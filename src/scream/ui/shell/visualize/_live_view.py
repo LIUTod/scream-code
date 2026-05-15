@@ -15,18 +15,13 @@ from contextlib import asynccontextmanager, suppress
 
 from ltod.message import Message
 from ltod.tooling import ToolError, ToolOk
+from rich._spinners import SPINNERS  # type: ignore[reportUnknownVariableType]
 from rich.console import Group, RenderableType
 from rich.live import Live
 from rich.markup import escape as rich_escape
 from rich.panel import Panel
-from rich.spinner import SPINNERS, Spinner
+from rich.spinner import Spinner
 from rich.text import Text
-
-# 注册自定义等待 spinner，替换默认 moon 相位
-SPINNERS["scream-moon"] = {
-    "interval": 80,
-    "frames": ["💬 ", "💭 ", "🗯️ ", "🫯 ", "💬 ", "💭 ", "🗯️ ", "🫯 "],
-}
 
 from scream.ui.shell.console import console
 from scream.ui.shell.echo import render_user_echo
@@ -80,6 +75,12 @@ from scream.wire.types import (
     TurnEnd,
     WireMessage,
 )
+
+# 注册自定义等待 spinner，替换默认 moon 相位
+SPINNERS["scream-moon"] = {
+    "interval": 80,
+    "frames": ["💬 ", "💭 ", "🗯️ ", "🫯 ", "💬 ", "💭 ", "🗯️ ", "🫯 "],
+}
 
 MAX_LIVE_NOTIFICATIONS = 4
 EXTERNAL_MESSAGE_GRACE_S = 0.1

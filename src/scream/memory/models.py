@@ -10,7 +10,7 @@ class MemoryEntry:
 
     id: str
     content: str
-    tags: list[str] = field(default_factory=list)
+    tags: list[str] = field(default_factory=list[str])
     created_at: str = ""
     updated_at: str = ""
     source: str = ""  # "project" or "global"

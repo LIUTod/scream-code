@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable, Iterable
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 from prompt_toolkit.shortcuts import input_dialog
@@ -121,8 +122,8 @@ def help(app: Shell, args: str):
     renderables.append(
         BulletColumns(
             Text(
-                "Sure, Scream is ready to help! "
-                "Just send me messages and I will help you get things done!"
+                "Scream \u5df2\u5c31\u7eea\uff01"
+                "\u53d1\u9001\u6d88\u606f\u5373\u53ef\u5f00\u59cb\uff0c\u6211\u4f1a\u5e2e\u4f60\u5b8c\u6210\u5404\u79cd\u4efb\u52a1\uff01"
             ),
         )
     )
@@ -135,10 +136,10 @@ def help(app: Shell, args: str):
         else:
             commands.append(cmd)
 
-    renderables.append(section("Keyboard shortcuts", _KEYBOARD_SHORTCUTS, "yellow"))
+    renderables.append(section("\u5feb\u6377\u952e", _KEYBOARD_SHORTCUTS, "yellow"))
     renderables.append(
         section(
-            "Slash commands",
+            "\u659c\u6760\u547d\u4ee4",
             _expanded_command_items(commands),
             "blue",
         )
@@ -146,7 +147,7 @@ def help(app: Shell, args: str):
     if skills:
         renderables.append(
             section(
-                "Skills",
+                "\u6280\u80fd",
                 _expanded_command_items(skills),
                 "cyan",
             )
@@ -177,7 +178,7 @@ def version(app: Shell, args: str):
     """显示版本信息"""
     from scream.constant import VERSION
 
-    console.print(f"scream, version {VERSION}")
+    console.print(f"scream, 版本 {VERSION}")
 
 
 @registry.command
@@ -191,13 +192,13 @@ async def model(app: Shell, args: str):
     config = soul.runtime.config
 
     if not config.models:
-        console.print('[yellow]No models configured. Add one via the config file.[/yellow]')
+        console.print('[yellow]未配置模型。请通过配置文件添加。[/yellow]')
         return
 
     if not config.is_from_default_location:
         console.print(
-            "[yellow]Model switching requires the default config file; "
-            "restart without --config/--config-file.[/yellow]"
+            "[yellow]切换模型需要使用默认配置文件；"
+            "请不使用 --config/--config-file 参数重启。[/yellow]"
         )
         return
 
@@ -284,8 +285,8 @@ async def model(app: Shell, args: str):
 
     if not model_changed and not thinking_changed:
         console.print(
-            f"[yellow]Already using {selected_display} "
-            f"with thinking {'on' if new_thinking else 'off'}.[/yellow]"
+            f"[yellow]已经在使用 {selected_display} "
+            f"思考模式 {'开启' if new_thinking else '关闭'}。[/yellow]"
         )
         return
 
@@ -302,7 +303,7 @@ async def model(app: Shell, args: str):
     except (ConfigError, OSError) as exc:
         config.default_model = prev_model
         config.default_thinking = prev_thinking
-        console.print(f"[red]Failed to save config: {exc}[/red]")
+        console.print(f"[red]保存配置失败: {exc}[/red]")
         return
 
     from scream.telemetry import track
@@ -312,9 +313,9 @@ async def model(app: Shell, args: str):
     if thinking_changed:
         track("thinking_toggle", enabled=new_thinking)
     console.print(
-        f"[green]Switched to {selected_display} "
-        f"with thinking {'on' if new_thinking else 'off'}. "
-        "Reloading...[/green]"
+        f"[green]已切换到 {selected_display} "
+        f"思考模式 {'开启' if new_thinking else '关闭'}。"
+        "正在重载...[/green]"
     )
     raise Reload(session_id=soul.runtime.session.id)
 
@@ -394,7 +395,7 @@ async def _delete_model_flow(
 
 @registry.command
 @shell_mode_registry.command
-async def config(app: Shell, args: str):
+async def config(app: Shell, args: str) -> None:
     """交互式配置模型（默认 anthropic 协议）"""
     from pydantic import SecretStr
 
@@ -421,7 +422,7 @@ async def config(app: Shell, args: str):
         ).run_async()
     except (EOFError, KeyboardInterrupt):
         return
-    if base_url_result is None:
+    if base_url_result is None:  # type: ignore[reportUnnecessaryComparison]
         return
     base_url = base_url_result.strip() or "https://api.anthropic.com/v1"
 
@@ -434,7 +435,7 @@ async def config(app: Shell, args: str):
         ).run_async()
     except (EOFError, KeyboardInterrupt):
         return
-    if api_key_result is None:
+    if api_key_result is None:  # type: ignore[reportUnnecessaryComparison]
         return
     api_key = api_key_result.strip()
     if not api_key:
@@ -450,7 +451,7 @@ async def config(app: Shell, args: str):
         ).run_async()
     except (EOFError, KeyboardInterrupt):
         return
-    if model_name_result is None:
+    if model_name_result is None:  # type: ignore[reportUnnecessaryComparison]
         return
     model_name = model_name_result.strip() or "claude-sonnet-4-6"
 
@@ -463,7 +464,7 @@ async def config(app: Shell, args: str):
         ).run_async()
     except (EOFError, KeyboardInterrupt):
         return
-    if provider_name_result is None:
+    if provider_name_result is None:  # type: ignore[reportUnnecessaryComparison]
         return
     provider_name = provider_name_result.strip() or "anthropic"
 
@@ -476,7 +477,7 @@ async def config(app: Shell, args: str):
         ).run_async()
     except (EOFError, KeyboardInterrupt):
         return
-    if model_key_result is None:
+    if model_key_result is None:  # type: ignore[reportUnnecessaryComparison]
         return
     model_key = model_key_result.strip() or "default"
 
@@ -564,8 +565,8 @@ async def editor(app: Shell, args: str):
     config_file = config.source_file
     if config_file is None:
         console.print(
-            "[yellow]Editor switching is unavailable with inline --config; "
-            "use --config-file to persist this setting.[/yellow]"
+            "[yellow]内联 --config 模式下无法切换编辑器；"
+            "请使用 --config-file 以持久化此设置。[/yellow]"
         )
         return
 
@@ -620,12 +621,12 @@ async def editor(app: Shell, args: str):
         binary = parts[0]
         if not shutil.which(binary):
             console.print(
-                f"[yellow]Warning: '{binary}' not found in PATH. "
-                f"Saving anyway — make sure it's installed before using Ctrl-O.[/yellow]"
+                f"[yellow]警告: '{binary}' 未在 PATH 中找到。"
+                f"仍保存设置 — 使用 Ctrl-O 前请确保已安装。[/yellow]"
             )
 
     if new_editor == current_editor:
-        console.print(f"[yellow]Editor is already set to: {new_editor or 'auto-detect'}[/yellow]")
+        console.print(f"[yellow]编辑器已设置为: {new_editor or 'auto-detect'}[/yellow]")
         return
 
     # Save to disk
@@ -641,11 +642,11 @@ async def editor(app: Shell, args: str):
     config.default_editor = new_editor
 
     if new_editor:
-        console.print(f"[green]Editor set to: {new_editor}[/green]")
+        console.print(f"[green]编辑器已设置为: {new_editor}[/green]")
     else:
         resolved = get_editor_command()
-        label = " ".join(resolved) if resolved else "none"
-        console.print(f"[green]Editor set to auto-detect (resolved: {label})[/green]")
+        label = " ".join(resolved) if resolved else "无"
+        console.print(f"[green]编辑器已设置为自动检测（解析为: {label}）[/green]")
 
 
 @registry.command(aliases=["release-notes"])
@@ -687,7 +688,7 @@ async def feedback(app: Shell, args: str):
 
     ISSUE_URL = "https://github.com/LIUTod/scream-code/issues"
     if not webbrowser.open(ISSUE_URL):
-        console.print(f"Please submit feedback at [underline]{ISSUE_URL}[/underline].")
+        console.print(f"请前往 [underline]{ISSUE_URL}[/underline] 提交反馈。")
 
 
 @registry.command(aliases=["reset"])
@@ -719,7 +720,7 @@ async def new(app: Shell, args: str):
     from scream.telemetry import track
 
     track("session_new")
-    console.print("[green]New session created. Switching...[/green]")
+    console.print("[green]新会话已创建，正在切换...[/green]")
     raise Reload(session_id=session.id)
 
 
@@ -731,7 +732,7 @@ async def title(app: Shell, args: str):
         return
     session = soul.runtime.session
     if not args.strip():
-        console.print(f"Session title: [bold]{session.title}[/bold]")
+        console.print(f"会话标题: [bold]{session.title}[/bold]")
         return
 
     from scream.session_state import load_session_state, save_session_state
@@ -745,7 +746,7 @@ async def title(app: Shell, args: str):
     session.state.custom_title = new_title
     session.state.title_generated = True
     session.title = new_title
-    console.print(f"[green]Session title set to: {new_title}[/green]")
+    console.print(f"[green]会话标题已设置为: {new_title}[/green]")
 
 
 @registry.command(name="sessions", aliases=["resume"])
@@ -771,18 +772,18 @@ async def list_sessions(app: Shell, args: str):
     selection, selected_work_dir = result
 
     if selection == current_session.id:
-        console.print("[yellow]You are already in this session.[/yellow]")
+        console.print("[yellow]你已经在当前会话中。[/yellow]")
         return
 
     if selected_work_dir != current_session.work_dir:
         cmd = f"scream --work-dir {shlex.quote(str(selected_work_dir))} --session {selection}"
-        console.print(f"[yellow]Session is in a different directory. Run:[/yellow]\n  {cmd}")
+        console.print(f"[yellow]会话位于不同目录。请运行:[/yellow]\n  {cmd}")
         return
 
     from scream.telemetry import track
 
     track("session_resume")
-    console.print(f"[green]Switching to session {selection}...[/green]")
+    console.print(f"[green]正在切换到会话 {selection}...[/green]")
     raise Reload(session_id=selection)
 
 
@@ -794,10 +795,10 @@ async def task(app: Shell, args: str):
     if soul is None:
         return
     if args.strip():
-        console.print('[yellow]Usage: "/task" opens the interactive task browser.[/yellow]')
+        console.print('[yellow]用法："/task" 打开交互式任务浏览器。[/yellow]')
         return
     if soul.runtime.role != "root":
-        console.print("[yellow]Background tasks are only available from the root agent.[/yellow]")
+        console.print("[yellow]后台任务仅根代理可用。[/yellow]")
         return
 
     await TaskBrowserApp(soul).run()
@@ -817,23 +818,23 @@ def theme(app: Shell, args: str):
     arg = args.strip().lower()
 
     if not arg:
-        console.print(f"Current theme: [bold]{current}[/bold]")
-        console.print("[grey50]Usage: /theme dark | /theme light[/grey50]")
+        console.print(f"当前主题: [bold]{current}[/bold]")
+        console.print("[grey50]用法: /theme dark | /theme light[/grey50]")
         return
 
     if arg not in ("dark", "light"):
-        console.print(f"[red]Unknown theme: {arg}. Use 'dark' or 'light'.[/red]")
+        console.print(f"[red]未知主题: {arg}。请使用 'dark' 或 'light'。[/red]")
         return
 
     if arg == current:
-        console.print(f"[yellow]Already using {arg} theme.[/yellow]")
+        console.print(f"[yellow]已经在使用 {arg} 主题。[/yellow]")
         return
 
     config_file = soul.runtime.config.source_file
     if config_file is None:
         console.print(
-            "[yellow]Theme switching requires a config file; "
-            "restart without --config to persist this setting.[/yellow]"
+            "[yellow]主题切换需要配置文件；"
+            "请不使用 --config 参数重启以持久化此设置。[/yellow]"
         )
         return
 
@@ -849,7 +850,7 @@ def theme(app: Shell, args: str):
     from scream.telemetry import track
 
     track("theme_switch", theme=arg)
-    console.print(f"[green]Switched to {arg} theme. Reloading...[/green]")
+    console.print(f"[green]已切换到 {arg} 主题。正在重载...[/green]")
     raise Reload(session_id=soul.runtime.session.id)
 
 
@@ -864,7 +865,7 @@ async def mcp(app: Shell, args: str):
     await soul.start_background_mcp_loading()
     snapshot = soul.status.mcp_status
     if snapshot is None:
-        console.print("[yellow]No MCP servers configured.[/yellow]")
+        console.print("[yellow]未配置 MCP 服务器。[/yellow]")
         return
 
     if not snapshot.loading:
@@ -905,17 +906,17 @@ def hooks(app: Shell, args: str):
     engine = soul.hook_engine
     if not engine.summary:
         console.print(
-            "[yellow]No hooks configured. "
-            "Add [[hooks]] sections to your config.toml to set up hooks.[/yellow]"
+            "[yellow]未配置 hooks。"
+            "请在 config.toml 中添加 [[hooks]] 段来设置 hooks。[/yellow]"
         )
         return
 
     console.print()
-    console.print("[bold]Configured Hooks:[/bold]")
+    console.print("[bold]已配置的 Hooks:[/bold]")
     console.print()
 
     for event, entries in engine.details().items():
-        console.print(f"  [cyan]{event}[/cyan]: {len(entries)} hook(s)")
+        console.print(f"  [cyan]{event}[/cyan]: {len(entries)} 个 hook")
         for entry in entries:
             source_tag = f" [dim]({entry['source']})[/dim]" if entry["source"] == "wire" else ""
             console.print(f"    [dim]{entry['matcher']}[/dim] {entry['command']}{source_tag}")
@@ -1021,5 +1022,4 @@ from . import (  # noqa: E402
     debug,  # noqa: F401 # type: ignore[reportUnusedImport]
     export_import,  # noqa: F401 # type: ignore[reportUnusedImport]
     update,  # noqa: F401 # type: ignore[reportUnusedImport]
-    usage,  # noqa: F401 # type: ignore[reportUnusedImport]
 )

@@ -24,6 +24,7 @@ from rich.text import Text
 
 from scream import logger
 from scream.background import list_task_views
+from scream.cli import Reload
 from scream.llm import model_display_name
 from scream.notifications import NotificationManager, NotificationWatcher
 from scream.soul import LLMNotSet, LLMNotSupported, MaxStepsReached, RunCancelled, Soul, run_soul
@@ -242,25 +243,25 @@ class Shell:
         work_dir = str(runtime.session.work_dir) if runtime else "unknown"
 
         info = Table.grid(padding=(0, 1))
-        info.add_row("Session:", session_id)
-        info.add_row("Working directory:", work_dir)
+        info.add_row("会话:", session_id)
+        info.add_row("工作目录:", work_dir)
 
         panel = Panel(
             Group(
                 Text(
-                    "The working directory is no longer accessible "
-                    "(external drive unplugged, directory deleted, or filesystem unmounted).",
+                    "工作目录已无法访问 "
+                    "（外部驱动器断开、目录被删除或文件系统卸载）。",
                 ),
                 Text(""),
                 info,
                 Text(""),
                 Text(
-                    "Your conversation history has been saved. "
-                    "Restart scream in a valid directory to continue.",
+                    "对话历史已保存。"
+                    "请在有效目录下重新启动 scream 以继续。",
                     style="dim",
                 ),
             ),
-            title="[bold red]Session crashed[/bold red]",
+            title="[bold red]会话崩溃[/bold red]",
             border_style="red",
         )
         console.print()
@@ -413,7 +414,7 @@ class Shell:
             from scream.ui.shell.slash import config as config_cmd
 
             try:
-                await config_cmd(self, "")
+                await config_cmd(self, "")  # type: ignore[reportGeneralTypeIssues]
             except Reload:
                 raise
             # If config returns without Reload (user cancelled), continue to shell
@@ -577,12 +578,11 @@ class Shell:
                             resume_prompt.set()
                             continue
                         deferred_bg_trigger = False
-                        logger.info("Background task completed while idle, triggering agent")
+                        logger.info("后台任务在空闲时完成，触发代理")
                         resume_prompt.set()
                         ok = await self.run_soul_command(
                             "<system-reminder>"
-                            "Background tasks completed while you"
-                            " were idle."
+                            "后台任务在你空闲时已完成。"
                             "</system-reminder>"
                         )
                         console.print()
@@ -596,7 +596,7 @@ class Shell:
                         else:
                             bg_auto_failures = 0
                         if self._exit_after_run:
-                            console.print("Bye!")
+                            console.print("再见！")
                             break
                         continue
 
@@ -609,12 +609,12 @@ class Shell:
                         continue
 
                     if event.kind == "interrupt":
-                        console.print("[grey50]Tip: press Ctrl-D or send 'exit' to quit[/grey50]")
+                        console.print("[grey50]提示：按 Ctrl-D 或输入 'exit' 退出[/grey50]")
                         resume_prompt.set()
                         continue
 
                     if event.kind == "eof":
-                        console.print("Bye!")
+                        console.print("再见！")
                         break
 
                     if event.kind == "cwd_lost":
@@ -641,7 +641,7 @@ class Shell:
 
                     if self._should_exit_input(user_input):
                         logger.debug("Exiting by slash command")
-                        console.print("Bye!")
+                        console.print("再见！")
                         break
 
                     if user_input.mode == PromptMode.SHELL:
@@ -686,7 +686,7 @@ class Shell:
                             await self.run_soul_command(slash_cmd_call.raw_input)
                             console.print()
                             if self._exit_after_run:
-                                console.print("Bye!")
+                                console.print("再见！")
                                 break
                         else:
                             await self._run_slash_command(slash_cmd_call)
@@ -698,7 +698,7 @@ class Shell:
                     await self.run_soul_command(user_input.content)
                     console.print()
                     if self._exit_after_run:
-                        console.print("Bye!")
+                        console.print("再见！")
                         break
             finally:
                 prompt_task.cancel()
@@ -742,8 +742,8 @@ class Shell:
                 return
             else:
                 console.print(
-                    f'[yellow]"/{slash_cmd_call.name}" is not available in shell mode. '
-                    "Press Ctrl-X to switch to agent mode.[/yellow]"
+                    f'[yellow]"/{slash_cmd_call.name}" 在 shell 模式下不可用。'
+                    "按 Ctrl-X 切换到代理模式。[/yellow]"
                 )
                 return
 
@@ -756,7 +756,7 @@ class Shell:
             logger.debug("Failed to parse shell command for cd check: {error}", error=exc)
         if split_cmd and len(split_cmd) == 2 and split_cmd[0] == "cd":
             console.print(
-                "[yellow]Warning: Directory changes are not preserved across command executions."
+                "[yellow]警告：目录变更在命令执行之间不会被保留。"
                 "[/yellow]"
             )
             return
@@ -786,7 +786,7 @@ class Shell:
                 await proc.wait()
         except Exception as e:
             logger.exception("Failed to run shell command:")
-            console.print(f"[red]Failed to run shell command: {e}[/red]")
+            console.print(f"[red]运行 shell 命令失败: {e}[/red]")
         finally:
             remove_sigint()
 
@@ -799,8 +799,8 @@ class Shell:
             logger.info("Unknown slash command /{command}", command=command_call.name)
             track("input_command_invalid")
             console.print(
-                f'[red]Unknown slash command "/{command_call.name}", '
-                'type "/" for all available commands[/red]'
+                f'[red]未知斜杠命令 "/{command_call.name}"，'
+                '输入 "/" 查看所有可用命令[/red]'
             )
             return
 
@@ -828,7 +828,7 @@ class Shell:
         except (asyncio.CancelledError, KeyboardInterrupt):
             # Handle Ctrl-C during slash command execution, return to shell prompt
             logger.debug("Slash command interrupted by KeyboardInterrupt")
-            console.print("[red]Interrupted by user[/red]")
+            console.print("[red]用户中断[/red]")
         except Exception as e:
             logger.exception("Unknown error:")
             console.print(f"[red]Unknown error: {e}[/red]")
@@ -971,7 +971,7 @@ class Shell:
             return True
         except LLMNotSet:
             logger.exception("LLM not set:")
-            console.print('[red]LLM not set. Configure a provider in the config file.[/red]')
+            console.print('[red]未设置 LLM。请在配置文件中配置服务商。[/red]')
         except LLMNotSupported as e:
             # actually unsupported input/mode should already be blocked by prompt session
             logger.exception("LLM not supported:")
@@ -980,56 +980,55 @@ class Shell:
             logger.exception("LLM provider error:")
             if isinstance(e, APIStatusError) and e.status_code == 401:
                 console.print(
-                    "[red]Authorization failed. Check your API key.[/red]\n"
-                    f"[dim]Server: {e}[/dim]"
+                    "[red]授权失败，请检查 API 密钥。[/red]\n"
+                    f"[dim]服务器: {e}[/dim]"
                 )
             elif isinstance(e, APIStatusError) and e.status_code == 402:
                 console.print(
-                    f"[red]Membership expired, please renew your plan[/red]\n[dim]Server: {e}[/dim]"
+                    f"[red]会员已过期，请续费[/red]\n[dim]服务器: {e}[/dim]"
                 )
             elif isinstance(e, APIStatusError) and e.status_code == 403:
                 console.print(
-                    "[red]Quota exceeded, please upgrade your plan or retry later[/red]\n"
-                    f"[dim]Server: {e}[/dim]"
+                    "[red]额度已用完，请升级套餐或稍后重试[/red]\n"
+                    f"[dim]服务器: {e}[/dim]"
                 )
             elif isinstance(e, APIConnectionError):
                 console.print(
-                    f"[red]Network connection failed: {e}[/red]\n"
-                    "[dim]Please check your network and try again.[/dim]"
+                    f"[red]网络连接失败: {e}[/red]\n"
+                    "[dim]请检查网络后重试。[/dim]"
                 )
             elif isinstance(e, APITimeoutError):
                 console.print(
-                    f"[red]Request timed out: {e}[/red]\n"
-                    "[dim]The server may be slow or unreachable. Please try again later.[/dim]"
+                    f"[red]请求超时: {e}[/red]\n"
+                    "[dim]服务器可能响应缓慢或无法访问，请稍后重试。[/dim]"
                 )
             elif isinstance(e, APIEmptyResponseError):
                 console.print(
-                    "[red]The server returned an empty response.[/red]\n"
-                    "[dim]This is usually a temporary issue. Please try again.[/dim]"
+                    "[red]服务器返回空响应。[/red]\n"
+                    "[dim]这通常是临时问题，请稍后重试。[/dim]"
                 )
             else:
                 console.print(f"[red]LLM provider error: {e}[/red]")
             if not isinstance(e, APIStatusError) or e.status_code not in (401, 402, 403):
                 console.print(
-                    "[dim]If this persists, run [bold]scream export[/bold] and send the "
-                    "exported data to support for assistance. "
-                    "Please do not share the exported file publicly.[/dim]"
+                    "[dim]如果问题持续，请运行 [bold]scream export[/bold] "
+                    "并发送导出数据给支持团队。请勿公开分享导出文件。[/dim]"
                 )
         except MaxStepsReached as e:
             logger.warning("Max steps reached: {n_steps}", n_steps=e.n_steps)
             console.print(
                 f"[yellow]{e}[/yellow]\n"
-                "[dim]Send another message to continue where it left off.[/dim]"
+                "[dim]发送另一条消息即可从断点继续。[/dim]"
             )
         except RunCancelled:
             logger.info("Cancelled by user")
-            console.print("[red]Interrupted by user[/red]")
+            console.print("[red]用户中断[/red]")
         except Exception as e:
             logger.exception("Unexpected error:")
             console.print(
-                f"[red]Unexpected error: {e}[/red]\n"
-                "[dim]Run [bold]scream export[/bold] and send the exported data to support "
-                "for assistance. Please do not share the exported file publicly.[/dim]"
+                f"[red]未知错误: {e}[/red]\n"
+                "[dim]运行 [bold]scream export[/bold] 并发送导出数据给支持团队。"
+                "请勿公开分享导出文件。[/dim]"
             )
             raise  # re-raise unknown error
         finally:

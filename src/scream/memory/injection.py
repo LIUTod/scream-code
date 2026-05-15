@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
-from ltod.message import Message
+from ltod.message import Message, TextPart
 
 from scream.memory.manager import MemoryManager
 from scream.soul.dynamic_injection import DynamicInjection, DynamicInjectionProvider
@@ -63,9 +63,9 @@ class MemoryInjectionProvider(DynamicInjectionProvider):
         """从最近的用户消息中提取查询文本。"""
         for msg in reversed(history):
             if msg.role == "user":
-                text_parts = []
+                text_parts: list[str] = []
                 for part in msg.content:
-                    if hasattr(part, "text"):
+                    if isinstance(part, TextPart):
                         text_parts.append(part.text)
                     elif isinstance(part, str):
                         text_parts.append(part)

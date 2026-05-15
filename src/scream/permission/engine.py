@@ -162,8 +162,10 @@ class PermissionEngine:
     """
 
     rules: list[PermissionRule] = field(default_factory=lambda: list(DEFAULT_RULES))
-    _session_overrides: list[PermissionRule] = field(default_factory=list, repr=False)
-    _auto_approved_tools: set[str] = field(default_factory=set, repr=False)
+    _session_overrides: list[PermissionRule] = field(
+        default_factory=list[PermissionRule], repr=False
+    )
+    _auto_approved_tools: set[str] = field(default_factory=set[str], repr=False)
     _session_auto_approve: bool = False
 
     def evaluate(self, tool_name: str, arguments: dict[str, Any]) -> PermissionResult:

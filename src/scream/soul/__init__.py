@@ -72,14 +72,20 @@ def format_context_status(
     context_usage: float,
     context_tokens: int = 0,
     max_context_tokens: int = 0,
+    session_tokens_used: int = 0,
 ) -> str:
     """Format context status string for display in status bar."""
+    parts: list[str] = []
+    if session_tokens_used > 0:
+        parts.append(f"本次Token用量: {format_token_count(session_tokens_used)}")
     bounded = max(0.0, min(context_usage, 1.0))
     if max_context_tokens > 0:
         used = format_token_count(context_tokens)
         total = format_token_count(max_context_tokens)
-        return f"上下文: {bounded:.1%} ({used}/{total})"
-    return f"上下文: {bounded:.1%}"
+        parts.append(f"上下文: {bounded:.1%} ({used}/{total})")
+    else:
+        parts.append(f"上下文: {bounded:.1%}")
+    return " | ".join(parts)
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,6 +102,8 @@ class StatusSnapshot:
     """The number of tokens currently in the context."""
     max_context_tokens: int = 0
     """The maximum number of tokens the context can hold."""
+    session_tokens_used: int = 0
+    """Accumulated token usage since session start."""
     mcp_status: MCPStatusSnapshot | None = None
     """The current MCP startup snapshot, if MCP is configured."""
 

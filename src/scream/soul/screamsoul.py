@@ -190,6 +190,7 @@ class ScreamSoul:
 
         self._steer_queue: asyncio.Queue[str | list[ContentPart]] = asyncio.Queue()
         self._last_tool_calls: list[tuple[str, str]] = []
+        self._session_tokens_used: int = 0
         self._plan_mode: bool = self._runtime.session.state.plan_mode
         self._plan_session_id: str | None = self._runtime.session.state.plan_session_id
         self._current_turn_id: str = ""
@@ -506,6 +507,7 @@ class ScreamSoul:
             plan_mode=self._plan_mode,
             context_tokens=token_count,
             max_context_tokens=max_size,
+            session_tokens_used=self._session_tokens_used,
             mcp_status=self._mcp_status_snapshot(),
         )
 
@@ -1158,10 +1160,12 @@ class ScreamSoul:
         if usage is not None:
             # mark the token count for the context before the step
             await self._context.update_token_count(usage.input)
+            self._session_tokens_used += usage.total
             snap = self.status
             status_update.context_usage = snap.context_usage
             status_update.context_tokens = snap.context_tokens
             status_update.max_context_tokens = snap.max_context_tokens
+            status_update.session_tokens_used = snap.session_tokens_used
         wire_send(status_update)
 
         # ═══════════════════════════════════════════════════════════════════════

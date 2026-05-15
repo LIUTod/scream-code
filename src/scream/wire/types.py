@@ -185,6 +185,8 @@ class StatusUpdate(BaseModel):
     """The number of tokens currently in the context."""
     max_context_tokens: int | None = None
     """The maximum number of tokens the context can hold."""
+    session_tokens_used: int | None = None
+    """Accumulated token usage since session start."""
     token_usage: TokenUsage | None = None
     """The token usage statistics of the current step."""
     message_id: str | None = None

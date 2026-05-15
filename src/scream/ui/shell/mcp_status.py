@@ -16,8 +16,8 @@ _SPINNER_FRAMES = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇"
 
 def render_mcp_console(snapshot: MCPStatusSnapshot) -> RenderableType:
     header_text = Text.assemble(
-        ("MCP Servers: ", "bold"),
-        f"{snapshot.connected}/{snapshot.total} connected, {snapshot.tools} tools",
+        ("MCP 服务器: ", "bold"),
+        f"{snapshot.connected}/{snapshot.total} 已连接, {snapshot.tools} 工具",
     )
     header: RenderableType = Spinner("dots", header_text) if snapshot.loading else header_text
 
@@ -26,7 +26,7 @@ def render_mcp_console(snapshot: MCPStatusSnapshot) -> RenderableType:
         color = _status_color(server.status)
         server_text = f"[{color}]{server.name}[/{color}]"
         if server.status == "unauthorized":
-            server_text += f" [grey50](unauthorized - run: scream mcp auth {server.name})[/grey50]"
+            server_text += f" [grey50](未授权 - 运行: scream mcp auth {server.name})[/grey50]"
         elif server.status != "connected":
             server_text += f" [grey50]({server.status})[/grey50]"
 
@@ -54,8 +54,8 @@ def render_mcp_prompt(snapshot: MCPStatusSnapshot, *, now: float | None = None) 
         (
             colors.text,
             (
-                f"{prefix}MCP Servers: "
-                f"{snapshot.connected}/{snapshot.total} connected, {snapshot.tools} tools"
+                f"{prefix}MCP 服务器: "
+                f"{snapshot.connected}/{snapshot.total} 已连接, {snapshot.tools} 工具"
             ),
         )
     )
@@ -99,13 +99,13 @@ def _prompt_status_style(status: str) -> str:
 
 def _prompt_server_detail(server: MCPServerSnapshot) -> str:
     if server.status == "unauthorized":
-        return f" (unauthorized - run: scream mcp auth {server.name})"
+        return f" (未授权 - 运行: scream mcp auth {server.name})"
 
     parts: list[str] = []
     if server.status != "connected":
         parts.append(server.status)
     if server.tools:
-        label = "tool" if len(server.tools) == 1 else "tools"
+        label = "工具"
         parts.append(f"{len(server.tools)} {label}")
 
     return f" ({', '.join(parts)})" if parts else ""

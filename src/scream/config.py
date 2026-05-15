@@ -225,7 +225,7 @@ class Config(BaseModel):
     mcp: MCPConfig = Field(default_factory=MCPConfig, description="MCP configuration")
     hooks: list[HookDef] = Field(default_factory=list, description="Hook definitions")  # pyright: ignore[reportUnknownVariableType]
     permission_rules: list[dict[str, Any]] = Field(
-        default_factory=list,
+        default_factory=list[dict[str, Any]],
         description=(
             "Custom permission rules. Each rule is a dict with "
             "'tool_pattern', 'action', optional 'path_pattern', and 'description'."

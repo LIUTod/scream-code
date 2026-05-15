@@ -18,7 +18,7 @@ from scream.ui.shell.keyboard import KeyEvent
 from scream.utils.rich.markdown import Markdown
 from scream.wire.types import QuestionRequest
 
-OTHER_OPTION_LABEL = "Other"
+OTHER_OPTION_LABEL = "其他"
 
 
 class QuestionRequestPanel:
@@ -125,13 +125,14 @@ class QuestionRequestPanel:
 
         lines.append(Text.from_markup(f"[yellow]? {escape(q.question)}[/yellow]"))
         if q.multi_select:
-            lines.append(Text("  (SPACE to toggle, ENTER to submit)", style="dim italic"))
+            lines.append(Text("  (空格切换，回车提交)", style="dim italic"))
         lines.append(Text(""))
 
         if self._body_text:
             lines.append(
                 Text.from_markup(
-                    "[bold cyan]  \u25b6 Press ctrl-e to view full content[/bold cyan]"
+                    "[bold cyan]  \u25b6 "
+                    "\u6309 ctrl-e \u67e5\u770b\u5b8c\u6574\u5185\u5bb9[/bold cyan]"
                 )
             )
             lines.append(Text(""))
@@ -169,14 +170,14 @@ class QuestionRequestPanel:
         if show_inline_input:
             lines.append(Text(""))
             lines.append(
-                Text("  Type your answer, then press Enter to submit.", style="dim italic")
+                Text("  输入答案后按回车提交。", style="dim italic")
             )
         elif len(self.request.questions) > 1:
             lines.append(Text(""))
             lines.append(
                 Text(
-                    "  \u25c4/\u25ba switch question  "
-                    "\u25b2/\u25bc select  \u21b5 submit  esc exit",
+                    "  \u25c4/\u25ba \u5207\u6362\u95ee\u9898  "
+                    "\u25b2/\u25bc \u9009\u62e9  \u21b5 \u63d0\u4ea4  esc \u9000\u51fa",
                     style="dim",
                 )
             )
@@ -184,7 +185,7 @@ class QuestionRequestPanel:
         return Panel(
             Group(*lines),
             border_style="grey50",
-            title="[bold]question[/bold]",
+            title="[bold]问题[/bold]",
             title_align="left",
             padding=(0, 1),
         )
@@ -301,7 +302,7 @@ def show_question_body_in_pager(panel: QuestionRequestPanel) -> None:
 
 async def prompt_other_input(question_text: str) -> str:
     console.print(Text.from_markup(f"\n[yellow]? {escape(question_text)}[/yellow]"))
-    console.print(Text("  Enter your answer:", style="dim"))
+    console.print(Text("  输入你的答案:", style="dim"))
     try:
         session: PromptSession[str] = PromptSession()
         return (await session.prompt_async("  > ")).strip()

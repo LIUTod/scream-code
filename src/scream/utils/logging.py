@@ -6,7 +6,7 @@ import locale
 import os
 import sys
 import threading
-from collections.abc import Iterator
+from collections.abc import Generator
 from typing import IO
 
 from scream import logger
@@ -111,7 +111,7 @@ def restore_stderr() -> None:
 
 
 @contextlib.contextmanager
-def open_original_stderr() -> Iterator[IO[bytes] | None]:
+def open_original_stderr() -> Generator[IO[bytes] | None, None, None]:
     redirector = _stderr_redirector
     if redirector is None:
         yield None

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Callable
-from typing import Literal
+from typing import Any, Literal
 
 from scream.approval_runtime import (
     ApprovalCancelledError,
@@ -207,19 +207,19 @@ class Approval:
             return ApprovalResult(approved=True)
 
         # PermissionEngine 评估（在展示审批 UI 前进行前置过滤）
-        if self._permission_engine is not None:
+        if self._permission_engine:
             try:
                 import json
 
                 raw_args = tool_call.function.arguments
                 if isinstance(raw_args, str) and raw_args:
-                    arguments = json.loads(raw_args)
+                    arguments: dict[str, Any] = json.loads(raw_args)
                 elif isinstance(raw_args, dict):
                     arguments = raw_args
                 else:
                     arguments = {}
             except Exception:
-                arguments = {}
+                arguments: dict[str, Any] = {}
             result = self._permission_engine.evaluate(action, arguments)
             if result == PermissionResult.ALLOWED:
                 from scream.telemetry import track

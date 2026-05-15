@@ -48,10 +48,9 @@ async def export(app: Shell, args: str):
 
     track("export")
     display = shorten_home(KaosPath(str(output)))
-    console.print(f"[green]Exported {count} messages to {display}[/green]")
+    console.print(f"[green]已导出 {count} 条消息到 {display}[/green]")
     console.print(
-        "[yellow]Note: The exported file may contain sensitive information. "
-        "Please be cautious when sharing it externally.[/yellow]"
+        "[yellow]注意：导出文件可能包含敏感信息，分享时请务必谨慎。[/yellow]"
     )
 
 
@@ -72,7 +71,7 @@ async def import_context(app: Shell, args: str):
 
     target = sanitize_cli_path(args)
     if not target:
-        console.print("[yellow]Usage: /import <file_path or session_id>[/yellow]")
+        console.print("[yellow]用法：/import <文件路径或会话ID>[/yellow]")
         return
 
     session = soul.runtime.session
@@ -102,16 +101,15 @@ async def import_context(app: Shell, args: str):
 
     # Write to wire file so the import appears in session replay
     await soul.wire_file.append_message(
-        TurnBegin(user_input=f"[Imported context from {source_desc}]")
+        TurnBegin(user_input=f"[已从 {source_desc} 导入上下文]")
     )
     await soul.wire_file.append_message(TurnEnd())
 
     console.print(
-        f"[green]Imported context from {source_desc} "
-        f"({content_len} chars) into current session.[/green]"
+        f"[green]已从 {source_desc} 导入上下文（{content_len} 字符）到当前会话。[/green]"
     )
     if source_desc.startswith("file") and is_sensitive_file(Path(target).name):
         console.print(
-            "[yellow]Warning: This file may contain secrets (API keys, tokens, credentials). "
-            "The content is now part of your session context.[/yellow]"
+            "[yellow]警告：此文件可能包含密钥（API 密钥、令牌、凭证）。"
+            "内容现已加入会话上下文。[/yellow]"
         )

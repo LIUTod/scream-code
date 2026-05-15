@@ -244,7 +244,7 @@ class _ContentBlock:
             elapsed_str = format_elapsed(time.monotonic() - self._start_time)
             count_str = format_token_count(int(self._token_count))
             return Text(
-                f"Thought for {elapsed_str} · {count_str} tokens",
+                f"思考用时 {elapsed_str} · {count_str} tokens",
                 style="grey50 italic",
             )
         remaining = self._pending_text()
@@ -301,7 +301,7 @@ class _ContentBlock:
         count_str = f"{format_token_count(int(self._token_count))} tokens"
 
         self._spinner.text = Text.assemble(
-            ("Composing...", ""),
+            ("生成中...", ""),
             (f" {elapsed_str}", "grey50"),
             (f" · {count_str}", "grey50"),
         )
@@ -322,7 +322,7 @@ class _ContentBlock:
         elapsed_str = format_elapsed(elapsed)
         count_str = f"{format_token_count(int(self._token_count))} tokens"
         self._spinner.text = Text.assemble(
-            ("Thinking...", ""),
+            ("思考中...", ""),
             (f" {elapsed_str}", "grey50"),
             (f" · {count_str}", "grey50"),
         )
@@ -344,7 +344,7 @@ class _ContentBlock:
         frame = _bullet_frame_for(elapsed)
 
         parts: list[tuple[str, str | Style]] = [
-            ("Thinking", "italic"),
+            ("思考中", "italic"),
             (f" {frame}", "cyan"),
             (f"  {elapsed_str}", "grey50"),
             (f" · {count_str}", "grey50"),
@@ -456,7 +456,7 @@ class _ToolCallBlock:
             lines.append(
                 BulletColumns(
                     Text(
-                        f"subagent {self._subagent_type} ({self._subagent_id})",
+                        f"子代理 {self._subagent_type} ({self._subagent_id})",
                         style="grey50",
                     ),
                     bullet_style="grey50",
@@ -468,7 +468,7 @@ class _ToolCallBlock:
             lines.append(
                 BulletColumns(
                     Text(
-                        f"{n_hidden} more tool call{'s' if n_hidden > 1 else ''} ...",
+                        f"还有 {n_hidden} 个工具调用 ...",
                         style="grey50 italic",
                     ),
                     bullet_style="grey50",
@@ -480,7 +480,7 @@ class _ToolCallBlock:
             )
             sub_url = self._extract_full_url(sub_call.function.arguments, sub_call.function.name)
             sub_text = Text()
-            sub_text.append("Used ")
+            sub_text.append("已使用 ")
             sub_text.append(sub_call.function.name, style="blue")
             if argument:
                 sub_text.append(" (", style="grey50")
@@ -565,7 +565,7 @@ class _ToolCallBlock:
 
     def _build_headline_text(self) -> Text:
         text = Text()
-        text.append("Used " if self.finished else "Using ")
+        text.append("已使用 " if self.finished else "使用中 ")
         text.append(self._tool_name, style="blue")
         if self._argument:
             text.append(" (", style="grey50")
@@ -620,6 +620,7 @@ class _StatusBlock:
         self._context_usage: float = 0.0
         self._context_tokens: int = 0
         self._max_context_tokens: int = 0
+        self._session_tokens_used: int = 0
         self.update(initial)
 
     def render(self) -> RenderableType:
@@ -632,9 +633,12 @@ class _StatusBlock:
             self._context_tokens = status.context_tokens
         if status.max_context_tokens is not None:
             self._max_context_tokens = status.max_context_tokens
+        if status.session_tokens_used is not None:
+            self._session_tokens_used = status.session_tokens_used
         if status.context_usage is not None:
             self.text.plain = format_context_status(
                 self._context_usage,
                 self._context_tokens,
                 self._max_context_tokens,
+                self._session_tokens_used,
             )

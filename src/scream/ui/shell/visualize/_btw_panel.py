@@ -103,10 +103,10 @@ class _BtwModalDelegate:
             elapsed_str = format_elapsed(elapsed)
             char_count = len(self._streaming_text)
             if char_count > 0:
-                return f"[bold]btw[/bold] [dim]· answering {elapsed_str} · {char_count} chars[/dim]"
-            return f"[bold]btw[/bold] [dim]· answering {elapsed_str}[/dim]"
+                return f"[bold]btw[/bold] [dim]· 回答中 {elapsed_str} · {char_count} 字符[/dim]"
+            return f"[bold]btw[/bold] [dim]· 回答中 {elapsed_str}[/dim]"
         if self._error:
-            return "[bold]btw[/bold] [dim]· error[/dim]"
+            return "[bold]btw[/bold] [dim]· 错误[/dim]"
         return "[bold]btw[/bold]"
 
     # -- Render --------------------------------------------------------------
@@ -116,7 +116,7 @@ class _BtwModalDelegate:
 
         # Q line — bold cyan with prefix
         q_text = Text()
-        q_text.append("Q: ", style="bold cyan")
+        q_text.append("问：", style="bold cyan")
         q_text.append(self._question)
         parts.append(q_text)
         # Separator between Q and A
@@ -132,17 +132,17 @@ class _BtwModalDelegate:
         elif self._error:
             parts.append(Text(self._error, style="red"))
             parts.append(Text(""))
-            parts.append(Text("Escape to dismiss", style="dim"))
+            parts.append(Text("按 Escape 关闭", style="dim"))
         elif self._response:
             parts.append(Markdown(self._response))
             # Hint is added here (inside Panel) for no-scroll case.
             # Scroll mode replaces it with scroll indicators below.
             parts.append(Text(""))
-            parts.append(Text("↑/↓ scroll · Escape dismiss", style="dim"))
+            parts.append(Text("↑/↓ 滚动 · Escape 关闭", style="dim"))
         else:
-            parts.append(Text("No response received.", style="dim"))
+            parts.append(Text("未收到响应。", style="dim"))
             parts.append(Text(""))
-            parts.append(Text("Escape to dismiss", style="dim"))
+            parts.append(Text("按 Escape 关闭", style="dim"))
 
         panel = Panel(
             Group(*parts),
@@ -182,10 +182,10 @@ class _BtwModalDelegate:
         below = max_offset - start
         hint_parts: list[str] = []
         if above > 0:
-            hint_parts.append(f"↑ {above} above")
+            hint_parts.append(f"↑ 上方 {above} 条")
         if below > 0:
-            hint_parts.append(f"↓ {below} below")
-        hint_parts.append("↑/↓ scroll · Escape dismiss")
+            hint_parts.append(f"↓ 下方 {below} 条")
+        hint_parts.append("↑/↓ 滚动 · Escape 关闭")
         hint_text = "  ·  ".join(hint_parts)
         hint_line = _build_bordered_line(hint_text, content[0] if content else "", columns)
         if visible:

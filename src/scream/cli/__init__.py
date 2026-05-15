@@ -685,7 +685,6 @@ def scream(
 
                 if not preserve_background_tasks:
                     await instance.shutdown_background_tasks()
-                    await instance.await_bg_tasks_shutdown()
 
             return session, exit_code
         finally:
@@ -756,7 +755,7 @@ def scream(
                     continue
             assert last_session is not None
             await _post_run(last_session, exit_code)
-            return None, exit_code
+            return exit_code
         except Exception:
             # Best-effort cleanup: _latest_created_session is the session from
             # the most recent _run() call, which may have failed before returning.

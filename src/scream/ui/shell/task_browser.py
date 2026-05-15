@@ -32,14 +32,14 @@ _FLASH_MESSAGE_SECONDS = 3.0
 
 
 def format_task_choice(view: TaskView, *, now: float | None = None) -> str:
-    description = view.spec.description.strip() or "(no description)"
+    description = view.spec.description.strip() or "（无描述）"
     return " · ".join(
         [
             f"[{view.runtime.status}]",
             description,
             view.spec.id,
             view.spec.kind,
-            _task_timing_label(view, now=now) or "updated just now",
+            _task_timing_label(view, now=now) or "刚刚更新",
         ]
     )
 
@@ -76,9 +76,9 @@ class TaskBrowserModel:
 
         if not self.visible_views:
             label = (
-                "No active background tasks."
+                "没有活跃的后台任务。"
                 if self.filter_mode == "active"
-                else "No background tasks in this session."
+                else "本会话中没有后台任务。"
             )
             self.pending_stop_task_id = None
             return [(_EMPTY_TASK_ID, label)], _EMPTY_TASK_ID
@@ -126,48 +126,48 @@ class TaskBrowserModel:
         for view in self.all_views:
             counts[view.runtime.status] = counts.get(view.runtime.status, 0) + 1
 
-        scope = "ALL" if self.filter_mode == "all" else "ACTIVE"
+        scope = "全部" if self.filter_mode == "all" else "活跃"
         return [
-            ("class:header.title", " TASK BROWSER "),
-            ("class:header.meta", f" filter={scope} "),
-            ("class:status.running", f" {counts['running']} running "),
-            ("class:status.info", f" {counts['starting']} starting "),
-            ("class:status.error", f" {counts['failed']} failed "),
-            ("class:status.success", f" {counts['completed']} completed "),
-            ("class:status.warning", f" {counts['killed'] + counts['lost']} interrupted "),
-            ("class:header.meta", f" {len(self.all_views)} total "),
+            ("class:header.title", " 任务浏览器 "),
+            ("class:header.meta", f" 筛选={scope} "),
+            ("class:status.running", f" {counts['running']} 运行中 "),
+            ("class:status.info", f" {counts['starting']} 启动中 "),
+            ("class:status.error", f" {counts['failed']} 失败 "),
+            ("class:status.success", f" {counts['completed']} 已完成 "),
+            ("class:status.warning", f" {counts['killed'] + counts['lost']} 中断 "),
+            ("class:header.meta", f" {len(self.all_views)} 总计 "),
         ]
 
     def detail_text(self, task_id: str | None) -> str:
         view = self.view_for(task_id)
         if view is None:
-            return "Select a task from the list."
+            return "从列表中选择一个任务。"
 
-        terminal_reason = "timed_out" if view.runtime.timed_out else view.runtime.status
+        terminal_reason = "已超时" if view.runtime.timed_out else view.runtime.status
         lines = [
-            f"Task ID: {view.spec.id}",
-            f"Status: {view.runtime.status}",
-            f"Description: {view.spec.description}",
-            f"Kind: {view.spec.kind}",
+            f"任务 ID: {view.spec.id}",
+            f"状态: {view.runtime.status}",
+            f"描述: {view.spec.description}",
+            f"类型: {view.spec.kind}",
         ]
         timing = _task_timing_label(view)
         if timing:
-            lines.append(f"Time: {timing}")
+            lines.append(f"时间: {timing}")
         if view.spec.cwd:
-            lines.append(f"Cwd: {view.spec.cwd}")
+            lines.append(f"工作目录: {view.spec.cwd}")
         if view.spec.command:
-            lines.append(f"Command: {view.spec.command}")
+            lines.append(f"命令: {view.spec.command}")
         if view.runtime.exit_code is not None:
-            lines.append(f"Exit code: {view.runtime.exit_code}")
-        lines.append(f"Terminal reason: {terminal_reason}")
+            lines.append(f"退出码: {view.runtime.exit_code}")
+        lines.append(f"终止原因: {terminal_reason}")
         if view.runtime.failure_reason:
-            lines.append(f"Reason: {view.runtime.failure_reason}")
+            lines.append(f"原因: {view.runtime.failure_reason}")
         return "\n".join(lines)
 
     def preview_text(self, task_id: str | None) -> str:
         view = self.view_for(task_id)
         if view is None:
-            return "No output to preview."
+            return "无输出可预览。"
 
         preview = self.manager.tail_output(
             view.spec.id,
@@ -175,13 +175,13 @@ class TaskBrowserModel:
             max_lines=_PREVIEW_MAX_LINES,
         )
         if not preview:
-            return "[no output available]"
+            return "[无可用输出]"
         return preview
 
     def full_output(self, task_id: str | None) -> str:
         view = self.view_for(task_id)
         if view is None:
-            return "[no output available]"
+            return "[无可用输出]"
 
         path = self.manager.resolve_output_path(view.spec.id)
         total_size = path.stat().st_size if path.exists() else 0
@@ -193,10 +193,10 @@ class TaskBrowserModel:
         max_bytes = max(self.config.read_max_bytes * 10, _FULL_OUTPUT_MAX_BYTES)
         if total_size > max_bytes:
             return (
-                f"[showing last {max_bytes} bytes of {total_size} bytes]\n\n"
-                f"{output or '[no output available]'}"
+                f"[显示最后 {max_bytes} 字节，共 {total_size} 字节]\n\n"
+                f"{output or '[无可用输出]'}"
             )
-        return output or "[no output available]"
+        return output or "[无可用输出]"
 
     def footer_fragments(self, task_id: str | None) -> StyleAndTextTuples:
         if self.pending_stop_task_id is not None:

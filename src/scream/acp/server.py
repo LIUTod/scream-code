@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Any, NamedTuple
@@ -31,7 +30,7 @@ class ACPServer:
         self.conn: acp.Client | None = None
         self.sessions: dict[str, tuple[ACPSession, _ModelIDConv]] = {}
         self.negotiated_version: ACPVersionSpec | None = None
-        self._auth_methods: list[acp.schema.AuthMethod] = []
+        self._auth_methods: list[acp.schema.AuthMethodTerminal] = []  # type: ignore[reportUnknownMemberType,reportAttributeAccessIssue]
 
     def on_connect(self, conn: acp.Client) -> None:
         logger.info("ACP client connected")
@@ -64,32 +63,19 @@ class ACPServer:
                 version=getattr(client_info, "version", None),
             )
 
-        # get command and args of current process for terminal-auth
-        command = sys.argv[0]
-        args: list[str] = []
-
         # Build terminal auth data for error response
-        terminal_args = args + ["login"]
+        terminal_args = ["login"]
 
         # Build and cache auth methods for reuse in AUTH_REQUIRED errors
         self._auth_methods = [
-            acp.schema.AuthMethod(
+            acp.schema.AuthMethodTerminal(  # type: ignore[reportUnknownMemberType,reportAttributeAccessIssue]
                 id="login",
                 name="Login with Scream account",
                 description=(
                     "Run `scream login` command in the terminal, "
                     "then follow the instructions to finish login."
                 ),
-                # Store auth data in field_meta for building AUTH_REQUIRED error
-                field_meta={
-                    "terminal-auth": {
-                        "command": command,
-                        "args": terminal_args,
-                        "label": "Scream Code Login",
-                        "env": {},
-                        "type": "terminal",
-                    }
-                },
+                args=terminal_args,
             ),
         ]
 
@@ -106,7 +92,7 @@ class ACPServer:
                     resume=acp.schema.SessionResumeCapabilities(),
                 ),
             ),
-            auth_methods=self._auth_methods,
+            auth_methods=self._auth_methods,  # type: ignore[reportUnknownArgumentType]
             agent_info=acp.schema.Implementation(name=NAME, version=VERSION),
         )
 

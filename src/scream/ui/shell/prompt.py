@@ -2255,5 +2255,6 @@ class CustomPromptSession:
                 status.context_usage,
                 status.context_tokens,
                 status.max_context_tokens,
+                status.session_tokens_used,
             )
         return current_toast.message

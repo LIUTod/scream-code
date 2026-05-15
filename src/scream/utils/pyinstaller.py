@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from PyInstaller.utils.hooks import collect_data_files, collect_submodules
+from PyInstaller.utils.hooks import (  # type: ignore[reportMissingModuleSource]
+    collect_data_files,
+    collect_submodules,
+)
 
 from scream.cli._lazy_group import LazySubcommandGroup
 

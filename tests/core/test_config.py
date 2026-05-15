@@ -56,8 +56,7 @@ def test_default_config_dump():
             "services": {"search": None, "fetch": None},
             "mcp": {"client": {"tool_call_timeout_ms": 60000}},
             "hooks": [],
-            "merge_all_available_skills": True,
-            "extra_skill_dirs": [],
+            "merge_all_available_skills": True, "permission_rules": [], "extra_skill_dirs": [],
             "telemetry": True,
             "skip_afk_prompt_injection": False,
         }

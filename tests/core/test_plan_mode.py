@@ -716,8 +716,8 @@ class TestScreamSoulPlanSessionPersistence:
 class TestToolRejectedError:
     def test_default_message(self) -> None:
         err = ToolRejectedError()
-        assert "rejected" in err.message.lower()
-        assert err.brief == "Rejected by user"
+        assert "拒绝" in err.message
+        assert err.brief == "被用户拒绝"
 
     def test_custom_message_and_brief(self) -> None:
         err = ToolRejectedError(message="Plan rejected", brief="Rejected")
@@ -727,7 +727,7 @@ class TestToolRejectedError:
     def test_custom_message_default_brief(self) -> None:
         err = ToolRejectedError(message="Custom rejection")
         assert err.message == "Custom rejection"
-        assert err.brief == "Rejected by user"
+        assert err.brief == "被用户拒绝"
 
 
 # ---------------------------------------------------------------------------

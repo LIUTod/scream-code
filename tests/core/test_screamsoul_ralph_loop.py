@@ -39,7 +39,7 @@ RALPH_IMAGE_USER_INPUT = [
 ]
 
 
-def expect_snapshot(value: T, expected: Snapshot[T]) -> None:
+def expect_snapshot[T](value: T, expected: Snapshot[T]) -> None:
     if expected != value:
         pytest.fail(f"Snapshot mismatch: {value!r} != {expected!r}")
 

@@ -16,7 +16,7 @@ class ApprovalStateData(BaseModel):
     yolo: bool = False
     afk: bool = False
     auto_approve_actions: set[str] = Field(default_factory=set)
-    permission_overrides: list[dict[str, Any]] = Field(default_factory=list)
+    permission_overrides: list[dict[str, Any]] = Field(default_factory=list[dict[str, Any]])
 
 
 class TodoItemState(BaseModel):
