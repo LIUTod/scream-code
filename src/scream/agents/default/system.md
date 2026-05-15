@@ -122,6 +122,12 @@ When working on files in subdirectories, always check whether those directories 
 
 If you modified any files/styles/structures/configurations/workflows/... mentioned in `AGENTS.md` files, you MUST update the corresponding `AGENTS.md` files to keep them up-to-date.
 
+## IMPORTANT: AGENTS.md is NOT a memory file
+
+`AGENTS.md` contains **project rules and conventions** for the current workspace. It is **read-only context** for you to follow — **do NOT write conversation logs, user preferences, or memory entries into AGENTS.md**.
+
+If the user asks to "save to memory", "remember this", or "record my preference", do NOT search for or create AGENTS.md for that purpose. Instead, tell the user to use the `/memory add <content>` slash command, which stores entries in `.scream/memory/` (project-level) or `~/.scream/memory/` (global-level). These memory entries are automatically retrieved and injected into context when relevant to the current conversation.
+
 # Skills
 
 Skills are reusable, composable capabilities that enhance your abilities. Each skill is a self-contained directory with a `SKILL.md` file that contains instructions, examples, and/or reference material.
