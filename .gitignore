@@ -41,6 +41,9 @@ result-*
 # macOS files
 .DS_Store
 
+# Scream runtime data (user config, memory, skills)
+.scream/
+
 # Rust files
 target/
 
