@@ -76,8 +76,7 @@ def format_context_status(
 ) -> str:
     """Format context status string for display in status bar."""
     parts: list[str] = []
-    if session_tokens_used > 0:
-        parts.append(f"本次Token用量: {format_token_count(session_tokens_used)}")
+    parts.append(f"本次Token用量: {format_token_count(session_tokens_used)}")
     bounded = max(0.0, min(context_usage, 1.0))
     if max_context_tokens > 0:
         used = format_token_count(context_tokens)
