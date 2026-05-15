@@ -1,6 +1,7 @@
-# Scream Code CLI
+<img width="960" height="480" alt="scream-code" src="https://github.com/user-attachments/assets/2e629c76-3ba5-42e3-96d7-767241a03b46" />
 
-> 一个会写代码的终端助手 —— 你说话，它干活。
+
+> 你的全能Ai终端助手 —— 你说话，它干活。
 
 **Scream**（尖叫）是一款运行在终端里的 AI 编程助手。你不用记复杂的命令，直接用中文或英文告诉它想做什么，它就会帮你写代码、改文件、查资料、跑程序。
 
@@ -10,9 +11,9 @@
 
 | 人群 | 你能用它做什么 |
 |------|---------------|
-| **零基础想学代码** | 告诉它"帮我写一个计算 BMI 的网页"，它直接生成完整代码并解释每行是什么意思 |
-| **普通工作者** | 批量重命名文件、从网页抓取数据、自动生成 Excel 报表、写邮件脚本 —— 不用学 Python |
-| **专业工程师** | 自动重构代码、批量迁移项目、生成单元测试、分析代码库架构、作为 IDE 的 ACP 后端 |
+| **零基础vibe coding** | 告诉它"帮我制作一个xx项目的观望"，它直接生成完整代码并给你放到你想要的位置 |
+| **普通工作者** | 批量重命名文件、从网页抓取数据、自动生成 Excel 报表、写邮件脚本 —— 不用学 Python，也能搞定复杂工作流 |
+| **专业工程师** | 自动重构代码、批量迁移项目、生成单元测试、分析代码库架构、作为 IDE 的 ACP 后端 ，干就完了|
 
 ---
 
@@ -63,43 +64,15 @@ EOF
 
 **支持多个模型**（配置好后可用 `/model` 随时切换）：
 
-```toml
-default_model = "gpt-4o"
+> 支持自定义 API（DeepSeek、Moonshot、MiniMax、通义千问、GPT、硅基流动等）。
 
-[providers.openai]
-type = "openai"
-base_url = "https://api.openai.com/v1"
-api_key = "sk-xxx"
-
-[providers.deepseek]
-type = "openai"
-base_url = "https://api.deepseek.com"
-api_key = "sk-xxx"
-
-[models.gpt-4o]
-provider = "openai"
-model = "gpt-4o"
-max_context_size = 128000
-
-[models.deepseek-chat]
-provider = "deepseek"
-model = "deepseek-chat"
-max_context_size = 64000
-```
-
-> 支持所有 OpenAI 兼容的 API（DeepSeek、Moonshot、通义千问、硅基流动等）。
-
-配置完成后，在交互模式下输入 `/model` 即可切换模型，无需重启。`/config` 支持追加配置，不会覆盖已有模型。
+配置完成后，在交互模式下输入 `/model` 即可切换模型或删除模型，无需重启。`/config` 支持追加配置，
 
 ### 第三步：开始使用
 
 ```bash
-# 进入交互模式，像聊天一样使用
+# 终端输入、进入交互模式，像聊天一样使用
 scream
-
-# 或者直接让它执行一个任务
-scream -p "帮我把当前目录下所有 .txt 文件合并成一个 all.txt"
-```
 
 ---
 
@@ -159,6 +132,7 @@ scream -C
 | `/compact` | 聊天记录太长时压缩上下文 |
 | `/clear` | 清空当前对话 |
 | `/export` | 导出整个对话为 Markdown 文件 |
+........更多功能不一一举例
 
 ### 审批面板
 
@@ -251,46 +225,7 @@ description: 触发条件描述，Scream 会根据描述决定何时调用此 Sk
 | `telemetry` | `true` | 匿名使用数据上报（可关闭） |
 
 ---
-
-## 参与开发
-
-### 环境准备
-
-```bash
-git clone https://github.com/LIUTod/scream-code.git
-cd scream-code
-make prepare        # 安装依赖和 git hooks
-```
-
-### 常用命令
-
-```bash
-make format         # 格式化代码
-make check          # 类型检查和 lint
-make test           # 运行测试
-make build          # 构建发布包
-```
-
-### 技术架构（给开发者）
-
-```
-scream-code/
-├── src/scream/
-│   ├── cli/              # Typer CLI 入口
-│   ├── soul/             # 核心代理循环（ScreamSoul）
-│   │   ├── approval.py   # 审批系统 + PermissionEngine
-│   │   ├── screamsoul.py # 主循环（LLM 调用 → 工具执行 → 上下文管理）
-│   │   └── slash.py      # 斜杠命令注册
-│   ├── tools/            # 内置工具（文件、Shell、Web、Agent）
-│   ├── ui/shell/         # 交互式终端 UI
-│   ├── permission/       # 权限规则引擎
-│   ├── memory/           # 持久化记忆系统
-│   └── wire/             # UI 与核心的事件传输层
-├── packages/
-│   ├── ltod/             # LLM 抽象层（消息、工具、Provider）
-│   └── kaos/             # OS 抽象层（文件、命令、路径）
-└── tests/                # 测试套件
-```
+## 碎碎念
 
 **核心设计决策**：
 - PermissionEngine 在审批 UI 之前做前置过滤，yolo/afk 始终优先
