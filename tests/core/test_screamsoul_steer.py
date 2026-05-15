@@ -15,8 +15,8 @@ from scream.soul.agent import Agent, Runtime
 from scream.soul.approval import Approval
 from scream.soul.context import Context
 from scream.soul.dynamic_injection import DynamicInjection
-from scream.soul.screamsoul import ScreamSoul
 from scream.soul.message import is_system_reminder_message
+from scream.soul.screamsoul import ScreamSoul
 from scream.utils.aioqueue import QueueShutDown
 from scream.wire import Wire
 from scream.wire.types import ImageURLPart, SteerInput, StepBegin, TextPart, TurnBegin, TurnEnd

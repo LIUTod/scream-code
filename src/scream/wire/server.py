@@ -401,8 +401,10 @@ class WireServer:
         accepted: list[str] = []
         rejected: list[dict[str, str]] = []
         toolset = None
-        if isinstance(self._soul, ScreamSoul) and isinstance(self._soul.agent.toolset, ScreamToolset):
-            toolset = self._soul.agent.toolset
+        if isinstance(self._soul, ScreamSoul):
+            ts = self._soul.agent.toolset
+            if isinstance(ts, ScreamToolset):
+                toolset = ts
 
         if toolset and msg.params.external_tools:
             for tool in msg.params.external_tools:

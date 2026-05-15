@@ -1,5 +1,4 @@
 import inspect
-from pathlib import Path
 
 import pytest
 from inline_snapshot import snapshot

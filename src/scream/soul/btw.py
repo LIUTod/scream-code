@@ -76,7 +76,9 @@ class _DenyAllToolset:
 # ---------------------------------------------------------------------------
 
 
-def _build_btw_context(soul: ScreamSoul, question: str) -> tuple[str, list[Message], _DenyAllToolset]:
+def _build_btw_context(
+    soul: ScreamSoul, question: str
+) -> tuple[str, list[Message], _DenyAllToolset]:
     """Build (system_prompt, history, toolset) aligned with the main agent.
 
     Uses the same system_prompt, normalize_history(), and tool definitions

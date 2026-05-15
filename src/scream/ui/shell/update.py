@@ -6,7 +6,6 @@ import re
 import shlex
 import subprocess
 from enum import Enum, auto
-from pathlib import Path
 
 import aiohttp
 
@@ -165,7 +164,7 @@ def _run_update_gate(current_version: str, latest_version: str) -> None:
     )
     console.print(Text.assemble("  ", ("[q]", "bold"), "      暂不升级，下次提醒"))
     console.print(
-        Text.assemble("  ", ("[s]", "bold"), f"      跳过此版本提醒")
+        Text.assemble("  ", ("[s]", "bold"), "      跳过此版本提醒")
     )
     console.print(Rule(style="grey50"))
     console.print()

@@ -6,14 +6,12 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
-import aiohttp
 from rich.console import Group, RenderableType
 from rich.panel import Panel
 from rich.progress_bar import ProgressBar
 from rich.table import Table
 from rich.text import Text
 
-from scream.config import LLMModel
 from scream.soul.screamsoul import ScreamSoul
 from scream.ui.shell.console import console
 from scream.ui.shell.slash import registry

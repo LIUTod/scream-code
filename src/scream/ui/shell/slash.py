@@ -9,8 +9,7 @@ from prompt_toolkit.shortcuts.choice_input import ChoiceInput
 
 from scream import logger
 from scream.cli import Reload
-from scream.config import get_config_file, load_config, save_config
-from scream.config import LLMModel, LLMProvider
+from scream.config import LLMModel, LLMProvider, get_config_file, load_config, save_config
 from scream.exception import ConfigError
 from scream.session import Session
 from scream.soul.screamsoul import ScreamSoul
@@ -544,8 +543,9 @@ async def config(app: Shell, args: str):
     from scream.telemetry import track
 
     track("config_interactive", provider=provider_name, model=model_name)
+    cfg_msg = f"provider={provider_name}, model={model_key}({model_name})"
     console.print(
-        f"[green]已保存配置：provider={provider_name}, model={model_key}({model_name}), url={base_url}。"
+        f"[green]已保存配置：{cfg_msg}, url={base_url}。"
         "正在重载...[/green]"
     )
     raise Reload(session_id=soul.runtime.session.id)

@@ -7,9 +7,9 @@ import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from loguru import logger
 from ltod.tooling import CallableTool, ToolError, ToolOk
 from ltod.tooling.error import ToolRuntimeError
-from loguru import logger
 
 from scream.plugin import PluginToolSpec
 from scream.tools.utils import ToolRejectedError

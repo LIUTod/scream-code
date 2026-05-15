@@ -12,7 +12,6 @@ from __future__ import annotations
 import fnmatch
 from dataclasses import dataclass, field
 from enum import Enum
-from pathlib import Path
 from typing import Any
 
 
@@ -107,7 +106,7 @@ class PermissionRule:
 DEFAULT_RULES: list[PermissionRule] = [
     # 读取操作默认允许
     PermissionRule("read file", PermissionAction.ALLOW, description="读取文件默认允许"),
-    PermissionRule("read media file", PermissionAction.ALLOW, description="读取媒体文件默认允许"),
+    PermissionRule("read media file", PermissionAction.ALLOW, description="读取媒体默认允许"),
     PermissionRule("glob", PermissionAction.ALLOW, description="文件搜索默认允许"),
     PermissionRule("grep", PermissionAction.ALLOW, description="代码搜索默认允许"),
     # 浏览器/搜索操作默认允许
@@ -115,30 +114,36 @@ DEFAULT_RULES: list[PermissionRule] = [
     PermissionRule("fetch", PermissionAction.ALLOW, description="网页获取默认允许"),
 
     # 写操作默认询问
-    PermissionRule("edit file", PermissionAction.ASK, description="编辑文件需要确认"),
-    PermissionRule("edit file outside of working directory", PermissionAction.ASK, description="编辑工作区外文件需要确认"),
+    PermissionRule("edit file", PermissionAction.ASK, description="编辑文件需确认"),
+    PermissionRule(
+        "edit file outside of working directory",
+        PermissionAction.ASK,
+        description="编辑工作区外文件需确认",
+    ),
 
     # 执行操作默认询问
-    PermissionRule("run command", PermissionAction.ASK, description="执行命令需要确认"),
-    PermissionRule("run background command", PermissionAction.ASK, description="执行后台命令需要确认"),
-    PermissionRule("stop background task", PermissionAction.ASK, description="停止后台任务需要确认"),
-    PermissionRule("execute*", PermissionAction.ASK, description="执行操作需要确认"),
-    PermissionRule("shell", PermissionAction.ASK, description="Shell 命令需要确认"),
-    PermissionRule("install*", PermissionAction.ASK, description="安装操作需要确认"),
-    PermissionRule("delete*", PermissionAction.ASK, description="删除操作需要确认"),
+    PermissionRule("run command", PermissionAction.ASK, description="执行命令需确认"),
+    PermissionRule("run background command", PermissionAction.ASK, description="后台命令需确认"),
+    PermissionRule("stop background task", PermissionAction.ASK, description="停止后台任务需确认"),
+    PermissionRule("execute*", PermissionAction.ASK, description="执行操作需确认"),
+    PermissionRule("shell", PermissionAction.ASK, description="Shell 命令需确认"),
+    PermissionRule("install*", PermissionAction.ASK, description="安装操作需确认"),
+    PermissionRule("delete*", PermissionAction.ASK, description="删除操作需确认"),
 
     # 敏感路径默认拒绝或询问
-    PermissionRule("*", PermissionAction.ASK, path_pattern="/etc/*", description="系统目录需要确认"),
-    PermissionRule("*", PermissionAction.ASK, path_pattern="/usr/*", description="系统目录需要确认"),
-    PermissionRule("*", PermissionAction.ASK, path_pattern="/bin/*", description="系统目录需要确认"),
-    PermissionRule("*", PermissionAction.ASK, path_pattern="/sbin/*", description="系统目录需要确认"),
-    PermissionRule("*", PermissionAction.DENY, path_pattern="*.env", description="环境文件禁止操作"),
-    PermissionRule("*", PermissionAction.DENY, path_pattern=".env*", description="环境文件禁止操作"),
-    PermissionRule("*", PermissionAction.DENY, path_pattern="*/.env", description="环境文件禁止操作"),
-    PermissionRule("*", PermissionAction.DENY, path_pattern="*/.env.*", description="环境文件禁止操作"),
-    PermissionRule("*", PermissionAction.ASK, path_pattern="*/.ssh/*", description="SSH 密钥目录需要确认"),
-    PermissionRule("*", PermissionAction.ASK, path_pattern="*/.aws/*", description="AWS 凭证目录需要确认"),
-    PermissionRule("*", PermissionAction.ASK, path_pattern="*/.scream/config.toml", description="配置文件需要确认"),
+    PermissionRule("*", PermissionAction.ASK, path_pattern="/etc/*", description="系统目录需确认"),
+    PermissionRule("*", PermissionAction.ASK, path_pattern="/usr/*", description="系统目录需确认"),
+    PermissionRule("*", PermissionAction.ASK, path_pattern="/bin/*", description="系统目录需确认"),
+    PermissionRule("*", PermissionAction.ASK, path_pattern="/sbin/*", description="系统目录需确认"),
+    PermissionRule("*", PermissionAction.DENY, path_pattern="*.env", description="禁止环境文件"),
+    PermissionRule("*", PermissionAction.DENY, path_pattern=".env*", description="禁止环境文件"),
+    PermissionRule("*", PermissionAction.DENY, path_pattern="*/.env", description="禁止环境文件"),
+    PermissionRule("*", PermissionAction.DENY, path_pattern="*/.env.*", description="禁止环境文件"),
+    PermissionRule("*", PermissionAction.ASK, path_pattern="*/.ssh/*", description="SSH 需确认"),
+    PermissionRule("*", PermissionAction.ASK, path_pattern="*/.aws/*", description="AWS 需确认"),
+    PermissionRule(
+        "*", PermissionAction.ASK, path_pattern="*/.scream/config.toml", description="配置需确认"
+    ),
 
     # 通配默认规则（最低优先级）
     PermissionRule("*", PermissionAction.ASK, description="未知操作默认询问"),
@@ -224,7 +229,7 @@ class PermissionEngine:
         self._session_auto_approve = False
 
     @classmethod
-    def from_dict_list(cls, rules_data: list[dict[str, Any]]) -> "PermissionEngine":
+    def from_dict_list(cls, rules_data: list[dict[str, Any]]) -> PermissionEngine:
         """从字典列表创建权限引擎。"""
         rules: list[PermissionRule] = []
         for r in rules_data:

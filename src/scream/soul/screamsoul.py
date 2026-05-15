@@ -30,6 +30,8 @@ from scream.approval_runtime import (
 from scream.background import build_active_task_snapshot
 from scream.hooks.engine import HookEngine
 from scream.llm import ModelCapability
+from scream.memory import MemoryManager
+from scream.memory.injection import MemoryInjectionProvider
 from scream.notifications import (
     NotificationView,
     build_notification_message,
@@ -53,8 +55,6 @@ from scream.soul.compaction import (
     should_auto_compact,
 )
 from scream.soul.context import Context
-from scream.memory import MemoryManager
-from scream.memory.injection import MemoryInjectionProvider
 from scream.soul.dynamic_injection import (
     DynamicInjection,
     DynamicInjectionProvider,
@@ -803,7 +803,9 @@ class ScreamSoul:
     def _find_slash_command(self, name: str) -> SlashCommand[Any] | None:
         return self._slash_command_map.get(name)
 
-    def _make_skill_runner(self, skill: Skill) -> Callable[[ScreamSoul, str], None | Awaitable[None]]:
+    def _make_skill_runner(
+        self, skill: Skill
+    ) -> Callable[[ScreamSoul, str], None | Awaitable[None]]:
         async def _run_skill(soul: ScreamSoul, args: str, *, _skill: Skill = skill) -> None:
             from scream.telemetry import track
 

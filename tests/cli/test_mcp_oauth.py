@@ -10,7 +10,6 @@ async def test_mcp_oauth_storage_persists_tokens_in_share_dir(tmp_path, monkeypa
     monkeypatch.setenv("SCREAM_SHARE_DIR", str(tmp_path))
 
     from mcp.shared.auth import OAuthToken
-
     from scream.mcp_oauth import create_mcp_oauth_token_storage, has_mcp_oauth_tokens
 
     server_url = "https://mcp.example.test/mcp/"
@@ -48,7 +47,6 @@ def test_create_mcp_oauth_uses_persistent_storage_without_warning(tmp_path, monk
     monkeypatch.setenv("SCREAM_SHARE_DIR", str(tmp_path))
 
     from fastmcp.client.auth.oauth import OAuth, TokenStorageAdapter
-
     from scream.mcp_oauth import create_mcp_oauth
 
     with warnings.catch_warnings(record=True) as caught:
@@ -64,7 +62,6 @@ def test_prepare_mcp_server_config_replaces_oauth_literal_without_mutating(tmp_p
     monkeypatch.setenv("SCREAM_SHARE_DIR", str(tmp_path))
 
     from fastmcp.client.auth.oauth import OAuth
-
     from scream.mcp_oauth import prepare_mcp_server_config
 
     server = {

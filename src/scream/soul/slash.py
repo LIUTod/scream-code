@@ -365,7 +365,8 @@ async def memory(soul: ScreamSoul, args: str):
         lines: list[str] = []
         for e in entries:
             scope_label = "项目" if e.source == "project" else "全局"
-            lines.append(f"[{e.id}] ({scope_label}) {e.content[:60]}{'...' if len(e.content) > 60 else ''}")
+            suffix = "..." if len(e.content) > 60 else ""
+            lines.append(f"[{e.id}] ({scope_label}) {e.content[:60]}{suffix}")
         wire_send(TextPart(text="\n".join(lines)))
         return
 
@@ -380,7 +381,8 @@ async def memory(soul: ScreamSoul, args: str):
         lines: list[str] = []
         for e in entries:
             scope_label = "项目" if e.source == "project" else "全局"
-            lines.append(f"[{e.id}] ({scope_label}) {e.content[:80]}{'...' if len(e.content) > 80 else ''}")
+            suffix = "..." if len(e.content) > 80 else ""
+            lines.append(f"[{e.id}] ({scope_label}) {e.content[:80]}{suffix}")
         wire_send(TextPart(text="\n".join(lines)))
         return
 

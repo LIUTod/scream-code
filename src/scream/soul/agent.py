@@ -19,6 +19,7 @@ from scream.config import Config
 from scream.exception import MCPConfigError, SystemPromptTemplateError
 from scream.llm import LLM
 from scream.notifications import NotificationManager
+from scream.permission import PermissionEngine
 from scream.session import Session
 from scream.skill import (
     Skill,
@@ -27,7 +28,6 @@ from scream.skill import (
     index_skills,
     resolve_skills_roots,
 )
-from scream.permission import PermissionEngine
 from scream.soul.approval import Approval, ApprovalState
 from scream.soul.denwarenji import DenwaRenji
 from scream.soul.toolset import ScreamToolset

@@ -2,8 +2,8 @@ import asyncio
 
 from ltod.chat_provider import APIStatusError, StreamedMessagePart
 from ltod.chat_provider.chaos import ChaosChatProvider, ChaosConfig
-from ltod.chat_provider.scream import Scream
 from ltod.chat_provider.mock import MockChatProvider
+from ltod.chat_provider.scream import Scream
 from ltod.message import Message, TextPart
 
 

@@ -5,8 +5,8 @@ from __future__ import annotations
 import shutil
 import tempfile
 from pathlib import Path
-from typing import TYPE_CHECKING
 
+from scream.config import Config
 from scream.plugin import (
     PLUGIN_JSON,
     PluginError,
@@ -17,8 +17,6 @@ from scream.plugin import (
     write_runtime,
 )
 from scream.share import get_share_dir
-
-from scream.config import Config
 
 
 def get_plugins_dir() -> Path:

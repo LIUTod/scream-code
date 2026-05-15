@@ -226,7 +226,10 @@ class Config(BaseModel):
     hooks: list[HookDef] = Field(default_factory=list, description="Hook definitions")  # pyright: ignore[reportUnknownVariableType]
     permission_rules: list[dict[str, Any]] = Field(
         default_factory=list,
-        description="Custom permission rules. Each rule is a dict with 'tool_pattern', 'action' ('allow'|'deny'|'ask'), optional 'path_pattern', and optional 'description'."
+        description=(
+            "Custom permission rules. Each rule is a dict with "
+            "'tool_pattern', 'action', optional 'path_pattern', and 'description'."
+        ),
     )
     merge_all_available_skills: bool = Field(
         default=True,
@@ -249,7 +252,7 @@ class Config(BaseModel):
     )
     telemetry: bool = Field(
         default=True,
-        description="Enable anonymous telemetry to help improve scream-cli. Set to false to disable.",
+        description="Enable anonymous telemetry. Set to false to disable.",
     )
 
     @model_validator(mode="after")

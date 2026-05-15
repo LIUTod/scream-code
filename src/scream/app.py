@@ -18,7 +18,6 @@ from scream.agentspec import DEFAULT_AGENT_FILE
 from scream.background.models import is_terminal_status
 from scream.cli import InputFormat, OutputFormat
 from scream.config import Config, LLMModel, LLMProvider, load_config
-from scream.constant import VERSION
 from scream.llm import augment_provider_with_env_vars, create_llm, model_display_name
 from scream.session import Session
 from scream.share import get_share_dir
@@ -27,7 +26,6 @@ from scream.soul.agent import Runtime, load_agent
 from scream.soul.context import Context
 from scream.soul.screamsoul import ScreamSoul
 from scream.utils.aioqueue import QueueShutDown
-from scream.utils.envvar import get_env_bool
 from scream.utils.logging import logger, open_original_stderr, redirect_stderr_to_logger
 from scream.utils.path import shorten_home
 from scream.wire import Wire, WireUISide
