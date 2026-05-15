@@ -1,0 +1,415 @@
+from __future__ import annotations
+
+import asyncio
+import sys
+import time
+from datetime import datetime
+from pathlib import Path
+from typing import Any, NamedTuple
+
+import acp
+from kaos.path import KaosPath
+
+from scream.acp.kaos import ACPKaos
+from scream.acp.mcp import acp_mcp_servers_to_mcp_config
+from scream.acp.session import ACPSession
+from scream.acp.tools import replace_tools
+from scream.acp.types import ACPContentBlock, MCPServer
+from scream.acp.version import ACPVersionSpec, negotiate_version
+from scream.app import ScreamCLI
+from scream.config import LLMModel, load_config, save_config
+from scream.constant import NAME, VERSION
+from scream.llm import create_llm, derive_model_capabilities
+from scream.session import Session
+from scream.soul.slash import registry as soul_slash_registry
+from scream.soul.toolset import ScreamToolset
+from scream.utils.logging import logger
+
+
+class ACPServer:
+    def __init__(self) -> None:
+        self.client_capabilities: acp.schema.ClientCapabilities | None = None
+        self.conn: acp.Client | None = None
+        self.sessions: dict[str, tuple[ACPSession, _ModelIDConv]] = {}
+        self.negotiated_version: ACPVersionSpec | None = None
+        self._auth_methods: list[acp.schema.AuthMethod] = []
+
+    def on_connect(self, conn: acp.Client) -> None:
+        logger.info("ACP client connected")
+        self.conn = conn
+
+    async def initialize(
+        self,
+        protocol_version: int,
+        client_capabilities: acp.schema.ClientCapabilities | None = None,
+        client_info: acp.schema.Implementation | None = None,
+        **kwargs: Any,
+    ) -> acp.InitializeResponse:
+        self.negotiated_version = negotiate_version(protocol_version)
+        logger.info(
+            "ACP server initialized with client protocol version: {version}, "
+            "negotiated version: {negotiated}, "
+            "client capabilities: {capabilities}, client info: {info}",
+            version=protocol_version,
+            negotiated=self.negotiated_version,
+            capabilities=client_capabilities,
+            info=client_info,
+        )
+        self.client_capabilities = client_capabilities
+
+        if client_info is not None:
+            from scream.telemetry import set_client_info
+
+            set_client_info(
+                name=client_info.name,
+                version=getattr(client_info, "version", None),
+            )
+
+        # get command and args of current process for terminal-auth
+        command = sys.argv[0]
+        args: list[str] = []
+
+        # Build terminal auth data for error response
+        terminal_args = args + ["login"]
+
+        # Build and cache auth methods for reuse in AUTH_REQUIRED errors
+        self._auth_methods = [
+            acp.schema.AuthMethod(
+                id="login",
+                name="Login with Scream account",
+                description=(
+                    "Run `scream login` command in the terminal, "
+                    "then follow the instructions to finish login."
+                ),
+                # Store auth data in field_meta for building AUTH_REQUIRED error
+                field_meta={
+                    "terminal-auth": {
+                        "command": command,
+                        "args": terminal_args,
+                        "label": "Scream Code Login",
+                        "env": {},
+                        "type": "terminal",
+                    }
+                },
+            ),
+        ]
+
+        return acp.InitializeResponse(
+            protocol_version=self.negotiated_version.protocol_version,
+            agent_capabilities=acp.schema.AgentCapabilities(
+                load_session=True,
+                prompt_capabilities=acp.schema.PromptCapabilities(
+                    embedded_context=True, image=True, audio=False
+                ),
+                mcp_capabilities=acp.schema.McpCapabilities(http=True, sse=False),
+                session_capabilities=acp.schema.SessionCapabilities(
+                    list=acp.schema.SessionListCapabilities(),
+                    resume=acp.schema.SessionResumeCapabilities(),
+                ),
+            ),
+            auth_methods=self._auth_methods,
+            agent_info=acp.schema.Implementation(name=NAME, version=VERSION),
+        )
+
+    async def new_session(
+        self, cwd: str, mcp_servers: list[MCPServer] | None = None, **kwargs: Any
+    ) -> acp.NewSessionResponse:
+        logger.info("Creating new session for working directory: {cwd}", cwd=cwd)
+        assert self.conn is not None, "ACP client not connected"
+        assert self.client_capabilities is not None, "ACP connection not initialized"
+
+        # Auth check bypassed (no OAuth)
+
+        session = await Session.create(KaosPath.unsafe_from_local_path(Path(cwd)))
+
+        mcp_config = acp_mcp_servers_to_mcp_config(mcp_servers or [])
+        cli_instance = await ScreamCLI.create(
+            session,
+            mcp_configs=[mcp_config],
+            ui_mode="acp",
+        )
+        config = cli_instance.soul.runtime.config
+        acp_kaos = ACPKaos(self.conn, session.id, self.client_capabilities)
+        acp_session = ACPSession(session.id, cli_instance, self.conn, kaos=acp_kaos)
+        model_id_conv = _ModelIDConv(config.default_model, config.default_thinking)
+        self.sessions[session.id] = (acp_session, model_id_conv)
+
+        if isinstance(cli_instance.soul.agent.toolset, ScreamToolset):
+            replace_tools(
+                self.client_capabilities,
+                self.conn,
+                session.id,
+                cli_instance.soul.agent.toolset,
+                cli_instance.soul.runtime,
+            )
+
+        available_commands = [
+            acp.schema.AvailableCommand(name=cmd.name, description=cmd.description)
+            for cmd in soul_slash_registry.list_commands()
+        ]
+        asyncio.create_task(
+            self.conn.session_update(
+                session_id=session.id,
+                update=acp.schema.AvailableCommandsUpdate(
+                    session_update="available_commands_update",
+                    available_commands=available_commands,
+                ),
+            )
+        )
+        return acp.NewSessionResponse(
+            session_id=session.id,
+            modes=acp.schema.SessionModeState(
+                available_modes=[
+                    acp.schema.SessionMode(
+                        id="default",
+                        name="Default",
+                        description="The default mode.",
+                    ),
+                ],
+                current_mode_id="default",
+            ),
+            models=acp.schema.SessionModelState(
+                available_models=_expand_llm_models(config.models),
+                current_model_id=model_id_conv.to_acp_model_id(),
+            ),
+        )
+
+    async def _setup_session(
+        self,
+        cwd: str,
+        session_id: str,
+        mcp_servers: list[MCPServer] | None = None,
+    ) -> tuple[ACPSession, _ModelIDConv]:
+        """Load or resume a session. Shared by load_session and resume_session."""
+        assert self.conn is not None, "ACP client not connected"
+        assert self.client_capabilities is not None, "ACP connection not initialized"
+
+        work_dir = KaosPath.unsafe_from_local_path(Path(cwd))
+        session = await Session.find(work_dir, session_id)
+        if session is None:
+            logger.error(
+                "Session not found: {id} for working directory: {cwd}", id=session_id, cwd=cwd
+            )
+            raise acp.RequestError.invalid_params({"session_id": "Session not found"})
+
+        mcp_config = acp_mcp_servers_to_mcp_config(mcp_servers or [])
+        cli_instance = await ScreamCLI.create(
+            session,
+            mcp_configs=[mcp_config],
+            resumed=True,  # _setup_session loads existing sessions
+            ui_mode="acp",
+        )
+        config = cli_instance.soul.runtime.config
+        acp_kaos = ACPKaos(self.conn, session.id, self.client_capabilities)
+        acp_session = ACPSession(session.id, cli_instance, self.conn, kaos=acp_kaos)
+        model_id_conv = _ModelIDConv(config.default_model, config.default_thinking)
+        self.sessions[session.id] = (acp_session, model_id_conv)
+
+        if isinstance(cli_instance.soul.agent.toolset, ScreamToolset):
+            replace_tools(
+                self.client_capabilities,
+                self.conn,
+                session.id,
+                cli_instance.soul.agent.toolset,
+                cli_instance.soul.runtime,
+            )
+
+        return acp_session, model_id_conv
+
+    async def load_session(
+        self, cwd: str, session_id: str, mcp_servers: list[MCPServer] | None = None, **kwargs: Any
+    ) -> None:
+        logger.info("Loading session: {id} for working directory: {cwd}", id=session_id, cwd=cwd)
+
+        if session_id in self.sessions:
+            logger.warning("Session already loaded: {id}", id=session_id)
+            return
+
+        # Auth check bypassed (no OAuth)
+
+        await self._setup_session(cwd, session_id, mcp_servers)
+        # TODO: replay session history?
+
+    async def resume_session(
+        self, cwd: str, session_id: str, mcp_servers: list[MCPServer] | None = None, **kwargs: Any
+    ) -> acp.schema.ResumeSessionResponse:
+        logger.info("Resuming session: {id} for working directory: {cwd}", id=session_id, cwd=cwd)
+
+        if session_id not in self.sessions:
+            await self._setup_session(cwd, session_id, mcp_servers)
+
+        acp_session, model_id_conv = self.sessions[session_id]
+        config = acp_session.cli.soul.runtime.config
+        return acp.schema.ResumeSessionResponse(
+            modes=acp.schema.SessionModeState(
+                available_modes=[
+                    acp.schema.SessionMode(
+                        id="default",
+                        name="Default",
+                        description="The default mode.",
+                    ),
+                ],
+                current_mode_id="default",
+            ),
+            models=acp.schema.SessionModelState(
+                available_models=_expand_llm_models(config.models),
+                current_model_id=model_id_conv.to_acp_model_id(),
+            ),
+        )
+
+    async def fork_session(
+        self, cwd: str, session_id: str, mcp_servers: list[MCPServer] | None = None, **kwargs: Any
+    ) -> acp.schema.ForkSessionResponse:
+        raise NotImplementedError
+
+    async def list_sessions(
+        self, cursor: str | None = None, cwd: str | None = None, **kwargs: Any
+    ) -> acp.schema.ListSessionsResponse:
+        logger.info("Listing sessions for working directory: {cwd}", cwd=cwd)
+        if cwd is None:
+            return acp.schema.ListSessionsResponse(sessions=[], next_cursor=None)
+        work_dir = KaosPath.unsafe_from_local_path(Path(cwd))
+        sessions = await Session.list(work_dir)
+        return acp.schema.ListSessionsResponse(
+            sessions=[
+                acp.schema.SessionInfo(
+                    cwd=cwd,
+                    session_id=s.id,
+                    title=s.title,
+                    updated_at=datetime.fromtimestamp(s.updated_at).astimezone().isoformat(),
+                )
+                for s in sessions
+            ],
+            next_cursor=None,
+        )
+
+    async def set_session_mode(self, mode_id: str, session_id: str, **kwargs: Any) -> None:
+        assert mode_id == "default", "Only default mode is supported"
+
+    async def set_session_model(self, model_id: str, session_id: str, **kwargs: Any) -> None:
+        logger.info(
+            "Setting session model to {model_id} for session: {id}",
+            model_id=model_id,
+            id=session_id,
+        )
+        if session_id not in self.sessions:
+            logger.error("Session not found: {id}", id=session_id)
+            raise acp.RequestError.invalid_params({"session_id": "Session not found"})
+
+        acp_session, current_model_id = self.sessions[session_id]
+        cli_instance = acp_session.cli
+        model_id_conv = _ModelIDConv.from_acp_model_id(model_id)
+        if model_id_conv == current_model_id:
+            return
+
+        config = cli_instance.soul.runtime.config
+        new_model = config.models.get(model_id_conv.model_key)
+        if new_model is None:
+            logger.error("Model not found: {model_key}", model_key=model_id_conv.model_key)
+            raise acp.RequestError.invalid_params({"model_id": "Model not found"})
+        new_provider = config.providers.get(new_model.provider)
+        if new_provider is None:
+            logger.error(
+                "Provider not found: {provider} for model: {model_key}",
+                provider=new_model.provider,
+                model_key=model_id_conv.model_key,
+            )
+            raise acp.RequestError.invalid_params({"model_id": "Model's provider not found"})
+
+        new_llm = create_llm(
+            new_provider,
+            new_model,
+            session_id=acp_session.id,
+            thinking=model_id_conv.thinking,
+        )
+        cli_instance.soul.runtime.llm = new_llm
+
+        config.default_model = model_id_conv.model_key
+        config.default_thinking = model_id_conv.thinking
+        assert config.is_from_default_location, "`scream acp` must use the default config location"
+        config_for_save = load_config()
+        config_for_save.default_model = model_id_conv.model_key
+        config_for_save.default_thinking = model_id_conv.thinking
+        save_config(config_for_save)
+
+    async def authenticate(self, method_id: str, **kwargs: Any) -> acp.AuthenticateResponse | None:
+        """
+        For Terminal Auth, this method is typically not called directly
+        (user completes auth in terminal). Implement for completeness.
+        """
+        if method_id == "login":
+            logger.info("Authentication bypassed (no OAuth): {id}", id=method_id)
+            return acp.AuthenticateResponse()
+
+        logger.error("Unknown auth method: {method_id}", method_id=method_id)
+        raise acp.RequestError.invalid_params({"method_id": "Unknown auth method"})
+
+    async def prompt(
+        self, prompt: list[ACPContentBlock], session_id: str, **kwargs: Any
+    ) -> acp.PromptResponse:
+        logger.info("Received prompt request for session: {id}", id=session_id)
+        if session_id not in self.sessions:
+            logger.error("Session not found: {id}", id=session_id)
+            raise acp.RequestError.invalid_params({"session_id": "Session not found"})
+        acp_session, *_ = self.sessions[session_id]
+        return await acp_session.prompt(prompt)
+
+    async def cancel(self, session_id: str, **kwargs: Any) -> None:
+        logger.info("Received cancel request for session: {id}", id=session_id)
+        if session_id not in self.sessions:
+            logger.error("Session not found: {id}", id=session_id)
+            raise acp.RequestError.invalid_params({"session_id": "Session not found"})
+        acp_session, *_ = self.sessions[session_id]
+        await acp_session.cancel()
+
+    async def ext_method(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
+        raise NotImplementedError
+
+    async def ext_notification(self, method: str, params: dict[str, Any]) -> None:
+        raise NotImplementedError
+
+
+class _ModelIDConv(NamedTuple):
+    model_key: str
+    thinking: bool
+
+    @classmethod
+    def from_acp_model_id(cls, model_id: str) -> _ModelIDConv:
+        if model_id.endswith(",thinking"):
+            return _ModelIDConv(model_id[: -len(",thinking")], True)
+        return _ModelIDConv(model_id, False)
+
+    def to_acp_model_id(self) -> str:
+        if self.thinking:
+            return f"{self.model_key},thinking"
+        return self.model_key
+
+
+def _expand_llm_models(models: dict[str, LLMModel]) -> list[acp.schema.ModelInfo]:
+    expanded_models: list[acp.schema.ModelInfo] = []
+    for model_key, model in models.items():
+        capabilities = derive_model_capabilities(model)
+        if "thinking" in model.model or "reason" in model.model:
+            # always-thinking models
+            expanded_models.append(
+                acp.schema.ModelInfo(
+                    model_id=_ModelIDConv(model_key, True).to_acp_model_id(),
+                    name=f"{model.model}",
+                )
+            )
+        else:
+            expanded_models.append(
+                acp.schema.ModelInfo(
+                    model_id=model_key,
+                    name=model.model,
+                )
+            )
+            if "thinking" in capabilities:
+                # add thinking variant
+                expanded_models.append(
+                    acp.schema.ModelInfo(
+                        model_id=_ModelIDConv(model_key, True).to_acp_model_id(),
+                        name=f"{model.model} (thinking)",
+                    )
+                )
+    return expanded_models

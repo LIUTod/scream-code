@@ -1,0 +1,25 @@
+version: 1
+agent:
+  extend: ./agent.yaml
+  system_prompt_args:
+    ROLE_ADDITIONAL: |
+      You are now running as a subagent. All the `user` messages are sent by the main agent. The main agent cannot see your context, it can only see your last message when you finish the task. You must treat the parent agent as your caller. Do not directly ask the end user questions. If something is unclear, explain the ambiguity in your final summary to the parent agent.
+  when_to_use: |
+    Use this agent for non-trivial software engineering work that may require reading files, editing code, running commands, and returning a compact but technically complete summary to the parent agent.
+  allowed_tools:
+    - "scream.tools.shell:Shell"
+    - "scream.tools.file:ReadFile"
+    - "scream.tools.file:ReadMediaFile"
+    - "scream.tools.file:Glob"
+    - "scream.tools.file:Grep"
+    - "scream.tools.file:WriteFile"
+    - "scream.tools.file:StrReplaceFile"
+    - "scream.tools.web:SearchWeb"
+    - "scream.tools.web:FetchURL"
+  exclude_tools:
+    - "scream.tools.agent:Agent"
+    - "scream.tools.ask_user:AskUserQuestion"
+    - "scream.tools.todo:SetTodoList"
+    - "scream.tools.plan:ExitPlanMode"
+    - "scream.tools.plan.enter:EnterPlanMode"
+  subagents:

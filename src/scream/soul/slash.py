@@ -1,0 +1,407 @@
+from __future__ import annotations
+
+import tempfile
+from collections.abc import Awaitable, Callable
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+from kaos.path import KaosPath
+from ltod.message import Message
+
+import scream.prompts as prompts
+from scream import logger
+from scream.soul import wire_send
+from scream.soul.agent import load_agents_md
+from scream.soul.context import Context
+from scream.soul.dynamic_injections.afk_mode import AFK_DISABLED_REMINDER
+from scream.soul.message import system, system_reminder
+from scream.utils.export import is_sensitive_file
+from scream.utils.path import sanitize_cli_path, shorten_home
+from scream.utils.slashcmd import SlashCommandRegistry
+from scream.wire.types import StatusUpdate, TextPart
+
+if TYPE_CHECKING:
+    from scream.soul.screamsoul import ScreamSoul
+
+type SoulSlashCmdFunc = Callable[[ScreamSoul, str], None | Awaitable[None]]
+"""
+A function that runs as a ScreamSoul-level slash command.
+
+Raises:
+    Any exception that can be raised by `Soul.run`.
+"""
+
+registry = SlashCommandRegistry[SoulSlashCmdFunc]()
+
+
+@registry.command
+async def init(soul: ScreamSoul, args: str):
+    """分析代码库并生成 AGENTS.md 文件"""
+    from scream.soul.screamsoul import ScreamSoul
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        tmp_context = Context(file_backend=Path(temp_dir) / "context.jsonl")
+        tmp_soul = ScreamSoul(soul.agent, context=tmp_context)
+        await tmp_soul.run(prompts.INIT)
+
+    agents_md = await load_agents_md(soul.runtime.builtin_args.SCREAM_WORK_DIR)
+    system_message = system(
+        "The user just ran `/init` slash command. "
+        "The system has analyzed the codebase and generated an `AGENTS.md` file. "
+        f"Latest AGENTS.md file content:\n{agents_md}"
+    )
+    await soul.context.append_message(Message(role="user", content=[system_message]))
+    from scream.telemetry import track
+
+    track("init_complete")
+
+
+@registry.command
+async def compact(soul: ScreamSoul, args: str):
+    """压缩上下文（可指定保留主题，如 /compact keep db discussions）"""
+    if soul.context.n_checkpoints == 0:
+        wire_send(TextPart(text="The context is empty."))
+        return
+
+    logger.info("Running `/compact`")
+    instruction = args.strip()
+    await soul.compact_context(manual=True, custom_instruction=instruction)
+    wire_send(TextPart(text="The context has been compacted."))
+    snap = soul.status
+    wire_send(
+        StatusUpdate(
+            context_usage=snap.context_usage,
+            context_tokens=snap.context_tokens,
+            max_context_tokens=snap.max_context_tokens,
+        )
+    )
+
+
+@registry.command(aliases=["reset"])
+async def clear(soul: ScreamSoul, args: str):
+    """清空上下文"""
+    logger.info("Running `/clear`")
+    await soul.context.clear()
+    await soul.context.write_system_prompt(soul.agent.system_prompt)
+    wire_send(TextPart(text="The context has been cleared."))
+    snap = soul.status
+    wire_send(
+        StatusUpdate(
+            context_usage=snap.context_usage,
+            context_tokens=snap.context_tokens,
+            max_context_tokens=snap.max_context_tokens,
+        )
+    )
+
+
+@registry.command
+async def yolo(soul: ScreamSoul, args: str):
+    """切换 YOLO 模式（自动批准所有操作）"""
+    from scream.telemetry import track
+
+    # Inspect only the yolo flag: afk is independent and is toggled by /afk.
+    if soul.runtime.approval.is_yolo_flag():
+        soul.runtime.approval.set_yolo(False)
+        track("yolo_toggle", enabled=False)
+        if soul.runtime.approval.is_afk():
+            # Yolo off but afk still on -> tool calls remain auto-approved.
+            # Don't mislead the user into thinking approvals just came back.
+            wire_send(
+                TextPart(
+                    text=(
+                        "Yolo disabled, but afk is still on — tool calls remain "
+                        "auto-approved. Use /afk to turn off afk."
+                    )
+                )
+            )
+        else:
+            wire_send(TextPart(text="You only die once! Actions will require approval."))
+    else:
+        soul.runtime.approval.set_yolo(True)
+        track("yolo_toggle", enabled=True)
+        wire_send(TextPart(text="You only live once! All actions will be auto-approved."))
+
+
+@registry.command
+async def afk(soul: ScreamSoul, args: str):
+    """切换 AFK 模式（自动关闭提问、自动批准工具调用）"""
+    from scream.telemetry import track
+
+    if soul.runtime.approval.is_afk():
+        soul.runtime.approval.set_afk(False)
+        await soul.notify_afk_changed(False)
+        await soul.context.append_message(
+            Message(role="user", content=[system_reminder(AFK_DISABLED_REMINDER)])
+        )
+        track("afk_toggle", enabled=False)
+        if soul.runtime.approval.is_yolo_flag():
+            wire_send(
+                TextPart(
+                    text=("afk mode disabled. You are back at the terminal. Yolo is still on.")
+                )
+            )
+        else:
+            wire_send(TextPart(text="afk mode disabled. You are back at the terminal."))
+    else:
+        soul.runtime.approval.set_afk(True)
+        await soul.notify_afk_changed(True)
+        track("afk_toggle", enabled=True)
+        wire_send(
+            TextPart(
+                text=(
+                    "afk mode enabled. AskUserQuestion will be auto-dismissed "
+                    "and tool calls auto-approved."
+                )
+            )
+        )
+
+
+@registry.command
+async def plan(soul: ScreamSoul, args: str):
+    """切换 Plan 模式。用法：/plan [on|off|view|clear]"""
+    subcmd = args.strip().lower()
+
+    if subcmd == "on":
+        if not soul.plan_mode:
+            await soul.toggle_plan_mode_from_manual()
+        plan_path = soul.get_plan_file_path()
+        wire_send(TextPart(text=f"Plan mode ON. Plan file: {plan_path}"))
+        wire_send(StatusUpdate(plan_mode=soul.plan_mode))
+    elif subcmd == "off":
+        if soul.plan_mode:
+            await soul.toggle_plan_mode_from_manual()
+        wire_send(TextPart(text="Plan mode OFF. All tools are now available."))
+        wire_send(StatusUpdate(plan_mode=soul.plan_mode))
+    elif subcmd == "view":
+        content = soul.read_current_plan()
+        if content:
+            wire_send(TextPart(text=content))
+        else:
+            wire_send(TextPart(text="No plan file found for this session."))
+    elif subcmd == "clear":
+        soul.clear_current_plan()
+        wire_send(TextPart(text="Plan cleared."))
+    else:
+        # Default: toggle
+        new_state = await soul.toggle_plan_mode_from_manual()
+        if new_state:
+            plan_path = soul.get_plan_file_path()
+            wire_send(
+                TextPart(
+                    text=f"Plan mode ON. Write your plan to: {plan_path}\n"
+                    "Use ExitPlanMode when done, or /plan off to exit manually."
+                )
+            )
+        else:
+            wire_send(TextPart(text="Plan mode OFF. All tools are now available."))
+        wire_send(StatusUpdate(plan_mode=soul.plan_mode))
+
+
+@registry.command(name="add-dir")
+async def add_dir(soul: ScreamSoul, args: str):
+    """添加目录到工作区。用法：/add-dir <路径>。无参数时列出已添加目录"""  # noqa: E501
+    from kaos.path import KaosPath
+
+    from scream.utils.path import is_within_directory, list_directory
+
+    args = sanitize_cli_path(args)
+    if not args:
+        if not soul.runtime.additional_dirs:
+            wire_send(TextPart(text="No additional directories. Usage: /add-dir <path>"))
+        else:
+            lines = ["Additional directories:"]
+            for d in soul.runtime.additional_dirs:
+                lines.append(f"  - {d}")
+            wire_send(TextPart(text="\n".join(lines)))
+        return
+
+    path = KaosPath(args).expanduser().canonical()
+
+    if not await path.exists():
+        wire_send(TextPart(text=f"Directory does not exist: {path}"))
+        return
+    if not await path.is_dir():
+        wire_send(TextPart(text=f"Not a directory: {path}"))
+        return
+
+    # Check if already added (exact match)
+    if path in soul.runtime.additional_dirs:
+        wire_send(TextPart(text=f"Directory already in workspace: {path}"))
+        return
+
+    # Check if it's within the work_dir (already accessible)
+    work_dir = soul.runtime.builtin_args.SCREAM_WORK_DIR
+    if is_within_directory(path, work_dir):
+        wire_send(TextPart(text=f"Directory is already within the working directory: {path}"))
+        return
+
+    # Check if it's within an already-added additional directory (redundant)
+    for existing in soul.runtime.additional_dirs:
+        if is_within_directory(path, existing):
+            wire_send(
+                TextPart(
+                    text=f"Directory is already within an added directory `{existing}`: {path}"
+                )
+            )
+            return
+
+    # Validate readability before committing any state changes
+    try:
+        ls_output = await list_directory(path)
+    except OSError as e:
+        wire_send(TextPart(text=f"Cannot read directory: {path} ({e})"))
+        return
+
+    # Add the directory (only after readability is confirmed)
+    soul.runtime.additional_dirs.append(path)
+
+    # Persist to session state
+    soul.runtime.session.state.additional_dirs.append(str(path))
+    soul.runtime.session.save_state()
+
+    # Inject a system message to inform the LLM about the new directory
+    system_message = system(
+        f"The user has added an additional directory to the workspace: `{path}`\n\n"
+        f"Directory listing:\n```\n{ls_output}\n```\n\n"
+        "You can now read, write, search, and glob files in this directory "
+        "as if it were part of the working directory."
+    )
+    await soul.context.append_message(Message(role="user", content=[system_message]))
+
+    wire_send(TextPart(text=f"Added directory to workspace: {path}"))
+    logger.info("Added additional directory: {path}", path=path)
+
+
+@registry.command
+async def export(soul: ScreamSoul, args: str):
+    """导出当前会话上下文到 markdown 文件"""
+    from scream.utils.export import perform_export
+
+    session = soul.runtime.session
+    result = await perform_export(
+        history=list(soul.context.history),
+        session_id=session.id,
+        work_dir=str(session.work_dir),
+        token_count=soul.context.token_count,
+        args=args,
+        default_dir=Path(str(session.work_dir)),
+    )
+    if isinstance(result, str):
+        wire_send(TextPart(text=result))
+        return
+    output, count = result
+    display = shorten_home(KaosPath(str(output)))
+    wire_send(TextPart(text=f"Exported {count} messages to {display}"))
+    wire_send(
+        TextPart(
+            text="  Note: The exported file may contain sensitive information. "
+            "Please be cautious when sharing it externally."
+        )
+    )
+
+
+@registry.command(name="import")
+async def import_context(soul: ScreamSoul, args: str):
+    """从文件或会话 ID 导入上下文"""
+    from scream.utils.export import perform_import
+
+    target = sanitize_cli_path(args)
+    if not target:
+        wire_send(TextPart(text="Usage: /import <file_path or session_id>"))
+        return
+
+    session = soul.runtime.session
+    raw_max_context_size = (
+        soul.runtime.llm.max_context_size if soul.runtime.llm is not None else None
+    )
+    max_context_size = (
+        raw_max_context_size
+        if isinstance(raw_max_context_size, int) and raw_max_context_size > 0
+        else None
+    )
+    result = await perform_import(
+        target=target,
+        current_session_id=session.id,
+        work_dir=session.work_dir,
+        context=soul.context,
+        max_context_size=max_context_size,
+    )
+    if isinstance(result, str):
+        wire_send(TextPart(text=result))
+        return
+
+    source_desc, content_len = result
+    wire_send(TextPart(text=f"Imported context from {source_desc} ({content_len} chars)."))
+    if source_desc.startswith("file") and is_sensitive_file(Path(target).name):
+        wire_send(
+            TextPart(
+                text="Warning: This file may contain secrets (API keys, tokens, credentials). "
+                "The content is now part of your session context."
+            )
+        )
+
+
+@registry.command
+async def memory(soul: ScreamSoul, args: str):
+    """记忆管理。用法：/memory add <内容> | list | search <关键词> | delete <ID>"""
+    mm = soul.memory_manager
+    parts = args.strip().split(None, 1)
+    subcmd = parts[0].lower() if parts else ""
+    rest = parts[1] if len(parts) > 1 else ""
+
+    if subcmd == "add":
+        if not rest:
+            wire_send(TextPart(text="用法: /memory add <内容>"))
+            return
+        entry = mm.add_entry(rest, scope="project")
+        wire_send(TextPart(text=f"已添加记忆 [{entry.id}]（项目级）"))
+        return
+
+    if subcmd == "list":
+        entries = mm.list_entries()
+        if not entries:
+            wire_send(TextPart(text="暂无记忆条目。"))
+            return
+        lines: list[str] = []
+        for e in entries:
+            scope_label = "项目" if e.source == "project" else "全局"
+            lines.append(f"[{e.id}] ({scope_label}) {e.content[:60]}{'...' if len(e.content) > 60 else ''}")
+        wire_send(TextPart(text="\n".join(lines)))
+        return
+
+    if subcmd == "search":
+        if not rest:
+            wire_send(TextPart(text="用法: /memory search <关键词>"))
+            return
+        entries = mm.find_relevant(rest, limit=5)
+        if not entries:
+            wire_send(TextPart(text="未找到相关记忆。"))
+            return
+        lines: list[str] = []
+        for e in entries:
+            scope_label = "项目" if e.source == "project" else "全局"
+            lines.append(f"[{e.id}] ({scope_label}) {e.content[:80]}{'...' if len(e.content) > 80 else ''}")
+        wire_send(TextPart(text="\n".join(lines)))
+        return
+
+    if subcmd == "delete":
+        if not rest:
+            wire_send(TextPart(text="用法: /memory delete <ID>"))
+            return
+        deleted = mm.remove_entry(rest.strip())
+        if deleted:
+            wire_send(TextPart(text=f"已删除记忆 [{rest.strip()}]"))
+        else:
+            wire_send(TextPart(text=f"未找到记忆 [{rest.strip()}]"))
+        return
+
+    # 默认显示帮助
+    wire_send(
+        TextPart(
+            text="记忆管理命令：\n"
+            "  /memory add <内容>     — 添加项目级记忆\n"
+            "  /memory list           — 列出所有记忆\n"
+            "  /memory search <关键词> — 搜索相关记忆\n"
+            "  /memory delete <ID>    — 删除指定记忆"
+        )
+    )

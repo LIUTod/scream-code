@@ -1,0 +1,22 @@
+version: 1
+agent:
+  extend: default
+  tools:
+    - "scream.tools.agent:Agent"
+    - "scream.tools.dmail:SendDMail"
+    - "scream.tools.ask_user:AskUserQuestion"
+    - "scream.tools.todo:SetTodoList"
+    - "scream.tools.shell:Shell"
+    - "scream.tools.background:TaskList"
+    - "scream.tools.background:TaskOutput"
+    - "scream.tools.background:TaskStop"
+    - "scream.tools.file:ReadFile"
+    - "scream.tools.file:ReadMediaFile"
+    - "scream.tools.file:Glob"
+    - "scream.tools.file:Grep"
+    - "scream.tools.file:WriteFile"
+    - "scream.tools.file:StrReplaceFile"
+    - "scream.tools.web:SearchWeb"
+    - "scream.tools.web:FetchURL"
+    - "scream.tools.plan:ExitPlanMode"
+    - "scream.tools.plan.enter:EnterPlanMode"

@@ -1,0 +1,36 @@
+version: 1
+agent:
+  name: ""
+  system_prompt_path: ./system.md
+  system_prompt_args:
+    ROLE_ADDITIONAL: ""
+  tools:
+    - "scream.tools.agent:Agent"
+    # - "scream.tools.dmail:SendDMail"
+    # - "scream.tools.think:Think"
+    - "scream.tools.ask_user:AskUserQuestion"
+    - "scream.tools.todo:SetTodoList"
+    - "scream.tools.shell:Shell"
+    - "scream.tools.background:TaskList"
+    - "scream.tools.background:TaskOutput"
+    - "scream.tools.background:TaskStop"
+    - "scream.tools.file:ReadFile"
+    - "scream.tools.file:ReadMediaFile"
+    - "scream.tools.file:Glob"
+    - "scream.tools.file:Grep"
+    - "scream.tools.file:WriteFile"
+    - "scream.tools.file:StrReplaceFile"
+    - "scream.tools.web:SearchWeb"
+    - "scream.tools.web:FetchURL"
+    - "scream.tools.plan:ExitPlanMode"
+    - "scream.tools.plan.enter:EnterPlanMode"
+  subagents:
+    coder:
+      path: ./coder.yaml
+      description: "Good at general software engineering tasks."
+    explore:
+      path: ./explore.yaml
+      description: "Fast codebase exploration with prompt-enforced read-only behavior."
+    plan:
+      path: ./plan.yaml
+      description: "Read-only implementation planning and architecture design."

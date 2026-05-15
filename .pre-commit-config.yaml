@@ -1,0 +1,16 @@
+default_install_hook_types:
+  - pre-commit
+
+repos:
+  - repo: local
+    hooks:
+      - id: make-format-scream-cli
+        name: make format-scream-cli
+        entry: make format-scream-cli
+        language: system
+        pass_filenames: false
+      - id: make-check-scream-cli
+        name: make check-scream-cli
+        entry: make check-scream-cli
+        language: system
+        pass_filenames: false

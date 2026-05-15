@@ -1,0 +1,263 @@
+from __future__ import annotations
+
+from typing import Any, Literal
+
+from ltod.utils.typing import JsonType
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    TypeAdapter,
+    field_serializer,
+    field_validator,
+    model_serializer,
+)
+
+from scream.wire.serde import serialize_wire_message
+from scream.wire.types import (
+    ContentPart,
+    Event,
+    Request,
+    is_event,
+    is_request,
+)
+
+
+class _MessageBase(BaseModel):
+    jsonrpc: Literal["2.0"] = "2.0"
+
+    model_config = ConfigDict(extra="ignore")
+
+
+class JSONRPCErrorObject(BaseModel):
+    code: int
+    message: str
+    data: JsonType | None = None
+
+
+class JSONRPCMessage(_MessageBase):
+    """The generic JSON-RPC message format used for validation."""
+
+    method: str | None = None
+    id: str | None = None
+    params: JsonType | None = None
+    result: JsonType | None = None
+    error: JSONRPCErrorObject | None = None
+
+    def method_is_inbound(self) -> bool:
+        return self.method in JSONRPC_IN_METHODS
+
+    def is_request(self) -> bool:
+        return self.method is not None and self.id is not None
+
+    def is_notification(self) -> bool:
+        return self.method is not None and self.id is None
+
+    def is_response(self) -> bool:
+        return self.method is None and self.id is not None
+
+
+class JSONRPCSuccessResponse(_MessageBase):
+    id: str
+    result: JsonType
+
+
+class JSONRPCErrorResponse(_MessageBase):
+    id: str
+    error: JSONRPCErrorObject
+
+
+class JSONRPCErrorResponseNullableID(_MessageBase):
+    id: str | None
+    error: JSONRPCErrorObject
+
+
+class ClientInfo(BaseModel):
+    name: str
+    version: str | None = None
+
+
+class ExternalTool(BaseModel):
+    name: str
+    description: str
+    parameters: dict[str, JsonType]
+
+
+class ClientCapabilities(BaseModel):
+    """Capabilities declared by the Wire client during initialization."""
+
+    supports_question: bool = False
+    """Whether the client can handle QuestionRequest messages."""
+    supports_plan_mode: bool = False
+    """Whether the client supports plan mode (EnterPlanMode / ExitPlanMode)."""
+
+
+class WireHookSubscription(BaseModel):
+    """Hook event subscription from the wire client."""
+
+    id: str
+    """Unique subscription ID — referenced in HookRequest."""
+    event: str
+    """Which event to subscribe to."""
+    matcher: str = ""
+    """Regex filter. Empty matches everything."""
+    timeout: int = 30
+    """Seconds to wait for client response."""
+
+
+class JSONRPCInitializeMessage(_MessageBase):
+    class Params(BaseModel):
+        protocol_version: str
+        client: ClientInfo | None = None
+        external_tools: list[ExternalTool] | None = None
+        hooks: list[WireHookSubscription] | None = None
+        capabilities: ClientCapabilities | None = None
+
+    method: Literal["initialize"] = "initialize"
+    id: str
+    params: Params
+
+
+class JSONRPCPromptMessage(_MessageBase):
+    class Params(BaseModel):
+        user_input: str | list[ContentPart]
+
+    method: Literal["prompt"] = "prompt"
+    id: str
+    params: Params
+
+    @model_serializer()
+    def _serialize(self) -> dict[str, Any]:
+        raise NotImplementedError("Prompt message serialization is not implemented.")
+
+
+class JSONRPCReplayMessage(_MessageBase):
+    method: Literal["replay"] = "replay"
+    id: str
+    params: JsonType | None = None
+
+
+class JSONRPCSteerMessage(_MessageBase):
+    class Params(BaseModel):
+        user_input: str | list[ContentPart]
+
+    method: Literal["steer"] = "steer"
+    id: str
+    params: Params
+
+    @model_serializer()
+    def _serialize(self) -> dict[str, Any]:
+        raise NotImplementedError("Steer message serialization is not implemented.")
+
+
+class _SetPlanModeParams(BaseModel):
+    enabled: bool
+
+    model_config = ConfigDict(extra="ignore")
+
+
+class JSONRPCSetPlanModeMessage(_MessageBase):
+    method: Literal["set_plan_mode"] = "set_plan_mode"
+    id: str
+    params: _SetPlanModeParams
+
+
+class JSONRPCCancelMessage(_MessageBase):
+    method: Literal["cancel"] = "cancel"
+    id: str
+    params: JsonType | None = None
+
+    @model_serializer()
+    def _serialize(self) -> dict[str, Any]:
+        raise NotImplementedError("Cancel message serialization is not implemented.")
+
+
+class JSONRPCEventMessage(_MessageBase):
+    method: Literal["event"] = "event"
+    params: Event
+
+    @field_serializer("params")
+    def _serialize_params(self, params: Event) -> dict[str, JsonType]:
+        return serialize_wire_message(params)
+
+    @field_validator("params", mode="before")
+    @classmethod
+    def _validate_params(cls, value: Any) -> Event:
+        if is_event(value):
+            return value
+        raise NotImplementedError("Event message deserialization is not implemented.")
+
+
+class JSONRPCRequestMessage(_MessageBase):
+    method: Literal["request"] = "request"
+    id: str
+    params: Request
+
+    @field_serializer("params")
+    def _serialize_params(self, params: Request) -> dict[str, JsonType]:
+        return serialize_wire_message(params)
+
+    @field_validator("params", mode="before")
+    @classmethod
+    def _validate_params(cls, value: Any) -> Request:
+        if is_request(value):
+            return value
+        raise NotImplementedError("Request message deserialization is not implemented.")
+
+
+type JSONRPCInMessage = (
+    JSONRPCSuccessResponse
+    | JSONRPCErrorResponse
+    | JSONRPCInitializeMessage
+    | JSONRPCPromptMessage
+    | JSONRPCSteerMessage
+    | JSONRPCReplayMessage
+    | JSONRPCSetPlanModeMessage
+    | JSONRPCCancelMessage
+)
+JSONRPCInMessageAdapter = TypeAdapter[JSONRPCInMessage](JSONRPCInMessage)
+JSONRPC_IN_METHODS = {"initialize", "prompt", "steer", "replay", "set_plan_mode", "cancel"}
+
+type JSONRPCOutMessage = (
+    JSONRPCSuccessResponse
+    | JSONRPCErrorResponse
+    | JSONRPCErrorResponseNullableID
+    | JSONRPCEventMessage
+    | JSONRPCRequestMessage
+)
+JSONRPC_OUT_METHODS = {"event", "request"}
+
+
+class ErrorCodes:
+    # Predefined JSON-RPC 2.0 error codes
+    PARSE_ERROR = -32700
+    """Invalid JSON was received by the server."""
+    INVALID_REQUEST = -32600
+    """The JSON sent is not a valid Request object."""
+    METHOD_NOT_FOUND = -32601
+    """The method does not exist / is not available."""
+    INVALID_PARAMS = -32602
+    """Invalid method parameter(s)."""
+    INTERNAL_ERROR = -32603
+    """Internal JSON-RPC error."""
+
+    INVALID_STATE = -32000
+    """The server is in an invalid state to process the request."""
+    LLM_NOT_SET = -32001
+    """The LLM is not set."""
+    LLM_NOT_SUPPORTED = -32002
+    """The specified LLM is not supported."""
+    CHAT_PROVIDER_ERROR = -32003
+    """There was an error from the chat provider."""
+    AUTH_EXPIRED = -32004
+    """Authentication has expired; user should re-login."""
+
+
+class Statuses:
+    FINISHED = "finished"
+    """The agent run has finished successfully."""
+    CANCELLED = "cancelled"
+    """The agent run was cancelled by the user."""
+    MAX_STEPS_REACHED = "max_steps_reached"
+    """The agent run reached the maximum number of steps."""
+    STEERED = "steered"
+    """A steer message was queued for injection into the active turn."""
