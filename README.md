@@ -21,19 +21,30 @@
 
 ### 第一步：安装
 
+**macOS / Linux** — 打开终端，复制粘贴下面这行命令：
+
 ```bash
-# 克隆仓库
-git clone https://github.com/LIUTod/scream-code.git
-cd scream-code
-
-# 安装依赖（需要 Python 3.12+ 和 uv）
-make prepare
-
-# 或者使用 pip
-pip install -e .
+curl -fsSL https://raw.githubusercontent.com/LIUTod/scream-code/main/install.sh | bash
 ```
 
-> **Windows 用户注意**：如果没有 `make`，直接运行 `uv sync --all-packages` 即可。
+**Windows** — 打开 PowerShell，复制粘贴下面这行命令：
+
+```powershell
+irm https://raw.githubusercontent.com/LIUTod/scream-code/main/install.ps1 | iex
+```
+
+脚本会自动完成以下所有步骤，无需你手动干预：
+
+1. **检测并安装 uv**（Python 包管理器）—— 如果系统中没有 uv，脚本会自动下载安装
+2. **检测并安装 Python** —— uv 会自动下载兼容的 Python 版本（>=3.12）
+3. **安装 scream-code** —— 从 GitHub 拉取最新版本并安装所有依赖
+4. **注册命令** —— 将 `scream` 命令添加到系统路径
+
+首次安装可能需要 2-5 分钟（取决于网络速度），请耐心等待。安装完成后，脚本会提示你如何启动。
+
+> **Windows 用户注意**：如果 PowerShell 提示执行策略限制，请先在管理员 PowerShell 中运行 `Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser`，然后再执行上面的安装命令。
+>
+> **手动安装**：如果你不想用一键脚本，也可以 `git clone` 后用 `make prepare`（或 Windows 上 `uv sync --all-packages`）进行源码安装。
 
 ### 第二步：启动并配置 AI 服务
 
@@ -125,10 +136,14 @@ scream -C
 | `/model` | 切换当前使用的模型，或删除不再使用的模型 |
 | `/yolo` | 切换"大胆模式" —— 自动批准所有操作（适合信任的任务） |
 | `/plan` | 进入计划模式 —— 先制定方案，不执行任何修改 |
-| `/memory add 我喜欢用单引号` | 告诉它你的偏好，它会记住 |
-| `/memory list` | 查看它记住了什么 |
+| `/memory add <内容>` | 添加一条长期记忆 |
+| `/memory list [short|long|global|all]` | 查看记忆（默认显示全部） |
 | `/memory search <关键词>` | 搜索相关记忆 |
+| `/memory get <ID>` | 查看单条记忆完整内容 |
+| `/memory keep <ID>` | 将短期记忆转为长期记忆 |
 | `/memory delete <ID>` | 删除指定记忆 |
+| `/memory toggle` | 开启/关闭自动记忆（当前会话） |
+| `/memory status` | 查看记忆统计和自动记忆开关状态 |
 | `/compact` | 聊天记录太长时压缩上下文 |
 | `/clear` | 清空当前对话 |
 | `/export` | 导出整个对话为 Markdown 文件 |
@@ -151,7 +166,7 @@ scream -C
 - **对话式编程** —— 用自然语言描述需求，它自动写代码、改文件、跑命令
 - **安全第一** —— 修改文件前必须征得同意，`.env` 等敏感文件默认禁止操作
 - **权限引擎** —— 精细控制它能做什么（读取/写入/执行），防止误操作
-- **记忆系统** —— 记住你的编码偏好，跨会话保持上下文
+- **三层记忆系统** —— 自动总结对话保存为 48 小时短期记忆，超时自动清理；可手动 `keep` 升级为长期记忆；全局记忆跨项目共享
 - **会话恢复** —— 随时中断，随时继续，对话历史自动保存
 - **多模式** —— 交互模式、静默模式、计划模式、后台任务模式
 - **MCP 扩展** —— 连接外部工具（数据库、浏览器、API 等）
@@ -223,6 +238,8 @@ description: 触发条件描述，Scream 会根据描述决定何时调用此 Sk
 | `default_yolo` | `false` | 默认自动批准所有操作 |
 | `theme` | `"dark"` | 终端主题（`dark`/`light`） |
 | `telemetry` | `true` | 匿名使用数据上报（可关闭） |
+| `auto_memory` | `true` | 是否开启自动记忆（每次对话后自动总结保存） |
+| `short_term_ttl_hours` | `48` | 短期记忆自动清理时间（小时） |
 
 ---
 ## 碎碎念
@@ -230,7 +247,7 @@ description: 触发条件描述，Scream 会根据描述决定何时调用此 Sk
 **核心设计决策**：
 - PermissionEngine 在审批 UI 之前做前置过滤，yolo/afk 始终优先
 - Memory 使用 DynamicInjectionProvider 模式，不修改系统 prompt 模板
-- 双作用域记忆：project 级随项目走，global 级跨项目共享
+- 三层记忆架构：短期记忆（48h TTL 自动清理）、长期记忆（手动保留）、全局记忆（跨项目共享）
 - 汉化只改用户可见字符串，内部协议字段保持英文
 
 ---

@@ -241,6 +241,21 @@ class BtwEnd(BaseModel):
     """Error message if the side question failed."""
 
 
+class MemorySaved(BaseModel):
+    """Indicates that an automatic memory has been saved after a turn."""
+
+    title: str
+    """Short title of the saved memory."""
+    content: str
+    """Summarized content of the memory."""
+    entry_id: str
+    """The ID of the memory entry."""
+    is_short_term: bool = True
+    """Whether this entry was saved to short-term memory."""
+    source: str = "short-term"
+    """Memory scope: short-term, long-term, or global."""
+
+
 class SubagentEvent(BaseModel):
     """
     An event from a subagent.
@@ -539,6 +554,7 @@ type Event = (
     | PlanDisplay
     | BtwBegin
     | BtwEnd
+    | MemorySaved
 )
 """Any event, including control flow and content/tooling events."""
 
@@ -688,6 +704,7 @@ __all__ = [
     "PlanDisplay",
     "BtwBegin",
     "BtwEnd",
+    "MemorySaved",
     "ApprovalRequest",
     "ToolCallRequest",
     "QuestionOption",

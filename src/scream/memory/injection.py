@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import deque
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
@@ -15,10 +16,13 @@ if TYPE_CHECKING:
 class MemoryInjectionProvider(DynamicInjectionProvider):
     """记忆注入提供器 — 在每次 LLM 调用前注入相关记忆。"""
 
+    _MAX_INJECTED_IDS = 100
+
     def __init__(self, memory_manager: MemoryManager) -> None:
         self._memory_manager = memory_manager
         self._last_query = ""
-        self._last_injected_ids: set[str] = set()
+        # Use deque with maxlen for LRU: oldest IDs are dropped automatically
+        self._last_injected_ids: deque[str] = deque(maxlen=self._MAX_INJECTED_IDS)
 
     async def get_injections(
         self,
@@ -43,7 +47,7 @@ class MemoryInjectionProvider(DynamicInjectionProvider):
         for entry in relevant:
             if entry.id in self._last_injected_ids:
                 continue
-            self._last_injected_ids.add(entry.id)
+            self._last_injected_ids.append(entry.id)
             injections.append(
                 DynamicInjection(
                     type="memory",
@@ -69,5 +73,9 @@ class MemoryInjectionProvider(DynamicInjectionProvider):
                         text_parts.append(part.text)
                     elif isinstance(part, str):
                         text_parts.append(part)
-                return " ".join(text_parts)
+                text = " ".join(text_parts).strip()
+                # 跳过动态注入的消息（如 [记忆] 提醒），避免提取到非用户查询
+                if text.startswith("[记忆]"):
+                    continue
+                return text
         return ""

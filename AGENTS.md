@@ -191,33 +191,53 @@ shell UI, ACP server mode for IDE integrations, and MCP tool loading.
 
 ## Memory System design
 
-`src/scream/memory/` provides dual-scope persistent memory with injection into LLM context.
+`src/scream/memory/` provides a three-tier persistent memory system with automatic
+summarization, TTL-based cleanup, and injection into LLM context.
 
 - **Storage format**: each entry is a `.md` file with JSON frontmatter:
   ```markdown
   ---
-  {"tags": ["偏好"], "created_at": "...", "updated_at": "..."}
+  {"tags": ["偏好"], "created_at": "...", "updated_at": "...", "expires_at": "..."}
   ---
   内容...
   ```
+  - `expires_at` is present only on short-term entries.
   - Backward compatible with plain `.md` files (no frontmatter → empty tags).
   - `MEMORY.md` index is auto-generated in each scope directory.
-- **Dual scope**:
-  - **Project**: `{work_dir}/.scream/memory/` — tied to the current project.
+- **Three-tier scope**:
+  - **Short-term**: `{work_dir}/.scream/memory/short-term/` — auto-saved memories with a
+    configurable TTL (default 48h). Expired entries are cleaned up on session start.
+  - **Long-term**: `{work_dir}/.scream/memory/long-term/` — manually promoted or explicitly
+    saved memories. Persist indefinitely.
   - **Global**: `~/.scream/memory/` — shared across all projects.
-- **Search**: `MemoryManager.find_relevant(query, limit=5)` uses token-based keyword matching
-  with Chinese single-character tokens and English word tokens (2+ chars).
+  - **Backward compatibility**: on startup, legacy `.md` files directly under
+    `{work_dir}/.scream/memory/` are automatically migrated to `long-term/`.
+- **Auto-memory** (`src/scream/memory/summarizer.py` + `screamsoul.py`):
+  - Triggered after every `TurnEnd` (fire-and-forget background task).
+  - LLM summarizes the turn into `{title, content, tags}` JSON.
+  - Jaccard similarity deduplication against existing short-term entries (threshold 0.75).
+  - Saved to `short-term/` with `expires_at = now + ttl_hours`.
+  - Emits `MemorySaved` wire event; UI shows `💾 48小时短期记忆已保存`.
+  - Input truncation: conversations >4000 chars are head/tail truncated before summarization.
+  - Can be disabled via `auto_memory = false` in config or `/memory off` at runtime.
+- **Search**: `MemoryManager.find_relevant(query, limit=5, search_scope="all")` uses
+  token-based keyword matching with Chinese single-character tokens and English word
+  tokens (2+ chars). Searches across short-term, long-term, and global.
 - **Injection** (`MemoryInjectionProvider`):
   - Implements `DynamicInjectionProvider` (same pattern as plan mode / afk mode injections).
   - Runs before each LLM call, extracts the latest user query from history.
   - Finds up to 3 relevant memories and injects them as `[记忆] content` reminders.
   - Deduplicates across identical short queries; resets on context compaction.
+  - `_last_injected_ids` is capped at 100 entries to prevent unbounded growth.
   - Registered in `ScreamSoul._injection_providers` alongside other providers.
 - **Slash commands** (`/memory` in `src/scream/soul/slash.py`):
-  - `add <content>` — create project-scoped entry.
-  - `list` — show all entries with scope labels.
-  - `search <keyword>` — keyword search across both scopes.
-  - `delete <id>` — remove by entry ID.
+  - `list [short|long|global|all]` — list entries by scope (default `all`).
+  - `search <keyword>` — keyword search across all scopes.
+  - `get <id>` — show full content of a single entry.
+  - `keep <id>` — promote a short-term entry to long-term.
+  - `delete <id>` — remove by entry ID (searches all scopes).
+  - `toggle | on | off` — enable/disable auto-memory for the current session.
+  - `status` — show auto-memory state and entry counts per scope.
 
 ## Git commit messages
 

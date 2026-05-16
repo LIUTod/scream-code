@@ -343,30 +343,38 @@ async def import_context(soul: ScreamSoul, args: str):
 
 @registry.command
 async def memory(soul: ScreamSoul, args: str):
-    """记忆管理。用法：/memory add <内容> | list | search <关键词> | delete <ID>"""
+    """记忆管理。用法：/memory list [short|long|global|all] | search <关键词>
+    | get <ID> | keep <ID> | delete <ID>"""
     mm = soul.memory_manager
     parts = args.strip().split(None, 1)
     subcmd = parts[0].lower() if parts else ""
     rest = parts[1] if len(parts) > 1 else ""
+
+    def _source_label(source: str) -> str:
+        return {"short-term": "短期", "long-term": "长期", "global": "全局"}.get(
+            source, source
+        )
 
     if subcmd == "add":
         if not rest:
             wire_send(TextPart(text="用法: /memory add <内容>"))
             return
         entry = mm.add_entry(rest, scope="project")
-        wire_send(TextPart(text=f"已添加记忆 [{entry.id}]（项目级）"))
+        wire_send(TextPart(text=f"已添加记忆 [{entry.id}]（长期）"))
         return
 
     if subcmd == "list":
-        entries = mm.list_entries()
+        filter_type = rest.lower() if rest else "all"
+        if filter_type not in ("short", "long", "global", "all"):
+            filter_type = "all"
+        entries = mm.list_entries(filter=filter_type)
         if not entries:
             wire_send(TextPart(text="暂无记忆条目。"))
             return
-        lines: list[str] = []
+        lines: list[str] = [f"共 {len(entries)} 条记忆：", ""]
         for e in entries:
-            scope_label = "项目" if e.source == "project" else "全局"
             suffix = "..." if len(e.content) > 60 else ""
-            lines.append(f"[{e.id}] ({scope_label}) {e.content[:60]}{suffix}")
+            lines.append(f"[{_source_label(e.source)}] [{e.id}] {e.content[:60]}{suffix}")
         wire_send(TextPart(text="\n".join(lines)))
         return
 
@@ -374,16 +382,42 @@ async def memory(soul: ScreamSoul, args: str):
         if not rest:
             wire_send(TextPart(text="用法: /memory search <关键词>"))
             return
-        entries = mm.find_relevant(rest, limit=5)
+        entries = mm.find_relevant(rest, limit=10, search_scope="all")
         if not entries:
             wire_send(TextPart(text="未找到相关记忆。"))
             return
-        lines: list[str] = []
+        lines: list[str] = [f"找到 {len(entries)} 条相关记忆：", ""]
         for e in entries:
-            scope_label = "项目" if e.source == "project" else "全局"
             suffix = "..." if len(e.content) > 80 else ""
-            lines.append(f"[{e.id}] ({scope_label}) {e.content[:80]}{suffix}")
+            lines.append(f"[{_source_label(e.source)}] [{e.id}] {e.content[:80]}{suffix}")
         wire_send(TextPart(text="\n".join(lines)))
+        return
+
+    if subcmd == "get":
+        if not rest:
+            wire_send(TextPart(text="用法: /memory get <ID>"))
+            return
+        for e in mm.list_entries(filter="all"):
+            if e.id == rest.strip():
+                tags = f"\n标签: {', '.join(e.tags)}" if e.tags else ""
+                wire_send(
+                    TextPart(
+                        text=f"[{_source_label(e.source)}] [{e.id}]{tags}\n\n{e.content}"
+                    )
+                )
+                return
+        wire_send(TextPart(text=f"未找到记忆 [{rest.strip()}]"))
+        return
+
+    if subcmd == "keep":
+        if not rest:
+            wire_send(TextPart(text="用法: /memory keep <ID>"))
+            return
+        entry = mm.promote_to_long_term(rest.strip())
+        if entry is not None:
+            wire_send(TextPart(text=f"已将短期记忆 [{entry.id}] 转为长期记忆。"))
+        else:
+            wire_send(TextPart(text=f"未找到短期记忆 [{rest.strip()}]"))
         return
 
     if subcmd == "delete":
@@ -397,13 +431,47 @@ async def memory(soul: ScreamSoul, args: str):
             wire_send(TextPart(text=f"未找到记忆 [{rest.strip()}]"))
         return
 
+    if subcmd in ("toggle", "on", "off"):
+        cfg = soul.runtime.config
+        if subcmd == "on":
+            cfg.auto_memory = True
+        elif subcmd == "off":
+            cfg.auto_memory = False
+        else:
+            cfg.auto_memory = not cfg.auto_memory
+        state = "开启" if cfg.auto_memory else "关闭"
+        wire_send(TextPart(text=f"自动记忆已{state}（当前会话有效，重启后恢复配置默认值）"))
+        return
+
+    if subcmd == "status":
+        cfg = soul.runtime.config
+        short_count = len(mm.list_entries(filter="short"))
+        long_count = len(mm.list_entries(filter="long"))
+        global_count = len(mm.list_entries(filter="global"))
+        auto_state = "开启" if cfg.auto_memory else "关闭"
+        ttl = cfg.short_term_ttl_hours
+        wire_send(
+            TextPart(
+                text=f"记忆状态：\n"
+                f"  自动记忆: {auto_state}\n"
+                f"  短期记忆: {short_count} 条（{ttl}小时后过期自动清理）\n"
+                f"  长期记忆: {long_count} 条\n"
+                f"  全局记忆: {global_count} 条"
+            )
+        )
+        return
+
     # 默认显示帮助
     wire_send(
         TextPart(
             text="记忆管理命令：\n"
-            "  /memory add <内容>     — 添加项目级记忆\n"
-            "  /memory list           — 列出所有记忆\n"
-            "  /memory search <关键词> — 搜索相关记忆\n"
-            "  /memory delete <ID>    — 删除指定记忆"
+            "  /memory add <内容>                      — 添加长期记忆\n"
+            "  /memory list [short|long|global|all]  — 列出记忆（默认all）\n"
+            "  /memory search <关键词>                — 搜索所有记忆\n"
+            "  /memory get <ID>                       — 查看记忆详情\n"
+            "  /memory keep <ID>                      — 短期记忆转长期\n"
+            "  /memory delete <ID>                    — 删除指定记忆\n"
+            "  /memory toggle | on | off               — 切换自动记忆开关\n"
+            "  /memory status                          — 查看记忆统计"
         )
     )

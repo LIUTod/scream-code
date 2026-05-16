@@ -250,6 +250,21 @@ class Config(BaseModel):
             "Missing paths are silently skipped."
         ),
     )
+    auto_memory: bool = Field(
+        default=True,
+        description=(
+            "Automatically summarize and save turn context to memory after each turn. "
+            "Set to false to disable."
+        ),
+    )
+    short_term_ttl_hours: int = Field(
+        default=48,
+        ge=1,
+        description=(
+            "Hours before short-term memory entries expire and are auto-deleted. "
+            "Default is 48 hours."
+        ),
+    )
     telemetry: bool = Field(
         default=True,
         description="Enable anonymous telemetry. Set to false to disable.",

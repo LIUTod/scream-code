@@ -5,7 +5,7 @@ from collections.abc import Awaitable, Callable, Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
-from prompt_toolkit.shortcuts import input_dialog
+from prompt_toolkit.shortcuts import PromptSession
 from prompt_toolkit.shortcuts.choice_input import ChoiceInput
 
 from scream import logger
@@ -415,27 +415,21 @@ async def config(app: Shell, args: str) -> None:
 
     # Step 1: API URL
     try:
-        base_url_result = await input_dialog(
-            title="API 地址",
-            text="请输入 API Base URL（默认 Anthropic 官方地址）：",
+        base_url_result = await PromptSession("API 地址 > ").prompt_async(
             default="https://api.anthropic.com/v1",
-        ).run_async()
+        )
     except (EOFError, KeyboardInterrupt):
         return
-    if base_url_result is None:  # type: ignore[reportUnnecessaryComparison]
+    if base_url_result is None:
         return
     base_url = base_url_result.strip() or "https://api.anthropic.com/v1"
 
     # Step 2: API Key
     try:
-        api_key_result = await input_dialog(
-            title="API Key",
-            text="请输入 API Key：",
-            password=False,
-        ).run_async()
+        api_key_result = await PromptSession("API Key > ").prompt_async()
     except (EOFError, KeyboardInterrupt):
         return
-    if api_key_result is None:  # type: ignore[reportUnnecessaryComparison]
+    if api_key_result is None:
         return
     api_key = api_key_result.strip()
     if not api_key:
@@ -444,40 +438,34 @@ async def config(app: Shell, args: str) -> None:
 
     # Step 3: 模型型号
     try:
-        model_name_result = await input_dialog(
-            title="模型型号",
-            text="请输入模型型号（如 claude-sonnet-4-6）：",
+        model_name_result = await PromptSession("模型型号 > ").prompt_async(
             default="claude-sonnet-4-6",
-        ).run_async()
+        )
     except (EOFError, KeyboardInterrupt):
         return
-    if model_name_result is None:  # type: ignore[reportUnnecessaryComparison]
+    if model_name_result is None:
         return
     model_name = model_name_result.strip() or "claude-sonnet-4-6"
 
     # Step 4: Provider 名称
     try:
-        provider_name_result = await input_dialog(
-            title="Provider 名称",
-            text="请输入 Provider 别名（用于区分不同服务商）：",
+        provider_name_result = await PromptSession("Provider 名称 > ").prompt_async(
             default="anthropic",
-        ).run_async()
+        )
     except (EOFError, KeyboardInterrupt):
         return
-    if provider_name_result is None:  # type: ignore[reportUnnecessaryComparison]
+    if provider_name_result is None:
         return
     provider_name = provider_name_result.strip() or "anthropic"
 
     # Step 5: Model 别名
     try:
-        model_key_result = await input_dialog(
-            title="Model 别名",
-            text="请输入 Model 别名（用于 /model 切换时显示）：",
+        model_key_result = await PromptSession("Model 别名 > ").prompt_async(
             default="default",
-        ).run_async()
+        )
     except (EOFError, KeyboardInterrupt):
         return
-    if model_key_result is None:  # type: ignore[reportUnnecessaryComparison]
+    if model_key_result is None:
         return
     model_key = model_key_result.strip() or "default"
 

@@ -56,6 +56,7 @@ from scream.wire.types import (
     ContentPart,
     MCPLoadingBegin,
     MCPLoadingEnd,
+    MemorySaved,
     Notification,
     PlanDisplay,
     QuestionRequest,
@@ -452,6 +453,14 @@ class _LiveView:
                 console.print()
             case TurnEnd():
                 self._active_turn_depth = max(0, self._active_turn_depth - 1)
+            case MemorySaved(title=title, entry_id=entry_id, is_short_term=is_st):
+                label = "48小时短期记忆已保存" if is_st else "记忆已记录至长期记忆库"
+                console.print(
+                    Text(
+                        f"💾 {label}: {title} [{entry_id}]",
+                        style="grey50 italic",
+                    )
+                )
             case CompactionBegin():
                 self._compacting_spinner = Spinner("balloon", "Compacting...")
                 self.refresh_soon()

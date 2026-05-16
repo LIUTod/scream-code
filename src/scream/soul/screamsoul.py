@@ -32,6 +32,7 @@ from scream.hooks.engine import HookEngine
 from scream.llm import ModelCapability
 from scream.memory import MemoryManager
 from scream.memory.injection import MemoryInjectionProvider
+from scream.memory.summarizer import auto_save_turn
 from scream.notifications import (
     NotificationView,
     build_notification_message,
@@ -76,6 +77,7 @@ from scream.wire.types import (
     ContentPart,
     MCPLoadingBegin,
     MCPLoadingEnd,
+    MemorySaved,
     StatusUpdate,
     SteerInput,
     StepBegin,
@@ -191,6 +193,7 @@ class ScreamSoul:
         self._steer_queue: asyncio.Queue[str | list[ContentPart]] = asyncio.Queue()
         self._last_tool_calls: list[tuple[str, str]] = []
         self._session_tokens_used: int = 0
+        self._last_turn_start_index: int = 0
         self._plan_mode: bool = self._runtime.session.state.plan_mode
         self._plan_session_id: str | None = self._runtime.session.state.plan_session_id
         self._current_turn_id: str = ""
@@ -208,7 +211,15 @@ class ScreamSoul:
         self._memory_manager = MemoryManager(
             work_dir=Path(str(self._runtime.session.work_dir)),
             share_dir=get_share_dir(),
+            ttl_hours=self._runtime.config.short_term_ttl_hours,
         )
+        self._memory_reviewer = None
+        try:
+            from scream.memory.reviewer import MemoryReviewer
+
+            self._memory_reviewer = MemoryReviewer(self._memory_manager)
+        except Exception:
+            logger.debug("MemoryReviewer initialization failed, skipping")
         self._injection_providers: list[DynamicInjectionProvider] = [
             PlanModeInjectionProvider(),
             *(
@@ -285,6 +296,10 @@ class ScreamSoul:
     @property
     def memory_manager(self) -> MemoryManager:
         return self._memory_manager
+
+    @property
+    def memory_reviewer(self) -> object | None:
+        return self._memory_reviewer
 
     def set_hook_engine(self, engine: HookEngine) -> None:
         self._hook_engine = engine
@@ -686,6 +701,23 @@ class ScreamSoul:
             wire_send(TurnEnd())
             turn_finished = True
 
+            # --- Auto-memory after turn ---
+            if (
+                not command_call
+                and self._runtime.config.auto_memory
+                and self._runtime.llm is not None
+            ):
+                _raw_messages = list(self._context.history)[self._last_turn_start_index:]
+                # Deep copy to avoid compaction races in the background task
+                turn_messages = [
+                    msg.model_copy(deep=True) for msg in _raw_messages
+                ]
+                # Fire-and-forget: don't block the shell on memory summarization
+                asyncio.create_task(
+                    self._auto_save_memory(turn_messages),
+                    name="auto-memory",
+                )
+
             # Auto-set title after first real turn (skip slash commands)
             if not command_call:
                 session = self._runtime.session
@@ -727,6 +759,38 @@ class ScreamSoul:
             if approval_source_token is not None:
                 reset_current_approval_source(approval_source_token)
 
+    async def _auto_save_memory(
+        self, turn_messages: Sequence[Message]
+    ) -> None:
+        """Background task: summarize turn and save to memory."""
+        try:
+            llm = self._runtime.llm
+            if llm is None:
+                return
+            entry = await auto_save_turn(
+                llm.chat_provider,
+                self._memory_manager,
+                turn_messages,
+            )
+            if entry is not None:
+                # Extract title from content (format: "## title\n\ncontent")
+                title = entry.content
+                if title.startswith("## "):
+                    title = title[3:].split("\n", 1)[0].strip()
+                wire_send(
+                    MemorySaved(
+                        title=title,
+                        content=entry.content,
+                        entry_id=entry.id,
+                        is_short_term=(entry.source == "short-term"),
+                        source=entry.source,
+                    )
+                )
+        except (TimeoutError, APIConnectionError, APITimeoutError):
+            logger.debug("Auto-memory skipped: LLM unavailable")
+        except Exception:
+            logger.exception("Auto-memory save failed unexpectedly")
+
     async def _turn(self, user_message: Message) -> TurnOutcome:
         if self._runtime.llm is None:
             raise LLMNotSet()
@@ -736,6 +800,7 @@ class ScreamSoul:
 
         self._current_turn_id = uuid.uuid4().hex
         self._last_tool_calls = []
+        self._last_turn_start_index = len(self._context.history)
         await self._checkpoint()  # this creates the checkpoint 0 on first run
         await self._context.append_message(user_message)
         logger.debug("Appended user message to context")
