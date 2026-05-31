@@ -6,11 +6,7 @@
   "access": "public",
   "baseBranch": "main",
   "updateInternalDependencies": "patch",
-  "ignore": [
-    "@scream-cli/vis",
-    "@scream-cli/vis-server",
-    "@scream-cli/vis-web"
-  ],
+  "ignore": [],
   "snapshot": {
     "useCalculatedVersion": true,
     "prereleaseTemplate": "{tag}-{commit}"
