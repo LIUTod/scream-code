@@ -149,22 +149,22 @@ Working on auth module
   });
 
   it('returns empty for {"none": true}', () => {
-    const text = '\`\`\`memory-memo\n{"none": true}\n\`\`\`';
+    const text = '```memory-memo\n{"none": true}\n```';
     expect(parseMemoryMemos(text).length).toBe(0);
   });
 
   it('skips malformed JSON blocks', () => {
-    const text = '\`\`\`memory-memo\n{not valid json}\n\`\`\`';
+    const text = '```memory-memo\n{not valid json}\n```';
     expect(parseMemoryMemos(text).length).toBe(0);
   });
 
   it('skips blocks without userRequirement', () => {
-    const text = '\`\`\`memory-memo\n{"solution": "something"}\n\`\`\`';
+    const text = '```memory-memo\n{"solution": "something"}\n```';
     expect(parseMemoryMemos(text).length).toBe(0);
   });
 
   it('normalizes completion status values', () => {
-    const text = '\`\`\`memory-memo\n{"userRequirement": "test", "solution": "x", "completionStatus": "completed", "problemsEncountered": "none"}\n\`\`\`';
+    const text = '```memory-memo\n{"userRequirement": "test", "solution": "x", "completionStatus": "completed", "problemsEncountered": "none"}\n```';
     const memos = parseMemoryMemos(text);
     expect(memos[0]!.completionStatus).toBe('done');
   });

@@ -86,10 +86,13 @@ describe('built-in slash command registry', () => {
         'export-debug-zip',
         'export-md',
         'fork',
+        'goal',
+        'goaloff',
         'help',
         'init',
         'logout',
         'mcp',
+        'memory',
         'model',
         'new',
         'permission',
@@ -102,7 +105,7 @@ describe('built-in slash command registry', () => {
         'title',
         'usage',
         'version',
-        'yolo',
+        'yes',
       ]),
     );
   });

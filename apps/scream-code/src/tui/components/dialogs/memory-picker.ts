@@ -24,9 +24,8 @@ import {
 import chalk from 'chalk';
 
 import type { MemoryMemo, MemoryMemoSummary } from '@scream-cli/memory';
-import { MemoryMemoStore, resolveProjectDir } from '@scream-cli/memory';
+import { MemoryMemoStore } from '@scream-cli/memory';
 
-import { getDataDir } from '#/utils/paths';
 import type { ColorPalette } from '#/tui/theme/colors';
 import { printableChar } from '#/tui/utils/printable-key';
 
@@ -248,9 +247,6 @@ export class MemoryPickerComponent extends Container implements Focusable {
     }
 
     // Header
-    const searchBadge = this.searchQuery.length > 0
-      ? ` — 搜索: "${this.searchQuery}"`
-      : '';
     const headerLabel = '记忆备忘录 ';
     const headerHint = this.searchQuery.length > 0
       ? '(Esc 清除搜索)'

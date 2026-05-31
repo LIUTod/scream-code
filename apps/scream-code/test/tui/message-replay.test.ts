@@ -489,8 +489,8 @@ describe('ScreamTUI resume message replay', () => {
 
     expect(transcript).toContain('Plan mode: ON');
     expect(transcript).toContain('权限模式： auto');
-    expect(transcript).toContain('YOLO 模式：开启');
-    expect(transcript).toContain('YOLO 模式：关闭');
+    expect(transcript).toContain('YES 模式：开启');
+    expect(transcript).toContain('YES 模式：关闭');
     expect(transcript).toContain('已批准（当前会话）: run command');
     expect(transcript).toContain('Plan mode: OFF');
   });

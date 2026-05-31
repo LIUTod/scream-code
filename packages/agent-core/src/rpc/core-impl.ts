@@ -766,7 +766,6 @@ async function createRuntimeConfig(input: {
   readonly resolveOAuthTokenProvider?: OAuthTokenProviderResolver | undefined;
 }): Promise<ToolServices> {
   const localFetcher = new LocalFetchURLProvider();
-  const searchService = input.config.services?.screamCliSearch;
   const fetchService = input.config.services?.screamCliFetch;
 
   return {

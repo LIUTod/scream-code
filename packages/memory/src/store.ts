@@ -150,7 +150,7 @@ export class MemoryMemoStore {
     await mkdir(dirname(this.filePath), { recursive: true });
   }
 
-  private parseLine(rawLine: string, lineNumber: number): MemoryMemo | undefined {
+  private parseLine(rawLine: string, _lineNumber: number): MemoryMemo | undefined {
     if (rawLine.length === 0) return undefined;
     try {
       const record = JSON.parse(rawLine) as MemoryMemoRecord;
