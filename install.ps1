@@ -1,5 +1,5 @@
 # Scream Code 一键安装 (TypeScript 版 / Windows)
-# 前置: Node.js >= 24.15.0 + Git
+# 前置: Node.js >= 22.0.0 + Git
 # 国内用户请先开启科学上网
 
 $ErrorActionPreference = "Stop"
@@ -20,20 +20,20 @@ function Info($msg)  { Write-Host "[INFO]  $msg" -ForegroundColor Green }
 function Warn($msg)  { Write-Host "[WARN]  $msg" -ForegroundColor Yellow }
 function Error($msg) { Write-Host "[ERROR] $msg" -ForegroundColor Red }
 
-# ── 1. 检测 Node.js >= 24.15.0 ─────────────────────────────────────────────
+# ── 1. 检测 Node.js >= 22.0.0 ─────────────────────────────────────────────
 function Find-Node {
-    foreach ($cmd in @("node", "nodejs", "node24", "node25")) {
+    foreach ($cmd in @("node", "nodejs", "node22", "node24", "node25")) {
         $found = Get-Command $cmd -ErrorAction SilentlyContinue
         if (-not $found) { continue }
         $verOutput = & $found.Source --version 2>&1
         if ($verOutput -match "v?(\d+)\.(\d+)\.(\d+)") {
             $major = [int]$matches[1]
             $minor = [int]$matches[2]
-            if ($major -gt 24) {
+            if ($major -gt 22) {
                 return @{ Path = $found.Source; Version = "$major.$minor" }
             }
-            if ($major -eq 24) {
-                if ($minor -ge 15) {
+            if ($major -eq 22) {
+                if ($minor -ge 0) {
                     return @{ Path = $found.Source; Version = "$major.$minor" }
                 }
             }
@@ -42,10 +42,10 @@ function Find-Node {
     return $null
 }
 
-Info "检测 Node.js >= 24.15.0..."
+Info "检测 Node.js >= 22.0.0..."
 $nodeInfo = Find-Node
 if (-not $nodeInfo) {
-    Error "未找到 Node.js 24.15.0 或更高版本"
+    Error "未找到 Node.js 22.0.0 或更高版本"
     Write-Host ""
     Write-Host "请按以下步骤安装："
     Write-Host "  1. 访问 https://nodejs.org/"

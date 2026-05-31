@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Scream Code 一键安装 (TypeScript 版)
-# 前置: Node.js >= 24.15.0, Git
+# 前置: Node.js >= 22.0.0, Git
 # 国内用户请先开启科学上网
 
 set -euo pipefail
@@ -26,16 +26,16 @@ info()  { echo "[INFO]  $*"; }
 warn()  { echo "[WARN]  $*" >&2; }
 error() { echo "[ERROR] $*" >&2; }
 
-# ── 1. 检测 Node.js >= 24.15.0 ─────────────────────────────────────────────
+# ── 1. 检测 Node.js >= 22.0.0 ─────────────────────────────────────────────
 find_node() {
-    for cmd in node nodejs node24 node25; do
+    for cmd in node nodejs node22 node24 node25; do
         if command -v "$cmd" >/dev/null 2>&1; then
             ver_output=$($cmd --version 2>&1 | sed 's/^v//')
             if [[ "$ver_output" =~ ^([0-9]+)\.([0-9]+)\. ]]; then
                 major="${BASH_REMATCH[1]}"
                 minor="${BASH_REMATCH[2]}"
-                # 需要 >= 24.15
-                if [[ "$major" -gt 24 ]] || { [[ "$major" -eq 24 ]] && [[ "$minor" -ge 15 ]]; }; then
+                # 需要 >= 22.0
+                if [[ "$major" -gt 22 ]] || { [[ "$major" -eq 22 ]] && [[ "$minor" -ge 0 ]]; }; then
                     echo "$cmd"
                     return 0
                 fi
@@ -45,9 +45,9 @@ find_node() {
     return 1
 }
 
-info "检测 Node.js >= 24.15.0..."
+info "检测 Node.js >= 22.0.0..."
 NODE_CMD=$(find_node) || {
-    error "未找到 Node.js 24.15.0 或更高版本"
+    error "未找到 Node.js 22.0.0 或更高版本"
     echo ""
     echo "安装方式："
     echo "  macOS:    brew install node"

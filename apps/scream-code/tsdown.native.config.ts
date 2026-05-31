@@ -37,7 +37,7 @@ export default defineConfig({
   fixedExtension: true,
   hash: false,
   platform: 'node',
-  target: 'node24',
+  target: 'node22',
   banner: { js: '#!/usr/bin/env node' },
   plugins: [rawTextPlugin()],
   alias: {
