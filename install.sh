@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Scream Code 一键安装 (TypeScript 版)
 # 前置: Node.js >= 22.0.0, Git
-# 国内用户请先开启科学上网
+# 国内用户建议科学上网，如遇网络错误请多尝试几次
 
 set -euo pipefail
 
@@ -138,7 +138,7 @@ info "安装路径: $INSTALL_DIR"
 info "下载 scream-code..."
 git clone --depth 1 "https://github.com/$REPO.git" "$INSTALL_DIR" || {
     error "下载失败"
-    echo "请检查网络连接（国内用户需要科学上网）"
+    echo "请检查网络连接（国内用户建议科学上网，或稍后重试）"
     exit 1
 }
 cd "$INSTALL_DIR"

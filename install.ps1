@@ -1,6 +1,6 @@
 # Scream Code 一键安装 (TypeScript 版 / Windows)
 # 前置: Node.js >= 22.0.0 + Git
-# 国内用户请先开启科学上网
+# 国内用户建议科学上网，如遇网络错误请多尝试几次
 
 $ErrorActionPreference = "Stop"
 
@@ -163,7 +163,7 @@ Info "下载 scream-code..."
 git clone --depth 1 "https://github.com/$Repo.git" $InstallDir
 if ($LASTEXITCODE -ne 0) {
     Error "git clone 失败（退出码: $LASTEXITCODE）"
-    Write-Host "请检查网络连接（国内用户需要科学上网）"
+    Write-Host "请检查网络连接（国内用户建议科学上网，或稍后重试）"
     exit 1
 }
 Set-Location $InstallDir
