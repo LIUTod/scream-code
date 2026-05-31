@@ -1,0 +1,57 @@
+{
+  "name": "@scream-cli/jian",
+  "version": "0.1.2",
+  "private": true,
+  "description": "Execution environment abstraction for AI agent applications",
+  "license": "MIT",
+  "author": "ScreamCli AI",
+  "homepage": "https://github.com/LIUTod/scream-code/tree/main/packages/jian#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/LIUTod/scream-code.git",
+    "directory": "packages/jian"
+  },
+  "bugs": {
+    "url": "https://github.com/LIUTod/scream-code/issues"
+  },
+  "keywords": [
+    "scream",
+    "agent",
+    "execution",
+    "sandbox",
+    "process",
+    "filesystem"
+  ],
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "imports": {
+    "#/*": [
+      "./src/*.ts",
+      "./src/*/index.ts"
+    ]
+  },
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./ssh": {
+      "types": "./src/ssh.ts",
+      "default": "./src/ssh.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "pathe": "^2.0.3",
+    "ssh2": "^1.17.0"
+  },
+  "devDependencies": {
+    "@types/ssh2": "^1.15.5"
+  }
+}

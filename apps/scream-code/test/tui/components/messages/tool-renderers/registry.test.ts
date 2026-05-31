@@ -1,0 +1,165 @@
+import type { Component } from '@earendil-works/pi-tui';
+import { describe, expect, it } from 'vitest';
+
+import { pickResultRenderer } from '#/tui/components/messages/tool-renderers/registry';
+import { darkColors } from '#/tui/theme/colors';
+import type { ToolCallBlockData, ToolResultBlockData } from '#/tui/types';
+
+function strip(text: string): string {
+  return text.replaceAll(/\[[0-9;]*m/g, '');
+}
+
+function joinRender(components: Component[], width = 100): string {
+  return components.flatMap((c) => c.render(width)).join('\n');
+}
+
+function call(name: string, args: Record<string, unknown> = {}): ToolCallBlockData {
+  return { id: 'tc', name, args };
+}
+
+function result(output: string, isError = false): ToolResultBlockData {
+  return { tool_call_id: 'tc', output, is_error: isError };
+}
+
+const ctx = { expanded: false, colors: darkColors };
+const expandedCtx = { expanded: true, colors: darkColors };
+
+describe('tool-result registry', () => {
+  it('falls back to truncated renderer for unknown tools', () => {
+    const renderer = pickResultRenderer('SomethingUnknown');
+    const out = strip(joinRender(renderer(call('SomethingUnknown'), result('a\nb\nc\nd\ne'), ctx)));
+    expect(out).toContain('a');
+    expect(out).toContain('b');
+    expect(out).toContain('c');
+    expect(out).not.toContain('\nd');
+    expect(out).toContain('... (2 more lines, ctrl+o to expand)');
+  });
+
+  it('uses truncated renderer for Bash to preserve raw output UX', () => {
+    const renderer = pickResultRenderer('Bash');
+    const out = strip(joinRender(renderer(call('Bash'), result('one\ntwo\nthree\nfour'), ctx)));
+    expect(out).toContain('one');
+    expect(out).toContain('...（还有 1 行，按 ctrl+o 展开）');
+  });
+
+  it('Read renders no body when collapsed (header chip carries the count)', () => {
+    const renderer = pickResultRenderer('Read');
+    const out = joinRender(
+      renderer(call('Read', { path: 'foo.ts' }), result('1\tfoo\n2\tbar'), ctx),
+    );
+    expect(out.trim()).toBe('');
+  });
+
+  it('Read expands to the raw file content when expanded', () => {
+    const renderer = pickResultRenderer('Read');
+    const out = strip(
+      joinRender(renderer(call('Read', { path: 'foo.ts' }), result('1\tfoo\n2\tbar'), expandedCtx)),
+    );
+    expect(out).toContain('foo');
+    expect(out).toContain('bar');
+  });
+
+  it('Grep glance lists path samples below the chip', () => {
+    const renderer = pickResultRenderer('Grep');
+    const out = strip(
+      joinRender(
+        renderer(
+          call('Grep', { pattern: 'foo' }),
+          result('src/a.ts\nsrc/b.ts\nsrc/c.ts\nsrc/d.ts\nsrc/e.ts'),
+          ctx,
+        ),
+      ),
+    );
+    expect(out).toContain('src/a.ts');
+    expect(out).toContain('src/b.ts');
+    expect(out).toContain('src/c.ts');
+    expect(out).toContain('+2 more');
+    expect(out).not.toContain('src/d.ts');
+  });
+
+  it('Grep glance strips trailing :line:text in content mode', () => {
+    const renderer = pickResultRenderer('Grep');
+    const out = strip(
+      joinRender(
+        renderer(
+          call('Grep', { pattern: 'foo' }),
+          result('src/a.ts:42:    foo()\nsrc/b.ts:7:foo'),
+          ctx,
+        ),
+      ),
+    );
+    expect(out).toContain('src/a.ts:42');
+    expect(out).not.toContain('foo()');
+  });
+
+  it('Grep with empty result renders nothing in collapsed state', () => {
+    const renderer = pickResultRenderer('Grep');
+    const out = joinRender(renderer(call('Grep', { pattern: 'foo' }), result(''), ctx));
+    expect(out.trim()).toBe('');
+  });
+
+  it('Glob glance lists path samples', () => {
+    const renderer = pickResultRenderer('Glob');
+    const out = strip(
+      joinRender(
+        renderer(call('Glob', { pattern: '**/*.ts' }), result('a.ts\nb.ts\nc.ts\nd.ts'), ctx),
+      ),
+    );
+    expect(out).toContain('a.ts');
+    expect(out).toContain('b.ts');
+    expect(out).toContain('c.ts');
+    expect(out).toContain('+1 more');
+  });
+
+  it('FetchURL renders no body when collapsed', () => {
+    const renderer = pickResultRenderer('FetchURL');
+    const out = joinRender(
+      renderer(call('FetchURL', { url: 'https://example.com/x' }), result('<body>...'), ctx),
+    );
+    expect(out.trim()).toBe('');
+  });
+
+  it('WebSearch renders no body when collapsed', () => {
+    const renderer = pickResultRenderer('WebSearch');
+    const out = joinRender(
+      renderer(call('WebSearch', { query: 'scream' }), result('1. Alpha\n2. Beta'), ctx),
+    );
+    expect(out.trim()).toBe('');
+  });
+
+  it('Edit renders no body when collapsed', () => {
+    const renderer = pickResultRenderer('Edit');
+    const out = joinRender(
+      renderer(
+        call('Edit', { path: 'foo.ts', old_string: 'a', new_string: 'b' }),
+        result('Replaced 1 occurrence in foo.ts'),
+        ctx,
+      ),
+    );
+    expect(out.trim()).toBe('');
+  });
+
+  it('Write renders no body when collapsed', () => {
+    const renderer = pickResultRenderer('Write');
+    const out = joinRender(
+      renderer(call('Write', { path: 'a.txt', content: 'a\nb\n' }), result('Wrote'), ctx),
+    );
+    expect(out.trim()).toBe('');
+  });
+
+  it('Think renders no body even with a thought arg', () => {
+    const renderer = pickResultRenderer('Think');
+    const out = joinRender(renderer(call('Think', { thought: 'hello' }), result('Recorded.'), ctx));
+    expect(out.trim()).toBe('');
+  });
+
+  it('Errors always fall back to truncated renderer regardless of tool', () => {
+    const renderer = pickResultRenderer('Read');
+    const out = strip(
+      joinRender(
+        renderer(call('Read', { path: 'foo.ts' }), result('ENOENT: foo.ts not found', true), ctx),
+      ),
+    );
+    expect(out).toContain('ENOENT: foo.ts not found');
+  });
+});

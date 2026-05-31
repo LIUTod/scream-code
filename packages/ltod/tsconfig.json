@@ -1,0 +1,6 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {},
+  "include": ["src", "test"],
+  "exclude": ["test/type-safety-negative.ts"]
+}

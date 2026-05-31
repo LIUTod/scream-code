@@ -1,0 +1,59 @@
+{
+  "name": "@scream-cli/ltod",
+  "version": "0.2.3",
+  "private": true,
+  "description": "The LLM abstraction layer for modern AI agent applications",
+  "license": "MIT",
+  "author": "ScreamCli AI",
+  "homepage": "https://github.com/LIUTod/scream-code/tree/main/packages/ltod#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/LIUTod/scream-code.git",
+    "directory": "packages/ltod"
+  },
+  "bugs": {
+    "url": "https://github.com/LIUTod/scream-code/issues"
+  },
+  "keywords": [
+    "llm",
+    "ai",
+    "agent",
+    "provider"
+  ],
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "imports": {
+    "#/*": [
+      "./src/*.ts",
+      "./src/*/index.ts"
+    ]
+  },
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./providers/*": {
+      "types": "./src/providers/*.ts",
+      "default": "./src/providers/*.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.95.2",
+    "@google/genai": "^1.49.0",
+    "openai": "^6.34.0",
+    "zod": "catalog:",
+    "zod-to-json-schema": "^3.25.2"
+  },
+  "devDependencies": {
+    "ajv": "^8.18.0",
+    "ajv-formats": "^3.0.1"
+  }
+}

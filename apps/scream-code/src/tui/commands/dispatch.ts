@@ -1,0 +1,279 @@
+import type { Component, Focusable } from '@earendil-works/pi-tui';
+
+import type { ScreamHarness, Session } from '@scream-cli/scream-code-sdk';
+
+import type { Theme } from '../theme';
+import type { ResolvedTheme } from '../theme/colors';
+import {
+  LLM_NOT_SET_MESSAGE,
+} from '../constant/scream-tui';
+import { formatErrorMessage } from '../utils/event-payload';
+import { parseSlashInput } from './parse';
+import {
+  resolveSlashCommandInput,
+  slashBusyMessage,
+} from './resolve';
+import type { BuiltinSlashCommandName } from './registry';
+import type { AuthFlowController } from '../controllers/auth-flow';
+import type { StreamingUIController } from '../controllers/streaming-ui';
+import type { TasksBrowserController } from '../controllers/tasks-browser';
+import type { AppState, LoginProgressSpinnerHandle, QueuedMessage } from '../types';
+import type { TUIState } from '../tui-state';
+
+import { handleConnectCommand, handleLogoutCommand } from './auth';
+import {
+  handleAutoCommand,
+  handleCompactCommand,
+  handleEditorCommand,
+  handleModelCommand,
+  handlePlanCommand,
+  handleThemeCommand,
+  handleYoloCommand,
+  showModelPicker,
+  showPermissionPicker,
+  showSettingsSelector,
+} from './config';
+import { showMcpServers, showStatusReport, showUsage } from './info';
+import {
+  handleExportDebugZipCommand,
+  handleExportMdCommand,
+  handleForkCommand,
+  handleInitCommand,
+  handleTitleCommand,
+} from './session';
+import { handleGoalCommand, handleGoalOffCommand } from './goal';
+
+// ---------------------------------------------------------------------------
+// Re-exports — keep existing consumers working
+// ---------------------------------------------------------------------------
+
+export {
+  handleConnectCommand,
+  handleLogoutCommand,
+} from './auth';
+export {
+  handleAutoCommand,
+  handleCompactCommand,
+  handleEditorCommand,
+  handleModelCommand,
+  handlePlanCommand,
+  handleThemeCommand,
+  handleYoloCommand,
+  showModelPicker,
+  showPermissionPicker,
+  showSettingsSelector,
+} from './config';
+export {
+  showMcpServers,
+  showStatusReport,
+  showUsage,
+} from './info';
+export {
+  handleExportDebugZipCommand,
+  handleExportMdCommand,
+  handleForkCommand,
+  handleInitCommand,
+  handleTitleCommand,
+} from './session';
+export { handleGoalCommand, handleGoalOffCommand } from './goal';
+
+// ---------------------------------------------------------------------------
+// Host interface
+// ---------------------------------------------------------------------------
+
+export interface SlashCommandHost {
+  state: TUIState;
+  session: Session | undefined;
+  readonly harness: ScreamHarness;
+  cancelInFlight: (() => void) | undefined;
+  deferUserMessages: boolean;
+
+  setAppState(patch: Partial<AppState>): void;
+  resetLivePane(): void;
+  showError(msg: string): void;
+  showStatus(msg: string, color?: string): void;
+  showNotice(title: string, detail?: string): void;
+  track(event: string, props?: Record<string, unknown>): void;
+  mountEditorReplacement(panel: Component & Focusable): void;
+  restoreEditor(): void;
+
+  // Session
+  requireSession(): Session;
+  switchToSession(session: Session, message: string): Promise<void>;
+  beginSessionRequest(): void;
+  failSessionRequest(message: string): void;
+  sendQueuedMessage(session: Session, item: QueuedMessage): void;
+
+  // UI
+  showProgressSpinner(label: string): LoginProgressSpinnerHandle;
+
+  // Theme
+  applyTheme(theme: Theme, resolved?: ResolvedTheme): void;
+  refreshTerminalThemeTracking(): void;
+
+  // Dispatch
+  stop(exitCode?: number): Promise<void>;
+  showHelpPanel(): void;
+  createNewSession(): Promise<void>;
+  showSessionPicker(): Promise<void>;
+  sendNormalUserInput(text: string): void;
+  sendSkillActivation(session: Session, skillName: string, skillArgs: string): void;
+  readonly skillCommandMap: Map<string, string>;
+
+  // Controller refs
+  readonly streamingUI: StreamingUIController;
+  readonly tasksBrowserController: TasksBrowserController;
+  readonly authFlow: AuthFlowController;
+}
+
+// ---------------------------------------------------------------------------
+// Dispatch — entry point from handleUserInput
+// ---------------------------------------------------------------------------
+
+export function dispatchInput(host: SlashCommandHost, text: string): void {
+  if (parseSlashInput(text) !== null) {
+    void executeSlashCommand(host, text);
+    return;
+  }
+  host.sendNormalUserInput(text);
+}
+
+async function executeSlashCommand(host: SlashCommandHost, input: string): Promise<void> {
+  const parsedCommand = parseSlashInput(input);
+  const intent = resolveSlashCommandInput({
+    input,
+    skillCommandMap: host.skillCommandMap,
+    isStreaming: host.state.appState.streamingPhase !== 'idle',
+    isCompacting: host.state.appState.isCompacting,
+  });
+
+  switch (intent.kind) {
+    case 'not-command':
+      return;
+    case 'blocked':
+      host.track('input_command_invalid', { reason: 'blocked', command: intent.commandName });
+      host.showError(slashBusyMessage(intent.commandName, intent.reason));
+      return;
+    case 'skill': {
+      const session = host.session;
+      if (host.state.appState.model.trim().length === 0 || session === undefined) {
+        host.showError(LLM_NOT_SET_MESSAGE);
+        return;
+      }
+      host.track('input_command', {
+        command: intent.commandName,
+        skill_name: intent.skillName,
+      });
+      host.sendSkillActivation(session, intent.skillName, intent.args);
+      return;
+    }
+    case 'message':
+      host.sendNormalUserInput(intent.input);
+      return;
+    case 'builtin':
+      host.track('input_command', { command: intent.name });
+      if (intent.name === 'new' && parsedCommand?.name === 'clear') {
+        host.track('clear');
+      }
+      try {
+        await handleBuiltInSlashCommand(host, intent.name, intent.args);
+      } catch (error) {
+        host.showError(formatErrorMessage(error));
+      }
+      return;
+  }
+}
+
+async function handleBuiltInSlashCommand(
+  host: SlashCommandHost,
+  name: BuiltinSlashCommandName,
+  args: string,
+): Promise<void> {
+  switch (name) {
+    case 'exit':
+      void host.stop();
+      return;
+    case 'help':
+      host.showHelpPanel();
+      return;
+    case 'version':
+      host.showStatus(`Scream Code v${host.state.appState.version}`);
+      return;
+    case 'new':
+      await host.createNewSession();
+      host.state.ui.requestRender();
+      return;
+    case 'sessions':
+      void host.showSessionPicker();
+      return;
+    case 'tasks':
+      void host.tasksBrowserController.show();
+      return;
+    case 'mcp':
+      void showMcpServers(host);
+      return;
+    case 'editor':
+      await handleEditorCommand(host, args);
+      return;
+    case 'theme':
+      await handleThemeCommand(host, args);
+      return;
+    case 'model':
+      handleModelCommand(host, args);
+      return;
+    case 'permission':
+      showPermissionPicker(host);
+      return;
+    case 'settings':
+      showSettingsSelector(host);
+      return;
+    case 'usage':
+      void showUsage(host);
+      return;
+    case 'status':
+      void showStatusReport(host);
+      return;
+    case 'title':
+      await handleTitleCommand(host, args);
+      return;
+    case 'yolo':
+      await handleYoloCommand(host, args);
+      return;
+    case 'auto':
+      await handleAutoCommand(host, args);
+      return;
+    case 'plan':
+      await handlePlanCommand(host, args);
+      return;
+    case 'goal':
+      await handleGoalCommand(host, args);
+      return;
+    case 'goaloff':
+      await handleGoalOffCommand(host);
+      return;
+    case 'compact':
+      await handleCompactCommand(host, args);
+      return;
+    case 'init':
+      await handleInitCommand(host);
+      return;
+    case 'fork':
+      await handleForkCommand(host, args);
+      return;
+    case 'export-md':
+      await handleExportMdCommand(host, args);
+      return;
+    case 'export-debug-zip':
+      await handleExportDebugZipCommand(host);
+      return;
+    case 'config':
+      await handleConnectCommand(host, args);
+      return;
+    case 'logout':
+      await handleLogoutCommand(host);
+      return;
+    default:
+      host.showError(`Unknown slash command: /${String(name)}`);
+      return;
+  }
+}

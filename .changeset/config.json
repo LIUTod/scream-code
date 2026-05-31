@@ -1,0 +1,18 @@
+{
+  "changelog": ["@changesets/changelog-github", { "repo": "LIUTod/scream-code", "disableThanks": true }],
+  "commit": false,
+  "fixed": [],
+  "linked": [],
+  "access": "public",
+  "baseBranch": "main",
+  "updateInternalDependencies": "patch",
+  "ignore": [
+    "@scream-cli/vis",
+    "@scream-cli/vis-server",
+    "@scream-cli/vis-web"
+  ],
+  "snapshot": {
+    "useCalculatedVersion": true,
+    "prereleaseTemplate": "{tag}-{commit}"
+  }
+}

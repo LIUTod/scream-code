@@ -1,0 +1,31 @@
+import { z } from 'zod';
+
+import { getUpdateStateFile } from '#/utils/paths';
+import { readJsonFile, writeJsonFile } from '#/utils/persistence';
+
+import { emptyUpdateCache, type UpdateCache } from './types';
+
+const UpdateCacheSchema: z.ZodType<UpdateCache> = z
+  .object({
+    source: z.literal('cdn'),
+    checkedAt: z.string().min(1).nullable(),
+    latest: z.string().min(1).nullable(),
+  })
+  .strict();
+
+export async function readUpdateCache(
+  filePath: string = getUpdateStateFile(),
+): Promise<UpdateCache> {
+  try {
+    return await readJsonFile(filePath, UpdateCacheSchema, emptyUpdateCache());
+  } catch {
+    return emptyUpdateCache();
+  }
+}
+
+export async function writeUpdateCache(
+  value: UpdateCache,
+  filePath: string = getUpdateStateFile(),
+): Promise<void> {
+  await writeJsonFile(filePath, UpdateCacheSchema, value);
+}

@@ -1,0 +1,7 @@
+{
+  "work_dirs": [
+    { "path": "/proj-a", "jian": "local", "last_session_id": null },
+    { "path": "/proj-b", "jian": "local", "last_session_id": null },
+    { "path": "/proj-c", "jian": "jian-foo", "last_session_id": null }
+  ]
+}

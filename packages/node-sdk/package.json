@@ -1,0 +1,71 @@
+{
+  "name": "@scream-cli/scream-code-sdk",
+  "version": "0.4.0",
+  "private": true,
+  "description": "TypeScript SDK for the Scream Code Agent",
+  "license": "MIT",
+  "author": "ScreamCli AI",
+  "homepage": "https://github.com/LIUTod/scream-code/tree/main/packages/node-sdk#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/LIUTod/scream-code.git",
+    "directory": "packages/node-sdk"
+  },
+  "bugs": {
+    "url": "https://github.com/LIUTod/scream-code/issues"
+  },
+  "keywords": [
+    "scream",
+    "sdk",
+    "typescript",
+    "agent",
+    "api"
+  ],
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "type": "module",
+  "imports": {
+    "#/*": [
+      "./src/*.ts",
+      "./src/*/index.ts"
+    ]
+  },
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.mts",
+        "import": "./dist/index.mjs",
+        "default": "./dist/index.mjs"
+      }
+    },
+    "provenance": true
+  },
+  "scripts": {
+    "build": "tsdown && pnpm run build:dts",
+    "build:dts": "node scripts/build-dts.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "clean": "rm -rf dist .tmp-api-extractor"
+  },
+  "dependencies": {
+    "@antfu/utils": "^9.3.0",
+    "smol-toml": "^1.6.1",
+    "yazl": "^3.3.1",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@scream-cli/agent-core": "workspace:^",
+    "@scream-cli/jian": "workspace:^",
+    "@scream-cli/scream-code-oauth": "workspace:^",
+    "@scream-cli/ltod": "workspace:^",
+    "@types/yazl": "^2.4.6"
+  }
+}

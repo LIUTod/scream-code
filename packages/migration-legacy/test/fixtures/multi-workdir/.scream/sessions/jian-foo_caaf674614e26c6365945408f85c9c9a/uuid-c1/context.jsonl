@@ -1,0 +1,3 @@
+{"role":"_system_prompt","content":"You are a remote helper."}
+{"role":"user","content":"hello from c1"}
+{"role":"assistant","content":[{"type":"text","text":"hi c1"}]}

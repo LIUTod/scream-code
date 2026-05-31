@@ -1,0 +1,90 @@
+{
+  "name": "@scream-cli/agent-core",
+  "version": "0.5.0",
+  "private": true,
+  "description": "The unified agent engine for Scream",
+  "license": "MIT",
+  "author": "ScreamCli AI",
+  "homepage": "https://github.com/LIUTod/scream-code/tree/main/packages/agent-core#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/LIUTod/scream-code.git",
+    "directory": "packages/agent-core"
+  },
+  "bugs": {
+    "url": "https://github.com/LIUTod/scream-code/issues"
+  },
+  "keywords": [
+    "scream",
+    "agent",
+    "ai",
+    "llm",
+    "session",
+    "tools"
+  ],
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "imports": {
+    "#/*": [
+      "./src/*.ts",
+      "./src/*/index.ts"
+    ]
+  },
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./agent/records/migration": {
+      "types": "./src/agent/records/migration/index.ts",
+      "default": "./src/agent/records/migration/index.ts"
+    },
+    "./session/store": {
+      "types": "./src/session/store/index.ts",
+      "default": "./src/session/store/index.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsdown",
+    "test": "vitest run",
+    "test:baseline": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@antfu/utils": "^9.3.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@scream-cli/jian": "workspace:^",
+    "@scream-cli/ltod": "workspace:^",
+    "@mozilla/readability": "^0.6.0",
+    "ajv": "^8.18.0",
+    "ajv-formats": "^3.0.1",
+    "js-yaml": "^4.1.1",
+    "linkedom": "^0.18.12",
+    "nunjucks": "^3.2.4",
+    "open": "^10.2.0",
+    "pathe": "^2.0.3",
+    "picomatch": "^4.0.4",
+    "proper-lockfile": "^4.1.2",
+    "regexp.escape": "^2.0.1",
+    "retry": "0.13.1",
+    "smol-toml": "^1.6.1",
+    "tar": "^7.5.13",
+    "yauzl": "^3.3.0",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
+    "@types/nunjucks": "^3.2.6",
+    "@types/picomatch": "^4.0.3",
+    "@types/proper-lockfile": "^4.1.4",
+    "@types/regexp.escape": "^2.0.0",
+    "@types/retry": "0.12.0",
+    "@types/tar": "^7.0.87",
+    "@types/yauzl": "^2.10.3",
+    "@types/yazl": "^2.4.6",
+    "yazl": "^3.3.1"
+  }
+}
