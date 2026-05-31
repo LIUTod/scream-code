@@ -87,7 +87,7 @@ function normalizeCompletionStatus(
 
 /** System prompt for exit-time extraction — instructs the LLM how to extract. */
 export const EXIT_EXTRACTION_SYSTEM_PROMPT =
-  'You are a memory extraction assistant. Your job is to scan a conversation transcript and identify completed task loops. Output ONLY in the specified JSON format. Do not call any tools.';
+  '你是一个记忆提取助手。任务是从对话记录中识别已完成的任务闭环。用对话的主要语言输出（中文对话用中文，英文对话用英文）。只输出指定的 JSON 格式，不要调用任何工具。';
 
 /** Build the user prompt for exit-time extraction, including a conversation sample. */
 export function buildExitExtractionPrompt(
@@ -95,36 +95,38 @@ export function buildExitExtractionPrompt(
   messageCount: number,
   sampleText: string,
 ): string {
-  return `The following is a conversation transcript from session "${sessionId}" (${messageCount} messages total). Extract every **completed task loop** where:
-- The user made a clear request or asked a specific question
-- A solution or answer was provided
-- The outcome is clear (success, partial success, blocked, or abandoned)
+  return `以下是会话 "${sessionId}"（共 ${messageCount} 条消息）的对话记录。请提取其中所有**已完成的任务闭环**：
 
-For each completed task loop found, output ONE structured memo block:
+判断标准：
+- 用户提出了明确的需求或问题
+- 给出了解决方案或回答
+- 结果明确（成功、部分完成、受阻、或放弃）
+
+对每个已完成的任务闭环，输出一个结构化记忆块。**必须用对话的主要语言书写**：
 
 \`\`\`memory-memo
 {
-  "userRequirement": "<the user's request or question, one sentence>",
-  "solution": "<the approach or solution, 2-4 sentences>",
+  "userRequirement": "<用户需求，一句话概括>",
+  "solution": "<解决方案，2-4 句话>",
   "completionStatus": "<done | partially done | blocked | abandoned>",
-  "problemsEncountered": "<issues found and how they were resolved, or 'none'>"
+  "problemsEncountered": "<遇到的问题及解决方式，无则填 'none'>"
 }
 \`\`\`
 
-Guidelines:
-- Include any significant errors and their fixes in "problemsEncountered".
-- Skip in-progress work unless it contains a landmark error+fix.
-- Merge closely related sub-tasks into a single memo.
-- Use the exact field names and JSON format. Do NOT add extra fields.
+注意：
+- 在 problemsEncountered 中记录重要的错误和修复方法
+- 跳过未完成的工作，除非其中包含有价值的错误修复经验
+- 将紧密相关的子任务合并为一条记忆
+- 严格遵守字段名和 JSON 格式，不要添加额外字段
 
-If no completed task loops are found, output exactly:
+如果没有已完成的任务闭环，输出：
 \`\`\`memory-memo
 {"none": true}
 \`\`\`
 
---- CONVERSATION TRANSCRIPT (last 30 messages) ---
+--- 对话记录（最近 30 条消息）---
 
 ${sampleText}
 
---- END TRANSCRIPT ---`;
+--- 对话记录结束 ---`;
 }

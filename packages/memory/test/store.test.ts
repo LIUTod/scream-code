@@ -171,11 +171,13 @@ Working on auth module
 });
 
 describe('buildExitExtractionPrompt', () => {
-  it('includes the sample text in the prompt', () => {
+  it('includes the sample text in the prompt (Chinese)', () => {
     const prompt = buildExitExtractionPrompt('sess-123', 50, '[user] fix the bug\n[assistant] done');
     expect(prompt).toContain('sess-123');
     expect(prompt).toContain('50');
     expect(prompt).toContain('[user] fix the bug');
     expect(prompt).toContain('[assistant] done');
+    expect(prompt).toContain('已完成的任务闭环');
+    expect(prompt).toContain('对话记录');
   });
 });
