@@ -1,6 +1,6 @@
 # Scream Code
 
-下一代智能体的起点。
+你的超级Ai个人助手。
 
 Scream Code 是一款省心的中文 AI Agent 助手。无需硬记代码，直接用中/英文下达指令，vibe coding、写代码、改文件、清理电脑、查资料、制作研报、制作 skill、搜全网信息……你动嘴，它动手！
 
@@ -91,9 +91,11 @@ chmod +x ~/.scream-code/bin/scream
 
 ## 项目灵感与感谢支持
 
-Scream 是结合作者本人的使用习惯和个人理解自行开发重构的 Agent 工具助手，从最开始的 Rust 版本，到 Python 版本，再到现在的 TypeScript 版本，我在很多功能上做了减法与优化，结合使用习惯与 Agent harness 的理解而开发。
+Scream 是结合作者本人的使用习惯和个人理解自行开发重构的 Agent 工具助手
+从最开始的 Rust 版本，到 Python 版本，再到现在的 TypeScript 版本
+我在很多功能上做了减法与优化，结合使用习惯与 Agent harness 的理解而开发。
 
-部分 UI 及交互设计参考 kimi-cli、Gemini-cli、DeepSeek-tui 等优质项目，欢迎各位的使用反馈与优化建议！
+部分 UI 及交互设计参考 codex、kimi、Gemini、等优秀项目，欢迎各位的使用反馈与优化建议！
 
 ---
 
