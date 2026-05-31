@@ -206,10 +206,12 @@ foreach ($old in $oldPaths) {
         Info "已删除: $old"
     }
 }
-# 清理 pip 安装的旧 scream 包
+# 清理 pip 安装的旧 scream 包（静默，失败不报错）
 $pythonCmd = Get-Command python -ErrorAction SilentlyContinue
 if ($pythonCmd) {
-    & python -m pip uninstall -y scream 2>$null
+    try {
+        $null = & python -m pip uninstall -y scream 2>&1
+    } catch { }
 }
 # 清理旧 Python 虚拟环境
 $venvPath = "$InstallDir\.venv"
