@@ -43,7 +43,7 @@ for dir in \
     fi
 done
 
-# ── 卸载 pip / pipx 全局安装的旧 scream 包 ──
+# ── 卸载 pip / pipx / uv 全局安装的旧 scream 包 ──
 for pip_cmd in pip3 pip; do
     if command -v "$pip_cmd" >/dev/null 2>&1; then
         "$pip_cmd" uninstall -y scream 2>/dev/null || true
@@ -52,6 +52,11 @@ done
 if command -v pipx >/dev/null 2>&1; then
     pipx uninstall scream 2>/dev/null || true
 fi
+if command -v uv >/dev/null 2>&1; then
+    uv tool uninstall scream 2>/dev/null || true
+fi
+# 清理 uv 可能残留的 trampoline 脚本
+rm -f "$HOME/.local/bin/scream" 2>/dev/null || true
 
 # ── 彻底删除旧 scream-code 目录（Python .venv / node_modules 等） ──
 if [ -d "$INSTALL_DIR" ]; then

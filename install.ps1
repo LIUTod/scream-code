@@ -31,6 +31,7 @@ $oldPaths = @(
     "$env:USERPROFILE\scream-code\bin\scream.bat",
     "$env:USERPROFILE\scream-code\bin\scream",
     "$env:USERPROFILE\.local\bin\scream.cmd",
+    "$env:USERPROFILE\.local\bin\scream",
     "$env:LOCALAPPDATA\Microsoft\WindowsApps\scream.cmd"
 )
 foreach ($old in $oldPaths) {
@@ -40,10 +41,14 @@ foreach ($old in $oldPaths) {
     }
 }
 
-# ── 卸载 pip 安装的旧 scream 包 ──
+# ── 卸载 pip / uv 安装的旧 scream 包 ──
 $pythonCmd = Get-Command python -ErrorAction SilentlyContinue
 if ($pythonCmd) {
     try { $null = & python -m pip uninstall -y scream 2>&1 } catch { }
+}
+$uvCmd = Get-Command uv -ErrorAction SilentlyContinue
+if ($uvCmd) {
+    try { $null = & uv tool uninstall scream 2>&1 } catch { }
 }
 
 # ── 彻底删除旧安装目录 ──
