@@ -191,7 +191,30 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 
-# ── 7. 创建 scream 命令 ────────────────────────────────────────────────────
+# ── 7. 清理旧 scream 命令，避免冲突 ───────────────────────────────────────────
+Info "清理旧 scream 命令..."
+$oldPaths = @(
+    "$env:USERPROFILE\scream-code\bin\scream.cmd",
+    "$env:USERPROFILE\.local\bin\scream.cmd",
+    "$env:LOCALAPPDATA\Microsoft\WindowsApps\scream.cmd"
+)
+foreach ($old in $oldPaths) {
+    if (Test-Path $old) {
+        Remove-Item -Force $old -ErrorAction SilentlyContinue
+        Info "已删除: $old"
+    }
+}
+# 清理旧的 scream PS 命令别名
+if (Test-Path $PROFILE) {
+    $content = Get-Content $PROFILE -Raw -ErrorAction SilentlyContinue
+    if ($content -match 'scream') {
+        $cleaned = $content -replace '(?m)^.*scream.*\r?\n?', ''
+        Set-Content $PROFILE $cleaned.TrimEnd() -Encoding UTF8
+        Info "已清理 PowerShell Profile 中的旧 scream 引用"
+    }
+}
+
+# ── 8. 创建 scream 命令 ────────────────────────────────────────────────────
 Info "创建 scream 命令..."
 New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
 
@@ -204,7 +227,7 @@ cd /d "$InstallDir"
 "@
 Set-Content -Path "$BinDir\scream.cmd" -Value $ScreamCmd -Encoding Default
 
-# ── 8. 添加到用户 PATH ─────────────────────────────────────────────────────
+# ── 9. 添加到用户 PATH ─────────────────────────────────────────────────────
 $UserPath = [Environment]::GetEnvironmentVariable("PATH", "User")
 if ($UserPath -notlike "*$BinDir*") {
     Info "添加 $BinDir 到用户 PATH..."

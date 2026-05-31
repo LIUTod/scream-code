@@ -132,7 +132,27 @@ pnpm -r build || {
     exit 1
 }
 
-# ── 7. 创建 scream 命令 ────────────────────────────────────────────────────
+# ── 7. 清理旧 scream 命令，避免冲突 ───────────────────────────────────────────
+info "清理旧 scream 命令..."
+for dir in \
+    "$HOME/.scream-code/bin" \
+    "$HOME/.local/bin" \
+    /usr/local/bin \
+    /opt/homebrew/bin; do
+    if [ -f "$dir/scream" ]; then
+        rm -f "$dir/scream"
+        info "已删除: $dir/scream"
+    fi
+done
+# 清理 shell 配置中的旧 scream PATH
+for rc in "$HOME/.zshrc" "$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.zprofile"; do
+    if [ -f "$rc" ]; then
+        sed -i.bak '/#.*scream.*PATH\|#.*scream-code.*PATH\|\/scream-code\/bin/d' "$rc" 2>/dev/null || true
+        rm -f "${rc}.bak" 2>/dev/null || true
+    fi
+done
+
+# ── 8. 创建 scream 命令 ────────────────────────────────────────────────────
 mkdir -p "$BIN_DIR"
 cat > "$BIN_DIR/scream" <<'EOF'
 #!/usr/bin/env bash
@@ -142,7 +162,7 @@ exec node "$SCREAM_HOME/apps/scream-code/dist/main.mjs" "$@"
 EOF
 chmod +x "$BIN_DIR/scream"
 
-# ── 8. 添加到 PATH ─────────────────────────────────────────────────────────
+# ── 9. 添加到 PATH ─────────────────────────────────────────────────────────
 if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
     SHELL_RC=""
     if [ -n "${ZSH_VERSION:-}" ] || [ "$(basename "$SHELL")" = "zsh" ]; then
