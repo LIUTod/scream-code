@@ -29,8 +29,13 @@ function Find-Node {
         if ($verOutput -match "v?(\d+)\.(\d+)\.(\d+)") {
             $major = [int]$matches[1]
             $minor = [int]$matches[2]
-            if (($major -gt 24) -or ($major -eq 24 -and $minor -ge 15)) {
+            if ($major -gt 24) {
                 return @{ Path = $found.Source; Version = "$major.$minor" }
+            }
+            if ($major -eq 24) {
+                if ($minor -ge 15) {
+                    return @{ Path = $found.Source; Version = "$major.$minor" }
+                }
             }
         }
     }
@@ -78,7 +83,10 @@ if (-not $pnpm) {
 
     if (-not $pnpm) {
         try {
-            irm https://get.pnpm.io/install.ps1 | iex
+            $tmpPnpmInstall = "$env:TEMP\pnpm-install-$(Get-Random).ps1"
+            irm https://get.pnpm.io/install.ps1 -OutFile $tmpPnpmInstall
+            & $tmpPnpmInstall
+            Remove-Item $tmpPnpmInstall -ErrorAction SilentlyContinue
         } catch {
             Error "pnpm 安装失败: $_"
             Write-Host "请手动安装: https://pnpm.io/installation"
@@ -116,7 +124,22 @@ if (Test-Path "$InstallDir\.git") {
     $isGitRepo = $true
 }
 
-if ($UpgradeMode -and $isGitRepo -and -not $ForceMode) {
+$action = "clone"
+if ($UpgradeMode) {
+    if ($isGitRepo) {
+        if (-not $ForceMode) {
+            $action = "upgrade"
+        }
+    }
+} elseif (Test-Path $InstallDir) {
+    if (-not $ForceMode) {
+        if (-not $UpgradeMode) {
+            $action = "exists"
+        }
+    }
+}
+
+if ($action -eq "upgrade") {
     Info "检测到现有安装，执行升级..."
     Set-Location $InstallDir
     try {
@@ -124,7 +147,7 @@ if ($UpgradeMode -and $isGitRepo -and -not $ForceMode) {
     } catch {
         git pull origin master
     }
-} elseif (Test-Path $InstallDir -and -not $ForceMode -and -not $UpgradeMode) {
+} elseif ($action -eq "exists") {
     Warn "目录已存在: $InstallDir"
     Warn "如需升级现有安装，请使用: .\install.ps1 --upgrade"
     Warn "如需强制重新安装，请使用: .\install.ps1 --force"
