@@ -191,10 +191,12 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 
-# ── 7. 清理旧 scream 命令，避免冲突 ───────────────────────────────────────────
-Info "清理旧 scream 命令..."
+# ── 7. 清理旧 scream 版本（Python / pip），避免冲突 ───────────────────────────
+Info "清理旧 scream 版本..."
+# 删除常见的旧 scream 命令
 $oldPaths = @(
     "$env:USERPROFILE\scream-code\bin\scream.cmd",
+    "$env:USERPROFILE\scream-code\bin\scream.bat",
     "$env:USERPROFILE\.local\bin\scream.cmd",
     "$env:LOCALAPPDATA\Microsoft\WindowsApps\scream.cmd"
 )
@@ -204,13 +206,24 @@ foreach ($old in $oldPaths) {
         Info "已删除: $old"
     }
 }
-# 清理旧的 scream PS 命令别名
+# 清理 pip 安装的旧 scream 包
+$pythonCmd = Get-Command python -ErrorAction SilentlyContinue
+if ($pythonCmd) {
+    & python -m pip uninstall -y scream 2>$null
+}
+# 清理旧 Python 虚拟环境
+$venvPath = "$InstallDir\.venv"
+if (Test-Path $venvPath) {
+    Remove-Item -Recurse -Force $venvPath -ErrorAction SilentlyContinue
+    Info "已删除旧 Python .venv"
+}
+# 清理 PowerShell Profile 中的旧 scream-code PATH 引用
 if (Test-Path $PROFILE) {
     $content = Get-Content $PROFILE -Raw -ErrorAction SilentlyContinue
-    if ($content -match 'scream') {
-        $cleaned = $content -replace '(?m)^.*scream.*\r?\n?', ''
+    if ($content -match 'scream-code') {
+        $cleaned = $content -replace '(?m)^.*scream-code.*\r?\n?', ''
         Set-Content $PROFILE $cleaned.TrimEnd() -Encoding UTF8
-        Info "已清理 PowerShell Profile 中的旧 scream 引用"
+        Info "已清理 PowerShell Profile 中的旧 scream-code 引用"
     }
 }
 

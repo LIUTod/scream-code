@@ -132,22 +132,36 @@ pnpm -r build || {
     exit 1
 }
 
-# ── 7. 清理旧 scream 命令，避免冲突 ───────────────────────────────────────────
-info "清理旧 scream 命令..."
+# ── 7. 清理旧 scream 版本（Python / pip / uv），避免冲突 ───────────────────────
+info "清理旧 scream 版本..."
+# 删除常见的旧 scream 命令
 for dir in \
     "$HOME/.scream-code/bin" \
     "$HOME/.local/bin" \
-    /usr/local/bin \
-    /opt/homebrew/bin; do
+    "/usr/local/bin" \
+    "/opt/homebrew/bin"; do
     if [ -f "$dir/scream" ]; then
         rm -f "$dir/scream"
         info "已删除: $dir/scream"
     fi
 done
-# 清理 shell 配置中的旧 scream PATH
+# 清理 pip / uv 全局安装的旧 scream 包
+if command -v pip3 >/dev/null 2>&1; then
+    pip3 uninstall -y scream 2>/dev/null || true
+fi
+if command -v pipx >/dev/null 2>&1; then
+    pipx uninstall scream 2>/dev/null || true
+fi
+# 清理旧 Python 虚拟环境（.venv / .tox）
+if [ -d "$INSTALL_DIR/.venv" ]; then
+    rm -rf "$INSTALL_DIR/.venv"
+    info "已删除旧 Python .venv"
+fi
+# 清理 shell 配置中的旧 scream-code PATH 条目
 for rc in "$HOME/.zshrc" "$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.zprofile"; do
     if [ -f "$rc" ]; then
-        sed -i.bak '/#.*scream.*PATH\|#.*scream-code.*PATH\|\/scream-code\/bin/d' "$rc" 2>/dev/null || true
+        sed -i.bak '/\.scream-code\/bin/d' "$rc" 2>/dev/null || true
+        sed -i.bak '/scream-code.*PATH/d' "$rc" 2>/dev/null || true
         rm -f "${rc}.bak" 2>/dev/null || true
     fi
 done
