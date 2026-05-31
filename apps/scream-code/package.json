@@ -65,10 +65,10 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@scream-cli/migration-legacy": "workspace:^",
     "@scream-cli/scream-code-oauth": "workspace:^",
     "@scream-cli/scream-code-sdk": "workspace:^",
     "@scream-cli/scream-telemetry": "workspace:^",
-    "@scream-cli/migration-legacy": "workspace:^",
     "@types/semver": "^7.7.0",
     "tsx": "^4.21.0"
   },
