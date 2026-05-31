@@ -1,3 +1,5 @@
+import { homedir } from 'node:os';
+
 import { describe, expect, it } from 'vitest';
 
 import { detectInstallSource } from '#/cli/update/source';
@@ -13,10 +15,12 @@ describe('detectInstallSource', () => {
   });
 
   it('returns source for the legacy ~/.scream-code path even when SCREAM_CODE_HOME points elsewhere', () => {
+    const legacyGitDir = `${homedir()}/.scream-code/.git`;
+
     expect(
       detectInstallSource({
         getInstallDir: () => '/custom/path',
-        existsSync: (path: string) => path === '/Users/tod/.scream-code/.git',
+        existsSync: (path: string) => path === legacyGitDir,
       }),
     ).toBe('source');
   });
