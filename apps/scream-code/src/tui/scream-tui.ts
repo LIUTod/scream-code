@@ -23,6 +23,7 @@ import { createGitLsFilesCache } from '#/utils/git/git-ls-files';
 import { appendInputHistory, loadInputHistory } from '#/utils/history/input-history';
 import { getInputHistoryFile } from '#/utils/paths';
 import { detectFdPath } from '#/utils/process/fd-detect';
+import type { CLIOptions } from '#/cli/options';
 
 import {
   BUILTIN_SLASH_COMMANDS,
@@ -107,7 +108,6 @@ import { formatErrorMessage } from './utils/event-payload';
 import { ImageAttachmentStore, type ImageAttachment } from './utils/image-attachment-store';
 import { extractMediaAttachments } from './utils/image-placeholder';
 import { hasPatchChanges } from './utils/object-patch';
-import { openUrl } from './utils/open-url';
 import { setProcessTitle } from './utils/proctitle';
 import { sessionRowsForPicker } from './utils/session-picker-rows';
 import { installTerminalFocusTracking } from './utils/terminal-focus';
@@ -118,6 +118,8 @@ import { nextTranscriptId } from './utils/transcript-id';
 
 export type { TUIState } from './tui-state';
 export { createTUIState } from './tui-state';
+import type { LoginProgressSpinnerHandle } from './types';
+
 export type {
   ScreamTUIOptions,
   TUIStartupOptions,
@@ -937,7 +939,8 @@ export class ScreamTUI {
 
   async syncRuntimeState(session: Session = this.requireSession()): Promise<void> {
     const status = await session.getStatus();
-    const goalMeta = session.metadata?.custom?.goal as
+    const custom = session.metadata?.['custom'] as Record<string, unknown> | undefined;
+    const goalMeta = custom?.['goal'] as
       | { active: boolean; content: string | null; continuationCount: number }
       | undefined;
     this.setAppState({
@@ -1303,7 +1306,7 @@ export class ScreamTUI {
     this.state.transcriptContainer.addChild(spinner);
     this.state.ui.requestRender();
     return {
-      stop: ({ ok, label: finalLabel }) => {
+      stop: ({ ok, label: finalLabel }: { ok: boolean; label: string }) => {
         spinner.stop();
         const tone = ok ? this.state.theme.colors.success : this.state.theme.colors.error;
         const symbol = ok ? '✓' : '✗';

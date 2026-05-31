@@ -6,7 +6,6 @@ import {
   fetchCatalog,
   inferWireType,
   loadBuiltInCatalog,
-  log,
   type Catalog,
 } from '@scream-cli/scream-code-sdk';
 
@@ -15,7 +14,6 @@ import type { ChoiceOption } from '../components/dialogs/choice-picker';
 
 import { resolveConnectCatalogRequest } from '../utils/connect-catalog';
 import { formatErrorMessage } from '../utils/event-payload';
-import type { LoginProgressSpinnerHandle } from '../types';
 import {
   promptApiKey,
   promptCatalogProviderSelection,

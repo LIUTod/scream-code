@@ -1,6 +1,4 @@
 import { execSync } from 'node:child_process';
-import { homedir } from 'node:os';
-import { join } from 'node:path';
 
 import {
   setCrashPhase,

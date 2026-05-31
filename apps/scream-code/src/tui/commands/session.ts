@@ -140,7 +140,7 @@ export async function handleExportDebugZipCommand(host: SlashCommandHost): Promi
 
   host.showStatus('正在导出会话…');
   try {
-    const installSource = await detectInstallSource();
+    const installSource = detectInstallSource();
     const shellEnv = detectShellEnvironment();
     const result = await host.harness.exportSession({
       id: session.id,

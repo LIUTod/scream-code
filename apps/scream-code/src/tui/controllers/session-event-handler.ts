@@ -351,10 +351,10 @@ export class SessionEventHandler {
     const session = this.host.session;
     if (session === undefined) return;
     const { appState } = this.host.state;
-    if (!session.metadata.custom) {
-      session.metadata.custom = {};
+    if (!session.metadata['custom']) {
+      session.metadata['custom'] = {};
     }
-    session.metadata.custom.goal = {
+    (session.metadata['custom'] as Record<string, unknown>)['goal'] = {
       active: appState.goalActive,
       content: appState.goal,
       continuationCount: appState.goalContinuationCount,

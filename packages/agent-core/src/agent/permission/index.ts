@@ -248,9 +248,9 @@ export class PermissionManager {
           has_feedback: false,
         });
         const resolved = result.resolveError?.(error);
-        return resolved === undefined
+        return await (resolved === undefined
           ? Promise.reject(error)
-          : this.permissionPolicyResolutionToPrepare(resolved, context, policyName);
+          : this.permissionPolicyResolutionToPrepare(resolved, context, policyName));
       } finally {
         this.pendingApprovals.delete(approvalId);
       }

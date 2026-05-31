@@ -1,19 +1,13 @@
 import type { SlashCommandHost } from './dispatch';
 
-interface GoalMeta {
-  active: boolean;
-  content: string | null;
-  continuationCount: number;
-}
-
 function syncGoalMetadata(host: SlashCommandHost): void {
   const session = host.session;
   if (session === undefined) return;
   const { appState } = host.state;
-  if (!session.metadata.custom) {
-    session.metadata.custom = {};
+  if (!session.metadata['custom']) {
+    session.metadata['custom'] = {};
   }
-  session.metadata.custom.goal = {
+  (session.metadata['custom'] as Record<string, unknown>)['goal'] = {
     active: appState.goalActive,
     content: appState.goal,
     continuationCount: appState.goalContinuationCount,

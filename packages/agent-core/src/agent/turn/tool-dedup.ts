@@ -81,10 +81,6 @@ function isMutatingTool(toolName: string): boolean {
   return MUTATING_TOOLS.has(toolName);
 }
 
-function buildStormKey(toolName: string, args: unknown): string {
-  return `${toolName} ${canonicalTelemetryArgs(args)}`;
-}
-
 /**
  * Detects and suppresses repetitive tool calls within a single turn.
  *

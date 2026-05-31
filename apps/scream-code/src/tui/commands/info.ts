@@ -3,6 +3,7 @@ import type { McpServerInfo, SessionStatus, SessionUsage } from '@scream-cli/scr
 import { buildMcpStatusReportLines } from '../components/messages/mcp-status-panel';
 import { buildStatusReportLines } from '../components/messages/status-panel';
 import { buildUsageReportLines, UsagePanelComponent, type ManagedUsageReport } from '../components/messages/usage-panel';
+import { isManagedUsageProvider } from '../constant/scream-tui';
 import { formatErrorMessage } from '../utils/event-payload';
 import type { SlashCommandHost } from './dispatch';
 

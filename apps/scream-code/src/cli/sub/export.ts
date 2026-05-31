@@ -189,7 +189,7 @@ function createDefaultExportDeps(overrides: Partial<ExportDeps> = {}): ExportDep
         }
       }),
     version: overrides.version ?? identity.version,
-    getInstallSource: overrides.getInstallSource ?? (() => detectInstallSource()),
+    getInstallSource: overrides.getInstallSource ?? (() => Promise.resolve(detectInstallSource())),
     getShellEnv: overrides.getShellEnv ?? detectShellEnvironment,
     confirmPreviousSession: overrides.confirmPreviousSession ?? confirmPreviousSession,
     cwd: overrides.cwd ?? (() => process.cwd()),

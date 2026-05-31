@@ -19,13 +19,19 @@ function fakeInitialAppState(): AppState {
     isReplaying: false,
     streamingPhase: 'idle',
     streamingStartTime: 0,
+    livePaneMode: 'idle',
     theme: 'dark',
     version: '0.0.0-test',
+    hasNewVersion: false,
+    latestVersion: null,
     editorCommand: null,
     notifications: { enabled: true, condition: 'unfocused' },
     availableModels: {},
     availableProviders: {},
     sessionTitle: null,
+    goal: null,
+    goalActive: false,
+    goalContinuationCount: 0,
   };
 }
 

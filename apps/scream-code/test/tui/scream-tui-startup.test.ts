@@ -12,11 +12,14 @@ import {
 interface StartupDriver {
   state: TUIState;
   init(): Promise<boolean>;
+  initMainTui(): Promise<void>;
 }
 
 interface ThemeTrackingDriver extends StartupDriver {
   refreshTerminalThemeTracking(): void;
 }
+
+type MigrateExitDriver = StartupDriver;
 
 function makeStartupInput(
   cliOptions: Partial<ScreamTUIStartupInput["cliOptions"]> = {},

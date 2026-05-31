@@ -62,14 +62,15 @@ export class FileMentionProvider implements AutocompleteProvider {
     private readonly gitCache: GitLsFilesCache,
   ) {
     this.slashCommandItems = slashCommands.map((cmd) => {
-      if ('label' in cmd && cmd.label !== undefined && cmd.label.length > 0) {
+      const ac = cmd as AutocompleteItem;
+      if (ac.label !== undefined && ac.label.length > 0) {
         return {
-          value: 'value' in cmd ? cmd.value : cmd.name,
-          label: cmd.label,
+          value: ac.value ?? (ac as { name?: string }).name ?? '',
+          label: ac.label,
         };
       }
-      const name = 'value' in cmd ? cmd.value : cmd.name;
-      const desc = cmd.description ?? '';
+      const name = ac.value ?? (ac as { name?: string }).name ?? '';
+      const desc = ac.description ?? '';
       return {
         value: name,
         label: `/${name}${desc ? ` — ${desc}` : ''}`,
