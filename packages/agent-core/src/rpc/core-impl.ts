@@ -6,6 +6,8 @@ import { getRootLogger, log } from '#/logging/logger';
 import { PluginManager } from '#/plugin';
 import { LocalFetchURLProvider } from '#/tools/providers/local-fetch-url';
 import { ScreamCliFetchURLProvider } from '#/tools/providers/scream-cli-fetch-url';
+import { DuckDuckGoSearchProvider } from '#/tools/providers/duckduckgo-search';
+import { FallbackSearchProvider } from '#/tools/providers/fallback-search';
 import { ScreamCliWebSearchProvider } from '#/tools/providers/scream-cli-web-search';
 import type { PromisableMethods } from '#/utils/types';
 import { getCoreVersion } from '#/version';
@@ -92,6 +94,7 @@ import type { ResumedAgentState, ResumeSessionResult } from './resumed';
 import type { SDKRPC } from './sdk-api';
 import { proxyWithExtraPayload } from './types';
 import { JianShellNotFoundError, LocalJian, type Jian } from '@scream-cli/jian';
+import type { WebSearchProvider } from '../tools/builtin';
 import type { ToolServices } from '../tools/support/services';
 
 const SCREAM_CODE_PROVIDER_NAME = 'managed:scream-code';
@@ -772,15 +775,35 @@ async function createRuntimeConfig(input: {
             defaultHeaders: input.screamRequestHeaders,
             ...serviceCredentials(fetchService, input.resolveOAuthTokenProvider),
           }),
-    webSearcher:
-      searchService?.baseUrl === undefined
-        ? undefined
-        : new ScreamCliWebSearchProvider({
-            baseUrl: searchService.baseUrl,
-            defaultHeaders: input.screamRequestHeaders,
-            ...serviceCredentials(searchService, input.resolveOAuthTokenProvider),
-          }),
+    webSearcher: buildWebSearcher(input),
   };
+}
+
+function buildWebSearcher(input: {
+  readonly config: ScreamConfig;
+  readonly screamRequestHeaders?: Record<string, string> | undefined;
+  readonly resolveOAuthTokenProvider?: OAuthTokenProviderResolver | undefined;
+}): WebSearchProvider | undefined {
+  const searchService = input.config.services?.screamCliSearch;
+  const ddgEnabled = input.config.services?.duckduckgo?.enabled !== false;
+
+  const screamProvider: WebSearchProvider | undefined =
+    searchService?.baseUrl !== undefined
+      ? new ScreamCliWebSearchProvider({
+          baseUrl: searchService.baseUrl,
+          defaultHeaders: input.screamRequestHeaders,
+          ...serviceCredentials(searchService, input.resolveOAuthTokenProvider),
+        })
+      : undefined;
+
+  const ddgProvider: WebSearchProvider | undefined = ddgEnabled
+    ? new DuckDuckGoSearchProvider()
+    : undefined;
+
+  if (screamProvider && ddgProvider) {
+    return new FallbackSearchProvider([screamProvider, ddgProvider]);
+  }
+  return screamProvider ?? ddgProvider;
 }
 
 function serviceCredentials(

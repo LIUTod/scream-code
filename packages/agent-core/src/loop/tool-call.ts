@@ -640,7 +640,7 @@ async function executeTool(
   return raceExecuteWithGraceAndHardTimeout(executePromise, signal, toolName);
 }
 
-const HARD_TIMEOUT_MS = 300_000;
+const HARD_TIMEOUT_MS = 1_200_000;
 
 async function raceExecuteWithGraceAndHardTimeout(
   executePromise: Promise<ExecutableToolResult>,

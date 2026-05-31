@@ -123,9 +123,16 @@ export const ScreamCliServiceConfigSchema = z.object({
 
 export type ScreamCliServiceConfig = z.infer<typeof ScreamCliServiceConfigSchema>;
 
+export const DuckDuckGoConfigSchema = z.object({
+  enabled: z.boolean().default(true),
+});
+
+export type DuckDuckGoConfig = z.infer<typeof DuckDuckGoConfigSchema>;
+
 export const ServicesConfigSchema = z.object({
   screamCliSearch: ScreamCliServiceConfigSchema.optional(),
   screamCliFetch: ScreamCliServiceConfigSchema.optional(),
+  duckduckgo: DuckDuckGoConfigSchema.optional(),
 });
 
 export type ServicesConfig = z.infer<typeof ServicesConfigSchema>;
@@ -211,9 +218,11 @@ const PermissionConfigPatchSchema = PermissionConfigSchema.partial();
 const LoopControlPatchSchema = LoopControlSchema.partial();
 const BackgroundConfigPatchSchema = BackgroundConfigSchema.partial();
 const ScreamCliServiceConfigPatchSchema = ScreamCliServiceConfigSchema.partial();
+const DuckDuckGoConfigPatchSchema = DuckDuckGoConfigSchema.partial();
 const ServicesConfigPatchSchema = z.object({
   screamCliSearch: ScreamCliServiceConfigPatchSchema.optional(),
   screamCliFetch: ScreamCliServiceConfigPatchSchema.optional(),
+  duckduckgo: DuckDuckGoConfigPatchSchema.optional(),
 });
 
 export const ScreamConfigPatchSchema = z
