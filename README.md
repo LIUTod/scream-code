@@ -1,3 +1,6 @@
+<img width="1667" height="302" alt="截屏2026-05-31 20 53 26" src="https://github.com/user-attachments/assets/568d6a08-c251-4204-906d-16de9b304b90" />
+
+
 # Scream Code
 
 你的超级Ai个人助手。
