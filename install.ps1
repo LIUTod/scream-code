@@ -20,7 +20,52 @@ function Info($msg)  { Write-Host "[INFO]  $msg" -ForegroundColor Green }
 function Warn($msg)  { Write-Host "[WARN]  $msg" -ForegroundColor Yellow }
 function Error($msg) { Write-Host "[ERROR] $msg" -ForegroundColor Red }
 
-# ── 1. 检测 Node.js >= 22.0.0 ─────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+# 0. 彻底清理所有旧版本 scream（Python / pip），确保全新安装不冲突
+# ══════════════════════════════════════════════════════════════════════════════
+Info "清理旧 scream 版本..."
+
+# ── 删除所有已知位置的旧 scream 命令 ──
+$oldPaths = @(
+    "$env:USERPROFILE\scream-code\bin\scream.cmd",
+    "$env:USERPROFILE\scream-code\bin\scream.bat",
+    "$env:USERPROFILE\scream-code\bin\scream",
+    "$env:USERPROFILE\.local\bin\scream.cmd",
+    "$env:LOCALAPPDATA\Microsoft\WindowsApps\scream.cmd"
+)
+foreach ($old in $oldPaths) {
+    if (Test-Path $old) {
+        Remove-Item -Force $old -ErrorAction SilentlyContinue
+        Info "已删除旧命令: $old"
+    }
+}
+
+# ── 卸载 pip 安装的旧 scream 包 ──
+$pythonCmd = Get-Command python -ErrorAction SilentlyContinue
+if ($pythonCmd) {
+    try { $null = & python -m pip uninstall -y scream 2>&1 } catch { }
+}
+
+# ── 彻底删除旧安装目录 ──
+if (Test-Path $InstallDir) {
+    Info "删除旧安装目录: $InstallDir"
+    Remove-Item -Recurse -Force $InstallDir -ErrorAction SilentlyContinue
+}
+
+# ── 清理 PowerShell Profile 中的旧 scream-code PATH 引用 ──
+if (Test-Path $PROFILE) {
+    $content = Get-Content $PROFILE -Raw -ErrorAction SilentlyContinue
+    if ($content -match 'scream-code') {
+        $cleaned = $content -replace '(?m)^.*scream-code.*\r?\n?', ''
+        Set-Content $PROFILE $cleaned.TrimEnd() -Encoding UTF8
+        Info "已清理 PowerShell Profile 中的旧 scream-code 引用"
+    }
+}
+Info "旧版本清理完毕"
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 1. 检测 Node.js >= 22.0.0
+# ══════════════════════════════════════════════════════════════════════════════
 function Find-Node {
     foreach ($cmd in @("node", "nodejs", "node22", "node24", "node25")) {
         $found = Get-Command $cmd -ErrorAction SilentlyContinue
@@ -64,7 +109,6 @@ if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
     Write-Host ""
     Write-Host "请下载安装 Git for Windows："
     Write-Host "  https://git-scm.com/download/win"
-    Write-Host "  安装时选择 'Use Git from the command line and also from 3rd-party software'"
     Write-Host ""
     exit 1
 }
@@ -76,7 +120,6 @@ $pnpm = Get-Command pnpm -ErrorAction SilentlyContinue
 if (-not $pnpm) {
     Info "pnpm 未安装，正在自动安装..."
     try {
-        # 优先尝试 corepack
         & $node -e "require('child_process').execSync('corepack enable', {stdio:'inherit'})" 2>$null
         $pnpm = Get-Command pnpm -ErrorAction SilentlyContinue
     } catch { }
@@ -92,7 +135,6 @@ if (-not $pnpm) {
             Write-Host "请手动安装: https://pnpm.io/installation"
             exit 1
         }
-        # 安装后重新定位
         $pnpm = Get-Command pnpm -ErrorAction SilentlyContinue
         if (-not $pnpm) {
             foreach ($p in @(
@@ -115,70 +157,18 @@ if (-not $pnpm) {
 }
 Info "pnpm: $(pnpm --version)"
 
-# ── 4. 确认安装路径 ────────────────────────────────────────────────────────
+# ── 4. 下载项目 ─────────────────────────────────────────────────────────────
 Info "安装路径: $InstallDir"
-
-# ── 5. 下载 / 升级项目 ─────────────────────────────────────────────────────
-$isGitRepo = $false
-if (Test-Path "$InstallDir\.git") {
-    $isGitRepo = $true
-}
-
-$action = "clone"
-if ($UpgradeMode) {
-    if ($isGitRepo) {
-        if (-not $ForceMode) {
-            $action = "upgrade"
-        }
-    }
-} elseif (Test-Path $InstallDir) {
-    if (-not $ForceMode) {
-        if (-not $UpgradeMode) {
-            $action = "exists"
-        }
-    }
-}
-
-if ($action -eq "upgrade") {
-    Info "检测到现有安装，执行升级..."
-    Set-Location $InstallDir
-    git pull origin main
-    if ($LASTEXITCODE -ne 0) {
-        git pull origin master
-        if ($LASTEXITCODE -ne 0) {
-            Error "git pull 失败（退出码: $LASTEXITCODE）"
-            Write-Host "请检查网络连接"
-            exit 1
-        }
-    }
-} elseif ($action -eq "exists") {
-    Warn "目录已存在: $InstallDir"
-    Warn "如需升级现有安装，请使用: .\install.ps1 --upgrade"
-    Warn "如需强制重新安装，请使用: .\install.ps1 --force"
+Info "下载 scream-code..."
+git clone --depth 1 "https://github.com/$Repo.git" $InstallDir
+if ($LASTEXITCODE -ne 0) {
+    Error "git clone 失败（退出码: $LASTEXITCODE）"
+    Write-Host "请检查网络连接（国内用户需要科学上网）"
     exit 1
-} else {
-    Info "下载 scream-code..."
-    if (Test-Path $InstallDir) {
-        Remove-Item -Recurse -Force $InstallDir
-    }
-    git clone --depth 1 "https://github.com/$Repo.git" $InstallDir
-    if ($LASTEXITCODE -ne 0) {
-        Error "git clone 失败（退出码: $LASTEXITCODE）"
-        Write-Host ""
-        Write-Host "可能原因及解决方式："
-        Write-Host "  1. 网络问题（国内用户需要科学上网）"
-        Write-Host "  2. 尝试手动下载后本地安装："
-        Write-Host "     git clone --depth 1 https://github.com/$Repo.git $InstallDir"
-        Write-Host "     cd $InstallDir"
-        Write-Host "     pnpm install && pnpm -r build"
-        Write-Host ""
-        exit 1
-    }
 }
-
 Set-Location $InstallDir
 
-# ── 6. 安装依赖并构建 ──────────────────────────────────────────────────────
+# ── 5. 安装依赖并构建 ──────────────────────────────────────────────────────
 Info "安装依赖并构建..."
 pnpm install
 if ($LASTEXITCODE -ne 0) {
@@ -191,45 +181,7 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 
-# ── 7. 清理旧 scream 版本（Python / pip），避免冲突 ───────────────────────────
-Info "清理旧 scream 版本..."
-# 删除常见的旧 scream 命令
-$oldPaths = @(
-    "$env:USERPROFILE\scream-code\bin\scream.cmd",
-    "$env:USERPROFILE\scream-code\bin\scream.bat",
-    "$env:USERPROFILE\.local\bin\scream.cmd",
-    "$env:LOCALAPPDATA\Microsoft\WindowsApps\scream.cmd"
-)
-foreach ($old in $oldPaths) {
-    if (Test-Path $old) {
-        Remove-Item -Force $old -ErrorAction SilentlyContinue
-        Info "已删除: $old"
-    }
-}
-# 清理 pip 安装的旧 scream 包（静默，失败不报错）
-$pythonCmd = Get-Command python -ErrorAction SilentlyContinue
-if ($pythonCmd) {
-    try {
-        $null = & python -m pip uninstall -y scream 2>&1
-    } catch { }
-}
-# 清理旧 Python 虚拟环境
-$venvPath = "$InstallDir\.venv"
-if (Test-Path $venvPath) {
-    Remove-Item -Recurse -Force $venvPath -ErrorAction SilentlyContinue
-    Info "已删除旧 Python .venv"
-}
-# 清理 PowerShell Profile 中的旧 scream-code PATH 引用
-if (Test-Path $PROFILE) {
-    $content = Get-Content $PROFILE -Raw -ErrorAction SilentlyContinue
-    if ($content -match 'scream-code') {
-        $cleaned = $content -replace '(?m)^.*scream-code.*\r?\n?', ''
-        Set-Content $PROFILE $cleaned.TrimEnd() -Encoding UTF8
-        Info "已清理 PowerShell Profile 中的旧 scream-code 引用"
-    }
-}
-
-# ── 8. 创建 scream 命令 ────────────────────────────────────────────────────
+# ── 6. 创建 scream 命令 ────────────────────────────────────────────────────
 Info "创建 scream 命令..."
 New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
 
@@ -242,7 +194,7 @@ cd /d "$InstallDir"
 "@
 Set-Content -Path "$BinDir\scream.cmd" -Value $ScreamCmd -Encoding Default
 
-# ── 9. 添加到用户 PATH ─────────────────────────────────────────────────────
+# ── 7. 添加到用户 PATH ─────────────────────────────────────────────────────
 $UserPath = [Environment]::GetEnvironmentVariable("PATH", "User")
 if ($UserPath -notlike "*$BinDir*") {
     Info "添加 $BinDir 到用户 PATH..."

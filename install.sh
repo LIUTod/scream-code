@@ -26,7 +26,52 @@ info()  { echo "[INFO]  $*"; }
 warn()  { echo "[WARN]  $*" >&2; }
 error() { echo "[ERROR] $*" >&2; }
 
-# ── 1. 检测 Node.js >= 22.0.0 ─────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+# 0. 彻底清理所有旧版本 scream（Python / pip / uv），确保全新安装不冲突
+# ══════════════════════════════════════════════════════════════════════════════
+info "清理旧 scream 版本..."
+
+# ── 删除所有已知位置的旧 scream 命令 ──
+for dir in \
+    "$HOME/.scream-code/bin" \
+    "$HOME/.local/bin" \
+    "/usr/local/bin" \
+    "/opt/homebrew/bin"; do
+    if [ -f "$dir/scream" ]; then
+        rm -f "$dir/scream"
+        info "已删除旧命令: $dir/scream"
+    fi
+done
+
+# ── 卸载 pip / pipx 全局安装的旧 scream 包 ──
+for pip_cmd in pip3 pip; do
+    if command -v "$pip_cmd" >/dev/null 2>&1; then
+        "$pip_cmd" uninstall -y scream 2>/dev/null || true
+    fi
+done
+if command -v pipx >/dev/null 2>&1; then
+    pipx uninstall scream 2>/dev/null || true
+fi
+
+# ── 彻底删除旧 scream-code 目录（Python .venv / node_modules 等） ──
+if [ -d "$INSTALL_DIR" ]; then
+    info "删除旧安装目录: $INSTALL_DIR"
+    rm -rf "$INSTALL_DIR"
+fi
+
+# ── 清理 shell 配置中的所有旧 scream-code PATH 条目 ──
+for rc in "$HOME/.zshrc" "$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.zprofile"; do
+    if [ -f "$rc" ]; then
+        sed -i.bak '/\.scream-code\/bin/d' "$rc" 2>/dev/null || true
+        sed -i.bak '/scream-code.*PATH/d' "$rc" 2>/dev/null || true
+        rm -f "${rc}.bak" 2>/dev/null || true
+    fi
+done
+info "旧版本清理完毕"
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 1. 检测 Node.js >= 22.0.0
+# ══════════════════════════════════════════════════════════════════════════════
 find_node() {
     for cmd in node nodejs node22 node24 node25; do
         if command -v "$cmd" >/dev/null 2>&1; then
@@ -34,7 +79,6 @@ find_node() {
             if [[ "$ver_output" =~ ^([0-9]+)\.([0-9]+)\. ]]; then
                 major="${BASH_REMATCH[1]}"
                 minor="${BASH_REMATCH[2]}"
-                # 需要 >= 22.0
                 if [[ "$major" -gt 22 ]] || { [[ "$major" -eq 22 ]] && [[ "$minor" -ge 0 ]]; }; then
                     echo "$cmd"
                     return 0
@@ -75,11 +119,9 @@ info "Git: $(git --version)"
 info "检测 pnpm..."
 if ! command -v pnpm >/dev/null 2>&1; then
     info "pnpm 未安装，正在自动安装..."
-    # 优先尝试 corepack (Node >= 16.13 内置)
     if $NODE_CMD -e "process.exit(require('module').createRequire(import.meta.url)('child_process').execSync('corepack --version', {encoding:'utf8'}).trim() ? 0 : 1)" 2>/dev/null || command -v corepack >/dev/null 2>&1; then
         corepack enable 2>/dev/null || true
     fi
-    # 如果 corepack 没成功，使用 standalone installer
     if ! command -v pnpm >/dev/null 2>&1; then
         curl -fsSL https://get.pnpm.io/install.sh | sh - || {
             error "pnpm 安装失败"
@@ -91,37 +133,17 @@ if ! command -v pnpm >/dev/null 2>&1; then
 fi
 info "pnpm: $(pnpm --version)"
 
-# ── 4. 确认安装路径 ────────────────────────────────────────────────────────
+# ── 4. 下载项目 ─────────────────────────────────────────────────────────────
 info "安装路径: $INSTALL_DIR"
-
-# ── 5. 下载 / 升级项目 ─────────────────────────────────────────────────────
-if [[ "$UPGRADE_MODE" == true ]] && [[ -d "$SCREAM_HOME/.git" ]] && [[ "$FORCE_MODE" == false ]]; then
-    info "检测到现有安装，执行升级..."
-    cd "$SCREAM_HOME"
-    git pull origin main || git pull origin master || {
-        error "git pull 失败"
-        exit 1
-    }
-elif [[ -d "$SCREAM_HOME" ]] && [[ "$FORCE_MODE" == false ]] && [[ "$UPGRADE_MODE" == false ]]; then
-    warn "目录已存在: $SCREAM_HOME"
-    warn "如需升级现有安装，请使用: ./install.sh --upgrade"
-    warn "如需强制重新安装，请使用: ./install.sh --force"
+info "下载 scream-code..."
+git clone --depth 1 "https://github.com/$REPO.git" "$INSTALL_DIR" || {
+    error "下载失败"
+    echo "请检查网络连接（国内用户需要科学上网）"
     exit 1
-else
-    info "下载 scream-code..."
-    rm -rf "$SCREAM_HOME"
-    git clone --depth 1 "https://github.com/$REPO.git" "$SCREAM_HOME" || {
-        error "下载失败"
-        echo "请检查网络连接（国内用户需要科学上网）"
-        exit 1
-    }
-    cd "$SCREAM_HOME"
-fi
+}
+cd "$INSTALL_DIR"
 
-# 确保在仓库目录中
-cd "$SCREAM_HOME"
-
-# ── 6. 安装依赖并构建 ──────────────────────────────────────────────────────
+# ── 5. 安装依赖并构建 ──────────────────────────────────────────────────────
 info "安装依赖并构建..."
 pnpm install || {
     error "依赖安装失败"
@@ -132,41 +154,7 @@ pnpm -r build || {
     exit 1
 }
 
-# ── 7. 清理旧 scream 版本（Python / pip / uv），避免冲突 ───────────────────────
-info "清理旧 scream 版本..."
-# 删除常见的旧 scream 命令
-for dir in \
-    "$HOME/.scream-code/bin" \
-    "$HOME/.local/bin" \
-    "/usr/local/bin" \
-    "/opt/homebrew/bin"; do
-    if [ -f "$dir/scream" ]; then
-        rm -f "$dir/scream"
-        info "已删除: $dir/scream"
-    fi
-done
-# 清理 pip / uv 全局安装的旧 scream 包
-if command -v pip3 >/dev/null 2>&1; then
-    pip3 uninstall -y scream 2>/dev/null || true
-fi
-if command -v pipx >/dev/null 2>&1; then
-    pipx uninstall scream 2>/dev/null || true
-fi
-# 清理旧 Python 虚拟环境（.venv / .tox）
-if [ -d "$INSTALL_DIR/.venv" ]; then
-    rm -rf "$INSTALL_DIR/.venv"
-    info "已删除旧 Python .venv"
-fi
-# 清理 shell 配置中的旧 scream-code PATH 条目
-for rc in "$HOME/.zshrc" "$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.zprofile"; do
-    if [ -f "$rc" ]; then
-        sed -i.bak '/\.scream-code\/bin/d' "$rc" 2>/dev/null || true
-        sed -i.bak '/scream-code.*PATH/d' "$rc" 2>/dev/null || true
-        rm -f "${rc}.bak" 2>/dev/null || true
-    fi
-done
-
-# ── 8. 创建 scream 命令 ────────────────────────────────────────────────────
+# ── 6. 创建 scream 命令 ────────────────────────────────────────────────────
 mkdir -p "$BIN_DIR"
 cat > "$BIN_DIR/scream" <<'EOF'
 #!/usr/bin/env bash
@@ -176,7 +164,7 @@ exec node "$SCREAM_HOME/apps/scream-code/dist/main.mjs" "$@"
 EOF
 chmod +x "$BIN_DIR/scream"
 
-# ── 9. 添加到 PATH ─────────────────────────────────────────────────────────
+# ── 7. 添加到 PATH ─────────────────────────────────────────────────────────
 if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
     SHELL_RC=""
     if [ -n "${ZSH_VERSION:-}" ] || [ "$(basename "$SHELL")" = "zsh" ]; then
