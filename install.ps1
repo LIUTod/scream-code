@@ -142,10 +142,14 @@ if ($UpgradeMode) {
 if ($action -eq "upgrade") {
     Info "检测到现有安装，执行升级..."
     Set-Location $InstallDir
-    try {
-        git pull origin main
-    } catch {
+    git pull origin main
+    if ($LASTEXITCODE -ne 0) {
         git pull origin master
+        if ($LASTEXITCODE -ne 0) {
+            Error "git pull 失败（退出码: $LASTEXITCODE）"
+            Write-Host "请检查网络连接"
+            exit 1
+        }
     }
 } elseif ($action -eq "exists") {
     Warn "目录已存在: $InstallDir"
@@ -157,11 +161,17 @@ if ($action -eq "upgrade") {
     if (Test-Path $InstallDir) {
         Remove-Item -Recurse -Force $InstallDir
     }
-    try {
-        git clone --depth 1 "https://github.com/$Repo.git" $InstallDir
-    } catch {
-        Error "下载失败: $_"
-        Write-Host "请检查网络连接（国内用户需要科学上网）"
+    git clone --depth 1 "https://github.com/$Repo.git" $InstallDir
+    if ($LASTEXITCODE -ne 0) {
+        Error "git clone 失败（退出码: $LASTEXITCODE）"
+        Write-Host ""
+        Write-Host "可能原因及解决方式："
+        Write-Host "  1. 网络问题（国内用户需要科学上网）"
+        Write-Host "  2. 尝试手动下载后本地安装："
+        Write-Host "     git clone --depth 1 https://github.com/$Repo.git $InstallDir"
+        Write-Host "     cd $InstallDir"
+        Write-Host "     pnpm install && pnpm -r build"
+        Write-Host ""
         exit 1
     }
 }
@@ -170,16 +180,14 @@ Set-Location $InstallDir
 
 # ── 6. 安装依赖并构建 ──────────────────────────────────────────────────────
 Info "安装依赖并构建..."
-try {
-    pnpm install
-} catch {
-    Error "依赖安装失败: $_"
+pnpm install
+if ($LASTEXITCODE -ne 0) {
+    Error "依赖安装失败（退出码: $LASTEXITCODE）"
     exit 1
 }
-try {
-    pnpm -r build
-} catch {
-    Error "构建失败: $_"
+pnpm -r build
+if ($LASTEXITCODE -ne 0) {
+    Error "构建失败（退出码: $LASTEXITCODE）"
     exit 1
 }
 
