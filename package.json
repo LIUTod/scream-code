@@ -21,7 +21,7 @@
     "version": "changeset version",
     "version:release": "changeset version",
     "publish": "pnpm run typecheck && pnpm run lint && pnpm run sherif && pnpm run test && pnpm run build && pnpm run lint:pkg && changeset publish",
-    "prepare": "simple-git-hooks"
+    "prepare": "node scripts/prepare.mjs"
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "0.18.2",

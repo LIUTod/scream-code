@@ -14,16 +14,6 @@
   "bugs": {
     "url": "https://github.com/LIUTod/scream-code/issues"
   },
-  "keywords": [
-    "scream",
-    "telemetry",
-    "analytics",
-    "events",
-    "client"
-  ],
-  "files": [
-    "dist"
-  ],
   "type": "module",
   "imports": {
     "#/*": [

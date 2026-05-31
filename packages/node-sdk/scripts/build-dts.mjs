@@ -1,9 +1,20 @@
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import path from 'node:path';
 
 const packageRoot = path.resolve(import.meta.dirname, '..');
+const monorepoRoot = path.resolve(import.meta.dirname, '../../..');
+const require = createRequire(import.meta.url);
+
+// JS entry points for build tools, resolved from monorepo root.
+// We call them via `node` directly to avoid the Windows .cmd spawn issue
+// (Node.js v24 `spawn` cannot run .cmd files without shell: true).
+const TOOL_PACKAGES = new Map([
+  ['tsc', 'typescript/bin/tsc'],
+  ['api-extractor', '@microsoft/api-extractor/bin/api-extractor'],
+]);
 const tempDir = path.join(packageRoot, '.tmp-api-extractor');
 const dtsRoot = path.join(tempDir, 'dts');
 const providerClientShimPath = path.join(dtsRoot, 'provider-clients.d.ts');
@@ -26,11 +37,34 @@ try {
   await rm(tempDir, { recursive: true, force: true });
 }
 
+function resolveToolEntry(packageSpec) {
+  // Try direct require.resolve first (works for packages that export their bin).
+  try {
+    return require.resolve(packageSpec, { paths: [monorepoRoot] });
+  } catch {
+    // The package may not export its bin path (e.g. @microsoft/api-extractor).
+    // Fall back to resolving the package root and joining the bin path manually.
+    const parts = packageSpec.split('/');
+    const packageName = parts[0].startsWith('@') ? `${parts[0]}/${parts[1]}` : parts[0];
+    const subpath = packageSpec.slice(packageName.length + 1);
+
+    const pkgRoot = path.dirname(
+      require.resolve(`${packageName}/package.json`, { paths: [monorepoRoot] }),
+    );
+    return path.join(pkgRoot, subpath);
+  }
+}
+
 function run(command, args) {
-  const executable = process.platform === 'win32' ? `${command}.cmd` : command;
+  const packageSpec = TOOL_PACKAGES.get(command);
+  if (packageSpec === undefined) {
+    throw new Error(`Unknown build tool: ${command}`);
+  }
+
+  const entry = resolveToolEntry(packageSpec);
 
   return new Promise((resolve, reject) => {
-    const child = spawn(executable, args, {
+    const child = spawn(process.execPath, [entry, ...args], {
       cwd: packageRoot,
       stdio: 'inherit',
     });

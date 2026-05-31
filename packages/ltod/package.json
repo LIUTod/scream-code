@@ -14,15 +14,6 @@
   "bugs": {
     "url": "https://github.com/LIUTod/scream-code/issues"
   },
-  "keywords": [
-    "llm",
-    "ai",
-    "agent",
-    "provider"
-  ],
-  "files": [
-    "dist"
-  ],
   "type": "module",
   "imports": {
     "#/*": [

@@ -14,17 +14,6 @@
   "bugs": {
     "url": "https://github.com/LIUTod/scream-code/issues"
   },
-  "keywords": [
-    "scream",
-    "sdk",
-    "typescript",
-    "agent",
-    "api"
-  ],
-  "files": [
-    "dist",
-    "README.md"
-  ],
   "type": "module",
   "imports": {
     "#/*": [
@@ -37,17 +26,6 @@
       "types": "./src/index.ts",
       "default": "./src/index.ts"
     }
-  },
-  "publishConfig": {
-    "access": "public",
-    "exports": {
-      ".": {
-        "types": "./dist/index.d.mts",
-        "import": "./dist/index.mjs",
-        "default": "./dist/index.mjs"
-      }
-    },
-    "provenance": true
   },
   "scripts": {
     "build": "tsdown && pnpm run build:dts",
