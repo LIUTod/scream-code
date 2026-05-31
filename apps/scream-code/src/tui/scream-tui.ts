@@ -51,6 +51,10 @@ import { CompactionComponent } from './components/dialogs/compaction';
 import { HelpPanelComponent } from './components/dialogs/help-panel';
 import { QuestionDialogComponent } from './components/dialogs/question-dialog';
 import { SessionPickerComponent } from './components/dialogs/session-picker';
+import { MemoryPickerComponent } from './components/dialogs/memory-picker';
+import { formatMemoryMemoForInjection } from './commands/memory';
+import { MemoryMemoStore, resolveProjectDir, type MemoryMemoSummary } from '@scream-cli/memory';
+import { getDataDir } from '#/utils/paths';
 import { AuthFlowController } from './controllers/auth-flow';
 import { EditorKeyboardController } from './controllers/editor-keyboard';
 import { SessionEventHandler } from './controllers/session-event-handler';
@@ -1385,7 +1389,7 @@ export class ScreamTUI {
   }
 
   private resolveActivityPaneMode(): EffectiveActivityPaneMode {
-    if (this.state.activeDialog === 'session-picker') return 'hidden';
+    if (this.state.activeDialog === 'session-picker' || this.state.activeDialog === 'memory-picker') return 'hidden';
     if (this.state.livePane.pendingApproval !== null) return 'hidden';
     if (this.state.appState.isCompacting) return 'hidden';
     if (this.state.livePane.pendingQuestion !== null) return 'hidden';
@@ -1579,6 +1583,46 @@ export class ScreamTUI {
   }
 
   hideSessionPicker(): void {
+    this.state.activeDialog = null;
+    this.restoreEditor();
+  }
+
+  async showMemoryPicker(): Promise<void> {
+    const store = new MemoryMemoStore(
+      resolveProjectDir(getDataDir(), this.state.appState.workDir),
+    );
+    let memos: MemoryMemoSummary[] = [];
+    let total = 0;
+    try {
+      const result = await store.list({ limit: 50 });
+      memos = result.memos;
+      total = result.total;
+    } catch {
+      // show empty list on error
+    }
+
+    this.state.activeDialog = 'memory-picker';
+    this.mountEditorReplacement(
+      new MemoryPickerComponent({
+        store,
+        memos,
+        total,
+        loading: false,
+        colors: this.state.theme.colors,
+        onCancel: () => {
+          this.hideMemoryPicker();
+        },
+        onInject: (memo) => {
+          const injection = formatMemoryMemoForInjection(memo);
+          this.sendNormalUserInput(injection);
+          this.showStatus(`已注入备忘录 #${memo.id}`);
+          this.hideMemoryPicker();
+        },
+      }),
+    );
+  }
+
+  hideMemoryPicker(): void {
     this.state.activeDialog = null;
     this.restoreEditor();
   }

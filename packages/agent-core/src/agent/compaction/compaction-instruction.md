@@ -65,3 +65,32 @@ The goal of compaction is to keep essential code patterns, technical details, an
 
 - [Detailed non tool use user message]
 - ...
+
+## Memory Memo Extraction
+
+AFTER completing the compaction summary above, scan the messages being compacted for **completed task loops**. A task loop is "completed" when:
+- The user made a clear request or asked a specific question
+- A solution or answer was provided
+- The outcome is clear (success, partial success, blocked, or abandoned)
+
+For each completed task loop found, output a structured memo block:
+
+```memory-memo
+{
+  "userRequirement": "<the user's request or question, one sentence>",
+  "solution": "<the approach or solution, 2-4 sentences>",
+  "completionStatus": "<done | partially done | blocked | abandoned>",
+  "problemsEncountered": "<issues found and how they were resolved, or 'none'>"
+}
+```
+
+Guidelines:
+- Include any significant errors and their fixes in "problemsEncountered".
+- Skip in-progress work unless it contains a landmark error+fix that would help future sessions.
+- Merge closely related sub-tasks into a single memo.
+- Use the exact field names and JSON format. Do NOT add extra fields.
+
+If no completed task loops are found in the compacted messages, output:
+```memory-memo
+{"none": true}
+```

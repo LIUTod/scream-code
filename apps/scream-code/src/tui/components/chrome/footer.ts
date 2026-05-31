@@ -61,7 +61,7 @@ const TOOLBAR_TIPS: readonly ToolbarTip[] = [
   { text: 'ctrl+c: 取消' },
   { text: '/theme: 切换主题' },
   { text: '/auto: 自动权限模式' },
-  { text: '/yolo: 切换 yolo' },
+  { text: '/yes: 自动批准' },
   { text: '/help: 显示命令' },
   { text: '/config: 选择并配置你常用的模型商', solo: true, priority: 3 },
   { text: '让 Scream 安排任务，例如 "八点提醒我上号打三角洲"', solo: true, priority: 3 },
@@ -248,7 +248,7 @@ export class FooterComponent implements Component {
     // ── Line 1: mode badges + model + [N task(s) running] + [N agent(s) running] + cwd + git + hints ──
     const left: string[] = [];
     if (state.permissionMode === 'auto') left.push(chalk.hex(colors.warning).bold('auto'));
-    if (state.permissionMode === 'yolo') left.push(chalk.hex(colors.warning).bold('yolo'));
+    if (state.permissionMode === 'yolo') left.push(chalk.hex(colors.warning).bold('YES'));
     if (state.planMode) left.push(chalk.hex(colors.primary).bold('plan'));
     if (state.goalActive && state.goal) {
       const goalText = state.goal.length > 20 ? state.goal.slice(0, 20) + '…' : state.goal;

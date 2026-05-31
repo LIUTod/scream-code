@@ -19,7 +19,7 @@ const PERMISSION_OPTIONS: readonly ChoiceOption[] = [
   },
   {
     value: 'yolo',
-    label: 'YOLO',
+    label: 'YES',
     description:
       '自动批准工具操作和计划转换。需要您输入时代理仍会明确提问。',
   },

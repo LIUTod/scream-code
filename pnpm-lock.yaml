@@ -78,6 +78,9 @@ importers:
       '@mariozechner/clipboard':
         specifier: ^0.3.2
         version: 0.3.9
+      '@scream-cli/memory':
+        specifier: workspace:*
+        version: link:../../packages/memory
       chalk:
         specifier: ^5.4.1
         version: 5.6.2
@@ -133,6 +136,9 @@ importers:
       '@scream-cli/ltod':
         specifier: workspace:^
         version: link:../ltod
+      '@scream-cli/memory':
+        specifier: workspace:*
+        version: link:../memory
       ajv:
         specifier: ^8.18.0
         version: 8.20.0
@@ -247,6 +253,12 @@ importers:
       ajv-formats:
         specifier: ^3.0.1
         version: 3.0.1(ajv@8.20.0)
+
+  packages/memory:
+    dependencies:
+      pathe:
+        specifier: ^2.0.3
+        version: 2.0.3
 
   packages/migration-legacy:
     dependencies:

@@ -1,0 +1,432 @@
+/**
+ * MemoryPicker — pi-tui interactive memory memo browser.
+ * Mirrors SessionPickerComponent layout and interaction patterns 1:1.
+ *
+ * Data must be loaded BEFORE mounting — see SessionPickerComponent.
+ *
+ * Keyboard:
+ *   ↑↓      Navigate
+ *   Enter   View detail / confirm delete
+ *   i       Inject into current session
+ *   d       Delete (with confirmation)
+ *   /       Search filter
+ *   Esc     Cancel / back
+ */
+
+import {
+  Container,
+  matchesKey,
+  Key,
+  truncateToWidth,
+  visibleWidth,
+  type Focusable,
+} from '@earendil-works/pi-tui';
+import chalk from 'chalk';
+
+import type { MemoryMemo, MemoryMemoSummary } from '@scream-cli/memory';
+import { MemoryMemoStore, resolveProjectDir } from '@scream-cli/memory';
+
+import { getDataDir } from '#/utils/paths';
+import type { ColorPalette } from '#/tui/theme/colors';
+import { printableChar } from '#/tui/utils/printable-key';
+
+const ELLIPSIS = '…';
+
+function formatRelativeTime(ts: number): string {
+  if (!Number.isFinite(ts) || ts <= 0) return '';
+  const diffSec = Math.floor(Math.max(0, Date.now() - ts) / 1000);
+  if (diffSec < 60) return '刚刚';
+  const minutes = Math.floor(diffSec / 60);
+  if (minutes < 60) return `${String(minutes)} 分钟前`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${String(hours)} 小时前`;
+  const days = Math.floor(hours / 24);
+  return `${String(days)} 天前`;
+}
+
+function singleLine(text: string): string {
+  return text.replaceAll(/\s+/g, ' ').trim();
+}
+
+function statusLabel(status: string): string {
+  switch (status) {
+    case 'done': return '已完成';
+    case 'partially done': return '部分完成';
+    case 'blocked': return '受阻';
+    case 'abandoned': return '已放弃';
+    default: return status;
+  }
+}
+
+function sourceLabel(source: string): string {
+  return source === 'compaction' ? '压缩提取' : '退出提取';
+}
+
+export interface MemoryPickerOptions {
+  store: MemoryMemoStore;
+  memos: MemoryMemoSummary[];
+  total: number;
+  loading: boolean;
+  colors: ColorPalette;
+  onCancel: () => void;
+  onInject: (memo: MemoryMemoSummary) => void;
+}
+
+type PickerMode = 'list' | 'detail' | 'confirmDelete';
+
+export class MemoryPickerComponent extends Container implements Focusable {
+  private store: MemoryMemoStore;
+  private colors: ColorPalette;
+  private onCancel: () => void;
+  private onInject: (memo: MemoryMemoSummary) => void;
+
+  focused = false;
+  private selectedIndex = 0;
+  private mode: PickerMode = 'list';
+  private searchQuery = '';
+  private isSearching = false;
+  private searchInput = '';
+
+  private memos: MemoryMemoSummary[];
+  private total: number;
+  private loading: boolean;
+  private detailMemo: MemoryMemo | null = null;
+
+  private maxVisibleItems = 5;
+
+  constructor(opts: MemoryPickerOptions) {
+    super();
+    this.store = opts.store;
+    this.memos = opts.memos;
+    this.total = opts.total;
+    this.loading = opts.loading;
+    this.colors = opts.colors;
+    this.onCancel = opts.onCancel;
+    this.onInject = opts.onInject;
+  }
+
+  private async loadMemos(): Promise<void> {
+    this.loading = true;
+    try {
+      const result = await this.store.list({ limit: 50, search: this.searchQuery || undefined });
+      this.memos = result.memos;
+      this.total = result.total;
+      this.selectedIndex = 0;
+    } catch {
+      this.memos = [];
+      this.total = 0;
+    } finally {
+      this.loading = false;
+    }
+  }
+
+  handleInput(data: string): void {
+    if (this.isSearching) {
+      if (matchesKey(data, Key.escape)) {
+        this.isSearching = false;
+        this.searchInput = '';
+        return;
+      }
+      if (matchesKey(data, Key.enter)) {
+        this.isSearching = false;
+        this.searchQuery = this.searchInput.trim();
+        void this.loadMemos();
+        return;
+      }
+      if (matchesKey(data, Key.backspace) || matchesKey(data, Key.delete)) {
+        this.searchInput = this.searchInput.slice(0, -1);
+        return;
+      }
+      const ch = printableChar(data);
+      if (ch.length > 0) {
+        this.searchInput += ch;
+      }
+      return;
+    }
+
+    if (this.mode === 'confirmDelete') {
+      if (matchesKey(data, Key.enter)) {
+        const memo = this.memos[this.selectedIndex];
+        if (memo) void this.deleteAndReload(memo.id);
+        return;
+      }
+      if (matchesKey(data, Key.escape)) {
+        this.mode = 'list';
+        return;
+      }
+      return;
+    }
+
+    if (this.mode === 'detail') {
+      if (matchesKey(data, Key.escape) || matchesKey(data, Key.enter)) {
+        this.mode = 'list';
+        this.detailMemo = null;
+        return;
+      }
+    }
+
+    // List mode
+    if (matchesKey(data, Key.escape)) {
+      if (this.searchQuery.length > 0) {
+        this.searchQuery = '';
+        void this.loadMemos();
+        return;
+      }
+      this.onCancel();
+      return;
+    }
+    if (matchesKey(data, Key.enter) && this.memos.length > 0) {
+      void this.showDetail();
+      return;
+    }
+    if (matchesKey(data, Key.up)) {
+      this.selectedIndex = Math.max(0, this.selectedIndex - 1);
+      return;
+    }
+    if (matchesKey(data, Key.down)) {
+      this.selectedIndex = Math.min(this.memos.length - 1, this.selectedIndex + 1);
+      return;
+    }
+
+    const ch = printableChar(data);
+    if (ch === 'i' || ch === 'I') {
+      const memo = this.memos[this.selectedIndex];
+      if (memo) {
+        this.onInject(memo);
+        this.onCancel();
+      }
+      return;
+    }
+    if (ch === 'd' || ch === 'D') {
+      if (this.memos.length > 0) this.mode = 'confirmDelete';
+      return;
+    }
+    if (ch === '/') {
+      this.isSearching = true;
+      this.searchInput = '';
+      return;
+    }
+  }
+
+  private async showDetail(): Promise<void> {
+    const summary = this.memos[this.selectedIndex];
+    if (!summary) return;
+    try {
+      this.detailMemo = await this.store.get(summary.id) ?? null;
+    } catch {
+      this.detailMemo = null;
+    }
+    if (this.detailMemo) this.mode = 'detail';
+  }
+
+  private async deleteAndReload(id: string): Promise<void> {
+    try {
+      await this.store.delete(id);
+    } catch { /* ignore */ }
+    await this.loadMemos();
+    this.mode = 'list';
+    if (this.selectedIndex >= this.memos.length) {
+      this.selectedIndex = Math.max(0, this.memos.length - 1);
+    }
+  }
+
+  override render(width: number): string[] {
+    const c = this.colors;
+    const lines: string[] = [];
+
+    // ── separator
+    lines.push(chalk.hex(c.primary)('─'.repeat(width)));
+
+    // Search input bar
+    if (this.isSearching) {
+      const prompt = '搜索: ';
+      const cursor = '█';
+      const input = this.searchInput.length > 0 ? this.searchInput : cursor;
+      lines.push(chalk.hex(c.primary).bold(prompt) + chalk.hex(c.text)(input));
+      lines.push(chalk.hex(c.primary)('─'.repeat(width)));
+      return lines;
+    }
+
+    // Header
+    const searchBadge = this.searchQuery.length > 0
+      ? ` — 搜索: "${this.searchQuery}"`
+      : '';
+    const headerLabel = '记忆备忘录 ';
+    const headerHint = this.searchQuery.length > 0
+      ? '(Esc 清除搜索)'
+      : '(↑↓ 导航，Enter 查看，i 注入，d 删除，/ 搜索，Esc 关闭)';
+    const labelWidth = visibleWidth(headerLabel);
+    const hintBudget = Math.max(0, width - labelWidth);
+    const shownHint = truncateToWidth(headerHint, hintBudget, ELLIPSIS);
+    lines.push(
+      chalk.hex(c.primary).bold(headerLabel) + chalk.hex(c.textMuted)(shownHint),
+    );
+    lines.push('');
+
+    // Loading
+    if (this.loading) {
+      lines.push(chalk.hex(c.textMuted)(truncateToWidth('  正在加载...', width, ELLIPSIS)));
+      lines.push(chalk.hex(c.primary)('─'.repeat(width)));
+      return lines;
+    }
+
+    // Empty
+    if (this.memos.length === 0) {
+      if (this.searchQuery.length > 0) {
+        lines.push(chalk.hex(c.textMuted)(
+          truncateToWidth(`  未找到匹配 "${this.searchQuery}" 的记忆。`, width, ELLIPSIS),
+        ));
+      } else {
+        lines.push(chalk.hex(c.textMuted)(
+          truncateToWidth('  暂无记忆备忘录。', width, ELLIPSIS),
+        ));
+        lines.push(chalk.hex(c.textMuted)(
+          truncateToWidth('  压缩对话或退出会话时，系统会自动提取并保存。', width, ELLIPSIS),
+        ));
+      }
+      lines.push(chalk.hex(c.primary)('─'.repeat(width)));
+      return lines;
+    }
+
+    // Detail mode
+    if (this.mode === 'detail' && this.detailMemo) {
+      return this.renderDetail(lines, width, c);
+    }
+
+    // Confirm delete
+    if (this.mode === 'confirmDelete') {
+      const memo = this.memos[this.selectedIndex];
+      if (memo) {
+        lines.push(truncateToWidth(
+          chalk.hex(c.warning).bold(`  删除: ${memo.userRequirement}`),
+          width, ELLIPSIS,
+        ));
+        lines.push(chalk.hex(c.warning)('  按 Enter 确认删除，Esc 取消'));
+      }
+      lines.push(chalk.hex(c.primary)('─'.repeat(width)));
+      return lines;
+    }
+
+    // ── List mode ──
+    const visibleStart = Math.max(
+      0,
+      Math.min(
+        this.selectedIndex - Math.floor(this.maxVisibleItems / 2),
+        Math.max(0, this.memos.length - this.maxVisibleItems),
+      ),
+    );
+    const visible = this.memos.slice(visibleStart, visibleStart + this.maxVisibleItems);
+
+    for (const [vi, memo] of visible.entries()) {
+      const index = visibleStart + vi;
+      const isSelected = index === this.selectedIndex;
+      const card = this.renderMemoCard(width, memo, isSelected);
+      lines.push(...card);
+      if (vi < visible.length - 1) lines.push('');
+    }
+
+    if (this.memos.length > visible.length) {
+      lines.push('');
+      const footer = `${String(visibleStart + 1)}-${String(visibleStart + visible.length)} / ${String(this.total)} 条`;
+      lines.push(chalk.hex(c.textMuted)(truncateToWidth(footer, width, ELLIPSIS)));
+    }
+
+    lines.push(chalk.hex(c.primary)('─'.repeat(width)));
+    return lines;
+  }
+
+  private renderMemoCard(
+    width: number,
+    memo: MemoryMemoSummary,
+    isSelected: boolean,
+  ): string[] {
+    const c = this.colors;
+    const pointer = isSelected ? '❯' : ' ';
+    const indent = '  ';
+    const indentWidth = visibleWidth(indent);
+    const titleColor = isSelected ? c.primary : c.text;
+    const titleStyle = isSelected ? chalk.hex(titleColor).bold : chalk.hex(titleColor);
+
+    const time = formatRelativeTime(memo.recordedAt);
+    const status = statusLabel(memo.completionStatus);
+    const src = sourceLabel(memo.extractionSource);
+    const trailingParts = [status, time, src].filter((p) => p.length > 0);
+    const trailingText = trailingParts.length > 0 ? '  ' + trailingParts.join('  ') : '';
+    const trailingWidth = visibleWidth(trailingText);
+    const headerPrefixWidth = visibleWidth(pointer) + 1;
+    const titleBudget = Math.max(8, width - headerPrefixWidth - trailingWidth);
+    const shownTitle = truncateToWidth(singleLine(memo.userRequirement), titleBudget, ELLIPSIS);
+
+    let header = chalk.hex(isSelected ? c.primary : c.textDim)(pointer + ' ');
+    header += titleStyle(shownTitle);
+    if (trailingText.length > 0) header += '  ' + chalk.hex(c.textDim)(trailingText);
+    const card: string[] = [header];
+
+    // Second line: session + id
+    const sessionLabel = memo.sourceSessionTitle && memo.sourceSessionTitle.length > 0
+      ? memo.sourceSessionTitle
+      : memo.sourceSessionId.slice(0, 12);
+    const idInfo = `ID: ${memo.id}    来源: ${sessionLabel}`;
+    card.push(
+      indent + chalk.hex(c.textMuted)(truncateToWidth(idInfo, Math.max(8, width - indentWidth), ELLIPSIS)),
+    );
+
+    // Third line: solution preview (like session picker's last prompt)
+    if (memo.solution.length > 0) {
+      const solutionPreview = '方案: ' + singleLine(memo.solution);
+      card.push(
+        indent + chalk.hex(c.textDim)(truncateToWidth(solutionPreview, Math.max(8, width - indentWidth), ELLIPSIS)),
+      );
+    }
+
+    return card;
+  }
+
+  private renderDetail(
+    lines: string[],
+    width: number,
+    c: ColorPalette,
+  ): string[] {
+    const memo = this.detailMemo!;
+    const time = new Date(memo.recordedAt).toLocaleString('zh-CN');
+    const sessionLabel = memo.sourceSessionTitle && memo.sourceSessionTitle.length > 0
+      ? `${memo.sourceSessionTitle} (${memo.sourceSessionId.slice(0, 12)})`
+      : memo.sourceSessionId.slice(0, 12);
+    const indent = '  ';
+
+    lines.push(truncateToWidth(
+      chalk.hex(c.primary).bold(`${indent}需求: ${memo.userRequirement}`),
+      width, ELLIPSIS,
+    ));
+    lines.push('');
+    lines.push(chalk.hex(c.textMuted)(
+      truncateToWidth(`${indent}状态: ${statusLabel(memo.completionStatus)}    来源: ${sourceLabel(memo.extractionSource)}    ${time}`, width, ELLIPSIS),
+    ));
+    lines.push(chalk.hex(c.textMuted)(
+      truncateToWidth(`${indent}会话: ${sessionLabel}`, width, ELLIPSIS),
+    ));
+    lines.push(chalk.hex(c.textMuted)(
+      truncateToWidth(`${indent}ID: ${memo.id}`, width, ELLIPSIS),
+    ));
+    lines.push('');
+
+    if (memo.solution.length > 0) {
+      lines.push(truncateToWidth(
+        chalk.hex(c.text)(`${indent}方案: ${singleLine(memo.solution)}`),
+        width, ELLIPSIS,
+      ));
+      lines.push('');
+    }
+    if (memo.problemsEncountered.length > 0 && memo.problemsEncountered !== 'none') {
+      lines.push(truncateToWidth(
+        chalk.hex(c.warning)(`${indent}问题: ${singleLine(memo.problemsEncountered)}`),
+        width, ELLIPSIS,
+      ));
+      lines.push('');
+    }
+
+    lines.push(chalk.hex(c.textMuted)('  Enter/Esc 返回  |  i 注入  |  d 删除'));
+    lines.push(chalk.hex(c.primary)('─'.repeat(width)));
+    return lines;
+  }
+}

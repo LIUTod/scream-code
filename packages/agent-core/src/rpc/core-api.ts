@@ -293,6 +293,7 @@ export interface AgentAPI {
   getUsage: (payload: EmptyPayload) => UsageStatus;
   getTools: (payload: EmptyPayload) => readonly ToolInfo[];
   getBackground: (payload: GetBackgroundPayload) => readonly BackgroundTaskInfo[];
+  extractMemoriesOnExit: (payload: EmptyPayload) => Promise<void>;
 }
 
 type AgentAPIWithId = WithAgentId<AgentAPI>;

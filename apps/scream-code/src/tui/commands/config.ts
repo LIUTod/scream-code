@@ -74,23 +74,23 @@ export async function handleYoloCommand(host: SlashCommandHost, args: string): P
 
   if (subcmd === 'on') {
     if (currentMode === 'yolo') {
-      host.showNotice('YOLO 模式已开启');
+      host.showNotice('YES 模式已开启');
       return;
     }
     await session.setPermission('yolo');
     host.setAppState({ permissionMode: 'yolo' });
-    host.showNotice('YOLO 模式：开启', '工作区工具自动批准。');
+    host.showNotice('YES 模式：开启', '工作区工具自动批准。');
     return;
   }
 
   if (subcmd === 'off') {
     if (currentMode !== 'yolo') {
-      host.showNotice('YOLO 模式已关闭');
+      host.showNotice('YES 模式已关闭');
       return;
     }
     await session.setPermission('manual');
     host.setAppState({ permissionMode: 'manual' });
-    host.showNotice('YOLO 模式：关闭');
+    host.showNotice('YES 模式：关闭');
     return;
   }
 
@@ -98,11 +98,11 @@ export async function handleYoloCommand(host: SlashCommandHost, args: string): P
   if (currentMode === 'yolo') {
     await session.setPermission('manual');
     host.setAppState({ permissionMode: 'manual' });
-    host.showNotice('YOLO 模式：关闭');
+    host.showNotice('YES 模式：关闭');
   } else {
     await session.setPermission('yolo');
     host.setAppState({ permissionMode: 'yolo' });
-    host.showNotice('YOLO 模式：开启', '工作区工具已自动批准。');
+    host.showNotice('YES 模式：开启', '工作区工具已自动批准。');
   }
 }
 

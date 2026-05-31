@@ -56,7 +56,7 @@ Main directories:
 - Streaming rendering: assistant delta, thinking, tool call, tool result, compaction, subagent, background agent.
 - Transcript: `createTranscriptComponent`, `appendTranscriptEntry`, read/tool/agent group aggregation.
 - Activity / queue / footer: `updateActivityPane`, `resolveActivityPaneMode`, `updateQueueDisplay`, terminal progress.
-- Dialogs / selectors: help, session picker, editor/model/thinking/theme/permission/settings selectors, approval / question panels.
+- Dialogs / selectors: help, session picker, memory picker, editor/model/thinking/theme/permission/settings selectors, approval / question panels.
 - Slash command handlers: `handleThemeCommand`, `handleModelCommand`, `handlePlanCommand`, `handleCompactCommand`, `handleLoginCommand`, and so on.
 
 If a section keeps growing, split pure functions, state projections, presentation components, and handler logic into the corresponding directories rather than continuing to expand `ScreamTUI`.

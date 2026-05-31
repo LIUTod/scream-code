@@ -90,7 +90,7 @@ export function createProgram(
 
     const rawSession = raw['session'] ?? raw['resume'];
     const sessionValue = rawSession === true ? '' : (rawSession as string | undefined);
-    const yoloValue = raw['yolo'] === true || raw['yes'] === true || raw['autoApprove'] === true;
+    const yoloValue = raw['yes'] === true || raw['yolo'] === true || raw['autoApprove'] === true;
     const autoValue = raw['auto'] === true;
 
     const opts: CLIOptions = {

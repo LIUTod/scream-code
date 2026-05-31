@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { join } from 'pathe';
+import { basename, dirname, join } from 'pathe';
 
 import { ErrorCodes, ScreamError, makeErrorPayload } from '#/errors';
 import { log } from '#/logging/logger';
@@ -33,6 +33,7 @@ import { ConfigState } from './config';
 import { ContextMemory } from './context';
 import { HookEngine } from '../session/hooks';
 import { InjectionManager } from './injection/manager';
+import { EXIT_EXTRACTION_SYSTEM_PROMPT, MemoryMemoStore, buildExitExtractionPrompt, parseMemoryMemos } from '@scream-cli/memory';
 import { PermissionManager, type PermissionManagerOptions } from './permission';
 import { PlanMode } from './plan';
 import {
@@ -112,6 +113,7 @@ export class Agent {
   readonly tools: ToolManager;
   readonly background: BackgroundManager;
   readonly cron: CronManager | null;
+  readonly memoStore: MemoryMemoStore | undefined;
   readonly replayBuilder: ReplayBuilder;
 
   private lastLlmConfigLogSignature?: string;
@@ -159,6 +161,11 @@ export class Agent {
     this.tools = new ToolManager(this);
     this.background = new BackgroundManager(this);
     this.cron = this.type === 'sub' ? null : new CronManager(this);
+    // homedir = <sessionDir>/agents/<agentId>, need 3 levels up to reach
+    // <projectDir> where memory/entries.jsonl lives
+    this.memoStore = options.homedir
+      ? new MemoryMemoStore(dirname(dirname(dirname(options.homedir))))
+      : undefined;
     this.replayBuilder = new ReplayBuilder(this);
   }
 
@@ -374,7 +381,78 @@ export class Agent {
       getUsage: () => this.usage.data(),
       getTools: () => this.tools.data(),
       getBackground: (payload) => this.background.list(payload.activeOnly ?? false, payload.limit),
+      extractMemoriesOnExit: async () => {
+        await this.extractMemoriesOnExit();
+      },
     };
+  }
+
+  /** Extract memory memos from the full conversation history on session exit. */
+  async extractMemoriesOnExit(): Promise<void> {
+    if (!this.memoStore) return;
+
+    const history = this.context.history;
+    if (history.length < 4) return; // Too short to contain meaningful task loops
+
+    // homedir = <projectDir>/<sessionId>/agents/<agentId>
+    const sessionId = this.homedir
+      ? basename(dirname(dirname(this.homedir)))
+      : 'unknown';
+
+    // Sample last 30 messages to stay within reasonable token budget
+    const sampleText = history
+      .slice(-30)
+      .map((m) => {
+        const text = m.content
+          .filter((p) => p.type === 'text')
+          .map((p) => p.text)
+          .join(' ');
+        return `[${m.role}] ${text.slice(0, 300)}`;
+      })
+      .join('\n');
+
+    const userPrompt = buildExitExtractionPrompt(sessionId, history.length, sampleText);
+
+    try {
+      const response = await this.generate(
+        this.config.provider,
+        EXIT_EXTRACTION_SYSTEM_PROMPT,
+        [], // no tools — extraction only
+        [
+          {
+            role: 'user',
+            content: [{ type: 'text', text: userPrompt }],
+            toolCalls: [],
+          },
+        ],
+      );
+
+      const summary = typeof response.message.content === 'string'
+        ? response.message.content
+        : response.message.content.map((p) => (p.type === 'text' ? p.text : '')).join('');
+
+      const memos = parseMemoryMemos(summary);
+      if (memos.length === 0) return;
+
+      for (const memo of memos) {
+        memo.sourceSessionId = sessionId;
+        memo.sourceSessionTitle = '';
+        memo.extractionSource = 'exit';
+        void this.memoStore.append(memo).catch((error: unknown) => {
+          this.log.warn('Failed to store memory memo from exit extraction', {
+            memoId: memo.id,
+            error: String(error),
+          });
+        });
+      }
+
+      this.log.info('Extracted memory memos on session exit', {
+        count: memos.length,
+        sessionId,
+      });
+    } catch (error) {
+      this.log.warn('Exit memory extraction failed', { error: String(error) });
+    }
   }
 
   emitEvent(event: AgentEvent): void {

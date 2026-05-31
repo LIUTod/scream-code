@@ -351,9 +351,24 @@ export class Session {
     });
   }
 
+  /** Fire-and-forget: extract memory memos on session exit. */
+  async extractMemoriesOnExit(): Promise<void> {
+    this.ensureOpen();
+    await this.rpc.extractMemoriesOnExit({ sessionId: this.id });
+  }
+
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
+    try {
+      // Extract memories before closing — fire-and-forget but give it a brief window
+      await Promise.race([
+        this.extractMemoriesOnExit(),
+        new Promise<void>((resolve) => setTimeout(resolve, 10_000)),
+      ]).catch(() => {});
+    } catch {
+      // Never let extraction failure block session close
+    }
     try {
       await this.rpc.closeSession({ sessionId: this.id });
     } finally {

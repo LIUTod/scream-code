@@ -30,6 +30,8 @@ import compactionInstructionTemplate from './compaction-instruction.md';
 import { renderMessagesToText } from './render-messages';
 import type { CompactionBeginData, CompactionResult } from './types';
 import { DEFAULT_COMPACTION_CONFIG, DefaultCompactionStrategy, type CompactionStrategy } from './strategy';
+import { basename, dirname } from 'pathe';
+import { parseMemoryMemos } from '@scream-cli/memory';
 
 type CompactionTelemetryTrigger = CompactionBeginData['source'] | 'manual-with-prompt' | 'unknown';
 
@@ -312,6 +314,7 @@ export class FullCompaction {
       this.markCompleted();
       this.agent.emitEvent({ type: 'compaction.completed', result });
       this.agent.context.applyCompaction(result);
+      this.extractAndStoreMemos(summary);
       this.triggerPostCompactHook(data, result);
     } catch (error) {
       if (!isAbortError(error)) {
@@ -374,6 +377,48 @@ export class FullCompaction {
         trigger: data.source,
         estimatedTokenCount: result.tokensAfter,
       },
+    });
+  }
+
+  /** Extract memory memos from compaction summary and store them. */
+  private extractAndStoreMemos(summary: string): void {
+    const memoStore = this.agent.memoStore;
+    if (!memoStore) {
+      this.agent.log.info('Memory memo store not available, skipping extraction');
+      return;
+    }
+
+    this.agent.log.info('Scanning compaction summary for memory memos', {
+      summaryLen: summary.length,
+    });
+
+    const memos = parseMemoryMemos(summary);
+    this.agent.log.info('Memory memo parse result', {
+      memoCount: memos.length,
+    });
+
+    if (memos.length === 0) return;
+
+    // homedir = <projectDir>/<sessionId>/agents/<agentId>
+    // sessionId is the second directory up from homedir
+    const sessionId = this.agent.homedir
+      ? basename(dirname(dirname(this.agent.homedir)))
+      : 'unknown';
+
+    for (const memo of memos) {
+      memo.sourceSessionId = sessionId;
+      memo.sourceSessionTitle = '';
+      void memoStore.append(memo).catch((error: unknown) => {
+        this.agent.log.warn('Failed to store memory memo from compaction', {
+          memoId: memo.id,
+          error: String(error),
+        });
+      });
+    }
+
+    this.agent.log.info('Extracted memory memos from compaction', {
+      count: memos.length,
+      sessionId,
     });
   }
 }

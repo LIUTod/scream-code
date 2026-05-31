@@ -42,6 +42,7 @@ import {
   handleTitleCommand,
 } from './session';
 import { handleGoalCommand, handleGoalOffCommand } from './goal';
+import { handleMemoryCommand } from './memory';
 
 // ---------------------------------------------------------------------------
 // Re-exports — keep existing consumers working
@@ -76,6 +77,7 @@ export {
   handleTitleCommand,
 } from './session';
 export { handleGoalCommand, handleGoalOffCommand } from './goal';
+export { handleMemoryCommand } from './memory';
 
 // ---------------------------------------------------------------------------
 // Host interface
@@ -116,6 +118,7 @@ export interface SlashCommandHost {
   showHelpPanel(): void;
   createNewSession(): Promise<void>;
   showSessionPicker(): Promise<void>;
+  showMemoryPicker(): void;
   sendNormalUserInput(text: string): void;
   sendSkillActivation(session: Session, skillName: string, skillArgs: string): void;
   readonly skillCommandMap: Map<string, string>;
@@ -236,7 +239,7 @@ async function handleBuiltInSlashCommand(
     case 'title':
       await handleTitleCommand(host, args);
       return;
-    case 'yolo':
+    case 'yes':
       await handleYoloCommand(host, args);
       return;
     case 'auto':
@@ -271,6 +274,9 @@ async function handleBuiltInSlashCommand(
       return;
     case 'logout':
       await handleLogoutCommand(host);
+      return;
+    case 'memory':
+      await handleMemoryCommand(host, args);
       return;
     default:
       host.showError(`Unknown slash command: /${String(name)}`);

@@ -48,6 +48,7 @@
     "@mozilla/readability": "^0.6.0",
     "@scream-cli/jian": "workspace:^",
     "@scream-cli/ltod": "workspace:^",
+    "@scream-cli/memory": "workspace:*",
     "ajv": "^8.18.0",
     "ajv-formats": "^3.0.1",
     "js-yaml": "^4.1.1",

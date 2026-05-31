@@ -542,6 +542,14 @@ export class SDKRpcClient {
     this.questionHandlers.delete(sessionId);
   }
 
+  async extractMemoriesOnExit(input: SessionIdRpcInput): Promise<void> {
+    const rpc = await this.getRpc();
+    return rpc.extractMemoriesOnExit({
+      sessionId: input.sessionId,
+      agentId: this.interactiveAgentId,
+    });
+  }
+
   async requestApproval(
     request: ApprovalRequest & { sessionId: string; agentId: string },
   ): Promise<ApprovalResponse> {

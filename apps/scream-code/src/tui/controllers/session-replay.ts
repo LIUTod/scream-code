@@ -366,7 +366,7 @@ export class SessionReplayRenderer {
   private renderPermissionUpdate(context: ReplayRenderContext, mode: PermissionMode): void {
     if (mode === 'yolo') {
       this.host.appendTranscriptEntry(
-        replayEntry(context, 'status', 'YOLO 模式：开启', 'notice', {
+        replayEntry(context, 'status', 'YES 模式：开启', 'notice', {
           detail: '所有操作将自动批准。请谨慎使用。',
         }),
       );
@@ -376,7 +376,7 @@ export class SessionReplayRenderer {
       replayEntry(
         context,
         'status',
-        mode === 'manual' ? 'YOLO 模式：关闭' : `权限模式： ${mode}`,
+        mode === 'manual' ? 'YES 模式：关闭' : `权限模式： ${mode}`,
         'notice',
       ),
     );
