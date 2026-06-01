@@ -14,6 +14,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, dirname } from "node:path";
 
+import { getDaemonInstructions } from "./cc-connect-daemon";
+
 // ─── Platform registry ────────────────────────────────────────────────────
 
 interface PlatformDef {
@@ -272,32 +274,49 @@ export async function runChannelSetup(): Promise<void> {
     console.log("");
   }
 
-  // ── Step 5: Next steps ───────────────────────────────────────────────
+  // ── Step 5: Full setup guide ──────────────────────────────────────────
+  const daemon = getDaemonInstructions(dirname(configPath));
+
   console.log("━".repeat(50));
   console.log("");
-  console.log("  接下来，运行以下命令完成登录：");
+  console.log("  📋 完整安装步骤（在终端中按顺序执行）：");
+  console.log("");
+
+  // Step 1: platform login
+  console.log(`  第 1 步 — 扫码认证（一次性）`);
   console.log("");
   console.log(`    cc-connect ${platform.setupCmd} --project default`);
   console.log("");
 
   if (platform.note) {
-    console.log(`  ⚠ ${platform.note}`);
+    console.log(`    ⚠ ${platform.note}`);
     console.log("");
   }
 
-  console.log("  登录成功后，安装并启动守护进程：");
+  // Steps 2+: daemon install & start
+  if (daemon.warning) {
+    console.log(`  ⚠ ${daemon.warning}`);
+    console.log("");
+  }
+
+  let stepNum = 2;
+  for (const step of daemon.steps) {
+    const onceTag = step.once ? "（一次性）" : "";
+    console.log(`  第 ${stepNum} 步 — ${step.label}${onceTag}`);
+    console.log("");
+    console.log(`    ${step.command}`);
+    console.log("");
+    stepNum++;
+  }
+
+  // Maintenance commands
+  console.log("  ──".repeat(25));
   console.log("");
-  console.log(`    cc-connect daemon install --work-dir ${dirname(configPath)}`);
-  console.log("    cc-connect daemon start");
+  console.log(`  日常管理 (${daemon.method})：`);
   console.log("");
-  console.log("  停用/强制关闭所有 cc-connect 进程：");
-  console.log("");
-  console.log("    cc-connect daemon stop");
-  console.log("");
-  console.log("  查看运行状态：");
-  console.log("");
-  console.log("    cc-connect daemon status");
-  console.log("    cc-connect daemon logs -f");
+  for (const cmd of daemon.helpCommands) {
+    console.log(`    ${cmd}`);
+  }
   console.log("");
 
   rl.close();

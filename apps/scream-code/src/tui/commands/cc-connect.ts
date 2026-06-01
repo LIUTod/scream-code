@@ -13,6 +13,7 @@ import { join, dirname } from "node:path";
 
 import { ChoicePickerComponent, type ChoiceOption } from "../components/dialogs/choice-picker";
 import type { SlashCommandHost } from "./dispatch";
+import { getDaemonInstructions } from "../../cli/cc-connect-daemon";
 
 // ─── Platform definitions ──────────────────────────────────────────────────
 
@@ -94,6 +95,41 @@ function generateConfig(platform: PlatformDef): void {
   writeFileSync(CONFIG_PATH, content, "utf-8");
 }
 
+// ─── Daemon instructions helper ────────────────────────────────────────────
+
+/**
+ * Format daemon steps as a numbered continuation from the platform setup step.
+ * Returns lines that should be appended after the platform setup command line.
+ */
+function formatDaemonSteps(configDir: string): string[] {
+  const daemon = getDaemonInstructions(configDir);
+  const lines: string[] = [];
+
+  if (daemon.warning) {
+    lines.push("");
+    lines.push(`⚠ ${daemon.warning}`);
+  }
+
+  let stepNum = 2; // step 1 is the platform setup
+  for (const step of daemon.steps) {
+    const onceTag = step.once ? "（一次性）" : "";
+    lines.push("");
+    lines.push(`第 ${stepNum} 步 — ${step.label}${onceTag}`);
+    lines.push(`  ${step.command}`);
+    stepNum++;
+  }
+
+  lines.push("");
+  lines.push("──".repeat(20));
+  lines.push("");
+  lines.push(`日常管理 (${daemon.method})：`);
+  for (const cmd of daemon.helpCommands) {
+    lines.push(`  ${cmd}`);
+  }
+
+  return lines;
+}
+
 // ─── Handler ───────────────────────────────────────────────────────────────
 
 export async function handleChannelCommand(host: SlashCommandHost, _args: string): Promise<void> {
@@ -139,11 +175,11 @@ export async function handleChannelCommand(host: SlashCommandHost, _args: string
           [
             `配置文件：${CONFIG_PATH}`,
             "",
-            "终端命令：",
+            "📋 在终端中按顺序执行：",
+            "",
+            `第 1 步 — 扫码认证（一次性）`,
             `  cc-connect ${platform.setupCmd}`,
-            `  cc-connect daemon install --work-dir ${configDir}  ← 安装（一次性）`,
-            "  cc-connect daemon start               ← 启动",
-            "  cc-connect daemon stop                ← 强制停用",
+            ...formatDaemonSteps(configDir),
           ].join("\n"),
         );
         return;
@@ -155,12 +191,11 @@ export async function handleChannelCommand(host: SlashCommandHost, _args: string
       const lines = [
         `配置文件已写入：${CONFIG_PATH}`,
         "",
-        "接下来请退出到终端，依次运行：",
+        "📋 在终端中按顺序执行：",
         "",
-        `  cc-connect ${platform.setupCmd}    ← 扫码/认证`,
-        `  cc-connect daemon install --work-dir ${configDir}  ← 安装（一次性）`,
-        "  cc-connect daemon start              ← 启动守护进程",
-        "  cc-connect daemon stop               ← 强制停用",
+        `第 1 步 — 扫码认证（一次性）`,
+        `  cc-connect ${platform.setupCmd}`,
+        ...formatDaemonSteps(configDir),
       ];
       if (platform.note) {
         lines.push("");
