@@ -163,13 +163,13 @@ export function getDaemonInstructions(
       : "pm2 start cc-connect --name cc-connect";
 
     return {
-      method: "pm2（备选）",
+      method: "schtasks（升级后），备选 pm2",
       warning:
         "当前 cc-connect 版本不支持 Windows 原生守护进程。\n" +
         "  推荐先升级到最新版，升级后会自动使用原生 Task Scheduler。",
       steps: [
         {
-          label: "升级 cc-connect（推荐，一次性）",
+          label: "升级 cc-connect（推荐）",
           command: "npm install -g cc-connect@latest",
           once: true,
         },
