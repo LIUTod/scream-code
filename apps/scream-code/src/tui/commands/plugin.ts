@@ -156,7 +156,7 @@ async function openPluginPanel(host: SlashCommandHost): Promise<void> {
       // Dismiss the picker immediately so transcript updates are visible
       host.restoreEditor();
       // Run async work; re-open panel with fresh data when done
-      handlePanelAction(host, value, marketplace, installed).finally(() => {
+      void handlePanelAction(host, value, marketplace, installed).finally(() => {
         openPluginPanel(host).catch(() => { /* panel refresh failure is non-fatal */ });
       });
     },
