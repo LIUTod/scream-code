@@ -232,7 +232,16 @@ export class SessionPickerComponent extends Container implements Focusable {
     const titleStyle = isSelected ? chalk.hex(titleColor).bold : chalk.hex(titleColor);
 
     const time = formatRelativeTime(session.updated_at);
-    const badge = isCurrent ? CURRENT_BADGE : '';
+    const isCcConnect = session.metadata?.['source'] === 'cc-connect';
+    const platform = isCcConnect
+      ? (session.metadata?.['agentType'] as string | undefined) ?? 'cc'
+      : undefined;
+    const badge = [
+      isCurrent ? CURRENT_BADGE : '',
+      platform ? `💬 ${platform}` : '',
+    ]
+      .filter((p) => p.length > 0)
+      .join(' ');
     const rawTitle = (session.title ?? session.id).trim() || session.id;
     const titleSource = formatSessionLabel({ title: rawTitle, metadata: session.metadata });
 

@@ -1635,15 +1635,44 @@ export class ScreamTUI {
         loading: this.state.loadingSessions,
         currentSessionId: this.state.appState.sessionId,
         colors: this.state.theme.colors,
-        onSelect: (sessionId: string) => {
-          void this.resumeSession(sessionId).then((switched) => {
+        onSelect: (pickerId: string) => {
+          const row = this.state.sessions.find((s) => s.id === pickerId);
+          const isCc = row?.metadata?.['source'] === 'cc-connect';
+          const realId = isCc
+            ? (row!.metadata!['agentSessionId'] as string)
+            : pickerId;
+          void this.resumeSession(realId).then(async (switched) => {
             if (switched) {
               this.hideSessionPicker();
+              return;
+            }
+            // Resume failed.  For CC sessions the ScreamCode session directory
+            // may not exist yet (e.g. cleaned up by an older version).  Create
+            // a fresh session with the same ID so CC reconnects correctly.
+            if (isCc) {
+              try {
+                const session = await this.harness.createSession({
+                  id: realId,
+                  workDir: this.state.appState.workDir,
+                  model: this.state.appState.model,
+                  permission: this.state.appState.permissionMode,
+                });
+                await this.switchToSession(session, `已连接 CC 会话 (${session.id})。`);
+                this.hideSessionPicker();
+              } catch (err) {
+                this.showError(`创建会话失败：${formatErrorMessage(err)}`);
+              }
             }
           });
         },
         onCancel,
         onDelete: (sessionId: string) => {
+          const row = this.state.sessions.find((s) => s.id === sessionId);
+          if (row?.metadata?.['source'] === 'cc-connect') {
+            // CC sessions are managed by cc-connect; skip deletion.
+            this.showStatus('CC 会话由 cc-connect 管理，请在聊天通道中操作。');
+            return;
+          }
           void this.harness.deleteSession(sessionId).then(async () => {
             await this.fetchSessions();
             if (this.state.sessions.length === 0) {
