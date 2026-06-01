@@ -92,6 +92,29 @@ chmod +x ~/.scream-code/bin/scream
 
 ---
 
+## cc-connect 通过聊天远程控制screamcode
+
+- 支持微信、飞书、slack、钉钉、QQ、Telegram等，你可以在安装scream-code后一键安装cc-connect来控制你的screamcode
+
+###第一步：一键安装指令安装
+
+```
+# npm install -g cc-connect
+```
+###第二步：打开screamcode，输入/cc-connect 选择你要接入的平台
+
+###第三步：按照步骤完成配置与链接后，输入命令启动后台守护进程（关闭screamcode也可在后台聊天）
+
+**提示：关于会话系统
+
+- *远程聊天会话默认走cc标识注入会话管理系统，可通过斜杠命令进入进行管理和删除，也可以直接在电脑端直接继承会话继续让screamcode完成工作 
+
+**提示：终端快捷指令
+
+cc-connect daemon start              ← 启动守护进程（电脑不关可一直使用）
+cc-connect daemon stop               ← 强制停用
+---
+
 ## 项目灵感与感谢支持
 
 Scream 是结合作者本人的使用习惯和个人理解自行开发重构的 Agent 工具助手
