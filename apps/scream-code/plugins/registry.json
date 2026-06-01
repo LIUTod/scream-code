@@ -8,6 +8,54 @@
       "source": "https://github.com/greensock/gsap-skills",
       "author": "GreenSock",
       "tags": ["animation", "gsap", "frontend", "scrolltrigger"]
+    },
+    {
+      "id": "gorden-ppt-skill",
+      "name": "Gorden PPT 助手",
+      "description": "17 套精修中文 PPT 模板，支持 python-pptx 编辑生成，适配国企/互联网大厂风格",
+      "source": "https://github.com/GordenSun/GordenPPTSkill",
+      "author": "GordenSun",
+      "tags": ["ppt", "pptx", "template", "chinese"]
+    },
+    {
+      "id": "claude-design-card",
+      "name": "Claude Design Card",
+      "description": "14 种设计卡片生成（封面/图文/社交分享/长篇排版），Parchment × Swiss 双风格体系",
+      "source": "https://github.com/geekjourneyx/claude-design-card",
+      "author": "geekjourneyx",
+      "tags": ["design", "card", "social-media", "xiaohongshu"]
+    },
+    {
+      "id": "superpowers",
+      "name": "Superpowers 开发技能包",
+      "description": "14 个开发方法论技能：TDD、系统调试、代码审查、子代理驱动开发、并行代理、头脑风暴等",
+      "source": "https://github.com/obra/superpowers",
+      "author": "obra",
+      "tags": ["tdd", "debugging", "code-review", "subagent", "methodology"]
+    },
+    {
+      "id": "audio-skill",
+      "name": "Audio Skill 录音分析",
+      "description": "本地录音分析自动化，含 RAG 知识库。适用于销售录音复盘、会议纪要、质量评分等",
+      "source": "https://github.com/LIUTod/audio-skill",
+      "author": "LIUTod",
+      "tags": ["audio", "rag", "recording", "analysis"]
+    },
+    {
+      "id": "scrapling-skill",
+      "name": "Scrapling 网页爬取",
+      "description": "基于 Scrapling 的智能爬虫技能，支持 Cloudflare/WAF 绕过、登录会话、自动抓取解析",
+      "source": "https://github.com/Cedriccmh/claude-code-skill-scrapling",
+      "author": "Cedriccmh",
+      "tags": ["scraping", "crawler", "cloudflare", "web"]
+    },
+    {
+      "id": "a-stock-data",
+      "name": "A 股数据分析",
+      "description": "A 股市场数据查询分析，27 个接口覆盖行情/研报/资金流/新闻/基本面，含 4 套内置研究流程",
+      "source": "https://github.com/simonlin1212/a-stock-data",
+      "author": "simonlin1212",
+      "tags": ["stock", "finance", "a-share", "data-analysis"]
     }
   ]
 }

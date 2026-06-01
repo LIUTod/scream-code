@@ -12,6 +12,8 @@ import {
 
 const SCREAM_PLUGIN_ROOT_PATH = 'scream.plugin.json';
 const SCREAM_PLUGIN_DIR_PATH = '.scream-plugin/plugin.json';
+const CLAUDE_PLUGIN_DIR_PATH = '.claude-plugin/plugin.json';
+const BARE_SKILL_PATH = 'SKILL.md';
 
 // Fields that look like third-party runtime extensions (Claude / Codex / old
 // Scream CLI). We do not run them; emit an info diagnostic so plugin authors and
@@ -38,23 +40,54 @@ export interface ParsedManifestResult {
 export async function parseManifest(pluginRoot: string): Promise<ParsedManifestResult> {
   const rootJsonPath = path.join(pluginRoot, SCREAM_PLUGIN_ROOT_PATH);
   const dirJsonPath = path.join(pluginRoot, SCREAM_PLUGIN_DIR_PATH);
+  const claudeDirJsonPath = path.join(pluginRoot, CLAUDE_PLUGIN_DIR_PATH);
   const rootJsonExists = await isFile(rootJsonPath);
   const dirJsonExists = await isFile(dirJsonPath);
+  const claudeDirJsonExists = await isFile(claudeDirJsonPath);
 
-  if (!rootJsonExists && !dirJsonExists) {
+  if (!rootJsonExists && !dirJsonExists && !claudeDirJsonExists) {
+    // Fallback: bare SKILL.md at repo root (common Claude Code skill pattern).
+    // Auto-generate a minimal virtual manifest so these repos can be installed
+    // without forcing authors to add ScreamCode-specific packaging.
+    const skillMdPath = path.join(pluginRoot, BARE_SKILL_PATH);
+    if (await isFile(skillMdPath)) {
+      return {
+        manifest: {
+          name: path.basename(pluginRoot),
+          skills: [pluginRoot],
+        },
+        manifestKind: 'bare-skill',
+        manifestPath: skillMdPath,
+        diagnostics: [],
+      };
+    }
+
     return {
       diagnostics: [
         {
           severity: 'error',
-          message: `No manifest at ${SCREAM_PLUGIN_ROOT_PATH} or ${SCREAM_PLUGIN_DIR_PATH}`,
+          message: `No manifest at ${SCREAM_PLUGIN_ROOT_PATH}, ${SCREAM_PLUGIN_DIR_PATH}, or ${CLAUDE_PLUGIN_DIR_PATH}`,
         },
       ],
     };
   }
 
-  const manifestPath = rootJsonExists ? rootJsonPath : dirJsonPath;
-  const manifestKind: PluginManifestKind = rootJsonExists ? 'scream-plugin-root' : 'scream-plugin-dir';
-  const shadowedManifestPath = rootJsonExists && dirJsonExists ? dirJsonPath : undefined;
+  // Priority: scream.plugin.json > .scream-plugin/plugin.json > .claude-plugin/plugin.json
+  const manifestPath = rootJsonExists
+    ? rootJsonPath
+    : dirJsonExists
+      ? dirJsonPath
+      : claudeDirJsonPath;
+  const manifestKind: PluginManifestKind = rootJsonExists
+    ? 'scream-plugin-root'
+    : dirJsonExists
+      ? 'scream-plugin-dir'
+      : 'claude-plugin-dir';
+  const shadowedManifestPath = rootJsonExists
+    ? (dirJsonExists ? dirJsonPath : claudeDirJsonExists ? claudeDirJsonPath : undefined)
+    : dirJsonExists && claudeDirJsonExists
+      ? claudeDirJsonPath
+      : undefined;
 
   let raw: unknown;
   try {

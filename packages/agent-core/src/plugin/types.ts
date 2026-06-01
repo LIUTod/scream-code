@@ -60,7 +60,7 @@ export interface PluginMcpServerInfo {
   readonly headerKeys?: readonly string[];
 }
 
-export type PluginManifestKind = 'scream-plugin-root' | 'scream-plugin-dir';
+export type PluginManifestKind = 'scream-plugin-root' | 'scream-plugin-dir' | 'claude-plugin-dir' | 'bare-skill';
 export type PluginSource = 'local-path' | 'zip-url' | 'github';
 export type PluginState = 'ok' | 'error';
 

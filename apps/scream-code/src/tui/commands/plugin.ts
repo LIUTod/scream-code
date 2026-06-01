@@ -1,9 +1,7 @@
 /**
  * /plugin — ScreamCode 插件中心。
  *
- * 打开后展示插件市场和已安装列表，支持一键安装/卸载。
- * 也支持快捷命令：/plugin install <url>、/plugin uninstall <id>
- */
+ * 打开后展示插件市场和已安装列表，支持浏览、安装、卸载。 */
 
 import type { PluginSummary } from '@scream-cli/scream-code-sdk';
 
@@ -27,39 +25,54 @@ const BUILTIN_REGISTRY: PluginMarketplaceEntry[] = [
     description: 'GreenSock 动画平台全套参考手册，含核心 API、Timeline、ScrollTrigger、插件、React 集成等 8 个技能',
     source: 'https://github.com/greensock/gsap-skills',
   },
+  {
+    id: 'gorden-ppt-skill',
+    displayName: 'Gorden PPT 助手',
+    description: '17 套精修中文 PPT 模板，支持 python-pptx 编辑生成，适配国企/互联网大厂风格',
+    source: 'https://github.com/GordenSun/GordenPPTSkill',
+  },
+  {
+    id: 'claude-design-card',
+    displayName: 'Claude Design Card',
+    description: '14 种设计卡片生成（封面/图文/社交分享/长篇排版），Parchment × Swiss 双风格体系',
+    source: 'https://github.com/geekjourneyx/claude-design-card',
+  },
+  {
+    id: 'superpowers',
+    displayName: 'Superpowers 开发技能包',
+    description: '14 个开发方法论技能：TDD、系统调试、代码审查、子代理驱动开发、并行代理、头脑风暴等',
+    source: 'https://github.com/obra/superpowers',
+  },
+  {
+    id: 'audio-skill',
+    displayName: 'Audio Skill 录音分析',
+    description: '本地录音分析自动化，含 RAG 知识库。适用于销售录音复盘、会议纪要、质量评分等',
+    source: 'https://github.com/LIUTod/audio-skill',
+  },
+  {
+    id: 'scrapling-skill',
+    displayName: 'Scrapling 网页爬取',
+    description: '基于 Scrapling 的智能爬虫技能，支持 Cloudflare/WAF 绕过、登录会话、自动抓取解析',
+    source: 'https://github.com/Cedriccmh/claude-code-skill-scrapling',
+  },
+  {
+    id: 'a-stock-data',
+    displayName: 'A 股数据分析',
+    description: 'A 股市场数据查询分析，27 个接口覆盖行情/研报/资金流/新闻/基本面，含 4 套内置研究流程',
+    source: 'https://github.com/simonlin1212/a-stock-data',
+  },
 ];
 
 // ─── Handler ────────────────────────────────────────────────────────────────
 
 export async function handlePluginCommand(
   host: SlashCommandHost,
-  args: string,
+  _args: string,
 ): Promise<void> {
-  const trimmed = args.trim();
-
-  // ── Quick install from URL ────────────────────────────────────────────
-  if (trimmed.startsWith('install ')) {
-    const source = trimmed.slice('install '.length).trim();
-    if (source.length === 0) {
-      host.showError('用法: /plugin install <github-url>');
-      return;
-    }
-    await installAndReport(host, source);
+  if (!host.session) {
+    host.showError('请先创建或恢复一个会话，再使用插件中心。');
     return;
   }
-
-  // ── Quick uninstall ───────────────────────────────────────────────────
-  if (trimmed.startsWith('uninstall ') || trimmed.startsWith('remove ')) {
-    const id = trimmed.slice(trimmed.indexOf(' ') + 1).trim();
-    if (id.length === 0) {
-      host.showError('用法: /plugin uninstall <插件id>');
-      return;
-    }
-    await uninstallAndReport(host, id);
-    return;
-  }
-
-  // ── Open plugin panel ─────────────────────────────────────────────────
   await openPluginPanel(host);
 }
 
@@ -133,14 +146,19 @@ async function openPluginPanel(host: SlashCommandHost): Promise<void> {
 
   const picker = new ChoicePickerComponent({
     title: 'ScreamCode 插件中心',
-    hint: 'Enter 安装 / 先按 d 再 Enter 卸载 / Esc 返回',
+    hint: 'Enter 安装 / d+Enter 卸载 / Esc 返回',
     options,
     colors: host.state.theme.colors,
     searchable: false,
     pageSize: 10,
-    onSelect: async (value: string) => {
+    onSelect: (value: string) => {
+      if (value.startsWith('__section')) return;
+      // Dismiss the picker immediately so transcript updates are visible
       host.restoreEditor();
-      await handlePanelAction(host, value, marketplace, installed);
+      // Run async work; re-open panel with fresh data when done
+      handlePanelAction(host, value, marketplace, installed).finally(() => {
+        openPluginPanel(host).catch(() => { /* panel refresh failure is non-fatal */ });
+      });
     },
     onCancel: () => {
       host.restoreEditor();
@@ -235,38 +253,31 @@ function buildOptions(
 async function handlePanelAction(
   host: SlashCommandHost,
   value: string,
-  marketplace: readonly PluginMarketplaceEntry[],
+  _marketplace: readonly PluginMarketplaceEntry[],
   installed: readonly PluginSummary[],
 ): Promise<void> {
   if (value.startsWith('install:')) {
     const source = value.slice('install:'.length);
     await installAndReport(host, source);
-    await openPluginPanel(host);
   } else if (value.startsWith('uninstall:')) {
     const id = value.slice('uninstall:'.length);
-    const confirmed = await confirmUninstall(host, id, installed);
+    const plugin = installed.find((p) => p.id === id);
+    const label = plugin?.displayName ?? id;
+    const confirmed = await confirmUninstall(host, label);
     if (confirmed) {
       await uninstallAndReport(host, id);
     }
-    await openPluginPanel(host);
   }
 }
 
-async function confirmUninstall(
-  host: SlashCommandHost,
-  id: string,
-  installed: readonly PluginSummary[],
-): Promise<boolean> {
-  const plugin = installed.find((p) => p.id === id);
-  const label = plugin?.displayName ?? id;
-
+async function confirmUninstall(host: SlashCommandHost, label: string): Promise<boolean> {
   return new Promise<boolean>((resolve) => {
     const picker = new ChoicePickerComponent({
       title: `确认卸载 "${label}"？`,
-      hint: '卸载后插件技能在下次会话中不再可用。',
+      hint: '卸载后可在插件市场中重新安装',
       options: [
-        { value: 'yes', label: '是，卸载', tone: 'danger' },
         { value: 'no', label: '取消' },
+        { value: 'yes', label: '是，卸载', tone: 'danger' },
       ],
       colors: host.state.theme.colors,
       onSelect: (v: string) => {
@@ -278,7 +289,6 @@ async function confirmUninstall(
         resolve(false);
       },
     });
-
     host.mountEditorReplacement(picker);
   });
 }

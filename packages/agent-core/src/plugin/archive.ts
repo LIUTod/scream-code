@@ -135,7 +135,12 @@ async function detectPluginRoot(dir: string): Promise<string> {
 async function hasManifest(dir: string): Promise<boolean> {
   const rootManifest = path.join(dir, 'scream.plugin.json');
   const dirManifest = path.join(dir, '.scream-plugin', 'plugin.json');
-  return (await isFile(rootManifest)) || (await isFile(dirManifest));
+  const claudeDirManifest = path.join(dir, '.claude-plugin', 'plugin.json');
+  const skillMd = path.join(dir, 'SKILL.md');
+  return (await isFile(rootManifest))
+    || (await isFile(dirManifest))
+    || (await isFile(claudeDirManifest))
+    || (await isFile(skillMd));
 }
 
 async function isFile(p: string): Promise<boolean> {
