@@ -111,11 +111,11 @@ chmod +x ~/.scream-code/bin/scream
 
 **提示：远程聊天快捷指令
 
-/new             创建新会话
-/bind setup      开启文件传送功能，支持PDF、图片等
-/mode            查看可用模式
-/mode yolo       自动批准所有工具
-/mode default    每次工具调用前询问
+- /new             创建新会话
+- /bind setup      开启文件传送功能，支持PDF、图片等
+- /mode            查看可用模式
+- /mode yolo       自动批准所有工具
+- /mode default    每次工具调用前询问
 ---
 
 ## 项目灵感与感谢支持
