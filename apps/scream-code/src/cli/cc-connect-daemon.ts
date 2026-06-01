@@ -155,7 +155,7 @@ export function getDaemonInstructions(
       };
     }
 
-    // daemon unavailable — lead with upgrade, pm2 as fallback
+    // daemon genuinely unavailable on this machine — pm2 is the only path
     const entry = detectCcConnectEntry();
 
     const pm2StartCmd = entry
@@ -163,38 +163,35 @@ export function getDaemonInstructions(
       : "pm2 start cc-connect --name cc-connect";
 
     return {
-      method: "schtasks（升级后），备选 pm2",
+      method: "pm2 (Node.js process manager)",
       warning:
-        "当前 cc-connect 版本不支持 Windows 原生守护进程。\n" +
-        "  推荐先升级到最新版，升级后会自动使用原生 Task Scheduler。",
+        "cc-connect 暂不支持在当前 Windows 系统上使用原生守护进程，以下使用 pm2 代替。",
       steps: [
         {
-          label: "升级 cc-connect（推荐）",
-          command: "npm install -g cc-connect@latest",
+          label: "安装 pm2",
+          command: "npm install -g pm2",
           once: true,
         },
         {
-          label: "安装守护进程",
-          command: `cc-connect daemon install --work-dir ${dir}`,
+          label: "启动 cc-connect",
+          command: pm2StartCmd,
+        },
+        {
+          label: "保存进程列表",
+          command: "pm2 save",
           once: true,
         },
         {
-          label: "启动服务",
-          command: "cc-connect daemon start",
+          label: "设置开机自启",
+          command: "pm2 startup",
+          once: true,
         },
       ],
       helpCommands: [
-        "cc-connect daemon stop       停止服务",
-        "cc-connect daemon status     查看状态",
-        "cc-connect daemon logs -f    查看日志",
-        "",
-        `备选 pm2 命令（不升级时使用）：`,
-        `  npm install -g pm2`,
-        `  ${pm2StartCmd}`,
-        "  pm2 save",
-        "  pm2 startup",
-        "  pm2 status               查看状态",
-        "  pm2 logs cc-connect      查看日志",
+        "pm2 status               查看状态",
+        "pm2 logs cc-connect      查看日志",
+        "pm2 stop cc-connect      停止服务",
+        "pm2 restart cc-connect   重启服务",
       ],
     };
   }
