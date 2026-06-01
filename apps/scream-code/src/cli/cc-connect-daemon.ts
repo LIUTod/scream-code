@@ -13,6 +13,8 @@
  */
 
 import { execSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
+import { join, dirname } from "node:path";
 
 // ─── Types ────────────────────────────────────────────────────────────────
 
@@ -72,9 +74,78 @@ export function ccConnectVersion(): string | undefined {
   }
 }
 
+/**
+ * Resolve the real JavaScript entry point of the globally-installed cc-connect
+ * package, bypassing platform wrapper scripts (.cmd / shell launchers).
+ *
+ * On Windows, `npm install -g cc-connect` creates a `.CMD` batch file that pm2
+ * cannot execute (it treats it as JS and crashes on `@ECHO off`).  This returns
+ * the absolute path to `run.js` inside the package so pm2 can invoke it
+ * directly.
+ */
+export function detectCcConnectEntry(): string | null {
+  try {
+    // Resolve global node_modules — dynamic across OS / user / node version
+    const npmRoot = execSync("npm root -g", {
+      encoding: "utf-8",
+      timeout: 5000,
+      windowsHide: true,
+    }).trim();
+
+    // cc-connect publishes bin scripts under npm/ (not the repo root)
+    const pkgPath = join(npmRoot, "cc-connect", "npm", "package.json");
+    if (!existsSync(pkgPath)) return null;
+
+    const pkg = JSON.parse(readFileSync(pkgPath, "utf-8")) as {
+      bin?: Record<string, string>;
+    };
+    const binScript = pkg?.bin?.["cc-connect"]; // "run.js"
+    if (!binScript) return null;
+
+    // Resolve relative to the package.json directory
+    const entryPath = join(dirname(pkgPath), binScript);
+    if (!existsSync(entryPath)) return null;
+
+    return entryPath;
+  } catch {
+    return null;
+  }
+}
+
 // ─── Instruction generator ─────────────────────────────────────────────────
 
 const CONFIG_DIR_DEFAULT = "~/.cc-connect";
+
+/** Build pm2 steps, using the real JS entry when available (Windows compat). */
+function buildPm2Steps(): DaemonStep[] {
+  const entry = detectCcConnectEntry();
+
+  const startCmd = entry
+    ? `pm2 start "${entry}" --name cc-connect`
+    : "pm2 start cc-connect --name cc-connect";
+
+  return [
+    {
+      label: "安装 pm2（一次性）",
+      command: "npm install -g pm2",
+      once: true,
+    },
+    {
+      label: "启动 cc-connect",
+      command: startCmd,
+    },
+    {
+      label: "保存进程列表（一次性）",
+      command: "pm2 save",
+      once: true,
+    },
+    {
+      label: "设置开机自启（一次性）",
+      command: "pm2 startup",
+      once: true,
+    },
+  ];
+}
 
 export function getDaemonInstructions(
   configDir?: string,
@@ -113,27 +184,7 @@ export function getDaemonInstructions(
       warning:
         "当前 cc-connect 版本不支持 Windows 原生守护进程，以下使用 pm2 代替。\n" +
         "  升级到最新版后可获得原生支持：npm install -g cc-connect@latest",
-      steps: [
-        {
-          label: "安装 pm2（一次性）",
-          command: "npm install -g pm2",
-          once: true,
-        },
-        {
-          label: "启动 cc-connect",
-          command: "pm2 start cc-connect --name cc-connect",
-        },
-        {
-          label: "保存进程列表（一次性）",
-          command: "pm2 save",
-          once: true,
-        },
-        {
-          label: "设置开机自启（一次性）",
-          command: "pm2 startup",
-          once: true,
-        },
-      ],
+      steps: buildPm2Steps(),
       helpCommands: [
         "pm2 status               查看状态",
         "pm2 logs cc-connect      查看日志",
