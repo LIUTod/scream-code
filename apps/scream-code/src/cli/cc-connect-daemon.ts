@@ -148,9 +148,12 @@ export function getDaemonInstructions(
           },
         ],
         helpCommands: [
-          "cc-connect daemon stop       停止服务",
-          "cc-connect daemon status     查看状态",
-          "cc-connect daemon logs -f    查看日志",
+          "cc-connect daemon status             查看运行状态",
+          "cc-connect daemon logs -f            实时查看日志（Ctrl+C 退出）",
+          "cc-connect daemon stop               停止服务",
+          "cc-connect daemon start              启动服务",
+          "cc-connect daemon restart            重启服务",
+          "cc-connect daemon uninstall          卸载守护进程",
         ],
       };
     }
@@ -188,10 +191,16 @@ export function getDaemonInstructions(
         },
       ],
       helpCommands: [
-        "pm2 status               查看状态",
-        "pm2 logs cc-connect      查看日志",
-        "pm2 stop cc-connect      停止服务",
-        "pm2 restart cc-connect   重启服务",
+        "⚠ 启动后会弹出一个小窗口，不要关闭！拖到任务栏或最小化即可。",
+        "   窗口关闭 = 服务停止，重启需执行下面的启动命令。",
+        "",
+        "pm2 status                         查看运行状态（online = 正常）",
+        "pm2 logs cc-connect                实时查看日志（Ctrl+C 退出）",
+        "pm2 stop cc-connect                停止服务",
+        "pm2 start cc-connect               重新启动（停止后/窗口误关后）",
+        "pm2 restart cc-connect             重启服务",
+        "pm2 delete cc-connect              完全删除（需重新走启动步骤）",
+        "pm2 list                           列出所有 pm2 进程",
       ],
     };
   }
@@ -211,9 +220,12 @@ export function getDaemonInstructions(
       },
     ],
     helpCommands: [
-      "cc-connect daemon stop       停止服务",
-      "cc-connect daemon status     查看状态",
-      "cc-connect daemon logs -f    查看日志",
+      "cc-connect daemon status             查看运行状态",
+      "cc-connect daemon logs -f            实时查看日志（Ctrl+C 退出）",
+      "cc-connect daemon stop               停止服务",
+      "cc-connect daemon start              启动服务",
+      "cc-connect daemon restart            重启服务",
+      "cc-connect daemon uninstall          卸载守护进程",
     ],
   };
 }
