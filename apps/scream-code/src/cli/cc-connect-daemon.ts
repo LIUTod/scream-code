@@ -92,21 +92,28 @@ export function detectCcConnectEntry(): string | null {
       windowsHide: true,
     }).trim();
 
-    // cc-connect publishes bin scripts under npm/ (not the repo root)
-    const pkgPath = join(npmRoot, "cc-connect", "npm", "package.json");
-    if (!existsSync(pkgPath)) return null;
+    // npm publish may produce either layout:
+    //   1. repo-root publish  → node_modules/cc-connect/npm/package.json
+    //   2. npm/ dir publish  → node_modules/cc-connect/package.json
+    const candidates = [
+      join(npmRoot, "cc-connect", "npm", "package.json"),
+      join(npmRoot, "cc-connect", "package.json"),
+    ];
 
-    const pkg = JSON.parse(readFileSync(pkgPath, "utf-8")) as {
-      bin?: Record<string, string>;
-    };
-    const binScript = pkg?.bin?.["cc-connect"]; // "run.js"
-    if (!binScript) return null;
+    for (const pkgPath of candidates) {
+      if (!existsSync(pkgPath)) continue;
+      const pkg = JSON.parse(readFileSync(pkgPath, "utf-8")) as {
+        bin?: Record<string, string>;
+      };
+      const binScript = pkg?.bin?.["cc-connect"]; // "run.js"
+      if (!binScript) continue;
 
-    // Resolve relative to the package.json directory
-    const entryPath = join(dirname(pkgPath), binScript);
-    if (!existsSync(entryPath)) return null;
+      // Resolve relative to the package.json directory
+      const entryPath = join(dirname(pkgPath), binScript);
+      if (existsSync(entryPath)) return entryPath;
+    }
 
-    return entryPath;
+    return null;
   } catch {
     return null;
   }
@@ -126,7 +133,7 @@ function buildPm2Steps(): DaemonStep[] {
 
   return [
     {
-      label: "安装 pm2（一次性）",
+      label: "安装 pm2",
       command: "npm install -g pm2",
       once: true,
     },
@@ -135,12 +142,12 @@ function buildPm2Steps(): DaemonStep[] {
       command: startCmd,
     },
     {
-      label: "保存进程列表（一次性）",
+      label: "保存进程列表",
       command: "pm2 save",
       once: true,
     },
     {
-      label: "设置开机自启（一次性）",
+      label: "设置开机自启",
       command: "pm2 startup",
       once: true,
     },
@@ -162,7 +169,7 @@ export function getDaemonInstructions(
         method: "schtasks (Windows Task Scheduler)",
         steps: [
           {
-            label: "安装守护进程（一次性）",
+            label: "安装守护进程",
             command: `cc-connect daemon install --work-dir ${dir}`,
             once: true,
           },
@@ -199,7 +206,7 @@ export function getDaemonInstructions(
     method: process.platform === "darwin" ? "launchd" : "systemd",
     steps: [
       {
-        label: "安装守护进程（一次性）",
+        label: "安装守护进程",
         command: `cc-connect daemon install --work-dir ${dir}`,
         once: true,
       },
