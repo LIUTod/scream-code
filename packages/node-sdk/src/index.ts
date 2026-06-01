@@ -5,6 +5,7 @@ export { ScreamAuthFacade } from '#/auth';
 export {
   applyCatalogProvider,
   catalogBaseUrl,
+  catalogCachePath,
   catalogModelToAlias,
   catalogProviderModels,
   CatalogFetchError,
@@ -12,6 +13,8 @@ export {
   fetchCatalog,
   inferWireType,
   loadBuiltInCatalog,
+  loadCatalogCache,
+  saveCatalogCache,
 } from '#/catalog';
 export type {
   ApplyCatalogProviderOptions,

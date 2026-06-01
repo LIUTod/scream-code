@@ -6,6 +6,9 @@ import {
   fetchCatalog,
   inferWireType,
   loadBuiltInCatalog,
+  loadCatalogCache,
+  resolveScreamHome,
+  saveCatalogCache,
   type Catalog,
 } from '@scream-cli/scream-code-sdk';
 
@@ -55,6 +58,8 @@ export async function handleConnectCommand(host: SlashCommandHost, args: string)
     try {
       catalog = await fetchCatalog(url, controller.signal);
       spinner.stop({ ok: true, label: 'Catalog loaded.' });
+      // Persist to local cache so we have a fresh copy next time we're offline
+      saveCatalogCache(catalog, resolveScreamHome());
     } catch (error) {
       if (controller.signal.aborted) {
         spinner.stop({ ok: false, label: 'Aborted.' });
@@ -64,13 +69,22 @@ export async function handleConnectCommand(host: SlashCommandHost, args: string)
           spinner.stop({ ok: false, label: 'Failed to load catalog.' });
           host.showError(`Failed to fetch catalog${hint}: ${formatErrorMessage(error)}`);
         } else {
-          const fallback = loadBuiltInCatalog(BUILT_IN_CATALOG_JSON);
-          if (fallback !== undefined) {
-            spinner.stop({ ok: true, label: 'Using built-in catalog (offline mode).' });
-            catalog = fallback;
+          const screamHome = resolveScreamHome();
+          // 1) local cache (last successful fetch)
+          const cached = loadCatalogCache(screamHome);
+          if (cached !== undefined) {
+            spinner.stop({ ok: true, label: 'Using cached catalog (offline mode).' });
+            catalog = cached;
           } else {
-            spinner.stop({ ok: false, label: 'Failed to load catalog.' });
-            host.showError(`Failed to fetch catalog${hint}: ${formatErrorMessage(error)}`);
+            // 2) built-in (shipped at build time)
+            const fallback = loadBuiltInCatalog(BUILT_IN_CATALOG_JSON);
+            if (fallback !== undefined) {
+              spinner.stop({ ok: true, label: 'Using built-in catalog (offline mode).' });
+              catalog = fallback;
+            } else {
+              spinner.stop({ ok: false, label: 'Failed to load catalog.' });
+              host.showError(`Failed to fetch catalog${hint}: ${formatErrorMessage(error)}`);
+            }
           }
         }
       }

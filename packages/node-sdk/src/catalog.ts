@@ -1,3 +1,6 @@
+import { readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 import type { ScreamConfig, ModelAlias } from '@scream-cli/agent-core';
 import {
   catalogBaseUrl,
@@ -12,6 +15,39 @@ import {
 
 export { catalogBaseUrl, catalogProviderModels, inferWireType };
 export type { Catalog, CatalogModel, CatalogProviderEntry };
+
+// ─── Catalog cache ────────────────────────────────────────────────────────
+
+/** Path to the local catalog cache inside the scream home directory. */
+export function catalogCachePath(screamHome: string): string {
+  return join(screamHome, 'catalog-cache.json');
+}
+
+/**
+ * Persist a successfully fetched catalog to local disk so it is available
+ * the next time the network is unreachable.  Best-effort — write failures
+ * are silently ignored so they never block the happy path.
+ */
+export function saveCatalogCache(catalog: Catalog, screamHome: string): void {
+  try {
+    writeFileSync(catalogCachePath(screamHome), JSON.stringify(catalog), 'utf-8');
+  } catch {
+    // best-effort cache
+  }
+}
+
+/**
+ * Load the most recently cached catalog snapshot.  Returns `undefined` when
+ * no cache file exists or the file is corrupt.
+ */
+export function loadCatalogCache(screamHome: string): Catalog | undefined {
+  try {
+    const raw = readFileSync(catalogCachePath(screamHome), 'utf-8');
+    return JSON.parse(raw) as Catalog;
+  } catch {
+    return undefined;
+  }
+}
 
 export const DEFAULT_CATALOG_URL = 'https://models.dev/api.json';
 
