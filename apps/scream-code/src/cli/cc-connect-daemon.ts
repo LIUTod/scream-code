@@ -121,7 +121,7 @@ export function getDaemonInstructions(
         },
         {
           label: "启动 cc-connect",
-          command: `pm2 start cc-connect --name cc-connect -- --work-dir ${dir}`,
+          command: "pm2 start cc-connect --name cc-connect",
         },
         {
           label: "保存进程列表（一次性）",
