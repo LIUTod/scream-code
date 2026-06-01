@@ -1,5 +1,5 @@
-import { readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 
 import type { ScreamConfig, ModelAlias } from '@scream-cli/agent-core';
 import {
@@ -30,7 +30,9 @@ export function catalogCachePath(screamHome: string): string {
  */
 export function saveCatalogCache(catalog: Catalog, screamHome: string): void {
   try {
-    writeFileSync(catalogCachePath(screamHome), JSON.stringify(catalog), 'utf-8');
+    const path = catalogCachePath(screamHome);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, JSON.stringify(catalog), 'utf-8');
   } catch {
     // best-effort cache
   }
