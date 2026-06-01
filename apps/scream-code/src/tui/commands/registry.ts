@@ -212,6 +212,15 @@ export const BUILTIN_SLASH_COMMANDS = [
     priority: 29,
     availability: 'always',
   },
+
+  // ── 插件中心 ──
+  {
+    name: 'plugin',
+    aliases: ['plugins'],
+    description: 'ScreamCode 插件中心：浏览、安装、卸载插件',
+    priority: 28,
+    availability: 'always',
+  },
 ] as const satisfies readonly ScreamSlashCommand[];
 
 export type BuiltinSlashCommand = (typeof BUILTIN_SLASH_COMMANDS)[number];

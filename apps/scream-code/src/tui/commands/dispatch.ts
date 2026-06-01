@@ -44,6 +44,7 @@ import {
 import { handleGoalCommand, handleGoalOffCommand } from './goal';
 import { handleChannelCommand } from './cc-connect';
 import { handleMemoryCommand } from './memory';
+import { handlePluginCommand } from './plugin';
 
 // ---------------------------------------------------------------------------
 // Re-exports — keep existing consumers working
@@ -80,6 +81,7 @@ export {
 export { handleGoalCommand, handleGoalOffCommand } from './goal';
 export { handleChannelCommand } from './cc-connect';
 export { handleMemoryCommand } from './memory';
+export { handlePluginCommand } from './plugin';
 
 // ---------------------------------------------------------------------------
 // Host interface
@@ -282,6 +284,9 @@ async function handleBuiltInSlashCommand(
       return;
     case 'memory':
       await handleMemoryCommand(host, args);
+      return;
+    case 'plugin':
+      await handlePluginCommand(host, args);
       return;
     default:
       host.showError(`Unknown slash command: /${String(name)}`);

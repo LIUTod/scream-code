@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "plugins": [
+    {
+      "id": "gsap-skills",
+      "name": "GSAP 动画技能包",
+      "description": "GreenSock 动画平台全套参考手册，含核心 API、Timeline、ScrollTrigger、插件、React 集成等 8 个技能",
+      "source": "https://github.com/greensock/gsap-skills",
+      "author": "GreenSock",
+      "tags": ["animation", "gsap", "frontend", "scrolltrigger"]
+    }
+  ]
+}
