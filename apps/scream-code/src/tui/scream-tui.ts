@@ -1007,7 +1007,7 @@ export class ScreamTUI {
   async fetchSessions(): Promise<void> {
     this.state.loadingSessions = true;
     try {
-      const sessions = await this.harness.listSessions({ workDir: this.state.appState.workDir });
+      const sessions = await this.harness.listSessions({});
       this.state.sessions = sessionRowsForPicker(
         sessions,
         this.state.appState.sessionId,

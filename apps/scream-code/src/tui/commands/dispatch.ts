@@ -42,6 +42,7 @@ import {
   handleTitleCommand,
 } from './session';
 import { handleGoalCommand, handleGoalOffCommand } from './goal';
+import { handleChannelCommand } from './cc-connect';
 import { handleMemoryCommand } from './memory';
 
 // ---------------------------------------------------------------------------
@@ -77,6 +78,7 @@ export {
   handleTitleCommand,
 } from './session';
 export { handleGoalCommand, handleGoalOffCommand } from './goal';
+export { handleChannelCommand } from './cc-connect';
 export { handleMemoryCommand } from './memory';
 
 // ---------------------------------------------------------------------------
@@ -253,6 +255,9 @@ async function handleBuiltInSlashCommand(
       return;
     case 'goaloff':
       await handleGoalOffCommand(host);
+      return;
+    case 'cc-connect':
+      await handleChannelCommand(host, args);
       return;
     case 'compact':
       await handleCompactCommand(host, args);

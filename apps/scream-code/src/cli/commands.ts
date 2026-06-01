@@ -10,12 +10,22 @@ import { registerExportCommand } from './sub/export';
 export type MainCommandHandler = (opts: CLIOptions) => void;
 export type MigrateCommandHandler = () => void;
 export type PluginNodeRunnerHandler = (entry: string, args: readonly string[]) => void;
+export type StreamJsonHandler = (opts: {
+  resume?: string;
+  model?: string;
+  permissionMode?: string;
+  skillsDirs: string[];
+}) => void;
+
+export type ChannelSetupHandler = () => void;
 
 export function createProgram(
   version: string,
   onMain: MainCommandHandler,
   onMigrate: MigrateCommandHandler,
   onPluginNodeRunner: PluginNodeRunnerHandler = () => {},
+  onStreamJson: StreamJsonHandler = () => {},
+  onChannelSetup: ChannelSetupHandler = () => {},
 ): Command {
   const program = new Command(CLI_COMMAND_NAME)
     .description('下一代智能体的起点')
@@ -75,6 +85,56 @@ export function createProgram(
 
   registerExportCommand(program);
   registerMigrateCommand(program, onMigrate);
+
+  // Hidden subcommand for cc-connect / Claude Code stream-json protocol.
+  // cc-connect spawns: scream stream-json --output-format stream-json --input-format stream-json
+  //   --permission-prompt-tool stdio --replay-user-messages --verbose ...
+  // We register all flags cc-connect may pass so Commander doesn't reject them.
+  // Flags we actually use: --input-format, --output-format, --resume, --model, --permission-mode.
+  // Flags accepted but ignored: --permission-prompt-tool, --replay-user-messages, --verbose,
+  //   --system-prompt, --append-system-prompt, --allowedTools, --disallowedTools, --effort,
+  //   --max-context-tokens.
+  program
+    .command('stream-json', { hidden: true })
+    .option('--input-format <fmt>', 'stream-json')
+    .option('--output-format <fmt>', 'stream-json')
+    .option('--resume <id>', 'resume a previous session')
+    .option('--model <model>', 'model to use')
+    .option('--permission-mode <mode>', 'permission mode')
+    .option('--permission-prompt-tool <mode>', '(ignored, cc-connect compat)')
+    .option('--replay-user-messages', '(ignored, cc-connect compat)')
+    .option('--verbose', '(ignored, cc-connect compat)')
+    .option('--system-prompt <text>', '(ignored, cc-connect compat)')
+    .option('--append-system-prompt <text>', '(ignored, cc-connect compat)')
+    .option('--allowedTools <list>', '(ignored, cc-connect compat)')
+    .option('--disallowedTools <list>', '(ignored, cc-connect compat)')
+    .option('--effort <value>', '(ignored, cc-connect compat)')
+    .option('--max-context-tokens <N>', '(ignored, cc-connect compat)')
+    .option(
+      '--skills-dir <dir>',
+      'additional skills directory (repeatable)',
+      (value: string, previous: string[]) => [...(previous ?? []), value],
+      [] as string[],
+    )
+    .action((subOpts: Record<string, unknown>) => {
+      onStreamJson({
+        resume: subOpts['resume'] as string | undefined,
+        model: subOpts['model'] as string | undefined,
+        permissionMode: subOpts['permissionMode'] as string | undefined,
+        skillsDirs: (subOpts['skillsDir'] as string[]) ?? [],
+      });
+    });
+
+  // `scream channel setup` — interactive cc-connect platform configuration wizard.
+  const channelCmd = program
+    .command('channel')
+    .description('管理 cc-connect 消息平台通道');
+  channelCmd
+    .command('setup')
+    .description('配置 cc-connect 并选择要连接的平台')
+    .action(() => {
+      onChannelSetup();
+    });
 
   program
     .command('__plugin_run_node', { hidden: true })

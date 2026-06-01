@@ -203,6 +203,15 @@ export const BUILTIN_SLASH_COMMANDS = [
     description: '退出应用',
     priority: 10,
   },
+
+  // ── cc-connect 通道配置 ──
+  {
+    name: 'cc-connect',
+    aliases: [],
+    description: 'cc-connect 快速通道配置（需先安装）',
+    priority: 29,
+    availability: 'always',
+  },
 ] as const satisfies readonly ScreamSlashCommand[];
 
 export type BuiltinSlashCommand = (typeof BUILTIN_SLASH_COMMANDS)[number];

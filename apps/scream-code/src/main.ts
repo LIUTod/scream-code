@@ -18,6 +18,8 @@ import type { CLIOptions } from './cli/options';
 import { OptionConflictError, validateOptions } from './cli/options';
 import { runPrompt } from './cli/run-prompt';
 import { runShell } from './cli/run-shell';
+import { runChannelSetup } from './cli/channel-setup';
+import { runStreamJson } from './cli/run-stream-json';
 import { formatStartupError } from './cli/startup-error';
 import { runPluginNodeEntry } from './cli/sub/plugin-run-node';
 import { runUpdatePreflight } from './cli/update/preflight';
@@ -90,6 +92,20 @@ export function main(): void {
     (entry, args) => {
       void runPluginNodeEntry(entry, args).catch(async (error: unknown) => {
         await logStartupFailure('运行插件节点入口', error);
+        process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+        process.exit(1);
+      });
+    },
+    (opts) => {
+      void runStreamJson(opts).catch(async (error: unknown) => {
+        await logStartupFailure('运行 stream-json', error);
+        process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+        process.exit(1);
+      });
+    },
+    () => {
+      void runChannelSetup().catch(async (error: unknown) => {
+        await logStartupFailure('运行 channel setup', error);
         process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
         process.exit(1);
       });
