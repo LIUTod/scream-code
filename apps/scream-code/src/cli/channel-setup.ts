@@ -326,8 +326,6 @@ export async function runChannelSetup(): Promise<void> {
   console.log("");
   console.log("    在聊天窗口发送 /bind setup");
   console.log("");
-  console.log("    目前飞书和 Telegram 支持附件回传，其他平台陆续适配中。");
-  console.log("");
 
   rl.close();
 }
