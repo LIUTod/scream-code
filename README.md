@@ -109,10 +109,13 @@ chmod +x ~/.scream-code/bin/scream
 
 - *远程聊天会话默认走cc标识注入会话管理系统，可通过斜杠命令进入进行管理和删除，也可以直接在电脑端直接继承会话继续让screamcode完成工作 
 
-**提示：终端快捷指令
+**提示：远程聊天快捷指令
 
-cc-connect daemon start              ← 启动守护进程（电脑不关可一直使用）
-cc-connect daemon stop               ← 强制停用
+/new             创建新会话
+/bind setup      开启文件传送功能，支持PDF、图片等
+/mode            查看可用模式
+/mode yolo       自动批准所有工具
+/mode default    每次工具调用前询问
 ---
 
 ## 项目灵感与感谢支持
