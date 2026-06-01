@@ -130,6 +130,13 @@ function formatDaemonSteps(configDir: string): string[] {
     lines.push(`  ${cmd}`);
   }
 
+  lines.push("");
+  lines.push("💡 激活附件回传（让 Agent 能发图片和文件）：");
+  lines.push("");
+  lines.push("  在聊天窗口发送 /bind setup");
+  lines.push("");
+  lines.push("  目前飞书和 Telegram 支持附件回传，其他平台陆续适配中。");
+
   return lines;
 }
 
