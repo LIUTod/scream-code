@@ -381,7 +381,7 @@ function extractUserText(msg: StdinUserMessage): string {
 // ─── main ─────────────────────────────────────────────────────────────────
 
 export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
-  const startedAt = Date.now();
+  const _startedAt = Date.now();
   const workDir = opts.workDir ?? process.cwd();
   const telemetryBootstrap = createCliTelemetryBootstrap();
   const telemetryClient: TelemetryClient = { track };
@@ -597,8 +597,8 @@ export function installStreamJsonTerminationHandlers(
       process.exit(signal === "SIGINT" ? 130 : 143);
     }
   };
-  const onSigint = () => handler("SIGINT");
-  const onSigterm = () => handler("SIGTERM");
+  const onSigint = () => { void handler("SIGINT"); };
+  const onSigterm = () => { void handler("SIGTERM"); };
   process.once("SIGINT", onSigint);
   process.once("SIGTERM", onSigterm);
   return () => {
