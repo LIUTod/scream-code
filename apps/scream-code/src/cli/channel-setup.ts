@@ -173,6 +173,9 @@ function resolveWorkDir(): string {
 function generateConfig(cliPath: string, platformType: string): string {
   const workDir = resolveWorkDir();
   return [
+    '# 全局：允许/禁止图片和文件回传到聊天（on = 开启，off = 关闭）',
+    'attachment_send = "on"',
+    '',
     '[[projects]]',
     'name = "default"',
     '',

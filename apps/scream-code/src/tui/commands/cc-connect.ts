@@ -76,6 +76,9 @@ function generateConfig(platform: PlatformDef): void {
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 
   const content = [
+    '# 全局：允许/禁止图片和文件回传到聊天（on = 开启，off = 关闭）',
+    'attachment_send = "on"',
+    '',
     '[[projects]]',
     'name = "default"',
     '',
