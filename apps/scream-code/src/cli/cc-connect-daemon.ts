@@ -197,10 +197,14 @@ export function getDaemonInstructions(
         "pm2 status                         查看运行状态（online = 正常）",
         "pm2 logs cc-connect                实时查看日志（Ctrl+C 退出）",
         "pm2 stop cc-connect                停止服务",
-        "pm2 start cc-connect               重新启动（停止后/窗口误关后）",
-        "pm2 restart cc-connect             重启服务",
-        "pm2 delete cc-connect              完全删除（需重新走启动步骤）",
+        "pm2 restart cc-connect             重启服务（日常开机后/改配置后）",
+        "pm2 delete cc-connect              完全删除",
         "pm2 list                           列出所有 pm2 进程",
+        "",
+        "常见问题：",
+        '  "Script already launched" → pm2 已经注册过了，用 pm2 restart cc-connect 即可。',
+        '  "stopped / errored"      → 用 pm2 logs cc-connect 查看错误原因。',
+        '  重新安装 cc-connect 后   → pm2 delete cc-connect 再重新走启动步骤。',
       ],
     };
   }
