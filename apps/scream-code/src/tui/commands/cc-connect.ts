@@ -183,10 +183,13 @@ export async function handleChannelCommand(host: SlashCommandHost, _args: string
           [
             `配置文件：${CONFIG_PATH}`,
             "",
-            "📋 在终端中按顺序执行：",
+            "📋 在终端中按顺序执行（每一步都必须做，不可跳过）：",
             "",
-            `第 1 步 — 扫码认证（一次性）`,
+            `第 1 步 — 扫码认证（一次性 · 必须执行）`,
             `  cc-connect ${platform.setupCmd}`,
+            "",
+            "  ⚠ 如果跳过这一步，cc-connect 启动后会无限报错崩溃！",
+            "    症状：pm2 status 显示 stopped，日志反复输出 token is required",
             ...formatDaemonSteps(configDir),
           ].join("\n"),
         );
@@ -199,10 +202,13 @@ export async function handleChannelCommand(host: SlashCommandHost, _args: string
       const lines = [
         `配置文件已写入：${CONFIG_PATH}`,
         "",
-        "📋 在终端中按顺序执行：",
+        "📋 在终端中按顺序执行（每一步都必须做，不可跳过）：",
         "",
-        `第 1 步 — 扫码认证（一次性）`,
+        `第 1 步 — 扫码认证（一次性 · 必须执行）`,
         `  cc-connect ${platform.setupCmd}`,
+        "",
+        "  ⚠ 如果跳过这一步，cc-connect 启动后会无限报错崩溃！",
+        "    症状：pm2 status 显示 stopped，日志反复输出 token is required",
         ...formatDaemonSteps(configDir),
       ];
       if (platform.note) {
