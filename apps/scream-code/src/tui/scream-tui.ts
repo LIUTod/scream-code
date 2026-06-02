@@ -911,6 +911,12 @@ export class ScreamTUI {
     const busyChanged = 'streamingPhase' in patch || 'isCompacting' in patch;
     Object.assign(this.state.appState, patch);
     if ('planMode' in patch) this.updateEditorBorderHighlight();
+    // Stop the welcome breathing animation once the first message is sent —
+    // the panel scrolls off-screen but the 40 ms timer keeps firing
+    // requestRender, causing flicker and broken scroll.
+    if ('streamingPhase' in patch && patch.streamingPhase !== 'idle') {
+      this.welcomeComponent?.stopBreathing();
+    }
     this.state.footer.setState(this.state.appState);
     this.updateActivityPane();
     if (busyChanged) this.updateQueueDisplay();
