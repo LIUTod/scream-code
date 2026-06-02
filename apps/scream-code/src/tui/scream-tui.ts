@@ -1320,6 +1320,7 @@ export class ScreamTUI {
     this.sessionEventHandler.stopAllMcpServerStatusSpinners();
     this.welcomeComponent?.stopBreathing();
     this.welcomeComponent = undefined;
+    this.state.editor.resetFirstInputGate();
     this.state.transcriptContainer.clear();
     this.clearTerminalInlineImages();
     this.state.todoPanel.clear();
