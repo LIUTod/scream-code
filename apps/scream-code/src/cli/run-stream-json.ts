@@ -439,21 +439,28 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
             session = await harness.resumeSession({ id: sessionKey });
             log.info("stream-json: resumed session", { sessionId: session.id });
           } catch (err) {
-            // The session directory exists on disk but the session index
-            // entry is missing (e.g. process killed between mkdir and
-            // index write).  harness.deleteSession() needs the index entry
-            // too, so it would also fail.  Remove the orphaned directory
-            // directly from the filesystem, then re-create cleanly.
-            log.warn("stream-json: resume failed, recreating session", {
+            // The session is in an inconsistent state: either the directory
+            // exists without an index entry, or the index has a stale entry
+            // pointing to a missing directory.  We need to clean up BOTH
+            // before createSession can succeed (it checks index first, then
+            // the directory — either will block creation).
+            log.warn("stream-json: resume failed, repairing session", {
               sessionKey,
               error: String(err),
             });
-            // listSessions already confirmed the directory exists — use its
-            // path to remove the orphan before recreating.
+
+            // Route 1: deleteSession — works when index entry and directory
+            // both exist (the normal path).
+            await harness.deleteSession(sessionKey).catch(() => {});
+
+            // Route 2: if the directory exists but the index entry was
+            // already missing, deleteSession won't touch it (it needs the
+            // index entry).  Remove it directly.
             const orphanDir = existing[0]?.sessionDir;
             if (orphanDir) {
-              await rm(orphanDir, { recursive: true, force: true });
+              await rm(orphanDir, { recursive: true, force: true }).catch(() => {});
             }
+
             const model = opts.model ?? config.defaultModel;
             session = await harness.createSession({
               id: sessionKey,
