@@ -179,7 +179,7 @@ export const BUILTIN_SLASH_COMMANDS = [
   {
     name: 'config',
     aliases: [],
-    description: '自定义模型配置',
+    description: '浏览并配置模型（远程拉取最新目录）',
     priority: 59,
   },
   {

@@ -11,98 +11,18 @@ import { resolveConnectCatalogRequest } from '#/tui/utils/connect-catalog';
 import { builtInCatalogDefine } from '../../../scripts/built-in-catalog.mjs';
 
 describe('resolveConnectCatalogRequest', () => {
-  it('prefers the built-in catalog by default and keeps online fetch as fallback', () => {
-    expect(resolveConnectCatalogRequest('')).toEqual({
-      kind: 'ok',
-      request: {
-        url: DEFAULT_CATALOG_URL,
-        preferBuiltIn: true,
-        allowBuiltInFallback: true,
-      },
-    });
+  it('returns default URL with diy=false for empty or unknown args', () => {
+    expect(resolveConnectCatalogRequest('')).toEqual({ url: DEFAULT_CATALOG_URL, diy: false });
+    expect(resolveConnectCatalogRequest('refresh')).toEqual({ url: DEFAULT_CATALOG_URL, diy: false });
+    expect(resolveConnectCatalogRequest('  refresh  ')).toEqual({ url: DEFAULT_CATALOG_URL, diy: false });
+    expect(resolveConnectCatalogRequest('--refresh')).toEqual({ url: DEFAULT_CATALOG_URL, diy: false });
+    expect(resolveConnectCatalogRequest('ignored text')).toEqual({ url: DEFAULT_CATALOG_URL, diy: false });
   });
 
-  it('forces an online fetch when refresh is requested', () => {
-    expect(resolveConnectCatalogRequest('refresh')).toEqual({
-      kind: 'ok',
-      request: {
-        url: DEFAULT_CATALOG_URL,
-        preferBuiltIn: false,
-        allowBuiltInFallback: true,
-      },
-    });
-    expect(resolveConnectCatalogRequest('  refresh  ')).toEqual({
-      kind: 'ok',
-      request: {
-        url: DEFAULT_CATALOG_URL,
-        preferBuiltIn: false,
-        allowBuiltInFallback: true,
-      },
-    });
-  });
-
-  it('treats explicit catalog URLs as authoritative and ignores refresh on them', () => {
-    expect(resolveConnectCatalogRequest('https://internal.example/catalog.json')).toEqual({
-      kind: 'ok',
-      request: {
-        url: 'https://internal.example/catalog.json',
-        preferBuiltIn: false,
-        allowBuiltInFallback: false,
-      },
-    });
-    expect(
-      resolveConnectCatalogRequest('refresh https://internal.example/catalog.json'),
-    ).toEqual({
-      kind: 'ok',
-      request: {
-        url: 'https://internal.example/catalog.json',
-        preferBuiltIn: false,
-        allowBuiltInFallback: false,
-      },
-    });
-    expect(
-      resolveConnectCatalogRequest('https://internal.example/catalog.json refresh'),
-    ).toEqual({
-      kind: 'ok',
-      request: {
-        url: 'https://internal.example/catalog.json',
-        preferBuiltIn: false,
-        allowBuiltInFallback: false,
-      },
-    });
-  });
-
-  it('rejects unsupported flags', () => {
-    const flagMessage = (flag: string) =>
-      `意外的参数 "${flag}"。请使用 /config [url] [refresh]。`;
-    expect(resolveConnectCatalogRequest('--refresh')).toEqual({
-      kind: 'error',
-      message: flagMessage('--refresh'),
-    });
-    expect(resolveConnectCatalogRequest('--url=https://internal.example/catalog.json')).toEqual({
-      kind: 'error',
-      message: flagMessage('--url=https://internal.example/catalog.json'),
-    });
-    expect(resolveConnectCatalogRequest('--url https://internal.example/catalog.json')).toEqual({
-      kind: 'error',
-      message: flagMessage('--url'),
-    });
-  });
-
-  it('rejects non-URL bare tokens', () => {
-    expect(resolveConnectCatalogRequest('ignored text')).toEqual({
-      kind: 'error',
-      message: '未知参数 "ignored"。用法: /config [url] [refresh]',
-    });
-  });
-
-  it('rejects multiple URLs', () => {
-    expect(
-      resolveConnectCatalogRequest('https://a.com/x.json https://b.com/y.json'),
-    ).toEqual({
-      kind: 'error',
-      message: '只能提供一个 catalog URL。收到 "https://a.com/x.json" 和 "https://b.com/y.json"。',
-    });
+  it('returns diy=true for /config diy (case-insensitive)', () => {
+    expect(resolveConnectCatalogRequest('diy')).toEqual({ url: DEFAULT_CATALOG_URL, diy: true });
+    expect(resolveConnectCatalogRequest('DIY')).toEqual({ url: DEFAULT_CATALOG_URL, diy: true });
+    expect(resolveConnectCatalogRequest('  diy  ')).toEqual({ url: DEFAULT_CATALOG_URL, diy: true });
   });
 });
 

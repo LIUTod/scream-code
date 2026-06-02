@@ -9,6 +9,7 @@ import {
 import { ApiKeyInputDialogComponent, type ApiKeyInputResult } from '../components/dialogs/api-key-input-dialog';
 import { ChoicePickerComponent, type ChoiceOption } from '../components/dialogs/choice-picker';
 import { ModelSelectorComponent } from '../components/dialogs/model-selector';
+import { TextInputDialogComponent, type TextInputResult } from '../components/dialogs/text-input-dialog';
 import type { SlashCommandHost } from './dispatch';
 
 export function promptLogoutProviderSelection(
@@ -124,5 +125,68 @@ export function runModelSelector(
       },
     });
     host.mountEditorReplacement(selector);
+  });
+}
+
+// ── /config diy prompts ────────────────────────────────────────────────
+
+const WIRE_TYPE_OPTIONS: ChoiceOption[] = [
+  { value: 'openai', label: 'OpenAI 兼容协议', description: '适用于 DeepSeek、OpenAI、Groq 等' },
+  { value: 'anthropic', label: 'Anthropic 协议', description: '适用于 Claude 系列模型' },
+];
+
+const THINKING_OPTIONS: ChoiceOption[] = [
+  { value: 'true', label: '开启思考模式' },
+  { value: 'false', label: '关闭思考模式' },
+];
+
+export function promptWireType(host: SlashCommandHost): Promise<string | undefined> {
+  return new Promise((resolve) => {
+    const picker = new ChoicePickerComponent({
+      title: '选择兼容协议',
+      hint: '选择模型服务商的 API 协议类型',
+      options: WIRE_TYPE_OPTIONS,
+      colors: host.state.theme.colors,
+      onSelect: (value) => { host.restoreEditor(); resolve(value); },
+      onCancel: () => { host.restoreEditor(); resolve(undefined); },
+    });
+    host.mountEditorReplacement(picker);
+  });
+}
+
+export function promptTextInput(
+  host: SlashCommandHost,
+  title: string,
+  opts?: { subtitle?: string; masked?: boolean; placeholder?: string },
+): Promise<string | undefined> {
+  return new Promise((resolve) => {
+    const dialog = new TextInputDialogComponent(
+      (result: TextInputResult) => {
+        host.restoreEditor();
+        resolve(result.kind === 'ok' ? result.value : undefined);
+      },
+      {
+        title,
+        subtitle: opts?.subtitle,
+        masked: opts?.masked,
+        placeholder: opts?.placeholder,
+        colors: host.state.theme.colors,
+      },
+    );
+    host.mountEditorReplacement(dialog);
+  });
+}
+
+export function promptThinkingMode(host: SlashCommandHost): Promise<boolean | undefined> {
+  return new Promise((resolve) => {
+    const picker = new ChoicePickerComponent({
+      title: '思考模式',
+      hint: '启用后模型会先思考再回答（需要模型支持）',
+      options: THINKING_OPTIONS,
+      colors: host.state.theme.colors,
+      onSelect: (value) => { host.restoreEditor(); resolve(value === 'true'); },
+      onCancel: () => { host.restoreEditor(); resolve(undefined); },
+    });
+    host.mountEditorReplacement(picker);
   });
 }

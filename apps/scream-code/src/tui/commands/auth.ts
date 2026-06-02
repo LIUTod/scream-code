@@ -1,8 +1,8 @@
 import {
   applyCatalogProvider,
   catalogBaseUrl,
+  catalogModelToAlias,
   catalogProviderModels,
-  CatalogFetchError,
   fetchCatalog,
   inferWireType,
   loadBuiltInCatalog,
@@ -10,6 +10,7 @@ import {
   resolveScreamHome,
   saveCatalogCache,
   type Catalog,
+  type CatalogModel,
 } from '@scream-cli/scream-code-sdk';
 
 import { BUILT_IN_CATALOG_JSON } from '../../built-in-catalog';
@@ -22,6 +23,9 @@ import {
   promptCatalogProviderSelection,
   promptLogoutProviderSelection,
   promptModelSelectionForCatalog,
+  promptThinkingMode,
+  promptTextInput,
+  promptWireType,
 } from './prompts';
 import type { SlashCommandHost } from './dispatch';
 
@@ -30,67 +34,48 @@ import type { SlashCommandHost } from './dispatch';
 // ---------------------------------------------------------------------------
 
 export async function handleConnectCommand(host: SlashCommandHost, args: string): Promise<void> {
-  const resolution = resolveConnectCatalogRequest(args);
-  if (resolution.kind === 'error') {
-    host.showError(resolution.message);
+  const { url, diy } = resolveConnectCatalogRequest(args);
+
+  if (diy) {
+    await handleDiyConfig(host);
     return;
   }
-  const { url, preferBuiltIn, allowBuiltInFallback } = resolution.request;
 
   let catalog: Catalog | undefined;
+  const controller = new AbortController();
+  const cancel = (): void => {
+    controller.abort();
+  };
+  host.cancelInFlight = cancel;
 
-  if (preferBuiltIn) {
-    const builtIn = loadBuiltInCatalog(BUILT_IN_CATALOG_JSON);
-    if (builtIn !== undefined) {
-      host.showStatus('已加载内置目录。运行 /config refresh 获取最新。');
-      catalog = builtIn;
-    }
-  }
-
-  if (catalog === undefined) {
-    const controller = new AbortController();
-    const cancel = (): void => {
-      controller.abort();
-    };
-    host.cancelInFlight = cancel;
-
-    const spinner = host.showProgressSpinner(`Fetching catalog from ${url}`);
-    try {
-      catalog = await fetchCatalog(url, controller.signal);
-      spinner.stop({ ok: true, label: 'Catalog loaded.' });
-      // Persist to local cache so we have a fresh copy next time we're offline
-      saveCatalogCache(catalog, resolveScreamHome());
-    } catch (error) {
-      if (controller.signal.aborted) {
-        spinner.stop({ ok: false, label: 'Aborted.' });
+  const spinner = host.showProgressSpinner(`正在拉取最新模型目录...`);
+  try {
+    catalog = await fetchCatalog(url, controller.signal);
+    spinner.stop({ ok: true, label: 'Catalog loaded.' });
+    saveCatalogCache(catalog, resolveScreamHome());
+  } catch (error) {
+    if (controller.signal.aborted) {
+      spinner.stop({ ok: false, label: 'Aborted.' });
+    } else {
+      // Remote failed — try cache, then built-in
+      const screamHome = resolveScreamHome();
+      const cached = loadCatalogCache(screamHome);
+      if (cached !== undefined) {
+        spinner.stop({ ok: true, label: 'Using cached catalog (offline mode).' });
+        catalog = cached;
       } else {
-        const hint = error instanceof CatalogFetchError ? ` (HTTP ${error.status})` : '';
-        if (!allowBuiltInFallback) {
-          spinner.stop({ ok: false, label: 'Failed to load catalog.' });
-          host.showError(`Failed to fetch catalog${hint}: ${formatErrorMessage(error)}`);
+        const fallback = loadBuiltInCatalog(BUILT_IN_CATALOG_JSON);
+        if (fallback !== undefined) {
+          spinner.stop({ ok: true, label: 'Using built-in catalog (offline mode).' });
+          catalog = fallback;
         } else {
-          const screamHome = resolveScreamHome();
-          // 1) local cache (last successful fetch)
-          const cached = loadCatalogCache(screamHome);
-          if (cached !== undefined) {
-            spinner.stop({ ok: true, label: 'Using cached catalog (offline mode).' });
-            catalog = cached;
-          } else {
-            // 2) built-in (shipped at build time)
-            const fallback = loadBuiltInCatalog(BUILT_IN_CATALOG_JSON);
-            if (fallback !== undefined) {
-              spinner.stop({ ok: true, label: 'Using built-in catalog (offline mode).' });
-              catalog = fallback;
-            } else {
-              spinner.stop({ ok: false, label: 'Failed to load catalog.' });
-              host.showError(`Failed to fetch catalog${hint}: ${formatErrorMessage(error)}`);
-            }
-          }
+          spinner.stop({ ok: false, label: 'Failed to load catalog.' });
+          host.showError(`Failed to fetch catalog: ${formatErrorMessage(error)}`);
         }
       }
-    } finally {
-      if (host.cancelInFlight === cancel) host.cancelInFlight = undefined;
     }
+  } finally {
+    if (host.cancelInFlight === cancel) host.cancelInFlight = undefined;
   }
 
   if (catalog === undefined) return;
@@ -184,4 +169,91 @@ export async function handleLogoutCommand(host: SlashCommandHost): Promise<void>
 
   host.track('logout', { provider: target });
   host.showStatus(`已删除模型商: ${target}.`);
+}
+
+// ── /config diy — manual provider setup ────────────────────────────────
+
+async function handleDiyConfig(host: SlashCommandHost): Promise<void> {
+  // Step 1 — wire type
+  const wire = await promptWireType(host);
+  if (wire === undefined) return;
+
+  // Step 2 — base URL
+  const baseUrl = await promptTextInput(host, '输入服务商 API 地址', {
+    subtitle: '例如 https://api.deepseek.com（可粘贴）',
+  });
+  if (baseUrl === undefined) return;
+
+  // Step 3 — API key (plain-text so users can paste)
+  const apiKey = await promptTextInput(host, '输入 API Key', {
+    subtitle: '密钥保存到 ~/.scream/config.toml（可粘贴，Esc 取消）',
+  });
+  if (apiKey === undefined) return;
+
+  // Step 4 — model ID
+  const modelId = await promptTextInput(host, '输入模型型号', {
+    subtitle: '例如 deepseek-v4-flash',
+  });
+  if (modelId === undefined) return;
+
+  // Step 5 — max context tokens
+  const maxContextStr = await promptTextInput(host, '输入模型最大上下文长度 (tokens)', {
+    subtitle: '默认 131072，DeepSeek V4 填 1000000',
+    placeholder: '131072',
+  });
+  if (maxContextStr === undefined) return;
+  const maxContextTokens = parseInt(maxContextStr, 10) || 131_072;
+
+  // Step 6 — thinking mode
+  const thinking = await promptThinkingMode(host);
+  if (thinking === undefined) return;
+
+  // Build a provider ID from the model name
+  const providerId = `custom-${modelId.replace(/[^A-Za-z0-9._-]/g, '-')}`;
+
+  // Build a minimal catalog model entry
+  const catalogModel: CatalogModel = {
+    id: modelId,
+    name: modelId,
+    capability: {
+      max_context_tokens: maxContextTokens,
+      image_in: false,
+      video_in: false,
+      audio_in: false,
+      thinking,
+      tool_use: true,
+    },
+    reasoningKey: wire === 'anthropic' ? 'thinking' : undefined,
+    maxOutputSize: wire === 'anthropic' ? 32_000 : undefined,
+  };
+
+  // Apply to config — same codepath as the regular catalog flow
+  const existingConfig = await host.harness.getConfig();
+  if (existingConfig.providers[providerId] !== undefined) {
+    await host.harness.removeProvider(providerId);
+  }
+
+  const config = await host.harness.getConfig();
+  config.providers[providerId] = {
+    type: wire as 'openai' | 'anthropic',
+    baseUrl,
+    apiKey,
+  };
+
+  const models = config.models ?? {};
+  models[`${providerId}/${modelId}`] = catalogModelToAlias(providerId, catalogModel);
+  config.models = models;
+  config.defaultModel = `${providerId}/${modelId}`;
+  config.defaultThinking = thinking;
+
+  await host.harness.setConfig({
+    providers: config.providers,
+    models: config.models,
+    defaultModel: config.defaultModel,
+    defaultThinking: config.defaultThinking,
+  });
+
+  await host.authFlow.refreshConfigAfterLogin();
+  host.track('config_diy', { providerId, model: modelId, wire });
+  host.showStatus(`已连接: ${providerId} · ${modelId} (${wire})`);
 }
