@@ -513,11 +513,11 @@ export class ScreamTUI {
   private startCcConnectPolling(): void {
     const POLL_INTERVAL_MS = 30_000;
     // First check immediately, then poll.
-    checkCcConnectActive().then((active) => {
+    void checkCcConnectActive().then((active) => {
       this.setAppState({ ccConnectActive: active });
     });
     this.ccConnectPollTimer = setInterval(() => {
-      checkCcConnectActive().then((active) => {
+      void checkCcConnectActive().then((active) => {
         this.setAppState({ ccConnectActive: active });
       });
     }, POLL_INTERVAL_MS);
