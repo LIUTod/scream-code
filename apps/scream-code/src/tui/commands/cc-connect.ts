@@ -7,7 +7,7 @@
  */
 
 import { execSync } from "node:child_process";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, dirname } from "node:path";
 
@@ -60,12 +60,17 @@ function detectScreamPath(): string {
 function readConfiguredType(): string | undefined {
   if (!existsSync(CONFIG_PATH)) return undefined;
   try {
-    const content = execSync(`grep '^type' "${CONFIG_PATH}" 2>/dev/null || true`, {
-      encoding: "utf-8",
-      timeout: 3000,
-    }).trim();
-    const m = content.match(/"(\S+)"/);
-    return m?.[1];
+    // Read the config file directly instead of shelling out to grep —
+    // Windows does not have grep, so the old approach always failed there
+    // and returned undefined, causing every /cc invocation to regenerate
+    // config.toml and overwrite the token that cc-connect <platform> setup
+    // had written into [projects.platforms.options].
+    const content = readFileSync(CONFIG_PATH, "utf-8");
+    for (const line of content.split("\n")) {
+      const m = line.match(/^type\s*=\s*"(\S+)"/);
+      if (m) return m[1];
+    }
+    return undefined;
   } catch {
     return undefined;
   }
