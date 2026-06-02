@@ -440,11 +440,14 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
           } catch (err) {
             // The session directory exists on disk but the session index
             // entry is missing (e.g. process killed between mkdir and
-            // index write).  Re-create the session instead of crashing.
+            // index write).  Delete the orphaned directory then re-create.
             log.warn("stream-json: resume failed, recreating session", {
               sessionKey,
               error: String(err),
             });
+            // Clean up the orphan so createSession doesn't fail with
+            // "already exists".
+            await harness.deleteSession(sessionKey).catch(() => {});
             const model = opts.model ?? config.defaultModel;
             session = await harness.createSession({
               id: sessionKey,
