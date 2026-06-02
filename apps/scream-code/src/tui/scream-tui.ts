@@ -1298,6 +1298,11 @@ export class ScreamTUI {
     this.welcomeComponent?.stopBreathing();
     const welcome = new WelcomeComponent(this.state.appState, this.state.theme.colors, this.state.ui);
     this.welcomeComponent = welcome;
+    // If the editor was already used in this session (e.g. session switch),
+    // the welcome onFirstInput hook won't fire again — stop breathing now.
+    if (this.state.editor.getText().length > 0) {
+      welcome.stopBreathing();
+    }
     this.state.transcriptContainer.addChild(welcome);
   }
 
