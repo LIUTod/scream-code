@@ -1,5 +1,6 @@
 export * from './chrome/footer';
 export * from './chrome/moon-loader';
+export * from './chrome/pulse-wave-loader';
 export * from './chrome/todo-panel';
 export * from './chrome/welcome';
 export * from './dialogs/approval-panel';

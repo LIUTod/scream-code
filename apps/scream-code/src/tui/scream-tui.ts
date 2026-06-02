@@ -38,6 +38,7 @@ import {
 import { GutterContainer } from './components/chrome/gutter-container';
 import { CHROME_GUTTER } from './constant/rendering';
 import { MoonLoader, type SpinnerStyle } from './components/chrome/moon-loader';
+import { PulseWaveLoader } from './components/chrome/pulse-wave-loader';
 import { WelcomeComponent } from './components/chrome/welcome';
 import {
   ApprovalPanelComponent,
@@ -207,6 +208,7 @@ export class ScreamTUI {
   private signalCleanupHandlers: Array<() => void> = [];
   private isShuttingDown = false;
   private ccConnectPollTimer: ReturnType<typeof setInterval> | undefined;
+  private welcomeComponent: WelcomeComponent | undefined;
   private startupNotice: string | undefined;
   private lastActivityMode: string | undefined;
   private lastHistoryContent: string | undefined;
@@ -1286,7 +1288,9 @@ export class ScreamTUI {
   }
 
   private renderWelcome(): void {
-    const welcome = new WelcomeComponent(this.state.appState, this.state.theme.colors);
+    this.welcomeComponent?.stopBreathing();
+    const welcome = new WelcomeComponent(this.state.appState, this.state.theme.colors, this.state.ui);
+    this.welcomeComponent = welcome;
     this.state.transcriptContainer.addChild(welcome);
   }
 
@@ -1302,6 +1306,8 @@ export class ScreamTUI {
     this.streamingUI.resetLiveText();
     this.streamingUI.resetToolUi();
     this.sessionEventHandler.stopAllMcpServerStatusSpinners();
+    this.welcomeComponent?.stopBreathing();
+    this.welcomeComponent = undefined;
     this.state.transcriptContainer.clear();
     this.clearTerminalInlineImages();
     this.state.todoPanel.clear();
@@ -1366,20 +1372,23 @@ export class ScreamTUI {
     switch (effectiveMode) {
       case 'hidden':
         this.stopActivitySpinner();
+        this.stopPulseWave();
         this.state.ui.requestRender();
         return;
       case 'waiting': {
-        const spinner = this.ensureActivitySpinner('moon');
+        this.stopActivitySpinner();
+        const pulseWave = this.ensurePulseWave();
         this.state.activityContainer.addChild(
           new ActivityPaneComponent({
             mode: 'waiting',
-            spinner,
+            pulseWave,
           }),
         );
         break;
       }
       case 'thinking': {
         this.stopActivitySpinner();
+        this.stopPulseWave();
         break;
       }
       case 'composing': {
@@ -1395,11 +1404,12 @@ export class ScreamTUI {
         break;
       }
       case 'tool': {
-        const spinner = this.ensureActivitySpinner('moon');
+        this.stopActivitySpinner();
+        const pulseWave = this.ensurePulseWave();
         this.state.activityContainer.addChild(
           new ActivityPaneComponent({
             mode: 'tool',
-            spinner,
+            pulseWave,
           }),
         );
         break;
@@ -1407,6 +1417,7 @@ export class ScreamTUI {
       case 'idle':
       case 'session': {
         this.stopActivitySpinner();
+        this.stopPulseWave();
         break;
       }
     }
@@ -1553,6 +1564,20 @@ export class ScreamTUI {
     if (this.state.activitySpinner !== null) {
       this.state.activitySpinner.instance.stop();
       this.state.activitySpinner = null;
+    }
+  }
+
+  private ensurePulseWave(): PulseWaveLoader {
+    if (this.state.pulseWave !== null) return this.state.pulseWave;
+    const instance = new PulseWaveLoader(this.state.ui, this.state.theme.colors.primary);
+    this.state.pulseWave = instance;
+    return instance;
+  }
+
+  private stopPulseWave(): void {
+    if (this.state.pulseWave !== null) {
+      this.state.pulseWave.stop();
+      this.state.pulseWave = null;
     }
   }
 

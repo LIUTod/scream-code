@@ -32,9 +32,9 @@ export class UserMessageComponent implements Component {
   }
 
   render(width: number): string[] {
-    const bullet = chalk.hex(this.color).bold(USER_MESSAGE_BULLET);
-    const bulletWidth = visibleWidth(bullet);
-    const contentWidth = Math.max(1, width - bulletWidth);
+    const border = chalk.hex(this.color).bold(USER_MESSAGE_BULLET);
+    const borderWidth = visibleWidth(border);
+    const contentWidth = Math.max(1, width - borderWidth);
 
     const lines: string[] = [];
 
@@ -43,18 +43,18 @@ export class UserMessageComponent implements Component {
       lines.push(line);
     }
 
-    // Text
+    // Text — first line gets the ┃ border, continuation lines get blank padding.
     const textLines = this.textComponent.render(contentWidth);
     for (let i = 0; i < textLines.length; i++) {
-      const prefix = i === 0 ? bullet : ' '.repeat(bulletWidth);
+      const prefix = i === 0 ? border : ' '.repeat(borderWidth);
       lines.push(prefix + textLines[i]);
     }
 
-    // Images — indented to align with text after the bullet
+    // Images — indented to align with text after the border.
     for (const thumbnail of this.imageThumbnails) {
       const imageLines = thumbnail.render(contentWidth);
       for (const line of imageLines) {
-        lines.push(' '.repeat(bulletWidth) + line);
+        lines.push(' '.repeat(borderWidth) + line);
       }
     }
 

@@ -1,12 +1,14 @@
 import { Container, Spacer } from '@earendil-works/pi-tui';
 
 import type { MoonLoader } from '../chrome/moon-loader';
+import type { PulseWaveLoader } from '../chrome/pulse-wave-loader';
 
 export type ActivityPaneMode = 'hidden' | 'waiting' | 'thinking' | 'composing' | 'tool';
 
 export interface ActivityPaneOptions {
   readonly mode: ActivityPaneMode;
   readonly spinner?: MoonLoader;
+  readonly pulseWave?: PulseWaveLoader;
 }
 
 export class ActivityPaneComponent extends Container {
@@ -18,12 +20,20 @@ export class ActivityPaneComponent extends Container {
         this.addChild(new Spacer(1));
         this.addChild(options.spinner);
       }
+      if (options.pulseWave !== undefined) {
+        this.addChild(new Spacer(1));
+        this.addChild(options.pulseWave);
+      }
       return;
     }
 
     if (options.mode === 'composing' && options.spinner !== undefined) {
       this.addChild(new Spacer(1));
       this.addChild(options.spinner);
+      if (options.pulseWave !== undefined) {
+        this.addChild(new Spacer(1));
+        this.addChild(options.pulseWave);
+      }
     }
   }
 }

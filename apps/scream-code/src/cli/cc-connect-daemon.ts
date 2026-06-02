@@ -14,6 +14,7 @@
 
 import { execSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join, dirname } from "node:path";
 
 // ─── Types ────────────────────────────────────────────────────────────────
@@ -165,6 +166,15 @@ export function getDaemonInstructions(
       ? `pm2 start "${entry}" --name cc-connect`
       : "pm2 start cc-connect --name cc-connect";
 
+    // Use the Windows Startup folder for reliable auto-start after reboot.
+    // schtasks + "pm2 resurrect" fails because the PM2 daemon isn't alive
+    // when the scheduled task fires at logon.  A .bat file in the Startup
+    // folder runs in the full user desktop environment where pm2 is on PATH
+    // and auto-spawns a daemon when needed.
+    const appData = process.env["APPDATA"] ?? join(homedir(), "AppData", "Roaming");
+    const startupDir = join(appData, "Microsoft", "Windows", "Start Menu", "Programs", "Startup");
+    const batPath = join(startupDir, "cc-connect-startup.bat");
+
     return {
       method: "pm2 (Node.js process manager)",
       warning:
@@ -185,9 +195,8 @@ export function getDaemonInstructions(
           once: true,
         },
         {
-          label: "设置开机自启（Windows）",
-          command:
-            'schtasks /create /tn "cc-connect-pm2" /tr "pm2 resurrect" /sc onlogon /rl limited /f',
+          label: "写入开机自启脚本（重启后自动运行）",
+          command: `echo @echo off ^&^& pm2 resurrect > "${batPath}"`,
           once: true,
         },
       ],
@@ -203,12 +212,11 @@ export function getDaemonInstructions(
         "pm2 list                           列出所有 pm2 进程",
         "",
         "取消开机自启：",
-        '  schtasks /delete /tn "cc-connect-pm2" /f',
+        `  del "${batPath}"`,
         "",
-        "备选开机自启方式（schtasks 不可用时）：",
-        "  1. Win+R 输入 shell:startup 回车",
-        "  2. 新建文本文件，内容写：pm2 resurrect",
-        "  3. 另存为 cc-connect.bat",
+        "如果开机后 pm2 status 显示为空：",
+        "  （1）运行 pm2 resurrect 手动恢复进程列表",
+        "  （2）运行 pm2 save 重新保存",
         "",
         "常见问题：",
         '  "Script already launched" → pm2 已经注册过了，用 pm2 restart cc-connect 即可。',

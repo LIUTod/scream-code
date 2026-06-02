@@ -1,32 +1,134 @@
 /**
  * Welcome panel shown at the top of the TUI.
  * Renders a round-bordered box with the logo, session, model, and version.
+ *
+ * The two-line ASCII logo cycles through a full 24-colour hue wheel
+ * (like addressable RGB LEDs) — starting and ending at the theme's
+ * primary green, smoothly sweeping through the full spectrum.
  */
 
-import type { Component } from '@earendil-works/pi-tui';
+import type { Component, TUI } from '@earendil-works/pi-tui';
 import { truncateToWidth, visibleWidth } from '@earendil-works/pi-tui';
 import chalk from 'chalk';
 
 import type { ColorPalette } from '#/tui/theme/colors';
 import type { AppState } from '#/tui/types';
 
+// 24 hues × 5 interpolated steps = 120 frames × 40 ms ≈ 4.8 s cycle.
+const HUE_STOPS = 24;
+const SUB_STEPS = 5;
+const BREATHE_STEPS = HUE_STOPS * SUB_STEPS; // 120
+const BREATHE_INTERVAL_MS = 40;
+
+// ── HSL ↔ RGB helpers ──────────────────────────────────────────────
+
+function hexToRgb(hex: string): [number, number, number] {
+  return [
+    parseInt(hex.slice(1, 3), 16),
+    parseInt(hex.slice(3, 5), 16),
+    parseInt(hex.slice(5, 7), 16),
+  ];
+}
+
+function rgbToHsl(r: number, g: number, b: number): [number, number, number] {
+  const rf = r / 255, gf = g / 255, bf = b / 255;
+  const max = Math.max(rf, gf, bf), min = Math.min(rf, gf, bf);
+  const l = (max + min) / 2;
+  if (max === min) return [0, 0, l * 100];
+  const d = max - min;
+  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+  let h = 0;
+  if (max === rf) h = ((gf - bf) / d + (gf < bf ? 6 : 0)) / 6;
+  else if (max === gf) h = ((bf - rf) / d + 2) / 6;
+  else h = ((rf - gf) / d + 4) / 6;
+  return [h * 360, s * 100, l * 100];
+}
+
+function hslToRgb(h: number, s: number, l: number): [number, number, number] {
+  const hf = ((h % 360) + 360) % 360 / 360;
+  const sf = s / 100, lf = l / 100;
+  if (sf === 0) { const v = Math.round(lf * 255); return [v, v, v]; }
+  const q = lf < 0.5 ? lf * (1 + sf) : lf + sf - lf * sf;
+  const p = 2 * lf - q;
+  const hue = (t: number): number => {
+    if (t < 0) t += 1; if (t > 1) t -= 1;
+    if (t < 1/6) return p + (q-p)*6*t;
+    if (t < 1/2) return q;
+    if (t < 2/3) return p + (q-p)*(2/3-t)*6;
+    return p;
+  };
+  return [Math.round(hue(hf+1/3)*255), Math.round(hue(hf)*255), Math.round(hue(hf-1/3)*255)];
+}
+
+function rgbToHex(r: number, g: number, b: number): string {
+  const c = (v: number): string =>
+    Math.round(Math.max(0, Math.min(255, v))).toString(16).padStart(2, '0');
+  return `#${c(r)}${c(g)}${c(b)}`;
+}
+
+// ── Palette builder ─────────────────────────────────────────────────
+
+/**
+ * Build a full-hue-wheel palette anchored at the primary-green hue.
+ * At frame 0 (and BREATHE_STEPS) the colour is pure primary; in between
+ * it sweeps through all 24 hue stops with smooth sub-step interpolation.
+ */
+function buildBreathingPalette(primaryHex: string, hueStops: number, subSteps: number): string[] {
+  const [r, g, b] = hexToRgb(primaryHex);
+  const [, sat, lit] = rgbToHsl(r, g, b);
+  const steps = hueStops * subSteps;
+
+  const palette: string[] = [];
+  for (let i = 0; i < steps; i++) {
+    // Map frame index to a hue angle.  Frame 0 = 0°, wraps back to 0° at the end.
+    const hueAngle = (i / steps) * 360;
+    const [rr, gg, bb] = hslToRgb(hueAngle, sat, lit);
+    palette.push(rgbToHex(rr, gg, bb));
+  }
+  return palette;
+}
+
+// ── Component ───────────────────────────────────────────────────────
+
 export class WelcomeComponent implements Component {
   private state: AppState;
   private colors: ColorPalette;
+  private ui: TUI;
+  private breatheFrame = 0;
+  private breatheTimer: ReturnType<typeof setInterval> | null = null;
+  private breathePalette: string[];
 
-  constructor(state: AppState, colors: ColorPalette) {
+  constructor(state: AppState, colors: ColorPalette, ui: TUI) {
     this.state = state;
     this.colors = colors;
+    this.ui = ui;
+    this.breathePalette = buildBreathingPalette(colors.primary, HUE_STOPS, SUB_STEPS);
+    this.startBreathing();
+  }
+
+  stopBreathing(): void {
+    if (this.breatheTimer !== null) {
+      clearInterval(this.breatheTimer);
+      this.breatheTimer = null;
+    }
+  }
+
+  private startBreathing(): void {
+    this.breatheTimer = setInterval(() => {
+      this.breatheFrame = (this.breatheFrame + 1) % BREATHE_STEPS;
+      this.ui.requestRender();
+    }, BREATHE_INTERVAL_MS);
   }
 
   invalidate(): void {}
 
   render(width: number): string[] {
+    const breatheColor = this.breathePalette[this.breatheFrame] ?? this.colors.primary;
+    const logoColor = (s: string): string => chalk.hex(breatheColor)(s);
     const primary = (s: string): string => chalk.hex(this.colors.primary)(s);
     const innerWidth = Math.max(10, width - 4);
     const pad = '  ';
 
-    // Logo + side-by-side text.
     const logo = ['░▒▓██▄▄▄██', '░▒▓▐█▄▀▄█▌'];
     const logoWidth = Math.max(...logo.map((row) => visibleWidth(row)));
     const gap = '  ';
@@ -47,8 +149,8 @@ export class WelcomeComponent implements Component {
     );
 
     const headerLines = [
-      primary(logo[0]!.padEnd(logoWidth)) + gap + rightRow0,
-      primary(logo[1]!.padEnd(logoWidth)) + gap + rightRow1,
+      logoColor(logo[0]!.padEnd(logoWidth)) + gap + rightRow0,
+      logoColor(logo[1]!.padEnd(logoWidth)) + gap + rightRow1,
     ];
 
     const activeModel = this.state.availableModels[this.state.model];
