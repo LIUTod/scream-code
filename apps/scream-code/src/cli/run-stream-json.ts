@@ -11,6 +11,7 @@
  */
 
 import { createInterface } from "node:readline";
+import { rm } from "node:fs/promises";
 
 import {
   ScreamHarness,
@@ -440,14 +441,19 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
           } catch (err) {
             // The session directory exists on disk but the session index
             // entry is missing (e.g. process killed between mkdir and
-            // index write).  Delete the orphaned directory then re-create.
+            // index write).  harness.deleteSession() needs the index entry
+            // too, so it would also fail.  Remove the orphaned directory
+            // directly from the filesystem, then re-create cleanly.
             log.warn("stream-json: resume failed, recreating session", {
               sessionKey,
               error: String(err),
             });
-            // Clean up the orphan so createSession doesn't fail with
-            // "already exists".
-            await harness.deleteSession(sessionKey).catch(() => {});
+            // listSessions already confirmed the directory exists — use its
+            // path to remove the orphan before recreating.
+            const orphanDir = existing[0]?.sessionDir;
+            if (orphanDir) {
+              await rm(orphanDir, { recursive: true, force: true });
+            }
             const model = opts.model ?? config.defaultModel;
             session = await harness.createSession({
               id: sessionKey,
