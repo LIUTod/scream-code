@@ -311,7 +311,7 @@ export class FooterComponent implements Component {
 
     // ── Line 2: transient hint (bottom-left) + status emoji + context (right) ──
     const emoji = statusEmoji(state.livePaneMode, state.streamingPhase);
-    const ccEmoji = state.ccConnectActive ? '📳' : '📴';
+    const ccEmoji = state.ccConnectActive ? '✅️' : '☑️';
     const goalIndicator = state.goalActive ? '🤔 ' : '';
     const contextText = goalIndicator + ccEmoji + ' ' + emoji + ' ' + formatContextStatus(
       state.contextUsage,
