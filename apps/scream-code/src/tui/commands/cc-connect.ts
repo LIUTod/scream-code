@@ -168,8 +168,14 @@ function buildNoticeText(
   let stepNum = 2;
   for (const step of daemon.steps) {
     const onceTag = step.once ? "（一次性）" : "";
+    const isAutoDone = step.command.includes("cc-connect-startup.bat");
     parts.push(`  第 ${stepNum} 步：${step.label}${onceTag}`);
-    parts.push(`    ${step.command}`);
+    if (isAutoDone) {
+      // Bat file already written by ScreamCode — not a command to run.
+      parts.push(`    ✅ 已自动完成，无需手动操作 （${step.command}）`);
+    } else {
+      parts.push(`    ${step.command}`);
+    }
     stepNum++;
   }
 
