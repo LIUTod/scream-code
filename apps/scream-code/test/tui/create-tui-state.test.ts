@@ -32,6 +32,7 @@ function fakeInitialAppState(): AppState {
     goal: null,
     goalActive: false,
     goalContinuationCount: 0,
+    ccConnectActive: false,
   };
 }
 

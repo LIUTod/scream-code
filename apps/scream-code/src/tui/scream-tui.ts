@@ -109,6 +109,7 @@ import { createTUIState, type TUIState } from './tui-state';
 import { isExpandable, isPlanExpandable } from './utils/component-capabilities';
 import { isDeadTerminalError } from './utils/dead-terminal';
 import { formatErrorMessage } from './utils/event-payload';
+import { checkCcConnectActive } from './utils/cc-connect-status';
 import { ImageAttachmentStore, type ImageAttachment } from './utils/image-attachment-store';
 import { extractMediaAttachments } from './utils/image-placeholder';
 import { hasPatchChanges } from './utils/object-patch';
@@ -174,6 +175,7 @@ function createInitialAppState(input: ScreamTUIStartupInput): AppState {
     goal: null,
     goalActive: false,
     goalContinuationCount: 0,
+    ccConnectActive: false,
   };
 }
 
@@ -204,6 +206,7 @@ export class ScreamTUI {
   private terminalThemeTrackingDispose: (() => void) | undefined;
   private signalCleanupHandlers: Array<() => void> = [];
   private isShuttingDown = false;
+  private ccConnectPollTimer: ReturnType<typeof setInterval> | undefined;
   private startupNotice: string | undefined;
   private lastActivityMode: string | undefined;
   private lastHistoryContent: string | undefined;
@@ -344,6 +347,7 @@ export class ScreamTUI {
       this.startEventLoop();
       try {
         await this.finishStartup(shouldReplayHistory);
+        this.startCcConnectPolling();
       } catch (error) {
         this.disposeTerminalTracking();
         this.state.ui.stop();
@@ -487,6 +491,7 @@ export class ScreamTUI {
   async stop(exitCode?: number): Promise<void> {
     if (this.isShuttingDown) return;
     this.isShuttingDown = true;
+    this.stopCcConnectPolling();
     this.unregisterSignalHandlers();
     this.aborted = true;
     this.streamingUI.discardPending();
@@ -502,6 +507,26 @@ export class ScreamTUI {
     this.state.ui.stop();
     if (this.onExit) {
       await this.onExit(exitCode);
+    }
+  }
+
+  private startCcConnectPolling(): void {
+    const POLL_INTERVAL_MS = 30_000;
+    // First check immediately, then poll.
+    checkCcConnectActive().then((active) => {
+      this.setAppState({ ccConnectActive: active });
+    });
+    this.ccConnectPollTimer = setInterval(() => {
+      checkCcConnectActive().then((active) => {
+        this.setAppState({ ccConnectActive: active });
+      });
+    }, POLL_INTERVAL_MS);
+  }
+
+  private stopCcConnectPolling(): void {
+    if (this.ccConnectPollTimer !== undefined) {
+      clearInterval(this.ccConnectPollTimer);
+      this.ccConnectPollTimer = undefined;
     }
   }
 

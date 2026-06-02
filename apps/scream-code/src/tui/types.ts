@@ -38,6 +38,7 @@ export interface AppState {
   goal: string | null;
   goalActive: boolean;
   goalContinuationCount: number;
+  ccConnectActive: boolean;
 }
 
 export interface ToolCallBlockData {
