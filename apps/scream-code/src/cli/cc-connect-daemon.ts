@@ -196,7 +196,9 @@ export function getDaemonInstructions(
         },
         {
           label: "写入开机自启脚本（重启后自动运行）",
-          command: `echo @echo off ^&^& pm2 resurrect > "${batPath}"`,
+          // Wrap in cmd /c so the command works in PowerShell too —
+          // PowerShell treats && as reserved and rejects ^& escaping.
+          command: `cmd /c "echo @echo off && pm2 resurrect > \\"${batPath}\\""`,
           once: true,
         },
       ],
