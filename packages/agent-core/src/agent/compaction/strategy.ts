@@ -14,8 +14,8 @@ export interface CompactionConfig {
 }
 
 export const DEFAULT_COMPACTION_CONFIG: CompactionConfig = {
-  triggerRatio: 0.85,
-  blockRatio: 0.85, // Same as triggerRatio to disable async compaction
+  triggerRatio: 0.75,
+  blockRatio: 0.85, // 10% proactive window between trigger and block
   reservedContextSize: 50_000,
   maxCompactionPerTurn: 3,
   maxRecentMessages: 4,

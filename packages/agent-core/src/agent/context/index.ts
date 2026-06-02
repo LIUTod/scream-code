@@ -2,7 +2,7 @@ import { createToolMessage, type ContentPart, type Message } from '@scream-cli/l
 
 import type { Agent } from '..';
 import type { ExecutableToolResult, LoopRecordedEvent } from '../../loop';
-import { estimateTokensForMessages } from '../../utils/tokens';
+import { estimateTokens, estimateTokensForMessages } from '../../utils/tokens';
 import type { CompactionResult } from '../compaction';
 import { project } from './projector';
 import {
@@ -19,6 +19,15 @@ const TOOL_EMPTY_STATUS = '<system>Tool output is empty.</system>';
 const TOOL_EMPTY_ERROR_STATUS =
   '<system>ERROR: Tool execution failed. Tool output is empty.</system>';
 const TOOL_OUTPUT_EMPTY_TEXT = 'Tool output is empty.';
+
+/** Maximum token count for tool results persisted in conversation history.
+ *  Results exceeding this limit are truncated to avoid bloating every
+ *  subsequent API request with stale data.  The model can re-read the
+ *  full content via read_file when needed. */
+const MAX_TOOL_RESULT_TOKENS = 8000;
+
+const TOOL_TRUNCATION_NOTICE =
+  '\n[content truncated — use read_file to re-read if needed]';
 
 export interface ContextMemorySnapshot {
   readonly history: readonly ContextMessage[];
@@ -255,9 +264,10 @@ function toolResultOutputForModel(result: ExecutableToolResult): string | Conten
     if (result.isError === true) {
       if (output.length === 0) return TOOL_EMPTY_ERROR_STATUS;
       if (output.trimStart().startsWith('<system>ERROR:')) return output;
-      return `${TOOL_ERROR_STATUS}\n${output}`;
+      return truncateToolOutput(`${TOOL_ERROR_STATUS}\n${output}`);
     }
-    return isEmptyOutputText(output) ? TOOL_EMPTY_STATUS : output;
+    if (isEmptyOutputText(output)) return TOOL_EMPTY_STATUS;
+    return truncateToolOutput(output);
   }
 
   if (output.length === 0) {
@@ -269,9 +279,72 @@ function toolResultOutputForModel(result: ExecutableToolResult): string | Conten
     ];
   }
   if (result.isError === true) {
-    return [{ type: 'text', text: TOOL_ERROR_STATUS }, ...output];
+    return [{ type: 'text', text: TOOL_ERROR_STATUS }, ...truncateContentParts(output)];
   }
-  return output;
+  return truncateContentParts(output);
+}
+
+/** Truncate a plain-text tool output that exceeds MAX_TOOL_RESULT_TOKENS. */
+function truncateToolOutput(text: string): string {
+  if (estimateTokens(text) <= MAX_TOOL_RESULT_TOKENS) return text;
+  // Walk backwards to find a safe cut point within budget, reserving room
+  // for the truncation notice.
+  const noticeTokens = estimateTokens(TOOL_TRUNCATION_NOTICE);
+  const budget = MAX_TOOL_RESULT_TOKENS - noticeTokens;
+  if (budget <= 0) return TOOL_TRUNCATION_NOTICE.trim();
+
+  // Character-level truncation: preserve the first ~budget tokens' worth of text.
+  let kept = '';
+  let tokens = 0;
+  for (const ch of text) {
+    const chTokens = ch.codePointAt(0)! <= 127 ? 1 / 4 : 1;
+    if (tokens + chTokens > budget) break;
+    kept += ch;
+    tokens += chTokens;
+  }
+  return kept + TOOL_TRUNCATION_NOTICE;
+}
+
+/** Truncate oversized text parts in a ContentPart array. */
+function truncateContentParts(parts: readonly ContentPart[]): ContentPart[] {
+  let totalTokens = 0;
+  for (const p of parts) {
+    if (p.type === 'text') totalTokens += estimateTokens(p.text);
+  }
+  if (totalTokens <= MAX_TOOL_RESULT_TOKENS) return [...parts];
+
+  const noticeTokens = estimateTokens(TOOL_TRUNCATION_NOTICE);
+  const budget = MAX_TOOL_RESULT_TOKENS - noticeTokens;
+  if (budget <= 0) return [{ type: 'text', text: TOOL_TRUNCATION_NOTICE.trim() }];
+
+  const result: ContentPart[] = [];
+  let used = 0;
+  for (const p of parts) {
+    if (p.type !== 'text') {
+      result.push(p);
+      continue;
+    }
+    const partTokens = estimateTokens(p.text);
+    if (used + partTokens <= budget) {
+      result.push(p);
+      used += partTokens;
+    } else {
+      // Partial truncation of this text part.
+      const remaining = budget - used;
+      let kept = '';
+      let t = 0;
+      for (const ch of p.text) {
+        const chTokens = ch.codePointAt(0)! <= 127 ? 1 / 4 : 1;
+        if (t + chTokens > remaining) break;
+        kept += ch;
+        t += chTokens;
+      }
+      if (kept.length > 0) result.push({ type: 'text', text: kept });
+      break;
+    }
+  }
+  result.push({ type: 'text', text: TOOL_TRUNCATION_NOTICE });
+  return result;
 }
 
 function isEmptyOutputText(output: string): boolean {
