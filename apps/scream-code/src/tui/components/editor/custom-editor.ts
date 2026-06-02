@@ -121,6 +121,9 @@ export class CustomEditor extends Editor {
    * the next keystroke.
    */
   public onPasteImage?: () => Promise<boolean>;
+  /** Fires exactly once when the user first types anything into the editor. */
+  public onFirstInput?: () => void;
+  private firstInputFired = false;
 
   private consumingPaste = false;
   private consumeBuffer = '';
@@ -327,6 +330,11 @@ export class CustomEditor extends Editor {
       }
       this.onEscape?.();
       return;
+    }
+
+    if (!this.firstInputFired) {
+      this.firstInputFired = true;
+      this.onFirstInput?.();
     }
 
     super.handleInput(normalized);

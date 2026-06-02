@@ -311,6 +311,7 @@ export class ScreamTUI {
       this.gitLsFilesCache,
     );
     this.state.editor.setAutocompleteProvider(provider);
+    this.state.editor.onFirstInput = () => this.welcomeComponent?.stopBreathing();
   }
 
   async refreshSkillCommands(session?: SkillListSession): Promise<void> {
