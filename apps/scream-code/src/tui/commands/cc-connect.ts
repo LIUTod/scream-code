@@ -103,44 +103,92 @@ function generateConfig(platform: PlatformDef): void {
   writeFileSync(CONFIG_PATH, content, "utf-8");
 }
 
-// ─── Daemon instructions helper ────────────────────────────────────────────
+// ─── Notice builders ────────────────────────────────────────────────────────
+
+const SEP = "──".repeat(20);
 
 /**
- * Format daemon steps as a numbered continuation from the platform setup step.
- * Returns lines that should be appended after the platform setup command line.
+ * Build the full notice text shown after platform selection.
+ * Common management commands come first; detailed setup steps follow.
  */
-function formatDaemonSteps(configDir: string): string[] {
+function buildNoticeText(
+  platform: PlatformDef,
+  isReconfigure: boolean,
+): string {
+  const configDir = dirname(CONFIG_PATH);
   const daemon = getDaemonInstructions(configDir);
-  const lines: string[] = [];
 
-  if (daemon.warning) {
-    lines.push("");
-    lines.push(`⚠ ${daemon.warning}`);
+  const parts: string[] = [];
+
+  // ── Header ──
+  if (isReconfigure) {
+    parts.push(`${platform.name} 已配置（配置不会丢失）`);
+    parts.push("");
+    parts.push(`配置文件：${CONFIG_PATH}`);
+  } else {
+    parts.push(`✔ ${platform.name} 通道配置完成`);
+    parts.push("");
+    parts.push(`配置文件已写入：${CONFIG_PATH}`);
   }
 
-  let stepNum = 2; // step 1 is the platform setup
+  // ── Quick Reference (front & center) ──
+  parts.push("");
+  parts.push("📋 常用管理指令（建议复制保存）：");
+  parts.push("");
+  parts.push(`  pm2 status                         查看运行状态（online = 正常）`);
+  parts.push(`  pm2 restart cc-connect             重启服务`);
+  parts.push(`  pm2 stop cc-connect                停止服务`);
+  parts.push(`  pm2 logs cc-connect                查看日志`);
+  parts.push(`  pm2 delete cc-connect              完全删除`);
+  if (isReconfigure) {
+    parts.push("");
+    parts.push("  ⚠ 不要再次运行 /cc-connect 并选择相同平台，否则会覆盖已有配置！");
+    parts.push("    如需更换平台，请先删除 C:\\Users\\<用户名>\\.cc-connect\\config.toml");
+  }
+
+  // ── Detailed setup steps ──
+  parts.push("");
+  parts.push(SEP);
+  parts.push("");
+  parts.push("📋 初始化步骤（仅首次配置时需要，按顺序执行）：");
+  parts.push("");
+
+  // Step 1: Platform auth
+  const noteTag = platform.note ? `（${platform.note}）` : "";
+  parts.push(`  第 1 步：平台认证${noteTag}`);
+  parts.push(`    cc-connect ${platform.setupCmd}`);
+  parts.push("");
+
+  // Step 2+: Daemon steps
+  if (daemon.warning) {
+    parts.push(`  ⚠ ${daemon.warning}`);
+    parts.push("");
+  }
+  let stepNum = 2;
   for (const step of daemon.steps) {
     const onceTag = step.once ? "（一次性）" : "";
-    lines.push("");
-    lines.push(`第 ${stepNum} 步 — ${step.label}${onceTag}`);
-    lines.push(`  ${step.command}`);
+    parts.push(`  第 ${stepNum} 步：${step.label}${onceTag}`);
+    parts.push(`    ${step.command}`);
     stepNum++;
   }
 
-  lines.push("");
-  lines.push("──".repeat(20));
-  lines.push("");
-  lines.push(`日常管理 (${daemon.method})：`);
+  // ── Help ──
+  parts.push("");
+  parts.push(SEP);
+  parts.push("");
+  parts.push(`更多指令 (${daemon.method})：`);
   for (const cmd of daemon.helpCommands) {
-    lines.push(`  ${cmd}`);
+    parts.push(`  ${cmd}`);
   }
 
-  lines.push("");
-  lines.push("💡 激活附件回传（让 Agent 能发图片和文件）：");
-  lines.push("");
-  lines.push("  在聊天窗口发送 /bind setup");
+  parts.push("");
+  parts.push("💡 激活附件回传（让 Agent 能发图片和文件）：");
+  parts.push("  在聊天窗口发送 /bind setup");
+  parts.push("");
+  parts.push("💡 开机自启已通过 Startup 文件夹中的 cc-connect-startup.bat 实现。");
+  parts.push("  如需手动重启服务：pm2 resurrect");
 
-  return lines;
+  return parts.join("\n");
 }
 
 // ─── Handler ───────────────────────────────────────────────────────────────
@@ -182,40 +230,12 @@ export async function handleChannelCommand(host: SlashCommandHost, _args: string
       }
 
       if (configuredType === value) {
-        const configDir = dirname(CONFIG_PATH);
-        host.showNotice(
-          `${platform.name} 已配置`,
-          [
-            `配置文件：${CONFIG_PATH}`,
-            "",
-            "📋 在终端中按顺序执行：",
-            "",
-            `第 1 步 — 平台认证（一次性）`,
-            `  cc-connect ${platform.setupCmd}`,
-            ...formatDaemonSteps(configDir),
-          ].join("\n"),
-        );
+        host.showNotice(`${platform.name} 已配置`, buildNoticeText(platform, true));
         return;
       }
 
       generateConfig(platform);
-
-      const configDir = dirname(CONFIG_PATH);
-      const lines = [
-        `配置文件已写入：${CONFIG_PATH}`,
-        "",
-        "📋 在终端中按顺序执行：",
-        "",
-        `第 1 步 — 平台认证（一次性）`,
-        `  cc-connect ${platform.setupCmd}`,
-        ...formatDaemonSteps(configDir),
-      ];
-      if (platform.note) {
-        lines.push("");
-        lines.push(`⚠ ${platform.note}`);
-      }
-
-      host.showNotice(`✔ ${platform.name} 通道配置完成`, lines.join("\n"));
+      host.showNotice(`✔ ${platform.name} 通道配置完成`, buildNoticeText(platform, false));
     },
     onCancel: () => {
       host.restoreEditor();
