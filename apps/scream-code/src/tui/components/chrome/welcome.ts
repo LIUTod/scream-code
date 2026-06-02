@@ -75,13 +75,13 @@ function rgbToHex(r: number, g: number, b: number): string {
  */
 function buildBreathingPalette(primaryHex: string, hueStops: number, subSteps: number): string[] {
   const [r, g, b] = hexToRgb(primaryHex);
-  const [, sat, lit] = rgbToHsl(r, g, b);
+  const [baseHue, sat, lit] = rgbToHsl(r, g, b);
   const steps = hueStops * subSteps;
 
   const palette: string[] = [];
   for (let i = 0; i < steps; i++) {
-    // Map frame index to a hue angle.  Frame 0 = 0°, wraps back to 0° at the end.
-    const hueAngle = (i / steps) * 360;
+    // Map frame index to a hue angle, anchored at the primary hue so frame 0 = primary green.
+    const hueAngle = (baseHue + (i / steps) * 360) % 360;
     const [rr, gg, bb] = hslToRgb(hueAngle, sat, lit);
     palette.push(rgbToHex(rr, gg, bb));
   }
