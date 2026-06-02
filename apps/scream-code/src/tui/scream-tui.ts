@@ -300,7 +300,11 @@ export class ScreamTUI {
   }
 
   private setupAutocomplete(): void {
-    const slashCommands: (AutocompleteItem | SlashCommand)[] = this.getSlashCommands().map((cmd) => ({
+    // Hide skill commands from the autocomplete dropdown — they clutter the
+    // list (~40 extra entries) and cause rendering ghosting when scrolling.
+    // Skills are still invocable by typing the full /skill:<name> manually.
+    const visible = this.getSlashCommands().filter((cmd) => !cmd.name.startsWith("skill:"));
+    const slashCommands: (AutocompleteItem | SlashCommand)[] = visible.map((cmd) => ({
       value: cmd.name,
       label: `/${cmd.name} — ${cmd.description}`,
     }));
