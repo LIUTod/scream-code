@@ -13,7 +13,7 @@
  */
 
 import { execSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, dirname } from "node:path";
 
@@ -120,6 +120,34 @@ export function detectCcConnectEntry(): string | null {
   }
 }
 
+// ─── Startup bat helper ──────────────────────────────────────────────────
+
+/**
+ * Write the Windows startup .bat file directly (no shell echo).
+ * Returns the written path, or null if the Startup folder doesn't exist.
+ */
+function resolveStartupBatPath(): string | null {
+  const appData = process.env["APPDATA"] ?? join(homedir(), "AppData", "Roaming");
+  const startupDir = join(appData, "Microsoft", "Windows", "Start Menu", "Programs", "Startup");
+  if (!existsSync(startupDir)) return null;
+  return join(startupDir, "cc-connect-startup.bat");
+}
+
+/**
+ * Write the startup bat file. Returns true on success.
+ */
+export function writeStartupBat(): boolean {
+  const batPath = resolveStartupBatPath();
+  if (!batPath) return false;
+  try {
+    mkdirSync(dirname(batPath), { recursive: true });
+    writeFileSync(batPath, "@echo off\r\npm2 resurrect\r\n", "utf-8");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // ─── Instruction generator ─────────────────────────────────────────────────
 
 const CONFIG_DIR_DEFAULT = "~/.cc-connect";
@@ -171,60 +199,88 @@ export function getDaemonInstructions(
     // when the scheduled task fires at logon.  A .bat file in the Startup
     // folder runs in the full user desktop environment where pm2 is on PATH
     // and auto-spawns a daemon when needed.
-    const appData = process.env["APPDATA"] ?? join(homedir(), "AppData", "Roaming");
-    const startupDir = join(appData, "Microsoft", "Windows", "Start Menu", "Programs", "Startup");
-    const batPath = join(startupDir, "cc-connect-startup.bat");
+    //
+    // We write the bat file directly from Node.js so the command works
+    // regardless of whether the user's shell is cmd.exe or PowerShell.
+    const batPath = resolveStartupBatPath();
+    const batWritten = writeStartupBat();
+
+    const steps: DaemonStep[] = [
+      {
+        label: "安装 pm2",
+        command: "npm install -g pm2",
+        once: true,
+      },
+      {
+        label: "启动 cc-connect",
+        command: pm2StartCmd,
+      },
+      {
+        label: "保存进程列表",
+        command: "pm2 save",
+        once: true,
+      },
+    ];
+
+    if (batWritten && batPath) {
+      steps.push({
+        label: "开机自启脚本（已自动写入，重启后生效）",
+        command: batPath,
+        once: true,
+      });
+    } else {
+      steps.push({
+        label: "设置开机自启",
+        command:
+          'schtasks /create /tn "cc-connect-pm2" /tr "pm2 resurrect" /sc onlogon /rl limited /f',
+        once: true,
+      });
+    }
+
+    const helpCommands = [
+      "⚠ 启动后会弹出一个小窗口，不要关闭！拖到任务栏或最小化即可。",
+      "   窗口关闭 = 服务停止，重启需执行下面的启动命令。",
+      "",
+      "pm2 status                         查看运行状态（online = 正常）",
+      "pm2 logs cc-connect                实时查看日志（Ctrl+C 退出）",
+      "pm2 stop cc-connect                停止服务",
+      "pm2 restart cc-connect             重启服务（日常开机后/改配置后）",
+      "pm2 delete cc-connect              完全删除",
+      "pm2 list                           列出所有 pm2 进程",
+    ];
+
+    if (batWritten && batPath) {
+      helpCommands.push(
+        "",
+        "取消开机自启：",
+        `  del "${batPath}"`,
+      );
+    } else {
+      helpCommands.push(
+        "",
+        "取消开机自启：",
+        '  schtasks /delete /tn "cc-connect-pm2" /f',
+      );
+    }
+
+    helpCommands.push(
+      "",
+      "如果开机后 pm2 status 显示为空：",
+      "  （1）运行 pm2 resurrect 手动恢复进程列表",
+      "  （2）运行 pm2 save 重新保存",
+      "",
+      "常见问题：",
+      '  "Script already launched" → pm2 已经注册过了，用 pm2 restart cc-connect 即可。',
+      '  "stopped / errored"      → 用 pm2 logs cc-connect 查看错误原因。',
+      '  重新安装 cc-connect 后   → pm2 delete cc-connect 再重新走启动步骤。',
+    );
 
     return {
       method: "pm2 (Node.js process manager)",
       warning:
         "cc-connect 暂不支持在当前 Windows 系统上使用原生守护进程，以下使用 pm2 代替。",
-      steps: [
-        {
-          label: "安装 pm2",
-          command: "npm install -g pm2",
-          once: true,
-        },
-        {
-          label: "启动 cc-connect",
-          command: pm2StartCmd,
-        },
-        {
-          label: "保存进程列表",
-          command: "pm2 save",
-          once: true,
-        },
-        {
-          label: "写入开机自启脚本（重启后自动运行）",
-          // Wrap in cmd /c so the command works in PowerShell too —
-          // PowerShell treats && as reserved and rejects ^& escaping.
-          command: `cmd /c "echo @echo off && pm2 resurrect > \\"${batPath}\\""`,
-          once: true,
-        },
-      ],
-      helpCommands: [
-        "⚠ 启动后会弹出一个小窗口，不要关闭！拖到任务栏或最小化即可。",
-        "   窗口关闭 = 服务停止，重启需执行下面的启动命令。",
-        "",
-        "pm2 status                         查看运行状态（online = 正常）",
-        "pm2 logs cc-connect                实时查看日志（Ctrl+C 退出）",
-        "pm2 stop cc-connect                停止服务",
-        "pm2 restart cc-connect             重启服务（日常开机后/改配置后）",
-        "pm2 delete cc-connect              完全删除",
-        "pm2 list                           列出所有 pm2 进程",
-        "",
-        "取消开机自启：",
-        `  del "${batPath}"`,
-        "",
-        "如果开机后 pm2 status 显示为空：",
-        "  （1）运行 pm2 resurrect 手动恢复进程列表",
-        "  （2）运行 pm2 save 重新保存",
-        "",
-        "常见问题：",
-        '  "Script already launched" → pm2 已经注册过了，用 pm2 restart cc-connect 即可。',
-        '  "stopped / errored"      → 用 pm2 logs cc-connect 查看错误原因。',
-        '  重新安装 cc-connect 后   → pm2 delete cc-connect 再重新走启动步骤。',
-      ],
+      steps,
+      helpCommands,
     };
   }
 

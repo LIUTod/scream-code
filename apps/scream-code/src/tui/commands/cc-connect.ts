@@ -51,7 +51,8 @@ function checkCcConnect(): { installed: boolean; version?: string } {
 
 function detectScreamPath(): string {
   try {
-    const which = execSync("which scream 2>/dev/null", { encoding: "utf-8", timeout: 3000 }).trim();
+    const cmd = process.platform === "win32" ? "where scream" : "which scream 2>/dev/null";
+    const which = execSync(cmd, { encoding: "utf-8", timeout: 3000 }).trim();
     if (which) return `${which} stream-json`;
   } catch { /* not found */ }
   return "scream stream-json";
