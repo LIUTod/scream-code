@@ -111,6 +111,12 @@ export class WelcomeComponent implements Component {
       clearInterval(this.breatheTimer);
       this.breatheTimer = null;
     }
+    // Reset to frame 0 (primary green) so the logo doesn't freeze on a
+    // random hue from the middle of the wheel.
+    if (this.breatheFrame !== 0) {
+      this.breatheFrame = 0;
+      this.ui.requestRender();
+    }
   }
 
   private startBreathing(): void {
