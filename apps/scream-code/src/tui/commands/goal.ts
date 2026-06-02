@@ -65,6 +65,6 @@ function showGoalStatus(host: SlashCommandHost): void {
   }
   host.showStatus(
     `🎯 目标状态：已激活 | 内容：${goal} | 已自动继续 ${goalContinuationCount} 次`,
-    'green',
+    host.state.theme.colors.success,
   );
 }
