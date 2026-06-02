@@ -434,8 +434,28 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
         // Try to resume an existing session first
         const existing = await harness.listSessions({ sessionId: sessionKey, workDir });
         if (existing.length > 0) {
-          session = await harness.resumeSession({ id: sessionKey });
-          log.info("stream-json: resumed session", { sessionId: session.id });
+          try {
+            session = await harness.resumeSession({ id: sessionKey });
+            log.info("stream-json: resumed session", { sessionId: session.id });
+          } catch (err) {
+            // The session directory exists on disk but the session index
+            // entry is missing (e.g. process killed between mkdir and
+            // index write).  Re-create the session instead of crashing.
+            log.warn("stream-json: resume failed, recreating session", {
+              sessionKey,
+              error: String(err),
+            });
+            const model = opts.model ?? config.defaultModel;
+            session = await harness.createSession({
+              id: sessionKey,
+              workDir,
+              model,
+              permission: "auto",
+            });
+            log.info("stream-json: recreated session", {
+              sessionId: session.id,
+            });
+          }
         } else {
           const model = opts.model ?? config.defaultModel;
           session = await harness.createSession({
