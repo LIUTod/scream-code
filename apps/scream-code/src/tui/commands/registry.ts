@@ -223,6 +223,14 @@ export const BUILTIN_SLASH_COMMANDS = [
     priority: 10,
   },
 
+  // ── cc-connect 通道管理 ──
+  {
+    name: 'cc',
+    aliases: [],
+    description: '操控你的cc（启动/关闭/重启）',
+    priority: 102,
+    availability: 'always',
+  },
   // ── cc-connect 通道配置 ──
   {
     name: 'cc-connect',

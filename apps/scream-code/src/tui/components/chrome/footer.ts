@@ -165,11 +165,66 @@ function formatContextStatus(usage: number, tokens?: number, maxTokens?: number)
   return `上下文：${pct}`;
 }
 
-function statusEmoji(livePaneMode: LivePaneMode, streamingPhase: AppState['streamingPhase']): string {
-  if (livePaneMode === 'tool') return '🔵';
-  if (streamingPhase === 'thinking' || streamingPhase === 'waiting') return '🟡';
-  if (streamingPhase === 'composing') return '🟢';
-  return '🔴';
+// ── Gradient status line for footer line 2 ───────────────────────────
+
+const BRAND_COLORS = ['#72A4E9', '#A78BFA', '#34D399'];
+const GRADIENT_CYCLE_MS = 4000;
+const SPINNER_FRAMES = ['●', '◉', '◎', '◌', '○', '◌', '◎', '◉'];
+const SPINNER_TICK_MS = 120;
+
+function hexToRgb(hex: string): [number, number, number] {
+  const v = parseInt(hex.slice(1), 16);
+  return [(v >> 16) & 255, (v >> 8) & 255, v & 255];
+}
+
+function lerpGradient(t: number): string {
+  const count = BRAND_COLORS.length;
+  const segment = Math.min(t * count, count - 1);
+  const idx = Math.floor(segment);
+  const localT = segment - idx;
+  const nextIdx = (idx + 1) % count;
+  const [r0, g0, b0] = hexToRgb(BRAND_COLORS[idx]!);
+  const [r1, g1, b1] = hexToRgb(BRAND_COLORS[nextIdx]!);
+  const r = Math.round(r0 + (r1 - r0) * localT);
+  const g = Math.round(g0 + (g1 - g0) * localT);
+  const b = Math.round(b0 + (b1 - b0) * localT);
+  return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+}
+
+function buildStatusLine(
+  streamingPhase: AppState['streamingPhase'],
+  livePaneMode: LivePaneMode,
+  streamingStartTime: number,
+): string {
+  if (streamingPhase === 'idle' && livePaneMode !== 'tool') {
+    return '○ 空闲';
+  }
+
+  let label: string;
+  if (livePaneMode === 'tool') {
+    label = '执行中';
+  } else if (streamingPhase === 'waiting') {
+    label = '等待响应';
+  } else if (streamingPhase === 'thinking') {
+    label = '思考中';
+  } else if (streamingPhase === 'composing') {
+    label = '输出中';
+  } else {
+    label = '';
+  }
+
+  const elapsed = Date.now() - streamingStartTime;
+  const totalSeconds = Math.floor(elapsed / 1000);
+  const elapsedStr = totalSeconds < 60 ? `${totalSeconds}s` : `${Math.floor(totalSeconds / 60)}m${totalSeconds % 60}s`;
+
+  const now = Date.now();
+  const tick = Math.floor(now / SPINNER_TICK_MS);
+  const frame = SPINNER_FRAMES[tick % SPINNER_FRAMES.length]!;
+  const gradientColor = lerpGradient((now % GRADIENT_CYCLE_MS) / GRADIENT_CYCLE_MS);
+
+  // Only the spinner dot uses a brand gradient colour; the rest inherits
+  // the line's outer colour so it stays consistent with the context text.
+  return chalk.hex(gradientColor).bold(frame) + ' ' + label + ' ' + elapsedStr;
 }
 
 export function formatFooterGitBadge(status: GitStatus, colors: ColorPalette): string {
@@ -310,32 +365,30 @@ export class FooterComponent implements Component {
       line1 = truncateToWidth(leftLine, width, '…');
     }
 
-    // ── Line 2: transient hint (bottom-left) + status emoji + context (right) ──
-    const emoji = statusEmoji(state.livePaneMode, state.streamingPhase);
-    const ccEmoji = state.ccConnectActive ? '✅️' : '☑️';
-    const goalIndicator = state.goalActive ? '🤔 ' : '';
-    const contextText = goalIndicator + ccEmoji + ' ' + emoji + ' ' + formatContextStatus(
+    // ── Line 2: transient hint (left)  …  context + status (right) ─────
+    const statusLine = buildStatusLine(
+      state.streamingPhase,
+      state.livePaneMode,
+      state.streamingStartTime,
+    );
+    const ccDot = state.ccConnectActive
+      ? chalk.hex(colors.success)('●')
+      : chalk.hex(colors.textDim)('●');
+    const rightText = ccDot + ' ' + formatContextStatus(
       state.contextUsage,
       state.contextTokens,
       state.maxContextTokens,
-    );
-    const contextWidth = visibleWidth(contextText);
+    ) + '  ' + statusLine;
+    const rightWidth = visibleWidth(rightText);
     let line2: string;
     if (this.transientHint) {
-      const maxHintWidth = Math.max(0, width - contextWidth - 1);
-      const shownHint =
-        visibleWidth(this.transientHint) <= maxHintWidth
-          ? this.transientHint
-          : truncateToWidth(this.transientHint, maxHintWidth, '…');
-      const hintWidth = visibleWidth(shownHint);
-      const pad = Math.max(0, width - hintWidth - contextWidth);
-      line2 =
-        chalk.hex(colors.warning).bold(shownHint) +
-        ' '.repeat(pad) +
-        chalk.hex(colors.text)(contextText);
+      const hintText = chalk.hex(colors.warning).bold(this.transientHint);
+      const hintWidth = visibleWidth(hintText);
+      const pad = Math.max(2, width - hintWidth - rightWidth);
+      line2 = hintText + ' '.repeat(pad) + chalk.hex(colors.textDim)(rightText);
     } else {
-      const leftPad = Math.max(0, width - contextWidth);
-      line2 = ' '.repeat(leftPad) + chalk.hex(colors.text)(contextText);
+      const lpad = Math.max(0, width - rightWidth);
+      line2 = ' '.repeat(lpad) + chalk.hex(colors.textDim)(rightText);
     }
 
     return [truncateToWidth(line1, width), truncateToWidth(line2, width)];

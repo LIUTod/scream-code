@@ -44,6 +44,7 @@ import {
 } from './session';
 import { handleGoalCommand, handleGoalOffCommand } from './goal';
 import { handleRevokeCommand } from './revoke';
+import { handleCcCommand } from './cc';
 import { handleChannelCommand } from './cc-connect';
 import { handleMemoryCommand } from './memory';
 import { handlePluginCommand } from './plugin';
@@ -83,6 +84,7 @@ export {
 } from './session';
 export { handleGoalCommand, handleGoalOffCommand } from './goal';
 export { handleRevokeCommand } from './revoke';
+export { handleCcCommand } from './cc';
 export { handleChannelCommand } from './cc-connect';
 export { handleMemoryCommand } from './memory';
 export { handlePluginCommand } from './plugin';
@@ -130,6 +132,9 @@ export interface SlashCommandHost {
   sendNormalUserInput(text: string): void;
   sendSkillActivation(session: Session, skillName: string, skillArgs: string): void;
   readonly skillCommandMap: Map<string, string>;
+
+  /** Trigger an immediate cc-connect liveness poll (bypasses the 30 s interval). */
+  refreshCcStatus(): void;
 
   // Controller refs
   readonly streamingUI: StreamingUIController;
@@ -280,6 +285,9 @@ async function handleBuiltInSlashCommand(
       return;
     case 'goaloff':
       await handleGoalOffCommand(host);
+      return;
+    case 'cc':
+      await handleCcCommand(host);
       return;
     case 'cc-connect':
       await handleChannelCommand(host, args);

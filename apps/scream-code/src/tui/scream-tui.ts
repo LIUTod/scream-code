@@ -541,6 +541,16 @@ export class ScreamTUI {
     }
   }
 
+  /** Trigger an immediate cc-connect liveness poll. Called by /cc after start/stop/restart. */
+  refreshCcStatus(): void {
+    // Delay 2s so the daemon has time to fully start before we check.
+    setTimeout(() => {
+      void checkCcConnectActive().then((active) => {
+        this.setAppState({ ccConnectActive: active });
+      });
+    }, 3000);
+  }
+
   // SIGHUP / dead-terminal EIO → emergencyTerminalExit (no cleanup, avoids
   // EIO write-loop that can pin a CPU core). SIGTERM → normal stop().
   private registerSignalHandlers(): void {
@@ -1426,9 +1436,7 @@ export class ScreamTUI {
         break;
       }
       case 'composing': {
-        const spinner = this.ensureActivitySpinner('braille', 'working...', (s) =>
-          chalk.hex(this.state.theme.colors.primary)(s),
-        );
+        const spinner = this.ensureActivitySpinner('gradient', 'working...');
         this.state.activityContainer.addChild(
           new ActivityPaneComponent({
             mode: 'composing',
@@ -1492,11 +1500,19 @@ export class ScreamTUI {
 
   toggleToolOutputExpansion(): void {
     this.state.toolOutputExpanded = !this.state.toolOutputExpanded;
-    for (const child of this.state.transcriptContainer.children) {
-      if (isExpandable(child)) {
-        child.setExpanded(this.state.toolOutputExpanded);
+    const walk = (children: readonly Component[]): void => {
+      for (const child of children) {
+        if (isExpandable(child)) {
+          child.setExpanded(this.state.toolOutputExpanded);
+        }
+        // Recurse into Container children so tool calls nested inside
+        // groups (AgentGroup, ReadGroup) are reached.
+        if ('children' in child && Array.isArray((child as { children?: unknown }).children)) {
+          walk((child as { children: readonly Component[] }).children);
+        }
       }
-    }
+    };
+    walk(this.state.transcriptContainer.children);
     this.state.ui.requestRender();
   }
 
