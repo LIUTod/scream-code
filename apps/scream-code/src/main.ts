@@ -22,7 +22,6 @@ import { runChannelSetup } from './cli/channel-setup';
 import { runStreamJson } from './cli/run-stream-json';
 import { formatStartupError } from './cli/startup-error';
 import { runPluginNodeEntry } from './cli/sub/plugin-run-node';
-import { runUpdatePreflight } from './cli/update/preflight';
 import { getVersion } from './cli/version';
 import { initProcessName } from './utils/process/proctitle';
 
@@ -38,13 +37,9 @@ export async function handleMainCommand(opts: CLIOptions, version: string): Prom
     throw error;
   }
 
-  const preflightResult = await runUpdatePreflight(
-    version,
-    validated.uiMode === 'print' ? { track, isTTY: false } : { track },
-  );
-  if (preflightResult === 'exit') {
-    process.exit(0);
-  }
+  // Update check moved to TUI startup — no blocking prompt here.
+  // The TUI shows a hint in the Welcome panel when a new version is
+  // available, and the user can run /update manually.
 
   if (validated.uiMode === 'print') {
     await runPrompt(validated.options, version);

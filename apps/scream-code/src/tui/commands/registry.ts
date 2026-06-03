@@ -223,6 +223,13 @@ export const BUILTIN_SLASH_COMMANDS = [
     priority: 10,
   },
 
+  {
+    name: 'update',
+    aliases: [],
+    description: '手动更新 Scream Code 到最新版本',
+    priority: 60,
+    availability: 'idle-only',
+  },
   // ── cc-connect 通道管理 ──
   {
     name: 'cc',

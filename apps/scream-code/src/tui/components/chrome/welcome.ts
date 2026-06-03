@@ -164,9 +164,14 @@ export class WelcomeComponent implements Component {
       ? chalk.hex(this.colors.warning)('未设置，运行 /config')
       : (activeModel?.displayName ?? activeModel?.model ?? this.state.model);
 
-    let versionValue = this.state.version;
+    let versionValue: string;
     if (this.state.hasNewVersion && this.state.latestVersion !== null) {
-      versionValue += chalk.hex(this.colors.warning)(` → ${this.state.latestVersion} 可更新`);
+      versionValue =
+        chalk.hex(this.colors.warning)(this.state.version) +
+        '  ' +
+        chalk.hex(this.colors.textDim)('有新版本（' + this.state.latestVersion + '）');
+    } else {
+      versionValue = this.state.version;
     }
 
     const infoLines = [

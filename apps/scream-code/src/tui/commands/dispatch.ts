@@ -45,6 +45,7 @@ import {
 import { handleGoalCommand, handleGoalOffCommand } from './goal';
 import { handleRevokeCommand } from './revoke';
 import { handleCcCommand } from './cc';
+import { handleUpdateCommand } from './update';
 import { handleChannelCommand } from './cc-connect';
 import { handleMemoryCommand } from './memory';
 import { handlePluginCommand } from './plugin';
@@ -85,6 +86,7 @@ export {
 export { handleGoalCommand, handleGoalOffCommand } from './goal';
 export { handleRevokeCommand } from './revoke';
 export { handleCcCommand } from './cc';
+export { handleUpdateCommand } from './update';
 export { handleChannelCommand } from './cc-connect';
 export { handleMemoryCommand } from './memory';
 export { handlePluginCommand } from './plugin';
@@ -285,6 +287,9 @@ async function handleBuiltInSlashCommand(
       return;
     case 'goaloff':
       await handleGoalOffCommand(host);
+      return;
+    case 'update':
+      await handleUpdateCommand(host);
       return;
     case 'cc':
       await handleCcCommand(host);
