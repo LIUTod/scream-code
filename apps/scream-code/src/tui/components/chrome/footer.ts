@@ -250,6 +250,7 @@ export class FooterComponent implements Component {
     if (state.permissionMode === 'auto') left.push(chalk.hex(colors.warning).bold('auto'));
     if (state.permissionMode === 'yolo') left.push(chalk.hex(colors.warning).bold('YES'));
     if (state.planMode) left.push(chalk.hex(colors.primary).bold('plan'));
+    if (state.parallelMode) left.push(chalk.hex('#72A4E9').bold('fanout'));
     if (state.goalActive && state.goal) {
       const goalText = state.goal.length > 20 ? state.goal.slice(0, 20) + '…' : state.goal;
       left.push(chalk.hex(colors.success).bold(`🎯 ${goalText}`));

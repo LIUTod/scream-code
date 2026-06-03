@@ -61,6 +61,48 @@ const BUILTIN_REGISTRY: PluginMarketplaceEntry[] = [
     description: 'A 股市场数据查询分析，27 个接口覆盖行情/研报/资金流/新闻/基本面，含 4 套内置研究流程',
     source: 'https://github.com/simonlin1212/a-stock-data',
   },
+  {
+    id: 'humanizer',
+    displayName: 'Humanizer AI 文本去味',
+    description: '去除 AI 写作痕迹：30 种 AI 模式检测 × 5 大类 × 语音校准，输出纯正人类文风',
+    source: 'https://github.com/blader/humanizer',
+  },
+  {
+    id: 'markdown-viewer-skills',
+    displayName: 'Markdown Viewer 图表技能包',
+    description: '14 个 AI 图表技能：PlantUML（UML/云架构/网络/安全/BPMN）+ Vega 数据可视化 + HTML 信息卡片，Markdown 内直接渲染',
+    source: 'https://github.com/markdown-viewer/skills',
+  },
+  {
+    id: 'patent-disclosure-skill',
+    displayName: 'Patent Disclosure 专利交底书',
+    description: '专利交底书自动生成：专利点挖掘 → 国知局查新 → 脱敏成文 → 自检闭环，Mermaid 附图，输出 .docx',
+    source: 'https://github.com/handsomestWei/patent-disclosure-skill',
+  },
+  {
+    id: 'html-ppt-skill',
+    displayName: 'HTML PPT Studio 演示文稿',
+    description: 'AI 驱动 HTML 幻灯片：36 套主题 × 31 种布局 × 47 种动画，纯静态 HTML/CSS/JS，支持演讲者模式',
+    source: 'https://github.com/lewislulu/html-ppt-skill',
+  },
+  {
+    id: 'uzi-skill',
+    displayName: 'UZI Skill 股票分析引擎',
+    description: 'A股/港股/美股深度分析：22 数据维度 × 180 量化规则 × 17 机构分析法 × 51 投资大师人格模拟，输出 Bloomberg 风格 HTML 报告',
+    source: 'https://github.com/wbh604/UZI-Skill',
+  },
+  {
+    id: 'contract-review-pro',
+    displayName: 'Contract Review Pro 合同审查',
+    description: '专业合同审查：7 步工作流 × 5 强制关 × 15 类风险标签 × 六维评估，输出批注合同+法律意见书+分析备忘录，支持 30 种合同类型',
+    source: 'https://github.com/CSlawyer1985/contract-review-pro',
+  },
+  {
+    id: 'academic-research-skills',
+    displayName: 'Academic Research 学术研究',
+    description: '完整学术研究管线：深度研究（13 Agent 团队 × 7 种模式）+ 学术写作（12 Agent 管线）+ 同行评审（7 Agent 多视角审稿），全流程覆盖',
+    source: 'https://github.com/Imbad0202/academic-research-skills',
+  },
 ];
 
 // ─── Handler ────────────────────────────────────────────────────────────────

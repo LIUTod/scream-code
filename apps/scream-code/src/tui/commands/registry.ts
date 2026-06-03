@@ -16,6 +16,13 @@ export const BUILTIN_SLASH_COMMANDS = [
     priority: 105,
     availability: 'always',
   },
+  {
+    name: 'fanout',
+    aliases: ['parallel'],
+    description: '切换为 Agent 优先并行模式',
+    priority: 106,
+    availability: 'always',
+  },
 
   // ── 会话管理 ──
   {

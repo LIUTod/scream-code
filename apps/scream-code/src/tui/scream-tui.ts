@@ -177,6 +177,7 @@ function createInitialAppState(input: ScreamTUIStartupInput): AppState {
     goalActive: false,
     goalContinuationCount: 0,
     ccConnectActive: false,
+    parallelMode: false,
   };
 }
 
@@ -795,8 +796,18 @@ export class ScreamTUI {
 
     this.beginSessionRequest();
 
-    const sdkInput = options?.parts ?? input;
-    void session.prompt(sdkInput).catch((error: unknown) => {
+    // When parallel mode is active, prepend a system instruction that tells
+    // the model to prefer FanOut for independent subtasks.  The instruction is
+    // only visible to the model — the transcript still shows the user's
+    // original message unchanged.
+    let modelInput: string | PromptPart[] = options?.parts ?? input;
+    if (this.state.appState.parallelMode && options?.parts === undefined) {
+      modelInput =
+        '[系统指令：当前处于 Agent 优先并行模式。对于文件或目录不重叠的独立子任务，请直接使用 FanOut 工具一次并行派发，不要逐个串行调用 Agent。只有当任务之间有硬依赖或操作同一文件时，才回退到串行 Agent。]\n\n' +
+        input;
+    }
+
+    void session.prompt(modelInput).catch((error: unknown) => {
       const message = formatErrorMessage(error);
       this.failSessionRequest(`发送失败：${message}`);
     });

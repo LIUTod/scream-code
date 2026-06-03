@@ -56,6 +56,62 @@
       "source": "https://github.com/simonlin1212/a-stock-data",
       "author": "simonlin1212",
       "tags": ["stock", "finance", "a-share", "data-analysis"]
+    },
+    {
+      "id": "humanizer",
+      "name": "Humanizer AI 文本去味",
+      "description": "去除 AI 写作痕迹：检测并重写 30 种 AI 生成模式（5 大类），支持语音校准匹配个人风格，最终审查二次打磨，输出纯正人类文风",
+      "source": "https://github.com/blader/humanizer",
+      "author": "blader",
+      "tags": ["writing", "ai-detection", "style", "editing", "humanization"]
+    },
+    {
+      "id": "markdown-viewer-skills",
+      "name": "Markdown Viewer 图表技能包",
+      "description": "14 个 AI 图表绘制技能：PlantUML（UML/云架构/网络/安全/BPMN/时序图）+ Vega 数据可视化 + HTML 信息卡片，直接在 Markdown 中渲染",
+      "source": "https://github.com/markdown-viewer/skills",
+      "author": "markdown-viewer",
+      "tags": ["diagram", "visualization", "plantuml", "markdown", "chart", "uml"]
+    },
+    {
+      "id": "patent-disclosure-skill",
+      "name": "Patent Disclosure 专利交底书",
+      "description": "专利技术交底书自动生成：专利点挖掘 → 国知局联网查新 → 脱敏成文 → 自检闭环，Mermaid 附图，输出 .docx，支持中英文",
+      "source": "https://github.com/handsomestWei/patent-disclosure-skill",
+      "author": "handsomestWei",
+      "tags": ["patent", "legal", "document", "chinese", "ip"]
+    },
+    {
+      "id": "html-ppt-skill",
+      "name": "HTML PPT Studio 演示文稿",
+      "description": "AI 驱动 HTML 幻灯片生成：36 套主题 × 31 种布局 × 47 种动画，纯静态 HTML/CSS/JS，支持演讲者模式、中英文排版，零构建步骤",
+      "source": "https://github.com/lewislulu/html-ppt-skill",
+      "author": "lewislulu",
+      "tags": ["ppt", "html", "presentation", "slides", "animation"]
+    },
+    {
+      "id": "uzi-skill",
+      "name": "UZI Skill 股票分析引擎",
+      "description": "A股/港股/美股深度分析：22 数据维度 × 180 量化规则 × 17 机构分析法 × 51 投资大师人格模拟，输出 Bloomberg 风格 HTML 报告，零 API 密钥",
+      "source": "https://github.com/wbh604/UZI-Skill",
+      "author": "wbh604",
+      "tags": ["stock", "investment", "analysis", "a-share", "hk-stock", "us-stock"]
+    },
+    {
+      "id": "contract-review-pro",
+      "name": "Contract Review Pro 合同审查",
+      "description": "专业合同审查技能：7 步状态机工作流 × 5 强制审查关 × 15 类风险标签 × 六维风险评估，输出批注合同+法律意见书+分析备忘录三件套，支持 30 种合同类型",
+      "source": "https://github.com/CSlawyer1985/contract-review-pro",
+      "author": "陈石 (CSlawyer1985)",
+      "tags": ["legal", "contract", "review", "chinese", "law"]
+    },
+    {
+      "id": "academic-research-skills",
+      "name": "Academic Research 学术研究",
+      "description": "完整学术研究管线：深度研究（13 Agent 团队 × 7 种模式）+ 学术写作（12 Agent 管线）+ 同行评审（7 Agent 多视角审稿），全流程覆盖",
+      "source": "https://github.com/Imbad0202/academic-research-skills",
+      "author": "Cheng-I Wu",
+      "tags": ["academic", "research", "paper", "writing", "review", "pipeline"]
     }
   ]
 }

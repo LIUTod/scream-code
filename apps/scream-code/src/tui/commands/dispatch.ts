@@ -25,6 +25,7 @@ import {
   handleAutoCommand,
   handleCompactCommand,
   handleEditorCommand,
+  handleFanoutCommand,
   handleModelCommand,
   handlePlanCommand,
   handleThemeCommand,
@@ -58,6 +59,7 @@ export {
   handleAutoCommand,
   handleCompactCommand,
   handleEditorCommand,
+  handleFanoutCommand,
   handleModelCommand,
   handlePlanCommand,
   handleThemeCommand,
@@ -251,6 +253,9 @@ async function handleBuiltInSlashCommand(
       return;
     case 'plan':
       await handlePlanCommand(host, args);
+      return;
+    case 'fanout':
+      await handleFanoutCommand(host, args);
       return;
     case 'goal':
       await handleGoalCommand(host, args);

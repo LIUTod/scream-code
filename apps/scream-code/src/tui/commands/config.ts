@@ -150,6 +150,16 @@ export async function handleAutoCommand(host: SlashCommandHost, args: string): P
   }
 }
 
+export async function handleFanoutCommand(host: SlashCommandHost, _args: string): Promise<void> {
+  const next = !host.state.appState.parallelMode;
+  host.setAppState({ parallelMode: next });
+  if (next) {
+    host.showNotice('并行模式：开启', 'Agent 将优先使用 FanOut 并行派发独立子任务。每个子任务 5 分钟超时，最多 5 个并行。');
+  } else {
+    host.showNotice('并行模式：关闭', 'Agent 恢复默认串行决策。');
+  }
+}
+
 export async function handleCompactCommand(host: SlashCommandHost, args: string): Promise<void> {
   const session = host.session;
   if (session === undefined) {

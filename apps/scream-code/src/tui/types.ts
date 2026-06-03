@@ -39,6 +39,7 @@ export interface AppState {
   goalActive: boolean;
   goalContinuationCount: number;
   ccConnectActive: boolean;
+  parallelMode: boolean;
 }
 
 export interface ToolCallBlockData {
