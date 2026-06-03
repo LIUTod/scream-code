@@ -190,8 +190,8 @@ export const BUILTIN_SLASH_COMMANDS = [
   {
     name: 'mcp',
     aliases: [],
-    description: '显示 MCP 服务器状态',
-    priority: 80,
+    description: '管理 MCP 服务器（安装/停用/卸载）',
+    priority: 108,
     availability: 'always',
   },
 

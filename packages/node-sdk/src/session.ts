@@ -289,6 +289,21 @@ export class Session {
     await this.rpc.reconnectMcpServer({ sessionId: this.id, name });
   }
 
+  async addMcpServer(name: string, config: Record<string, unknown>): Promise<void> {
+    this.ensureOpen();
+    await this.rpc.addMcpServer({ sessionId: this.id, name, config });
+  }
+
+  async stopMcpServer(name: string): Promise<void> {
+    this.ensureOpen();
+    await this.rpc.stopMcpServer({ sessionId: this.id, name });
+  }
+
+  async removeMcpServer(name: string): Promise<void> {
+    this.ensureOpen();
+    await this.rpc.removeMcpServer({ sessionId: this.id, name });
+  }
+
   async listPlugins(): Promise<readonly PluginSummary[]> {
     this.ensureOpen();
     return this.rpc.listPlugins();

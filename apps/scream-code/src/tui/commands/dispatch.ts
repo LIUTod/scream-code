@@ -46,6 +46,7 @@ import { handleGoalCommand, handleGoalOffCommand } from './goal';
 import { handleRevokeCommand } from './revoke';
 import { handleCcCommand } from './cc';
 import { handleUpdateCommand } from './update';
+import { handleMcpCommand } from './mcp';
 import { handleChannelCommand } from './cc-connect';
 import { handleMemoryCommand } from './memory';
 import { handlePluginCommand } from './plugin';
@@ -87,6 +88,7 @@ export { handleGoalCommand, handleGoalOffCommand } from './goal';
 export { handleRevokeCommand } from './revoke';
 export { handleCcCommand } from './cc';
 export { handleUpdateCommand } from './update';
+export { handleMcpCommand } from './mcp';
 export { handleChannelCommand } from './cc-connect';
 export { handleMemoryCommand } from './memory';
 export { handlePluginCommand } from './plugin';
@@ -235,9 +237,7 @@ async function handleBuiltInSlashCommand(
       });
       return;
     case 'mcp':
-      showMcpServers(host).catch((error: unknown) => {
-        host.showError(`显示 MCP 服务器状态失败：${formatErrorMessage(error)}`);
-      });
+      await handleMcpCommand(host, args);
       return;
     case 'editor':
       await handleEditorCommand(host, args);

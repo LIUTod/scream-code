@@ -69,6 +69,9 @@ import type {
   PluginSummary,
   PromptPayload,
   ReconnectMcpServerPayload,
+  AddMcpServerPayload,
+  StopMcpServerPayload,
+  RemoveMcpServerPayload,
   RegisterToolPayload,
   ReloadPluginsResult,
   RemoveScreamProviderPayload,
@@ -592,6 +595,27 @@ export class ScreamCore implements PromisableMethods<CoreAPI> {
     ...payload
   }: SessionScopedPayload<ReconnectMcpServerPayload>): Promise<void> {
     return this.sessionApi(sessionId).reconnectMcpServer(payload);
+  }
+
+  addMcpServer({
+    sessionId,
+    ...payload
+  }: SessionScopedPayload<AddMcpServerPayload>): Promise<void> {
+    return this.sessionApi(sessionId).addMcpServer(payload);
+  }
+
+  stopMcpServer({
+    sessionId,
+    ...payload
+  }: SessionScopedPayload<StopMcpServerPayload>): Promise<void> {
+    return this.sessionApi(sessionId).stopMcpServer(payload);
+  }
+
+  removeMcpServer({
+    sessionId,
+    ...payload
+  }: SessionScopedPayload<RemoveMcpServerPayload>): Promise<void> {
+    return this.sessionApi(sessionId).removeMcpServer(payload);
   }
 
   generateAgentsMd({ sessionId, ...payload }: SessionScopedPayload<EmptyPayload>): Promise<void> {

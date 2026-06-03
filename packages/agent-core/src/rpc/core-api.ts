@@ -4,6 +4,7 @@ import type { PermissionData, PermissionMode } from '#/agent/permission';
 import type { PlanData } from '#/agent/plan';
 import type { ToolInfo } from '#/agent/tool';
 import type { ScreamConfig, ScreamConfigPatch } from '#/config';
+import type { McpServerConfig } from '#/config/schema';
 import type { ExperimentalFlagMap } from '#/flags';
 import type { ResumeSessionResult } from '#/rpc/resumed';
 import type { SessionMeta } from '#/session';
@@ -221,6 +222,19 @@ export interface ReconnectMcpServerPayload {
   readonly name: string;
 }
 
+export interface AddMcpServerPayload {
+  readonly name: string;
+  readonly config: McpServerConfig;
+}
+
+export interface StopMcpServerPayload {
+  readonly name: string;
+}
+
+export interface RemoveMcpServerPayload {
+  readonly name: string;
+}
+
 export interface InstallPluginPayload {
   readonly source: string;
 }
@@ -310,6 +324,9 @@ export interface SessionAPI extends AgentAPIWithId {
   listMcpServers: (payload: EmptyPayload) => readonly McpServerInfo[];
   getMcpStartupMetrics: (payload: EmptyPayload) => McpStartupMetrics;
   reconnectMcpServer: (payload: ReconnectMcpServerPayload) => void;
+  addMcpServer: (payload: AddMcpServerPayload) => void;
+  stopMcpServer: (payload: StopMcpServerPayload) => void;
+  removeMcpServer: (payload: RemoveMcpServerPayload) => void;
   generateAgentsMd: (payload: EmptyPayload) => void;
 }
 

@@ -205,6 +205,54 @@ export class McpConnectionManager {
     await this.connectOne(entry, attemptId);
   }
 
+  /** Runtime add and connect a new MCP server. Reconnects if already present. */
+  async addServer(name: string, config: McpServerConfig): Promise<void> {
+    const existing = this.entries.get(name);
+    if (existing !== undefined) {
+      // Update config and reconnect — the user may have changed args.
+      (existing as { config: McpServerConfig }).config = config;
+      await this.reconnect(name);
+      return;
+    }
+    const entry: InternalEntry = {
+      name,
+      config,
+      attemptId: 0,
+      status: 'pending',
+    };
+    this.entries.set(name, entry);
+    this.emit(entry);
+    await this.connectOne(entry, this.beginConnectAttempt(entry));
+  }
+
+  /** Disconnect the client but keep the entry so it can be reconnected later. */
+  async stopServer(name: string): Promise<void> {
+    const entry = this.entries.get(name);
+    if (entry === undefined) return;
+    await this.closeClient(entry);
+    entry.status = 'disabled';
+    entry.tools = undefined;
+    entry.enabledNames = undefined;
+    entry.error = undefined;
+    this.emit(entry);
+  }
+
+  /** Runtime disconnect and remove an MCP server. No-op if not found. */
+  async removeServer(name: string): Promise<void> {
+    const entry = this.entries.get(name);
+    if (entry === undefined) return;
+    await this.closeClient(entry);
+    this.entries.delete(name);
+    // Emit a synthetic 'disabled' status so listeners (ToolManager) clean up
+    // registered tools.
+    const view = toPublicEntry(entry);
+    view satisfies McpServerEntry;
+    const disabledView: McpServerEntry = { ...view, status: 'disabled', error: undefined };
+    for (const listener of this.listeners) {
+      try { listener(disabledView); } catch { /* noop */ }
+    }
+  }
+
   async shutdown(): Promise<void> {
     const entries = Array.from(this.entries.values());
     this.entries.clear();

@@ -103,6 +103,15 @@ export interface ReconnectMcpServerRpcInput extends SessionIdRpcInput {
   readonly name: string;
 }
 
+export interface AddMcpServerRpcInput extends SessionIdRpcInput {
+  readonly name: string;
+  readonly config: Record<string, unknown>;
+}
+
+export interface RemoveMcpServerRpcInput extends SessionIdRpcInput {
+  readonly name: string;
+}
+
 type ResolvedCoreAPI = Awaited<ReturnType<SDKRPCClient>>;
 
 export class SDKRpcClient {
@@ -457,6 +466,26 @@ export class SDKRpcClient {
   async reconnectMcpServer(input: ReconnectMcpServerRpcInput): Promise<void> {
     const rpc = await this.getRpc();
     return rpc.reconnectMcpServer({ sessionId: input.sessionId, name: input.name });
+  }
+
+  async addMcpServer(input: AddMcpServerRpcInput): Promise<void> {
+    const rpc = await this.getRpc();
+    return rpc.addMcpServer({
+      sessionId: input.sessionId,
+      name: input.name,
+      // config shape is validated by McpServerConfigSchema in the core
+      config: input.config as never,
+    });
+  }
+
+  async stopMcpServer(input: RemoveMcpServerRpcInput): Promise<void> {
+    const rpc = await this.getRpc();
+    return rpc.stopMcpServer({ sessionId: input.sessionId, name: input.name });
+  }
+
+  async removeMcpServer(input: RemoveMcpServerRpcInput): Promise<void> {
+    const rpc = await this.getRpc();
+    return rpc.removeMcpServer({ sessionId: input.sessionId, name: input.name });
   }
 
   async listPlugins(): Promise<readonly PluginSummary[]> {

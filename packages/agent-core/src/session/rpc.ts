@@ -13,6 +13,9 @@ import type {
   McpStartupMetrics,
   PromptPayload,
   ReconnectMcpServerPayload,
+  AddMcpServerPayload,
+  StopMcpServerPayload,
+  RemoveMcpServerPayload,
   RenameSessionPayload,
   RegisterToolPayload,
   SessionAPI,
@@ -83,6 +86,18 @@ export class SessionAPIImpl implements PromisableMethods<SessionAPI> {
 
   async reconnectMcpServer(payload: ReconnectMcpServerPayload): Promise<void> {
     await this.session.mcp.reconnect(payload.name);
+  }
+
+  async addMcpServer(payload: AddMcpServerPayload): Promise<void> {
+    await this.session.mcp.addServer(payload.name, payload.config);
+  }
+
+  async stopMcpServer(payload: StopMcpServerPayload): Promise<void> {
+    await this.session.mcp.stopServer(payload.name);
+  }
+
+  async removeMcpServer(payload: RemoveMcpServerPayload): Promise<void> {
+    await this.session.mcp.removeServer(payload.name);
   }
 
   generateAgentsMd(_payload: EmptyPayload): Promise<void> {
