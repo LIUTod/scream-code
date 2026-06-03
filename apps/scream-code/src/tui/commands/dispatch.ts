@@ -202,7 +202,7 @@ async function handleBuiltInSlashCommand(
 ): Promise<void> {
   switch (name) {
     case 'exit':
-      host.stop().catch((error: unknown) => {
+      host.stop().catch(() => {
         // stop() kills the process; if it fails, force-exit to avoid a hung TUI.
         process.exit(1);
       });
