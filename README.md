@@ -1,5 +1,4 @@
-<img width="1667" height="302" alt="截屏2026-05-31 20 53 26" src="https://github.com/user-attachments/assets/568d6a08-c251-4204-906d-16de9b304b90" />
-
+<img width="463" height="157" alt="image" src="https://github.com/user-attachments/assets/a24426f5-1c15-48e4-9625-9066557dc6b6" />
 
 # Scream Code
 
