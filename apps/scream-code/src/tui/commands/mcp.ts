@@ -85,15 +85,19 @@ async function openMcpPanel(host: SlashCommandHost): Promise<void> {
     title: `MCP 管理（${connectedCount}/${servers.length} 已连接）`,
     rows,
     colors: host.state.theme.colors,
-    onEnter: async (row) => {
-      host.restoreEditor();
-      await handleEnter(host, row, servers);
-      await openMcpPanel(host);
+    onEnter: (row) => {
+      void (async () => {
+        host.restoreEditor();
+        await handleEnter(host, row, servers);
+        await openMcpPanel(host);
+      })();
     },
-    onDelete: async (row) => {
-      host.restoreEditor();
-      await handleDelete(host, row);
-      await openMcpPanel(host);
+    onDelete: (row) => {
+      void (async () => {
+        host.restoreEditor();
+        await handleDelete(host, row);
+        await openMcpPanel(host);
+      })();
     },
     onCancel: () => {
       host.restoreEditor();
