@@ -1436,7 +1436,9 @@ export class ScreamTUI {
         break;
       }
       case 'composing': {
-        const spinner = this.ensureActivitySpinner('gradient', 'working...');
+        const spinner = this.ensureActivitySpinner('braille', 'working...', (s) =>
+          chalk.hex(this.state.theme.colors.primary)(s),
+        );
         this.state.activityContainer.addChild(
           new ActivityPaneComponent({
             mode: 'composing',
