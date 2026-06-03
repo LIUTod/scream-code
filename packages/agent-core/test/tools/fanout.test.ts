@@ -139,10 +139,14 @@ describe('ConflictTracker', () => {
     // Both tasks reference the same file; FanOut should still spawn both
     // and inject conflict warnings into their prompts.
     const exec = tool.resolveExecution(input);
-    expect(exec.description).toContain('FanOut');
+    if ('isError' in exec) {
+      expect.unreachable('resolveExecution returned an error');
+    } else {
+      expect(exec.description).toContain('FanOut');
+    }
 
     // The spawn mock verifies both were called
-    execute(tool, input).then(() => {
+    void execute(tool, input).then(() => {
       expect(host.spawn).toHaveBeenCalledTimes(2);
     });
   });
