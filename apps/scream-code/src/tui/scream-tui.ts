@@ -84,6 +84,7 @@ import {
 } from './constant/scream-tui';
 
 import { readUpdateCache } from '#/cli/update/cache';
+import { refreshUpdateCache } from '#/cli/update/refresh';
 import { selectUpdateTarget } from '#/cli/update/select';
 
 import { adaptPanelResponse } from './reverse-rpc/approval/adapter';
@@ -1087,6 +1088,10 @@ export class ScreamTUI {
 
   private async checkForUpdates(): Promise<void> {
     try {
+      // Refresh from GitHub Releases API first so we always have a fresh
+      // cache before comparing.  Errors (network offline, rate-limited) are
+      // swallowed — the stale cache is still usable as a fallback.
+      await refreshUpdateCache().catch(() => {});
       const cache = await readUpdateCache();
       const target = selectUpdateTarget(this.state.appState.version, cache.latest);
       if (target !== null) {
