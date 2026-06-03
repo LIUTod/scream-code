@@ -35,11 +35,10 @@ export const FEEDBACK_VERSION_PREFIX = 'scream-code-';
 // Telemetry event name; keep stable for dashboard queries.
 export const FEEDBACK_TELEMETRY_EVENT = 'feedback_submitted';
 
-// CDN / GitHub — source of truth for version checks via GitHub Releases API.
-export const SCREAM_CODE_CDN_BASE = 'https://code.scream.com/scream-code';
+// GitHub — sole source of truth for the project.
+export const SCREAM_CODE_GITHUB_REPO = 'https://github.com/LIUTod/scream-code';
 export const SCREAM_CODE_CDN_LATEST_URL =
   'https://api.github.com/repos/LIUTod/scream-code/releases/latest';
-export const SCREAM_CODE_PLUGIN_MARKETPLACE_URL = `${SCREAM_CODE_CDN_BASE}/plugins/marketplace.json`;
+export const SCREAM_CODE_PLUGIN_MARKETPLACE_URL =
+  'https://raw.githubusercontent.com/LIUTod/scream-code/main/plugins/marketplace.json';
 export const SCREAM_CODE_PLUGIN_MARKETPLACE_URL_ENV = 'SCREAM_CODE_PLUGIN_MARKETPLACE_URL';
-export const SCREAM_CODE_INSTALL_SH_URL = `${SCREAM_CODE_CDN_BASE}/install.sh`;
-export const SCREAM_CODE_INSTALL_PS1_URL = `${SCREAM_CODE_CDN_BASE}/install.ps1`;

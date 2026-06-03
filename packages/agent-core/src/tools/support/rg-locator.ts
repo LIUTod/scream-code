@@ -26,7 +26,7 @@ import { type Entry, fromBuffer as yauzlFromBuffer } from 'yauzl';
 import { abortable } from '../../utils/abort';
 
 const RG_VERSION = '15.0.0';
-const RG_BASE_URL = 'https://code.scream.com/scream-code/rg';
+const RG_BASE_URL = `https://github.com/BurntSushi/ripgrep/releases/download/${RG_VERSION}`;
 const DOWNLOAD_TIMEOUT_MS = 600_000;
 const RG_ARCHIVE_SHA256: Record<string, string> = {
   'ripgrep-15.0.0-aarch64-apple-darwin.tar.gz':
