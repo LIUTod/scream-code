@@ -253,6 +253,13 @@ export const BUILTIN_SLASH_COMMANDS = [
     description: '退出应用',
     priority: 10,
   },
+  {
+    name: 'screamdog',
+    aliases: [],
+    description: '启动桌面Scream狗',
+    priority: 0,
+    availability: 'always',
+  },
 ] as const satisfies readonly ScreamSlashCommand[];
 
 export type BuiltinSlashCommand = (typeof BUILTIN_SLASH_COMMANDS)[number];

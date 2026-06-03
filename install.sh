@@ -159,7 +159,18 @@ pnpm -r build || {
     exit 1
 }
 
-# ── 6. 创建 scream 命令 ────────────────────────────────────────────────────
+# ── 6. 安装 Scream Dog 桌宠 ──────────────────────────────────────────────
+info "安装 Scream Dog..."
+mkdir -p "$INSTALL_DIR/pet/img"
+cp "$INSTALL_DIR/apps/scream-code/pet/main.js" "$INSTALL_DIR/pet/" 2>/dev/null || true
+cp "$INSTALL_DIR/apps/scream-code/pet/pet.html" "$INSTALL_DIR/pet/" 2>/dev/null || true
+cp "$INSTALL_DIR/apps/scream-code/pet/package.json" "$INSTALL_DIR/pet/" 2>/dev/null || true
+cp "$INSTALL_DIR/apps/scream-code/pet/img/"*.png "$INSTALL_DIR/pet/img/" 2>/dev/null || true
+# Pre-cache Electron into the npx store so the first `/screamdog` launch is instant.
+info "预缓存 Electron（首次启动 Scream Dog 秒开）..."
+(cd "$INSTALL_DIR/pet" && npx --yes electron --version >/dev/null 2>&1) || true
+
+# ── 7. 创建 scream 命令 ────────────────────────────────────────────────────
 mkdir -p "$BIN_DIR"
 cat > "$BIN_DIR/scream" <<'EOF'
 #!/usr/bin/env bash

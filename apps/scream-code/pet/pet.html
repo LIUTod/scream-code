@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  * { margin: 0; padding: 0; }
+  body {
+    background: transparent;
+    width: 128px; height: 128px;
+    overflow: hidden;
+    -webkit-app-region: drag;
+    user-select: none;
+  }
+  img {
+    width: 128px; height: 128px;
+    image-rendering: pixelated;
+  }
+</style>
+</head>
+<body>
+<img id="frame" src="img/idle_1.png">
+
+<script>
+const { readFileSync, writeFileSync, existsSync } = require('node:fs');
+const { ipcRenderer } = require('electron');
+const path = require('node:path');
+
+const { tmpdir } = require('node:os');
+const STATE_FILE = path.join(tmpdir(), 'scream-pet-state.json');
+
+const anims = {
+  idle: {
+    // Ping-pong: 1→2→3→2→1, 1200ms per frame — slow breathing feel
+    frames: ['idle_1.png', 'idle_2.png', 'idle_3.png', 'idle_2.png', 'idle_1.png'],
+    interval: 1200,
+  },
+  run: {
+    frames: ['run_1.png', 'run_2.png', 'run_3.png'],
+    interval: 250,
+  },
+};
+
+const img = document.getElementById('frame');
+let state = 'idle';
+let frameIdx = 0;
+let timer = null;
+
+function loadAnim(newState) {
+  if (!anims[newState]) return;
+  if (newState === state && timer) return;  // already playing this anim
+  state = newState;
+  frameIdx = 0;
+  clearInterval(timer);
+  const anim = anims[state];
+  // Show first frame immediately
+  img.src = 'img/' + anim.frames[0] + '?t=' + Date.now();
+  timer = setInterval(() => {
+    frameIdx = (frameIdx + 1) % anim.frames.length;
+    img.src = 'img/' + anim.frames[frameIdx] + '?t=' + Date.now();
+  }, anim.interval);
+}
+
+// Start idle animation
+loadAnim('idle');
+
+// Poll state file every 500ms
+setInterval(() => {
+  try {
+    if (!existsSync(STATE_FILE)) return;
+    const data = JSON.parse(readFileSync(STATE_FILE, 'utf8'));
+    loadAnim(data.state);
+  } catch { /* poll best-effort */ }
+}, 500);
+</script>
+</body>
+</html>

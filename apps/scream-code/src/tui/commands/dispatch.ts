@@ -45,6 +45,7 @@ import {
 import { handleGoalCommand, handleGoalOffCommand } from './goal';
 import { handleRevokeCommand } from './revoke';
 import { handleCcCommand } from './cc';
+import { handleScreamdogCommand } from './screamdog';
 import { handleUpdateCommand } from './update';
 import { handleChannelCommand } from './cc-connect';
 import { handleMemoryCommand } from './memory';
@@ -86,6 +87,7 @@ export {
 export { handleGoalCommand, handleGoalOffCommand } from './goal';
 export { handleRevokeCommand } from './revoke';
 export { handleCcCommand } from './cc';
+export { handleScreamdogCommand, syncPetState } from './screamdog';
 export { handleUpdateCommand } from './update';
 export { handleChannelCommand } from './cc-connect';
 export { handleMemoryCommand } from './memory';
@@ -208,6 +210,9 @@ async function handleBuiltInSlashCommand(
   args: string,
 ): Promise<void> {
   switch (name) {
+    case 'screamdog':
+      await handleScreamdogCommand(host);
+      return;
     case 'exit':
       host.stop().catch(() => {
         // stop() kills the process; if it fails, force-exit to avoid a hung TUI.

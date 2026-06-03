@@ -60,6 +60,7 @@ import { AuthFlowController } from './controllers/auth-flow';
 import { EditorKeyboardController } from './controllers/editor-keyboard';
 import { SessionEventHandler } from './controllers/session-event-handler';
 import * as slashCommands from './commands/dispatch';
+import { syncPetState } from './commands/screamdog';
 import { SessionReplayRenderer } from './controllers/session-replay';
 import { StreamingUIController } from './controllers/streaming-ui';
 import { TasksBrowserController } from './controllers/tasks-browser';
@@ -943,8 +944,11 @@ export class ScreamTUI {
     // Stop the welcome breathing animation once the first message is sent —
     // the panel scrolls off-screen but the 40 ms timer keeps firing
     // requestRender, causing flicker and broken scroll.
-    if ('streamingPhase' in patch && patch.streamingPhase !== 'idle') {
-      this.welcomeComponent?.stopBreathing();
+    if ('streamingPhase' in patch) {
+      if (patch.streamingPhase !== 'idle') {
+        this.welcomeComponent?.stopBreathing();
+      }
+      syncPetState(patch.streamingPhase ?? 'idle');
     }
     this.state.footer.setState(this.state.appState);
     this.updateActivityPane();

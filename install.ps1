@@ -186,7 +186,20 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 
-# ── 6. 创建 scream 命令 ────────────────────────────────────────────────────
+# ── 6. 安装 Scream Dog 桌宠 ──────────────────────────────────────────────
+Info "安装 Scream Dog..."
+$PetDir = Join-Path $InstallDir "pet"
+New-Item -ItemType Directory -Force -Path (Join-Path $PetDir "img") | Out-Null
+$PetSrc = Join-Path $InstallDir "apps\scream-code\pet"
+Copy-Item "$PetSrc\main.js" $PetDir -ErrorAction SilentlyContinue
+Copy-Item "$PetSrc\pet.html" $PetDir -ErrorAction SilentlyContinue
+Copy-Item "$PetSrc\package.json" $PetDir -ErrorAction SilentlyContinue
+Copy-Item "$PetSrc\img\*.png" (Join-Path $PetDir "img") -ErrorAction SilentlyContinue
+# Pre-cache Electron into npx store so first launch is instant.
+Info "预缓存 Electron..."
+try { & npx --yes electron --version 2>&1 | Out-Null } catch {}
+
+# ── 7. 创建 scream 命令 ────────────────────────────────────────────────────
 Info "创建 scream 命令..."
 New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
 
