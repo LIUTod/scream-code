@@ -12,7 +12,7 @@ export const BUILTIN_SLASH_COMMANDS = [
   {
     name: 'yes',
     aliases: ['yolo'],
-    description: '切换自动批准模式',
+    description: '切换至自动批准模式(yolo)',
     priority: 105,
     availability: 'always',
   },
