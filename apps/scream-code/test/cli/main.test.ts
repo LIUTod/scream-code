@@ -103,20 +103,18 @@ describe('main entry command handling', () => {
     vi.clearAllMocks();
   });
 
-  it('runs update preflight before starting the shell', async () => {
+  it('starts the shell without blocking on update preflight', async () => {
     const opts = defaultOpts();
     mocks.validateOptions.mockReturnValue({ options: opts, uiMode: 'shell' });
-    mocks.runUpdatePreflight.mockResolvedValue('continue');
     mocks.runShell.mockResolvedValue(void 0);
 
     const exitCode = await runHandleMainCommand(opts);
 
     expect(exitCode).toBeNull();
     expect(validateOptions).toHaveBeenCalledWith(opts);
-    expect(runUpdatePreflight).toHaveBeenCalledWith('0.0.1-alpha.2', { track: expect.any(Function) });
-    expect(mocks.runUpdatePreflight.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.runShell.mock.invocationCallOrder[0]!,
-    );
+    // Update preflight is no longer called at startup — it was moved to
+    // the TUI layer where it runs silently in the background.
+    expect(runUpdatePreflight).not.toHaveBeenCalled();
     expect(runShell).toHaveBeenCalledWith(opts, '0.0.1-alpha.2');
   });
 
@@ -126,32 +124,25 @@ describe('main entry command handling', () => {
       prompt: 'explain the repo',
     };
     mocks.validateOptions.mockReturnValue({ options: opts, uiMode: 'print' });
-    mocks.runUpdatePreflight.mockResolvedValue('continue');
     mocks.runPrompt.mockResolvedValue(void 0);
 
     const exitCode = await runHandleMainCommand(opts);
 
     expect(exitCode).toBeNull();
-    expect(runUpdatePreflight).toHaveBeenCalledWith('0.0.1-alpha.2', {
-      track: expect.any(Function),
-      isTTY: false,
-    });
+    expect(runUpdatePreflight).not.toHaveBeenCalled();
     expect(runPrompt).toHaveBeenCalledWith(opts, '0.0.1-alpha.2');
     expect(runShell).not.toHaveBeenCalled();
   });
 
-  it('keeps shell mode update preflight interactive by default', async () => {
+  it('starts the shell without calling update preflight', async () => {
     const opts = defaultOpts();
     mocks.validateOptions.mockReturnValue({ options: opts, uiMode: 'shell' });
-    mocks.runUpdatePreflight.mockResolvedValue('continue');
     mocks.runShell.mockResolvedValue(void 0);
 
     const exitCode = await runHandleMainCommand(opts);
 
     expect(exitCode).toBeNull();
-    expect(runUpdatePreflight).toHaveBeenCalledWith('0.0.1-alpha.2', {
-      track: expect.any(Function),
-    });
+    expect(runUpdatePreflight).not.toHaveBeenCalled();
     expect(runShell).toHaveBeenCalledWith(opts, '0.0.1-alpha.2');
   });
 
@@ -163,18 +154,6 @@ describe('main entry command handling', () => {
       mocks.createProgram.mock.invocationCallOrder[0]!,
     );
     expect(mocks.parse).toHaveBeenCalledWith(process.argv);
-  });
-
-  it('exits early when update preflight requests process exit', async () => {
-    const opts = defaultOpts();
-    mocks.validateOptions.mockReturnValue({ options: opts, uiMode: 'shell' });
-    mocks.runUpdatePreflight.mockResolvedValue('exit');
-    mocks.runShell.mockResolvedValue(void 0);
-
-    const exitCode = await runHandleMainCommand(opts);
-
-    expect(exitCode).toBe(0);
-    expect(runShell).not.toHaveBeenCalled();
   });
 
   it('formats Scream startup errors with structured fields', () => {
