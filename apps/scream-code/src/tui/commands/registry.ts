@@ -1,26 +1,25 @@
 import type { ScreamSlashCommand, SlashCommandAvailability } from './types';
 
 export const BUILTIN_SLASH_COMMANDS = [
-  // ── 权限模式 ──
   {
     name: 'auto',
     aliases: [],
     description: '切换自动权限模式',
-    priority: 110,
-    availability: 'always',
-  },
-  {
-    name: 'yes',
-    aliases: ['yolo'],
-    description: '切换至自动批准模式(yolo)',
-    priority: 105,
+    priority: 125,
     availability: 'always',
   },
   {
     name: 'fanout',
     aliases: ['parallel'],
     description: '切换为 Agent 优先并行模式',
-    priority: 106,
+    priority: 124,
+    availability: 'always',
+  },
+  {
+    name: 'yes',
+    aliases: ['yolo'],
+    description: '切换至自动批准模式(yolo)',
+    priority: 123,
     availability: 'always',
   },
 
@@ -29,55 +28,21 @@ export const BUILTIN_SLASH_COMMANDS = [
     name: 'sessions',
     aliases: ['resume'],
     description: '浏览并恢复会话',
-    priority: 104,
+    priority: 122,
   },
-  {
-    name: 'new',
-    aliases: ['clear'],
-    description: '在当前工作区开启新会话',
-    priority: 103,
-  },
-  {
-    name: 'fork',
-    aliases: [],
-    description: '复制当前会话并新开分支',
-    priority: 98,
-  },
-
-  // ── 记忆备忘录 ──
-  {
-    name: 'memory',
-    aliases: ['memo', 'mem'],
-    description: '浏览、搜索、注入记忆备忘录',
-    priority: 102,
-    availability: 'always',
-  },
-
-  // ── 核心功能 ──
   {
     name: 'compact',
     aliases: [],
     description: '压缩对话上下文',
-    priority: 101,
+    priority: 121,
   },
-  {
-    name: 'plan',
-    aliases: [],
-    description: '切换计划模式',
-    priority: 100,
-    availability: (args) => (args.trim().toLowerCase() === 'clear' ? 'idle-only' : 'always'),
-  },
-  {
-    name: 'model',
-    aliases: [],
-    description: '切换 LLM 模型',
-    priority: 99,
-  },
+
+  // ── 自动化 ──
   {
     name: 'goal',
     aliases: [],
     description: '管理自动目标（status状态/pause暂停/resume恢复/replace替换，取消用 /goaloff）',
-    priority: 97,
+    priority: 120,
     availability: (args) => {
       const trimmed = args.trim();
       return trimmed === '' || trimmed === 'status' || trimmed === 'pause'
@@ -86,25 +51,82 @@ export const BUILTIN_SLASH_COMMANDS = [
     },
   },
   {
-    name: 'revoke',
-    aliases: [],
-    description: '撤回上一次对话（可指定轮数，如 /revoke 3）',
-    priority: 80,
-    availability: 'idle-only',
-  },
-  {
     name: 'goaloff',
     aliases: [],
     description: '取消并清空当前目标',
-    priority: 96,
+    priority: 119,
     availability: 'always',
+  },
+
+  // ── cc-connect ──
+  {
+    name: 'cc',
+    aliases: [],
+    description: '操控你的cc（启动/关闭/重启）',
+    priority: 118,
+    availability: 'always',
+  },
+  {
+    name: 'cc-connect',
+    aliases: [],
+    description: 'cc-connect 快速通道配置（需先安装）',
+    priority: 117,
+    availability: 'always',
+  },
+
+  // ── 核心功能 ──
+  {
+    name: 'plan',
+    aliases: [],
+    description: '切换计划模式',
+    priority: 116,
+    availability: (args) => (args.trim().toLowerCase() === 'clear' ? 'idle-only' : 'always'),
+  },
+  {
+    name: 'model',
+    aliases: [],
+    description: '切换 LLM 模型',
+    priority: 115,
+  },
+  {
+    name: 'new',
+    aliases: ['clear'],
+    description: '在当前工作区开启新会话',
+    priority: 114,
+  },
+  {
+    name: 'fork',
+    aliases: [],
+    description: '复制当前会话并新开分支',
+    priority: 113,
+  },
+  {
+    name: 'memory',
+    aliases: ['memo', 'mem'],
+    description: '浏览、搜索、注入记忆备忘录',
+    priority: 112,
+    availability: 'always',
+  },
+  {
+    name: 'revoke',
+    aliases: [],
+    description: '撤回上一次对话（可指定轮数，如 /revoke 3）',
+    priority: 111,
+    availability: 'idle-only',
   },
   {
     name: 'tasks',
     aliases: ['task'],
     description: '浏览后台任务',
-    priority: 95,
+    priority: 110,
     availability: 'always',
+  },
+  {
+    name: 'update',
+    aliases: [],
+    description: '手动更新 Scream Code 到最新版本',
+    priority: 109,
+    availability: 'idle-only',
   },
 
   // ── 信息查看 ──
@@ -208,6 +230,15 @@ export const BUILTIN_SLASH_COMMANDS = [
     priority: 58,
   },
 
+  // ── 插件中心 ──
+  {
+    name: 'plugin',
+    aliases: ['plugins'],
+    description: 'ScreamCode 插件中心：浏览、安装、卸载插件',
+    priority: 35,
+    availability: 'always',
+  },
+
   // ── 系统 ──
   {
     name: 'version',
@@ -221,39 +252,6 @@ export const BUILTIN_SLASH_COMMANDS = [
     aliases: ['quit', 'q'],
     description: '退出应用',
     priority: 10,
-  },
-
-  {
-    name: 'update',
-    aliases: [],
-    description: '手动更新 Scream Code 到最新版本',
-    priority: 60,
-    availability: 'idle-only',
-  },
-  // ── cc-connect 通道管理 ──
-  {
-    name: 'cc',
-    aliases: [],
-    description: '操控你的cc（启动/关闭/重启）',
-    priority: 102,
-    availability: 'always',
-  },
-  // ── cc-connect 通道配置 ──
-  {
-    name: 'cc-connect',
-    aliases: [],
-    description: 'cc-connect 快速通道配置（需先安装）',
-    priority: 29,
-    availability: 'always',
-  },
-
-  // ── 插件中心 ──
-  {
-    name: 'plugin',
-    aliases: ['plugins'],
-    description: 'ScreamCode 插件中心：浏览、安装、卸载插件',
-    priority: 28,
-    availability: 'always',
   },
 ] as const satisfies readonly ScreamSlashCommand[];
 
