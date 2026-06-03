@@ -246,9 +246,11 @@ async function installMcp(host: SlashCommandHost, rec: McpRecommendation): Promi
     spinner.stop({ ok: true, label: `${rec.displayName} 安装成功并已启动。` });
   } catch (error) {
     spinner.stop({ ok: false, label: `${rec.displayName} 安装失败。` });
-    host.showError(
-      `安装失败: ${error instanceof Error ? error.message : String(error)}`,
-    );
+    const msg = error instanceof Error ? error.message : String(error);
+    const hint = msg.includes('Timed out') || msg.includes('ETIMEDOUT') || msg.includes('ENOTFOUND')
+      ? '网络超时，建议检查网络或开启加速后重试。'
+      : '';
+    host.showError(hint ? `安装失败：${msg}\n${hint}` : `安装失败：${msg}`);
   }
 }
 
@@ -311,7 +313,7 @@ async function writeMcpConfig(
 
   const servers: Record<string, unknown> =
     (data['mcpServers'] as Record<string, unknown>) ?? {};
-  servers[name] = { transport: 'stdio', command, args, startupTimeoutMs: 120_000 };
+  servers[name] = { transport: 'stdio', command, args, startupTimeoutMs: 300_000 };
   data['mcpServers'] = servers;
 
   await mkdir(dirname(configPath), { recursive: true });
