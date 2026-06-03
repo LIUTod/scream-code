@@ -1,0 +1,12 @@
+diff --git a/dist/components/editor.js b/dist/components/editor.js
+index 50f92259fa88f4efe406a60b7db8e54a9eedace6..ebf0548c449fc40b1e91a277730a0241e5629850 100644
+--- a/dist/components/editor.js
++++ b/dist/components/editor.js
+@@ -487,6 +487,7 @@ export class Editor {
+             }
+             if (kb.matches(data, "tui.select.up") || kb.matches(data, "tui.select.down")) {
+                 this.autocompleteList.handleInput(data);
++                this.tui.requestRender();
+                 return;
+             }
+             if (kb.matches(data, "tui.input.tab")) {
