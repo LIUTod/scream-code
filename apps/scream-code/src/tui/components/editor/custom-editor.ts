@@ -125,6 +125,11 @@ export class CustomEditor extends Editor {
   public onFirstInput?: () => void;
   private firstInputFired = false;
 
+  /** Whether the user has ever typed anything into the editor. */
+  hasFirstInputFired(): boolean {
+    return this.firstInputFired;
+  }
+
   /** Reset the first-input gate so onFirstInput will fire again on the next keystroke. */
   resetFirstInputGate(): void {
     this.firstInputFired = false;

@@ -1329,9 +1329,11 @@ export class ScreamTUI {
     this.welcomeComponent?.stopBreathing();
     const welcome = new WelcomeComponent(this.state.appState, this.state.theme.colors, this.state.ui);
     this.welcomeComponent = welcome;
-    // If the editor was already used in this session (e.g. session switch),
-    // the welcome onFirstInput hook won't fire again — stop breathing now.
-    if (this.state.editor.getText().length > 0) {
+    // Once the user has typed anything (even a single character), breathing
+    // stays off forever — even across session switches.  This prevents the
+    // logo colour cycle from re-triggering expensive full-tree renders when
+    // the transcript is packed with replayed historical components.
+    if (this.state.editor.hasFirstInputFired()) {
       welcome.stopBreathing();
     }
     this.state.transcriptContainer.addChild(welcome);
@@ -1351,7 +1353,6 @@ export class ScreamTUI {
     this.sessionEventHandler.stopAllMcpServerStatusSpinners();
     this.welcomeComponent?.stopBreathing();
     this.welcomeComponent = undefined;
-    this.state.editor.resetFirstInputGate();
     this.state.transcriptContainer.clear();
     this.clearTerminalInlineImages();
     this.state.todoPanel.clear();
