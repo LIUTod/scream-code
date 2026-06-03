@@ -34,7 +34,7 @@ interface InternalEntry {
 
 export type McpStatusListener = (entry: McpServerEntry) => void;
 
-const DEFAULT_STARTUP_TIMEOUT_MS = 30_000;
+const DEFAULT_STARTUP_TIMEOUT_MS = 60_000;
 
 type RuntimeMcpClient = StdioMcpClient | HttpMcpClient;
 

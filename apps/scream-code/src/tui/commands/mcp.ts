@@ -311,7 +311,7 @@ async function writeMcpConfig(
 
   const servers: Record<string, unknown> =
     (data['mcpServers'] as Record<string, unknown>) ?? {};
-  servers[name] = { transport: 'stdio', command, args, startupTimeoutMs: 60_000 };
+  servers[name] = { transport: 'stdio', command, args, startupTimeoutMs: 120_000 };
   data['mcpServers'] = servers;
 
   await mkdir(dirname(configPath), { recursive: true });
