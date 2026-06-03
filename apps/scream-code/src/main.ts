@@ -11,7 +11,7 @@ import {
   resolveGlobalLogPath,
   resolveScreamHome,
 } from '@scream-cli/scream-code-sdk';
-import { installCrashHandlers, track } from '@scream-cli/scream-telemetry';
+import { installCrashHandlers } from '@scream-cli/scream-telemetry';
 
 import { createProgram } from './cli/commands';
 import type { CLIOptions } from './cli/options';
