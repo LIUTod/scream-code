@@ -1,9 +1,5 @@
 <img width="463" height="157" alt="image" src="https://github.com/user-attachments/assets/a24426f5-1c15-48e4-9625-9066557dc6b6" />
 
-# Scream Code
-
-你的超级Ai个人助手。
-
 Scream Code 是一款省心的中文 AI Agent 助手。无需硬记代码，直接用中/英文下达指令，vibe coding、写代码、改文件、清理电脑、查资料、制作研报、制作 skill、搜全网信息……你动嘴，它动手！
 
 ---
