@@ -87,6 +87,7 @@ import type {
   SkillSummary,
   SteerPayload,
   StopBackgroundPayload,
+  UndoHistoryPayload,
   UnregisterToolPayload,
   UpdateSessionMetadataPayload,
 } from './core-api';
@@ -501,6 +502,10 @@ export class ScreamCore implements PromisableMethods<CoreAPI> {
 
   clearContext({ sessionId, ...payload }: SessionAgentPayload<EmptyPayload>) {
     return this.sessionApi(sessionId).clearContext(payload);
+  }
+
+  undoHistory({ sessionId, ...payload }: SessionAgentPayload<UndoHistoryPayload>) {
+    return this.sessionApi(sessionId).undoHistory(payload);
   }
 
   activateSkill({

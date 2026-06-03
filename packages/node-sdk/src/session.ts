@@ -343,6 +343,16 @@ export class Session {
     });
   }
 
+  /**
+   * Remove the last N user-prompt turns from the conversation history.
+   * The TUI is responsible for cleaning up the corresponding transcript
+   * entries and UI components after this call succeeds.
+   */
+  async undoHistory(count: number = 1): Promise<void> {
+    this.ensureOpen();
+    await this.rpc.undoHistory({ sessionId: this.id, count });
+  }
+
   async writeMetadata(): Promise<void> {
     this.ensureOpen();
     await this.rpc.updateSessionMetadata({

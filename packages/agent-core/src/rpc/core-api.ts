@@ -264,6 +264,9 @@ export type SetScreamConfigPayload = ScreamConfigPatch;
 export interface RemoveScreamProviderPayload {
   readonly providerId: string;
 }
+export interface UndoHistoryPayload {
+  readonly count: number;
+}
 
 export interface AgentAPI {
   prompt: (payload: PromptPayload) => void;
@@ -283,6 +286,7 @@ export interface AgentAPI {
   setActiveTools: (payload: SetActiveToolsPayload) => void;
   stopBackground: (payload: StopBackgroundPayload) => void;
   clearContext: (payload: EmptyPayload) => void;
+  undoHistory: (payload: UndoHistoryPayload) => void;
   activateSkill: (payload: ActivateSkillPayload) => void;
   getBackgroundOutput: (payload: GetBackgroundOutputPayload) => string;
   getBackgroundOutputPath: (payload: GetBackgroundOutputPathPayload) => string | undefined;

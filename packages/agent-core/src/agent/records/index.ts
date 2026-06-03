@@ -76,6 +76,9 @@ function restoreAgentRecord(agent: Agent, input: AgentRecord): void {
     case 'context.clear':
       agent.context.clear();
       return;
+    case 'context.undo':
+      agent.context.undo(input.count);
+      return;
     case 'context.apply_compaction':
       agent.context.applyCompaction(input);
       return;

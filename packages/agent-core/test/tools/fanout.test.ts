@@ -119,7 +119,7 @@ describe('FanOutInputSchema', () => {
 // ── ConflictTracker ─────────────────────────────────────────────────────────
 
 describe('ConflictTracker', () => {
-  it('detects overlapping file paths between tasks', () => {
+  it('detects overlapping file paths between tasks', async () => {
     // The ConflictTracker is exercised internally by the FanOut execution.
     // We test it indirectly by verifying that tasks referencing the same file
     // still complete (the warning is injected into the prompt).
@@ -146,9 +146,8 @@ describe('ConflictTracker', () => {
     }
 
     // The spawn mock verifies both were called
-    void execute(tool, input).then(() => {
-      expect(host.spawn).toHaveBeenCalledTimes(2);
-    });
+    await execute(tool, input);
+    expect(host.spawn).toHaveBeenCalledTimes(2);
   });
 
   it('does not warn when tasks reference different files', () => {
@@ -217,7 +216,9 @@ describe('FanOut execution', () => {
     const result = await execute(tool, twoTasks());
 
     expect(result.isError).toBe(true);
-    expect(result.output).toContain('all subagents failed to spawn');
+    expect(result.output).toContain('all');
+    expect(result.output).toContain('subagents failed to spawn');
+    expect(result.output).toContain('Failures:');
   });
 
   it('caps at 5 tasks even if input provides more', async () => {

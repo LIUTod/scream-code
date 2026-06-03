@@ -68,6 +68,7 @@ export interface AgentRecordEvents {
   'context.append_message': { message: ContextMessage };
   'context.append_loop_event': { event: LoopRecordedEvent };
   'context.clear': {};
+  'context.undo': { count: number };
   'context.apply_compaction': CompactionResult;
 
   'tools.update_store': ToolStoreUpdate;

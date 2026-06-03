@@ -23,6 +23,7 @@ import type {
   SkillSummary,
   SteerPayload,
   StopBackgroundPayload,
+  UndoHistoryPayload,
   UnregisterToolPayload,
   UpdateSessionMetadataPayload,
 } from '#/rpc';
@@ -157,6 +158,10 @@ export class SessionAPIImpl implements PromisableMethods<SessionAPI> {
 
   clearContext({ agentId, ...payload }: AgentScopedPayload<EmptyPayload>) {
     return this.getAgent(agentId).clearContext(payload);
+  }
+
+  undoHistory({ agentId, ...payload }: AgentScopedPayload<UndoHistoryPayload>) {
+    return this.getAgent(agentId).undoHistory(payload);
   }
 
   async activateSkill({ agentId, ...payload }: AgentScopedPayload<ActivateSkillPayload>) {

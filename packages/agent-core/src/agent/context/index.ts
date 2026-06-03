@@ -102,6 +102,59 @@ export class ContextMemory {
     this.agent.emitStatusUpdated();
   }
 
+  /**
+   * Remove the last N user-prompt turns from the conversation history.
+   * This is the core of the `/undo` command: it walks the history backward,
+   * removes all messages belonging to each undone turn, and adjusts token
+   * accounting and injection positions.
+   */
+  undo(count: number): void {
+    if (count <= 0 || this._history.length === 0) return;
+
+    this.agent.records.logRecord({ type: 'context.undo', count });
+
+    let removedUserCount = 0;
+    let stoppedAtBoundary = false;
+    for (let i = this._history.length - 1; i >= 0; i--) {
+      const message = this._history[i];
+      if (message === undefined) continue;
+      // Don't cross injection or compaction summary boundaries.
+      if (message.origin?.kind === 'injection') continue;
+      if (message.origin?.kind === 'compaction_summary') {
+        stoppedAtBoundary = true;
+        break;
+      }
+
+      this._history.splice(i, 1);
+      this.agent.injection.onContextMessageRemoved(i);
+
+      if (i < this.tokenCountCoveredMessageCount) {
+        this.tokenCountCoveredMessageCount--;
+        // Clamp to zero — the real token count from API usage can differ
+        // from estimates, and subtraction could otherwise go negative.
+        this._tokenCount = Math.max(
+          0,
+          this._tokenCount - estimateTokensForMessages([message]),
+        );
+      }
+
+      if (isRealUserPrompt(message)) {
+        removedUserCount++;
+        if (removedUserCount >= count) break;
+      }
+    }
+
+    this.openSteps.clear();
+    this.pendingToolResultIds.clear();
+    this.deferredMessages = [];
+    this.agent.emitStatusUpdated();
+
+    if (!this.agent.records.restoring && (stoppedAtBoundary || removedUserCount < count)) {
+      // Throw nothing — this is a best-effort operation.  If there aren't
+      // enough user prompts to undo, we just undo what we can and stop.
+    }
+  }
+
   applyCompaction(summary: CompactionResult): void {
     this.agent.records.logRecord({
       type: 'context.apply_compaction',
@@ -145,7 +198,11 @@ export class ContextMemory {
   }
 
   get messages(): Message[] {
-    return project(this.history);
+    // Apply micro-compaction before projecting: old tool results are
+    // truncated to a short marker, freeing context tokens without an
+    // LLM call.  Detect() is a no-op when the feature flag is off.
+    this.agent.microCompaction.detect();
+    return project(this.agent.microCompaction.compact(this.history));
   }
 
   appendLoopEvent(event: LoopRecordedEvent): void {
@@ -349,4 +406,19 @@ function truncateContentParts(parts: readonly ContentPart[]): ContentPart[] {
 
 function isEmptyOutputText(output: string): boolean {
   return output.length === 0 || output.trim() === TOOL_OUTPUT_EMPTY_TEXT;
+}
+
+/**
+ * Determines whether a context message counts as a "user prompt" for undo
+ * anchoring.  Regular user messages and user-triggered skill activations
+ * both count; injections, system reminders, and model-triggered skills don't.
+ */
+function isRealUserPrompt(message: ContextMessage): boolean {
+  if (message.role !== 'user') return false;
+  const origin = message.origin;
+  if (origin === undefined || origin.kind === 'user') return true;
+  if (origin.kind === 'skill_activation') {
+    return origin.trigger === 'user-slash';
+  }
+  return false;
 }

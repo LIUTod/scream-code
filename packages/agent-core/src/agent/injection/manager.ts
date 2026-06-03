@@ -3,6 +3,7 @@ import type { DynamicInjector } from './injector';
 import { PermissionModeInjector } from './permission-mode';
 import { PluginSessionStartInjector } from './plugin-session-start';
 import { PlanModeInjector } from './plan-mode';
+import { TodoListReminderInjector } from './todo-list';
 
 export class InjectionManager {
   private readonly injectors: DynamicInjector[];
@@ -12,6 +13,7 @@ export class InjectionManager {
       new PluginSessionStartInjector(agent),
       new PlanModeInjector(agent),
       new PermissionModeInjector(agent),
+      new TodoListReminderInjector(agent),
     ];
   }
 
@@ -31,6 +33,16 @@ export class InjectionManager {
     for (const injector of this.injectors) {
       try {
         injector.onContextCompacted(compactedCount);
+      } catch {
+        continue;
+      }
+    }
+  }
+
+  onContextMessageRemoved(index: number): void {
+    for (const injector of this.injectors) {
+      try {
+        injector.onContextMessageRemoved(index);
       } catch {
         continue;
       }

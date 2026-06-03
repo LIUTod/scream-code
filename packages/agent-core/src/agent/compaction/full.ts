@@ -32,6 +32,7 @@ import type { CompactionBeginData, CompactionResult } from './types';
 import { DEFAULT_COMPACTION_CONFIG, DefaultCompactionStrategy, type CompactionStrategy } from './strategy';
 import { basename, dirname } from 'pathe';
 import { parseMemoryMemos } from '@scream-cli/memory';
+import type { TodoItem } from '../../tools/builtin/state/todo-list';
 
 type CompactionTelemetryTrigger = CompactionBeginData['source'] | 'manual-with-prompt' | 'unknown';
 
@@ -262,6 +263,7 @@ export class FullCompaction {
           }
           usage = response.usage;
           summary = extractCompactionSummary(response);
+          summary = this.postProcessSummary(summary);
           break;
         } catch (error) {
           if (error instanceof APIContextOverflowError || error instanceof TruncatedError) {
@@ -420,6 +422,25 @@ export class FullCompaction {
       count: memos.length,
       sessionId,
     });
+  }
+
+  /**
+   * Append the current todo list as a markdown section to the compaction
+   * summary so active tasks survive compression. This mirrors kimi-code's
+   * approach: without it, the todo list is lost after compaction because
+   * the original messages containing it are removed from the context window.
+   */
+  private postProcessSummary(summary: string): string {
+    const storeData = this.agent.tools.storeData();
+    const todos = (storeData['todo'] as readonly TodoItem[] | undefined) ?? [];
+    if (todos.length === 0) return summary;
+
+    const lines = todos.map((t) => {
+      const marker = t.status === 'done' ? 'x' : t.status === 'in_progress' ? '-' : ' ';
+      return `- [${marker}] ${t.title}`;
+    });
+    const todoMarkdown = ['## TODO List', '', ...lines].join('\n');
+    return `${summary.trim()}\n\n${todoMarkdown}`;
   }
 }
 

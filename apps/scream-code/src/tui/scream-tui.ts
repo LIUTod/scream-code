@@ -502,6 +502,9 @@ export class ScreamTUI {
     this.stopCcConnectPolling();
     this.unregisterSignalHandlers();
     this.aborted = true;
+    // Cancel any in-flight operation (e.g. OAuth login flow) before teardown.
+    this.cancelInFlight?.();
+    this.cancelInFlight = undefined;
     this.streamingUI.discardPending();
     this.editorKeyboard.clearPendingExit();
     for (const dispose of this.reverseRpcDisposers) {
@@ -1042,6 +1045,9 @@ export class ScreamTUI {
     for (const dispose of this.reverseRpcDisposers) {
       dispose();
     }
+    // Clear the array so session-switch (unloadCurrentSession) doesn't leave
+    // stale disposers that would be double-disposed on the next call.
+    this.reverseRpcDisposers.length = 0;
   }
 
   private registerSessionHandlers(session: Session): void {

@@ -43,6 +43,7 @@ import {
   handleTitleCommand,
 } from './session';
 import { handleGoalCommand, handleGoalOffCommand } from './goal';
+import { handleRevokeCommand } from './revoke';
 import { handleChannelCommand } from './cc-connect';
 import { handleMemoryCommand } from './memory';
 import { handlePluginCommand } from './plugin';
@@ -81,6 +82,7 @@ export {
   handleTitleCommand,
 } from './session';
 export { handleGoalCommand, handleGoalOffCommand } from './goal';
+export { handleRevokeCommand } from './revoke';
 export { handleChannelCommand } from './cc-connect';
 export { handleMemoryCommand } from './memory';
 export { handlePluginCommand } from './plugin';
@@ -200,7 +202,10 @@ async function handleBuiltInSlashCommand(
 ): Promise<void> {
   switch (name) {
     case 'exit':
-      void host.stop();
+      host.stop().catch((error: unknown) => {
+        // stop() kills the process; if it fails, force-exit to avoid a hung TUI.
+        process.exit(1);
+      });
       return;
     case 'help':
       host.showHelpPanel();
@@ -213,13 +218,19 @@ async function handleBuiltInSlashCommand(
       host.state.ui.requestRender();
       return;
     case 'sessions':
-      void host.showSessionPicker();
+      host.showSessionPicker().catch((error: unknown) => {
+        host.showError(`打开会话选择器失败：${formatErrorMessage(error)}`);
+      });
       return;
     case 'tasks':
-      void host.tasksBrowserController.show();
+      host.tasksBrowserController.show().catch((error: unknown) => {
+        host.showError(`打开任务浏览器失败：${formatErrorMessage(error)}`);
+      });
       return;
     case 'mcp':
-      void showMcpServers(host);
+      showMcpServers(host).catch((error: unknown) => {
+        host.showError(`显示 MCP 服务器状态失败：${formatErrorMessage(error)}`);
+      });
       return;
     case 'editor':
       await handleEditorCommand(host, args);
@@ -237,10 +248,14 @@ async function handleBuiltInSlashCommand(
       showSettingsSelector(host);
       return;
     case 'usage':
-      void showUsage(host);
+      showUsage(host).catch((error: unknown) => {
+        host.showError(`显示使用情况失败：${formatErrorMessage(error)}`);
+      });
       return;
     case 'status':
-      void showStatusReport(host);
+      showStatusReport(host).catch((error: unknown) => {
+        host.showError(`显示状态报告失败：${formatErrorMessage(error)}`);
+      });
       return;
     case 'title':
       await handleTitleCommand(host, args);
@@ -256,6 +271,9 @@ async function handleBuiltInSlashCommand(
       return;
     case 'fanout':
       await handleFanoutCommand(host, args);
+      return;
+    case 'revoke':
+      await handleRevokeCommand(host, args);
       return;
     case 'goal':
       await handleGoalCommand(host, args);

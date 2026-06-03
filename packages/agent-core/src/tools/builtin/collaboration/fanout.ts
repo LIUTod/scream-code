@@ -173,16 +173,19 @@ export class FanOutTool implements BuiltinTool<FanOutInput> {
     const tracker = new ConflictTracker();
     const conflictIndices = tracker.analyze(tasks);
 
+    // Declared outside try so the catch block can clean up deadlines and
+    // cancel orphaned subagents on abort.
+    const handles: Array<{
+      index: number;
+      description: string;
+      handle: Awaited<ReturnType<SessionSubagentHost['spawn']>>;
+      deadline: DeadlineAbortSignal;
+    }> = [];
+
     try {
       signal.throwIfAborted();
 
       // ── Spawn all subagents concurrently ────────────────────────────
-      const handles: Array<{
-        index: number;
-        description: string;
-        handle: Awaited<ReturnType<SessionSubagentHost['spawn']>>;
-        deadline: DeadlineAbortSignal;
-      }> = [];
 
       const spawnResults = await Promise.allSettled(
         tasks.map(async (task, index) => {
@@ -219,7 +222,24 @@ export class FanOutTool implements BuiltinTool<FanOutInput> {
       }
 
       if (handles.length === 0) {
-        return { output: 'FanOut: all subagents failed to spawn.', isError: true };
+        // Surface individual spawn failure reasons so the model can diagnose
+        // why all subagents failed (e.g. profile not found, rate limiting).
+        const failures: string[] = [];
+        for (let i = 0; i < spawnResults.length; i++) {
+          const r = spawnResults[i]!;
+          if (r.status === 'rejected') {
+            failures.push(`[${i + 1}/${tasks.length}] ${String(r.reason)}`);
+          }
+        }
+        return {
+          output: [
+            `FanOut: all ${tasks.length} subagents failed to spawn.`,
+            '',
+            'Failures:',
+            ...failures.map((f) => `  ${f}`),
+          ].join('\n'),
+          isError: true,
+        };
       }
 
       // ── Wait for all to complete ────────────────────────────────────
@@ -296,6 +316,20 @@ export class FanOutTool implements BuiltinTool<FanOutInput> {
 
       return { output, ...(hasFailures ? { isError: true } : {}) };
     } catch (error) {
+      // Clean up any subagents that were successfully spawned but not
+      // yet completed. Without this, they would continue running as
+      // orphans consuming tokens and potentially modifying files.
+      //
+      // NOTE: cancelAll() cancels every foreground subagent in the
+      // session, not just this FanOut batch.  If another concurrent
+      // tool call has live subagents they will also be stopped.  This
+      // is a known limitation — per-handle cancellation requires a
+      // SubagentHandle.cancel() API tracked for a follow-up.
+      for (const { deadline } of handles) {
+        deadline.clear();
+      }
+      this.subagentHost.cancelAll();
+
       let message: string;
       if (isUserCancellation(signal.reason)) {
         message = 'FanOut cancelled by user.';

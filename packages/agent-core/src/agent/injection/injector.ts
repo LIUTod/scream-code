@@ -16,6 +16,20 @@ export abstract class DynamicInjector {
     }
   }
 
+  /**
+   * Called when a single message is removed from the context history (e.g.
+   * by `/undo`). Adjusts the injection position so future injections don't
+   * reference a stale index or re-inject too early.
+   */
+  onContextMessageRemoved(index: number): void {
+    if (this.injectedAt === null) return;
+    if (index < this.injectedAt) {
+      this.injectedAt--;
+    } else if (index === this.injectedAt) {
+      this.injectedAt = null;
+    }
+  }
+
   async inject(): Promise<void> {
     const injection = await this.getInjection();
     if (injection) {

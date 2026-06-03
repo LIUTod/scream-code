@@ -76,14 +76,26 @@ export const BUILTIN_SLASH_COMMANDS = [
   {
     name: 'goal',
     aliases: [],
-    description: '设置或查看自动工作目标',
+    description: '管理自动目标（status状态/pause暂停/resume恢复/replace替换，取消用 /goaloff）',
     priority: 97,
-    availability: 'always',
+    availability: (args) => {
+      const trimmed = args.trim();
+      return trimmed === '' || trimmed === 'status' || trimmed === 'pause'
+        ? 'always'
+        : 'idle-only';
+    },
+  },
+  {
+    name: 'revoke',
+    aliases: [],
+    description: '撤回上一次对话（可指定轮数，如 /revoke 3）',
+    priority: 80,
+    availability: 'idle-only',
   },
   {
     name: 'goaloff',
     aliases: [],
-    description: '关闭并清空当前目标',
+    description: '取消并清空当前目标',
     priority: 96,
     availability: 'always',
   },

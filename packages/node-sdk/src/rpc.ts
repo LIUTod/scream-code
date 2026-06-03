@@ -508,6 +508,15 @@ export class SDKRpcClient {
     });
   }
 
+  async undoHistory(input: { sessionId: string; count: number }): Promise<void> {
+    const rpc = await this.getRpc();
+    return rpc.undoHistory({
+      sessionId: input.sessionId,
+      agentId: this.interactiveAgentId,
+      count: input.count,
+    });
+  }
+
   onEvent(listener: (event: Event) => void): Unsubscribe {
     this.eventListeners.add(listener);
     return () => {

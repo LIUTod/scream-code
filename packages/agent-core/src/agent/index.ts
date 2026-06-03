@@ -27,7 +27,7 @@ import {
 } from '../utils/tokens';
 import type { PromisableMethods } from '../utils/types';
 import { BackgroundManager } from './background';
-import { FullCompaction, type CompactionStrategy } from './compaction';
+import { FullCompaction, MicroCompaction, type CompactionStrategy } from './compaction';
 import { CronManager } from './cron';
 import { ConfigState } from './config';
 import { ContextMemory } from './context';
@@ -102,6 +102,7 @@ export class Agent {
   readonly blobStore: BlobStore | undefined;
   readonly records: AgentRecords;
   readonly fullCompaction: FullCompaction;
+  readonly microCompaction: MicroCompaction;
   readonly context: ContextMemory;
   readonly config: ConfigState;
   readonly turn: TurnFlow;
@@ -150,6 +151,7 @@ export class Agent {
           : undefined),
     );
     this.fullCompaction = new FullCompaction(this, options.compactionStrategy);
+    this.microCompaction = new MicroCompaction(this);
     this.context = new ContextMemory(this);
     this.config = new ConfigState(this);
     this.turn = new TurnFlow(this);
@@ -365,6 +367,9 @@ export class Agent {
       },
       clearContext: () => {
         this.context.clear();
+      },
+      undoHistory: (payload) => {
+        this.context.undo(payload.count);
       },
       activateSkill: (payload) => {
         if (this.skills === null) {
