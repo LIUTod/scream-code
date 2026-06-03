@@ -108,7 +108,7 @@ export async function handleCcCommand(host: SlashCommandHost): Promise<void> {
     title: `cc-connect 守护进程管理 (${daemon.method})`,
     options,
     colors: host.state.theme.colors,
-    onSelect: async (value) => {
+    onSelect: (value) => {
       const action = value as Action;
       const label = action === 'start' ? '启动' : action === 'stop' ? '关闭' : '重启';
       const cmd = daemon.buildCmd(action);
@@ -116,18 +116,18 @@ export async function handleCcCommand(host: SlashCommandHost): Promise<void> {
       host.restoreEditor();
       host.showStatus(`正在${label} cc-connect...`);
 
-      const { ok, output } = await runCmd(cmd);
-      if (ok) {
-        host.showStatus(
-          `✅ cc-connect 已${label}` + (output ? `（${output}）` : ''),
-          host.state.theme.colors.success,
-        );
-        // Trigger an immediate re-check so the footer dot reflects the
-        // real process state without waiting for the 30 s poll interval.
-        host.refreshCcStatus();
-      } else {
-        host.showError(`❌ ${label}失败：${output || '未知错误'}`);
-      }
+      void (async () => {
+        const { ok, output } = await runCmd(cmd);
+        if (ok) {
+          host.showStatus(
+            `✅ cc-connect 已${label}` + (output ? `（${output}）` : ''),
+            host.state.theme.colors.success,
+          );
+          host.refreshCcStatus();
+        } else {
+          host.showError(`❌ ${label}失败：${output || '未知错误'}`);
+        }
+      })();
     },
     onCancel: () => {
       host.restoreEditor();
