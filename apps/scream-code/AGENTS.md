@@ -159,6 +159,74 @@ Edit the `RECOMMENDED` array in `apps/scream-code/src/tui/commands/mcp.ts`.
 - Playwright recommendation: `startupTimeoutMs: 300_000` (5 min — first launch downloads Chromium).
 - Global default: `DEFAULT_STARTUP_TIMEOUT_MS = 60_000`.
 
+## Slash Commands
+
+All slash commands are declared in `src/tui/commands/registry.ts` and dispatched in `src/tui/commands/dispatch.ts`. Beyond the session-config-modelling helpers documented in `ScreamTUI`, these commands carry non-trivial state or backend integration:
+
+### FanOut (`/fanout`)
+
+Parallel sub-agent orchestration. Toggles `parallelMode` in `AppState`. When enabled, the model may spawn multiple agents concurrently via the `FanOut` built-in tool.
+
+- **Tool**: `packages/agent-core/src/tools/builtin/collaboration/fanout.ts`
+- **Trait**: `ConflictTracker` inside FanOut prevents two agents writing the same file simultaneously (read+read = parallel, write+write = queued).
+- **Footer badge**: `fanout` in brand blue when active.
+
+### Goal System (`/goal`, `/goaloff`)
+
+Persistent goal injection that survives turns and session resumes.
+
+- **TUI**: `src/tui/commands/goal.ts` — subcommands: `status`, `pause`, `resume`, `replace`. `/goaloff` cancels entirely.
+- **State**: `AppState.goal`, `goalActive`, `goalContinuationCount`. Injected into the system prompt by `GoalInjectionProvider`.
+- **Storage**: persisted in session metadata (`custom.goal`) so goals survive session switch and resume.
+- **Footer badge**: 🎯 + truncated goal text (green) when active.
+
+### cc-connect (`/cc`)
+
+One-click cc-connect daemon life cycle management (cross-platform).
+
+- **TUI**: `src/tui/commands/cc.ts` — panel with start / stop / restart.
+- **Platform**: macOS `launchd`, Linux `systemd`, Windows `pm2`.
+- **Footer dot**: `●` green when cc-connect is active, dim when not. Refreshed every 3 s via `refreshCcStatus()`.
+- **Config**: `src/tui/commands/cc-connect.ts` — channel setup wizard.
+
+### Update (`/update`)
+
+Manual update from GitHub. Silent background version check runs at startup.
+
+- **Version source**: `src/cli/update/cdn.ts` — fetches `api.github.com/repos/LIUTod/scream-code/releases/latest`, strips `v` prefix from `tag_name`.
+- **Cache**: `src/cli/update/cache.ts` — reads/writes `~/.scream-code/updates/latest.json`.
+- **Compare**: `src/cli/update/select.ts` — `semver.gt(latest, current)`.
+- **TUI startup**: `checkForUpdates()` in `scream-tui.ts` calls `refreshUpdateCache()` then `readUpdateCache()` + `selectUpdateTarget()`.
+- **Welcome panel**: shows "有新版本（x.y.z）" when `hasNewVersion` is true.
+- **Manual trigger**: `/update` command in `src/cli/update/` — git pull → pnpm install → pnpm -r build, with per-step timeouts and network error detection.
+- **Constant**: `src/constant/app.ts` — `SCREAM_CODE_CDN_LATEST_URL`, `SCREAM_CODE_GITHUB_REPO`.
+
+### /revoke
+
+Undo the last N conversation turns. Anchors at user messages and restores the welcome panel if all messages are removed.
+
+- **TUI**: `src/tui/commands/revoke.ts` — `findUndoAnchorEntryIndex`, `removeUndoContextComponents`.
+- **Core**: `packages/agent-core/src/agent/context/index.ts` — `undo()` performs a backward walk, splices messages, and clamps `_tokenCount` down.
+- **Availability**: `idle-only`.
+
+## Agent-Core Mechanisms
+
+### Micro-Compaction
+
+Lightweight context compaction triggered automatically. Unlike full compaction (which involves an LLM call), micro-compaction silently truncates old tool results in-place to free context window space.
+
+- **Flag-gated**: controlled via experimental flags in `agent-core`.
+- **Effect**: reduces `_tokenCount` without changing conversation semantics.
+
+### WelcomeComponent Breathing
+
+The welcome logo cycles through a 24-hue colour wheel at 40 ms intervals (25 fps).
+
+- **Component**: `src/tui/components/chrome/welcome.ts` — `startBreathing()` / `stopBreathing()`.
+- **Lifecycle**: breathing starts automatically at app launch. The first keystroke in the editor fires `onFirstInput`, which calls `stopBreathing()` permanently. `firstInputFired` is never reset across session switches.
+- **Session switch**: `clearTranscriptAndRedraw()` does NOT call `resetFirstInputGate()`, so breathing stays off. `renderWelcome()` checks `hasFirstInputFired()` before starting the new component.
+- **Rationale**: prevents expensive full-tree re-renders when the transcript is packed with replayed historical components.
+
 ## General Coding Requirements
 
 - For optional object properties, pass `undefined` directly — do not use conditional spread.
