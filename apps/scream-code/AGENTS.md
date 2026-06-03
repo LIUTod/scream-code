@@ -121,6 +121,44 @@ When writing color:
 
 After a theme change, non-comment code must not contain chalk named colors such as `chalk.white`, `chalk.cyan`, `chalk.red`, `chalk.green`, `chalk.gray`, `chalk.yellow`, `chalk.blue`, `chalk.magenta`, `chalk.whiteBright`, or `chalk.blackBright`.
 
+## MCP (Model Context Protocol)
+
+ScreamCode 内置 MCP 客户端，Agent 可以通过 MCP 协议调用外部工具（浏览器自动化、GitHub 操作、文件系统等）。
+
+### 架构
+
+```
+用户 /mcp 面板 → 写 mcp.json → McpConnectionManager → StdioClient/HttpClient
+                    ↑                                              ↓
+              ~/.scream-code/mcp.json                       MCP Server 进程
+                                                             (npx 启动)
+```
+
+- **配置**：`~/.scream-code/mcp.json`（全局）和 `<cwd>/.scream-code/mcp.json`（项目级），项目覆盖全局。
+- **连接管理**：`packages/agent-core/src/mcp/connection-manager.ts` — `addServer`（运行时添加）、`stopServer`（断开保留）、`removeServer`（断开并删除）、`reconnect`（重连）。
+- **RPC 暴露**：`core-api.ts` → `core-impl.ts` → `session/rpc.ts` → node-sdk → TUI。
+- **TUI 面板**：`apps/scream-code/src/tui/commands/mcp.ts` — `/mcp` 命令，自定义 `McpPickerComponent` 组件。
+- **底部状态栏**：MCP 状态不在 footer 显示，通过 `/mcp` 面板查看。
+
+### /mcp 面板
+
+```
+/mcp → MCP 管理面板
+  ├─ 已安装列表（状态 + 工具数量）
+  ├─ Enter → 推荐项安装并启动 / 已安装项启停切换
+  ├─ d → 卸载（清理 mcp.json + 断开连接）
+  └─ 内置推荐：Playwright（浏览器自动化）
+```
+
+### 添加新推荐
+
+编辑 `apps/scream-code/src/tui/commands/mcp.ts` 中的 `RECOMMENDED` 数组。
+
+### 超时
+
+- Playwright 推荐配置：`startupTimeoutMs: 300_000`（5 分钟，首次需下载 Chromium）。
+- 全局默认：`DEFAULT_STARTUP_TIMEOUT_MS = 60_000`。
+
 ## General Coding Requirements
 
 - For optional object properties, pass `undefined` directly — do not use conditional spread.
