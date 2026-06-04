@@ -120,6 +120,11 @@ async function loadServers(
   }
 }
 
+/** Replace newlines so error messages don't break single-line terminal rendering. */
+function sanitizeDesc(s: string): string {
+  return s.replace(/\r?\n/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
 function buildRows(
   servers: readonly { name: string; status: string; toolCount: number; error?: string }[],
 ): McpRow[] {
@@ -131,7 +136,7 @@ function buildRows(
     for (const s of servers) {
       const statusLabel = STATUS_LABELS[s.status] ?? s.status;
       const toolInfo = s.status === 'connected' ? `${s.toolCount} tools` : '';
-      const errorInfo = s.error ? ` — ${s.error}` : '';
+      const errorInfo = s.error ? ` — ${sanitizeDesc(s.error)}` : '';
       rows.push({
         kind: 'installed',
         name: s.name,
@@ -486,6 +491,6 @@ class McpPickerComponent extends Container implements Focusable {
     }
 
     lines.push(chalk.hex(colors.primary)('─'.repeat(width)));
-    return lines;
+    return lines.map((line) => truncateToWidth(line, width, ELLIPSIS));
   }
 }
