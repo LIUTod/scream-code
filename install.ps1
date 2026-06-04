@@ -206,8 +206,32 @@ try {
     $ShortcutPath = "$DesktopPath\Scream Code.lnk"
     $WshShell = New-Object -ComObject WScript.Shell
     $Shortcut = $WshShell.CreateShortcut($ShortcutPath)
-    $Shortcut.TargetPath       = "powershell.exe"
-    $Shortcut.Arguments        = "-NoExit -Command `"& { $Host.UI.RawUI.WindowTitle = 'Scream Code'; scream }`""
+
+    # 按优先级选择终端：Windows Terminal > pwsh 7 > powershell 5
+    $wt    = Get-Command wt.exe           -ErrorAction SilentlyContinue
+    $pwsh7 = Get-Command pwsh.exe         -ErrorAction SilentlyContinue
+    $ps5   = Get-Command powershell.exe   -ErrorAction SilentlyContinue
+
+    if ($wt) {
+        # Windows Terminal — 现代、美观
+        $Shortcut.TargetPath = $wt.Source
+        $Shortcut.Arguments  = "--title `"Scream Code`" cmd /k `"chcp 65001 > nul && scream`""
+    }
+    elseif ($pwsh7) {
+        # PowerShell 7+
+        $Shortcut.TargetPath = $pwsh7.Source
+        $Shortcut.Arguments  = "-NoExit -Command `"chcp 65001 > `$null; scream`""
+    }
+    elseif ($ps5) {
+        # Windows PowerShell 5.x（旧版 conhost，加 UTF-8 补丁）
+        $Shortcut.TargetPath = $ps5.Source
+        $Shortcut.Arguments  = "-NoExit -Command `"chcp 65001 > `$null; [Console]::OutputEncoding = [Console]::InputEncoding = [Text.Encoding]::UTF8; `$Host.UI.RawUI.WindowTitle = 'Scream Code'; scream`""
+    }
+    else {
+        $Shortcut.TargetPath = "powershell.exe"
+        $Shortcut.Arguments  = "-NoExit -Command `"chcp 65001 > `$null; [Console]::OutputEncoding = [Console]::InputEncoding = [Text.Encoding]::UTF8; `$Host.UI.RawUI.WindowTitle = 'Scream Code'; scream`""
+    }
+
     $Shortcut.WorkingDirectory = $env:USERPROFILE
     $Shortcut.Description      = "Scream Code - AI 命令行助手"
     $IconPath = "$InstallDir\icon.ico"
