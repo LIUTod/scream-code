@@ -134,3 +134,9 @@ Scream 是结合作者本人的使用习惯和个人理解自行开发重构的 
 ## 入口
 
 https://scream.chat
+
+---
+
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=LIUTod/scream-code&type=Date)](https://star-history.com/#LIUTod/scream-code&Date)
