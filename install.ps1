@@ -199,7 +199,28 @@ cd /d "$InstallDir"
 "@
 Set-Content -Path "$BinDir\scream.cmd" -Value $ScreamCmd -Encoding Default
 
-# ── 7. 添加到用户 PATH ─────────────────────────────────────────────────────
+# ── 7. 创建桌面快捷方式 ───────────────────────────────────────────────────
+Info "创建桌面快捷方式..."
+try {
+    $DesktopPath = [Environment]::GetFolderPath("Desktop")
+    $ShortcutPath = "$DesktopPath\Scream Code.lnk"
+    $WshShell = New-Object -ComObject WScript.Shell
+    $Shortcut = $WshShell.CreateShortcut($ShortcutPath)
+    $Shortcut.TargetPath       = "cmd.exe"
+    $Shortcut.Arguments        = "/k title Scream Code && scream"
+    $Shortcut.WorkingDirectory = $env:USERPROFILE
+    $Shortcut.Description      = "Scream Code - AI 命令行助手"
+    $IconPath = "$InstallDir\icon.ico"
+    if (Test-Path $IconPath) {
+        $Shortcut.IconLocation = $IconPath
+    }
+    $Shortcut.Save()
+    Info "桌面快捷方式已创建: $ShortcutPath"
+} catch {
+    Warn "快捷方式创建失败: $_"
+}
+
+# ── 8. 添加到用户 PATH ─────────────────────────────────────────────────────
 $UserPath = [Environment]::GetEnvironmentVariable("PATH", "User")
 if ($UserPath -notlike "*$BinDir*") {
     Info "添加 $BinDir 到用户 PATH..."
