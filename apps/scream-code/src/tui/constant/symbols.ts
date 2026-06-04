@@ -5,3 +5,6 @@ export const STATUS_BULLET = '● ';
 // assumes the marker occupies the leading cells.
 export const USER_MESSAGE_BULLET = '┃ ';
 export const FAILURE_MARK = '✗ ';
+
+// Selector pointer used in lists, pickers, and queues.
+export const SELECT_POINTER = '❯';

@@ -2,6 +2,7 @@ import { Container, Text } from '@earendil-works/pi-tui';
 import chalk from 'chalk';
 
 import type { QueuedMessage } from '../../types';
+import { SELECT_POINTER } from '../../constant/symbols';
 import type { ColorPalette } from '../../theme/colors';
 
 export interface QueuePaneOptions {
@@ -20,7 +21,7 @@ export class QueuePaneComponent extends Container {
     const dim = chalk.hex(options.colors.textDim);
 
     for (const item of options.messages) {
-      this.addChild(new Text(accent(`  ❯ ${item.text}`), 0, 0));
+      this.addChild(new Text(accent(`  ${SELECT_POINTER} ${item.text}`), 0, 0));
     }
 
     if (options.messages.length > 0) {

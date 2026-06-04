@@ -31,6 +31,8 @@ export { USER_PROMPT_ORIGIN } from './agent/context';
 export type {
   AgentContextData,
   ContextMessage,
+  CronJobOrigin,
+  CronMissedOrigin,
   PromptOrigin,
   UserPromptOrigin,
 } from './agent/context';

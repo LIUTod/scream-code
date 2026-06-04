@@ -102,6 +102,8 @@ export type {
   BackgroundTaskTerminatedEvent,
 } from '@scream-cli/agent-core';
 
+export type { CronFiredEvent, CronJobOrigin, CronMissedOrigin } from '@scream-cli/agent-core';
+
 export type MaybePromise<T> = T | Promise<T>;
 
 export type ApprovalHandler = (request: ApprovalRequest) => MaybePromise<ApprovalResponse>;

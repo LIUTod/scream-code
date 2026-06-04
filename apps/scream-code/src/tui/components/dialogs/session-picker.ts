@@ -15,6 +15,7 @@ import chalk from 'chalk';
 import { formatSessionLabel } from '#/migration/index';
 import type { ColorPalette } from '#/tui/theme/colors';
 import { printableChar } from '#/tui/utils/printable-key';
+import { SELECT_POINTER } from '../../constant/symbols';
 
 export interface SessionRow {
   readonly id: string;
@@ -225,7 +226,7 @@ export class SessionPickerComponent extends Container implements Focusable {
     isCurrent: boolean,
   ): string[] {
     const colors = this.colors;
-    const pointer = isSelected ? '❯' : ' ';
+    const pointer = isSelected ? SELECT_POINTER : ' ';
     const indent = '  ';
     const indentWidth = visibleWidth(indent);
     const titleColor = isSelected ? colors.primary : colors.text;

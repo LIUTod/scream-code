@@ -66,6 +66,7 @@ import { TasksBrowserController } from './controllers/tasks-browser';
 import { FileMentionProvider } from './components/editor/file-mention-provider';
 import { AssistantMessageComponent } from './components/messages/assistant-message';
 import { BackgroundAgentStatusComponent } from './components/messages/background-agent-status';
+import { CronMessageComponent } from './components/messages/cron-message';
 import { SkillActivationComponent } from './components/messages/skill-activation';
 import {
   NoticeMessageComponent,
@@ -1241,6 +1242,7 @@ export class ScreamTUI {
           entry.skillName ?? entry.content,
           entry.skillArgs,
           this.state.theme.colors,
+          entry.skillTrigger,
         );
       case 'assistant': {
         const component = new AssistantMessageComponent(
@@ -1288,6 +1290,10 @@ export class ScreamTUI {
         return entry.renderMode === 'notice'
           ? new NoticeMessageComponent(entry.content, entry.detail, this.state.theme.colors)
           : new StatusMessageComponent(entry.content, this.state.theme.colors, entry.color);
+      case 'cron': {
+        if (entry.cronData === undefined) return null;
+        return new CronMessageComponent(entry.content, entry.cronData, this.state.theme.colors);
+      }
       case 'welcome':
         return null;
       default:

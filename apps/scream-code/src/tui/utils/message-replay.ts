@@ -38,6 +38,7 @@ export interface SkillActivationProjection {
   readonly activationId: string;
   readonly skillName: string;
   readonly skillArgs?: string;
+  readonly trigger?: 'user-slash' | 'model-tool' | 'nested-skill';
 }
 
 export interface ReplayBackgroundProjection {
@@ -203,6 +204,7 @@ export function skillActivationFromOrigin(
     activationId: origin.activationId,
     skillName: origin.skillName,
     skillArgs: origin.skillArgs,
+    trigger: origin.trigger,
   };
 }
 

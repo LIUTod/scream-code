@@ -234,10 +234,12 @@ export class SessionReplayRenderer {
     if (message.origin?.kind === 'injection') {
       return;
     }
-    // WHY: cron fires are not user turns (see isReplayUserTurnRecord); skip
-    // visual render and turn advance so the raw <cron-fire ...> envelope never
-    // surfaces in the resumed transcript.
-    if (message.origin?.kind === 'cron_job' || message.origin?.kind === 'cron_missed') {
+    if (message.origin?.kind === 'cron_job') {
+      this.renderCronJob(context, message.origin);
+      return;
+    }
+    if (message.origin?.kind === 'cron_missed') {
+      this.renderCronMissed(context, message.origin);
       return;
     }
 
@@ -343,7 +345,32 @@ export class SessionReplayRenderer {
       skillActivationId: skill.activationId,
       skillName: skill.skillName,
       skillArgs: skill.skillArgs,
+      skillTrigger: skill.trigger,
     });
+  }
+
+  private renderCronJob(
+    context: ReplayRenderContext,
+    origin: import('@scream-cli/scream-code-sdk').CronJobOrigin,
+  ): void {
+    this.host.appendTranscriptEntry({
+      ...replayEntry(context, 'cron', '', 'plain'),
+      cronData: {
+        jobId: origin.jobId,
+        cron: origin.cron,
+        recurring: origin.recurring,
+        coalescedCount: origin.coalescedCount,
+        stale: origin.stale,
+      },
+    });
+  }
+
+  private renderCronMissed(
+    _context: ReplayRenderContext,
+    _origin: import('@scream-cli/scream-code-sdk').CronMissedOrigin,
+  ): void {
+    // Missed cron fires are rare (long outages); for now we skip visual
+    // rendering. Can add a banner later if needed.
   }
 
   private renderHookResult(context: ReplayRenderContext, message: ContextMessage): void {

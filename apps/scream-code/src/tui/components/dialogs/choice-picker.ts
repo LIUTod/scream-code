@@ -18,6 +18,8 @@ import {
 } from '@earendil-works/pi-tui';
 import chalk from 'chalk';
 
+import { SELECT_POINTER } from '../../constant/symbols';
+
 import type { ColorPalette } from '#/tui/theme/colors';
 import { printableChar } from '#/tui/utils/printable-key';
 import { SearchableList } from '#/tui/utils/searchable-list';
@@ -156,7 +158,7 @@ export class ChoicePickerComponent extends Container implements Focusable {
       const opt = options[i]!;
       const isSelected = i === view.selectedIndex;
       const isCurrent = opt.value === this.opts.currentValue;
-      const pointer = isSelected ? '❯' : ' ';
+      const pointer = isSelected ? SELECT_POINTER : ' ';
       const labelStyle = optionLabelStyle(opt, isSelected, colors);
       let line = chalk.hex(isSelected ? colors.primary : colors.textDim)(`  ${pointer} `);
       line += labelStyle(opt.label);

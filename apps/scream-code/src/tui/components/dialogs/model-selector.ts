@@ -11,6 +11,7 @@ import chalk from 'chalk';
 import { DEFAULT_OAUTH_PROVIDER_NAME, PRODUCT_NAME } from '#/constant/app';
 import type { ColorPalette } from '#/tui/theme/colors';
 import { SearchableList } from '#/tui/utils/searchable-list';
+import { SELECT_POINTER } from '../../constant/symbols';
 
 import type { ChoiceOption } from './choice-picker';
 
@@ -167,7 +168,7 @@ export class ModelSelectorComponent extends Container implements Focusable {
       const choice = choices[i]!;
       const isSelected = i === view.selectedIndex;
       const isCurrent = choice.alias === this.opts.currentValue;
-      const pointer = isSelected ? '❯' : ' ';
+      const pointer = isSelected ? SELECT_POINTER : ' ';
       const labelStyle = isSelected ? chalk.hex(colors.primary).bold : chalk.hex(colors.text);
       let line = chalk.hex(isSelected ? colors.primary : colors.textDim)(`  ${pointer} `);
       line += labelStyle(choice.label);

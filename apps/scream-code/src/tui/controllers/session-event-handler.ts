@@ -9,6 +9,7 @@ import type {
   CompactionCancelledEvent,
   CompactionCompletedEvent,
   CompactionStartedEvent,
+  CronFiredEvent,
   ErrorEvent,
   Event,
   HookResultEvent,
@@ -49,6 +50,8 @@ import {
   type McpServerStatusSnapshot,
   selectMcpStartupStatusRows,
 } from '../utils/mcp-server-status';
+import { openUrl } from '../utils/open-url';
+import { McpOAuthAuthorizationUrlOpener } from '../utils/mcp-oauth';
 import { setProcessTitle } from '../utils/proctitle';
 
 import { formatStepDebugTiming } from '#/utils/usage/debug-timing';
@@ -115,10 +118,14 @@ export class SessionEventHandler {
       host.sendQueuedMessage(session, item);
     };
     host.sessionEventUnsubscribe?.();
+    const mcpOAuthOpener = new McpOAuthAuthorizationUrlOpener(openUrl);
     const { sessionId } = host.state.appState;
     host.sessionEventUnsubscribe = session.onEvent((event) => {
       if (host.aborted) return;
       if (event.sessionId !== sessionId) return;
+      if (event.type === 'tool.progress') {
+        mcpOAuthOpener.handleToolProgress(event);
+      }
       this.handleEvent(event, sendQueued);
     });
     void this.syncMcpServerStatusSnapshot(session);
@@ -196,6 +203,7 @@ export class SessionEventHandler {
       case 'background.task.updated':
       case 'background.task.terminated':
         this.handleBackgroundTaskEvent(event); break;
+      case 'cron.fired': this.handleCronFired(event); break;
       case 'mcp.server.status': this.renderMcpServerStatus(event.server); break;
       case 'tool.list.updated': break;
       default: break;
@@ -664,6 +672,25 @@ export class SessionEventHandler {
       skillActivationId: event.activationId,
       skillName: event.skillName,
       skillArgs: event.skillArgs,
+      skillTrigger: event.trigger,
+    });
+  }
+
+  private handleCronFired(event: CronFiredEvent): void {
+    this.host.streamingUI.flushNow();
+    this.host.appendTranscriptEntry({
+      id: nextTranscriptId(),
+      kind: 'cron',
+      turnId: this.host.streamingUI.getTurnContext().turnId,
+      renderMode: 'plain',
+      content: event.prompt,
+      cronData: {
+        jobId: event.origin.jobId,
+        cron: event.origin.cron,
+        recurring: event.origin.recurring,
+        coalescedCount: event.origin.coalescedCount,
+        stale: event.origin.stale,
+      },
     });
   }
 

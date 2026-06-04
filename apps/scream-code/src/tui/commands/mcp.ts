@@ -18,6 +18,7 @@ import chalk from 'chalk';
 
 import { getDataDir } from '#/utils/paths';
 import type { ColorPalette } from '#/tui/theme/colors';
+import { SELECT_POINTER } from '../constant/symbols';
 import type { SlashCommandHost } from './dispatch';
 
 // ─── 内置推荐列表 ──────────────────────────────────────────────────────
@@ -470,7 +471,7 @@ class McpPickerComponent extends Container implements Focusable {
         continue;
       }
 
-      const pointer = isSelected ? '❯' : ' ';
+      const pointer = isSelected ? SELECT_POINTER : ' ';
       const pointerColor = isSelected ? colors.primary : colors.textDim;
       const labelColor = isSelected ? colors.primary : colors.text;
       const labelStyle = isSelected ? chalk.hex(labelColor).bold : chalk.hex(labelColor);

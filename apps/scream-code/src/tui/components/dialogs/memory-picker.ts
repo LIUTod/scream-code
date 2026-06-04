@@ -13,6 +13,7 @@
  *   Esc     Cancel / back
  */
 
+import { SELECT_POINTER } from '../../constant/symbols';
 import {
   Container,
   matchesKey,
@@ -337,7 +338,7 @@ export class MemoryPickerComponent extends Container implements Focusable {
     isSelected: boolean,
   ): string[] {
     const c = this.colors;
-    const pointer = isSelected ? '❯' : ' ';
+    const pointer = isSelected ? SELECT_POINTER : ' ';
     const indent = '  ';
     const indentWidth = visibleWidth(indent);
     const titleColor = isSelected ? c.primary : c.text;

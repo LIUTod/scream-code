@@ -19,12 +19,26 @@ import type { ColorPalette } from '#/tui/theme/colors';
 
 const ARGS_PREVIEW_MAX = 200;
 
+const TRIGGER_LABEL: Record<string, string> = {
+  'user-slash': '（用户触发）',
+  'model-tool': '（模型调用）',
+  'nested-skill': '（嵌套调用）',
+};
+
 export class SkillActivationComponent extends Container {
-  constructor(name: string, args: string | undefined, colors: ColorPalette) {
+  constructor(
+    name: string,
+    args: string | undefined,
+    colors: ColorPalette,
+    trigger?: 'user-slash' | 'model-tool' | 'nested-skill',
+  ) {
     super();
     this.addChild(new Spacer(1));
+    const triggerLabel = trigger !== undefined ? chalk.hex(colors.textDim)(TRIGGER_LABEL[trigger] ?? '') : '';
     const head =
-      chalk.hex(colors.primary).bold('▶ 已激活 skill：') + chalk.hex(colors.roleUser).bold(name);
+      chalk.hex(colors.primary).bold('▶ 已激活 skill：') +
+      chalk.hex(colors.roleUser).bold(name) +
+      (triggerLabel.length > 0 ? ' ' + triggerLabel : '');
     this.addChild(new Text(head, 0, 0));
     const trimmed = args?.trim() ?? '';
     if (trimmed.length > 0) {

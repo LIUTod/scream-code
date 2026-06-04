@@ -71,6 +71,12 @@ export interface ErrorEvent extends ScreamErrorPayload {
   readonly type: 'error';
 }
 
+export interface CronFiredEvent {
+  readonly type: 'cron.fired';
+  readonly origin: import('../agent/context/types').CronJobOrigin;
+  readonly prompt: string;
+}
+
 export interface WarningEvent {
   readonly type: 'warning';
   readonly message: string;
@@ -300,6 +306,7 @@ export type AgentEvent =
   | CompactionCompletedEvent
   | BackgroundTaskStartedEvent
   | BackgroundTaskUpdatedEvent
-  | BackgroundTaskTerminatedEvent;
+  | BackgroundTaskTerminatedEvent
+  | CronFiredEvent;
 
 export type Event = AgentEvent & { agentId: string; sessionId: string };

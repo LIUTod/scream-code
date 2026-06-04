@@ -117,6 +117,7 @@ function isRevokeContextEntry(entry: TranscriptEntry): boolean {
     case 'status':
       return entry.turnId !== undefined;
     case 'welcome':
+    case 'cron':
       return false;
   }
 }
