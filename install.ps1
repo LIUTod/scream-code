@@ -206,8 +206,8 @@ try {
     $ShortcutPath = "$DesktopPath\Scream Code.lnk"
     $WshShell = New-Object -ComObject WScript.Shell
     $Shortcut = $WshShell.CreateShortcut($ShortcutPath)
-    $Shortcut.TargetPath       = "cmd.exe"
-    $Shortcut.Arguments        = "/k title Scream Code && scream"
+    $Shortcut.TargetPath       = "powershell.exe"
+    $Shortcut.Arguments        = "-NoExit -Command `"& { $Host.UI.RawUI.WindowTitle = 'Scream Code'; scream }`""
     $Shortcut.WorkingDirectory = $env:USERPROFILE
     $Shortcut.Description      = "Scream Code - AI 命令行助手"
     $IconPath = "$InstallDir\icon.ico"
