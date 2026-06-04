@@ -11,7 +11,8 @@
  */
 
 import { createInterface } from "node:readline";
-import { rm } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 
 import {
   ScreamHarness,
@@ -138,6 +139,7 @@ interface StreamJsonOptions {
   permissionMode?: string;
   workDir?: string;
   skillsDirs: string[];
+  appendSystemPrompt?: string;
 }
 
 interface TokenUsage {
@@ -402,6 +404,24 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
   let session: Session | undefined;
   let currentSessionId: string | undefined;
 
+  // cc-connect passes --append-system-prompt with instructions for
+  // cc-connect send --image / --file etc.  Inject them into the agent's
+  // system prompt via the project-level AGENTS.md so the agent knows how
+  // to deliver generated files back to the chat user.
+  const agentsMdPath = join(workDir, ".scream-code", "AGENTS.md");
+  let originalAgentsMd: string | undefined;
+  let injectedAgentsMd = false;
+  if (opts.appendSystemPrompt) {
+    try { originalAgentsMd = await readFile(agentsMdPath, "utf-8"); } catch { /* new file */ }
+    await mkdir(join(workDir, ".scream-code"), { recursive: true });
+    const merged = originalAgentsMd
+      ? `${opts.appendSystemPrompt}\n\n${originalAgentsMd}`
+      : opts.appendSystemPrompt;
+    await writeFile(agentsMdPath, merged, "utf-8");
+    injectedAgentsMd = true;
+    log.info("stream-json: injected cc-connect system prompt into AGENTS.md");
+  }
+
   try {
     await harness.ensureConfigFile();
     const config = await harness.getConfig();
@@ -615,6 +635,19 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
       await harness.close();
     } catch {
       // Best-effort cleanup
+    }
+
+    // Restore AGENTS.md to its original state (undo cc-connect injection)
+    if (injectedAgentsMd) {
+      try {
+        if (originalAgentsMd === undefined) {
+          await rm(agentsMdPath, { force: true });
+        } else {
+          await writeFile(agentsMdPath, originalAgentsMd, "utf-8");
+        }
+      } catch {
+        // Best-effort cleanup
+      }
     }
   }
 }

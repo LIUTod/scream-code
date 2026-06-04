@@ -15,6 +15,7 @@ export type StreamJsonHandler = (opts: {
   model?: string;
   permissionMode?: string;
   skillsDirs: string[];
+  appendSystemPrompt?: string;
 }) => void;
 
 export type ChannelSetupHandler = () => void;
@@ -105,7 +106,7 @@ export function createProgram(
     .option('--replay-user-messages', '(ignored, cc-connect compat)')
     .option('--verbose', '(ignored, cc-connect compat)')
     .option('--system-prompt <text>', '(ignored, cc-connect compat)')
-    .option('--append-system-prompt <text>', '(ignored, cc-connect compat)')
+    .option('--append-system-prompt <text>', '(passed through to agent)')
     .option('--allowedTools <list>', '(ignored, cc-connect compat)')
     .option('--disallowedTools <list>', '(ignored, cc-connect compat)')
     .option('--effort <value>', '(ignored, cc-connect compat)')
@@ -122,6 +123,7 @@ export function createProgram(
         model: subOpts['model'] as string | undefined,
         permissionMode: subOpts['permissionMode'] as string | undefined,
         skillsDirs: (subOpts['skillsDir'] as string[]) ?? [],
+        appendSystemPrompt: subOpts['appendSystemPrompt'] as string | undefined,
       });
     });
 
