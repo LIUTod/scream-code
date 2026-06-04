@@ -25,6 +25,8 @@ const dark = {
   red400: '#E85454',
   red300: '#F08585',
   amber400: '#E8A838',
+  gold400: '#FBD700',
+  tangerine400: '#FF5401',
   orange300: '#FFCB6B',
 } as const;
 
@@ -38,6 +40,8 @@ const light = {
   green700: '#0E7A38',
   red700: '#B91C1C',
   amber800: '#92660A',
+  gold700: '#8C7600',
+  tangerine700: '#B33A00',
   orange700: '#9A4A00',
 } as const;
 
@@ -81,7 +85,7 @@ export interface ColorPalette {
 
 export const darkColors: ColorPalette = {
   primary: dark.blue400,
-  accent: dark.cyan400,
+  accent: dark.tangerine400,
 
   text: dark.gray100,
   textStrong: dark.gray50,
@@ -89,7 +93,7 @@ export const darkColors: ColorPalette = {
   textMuted: dark.gray600,
 
   border: dark.gray700,
-  borderFocus: dark.amber400,
+  borderFocus: dark.gold400,
 
   success: dark.green400,
   warning: dark.amber400,
@@ -112,7 +116,7 @@ export const darkColors: ColorPalette = {
 
 export const lightColors: ColorPalette = {
   primary: light.blue600,
-  accent: light.cyan700,
+  accent: light.tangerine700,
 
   text: light.gray900,
   textStrong: light.gray900,
@@ -120,7 +124,7 @@ export const lightColors: ColorPalette = {
   textMuted: light.gray600,
 
   border: light.gray500,
-  borderFocus: light.amber800,
+  borderFocus: light.gold700,
 
   success: light.green700,
   warning: light.amber800,

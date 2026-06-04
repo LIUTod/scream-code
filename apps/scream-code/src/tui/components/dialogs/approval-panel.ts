@@ -166,17 +166,17 @@ function isDuplicateBriefBlock(block: DisplayBlock, description: string): boolea
 function headerFor(toolName: string): string {
   switch (toolName) {
     case 'Bash':
-      return '运行此命令？';
+      return '是否执行此命令？';
     case 'Write':
-      return '写入此文件？';
+      return '是否写入此文件？';
     case 'Edit':
-      return '应用这些编辑？';
+      return '是否应用这些编辑？';
     case 'TaskStop':
-      return '停止此任务？';
+      return '是否停止此任务？';
     case 'ExitPlanMode':
-      return '准备按此计划构建？';
+      return '是否按此计划构建？';
     default:
-      return `批准 ${toolName}？`;
+      return `是否批准 ${toolName}？`;
   }
 }
 
@@ -317,7 +317,7 @@ export class ApprovalPanelComponent extends Container implements Focusable {
     const title = headerFor(data.tool_name);
     const lines: string[] = [
       horizontalBar,
-      indent(`${borderColorBold('▶')} ${borderColorBold(title)}`),
+      indent(`${borderColorBold('→')} ${borderColorBold(title)}`),
     ];
 
     const dedupedBlocks = data.display.filter(
