@@ -9,7 +9,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import type { createScreamDeviceId as createScreamDeviceIdFn } from '@scream-cli/scream-code-oauth';
+import type { createScreamDeviceId as createScreamDeviceIdFn } from '@scream-cli/config';
 import { Command } from 'commander';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -74,9 +74,9 @@ vi.mock('@scream-cli/scream-code-sdk', async (importOriginal) => {
   };
 });
 
-vi.mock('@scream-cli/scream-code-oauth', async () => {
-  const actual = await vi.importActual<typeof import('@scream-cli/scream-code-oauth')>(
-    '@scream-cli/scream-code-oauth',
+vi.mock('@scream-cli/config', async () => {
+  const actual = await vi.importActual<typeof import('@scream-cli/config')>(
+    '@scream-cli/config',
   );
   return {
     ...actual,

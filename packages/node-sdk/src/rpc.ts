@@ -20,7 +20,7 @@ import {
   type ToolCallRequest,
   type ToolCallResponse,
 } from '@scream-cli/agent-core';
-import { createScreamDefaultHeaders } from '@scream-cli/scream-code-oauth';
+import { createScreamDefaultHeaders } from '@scream-cli/config';
 
 import type { ApprovalHandler, QuestionHandler } from '#/events';
 import type {

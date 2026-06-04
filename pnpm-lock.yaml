@@ -105,12 +105,12 @@ importers:
         specifier: ^4.3.6
         version: 4.4.3
     devDependencies:
+      '@scream-cli/config':
+        specifier: workspace:^
+        version: link:../../packages/config
       '@scream-cli/migration-legacy':
         specifier: workspace:^
         version: link:../../packages/migration-legacy
-      '@scream-cli/scream-code-oauth':
-        specifier: workspace:^
-        version: link:../../packages/oauth
       '@scream-cli/scream-code-sdk':
         specifier: workspace:^
         version: link:../../packages/node-sdk
@@ -221,6 +221,8 @@ importers:
         specifier: ^3.3.1
         version: 3.3.1
 
+  packages/config: {}
+
   packages/jian:
     dependencies:
       pathe:
@@ -299,28 +301,18 @@ importers:
       '@scream-cli/agent-core':
         specifier: workspace:^
         version: link:../agent-core
+      '@scream-cli/config':
+        specifier: workspace:^
+        version: link:../config
       '@scream-cli/jian':
         specifier: workspace:^
         version: link:../jian
       '@scream-cli/ltod':
         specifier: workspace:^
         version: link:../ltod
-      '@scream-cli/scream-code-oauth':
-        specifier: workspace:^
-        version: link:../oauth
       '@types/yazl':
         specifier: ^2.4.6
         version: 2.4.6
-
-  packages/oauth:
-    dependencies:
-      proper-lockfile:
-        specifier: ^4.1.2
-        version: 4.1.2
-    devDependencies:
-      '@types/proper-lockfile':
-        specifier: ^4.1.4
-        version: 4.1.4
 
   packages/telemetry: {}
 

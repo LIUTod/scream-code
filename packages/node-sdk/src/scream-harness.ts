@@ -13,7 +13,7 @@ import {
   type TelemetryContextPatch,
   type TelemetryProperties,
 } from '@scream-cli/agent-core';
-import { assertScreamHostIdentity } from '@scream-cli/scream-code-oauth';
+import { assertScreamHostIdentity } from '@scream-cli/config';
 
 import { ScreamAuthFacade } from '#/auth';
 import { SDKRpcClient } from '#/rpc';
@@ -59,8 +59,6 @@ export class ScreamHarness {
     this.auth = new ScreamAuthFacade({
       homeDir: this.homeDir,
       configPath: this.configPath,
-      identity: this.identity,
-      onRefresh: options.onOAuthRefresh,
     });
     this.rpc = new SDKRpcClient({
       homeDir: options.homeDir,

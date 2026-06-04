@@ -1,6 +1,6 @@
 import { execSync } from 'node:child_process';
 
-import type { createScreamDeviceId as createScreamDeviceIdFn } from '@scream-cli/scream-code-oauth';
+import type { createScreamDeviceId as createScreamDeviceIdFn } from '@scream-cli/config';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { runShell } from '#/cli/run-shell';
@@ -89,9 +89,9 @@ vi.mock('@scream-cli/scream-code-sdk', async (importOriginal) => {
   };
 });
 
-vi.mock('@scream-cli/scream-code-oauth', async () => {
-  const actual = await vi.importActual<typeof import('@scream-cli/scream-code-oauth')>(
-    '@scream-cli/scream-code-oauth',
+vi.mock('@scream-cli/config', async () => {
+  const actual = await vi.importActual<typeof import('@scream-cli/config')>(
+    '@scream-cli/config',
   );
   return {
     ...actual,
@@ -391,54 +391,6 @@ describe('runShell', () => {
       config_ms: expect.any(Number),
       init_ms: expect.any(Number),
       mcp_ms: 47,
-    });
-  });
-
-  it('bridges OAuth refresh outcomes to telemetry', async () => {
-    mocks.loadTuiConfig.mockResolvedValue({
-      theme: 'dark',
-      editorCommand: null,
-      notifications: { enabled: true, condition: 'unfocused' },
-    });
-    mocks.tuiStart.mockResolvedValue(undefined);
-
-    await runShell(
-      {
-        session: undefined,
-        continue: false,
-        yolo: false,
-        auto: false,
-        plan: false,
-        model: undefined,
-        outputFormat: undefined,
-        prompt: undefined,
-        skillsDirs: [],
-      },
-      '1.2.3-test',
-    );
-
-    const [harnessOptions] = mocks.screamHarnessConstructor.mock.calls[0] as [
-      {
-        readonly onOAuthRefresh: (
-          outcome:
-            | { readonly success: true }
-            | { readonly success: false; readonly reason: 'unauthorized' | 'network_or_other' },
-        ) => void;
-      },
-    ];
-
-    harnessOptions.onOAuthRefresh({ success: true });
-    harnessOptions.onOAuthRefresh({ success: false, reason: 'unauthorized' });
-    harnessOptions.onOAuthRefresh({ success: false, reason: 'network_or_other' });
-
-    expect(mocks.telemetryTrack).toHaveBeenCalledWith('oauth_refresh', { success: true });
-    expect(mocks.telemetryTrack).toHaveBeenCalledWith('oauth_refresh', {
-      success: false,
-      reason: 'unauthorized',
-    });
-    expect(mocks.telemetryTrack).toHaveBeenCalledWith('oauth_refresh', {
-      success: false,
-      reason: 'network_or_other',
     });
   });
 

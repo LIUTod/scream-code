@@ -4,7 +4,6 @@
   "bundledPackages": [
     "@scream-cli/agent-core",
     "@scream-cli/jian",
-    "@scream-cli/scream-code-oauth",
     "@scream-cli/ltod"
   ],
   "compiler": {

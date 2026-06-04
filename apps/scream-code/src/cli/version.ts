@@ -7,7 +7,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 
-import { createScreamDefaultHeaders, type ScreamHostIdentity } from '@scream-cli/scream-code-oauth';
+import { createScreamDefaultHeaders, type ScreamHostIdentity } from '@scream-cli/config';
 
 import { CLI_USER_AGENT_PRODUCT } from '#/constant/app';
 

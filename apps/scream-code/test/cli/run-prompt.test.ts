@@ -1,4 +1,4 @@
-import type { createScreamDeviceId as createScreamDeviceIdFn } from '@scream-cli/scream-code-oauth';
+import type { createScreamDeviceId as createScreamDeviceIdFn } from '@scream-cli/config';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { runPrompt } from '#/cli/run-prompt';
@@ -101,9 +101,9 @@ vi.mock('@scream-cli/scream-code-sdk', async (importOriginal) => {
   };
 });
 
-vi.mock('@scream-cli/scream-code-oauth', async () => {
-  const actual = await vi.importActual<typeof import('@scream-cli/scream-code-oauth')>(
-    '@scream-cli/scream-code-oauth',
+vi.mock('@scream-cli/config', async () => {
+  const actual = await vi.importActual<typeof import('@scream-cli/config')>(
+    '@scream-cli/config',
   );
   return {
     ...actual,

@@ -125,18 +125,16 @@ Scream 是结合作者本人的使用习惯和个人理解自行开发重构的 
 
 ---
 
-## 许可证
-
-[LICENSE](LICENSE)
-
----
-
 ## 入口
 
 https://scream.chat
 
----
-
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=LIUTod/scream-code&type=Date)](https://star-history.com/#LIUTod/scream-code&Date)
+<a href="https://www.star-history.com/?repos=LIUTod%2Fscream-code&type=date&legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=LIUTod/scream-code&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=LIUTod/scream-code&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=LIUTod/scream-code&type=date&legend=top-left" />
+ </picture>
+</a>

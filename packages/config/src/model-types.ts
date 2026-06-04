@@ -1,10 +1,9 @@
 import { readApiErrorMessage } from './api-error';
-import { screamCodeBaseUrl } from './managed-usage';
+import { SCREAM_CODE_BASE_URL } from './constants';
 import { isRecord } from './utils';
 
 export const SCREAM_CODE_PLATFORM_ID = 'scream-code';
 export const SCREAM_CODE_PROVIDER_NAME = 'managed:scream-code';
-export const SCREAM_CODE_OAUTH_KEY = 'oauth/scream-code';
 
 export interface ManagedScreamCodeModelInfo {
   readonly id: string;
@@ -45,7 +44,7 @@ export interface ManagedScreamCodeCleanupResult {
 
 export interface ManagedScreamOAuthRef {
   readonly storage: 'file';
-  readonly key: typeof SCREAM_CODE_OAUTH_KEY;
+  readonly key: 'oauth/scream-code';
 }
 
 export interface ManagedScreamProviderConfig {
@@ -118,7 +117,7 @@ interface SelectedDefaultModel {
   readonly thinking: boolean;
 }
 
-function capabilitiesForModel(model: ManagedScreamCodeModelInfo): string[] | undefined {
+export function capabilitiesForModel(model: ManagedScreamCodeModelInfo): string[] | undefined {
   const caps = new Set<string>();
   if (model.supportsReasoning) caps.add('thinking');
   if (model.supportsImageIn) caps.add('image_in');
@@ -128,7 +127,7 @@ function capabilitiesForModel(model: ManagedScreamCodeModelInfo): string[] | und
 }
 
 function defaultBaseUrl(baseUrl: string | undefined): string {
-  return (baseUrl ?? screamCodeBaseUrl()).replace(/\/+$/, '');
+  return (baseUrl ?? SCREAM_CODE_BASE_URL).replace(/\/+$/, '');
 }
 
 function toModelInfo(item: unknown): ManagedScreamCodeModelInfo | undefined {
@@ -209,7 +208,7 @@ export function applyManagedScreamCodeConfig(
     type: 'scream',
     baseUrl,
     apiKey: '',
-    oauth: { storage: 'file', key: SCREAM_CODE_OAUTH_KEY },
+    oauth: { storage: 'file', key: 'oauth/scream-code' },
   };
 
   for (const [key, model] of Object.entries(existingModels)) {
@@ -218,12 +217,12 @@ export function applyManagedScreamCodeConfig(
     }
   }
   for (const model of options.models) {
-    const capabilities = capabilitiesForModel(model);
+    const caps = capabilitiesForModel(model);
     existingModels[managedModelKey(model.id)] = {
       provider: SCREAM_CODE_PROVIDER_NAME,
       model: model.id,
       maxContextSize: model.contextLength,
-      capabilities,
+      capabilities: caps,
       displayName: model.displayName,
     };
   }
@@ -235,12 +234,12 @@ export function applyManagedScreamCodeConfig(
     screamCliSearch: {
       baseUrl: `${baseUrl}/search`,
       apiKey: '',
-      oauth: { storage: 'file', key: SCREAM_CODE_OAUTH_KEY },
+      oauth: { storage: 'file', key: 'oauth/scream-code' },
     },
     screamCliFetch: {
       baseUrl: `${baseUrl}/fetch`,
       apiKey: '',
-      oauth: { storage: 'file', key: SCREAM_CODE_OAUTH_KEY },
+      oauth: { storage: 'file', key: 'oauth/scream-code' },
     },
   };
 
@@ -372,12 +371,6 @@ function assertPositiveContextLength(model: ManagedScreamCodeModelInfo): void {
   if (!Number.isInteger(model.contextLength) || model.contextLength <= 0) {
     throw new Error(`Scream Code model "${model.id}" must include a positive context_length.`);
   }
-}
-
-export async function provisionManagedScreamCodeConfigAfterLogin(
-  options: ProvisionManagedScreamCodeConfigOptions<ManagedScreamConfigShape>,
-): Promise<ManagedScreamCodeProvisionResult> {
-  return provisionManagedScreamCodeConfig(options);
 }
 
 export async function provisionManagedScreamCodeConfig<TConfig>(

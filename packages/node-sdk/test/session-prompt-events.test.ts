@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
-import { SCREAM_CODE_PLATFORM } from '@scream-cli/scream-code-oauth';
+import { SCREAM_CODE_PLATFORM } from '@scream-cli/config';
 import type * as LtodModule from '@scream-cli/ltod';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 

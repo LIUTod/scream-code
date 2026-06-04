@@ -1,15 +1,15 @@
 {
-  "name": "@scream-cli/scream-code-oauth",
-  "version": "0.1.2",
+  "name": "@scream-cli/config",
+  "version": "0.1.0",
   "private": true,
-  "description": "Scream OAuth toolkit for managed Scream Code authentication",
+  "description": "Platform configuration and model management for Scream Code",
   "license": "MIT",
   "author": "ScreamCli AI",
-  "homepage": "https://github.com/LIUTod/scream-code/tree/main/packages/oauth#readme",
+  "homepage": "https://github.com/LIUTod/scream-code/tree/main/packages/config#readme",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/LIUTod/scream-code.git",
-    "directory": "packages/oauth"
+    "directory": "packages/config"
   },
   "bugs": {
     "url": "https://github.com/LIUTod/scream-code/issues"
@@ -23,19 +23,13 @@
   },
   "exports": {
     ".": {
-      "types": "./src/index.ts",
-      "default": "./src/index.ts"
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.mjs"
     }
   },
   "scripts": {
-    "build": "tsdown",
+    "build": "tsdown && cp dist/index.d.mts dist/index.d.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "clean": "rm -rf dist"
-  },
-  "dependencies": {
-    "proper-lockfile": "^4.1.2"
-  },
-  "devDependencies": {
-    "@types/proper-lockfile": "^4.1.4"
   }
 }

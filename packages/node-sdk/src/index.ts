@@ -57,11 +57,5 @@ export type {
   FlagSurface,
 } from '@scream-cli/agent-core';
 
-export type {
-  ScreamAuthLoginResult,
-  ScreamAuthLogoutResult,
-  ScreamAuthSubmitFeedbackInput,
-} from '#/auth';
-
 export * from '#/events';
 export type * from '#/types';

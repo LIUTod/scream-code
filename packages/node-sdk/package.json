@@ -41,9 +41,9 @@
   },
   "devDependencies": {
     "@scream-cli/agent-core": "workspace:^",
+    "@scream-cli/config": "workspace:^",
     "@scream-cli/jian": "workspace:^",
     "@scream-cli/ltod": "workspace:^",
-    "@scream-cli/scream-code-oauth": "workspace:^",
     "@types/yazl": "^2.4.6"
   }
 }

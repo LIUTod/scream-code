@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import type { ScreamConfig } from '@scream-cli/agent-core';
-import { createScreamDefaultHeaders, SCREAM_CODE_PLATFORM } from '@scream-cli/scream-code-oauth';
+import { createScreamDefaultHeaders, SCREAM_CODE_PLATFORM } from '@scream-cli/config';
 
 import { ProviderManager } from '../../agent-core/src/session/provider-manager';
 import { TEST_IDENTITY } from './test-identity';

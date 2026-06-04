@@ -13,9 +13,17 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { arch, hostname, release, type } from 'node:os';
 import { join } from 'node:path';
 
-import type { DeviceHeaders } from './types';
-
 export const SCREAM_CODE_PLATFORM = 'scream_code_cli';
+
+/** Device identification for `X-Msh-*` headers. */
+export interface DeviceHeaders {
+  readonly 'X-Msh-Platform': string;
+  readonly 'X-Msh-Version': string;
+  readonly 'X-Msh-Device-Name': string;
+  readonly 'X-Msh-Device-Model': string;
+  readonly 'X-Msh-Os-Version': string;
+  readonly 'X-Msh-Device-Id': string;
+}
 
 export interface ScreamHostIdentity {
   readonly userAgentProduct: string;
@@ -132,7 +140,7 @@ function macOsProductVersion(): string | undefined {
 }
 
 function asciiHeader(value: string, fallback = 'unknown'): string {
-  const cleaned = value.replaceAll(/[^\u0020-\u007E]/g, '').trim();
+  const cleaned = value.replaceAll(/[^ -~]/g, '').trim();
   return cleaned.length > 0 ? cleaned : fallback;
 }
 

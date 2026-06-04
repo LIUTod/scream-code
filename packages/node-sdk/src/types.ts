@@ -6,7 +6,7 @@ import type {
   TelemetryContextPatch,
   TelemetryProperties,
 } from '@scream-cli/agent-core';
-import type { ScreamHostIdentity, OAuthRefreshOutcome } from '@scream-cli/scream-code-oauth';
+import type { ScreamHostIdentity } from '@scream-cli/config';
 import type { ContentPart } from '@scream-cli/ltod';
 
 export type JsonPrimitive = string | number | boolean | null;
@@ -49,7 +49,7 @@ export type {
   ToolInfo,
 } from '@scream-cli/agent-core';
 
-export type { ScreamHostIdentity, OAuthRefreshOutcome };
+export type { ScreamHostIdentity } from '@scream-cli/config';
 export type { TelemetryClient, TelemetryContextPatch, TelemetryProperties };
 export type { ContentPart, Role, ToolCall } from '@scream-cli/ltod';
 
@@ -68,7 +68,6 @@ export interface ScreamHarnessOptions {
   readonly uiMode?: string;
   readonly skillDirs?: readonly string[];
   readonly telemetry?: TelemetryClient | undefined;
-  readonly onOAuthRefresh?: ((outcome: OAuthRefreshOutcome) => void) | undefined;
 }
 
 export interface CreateSessionOptions {

@@ -1,10 +1,12 @@
 import { readApiErrorMessage } from './api-error';
 import { isRecord } from './utils';
-import type {
-  ManagedScreamCodeModelInfo,
-  ManagedScreamConfigShape,
-} from './managed-scream-code';
+import {
+  capabilitiesForModel,
+  type ManagedScreamCodeModelInfo,
+  type ManagedScreamConfigShape,
+} from './model-types';
 
+export { capabilitiesForModel };
 export type { ManagedScreamConfigShape };
 
 export interface OpenPlatformDefinition {
@@ -60,15 +62,6 @@ function toModelInfo(item: unknown): ManagedScreamCodeModelInfo | undefined {
     supportsToolUse,
     displayName: normalizedDisplayName,
   };
-}
-
-export function capabilitiesForModel(model: ManagedScreamCodeModelInfo): string[] | undefined {
-  const caps = new Set<string>();
-  if (model.supportsReasoning) caps.add('thinking');
-  if (model.supportsImageIn) caps.add('image_in');
-  if (model.supportsVideoIn) caps.add('video_in');
-  if (model.supportsToolUse ?? true) caps.add('tool_use');
-  return caps.size > 0 ? [...caps] : undefined;
 }
 
 export class OpenPlatformApiError extends Error {

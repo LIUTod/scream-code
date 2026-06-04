@@ -13,6 +13,7 @@
     "src/**/*.ts",
     "../agent-core/src/**/*.ts",
     "../agent-core/src/prompt-modules.d.ts",
+    "../config/src/**/*.ts",
     "../jian/src/**/*.ts",
     "../ltod/src/**/*.ts",
     "../oauth/src/**/*.ts"

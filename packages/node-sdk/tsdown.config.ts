@@ -22,7 +22,7 @@ export default defineConfig({
   alias: {
     '@scream-cli/agent-core': fileURLToPath(new URL('../agent-core/src/index.ts', import.meta.url)),
     '@scream-cli/jian': fileURLToPath(new URL('../jian/src/index.ts', import.meta.url)),
-    '@scream-cli/scream-code-oauth': fileURLToPath(new URL('../oauth/src/index.ts', import.meta.url)),
+    '@scream-cli/config': fileURLToPath(new URL('../config/src/index.ts', import.meta.url)),
     '@scream-cli/ltod': fileURLToPath(new URL('../ltod/src/index.ts', import.meta.url)),
   },
   deps: {

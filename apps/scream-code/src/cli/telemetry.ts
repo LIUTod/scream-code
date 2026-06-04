@@ -1,4 +1,4 @@
-import { createScreamDeviceId, SCREAM_CODE_PROVIDER_NAME } from '@scream-cli/scream-code-oauth';
+import { createScreamDeviceId } from '@scream-cli/config';
 import { initializeTelemetry } from '@scream-cli/scream-telemetry';
 import { resolveScreamHome, type ScreamConfig, type ScreamHarness } from '@scream-cli/scream-code-sdk';
 
@@ -40,7 +40,7 @@ export function initializeCliTelemetry(options: InitializeCliTelemetryOptions): 
     uiMode: options.uiMode,
     model: options.model ?? options.config.defaultModel,
     getAccessToken: async () =>
-      (await options.harness.auth.getCachedAccessToken(SCREAM_CODE_PROVIDER_NAME)) ?? null,
+      null,
   });
   if (options.bootstrap.firstLaunch) {
     options.harness.track('first_launch');
