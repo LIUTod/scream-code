@@ -187,7 +187,7 @@ describe('ApprovalPanelComponent', () => {
     const dialog = new ApprovalPanelComponent(pending, () => {}, COLORS);
 
     const out = strip(dialog.render(80).join('\n'));
-    expect(out).toContain('准备按此计划构建？');
+    expect(out).toContain('是否按此计划构建？');
     expect(out).not.toContain('Approve ExitPlanMode?');
     expect(out).toContain('Approve');
     expect(out).toContain('Reject');
