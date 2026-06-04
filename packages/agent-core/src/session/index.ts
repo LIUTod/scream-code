@@ -175,7 +175,9 @@ export class Session {
     // replay a non-empty system prompt and never enter this branch.
     const main = this.agents.get('main');
     const profile = DEFAULT_AGENT_PROFILES['agent'];
-    if (main !== undefined && profile !== undefined && main.config.systemPrompt === '') {
+    // Reload AGENTS.md on every resume so edits take effect
+    // without requiring session deletion / recreation.
+    if (main !== undefined && profile !== undefined) {
       await this.bootstrapAgentProfile(main, profile);
     }
     await this.triggerSessionStart('resume');
