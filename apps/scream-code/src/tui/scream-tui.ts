@@ -812,13 +812,13 @@ export class ScreamTUI {
     this.beginSessionRequest();
 
     // When parallel mode is active, prepend a system instruction that tells
-    // the model to prefer FanOut for independent subtasks.  The instruction is
-    // only visible to the model — the transcript still shows the user's
-    // original message unchanged.
+    // the model to issue multiple Agent tool calls for independent subtasks.
+    // The instruction is only visible to the model — the transcript still
+    // shows the user's original message unchanged.
     let modelInput: string | readonly PromptPart[] = options?.parts ?? input;
     if (this.state.appState.parallelMode && options?.parts === undefined) {
       modelInput =
-        '[系统指令：当前处于 Agent 优先并行模式。对于文件或目录不重叠的独立子任务，请直接使用 FanOut 工具一次并行派发，不要逐个串行调用 Agent。只有当任务之间有硬依赖或操作同一文件时，才回退到串行 Agent。]\n\n' +
+        '[系统指令：Power 并行模式已激活。你必须将用户的任务拆解为多个独立的子任务，并在同一个回复中同时调用多个 Agent 工具并行执行。每个 Agent 处理一个子任务，系统自动并发。不要逐个串行调用 Agent——除非子任务之间有严格的顺序依赖或会写入同一文件。即使是简单任务，也至少拆成 2 个 Agent 并行。优先并行，宁可多拆不要少拆。]\n\n' +
         input;
     }
 
@@ -940,6 +940,7 @@ export class ScreamTUI {
   setAppState(patch: Partial<AppState>): void {
     if (!hasPatchChanges(this.state.appState, patch)) return;
     const busyChanged = 'streamingPhase' in patch || 'isCompacting' in patch;
+    const prevParallelMode = this.state.appState.parallelMode;
     Object.assign(this.state.appState, patch);
     if ('planMode' in patch) this.updateEditorBorderHighlight();
     // Stop the welcome breathing animation once the first message is sent —
@@ -947,6 +948,13 @@ export class ScreamTUI {
     // requestRender, causing flicker and broken scroll.
     if ('streamingPhase' in patch && patch.streamingPhase !== 'idle') {
       this.welcomeComponent?.stopBreathing();
+    }
+    if ('parallelMode' in patch && patch.parallelMode !== prevParallelMode) {
+      if (patch.parallelMode) {
+        this.state.footer.startPowerGradient();
+      } else {
+        this.state.footer.stopPowerGradient();
+      }
     }
     this.state.footer.setState(this.state.appState);
     this.updateActivityPane();

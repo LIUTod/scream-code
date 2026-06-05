@@ -163,13 +163,14 @@ Edit the `RECOMMENDED` array in `apps/scream-code/src/tui/commands/mcp.ts`.
 
 All slash commands are declared in `src/tui/commands/registry.ts` and dispatched in `src/tui/commands/dispatch.ts`. Beyond the session-config-modelling helpers documented in `ScreamTUI`, these commands carry non-trivial state or backend integration:
 
-### FanOut (`/fanout`)
+### Power Mode (`/power`)
 
-Parallel sub-agent orchestration. Toggles `parallelMode` in `AppState`. When enabled, the model may spawn multiple agents concurrently via the `FanOut` built-in tool.
+Parallel sub-agent orchestration. Toggles `parallelMode` in `AppState`. When enabled, the model is instructed to spawn multiple agents concurrently by issuing multiple `Agent` tool calls in a single response. All tool calls in a step are executed via `Promise.allSettled`, so they run in parallel automatically.
 
-- **Tool**: `packages/agent-core/src/tools/builtin/collaboration/fanout.ts`
-- **Trait**: `ConflictTracker` inside FanOut prevents two agents writing the same file simultaneously (read+read = parallel, write+write = queued).
-- **Footer badge**: `fanout` in brand blue when active.
+- **Entry**: `/power` (aliases: `/parallel`)
+- **Tool**: `packages/agent-core/src/tools/builtin/collaboration/agent.ts`
+- **Execution**: `packages/agent-core/src/loop/tool-call.ts` — concurrent tool execution
+- **Footer badge**: `power` in brand blue when active.
 
 ### Goal System (`/goal`, `/goaloff`)
 

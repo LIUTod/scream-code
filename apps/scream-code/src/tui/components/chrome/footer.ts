@@ -191,6 +191,19 @@ function lerpGradient(t: number): string {
   return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
 }
 
+const POWER_GRADIENT_CYCLE_MS = 2000;
+
+/** Each character of `text` gets a phase-offset colour from the brand gradient, creating a flowing rainbow effect. */
+function gradientText(text: string, now: number): string {
+  const t = (now % POWER_GRADIENT_CYCLE_MS) / POWER_GRADIENT_CYCLE_MS;
+  let out = '';
+  for (let i = 0; i < text.length; i++) {
+    const charT = (t + i / text.length) % 1.0;
+    out += chalk.hex(lerpGradient(charT))(text[i]);
+  }
+  return chalk.bold(out);
+}
+
 function buildStatusLine(
   streamingPhase: AppState['streamingPhase'],
   livePaneMode: LivePaneMode,
@@ -253,6 +266,7 @@ export class FooterComponent implements Component {
    */
   private backgroundBashTaskCount = 0;
   private backgroundAgentCount = 0;
+  private powerGradientTimer: ReturnType<typeof setInterval> | undefined;
 
   constructor(state: AppState, colors: ColorPalette, onGitStatusChange: () => void = () => {}) {
     this.state = state;
@@ -268,6 +282,19 @@ export class FooterComponent implements Component {
       this.gitCache = createGitStatusCache(state.workDir, { onChange: this.onGitStatusChange });
     }
     this.state = state;
+  }
+
+  startPowerGradient(): void {
+    if (this.powerGradientTimer !== undefined) return;
+    this.powerGradientTimer = setInterval(() => {
+      this.onGitStatusChange();
+    }, 80);
+  }
+
+  stopPowerGradient(): void {
+    if (this.powerGradientTimer === undefined) return;
+    clearInterval(this.powerGradientTimer);
+    this.powerGradientTimer = undefined;
   }
 
   setColors(colors: ColorPalette): void {
@@ -305,7 +332,7 @@ export class FooterComponent implements Component {
     if (state.permissionMode === 'auto') left.push(chalk.hex(colors.warning).bold('auto'));
     if (state.permissionMode === 'yolo') left.push(chalk.hex(colors.warning).bold('YES'));
     if (state.planMode) left.push(chalk.hex(colors.primary).bold('plan'));
-    if (state.parallelMode) left.push(chalk.hex('#72A4E9').bold('fanout'));
+    if (state.parallelMode) left.push(gradientText('power', Date.now()));
     if (state.goalActive && state.goal) {
       const goalText = state.goal.length > 20 ? state.goal.slice(0, 20) + '…' : state.goal;
       left.push(chalk.hex(colors.success).bold(`🎯 ${goalText}`));

@@ -150,13 +150,13 @@ export async function handleAutoCommand(host: SlashCommandHost, args: string): P
   }
 }
 
-export async function handleFanoutCommand(host: SlashCommandHost, _args: string): Promise<void> {
+export async function handlePowerCommand(host: SlashCommandHost, _args: string): Promise<void> {
   const next = !host.state.appState.parallelMode;
   host.setAppState({ parallelMode: next });
   if (next) {
-    host.showNotice('并行模式：开启', 'Agent 将优先使用 FanOut 并行派发独立子任务。每个子任务 5 分钟超时，最多 5 个并行。');
+    host.showNotice('Power 模式：开启', '成功注入power能量 你的任务交给我了');
   } else {
-    host.showNotice('并行模式：关闭', 'Agent 恢复默认串行决策。');
+    host.showNotice('Power 模式：关闭', '可惜了 早知道再多花点Token了');
   }
 }
 

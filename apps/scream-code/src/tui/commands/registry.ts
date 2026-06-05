@@ -9,9 +9,9 @@ export const BUILTIN_SLASH_COMMANDS = [
     availability: 'always',
   },
   {
-    name: 'fanout',
+    name: 'power',
     aliases: ['parallel'],
-    description: '切换为 Agent 优先并行模式',
+    description: '切换至Agent并发模式',
     priority: 124,
     availability: 'always',
   },
