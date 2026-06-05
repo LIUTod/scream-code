@@ -65,7 +65,7 @@ function generateId(): string {
 }
 
 export function createMemoryMemo(
-  partial: Omit<MemoryMemo, 'id' | 'recordedAt'> & {
+  partial: Omit<MemoryMemo, 'id' | 'recordedAt' | 'category'> & {
     id?: string;
     recordedAt?: number;
     category?: MemoryCategory;
