@@ -155,6 +155,7 @@ describe('Agent compaction', () => {
     const strategy = new DefaultCompactionStrategy(() => 32_000, {
       triggerRatio: 0.85,
       blockRatio: 0.85,
+      turnGrowthMultiplier: 2.5,
       reservedContextSize: 50_000,
       maxCompactionPerTurn: 3,
       maxRecentMessages: 3,
@@ -1600,6 +1601,8 @@ const alwaysCompactOnce: CompactionStrategy = {
   shouldBlock: () => true,
   computeCompactCount: (messages: readonly Message[]) => messages.length,
   reduceCompactOnOverflow: (messages: readonly Message[]) => messages.length,
+  estimateTurnGrowth: (maxOutputTokens: number) => maxOutputTokens * 2.5,
+  shouldCompactProactively: () => true,
   checkAfterStep: true,
   maxCompactionPerTurn: 1,
 };
@@ -1617,6 +1620,7 @@ function testCompactionStrategy(maxSize: number = 1_000): DefaultCompactionStrat
   return new DefaultCompactionStrategy(() => maxSize, {
     triggerRatio: 0.85,
     blockRatio: 0.85,
+    turnGrowthMultiplier: 2.5,
     reservedContextSize: 0,
     maxCompactionPerTurn: 3,
     maxRecentMessages: 10,
@@ -1630,6 +1634,7 @@ function overflowOnlyCompactionStrategy(maxSize: number = 14): DefaultCompaction
   return new DefaultCompactionStrategy(() => maxSize, {
     triggerRatio: Infinity,
     blockRatio: Infinity,
+    turnGrowthMultiplier: 2.5,
     reservedContextSize: 0,
     maxCompactionPerTurn: 3,
     maxRecentMessages: 3,
