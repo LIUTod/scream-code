@@ -211,12 +211,73 @@ Undo the last N conversation turns. Anchors at user messages and restores the we
 
 ## Agent-Core Mechanisms
 
-### Micro-Compaction
+### Compaction Pipeline
 
-Lightweight context compaction triggered automatically. Unlike full compaction (which involves an LLM call), micro-compaction silently truncates old tool results in-place to free context window space.
+ScreamCode has a three-stage compaction pipeline coordinated at the `beforeStep` hook
+in `packages/agent-core/src/agent/turn/index.ts`. Each step, before the LLM call:
 
-- **Flag-gated**: controlled via experimental flags in `agent-core`.
-- **Effect**: reduces `_tokenCount` without changing conversation semantics.
+```
+Stage 1: Micro (zero LLM) → truncates old tool results to placeholders, always enabled, triggers at >= 50% usage
+Stage 2: Full  (one LLM)   → LLM summarizes old messages, triggers at >= 75% usage
+Stage 3: Block (safety net) → blocks the turn until compaction completes, triggers at >= 85% usage
+```
+
+- **Predictive trigger**: estimates next-step token growth and proactively compacts before overflow, rather than waiting for it to happen.
+- **Circuit breaker**: 3 consecutive compaction failures → auto-compaction disabled for the current turn, auto-resets next turn.
+- **Timeout**: `block()` waits up to 60 seconds for compaction, cancels and notifies the user on timeout.
+- **Overflow fast-fail**: when the API returns a context overflow error, `chatWithRetry` no longer retries 3 times — it surfaces the error immediately so the upper layer can trigger emergency compaction.
+
+Key files: `packages/agent-core/src/agent/compaction/{micro,full,strategy}.ts`,
+`packages/agent-core/src/loop/retry.ts`.
+
+### Memory System
+
+The agent has a full memory system provided by the `@scream-cli/memory` package:
+
+- **Storage**: JSONL file at `<project>/.scream-code/memory/entries.jsonl` with full CRUD support.
+- **Categories**: `user_preference`, `feedback`, `project_context`, `reference`.
+- **Extraction**: structured memories are automatically extracted from messages during compaction (LLM-driven), no manual steps needed.
+- **Scoring**: multi-factor relevance algorithm (keyword overlap + recency decay + category weight + status boost), purely rule-based, zero LLM cost.
+
+#### Auto Recall
+
+On the first step of every new turn, `MemoryRecallInjector` automatically looks up
+memories relevant to the current user query (up to 3) and injects them into context
+as a `<system-reminder>`. Fully rule-based matching — no extra LLM call.
+
+- **Registration**: `InjectionManager` registers it at construction time (requires `memoStore` to be available).
+- **Opt-out**: set `memoStore` to `undefined` to disable auto recall.
+
+Key files: `packages/agent-core/src/agent/injection/memory-recall.ts`,
+`packages/memory/src/scoring.ts`.
+
+#### Session Memory
+
+`SessionMemory` tracks every tool execution in the current session (tool name,
+argument summary, success/failure). After compaction, a summary is injected as a
+`<system-reminder>` so the model retains awareness of recent actions even after
+detailed conversation history is stripped.
+
+Key file: `packages/agent-core/src/agent/session-memory.ts`.
+
+#### Dream Consolidation (`/dream`)
+
+A CCB-style four-stage memory consolidation command. LLM-driven:
+
+1. **Orient** — scan all memories, report an overview
+2. **Gather** — semantically identify duplicates, contradictions, and stale entries
+3. **Consolidate** — produce a merge plan
+4. **Prune** — execute after user confirmation
+
+Includes automatic reminders: when >= 24 hours and >= 5 sessions have passed since
+the last dream, a suggestion is injected on the first step of the turn.
+
+- **Tracker**: `packages/memory/src/dream.ts` — `DreamTracker`, persisted to
+  `<project>/.scream-code/dream-lock.json`.
+- **Skill**: `packages/agent-core/src/skill/builtin/dream.ts` + `dream.md`.
+
+Key files: `packages/memory/src/{dream,consolidator}.ts`,
+`packages/agent-core/src/skill/builtin/dream.md`.
 
 ### WelcomeComponent Breathing
 

@@ -93,7 +93,7 @@ export function buildMcpStatusReportLines(options: McpStatusReportOptions): stri
   const lines: string[] = [accent('服务器')];
 
   if (servers.length === 0) {
-    lines.push(muted('  未配置 MCP 服务器。运行 /mcp-config 添加一个。'));
+    lines.push(muted('  未配置 MCP 服务器。运行 /mcp 添加一个。'));
     return lines;
   }
 
@@ -132,7 +132,7 @@ export function buildMcpStatusReportLines(options: McpStatusReportOptions): stri
       lines.push(`    ${muted('错误：')} ${error(server.error.trim())}`);
     }
     if (server.status === 'needs-auth') {
-      lines.push(`    ${muted('操作：')} ${value(`运行 /mcp-config login ${server.name}`)}`);
+      lines.push(`    ${muted('操作：')} ${value(`运行 /mcp 管理服务器。`)}`);
     }
   }
 

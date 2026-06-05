@@ -7,18 +7,31 @@ import {
 
 export type OpenUrl = (url: string) => void;
 
+const MAX_AUTH_URL_SET_SIZE = 200;
+
 export class McpOAuthAuthorizationUrlOpener {
   private readonly openedAuthorizationUrls = new Set<string>();
 
   constructor(private readonly openUrl: OpenUrl) {}
 
-  handleToolProgress(event: Pick<ToolProgressEvent, 'toolCallId' | 'update'>): void {
+  /** Returns the server name if a new authorization URL was opened. */
+  handleToolProgress(
+    event: Pick<ToolProgressEvent, 'toolCallId' | 'update'>,
+  ): { serverName: string } | undefined {
     const update = parseMcpOAuthAuthorizationUrlUpdate(event.update);
-    if (update === undefined) return;
+    if (update === undefined) return undefined;
     const key = `${event.toolCallId}\0${update.authorizationUrl}`;
-    if (this.openedAuthorizationUrls.has(key)) return;
+    if (this.openedAuthorizationUrls.has(key)) return undefined;
+    if (this.openedAuthorizationUrls.size >= MAX_AUTH_URL_SET_SIZE) {
+      // Clear oldest half to prevent unbounded growth.
+      const entries = [...this.openedAuthorizationUrls];
+      for (let i = 0; i < entries.length / 2; i++) {
+        this.openedAuthorizationUrls.delete(entries[i]);
+      }
+    }
     this.openedAuthorizationUrls.add(key);
     this.openUrl(update.authorizationUrl);
+    return { serverName: update.serverName };
   }
 }
 

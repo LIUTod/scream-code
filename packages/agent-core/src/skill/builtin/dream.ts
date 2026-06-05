@@ -1,17 +1,17 @@
 import { parseSkillText } from '../parser';
 import type { SkillDefinition } from '../types';
-import MCP_CONFIG_BODY from './mcp-config.md';
+import DREAM_BODY from './dream.md';
 
-const PSEUDO_PATH = 'builtin://mcp-config';
+const PSEUDO_PATH = 'builtin://dream';
 
 const parsed = parseSkillText({
-  skillMdPath: '/builtin/skills/mcp-config.md',
-  skillDirName: 'mcp-config',
+  skillMdPath: '/builtin/skills/dream.md',
+  skillDirName: 'dream',
   source: 'builtin',
-  text: MCP_CONFIG_BODY,
+  text: DREAM_BODY,
 });
 
-export const MCP_CONFIG_SKILL: SkillDefinition = {
+export const DREAM_SKILL: SkillDefinition = {
   ...parsed,
   path: PSEUDO_PATH,
   dir: PSEUDO_PATH,

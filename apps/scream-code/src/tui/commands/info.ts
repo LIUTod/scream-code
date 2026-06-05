@@ -75,7 +75,7 @@ export async function showMcpServers(host: SlashCommandHost): Promise<void> {
   try {
     servers = await host.requireSession().listMcpServers();
   } catch (error) {
-    host.showError(`Failed to load MCP servers: ${formatErrorMessage(error)}`);
+    host.showError(`加载 MCP 服务器失败：${formatErrorMessage(error)}`);
     return;
   }
 

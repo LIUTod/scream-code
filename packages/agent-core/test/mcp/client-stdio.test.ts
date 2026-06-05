@@ -88,9 +88,10 @@ describe('StdioMcpClient', () => {
     }
   }, 15000);
 
-  it('inherits parent process env so PATH/HOME survive; config.env overrides on conflict', async () => {
-    const parentOnly = `SCREAM_TEST_PARENT_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-    const shared = `SCREAM_TEST_SHARED_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  it('forwards allowlisted env vars; config.env overrides on conflict', async () => {
+    // Use TERM prefix which is in the allowlist.
+    const parentOnly = `TERM_SCREAM_TEST_PARENT_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    const shared = `TERM_SCREAM_TEST_SHARED_${Date.now()}_${Math.random().toString(36).slice(2)}`;
     process.env[parentOnly] = 'from-parent';
     process.env[shared] = 'from-parent';
     const client = new StdioMcpClient({
@@ -108,6 +109,24 @@ describe('StdioMcpClient', () => {
     } finally {
       delete process.env[parentOnly];
       delete process.env[shared];
+      await client.close();
+    }
+  }, 15000);
+
+  it('does not forward non-allowlisted env vars', async () => {
+    const secret = `SCREAM_TEST_SECRET_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    process.env[secret] = 'should-not-leak';
+    const client = new StdioMcpClient({
+      transport: 'stdio',
+      command: process.execPath,
+      args: [fixture],
+    });
+    try {
+      await client.connect();
+      const result = await client.callTool('read_env', { name: secret });
+      expect(result.content).toEqual([{ type: 'text', text: '' }]);
+    } finally {
+      delete process.env[secret];
       await client.close();
     }
   }, 15000);

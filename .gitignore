@@ -9,6 +9,7 @@ coverage/
 .playwright-mcp/
 .claude
 .conductor
+.scream-code
 .scream-stash-dir
 plugins/cdn/
 superpowers

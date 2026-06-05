@@ -48,10 +48,11 @@ describe('skill slash commands', () => {
 
   it('keeps disableModelInvocation skills slash-invocable', () => {
     const built = buildSkillSlashCommands([
-      skill('mcp-config', 'inline', { disableModelInvocation: true, source: 'builtin' }),
+      skill('dream', 'inline', { disableModelInvocation: true, source: 'builtin' }),
     ]);
 
-    expect(built.commands.map((command) => command.name)).toEqual(['skill:mcp-config']);
-    expect(built.commandMap.get('skill:mcp-config')).toBe('mcp-config');
+    expect(built.commands.map((command) => command.name)).toEqual(['skill:dream', 'dream']);
+    expect(built.commandMap.get('skill:dream')).toBe('dream');
+    expect(built.commandMap.get('dream')).toBe('dream');
   });
 });

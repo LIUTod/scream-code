@@ -215,13 +215,27 @@ class BoundedTail {
   }
 }
 
-// Inherit the parent's env so PATH/HOME/etc. survive — otherwise `npx`/`uvx`
-// style stdio servers fail to launch even with a valid config. Explicit
-// `config.env` entries still override on conflict.
+// Only forward a safe subset of the parent's env to MCP child processes.
+// Passing all of process.env would leak API keys and other secrets to third-
+// party MCP servers. Explicit `config.env` entries always take precedence.
+const ALLOWED_ENV_PREFIXES = [
+  'PATH', 'HOME', 'USER', 'SHELL', 'LANG', 'LC_',
+  'TMPDIR', 'TEMP', 'TMP',
+  'NODE_PATH', 'PYTHONPATH', 'VIRTUAL_ENV', 'CONDA_PREFIX',
+  'XDG_', 'DBUS_', 'DISPLAY', 'WAYLAND_',
+  'SYSTEMROOT', 'ProgramFiles', 'ProgramFiles(x86)', 'APPDATA', 'LOCALAPPDATA',
+  'TERM', 'COLORTERM', 'NO_COLOR', 'FORCE_COLOR',
+  'SSH_AUTH_SOCK', 'SSH_AGENT_PID',
+];
+
+function isEnvAllowed(key: string): boolean {
+  return ALLOWED_ENV_PREFIXES.some((prefix) => key.startsWith(prefix));
+}
+
 function mergeStdioEnv(configEnv?: Record<string, string>): Record<string, string> {
   const merged: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) {
-    if (value !== undefined) merged[key] = value;
+    if (value !== undefined && isEnvAllowed(key)) merged[key] = value;
   }
   if (configEnv !== undefined) Object.assign(merged, configEnv);
   return merged;

@@ -46,7 +46,7 @@ export interface McpConnectionManagerOptions {
    *  - If `oauthService.hasTokens(name, url)` is true, the provider is
    *    attached to the transport so the SDK can refresh tokens on 401.
    *  - Connection failures that look like 401 / `UnauthorizedError` flip
-   *    the entry into `needs-auth` instead of `failed`; `/mcp-config`
+   *    the entry into `needs-auth` instead of `failed`; `/mcp`
    *    drives the browser flow through the synthetic auth tool.
    */
   readonly oauthService?: McpOAuthService;
@@ -293,7 +293,7 @@ export class McpConnectionManager {
       }
       if (this.shouldMarkNeedsAuth(entry, error)) {
         entry.status = 'needs-auth';
-        entry.error = `${entry.name} requires OAuth — run /mcp-config login ${entry.name}`;
+        entry.error = `${entry.name} 需要 OAuth 认证，请运行 /mcp 管理`;
       } else {
         entry.status = 'failed';
         entry.error = formatStartupError(error, client);
@@ -368,7 +368,7 @@ export class McpConnectionManager {
     if (entry.config.bearerTokenEnvVar !== undefined) return false;
     // If the user pinned a static `headers` block, treat 401s as a bad header
     // rather than hijacking them into the OAuth flow — the real error is more
-    // actionable than "run /mcp-config login" for a server that doesn't speak
+    // actionable than "/mcp" for a server that doesn't speak
     // OAuth.
     if (entry.config.headers !== undefined) return false;
     return isUnauthorizedLikeError(error);

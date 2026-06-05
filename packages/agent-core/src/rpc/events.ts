@@ -233,6 +233,7 @@ export interface CompactionBlockedEvent {
 
 export interface CompactionCancelledEvent {
   readonly type: 'compaction.cancelled';
+  readonly reason?: string | undefined;
 }
 
 export interface CompactionCompletedEvent {

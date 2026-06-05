@@ -1,5 +1,6 @@
 import { sleep } from '@antfu/utils';
 import * as retry from 'retry';
+import { APIContextOverflowError } from '@scream-cli/ltod';
 
 import type { Logger } from '#/logging/types';
 
@@ -44,6 +45,14 @@ export async function chatWithRetry(input: ChatWithRetryInput): Promise<LLMChatR
     try {
       return await input.llm.chat(paramsForAttempt(input, attempt, maxAttempts));
     } catch (error) {
+      // Overflow errors can't be fixed by retrying — they need compaction.
+      // Fail fast so the turn-level handler can trigger emergency compaction
+      // without wasting retry attempts on the same overflow.
+      if (error instanceof APIContextOverflowError) {
+        logRequestFailure(input, error, attempt, maxAttempts);
+        throw error;
+      }
+
       if (attempt >= maxAttempts || !input.llm.isRetryableError(error)) {
         logRequestFailure(input, error, attempt, maxAttempts);
         throw error;

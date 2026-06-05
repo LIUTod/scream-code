@@ -108,6 +108,13 @@ export class TurnFlow {
       return null;
     }
 
+    // Initialize dream tracker and record new session on first turn
+    if (this.turnId === -1) {
+      void this.agent.dreamTracker.init().then(() =>
+        this.agent.dreamTracker.recordNewSession(),
+      );
+    }
+
     this.turnId += 1;
     this.currentStep = 0;
     this.stepToolCallKeys.clear();
@@ -117,6 +124,7 @@ export class TurnFlow {
     this.currentStepByTurn.set(this.turnId, 0);
     this.agent.telemetry.track('turn_started', { mode: telemetryMode });
     this.agent.fullCompaction.resetForTurn();
+    this.agent.injection.resetForTurn();
     this.agent.usage.beginTurn();
     this.agent.emitEvent({
       type: 'turn.started',
@@ -254,6 +262,10 @@ export class TurnFlow {
         this.agent.emitEvent(ended);
       } else {
         const summary = summarizeTurnError(error, turnId);
+        this.agent.sessionMemory.recordError(
+          `${summary.name}: ${summary.message}`,
+          this.currentStep,
+        );
         void this.agent.hooks?.fireAndForgetTrigger('StopFailure', {
           matcherValue: summary.name,
           inputData: {
@@ -384,9 +396,28 @@ export class TurnFlow {
           maxSteps: loopControl?.maxStepsPerTurn,
           maxRetryAttempts: loopControl?.maxRetriesPerStep,
           hooks: {
-            beforeStep: async ({ signal: stepSignal }) => {
+            beforeStep: async ({ signal: stepSignal, stepNumber }) => {
               this.flushSteerBuffer();
               await this.agent.fullCompaction.beforeStep(stepSignal);
+
+              // Inject session memory summary so the model retains context
+              // after compaction strips detailed tool-call history.
+              const sessionSummary = this.agent.sessionMemory.getSessionSummary();
+              if (sessionSummary.length > 0) {
+                this.agent.context.appendSystemReminder(sessionSummary, {
+                  kind: 'injection',
+                  variant: 'session_memory',
+                });
+              }
+
+              // Suggest /dream on the first step when conditions are met
+              if (stepNumber === 1 && this.agent.dreamTracker.shouldSuggest()) {
+                this.agent.context.appendSystemReminder(
+                  this.agent.dreamTracker.getSuggestionMessage(),
+                  { kind: 'injection', variant: 'dream_suggestion' },
+                );
+              }
+
               await this.agent.injection.inject();
               deduper.beginStep();
               return;
@@ -444,6 +475,15 @@ export class TurnFlow {
                 ctx.result,
               );
               const { isError, output } = finalResult;
+
+              // Record in session memory for post-compaction context injection
+              this.agent.sessionMemory.recordToolExecution(
+                ctx.toolCall.name,
+                summarizeToolArgs(ctx.args),
+                isError === true,
+                ctx.stepNumber,
+              );
+
               const event = isError === true ? 'PostToolUseFailure' : 'PostToolUse';
               void this.agent.hooks?.fireAndForgetTrigger(event, {
                 matcherValue: ctx.toolCall.name,
@@ -826,4 +866,23 @@ function telemetryToolErrorType(result: ToolTelemetryResult): string {
 
 function toolResultText(result: ToolTelemetryResult): string {
   return toolOutputText(result.output);
+}
+
+/** Extract a short human-readable summary from tool arguments. */
+function summarizeToolArgs(args: unknown): string {
+  if (typeof args !== 'object' || args === null) return '';
+  const a = args as Record<string, unknown>;
+  // Common tool arg patterns — try each in priority order
+  if (typeof a['file_path'] === 'string') return a['file_path'] as string;
+  if (typeof a['path'] === 'string') return a['path'] as string;
+  if (typeof a['description'] === 'string') return truncateArg(a['description'] as string);
+  if (typeof a['subject'] === 'string') return a['subject'] as string;
+  if (typeof a['command'] === 'string') return truncateArg(a['command'] as string);
+  if (typeof a['query'] === 'string') return truncateArg(a['query'] as string);
+  if (typeof a['url'] === 'string') return a['url'] as string;
+  return '';
+}
+
+function truncateArg(s: string): string {
+  return s.length > 80 ? s.slice(0, 77) + '...' : s;
 }

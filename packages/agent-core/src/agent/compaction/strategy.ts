@@ -11,6 +11,9 @@ export interface CompactionConfig {
   maxRecentUserMessages: number;
   maxRecentSizeRatio: number;
   minOverflowReductionRatio: number;
+  /** Multiplier for max output tokens when estimating turn growth.
+   *  1.0 = just max output; 2.5 = max output + 1.5x for tool results. */
+  turnGrowthMultiplier: number;
 }
 
 export const DEFAULT_COMPACTION_CONFIG: CompactionConfig = {
@@ -22,6 +25,7 @@ export const DEFAULT_COMPACTION_CONFIG: CompactionConfig = {
   maxRecentUserMessages: Infinity,
   maxRecentSizeRatio: 0.2,
   minOverflowReductionRatio: 0.05,
+  turnGrowthMultiplier: 2.5, // maxOutput + 1.5x avg tool result growth
 };
 
 export interface CompactionStrategy {
@@ -29,6 +33,11 @@ export interface CompactionStrategy {
   shouldBlock(usedSize: number): boolean;
   computeCompactCount(messages: readonly Message[], source: CompactionSource): number;
   reduceCompactOnOverflow(messages: readonly Message[]): number;
+  /** Estimate worst-case token growth for one turn step. */
+  estimateTurnGrowth(maxOutputTokens: number): number;
+  /** Whether to proactively compact before the next API call to avoid
+   *  hitting context overflow during streaming. */
+  shouldCompactProactively(usedSize: number, maxOutputTokens: number): boolean;
   readonly checkAfterStep: boolean;
   readonly maxCompactionPerTurn: number;
 }
@@ -136,6 +145,22 @@ export class DefaultCompactionStrategy implements CompactionStrategy {
       }
     }
     return bestN ?? messages.length;
+  }
+
+  estimateTurnGrowth(maxOutputTokens: number): number {
+    // Conservative: assume the model produces its full output budget + tool
+    // results proportional to the turnGrowthMultiplier minus the output itself.
+    const toolResultGrowth = Math.max(
+      0,
+      maxOutputTokens * (this.config.turnGrowthMultiplier - 1),
+    );
+    return maxOutputTokens + Math.round(toolResultGrowth);
+  }
+
+  shouldCompactProactively(usedSize: number, maxOutputTokens: number): boolean {
+    if (this.maxSize <= 0) return false;
+    const predicted = usedSize + this.estimateTurnGrowth(maxOutputTokens);
+    return predicted >= this.maxSize;
   }
 
   get checkAfterStep(): boolean {

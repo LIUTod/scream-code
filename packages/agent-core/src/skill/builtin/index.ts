@@ -1,8 +1,8 @@
 import type { SkillRegistry } from '../registry';
-import { MCP_CONFIG_SKILL } from './mcp-config';
+import { DREAM_SKILL } from './dream';
 
 export function registerBuiltinSkills(registry: SkillRegistry): void {
-  registry.registerBuiltinSkill(MCP_CONFIG_SKILL);
+  registry.registerBuiltinSkill(DREAM_SKILL);
 }
 
-export { MCP_CONFIG_SKILL };
+export { DREAM_SKILL };

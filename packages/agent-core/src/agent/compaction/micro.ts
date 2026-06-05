@@ -3,7 +3,6 @@ import type { ContentPart } from '@scream-cli/ltod';
 import type { Agent } from '..';
 import type { ContextMessage } from '../context';
 import { estimateTokens, estimateTokensForMessages } from '../../utils/tokens';
-import { flags } from '../../flags';
 
 export interface MicroCompactionConfig {
   /** Number of most recent messages to always keep untouched. */
@@ -59,8 +58,6 @@ export class MicroCompaction {
 
   /** Check whether micro-compaction is warranted and advance the cutoff. */
   detect(): void {
-    if (!flags.enabled('micro-compaction')) return;
-
     const config = this.config;
     const { history } = this.agent.context;
     const maxContextTokens = this.agent.config.modelCapabilities.max_context_tokens;
@@ -92,8 +89,6 @@ export class MicroCompaction {
    * before the cutoff line with the truncated marker.
    */
   compact(messages: readonly ContextMessage[]): readonly ContextMessage[] {
-    if (!flags.enabled('micro-compaction')) return messages;
-
     const config = this.config;
     const result: ContextMessage[] = [];
     let i = 0;
@@ -114,6 +109,16 @@ export class MicroCompaction {
       i++;
     }
     return result;
+  }
+
+  /**
+   * Estimate how many tokens micro-compaction would save at the current
+   * cutoff. Used by the unified compaction pipeline so Full can decide
+   * whether it still needs to run after Micro has been applied.
+   */
+  estimateSavings(messages: readonly ContextMessage[]): number {
+    const { beforeTokens, afterTokens } = this.measureEffect(messages, this.cutoff);
+    return beforeTokens - afterTokens;
   }
 
   private measureEffect(

@@ -82,22 +82,32 @@ async function openMcpPanel(host: SlashCommandHost): Promise<void> {
   const rows = buildRows(servers);
   const connectedCount = servers.filter((s) => s.status === 'connected').length;
 
-  const picker = new McpPickerComponent({
+  let picker: McpPickerComponent;
+
+  const refreshPanel = async () => {
+    const s = await loadServers(host);
+    const r = buildRows(s);
+    const cc = s.filter((x) => x.status === 'connected').length;
+    picker.refresh(r, `MCP 管理（${cc}/${s.length} 已连接）`);
+    host.mountEditorReplacement(picker);
+  };
+
+  picker = new McpPickerComponent({
     title: `MCP 管理（${connectedCount}/${servers.length} 已连接）`,
     rows,
     colors: host.state.theme.colors,
     onEnter: (row) => {
       void (async () => {
         host.restoreEditor();
-        await handleEnter(host, row, servers);
-        await openMcpPanel(host);
+        await handleEnter(host, row);
+        await refreshPanel();
       })();
     },
     onDelete: (row) => {
       void (async () => {
         host.restoreEditor();
         await handleDelete(host, row);
-        await openMcpPanel(host);
+        await refreshPanel();
       })();
     },
     onCancel: () => {
@@ -116,7 +126,9 @@ async function loadServers(
   if (!host.session) return [];
   try {
     return await host.session.listMcpServers();
-  } catch {
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    host.showError(`加载 MCP 服务器失败：${msg}`);
     return [];
   }
 }
@@ -176,7 +188,6 @@ function buildRows(
 async function handleEnter(
   host: SlashCommandHost,
   row: McpRow,
-  servers: readonly { name: string; status: string }[],
 ): Promise<void> {
   if (row.kind === 'recommended') {
     if (row.alreadyInstalled) {
@@ -187,9 +198,7 @@ async function handleEnter(
     if (!rec) return;
     await installMcp(host, rec);
   } else if (row.kind === 'installed' && row.status && row.status !== '__section' && row.status !== '__empty') {
-    const server = servers.find((s) => s.name === row.name);
-    if (!server) return;
-    if (server.status === 'connected') {
+    if (row.status === 'connected') {
       await disableMcp(host, row.name);
     } else {
       await enableMcp(host, row.name);
@@ -381,6 +390,25 @@ class McpPickerComponent extends Container implements Focusable {
       this.rows[this.selectedIndex]?.status === '__section'
     ) {
       this.selectedIndex++;
+    }
+  }
+
+  refresh(rows: McpRow[], title: string): void {
+    this.rows = rows;
+    this.title = title;
+    if (
+      this.selectedIndex >= rows.length ||
+      rows[this.selectedIndex]?.status === '__section' ||
+      rows[this.selectedIndex]?.status === '__empty'
+    ) {
+      this.selectedIndex = 0;
+      while (
+        this.selectedIndex < rows.length &&
+        (rows[this.selectedIndex]?.status === '__section' ||
+          rows[this.selectedIndex]?.status === '__empty')
+      ) {
+        this.selectedIndex++;
+      }
     }
   }
 

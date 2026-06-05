@@ -1393,16 +1393,22 @@ export class ScreamTUI {
   showProgressSpinner(label: string): LoginProgressSpinnerHandle {
     const tint = (s: string): string => chalk.hex(this.state.theme.colors.primary)(s);
     const spinner = new MoonLoader(this.state.ui, 'braille', tint, label);
-    this.state.transcriptContainer.addChild(new Spacer(1));
+    const spacer = new Spacer(1);
+    this.state.transcriptContainer.addChild(spacer);
     this.state.transcriptContainer.addChild(spinner);
     this.state.ui.requestRender();
     return {
       stop: ({ ok, label: finalLabel }: { ok: boolean; label: string }) => {
         spinner.stop();
+        const container = this.state.transcriptContainer;
+        const children = container.children;
+        const sIdx = children.indexOf(spacer);
+        if (sIdx >= 0) children.splice(sIdx, 1);
+        const spIdx = children.indexOf(spinner);
+        if (spIdx >= 0) children.splice(spIdx, 1);
+        container.invalidate();
         const tone = ok ? this.state.theme.colors.success : this.state.theme.colors.error;
-        const symbol = ok ? '✓' : '✗';
-        spinner.setText(chalk.hex(tone)(`${symbol} ${finalLabel}`));
-        this.state.ui.requestRender();
+        this.showStatus(finalLabel, tone);
       },
     };
   }

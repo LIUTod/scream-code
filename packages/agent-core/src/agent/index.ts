@@ -33,9 +33,10 @@ import { ConfigState } from './config';
 import { ContextMemory } from './context';
 import { HookEngine } from '../session/hooks';
 import { InjectionManager } from './injection/manager';
-import { EXIT_EXTRACTION_SYSTEM_PROMPT, MemoryMemoStore, buildExitExtractionPrompt, parseMemoryMemos } from '@scream-cli/memory';
+import { DreamTracker, EXIT_EXTRACTION_SYSTEM_PROMPT, MemoryMemoStore, buildExitExtractionPrompt, parseMemoryMemos } from '@scream-cli/memory';
 import { PermissionManager, type PermissionManagerOptions } from './permission';
 import { PlanMode } from './plan';
+import { SessionMemory } from './session-memory';
 import {
   AgentRecords,
   BlobStore,
@@ -115,6 +116,8 @@ export class Agent {
   readonly background: BackgroundManager;
   readonly cron: CronManager | null;
   readonly memoStore: MemoryMemoStore | undefined;
+  readonly sessionMemory: SessionMemory;
+  readonly dreamTracker: DreamTracker;
   readonly replayBuilder: ReplayBuilder;
 
   private lastLlmConfigLogSignature?: string;
@@ -165,9 +168,14 @@ export class Agent {
     this.cron = this.type === 'sub' ? null : new CronManager(this);
     // homedir = <sessionDir>/agents/<agentId>, need 3 levels up to reach
     // <projectDir> where memory/entries.jsonl lives
-    this.memoStore = options.homedir
-      ? new MemoryMemoStore(dirname(dirname(dirname(options.homedir))))
+    const projectDir = options.homedir
+      ? dirname(dirname(dirname(options.homedir)))
       : undefined;
+    this.memoStore = projectDir
+      ? new MemoryMemoStore(projectDir)
+      : undefined;
+    this.sessionMemory = new SessionMemory(this);
+    this.dreamTracker = new DreamTracker(projectDir ?? '');
     this.replayBuilder = new ReplayBuilder(this);
   }
 

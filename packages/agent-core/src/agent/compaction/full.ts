@@ -42,8 +42,13 @@ export interface CompactedHistory {
 
 export const MAX_COMPACTION_RETRY_ATTEMPTS = 5;
 
+/** Max consecutive compaction failures before auto-compaction is
+ *  disabled for the remainder of the turn. Resets each turn. */
+const MAX_CONSECUTIVE_FAILURES = 3;
+
 export class FullCompaction {
   protected compactionCountInTurn = 0;
+  private consecutiveCompactionFailures = 0;
   protected compacting: {
     abortController: AbortController;
     startedAt: number;
@@ -67,6 +72,9 @@ export class FullCompaction {
           reservedContextSize:
             agent.screamConfig?.loopControl?.reservedContextSize ??
             DEFAULT_COMPACTION_CONFIG.reservedContextSize,
+          triggerRatio:
+            agent.screamConfig?.loopControl?.compactionTriggerRatio ??
+            DEFAULT_COMPACTION_CONFIG.triggerRatio,
         }
       );
   }
@@ -126,14 +134,14 @@ export class FullCompaction {
     this.markCanceled();
   }
 
-  private markCanceled(): void {
+  private markCanceled(reason?: string): void {
     if (!this.compacting) return;
     this.agent.records.logRecord({
       type: 'full_compaction.cancel',
     });
     this.compacting.abortController.abort();
     this.compacting = null;
-    this.agent.emitEvent({ type: 'compaction.cancelled' });
+    this.agent.emitEvent({ type: 'compaction.cancelled', reason });
   }
 
   markCompleted() {
@@ -152,6 +160,7 @@ export class FullCompaction {
 
   resetForTurn(): void {
     this.compactionCountInTurn = 0;
+    this.consecutiveCompactionFailures = 0;
   }
 
   async handleOverflowError(signal: AbortSignal, error: unknown) {
@@ -162,10 +171,50 @@ export class FullCompaction {
   }
 
   async beforeStep(signal: AbortSignal): Promise<void> {
-    this.checkAutoCompaction();
-    if (this.strategy.shouldBlock(this.tokenCountWithPending)) {
+    // Stage 1: Run micro compaction first (free, no LLM call).
+    // detect() advances the internal cutoff when token usage >= 50%.
+    this.agent.microCompaction.detect();
+
+    // Stage 2: Check if full compaction is still needed, accounting for
+    // the token savings micro compaction already provides.
+    const effectiveTokens = this.effectiveTokenCount;
+
+    // Stage 2a: Proactive check — will the NEXT step overflow?
+    // Estimate worst-case token growth before the API call so we can
+    // compact BEFORE hitting a 413, not after.
+    const shouldCompact =
+      this.strategy.shouldCompact(effectiveTokens) ||
+      this.strategy.shouldCompactProactively(
+        effectiveTokens,
+        this.estimatedMaxOutputTokens,
+      );
+
+    if (shouldCompact) {
+      this.checkAutoCompaction();
+    }
+
+    // Stage 3: Block if we're past the blocking threshold.
+    if (this.strategy.shouldBlock(effectiveTokens)) {
       await this.block(signal);
     }
+  }
+
+  /** Conservative estimate of max output tokens for one API call. */
+  private get estimatedMaxOutputTokens(): number {
+    const ctx = this.agent.config.modelCapabilities.max_context_tokens;
+    // 5% of context window, bounded between 8K and 32K.
+    // For 200K context: 10K; for 32K context: 8K; for 1M: 32K.
+    if (ctx > 0) return Math.max(8192, Math.min(32768, Math.floor(ctx * 0.05)));
+    return 16384; // unknown context window
+  }
+
+  /** Token count adjusted for micro compaction savings. */
+  private get effectiveTokenCount(): number {
+    const raw = this.tokenCountWithPending;
+    const savings = this.agent.microCompaction.estimateSavings(
+      this.agent.context.history,
+    );
+    return Math.max(0, raw - savings);
   }
 
   async afterStep(): Promise<void> {
@@ -184,6 +233,11 @@ export class FullCompaction {
 
   private beginAutoCompaction(throwOnLimit: boolean = true): boolean {
     if (this.compacting) return true;
+    if (this.consecutiveCompactionFailures >= MAX_CONSECUTIVE_FAILURES) {
+      // Circuit breaker open — auto compaction is disabled for this turn.
+      // Manual /compact still works via begin() which bypasses this method.
+      return false;
+    }
     const maxCompactions = this.strategy.maxCompactionPerTurn;
     if (this.compactionCountInTurn >= maxCompactions) {
       if (throwOnLimit) {
@@ -199,18 +253,41 @@ export class FullCompaction {
 
   private async block(signal: AbortSignal): Promise<void> {
     const active = this.compacting;
-    if (active) {
-      active.blockedByTurn = true;
-      signal.addEventListener('abort', () => {
-        if (this.compacting === active) {
-          this.cancel();
-        }
-      });
-      this.agent.emitEvent({
-        type: 'compaction.blocked',
-        turnId: this.agent.turn.currentId,
-      });
+    if (!active) return;
+
+    active.blockedByTurn = true;
+
+    const BLOCK_TIMEOUT_MS = 60_000; // 60 seconds
+
+    const timeoutId = setTimeout(() => {
+      // Only cancel if this exact compaction is still the active one.
+      // It may have completed between the timer firing and this callback
+      // executing (race between microtask queue and timer queue).
+      if (this.compacting === active) {
+        this.markCanceled(
+          '压缩超时（60秒），已取消。请使用 /compact 手动重试。',
+        );
+      }
+    }, BLOCK_TIMEOUT_MS);
+
+    const onAbort = (): void => {
+      clearTimeout(timeoutId);
+      if (this.compacting === active) {
+        this.cancel();
+      }
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+
+    this.agent.emitEvent({
+      type: 'compaction.blocked',
+      turnId: this.agent.turn.currentId,
+    });
+
+    try {
       await active.promise;
+    } finally {
+      clearTimeout(timeoutId);
+      signal.removeEventListener('abort', onAbort);
     }
   }
 
@@ -253,7 +330,7 @@ export class FullCompaction {
           const response = await this.agent.generate(
             this.agent.config.provider,
             this.agent.config.systemPrompt,
-            [...this.agent.tools.loopTools],
+            [],
             messages,
             undefined,
             { signal },
@@ -287,8 +364,7 @@ export class FullCompaction {
       const newHistory = this.agent.context.history;
       for (let i = 0; i < originalHistory.length; i++) {
         if (newHistory[i] !== originalHistory[i]) {
-          // History changed during compaction, likely due to undo
-          this.cancel();
+          this.markCanceled('上下文已被更改（如 /revoke），压缩已取消');
           return undefined;
         }
       }
@@ -318,10 +394,25 @@ export class FullCompaction {
       this.agent.context.applyCompaction(result);
       this.extractAndStoreMemos(summary);
       this.triggerPostCompactHook(data, result);
+
+      // Compaction succeeded — reset circuit breaker
+      this.consecutiveCompactionFailures = 0;
     } catch (error) {
       if (!isAbortError(error)) {
         const active = this.compacting;
         const blockedByTurn = active?.blockedByTurn === true;
+
+        // Track consecutive failures for circuit breaker
+        this.consecutiveCompactionFailures += 1;
+        if (this.consecutiveCompactionFailures >= MAX_CONSECUTIVE_FAILURES) {
+          this.agent.emitEvent({
+            type: 'warning',
+            message:
+              `压缩连续失败 ${String(this.consecutiveCompactionFailures)} 次，已自动暂停本回合的自动压缩。使用 /compact 手动重试。`,
+            code: 'compaction_circuit_open',
+          });
+        }
+
         this.agent.log.error('compaction failed', {
           code: isScreamError(error) ? error.code : undefined,
           error,

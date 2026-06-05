@@ -124,7 +124,10 @@ export class SessionEventHandler {
       if (host.aborted) return;
       if (event.sessionId !== sessionId) return;
       if (event.type === 'tool.progress') {
-        mcpOAuthOpener.handleToolProgress(event);
+        const authOpened = mcpOAuthOpener.handleToolProgress(event);
+        if (authOpened !== undefined) {
+          host.showStatus(`已在浏览器中打开 ${authOpened.serverName} 的授权页面`);
+        }
       }
       this.handleEvent(event, sendQueued);
     });
@@ -211,8 +214,15 @@ export class SessionEventHandler {
   }
 
   stopAllMcpServerStatusSpinners(): void {
+    const { state } = this.host;
+    const children = state.transcriptContainer.children;
     for (const spinner of this.mcpServerStatusSpinners.values()) {
       spinner.stop();
+      const idx = children.indexOf(spinner);
+      if (idx >= 0) children.splice(idx, 1);
+    }
+    if (this.mcpServerStatusSpinners.size > 0) {
+      state.transcriptContainer.invalidate();
     }
     this.mcpServerStatusSpinners.clear();
   }
@@ -607,7 +617,7 @@ export class SessionEventHandler {
         return;
       }
       case 'needs-auth': {
-        const message = `MCP 服务器 "${server.name}" 需要 OAuth — run /mcp-config login ${server.name}`;
+        const message = `MCP 服务器 "${server.name}" 需要 OAuth 认证，请运行 /mcp`;
         this.finalizeMcpServerStatusRow(server.name, message, colors.warning);
         return;
       }
@@ -647,14 +657,15 @@ export class SessionEventHandler {
       return;
     }
     spinner.stop();
-    const status = new StatusMessageComponent(message, state.theme.colors, color);
-    const children = state.transcriptContainer.children;
+    const container = state.transcriptContainer;
+    const children = container.children;
     const idx = children.indexOf(spinner);
     if (idx >= 0) {
-      children[idx] = status;
-      state.transcriptContainer.invalidate();
+      children.splice(idx, 1);
+      container.addChild(new StatusMessageComponent(message, state.theme.colors, color));
+      container.invalidate();
     } else {
-      state.transcriptContainer.addChild(status);
+      container.addChild(new StatusMessageComponent(message, state.theme.colors, color));
     }
     this.mcpServerStatusSpinners.delete(name);
     state.ui.requestRender();
@@ -713,9 +724,12 @@ export class SessionEventHandler {
   }
 
   private handleCompactionCancel(
-    _event: CompactionCancelledEvent,
+    event: CompactionCancelledEvent,
     sendQueued: (item: QueuedMessage) => void,
   ): void {
+    if (event.reason) {
+      this.host.showStatus(event.reason, this.host.state.theme.colors.warning);
+    }
     this.host.streamingUI.cancelCompaction();
     this.finishCompaction(sendQueued);
   }

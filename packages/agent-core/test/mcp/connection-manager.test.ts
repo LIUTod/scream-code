@@ -360,7 +360,7 @@ describe('McpConnectionManager', () => {
       });
       const entry = cm.get('gated');
       expect(entry?.status).toBe('needs-auth');
-      expect(entry?.error).toContain('run /mcp-config login gated');
+      expect(entry?.error).toContain('需要 OAuth 认证');
       expect(entry?.toolCount).toBe(0);
     } finally {
       await cm.shutdown();
@@ -433,7 +433,7 @@ describe('McpConnectionManager', () => {
       const entry = cm.get('notion');
       expect(entry).toMatchObject({
         status: 'needs-auth',
-        error: expect.stringContaining('run /mcp-config login notion'),
+        error: expect.stringContaining('需要 OAuth 认证'),
       });
       expect(entry?.error).not.toContain('redirectUrl must be set');
     } finally {

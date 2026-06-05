@@ -1,5 +1,11 @@
 /** Memory memo types — structured work logs extracted from conversations. */
 
+export type MemoryCategory =
+  | 'user_preference'   // 用户偏好: 角色、习惯、风格
+  | 'feedback'          // 反馈: 从错误中学到的经验
+  | 'project_context'   // 项目上下文: 架构决策、bug、进行中的工作
+  | 'reference';        // 引用: 外部系统指针 (Linear, Slack, 文档 URL)
+
 export interface MemoryMemo {
   /** Unique ID generated at creation time. */
   id: string;
@@ -17,6 +23,8 @@ export interface MemoryMemo {
   problemsEncountered: string;
   /** How this memo was triggered. */
   extractionSource: 'compaction' | 'exit';
+  /** Memory category for targeted recall and formatting. */
+  category: MemoryCategory;
   /** Epoch milliseconds when this entry was created. */
   recordedAt: number;
   /** Optional free-form tags. */
@@ -40,6 +48,7 @@ export interface MemoryMemoSummary {
   completionStatus: string;
   problemsEncountered: string;
   extractionSource: string;
+  category: string;
   recordedAt: number;
 }
 
@@ -67,6 +76,7 @@ export function createMemoryMemo(
     completionStatus: partial.completionStatus,
     problemsEncountered: partial.problemsEncountered,
     extractionSource: partial.extractionSource,
+    category: partial.category ?? 'project_context',
     recordedAt: partial.recordedAt ?? Date.now(),
     tags: partial.tags,
   };
@@ -82,6 +92,7 @@ export function toSummary(memo: MemoryMemo): MemoryMemoSummary {
     completionStatus: memo.completionStatus,
     problemsEncountered: memo.problemsEncountered,
     extractionSource: memo.extractionSource,
+    category: memo.category,
     recordedAt: memo.recordedAt,
   };
 }

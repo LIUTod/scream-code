@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises';
-import { join } from 'pathe';
+import { dirname, join, resolve } from 'pathe';
 
 import { resolveScreamHome } from '#/config/path';
 import { McpServerConfigSchema, type McpServerConfig } from '#/config/schema';
@@ -10,9 +10,14 @@ const McpJsonFileSchema = z.object({
   mcpServers: z.record(z.string(), McpServerConfigSchema).default({}),
 });
 
+/** Maximum number of parent directories to walk when discovering mcp.json. */
+const MAX_PARENT_WALK = 20;
+
 export interface McpJsonPaths {
   readonly user: string;
   readonly project: string;
+  /** Parent `.scream-code/mcp.json` paths, ordered from root to shallowest. */
+  readonly parents: readonly string[];
 }
 
 export interface ResolveMcpJsonPathsInput {
@@ -21,10 +26,24 @@ export interface ResolveMcpJsonPathsInput {
 }
 
 export function resolveMcpJsonPaths(input: ResolveMcpJsonPathsInput): McpJsonPaths {
+  const cwd = resolve(input.cwd);
   return {
     user: join(resolveScreamHome(input.homeDir), 'mcp.json'),
-    project: join(input.cwd, '.scream-code', 'mcp.json'),
+    project: join(cwd, '.scream-code', 'mcp.json'),
+    parents: findParentMcpJsonPaths(cwd),
   };
+}
+
+/** Walk up from `cwd` collecting `.scream-code/mcp.json` paths (root→shallow). */
+function findParentMcpJsonPaths(cwd: string): string[] {
+  const paths: string[] = [];
+  let dir = dirname(cwd);
+  for (let i = 0; i < MAX_PARENT_WALK && dir !== dirname(dir); i++) {
+    paths.push(join(dir, '.scream-code', 'mcp.json'));
+    dir = dirname(dir);
+  }
+  // Reverse so root is first, shallowest parent is last.
+  return paths.reverse();
 }
 
 export interface LoadMcpServersInput {
@@ -33,10 +52,14 @@ export interface LoadMcpServersInput {
 }
 
 /**
- * Load MCP server declarations from the user-global `~/.scream-code/mcp.json`
- * and the project-local `<cwd>/.scream-code/mcp.json`. Entries in the project
- * file override user-global entries with the same key, so a repo can specialise
- * or replace a shared definition.
+ * Load MCP server declarations from:
+ *   1. `~/.scream-code/mcp.json` (lowest priority)
+ *   2. Parent `.scream-code/mcp.json` files, root→shallow
+ *   3. `<cwd>/.scream-code/mcp.json` (highest project priority)
+ *
+ * Entries in deeper/nearer directories override those from ancestors, so a
+ * monorepo root can define shared MCP servers that child projects inherit
+ * and optionally override.
  *
  * Note: project-local entries may spawn stdio commands at session start, so
  * opening a session inside an untrusted checkout will execute whatever its
@@ -46,8 +69,9 @@ export async function loadMcpServers(
   input: LoadMcpServersInput,
 ): Promise<Record<string, McpServerConfig>> {
   const paths = resolveMcpJsonPaths({ cwd: input.cwd, homeDir: input.homeDir });
-  const [user, project] = await Promise.all([readMcpJson(paths.user), readMcpJson(paths.project)]);
-  return { ...user, ...project };
+  const allPaths = [paths.user, ...paths.parents, paths.project];
+  const results = await Promise.all(allPaths.map((p) => readMcpJson(p)));
+  return Object.assign({}, ...results);
 }
 
 async function readMcpJson(filePath: string): Promise<Record<string, McpServerConfig>> {

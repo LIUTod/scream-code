@@ -242,7 +242,10 @@ export class MemoryPickerComponent extends Container implements Focusable {
       const prompt = '搜索: ';
       const cursor = '█';
       const input = this.searchInput.length > 0 ? this.searchInput : cursor;
-      lines.push(chalk.hex(c.primary).bold(prompt) + chalk.hex(c.text)(input));
+      lines.push(truncateToWidth(
+        chalk.hex(c.primary).bold(prompt) + chalk.hex(c.text)(input),
+        width, ELLIPSIS,
+      ));
       lines.push(chalk.hex(c.primary)('─'.repeat(width)));
       return lines;
     }
@@ -356,8 +359,8 @@ export class MemoryPickerComponent extends Container implements Focusable {
 
     let header = chalk.hex(isSelected ? c.primary : c.textDim)(pointer + ' ');
     header += titleStyle(shownTitle);
-    if (trailingText.length > 0) header += '  ' + chalk.hex(c.textDim)(trailingText);
-    const card: string[] = [header];
+    if (trailingText.length > 0) header += chalk.hex(c.textDim)(trailingText);
+    const card: string[] = [truncateToWidth(header, width, ELLIPSIS)];
 
     // Second line: session + id
     const sessionLabel = memo.sourceSessionTitle && memo.sourceSessionTitle.length > 0
@@ -422,7 +425,9 @@ export class MemoryPickerComponent extends Container implements Focusable {
       lines.push('');
     }
 
-    lines.push(chalk.hex(c.textMuted)('  Enter/Esc 返回  |  i 注入  |  d 删除'));
+    lines.push(chalk.hex(c.textMuted)(
+      truncateToWidth('  Enter/Esc 返回  |  i 注入  |  d 删除', width, ELLIPSIS),
+    ));
     lines.push(chalk.hex(c.primary)('─'.repeat(width)));
     return lines;
   }

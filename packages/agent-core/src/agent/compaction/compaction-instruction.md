@@ -80,14 +80,22 @@ The goal of compaction is to keep essential code patterns, technical details, an
   "userRequirement": "<用户需求，一句话概括>",
   "solution": "<解决方案，2-4 句话>",
   "completionStatus": "<done | partially done | blocked | abandoned>",
-  "problemsEncountered": "<遇到的问题及解决方式，无则填 'none'>"
+  "problemsEncountered": "<遇到的问题及解决方式，无则填 'none'>",
+  "category": "<user_preference | feedback | project_context | reference>"
 }
 ```
+
+**category 判断规则**：
+- `user_preference`: 用户的行为偏好、工作习惯、个人风格或角色设定
+- `feedback`: 从错误中学到的经验、"应该这样做而不是那样做"的反馈
+- `project_context`: 项目架构、关键文件位置、进行中的重构或已知 bug
+- `reference`: 外部系统的链接或指针（如项目名、Slack 频道、文档 URL）
 
 注意：
 - 在 problemsEncountered 中记录重要的错误信息和修复方法
 - 跳过未完成的工作，除非其中包含有价值的错误修复经验
 - 将紧密相关的子任务合并为一条记忆
+- category 必须从上述四个值中选择一个，默认为 `project_context`
 - 严格遵守字段名和 JSON 格式，不要添加额外字段
 
 如果被压缩的消息中没有已完成的任务闭环，输出：

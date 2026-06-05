@@ -89,14 +89,14 @@ describe('HarnessAPI session skills', () => {
     const created = await rpc.createSession({ id: 'ses_builtin_skill_list', workDir });
 
     const skills = await rpc.listSkills({ sessionId: created.id });
-    const listed = skills.find((skill) => skill.name === 'mcp-config');
+    const listed = skills.find((skill) => skill.name === 'dream');
 
     expect(listed).toMatchObject({
-      name: 'mcp-config',
-      description: 'Configure MCP servers and handle MCP OAuth login.',
+      name: 'dream',
+      description: expect.stringContaining('整理记忆库'),
       source: 'builtin',
     });
-    expect(listed?.path).toBe('builtin://mcp-config');
+    expect(listed?.path).toBe('builtin://dream');
     expect(JSON.stringify(skills)).not.toContain('Your tool list contains one synthetic tool');
   });
 
@@ -386,14 +386,14 @@ describe('HarnessAPI session skills', () => {
     );
   });
 
-  it('registers builtin mcp-config skill, hides it from the model, and activates it via slash', async () => {
+  it('registers builtin dream skill, hides it from the model, and activates it via slash', async () => {
     const { core, events, rpc } = await createTestRpc();
     const created = await rpc.createSession({ id: 'ses_skill_builtin', workDir });
 
     const skills = await rpc.listSkills({ sessionId: created.id });
-    const builtin = skills.find((skill) => skill.name === 'mcp-config');
+    const builtin = skills.find((skill) => skill.name === 'dream');
     expect(builtin).toMatchObject({
-      name: 'mcp-config',
+      name: 'dream',
       source: 'builtin',
       disableModelInvocation: true,
     });
@@ -401,18 +401,18 @@ describe('HarnessAPI session skills', () => {
     const session = core.sessions.get(created.id);
     expect(session).toBeDefined();
     const invocable = session!.skills.listInvocableSkills();
-    expect(invocable.some((skill) => skill.name === 'mcp-config')).toBe(false);
-    expect(session!.skills.getModelSkillListing()).not.toContain('mcp-config');
+    expect(invocable.some((skill) => skill.name === 'dream')).toBe(false);
+    expect(session!.skills.getModelSkillListing()).not.toContain('dream');
 
     await rpc.activateSkill({
       sessionId: created.id,
       agentId: 'main',
-      name: 'mcp-config',
+      name: 'dream',
     });
     const activated = await waitForEvent(events, (event) => event.type === 'skill.activated');
     expect(activated).toMatchObject({
       type: 'skill.activated',
-      skillName: 'mcp-config',
+      skillName: 'dream',
       trigger: 'user-slash',
       skillSource: 'builtin',
     });
@@ -424,19 +424,19 @@ describe('HarnessAPI session skills', () => {
       type: 'turn.prompt',
       origin: {
         kind: 'skill_activation',
-        skillName: 'mcp-config',
+        skillName: 'dream',
         skillSource: 'builtin',
       },
     });
     const promptInput = (prompt as { input?: ReadonlyArray<{ text?: string }> } | undefined)?.input;
-    expect(promptInput?.[0]?.text).toContain('Interactive MCP server configuration');
+    expect(promptInput?.[0]?.text).toContain('Dream');
     expect(promptInput?.[0]?.text).toContain('AskUserQuestion');
   });
 
   it('lets a user-supplied skill override the builtin of the same name', async () => {
-    await writeSkill('mcp-config', [
+    await writeSkill('dream', [
       '---',
-      'name: mcp-config',
+      'name: dream',
       'description: Project-local override',
       '---',
       '',
@@ -446,9 +446,9 @@ describe('HarnessAPI session skills', () => {
     const created = await rpc.createSession({ id: 'ses_skill_builtin_override', workDir });
 
     const skills = await rpc.listSkills({ sessionId: created.id });
-    const listed = skills.find((skill) => skill.name === 'mcp-config');
+    const listed = skills.find((skill) => skill.name === 'dream');
     expect(listed).toMatchObject({
-      name: 'mcp-config',
+      name: 'dream',
       source: 'project',
       description: 'Project-local override',
     });
