@@ -26,7 +26,7 @@ export class McpOAuthAuthorizationUrlOpener {
       // Clear oldest half to prevent unbounded growth.
       const entries = [...this.openedAuthorizationUrls];
       for (let i = 0; i < entries.length / 2; i++) {
-        this.openedAuthorizationUrls.delete(entries[i]);
+        this.openedAuthorizationUrls.delete(entries[i]!);
       }
     }
     this.openedAuthorizationUrls.add(key);
