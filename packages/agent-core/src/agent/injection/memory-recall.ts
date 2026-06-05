@@ -1,4 +1,3 @@
-import type { MemoryMemoStore } from '@scream-cli/memory';
 import { rankMemos } from '@scream-cli/memory';
 
 import type { Agent } from '..';
