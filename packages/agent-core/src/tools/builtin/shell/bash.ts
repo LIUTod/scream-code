@@ -143,6 +143,124 @@ function withoutBackgroundDescription(description: string): string {
     );
 }
 
+// Block a command that matches a dangerous self-termination pattern.
+function rejectDangerousCommand(
+  pattern: string,
+  hint: string,
+): ExecutableToolResult {
+  return {
+    isError: true,
+    output:
+      `Scream Code self-protection blocked this command.\n\n` +
+      `The command matches a dangerous pattern (${pattern}) that could kill Scream Code's own process.\n\n` +
+      `Instead: ${hint}`,
+  };
+}
+
+function validateCommand(command: string, isWindows: boolean): ExecutableToolResult | null {
+  const cmd = command;
+
+  // kill -9 -1 / kill -KILL -1 — signal all processes (POSIX)
+  if (/\bkill\s+-9\s+-1\b/.test(cmd) || /\bkill\s+-KILL\s+-1\b/.test(cmd)) {
+    return rejectDangerousCommand(
+      'kill -9 -1',
+      "Use 'kill <pid>' with a specific PID to terminate the target process.",
+    );
+  }
+
+  // killall / pkill targeting node or scream (POSIX + Git Bash)
+  if (/\b(killall|pkill)\b.*\b(node|scream)/i.test(cmd)) {
+    return rejectDangerousCommand(
+      'killall/pkill node',
+      "Use 'kill <pid>' with a specific PID, or use the server's own stop command.",
+    );
+  }
+
+  if (isWindows) {
+    // tasklist + grep node/scream + taskkill pipeline
+    if (
+      /\btasklist\b/.test(cmd) &&
+      /\bgrep\b.*\b(node|scream)/i.test(cmd) &&
+      /\b(taskkill|tskill)\b/.test(cmd)
+    ) {
+      return rejectDangerousCommand(
+        'tasklist | grep node | taskkill pipeline',
+        "Use 'taskkill /PID <pid>' with the specific preview server PID. First run 'tasklist | grep -i node' to find the exact PID, then kill only that one.",
+      );
+    }
+
+    // taskkill /IM node.exe (kill by image name)
+    if (/\btaskkill\b.*\/IM\s+node/i.test(cmd)) {
+      return rejectDangerousCommand(
+        'taskkill /IM node.exe',
+        "Use 'taskkill /PID <pid>' with a specific PID instead of killing by image name.",
+      );
+    }
+
+    // wmic process where name='node.exe' delete
+    if (/\bwmic\s+process\s+.*where\s+.*name.*=.*node/i.test(cmd) && /\bdelete\b/i.test(cmd)) {
+      return rejectDangerousCommand(
+        'wmic process delete',
+        "Use 'taskkill /PID <pid>' with a specific PID instead.",
+      );
+    }
+
+    // PowerShell Stop-Process -Name node
+    if (/\bstop-process\b.*-Name\s+node/i.test(cmd)) {
+      return rejectDangerousCommand(
+        'Stop-Process -Name node',
+        "Use 'Stop-Process -Id <pid>' with a specific PID instead.",
+      );
+    }
+  } else {
+    // ps + grep node/scream + xargs kill pipeline (POSIX)
+    if (
+      /\bps\b/.test(cmd) &&
+      /\bgrep\b.*\b(node|scream)/i.test(cmd) &&
+      /\bxargs\s+kill\b/.test(cmd)
+    ) {
+      return rejectDangerousCommand(
+        'ps | grep node | xargs kill pipeline',
+        "Use 'kill <pid>' with a specific PID instead.",
+      );
+    }
+
+    // pgrep node/scream + xargs kill
+    if (/\bpgrep\b.*\b(node|scream)/i.test(cmd) && /\bxargs\s+kill\b/.test(cmd)) {
+      return rejectDangerousCommand(
+        'pgrep node | xargs kill',
+        "Use 'kill <pid>' with a specific PID instead.",
+      );
+    }
+  }
+
+  return null;
+}
+
+function buildSelfProtectionPreamble(isWindows: boolean): string {
+  if (isWindows) {
+    // Windows Git Bash: shadow taskkill, tskill, kill, pkill
+    return (
+      `_SCREAM_CHECK(){ for _a in "$@";do [ "$_a" = "$SCREAM_PID" ]&&{ ` +
+      `echo "Scream Code self-protection: refusing to kill itself (pid $SCREAM_PID). Use a specific non-Scream PID.">&2;return 1;` +
+      `};done;return 0;};` +
+      `kill(){ _SCREAM_CHECK "$@"||return 1;command kill "$@";};` +
+      `pkill(){ echo "Scream Code self-protection: pkill blocked. Use kill <pid>.">&2;return 1;};` +
+      `taskkill(){ _SCREAM_CHECK "$@"||return 1;command taskkill "$@";};` +
+      `tskill(){ _SCREAM_CHECK "$@"||return 1;command tskill "$@";};`
+    );
+  }
+  // POSIX: shadow kill, pkill, killall; also guard process-group kill (-pid)
+  return (
+    `_SCREAM_CHECK(){ for _a in "$@";do [ "$_a" = "$SCREAM_PID" ]||[ "$_a" = "-$SCREAM_PID" ]&&{ ` +
+    `echo "Scream Code self-protection: refusing to kill itself (pid $SCREAM_PID). Use a specific non-Scream PID.">&2;return 1;` +
+    `};done;return 0;};` +
+    `kill(){ _SCREAM_CHECK "$@"||return 1;command kill "$@";};` +
+    `pkill(){ echo "Scream Code self-protection: pkill blocked. Use kill <pid>.">&2;return 1;};` +
+    `killall(){ echo "Scream Code self-protection: killall blocked. Use kill <pid>.">&2;return 1;};`
+  );
+}
+
 export class BashTool implements BuiltinTool<BashInput> {
   readonly name = 'Bash' as const;
   readonly description: string;
@@ -187,10 +305,11 @@ export class BashTool implements BuiltinTool<BashInput> {
 
   private spawn(effectiveCwd: string, command: string): Promise<JianProcess> {
     const shellCwd = this.isWindowsBash ? windowsPathToPosixPath(effectiveCwd) : effectiveCwd;
+    const preamble = buildSelfProtectionPreamble(this.isWindowsBash);
     const shellArgs = [
       this.jian.osEnv.shellPath,
       '-c',
-      `cd ${shellQuote(shellCwd)} && ${command}`,
+      `cd ${shellQuote(shellCwd)} && ${preamble}; ${command}`,
     ];
 
     const noninteractiveEnv: Record<string, string> = {
@@ -201,6 +320,7 @@ export class BashTool implements BuiltinTool<BashInput> {
       // set one.
       GIT_TERMINAL_PROMPT: process.env['GIT_TERMINAL_PROMPT'] ?? '0',
       SHELL: this.jian.osEnv.shellPath,
+      SCREAM_PID: String(process.pid),
     };
 
     // Merge ambient env + noninteractive knobs so tools like git / node
@@ -219,6 +339,9 @@ export class BashTool implements BuiltinTool<BashInput> {
     if (args.command.length === 0) {
       return { isError: true, output: 'Command cannot be empty.' };
     }
+
+    const validationError = validateCommand(args.command, this.isWindowsBash);
+    if (validationError !== null) return validationError;
 
     if (args.run_in_background) {
       if (!this.allowBackground) {

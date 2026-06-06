@@ -55,7 +55,13 @@ function captureCommandRewrite(
       // The shell wrapper is "cd '<cwd>' && <rewritten>"; isolate the rewrite.
       const wrapped = argv[2]!;
       const match = /^cd '[^']+' && (.*)$/.exec(wrapped)!;
-      return { rewritten: match[1]!, argv };
+      // Strip self-protection preamble if present: _SCREAM_CHECK(){...};...};; <command>
+      let rewritten = match[1]!;
+      if (rewritten.startsWith('_SCREAM_CHECK(){')) {
+        const sep = rewritten.lastIndexOf('};; ');
+        if (sep !== -1) rewritten = rewritten.slice(sep + 4);
+      }
+      return { rewritten, argv };
     });
 }
 

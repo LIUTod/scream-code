@@ -103,6 +103,30 @@ const BUILTIN_REGISTRY: PluginMarketplaceEntry[] = [
     description: '完整学术研究管线：深度研究（13 Agent 团队 × 7 种模式）+ 学术写作（12 Agent 管线）+ 同行评审（7 Agent 多视角审稿），全流程覆盖',
     source: 'https://github.com/Imbad0202/academic-research-skills',
   },
+  {
+    id: 'taste-skill',
+    displayName: 'Taste Skill 品味提升',
+    description: '让 AI 拥有好品味，不再生成无聊、千篇一律的平庸内容',
+    source: 'https://github.com/Leonxlnx/taste-skill',
+  },
+  {
+    id: 'headroom',
+    displayName: 'Headroom 压缩优化',
+    description: '在内容送达 LLM 前压缩工具输出、日志、文件和 RAG 块，节省 60-95% Token，答案质量不变',
+    source: 'https://github.com/chopratejas/headroom',
+  },
+  {
+    id: 'composio',
+    displayName: 'Composio 工具集成',
+    description: '1000+ 工具集、工具搜索、上下文管理、认证和沙盒工作台，帮助构建能把意图转化为行动的 AI Agent',
+    source: 'https://github.com/ComposioHQ/composio',
+  },
+  {
+    id: 'remotion',
+    displayName: 'Remotion 视频编程',
+    description: '用 React 程序化生成视频，代码驱动动画、剪辑和渲染',
+    source: 'https://github.com/remotion-dev/remotion',
+  },
 ];
 
 // ─── Handler ────────────────────────────────────────────────────────────────
