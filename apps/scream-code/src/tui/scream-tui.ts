@@ -11,7 +11,6 @@ import type {
   ApprovalRequest,
   ApprovalResponse,
   BackgroundTaskInfo,
-  CreateSessionOptions,
   ScreamHarness,
   PermissionMode,
   PromptPart,
@@ -41,7 +40,7 @@ import { MoonLoader, type SpinnerStyle } from './components/chrome/moon-loader';
 import { PulseWaveLoader } from './components/chrome/pulse-wave-loader';
 import { WelcomeComponent } from './components/chrome/welcome';
 import { CompactionComponent } from './components/dialogs/compaction';
-import { HelpPanelComponent, type HelpPanelCommand } from './components/dialogs/help-panel';
+import type { HelpPanelCommand } from './components/dialogs/help-panel';
 import { AuthFlowController } from './controllers/auth-flow';
 import { EditorKeyboardController } from './controllers/editor-keyboard';
 import { SessionEventHandler } from './controllers/session-event-handler';
@@ -74,12 +73,9 @@ import { readUpdateCache } from '#/cli/update/cache';
 import { refreshUpdateCache } from '#/cli/update/refresh';
 import { selectUpdateTarget } from '#/cli/update/select';
 
-import { adaptPanelResponse } from './reverse-rpc/approval/adapter';
 import { ApprovalController } from './reverse-rpc/approval/controller';
-import { createApprovalRequestHandler } from './reverse-rpc/approval/handler';
 import { registerReverseRPCHandlers } from './reverse-rpc/index';
 import { QuestionController } from './reverse-rpc/question/controller';
-import { createQuestionAskHandler } from './reverse-rpc/question/handler';
 import type { ApprovalPanelData, QuestionPanelData } from './reverse-rpc/types';
 import { createScreamTUIThemeBundle } from './theme/bundle';
 import type { ResolvedTheme } from './theme/colors';
@@ -87,6 +83,7 @@ import type { Theme } from './theme/index';
 import {
   INITIAL_LIVE_PANE,
   type AppState,
+  type LoginProgressSpinnerHandle,
   type ScreamTUIOptions,
   type LivePaneState,
   type QueuedMessage,
@@ -103,10 +100,8 @@ import { ImageAttachmentStore, type ImageAttachment } from './utils/image-attach
 import { extractMediaAttachments } from './utils/image-placeholder';
 import { hasPatchChanges } from './utils/object-patch';
 import { setProcessTitle } from './utils/proctitle';
-import { sessionRowsForPicker } from './utils/session-picker-rows';
 import type { SessionRow } from './components/dialogs/session-picker';
 import { installTerminalFocusTracking } from './utils/terminal-focus';
-import { notifyTerminalOnce } from './utils/terminal-notification';
 import { installTerminalThemeTracking } from './utils/terminal-theme';
 import { detectTmuxKeyboardWarning } from './utils/tmux-keyboard';
 import { nextTranscriptId } from './utils/transcript-id';
@@ -115,7 +110,6 @@ import { DialogManager } from './managers/dialog-manager';
 
 export type { TUIState } from './tui-state';
 export { createTUIState } from './tui-state';
-import type { LoginProgressSpinnerHandle } from './types';
 
 export type {
   ScreamTUIOptions,
@@ -1460,8 +1454,8 @@ export class ScreamTUI {
     this.dialogManager.hideSessionPicker();
   }
 
-  async showMemoryPicker(): Promise<void> {
-    await this.dialogManager.showMemoryPicker();
+  showMemoryPicker(): void {
+    this.dialogManager.showMemoryPicker();
   }
 
   hideMemoryPicker(): void {

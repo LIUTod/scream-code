@@ -3,7 +3,6 @@ import type {
   ApprovalResponse,
   CreateSessionOptions,
   ScreamHarness,
-  PermissionMode,
   Session,
 } from '@scream-cli/scream-code-sdk';
 import { LLM_NOT_SET_MESSAGE, MAIN_AGENT_ID, NO_ACTIVE_SESSION_MESSAGE } from '../constant/scream-tui';

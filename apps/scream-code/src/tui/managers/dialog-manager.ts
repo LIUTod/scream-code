@@ -1,6 +1,5 @@
 import type { Component, Focusable } from '@earendil-works/pi-tui';
 import type {
-  ApprovalResponse,
   ScreamHarness,
   Session,
 } from '@scream-cli/scream-code-sdk';
@@ -15,7 +14,6 @@ import { MemoryPickerComponent } from '../components/dialogs/memory-picker';
 import { SessionPickerComponent, type SessionRow } from '../components/dialogs/session-picker';
 import { QuestionDialogComponent } from '../components/dialogs/question-dialog';
 import { formatMemoryMemoForInjection } from '../commands/memory';
-import { sessionRowsForPicker } from '../utils/session-picker-rows';
 import { notifyTerminalOnce } from '../utils/terminal-notification';
 import { adaptPanelResponse } from '../reverse-rpc/approval/adapter';
 import type { ApprovalController } from '../reverse-rpc/approval/controller';
@@ -143,7 +141,7 @@ export class DialogManager {
                   await this.host.switchToSession(session, `已连接 CC 会话 (${session.id})。`);
                   this.hideSessionPicker();
                 }
-              } catch (err) {
+              } catch {
                 this.host.showError(`创建会话失败`);
               }
             }
