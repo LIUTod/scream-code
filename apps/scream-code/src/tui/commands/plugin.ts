@@ -174,8 +174,11 @@ async function uninstallAndReport(host: SlashCommandHost, id: string): Promise<v
 // ─── Plugin panel ───────────────────────────────────────────────────────────
 
 async function openPluginPanel(host: SlashCommandHost): Promise<void> {
-  const marketplace = await loadSafe(host);
-  const installed = await loadInstalled(host);
+  host.showStatus('正在加载插件中心…', 'cyan');
+  const [marketplace, installed] = await Promise.all([
+    loadSafe(host),
+    loadInstalled(host),
+  ]);
 
   const options = buildOptions(marketplace, installed);
   if (options.length === 0) {
