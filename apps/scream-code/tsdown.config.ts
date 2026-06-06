@@ -29,7 +29,7 @@ export default defineConfig({
     [BUILT_IN_CATALOG_DEFINE]: builtInCatalogDefine(),
   },
   deps: {
-    alwaysBundle: [/^@scream-cli\//],
+    alwaysBundle: [/^@scream-./],
     neverBundle: [],
   },
 });

@@ -1,5 +1,5 @@
 {
-  "name": "@scream-cli/memory",
+  "name": "@scream-code/memory",
   "version": "0.1.0",
   "private": true,
   "description": "Persistent memory memo store for cross-session knowledge sharing",

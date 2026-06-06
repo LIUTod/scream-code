@@ -33,7 +33,7 @@ import { ConfigState } from './config';
 import { ContextMemory } from './context';
 import { HookEngine } from '../session/hooks';
 import { InjectionManager } from './injection/manager';
-import { DreamTracker, EXIT_EXTRACTION_SYSTEM_PROMPT, MemoryMemoStore, buildExitExtractionPrompt, parseMemoryMemos } from '@scream-cli/memory';
+import { DreamTracker, EXIT_EXTRACTION_SYSTEM_PROMPT, MemoryMemoStore, buildExitExtractionPrompt, parseMemoryMemos } from '@scream-code/memory';
 import { PermissionManager, type PermissionManagerOptions } from './permission';
 import { PlanMode } from './plan';
 import { SessionMemory } from './session-memory';

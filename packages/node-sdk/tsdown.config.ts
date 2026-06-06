@@ -26,7 +26,7 @@ export default defineConfig({
     '@scream-cli/ltod': fileURLToPath(new URL('../ltod/src/index.ts', import.meta.url)),
   },
   deps: {
-    alwaysBundle: [/^@scream-cli\//],
+    alwaysBundle: [/^@scream-./],
     neverBundle: [],
   },
 });

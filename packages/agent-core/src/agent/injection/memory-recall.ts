@@ -1,4 +1,4 @@
-import { rankMemos } from '@scream-cli/memory';
+import { rankMemos } from '@scream-code/memory';
 
 import type { Agent } from '..';
 import { DynamicInjector } from './injector';

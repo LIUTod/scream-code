@@ -57,6 +57,7 @@
   "dependencies": {
     "@earendil-works/pi-tui": "^0.74.0",
     "@mariozechner/clipboard": "^0.3.2",
+    "@scream-code/memory": "workspace:*",
     "chalk": "^5.4.1",
     "cli-highlight": "^2.1.11",
     "commander": "^13.1.0",

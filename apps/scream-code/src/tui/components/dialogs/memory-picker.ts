@@ -24,8 +24,8 @@ import {
 } from '@earendil-works/pi-tui';
 import chalk from 'chalk';
 
-import type { MemoryMemo, MemoryMemoSummary } from '@scream-cli/memory';
-import { MemoryMemoStore } from '@scream-cli/memory';
+import type { MemoryMemo, MemoryMemoSummary } from '@scream-code/memory';
+import { MemoryMemoStore } from '@scream-code/memory';
 
 import type { ColorPalette } from '#/tui/theme/colors';
 import { printableChar } from '#/tui/utils/printable-key';

@@ -1,4 +1,4 @@
-import type { MemoryMemoSummary } from '@scream-cli/memory';
+import type { MemoryMemoSummary } from '@scream-code/memory';
 
 import type { SlashCommandHost } from './dispatch';
 

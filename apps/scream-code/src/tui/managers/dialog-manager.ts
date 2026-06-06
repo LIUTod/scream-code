@@ -3,7 +3,7 @@ import type {
   ScreamHarness,
   Session,
 } from '@scream-cli/scream-code-sdk';
-import { MemoryMemoStore, resolveProjectDir, type MemoryMemoSummary } from '@scream-cli/memory';
+import { MemoryMemoStore, resolveProjectDir, type MemoryMemoSummary } from '@scream-code/memory';
 import { getDataDir } from '#/utils/paths';
 import type { TUIState } from '../tui-state';
 import type { LivePaneState } from '../types';
