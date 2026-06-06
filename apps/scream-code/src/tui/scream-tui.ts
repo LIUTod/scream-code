@@ -40,22 +40,8 @@ import { CHROME_GUTTER } from './constant/rendering';
 import { MoonLoader, type SpinnerStyle } from './components/chrome/moon-loader';
 import { PulseWaveLoader } from './components/chrome/pulse-wave-loader';
 import { WelcomeComponent } from './components/chrome/welcome';
-import {
-  ApprovalPanelComponent,
-  type ApprovalPanelResponse,
-} from './components/dialogs/approval-panel';
-import {
-  ApprovalPreviewViewer,
-  type ApprovalPreviewBlock,
-} from './components/dialogs/approval-preview';
 import { CompactionComponent } from './components/dialogs/compaction';
 import { HelpPanelComponent } from './components/dialogs/help-panel';
-import { QuestionDialogComponent } from './components/dialogs/question-dialog';
-import { SessionPickerComponent } from './components/dialogs/session-picker';
-import { MemoryPickerComponent } from './components/dialogs/memory-picker';
-import { formatMemoryMemoForInjection } from './commands/memory';
-import { MemoryMemoStore, resolveProjectDir, type MemoryMemoSummary } from '@scream-cli/memory';
-import { getDataDir } from '#/utils/paths';
 import { AuthFlowController } from './controllers/auth-flow';
 import { EditorKeyboardController } from './controllers/editor-keyboard';
 import { SessionEventHandler } from './controllers/session-event-handler';
@@ -118,11 +104,14 @@ import { extractMediaAttachments } from './utils/image-placeholder';
 import { hasPatchChanges } from './utils/object-patch';
 import { setProcessTitle } from './utils/proctitle';
 import { sessionRowsForPicker } from './utils/session-picker-rows';
+import type { SessionRow } from './components/dialogs/session-picker';
 import { installTerminalFocusTracking } from './utils/terminal-focus';
 import { notifyTerminalOnce } from './utils/terminal-notification';
 import { installTerminalThemeTracking } from './utils/terminal-theme';
 import { detectTmuxKeyboardWarning } from './utils/tmux-keyboard';
 import { nextTranscriptId } from './utils/transcript-id';
+import { SessionManager } from './managers/session-manager';
+import { DialogManager } from './managers/dialog-manager';
 
 export type { TUIState } from './tui-state';
 export { createTUIState } from './tui-state';
@@ -194,9 +183,8 @@ export class ScreamTUI {
   readonly options: ScreamTUIOptions;
   session: Session | undefined;
   state: TUIState;
-  private readonly approvalController = new ApprovalController();
-  private readonly questionController = new QuestionController();
-  private readonly reverseRpcDisposers: Array<() => void> = [];
+  readonly approvalController = new ApprovalController();
+  readonly questionController = new QuestionController();
   private skillCommands: readonly ScreamSlashCommand[] = [];
   readonly skillCommandMap = new Map<string, string>();
   private readonly imageStore = new ImageAttachmentStore();
@@ -211,30 +199,19 @@ export class ScreamTUI {
   private signalCleanupHandlers: Array<() => void> = [];
   private isShuttingDown = false;
   private ccConnectPollTimer: ReturnType<typeof setInterval> | undefined;
+  readonly reverseRpcDisposers: Array<() => void> = [];
   private welcomeComponent: WelcomeComponent | undefined;
-  private startupNotice: string | undefined;
+  startupNotice: string | undefined;
   private lastActivityMode: string | undefined;
   private lastHistoryContent: string | undefined;
+  readonly sessionManager: SessionManager;
+  readonly dialogManager: DialogManager;
   readonly streamingUI: StreamingUIController;
   readonly authFlow: AuthFlowController;
   readonly sessionEventHandler: SessionEventHandler;
   readonly sessionReplay: SessionReplayRenderer;
   readonly tasksBrowserController: TasksBrowserController;
   readonly editorKeyboard: EditorKeyboardController;
-
-  // The currently-mounted approval panel, if any. Kept so the full-screen
-  // preview viewer can restore focus to the exact same instance (and its
-  // selection / feedback state) when it closes.
-  private activeApprovalPanel: ApprovalPanelComponent | undefined;
-  // Active full-screen approval preview. While set, the root UI's normal
-  // children are stashed in `savedChildren`; closing restores them.
-  private approvalPreview:
-    | {
-        component: ApprovalPreviewViewer;
-        savedChildren: readonly Component[];
-        panel: ApprovalPanelComponent;
-      }
-    | undefined;
 
   public onExit?: (exitCode?: number) => Promise<void>;
 
@@ -288,6 +265,8 @@ export class ScreamTUI {
     this.tasksBrowserController = new TasksBrowserController(this);
     this.editorKeyboard = new EditorKeyboardController(this, this.imageStore);
     this.editorKeyboard.install();
+    this.sessionManager = new SessionManager(this);
+    this.dialogManager = new DialogManager(this);
     this.buildLayout();
   }
 
@@ -426,76 +405,18 @@ export class ScreamTUI {
 
   private async init(): Promise<boolean> {
     await this.authFlow.refreshAvailableModels();
-
-    const { startup } = this.options;
-    const { workDir } = this.state.appState;
-    let session: Session | undefined;
-    let shouldReplayHistory = false;
-    const isResumeStartup = startup.sessionFlag !== undefined || startup.continueLast;
-    const createSessionOptions: CreateSessionOptions = {
-      workDir,
-      model: startup.model,
-      permission: startup.auto ? 'auto' : startup.yolo ? 'yolo' : undefined,
-      planMode: startup.plan ? true : undefined,
-    };
-
-    if (isResumeStartup) {
-      if (startup.sessionFlag === '') {
-        this.state.startupState = 'picker';
+    try {
+      const { shouldReplay } = await this.sessionManager.init({
+        startup: this.options.startup,
+        workDir: this.state.appState.workDir,
+      });
+      return shouldReplay;
+    } catch (error) {
+      if (error instanceof Error && error.message === 'picker') {
         return false;
       }
-
-      if (startup.sessionFlag !== undefined) {
-        const sessions = await this.harness.listSessions({
-          sessionId: startup.sessionFlag,
-          workDir,
-        });
-        const target = sessions[0];
-        if (target === undefined) {
-          throw new Error(`未找到会话 "${startup.sessionFlag}"。`);
-        }
-        if (target.workDir !== workDir) {
-          this.state.ui.stop();
-          process.stderr.write(
-            `${chalk.yellow(
-              `会话 "${startup.sessionFlag}" 是在其他目录下创建的。\n` +
-                `  cd "${target.workDir}" && scream -r ${startup.sessionFlag}`,
-            )}\n\n`,
-          );
-          throw new Error(
-            `会话 "${startup.sessionFlag}" 是在其他目录下创建的。`,
-          );
-        }
-        session = await this.harness.resumeSession({ id: startup.sessionFlag });
-        shouldReplayHistory = true;
-      } else {
-        const sessions = await this.harness.listSessions({ workDir });
-        const target = sessions[0];
-        if (target !== undefined) {
-          session = await this.harness.resumeSession({ id: target.id });
-          shouldReplayHistory = true;
-        } else {
-          session = await this.harness.createSession(createSessionOptions);
-          this.startupNotice =
-            this.startupNotice !== undefined
-              ? `${this.startupNotice}\n"${workDir}" 下没有可继续的会话；正在启动新会话。`
-              : `"${workDir}" 下没有可继续的会话；正在启动新会话。`;
-        }
-      }
-    } else {
-      session = await this.harness.createSession(createSessionOptions);
+      throw error;
     }
-    if (session !== undefined && startup.model !== undefined && isResumeStartup) {
-      await session.setModel(startup.model);
-    }
-
-    if (session === undefined) {
-      throw new Error('启动会话未初始化。');
-    }
-    await this.setSession(session);
-    await this.syncRuntimeState(session);
-    this.state.startupState = 'ready';
-    return shouldReplayHistory;
   }
 
   async stop(exitCode?: number): Promise<void> {
@@ -514,7 +435,7 @@ export class ScreamTUI {
     }
     this.reverseRpcDisposers.length = 0;
     this.disposeTerminalTracking();
-    await this.closeSession('shutting down');
+    await this.closeSession();
     await this.harness.close();
     this.sessionEventHandler.stopAllMcpServerStatusSpinners();
     this.state.ui.stop();
@@ -926,6 +847,22 @@ export class ScreamTUI {
     return this.state.transcriptEntries.length > 0;
   }
 
+  getCurrentWorkDir(): string {
+    return this.state.appState.workDir;
+  }
+
+  getSessions(): SessionRow[] {
+    return this.state.sessions;
+  }
+
+  getIsLoadingSessions(): boolean {
+    return this.state.loadingSessions;
+  }
+
+  async deleteSession(sessionId: string): Promise<void> {
+    await this.harness.deleteSession(sessionId);
+  }
+
   async getStartupMcpMs(): Promise<number> {
     const session = this.session;
     if (session === undefined) return 0;
@@ -1006,33 +943,11 @@ export class ScreamTUI {
   }
 
   async setSession(session: Session): Promise<void> {
-    const previous = this.unloadCurrentSession('switching session');
-    await previous?.close();
-    this.session = session;
-    this.harness.setTelemetryContext({ sessionId: session.id });
-    this.registerSessionHandlers(session);
+    await this.sessionManager.setSession(session);
   }
 
   async syncRuntimeState(session: Session = this.requireSession()): Promise<void> {
-    const status = await session.getStatus();
-    const custom = session.metadata?.['custom'] as Record<string, unknown> | undefined;
-    const goalMeta = custom?.['goal'] as
-      | { active: boolean; content: string | null; continuationCount: number }
-      | undefined;
-    this.setAppState({
-      sessionId: session.id,
-      model: status.model ?? '',
-      thinking: status.thinkingLevel !== 'off',
-      permissionMode: status.permission,
-      planMode: status.planMode,
-      contextTokens: status.contextTokens,
-      maxContextTokens: status.maxContextTokens,
-      contextUsage: status.contextUsage,
-      sessionTitle: session.summary?.title ?? null,
-      goal: goalMeta?.content ?? null,
-      goalActive: goalMeta?.active ?? false,
-      goalContinuationCount: goalMeta?.continuationCount ?? 0,
-    });
+    await this.sessionManager.syncRuntimeState(session);
   }
 
   // Plan mode is set by createSession — do not re-enter it here.
@@ -1042,57 +957,12 @@ export class ScreamTUI {
     await this.syncRuntimeState(session);
   }
 
-  async closeSession(reason: string): Promise<void> {
-    const previous = this.unloadCurrentSession(reason);
-    await previous?.close();
-  }
-
-  private unloadCurrentSession(reason: string): Session | undefined {
-    const previous = this.session;
-    this.sessionEventUnsubscribe?.();
-    this.sessionEventUnsubscribe = undefined;
-    this.clearReverseRpcPanels();
-    previous?.setApprovalHandler(undefined);
-    previous?.setQuestionHandler(undefined);
-    this.approvalController.cancelAll(reason);
-    this.questionController.cancelAll(reason);
-    this.session = undefined;
-    this.harness.setTelemetryContext({ sessionId: null });
-    return previous;
-  }
-
-  private clearReverseRpcPanels(): void {
-    for (const dispose of this.reverseRpcDisposers) {
-      dispose();
-    }
-    // Clear the array so session-switch (unloadCurrentSession) doesn't leave
-    // stale disposers that would be double-disposed on the next call.
-    this.reverseRpcDisposers.length = 0;
-  }
-
-  private registerSessionHandlers(session: Session): void {
-    session.setApprovalHandler(
-      createApprovalRequestHandler(this.approvalController, (request, response) => {
-        this.appendApprovalTranscriptEntry(request, response);
-      }),
-    );
-    session.setQuestionHandler(createQuestionAskHandler(this.questionController));
+  async closeSession(): Promise<void> {
+    await this.sessionManager.closeSession();
   }
 
   async fetchSessions(): Promise<void> {
-    this.state.loadingSessions = true;
-    try {
-      const sessions = await this.harness.listSessions({});
-      this.state.sessions = sessionRowsForPicker(
-        sessions,
-        this.state.appState.sessionId,
-        this.hasSessionContent(),
-      );
-    } catch {
-      /* silently ignore */
-    } finally {
-      this.state.loadingSessions = false;
-    }
+    await this.sessionManager.fetchSessions();
   }
 
   private async checkForUpdates(): Promise<void> {
@@ -1116,73 +986,16 @@ export class ScreamTUI {
   }
 
   resetSessionRuntime(): void {
-    this.aborted = false;
-    this.streamingUI.discardPending();
-    this.state.queuedMessages = [];
-    this.harness.interactiveAgentId = MAIN_AGENT_ID;
-    this.streamingUI.resetToolCallState();
-    this.streamingUI.resetToolUi();
-    this.sessionEventHandler.resetRuntimeState();
-    this.tasksBrowserController.close();
-    this.state.footer.setBackgroundCounts({ bashTasks: 0, agentTasks: 0 });
-    this.streamingUI.setTodoList([]);
-    this.streamingUI.setTurnId(undefined);
-    this.streamingUI.setStep(0);
-    this.streamingUI.resetLiveText();
-    this.updateQueueDisplay();
+    this.sessionManager.resetSessionRuntime();
   }
 
-  private async resumeSession(targetSessionId: string): Promise<boolean> {
-    if (targetSessionId === this.state.appState.sessionId) {
-      this.showStatus('已在该会话中。');
-      return true;
-    }
-    if (this.state.appState.streamingPhase !== 'idle') {
-      this.showError('流式传输期间无法切换会话 — 请先按 Esc 或 Ctrl-C。');
-      return false;
-    }
-    if (this.state.appState.isReplaying) {
-      this.showError('历史回放期间无法切换会话。');
-      return false;
-    }
-
-    let session: Session;
-    try {
-      session = await this.harness.resumeSession({ id: targetSessionId });
-    } catch (error) {
-      const msg = formatErrorMessage(error);
-      this.showError(`恢复会话 ${targetSessionId} 失败：${msg}`);
-      return false;
-    }
-
-    await this.switchToSession(session, `已恢复会话 (${session.id})。`);
-    return true;
+  async resumeSession(targetSessionId: string): Promise<boolean> {
+    const result = await this.sessionManager.resumeSession(targetSessionId);
+    return result.switched;
   }
 
   async switchToSession(session: Session, statusMessage: string): Promise<void> {
-    this.resetSessionRuntime();
-    await this.setSession(session);
-    await this.syncRuntimeState(session);
-    this.refreshSessionTitle();
-    try {
-      await this.refreshSkillCommands(this.session);
-    } catch {
-      /* keep the switched session usable even if dynamic skills fail */
-    }
-    this.clearTranscriptAndRedraw();
-    try {
-      await this.sessionReplay.hydrateFromReplay(session);
-    } catch (error) {
-      const msg = formatErrorMessage(error);
-      this.showError(`重放会话历史失败：${msg}`);
-    } finally {
-      this.sessionEventHandler.startSubscription();
-    }
-    const resumeState = session.getResumeState();
-    if (resumeState?.warning !== undefined) {
-      this.showStatus(`警告：${resumeState.warning}`, this.state.theme.colors.warning);
-    }
-    this.showStatus(statusMessage);
+    await this.sessionManager.switchToSession(session, statusMessage);
   }
 
   async createNewSession(): Promise<void> {
@@ -1191,35 +1004,7 @@ export class ScreamTUI {
       return;
     }
 
-    let session: Session;
-    try {
-      session = await this.createSessionFromCurrentState();
-    } catch (error) {
-      const msg = formatErrorMessage(error);
-      this.showError(`启动新会话失败：${msg}`);
-      return;
-    }
-
-    this.resetSessionRuntime();
-    await this.setSession(session);
-    this.setAppState({ sessionId: session.id });
-    try {
-      await this.activateRuntime();
-      await this.syncRuntimeState(session);
-    } catch (error) {
-      this.sessionEventHandler.startSubscription();
-      const msg = formatErrorMessage(error);
-      this.showError(`创建后设置失败：${msg}`);
-      return;
-    }
-    try {
-      await this.refreshSkillCommands(this.session);
-    } catch {
-      /* keep the new session usable even if dynamic skills fail */
-    }
-    this.sessionEventHandler.startSubscription();
-    this.clearTranscriptAndRedraw();
-    this.showStatus(`已启动新会话 (${session.id})。`);
+    await this.sessionManager.createNewSession();
   }
 
   // =========================================================================
@@ -1318,7 +1103,7 @@ export class ScreamTUI {
     }
   }
 
-  private appendApprovalTranscriptEntry(request: ApprovalRequest, response: ApprovalResponse): void {
+  appendApprovalTranscriptEntry(request: ApprovalRequest, response: ApprovalResponse): void {
     if (request.toolName === 'ExitPlanMode' || request.display.kind === 'plan_review') return;
     const parts: string[] = [];
     switch (response.decision) {
@@ -1363,7 +1148,7 @@ export class ScreamTUI {
     this.state.terminal.write(deleteAllKittyImages());
   }
 
-  private clearTranscriptAndRedraw(): void {
+  clearTranscriptAndRedraw(): void {
     this.streamingUI.discardPending();
     this.state.transcriptEntries = [];
     this.streamingUI.disposeActiveCompactionBlock();
@@ -1678,240 +1463,48 @@ export class ScreamTUI {
   }
 
   showHelpPanel(): void {
-    this.state.activeDialog = 'help';
-    this.mountEditorReplacement(
-      new HelpPanelComponent({
-        commands: this.getSlashCommands(),
-        colors: this.state.theme.colors,
-        onClose: () => {
-          this.hideHelpPanel();
-        },
-      }),
-    );
+    this.dialogManager.showHelpPanel(this.getSlashCommands() as any);
   }
 
   private hideHelpPanel(): void {
-    this.state.activeDialog = null;
-    this.restoreEditor();
+    this.dialogManager.hideHelpPanel();
   }
 
   async showSessionPicker(): Promise<void> {
-    await this.fetchSessions();
-    this.mountSessionPicker(() => {
-      this.hideSessionPicker();
-    });
+    await this.dialogManager.showSessionPicker();
   }
 
   private async bootstrapFromPicker(): Promise<void> {
     await this.fetchSessions();
-    this.mountSessionPicker(() => {
-      this.hideSessionPicker();
-      void this.stop();
-    });
+    this.dialogManager.showSessionPicker();
   }
 
   hideSessionPicker(): void {
-    this.state.activeDialog = null;
-    this.restoreEditor();
+    this.dialogManager.hideSessionPicker();
   }
 
   async showMemoryPicker(): Promise<void> {
-    const store = new MemoryMemoStore(
-      resolveProjectDir(getDataDir(), this.state.appState.workDir),
-    );
-    let memos: MemoryMemoSummary[] = [];
-    let total = 0;
-    try {
-      const result = await store.list({ limit: 50 });
-      memos = result.memos;
-      total = result.total;
-    } catch {
-      // show empty list on error
-    }
-
-    this.state.activeDialog = 'memory-picker';
-    this.mountEditorReplacement(
-      new MemoryPickerComponent({
-        store,
-        memos,
-        total,
-        loading: false,
-        colors: this.state.theme.colors,
-        onCancel: () => {
-          this.hideMemoryPicker();
-        },
-        onInject: (memo) => {
-          const injection = formatMemoryMemoForInjection(memo);
-          this.sendNormalUserInput(injection);
-          this.showStatus(`已注入备忘录 #${memo.id}`);
-          this.hideMemoryPicker();
-        },
-      }),
-    );
+    await this.dialogManager.showMemoryPicker();
   }
 
   hideMemoryPicker(): void {
-    this.state.activeDialog = null;
-    this.restoreEditor();
-  }
-
-  private mountSessionPicker(onCancel: () => void): void {
-    this.state.activeDialog = 'session-picker';
-    this.mountEditorReplacement(
-      new SessionPickerComponent({
-        sessions: this.state.sessions,
-        loading: this.state.loadingSessions,
-        currentSessionId: this.state.appState.sessionId,
-        colors: this.state.theme.colors,
-        onSelect: (pickerId: string) => {
-          const row = this.state.sessions.find((s) => s.id === pickerId);
-          const isCc = row?.metadata?.['source'] === 'cc-connect';
-          const realId = isCc
-            ? (row!.metadata!['agentSessionId'] as string)
-            : pickerId;
-          void this.resumeSession(realId).then(async (switched) => {
-            if (switched) {
-              this.hideSessionPicker();
-              return;
-            }
-            // Resume failed.  For CC sessions the ScreamCode session directory
-            // may not exist yet (e.g. cleaned up by an older version).  Create
-            // a fresh session with the same ID so CC reconnects correctly.
-            if (isCc) {
-              try {
-                const session = await this.harness.createSession({
-                  id: realId,
-                  workDir: this.state.appState.workDir,
-                  model: this.state.appState.model,
-                  permission: this.state.appState.permissionMode,
-                });
-                await this.switchToSession(session, `已连接 CC 会话 (${session.id})。`);
-                this.hideSessionPicker();
-              } catch (err) {
-                this.showError(`创建会话失败：${formatErrorMessage(err)}`);
-              }
-            }
-          });
-        },
-        onCancel,
-        onDelete: (sessionId: string) => {
-          const row = this.state.sessions.find((s) => s.id === sessionId);
-          if (row?.metadata?.['source'] === 'cc-connect') {
-            // CC sessions are managed by cc-connect; skip deletion.
-            this.showStatus('CC 会话由 cc-connect 管理，请在聊天通道中操作。');
-            return;
-          }
-          void this.harness.deleteSession(sessionId).then(async () => {
-            await this.fetchSessions();
-            if (this.state.sessions.length === 0) {
-              this.hideSessionPicker();
-            } else if (this.state.activeDialog === 'session-picker') {
-              this.mountSessionPicker(onCancel);
-            }
-          });
-        },
-      }),
-    );
+    this.dialogManager.hideMemoryPicker();
   }
 
   private showApprovalPanel(payload: ApprovalPanelData): void {
-    this.patchLivePane({ pendingApproval: { data: payload } });
-    notifyTerminalOnce(this.state, `approval:${payload.id}`, {
-      title: 'Scream Code 需要审批',
-      body: payload.tool_name,
-    });
-    const panel = new ApprovalPanelComponent(
-      { data: payload },
-      (response: ApprovalPanelResponse) => {
-        this.approvalController.respond(adaptPanelResponse(response));
-      },
-      this.state.theme.colors,
-      () => {
-        this.toggleToolOutputExpansion();
-      },
-      () => {
-        this.togglePlanExpansion();
-      },
-      (block) => {
-        this.openApprovalPreview(panel, block);
-      },
-    );
-    this.activeApprovalPanel = panel;
-    this.mountEditorReplacement(panel);
+    this.dialogManager.showApprovalPanel(payload);
   }
 
   private hideApprovalPanel(): void {
-    // If the full-screen preview is open, fold it back first so the saved-
-    // children stack stays consistent with what mountEditorReplacement set up.
-    if (this.approvalPreview !== undefined) this.closeApprovalPreview();
-    this.activeApprovalPanel = undefined;
-    this.patchLivePane({ pendingApproval: null });
-    this.restoreEditor();
-  }
-
-  // Mounts the full-screen approval preview viewer on top of the current
-  // approval panel. Uses the same nested-takeover pattern as
-  // openTaskOutputViewer: we snapshot the root container's children, swap
-  // in the viewer, and restore on close. The approval panel instance is
-  // kept around in `activeApprovalPanel` so its selection state survives.
-  private openApprovalPreview(panel: ApprovalPanelComponent, block: ApprovalPreviewBlock): void {
-    if (this.approvalPreview !== undefined) return;
-    const savedChildren = [...this.state.ui.children];
-    const viewer = new ApprovalPreviewViewer(
-      {
-        block,
-        colors: this.state.theme.colors,
-        onClose: () => {
-          this.closeApprovalPreview();
-        },
-      },
-      this.state.terminal,
-    );
-    this.state.ui.clear();
-    this.state.ui.addChild(viewer);
-    this.state.ui.setFocus(viewer);
-    this.state.ui.requestRender(true);
-    this.approvalPreview = { component: viewer, savedChildren, panel };
-  }
-
-  private closeApprovalPreview(): void {
-    const preview = this.approvalPreview;
-    if (preview === undefined) return;
-    this.approvalPreview = undefined;
-    this.state.ui.clear();
-    for (const child of preview.savedChildren) {
-      this.state.ui.addChild(child);
-    }
-    this.state.ui.setFocus(preview.panel);
-    this.state.ui.requestRender(true);
+    this.dialogManager.hideApprovalPanel();
   }
 
   private showQuestionDialog(payload: QuestionPanelData): void {
-    this.patchLivePane({ pendingQuestion: { data: payload } });
-    notifyTerminalOnce(this.state, `question:${payload.id}`, {
-      title: 'Scream Code 需要您的回答',
-      body: payload.questions[0]?.question,
-    });
-    const dialog = new QuestionDialogComponent(
-      { data: payload },
-      (response) => {
-        this.questionController.respond(response);
-      },
-      this.state.theme.colors,
-      undefined,
-      () => {
-        this.toggleToolOutputExpansion();
-      },
-      () => {
-        this.togglePlanExpansion();
-      },
-    );
-    this.mountEditorReplacement(dialog);
+    this.dialogManager.showQuestionDialog(payload);
   }
 
   private hideQuestionDialog(): void {
-    this.patchLivePane({ pendingQuestion: null });
-    this.restoreEditor();
+    this.dialogManager.hideQuestionDialog();
   }
 
 }
