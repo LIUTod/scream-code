@@ -6,9 +6,13 @@
  */
 
 import { execFileSync } from 'node:child_process';
+import { resolve } from 'node:path';
+import { existsSync } from 'node:fs';
 
 export function createDesktopShortcut() {
   if (process.platform !== 'win32') return;
+
+  const iconPath = resolve(import.meta.dirname, '../../icon.ico');
 
   try {
     execFileSync(
@@ -17,7 +21,10 @@ export function createDesktopShortcut() {
         '-NoProfile',
         '-ExecutionPolicy', 'Bypass',
         '-Command',
-        shortcutPowerShellScript,
+        shortcutPowerShellScript.replace(
+          '__ICON_LOCATION__',
+          existsSync(iconPath) ? iconPath : '',
+        ),
       ],
       { stdio: 'ignore', timeout: 10_000 },
     );
@@ -57,5 +64,11 @@ else {
 
 $Shortcut.WorkingDirectory = $env:USERPROFILE
 $Shortcut.Description      = 'Scream Code - AI 命令行助手'
+
+$IconPath = '__ICON_LOCATION__'
+if ($IconPath -and (Test-Path $IconPath)) {
+    $Shortcut.IconLocation = $IconPath
+}
+
 $Shortcut.Save()
 `.trim();
