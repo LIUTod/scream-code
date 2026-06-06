@@ -58,10 +58,17 @@ export async function resolveGithubSource(
   }
 
   // No release we could resolve. Fall back to the default branch via codeload.
-  const headProbe = await fetch(
-    `https://codeload.github.com/${owner}/${repo}/zip/HEAD`,
-    { method: 'HEAD' },
-  );
+  const headController = new AbortController();
+  const headTimeout = setTimeout(() => headController.abort(), 30_000);
+  let headProbe: Response;
+  try {
+    headProbe = await fetch(
+      `https://codeload.github.com/${owner}/${repo}/zip/HEAD`,
+      { method: 'HEAD', signal: headController.signal },
+    );
+  } finally {
+    clearTimeout(headTimeout);
+  }
   if (headProbe.status === 404) {
     throw new Error(`Repository \`${owner}/${repo}\` not found or not accessible.`);
   }
@@ -94,7 +101,14 @@ async function tryResolveLatestReleaseTag(
   repo: string,
 ): Promise<string | undefined> {
   const url = `https://github.com/${owner}/${repo}/releases/latest`;
-  const resp = await fetch(url, { redirect: 'manual' });
+  const controller = new AbortController();
+  const timeoutHandle = setTimeout(() => controller.abort(), 30_000);
+  let resp: Response;
+  try {
+    resp = await fetch(url, { redirect: 'manual', signal: controller.signal });
+  } finally {
+    clearTimeout(timeoutHandle);
+  }
 
   // Definitive "no own latest release". Distinct from transient errors.
   if (resp.status === 404) return undefined;

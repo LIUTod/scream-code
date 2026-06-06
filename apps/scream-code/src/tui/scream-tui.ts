@@ -1163,6 +1163,9 @@ export class ScreamTUI {
     this.state.transcriptContainer.addChild(spinner);
     this.state.ui.requestRender();
     return {
+      setLabel: (label: string) => {
+        spinner.setLabel(label);
+      },
       stop: ({ ok, label: finalLabel }: { ok: boolean; label: string }) => {
         spinner.stop();
         const container = this.state.transcriptContainer;

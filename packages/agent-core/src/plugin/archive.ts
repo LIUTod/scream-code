@@ -8,7 +8,7 @@ export async function downloadZip(url: string, signal?: AbortSignal): Promise<Bu
   const controller = new AbortController();
   const timeoutHandle = setTimeout(() => {
     controller.abort();
-  }, 5 * 60 * 1000);
+  }, 10 * 60 * 1000);
   try {
     const resp = await fetch(url, { signal: signal ?? controller.signal });
     if (!resp.ok) {

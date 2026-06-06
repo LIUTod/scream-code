@@ -6,19 +6,21 @@
 import type { PluginSummary } from '@scream-cli/scream-code-sdk';
 
 import { ChoicePickerComponent, type ChoiceOption } from '../components/dialogs/choice-picker';
-import {
-  loadPluginMarketplace,
-  type PluginMarketplaceEntry,
-} from '../../utils/plugin-marketplace';
 import type { SlashCommandHost } from './dispatch';
 
-// ─── Built-in fallback ──────────────────────────────────────────────────────
+// ─── Built-in marketplace ────────────────────────────────────────────────────
 
 /**
- * Minimal built-in registry shipped with the binary.  Used as a fallback when
- * the remote CDN marketplace is unreachable (offline mode).
- */
-const BUILTIN_REGISTRY: PluginMarketplaceEntry[] = [
+ * Plugin marketplace shipped with the binary.  Updated with each hard-version
+ * release — no remote fetch needed at runtime. */
+interface MarketplaceEntry {
+  readonly id: string;
+  readonly displayName: string;
+  readonly description: string;
+  readonly source: string;
+}
+
+const BUILTIN_REGISTRY: MarketplaceEntry[] = [
   {
     id: 'gsap-skills',
     displayName: 'GSAP 动画技能包',
@@ -151,7 +153,15 @@ async function installAndReport(host: SlashCommandHost, source: string): Promise
     return;
   }
 
-  const spinner = host.showProgressSpinner('正在安装插件...');
+  const spinner = host.showProgressSpinner('正在解析插件来源…');
+  const stageTimers: ReturnType<typeof setTimeout>[] = [];
+
+  // Approximate progress stages while the underlying RPC call is in-flight.
+  // Real timing varies by repo size / network, so these are conservative.
+  stageTimers.push(setTimeout(() => spinner.setLabel('正在下载插件包…'), 3_000));
+  stageTimers.push(setTimeout(() => spinner.setLabel('正在解压安装…'), 8_000));
+  stageTimers.push(setTimeout(() => spinner.setLabel('正在校验并完成…'), 15_000));
+
   try {
     const summary = await session.installPlugin(source);
     spinner.stop({ ok: true, label: `插件 "${summary.displayName}" 安装成功。` });
@@ -169,6 +179,8 @@ async function installAndReport(host: SlashCommandHost, source: string): Promise
     host.showError(
       `安装失败: ${error instanceof Error ? error.message : String(error)}`,
     );
+  } finally {
+    for (const timer of stageTimers) clearTimeout(timer);
   }
 }
 
@@ -198,11 +210,8 @@ async function uninstallAndReport(host: SlashCommandHost, id: string): Promise<v
 // ─── Plugin panel ───────────────────────────────────────────────────────────
 
 async function openPluginPanel(host: SlashCommandHost): Promise<void> {
-  host.showStatus('正在加载插件中心…', 'cyan');
-  const [marketplace, installed] = await Promise.all([
-    loadSafe(host),
-    loadInstalled(host),
-  ]);
+  const marketplace = BUILTIN_REGISTRY;
+  const installed = await loadInstalled(host);
 
   const options = buildOptions(marketplace, installed);
   if (options.length === 0) {
@@ -222,9 +231,7 @@ async function openPluginPanel(host: SlashCommandHost): Promise<void> {
     pageSize: 10,
     onSelect: (value: string) => {
       if (value.startsWith('__section')) return;
-      // Dismiss the picker immediately so transcript updates are visible
       host.restoreEditor();
-      // Run async work; re-open panel with fresh data when done
       void handlePanelAction(host, value, marketplace, installed).finally(() => {
         openPluginPanel(host).catch(() => { /* panel refresh failure is non-fatal */ });
       });
@@ -239,20 +246,6 @@ async function openPluginPanel(host: SlashCommandHost): Promise<void> {
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-/** Load marketplace (remote CDN), falling back to built-in registry. */
-async function loadSafe(
-  host: SlashCommandHost,
-): Promise<readonly PluginMarketplaceEntry[]> {
-  try {
-    const result = await loadPluginMarketplace({
-      workDir: host.state.appState.workDir ?? process.cwd(),
-    });
-    return result.plugins;
-  } catch {
-    return BUILTIN_REGISTRY;
-  }
-}
-
 async function loadInstalled(
   host: SlashCommandHost,
 ): Promise<readonly PluginSummary[]> {
@@ -266,7 +259,7 @@ async function loadInstalled(
 }
 
 function buildOptions(
-  marketplace: readonly PluginMarketplaceEntry[],
+  marketplace: readonly MarketplaceEntry[],
   installed: readonly PluginSummary[],
 ): ChoiceOption[] {
   const options: ChoiceOption[] = [];
@@ -322,7 +315,7 @@ function buildOptions(
 async function handlePanelAction(
   host: SlashCommandHost,
   value: string,
-  _marketplace: readonly PluginMarketplaceEntry[],
+  _marketplace: readonly MarketplaceEntry[],
   installed: readonly PluginSummary[],
 ): Promise<void> {
   if (value.startsWith('install:')) {
