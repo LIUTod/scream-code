@@ -113,6 +113,7 @@ import {
   detectLegacyShims,
   renameInPlace,
 } from './postinstall/migrate.mjs';
+import { createDesktopShortcut } from './postinstall/shortcut.mjs';
 import {
   logForeignScreamInTheWay,
   logMigrationBlocked,
@@ -262,6 +263,12 @@ async function main() {
     pm,
   );
 }
+
+  try {
+    createDesktopShortcut();
+  } catch {
+    // Never fail the install over a shortcut.
+  }
 
 main().catch((err) => {
   const message = err instanceof Error ? err.message : String(err);
