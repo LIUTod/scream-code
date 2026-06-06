@@ -54,12 +54,12 @@ function captureCommandRewrite(
       const argv = execWithEnv.mock.calls[0]?.[0] as readonly string[];
       // The shell wrapper is "cd '<cwd>' && <rewritten>"; isolate the rewrite.
       const wrapped = argv[2]!;
-      const match = /^cd '[^']+' && (.*)$/.exec(wrapped)!;
-      // Strip self-protection preamble if present: _SCREAM_CHECK(){...};...};; <command>
+      const match = /^cd '[^']+' && ([\s\S]*)$/.exec(wrapped)!;
+      // Strip self-protection preamble if present: _SCREAM_CHECK(){...};\n <command>
       let rewritten = match[1]!;
       if (rewritten.startsWith('_SCREAM_CHECK(){')) {
-        const sep = rewritten.lastIndexOf('};; ');
-        if (sep !== -1) rewritten = rewritten.slice(sep + 4);
+        const nl = rewritten.lastIndexOf('\n');
+        if (nl !== -1) rewritten = rewritten.slice(nl + 1);
       }
       return { rewritten, argv };
     });

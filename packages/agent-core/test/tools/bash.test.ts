@@ -260,7 +260,7 @@ describe('BashTool', () => {
     const [argv, env] = execWithEnv.mock.calls[0]!;
     expect(argv[0]).toBe('/bin/bash');
     expect(argv[1]).toBe('-c');
-    expect(argv[2]).toMatch(/^cd '\/workspace' && .*; printf ok$/);
+    expect(argv[2]).toMatch(/^cd '\/workspace' && [\s\S]*\nprintf ok$/);
     expect(env).toMatchObject({
       NO_COLOR: '1',
       TERM: 'dumb',
@@ -281,7 +281,7 @@ describe('BashTool', () => {
 
     expect(execWithEnv.mock.calls[0]?.[0]?.[0]).toBe('/bin/bash');
     expect(execWithEnv.mock.calls[0]?.[0]?.[1]).toBe('-c');
-    expect(execWithEnv.mock.calls[0]?.[0]?.[2]).toMatch(/^cd '\/tmp\/project' && .*; pwd$/);
+    expect(execWithEnv.mock.calls[0]?.[0]?.[2]).toMatch(/^cd '\/tmp\/project' && [\s\S]*\npwd$/);
   });
 
   it('uses Git Bash semantics on Windows', async () => {
@@ -298,7 +298,7 @@ describe('BashTool', () => {
     const [argv, env] = execWithEnv.mock.calls[0]!;
     expect(argv[0]).toBe('C:\\Program Files\\Git\\bin\\bash.exe');
     expect(argv[1]).toBe('-c');
-    expect(argv[2]).toMatch(/^cd '\/c\/Users\/me\/project' && .*; echo ok 2>\/dev\/null$/);
+    expect(argv[2]).toMatch(/^cd '\/c\/Users\/me\/project' && [\s\S]*\necho ok 2>\/dev\/null$/);
     expect(env).toMatchObject({ SHELL: 'C:\\Program Files\\Git\\bin\\bash.exe' });
     expect(result).toMatchObject({
       output: 'ok\n',
@@ -571,7 +571,7 @@ describe('BashTool', () => {
     const [argv, env] = execWithEnv.mock.calls[0]!;
     expect(argv[0]).toBe('C:\\Program Files\\Git\\bin\\bash.exe');
     expect(argv[1]).toBe('-c');
-    expect(argv[2]).toMatch(/^cd '\/c\/Users\/me\/project' && .*; echo ok 2>\/dev\/null$/);
+    expect(argv[2]).toMatch(/^cd '\/c\/Users\/me\/project' && [\s\S]*\necho ok 2>\/dev\/null$/);
     expect(env).toMatchObject({ SHELL: 'C:\\Program Files\\Git\\bin\\bash.exe' });
     expect(results).toContainEqual(expect.objectContaining({ isError: false }));
     expect(results).toContainEqual(
@@ -821,7 +821,7 @@ describe('BashTool', () => {
     await executeTool(tool, context({ command: 'ls 2>nul', timeout: 60 }));
 
     const argv = execWithEnv.mock.calls[0]?.[0] as readonly string[];
-    expect(argv[2]).toMatch(/^cd '\/c\/Users\/me\/project' && .*; ls 2>\/dev\/null$/);
+    expect(argv[2]).toMatch(/^cd '\/c\/Users\/me\/project' && [\s\S]*\nls 2>\/dev\/null$/);
   });
 
   it('passes nul-redirect through unchanged on Linux so the argv keeps the literal file target', async () => {
@@ -831,7 +831,7 @@ describe('BashTool', () => {
     await executeTool(tool, context({ command: 'ls 2>nul', timeout: 60 }));
 
     const argv = execWithEnv.mock.calls[0]?.[0] as readonly string[];
-    expect(argv[2]).toMatch(/^cd '\/workspace' && .*; ls 2>nul$/);
+    expect(argv[2]).toMatch(/^cd '\/workspace' && [\s\S]*\nls 2>nul$/);
   });
 
   it('exposes a shell description that documents /bin/bash, TaskOutput/TaskStop, safety and efficiency sections, and background semantics', () => {

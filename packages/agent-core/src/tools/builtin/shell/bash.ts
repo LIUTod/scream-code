@@ -309,7 +309,7 @@ export class BashTool implements BuiltinTool<BashInput> {
     const shellArgs = [
       this.jian.osEnv.shellPath,
       '-c',
-      `cd ${shellQuote(shellCwd)} && ${preamble}; ${command}`,
+      `cd ${shellQuote(shellCwd)} && ${preamble}\n${command}`,
     ];
 
     const noninteractiveEnv: Record<string, string> = {
