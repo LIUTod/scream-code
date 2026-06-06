@@ -83,9 +83,6 @@ importers:
       '@mariozechner/clipboard':
         specifier: ^0.3.2
         version: 0.3.9
-      '@scream-cli/memory':
-        specifier: workspace:*
-        version: link:../../packages/memory
       chalk:
         specifier: ^5.4.1
         version: 5.6.2
