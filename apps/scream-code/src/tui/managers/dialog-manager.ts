@@ -6,6 +6,7 @@ import type {
 import { MemoryMemoStore, resolveProjectDir, type MemoryMemoSummary } from '@scream-cli/memory';
 import { getDataDir } from '#/utils/paths';
 import type { TUIState } from '../tui-state';
+import type { LivePaneState } from '../types';
 import { ApprovalPanelComponent, type ApprovalPanelResponse } from '../components/dialogs/approval-panel';
 import { ApprovalPreviewViewer, type ApprovalPreviewBlock } from '../components/dialogs/approval-preview';
 import { HelpPanelComponent, type HelpPanelCommand } from '../components/dialogs/help-panel';
@@ -14,6 +15,7 @@ import { SessionPickerComponent, type SessionRow } from '../components/dialogs/s
 import { QuestionDialogComponent } from '../components/dialogs/question-dialog';
 import { formatMemoryMemoForInjection } from '../commands/memory';
 import { sessionRowsForPicker } from '../utils/session-picker-rows';
+import { notifyTerminalOnce } from '../utils/terminal-notification';
 import { adaptPanelResponse } from '../reverse-rpc/approval/adapter';
 import type { ApprovalController } from '../reverse-rpc/approval/controller';
 import type { QuestionController } from '../reverse-rpc/question/controller';
@@ -37,6 +39,7 @@ export interface DialogManagerHost {
   getCurrentWorkDir(): string;
   toggleToolOutputExpansion(): void;
   togglePlanExpansion(): void;
+  patchLivePane(patch: Partial<LivePaneState>): void;
 }
 
 /**
@@ -95,7 +98,8 @@ export class DialogManager {
   // =========================================================================
   // Session picker
   // =========================================================================
-  showSessionPicker(): void {
+  async showSessionPicker(): Promise<void> {
+    await this.host.fetchSessions();
     this.host.state.activeDialog = 'session-picker';
     this.mountSessionPicker(() => {
       this.host.state.activeDialog = null;
@@ -218,10 +222,11 @@ export class DialogManager {
   // Approval panel
   // =========================================================================
   showApprovalPanel(payload: ApprovalPanelData): void {
-    this.host.state.livePane = {
-      ...this.host.state.livePane,
-      pendingApproval: { data: payload },
-    };
+    this.host.patchLivePane({ pendingApproval: { data: payload } });
+    notifyTerminalOnce(this.host.state, `approval:${payload.id}`, {
+      title: 'Scream Code 需要审批',
+      body: payload.tool_name,
+    });
     const panel = new ApprovalPanelComponent(
       { data: payload },
       (response: ApprovalPanelResponse) => {
@@ -247,10 +252,7 @@ export class DialogManager {
       this.closeApprovalPreview();
     }
     this.activeApprovalPanel = undefined;
-    this.host.state.livePane = {
-      ...this.host.state.livePane,
-      pendingApproval: null,
-    };
+    this.host.patchLivePane({ pendingApproval: null });
     this.restoreEditor();
   }
 
@@ -290,10 +292,11 @@ export class DialogManager {
   // Question dialog
   // =========================================================================
   showQuestionDialog(payload: QuestionPanelData): void {
-    this.host.state.livePane = {
-      ...this.host.state.livePane,
-      pendingQuestion: { data: payload },
-    };
+    this.host.patchLivePane({ pendingQuestion: { data: payload } });
+    notifyTerminalOnce(this.host.state, `question:${payload.id}`, {
+      title: 'Scream Code 需要您的回答',
+      body: payload.questions[0]?.question,
+    });
     const dialog = new QuestionDialogComponent(
       { data: payload },
       (response) => {
@@ -312,10 +315,7 @@ export class DialogManager {
   }
 
   hideQuestionDialog(): void {
-    this.host.state.livePane = {
-      ...this.host.state.livePane,
-      pendingQuestion: null,
-    };
+    this.host.patchLivePane({ pendingQuestion: null });
     this.restoreEditor();
   }
 

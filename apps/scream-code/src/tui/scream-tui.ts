@@ -1476,7 +1476,7 @@ export class ScreamTUI {
 
   private async bootstrapFromPicker(): Promise<void> {
     await this.fetchSessions();
-    this.dialogManager.showSessionPicker();
+    await this.dialogManager.showSessionPicker();
   }
 
   hideSessionPicker(): void {
