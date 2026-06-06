@@ -6,7 +6,7 @@ import type {
   PermissionMode,
   Session,
 } from '@scream-cli/scream-code-sdk';
-import { LLM_NOT_SET_MESSAGE, MAIN_AGENT_ID } from '../constant/scream-tui';
+import { LLM_NOT_SET_MESSAGE, MAIN_AGENT_ID, NO_ACTIVE_SESSION_MESSAGE } from '../constant/scream-tui';
 import { formatErrorMessage } from '../utils/event-payload';
 import { sessionRowsForPicker } from '../utils/session-picker-rows';
 import { createApprovalRequestHandler } from '../reverse-rpc/approval/handler';
@@ -274,7 +274,7 @@ export class SessionManager {
     }
     const resumeState = session.getResumeState();
     if (resumeState?.warning !== undefined) {
-      this.host.showStatus(`警告：${resumeState.warning}`);
+      this.host.showStatus(`警告：${resumeState.warning}`, this.host.state.theme.colors.warning);
     }
     this.host.showStatus(statusMessage);
   }
@@ -362,7 +362,7 @@ export class SessionManager {
   // ---------------------------------------------------------------------------
   private requireSession(): Session {
     if (this.host.session === undefined) {
-      throw new Error('No active session');
+      throw new Error(NO_ACTIVE_SESSION_MESSAGE);
     }
     return this.host.session;
   }

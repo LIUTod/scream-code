@@ -41,7 +41,7 @@ import { MoonLoader, type SpinnerStyle } from './components/chrome/moon-loader';
 import { PulseWaveLoader } from './components/chrome/pulse-wave-loader';
 import { WelcomeComponent } from './components/chrome/welcome';
 import { CompactionComponent } from './components/dialogs/compaction';
-import { HelpPanelComponent } from './components/dialogs/help-panel';
+import { HelpPanelComponent, type HelpPanelCommand } from './components/dialogs/help-panel';
 import { AuthFlowController } from './controllers/auth-flow';
 import { EditorKeyboardController } from './controllers/editor-keyboard';
 import { SessionEventHandler } from './controllers/session-event-handler';
@@ -927,34 +927,12 @@ export class ScreamTUI {
     return this.session;
   }
 
-  private async createSessionFromCurrentState(): Promise<Session> {
-    const model = this.state.appState.model.trim();
-    if (model.length === 0) {
-      throw new Error(LLM_NOT_SET_MESSAGE);
-    }
-    return this.harness.createSession({
-      workDir: this.state.appState.workDir,
-      model,
-      thinking:
-        this.session === undefined ? undefined : this.state.appState.thinking ? 'on' : 'off',
-      permission: this.state.appState.permissionMode,
-      planMode: this.state.appState.planMode ? true : undefined,
-    });
-  }
-
   async setSession(session: Session): Promise<void> {
     await this.sessionManager.setSession(session);
   }
 
   async syncRuntimeState(session: Session = this.requireSession()): Promise<void> {
     await this.sessionManager.syncRuntimeState(session);
-  }
-
-  // Plan mode is set by createSession — do not re-enter it here.
-  private async activateRuntime(): Promise<void> {
-    const session = this.requireSession();
-    await session.setPermission(this.state.appState.permissionMode);
-    await this.syncRuntimeState(session);
   }
 
   async closeSession(): Promise<void> {
@@ -1463,7 +1441,7 @@ export class ScreamTUI {
   }
 
   showHelpPanel(): void {
-    this.dialogManager.showHelpPanel(this.getSlashCommands() as any);
+    this.dialogManager.showHelpPanel(this.getSlashCommands() as unknown as readonly HelpPanelCommand[]);
   }
 
   private hideHelpPanel(): void {
@@ -1475,7 +1453,6 @@ export class ScreamTUI {
   }
 
   private async bootstrapFromPicker(): Promise<void> {
-    await this.fetchSessions();
     await this.dialogManager.showSessionPicker();
   }
 

@@ -1,6 +1,7 @@
 import type { Component, Focusable } from '@earendil-works/pi-tui';
 import type {
   ApprovalResponse,
+  ScreamHarness,
   Session,
 } from '@scream-cli/scream-code-sdk';
 import { MemoryMemoStore, resolveProjectDir, type MemoryMemoSummary } from '@scream-cli/memory';
@@ -25,6 +26,7 @@ export interface DialogManagerHost {
   readonly state: TUIState;
   readonly approvalController: ApprovalController;
   readonly questionController: QuestionController;
+  readonly harness: ScreamHarness;
 
   showError(message: string): void;
   showStatus(message: string, color?: string): void;
@@ -113,15 +115,14 @@ export class DialogManager {
   }
 
   private mountSessionPicker(onCancel: () => void): void {
-    this.host.state.activeDialog = 'session-picker';
     this.mountEditorReplacement(
       new SessionPickerComponent({
-        sessions: this.host.getSessions() as any,
+        sessions: this.host.getSessions(),
         loading: this.host.getIsLoadingSessions(),
         currentSessionId: this.host.getCurrentSessionId(),
         colors: this.host.state.theme.colors,
         onSelect: (pickerId: string) => {
-          const row = (this.host.getSessions() as any[]).find((s) => s.id === pickerId);
+          const row = this.host.getSessions().find((s) => s.id === pickerId);
           const isCc = row?.metadata?.['source'] === 'cc-connect';
           const realId = isCc ? (row!.metadata!['agentSessionId'] as string) : pickerId;
 
@@ -132,11 +133,11 @@ export class DialogManager {
             }
             if (isCc) {
               try {
-                const session = await (this.host as any).harness?.createSession?.({
+                const session = await this.host.harness.createSession({
                   id: realId,
                   workDir: this.host.getCurrentWorkDir(),
-                  model: (this.host as any).state?.appState?.model,
-                  permission: (this.host as any).state?.appState?.permissionMode,
+                  model: this.host.state.appState.model,
+                  permission: this.host.state.appState.permissionMode,
                 });
                 if (session) {
                   await this.host.switchToSession(session, `已连接 CC 会话 (${session.id})。`);
@@ -150,7 +151,7 @@ export class DialogManager {
         },
         onCancel,
         onDelete: (sessionId: string) => {
-          const row = (this.host.getSessions() as any[]).find((s) => s.id === sessionId);
+          const row = this.host.getSessions().find((s) => s.id === sessionId);
           if (row?.metadata?.['source'] === 'cc-connect') {
             this.host.showStatus('CC 会话由 cc-connect 管理，请在聊天通道中操作。');
             return;
@@ -319,13 +320,4 @@ export class DialogManager {
     this.restoreEditor();
   }
 
-  // =========================================================================
-  // Cleanup
-  // =========================================================================
-  clearAllPanels(): void {
-    if (this.approvalPreview !== undefined) {
-      this.closeApprovalPreview();
-    }
-    this.activeApprovalPanel = undefined;
-  }
 }
