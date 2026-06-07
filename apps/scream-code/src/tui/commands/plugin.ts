@@ -106,12 +106,6 @@ const BUILTIN_REGISTRY: MarketplaceEntry[] = [
     source: 'https://github.com/Imbad0202/academic-research-skills',
   },
   {
-    id: 'taste-skill',
-    displayName: 'Taste Skill 品味提升',
-    description: '让 AI 拥有好品味，不再生成无聊、千篇一律的平庸内容',
-    source: 'https://github.com/Leonxlnx/taste-skill',
-  },
-  {
     id: 'headroom',
     displayName: 'Headroom 压缩优化',
     description: '在内容送达 LLM 前压缩工具输出、日志、文件和 RAG 块，节省 60-95% Token，答案质量不变',
