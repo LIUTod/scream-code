@@ -473,9 +473,15 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
   if (opts.appendSystemPrompt) {
     try { originalAgentsMd = await readFile(agentsMdPath, "utf-8"); } catch { /* new file */ }
     await mkdir(join(workDir, ".scream-code"), { recursive: true });
+    const sendHint =
+      '【重要】你可以通过以下命令向用户发送图片或文件：\n' +
+      '  cc-connect send --image /absolute/path/to/image.png\n' +
+      '  cc-connect send --file /absolute/path/to/file.pdf\n' +
+      '当用户要求你发送文件、截图、生成的图片时，使用 Bash 工具执行上述命令即可。\n';
+    const ccPrompt = `${sendHint}\n${opts.appendSystemPrompt}`;
     const merged = originalAgentsMd
-      ? `${opts.appendSystemPrompt}\n\n${originalAgentsMd}`
-      : opts.appendSystemPrompt;
+      ? `${ccPrompt}\n\n${originalAgentsMd}`
+      : ccPrompt;
     await writeFile(agentsMdPath, merged, "utf-8");
     injectedAgentsMd = true;
     log.info("stream-json: injected cc-connect system prompt into AGENTS.md");
