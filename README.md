@@ -45,28 +45,6 @@ irm https://raw.githubusercontent.com/LIUTod/scream-code/main/install.ps1 | iex
 cd ~/.scream-code && ./install.sh --upgrade
 ```
 
-**手动安装**（一键脚本不可用时的备用方案）：
-
-```bash
-# 1. 克隆仓库
-git clone --depth 1 https://github.com/LIUTod/scream-code.git ~/.scream-code
-cd ~/.scream-code
-
-# 2. 安装依赖并构建
-pnpm install && pnpm -r build
-
-# 3. 手动创建命令并加入 PATH
-mkdir -p ~/.scream-code/bin
-cat > ~/.scream-code/bin/scream <<'EOF'
-#!/usr/bin/env bash
-SCREAM_HOME="${SCREAM_HOME:-$HOME/.scream-code}"
-cd "$SCREAM_HOME"
-exec node "$SCREAM_HOME/apps/scream-code/dist/main.mjs" "$@"
-EOF
-chmod +x ~/.scream-code/bin/scream
-# 将 ~/.scream-code/bin 加入 PATH
-```
-
 ### 第二步：启动并配置 AI 服务
 
 首次启动时，如果检测到没有配置模型，会自动进入交互式配置向导（`/config`）。按提示输入 API 地址、密钥、模型型号即可完成配置。
