@@ -127,11 +127,22 @@ interface ClaudeResultEvent {
   };
 }
 
+interface ClaudeControlRequestEvent {
+  type: "control_request";
+  request_id: string;
+  tool_use: {
+    id: string;
+    name: string;
+    input: unknown;
+  };
+}
+
 type ClaudeEvent =
   | ClaudeSystemEvent
   | ClaudeAssistantEvent
   | ClaudeUserEvent
-  | ClaudeResultEvent;
+  | ClaudeResultEvent
+  | ClaudeControlRequestEvent;
 
 interface StreamJsonOptions {
   resume?: string;
@@ -312,6 +323,15 @@ class ClaudeStreamJsonWriter {
     });
   }
 
+  /** Emit a `control_request` event for cc-connect permission flow. */
+  emitControlRequest(requestId: string, toolCallId: string, toolName: string, input: unknown): void {
+    this.writeJson({
+      type: "control_request",
+      request_id: requestId,
+      tool_use: { id: toolCallId, name: toolName, input },
+    });
+  }
+
   updateUsage(input: number, output: number): void {
     if (input > 0) this.tokenUsage.input += input;
     if (output > 0) this.tokenUsage.output += output;
@@ -381,6 +401,35 @@ function extractUserText(msg: StdinUserMessage): string {
     .join("\n");
 }
 
+// ─── Mode mapping ─────────────────────────────────────────────────────────
+
+import type { PermissionMode } from "@scream-cli/scream-code-sdk";
+
+interface MappedMode {
+  permission: PermissionMode;
+  planMode: boolean;
+}
+
+function mapCcConnectMode(mode: string | undefined): MappedMode {
+  switch (mode) {
+    case "default":
+      return { permission: "manual", planMode: false };
+    case "acceptEdits":
+      return { permission: "manual", planMode: false };
+    case "plan":
+      return { permission: "manual", planMode: true };
+    case "auto":
+      return { permission: "auto", planMode: false };
+    case "yolo":
+    case "bypassPermissions":
+      return { permission: "yolo", planMode: false };
+    case "dontAsk":
+      return { permission: "manual", planMode: false };
+    default:
+      return { permission: "auto", planMode: false };
+  }
+}
+
 // ─── main ─────────────────────────────────────────────────────────────────
 
 export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
@@ -403,6 +452,16 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
 
   let session: Session | undefined;
   let currentSessionId: string | undefined;
+  let sessionKey = "cc-connect-main";
+
+  // Pending approvals awaiting control_response from cc-connect.
+  const pendingApprovals = new Map<
+    string,
+    { resolve: (response: { decision: "approved" | "rejected"; scope?: "session"; feedback?: string }) => void }
+  >();
+
+  // Subagent id → name mapping (completed/failed events only carry id).
+  const subagentNames = new Map<string, string>();
 
   // cc-connect passes --append-system-prompt with instructions for
   // cc-connect send --image / --file etc.  Inject them into the agent's
@@ -429,13 +488,20 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
     // ── Read stdin messages in a loop ──────────────────────────────────
     for await (const msg of readStdinMessages()) {
       if (msg.type === "control_response") {
-        // For now, permissions are auto-approved internally, so
-        // control_response is a no-op.  If we later add control_request
-        // emission, we'd route the response to the pending request.
-        log.debug("stream-json: control_response received (auto-approved mode)", {
-          requestId: msg.response.request_id,
-          behavior: msg.response.response.behavior,
-        });
+        const pending = pendingApprovals.get(msg.response.request_id);
+        if (pending) {
+          pendingApprovals.delete(msg.response.request_id);
+          const behavior = msg.response.response.behavior;
+          pending.resolve({
+            decision: behavior === "allow" ? "approved" : "rejected",
+            scope: behavior === "allow" ? "session" : undefined,
+            feedback: msg.response.response.message,
+          });
+        } else {
+          log.warn("stream-json: control_response for unknown request_id", {
+            requestId: msg.response.request_id,
+          });
+        }
         continue;
       }
 
@@ -447,10 +513,12 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
       }
 
       // ── Create or reuse session ──────────────────────────────────────
-      // One channel = one session.  Always use a fixed key so all
-      // messages from this channel accumulate in the same ScreamCode
-      // session, regardless of what cc-connect passes as --resume.
-      const sessionKey = "cc-connect-main";
+      // One channel = one session.  Use --resume if cc-connect passes one,
+      // otherwise fall back to the deterministic key.
+      sessionKey = opts.resume ?? "cc-connect-main";
+      const { permission: mappedPermission, planMode: mappedPlanMode } = mapCcConnectMode(
+        opts.permissionMode,
+      );
       if (!session) {
         // Try to resume an existing session first
         const existing = await harness.listSessions({ sessionId: sessionKey, workDir });
@@ -486,7 +554,8 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
               id: sessionKey,
               workDir,
               model,
-              permission: "auto",
+              permission: mappedPermission,
+              planMode: mappedPlanMode,
             });
             log.info("stream-json: recreated session", {
               sessionId: session.id,
@@ -498,7 +567,8 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
             id: sessionKey,
             workDir,
             model,
-            permission: "auto",
+            permission: mappedPermission,
+            planMode: mappedPlanMode,
           });
           log.info("stream-json: created session", { sessionId: session.id });
         }
@@ -510,8 +580,41 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
         // and passes it back via --resume next time.
         writer.emitSystem(sessionKey);
 
-        // Auto-approve all permissions (cc-connect handles its own permission flow)
-        session.setApprovalHandler(() => ({ decision: "approved" }));
+        // ── Approval handler wired to cc-connect control_request ─────────
+        function sendControlRequest(
+          request: { toolCallId: string; toolName: string; action: string; display: unknown },
+        ): Promise<{ decision: "approved" | "rejected"; scope?: "session"; feedback?: string }> {
+          return new Promise((resolve) => {
+            const reqId = `req_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+            pendingApprovals.set(reqId, { resolve });
+            writer.emitControlRequest(reqId, request.toolCallId, request.toolName, request.display);
+          });
+        }
+
+        switch (opts.permissionMode) {
+          case "yolo":
+          case "bypassPermissions":
+            session.setApprovalHandler(() => ({ decision: "approved" }));
+            break;
+          case "dontAsk":
+            session.setApprovalHandler(() => ({
+              decision: "rejected",
+              feedback: "dontAsk 模式下工具调用被自动拒绝",
+            }));
+            break;
+          case "acceptEdits":
+            session.setApprovalHandler((request) => {
+              if (["Edit", "Write"].includes(request.toolName)) {
+                return { decision: "approved" };
+              }
+              return sendControlRequest(request);
+            });
+            break;
+          default:
+            // default / plan / auto → all route through control_request
+            session.setApprovalHandler((request) => sendControlRequest(request));
+            break;
+        }
         session.setQuestionHandler(() => null);
       }
 
@@ -539,6 +642,25 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
           if (event.type === "error") {
             if (event.agentId !== "main") return;
             finish(new Error(`${event.code}: ${event.message}`));
+            return;
+          }
+
+          // Subagent lifecycle events — show progress in chat
+          if (event.type === "subagent.spawned") {
+            subagentNames.set(event.subagentId, event.subagentName);
+            writer.writeAssistantDelta(`\n[子任务: ${event.subagentName}]\n`);
+            return;
+          }
+          if (event.type === "subagent.completed") {
+            const name = subagentNames.get(event.subagentId) ?? event.subagentId;
+            writer.writeAssistantDelta(`\n[子任务完成: ${name}]\n`);
+            subagentNames.delete(event.subagentId);
+            return;
+          }
+          if (event.type === "subagent.failed") {
+            const name = subagentNames.get(event.subagentId) ?? event.subagentId;
+            writer.writeAssistantDelta(`\n[子任务失败: ${name} - ${event.error}]\n`);
+            subagentNames.delete(event.subagentId);
             return;
           }
 
@@ -623,9 +745,15 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
     writer.emitResult("error", error instanceof Error ? error.message : String(error));
     process.exitCode = 1;
   } finally {
+    // Reject any pending approvals so the core doesn't hang on shutdown.
+    for (const [, pending] of pendingApprovals) {
+      pending.resolve({ decision: "rejected", feedback: "会话已结束" });
+    }
+    pendingApprovals.clear();
+
     // Emit resume hint so user knows how to continue
     if (currentSessionId) {
-      writer.emitResumeHint(currentSessionId);
+      writer.emitResumeHint(sessionKey);
     }
 
     try {

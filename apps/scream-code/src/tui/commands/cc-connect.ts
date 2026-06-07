@@ -64,15 +64,22 @@ function detectScreamPath(): string {
 function readConfiguredType(): string | undefined {
   if (!existsSync(CONFIG_PATH)) return undefined;
   try {
-    // Read the config file directly instead of shelling out to grep —
-    // Windows does not have grep, so the old approach always failed there
-    // and returned undefined, causing every /cc invocation to regenerate
-    // config.toml and overwrite the token that cc-connect <platform> setup
-    // had written into [projects.platforms.options].
     const content = readFileSync(CONFIG_PATH, "utf-8");
+    let inPlatforms = false;
     for (const line of content.split("\n")) {
-      const m = line.match(/^type\s*=\s*"(\S+)"/);
-      if (m) return m[1];
+      const trimmed = line.trim();
+      if (trimmed === "[[projects.platforms]]") {
+        inPlatforms = true;
+        continue;
+      }
+      if (trimmed.startsWith("[[") && trimmed !== "[[projects.platforms]]") {
+        inPlatforms = false;
+        continue;
+      }
+      if (inPlatforms) {
+        const m = line.match(/^type\s*=\s*"(\S+)"/);
+        if (m) return m[1];
+      }
     }
     return undefined;
   } catch {
@@ -80,10 +87,28 @@ function readConfiguredType(): string | undefined {
   }
 }
 
+function escapeSingleQuotes(str: string): string {
+  return str.replace(/'/g, "\\'");
+}
+
 function generateConfig(platform: PlatformDef): void {
   const dir = dirname(CONFIG_PATH);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 
+  const platformBlock = `\n[[projects.platforms]]\ntype = "${platform.type}"\n`;
+
+  // If config already exists, append the new platform instead of overwriting.
+  if (existsSync(CONFIG_PATH)) {
+    const existing = readFileSync(CONFIG_PATH, "utf-8");
+    if (existing.includes(`type = "${platform.type}"`)) {
+      // Same platform already configured — nothing to do.
+      return;
+    }
+    writeFileSync(CONFIG_PATH, existing + platformBlock, "utf-8");
+    return;
+  }
+
+  // Fresh config file
   const content = [
     '# 全局：允许/禁止图片和文件回传到聊天（on = 开启，off = 关闭）',
     'attachment_send = "on"',
@@ -95,8 +120,8 @@ function generateConfig(platform: PlatformDef): void {
     'type = "claudecode"',
     '',
     '[projects.agent.options]',
-    `cli_path = '${detectScreamPath()}'`,
-    `work_dir = '${process.cwd()}'`,
+    `cli_path = '${escapeSingleQuotes(detectScreamPath())}'`,
+    `work_dir = '${escapeSingleQuotes(process.cwd())}'`,
     'mode = "default"',
     '',
     '[[projects.platforms]]',
