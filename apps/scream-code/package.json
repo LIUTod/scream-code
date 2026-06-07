@@ -1,6 +1,6 @@
 {
   "name": "scream-code",
-  "version": "0.3.6",
+  "version": "0.3.7",
   "description": "The Starting Point for Next-Gen Agents",
   "license": "MIT",
   "author": "ScreamCli",
@@ -23,7 +23,8 @@
     "tui"
   ],
   "bin": {
-    "scream": "dist/main.mjs"
+    "scream": "dist/main.mjs",
+    "scream-desktop-mcp": "dist/mcp-servers/desktop-server.mjs"
   },
   "files": [
     "dist",
@@ -67,11 +68,13 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@scream-cli/agent-core": "workspace:^",
     "@scream-cli/config": "workspace:^",
     "@scream-cli/migration-legacy": "workspace:^",
     "@scream-cli/scream-code-sdk": "workspace:^",
     "@scream-cli/scream-telemetry": "workspace:^",
     "@scream-code/memory": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@types/semver": "^7.7.0",
     "tsx": "^4.21.0"
   },
