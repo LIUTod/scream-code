@@ -66,14 +66,6 @@
       "tags": ["writing", "ai-detection", "style", "editing", "humanization"]
     },
     {
-      "id": "markdown-viewer-skills",
-      "name": "Markdown Viewer 图表技能包",
-      "description": "14 个 AI 图表绘制技能：PlantUML（UML/云架构/网络/安全/BPMN/时序图）+ Vega 数据可视化 + HTML 信息卡片，直接在 Markdown 中渲染",
-      "source": "https://github.com/markdown-viewer/skills",
-      "author": "markdown-viewer",
-      "tags": ["diagram", "visualization", "plantuml", "markdown", "chart", "uml"]
-    },
-    {
       "id": "patent-disclosure-skill",
       "name": "Patent Disclosure 专利交底书",
       "description": "专利技术交底书自动生成：专利点挖掘 → 国知局联网查新 → 脱敏成文 → 自检闭环，Mermaid 附图，输出 .docx，支持中英文",
@@ -120,22 +112,6 @@
       "source": "https://github.com/chopratejas/headroom",
       "author": "chopratejas",
       "tags": ["compression", "token-saving", "rag", "optimization", "mcp"]
-    },
-    {
-      "id": "composio",
-      "name": "Composio 工具集成",
-      "description": "1000+ 工具集、工具搜索、上下文管理、认证和沙盒工作台，帮助构建能把意图转化为行动的 AI Agent",
-      "source": "https://github.com/ComposioHQ/composio",
-      "author": "ComposioHQ",
-      "tags": ["tools", "integration", "agent", "sandbox", "authentication"]
-    },
-    {
-      "id": "remotion",
-      "name": "Remotion 视频编程",
-      "description": "用 React 程序化生成视频，代码驱动动画、剪辑和渲染",
-      "source": "https://github.com/remotion-dev/remotion",
-      "author": "remotion-dev",
-      "tags": ["video", "react", "animation", "rendering", "programmatic"]
     }
   ]
 }

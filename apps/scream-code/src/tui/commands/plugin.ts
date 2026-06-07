@@ -70,12 +70,6 @@ const BUILTIN_REGISTRY: MarketplaceEntry[] = [
     source: 'https://github.com/blader/humanizer',
   },
   {
-    id: 'markdown-viewer-skills',
-    displayName: 'Markdown Viewer 图表技能包',
-    description: '14 个 AI 图表技能：PlantUML（UML/云架构/网络/安全/BPMN）+ Vega 数据可视化 + HTML 信息卡片，Markdown 内直接渲染',
-    source: 'https://github.com/markdown-viewer/skills',
-  },
-  {
     id: 'patent-disclosure-skill',
     displayName: 'Patent Disclosure 专利交底书',
     description: '专利交底书自动生成：专利点挖掘 → 国知局查新 → 脱敏成文 → 自检闭环，Mermaid 附图，输出 .docx',
@@ -110,18 +104,6 @@ const BUILTIN_REGISTRY: MarketplaceEntry[] = [
     displayName: 'Headroom 压缩优化',
     description: '在内容送达 LLM 前压缩工具输出、日志、文件和 RAG 块，节省 60-95% Token，答案质量不变',
     source: 'https://github.com/chopratejas/headroom',
-  },
-  {
-    id: 'composio',
-    displayName: 'Composio 工具集成',
-    description: '1000+ 工具集、工具搜索、上下文管理、认证和沙盒工作台，帮助构建能把意图转化为行动的 AI Agent',
-    source: 'https://github.com/ComposioHQ/composio',
-  },
-  {
-    id: 'remotion',
-    displayName: 'Remotion 视频编程',
-    description: '用 React 程序化生成视频，代码驱动动画、剪辑和渲染',
-    source: 'https://github.com/remotion-dev/remotion',
   },
 ];
 
