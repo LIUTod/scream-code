@@ -53,7 +53,10 @@ function detectScreamPath(): string {
   try {
     const cmd = process.platform === "win32" ? "where scream" : "which scream 2>/dev/null";
     const which = execSync(cmd, { encoding: "utf-8", timeout: 3000 }).trim();
-    if (which) return `${which} stream-json`;
+    // Windows `where` can return multiple matches (one per line).
+    // TOML strings must be single-line, so take only the first match.
+    const first = which.split(/[\r\n]+/)[0]?.trim() ?? "";
+    if (first) return `${first} stream-json`;
   } catch { /* not found */ }
   return "scream stream-json";
 }

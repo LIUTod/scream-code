@@ -153,7 +153,9 @@ function detectScreamPath(): string {
       encoding: "utf-8",
       timeout: 3000,
     }).trim();
-    if (which) return `${which} stream-json`;
+    // Guard against multi-line output (rare but possible).
+    const first = which.split(/[\r\n]+/)[0]?.trim() ?? "";
+    if (first) return `${first} stream-json`;
   } catch {
     // not found
   }
