@@ -282,6 +282,14 @@ export interface UndoHistoryPayload {
   readonly count: number;
 }
 
+export interface SideQuestionPayload {
+  readonly question: string;
+}
+
+export interface SideQuestionResult {
+  readonly answer: string;
+}
+
 export interface AgentAPI {
   prompt: (payload: PromptPayload) => void;
   steer: (payload: SteerPayload) => void;
@@ -312,6 +320,7 @@ export interface AgentAPI {
   getTools: (payload: EmptyPayload) => readonly ToolInfo[];
   getBackground: (payload: GetBackgroundPayload) => readonly BackgroundTaskInfo[];
   extractMemoriesOnExit: (payload: EmptyPayload) => Promise<void>;
+  sideQuestion: (payload: SideQuestionPayload) => Promise<SideQuestionResult>;
 }
 
 type AgentAPIWithId = WithAgentId<AgentAPI>;

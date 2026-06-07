@@ -16,9 +16,9 @@ export const ENV_MODEL_ALIAS_KEY = '__scream_env_model__';
 const ALLOWED_TYPES: readonly ProviderType[] = ['scream', 'anthropic', 'openai'];
 
 const DEFAULT_BASE_URL: Partial<Record<ProviderType, string>> = {
-  scream: 'https://api.scream-cli.ai/v1',
   openai: 'https://api.openai.com/v1',
   // anthropic: omitted -> let the Anthropic SDK pick its default
+  // scream: omitted -> requires SCREAM_MODEL_BASE_URL or explicit config
 };
 
 /** Default context window (256K) used when SCREAM_MODEL_MAX_CONTEXT_SIZE is unset. */

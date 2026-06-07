@@ -43,6 +43,7 @@ export type {
   BackgroundTaskStatus,
 } from './tools/background/manager';
 export type { ToolServices } from './tools/support/services';
+export { toInputJsonSchema } from './tools/support/input-schema';
 export { SingleModelProvider } from './session/provider-manager';
 export type {
   BearerTokenProvider,

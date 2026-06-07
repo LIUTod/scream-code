@@ -50,6 +50,7 @@ import { handleMcpCommand } from './mcp';
 import { handleChannelCommand } from './cc-connect';
 import { handleMemoryCommand } from './memory';
 import { handlePluginCommand } from './plugin';
+import { handleBtwCommand } from './btw';
 
 // ---------------------------------------------------------------------------
 // Re-exports — keep existing consumers working
@@ -235,6 +236,9 @@ async function handleBuiltInSlashCommand(
       host.tasksBrowserController.show().catch((error: unknown) => {
         host.showError(`打开任务浏览器失败：${formatErrorMessage(error)}`);
       });
+      return;
+    case 'btw':
+      await handleBtwCommand(host, args);
       return;
     case 'mcp':
       await handleMcpCommand(host, args);

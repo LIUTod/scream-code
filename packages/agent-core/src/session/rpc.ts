@@ -26,6 +26,7 @@ import type {
   SkillSummary,
   SteerPayload,
   StopBackgroundPayload,
+  SideQuestionPayload,
   UndoHistoryPayload,
   UnregisterToolPayload,
   UpdateSessionMetadataPayload,
@@ -227,6 +228,10 @@ export class SessionAPIImpl implements PromisableMethods<SessionAPI> {
 
   extractMemoriesOnExit({ agentId, ...payload }: AgentScopedPayload<EmptyPayload>) {
     return this.getAgent(agentId).extractMemoriesOnExit(payload);
+  }
+
+  sideQuestion({ agentId, ...payload }: AgentScopedPayload<SideQuestionPayload>) {
+    return this.getAgent(agentId).sideQuestion(payload);
   }
 
   private getAgent(agentId: string): PromisableMethods<AgentAPI> {

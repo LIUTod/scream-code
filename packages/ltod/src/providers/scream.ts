@@ -353,7 +353,7 @@ export class ScreamChatProvider implements ChatProvider {
   private _model: string;
   private _stream: boolean;
   private _apiKey: string | undefined;
-  private _baseUrl: string;
+  private _baseUrl: string | undefined;
   private _defaultHeaders: Record<string, string> | undefined;
   private _generationKwargs: GenerationKwargs;
   private _client: OpenAI | undefined;
@@ -363,7 +363,7 @@ export class ScreamChatProvider implements ChatProvider {
   constructor(options: ScreamOptions) {
     const apiKey = options.apiKey ?? process.env['SCREAM_API_KEY'];
     this._apiKey = apiKey === undefined || apiKey.length === 0 ? undefined : apiKey;
-    this._baseUrl = options.baseUrl ?? process.env['SCREAM_BASE_URL'] ?? 'https://api.scream-cli.ai/v1';
+    this._baseUrl = options.baseUrl ?? process.env['SCREAM_BASE_URL'];
     this._defaultHeaders = options.defaultHeaders;
     this._clientFactory = options.clientFactory;
     this._model = options.model;

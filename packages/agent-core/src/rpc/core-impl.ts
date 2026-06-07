@@ -87,6 +87,7 @@ import type {
   SetPluginEnabledPayload,
   SetPluginMcpServerEnabledPayload,
   SetThinkingPayload,
+  SideQuestionPayload,
   SkillSummary,
   SteerPayload,
   StopBackgroundPayload,
@@ -108,6 +109,7 @@ type SessionScopedPayload<T> = T & { readonly sessionId: string };
 type SessionAgentPayload<T> = SessionScopedPayload<AgentScopedPayload<T>>;
 type RenameSessionRequest = SessionScopedPayload<RenameSessionPayload>;
 type UpdateSessionMetadataRequest = SessionScopedPayload<UpdateSessionMetadataPayload>;
+
 
 export interface ScreamCoreOptions {
   readonly homeDir?: string | undefined;
@@ -561,6 +563,10 @@ export class ScreamCore implements PromisableMethods<CoreAPI> {
     return this.sessionApi(sessionId).extractMemoriesOnExit(payload);
   }
 
+  sideQuestion({ sessionId, ...payload }: SessionAgentPayload<SideQuestionPayload>) {
+    return this.sessionApi(sessionId).sideQuestion(payload);
+  }
+
   updateSessionMetadata({ sessionId, ...payload }: UpdateSessionMetadataRequest): Promise<void> {
     return this.sessionApi(sessionId).updateSessionMetadata(payload);
   }
@@ -697,7 +703,9 @@ export class ScreamCore implements PromisableMethods<CoreAPI> {
   }
 
   private async resolveRuntime(config: ScreamConfig): Promise<ToolServices> {
-    if (this.runtime !== undefined) return this.runtime;
+    if (this.runtime !== undefined) {
+      return this.runtime;
+    }
     const runtime = await createRuntimeConfig({
       config,
       screamRequestHeaders: this.screamRequestHeaders,

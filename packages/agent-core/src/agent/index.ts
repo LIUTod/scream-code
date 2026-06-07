@@ -63,6 +63,9 @@ export type { BuiltinTool, ToolInfo, ToolSource, UserToolRegistration } from './
 
 export type AgentType = 'main' | 'sub' | 'independent';
 
+const SIDE_QUESTION_SYSTEM =
+  'You are a helpful coding assistant answering a quick side question. The user is in the middle of a coding session and needs a fast, concise answer. Keep your response short and focused — this is a side question, not the main task.';
+
 export interface AgentOptions {
   readonly jian: Jian;
   readonly config?: ScreamConfig;
@@ -397,6 +400,10 @@ export class Agent {
       extractMemoriesOnExit: async () => {
         await this.extractMemoriesOnExit();
       },
+      sideQuestion: async (payload) => {
+        const answer = await this.sideQuestion(payload.question);
+        return { answer };
+      },
     };
   }
 
@@ -466,6 +473,45 @@ export class Agent {
     } catch (error) {
       this.log.warn('Exit memory extraction failed', { error: String(error) });
     }
+  }
+
+  async sideQuestion(question: string): Promise<string> {
+    const contextParts: string[] = [];
+    let charBudget = 2000;
+
+    for (let i = this.context.history.length - 1; i >= 0 && charBudget > 0; i--) {
+      const msg = this.context.history[i];
+      if (msg === undefined) continue;
+      if (msg.role !== 'user' && msg.role !== 'assistant') continue;
+      const text = msg.content
+        .filter((p): p is { type: 'text'; text: string } => p.type === 'text')
+        .map((p) => p.text)
+        .join('');
+      if (!text) continue;
+      const snippet = text.length > 400 ? `${text.slice(0, 400)}…` : text;
+      contextParts.unshift(`[${msg.role}]: ${snippet}`);
+      charBudget -= snippet.length;
+    }
+
+    const conversationContext = contextParts.join('\n\n');
+
+    const system = conversationContext
+      ? `${SIDE_QUESTION_SYSTEM}\n\n<conversation_context>\n${conversationContext}\n</conversation_context>`
+      : SIDE_QUESTION_SYSTEM;
+
+    const response = await this.generate(
+      this.config.provider,
+      system,
+      [],
+      [{ role: 'user', content: [{ type: 'text' as const, text: question }], toolCalls: [] }],
+    );
+
+    const text = response.message.content
+      .filter((p): p is { type: 'text'; text: string } => p.type === 'text')
+      .map((p) => p.text)
+      .join('');
+
+    return text || '(no response)';
   }
 
   emitEvent(event: AgentEvent): void {

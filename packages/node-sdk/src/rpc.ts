@@ -588,6 +588,16 @@ export class SDKRpcClient {
     });
   }
 
+  async sideQuestion(sessionId: string, question: string): Promise<string> {
+    const rpc = await this.getRpc();
+    const result = await rpc.sideQuestion({
+      sessionId,
+      agentId: this.interactiveAgentId,
+      question,
+    });
+    return result.answer;
+  }
+
   async requestApproval(
     request: ApprovalRequest & { sessionId: string; agentId: string },
   ): Promise<ApprovalResponse> {

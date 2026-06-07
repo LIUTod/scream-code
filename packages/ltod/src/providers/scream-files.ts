@@ -21,7 +21,7 @@ export interface ScreamUploadOptions {
 
 export interface ScreamFilesOptions {
   apiKey?: string;
-  baseUrl: string;
+  baseUrl?: string;
   defaultHeaders?: Record<string, string>;
   clientFactory?: (auth: ProviderRequestAuth) => OpenAI;
 }
@@ -38,7 +38,7 @@ export interface ScreamFilesOptions {
  */
 export class ScreamFiles {
   private readonly _apiKey: string | undefined;
-  private readonly _baseUrl: string;
+  private readonly _baseUrl: string | undefined;
   private readonly _defaultHeaders: Record<string, string> | undefined;
   private readonly _client: OpenAI | undefined;
   private readonly _clientFactory: ((auth: ProviderRequestAuth) => OpenAI) | undefined;

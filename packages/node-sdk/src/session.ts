@@ -382,6 +382,11 @@ export class Session {
     await this.rpc.extractMemoriesOnExit({ sessionId: this.id });
   }
 
+  async sideQuestion(question: string): Promise<string> {
+    this.ensureOpen();
+    return this.rpc.sideQuestion(this.id, question);
+  }
+
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
