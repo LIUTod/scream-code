@@ -198,6 +198,12 @@ interface ArgMapping {
   flags?: Record<string, string>;
 }
 
+function safeStr(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  return JSON.stringify(value);
+}
+
 function buildCliArgs(
   subcommand: string,
   input: Record<string, unknown>,
@@ -207,7 +213,7 @@ function buildCliArgs(
   if (mapping.positional) {
     for (const key of mapping.positional) {
       const value = input[key];
-      if (value !== undefined && value !== null) args.push(String(value));
+      if (value !== undefined && value !== null) args.push(safeStr(value));
     }
   }
   if (mapping.flags) {
@@ -217,7 +223,7 @@ function buildCliArgs(
       if (typeof value === 'boolean') {
         if (value) args.push('--' + flagName);
       } else {
-        args.push('--' + flagName, String(value));
+        args.push('--' + flagName, safeStr(value));
       }
     }
   }

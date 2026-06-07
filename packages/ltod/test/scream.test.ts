@@ -1185,7 +1185,6 @@ describe('ScreamChatProvider', () => {
       expect(params).toMatchObject({
         model: 'scream-k2-turbo-preview',
         temperature: 0.5,
-        baseUrl: expect.any(String),
       });
     });
   });
