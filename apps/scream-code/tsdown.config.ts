@@ -9,7 +9,7 @@ const appRoot = import.meta.dirname;
 const repoRoot = resolve(appRoot, '../..');
 
 export default defineConfig({
-  entry: ['./src/main.ts', './src/mcp-servers/desktop-server.ts'],
+  entry: ['./src/main.ts'],
   format: ['esm'],
   outDir: 'dist',
   clean: true,

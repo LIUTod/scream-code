@@ -23,8 +23,7 @@
     "tui"
   ],
   "bin": {
-    "scream": "dist/main.mjs",
-    "scream-desktop-mcp": "dist/mcp-servers/desktop-server.mjs"
+    "scream": "dist/main.mjs"
   },
   "files": [
     "dist",

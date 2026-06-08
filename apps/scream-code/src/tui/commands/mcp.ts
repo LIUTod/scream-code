@@ -4,7 +4,6 @@
  * 查看已安装的 MCP 服务器状态，一键安装推荐服务器。 */
 
 import { writeFile, readFile, mkdir } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 import {
@@ -18,7 +17,6 @@ import {
 import chalk from 'chalk';
 
 import { getDataDir } from '#/utils/paths';
-import { checkAgentDesktop, installAgentDesktop } from '#/cli/agent-desktop';
 import type { ColorPalette } from '#/tui/theme/colors';
 import { SELECT_POINTER } from '../constant/symbols';
 import type { SlashCommandHost } from './dispatch';
@@ -37,40 +35,23 @@ interface McpRecommendation {
 
 const RECOMMENDED: McpRecommendation[] = [
   {
-    name: 'agent-desktop',
-    displayName: 'Desktop Automation',
-    description: 'macOS 桌面自动化：截图/点击/键入/滚动/窗口管理（需辅助功能权限）',
-    command: 'scream-desktop-mcp',
-    args: [],
+    name: 'peekaboo',
+    displayName: 'Peekaboo',
+    description: 'macOS 桌面自动化：截图/点击/键入/滚动/窗口管理（Background delivery，无需聚焦）',
+    command: 'npx',
+    args: ['-y', '@steipete/peekaboo', 'mcp'],
     macOnly: true,
   },
   {
-    name: 'playwright',
-    displayName: 'Playwright',
-    description: '浏览器自动化：导航/点击/填表/截图，支持 Chromium/Firefox/WebKit',
+    name: 'chrome-devtools',
+    displayName: 'Chrome DevTools',
+    description: '浏览器自动化：46 个工具，支持导航/点击/填表/截图/性能分析/内存调试/扩展管理',
     command: 'npx',
-    args: ['@playwright/mcp@latest', '--headless', '--caps=vision,pdf'],
+    args: ['-y', 'chrome-devtools-mcp@latest', '--no-usage-statistics'],
   },
 ];
 
 // ─── 状态映射 ─────────────────────────────────────────────────────────
-
-/** Resolve scream-desktop-mcp to an absolute path. In development the bin is
- *  not on PATH; resolve relative to the main dist entry. In production (global
- *  npm install) the bin link works directly. */
-function resolveDesktopMcpCommand(): { command: string; args: string[] } {
-  // Try development path first: resolve relative to the running main script.
-  // main.mjs is `dist/main.mjs`; desktop-server.mjs is `dist/mcp-servers/desktop-server.mjs`.
-  const candidates = [
-    join(dirname(process.argv[1] ?? ''), 'mcp-servers', 'desktop-server.mjs'),
-    // Also try the tsx dev path: src/main.ts → src/mcp-servers/desktop-server.ts
-    join(dirname(process.argv[1] ?? ''), 'mcp-servers', 'desktop-server.ts'),
-  ];
-  for (const p of candidates) {
-    if (existsSync(p)) return { command: process.execPath, args: [p] };
-  }
-  return { command: 'scream-desktop-mcp', args: [] };
-}
 
 const STATUS_LABELS: Record<string, string> = {
   pending: '⏳ 连接中',
@@ -288,37 +269,13 @@ async function installMcp(host: SlashCommandHost, rec: McpRecommendation): Promi
 
   const spinner = host.showProgressSpinner(`正在安装 ${rec.displayName}...`);
 
-  // agent-desktop: ensure the native binary is installed first
-  if (rec.name === 'agent-desktop') {
-    try {
-      const status = await checkAgentDesktop();
-      if (!status.installed) {
-        spinner.setLabel('正在安装 agent-desktop 二进制...');
-        const result = await installAgentDesktop();
-        if (!result.ok) {
-          spinner.stop({ ok: false, label: 'agent-desktop 二进制安装失败。' });
-          host.showError(`agent-desktop 安装失败：${result.output}`);
-          return;
-        }
-      }
-    } catch (error) {
-      spinner.stop({ ok: false, label: 'agent-desktop 检测失败。' });
-      host.showError(`agent-desktop 检测失败：${error instanceof Error ? error.message : String(error)}`);
-      return;
-    }
-  }
-
   spinner.setLabel(`正在配置 ${rec.displayName}...`);
   try {
-    // Resolve the actual command path (dev: local build, production: npm bin).
-    const resolved = rec.name === 'agent-desktop'
-      ? resolveDesktopMcpCommand()
-      : { command: rec.command, args: rec.args };
-    await writeMcpConfig(host, rec.name, resolved.command, resolved.args);
+    await writeMcpConfig(host, rec.name, rec.command, rec.args);
     await session.addMcpServer(rec.name, {
       transport: 'stdio',
-      command: resolved.command,
-      args: resolved.args,
+      command: rec.command,
+      args: rec.args,
     });
     spinner.stop({ ok: true, label: `${rec.displayName} 安装成功并已启动。` });
   } catch (error) {
