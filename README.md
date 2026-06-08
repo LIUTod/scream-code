@@ -136,5 +136,6 @@ https://scream.chat
 </a>
 
 
-##
+## License
+
 MIT
