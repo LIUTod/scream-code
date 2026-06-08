@@ -134,3 +134,7 @@ https://scream.chat
    <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=LIUTod/scream-code&type=date&legend=top-left" />
  </picture>
 </a>
+
+
+##
+MIT
