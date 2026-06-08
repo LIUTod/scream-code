@@ -34,6 +34,5 @@
   },
   "dependencies": {
     "pathe": "^2.0.3"
-  },
-  "devDependencies": {}
+  }
 }

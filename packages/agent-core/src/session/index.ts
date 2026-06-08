@@ -196,7 +196,7 @@ export class Session {
       const recap = main.sessionMemory.getSessionSummary();
       if (recap.length > 0) {
         this.metadata.custom = { ...this.metadata.custom, recap };
-        this.writeMetadata();
+        void this.writeMetadata();
       }
     }
     try {
