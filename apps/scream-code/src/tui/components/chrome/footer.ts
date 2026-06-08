@@ -64,7 +64,7 @@ const TOOLBAR_TIPS: readonly ToolbarTip[] = [
   { text: '/yes: 自动批准' },
   { text: '/help: 显示命令' },
   { text: '/config: 选择并配置你常用的模型商', solo: true, priority: 3 },
-  { text: '让 Scream 安排任务，例如 "八点提醒我上号打三角洲"', solo: true, priority: 3 },
+  { text: '让 Scream 安排任务，例如 "2个小时后提醒我去拿快递"', solo: true, priority: 3 },
 ];
 
 /**

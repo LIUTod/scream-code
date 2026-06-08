@@ -9,4 +9,4 @@ overrides:
   "ssh2@1.17.0>cpu-features": "-"
   "ssh2@1.17.0>nan": "-"
 patchedDependencies:
-  '@earendil-works/pi-tui@0.74.2': patches/@earendil-works__pi-tui@0.74.2.patch
+  '@earendil-works/pi-tui@0.78.1': patches/@earendil-works__pi-tui@0.78.1.patch

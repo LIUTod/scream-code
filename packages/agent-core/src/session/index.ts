@@ -180,11 +180,25 @@ export class Session {
     if (main !== undefined && profile !== undefined) {
       await this.bootstrapAgentProfile(main, profile);
     }
+    if (main !== undefined && this.metadata.custom?.['recap']) {
+      main.context.appendSystemReminder(this.metadata.custom['recap'] as string, {
+        kind: 'injection',
+        variant: 'recap',
+      });
+    }
     await this.triggerSessionStart('resume');
     return { warning: resumeWarning };
   }
 
   async close(): Promise<void> {
+    const main = this.agents.get('main');
+    if (main !== undefined) {
+      const recap = main.sessionMemory.getSessionSummary();
+      if (recap.length > 0) {
+        this.metadata.custom = { ...this.metadata.custom, recap };
+        this.writeMetadata();
+      }
+    }
     try {
       await Promise.allSettled(
         Array.from(this.agents.values(), async (agent) => agent.cron?.stop()),

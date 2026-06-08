@@ -15,9 +15,9 @@ overrides:
   ssh2@1.17.0>nan: '-'
 
 patchedDependencies:
-  '@earendil-works/pi-tui@0.74.2':
+  '@earendil-works/pi-tui@0.78.1':
     hash: 04c16c5f582aba0f3a34f549b3f1af3561dce590a16452034b66cf423efacf5d
-    path: patches/@earendil-works__pi-tui@0.74.2.patch
+    path: patches/@earendil-works__pi-tui@0.78.1.patch
 
 importers:
 
@@ -78,8 +78,8 @@ importers:
   apps/scream-code:
     dependencies:
       '@earendil-works/pi-tui':
-        specifier: ^0.74.0
-        version: 0.74.2(patch_hash=04c16c5f582aba0f3a34f549b3f1af3561dce590a16452034b66cf423efacf5d)
+        specifier: ^0.78.1
+        version: 0.78.1(patch_hash=04c16c5f582aba0f3a34f549b3f1af3561dce590a16452034b66cf423efacf5d)
       '@mariozechner/clipboard':
         specifier: ^0.3.2
         version: 0.3.9
@@ -455,9 +455,9 @@ packages:
     resolution: {integrity: sha512-ooWCrlZP11i8GImSjTHYHLkvFDP48nS4+204nGb1RiX/WXYHmJA2III9/e2DWVabCESdW7hBAEzHRqUn9OUVvQ==}
     engines: {node: '>=0.1.90'}
 
-  '@earendil-works/pi-tui@0.74.2':
-    resolution: {integrity: sha512-valQPz74qbdydRqII6t9rJ46YANMOOJeDhKm25a1ZrWvWwdjAaAEu6s3ur/LWz84Wkkwcbub2ZkVjzCZi8gFGA==}
-    engines: {node: '>=20.0.0'}
+  '@earendil-works/pi-tui@0.78.1':
+    resolution: {integrity: sha512-07GVQo/38a0yvIPlWDr3RJn1B8gk3ZuIX9h2oIQ+Biyu3JN0KppWmgWHfaWRydQgse5JtC++KDw5MWaIRnV0mw==}
+    engines: {node: '>=22.19.0'}
 
   '@emnapi/core@1.10.0':
     resolution: {integrity: sha512-yq6OkJ4p82CAfPl0u9mQebQHKPJkY7WrIuk205cTYnYe+k2Z8YBh11FrbRG/H6ihirqcacOgl2BIO8oyMQLeXw==}
@@ -2458,9 +2458,6 @@ packages:
   jws@4.0.1:
     resolution: {integrity: sha512-EKI/M/yqPncGUUh44xz0PxSidXFr/+r0pA70+gIYhjv+et7yxM+s29Y+VGDkovRofQem0fs7Uvf4+YmAdyRduA==}
 
-  koffi@2.16.2:
-    resolution: {integrity: sha512-owU0MRwv6xkrVqCd+33uw6BaYppkTRXbO/rVdJNI2dvZG0gzyRhYwW25eWtc5pauwK8TGh3AbkFONSezdykfSA==}
-
   lightningcss-android-arm64@1.32.0:
     resolution: {integrity: sha512-YK7/ClTt4kAK0vo6w3X+Pnm0D2cf2vPHbhOXdoNti1Ga0al1P4TBZhwjATvjNwLEBCnKvjJc2jQgHXH0NEwlAg==}
     engines: {node: '>= 12.0.0'}
@@ -3819,12 +3816,10 @@ snapshots:
   '@colors/colors@1.5.0':
     optional: true
 
-  '@earendil-works/pi-tui@0.74.2(patch_hash=04c16c5f582aba0f3a34f549b3f1af3561dce590a16452034b66cf423efacf5d)':
+  '@earendil-works/pi-tui@0.78.1(patch_hash=04c16c5f582aba0f3a34f549b3f1af3561dce590a16452034b66cf423efacf5d)':
     dependencies:
       get-east-asian-width: 1.6.0
       marked: 15.0.12
-    optionalDependencies:
-      koffi: 2.16.2
 
   '@emnapi/core@1.10.0':
     dependencies:
@@ -5610,9 +5605,6 @@ snapshots:
     dependencies:
       jwa: 2.0.1
       safe-buffer: 5.2.1
-
-  koffi@2.16.2:
-    optional: true
 
   lightningcss-android-arm64@1.32.0:
     optional: true

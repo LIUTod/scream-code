@@ -1,6 +1,6 @@
 {
   "name": "scream-code",
-  "version": "0.3.7",
+  "version": "0.3.8",
   "description": "The Starting Point for Next-Gen Agents",
   "license": "MIT",
   "author": "ScreamCli",
@@ -58,7 +58,7 @@
     "smoke": "node dist/main.mjs --version"
   },
   "dependencies": {
-    "@earendil-works/pi-tui": "^0.74.0",
+    "@earendil-works/pi-tui": "^0.78.1",
     "@mariozechner/clipboard": "^0.3.2",
     "chalk": "^5.4.1",
     "cli-highlight": "^2.1.11",
