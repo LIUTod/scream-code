@@ -429,6 +429,9 @@ export class ScreamTUI {
     }
     this.reverseRpcDisposers.length = 0;
     this.disposeTerminalTracking();
+    this.state.footer.setTransientHint('正在整理会话记忆...');
+    this.state.ui.requestRender();
+    await new Promise((r) => setTimeout(r, 0));
     await this.closeSession();
     await this.harness.close();
     this.sessionEventHandler.stopAllMcpServerStatusSpinners();

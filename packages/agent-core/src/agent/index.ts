@@ -472,15 +472,20 @@ export class Agent {
       const memos = parseMemoryMemos(summary);
       if (memos.length === 0) return;
 
-      for (const memo of memos) {
-        memo.sourceSessionId = sessionId;
-        memo.sourceSessionTitle = sessionTitle ?? '';
-        memo.extractionSource = 'exit';
-        void this.memoStore.append(memo).catch((error: unknown) => {
-          this.log.warn('Failed to store memory memo from exit extraction', {
-            memoId: memo.id,
-            error: String(error),
-          });
+      const store = this.memoStore;
+      const results = await Promise.allSettled(
+        memos.map((memo) => {
+          memo.sourceSessionId = sessionId;
+          memo.sourceSessionTitle = sessionTitle ?? '';
+          memo.extractionSource = 'exit';
+          return store.append(memo);
+        }),
+      );
+      const failed = results.filter((r) => r.status === 'rejected').length;
+      if (failed > 0) {
+        this.log.warn('Some memory memos failed to store from exit extraction', {
+          failed,
+          total: memos.length,
         });
       }
 

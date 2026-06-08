@@ -46,6 +46,19 @@ export const MAX_COMPACTION_RETRY_ATTEMPTS = 5;
  *  disabled for the remainder of the turn. Resets each turn. */
 const MAX_CONSECUTIVE_FAILURES = 3;
 
+/** Minimal system prompt used during compaction. The full agent system
+ *  prompt contains tool descriptions and runtime injections that contradict
+ *  the compaction instruction ("DO NOT CALL ANY TOOLS"). This compact prompt
+ *  keeps the LLM focused and explicitly references the memory-memo extraction
+ *  section inside compaction-instruction.md. */
+const COMPACTION_SYSTEM_PROMPT =
+  'You are a conversation context compaction assistant. ' +
+  'Your job is to summarize the conversation above into a structured summary. ' +
+  'Output text only. DO NOT CALL ANY TOOLS. ' +
+  'Follow the compaction instruction in the last user message exactly. ' +
+  'Pay special attention to the Memory Memo Extraction section — ' +
+  'you MUST output memory-memo blocks for every completed task loop.';
+
 export class FullCompaction {
   protected compactionCountInTurn = 0;
   private consecutiveCompactionFailures = 0;
@@ -329,7 +342,7 @@ export class FullCompaction {
         try {
           const response = await this.agent.generate(
             this.agent.config.provider,
-            this.agent.config.systemPrompt,
+            COMPACTION_SYSTEM_PROMPT,
             [],
             messages,
             undefined,
@@ -500,14 +513,18 @@ export class FullCompaction {
 
     const sessionTitle = await this.agent.getSessionTitle();
 
-    for (const memo of memos) {
-      memo.sourceSessionId = sessionId;
-      memo.sourceSessionTitle = sessionTitle ?? '';
-      void memoStore.append(memo).catch((error: unknown) => {
-        this.agent.log.warn('Failed to store memory memo from compaction', {
-          memoId: memo.id,
-          error: String(error),
-        });
+    const results = await Promise.allSettled(
+      memos.map((memo) => {
+        memo.sourceSessionId = sessionId;
+        memo.sourceSessionTitle = sessionTitle ?? '';
+        return memoStore.append(memo);
+      }),
+    );
+    const failed = results.filter((r) => r.status === 'rejected').length;
+    if (failed > 0) {
+      this.agent.log.warn('Some memory memos failed to store from compaction', {
+        failed,
+        total: memos.length,
       });
     }
 

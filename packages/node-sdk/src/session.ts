@@ -389,9 +389,8 @@ export class Session {
 
   async close(): Promise<void> {
     if (this.closed) return;
-    this.closed = true;
     try {
-      // Extract memories before closing — fire-and-forget but give it enough time for LLM
+      // Extract memories before closing — give it enough time for LLM
       await Promise.race([
         this.extractMemoriesOnExit(),
         new Promise<void>((resolve) => setTimeout(resolve, 30_000)),
@@ -399,6 +398,7 @@ export class Session {
     } catch {
       // Never let extraction failure block session close
     }
+    this.closed = true;
     try {
       await this.rpc.closeSession({ sessionId: this.id });
     } finally {

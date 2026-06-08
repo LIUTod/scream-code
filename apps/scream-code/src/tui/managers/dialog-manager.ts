@@ -170,24 +170,24 @@ export class DialogManager {
   // =========================================================================
   // Memory picker
   // =========================================================================
-  showMemoryPicker(): void {
+  showMemoryPicker(
+    preloadedMemos?: MemoryMemoSummary[],
+    preloadedTotal?: number,
+  ): void {
     const store = new MemoryMemoStore(
       resolveProjectDir(getDataDir(), this.host.getCurrentWorkDir()),
     );
-    let memos: MemoryMemoSummary[] = [];
-    let total = 0;
-    try {
-      // list is async — fire it but show picker immediately with empty list
+
+    const hasData = preloadedMemos !== undefined;
+    const memos = preloadedMemos ?? [];
+    const total = preloadedTotal ?? 0;
+
+    if (!hasData) {
       void store.list({ limit: 50 }).then((result) => {
-        memos = result.memos;
-        total = result.total;
-        // re-render if picker is still open
         if (this.host.state.activeDialog === 'memory-picker') {
-          this.showMemoryPicker();
+          this.showMemoryPicker(result.memos, result.total);
         }
-      });
-    } catch {
-      // show empty list on error
+      }).catch(() => {});
     }
 
     this.host.state.activeDialog = 'memory-picker';
@@ -196,7 +196,7 @@ export class DialogManager {
         store,
         memos,
         total,
-        loading: false,
+        loading: !hasData,
         colors: this.host.state.theme.colors,
         onCancel: () => {
           this.host.state.activeDialog = null;
