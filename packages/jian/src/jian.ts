@@ -16,7 +16,7 @@ export interface Jian {
   /**
    * OS / shell probe describing the target environment. Populated by the
    * concrete Jian implementation (e.g. `detectEnvironmentFromNode()` for
-   * `LocalJian`, a remote probe for `SSHJian`).
+   * `LocalJian`).
    */
   readonly osEnv: Environment;
 
