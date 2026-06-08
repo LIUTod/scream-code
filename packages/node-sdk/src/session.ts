@@ -391,10 +391,10 @@ export class Session {
     if (this.closed) return;
     this.closed = true;
     try {
-      // Extract memories before closing — fire-and-forget but give it a brief window
+      // Extract memories before closing — fire-and-forget but give it enough time for LLM
       await Promise.race([
         this.extractMemoriesOnExit(),
-        new Promise<void>((resolve) => setTimeout(resolve, 10_000)),
+        new Promise<void>((resolve) => setTimeout(resolve, 30_000)),
       ]).catch(() => {});
     } catch {
       // Never let extraction failure block session close

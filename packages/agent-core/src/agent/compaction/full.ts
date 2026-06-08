@@ -392,7 +392,7 @@ export class FullCompaction {
       this.markCompleted();
       this.agent.emitEvent({ type: 'compaction.completed', result });
       this.agent.context.applyCompaction(result);
-      this.extractAndStoreMemos(summary);
+      await this.extractAndStoreMemos(summary);
       this.triggerPostCompactHook(data, result);
 
       // Compaction succeeded — reset circuit breaker
@@ -474,7 +474,7 @@ export class FullCompaction {
   }
 
   /** Extract memory memos from compaction summary and store them. */
-  private extractAndStoreMemos(summary: string): void {
+  private async extractAndStoreMemos(summary: string): Promise<void> {
     const memoStore = this.agent.memoStore;
     if (!memoStore) {
       this.agent.log.info('Memory memo store not available, skipping extraction');
@@ -498,9 +498,11 @@ export class FullCompaction {
       ? basename(dirname(dirname(this.agent.homedir)))
       : 'unknown';
 
+    const sessionTitle = await this.agent.getSessionTitle();
+
     for (const memo of memos) {
       memo.sourceSessionId = sessionId;
-      memo.sourceSessionTitle = '';
+      memo.sourceSessionTitle = sessionTitle ?? '';
       void memoStore.append(memo).catch((error: unknown) => {
         this.agent.log.warn('Failed to store memory memo from compaction', {
           memoId: memo.id,

@@ -41,8 +41,8 @@ If no completed task loops are found in the compacted messages, output:
 export function parseMemoryMemos(text: string): MemoryMemo[] {
   const memos: MemoryMemo[] = [];
 
-  // Match ```memory-memo ... ``` blocks
-  const regex = /```memory-memo\s*\n([\s\S]*?)```/g;
+  // Match ```memory-memo ... ``` blocks (tolerate optional whitespace/newlines after header)
+  const regex = /```memory-memo[\s\S]*?\n([\s\S]*?)```/g;
   let match: RegExpExecArray | null;
 
   while ((match = regex.exec(text)) !== null) {
@@ -54,7 +54,10 @@ export function parseMemoryMemos(text: string): MemoryMemo[] {
       if (parsed['none'] === true) continue;
 
       const requirement = typeof parsed['userRequirement'] === 'string' ? parsed['userRequirement'].trim() : '';
-      if (requirement.length === 0) continue;
+      if (requirement.length === 0) {
+        console.warn('[memory] Skipping memory-memo with empty userRequirement:', jsonStr.slice(0, 200));
+        continue;
+      }
 
       memos.push(
         createMemoryMemo({
@@ -71,8 +74,8 @@ export function parseMemoryMemos(text: string): MemoryMemo[] {
           sourceSessionTitle: '', // filled in by caller
         }),
       );
-    } catch {
-      // Malformed JSON block — skip silently
+    } catch (err) {
+      console.warn('[memory] Malformed JSON in memory-memo block:', jsonStr.slice(0, 200), err);
     }
   }
 

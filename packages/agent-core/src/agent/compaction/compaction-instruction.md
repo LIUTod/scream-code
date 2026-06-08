@@ -9,6 +9,41 @@ The goal of compaction is to keep essential code patterns, technical details, an
 
 {{ customInstruction }}
 
+<!-- Memory Memo Extraction (PRIORITY — do not skip) -->
+
+## 记忆备忘录提取
+
+AFTER completing the compaction summary below, scan the messages being compacted for **completed task loops**. A task loop is "completed" when:
+- The user made a clear request or asked a specific question
+- You provided a solution or answer
+- The outcome is clear (success, partial success, blocked, or abandoned)
+
+For each completed task loop found, output a structured memo block **at the very end of your response**:
+
+```memory-memo
+{
+  "userRequirement": "<the user's request or question, one sentence>",
+  "solution": "<the approach or solution, 2-4 sentences>",
+  "completionStatus": "<done | partially done | blocked | abandoned>",
+  "problemsEncountered": "<issues found and how they were resolved, or 'none'>",
+  "category": "<user_preference | feedback | project_context | reference>"
+}
+```
+
+Guidelines:
+- Include any significant errors and their fixes in "problemsEncountered".
+- Skip in-progress work unless it contains a landmark error+fix.
+- Merge closely related sub-tasks into a single memo.
+- For category: user_preference = user habits/style/role, feedback = lessons learned,
+  project_context = architecture/bugs/work-in-progress, reference = external pointer.
+- Default to "project_context" when unsure.
+- Use the exact field names and JSON format shown above.
+
+If no completed task loops are found in the compacted messages, output:
+```memory-memo
+{"none": true}
+```
+
 <!-- Compression Priorities (in order) -->
 
 1. **Current Task State**: What is being worked on RIGHT NOW
@@ -65,40 +100,3 @@ The goal of compaction is to keep essential code patterns, technical details, an
 
 - [Detailed non tool use user message]
 - ...
-
-## 记忆备忘录提取
-
-在完成上述压缩摘要后，扫描被压缩的消息中是否存在**已完成的任务闭环**。任务闭环的判断标准：
-- 用户提出了明确的需求或问题
-- 给出了解决方案或回答
-- 结果明确（成功、部分完成、受阻、或放弃）
-
-对每个已完成的任务闭环，输出一个结构化记忆块。**必须用对话的主要语言书写**（中文对话用中文，英文对话用英文）：
-
-```memory-memo
-{
-  "userRequirement": "<用户需求，一句话概括>",
-  "solution": "<解决方案，2-4 句话>",
-  "completionStatus": "<done | partially done | blocked | abandoned>",
-  "problemsEncountered": "<遇到的问题及解决方式，无则填 'none'>",
-  "category": "<user_preference | feedback | project_context | reference>"
-}
-```
-
-**category 判断规则**：
-- `user_preference`: 用户的行为偏好、工作习惯、个人风格或角色设定
-- `feedback`: 从错误中学到的经验、"应该这样做而不是那样做"的反馈
-- `project_context`: 项目架构、关键文件位置、进行中的重构或已知 bug
-- `reference`: 外部系统的链接或指针（如项目名、Slack 频道、文档 URL）
-
-注意：
-- 在 problemsEncountered 中记录重要的错误信息和修复方法
-- 跳过未完成的工作，除非其中包含有价值的错误修复经验
-- 将紧密相关的子任务合并为一条记忆
-- category 必须从上述四个值中选择一个，默认为 `project_context`
-- 严格遵守字段名和 JSON 格式，不要添加额外字段
-
-如果被压缩的消息中没有已完成的任务闭环，输出：
-```memory-memo
-{"none": true}
-```

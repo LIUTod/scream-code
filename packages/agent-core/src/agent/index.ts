@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'pathe';
 
 import { ErrorCodes, ScreamError, makeErrorPayload } from '#/errors';
@@ -407,6 +408,21 @@ export class Agent {
     };
   }
 
+  /** Read session title from state.json (if available). */
+  async getSessionTitle(): Promise<string | undefined> {
+    if (!this.homedir) return undefined;
+    const sessionDir = dirname(dirname(this.homedir));
+    try {
+      const text = await readFile(join(sessionDir, 'state.json'), 'utf-8');
+      const parsed = JSON.parse(text) as Record<string, unknown>;
+      if (typeof parsed['title'] === 'string' && parsed['title'].length > 0) return parsed['title'];
+      if (typeof parsed['customTitle'] === 'string' && parsed['customTitle'].length > 0) return parsed['customTitle'];
+    } catch {
+      // ignore — state.json may not exist
+    }
+    return undefined;
+  }
+
   /** Extract memory memos from the full conversation history on session exit. */
   async extractMemoriesOnExit(): Promise<void> {
     if (!this.memoStore) return;
@@ -418,6 +434,8 @@ export class Agent {
     const sessionId = this.homedir
       ? basename(dirname(dirname(this.homedir)))
       : 'unknown';
+
+    const sessionTitle = await this.getSessionTitle();
 
     // Sample last 30 messages to stay within reasonable token budget
     const sampleText = history
@@ -456,7 +474,7 @@ export class Agent {
 
       for (const memo of memos) {
         memo.sourceSessionId = sessionId;
-        memo.sourceSessionTitle = '';
+        memo.sourceSessionTitle = sessionTitle ?? '';
         memo.extractionSource = 'exit';
         void this.memoStore.append(memo).catch((error: unknown) => {
           this.log.warn('Failed to store memory memo from exit extraction', {
