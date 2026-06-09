@@ -103,14 +103,20 @@ describe('FooterComponent — context NaN resilience', () => {
     expect(strip(off.render(120)[0]!)).not.toContain('思考中');
   });
 
-  it('renders transient hints on the context line', () => {
+  it('renders transient hints replacing the status area', () => {
     const footer = new FooterComponent(baseState(), darkColors);
 
     footer.setTransientHint('Press Ctrl-C again to exit');
 
-    const [, line2] = footer.render(120);
-    expect(strip(line2 ?? '')).toContain('Press Ctrl-C again to exit');
-    expect(strip(line2 ?? '')).toContain('上下文：0.0%');
+    const [line1] = footer.render(120);
+    expect(strip(line1 ?? '')).toContain('Press Ctrl-C again to exit');
+  });
+
+  it('renders status info on line 1 when no hint', () => {
+    const footer = new FooterComponent(baseState(), darkColors);
+
+    const [line1] = footer.render(120);
+    expect(strip(line1 ?? '')).toContain('上下文：0.0%');
   });
 
   it('highlights the pull request badge separately from git status text', () => {

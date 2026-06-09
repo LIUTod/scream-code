@@ -137,6 +137,10 @@ vi.mock('node:child_process', () => ({
   execSync: mocks.execSync,
 }));
 
+vi.mock('../../src/tui/components/chrome/loading', () => ({
+  runLoadingAnimation: vi.fn(() => Promise.resolve()),
+}));
+
 describe('runShell', () => {
   afterEach(() => {
     vi.clearAllMocks();
