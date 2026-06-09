@@ -49,7 +49,7 @@ export class WolfPackTool implements BuiltinTool<WolfPackToolInput> {
   constructor(
     private readonly subagentHost: SessionSubagentHost,
     private readonly isEnabled: () => boolean,
-    options?: { log?: Logger },
+    _options?: { log?: Logger },
   ) {}
 
   resolveExecution(args: WolfPackToolInput): ToolExecution {
@@ -145,7 +145,7 @@ export class WolfPackTool implements BuiltinTool<WolfPackToolInput> {
 
     for (const settled of completions) {
       if (settled.status === 'fulfilled') {
-        const { item, result, success, agentId } = settled.value;
+        const { item, result: _result, success, agentId } = settled.value;
         if (success) {
           successCount++;
           lines.push(`### ${item} (OK)`);
