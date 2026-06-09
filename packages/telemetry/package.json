@@ -1,6 +1,6 @@
 {
   "name": "@scream-cli/scream-telemetry",
-  "version": "0.1.1",
+  "version": "0.3.10",
   "private": true,
   "description": "Shared telemetry infrastructure for Scream Code",
   "license": "MIT",
