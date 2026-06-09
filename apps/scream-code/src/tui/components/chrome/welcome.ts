@@ -11,6 +11,7 @@ import type { Component, TUI } from '@earendil-works/pi-tui';
 import { truncateToWidth, visibleWidth } from '@earendil-works/pi-tui';
 import chalk from 'chalk';
 
+import { currentTipIndex, tipsForIndex } from '#/tui/components/chrome/footer';
 import type { ColorPalette } from '#/tui/theme/colors';
 import type { AppState } from '#/tui/types';
 
@@ -97,6 +98,7 @@ export class WelcomeComponent implements Component {
   private breatheFrame = 0;
   private breatheTimer: ReturnType<typeof setInterval> | null = null;
   private breathePalette: string[];
+  borderTitle: string | null = null;
 
   constructor(state: AppState, colors: ColorPalette, ui: TUI) {
     this.state = state;
@@ -149,7 +151,7 @@ export class WelcomeComponent implements Component {
     const dim = chalk.hex(this.colors.textDim);
     const labelStyle = chalk.bold.hex(this.colors.textDim);
     const rightRow1 = truncateToWidth(
-      dim(isLoggedOut ? '运行 /config 开始配置。' : '发送 /help 获取帮助信息。/config 配置模型'),
+      dim(isLoggedOut ? '运行 /config 开始配置。' : '发送 / 进入快捷菜单，/exit 保存并退出'),
       textWidth,
       '…',
     );
@@ -180,13 +182,20 @@ export class WelcomeComponent implements Component {
       labelStyle('版本： ') + versionValue,
     ];
 
-    const hintLine = chalk.hex(this.colors.textMuted)('按 / 可进入快捷指令菜单，输入 /sessions 可恢复或管理会话');
-    const tipLine = chalk.hex(this.colors.textMuted)('Tips：试试让它写代码、做研报、做攻略、清理电脑...');
-    const contentLines: string[] = [...headerLines, '', ...infoLines, '', hintLine, tipLine];
+    const tipIdx = currentTipIndex();
+    const { primary: tipPrimary, pair: tipPair } = tipsForIndex(tipIdx);
+    const tip = (tipPair && visibleWidth(tipPair) <= innerWidth) ? tipPair : tipPrimary;
+    const tipLine = chalk.hex(this.colors.textMuted)('Tips：  ' + tip);
+    const contentLines: string[] = [...headerLines, '', ...infoLines, '', tipLine];
+
+    const borderTitle = this.borderTitle;
+    const topBorder = borderTitle
+      ? primary('╭─ ' + borderTitle + ' ' + '─'.repeat(Math.max(0, width - 5 - visibleWidth(borderTitle))) + '╮')
+      : primary('╭' + '─'.repeat(width - 2) + '╮');
 
     const lines: string[] = [
       '',
-      primary('╭' + '─'.repeat(width - 2) + '╮'),
+      topBorder,
       primary('│') + ' '.repeat(width - 2) + primary('│'),
     ];
 

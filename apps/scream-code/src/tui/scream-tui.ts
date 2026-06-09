@@ -1088,6 +1088,7 @@ export class ScreamTUI {
   private renderWelcome(): void {
     this.welcomeComponent?.stopBreathing();
     const welcome = new WelcomeComponent(this.state.appState, this.state.theme.colors, this.state.ui);
+    welcome.borderTitle = 'Scream Code';
     this.welcomeComponent = welcome;
     // Once the user has typed anything (even a single character), breathing
     // stays off forever — even across session switches.  This prevents the

@@ -31,8 +31,8 @@ const MAX_CWD_SEGMENTS = 3;
 //
 // This is deliberately code-level configuration: edit the interval and the
 // TOOLBAR_TIPS array below to change what the footer advertises.
-const TIP_ROTATE_INTERVAL_MS = 10_000;
-const TIP_SEPARATOR = ' | ';
+export const TIP_ROTATE_INTERVAL_MS = 10_000;
+export const TIP_SEPARATOR = ' | ';
 
 export interface ToolbarTip {
   readonly text: string;
@@ -48,7 +48,7 @@ export interface ToolbarTip {
   readonly priority?: number;
 }
 
-const TOOLBAR_TIPS: readonly ToolbarTip[] = [
+export const TOOLBAR_TIPS: readonly ToolbarTip[] = [
   { text: 'shift+tab: 计划模式' },
   { text: '/model: 切换模型' },
   { text: 'ctrl+s: 中途干预', priority: 2 },
@@ -94,9 +94,9 @@ export function buildWeightedTips(tips: readonly ToolbarTip[]): readonly Toolbar
   return seq;
 }
 
-const ROTATION: readonly ToolbarTip[] = buildWeightedTips(TOOLBAR_TIPS);
+export const ROTATION: readonly ToolbarTip[] = buildWeightedTips(TOOLBAR_TIPS);
 
-function currentTipIndex(): number {
+export function currentTipIndex(): number {
   return Math.floor(Date.now() / TIP_ROTATE_INTERVAL_MS);
 }
 
@@ -108,7 +108,7 @@ function currentTipIndex(): number {
  * current tip (which can happen at the wrap boundary), keeping long/important
  * tips on their own and avoiding "X | X".
  */
-function tipsForIndex(index: number): { primary: string; pair: string | null } {
+export function tipsForIndex(index: number): { primary: string; pair: string | null } {
   const n = ROTATION.length;
   if (n === 0) return { primary: '', pair: null };
   const offset = ((index % n) + n) % n;
@@ -343,53 +343,38 @@ export class FooterComponent implements Component {
     const leftLine = left.join('  ');
     const leftWidth = visibleWidth(leftLine);
 
-    // Rotating hint tips, fill remaining space on line 1.
-    const { primary, pair } = tipsForIndex(currentTipIndex());
-    const gap = 2;
-    const remaining = Math.max(0, width - leftWidth - gap);
-    let tipText = '';
-    if (pair && visibleWidth(pair) <= remaining) {
-      tipText = pair;
-    } else if (primary && visibleWidth(primary) <= remaining) {
-      tipText = primary;
+    // ── Right side: transient hint (when active) or status info ─────
+    let rightText: string;
+    if (this.transientHint) {
+      rightText = chalk.hex(colors.warning).bold(this.transientHint);
+    } else {
+      const statusLine = buildStatusLine(
+        state.streamingPhase,
+        state.livePaneMode,
+        state.streamingStartTime,
+      );
+      const ccDot = state.ccConnectActive
+        ? chalk.hex(colors.success)('●')
+        : chalk.hex(colors.textDim)('●');
+      rightText = chalk.hex(colors.textDim)(ccDot + ' ' + formatContextStatus(
+        state.contextUsage,
+        state.contextTokens,
+        state.maxContextTokens,
+      ) + '  ' + statusLine);
     }
+    const rightWidth = visibleWidth(rightText);
+    const gap = 3;
 
     let line1: string;
-    if (tipText) {
-      const pad = width - leftWidth - visibleWidth(tipText);
-      line1 = leftLine + ' '.repeat(Math.max(0, pad)) + chalk.hex(colors.textMuted)(tipText);
+    if (leftWidth + gap + rightWidth <= width) {
+      const pad = width - leftWidth - rightWidth;
+      line1 = leftLine + ' '.repeat(pad) + rightText;
     } else if (leftWidth <= width) {
       line1 = leftLine;
     } else {
       line1 = truncateToWidth(leftLine, width, '…');
     }
 
-    // ── Line 2: transient hint (left)  …  context + status (right) ─────
-    const statusLine = buildStatusLine(
-      state.streamingPhase,
-      state.livePaneMode,
-      state.streamingStartTime,
-    );
-    const ccDot = state.ccConnectActive
-      ? chalk.hex(colors.success)('●')
-      : chalk.hex(colors.textDim)('●');
-    const rightText = ccDot + ' ' + formatContextStatus(
-      state.contextUsage,
-      state.contextTokens,
-      state.maxContextTokens,
-    ) + '  ' + statusLine;
-    const rightWidth = visibleWidth(rightText);
-    let line2: string;
-    if (this.transientHint) {
-      const hintText = chalk.hex(colors.warning).bold(this.transientHint);
-      const hintWidth = visibleWidth(hintText);
-      const pad = Math.max(2, width - hintWidth - rightWidth);
-      line2 = hintText + ' '.repeat(pad) + chalk.hex(colors.textDim)(rightText);
-    } else {
-      const lpad = Math.max(0, width - rightWidth);
-      line2 = ' '.repeat(lpad) + chalk.hex(colors.textDim)(rightText);
-    }
-
-    return [truncateToWidth(line1, width), truncateToWidth(line2, width)];
+    return [truncateToWidth(line1, width)];
   }
 }
