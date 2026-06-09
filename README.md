@@ -76,7 +76,7 @@ cd ~/.scream-code && ./install.sh --upgrade
 - **多 Agent 并行模式** —— `/power` 开启 Power 并行模式，复杂任务自动拆解为多个子 Agent 同时执行，内置 coder/explore/plan/verify/writer 五类子 Agent。支持多角度分析、对抗验证等并行编排模式。
 - **技能中心** —— 内置多款技能可下载，用户也可以自行安装skill技能
 - **MCP** —— 内置浏览器自动化MCP和电脑桌面自动化MCP（目前仅支持mac），另外可自行添加或下载使用自定MCP
-- **power** —— 强制集群模式，适合多文件多任务同时处理（未开启情况下由主Agent自行决定是否开启并行）
+- **wolfpack** —— 群狼模式，适合多文件多任务同时处理 拥有自动审批权限
 - **dream** —— 定期整理自动记忆备忘录，清理无效记忆日志
 
 ---
