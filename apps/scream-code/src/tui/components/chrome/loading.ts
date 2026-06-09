@@ -104,11 +104,11 @@ function supportsAnsi(): boolean {
   }
 
   // Respect NO_COLOR / FORCE_COLOR conventions
-  if (process.env.NO_COLOR) {
+  if (process.env['NO_COLOR']) {
     ansiSupported = false;
     return false;
   }
-  if (process.env.FORCE_COLOR) {
+  if (process.env['FORCE_COLOR']) {
     ansiSupported = true;
     return true;
   }
@@ -116,8 +116,8 @@ function supportsAnsi(): boolean {
   // Windows: Terminal / conhost on Win10 1909+ supports ANSI.
   // CI environments (gh actions, appveyor) set CI=true.
   if (process.platform === 'win32') {
-    const term = (process.env.TERM ?? '').toLowerCase();
-    const session = (process.env.TERM_PROGRAM ?? '').toLowerCase();
+    const term = (process.env['TERM'] ?? '').toLowerCase();
+    const session = (process.env['TERM_PROGRAM'] ?? '').toLowerCase();
     // Windows Terminal, ConEmu, Cmder all support ANSI
     if (term.includes('xterm') || term.includes('vt100') || term.includes('256color')) {
       ansiSupported = true;
@@ -128,7 +128,7 @@ function supportsAnsi(): boolean {
       return true;
     }
     // GitHub Actions / CI on Windows
-    if (process.env.CI) {
+    if (process.env['CI']) {
       ansiSupported = true;
       return true;
     }
@@ -139,7 +139,7 @@ function supportsAnsi(): boolean {
   }
 
   // Unix: check TERM
-  if (process.env.TERM && process.env.TERM !== 'dumb') {
+  if (process.env['TERM'] && process.env['TERM'] !== 'dumb') {
     ansiSupported = true;
     return true;
   }
@@ -149,7 +149,7 @@ function supportsAnsi(): boolean {
 }
 
 function plainFrame(frameIndex: number, green: string): string {
-  const f = FRAMES[Math.min(frameIndex, FRAMES.length - 1)];
+  const f = FRAMES[Math.min(frameIndex, FRAMES.length - 1)]!;
   let out = '';
   for (const l of f.content) {
     out += color(l, green) + (l || ' ') + RESET + '\n';
@@ -189,11 +189,11 @@ export function runLoadingAnimation(theme: ResolvedTheme = 'dark'): Promise<void
       }
       draw(frame);
       frame++;
-      setTimeout(tick, FRAMES[frame - 1].duration);
+      setTimeout(tick, FRAMES[frame - 1]!.duration);
     }
 
     stdout.write(HIDE_CURSOR + '\x1b[2J\x1b[H');
     draw(0);
-    setTimeout(tick, FRAMES[0].duration);
+    setTimeout(tick, FRAMES[0]!.duration);
   });
 }
