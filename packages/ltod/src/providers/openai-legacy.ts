@@ -1,5 +1,10 @@
 import type { ModelCapability } from '#/capability';
 import type { ContentPart, Message, StreamedMessagePart, ToolCall } from '#/message';
+import {
+  normalizeToolCallIdsForProvider,
+  sanitizeToolCallId,
+  type ToolCallIdPolicy,
+} from '#/providers/tool-call-id';
 import type {
   ChatProvider,
   FinishReason,
@@ -41,6 +46,11 @@ import {
 // arms can be overridden by an explicit `reasoningKey` on the provider config.
 const KNOWN_REASONING_KEYS = ['reasoning_content', 'reasoning_details', 'reasoning'] as const;
 const DEFAULT_OUTBOUND_REASONING_KEY = KNOWN_REASONING_KEYS[0];
+
+const OPENAI_CHAT_TOOL_CALL_ID_POLICY: ToolCallIdPolicy = {
+  normalize: (id) => sanitizeToolCallId(id, 64),
+  maxLength: 64,
+};
 
 function extractReasoningContent(
   source: unknown,
@@ -397,7 +407,8 @@ export class OpenAILegacyChatProvider implements ChatProvider {
     if (systemPrompt) {
       messages.push({ role: 'system', content: systemPrompt });
     }
-    for (const msg of history) {
+    const normalizedHistory = normalizeToolCallIdsForProvider(history, OPENAI_CHAT_TOOL_CALL_ID_POLICY);
+    for (const msg of normalizedHistory) {
       messages.push(convertMessage(msg, this._reasoningKey, this._toolMessageConversion));
     }
 

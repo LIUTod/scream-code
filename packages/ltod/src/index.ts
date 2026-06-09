@@ -57,12 +57,22 @@ export {
   APIConnectionError,
   APIContextOverflowError,
   APIEmptyResponseError,
+  APIProviderRateLimitError,
   APIStatusError,
   APITimeoutError,
   ChatProviderError,
   isContextOverflowStatusError,
+  isProviderRateLimitError,
   isRetryableGenerateError,
 } from './errors';
+
+// Tool call ID sanitization
+export {
+  normalizeToolCallIdsForProvider,
+  sanitizeOpenAIResponsesCallId,
+  sanitizeToolCallId,
+} from './providers/tool-call-id';
+export type { ToolCallIdPolicy } from './providers/tool-call-id';
 
 /**
  * Concrete provider adapters stay off the root barrel because their SDK type

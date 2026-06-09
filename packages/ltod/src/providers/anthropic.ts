@@ -6,6 +6,11 @@ import {
   normalizeAPIStatusError,
 } from '#/errors';
 import type { ContentPart, Message, StreamedMessagePart, ToolCall } from '#/message';
+import {
+  normalizeToolCallIdsForProvider,
+  sanitizeToolCallId,
+  type ToolCallIdPolicy,
+} from '#/providers/tool-call-id';
 import type {
   ChatProvider,
   FinishReason,
@@ -328,6 +333,11 @@ function budgetTokensForEffort(effort: ThinkingEffort): number {
   }
   throw new Error(`Unknown thinking effort: ${String(effort)}`);
 }
+const ANTHROPIC_TOOL_CALL_ID_POLICY: ToolCallIdPolicy = {
+  normalize: (id) => sanitizeToolCallId(id, 64),
+  maxLength: 64,
+};
+
 const CACHE_CONTROL = { type: 'ephemeral' as const };
 
 type CacheableBlock = ContentBlockParam & { cache_control?: { type: 'ephemeral' } };
@@ -900,8 +910,9 @@ export class AnthropicChatProvider implements ChatProvider {
 
     // Convert messages, merging consecutive tool-result-only user messages
     // into a single user message (Anthropic parallel-tool-use spec).
+    const normalizedHistory = normalizeToolCallIdsForProvider(history, ANTHROPIC_TOOL_CALL_ID_POLICY);
     const messages: MessageParam[] = [];
-    for (const msg of history) {
+    for (const msg of normalizedHistory) {
       const converted = convertMessage(msg);
       const last = messages.at(-1);
       if (last !== undefined && isToolResultOnly(last) && isToolResultOnly(converted)) {

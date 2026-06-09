@@ -637,18 +637,15 @@ async function executeTool(
       });
     },
   });
-  return raceExecuteWithGraceAndHardTimeout(executePromise, signal, toolName);
+  return raceExecuteWithGraceTimeout(executePromise, signal, toolName);
 }
 
-const HARD_TIMEOUT_MS = 1_200_000;
-
-async function raceExecuteWithGraceAndHardTimeout(
+async function raceExecuteWithGraceTimeout(
   executePromise: Promise<ExecutableToolResult>,
   signal: AbortSignal,
   toolName: string,
 ): Promise<ExecutableToolResult> {
   let graceTimer: ReturnType<typeof setTimeout> | undefined;
-  let hardTimer: ReturnType<typeof setTimeout> | undefined;
   let onAbort: (() => void) | undefined;
 
   const graceSentinel: Promise<ExecutableToolResult> = new Promise((resolve) => {
@@ -668,23 +665,12 @@ async function raceExecuteWithGraceAndHardTimeout(
     }
   });
 
-  const hardSentinel: Promise<ExecutableToolResult> = new Promise((resolve) => {
-    hardTimer = setTimeout(() => {
-      resolve({
-        output: `Tool "${toolName}" exceeded hard timeout (${String(HARD_TIMEOUT_MS)}ms)`,
-        isError: true,
-      });
-    }, HARD_TIMEOUT_MS);
-  });
-
   try {
     // Tools that ignore AbortSignal may never settle. After abort, the grace
-    // branch lets the turn finish with a synthetic error result. The hard
-    // timeout caps total execution time regardless of abort state.
-    return await Promise.race([executePromise, graceSentinel, hardSentinel]);
+    // branch lets the turn finish with a synthetic error result.
+    return await Promise.race([executePromise, graceSentinel]);
   } finally {
     if (graceTimer !== undefined) clearTimeout(graceTimer);
-    if (hardTimer !== undefined) clearTimeout(hardTimer);
     if (onAbort !== undefined) {
       try {
         signal.removeEventListener('abort', onAbort);

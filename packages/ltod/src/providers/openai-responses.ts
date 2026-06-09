@@ -2,6 +2,11 @@ import type { ModelCapability } from '#/capability';
 import { APIContextOverflowError, ChatProviderError, isContextOverflowErrorCode } from '#/errors';
 import type { ContentPart, Message, StreamedMessagePart, ToolCall } from '#/message';
 import { extractText } from '#/message';
+import {
+  normalizeToolCallIdsForProvider,
+  sanitizeOpenAIResponsesCallId,
+  type ToolCallIdPolicy,
+} from '#/providers/tool-call-id';
 import type {
   ChatProvider,
   FinishReason,
@@ -89,6 +94,11 @@ type ResponseOutputItemView =
   | {
       type: 'other';
     };
+
+const OPENAI_RESPONSES_TOOL_CALL_ID_POLICY: ToolCallIdPolicy = {
+  normalize: (id) => sanitizeOpenAIResponsesCallId(id, 64),
+  maxLength: 64,
+};
 
 function asRawObject(value: unknown): RawObject | null {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
@@ -904,7 +914,8 @@ export class OpenAIResponsesChatProvider implements ChatProvider {
       input.push(sysItem);
     }
 
-    for (const msg of history) {
+    const normalizedHistory = normalizeToolCallIdsForProvider(history, OPENAI_RESPONSES_TOOL_CALL_ID_POLICY);
+    for (const msg of normalizedHistory) {
       input.push(...convertMessage(msg, this._model, this._toolMessageConversion));
     }
 

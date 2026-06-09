@@ -2,9 +2,11 @@ import {
   APIConnectionError,
   APIContextOverflowError,
   APIEmptyResponseError,
+  APIProviderRateLimitError,
   APIStatusError,
   APITimeoutError,
   ChatProviderError,
+  isProviderRateLimitError,
   isRetryableGenerateError,
   normalizeAPIStatusError,
 } from '#/errors';
@@ -85,6 +87,22 @@ describe('APIContextOverflowError', () => {
   });
 });
 
+describe('APIProviderRateLimitError', () => {
+  it('extends APIStatusError with status 429', () => {
+    const err = new APIProviderRateLimitError('too many requests', 'req-429');
+    expect(err).toBeInstanceOf(APIStatusError);
+    expect(err).toBeInstanceOf(ChatProviderError);
+    expect(err.name).toBe('APIProviderRateLimitError');
+    expect(err.statusCode).toBe(429);
+    expect(err.requestId).toBe('req-429');
+  });
+
+  it('defaults requestId to null when omitted', () => {
+    const err = new APIProviderRateLimitError('rate limited');
+    expect(err.requestId).toBeNull();
+  });
+});
+
 describe('isRetryableGenerateError', () => {
   it('matches transient provider errors and empty generate responses', () => {
     expect(isRetryableGenerateError(new APIConnectionError('conn'))).toBe(true);
@@ -116,6 +134,7 @@ describe('error hierarchy instanceof checks', () => {
       new APITimeoutError('timeout'),
       new APIStatusError(400, 'status', null),
       new APIContextOverflowError(400, 'context length exceeded'),
+      new APIProviderRateLimitError('rate limited'),
       new APIEmptyResponseError('empty'),
     ];
 
@@ -174,5 +193,35 @@ describe('normalizeAPIStatusError', () => {
     const error = normalizeAPIStatusError(statusCode, message);
     expect(error).toBeInstanceOf(APIStatusError);
     expect(error).not.toBeInstanceOf(APIContextOverflowError);
+  });
+
+  it('normalizes 429 to APIProviderRateLimitError', () => {
+    const error = normalizeAPIStatusError(429, 'Too Many Requests', 'req-rate');
+    expect(error).toBeInstanceOf(APIProviderRateLimitError);
+    expect(error).toBeInstanceOf(APIStatusError);
+    expect(error.statusCode).toBe(429);
+    expect(error.requestId).toBe('req-rate');
+  });
+});
+
+describe('isProviderRateLimitError', () => {
+  it('matches APIProviderRateLimitError instances', () => {
+    expect(isProviderRateLimitError(new APIProviderRateLimitError('rate limited'))).toBe(true);
+  });
+
+  it('matches APIStatusError with statusCode 429', () => {
+    expect(isProviderRateLimitError(new APIStatusError(429, 'too many requests'))).toBe(true);
+  });
+
+  it('matches errors with rate limit message patterns', () => {
+    expect(isProviderRateLimitError(new Error('rate-limited by provider'))).toBe(true);
+    expect(isProviderRateLimitError(new Error('too many requests'))).toBe(true);
+    expect(isProviderRateLimitError(new Error('reached max rpm'))).toBe(true);
+  });
+
+  it('does not match non-rate-limit errors', () => {
+    expect(isProviderRateLimitError(new APIStatusError(500, 'server error'))).toBe(false);
+    expect(isProviderRateLimitError(new APIConnectionError('connection refused'))).toBe(false);
+    expect(isProviderRateLimitError(new Error('something else'))).toBe(false);
   });
 });

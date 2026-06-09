@@ -3,7 +3,6 @@ const { stdout } = process;
 
 import type { ResolvedTheme } from "#/tui/theme/colors";
 
-const DIM = "\x1b[38;2;136;136;136m";
 const BRIGHT = "\x1b[38;2;255;255;255m";
 const RESET = "\x1b[0m";
 const HIDE_CURSOR = "\x1b[?25l";
@@ -157,6 +156,15 @@ function plainFrame(frameIndex: number, green: string): string {
   return out;
 }
 
+const LOADING_STAGES = [
+  '正在整理记忆区域....',
+  '正在加载用户喜好....',
+  '正在确认模型配置....',
+  '正在加载scream code....',
+];
+
+const STAGE_DELAYS_MS = [450, 350, 650, 350];
+
 export function runLoadingAnimation(theme: ResolvedTheme = 'dark'): Promise<void> {
   const green = THEME_GREEN[theme];
   const ansi = supportsAnsi();
@@ -164,7 +172,9 @@ export function runLoadingAnimation(theme: ResolvedTheme = 'dark'): Promise<void
   // Non-TTY or no ANSI: just print the final frame once, then resolve
   if (!ansi) {
     stdout.write(plainFrame(FRAMES.length - 1, green));
-    stdout.write('\n' + DIM + '正在加载scream code....' + RESET + '\n');
+    for (const stage of LOADING_STAGES) {
+      stdout.write(green + stage + RESET + '\n');
+    }
     return Promise.resolve();
   }
 
@@ -176,14 +186,23 @@ export function runLoadingAnimation(theme: ResolvedTheme = 'dark'): Promise<void
       stdout.write('\x1b[H' + plainFrame(i, green));
     }
 
+    function showStages(stages: readonly string[], index: number): void {
+      if (index >= stages.length) {
+        setTimeout(() => {
+          stdout.write('\x1b[2J\x1b[H' + SHOW_CURSOR);
+          resolve();
+        }, 400);
+        return;
+      }
+      stdout.write('\n' + green + stages[index] + RESET);
+      const delay = STAGE_DELAYS_MS[index] ?? 350;
+      setTimeout(() => showStages(stages, index + 1), delay);
+    }
+
     function tick() {
       if (frame >= last) {
         setTimeout(() => {
-          stdout.write('\n' + DIM + '正在加载scream code....' + RESET + '\n');
-          setTimeout(() => {
-            stdout.write('\x1b[2J\x1b[H' + SHOW_CURSOR);
-            resolve();
-          }, 400);
+          showStages(LOADING_STAGES, 0);
         }, 600);
         return;
       }
