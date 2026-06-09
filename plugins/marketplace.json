@@ -10,14 +10,6 @@
       "tags": ["animation", "gsap", "frontend", "scrolltrigger"]
     },
     {
-      "id": "gorden-ppt-skill",
-      "name": "Gorden PPT 助手",
-      "description": "17 套精修中文 PPT 模板，支持 python-pptx 编辑生成，适配国企/互联网大厂风格",
-      "source": "https://github.com/GordenSun/GordenPPTSkill",
-      "author": "GordenSun",
-      "tags": ["ppt", "pptx", "template", "chinese"]
-    },
-    {
       "id": "claude-design-card",
       "name": "Claude Design Card",
       "description": "14 种设计卡片生成（封面/图文/社交分享/长篇排版），Parchment × Swiss 双风格体系",
@@ -74,22 +66,6 @@
       "tags": ["patent", "legal", "document", "chinese", "ip"]
     },
     {
-      "id": "html-ppt-skill",
-      "name": "HTML PPT Studio 演示文稿",
-      "description": "AI 驱动 HTML 幻灯片生成：36 套主题 × 31 种布局 × 47 种动画，纯静态 HTML/CSS/JS，支持演讲者模式、中英文排版，零构建步骤",
-      "source": "https://github.com/lewislulu/html-ppt-skill",
-      "author": "lewislulu",
-      "tags": ["ppt", "html", "presentation", "slides", "animation"]
-    },
-    {
-      "id": "uzi-skill",
-      "name": "UZI Skill 股票分析引擎",
-      "description": "A股/港股/美股深度分析：22 数据维度 × 180 量化规则 × 17 机构分析法 × 51 投资大师人格模拟，输出 Bloomberg 风格 HTML 报告，零 API 密钥",
-      "source": "https://github.com/wbh604/UZI-Skill",
-      "author": "wbh604",
-      "tags": ["stock", "investment", "analysis", "a-share", "hk-stock", "us-stock"]
-    },
-    {
       "id": "contract-review-pro",
       "name": "Contract Review Pro 合同审查",
       "description": "专业合同审查技能：7 步状态机工作流 × 5 强制审查关 × 15 类风险标签 × 六维风险评估，输出批注合同+法律意见书+分析备忘录三件套，支持 30 种合同类型",
@@ -112,6 +88,86 @@
       "source": "https://github.com/chopratejas/headroom",
       "author": "chopratejas",
       "tags": ["compression", "token-saving", "rag", "optimization", "mcp"]
+    },
+    {
+      "id": "xiaohu-wechat-format",
+      "name": "小壶公众号排版",
+      "description": "Markdown → 微信兼容 HTML → 推送草稿箱，30 套主题 + 可视化画廊，一键排版发布",
+      "source": "https://github.com/xiaohuailabs/xiaohu-wechat-format",
+      "author": "xiaohuailabs",
+      "tags": ["wechat", "html", "markdown", "publish", "theme"]
+    },
+    {
+      "id": "huashu-design",
+      "name": "花束设计",
+      "description": "HTML 原生设计技能：高保真原型 / 幻灯片 / 动画 + 20 设计哲学 + 5 维评审 + MP4 导出",
+      "source": "https://github.com/alchaincyf/huashu-design",
+      "author": "alchaincyf",
+      "tags": ["design", "html", "prototype", "slides", "animation"]
+    },
+    {
+      "id": "html-video",
+      "name": "HTML Video 视频生成",
+      "description": "HTML 转 MP4：可插拔渲染引擎 + 21 套模板 + AI 配乐，全程本地，零渲染费用",
+      "source": "https://github.com/nexu-io/html-video",
+      "author": "nexu-io",
+      "tags": ["video", "html", "mp4", "animation", "template"]
+    },
+    {
+      "id": "xiaohu-video-translate",
+      "name": "小壶视频翻译",
+      "description": "外语视频自动配中文字幕：下载 / 转写 / 翻译 / 润色 / 烧录一条龙，全程本地",
+      "source": "https://github.com/xiaohuailabs/xiaohu-video-translate",
+      "author": "xiaohuailabs",
+      "tags": ["video", "translate", "subtitle", "chinese", "local"]
+    },
+    {
+      "id": "videocut-skills",
+      "name": "视频剪辑 Agent",
+      "description": "Claude Code Skills 驱动的视频剪辑 Agent：口播剪辑 / 字幕导入 / 画质高清化",
+      "source": "https://github.com/Ceeon/videocut-skills",
+      "author": "Ceeon",
+      "tags": ["video", "editing", "subtitle", "agent"]
+    },
+    {
+      "id": "taste-skill",
+      "name": "Taste Skill 设计品味",
+      "description": "给 AI 好品味：阻止生成无聊通用的设计，输出有质感的方案",
+      "source": "https://github.com/Leonxlnx/taste-skill",
+      "author": "Leonxlnx",
+      "tags": ["design", "taste", "quality", "ai"]
+    },
+    {
+      "id": "vtake-skills",
+      "name": "VTake 视频剪辑",
+      "description": "Agent Skills 驱动的视频剪辑工具",
+      "source": "https://github.com/notedit/vtake-skills",
+      "author": "notedit",
+      "tags": ["video", "editing", "agent"]
+    },
+    {
+      "id": "remotion-skills",
+      "name": "Remotion 视频技能",
+      "description": "Remotion（React 视频框架）官方技能包",
+      "source": "https://github.com/remotion-dev/skills",
+      "author": "remotion-dev",
+      "tags": ["video", "react", "remotion", "framework"]
+    },
+    {
+      "id": "html-anything",
+      "name": "HTML Anything 全能设计",
+      "description": "75 个技能 × 9 种场景：杂志 / 幻灯片 / 海报 / 小红书 / 数据报告 / 原型，零 API 密钥",
+      "source": "https://github.com/nexu-io/html-anything",
+      "author": "nexu-io",
+      "tags": ["design", "html", "slides", "poster", "prototype", "report"]
+    },
+    {
+      "id": "guizang-social-card-skill",
+      "name": "归藏社交卡片",
+      "description": "小红书轮播图 + 公众号封面：28 种布局 × 10 套主题，Editorial × Swiss 视觉体系，单文件 HTML → PNG",
+      "source": "https://github.com/op7418/guizang-social-card-skill",
+      "author": "op7418",
+      "tags": ["xiaohongshu", "wechat", "card", "design", "html", "png"]
     }
   ]
 }

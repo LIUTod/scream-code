@@ -28,12 +28,6 @@ const BUILTIN_REGISTRY: MarketplaceEntry[] = [
     source: 'https://github.com/greensock/gsap-skills',
   },
   {
-    id: 'gorden-ppt-skill',
-    displayName: 'Gorden PPT 助手',
-    description: '17 套精修中文 PPT 模板，支持 python-pptx 编辑生成，适配国企/互联网大厂风格',
-    source: 'https://github.com/GordenSun/GordenPPTSkill',
-  },
-  {
     id: 'claude-design-card',
     displayName: 'Claude Design Card',
     description: '14 种设计卡片生成（封面/图文/社交分享/长篇排版），Parchment × Swiss 双风格体系',
@@ -76,18 +70,6 @@ const BUILTIN_REGISTRY: MarketplaceEntry[] = [
     source: 'https://github.com/handsomestWei/patent-disclosure-skill',
   },
   {
-    id: 'html-ppt-skill',
-    displayName: 'HTML PPT Studio 演示文稿',
-    description: 'AI 驱动 HTML 幻灯片：36 套主题 × 31 种布局 × 47 种动画，纯静态 HTML/CSS/JS，支持演讲者模式',
-    source: 'https://github.com/lewislulu/html-ppt-skill',
-  },
-  {
-    id: 'uzi-skill',
-    displayName: 'UZI Skill 股票分析引擎',
-    description: 'A股/港股/美股深度分析：22 数据维度 × 180 量化规则 × 17 机构分析法 × 51 投资大师人格模拟，输出 Bloomberg 风格 HTML 报告',
-    source: 'https://github.com/wbh604/UZI-Skill',
-  },
-  {
     id: 'contract-review-pro',
     displayName: 'Contract Review Pro 合同审查',
     description: '专业合同审查：7 步工作流 × 5 强制关 × 15 类风险标签 × 六维评估，输出批注合同+法律意见书+分析备忘录，支持 30 种合同类型',
@@ -104,6 +86,66 @@ const BUILTIN_REGISTRY: MarketplaceEntry[] = [
     displayName: 'Headroom 压缩优化',
     description: '在内容送达 LLM 前压缩工具输出、日志、文件和 RAG 块，节省 60-95% Token，答案质量不变',
     source: 'https://github.com/chopratejas/headroom',
+  },
+  {
+    id: 'xiaohu-wechat-format',
+    displayName: '小壶公众号排版',
+    description: 'Markdown → 微信兼容 HTML → 推送草稿箱，30 套主题 + 可视化画廊，一键排版发布',
+    source: 'https://github.com/xiaohuailabs/xiaohu-wechat-format',
+  },
+  {
+    id: 'huashu-design',
+    displayName: '花束设计',
+    description: 'HTML 原生设计技能：高保真原型 / 幻灯片 / 动画 + 20 设计哲学 + 5 维评审 + MP4 导出',
+    source: 'https://github.com/alchaincyf/huashu-design',
+  },
+  {
+    id: 'html-video',
+    displayName: 'HTML Video 视频生成',
+    description: 'HTML 转 MP4：可插拔渲染引擎 + 21 套模板 + AI 配乐，全程本地，零渲染费用',
+    source: 'https://github.com/nexu-io/html-video',
+  },
+  {
+    id: 'xiaohu-video-translate',
+    displayName: '小壶视频翻译',
+    description: '外语视频自动配中文字幕：下载 / 转写 / 翻译 / 润色 / 烧录一条龙，全程本地',
+    source: 'https://github.com/xiaohuailabs/xiaohu-video-translate',
+  },
+  {
+    id: 'videocut-skills',
+    displayName: '视频剪辑 Agent',
+    description: 'Claude Code Skills 驱动的视频剪辑 Agent：口播剪辑 / 字幕导入 / 画质高清化',
+    source: 'https://github.com/Ceeon/videocut-skills',
+  },
+  {
+    id: 'taste-skill',
+    displayName: 'Taste Skill 设计品味',
+    description: '给 AI 好品味：阻止生成无聊通用的设计，输出有质感的方案',
+    source: 'https://github.com/Leonxlnx/taste-skill',
+  },
+  {
+    id: 'vtake-skills',
+    displayName: 'VTake 视频剪辑',
+    description: 'Agent Skills 驱动的视频剪辑工具',
+    source: 'https://github.com/notedit/vtake-skills',
+  },
+  {
+    id: 'remotion-skills',
+    displayName: 'Remotion 视频技能',
+    description: 'Remotion（React 视频框架）官方技能包',
+    source: 'https://github.com/remotion-dev/skills',
+  },
+  {
+    id: 'html-anything',
+    displayName: 'HTML Anything 全能设计',
+    description: '75 个技能 × 9 种场景：杂志 / 幻灯片 / 海报 / 小红书 / 数据报告 / 原型，零 API 密钥',
+    source: 'https://github.com/nexu-io/html-anything',
+  },
+  {
+    id: 'guizang-social-card-skill',
+    displayName: '归藏社交卡片',
+    description: '小红书轮播图 + 公众号封面：28 种布局 × 10 套主题，Editorial × Swiss 视觉体系，单文件 HTML → PNG',
+    source: 'https://github.com/op7418/guizang-social-card-skill',
   },
 ];
 
@@ -234,15 +276,50 @@ async function loadInstalled(
   }
 }
 
+/**
+ * Normalize a GitHub URL to `{owner}/{repo}` for fuzzy matching.
+ * Returns `null` for non-GitHub URLs (caller falls back to exact match).
+ */
+function normalizeGithubSource(url: string): string | null {
+  try {
+    const u = new URL(url.trim());
+    if (u.hostname !== 'github.com' && u.hostname !== 'www.github.com') return null;
+    const segments = u.pathname.split('/').filter((s) => s.length > 0);
+    if (segments.length < 2) return null;
+    const owner = segments[0]!;
+    const repo = segments[1]!.replace(/\.git$/, '');
+    return `${owner}/${repo}`.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+function isInstalled(
+  marketplaceId: string,
+  marketplaceSource: string,
+  installed: readonly PluginSummary[],
+): boolean {
+  // Match by id first (exact).
+  if (installed.some((p) => p.id === marketplaceId)) return true;
+  // Fallback: match by GitHub owner/repo so a manifest name mismatch doesn't
+  // cause the plugin to appear as "not installed" after a successful install.
+  const normalizedSource = normalizeGithubSource(marketplaceSource);
+  if (normalizedSource === null) return false;
+  return installed.some((p) => {
+    const src = p.originalSource ?? '';
+    const norm = normalizeGithubSource(src);
+    return norm !== null && norm === normalizedSource;
+  });
+}
+
 function buildOptions(
   marketplace: readonly MarketplaceEntry[],
   installed: readonly PluginSummary[],
 ): ChoiceOption[] {
   const options: ChoiceOption[] = [];
-  const installedIds = new Set(installed.map((p) => p.id));
 
   // ── Section: marketplace (not yet installed) ──
-  const newPlugins = marketplace.filter((p) => !installedIds.has(p.id));
+  const newPlugins = marketplace.filter((p) => !isInstalled(p.id, p.source, installed));
   if (newPlugins.length > 0) {
     options.push({
       value: '__section__marketplace',

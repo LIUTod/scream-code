@@ -1,4 +1,4 @@
-import { realpath, readFile, stat } from 'node:fs/promises';
+import { readdir, realpath, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 
 import { McpServerConfigSchema, type McpServerConfig } from '../config/schema';
@@ -46,9 +46,7 @@ export async function parseManifest(pluginRoot: string): Promise<ParsedManifestR
   const claudeDirJsonExists = await isFile(claudeDirJsonPath);
 
   if (!rootJsonExists && !dirJsonExists && !claudeDirJsonExists) {
-    // Fallback: bare SKILL.md at repo root (common Claude Code skill pattern).
-    // Auto-generate a minimal virtual manifest so these repos can be installed
-    // without forcing authors to add ScreamCode-specific packaging.
+    // Fallback 1: bare SKILL.md at repo root (common Claude Code skill pattern).
     const skillMdPath = path.join(pluginRoot, BARE_SKILL_PATH);
     if (await isFile(skillMdPath)) {
       return {
@@ -58,6 +56,23 @@ export async function parseManifest(pluginRoot: string): Promise<ParsedManifestR
         },
         manifestKind: 'bare-skill',
         manifestPath: skillMdPath,
+        diagnostics: [],
+      };
+    }
+
+    // Fallback 2: scan subdirectories for SKILL.md files (up to 3 levels deep).
+    // Many community skills ship SKILL.md inside subdirectories rather than at
+    // the repo root.  Auto-discover them so these repos can be installed without
+    // forcing authors to add ScreamCode-specific packaging.
+    const discoveredSkillDirs = await discoverSkillDirs(pluginRoot, 3);
+    if (discoveredSkillDirs.length > 0) {
+      return {
+        manifest: {
+          name: path.basename(pluginRoot),
+          skills: discoveredSkillDirs,
+        },
+        manifestKind: 'bare-skill',
+        manifestPath: path.join(discoveredSkillDirs[0]!, BARE_SKILL_PATH),
         diagnostics: [],
       };
     }
@@ -403,6 +418,46 @@ function isObject(value: unknown): value is Record<string, unknown> {
 function isWithin(child: string, parent: string): boolean {
   const relative = path.relative(parent, child);
   return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
+/**
+ * Recursively scan for `SKILL.md` files up to `maxDepth` levels below `root`.
+ * Returns the unique parent directories, deduplicated so that a nested skill
+ * dir is not listed if its ancestor is already a skill root.
+ */
+async function discoverSkillDirs(root: string, maxDepth: number): Promise<string[]> {
+  const found: string[] = [];
+
+  async function walk(dir: string, depth: number): Promise<void> {
+    if (depth > maxDepth) return;
+    let entries;
+    try {
+      entries = await readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const child = path.join(dir, entry.name);
+      if (await isFile(path.join(child, BARE_SKILL_PATH))) {
+        found.push(child);
+      }
+      await walk(child, depth + 1);
+    }
+  }
+
+  await walk(root, 1);
+
+  // Deduplicate: if a discovered dir is nested inside another discovered dir,
+  // keep only the ancestor.
+  const sorted = found.sort((a, b) => a.length - b.length);
+  const result: string[] = [];
+  for (const dir of sorted) {
+    if (!result.some((parent) => dir.startsWith(parent + path.sep))) {
+      result.push(dir);
+    }
+  }
+  return result;
 }
 
 async function isFile(p: string): Promise<boolean> {
