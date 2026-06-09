@@ -12,7 +12,12 @@ export function project(history: readonly ContextMessage[]): Message[] {
       !(message.role === 'assistant' && message.content.length === 0 && message.toolCalls.length === 0)
     );
   });
-  return mergeAdjacentUserMessages(usable);
+  // A crash mid-tool-execution leaves an assistant message with tool_calls at
+  // the tail but no matching tool results — the API rejects this. Drop it.
+  const last = usable.at(-1);
+  const repaired =
+    last?.role === 'assistant' && last.toolCalls.length > 0 ? usable.slice(0, -1) : usable;
+  return mergeAdjacentUserMessages(repaired);
 }
 
 function mergeAdjacentUserMessages(history: readonly ContextMessage[]): Message[] {

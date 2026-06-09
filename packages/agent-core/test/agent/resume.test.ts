@@ -152,6 +152,15 @@ describe('Agent resume', () => {
           ],
         },
       } as unknown as AgentRecord,
+      {
+        type: 'context.append_message',
+        message: {
+          role: 'tool',
+          content: [{ type: 'text', text: '/home/user' }],
+          toolCalls: [],
+          toolCallId: 'call_legacy_bash',
+        },
+      } as unknown as AgentRecord,
     ]);
     const ctx = testAgent({ persistence });
 

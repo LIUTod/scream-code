@@ -846,6 +846,9 @@ export class ScreamTUI {
   }
 
   async deleteSession(sessionId: string): Promise<void> {
+    if (sessionId === this.session?.id) {
+      await this.sessionManager.closeSession('session deleted');
+    }
     await this.harness.deleteSession(sessionId);
   }
 

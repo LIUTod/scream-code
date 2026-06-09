@@ -82,14 +82,14 @@ export class SessionStore {
   async create(input: CreateSessionRecordInput): Promise<SessionSummary> {
     assertSafeSessionId(input.id);
     const workDir = normalizeWorkDir(input.workDir);
+    const dir = this.sessionDirFor({ id: input.id, workDir });
+
     const indexed = await this.findSessionEntry(input.id);
     if (indexed !== undefined) {
-      throw new ScreamError(ErrorCodes.SESSION_ALREADY_EXISTS, `Session "${input.id}" already exists`);
-    }
-
-    const dir = this.sessionDirFor({ id: input.id, workDir });
-    if (await isDirectory(dir)) {
-      throw new ScreamError(ErrorCodes.SESSION_ALREADY_EXISTS, `Session "${input.id}" already exists`);
+      await this.delete(input.id);
+    } else if (await isDirectory(dir)) {
+      // Directory exists but no index entry — orphaned from partial delete.
+      await rm(dir, { recursive: true, force: true });
     }
 
     await mkdir(dir, { recursive: true, mode: 0o700 });
@@ -168,9 +168,11 @@ export class SessionStore {
 
   async delete(id: string): Promise<void> {
     assertSafeSessionId(id);
-    const entry = await this.findExistingSessionEntry(id);
-    await rm(entry.sessionDir, { recursive: true, force: true });
-    await removeSessionIndexEntry(this.homeDir, id);
+    const entry = await this.findSessionEntry(id);
+    if (entry !== undefined) {
+      await rm(entry.sessionDir, { recursive: true, force: true }).catch(() => {});
+    }
+    await removeSessionIndexEntry(this.homeDir, id).catch(() => {});
   }
 
   async list(options: ListSessionsPayload = {}): Promise<readonly SessionSummary[]> {
