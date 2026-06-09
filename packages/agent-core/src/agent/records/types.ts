@@ -71,6 +71,9 @@ export interface AgentRecordEvents {
   'context.undo': { count: number };
   'context.apply_compaction': CompactionResult;
 
+  'wolfpack.enter': {};
+  'wolfpack.exit': {};
+
   'tools.update_store': ToolStoreUpdate;
 }
 

@@ -33,7 +33,7 @@ function fakeInitialAppState(): AppState {
     goalActive: false,
     goalContinuationCount: 0,
     ccConnectActive: false,
-    parallelMode: false,
+    wolfpackMode: false,
   };
 }
 

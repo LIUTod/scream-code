@@ -685,6 +685,7 @@ describe('Permission policy chain', () => {
       'git-control-path-access-ask',
       'cwd-outside-file-write-ask',
       'yolo-mode-approve',
+      'wolfpack-mode-approve',
       'default-tool-approve',
       'git-cwd-write-approve',
       'fallback-ask',

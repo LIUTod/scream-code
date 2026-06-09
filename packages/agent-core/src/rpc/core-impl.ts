@@ -481,6 +481,14 @@ export class ScreamCore implements PromisableMethods<CoreAPI> {
     return this.sessionApi(sessionId).clearPlan(payload);
   }
 
+  enterWolfpack({ sessionId, ...payload }: SessionAgentPayload<EmptyPayload>) {
+    return this.sessionApi(sessionId).enterWolfpack(payload);
+  }
+
+  exitWolfpack({ sessionId, ...payload }: SessionAgentPayload<EmptyPayload>) {
+    return this.sessionApi(sessionId).exitWolfpack(payload);
+  }
+
   beginCompaction({ sessionId, ...payload }: SessionAgentPayload<BeginCompactionPayload>) {
     return this.sessionApi(sessionId).beginCompaction(payload);
   }

@@ -67,6 +67,12 @@ function restoreAgentRecord(agent: Agent, input: AgentRecord): void {
     case 'plan_mode.exit':
       agent.planMode.exit(input.id);
       return;
+    case 'wolfpack.enter':
+      agent.wolfpackMode.restoreEnter();
+      return;
+    case 'wolfpack.exit':
+      agent.wolfpackMode.exit();
+      return;
     case 'context.append_message':
       agent.context.appendMessage(input.message);
       return;

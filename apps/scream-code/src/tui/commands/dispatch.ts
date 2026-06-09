@@ -25,9 +25,9 @@ import {
   handleAutoCommand,
   handleCompactCommand,
   handleEditorCommand,
-  handlePowerCommand,
   handleModelCommand,
   handlePlanCommand,
+  handleWolfpackCommand,
   handleThemeCommand,
   handleYoloCommand,
   showModelPicker,
@@ -64,9 +64,9 @@ export {
   handleAutoCommand,
   handleCompactCommand,
   handleEditorCommand,
-  handlePowerCommand,
   handleModelCommand,
   handlePlanCommand,
+  handleWolfpackCommand,
   handleThemeCommand,
   handleYoloCommand,
   showModelPicker,
@@ -280,8 +280,8 @@ async function handleBuiltInSlashCommand(
     case 'plan':
       await handlePlanCommand(host, args);
       return;
-    case 'power':
-      await handlePowerCommand(host, args);
+    case 'wolfpack':
+      await handleWolfpackCommand(host, args);
       return;
     case 'revoke':
       await handleRevokeCommand(host, args);

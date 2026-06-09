@@ -21,6 +21,7 @@ import {
   UserConfiguredDenyPermissionPolicy,
 } from './user-configured-rules';
 import { YoloModeApprovePermissionPolicy } from './yolo-mode-approve';
+import { WolfPackModeApprovePermissionPolicy } from './wolfpack-mode-approve';
 
 /** Permission policies run in order; the first non-undefined result wins. */
 export function createPermissionDecisionPolicies(agent: Agent): readonly PermissionPolicy[] {
@@ -53,6 +54,8 @@ export function createPermissionDecisionPolicies(agent: Agent): readonly Permiss
     new CwdOutsideFileWriteAskPermissionPolicy(agent),
     // yolo mode → approve.
     new YoloModeApprovePermissionPolicy(agent),
+    // WolfPack mode active → approve.
+    new WolfPackModeApprovePermissionPolicy(agent),
     // Tool is in the default-approve list (read-only / UI helpers) → approve.
     new DefaultToolApprovePermissionPolicy(),
     // Write/Edit on POSIX paths inside cwd inside a git work tree → approve.

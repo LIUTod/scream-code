@@ -148,6 +148,17 @@ export class Session {
     await this.rpc.setPlanMode({ sessionId: this.id, enabled });
   }
 
+  async setWolfpackMode(enabled: boolean): Promise<void> {
+    this.ensureOpen();
+    if (typeof enabled !== 'boolean') {
+      throw new ScreamError(
+        ErrorCodes.SESSION_WOLFPACK_MODE_INVALID,
+        'Session wolfpack mode must be a boolean',
+      );
+    }
+    await this.rpc.setWolfpackMode({ sessionId: this.id, enabled });
+  }
+
   async getPlan(): Promise<SessionPlan> {
     this.ensureOpen();
     return this.rpc.getPlan({ sessionId: this.id });

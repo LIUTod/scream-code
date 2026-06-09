@@ -393,6 +393,12 @@ export class ToolManager {
               log: this.agent.log,
             },
           ),
+        this.agent.subagentHost &&
+          new b.WolfPackTool(
+            this.agent.subagentHost,
+            () => this.agent.wolfpackMode.isActive,
+            { log: this.agent.log },
+          ),
 
         toolServices?.webSearcher && new b.WebSearchTool(toolServices.webSearcher),
         toolServices?.urlFetcher && new b.FetchURLTool(toolServices.urlFetcher),

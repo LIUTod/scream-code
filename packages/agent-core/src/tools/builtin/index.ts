@@ -9,6 +9,7 @@ export * from './collaboration/agent';
 export * from './collaboration/ask-user';
 
 export * from './collaboration/skill-tool';
+export * from './collaboration/wolfpack';
 export * from './file/edit';
 export * from './file/glob';
 export * from './file/grep';

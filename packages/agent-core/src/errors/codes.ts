@@ -27,6 +27,7 @@ export const ErrorCodes = {
   SESSION_THINKING_EMPTY: 'session.thinking_empty',
   SESSION_MODEL_EMPTY: 'session.model_empty',
   SESSION_PLAN_MODE_INVALID: 'session.plan_mode_invalid',
+  SESSION_WOLFPACK_MODE_INVALID: 'session.wolfpack_mode_invalid',
   SESSION_APPROVAL_HANDLER_ERROR: 'session.approval_handler_error',
   SESSION_QUESTION_HANDLER_ERROR: 'session.question_handler_error',
   SESSION_INIT_FAILED: 'session.init_failed',
@@ -188,6 +189,12 @@ export const SCREAM_ERROR_INFO = {
     retryable: false,
     public: true,
     action: 'Provide a boolean plan mode.',
+  },
+  'session.wolfpack_mode_invalid': {
+    title: 'Invalid wolfpack mode',
+    retryable: false,
+    public: true,
+    action: 'Provide a boolean wolfpack mode.',
   },
   'session.approval_handler_error': {
     title: 'Approval handler threw',

@@ -163,14 +163,17 @@ Edit the `RECOMMENDED` array in `apps/scream-code/src/tui/commands/mcp.ts`.
 
 All slash commands are declared in `src/tui/commands/registry.ts` and dispatched in `src/tui/commands/dispatch.ts`. Beyond the session-config-modelling helpers documented in `ScreamTUI`, these commands carry non-trivial state or backend integration:
 
-### Power Mode (`/power`)
+### WolfPack Mode (`/wolfpack`)
 
-Parallel sub-agent orchestration. Toggles `parallelMode` in `AppState`. When enabled, the model is instructed to spawn multiple agents concurrently by issuing multiple `Agent` tool calls in a single response. All tool calls in a step are executed via `Promise.allSettled`, so they run in parallel automatically.
+Batch parallel subagent orchestration. Toggles `wolfpackMode` in `AppState`. When active, the LLM can use the `WolfPack` tool to spawn parallel subagents via a template + items pattern (max 20 items), executed concurrently via `Promise.allSettled` with aggregated results. Follows the PlanMode pattern end-to-end.
 
-- **Entry**: `/power` (aliases: `/parallel`)
-- **Tool**: `packages/agent-core/src/tools/builtin/collaboration/agent.ts`
-- **Execution**: `packages/agent-core/src/loop/tool-call.ts` — concurrent tool execution
-- **Footer badge**: `power` in brand blue when active.
+- **Entry**: `/wolfpack` (aliases: `wp`), toggles on/off with no args
+- **State machine**: `packages/agent-core/src/agent/wolfpack/index.ts` — `WolfPackMode` (enter / exit / restoreEnter / isActive)
+- **Injector**: `packages/agent-core/src/agent/injection/wolfpack.ts` — `WolfPackModeInjector`, injects usage instructions on enter/exit
+- **Tool**: `packages/agent-core/src/tools/builtin/collaboration/wolfpack.ts` — `WolfPackTool`, runtime-gated by `wolfpackMode.isActive`
+- **Permission policy**: `packages/agent-core/src/agent/permission/policies/wolfpack-mode-approve.ts` — auto-approves all tools when WolfPack is active
+- **Records**: `wolfpack.enter` / `wolfpack.exit` for session replay recovery
+- **Footer badge**: `wolfpack` in brand blue when active
 
 ### Goal System (`/goal`, `/goaloff`)
 

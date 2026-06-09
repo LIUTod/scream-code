@@ -150,13 +150,38 @@ export async function handleAutoCommand(host: SlashCommandHost, args: string): P
   }
 }
 
-export async function handlePowerCommand(host: SlashCommandHost, _args: string): Promise<void> {
-  const next = !host.state.appState.parallelMode;
-  host.setAppState({ parallelMode: next });
-  if (next) {
-    host.showNotice('Power 模式：开启', '成功注入power能量 你的任务交给我了');
-  } else {
-    host.showNotice('Power 模式：关闭', '可惜了 早知道再多花点Token了');
+export async function handleWolfpackCommand(host: SlashCommandHost, args: string): Promise<void> {
+  const session = host.session;
+  if (session === undefined) {
+    host.showError(NO_ACTIVE_SESSION_MESSAGE);
+    return;
+  }
+
+  const subcmd = args.trim().toLowerCase();
+  let enabled: boolean;
+  if (subcmd.length === 0) enabled = !host.state.appState.wolfpackMode;
+  else if (subcmd === 'on') enabled = true;
+  else if (subcmd === 'off') enabled = false;
+  else {
+    host.showError(`Unknown wolfpack subcommand: ${subcmd}`);
+    return;
+  }
+
+  await applyWolfpackMode(host, session, enabled);
+}
+
+async function applyWolfpackMode(host: SlashCommandHost, session: Session, enabled: boolean): Promise<void> {
+  try {
+    await session.setWolfpackMode(enabled);
+    host.setAppState({ wolfpackMode: enabled });
+    if (enabled) {
+      host.showNotice('WolfPack 模式：开启', '批量并发代理已激活。');
+      return;
+    }
+    host.showNotice('WolfPack 模式：关闭');
+  } catch (error) {
+    const msg = formatErrorMessage(error);
+    host.showError(`Failed to set wolfpack mode: ${msg}`);
   }
 }
 

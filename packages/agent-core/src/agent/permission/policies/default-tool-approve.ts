@@ -15,6 +15,7 @@ const DEFAULT_APPROVE_TOOLS = new Set([
   'Agent',
   'AskUserQuestion',
   'Skill',
+  'WolfPack',
 ]);
 
 export class DefaultToolApprovePermissionPolicy implements PermissionPolicy {

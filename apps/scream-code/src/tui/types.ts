@@ -17,6 +17,7 @@ export interface AppState {
   sessionId: string;
   permissionMode: PermissionMode;
   planMode: boolean;
+  wolfpackMode: boolean;
   thinking: boolean;
   contextUsage: number;
   contextTokens: number;
@@ -39,7 +40,6 @@ export interface AppState {
   goalActive: boolean;
   goalContinuationCount: number;
   ccConnectActive: boolean;
-  parallelMode: boolean;
 }
 
 export interface ToolCallBlockData {

@@ -37,6 +37,7 @@ import { InjectionManager } from './injection/manager';
 import { DreamTracker, EXIT_EXTRACTION_SYSTEM_PROMPT, MemoryMemoStore, buildExitExtractionPrompt, parseMemoryMemos } from '@scream-code/memory';
 import { PermissionManager, type PermissionManagerOptions } from './permission';
 import { PlanMode } from './plan';
+import { WolfPackMode } from './wolfpack';
 import { SessionMemory } from './session-memory';
 import {
   AgentRecords,
@@ -114,6 +115,7 @@ export class Agent {
   readonly injection: InjectionManager;
   readonly permission: PermissionManager;
   readonly planMode: PlanMode;
+  readonly wolfpackMode: WolfPackMode;
   readonly usage: UsageRecorder;
   readonly skills: SkillManager | null;
   readonly tools: ToolManager;
@@ -163,8 +165,9 @@ export class Agent {
     this.config = new ConfigState(this);
     this.turn = new TurnFlow(this);
     this.injection = new InjectionManager(this);
-    this.permission = new PermissionManager(this, options.permission);
     this.planMode = new PlanMode(this);
+    this.wolfpackMode = new WolfPackMode(this);
+    this.permission = new PermissionManager(this, options.permission);
     this.usage = new UsageRecorder(this);
     this.skills = options.skills ? new SkillManager(this, options.skills) : null;
     this.tools = new ToolManager(this);
@@ -351,6 +354,12 @@ export class Agent {
       },
       enterPlan: async () => {
         await this.planMode.enter();
+      },
+      enterWolfpack: () => {
+        this.wolfpackMode.enter();
+      },
+      exitWolfpack: () => {
+        this.wolfpackMode.exit();
       },
       cancelPlan: (payload) => {
         this.planMode.cancel(payload.id);

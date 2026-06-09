@@ -94,6 +94,10 @@ export interface SetSessionPlanModeRpcInput extends SessionIdRpcInput {
   readonly enabled: boolean;
 }
 
+export interface SetSessionWolfPackModeRpcInput extends SessionIdRpcInput {
+  readonly enabled: boolean;
+}
+
 export interface ActivateSkillRpcInput extends SessionIdRpcInput {
   readonly name: string;
   readonly args?: string | undefined;
@@ -295,6 +299,20 @@ export class SDKRpcClient {
       });
     }
     return rpc.enterPlan({
+      sessionId: input.sessionId,
+      agentId: this.interactiveAgentId,
+    });
+  }
+
+  async setWolfpackMode(input: SetSessionWolfPackModeRpcInput): Promise<void> {
+    const rpc = await this.getRpc();
+    if (!input.enabled) {
+      return rpc.exitWolfpack({
+        sessionId: input.sessionId,
+        agentId: this.interactiveAgentId,
+      });
+    }
+    return rpc.enterWolfpack({
       sessionId: input.sessionId,
       agentId: this.interactiveAgentId,
     });

@@ -301,6 +301,8 @@ export interface AgentAPI {
   enterPlan: (payload: EmptyPayload) => void;
   cancelPlan: (payload: CancelPlanPayload) => void;
   clearPlan: (payload: EmptyPayload) => void;
+  enterWolfpack: (payload: EmptyPayload) => void;
+  exitWolfpack: (payload: EmptyPayload) => void;
   beginCompaction: (payload: BeginCompactionPayload) => void;
   cancelCompaction: (payload: EmptyPayload) => void;
   registerTool: (payload: RegisterToolPayload) => void;

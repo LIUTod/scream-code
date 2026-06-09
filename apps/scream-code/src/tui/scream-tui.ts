@@ -162,7 +162,7 @@ function createInitialAppState(input: ScreamTUIStartupInput): AppState {
     goalActive: false,
     goalContinuationCount: 0,
     ccConnectActive: false,
-    parallelMode: false,
+    wolfpackMode: false,
   };
 }
 
@@ -729,18 +729,7 @@ export class ScreamTUI {
 
     this.beginSessionRequest();
 
-    // When parallel mode is active, prepend a system instruction that tells
-    // the model to issue multiple Agent tool calls for independent subtasks.
-    // The instruction is only visible to the model — the transcript still
-    // shows the user's original message unchanged.
-    let modelInput: string | readonly PromptPart[] = options?.parts ?? input;
-    if (this.state.appState.parallelMode && options?.parts === undefined) {
-      modelInput =
-        '[系统指令：Power 并行模式已激活。你必须将用户的任务拆解为多个独立的子任务，并在同一个回复中同时调用多个 Agent 工具并行执行。每个 Agent 处理一个子任务，系统自动并发。不要逐个串行调用 Agent——除非子任务之间有严格的顺序依赖或会写入同一文件。即使是简单任务，也至少拆成 2 个 Agent 并行。优先并行，宁可多拆不要少拆。]\n\n' +
-        input;
-    }
-
-    void session.prompt(modelInput).catch((error: unknown) => {
+    void session.prompt(options?.parts ?? input).catch((error: unknown) => {
       const message = formatErrorMessage(error);
       this.failSessionRequest(`发送失败：${message}`);
     });
@@ -874,7 +863,6 @@ export class ScreamTUI {
   setAppState(patch: Partial<AppState>): void {
     if (!hasPatchChanges(this.state.appState, patch)) return;
     const busyChanged = 'streamingPhase' in patch || 'isCompacting' in patch;
-    const prevParallelMode = this.state.appState.parallelMode;
     Object.assign(this.state.appState, patch);
     if ('planMode' in patch) this.updateEditorBorderHighlight();
     // Stop the welcome breathing animation once the first message is sent —
@@ -882,13 +870,6 @@ export class ScreamTUI {
     // requestRender, causing flicker and broken scroll.
     if ('streamingPhase' in patch && patch.streamingPhase !== 'idle') {
       this.welcomeComponent?.stopBreathing();
-    }
-    if ('parallelMode' in patch && patch.parallelMode !== prevParallelMode) {
-      if (patch.parallelMode) {
-        this.state.footer.startPowerGradient();
-      } else {
-        this.state.footer.stopPowerGradient();
-      }
     }
     this.state.footer.setState(this.state.appState);
     this.updateActivityPane();

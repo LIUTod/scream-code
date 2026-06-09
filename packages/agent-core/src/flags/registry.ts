@@ -17,6 +17,12 @@ export const FLAG_DEFINITIONS = [
     default: false,
     surface: 'both',
   },
+  {
+    id: 'wolfpack',
+    env: 'SCREAM_CODE_EXPERIMENTAL_WOLFPACK',
+    default: false,
+    surface: 'both',
+  },
 ] as const satisfies readonly FlagDefinitionInput[];
 
 /** Literal union of registered flag ids (currently none → `never`). */

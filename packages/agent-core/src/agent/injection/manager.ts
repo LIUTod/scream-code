@@ -5,6 +5,7 @@ import { PermissionModeInjector } from './permission-mode';
 import { PluginSessionStartInjector } from './plugin-session-start';
 import { PlanModeInjector } from './plan-mode';
 import { TodoListReminderInjector } from './todo-list';
+import { WolfPackModeInjector } from './wolfpack';
 
 export class InjectionManager {
   private readonly injectors: DynamicInjector[];
@@ -19,6 +20,7 @@ export class InjectionManager {
 
     this.injectors = [
       new PluginSessionStartInjector(agent),
+      new WolfPackModeInjector(agent),
       new PlanModeInjector(agent),
       new PermissionModeInjector(agent),
       new TodoListReminderInjector(agent),
