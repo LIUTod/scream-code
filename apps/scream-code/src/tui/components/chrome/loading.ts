@@ -1,5 +1,5 @@
 import process from "node:process";
-const { stdout, stdin } = process;
+const { stdout } = process;
 
 import type { ResolvedTheme } from "#/tui/theme/colors";
 
@@ -15,6 +15,7 @@ const LOGO = [
 const SHADOW_CHARS = new Set(['╚','═','╝','║','╔','╗','╠','╣','╦','╩','╬'])
 const SHEEN_STEP = 2
 const SHEEN_INTERVAL_MS = 150
+const LOADING_DURATION_MS = 2200
 const THEME_ACCENT: Record<ResolvedTheme, [number, number, number]> = {
   dark: [78, 200, 126],   // #4EC87E
   light: [14, 122, 56],  // #0E7A38
@@ -113,6 +114,7 @@ export function runLoadingAnimation(theme: ResolvedTheme = 'dark'): Promise<void
 
   if (!ansi) {
     for (const line of LOGO) stdout.write(`${fg(...LOGO_RGB)}${line}${RESET}\n`)
+    stdout.write(`${BOLD}${fg(...THEME_ACCENT[theme])}正在进入 Scream Code...${RESET}\n`)
     return Promise.resolve()
   }
 
@@ -122,7 +124,6 @@ export function runLoadingAnimation(theme: ResolvedTheme = 'dark'): Promise<void
     stdout.write('\x1b[?25l')
 
     const accent = THEME_ACCENT[theme]
-
     let sheenPos = 0
     let isReversing = false
     let shimmerPulse = 0
@@ -147,7 +148,7 @@ export function runLoadingAnimation(theme: ResolvedTheme = 'dark'): Promise<void
       if (phase === 'loading') {
         lines.push(centerPad(renderShimmer(shimmerPulse, accent), cols))
       } else {
-        lines.push(centerPad(`${BOLD}${fg(...accent)}点击按下 ENTER 唤醒核心${RESET}`, cols))
+        lines.push(centerPad(`${BOLD}${fg(...accent)}正在进入 Scream Code...${RESET}`, cols))
       }
 
       lines.push('')
@@ -170,33 +171,12 @@ export function runLoadingAnimation(theme: ResolvedTheme = 'dark'): Promise<void
       render()
     }
 
-    function cleanup() {
+    function finish() {
       clearInterval(timer)
-      stdin.removeAllListeners('data')
-      stdin.setRawMode(false)
       stdout.write('\x1b[?25h')
       stdout.write('\x1b[?1049l')
+      resolve()
     }
-
-    function interrupt() {
-      cleanup()
-      process.exit(0)
-    }
-
-    process.on('SIGINT', interrupt)
-    process.on('SIGTERM', interrupt)
-
-    stdin.setRawMode(true)
-    stdin.on('data', (data) => {
-      const key = data.toString()
-      if (key === '\x03') {
-        interrupt()
-      }
-      if ((key === '\r' || key === '\n') && phase === 'ready') {
-        cleanup()
-        resolve()
-      }
-    })
 
     render()
     const timer = setInterval(tick, SHEEN_INTERVAL_MS)
@@ -204,6 +184,7 @@ export function runLoadingAnimation(theme: ResolvedTheme = 'dark'): Promise<void
     setTimeout(() => {
       phase = 'ready'
       render()
-    }, 400)
+      setTimeout(finish, 600)
+    }, LOADING_DURATION_MS)
   })
 }
