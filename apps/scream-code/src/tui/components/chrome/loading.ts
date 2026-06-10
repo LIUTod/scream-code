@@ -1,218 +1,206 @@
 import process from "node:process";
-const { stdout } = process;
+const { stdout, stdin } = process;
 
 import type { ResolvedTheme } from "#/tui/theme/colors";
 
-const BRIGHT = "\x1b[38;2;255;255;255m";
-const RESET = "\x1b[0m";
-const HIDE_CURSOR = "\x1b[?25l";
-const SHOW_CURSOR = "\x1b[?25h";
+const LOGO = [
+  '███████╗ ██████╗██████╗ ███████╗ █████╗ ███╗   ███╗  ██████╗ ██████╗ ██████╗ ███████╗',
+  '██╔════╝██╔════╝██╔══██╗██╔════╝██╔══██╗████╗ ████║ ██╔════╝██╔═══██╗██╔══██╗██╔════╝',
+  '███████╗██║     ██████╔╝█████╗  ███████║██╔████╔██║ ██║     ██║   ██║██║  ██║█████╗  ',
+  '╚════██║██║     ██╔══██╗██╔══╝  ██╔══██║██║╚██╔╝██║ ██║     ██║   ██║██║  ██║██╔══╝  ',
+  '███████║╚██████╗██║  ██║███████╗██║  ██║██║ ╚═╝ ██║ ╚██████╗╚██████╔╝██████╔╝███████╗',
+  '╚══════╝ ╚═════╝╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚═╝     ╚═╝  ╚═════╝ ╚═════╝ ╚═════╝ ╚══════╝',
+]
 
-const THEME_GREEN: Record<ResolvedTheme, string> = {
-  dark: "\x1b[38;2;78;200;126m",   // #4EC87E
-  light: "\x1b[38;2;14;122;56m",  // #0E7A38
-};
+const SHADOW_CHARS = new Set(['╚','═','╝','║','╔','╗','╠','╣','╦','╩','╬'])
+const SHEEN_STEP = 2
+const SHEEN_INTERVAL_MS = 150
+const THEME_ACCENT: Record<ResolvedTheme, [number, number, number]> = {
+  dark: [78, 200, 126],   // #4EC87E
+  light: [14, 122, 56],  // #0E7A38
+}
+const BLOCK_RGB: [number, number, number] = [255, 255, 255]
+const LOGO_RGB: [number, number, number] = [136, 136, 136]
+const DIM_RGB: [number, number, number] = [85, 85, 85]
 
-const FRAMES = [
-  { duration: 80, content: ["┌┐", "││", "││", "└┘"] },
-  { duration: 80, content: ["┌──────┐", "│      │", "│      │", "└──────┘"] },
-  { duration: 80, content: ["┌──────────────────┐", "│                  │", "│                  │", "└──────────────────┘"] },
-  {
-    duration: 80,
-    content: [
-      "┌──────────────────────────────┐",
-      "│                              │",
-      "│    welcome to scream code    │",
-      "│                              │",
-      "└──────────────────────────────┘",
-    ],
-  },
-  {
-    duration: 100,
-    content: [
-      "┌─────────────────────────────────────────────────────────────────┐",
-      "│                                                                 │",
-      "│                     welcome to scream code                      │",
-      "│                                                                 │",
-      "│      ███████╗  ██████╗██████╗ ███████╗ █████╗ ███╗   ███╗       │",
-      "│      ██╔════╝ ██╔════╝██╔══██╗██╔════╝██╔══██╗████╗ ████║       │",
-      "│      ███████╗ ██║     ██████╔╝█████╗  ███████║██╔████╔██║       │",
-      "│      ╚════██║ ██║     ██╔══██╗██╔══╝  ██╔══██║██║╚██╔╝██║       │",
-      "│      ███████║ ╚██████╗██║  ██║███████╗██║  ██║██║ ╚═╝ ██║       │",
-      "│      ╚══════╝  ╚═════╝╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚═╝     ╚═╝       │",
-      "│                                                                 │",
-      "└─────────────────────────────────────────────────────────────────┘",
-    ],
-  },
-  {
-    duration: 120,
-    content: [
-      "┌─────────────────────────────────────────────────────────────────┐",
-      "│                                                                 │",
-      "│                     welcome to scream code                      │",
-      "│                                                                 │",
-      "│      ███████╗  ██████╗██████╗ ███████╗ █████╗ ███╗   ███╗       │",
-      "│      ██╔════╝ ██╔════╝██╔══██╗██╔════╝██╔══██╗████╗ ████║       │",
-      "│      ███████╗ ██║     ██████╔╝█████╗  ███████║██╔████╔██║       │",
-      "│      ╚════██║ ██║     ██╔══██╗██╔══╝  ██╔══██║██║╚██╔╝██║       │",
-      "│      ███████║ ╚██████╗██║  ██║███████╗██║  ██║██║ ╚═╝ ██║       │",
-      "│      ╚══════╝  ╚═════╝╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚═╝     ╚═╝       │",
-      "│                                                                 │",
-      "│                       你的中文智能Ai助手                        │",
-      "└─────────────────────────────────────────────────────────────────┘",
-    ],
-  },
-  {
-    duration: 9999,
-    content: [
-      "┌─────────────────────────────────────────────────────────────────┐",
-      "│                                                                 │",
-      "│                     welcome to scream code                      │",
-      "│                                                                 │",
-      "│      ███████╗  ██████╗██████╗ ███████╗ █████╗ ███╗   ███╗       │",
-      "│      ██╔════╝ ██╔════╝██╔══██╗██╔════╝██╔══██╗████╗ ████║       │",
-      "│      ███████╗ ██║     ██████╔╝█████╗  ███████║██╔████╔██║       │",
-      "│      ╚════██║ ██║     ██╔══██╗██╔══╝  ██╔══██║██║╚██╔╝██║       │",
-      "│      ███████║ ╚██████╗██║  ██║███████╗██║  ██║██║ ╚═╝ ██║       │",
-      "│      ╚══════╝  ╚═════╝╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚═╝     ╚═╝       │",
-      "│                                                                 │",
-      "│                       你的中文智能Ai助手                        │",
-      "└─────────────────────────────────────────────────────────────────┘",
-    ],
-  },
-];
+function fg(r: number, g: number, b: number) { return `\x1b[38;2;${r};${g};${b}m` }
+const RESET = '\x1b[0m'
+const BOLD = '\x1b[1m'
+const DIM = '\x1b[2m'
 
-function color(line: string, green: string): string {
-  const s = line.replace(/[│ ]/g, "");
-  const tb = (line.startsWith("┌") || line.startsWith("└")) && (line.endsWith("┐") || line.endsWith("┘")) && s.replace(/[─┌┐└┘]/g, "") === "";
-  const es = line.startsWith("│") && line.endsWith("│") && s === "";
-  if (tb || es) return green;
-  if (line.includes("welcome") || line.includes("scream") || line.includes("你的中文")) return green;
-  return BRIGHT;
+function renderSheen(char: string, charIndex: number, sheenPos: number, isReversing: boolean, accent: [number, number, number]) {
+  if (char === ' ') return ' '
+  if (char === '█') return `${fg(...BLOCK_RGB)}█${RESET}`
+  if (!SHADOW_CHARS.has(char)) return `${fg(...LOGO_RGB)}${char}${RESET}`
+  let color: [number, number, number]
+  if (isReversing) {
+    color = charIndex <= sheenPos ? LOGO_RGB : accent
+  } else {
+    color = charIndex <= sheenPos ? accent : LOGO_RGB
+  }
+  return `${fg(...color)}${char}${RESET}`
 }
 
-let ansiSupported: boolean | null = null;
+const LOADING_TEXT = '加载中...'
+function buildShimmerPalette(n: number, accent: [number, number, number]) {
+  const size = Math.max(8, Math.min(20, Math.ceil(n * 1.5)))
+  const palette: [number, number, number][] = []
+  for (let i = 0; i < size; i++) {
+    const t = i / (size - 1)
+    palette.push([
+      Math.round(accent[0] - t * accent[0] * 0.35),
+      Math.round(accent[1] - t * accent[1] * 0.6),
+      Math.round(accent[2] - t * accent[2] * 0.33),
+    ])
+  }
+  return palette
+}
+
+function renderShimmer(pulse: number, accent: [number, number, number]) {
+  const chars = LOADING_TEXT.split('')
+  const n = chars.length
+  const palette = buildShimmerPalette(n, accent)
+  let out = ''
+  for (let i = 0; i < n; i++) {
+    const phase = (pulse - i + n) % n
+    const color = palette[phase]!
+    const ratio = n <= 1 ? 0 : phase / (n - 1)
+    const attr = ratio < 0.23 ? BOLD : ratio < 0.69 ? '' : DIM
+    out += `${attr}${fg(...color)}${chars[i]}${RESET}`
+  }
+  return out
+}
+
+function getTerminalSize() {
+  return { cols: stdout.columns || 80, rows: stdout.rows || 24 }
+}
+
+function visualWidth(s: string) {
+  let w = 0
+  for (const ch of s.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '')) {
+    w += /[一-鿿　-〿＀-￯]/.test(ch) ? 2 : 1
+  }
+  return w
+}
+
+function centerPad(text: string, width: number) {
+  const plainW = visualWidth(text)
+  const pad = Math.max(0, Math.floor((width - plainW) / 2))
+  return ' '.repeat(pad) + text
+}
+
+let ansiSupported: boolean | null = null
 
 function supportsAnsi(): boolean {
-  if (ansiSupported !== null) return ansiSupported;
-
-  // Non-TTY (pipe, redirect, headless) — no cursor control possible
-  if (!stdout.isTTY) {
-    ansiSupported = false;
-    return false;
-  }
-
-  // Respect NO_COLOR / FORCE_COLOR conventions
-  if (process.env['NO_COLOR']) {
-    ansiSupported = false;
-    return false;
-  }
-  if (process.env['FORCE_COLOR']) {
-    ansiSupported = true;
-    return true;
-  }
-
-  // Windows: Terminal / conhost on Win10 1909+ supports ANSI.
-  // CI environments (gh actions, appveyor) set CI=true.
+  if (ansiSupported !== null) return ansiSupported
+  if (!stdout.isTTY) { ansiSupported = false; return false }
+  if (process.env['NO_COLOR']) { ansiSupported = false; return false }
+  if (process.env['FORCE_COLOR']) { ansiSupported = true; return true }
   if (process.platform === 'win32') {
-    const term = (process.env['TERM'] ?? '').toLowerCase();
-    const session = (process.env['TERM_PROGRAM'] ?? '').toLowerCase();
-    // Windows Terminal, ConEmu, Cmder all support ANSI
-    if (term.includes('xterm') || term.includes('vt100') || term.includes('256color')) {
-      ansiSupported = true;
-      return true;
-    }
-    if (session.includes('terminal') || session.includes('vscode')) {
-      ansiSupported = true;
-      return true;
-    }
-    // GitHub Actions / CI on Windows
-    if (process.env['CI']) {
-      ansiSupported = true;
-      return true;
-    }
-    // Last resort: Win10 build 1909+ enables ANSI by default via conhost
-    // Node >=22 on Win10+ should have it. Assume yes but guard with simple test.
-    ansiSupported = true;
-    return true;
+    const term = (process.env['TERM'] ?? '').toLowerCase()
+    const session = (process.env['TERM_PROGRAM'] ?? '').toLowerCase()
+    if (term.includes('xterm') || term.includes('vt100') || term.includes('256color')) { ansiSupported = true; return true }
+    if (session.includes('terminal') || session.includes('vscode')) { ansiSupported = true; return true }
+    if (process.env['CI']) { ansiSupported = true; return true }
+    ansiSupported = true; return true
   }
-
-  // Unix: check TERM
-  if (process.env['TERM'] && process.env['TERM'] !== 'dumb') {
-    ansiSupported = true;
-    return true;
-  }
-
-  ansiSupported = false;
-  return false;
+  if (process.env['TERM'] && process.env['TERM'] !== 'dumb') { ansiSupported = true; return true }
+  ansiSupported = false; return false
 }
-
-function plainFrame(frameIndex: number, green: string): string {
-  const f = FRAMES[Math.min(frameIndex, FRAMES.length - 1)]!;
-  let out = '';
-  for (const l of f.content) {
-    out += color(l, green) + (l || ' ') + RESET + '\n';
-  }
-  return out;
-}
-
-const LOADING_STAGES = [
-  '正在整理记忆区域....',
-  '正在加载用户喜好....',
-  '正在确认模型配置....',
-  '正在加载scream code....',
-];
-
-const STAGE_DELAYS_MS = [450, 350, 650, 350];
 
 export function runLoadingAnimation(theme: ResolvedTheme = 'dark'): Promise<void> {
-  const green = THEME_GREEN[theme];
-  const ansi = supportsAnsi();
+  const ansi = supportsAnsi()
 
-  // Non-TTY or no ANSI: just print the final frame once, then resolve
   if (!ansi) {
-    stdout.write(plainFrame(FRAMES.length - 1, green));
-    for (const stage of LOADING_STAGES) {
-      stdout.write(green + stage + RESET + '\n');
-    }
-    return Promise.resolve();
+    for (const line of LOGO) stdout.write(`${fg(...LOGO_RGB)}${line}${RESET}\n`)
+    return Promise.resolve()
   }
 
   return new Promise((resolve) => {
-    const last = FRAMES.length - 1;
-    let frame = 0;
+    stdout.write('\x1b[?1049h')
+    stdout.write('\x1b[2J')
+    stdout.write('\x1b[?25l')
 
-    function draw(i: number) {
-      stdout.write('\x1b[H' + plainFrame(i, green));
-    }
+    const accent = THEME_ACCENT[theme]
 
-    function showStages(stages: readonly string[], index: number): void {
-      if (index >= stages.length) {
-        setTimeout(() => {
-          stdout.write('\x1b[2J\x1b[H' + SHOW_CURSOR);
-          resolve();
-        }, 400);
-        return;
+    let sheenPos = 0
+    let isReversing = false
+    let shimmerPulse = 0
+    let phase: 'loading' | 'ready' = 'loading'
+
+    function render() {
+      const { cols, rows } = getTerminalSize()
+      const lines: string[] = []
+
+      const contentHeight = LOGO.length + 4
+      const topPad = Math.max(0, Math.floor((rows - contentHeight) / 2))
+      for (let i = 0; i < topPad; i++) lines.push('')
+
+      for (const line of LOGO) {
+        let colored = ''
+        for (let ci = 0; ci < line.length; ci++) {
+          colored += renderSheen(line[ci]!, ci, sheenPos, isReversing, accent)
+        }
+        lines.push(centerPad(colored, cols))
       }
-      stdout.write('\n' + green + stages[index] + RESET);
-      const delay = STAGE_DELAYS_MS[index] ?? 350;
-      setTimeout(() => showStages(stages, index + 1), delay);
+
+      if (phase === 'loading') {
+        lines.push(centerPad(renderShimmer(shimmerPulse, accent), cols))
+      } else {
+        lines.push(centerPad(`${BOLD}${fg(...accent)}点击 ENTER 进入${RESET}`, cols))
+      }
+
+      lines.push('')
+      lines.push('')
+      lines.push(centerPad(`${fg(...DIM_RGB)}按 Ctrl+C 即可退出Scream Code${RESET}`, cols))
+
+      while (lines.length < rows) lines.push('')
+
+      stdout.write('\x1b[H')
+      stdout.write(lines.join('\n'))
     }
 
     function tick() {
-      if (frame >= last) {
-        setTimeout(() => {
-          showStages(LOADING_STAGES, 0);
-        }, 600);
-        return;
+      sheenPos += SHEEN_STEP
+      if (sheenPos >= 90) {
+        isReversing = !isReversing
+        sheenPos = 0
       }
-      draw(frame);
-      frame++;
-      setTimeout(tick, FRAMES[frame - 1]!.duration);
+      shimmerPulse = (shimmerPulse + 1) % LOADING_TEXT.length
+      render()
     }
 
-    stdout.write(HIDE_CURSOR + '\x1b[2J\x1b[H');
-    draw(0);
-    setTimeout(tick, FRAMES[0]!.duration);
-  });
+    function cleanup() {
+      clearInterval(timer)
+      stdin.removeAllListeners('data')
+      stdin.setRawMode(false)
+      stdout.write('\x1b[?25h')
+      stdout.write('\x1b[?1049l')
+    }
+
+    function interrupt() {
+      cleanup()
+      process.exit(0)
+    }
+
+    process.on('SIGINT', interrupt)
+    process.on('SIGTERM', interrupt)
+
+    stdin.setRawMode(true)
+    stdin.on('data', (data) => {
+      const key = data.toString()
+      if ((key === '\r' || key === '\n') && phase === 'ready') {
+        cleanup()
+        resolve()
+      }
+    })
+
+    render()
+    const timer = setInterval(tick, SHEEN_INTERVAL_MS)
+
+    setTimeout(() => {
+      phase = 'ready'
+      render()
+    }, 400)
+  })
 }
