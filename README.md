@@ -73,7 +73,7 @@ cd ~/.scream-code && ./install.sh --upgrade
 - **会话恢复** —— 随时中断，随时继续，对话历史自动保存，可通过 `/sessions` 浏览和恢复历史会话
 - **多模式** —— 交互模式、静默模式、计划模式、后台任务模式，可选
 - **MCP 扩展** —— 连接外部工具（数据库、浏览器、API 等）
-- **多 Agent 并行模式** —— `/power` 开启 Power 并行模式，复杂任务自动拆解为多个子 Agent 同时执行，内置 coder/explore/plan/verify/writer 五类子 Agent。支持多角度分析、对抗验证等并行编排模式。
+- **多 Agent 并行模式** —— 复杂任务自动拆解为多个子 Agent 同时执行，内置 coder/explore/plan/verify/writer 五类子 Agent。支持多角度分析、对抗验证等并行编排模式。
 - **技能中心** —— 内置多款技能可下载，用户也可以自行安装skill技能
 - **MCP** —— 内置浏览器自动化MCP和电脑桌面自动化MCP（目前仅支持mac），另外可自行添加或下载使用自定MCP
 - **wolfpack** —— 群狼模式，适合多文件多任务同时处理 拥有自动审批权限
