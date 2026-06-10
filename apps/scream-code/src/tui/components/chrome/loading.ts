@@ -41,7 +41,7 @@ function renderSheen(char: string, charIndex: number, sheenPos: number, isRevers
   return `${fg(...color)}${char}${RESET}`
 }
 
-const LOADING_TEXT = '加载中...'
+const LOADING_TEXT = 'Ai正在加载中...'
 function buildShimmerPalette(n: number, accent: [number, number, number]) {
   const size = Math.max(8, Math.min(20, Math.ceil(n * 1.5)))
   const palette: [number, number, number][] = []
@@ -147,7 +147,7 @@ export function runLoadingAnimation(theme: ResolvedTheme = 'dark'): Promise<void
       if (phase === 'loading') {
         lines.push(centerPad(renderShimmer(shimmerPulse, accent), cols))
       } else {
-        lines.push(centerPad(`${BOLD}${fg(...accent)}点击 ENTER 进入${RESET}`, cols))
+        lines.push(centerPad(`${BOLD}${fg(...accent)}点击按下 ENTER 唤醒核心${RESET}`, cols))
       }
 
       lines.push('')
