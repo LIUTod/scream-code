@@ -201,7 +201,19 @@ export function runLoadingAnimation(theme: ResolvedTheme = 'dark'): Promise<void
     process.on('SIGINT', interrupt)
     process.on('SIGTERM', interrupt)
 
-    stdin.setRawMode(true)
+    try {
+      stdin.setRawMode(true)
+    } catch {
+      process.off('SIGINT', interrupt)
+      process.off('SIGTERM', interrupt)
+      stdout.write('\x1b[?25h')
+      stdout.write('\x1b[?1049l')
+      for (const line of LOGO) stdout.write(`${fg(...LOGO_RGB)}${line}${RESET}\n`)
+      stdout.write(`${BOLD}${fg(...accent)}正在唤醒核心...${RESET}\n`)
+      resolve()
+      return
+    }
+
     stdin.on('data', onData)
 
     render()
