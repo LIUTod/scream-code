@@ -114,7 +114,7 @@ export function runLoadingAnimation(theme: ResolvedTheme = 'dark'): Promise<void
 
   if (!ansi) {
     for (const line of LOGO) stdout.write(`${fg(...LOGO_RGB)}${line}${RESET}\n`)
-    stdout.write(`${BOLD}${fg(...THEME_ACCENT[theme])}正在进入 Scream Code...${RESET}\n`)
+    stdout.write(`${BOLD}${fg(...THEME_ACCENT[theme])}正在唤醒核心...${RESET}\n`)
     return Promise.resolve()
   }
 
@@ -148,7 +148,7 @@ export function runLoadingAnimation(theme: ResolvedTheme = 'dark'): Promise<void
       if (phase === 'loading') {
         lines.push(centerPad(renderShimmer(shimmerPulse, accent), cols))
       } else {
-        lines.push(centerPad(`${BOLD}${fg(...accent)}正在进入 Scream Code...${RESET}`, cols))
+        lines.push(centerPad(`${BOLD}${fg(...accent)}正在唤醒核心...${RESET}`, cols))
       }
 
       lines.push('')
@@ -184,7 +184,7 @@ export function runLoadingAnimation(theme: ResolvedTheme = 'dark'): Promise<void
     setTimeout(() => {
       phase = 'ready'
       render()
-      setTimeout(finish, 600)
+      setTimeout(finish, 500)
     }, LOADING_DURATION_MS)
   })
 }
