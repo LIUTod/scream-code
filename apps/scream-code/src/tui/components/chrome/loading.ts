@@ -189,6 +189,9 @@ export function runLoadingAnimation(theme: ResolvedTheme = 'dark'): Promise<void
     stdin.setRawMode(true)
     stdin.on('data', (data) => {
       const key = data.toString()
+      if (key === '\x03') {
+        interrupt()
+      }
       if ((key === '\r' || key === '\n') && phase === 'ready') {
         cleanup()
         resolve()
