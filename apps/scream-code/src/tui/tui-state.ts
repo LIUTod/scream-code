@@ -61,6 +61,21 @@ export function createTUIState(options: ScreamTUIOptions): TUIState {
   const terminal = new ProcessTerminal();
   const ui = new TUI(terminal);
 
+  // ── Render safety net ──────────────────────────────────────────────
+  // pi-tui's doRender() runs inside process.nextTick + setTimeout, so
+  // exceptions become uncaughtException and can kill the process or
+  // corrupt the terminal state.  Monkey-patch doRender with a try-catch
+  // so a single bad component render doesn't take down the whole TUI.
+  const uiAny = ui as unknown as Record<string, unknown>;
+  const originalDoRender = (uiAny['doRender'] as () => void).bind(ui);
+  uiAny['doRender'] = (): void => {
+    try {
+      originalDoRender();
+    } catch (error) {
+      console.error('[scream-code] render error:', error);
+    }
+  };
+
   const transcriptContainer = new GutterContainer(CHROME_GUTTER, CHROME_GUTTER);
   const activityContainer = new GutterContainer(CHROME_GUTTER, CHROME_GUTTER);
   const todoPanelContainer = new GutterContainer(CHROME_GUTTER, CHROME_GUTTER);
