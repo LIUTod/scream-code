@@ -1,5 +1,5 @@
 import process from "node:process";
-const { stdout } = process;
+const { stdout, stdin } = process;
 
 import type { ResolvedTheme } from "#/tui/theme/colors";
 
@@ -148,7 +148,7 @@ export function runLoadingAnimation(theme: ResolvedTheme = 'dark'): Promise<void
       if (phase === 'loading') {
         lines.push(centerPad(renderShimmer(shimmerPulse, accent), cols))
       } else {
-        lines.push(centerPad(`${BOLD}${fg(...accent)}正在唤醒核心...${RESET}`, cols))
+        lines.push(centerPad(`${BOLD}${fg(...accent)}按下 ENTER 唤醒核心${RESET}`, cols))
       }
 
       lines.push('')
@@ -171,12 +171,38 @@ export function runLoadingAnimation(theme: ResolvedTheme = 'dark'): Promise<void
       render()
     }
 
-    function finish() {
+    function onData(data: Buffer) {
+      const key = data.toString()
+      if (key === '\x03') {
+        interrupt()
+        return
+      }
+      if ((key === '\r' || key === '\n') && phase === 'ready') {
+        cleanup()
+        resolve()
+      }
+    }
+
+    function cleanup() {
       clearInterval(timer)
+      stdin.off('data', onData)
+      process.off('SIGINT', interrupt)
+      process.off('SIGTERM', interrupt)
+      stdin.setRawMode(false)
       stdout.write('\x1b[?25h')
       stdout.write('\x1b[?1049l')
-      resolve()
     }
+
+    function interrupt() {
+      cleanup()
+      process.exit(0)
+    }
+
+    process.on('SIGINT', interrupt)
+    process.on('SIGTERM', interrupt)
+
+    stdin.setRawMode(true)
+    stdin.on('data', onData)
 
     render()
     const timer = setInterval(tick, SHEEN_INTERVAL_MS)
@@ -184,7 +210,6 @@ export function runLoadingAnimation(theme: ResolvedTheme = 'dark'): Promise<void
     setTimeout(() => {
       phase = 'ready'
       render()
-      setTimeout(finish, 500)
     }, LOADING_DURATION_MS)
   })
 }
