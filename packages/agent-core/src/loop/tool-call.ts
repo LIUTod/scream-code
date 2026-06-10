@@ -128,6 +128,19 @@ export async function runToolCallBatch(
   try {
     for (let index = 0; index < calls.length; index += 1) {
       const call = calls[index]!;
+
+      // If the signal fired (user stop / parent abort), skip preparation
+      // for remaining tools and settle them with synthetic abort results.
+      // This avoids running preflight, resolveExecution, hooks, and
+      // dispatching tool.call events for tools that will never execute.
+      if (step.signal.aborted) {
+        await dispatchToolCall(step, call, call.args);
+        pendingResults.push(
+          Promise.resolve(makeErrorToolResult(call, call.args, abortedToolOutput(call.toolName, step.signal))),
+        );
+        continue;
+      }
+
       const prepared = await prepareToolCall(step, call);
       pendingResults.push(scheduler.add(prepared.task));
 

@@ -656,6 +656,64 @@ describe('runTurn — tool-call behaviour', () => {
     expect(callIds).toEqual(['tc-bad-args', 'tc-fail', 'tc-good', 'tc-missing']);
     expect(resultIds).toEqual(callIds);
   });
+
+  it('skips preparation for remaining tools when signal is aborted mid-batch', async () => {
+    const controller = new AbortController();
+    let hookGateResolve: (() => void) | undefined;
+    const hookGate = new Promise<void>((resolve) => {
+      hookGateResolve = resolve;
+    });
+    let hookStartedResolve: (() => void) | undefined;
+    const hookStarted = new Promise<void>((resolve) => {
+      hookStartedResolve = resolve;
+    });
+    let hookCallCount = 0;
+
+    const turnPromise = runTurn({
+      tools: [new EchoTool()],
+      signal: controller.signal,
+      hooks: {
+        prepareToolExecution: async () => {
+          hookCallCount++;
+          hookStartedResolve?.();
+          await hookGate;
+          return undefined;
+        },
+      },
+      responses: [
+        makeToolUseResponse([
+          makeToolCall('echo', { text: 'first' }, 'tc-1'),
+          makeToolCall('echo', { text: 'second' }, 'tc-2'),
+        ]),
+        makeEndTurnResponse('done'),
+      ],
+    });
+
+    // Wait for the hook to start processing the first tool, then abort
+    await hookStarted;
+    controller.abort();
+    // Release the hook so the first tool's preparation can complete
+    hookGateResolve?.();
+
+    const { context, sink } = await turnPromise;
+
+    // Both tools should have tool.call + tool.result pairs (pairing invariant)
+    const callIds = sink.byType('tool.call').map((e) => e.toolCallId);
+    const resultIds = sink.byType('tool.result').map((e) => e.toolCallId);
+    expect(callIds).toEqual(['tc-1', 'tc-2']);
+    expect(resultIds).toEqual(['tc-1', 'tc-2']);
+
+    // The hook should only be called once — the second tool's prepareToolCall
+    // was skipped entirely by the abort check.
+    expect(hookCallCount).toBe(1);
+
+    // Both tools should have abort error results
+    const results = context.toolResults();
+    expect(results).toHaveLength(2);
+    expect(results[0]?.result.isError).toBe(true);
+    expect(results[1]?.result.isError).toBe(true);
+    expect(expectTextOutput(results[1]?.result.output)).toContain('aborted');
+  });
 });
 
 interface PathLockedInput {
