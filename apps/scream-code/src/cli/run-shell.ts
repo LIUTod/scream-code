@@ -64,6 +64,10 @@ export async function runShell(
   const config = await harness.getConfig();
   const configMs = Date.now() - configStartedAt;
 
+  // Preflight validates the host environment (e.g. Git Bash on Windows)
+  // BEFORE the loading animation, so any error is visible to the user.
+  await harness.preflight();
+
   await runLoadingAnimation(resolvedTheme);
 
   const tui = new ScreamTUI(harness, {

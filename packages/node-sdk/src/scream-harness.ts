@@ -200,6 +200,11 @@ export class ScreamHarness {
     return this.rpc.getExperimentalFlags();
   }
 
+  /** Validate host environment before starting the UI. */
+  async preflight(): Promise<void> {
+    await this.rpc.preflight();
+  }
+
   async ensureConfigFile(): Promise<void> {
     await ensureConfigFile(this.configPath);
   }

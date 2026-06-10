@@ -155,6 +155,10 @@ export class SDKRpcClient {
     return this.core.configPath;
   }
 
+  async preflight(): Promise<void> {
+    await this.core.preflight();
+  }
+
   async createSession(input: CreateSessionOptions): Promise<SessionSummary> {
     const rpc = await this.getRpc();
     const { planMode, ...coreInput } = input;

@@ -91,6 +91,7 @@ async function locateWindowsGitBash(deps: EnvironmentDeps): Promise<string> {
     }
   }
 
+  // 1. Try to find git.exe on PATH and infer bash.exe from its location.
   const gitExe = await deps.findExecutable('git.exe');
   if (gitExe !== undefined) {
     const inferred = inferGitBashFromGitExe(gitExe);
@@ -100,15 +101,41 @@ async function locateWindowsGitBash(deps: EnvironmentDeps): Promise<string> {
         return inferred;
       }
     }
+    // Scoop shims (e.g. ~/scoop/shims/git.exe) won't infer correctly
+    // because the path lacks "cmd"/"bin" segments.  Walk sibling
+    // directories of the resolved git.exe to find a companion bash.exe.
+    const fellback = inferBashByWalkingUp(gitExe);
+    if (fellback !== undefined) {
+      checked.push(fellback);
+      if (await deps.isFile(fellback)) {
+        return fellback;
+      }
+    }
   }
 
+  // 2. Search for bash.exe directly on PATH (handles scoop / custom layouts
+  //    where the Git usr/bin directory is on PATH).
+  const bashExe = await deps.findExecutable('bash.exe');
+  if (bashExe !== undefined) {
+    checked.push(bashExe);
+    return bashExe;
+  }
+
+  // 3. Check well-known installation roots.
   const candidates: string[] = [
     'C:\\Program Files\\Git\\bin\\bash.exe',
     'C:\\Program Files (x86)\\Git\\bin\\bash.exe',
+    'C:\\msys64\\usr\\bin\\bash.exe',
+    'C:\\cygwin64\\bin\\bash.exe',
   ];
   const localAppData = deps.env['LOCALAPPDATA']?.trim();
   if (localAppData !== undefined && localAppData.length > 0) {
     candidates.push(`${localAppData}\\Programs\\Git\\bin\\bash.exe`);
+  }
+  const userProfile = deps.env['USERPROFILE']?.trim();
+  if (userProfile !== undefined && userProfile.length > 0) {
+    // scoop (default); current symlink points to the active version
+    candidates.push(`${userProfile}\\scoop\\apps\\git\\current\\bin\\bash.exe`);
   }
   for (const candidate of candidates) {
     checked.push(candidate);
@@ -134,6 +161,27 @@ function inferGitBashFromGitExe(gitExe: string): string | undefined {
     if (segment === 'cmd' || segment === 'bin') {
       const root = parts.slice(0, i).join(sep);
       return root.length === 0 ? `bin${sep}bash.exe` : `${root}${sep}bin${sep}bash.exe`;
+    }
+  }
+  return undefined;
+}
+
+// Fallback when inferGitBashFromGitExe returns undefined — e.g. scoop shims
+// at `~/scoop/shims/git.exe` where no path segment is "cmd" or "bin".
+// Walks upward from git.exe looking for `bash.exe` in a sibling `bin`
+// directory, capped at 5 levels to avoid scanning the whole drive.
+function inferBashByWalkingUp(gitExe: string): string | undefined {
+  const sep = gitExe.includes('\\') ? '\\' : '/';
+  const parts = gitExe.split(sep);
+  // Start from the directory containing git.exe, walk up.
+  for (let i = parts.length - 1; i >= 1 && parts.length - i <= 6; i -= 1) {
+    const root = parts.slice(0, i).join(sep) || sep;
+    const candidate = `${root}${sep}bin${sep}bash.exe`;
+    // Quick syntactic filter: only return if it looks like a different
+    // directory than where git.exe lives (the caller will verify with isFile).
+    const gitDir = parts.slice(0, -1).join(sep);
+    if (`${root}${sep}bin` !== gitDir) {
+      return candidate;
     }
   }
   return undefined;

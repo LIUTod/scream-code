@@ -176,6 +176,11 @@ export class ScreamCore implements PromisableMethods<CoreAPI> {
     this.sdk = rpcClient(this);
   }
 
+  /** Resolve the shell environment so missing Git Bash is surfaced early. */
+  async preflight(): Promise<void> {
+    await this.jian;
+  }
+
   async createSession(input: CreateSessionPayload): Promise<SessionSummary> {
     const options = input;
     const workDir = requiredWorkDir('createSession', options.workDir);
