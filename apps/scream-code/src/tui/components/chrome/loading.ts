@@ -152,7 +152,7 @@ export function runLoadingAnimation(theme: ResolvedTheme = 'dark'): Promise<void
 
       lines.push('')
       lines.push('')
-      lines.push(centerPad(`${fg(...DIM_RGB)}按 Ctrl+C 即可退出Scream Code${RESET}`, cols))
+      lines.push(centerPad(`${fg(...DIM_RGB)}按住 Ctrl+C 即可退出 Scream Code${RESET}`, cols))
 
       while (lines.length < rows) lines.push('')
 
