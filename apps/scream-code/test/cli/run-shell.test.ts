@@ -32,6 +32,7 @@ const mocks = vi.hoisted(() => {
     detectTerminalTheme: vi.fn(),
     screamHarnessConstructor: vi.fn(),
     harnessEnsureConfigFile: vi.fn(),
+    harnessPreflight: vi.fn(),
     harnessGetConfig: vi.fn(async () => ({
       providers: {},
       defaultModel: 'k2',
@@ -73,6 +74,7 @@ vi.mock('@scream-cli/scream-code-sdk', async (importOriginal) => {
         getCachedAccessToken: mocks.harnessGetCachedAccessToken,
       };
       ensureConfigFile = mocks.harnessEnsureConfigFile;
+      preflight = mocks.harnessPreflight;
       getConfig = mocks.harnessGetConfig;
       close = mocks.harnessClose;
       track = mocks.harnessTrack;
