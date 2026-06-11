@@ -48,14 +48,43 @@ function singleLine(text: string): string {
   return text.replaceAll(/\s+/g, ' ').trim();
 }
 
-function statusLabel(status: string): string {
-  switch (status) {
-    case 'done': return '已完成';
-    case 'partially done': return '部分完成';
-    case 'blocked': return '受阻';
-    case 'abandoned': return '已放弃';
-    default: return status;
+/**
+ * Wrap text to fit within `maxWidth` display columns.
+ * Handles CJK double-width characters via `visibleWidth`.
+ * Returns an array of lines, each ≤ maxWidth columns.
+ */
+function wrapText(text: string, maxWidth: number): string[] {
+  if (maxWidth <= 0) return [text];
+  const words = text.split(/(\s+)/);
+  const lines: string[] = [];
+  let current = '';
+
+  for (const word of words) {
+    if (word.length === 0) continue;
+    const candidate = current + word;
+    if (visibleWidth(candidate) <= maxWidth) {
+      current = candidate;
+    } else {
+      if (current.length > 0) lines.push(current.trimEnd());
+      // If a single word exceeds maxWidth, hard-break it
+      if (visibleWidth(word) > maxWidth) {
+        let chunk = '';
+        for (const ch of word) {
+          if (visibleWidth(chunk + ch) > maxWidth) {
+            if (chunk.length > 0) lines.push(chunk);
+            chunk = ch;
+          } else {
+            chunk += ch;
+          }
+        }
+        current = chunk;
+      } else {
+        current = word.trimStart();
+      }
+    }
   }
+  if (current.trim().length > 0) lines.push(current.trimEnd());
+  return lines.length > 0 ? lines : [''];
 }
 
 function sourceLabel(source: string): string {
@@ -298,7 +327,7 @@ export class MemoryPickerComponent extends Container implements Focusable {
       const memo = this.memos[this.selectedIndex];
       if (memo) {
         lines.push(truncateToWidth(
-          chalk.hex(c.warning).bold(`  删除: ${memo.userRequirement}`),
+          chalk.hex(c.warning).bold(`  删除: ${memo.userNeed}`),
           width, ELLIPSIS,
         ));
         lines.push(chalk.hex(c.warning)('  按 Enter 确认删除，Esc 取消'));
@@ -348,14 +377,13 @@ export class MemoryPickerComponent extends Container implements Focusable {
     const titleStyle = isSelected ? chalk.hex(titleColor).bold : chalk.hex(titleColor);
 
     const time = formatRelativeTime(memo.recordedAt);
-    const status = statusLabel(memo.completionStatus);
     const src = sourceLabel(memo.extractionSource);
-    const trailingParts = [status, time, src].filter((p) => p.length > 0);
+    const trailingParts = [time, src].filter((p) => p.length > 0);
     const trailingText = trailingParts.length > 0 ? '  ' + trailingParts.join('  ') : '';
     const trailingWidth = visibleWidth(trailingText);
     const headerPrefixWidth = visibleWidth(pointer) + 1;
     const titleBudget = Math.max(8, width - headerPrefixWidth - trailingWidth);
-    const shownTitle = truncateToWidth(singleLine(memo.userRequirement), titleBudget, ELLIPSIS);
+    const shownTitle = truncateToWidth(singleLine(memo.userNeed), titleBudget, ELLIPSIS);
 
     let header = chalk.hex(isSelected ? c.primary : c.textDim)(pointer + ' ');
     header += titleStyle(shownTitle);
@@ -371,11 +399,11 @@ export class MemoryPickerComponent extends Container implements Focusable {
       indent + chalk.hex(c.textMuted)(truncateToWidth(idInfo, Math.max(8, width - indentWidth), ELLIPSIS)),
     );
 
-    // Third line: solution preview (like session picker's last prompt)
-    if (memo.solution.length > 0) {
-      const solutionPreview = '方案: ' + singleLine(memo.solution);
+    // Third line: approach preview
+    if (memo.approach.length > 0) {
+      const approachPreview = '方案: ' + singleLine(memo.approach);
       card.push(
-        indent + chalk.hex(c.textDim)(truncateToWidth(solutionPreview, Math.max(8, width - indentWidth), ELLIPSIS)),
+        indent + chalk.hex(c.textDim)(truncateToWidth(approachPreview, Math.max(8, width - indentWidth), ELLIPSIS)),
       );
     }
 
@@ -393,14 +421,15 @@ export class MemoryPickerComponent extends Container implements Focusable {
       ? `${memo.sourceSessionTitle} (${memo.sourceSessionId.slice(0, 12)})`
       : memo.sourceSessionId.slice(0, 12);
     const indent = '  ';
+    const contentWidth = Math.max(8, width - visibleWidth(indent));
 
     lines.push(truncateToWidth(
-      chalk.hex(c.primary).bold(`${indent}需求: ${memo.userRequirement}`),
+      chalk.hex(c.primary).bold(`${indent}需求: ${memo.userNeed}`),
       width, ELLIPSIS,
     ));
     lines.push('');
     lines.push(chalk.hex(c.textMuted)(
-      truncateToWidth(`${indent}状态: ${statusLabel(memo.completionStatus)}    来源: ${sourceLabel(memo.extractionSource)}    ${time}`, width, ELLIPSIS),
+      truncateToWidth(`${indent}结果: ${memo.outcome}    来源: ${sourceLabel(memo.extractionSource)}    ${time}`, width, ELLIPSIS),
     ));
     lines.push(chalk.hex(c.textMuted)(
       truncateToWidth(`${indent}会话: ${sessionLabel}`, width, ELLIPSIS),
@@ -410,18 +439,40 @@ export class MemoryPickerComponent extends Container implements Focusable {
     ));
     lines.push('');
 
-    if (memo.solution.length > 0) {
-      lines.push(truncateToWidth(
-        chalk.hex(c.text)(`${indent}方案: ${singleLine(memo.solution)}`),
-        width, ELLIPSIS,
-      ));
+    if (memo.approach.length > 0) {
+      const label = '方案: ';
+      const wrapped = wrapText(memo.approach, contentWidth - visibleWidth(label));
+      for (let i = 0; i < wrapped.length; i++) {
+        const prefix = i === 0 ? `${indent}${label}` : indent + ' '.repeat(visibleWidth(label));
+        lines.push(truncateToWidth(
+          chalk.hex(c.text)(prefix + wrapped[i]),
+          width, ELLIPSIS,
+        ));
+      }
       lines.push('');
     }
-    if (memo.problemsEncountered.length > 0 && memo.problemsEncountered !== 'none') {
-      lines.push(truncateToWidth(
-        chalk.hex(c.warning)(`${indent}问题: ${singleLine(memo.problemsEncountered)}`),
-        width, ELLIPSIS,
-      ));
+    if (memo.whatFailed.length > 0 && memo.whatFailed !== 'none') {
+      const label = '踩坑: ';
+      const wrapped = wrapText(memo.whatFailed, contentWidth - visibleWidth(label));
+      for (let i = 0; i < wrapped.length; i++) {
+        const prefix = i === 0 ? `${indent}${label}` : indent + ' '.repeat(visibleWidth(label));
+        lines.push(truncateToWidth(
+          chalk.hex(c.warning)(prefix + wrapped[i]),
+          width, ELLIPSIS,
+        ));
+      }
+      lines.push('');
+    }
+    if (memo.whatWorked.length > 0 && memo.whatWorked !== 'none') {
+      const label = '经验: ';
+      const wrapped = wrapText(memo.whatWorked, contentWidth - visibleWidth(label));
+      for (let i = 0; i < wrapped.length; i++) {
+        const prefix = i === 0 ? `${indent}${label}` : indent + ' '.repeat(visibleWidth(label));
+        lines.push(truncateToWidth(
+          chalk.hex(c.success ?? c.primary)(prefix + wrapped[i]),
+          width, ELLIPSIS,
+        ));
+      }
       lines.push('');
     }
 

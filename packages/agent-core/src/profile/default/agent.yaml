@@ -18,6 +18,10 @@ tools:
   - CronCreate
   - CronList
   - CronDelete
+  - CreateGoal
+  - GetGoal
+  - SetGoalBudget
+  - UpdateGoal
   - ReadMediaFile
   - TodoList
   - Skill

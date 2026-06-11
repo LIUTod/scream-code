@@ -1,10 +1,4 @@
-/** Memory memo types — structured work logs extracted from conversations. */
-
-export type MemoryCategory =
-  | 'user_preference'   // 用户偏好: 角色、习惯、风格
-  | 'feedback'          // 反馈: 从错误中学到的经验
-  | 'project_context'   // 项目上下文: 架构决策、bug、进行中的工作
-  | 'reference';        // 引用: 外部系统指针 (Linear, Slack, 文档 URL)
+/** Memory memo types — structured task experience records extracted from conversations. */
 
 export interface MemoryMemo {
   /** Unique ID generated at creation time. */
@@ -13,28 +7,26 @@ export interface MemoryMemo {
   sourceSessionId: string;
   /** Session title for display purposes. */
   sourceSessionTitle?: string;
-  /** The user's original request or question. */
-  userRequirement: string;
-  /** The approach or solution that was applied. */
-  solution: string;
-  /** Current status of the task. */
-  completionStatus: 'done' | 'partially done' | 'blocked' | 'abandoned';
-  /** Problems encountered and how they were resolved (or "none"). */
-  problemsEncountered: string;
+  /** The user's need or goal, one sentence. */
+  userNeed: string;
+  /** The approach taken — what was done. */
+  approach: string;
+  /** Final outcome (free text, e.g. "完成", "部分完成", "失败"). */
+  outcome: string;
+  /** Dead ends tried — things that didn't work. 'none' if nothing notable. */
+  whatFailed: string;
+  /** What ultimately worked — key actions that led to success. 'none' if nothing notable. */
+  whatWorked: string;
   /** How this memo was triggered. */
   extractionSource: 'compaction' | 'exit';
-  /** Memory category for targeted recall and formatting. */
-  category: MemoryCategory;
   /** Epoch milliseconds when this entry was created. */
   recordedAt: number;
-  /** Optional free-form tags. */
-  tags?: string[];
 }
 
 /** JSONL envelope — one line in entries.jsonl. */
 export interface MemoryMemoRecord {
   type: 'memory_memo';
-  version: 1;
+  version: 2;
   entry: MemoryMemo;
 }
 
@@ -43,12 +35,12 @@ export interface MemoryMemoSummary {
   id: string;
   sourceSessionTitle?: string;
   sourceSessionId: string;
-  userRequirement: string;
-  solution: string;
-  completionStatus: string;
-  problemsEncountered: string;
+  userNeed: string;
+  approach: string;
+  outcome: string;
+  whatFailed: string;
+  whatWorked: string;
   extractionSource: string;
-  category: string;
   recordedAt: number;
 }
 
@@ -65,24 +57,22 @@ function generateId(): string {
 }
 
 export function createMemoryMemo(
-  partial: Omit<MemoryMemo, 'id' | 'recordedAt' | 'category'> & {
+  partial: Omit<MemoryMemo, 'id' | 'recordedAt'> & {
     id?: string;
     recordedAt?: number;
-    category?: MemoryCategory;
   },
 ): MemoryMemo {
   return {
     id: partial.id ?? generateId(),
     sourceSessionId: partial.sourceSessionId,
     sourceSessionTitle: partial.sourceSessionTitle,
-    userRequirement: partial.userRequirement,
-    solution: partial.solution,
-    completionStatus: partial.completionStatus,
-    problemsEncountered: partial.problemsEncountered,
+    userNeed: partial.userNeed,
+    approach: partial.approach,
+    outcome: partial.outcome,
+    whatFailed: partial.whatFailed,
+    whatWorked: partial.whatWorked,
     extractionSource: partial.extractionSource,
-    category: partial.category ?? 'project_context',
     recordedAt: partial.recordedAt ?? Date.now(),
-    tags: partial.tags,
   };
 }
 
@@ -91,12 +81,12 @@ export function toSummary(memo: MemoryMemo): MemoryMemoSummary {
     id: memo.id,
     sourceSessionTitle: memo.sourceSessionTitle,
     sourceSessionId: memo.sourceSessionId,
-    userRequirement: memo.userRequirement,
-    solution: memo.solution,
-    completionStatus: memo.completionStatus,
-    problemsEncountered: memo.problemsEncountered,
+    userNeed: memo.userNeed,
+    approach: memo.approach,
+    outcome: memo.outcome,
+    whatFailed: memo.whatFailed,
+    whatWorked: memo.whatWorked,
     extractionSource: memo.extractionSource,
-    category: memo.category,
     recordedAt: memo.recordedAt,
   };
 }

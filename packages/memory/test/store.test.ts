@@ -10,10 +10,11 @@ import type { MemoryMemo } from '../src/models.js';
 
 function makeMemo(overrides: Partial<MemoryMemo> = {}): MemoryMemo {
   return createMemoryMemo({
-    userRequirement: 'Test requirement',
-    solution: 'Test solution',
-    completionStatus: 'done',
-    problemsEncountered: 'none',
+    userNeed: 'Test requirement',
+    approach: 'Test solution',
+    outcome: '完成',
+    whatFailed: 'none',
+    whatWorked: 'none',
     extractionSource: 'compaction',
     sourceSessionId: 'test-session',
     sourceSessionTitle: 'Test Session',
@@ -40,7 +41,7 @@ describe('MemoryMemoStore', () => {
       await store.append(memo);
       const found = await store.get(memo.id);
       expect(found).not.toBeUndefined();
-      expect(found!.userRequirement).toBe('Test requirement');
+      expect(found!.userNeed).toBe('Test requirement');
       expect(found!.sourceSessionId).toBe('test-session');
     });
 
@@ -86,17 +87,17 @@ describe('MemoryMemoStore', () => {
     });
 
     it('filters by search keyword', async () => {
-      await store.append(makeMemo({ userRequirement: '修复 OAuth 认证bug', solution: '加刷新逻辑' }));
-      await store.append(makeMemo({ userRequirement: '配置 TypeScript', solution: '改 tsconfig' }));
-      await store.append(makeMemo({ userRequirement: '优化性能', solution: '加缓存' }));
+      await store.append(makeMemo({ userNeed: '修复 OAuth 认证bug', approach: '加刷新逻辑' }));
+      await store.append(makeMemo({ userNeed: '配置 TypeScript', approach: '改 tsconfig' }));
+      await store.append(makeMemo({ userNeed: '优化性能', approach: '加缓存' }));
 
       const result = await store.list({ search: 'oauth' });
       expect(result.total).toBe(1);
-      expect(result.memos[0]!.userRequirement).toContain('OAuth');
+      expect(result.memos[0]!.userNeed).toContain('OAuth');
     });
 
-    it('searches across solution field', async () => {
-      await store.append(makeMemo({ userRequirement: '修复bug', solution: '使用redis缓存' }));
+    it('searches across approach field', async () => {
+      await store.append(makeMemo({ userNeed: '修复bug', approach: '使用redis缓存' }));
       const result = await store.list({ search: 'redis' });
       expect(result.total).toBe(1);
     });
@@ -124,28 +125,30 @@ Working on auth module
 
 \`\`\`memory-memo
 {
-  "userRequirement": "修复 OAuth 401",
-  "solution": "增加 token 刷新重试",
-  "completionStatus": "done",
-  "problemsEncountered": "无限重试导致死循环，加了 max retries"
+  "userNeed": "修复 OAuth 401",
+  "approach": "增加 token 刷新重试",
+  "outcome": "完成",
+  "whatFailed": "无限重试导致死循环，加了 max retries",
+  "whatWorked": "加了 max retries 限制"
 }
 \`\`\`
 
 \`\`\`memory-memo
 {
-  "userRequirement": "优化编译速度",
-  "solution": "升级 tsdown，启用并行编译",
-  "completionStatus": "partially done",
-  "problemsEncountered": "none"
+  "userNeed": "优化编译速度",
+  "approach": "升级 tsdown，启用并行编译",
+  "outcome": "部分完成",
+  "whatFailed": "none",
+  "whatWorked": "none"
 }
 \`\`\`
 `;
 
     const memos = parseMemoryMemos(text);
     expect(memos.length).toBe(2);
-    expect(memos[0]!.userRequirement).toContain('OAuth');
-    expect(memos[0]!.completionStatus).toBe('done');
-    expect(memos[1]!.completionStatus).toBe('partially done');
+    expect(memos[0]!.userNeed).toContain('OAuth');
+    expect(memos[0]!.outcome).toBe('完成');
+    expect(memos[1]!.outcome).toBe('部分完成');
   });
 
   it('returns empty for {"none": true}', () => {
@@ -158,15 +161,16 @@ Working on auth module
     expect(parseMemoryMemos(text).length).toBe(0);
   });
 
-  it('skips blocks without userRequirement', () => {
-    const text = '```memory-memo\n{"solution": "something"}\n```';
+  it('skips blocks without userNeed', () => {
+    const text = '```memory-memo\n{"approach": "something"}\n```';
     expect(parseMemoryMemos(text).length).toBe(0);
   });
 
-  it('normalizes completion status values', () => {
-    const text = '```memory-memo\n{"userRequirement": "test", "solution": "x", "completionStatus": "completed", "problemsEncountered": "none"}\n```';
+  it('parses blocks with all new fields', () => {
+    const text = '```memory-memo\n{"userNeed": "test", "approach": "x", "outcome": "完成", "whatFailed": "试了A不行", "whatWorked": "方案B成功"}\n```';
     const memos = parseMemoryMemos(text);
-    expect(memos[0]!.completionStatus).toBe('done');
+    expect(memos[0]!.whatFailed).toBe('试了A不行');
+    expect(memos[0]!.whatWorked).toBe('方案B成功');
   });
 });
 

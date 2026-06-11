@@ -73,6 +73,15 @@ function restoreAgentRecord(agent: Agent, input: AgentRecord): void {
     case 'wolfpack.exit':
       agent.wolfpackMode.exit();
       return;
+    case 'goal.create':
+      agent.goal.restoreCreate(input);
+      return;
+    case 'goal.update':
+      agent.goal.restoreUpdate(input);
+      return;
+    case 'goal.clear':
+      agent.goal.restoreClear(input);
+      return;
     case 'context.append_message':
       agent.context.appendMessage(input.message);
       return;

@@ -46,6 +46,13 @@ export const ErrorCodes = {
   PROVIDER_AUTH_ERROR: 'provider.auth_error',
   PROVIDER_CONNECTION_ERROR: 'provider.connection_error',
 
+  GOAL_OBJECTIVE_EMPTY: 'goal.objective_empty',
+  GOAL_OBJECTIVE_TOO_LONG: 'goal.objective_too_long',
+  GOAL_ALREADY_EXISTS: 'goal.already_exists',
+  GOAL_NOT_FOUND: 'goal.not_found',
+  GOAL_STATUS_INVALID: 'goal.status_invalid',
+  GOAL_NOT_RESUMABLE: 'goal.not_resumable',
+
   SKILL_NOT_FOUND: 'skill.not_found',
   SKILL_TYPE_UNSUPPORTED: 'skill.type_unsupported',
   SKILL_NAME_EMPTY: 'skill.name_empty',
@@ -282,6 +289,43 @@ export const SCREAM_ERROR_INFO = {
     retryable: true,
     public: true,
     action: 'Check network connectivity and retry.',
+  },
+
+  'goal.objective_empty': {
+    title: 'Goal objective is empty',
+    retryable: false,
+    public: true,
+    action: 'Provide a non-empty goal objective.',
+  },
+  'goal.objective_too_long': {
+    title: 'Goal objective too long',
+    retryable: false,
+    public: true,
+    action: 'Shorten the goal objective to under 4000 characters.',
+  },
+  'goal.already_exists': {
+    title: 'A goal already exists',
+    retryable: false,
+    public: true,
+    action: 'Use replace to start a new goal, or cancel the existing one first.',
+  },
+  'goal.not_found': {
+    title: 'No current goal',
+    retryable: false,
+    public: true,
+    action: 'Create a goal with /goal before using goal commands.',
+  },
+  'goal.status_invalid': {
+    title: 'Invalid goal status transition',
+    retryable: false,
+    public: true,
+    action: 'Check the current goal status and use a valid transition.',
+  },
+  'goal.not_resumable': {
+    title: 'Goal cannot be resumed',
+    retryable: false,
+    public: true,
+    action: 'Only paused or blocked goals can be resumed.',
   },
 
   'skill.not_found': {

@@ -94,6 +94,9 @@ import type {
   UndoHistoryPayload,
   UnregisterToolPayload,
   UpdateSessionMetadataPayload,
+  CreateGoalPayload,
+  UpdateGoalStatusPayload,
+  SetGoalBudgetPayload,
 } from './core-api';
 import type { ResumedAgentState, ResumeSessionResult } from './resumed';
 import type { SDKRPC } from './sdk-api';
@@ -578,6 +581,26 @@ export class ScreamCore implements PromisableMethods<CoreAPI> {
 
   sideQuestion({ sessionId, ...payload }: SessionAgentPayload<SideQuestionPayload>) {
     return this.sessionApi(sessionId).sideQuestion(payload);
+  }
+
+  createGoal({ sessionId, ...payload }: SessionAgentPayload<CreateGoalPayload>) {
+    return this.sessionApi(sessionId).createGoal(payload);
+  }
+
+  updateGoalStatus({ sessionId, ...payload }: SessionAgentPayload<UpdateGoalStatusPayload>) {
+    return this.sessionApi(sessionId).updateGoalStatus(payload);
+  }
+
+  cancelGoal({ sessionId, ...payload }: SessionAgentPayload<EmptyPayload>) {
+    return this.sessionApi(sessionId).cancelGoal(payload);
+  }
+
+  getGoal({ sessionId, ...payload }: SessionAgentPayload<EmptyPayload>) {
+    return this.sessionApi(sessionId).getGoal(payload);
+  }
+
+  setGoalBudget({ sessionId, ...payload }: SessionAgentPayload<SetGoalBudgetPayload>) {
+    return this.sessionApi(sessionId).setGoalBudget(payload);
   }
 
   updateSessionMetadata({ sessionId, ...payload }: UpdateSessionMetadataRequest): Promise<void> {

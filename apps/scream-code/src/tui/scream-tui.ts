@@ -193,6 +193,8 @@ export class ScreamTUI {
   private signalCleanupHandlers: Array<() => void> = [];
   private isShuttingDown = false;
   private ccConnectPollTimer: ReturnType<typeof setInterval> | undefined;
+  private memoryIdleTimer: ReturnType<typeof setTimeout> | undefined;
+  private lastMemoryExtractionTime = 0;
   readonly reverseRpcDisposers: Array<() => void> = [];
   private welcomeComponent: WelcomeComponent | undefined;
   startupNotice: string | undefined;
@@ -461,6 +463,51 @@ export class ScreamTUI {
     }
   }
 
+  // ---------------------------------------------------------------------------
+  // Memory idle extraction
+  // ---------------------------------------------------------------------------
+
+  private static readonly MEMORY_IDLE_MS = 10 * 60 * 1000; // 10 minutes
+  private static readonly MEMORY_EXTRACT_COOLDOWN_MS = 10 * 60 * 1000; // 10 minutes
+
+  private startMemoryIdleTimer(): void {
+    this.stopMemoryIdleTimer();
+    this.memoryIdleTimer = setTimeout(() => {
+      void this.performIdleMemoryExtraction();
+    }, ScreamTUI.MEMORY_IDLE_MS);
+  }
+
+  stopMemoryIdleTimer(): void {
+    if (this.memoryIdleTimer !== undefined) {
+      clearTimeout(this.memoryIdleTimer);
+      this.memoryIdleTimer = undefined;
+    }
+  }
+
+  private async performIdleMemoryExtraction(): Promise<void> {
+    const now = Date.now();
+    if (now - this.lastMemoryExtractionTime < ScreamTUI.MEMORY_EXTRACT_COOLDOWN_MS) return;
+    if (this.state.appState.streamingPhase !== 'idle') return;
+    if (this.state.appState.isCompacting) return;
+    if (this.state.appState.isReplaying) return;
+
+    const session = this.session;
+    if (session === undefined) return;
+
+    try {
+      await session.extractMemoriesOnExit();
+      this.lastMemoryExtractionTime = Date.now();
+      this.showStatus('已沉淀关键信息至记忆备忘录');
+    } catch {
+      // Silent fail — don't bother the user
+    }
+  }
+
+  /** Called after compaction extraction to avoid duplicate idle extraction within cooldown. */
+  markMemoryExtracted(): void {
+    this.lastMemoryExtractionTime = Date.now();
+  }
+
   /** Trigger an immediate cc-connect liveness poll. Called by /cc after start/stop/restart. */
   refreshCcStatus(): void {
     // Delay 2s so the daemon has time to fully start before we check.
@@ -576,6 +623,7 @@ export class ScreamTUI {
     }
     void this.persistInputHistory(text);
     slashCommands.dispatchInput(this, text);
+    this.startMemoryIdleTimer();
   }
 
   sendNormalUserInput(text: string): void {

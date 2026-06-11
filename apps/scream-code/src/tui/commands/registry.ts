@@ -1,7 +1,7 @@
 import type { ScreamSlashCommand, SlashCommandAvailability } from './types';
 
 export const BUILTIN_SLASH_COMMANDS = [
-  // ── 1. auto / 2. yes / 3. wolfpack / 4. sessions (固定前四) ──
+  // ── 1. auto / 2. yes / 3. wolfpack / 4. sessions / 5. goal ──
   {
     name: 'auto',
     aliases: [],
@@ -29,20 +29,32 @@ export const BUILTIN_SLASH_COMMANDS = [
     description: '浏览并恢复会话',
     priority: 122,
   },
+  {
+    name: 'goal',
+    aliases: ['goaloff'],
+    description: '查看/管理自动目标',
+    priority: 121,
+    availability: (args) => {
+      const trimmed = args.trim();
+      return trimmed === '' || trimmed === 'status' || trimmed === 'pause' || trimmed === 'off'
+        ? 'always'
+        : 'idle-only';
+    },
+  },
 
   // ── 记忆 / 会话 ──
   {
     name: 'memory',
     aliases: ['memo', 'mem'],
     description: '浏览、搜索、注入记忆备忘录',
-    priority: 121,
+    priority: 120,
     availability: 'always',
   },
   {
     name: 'new',
     aliases: ['clear'],
     description: '在当前工作区开启新会话',
-    priority: 121,
+    priority: 120,
   },
 
   // ── 模型 / 工作流（高频） ──
@@ -142,25 +154,6 @@ export const BUILTIN_SLASH_COMMANDS = [
     description: '撤回上一次对话（可指定轮数，如 /revoke 3）',
     priority: 108,
     availability: 'idle-only',
-  },
-  {
-    name: 'goal',
-    aliases: [],
-    description: '管理自动目标（status状态/pause暂停/resume恢复/replace替换，取消用 /goaloff）',
-    priority: 107,
-    availability: (args) => {
-      const trimmed = args.trim();
-      return trimmed === '' || trimmed === 'status' || trimmed === 'pause'
-        ? 'always'
-        : 'idle-only';
-    },
-  },
-  {
-    name: 'goaloff',
-    aliases: [],
-    description: '取消并清空当前目标',
-    priority: 106,
-    availability: 'always',
   },
   {
     name: 'fork',

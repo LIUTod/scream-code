@@ -398,6 +398,36 @@ export class Session {
     return this.rpc.sideQuestion(this.id, question);
   }
 
+  async createGoal(objective: string, options?: { completionCriterion?: string; replace?: boolean }): Promise<import('@scream-cli/agent-core').GoalSnapshotData> {
+    this.ensureOpen();
+    return this.rpc.createGoal({
+      sessionId: this.id,
+      objective,
+      completionCriterion: options?.completionCriterion,
+      replace: options?.replace,
+    });
+  }
+
+  async updateGoalStatus(status: 'active' | 'complete' | 'paused' | 'blocked'): Promise<import('@scream-cli/agent-core').GoalSnapshotData | null> {
+    this.ensureOpen();
+    return this.rpc.updateGoalStatus({ sessionId: this.id, status });
+  }
+
+  async cancelGoal(): Promise<import('@scream-cli/agent-core').GoalSnapshotData | null> {
+    this.ensureOpen();
+    return this.rpc.cancelGoal({ sessionId: this.id });
+  }
+
+  async getGoal(): Promise<import('@scream-cli/agent-core').GetGoalResult> {
+    this.ensureOpen();
+    return this.rpc.getGoal({ sessionId: this.id });
+  }
+
+  async setGoalBudget(value: number, unit: 'turns' | 'tokens' | 'milliseconds' | 'seconds' | 'minutes' | 'hours'): Promise<import('@scream-cli/agent-core').GoalSnapshotData> {
+    this.ensureOpen();
+    return this.rpc.setGoalBudget({ sessionId: this.id, value, unit });
+  }
+
   async close(): Promise<void> {
     if (this.closed) return;
     try {

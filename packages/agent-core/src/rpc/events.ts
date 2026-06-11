@@ -1,6 +1,7 @@
 import type { FinishReason, TokenUsage } from '@scream-cli/ltod';
 
 import type { PromptOrigin } from '../agent/context';
+import type { GoalChange, GoalSnapshot } from '../agent/goal';
 import type { ScreamErrorPayload } from '../errors';
 import type { PermissionMode } from '../agent/permission';
 import type { SkillSource } from '../skill';
@@ -75,6 +76,12 @@ export interface CronFiredEvent {
   readonly type: 'cron.fired';
   readonly origin: import('../agent/context/types').CronJobOrigin;
   readonly prompt: string;
+}
+
+export interface GoalUpdatedEvent {
+  readonly type: 'goal.updated';
+  readonly snapshot: GoalSnapshot | null;
+  readonly change?: GoalChange | undefined;
 }
 
 export interface WarningEvent {
@@ -308,6 +315,7 @@ export type AgentEvent =
   | BackgroundTaskStartedEvent
   | BackgroundTaskUpdatedEvent
   | BackgroundTaskTerminatedEvent
-  | CronFiredEvent;
+  | CronFiredEvent
+  | GoalUpdatedEvent;
 
 export type Event = AgentEvent & { agentId: string; sessionId: string };

@@ -7,10 +7,6 @@ export interface RelevanceFactors {
   recency: number;             // 0-1
   /** Usage boost: +0.1 per previous injection, capped at 0.3. */
   usageBoost: number;          // 0-0.3
-  /** Category match: 1.0 if category matches task type, 0.5 otherwise. */
-  categoryMatch: number;       // 0.5-1.0
-  /** Completion status: 'blocked' memos get +0.1 (needs attention). */
-  statusBoost: number;         // 0-0.1
 }
 
 export interface ScoredMemo {
@@ -31,16 +27,12 @@ export function computeRelevanceScore(
     keywordOverlap: computeKeywordSimilarity(memo, query),
     recency: computeRecency(memo.recordedAt),
     usageBoost: Math.min(0.3, usageCount * 0.1),
-    categoryMatch: inferCategoryMatch(memo.category),
-    statusBoost: memo.completionStatus === 'blocked' ? 0.1 : 0,
   };
 
   return (
-    factors.keywordOverlap * 0.40 +
+    factors.keywordOverlap * 0.50 +
     factors.recency * 0.25 +
-    factors.usageBoost * 0.15 +
-    factors.categoryMatch * 0.15 +
-    factors.statusBoost * 0.05
+    factors.usageBoost * 0.25
   );
 }
 
@@ -105,7 +97,7 @@ function computeKeywordSimilarity(
   memo: MemoryMemoSummary,
   query: string,
 ): number {
-  const memoText = `${memo.userRequirement} ${memo.solution} ${memo.problemsEncountered}`;
+  const memoText = `${memo.userNeed} ${memo.approach} ${memo.whatFailed} ${memo.whatWorked}`;
   const memoWords = extractKeywords(memoText);
   const queryWords = extractKeywords(query);
 
@@ -122,16 +114,4 @@ function computeRecency(recordedAt: number): number {
   const daysSince = (Date.now() - recordedAt) / (1000 * 60 * 60 * 24);
   // Linear decay: 1.0 at day 0, 0 at day 90+
   return Math.max(0, 1 - daysSince / 90);
-}
-
-function inferCategoryMatch(category: string): number {
-  // user_preference and feedback have higher baseline relevance
-  // because they encode durable knowledge about the user/project
-  switch (category) {
-    case 'user_preference': return 1.0;
-    case 'feedback': return 0.9;
-    case 'project_context': return 0.7;
-    case 'reference': return 0.5;
-    default: return 0.7;
-  }
 }

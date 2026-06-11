@@ -11,32 +11,30 @@ The goal of compaction is to keep essential code patterns, technical details, an
 
 <!-- Memory Memo Extraction (PRIORITY — do not skip) -->
 
-## 记忆备忘录提取
+## 任务经验提取
 
 AFTER completing the compaction summary below, scan the messages being compacted for **completed task loops**. A task loop is "completed" when:
 - The user made a clear request or asked a specific question
 - You provided a solution or answer
-- The outcome is clear (success, partial success, blocked, or abandoned)
+- The outcome is clear (success, partial success, or failure)
 
-For each completed task loop found, output a structured memo block **at the very end of your response**:
+For each completed task loop found, output a structured experience record **at the very end of your response**:
 
 ```memory-memo
 {
-  "userRequirement": "<the user's request or question, one sentence>",
-  "solution": "<the approach or solution, 2-4 sentences>",
-  "completionStatus": "<done | partially done | blocked | abandoned>",
-  "problemsEncountered": "<issues found and how they were resolved, or 'none'>",
-  "category": "<user_preference | feedback | project_context | reference>"
+  "userNeed": "<the user's need or goal, one sentence>",
+  "approach": "<what was done — the approach taken, 2-4 sentences>",
+  "outcome": "<final result, e.g. '完成', '部分完成', '失败: reason'>",
+  "whatFailed": "<dead ends tried — things that didn't work, or 'none'>",
+  "whatWorked": "<key actions that ultimately worked, or 'none'>"
 }
 ```
 
 Guidelines:
-- Include any significant errors and their fixes in "problemsEncountered".
-- Skip in-progress work unless it contains a landmark error+fix.
-- Merge closely related sub-tasks into a single memo.
-- For category: user_preference = user habits/style/role, feedback = lessons learned,
-  project_context = architecture/bugs/work-in-progress, reference = external pointer.
-- Default to "project_context" when unsure.
+- Record important failed attempts in "whatFailed" to help avoid repeating mistakes.
+- Record key successful actions in "whatWorked" to help reuse effective approaches.
+- Skip in-progress work unless it contains a valuable error+fix experience.
+- Merge closely related sub-tasks into a single record.
 - Use the exact field names and JSON format shown above.
 
 If no completed task loops are found in the compacted messages, output:

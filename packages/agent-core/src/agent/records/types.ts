@@ -5,6 +5,7 @@ import type { ToolStoreUpdate } from '../../tools/store';
 import type { CompactionBeginData, CompactionResult } from '../compaction';
 import type { AgentConfigUpdateData } from '../config';
 import type { ContextMessage, PromptOrigin } from '../context';
+import type { GoalActor, GoalBudgetLimits, GoalStatus } from '../goal';
 import type { PermissionApprovalResultRecord, PermissionMode } from '../permission';
 import type { UserToolRegistration } from '../tool';
 import type { UsageRecordScope } from '../usage';
@@ -73,6 +74,22 @@ export interface AgentRecordEvents {
 
   'wolfpack.enter': {};
   'wolfpack.exit': {};
+
+  'goal.create': {
+    goalId: string;
+    objective: string;
+    completionCriterion?: string;
+  };
+  'goal.update': {
+    status?: GoalStatus;
+    tokensUsed?: number;
+    turnsUsed?: number;
+    wallClockMs?: number;
+    budgetLimits?: GoalBudgetLimits;
+    reason?: string;
+    actor?: GoalActor;
+  };
+  'goal.clear': {};
 
   'tools.update_store': ToolStoreUpdate;
 }

@@ -1,13 +1,15 @@
 import type { SlashCommandHost } from './dispatch';
+import { GoalStatusMessageComponent } from '../components/messages/goal-panel';
 
 // ── Parsing ─────────────────────────────────────────────────────────────
 
-const CONTROL_SUBCOMMANDS = new Set(['pause', 'resume']);
+const CONTROL_SUBCOMMANDS = new Set(['pause', 'resume', 'off']);
 
 export type ParsedGoalCommand =
   | { readonly kind: 'status' }
   | { readonly kind: 'pause' }
   | { readonly kind: 'resume' }
+  | { readonly kind: 'off' }
   | { readonly kind: 'create'; readonly objective: string; readonly replace: boolean }
   | { readonly kind: 'error'; readonly message: string; readonly severity?: 'error' | 'hint' };
 
@@ -25,7 +27,7 @@ export function parseGoalCommand(rawArgs: string): ParsedGoalCommand {
   const tokens = args.split(/\s+/);
   const first = tokens[0];
   if (first !== undefined && CONTROL_SUBCOMMANDS.has(first) && tokens.length === 1) {
-    return { kind: first as 'pause' | 'resume' };
+    return { kind: first as 'pause' | 'resume' | 'off' };
   }
 
   let index = 0;
@@ -60,122 +62,134 @@ export async function handleGoalCommand(host: SlashCommandHost, args: string): P
       else host.showError(parsed.message);
       return;
     case 'status':
-      showGoalStatus(host);
+      await showGoalStatus(host);
       return;
     case 'pause':
-      pauseGoal(host);
+      await pauseGoal(host);
       return;
     case 'resume':
-      resumeGoal(host);
+      await resumeGoal(host);
+      return;
+    case 'off':
+      await handleGoalOffCommand(host);
       return;
     case 'create':
-      createGoal(host, parsed);
+      await createGoal(host, parsed);
       return;
   }
 }
 
 // ── Subcommand implementations ──────────────────────────────────────────
 
-function createGoal(host: SlashCommandHost, parsed: ParsedGoalCommand & { kind: 'create' }): void {
-  host.setAppState({
-    goal: parsed.objective,
-    goalActive: true,
-    goalContinuationCount: 0,
-  });
-  syncGoalMetadata(host);
-  host.showStatus(`🎯 目标已设置：${parsed.objective}`);
-
-  // Auto-start: send the objective as user input to begin execution
+async function createGoal(host: SlashCommandHost, parsed: ParsedGoalCommand & { kind: 'create' }): Promise<void> {
   const session = host.session;
-  if (session !== undefined && host.state.appState.streamingPhase === 'idle') {
-    host.sendQueuedMessage(session, { text: parsed.objective, agentId: undefined });
-  } else if (session !== undefined) {
-    host.state.queuedMessages.push({ text: parsed.objective, agentId: undefined });
+  if (session === undefined) {
+    host.showError('没有活跃的会话。');
+    return;
+  }
+
+  try {
+    await session.createGoal(parsed.objective, { replace: parsed.replace });
+    host.showStatus(`🎯 目标已设置：${parsed.objective}`);
+
+    // Auto-start: send the objective as user input to begin execution
+    if (host.state.appState.streamingPhase === 'idle') {
+      host.sendQueuedMessage(session, { text: parsed.objective, agentId: undefined });
+    } else {
+      host.state.queuedMessages.push({ text: parsed.objective, agentId: undefined });
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    host.showError(`创建目标失败：${message}`);
   }
 }
 
-function pauseGoal(host: SlashCommandHost): void {
-  if (!host.state.appState.goalActive) {
-    host.showStatus('🎯 没有可暂停的目标。');
+async function pauseGoal(host: SlashCommandHost): Promise<void> {
+  const session = host.session;
+  if (session === undefined) {
+    host.showError('没有活跃的会话。');
     return;
   }
-  if (host.state.appState.goalActive && host.state.appState.goal === null) {
-    host.showStatus('🎯 当前没有激活的目标。');
-    return;
+
+  try {
+    const result = await session.getGoal();
+    if (result.goal === null) {
+      host.showStatus('🎯 当前没有激活的目标。');
+      return;
+    }
+
+    await session.updateGoalStatus('paused');
+    host.showStatus('🎯 目标已暂停。使用 `/goal resume` 恢复。');
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    host.showError(`暂停目标失败：${message}`);
   }
-  host.setAppState({ goalActive: false });
-  syncGoalMetadata(host);
-  host.showStatus('🎯 目标已暂停。使用 `/goal resume` 恢复。');
 }
 
-function resumeGoal(host: SlashCommandHost): void {
-  if (host.state.appState.goalActive) {
-    host.showStatus('🎯 目标已在运行中。');
-    return;
-  }
-  const goal = host.state.appState.goal;
-  if (goal === null) {
-    host.showStatus('🎯 没有可恢复的目标。使用 `/goal <指令>` 设置新目标。');
-    return;
-  }
-  host.setAppState({ goalActive: true, goalContinuationCount: 0 });
-  syncGoalMetadata(host);
-  host.showStatus('🎯 目标已恢复。');
-  // Resume execution
+async function resumeGoal(host: SlashCommandHost): Promise<void> {
   const session = host.session;
-  if (session !== undefined && host.state.appState.streamingPhase === 'idle') {
-    host.sendQueuedMessage(session, { text: '继续执行当前目标。', agentId: undefined });
+  if (session === undefined) {
+    host.showError('没有活跃的会话。');
+    return;
+  }
+
+  try {
+    const result = await session.getGoal();
+    if (result.goal === null) {
+      host.showStatus('🎯 没有可恢复的目标。使用 `/goal <指令>` 设置新目标。');
+      return;
+    }
+
+    await session.updateGoalStatus('active');
+    host.showStatus('🎯 目标已恢复。');
+
+    // Resume execution
+    if (host.state.appState.streamingPhase === 'idle') {
+      host.sendQueuedMessage(session, { text: '继续执行当前目标。', agentId: undefined });
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    host.showError(`恢复目标失败：${message}`);
   }
 }
 
 export async function handleGoalOffCommand(host: SlashCommandHost): Promise<void> {
-  const hadGoal = host.state.appState.goalActive || host.state.appState.goal !== null;
-  host.setAppState({
-    goal: null,
-    goalActive: false,
-    goalContinuationCount: 0,
-  });
-  syncGoalMetadata(host);
-  if (hadGoal) {
-    host.showStatus('🎯 目标已取消。');
-  } else {
-    host.showStatus('🎯 当前没有激活的目标。');
-  }
-}
-
-function showGoalStatus(host: SlashCommandHost): void {
-  const { goal, goalActive, goalContinuationCount } = host.state.appState;
-  if (goal === null) {
-    host.showStatus('🎯 当前没有设置目标。使用 `/goal <指令>` 设置新目标。');
+  const session = host.session;
+  if (session === undefined) {
+    host.showError('没有活跃的会话。');
     return;
   }
-  const statusTag = goalActive ? '▶ 运行中' : '⏸ 已暂停';
-  const parts = [
-    `🎯 ${statusTag}`,
-    `   目标：${goal}`,
-    `   已自动继续 ${goalContinuationCount} 次`,
-  ];
-  if (!goalActive) {
-    parts.push('   使用 `/goal resume` 恢复，或 `/goaloff` 取消');
-  } else {
-    parts.push('   使用 `/goal pause` 暂停，或 `/goaloff` 取消');
+
+  try {
+    const result = await session.getGoal();
+    if (result.goal === null) {
+      host.showStatus('🎯 当前没有激活的目标。');
+      return;
+    }
+
+    await session.cancelGoal();
+    host.showStatus('🎯 目标已取消。');
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    host.showError(`取消目标失败：${message}`);
   }
-  host.showStatus(parts.join('\n'), host.state.theme.colors.success);
 }
 
-// ── Metadata sync ───────────────────────────────────────────────────────
-
-function syncGoalMetadata(host: SlashCommandHost): void {
+async function showGoalStatus(host: SlashCommandHost): Promise<void> {
   const session = host.session;
-  if (session === undefined) return;
-  const { appState } = host.state;
-  if (!session.metadata['custom']) {
-    session.metadata['custom'] = {};
+  if (session === undefined) {
+    host.showStatus('🎯 当前没有活跃的会话。');
+    return;
   }
-  (session.metadata['custom'] as Record<string, unknown>)['goal'] = {
-    active: appState.goalActive,
-    content: appState.goal,
-    continuationCount: appState.goalContinuationCount,
-  };
-  void session.writeMetadata();
+
+  try {
+    const result = await session.getGoal();
+    host.state.transcriptContainer.addChild(
+      new GoalStatusMessageComponent(result.goal, host.state.theme.colors),
+    );
+    host.state.ui.requestRender();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    host.showError(`获取目标状态失败：${message}`);
+  }
 }

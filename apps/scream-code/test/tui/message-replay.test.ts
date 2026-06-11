@@ -139,6 +139,7 @@ function makeSession(
     setThinking: vi.fn(async () => {}),
     setPermission: vi.fn(async () => {}),
     setPlanMode: vi.fn(async () => {}),
+    getGoal: vi.fn(async () => ({ goal: null })),
     onEvent: vi.fn(() => vi.fn()),
     listMcpServers: vi.fn(async () => []),
     listSkills: vi.fn(async () => []),

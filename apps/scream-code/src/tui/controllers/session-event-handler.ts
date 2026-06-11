@@ -87,6 +87,7 @@ export interface SessionEventHost {
   sendQueuedMessage(session: Session, item: QueuedMessage): void;
   shiftQueuedMessage(): QueuedMessage | undefined;
   readonly tasksBrowserController: TasksBrowserController;
+  markMemoryExtracted(): void;
 }
 
 export class SessionEventHandler {
@@ -209,6 +210,7 @@ export class SessionEventHandler {
       case 'cron.fired': this.handleCronFired(event); break;
       case 'mcp.server.status': this.renderMcpServerStatus(event.server); break;
       case 'tool.list.updated': break;
+      case 'goal.updated': this.handleGoalUpdated(event); break;
       default: break;
     }
   }
@@ -335,49 +337,7 @@ export class SessionEventHandler {
     }
     this.host.streamingUI.resetToolUi();
 
-    // Goal 自动继续
-    const { appState } = this.host.state;
-    if (event.reason === 'completed' && appState.goalActive && appState.goal) {
-      const MAX_CONTINUATIONS = 20;
-      if (appState.goalContinuationCount >= MAX_CONTINUATIONS) {
-        this.host.setAppState({
-          goal: null,
-          goalActive: false,
-          goalContinuationCount: 0,
-        });
-        this.host.showNotice(
-          'Goal 模式',
-          `已达到最大自动继续次数 (${MAX_CONTINUATIONS})，已自动关闭。输入 /goal 可重新设置。`,
-        );
-        this.syncGoalMetadata();
-      } else if (this.host.state.queuedMessages.length === 0) {
-        this.host.setAppState({
-          goalContinuationCount: appState.goalContinuationCount + 1,
-        });
-        this.host.state.queuedMessages.unshift({
-          text: `请继续执行目标：${appState.goal}。请评估当前进度，如果已完成请明确说明，否则继续执行下一步。`,
-          agentId: undefined,
-        });
-        this.syncGoalMetadata();
-      }
-    }
-
     this.host.streamingUI.finalizeTurn(sendQueued);
-  }
-
-  private syncGoalMetadata(): void {
-    const session = this.host.session;
-    if (session === undefined) return;
-    const { appState } = this.host.state;
-    if (!session.metadata['custom']) {
-      session.metadata['custom'] = {};
-    }
-    (session.metadata['custom'] as Record<string, unknown>)['goal'] = {
-      active: appState.goalActive,
-      content: appState.goal,
-      continuationCount: appState.goalContinuationCount,
-    };
-    void session.writeMetadata();
   }
 
   private handleStepBegin(event: TurnStepStartedEvent): void {
@@ -705,6 +665,18 @@ export class SessionEventHandler {
     });
   }
 
+  private handleGoalUpdated(event: { snapshot: { objective: string; status: string } | null }): void {
+    const snapshot = event.snapshot;
+    if (snapshot === null) {
+      this.host.setAppState({ goal: null, goalActive: false });
+    } else {
+      this.host.setAppState({
+        goal: snapshot.objective,
+        goalActive: snapshot.status === 'active',
+      });
+    }
+  }
+
   private handleCompactionBegin(event: CompactionStartedEvent): void {
     this.host.streamingUI.finalizeLiveTextBuffers('waiting');
     this.host.setAppState({
@@ -720,6 +692,7 @@ export class SessionEventHandler {
     sendQueued: (item: QueuedMessage) => void,
   ): void {
     this.host.streamingUI.endCompaction(event.result.tokensBefore, event.result.tokensAfter);
+    this.host.markMemoryExtracted();
     this.finishCompaction(sendQueued);
   }
 

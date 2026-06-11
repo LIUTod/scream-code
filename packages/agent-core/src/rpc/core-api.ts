@@ -290,6 +290,46 @@ export interface SideQuestionResult {
   readonly answer: string;
 }
 
+export interface CreateGoalPayload {
+  readonly objective: string;
+  readonly completionCriterion?: string;
+  readonly replace?: boolean;
+}
+
+export interface UpdateGoalStatusPayload {
+  readonly status: 'active' | 'complete' | 'paused' | 'blocked';
+}
+
+export interface SetGoalBudgetPayload {
+  readonly value: number;
+  readonly unit: 'turns' | 'tokens' | 'milliseconds' | 'seconds' | 'minutes' | 'hours';
+}
+
+export interface GoalSnapshotData {
+  readonly goalId: string;
+  readonly objective: string;
+  readonly completionCriterion?: string;
+  readonly status: string;
+  readonly turnsUsed: number;
+  readonly tokensUsed: number;
+  readonly wallClockMs: number;
+  readonly budget: {
+    readonly tokenBudget: number | null;
+    readonly turnBudget: number | null;
+    readonly wallClockBudgetMs: number | null;
+    readonly remainingTokens: number | null;
+    readonly remainingTurns: number | null;
+    readonly remainingWallClockMs: number | null;
+    readonly overBudget: boolean;
+  };
+  readonly terminalReason?: string;
+  readonly notes: readonly { readonly content: string; readonly time: number }[];
+}
+
+export interface GetGoalResult {
+  readonly goal: GoalSnapshotData | null;
+}
+
 export interface AgentAPI {
   prompt: (payload: PromptPayload) => void;
   steer: (payload: SteerPayload) => void;
@@ -323,6 +363,11 @@ export interface AgentAPI {
   getBackground: (payload: GetBackgroundPayload) => readonly BackgroundTaskInfo[];
   extractMemoriesOnExit: (payload: EmptyPayload) => Promise<void>;
   sideQuestion: (payload: SideQuestionPayload) => Promise<SideQuestionResult>;
+  createGoal: (payload: CreateGoalPayload) => GoalSnapshotData;
+  updateGoalStatus: (payload: UpdateGoalStatusPayload) => GoalSnapshotData | null;
+  cancelGoal: (payload: EmptyPayload) => GoalSnapshotData | null;
+  getGoal: (payload: EmptyPayload) => GetGoalResult;
+  setGoalBudget: (payload: SetGoalBudgetPayload) => GoalSnapshotData;
 }
 
 type AgentAPIWithId = WithAgentId<AgentAPI>;

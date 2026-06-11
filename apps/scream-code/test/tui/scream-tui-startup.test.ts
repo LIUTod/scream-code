@@ -71,6 +71,7 @@ function makeSession(overrides: Record<string, unknown> = {}) {
     setThinking: vi.fn(async () => {}),
     setPermission: vi.fn(async () => {}),
     setPlanMode: vi.fn(async () => {}),
+    getGoal: vi.fn(async () => ({ goal: null })),
     onEvent: vi.fn(() => () => {}),
     listSkills: vi.fn(async () => []),
     close: vi.fn(async () => {}),

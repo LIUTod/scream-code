@@ -79,6 +79,7 @@ describe('Event public types', () => {
         case 'background.task.updated':
         case 'background.task.terminated':
         case 'cron.fired':
+        case 'goal.updated':
           return;
         default:
           assertNever(event);

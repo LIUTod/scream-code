@@ -1,5 +1,6 @@
 import type { Agent } from '..';
 import type { DynamicInjector } from './injector';
+import { GoalInjector } from './goal';
 import { MemoryRecallInjector } from './memory-recall';
 import { PermissionModeInjector } from './permission-mode';
 import { PluginSessionStartInjector } from './plugin-session-start';
@@ -24,6 +25,7 @@ export class InjectionManager {
       new PlanModeInjector(agent),
       new PermissionModeInjector(agent),
       new TodoListReminderInjector(agent),
+      new GoalInjector(agent),
       ...(this.memoryRecall ? [this.memoryRecall] : []),
     ];
   }

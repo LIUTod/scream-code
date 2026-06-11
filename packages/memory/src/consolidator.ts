@@ -8,10 +8,11 @@ export interface DuplicateGroup {
   memos: MemoryMemoSummary[];
   /** Suggested merged memo content. */
   merged: {
-    userRequirement: string;
-    solution: string;
-    completionStatus: MemoryMemo['completionStatus'];
-    problemsEncountered: string;
+    userNeed: string;
+    approach: string;
+    outcome: string;
+    whatFailed: string;
+    whatWorked: string;
   };
   /** Reason this group was flagged. */
   reason: string;
@@ -19,7 +20,7 @@ export interface DuplicateGroup {
 
 export interface ConsolidationPlan {
   duplicateGroups: DuplicateGroup[];
-  /** Memos that appear to be resolved (blocked → done). */
+  /** Memos that appear to be resolved (outcome indicates completion). */
   resolved: MemoryMemoSummary[];
   /** Memos that appear stale (no updates > 30 days). */
   stale: MemoryMemoSummary[];
@@ -102,12 +103,12 @@ export async function applyConsolidation(
     const merged = createMemoryMemo({
       sourceSessionId: newest.sourceSessionId,
       sourceSessionTitle: newest.sourceSessionTitle,
-      userRequirement: group.merged.userRequirement,
-      solution: group.merged.solution,
-      completionStatus: group.merged.completionStatus,
-      problemsEncountered: group.merged.problemsEncountered,
+      userNeed: group.merged.userNeed,
+      approach: group.merged.approach,
+      outcome: group.merged.outcome,
+      whatFailed: group.merged.whatFailed,
+      whatWorked: group.merged.whatWorked,
       extractionSource: 'compaction', // merged memos are post-hoc
-      category: 'project_context',
     });
 
     // Delete all originals
@@ -142,7 +143,7 @@ function findDuplicateGroups(memos: MemoryMemoSummary[]): DuplicateGroup[] {
       const isSimilar = cluster.some((m) => {
         const score = computeRelevanceScore(
           candidate,
-          `${m.userRequirement} ${m.solution}`,
+          `${m.userNeed} ${m.approach}`,
         );
         return score >= SIMILARITY_THRESHOLD;
       });
@@ -162,44 +163,59 @@ function findDuplicateGroups(memos: MemoryMemoSummary[]): DuplicateGroup[] {
 }
 
 function buildDuplicateGroup(cluster: MemoryMemoSummary[]): DuplicateGroup {
-  // Merge: use the most recent memo's requirement as base
+  // Merge: use the most recent memo's fields as base
   const sorted = [...cluster].sort((a, b) => b.recordedAt - a.recordedAt);
   const newest = sorted[0]!;
 
-  // Collect all unique problems
-  const problems = new Set(
+  // Collect all unique whatFailed entries
+  const failures = new Set(
     cluster
-      .map((m) => m.problemsEncountered)
+      .map((m) => m.whatFailed)
       .filter((p) => p && p !== 'none' && p !== '无'),
   );
 
-  // Determine best status: prioritize 'done', then 'blocked', then others
-  const statuses = new Set(cluster.map((m) => m.completionStatus));
-  const status: MemoryMemo['completionStatus'] = statuses.has('done')
-    ? 'done'
-    : statuses.has('blocked')
-      ? 'blocked'
-      : statuses.has('partially done')
-        ? 'partially done'
-        : 'abandoned';
+  // Collect all unique whatWorked entries
+  const successes = new Set(
+    cluster
+      .map((m) => m.whatWorked)
+      .filter((w) => w && w !== 'none' && w !== '无'),
+  );
+
+  // Determine best outcome: prefer completion indicators
+  const outcomes = cluster.map((m) => m.outcome);
+  const hasDone = outcomes.some((o) => o.includes('完成') || o.toLowerCase().includes('done'));
+  const bestOutcome = hasDone
+    ? '完成'
+    : newest.outcome;
 
   return {
     memos: cluster,
     merged: {
-      userRequirement: newest.userRequirement,
-      solution: `合并 ${cluster.length} 条相关记忆。最新方案: ${newest.solution}`,
-      completionStatus: status,
-      problemsEncountered:
-        problems.size > 0 ? [...problems].join('; ') : 'none',
+      userNeed: newest.userNeed,
+      approach: `合并 ${cluster.length} 条相关记录。最新方案: ${newest.approach}`,
+      outcome: bestOutcome,
+      whatFailed: failures.size > 0 ? [...failures].join('; ') : 'none',
+      whatWorked: successes.size > 0 ? [...successes].join('; ') : 'none',
     },
-    reason: `发现 ${cluster.length} 条相似记忆（关键词重叠 > ${Math.round(SIMILARITY_THRESHOLD * 100)}%）`,
+    reason: `发现 ${cluster.length} 条相似记录（关键词重叠 > ${Math.round(SIMILARITY_THRESHOLD * 100)}%）`,
   };
+}
+
+function isOutcomeCompleted(outcome: string): boolean {
+  const lower = outcome.toLowerCase();
+  return (
+    lower.includes('完成') ||
+    lower.includes('done') ||
+    lower.includes('completed') ||
+    lower.includes('成功') ||
+    lower.includes('success')
+  );
 }
 
 function findResolved(memos: MemoryMemoSummary[]): MemoryMemoSummary[] {
   return memos.filter(
     (m) =>
-      m.completionStatus === 'done' &&
+      isOutcomeCompleted(m.outcome) &&
       // Only flag memos older than 7 days as "resolved"
       (Date.now() - m.recordedAt) > 7 * 24 * 60 * 60 * 1000,
   );
@@ -213,7 +229,7 @@ function findStale(
   return memos.filter(
     (m) =>
       m.recordedAt < threshold &&
-      m.completionStatus !== 'done' &&
-      m.completionStatus !== 'blocked',
+      !isOutcomeCompleted(m.outcome) &&
+      !m.outcome.includes('blocked'),
   );
 }

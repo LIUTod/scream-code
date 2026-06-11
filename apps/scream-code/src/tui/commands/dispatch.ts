@@ -197,7 +197,8 @@ async function executeSlashCommand(host: SlashCommandHost, input: string): Promi
         host.track('clear');
       }
       try {
-        await handleBuiltInSlashCommand(host, intent.name, intent.args);
+        const args = intent.name === 'goal' && parsedCommand?.name === 'goaloff' ? 'off' : intent.args;
+        await handleBuiltInSlashCommand(host, intent.name, args);
       } catch (error) {
         host.showError(formatErrorMessage(error));
       }
@@ -288,9 +289,6 @@ async function handleBuiltInSlashCommand(
       return;
     case 'goal':
       await handleGoalCommand(host, args);
-      return;
-    case 'goaloff':
-      await handleGoalOffCommand(host);
       return;
     case 'update':
       await handleUpdateCommand(host);

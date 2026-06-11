@@ -381,6 +381,12 @@ export class ToolManager {
         this.agent.cron && new b.CronCreateTool(this.agent.cron),
         this.agent.cron && new b.CronListTool(this.agent.cron),
         this.agent.cron && new b.CronDeleteTool(this.agent.cron),
+        // Goal tools are main-agent-only.
+        this.agent.type === 'main' && new b.CreateGoalTool(this.agent),
+        this.agent.type === 'main' && new b.UpdateGoalTool(this.agent),
+        this.agent.type === 'main' && new b.GetGoalTool(this.agent),
+        this.agent.type === 'main' && new b.SetGoalBudgetTool(this.agent),
+        this.agent.type === 'main' && new b.WriteGoalNoteTool(this.agent),
         this.agent.skills?.registry.listInvocableSkills().length &&
           new b.SkillTool(this.agent),
         this.agent.subagentHost &&
@@ -422,8 +428,14 @@ export class ToolManager {
 
   get loopTools(): readonly ExecutableTool[] {
     const mcpNames = [...this.mcpTools.keys()].filter((name) => this.isMcpToolEnabled(name));
+    // Mutation goal tools are only offered to the model while a goal exists.
+    const hideGoalMutationTools = this.agent.goal.getGoal().goal === null;
     return uniq([...this.enabledTools, ...mcpNames])
       .toSorted((a, b) => a.localeCompare(b))
+      .filter(
+        (name) =>
+          !(hideGoalMutationTools && (name === 'SetGoalBudget' || name === 'UpdateGoal' || name === 'WriteGoalNote')),
+      )
       .map(
         (name) =>
           this.userTools.get(name) ??

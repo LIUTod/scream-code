@@ -46,6 +46,7 @@ export interface SessionManagerHost {
   updateQueueDisplay(): void;
   appendApprovalTranscriptEntry(request: ApprovalRequest, response: ApprovalResponse): void;
   hasSessionContent(): boolean;
+  stopMemoryIdleTimer(): void;
 }
 
 /**
@@ -139,10 +140,8 @@ export class SessionManager {
 
   async syncRuntimeState(session: Session = this.requireSession()): Promise<void> {
     const status = await session.getStatus();
-    const custom = session.metadata?.['custom'] as Record<string, unknown> | undefined;
-    const goalMeta = custom?.['goal'] as
-      | { active: boolean; content: string | null; continuationCount: number }
-      | undefined;
+    const goalResult = await session.getGoal().catch(() => ({ goal: null }));
+    const goal = goalResult.goal;
     this.host.setAppState({
       sessionId: session.id,
       model: status.model ?? '',
@@ -153,9 +152,9 @@ export class SessionManager {
       maxContextTokens: status.maxContextTokens,
       contextUsage: status.contextUsage,
       sessionTitle: session.summary?.title ?? null,
-      goal: goalMeta?.content ?? null,
-      goalActive: goalMeta?.active ?? false,
-      goalContinuationCount: goalMeta?.continuationCount ?? 0,
+      goal: goal?.objective ?? null,
+      goalActive: goal?.status === 'active',
+      goalContinuationCount: 0,
     });
   }
 
@@ -354,6 +353,7 @@ export class SessionManager {
     this.host.streamingUI.setStep(0);
     this.host.streamingUI.resetLiveText();
     this.host.updateQueueDisplay();
+    this.host.stopMemoryIdleTimer();
   }
 
   // ---------------------------------------------------------------------------

@@ -68,19 +68,19 @@ export class MemoryRecallInjector extends DynamicInjector {
     ranked: ReturnType<typeof rankMemos>,
   ): string {
     const lines = [
-      '以下是与当前任务相关的历史记忆（来自之前的会话）：',
+      '以下是与当前任务相关的历史经验记录（来自之前的会话）：',
       '',
     ];
 
     for (const [i, { memo, score }] of ranked.entries()) {
       const level = score >= 0.6 ? '高' : score >= 0.4 ? '中' : '低';
       lines.push(
-        `**记忆 ${i + 1}** (相关性: ${level})`,
-        `- 需求: ${memo.userRequirement}`,
-        `- 方案: ${memo.solution}`,
-        memo.completionStatus === 'blocked'
-          ? `- ⚠️ 状态: 受阻 — 可能需要关注`
-          : `- 状态: ${memo.completionStatus}`,
+        `**记录 ${i + 1}** (相关性: ${level})`,
+        `- 需求: ${memo.userNeed}`,
+        `- 方案: ${memo.approach}`,
+        `- 结果: ${memo.outcome}`,
+        memo.whatFailed !== 'none' ? `- 踩坑: ${memo.whatFailed}` : '',
+        memo.whatWorked !== 'none' ? `- 经验: ${memo.whatWorked}` : '',
         '',
       );
     }

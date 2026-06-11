@@ -184,6 +184,15 @@ Persistent goal injection that survives turns and session resumes.
 - **Storage**: persisted in session metadata (`custom.goal`) so goals survive session switch and resume.
 - **Footer badge**: 🎯 + truncated goal text (green) when active.
 
+#### Goal Loop & WriteGoalNote
+
+The goal system runs in an autonomous loop (`driveGoal()` in `packages/agent-core/src/agent/turn/index.ts`). After each turn, if the goal is still active, the agent is prompted to continue. During execution:
+
+- **WriteGoalNote tool**: `packages/agent-core/src/tools/builtin/goal/write-goal-note.ts` — lets the model record working notes (max 10 notes × 200 chars). Notes are stored in `GoalMode` memory state, not in conversation context, so compaction cannot lose them.
+- **GoalInjector**: `packages/agent-core/src/agent/injection/goal.ts` — injects notes into each continuation turn under `## Working Notes`. Also prompts the model to use WriteGoalNote when discovering facts or hitting dead ends.
+- **Lifecycle**: notes are cleared when the goal completes or is cancelled. Notes do not survive session resume (model re-accumulates them).
+- **TUI ordering**: `/goal` is 5th in the quick command list (priority 121, after sessions).
+
 ### cc-connect (`/cc`)
 
 One-click cc-connect daemon life cycle management (cross-platform).
@@ -236,12 +245,15 @@ Key files: `packages/agent-core/src/agent/compaction/{micro,full,strategy}.ts`,
 
 ### Memory System
 
-The agent has a full memory system provided by the `@scream-cli/memory` package:
+The agent has a memory system provided by the `@scream-cli/memory` package. Positioned as "task experience records" — structured logs of what was tried, what worked, and what failed.
 
-- **Storage**: JSONL file at `<project>/.scream-code/memory/entries.jsonl` with full CRUD support.
-- **Categories**: `user_preference`, `feedback`, `project_context`, `reference`.
-- **Extraction**: structured memories are automatically extracted from messages during compaction (LLM-driven), no manual steps needed.
-- **Scoring**: multi-factor relevance algorithm (keyword overlap + recency decay + category weight + status boost), purely rule-based, zero LLM cost.
+- **Storage**: JSONL file at `<project>/.scream-code/memory/entries.jsonl` (version 2 format, with v1→v2 auto-migration in `store.ts`).
+- **Fields**: `userNeed` (需求), `approach` (方案), `outcome` (结果), `whatFailed` (踩坑), `whatWorked` (经验). No categories or tags.
+- **Extraction triggers**:
+  - Compaction: `extractAndStoreMemos()` in `packages/agent-core/src/agent/compaction/full.ts` — scans compaction summary for `memory-memo` blocks.
+  - Session exit: `extractMemoriesOnExit()` in `packages/agent-core/src/agent/index.ts` — takes last 30 messages × 300 chars, calls LLM.
+  - Idle timer: after 10 minutes of no user input, `ScreamTUI.performIdleMemoryExtraction()` calls `session.extractMemoriesOnExit()`. Cooldown: 10 minutes. Compaction extraction updates the cooldown timestamp to avoid duplicates.
+- **Scoring**: keyword Jaccard similarity (50%) + recency decay 90 days (25%) + usage boost (25%). Purely rule-based, zero LLM cost.
 
 #### Auto Recall
 
@@ -268,9 +280,9 @@ Key file: `packages/agent-core/src/agent/session-memory.ts`.
 
 A CCB-style four-stage memory consolidation command. LLM-driven:
 
-1. **Orient** — scan all memories, report an overview
+1. **Orient** — scan all memories, report overview (count, outcome distribution, time range)
 2. **Gather** — semantically identify duplicates, contradictions, and stale entries
-3. **Consolidate** — produce a merge plan
+3. **Consolidate** — produce a merge plan (merged records use new field names)
 4. **Prune** — execute after user confirmation
 
 Includes automatic reminders: when >= 24 hours and >= 5 sessions have passed since

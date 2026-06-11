@@ -1,4 +1,4 @@
-import { type MemoryMemo, type MemoryCategory, createMemoryMemo } from './models.js';
+import { type MemoryMemo, createMemoryMemo } from './models.js';
 
 /**
  * Parse memory-memo blocks from LLM compaction output.
@@ -18,22 +18,21 @@ export function parseMemoryMemos(text: string): MemoryMemo[] {
       const parsed = JSON.parse(jsonStr) as Record<string, unknown>;
       if (parsed['none'] === true) continue;
 
-      const requirement = typeof parsed['userRequirement'] === 'string' ? parsed['userRequirement'].trim() : '';
-      if (requirement.length === 0) {
-        console.warn('[memory] Skipping memory-memo with empty userRequirement:', jsonStr.slice(0, 200));
+      const userNeed = typeof parsed['userNeed'] === 'string' ? parsed['userNeed'].trim() : '';
+      if (userNeed.length === 0) {
+        console.warn('[memory] Skipping memory-memo with empty userNeed:', jsonStr.slice(0, 200));
         continue;
       }
 
       memos.push(
         createMemoryMemo({
-          userRequirement: requirement,
-          solution: typeof parsed['solution'] === 'string' ? parsed['solution'].trim() : '',
-          completionStatus: normalizeCompletionStatus(parsed['completionStatus']),
-          problemsEncountered:
-            typeof parsed['problemsEncountered'] === 'string'
-              ? parsed['problemsEncountered'].trim()
-              : 'none',
-          category: normalizeCategory(parsed['category']),
+          userNeed,
+          approach: typeof parsed['approach'] === 'string' ? parsed['approach'].trim() : '',
+          outcome: typeof parsed['outcome'] === 'string' ? parsed['outcome'].trim() : '',
+          whatFailed:
+            typeof parsed['whatFailed'] === 'string' ? parsed['whatFailed'].trim() : 'none',
+          whatWorked:
+            typeof parsed['whatWorked'] === 'string' ? parsed['whatWorked'].trim() : 'none',
           extractionSource: 'compaction',
           sourceSessionId: '', // filled in by caller
           sourceSessionTitle: '', // filled in by caller
@@ -47,33 +46,9 @@ export function parseMemoryMemos(text: string): MemoryMemo[] {
   return memos;
 }
 
-function normalizeCompletionStatus(
-  raw: unknown,
-): MemoryMemo['completionStatus'] {
-  const s = typeof raw === 'string' ? raw.toLowerCase().trim() : '';
-  if (s.startsWith('done') || s === 'completed' || s === 'complete') return 'done';
-  if (s.startsWith('partial') || s === 'in progress') return 'partially done';
-  if (s.startsWith('block') || s === 'stuck') return 'blocked';
-  if (s.startsWith('abandon') || s === 'cancelled' || s === 'canceled') return 'abandoned';
-  return 'done'; // default
-}
-
-function normalizeCategory(raw: unknown): MemoryCategory {
-  const valid: MemoryCategory[] = [
-    'user_preference',
-    'feedback',
-    'project_context',
-    'reference',
-  ];
-  if (typeof raw === 'string' && valid.includes(raw as MemoryCategory)) {
-    return raw as MemoryCategory;
-  }
-  return 'project_context'; // default for backward compat
-}
-
 /** System prompt for exit-time extraction — instructs the LLM how to extract. */
 export const EXIT_EXTRACTION_SYSTEM_PROMPT =
-  '你是一个记忆提取助手。任务是从对话记录中识别已完成的任务闭环。用对话的主要语言输出（中文对话用中文，英文对话用英文）。只输出指定的 JSON 格式，不要调用任何工具。';
+  '你是一个任务经验提取助手。任务是从对话记录中识别已完成的任务闭环，提炼出任务经验记录。用对话的主要语言输出（中文对话用中文，英文对话用英文）。只输出指定的 JSON 格式，不要调用任何工具。';
 
 /** Build the user prompt for exit-time extraction, including a conversation sample. */
 export function buildExitExtractionPrompt(
@@ -86,25 +61,25 @@ export function buildExitExtractionPrompt(
 判断标准：
 - 用户提出了明确的需求或问题
 - 给出了解决方案或回答
-- 结果明确（成功、部分完成、受阻、或放弃）
+- 结果明确（成功、部分完成、失败）
 
-对每个已完成的任务闭环，输出一个结构化记忆块。**必须用对话的主要语言书写**：
+对每个已完成的任务闭环，输出一个结构化经验记录。**必须用对话的主要语言书写**：
 
 \`\`\`memory-memo
 {
-  "userRequirement": "<用户需求，一句话概括>",
-  "solution": "<解决方案，2-4 句话>",
-  "completionStatus": "<done | partially done | blocked | abandoned>",
-  "problemsEncountered": "<遇到的问题及解决方式，无则填 'none'>",
-  "category": "<user_preference | feedback | project_context | reference>"
+  "userNeed": "<用户需求/目标，一句话概括>",
+  "approach": "<执行方案，做了什么，2-4 句话>",
+  "outcome": "<最终结果，如'完成'、'部分完成'、'失败：原因'>",
+  "whatFailed": "<踩坑记录：试了但不行的路，无则填 'none'>",
+  "whatWorked": "<成功经验：最终奏效的关键动作，无则填 'none'>"
 }
 \`\`\`
 
 注意：
-- 在 problemsEncountered 中记录重要的错误和修复方法
-- 跳过未完成的工作，除非其中包含有价值的错误修复经验
-- 将紧密相关的子任务合并为一条记忆
-- category 从四个值中选一个，不确定时用 project_context
+- whatFailed 记录重要的错误尝试，帮助未来避免重蹈覆辙
+- whatWorked 记录最终成功的关键动作，帮助未来复用经验
+- 跳过未完成的工作，除非其中包含有价值的踩坑经验
+- 将紧密相关的子任务合并为一条记录
 - 严格遵守字段名和 JSON 格式，不要添加额外字段
 
 如果没有已完成的任务闭环，输出：

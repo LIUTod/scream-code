@@ -7,6 +7,11 @@ export * from '../cron/cron-delete';
 export * from '../cron/cron-list';
 export * from './collaboration/agent';
 export * from './collaboration/ask-user';
+export * from './goal/create-goal';
+export * from './goal/get-goal';
+export * from './goal/set-goal-budget';
+export * from './goal/update-goal';
+export * from './goal/write-goal-note';
 
 export * from './collaboration/skill-tool';
 export * from './collaboration/wolfpack';

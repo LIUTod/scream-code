@@ -6,16 +6,6 @@ export async function handleMemoryCommand(host: SlashCommandHost, _args: string)
   host.showMemoryPicker();
 }
 
-function statusLabel(status: string): string {
-  switch (status) {
-    case 'done': return '已完成';
-    case 'partially done': return '部分完成';
-    case 'blocked': return '受阻';
-    case 'abandoned': return '已放弃';
-    default: return status;
-  }
-}
-
 export function formatMemoryMemoForInjection(memo: MemoryMemoSummary): string {
   const date = new Date(memo.recordedAt).toLocaleString('zh-CN');
   const sessionLabel =
@@ -28,15 +18,16 @@ export function formatMemoryMemoForInjection(memo: MemoryMemoSummary): string {
     '',
     `## 历史备忘录 #${memo.id}`,
     '',
-    `- **原始需求**: ${memo.userRequirement}`,
-    `- **解决方案**: ${memo.solution || '(无)'}`,
-    `- **完成情况**: ${statusLabel(memo.completionStatus)}`,
-    `- **遇到的问题**: ${memo.problemsEncountered && memo.problemsEncountered !== 'none' ? memo.problemsEncountered : '无'}`,
+    `- **用户需求**: ${memo.userNeed}`,
+    `- **执行方案**: ${memo.approach || '(无)'}`,
+    `- **完成结果**: ${memo.outcome}`,
+    `- **踩坑记录**: ${memo.whatFailed && memo.whatFailed !== 'none' ? memo.whatFailed : '无'}`,
+    `- **成功经验**: ${memo.whatWorked && memo.whatWorked !== 'none' ? memo.whatWorked : '无'}`,
     `- **来源会话**: ${sessionLabel}`,
     `- **记录时间**: ${date}`,
     '',
     '---',
-    '请参考以上历史经验来处理当前问题。',
+    '请参考以上历史经验来处理当前问题。特别注意踩坑记录中的错误不要重犯。',
   ];
 
   return lines.join('\n');

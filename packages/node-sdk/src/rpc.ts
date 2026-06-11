@@ -103,6 +103,21 @@ export interface ActivateSkillRpcInput extends SessionIdRpcInput {
   readonly args?: string | undefined;
 }
 
+export interface CreateGoalRpcInput extends SessionIdRpcInput {
+  readonly objective: string;
+  readonly completionCriterion?: string;
+  readonly replace?: boolean;
+}
+
+export interface UpdateGoalStatusRpcInput extends SessionIdRpcInput {
+  readonly status: 'active' | 'complete' | 'paused' | 'blocked';
+}
+
+export interface SetGoalBudgetRpcInput extends SessionIdRpcInput {
+  readonly value: number;
+  readonly unit: 'turns' | 'tokens' | 'milliseconds' | 'seconds' | 'minutes' | 'hours';
+}
+
 export interface ReconnectMcpServerRpcInput extends SessionIdRpcInput {
   readonly name: string;
 }
@@ -291,6 +306,52 @@ export class SDKRpcClient {
       sessionId: input.sessionId,
       agentId: this.interactiveAgentId,
       mode: input.mode,
+    });
+  }
+
+  async createGoal(input: CreateGoalRpcInput): Promise<import('@scream-cli/agent-core').GoalSnapshotData> {
+    const rpc = await this.getRpc();
+    return rpc.createGoal({
+      sessionId: input.sessionId,
+      agentId: this.interactiveAgentId,
+      objective: input.objective,
+      completionCriterion: input.completionCriterion,
+      replace: input.replace,
+    });
+  }
+
+  async updateGoalStatus(input: UpdateGoalStatusRpcInput): Promise<import('@scream-cli/agent-core').GoalSnapshotData | null> {
+    const rpc = await this.getRpc();
+    return rpc.updateGoalStatus({
+      sessionId: input.sessionId,
+      agentId: this.interactiveAgentId,
+      status: input.status,
+    });
+  }
+
+  async cancelGoal(input: SessionIdRpcInput): Promise<import('@scream-cli/agent-core').GoalSnapshotData | null> {
+    const rpc = await this.getRpc();
+    return rpc.cancelGoal({
+      sessionId: input.sessionId,
+      agentId: this.interactiveAgentId,
+    });
+  }
+
+  async getGoal(input: SessionIdRpcInput): Promise<import('@scream-cli/agent-core').GetGoalResult> {
+    const rpc = await this.getRpc();
+    return rpc.getGoal({
+      sessionId: input.sessionId,
+      agentId: this.interactiveAgentId,
+    });
+  }
+
+  async setGoalBudget(input: SetGoalBudgetRpcInput): Promise<import('@scream-cli/agent-core').GoalSnapshotData> {
+    const rpc = await this.getRpc();
+    return rpc.setGoalBudget({
+      sessionId: input.sessionId,
+      agentId: this.interactiveAgentId,
+      value: input.value,
+      unit: input.unit,
     });
   }
 

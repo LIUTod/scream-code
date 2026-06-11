@@ -32,6 +32,7 @@ import { FullCompaction, MicroCompaction, type CompactionStrategy } from './comp
 import { CronManager } from './cron';
 import { ConfigState } from './config';
 import { ContextMemory } from './context';
+import { GoalMode } from './goal';
 import { HookEngine } from '../session/hooks';
 import { InjectionManager } from './injection/manager';
 import { DreamTracker, EXIT_EXTRACTION_SYSTEM_PROMPT, MemoryMemoStore, buildExitExtractionPrompt, parseMemoryMemos } from '@scream-code/memory';
@@ -121,6 +122,7 @@ export class Agent {
   readonly tools: ToolManager;
   readonly background: BackgroundManager;
   readonly cron: CronManager | null;
+  readonly goal: GoalMode;
   readonly memoStore: MemoryMemoStore | undefined;
   readonly sessionMemory: SessionMemory;
   readonly dreamTracker: DreamTracker;
@@ -173,6 +175,7 @@ export class Agent {
     this.tools = new ToolManager(this);
     this.background = new BackgroundManager(this);
     this.cron = this.type === 'sub' ? null : new CronManager(this);
+    this.goal = new GoalMode(this);
     // homedir = <sessionDir>/agents/<agentId>, need 3 levels up to reach
     // <projectDir> where memory/entries.jsonl lives
     const projectDir = options.homedir
@@ -292,6 +295,7 @@ export class Agent {
 
   async resume(): Promise<{ warning?: string }> {
     const result = await this.records.replay();
+    this.goal.normalizeAfterReplay();
     await this.background.loadFromDisk();
     await this.background.reconcile();
     await this.cron?.loadFromDisk();
@@ -413,6 +417,53 @@ export class Agent {
       sideQuestion: async (payload) => {
         const answer = await this.sideQuestion(payload.question);
         return { answer };
+      },
+      createGoal: async (payload) => {
+        const snapshot = await this.goal.createGoal(
+          {
+            objective: payload.objective,
+            completionCriterion: payload.completionCriterion,
+            replace: payload.replace,
+          },
+          'user',
+        );
+        return snapshot;
+      },
+      updateGoalStatus: async (payload) => {
+        const { status } = payload;
+        if (status === 'complete') {
+          return this.goal.markComplete({}, 'user');
+        }
+        if (status === 'blocked') {
+          return this.goal.markBlocked({}, 'user');
+        }
+        if (status === 'paused') {
+          return this.goal.pauseGoal({}, 'user');
+        }
+        // status === 'active'
+        return this.goal.resumeGoal({}, 'user');
+      },
+      cancelGoal: async () => {
+        return this.goal.cancelGoal('user');
+      },
+      getGoal: () => {
+        return this.goal.getGoal();
+      },
+      setGoalBudget: async (payload) => {
+        const { value, unit } = payload;
+        let budgetLimits: import('./goal').GoalBudgetLimits;
+        if (unit === 'turns') {
+          budgetLimits = { turnBudget: value };
+        } else if (unit === 'tokens') {
+          budgetLimits = { tokenBudget: value };
+        } else {
+          let ms = value;
+          if (unit === 'seconds') ms *= 1000;
+          else if (unit === 'minutes') ms *= 60_000;
+          else if (unit === 'hours') ms *= 3_600_000;
+          budgetLimits = { wallClockBudgetMs: ms };
+        }
+        return this.goal.setBudgetLimits({ budgetLimits }, 'user');
       },
     };
   }

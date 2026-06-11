@@ -51,7 +51,7 @@ export class MemoryMemoStore {
   async append(entry: MemoryMemo): Promise<void> {
     const record: MemoryMemoRecord = {
       type: 'memory_memo',
-      version: 1,
+      version: 2,
       entry,
     };
     await this.ensureDir();
@@ -87,7 +87,7 @@ export class MemoryMemoStore {
         for (const entry of entries) {
           const record: MemoryMemoRecord = {
             type: 'memory_memo',
-            version: 1,
+            version: 2,
             entry,
           };
           await fh.writeFile(JSON.stringify(record) + '\n', 'utf8');
@@ -133,11 +133,11 @@ export class MemoryMemoStore {
     if (search) {
       filtered = all.filter(
         (m) =>
-          m.userRequirement.toLowerCase().includes(search) ||
-          m.solution.toLowerCase().includes(search) ||
-          m.problemsEncountered.toLowerCase().includes(search) ||
-          (m.sourceSessionTitle ?? '').toLowerCase().includes(search) ||
-          m.tags?.some((t) => t.toLowerCase().includes(search)),
+          m.userNeed.toLowerCase().includes(search) ||
+          m.approach.toLowerCase().includes(search) ||
+          m.whatFailed.toLowerCase().includes(search) ||
+          m.whatWorked.toLowerCase().includes(search) ||
+          (m.sourceSessionTitle ?? '').toLowerCase().includes(search),
       );
     }
 
@@ -153,11 +153,27 @@ export class MemoryMemoStore {
   private parseLine(rawLine: string, _lineNumber: number): MemoryMemo | undefined {
     if (rawLine.length === 0) return undefined;
     try {
-      const record = JSON.parse(rawLine) as MemoryMemoRecord;
-      if (record.type === 'memory_memo' && record.entry) {
-        return record.entry;
+      const record = JSON.parse(rawLine) as Record<string, unknown>;
+      if (record['type'] !== 'memory_memo' || !record['entry']) return undefined;
+      const entry = record['entry'] as Record<string, unknown>;
+
+      // Migrate v1 → v2 field names
+      if (record['version'] === 1 || (entry['userRequirement'] !== undefined && entry['userNeed'] === undefined)) {
+        return {
+          id: String(entry['id'] ?? ''),
+          sourceSessionId: String(entry['sourceSessionId'] ?? ''),
+          sourceSessionTitle: typeof entry['sourceSessionTitle'] === 'string' ? entry['sourceSessionTitle'] : undefined,
+          userNeed: String(entry['userRequirement'] ?? ''),
+          approach: String(entry['solution'] ?? ''),
+          outcome: String(entry['completionStatus'] ?? ''),
+          whatFailed: String(entry['problemsEncountered'] ?? 'none'),
+          whatWorked: 'none',
+          extractionSource: (entry['extractionSource'] === 'exit' ? 'exit' : 'compaction') as 'compaction' | 'exit',
+          recordedAt: Number(entry['recordedAt'] ?? 0),
+        };
       }
-      return undefined;
+
+      return entry as unknown as MemoryMemo;
     } catch {
       // Skip corrupted lines
       return undefined;
