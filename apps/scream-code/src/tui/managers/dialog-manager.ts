@@ -198,6 +198,7 @@ export class DialogManager {
         total,
         loading: !hasData,
         colors: this.host.state.theme.colors,
+        ui: this.host.state.ui,
         onCancel: () => {
           this.host.state.activeDialog = null;
           this.restoreEditor();

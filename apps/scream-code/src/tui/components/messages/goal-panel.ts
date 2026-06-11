@@ -1,4 +1,5 @@
 import type { Component } from '@earendil-works/pi-tui';
+import { visibleWidth } from '@earendil-works/pi-tui';
 import type { GoalSnapshotData } from '@scream-cli/agent-core';
 import chalk from 'chalk';
 
@@ -26,7 +27,7 @@ function wrap(text: string, width: number, maxLines: number): string[] {
   let current = '';
   for (const word of words) {
     const candidate = current.length === 0 ? word : `${current} ${word}`;
-    if (candidate.length > width && current.length > 0) {
+    if (visibleWidth(candidate) > width && current.length > 0) {
       lines.push(current);
       current = word;
     } else {

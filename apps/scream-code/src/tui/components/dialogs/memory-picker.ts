@@ -21,6 +21,7 @@ import {
   truncateToWidth,
   visibleWidth,
   type Focusable,
+  type TUI,
 } from '@earendil-works/pi-tui';
 import chalk from 'chalk';
 
@@ -97,6 +98,7 @@ export interface MemoryPickerOptions {
   total: number;
   loading: boolean;
   colors: ColorPalette;
+  ui?: TUI;
   onCancel: () => void;
   onInject: (memo: MemoryMemoSummary) => void;
 }
@@ -106,6 +108,7 @@ type PickerMode = 'list' | 'detail' | 'confirmDelete';
 export class MemoryPickerComponent extends Container implements Focusable {
   private store: MemoryMemoStore;
   private colors: ColorPalette;
+  private readonly ui: TUI | undefined;
   private onCancel: () => void;
   private onInject: (memo: MemoryMemoSummary) => void;
 
@@ -130,12 +133,14 @@ export class MemoryPickerComponent extends Container implements Focusable {
     this.total = opts.total;
     this.loading = opts.loading;
     this.colors = opts.colors;
+    this.ui = opts.ui;
     this.onCancel = opts.onCancel;
     this.onInject = opts.onInject;
   }
 
   private async loadMemos(): Promise<void> {
     this.loading = true;
+    this.ui?.requestRender();
     try {
       const result = await this.store.list({ limit: 50, search: this.searchQuery || undefined });
       this.memos = result.memos;
@@ -146,6 +151,7 @@ export class MemoryPickerComponent extends Container implements Focusable {
       this.total = 0;
     } finally {
       this.loading = false;
+      this.ui?.requestRender();
     }
   }
 
@@ -246,6 +252,7 @@ export class MemoryPickerComponent extends Container implements Focusable {
       this.detailMemo = null;
     }
     if (this.detailMemo) this.mode = 'detail';
+    this.ui?.requestRender();
   }
 
   private async deleteAndReload(id: string): Promise<void> {
@@ -257,6 +264,7 @@ export class MemoryPickerComponent extends Container implements Focusable {
     if (this.selectedIndex >= this.memos.length) {
       this.selectedIndex = Math.max(0, this.memos.length - 1);
     }
+    this.ui?.requestRender();
   }
 
   override render(width: number): string[] {
