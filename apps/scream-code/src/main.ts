@@ -56,6 +56,17 @@ async function handleMigrateCommand(): Promise<void> {
 }
 
 export function main(): void {
+  // Catch EPIPE globally — on some Windows ConPTY setups stdout's pipe can
+  // break during the first render, before the TUI's own error handler is
+  // active. Exit cleanly instead of crashing with an unhandled error.
+  const swallowEpipe = (stream: NodeJS.WriteStream) => {
+    stream.on('error', (error: NodeJS.ErrnoException) => {
+      if (error.code === 'EPIPE') process.exit(0);
+    });
+  };
+  swallowEpipe(process.stdout);
+  swallowEpipe(process.stderr);
+
   initProcessName();
   installCrashHandlers();
 
