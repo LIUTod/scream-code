@@ -159,17 +159,18 @@ export class MemoryMemoStore {
 
       // Migrate v1 → v2 field names
       if (record['version'] === 1 || (entry['userRequirement'] !== undefined && entry['userNeed'] === undefined)) {
+        const str = (v: unknown, fallback = ''): string => (typeof v === 'string' ? v : fallback);
         return {
-          id: String(entry['id'] ?? ''),
-          sourceSessionId: String(entry['sourceSessionId'] ?? ''),
-          sourceSessionTitle: typeof entry['sourceSessionTitle'] === 'string' ? entry['sourceSessionTitle'] : undefined,
-          userNeed: String(entry['userRequirement'] ?? ''),
-          approach: String(entry['solution'] ?? ''),
-          outcome: String(entry['completionStatus'] ?? ''),
-          whatFailed: String(entry['problemsEncountered'] ?? 'none'),
+          id: str(entry['id']),
+          sourceSessionId: str(entry['sourceSessionId']),
+          sourceSessionTitle: str(entry['sourceSessionTitle'], undefined as unknown as string),
+          userNeed: str(entry['userRequirement']),
+          approach: str(entry['solution']),
+          outcome: str(entry['completionStatus']),
+          whatFailed: str(entry['problemsEncountered'], 'none'),
           whatWorked: 'none',
           extractionSource: (entry['extractionSource'] === 'exit' ? 'exit' : 'compaction') as 'compaction' | 'exit',
-          recordedAt: Number(entry['recordedAt'] ?? 0),
+          recordedAt: typeof entry['recordedAt'] === 'number' ? entry['recordedAt'] : 0,
         };
       }
 
