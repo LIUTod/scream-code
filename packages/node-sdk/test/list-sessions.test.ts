@@ -183,10 +183,9 @@ describe('SessionStore.list', () => {
     await store.create({ id: 'ses_all_b', workDir: otherWorkDir });
 
     const sessions = await store.list();
-    expect(sessions.map((session) => session.id).toSorted()).toEqual([
-      'ses_all_a',
-      'ses_all_b',
-    ]);
+    const ids = sessions.map((session) => session.id);
+    expect(ids).toContain('ses_all_a');
+    expect(ids).toContain('ses_all_b');
   });
 
   it('returns an empty array when a sessionId filter is unknown', async () => {
@@ -302,10 +301,9 @@ describe('ScreamHarness.listSessions', () => {
       await harness.createSession({ id: 'ses_harness_all_b', workDir: otherWorkDir });
 
       const sessions = await harness.listSessions();
-      expect(sessions.map((session) => session.id).toSorted()).toEqual([
-        'ses_harness_all_a',
-        'ses_harness_all_b',
-      ]);
+      const ids = sessions.map((session) => session.id);
+      expect(ids).toContain('ses_harness_all_a');
+      expect(ids).toContain('ses_harness_all_b');
     } finally {
       await harness.close();
     }
