@@ -119,7 +119,9 @@ export function runLoadingAnimation(theme: ResolvedTheme = 'dark'): Promise<void
   }
 
   return new Promise((resolve) => {
-    stdout.write('\x1b[?1049h')
+    if (process.platform !== 'win32') {
+      stdout.write('\x1b[?1049h')
+    }
     stdout.write('\x1b[2J')
     stdout.write('\x1b[?25l')
 
@@ -188,9 +190,13 @@ export function runLoadingAnimation(theme: ResolvedTheme = 'dark'): Promise<void
       stdin.off('data', onData)
       process.off('SIGINT', interrupt)
       process.off('SIGTERM', interrupt)
-      stdin.setRawMode(false)
+      try { stdin.setRawMode(false) } catch { /* ignore */ }
       stdout.write('\x1b[?25h')
-      stdout.write('\x1b[?1049l')
+      if (process.platform !== 'win32') {
+        stdout.write('\x1b[?1049l')
+      } else {
+        stdout.write('\x1b[2J\x1b[H')
+      }
     }
 
     function interrupt() {
@@ -207,7 +213,9 @@ export function runLoadingAnimation(theme: ResolvedTheme = 'dark'): Promise<void
       process.off('SIGINT', interrupt)
       process.off('SIGTERM', interrupt)
       stdout.write('\x1b[?25h')
-      stdout.write('\x1b[?1049l')
+      if (process.platform !== 'win32') {
+        stdout.write('\x1b[?1049l')
+      }
       for (const line of LOGO) stdout.write(`${fg(...LOGO_RGB)}${line}${RESET}\n`)
       stdout.write(`${BOLD}${fg(...accent)}正在唤醒核心...${RESET}\n`)
       resolve()
