@@ -494,18 +494,28 @@ export class ScreamTUI {
     const session = this.session;
     if (session === undefined) return;
 
+    this.state.footer.setTransientHint('正在整理会话记忆...');
+    this.state.ui.requestRender();
     try {
       await session.extractMemoriesOnExit();
       this.lastMemoryExtractionTime = Date.now();
       this.showStatus('已沉淀关键信息至记忆备忘录');
     } catch {
       // Silent fail — don't bother the user
+    } finally {
+      this.state.footer.setTransientHint(null);
+      this.state.ui.requestRender();
     }
   }
 
   /** Called after compaction extraction to avoid duplicate idle extraction within cooldown. */
   markMemoryExtracted(): void {
     this.lastMemoryExtractionTime = Date.now();
+  }
+
+  /** Called by StreamingUIController when a turn finishes with no queued continuations. */
+  onTurnCompleted(): void {
+    this.startMemoryIdleTimer();
   }
 
   /** Trigger an immediate cc-connect liveness poll. Called by /cc after start/stop/restart. */
@@ -623,7 +633,7 @@ export class ScreamTUI {
     }
     void this.persistInputHistory(text);
     slashCommands.dispatchInput(this, text);
-    this.startMemoryIdleTimer();
+    this.stopMemoryIdleTimer();
   }
 
   sendNormalUserInput(text: string): void {

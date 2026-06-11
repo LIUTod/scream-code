@@ -34,6 +34,7 @@ export interface StreamingUIHost {
   deferUserMessages: boolean;
   shiftQueuedMessage(): QueuedMessage | undefined;
   pushTranscriptEntry(entry: TranscriptEntry): void;
+  onTurnCompleted(): void;
 }
 
 export class StreamingUIController {
@@ -519,6 +520,7 @@ export class StreamingUIController {
 
     this.host.setAppState({ streamingPhase: 'idle' });
     this.host.resetLivePane();
+    this.host.onTurnCompleted();
     notifyTerminalOnce(state, `turn-complete:${completedTurnKey}`, {
       title: 'Scream Code 任务完成',
       body: state.appState.sessionTitle ?? undefined,

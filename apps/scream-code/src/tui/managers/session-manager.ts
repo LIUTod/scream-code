@@ -286,6 +286,9 @@ export class SessionManager {
       return;
     }
 
+    // Extract memories from current session before switching
+    await this.extractMemoriesBeforeSwitch();
+
     let session: Session;
     try {
       session = await this.createSessionFromCurrentState();
@@ -359,6 +362,27 @@ export class SessionManager {
   // ---------------------------------------------------------------------------
   // Helpers
   // ---------------------------------------------------------------------------
+  private async extractMemoriesBeforeSwitch(): Promise<void> {
+    const session = this.host.session;
+    if (session === undefined) return;
+    if (this.host.state.appState.streamingPhase !== 'idle') return;
+
+    this.host.state.footer.setTransientHint('正在整理会话记忆...');
+    this.host.state.ui.requestRender();
+    try {
+      await Promise.race([
+        session.extractMemoriesOnExit(),
+        new Promise<void>((resolve) => setTimeout(resolve, 30_000)),
+      ]);
+      this.host.showStatus('已沉淀关键信息至记忆备忘录');
+    } catch {
+      // Silent fail — don't block session creation
+    } finally {
+      this.host.state.footer.setTransientHint(null);
+      this.host.state.ui.requestRender();
+    }
+  }
+
   private requireSession(): Session {
     if (this.host.session === undefined) {
       throw new Error(NO_ACTIVE_SESSION_MESSAGE);
