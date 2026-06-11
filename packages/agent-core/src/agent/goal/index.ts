@@ -192,7 +192,7 @@ export class GoalMode {
 
   // --- Creation ---
 
-  async createGoal(input: CreateGoalInput, actor: GoalActor = 'user'): Promise<GoalSnapshot> {
+  async createGoal(input: CreateGoalInput, _actor: GoalActor = 'user'): Promise<GoalSnapshot> {
     const objective = input.objective.trim();
     if (objective.length === 0) {
       throw new ScreamError(ErrorCodes.GOAL_OBJECTIVE_EMPTY, 'Goal objective cannot be empty');
@@ -294,7 +294,7 @@ export class GoalMode {
 
   async setBudgetLimits(
     input: { budgetLimits: GoalBudgetLimits },
-    actor: GoalActor = 'user',
+    _actor: GoalActor = 'user',
   ): Promise<GoalSnapshot> {
     const state = this.requireState();
     state.budgetLimits = { ...state.budgetLimits, ...input.budgetLimits };

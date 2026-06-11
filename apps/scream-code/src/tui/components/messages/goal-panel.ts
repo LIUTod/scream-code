@@ -1,5 +1,4 @@
 import type { Component } from '@earendil-works/pi-tui';
-import { visibleWidth } from '@earendil-works/pi-tui';
 import type { GoalSnapshotData } from '@scream-cli/agent-core';
 import chalk from 'chalk';
 
