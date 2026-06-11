@@ -1,4 +1,4 @@
-<img width="658" height="135" alt="image" src="https://github.com/user-attachments/assets/5ec08494-2fcb-4741-a4d6-3968fed97189" />
+<img width="871" height="159" alt="image" src="https://github.com/user-attachments/assets/61e37711-fb8a-444a-b382-3d9e1871742c" />
 
 
 Scream Code 是一款省心的中文 AI Agent 助手。无需硬记代码，直接用中/英文下达指令，vibe coding、写代码、查论文、改文件、清理电脑、查资料、制作研报、搜全网信息……你动嘴，它动手！
