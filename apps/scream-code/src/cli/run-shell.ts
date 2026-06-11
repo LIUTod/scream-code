@@ -68,7 +68,7 @@ export async function runShell(
   // BEFORE the loading animation, so any error is visible to the user.
   await harness.preflight();
 
-  await runLoadingAnimation(resolvedTheme);
+  // await runLoadingAnimation(resolvedTheme); // 临时禁用，排查 Windows 闪退
 
   const tui = new ScreamTUI(harness, {
     cliOptions: opts,
