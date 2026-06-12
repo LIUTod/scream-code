@@ -113,6 +113,7 @@ import {
   detectLegacyShims,
   renameInPlace,
 } from './postinstall/migrate.mjs';
+import { patchPiTui } from './postinstall/patch-pi-tui.mjs';
 import { createDesktopShortcut } from './postinstall/shortcut.mjs';
 import {
   logForeignScreamInTheWay,
@@ -123,6 +124,9 @@ import {
 } from './postinstall/ui.mjs';
 
 async function main() {
+  // Patch pi-tui for fixedBottomLineCount support (all installs).
+  try { patchPiTui(); } catch { /* non-fatal */ }
+
   // Step 1: skip non-global installs (npx, local project deps,
   // workspace bootstraps). Windows is supported natively; the
   // platform-specific bits (PATHEXT-aware PATH walk, whole-file
