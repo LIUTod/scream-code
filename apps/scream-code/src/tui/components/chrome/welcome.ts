@@ -85,7 +85,7 @@ function rgbToHex(r: number, g: number, b: number): string {
  */
 function buildBreathingPalette(primaryHex: string, hueStops: number, subSteps: number): string[] {
   const [r, g, b] = hexToRgb(primaryHex);
-  const [baseHue, sat, lit] = rgbToHsl(r, g, b);
+  const [baseHue] = rgbToHsl(r, g, b);
   const steps = hueStops * subSteps;
 
   const palette: string[] = [];
@@ -142,17 +142,15 @@ export class WelcomeComponent implements Component {
   render(width: number): string[] {
     const breatheColor = this.breathePalette[this.breatheFrame] ?? this.colors.primary;
     const logoColor = (s: string): string => chalk.hex(breatheColor)(s);
-    const primary = (s: string): string => chalk.hex(this.colors.primary)(s);
     const dim = chalk.hex(this.colors.textDim);
     const labelStyle = chalk.bold.hex(this.colors.textDim);
     const innerWidth = Math.max(10, width - 4);
-    const pad = '  ';
     const isLoggedOut = !this.state.model;
 
     // ── Logo ──
     const frameIdx = this.breatheTimer !== null ? Math.floor(this.breatheFrame / 24) % LOGO_FRAMES.length : 0;
-    const [topRow, bottomRow] = LOGO_FRAMES[frameIdx];
-    const logo = [logoColor(topRow), logoColor(bottomRow)];
+    const frame = LOGO_FRAMES[frameIdx]!;
+    const logo = [logoColor(frame[0]), logoColor(frame[1])];
 
     // ── Info ──
     const activeModel = this.state.availableModels[this.state.model];
