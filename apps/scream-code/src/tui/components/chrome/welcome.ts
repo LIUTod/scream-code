@@ -11,7 +11,6 @@ import type { Component, TUI } from '@earendil-works/pi-tui';
 import { truncateToWidth, visibleWidth } from '@earendil-works/pi-tui';
 import chalk from 'chalk';
 
-import { currentTipIndex, tipsForIndex } from '#/tui/components/chrome/footer';
 import type { ColorPalette } from '#/tui/theme/colors';
 import type { AppState } from '#/tui/types';
 
@@ -134,33 +133,16 @@ export class WelcomeComponent implements Component {
     const breatheColor = this.breathePalette[this.breatheFrame] ?? this.colors.primary;
     const logoColor = (s: string): string => chalk.hex(breatheColor)(s);
     const primary = (s: string): string => chalk.hex(this.colors.primary)(s);
-    const innerWidth = Math.max(10, width - 4);
-    const pad = '  ';
-
-    const logo = ['░▒▓██▄▄▄██', '░▒▓▐█▄▀▄█▌'];
-    const logoWidth = Math.max(...logo.map((row) => visibleWidth(row)));
-    const gap = '  ';
-    const textWidth = Math.max(4, innerWidth - logoWidth - gap.length);
-
-    const rightRow0 = truncateToWidth(
-      chalk.bold.hex(this.colors.primary)('欢迎使用Scream 您的中文Ai助手'),
-      textWidth,
-      '…',
-    );
-    const isLoggedOut = !this.state.model;
     const dim = chalk.hex(this.colors.textDim);
     const labelStyle = chalk.bold.hex(this.colors.textDim);
-    const rightRow1 = truncateToWidth(
-      dim(isLoggedOut ? '运行 /config 开始配置。' : '发送 / 进入快捷菜单，/exit 保存并退出'),
-      textWidth,
-      '…',
-    );
+    const innerWidth = Math.max(10, width - 4);
+    const pad = '  ';
+    const isLoggedOut = !this.state.model;
 
-    const headerLines = [
-      logoColor(logo[0]!.padEnd(logoWidth)) + gap + rightRow0,
-      logoColor(logo[1]!.padEnd(logoWidth)) + gap + rightRow1,
-    ];
+    // ── Logo ──
+    const logo = [logoColor('██▄▄▄██'), logoColor('▐█▄▀▄█▌')];
 
+    // ── Info ──
     const activeModel = this.state.availableModels[this.state.model];
     const modelValue = isLoggedOut
       ? chalk.hex(this.colors.warning)('未设置，运行 /config')
@@ -176,22 +158,36 @@ export class WelcomeComponent implements Component {
       versionValue = this.state.version;
     }
 
-    const infoLines = [
-      labelStyle('目录： ') + this.state.workDir,
-      labelStyle('模型： ') + modelValue,
-      labelStyle('版本： ') + versionValue,
+    const hintText = isLoggedOut
+      ? '运行 /config 开始配置'
+      : '发送 / 进入快捷菜单，/exit 保存并退出';
+
+    const contentLines: string[] = [
+      '',
+      ...logo,
+      '',
+      labelStyle('版本：') + ' ' + versionValue,
+      labelStyle('模型：') + ' ' + modelValue,
+      labelStyle('目录：') + ' ' + this.state.workDir,
+      '',
+      dim(hintText),
+      '',
     ];
 
-    const tipIdx = currentTipIndex();
-    const { primary: tipPrimary, pair: tipPair } = tipsForIndex(tipIdx);
-    const tip = (tipPair && visibleWidth(tipPair) <= innerWidth) ? tipPair : tipPrimary;
-    const tipLine = chalk.hex(this.colors.textMuted)('Tips：  ' + tip);
-    const contentLines: string[] = [...headerLines, '', ...infoLines, '', tipLine];
-
-    const borderTitle = this.borderTitle;
-    const topBorder = borderTitle
-      ? primary('╭─ ' + borderTitle + ' ' + '─'.repeat(Math.max(0, width - 5 - visibleWidth(borderTitle))) + '╮')
-      : primary('╭' + '─'.repeat(width - 2) + '╮');
+    // ── Top border with centered title ──
+    const borderTitle = this.borderTitle ?? '';
+    const contentWidth = width - 2;
+    let topBorder: string;
+    if (borderTitle) {
+      const centerPos = Math.floor(contentWidth / 2);
+      const titleText = `─ ${borderTitle} ─`;
+      const titleStart = centerPos - Math.floor(visibleWidth(titleText) / 2);
+      const leftDash = Math.max(0, titleStart);
+      const rightDash = Math.max(0, contentWidth - leftDash - visibleWidth(titleText));
+      topBorder = primary('╭' + '─'.repeat(leftDash) + titleText + '─'.repeat(rightDash) + '╮');
+    } else {
+      topBorder = primary('╭' + '─'.repeat(contentWidth) + '╮');
+    }
 
     const lines: string[] = [
       '',
@@ -202,8 +198,9 @@ export class WelcomeComponent implements Component {
     for (const content of contentLines) {
       const truncated = truncateToWidth(content, innerWidth, '…');
       const vis = visibleWidth(truncated);
-      const rightPad = Math.max(0, innerWidth - vis);
-      lines.push(primary('│') + pad + truncated + ' '.repeat(rightPad) + primary('│'));
+      const centerPad = Math.floor((width - 1 - vis) / 2);
+      const rightPad = width - 2 - vis - centerPad;
+      lines.push(primary('│') + ' '.repeat(centerPad) + truncated + ' '.repeat(rightPad) + primary('│'));
     }
 
     lines.push(primary('│') + ' '.repeat(width - 2) + primary('│'));
