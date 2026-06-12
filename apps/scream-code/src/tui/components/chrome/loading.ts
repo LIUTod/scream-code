@@ -15,7 +15,7 @@ const LOGO = [
 const SHADOW_CHARS = new Set(['╚','═','╝','║','╔','╗','╠','╣','╦','╩','╬'])
 const SHEEN_STEP = 2
 const SHEEN_INTERVAL_MS = 150
-const LOADING_DURATION_MS = 2200
+const LOADING_DURATION_MS = 1500
 const THEME_ACCENT: Record<ResolvedTheme, [number, number, number]> = {
   dark: [78, 200, 126],   // #4EC87E
   light: [14, 122, 56],  // #0E7A38
