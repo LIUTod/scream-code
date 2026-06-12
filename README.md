@@ -44,7 +44,7 @@ cd ~/.scream-code && ./install.sh --upgrade
 
 **支持多个模型**（配置好后可用 `/model` 随时切换）：
 
-> 支持自定义 API（DeepSeek、OpenAI、Anthropic、Moonshot、MiniMax、通义千问、GPT、硅基流动等）。
+> 支持自定义 API（DeepSeek、OpenAI、Anthropic、MiniMax、通义千问、硅基流动等（`/config diy`）需要输入隐藏指令）。
 
 配置完成后，在交互模式下输入 `/model` 即可切换模型或删除模型，无需重启。`/config` 支持追加配置。
 
