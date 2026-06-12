@@ -12,6 +12,10 @@ export const RESULT_PREVIEW_LINES = 3;
 export const THINKING_PREVIEW_LINES = 2;
 export const COMMAND_PREVIEW_LINES = 10;
 
+// Shell output is capped before wrapping to prevent a single huge command
+// result from hanging the renderer.
+export const MAX_SHELL_OUTPUT_BYTES = 128 * 1024;
+
 // Animation frames are shared by update loaders and live thinking.
 export const BRAILLE_SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 export const BRAILLE_SPINNER_INTERVAL_MS = 80;

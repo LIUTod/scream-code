@@ -18,6 +18,28 @@ export function trimTrailingEmptyLines(lines: string[]): string[] {
 }
 
 /**
+ * Returns the tail of `text` whose UTF-8 byte length is at most `maxBytes`.
+ * Iterates by Unicode code points so multi-byte characters and surrogate
+ * pairs are never split.
+ */
+function truncateTailBytes(text: string, maxBytes: number): string {
+  if (Buffer.byteLength(text, 'utf8') <= maxBytes) return text;
+
+  const chars = Array.from(text);
+  let start = chars.length;
+  let bytes = 0;
+  for (let i = chars.length - 1; i >= 0; i--) {
+    const char = chars[i];
+    if (char === undefined) continue;
+    const charBytes = Buffer.byteLength(char, 'utf8');
+    if (bytes + charBytes > maxBytes) break;
+    bytes += charBytes;
+    start = i;
+  }
+  return chars.slice(start).join('');
+}
+
+/**
  * Component that renders tool output with wrap-aware line truncation.
  * Uses pi-tui's Text component to compute actual visual wrapped lines,
  * then caps at PREVIEW_LINES. This handles long single-line output (e.g.
@@ -36,6 +58,7 @@ export class TruncatedOutputComponent implements Component {
       isError: boolean | undefined;
       colors: ColorPalette;
       maxLines?: number;
+      maxBytes?: number;
       hintFormatter?: (remaining: number) => string;
     },
   ) {
@@ -44,7 +67,11 @@ export class TruncatedOutputComponent implements Component {
     this.hintFormatter = options.hintFormatter;
     const tint = options.isError ? chalk.hex(options.colors.error) : chalk.dim;
     const cleaned = trimTrailingEmptyLines(output.split('\n')).join('\n');
-    this.textComponent = new Text(tint(cleaned), 2, 0);
+    const truncated =
+      options.maxBytes === undefined
+        ? cleaned
+        : truncateTailBytes(cleaned, options.maxBytes);
+    this.textComponent = new Text(tint(truncated), 2, 0);
   }
 
   invalidate(): void {

@@ -507,6 +507,7 @@ export class ToolCallComponent extends Container {
   private subagentError: string | undefined;
   private streamingProgressTimer: ReturnType<typeof setInterval> | undefined;
   private subagentElapsedTimer: ReturnType<typeof setInterval> | undefined;
+  private disposed = false;
   private subagentStartedAtMs: number | undefined;
   private subagentEndedAtMs: number | undefined;
 
@@ -630,6 +631,8 @@ export class ToolCallComponent extends Container {
   }
 
   dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
     this.stopStreamingProgressTimer();
     this.stopSubagentElapsedTimer();
   }
@@ -834,6 +837,10 @@ export class ToolCallComponent extends Container {
     }
     if (this.ui === undefined || this.streamingProgressTimer !== undefined) return;
     this.streamingProgressTimer = setInterval(() => {
+      if (this.disposed) {
+        this.stopStreamingProgressTimer();
+        return;
+      }
       if (!this.isStreamingEditPreview()) {
         this.stopStreamingProgressTimer();
         return;
@@ -861,6 +868,10 @@ export class ToolCallComponent extends Container {
     }
     if (this.ui === undefined || this.subagentElapsedTimer !== undefined) return;
     this.subagentElapsedTimer = setInterval(() => {
+      if (this.disposed) {
+        this.stopSubagentElapsedTimer();
+        return;
+      }
       const latestPhase = this.getDerivedSubagentPhase();
       if (latestPhase !== 'spawning' && latestPhase !== 'running') {
         this.stopSubagentElapsedTimer();

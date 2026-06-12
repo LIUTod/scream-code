@@ -225,6 +225,38 @@ describe('ToolCallComponent', () => {
     expect(expanded).not.toContain('按 ctrl+e 展开');
   });
 
+  it('stops the streaming progress timer after dispose', () => {
+    vi.useFakeTimers();
+    const requestRender = vi.fn();
+    const ui = { terminal: { rows: 24 }, requestRender } as unknown as TUI;
+
+    const component = new ToolCallComponent(
+      {
+        id: 'call_edit',
+        name: 'Edit',
+        args: { path: 'foo.ts', old_string: 'a', new_string: 'b' },
+        streamingArguments: JSON.stringify({
+          path: 'foo.ts',
+          old_string: 'a',
+          new_string: 'b',
+        }),
+      },
+      undefined,
+      darkColors,
+      ui,
+      createMarkdownTheme(darkColors),
+    );
+
+    vi.advanceTimersByTime(2500);
+    const callsBefore = requestRender.mock.calls.length;
+    expect(callsBefore).toBeGreaterThan(0);
+
+    component.dispose();
+    vi.advanceTimersByTime(2500);
+
+    expect(requestRender.mock.calls.length).toBe(callsBefore);
+  });
+
   it('plan preview controls are no-ops for non-ExitPlanMode tool calls', () => {
     const component = new ToolCallComponent(
       {
@@ -1299,5 +1331,60 @@ describe('ToolCallComponent', () => {
     } finally {
       stderr.restore();
     }
+  });
+
+  it('stops the streaming progress timer after dispose', () => {
+    vi.useFakeTimers();
+    const requestRender = vi.fn();
+    const ui = { terminal: { rows: 24 }, requestRender } as unknown as TUI;
+
+    const component = new ToolCallComponent(
+      {
+        id: 'call_edit',
+        name: 'Edit',
+        args: { path: 'foo.ts', old_string: 'a', new_string: 'b' },
+        streamingArguments: JSON.stringify({
+          path: 'foo.ts',
+          old_string: 'a',
+          new_string: 'b',
+        }),
+      },
+      undefined,
+      darkColors,
+      ui,
+      createMarkdownTheme(darkColors),
+    );
+
+    vi.advanceTimersByTime(2500);
+    const callsBefore = requestRender.mock.calls.length;
+    expect(callsBefore).toBeGreaterThan(0);
+
+    component.dispose();
+    vi.advanceTimersByTime(2500);
+
+    expect(requestRender.mock.calls.length).toBe(callsBefore);
+  });
+
+  it('dispose is idempotent', () => {
+    const component = new ToolCallComponent(
+      {
+        id: 'call_edit_dispose',
+        name: 'Edit',
+        args: { path: 'foo.ts', old_string: 'a', new_string: 'b' },
+        streamingArguments: JSON.stringify({
+          path: 'foo.ts',
+          old_string: 'a',
+          new_string: 'b',
+        }),
+      },
+      undefined,
+      darkColors,
+    );
+
+    expect(() => {
+      component.dispose();
+      component.dispose();
+      component.dispose();
+    }).not.toThrow();
   });
 });

@@ -21,6 +21,7 @@ export class AssistantMessageComponent implements Component {
   private showBullet: boolean;
   private cachedWidth: number | undefined;
   private cachedLines: string[] | undefined;
+  private markdownChild: Markdown | undefined;
 
   constructor(markdownTheme: MarkdownTheme, colors: ColorPalette, showBullet: boolean = true) {
     this.markdownTheme = markdownTheme;
@@ -37,14 +38,32 @@ export class AssistantMessageComponent implements Component {
   }
 
   updateContent(text: string): void {
-    const displayText = text;
-    if (displayText === this.lastText) return;
-    this.lastText = displayText;
+    const trimmedText = text.trim();
+    const previousTrimmed = this.lastText.trim();
+    if (trimmedText === previousTrimmed) {
+      this.lastText = text;
+      return;
+    }
+
+    this.lastText = text;
     this.cachedWidth = undefined;
     this.cachedLines = undefined;
+
+    const markdownChild = this.markdownChild;
+    if (
+      markdownChild !== undefined &&
+      trimmedText.startsWith(previousTrimmed) &&
+      trimmedText.length > previousTrimmed.length
+    ) {
+      markdownChild.setText(trimmedText);
+      return;
+    }
+
     this.contentContainer.clear();
-    if (displayText.trim().length > 0) {
-      this.contentContainer.addChild(new Markdown(displayText.trim(), 0, 0, this.markdownTheme));
+    this.markdownChild = undefined;
+    if (trimmedText.length > 0) {
+      this.markdownChild = new Markdown(trimmedText, 0, 0, this.markdownTheme);
+      this.contentContainer.addChild(this.markdownChild);
     }
   }
 

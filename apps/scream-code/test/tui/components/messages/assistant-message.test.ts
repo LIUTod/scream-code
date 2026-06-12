@@ -73,15 +73,50 @@ describe('AssistantMessageComponent', () => {
     expect(second).not.toBe(first);
   });
 
-  it('recomputes after invalidate() is called', () => {
+  it('reuses the Markdown child for append-only stream updates', () => {
     const component = new AssistantMessageComponent(createMarkdownTheme(darkColors), darkColors);
 
-    component.updateContent('stable content');
+    component.updateContent('hello');
     const first = component.render(80);
-    component.invalidate();
+
+    component.updateContent('hello world');
     const second = component.render(80);
 
     expect(second).not.toBe(first);
-    expect(second).toEqual(first);
+    expect(second.join('\n')).toContain('hello world');
+  });
+
+  it('rebuilds the Markdown child when text shortens', () => {
+    const component = new AssistantMessageComponent(createMarkdownTheme(darkColors), darkColors);
+
+    component.updateContent('hello world');
+    component.updateContent('hello');
+
+    const lines = component.render(80).map(strip);
+    expect(lines.join('\n')).toContain('hello');
+    expect(lines.join('\n')).not.toContain('world');
+  });
+
+  it('rebuilds the Markdown child when text prefix changes', () => {
+    const component = new AssistantMessageComponent(createMarkdownTheme(darkColors), darkColors);
+
+    component.updateContent('hello');
+    component.updateContent('world');
+
+    const lines = component.render(80).map(strip);
+    expect(lines.join('\n')).toContain('world');
+    expect(lines.join('\n')).not.toContain('hello');
+  });
+
+  it('skips content rebuild when only surrounding whitespace changes', () => {
+    const component = new AssistantMessageComponent(createMarkdownTheme(darkColors), darkColors);
+
+    component.updateContent('hello');
+    const first = component.render(80);
+
+    component.updateContent('  hello  ');
+    const second = component.render(80);
+
+    expect(second).toBe(first);
   });
 });

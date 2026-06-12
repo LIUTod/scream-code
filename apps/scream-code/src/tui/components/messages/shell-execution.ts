@@ -4,6 +4,7 @@ import chalk from 'chalk';
 
 import type { ColorPalette } from '#/tui/theme/colors';
 import type { ToolCallBlockData, ToolResultBlockData } from '#/tui/types';
+import { MAX_SHELL_OUTPUT_BYTES } from '#/tui/constant/rendering';
 
 import type { ResultRenderer } from './tool-renderers/types';
 import { PREVIEW_LINES } from './tool-renderers/types';
@@ -65,6 +66,7 @@ export class ShellExecutionComponent extends Container {
         isError: result.is_error ?? false,
         colors,
         maxLines: previewLines,
+        maxBytes: MAX_SHELL_OUTPUT_BYTES,
         hintFormatter: (remaining) =>
           `...（还有 ${String(remaining)} 行，按 ctrl+o 展开）`,
       }),

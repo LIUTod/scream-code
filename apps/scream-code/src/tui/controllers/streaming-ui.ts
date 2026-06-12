@@ -638,6 +638,7 @@ export class StreamingUIController {
     const tc = this._pendingToolComponents.get(toolCallId);
     if (tc) {
       tc.setResult(result);
+      tc.dispose();
       this._pendingToolComponents.delete(toolCallId);
       state.ui.requestRender();
       return;
