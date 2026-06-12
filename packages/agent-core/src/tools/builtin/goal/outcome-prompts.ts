@@ -8,6 +8,16 @@ export function buildGoalCompletionSummaryPrompt(goal: GoalSnapshot): string {
   ].join('\n');
 }
 
+export function buildGradingFeedbackPrompt(reason: string): string {
+  return [
+    'Goal verification failed. An independent reviewer found that the completion criteria were not genuinely met.',
+    '',
+    `Reviewer feedback:\n${reason}`,
+    '',
+    'Address every issue listed above before calling UpdateGoal with complete again. Do not re-submit until all issues are resolved.',
+  ].join('\n');
+}
+
 export function buildGoalBlockedReasonPrompt(goal: GoalSnapshot): string {
   return [
     buildGoalBlockedMessage(goal),

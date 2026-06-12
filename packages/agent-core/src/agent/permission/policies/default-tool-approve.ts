@@ -16,6 +16,11 @@ const DEFAULT_APPROVE_TOOLS = new Set([
   'AskUserQuestion',
   'Skill',
   'WolfPack',
+  'CreateGoal',
+  'UpdateGoal',
+  'GetGoal',
+  'SetGoalBudget',
+  'WriteGoalNote',
 ]);
 
 export class DefaultToolApprovePermissionPolicy implements PermissionPolicy {

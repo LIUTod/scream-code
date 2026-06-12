@@ -305,9 +305,8 @@ export class FooterComponent implements Component {
     if (state.permissionMode === 'yolo') left.push(chalk.hex(colors.warning).bold('YES'));
     if (state.planMode) left.push(chalk.hex(colors.primary).bold('plan'));
     if (state.wolfpackMode) left.push(chalk.hex(colors.primary).bold('wolfpack'));
-    if (state.goalActive && state.goal) {
-      const goalText = state.goal.length > 20 ? state.goal.slice(0, 20) + '…' : state.goal;
-      left.push(chalk.hex(colors.success).bold(`🎯 ${goalText}`));
+    if (state.goalActive) {
+      left.push(chalk.hex(colors.primary).bold('goal'));
     }
 
     const model = shortenModel(modelDisplayName(state));

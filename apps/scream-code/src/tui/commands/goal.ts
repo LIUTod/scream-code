@@ -1,5 +1,12 @@
+import type { Component } from '@earendil-works/pi-tui';
+
 import type { SlashCommandHost } from './dispatch';
 import { GoalStatusMessageComponent } from '../components/messages/goal-panel';
+
+const GOAL_STATUS_DISMISS_MS = 10_000;
+
+let activeGoalPanel: Component | undefined;
+let activeGoalTimer: ReturnType<typeof setTimeout> | undefined;
 
 // ── Parsing ─────────────────────────────────────────────────────────────
 
@@ -184,12 +191,27 @@ async function showGoalStatus(host: SlashCommandHost): Promise<void> {
 
   try {
     const result = await session.getGoal();
-    host.state.transcriptContainer.addChild(
-      new GoalStatusMessageComponent(result.goal, host.state.theme.colors),
-    );
+    dismissGoalPanel(host);
+
+    const panel = new GoalStatusMessageComponent(result.goal, host.state.theme.colors);
+    host.state.transcriptContainer.addChild(panel);
+    activeGoalPanel = panel;
+    activeGoalTimer = setTimeout(() => dismissGoalPanel(host), GOAL_STATUS_DISMISS_MS);
     host.state.ui.requestRender();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     host.showError(`获取目标状态失败：${message}`);
+  }
+}
+
+function dismissGoalPanel(host: SlashCommandHost): void {
+  if (activeGoalTimer !== undefined) {
+    clearTimeout(activeGoalTimer);
+    activeGoalTimer = undefined;
+  }
+  if (activeGoalPanel !== undefined) {
+    host.state.transcriptContainer.removeChild(activeGoalPanel);
+    activeGoalPanel = undefined;
+    host.state.ui.requestRender();
   }
 }

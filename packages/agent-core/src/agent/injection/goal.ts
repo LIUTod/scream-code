@@ -137,6 +137,12 @@ function buildGoalReminder(goal: GoalSnapshot): string {
       "Call UpdateGoal as soon as the goal is genuinely done or cannot proceed; don't keep going " +
       'once there is nothing left to do.',
   );
+  lines.push('');
+  lines.push(
+    'When you call UpdateGoal with `complete`, an independent reviewer will verify that the ' +
+      'completion criteria are met. Provide a clear summary of what you accomplished in your ' +
+      'final response so the reviewer can evaluate it.',
+  );
   return lines.join('\n');
 }
 

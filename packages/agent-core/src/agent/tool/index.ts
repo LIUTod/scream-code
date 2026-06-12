@@ -13,6 +13,7 @@ import type { MCPClient } from '../../mcp/types';
 import { DEFAULT_AGENT_PROFILES } from '../../profile';
 import { extendWorkspaceWithSkillRoots } from '../../skill';
 import * as b from '../../tools/builtin';
+import type { GoalGraderFn } from '../../tools/builtin/goal/update-goal';
 import type { ToolStore, ToolStoreData, ToolStoreKey } from '../../tools/store';
 import type {
   BuiltinTool,
@@ -23,6 +24,182 @@ import type {
 } from './types';
 
 export * from './types';
+
+const CRITERIA_SYSTEM_PROMPT = [
+  'You generate concrete, verifiable acceptance criteria for a given objective.',
+  'Criteria must be specific and testable — state what should work end-to-end, not just what should exist.',
+  'Avoid vague criteria like "feature works" or "code is correct".',
+  'Respond with JSON only: {"criteria": ["criterion 1", "criterion 2", ...]}',
+].join(' ');
+
+const GRADER_SYSTEM_PROMPT = [
+  'You are a strict goal completion evaluator. Your default judgment is FAIL. Only PASS when there is clear, specific evidence that every acceptance criterion is genuinely met end-to-end.',
+  'Evaluate across three dimensions:',
+  '- Completeness: every acceptance criterion is individually met with concrete evidence in the output. Partial completion is FAIL.',
+  '- Conformance: the work matches what was asked — no scope drift, no over-engineering, no cutting corners.',
+  '- Substance: the output is real, finished, working work — not just a plan, outline, scaffold, stub, mock, or partial implementation, unless the objective specifically asks for those. Surface-level appearance without end-to-end correctness is FAIL.',
+  'When FAIL, you MUST list specific issues with actionable fix directions. Do not accept plausible-sounding but unverified claims of completion.',
+  'Respond with JSON only.',
+].join(' ');
+
+function buildCriteriaPrompt(objective: string): string {
+  return [
+    '## Objective',
+    objective,
+    '',
+    'Generate 3-8 concrete, verifiable acceptance criteria for this objective.',
+    'Each criterion should describe a specific, testable behavior or outcome — focus on end-to-end correctness, not surface existence.',
+    'Respond with JSON: {"criteria": ["criterion 1", "criterion 2", ...]}',
+  ].join('\n');
+}
+
+function buildGraderPrompt(objective: string, criteria: string, output: string): string {
+  return [
+    '## Objective',
+    objective,
+    '',
+    '## Acceptance Criteria',
+    criteria,
+    '',
+    '## Agent Output',
+    output || '(no output captured)',
+    '',
+    'Evaluate each dimension independently against the acceptance criteria, then decide overall PASS/FAIL.',
+    'When FAIL, list every specific issue with an actionable fix direction so the agent knows exactly what to address next.',
+    'Respond with JSON:',
+    '{"completeness":{"pass":true/false,"detail":"..."},"conformance":{"pass":true/false,"detail":"..."},"substance":{"pass":true/false,"detail":"..."},"issues":["issue 1: what to fix","issue 2: what to fix"],"pass":true/false,"reason":"overall summary"}',
+  ].join('\n');
+}
+
+interface GraderResult {
+  pass: boolean;
+  reason: string;
+  /** Formatted dimension breakdown + issues for display. Empty if no structured dims. */
+  summary: string;
+}
+
+function parseGraderResponse(text: string): GraderResult {
+  try {
+    const match = text.match(/\{[\s\S]*\}/);
+    if (!match) return { pass: true, reason: 'No JSON found in grader response', summary: '' };
+    const parsed = JSON.parse(match[0]) as {
+      pass?: unknown;
+      reason?: unknown;
+      completeness?: { pass?: unknown; detail?: unknown };
+      conformance?: { pass?: unknown; detail?: unknown };
+      substance?: { pass?: unknown; detail?: unknown };
+      issues?: unknown;
+    };
+
+    const overallPass = parsed.pass === true;
+    const overallReason = typeof parsed.reason === 'string' ? parsed.reason : 'No reason provided';
+
+    const dims = [parsed.completeness, parsed.conformance, parsed.substance];
+    const hasDims = dims.some((d) => d !== undefined);
+    if (!hasDims) return { pass: overallPass, reason: overallReason, summary: '' };
+
+    const lines: string[] = [];
+    const failedDims: string[] = [];
+    for (const [name, dim] of Object.entries({
+      Completeness: parsed.completeness,
+      Conformance: parsed.conformance,
+      Substance: parsed.substance,
+    })) {
+      if (dim === undefined) continue;
+      const ok = dim.pass === true;
+      const detail = typeof dim.detail === 'string' ? dim.detail : '';
+      lines.push(`  ${ok ? '✓' : '✗'} ${name}: ${detail}`);
+      if (!ok) failedDims.push(`${name}: ${detail}`);
+    }
+
+    // Extract issues list
+    const issues = Array.isArray(parsed.issues)
+      ? (parsed.issues as unknown[]).filter((i): i is string => typeof i === 'string')
+      : [];
+
+    if (issues.length > 0) {
+      lines.push('');
+      lines.push('  Issues to fix:');
+      for (const issue of issues) {
+        lines.push(`  - ${issue}`);
+      }
+    }
+
+    const summary = lines.join('\n');
+
+    // Build reason: failed dims + issues for the agent's system reminder
+    const reasonParts: string[] = [overallReason];
+    if (failedDims.length > 0) reasonParts.push(failedDims.join('\n'));
+    if (issues.length > 0) reasonParts.push(`Issues to fix:\n${issues.map((i) => `- ${i}`).join('\n')}`);
+
+    return { pass: overallPass, reason: reasonParts.join('\n'), summary };
+  } catch {
+    return { pass: true, reason: 'Failed to parse grader response', summary: '' };
+  }
+}
+
+function extractResponseText(response: { message: { content: { type: string; text?: string }[] } }): string {
+  return response.message.content
+    .filter((p): p is { type: 'text'; text: string } => p.type === 'text')
+    .map((p) => p.text)
+    .join('');
+}
+
+async function generateAcceptanceCriteria(
+  agent: Agent,
+  objective: string,
+): Promise<string> {
+  const prompt = buildCriteriaPrompt(objective);
+  const response = await agent.rawGenerate(
+    agent.config.provider,
+    CRITERIA_SYSTEM_PROMPT,
+    [],
+    [{ role: 'user', content: [{ type: 'text' as const, text: prompt }], toolCalls: [] }],
+  );
+  const text = extractResponseText(response);
+  try {
+    const match = text.match(/\{[\s\S]*\}/);
+    if (!match) return '';
+    const parsed = JSON.parse(match[0]) as { criteria?: unknown };
+    if (!Array.isArray(parsed.criteria)) return '';
+    return (parsed.criteria as unknown[])
+      .filter((c): c is string => typeof c === 'string')
+      .map((c, i) => `${i + 1}. ${c}`)
+      .join('\n');
+  } catch {
+    return '';
+  }
+}
+
+function createGoalGrader(agent: Agent): GoalGraderFn {
+  return async (objective, criterion, output) => {
+    // Phase 1: determine acceptance criteria
+    let criteria: string;
+    if (criterion !== undefined) {
+      criteria = criterion;
+    } else {
+      criteria = await generateAcceptanceCriteria(agent, objective);
+      if (!criteria) {
+        criteria = 'No specific criteria defined. Evaluate based on whether the objective is clearly achieved.';
+      }
+    }
+
+    // Phase 2: evaluate against criteria
+    const user = buildGraderPrompt(objective, criteria, output);
+    const response = await agent.rawGenerate(
+      agent.config.provider,
+      GRADER_SYSTEM_PROMPT,
+      [],
+      [{ role: 'user', content: [{ type: 'text' as const, text: user }], toolCalls: [] }],
+    );
+    const text = extractResponseText(response);
+    const result = parseGraderResponse(text);
+    const reason = result.summary
+      ? `${result.reason}\n${result.summary}`
+      : result.reason;
+    return { pass: result.pass, reason };
+  };
+}
 
 interface McpToolEntry {
   readonly tool: ExecutableTool;
@@ -383,7 +560,7 @@ export class ToolManager {
         this.agent.cron && new b.CronDeleteTool(this.agent.cron),
         // Goal tools are main-agent-only.
         this.agent.type === 'main' && new b.CreateGoalTool(this.agent),
-        this.agent.type === 'main' && new b.UpdateGoalTool(this.agent),
+        this.agent.type === 'main' && new b.UpdateGoalTool(this.agent, createGoalGrader(this.agent)),
         this.agent.type === 'main' && new b.GetGoalTool(this.agent),
         this.agent.type === 'main' && new b.SetGoalBudgetTool(this.agent),
         this.agent.type === 'main' && new b.WriteGoalNoteTool(this.agent),
