@@ -20,6 +20,16 @@ const SUB_STEPS = 5;
 const BREATHE_STEPS = HUE_STOPS * SUB_STEPS; // 120
 const BREATHE_INTERVAL_MS = 40;
 
+// ── Logo face animation frames ──────────────────────────────────────
+// Top row is always the same; bottom row animates the "eyes".
+const LOGO_FRAMES: [string, string][] = [
+  ['██▄▄▄██', '▐█▄▀▄█▌'], // 回中
+  ['██▄▄▄██', '▐▄▄▀▄▄▌'], // 眯眼
+  ['██▄▄▄██', '▐▄▀▄▄▄▌'], // 细眯眼（左）
+  ['██▄▄▄██', '▐▄▄▄▀▄▌'], // 细眯眼（右）
+  ['██▄▄▄██', '▐█▄▀▄█▌'], // 睁开
+];
+
 // ── HSL ↔ RGB helpers ──────────────────────────────────────────────
 
 function hexToRgb(hex: string): [number, number, number] {
@@ -82,7 +92,7 @@ function buildBreathingPalette(primaryHex: string, hueStops: number, subSteps: n
   for (let i = 0; i < steps; i++) {
     // Map frame index to a hue angle, anchored at the primary hue so frame 0 = primary green.
     const hueAngle = (baseHue + (i / steps) * 360) % 360;
-    const [rr, gg, bb] = hslToRgb(hueAngle, sat, lit);
+    const [rr, gg, bb] = hslToRgb(hueAngle, 90, 70);
     palette.push(rgbToHex(rr, gg, bb));
   }
   return palette;
@@ -140,7 +150,9 @@ export class WelcomeComponent implements Component {
     const isLoggedOut = !this.state.model;
 
     // ── Logo ──
-    const logo = [logoColor('██▄▄▄██'), logoColor('▐█▄▀▄█▌')];
+    const frameIdx = this.breatheTimer !== null ? Math.floor(this.breatheFrame / 24) % LOGO_FRAMES.length : 0;
+    const [topRow, bottomRow] = LOGO_FRAMES[frameIdx];
+    const logo = [logoColor(topRow), logoColor(bottomRow)];
 
     // ── Info ──
     const activeModel = this.state.availableModels[this.state.model];
@@ -163,7 +175,6 @@ export class WelcomeComponent implements Component {
       : '发送 / 进入快捷菜单，/exit 保存并退出';
 
     const contentLines: string[] = [
-      '',
       ...logo,
       '',
       labelStyle('版本：') + ' ' + versionValue,
@@ -171,7 +182,6 @@ export class WelcomeComponent implements Component {
       labelStyle('目录：') + ' ' + this.state.workDir,
       '',
       dim(hintText),
-      '',
     ];
 
     // ── Top border with centered title ──
@@ -184,15 +194,15 @@ export class WelcomeComponent implements Component {
       const titleStart = centerPos - Math.floor(visibleWidth(titleText) / 2);
       const leftDash = Math.max(0, titleStart);
       const rightDash = Math.max(0, contentWidth - leftDash - visibleWidth(titleText));
-      topBorder = primary('╭' + '─'.repeat(leftDash) + titleText + '─'.repeat(rightDash) + '╮');
+      topBorder = logoColor('╭' + '─'.repeat(leftDash) + titleText + '─'.repeat(rightDash) + '╮');
     } else {
-      topBorder = primary('╭' + '─'.repeat(contentWidth) + '╮');
+      topBorder = logoColor('╭' + '─'.repeat(contentWidth) + '╮');
     }
 
     const lines: string[] = [
       '',
       topBorder,
-      primary('│') + ' '.repeat(width - 2) + primary('│'),
+      logoColor('│') + ' '.repeat(width - 2) + logoColor('│'),
     ];
 
     for (const content of contentLines) {
@@ -200,11 +210,11 @@ export class WelcomeComponent implements Component {
       const vis = visibleWidth(truncated);
       const centerPad = Math.floor((width - 1 - vis) / 2);
       const rightPad = width - 2 - vis - centerPad;
-      lines.push(primary('│') + ' '.repeat(centerPad) + truncated + ' '.repeat(rightPad) + primary('│'));
+      lines.push(logoColor('│') + ' '.repeat(centerPad) + truncated + ' '.repeat(rightPad) + logoColor('│'));
     }
 
-    lines.push(primary('│') + ' '.repeat(width - 2) + primary('│'));
-    lines.push(primary('╰' + '─'.repeat(width - 2) + '╯'));
+    lines.push(logoColor('│') + ' '.repeat(width - 2) + logoColor('│'));
+    lines.push(logoColor('╰' + '─'.repeat(width - 2) + '╯'));
     lines.push('');
 
     return lines;

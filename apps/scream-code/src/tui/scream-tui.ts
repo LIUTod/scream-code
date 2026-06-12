@@ -615,34 +615,6 @@ export class ScreamTUI {
     const footerWrap = new GutterContainer(CHROME_GUTTER, CHROME_GUTTER);
     footerWrap.addChild(this.state.footer);
     this.state.ui.addChild(footerWrap);
-    this.installFixedBottomRegion();
-  }
-
-  /**
-   * Pin the editor + footer to the terminal bottom. The pi-tui patch adds a
-   * `fixedBottomLineCount` property: the last N rendered lines stay pinned
-   * while the transcript above scrolls independently.
-   *
-   * We override `doRender` to measure the editor + footer height each frame
-   * (they change with multi-line input or terminal resize) and set the count
-   * before the real render runs.
-   */
-  private installFixedBottomRegion(): void {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const ui = this.state.ui as any;
-    const originalDoRender = ui.doRender.bind(ui);
-    const editorContainer = this.state.editorContainer;
-    const footerWrap = ui.children.at(-1) as Component | undefined;
-
-    ui.doRender = () => {
-      const w: number = ui.terminal?.columns ?? 0;
-      if (w > 0) {
-        const editorLines = editorContainer.render(w).length;
-        const footerLines = footerWrap ? footerWrap.render(w).length : 0;
-        ui.fixedBottomLineCount = editorLines + footerLines;
-      }
-      originalDoRender();
-    };
   }
 
   // =========================================================================
