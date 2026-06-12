@@ -10,3 +10,35 @@ index 50f92259fa88f4efe406a60b7db8e54a9eedace6..ebf0548c449fc40b1e91a277730a0241
                  return;
              }
              if (kb.matches(data, "tui.input.tab")) {
+diff --git a/dist/tui.js b/dist/tui.js
+--- a/dist/tui.js
++++ b/dist/tui.js
+@@ -121,6 +121,7 @@ export class TUI extends Container {
+     overlayFocusRestore = { status: "inactive" };
+     constructor(terminal, showHardwareCursor) {
+         super();
++        this.fixedBottomLineCount = 0;
+         this.terminal = terminal;
+         if (showHardwareCursor !== undefined) {
+             this.showHardwareCursor = showHardwareCursor;
+@@ -892,6 +893,20 @@ export class TUI extends Container {
+         };
+         // Render all components to get new lines
+         let newLines = this.render(width);
++        // Fixed-bottom region: pin the last N lines (editor + footer) and apply
++        // viewport scrolling only to the remaining top portion.
++        if (this.fixedBottomLineCount > 0) {
++            const bottomCount = Math.min(this.fixedBottomLineCount, height);
++            const topCount = height - bottomCount;
++            if (topCount > 0) {
++                const topLines = newLines.length > bottomCount ? newLines.slice(0, -bottomCount) : [];
++                const bottomLines = newLines.slice(-bottomCount);
++                const topStart = Math.max(0, topLines.length - topCount);
++                const visibleTop = topLines.slice(topStart, topStart + topCount);
++                while (visibleTop.length < topCount) visibleTop.push("");
++                newLines = [...visibleTop, ...bottomLines];
++            }
++        }
+         // Composite overlays into the rendered lines (before differential compare)
+         if (this.overlayStack.length > 0) {
+             newLines = this.compositeOverlays(newLines, width, height);
