@@ -8,35 +8,51 @@ import type { ColorPalette } from '#/tui/theme/colors';
 import type { BackgroundAgentStatusData } from '#/tui/types';
 
 export class BackgroundAgentStatusComponent implements Component {
+  private readonly bullet: string;
+  private readonly textComponent: Text;
+  private cachedWidth: number | undefined;
+  private cachedLines: string[] | undefined;
+
   constructor(
     private readonly data: BackgroundAgentStatusData,
     private readonly colors: ColorPalette,
-  ) {}
-
-  invalidate(): void {}
-
-  render(width: number): string[] {
+  ) {
     const tone =
-      this.data.phase === 'started'
-        ? this.colors.primary
-        : this.data.phase === 'completed'
-          ? this.colors.success
-          : this.colors.error;
+      data.phase === 'started'
+        ? colors.primary
+        : data.phase === 'completed'
+          ? colors.success
+          : colors.error;
 
-    const bullet =
-      this.data.phase === 'failed' ? chalk.hex(tone)(FAILURE_MARK) : chalk.hex(tone)(STATUS_BULLET);
+    this.bullet = data.phase === 'failed' ? chalk.hex(tone)(FAILURE_MARK) : chalk.hex(tone)(STATUS_BULLET);
     const text =
-      chalk.hex(tone)(this.data.headline) +
-      (this.data.detail !== undefined && this.data.detail.length > 0
-        ? chalk.hex(this.colors.textDim)(` (${this.data.detail})`)
+      chalk.hex(tone)(data.headline) +
+      (data.detail !== undefined && data.detail.length > 0
+        ? chalk.hex(colors.textDim)(` (${data.detail})`)
         : '');
 
-    const textComponent = new Text(text, 0, 0);
+    this.textComponent = new Text(text, 0, 0);
+  }
+
+  invalidate(): void {
+    this.cachedWidth = undefined;
+    this.cachedLines = undefined;
+  }
+
+  render(width: number): string[] {
+    if (this.cachedLines !== undefined && this.cachedWidth === width) {
+      return this.cachedLines;
+    }
+
     const contentWidth = Math.max(1, width - MESSAGE_INDENT.length);
-    const contentLines = textComponent.render(contentWidth);
-    return [
+    const contentLines = this.textComponent.render(contentWidth);
+    const lines = [
       '',
-      ...contentLines.map((line, index) => (index === 0 ? bullet : MESSAGE_INDENT) + line),
+      ...contentLines.map((line, index) => (index === 0 ? this.bullet : MESSAGE_INDENT) + line),
     ];
+
+    this.cachedWidth = width;
+    this.cachedLines = lines;
+    return lines;
   }
 }

@@ -53,4 +53,38 @@ describe('BackgroundAgentStatusComponent', () => {
       '✗ explore agent failed in background (Explore project structure · boom)',
     );
   });
+
+  it('caches render output for the same width', () => {
+    const component = new BackgroundAgentStatusComponent(
+      {
+        phase: 'completed',
+        headline: 'explore agent completed in background',
+        detail: 'Explore project structure',
+      },
+      darkColors,
+    );
+
+    const first = component.render(120);
+    const second = component.render(120);
+
+    expect(second).toBe(first);
+  });
+
+  it('recomputes after invalidate()', () => {
+    const component = new BackgroundAgentStatusComponent(
+      {
+        phase: 'completed',
+        headline: 'explore agent completed in background',
+        detail: 'Explore project structure',
+      },
+      darkColors,
+    );
+
+    const first = component.render(120);
+    component.invalidate();
+    const second = component.render(120);
+
+    expect(second).not.toBe(first);
+    expect(second).toEqual(first);
+  });
 });

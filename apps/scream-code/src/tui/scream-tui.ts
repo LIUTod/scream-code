@@ -1235,10 +1235,7 @@ export class ScreamTUI {
     const effectiveMode = this.resolveActivityPaneMode();
     this.syncTerminalProgress(this.shouldShowTerminalProgress(effectiveMode));
 
-    if (
-      effectiveMode === this.lastActivityMode &&
-      (effectiveMode === 'waiting' || effectiveMode === 'thinking' || effectiveMode === 'tool')
-    ) {
+    if (effectiveMode === this.lastActivityMode) {
       return;
     }
 
@@ -1383,6 +1380,9 @@ export class ScreamTUI {
     this.state.theme.markdownTheme = nextTheme.markdownTheme;
     this.setAppState({ theme });
     this.updateEditorBorderHighlight();
+    for (const child of this.state.transcriptContainer.children) {
+      child.invalidate?.();
+    }
     this.state.ui.requestRender(true);
   }
 

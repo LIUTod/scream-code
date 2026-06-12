@@ -16,6 +16,8 @@ export class UserMessageComponent implements Component {
   private textComponent: Text;
   private spacerComponent: Spacer;
   private imageThumbnails: ImageThumbnail[];
+  private cachedWidth: number | undefined;
+  private cachedLines: string[] | undefined;
 
   constructor(text: string, colors: ColorPalette, images?: ImageAttachment[]) {
     this.color = colors.roleUser;
@@ -25,6 +27,8 @@ export class UserMessageComponent implements Component {
   }
 
   invalidate(): void {
+    this.cachedWidth = undefined;
+    this.cachedLines = undefined;
     this.textComponent.invalidate();
     for (const img of this.imageThumbnails) {
       img.invalidate?.();
@@ -32,6 +36,10 @@ export class UserMessageComponent implements Component {
   }
 
   render(width: number): string[] {
+    if (this.cachedLines !== undefined && this.cachedWidth === width) {
+      return this.cachedLines;
+    }
+
     const border = chalk.hex(this.color).bold(USER_MESSAGE_BULLET);
     const borderWidth = visibleWidth(border);
     const contentWidth = Math.max(1, width - borderWidth);
@@ -58,6 +66,8 @@ export class UserMessageComponent implements Component {
       }
     }
 
+    this.cachedWidth = width;
+    this.cachedLines = lines;
     return lines;
   }
 }

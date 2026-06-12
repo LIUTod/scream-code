@@ -34,6 +34,8 @@ export class ThinkingComponent implements Component {
   // the cache and forces full re-wrap on every frame, which dominates CPU
   // once the transcript accumulates many finalized thinking blocks.
   private readonly textComponent: Text;
+  private cachedWidth: number | undefined;
+  private cachedLines: string[] | undefined;
 
   constructor(
     text: string,
@@ -53,11 +55,16 @@ export class ThinkingComponent implements Component {
     }
   }
 
-  invalidate(): void {}
+  invalidate(): void {
+    this.cachedWidth = undefined;
+    this.cachedLines = undefined;
+  }
 
   setText(text: string): void {
     if (this.text === text) return;
     this.text = text;
+    this.cachedWidth = undefined;
+    this.cachedLines = undefined;
     this.textComponent.setText(this.styled(text));
   }
 
@@ -66,7 +73,10 @@ export class ThinkingComponent implements Component {
   }
 
   finalize(): void {
+    if (this.mode === 'finalized') return;
     this.mode = 'finalized';
+    this.cachedWidth = undefined;
+    this.cachedLines = undefined;
     this.stopSpinner();
   }
 
@@ -77,9 +87,17 @@ export class ThinkingComponent implements Component {
   setExpanded(expanded: boolean): void {
     if (this.expanded === expanded) return;
     this.expanded = expanded;
+    this.cachedWidth = undefined;
+    this.cachedLines = undefined;
   }
 
   render(width: number): string[] {
+    // Live mode is intentionally not cached: the spinner frame changes every
+    // 80 ms, and returning a stale cached array would freeze the animation.
+    if (this.mode === 'finalized' && this.cachedLines !== undefined && this.cachedWidth === width) {
+      return this.cachedLines;
+    }
+
     const contentWidth = Math.max(1, width - MESSAGE_INDENT.length);
     const contentLines = this.text.length > 0 ? this.textComponent.render(contentWidth) : [''];
 
@@ -105,6 +123,8 @@ export class ThinkingComponent implements Component {
     }
 
     if (this.expanded || contentLines.length <= THINKING_PREVIEW_LINES) {
+      this.cachedWidth = width;
+      this.cachedLines = rendered;
       return rendered;
     }
 
@@ -114,6 +134,8 @@ export class ThinkingComponent implements Component {
     truncated.push(
       MESSAGE_INDENT + chalk.dim(`... (${String(remaining)} more lines, ctrl+o to expand)`),
     );
+    this.cachedWidth = width;
+    this.cachedLines = truncated;
     return truncated;
   }
 

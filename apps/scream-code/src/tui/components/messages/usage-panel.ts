@@ -208,15 +208,25 @@ export function buildUsageReportLines(options: UsageReportOptions): string[] {
 }
 
 export class UsagePanelComponent implements Component {
+  private cachedWidth: number | undefined;
+  private cachedLines: string[] | undefined;
+
   constructor(
     private readonly lines: readonly string[],
     private readonly borderHex: string,
     private readonly title: string = ' 用量 ',
   ) {}
 
-  invalidate(): void {}
+  invalidate(): void {
+    this.cachedWidth = undefined;
+    this.cachedLines = undefined;
+  }
 
   render(width: number): string[] {
+    if (this.cachedLines !== undefined && this.cachedWidth === width) {
+      return this.cachedLines;
+    }
+
     const paint = (s: string): string => chalk.hex(this.borderHex)(s);
     const indent = ' '.repeat(LEFT_MARGIN);
 
@@ -243,6 +253,9 @@ export class UsagePanelComponent implements Component {
       out.push(indent + paint('│') + ' ' + clipped + ' '.repeat(pad) + ' ' + paint('│'));
     }
     out.push(bottom);
+
+    this.cachedWidth = width;
+    this.cachedLines = out;
     return out;
   }
 }

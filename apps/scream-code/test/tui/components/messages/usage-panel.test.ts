@@ -64,4 +64,24 @@ describe('UsagePanelComponent', () => {
       expect(visibleWidth(line)).toBeLessThanOrEqual(width);
     }
   });
+
+  it('caches render output for the same width', () => {
+    const component = new UsagePanelComponent(['会话用量'], darkColors.primary);
+
+    const first = component.render(80);
+    const second = component.render(80);
+
+    expect(second).toBe(first);
+  });
+
+  it('recomputes after invalidate()', () => {
+    const component = new UsagePanelComponent(['会话用量'], darkColors.primary);
+
+    const first = component.render(80);
+    component.invalidate();
+    const second = component.render(80);
+
+    expect(second).not.toBe(first);
+    expect(second).toEqual(first);
+  });
 });

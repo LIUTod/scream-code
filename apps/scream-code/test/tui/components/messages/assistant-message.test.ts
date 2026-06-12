@@ -50,4 +50,38 @@ describe('AssistantMessageComponent', () => {
     expect(text).toContain('</hook_result>');
     expect(text).not.toContain('UserPromptSubmit hook');
   });
+
+  it('caches render output after content stabilizes', () => {
+    const component = new AssistantMessageComponent(createMarkdownTheme(darkColors), darkColors);
+
+    component.updateContent('stable content');
+    const first = component.render(80);
+    const second = component.render(80);
+
+    expect(second).toBe(first);
+  });
+
+  it('invalidates cache when updateContent() changes text', () => {
+    const component = new AssistantMessageComponent(createMarkdownTheme(darkColors), darkColors);
+
+    component.updateContent('first');
+    const first = component.render(80);
+
+    component.updateContent('second');
+    const second = component.render(80);
+
+    expect(second).not.toBe(first);
+  });
+
+  it('recomputes after invalidate() is called', () => {
+    const component = new AssistantMessageComponent(createMarkdownTheme(darkColors), darkColors);
+
+    component.updateContent('stable content');
+    const first = component.render(80);
+    component.invalidate();
+    const second = component.render(80);
+
+    expect(second).not.toBe(first);
+    expect(second).toEqual(first);
+  });
 });

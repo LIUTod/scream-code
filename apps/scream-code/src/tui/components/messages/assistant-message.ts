@@ -19,6 +19,8 @@ export class AssistantMessageComponent implements Component {
   private bulletColor: string;
   private lastText = '';
   private showBullet: boolean;
+  private cachedWidth: number | undefined;
+  private cachedLines: string[] | undefined;
 
   constructor(markdownTheme: MarkdownTheme, colors: ColorPalette, showBullet: boolean = true) {
     this.markdownTheme = markdownTheme;
@@ -28,13 +30,18 @@ export class AssistantMessageComponent implements Component {
   }
 
   setShowBullet(show: boolean): void {
+    if (this.showBullet === show) return;
     this.showBullet = show;
+    this.cachedWidth = undefined;
+    this.cachedLines = undefined;
   }
 
   updateContent(text: string): void {
     const displayText = text;
     if (displayText === this.lastText) return;
     this.lastText = displayText;
+    this.cachedWidth = undefined;
+    this.cachedLines = undefined;
     this.contentContainer.clear();
     if (displayText.trim().length > 0) {
       this.contentContainer.addChild(new Markdown(displayText.trim(), 0, 0, this.markdownTheme));
@@ -42,10 +49,16 @@ export class AssistantMessageComponent implements Component {
   }
 
   invalidate(): void {
+    this.cachedWidth = undefined;
+    this.cachedLines = undefined;
     this.contentContainer.invalidate?.();
   }
 
   render(width: number): string[] {
+    if (this.cachedLines !== undefined && this.cachedWidth === width) {
+      return this.cachedLines;
+    }
+
     if (this.lastText.trim().length === 0) return [];
 
     const prefix = this.showBullet ? STATUS_BULLET : MESSAGE_INDENT;
@@ -58,6 +71,9 @@ export class AssistantMessageComponent implements Component {
         i === 0 && this.showBullet ? chalk.hex(this.bulletColor)(STATUS_BULLET) : MESSAGE_INDENT;
       lines.push(p + contentLines[i]);
     }
+
+    this.cachedWidth = width;
+    this.cachedLines = lines;
     return lines;
   }
 }

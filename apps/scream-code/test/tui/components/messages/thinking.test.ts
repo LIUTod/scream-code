@@ -81,4 +81,46 @@ describe('ThinkingComponent', () => {
     expect(collapsed).not.toContain('line7');
     expect(collapsed).toContain('ctrl+o to expand');
   });
+
+  it('caches finalized mode renders for the same width', () => {
+    const component = new ThinkingComponent(longThinking, darkColors, true, 'live');
+    component.finalize();
+
+    const first = component.render(80);
+    const second = component.render(80);
+
+    expect(second).toBe(first);
+  });
+
+  it('does not cache live mode renders', () => {
+    const component = new ThinkingComponent('step', darkColors, true, 'live');
+
+    const first = component.render(80);
+    const second = component.render(80);
+
+    expect(second).not.toBe(first);
+  });
+
+  it('invalidates cache on setText, setExpanded, finalize, and invalidate', () => {
+    const component = new ThinkingComponent(longThinking, darkColors, true, 'live');
+    component.finalize();
+
+    const initial = component.render(80);
+
+    component.setText('changed');
+    expect(component.render(80)).not.toBe(initial);
+
+    const afterText = component.render(80);
+    component.setExpanded(true);
+    expect(component.render(80)).not.toBe(afterText);
+
+    const live = new ThinkingComponent('x', darkColors, true, 'live');
+    const liveFirst = live.render(80);
+    live.finalize();
+    expect(live.render(80)).not.toBe(liveFirst);
+
+    const finalized = live.render(80);
+    live.invalidate();
+    expect(live.render(80)).not.toBe(finalized);
+  });
 });

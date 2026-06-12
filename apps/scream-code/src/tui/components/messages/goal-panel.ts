@@ -141,29 +141,44 @@ function buildEmptyGoalLines(colors: { text: string; textDim: string }): string[
 }
 
 export class GoalStatusMessageComponent implements Component {
+  private readonly panel: UsagePanelComponent;
+  private cachedWidth: number | undefined;
+  private cachedLines: string[] | undefined;
+
   constructor(
     private readonly goal: GoalSnapshotData | null,
     private readonly colors: { primary: string; text: string; textDim: string; success: string },
-  ) {}
-
-  invalidate(): void {}
-
-  render(width: number): string[] {
-    const goal = this.goal;
+  ) {
     if (goal === null) {
-      const panel = new UsagePanelComponent(
+      this.panel = new UsagePanelComponent(
         buildEmptyGoalLines(this.colors),
         this.colors.success,
         ' Scream Goal ',
       );
-      return ['', ...panel.render(width)];
+    } else {
+      const title = ` Scream Goal · ${statusLabel(goal.status)} `;
+      this.panel = new UsagePanelComponent(
+        buildGoalReportLines(goal, this.colors),
+        this.colors.success,
+        title,
+      );
     }
-    const title = ` Scream Goal · ${statusLabel(goal.status)} `;
-    const panel = new UsagePanelComponent(
-      buildGoalReportLines(goal, this.colors),
-      this.colors.success,
-      title,
-    );
-    return ['', ...panel.render(width)];
+  }
+
+  invalidate(): void {
+    this.cachedWidth = undefined;
+    this.cachedLines = undefined;
+    this.panel.invalidate();
+  }
+
+  render(width: number): string[] {
+    if (this.cachedLines !== undefined && this.cachedWidth === width) {
+      return this.cachedLines;
+    }
+
+    const lines = ['', ...this.panel.render(width)];
+    this.cachedWidth = width;
+    this.cachedLines = lines;
+    return lines;
   }
 }
