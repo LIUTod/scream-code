@@ -101,4 +101,7 @@ tools:
   - Edit
   - WebSearch
   - FetchURL
+  - MemoryLookup
+  - MemoryConsolidatePlan
+  - MemoryConsolidateApply
   - mcp__*

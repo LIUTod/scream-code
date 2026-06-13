@@ -1,7 +1,6 @@
 import type { Agent } from '..';
 import type { DynamicInjector } from './injector';
 import { GoalInjector } from './goal';
-import { MemoryRecallInjector } from './memory-recall';
 import { PermissionModeInjector } from './permission-mode';
 import { PluginSessionStartInjector } from './plugin-session-start';
 import { PlanModeInjector } from './plan-mode';
@@ -10,15 +9,8 @@ import { WolfPackModeInjector } from './wolfpack';
 
 export class InjectionManager {
   private readonly injectors: DynamicInjector[];
-  private readonly memoryRecall: MemoryRecallInjector | null;
 
   constructor(protected readonly agent: Agent) {
-    // Feature-gated: only enable memory recall when the store is available.
-    // Auto-recall can be disabled by setting memStore to undefined on the agent.
-    const autoRecallEnabled = agent.memoStore !== undefined;
-
-    this.memoryRecall = autoRecallEnabled ? new MemoryRecallInjector(agent) : null;
-
     this.injectors = [
       new PluginSessionStartInjector(agent),
       new WolfPackModeInjector(agent),
@@ -26,7 +18,6 @@ export class InjectionManager {
       new PermissionModeInjector(agent),
       new TodoListReminderInjector(agent),
       new GoalInjector(agent),
-      ...(this.memoryRecall ? [this.memoryRecall] : []),
     ];
   }
 
@@ -36,9 +27,9 @@ export class InjectionManager {
     }
   }
 
-  /** Reset per-turn state on all injectors (e.g. memory recall flag). */
+  /** Reset per-turn state on all injectors. */
   resetForTurn(): void {
-    this.memoryRecall?.resetForTurn();
+    // No-op: none of the current injectors maintain per-turn state.
   }
 
   onContextClear(): void {

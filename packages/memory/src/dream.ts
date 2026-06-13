@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, rmdir, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'pathe';
 
 export interface DreamState {
@@ -19,15 +19,17 @@ const MIN_SESSIONS_BETWEEN_DREAMS = 5;
 
 /**
  * Tracks dream consolidation state and decides when to suggest running
- * another dream. Persisted to `<project>/.scream-code/dream-lock.json`.
+ * another dream. Persisted to `<screamHomeDir>/dream-lock.json`.
  */
 export class DreamTracker {
   private state: DreamState;
   private readonly lockPath: string;
+  private readonly screamHomeDir: string;
   private initialized = false;
 
-  constructor(projectDir: string) {
-    this.lockPath = join(projectDir, '.scream-code', LOCK_FILE);
+  constructor(screamHomeDir: string) {
+    this.screamHomeDir = screamHomeDir;
+    this.lockPath = join(screamHomeDir, LOCK_FILE);
     this.state = {
       lastDreamAt: new Date().toISOString(),
       sessionsSinceLastDream: 0,
@@ -44,10 +46,13 @@ export class DreamTracker {
       const parsed = JSON.parse(raw) as DreamLockFile;
       if (parsed.version === 1 && parsed.state) {
         this.state = parsed.state;
+        return;
       }
     } catch {
-      // File doesn't exist or is corrupt — use defaults
+      // File doesn't exist or is corrupt — try legacy migration
     }
+
+    await this.migrateLegacyLockFiles();
   }
 
   /** Record that a dream completed successfully. */
@@ -97,6 +102,70 @@ export class DreamTracker {
       await writeFile(this.lockPath, JSON.stringify(data, null, 2), 'utf8');
     } catch {
       // Non-critical — will try again next time
+    }
+  }
+
+  /**
+   * One-time migration for legacy dream-lock.json locations:
+   * - <screamHomeDir>/.scream-code/dream-lock.json (buggy double directory)
+   * - <screamHomeDir>/sessions/<sessionKey>/.scream-code/dream-lock.json (old per-session)
+   *
+   * Picks the most recent state, writes it to the new global location, and
+   * deletes the legacy files/directories.
+   */
+  private async migrateLegacyLockFiles(): Promise<void> {
+    const candidates: string[] = [
+      join(this.screamHomeDir, '.scream-code', LOCK_FILE),
+    ];
+
+    const sessionsDir = join(this.screamHomeDir, 'sessions');
+    try {
+      const entries = await readdir(sessionsDir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.isDirectory()) {
+          candidates.push(join(sessionsDir, entry.name, '.scream-code', LOCK_FILE));
+        }
+      }
+    } catch {
+      // sessions directory may not exist
+    }
+
+    let bestState: DreamState | undefined;
+    let bestSource: string | undefined;
+    for (const candidate of candidates) {
+      try {
+        await stat(candidate);
+        const raw = await readFile(candidate, 'utf8');
+        const parsed = JSON.parse(raw) as DreamLockFile;
+        if (parsed.version === 1 && parsed.state) {
+          if (
+            bestState === undefined ||
+            new Date(parsed.state.lastDreamAt).getTime() >
+              new Date(bestState.lastDreamAt).getTime()
+          ) {
+            bestState = parsed.state;
+            bestSource = candidate;
+          }
+        }
+      } catch {
+        // ignore missing or corrupt legacy files
+      }
+    }
+
+    if (bestState !== undefined) {
+      this.state = bestState;
+      await this.persist();
+    }
+
+    // Clean up legacy files and empty parent directories regardless of whether
+    // we found usable state.
+    for (const candidate of candidates) {
+      try {
+        await rm(candidate);
+        await rmdir(dirname(candidate)).catch(() => {});
+      } catch {
+        // ignore missing files
+      }
     }
   }
 }

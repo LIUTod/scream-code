@@ -80,3 +80,6 @@ tools:
   - Read
   - Glob
   - Grep
+  - MemoryLookup
+  - MemoryConsolidatePlan
+  - MemoryConsolidateApply

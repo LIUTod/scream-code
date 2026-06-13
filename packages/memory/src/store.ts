@@ -1,4 +1,4 @@
-import { mkdir, open, rename, unlink } from 'node:fs/promises';
+import { mkdir, open, readdir, rename, rmdir, stat, unlink, writeFile } from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
 import { dirname, join } from 'pathe';
 
@@ -7,6 +7,7 @@ import { toSummary } from './models.js';
 
 const FILE_NAME = 'entries.jsonl';
 const TMP_SUFFIX = '.tmp';
+const MIGRATION_MARKER = '.migrated';
 
 export class MemoryMemoStore {
   private readonly filePath: string;
@@ -150,7 +151,8 @@ export class MemoryMemoStore {
     await mkdir(dirname(this.filePath), { recursive: true });
   }
 
-  private parseLine(rawLine: string, _lineNumber: number): MemoryMemo | undefined {
+  /** @internal */
+  parseLine(rawLine: string, _lineNumber: number): MemoryMemo | undefined {
     if (rawLine.length === 0) return undefined;
     try {
       const record = JSON.parse(rawLine) as Record<string, unknown>;
@@ -179,5 +181,90 @@ export class MemoryMemoStore {
       // Skip corrupted lines
       return undefined;
     }
+  }
+
+  /**
+   * One-time migration from per-workDir memory stores to a global store.
+   * Reads `<screamHomeDir>/sessions/<workDirKey>/memory/entries.jsonl`
+   * and appends valid entries to `<screamHomeDir>/memory/entries.jsonl`.
+   * Deletes the legacy per-session memory files afterwards and writes a marker
+   * file so the migration only runs once.
+   */
+  static async migrateLegacyStores(screamHomeDir: string): Promise<void> {
+    const target = new MemoryMemoStore(screamHomeDir);
+    const markerPath = join(screamHomeDir, 'memory', MIGRATION_MARKER);
+
+    try {
+      await stat(markerPath);
+      return; // already migrated
+    } catch {
+      // continue with migration
+    }
+
+    const sessionsDir = join(screamHomeDir, 'sessions');
+    let sessionEntries: string[];
+    try {
+      sessionEntries = await readdir(sessionsDir, { withFileTypes: true })
+        .then((entries) => entries.filter((e) => e.isDirectory()).map((e) => e.name));
+    } catch {
+      await writeFile(markerPath, '', 'utf8').catch(() => {});
+      return;
+    }
+
+    const migratedIds = new Set<string>();
+    for await (const memo of target.read()) {
+      migratedIds.add(memo.id);
+    }
+
+    let migratedCount = 0;
+    const legacyPaths: string[] = [];
+    for (const sessionKey of sessionEntries) {
+      const legacyPath = join(sessionsDir, sessionKey, 'memory', FILE_NAME);
+      let stream;
+      try {
+        stream = createReadStream(legacyPath, { encoding: 'utf8' });
+      } catch {
+        continue;
+      }
+
+      // Swallow async ENOENT errors when the legacy file does not exist.
+      stream.on('error', () => {});
+
+      let line = '';
+      let hadContent = false;
+      try {
+        for await (const chunk of stream) {
+          line += chunk;
+          let newlineIndex = line.indexOf('\n');
+          while (newlineIndex !== -1) {
+            const rawLine = line.slice(0, newlineIndex).replace(/\r$/, '');
+            line = line.slice(newlineIndex + 1);
+            newlineIndex = line.indexOf('\n');
+
+            const memo = target.parseLine(rawLine, 0);
+            if (memo === undefined || migratedIds.has(memo.id)) continue;
+            await target.append(memo);
+            migratedIds.add(memo.id);
+            migratedCount++;
+            hadContent = true;
+          }
+        }
+      } catch {
+        continue;
+      }
+
+      // Track the file for deletion only if we successfully read its stream.
+      // We delete regardless of whether any new entries were migrated; the
+      // global store is now the source of truth.
+      legacyPaths.push(legacyPath);
+    }
+
+    // Delete legacy per-session memory files and empty memory directories.
+    for (const legacyPath of legacyPaths) {
+      await unlink(legacyPath).catch(() => {});
+      await rmdir(dirname(legacyPath)).catch(() => {});
+    }
+
+    await writeFile(markerPath, `${migratedCount}\n`, 'utf8').catch(() => {});
   }
 }

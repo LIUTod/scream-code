@@ -623,6 +623,10 @@ export class ToolManager {
         this.agent.type === 'main' && new b.GetGoalTool(this.agent),
         this.agent.type === 'main' && new b.SetGoalBudgetTool(this.agent),
         this.agent.type === 'main' && new b.WriteGoalNoteTool(this.agent),
+        // Memory tools are main-agent-only because the store is global.
+        this.agent.type === 'main' && this.agent.memoStore && new b.MemoryLookupTool(this.agent),
+        this.agent.type === 'main' && this.agent.memoStore && new b.MemoryConsolidatePlanTool(this.agent),
+        this.agent.type === 'main' && this.agent.memoStore && new b.MemoryConsolidateApplyTool(this.agent),
         this.agent.skills?.registry.listInvocableSkills().length &&
           new b.SkillTool(this.agent),
         this.agent.subagentHost &&

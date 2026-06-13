@@ -412,7 +412,7 @@ Key files: `packages/agent-core/src/agent/compaction/{micro,full,strategy}.ts`,
 
 The agent has a memory system provided by the `@scream-cli/memory` package. Positioned as "task experience records" — structured logs of what was tried, what worked, and what failed.
 
-- **Storage**: JSONL file at `<project>/.scream-code/memory/entries.jsonl` (version 2 format, with v1→v2 auto-migration in `store.ts`).
+- **Storage**: JSONL file at `<screamHomeDir>/memory/entries.jsonl` (version 2 format, with v1→v2 auto-migration in `store.ts`).
 - **Fields**: `userNeed` (需求), `approach` (方案), `outcome` (结果), `whatFailed` (踩坑), `whatWorked` (经验). No categories or tags.
 - **Extraction triggers**:
   - Compaction: `extractAndStoreMemos()` in `packages/agent-core/src/agent/compaction/full.ts` — scans compaction summary for `memory-memo` blocks.
@@ -420,16 +420,17 @@ The agent has a memory system provided by the `@scream-cli/memory` package. Posi
   - Idle timer: after 10 minutes of no user input, `ScreamTUI.performIdleMemoryExtraction()` calls `session.extractMemoriesOnExit()`. Cooldown: 10 minutes. Compaction extraction updates the cooldown timestamp to avoid duplicates.
 - **Scoring**: keyword Jaccard similarity (50%) + recency decay 90 days (25%) + usage boost (25%). Purely rule-based, zero LLM cost.
 
-#### Auto Recall
+#### Active Lookup
 
-On the first step of every new turn, `MemoryRecallInjector` automatically looks up
-memories relevant to the current user query (up to 3) and injects them into context
-as a `<system-reminder>`. Fully rule-based matching — no extra LLM call.
+The model queries the memory store on demand via the `MemoryLookup` tool. It is no longer injected automatically at the start of every turn.
 
-- **Registration**: `InjectionManager` registers it at construction time (requires `memoStore` to be available).
-- **Opt-out**: set `memoStore` to `undefined` to disable auto recall.
+- **When to call**: the current task resembles prior work, you hit a repeating error or pattern, you are unsure of the best approach, or the user references a previous fix/decision.
+- **Input**: `query` (required), optional `limit` (default 5, max 20), optional `min_score` (default 0.2).
+- **Output**: ranked memos with `approach`, `outcome`, `whatFailed`, `whatWorked`, and relevance `score`. The model should apply `whatWorked` and avoid `whatFailed`.
+- **Registration**: `ToolManager.initializeBuiltinTools()` registers it only for the `main` agent when `memoStore` is available.
+- **Manual injection**: users can still browse and inject existing memos via the `/memory` TUI picker (`apps/scream-code/src/tui/managers/dialog-manager.ts`).
 
-Key files: `packages/agent-core/src/agent/injection/memory-recall.ts`,
+Key files: `packages/agent-core/src/tools/builtin/memory/memory-lookup.ts`,
 `packages/memory/src/scoring.ts`.
 
 #### Session Memory
@@ -443,21 +444,36 @@ Key file: `packages/agent-core/src/agent/session-memory.ts`.
 
 #### Dream Consolidation (`/dream`)
 
-A CCB-style four-stage memory consolidation command. LLM-driven:
+A CCB-style four-stage memory consolidation command. LLM-driven planning,
+programmatic execution:
 
-1. **Orient** — scan all memories, report overview (count, outcome distribution, time range)
-2. **Gather** — semantically identify duplicates, contradictions, and stale entries
-3. **Consolidate** — produce a merge plan (merged records use new field names)
-4. **Prune** — execute after user confirmation
+1. **Orient** — `MemoryConsolidatePlan` scans all memories and reports overview
+   stats (count, outcome distribution, time range).
+2. **Gather** — the model reviews the programmatic plan and semantically checks
+   for false positives, contradictions, and additional stale entries.
+3. **Consolidate** — the model presents the merge plan to the user.
+4. **Prune** — after user confirmation, `MemoryConsolidateApply` deletes the
+   originals, appends merged records with the correct JSONL envelope, and resets
+   the dream tracker.
 
 Includes automatic reminders: when >= 24 hours and >= 5 sessions have passed since
 the last dream, a suggestion is injected on the first step of the turn.
 
+The memory store is global, so `/dream` operates on a single shared JSONL file rather
+than per-session files.
+
 - **Tracker**: `packages/memory/src/dream.ts` — `DreamTracker`, persisted to
-  `<project>/.scream-code/dream-lock.json`.
+  `<screamHomeDir>/dream-lock.json` (default `~/.scream-code/dream-lock.json`).
+- **Store**: `packages/memory/src/store.ts` — `MemoryMemoStore`, persisted to
+  `<screamHomeDir>/memory/entries.jsonl`.
+- **Consolidator**: `packages/memory/src/consolidator.ts` —
+  `buildConsolidationPlan` / `applyConsolidation`.
+- **Tools**: `packages/agent-core/src/tools/builtin/memory/memory-consolidate.ts` —
+  `MemoryConsolidatePlan` / `MemoryConsolidateApply`.
 - **Skill**: `packages/agent-core/src/skill/builtin/dream.ts` + `dream.md`.
 
 Key files: `packages/memory/src/{dream,consolidator}.ts`,
+`packages/agent-core/src/tools/builtin/memory/memory-consolidate.ts`,
 `packages/agent-core/src/skill/builtin/dream.md`.
 
 ### WelcomeComponent Breathing

@@ -24,6 +24,9 @@ tools:
   - UpdateGoal
   - ReadMediaFile
   - TodoList
+  - MemoryLookup
+  - MemoryConsolidatePlan
+  - MemoryConsolidateApply
   - Skill
   - WebSearch
   - Agent

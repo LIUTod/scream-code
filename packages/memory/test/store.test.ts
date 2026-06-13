@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -114,6 +114,84 @@ describe('MemoryMemoStore', () => {
       }
       expect(entries.length).toBe(2);
     });
+  });
+});
+
+describe('migrateLegacyStores', () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'scream-memory-migration-test-'));
+  });
+
+  afterEach(async () => {
+    await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('migrates per-session entries to the global store and deletes legacy files', async () => {
+    const legacyMemo = createMemoryMemo({
+      userNeed: 'Legacy need',
+      approach: 'Legacy approach',
+      outcome: '完成',
+      whatFailed: 'none',
+      whatWorked: 'none',
+      extractionSource: 'exit',
+      sourceSessionId: 'legacy-session',
+      sourceSessionTitle: 'Legacy Session',
+    });
+
+    const legacyDir = join(tmpDir, 'sessions', 'wd_abc123', 'memory');
+    await mkdir(legacyDir, { recursive: true });
+    const legacyPath = join(legacyDir, 'entries.jsonl');
+    await writeFile(
+      legacyPath,
+      JSON.stringify({ type: 'memory_memo', version: 2, entry: legacyMemo }) + '\n',
+      'utf8',
+    );
+
+    await MemoryMemoStore.migrateLegacyStores(tmpDir);
+
+    const globalStore = new MemoryMemoStore(tmpDir);
+    const memos: MemoryMemo[] = [];
+    for await (const memo of globalStore.read()) {
+      memos.push(memo);
+    }
+    expect(memos.length).toBe(1);
+    expect(memos[0]!.userNeed).toBe('Legacy need');
+
+    await expect(stat(legacyPath)).rejects.toThrow();
+  });
+
+  it('skips entries whose ids already exist in the global store', async () => {
+    const sharedMemo = createMemoryMemo({
+      userNeed: 'Shared need',
+      approach: 'Shared approach',
+      outcome: '完成',
+      whatFailed: 'none',
+      whatWorked: 'none',
+      extractionSource: 'exit',
+      sourceSessionId: 'shared-session',
+      sourceSessionTitle: 'Shared Session',
+    });
+
+    const globalStore = new MemoryMemoStore(tmpDir);
+    await globalStore.append(sharedMemo);
+
+    const legacyDir = join(tmpDir, 'sessions', 'wd_shared', 'memory');
+    await mkdir(legacyDir, { recursive: true });
+    await writeFile(
+      join(legacyDir, 'entries.jsonl'),
+      JSON.stringify({ type: 'memory_memo', version: 2, entry: sharedMemo }) + '\n',
+      'utf8',
+    );
+
+    await MemoryMemoStore.migrateLegacyStores(tmpDir);
+
+    const memos: MemoryMemo[] = [];
+    for await (const memo of globalStore.read()) {
+      memos.push(memo);
+    }
+    expect(memos.length).toBe(1);
   });
 });
 

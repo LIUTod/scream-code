@@ -16,4 +16,7 @@ tools:
   - Glob
   - Grep
   - WebSearch
+  - MemoryLookup
+  - MemoryConsolidatePlan
+  - MemoryConsolidateApply
   - FetchURL

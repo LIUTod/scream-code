@@ -2,7 +2,6 @@ export type { MemoryMemo, MemoryMemoRecord, MemoryMemoSummary, MemoryMemoListRes
 export { createMemoryMemo, toSummary } from './models.js';
 export { MemoryMemoStore } from './store.js';
 export { parseMemoryMemos, buildExitExtractionPrompt, EXIT_EXTRACTION_SYSTEM_PROMPT } from './extractor.js';
-export { resolveProjectDir } from './paths.js';
 export { computeRelevanceScore, rankMemos, type ScoredMemo } from './scoring.js';
 export {
   buildConsolidationPlan,

@@ -439,6 +439,7 @@ export class Session {
       toolServices: this.options.toolServices,
       config: this.options.config,
       homedir,
+      screamHomeDir: this.options.screamHomeDir,
       skills: this.skills,
       rpc: proxyWithExtraPayload(this.rpc, { agentId: id }),
       modelProvider: this.options.providerManager,

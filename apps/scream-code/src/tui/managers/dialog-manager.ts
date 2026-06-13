@@ -3,7 +3,7 @@ import type {
   ScreamHarness,
   Session,
 } from '@scream-cli/scream-code-sdk';
-import { MemoryMemoStore, resolveProjectDir, type MemoryMemoSummary } from '@scream-code/memory';
+import { MemoryMemoStore, type MemoryMemoSummary } from '@scream-code/memory';
 import { getDataDir } from '#/utils/paths';
 import type { TUIState } from '../tui-state';
 import type { LivePaneState } from '../types';
@@ -174,9 +174,7 @@ export class DialogManager {
     preloadedMemos?: MemoryMemoSummary[],
     preloadedTotal?: number,
   ): void {
-    const store = new MemoryMemoStore(
-      resolveProjectDir(getDataDir(), this.host.getCurrentWorkDir()),
-    );
+    const store = new MemoryMemoStore(getDataDir());
 
     const hasData = preloadedMemos !== undefined;
     const memos = preloadedMemos ?? [];

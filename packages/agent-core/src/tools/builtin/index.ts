@@ -12,6 +12,8 @@ export * from './goal/get-goal';
 export * from './goal/set-goal-budget';
 export * from './goal/update-goal';
 export * from './goal/write-goal-note';
+export * from './memory/memory-consolidate';
+export * from './memory/memory-lookup';
 
 export * from './collaboration/skill-tool';
 export * from './collaboration/wolfpack';

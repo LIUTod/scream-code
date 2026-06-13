@@ -73,6 +73,7 @@ export interface AgentOptions {
   readonly jian: Jian;
   readonly config?: ScreamConfig;
   readonly homedir?: string;
+  readonly screamHomeDir?: string;
   readonly rpc?: Partial<SDKAgentRPC>;
   readonly persistence?: AgentRecordPersistence;
   readonly type?: AgentType;
@@ -176,16 +177,16 @@ export class Agent {
     this.background = new BackgroundManager(this);
     this.cron = this.type === 'sub' ? null : new CronManager(this);
     this.goal = new GoalMode(this);
-    // homedir = <sessionDir>/agents/<agentId>, need 3 levels up to reach
-    // <projectDir> where memory/entries.jsonl lives
-    const projectDir = options.homedir
-      ? dirname(dirname(dirname(options.homedir)))
+    // Use a global memory store shared across all sessions/workDirs.
+    const screamHomeDir = options.screamHomeDir;
+    this.memoStore = screamHomeDir
+      ? new MemoryMemoStore(screamHomeDir)
       : undefined;
-    this.memoStore = projectDir
-      ? new MemoryMemoStore(projectDir)
-      : undefined;
+    if (this.memoStore !== undefined && screamHomeDir !== undefined) {
+      void MemoryMemoStore.migrateLegacyStores(screamHomeDir);
+    }
     this.sessionMemory = new SessionMemory(this);
-    this.dreamTracker = new DreamTracker(projectDir ?? '');
+    this.dreamTracker = new DreamTracker(screamHomeDir ?? '');
     this.replayBuilder = new ReplayBuilder(this);
   }
 
