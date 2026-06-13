@@ -200,6 +200,13 @@ export class Session {
       }
     }
     try {
+      // Cancel any in-flight turn so the session can be resumed or have its
+      // model switched without inheriting a stuck/partial tool exchange.
+      for (const agent of this.agents.values()) {
+        if (agent.turn.hasActiveTurn) {
+          agent.turn.cancel();
+        }
+      }
       await Promise.allSettled(
         Array.from(this.agents.values(), async (agent) => agent.cron?.stop()),
       );
