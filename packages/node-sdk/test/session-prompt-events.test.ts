@@ -210,7 +210,7 @@ describe('Session.prompt events', () => {
           reason: 'completed',
         }),
       );
-      expect(fakeProviderState.calls[0]?.systemPrompt).toContain('You are Scream Code CLI');
+      expect(fakeProviderState.calls[0]?.systemPrompt).toContain('You are Scream Code');
       expect(fakeProviderState.calls[0]?.systemPrompt).toContain('Available skills');
       expect(fakeProviderState.providerConfigs[0]).toMatchObject({
         type: 'scream',
