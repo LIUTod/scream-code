@@ -83,6 +83,7 @@ export function createTUIState(options: ScreamTUIOptions): TUIState {
   const queueContainer = new GutterContainer(CHROME_GUTTER, CHROME_GUTTER);
   const editorContainer = new GutterContainer(CHROME_GUTTER, CHROME_GUTTER);
   const editor = new CustomEditor(ui, theme.colors);
+  editor.thinking = initialAppState.thinking;
   const footer = new FooterComponent({ ...initialAppState }, theme.colors, () => {
     ui.requestRender();
   });

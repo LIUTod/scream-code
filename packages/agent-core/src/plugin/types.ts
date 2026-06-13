@@ -88,12 +88,18 @@ export interface PluginRecord {
   readonly capabilities?: PluginCapabilityState;
   readonly github?: PluginGithubMetadata;
   readonly skillInstructions?: string;
+  readonly skills: readonly PluginSkillSummary[];
   readonly skillCount: number;
   readonly manifest?: PluginManifest;
   readonly manifestKind?: PluginManifestKind;
   readonly manifestPath?: string;
   readonly shadowedManifestPath?: string;
   readonly diagnostics: readonly PluginDiagnostic[];
+}
+
+export interface PluginSkillSummary {
+  readonly name: string;
+  readonly description: string;
 }
 
 export interface PluginSummary {
@@ -103,6 +109,7 @@ export interface PluginSummary {
   readonly enabled: boolean;
   readonly state: PluginState;
   readonly skillCount: number;
+  readonly skills: readonly PluginSkillSummary[];
   readonly mcpServerCount: number;
   readonly enabledMcpServerCount: number;
   readonly hasErrors: boolean;

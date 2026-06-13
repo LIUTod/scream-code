@@ -163,6 +163,7 @@ function createInitialAppState(input: ScreamTUIStartupInput): AppState {
     goalContinuationCount: 0,
     ccConnectActive: false,
     wolfpackMode: false,
+    recentSessions: [],
   };
 }
 
@@ -347,6 +348,18 @@ export class ScreamTUI {
   private async initMainTui(): Promise<boolean> {
     const shouldReplayHistory = await this.init();
 
+    // Load recent sessions for the welcome screen.
+    try {
+      const sessions = await this.harness.listSessions({ workDir: this.state.appState.workDir });
+      this.state.appState.recentSessions = sessions.slice(0, 3).map((s) => ({
+        id: s.id,
+        title: s.title,
+        updatedAt: s.updatedAt,
+      }));
+    } catch {
+      this.state.appState.recentSessions = [];
+    }
+
     // Mount only after init() succeeds; see mountFooter().
     this.mountFooter();
     this.renderWelcome();
@@ -467,7 +480,7 @@ export class ScreamTUI {
   // Memory idle extraction
   // ---------------------------------------------------------------------------
 
-  private static readonly MEMORY_IDLE_MS = 10 * 60 * 1000; // 10 minutes
+  private static readonly MEMORY_IDLE_MS = 15 * 60 * 1000; // 15 minutes
   private static readonly MEMORY_EXTRACT_COOLDOWN_MS = 10 * 60 * 1000; // 10 minutes
 
   private startMemoryIdleTimer(): void {
@@ -926,6 +939,9 @@ export class ScreamTUI {
     const busyChanged = 'streamingPhase' in patch || 'isCompacting' in patch;
     Object.assign(this.state.appState, patch);
     if ('planMode' in patch) this.updateEditorBorderHighlight();
+    if ('thinking' in patch) {
+      this.state.editor.thinking = patch.thinking ?? false;
+    }
     // Stop the welcome breathing animation once the first message is sent —
     // the panel scrolls off-screen but the 40 ms timer keeps firing
     // requestRender, causing flicker and broken scroll.
@@ -1148,7 +1164,12 @@ export class ScreamTUI {
 
   private renderWelcome(): void {
     this.welcomeComponent?.stopBreathing();
-    const welcome = new WelcomeComponent(this.state.appState, this.state.theme.colors, this.state.ui);
+    const welcome = new WelcomeComponent(
+      this.state.appState,
+      this.state.theme.colors,
+      this.state.ui,
+      this.state.appState.recentSessions,
+    );
     welcome.borderTitle = 'Scream Code';
     this.welcomeComponent = welcome;
     // Once the user has typed anything (even a single character), breathing

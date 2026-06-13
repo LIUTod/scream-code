@@ -12,6 +12,7 @@ import { getColorPalette } from '#/tui/theme/index';
 function makeEditor(): CustomEditor {
   const tui = {
     requestRender: vi.fn(),
+    terminal: { rows: 24, cols: 80 },
   } as unknown as TUI;
   return new CustomEditor(tui, { ...getColorPalette('dark') });
 }
@@ -40,7 +41,7 @@ describe('CustomEditor autocomplete Escape handling', () => {
 
     expect(editor.isShowingAutocomplete()).toBe(true);
 
-    editor.handleInput('\u001B');
+    editor.handleInput('');
 
     expect(editor.isShowingAutocomplete()).toBe(false);
     expect(onEscape).not.toHaveBeenCalled();
@@ -64,7 +65,7 @@ describe('CustomEditor autocomplete Escape handling', () => {
 
     editor.handleInput('/');
     await flushAutocomplete();
-    editor.handleInput('\u001B');
+    editor.handleInput('');
     resolveSuggestions([{ value: 'help', label: 'help' }]);
     await flushAutocomplete();
 
@@ -77,8 +78,8 @@ describe('CustomEditor Kitty key release handling', () => {
   it('ignores Kitty key release events instead of inserting their CSI-u payload', () => {
     const editor = makeEditor();
 
-    editor.handleInput('\u001B[47;1:3u');
-    editor.handleInput('\u001B[110;1:3u');
+    editor.handleInput('[47;1:3u');
+    editor.handleInput('[110;1:3u');
 
     expect(editor.getText()).toBe('');
   });
@@ -215,7 +216,7 @@ describe('CustomEditor shortcut telemetry hooks', () => {
 
     editor.handleInput('a');
     editor.handleInput('\n');
-    editor.handleInput('\u001B[106;5u');
+    editor.handleInput('[106;5u');
 
     expect(onInsertNewline).toHaveBeenCalledTimes(2);
     expect(editor.getText()).toBe('a\n\n');
@@ -227,8 +228,39 @@ describe('CustomEditor shortcut telemetry hooks', () => {
     editor.onUndo = onUndo;
 
     editor.handleInput('a');
-    editor.handleInput('\u001F');
+    editor.handleInput('');
 
     expect(onUndo).toHaveBeenCalledOnce();
+  });
+});
+
+describe('CustomEditor think label', () => {
+  it('embeds a "think" label in the top border when thinking is enabled', () => {
+    const editor = makeEditor();
+    editor.thinking = true;
+
+    const out = editor.render(40).join('\n');
+
+    expect(out).toContain('─ Think ─');
+    expect(out).toContain('╭');
+    expect(out).toContain('╮');
+  });
+
+  it('hides the think label when thinking is disabled', () => {
+    const editor = makeEditor();
+    editor.thinking = false;
+
+    const out = editor.render(40).join('\n');
+
+    expect(out).not.toContain('─ Think ─');
+  });
+
+  it('does not try to embed the label when the terminal is too narrow', () => {
+    const editor = makeEditor();
+    editor.thinking = true;
+
+    const out = editor.render(8).join('\n');
+
+    expect(out).not.toContain('think');
   });
 });

@@ -16,6 +16,7 @@ import {
   type PluginInfo,
   type PluginMcpServerInfo,
   type PluginRecord,
+  type PluginSkillSummary,
   type PluginSource,
   type PluginSummary,
   type ReloadSummary,
@@ -331,6 +332,7 @@ async function recordFrom(input: {
 }): Promise<PluginRecord> {
   const { parsed } = input;
   const hasError = parsed.diagnostics.some((d) => d.severity === 'error');
+  const skills = hasError || parsed.manifest === undefined ? [] : await discoverPluginSkills(input.id, parsed.manifest);
   return {
     id: input.id,
     root: input.root,
@@ -342,7 +344,8 @@ async function recordFrom(input: {
     originalSource: input.originalSource,
     capabilities: input.capabilities,
     github: input.github,
-    skillCount: await countDiscoveredPluginSkills(input.id, parsed.manifest),
+    skills,
+    skillCount: skills.length,
     manifest: parsed.manifest,
     manifestKind: parsed.manifestKind,
     manifestPath: parsed.manifestPath,
@@ -360,6 +363,7 @@ function recordToSummary(record: PluginRecord): PluginSummary {
     enabled: record.enabled,
     state: record.state,
     skillCount: record.skillCount,
+    skills: record.skills,
     mcpServerCount: Object.keys(record.manifest?.mcpServers ?? {}).length,
     enabledMcpServerCount: pluginMcpServersInfo(record).filter((server) => server.enabled).length,
     hasErrors: record.diagnostics.some((d) => d.severity === 'error'),
@@ -369,18 +373,18 @@ function recordToSummary(record: PluginRecord): PluginSummary {
   };
 }
 
-async function countDiscoveredPluginSkills(
+async function discoverPluginSkills(
   pluginId: string,
   manifest: PluginRecord['manifest'],
-): Promise<number> {
+): Promise<readonly PluginSkillSummary[]> {
   const roots = (manifest?.skills ?? []).map((dir) => ({
     path: dir,
     source: 'extra',
     plugin: { id: pluginId, instructions: manifest?.skillInstructions },
   }) satisfies SkillRoot);
-  if (roots.length === 0) return 0;
+  if (roots.length === 0) return [];
   const skills = await discoverSkills({ roots });
-  return skills.length;
+  return skills.map((skill) => ({ name: skill.name, description: skill.description }));
 }
 
 function recordToInfo(record: PluginRecord): PluginInfo {

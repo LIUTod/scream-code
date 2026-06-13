@@ -46,12 +46,14 @@ export class SkillRegistry {
       onWarning: this.onWarning,
       onSkippedByPolicy: (skill) => this.skipped.push(skill),
       onDiscoveredSkill: (skill) => {
+        // Index plugin-local name early so plugin-specific lookup survives
+        // scanner-level deduplication of globally colliding names.
         this.indexPluginSkill(skill);
       },
     } satisfies DiscoverSkillsOptions);
 
     for (const skill of skills) {
-      this.byName.set(normalizeSkillName(skill.name), skill);
+      this.register(skill);
     }
   }
 
@@ -60,11 +62,27 @@ export class SkillRegistry {
   }
 
   register(skill: SkillDefinition, options: { readonly replace?: boolean } = {}): void {
-    const key = normalizeSkillName(skill.name);
-    if (options.replace === true || !this.byName.has(key)) {
-      this.byName.set(key, skill);
+    const pluginId = skill.plugin?.id;
+    const resolved = resolveUniqueSkillName(skill, this.byName, pluginId);
+    if (resolved.shadowed) {
+      this.onWarning(
+        `Skill "${skill.name}" from ${skill.source}${pluginId !== undefined ? ` (plugin "${pluginId}")` : ''} is shadowed by an existing skill with the same name.`,
+      );
+      return;
     }
+    const normalizedSkill = resolved.name === skill.name ? skill : { ...skill, name: resolved.name };
+    const key = normalizeSkillName(resolved.name);
+    if (options.replace === true || !this.byName.has(key)) {
+      this.byName.set(key, normalizedSkill);
+    }
+    // Index by the original plugin-local name so getPluginSkill(pluginId, name)
+    // still works even when the global name had to be prefixed to avoid collision.
     this.indexPluginSkill(skill, options);
+    if (resolved.renamed) {
+      this.onWarning(
+        `Skill "${skill.name}" from plugin "${pluginId}" was renamed to "${resolved.name}" because a skill with the same name is already registered.`,
+      );
+    }
   }
 
   getSkill(name: string): SkillDefinition | undefined {
@@ -140,6 +158,49 @@ export class SkillRegistry {
 
 function pluginSkillKey(pluginId: string, skillName: string): string {
   return `${pluginId}\0${normalizeSkillName(skillName)}`;
+}
+
+interface UniqueSkillNameResult {
+  readonly name: string;
+  readonly renamed: boolean;
+  readonly shadowed: boolean;
+}
+
+/**
+ * Resolve a unique skill name when registering across multiple sources.
+ *
+ * Non-plugin skills are never renamed; if their name collides with an existing
+ * skill they are considered shadowed and should be reported to the caller.
+ * Plugin skills get a "plugin-id:skill-name" prefix on collision so users can
+ * still invoke them and distinguish them in listings. If even the prefixed
+ * form collides, a numeric suffix is appended.
+ */
+function resolveUniqueSkillName(
+  skill: SkillDefinition,
+  byName: ReadonlyMap<string, SkillDefinition>,
+  pluginId: string | undefined,
+): UniqueSkillNameResult {
+  const originalKey = normalizeSkillName(skill.name);
+  if (!byName.has(originalKey)) {
+    return { name: skill.name, renamed: false, shadowed: false };
+  }
+  if (pluginId === undefined) {
+    return { name: skill.name, renamed: false, shadowed: true };
+  }
+  const prefixed = `${pluginId}:${skill.name}`;
+  const prefixedKey = normalizeSkillName(prefixed);
+  if (!byName.has(prefixedKey)) {
+    return { name: prefixed, renamed: true, shadowed: false };
+  }
+  let index = 2;
+  while (true) {
+    const candidate = `${pluginId}:${skill.name}-${String(index)}`;
+    const candidateKey = normalizeSkillName(candidate);
+    if (!byName.has(candidateKey)) {
+      return { name: candidate, renamed: true, shadowed: false };
+    }
+    index++;
+  }
 }
 
 const SOURCE_GROUPS: ReadonlyArray<{ readonly source: SkillSource; readonly label: string }> = [

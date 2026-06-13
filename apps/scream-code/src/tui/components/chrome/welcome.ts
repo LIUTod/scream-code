@@ -1,10 +1,13 @@
 /**
  * Welcome panel shown at the top of the TUI.
- * Renders a round-bordered box with the logo, session, model, and version.
  *
- * The two-line ASCII logo cycles through a full 24-colour hue wheel
- * (like addressable RGB LEDs) — starting and ending at the theme's
- * primary green, smoothly sweeping through the full spectrum.
+ * Layout: a single rounded box split into three areas by internal lines.
+ *   - Left column: logo + model + version, vertically centered.
+ *   - Right top: quick-start tips.
+ *   - Right bottom: recent sessions.
+ *
+ * The logo, outer border, and section titles share the theme's breathing
+ * primary colour; content stays muted.
  */
 
 import type { Component, TUI } from '@earendil-works/pi-tui';
@@ -12,7 +15,7 @@ import { truncateToWidth, visibleWidth } from '@earendil-works/pi-tui';
 import chalk from 'chalk';
 
 import type { ColorPalette } from '#/tui/theme/colors';
-import type { AppState } from '#/tui/types';
+import type { AppState, RecentSession } from '#/tui/types';
 
 // 24 hues × 5 interpolated steps = 120 frames × 40 ms ≈ 4.8 s cycle.
 const HUE_STOPS = 24;
@@ -20,8 +23,17 @@ const SUB_STEPS = 5;
 const BREATHE_STEPS = HUE_STOPS * SUB_STEPS; // 120
 const BREATHE_INTERVAL_MS = 40;
 
+const WELCOME_TIPS: readonly string[] = [
+  '/config  配置模型',
+  '/sessions  恢复历史会话',
+  '/  输入后打开快捷菜单',
+];
+
+const WELCOME_SESSION_SLOTS = 3;
+const LEFT_COLUMN_WIDTH = 22;
+const MIN_BOX_WIDTH = 50;
+
 // ── Logo face animation frames ──────────────────────────────────────
-// Top row is always the same; bottom row animates the "eyes".
 const LOGO_FRAMES: [string, string][] = [
   ['██▄▄▄██', '▐█▄▀▄█▌'], // 回中
   ['██▄▄▄██', '▐▄▄▀▄▄▌'], // 眯眼
@@ -76,13 +88,6 @@ function rgbToHex(r: number, g: number, b: number): string {
   return `#${c(r)}${c(g)}${c(b)}`;
 }
 
-// ── Palette builder ─────────────────────────────────────────────────
-
-/**
- * Build a full-hue-wheel palette anchored at the primary-green hue.
- * At frame 0 (and BREATHE_STEPS) the colour is pure primary; in between
- * it sweeps through all 24 hue stops with smooth sub-step interpolation.
- */
 function buildBreathingPalette(primaryHex: string, hueStops: number, subSteps: number): string[] {
   const [r, g, b] = hexToRgb(primaryHex);
   const [baseHue] = rgbToHsl(r, g, b);
@@ -90,12 +95,34 @@ function buildBreathingPalette(primaryHex: string, hueStops: number, subSteps: n
 
   const palette: string[] = [];
   for (let i = 0; i < steps; i++) {
-    // Map frame index to a hue angle, anchored at the primary hue so frame 0 = primary green.
     const hueAngle = (baseHue + (i / steps) * 360) % 360;
     const [rr, gg, bb] = hslToRgb(hueAngle, 90, 70);
     palette.push(rgbToHex(rr, gg, bb));
   }
   return palette;
+}
+
+function formatTimeAgo(timestamp: number): string {
+  const seconds = Math.floor((Date.now() - timestamp) / 1000);
+  if (seconds < 60) return '刚刚';
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}分钟前`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}小时前`;
+  const days = Math.floor(hours / 24);
+  return `${days}天前`;
+}
+
+function padSpaces(n: number): string {
+  return ' '.repeat(Math.max(0, n));
+}
+
+function centerText(text: string, width: number): string {
+  const visLen = visibleWidth(text);
+  if (visLen >= width) return truncateToWidth(text, width, '…');
+  const leftPad = Math.floor((width - visLen) / 2);
+  const rightPad = width - visLen - leftPad;
+  return ' '.repeat(leftPad) + text + ' '.repeat(rightPad);
 }
 
 // ── Component ───────────────────────────────────────────────────────
@@ -107,12 +134,14 @@ export class WelcomeComponent implements Component {
   private breatheFrame = 0;
   private breatheTimer: ReturnType<typeof setInterval> | null = null;
   private breathePalette: string[];
+  private recentSessions: readonly RecentSession[];
   borderTitle: string | null = null;
 
-  constructor(state: AppState, colors: ColorPalette, ui: TUI) {
+  constructor(state: AppState, colors: ColorPalette, ui: TUI, recentSessions: readonly RecentSession[] = []) {
     this.state = state;
     this.colors = colors;
     this.ui = ui;
+    this.recentSessions = recentSessions;
     this.breathePalette = buildBreathingPalette(colors.primary, HUE_STOPS, SUB_STEPS);
     this.startBreathing();
   }
@@ -122,8 +151,6 @@ export class WelcomeComponent implements Component {
       clearInterval(this.breatheTimer);
       this.breatheTimer = null;
     }
-    // Reset to frame 0 (primary green) so the logo doesn't freeze on a
-    // random hue from the middle of the wheel.
     if (this.breatheFrame !== 0) {
       this.breatheFrame = 0;
       this.ui.requestRender();
@@ -141,80 +168,145 @@ export class WelcomeComponent implements Component {
 
   render(width: number): string[] {
     const breatheColor = this.breathePalette[this.breatheFrame] ?? this.colors.primary;
-    const logoColor = (s: string): string => chalk.hex(breatheColor)(s);
+    const boxColor = chalk.hex(breatheColor);
     const dim = chalk.hex(this.colors.textDim);
-    const labelStyle = chalk.bold.hex(this.colors.textDim);
-    const innerWidth = Math.max(10, width - 4);
+    const muted = chalk.hex(this.colors.textMuted);
+    const titleColor = chalk.bold.hex(breatheColor);
+
+    const boxWidth = Math.max(MIN_BOX_WIDTH, width);
+    const innerWidth = boxWidth - 2;
+    const showRightColumn = innerWidth >= 55;
+    const leftCol = showRightColumn ? LEFT_COLUMN_WIDTH : innerWidth;
+    const rightCol = showRightColumn ? Math.max(10, innerWidth - leftCol - 1) : 0;
+
     const isLoggedOut = !this.state.model;
-
-    // ── Logo ──
-    const frameIdx = this.breatheTimer !== null ? Math.floor(this.breatheFrame / 24) % LOGO_FRAMES.length : 0;
-    const frame = LOGO_FRAMES[frameIdx]!;
-    const logo = [logoColor(frame[0]), logoColor(frame[1])];
-
-    // ── Info ──
     const activeModel = this.state.availableModels[this.state.model];
     const modelValue = isLoggedOut
-      ? chalk.hex(this.colors.warning)('未设置，运行 /config')
+      ? chalk.hex(this.colors.warning)('未设置')
       : (activeModel?.displayName ?? activeModel?.model ?? this.state.model);
 
     let versionValue: string;
     if (this.state.hasNewVersion && this.state.latestVersion !== null) {
       versionValue =
         chalk.hex(this.colors.warning)(this.state.version) +
-        '  ' +
-        chalk.hex(this.colors.textDim)('有新版本（' + this.state.latestVersion + '）');
+        ' ' +
+        dim('(' + this.state.latestVersion + ')');
     } else {
       versionValue = this.state.version;
     }
 
-    const hintText = isLoggedOut
-      ? '运行 /config 开始配置'
-      : '发送 / 进入快捷菜单，/exit 保存并退出';
+    const frameIdx = this.breatheTimer !== null ? Math.floor(this.breatheFrame / 24) % LOGO_FRAMES.length : 0;
+    const frame = LOGO_FRAMES[frameIdx]!;
+    const logo = [boxColor(frame[0]), boxColor(frame[1])];
 
-    const contentLines: string[] = [
-      ...logo,
-      '',
-      labelStyle('版本：') + ' ' + versionValue,
-      labelStyle('模型：') + ' ' + modelValue,
-      labelStyle('目录：') + ' ' + this.state.workDir,
-      '',
-      dim(hintText),
-    ];
+    // Right column content.
+    const tipLines: string[] = [];
+    for (const tip of WELCOME_TIPS) {
+      tipLines.push(` ${dim('•')} ${muted(tip)}`);
+    }
 
-    // ── Top border with centered title ──
+    const sessionLines: string[] = [];
+    const sessions = this.recentSessions.slice(0, WELCOME_SESSION_SLOTS);
+    if (sessions.length === 0) {
+      sessionLines.push(` ${dim('•')} ${muted('无最近会话')}`);
+    } else {
+      for (const session of sessions) {
+        const name = session.title ?? session.id;
+        const timeAgo = formatTimeAgo(session.updatedAt);
+        sessionLines.push(` ${dim('•')} ${muted(name)} ${dim(`(${timeAgo})`)}`);
+      }
+    }
+
+    let leftRows: string[];
+    let rightRows: string[] = [];
+    let separatorRow = -1;
+
+    if (showRightColumn) {
+      rightRows = [
+        ` ${titleColor('Tips')}`,
+        ...tipLines,
+        boxColor('─'.repeat(rightCol)),
+        ` ${titleColor('最近会话')}`,
+        ...sessionLines,
+      ];
+      separatorRow = 1 + tipLines.length;
+
+      const leftContent = [
+        '',
+        centerText(logo[0]!, leftCol),
+        centerText(logo[1]!, leftCol),
+        '',
+        centerText(dim(versionValue), leftCol),
+        centerText(dim(modelValue), leftCol),
+      ];
+      const topPad = Math.max(0, Math.floor((rightRows.length - leftContent.length) / 2));
+      const bottomPad = Math.max(0, rightRows.length - leftContent.length - topPad);
+      leftRows = [
+        ...Array(topPad).fill(''),
+        ...leftContent,
+        ...Array(bottomPad).fill(''),
+      ];
+    } else {
+      const leftContent = [
+        '',
+        centerText(logo[0]!, leftCol),
+        centerText(logo[1]!, leftCol),
+        '',
+        centerText(dim(versionValue), leftCol),
+        centerText(dim(modelValue), leftCol),
+        '',
+      ];
+      leftRows = leftContent;
+    }
+
+    // Top border with the title centered above the left-column logo.
     const borderTitle = this.borderTitle ?? '';
-    const contentWidth = width - 2;
+    const contentWidth = boxWidth - 2;
     let topBorder: string;
     if (borderTitle) {
-      const centerPos = Math.floor(contentWidth / 2);
+      const titleVis = visibleWidth(borderTitle);
+      const textPad = Math.floor((leftCol - titleVis) / 2);
+      const leftDash = Math.max(0, textPad - 2);
       const titleText = `─ ${borderTitle} ─`;
-      const titleStart = centerPos - Math.floor(visibleWidth(titleText) / 2);
-      const leftDash = Math.max(0, titleStart);
-      const rightDash = Math.max(0, contentWidth - leftDash - visibleWidth(titleText));
-      topBorder = logoColor('╭' + '─'.repeat(leftDash) + titleText + '─'.repeat(rightDash) + '╮');
+      const titleBlockVis = titleVis + 4;
+      const rightDash = Math.max(0, contentWidth - leftDash - titleBlockVis);
+      topBorder = boxColor('╭' + '─'.repeat(leftDash) + titleText + '─'.repeat(rightDash) + '╮');
     } else {
-      topBorder = logoColor('╭' + '─'.repeat(contentWidth) + '╮');
+      topBorder = boxColor('╭' + '─'.repeat(contentWidth) + '╮');
     }
 
-    const lines: string[] = [
-      '',
-      topBorder,
-      logoColor('│') + ' '.repeat(width - 2) + logoColor('│'),
-    ];
+    const lines: string[] = [''];
+    const boxOffset = '';
 
-    for (const content of contentLines) {
-      const truncated = truncateToWidth(content, innerWidth, '…');
-      const vis = visibleWidth(truncated);
-      const centerPad = Math.floor((width - 1 - vis) / 2);
-      const rightPad = width - 2 - vis - centerPad;
-      lines.push(logoColor('│') + ' '.repeat(centerPad) + truncated + ' '.repeat(rightPad) + logoColor('│'));
+    lines.push(boxOffset + topBorder);
+
+    const totalRows = Math.max(leftRows.length, rightRows.length);
+    for (let i = 0; i < totalRows; i++) {
+      const left = this.#fitToWidth(leftRows[i] ?? '', leftCol);
+      if (showRightColumn) {
+        const right = this.#fitToWidth(rightRows[i] ?? '', rightCol);
+        const sep = i === separatorRow ? boxColor('├') : boxColor('│');
+        lines.push(boxOffset + boxColor('│') + left + sep + right + boxColor('│'));
+      } else {
+        lines.push(boxOffset + boxColor('│') + left + boxColor('│'));
+      }
     }
 
-    lines.push(logoColor('│') + ' '.repeat(width - 2) + logoColor('│'));
-    lines.push(logoColor('╰' + '─'.repeat(width - 2) + '╯'));
+    if (showRightColumn) {
+      lines.push(boxOffset + boxColor('╰' + '─'.repeat(leftCol) + '┴' + '─'.repeat(rightCol) + '╯'));
+    } else {
+      lines.push(boxOffset + boxColor('╰' + '─'.repeat(leftCol) + '╯'));
+    }
     lines.push('');
 
     return lines;
+  }
+
+  #fitToWidth(str: string, width: number): string {
+    const visLen = visibleWidth(str);
+    if (visLen > width) {
+      return truncateToWidth(str, width, '…');
+    }
+    return str + padSpaces(width - visLen);
   }
 }

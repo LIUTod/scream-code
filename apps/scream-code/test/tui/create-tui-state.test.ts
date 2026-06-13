@@ -34,6 +34,7 @@ function fakeInitialAppState(): AppState {
     goalContinuationCount: 0,
     ccConnectActive: false,
     wolfpackMode: false,
+    recentSessions: [],
   };
 }
 

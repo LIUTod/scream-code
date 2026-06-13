@@ -188,7 +188,7 @@ describe('PluginManager', () => {
     });
   });
 
-  it('summaries count discovered skills inside plugin skill roots', async () => {
+  it('summaries include discovered skill names and descriptions', async () => {
     const home = await makeScreamHome();
     const root = await makePlugin('superpowers', {
       skillNames: ['brainstorming', 'systematic-debugging', 'writing-plans'],
@@ -197,13 +197,18 @@ describe('PluginManager', () => {
     await manager.load();
     await manager.install(root);
 
-    expect(manager.summaries()).toContainEqual(
-      expect.objectContaining({
-        id: 'superpowers',
-        skillCount: 3,
-      }),
-    );
+    const summary = manager.summaries().find((s) => s.id === 'superpowers');
+    expect(summary).toBeDefined();
+    expect(summary!.skillCount).toBe(3);
+    expect(summary!.skills.map((s) => s.name).sort()).toEqual([
+      'brainstorming',
+      'systematic-debugging',
+      'writing-plans',
+    ]);
+    expect(summary!.skills.every((s) => s.description.length > 0)).toBe(true);
+
     expect(manager.info('superpowers')?.skillCount).toBe(3);
+    expect(manager.info('superpowers')?.skills).toEqual(summary!.skills);
   });
 
   it('reload() picks up edits to the managed plugin copy', async () => {

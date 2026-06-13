@@ -311,8 +311,7 @@ export class FooterComponent implements Component {
 
     const model = shortenModel(modelDisplayName(state));
     if (model) {
-      const thinkingLabel = state.thinking ? ' 思考中' : '';
-      left.push(chalk.hex(colors.text)(`${model}${thinkingLabel}`));
+      left.push(chalk.hex(colors.text)(model));
     }
 
     // Background-task badges sit immediately before cwd. `bash-*` tasks

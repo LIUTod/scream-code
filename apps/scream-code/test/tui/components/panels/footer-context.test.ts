@@ -95,12 +95,10 @@ describe('FooterComponent — context NaN resilience', () => {
     expect(out).toMatch(/上下文：50\.0%/);
   });
 
-  it('shows "thinking" label when thinking is enabled, hides it when disabled', () => {
+  it('does not show a thinking label in the footer', () => {
     const on = new FooterComponent(baseState({ model: 'k2', thinking: true }), darkColors);
-    const off = new FooterComponent(baseState({ model: 'k2', thinking: false }), darkColors);
 
-    expect(strip(on.render(120)[0]!)).toContain('思考中');
-    expect(strip(off.render(120)[0]!)).not.toContain('思考中');
+    expect(strip(on.render(120)[0]!)).not.toContain('思考中');
   });
 
   it('renders transient hints replacing the status area', () => {

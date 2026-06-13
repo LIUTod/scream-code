@@ -89,3 +89,26 @@ export function toMcpToolResult(result: unknown): MCPToolResult {
   }
   return { content: [], isError: false };
 }
+
+/**
+ * Returns true when an MCP tool-call failure looks like a dead transport rather
+ * than an application-level error. These are the cases where tearing down and
+ * reconnecting the server is likely to help.
+ */
+export function isRetriableMcpCallError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const message = error.message.toLowerCase();
+  const patterns = [
+    /\be?connrefused\b/,
+    /\be?connreset\b/,
+    /\bepipe\b/,
+    /\be?netunreach\b/,
+    /\be?hostunreach\b/,
+    /fetch failed/,
+    /transport not connected/,
+    /transport closed/,
+    /network error/,
+    /maximum reconnection attempts/,
+  ];
+  return patterns.some((pattern) => pattern.test(message));
+}

@@ -4,8 +4,9 @@ import picomatch from 'picomatch';
 
 import type { Agent } from '..';
 import { makeErrorPayload } from '../../errors';
-import type { ExecutableTool } from '../../loop';
+import type { ExecutableTool, ExecutableToolResult } from '../../loop';
 import { createMcpAuthTool } from '../../mcp/auth-tool';
+import { isRetriableMcpCallError } from '../../mcp/client-shared';
 import type { McpConnectionManager, McpServerEntry } from '../../mcp';
 import { mcpResultToExecutableOutput } from '../../mcp/output';
 import { isMcpToolName, qualifyMcpToolName } from '../../mcp/tool-naming';
@@ -271,6 +272,7 @@ export class ToolManager {
       parameters,
       resolveExecution: (args) => {
         return {
+          description,
           approvalRule: name,
           execute: async (context) => {
             return this.agent.rpc!.toolCall!(
@@ -303,6 +305,7 @@ export class ToolManager {
     client: MCPClient,
     tools: readonly Tool[],
     enabledTools?: ReadonlySet<string>,
+    options?: { readonly mcp?: McpConnectionManager },
   ): McpServerRegistrationResult {
     this.unregisterMcpServer(serverName);
     const qualifiedNames: string[] = [];
@@ -336,17 +339,72 @@ export class ToolManager {
         parameters: tool.parameters,
         resolveExecution: (args) => {
           return {
+            description: tool.description,
             approvalRule: qualified,
             execute: async (context) => {
               // `args` has already been JSON-parsed and schema-validated by
               // the loop's preflight (`loop/tool-call.ts`), so the MCP
               // client gets a plain object directly.
-              const result = await client.callTool(
-                tool.name,
-                (args ?? {}) as Record<string, unknown>,
-                context.signal,
-              );
-              return mcpResultToExecutableOutput(result, qualified);
+              const runCall = async (targetClient: MCPClient): Promise<ExecutableToolResult> => {
+                const result = await targetClient.callTool(
+                  tool.name,
+                  (args ?? {}) as Record<string, unknown>,
+                  context.signal,
+                );
+                return mcpResultToExecutableOutput(result, qualified);
+              };
+
+              try {
+                return await runCall(client);
+              } catch (error) {
+                const mcp = options?.mcp;
+                if (
+                  mcp === undefined ||
+                  context.signal.aborted ||
+                  !(isRetriableMcpCallError(error) || mcp.get(serverName)?.status !== 'connected')
+                ) {
+                  return {
+                    isError: true,
+                    output:
+                      `MCP tool "${tool.name}" failed: ` +
+                      (error instanceof Error ? error.message : String(error)),
+                  };
+                }
+
+                try {
+                  await mcp.reconnect(serverName);
+                } catch {
+                  // reconnect failed; fall through and report the original call error
+                }
+
+                if (context.signal.aborted) {
+                  return {
+                    isError: true,
+                    output: `MCP tool "${tool.name}" aborted during reconnect.`,
+                  };
+                }
+
+                const resolved = mcp.resolved(serverName);
+                if (resolved === undefined) {
+                  return {
+                    isError: true,
+                    output:
+                      `MCP tool "${tool.name}" failed: ` +
+                      (error instanceof Error ? error.message : String(error)),
+                  };
+                }
+
+                try {
+                  return await runCall(resolved.client);
+                } catch (retryError) {
+                  return {
+                    isError: true,
+                    output:
+                      `MCP tool "${tool.name}" failed after reconnect: ` +
+                      (retryError instanceof Error ? retryError.message : String(retryError)),
+                  };
+                }
+              }
             },
           };
         },
@@ -437,6 +495,7 @@ export class ToolManager {
       resolved.client,
       resolved.tools,
       resolved.enabledNames,
+      { mcp },
     );
     this.emitMcpToolCollisions(entry.name, result.collisions);
     this.agent.emitEvent({

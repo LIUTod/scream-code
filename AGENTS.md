@@ -1,8 +1,165 @@
-# apps/scream-code Development Guide
+# scream-code Development Guide
 
-This file only contains rules local to `apps/scream-code`.
+> This guide covers the whole monorepo. Sections marked **apps/scream-code** are app-specific; the rest apply to all workspace packages.
 
-## TUI File Layout
+## Table of Contents
+
+1. [Workspace Overview](#workspace-overview)
+2. [Code Quality & Style](#code-quality--style)
+3. [TUI Sanitization](#tui-sanitization)
+4. [Testing Guidance](#testing-guidance)
+5. [Commands & Workflow](#commands--workflow)
+6. [TUI File Layout (apps/scream-code)](#tui-file-layout-apps-scream-code)
+7. [Module Responsibilities (apps/scream-code)](#module-responsibilities-apps-scream-code)
+8. [ScreamTUI Internal Sections (apps/scream-code)](#screamtui-internal-sections-apps-scream-code)
+9. [Where New Features Go (apps/scream-code)](#where-new-features-go-apps-scream-code)
+10. [TUI Coding Conventions (apps/scream-code)](#tui-coding-conventions-apps-scream-code)
+11. [How to Set Themes (apps/scream-code)](#how-to-set-themes-apps-scream-code)
+12. [MCP (apps/scream-code)](#mcp-apps-scream-code)
+13. [Slash Commands (apps/scream-code)](#slash-commands-apps-scream-code)
+14. [Agent-Core Mechanisms](#agent-core-mechanisms)
+15. [General Coding Requirements](#general-coding-requirements)
+
+---
+
+## Workspace Overview
+
+### Packages
+
+| Package | Path | Responsibility |
+| ----------------------- | ---------------------------------------------------- | ---------------------------------------------------------------------- |
+| `agent-core` | `packages/agent-core/` | Agent runtime: turn loop, session, tools, MCP client, compaction, memory, goal/wolfpack |
+| `ltod` | `packages/ltod/` | Multi-provider LLM client with streaming support |
+| `jian` | `packages/jian/` | Execution environment abstractions (filesystem, process, sandbox) |
+| `node-sdk` | `packages/node-sdk/` | Node.js SDK (`ScreamHarness`, `Session`) consumed by the app |
+| `memory` | `packages/memory/` | Cross-session memory store and scoring |
+| `telemetry` | `packages/telemetry/` | Telemetry, crash reporting, usage metrics |
+| `config` | `packages/config/` | Platform configuration, identity, model aliases |
+| `migration-legacy` | `packages/migration-legacy/` | Legacy data migration — **deprecated, do not expand** |
+| `apps/scream-code` | `apps/scream-code/` | CLI and terminal UI application (`scream` command) |
+
+### Terminology
+
+- When the user says **"agent"** or **"session"**, they mean the `packages/agent-core` runtime (`Session`, `Agent`, turn loop), not the assistant.
+- **"app"** / **"TUI"** / **"CLI"** refers to `apps/scream-code`.
+- **"SDK"** refers to `@scream-cli/scream-code-sdk` exported from `packages/node-sdk`.
+- **"LLM layer"** refers to `packages/ltod`.
+- **"memory"** refers to `packages/memory` task-experience records.
+
+### Cross-package Import Rules
+
+- `apps/scream-code` must use core capabilities **only through `@scream-cli/scream-code-sdk`**. Never import `@scream-cli/agent-core` directly in app code.
+- `packages/agent-core` must not depend on `apps/scream-code`.
+- Prefer package-local imports. When crossing packages, import from the package's public `index.ts` or documented subpaths.
+- For Node built-ins, prefer namespace imports: `import * as fs from 'node:fs/promises'`, `import * as path from 'node:path'`.
+
+---
+
+## Code Quality & Style
+
+### TypeScript
+
+- Avoid `any`. If unavoidable, add a short comment explaining why.
+- Do **not** introduce new `ReturnType<>` usage for new code; prefer explicit type names. Existing uses (e.g., timer IDs) should migrate to named aliases when touched.
+- Avoid inline type imports such as `import('pkg').Type` or `import('./module').Type`. Use top-level imports.
+- Optional object properties: pass `undefined` directly — do not use conditional spread.
+- Internal methods with only a single parameter should not be turned into options objects just for stylistic uniformity.
+- Except for a package's own public `index.ts`, internal `index.ts` barrels should prefer `export * from './module'`.
+
+### Classes
+
+- The current codebase uses `private readonly` for internal class state. Keep this style within a file; do not mix `private readonly` and native `#private` fields in the same component.
+- Constructor parameter properties are fine (e.g., `constructor(private readonly host: Host)`).
+- Leave externally accessible members bare (no `public` keyword).
+
+### Promises & Async
+
+- New code should prefer `Promise.withResolvers()` when it simplifies control flow. Do not refactor existing `new Promise` code purely for style.
+- In Bun contexts, prefer `await Bun.sleep(ms)` over `new Promise(r => setTimeout(r, ms))`.
+
+### Prompts & Static Copy
+
+- Tool descriptions and system prompts live in `.md` files next to the code that uses them.
+- Import them through the project's raw-text loader, e.g.:
+  ```ts
+  import DESCRIPTION from './tool.md';
+  ```
+  Do not inline multi-line prompts as template literals.
+- UI copy, option labels, help text, and dialog titles should stay next to the component or command that uses them. Do not centralize them into a global "copy constants" module.
+
+### Logging
+
+- **Never use `console.log` / `console.warn` / `console.error` in TUI components or render paths** — it corrupts terminal rendering.
+- `console.log` is allowed only in CLI-only, non-interactive flows (e.g., `channel-setup.ts`).
+- Runtime errors should go through the telemetry/logger or be written to the app log file, not printed to stdout/stderr.
+- Existing `console.error` in `apps/scream-code/src/tui/tui-state.ts` should be treated as a legacy escape hatch, not a pattern to copy.
+
+### Generated Files
+
+- `dist/`, `.turbo/`, and build artifacts are generated. Never hand-edit them.
+- `packages/agent-core/src/tools/builtin/**/*.md` are hand-authored prompt files; edit them directly.
+- `packages/migration-legacy/` is deprecated; do not add new migration logic.
+
+---
+
+## TUI Sanitization
+
+All text rendered in the TUI must be sanitized. Raw content — file contents, error messages, tool output, paths — breaks terminal rendering: tabs create visual holes, long lines overflow, and absolute paths leak the home directory.
+
+**Rules:**
+
+- **Tabs → spaces** via `replaceTabs()` (from `@earendil-works/pi-tui` or local render-utils).
+- **Truncate** lines with `truncateToWidth()` / `ui.truncate()`. Reuse existing `TRUNCATE_LENGTHS` constants; do not invent ad-hoc numbers.
+- **Shorten paths** with `shortenPath()` (replaces home with `~`).
+- **Apply to every render path**, not just the happy path:
+  - Success output (file previews, command output, search results).
+  - **Error messages** — these often embed file content (e.g., patch failure messages include unmatched lines). If a message contains file content, run `replaceTabs()` and truncate.
+  - Diff content (added and removed).
+  - Streaming previews.
+
+**Streaming tool previews:** Tool-call previews can have multiple render paths. If you add preview-only fields or depend on partially streamed args, update every path — not only the final renderer. Verify both live streaming and rebuilt transcript paths after any preview change.
+
+---
+
+## Testing Guidance
+
+Test the contract the system exposes — not the easiest internal detail to assert.
+
+- Every new test must defend one **concrete, externally observable contract**: behavior, output shape, state transition, error mapping, or a regression-prone parsing boundary. If you cannot name the contract, do not add the test.
+- No placeholder tests, tautologies, or "the code ran" assertions (`expect(true).toBe(true)`, bare `not.toThrow()`, non-empty string checks, length-grew checks, "prompt exists" checks without semantic assertion).
+- Prefer contract-level tests over implementation details. Avoid asserting internal helper wiring, field assignment, singleton identity, incidental ordering, prompt boilerplate, or passthrough option forwarding unless another component depends on that exact detail.
+- Don't duplicate coverage across abstraction levels. If an integration test already proves the behavior, drop the narrower unit test that restates it through mocks.
+- Tests **must be full-suite safe**, not just file-local safe. No long-lived file-wide mutations of `Bun.*`, `process.platform`, `process.env`, or `Bun.env` when a narrower seam exists. Prefer per-test `vi.spyOn(...)` with `vi.restoreAllMocks()` in `afterEach`.
+- **Never use `mock.module()`**. It mutates the global module registry and leaks across files. Use `spyOn` on the imported module object instead.
+- For lifecycle/stateful code, prefer one test per invariant or transition over several tiny tests asserting one field each from the same transition.
+- For error handling, trigger the real failure path and assert the surfaced contract — don't instantiate error classes directly or inspect internal metadata.
+- Smoke tests are acceptable only when they catch a failure mode narrower tests would miss. "Package boots" or "command starts" alone is not enough.
+- Assert exact strings, ordering, and formatting only when downstream code parses or depends on the exact bytes. Otherwise assert semantic content.
+- Compile-time guarantees → type checks/type tests, not runtime placeholders.
+- Don't add tests for tiny low-risk changes unless they protect a real contract or fix a regression-prone edge case.
+- Prefer focused package-local verification for the changed area.
+
+### Test Placement (apps/scream-code)
+
+- Component behavior tests live next to the corresponding component's tests.
+- Command parsing tests go under `test/tui/commands/`.
+- reverse-rpc tests go under `test/tui/reverse-rpc/`.
+- Pure utility tests go next to the corresponding utils tests.
+- Do not create a generic `some-feature.test.ts` just to land a small feature.
+
+---
+
+## Commands & Workflow
+
+- **Never commit, push, or publish unless explicitly asked.**
+- Type-check: `bun run typecheck` (per package) or the workspace check command.
+- Tests: `bunx vitest run` (package) or `bun run test` (workspace).
+- Build: `bun run build`.
+- Do not run raw `tsc` directly.
+
+---
+
+## TUI File Layout (apps/scream-code)
 
 `apps/scream-code` is the terminal UI / CLI app. The entry chain is:
 
@@ -28,7 +185,9 @@ Main directories:
 - `src/tui/utils/`: TUI-only utility functions.
 - `src/utils/`: app-wide utilities — clipboard, git, history, image, process, usage, and so on.
 
-## Module Responsibilities
+---
+
+## Module Responsibilities (apps/scream-code)
 
 - `cli` only interprets command-line input, assembles startup arguments, and invokes the TUI. Do not put TUI interaction logic into the CLI.
 - `ScreamTUI` coordinates; it does not accumulate complex business rules. New logic that can be tested independently should be split into `commands`, `components`, `reverse-rpc`, or `utils` first.
@@ -40,7 +199,9 @@ Main directories:
 - Resume replay orchestration lives in the `Session Replay` section of `ScreamTUI`, because it intentionally drives the same stateful render hooks as live events. Stateless replay parsing, limiting, and projection helpers belong in `src/tui/utils/message-replay.ts`.
 - `apps/scream-code` may only use core capabilities through `@scream-cli/scream-code-sdk`. Do not import `@scream-cli/agent-core` directly in app code.
 
-## ScreamTUI Internal Sections
+---
+
+## ScreamTUI Internal Sections (apps/scream-code)
 
 `src/tui/scream-tui.ts` is large. When you modify it, place code into the existing responsibility section — do not just drop it where it happens to be convenient.
 
@@ -61,7 +222,9 @@ Main directories:
 
 If a section keeps growing, split pure functions, state projections, presentation components, and handler logic into the corresponding directories rather than continuing to expand `ScreamTUI`.
 
-## Where New Features Go
+---
+
+## Where New Features Go (apps/scream-code)
 
 The feature type decides where it lands:
 
@@ -79,22 +242,18 @@ The feature type decides where it lands:
 - New constants: constants shared by CLI/TUI and not copy belong in `src/constant/`; non-copy constants reused only within the TUI belong in `src/tui/constant/`. Component-local copy, option labels, help descriptions, dialog title/footer text — keep these next to the corresponding component or command, do not centralize them into a global copy constants module.
 - New general-purpose capability: if it does not depend on TUI state, put it under `src/utils/`; if it depends on TUI state or a component, put it under `src/tui/utils/`.
 
-Test placement rules:
+---
 
-- Component behavior tests live next to the corresponding component's tests.
-- Command parsing tests go under `test/tui/commands/`.
-- reverse-rpc tests go under `test/tui/reverse-rpc/`.
-- Pure utility tests go next to the corresponding utils tests.
-- Do not create a generic `some-feature.test.ts` just to land a small feature.
-
-## TUI Coding Conventions
+## TUI Coding Conventions (apps/scream-code)
 
 - Do not over-encapsulate, especially for one- or two-line functions — do not introduce a two-layer wrapper, just inline.
 - Functions with no state / UI side effects do not belong as private methods on the `ScreamTUI` class; put them in external utils.
 - Constants must live in the corresponding `constant` directory; they must not be scattered through component or logic code.
 - Inside `handleInput(data)`, when comparing a printable character (letter, digit, space, punctuation), it is **forbidden** to write literal comparisons such as `data === 'q'`. With the Kitty keyboard protocol enabled in terminals like VSCode, these keys are sent as CSI-u sequences (e.g. `\x1b[113u`), and a bare comparison will never match. Decode with `printableChar(data)` from `src/tui/utils/printable-key.ts` first, then compare; function keys continue to use `matchesKey(data, Key.*)`; control characters (codepoint < 32) may still be compared against the raw `data`. `test/tui/printable-key-guard.test.ts` enforces this in CI.
 
-## How to Set Themes
+---
+
+## How to Set Themes (apps/scream-code)
 
 Themes are managed centrally under `src/tui/theme/`:
 
@@ -121,7 +280,9 @@ When writing color:
 
 After a theme change, non-comment code must not contain chalk named colors such as `chalk.white`, `chalk.cyan`, `chalk.red`, `chalk.green`, `chalk.gray`, `chalk.yellow`, `chalk.blue`, `chalk.magenta`, `chalk.whiteBright`, or `chalk.blackBright`.
 
-## MCP (Model Context Protocol)
+---
+
+## MCP (apps/scream-code)
 
 ScreamCode has a built-in MCP client. Agents can call external tools (browser automation, GitHub operations, filesystem access, etc.) through the Model Context Protocol.
 
@@ -159,7 +320,9 @@ Edit the `RECOMMENDED` array in `apps/scream-code/src/tui/commands/mcp.ts`.
 - Playwright recommendation: `startupTimeoutMs: 300_000` (5 min — first launch downloads Chromium).
 - Global default: `DEFAULT_STARTUP_TIMEOUT_MS = 60_000`.
 
-## Slash Commands
+---
+
+## Slash Commands (apps/scream-code)
 
 All slash commands are declared in `src/tui/commands/registry.ts` and dispatched in `src/tui/commands/dispatch.ts`. Beyond the session-config-modelling helpers documented in `ScreamTUI`, these commands carry non-trivial state or backend integration:
 
@@ -221,6 +384,8 @@ Undo the last N conversation turns. Anchors at user messages and restores the we
 - **TUI**: `src/tui/commands/revoke.ts` — `findUndoAnchorEntryIndex`, `removeUndoContextComponents`.
 - **Core**: `packages/agent-core/src/agent/context/index.ts` — `undo()` performs a backward walk, splices messages, and clamps `_tokenCount` down.
 - **Availability**: `idle-only`.
+
+---
 
 ## Agent-Core Mechanisms
 
@@ -303,6 +468,8 @@ The welcome logo cycles through a 24-hue colour wheel at 40 ms intervals (25 fps
 - **Lifecycle**: breathing starts automatically at app launch. The first keystroke in the editor fires `onFirstInput`, which calls `stopBreathing()` permanently. `firstInputFired` is never reset across session switches.
 - **Session switch**: `clearTranscriptAndRedraw()` does NOT call `resetFirstInputGate()`, so breathing stays off. `renderWelcome()` checks `hasFirstInputFired()` before starting the new component.
 - **Rationale**: prevents expensive full-tree re-renders when the transcript is packed with replayed historical components.
+
+---
 
 ## General Coding Requirements
 

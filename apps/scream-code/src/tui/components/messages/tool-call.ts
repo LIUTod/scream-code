@@ -1608,6 +1608,13 @@ export class ToolCallComponent extends Container {
         this.addChild(new Text(line, 2, 0));
       }
     }
+
+    // Fallback for tools without a dedicated preview (e.g. MCP / user tools):
+    // show the one-line description so the expanded card isn't blank.
+    const description = str(this.toolCall.description);
+    if (this.expanded && description.length > 0) {
+      this.addChild(new Text(chalk.dim(description), 2, 0));
+    }
   }
 
   /**

@@ -94,6 +94,34 @@ describe('skill registry prompt rendering', () => {
     expect(rendered).toContain('  - Path: /tmp/user/alpha/SKILL.md');
     expect(rendered).toContain('  - Description: Alpha does things');
   });
+
+  it('renames plugin skills on name collision so they remain distinguishable', () => {
+    const warnings: string[] = [];
+    const registry = new SkillRegistry({ onWarning: (msg) => warnings.push(msg) });
+
+    registry.register(makeSkill('foo', 'user'));
+    registry.register({ ...makeSkill('foo', 'extra'), plugin: { id: 'plugin-a' } });
+    registry.register({ ...makeSkill('foo', 'extra'), plugin: { id: 'plugin-b' } });
+
+    expect(registry.getSkill('foo')).toBeDefined();
+    expect(registry.getSkill('plugin-a:foo')).toBeDefined();
+    expect(registry.getSkill('plugin-b:foo')).toBeDefined();
+    expect(registry.getPluginSkill('plugin-a', 'foo')).toBeDefined();
+    expect(registry.getPluginSkill('plugin-b', 'foo')).toBeDefined();
+    expect(registry.listSkills()).toHaveLength(3);
+    expect(warnings.some((w) => w.includes('renamed'))).toBe(true);
+  });
+
+  it('keeps non-plugin skills shadowed without renaming them', () => {
+    const warnings: string[] = [];
+    const registry = new SkillRegistry({ onWarning: (msg) => warnings.push(msg) });
+
+    registry.register(makeSkill('foo', 'user'));
+    registry.register(makeSkill('foo', 'project'));
+
+    expect(registry.listSkills()).toHaveLength(1);
+    expect(warnings.some((w) => w.includes('shadowed'))).toBe(true);
+  });
 });
 
 function makeRegistry(skills: readonly SkillDefinition[]): SkillRegistry {

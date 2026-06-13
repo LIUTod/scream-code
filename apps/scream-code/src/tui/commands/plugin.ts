@@ -343,13 +343,10 @@ function buildOptions(
       description: undefined,
     });
     for (const p of installed) {
-      const enabledTag = p.enabled ? '✓ 已启用' : '✗ 已禁用';
-      const versionTag = p.version ? `v${p.version}` : '';
-      const meta = [versionTag, enabledTag].filter(Boolean).join('  ');
       options.push({
         value: `uninstall:${p.id}`,
         label: p.displayName,
-        description: `${meta}  [${p.skillCount} skills]`,
+        description: formatInstalledPluginDescription(p),
       });
     }
   }
@@ -406,4 +403,26 @@ async function confirmUninstall(host: SlashCommandHost, label: string): Promise<
     });
     host.mountEditorReplacement(picker);
   });
+}
+
+const SKILL_DESC_MAX = 40;
+const SKILLS_PREVIEW_COUNT = 3;
+
+function formatInstalledPluginDescription(p: PluginSummary): string {
+  const enabledTag = p.enabled ? '✓ 已启用' : '✗ 已禁用';
+  const versionTag = p.version ? `v${p.version}` : '';
+  const meta = [versionTag, enabledTag].filter(Boolean).join('  ');
+  const skillDescriptions = p.skills
+    .slice(0, SKILLS_PREVIEW_COUNT)
+    .map((s) => `${s.name}: ${truncate(s.description, SKILL_DESC_MAX)}`);
+  const remaining = p.skillCount - SKILLS_PREVIEW_COUNT;
+  const descriptionParts = [`${meta}  [${p.skillCount} skills]`, ...skillDescriptions];
+  if (remaining > 0) {
+    descriptionParts.push(`…等 ${remaining} 个 skill`);
+  }
+  return descriptionParts.join('  ·  ');
+}
+
+function truncate(value: string, max: number): string {
+  return value.length > max ? `${value.slice(0, max)}…` : value;
 }

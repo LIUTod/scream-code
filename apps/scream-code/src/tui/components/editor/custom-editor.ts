@@ -2,7 +2,7 @@
  * Custom editor extending pi-tui Editor with app-level keybindings.
  */
 
-import { Editor, isKeyRelease, matchesKey, Key, type TUI } from '@earendil-works/pi-tui';
+import { Editor, isKeyRelease, matchesKey, Key, visibleWidth, type TUI } from '@earendil-works/pi-tui';
 import chalk from 'chalk';
 
 import type { ColorPalette } from '#/tui/theme/colors';
@@ -135,6 +135,9 @@ export class CustomEditor extends Editor {
     this.firstInputFired = false;
   }
 
+  /** Whether the active model has thinking enabled. When true, a small "think" label is embedded in the top-right of the input box border. */
+  thinking = false;
+
   private consumingPaste = false;
   private consumeBuffer = '';
 
@@ -226,7 +229,12 @@ export class CustomEditor extends Editor {
     // overwrite it (e.g. plan-mode / slash-context highlight via
     // `editor.borderColor = chalk.hex(primary)`), so we route corners and
     // side bars through the same hook to stay in sync.
-    return wrapWithSideBorders(lines, (s) => this.borderColor(s));
+    const paint = this.borderColor ?? ((s: string) => s);
+    const wrapped = wrapWithSideBorders(lines, paint);
+    if (this.thinking) {
+      injectThinkLabel(wrapped, width, paint);
+    }
+    return wrapped;
   }
 
   override handleInput(data: string): void {
@@ -437,4 +445,29 @@ export function wrapWithSideBorders(
     if (line.length === 1) return head;
     return head + line.slice(1, -1) + tail;
   });
+}
+
+const THINK_LABEL = ' Think ';
+const THINK_LABEL_MIN_WIDTH = 14;
+
+/**
+ * Embed a small "think" label into the top-right corner of the input box
+ * border, mirroring the welcome panel's top-left border title style.
+ * The label only appears when the active model has thinking enabled.
+ */
+function injectThinkLabel(
+  lines: string[],
+  width: number,
+  paint: (s: string) => string,
+): void {
+  if (width < THINK_LABEL_MIN_WIDTH) return;
+  const topIdx = lines.findIndex((line) => line.includes('╭'));
+  if (topIdx === -1) return;
+
+  const labelBlock = `─${THINK_LABEL}─`;
+  const labelVis = visibleWidth(labelBlock);
+  const leftDashCount = width - 2 - labelVis;
+  if (leftDashCount < 1) return;
+
+  lines[topIdx] = paint('╭' + '─'.repeat(leftDashCount) + labelBlock + '╮');
 }

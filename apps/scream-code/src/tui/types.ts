@@ -11,13 +11,18 @@ import type { PendingApproval, PendingQuestion } from './reverse-rpc/types';
 import type { Theme } from './theme';
 import type { ResolvedTheme } from './theme/colors';
 
+export interface RecentSession {
+  readonly id: string;
+  readonly title?: string;
+  readonly updatedAt: number;
+}
+
 export interface AppState {
   model: string;
   workDir: string;
   sessionId: string;
   permissionMode: PermissionMode;
   planMode: boolean;
-  wolfpackMode: boolean;
   thinking: boolean;
   contextUsage: number;
   contextTokens: number;
@@ -40,6 +45,8 @@ export interface AppState {
   goalActive: boolean;
   goalContinuationCount: number;
   ccConnectActive: boolean;
+  wolfpackMode: boolean;
+  recentSessions: RecentSession[];
 }
 
 export interface ToolCallBlockData {

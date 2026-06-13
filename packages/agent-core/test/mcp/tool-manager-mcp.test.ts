@@ -1,8 +1,9 @@
 import type { ContentPart, Tool } from '@scream-cli/ltod';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import type { Agent } from '../../src/agent';
 import { ToolManager } from '../../src/agent/tool';
+import type { McpConnectionManager } from '../../src/mcp';
 import type { MCPClient } from '../../src/mcp/types';
 import { testAgent } from '../agent/harness/agent';
 import { executeTool } from '../tools/fixtures/execute-tool';
@@ -274,6 +275,115 @@ describe('ToolManager MCP integration', () => {
     });
     expect(result.isError).toBe(false);
     expect(result.output).toBe('hello world');
+  });
+
+  it('reconnects and retries once on retriable MCP connection errors', async () => {
+    const tm = new ToolManager(fakeAgent());
+    tm.setActiveTools(['mcp__*']);
+
+    const failingClient: MCPClient = {
+      async listTools() {
+        return [
+          {
+            name: 'echo',
+            description: 'Echoes back',
+            inputSchema: {
+              type: 'object',
+              properties: { text: { type: 'string' } },
+              required: ['text'],
+            },
+          },
+        ];
+      },
+      async callTool() {
+        throw new Error('transport closed unexpectedly');
+      },
+    };
+
+    const recoveredClient: MCPClient = {
+      async listTools() {
+        return [
+          {
+            name: 'echo',
+            description: 'Echoes back',
+            inputSchema: {
+              type: 'object',
+              properties: { text: { type: 'string' } },
+              required: ['text'],
+            },
+          },
+        ];
+      },
+      async callTool(name, args) {
+        return { content: [{ type: 'text', text: String(args['text']) }], isError: false };
+      },
+    };
+
+    let activeClient = failingClient;
+    const fakeMcp = {
+      get: () => ({ status: 'failed' as const }),
+      reconnect: async () => {
+        activeClient = recoveredClient;
+      },
+      resolved: () => ({ client: activeClient, tools: [], enabledNames: new Set<string>() }),
+    } as unknown as McpConnectionManager;
+
+    tm.registerMcpServer('s', failingClient, await discoverTools(failingClient), undefined, {
+      mcp: fakeMcp,
+    });
+    const echo = tm.loopTools.find((t) => t.name === 'mcp__s__echo');
+    expect(echo).toBeDefined();
+
+    const result = await executeTool(echo!, {
+      turnId: '1',
+      toolCallId: 'tc-retry',
+      args: { text: 'recovered' },
+      signal: new AbortController().signal,
+    });
+
+    expect(result.isError).toBe(false);
+    expect(result.output).toBe('recovered');
+  });
+
+  it('does not retry non-retriable MCP call errors', async () => {
+    const tm = new ToolManager(fakeAgent());
+    tm.setActiveTools(['mcp__*']);
+
+    const client: MCPClient = {
+      async listTools() {
+        return [
+          {
+            name: 'echo',
+            description: 'Echoes back',
+            inputSchema: { type: 'object', properties: { text: { type: 'string' } } },
+          },
+        ];
+      },
+      async callTool() {
+        throw new Error('invalid argument: text is required');
+      },
+    };
+
+    const reconnect = vi.fn();
+    const fakeMcp = {
+      get: () => ({ status: 'connected' as const }),
+      reconnect,
+      resolved: () => ({ client, tools: [], enabledNames: new Set<string>() }),
+    } as unknown as McpConnectionManager;
+
+    tm.registerMcpServer('s', client, await discoverTools(client), undefined, { mcp: fakeMcp });
+    const echo = tm.loopTools.find((t) => t.name === 'mcp__s__echo');
+
+    const result = await executeTool(echo!, {
+      turnId: '1',
+      toolCallId: 'tc-no-retry',
+      args: { text: 'x' },
+      signal: new AbortController().signal,
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.output).toContain('invalid argument');
+    expect(reconnect).not.toHaveBeenCalled();
   });
 
   it('truncates oversized MCP text output with a clear notice', async () => {
@@ -609,5 +719,20 @@ describe('ToolManager MCP integration', () => {
     tm.setActiveTools(['mcp__s__echo']);
 
     expect(tm.loopTools.map((t) => t.name)).toEqual(['mcp__s__echo']);
+  });
+
+  it('surfaces the MCP tool description on the resolved execution', async () => {
+    const tm = new ToolManager(fakeAgent());
+    tm.setActiveTools(['mcp__*']);
+    const client = fakeClient();
+    tm.registerMcpServer('s', client, await discoverTools(client));
+    const echo = tm.loopTools.find((t) => t.name === 'mcp__s__echo');
+    expect(echo).toBeDefined();
+
+    const execution = await echo!.resolveExecution({ text: 'hi' });
+    expect(execution.isError).toBeFalsy();
+    if (execution.isError !== true) {
+      expect(execution.description).toBe('Echoes back');
+    }
   });
 });
