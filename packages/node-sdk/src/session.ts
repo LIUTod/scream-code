@@ -428,16 +428,19 @@ export class Session {
     return this.rpc.setGoalBudget({ sessionId: this.id, value, unit });
   }
 
-  async close(): Promise<void> {
+  async close(options: { extractMemories?: boolean } = {}): Promise<void> {
     if (this.closed) return;
-    try {
-      // Extract memories before closing — give it enough time for LLM
-      await Promise.race([
-        this.extractMemoriesOnExit(),
-        new Promise<void>((resolve) => setTimeout(resolve, 30_000)),
-      ]).catch(() => {});
-    } catch {
-      // Never let extraction failure block session close
+    if (options.extractMemories !== false) {
+      try {
+        // Extract memories before closing — give it enough time for LLM
+        const extract = this.extractMemoriesOnExit().catch(() => {});
+        await Promise.race([
+          extract,
+          new Promise<void>((resolve) => setTimeout(resolve, 30_000)),
+        ]);
+      } catch {
+        // Never let extraction failure block session close
+      }
     }
     this.closed = true;
     try {

@@ -132,7 +132,7 @@ export class SessionManager {
   // ---------------------------------------------------------------------------
   async setSession(session: Session): Promise<void> {
     const previous = this.unloadCurrentSession('switching session');
-    await previous?.close();
+    await previous?.close({ extractMemories: false });
     this.host.session = session;
     this.host.harness.setTelemetryContext({ sessionId: session.id });
     this.registerSessionHandlers(session);
