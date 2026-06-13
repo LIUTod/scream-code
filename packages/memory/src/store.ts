@@ -231,7 +231,6 @@ export class MemoryMemoStore {
       stream.on('error', () => {});
 
       let line = '';
-      let hadContent = false;
       try {
         for await (const chunk of stream) {
           line += chunk;
@@ -246,7 +245,6 @@ export class MemoryMemoStore {
             await target.append(memo);
             migratedIds.add(memo.id);
             migratedCount++;
-            hadContent = true;
           }
         }
       } catch {

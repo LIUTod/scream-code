@@ -131,7 +131,6 @@ export class DreamTracker {
     }
 
     let bestState: DreamState | undefined;
-    let bestSource: string | undefined;
     for (const candidate of candidates) {
       try {
         await stat(candidate);
@@ -144,7 +143,6 @@ export class DreamTracker {
               new Date(bestState.lastDreamAt).getTime()
           ) {
             bestState = parsed.state;
-            bestSource = candidate;
           }
         }
       } catch {
