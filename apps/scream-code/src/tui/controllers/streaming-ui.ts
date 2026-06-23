@@ -9,6 +9,7 @@ import { ToolCallComponent } from '../components/messages/tool-call';
 import { STREAMING_UI_FLUSH_MS } from '../constant/streaming';
 import { hasDispose } from '../utils/component-capabilities';
 import { appendStreamingArgsPreview, parseStreamingArgs } from '../utils/event-payload';
+import { estimateTokens, getSharedSpeedTracker } from '../utils/speed-tracker';
 import { notifyTerminalOnce } from '../utils/terminal-notification';
 import { nextTranscriptId } from '../utils/transcript-id';
 import type { TodoItem } from '../components/chrome/todo-panel';
@@ -54,6 +55,7 @@ export class StreamingUIController {
   private _currentStep = 0;
   private _assistantDraft = '';
   private _thinkingDraft = '';
+  private lastDeltaAt: number | undefined;
   private _thinkingEntry: TranscriptEntry | undefined = undefined;
   private _compactionEntry: TranscriptEntry | undefined = undefined;
   private _streamingBlock: { component: AssistantMessageComponent; entry: TranscriptEntry } | null = null;
@@ -108,6 +110,7 @@ export class StreamingUIController {
   appendThinkingDelta(delta: string): void {
     this._thinkingDraft += delta;
     this.pendingThinkingFlush = true;
+    this.recordSpeedObservation(delta);
   }
 
   appendAssistantDelta(delta: string): void {
@@ -116,6 +119,25 @@ export class StreamingUIController {
     }
     this._assistantDraft += delta;
     this.pendingAssistantFlush = true;
+    this.recordSpeedObservation(delta);
+  }
+
+  /**
+   * Feed an estimated tok/s observation into the shared speed gauge. Uses the
+   * inter-delta elapsed time so a burst of small deltas produces an accurate
+   * instantaneous rate. The gauge's 3s rolling window smooths jitter.
+   */
+  private recordSpeedObservation(delta: string): void {
+    const now = performance.now();
+    const tokens = estimateTokens(delta);
+    if (this.lastDeltaAt !== undefined) {
+      const elapsedMs = now - this.lastDeltaAt;
+      if (elapsedMs > 0) {
+        const rate = (tokens / elapsedMs) * 1000;
+        getSharedSpeedTracker().observe(rate, now);
+      }
+    }
+    this.lastDeltaAt = now;
   }
 
   hasThinkingDraft(): boolean {
@@ -483,6 +505,8 @@ export class StreamingUIController {
     this._assistantDraft = '';
     this._streamingBlock = null;
     this._thinkingDraft = '';
+    this.lastDeltaAt = undefined;
+    getSharedSpeedTracker().reset();
     this.disposeActiveThinkingComponent();
   }
 

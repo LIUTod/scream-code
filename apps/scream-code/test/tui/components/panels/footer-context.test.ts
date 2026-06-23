@@ -153,6 +153,68 @@ describe('FooterComponent — context NaN resilience', () => {
       chalk.level = previousLevel;
     }
   });
+
+  it('colors context usage with textDim when below warning threshold', () => {
+    const previousLevel = chalk.level;
+    chalk.level = 3;
+    try {
+      const fc = makeFooter(
+        baseState({ contextUsage: 0.5, contextTokens: 50_000, maxContextTokens: 200_000 }),
+      );
+      const out = fc.render(200).join('');
+      expect(out).toContain(hexToSgr(darkColors.textDim));
+      expect(out).not.toContain(hexToSgr(darkColors.warning));
+      expect(out).not.toContain(hexToSgr(darkColors.error));
+    } finally {
+      chalk.level = previousLevel;
+    }
+  });
+
+  it('colors context usage with warning color at 70-90%', () => {
+    const previousLevel = chalk.level;
+    chalk.level = 3;
+    try {
+      const fc = makeFooter(
+        baseState({ contextUsage: 0.8, contextTokens: 160_000, maxContextTokens: 200_000 }),
+      );
+      const out = fc.render(200).join('');
+      expect(out).toContain(hexToSgr(darkColors.warning));
+      expect(out).not.toContain(hexToSgr(darkColors.error));
+    } finally {
+      chalk.level = previousLevel;
+    }
+  });
+
+  it('colors context usage with error color at >= 90%', () => {
+    const previousLevel = chalk.level;
+    chalk.level = 3;
+    try {
+      const fc = makeFooter(
+        baseState({ contextUsage: 0.95, contextTokens: 190_000, maxContextTokens: 200_000 }),
+      );
+      const out = fc.render(200).join('');
+      expect(out).toContain(hexToSgr(darkColors.error));
+      expect(out).not.toContain(hexToSgr(darkColors.warning));
+    } finally {
+      chalk.level = previousLevel;
+    }
+  });
+
+  it('triggers warning via absolute-token threshold even when percent is below 70%', () => {
+    const previousLevel = chalk.level;
+    chalk.level = 3;
+    try {
+      // 140k tokens in a 500k window = 28% — below the 70% percent threshold,
+      // but the 140k token threshold should trigger warning.
+      const fc = makeFooter(
+        baseState({ contextUsage: 0.28, contextTokens: 140_000, maxContextTokens: 500_000 }),
+      );
+      const out = fc.render(200).join('');
+      expect(out).toContain(hexToSgr(darkColors.warning));
+    } finally {
+      chalk.level = previousLevel;
+    }
+  });
 });
 
 describe('buildWeightedTips — weighted rotation', () => {

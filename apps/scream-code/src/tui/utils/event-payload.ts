@@ -1,6 +1,7 @@
 import { isScreamError } from '@scream-code/scream-code-sdk';
 
 import {
+  MAX_TRANSCRIPT_ERROR_LINES,
   STREAMING_ARGS_FIELD_RE,
   STREAMING_ARGS_PREVIEW_MAX_CHARS,
 } from '#/tui/constant/streaming';
@@ -92,6 +93,20 @@ export function isTodoItemShape(
 export function formatErrorMessage(error: unknown): string {
   if (isScreamError(error)) return `[${error.code}] ${error.message}`;
   return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * Cap an error message body for inline transcript display. Drops blank lines,
+ * keeps the first `maxLines` non-blank lines, and appends a `… (N more lines)`
+ * hint when truncated. Full text is preserved in the persisted session — this
+ * only bounds the live transcript render.
+ */
+export function truncateErrorMessage(message: string, maxLines: number = MAX_TRANSCRIPT_ERROR_LINES): string {
+  const lines = message.split('\n').filter((line) => line.trim().length > 0);
+  if (lines.length <= maxLines) return lines.join('\n');
+  const kept = lines.slice(0, maxLines);
+  const remaining = lines.length - maxLines;
+  return `${kept.join('\n')}\n… (${String(remaining)} more lines)`;
 }
 
 export function stringValue(value: unknown): string | undefined {

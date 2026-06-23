@@ -164,6 +164,59 @@ function formatContextStatus(usage: number, tokens?: number, maxTokens?: number)
   return `上下文：${pct}`;
 }
 
+// Context-usage threshold coloring. Dual-dimension: trigger when EITHER the
+// percent OR the absolute-token threshold is reached (whichever fires first
+// for the current window size). Token thresholds are sized so they match the
+// percent thresholds on scream-code's typical 128k-200k windows and only kick
+// in earlier on very large windows (1M+) where percent alone is deceptively low.
+const CONTEXT_WARNING_PERCENT_THRESHOLD = 70;
+const CONTEXT_WARNING_TOKEN_THRESHOLD = 140_000;
+const CONTEXT_ERROR_PERCENT_THRESHOLD = 90;
+const CONTEXT_ERROR_TOKEN_THRESHOLD = 180_000;
+
+function reachesThreshold(
+  percent: number,
+  maxTokens: number | undefined,
+  percentThreshold: number,
+  tokenThreshold: number,
+): boolean {
+  if (!Number.isFinite(percent) || percent <= 0) return false;
+  if (maxTokens === undefined || !Number.isFinite(maxTokens) || maxTokens <= 0) {
+    return percent >= percentThreshold;
+  }
+  const tokenPercentThreshold = (tokenThreshold / maxTokens) * 100;
+  return percent >= Math.min(percentThreshold, tokenPercentThreshold);
+}
+
+function pickContextColor(
+  usage: number,
+  maxTokens: number | undefined,
+  colors: ColorPalette,
+): string {
+  const percent = safeUsage(usage) * 100;
+  if (
+    reachesThreshold(
+      percent,
+      maxTokens,
+      CONTEXT_ERROR_PERCENT_THRESHOLD,
+      CONTEXT_ERROR_TOKEN_THRESHOLD,
+    )
+  ) {
+    return colors.error;
+  }
+  if (
+    reachesThreshold(
+      percent,
+      maxTokens,
+      CONTEXT_WARNING_PERCENT_THRESHOLD,
+      CONTEXT_WARNING_TOKEN_THRESHOLD,
+    )
+  ) {
+    return colors.warning;
+  }
+  return colors.textDim;
+}
+
 // ── Gradient status line for footer line 2 ───────────────────────────
 
 const BRAND_COLORS = ['#72A4E9', '#A78BFA', '#34D399'];
@@ -390,11 +443,12 @@ export class FooterComponent implements Component {
       const ccDot = state.ccConnectActive
         ? chalk.hex(colors.success)('●')
         : chalk.hex(colors.textDim)('●');
-      rightText = chalk.hex(colors.textDim)(ccDot + ' ' + formatContextStatus(
-        state.contextUsage,
-        state.contextTokens,
-        state.maxContextTokens,
-      ) + '  ' + statusLine);
+      const contextColor = pickContextColor(state.contextUsage, state.maxContextTokens, colors);
+      const contextPart = chalk.hex(contextColor)(
+        formatContextStatus(state.contextUsage, state.contextTokens, state.maxContextTokens),
+      );
+      const statusPart = chalk.hex(colors.textDim)(`  ${statusLine}`);
+      rightText = `${ccDot} ${contextPart}${statusPart}`;
     }
     const rightWidth = visibleWidth(rightText);
     const gap = 3;

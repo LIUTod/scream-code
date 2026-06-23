@@ -17,12 +17,15 @@ import {
 } from '#/tui/constant/rendering';
 import { STATUS_BULLET } from '#/tui/constant/symbols';
 import type { ColorPalette } from '#/tui/theme/colors';
+import { easeSpeedRatio, getSharedSpeedTracker, lerpHex, SPEED_MAX } from '#/tui/utils/speed-tracker';
 
 export type ThinkingRenderMode = 'live' | 'finalized';
 
 export class ThinkingComponent implements Component {
   private text: string;
   private color: string;
+  private readonly dimColor: string;
+  private readonly accentColor: string;
   private showMarker: boolean;
   private mode: ThinkingRenderMode;
   private expanded = false;
@@ -46,6 +49,8 @@ export class ThinkingComponent implements Component {
   ) {
     this.text = text;
     this.color = colors.roleThinking;
+    this.dimColor = colors.textDim;
+    this.accentColor = colors.primary;
     this.showMarker = showMarker;
     this.mode = mode;
     this.ui = ui;
@@ -109,9 +114,15 @@ export class ThinkingComponent implements Component {
       const spinner = chalk.hex(this.color)(
         `${BRAILLE_SPINNER_FRAMES[this.spinnerFrame] ?? BRAILLE_SPINNER_FRAMES[0]} `,
       );
+      const rate = Math.min(SPEED_MAX, getSharedSpeedTracker().getSpeed());
+      const rateSuffix = rate > 0.05
+        ? chalk.hex(lerpHex(this.dimColor, this.accentColor, easeSpeedRatio(rate / SPEED_MAX)))(
+            ` · ${rate.toFixed(1)} toks/s`,
+          )
+        : '';
       return [
         '',
-        spinner + chalk.hex(this.color)('思考中...'),
+        spinner + chalk.hex(this.color)('思考中...') + rateSuffix,
         ...visibleLines.map((line) => MESSAGE_INDENT + line),
       ];
     }

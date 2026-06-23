@@ -8,3 +8,8 @@ export const STREAMING_ARGS_PREVIEW_MAX_CHARS = 64 * 1024;
 
 // Coalesces high-frequency model/tool deltas before rebuilding TUI components.
 export const STREAMING_UI_FLUSH_MS = 50;
+
+// Bounds pathological provider error bodies (e.g. a proxy 502 whose body is a
+// full HTML page) rendered inline in the transcript so they can't flood the
+// scrollback. Full text is still kept in the persisted session.
+export const MAX_TRANSCRIPT_ERROR_LINES = 8;
