@@ -500,6 +500,56 @@ describe('Agent turn flow', () => {
     expect(history).toContain('Verification passed after the fix');
   });
 
+  it('does not block completion once a failed Edit succeeds on retry', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'scream-edit-retry-'));
+    const filePath = join(dir, 'target.txt');
+    const fileContent = 'line one\nline two\n';
+    const { writeFileSync } = await import('node:fs');
+    writeFileSync(filePath, fileContent, 'utf8');
+
+    const ctx = testAgent();
+    ctx.configure({ tools: ['Edit'] });
+    await ctx.rpc.setPermission({ mode: 'yolo' });
+    ctx.agent.config.update({ cwd: dir });
+
+    const failingEdit: ToolCall = {
+      type: 'function',
+      id: 'call_edit_fail',
+      name: 'Edit',
+      arguments: JSON.stringify({
+        path: filePath,
+        old_string: 'stale content not in file',
+        new_string: 'replaced',
+      }),
+    };
+    const passingEdit: ToolCall = {
+      type: 'function',
+      id: 'call_edit_pass',
+      name: 'Edit',
+      arguments: JSON.stringify({
+        path: filePath,
+        old_string: 'line one',
+        new_string: 'line one edited',
+      }),
+    };
+
+    ctx.mockNextResponse({ type: 'text', text: 'I will edit the file.' }, failingEdit);
+    ctx.mockNextResponse({ type: 'text', text: 'Re-read and retrying the edit.' }, passingEdit);
+    ctx.mockNextResponse({
+      type: 'text',
+      text: 'Edit succeeded after re-reading the file. The change is applied.',
+    });
+
+    await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Edit the file' }] });
+    await ctx.untilTurnEnd();
+
+    const history = JSON.stringify(ctx.agent.context.data().history);
+    expect(history).not.toContain('A required tool (Edit) failed this turn');
+    expect(history).not.toContain('convergence_gate');
+    expect(history).toContain('Edit succeeded after re-reading the file');
+    expect(ctx.llmCalls).toHaveLength(3);
+  });
+
 
   it('cancels while waiting for a Stop hook', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'scream-stop-hook-'));

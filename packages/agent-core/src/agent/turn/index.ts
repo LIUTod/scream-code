@@ -815,11 +815,12 @@ export class TurnFlow {
                     : this.isExploratoryBashCommand(command);
                 this.lastToolFailure = { toolName: ctx.toolCall.name, isExploratory };
               } else if (isError !== true && this.lastToolFailure?.toolName === ctx.toolCall.name) {
-                // A successful execution of the same tool type resolves a previous
-                // exploratory failure (e.g. `npx tsc` missing the compiler, then
-                // `npx -p typescript tsc` succeeding). Blocking failures are only
-                // cleared when the turn resets.
-                if (this.lastToolFailure.isExploratory) {
+                // Edit/Write/Agent are deterministic — a later success of the
+                // same tool means the prior failure (e.g. stale old_string) is
+                // resolved. Bash is non-deterministic: a passing `ls` does
+                // not fix a failing `tsc`, so blocking Bash failures are only
+                // cleared by a passing verification (markAllVerified above).
+                if (ctx.toolCall.name !== 'Bash' || this.lastToolFailure.isExploratory) {
                   this.lastToolFailure = null;
                 }
               }

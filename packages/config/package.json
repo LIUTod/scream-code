@@ -1,6 +1,6 @@
 {
   "name": "@scream-code/config",
-  "version": "0.6.9",
+  "version": "0.6.10",
   "private": true,
   "description": "Platform configuration and model management for Scream Code",
   "license": "MIT",

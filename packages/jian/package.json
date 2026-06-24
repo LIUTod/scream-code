@@ -1,6 +1,6 @@
 {
   "name": "@scream-code/jian",
-  "version": "0.6.9",
+  "version": "0.6.10",
   "private": true,
   "description": "Execution environment abstraction for AI agent applications",
   "license": "MIT",
