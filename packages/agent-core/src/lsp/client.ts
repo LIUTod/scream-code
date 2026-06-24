@@ -63,6 +63,8 @@ export class LspClient {
     }
   >();
   private collectedDiagnostics = new Map<string, LspDiagnostic[]>();
+  private openedDocuments = new Set<string>();
+  private documentVersion = new Map<string, number>();
   private buffer = '';
   private contentLength = -1;
   private started = false;
@@ -71,6 +73,7 @@ export class LspClient {
     private readonly command: string[],
     private readonly workspaceRoot: string,
     private readonly jian: Jian,
+    private readonly initializationOptions?: Record<string, unknown>,
   ) {}
 
   async start(): Promise<void> {
@@ -106,9 +109,17 @@ export class LspClient {
       capabilities: {
         textDocument: {
           synchronization: { willSave: false, willSaveWaitUntil: false, didSave: false },
+          publishDiagnostics: {
+            relatedInformation: true,
+            versionSupport: false,
+            tagSupport: { valueSet: [1, 2] },
+            codeDescriptionSupport: true,
+            dataSupport: true,
+          },
           rename: { prepareSupport: false },
         },
       },
+      initializationOptions: this.initializationOptions,
     });
     this.notify('initialized', {});
   }
@@ -129,16 +140,35 @@ export class LspClient {
       // Already exited or not killable.
     }
     this.process = undefined;
+    this.openedDocuments.clear();
+    this.documentVersion.clear();
   }
 
   didOpen(path: string, content: string, languageId: string): void {
+    const uri = pathToUri(path);
+    if (this.openedDocuments.has(uri)) {
+      this.didChange(path, content);
+      return;
+    }
+    this.openedDocuments.add(uri);
+    this.documentVersion.set(uri, 1);
     this.notify('textDocument/didOpen', {
       textDocument: {
-        uri: pathToUri(path),
+        uri,
         languageId,
         version: 1,
         text: content,
       },
+    });
+  }
+
+  didChange(path: string, content: string): void {
+    const uri = pathToUri(path);
+    const version = (this.documentVersion.get(uri) ?? 1) + 1;
+    this.documentVersion.set(uri, version);
+    this.notify('textDocument/didChange', {
+      textDocument: { uri, version },
+      contentChanges: [{ text: content }],
     });
   }
 

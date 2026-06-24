@@ -603,8 +603,8 @@ export class ToolManager {
       [
         new b.ReadTool(jian, workspace),
         new b.ReadGroupTool(jian, workspace),
-        new b.WriteTool(jian, workspace),
-        new b.EditTool(jian, workspace),
+        new b.WriteTool(jian, workspace, this.lspRegistry),
+        new b.EditTool(jian, workspace, this.lspRegistry),
         new b.GrepTool(jian, workspace),
         new b.GlobTool(jian, workspace),
         new b.BashTool(jian, cwd, background, {

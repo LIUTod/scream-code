@@ -14,10 +14,12 @@ import { z } from 'zod';
 import type { BuiltinTool } from '../../../agent/tool';
 import { ToolAccesses } from '../../../loop/tool-access';
 import type { ExecutableToolResult, ToolExecution } from '../../../loop/types';
+import type { LspRegistry } from '../../../lsp/registry';
 import { resolvePathAccessPath } from '../../policies/path-access';
 import { toInputJsonSchema } from '../../support/input-schema';
 import { literalRulePattern, matchesPathRuleSubject } from '../../support/rule-match';
 import type { WorkspaceConfig } from '../../support/workspace';
+import { fetchDiagnostics, formatDiagnosticsHint, formatDiagnosticsNotice } from './lsp-diagnostics';
 import { materializeModelText, toModelTextView, computeAnchor } from './line-endings';
 import EDIT_DESCRIPTION from './edit.md';
 
@@ -69,6 +71,7 @@ export class EditTool implements BuiltinTool<EditInput> {
   constructor(
     private readonly jian: Jian,
     private readonly workspace: WorkspaceConfig,
+    private readonly lspRegistry?: LspRegistry,
   ) {}
 
   resolveExecution(args: EditInput): ToolExecution {
@@ -150,7 +153,8 @@ export class EditTool implements BuiltinTool<EditInput> {
           safePath,
           materializeModelText(newContent, modelView.lineEndingStyle),
         );
-        return { output: `Replaced 1 occurrence in ${args.path}` };
+        const notice = await this.appendDiagnostics(safePath);
+        return { output: `Replaced 1 occurrence in ${args.path}${notice}` };
       }
 
       const parts = content.split(args.old_string);
@@ -165,7 +169,8 @@ export class EditTool implements BuiltinTool<EditInput> {
         safePath,
         materializeModelText(newContent, modelView.lineEndingStyle),
       );
-      return { output: `Replaced ${String(replacementCount)} occurrences in ${args.path}` };
+      const notice = await this.appendDiagnostics(safePath);
+      return { output: `Replaced ${String(replacementCount)} occurrences in ${args.path}${notice}` };
     } catch (error) {
       const code = (error as { code?: unknown } | null)?.code;
       if (code === 'EISDIR') {
@@ -176,5 +181,17 @@ export class EditTool implements BuiltinTool<EditInput> {
         output: error instanceof Error ? error.message : String(error),
       };
     }
+  }
+
+  private async appendDiagnostics(safePath: string): Promise<string> {
+    const result = await fetchDiagnostics(
+      this.lspRegistry,
+      this.jian,
+      safePath,
+      this.workspace.workspaceDir,
+    );
+    const notice = formatDiagnosticsNotice(result);
+    const hint = formatDiagnosticsHint(result);
+    return [notice, hint].filter((s) => s.length > 0).join('');
   }
 }

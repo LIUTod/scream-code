@@ -11,6 +11,7 @@ import { toInputJsonSchema } from '../../support/input-schema';
 import { literalRulePattern, matchesPathRuleSubject } from '../../support/rule-match';
 import type { WorkspaceConfig } from '../../support/workspace';
 import { makeCarriageReturnsVisible, type LineEndingStyle, computeAnchor, toModelTextView } from './line-endings';
+import { formatConflictNotice, scanConflictLines } from './conflict-detect';
 import readDescriptionTemplate from './read.md';
 
 export const MAX_LINES: number = 1000;
@@ -420,9 +421,19 @@ export class ReadTool implements BuiltinTool<ReadInput> {
   }
 
   private finishReadResult(input: FinishReadResultInput): ExecutableToolResult {
-    return {
-      output: this.finishOutput(input.renderedLines, this.finishMessage(input)),
-    };
+    const message = this.finishMessage(input);
+    // Scan the returned window (not the whole file) for merge conflict
+    // markers so the agent is warned before editing a conflicted file. Strip
+    // the `NNN\t` line-number prefix renderLine adds before scanning. The
+    // notice is appended to the system message (inside <system>…</system>)
+    // so the ReadGroup parser's `</system>\s*$` regex still matches.
+    const rawLines = input.renderedLines.map((l) => {
+      const tabIdx = l.indexOf('\t');
+      return tabIdx === -1 ? l : l.slice(tabIdx + 1);
+    });
+    const notice = formatConflictNotice(scanConflictLines(rawLines, input.startLine));
+    const fullMessage = notice.length > 0 ? `${message} ${notice}` : message;
+    return { output: this.finishOutput(input.renderedLines, fullMessage) };
   }
 
   private finishOutput(renderedLines: readonly string[], message: string): string {

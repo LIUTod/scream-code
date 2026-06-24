@@ -12,10 +12,12 @@ import { z } from 'zod';
 import type { BuiltinTool } from '../../../agent/tool';
 import { ToolAccesses } from '../../../loop/tool-access';
 import type { ExecutableToolResult, ToolExecution } from '../../../loop/types';
+import type { LspRegistry } from '../../../lsp/registry';
 import { resolvePathAccessPath } from '../../policies/path-access';
 import { toInputJsonSchema } from '../../support/input-schema';
 import { literalRulePattern, matchesPathRuleSubject } from '../../support/rule-match';
 import type { WorkspaceConfig } from '../../support/workspace';
+import { fetchDiagnostics, formatDiagnosticsHint, formatDiagnosticsNotice } from './lsp-diagnostics';
 import WRITE_DESCRIPTION from './write.md';
 
 /** Mask isolating the file-type bits of a stat mode. */
@@ -58,6 +60,7 @@ export class WriteTool implements BuiltinTool<WriteInput> {
   constructor(
     private readonly jian: Jian,
     private readonly workspace: WorkspaceConfig,
+    private readonly lspRegistry?: LspRegistry,
   ) {}
 
   resolveExecution(args: WriteInput): ToolExecution {
@@ -98,8 +101,9 @@ export class WriteTool implements BuiltinTool<WriteInput> {
       // length would only equal the byte count for pure ASCII content, so it
       // is not used here.
       const bytesWritten = Buffer.byteLength(args.content, 'utf8');
+      const notice = await this.appendDiagnostics(safePath);
       return {
-        output: `${mode === 'append' ? 'Appended' : 'Wrote'} ${String(bytesWritten)} bytes to ${args.path}`,
+        output: `${mode === 'append' ? 'Appended' : 'Wrote'} ${String(bytesWritten)} bytes to ${args.path}${notice}`,
       };
     } catch (error) {
       const code = (error as { code?: unknown } | null)?.code;
@@ -141,5 +145,17 @@ export class WriteTool implements BuiltinTool<WriteInput> {
       return `Parent path is not a directory: ${parent}.`;
     }
     return undefined;
+  }
+
+  private async appendDiagnostics(safePath: string): Promise<string> {
+    const result = await fetchDiagnostics(
+      this.lspRegistry,
+      this.jian,
+      safePath,
+      this.workspace.workspaceDir,
+    );
+    const notice = formatDiagnosticsNotice(result);
+    const hint = formatDiagnosticsHint(result);
+    return [notice, hint].filter((s) => s.length > 0).join('');
   }
 }
