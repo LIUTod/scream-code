@@ -4,6 +4,7 @@ import {
   TUI,
 } from '@earendil-works/pi-tui';
 
+import { ErrorBannerComponent } from './components/chrome/error-banner';
 import { FooterComponent } from './components/chrome/footer';
 import { GutterContainer } from './components/chrome/gutter-container';
 import type { MoonLoader, SpinnerStyle } from './components/chrome/moon-loader';
@@ -36,6 +37,8 @@ export interface TUIState {
   todoPanelContainer: Container;
   todoPanel: TodoPanelComponent;
   queueContainer: Container;
+  errorBanner: ErrorBannerComponent;
+  errorBannerContainer: Container;
   editorContainer: Container;
   footer: FooterComponent;
   editor: CustomEditor;
@@ -92,6 +95,9 @@ export function createTUIState(options: ScreamTUIOptions): TUIState {
   const todoPanelContainer = new GutterContainer(CHROME_GUTTER, CHROME_GUTTER);
   const todoPanel = new TodoPanelComponent(theme.colors);
   const queueContainer = new GutterContainer(CHROME_GUTTER, CHROME_GUTTER);
+  const errorBanner = new ErrorBannerComponent(theme.colors);
+  const errorBannerContainer = new GutterContainer(CHROME_GUTTER, CHROME_GUTTER);
+  errorBannerContainer.addChild(errorBanner);
   const editorContainer = new GutterContainer(CHROME_GUTTER, CHROME_GUTTER);
   const editor = new CustomEditor(ui, theme.colors);
   editor.thinking = initialAppState.thinking;
@@ -107,6 +113,8 @@ export function createTUIState(options: ScreamTUIOptions): TUIState {
     todoPanelContainer,
     todoPanel,
     queueContainer,
+    errorBanner,
+    errorBannerContainer,
     editorContainer,
     footer,
     editor,

@@ -171,6 +171,7 @@ export class InputController {
       });
     }
 
+    this.host.state.errorBanner.clear();
     void session.steer(input.join('\n\n')).catch((error: unknown) => {
       const message = formatErrorMessage(error);
       this.host.showError(`引导失败：${message}`);
@@ -298,6 +299,7 @@ export class InputController {
       options?.imageAttachmentIds !== undefined && options.imageAttachmentIds.length > 0
         ? options.imageAttachmentIds
         : undefined;
+    this.host.state.errorBanner.clear();
     this.host.appendTranscriptEntry({
       id: nextTranscriptId(),
       kind: 'user',

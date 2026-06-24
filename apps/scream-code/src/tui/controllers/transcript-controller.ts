@@ -291,6 +291,7 @@ export class TranscriptController {
     this.clearTerminalInlineImages();
     state.todoPanel.clear();
     state.todoPanelContainer.clear();
+    state.errorBanner.clear();
     imageStore.clear();
     this.renderWelcome();
   }
@@ -310,10 +311,13 @@ export class TranscriptController {
   }
 
   showError(message: string): void {
-    this.showStatus(
-      `错误：${truncateErrorMessage(replaceTabs(message))}`,
-      this.host.state.theme.colors.error,
-    );
+    const cleaned = replaceTabs(message);
+    // Transcript keeps the fuller (8-line) error for history/replay.
+    this.showStatus(`错误：${truncateErrorMessage(cleaned)}`, this.host.state.theme.colors.error);
+    // Banner shows a tighter (3-line) preview pinned above the input so a
+    // turn-ending error can't scroll out of view before the user returns.
+    this.host.state.errorBanner.setMessage(cleaned);
+    this.host.state.ui.requestRender();
   }
 
   showProgressSpinner(label: string): LoginProgressSpinnerHandle {

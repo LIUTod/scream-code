@@ -202,6 +202,7 @@ export class LifecycleController {
     ui.addChild(this.host.state.activityContainer);
     ui.addChild(this.host.state.todoPanelContainer);
     ui.addChild(this.host.state.queueContainer);
+    ui.addChild(this.host.state.errorBannerContainer);
     ui.addChild(this.host.state.editorContainer);
   }
 
