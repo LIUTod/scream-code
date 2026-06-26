@@ -2,8 +2,6 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { valid } from 'semver';
 
-const execFileAsync = promisify(execFile);
-
 const NPM_TIMEOUT_MS = 15_000;
 
 /**
