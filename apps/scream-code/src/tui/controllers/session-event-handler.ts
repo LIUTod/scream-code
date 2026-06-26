@@ -368,12 +368,12 @@ export class SessionEventHandler {
         return;
       }
       if (!consumeLoopLimitIteration(this.host.state.appState.loopLimit)) {
+        const reason = this.host.state.appState.loopLimit?.kind === 'duration' ? '时间' : '次数';
         this.host.setAppState({
           loopModeEnabled: false,
           loopPrompt: undefined,
           loopLimit: undefined,
         });
-        const reason = this.host.state.appState.loopLimit?.kind === 'duration' ? '时间' : '次数';
         this.host.showStatus(`循环${reason}限制已到，循环模式已关闭。`);
         return;
       }

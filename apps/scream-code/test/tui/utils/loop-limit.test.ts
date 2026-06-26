@@ -137,8 +137,22 @@ describe('describeLoopLimitRuntime', () => {
   });
 
   it('describes duration runtime', () => {
+    const now = 1_000_000;
     expect(
-      describeLoopLimitRuntime({ kind: 'duration', durationMs: 120_000, deadlineMs: 0 }),
-    ).toBe('时长限制 2 分钟');
+      describeLoopLimitRuntime(
+        { kind: 'duration', durationMs: 120_000, deadlineMs: now + 60_000 },
+        now,
+      ),
+    ).toBe('剩余 1 分钟');
+  });
+
+  it('describes expired duration runtime', () => {
+    const now = 1_000_000;
+    expect(
+      describeLoopLimitRuntime(
+        { kind: 'duration', durationMs: 120_000, deadlineMs: now - 1 },
+        now,
+      ),
+    ).toBe('已过期');
   });
 });

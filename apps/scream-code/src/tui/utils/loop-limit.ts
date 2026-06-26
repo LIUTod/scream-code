@@ -180,11 +180,16 @@ export function describeLoopLimit(config: LoopLimitConfig): string {
   return formatDuration(config.durationMs);
 }
 
-export function describeLoopLimitRuntime(limit: LoopLimitRuntime): string {
+export function describeLoopLimitRuntime(
+  limit: LoopLimitRuntime,
+  nowMs = Date.now(),
+): string {
   if (limit.kind === 'iterations') {
     return `剩余 ${limit.remaining}/${limit.initial} 次`;
   }
-  return `时长限制 ${formatDuration(limit.durationMs)}`;
+  const remainingMs = limit.deadlineMs - nowMs;
+  if (remainingMs <= 0) return '已过期';
+  return `剩余 ${formatDuration(remainingMs)}`;
 }
 
 function formatDuration(durationMs: number): string {
