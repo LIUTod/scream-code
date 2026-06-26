@@ -2,6 +2,7 @@ import type { ContentPart } from '@scream-code/ltod';
 
 import type { Agent } from '..';
 import type { ContextMessage } from '../context';
+import { flags } from '../../flags';
 import { estimateTokens, estimateTokensForMessages } from '../../utils/tokens';
 
 export interface MicroCompactionConfig {
@@ -105,6 +106,7 @@ export class MicroCompaction {
 
   /** Check whether micro-compaction is warranted and advance the cutoff. */
   detect(): void {
+    if (!flags.enabled('micro-compaction')) return;
     const config = this.config;
     const { history } = this.agent.context;
     const maxContextTokens = this.agent.config.modelCapabilities.max_context_tokens;

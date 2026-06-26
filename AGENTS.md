@@ -156,6 +156,10 @@ Test the contract the system exposes — not the easiest internal detail to asse
 - Build: `bun run build`.
 - Do not run raw `tsc` directly.
 
+### Changesets
+
+When generating a changeset (`.changeset/*.md`), never decide on a `major` bump on your own. `major` is reserved for breaking changes — renamed or removed commands/arguments, removed public APIs, changed behavior semantics, or incompatible user configuration. When you judge a change to meet the major criteria, stop and ask the user for confirmation first; only write `major` after they explicitly agree. Otherwise default to `minor` (fall back to `patch` when the change is clearly a fix with no new surface).
+
 ---
 
 ## TUI File Layout (apps/scream-code)

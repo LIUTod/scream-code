@@ -14,7 +14,7 @@ export const FLAG_DEFINITIONS = [
   {
     id: 'micro-compaction',
     env: 'SCREAM_CODE_EXPERIMENTAL_MICRO_COMPACTION',
-    default: false,
+    default: true,
     surface: 'both',
   },
   {

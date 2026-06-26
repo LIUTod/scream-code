@@ -212,7 +212,8 @@ export class ContextMemory {
   get messages(): Message[] {
     // Apply micro-compaction before projecting: old tool results are
     // truncated to a short marker, freeing context tokens without an
-    // LLM call.  Detect() is a no-op when the feature flag is off.
+    // LLM call. Detect() is a no-op when the micro-compaction flag is
+    // off (env: SCREAM_CODE_EXPERIMENTAL_MICRO_COMPACTION=0).
     this.agent.microCompaction.detect();
     return project(this.agent.microCompaction.compact(this.history));
   }
