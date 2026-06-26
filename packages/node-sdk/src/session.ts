@@ -428,9 +428,9 @@ export class Session {
   }
 
   /** Fire-and-forget: extract memory memos on session exit. */
-  async extractMemoriesOnExit(): Promise<void> {
+  async extractMemoriesOnExit(): Promise<number> {
     this.ensureOpen();
-    await this.rpc.extractMemoriesOnExit({ sessionId: this.id });
+    return this.rpc.extractMemoriesOnExit({ sessionId: this.id });
   }
 
   async sideQuestion(question: string): Promise<string> {

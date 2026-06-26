@@ -102,6 +102,7 @@ export class CustomEditor extends Editor {
   public onTogglePlanExpand?: () => boolean;
   public onOpenExternalEditor?: () => void;
   public onCtrlS?: () => void;
+  public onCtrlW?: () => void;
   /**
    * Called when ↑ is pressed in an empty editor. Return `true` to consume
    * the key (e.g. recalled a queued message); return `false` to fall
@@ -301,6 +302,11 @@ export class CustomEditor extends Editor {
 
     if (matchesKey(normalized, Key.ctrl('s'))) {
       this.onCtrlS?.();
+      return;
+    }
+
+    if (matchesKey(normalized, Key.ctrl('w'))) {
+      this.onCtrlW?.();
       return;
     }
 

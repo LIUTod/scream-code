@@ -34,6 +34,7 @@ export interface EditorKeyboardHost {
   handlePlanToggle(next: boolean): void;
   clearQueuedMessages(): void;
   setExternalEditorRunning(running: boolean): void;
+  cancelPendingMemoryExtraction(): void;
 }
 
 export class EditorKeyboardController {
@@ -157,6 +158,10 @@ export class EditorKeyboardController {
       }
       host.updateQueueDisplay();
       host.state.ui.requestRender();
+    };
+
+    editor.onCtrlW = () => {
+      host.cancelPendingMemoryExtraction();
     };
 
     editor.onUpArrowEmpty = () => {

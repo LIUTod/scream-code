@@ -35,6 +35,7 @@ export interface LifecycleControllerHost {
   closeSession(): Promise<void>;
   stop(exitCode?: number): Promise<void>;
   showStatus(message: string, color?: string): void;
+  showNotice(title: string, detail?: string): void;
   applyResolvedAutoTheme(resolved: ResolvedTheme): void;
   applyTheme(theme: Theme, resolved?: ResolvedTheme): void;
   updateActivityPane(): void;
@@ -53,12 +54,14 @@ export class LifecycleController {
   private signalCleanupHandlers: Array<() => void> = [];
   private ccConnectPollTimer: ReturnType<typeof setInterval> | undefined;
   private memoryIdleTimer: ReturnType<typeof setTimeout> | undefined;
+  private memoryCountdownTimer: ReturnType<typeof setTimeout> | undefined;
   private lastMemoryExtractionTime = 0;
   private terminalFocusTrackingDispose: (() => void) | undefined;
   private terminalThemeTrackingDispose: (() => void) | undefined;
   private lastActivityMode: string | undefined;
 
   private static readonly MEMORY_IDLE_MS = 15 * 60 * 1000; // 15 minutes
+  private static readonly MEMORY_COUNTDOWN_MS = 15 * 1000; // 15 seconds
   private static readonly MEMORY_EXTRACT_COOLDOWN_MS = 10 * 60 * 1000; // 10 minutes
 
   constructor(private readonly host: LifecycleControllerHost) {}
@@ -151,7 +154,8 @@ export class LifecycleController {
   startMemoryIdleTimer(): void {
     this.stopMemoryIdleTimer();
     this.memoryIdleTimer = setTimeout(() => {
-      void this.performIdleMemoryExtraction();
+      this.memoryIdleTimer = undefined;
+      this.startExtractionCountdown();
     }, LifecycleController.MEMORY_IDLE_MS);
   }
 
@@ -160,6 +164,31 @@ export class LifecycleController {
       clearTimeout(this.memoryIdleTimer);
       this.memoryIdleTimer = undefined;
     }
+    if (this.memoryCountdownTimer !== undefined) {
+      clearTimeout(this.memoryCountdownTimer);
+      this.memoryCountdownTimer = undefined;
+    }
+  }
+
+  private startExtractionCountdown(): void {
+    if (this.memoryCountdownTimer !== undefined) return;
+    this.host.showNotice(
+      '15 分钟未操作，即将整理会话记忆',
+      `按 Ctrl+W 取消（${Math.round(LifecycleController.MEMORY_COUNTDOWN_MS / 1000)} 秒后自动开始）`,
+    );
+    this.host.state.ui.requestRender();
+    this.memoryCountdownTimer = setTimeout(() => {
+      this.memoryCountdownTimer = undefined;
+      void this.performIdleMemoryExtraction();
+    }, LifecycleController.MEMORY_COUNTDOWN_MS);
+  }
+
+  cancelPendingMemoryExtraction(): void {
+    if (this.memoryCountdownTimer === undefined) return;
+    clearTimeout(this.memoryCountdownTimer);
+    this.memoryCountdownTimer = undefined;
+    this.host.showStatus('已取消记忆提取', this.host.state.theme.colors.textDim);
+    this.startMemoryIdleTimer();
   }
 
   private async performIdleMemoryExtraction(): Promise<void> {
@@ -171,16 +200,18 @@ export class LifecycleController {
     if (state.appState.isReplaying) return;
     if (session === undefined) return;
 
-    state.footer.setTransientHint('正在整理会话记忆...');
+    this.host.showStatus('正在整理会话记忆...', state.theme.colors.textDim);
     state.ui.requestRender();
     try {
-      await session.extractMemoriesOnExit();
-      this.lastMemoryExtractionTime = Date.now();
-      this.host.showStatus('已沉淀关键信息至记忆备忘录');
+      const count = await session.extractMemoriesOnExit();
+      this.host.showStatus(
+        count > 0 ? `已沉淀 ${count} 条记忆至备忘录` : '本次无需沉淀新记忆',
+        state.theme.colors.textDim,
+      );
     } catch {
-      // Silent fail — don't bother the user
+      this.host.showStatus('记忆整理失败，稍后再试', state.theme.colors.warning);
     } finally {
-      state.footer.setTransientHint(null);
+      this.lastMemoryExtractionTime = Date.now();
       state.ui.requestRender();
     }
   }

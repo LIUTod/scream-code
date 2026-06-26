@@ -360,8 +360,7 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
     this.reverseRpcDisposers.length = 0;
     this.lifecycleController.disposeTerminalTracking();
     this.inputController.dispose();
-    this.state.footer.setTransientHint('正在整理会话记忆...');
-    this.state.ui.requestRender();
+    this.showStatus('正在整理会话记忆...', this.state.theme.colors.textDim);
     await new Promise<void>((resolve) => {
       setTimeout(resolve, 0);
     });
@@ -507,6 +506,10 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
 
   setExternalEditorRunning(running: boolean): void {
     this.state.externalEditorRunning = running;
+  }
+
+  cancelPendingMemoryExtraction(): void {
+    this.lifecycleController.cancelPendingMemoryExtraction();
   }
 
   setTasksBrowser(value: TUIState['tasksBrowser']): void {

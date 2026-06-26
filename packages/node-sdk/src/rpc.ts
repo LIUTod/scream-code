@@ -668,7 +668,7 @@ export class SDKRpcClient {
     this.questionHandlers.delete(sessionId);
   }
 
-  async extractMemoriesOnExit(input: SessionIdRpcInput): Promise<void> {
+  async extractMemoriesOnExit(input: SessionIdRpcInput): Promise<number> {
     const rpc = await this.getRpc();
     return rpc.extractMemoriesOnExit({
       sessionId: input.sessionId,

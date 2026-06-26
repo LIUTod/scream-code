@@ -370,7 +370,7 @@ export interface AgentAPI {
   getUsage: (payload: EmptyPayload) => UsageStatus;
   getTools: (payload: EmptyPayload) => readonly ToolInfo[];
   getBackground: (payload: GetBackgroundPayload) => readonly BackgroundTaskInfo[];
-  extractMemoriesOnExit: (payload: EmptyPayload) => Promise<void>;
+  extractMemoriesOnExit: (payload: EmptyPayload) => Promise<number>;
   sideQuestion: (payload: SideQuestionPayload) => Promise<SideQuestionResult>;
   createGoal: (payload: CreateGoalPayload) => GoalSnapshotData;
   updateGoalStatus: (payload: UpdateGoalStatusPayload) => GoalSnapshotData | null;
