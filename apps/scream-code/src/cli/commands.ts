@@ -16,6 +16,7 @@ export type StreamJsonHandler = (opts: {
   permissionMode?: string;
   skillsDirs: string[];
   appendSystemPrompt?: string;
+  appendSystemPromptFile?: string;
 }) => void;
 
 export type ChannelSetupHandler = () => void;
@@ -90,11 +91,12 @@ export function createProgram(
   // Hidden subcommand for cc-connect / Claude Code stream-json protocol.
   // cc-connect spawns: scream stream-json --output-format stream-json --input-format stream-json
   //   --permission-prompt-tool stdio --replay-user-messages --verbose ...
-  // We register all flags cc-connect may pass so Commander doesn't reject them.
-  // Flags we actually use: --input-format, --output-format, --resume, --model, --permission-mode.
+  // Flags are sourced from cc-connect's agent/claudecode/session.go (v1.3.2+).
+  // We register every flag cc-connect may pass so Commander doesn't reject them.
+  // Flags we actually use: --input-format, --output-format, --resume, --model, --permission-mode,
+  //   --append-system-prompt, --append-system-prompt-file, --skills-dir (scream-code extension).
   // Flags accepted but ignored: --permission-prompt-tool, --replay-user-messages, --verbose,
-  //   --system-prompt, --append-system-prompt, --allowedTools, --disallowedTools, --effort,
-  //   --max-context-tokens.
+  //   --system-prompt, --allowedTools, --disallowedTools, --effort, --max-context-tokens, --plugin-dir.
   program
     .command('stream-json', { hidden: true })
     .option('--input-format <fmt>', 'stream-json')
@@ -107,6 +109,7 @@ export function createProgram(
     .option('--verbose', '(ignored, cc-connect compat)')
     .option('--system-prompt <text>', '(ignored, cc-connect compat)')
     .option('--append-system-prompt <text>', '(passed through to agent)')
+    .option('--append-system-prompt-file <path>', '(passed through to agent; file contents are read and merged)')
     .option('--allowedTools <list>', '(ignored, cc-connect compat)')
     .option('--disallowedTools <list>', '(ignored, cc-connect compat)')
     .option('--effort <value>', '(ignored, cc-connect compat)')
@@ -117,6 +120,12 @@ export function createProgram(
       (value: string, previous: string[]) => [...(previous ?? []), value],
       [] as string[],
     )
+    .option(
+      '--plugin-dir <dir>',
+      '(ignored, cc-connect compat; repeatable)',
+      (value: string, previous: string[]) => [...(previous ?? []), value],
+      [] as string[],
+    )
     .action((subOpts: Record<string, unknown>) => {
       onStreamJson({
         resume: subOpts['resume'] as string | undefined,
@@ -124,6 +133,7 @@ export function createProgram(
         permissionMode: subOpts['permissionMode'] as string | undefined,
         skillsDirs: (subOpts['skillsDir'] as string[]) ?? [],
         appendSystemPrompt: subOpts['appendSystemPrompt'] as string | undefined,
+        appendSystemPromptFile: subOpts['appendSystemPromptFile'] as string | undefined,
       });
     });
 

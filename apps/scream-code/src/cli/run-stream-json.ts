@@ -149,6 +149,7 @@ interface StreamJsonOptions {
   workDir?: string;
   skillsDirs: string[];
   appendSystemPrompt?: string;
+  appendSystemPromptFile?: string;
 }
 
 interface TokenUsage {
@@ -458,14 +459,38 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
   // Subagent id → name mapping (completed/failed events only carry id).
   const subagentNames = new Map<string, string>();
 
-  // cc-connect passes --append-system-prompt with instructions for
-  // cc-connect send --image / --file etc.  Inject them into the agent's
-  // system prompt via the project-level AGENTS.md so the agent knows how
-  // to deliver generated files back to the chat user.
+  // cc-connect passes --append-system-prompt (text) and/or
+  // --append-system-prompt-file (path to a file containing the prompt) with
+  // instructions for cc-connect send --image / --file etc.  Inject them into
+  // the agent's system prompt via the project-level AGENTS.md so the agent
+  // knows how to deliver generated files back to the chat user.
   const agentsMdPath = join(workDir, ".scream-code", "AGENTS.md");
   let originalAgentsMd: string | undefined;
   let injectedAgentsMd = false;
-  if (opts.appendSystemPrompt) {
+
+  // Merge text + file sources. cc-connect may pass either or both; the file
+  // variant is newer (Claude Code SDK parity) and typically carries the
+  // bulk of platform-specific instructions.
+  let appendPrompt = opts.appendSystemPrompt ?? "";
+  if (opts.appendSystemPromptFile) {
+    try {
+      const fileContent = await readFile(opts.appendSystemPromptFile, "utf-8");
+      appendPrompt = appendPrompt
+        ? `${appendPrompt}\n\n${fileContent}`
+        : fileContent;
+      log.info("stream-json: loaded append-system-prompt-file", {
+        path: opts.appendSystemPromptFile,
+        bytes: fileContent.length,
+      });
+    } catch (error) {
+      log.warn("stream-json: failed to read append-system-prompt-file", {
+        path: opts.appendSystemPromptFile,
+        error: String(error),
+      });
+    }
+  }
+
+  if (appendPrompt) {
     try { originalAgentsMd = await readFile(agentsMdPath, "utf-8"); } catch { /* new file */ }
     await mkdir(join(workDir, ".scream-code"), { recursive: true });
     const sendHint =
@@ -473,7 +498,7 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
       '  cc-connect send --image /absolute/path/to/image.png\n' +
       '  cc-connect send --file /absolute/path/to/file.pdf\n' +
       '当用户要求你发送文件、截图、生成的图片时，使用 Bash 工具执行上述命令即可。\n';
-    const ccPrompt = `${sendHint}\n${opts.appendSystemPrompt}`;
+    const ccPrompt = `${sendHint}\n${appendPrompt}`;
     const merged = originalAgentsMd
       ? `${ccPrompt}\n\n${originalAgentsMd}`
       : ccPrompt;
