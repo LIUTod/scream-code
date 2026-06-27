@@ -1,5 +1,6 @@
 import type { Component } from '@earendil-works/pi-tui';
-import { Container, Text } from '@earendil-works/pi-tui';
+import { Text } from '@earendil-works/pi-tui';
+import { CachedContainer } from '../../utils/cached-container';
 import chalk from 'chalk';
 
 import { NoticeMessageComponent, StatusMessageComponent } from '../messages/status-message';
@@ -99,7 +100,7 @@ class CommittedMessageComponent implements Component {
   }
 }
 
-export class CommittedTranscriptComponent extends Container {
+export class CommittedTranscriptComponent extends CachedContainer {
   private readonly header: Text;
   private readonly colors: ColorPalette;
   private committedCount = 0;
@@ -122,6 +123,7 @@ export class CommittedTranscriptComponent extends Container {
     } else {
       this.header.setText(`  ${chalk.hex(this.colors.textDim)(`↑ 还有 ${count} 条历史消息`)}`);
     }
+    this.invalidate();
   }
 
   appendEntry(

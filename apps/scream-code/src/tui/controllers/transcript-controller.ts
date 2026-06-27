@@ -38,8 +38,8 @@ export interface TranscriptControllerHost {
   readonly streamingUI: StreamingUIController;
 
   showStatus(message: string, color?: string): void;
+  batchUpdate<T>(fn: () => T): T;
 }
-
 export class TranscriptController {
   private welcomeComponent: WelcomeComponent | undefined;
   private committedComponent: CommittedTranscriptComponent | undefined;
@@ -79,49 +79,50 @@ export class TranscriptController {
   }
 
   commit(): void {
-    const { state } = this.host;
-    // Don't fold history while a turn is actively streaming. Committing mid-turn
-    // collapses the transcript height and triggers viewport jumps. We fold once
-    // when the turn fully settles instead.
-    if (state.appState.streamingPhase !== 'idle') return;
-    const container = state.transcriptContainer;
-    const children = container.children;
-    if (children.length <= TranscriptController.LIVE_LIMIT) return;
+    this.host.batchUpdate(() => {
+      const { state } = this.host;
+      // Don't fold history while a turn is actively streaming. Committing mid-turn
+      // collapses the transcript height and triggers viewport jumps. We fold once
+      // when the turn fully settles instead.
+      if (state.appState.streamingPhase !== 'idle') return;
+      const container = state.transcriptContainer;
+      const children = container.children;
+      if (children.length <= TranscriptController.LIVE_LIMIT) return;
 
-    const toCommit: { component: Component; entry: TranscriptEntry }[] = [];
-    for (const child of children) {
-      if (this.pendingComponents.has(child)) continue;
-      if (child === this.welcomeComponent) continue;
-      if (child === this.committedComponent) continue;
-      const entry = this.liveComponentToEntry.get(child);
-      if (entry === undefined) continue;
-      if (children.length - toCommit.length <= TranscriptController.LIVE_LIMIT) break;
-      toCommit.push({ component: child, entry });
-    }
+      const toCommit: { component: Component; entry: TranscriptEntry }[] = [];
+      for (const child of children) {
+        if (this.pendingComponents.has(child)) continue;
+        if (child === this.welcomeComponent) continue;
+        if (child === this.committedComponent) continue;
+        const entry = this.liveComponentToEntry.get(child);
+        if (entry === undefined) continue;
+        if (children.length - toCommit.length <= TranscriptController.LIVE_LIMIT) break;
+        toCommit.push({ component: child, entry });
+      }
 
-    if (toCommit.length === 0) return;
+      if (toCommit.length === 0) return;
 
-    if (this.committedComponent === undefined) {
-      this.committedComponent = new CommittedTranscriptComponent(state.theme.colors);
-      container.children.unshift(this.committedComponent);
-    }
+      if (this.committedComponent === undefined) {
+        this.committedComponent = new CommittedTranscriptComponent(state.theme.colors);
+        container.children.unshift(this.committedComponent);
+      }
 
-    for (const { component, entry } of toCommit) {
-      this.committedComponent.appendEntry(entry, state.theme.colors);
-      container.removeChild(component);
-      this.liveComponentToEntry.delete(component);
-    }
+      for (const { component, entry } of toCommit) {
+        this.committedComponent.appendEntry(entry, state.theme.colors);
+        container.removeChild(component);
+        this.liveComponentToEntry.delete(component);
+      }
 
-    this.committedComponent.setCount(this.committedComponent.getCount() + toCommit.length);
-    if (process.env['SCREAM_CODE_DEBUG'] === '1') {
-      this.host.showStatus(
-        `[debug] committed=${this.committedComponent.getCount()} live=${this.getLiveCount()}`
-      );
-    }
-    container.invalidate();
-    state.ui.requestRender();
+      this.committedComponent.setCount(this.committedComponent.getCount() + toCommit.length);
+      if (process.env['SCREAM_CODE_DEBUG'] === '1') {
+        this.host.showStatus(
+          `[debug] committed=${this.committedComponent.getCount()} live=${this.getLiveCount()}`,
+        );
+      }
+      container.invalidate();
+      state.ui.requestRender();
+    });
   }
-
   private createComponent(entry: TranscriptEntry): Component | null {
     const { state, imageStore } = this.host;
 

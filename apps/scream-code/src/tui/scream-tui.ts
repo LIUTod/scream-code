@@ -161,6 +161,14 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
 
   public onExit?: (exitCode?: number) => Promise<void>;
 
+  /**
+   * Execute a compound UI update without intermediate renders. All
+   * `requestRender()` calls inside `fn` are deferred; a single force render is
+   * queued when the batch completes.
+   */
+  batchUpdate<T>(fn: () => T): T {
+    return this.state.renderBatcher.batchUpdate(fn);
+  }
 
   constructor(harness: ScreamHarness, startupInput: ScreamTUIStartupInput) {
     this.harness = harness;

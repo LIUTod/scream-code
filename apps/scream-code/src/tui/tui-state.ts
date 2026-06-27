@@ -5,6 +5,7 @@ import {
 } from '@earendil-works/pi-tui';
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { getLogDir } from '#/utils/paths';
+import { createRenderBatcher, type RenderBatchController } from './utils/render-batcher';
 
 import { ErrorBannerComponent } from './components/chrome/error-banner';
 import { FooterComponent } from './components/chrome/footer';
@@ -62,6 +63,7 @@ export interface TUIState {
   queuedMessages: QueuedMessage[];
   fdPath: string | null;
   gitLsFilesCache: GitLsFilesCache;
+  renderBatcher: RenderBatchController;
 }
 function logRenderError(error: unknown): void {
   try {
@@ -100,6 +102,16 @@ export function createTUIState(options: ScreamTUIOptions): TUIState {
       logRenderError(error);
     }
   };
+
+  // Wrap pi-tui's render scheduling so multiple requestRender() calls in the
+  // same microtask collapse into a single underlying call, and so
+  // ScreamTUI.batchUpdate() can suppress renders during compound updates.
+  const originalRequestRender = ui.requestRender.bind(ui);
+  const renderBatcher = createRenderBatcher(originalRequestRender);
+  ui.requestRender = (force = false): void => {
+    renderBatcher.requestRender(force);
+  };
+
   const transcriptContainer = new GutterContainer(CHROME_GUTTER, CHROME_GUTTER);
   const activityContainer = new GutterContainer(CHROME_GUTTER, CHROME_GUTTER);
   const todoPanelContainer = new GutterContainer(CHROME_GUTTER, CHROME_GUTTER);
@@ -146,5 +158,6 @@ export function createTUIState(options: ScreamTUIOptions): TUIState {
     queuedMessages: [],
     fdPath: detectFdPath(),
     gitLsFilesCache: createGitLsFilesCache(initialAppState.workDir),
+    renderBatcher,
   };
 }
