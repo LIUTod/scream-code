@@ -22,6 +22,12 @@ import type { WorkspaceConfig } from '../../support/workspace';
 import { scanConflictLines } from './conflict-detect';
 import { fetchDiagnostics, formatDiagnosticsHint, formatDiagnosticsNotice } from './lsp-diagnostics';
 import { materializeModelText, toModelTextView, computeAnchor } from './line-endings';
+import {
+  hashEditPayload,
+  NOOP_HARD_LIMIT,
+  recordFailedEdit,
+  resetNoopLoop,
+} from './noop-loop-guard';
 import EDIT_DESCRIPTION from './edit.md';
 
 // `old_string` must be non-empty: the non-replace_all branch walks
@@ -103,6 +109,45 @@ export class EditTool implements BuiltinTool<EditInput> {
   }
 
   private async execution(args: EditInput, safePath: string): Promise<ExecutableToolResult> {
+    const result = await this.executionCore(args, safePath);
+    const inputHash = hashEditPayload({
+      path: args.path,
+      old_string: args.old_string,
+      new_string: args.new_string,
+      replace_all: args.replace_all,
+      anchor: args.anchor,
+    });
+
+    if (result.isError !== true) {
+      resetNoopLoop(safePath);
+      return result;
+    }
+
+    const { count, escalate } = recordFailedEdit(safePath, inputHash);
+    if (escalate) {
+      return {
+        isError: true,
+        stopTurn: true,
+        output:
+          `Edit to ${args.path} has failed ${String(NOOP_HARD_LIMIT)} times in a row with the ` +
+          `same payload. The model appears stuck in a loop. Turn stopped. Re-read ${args.path} ` +
+          `with the Read tool to observe current content, then issue a different edit.`,
+      };
+    }
+    if (count >= 2) {
+      return {
+        ...result,
+        output:
+          (typeof result.output === 'string' ? result.output : '') +
+          `\n\nWarning: attempt ${String(count)} of ${String(NOOP_HARD_LIMIT)} with the same ` +
+          `payload on ${args.path}. The file may have changed — re-read it before retrying. ` +
+          `One more identical failure will stop the turn.`,
+      };
+    }
+    return result;
+  }
+
+  private async executionCore(args: EditInput, safePath: string): Promise<ExecutableToolResult> {
     if (args.old_string === args.new_string) {
       return {
         isError: true,

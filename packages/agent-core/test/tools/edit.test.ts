@@ -1,9 +1,10 @@
 import type { LspDiagnostic } from '../../src/lsp/client';
 import type { LspRegistry } from '../../src/lsp/registry';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { type EditInput, EditInputSchema, EditTool } from '../../src/tools/builtin/file/edit';
 import { computeAnchor, toModelTextView } from '../../src/tools/builtin/file/line-endings';
+import { resetNoopLoop } from '../../src/tools/builtin/file/noop-loop-guard';
 import { createFakeJian, PERMISSIVE_WORKSPACE } from './fixtures/fake-jian';
 import { executeTool } from './fixtures/execute-tool';
 
@@ -766,5 +767,123 @@ describe('EditTool', () => {
     expect(result.isError).toBeFalsy();
     expect(result.output).toContain('[LSP]');
     expect(result.output).toContain('Unused variable');
+  });
+});
+
+describe('EditTool noop-loop-guard', () => {
+  const NOOP_PATHS = ['/tmp/noop-a.txt', '/tmp/noop-b.txt', '/tmp/noop-c.txt'];
+
+  beforeEach(() => {
+    for (const p of NOOP_PATHS) resetNoopLoop(p);
+  });
+
+  afterEach(() => {
+    for (const p of NOOP_PATHS) resetNoopLoop(p);
+  });
+
+  function asError(r: { isError?: boolean }): { stopTurn?: boolean; output: unknown } {
+    if (r.isError !== true) throw new Error('expected error result');
+    return r as { stopTurn?: boolean; output: unknown };
+  }
+
+  it('stops the turn after 3 consecutive identical failed edits', async () => {
+    resetNoopLoop('/tmp/noop-a.txt');
+    const tool = new EditTool(
+      createFakeJian({
+        readText: vi.fn().mockResolvedValue('alpha beta'),
+        writeText: vi.fn().mockResolvedValue(0),
+      }),
+      PERMISSIVE_WORKSPACE,
+    );
+
+    const args: EditInput = {
+      path: '/tmp/noop-a.txt',
+      old_string: 'missing',
+      new_string: 'whatever',
+    };
+
+    const r1 = await executeTool(tool, context(args));
+    expect(r1.isError).toBe(true);
+    expect(asError(r1).stopTurn).toBeUndefined();
+
+    const r2 = await executeTool(tool, context(args));
+    expect(r2.isError).toBe(true);
+    expect(asError(r2).stopTurn).toBeUndefined();
+    expect(r2.output).toContain('Warning: attempt 2 of 3');
+
+    const r3 = await executeTool(tool, context(args));
+    expect(r3.isError).toBe(true);
+    expect(asError(r3).stopTurn).toBe(true);
+    expect(r3.output).toContain('stuck in a loop');
+    resetNoopLoop('/tmp/noop-a.txt');
+  });
+
+  it('resets the counter after a successful edit', async () => {
+    resetNoopLoop('/tmp/noop-b.txt');
+    const tool = new EditTool(
+      createFakeJian({
+        readText: vi.fn().mockResolvedValue('alpha beta'),
+        writeText: vi.fn().mockResolvedValue(0),
+      }),
+      PERMISSIVE_WORKSPACE,
+    );
+
+    const failArgs: EditInput = {
+      path: '/tmp/noop-b.txt',
+      old_string: 'missing',
+      new_string: 'whatever',
+    };
+    const r1 = await executeTool(tool, context(failArgs));
+    expect(r1.isError).toBe(true);
+    expect(asError(r1).stopTurn).toBeUndefined();
+
+    const successArgs: EditInput = {
+      path: '/tmp/noop-b.txt',
+      old_string: 'beta',
+      new_string: 'gamma',
+    };
+    const r2 = await executeTool(tool, context(successArgs));
+    expect(r2.isError).toBeFalsy();
+
+    const r3 = await executeTool(tool, context(failArgs));
+    expect(r3.isError).toBe(true);
+    expect(asError(r3).stopTurn).toBeUndefined();
+    expect(r3.output).not.toContain('Warning: attempt');
+    resetNoopLoop('/tmp/noop-b.txt');
+  });
+
+  it('does not trip when failures use different payloads', async () => {
+    resetNoopLoop('/tmp/noop-c.txt');
+    const tool = new EditTool(
+      createFakeJian({
+        readText: vi.fn().mockResolvedValue('alpha beta'),
+        writeText: vi.fn().mockResolvedValue(0),
+      }),
+      PERMISSIVE_WORKSPACE,
+    );
+
+    const r1 = await executeTool(
+      tool,
+      context({
+        path: '/tmp/noop-c.txt',
+        old_string: 'missing-one',
+        new_string: 'a',
+      }),
+    );
+    expect(r1.isError).toBe(true);
+    expect(asError(r1).stopTurn).toBeUndefined();
+
+    const r2 = await executeTool(
+      tool,
+      context({
+        path: '/tmp/noop-c.txt',
+        old_string: 'missing-two',
+        new_string: 'b',
+      }),
+    );
+    expect(r2.isError).toBe(true);
+    expect(asError(r2).stopTurn).toBeUndefined();
+    expect(r2.output).not.toContain('Warning: attempt');
+    resetNoopLoop('/tmp/noop-c.txt');
   });
 });

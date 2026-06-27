@@ -35,6 +35,11 @@ import type {
   LLMStreamTiming,
 } from '../../loop';
 import {
+  deobfuscateToolCalls,
+  obfuscateMessages,
+  type SecretObfuscator,
+} from '../secrets';
+import {
   applyCompletionBudget,
   type CompletionBudgetConfig,
 } from '../../utils/completion-budget';
@@ -63,6 +68,7 @@ export interface LtodLLMConfig {
    * final cap is applied to each request.
    */
   readonly completionBudgetConfig?: CompletionBudgetConfig | undefined;
+  readonly obfuscator?: SecretObfuscator | undefined;
 }
 
 export class LtodLLM implements LLM {
@@ -73,6 +79,7 @@ export class LtodLLM implements LLM {
   private readonly provider: ChatProvider;
   private readonly generate: GenerateFn;
   private readonly completionBudgetConfig: CompletionBudgetConfig | undefined;
+  private readonly obfuscator: SecretObfuscator | undefined;
 
   constructor(config: LtodLLMConfig) {
     this.provider = config.provider;
@@ -81,6 +88,7 @@ export class LtodLLM implements LLM {
     this.capability = config.capability;
     this.generate = config.generate ?? ltodGenerate;
     this.completionBudgetConfig = config.completionBudgetConfig;
+    this.obfuscator = config.obfuscator;
   }
 
   async chat(params: LLMChatParams): Promise<LLMChatResponse> {
@@ -96,7 +104,11 @@ export class LtodLLM implements LLM {
     const markStreamOutput = (): void => {
       firstChunkAt ??= Date.now();
     };
-    const callbacks = buildLtodCallbacks(params, markStreamOutput);
+    const { callbacks, flushPending } = buildLtodCallbacks(
+      params,
+      markStreamOutput,
+      this.obfuscator,
+    );
 
     // Compute and apply the per-request completion budget against a
     // throwaway shallow clone. `effectiveProvider` is local to this call
@@ -108,17 +120,33 @@ export class LtodLLM implements LLM {
       capability: this.capability,
     });
 
+    const outboundMessages =
+      this.obfuscator && this.obfuscator.hasSecrets()
+        ? obfuscateMessages(this.obfuscator, params.messages)
+        : params.messages;
+
     const result = await this.generate(
       effectiveProvider,
       this.systemPrompt,
       [...params.tools],
-      params.messages,
+      outboundMessages,
       callbacks,
       generateOptions(params, {
         onRequestStart: markRequestStart,
-        onStreamEnd: markStreamEnd,
+        onStreamEnd: () => {
+          markStreamEnd();
+          flushPending();
+        },
       }),
     );
+
+    // result.message stays in placeholder form so persisted assistant
+    // messages carry `#XXXXXX#` tokens, not raw secrets. Deobfuscation
+    // happens at two seams: streaming deltas (for TUI display) and
+    // response.toolCalls (so tool execution gets real secret values).
+    // Persisted assistant toolCalls carry real secrets (from deobfuscated
+    // response.toolCalls), but obfuscateMessages re-obfuscates them on
+    // the next outbound pass so the provider never sees them.
 
     // Replay merged content parts onto loop per-block callbacks after the
     // stream drained. This preserves WAL append order and stops partial
@@ -134,7 +162,10 @@ export class LtodLLM implements LLM {
     }
 
     const response: LLMChatResponse = {
-      toolCalls: [...result.message.toolCalls],
+      toolCalls:
+        this.obfuscator && this.obfuscator.hasSecrets()
+          ? deobfuscateToolCalls(this.obfuscator, result.message.toolCalls)
+          : [...result.message.toolCalls],
       providerFinishReason: result.finishReason ?? undefined,
       rawFinishReason: result.rawFinishReason ?? undefined,
       usage: result.usage ?? emptyUsage(),
@@ -179,7 +210,8 @@ function generateOptions(
 function buildLtodCallbacks(
   params: LLMChatParams,
   markStreamOutput: () => void,
-): GenerateCallbacks {
+  obfuscator?: SecretObfuscator,
+): { callbacks: GenerateCallbacks; flushPending: () => void } {
   type ToolCallIdentity = { readonly toolCallId: string; readonly name: string };
   type BufferedToolCallDelta = { readonly argumentsPart?: string | undefined };
 
@@ -187,79 +219,152 @@ function buildLtodCallbacks(
   const pendingIndexedToolCallDeltas = new Map<number | string, BufferedToolCallDelta[]>();
   let lastToolCallIdentity: ToolCallIdentity | undefined;
 
+  // Partial-placeholder buffers: when a delta ends with an incomplete
+  // `#XXXXXX#` fragment, hold it back until the next delta completes (or
+  // doesn't). Separate buffers per content type so interleaved text/think
+  // deltas don't cross-contaminate. ToolCall argument deltas get a
+  // per-toolCallId buffer so parallel tool calls don't cross-contaminate.
+  let pendingTextTail = '';
+  let pendingThinkTail = '';
+  const pendingToolCallTails = new Map<string, string>();
+
+  const PARTIAL_PLACEHOLDER_RE = /#[A-Z2-9]{0,6}$/;
+
+  const deobfuscateWithBuffer = (
+    text: string,
+    setBuffer: (v: string) => void,
+    getBuffer: () => string,
+  ): string => {
+    if (obfuscator === undefined || !obfuscator.hasSecrets()) {
+      return getBuffer() + text;
+    }
+    const combined = getBuffer() + text;
+    setBuffer('');
+    const deobfuscated = obfuscator.deobfuscate(combined);
+    const partialMatch = deobfuscated.match(PARTIAL_PLACEHOLDER_RE);
+    if (partialMatch !== null && partialMatch[0].length > 0) {
+      setBuffer(partialMatch[0]);
+      return deobfuscated.slice(0, deobfuscated.length - partialMatch[0].length);
+    }
+    return deobfuscated;
+  };
+
   const emitToolCallDelta = (delta: {
     toolCallId: string;
     name: string;
     argumentsPart?: string;
   }): void => {
     if (params.onToolCallDelta === undefined) return;
+    if (delta.argumentsPart !== undefined) {
+      const id = delta.toolCallId;
+      const out = deobfuscateWithBuffer(
+        delta.argumentsPart,
+        (v) => pendingToolCallTails.set(id, v),
+        () => pendingToolCallTails.get(id) ?? '',
+      );
+      if (out.length > 0) {
+        delta = { ...delta, argumentsPart: out };
+      } else {
+        return;
+      }
+    }
     params.onToolCallDelta(delta);
   };
 
   return {
-    onMessagePart: (part: StreamedMessagePart) => {
-      markStreamOutput();
-      if (part.type === 'text') {
-        if (params.onTextDelta === undefined) return;
-        params.onTextDelta(part.text);
-        return;
-      }
-      if (part.type === 'think') {
-        if (params.onThinkDelta === undefined) return;
-        params.onThinkDelta(part.think);
-        return;
-      }
-      if (part.type === 'function') {
-        const identity = { toolCallId: part.id, name: part.name };
-        lastToolCallIdentity = identity;
-        if (part._streamIndex !== undefined) {
-          toolCallIdentities.set(part._streamIndex, identity);
+    callbacks: {
+      onMessagePart: (part: StreamedMessagePart) => {
+        markStreamOutput();
+        if (part.type === 'text') {
+          if (params.onTextDelta === undefined) return;
+          const out = deobfuscateWithBuffer(
+            part.text,
+            (v) => { pendingTextTail = v; },
+            () => pendingTextTail,
+          );
+          if (out.length > 0) params.onTextDelta(out);
+          return;
         }
-        emitToolCallDelta({
-          toolCallId: part.id,
-          name: part.name,
-          ...(part.arguments !== null ? { argumentsPart: part.arguments } : {}),
-        });
-        if (part._streamIndex !== undefined) {
-          const pendingDeltas = pendingIndexedToolCallDeltas.get(part._streamIndex);
-          if (pendingDeltas !== undefined) {
-            pendingIndexedToolCallDeltas.delete(part._streamIndex);
-            for (const delta of pendingDeltas) {
-              emitToolCallDelta({
-                toolCallId: identity.toolCallId,
-                name: identity.name,
-                ...delta,
-              });
+        if (part.type === 'think') {
+          if (params.onThinkDelta === undefined) return;
+          const out = deobfuscateWithBuffer(
+            part.think,
+            (v) => { pendingThinkTail = v; },
+            () => pendingThinkTail,
+          );
+          if (out.length > 0) params.onThinkDelta(out);
+          return;
+        }
+        if (part.type === 'function') {
+          const identity = { toolCallId: part.id, name: part.name };
+          lastToolCallIdentity = identity;
+          if (part._streamIndex !== undefined) {
+            toolCallIdentities.set(part._streamIndex, identity);
+          }
+          emitToolCallDelta({
+            toolCallId: part.id,
+            name: part.name,
+            ...(part.arguments !== null ? { argumentsPart: part.arguments } : {}),
+          });
+          if (part._streamIndex !== undefined) {
+            const pendingDeltas = pendingIndexedToolCallDeltas.get(part._streamIndex);
+            if (pendingDeltas !== undefined) {
+              pendingIndexedToolCallDeltas.delete(part._streamIndex);
+              for (const delta of pendingDeltas) {
+                emitToolCallDelta({
+                  toolCallId: identity.toolCallId,
+                  name: identity.name,
+                  ...delta,
+                });
+              }
             }
           }
+          return;
         }
-        return;
-      }
-      if (part.type === 'tool_call_part') {
-        const argumentsPart = part.argumentsPart;
-        const delta = argumentsPart !== null ? { argumentsPart } : {};
-        if (part.index !== undefined) {
-          const identity = toolCallIdentities.get(part.index);
-          if (identity === undefined) {
-            const pendingDeltas = pendingIndexedToolCallDeltas.get(part.index) ?? [];
-            pendingDeltas.push(delta);
-            pendingIndexedToolCallDeltas.set(part.index, pendingDeltas);
+        if (part.type === 'tool_call_part') {
+          const argumentsPart = part.argumentsPart;
+          const delta = argumentsPart !== null ? { argumentsPart } : {};
+          if (part.index !== undefined) {
+            const identity = toolCallIdentities.get(part.index);
+            if (identity === undefined) {
+              const pendingDeltas = pendingIndexedToolCallDeltas.get(part.index) ?? [];
+              pendingDeltas.push(delta);
+              pendingIndexedToolCallDeltas.set(part.index, pendingDeltas);
+              return;
+            }
+            emitToolCallDelta({
+              toolCallId: identity.toolCallId,
+              name: identity.name,
+              ...delta,
+            });
             return;
           }
+          const identity = lastToolCallIdentity;
+          if (identity === undefined) return;
           emitToolCallDelta({
             toolCallId: identity.toolCallId,
             name: identity.name,
             ...delta,
           });
-          return;
         }
-        const identity = lastToolCallIdentity;
-        if (identity === undefined) return;
-        emitToolCallDelta({
-          toolCallId: identity.toolCallId,
-          name: identity.name,
-          ...delta,
-        });
+      },
+    },
+    flushPending: () => {
+      if (pendingTextTail.length > 0 && params.onTextDelta !== undefined) {
+        params.onTextDelta(pendingTextTail);
+        pendingTextTail = '';
+      }
+      if (pendingThinkTail.length > 0 && params.onThinkDelta !== undefined) {
+        params.onThinkDelta(pendingThinkTail);
+        pendingThinkTail = '';
+      }
+      if (params.onToolCallDelta !== undefined) {
+        for (const [id, tail] of pendingToolCallTails) {
+          if (tail.length > 0) {
+            params.onToolCallDelta({ toolCallId: id, name: '', argumentsPart: tail });
+          }
+        }
+        pendingToolCallTails.clear();
       }
     },
   };
