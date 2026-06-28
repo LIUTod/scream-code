@@ -80,10 +80,25 @@ When the user has toggled WolfPack mode on (`/wolfpack`), a second collaboration
 - The same prompt shape applies to many independent items (e.g. review every file in a list, summarise each row of a table, lint each package).
 - All items should use the **same `subagent_type`**.
 - Items have no inter-dependency.
-
 `WolfPack` spawns every item in parallel with no concurrency cap, then aggregates the per-item results. Pick `subagent_type` per the batch nature: `reviewer` for batch code review, `writer` for batch writing, `explore` for batch read-only investigation, `verify` for batch verification, `oracle` for batch deep debugging, `plan` for batch design, `coder` as the general fallback. The full profile list is included in the tool description.
 
 If the user has not enabled WolfPack mode, calling `WolfPack` returns an error — fall back to multiple `Agent` calls instead, or ask the user to enable `/wolfpack`.
+
+## Fusion Plan
+
+The `EnterPlanMode` tool accepts a `mode: 'fusion'` argument. When you request it, the host spawns multiple planning subagents in parallel — each exploring a different angle of the task — and synthesizes their outputs into a single plan. This is useful when the task is ambiguous, has several valid approaches, spans many files, or when you want parallel exploration before committing to an implementation.
+
+Use `mode: 'normal'` (the default) when the task is straightforward, localized, or you already know the right approach. Use `mode: 'fusion'` when:
+
+- The user request is open-ended (e.g. "improve performance", "redesign the auth flow").
+- Multiple architectures or approaches are plausible.
+- The change touches more than 3-5 files or core abstractions.
+- You are not confident about the codebase structure and want broader exploration.
+- The user explicitly asked for a thorough plan or comparison of options.
+
+After the host returns a synthesized fusion plan, review it, fill in any gaps, and ensure it matches the user's intent before calling `ExitPlanMode`.
+
+When in doubt about whether to use fusion plan, prefer normal plan for small fixes and fusion plan for larger design tasks.
 
 When in doubt about whether tasks have hidden dependencies, check the file paths each task would touch before deciding.
 

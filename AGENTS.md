@@ -420,6 +420,20 @@ Undo the last N conversation turns. Anchors at user messages and restores the we
 
 ## Agent-Core Mechanisms
 
+### Fusion Plan
+
+`EnterPlanMode` supports a `mode: 'fusion'` argument. When the LLM requests it, the TUI spawns multiple headless `scream` CLI subagents in parallel, each exploring the task from a different angle. The subagent outputs are truncated, then fed to a synthesis subagent that produces a single consolidated plan. The synthesized plan is written to the session plan file before the main agent enters normal plan mode to review and present it.
+
+- **Angles**: correctness/edge cases, minimal invasiveness, and architecture/maintainability.
+- **Worker count**: defaults to 3; configurable per invocation (not yet exposed to the LLM).
+- **Timeout**: default 120 seconds per worker; synthesis has its own budget.
+- **Output budget**: default 8,000 bytes per worker, 12,000 bytes for synthesis.
+- **Recursion guard**: the environment variable `SCREAM_FUSIONPLAN_SUBAGENT` is set for spawned subagents so they do not recursively trigger fusion plan.
+
+The LLM should choose `mode: 'fusion'` for ambiguous, large, or multi-approach tasks and `mode: 'normal'` (default) for straightforward or localized changes. See `packages/agent-core/src/tools/builtin/planning/enter-plan-mode.md` for the full decision guide.
+
+Key files: `apps/scream-code/src/tui/utils/fusion-plan.ts`, `apps/scream-code/src/tui/commands/config.ts`, `packages/agent-core/src/tools/builtin/planning/enter-plan-mode.md`, `packages/agent-core/src/profile/default/system.md`.
+
 ### Compaction Pipeline
 
 ScreamCode has a three-stage compaction pipeline coordinated at the `beforeStep` hook

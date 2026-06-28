@@ -50,7 +50,7 @@ export interface ColorPalette {
   primary: string;
   accent: string;
   planMode: string;
-
+  fusionPlanMode: string;
   // Text
   text: string;
   textStrong: string;
@@ -93,7 +93,7 @@ export const darkColors: ColorPalette = {
   primary: dark.green,
   accent: dark.tangerine400,
   planMode: '#00FFFF',
-
+  fusionPlanMode: '#ffff66',
   text: dark.gray100,
   textStrong: dark.gray50,
   textDim: dark.gray500,
@@ -133,7 +133,7 @@ export const lightColors: ColorPalette = {
   primary: light.green,
   accent: light.tangerine700,
   planMode: '#00838F',
-
+  fusionPlanMode: '#ffff66',
   text: light.gray900,
   textStrong: light.gray900,
   textDim: light.gray700,

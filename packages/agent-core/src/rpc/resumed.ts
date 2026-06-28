@@ -15,7 +15,7 @@ import type { BackgroundTaskInfo } from '#/tools/builtin';
 
 export type AgentReplayRecord =
   | { type: 'message'; message: ContextMessage }
-  | { type: 'plan_updated'; enabled: boolean }
+  | { type: 'plan_updated'; enabled: boolean; strategy?: 'normal' | 'fusion' }
   | { type: 'config_updated'; config: AgentConfigUpdateData }
   | { type: 'permission_updated'; mode: PermissionMode }
   | { type: 'approval_result'; record: PermissionApprovalResultRecord };

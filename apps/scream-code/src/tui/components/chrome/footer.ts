@@ -349,7 +349,10 @@ export class FooterComponent implements Component {
     const left: string[] = [];
     if (state.permissionMode === 'auto') left.push(chalk.hex(colors.warning).bold('auto'));
     if (state.permissionMode === 'yolo') left.push(chalk.hex(colors.warning).bold('YES'));
-    if (state.planMode) left.push(chalk.hex(colors.planMode).bold('plan'));
+    if (state.planMode !== 'off') {
+      const isFusion = state.planMode === 'fusionplan';
+      left.push(chalk.hex(isFusion ? colors.fusionPlanMode : colors.planMode).bold(isFusion ? 'fusion' : 'plan'));
+    }
     if (state.wolfpackMode) left.push(chalk.hex(colors.primary).bold('wolfpack'));
     if (state.loopModeEnabled) {
       const iter = state.loopIteration;

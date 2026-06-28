@@ -243,6 +243,7 @@ describe('Session plan, compact, usage, and resume APIs', () => {
       expect(enterRecord).toEqual({
         type: 'plan_mode.enter',
         id: sourcePlan.id,
+        strategy: 'normal',
         time: expect.any(Number),
       });
       const forkState = JSON.parse(

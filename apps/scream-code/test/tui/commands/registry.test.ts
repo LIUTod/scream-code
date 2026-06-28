@@ -53,6 +53,14 @@ describe('built-in slash command registry', () => {
     expect(resolveSlashCommandAvailability(plan!, 'clear')).toBe('idle-only');
   });
 
+  it('registers fusionplan with alias fp and clear idle-only', () => {
+    const fusion = findBuiltInSlashCommand('fusionplan');
+    expect(fusion).toBeDefined();
+    expect(findBuiltInSlashCommand('fp')?.name).toBe('fusionplan');
+    expect(resolveSlashCommandAvailability(fusion!, '')).toBe('always');
+    expect(resolveSlashCommandAvailability(fusion!, 'clear')).toBe('idle-only');
+  });
+
   it('defaults commands without explicit availability to idle-only', () => {
     const command: ScreamSlashCommand = {
       name: 'example',
@@ -107,6 +115,7 @@ describe('built-in slash command registry', () => {
         'new',
         'permission',
         'plan',
+        'fusionplan',
         'revoke',
         'sessions',
         'settings',

@@ -37,6 +37,7 @@ export interface AgentRecordEvents {
 
   'plan_mode.enter': {
     id: string;
+    strategy?: 'normal' | 'fusion';
   };
   'plan_mode.cancel': {
     id?: string;

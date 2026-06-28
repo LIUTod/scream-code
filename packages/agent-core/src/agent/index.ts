@@ -653,6 +653,7 @@ export class Agent {
       maxContextTokens,
       contextUsage,
       planMode: this.planMode.isActive,
+      planStrategy: this.planMode.isActive ? this.planMode.strategy : undefined,
       permission: this.permission.mode,
       usage,
     });

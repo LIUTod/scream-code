@@ -63,16 +63,45 @@ describe('EnterPlanModeTool', () => {
 
     expect(tool.name).toBe('EnterPlanMode');
     expect(tool.description.length).toBeGreaterThan(0);
-    expect(tool.description).toContain('Use it when ANY of these conditions apply');
-    expect(tool.description).toContain('New Feature Implementation');
+    expect(tool.description).toContain('Planning Modes');
+    expect(tool.description).toContain('Normal plan');
+    expect(tool.description).toContain('Fusion plan');
+    expect(tool.description).toContain('When to Use');
     expect(tool.description).toContain('When NOT to use');
     expect(tool.description).toContain('subagent_type="explore"');
+    expect(tool.description).toContain('fusion');
     expect(EnterPlanModeInputSchema.safeParse({}).success).toBe(true);
     expect(tool.parameters).toMatchObject({
       type: 'object',
-      properties: {},
+      properties: { mode: expect.any(Object) },
     });
     expect((tool.parameters['properties'] as Record<string, unknown>)['reason']).toBeUndefined();
+  });
+
+  it('defaults to normal mode when no mode is provided', async () => {
+    const { agent } = makeAgent({ mode: 'yolo' });
+    const result = await executeTool(new EnterPlanModeTool(agent), {
+      turnId: '0',
+      toolCallId: 'tc_default',
+      args: { mode: 'normal' },
+      signal,
+    });
+
+    expect(result.isError).toBeFalsy();
+    expect(result.output).toContain('Plan mode is now active');
+  });
+
+  it('accepts explicit fusion mode', async () => {
+    const { agent } = makeAgent({ mode: 'yolo' });
+    const result = await executeTool(new EnterPlanModeTool(agent), {
+      turnId: '0',
+      toolCallId: 'tc_fusion',
+      args: { mode: 'fusion' },
+      signal,
+    });
+
+    expect(result.isError).toBeFalsy();
+    expect(result.output).toContain('Plan mode is now active');
   });
 
   it('returns an error when plan mode is already active', async () => {
@@ -80,7 +109,7 @@ describe('EnterPlanModeTool', () => {
     const result = await executeTool(new EnterPlanModeTool(agent), {
       turnId: '0',
       toolCallId: 'tc_1',
-      args: {},
+      args: { mode: 'normal' },
       signal,
     });
 
@@ -96,7 +125,7 @@ describe('EnterPlanModeTool', () => {
       const result = await executeTool(new EnterPlanModeTool(agent), {
         turnId: '0',
         toolCallId: `tc_${mode}`,
-        args: {},
+        args: { mode: 'normal' },
         signal,
       });
 
@@ -113,7 +142,7 @@ describe('EnterPlanModeTool', () => {
     const result = await executeTool(new EnterPlanModeTool(agent), {
       turnId: '0',
       toolCallId: 'tc_inline',
-      args: {},
+      args: { mode: 'normal' },
       signal,
     });
 
@@ -128,7 +157,7 @@ describe('EnterPlanModeTool', () => {
     const result = await executeTool(new EnterPlanModeTool(agent), {
       turnId: '0',
       toolCallId: 'tc_file',
-      args: {},
+      args: { mode: 'normal' },
       signal,
     });
 
@@ -145,7 +174,7 @@ describe('EnterPlanModeTool', () => {
     const result = await executeTool(new EnterPlanModeTool(agent), {
       turnId: '0',
       toolCallId: 'tc_error',
-      args: {},
+      args: { mode: 'normal' },
       signal,
     });
 
@@ -155,7 +184,7 @@ describe('EnterPlanModeTool', () => {
 
   it('resolveExecution description returns a stable phrase', () => {
     const { agent } = makeAgent();
-    const execution = new EnterPlanModeTool(agent).resolveExecution({});
+    const execution = new EnterPlanModeTool(agent).resolveExecution({ mode: 'normal' });
     expect(execution.isError).toBeFalsy();
     if (execution.isError === true) throw new Error('expected runnable execution');
     expect(execution.description).toContain('plan mode');

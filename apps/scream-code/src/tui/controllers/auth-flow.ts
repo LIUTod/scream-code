@@ -56,7 +56,7 @@ export class AuthFlowController {
         : host.options.startup.yolo
           ? 'yolo'
           : undefined,
-      planMode: host.state.appState.planMode ? true : undefined,
+      planMode: host.state.appState.planMode !== 'off' ? true : undefined,
     });
     await host.setSession(session);
     host.setAppState({

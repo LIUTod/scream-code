@@ -12,7 +12,7 @@ function makeAppState(overrides: Partial<AppState> = {}): AppState {
     workDir: '/tmp',
     sessionId: 'test-session',
     permissionMode: 'manual',
-    planMode: false,
+    planMode: 'off',
     thinkingLevel: 'off',
     contextUsage: 0,
     contextTokens: 0,

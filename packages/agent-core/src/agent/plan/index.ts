@@ -9,20 +9,25 @@ export type PlanData = null | {
   content: string;
   path: string;
 };
+export type PlanStrategy = 'normal' | 'fusion';
 export type PlanFilePath = string | null;
 
 export class PlanMode {
   protected _isActive = false;
   protected _planId: null | string = null;
   protected _planFilePath: PlanFilePath = null;
+  protected _strategy: PlanStrategy = 'normal';
 
   constructor(protected readonly agent: Agent) {}
-
   createPlanId(): string {
     return generateHeroSlug(randomUUID(), new Set());
   }
-
-  async enter(id = this.createPlanId(), createFile = false, emitStatus = true): Promise<void> {
+  async enter(
+    id: string = this.createPlanId(),
+    createFile: boolean = false,
+    emitStatus: boolean = true,
+    strategy: PlanStrategy = 'normal',
+  ): Promise<void> {
     if (this._isActive) {
       throw new Error('Already in plan mode');
     }
@@ -30,13 +35,14 @@ export class PlanMode {
     this._isActive = true;
     this._planId = id;
     this._planFilePath = null;
+    this._strategy = strategy;
 
     let enterRecorded = false;
     try {
       const planFilePath = this.planFilePathFor(id);
       this._planFilePath = planFilePath;
       await this.ensurePlanDirectory(planFilePath);
-      this.agent.records.logRecord({ type: 'plan_mode.enter', id });
+      this.agent.records.logRecord({ type: 'plan_mode.enter', id, strategy });
       enterRecorded = true;
       if (createFile) {
         await this.writeEmptyPlanFile(planFilePath);
@@ -48,6 +54,7 @@ export class PlanMode {
         this._isActive = false;
         this._planId = null;
         this._planFilePath = null;
+        this._strategy = 'normal';
       }
       throw error;
     }
@@ -55,15 +62,17 @@ export class PlanMode {
     if (emitStatus) this.agent.emitStatusUpdated();
   }
 
-  restoreEnter({ id }: { readonly id: string }): void {
+  restoreEnter({ id, strategy }: { readonly id: string; readonly strategy?: PlanStrategy }): void {
     this.agent.replayBuilder.push({
       type: 'plan_updated',
       enabled: true,
+      strategy,
     });
 
     this._isActive = true;
     this._planId = id;
     this._planFilePath = this.planFilePathFor(id);
+    this._strategy = strategy ?? 'normal';
   }
 
   cancel(id?: string): void {
@@ -75,6 +84,7 @@ export class PlanMode {
     this._isActive = false;
     this._planId = null;
     this._planFilePath = null;
+    this._strategy = 'normal';
     this.agent.emitStatusUpdated();
   }
 
@@ -92,6 +102,7 @@ export class PlanMode {
     this._isActive = false;
     this._planId = null;
     this._planFilePath = null;
+    this._strategy = 'normal';
     this.agent.emitStatusUpdated();
   }
 
@@ -101,6 +112,10 @@ export class PlanMode {
 
   get planFilePath(): PlanFilePath {
     return this._planFilePath;
+  }
+
+  get strategy(): PlanStrategy {
+    return this._strategy;
   }
 
   async data(): Promise<PlanData> {

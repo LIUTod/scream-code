@@ -11,8 +11,8 @@ import { NO_ACTIVE_SESSION_MESSAGE } from '../constant/scream-tui';
 import { isTheme } from '../theme/index';
 import { formatErrorMessage } from '../utils/event-payload';
 import { showUsage } from './info';
+import type { PlanModeState } from '../types';
 import type { SlashCommandHost } from './dispatch';
-
 // ---------------------------------------------------------------------------
 // Plan / Config commands
 // ---------------------------------------------------------------------------
@@ -31,26 +31,32 @@ export async function handlePlanCommand(host: SlashCommandHost, args: string): P
     return;
   }
 
-  let enabled: boolean;
-  if (subcmd.length === 0) enabled = !host.state.appState.planMode;
-  else if (subcmd === 'on') enabled = true;
-  else if (subcmd === 'off') enabled = false;
+  let state: PlanModeState;
+  if (subcmd.length === 0) state = host.state.appState.planMode === 'off' ? 'plan' : 'off';
+  else if (subcmd === 'on') state = 'plan';
+  else if (subcmd === 'off') state = 'off';
   else {
     host.showError(`Unknown plan subcommand: ${subcmd}`);
     return;
   }
 
-  await applyPlanMode(host, session, enabled);
+  await applyPlanMode(host, session, state);
 }
 
-async function applyPlanMode(host: SlashCommandHost, session: Session, enabled: boolean): Promise<void> {
+async function applyPlanMode(host: SlashCommandHost, session: Session, state: PlanModeState): Promise<void> {
+  const enabled = state !== 'off';
   try {
-    await session.setPlanMode(enabled);
-    host.setAppState({ planMode: enabled });
+    const status = await session.getStatus().catch(() => null);
+    const currentAgentPlanMode = status?.planMode ?? false;
+    if (currentAgentPlanMode !== enabled) {
+      await session.setPlanMode(enabled);
+    }
+    host.setAppState({ planMode: state });
     if (enabled) {
       const plan = await session.getPlan().catch(() => null);
+      const label = state === 'fusionplan' ? '融合计划模式：开启' : '计划模式：开启';
       host.showNotice(
-        '计划模式：开启',
+        label,
         plan?.path !== undefined ? `计划将创建于此：${plan.path}` : undefined,
       );
       return;
@@ -60,6 +66,26 @@ async function applyPlanMode(host: SlashCommandHost, session: Session, enabled: 
     const msg = formatErrorMessage(error);
     host.showError(`Failed to set plan mode: ${msg}`);
   }
+}
+
+export async function handleFusionPlanCommand(host: SlashCommandHost, args: string): Promise<void> {
+  const session = host.session;
+  if (session === undefined) {
+    host.showError(NO_ACTIVE_SESSION_MESSAGE);
+    return;
+  }
+
+  const subcmd = args.trim().toLowerCase();
+  let state: PlanModeState;
+  if (subcmd.length === 0) state = host.state.appState.planMode === 'fusionplan' ? 'off' : 'fusionplan';
+  else if (subcmd === 'on') state = 'fusionplan';
+  else if (subcmd === 'off') state = 'off';
+  else {
+    host.showError(`Unknown fusionplan subcommand: ${subcmd}`);
+    return;
+  }
+
+  await applyPlanMode(host, session, state);
 }
 
 export async function handleYoloCommand(host: SlashCommandHost, args: string): Promise<void> {

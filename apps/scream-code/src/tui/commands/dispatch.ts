@@ -25,6 +25,7 @@ import {
   handleAutoCommand,
   handleCompactCommand,
   handleEditorCommand,
+  handleFusionPlanCommand,
   handleModelCommand,
   handlePlanCommand,
   handleWolfpackCommand,
@@ -66,6 +67,7 @@ export {
   handleAutoCommand,
   handleCompactCommand,
   handleEditorCommand,
+  handleFusionPlanCommand,
   handleModelCommand,
   handlePlanCommand,
   handleWolfpackCommand,
@@ -271,6 +273,9 @@ async function handleBuiltInSlashCommand(
       return;
     case 'plan':
       await handlePlanCommand(host, args);
+      return;
+    case 'fusionplan':
+      await handleFusionPlanCommand(host, args);
       return;
     case 'wolfpack':
       await handleWolfpackCommand(host, args);

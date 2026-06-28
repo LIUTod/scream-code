@@ -54,7 +54,7 @@ export function appStateFromResumeAgent(agent: ResumedAgentState): Partial<AppSt
     contextTokens,
     maxContextTokens,
     contextUsage,
-    planMode: agent.plan !== null,
+    planMode: agent.plan !== null ? 'plan' : 'off',
     permissionMode: agent.permission.mode,
   };
 }

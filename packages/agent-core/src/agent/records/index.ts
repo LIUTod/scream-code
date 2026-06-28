@@ -59,7 +59,7 @@ function restoreAgentRecord(agent: Agent, input: AgentRecord): void {
       agent.fullCompaction.markCompleted();
       return;
     case 'plan_mode.enter':
-      agent.planMode.restoreEnter(input);
+      agent.planMode.restoreEnter({ id: input.id, strategy: input.strategy });
       return;
     case 'plan_mode.cancel':
       agent.planMode.cancel(input.id);

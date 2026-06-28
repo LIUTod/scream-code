@@ -14,9 +14,14 @@ import type { ToolExecution } from '../../../loop/types';
 import { toInputJsonSchema } from '../../support/input-schema';
 import DESCRIPTION from './enter-plan-mode.md';
 
-// ── Input schema ─────────────────────────────────────────────────────
-
-export const EnterPlanModeInputSchema = z.object({}).strict();
+export const EnterPlanModeInputSchema = z.object({
+  mode: z
+    .enum(['normal', 'fusion'])
+    .default('normal')
+    .describe(
+      "Planning strategy. 'normal' (default): you design the plan. 'fusion': the host spawns parallel planning subagents and synthesizes a single plan for you to review. Use 'fusion' for ambiguous, large, or multi-approach tasks.",
+    ),
+}).strict();
 export type EnterPlanModeInput = z.infer<typeof EnterPlanModeInputSchema>;
 
 export class EnterPlanModeTool implements BuiltinTool<EnterPlanModeInput> {
@@ -40,7 +45,7 @@ export class EnterPlanModeTool implements BuiltinTool<EnterPlanModeInput> {
         }
 
         try {
-          await this.agent.planMode.enter();
+          await this.agent.planMode.enter(undefined, false, true, _args.mode);
         } catch (error) {
           const message = error instanceof Error ? error.message : 'Failed to enter plan mode.';
           return { isError: true, output: `Failed to enter plan mode: ${message}` };

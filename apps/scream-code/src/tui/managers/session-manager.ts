@@ -12,7 +12,7 @@ import { createApprovalRequestHandler } from '../reverse-rpc/approval/handler';
 import { createQuestionAskHandler } from '../reverse-rpc/question/handler';
 import type { ApprovalController } from '../reverse-rpc/approval/controller';
 import type { QuestionController } from '../reverse-rpc/question/controller';
-import type { AppState, TUIStartupOptions } from '../types';
+import type { AppState, PlanModeState, TUIStartupOptions } from '../types';
 import type { TUIState } from '../tui-state';
 import type { SessionEventHandler } from '../controllers/session-event-handler';
 import type { SessionReplayRenderer } from '../controllers/session-replay';
@@ -145,8 +145,7 @@ export class SessionManager {
       sessionId: session.id,
       model: status.model ?? '',
       thinkingLevel: status.thinkingLevel as import('@scream-code/scream-code-sdk').ThinkingEffort,
-      permissionMode: status.permission,
-      planMode: status.planMode,
+      planMode: (status.planMode ? 'plan' : 'off') as PlanModeState,
       contextTokens: status.contextTokens,
       maxContextTokens: status.maxContextTokens,
       contextUsage: status.contextUsage,
@@ -330,7 +329,7 @@ export class SessionManager {
             ? 'off'
             : this.host.state.appState.thinkingLevel,
       permission: this.host.state.appState.permissionMode,
-      planMode: this.host.state.appState.planMode ? true : undefined,
+      planMode: this.host.state.appState.planMode !== 'off' ? true : undefined,
     });
   }
 

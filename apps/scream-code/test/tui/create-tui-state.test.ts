@@ -10,7 +10,7 @@ function fakeInitialAppState(): AppState {
     workDir: '/tmp/scream-test',
     sessionId: 'sess-1',
     permissionMode: 'manual',
-    planMode: false,
+    planMode: 'off',
     thinkingLevel: 'off',
     contextUsage: 0,
     contextTokens: 0,

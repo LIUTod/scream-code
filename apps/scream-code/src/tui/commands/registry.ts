@@ -92,6 +92,13 @@ export const BUILTIN_SLASH_COMMANDS = [
     availability: (args) => (args.trim().toLowerCase() === 'clear' ? 'idle-only' : 'always'),
   },
   {
+    name: 'fusionplan',
+    aliases: ['fp'],
+    description: '切换融合计划模式（多子代理并行规划）',
+    priority: 118,
+    availability: (args) => (args.trim().toLowerCase() === 'clear' ? 'idle-only' : 'always'),
+  },
+  {
     name: 'tasks',
     aliases: ['task'],
     description: '浏览后台任务',

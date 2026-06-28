@@ -13,7 +13,7 @@ import {
 } from '../constant/scream-tui';
 import { formatErrorMessage } from '../utils/event-payload';
 import type { ImageAttachmentStore } from '../utils/image-attachment-store';
-import type { AppState, PendingExit, QueuedMessage } from '../types';
+import type { AppState, PendingExit, PlanModeState, QueuedMessage } from '../types';
 import type { TUIState } from '../tui-state';
 
 export interface EditorKeyboardHost {
@@ -34,7 +34,7 @@ export interface EditorKeyboardHost {
   togglePlanExpansion(): boolean;
   hideSessionPicker(): void;
   stop(exitCode?: number): Promise<void>;
-  handlePlanToggle(next: boolean): void;
+  handlePlanModeStateChange(state: PlanModeState): void;
   clearQueuedMessages(): void;
   setExternalEditorRunning(running: boolean): void;
   cancelPendingMemoryExtraction(): void;
@@ -129,8 +129,10 @@ export class EditorKeyboardController {
         host.showError(NO_ACTIVE_SESSION_MESSAGE);
         return;
       }
-      const next = !host.state.appState.planMode;
-      host.handlePlanToggle(next);
+      const current = host.state.appState.planMode;
+      const next: PlanModeState =
+        current === 'off' ? 'plan' : current === 'plan' ? 'fusionplan' : 'off';
+      host.handlePlanModeStateChange(next);
     };
 
     editor.onOpenExternalEditor = () => {

@@ -11,6 +11,7 @@ export { handleSkillCommand } from './skill-center';
 export {
   handleCompactCommand,
   handleEditorCommand,
+  handleFusionPlanCommand,
   handleModelCommand,
   handlePlanCommand,
   handleThemeCommand,

@@ -150,6 +150,7 @@ export interface SessionStatus {
   readonly thinkingLevel: string;
   readonly permission: PermissionMode;
   readonly planMode: boolean;
+  readonly planStrategy?: 'normal' | 'fusion';
   readonly contextTokens: number;
   readonly maxContextTokens: number;
   readonly contextUsage: number;
