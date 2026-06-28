@@ -87,19 +87,17 @@ function mockSpawnExit(code: number, signal: NodeJS.Signals | null = null): void
 describe('runUpdatePreflight', () => {
   afterEach(() => { vi.clearAllMocks(); });
 
-  it('continues on first launch with empty cache, still refreshes in background', async () => {
-    mocks.readUpdateCache.mockResolvedValue(emptyUpdateCache());
+  it('continues on first launch with empty cache after refreshing latest version', async () => {
     mocks.refreshUpdateCache.mockResolvedValue(emptyUpdateCache());
     const { options } = captureOutput();
 
     await expect(runUpdatePreflight('0.4.0', options)).resolves.toBe('continue');
-    expect(readUpdateCache).toHaveBeenCalledTimes(1);
     expect(refreshUpdateCache).toHaveBeenCalledTimes(1);
+    expect(readUpdateCache).not.toHaveBeenCalled();
   });
-
   it('skips when non-interactive', async () => {
-    mocks.readUpdateCache.mockResolvedValue(cacheWith('0.5.0'));
     mocks.refreshUpdateCache.mockResolvedValue(cacheWith('0.5.0'));
+    mocks.promptForInstallConfirmation.mockResolvedValue(false);
     const { stdout, options } = captureOutput();
     await expect(
       runUpdatePreflight('0.4.0', { ...options, isTTY: false }),
@@ -110,7 +108,6 @@ describe('runUpdatePreflight', () => {
   });
 
   it('interactive: prompts and runs npm install -g scream-code@latest', async () => {
-    mocks.readUpdateCache.mockResolvedValue(cacheWith('0.5.0'));
     mocks.refreshUpdateCache.mockResolvedValue(cacheWith('0.5.0'));
     mocks.promptForInstallConfirmation.mockResolvedValue(true);
     mockSpawnExit(0);
@@ -132,7 +129,6 @@ describe('runUpdatePreflight', () => {
   });
 
   it('declined install continues without spawn', async () => {
-    mocks.readUpdateCache.mockResolvedValue(cacheWith('0.5.0'));
     mocks.refreshUpdateCache.mockResolvedValue(cacheWith('0.5.0'));
     mocks.promptForInstallConfirmation.mockResolvedValue(false);
     const { options } = captureOutput();
@@ -141,7 +137,6 @@ describe('runUpdatePreflight', () => {
   });
 
   it('warns and continues when spawn exits non-zero, without claiming success', async () => {
-    mocks.readUpdateCache.mockResolvedValue(cacheWith('0.5.0'));
     mocks.refreshUpdateCache.mockResolvedValue(cacheWith('0.5.0'));
     mocks.promptForInstallConfirmation.mockResolvedValue(true);
     mockSpawnExit(1);
@@ -150,5 +145,4 @@ describe('runUpdatePreflight', () => {
     expect(stderr.join('')).toContain('警告：更新失败');
     expect(stdout.join('')).not.toContain('已更新至');
   });
-
 });

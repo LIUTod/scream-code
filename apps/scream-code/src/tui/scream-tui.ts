@@ -285,6 +285,10 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
   private async initMainTui(): Promise<boolean> {
     const shouldReplayHistory = await this.init();
 
+    // Check for updates before rendering the welcome screen so the version
+    // hint is always based on the freshly fetched latest release.
+    await this.checkForUpdates();
+
     // Load recent sessions for the welcome screen.
     try {
       const sessions = await this.harness.listSessions({ workDir: this.state.appState.workDir });
@@ -326,15 +330,7 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
     if (resumeState?.warning !== undefined) {
       this.showStatus(`警告：${resumeState.warning}`, this.state.theme.colors.warning);
     }
-    if (this.session !== undefined) {
-      this.sessionEventHandler.startSubscription();
-    }
-    void this.fetchSessions();
-    if (this.session !== undefined) {
-      this.refreshSessionTitle();
-    }
     void this.refreshSkillCommands(this.session);
-    void this.checkForUpdates();
   }
 
   private async showTmuxKeyboardWarningIfNeeded(): Promise<void> {

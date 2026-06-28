@@ -1,6 +1,5 @@
 import { spawn } from 'node:child_process';
 
-import { readUpdateCache } from './cache';
 import { promptForInstallConfirmation, type InstallPromptOptions } from './prompt';
 import { refreshUpdateCache } from './refresh';
 import { selectUpdateTarget } from './select';
@@ -45,10 +44,6 @@ function renderManualUpdateMessage(currentVersion: string, target: UpdateTarget)
 
 function renderInstallSuccessMessage(target: UpdateTarget): string {
   return `已更新至 ${target.version}。请重新启动 scream 以使用新版本。\n`;
-}
-
-function refreshInBackground(): void {
-  void refreshUpdateCache().catch(() => {});
 }
 
 async function promptInstall(
@@ -103,10 +98,9 @@ export async function runUpdatePreflight(
   const stderr = options.stderr ?? process.stderr;
 
   try {
-    const cache = await readUpdateCache().catch(() => null);
+    const cache = await refreshUpdateCache().catch(() => null);
     const latest = cache?.latest ?? null;
     const target = selectUpdateTarget(currentVersion, latest);
-    refreshInBackground();
 
     const isInteractive =
       options.isTTY ?? (process.stdin.isTTY && process.stdout.isTTY);
