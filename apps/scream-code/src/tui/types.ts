@@ -53,10 +53,11 @@ export interface AppState {
   contextTokens: number;
   maxContextTokens: number;
   isCompacting: boolean;
+  lastCompactionFinishedAt: number | undefined;
+  autoCompactionCount: number;
   isReplaying: boolean;
-  streamingPhase: 'idle' | 'waiting' | 'thinking' | 'composing';
+  streamingPhase: 'idle' | 'waiting' | 'thinking' | 'composing' | 'tool';
   streamingStartTime: number;
-  livePaneMode: LivePaneMode;
   theme: Theme;
   version: string;
   hasNewVersion: boolean;
@@ -79,6 +80,7 @@ export interface AppState {
   loopVerifier: { command: string; timeoutMs: number } | undefined;
   loopIteration: number;
   loopLastVerifyPassed: boolean | undefined;
+  loopVerifying: boolean;
   recentSessions: RecentSession[];
 }
 
@@ -206,15 +208,7 @@ export interface TranscriptEntry {
   skillTrigger?: 'user-slash' | 'model-tool' | 'nested-skill';
 }
 
-export type LivePaneMode =
-  | 'idle'
-  | 'waiting'
-  | 'thinking'
-  | 'tool'
-  | 'session';
-
 export interface LivePaneState {
-  mode: LivePaneMode;
   pendingApproval: PendingApproval | null;
   pendingQuestion: PendingQuestion | null;
 }
@@ -233,7 +227,6 @@ export interface SendMessageOptions {
 }
 
 export const INITIAL_LIVE_PANE: LivePaneState = {
-  mode: 'idle',
   pendingApproval: null,
   pendingQuestion: null,
 };

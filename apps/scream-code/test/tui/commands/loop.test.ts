@@ -18,10 +18,11 @@ function makeAppState(overrides: Partial<AppState> = {}): AppState {
     contextTokens: 0,
     maxContextTokens: 1000,
     isCompacting: false,
+    lastCompactionFinishedAt: undefined,
+    autoCompactionCount: 0,
     isReplaying: false,
     streamingPhase: 'idle',
     streamingStartTime: 0,
-    livePaneMode: 'idle',
     theme: 'dark',
     version: '0.0.0-test',
     hasNewVersion: false,
@@ -44,6 +45,7 @@ function makeAppState(overrides: Partial<AppState> = {}): AppState {
     loopVerifier: undefined,
     loopIteration: 0,
     loopLastVerifyPassed: undefined,
+    loopVerifying: false,
     recentSessions: [],
     ...overrides,
   };
@@ -90,6 +92,7 @@ describe('handleLoopCommand', () => {
       loopVerifier: undefined,
       loopIteration: 0,
       loopLastVerifyPassed: undefined,
+      loopVerifying: false,
     });
     expect(host.showStatus).toHaveBeenCalledWith('循环模式已关闭。');
   });
@@ -118,6 +121,7 @@ describe('handleLoopCommand', () => {
       loopVerifier: undefined,
       loopIteration: 0,
       loopLastVerifyPassed: undefined,
+      loopVerifying: false,
     });
     expect(host.showNotice).toHaveBeenCalledWith('循环模式已开启', expect.stringContaining('剩余 3/3 次'));
     expect(host.sendNormalUserInput).toHaveBeenCalledWith('fix tests');

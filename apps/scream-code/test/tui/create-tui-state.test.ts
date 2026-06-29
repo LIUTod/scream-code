@@ -16,10 +16,11 @@ function fakeInitialAppState(): AppState {
     contextTokens: 0,
     maxContextTokens: 0,
     isCompacting: false,
+    lastCompactionFinishedAt: undefined,
+    autoCompactionCount: 0,
     isReplaying: false,
     streamingPhase: 'idle',
     streamingStartTime: 0,
-    livePaneMode: 'idle',
     theme: 'dark',
     version: '0.0.0-test',
     hasNewVersion: false,
@@ -42,6 +43,7 @@ function fakeInitialAppState(): AppState {
     loopVerifier: undefined,
     loopIteration: 0,
     loopLastVerifyPassed: undefined,
+    loopVerifying: false,
     recentSessions: [],
   };
 }
@@ -80,7 +82,6 @@ describe('createTUIState', () => {
     expect(state.startupState).toBe('pending');
 
     // LivePane defaults.
-    expect(state.livePane.mode).toBe('idle');
     expect(state.livePane.pendingApproval).toBeNull();
     expect(state.livePane.pendingQuestion).toBeNull();
 

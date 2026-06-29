@@ -10,6 +10,7 @@ import { spawn } from 'node:child_process';
 import { readUpdateCache } from '#/cli/update/cache';
 import { refreshUpdateCache } from '#/cli/update/refresh';
 import { selectUpdateTarget } from '#/cli/update/select';
+import { isBusy } from '../utils/app-state';
 
 import type { SlashCommandHost } from './dispatch';
 
@@ -123,7 +124,7 @@ async function runInstallStep(
 }
 
 export async function handleUpdateCommand(host: SlashCommandHost): Promise<void> {
-  if (host.state.appState.streamingPhase !== 'idle') {
+  if (isBusy(host.state.appState)) {
     host.showError('请在空闲时执行更新。');
     return;
   }

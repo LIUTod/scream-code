@@ -6,6 +6,8 @@ import { PermissionSelectorComponent } from '../components/dialogs/permission-se
 import { SettingsSelectorComponent, type SettingsSelection } from '../components/dialogs/settings-selector';
 import { ThemeSelectorComponent } from '../components/dialogs/theme-selector';
 import { saveTuiConfig } from '../config';
+import { isBusy } from '../utils/app-state';
+import { formatTokenCount } from '#/utils/usage/usage-format';
 import type { Theme } from '../theme';
 import { NO_ACTIVE_SESSION_MESSAGE } from '../constant/scream-tui';
 import { isTheme } from '../theme/index';
@@ -13,6 +15,47 @@ import { formatErrorMessage } from '../utils/event-payload';
 import { showUsage } from './info';
 import type { PlanModeState } from '../types';
 import type { SlashCommandHost } from './dispatch';
+
+/**
+ * Storm Breaker guard for model switches. Returns the (currentTokens,
+ * maxContextTokens) pair when switching to `alias` would overflow its
+ * context window, or `null` when the switch is safe / unknown.
+ *
+ * Exported (and kept pure) so the guard is unit-testable without spinning
+ * up a full ScreamTUI + session mock.
+ */
+export function contextOverflowForModel(
+  state: { contextTokens: number; availableModels: Record<string, { maxContextSize: number }> },
+  alias: string,
+): { currentTokens: number; maxContextTokens: number } | null {
+  const targetModel = state.availableModels[alias];
+  if (targetModel === undefined) return null;
+  const currentTokens = state.contextTokens;
+  if (currentTokens <= 0) return null;
+  if (currentTokens <= targetModel.maxContextSize) return null;
+  return { currentTokens, maxContextTokens: targetModel.maxContextSize };
+}
+
+/**
+ * Storm Breaker guard for /compact. Returns the (currentTokens,
+ * maxContextTokens, ratio) triple when context usage is below 5% — compressing
+ * at this point yields no benefit and discards useful history. Returns `null`
+ * when compression is legitimate or when the window size is unknown.
+ *
+ * Exported (and kept pure) so the guard is unit-testable without a session.
+ */
+export function shouldGuardCompaction(
+  state: { contextTokens: number; maxContextTokens: number },
+): { currentTokens: number; maxContextTokens: number; ratio: number } | null {
+  const max = state.maxContextTokens;
+  if (max <= 0) return null;
+  const currentTokens = state.contextTokens;
+  if (currentTokens <= 0) return null;
+  const ratio = currentTokens / max;
+  if (ratio >= 0.05) return null;
+  return { currentTokens, maxContextTokens: max, ratio };
+}
+
 // ---------------------------------------------------------------------------
 // Plan / Config commands
 // ---------------------------------------------------------------------------
@@ -218,6 +261,18 @@ export async function handleCompactCommand(host: SlashCommandHost, args: string)
     return;
   }
   const customInstruction = args.trim() || undefined;
+
+  const guard = shouldGuardCompaction(host.state.appState);
+  if (guard !== null) {
+    const pct = (guard.ratio * 100).toFixed(1);
+    host.showNotice(
+      'Storm Breaker（风暴守护者）',
+      `当前上下文仅 ${formatTokenCount(guard.currentTokens)} / ${formatTokenCount(guard.maxContextTokens)}（${pct}%），压缩无收益。` +
+        '建议继续对话，待上下文增长至 5% 以上再执行 /compact。',
+    );
+    return;
+  }
+
   await session.compact({ instruction: customInstruction });
 }
 
@@ -338,7 +393,7 @@ export function showModelPicker(host: SlashCommandHost, selectedValue: string = 
 }
 
 async function performModelSwitch(host: SlashCommandHost, alias: string, thinkingLevel: ThinkingEffort): Promise<void> {
-  if (host.state.appState.streamingPhase !== 'idle') {
+  if (isBusy(host.state.appState)) {
     host.showError('Cannot switch models while streaming — press Esc or Ctrl-C first.');
     return;
   }
@@ -346,6 +401,21 @@ async function performModelSwitch(host: SlashCommandHost, alias: string, thinkin
   const prevModel = host.state.appState.model;
   const prevThinkingLevel = host.state.appState.thinkingLevel;
   const runtimeChanged = alias !== prevModel || thinkingLevel !== prevThinkingLevel;
+
+  // Storm Breaker guard: refuse to switch to a model whose context window is
+  // smaller than the session's current token count. Switching would either
+  // truncate the context silently or force an immediate compaction the user
+  // did not ask for. Block early with a friendly advisory so the user can
+  // compact first or pick a larger-window model.
+  const overflow = alias !== prevModel ? contextOverflowForModel(host.state.appState, alias) : null;
+  if (overflow !== null) {
+    host.showNotice(
+      'Storm Breaker（风暴守护者）',
+      `无法切换到模型「${alias}」：当前会话上下文 ${formatTokenCount(overflow.currentTokens)} 已超出该模型上限 ${formatTokenCount(overflow.maxContextTokens)}。` +
+        '建议先执行 /compact 压缩上下文，或选择上下文窗口更大的模型。',
+    );
+    return;
+  }
 
   const session = host.session;
   try {

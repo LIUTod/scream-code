@@ -11,7 +11,8 @@ import { truncateToWidth, visibleWidth } from '@earendil-works/pi-tui';
 import chalk from 'chalk';
 
 import type { ColorPalette } from '#/tui/theme/colors';
-import type { AppState, LivePaneMode } from '#/tui/types';
+import type { AppState } from '#/tui/types';
+import { resolveLoopSubstate } from '#/tui/loop-state';
 import { shimmerText } from '#/tui/utils/shimmer';
 import {
   createGitStatusCache,
@@ -206,15 +207,14 @@ function lerpGradient(t: number): string {
 
 function buildStatusLine(
   streamingPhase: AppState['streamingPhase'],
-  livePaneMode: LivePaneMode,
   streamingStartTime: number,
 ): string {
-  if (streamingPhase === 'idle' && livePaneMode !== 'tool') {
+  if (streamingPhase === 'idle') {
     return '○ 空闲';
   }
 
   let label: string;
-  if (livePaneMode === 'tool') {
+  if (streamingPhase === 'tool') {
     label = '执行中';
   } else if (streamingPhase === 'waiting') {
     label = '等待响应';
@@ -366,6 +366,8 @@ export class FooterComponent implements Component {
           ? `loop ${Math.ceil(remainMs / 60_000)}m`
           : `loop ${Math.max(1, Math.ceil(remainMs / 1_000))}s`;
       }
+      const substate = resolveLoopSubstate(state);
+      if (substate === 'verifying') badge += ' · 验证中';
       if (state.loopLastVerifyPassed === false) badge += ' · ✗';
       left.push(chalk.hex(colors.primary).bold(badge));
     }
@@ -416,7 +418,6 @@ export class FooterComponent implements Component {
     } else {
       const statusLine = buildStatusLine(
         state.streamingPhase,
-        state.livePaneMode,
         state.streamingStartTime,
       );
       const ccDot = state.ccConnectActive

@@ -30,6 +30,7 @@ import { truncateErrorMessage } from '../utils/event-payload';
 import { replaceTabs } from '../utils/sanitize';
 import { nextTranscriptId } from '../utils/transcript-id';
 import { isExpandable, isPlanExpandable } from '../utils/component-capabilities';
+import { isStreaming } from '../utils/app-state';
 import { CommittedTranscriptComponent } from '../components/transcript/committed-transcript';
 import { ReadGroupComponent, parseReadGroupOutput } from '../components/messages/read-group';
 
@@ -85,7 +86,7 @@ export class TranscriptController {
       // Don't fold history while a turn is actively streaming. Committing mid-turn
       // collapses the transcript height and triggers viewport jumps. We fold once
       // when the turn fully settles instead.
-      if (state.appState.streamingPhase !== 'idle') return;
+      if (isStreaming(state.appState)) return;
       const container = state.transcriptContainer;
       const children = container.children;
       if (children.length <= TranscriptController.LIVE_LIMIT) return;

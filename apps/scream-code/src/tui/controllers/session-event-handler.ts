@@ -58,6 +58,8 @@ import { formatStepDebugTiming } from '#/utils/usage/debug-timing';
 import { consumeLoopLimitIteration, isLoopLimitExpired } from '../utils/loop-limit';
 import { runShellVerifier } from '../utils/loop-verifier';
 import { nextTranscriptId } from '../utils/transcript-id';
+import { canTransitionTo } from '../streaming-phase';
+import { detectCompactionAnomaly } from '../utils/compaction-anomaly';
 import type { StreamingUIController } from './streaming-ui';
 import type { TasksBrowserController } from './tasks-browser';
 import type {
@@ -99,6 +101,17 @@ export class SessionEventHandler {
   // Runtime state – owned by this handler, reset between sessions.
   backgroundAgentMetadata: Map<string, BackgroundAgentMetadata> = new Map();
   backgroundTasks: Map<string, BackgroundTaskInfo> = new Map();
+  /**
+   * Compaction trigger of the in-flight compaction, captured in
+   * `handleCompactionBegin` (CompactionStartedEvent carries `trigger`) and
+   * read in `handleCompactionEnd` (CompactionCompletedEvent does not). Used so
+   * Storm Breaker cadence tracking only counts auto-compactions — manual
+   * /compact must not inflate `autoCompactionCount` or set
+   * `lastCompactionFinishedAt`, otherwise the first genuine auto-compaction
+   * would silently fail to trigger `first_step_blowup`, and a manual compact
+   * followed shortly by an auto one would falsely trip `rapid_refire`.
+   */
+  private lastCompactionTrigger: 'manual' | 'auto' | undefined;
   backgroundTaskTranscriptedTerminal: Set<string> = new Set();
   subagentInfo: Map<string, { parentToolCallId: string; name: string }> = new Map();
   renderedSkillActivationIds: Set<string> = new Set();
@@ -324,13 +337,11 @@ export class SessionEventHandler {
     this.host.streamingUI.resetToolUi();
     this.host.streamingUI.setStep(0);
     this.host.patchLivePane({
-      mode: 'waiting',
       pendingApproval: null,
       pendingQuestion: null,
     });
     this.host.setAppState({
       streamingPhase: 'waiting',
-      streamingStartTime: Date.now(),
     });
   }
 
@@ -372,6 +383,7 @@ export class SessionEventHandler {
       loopVerifier: undefined,
       loopIteration: 0,
       loopLastVerifyPassed: undefined,
+      loopVerifying: false,
     });
     this.host.showStatus(message);
   }
@@ -391,16 +403,21 @@ export class SessionEventHandler {
 
     const verifier = state.loopVerifier;
     if (verifier) {
+      this.host.setAppState({ loopVerifying: true });
       const result = await runShellVerifier(verifier, state.workDir);
       // verifier 期间用户可能按 Esc 暂停或修改 prompt，需重新检查
       const after = this.host.state.appState;
-      if (!after.loopModeEnabled || after.loopPrompt !== loopPrompt) return;
+      if (!after.loopModeEnabled || after.loopPrompt !== loopPrompt) {
+        this.host.setAppState({ loopVerifying: false });
+        return;
+      }
 
       if (result.passed) {
+        this.host.setAppState({ loopVerifying: false });
         this.disableLoop(`✓ 验证通过，循环结束（${currentIteration} 次迭代）。`);
         return;
       }
-      this.host.setAppState({ loopLastVerifyPassed: false });
+      this.host.setAppState({ loopVerifying: false, loopLastVerifyPassed: false });
     }
 
     if (!consumeLoopLimitIteration(this.host.state.appState.loopLimit)) {
@@ -418,15 +435,13 @@ export class SessionEventHandler {
     this.host.streamingUI.flushNow();
     this.host.streamingUI.setStep(event.step);
     this.host.streamingUI.resetToolUi();
-    this.host.streamingUI.finalizeLiveTextBuffers('waiting');
+    this.host.streamingUI.finalizeLiveTextBuffers();
     this.host.patchLivePane({
-      mode: 'waiting',
       pendingApproval: null,
       pendingQuestion: null,
     });
     this.host.setAppState({
       streamingPhase: 'waiting',
-      streamingStartTime: Date.now(),
     });
   }
 
@@ -466,7 +481,7 @@ export class SessionEventHandler {
   private handleStepInterrupted(event: TurnStepInterruptedEvent): void {
     this.host.streamingUI.flushNow();
     this.host.streamingUI.resetToolUi();
-    this.host.streamingUI.finalizeLiveTextBuffers('idle');
+    this.host.streamingUI.finalizeLiveTextBuffers();
     const reason = event.reason;
     if (reason === 'error') return;
     if (reason === 'aborted' || reason === undefined || reason === '') {
@@ -483,9 +498,8 @@ export class SessionEventHandler {
   private handleThinkingDelta(event: ThinkingDeltaEvent): void {
     const { state, streamingUI } = this.host;
     streamingUI.appendThinkingDelta(event.delta);
-    this.host.patchLivePane({ mode: 'idle' });
-    if (state.appState.streamingPhase !== 'thinking') {
-      this.host.setAppState({ streamingPhase: 'thinking', streamingStartTime: Date.now() });
+    if (canTransitionTo(state.appState.streamingPhase, 'thinking')) {
+      this.host.setAppState({ streamingPhase: 'thinking' });
     }
     streamingUI.scheduleFlush();
   }
@@ -493,18 +507,17 @@ export class SessionEventHandler {
   private handleAssistantDelta(event: AssistantDeltaEvent): void {
     const { state, streamingUI } = this.host;
     if (streamingUI.hasThinkingDraft()) {
-      streamingUI.flushThinkingToTranscript('idle');
+      streamingUI.flushThinkingToTranscript();
     }
 
     streamingUI.appendAssistantDelta(event.delta);
 
     this.host.patchLivePane({
-      mode: 'idle',
       pendingApproval: null,
       pendingQuestion: null,
     });
-    if (state.appState.streamingPhase !== 'composing') {
-      this.host.setAppState({ streamingPhase: 'composing', streamingStartTime: Date.now() });
+    if (canTransitionTo(state.appState.streamingPhase, 'composing')) {
+      this.host.setAppState({ streamingPhase: 'composing' });
     }
     streamingUI.scheduleFlush();
   }
@@ -512,7 +525,7 @@ export class SessionEventHandler {
   private handleHookResult(event: HookResultEvent): void {
     this.host.streamingUI.flushNow();
     if (this.host.streamingUI.hasThinkingDraft()) {
-      this.host.streamingUI.flushThinkingToTranscript('idle');
+      this.host.streamingUI.flushThinkingToTranscript();
     }
     this.host.streamingUI.finalizeAssistantStream();
     this.host.appendTranscriptEntry({
@@ -523,7 +536,6 @@ export class SessionEventHandler {
       content: formatHookResultMarkdown(event),
     });
     this.host.patchLivePane({
-      mode: 'idle',
       pendingApproval: null,
       pendingQuestion: null,
     });
@@ -544,10 +556,12 @@ export class SessionEventHandler {
     };
     streamingUI.registerToolCall(toolCall);
     this.host.patchLivePane({
-      mode: 'tool',
       pendingApproval: null,
       pendingQuestion: null,
     });
+    if (canTransitionTo(this.host.state.appState.streamingPhase, 'tool')) {
+      this.host.setAppState({ streamingPhase: 'tool' });
+    }
   }
 
   private handleToolCallDelta(event: ToolCallDeltaEvent): void {
@@ -556,12 +570,11 @@ export class SessionEventHandler {
     streamingUI.accumulateToolCallDelta(event.toolCallId, event.name, event.argumentsPart);
 
     this.host.patchLivePane({
-      mode: 'tool',
       pendingApproval: null,
       pendingQuestion: null,
     });
-    if (state.appState.streamingPhase !== 'composing') {
-      this.host.setAppState({ streamingPhase: 'composing', streamingStartTime: Date.now() });
+    if (canTransitionTo(state.appState.streamingPhase, 'tool')) {
+      this.host.setAppState({ streamingPhase: 'tool' });
     }
     streamingUI.scheduleFlush();
   }
@@ -597,7 +610,9 @@ export class SessionEventHandler {
         streamingUI.setTodoList(sanitized);
       }
     }
-    this.host.patchLivePane({ mode: 'waiting' });
+    if (canTransitionTo(this.host.state.appState.streamingPhase, 'waiting')) {
+      this.host.setAppState({ streamingPhase: 'waiting' });
+    }
   }
 
   private handleStatusUpdate(event: AgentStatusUpdatedEvent): void {
@@ -639,7 +654,7 @@ export class SessionEventHandler {
   private handleSessionError(event: ErrorEvent): void {
     this.host.streamingUI.flushNow();
     this.host.streamingUI.resetToolUi();
-    this.host.streamingUI.finalizeLiveTextBuffers('idle');
+    this.host.streamingUI.finalizeLiveTextBuffers();
     this.host.showError(`[${event.code}] ${event.message}`);
   }
 
@@ -768,11 +783,31 @@ export class SessionEventHandler {
   }
 
   private handleCompactionBegin(event: CompactionStartedEvent): void {
-    this.host.streamingUI.finalizeLiveTextBuffers('waiting');
+    this.host.streamingUI.finalizeLiveTextBuffers();
+    this.lastCompactionTrigger = event.trigger;
+
+    // Storm Breaker: surface pathological auto-compaction patterns without
+    // blocking the compaction itself (blocking would deadlock the session).
+    if (event.trigger === 'auto') {
+      const anomaly = detectCompactionAnomaly({
+        lastFinishedAt: this.host.state.appState.lastCompactionFinishedAt,
+        autoCompactionCount: this.host.state.appState.autoCompactionCount,
+        currentTokens: this.host.state.appState.contextTokens,
+        maxContextTokens: this.host.state.appState.maxContextTokens,
+        now: Date.now(),
+      });
+      if (anomaly !== null) {
+        this.host.showNotice(
+          'Storm Breaker（风暴守护者）',
+          `检测到异常压缩节奏：${anomaly.detail}` +
+            '可能存在工具调用循环或超长输出，建议查看最近几步的对话记录。',
+        );
+      }
+    }
+
     this.host.setAppState({
       isCompacting: true,
       streamingPhase: 'waiting',
-      streamingStartTime: Date.now(),
     });
     this.host.streamingUI.beginCompaction(event.instruction);
   }
@@ -783,6 +818,20 @@ export class SessionEventHandler {
   ): void {
     this.host.streamingUI.endCompaction(event.result.tokensBefore, event.result.tokensAfter);
     this.host.markMemoryExtracted();
+
+    // Only auto-compactions count toward Storm Breaker cadence tracking. A
+    // manual /compact must not inflate the auto counter or set the
+    // last-finished timestamp — otherwise the first genuine auto-compaction
+    // would fail first_step_blowup, and manual→auto within 30s would false-trip
+    // rapid_refire.
+    if (this.lastCompactionTrigger === 'auto') {
+      this.host.setAppState({
+        lastCompactionFinishedAt: Date.now(),
+        autoCompactionCount: this.host.state.appState.autoCompactionCount + 1,
+      });
+    }
+    this.lastCompactionTrigger = undefined;
+
     this.finishCompaction(sendQueued);
   }
 
@@ -794,6 +843,7 @@ export class SessionEventHandler {
       this.host.showStatus(event.reason, this.host.state.theme.colors.warning);
     }
     this.host.streamingUI.cancelCompaction();
+    this.lastCompactionTrigger = undefined;
     this.finishCompaction(sendQueued);
   }
 

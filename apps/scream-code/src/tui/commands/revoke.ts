@@ -7,6 +7,7 @@ import { BackgroundAgentStatusComponent } from '../components/messages/backgroun
 import { ReadGroupComponent } from '../components/messages/read-group';
 import { SkillActivationComponent } from '../components/messages/skill-activation';
 import { ThinkingComponent } from '../components/messages/thinking';
+import { isBusy } from '../utils/app-state';
 import { ToolCallComponent } from '../components/messages/tool-call';
 import { UserMessageComponent } from '../components/messages/user-message';
 import { NO_ACTIVE_SESSION_MESSAGE } from '../constant/scream-tui';
@@ -21,7 +22,7 @@ export async function handleRevokeCommand(
   host: SlashCommandHost,
   args: string = '',
 ): Promise<void> {
-  if (host.state.appState.streamingPhase !== 'idle') {
+  if (isBusy(host.state.appState)) {
     host.showError('无法在 streaming 中撤回 — 请先按 Esc 或 Ctrl-C 取消。');
     return;
   }

@@ -107,10 +107,11 @@ function createInitialAppState(input: ScreamTUIStartupInput): AppState {
     contextTokens: 0,
     maxContextTokens: 0,
     isCompacting: false,
+    lastCompactionFinishedAt: undefined,
+    autoCompactionCount: 0,
     isReplaying: false,
     streamingPhase: 'idle',
     streamingStartTime: 0,
-    livePaneMode: 'idle',
     theme: input.tuiConfig.theme,
     version: input.version,
     hasNewVersion: false,
@@ -133,6 +134,7 @@ function createInitialAppState(input: ScreamTUIStartupInput): AppState {
     loopVerifier: undefined,
     loopIteration: 0,
     loopLastVerifyPassed: undefined,
+    loopVerifying: false,
     recentSessions: [],
   };
 }
@@ -462,13 +464,11 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
     this.streamingUI.resetToolCallState();
 
     this.patchLivePane({
-      mode: 'waiting',
       pendingApproval: null,
       pendingQuestion: null,
     });
     this.setAppState({
       streamingPhase: 'waiting',
-      streamingStartTime: Date.now(),
     });
   }
 
@@ -580,6 +580,21 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
   }
 
   setAppState(patch: Partial<AppState>): void {
+    // Auto-stamp streamingStartTime whenever streamingPhase transitions.
+    // Callers no longer need to pair streamingPhase with a manual timestamp.
+    // Guard against undefined: a caller could legally pass
+    // `{ streamingPhase: undefined }` to "unset" the field, which we treat as
+    // a no-op rather than corrupting the state machine.
+    if (
+      'streamingPhase' in patch &&
+      patch.streamingPhase !== undefined &&
+      patch.streamingPhase !== this.state.appState.streamingPhase
+    ) {
+      patch = {
+        ...patch,
+        streamingStartTime: patch.streamingPhase === 'idle' ? 0 : Date.now(),
+      };
+    }
     if (!hasPatchChanges(this.state.appState, patch)) return;
     const busyChanged = 'streamingPhase' in patch || 'isCompacting' in patch;
     Object.assign(this.state.appState, patch);
@@ -603,10 +618,6 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
   patchLivePane(patch: Partial<LivePaneState>): void {
     if (!hasPatchChanges(this.state.livePane, patch)) return;
     Object.assign(this.state.livePane, patch);
-    if ('mode' in patch) {
-      this.state.appState.livePaneMode = patch.mode!;
-      this.state.footer.setState(this.state.appState);
-    }
     this.lifecycleController.updateActivityPane();
     this.state.ui.requestRender();
   }

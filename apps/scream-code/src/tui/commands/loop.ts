@@ -10,6 +10,7 @@ import {
   parseLoopLimitArgs,
   type LoopLimitRuntime,
 } from '../utils/loop-limit';
+import { detectGoalLoopConflict } from '../utils/goal-loop-conflict';
 
 const DEFAULT_VERIFY_TIMEOUT_MS = 60_000;
 
@@ -119,6 +120,18 @@ export async function handleLoopCommand(host: SlashCommandHost, args: string): P
     return;
   }
 
+  // Storm Breaker: /loop and /goal are semantically incompatible. loop resets
+  // context each round, which would destroy goal's working notes.
+  if (detectGoalLoopConflict(host.state.appState, 'enable_loop') === 'goal_active') {
+    host.showNotice(
+      'Storm Breaker（风暴守护者）',
+      '当前已有激活的目标（/goal）。/loop 与 /goal 语义冲突：' +
+        'loop 每轮重置上下文，会破坏 goal 的工作笔记迭代。' +
+        '请先 /goal off 关闭目标，再开启循环模式。',
+    );
+    return;
+  }
+
   const loopLimit = createLoopLimitRuntime(parsed.limit);
   host.setAppState({
     loopModeEnabled: true,
@@ -127,6 +140,7 @@ export async function handleLoopCommand(host: SlashCommandHost, args: string): P
     loopVerifier: parsed.verifier ? makeVerifier(parsed.verifier.command) : undefined,
     loopIteration: 0,
     loopLastVerifyPassed: undefined,
+    loopVerifying: false,
   });
 
   await ensureAutoPermission(host);
@@ -168,6 +182,7 @@ export function disableLoopMode(host: SlashCommandHost, message?: string): void 
     loopVerifier: undefined,
     loopIteration: 0,
     loopLastVerifyPassed: undefined,
+    loopVerifying: false,
   });
   if (message) {
     host.showStatus(message);

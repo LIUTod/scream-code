@@ -56,6 +56,7 @@ const mocks = vi.hoisted(() => {
     harnessCreateSession: vi.fn(async () => session),
     harnessResumeSession: vi.fn(async () => session),
     harnessListSessions: vi.fn(async () => [{ id: 'ses_previous', workDir: process.cwd() }]),
+    harnessDeleteSession: vi.fn(async () => undefined),
     harnessGetCachedAccessToken: vi.fn(),
     createScreamDeviceId: vi.fn<CreateScreamDeviceId>(() => 'device-1'),
     resolveScreamHome: vi.fn((homeDir?: string) => homeDir ?? '/tmp/scream-code-test-home'),
@@ -76,6 +77,7 @@ vi.mock('@scream-code/scream-code-sdk', async (importOriginal) => {
       createSession = mocks.harnessCreateSession;
       resumeSession = mocks.harnessResumeSession;
       listSessions = mocks.harnessListSessions;
+      deleteSession = mocks.harnessDeleteSession;
       close = mocks.harnessClose;
       constructor(...args: unknown[]) {
         const options = args[0] as { readonly homeDir?: string } | undefined;
@@ -677,5 +679,35 @@ describe('runPrompt', () => {
 
     const handler = mocks.session.setQuestionHandler.mock.calls[0]![0] as () => unknown;
     expect(handler()).toBeNull();
+  });
+
+  it('deletes the session and skips resume hint for fusion-plan worker subagents', async () => {
+    const previous = process.env['SCREAM_FUSIONPLAN_SUBAGENT'];
+    process.env['SCREAM_FUSIONPLAN_SUBAGENT'] = '1';
+    const stdout = writer();
+    const stderr = writer();
+    try {
+      await runPrompt(opts(), '1.2.3-test', { stdout, stderr });
+
+      expect(mocks.harnessCreateSession).toHaveBeenCalled();
+      expect(mocks.harnessDeleteSession).toHaveBeenCalledWith('ses_prompt');
+      // Resume hint must not be written for a session that is about to be deleted.
+      expect(stderr.text()).toBe('');
+    } finally {
+      if (previous === undefined) {
+        delete process.env['SCREAM_FUSIONPLAN_SUBAGENT'];
+      } else {
+        process.env['SCREAM_FUSIONPLAN_SUBAGENT'] = previous;
+      }
+    }
+  });
+
+  it('does not delete the session for a normal prompt run', async () => {
+    const stdout = writer();
+    const stderr = writer();
+    await runPrompt(opts(), '1.2.3-test', { stdout, stderr });
+
+    expect(mocks.harnessDeleteSession).not.toHaveBeenCalled();
+    expect(stderr.text()).toBe('恢复此会话：scream -r ses_prompt\n');
   });
 });

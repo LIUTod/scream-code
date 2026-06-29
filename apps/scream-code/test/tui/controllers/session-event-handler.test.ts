@@ -149,13 +149,11 @@ describe('SessionEventHandler', () => {
 
     expect(host.streamingUI.setStep).toHaveBeenCalledWith(0);
     expect(host.patchLivePane).toHaveBeenCalledWith({
-      mode: 'waiting',
       pendingApproval: null,
       pendingQuestion: null,
     });
     expect(host.setAppState).toHaveBeenCalledWith({
       streamingPhase: 'waiting',
-      streamingStartTime: expect.any(Number),
     });
 
     handler.handleEvent(
@@ -171,14 +169,8 @@ describe('SessionEventHandler', () => {
       type: 'text',
       text: 'Hello',
     });
-    expect(host.patchLivePane).toHaveBeenLastCalledWith({
-      mode: 'idle',
-      pendingApproval: null,
-      pendingQuestion: null,
-    });
     expect(host.setAppState).toHaveBeenLastCalledWith({
       streamingPhase: 'composing',
-      streamingStartTime: expect.any(Number),
     });
 
     handler.handleEvent(

@@ -7,6 +7,7 @@ import type {
 } from '@scream-code/scream-code-sdk';
 import { LLM_NOT_SET_MESSAGE, MAIN_AGENT_ID, NO_ACTIVE_SESSION_MESSAGE } from '../constant/scream-tui';
 import { formatErrorMessage } from '../utils/event-payload';
+import { isBusy } from '../utils/app-state';
 import { sessionRowsForPicker } from '../utils/session-picker-rows';
 import { createApprovalRequestHandler } from '../reverse-rpc/approval/handler';
 import { createQuestionAskHandler } from '../reverse-rpc/question/handler';
@@ -226,7 +227,7 @@ export class SessionManager {
       this.host.showStatus('已在该会话中。');
       return { switched: true };
     }
-    if (this.host.state.appState.streamingPhase !== 'idle') {
+    if (isBusy(this.host.state.appState)) {
       this.host.showError('流式传输期间无法切换会话 — 请先按 Esc 或 Ctrl-C。');
       return { switched: false };
     }

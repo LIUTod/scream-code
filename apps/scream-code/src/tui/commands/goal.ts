@@ -2,6 +2,8 @@ import type { Component } from '@earendil-works/pi-tui';
 
 import type { SlashCommandHost } from './dispatch';
 import { GoalStatusMessageComponent } from '../components/messages/goal-panel';
+import { isBusy } from '../utils/app-state';
+import { detectGoalLoopConflict } from '../utils/goal-loop-conflict';
 
 const GOAL_STATUS_DISMISS_MS = 10_000;
 
@@ -95,12 +97,24 @@ async function createGoal(host: SlashCommandHost, parsed: ParsedGoalCommand & { 
     return;
   }
 
+  // Storm Breaker: /goal and /loop are semantically incompatible. loop resets
+  // context each round, which would destroy goal's working notes.
+  if (detectGoalLoopConflict(host.state.appState, 'enable_goal') === 'loop_active') {
+    host.showNotice(
+      'Storm Breaker（风暴守护者）',
+      '当前已开启循环模式（/loop）。/goal 与 /loop 语义冲突：' +
+        'loop 每轮重置上下文，会破坏 goal 的工作笔记迭代。' +
+        '请先 /loop 关闭循环模式，再设置目标。',
+    );
+    return;
+  }
+
   try {
     await session.createGoal(parsed.objective, { replace: parsed.replace });
     host.showStatus(`🎯 目标已设置：${parsed.objective}`);
 
     // Auto-start: send the objective as user input to begin execution
-    if (host.state.appState.streamingPhase === 'idle') {
+    if (!isBusy(host.state.appState)) {
       host.sendQueuedMessage(session, { text: parsed.objective, agentId: undefined });
     } else {
       host.state.queuedMessages.push({ text: parsed.objective, agentId: undefined });
@@ -151,7 +165,7 @@ async function resumeGoal(host: SlashCommandHost): Promise<void> {
     host.showStatus('🎯 目标已恢复。');
 
     // Resume execution
-    if (host.state.appState.streamingPhase === 'idle') {
+    if (!isBusy(host.state.appState)) {
       host.sendQueuedMessage(session, { text: '继续执行当前目标。', agentId: undefined });
     }
   } catch (error) {

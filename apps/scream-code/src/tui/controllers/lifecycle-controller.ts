@@ -12,6 +12,7 @@ import type { AppState, ScreamTUIOptions } from '../types';
 import type { TUIState } from '../tui-state';
 import { checkCcConnectActive } from '../utils/cc-connect-status';
 import { isDeadTerminalError } from '../utils/dead-terminal';
+import { isStreaming } from '../utils/app-state';
 import { installTerminalFocusTracking } from '../utils/terminal-focus';
 import { installTerminalThemeTracking } from '../utils/terminal-theme';
 import { MoonLoader, type SpinnerStyle } from '../components/chrome/moon-loader';
@@ -19,7 +20,7 @@ import { PulseWaveLoader } from '../components/chrome/pulse-wave-loader';
 import { ActivityPaneComponent, type ActivityPaneMode } from '../components/panes/activity-pane';
 import chalk from 'chalk';
 
-type EffectiveActivityPaneMode = ActivityPaneMode | 'idle' | 'session';
+type EffectiveActivityPaneMode = ActivityPaneMode | 'idle';
 
 export interface LifecycleControllerHost {
   readonly state: TUIState;
@@ -195,7 +196,7 @@ export class LifecycleController {
     const now = Date.now();
     if (now - this.lastMemoryExtractionTime < LifecycleController.MEMORY_EXTRACT_COOLDOWN_MS) return;
     const { state, session } = this.host;
-    if (state.appState.streamingPhase !== 'idle') return;
+    if (isStreaming(state.appState)) return;
     if (state.appState.isCompacting) return;
     if (state.appState.isReplaying) return;
     if (session === undefined) return;
@@ -339,8 +340,7 @@ export class LifecycleController {
         );
         break;
       }
-      case 'idle':
-      case 'session': {
+      case 'idle': {
         this.stopActivitySpinner();
         this.stopPulseWave();
         break;
@@ -356,14 +356,14 @@ export class LifecycleController {
     if (state.appState.isCompacting) return 'hidden';
     if (state.livePane.pendingQuestion !== null) return 'hidden';
 
+    // streamingPhase is the single source of truth for the work phase —
+    // 'tool' covers tool execution, the rest map directly to activity-pane
+    // display modes. 'idle' maps to the idle branch below.
     const streamingPhase = state.appState.streamingPhase;
-    if (state.livePane.mode === 'idle') {
-      if (streamingPhase === 'thinking' || streamingPhase === 'composing') {
-        return streamingPhase;
-      }
+    if (streamingPhase === 'waiting' || streamingPhase === 'thinking' || streamingPhase === 'composing' || streamingPhase === 'tool') {
+      return streamingPhase;
     }
-
-    return state.livePane.mode;
+    return 'idle';
   }
 
   private shouldShowTerminalProgress(effectiveMode: EffectiveActivityPaneMode): boolean {

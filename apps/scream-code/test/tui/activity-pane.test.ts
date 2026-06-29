@@ -51,14 +51,14 @@ describe('updateActivityPane terminal progress', () => {
     try {
       const { driver, state, setProgress } = makeDriverWithTerminalProgress();
 
-      state.livePane = { ...state.livePane, mode: 'waiting' };
+      state.appState.streamingPhase = 'waiting';
       driver.updateActivityPane();
 
       expect(setProgress).toHaveBeenCalledTimes(1);
       expect(setProgress).toHaveBeenLastCalledWith(true);
       expect(state.terminalState.progressActive).toBe(true);
 
-      state.livePane = { ...state.livePane, mode: 'idle' };
+      state.appState.streamingPhase = 'idle';
       driver.updateActivityPane();
 
       expect(setProgress).toHaveBeenCalledTimes(2);
@@ -92,7 +92,6 @@ describe('updateActivityPane terminal progress', () => {
     vi.useFakeTimers();
     try {
       const { driver, state, setProgress } = makeDriverWithTerminalProgress();
-      state.livePane = { ...state.livePane, mode: 'idle' };
       state.appState.streamingPhase = 'thinking';
 
       driver.updateActivityPane();

@@ -26,6 +26,7 @@ import type {
 } from '../types';
 import type { TUIState } from '../tui-state';
 import { formatErrorMessage } from '../utils/event-payload';
+import { isBusy, isStreaming } from '../utils/app-state';
 import { runFusionPlan } from '../utils/fusion-plan';
 import type { ImageAttachmentStore } from '../utils/image-attachment-store';
 import { extractMediaAttachments } from '../utils/image-placeholder';
@@ -283,7 +284,7 @@ export class InputController {
       }
       return;
     }
-    if (this.host.state.appState.streamingPhase === 'idle') {
+    if (!isStreaming(this.host.state.appState)) {
       for (const part of input) {
         this.sendMessageInternal(session, part);
       }
@@ -462,11 +463,7 @@ export class InputController {
   }
 
   private sendMessage(session: Session, input: string, options?: SendMessageOptions): void {
-    if (
-      this.host.deferUserMessages ||
-      this.host.state.appState.streamingPhase !== 'idle' ||
-      this.host.state.appState.isCompacting
-    ) {
+    if (this.host.deferUserMessages || isBusy(this.host.state.appState)) {
       this.enqueueMessage(input, options);
       return;
     }

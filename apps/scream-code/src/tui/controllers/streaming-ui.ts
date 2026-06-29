@@ -305,7 +305,7 @@ export class StreamingUIController {
     if (existingComponent !== undefined) {
       existingComponent.updateToolCall(toolCall);
     } else if (existing === undefined) {
-      this.finalizeLiveTextBuffers('tool');
+      this.finalizeLiveTextBuffers();
       if (toolCall.name !== 'Agent') {
         this.onToolCallStart(toolCall);
       }
@@ -481,11 +481,10 @@ export class StreamingUIController {
   // Text streaming
   // ---------------------------------------------------------------------------
 
-  flushThinkingToTranscript(nextMode: LivePaneState['mode'] = 'idle'): void {
+  flushThinkingToTranscript(): void {
     this.flushNow();
     this._thinkingDraft = '';
     this.onThinkingEnd();
-    this.host.patchLivePane({ mode: nextMode });
   }
 
   finalizeAssistantStream(): void {
@@ -523,8 +522,8 @@ export class StreamingUIController {
     this._activeToolCalls.clear();
   }
 
-  finalizeLiveTextBuffers(nextMode: LivePaneState['mode'] = 'idle'): void {
-    this.flushThinkingToTranscript(nextMode);
+  finalizeLiveTextBuffers(): void {
+    this.flushThinkingToTranscript();
     this.finalizeAssistantStream();
   }
 
@@ -534,7 +533,7 @@ export class StreamingUIController {
     this.host.deferUserMessages = false;
     const completedTurnKey =
       this._currentTurnId ?? `local:${String(state.appState.streamingStartTime)}`;
-    this.finalizeLiveTextBuffers('idle');
+    this.finalizeLiveTextBuffers();
     this.resetToolCallState();
     this._currentTurnId = undefined;
 
@@ -859,7 +858,7 @@ export class StreamingUIController {
     this._activeToolCalls.set(id, toolCall);
 
     if (this._thinkingDraft.length > 0 || this._streamingBlock !== null) {
-      this.finalizeLiveTextBuffers('tool');
+      this.finalizeLiveTextBuffers();
     }
 
     const existingComponent = this._pendingToolComponents.get(id);

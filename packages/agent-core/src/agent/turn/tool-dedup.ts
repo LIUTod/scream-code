@@ -91,7 +91,8 @@ function isMutatingTool(toolName: string): boolean {
  *   to try a different approach.
  * - Storm Breaker: when a mutating tool is called repeatedly on the same target
  *   within a sliding window (default size 6), the call is suppressed entirely
- *   and an error result is returned to the model.
+ *   and a friendly advisory result is returned to the model (non-error, so the
+ *   TUI renders it as normal output rather than a failed tool call).
  */
 export class ToolCallDeduplicator {
   private stepDeferreds = new Map<string, Deferred<ExecutableToolResult>>();
@@ -170,9 +171,8 @@ export class ToolCallDeduplicator {
       if (priorCount >= this.stormThreshold - 1) {
         return {
           output:
-            `Storm Breaker: ${toolName} 对同一目标已连续调用 ${String(priorCount + 1)} 次。` +
-            `请制定计划后再执行，或尝试不同的方法。`,
-          isError: true,
+            `Storm Breaker（风暴守护者）：检测到无效循环调用风险——${toolName} 对同一目标已连续调用 ${String(priorCount + 1)} 次。` +
+            `建议先制定计划方案，或更换其他方法后再继续。`,
         };
       }
     }

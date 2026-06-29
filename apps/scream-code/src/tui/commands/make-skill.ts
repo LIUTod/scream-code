@@ -2,6 +2,7 @@ import type { Session } from '@scream-code/scream-code-sdk';
 
 import { LLM_NOT_SET_MESSAGE, NO_ACTIVE_SESSION_MESSAGE } from '../constant/scream-tui';
 import { isAbortError } from '../utils/errors';
+import { isBusy } from '../utils/app-state';
 import type { SlashCommandHost } from './dispatch';
 
 export async function handleMakeSkillCommand(host: SlashCommandHost, args: string): Promise<void> {
@@ -16,7 +17,7 @@ export async function handleMakeSkillCommand(host: SlashCommandHost, args: strin
     return;
   }
 
-  if (host.state.appState.streamingPhase !== 'idle') {
+  if (isBusy(host.state.appState)) {
     host.showError('请等待当前回复完成后再使用 /make-skill');
     return;
   }

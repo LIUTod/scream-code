@@ -301,6 +301,44 @@ describe('ToolCallDeduplicator', () => {
     });
   });
 
+  describe('Storm Breaker suppression', () => {
+    it('returns a friendly non-error advisory when a mutating tool hits the threshold', () => {
+      const dedup = new ToolCallDeduplicator();
+      const args = { path: '/a' };
+      // Two prior mutating calls in the sliding window (threshold is 3).
+      for (let i = 0; i < 2; i += 1) {
+        dedup.beginStep();
+        dedup.checkSameStep(`prior${String(i)}`, 'Edit', args);
+        dedup.endStep();
+      }
+
+      dedup.beginStep();
+      const suppressed = dedup.checkSameStep('third', 'Edit', args);
+      expect(suppressed).not.toBeNull();
+      // Suppression must not flag the result as an error — it is a friendly
+      // guardrail suggestion, so the TUI renders it as normal tool output.
+      expect(suppressed!.isError).toBeUndefined();
+      const text = suppressed!.output as string;
+      expect(text).toContain('Storm Breaker');
+      expect(text).toContain('Edit');
+      expect(text).toContain('3');
+    });
+
+    it('does not suppress non-mutating tools regardless of repeat count', () => {
+      const dedup = new ToolCallDeduplicator();
+      const args = { path: '/a' };
+      for (let i = 0; i < 5; i += 1) {
+        dedup.beginStep();
+        dedup.checkSameStep(`r${String(i)}`, 'Read', args);
+        dedup.endStep();
+      }
+      dedup.beginStep();
+      // Read is not in MUTATING_TOOLS, so Storm Breaker never engages.
+      const cached = dedup.checkSameStep('sixth', 'Read', args);
+      expect(cached).toBeNull();
+    });
+  });
+
   describe('arg rewrite between checkSameStep and finalize', () => {
     it('resolves the dup deferred even when the original call args are rewritten before finalize', async () => {
       // Models the loop contract: prepareToolExecution may return
