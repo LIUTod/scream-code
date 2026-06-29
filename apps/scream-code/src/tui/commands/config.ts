@@ -291,6 +291,7 @@ async function applyEditorChoice(host: SlashCommandHost, value: string): Promise
       editorCommand,
       notifications: host.state.appState.notifications,
       like: host.state.appState.like,
+      fusionPlan: host.state.appState.fusionPlan,
     });
   } catch (error) {
     host.showStatus(
@@ -424,13 +425,13 @@ async function applyThemeChoice(host: SlashCommandHost, theme: Theme): Promise<v
     host.showStatus(`Theme unchanged: "${theme}".`);
     return;
   }
-
   try {
     await saveTuiConfig({
       theme,
       editorCommand: host.state.appState.editorCommand,
       notifications: host.state.appState.notifications,
       like: host.state.appState.like,
+      fusionPlan: host.state.appState.fusionPlan,
     });
   } catch (error) {
     host.showStatus(

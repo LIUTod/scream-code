@@ -44,6 +44,7 @@ function makeStartupInput(
       editorCommand: null,
       notifications: { enabled: true, condition: "unfocused" },
       like: {},
+      fusionPlan: { timeoutSeconds: 600, workerCount: 3 },
       ...tuiConfig,
     },
     version: "0.0.0-test",

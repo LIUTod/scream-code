@@ -49,6 +49,19 @@ function createMockChildProcess(exitCode: number, stdoutLines: string[]): EventE
   return child;
 }
 
+function createHangingMockChildProcess(): EventEmitter & { killMock: ReturnType<typeof vi.fn> } {
+  const child = new EventEmitter();
+  const stdout = new PassThrough();
+  const stderr = new PassThrough();
+  const killMock = vi.fn((signal: string) => {
+    if (signal === 'SIGTERM') {
+      child.emit('close', null);
+    }
+  });
+  Object.assign(child, { stdout, stderr, pid: 12345, kill: killMock });
+  return child as EventEmitter & { killMock: ReturnType<typeof vi.fn> };
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
 });
@@ -206,4 +219,28 @@ describe('runFusionPlan worker orchestration', () => {
     expect(progress.at(-1)?.phase).toBe('completed');
     expect(progress.at(-1)?.completedWorkers).toBe(2);
   });
+
+  it('times out a hanging worker and reports timeout duration', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    mocks.spawn.mockReturnValue(createHangingMockChildProcess());
+
+    const runPromise = runFusionPlan({
+      task: 'Implement feature X',
+      cwd: '/tmp',
+      timeoutMs: 50,
+      workerCount: 1,
+    });
+
+    await vi.advanceTimersByTimeAsync(50 + 1);
+    await expect(runPromise).resolves.toEqual({
+      ok: false,
+      plan: '',
+      workerResults: expect.arrayContaining([
+        expect.objectContaining({ timedOut: true, timeoutMs: 50 }),
+      ]),
+    });
+
+    vi.useRealTimers();
+  }, 10_000);
+
 });

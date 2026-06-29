@@ -29,6 +29,7 @@ function makeAppState(overrides: Partial<AppState> = {}): AppState {
     editorCommand: null,
     notifications: { enabled: true, condition: 'unfocused' },
     like: {},
+    fusionPlan: { timeoutSeconds: 600, workerCount: 3 },
     availableModels: {},
     availableProviders: {},
     sessionTitle: null,

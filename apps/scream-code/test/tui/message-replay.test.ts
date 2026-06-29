@@ -44,6 +44,7 @@ function makeStartupInput(): ScreamTUIStartupInput {
       editorCommand: null,
       notifications: { enabled: true, condition: 'unfocused' },
       like: {},
+      fusionPlan: { timeoutSeconds: 600, workerCount: 3 },
     },
     version: '0.0.0-test',
     workDir: '/tmp/proj-a',

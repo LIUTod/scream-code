@@ -47,6 +47,12 @@ export const TuiConfigFileSchema = z.object({
     })
     .optional(),
   like: TuiLikePreferencesSchema.optional(),
+  fusionPlan: z
+    .object({
+      timeoutSeconds: z.number().int().min(30).max(3600).optional(),
+      workerCount: z.number().int().min(1).max(8).optional(),
+    })
+    .optional(),
 });
 
 export const TuiConfigSchema = z.object({
@@ -54,7 +60,12 @@ export const TuiConfigSchema = z.object({
   editorCommand: z.string().nullable(),
   notifications: NotificationsConfigSchema,
   like: TuiLikePreferencesSchema,
+  fusionPlan: z.object({
+    timeoutSeconds: z.number().int().min(30).max(3600),
+    workerCount: z.number().int().min(1).max(8),
+  }),
 });
+
 
 export type TuiConfigFileShape = z.infer<typeof TuiConfigFileSchema>;
 export type TuiConfig = z.infer<typeof TuiConfigSchema>;
@@ -69,13 +80,16 @@ export const DEFAULT_TUI_CONFIG: TuiConfig = TuiConfigSchema.parse({
   editorCommand: null,
   notifications: DEFAULT_NOTIFICATIONS_CONFIG,
   like: {},
+  fusionPlan: {
+    timeoutSeconds: 600,
+    workerCount: 3,
+  },
 });
 
 /**
  * Thrown by `loadTuiConfig` when the on-disk TOML cannot be parsed.
  * Carries `fallback` so the caller can recover without re-running the
- * I/O, and use `message` (== `INVALID_TUI_CONFIG_MESSAGE`) as a
- * user-facing notice.
+ * discovery code.
  */
 export class TuiConfigParseError extends Error {
   override readonly name = 'TuiConfigParseError';
@@ -124,6 +138,7 @@ export async function saveTuiConfig(
 export function normalizeTuiConfig(config: TuiConfigFileShape): TuiConfig {
   const command = config.editor?.command?.trim();
   const like = config.like ?? {};
+  const fusionPlan = config.fusionPlan ?? {};
   return TuiConfigSchema.parse({
     theme: config.theme ?? DEFAULT_TUI_CONFIG.theme,
     editorCommand: command === undefined || command.length === 0 ? null : command,
@@ -137,6 +152,10 @@ export function normalizeTuiConfig(config: TuiConfigFileShape): TuiConfig {
       tone: normalizeOptionalString(like.tone),
       other: normalizeOptionalString(like.other),
     },
+    fusionPlan: {
+      timeoutSeconds: fusionPlan.timeoutSeconds ?? DEFAULT_TUI_CONFIG.fusionPlan.timeoutSeconds,
+      workerCount: fusionPlan.workerCount ?? DEFAULT_TUI_CONFIG.fusionPlan.workerCount,
+    },
   });
 }
 
@@ -145,6 +164,7 @@ function normalizeOptionalString(value: string | undefined): string | undefined 
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : undefined;
 }
+
 export function renderTuiConfig(config: TuiConfig): string {
   const nickname = escapeTomlBasicString(config.like.nickname ?? '');
   const tone = escapeTomlBasicString(config.like.tone ?? '');
@@ -166,6 +186,10 @@ notification_condition = "${config.notifications.condition}" # "unfocused" | "al
 nickname = "${nickname}"
 tone = "${tone}"
 other = "${other}"
+
+[fusionPlan]
+timeoutSeconds = ${config.fusionPlan.timeoutSeconds} # 30..3600, default 600
+workerCount = ${config.fusionPlan.workerCount} # 1..8, default 3
 `;
 }
 

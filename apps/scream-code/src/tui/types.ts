@@ -7,8 +7,7 @@ import type {
   ToolInputDisplay,
   ToolResultDisplay,
 } from '@scream-code/scream-code-sdk';
-
-import type { NotificationsConfig, TuiLikePreferences } from './config';
+import type { NotificationsConfig, TuiConfig, TuiLikePreferences } from './config';
 import type { PendingApproval, PendingQuestion } from './reverse-rpc/types';
 import type { Theme } from './theme';
 import type { ResolvedTheme } from './theme/colors';
@@ -65,6 +64,7 @@ export interface AppState {
   editorCommand: string | null;
   notifications: NotificationsConfig;
   like: TuiLikePreferences;
+  fusionPlan: TuiConfig['fusionPlan'];
   availableModels: Record<string, ModelAlias>;
   availableProviders: Record<string, ProviderConfig>;
   sessionTitle: string | null;

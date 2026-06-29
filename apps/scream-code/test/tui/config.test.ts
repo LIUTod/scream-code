@@ -57,6 +57,7 @@ notification_condition = "always"
       editorCommand: 'code --wait',
       notifications: { enabled: false, condition: 'always' },
       like: {},
+      fusionPlan: { timeoutSeconds: 600, workerCount: 3 },
     });
   });
 
@@ -65,12 +66,12 @@ notification_condition = "always"
 [editor]
 command = "   "
 `);
-
     expect(config).toEqual({
       theme: 'auto',
       editorCommand: null,
       notifications: { enabled: true, condition: 'unfocused' },
       like: {},
+      fusionPlan: { timeoutSeconds: 600, workerCount: 3 },
     });
   });
 
@@ -101,6 +102,7 @@ command = "   "
         editorCommand: 'vim',
         notifications: { enabled: false, condition: 'always' },
         like: {},
+        fusionPlan: { timeoutSeconds: 600, workerCount: 3 },
       },
       filePath,
     );
@@ -110,6 +112,7 @@ command = "   "
       editorCommand: 'vim',
       notifications: { enabled: false, condition: 'always' },
       like: {},
+      fusionPlan: { timeoutSeconds: 600, workerCount: 3 },
     });
   });
 });

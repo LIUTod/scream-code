@@ -39,6 +39,36 @@ function trySourceOrDist(): { command: string; prefixArgs: string[] } {
 
 export const SCREAM_FUSIONPLAN_SUBAGENT_ENV = 'SCREAM_FUSIONPLAN_SUBAGENT';
 
+/**
+ * Terminate a child process tree reliably on both POSIX and Windows.
+ * On Windows `proc.kill()` only signals the wrapper, so use `taskkill /T`.
+ * On POSIX, kill the process group so grandchildren inherit the signal.
+ */
+function killProcessTree(proc: ReturnType<typeof spawn>, signal: 'SIGTERM' | 'SIGKILL'): void {
+  if (proc.pid === undefined) return;
+  if (process.platform === 'win32') {
+    const force = signal === 'SIGKILL' ? ['/F'] : [];
+    const child = spawn('taskkill', [...force, '/T', '/PID', String(proc.pid)], {
+      stdio: 'ignore',
+      windowsHide: true,
+      detached: true,
+    });
+    if (typeof child.unref === 'function') {
+      child.unref();
+    }
+    return;
+  }
+  try {
+    process.kill(-proc.pid, signal);
+  } catch {
+    try {
+      proc.kill(signal);
+    } catch {
+      /* best effort */
+    }
+  }
+}
+
 export type FusionPlanPhase = 'planning' | 'synthesis' | 'completed' | 'failed';
 
 export interface FusionPlanWorkerProgress {
@@ -77,6 +107,8 @@ export interface FusionPlanWorkerResult {
   stderr: string;
   exitCode: number | null;
   timedOut: boolean;
+  /** Timeout applied to this worker (ms), for diagnostics. */
+  timeoutMs?: number;
   /** Resolved CLI invocation, for diagnostics. */
   command?: string;
 }
@@ -142,10 +174,18 @@ const WORKER_ANGLES = [
 ] as const;
 
 const DEFAULT_WORKER_COUNT = 3;
-const DEFAULT_TIMEOUT_MS = 120_000;
+const DEFAULT_TIMEOUT_MS = 600_000;
 const DEFAULT_MAX_OUTPUT_BYTES = 8_000;
 const DEFAULT_SYNTHESIS_MAX_OUTPUT_BYTES = 12_000;
 
+/** Override via `SCREAM_FUSIONPLAN_TIMEOUT_SECONDS` env var (30..3600). */
+function resolveDefaultTimeoutMs(): number {
+  const env = process.env['SCREAM_FUSIONPLAN_TIMEOUT_SECONDS'];
+  if (env === undefined) return DEFAULT_TIMEOUT_MS;
+  const parsed = Number.parseInt(env, 10);
+  if (Number.isNaN(parsed)) return DEFAULT_TIMEOUT_MS;
+  return Math.max(30_000, Math.min(3_600_000, parsed * 1000));
+}
 function buildPlannerPrompt(input: { task: string; angle: string; maxOutputBytes: number }): string {
   return [
     'You are a planning specialist. Create an implementation plan for the request below.',
@@ -306,7 +346,7 @@ async function runWorker(input: FusionPlanWorkerInput): Promise<FusionPlanWorker
       model: input.model,
     });
     const { command, prefixArgs } = resolveScreamCommand(input.screamBin);
-    const timeoutMs = input.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    const timeoutMs = input.timeoutMs ?? resolveDefaultTimeoutMs();
     const fullCommand = [command, ...prefixArgs, ...args].join(' ');
     result.command = fullCommand;
 
@@ -371,13 +411,14 @@ async function runWorker(input: FusionPlanWorkerInput): Promise<FusionPlanWorker
 
       timeout = setTimeout(() => {
         result.timedOut = true;
-        proc.kill('SIGTERM');
-        setTimeout(() => proc.kill('SIGKILL'), 5_000).unref();
+        killProcessTree(proc, 'SIGTERM');
+        setTimeout(() => killProcessTree(proc, 'SIGKILL'), 5_000).unref();
       }, timeoutMs);
       timeout.unref();
     });
 
     result.exitCode = exitCode;
+    result.timeoutMs = timeoutMs;
     result.ok = exitCode === 0 && !result.timedOut && result.output.trim().length > 0;
     if (!result.output.trim()) {
       result.output = result.stderr.trim() || '(worker produced no final assistant output)';
@@ -443,7 +484,7 @@ export async function runFusionPlan(input: FusionPlanOptions): Promise<FusionPla
 
   const workerCount = Math.max(1, Math.min(8, input.workerCount ?? DEFAULT_WORKER_COUNT));
   const maxOutputBytes = input.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES;
-  const timeoutMs = input.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const timeoutMs = input.timeoutMs ?? resolveDefaultTimeoutMs();
   const promptDir = await createPromptDir();
 
   const workerStates: { status: 'pending' | 'running' | 'completed' | 'failed'; angle: string; label: string }[] = [];

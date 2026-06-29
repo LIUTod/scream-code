@@ -187,6 +187,8 @@ export class InputController {
         this.host.state.appState.thinkingLevel === 'off'
           ? undefined
           : this.host.state.appState.thinkingLevel,
+      workerCount: this.host.state.appState.fusionPlan.workerCount,
+      timeoutMs: this.host.state.appState.fusionPlan.timeoutSeconds * 1000,
       onProgress: (event) => {
         if (this.fusionPlanEntry === undefined) {
           this.fusionPlanEntry = {
@@ -210,7 +212,10 @@ export class InputController {
           const details = result.workerResults
             .map((r, i) => {
               if (r.ok) return `worker ${i + 1}: ok`;
-              if (r.timedOut) return `worker ${i + 1}: timed out`;
+              if (r.timedOut) {
+                const timeoutS = r.timeoutMs !== undefined ? Math.round(r.timeoutMs / 1000) : 600;
+                return `worker ${i + 1}: timed out after ${timeoutS}s`;
+              }
               const reason = r.exitCode !== null ? `exit ${r.exitCode}` : r.stderr.trim() || 'no output';
               const commandHint = r.command ? ` [${r.command}]` : '';
               return `worker ${i + 1}: failed (${reason})${commandHint}`;
