@@ -13,10 +13,10 @@ const LOGO = [
 ]
 
 const SHADOW_CHARS = new Set(['╚','═','╝','║','╔','╗','╠','╣','╦','╩','╬'])
-const SHEEN_STEP = 2
-const SHEEN_INTERVAL_MS = 150
+const SHEEN_STEP = 4
+const SHEEN_INTERVAL_MS = 60
 const LOADING_DURATION_MS = 1500
-const THEME_ACCENT: Record<ResolvedTheme, [number, number, number]> = {
+const THEME_PRIMARY: Record<ResolvedTheme, [number, number, number]> = {
   dark: [78, 200, 126],   // #4EC87E
   light: [14, 122, 56],  // #0E7A38
 }
@@ -24,43 +24,101 @@ const BLOCK_RGB: [number, number, number] = [255, 255, 255]
 const LOGO_RGB: [number, number, number] = [136, 136, 136]
 const DIM_RGB: [number, number, number] = [85, 85, 85]
 
+// Breathing palette — mirrors WelcomeComponent so the loading splash and the
+// welcome panel share the same hue-rotating colour (24 hues × 5 sub-steps
+// = 120 frames, sat=90 lit=70). The logo's shadow characters keep the original
+// flat grey base. A gradient sheen sweeps across them, then a grey sweep
+// returns across the gradient, restoring the original ping-pong breathing
+// cycle.
+const HUE_STOPS = 24
+const SUB_STEPS = 5
+const BREATHE_STEPS = HUE_STOPS * SUB_STEPS
+
+function rgbToHsl(r: number, g: number, b: number): [number, number, number] {
+  const rf = r / 255, gf = g / 255, bf = b / 255
+  const max = Math.max(rf, gf, bf), min = Math.min(rf, gf, bf)
+  const l = (max + min) / 2
+  if (max === min) return [0, 0, l * 100]
+  const d = max - min
+  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min)
+  let h = 0
+  if (max === rf) h = ((gf - bf) / d + (gf < bf ? 6 : 0)) / 6
+  else if (max === gf) h = ((bf - rf) / d + 2) / 6
+  else h = ((rf - gf) / d + 4) / 6
+  return [h * 360, s * 100, l * 100]
+}
+
+function hslToRgb(h: number, s: number, l: number): [number, number, number] {
+  const hf = ((h % 360) + 360) % 360 / 360
+  const sf = s / 100, lf = l / 100
+  if (sf === 0) { const v = Math.round(lf * 255); return [v, v, v] }
+  const q = lf < 0.5 ? lf * (1 + sf) : lf + sf - lf * sf
+  const p = 2 * lf - q
+  const hue = (t: number): number => {
+    if (t < 0) t += 1; if (t > 1) t -= 1
+    if (t < 1/6) return p + (q-p)*6*t
+    if (t < 1/2) return q
+    if (t < 2/3) return p + (q-p)*(2/3-t)*6
+    return p
+  }
+  return [Math.round(hue(hf+1/3)*255), Math.round(hue(hf)*255), Math.round(hue(hf-1/3)*255)]
+}
+
+function buildBreathingPalette(primary: [number, number, number]): [number, number, number][] {
+  const [r, g, b] = primary
+  const [baseHue] = rgbToHsl(r, g, b)
+  const steps = HUE_STOPS * SUB_STEPS
+  const palette: [number, number, number][] = []
+  for (let i = 0; i < steps; i++) {
+    const hueAngle = (baseHue + (i / steps) * 360) % 360
+    palette.push(hslToRgb(hueAngle, 90, 70))
+  }
+  return palette
+}
+
 function fg(r: number, g: number, b: number) { return `\u001B[38;2;${r};${g};${b}m` }
 const RESET = '\u001B[0m'
 const BOLD = '\u001B[1m'
 const DIM = '\u001B[2m'
 
-function renderSheen(char: string, charIndex: number, sheenPos: number, isReversing: boolean, accent: [number, number, number]) {
+function renderSheen(
+  char: string,
+  charIndex: number,
+  sheenPos: number,
+  isReversing: boolean,
+  breatheColor: [number, number, number],
+) {
   if (char === ' ') return ' '
   if (char === '█') return `${fg(...BLOCK_RGB)}█${RESET}`
   if (!SHADOW_CHARS.has(char)) return `${fg(...LOGO_RGB)}${char}${RESET}`
-  let color: [number, number, number]
-  if (isReversing) {
-    color = charIndex <= sheenPos ? LOGO_RGB : accent
-  } else {
-    color = charIndex <= sheenPos ? accent : LOGO_RGB
-  }
+  // Ping-pong sheen: gradient wave sweeps across the grey base, then a grey
+  // wave sweeps back across the gradient, matching the original breathing
+  // cycle from git HEAD.
+  const color = isReversing
+    ? (charIndex <= sheenPos ? LOGO_RGB : breatheColor)
+    : (charIndex <= sheenPos ? breatheColor : LOGO_RGB)
   return `${fg(...color)}${char}${RESET}`
 }
 
 const LOADING_TEXT = 'Ai正在加载中...'
-function buildShimmerPalette(n: number, accent: [number, number, number]) {
+function buildShimmerPalette(n: number, breatheColor: [number, number, number]) {
   const size = Math.max(8, Math.min(20, Math.ceil(n * 1.5)))
   const palette: [number, number, number][] = []
   for (let i = 0; i < size; i++) {
     const t = i / (size - 1)
     palette.push([
-      Math.round(accent[0] - t * accent[0] * 0.35),
-      Math.round(accent[1] - t * accent[1] * 0.6),
-      Math.round(accent[2] - t * accent[2] * 0.33),
+      Math.round(breatheColor[0] - t * breatheColor[0] * 0.35),
+      Math.round(breatheColor[1] - t * breatheColor[1] * 0.6),
+      Math.round(breatheColor[2] - t * breatheColor[2] * 0.33),
     ])
   }
   return palette
 }
 
-function renderShimmer(pulse: number, accent: [number, number, number]) {
+function renderShimmer(pulse: number, breatheColor: [number, number, number]) {
   const chars = LOADING_TEXT.split('')
   const n = chars.length
-  const palette = buildShimmerPalette(n, accent)
+  const palette = buildShimmerPalette(n, breatheColor)
   let out = ''
   for (let i = 0; i < n; i++) {
     const phase = (pulse - i + n) % n
@@ -120,7 +178,7 @@ export function runLoadingAnimation(
     // warm before ScreamTUI reads it — keeps the no-colour path consistent.
     const finish = (): void => {
       for (const line of LOGO) stdout.write(`${fg(...LOGO_RGB)}${line}${RESET}\n`)
-      stdout.write(`${BOLD}${fg(...THEME_ACCENT[theme])}正在唤醒核心...${RESET}\n`)
+      stdout.write(`${BOLD}${fg(...THEME_PRIMARY[theme])}正在唤醒核心...${RESET}\n`)
     }
     if (prefetch === undefined) {
       finish()
@@ -136,32 +194,36 @@ export function runLoadingAnimation(
     stdout.write('\u001B[2J')
     stdout.write('\u001B[?25l')
 
-    const accent = THEME_ACCENT[theme]
+    const primary = THEME_PRIMARY[theme]
+    const breathePalette = buildBreathingPalette(primary)
     let sheenPos = 0
     let isReversing = false
     let shimmerPulse = 0
+    let breatheFrame = 0
     let phase: 'loading' | 'ready' = 'loading'
 
     function render() {
       const { cols, rows } = getTerminalSize()
       const lines: string[] = []
 
-      const contentHeight = LOGO.length + 4
+      const contentHeight = LOGO.length + 5
       const topPad = Math.max(0, Math.floor((rows - contentHeight) / 2))
       for (let i = 0; i < topPad; i++) lines.push('')
 
+      const breatheColor = breathePalette[breatheFrame] ?? primary
       for (const line of LOGO) {
         let colored = ''
         for (let ci = 0; ci < line.length; ci++) {
-          colored += renderSheen(line[ci]!, ci, sheenPos, isReversing, accent)
+          colored += renderSheen(line[ci]!, ci, sheenPos, isReversing, breatheColor)
         }
         lines.push(centerPad(colored, cols))
       }
+      lines.push('')
 
       if (phase === 'loading') {
-        lines.push(centerPad(renderShimmer(shimmerPulse, accent), cols))
+        lines.push(centerPad(renderShimmer(shimmerPulse, breatheColor), cols))
       } else {
-        lines.push(centerPad(`${BOLD}${fg(...accent)}按下 ENTER 唤醒核心${RESET}`, cols))
+        lines.push(centerPad(`${BOLD}${fg(...breatheColor)}按下 ENTER 唤醒核心${RESET}`, cols))
       }
 
       lines.push('')
@@ -181,6 +243,7 @@ export function runLoadingAnimation(
         sheenPos = 0
       }
       shimmerPulse = (shimmerPulse + 1) % LOADING_TEXT.length
+      breatheFrame = (breatheFrame + 1) % BREATHE_STEPS
       render()
     }
 
@@ -228,7 +291,7 @@ export function runLoadingAnimation(
         stdout.write('\u001B[?1049l')
       }
       for (const line of LOGO) stdout.write(`${fg(...LOGO_RGB)}${line}${RESET}\n`)
-      stdout.write(`${BOLD}${fg(...accent)}正在唤醒核心...${RESET}\n`)
+      stdout.write(`${BOLD}${fg(...primary)}正在唤醒核心...${RESET}\n`)
       resolve()
       return
     }
