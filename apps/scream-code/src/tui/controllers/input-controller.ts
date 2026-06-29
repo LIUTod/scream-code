@@ -31,6 +31,7 @@ import { runFusionPlan } from '../utils/fusion-plan';
 import type { ImageAttachmentStore } from '../utils/image-attachment-store';
 import { extractMediaAttachments } from '../utils/image-placeholder';
 import { consumeLoopLimitIteration } from '../utils/loop-limit';
+import { getBreathingFrame } from '#/tui/utils/breathing-clock';
 import { appendInputHistory, loadInputHistory } from '#/utils/history/input-history';
 import { getInputHistoryFile } from '#/utils/paths';
 import { nextTranscriptId } from '../utils/transcript-id';
@@ -88,7 +89,6 @@ export interface InputControllerHost extends SlashCommandHost {
 export class InputController {
   private lastHistoryContent: string | undefined;
   private breatheTimer: ReturnType<typeof setInterval> | null = null;
-  private breatheFrame = 0;
   /** Once the user types, breathing stops permanently (same as welcome). */
   private breatheOnceStopped = false;
   private fusionPlanComponent?: FusionPlanStatusComponent;
@@ -358,15 +358,13 @@ export class InputController {
     const primaryHex = this.host.state.theme.colors.primary;
     const [r, g, b] = hexToRgb(primaryHex);
     const [baseHue] = rgbToHsl(r, g, b);
-    this.breatheFrame = 0;
     const editor = this.host.state.editor;
     const ui = this.host.state.ui;
     this.breatheTimer = setInterval(() => {
-      const hue = (baseHue + (this.breatheFrame / BREATHE_FRAMES) * 360) % 360;
+      const hue = (baseHue + (getBreathingFrame() / BREATHE_FRAMES) * 360) % 360;
       const hex = hslToHex(hue, 90, 70);
       editor.borderColor = (s: string) => chalk.hex(hex)(s);
       ui.requestRender();
-      this.breatheFrame = (this.breatheFrame + 1) % BREATHE_FRAMES;
     }, BREATHE_INTERVAL_MS);
   }
 

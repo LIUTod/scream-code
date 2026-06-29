@@ -16,12 +16,11 @@ import chalk from 'chalk';
 
 import type { ColorPalette } from '#/tui/theme/colors';
 import type { AppState, RecentSession } from '#/tui/types';
+import { BREATHE_INTERVAL_MS, getBreathingFrame } from '#/tui/utils/breathing-clock';
 
 // 24 hues × 5 interpolated steps = 120 frames × 40 ms ≈ 4.8 s cycle.
 const HUE_STOPS = 24;
 const SUB_STEPS = 5;
-const BREATHE_STEPS = HUE_STOPS * SUB_STEPS; // 120
-const BREATHE_INTERVAL_MS = 40;
 
 const WELCOME_TIPS: readonly string[] = [
   '/config  配置模型',
@@ -131,7 +130,6 @@ export class WelcomeComponent implements Component {
   private state: AppState;
   private colors: ColorPalette;
   private ui: TUI;
-  private breatheFrame = 0;
   private breatheTimer: ReturnType<typeof setInterval> | null = null;
   private breathePalette: string[];
   private recentSessions: readonly RecentSession[];
@@ -150,16 +148,12 @@ export class WelcomeComponent implements Component {
     if (this.breatheTimer !== null) {
       clearInterval(this.breatheTimer);
       this.breatheTimer = null;
-    }
-    if (this.breatheFrame !== 0) {
-      this.breatheFrame = 0;
       this.ui.requestRender();
     }
   }
 
   private startBreathing(): void {
     this.breatheTimer = setInterval(() => {
-      this.breatheFrame = (this.breatheFrame + 1) % BREATHE_STEPS;
       this.ui.requestRender();
     }, BREATHE_INTERVAL_MS);
   }
@@ -167,7 +161,8 @@ export class WelcomeComponent implements Component {
   invalidate(): void {}
 
   render(width: number): string[] {
-    const breatheColor = this.breathePalette[this.breatheFrame] ?? this.colors.primary;
+    const breatheFrame = this.breatheTimer !== null ? getBreathingFrame() : 0;
+    const breatheColor = this.breathePalette[breatheFrame] ?? this.colors.primary;
     const boxColor = chalk.hex(breatheColor);
     const dim = chalk.hex(this.colors.textDim);
     const muted = chalk.hex(this.colors.textMuted);
@@ -195,7 +190,7 @@ export class WelcomeComponent implements Component {
       versionValue = this.state.version;
     }
 
-    const frameIdx = this.breatheTimer !== null ? Math.floor(this.breatheFrame / 24) % LOGO_FRAMES.length : 0;
+    const frameIdx = this.breatheTimer !== null ? Math.floor(breatheFrame / 24) % LOGO_FRAMES.length : 0;
     const frame = LOGO_FRAMES[frameIdx]!;
     const logo = [boxColor(frame[0]), boxColor(frame[1])];
 

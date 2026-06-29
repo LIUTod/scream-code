@@ -94,17 +94,13 @@ async function applyPlanMode(host: SlashCommandHost, session: Session, state: Pl
     if (currentAgentPlanMode !== enabled) {
       await session.setPlanMode(enabled);
     }
-    host.setAppState({ planMode: state });
+    let planPath: string | undefined;
     if (enabled) {
       const plan = await session.getPlan().catch(() => null);
-      const label = state === 'fusionplan' ? '融合计划模式：开启' : '计划模式：开启';
-      host.showNotice(
-        label,
-        plan?.path !== undefined ? `计划将创建于此：${plan.path}` : undefined,
-      );
-      return;
+      planPath = plan?.path;
     }
-    host.showNotice('计划模式：关闭');
+    host.setAppState({ planMode: state });
+    host.setPlanModeBanner(state, planPath);
   } catch (error) {
     const msg = formatErrorMessage(error);
     host.showError(`Failed to set plan mode: ${msg}`);

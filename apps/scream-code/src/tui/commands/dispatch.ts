@@ -17,7 +17,7 @@ import type { BuiltinSlashCommandName } from './registry';
 import type { AuthFlowController } from '../controllers/auth-flow';
 import type { StreamingUIController } from '../controllers/streaming-ui';
 import type { TasksBrowserController } from '../controllers/tasks-browser';
-import type { AppState, LoginProgressSpinnerHandle, QueuedMessage } from '../types';
+import type { AppState, LoginProgressSpinnerHandle, PlanModeState, QueuedMessage } from '../types';
 import type { TUIState } from '../tui-state';
 
 import { handleConnectCommand, handleLogoutCommand } from './auth';
@@ -114,6 +114,7 @@ export interface SlashCommandHost {
   showError(msg: string): void;
   showStatus(msg: string, color?: string): void;
   showNotice(title: string, detail?: string): void;
+  setPlanModeBanner(mode: PlanModeState, planPath?: string): void;
   mountEditorReplacement(panel: Component & Focusable): void;
   restoreEditor(): void;
 

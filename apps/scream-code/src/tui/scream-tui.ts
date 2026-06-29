@@ -597,8 +597,19 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
     }
     if (!hasPatchChanges(this.state.appState, patch)) return;
     const busyChanged = 'streamingPhase' in patch || 'isCompacting' in patch;
+    const prevPlanMode = this.state.appState.planMode;
+    const prevSessionId = this.state.appState.sessionId;
     Object.assign(this.state.appState, patch);
-    if ('planMode' in patch) this.updateEditorBorderHighlight();
+    const planModeChanged = 'planMode' in patch && prevPlanMode !== this.state.appState.planMode;
+    // Session switch (sessionId change) must also reset the banner path —
+    // otherwise the banner keeps showing the previous session's plan file
+    // when the new session happens to share the same planMode.
+    const sessionChanged =
+      'sessionId' in patch && this.state.appState.sessionId !== prevSessionId;
+    if (planModeChanged || sessionChanged) {
+      this.updateEditorBorderHighlight();
+      this.state.planModeBanner.setPlanMode(this.state.appState.planMode ?? 'off');
+    }
     if ('thinkingLevel' in patch) {
       this.state.editor.thinking = patch.thinkingLevel !== 'off';
       this.state.editor.thinkingLevel = patch.thinkingLevel ?? 'off';
@@ -730,6 +741,11 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
     this.transcriptController.showNotice(title, detail);
   }
 
+  setPlanModeBanner(mode: PlanModeState, planPath?: string): void {
+    this.state.planModeBanner.setPlanMode(mode, planPath);
+    this.state.ui.requestRender();
+  }
+
   showError(message: string): void {
     this.transcriptController.showError(message);
   }
@@ -774,7 +790,14 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
     this.state.ui.requestRender();
   }
 
+  exitFullScreenTakeover(): void {
+    if (this.state.tasksBrowser !== undefined) {
+      this.tasksBrowserController.close();
+    }
+  }
+
   mountEditorReplacement(panel: Component & Focusable): void {
+    this.exitFullScreenTakeover();
     this.swapEditor(panel);
   }
 

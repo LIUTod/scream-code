@@ -28,6 +28,8 @@ export interface DialogManagerHost {
 
   showError(message: string): void;
   showStatus(message: string, color?: string): void;
+  /** 退出 /tasks 等全屏接管组件,让后续 editor 替换能挂载到真实容器。 */
+  exitFullScreenTakeover(): void;
   sendNormalUserInput(text: string): void;
   resumeSession(sessionId: string): Promise<boolean>;
   switchToSession(session: Session, message: string): Promise<void>;
@@ -61,6 +63,7 @@ export class DialogManager {
   // Editor replacement primitives
   // =========================================================================
   private mountEditorReplacement(panel: Component & Focusable): void {
+    this.host.exitFullScreenTakeover();
     this.host.state.editorContainer.clear();
     this.host.state.editorContainer.addChild(panel);
     this.host.state.ui.setFocus(panel);

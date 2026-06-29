@@ -11,6 +11,7 @@ import { ErrorBannerComponent } from './components/chrome/error-banner';
 import { FooterComponent } from './components/chrome/footer';
 import { GutterContainer } from './components/chrome/gutter-container';
 import type { MoonLoader, SpinnerStyle } from './components/chrome/moon-loader';
+import { PlanModeBannerComponent } from './components/chrome/plan-mode-banner';
 import type { PulseWaveLoader } from './components/chrome/pulse-wave-loader';
 import { TodoPanelComponent } from './components/chrome/todo-panel';
 import type { SessionRow } from './components/dialogs/session-picker';
@@ -42,6 +43,8 @@ export interface TUIState {
   queueContainer: Container;
   errorBanner: ErrorBannerComponent;
   errorBannerContainer: Container;
+  planModeBanner: PlanModeBannerComponent;
+  planModeBannerContainer: Container;
   editorContainer: Container;
   footer: FooterComponent;
   editor: CustomEditor;
@@ -120,6 +123,9 @@ export function createTUIState(options: ScreamTUIOptions): TUIState {
   const errorBanner = new ErrorBannerComponent(theme.colors);
   const errorBannerContainer = new GutterContainer(CHROME_GUTTER, CHROME_GUTTER);
   errorBannerContainer.addChild(errorBanner);
+  const planModeBanner = new PlanModeBannerComponent(theme.colors);
+  const planModeBannerContainer = new GutterContainer(CHROME_GUTTER, CHROME_GUTTER);
+  planModeBannerContainer.addChild(planModeBanner);
   const editorContainer = new GutterContainer(CHROME_GUTTER, CHROME_GUTTER);
   const editor = new CustomEditor(ui, theme.colors);
   editor.thinking = initialAppState.thinkingLevel !== 'off';
@@ -138,6 +144,8 @@ export function createTUIState(options: ScreamTUIOptions): TUIState {
     queueContainer,
     errorBanner,
     errorBannerContainer,
+    planModeBanner,
+    planModeBannerContainer,
     editorContainer,
     footer,
     editor,
