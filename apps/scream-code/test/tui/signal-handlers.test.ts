@@ -28,6 +28,7 @@ function makeStartupInput(): ScreamTUIStartupInput {
       notifications: { enabled: true, condition: 'unfocused' },
       like: {},
       fusionPlan: { timeoutSeconds: 600, workerCount: 3 },
+      subagentModels: {},
     },
     version: '0.0.0-test',
     workDir: '/tmp/proj-signals',
@@ -37,6 +38,7 @@ function makeStartupInput(): ScreamTUIStartupInput {
 
 function makeHarness() {
   return {
+    setSubagentModelBindings: vi.fn(),
     getConfig: vi.fn(async () => ({})),
     createSession: vi.fn(),
     resumeSession: vi.fn(),

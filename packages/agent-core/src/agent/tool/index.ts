@@ -641,6 +641,7 @@ export class ToolManager {
         this.agent.type === 'main' && new b.MakeSkillPlanTool(this.agent),
         this.agent.type === 'main' && new b.MakeSkillApplyTool(this.agent),
         this.agent.subagentHost &&
+          this.agent.type !== 'sub' &&
           new b.AgentTool(
             this.agent.subagentHost,
             background,
@@ -651,6 +652,7 @@ export class ToolManager {
             },
           ),
         this.agent.subagentHost &&
+          this.agent.type !== 'sub' &&
           new b.WolfPackTool(
             this.agent.subagentHost,
             () => this.agent.wolfpackMode.isActive,

@@ -4,6 +4,7 @@ import { EditorSelectorComponent } from '../components/dialogs/editor-selector';
 import { ModelSelectorComponent } from '../components/dialogs/model-selector';
 import { PermissionSelectorComponent } from '../components/dialogs/permission-selector';
 import { SettingsSelectorComponent, type SettingsSelection } from '../components/dialogs/settings-selector';
+import { showSubagentModelBinder } from '../components/dialogs/subagent-model-binder';
 import { ThemeSelectorComponent } from '../components/dialogs/theme-selector';
 import { saveTuiConfig } from '../config';
 import { isBusy } from '../utils/app-state';
@@ -295,7 +296,12 @@ export async function handleThemeCommand(host: SlashCommandHost, args: string): 
 }
 
 export function handleModelCommand(host: SlashCommandHost, args: string): void {
-  const alias = args.trim();
+  const trimmed = args.trim();
+  if (trimmed === 'diy') {
+    showSubagentModelBinder(host);
+    return;
+  }
+  const alias = trimmed;
   if (alias.length === 0) {
     showModelPicker(host);
     return;
@@ -343,6 +349,7 @@ async function applyEditorChoice(host: SlashCommandHost, value: string): Promise
       notifications: host.state.appState.notifications,
       like: host.state.appState.like,
       fusionPlan: host.state.appState.fusionPlan,
+      subagentModels: host.state.appState.subagentModels,
     });
   } catch (error) {
     host.showStatus(
@@ -498,6 +505,7 @@ async function applyThemeChoice(host: SlashCommandHost, theme: Theme): Promise<v
       notifications: host.state.appState.notifications,
       like: host.state.appState.like,
       fusionPlan: host.state.appState.fusionPlan,
+      subagentModels: host.state.appState.subagentModels,
     });
   } catch (error) {
     host.showStatus(

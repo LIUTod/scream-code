@@ -1,4 +1,13 @@
-Launch a subagent to handle a task. The subagent runs as a same-process loop instance with its own context and wire file.
+Launch a subagent to handle a focused task. Prefer this tool over doing the work yourself when the task matches one of the specialists below.
+
+Specialist subagents:
+- `coder` — concrete coding, editing, refactoring
+- `explore` — read-only codebase investigation
+- `plan` — implementation planning and architecture
+- `verify` — build/test/lint checks
+- `reviewer` — code review
+- `oracle` — deep debugging and second opinions
+- `writer` — reports and documentation
 
 ## Required prompt structure
 
@@ -28,6 +37,6 @@ Usage notes:
 - When the task continues earlier work a subagent already did, prefer resuming that agent (pass its `resume` id) over spawning a fresh instance — the resumed agent keeps its prior context.
 - A subagent's result is only visible to you, not to the user. When the user needs to see what a subagent produced, summarize the relevant parts yourself in your own reply.
 
-When NOT to use Agent: skip delegation for trivial work you can do directly — reading a file whose path you already know, searching a small known set of files, or any task that takes only a step or two. Delegation has a context-handoff cost; it pays off only when the task is substantial enough to outweigh it.
+When NOT to use Agent: skip delegation for trivial one-step work (e.g. reading a known file). Almost everything else is a candidate for delegation.
 
 Once a subagent is running, leave that scope to it: do not redo its searches or reads in parallel, and do not abandon it midway and finish the job manually. Both undo the context savings the delegation was meant to buy.

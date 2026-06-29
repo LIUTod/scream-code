@@ -4,6 +4,7 @@ import type {
   ProviderConfig,
   PromptPart,
   ThinkingEffort,
+  TokenUsage,
   ToolInputDisplay,
   ToolResultDisplay,
 } from '@scream-code/scream-code-sdk';
@@ -66,6 +67,7 @@ export interface AppState {
   notifications: NotificationsConfig;
   like: TuiLikePreferences;
   fusionPlan: TuiConfig['fusionPlan'];
+  subagentModels: Record<string, string>;
   availableModels: Record<string, ModelAlias>;
   availableProviders: Record<string, ProviderConfig>;
   sessionTitle: string | null;
@@ -82,6 +84,7 @@ export interface AppState {
   loopLastVerifyPassed: boolean | undefined;
   loopVerifying: boolean;
   recentSessions: RecentSession[];
+  subagentUsage: SubagentUsageMap;
 }
 
 export interface ToolCallBlockData {
@@ -122,6 +125,8 @@ export interface SubagentReplayToolCallData {
   description?: string;
   result?: ToolResultBlockData;
 }
+
+export type SubagentUsageMap = Record<string, TokenUsage>;
 
 export interface SubagentReplayBlockData {
   id: string;

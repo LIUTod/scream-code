@@ -58,6 +58,7 @@ notification_condition = "always"
       notifications: { enabled: false, condition: 'always' },
       like: {},
       fusionPlan: { timeoutSeconds: 600, workerCount: 3 },
+      subagentModels: {},
     });
   });
 
@@ -72,6 +73,7 @@ command = "   "
       notifications: { enabled: true, condition: 'unfocused' },
       like: {},
       fusionPlan: { timeoutSeconds: 600, workerCount: 3 },
+      subagentModels: {},
     });
   });
 
@@ -103,6 +105,7 @@ command = "   "
         notifications: { enabled: false, condition: 'always' },
         like: {},
         fusionPlan: { timeoutSeconds: 600, workerCount: 3 },
+        subagentModels: {},
       },
       filePath,
     );
@@ -113,6 +116,7 @@ command = "   "
       notifications: { enabled: false, condition: 'always' },
       like: {},
       fusionPlan: { timeoutSeconds: 600, workerCount: 3 },
+      subagentModels: {},
     });
   });
 });

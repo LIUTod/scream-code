@@ -26,6 +26,7 @@ function makeStartupInput(): ScreamTUIStartupInput {
       notifications: { enabled: true, condition: 'unfocused' },
       like: {},
       fusionPlan: { timeoutSeconds: 600, workerCount: 3 },
+      subagentModels: {},
     },
     version: '0.0.0-test',
     workDir: '/tmp/proj-a',
@@ -39,7 +40,7 @@ function makeDriverWithTerminalProgress(): {
   setProgress: ReturnType<typeof vi.fn<(active: boolean) => void>>;
 } {
   const setProgress = vi.fn<(active: boolean) => void>();
-  const driver = new ScreamTUI({} as never, makeStartupInput()) as unknown as ActivityDriver;
+  const driver = new ScreamTUI({ setSubagentModelBindings: () => {} } as never, makeStartupInput()) as unknown as ActivityDriver;
   vi.spyOn(driver.state.ui, 'requestRender').mockImplementation(() => {});
   driver.state.terminal = { columns: 80, setProgress } as unknown as TUIState['terminal'];
   return { driver, state: driver.state, setProgress };

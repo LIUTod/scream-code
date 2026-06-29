@@ -26,6 +26,7 @@ function makeStartupInput(): ScreamTUIStartupInput {
       notifications: { enabled: true, condition: 'unfocused' },
       like: {},
       fusionPlan: { timeoutSeconds: 600, workerCount: 3 },
+      subagentModels: {},
     },
     version: '0.0.0-test',
     workDir: '/tmp/proj-a',
@@ -34,7 +35,7 @@ function makeStartupInput(): ScreamTUIStartupInput {
 }
 
 function makeDriver(): SetAppStateDriver {
-  const driver = new ScreamTUI({} as never, makeStartupInput()) as unknown as SetAppStateDriver;
+  const driver = new ScreamTUI({ setSubagentModelBindings: () => {} } as never, makeStartupInput()) as unknown as SetAppStateDriver;
   vi.spyOn(driver.state.ui, 'requestRender').mockImplementation(() => {});
   vi.spyOn(driver.state.terminal, 'setProgress').mockImplementation(() => {});
   return driver;

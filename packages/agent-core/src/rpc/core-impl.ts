@@ -124,6 +124,7 @@ export interface ScreamCoreOptions {
   readonly screamRequestHeaders?: Record<string, string> | undefined;
   readonly resolveOAuthTokenProvider?: OAuthTokenProviderResolver | undefined;
   readonly skillDirs?: readonly string[];
+  readonly subagentModelBindings?: () => Record<string, string | undefined>;
 }
 
 export class ScreamCore implements PromisableMethods<CoreAPI> {
@@ -139,6 +140,7 @@ export class ScreamCore implements PromisableMethods<CoreAPI> {
   private readonly screamRequestHeaders: Record<string, string> | undefined;
   private readonly resolveOAuthTokenProvider: OAuthTokenProviderResolver | undefined;
   private readonly skillDirs: readonly string[];
+  private subagentModelBindings?: () => Record<string, string | undefined>;
   private readonly sessionStore: SessionStore;
   readonly plugins: PluginManager;
   private pluginsReady: Promise<void>;
@@ -164,6 +166,7 @@ export class ScreamCore implements PromisableMethods<CoreAPI> {
     this.screamRequestHeaders = options.screamRequestHeaders;
     this.resolveOAuthTokenProvider = options.resolveOAuthTokenProvider;
     this.skillDirs = options.skillDirs ?? [];
+    this.subagentModelBindings = options.subagentModelBindings;
     ensureScreamHome(this.homeDir);
     this.config = loadRuntimeConfig(this.configPath);
     this.sessionStore = new SessionStore(this.homeDir);
@@ -177,6 +180,11 @@ export class ScreamCore implements PromisableMethods<CoreAPI> {
     });
 
     this.sdk = rpcClient(this);
+  }
+
+  /** Live TUI-owned per-profile model bindings; called at subagent spawn time. */
+  setSubagentModelBindings(getter: (() => Record<string, string | undefined>) | undefined): void {
+    this.subagentModelBindings = getter;
   }
 
   /** Resolve the shell environment so missing Git Bash is surfaced early. */
@@ -226,6 +234,7 @@ export class ScreamCore implements PromisableMethods<CoreAPI> {
       skills: this.resolveSessionSkillConfig(config),
       mcpConfig,
       pluginSessionStarts,
+      subagentModelBindings: this.subagentModelBindings,
     });
     try {
       session.metadata = {
@@ -321,6 +330,7 @@ export class ScreamCore implements PromisableMethods<CoreAPI> {
       mcpConfig,
       initializeMainAgent: false,
       pluginSessionStarts,
+      subagentModelBindings: this.subagentModelBindings,
     });
     let warning: string | undefined;
     try {

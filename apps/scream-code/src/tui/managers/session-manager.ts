@@ -125,6 +125,10 @@ export class SessionManager {
     await this.setSession(session);
     await this.syncRuntimeState(session);
     this.host.state.startupState = 'ready';
+    // Subscribe to session events for the newly initialized session. This is
+    // required for the initial createSession path; resume/switch paths call
+    // startSubscription in their own flows.
+    this.host.sessionEventHandler.startSubscription();
     return { session, shouldReplay: shouldReplayHistory };
   }
 

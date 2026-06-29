@@ -45,6 +45,7 @@ function makeStartupInput(
       notifications: { enabled: true, condition: "unfocused" },
       like: {},
       fusionPlan: { timeoutSeconds: 600, workerCount: 3 },
+      subagentModels: {},
       ...tuiConfig,
     },
     version: "0.0.0-test",
@@ -83,6 +84,7 @@ function makeSession(overrides: Record<string, unknown> = {}) {
 
 function makeHarness(session = makeSession(), overrides: Record<string, unknown> = {}) {
   return {
+    setSubagentModelBindings: vi.fn(),
     getConfig: vi.fn(async () => ({
       models: {
         k2: { model: "scream-cli-v1", maxContextSize: 100 },

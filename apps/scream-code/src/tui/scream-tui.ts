@@ -120,6 +120,7 @@ function createInitialAppState(input: ScreamTUIStartupInput): AppState {
     notifications: input.tuiConfig.notifications,
     like: input.tuiConfig.like,
     fusionPlan: input.tuiConfig.fusionPlan,
+    subagentModels: input.tuiConfig.subagentModels,
     availableModels: {},
     availableProviders: {},
     sessionTitle: null,
@@ -136,6 +137,7 @@ function createInitialAppState(input: ScreamTUIStartupInput): AppState {
     loopLastVerifyPassed: undefined,
     loopVerifying: false,
     recentSessions: [],
+    subagentUsage: {},
   };
 }
 

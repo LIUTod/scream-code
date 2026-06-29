@@ -8,7 +8,6 @@ import type { Component } from '@earendil-works/pi-tui';
 import { truncateToWidth, visibleWidth } from '@earendil-works/pi-tui';
 import type { SessionUsage, TokenUsage } from '@scream-code/scream-code-sdk';
 import chalk from 'chalk';
-
 import {
   formatTokenCount,
   ratioSeverity,
@@ -16,6 +15,7 @@ import {
   safeUsageRatio,
 } from '#/utils/usage/usage-format';
 import type { ColorPalette } from '#/tui/theme/colors';
+import type { SubagentUsageMap } from '#/tui/types';
 
 const LEFT_MARGIN = 2;
 const SIDE_PADDING = 1;
@@ -44,6 +44,7 @@ export interface UsageReportOptions {
   readonly maxContextTokens: number;
   readonly managedUsage?: ManagedUsageReport;
   readonly managedUsageError?: string;
+  readonly subagentUsage?: SubagentUsageMap;
 }
 
 export interface ManagedUsageReportLineOptions {
@@ -51,10 +52,10 @@ export interface ManagedUsageReportLineOptions {
   readonly managedUsage?: ManagedUsageReport;
   readonly managedUsageError?: string;
 }
-
 function usageNumber(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0;
 }
+
 
 function usageInputTotal(usage: TokenUsage): number {
   return (
@@ -143,6 +144,7 @@ export function buildManagedUsageReportLines(options: ManagedUsageReportLineOpti
   const value = chalk.hex(colors.text);
   const muted = chalk.hex(colors.textDim);
   const errorStyle = chalk.hex(colors.error);
+
   const severityHex = (sev: 'ok' | 'warn' | 'danger'): string =>
     sev === 'danger' ? colors.error : sev === 'warn' ? colors.warning : colors.success;
 
@@ -155,6 +157,40 @@ export function buildManagedUsageReportLines(options: ManagedUsageReportLineOpti
     errorStyle,
     severityHex,
   );
+}
+
+
+function buildSubagentUsageSection(
+  usage: SubagentUsageMap | undefined,
+  accent: Colorize,
+  value: Colorize,
+  muted: Colorize,
+): string[] {
+  const entries = Object.entries(usage ?? {});
+  if (entries.length === 0) return [];
+
+  const lines: string[] = [accent('子 Agent 用量')];
+  let totalInput = 0;
+  let totalOutput = 0;
+  for (const [name, row] of entries) {
+    const input = usageInputTotal(row);
+    const output = usageNumber(row.output);
+    totalInput += input;
+    totalOutput += output;
+    lines.push(
+      `  ${muted(name)}  输入 ${value(formatTokenCount(input))}  输出 ${value(
+        formatTokenCount(output),
+      )}  总计 ${value(formatTokenCount(input + output))}`,
+    );
+  }
+  if (entries.length > 1) {
+    lines.push(
+      `  ${muted('总计')}  输入 ${value(formatTokenCount(totalInput))}  输出 ${value(
+        formatTokenCount(totalOutput),
+      )}  总计 ${value(formatTokenCount(totalInput + totalOutput))}`,
+    );
+  }
+  return lines;
 }
 
 export function buildUsageReportLines(options: UsageReportOptions): string[] {
@@ -202,6 +238,12 @@ export function buildUsageReportLines(options: UsageReportOptions): string[] {
   if (managedSection.length > 0) {
     lines.push('');
     lines.push(...managedSection);
+  }
+
+  const subagentSection = buildSubagentUsageSection(options.subagentUsage, accent, value, muted);
+  if (subagentSection.length > 0) {
+    lines.push('');
+    lines.push(...subagentSection);
   }
 
   return lines;

@@ -9,7 +9,7 @@ function strip(text: string): string {
 }
 
 describe('UsagePanelComponent', () => {
-  it('formats session, context, and managed usage sections', () => {
+  it('formats session, context, managed, and subagent usage sections', () => {
     const lines = buildUsageReportLines({
       colors: darkColors,
       sessionUsage: {
@@ -34,6 +34,9 @@ describe('UsagePanelComponent', () => {
         },
         limits: [],
       },
+      subagentUsage: {
+        coder: { inputOther: 100, inputCacheRead: 50, inputCacheCreation: 0, output: 75 },
+      },
     }).map(strip);
 
     expect(lines).toContain('会话用量');
@@ -43,6 +46,8 @@ describe('UsagePanelComponent', () => {
     expect(lines).toContain('计划用量');
     expect(lines.join('\n')).toContain('20% 已用');
     expect(lines.join('\n')).toContain('resets tomorrow');
+    expect(lines).toContain('子 Agent 用量');
+    expect(lines).toContain('  coder  输入 150  输出 75  总计 225');
   });
 
   it('wraps preformatted usage lines in a bordered panel', () => {

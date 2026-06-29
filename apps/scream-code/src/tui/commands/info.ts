@@ -34,6 +34,7 @@ export async function showUsage(host: SlashCommandHost): Promise<void> {
     maxContextTokens: host.state.appState.maxContextTokens,
     managedUsage: managedUsage?.usage,
     managedUsageError: managedUsage?.error,
+    subagentUsage: host.state.appState.subagentUsage,
   });
   const panel = new UsagePanelComponent(lines, host.state.theme.colors.primary);
   host.state.transcriptContainer.addChild(panel);

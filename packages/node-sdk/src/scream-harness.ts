@@ -80,6 +80,14 @@ export class ScreamHarness {
     this.rpc.interactiveAgentId = agentId;
   }
 
+  /**
+   * Install a live getter that returns the TUI's per-profile model bindings.
+   * Read at subagent spawn/resume time so mid-session `/model diy` changes take
+   * effect without recreating the session.
+   */
+  setSubagentModelBindings(getter: (() => Record<string, string | undefined>) | undefined): void {
+    this.rpc.core.setSubagentModelBindings(getter);
+  }
 
   async createSession(options: CreateSessionOptions): Promise<Session> {
     const { planMode, ...coreOptions } = options;

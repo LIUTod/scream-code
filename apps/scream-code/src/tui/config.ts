@@ -53,6 +53,7 @@ export const TuiConfigFileSchema = z.object({
       workerCount: z.number().int().min(1).max(8).optional(),
     })
     .optional(),
+  subagentModels: z.record(z.string(), z.string()).optional(),
 });
 
 export const TuiConfigSchema = z.object({
@@ -64,6 +65,7 @@ export const TuiConfigSchema = z.object({
     timeoutSeconds: z.number().int().min(30).max(3600),
     workerCount: z.number().int().min(1).max(8),
   }),
+  subagentModels: z.record(z.string(), z.string()),
 });
 
 
@@ -84,6 +86,7 @@ export const DEFAULT_TUI_CONFIG: TuiConfig = TuiConfigSchema.parse({
     timeoutSeconds: 600,
     workerCount: 3,
   },
+  subagentModels: {},
 });
 
 /**
@@ -156,6 +159,7 @@ export function normalizeTuiConfig(config: TuiConfigFileShape): TuiConfig {
       timeoutSeconds: fusionPlan.timeoutSeconds ?? DEFAULT_TUI_CONFIG.fusionPlan.timeoutSeconds,
       workerCount: fusionPlan.workerCount ?? DEFAULT_TUI_CONFIG.fusionPlan.workerCount,
     },
+    subagentModels: normalizeSubagentModels(config.subagentModels),
   });
 }
 
@@ -165,10 +169,24 @@ function normalizeOptionalString(value: string | undefined): string | undefined 
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
+function normalizeSubagentModels(
+  raw: Record<string, string> | undefined,
+): Record<string, string> {
+  if (raw === undefined) return {};
+  const out: Record<string, string> = {};
+  for (const [profileName, alias] of Object.entries(raw)) {
+    const key = profileName.trim();
+    const val = typeof alias === 'string' ? alias.trim() : '';
+    if (key.length > 0 && val.length > 0) out[key] = val;
+  }
+  return out;
+}
+
 export function renderTuiConfig(config: TuiConfig): string {
   const nickname = escapeTomlBasicString(config.like.nickname ?? '');
   const tone = escapeTomlBasicString(config.like.tone ?? '');
   const other = escapeTomlBasicString(config.like.other ?? '');
+  const subagentModelsBlock = renderSubagentModelsBlock(config.subagentModels);
   return `# ~/.scream-code/tui.toml
 # Terminal UI preferences for scream-code.
 # Agent/runtime settings stay in ~/.scream-code/config.toml.
@@ -189,8 +207,16 @@ other = "${other}"
 
 [fusionPlan]
 timeoutSeconds = ${config.fusionPlan.timeoutSeconds} # 30..3600, default 600
-workerCount = ${config.fusionPlan.workerCount} # 1..8, default 3
-`;
+workerCount = ${config.fusionPlan.workerCount} # 1..8, default 3${subagentModelsBlock}`;
+}
+
+function renderSubagentModelsBlock(models: Record<string, string>): string {
+  const entries = Object.entries(models);
+  if (entries.length === 0) return '\n';
+  const lines = entries.map(
+    ([name, alias]) => `${name} = "${escapeTomlBasicString(alias)}"`,
+  );
+  return `\n\n[subagentModels]\n${lines.join('\n')}\n`;
 }
 
 function escapeTomlBasicString(value: string): string {

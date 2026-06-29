@@ -59,6 +59,7 @@ export class SessionSubagentHost {
     private readonly session: Session,
     private readonly ownerAgentId: string,
     readonly backgroundTaskTimeoutMs?: number | undefined,
+    private readonly modelBindings?: () => Record<string, string | undefined>,
   ) {}
 
   async spawn(profileName: string, options: RunSubagentOptions): Promise<SubagentHandle> {
@@ -148,11 +149,14 @@ export class SessionSubagentHost {
         ...options,
         signal: controller.signal,
       },
-      // A resumed subagent is realigned to the parent agent's current model,
-      // so a parent setModel between the initial spawn and the resume is
-      // reflected — a subagent always uses the parent agent's model.
+      // A resumed subagent is realigned to its bound model (or the parent's
+      // current model when unbound), so a /model diy rebind or a parent
+      // setModel between the initial spawn and the resume is reflected.
       () => {
-        child.config.update({ modelAlias: parent.config.modelAlias });
+        const binding = this.resolveModelBinding(profileName);
+        const modelAlias = binding ?? parent.config.modelAlias;
+        const thinkingLevel = this.resolveThinkingLevel(parent, binding, parent.config.thinkingLevel);
+        child.config.update({ modelAlias, thinkingLevel });
         return Promise.resolve();
       },
     ).finally(() => {
@@ -290,6 +294,7 @@ export class SessionSubagentHost {
         subagentId: childId,
         parentToolCallId: options.parentToolCallId,
         error: message,
+        usage: child.usage.data().total,
       });
       throw error;
     }
@@ -300,15 +305,48 @@ export class SessionSubagentHost {
     child: Agent,
     profile: ResolvedAgentProfile,
   ): Promise<void> {
-    // A subagent always inherits the parent agent's model.
+    // A subagent uses the model bound to its profile via /model diy when one
+    // is configured; otherwise it inherits the parent agent's model.
+    const binding = this.resolveModelBinding(profile.name);
+    const modelAlias = binding ?? parent.config.modelAlias;
+    const thinkingLevel = this.resolveThinkingLevel(parent, binding, parent.config.thinkingLevel);
     child.config.update({
       cwd: parent.config.cwd,
-      modelAlias: parent.config.modelAlias,
-      thinkingLevel: parent.config.thinkingLevel,
+      modelAlias,
+      thinkingLevel,
     });
 
     const context = await prepareSystemPromptContext(child.jian);
     child.useProfile(profile, context);
+  }
+
+  private resolveModelBinding(profileName: string): string | undefined {
+    const bindings = this.modelBindings?.();
+    if (bindings === undefined) return undefined;
+    const alias = bindings[profileName];
+    if (typeof alias !== 'string' || alias.trim().length === 0) return undefined;
+    return alias;
+  }
+
+  /**
+   * When a profile binds to a different model, the parent's thinkingLevel may
+   * not be supported (e.g. Claude parent with `thinking=high` spawning a GPT
+   * subagent). Probe the bound model's capability and force `off` when it
+   * lacks thinking support. Falls back to the parent level when the probe
+   * fails (unconfigured model, no provider) so spawn still succeeds.
+   */
+  private resolveThinkingLevel(
+    parent: Agent,
+    binding: string | undefined,
+    parentLevel: string,
+  ): string {
+    if (binding === undefined || parent.modelProvider === undefined) return parentLevel;
+    try {
+      const capabilities = parent.modelProvider.resolveProviderConfig(binding).modelCapabilities;
+      return capabilities.thinking ? parentLevel : 'off';
+    } catch {
+      return parentLevel;
+    }
   }
 
   private async triggerSubagentStart(

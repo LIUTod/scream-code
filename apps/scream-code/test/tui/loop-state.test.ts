@@ -28,6 +28,7 @@ function makeState(overrides: Partial<AppState> = {}): AppState {
     notifications: { enabled: true, condition: 'unfocused' },
     like: {},
     fusionPlan: { timeoutSeconds: 600, workerCount: 3 },
+    subagentModels: {},
     availableModels: {},
     availableProviders: {},
     sessionTitle: null,
@@ -44,6 +45,7 @@ function makeState(overrides: Partial<AppState> = {}): AppState {
     loopLastVerifyPassed: undefined,
     loopVerifying: false,
     recentSessions: [],
+    subagentUsage: {},
     ...overrides,
   };
 }

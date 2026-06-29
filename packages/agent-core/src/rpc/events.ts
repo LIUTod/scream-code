@@ -242,6 +242,7 @@ export interface SubagentFailedEvent {
   readonly subagentId: string;
   readonly parentToolCallId: string;
   readonly error: string;
+  readonly usage?: TokenUsage | undefined;
 }
 
 export interface CompactionStartedEvent {

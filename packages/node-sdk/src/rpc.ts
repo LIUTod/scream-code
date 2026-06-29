@@ -60,6 +60,7 @@ export interface SDKRpcClientOptions {
   readonly identity?: ScreamHostIdentity | undefined;
   readonly resolveOAuthTokenProvider?: OAuthTokenProviderResolver | undefined;
   readonly skillDirs?: readonly string[];
+  readonly subagentModelBindings?: () => Record<string, string | undefined>;
 }
 
 export interface SessionPromptRpcInput {
@@ -157,6 +158,7 @@ export class SDKRpcClient {
       screamRequestHeaders,
       resolveOAuthTokenProvider: options.resolveOAuthTokenProvider,
       skillDirs: options.skillDirs,
+      subagentModelBindings: options.subagentModelBindings,
     });
     this.ready = sdkRpc(new ClientAPI(this)).then((rpc) => {
       this.rpc = rpc;

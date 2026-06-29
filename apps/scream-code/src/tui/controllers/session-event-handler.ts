@@ -21,6 +21,7 @@ import type {
   SubagentSpawnedEvent,
   SubagentStartedEvent,
   ThinkingDeltaEvent,
+  TokenUsage,
   ToolCallDeltaEvent,
   ToolCallStartedEvent,
   ToolProgressEvent,
@@ -67,11 +68,22 @@ import type {
   BackgroundAgentMetadata,
   LivePaneState,
   QueuedMessage,
+  SubagentUsageMap,
   ToolCallBlockData,
   ToolResultBlockData,
   TranscriptEntry,
 } from '../types';
 import type { TUIState } from '../tui-state';
+
+function addTokenUsage(a: TokenUsage, b: TokenUsage): TokenUsage {
+  return {
+    inputOther: a.inputOther + b.inputOther,
+    inputCacheRead: a.inputCacheRead + b.inputCacheRead,
+    inputCacheCreation: a.inputCacheCreation + b.inputCacheCreation,
+    output: a.output + b.output,
+  };
+}
+
 
 export interface SessionEventHost {
   state: TUIState;
@@ -126,6 +138,7 @@ export class SessionEventHandler {
     this.renderedSkillActivationIds.clear();
     this.renderedMcpServerStatusKeys.clear();
     this.stopAllMcpServerStatusSpinners();
+    this.host.setAppState({ subagentUsage: {} });
   }
 
   startSubscription(): void {
@@ -910,6 +923,7 @@ export class SessionEventHandler {
   }
 
   private handleSubagentCompleted(event: SubagentCompletedEvent): void {
+    this.recordSubagentUsage(event.subagentId, undefined, event.usage);
     const { streamingUI } = this.host;
     const backgroundMeta = this.backgroundAgentMetadata.get(event.subagentId);
     if (backgroundMeta !== undefined) {
@@ -938,6 +952,7 @@ export class SessionEventHandler {
   }
 
   private handleSubagentFailed(event: SubagentFailedEvent): void {
+    this.recordSubagentUsage(event.subagentId, undefined, event.usage);
     const { streamingUI } = this.host;
     const backgroundMeta = this.backgroundAgentMetadata.get(event.subagentId);
     if (backgroundMeta !== undefined) {
@@ -968,6 +983,22 @@ export class SessionEventHandler {
     if (tc === undefined) return;
     tc.onSubagentFailed({ error: event.error });
     streamingUI.removeToolComponentIfInactive(event.parentToolCallId);
+  }
+
+  private recordSubagentUsage(
+    subagentId: string,
+    subagentName: string | undefined,
+    usage: TokenUsage | undefined,
+  ): void {
+    if (usage === undefined) return;
+    const info = this.subagentInfo.get(subagentId);
+    const name = info?.name ?? subagentName ?? subagentId;
+    const current = this.host.state.appState.subagentUsage[name];
+    const next: SubagentUsageMap = {
+      ...this.host.state.appState.subagentUsage,
+      [name]: current === undefined ? usage : addTokenUsage(current, usage),
+    };
+    this.host.setAppState({ subagentUsage: next });
   }
 
   private createStandaloneSubagentToolCall(event: SubagentSpawnedEvent) {
