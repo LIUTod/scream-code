@@ -96,13 +96,38 @@ export function createTUIState(options: ScreamTUIOptions): TUIState {
   // exceptions become uncaughtException and can kill the process or
   // corrupt the terminal state.  Monkey-patch doRender with a try-catch
   // so a single bad component render doesn't take down the whole TUI.
+  //
+  // When pi-tui throws (typically "Rendered line N exceeds terminal
+  // width"), it has already called this.stop() internally — `stopped`
+  // is now true and previousLines/previousViewportTop are left
+  // inconsistent. If we only swallow the error, every subsequent
+  // requestRender() hits `if (stopped) return` and the terminal stays
+  // frozen at whatever partial state the failed frame left it in —
+  // which on Windows ConPTY / Ubuntu gnome looks exactly like "content
+  // jumped to the top and stopped redrawing". Force a clean fullRender
+  // on the next tick so pi-tui resets its internal state and re-emits
+  // the viewport from scratch.
   const uiAny = ui as unknown as Record<string, unknown>;
   const originalDoRender = (uiAny['doRender'] as () => void).bind(ui);
+  let recovering = false;
   uiAny['doRender'] = (): void => {
     try {
       originalDoRender();
     } catch (error) {
       logRenderError(error);
+      if (!recovering) {
+        recovering = true;
+        // requestRender(true) resets previousLines=[], previousWidth=-1,
+        // previousHeight=-1, previousViewportTop=0 — next doRender takes
+        // the heightChanged branch and does a clean fullRender(false)
+        // instead of leaving the viewport pinned to row 0.
+        try {
+          (ui.requestRender as (force?: boolean) => void)(true);
+        } catch {
+          // If even the recovery throws, give up — don't recurse.
+        }
+        queueMicrotask(() => { recovering = false; });
+      }
     }
   };
 

@@ -284,6 +284,11 @@ export class FooterComponent implements Component {
       this.gitCache = createGitStatusCache(state.workDir, { onChange: this.onGitStatusChange });
     }
     this.state = state;
+    // Shimmer is a 30fps decorative timer. While streaming, every frame is
+    // a fullRender(true) risk in pi-tui (any spurious diff above the
+    // viewport triggers `\x1b[2J\x1b[H` and snaps content to the top on
+    // ConPTY / gnome). Restrict shimmer to the thinking phase only —
+    // waiting/composing/tool have their own activity indicators already.
     const isThinking = state.streamingPhase === 'thinking';
     if (isThinking && !wasThinking) {
       this.#startShimmer();

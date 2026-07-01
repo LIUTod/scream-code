@@ -341,6 +341,18 @@ export class InputController {
     this.#stopBreathing();
   }
 
+  /**
+   * Stop the editor border breathing animation while streaming. Called
+   * when streamingPhase transitions away from 'idle'. The 25fps timer
+   * is decorative; while streaming it does nothing but feed pi-tui
+   * extra requestRender() frames, each of which is a fullRender(true)
+   * risk on ConPTY/gnome. Breathing resumes via updateEditorBorderHighlight
+   * when streamingPhase returns to 'idle' and the editor is empty.
+   */
+  stopBreathingForStreaming(): void {
+    this.#stopBreathing();
+  }
+
   // ── Breathing animation ────────────────────────────────────────────
 
   #permanentlyStopBreathing(): void {

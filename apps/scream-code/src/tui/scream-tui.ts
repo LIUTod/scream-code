@@ -628,8 +628,14 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
     // Stop the welcome breathing animation once the first message is sent —
     // the panel scrolls off-screen but the 40 ms timer keeps firing
     // requestRender, causing flicker and broken scroll.
+    // Also stop the editor border breathing: while streaming the editor is
+    // empty (user pressed enter) so updateEditorBorderHighlight would
+    // otherwise keep the 25fps timer alive, feeding pi-tui extra frames
+    // that each risk a fullRender(true) → viewport-snap-to-top on
+    // Windows ConPTY and Ubuntu gnome-terminal.
     if ('streamingPhase' in patch && patch.streamingPhase !== 'idle') {
       this.transcriptController.stopWelcomeBreathing();
+      this.inputController.stopBreathingForStreaming();
     }
     this.state.footer.setState(this.state.appState);
     this.lifecycleController.updateActivityPane();
