@@ -1,6 +1,6 @@
 import type { Session } from '@scream-code/scream-code-sdk';
 
-import { ClipboardMediaError, readClipboardMedia } from '#/utils/clipboard/clipboard-image';
+import { ClipboardMediaError, readClipboardMedia, readImageFromPath } from '#/utils/clipboard/clipboard-image';
 import { parseImageMeta } from '#/utils/image/image-mime';
 import { editInExternalEditor, resolveEditorCommand } from '#/utils/process/external-editor';
 
@@ -189,6 +189,17 @@ export class EditorKeyboardController {
     };
 
     editor.onPasteImage = async () => this.handleClipboardImagePaste();
+    editor.onPasteImagePath = async (path) => this.handleImagePathPaste(path);
+  }
+
+  private async handleImagePathPaste(path: string): Promise<void> {
+    const media = readImageFromPath(path);
+    if (media === null) return;
+    const meta = parseImageMeta(media.bytes);
+    if (meta === null) return;
+    const attachment = this.imageStore.addImage(media.bytes, meta.mime, meta.width, meta.height);
+    this.host.state.editor.insertTextAtCursor?.(`${attachment.placeholder} `);
+    this.host.state.ui.requestRender();
   }
 
   clearPendingExit(): void {

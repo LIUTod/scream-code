@@ -125,7 +125,7 @@ describe('ChoicePickerComponent', () => {
     picker.handleInput('\u001B[C');
     picker.handleInput('\r');
 
-    expect(onSelect).toHaveBeenCalledWith({ alias: 'scream', thinkingLevel: 'off' });
+    expect(onSelect).toHaveBeenCalledWith({ alias: 'scream', thinkingLevel: 'off', imageEnabled: false });
   });
 
   it('forces always-thinking models on and unsupported models off', () => {
@@ -157,13 +157,13 @@ describe('ChoicePickerComponent', () => {
     expect(picker.render(120).map(strip)).toContain('  [ low ]  medium  high');
     picker.handleInput('\u001B[C');
     picker.handleInput('\r');
-    expect(onSelect).toHaveBeenLastCalledWith({ alias: 'always', thinkingLevel: 'medium' });
+    expect(onSelect).toHaveBeenLastCalledWith({ alias: 'always', thinkingLevel: 'medium', imageEnabled: false });
 
     picker.handleInput('\u001B[B');
     expect(picker.render(120).map(strip)).toContain('  [ off ] unsupported');
     picker.handleInput('\u001B[D');
     picker.handleInput('\r');
-    expect(onSelect).toHaveBeenLastCalledWith({ alias: 'plain', thinkingLevel: 'off' });
+    expect(onSelect).toHaveBeenLastCalledWith({ alias: 'plain', thinkingLevel: 'off', imageEnabled: false });
   });
 
   it('treats adaptiveThinking models as thinking-capable without a thinking capability', () => {
@@ -187,12 +187,60 @@ describe('ChoicePickerComponent', () => {
     // adaptiveThinking makes the alias togglable (not 'unsupported'): the current
     // thinking state is preserved on select instead of being forced off.
     picker.handleInput('\r');
-    expect(onSelect).toHaveBeenLastCalledWith({ alias: 'okapi', thinkingLevel: 'high' });
+    expect(onSelect).toHaveBeenLastCalledWith({ alias: 'okapi', thinkingLevel: 'high', imageEnabled: false });
 
     // Right (ESC[C) cycles to the next thinking level, proving it is an interactive control.
     picker.handleInput('\u001B[C');
     picker.handleInput('\r');
-    expect(onSelect).toHaveBeenLastCalledWith({ alias: 'okapi', thinkingLevel: 'off' });
+    expect(onSelect).toHaveBeenLastCalledWith({ alias: 'okapi', thinkingLevel: 'off', imageEnabled: false });
+  });
+
+  it('toggles image capability with Space and locks catalog-declared vision on', () => {
+    const onSelect = vi.fn();
+    const picker = new ModelSelectorComponent({
+      models: {
+        vision: {
+          provider: 'managed:scream-code',
+          model: 'scream-vision',
+          maxContextSize: 200_000,
+          displayName: 'Scream Vision',
+          capabilities: ['image_in'],
+        },
+        blind: {
+          provider: 'managed:scream-code',
+          model: 'scream-blind',
+          maxContextSize: 200_000,
+          displayName: 'Scream Blind',
+          capabilities: ['tool_use'],
+        },
+      },
+      currentValue: 'vision',
+      currentThinkingLevel: 'off',
+      colors: darkColors,
+      onSelect,
+      onCancel: vi.fn(),
+    });
+
+    // vision has catalog image_in → "默认开启", Space cannot turn it off.
+    expect(picker.render(120).map(strip).join('\n')).toContain('默认开启');
+    picker.handleInput(' ');
+    picker.handleInput('\r');
+    expect(onSelect).toHaveBeenLastCalledWith({ alias: 'vision', thinkingLevel: 'off', imageEnabled: true });
+
+    // Moving to blind resets the draft to blind's actual state (no image_in).
+    picker.handleInput('[B');
+    picker.handleInput('\r');
+    expect(onSelect).toHaveBeenLastCalledWith({ alias: 'blind', thinkingLevel: 'off', imageEnabled: false });
+
+    // Space force-enables image on blind (DIY override scenario).
+    picker.handleInput(' ');
+    picker.handleInput('\r');
+    expect(onSelect).toHaveBeenLastCalledWith({ alias: 'blind', thinkingLevel: 'off', imageEnabled: true });
+
+    // Space again turns it back off.
+    picker.handleInput(' ');
+    picker.handleInput('\r');
+    expect(onSelect).toHaveBeenLastCalledWith({ alias: 'blind', thinkingLevel: 'off', imageEnabled: false });
   });
 
   it('keeps the thinking draft when moving across models', () => {
@@ -227,7 +275,7 @@ describe('ChoicePickerComponent', () => {
     picker.handleInput('\u001B[B');
     picker.handleInput('\r');
 
-    expect(onSelect).toHaveBeenCalledWith({ alias: 'thinking', thinkingLevel: 'high' });
+    expect(onSelect).toHaveBeenCalledWith({ alias: 'thinking', thinkingLevel: 'high', imageEnabled: false });
   });
 });
 

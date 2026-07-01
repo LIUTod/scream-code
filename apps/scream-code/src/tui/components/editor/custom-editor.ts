@@ -10,17 +10,90 @@ import type { ColorPalette } from '#/tui/theme/colors';
 import { createEditorTheme } from '#/tui/theme/pi-tui-theme';
 
 // oxlint-disable-next-line no-control-regex -- ESC (\x1b) is required to match ANSI SGR escape sequences
-const ANSI_SGR = /\u001B\[[0-9;]*m/g;
+const ANSI_SGR = /\[[0-9;]*m/g;
 
 const PASTE_MARKER_RE = /\[paste #(\d+)(?: (?:\+\d+ lines|\d+ chars))?\]/g;
-const BRACKET_PASTE_START = '\u001B[200~';
-const BRACKET_PASTE_END = '\u001B[201~';
+const BRACKET_PASTE_START = '[200~';
+const BRACKET_PASTE_END = '[201~';
+
+const BRACKETED_IMAGE_PATH_REGEX = /\.(?:png|jpe?g|gif|webp)$/i;
+const BRACKETED_IMAGE_PATH_BOUNDARY_REGEX = /\.(?:png|jpe?g|gif|webp)(?=$|["']?\s)/gi;
+const SHELL_ESCAPED_PATH_CHAR_REGEX = /\\([\\\s'"()[\]{}&;<>|?*!$`])/g;
+
+function isPastedPathSeparator(char: string | undefined): boolean {
+  return char === undefined || char === ' ' || char === '\t' || char === '\r' || char === '\n';
+}
+
+function imagePathBoundaryEnd(payload: string, segmentStart: number, extensionEnd: number): number | undefined {
+  const quote = payload[segmentStart];
+  const afterExtension = payload[extensionEnd];
+  if (quote === '"' || quote === "'") {
+    return afterExtension === quote && isPastedPathSeparator(payload[extensionEnd + 1])
+      ? extensionEnd + 1
+      : undefined;
+  }
+  if (isPastedPathSeparator(afterExtension)) return extensionEnd;
+  return undefined;
+}
+
+function normalizePastedImagePath(path: string): string {
+  const trimmed = path.trim();
+  const first = trimmed[0];
+  const last = trimmed[trimmed.length - 1];
+  const unquoted =
+    trimmed.length > 1 && (first === '"' || first === "'") && last === first ? trimmed.slice(1, -1) : trimmed;
+  return unquoted.replace(SHELL_ESCAPED_PATH_CHAR_REGEX, '$1');
+}
+
+/**
+ * If a bracketed paste contains only image file paths (one or more,
+ * space/quote separated, all with image extensions), return them. Returns
+ * `undefined` when the paste is mixed text + paths or contains non-image
+ * content — in that case the caller should fall through to normal text
+ * paste. Mirrors oh-my-pi's approach so pasting a Finder-copied image
+ * file becomes a multimodal image attachment instead of a text path the
+ * agent would have to Read manually.
+ */
+function extractBracketedImagePastePaths(data: string): string[] | undefined {
+  if (!data.includes(BRACKET_PASTE_START)) return undefined;
+  const startIndex = data.indexOf(BRACKET_PASTE_START);
+  const endIndex = data.indexOf(BRACKET_PASTE_END, startIndex + BRACKET_PASTE_START.length);
+  if (endIndex === -1) return undefined;
+  const pasted = data.slice(startIndex + BRACKET_PASTE_START.length, endIndex).trim();
+  if (pasted.length === 0) return undefined;
+
+  const paths: string[] = [];
+  let segmentStart = 0;
+  BRACKETED_IMAGE_PATH_BOUNDARY_REGEX.lastIndex = 0;
+  for (
+    let match = BRACKETED_IMAGE_PATH_BOUNDARY_REGEX.exec(pasted);
+    match !== null;
+    match = BRACKETED_IMAGE_PATH_BOUNDARY_REGEX.exec(pasted)
+  ) {
+    const extensionEnd = match.index + match[0].length;
+    const boundaryEnd = imagePathBoundaryEnd(pasted, segmentStart, extensionEnd);
+    if (boundaryEnd === undefined) continue;
+
+    const path = normalizePastedImagePath(pasted.slice(segmentStart, boundaryEnd));
+    if (path.length === 0 || !BRACKETED_IMAGE_PATH_REGEX.test(path)) return undefined;
+    paths.push(path);
+
+    segmentStart = boundaryEnd;
+    while (segmentStart < pasted.length && isPastedPathSeparator(pasted[segmentStart])) {
+      segmentStart += 1;
+    }
+    BRACKETED_IMAGE_PATH_BOUNDARY_REGEX.lastIndex = segmentStart;
+  }
+
+  if (paths.length === 0 || segmentStart !== pasted.length) return undefined;
+  return paths;
+}
 
 // Kitty keyboard protocol CSI-u sequence: ESC [ keycode ; modifier[:eventType] u.
 // We intentionally match only the simple two-field form — enough to rewrite
 // `ctrl+<LETTER>` with caps_lock into `ctrl+<letter>` without caps_lock.
 // oxlint-disable-next-line no-control-regex -- ESC (\x1b) is required to match CSI
-const KITTY_CSI_U = /^\u001B\[(\d+);(\d+)((?::\d+)*)u$/;
+const KITTY_CSI_U = /^\[(\d+);(\d+)((?::\d+)*)u$/;
 // Kitty modifier bit layout: shift=1, alt=2, ctrl=4, super=8, hyper=16,
 // meta=32, caps_lock=64, num_lock=128. Reported value is `mask + 1`.
 const CAPS_LOCK_BIT = 64;
@@ -61,7 +134,7 @@ export function normalizeCapsLockedCtrl(data: string): string {
   if (codepoint < 65 || codepoint > 90) return data;
   const loweredCodepoint = codepoint + 32;
   const strippedModifier = (modifier & ~CAPS_LOCK_BIT) + 1;
-  return `\u001B[${String(loweredCodepoint)};${String(strippedModifier)}${tail}u`;
+  return `[${String(loweredCodepoint)};${String(strippedModifier)}${tail}u`;
 }
 
 /** Convert a visible-char index (ANSI-stripped) back to an index into the raw ANSI-bearing string. */
@@ -87,7 +160,7 @@ function stripSgr(s: string): string {
 }
 
 function getNewlineInput(data: string): string | undefined {
-  if (data === '\n' || data === '\u001B\r' || data === '\u001B[13;2~') return data;
+  if (data === '\n' || data === '\r' || data === '[13;2~') return data;
   if (matchesKey(data, Key.ctrl('j'))) return '\n';
   return undefined;
 }
@@ -120,6 +193,15 @@ export class CustomEditor extends Editor {
    * the next keystroke.
    */
   public onPasteImage?: () => Promise<boolean>;
+  /**
+   * Called when a bracketed paste contains only image file paths (e.g.
+   * the user copied an image file in Finder and pasted — the terminal
+   * translates the file URL into a text path). The host loads each path
+   * from disk and registers it as an image attachment, so the paste
+   * becomes a multimodal image input instead of a text path the agent
+   * would have to Read manually.
+   */
+  public onPasteImagePath?: (path: string) => void | Promise<void>;
   /** Fires exactly once when the user first types anything into the editor. */
   public onFirstInput?: () => void;
   private firstInputFired = false;
@@ -248,6 +330,26 @@ export class CustomEditor extends Editor {
     // If a bracketed paste arrives while the cursor sits on an existing
     // paste marker, expand that marker instead of pasting new content.
     if (normalized.includes(BRACKET_PASTE_START) && this.expandPasteMarkerAtCursor()) {
+      if (!normalized.includes(BRACKET_PASTE_END)) {
+        this.consumingPaste = true;
+      }
+      return;
+    }
+
+    // Pasting a copied image file (e.g. from Finder): the terminal
+    // translates the file URL into a text path. When the bracketed paste
+    // contains only image file paths, load each from disk as an image
+    // attachment instead of inserting the path as text — so the paste
+    // becomes a multimodal image input the model sees directly, not a
+    // text path the agent would have to Read manually.
+    const pastedImagePaths = extractBracketedImagePastePaths(normalized);
+    if (pastedImagePaths !== undefined && this.onPasteImagePath !== undefined) {
+      const handler = this.onPasteImagePath;
+      void (async () => {
+        for (const path of pastedImagePaths) {
+          await handler(path);
+        }
+      })();
       if (!normalized.includes(BRACKET_PASTE_END)) {
         this.consumingPaste = true;
       }

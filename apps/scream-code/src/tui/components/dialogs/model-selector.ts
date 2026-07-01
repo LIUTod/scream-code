@@ -26,6 +26,7 @@ interface ModelChoice {
 export interface ModelSelection {
   readonly alias: string;
   readonly thinkingLevel: ThinkingEffort;
+  readonly imageEnabled: boolean;
 }
 
 const DEFAULT_THINKING_LEVELS: readonly ThinkingEffort[] = ['off', 'low', 'medium', 'high'];
@@ -102,11 +103,17 @@ function effectiveThinkingLevel(
   return levels[0] ?? 'off';
 }
 
+function modelHasImageIn(model: ModelAlias): boolean {
+  return model.capabilities?.includes('image_in') === true;
+}
+
 export class ModelSelectorComponent extends Container implements Focusable {
   focused = false;
   private readonly opts: ModelSelectorOptions;
   private readonly list: SearchableList<ModelChoice>;
   private thinkingDraft: ThinkingEffort;
+  private imageDraft: boolean;
+  private lastSelectedAlias: string | undefined;
 
   constructor(opts: ModelSelectorOptions) {
     super();
@@ -126,6 +133,9 @@ export class ModelSelectorComponent extends Container implements Focusable {
       initialChoice !== undefined
         ? effectiveThinkingLevel(initialChoice.model, opts.currentThinkingLevel)
         : opts.currentThinkingLevel;
+    this.imageDraft =
+      initialChoice !== undefined ? modelHasImageIn(initialChoice.model) : false;
+    this.lastSelectedAlias = initialChoice?.alias;
   }
 
   handleInput(data: string): void {
@@ -135,6 +145,13 @@ export class ModelSelectorComponent extends Container implements Focusable {
       return;
     }
     const selected = this.list.selected();
+    // When the user navigates to a different model, reset imageDraft to that
+    // model's actual declared state so the display stays honest. thinkingDraft
+    // is intentionally sticky (a preference); image capability is model-specific.
+    if (selected !== undefined && selected.alias !== this.lastSelectedAlias) {
+      this.imageDraft = modelHasImageIn(selected.model);
+      this.lastSelectedAlias = selected.alias;
+    }
     // Left/Right cycle thinking level for the selected model. Paging stays on
     // PgUp/PgDn so horizontal arrows are free for the thinking control.
     if (selected !== undefined && thinkingAvailability(selected.model) !== 'unsupported') {
@@ -151,11 +168,23 @@ export class ModelSelectorComponent extends Container implements Focusable {
         return;
       }
     }
+    // Space toggles image capability for the selected model. Catalog-declared
+    // image_in is locked on (shown as "默认开启") and cannot be turned off —
+    // only DIY/catalog-off models can be toggled to force-enable vision.
+    if (
+      selected !== undefined &&
+      !modelHasImageIn(selected.model) &&
+      matchesKey(data, Key.space)
+    ) {
+      this.imageDraft = !this.imageDraft;
+      return;
+    }
     if (matchesKey(data, Key.enter)) {
       if (selected === undefined) return;
       this.opts.onSelect({
         alias: selected.alias,
         thinkingLevel: effectiveThinkingLevel(selected.model, this.thinkingDraft),
+        imageEnabled: this.imageDraft,
       });
       return;
     }
@@ -168,7 +197,7 @@ export class ModelSelectorComponent extends Container implements Focusable {
     const view = this.list.view();
     const choices = view.items;
 
-    const navParts = ['↑↓ 模型', '←→ 思考等级'];
+    const navParts = ['↑↓ 模型', '←→ 思考等级', 'Space(空格) vision识图'];
     if (view.page.pageCount > 1) navParts.push('PgUp/PgDn 翻页');
     navParts.push('Enter 应用', 'Esc 取消');
 
@@ -208,6 +237,11 @@ export class ModelSelectorComponent extends Container implements Focusable {
       lines.push(this.renderThinkingControl(selected.model));
     }
     lines.push('');
+    lines.push(chalk.hex(colors.textMuted)(' Vision 识图'));
+    if (selected !== undefined) {
+      lines.push(this.renderImageControl(selected.model));
+    }
+    lines.push('');
     if (view.page.pageCount > 1) {
       lines.push(
         chalk.hex(colors.textMuted)(
@@ -237,5 +271,20 @@ export class ModelSelectorComponent extends Container implements Focusable {
       return `${line} ${chalk.hex(colors.textMuted)('unsupported')}`;
     }
     return line;
+  }
+
+  private renderImageControl(model: ModelAlias): string {
+    const { colors } = this.opts;
+    // Catalog-declared image_in is always on and cannot be turned off.
+    if (modelHasImageIn(model)) {
+      return `  ${chalk.hex(colors.success).bold('✓ 默认开启')}${chalk.hex(colors.textMuted)(' (catalog)')}`;
+    }
+    const stateLabel = this.imageDraft
+      ? chalk.hex(colors.success).bold('✓ 开启')
+      : chalk.hex(colors.textDim)('✗ 关闭');
+    const note = this.imageDraft
+      ? chalk.hex(colors.textMuted)(' (手动开启)')
+      : '';
+    return `  ${stateLabel}${note}`;
   }
 }

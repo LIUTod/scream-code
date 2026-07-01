@@ -211,6 +211,16 @@ function readImagePath(path: string): ClipboardImage | null {
   return { kind: 'image', bytes: new Uint8Array(bytes), mimeType: meta.mime };
 }
 
+/**
+ * Read an image file from disk into a ClipboardImage. Used when the user
+ * pastes a file URL that the terminal has translated into a text path —
+ * the path points at a real image file, so we load it directly rather
+ * than going through the clipboard native binding.
+ */
+export function readImageFromPath(path: string): ClipboardImage | null {
+  return readImagePath(path);
+}
+
 function readVideoPath(path: string): ClipboardVideo | null {
   const mimeType = videoMimeFromPath(path);
   if (mimeType === null) return null;

@@ -388,9 +388,9 @@ export function showModelPicker(host: SlashCommandHost, selectedValue: string = 
       currentThinkingLevel: host.state.appState.thinkingLevel,
       colors: host.state.theme.colors,
       searchable: true,
-      onSelect: ({ alias, thinkingLevel }) => {
+      onSelect: ({ alias, thinkingLevel, imageEnabled }) => {
         host.restoreEditor();
-        void performModelSwitch(host, alias, thinkingLevel);
+        void performModelSwitch(host, alias, thinkingLevel, imageEnabled);
       },
       onCancel: () => {
         host.restoreEditor();
@@ -399,7 +399,7 @@ export function showModelPicker(host: SlashCommandHost, selectedValue: string = 
   );
 }
 
-async function performModelSwitch(host: SlashCommandHost, alias: string, thinkingLevel: ThinkingEffort): Promise<void> {
+async function performModelSwitch(host: SlashCommandHost, alias: string, thinkingLevel: ThinkingEffort, imageEnabled: boolean): Promise<void> {
   if (isBusy(host.state.appState)) {
     host.showError('Cannot switch models while streaming — press Esc or Ctrl-C first.');
     return;
@@ -407,7 +407,10 @@ async function performModelSwitch(host: SlashCommandHost, alias: string, thinkin
 
   const prevModel = host.state.appState.model;
   const prevThinkingLevel = host.state.appState.thinkingLevel;
-  const runtimeChanged = alias !== prevModel || thinkingLevel !== prevThinkingLevel;
+  const prevImageEnabled =
+    host.state.appState.availableModels[alias]?.capabilities?.includes('image_in') === true;
+  const runtimeChanged =
+    alias !== prevModel || thinkingLevel !== prevThinkingLevel || imageEnabled !== prevImageEnabled;
 
   // Storm Breaker guard: refuse to switch to a model whose context window is
   // smaller than the session's current token count. Switching would either
@@ -447,11 +450,26 @@ async function performModelSwitch(host: SlashCommandHost, alias: string, thinkin
   let persisted = false;
 
   try {
-    persisted = await persistModelSelection(host, alias, thinkingLevel);
+    persisted = await persistModelSelection(host, alias, thinkingLevel, imageEnabled);
   } catch (error) {
     const msg = formatErrorMessage(error);
     host.showError(`Switched to ${alias}, but failed to save default: ${msg}`);
     return;
+  }
+
+  // Mirror the persisted capabilities change into the in-memory availableModels
+  // so supportsCurrentModelCapability sees the new state without a restart.
+  if (persisted) {
+    const prevAlias = host.state.appState.availableModels[alias];
+    if (prevAlias !== undefined) {
+      const nextCaps = computeCapabilities(prevAlias.capabilities, imageEnabled);
+      host.setAppState({
+        availableModels: {
+          ...host.state.appState.availableModels,
+          [alias]: { ...prevAlias, capabilities: nextCaps },
+        },
+      });
+    }
   }
 
   const status = runtimeChanged
@@ -462,22 +480,59 @@ async function performModelSwitch(host: SlashCommandHost, alias: string, thinkin
   host.showStatus(status, host.state.theme.colors.success);
 }
 
-async function persistModelSelection(host: SlashCommandHost, alias: string, thinkingLevel: ThinkingEffort): Promise<boolean> {
+async function persistModelSelection(host: SlashCommandHost, alias: string, thinkingLevel: ThinkingEffort, imageEnabled: boolean): Promise<boolean> {
   const config = await host.harness.getConfig({ reload: true });
   const effectiveThinking = thinkingLevel !== 'off';
   const existingEffort = config.thinking?.effort;
   const newEffort = effectiveThinking ? thinkingLevel : existingEffort;
+
+  // Compute the new capabilities array for the selected alias. We add/remove
+  // only 'image_in'; other declared capabilities (thinking, tool_use, etc.)
+  // are preserved as-is. mergeConfigPatch replaces arrays wholesale, so we
+  // must construct the full array.
+  const aliasCfg = config.models?.[alias];
+  const prevCaps = aliasCfg?.capabilities;
+  const nextCaps = computeCapabilities(prevCaps, imageEnabled);
+  // We only toggle 'image_in', so the change is real iff its presence flipped.
+  // Comparing array references would always differ (computeCapabilities returns
+  // a new array even when content is unchanged), causing false-positive writes.
+  const hadImageIn = prevCaps?.includes('image_in') === true;
+  const capsChanged = hadImageIn !== imageEnabled;
+
   const unchanged =
     config.defaultModel === alias &&
     config.defaultThinking === effectiveThinking &&
-    existingEffort === newEffort;
+    existingEffort === newEffort &&
+    !capsChanged;
   if (unchanged) return false;
+
   await host.harness.setConfig({
     defaultModel: alias,
     defaultThinking: effectiveThinking,
     thinking: { ...config.thinking, mode: effectiveThinking ? 'on' : 'off', effort: newEffort },
+    models: capsChanged && aliasCfg !== undefined
+      ? { [alias]: { ...aliasCfg, capabilities: nextCaps } }
+      : undefined,
   });
   return true;
+}
+
+/**
+ * Returns the new capabilities array after toggling 'image_in'. Returns
+ * `undefined` when the result would be empty, so legacy aliases without a
+ * capabilities declaration stay clean (no `capabilities = []` in toml).
+ */
+function computeCapabilities(
+  prev: readonly string[] | undefined,
+  imageEnabled: boolean,
+): string[] | undefined {
+  if (imageEnabled) {
+    if (prev === undefined) return ['image_in'];
+    return prev.includes('image_in') ? [...prev] : [...prev, 'image_in'];
+  }
+  if (prev === undefined) return undefined;
+  const filtered = prev.filter((c) => c !== 'image_in');
+  return filtered.length === 0 ? undefined : filtered;
 }
 
 function showThemePicker(host: SlashCommandHost): void {
