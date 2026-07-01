@@ -50,7 +50,7 @@ export const TuiConfigFileSchema = z.object({
   fusionPlan: z
     .object({
       timeoutSeconds: z.number().int().min(30).max(3600).optional(),
-      workerCount: z.number().int().min(1).max(8).optional(),
+      workerCount: z.number().int().min(1).max(3).optional(),
     })
     .optional(),
   subagentModels: z.record(z.string(), z.string()).optional(),
@@ -63,7 +63,7 @@ export const TuiConfigSchema = z.object({
   like: TuiLikePreferencesSchema,
   fusionPlan: z.object({
     timeoutSeconds: z.number().int().min(30).max(3600),
-    workerCount: z.number().int().min(1).max(8),
+    workerCount: z.number().int().min(1).max(3),
   }),
   subagentModels: z.record(z.string(), z.string()),
 });
@@ -207,7 +207,7 @@ other = "${other}"
 
 [fusionPlan]
 timeoutSeconds = ${config.fusionPlan.timeoutSeconds} # 30..3600, default 600
-workerCount = ${config.fusionPlan.workerCount} # 1..8, default 3${subagentModelsBlock}`;
+workerCount = ${config.fusionPlan.workerCount} # 1..3, default 3${subagentModelsBlock}`;
 }
 
 function renderSubagentModelsBlock(models: Record<string, string>): string {

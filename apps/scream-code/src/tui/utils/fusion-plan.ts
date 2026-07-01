@@ -99,6 +99,14 @@ export interface FusionPlanWorkerInput {
   readonly maxOutputBytes?: number;
   readonly screamBin?: string;
   readonly onStarted?: () => void;
+  /**
+   * When true, `task` is treated as the complete prompt and written to the
+   * prompt file verbatim — skipping `buildPlannerPrompt`. Used by the
+   * synthesis worker whose instructions are already fully assembled;
+   * wrapping them in "You are a planning specialist..." would conflict
+   * with the synthesis instructions.
+   */
+  readonly rawPrompt?: boolean;
 }
 
 export interface FusionPlanWorkerResult {
@@ -324,14 +332,17 @@ export function truncateUtf8(input: string, maxBytes: number): string {
 }
 async function runWorker(input: FusionPlanWorkerInput): Promise<FusionPlanWorkerResult> {
   const maxOutputBytes = input.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES;
+  const promptBody = input.rawPrompt
+    ? input.task
+    : buildPlannerPrompt({
+        task: input.task,
+        angle: input.angle,
+        maxOutputBytes,
+      });
   const promptFile = await writePromptFile(
     input.promptDir,
     input.index,
-    buildPlannerPrompt({
-      task: input.task,
-      angle: input.angle,
-      maxOutputBytes,
-    }),
+    promptBody,
   );
   const result: FusionPlanWorkerResult = {
     ok: false,
@@ -461,6 +472,7 @@ async function runSynthesisWorker(
     timeoutMs: input.timeoutMs,
     maxOutputBytes,
     screamBin: input.screamBin,
+    rawPrompt: true,
   });
   return result.ok ? result.output.trim() : `(synthesis failed: ${result.stderr || 'no output'})`;
 }
@@ -482,7 +494,7 @@ export async function runFusionPlan(input: FusionPlanOptions): Promise<FusionPla
     return { ok: false, plan: '', workerResults: [] };
   }
 
-  const workerCount = Math.max(1, Math.min(8, input.workerCount ?? DEFAULT_WORKER_COUNT));
+  const workerCount = Math.max(1, Math.min(WORKER_ANGLES.length, input.workerCount ?? DEFAULT_WORKER_COUNT));
   const maxOutputBytes = input.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES;
   const timeoutMs = input.timeoutMs ?? resolveDefaultTimeoutMs();
   const promptDir = await createPromptDir();

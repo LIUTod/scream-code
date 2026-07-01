@@ -143,7 +143,7 @@ describe('runFusionPlan worker orchestration', () => {
   it('spawns scream with stream-json output and parses assistant content', async () => {
     mocks.spawn.mockImplementation((cmd: string, args: readonly string[]) => {
       const promptArg = args[args.indexOf('--prompt') + 1];
-      const isSynthesis = promptArg?.includes('Synthesize the best plan');
+      const isSynthesis = promptArg?.includes('synthesize them into a single');
       const stdoutLines = isSynthesis
         ? [JSON.stringify({ role: 'assistant', content: 'Final synthesized plan.' })]
         : [JSON.stringify({ role: 'assistant', content: 'Worker plan output.' })];
@@ -195,7 +195,7 @@ describe('runFusionPlan worker orchestration', () => {
   it('emits progress events as workers start and complete', async () => {
     mocks.spawn.mockImplementation((cmd: string, args: readonly string[]) => {
       const promptArg = args[args.indexOf('--prompt') + 1];
-      const isSynthesis = promptArg?.includes('Synthesize the best plan');
+      const isSynthesis = promptArg?.includes('synthesize them into a single');
       const stdoutLines = isSynthesis
         ? [JSON.stringify({ role: 'assistant', content: 'Final synthesized plan.' })]
         : [JSON.stringify({ role: 'assistant', content: 'Worker plan output.' })];
