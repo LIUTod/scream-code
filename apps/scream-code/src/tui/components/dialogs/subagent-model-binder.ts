@@ -22,6 +22,8 @@ import type { SlashCommandHost } from '#/tui/commands/dispatch';
 
 const FOLLOW_MAIN = '__follow_main__';
 
+let applying = false;
+
 const SUBAGENT_PROFILES: readonly {
   readonly name: string;
   readonly description: string;
@@ -95,7 +97,11 @@ function mountModelPicker(host: SlashCommandHost, profileName: string): void {
       colors: host.state.theme.colors,
       searchable: true,
       onSelect: (value) => {
-        void applyBinding(host, profileName, value);
+        if (applying) return;
+        applying = true;
+        void applyBinding(host, profileName, value).finally(() => {
+          applying = false;
+        });
       },
       onCancel: () => {
         mountProfileList(host);
@@ -126,8 +132,8 @@ async function applyBinding(
         ? '跟随主模型'
         : modelDisplayName(value, host.state.appState.availableModels[value]);
     host.showStatus(`${profileName} → ${label}`, host.state.theme.colors.success);
+    mountProfileList(host);
   } catch (error) {
     host.showError(`保存失败：${error instanceof Error ? error.message : String(error)}`);
   }
-  mountProfileList(host);
 }

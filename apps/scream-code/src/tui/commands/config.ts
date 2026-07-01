@@ -298,6 +298,10 @@ export async function handleThemeCommand(host: SlashCommandHost, args: string): 
 export function handleModelCommand(host: SlashCommandHost, args: string): void {
   const trimmed = args.trim();
   if (trimmed === 'diy') {
+    if (isBusy(host.state.appState)) {
+      host.showError('Cannot rebind subagents while streaming — press Esc or Ctrl-C first.');
+      return;
+    }
     showSubagentModelBinder(host);
     return;
   }
