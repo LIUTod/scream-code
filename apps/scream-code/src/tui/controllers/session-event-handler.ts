@@ -649,10 +649,12 @@ export class SessionEventHandler {
     if (event.permission !== undefined) {
       patch.permissionMode = event.permission;
     }
-    if (event.model !== undefined) patch.model = event.model;
-    if (event.thinkingLevel !== undefined) {
-      patch.thinkingLevel = event.thinkingLevel as import('@scream-code/scream-code-sdk').ThinkingEffort;
-    }
+    // model / thinkingLevel are intentionally NOT applied from status events.
+    // Subagent status updates carry the subagent's bound model, and any path
+    // that lets them through (race, new event type, SDK agentId quirk) would
+    // overwrite the main model display. The main model only changes via
+    // explicit user action (`/model` → performModelSwitch) or syncRuntimeState
+    // on session switch — both call setAppState directly.
     if (Object.keys(patch).length > 0) this.host.setAppState(patch);
   }
 
