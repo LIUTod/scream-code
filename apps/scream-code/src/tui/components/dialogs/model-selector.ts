@@ -26,7 +26,6 @@ interface ModelChoice {
 export interface ModelSelection {
   readonly alias: string;
   readonly thinkingLevel: ThinkingEffort;
-  readonly imageEnabled: boolean;
 }
 
 const DEFAULT_THINKING_LEVELS: readonly ThinkingEffort[] = ['off', 'low', 'medium', 'high'];
@@ -62,6 +61,12 @@ export interface ModelSelectorOptions {
   readonly pageSize?: number;
   readonly onSelect: (selection: ModelSelection) => void;
   readonly onCancel: () => void;
+  /**
+   * Fired immediately when the user cycles the thinking level with ←/→ for
+   * the selected model. Persistence is the host's responsibility; Enter is
+   * not required to save the change.
+   */
+  readonly onChangeThinking?: (alias: string, level: ThinkingEffort) => void;
 }
 
 function createModelChoices(models: Record<string, ModelAlias>): readonly ModelChoice[] {
@@ -107,13 +112,19 @@ function modelHasImageIn(model: ModelAlias): boolean {
   return model.capabilities?.includes('image_in') === true;
 }
 
+function modelHasVideoIn(model: ModelAlias): boolean {
+  return model.capabilities?.includes('video_in') === true;
+}
+
+function modelHasAudioIn(model: ModelAlias): boolean {
+  return model.capabilities?.includes('audio_in') === true;
+}
+
 export class ModelSelectorComponent extends Container implements Focusable {
   focused = false;
   private readonly opts: ModelSelectorOptions;
   private readonly list: SearchableList<ModelChoice>;
   private thinkingDraft: ThinkingEffort;
-  private imageDraft: boolean;
-  private lastSelectedAlias: string | undefined;
 
   constructor(opts: ModelSelectorOptions) {
     super();
@@ -133,9 +144,6 @@ export class ModelSelectorComponent extends Container implements Focusable {
       initialChoice !== undefined
         ? effectiveThinkingLevel(initialChoice.model, opts.currentThinkingLevel)
         : opts.currentThinkingLevel;
-    this.imageDraft =
-      initialChoice !== undefined ? modelHasImageIn(initialChoice.model) : false;
-    this.lastSelectedAlias = initialChoice?.alias;
   }
 
   handleInput(data: string): void {
@@ -145,46 +153,31 @@ export class ModelSelectorComponent extends Container implements Focusable {
       return;
     }
     const selected = this.list.selected();
-    // When the user navigates to a different model, reset imageDraft to that
-    // model's actual declared state so the display stays honest. thinkingDraft
-    // is intentionally sticky (a preference); image capability is model-specific.
-    if (selected !== undefined && selected.alias !== this.lastSelectedAlias) {
-      this.imageDraft = modelHasImageIn(selected.model);
-      this.lastSelectedAlias = selected.alias;
-    }
     // Left/Right cycle thinking level for the selected model. Paging stays on
-    // PgUp/PgDn so horizontal arrows are free for the thinking control.
+    // PgUp/PgDn so horizontal arrows are free for the thinking control. The
+    // change is persisted immediately via onChangeThinking so the user does
+    // not need to press Enter to save it.
     if (selected !== undefined && thinkingAvailability(selected.model) !== 'unsupported') {
       const levels = getThinkingLevels(selected.model);
       const idx = levels.indexOf(this.thinkingDraft);
       if (matchesKey(data, Key.left)) {
         const nextIdx = idx <= 0 ? levels.length - 1 : idx - 1;
         this.thinkingDraft = levels[nextIdx]!;
+        this.opts.onChangeThinking?.(selected.alias, this.thinkingDraft);
         return;
       }
       if (matchesKey(data, Key.right)) {
         const nextIdx = idx === -1 || idx >= levels.length - 1 ? 0 : idx + 1;
         this.thinkingDraft = levels[nextIdx]!;
+        this.opts.onChangeThinking?.(selected.alias, this.thinkingDraft);
         return;
       }
-    }
-    // Space toggles image capability for the selected model. Catalog-declared
-    // image_in is locked on (shown as "默认开启") and cannot be turned off —
-    // only DIY/catalog-off models can be toggled to force-enable vision.
-    if (
-      selected !== undefined &&
-      !modelHasImageIn(selected.model) &&
-      matchesKey(data, Key.space)
-    ) {
-      this.imageDraft = !this.imageDraft;
-      return;
     }
     if (matchesKey(data, Key.enter)) {
       if (selected === undefined) return;
       this.opts.onSelect({
         alias: selected.alias,
         thinkingLevel: effectiveThinkingLevel(selected.model, this.thinkingDraft),
-        imageEnabled: this.imageDraft,
       });
       return;
     }
@@ -197,9 +190,9 @@ export class ModelSelectorComponent extends Container implements Focusable {
     const view = this.list.view();
     const choices = view.items;
 
-    const navParts = ['↑↓ 模型', '←→ 思考等级', 'Space(空格) vision识图'];
+    const navParts = ['↑↓ 模型', '←→ 思考等级'];
     if (view.page.pageCount > 1) navParts.push('PgUp/PgDn 翻页');
-    navParts.push('Enter 应用', 'Esc 取消');
+    navParts.push('Enter 切换模型', 'Esc 取消');
 
     const titleSuffix =
       searchable && view.query.length === 0 ? chalk.hex(colors.textMuted)('  (输入搜索)') : '';
@@ -231,15 +224,17 @@ export class ModelSelectorComponent extends Container implements Focusable {
     }
 
     lines.push('');
-    lines.push(chalk.hex(colors.textMuted)(' Thinking'));
+    lines.push(chalk.hex(colors.textMuted)(' Thinking（全局设置）'));
     const selected = choices[view.selectedIndex];
     if (selected !== undefined) {
       lines.push(this.renderThinkingControl(selected.model));
     }
     lines.push('');
-    lines.push(chalk.hex(colors.textMuted)(' Vision 识图'));
+    lines.push(chalk.hex(colors.textMuted)(' 多模态能力'));
     if (selected !== undefined) {
       lines.push(this.renderImageControl(selected.model));
+      lines.push(this.renderVideoControl(selected.model));
+      lines.push(this.renderAudioControl(selected.model));
     }
     lines.push('');
     if (view.page.pageCount > 1) {
@@ -275,16 +270,27 @@ export class ModelSelectorComponent extends Container implements Focusable {
 
   private renderImageControl(model: ModelAlias): string {
     const { colors } = this.opts;
-    // Catalog-declared image_in is always on and cannot be turned off.
+    // Vision capability is read-only — it reflects whatever the catalog/config
+    // declares. Users cannot override it from the model selector.
     if (modelHasImageIn(model)) {
-      return `  ${chalk.hex(colors.success).bold('✓ 默认开启')}${chalk.hex(colors.textMuted)(' (catalog)')}`;
+      return `  ${chalk.hex(colors.textMuted)('识图')}: ${chalk.hex(colors.success).bold('✓ 支持')}`;
     }
-    const stateLabel = this.imageDraft
-      ? chalk.hex(colors.success).bold('✓ 开启')
-      : chalk.hex(colors.textDim)('✗ 关闭');
-    const note = this.imageDraft
-      ? chalk.hex(colors.textMuted)(' (手动开启)')
-      : '';
-    return `  ${stateLabel}${note}`;
+    return `  ${chalk.hex(colors.textMuted)('识图')}: ${chalk.hex(colors.textDim)('✗ 不支持')}`;
+  }
+
+  private renderVideoControl(model: ModelAlias): string {
+    const { colors } = this.opts;
+    if (modelHasVideoIn(model)) {
+      return `  ${chalk.hex(colors.textMuted)('视频')}: ${chalk.hex(colors.success).bold('✓ 支持')}`;
+    }
+    return `  ${chalk.hex(colors.textMuted)('视频')}: ${chalk.hex(colors.textDim)('✗ 不支持')}`;
+  }
+
+  private renderAudioControl(model: ModelAlias): string {
+    const { colors } = this.opts;
+    if (modelHasAudioIn(model)) {
+      return `  ${chalk.hex(colors.textMuted)('音频')}: ${chalk.hex(colors.success).bold('✓ 支持')}`;
+    }
+    return `  ${chalk.hex(colors.textMuted)('音频')}: ${chalk.hex(colors.textDim)('✗ 不支持')}`;
   }
 }

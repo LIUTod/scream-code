@@ -74,8 +74,12 @@ describe('ChoicePickerComponent', () => {
     });
     const modelOutput = model.render(120).map(strip);
     expect(modelOutput).toContain('  ❯ Scream K2 (Scream Code) ← current');
-    expect(modelOutput).toContain(' Thinking');
+    expect(modelOutput).toContain(' Thinking（全局设置）');
     expect(modelOutput).toContain('  off  low  medium  [ high ]');
+    expect(modelOutput).toContain(' 多模态能力');
+    expect(modelOutput).toContain('  识图: ✗ 不支持');
+    expect(modelOutput).toContain('  视频: ✗ 不支持');
+    expect(modelOutput).toContain('  音频: ✗ 不支持');
 
     const theme = new ThemeSelectorComponent({
       currentValue: 'light',
@@ -125,7 +129,7 @@ describe('ChoicePickerComponent', () => {
     picker.handleInput('\u001B[C');
     picker.handleInput('\r');
 
-    expect(onSelect).toHaveBeenCalledWith({ alias: 'scream', thinkingLevel: 'off', imageEnabled: false });
+    expect(onSelect).toHaveBeenCalledWith({ alias: 'scream', thinkingLevel: 'off' });
   });
 
   it('forces always-thinking models on and unsupported models off', () => {
@@ -157,13 +161,13 @@ describe('ChoicePickerComponent', () => {
     expect(picker.render(120).map(strip)).toContain('  [ low ]  medium  high');
     picker.handleInput('\u001B[C');
     picker.handleInput('\r');
-    expect(onSelect).toHaveBeenLastCalledWith({ alias: 'always', thinkingLevel: 'medium', imageEnabled: false });
+    expect(onSelect).toHaveBeenLastCalledWith({ alias: 'always', thinkingLevel: 'medium' });
 
     picker.handleInput('\u001B[B');
     expect(picker.render(120).map(strip)).toContain('  [ off ] unsupported');
     picker.handleInput('\u001B[D');
     picker.handleInput('\r');
-    expect(onSelect).toHaveBeenLastCalledWith({ alias: 'plain', thinkingLevel: 'off', imageEnabled: false });
+    expect(onSelect).toHaveBeenLastCalledWith({ alias: 'plain', thinkingLevel: 'off' });
   });
 
   it('treats adaptiveThinking models as thinking-capable without a thinking capability', () => {
@@ -187,60 +191,43 @@ describe('ChoicePickerComponent', () => {
     // adaptiveThinking makes the alias togglable (not 'unsupported'): the current
     // thinking state is preserved on select instead of being forced off.
     picker.handleInput('\r');
-    expect(onSelect).toHaveBeenLastCalledWith({ alias: 'okapi', thinkingLevel: 'high', imageEnabled: false });
+    expect(onSelect).toHaveBeenLastCalledWith({ alias: 'okapi', thinkingLevel: 'high' });
 
     // Right (ESC[C) cycles to the next thinking level, proving it is an interactive control.
     picker.handleInput('\u001B[C');
     picker.handleInput('\r');
-    expect(onSelect).toHaveBeenLastCalledWith({ alias: 'okapi', thinkingLevel: 'off', imageEnabled: false });
+    expect(onSelect).toHaveBeenLastCalledWith({ alias: 'okapi', thinkingLevel: 'off' });
   });
-
-  it('toggles image capability with Space and locks catalog-declared vision on', () => {
-    const onSelect = vi.fn();
+  it('fires onChangeThinking immediately when cycling thinking with arrows', () => {
+    const onChangeThinking = vi.fn();
     const picker = new ModelSelectorComponent({
       models: {
-        vision: {
+        scream: {
           provider: 'managed:scream-code',
-          model: 'scream-vision',
+          model: 'scream-k2',
           maxContextSize: 200_000,
-          displayName: 'Scream Vision',
-          capabilities: ['image_in'],
-        },
-        blind: {
-          provider: 'managed:scream-code',
-          model: 'scream-blind',
-          maxContextSize: 200_000,
-          displayName: 'Scream Blind',
-          capabilities: ['tool_use'],
+          displayName: 'Scream K2',
+          capabilities: ['thinking'],
         },
       },
-      currentValue: 'vision',
-      currentThinkingLevel: 'off',
+      currentValue: 'scream',
+      currentThinkingLevel: 'high',
       colors: darkColors,
-      onSelect,
+      onSelect: vi.fn(),
+      onChangeThinking,
       onCancel: vi.fn(),
     });
 
-    // vision has catalog image_in → "默认开启", Space cannot turn it off.
-    expect(picker.render(120).map(strip).join('\n')).toContain('默认开启');
-    picker.handleInput(' ');
-    picker.handleInput('\r');
-    expect(onSelect).toHaveBeenLastCalledWith({ alias: 'vision', thinkingLevel: 'off', imageEnabled: true });
-
-    // Moving to blind resets the draft to blind's actual state (no image_in).
-    picker.handleInput('[B');
-    picker.handleInput('\r');
-    expect(onSelect).toHaveBeenLastCalledWith({ alias: 'blind', thinkingLevel: 'off', imageEnabled: false });
-
-    // Space force-enables image on blind (DIY override scenario).
-    picker.handleInput(' ');
-    picker.handleInput('\r');
-    expect(onSelect).toHaveBeenLastCalledWith({ alias: 'blind', thinkingLevel: 'off', imageEnabled: true });
-
-    // Space again turns it back off.
-    picker.handleInput(' ');
-    picker.handleInput('\r');
-    expect(onSelect).toHaveBeenLastCalledWith({ alias: 'blind', thinkingLevel: 'off', imageEnabled: false });
+    // Right cycles high -> off (wraps), firing onChangeThinking each step.
+    picker.handleInput('[C');
+    expect(onChangeThinking).toHaveBeenLastCalledWith('scream', 'off');
+    picker.handleInput('[C');
+    expect(onChangeThinking).toHaveBeenLastCalledWith('scream', 'low');
+    // Left cycles low -> off -> high (wraps).
+    picker.handleInput('[D');
+    expect(onChangeThinking).toHaveBeenLastCalledWith('scream', 'off');
+    picker.handleInput('[D');
+    expect(onChangeThinking).toHaveBeenLastCalledWith('scream', 'high');
   });
 
   it('keeps the thinking draft when moving across models', () => {
@@ -275,7 +262,7 @@ describe('ChoicePickerComponent', () => {
     picker.handleInput('\u001B[B');
     picker.handleInput('\r');
 
-    expect(onSelect).toHaveBeenCalledWith({ alias: 'thinking', thinkingLevel: 'high', imageEnabled: false });
+    expect(onSelect).toHaveBeenCalledWith({ alias: 'thinking', thinkingLevel: 'high' });
   });
 });
 

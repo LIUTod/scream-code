@@ -20,11 +20,14 @@ import { resolveConnectCatalogRequest } from '../utils/connect-catalog';
 import { formatErrorMessage } from '../utils/event-payload';
 import {
   promptApiKey,
+  promptAudioMode,
   promptCatalogProviderSelection,
+  promptImageMode,
   promptLogoutProviderSelection,
   promptModelSelectionForCatalog,
   promptThinkingMode,
   promptTextInput,
+  promptVideoMode,
   promptWireType,
 } from './prompts';
 import type { SlashCommandHost } from './dispatch';
@@ -205,6 +208,14 @@ async function handleDiyConfig(host: SlashCommandHost): Promise<void> {
   const thinkingLevel = await promptThinkingMode(host);
   if (thinkingLevel === undefined) return;
 
+  // Step 7 — multimodal inputs
+  const imageEnabled = await promptImageMode(host);
+  if (imageEnabled === undefined) return;
+  const videoEnabled = await promptVideoMode(host);
+  if (videoEnabled === undefined) return;
+  const audioEnabled = await promptAudioMode(host);
+  if (audioEnabled === undefined) return;
+
   // Build a provider ID from the model name
   const providerId = `custom-${modelId.replaceAll(/[^A-Za-z0-9._-]/g, '-')}`;
 
@@ -214,9 +225,9 @@ async function handleDiyConfig(host: SlashCommandHost): Promise<void> {
     name: modelId,
     capability: {
       max_context_tokens: maxContextTokens,
-      image_in: false,
-      video_in: false,
-      audio_in: false,
+      image_in: imageEnabled,
+      video_in: videoEnabled,
+      audio_in: audioEnabled,
       thinking: thinkingLevel !== 'off',
       tool_use: true,
     },
