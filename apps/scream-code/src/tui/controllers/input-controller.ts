@@ -31,7 +31,7 @@ import { runFusionPlan } from '../utils/fusion-plan';
 import type { ImageAttachmentStore } from '../utils/image-attachment-store';
 import { extractMediaAttachments } from '../utils/image-placeholder';
 import { consumeLoopLimitIteration } from '../utils/loop-limit';
-import { getBreathingFrame } from '#/tui/utils/breathing-clock';
+import { BREATHE_CYCLE_MS, getBreathingFrame, resetBreathingClock } from '#/tui/utils/breathing-clock';
 import { appendInputHistory, loadInputHistory } from '#/utils/history/input-history';
 import { getInputHistoryFile } from '#/utils/paths';
 import { nextTranscriptId } from '../utils/transcript-id';
@@ -89,6 +89,7 @@ export interface InputControllerHost extends SlashCommandHost {
 export class InputController {
   private lastHistoryContent: string | undefined;
   private breatheTimer: ReturnType<typeof setInterval> | null = null;
+  private breatheTimeout: ReturnType<typeof setTimeout> | null = null;
   /** Once the user types, breathing stops permanently (same as welcome). */
   private breatheOnceStopped = false;
   private fusionPlanComponent?: FusionPlanStatusComponent;
@@ -339,6 +340,10 @@ export class InputController {
   /** Stop the idle breathing timer. Safe to call when not breathing. */
   dispose(): void {
     this.#stopBreathing();
+    if (this.breatheTimeout !== null) {
+      clearTimeout(this.breatheTimeout);
+      this.breatheTimeout = null;
+    }
   }
 
   /**
@@ -358,6 +363,10 @@ export class InputController {
   #permanentlyStopBreathing(): void {
     this.breatheOnceStopped = true;
     this.#stopBreathing();
+    if (this.breatheTimeout !== null) {
+      clearTimeout(this.breatheTimeout);
+      this.breatheTimeout = null;
+    }
     // Fall back to static green.
     const colorToken = this.host.state.theme.colors.primary;
     this.host.state.editor.borderColor = (s: string) => chalk.hex(colorToken)(s);
@@ -367,6 +376,7 @@ export class InputController {
   #startBreathing(): void {
     if (this.breatheTimer) return;
     if (this.breatheOnceStopped) return;
+    resetBreathingClock();
     const primaryHex = this.host.state.theme.colors.primary;
     const [r, g, b] = hexToRgb(primaryHex);
     const [baseHue] = rgbToHsl(r, g, b);
@@ -378,6 +388,11 @@ export class InputController {
       editor.borderColor = (s: string) => chalk.hex(hex)(s);
       ui.requestRender();
     }, BREATHE_INTERVAL_MS);
+    if (this.breatheTimeout === null) {
+      this.breatheTimeout = setTimeout(() => {
+        this.#permanentlyStopBreathing();
+      }, BREATHE_CYCLE_MS);
+    }
   }
 
   #stopBreathing(): void {

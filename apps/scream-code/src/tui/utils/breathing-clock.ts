@@ -19,9 +19,26 @@
 
 export const BREATHE_STEPS = 120;
 export const BREATHE_INTERVAL_MS = 40;
+export const BREATHE_CYCLE_MS = 2000;
 
-const startTime = Date.now();
+let startTime = Date.now();
+
+/**
+ * Reset the clock so the next cycle starts at frame 0.
+ *
+ * Call from each component's `startBreathing` — this aligns `startTime`
+ * with the component's `setTimeout(BREATHE_CYCLE_MS)` so the 2 s stop
+ * fires at frame 0 of a new cycle, not partway through a second one.
+ * Without this, the gap between module load (which sets `startTime`)
+ * and `startBreathing` (which starts the stop timeout) lets the frame
+ * advance past 120 before the timeout fires, causing the logo to start
+ * a second cycle and get cut off mid-blink.
+ */
+export function resetBreathingClock(): void {
+  startTime = Date.now();
+}
 
 export function getBreathingFrame(): number {
-  return Math.floor((Date.now() - startTime) / BREATHE_INTERVAL_MS) % BREATHE_STEPS;
+  const stepMs = BREATHE_CYCLE_MS / BREATHE_STEPS;
+  return Math.floor((Date.now() - startTime) / stepMs) % BREATHE_STEPS;
 }
