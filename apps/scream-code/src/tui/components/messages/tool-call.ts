@@ -551,6 +551,11 @@ export class ToolCallComponent extends CachedContainer {
    */
   private onSnapshotChange: (() => void) | undefined;
 
+  // Spacer(1) + headerText — the two children rebuildBody keeps before
+  // rebuilding the call preview and everything after it. Hoisted to a named
+  // constant so the rebuild invariant survives future constructor changes.
+  private static readonly HEADER_END_INDEX = 2;
+
   constructor(
     toolCall: ToolCallBlockData,
     result: ToolResultBlockData | undefined,
@@ -654,6 +659,8 @@ export class ToolCallComponent extends CachedContainer {
     this.disposed = true;
     this.stopStreamingProgressTimer();
     this.stopSubagentElapsedTimer();
+    // Drop the group listener so a borrowed card can't be polled after dispose.
+    this.onSnapshotChange = undefined;
   }
 
   /**
@@ -665,7 +672,16 @@ export class ToolCallComponent extends CachedContainer {
   setPlanInfo(info: { plan?: string; path?: string }): void {
     if (this.toolCall.name !== 'ExitPlanMode') return;
     let changed = false;
-    if (info.plan !== undefined && info.plan.length > 0 && this.currentPlan !== info.plan) {
+    // args.plan takes priority over currentPlan in resolvePlanForPreview, so
+    // skip the plan update (and the rebuild it would trigger) when args
+    // already carries a plan — the injected currentPlan would never be read.
+    const argsPlan = str(this.toolCall.args['plan']);
+    if (
+      argsPlan.length === 0 &&
+      info.plan !== undefined &&
+      info.plan.length > 0 &&
+      this.currentPlan !== info.plan
+    ) {
       this.currentPlan = info.plan;
       changed = true;
     }
@@ -1281,7 +1297,7 @@ export class ToolCallComponent extends CachedContainer {
   private rebuildBody(): void {
     // See rebuildContent for why markDirty is needed before pop().
     this.markDirty();
-    while (this.children.length > 2) {
+    while (this.children.length > ToolCallComponent.HEADER_END_INDEX) {
       this.children.pop();
     }
     this.buildCallPreview();

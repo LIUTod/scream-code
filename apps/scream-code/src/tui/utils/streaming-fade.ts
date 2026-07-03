@@ -61,7 +61,10 @@ export function fadeColor(ageMs: number, table: string[], reduced: boolean): str
   if (ageMs >= FADE_MS) return ink;
   if (ageMs <= 0) return table[0]!;
   const t = ageMs / FADE_MS;
-  const bucket = Math.min(FADE_BUCKETS - 1, Math.floor(t * FADE_BUCKETS));
+  // Use (FADE_BUCKETS - 1) so t=1 maps to the last bucket (ink) and every
+  // prior bucket gets an equal share of the fade window. Multiplying by
+  // FADE_BUCKETS made the last bucket cover [11/12, 1) — ink 100ms early.
+  const bucket = Math.min(FADE_BUCKETS - 1, Math.floor(t * (FADE_BUCKETS - 1)));
   return table[bucket]!;
 }
 

@@ -4,7 +4,10 @@ export const STREAMING_ARGS_FIELD_RE =
   /"(path|file_path|command|pattern|query|url|description|title|name)"\s*:\s*"((?:\\.|[^"\\])*)"/g;
 
 // Bounds live tool-argument previews; final tool.call payloads remain complete.
-export const STREAMING_ARGS_PREVIEW_MAX_CHARS = 64 * 1024;
+// 8KB is enough for the preview fields (path/command/pattern/url/description)
+// without re-parsing a 64KB buffer on every delta — appendSubToolCallDelta
+// re-parses the whole buffer per delta, so the cap doubles as a perf bound.
+export const STREAMING_ARGS_PREVIEW_MAX_CHARS = 8 * 1024;
 
 // Coalesces high-frequency model/tool deltas before rebuilding TUI components.
 export const STREAMING_UI_FLUSH_MS = 50;

@@ -55,6 +55,11 @@ export class AssistantMessageComponent implements Component {
     this.showBullet = show;
     this.cachedWidth = undefined;
     this.cachedLines = undefined;
+    if (!show) {
+      // Bullet hidden — stop the fade timer so it doesn't keep firing
+      // requestRender for a bullet that isn't drawn.
+      this.stopFade();
+    }
   }
 
   updateContent(text: string): void {
@@ -120,7 +125,9 @@ export class AssistantMessageComponent implements Component {
       return this.bulletColor;
     }
     const age = Date.now() - this.fadeStartMs;
-    return fadeColor(age, this.fadeTable, isReducedMotion());
+    // startFade already gated on isReducedMotion() — if fade is active,
+    // reduced is false, so skip re-querying process.env on every render tick.
+    return fadeColor(age, this.fadeTable, false);
   }
 
   private startFade(): void {
