@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * prepublishOnly — verify dist version matches package.json before npm publish.
+ * prepublishOnly — sync README and verify dist version before npm publish.
  *
  * History: 0.7.8 shipped with dist built from 0.7.7 source (tsdown injects
  * __SCREAM_CODE_VERSION__ at build time, so stale dist = wrong --version to
@@ -10,7 +10,7 @@
  * Run automatically by `npm publish` / `pnpm publish` via the
  * `prepublishOnly` script hook. Run manually with `node scripts/verify-publish.mjs`.
  */
-import { readFileSync, readdirSync, existsSync } from 'node:fs';
+import { copyFileSync, readFileSync, readdirSync, existsSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
@@ -21,6 +21,19 @@ const pkg = JSON.parse(readFileSync(join(pkgRoot, 'package.json'), 'utf-8'));
 const expected = pkg.version;
 
 console.log(`[verify-publish] Expected version: ${expected}`);
+
+// Step 0 — sync README from repo root into package dir.
+// Single source of truth: repo-root README.md. The package-local copy is
+// regenerated on each publish so npmjs.com matches GitHub without drift.
+const repoRoot = resolve(pkgRoot, '../..');
+const srcReadme = join(repoRoot, 'README.md');
+const dstReadme = join(pkgRoot, 'README.md');
+if (!existsSync(srcReadme)) {
+  console.error(`[verify-publish] FAIL: repo-root README.md not found at ${srcReadme}`);
+  process.exit(1);
+}
+copyFileSync(srcReadme, dstReadme);
+console.log('[verify-publish] Synced README.md from repo root to package dir.');
 
 // Step 1 — rebuild dist so __SCREAM_CODE_VERSION__ is freshly injected.
 console.log('[verify-publish] Rebuilding dist via tsdown...');

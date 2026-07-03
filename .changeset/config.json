@@ -6,7 +6,15 @@
   "access": "public",
   "baseBranch": "main",
   "updateInternalDependencies": "patch",
-  "ignore": [],
+  "ignore": [
+    "@scream-code/agent-core",
+    "@scream-code/config",
+    "@scream-code/jian",
+    "@scream-code/ltod",
+    "@scream-code/memory",
+    "@scream-code/migration-legacy",
+    "@scream-code/scream-code-sdk"
+  ],
   "snapshot": {
     "useCalculatedVersion": true,
     "prereleaseTemplate": "{tag}-{commit}"
