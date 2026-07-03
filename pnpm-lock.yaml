@@ -114,6 +114,9 @@ importers:
       '@scream-code/config':
         specifier: workspace:^
         version: link:../../packages/config
+      '@scream-code/knowledge':
+        specifier: workspace:*
+        version: link:../../packages/knowledge
       '@scream-code/memory':
         specifier: workspace:*
         version: link:../../packages/memory
@@ -144,6 +147,9 @@ importers:
       '@scream-code/jian':
         specifier: workspace:^
         version: link:../jian
+      '@scream-code/knowledge':
+        specifier: workspace:*
+        version: link:../knowledge
       '@scream-code/ltod':
         specifier: workspace:^
         version: link:../ltod
@@ -231,6 +237,15 @@ importers:
 
   packages/jian:
     dependencies:
+      pathe:
+        specifier: ^2.0.3
+        version: 2.0.3
+
+  packages/knowledge:
+    dependencies:
+      '@scream-code/memory':
+        specifier: workspace:*
+        version: link:../memory
       pathe:
         specifier: ^2.0.3
         version: 2.0.3
