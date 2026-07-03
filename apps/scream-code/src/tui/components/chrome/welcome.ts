@@ -193,6 +193,16 @@ export class WelcomeComponent implements Component {
       ? chalk.hex(this.colors.warning)('未设置')
       : (activeModel?.displayName ?? activeModel?.model ?? this.state.model);
 
+    const like = this.state.like;
+    const likeActive = Boolean(
+      (like.nickname ?? '').trim() ||
+        (like.tone ?? '').trim() ||
+        (like.other ?? '').trim(),
+    );
+    const likeValue = likeActive
+      ? chalk.hex(this.colors.success)('like已激活')
+      : chalk.hex(this.colors.textDim)('like未加载');
+
     let versionValue: string;
     if (this.state.hasNewVersion && this.state.latestVersion !== null) {
       versionValue =
@@ -246,6 +256,7 @@ export class WelcomeComponent implements Component {
         '',
         centerText(dim(versionValue), leftCol),
         centerText(dim(modelValue), leftCol),
+        centerText(likeValue, leftCol),
       ];
       const topPad = Math.max(0, Math.floor((rightRows.length - leftContent.length) / 2));
       const bottomPad = Math.max(0, rightRows.length - leftContent.length - topPad);
@@ -262,6 +273,7 @@ export class WelcomeComponent implements Component {
         '',
         centerText(dim(versionValue), leftCol),
         centerText(dim(modelValue), leftCol),
+        centerText(likeValue, leftCol),
         '',
       ];
       leftRows = leftContent;

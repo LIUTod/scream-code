@@ -25,7 +25,7 @@ export async function prepareSystemPromptContext(
   return { cwdListing, agentsMd, roleAdditional };
 }
 
-async function loadRoleAdditional(_jian: Jian): Promise<string | undefined> {
+export async function loadRoleAdditional(_jian: Jian): Promise<string | undefined> {
   const prefsPath = join(resolveScreamHome(), 'user-prefs.md');
   if (!(await pathExists(_jian, prefsPath))) {
     return undefined;

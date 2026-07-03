@@ -8,44 +8,55 @@ describe('buildRoleAdditionalText', () => {
   });
 
   it('includes the nickname when set', () => {
-    expect(buildRoleAdditionalText({ nickname: 'Alex' })).toBe(
-      'The user\'s preferred nickname is "Alex".',
-    );
+    const result = buildRoleAdditionalText({ nickname: 'Alex' });
+    expect(result).toContain('HIGHEST PRIORITY');
+    expect(result).toContain('- Nickname: address the user as "Alex".');
   });
 
   it('includes the tone when set', () => {
-    expect(buildRoleAdditionalText({ tone: 'friendly' })).toBe(
-      'Respond in a friendly tone.',
-    );
+    const result = buildRoleAdditionalText({ tone: 'friendly' });
+    expect(result).toContain('- Tone: respond in friendly tone.');
   });
 
   it('includes other preferences verbatim', () => {
-    expect(buildRoleAdditionalText({ other: 'use Chinese, avoid abbreviations' })).toBe(
-      'Additional user preferences: use Chinese, avoid abbreviations',
-    );
+    const result = buildRoleAdditionalText({ other: 'use Chinese, avoid abbreviations' });
+    expect(result).toContain('- Other: use Chinese, avoid abbreviations');
   });
 
   it('combines all fields in order', () => {
-    expect(
-      buildRoleAdditionalText({
-        nickname: 'Alex',
-        tone: 'friendly',
-        other: 'use examples',
-      }),
-    ).toBe(
-      'The user\'s preferred nickname is "Alex".\nRespond in a friendly tone.\nAdditional user preferences: use examples',
-    );
+    const result = buildRoleAdditionalText({
+      nickname: 'Alex',
+      tone: 'friendly',
+      other: 'use examples',
+    });
+    const nicknameIdx = result.indexOf('Nickname:');
+    const toneIdx = result.indexOf('Tone:');
+    const otherIdx = result.indexOf('Other:');
+    expect(nicknameIdx).toBeGreaterThan(-1);
+    expect(toneIdx).toBeGreaterThan(nicknameIdx);
+    expect(otherIdx).toBeGreaterThan(toneIdx);
+    expect(result).toContain('address the user as "Alex"');
+    expect(result).toContain('respond in friendly tone');
+    expect(result).toContain('use examples');
   });
 
   it('trims whitespace from inputs', () => {
-    expect(buildRoleAdditionalText({ nickname: '  Alex  ', tone: '  concise ' })).toBe(
-      'The user\'s preferred nickname is "Alex".\nRespond in a concise tone.',
-    );
+    const result = buildRoleAdditionalText({ nickname: '  Alex  ', tone: '  concise ' });
+    expect(result).toContain('address the user as "Alex"');
+    expect(result).toContain('respond in concise tone');
   });
 
   it('ignores fields that are empty after trimming', () => {
-    expect(buildRoleAdditionalText({ nickname: '   ', tone: 'calm', other: '' })).toBe(
-      'Respond in a calm tone.',
-    );
+    const result = buildRoleAdditionalText({ nickname: '   ', tone: 'calm', other: '' });
+    expect(result).not.toContain('Nickname');
+    expect(result).toContain('- Tone: respond in calm tone.');
+    expect(result).not.toContain('Other');
+  });
+
+  it('marks the block as highest priority with bilingual anchor', () => {
+    const result = buildRoleAdditionalText({ nickname: 'Alex' });
+    expect(result).toContain('HIGHEST PRIORITY');
+    expect(result).toContain('MUST');
+    expect(result).toContain('用户通过 /like 设置的偏好具有最高优先级');
   });
 });

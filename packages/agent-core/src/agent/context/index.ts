@@ -417,7 +417,7 @@ function isEmptyOutputText(output: string): boolean {
  * anchoring.  Regular user messages and user-triggered skill activations
  * both count; injections, system reminders, and model-triggered skills don't.
  */
-function isRealUserPrompt(message: ContextMessage): boolean {
+export function isRealUserPrompt(message: ContextMessage): boolean {
   if (message.role !== 'user') return false;
   const origin = message.origin;
   if (origin === undefined || origin.kind === 'user') return true;

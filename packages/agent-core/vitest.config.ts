@@ -7,5 +7,6 @@ export default defineConfig({
   test: {
     name: 'scream-core',
     include: ['test/**/*.{test,e2e}.ts'],
+    setupFiles: ['./test/setup.ts'],
   },
 });

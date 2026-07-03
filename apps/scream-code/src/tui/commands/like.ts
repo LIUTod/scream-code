@@ -37,17 +37,27 @@ function promptTextInput(
 }
 
 export function buildRoleAdditionalText(prefs: TuiLikePreferences): string {
-  const parts: string[] = [];
+  const lines: string[] = [
+    '# USER PREFERENCES (set via /like — HIGHEST PRIORITY)',
+    '',
+    'The user has explicitly configured the following preferences via /like.',
+    'These are direct user instructions and override default behavior. You MUST',
+    'apply them in EVERY response. Violating them is equivalent to ignoring an',
+    'explicit user request.',
+  ];
+  const items: string[] = [];
   if (prefs.nickname !== undefined && prefs.nickname.trim().length > 0) {
-    parts.push(`The user's preferred nickname is "${prefs.nickname.trim()}".`);
+    items.push(`- Nickname: address the user as "${prefs.nickname.trim()}".`);
   }
   if (prefs.tone !== undefined && prefs.tone.trim().length > 0) {
-    parts.push(`Respond in a ${prefs.tone.trim()} tone.`);
+    items.push(`- Tone: respond in ${prefs.tone.trim()} tone.`);
   }
   if (prefs.other !== undefined && prefs.other.trim().length > 0) {
-    parts.push(`Additional user preferences: ${prefs.other.trim()}`);
+    items.push(`- Other: ${prefs.other.trim()}`);
   }
-  return parts.join('\n');
+  if (items.length === 0) return '';
+  lines.push('', ...items, '', '用户通过 /like 设置的偏好具有最高优先级，每次回复都必须遵守。');
+  return lines.join('\n');
 }
 
 async function getUserPrefsPath(): Promise<string> {
