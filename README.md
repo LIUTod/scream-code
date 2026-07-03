@@ -74,7 +74,9 @@ npm install -g scream-code
 ```
 
 安装完成后，`scream` 命令自动加入 PATH。首次安装约需 2-5 分钟。
-
+TUI启动命令`scream`
+自动权限模式启动`scream --auto`
+自动批准模式启动`scream -y`
 
 ### 第二步：启动并配置 AI 服务
 
