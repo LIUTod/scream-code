@@ -1355,4 +1355,89 @@ describe('ToolCallComponent', () => {
       component.dispose();
     }).not.toThrow();
   });
+
+  it('caches render output across repeated renders at the same width', () => {
+    const component = new ToolCallComponent(
+      {
+        id: 'call_cache_stable',
+        name: 'Read',
+        args: { path: 'foo.ts' },
+      },
+      {
+        tool_call_id: 'call_cache_stable',
+        output: 'content',
+        is_error: false,
+      },
+      darkColors,
+    );
+
+    const first = component.render(100);
+    const second = component.render(100);
+    expect(second).toBe(first);
+  });
+
+  it('re-renders after width changes', () => {
+    const component = new ToolCallComponent(
+      {
+        id: 'call_cache_width',
+        name: 'Read',
+        args: { path: 'foo.ts' },
+      },
+      {
+        tool_call_id: 'call_cache_width',
+        output: 'content',
+        is_error: false,
+      },
+      darkColors,
+    );
+
+    const at100 = component.render(100);
+    const at80 = component.render(80);
+    expect(at80).not.toBe(at100);
+  });
+
+  it('invalidates cache when result lands on an in-flight tool call', () => {
+    const component = new ToolCallComponent(
+      {
+        id: 'call_cache_set_result',
+        name: 'Read',
+        args: { path: 'foo.ts' },
+      },
+      undefined,
+      darkColors,
+    );
+
+    const inFlight = component.render(100);
+    expect(strip(inFlight.join('\n'))).toContain('正在使用 Read');
+    component.setResult({
+      tool_call_id: 'call_cache_set_result',
+      output: 'final content',
+      is_error: false,
+    });
+    const afterResult = component.render(100);
+    expect(afterResult).not.toBe(inFlight);
+    expect(strip(afterResult.join('\n'))).toContain('已使用 Read');
+  });
+
+  it('invalidates cache when expand state toggles', () => {
+    const component = new ToolCallComponent(
+      {
+        id: 'call_cache_expand',
+        name: 'Bash',
+        args: { command: 'printf output' },
+      },
+      {
+        tool_call_id: 'call_cache_expand',
+        output: ['line1', 'line2', 'line3', 'line4', 'line5'].join('\n'),
+        is_error: false,
+      },
+      darkColors,
+    );
+
+    const collapsed = component.render(100);
+    component.setExpanded(true);
+    const expanded = component.render(100);
+    expect(expanded).not.toBe(collapsed);
+    expect(strip(expanded.join('\n'))).toContain('line5');
+  });
 });

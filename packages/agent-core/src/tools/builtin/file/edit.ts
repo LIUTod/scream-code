@@ -213,23 +213,37 @@ export class EditTool implements BuiltinTool<EditInput> {
       if (!replaceAll) {
         let count = 0;
         let pos = 0;
+        const matchLineNumbers: number[] = [];
         while (pos < content.length) {
           const idx = content.indexOf(args.old_string, pos);
           if (idx === -1) break;
           count++;
+          if (matchLineNumbers.length < 10) {
+            const lineNum = content.slice(0, idx).split('\n').length;
+            matchLineNumbers.push(lineNum);
+          }
           pos = idx + args.old_string.length;
         }
 
         if (count === 0) {
-          return { isError: true, output: `old_string not found in ${args.path}, The file contents may be out of date. Please use the Read Tool to reload the content.
-` };
-        }
-        if (count > 1) {
+          const lineCount = content.split('\n').length;
           return {
             isError: true,
             output:
-              `old_string is not unique in ${args.path} (found ${String(count)} occurrences). ` +
-              'To replace every occurrence, set replace_all=true. To replace only one occurrence, include more surrounding context in old_string.',
+              `old_string not found in ${args.path} (file has ${String(lineCount)} lines). ` +
+              'The file contents may be out of date — re-read with the Read tool. ' +
+              'If you already re-read, verify old_string matches exactly: indentation, trailing whitespace, and line endings (LF vs CRLF) must all match the Read output view.',
+          };
+        }
+        if (count > 1) {
+          const truncatedNote =
+            count > matchLineNumbers.length ? ` (showing first ${String(matchLineNumbers.length)})` : '';
+          return {
+            isError: true,
+            output:
+              `old_string is not unique in ${args.path} (found ${String(count)} occurrences at lines: ${matchLineNumbers.join(', ')}${truncatedNote}). ` +
+              'To replace every occurrence, set replace_all=true. ' +
+              'To target a specific one, include more surrounding context lines from one of those line ranges in old_string.',
           };
         }
 
@@ -246,8 +260,14 @@ export class EditTool implements BuiltinTool<EditInput> {
       const parts = content.split(args.old_string);
       const replacementCount = parts.length - 1;
       if (replacementCount === 0) {
-        return { isError: true, output: `old_string not found in ${args.path}, The file contents may be out of date. Please use the Read Tool to reload the content.
-` };
+        const lineCount = content.split('\n').length;
+        return {
+          isError: true,
+          output:
+            `old_string not found in ${args.path} (file has ${String(lineCount)} lines). ` +
+            'The file contents may be out of date — re-read with the Read tool. ' +
+            'If you already re-read, verify old_string matches exactly: indentation, trailing whitespace, and line endings (LF vs CRLF) must all match the Read output view.',
+        };
       }
 
       const newContent = parts.join(args.new_string);

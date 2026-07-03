@@ -575,6 +575,8 @@ export class StreamingUIController {
     const component = new AssistantMessageComponent(
       state.theme.markdownTheme,
       state.theme.colors,
+      true,
+      state.ui,
     );
     this._streamingBlock = { component, entry };
     this.host.pushTranscriptEntry(entry);

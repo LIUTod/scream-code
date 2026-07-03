@@ -154,6 +154,10 @@ export class TranscriptController {
           entry.skillTrigger,
         );
       case 'assistant': {
+        // Historical replay: no `ui` → AssistantMessageComponent skips the
+        // streaming bullet fade (startFade returns early when ui is unset).
+        // Only live streaming (streaming-ui.ts) passes ui so the bullet
+        // fades from accent to ink on first token arrival.
         const component = new AssistantMessageComponent(
           state.theme.markdownTheme,
           state.theme.colors,

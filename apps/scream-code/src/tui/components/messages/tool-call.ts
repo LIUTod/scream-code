@@ -5,9 +5,11 @@
 
 import { isAbsolute, relative, sep } from 'node:path';
 
-import { Container, Text, Spacer, visibleWidth } from '@earendil-works/pi-tui';
+import { Text, Spacer, visibleWidth } from '@earendil-works/pi-tui';
 import type { Component, MarkdownTheme, TUI } from '@earendil-works/pi-tui';
 import chalk from 'chalk';
+
+import { CachedContainer } from '#/tui/utils/cached-container';
 
 import { highlightLines, langFromPath } from '#/tui/components/media/code-highlight';
 import { renderDiffLinesClustered } from '#/tui/components/media/diff-preview';
@@ -465,7 +467,7 @@ class PrefixedWrappedLine implements Component {
   }
 }
 
-export class ToolCallComponent extends Container {
+export class ToolCallComponent extends CachedContainer {
   private expanded = false;
   private planExpanded = false;
   private toolCall: ToolCallBlockData;
@@ -1264,6 +1266,10 @@ export class ToolCallComponent extends Container {
   }
 
   private rebuildContent(): void {
+    // children.pop() below bypasses CachedContainer.removeChild, so mark
+    // dirty explicitly — otherwise a rebuild that only removes children
+    // would leave the cache returning stale lines.
+    this.markDirty();
     while (this.children.length > this.callPreviewEndIndex) {
       this.children.pop();
     }
@@ -1273,6 +1279,8 @@ export class ToolCallComponent extends Container {
   }
 
   private rebuildBody(): void {
+    // See rebuildContent for why markDirty is needed before pop().
+    this.markDirty();
     while (this.children.length > 2) {
       this.children.pop();
     }

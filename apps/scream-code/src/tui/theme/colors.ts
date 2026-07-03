@@ -19,7 +19,7 @@ const dark = {
   gray50: '#F5F5F5',
   gray100: '#E0E0E0',
   gray500: '#888888',
-  gray600: '#6B6B6B',
+  gray600: '#767676',
   gray700: '#5A5A5A',
   greenLight: '#7AD99B',
   red: '#E85454',
@@ -133,7 +133,7 @@ export const lightColors: ColorPalette = {
   primary: light.green,
   accent: light.tangerine700,
   planMode: '#00838F',
-  fusionPlanMode: '#ffff66',
+  fusionPlanMode: '#8C7600',
   text: light.gray900,
   textStrong: light.gray900,
   textDim: light.gray700,
@@ -142,7 +142,7 @@ export const lightColors: ColorPalette = {
   // Markdown
   mdLink: '#007A8A',
   mdCodeBlock: '#1565C0',
-  mdCodeBlockBorder: '#9E9E9E',
+  mdCodeBlockBorder: '#848484',
   mdQuote: '#616161',
 
   // Surface

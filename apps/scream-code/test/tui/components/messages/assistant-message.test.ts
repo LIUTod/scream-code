@@ -1,15 +1,25 @@
 import { visibleWidth } from '@earendil-works/pi-tui';
-import { describe, expect, it } from 'vitest';
+import type { TUI } from '@earendil-works/pi-tui';
+import chalk from 'chalk';
+import { describe, expect, it, vi } from 'vitest';
 
 import { AssistantMessageComponent } from '#/tui/components/messages/assistant-message';
 import { STATUS_BULLET } from '#/tui/constant/symbols';
 import { darkColors } from '#/tui/theme/colors';
 import { createMarkdownTheme } from '#/tui/theme/pi-tui-theme';
+import { FADE_MS } from '#/tui/utils/streaming-fade';
 
 import { captureProcessWrite } from '../../../helpers/process';
 
 function strip(text: string): string {
   return text.replaceAll(/\u001B\[[0-9;]*m/g, '');
+}
+
+// Extract the first truecolor foreground RGB from a line, as "r;g;b".
+function bulletRgb(line: string): string | null {
+  const re = /\[38;2;(\d+);(\d+);(\d+)m/;
+  const m = line.match(re);
+  return m ? `${m[1]};${m[2]};${m[3]}` : null;
 }
 
 describe('AssistantMessageComponent', () => {
@@ -118,5 +128,90 @@ describe('AssistantMessageComponent', () => {
     const second = component.render(80);
 
     expect(second).toBe(first);
+  });
+
+  it('bullet fades from accent to roleAssistant over FADE_MS', () => {
+    const previousLevel = chalk.level;
+    chalk.level = 3;
+    vi.useFakeTimers();
+    try {
+      const requestRender = vi.fn();
+      const ui = { requestRender } as unknown as TUI;
+      const component = new AssistantMessageComponent(
+        createMarkdownTheme(darkColors),
+        darkColors,
+        true,
+        ui,
+      );
+
+      component.updateContent('hello');
+      const initial = component.render(80);
+      const initialBullet = initial[1] ?? '';
+      // primary = #4EC87E = rgb(78, 200, 126)
+      expect(bulletRgb(initialBullet)).toBe('78;200;126');
+
+      vi.advanceTimersByTime(FADE_MS + 100);
+      const settled = component.render(80);
+      const settledBullet = settled[1] ?? '';
+      // roleAssistant = #E0E0E0 = rgb(224, 224, 224)
+      expect(bulletRgb(settledBullet)).toBe('224;224;224');
+
+      component.dispose();
+    } finally {
+      chalk.level = previousLevel;
+      vi.useRealTimers();
+    }
+  });
+
+  it('bullet stays in roleAssistant when SCREAM_REDUCED_MOTION is set', () => {
+    const previousLevel = chalk.level;
+    chalk.level = 3;
+    vi.useFakeTimers();
+    process.env['SCREAM_REDUCED_MOTION'] = '1';
+    try {
+      const requestRender = vi.fn();
+      const ui = { requestRender } as unknown as TUI;
+      const component = new AssistantMessageComponent(
+        createMarkdownTheme(darkColors),
+        darkColors,
+        true,
+        ui,
+      );
+
+      component.updateContent('hello');
+      const lines = component.render(80);
+      const bullet = lines[1] ?? '';
+      // No fade — bullet should be roleAssistant immediately.
+      expect(bulletRgb(bullet)).toBe('224;224;224');
+      expect(requestRender).not.toHaveBeenCalled();
+
+      component.dispose();
+    } finally {
+      delete process.env['SCREAM_REDUCED_MOTION'];
+      chalk.level = previousLevel;
+      vi.useRealTimers();
+    }
+  });
+
+  it('dispose stops the fade timer', () => {
+    vi.useFakeTimers();
+    try {
+      const requestRender = vi.fn();
+      const ui = { requestRender } as unknown as TUI;
+      const component = new AssistantMessageComponent(
+        createMarkdownTheme(darkColors),
+        darkColors,
+        true,
+        ui,
+      );
+
+      component.updateContent('hello');
+      const callsBefore = requestRender.mock.calls.length;
+      component.dispose();
+      vi.advanceTimersByTime(FADE_MS * 2);
+      expect(requestRender.mock.calls.length).toBe(callsBefore);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
