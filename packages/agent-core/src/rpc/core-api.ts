@@ -299,6 +299,15 @@ export interface SideQuestionResult {
   readonly answer: string;
 }
 
+export interface GenerateTextPayload {
+  readonly systemPrompt: string;
+  readonly userPrompt: string;
+}
+
+export interface GenerateTextResult {
+  readonly text: string;
+}
+
 export interface CreateGoalPayload {
   readonly objective: string;
   readonly completionCriterion?: string;
@@ -372,6 +381,7 @@ export interface AgentAPI {
   getBackground: (payload: GetBackgroundPayload) => readonly BackgroundTaskInfo[];
   extractMemoriesOnExit: (payload: EmptyPayload) => Promise<number>;
   sideQuestion: (payload: SideQuestionPayload) => Promise<SideQuestionResult>;
+  generateText: (payload: GenerateTextPayload) => Promise<GenerateTextResult>;
   createGoal: (payload: CreateGoalPayload) => GoalSnapshotData;
   updateGoalStatus: (payload: UpdateGoalStatusPayload) => GoalSnapshotData | null;
   cancelGoal: (payload: EmptyPayload) => GoalSnapshotData | null;

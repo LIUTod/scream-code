@@ -28,6 +28,7 @@ tools:
   - MemoryConsolidatePlan
   - MemoryConsolidateApply
   - MemoryWrite
+  - KnowledgeLookup
   - Skill
   - MakeSkillPlan
   - MakeSkillApply

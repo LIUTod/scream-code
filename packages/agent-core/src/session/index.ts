@@ -150,6 +150,7 @@ export class Session {
   async createMain() {
     const { agent } = await this.createAgent({ type: 'main' }, DEFAULT_AGENT_PROFILES['agent']);
     await agent.memoStoreReady;
+    await agent.knowledgeStoreReady;
     await this.triggerSessionStart('startup');
     return agent;
   }
@@ -162,6 +163,7 @@ export class Session {
     const resumeTasks = Object.keys(agents).map(async (id) => {
       const agent = this.ensureResumeAgentInstantiated(id, agents);
       await agent.memoStoreReady;
+      await agent.knowledgeStoreReady;
       const result = await agent.resume();
       if (result.warning !== undefined && warning === undefined) {
         warning = result.warning;

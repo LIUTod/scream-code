@@ -29,6 +29,7 @@ import type {
   SteerPayload,
   StopBackgroundPayload,
   SideQuestionPayload,
+  GenerateTextPayload,
   UndoHistoryPayload,
   UnregisterToolPayload,
   UpdateSessionMetadataPayload,
@@ -249,6 +250,10 @@ export class SessionAPIImpl implements PromisableMethods<SessionAPI> {
 
   sideQuestion({ agentId, ...payload }: AgentScopedPayload<SideQuestionPayload>) {
     return this.getAgent(agentId).sideQuestion(payload);
+  }
+
+  generateText({ agentId, ...payload }: AgentScopedPayload<GenerateTextPayload>) {
+    return this.getAgent(agentId).generateText(payload);
   }
 
   createGoal({ agentId, ...payload }: AgentScopedPayload<CreateGoalPayload>) {

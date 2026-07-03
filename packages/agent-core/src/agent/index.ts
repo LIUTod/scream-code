@@ -35,6 +35,7 @@ import { GoalMode } from './goal';
 import { HookEngine } from '../session/hooks';
 import { InjectionManager } from './injection/manager';
 import { DreamTracker, EXIT_EXTRACTION_SYSTEM_PROMPT, MemoryMemoStore, buildExitExtractionPrompt, createFastEmbedEngine, parseMemoryMemos } from '@scream-code/memory';
+import { KnowledgeStore } from '@scream-code/knowledge';
 import { PermissionManager, type PermissionManagerOptions } from './permission';
 import { PlanMode } from './plan';
 import { DEFAULT_SECRET_PATTERNS, SecretObfuscator } from './secrets';
@@ -125,6 +126,7 @@ export class Agent {
   readonly cron: CronManager | null;
   readonly goal: GoalMode;
   readonly memoStore: MemoryMemoStore | undefined;
+  readonly knowledgeStore: KnowledgeStore | undefined;
   readonly sessionMemory: SessionMemory;
   readonly workingSet: WorkingSet;
   readonly dreamTracker: DreamTracker;
@@ -184,6 +186,12 @@ export class Agent {
       ? new MemoryMemoStore(screamHomeDir, this.log)
       : undefined;
     this.memoStoreReady = this.initMemoStore(screamHomeDir);
+    // Knowledge store is main-agent-only — subagents don't need retrieval access.
+    this.knowledgeStore =
+      screamHomeDir !== undefined && this.type === 'main'
+        ? new KnowledgeStore(screamHomeDir)
+        : undefined;
+    this.knowledgeStoreReady = this.initKnowledgeStore(this.knowledgeStore);
     this.sessionMemory = new SessionMemory(this);
     this.workingSet = new WorkingSet();
     this.dreamTracker = new DreamTracker(screamHomeDir ?? '');
@@ -196,6 +204,12 @@ export class Agent {
    * before the first turn runs.
    */
   readonly memoStoreReady: Promise<void>;
+
+  /**
+   * Promise that resolves once the knowledge store (and its embedding engine)
+   * has been initialized. Main-agent-only.
+   */
+  readonly knowledgeStoreReady: Promise<void>;
 
   private initMemoStore(screamHomeDir: string | undefined): Promise<void> {
     if (screamHomeDir === undefined || this.memoStore === undefined) {
@@ -216,6 +230,22 @@ export class Agent {
         this.memoStore!.setEmbeddingEngine(createFastEmbedEngine());
       } catch (error: unknown) {
         this.log.warn('embedding engine init failed; falling back to keyword search', error);
+      }
+    })();
+  }
+
+  private initKnowledgeStore(store: KnowledgeStore | undefined): Promise<void> {
+    if (store === undefined) return Promise.resolve();
+    return (async () => {
+      try {
+        await store.init();
+      } catch (error: unknown) {
+        this.log.error('knowledge store init failed', error);
+      }
+      try {
+        store.setEmbeddingEngine(createFastEmbedEngine());
+      } catch (error: unknown) {
+        this.log.warn('knowledge embedding engine init failed', error);
       }
     })();
   }
@@ -439,6 +469,10 @@ export class Agent {
         const answer = await this.sideQuestion(payload.question);
         return { answer };
       },
+      generateText: async (payload) => {
+        const text = await this.generateText(payload.systemPrompt, payload.userPrompt);
+        return { text };
+      },
       createGoal: async (payload) => {
         const snapshot = await this.goal.createGoal(
           {
@@ -625,6 +659,27 @@ export class Agent {
       .join('');
 
     return text || '(no response)';
+  }
+
+  /**
+   * Call the configured LLM with a custom system prompt and single user message.
+   * Returns the text response. No tools, no conversation history, no side effects.
+   * Used by the knowledge base for extraction / rerank / entity-recall calls.
+   */
+  async generateText(systemPrompt: string, userPrompt: string): Promise<string> {
+    if (!this.config.hasModel) {
+      throw new Error('No model configured. Run `scream config` or use `/model` to set a default model.');
+    }
+    const response = await this.generate(
+      this.config.provider,
+      systemPrompt,
+      [],
+      [{ role: 'user', content: [{ type: 'text', text: userPrompt }], toolCalls: [] }],
+    );
+    return response.message.content
+      .filter((p): p is { type: 'text'; text: string } => p.type === 'text')
+      .map((p) => p.text)
+      .join('');
   }
 
   emitEvent(event: AgentEvent): void {

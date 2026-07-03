@@ -688,6 +688,17 @@ export class SDKRpcClient {
     return result.answer;
   }
 
+  async generateText(sessionId: string, systemPrompt: string, userPrompt: string): Promise<string> {
+    const rpc = await this.getRpc();
+    const result = await rpc.generateText({
+      sessionId,
+      agentId: this.interactiveAgentId,
+      systemPrompt,
+      userPrompt,
+    });
+    return result.text;
+  }
+
   async requestApproval(
     request: ApprovalRequest & { sessionId: string; agentId: string },
   ): Promise<ApprovalResponse> {

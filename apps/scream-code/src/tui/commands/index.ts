@@ -21,6 +21,7 @@ export {
   showSettingsSelector,
 } from './config';
 export { handleLikeCommand } from './like';
+export { handleKnowledgeCommand } from './knowledge';
 export { handleLoopCommand, describeLoopStatus } from './loop';
 export {
   showMcpServers,

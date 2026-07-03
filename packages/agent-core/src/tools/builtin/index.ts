@@ -17,6 +17,7 @@ export * from './memory/memory-consolidate';
 export * from './memory/memory-edit';
 export * from './memory/memory-lookup';
 export * from './memory/memory-write';
+export * from './knowledge/knowledge-lookup';
 export * from './lsp-tool';
 
 export * from './collaboration/skill-tool';

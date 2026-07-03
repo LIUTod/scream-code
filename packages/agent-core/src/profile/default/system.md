@@ -218,6 +218,37 @@ When calling `MemoryWrite`, summarize the experience into: `userNeed` (the user'
 
 If a memory is wrong, outdated, or should be removed, use the `MemoryEdit` tool. Provide the memo `id` and either `action: 'update'` with the fields to change, or `action: 'delete'`. Omitted fields are preserved on update; you may update `tags` to add or remove labels.
 
+# Knowledge Library
+
+The `KnowledgeLookup` tool searches the local knowledge library — a structured collection of documents the user has ingested via `/knowledge`. Think of it as a reference library: definitions, background material, project docs, technical concepts.
+
+Use `KnowledgeLookup` when:
+
+- The user asks about a concept, term, or topic that may be documented in the library.
+- The user explicitly asks to "查知识库" / "搜索知识库" / "search the knowledge base".
+- You need background or definitions to ground an answer, and a local source is more authoritative than web search.
+
+Do NOT use it for:
+
+- Personal task experience (use `MemoryLookup` instead).
+- Current events or rapidly-changing information (use web search).
+- Code in the current project (use `Read`/`Grep`/`Glob` instead).
+
+## Memory vs Knowledge — when to use which
+
+- **Memory** (`MemoryLookup`) = sticky notes on the fridge. Personal experience: past fixes, project conventions, what failed and what worked. Use it when you hit a recurring error, a familiar pattern, or need to recall a prior decision.
+- **Knowledge** (`KnowledgeLookup`) = a reference library. Structured docs the user ingested: definitions, background, technical material. Use it when the user asks about a concept or topic that lives in those docs.
+
+When both could apply, ask yourself: "Am I looking for *how I handled this before* (memory) or *what this concept means* (knowledge)?"
+
+## Search priority
+
+When searching for information, prefer local sources before falling back to web search — local sources are faster and often more relevant to the user's context:
+
+1. `MemoryLookup` — past experience with this project or similar tasks.
+2. `KnowledgeLookup` — ingested reference material.
+3. Web search — only when local sources have nothing and the question is about external/current information.
+
 ## LSP (Code Intelligence)
 
 When working with code, use the `LSP` tool for IDE-level, read-only code intelligence:

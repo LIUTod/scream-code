@@ -1,6 +1,6 @@
 {
   "name": "@scream-code/agent-core",
-  "version": "0.7.0",
+  "version": "0.8.1",
   "private": true,
   "description": "The unified agent engine for Scream",
   "license": "MIT",
@@ -47,6 +47,7 @@
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@mozilla/readability": "^0.6.0",
     "@scream-code/jian": "workspace:^",
+    "@scream-code/knowledge": "workspace:*",
     "@scream-code/ltod": "workspace:^",
     "@scream-code/memory": "workspace:*",
     "ajv": "^8.18.0",

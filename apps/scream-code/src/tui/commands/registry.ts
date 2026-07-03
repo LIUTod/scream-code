@@ -58,6 +58,13 @@ export const BUILTIN_SLASH_COMMANDS = [
     availability: 'always',
   },
   {
+    name: 'knowledge',
+    aliases: ['know'],
+    description: '管理本地知识库（摄入/搜索/删除/统计）',
+    priority: 119,
+    availability: 'always',
+  },
+  {
     name: 'new',
     aliases: ['clear'],
     description: '在当前工作区开启新会话',

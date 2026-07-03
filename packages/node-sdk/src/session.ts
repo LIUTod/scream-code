@@ -438,6 +438,15 @@ export class Session {
     return this.rpc.sideQuestion(this.id, question);
   }
 
+  /**
+   * Call the configured LLM with a custom system prompt and single user message.
+   * Returns the text response. Used by /knowledge for extraction / rerank.
+   */
+  async generateText(systemPrompt: string, userPrompt: string): Promise<string> {
+    this.ensureOpen();
+    return this.rpc.generateText(this.id, systemPrompt, userPrompt);
+  }
+
   async createGoal(objective: string, options?: { completionCriterion?: string; replace?: boolean }): Promise<GoalSnapshotData> {
     this.ensureOpen();
     return this.rpc.createGoal({

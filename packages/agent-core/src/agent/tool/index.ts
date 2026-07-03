@@ -636,6 +636,7 @@ export class ToolManager {
         this.agent.type === 'main' && this.agent.memoStore && new b.MemoryConsolidatePlanTool(this.agent),
         this.agent.type === 'main' && this.agent.memoStore && new b.MemoryConsolidateApplyTool(this.agent),
         this.agent.type === 'main' && this.agent.memoStore && new b.MemoryWriteTool(this.agent),
+        this.agent.type === 'main' && this.agent.knowledgeStore && new b.KnowledgeLookupTool(this.agent),
         this.agent.skills?.registry.listInvocableSkills().length &&
           new b.SkillTool(this.agent),
         this.agent.type === 'main' && new b.MakeSkillPlanTool(this.agent),

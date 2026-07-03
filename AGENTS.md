@@ -501,6 +501,53 @@ Key files: `packages/agent-core/src/tools/builtin/memory/memory-lookup.ts`,
 `packages/memory/src/scoring.ts`,
 `packages/memory/src/store.ts`.
 
+#### Knowledge Library
+
+A local reference library — distinct from memory. Where memory is "sticky notes
+on the fridge" (personal task experience), knowledge is "a bookshelf of
+reference docs" (structured material the user ingests). The agent should reach
+for `MemoryLookup` when recalling *how it handled something before*, and
+`KnowledgeLookup` when the user asks *what a concept means* or explicitly asks
+to search the knowledge base.
+
+- **Storage**: SQLite database at `<screamHomeDir>/knowledge/knowledge.db`.
+  Schema: `knowledge_sources` (one per ingested file) → `knowledge_documents` →
+  `knowledge_chunks` (with embedding) → `knowledge_events` (LLM-fused event per
+  chunk, with title + content embeddings) → `knowledge_entities` (with embedding)
+  → `knowledge_event_entities` (bipartite edges with relation embeddings). Vectors
+  are stored as JSON text and ranked via JS cosine similarity (same pattern as
+  memory). FTS5 indexes chunks/events/entities for keyword fallback.
+- **Ingest** (`/knowledge` → ingest): markdown file → heading_strict chunking →
+  embed chunks → LLM extract 1 fused event + N entities per chunk → embed event
+  title/content + entity names + relation text → store. All writes run in a
+  single SQLite transaction; a mid-ingest failure rolls back every partial row.
+  Re-ingesting the same file path errors out (deduped via `knowledge_sources.file_path`).
+- **Search** (`KnowledgeLookup` tool and `/knowledge` → search): multi-hop
+  retrieval — vectorize query → LLM extract query entities → recall entities by
+  name + vector → seed events (entity-linked + title-vector matched) → BFS expand
+  1 hop via event-entity edges → coarse rank by content embedding → LLM rerank →
+  return deduped chunks with scores and provenance. Falls back to direct chunk
+  vector search when no seed events match, and to FTS5 when embeddings are unavailable.
+- **Tool**: `KnowledgeLookup` in `packages/agent-core/src/tools/builtin/knowledge/knowledge-lookup.ts`
+  — registered only on the main agent. Searches the store via `multiSearch` and
+  returns markdown-formatted ranked chunks.
+- **TUI command**: `/knowledge` (`apps/scream-code/src/tui/commands/knowledge.ts`)
+  — interactive menu: ingest / list / search / delete / stats. Uses its own
+  `KnowledgeStore` instance (separate from the agent's) but operates on the same
+  `knowledge.db`; SQLite WAL mode makes concurrent reads safe during ingest.
+- **Agent integration**: `Agent.knowledgeStore` is auto-created in the Agent
+  constructor for main agents (same pattern as `memoStore`), with
+  `knowledgeStoreReady` awaited during session create/resume. LLM access for
+  extraction/rerank/entity-recall goes through `Agent.generateText(systemPrompt, userPrompt)`
+  — a new method that calls the configured LLM with a custom system prompt and
+  single user message, bypassing conversation history and tools.
+
+Key files: `packages/knowledge/src/store.ts`, `packages/knowledge/src/ingest.ts`,
+`packages/knowledge/src/search.ts`, `packages/knowledge/src/extractor.ts`,
+`packages/knowledge/src/chunking.ts`,
+`packages/agent-core/src/tools/builtin/knowledge/knowledge-lookup.ts`,
+`apps/scream-code/src/tui/commands/knowledge.ts`.
+
 #### Session Memory
 
 `SessionMemory` tracks every tool execution in the current session (tool name,

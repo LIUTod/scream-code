@@ -55,6 +55,7 @@ import { handleSkillCommand } from './skill-center';
 import { handleBtwCommand } from './btw';
 import { handleLoopCommand } from './loop';
 import { handleLikeCommand } from './like';
+import { handleKnowledgeCommand } from './knowledge';
 
 // ---------------------------------------------------------------------------
 // Re-exports — keep existing consumers working
@@ -256,6 +257,9 @@ async function handleBuiltInSlashCommand(
       return;
     case 'like':
       await handleLikeCommand(host);
+      return;
+    case 'knowledge':
+      await handleKnowledgeCommand(host, args);
       return;
     case 'usage':
       showUsage(host).catch((error: unknown) => {

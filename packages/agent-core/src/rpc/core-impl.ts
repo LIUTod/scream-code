@@ -91,6 +91,7 @@ import type {
   SetPluginMcpServerEnabledPayload,
   SetThinkingPayload,
   SideQuestionPayload,
+  GenerateTextPayload,
   SkillSummary,
   SteerPayload,
   StopBackgroundPayload,
@@ -586,6 +587,10 @@ export class ScreamCore implements PromisableMethods<CoreAPI> {
 
   sideQuestion({ sessionId, ...payload }: SessionAgentPayload<SideQuestionPayload>) {
     return this.sessionApi(sessionId).sideQuestion(payload);
+  }
+
+  generateText({ sessionId, ...payload }: SessionAgentPayload<GenerateTextPayload>) {
+    return this.sessionApi(sessionId).generateText(payload);
   }
 
   createGoal({ sessionId, ...payload }: SessionAgentPayload<CreateGoalPayload>) {
