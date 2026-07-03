@@ -2,7 +2,7 @@
  * Footer/status bar — multi-line status display at the bottom of the TUI.
  *
  * Layout:
- *   Line 1: [yolo] [plan] <model> <cwd>  <git-badge>  <shortcut hints>
+ *   Line 1: [yolo] [plan] <model>  <git-badge>  <shortcut hints>
  *   Line 2: context: XX.X% (tokens/max)
  */
 
@@ -22,8 +22,6 @@ import {
   type GitStatusCache,
 } from '#/utils/git/git-status';
 import { safeUsageRatio } from '#/utils/usage/usage-format';
-
-const MAX_CWD_SEGMENTS = 3;
 
 // Toolbar tips — rotates every 10s. Most tips are short and pair up (two
 // joined by " | ") when space allows; tips flagged `solo` are long or
@@ -128,23 +126,6 @@ function shortenModel(model: string): string {
 function modelDisplayName(state: AppState): string {
   const model = state.availableModels[state.model];
   return model?.displayName ?? model?.model ?? state.model;
-}
-
-function shortenCwd(path: string): string {
-  if (!path) return path;
-  const home = process.env['HOME'] ?? '';
-  let work = path;
-  if (home && path === home) {
-    return '~';
-  }
-  if (home && path.startsWith(home + '/')) {
-    work = '~' + path.slice(home.length);
-  }
-
-  const segments = work.split('/').filter((s) => s.length > 0);
-  if (segments.length <= MAX_CWD_SEGMENTS) return work;
-  const tail = segments.slice(-MAX_CWD_SEGMENTS).join('/');
-  return `…/${tail}`;
 }
 
 function formatTokenCount(n: number): string {
@@ -404,9 +385,6 @@ export class FooterComponent implements Component {
         chalk.hex(colors.primary)(`[${String(this.backgroundAgentCount)}${noun} 运行中]`),
       );
     }
-
-    const cwd = shortenCwd(state.workDir);
-    if (cwd) left.push(chalk.hex(colors.status)(cwd));
 
     const git = this.gitCache.getStatus();
     if (git !== null) {
