@@ -59,6 +59,7 @@ describe('createTUIState', () => {
         yolo: false,
         auto: false,
         plan: false,
+        wolfpack: false,
       },
     };
     const state = createTUIState(opts);

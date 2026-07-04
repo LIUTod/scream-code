@@ -124,6 +124,13 @@ export class SessionManager {
     }
     await this.setSession(session);
     await this.syncRuntimeState(session);
+
+    // Apply CLI startup flags that are not part of CreateSessionOptions.
+    // WolfPack is a runtime session mode; set it after the session is live.
+    if (startup.wolfpack && !isResumeStartup) {
+      await session.setWolfpackMode(true);
+    }
+
     this.host.state.startupState = 'ready';
     // Subscribe to session events for the newly initialized session. This is
     // required for the initial createSession path; resume/switch paths call

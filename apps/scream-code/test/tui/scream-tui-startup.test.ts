@@ -33,6 +33,7 @@ function makeStartupInput(
       yolo: false,
       auto: false,
       plan: false,
+      wolfpack: false,
       model: undefined,
       outputFormat: undefined,
       prompt: undefined,

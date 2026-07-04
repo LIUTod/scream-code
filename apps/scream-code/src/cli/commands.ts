@@ -83,7 +83,8 @@ export function createProgram(
     )
     .addOption(new Option('--yes').hideHelp().default(false))
     .addOption(new Option('--auto-approve').hideHelp().default(false))
-    .option('--plan', '以计划模式启动。', false);
+    .option('--plan', '以计划模式启动。', false)
+    .option('--wolfpack', '启动时默认开启 WolfPack 批量并发模式。', false);
 
   registerExportCommand(program);
   registerMigrateCommand(program, onMigrate);
@@ -171,6 +172,7 @@ export function createProgram(
       yolo: yoloValue,
       auto: autoValue,
       plan: raw['plan'] as boolean,
+      wolfpack: raw['wolfpack'] as boolean,
       model: raw['model'] as string | undefined,
       outputFormat: raw['outputFormat'] as CLIOptions['outputFormat'],
       prompt: raw['prompt'] as string | undefined,
