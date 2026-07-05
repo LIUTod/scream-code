@@ -14,6 +14,7 @@ import {
 } from '@scream-code/knowledge';
 
 import type { SlashCommandHost } from './dispatch';
+import { handleWeb } from './knowledge-web';
 import { TextInputDialogComponent } from '../components/dialogs/text-input-dialog';
 import { ChoicePickerComponent, type ChoiceOption } from '../components/dialogs/choice-picker';
 import { KnowledgeResultViewer } from '../components/dialogs/knowledge-result-viewer';
@@ -25,7 +26,7 @@ import { getDataDir } from '#/utils/paths';
 
 let knowledgeStoreInstance: KnowledgeStore | undefined;
 
-async function getKnowledgeStore(): Promise<KnowledgeStore> {
+export async function getKnowledgeStore(): Promise<KnowledgeStore> {
   if (knowledgeStoreInstance === undefined) {
     knowledgeStoreInstance = new KnowledgeStore(getDataDir());
     await knowledgeStoreInstance.init();
@@ -390,6 +391,11 @@ export async function handleKnowledgeCommand(
       label: '📊 统计信息',
       description: '查看知识库整体统计',
     },
+    {
+      value: 'web',
+      label: '🌐 知识图谱',
+      description: '在浏览器中查看交互式知识图谱',
+    },
   ];
 
   const showMenu = (): void => {
@@ -407,6 +413,7 @@ export async function handleKnowledgeCommand(
             else if (value === 'search') await handleSearch(host);
             else if (value === 'delete') await handleDelete(host);
             else if (value === 'stats') await handleStats(host);
+            else if (value === 'web') await handleWeb();
           } catch (error: unknown) {
             const msg = error instanceof Error ? error.message : String(error);
             host.showError(`操作失败: ${msg}`);

@@ -10,6 +10,7 @@ export type {
   KnowledgeEntityType,
   KnowledgeEvent,
   KnowledgeEventEntity,
+  KnowledgeGraphData,
   KnowledgeSearchOptions,
   KnowledgeSearchResult,
   KnowledgeSearchStepCallback,

@@ -734,6 +734,62 @@ export class KnowledgeStore {
     return rows.map(rowToEntity);
   }
 
+  // ── Graph export ──────────────────────────────────────────────────
+
+  async listEntities(sourceId?: string): Promise<Array<KnowledgeEntity & { eventCount: number }>> {
+    await this.init();
+    if (this.db === undefined) return [];
+    const sql = sourceId
+      ? `SELECT e.*, COUNT(ee.id) AS event_count
+         FROM knowledge_entities e
+         LEFT JOIN knowledge_event_entities ee ON ee.entity_id = e.id
+         WHERE e.source_id = ?
+         GROUP BY e.id
+         ORDER BY event_count DESC`
+      : `SELECT e.*, COUNT(ee.id) AS event_count
+         FROM knowledge_entities e
+         LEFT JOIN knowledge_event_entities ee ON ee.entity_id = e.id
+         GROUP BY e.id
+         ORDER BY event_count DESC`;
+    const rows = sourceId
+      ? (this.db.prepare(sql).all(sourceId) as Array<Record<string, unknown>>)
+      : (this.db.prepare(sql).all() as Array<Record<string, unknown>>);
+    return rows.map((row) => ({
+      ...rowToEntity(row),
+      eventCount: Number(row['event_count'] ?? 0),
+    }));
+  }
+
+  async listEvents(sourceId?: string): Promise<KnowledgeEvent[]> {
+    await this.init();
+    if (this.db === undefined) return [];
+    const sql = sourceId
+      ? 'SELECT * FROM knowledge_events WHERE source_id = ? ORDER BY rank ASC'
+      : 'SELECT * FROM knowledge_events ORDER BY created_at DESC';
+    const rows = sourceId
+      ? (this.db.prepare(sql).all(sourceId) as Array<Record<string, unknown>>)
+      : (this.db.prepare(sql).all() as Array<Record<string, unknown>>);
+    return rows.map(rowToEvent);
+  }
+
+  async listEventEntities(sourceId?: string): Promise<Array<{ eventId: string; entityId: string }>> {
+    await this.init();
+    if (this.db === undefined) return [];
+    const sql = sourceId
+      ? `SELECT ee.event_id, ee.entity_id
+         FROM knowledge_event_entities ee
+         JOIN knowledge_events e ON e.id = ee.event_id
+         WHERE e.source_id = ?`
+      : 'SELECT event_id, entity_id FROM knowledge_event_entities';
+    const rows = sourceId
+      ? (this.db.prepare(sql).all(sourceId) as Array<Record<string, unknown>>)
+      : (this.db.prepare(sql).all() as Array<Record<string, unknown>>);
+    return rows.map((row) => ({
+      eventId: asString(row['event_id']),
+      entityId: asString(row['entity_id']),
+    }));
+  }
+
   // ── FTS5 search ────────────────────────────────────────────────────
 
   async ftsSearchChunks(query: string, limit: number = 50): Promise<KnowledgeChunk[]> {

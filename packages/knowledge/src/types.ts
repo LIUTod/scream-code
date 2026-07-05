@@ -171,3 +171,25 @@ export interface LlmCaller {
 
 /** Re-export the embedding engine type for convenience. */
 export type { EmbeddingEngine };
+
+/** Graph data payload for the /knowledge web visualization. */
+export interface KnowledgeGraphData {
+  entities: Array<{
+    id: string;
+    sourceId: string;
+    type: string;
+    name: string;
+    normalizedName: string;
+    eventCount: number;
+  }>;
+  events: Array<{
+    id: string;
+    sourceId: string;
+    documentId: string;
+    title: string;
+    rank: number;
+    entityIds: string[];
+  }>;
+  edges: Array<{ entityId: string; eventId: string }>;
+  sources: Array<{ id: string; name: string }>;
+}
