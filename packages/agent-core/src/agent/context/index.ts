@@ -273,6 +273,7 @@ export class ContextMemory {
           ...message,
           role: 'tool',
           isError: event.result.isError,
+          useless: event.result.isError !== true && event.result.useless === true ? true : undefined,
         });
         this.pendingToolResultIds.delete(event.toolCallId);
         this.flushDeferredMessagesIfToolExchangeClosed();

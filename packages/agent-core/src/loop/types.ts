@@ -80,6 +80,14 @@ export interface ExecutableToolSuccessResult {
    * leave it undefined and renderers fall back to text.
    */
   readonly display?: ToolResultDisplay | undefined;
+  /**
+   * Hint that this result is uneventful and unlikely to be referenced
+   * again (e.g. "no matches found", empty output). When set on a tool
+   * result entering the context, the corresponding ContextMessage is
+   * marked useless so micro compaction can elide it later without losing
+   * actionable information.
+   */
+  readonly useless?: boolean | undefined;
 }
 
 export interface ExecutableToolErrorResult {

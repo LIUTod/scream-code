@@ -24,6 +24,7 @@ const SRC = join(import.meta.dirname, '..', 'src');
 const TEMPLATED = new Set([
   'profile/default/system.md',
   'agent/compaction/compaction-instruction.md',
+  'agent/compaction/compaction-update-instruction.md',
   'tools/builtin/file/read.md',
   'tools/builtin/file/read-media.md',
   'tools/builtin/shell/bash.md',

@@ -13,7 +13,17 @@ import {
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { AgentOptions } from '../../src/agent';
-import { DefaultCompactionStrategy, type CompactionStrategy } from '../../src/agent/compaction';
+import type { ContextMessage } from '../../src/agent/context';
+import {
+  createFileOps,
+  DefaultCompactionStrategy,
+  extractFileOpsFromMessage,
+  formatFileOperations,
+  MicroCompaction,
+  renderMessagesToText,
+  upsertFileOperations,
+  type CompactionStrategy,
+} from '../../src/agent/compaction';
 import { HookEngine, type HookEngineTriggerArgs } from '../../src/session/hooks';
 import { estimateTokensForMessages } from '../../src/utils/tokens';
 import type { TestAgentContext, TestAgentOptions } from './harness/agent';
@@ -1467,6 +1477,365 @@ describe('Agent compaction', () => {
     `);
     await ctx.expectResumeMatches();
   });
+
+  describe('bugfixes', () => {
+    it('maxRecentUserMessages defaults to 2 (not Infinity)', () => {
+      // The default config should cap recent user messages at 2 so that
+      // oversized consecutive user prompts don't evade compaction.
+      const strategy = new DefaultCompactionStrategy(() => 1_000);
+      const messages = [
+        textMessage('user', 'old user'),
+        textMessage('assistant', 'old assistant'),
+        textMessage('user', `pending user one ${'x'.repeat(1_200)}`),
+        textMessage('user', `pending user two ${'x'.repeat(1_200)}`),
+        textMessage('user', `pending user three ${'x'.repeat(1_200)}`),
+      ];
+
+      // With maxRecentUserMessages=2, only the last 2 user messages stay,
+      // so the first user+assistant pair gets compacted.
+      expect(strategy.computeCompactCount(messages, 'auto')).toBe(2);
+    });
+
+    it('microCompaction.reset() clears the cutoff to zero', () => {
+      // The reset signature is now `reset()` with no parameter; verify it
+      // unconditionally clears the cutoff regardless of prior state.
+      const micro = new MicroCompaction({} as never, {
+        keepRecentMessages: 0,
+        minContentTokens: 0,
+        minContextUsageRatio: 0,
+        truncatedMarker: '[cleared]',
+      });
+      // Force a non-zero cutoff by detect()ing on a synthetic history.
+      // Then reset() should drop it back to 0.
+      micro.reset();
+      // After reset, compact() should not truncate anything in the cutoff
+      // range (cutoff=0 means nothing is "old enough" to truncate).
+      const messages = [
+        {
+          role: 'tool' as const,
+          content: [{ type: 'text' as const, text: 'tool output' }],
+          toolCallId: 'tc1',
+          toolCalls: [],
+        },
+      ];
+      const out = micro.compact(messages);
+      expect(out[0]!.content[0]!).toEqual({ type: 'text', text: 'tool output' });
+    });
+  });
+
+  describe('file operations tracking', () => {
+    it('extracts Read/Edit/Write paths from assistant tool calls', () => {
+      const ops = createFileOps();
+      extractFileOpsFromMessage(
+        {
+          role: 'assistant',
+          content: [],
+          toolCalls: [
+            { type: 'function', id: '1', name: 'Read', arguments: JSON.stringify({ path: '/a.ts' }) },
+            { type: 'function', id: '2', name: 'Edit', arguments: JSON.stringify({ path: '/b.ts' }) },
+            { type: 'function', id: '3', name: 'Write', arguments: JSON.stringify({ path: '/c.ts' }) },
+            { type: 'function', id: '4', name: 'Read', arguments: JSON.stringify({ path: '/a.ts' }) },
+          ],
+        },
+        ops,
+      );
+      expect(ops.read).toEqual(new Set(['/a.ts']));
+      expect(ops.edited).toEqual(new Set(['/b.ts']));
+      expect(ops.written).toEqual(new Set(['/c.ts']));
+    });
+
+    it('marks RW for files both read and modified', () => {
+      const ops = createFileOps();
+      ops.read.add('/x.ts');
+      ops.edited.add('/x.ts');
+      const out = formatFileOperations(ops);
+      expect(out).toContain('/x.ts (RW)');
+    });
+
+    it('caps at 20 files with elision marker', () => {
+      const ops = createFileOps();
+      for (let i = 0; i < 25; i++) ops.read.add(`/file${i}.ts`);
+      const out = formatFileOperations(ops);
+      expect(out).toContain('…5 files elided…');
+    });
+
+    it('upsertFileOperations strips existing <files> section', () => {
+      const summary = 'summary text\n\n<files>\n/a.ts (Read)\n</files>';
+      const ops = createFileOps();
+      ops.read.add('/b.ts');
+      const out = upsertFileOperations(summary, ops);
+      expect(out).not.toContain('/a.ts');
+      expect(out).toContain('/b.ts');
+    });
+
+    it('ignores non-file tools (Grep/Glob/Bash)', () => {
+      const ops = createFileOps();
+      extractFileOpsFromMessage(
+        {
+          role: 'assistant',
+          content: [],
+          toolCalls: [
+            { type: 'function', id: '1', name: 'Grep', arguments: JSON.stringify({ pattern: 'foo' }) },
+            { type: 'function', id: '2', name: 'Bash', arguments: JSON.stringify({ command: 'ls' }) },
+          ],
+        },
+        ops,
+      );
+      expect(ops.read.size).toBe(0);
+      expect(ops.edited.size).toBe(0);
+      expect(ops.written.size).toBe(0);
+    });
+
+    it('returns empty string when no file operations', () => {
+      const ops = createFileOps();
+      expect(formatFileOperations(ops)).toBe('');
+    });
+
+    it('skips assistant messages with null arguments', () => {
+      const ops = createFileOps();
+      extractFileOpsFromMessage(
+        {
+          role: 'assistant',
+          content: [],
+          toolCalls: [
+            { type: 'function', id: '1', name: 'Read', arguments: null },
+          ],
+        },
+        ops,
+      );
+      expect(ops.read.size).toBe(0);
+    });
+  });
+
+  describe('render-messages truncation', () => {
+    it('truncates tool call arguments exceeding 2000 chars', () => {
+      const longValue = 'x'.repeat(3000);
+      const message: Message = {
+        role: 'assistant',
+        content: [],
+        toolCalls: [
+          {
+            type: 'function',
+            id: '1',
+            name: 'Read',
+            arguments: JSON.stringify({ path: longValue }),
+          },
+        ],
+      };
+      const out = renderMessagesToText([message]);
+      expect(out).toContain('[…');
+      expect(out).not.toContain(longValue);
+    });
+
+    it('truncates tool result text exceeding 2000 chars', () => {
+      const longText = 'a'.repeat(1200) + 'b'.repeat(1000) + 'c'.repeat(800);
+      const message: Message = {
+        role: 'tool',
+        content: [{ type: 'text', text: longText }],
+        toolCallId: '1',
+        toolCalls: [],
+      };
+      const out = renderMessagesToText([message]);
+      expect(out).toContain('[…');
+      // Head (1200 chars of 'a') + tail (800 chars of 'c') = 2000 chars of content.
+      // Header line "message" + "toolCallId" contributes 2 extra 'a's, "content"
+      // label contributes 1 extra 'c' — assert on the truncated block, not the
+      // full rendered output.
+      const block = out.split('\n\n')[0]!.split('\n').slice(1).join('\n');
+      expect((block.match(/a/g) ?? []).length).toBe(1200);
+      // Tail (800 'c's) plus the 'c' in "ch" inside the elision marker
+      expect((block.match(/c/g) ?? []).length).toBe(801);
+      // Middle 'b' block should be elided
+      expect(out).not.toContain('b');
+    });
+
+    it('preserves short content unchanged', () => {
+      const message: Message = {
+        role: 'tool',
+        content: [{ type: 'text', text: 'short output' }],
+        toolCallId: '1',
+        toolCalls: [],
+      };
+      const out = renderMessagesToText([message]);
+      expect(out).toContain('short output');
+      expect(out).not.toContain('[…');
+    });
+
+    it('preserves short tool call arguments unchanged', () => {
+      const message: Message = {
+        role: 'assistant',
+        content: [],
+        toolCalls: [
+          {
+            type: 'function',
+            id: '1',
+            name: 'Read',
+            arguments: JSON.stringify({ path: '/short.ts' }),
+          },
+        ],
+      };
+      const out = renderMessagesToText([message]);
+      expect(out).toContain('/short.ts');
+      expect(out).not.toContain('[…');
+    });
+
+    it('handles null tool call arguments', () => {
+      const message: Message = {
+        role: 'assistant',
+        content: [],
+        toolCalls: [
+          { type: 'function', id: '1', name: 'Read', arguments: null },
+        ],
+      };
+      const out = renderMessagesToText([message]);
+      expect(out).toContain('null');
+    });
+
+    it('truncates thinking blocks exceeding 2000 chars', () => {
+      const longThink = 'y'.repeat(5000);
+      const message: Message = {
+        role: 'assistant',
+        content: [{ type: 'think', think: longThink }],
+        toolCalls: [],
+      };
+      const out = renderMessagesToText([message]);
+      expect(out).toContain('[…');
+      expect((out.match(/y/g) ?? []).length).toBeLessThan(3000);
+    });
+  });
+
+  describe('useless-result elision', () => {
+    it('elides tool results flagged useless below the size threshold', () => {
+      // A useless tool result is elided even when smaller than
+      // minContentTokens, because the flag is an explicit declaration that
+      // the content carries no actionable information.
+      const micro = new MicroCompaction({} as never, {
+        keepRecentMessages: 0,
+        minContentTokens: 100,
+        minContextUsageRatio: 0,
+        truncatedMarker: '[cleared]',
+        uselessMarker: '[uneventful]',
+      });
+      // @ts-expect-error: cutoff is private; we set it via detect() instead.
+      micro.cutoff = 1;
+      const history: ContextMessage[] = [
+        {
+          role: 'tool',
+          toolCallId: '1',
+          toolCalls: [],
+          content: [{ type: 'text', text: 'short uneventful output' }],
+          useless: true,
+        } as ContextMessage,
+      ];
+      const out = micro.compact(history);
+      expect(out[0]!.content[0]).toMatchObject({ type: 'text', text: '[uneventful]' });
+    });
+
+    it('does not elide useless tool results past the cutoff line', () => {
+      const micro = new MicroCompaction({} as never, {
+        keepRecentMessages: 1,
+        minContentTokens: 100,
+        minContextUsageRatio: 0,
+        truncatedMarker: '[cleared]',
+        uselessMarker: '[uneventful]',
+      });
+      // @ts-expect-error: cutoff is private; we set it via detect() instead.
+      micro.cutoff = 0;
+      const history: ContextMessage[] = [
+        {
+          role: 'tool',
+          toolCallId: '1',
+          toolCalls: [],
+          content: [{ type: 'text', text: 'short uneventful output' }],
+          useless: true,
+        } as ContextMessage,
+      ];
+      const out = micro.compact(history);
+      expect(out[0]!.content[0]).toMatchObject({
+        type: 'text',
+        text: 'short uneventful output',
+      });
+    });
+
+    it('counts useless-result savings in estimateSavings', () => {
+      const micro = new MicroCompaction({} as never, {
+        keepRecentMessages: 0,
+        minContentTokens: 100,
+        minContextUsageRatio: 0,
+        truncatedMarker: '[cleared]',
+        uselessMarker: '[uneventful]',
+      });
+      // @ts-expect-error: cutoff is private; we set it via detect() instead.
+      micro.cutoff = 1;
+      const history: ContextMessage[] = [
+        {
+          role: 'tool',
+          toolCallId: '1',
+          toolCalls: [],
+          content: [{ type: 'text', text: 'x'.repeat(500) }],
+          useless: true,
+        } as ContextMessage,
+      ];
+      const savings = micro.estimateSavings(history);
+      expect(savings).toBeGreaterThan(0);
+    });
+  });
+
+  describe('iterative summary update', () => {
+    it('uses the update instruction when a prior compaction summary exists at history head', async () => {
+      const ctx = testAgent();
+      ctx.configure({
+        provider: CATALOGUED_PROVIDER,
+        modelCapabilities: CATALOGUED_MODEL_CAPABILITIES,
+      });
+      // First compaction: produces a summary that becomes the head assistant
+      // message with origin.kind === 'compaction_summary'.
+      ctx.appendExchange(1, 'first user', 'first assistant', 20);
+      ctx.appendExchange(2, 'second user', 'second assistant', 40);
+      ctx.mockNextResponse({ type: 'text', text: 'Initial compaction summary.' });
+      const firstApplied = new Promise<void>((resolve) => {
+        ctx.emitter.once('context.apply_compaction', () => resolve());
+      });
+      await ctx.rpc.beginCompaction({ instruction: undefined });
+      await firstApplied;
+      // Drain the first LLM input so lastLlmInput() can return the second.
+      ctx.lastLlmInput();
+
+      // Add new exchanges, then compact again — this time the head message
+      // is the previous summary, so the iterative-update instruction must
+      // be selected.
+      ctx.appendExchange(3, 'third user', 'third assistant', 120);
+      ctx.mockNextResponse({ type: 'text', text: 'Updated compaction summary.' });
+      const secondApplied = new Promise<void>((resolve) => {
+        ctx.emitter.once('context.apply_compaction', () => resolve());
+      });
+      await ctx.rpc.beginCompaction({ instruction: undefined });
+      await secondApplied;
+
+      const instruction = lastCompactionInstruction(ctx);
+      expect(instruction).toContain('UPDATE an existing compaction summary');
+    });
+
+    it('uses the fresh-first-time instruction when no prior summary exists', async () => {
+      const ctx = testAgent();
+      ctx.configure({
+        provider: CATALOGUED_PROVIDER,
+        modelCapabilities: CATALOGUED_MODEL_CAPABILITIES,
+      });
+      ctx.appendExchange(1, 'first user', 'first assistant', 20);
+      ctx.appendExchange(2, 'second user', 'second assistant', 40);
+      ctx.mockNextResponse({ type: 'text', text: 'Fresh summary.' });
+      const applied = new Promise<void>((resolve) => {
+        ctx.emitter.once('context.apply_compaction', () => resolve());
+      });
+      await ctx.rpc.beginCompaction({ instruction: undefined });
+      await applied;
+
+      const instruction = lastCompactionInstruction(ctx);
+      expect(instruction).toContain('compact this conversation context');
+      expect(instruction).not.toContain('UPDATE an existing compaction summary');
+    });
+  });
 });
 
 afterEach(() => {
@@ -1625,5 +1994,20 @@ function inputHistorySnapshot(history: readonly Message[]): string[] {
 }
 
 function normalizeInputText(text: string): string {
-  return text.includes('compact this conversation context') ? '<compaction-instruction>' : text;
+  return text.includes('compact this conversation context') || text.includes('UPDATE an existing compaction summary')
+    ? '<compaction-instruction>'
+    : text;
+}
+
+function lastCompactionInstruction(ctx: TestAgentContext): string {
+  const last = ctx.llmCalls.at(-1);
+  if (!last) throw new Error('No LLM call recorded');
+  const lastUser = [...last.history].reverse().find((m) => m.role === 'user');
+  if (!lastUser) throw new Error('No user message in last LLM call');
+  const text = lastUser.content
+    .filter((p): p is { type: 'text'; text: string } => p.type === 'text')
+    .map((p) => p.text)
+    .join('');
+  if (text.length === 0) throw new Error('Last user message has no text content');
+  return text;
 }

@@ -27,12 +27,20 @@ import {
 } from '../../utils/tokens';
 import { project } from '../context/projector';
 import compactionInstructionTemplate from './compaction-instruction.md';
+import compactionUpdateInstructionTemplate from './compaction-update-instruction.md';
 import { renderMessagesToText } from './render-messages';
 import type { CompactionBeginData, CompactionResult } from './types';
 import { DEFAULT_COMPACTION_CONFIG, DefaultCompactionStrategy, type CompactionStrategy } from './strategy';
 import { basename, dirname } from 'pathe';
 import { parseMemoryMemos } from '@scream-code/memory';
 import type { TodoItem } from '../../tools/builtin/state/todo-list';
+import type { ContextMessage } from '../context/types';
+import {
+  createFileOps,
+  extractFileOpsFromMessage,
+  formatFileOperations,
+  type FileOperations,
+} from './file-operations';
 
 
 export interface CompactedHistory {
@@ -251,7 +259,7 @@ export class FullCompaction {
 
   private checkAutoCompaction(throwOnLimit: boolean = true): boolean {
     if (this.compacting) return true;
-    if (!this.strategy.shouldCompact(this.tokenCountWithPending)) return false;
+    if (!this.strategy.shouldCompact(this.effectiveTokenCount)) return false;
 
     return this.beginAutoCompaction(throwOnLimit);
   }
@@ -325,6 +333,11 @@ export class FullCompaction {
     const originalHistory = [...this.agent.context.history];
     const tokensBefore = estimateTokensForMessages(originalHistory);
     const model = this.agent.config.model;
+    // Detect a prior compaction summary at the head of history. If present,
+    // use the iterative-update instruction so the LLM merges new content into
+    // the existing summary instead of producing a fresh one from scratch.
+    const previousSummary = extractPreviousSummary(originalHistory);
+    const isUpdate = previousSummary !== null;
     let retryCount = 0;
     try {
       await this.triggerPreCompactHook(data, tokensBefore, signal);
@@ -334,6 +347,9 @@ export class FullCompaction {
       let summary: string;
       while (true) {
         const messagesToCompact = originalHistory.slice(0, compactedCount);
+        const instruction = isUpdate
+          ? COMPACTION_UPDATE_INSTRUCTION(data.instruction)
+          : COMPACTION_INSTRUCTION(data.instruction);
         const messages = [
           ...project(messagesToCompact),
           {
@@ -341,7 +357,7 @@ export class FullCompaction {
             content: [
               {
                 type: 'text',
-                text: COMPACTION_INSTRUCTION(data.instruction),
+                text: instruction,
               },
             ],
             toolCalls: [],
@@ -391,18 +407,25 @@ export class FullCompaction {
       }
 
       const recent = originalHistory.slice(compactedCount);
-      const tokensAfter = estimateTokens(summary) + estimateTokensForMessages(recent);
+      const messagesToCompactForOps = originalHistory.slice(0, compactedCount);
+      const fileOps = createFileOps();
+      for (const msg of messagesToCompactForOps) {
+        extractFileOpsFromMessage(msg, fileOps);
+      }
+      const processedSummary = this.postProcessSummary(summary, fileOps);
+      const tokensAfter = estimateTokens(processedSummary) + estimateTokensForMessages(recent);
 
       const result: CompactionResult = {
-        summary,
+        summary: processedSummary,
         compactedCount,
         tokensBefore,
         tokensAfter,
+        ...(isUpdate ? { isUpdate: true } : {}),
       };
       this.markCompleted();
       this.agent.emitEvent({ type: 'compaction.completed', result });
       this.agent.context.applyCompaction(result);
-      await this.extractAndStoreMemos(summary);
+      await this.extractAndStoreMemos(processedSummary);
       this.triggerPostCompactHook(data, result);
 
       // Compaction succeeded — reset circuit breaker
@@ -534,22 +557,29 @@ export class FullCompaction {
   }
 
   /**
-   * Append the current todo list as a markdown section to the compaction
-   * summary so active tasks survive compression. This mirrors kimi-code's
-   * approach: without it, the todo list is lost after compaction because
-   * the original messages containing it are removed from the context window.
+   * Append the current todo list and file operations as markdown sections to
+   * the compaction summary so active tasks and file context survive
+   * compression. Without this, both are lost after compaction because the
+   * original messages containing them are removed from the context window.
    */
-  private postProcessSummary(summary: string): string {
+  private postProcessSummary(summary: string, fileOps: FileOperations): string {
     const storeData = this.agent.tools.storeData();
     const todos = (storeData['todo'] as readonly TodoItem[] | undefined) ?? [];
-    if (todos.length === 0) return summary;
 
-    const lines = todos.map((t) => {
-      const marker = t.status === 'done' ? 'x' : t.status === 'in_progress' ? '-' : ' ';
-      return `- [${marker}] ${t.title}`;
-    });
-    const todoMarkdown = ['## TODO List', '', ...lines].join('\n');
-    return `${summary.trim()}\n\n${todoMarkdown}`;
+    const sections: string[] = [summary.trim()];
+
+    if (todos.length > 0) {
+      const lines = todos.map((t) => {
+        const marker = t.status === 'done' ? 'x' : t.status === 'in_progress' ? '-' : ' ';
+        return `- [${marker}] ${t.title}`;
+      });
+      sections.push(['## TODO List', '', ...lines].join('\n'));
+    }
+
+    const filesSection = formatFileOperations(fileOps);
+    if (filesSection.length > 0) sections.push(filesSection);
+
+    return sections.join('\n\n');
   }
 }
 function extractCompactionSummary(response: GenerateResult, model: string): string {
@@ -572,4 +602,22 @@ function extractCompactionSummary(response: GenerateResult, model: string): stri
 
 export const COMPACTION_INSTRUCTION = (customInstruction = ''): string =>
   renderPrompt(compactionInstructionTemplate, { customInstruction });
+
+export const COMPACTION_UPDATE_INSTRUCTION = (customInstruction = ''): string =>
+  renderPrompt(compactionUpdateInstructionTemplate, { customInstruction });
+
+/**
+ * If history starts with a compaction_summary message, return its text so the
+ * next compaction can merge new content into it instead of starting fresh.
+ * Returns null when no prior summary exists (first compaction in the session).
+ */
+function extractPreviousSummary(history: readonly ContextMessage[]): string | null {
+  const head = history[0];
+  if (head?.origin?.kind !== 'compaction_summary') return null;
+  const text = head.content
+    .filter((p): p is { type: 'text'; text: string } => p.type === 'text')
+    .map((p) => p.text)
+    .join('');
+  return text.length > 0 ? text : null;
+}
 

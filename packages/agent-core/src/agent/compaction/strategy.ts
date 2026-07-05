@@ -22,7 +22,7 @@ export const DEFAULT_COMPACTION_CONFIG: CompactionConfig = {
   reservedContextSize: 50_000,
   maxCompactionPerTurn: 3,
   maxRecentMessages: 4,
-  maxRecentUserMessages: Infinity,
+  maxRecentUserMessages: 2,
   maxRecentSizeRatio: 0.2,
   minOverflowReductionRatio: 0.05,
   turnGrowthMultiplier: 2.5, // maxOutput + 1.5x avg tool result growth

@@ -1,5 +1,28 @@
 import type { Message } from '@scream-code/ltod';
 
+// Truncation budgets applied while serializing messages for the compaction
+// LLM call. Without these, a single oversized tool call (e.g. a Read of a
+// 5000-line file) or a large tool result can bloat the compaction input and
+// push out the actual conversation context. Head/tail ratio keeps the start
+// (argument names, result prefix) and end (final status) visible.
+const TOOL_RESULT_MAX_CHARS = 2000;
+const TOOL_CALL_MAX_CHARS = 2000;
+const TRUNCATE_HEAD_RATIO = 0.6;
+
+function truncateForSummary(
+  text: string,
+  maxChars: number,
+  headRatio: number = TRUNCATE_HEAD_RATIO,
+): string {
+  if (text.length <= maxChars) return text;
+  const ratio = Math.min(Math.max(headRatio, 0), 1);
+  const headChars = Math.round(maxChars * ratio);
+  const tailChars = maxChars - headChars;
+  const elided = text.length - maxChars;
+  const tail = tailChars > 0 ? text.slice(-tailChars) : '';
+  return `${text.slice(0, headChars)} […${elided}ch elided…] ${tail}`;
+}
+
 export function renderMessagesToText(messages: readonly Message[]): string {
   return messages.map((message, index) => renderMessageToText(message, index)).join('\n\n');
 }
@@ -36,9 +59,9 @@ function renderMessageToText(message: Message, index: number): string {
 function renderContentPartToText(part: Message['content'][number]): string {
   switch (part.type) {
     case 'text':
-      return renderBlock('text', part.text);
+      return renderBlock('text', truncateForSummary(part.text, TOOL_RESULT_MAX_CHARS));
     case 'think':
-      return renderBlock('think', part.think);
+      return renderBlock('think', truncateForSummary(part.think, TOOL_RESULT_MAX_CHARS));
     case 'image_url':
       return renderMediaPart('image_url', part.imageUrl.url, part.imageUrl.id);
     case 'audio_url':
@@ -66,11 +89,13 @@ function renderToolCallToText(toolCall: Message['toolCalls'][number]): string {
 function renderToolCallArguments(args: string | null): string {
   if (args === null) return 'null';
 
+  let pretty: string;
   try {
-    return stringifyJsonish(JSON.parse(args));
+    pretty = stringifyJsonish(JSON.parse(args));
   } catch {
-    return args;
+    pretty = args;
   }
+  return truncateForSummary(pretty, TOOL_CALL_MAX_CHARS);
 }
 
 function renderMediaPart(type: string, url: string, id?: string | undefined): string {

@@ -14,6 +14,8 @@ export interface MicroCompactionConfig {
   minContextUsageRatio: number;
   /** Placeholder text for truncated tool results. */
   truncatedMarker: string;
+  /** Placeholder text for tool results explicitly marked useless. */
+  uselessMarker: string;
 }
 
 const DEFAULT_CONFIG: MicroCompactionConfig = {
@@ -21,6 +23,7 @@ const DEFAULT_CONFIG: MicroCompactionConfig = {
   minContentTokens: 100,
   minContextUsageRatio: 0.5,
   truncatedMarker: '[Old tool result content cleared]',
+  uselessMarker: '[Uneventful result elided]',
 };
 
 /**
@@ -91,8 +94,8 @@ export class MicroCompaction {
   }
 
   /** Reset the internal cutoff line (e.g. after a full compaction). */
-  reset(maxCutoff = 0): void {
-    this.cutoff = Math.min(this.cutoff, maxCutoff);
+  reset(): void {
+    this.cutoff = 0;
   }
 
   /** Advance the cutoff line and log the change. */
@@ -125,7 +128,9 @@ export class MicroCompaction {
    * Apply micro-compaction to a message list: replace old tool results
    * before the cutoff line with truncated markers. Read results for files
    * that were re-read later get a supersede marker so the model knows
-   * the old content is stale.
+   * the old content is stale. Tool results explicitly marked useless are
+   * elided with a short notice regardless of size, since they carry no
+   * actionable information.
    */
   compact(messages: readonly ContextMessage[]): readonly ContextMessage[] {
     const config = this.config;
@@ -133,12 +138,22 @@ export class MicroCompaction {
     const result: ContextMessage[] = [];
     let i = 0;
     for (const msg of messages) {
-      if (
+      const isUseless =
         i < this.cutoff &&
         msg.role === 'tool' &&
         msg.toolCallId !== undefined &&
-        estimateTokensForMessages([msg]) >= config.minContentTokens
-      ) {
+        msg.useless === true;
+      const isOversizedTruncatable =
+        i < this.cutoff &&
+        msg.role === 'tool' &&
+        msg.toolCallId !== undefined &&
+        estimateTokensForMessages([msg]) >= config.minContentTokens;
+      if (isUseless) {
+        result.push({
+          ...msg,
+          content: [{ type: 'text', text: config.uselessMarker } as ContentPart],
+        } as ContextMessage);
+      } else if (isOversizedTruncatable) {
         const marker =
           msg.toolCallId !== undefined && superseded.has(msg.toolCallId)
             ? `[Superseded by a newer read of ${superseded.get(msg.toolCallId)}]`
@@ -170,6 +185,7 @@ export class MicroCompaction {
     cutoff: number,
   ): { truncatedToolResultCount: number; beforeTokens: number; afterTokens: number } {
     let markerTokenCount: number | undefined;
+    let uselessMarkerTokenCount: number | undefined;
     let truncatedToolResultCount = 0;
     let beforeTokens = 0;
     let afterTokens = 0;
@@ -178,12 +194,20 @@ export class MicroCompaction {
       if (message?.role !== 'tool' || message.toolCallId === undefined) continue;
 
       const contentTokens = estimateTokensForMessages([message]);
-      if (contentTokens < this.config.minContentTokens) continue;
+      const isUseless = message.useless === true;
+      if (!isUseless && contentTokens < this.config.minContentTokens) continue;
 
-      markerTokenCount ??= estimateTokens(this.config.truncatedMarker);
-      truncatedToolResultCount += 1;
-      beforeTokens += contentTokens;
-      afterTokens += markerTokenCount;
+      if (isUseless) {
+        uselessMarkerTokenCount ??= estimateTokens(this.config.uselessMarker);
+        truncatedToolResultCount += 1;
+        beforeTokens += contentTokens;
+        afterTokens += uselessMarkerTokenCount;
+      } else {
+        markerTokenCount ??= estimateTokens(this.config.truncatedMarker);
+        truncatedToolResultCount += 1;
+        beforeTokens += contentTokens;
+        afterTokens += markerTokenCount;
+      }
     }
     return { truncatedToolResultCount, beforeTokens, afterTokens };
   }
