@@ -1,8 +1,11 @@
 import { extractQueryEntities, rerankEventsWithLlm } from './extractor.js';
 import type { KnowledgeStore } from './store.js';
 import type {
-  KnowledgeSearchResult,
   KnowledgeSearchOptions,
+  KnowledgeSearchResult,
+  KnowledgeSearchStepCallback,
+  KnowledgeSearchTrace,
+  KnowledgeSearchTraceStep,
   LlmCaller,
 } from './types.js';
 
@@ -13,6 +16,36 @@ const EXPANDED_EVENT_LIMIT = 100;
 const COARSE_RANK_LIMIT = 50;
 const ENTITY_VECTOR_THRESHOLD = 0.7;
 const TITLE_VECTOR_THRESHOLD = 0.4;
+
+async function timed<T>(
+  onStep: KnowledgeSearchStepCallback | undefined,
+  step: string,
+  detail: string,
+  fn: () => Promise<T>,
+  payload?: (result: T) => unknown,
+): Promise<T> {
+  const start = performance.now();
+  try {
+    const result = await fn();
+    const durationMs = Math.round((performance.now() - start) * 100) / 100;
+    const traceStep: KnowledgeSearchTraceStep = {
+      step,
+      detail,
+      durationMs,
+      ...(payload !== undefined ? { payload: payload(result) } : {}),
+    };
+    onStep?.(traceStep);
+    return result;
+  } catch (error) {
+    const durationMs = Math.round((performance.now() - start) * 100) / 100;
+    onStep?.({
+      step,
+      detail: `${detail} 失败：${error instanceof Error ? error.message : String(error)}`,
+      durationMs,
+    });
+    throw error;
+  }
+}
 
 /**
  * Multi-hop retrieval:
@@ -25,6 +58,9 @@ const TITLE_VECTOR_THRESHOLD = 0.4;
  * 6. LLM rerank — pick top-K most relevant.
  * 7. Return corresponding chunks (deduped by chunk_id) with scores and provenance.
  *    If rerank yields fewer than topK chunks, backfill by direct chunk vector search.
+ *
+ * Optional `onStep` callback receives a trace step at each phase — used by the
+ * KnowledgeLookup tool to expose retrieval diagnostics to the agent.
  */
 export async function multiSearch(
   store: KnowledgeStore,
@@ -32,21 +68,51 @@ export async function multiSearch(
   query: string,
   options: KnowledgeSearchOptions = {},
 ): Promise<KnowledgeSearchResult[]> {
+  const results = await multiSearchWithTrace(store, llm, query, options);
+  return results.results;
+}
+
+/** Like multiSearch but also returns the retrieval trace for diagnostics. */
+export async function multiSearchWithTrace(
+  store: KnowledgeStore,
+  llm: LlmCaller,
+  query: string,
+  options: KnowledgeSearchOptions = {},
+): Promise<{ results: KnowledgeSearchResult[]; trace: KnowledgeSearchTrace }> {
   const topK = Math.min(options.topK ?? DEFAULT_TOP_K, MAX_TOP_K);
+  const steps: KnowledgeSearchTraceStep[] = [];
+  const onStep: KnowledgeSearchStepCallback = (step) => steps.push(step);
+  const rerankedEventTitles: string[] = [];
+  let fallbackReason: string | null = null;
 
   const engine = store.getEmbeddingEngine();
   if (engine === undefined || !engine.available) {
-    return ftsFallback(store, query, topK);
+    fallbackReason = 'embedding engine unavailable; used FTS5 keyword fallback';
+    const results = await ftsFallback(store, query, topK);
+    return { results, trace: { steps, rerankedEventTitles, fallbackReason } };
   }
 
-  const queryEmbeddings = await engine.embedBatch([query]);
+  const queryEmbeddings = await timed(
+    onStep,
+    'queryEmbedding',
+    '把用户问题转成向量，用于召回相关事件和切片。',
+    async () => engine.embedBatch([query]),
+  );
   if (queryEmbeddings === null || queryEmbeddings.length === 0) {
-    return ftsFallback(store, query, topK);
+    fallbackReason = 'query embedding returned null; used FTS5 fallback';
+    const results = await ftsFallback(store, query, topK);
+    return { results, trace: { steps, rerankedEventTitles, fallbackReason } };
   }
   const queryVec = queryEmbeddings[0]!;
 
   // 2. Entity recall
-  const recalledEntities = await recallEntities(store, llm, query, queryVec);
+  const recalledEntities = await timed(
+    onStep,
+    'entityRecall',
+    'LLM 抽 query 实体 + 名字精确匹配 + 向量召回。',
+    () => recallEntities(store, llm, query, queryVec),
+    (entities) => ({ count: entities.length }),
+  );
 
   // 3. Seed events
   const seedEventIds = new Set<string>();
@@ -54,71 +120,133 @@ export async function multiSearch(
     const events = await store.findEventsByEntity(entity.id);
     for (const event of events) seedEventIds.add(event.id);
   }
-  const titleMatches = await store.findEventsByTitleVector(queryVec, {
-    limit: SEED_EVENT_LIMIT,
-    threshold: TITLE_VECTOR_THRESHOLD,
-  });
+  const titleMatches = await timed(
+    onStep,
+    'seedEventsByTitle',
+    '按查询向量在事件标题向量上召回 seed events。',
+    () =>
+      store.findEventsByTitleVector(queryVec, {
+        limit: SEED_EVENT_LIMIT,
+        threshold: TITLE_VECTOR_THRESHOLD,
+      }),
+    (matches) => ({ count: matches.length }),
+  );
   for (const { event } of titleMatches) seedEventIds.add(event.id);
 
-  // 4. BFS expand — 1 hop
-  const expandedEventIds = new Set<string>(seedEventIds);
-  for (const eventId of seedEventIds) {
-    const entities = await store.findEntitiesByEvent(eventId);
-    for (const entity of entities) {
-      const neighborEvents = await store.findEventsByEntity(entity.id);
-      for (const neighbor of neighborEvents) {
-        expandedEventIds.add(neighbor.id);
-        if (expandedEventIds.size >= EXPANDED_EVENT_LIMIT) break;
-      }
-      if (expandedEventIds.size >= EXPANDED_EVENT_LIMIT) break;
-    }
-    if (expandedEventIds.size >= EXPANDED_EVENT_LIMIT) break;
+  if (seedEventIds.size === 0) {
+    fallbackReason = 'no seed events; used direct chunk vector search';
+    const results = await chunkVectorFallback(store, queryVec, topK);
+    return { results, trace: { steps, rerankedEventTitles, fallbackReason } };
   }
+
+  // 4. BFS expand — 1 hop
+  const expandedEventIds = await timed(
+    onStep,
+    'bfsExpand',
+    '从 seed events 沿实体关系 1 跳扩展候选事件。',
+    async () => {
+      const ids = new Set<string>(seedEventIds);
+      let capped = false;
+      for (const eventId of seedEventIds) {
+        const entities = await store.findEntitiesByEvent(eventId);
+        for (const entity of entities) {
+          const neighborEvents = await store.findEventsByEntity(entity.id);
+          for (const neighbor of neighborEvents) {
+            ids.add(neighbor.id);
+            if (ids.size >= EXPANDED_EVENT_LIMIT) {
+              capped = true;
+              break;
+            }
+          }
+          if (ids.size >= EXPANDED_EVENT_LIMIT) break;
+        }
+        if (ids.size >= EXPANDED_EVENT_LIMIT) break;
+      }
+      return { ids, capped };
+    },
+    (result) => ({ expandedCount: result.ids.size, capped: result.capped }),
+  );
 
   // 5. Coarse rank — score graph-reachable events by content similarity.
-  //    Graph associativity is the primary gate (entity recall + BFS expand);
-  //    content vector orders within that gate, not as a global recall path.
-  //    Mirrors SAG's coarse rank which only considers graph-reachable events.
-  const candidates: Array<{
-    id: string;
-    title: string;
-    summary: string;
-    score: number;
-    chunkId: string;
-  }> = [];
-  for (const eventId of expandedEventIds) {
-    const event = await store.getEvent(eventId);
-    if (event === undefined) continue;
-    const vec = event.contentEmbedding;
-    const score = vec === null ? 0 : engine.cosineSimilarity(queryVec, vec);
-    candidates.push({
-      id: event.id,
-      title: event.title,
-      summary: event.summary ?? '',
-      score,
-      chunkId: event.chunkId,
-    });
-  }
+  const { candidates, topCandidates } = await timed(
+    onStep,
+    'coarseRank',
+    '按 content 向量相似度对候选事件排序，取前 COARSE_RANK_LIMIT 个。',
+    async () => {
+      const cands: Array<{
+        id: string;
+        title: string;
+        summary: string;
+        score: number;
+        chunkId: string;
+      }> = [];
+      for (const eventId of expandedEventIds.ids) {
+        const event = await store.getEvent(eventId);
+        if (event === undefined) continue;
+        const vec = event.contentEmbedding;
+        const score = vec === null ? 0 : engine.cosineSimilarity(queryVec, vec);
+        cands.push({
+          id: event.id,
+          title: event.title,
+          summary: event.summary ?? '',
+          score,
+          chunkId: event.chunkId,
+        });
+      }
+      cands.sort((a, b) => b.score - a.score);
+      const top = cands.slice(0, COARSE_RANK_LIMIT);
+      return { candidates: cands, topCandidates: top };
+    },
+    (result) => ({
+      totalCandidates: result.candidates.length,
+      kept: result.topCandidates.length,
+      topScore: result.topCandidates[0]?.score ?? 0,
+    }),
+  );
 
   if (candidates.length === 0) {
-    // No graph-reachable events — fall back to direct chunk vector search.
-    return chunkVectorFallback(store, queryVec, topK);
+    fallbackReason = 'no graph-reachable events with content; used chunk vector fallback';
+    const results = await chunkVectorFallback(store, queryVec, topK);
+    return { results, trace: { steps, rerankedEventTitles, fallbackReason } };
   }
-
-  candidates.sort((a, b) => b.score - a.score);
-  const topCandidates = candidates.slice(0, COARSE_RANK_LIMIT);
 
   // 6. LLM rerank
   let rankedIds: string[];
-  if (options.skipRerank === true || topCandidates.length <= topK) {
+  if (options.skipRerank === true) {
     rankedIds = topCandidates.map((c) => c.id);
+    onStep({
+      step: 'rerank',
+      detail: '跳过 LLM rerank（skipRerank=true），直接用 coarse rank 顺序。',
+      durationMs: 0,
+      payload: { count: rankedIds.length },
+    });
+  } else if (topCandidates.length <= topK) {
+    rankedIds = topCandidates.map((c) => c.id);
+    onStep({
+      step: 'rerank',
+      detail: `候选数 ${topCandidates.length} ≤ topK ${topK}，无需 LLM rerank。`,
+      durationMs: 0,
+      payload: { count: rankedIds.length },
+    });
   } else {
-    rankedIds = await rerankEventsWithLlm(
-      llm,
-      query,
-      topCandidates.map((c) => ({ id: c.id, title: c.title, summary: c.summary })),
-      topK,
+    rankedIds = await timed(
+      onStep,
+      'rerank',
+      `LLM 从 ${topCandidates.length} 个候选中选最相关的 ${topK} 个。`,
+      () =>
+        rerankEventsWithLlm(
+          llm,
+          query,
+          topCandidates.map((c) => ({ id: c.id, title: c.title, summary: c.summary })),
+          topK,
+        ),
+      (ids) => ({ count: ids.length }),
     );
+  }
+  // Collect reranked event titles in order.
+  for (const id of rankedIds) {
+    const c = topCandidates.find((x) => x.id === id);
+    if (c !== undefined) rerankedEventTitles.push(c.title);
   }
 
   // 7. Build results from ranked events → chunks (dedupe by chunk_id).
@@ -136,6 +264,7 @@ export async function multiSearch(
 
   // If rerank gave us fewer than topK, fall back to coarse-ranked remaining.
   if (results.length < topK) {
+    let supplemented = 0;
     for (const candidate of topCandidates) {
       if (results.length >= topK) break;
       if (rankedIds.includes(candidate.id)) continue;
@@ -146,7 +275,18 @@ export async function multiSearch(
         candidate.score,
         candidate.id,
       );
-      if (result !== undefined) results.push(result);
+      if (result !== undefined) {
+        results.push(result);
+        supplemented += 1;
+      }
+    }
+    if (supplemented > 0) {
+      onStep({
+        step: 'supplementFromCoarse',
+        detail: `rerank 结果不足，从 coarse rank 残余补 ${supplemented} 个。`,
+        durationMs: 0,
+        payload: { supplemented },
+      });
     }
   }
 
@@ -155,9 +295,16 @@ export async function multiSearch(
   // events don't yield enough sections.
   if (results.length < topK) {
     const remaining = topK - results.length;
-    const backfill = await store.searchChunksByVector(queryVec, {
-      limit: remaining * 2,
-    });
+    const backfill = await timed(
+      onStep,
+      'backfill',
+      `rerank 结果不足，回退到 chunk 向量搜索补 ${remaining} 个。`,
+      () =>
+        store.searchChunksByVector(queryVec, {
+          limit: remaining * 2,
+        }),
+      (matches) => ({ backfillCandidates: matches.length }),
+    );
     for (const { chunk, score } of backfill) {
       if (results.length >= topK) break;
       if (seen.has(chunk.id)) continue;
@@ -167,7 +314,7 @@ export async function multiSearch(
     }
   }
 
-  return results;
+  return { results, trace: { steps, rerankedEventTitles, fallbackReason } };
 }
 
 /** Recall entities by name (LLM-extracted) and by vector similarity. */

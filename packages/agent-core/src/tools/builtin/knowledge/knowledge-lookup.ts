@@ -72,8 +72,8 @@ export class KnowledgeLookupTool implements BuiltinTool<KnowledgeLookupInput> {
             return this.agent.generateText(systemPrompt, userPrompt);
           },
         };
-        const { multiSearch } = await import('@scream-code/knowledge');
-        const results = await multiSearch(store, llm, query, { topK });
+        const { multiSearchWithTrace } = await import('@scream-code/knowledge');
+        const { results, trace } = await multiSearchWithTrace(store, llm, query, { topK });
 
         if (results.length === 0) {
           return {
@@ -97,6 +97,22 @@ export class KnowledgeLookupTool implements BuiltinTool<KnowledgeLookupInput> {
             `  ${result.content}`,
             '',
           );
+        }
+
+        // Append a compact retrieval trace so the agent can see why these
+        // chunks were selected (or why so few). Helps the agent decide whether
+        // to retry with a rephrased query.
+        lines.push('---', 'Retrieval trace:');
+        if (trace.fallbackReason !== null) {
+          lines.push(`  ⚠ Fallback: ${trace.fallbackReason}`);
+        }
+        for (const step of trace.steps) {
+          const payloadStr =
+            step.payload !== undefined ? ` ${JSON.stringify(step.payload)}` : '';
+          lines.push(`  • ${step.step} (${step.durationMs}ms) — ${step.detail}${payloadStr}`);
+        }
+        if (trace.rerankedEventTitles.length > 0) {
+          lines.push(`  Reranked events: ${trace.rerankedEventTitles.join(' | ')}`);
         }
 
         return { isError: false, output: lines.join('\n') };

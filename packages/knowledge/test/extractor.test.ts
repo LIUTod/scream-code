@@ -181,6 +181,44 @@ describe('extractEventFromChunk', () => {
     expect(event.title).toBe('H');
     expect(event.content).toBe('C');
   });
+
+  it('retries with backoff on transient failure then succeeds', async () => {
+    let calls = 0;
+    const llm: LlmCaller = {
+      async generate() {
+        calls += 1;
+        if (calls < 3) throw new Error('transient');
+        return JSON.stringify({
+          items: [
+            {
+              title: 'Recovered',
+              summary: 's',
+              content: 'c',
+              category: 'definition',
+              keywords: [],
+              entities: [],
+            },
+          ],
+        });
+      },
+    };
+    const event = await extractEventFromChunk(llm, makeChunk());
+    expect(calls).toBe(3);
+    expect(event.title).toBe('Recovered');
+  });
+
+  it('falls back after exhausting retries', async () => {
+    let calls = 0;
+    const llm: LlmCaller = {
+      async generate() {
+        calls += 1;
+        throw new Error('persistent');
+      },
+    };
+    const event = await extractEventFromChunk(llm, makeChunk({ heading: 'H', content: 'C' }));
+    expect(calls).toBe(3);
+    expect(event.title).toBe('H');
+  });
 });
 
 describe('rerankEventsWithLlm', () => {

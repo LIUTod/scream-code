@@ -4,6 +4,14 @@ const HEADING_RE = /^(#{1,6})\s+(.+?)\s*$/;
 const CODE_FENCE_RE = /^(\s*)(`{3,}|~{3,})/;
 
 /**
+ * Soft cap on chunk token count. BGE-small-zh-v1.5 (the fastembed model used
+ * here) has a 512-token sequence limit; chunks longer than that get truncated
+ * at the embedding layer, hurting retrieval quality. We split at ~480 to leave
+ * headroom for the heading line that gets prepended at embed time.
+ */
+const MAX_CHUNK_TOKENS = 480;
+
+/**
  * Split a markdown document into sections using heading_strict strategy:
  * each section begins at a heading and contains all body content until the
  * next heading. Consecutive headings collapse to the lowest-level one as the
@@ -24,19 +32,24 @@ export function chunkMarkdown(content: string): ChunkSection[] {
   const flush = (): void => {
     const raw = buffer.join('\n').trim();
     const heading = currentHeading;
+    const level = currentLevel;
     buffer = [];
     // Skip sections with no body content.
     if (raw.length === 0) return;
     const body = stripMarkdown(raw);
     if (body.length === 0 && heading === null) return;
-    sections.push({
+    const base: ChunkSection = {
       heading,
-      headingLevel: currentLevel,
+      headingLevel: level,
       content: body,
       rawContent: raw,
       rank,
-    });
-    rank += 1;
+    };
+    const subSections = splitLargeSection(base);
+    for (const section of subSections) {
+      sections.push({ ...section, rank });
+      rank += 1;
+    }
   };
 
   for (const line of lines) {
@@ -98,10 +111,11 @@ export function stripMarkdown(text: string): string {
 /**
  * Split a plain text file into chunks by blank-line paragraphs.
  * Each non-empty paragraph becomes one chunk with no heading.
- * Long paragraphs are split at sentence boundaries to avoid huge chunks.
+ * Long paragraphs are split at sentence boundaries to stay under the
+ * embedding model's token cap (same MAX_CHUNK_TOKENS as markdown).
  */
 export function chunkText(content: string): ChunkSection[] {
-  const MAX_PARA_TOKENS = 800;
+  const MAX_PARA_TOKENS = MAX_CHUNK_TOKENS;
   const MAX_PARA_CHARS = MAX_PARA_TOKENS * 4;
 
   const paragraphs = content
@@ -156,4 +170,154 @@ export function chunkText(content: string): ChunkSection[] {
 /** Rough token estimate — chars / 4 (English-leaning; CJK underestimates). */
 export function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4);
+}
+
+/**
+ * Split a section that exceeds MAX_CHUNK_TOKENS into smaller sub-sections.
+ * Strategy (mirrors SAG's `splitLargeSection`):
+ *   1. Split into paragraphs by blank lines.
+ *   2. Greedily pack paragraphs into chunks under the token cap.
+ *   3. A paragraph that alone exceeds the cap is split at sentence boundaries;
+ *      a sentence that itself exceeds the cap is split by character limit.
+ *
+ * Sections under the cap are returned unchanged (single-element array).
+ * The heading is preserved across all sub-sections; rank is reassigned by the
+ * caller. rawContent is rebuilt from the sub-chunk's content paragraphs.
+ */
+export function splitLargeSection(section: ChunkSection): ChunkSection[] {
+  const totalTokens = estimateTokens(section.content);
+  if (totalTokens <= MAX_CHUNK_TOKENS) {
+    return [section];
+  }
+
+  const paragraphs = section.rawContent.split(/\n{2,}/).map((p) => p.trim()).filter((p) => p.length > 0);
+  // When the section has no paragraph breaks (one giant block), fall back to
+  // sentence-level splitting on the whole content.
+  if (paragraphs.length <= 1) {
+    return splitBySentences(section, section.rawContent);
+  }
+
+  const result: ChunkSection[] = [];
+  let buffer: string[] = [];
+  let bufferTokens = 0;
+
+  const flushBuffer = (): void => {
+    if (buffer.length === 0) return;
+    const raw = buffer.join('\n\n').trim();
+    if (raw.length === 0) {
+      buffer = [];
+      bufferTokens = 0;
+      return;
+    }
+    result.push({
+      heading: section.heading,
+      headingLevel: section.headingLevel,
+      content: stripMarkdown(raw),
+      rawContent: raw,
+      rank: 0, // reassigned by caller
+    });
+    buffer = [];
+    bufferTokens = 0;
+  };
+
+  for (const para of paragraphs) {
+    const paraTokens = estimateTokens(para);
+    if (paraTokens > MAX_CHUNK_TOKENS) {
+      // Flush whatever is buffered first, then split the oversized paragraph.
+      flushBuffer();
+      for (const frag of splitBySentences(section, para)) {
+        result.push(frag);
+      }
+      continue;
+    }
+    if (buffer.length > 0 && bufferTokens + paraTokens > MAX_CHUNK_TOKENS) {
+      flushBuffer();
+    }
+    buffer.push(para);
+    bufferTokens += paraTokens;
+  }
+  flushBuffer();
+
+  return result.length > 0 ? result : [section];
+}
+
+/**
+ * Split a long text into sub-sections at sentence boundaries.
+ * Falls back to a hard character cut when a single sentence exceeds the cap.
+ */
+function splitBySentences(section: ChunkSection, text: string): ChunkSection[] {
+  const sentences = splitSentences(text);
+  const result: ChunkSection[] = [];
+  let buffer = '';
+  let bufferTokens = 0;
+
+  const flush = (): void => {
+    const trimmed = buffer.trim();
+    if (trimmed.length === 0) {
+      buffer = '';
+      bufferTokens = 0;
+      return;
+    }
+    result.push({
+      heading: section.heading,
+      headingLevel: section.headingLevel,
+      content: stripMarkdown(trimmed),
+      rawContent: trimmed,
+      rank: 0,
+    });
+    buffer = '';
+    bufferTokens = 0;
+  };
+
+  for (const sentence of sentences) {
+    const sentTokens = estimateTokens(sentence);
+    if (sentTokens > MAX_CHUNK_TOKENS) {
+      flush();
+      for (const frag of splitByCharLimit(sentence)) {
+        result.push({
+          heading: section.heading,
+          headingLevel: section.headingLevel,
+          content: stripMarkdown(frag),
+          rawContent: frag,
+          rank: 0,
+        });
+      }
+      continue;
+    }
+    if (buffer.length > 0 && bufferTokens + sentTokens > MAX_CHUNK_TOKENS) {
+      flush();
+    }
+    buffer = buffer.length === 0 ? sentence : `${buffer} ${sentence}`;
+    bufferTokens += sentTokens;
+  }
+  flush();
+
+  return result.length > 0 ? result : [
+    {
+      heading: section.heading,
+      headingLevel: section.headingLevel,
+      content: section.content,
+      rawContent: section.rawContent,
+      rank: 0,
+    },
+  ];
+}
+
+/** Split text into sentences using CJK + ASCII punctuation. */
+function splitSentences(text: string): string[] {
+  const matches = text.match(/[^。！？!?.\n]+[。！？!?.\n]+|[^。！？!?.\n]+$/g);
+  return matches ?? [text];
+}
+
+/** Hard character cut for pathological single sentences longer than the cap. */
+function splitByCharLimit(text: string): string[] {
+  const maxChars = MAX_CHUNK_TOKENS * 4;
+  const chunks: string[] = [];
+  let remaining = text.trim();
+  while (remaining.length > maxChars) {
+    chunks.push(remaining.slice(0, maxChars));
+    remaining = remaining.slice(maxChars).trimStart();
+  }
+  if (remaining.length > 0) chunks.push(remaining);
+  return chunks;
 }

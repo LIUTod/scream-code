@@ -1,5 +1,33 @@
 import type { ChunkSection, ExtractedEntity, ExtractedEvent, LlmCaller } from './types.js';
 
+/** Max LLM call attempts for extraction — fails fall back to a heading-derived event. */
+const EXTRACTION_MAX_ATTEMPTS = 3;
+/** Base delay (ms) for exponential backoff: 100, 200, 400. */
+const EXTRACTION_BACKOFF_BASE_MS = 100;
+
+function backoffDelay(attempt: number): number {
+  return EXTRACTION_BACKOFF_BASE_MS * 2 ** Math.max(0, attempt - 1);
+}
+
+async function callLlmWithBackoff(
+  llm: LlmCaller,
+  systemPrompt: string,
+  userPrompt: string,
+): Promise<string> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= EXTRACTION_MAX_ATTEMPTS; attempt += 1) {
+    try {
+      return await llm.generate(systemPrompt, userPrompt);
+    } catch (error) {
+      lastError = error;
+      if (attempt < EXTRACTION_MAX_ATTEMPTS) {
+        await new Promise((resolve) => setTimeout(resolve, backoffDelay(attempt)));
+      }
+    }
+  }
+  throw lastError;
+}
+
 export const ENTITY_TYPES = [
   'person',
   'organization',
@@ -196,14 +224,16 @@ function fallbackEvent(chunk: ChunkSection): ExtractedEvent {
 
 /**
  * Run extraction on a single chunk via the LLM caller.
- * Returns the parsed event (with fallback on failure).
+ * Retries with exponential backoff on transient failures; falls back to a
+ * heading-derived event only after all attempts fail.
  */
 export async function extractEventFromChunk(
   llm: LlmCaller,
   chunk: ChunkSection,
 ): Promise<ExtractedEvent> {
   try {
-    const response = await llm.generate(
+    const response = await callLlmWithBackoff(
+      llm,
       EXTRACTION_SYSTEM_PROMPT,
       buildExtractionUserPrompt(chunk),
     );

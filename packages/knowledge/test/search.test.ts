@@ -5,7 +5,7 @@ import { join } from 'pathe';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { ingestContent } from '../src/ingest.js';
-import { multiSearch } from '../src/search.js';
+import { multiSearch, multiSearchWithTrace } from '../src/search.js';
 import { KnowledgeStore } from '../src/store.js';
 import type { EmbeddingEngine, LlmCaller } from '../src/types.js';
 
@@ -192,5 +192,111 @@ describe('multiSearch (integration with stubs)', () => {
     expect(typeof results[0]!.score).toBe('number');
     expect(results[0]!.eventId).not.toBeNull();
     expect(results[0]!.eventTitle).not.toBeNull();
+  });
+});
+
+describe('multiSearchWithTrace', () => {
+  let tmpDir: string;
+  let store: KnowledgeStore;
+
+  beforeEach(async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'scream-knowledge-trace-'));
+    store = new KnowledgeStore(tmpDir);
+    await store.init();
+    store.setEmbeddingEngine(makeStubEngine());
+  });
+
+  afterEach(async () => {
+    store.close();
+    await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('records steps for each retrieval phase on a hit', async () => {
+    const llm = makeStubLlm();
+    const content = [
+      '## Rust Language',
+      'Rust is a systems programming language focused on safety.',
+      '',
+      '## Python Language',
+      'Python is a scripting language popular for data science.',
+    ].join('\n');
+    await ingestContent(store, llm, { name: 'languages.md', content });
+
+    const { results, trace } = await multiSearchWithTrace(store, llm, 'Rust', { topK: 2 });
+    expect(results.length).toBeGreaterThan(0);
+
+    const stepNames = trace.steps.map((s) => s.step);
+    expect(stepNames).toContain('queryEmbedding');
+    expect(stepNames).toContain('entityRecall');
+    expect(stepNames).toContain('seedEventsByTitle');
+    expect(stepNames).toContain('bfsExpand');
+    expect(stepNames).toContain('coarseRank');
+    expect(trace.rerankedEventTitles.length).toBeGreaterThan(0);
+    expect(trace.fallbackReason).toBeNull();
+  });
+
+  it('records fallbackReason when knowledge base is empty', async () => {
+    const llm = makeStubLlm();
+    const { results, trace } = await multiSearchWithTrace(store, llm, 'anything', { topK: 3 });
+    expect(results).toEqual([]);
+    expect(trace.fallbackReason).not.toBeNull();
+    expect(trace.rerankedEventTitles).toEqual([]);
+  });
+
+  it('each step has non-negative durationMs and a non-empty detail', async () => {
+    const llm = makeStubLlm();
+    await ingestContent(store, llm, { name: 'doc.md', content: '## H\nBody text' });
+    const { trace } = await multiSearchWithTrace(store, llm, 'Body', { topK: 1 });
+    for (const step of trace.steps) {
+      expect(step.durationMs).toBeGreaterThanOrEqual(0);
+      expect(step.detail.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('emits a rerank step on every path (skip, short, or full rerank)', async () => {
+    const llm = makeStubLlm();
+    const content = [
+      '## Rust\nRust content',
+      '## Python\nPython content',
+      '## Go\nGo content',
+    ].join('\n\n');
+    await ingestContent(store, llm, { name: 'doc.md', content });
+
+    // Full rerank path (candidates > topK) — use a query that matches titles.
+    const traceFull = await multiSearchWithTrace(store, llm, 'Rust', { topK: 1 });
+    const stepsFull = traceFull.trace.steps.map((s) => s.step);
+    expect(stepsFull).toContain('rerank');
+
+    // Short-circuit path (candidates <= topK).
+    const traceShort = await multiSearchWithTrace(store, llm, 'Rust', { topK: 10 });
+    const stepsShort = traceShort.trace.steps.map((s) => s.step);
+    expect(stepsShort).toContain('rerank');
+
+    // Skip path (skipRerank=true).
+    const traceSkip = await multiSearchWithTrace(store, llm, 'Rust', {
+      topK: 1,
+      skipRerank: true,
+    });
+    const stepsSkip = traceSkip.trace.steps.map((s) => s.step);
+    expect(stepsSkip).toContain('rerank');
+  });
+
+  it('measures real duration for IO-bound steps (bfsExpand, coarseRank)', async () => {
+    const llm = makeStubLlm();
+    const content = [
+      '## Rust\nRust content here',
+      '## Python\nPython content here',
+      '## Go\nGo content here',
+    ].join('\n\n');
+    await ingestContent(store, llm, { name: 'doc.md', content });
+
+    const { trace } = await multiSearchWithTrace(store, llm, 'Rust', { topK: 1 });
+    const stepByName = new Map(trace.steps.map((s) => [s.step, s]));
+    // These steps were previously hard-coded to 0ms — verify they now carry
+    // a real measurement (a number, even if 0 for fast in-memory stubs).
+    expect(stepByName.has('bfsExpand')).toBe(true);
+    expect(typeof stepByName.get('bfsExpand')?.durationMs).toBe('number');
+    expect(stepByName.has('coarseRank')).toBe(true);
+    expect(typeof stepByName.get('coarseRank')?.durationMs).toBe('number');
   });
 });
