@@ -49,6 +49,105 @@ export interface CompactedHistory {
 
 export const MAX_COMPACTION_RETRY_ATTEMPTS = 5;
 
+/** Max recursion depth for re-summarize fallback. Each level halves the
+ *  input, so depth 3 means we can compress a 8x-oversized input down to a
+ *  single summary by chaining 2^3 = 8 partial summaries. */
+const MAX_RE_SUMMARIZE_DEPTH = 3;
+
+class TruncatedError extends Error {}
+
+/**
+ * Recursive re-summarize fallback for context overflow. When even the
+ * minimum safe split still overflows the model (typically because a single
+ * message contains a giant tool result), split the input in half at a safe
+ * boundary, summarize each half, then concatenate the two partial summaries
+ * and re-summarize them into one. If a half still overflows, recurse.
+ *
+ * The split uses `canSplitAfter` from the strategy to make sure each half
+ * ends at a message boundary that doesn't orphan tool results. If no safe
+ * split exists in the half (e.g. one giant message), feed it as-is to the
+ * model and let the outer retry loop handle the overflow.
+ */
+async function summarizeWithFallback(
+  messages: readonly ContextMessage[],
+  summarizeOnce: (msgs: readonly ContextMessage[]) => Promise<{ summary: string; usage: TokenUsage | null }>,
+  depth: number = 0,
+): Promise<{ summary: string; usage: TokenUsage | null }> {
+  if (messages.length <= 1) {
+    // Can't split further — let the outer loop retry / fail.
+    return summarizeOnce(messages);
+  }
+
+  // Find a safe split near the midpoint, biased toward the back half so
+  // the second chunk tends to be smaller (more recent, denser content).
+  let split = -1;
+  const mid = Math.floor(messages.length / 2);
+  for (let i = mid; i > 0; i--) {
+    if (canSplitAfterContext(messages, i - 1)) {
+      split = i;
+      break;
+    }
+  }
+  if (split === -1) {
+    // No safe split forward from mid; try back half.
+    for (let i = mid + 1; i < messages.length; i++) {
+      if (canSplitAfterContext(messages, i - 1)) {
+        split = i;
+        break;
+      }
+    }
+  }
+  if (split === -1) {
+    return summarizeOnce(messages);
+  }
+
+  const firstHalf = messages.slice(0, split);
+  const secondHalf = messages.slice(split);
+
+  // Summarize each half. If a half overflows, recurse on it — but only if
+  // we haven't hit the depth cap. At the cap, let the overflow error bubble
+  // so the outer retry loop can handle it (otherwise we'd loop forever
+  // re-trying the same oversized half).
+  const summarizeHalf = async (half: readonly ContextMessage[]): Promise<string> => {
+    try {
+      return (await summarizeOnce(half)).summary;
+    } catch (error) {
+      if (
+        (error instanceof APIContextOverflowError || error instanceof TruncatedError) &&
+        depth + 1 < MAX_RE_SUMMARIZE_DEPTH
+      ) {
+        const nested = await summarizeWithFallback(half, summarizeOnce, depth + 1);
+        return nested.summary;
+      }
+      throw error;
+    }
+  };
+
+  const firstSummary = await summarizeHalf(firstHalf);
+  const secondSummary = await summarizeHalf(secondHalf);
+  const merged = `${firstSummary}\n\n---\n\n${secondSummary}`;
+
+  // Re-summarize the merged partial summaries into one final summary.
+  // Wrap them in a minimal user message so the model sees a single chunk.
+  const mergedMessage: ContextMessage = {
+    role: 'user',
+    content: [{ type: 'text', text: merged }],
+    toolCalls: [],
+  };
+  return summarizeOnce([mergedMessage]);
+}
+
+/** Same split-safety rule as DefaultCompactionStrategy.canSplitAfter, but
+ *  operates on ContextMessage (which carries toolCalls on assistant msgs). */
+function canSplitAfterContext(messages: readonly ContextMessage[], index: number): boolean {
+  const m = messages[index];
+  if (m === undefined) return false;
+  if (m.role === 'user') return false;
+  if (m.role === 'assistant' && m.toolCalls.length > 0) return false;
+  if (messages[index + 1]?.role === 'tool') return false;
+  return true;
+}
+
 /** Max consecutive compaction failures before auto-compaction is
  *  disabled for the remainder of the turn. Resets each turn. */
 const MAX_CONSECUTIVE_FAILURES = 3;
@@ -343,10 +442,9 @@ export class FullCompaction {
       await this.triggerPreCompactHook(data, tokensBefore, signal);
 
       const delays = retryBackoffDelays(MAX_COMPACTION_RETRY_ATTEMPTS);
-      let usage: TokenUsage | null;
-      let summary: string;
-      while (true) {
-        const messagesToCompact = originalHistory.slice(0, compactedCount);
+      const summarizeOnce = async (
+        messagesToCompact: readonly ContextMessage[],
+      ): Promise<{ summary: string; usage: TokenUsage | null }> => {
         const instruction = isUpdate
           ? COMPACTION_UPDATE_INSTRUCTION(data.instruction)
           : COMPACTION_INSTRUCTION(data.instruction);
@@ -363,25 +461,52 @@ export class FullCompaction {
             toolCalls: [],
           } satisfies Message,
         ];
-        class TruncatedError extends Error {}
+        const response = await this.agent.generate(
+          this.agent.config.provider,
+          COMPACTION_SYSTEM_PROMPT,
+          [],
+          messages,
+          undefined,
+          { signal },
+        );
+        if (response.finishReason === 'truncated') {
+          throw new TruncatedError();
+        }
+        return {
+          summary: extractCompactionSummary(response, model),
+          usage: response.usage,
+        };
+      };
+
+      let usage: TokenUsage | null;
+      let summary: string;
+      while (true) {
+        const messagesToCompact = originalHistory.slice(0, compactedCount);
         try {
-          const response = await this.agent.generate(
-            this.agent.config.provider,
-            COMPACTION_SYSTEM_PROMPT,
-            [],
-            messages,
-            undefined,
-            { signal },
-          );
-          if (response.finishReason === 'truncated') {
-            throw new TruncatedError();
-          }
-          usage = response.usage;
-          summary = extractCompactionSummary(response, model);
+          const result = await summarizeOnce(messagesToCompact);
+          usage = result.usage;
+          summary = result.summary;
           break;
         } catch (error) {
           if (error instanceof APIContextOverflowError || error instanceof TruncatedError) {
-            compactedCount = this.strategy.reduceCompactOnOverflow(messagesToCompact);
+            // Context overflow: shrink the input and retry. If we've already
+            // shrunk to the minimum safe split, fall back to re-summarizing
+            // the input in halves and merging — this handles the case where
+            // a single oversized message (e.g. a huge tool result) makes
+            // even the smallest split too large for the model.
+            const reduced = this.strategy.reduceCompactOnOverflow(messagesToCompact);
+            if (reduced < compactedCount) {
+              compactedCount = reduced;
+            } else {
+              this.agent.log.warn('compaction overflow at minimum split, falling back to re-summarize', {
+                compactedCount,
+                tokensBefore: estimateTokensForMessages(messagesToCompact),
+              });
+              const result = await summarizeWithFallback(messagesToCompact, summarizeOnce);
+              summary = result.summary;
+              usage = result.usage;
+              break;
+            }
           }
           else if (!isRetryableGenerateError(error)) {
             throw error;
