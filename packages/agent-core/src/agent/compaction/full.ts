@@ -170,6 +170,16 @@ export class FullCompaction {
   private consecutiveCompactionFailures = 0;
   private _shouldInjectSessionSummary = false;
   private compactionTimedOut = false;
+  /** Token count below which compaction should not re-trigger. Set after a
+   *  successful compaction to 110% of the post-compaction token count, so
+   *  that a context sitting just above triggerRatio doesn't immediately
+   *  re-trigger on every step. Reset each turn. */
+  private lowWaterMark = 0;
+  /** Whether a reactive (overflow-triggered) compaction has already been
+   *  attempted this turn. Prevents the overflow → compact → still near
+   *  limit → overflow → compact cycle from consuming the entire
+   *  maxCompactionPerTurn budget with marginal savings. */
+  private reactiveAttempted = false;
   protected compacting: {
     abortController: AbortController;
     promise: Promise<void>;
@@ -287,9 +297,14 @@ export class FullCompaction {
   resetForTurn(): void {
     this.compactionCountInTurn = 0;
     this.consecutiveCompactionFailures = 0;
+    this.lowWaterMark = 0;
+    this.reactiveAttempted = false;
   }
 
   async handleOverflowError(signal: AbortSignal, error: unknown) {
+    if (this.reactiveAttempted) {
+      throw error;
+    }
     const didStartCompaction = this.beginAutoCompaction(false);
     if (!didStartCompaction && !this.compacting) {
       if (this.consecutiveCompactionFailures >= MAX_CONSECUTIVE_FAILURES) {
@@ -301,6 +316,7 @@ export class FullCompaction {
       }
       throw error;
     }
+    this.reactiveAttempted = true;
   }
 
   async beforeStep(signal: AbortSignal): Promise<void> {
@@ -312,7 +328,8 @@ export class FullCompaction {
     // the token savings micro compaction already provides.
     const effectiveTokens = this.effectiveTokenCount;
 
-    const isReactiveTrigger = this.strategy.shouldCompact(effectiveTokens);
+    const isReactiveTrigger = this.strategy.shouldCompact(effectiveTokens) &&
+      effectiveTokens >= this.lowWaterMark;
     const isProactiveTrigger = !isReactiveTrigger &&
       this.strategy.shouldCompactProactively(
         effectiveTokens,
@@ -358,7 +375,9 @@ export class FullCompaction {
 
   private checkAutoCompaction(throwOnLimit: boolean = true): boolean {
     if (this.compacting) return true;
-    if (!this.strategy.shouldCompact(this.effectiveTokenCount)) return false;
+    const effectiveTokens = this.effectiveTokenCount;
+    if (!this.strategy.shouldCompact(effectiveTokens)) return false;
+    if (effectiveTokens < this.lowWaterMark) return false;
 
     return this.beginAutoCompaction(throwOnLimit);
   }
@@ -550,6 +569,10 @@ export class FullCompaction {
       this.markCompleted();
       this.agent.emitEvent({ type: 'compaction.completed', result });
       this.agent.context.applyCompaction(result);
+      // Set lowWaterMark AFTER applyCompaction so effectiveTokenCount reflects
+      // the compressed context. 110% margin accounts for normal per-step token
+      // growth that shouldn't count as "needing compaction again."
+      this.lowWaterMark = Math.floor(this.effectiveTokenCount * 1.1);
       await this.extractAndStoreMemos(processedSummary);
       this.triggerPostCompactHook(data, result);
 

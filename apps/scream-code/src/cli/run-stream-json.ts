@@ -337,6 +337,15 @@ class ClaudeStreamJsonWriter {
     if (output > 0) this.tokenUsage.output += output;
   }
 
+  /** Returns the accumulated token usage for the current turn. Used by
+   *  the result event emitter so the final `result` event carries the
+   *  turn's total token usage. Without this, usage was accumulated but
+   *  never emitted — consumers (cc-connect, mobile clients) saw empty
+   *  usage fields. */
+  getTokenUsage(): TokenUsage {
+    return { ...this.tokenUsage };
+  }
+
   private nextMsgId(): string {
     this.msgCounter += 1;
     return `msg_${this.msgCounter.toString(36)}`;
@@ -681,15 +690,18 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
       let settled = false;
       let unsubscribe: (() => void) | undefined;
 
-      const finish = (error?: Error): void => {
+      const finish = (error?: Error, exitCode?: number): void => {
         if (settled) return;
         settled = true;
         unsubscribe?.();
         if (error) {
-          writer.emitResult("error", error.message);
+          writer.emitResult("error", error.message, writer.getTokenUsage());
+          if (exitCode !== undefined) {
+            process.exitCode = exitCode;
+          }
           reject(error);
         } else {
-          writer.emitResult("success", "");
+          writer.emitResult("success", "", writer.getTokenUsage());
           resolve();
         }
       };
@@ -697,7 +709,17 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
       unsubscribe = session.onEvent((event) => {
         if (event.type === "error") {
           if (event.agentId !== "main") return;
-          finish(new Error(`${event.code}: ${event.message}`));
+          const errCode = event.code;
+          let exitCode = 1;
+          if (
+            errCode === "provider.auth_error" ||
+            errCode === "provider.rate_limit" ||
+            errCode === "provider.api_error" ||
+            errCode === "provider.connection_error"
+          ) {
+            exitCode = 3;
+          }
+          finish(new Error(`${event.code}: ${event.message}`), exitCode);
           return;
         }
 
@@ -760,12 +782,32 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
         } else if (type === "turn.ended") {
           if (event.reason === "completed") {
             finish();
+          } else if (event.reason === "cancelled") {
+            // SIGINT handler sets exitCode=130; don't override.
+            finish(new Error("Turn cancelled"));
           } else {
+            // reason === 'failed'
+            const errCode = event.error?.code;
             const errMsg =
               event.error !== undefined
                 ? `${event.error.code}: ${event.error.message}`
                 : `Turn ended: ${event.reason}`;
-            finish(new Error(errMsg));
+            // Semantic exit codes:
+            //   4 = incomplete (max steps exceeded, agent didn't finish)
+            //   3 = provider error (auth, rate limit, API failure)
+            //   1 = generic error (everything else)
+            let code = 1;
+            if (errCode === "loop.max_steps_exceeded") {
+              code = 4;
+            } else if (
+              errCode === "provider.auth_error" ||
+              errCode === "provider.rate_limit" ||
+              errCode === "provider.api_error" ||
+              errCode === "provider.connection_error"
+            ) {
+              code = 3;
+            }
+            finish(new Error(errMsg), code);
           }
         }
         // thinking.delta, tool.call.*, tool.result are intentionally
@@ -796,9 +838,17 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
       await turnPromise;
     }
   } catch (error) {
-    log.error("stream-json: fatal", { error });
-    writer.emitResult("error", error instanceof Error ? error.message : String(error));
-    process.exitCode = 1;
+    // finish() already emitted the result event and set exitCode for
+    // expected errors (turn.ended / agent error events). Only emit a
+    // result event here for truly unexpected fatal errors that bypassed
+    // the event-driven path.
+    if (process.exitCode === undefined) {
+      log.error("stream-json: fatal", { error });
+      writer.emitResult("error", error instanceof Error ? error.message : String(error), writer.getTokenUsage());
+      process.exitCode = 1;
+    } else {
+      log.error("stream-json: turn error (exitCode already set)", { error });
+    }
   } finally {
     // Reject any pending approvals so the core doesn't hang on shutdown.
     for (const [, pending] of pendingApprovals) {
