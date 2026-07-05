@@ -7,6 +7,7 @@ export interface CLIOptions {
   yolo: boolean;
   auto: boolean;
   plan: boolean;
+  wolfpack: boolean;
   model: string | undefined;
   outputFormat: PromptOutputFormat | undefined;
   prompt: string | undefined;
@@ -46,6 +47,9 @@ export function validateOptions(opts: CLIOptions): ValidatedOptions {
   if (promptMode && opts.plan) {
     throw new OptionConflictError('--prompt 不能与 --plan 同时使用。');
   }
+  if (promptMode && opts.wolfpack) {
+    throw new OptionConflictError('--prompt 不能与 --wolfpack 同时使用。');
+  }
   if (promptMode && opts.session === '') {
     throw new OptionConflictError('在提示模式下不能使用不带 ID 的 --session。');
   }
@@ -63,6 +67,9 @@ export function validateOptions(opts: CLIOptions): ValidatedOptions {
   }
   if (!promptMode && (opts.continue || opts.session !== undefined) && opts.plan) {
     throw new OptionConflictError('--plan 不能与 --continue 或 --session 同时使用。');
+  }
+  if (!promptMode && (opts.continue || opts.session !== undefined) && opts.wolfpack) {
+    throw new OptionConflictError('--wolfpack 不能与 --continue 或 --session 同时使用。');
   }
   return { options: opts, uiMode: promptMode ? 'print' : 'shell' };
 }

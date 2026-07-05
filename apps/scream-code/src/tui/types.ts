@@ -246,6 +246,7 @@ export interface TUIStartupOptions {
   readonly yolo: boolean;
   readonly auto: boolean;
   readonly plan: boolean;
+  readonly wolfpack: boolean;
   readonly model?: string;
   readonly startupNotice?: string;
 }
