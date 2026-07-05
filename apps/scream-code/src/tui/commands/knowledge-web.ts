@@ -9,7 +9,7 @@ import type { AddressInfo } from 'node:net';
 import type { KnowledgeStore } from '@scream-code/knowledge';
 
 import { openUrl } from '../utils/open-url';
-import { getKnowledgeStore } from './knowledge';
+import { getKnowledgeStore } from './knowledge-store';
 
 // ─── Server lifecycle ────────────────────────────────────────────────
 
@@ -423,7 +423,7 @@ svg{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-
   document.getElementById('btn-expand').onclick=function(){graphData.entities.forEach(function(e){expEnt.add(e.id)});graphData.events.forEach(function(e){expEv.add(e.id)});selId=null;document.getElementById('detail').classList.remove('open');fitView();rebuildDOM()};
   document.getElementById('btn-close').onclick=function(){document.getElementById('detail').classList.remove('open');navStack=[]};
 })();
-<\/script>
+${'</'}script>
 </body>
 </html>`;
 

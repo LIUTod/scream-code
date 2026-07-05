@@ -1,9 +1,7 @@
 import { stat } from 'node:fs/promises';
 import { basename } from 'node:path';
 
-import { createFastEmbedEngine } from '@scream-code/memory';
 import {
-  KnowledgeStore,
   ingestDirectory,
   ingestFile,
   isSupportedFile,
@@ -15,6 +13,7 @@ import {
 
 import type { SlashCommandHost } from './dispatch';
 import { handleWeb } from './knowledge-web';
+import { getKnowledgeStore } from './knowledge-store';
 import { TextInputDialogComponent } from '../components/dialogs/text-input-dialog';
 import { ChoicePickerComponent, type ChoiceOption } from '../components/dialogs/choice-picker';
 import { KnowledgeResultViewer } from '../components/dialogs/knowledge-result-viewer';
@@ -22,18 +21,6 @@ import {
   KnowledgeDocumentTree,
   type KnowledgeDocumentTreeEntry,
 } from '../components/dialogs/knowledge-document-tree';
-import { getDataDir } from '#/utils/paths';
-
-let knowledgeStoreInstance: KnowledgeStore | undefined;
-
-export async function getKnowledgeStore(): Promise<KnowledgeStore> {
-  if (knowledgeStoreInstance === undefined) {
-    knowledgeStoreInstance = new KnowledgeStore(getDataDir());
-    await knowledgeStoreInstance.init();
-    knowledgeStoreInstance.setEmbeddingEngine(createFastEmbedEngine());
-  }
-  return knowledgeStoreInstance;
-}
 
 function promptTextInput(
   host: SlashCommandHost,
