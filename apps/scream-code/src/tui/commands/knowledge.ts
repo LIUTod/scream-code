@@ -117,6 +117,19 @@ async function handleIngest(host: SlashCommandHost): Promise<void> {
 
   const store = await getKnowledgeStore();
   const llm = makeLlmCaller(host);
+
+  const checkSpinner = host.showProgressSpinner('检查向量模型...');
+  const status = await store.ensureEmbeddingReady();
+  if (!status.ok) {
+    checkSpinner.stop({ ok: false, label: '向量模型下载失败' });
+    host.showNotice(
+      '向量模型下载失败',
+      '知识库需要中文向量模型 bge-small-zh-v1.5（约 95MB）才能进行语义检索。\n\n可能原因：\n• 网络不通，无法下载模型文件\n• onnxruntime native binding 加载失败\n\n请检查网络后重试。',
+    );
+    return;
+  }
+  checkSpinner.stop({ ok: true, label: '向量模型就绪' });
+
   const spinner = host.showProgressSpinner('开始摄入...');
   try {
     if (stats.isDirectory()) {

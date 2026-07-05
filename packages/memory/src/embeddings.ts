@@ -22,6 +22,13 @@ export interface EmbeddingEngine {
    * Compute cosine similarity between two vectors.
    */
   cosineSimilarity(a: Float32Array, b: Float32Array): number;
+
+  /**
+   * Proactively trigger model loading (downloads the model on first call).
+   * Returns true if the engine is ready for embedding, false on failure.
+   * Safe to call multiple times; failed loads can be retried.
+   */
+  ensureReady(): Promise<boolean>;
 }
 
 /** Minimal interface for the fastembed model — avoids importing fastembed at module level. */
@@ -87,6 +94,23 @@ export function createFastEmbedEngine(): EmbeddingEngine {
       }
       const denom = Math.sqrt(normA) * Math.sqrt(normB);
       return denom === 0 ? 0 : dot / denom;
+    },
+
+    async ensureReady(): Promise<boolean> {
+      if (embedder !== null) return true;
+      try {
+        initPromise ??= loadEmbedder();
+        embedder = await initPromise;
+        if (embedder === null) {
+          initPromise = null;
+          return false;
+        }
+        loadFailed = false;
+        return true;
+      } catch {
+        initPromise = null;
+        return false;
+      }
     },
   };
 }

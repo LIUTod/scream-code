@@ -89,8 +89,8 @@ export async function ingestFile(
 ): Promise<{ documentId: string; chunkCount: number; eventCount: number; entityCount: number }> {
   const engine = store.getEmbeddingEngine();
   if (engine === undefined || !engine.available) {
-    onProgress?.({ stage: 'error', message: 'embedding engine unavailable' });
-    throw new Error('embedding engine unavailable — knowledge base requires fastembed');
+    onProgress?.({ stage: 'error', message: '向量模型未就绪' });
+    throw new Error('向量模型未就绪，请检查网络后重试');
   }
 
   // 1. Dedupe by file path.
@@ -100,7 +100,7 @@ export async function ingestFile(
       stage: 'error',
       message: `文件已摄入：${existing.name}（source id=${existing.id}）`,
     });
-    throw new Error(`file already ingested: ${filePath} (source ${existing.id})`);
+    throw new Error(`文件已摄入过: ${filePath} (source ${existing.id})`);
   }
 
   // 2. Read + chunk.
@@ -109,7 +109,7 @@ export async function ingestFile(
   const sections = chunkContent(content, getFileExtension(filePath));
   if (sections.length === 0) {
     onProgress?.({ stage: 'error', message: '文件无有效内容' });
-    throw new Error('file has no content to ingest');
+    throw new Error('文件无有效内容可摄入');
   }
 
   store.beginTransaction();
@@ -138,8 +138,8 @@ export async function ingestFile(
       sections.map((s) => (s.heading !== null ? `${s.heading}\n${s.content}` : s.content)),
     );
     if (chunkEmbeddings === null) {
-      onProgress?.({ stage: 'error', message: 'chunk embedding failed' });
-      throw new Error('chunk embedding failed');
+      onProgress?.({ stage: 'error', message: 'chunk 向量嵌入失败' });
+      throw new Error('chunk 向量嵌入失败');
     }
 
     const chunks = [];
@@ -199,8 +199,8 @@ export async function ingestFile(
       engine.embedBatch(contentTexts),
     ]);
     if (titleEmbeddings === null || contentEmbeddings === null) {
-      onProgress?.({ stage: 'error', message: 'event embedding failed' });
-      throw new Error('event embedding failed');
+      onProgress?.({ stage: 'error', message: 'event 向量嵌入失败' });
+      throw new Error('event 向量嵌入失败');
     }
 
     const events: KnowledgeEvent[] = [];
@@ -246,8 +246,8 @@ export async function ingestFile(
         ? await engine.embedBatch(uniqueEntities.map((e) => e.name))
         : [];
     if (uniqueEntities.length > 0 && entityEmbeddings === null) {
-      onProgress?.({ stage: 'error', message: 'entity embedding failed' });
-      throw new Error('entity embedding failed');
+      onProgress?.({ stage: 'error', message: 'entity 向量嵌入失败' });
+      throw new Error('entity 向量嵌入失败');
     }
 
     const entityIdByEntityKey = new Map<string, string>();
@@ -282,8 +282,8 @@ export async function ingestFile(
     const relationEmbeddings =
       relationPairs.length > 0 ? await engine.embedBatch(relationTexts) : [];
     if (relationPairs.length > 0 && relationEmbeddings === null) {
-      onProgress?.({ stage: 'error', message: 'relation embedding failed' });
-      throw new Error('relation embedding failed');
+      onProgress?.({ stage: 'error', message: 'relation 向量嵌入失败' });
+      throw new Error('relation 向量嵌入失败');
     }
 
     for (let i = 0; i < relationPairs.length; i++) {
@@ -332,14 +332,14 @@ export async function ingestContent(
 ): Promise<{ documentId: string; chunkCount: number; eventCount: number; entityCount: number }> {
   const engine = store.getEmbeddingEngine();
   if (engine === undefined || !engine.available) {
-    onProgress?.({ stage: 'error', message: 'embedding engine unavailable' });
-    throw new Error('embedding engine unavailable — knowledge base requires fastembed');
+    onProgress?.({ stage: 'error', message: '向量模型未就绪' });
+    throw new Error('向量模型未就绪，请检查网络后重试');
   }
 
   const sections = chunkMarkdown(params.content);
   if (sections.length === 0) {
     onProgress?.({ stage: 'error', message: '内容无有效切片' });
-    throw new Error('content has no sections to ingest');
+    throw new Error('内容无章节可摄入');
   }
 
   store.beginTransaction();
@@ -360,8 +360,8 @@ export async function ingestContent(
       sections.map((s) => (s.heading !== null ? `${s.heading}\n${s.content}` : s.content)),
     );
     if (chunkEmbeddings === null) {
-      onProgress?.({ stage: 'error', message: 'chunk embedding failed' });
-      throw new Error('chunk embedding failed');
+      onProgress?.({ stage: 'error', message: 'chunk 向量嵌入失败' });
+      throw new Error('chunk 向量嵌入失败');
     }
     const chunks = [];
     for (let i = 0; i < sections.length; i++) {
@@ -395,8 +395,8 @@ export async function ingestContent(
       engine.embedBatch(extractedEvents.map((e) => `${e.title}\n\n${e.content}`)),
     ]);
     if (titleEmbeddings === null || contentEmbeddings === null) {
-      onProgress?.({ stage: 'error', message: 'event embedding failed' });
-      throw new Error('event embedding failed');
+      onProgress?.({ stage: 'error', message: 'event 向量嵌入失败' });
+      throw new Error('event 向量嵌入失败');
     }
     const events: KnowledgeEvent[] = [];
     for (let i = 0; i < extractedEvents.length; i++) {
@@ -430,8 +430,8 @@ export async function ingestContent(
     const uniqueEntities = Array.from(entityMap.values());
     const entityEmbeddings = uniqueEntities.length > 0 ? await engine.embedBatch(uniqueEntities.map((e) => e.name)) : [];
     if (uniqueEntities.length > 0 && entityEmbeddings === null) {
-      onProgress?.({ stage: 'error', message: 'entity embedding failed' });
-      throw new Error('entity embedding failed');
+      onProgress?.({ stage: 'error', message: 'entity 向量嵌入失败' });
+      throw new Error('entity 向量嵌入失败');
     }
     const entityIdByEntityKey = new Map<string, string>();
     for (let i = 0; i < uniqueEntities.length; i++) {
@@ -459,8 +459,8 @@ export async function ingestContent(
     });
     const relationEmbeddings = relationPairs.length > 0 ? await engine.embedBatch(relationTexts) : [];
     if (relationPairs.length > 0 && relationEmbeddings === null) {
-      onProgress?.({ stage: 'error', message: 'relation embedding failed' });
-      throw new Error('relation embedding failed');
+      onProgress?.({ stage: 'error', message: 'relation 向量嵌入失败' });
+      throw new Error('relation 向量嵌入失败');
     }
     for (let i = 0; i < relationPairs.length; i++) {
       const pair = relationPairs[i]!;
@@ -523,7 +523,7 @@ export async function ingestDirectory(
 }> {
   const files = await collectSupportedFiles(dirPath);
   if (files.length === 0) {
-    throw new Error(`no supported files (.md, .markdown, .txt) found in ${dirPath}`);
+    throw new Error(`目录下没有支持的文件 (.md, .markdown, .txt): ${dirPath}`);
   }
 
   const errors: Array<{ filePath: string; message: string }> = [];

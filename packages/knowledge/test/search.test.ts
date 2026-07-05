@@ -52,6 +52,9 @@ function makeStubEngine(): EmbeddingEngine {
       for (let i = 0; i < a.length; i++) dot += a[i]! * b[i]!;
       return dot;
     },
+    async ensureReady(): Promise<boolean> {
+      return true;
+    },
   };
 }
 
