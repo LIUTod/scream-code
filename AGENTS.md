@@ -437,17 +437,18 @@ Collects the user's persona/preferences through a short interactive TUI and inje
 
 ### Fusion Plan
 
-`EnterPlanMode` supports a `mode: 'fusion'` argument. When the LLM requests it, the TUI spawns multiple headless `scream` CLI subagents in parallel, each exploring the task from a different angle. The subagent outputs are truncated, then fed to a synthesis subagent that produces a single consolidated plan. The synthesized plan is written to the session plan file before the main agent enters normal plan mode to review and present it.
+`EnterPlanMode` supports a `mode: 'fusion'` argument. When the main agent enters fusion plan mode, it is prompted to call the `FusionPlan` built-in tool instead of writing the plan manually. `FusionPlanTool` spawns multiple `plan` subagents in parallel via `SessionSubagentHost`, each exploring the task from a different angle, then a synthesis subagent merges the outputs into a single consolidated plan. The synthesized plan is written to the session plan file with `strategy: 'fusion'`.
 
 - **Angles**: correctness/edge cases, minimal invasiveness, and architecture/maintainability.
-- **Worker count**: defaults to 3; configurable per invocation (not yet exposed to the LLM).
-- **Timeout**: default 120 seconds per worker; synthesis has its own budget.
-- **Output budget**: default 8,000 bytes per worker, 12,000 bytes for synthesis.
-- **Recursion guard**: the environment variable `SCREAM_FUSIONPLAN_SUBAGENT` is set for spawned subagents so they do not recursively trigger fusion plan.
+- **Worker count**: defaults to 3; configurable per invocation (`worker_count`, 1–3).
+- **Timeout**: default 600 seconds per worker; configurable (`timeout_seconds`, 30–3600).
+- **Recursion guard**: `FusionPlanTool` is only registered on the main agent. `plan` subagents have `spawns: [explore]` and cannot recursively invoke `FusionPlan`.
+- **TUI toggle**: `Shift+Tab` cycles `off → plan → fusionplan → off`. The `fusionplan` state sets `strategy: 'fusion'` via `setPlanStrategy` RPC; the main agent then calls `FusionPlan` on the next turn.
+- **Plan mode injection**: when `planMode.strategy === 'fusion'`, the `PlanModeInjector` injects independent fusion prompts telling the main agent to use `FusionPlan` instead of writing manually.
 
 The LLM should choose `mode: 'fusion'` for ambiguous, large, or multi-approach tasks and `mode: 'normal'` (default) for straightforward or localized changes. See `packages/agent-core/src/tools/builtin/planning/enter-plan-mode.md` for the full decision guide.
 
-Key files: `apps/scream-code/src/tui/utils/fusion-plan.ts`, `apps/scream-code/src/tui/commands/config.ts`, `packages/agent-core/src/tools/builtin/planning/enter-plan-mode.md`, `packages/agent-core/src/profile/default/system.md`.
+Key files: `packages/agent-core/src/tools/builtin/planning/fusion-plan.ts`, `packages/agent-core/src/agent/injection/plan-mode.ts`, `packages/agent-core/src/tools/builtin/planning/enter-plan-mode.ts`, `packages/agent-core/src/profile/default/system.md`.
 
 ### Compaction Pipeline
 
