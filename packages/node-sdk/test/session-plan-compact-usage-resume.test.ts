@@ -229,6 +229,7 @@ describe('Session plan, compact, usage, and resume APIs', () => {
         id: sourcePlan.id,
         content: 'source plan',
         path: join(forkSummary!.sessionDir, 'agents', 'main', 'plans', `${sourcePlan.id}.md`),
+        strategy: 'normal',
       });
       expect(forkPlan?.path).not.toBe(sourcePlan.path);
       const forkWire = await readFile(
