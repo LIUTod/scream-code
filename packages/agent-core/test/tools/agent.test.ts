@@ -746,6 +746,84 @@ describe('AgentTool', () => {
     ]);
   });
 
+  it('rejects spawns outside the allowed whitelist', async () => {
+    const host = mockSubagentHost({
+      spawn: vi.fn().mockResolvedValue({
+        agentId: 'agent-child',
+        profileName: 'coder',
+        resumed: false,
+        completion: Promise.resolve({ result: 'child result' }),
+      }),
+    });
+    const tool = new AgentTool(host, undefined, undefined, { allowedSpawns: ['explore'] });
+
+    const result = await executeTool(
+      tool,
+      context({
+        prompt: 'Investigate',
+        description: 'Find cause',
+      }),
+    );
+
+    expect(result).toMatchObject({
+      isError: true,
+      output: 'Cannot spawn "coder". Allowed subagents: explore.',
+    });
+    expect(host.spawn).not.toHaveBeenCalled();
+  });
+
+  it('allows spawns inside the allowed whitelist', async () => {
+    const host = mockSubagentHost({
+      spawn: vi.fn().mockResolvedValue({
+        agentId: 'agent-child',
+        profileName: 'explore',
+        resumed: false,
+        completion: Promise.resolve({ result: 'child result' }),
+      }),
+    });
+    const tool = new AgentTool(host, undefined, undefined, { allowedSpawns: ['explore'] });
+
+    const result = await executeTool(
+      tool,
+      context({
+        prompt: 'Investigate',
+        description: 'Find cause',
+        subagent_type: 'explore',
+      }),
+    );
+
+    expect(host.spawn).toHaveBeenCalledWith(
+      'explore',
+      expect.objectContaining({
+        parentToolCallId: 'call_agent',
+      }),
+    );
+    expect(result.output).toContain('child result');
+  });
+
+  it('filters the subagent description to the allowed whitelist', () => {
+    const host = mockSubagentHost({ spawn: vi.fn() });
+    const subagents = {
+      explore: profile({
+        name: 'explore',
+        description: 'Read-only exploration.',
+        tools: ['Read', 'Grep', 'Glob'],
+      }),
+      coder: profile({
+        name: 'coder',
+        description: 'General coding.',
+        tools: ['Read', 'Write', 'Edit', 'Bash'],
+      }),
+    };
+
+    const tool = new AgentTool(host, undefined, subagents, { allowedSpawns: ['explore'] });
+
+    expect(tool.description).toContain('Read-only exploration.');
+    expect(tool.description).not.toContain('General coding.');
+    expect(tool.description).toContain('Tools: Read, Grep, Glob');
+    expect(tool.description).not.toContain('Tools: Read, Write, Edit, Bash');
+  });
+
   it('reports a deliberate user interruption when a foreground subagent is cancelled by the user', async () => {
     const controller = new AbortController();
     const host = mockSubagentHost({

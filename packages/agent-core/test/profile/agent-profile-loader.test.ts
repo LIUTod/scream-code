@@ -185,6 +185,14 @@ describe('default agent profiles', () => {
     expect(DEFAULT_AGENT_PROFILES['plan']?.tools).not.toContain('Bash');
   });
 
+  it('merges spawns through extends and resolves them on default profiles', () => {
+    expect(DEFAULT_AGENT_PROFILES['agent']?.spawns).toBeUndefined();
+    expect(DEFAULT_AGENT_PROFILES['plan']?.spawns).toEqual(['explore']);
+    expect(DEFAULT_AGENT_PROFILES['reviewer']?.spawns).toEqual(['explore']);
+    expect(DEFAULT_AGENT_PROFILES['coder']?.spawns).toBeUndefined();
+    expect(DEFAULT_AGENT_PROFILES['explore']?.spawns).toBeUndefined();
+  });
+
   it('renders the model-invocable skill listing for bundled prompts', () => {
     const skills = new SkillRegistry();
     skills.register(skill('review', { whenToUse: 'When code review is requested.' }));

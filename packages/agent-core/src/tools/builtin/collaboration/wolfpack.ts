@@ -53,16 +53,20 @@ export class WolfPackTool implements BuiltinTool<WolfPackToolInput> {
     options?: {
       subagents?: ResolvedAgentProfile['subagents'];
       log?: Logger;
+      allowedSpawns?: string[];
     },
   ) {
-    const typeLines = buildSubagentDescriptions(options?.subagents);
+    const visibleSubagents = filterSubagentsBySpawns(options?.subagents, options?.allowedSpawns);
+    const typeLines = buildSubagentDescriptions(visibleSubagents);
     this.description = typeLines
       ? `${WOLFPACK_DESCRIPTION}\n\nAvailable agent types (pass via subagent_type):\n${typeLines}`
       : WOLFPACK_DESCRIPTION;
     this.log = options?.log;
+    this.allowedSpawns = options?.allowedSpawns;
   }
 
   private readonly log?: Logger;
+  private readonly allowedSpawns?: string[];
 
   resolveExecution(args: WolfPackToolInput): ToolExecution {
     return {
@@ -92,6 +96,13 @@ export class WolfPackTool implements BuiltinTool<WolfPackToolInput> {
     }
 
     const profileName = args.subagent_type ?? 'coder';
+    if (this.allowedSpawns !== undefined && !this.allowedSpawns.includes(profileName)) {
+      return {
+        output: `Cannot spawn "${profileName}" via WolfPack. Allowed subagents: ${this.allowedSpawns.join(', ')}.`,
+        isError: true,
+      };
+    }
+
     const template = args.prompt_template;
 
     // Spawn every requested subagent in parallel (unlimited concurrency mode).
@@ -187,4 +198,14 @@ export class WolfPackTool implements BuiltinTool<WolfPackToolInput> {
 
     return { output: [summary, '', ...lines].join('\n') };
   }
+}
+
+function filterSubagentsBySpawns(
+  subagents: ResolvedAgentProfile['subagents'] | undefined,
+  allowedSpawns: string[] | undefined,
+): ResolvedAgentProfile['subagents'] | undefined {
+  if (allowedSpawns === undefined || subagents === undefined) return subagents;
+  return Object.fromEntries(
+    Object.entries(subagents).filter(([name]) => allowedSpawns.includes(name)),
+  );
 }

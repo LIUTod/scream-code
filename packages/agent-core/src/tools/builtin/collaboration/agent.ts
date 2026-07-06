@@ -139,11 +139,13 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
     options?: {
       allowBackground?: boolean;
       log?: Logger;
+      allowedSpawns?: string[];
     },
   ) {
     this.allowBackground = options?.allowBackground ?? this.backgroundManager !== undefined;
     const log = options?.log;
-    const typeLines = buildSubagentDescriptions(subagents);
+    const visibleSubagents = filterSubagentsBySpawns(subagents, options?.allowedSpawns);
+    const typeLines = buildSubagentDescriptions(visibleSubagents);
     const baseDescription = `${AGENT_DESCRIPTION_BASE}\n\n${
       this.allowBackground ? AGENT_BACKGROUND_DESCRIPTION : AGENT_BACKGROUND_DISABLED_DESCRIPTION
     }`;
@@ -151,9 +153,21 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
       ? `${baseDescription}\n\nAvailable agent types (pass via subagent_type):\n${typeLines}`
       : baseDescription;
     this.log = log;
+    this.allowedSpawns = options?.allowedSpawns;
+  }
+
+  private checkSpawnAllowed(profileName: string): ExecutableToolResult | undefined {
+    if (this.allowedSpawns !== undefined && !this.allowedSpawns.includes(profileName)) {
+      return {
+        output: `Cannot spawn "${profileName}". Allowed subagents: ${this.allowedSpawns.join(', ')}.`,
+        isError: true,
+      };
+    }
+    return undefined;
   }
 
   private readonly log?: Logger;
+  private readonly allowedSpawns?: string[];
 
   resolveExecution(args: AgentToolInput): ToolExecution {
     let profileName = args.subagent_type?.length ? args.subagent_type : 'coder';
@@ -199,6 +213,14 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
           output: 'Cannot set subagent_type when resuming an existing agent. Resume by agent id only.',
           isError: true,
         };
+      }
+
+      const effectiveProfileName = resumeAgentId !== undefined && resumeAgentId.length > 0
+        ? this.subagentHost.getProfileName?.(resumeAgentId)
+        : requestedProfileName ?? 'coder';
+      if (effectiveProfileName !== undefined) {
+        const denied = this.checkSpawnAllowed(effectiveProfileName);
+        if (denied !== undefined) return denied;
       }
 
       let reservation: ReturnType<BackgroundProcessManager['reserveSlot']> | undefined;
@@ -391,4 +413,14 @@ export function buildSubagentDescriptions(subagents: ResolvedAgentProfile['subag
       return `${header}\n  Tools: ${subagent.tools.join(', ')}`;
     })
     .join('\n');
+}
+
+function filterSubagentsBySpawns(
+  subagents: ResolvedAgentProfile['subagents'] | undefined,
+  allowedSpawns: string[] | undefined,
+): ResolvedAgentProfile['subagents'] | undefined {
+  if (allowedSpawns === undefined || subagents === undefined) return subagents;
+  return Object.fromEntries(
+    Object.entries(subagents).filter(([name]) => allowedSpawns.includes(name)),
+  );
 }

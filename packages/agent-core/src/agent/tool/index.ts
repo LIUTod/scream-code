@@ -599,6 +599,23 @@ export class ToolManager {
       this.enabledTools.has('TaskList') &&
       this.enabledTools.has('TaskOutput') &&
       this.enabledTools.has('TaskStop');
+    // Collaboration tools. Main agents see all configured subagents.
+    // Subagents with a `spawns` whitelist in their profile can spawn only
+    // the listed profiles; this lets plan/reviewer recursively delegate
+    // parallel exploration without giving every subagent full spawn power.
+    const parentProfile = DEFAULT_AGENT_PROFILES[this.agent.config.profileName ?? 'agent'];
+    const allowedSpawns = parentProfile?.spawns;
+    const canSpawn =
+      this.agent.subagentHost &&
+      (this.agent.type !== 'sub' || (allowedSpawns !== undefined && allowedSpawns.length > 0));
+    const visibleSubagents = allowedSpawns
+      ? Object.fromEntries(
+          Object.entries(DEFAULT_AGENT_PROFILES['agent']?.subagents ?? {}).filter(([name]) =>
+            allowedSpawns.includes(name),
+          ),
+        )
+      : DEFAULT_AGENT_PROFILES['agent']?.subagents;
+
     this.builtinTools = new Map(
       [
         new b.ReadTool(jian, workspace),
@@ -641,25 +658,25 @@ export class ToolManager {
           new b.SkillTool(this.agent),
         this.agent.type === 'main' && new b.MakeSkillPlanTool(this.agent),
         this.agent.type === 'main' && new b.MakeSkillApplyTool(this.agent),
-        this.agent.subagentHost &&
-          this.agent.type !== 'sub' &&
+        canSpawn &&
           new b.AgentTool(
             this.agent.subagentHost,
             background,
-            DEFAULT_AGENT_PROFILES['agent']?.subagents,
+            visibleSubagents,
             {
               allowBackground,
               log: this.agent.log,
+              allowedSpawns,
             },
           ),
-        this.agent.subagentHost &&
-          this.agent.type !== 'sub' &&
+        canSpawn &&
           new b.WolfPackTool(
             this.agent.subagentHost,
             () => this.agent.wolfpackMode.isActive,
             {
-              subagents: DEFAULT_AGENT_PROFILES['agent']?.subagents,
+              subagents: visibleSubagents,
               log: this.agent.log,
+              allowedSpawns,
             },
           ),
 

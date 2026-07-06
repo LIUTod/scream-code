@@ -21,6 +21,9 @@ export const RawAgentProfileSchema = z.object({
   tools: z.array(z.string()).optional(),
   whenToUse: z.string().optional(),
   subagents: z.record(z.string(), RawSubagentProfileSchema).optional(),
+  // Subagent profile names this agent is allowed to spawn. When omitted,
+  // the agent cannot spawn subagents (but may inherit from a parent profile).
+  spawns: z.array(z.string().min(1)).optional(),
 });
 
 export type RawAgentProfile = z.infer<typeof RawAgentProfileSchema>;
@@ -53,4 +56,8 @@ export interface ResolvedAgentProfile {
   tools: string[];
   whenToUse?: string;
   subagents?: Record<string, ResolvedAgentProfile>;
+  // Subagent profile names this agent is allowed to spawn. Undefined means
+  // no spawning (main agents with no whitelist are treated as unrestricted
+  // and pass undefined to allow all configured subagents).
+  spawns?: string[];
 }
