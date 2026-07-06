@@ -168,7 +168,7 @@ export class FusionPlanTool implements BuiltinTool<FusionPlanInput> {
       });
       const synthesisCompletion = await synthesisHandle.completion;
       finalPlan = synthesisCompletion.result.trim();
-    } catch (error) {
+    } catch {
       // Fall back to concatenating successful outputs if synthesis subagent fails.
       finalPlan = truncatedOutputs.join('\n\n---\n\n');
     }
