@@ -20,6 +20,7 @@ promptVars:
     - NEVER use Bash for any file creation or modification commands
     - Adapt your search depth based on the thoroughness level specified by the caller
     - Wherever possible, spawn multiple parallel tool calls for grepping and reading files to maximize speed
+    - If a search returns empty results, you MUST try at least one alternate strategy (different pattern, broader path, or alternate naming convention) before concluding the target doesn't exist
 
     If the prompt includes a <git-context> block, use it to orient yourself about the repository state before starting your investigation.
 
