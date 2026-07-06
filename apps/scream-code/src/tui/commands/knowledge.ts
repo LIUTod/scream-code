@@ -76,6 +76,8 @@ function makeLlmCaller(host: SlashCommandHost): LlmCaller {
 
 function formatProgress(progress: IngestProgress): string {
   switch (progress.stage) {
+    case 'embedding-check':
+      return progress.message;
     case 'chunking':
       return `切分文件中...`;
     case 'embedding-chunks':
@@ -117,18 +119,6 @@ async function handleIngest(host: SlashCommandHost): Promise<void> {
 
   const store = await getKnowledgeStore();
   const llm = makeLlmCaller(host);
-
-  const checkSpinner = host.showProgressSpinner('检查向量模型...');
-  const status = await store.ensureEmbeddingReady();
-  if (!status.ok) {
-    checkSpinner.stop({ ok: false, label: '向量模型下载失败' });
-    host.showNotice(
-      '向量模型下载失败',
-      '知识库需要中文向量模型 bge-small-zh-v1.5（约 95MB）才能进行语义检索。\n\n可能原因：\n• 网络不通，无法下载模型文件\n• onnxruntime native binding 加载失败\n\n请检查网络后重试。',
-    );
-    return;
-  }
-  checkSpinner.stop({ ok: true, label: '向量模型就绪' });
 
   const spinner = host.showProgressSpinner('开始摄入...');
   try {
@@ -227,12 +217,19 @@ async function handleSearch(host: SlashCommandHost): Promise<void> {
   }
   spinner.stop({ ok: true, label: '搜索完成' });
 
+  const engine = store.getEmbeddingEngine();
+  const degraded = engine === undefined || !engine.available;
+
   if (results.length === 0) {
-    await showResultViewer(host, '搜索结果', `查询 "${query}" 未命中任何 chunk`);
+    await showResultViewer(host, '搜索结果', `查询 "${query}" 未命中任何 chunk${degraded ? '\n\n⚠️ 向量模型未就绪，当前为关键词检索模式。如下载失败，建议开启科学上网后重启。' : ''}`);
     return;
   }
 
   const lines: string[] = [`查询: ${query}`, ''];
+  if (degraded) {
+    lines.push('⚠️ 向量模型未就绪，当前为关键词检索模式。如下载失败，建议开启科学上网后重启。');
+    lines.push('');
+  }
   for (const [i, r] of results.entries()) {
     lines.push(`#${i + 1} [score=${r.score.toFixed(3)}] ${r.heading ?? '(无标题)'}`);
     lines.push(`   来源: ${r.sourceName}`);
@@ -413,7 +410,7 @@ export async function handleKnowledgeCommand(
             else if (value === 'search') await handleSearch(host);
             else if (value === 'delete') await handleDelete(host);
             else if (value === 'stats') await handleStats(host);
-            else if (value === 'web') await handleWeb();
+            else if (value === 'web') await handleWeb(host);
           } catch (error: unknown) {
             const msg = error instanceof Error ? error.message : String(error);
             host.showError(`操作失败: ${msg}`);

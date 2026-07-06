@@ -4,6 +4,7 @@ import { basename, join } from 'pathe';
 import { chunkMarkdown, chunkText } from './chunking.js';
 import { extractEventFromChunk } from './extractor.js';
 import type { KnowledgeStore } from './store.js';
+import type { EmbeddingEngine } from '@scream-code/memory';
 import type {
   ChunkSection,
   IngestProgress,
@@ -11,6 +12,24 @@ import type {
   KnowledgeEvent,
   LlmCaller,
 } from './types.js';
+
+/**
+ * Embed texts, returning null-array if embeddings are skipped or on failure.
+ * Caller should set skipEmbedding=true when the model didn't load in time,
+ * so the entire ingestion is consistent (all or nothing for embeddings).
+ * Search falls back to FTS5 keyword match for chunks without embeddings.
+ */
+async function embedOrNulls(
+  engine: EmbeddingEngine | undefined,
+  texts: string[],
+  skipEmbedding?: boolean,
+): Promise<(Float32Array | null)[]> {
+  if (engine === undefined || texts.length === 0 || skipEmbedding) return texts.map(() => null);
+  if (!engine.available) return texts.map(() => null);
+  const vectors = await engine.embedBatch(texts);
+  if (vectors === null || vectors.length !== texts.length) return texts.map(() => null);
+  return vectors;
+}
 
 /** LLM concurrency for extraction — kept low to avoid rate-limit bursts. */
 const LLM_CONCURRENCY = 3;
@@ -88,9 +107,25 @@ export async function ingestFile(
   onProgress?: IngestProgressCallback,
 ): Promise<{ documentId: string; chunkCount: number; eventCount: number; entityCount: number }> {
   const engine = store.getEmbeddingEngine();
-  if (engine === undefined || !engine.available) {
-    onProgress?.({ stage: 'error', message: '向量模型未就绪' });
-    throw new Error('向量模型未就绪，请检查网络后重试');
+  // Try loading the model with a 15s timeout. Even if the engine previously
+  // failed (available=false), ensureReady() can retry — background downloads
+  // may have completed since last attempt.
+  let skipEmbed = engine === undefined;
+  if (engine !== undefined) {
+    onProgress?.({ stage: 'embedding-check', message: '检查向量模型...' });
+    try {
+      const ready = await Promise.race([
+        engine.ensureReady(),
+        new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 15_000)),
+      ]);
+      skipEmbed = !ready;
+      if (skipEmbed) {
+        onProgress?.({ stage: 'embedding-check', message: '向量模型未就绪，本次摄入跳过向量嵌入' });
+      }
+    } catch {
+      skipEmbed = true;
+      onProgress?.({ stage: 'embedding-check', message: '向量模型未就绪，本次摄入跳过向量嵌入' });
+    }
   }
 
   // 1. Dedupe by file path.
@@ -134,13 +169,11 @@ export async function ingestFile(
       totalChunks: sections.length,
       message: `嵌入 chunks: 0/${sections.length}`,
     });
-    const chunkEmbeddings = await engine.embedBatch(
+    const chunkEmbeddings = await embedOrNulls(
+      engine,
       sections.map((s) => (s.heading !== null ? `${s.heading}\n${s.content}` : s.content)),
+      skipEmbed,
     );
-    if (chunkEmbeddings === null) {
-      onProgress?.({ stage: 'error', message: 'chunk 向量嵌入失败' });
-      throw new Error('chunk 向量嵌入失败');
-    }
 
     const chunks = [];
     for (let i = 0; i < sections.length; i++) {
@@ -195,13 +228,9 @@ export async function ingestFile(
     const titleTexts = extractedEvents.map((e) => e.title);
     const contentTexts = extractedEvents.map((e) => `${e.title}\n\n${e.content}`);
     const [titleEmbeddings, contentEmbeddings] = await Promise.all([
-      engine.embedBatch(titleTexts),
-      engine.embedBatch(contentTexts),
+      embedOrNulls(engine, titleTexts, skipEmbed),
+      embedOrNulls(engine, contentTexts, skipEmbed),
     ]);
-    if (titleEmbeddings === null || contentEmbeddings === null) {
-      onProgress?.({ stage: 'error', message: 'event 向量嵌入失败' });
-      throw new Error('event 向量嵌入失败');
-    }
 
     const events: KnowledgeEvent[] = [];
     for (let i = 0; i < extractedEvents.length; i++) {
@@ -243,17 +272,13 @@ export async function ingestFile(
     const uniqueEntities = Array.from(entityMap.values());
     const entityEmbeddings =
       uniqueEntities.length > 0
-        ? await engine.embedBatch(uniqueEntities.map((e) => e.name))
+        ? await embedOrNulls(engine, uniqueEntities.map((e) => e.name), skipEmbed)
         : [];
-    if (uniqueEntities.length > 0 && entityEmbeddings === null) {
-      onProgress?.({ stage: 'error', message: 'entity 向量嵌入失败' });
-      throw new Error('entity 向量嵌入失败');
-    }
 
     const entityIdByEntityKey = new Map<string, string>();
     for (let i = 0; i < uniqueEntities.length; i++) {
       const entity = uniqueEntities[i]!;
-      const embedding = entityEmbeddings?.[i] ?? null;
+      const embedding = entityEmbeddings[i] ?? null;
       const stored = await store.upsertEntity({
         sourceId: source.id,
         type: entity.type,
@@ -280,11 +305,7 @@ export async function ingestFile(
         : `${event.title} ${entity.name}`;
     });
     const relationEmbeddings =
-      relationPairs.length > 0 ? await engine.embedBatch(relationTexts) : [];
-    if (relationPairs.length > 0 && relationEmbeddings === null) {
-      onProgress?.({ stage: 'error', message: 'relation 向量嵌入失败' });
-      throw new Error('relation 向量嵌入失败');
-    }
+      relationPairs.length > 0 ? await embedOrNulls(engine, relationTexts, skipEmbed) : [];
 
     for (let i = 0; i < relationPairs.length; i++) {
       const pair = relationPairs[i]!;
@@ -331,9 +352,22 @@ export async function ingestContent(
   onProgress?: IngestProgressCallback,
 ): Promise<{ documentId: string; chunkCount: number; eventCount: number; entityCount: number }> {
   const engine = store.getEmbeddingEngine();
-  if (engine === undefined || !engine.available) {
-    onProgress?.({ stage: 'error', message: '向量模型未就绪' });
-    throw new Error('向量模型未就绪，请检查网络后重试');
+  let skipEmbed = engine === undefined;
+  if (engine !== undefined) {
+    onProgress?.({ stage: 'embedding-check', message: '检查向量模型...' });
+    try {
+      const ready = await Promise.race([
+        engine.ensureReady(),
+        new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 15_000)),
+      ]);
+      skipEmbed = !ready;
+      if (skipEmbed) {
+        onProgress?.({ stage: 'embedding-check', message: '向量模型未就绪，本次摄入跳过向量嵌入' });
+      }
+    } catch {
+      skipEmbed = true;
+      onProgress?.({ stage: 'embedding-check', message: '向量模型未就绪，本次摄入跳过向量嵌入' });
+    }
   }
 
   const sections = chunkMarkdown(params.content);
@@ -356,13 +390,11 @@ export async function ingestContent(
     });
 
     onProgress?.({ stage: 'embedding-chunks', chunkIndex: 0, totalChunks: sections.length, message: `嵌入 chunks: 0/${sections.length}` });
-    const chunkEmbeddings = await engine.embedBatch(
+    const chunkEmbeddings = await embedOrNulls(
+      engine,
       sections.map((s) => (s.heading !== null ? `${s.heading}\n${s.content}` : s.content)),
+      skipEmbed,
     );
-    if (chunkEmbeddings === null) {
-      onProgress?.({ stage: 'error', message: 'chunk 向量嵌入失败' });
-      throw new Error('chunk 向量嵌入失败');
-    }
     const chunks = [];
     for (let i = 0; i < sections.length; i++) {
       const section = sections[i]!;
@@ -391,13 +423,9 @@ export async function ingestContent(
 
     onProgress?.({ stage: 'embedding-events', chunkIndex: 0, totalChunks: sections.length, message: `嵌入 events: 0/${sections.length}` });
     const [titleEmbeddings, contentEmbeddings] = await Promise.all([
-      engine.embedBatch(extractedEvents.map((e) => e.title)),
-      engine.embedBatch(extractedEvents.map((e) => `${e.title}\n\n${e.content}`)),
+      embedOrNulls(engine, extractedEvents.map((e) => e.title), skipEmbed),
+      embedOrNulls(engine, extractedEvents.map((e) => `${e.title}\n\n${e.content}`), skipEmbed),
     ]);
-    if (titleEmbeddings === null || contentEmbeddings === null) {
-      onProgress?.({ stage: 'error', message: 'event 向量嵌入失败' });
-      throw new Error('event 向量嵌入失败');
-    }
     const events: KnowledgeEvent[] = [];
     for (let i = 0; i < extractedEvents.length; i++) {
       const extracted = extractedEvents[i]!;
@@ -428,11 +456,7 @@ export async function ingestContent(
       }
     }
     const uniqueEntities = Array.from(entityMap.values());
-    const entityEmbeddings = uniqueEntities.length > 0 ? await engine.embedBatch(uniqueEntities.map((e) => e.name)) : [];
-    if (uniqueEntities.length > 0 && entityEmbeddings === null) {
-      onProgress?.({ stage: 'error', message: 'entity 向量嵌入失败' });
-      throw new Error('entity 向量嵌入失败');
-    }
+    const entityEmbeddings = uniqueEntities.length > 0 ? await embedOrNulls(engine, uniqueEntities.map((e) => e.name), skipEmbed) : [];
     const entityIdByEntityKey = new Map<string, string>();
     for (let i = 0; i < uniqueEntities.length; i++) {
       const entity = uniqueEntities[i]!;
@@ -457,11 +481,7 @@ export async function ingestContent(
       const event = events[eventIndex]!;
       return entity.description.length > 0 ? entity.description : `${event.title} ${entity.name}`;
     });
-    const relationEmbeddings = relationPairs.length > 0 ? await engine.embedBatch(relationTexts) : [];
-    if (relationPairs.length > 0 && relationEmbeddings === null) {
-      onProgress?.({ stage: 'error', message: 'relation 向量嵌入失败' });
-      throw new Error('relation 向量嵌入失败');
-    }
+    const relationEmbeddings = relationPairs.length > 0 ? await embedOrNulls(engine, relationTexts, skipEmbed) : [];
     for (let i = 0; i < relationPairs.length; i++) {
       const pair = relationPairs[i]!;
       const event = events[pair.eventIndex]!;

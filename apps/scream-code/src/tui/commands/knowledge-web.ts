@@ -10,6 +10,7 @@ import type { KnowledgeStore } from '@scream-code/knowledge';
 
 import { openUrl } from '../utils/open-url';
 import { getKnowledgeStore } from './knowledge-store';
+import type { SlashCommandHost } from './dispatch';
 
 // ─── Server lifecycle ────────────────────────────────────────────────
 
@@ -478,7 +479,7 @@ function serveHTML(res: ServerResponse): void {
 
 // ─── Public API ─────────────────────────────────────────────────────
 
-export async function handleWeb(): Promise<void> {
+export async function handleWeb(host: SlashCommandHost): Promise<void> {
   const store = await getKnowledgeStore();
   const s = await store.stats();
   if (s.entities === 0 && s.events === 0) {
@@ -505,5 +506,5 @@ export async function handleWeb(): Promise<void> {
   const port = (server.address() as AddressInfo).port;
   const url = `http://127.0.0.1:${port}`;
   openUrl(url);
-  console.log(`\n  知识图谱: ${url}\n  按 Ctrl+C 停止服务器\n`);
+  host.showStatus(`知识图谱已打开: ${url}`);
 }
