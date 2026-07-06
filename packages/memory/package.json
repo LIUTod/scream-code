@@ -1,6 +1,6 @@
 {
   "name": "@scream-code/memory",
-  "version": "0.8.6",
+  "version": "0.8.7",
   "private": true,
   "description": "Persistent memory memo store for cross-session knowledge sharing",
   "license": "MIT",
