@@ -39,6 +39,7 @@ tools:
   - FetchURL
   - AskUserQuestion
   - EnterPlanMode
+  - FusionPlan
   - ExitPlanMode
   - mcp__*
 

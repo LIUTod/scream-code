@@ -79,6 +79,7 @@ export async function handlePlanCommand(host: SlashCommandHost, args: string): P
   if (subcmd.length === 0) state = host.state.appState.planMode === 'off' ? 'plan' : 'off';
   else if (subcmd === 'on') state = 'plan';
   else if (subcmd === 'off') state = 'off';
+  else if (subcmd === 'fusion') state = 'fusionplan';
   else {
     host.showError(`Unknown plan subcommand: ${subcmd}`);
     return;
@@ -89,11 +90,17 @@ export async function handlePlanCommand(host: SlashCommandHost, args: string): P
 
 async function applyPlanMode(host: SlashCommandHost, session: Session, state: PlanModeState): Promise<void> {
   const enabled = state !== 'off';
+  const strategy = state === 'fusionplan' ? 'fusion' as const : 'normal' as const;
   try {
     const status = await session.getStatus().catch(() => null);
     const currentAgentPlanMode = status?.planMode ?? false;
-    if (currentAgentPlanMode !== enabled) {
-      await session.setPlanMode(enabled);
+    const currentStrategy = status?.planStrategy;
+    if (!enabled && currentAgentPlanMode) {
+      await session.setPlanMode(false);
+    } else if (enabled && !currentAgentPlanMode) {
+      await session.setPlanMode(true, strategy);
+    } else if (enabled && currentStrategy !== strategy) {
+      await session.setPlanStrategy(strategy);
     }
     let planPath: string | undefined;
     if (enabled) {

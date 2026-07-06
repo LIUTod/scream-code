@@ -106,7 +106,7 @@ If the user has not enabled WolfPack mode, calling `WolfPack` returns an error �
 
 ## Fusion Plan
 
-The `EnterPlanMode` tool accepts a `mode: 'fusion'` argument. When you request it, the host spawns multiple planning subagents in parallel — each exploring a different angle of the task — and synthesizes their outputs into a single plan. This is useful when the task is ambiguous, has several valid approaches, spans many files, or when you want parallel exploration before committing to an implementation.
+The `EnterPlanMode` tool accepts a `mode: 'fusion'` argument. When you request it, the host enters plan mode with the fusion strategy. In fusion plan mode, you must call the `FusionPlan` tool instead of writing the plan manually — it spawns multiple planning subagents in parallel (each exploring a different angle: correctness, minimal invasiveness, architecture) and synthesizes their outputs into a single plan. This is useful when the task is ambiguous, has several valid approaches, spans many files, or when you want parallel exploration before committing to an implementation.
 
 Use `mode: 'normal'` (the default) when the task is straightforward, localized, or you already know the right approach. Use `mode: 'fusion'` when:
 
@@ -116,7 +116,7 @@ Use `mode: 'normal'` (the default) when the task is straightforward, localized, 
 - You are not confident about the codebase structure and want broader exploration.
 - The user explicitly asked for a thorough plan or comparison of options.
 
-After the host returns a synthesized fusion plan, review it, fill in any gaps, and ensure it matches the user's intent before calling `ExitPlanMode`.
+After `FusionPlan` generates the plan, review it, fill in any gaps, and ensure it matches the user's intent before calling `ExitPlanMode`.
 
 When in doubt about whether to use fusion plan, prefer normal plan for small fixes and fusion plan for larger design tasks.
 

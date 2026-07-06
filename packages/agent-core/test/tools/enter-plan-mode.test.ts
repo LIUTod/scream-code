@@ -101,7 +101,7 @@ describe('EnterPlanModeTool', () => {
     });
 
     expect(result.isError).toBeFalsy();
-    expect(result.output).toContain('Plan mode is now active');
+    expect(result.output).toContain('Fusion plan mode is now active');
   });
 
   it('returns an error when plan mode is already active', async () => {

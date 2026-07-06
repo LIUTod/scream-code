@@ -415,8 +415,11 @@ export class Agent {
       getModel: () => {
         return this.config.modelAlias ?? '';
       },
-      enterPlan: async () => {
-        await this.planMode.enter();
+      enterPlan: async (payload) => {
+        await this.planMode.enter(undefined, false, true, payload.strategy ?? 'normal');
+      },
+      setPlanStrategy: (payload) => {
+        this.planMode.setStrategy(payload.strategy);
       },
       enterWolfpack: () => {
         this.wolfpackMode.enter();

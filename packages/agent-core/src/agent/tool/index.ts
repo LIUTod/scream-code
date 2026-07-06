@@ -679,6 +679,9 @@ export class ToolManager {
               allowedSpawns,
             },
           ),
+        // FusionPlan is main-agent-only because it enters plan mode and writes
+        // the plan file; subagents should never recursively invoke it.
+        this.agent.type === 'main' && canSpawn && new b.FusionPlanTool(this.agent),
 
         toolServices?.webSearcher && new b.WebSearchTool(toolServices.webSearcher),
         toolServices?.urlFetcher && new b.FetchURLTool(toolServices.urlFetcher),

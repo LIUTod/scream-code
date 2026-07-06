@@ -23,7 +23,7 @@ export class PlanModeInjector extends DynamicInjector {
   }
 
   override async getInjection(): Promise<string | undefined> {
-    const { isActive, planFilePath } = this.agent.planMode;
+    const { isActive, planFilePath, strategy } = this.agent.planMode;
     if (!isActive) {
       if (!this.wasActive) {
         return undefined;
@@ -36,17 +36,29 @@ export class PlanModeInjector extends DynamicInjector {
       this.injectedAt = null;
       this.wasActive = true;
       if (await this.hasCurrentPlanContent()) {
-        return reentryReminder(planFilePath);
+        return strategy === 'fusion'
+          ? fusionReentryReminder(planFilePath)
+          : reentryReminder(planFilePath);
       }
     }
     const variant = this.getVariant();
     if (variant === null) return undefined;
 
-    return variant === 'full'
+    if (strategy === 'fusion') {
+      return variant === 'full'
+        ? fusionFullReminder(planFilePath)
+        : variant === 'sparse'
+          ? fusionSparseReminder(planFilePath)
+          : fusionReentryReminder(planFilePath);
+    }
+
+    const reminder = variant === 'full'
       ? fullReminder(planFilePath)
       : variant === 'sparse'
         ? sparseReminder(planFilePath)
         : reentryReminder(planFilePath);
+
+    return reminder;
   }
 
   protected getVariant(): PlanModeVariant | null {
@@ -178,4 +190,37 @@ Your turn must end with either AskUserQuestion (to clarify requirements) or Exit
 
 function exitReminder(): string {
   return `Plan mode is no longer active. The read-only and plan-file-only restrictions from plan mode no longer apply. Continue with the approved plan using the normal tool and permission rules.`;
+}
+
+function fusionFullReminder(planFilePath: PlanFilePath): string {
+  const body = `Fusion plan mode is active. You MUST NOT make any edits (with the exception of the current plan file) or otherwise make changes to the system unless a tool request is explicitly approved. Prefer read-only tools. Use Bash only when needed; Bash follows the normal permission mode and rules. This supersedes any other instructions you have received.
+
+Workflow:
+  1. Understand — briefly explore the codebase with Glob, Grep, Read if needed.
+  2. Call FusionPlan — this tool spawns parallel planning subagents from different angles (correctness, minimal invasiveness, architecture) and synthesizes their outputs into a single plan.
+  3. Review — read the generated plan file. Correct minor issues with Edit if needed.
+  4. Exit — call ExitPlanMode for user approval.
+
+Do NOT write the plan manually. Use the FusionPlan tool to generate it.
+Your turn must end with either AskUserQuestion (to clarify requirements) or FusionPlan (to generate the plan) or ExitPlanMode (to request plan approval). Do NOT end your turn any other way.`;
+  return withPlanFileFooter(body, planFilePath);
+}
+
+function fusionSparseReminder(planFilePath: PlanFilePath): string {
+  const body = `Fusion plan mode still active. Use the FusionPlan tool to generate the plan — do not write it manually. After the plan is generated, review it and call ExitPlanMode for approval. End turns with FusionPlan or ExitPlanMode.`;
+  return withPlanFileFooter(body, planFilePath);
+}
+
+function fusionReentryReminder(planFilePath: PlanFilePath): string {
+  const body = `Fusion plan mode is active. You MUST NOT make any edits (with the exception of the current plan file) or otherwise make changes to the system unless a tool request is explicitly approved. Prefer read-only tools. Use Bash only when needed; Bash follows the normal permission mode and rules. This supersedes any other instructions you have received.
+
+## Re-entering Fusion Plan Mode
+A plan file from a previous planning session already exists.
+  1. Read the existing plan file to understand what was previously planned.
+  2. Evaluate the user's current request against that plan.
+  3. If different task: call FusionPlan to regenerate. If same task: review and update the existing plan with Edit if only minor corrections are needed.
+  4. Call ExitPlanMode for user approval.
+
+Do NOT write the plan manually. Use the FusionPlan tool to generate it, or Edit for minor corrections to an existing plan.`;
+  return withPlanFileFooter(body, planFilePath);
 }

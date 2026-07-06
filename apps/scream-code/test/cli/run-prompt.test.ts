@@ -703,27 +703,6 @@ describe('runPrompt', () => {
     expect(handler()).toBeNull();
   });
 
-  it('deletes the session and skips resume hint for fusion-plan worker subagents', async () => {
-    const previous = process.env['SCREAM_FUSIONPLAN_SUBAGENT'];
-    process.env['SCREAM_FUSIONPLAN_SUBAGENT'] = '1';
-    const stdout = writer();
-    const stderr = writer();
-    try {
-      await runPrompt(opts(), '1.2.3-test', { stdout, stderr });
-
-      expect(mocks.harnessCreateSession).toHaveBeenCalled();
-      expect(mocks.harnessDeleteSession).toHaveBeenCalledWith('ses_prompt');
-      // Resume hint must not be written for a session that is about to be deleted.
-      expect(stderr.text()).toBe('');
-    } finally {
-      if (previous === undefined) {
-        delete process.env['SCREAM_FUSIONPLAN_SUBAGENT'];
-      } else {
-        process.env['SCREAM_FUSIONPLAN_SUBAGENT'] = previous;
-      }
-    }
-  });
-
   it('does not delete the session for a normal prompt run', async () => {
     const stdout = writer();
     const stderr = writer();

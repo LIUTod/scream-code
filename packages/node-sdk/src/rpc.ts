@@ -91,6 +91,7 @@ export interface SetSessionPermissionRpcInput extends SessionIdRpcInput {
 
 export interface SetSessionPlanModeRpcInput extends SessionIdRpcInput {
   readonly enabled: boolean;
+  readonly strategy?: 'normal' | 'fusion';
 }
 
 export interface SetSessionWolfPackModeRpcInput extends SessionIdRpcInput {
@@ -369,6 +370,16 @@ export class SDKRpcClient {
     return rpc.enterPlan({
       sessionId: input.sessionId,
       agentId: this.interactiveAgentId,
+      strategy: input.strategy,
+    });
+  }
+
+  async setPlanStrategy(input: SetSessionPlanModeRpcInput): Promise<void> {
+    const rpc = await this.getRpc();
+    return rpc.setPlanStrategy({
+      sessionId: input.sessionId,
+      agentId: this.interactiveAgentId,
+      strategy: input.strategy ?? 'normal',
     });
   }
 
@@ -466,6 +477,7 @@ export class SDKRpcClient {
       thinkingLevel: config.thinkingLevel,
       permission: permission.mode,
       planMode: plan !== null,
+      planStrategy: plan?.strategy,
       contextTokens,
       maxContextTokens,
       contextUsage,

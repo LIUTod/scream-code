@@ -33,6 +33,7 @@ export * from './file/read-media';
 export * from './file/write';
 export * from './planning/enter-plan-mode';
 export * from './planning/exit-plan-mode';
+export * from './planning/fusion-plan';
 export * from './shell/bash';
 export * from './state/todo-list';
 export * from './web/fetch-url';

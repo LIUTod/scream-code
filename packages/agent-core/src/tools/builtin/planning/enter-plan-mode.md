@@ -6,9 +6,9 @@ Getting user sign-off on your approach via ExitPlanMode before writing code prev
 The host supports two planning strategies. You can request either one via this tool:
 
 - **Normal plan** (default): You investigate the codebase, design a single implementation approach, write it to the plan file, and present it for approval. Best when the task is straightforward or you are already confident about the right approach.
-- **Fusion plan**: The host spawns multiple independent planning subagents in parallel, each exploring a different angle, then synthesizes their outputs into one consolidated plan. Best when the task is ambiguous, has many valid approaches, crosses many files, or when exploration itself adds significant value. Fusion plan may take longer but tends to surface risks and alternatives you might miss.
+- **Fusion plan**: Invoke the FusionPlan tool to spawn multiple independent planning subagents in parallel, each exploring a different angle, then synthesize their outputs into one consolidated plan. Best when the task is ambiguous, has many valid approaches, crosses many files, or when exploration itself adds significant value. Fusion plan may take longer but tends to surface risks and alternatives you might miss.
 
-To request a fusion plan, include `mode: 'fusion'` in your tool arguments. If you omit `mode` or set it to `normal`, the host uses the normal plan flow.
+To request a fusion plan, include `mode: 'fusion'` in your tool arguments. When in fusion strategy, call the FusionPlan tool to generate the plan.
 
 ### When to choose which mode
 
@@ -55,8 +55,8 @@ When NOT to use:
 In plan mode, you will:
 1. Identify 2-3 key questions about the codebase that are critical to your plan. If you are not confident about the codebase structure or relevant code paths, use `Agent(subagent_type="explore")` to investigate these questions first - this is strongly recommended for non-trivial tasks.
 2. Explore the codebase using Glob, Grep, Read, and other read-only tools for any remaining quick lookups. Use Bash only when needed; Bash follows the normal permission mode and rules.
-3. Design an implementation approach based on your findings (or, for fusion plan, review the synthesized plan the host provides).
-4. Write the plan to the current plan file with Write or Edit.
+3. Design an implementation approach based on your findings (or, for fusion plan, call FusionPlan to generate the synthesized plan).
+4. Review the generated plan, fill in any gaps, and ensure it matches the user's intent.
 5. Present your plan to the user via ExitPlanMode for approval
 
-For fusion plan, the host performs the parallel exploration and synthesis for you; you should still review the result, fill in any gaps, and ensure it matches the user's intent before exiting plan mode.
+For fusion plan, the FusionPlan tool performs the parallel exploration and synthesis for you; you should still review the result before exiting plan mode.

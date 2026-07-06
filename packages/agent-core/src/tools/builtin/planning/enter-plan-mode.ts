@@ -51,13 +51,41 @@ export class EnterPlanModeTool implements BuiltinTool<EnterPlanModeInput> {
           return { isError: true, output: `Failed to enter plan mode: ${message}` };
         }
 
-        return { output: enteredPlanModeMessage(this.agent.planMode.planFilePath) };
+        return { output: enteredPlanModeMessage(_args.mode, this.agent.planMode.planFilePath) };
       },
     };
   }
 }
 
-function enteredPlanModeMessage(planPath: string | null): string {
+function enteredPlanModeMessage(mode: 'normal' | 'fusion', planPath: string | null): string {
+  if (mode === 'fusion') {
+    if (planPath === null) {
+      return [
+        'Fusion plan mode is now active. Your workflow:',
+        '',
+        '1. Investigate the codebase briefly if needed.',
+        '2. Call the FusionPlan tool to generate the plan — it spawns parallel planning subagents and synthesizes their outputs.',
+        '3. Review the generated plan in the plan file.',
+        '4. When the plan is ready, call ExitPlanMode for user approval.',
+        '',
+        'Do NOT write the plan manually. Use FusionPlan instead.',
+      ].join('\n');
+    }
+
+    return [
+      'Fusion plan mode is now active. Your workflow:',
+      '',
+      `Plan file: ${planPath}`,
+      '',
+      '1. Investigate the codebase briefly if needed.',
+      '2. Call the FusionPlan tool to generate the plan — it spawns parallel planning subagents and synthesizes their outputs.',
+      '3. Review the generated plan in the plan file.',
+      '4. When the plan is ready, call ExitPlanMode for user approval.',
+      '',
+      'Do NOT write the plan manually. Use FusionPlan instead.',
+    ].join('\n');
+  }
+
   if (planPath === null) {
     return [
       'Plan mode is now active. Your workflow:',

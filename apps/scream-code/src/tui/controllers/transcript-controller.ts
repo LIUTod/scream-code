@@ -19,7 +19,6 @@ import { UserMessageComponent } from '../components/messages/user-message';
 import { AssistantMessageComponent } from '../components/messages/assistant-message';
 import { SkillActivationComponent } from '../components/messages/skill-activation';
 import { BackgroundAgentStatusComponent } from '../components/messages/background-agent-status';
-import { FusionPlanStatusComponent } from '../components/messages/fusion-plan-status';
 import { CronMessageComponent } from '../components/messages/cron-message';
 import { MoonLoader } from '../components/chrome/moon-loader';
 import type { StreamingUIController } from './streaming-ui';
@@ -195,9 +194,6 @@ export class TranscriptController {
             state.theme.colors,
           );
         }
-        if (entry.fusionPlanStatus !== undefined) {
-          return new FusionPlanStatusComponent(entry.fusionPlanStatus, state.theme.colors, state.ui);
-        }
         return entry.renderMode === 'notice'
           ? new NoticeMessageComponent(entry.content, entry.detail, state.theme.colors)
           : new StatusMessageComponent(entry.content, state.theme.colors, entry.color);
@@ -208,9 +204,6 @@ export class TranscriptController {
             entry.backgroundAgentStatus,
             state.theme.colors,
           );
-        }
-        if (entry.fusionPlanStatus !== undefined) {
-          return new FusionPlanStatusComponent(entry.fusionPlanStatus, state.theme.colors, state.ui);
         }
         return entry.renderMode === 'notice'
           ? new NoticeMessageComponent(entry.content, entry.detail, state.theme.colors)

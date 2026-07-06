@@ -149,7 +149,7 @@ export class Session {
     await this.rpc.setPermission({ sessionId: this.id, mode });
   }
 
-  async setPlanMode(enabled: boolean): Promise<void> {
+  async setPlanMode(enabled: boolean, strategy?: 'normal' | 'fusion'): Promise<void> {
     this.ensureOpen();
     if (typeof enabled !== 'boolean') {
       throw new ScreamError(
@@ -157,7 +157,12 @@ export class Session {
         'Session plan mode must be a boolean',
       );
     }
-    await this.rpc.setPlanMode({ sessionId: this.id, enabled });
+    await this.rpc.setPlanMode({ sessionId: this.id, enabled, strategy });
+  }
+
+  async setPlanStrategy(strategy: 'normal' | 'fusion'): Promise<void> {
+    this.ensureOpen();
+    await this.rpc.setPlanStrategy({ sessionId: this.id, enabled: true, strategy });
   }
 
   async setWolfpackMode(enabled: boolean): Promise<void> {

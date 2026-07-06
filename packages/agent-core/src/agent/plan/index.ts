@@ -8,6 +8,7 @@ export type PlanData = null | {
   id: string;
   content: string;
   path: string;
+  strategy: PlanStrategy;
 };
 export type PlanStrategy = 'normal' | 'fusion';
 export type PlanFilePath = string | null;
@@ -118,6 +119,20 @@ export class PlanMode {
     return this._strategy;
   }
 
+  setStrategy(strategy: PlanStrategy): void {
+    if (!this._isActive) {
+      throw new Error('Cannot set plan strategy when plan mode is not active');
+    }
+    if (this._strategy === strategy) return;
+    this._strategy = strategy;
+    this.agent.replayBuilder.push({
+      type: 'plan_updated',
+      enabled: true,
+      strategy,
+    });
+    this.agent.emitStatusUpdated();
+  }
+
   async data(): Promise<PlanData> {
     if (!this._planId || !this._planFilePath) return null;
     let content = '';
@@ -130,6 +145,7 @@ export class PlanMode {
       id: this._planId,
       content,
       path: this._planFilePath,
+      strategy: this._strategy,
     };
   }
 

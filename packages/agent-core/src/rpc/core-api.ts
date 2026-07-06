@@ -153,6 +153,12 @@ export interface SetModelResult {
   readonly model: string;
   readonly providerName?: string | undefined;
 }
+export interface EnterPlanPayload {
+  readonly strategy?: 'normal' | 'fusion';
+}
+export interface SetPlanStrategyPayload {
+  readonly strategy: 'normal' | 'fusion';
+}
 export interface CancelPlanPayload {
   readonly id?: string;
 }
@@ -356,7 +362,8 @@ export interface AgentAPI {
   setPermission: (payload: SetPermissionPayload) => void;
   setModel: (payload: SetModelPayload) => SetModelResult;
   getModel: (payload: EmptyPayload) => string;
-  enterPlan: (payload: EmptyPayload) => void;
+  enterPlan: (payload: EnterPlanPayload) => void;
+  setPlanStrategy: (payload: SetPlanStrategyPayload) => void;
   cancelPlan: (payload: CancelPlanPayload) => void;
   clearPlan: (payload: EmptyPayload) => void;
   enterWolfpack: (payload: EmptyPayload) => void;

@@ -128,6 +128,7 @@ export interface PlanInfo {
   readonly id: string;
   readonly content: string;
   readonly path: string;
+  readonly strategy: 'normal' | 'fusion';
 }
 
 export type SessionPlan = PlanInfo | null;

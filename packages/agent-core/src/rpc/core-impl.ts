@@ -89,6 +89,8 @@ import type {
   SetPermissionPayload,
   SetPluginEnabledPayload,
   SetPluginMcpServerEnabledPayload,
+  EnterPlanPayload,
+  SetPlanStrategyPayload,
   SetThinkingPayload,
   SideQuestionPayload,
   GenerateTextPayload,
@@ -483,8 +485,12 @@ export class ScreamCore implements PromisableMethods<CoreAPI> {
     return this.sessionApi(sessionId).getModel(payload);
   }
 
-  enterPlan({ sessionId, ...payload }: SessionAgentPayload<EmptyPayload>) {
+  enterPlan({ sessionId, ...payload }: SessionAgentPayload<EnterPlanPayload>) {
     return this.sessionApi(sessionId).enterPlan(payload);
+  }
+
+  setPlanStrategy({ sessionId, ...payload }: SessionAgentPayload<SetPlanStrategyPayload>) {
+    return this.sessionApi(sessionId).setPlanStrategy(payload);
   }
 
   cancelPlan({ sessionId, ...payload }: SessionAgentPayload<CancelPlanPayload>) {
