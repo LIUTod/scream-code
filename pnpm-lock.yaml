@@ -95,6 +95,9 @@ importers:
       diff:
         specifier: ^9.0.0
         version: 9.0.0
+      fastembed:
+        specifier: ^2.1.0
+        version: 2.1.0
       semver:
         specifier: ^7.7.4
         version: 7.8.1

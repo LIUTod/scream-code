@@ -44,6 +44,6 @@ export default defineConfig({
   },
   deps: {
     alwaysBundle: [/^@scream-./],
-    neverBundle: [],
+    neverBundle: ['fastembed'],
   },
 });

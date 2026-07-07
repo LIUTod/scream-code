@@ -262,13 +262,15 @@ async function main() {
     },
     pm,
   );
-}
 
+  // Best-effort Windows desktop shortcut; must stay inside main() so it
+  // is covered by the top-level catch and never fails the install.
   try {
     createDesktopShortcut();
   } catch {
     // Never fail the install over a shortcut.
   }
+}
 
 main().catch((err) => {
   const message = err instanceof Error ? err.message : String(err);
