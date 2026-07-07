@@ -3,7 +3,11 @@
 </p>
 
 <p align="center">
-  <strong>Scream Code 你的本地 Agent 智能助手</strong>
+  <strong>Scream Code — Your Local AI Agent Assistant</strong>
+</p>
+
+<p align="center">
+  <a href="#中文说明"><img src="https://img.shields.io/badge/README-中文-blue?style=for-the-badge" alt="Chinese README"></a>
 </p>
 
 <p align="center">
@@ -19,6 +23,195 @@
 </p>
 
 ---
+
+Scream Code is a hassle-free, locally deployable, all-in-one AI Agent assistant. No remote calls, high security — just tell it what you need in natural language (Chinese or English). Vibe coding, write code, search papers, edit files, clean your machine, research, generate reports, search the web... You speak, it acts!
+
+---
+
+## ✨ Core Features
+
+<table>
+  <tr>
+    <td width="50%">
+      <h3>🎯 Goal Loop</h3>
+      <p>Not a useless loop — <strong>goal-driven autonomy</strong> with an independent judge Agent. Set a goal and it iterates automatically with budget control. No wasteful token-burning loops.</p>
+    </td>
+    <td width="50%">
+      <h3>🐺 Wolfpack Mode</h3>
+      <p><strong>Unlimited intelligent batch concurrency</strong> — multiple Agents collaborate in parallel. Built-in coder/explore/plan/verify/reviewer/oracle/writer sub-agents. No item limit.</p>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%">
+      <h3>🧠 Persistent Memory</h3>
+      <p><strong>Structured SQL extraction from pain points</strong>, FTS5 full-text + Tag semantic + vector triple retrieval. Shared across sessions — the more you use it, the smarter it gets.</p>
+    </td>
+    <td width="50%">
+      <h3>📚 Local SAG Knowledge Base</h3>
+      <p><strong>Based on paper: https://arxiv.org/abs/2606.15971 — SAG knowledge base</strong> (dramatically improves multi-hop reasoning), visual graph, import your local knowledge anytime.</p>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%">
+      <h3>🛡️ Efficient Lightweight Runtime</h3>
+      <p><strong>Enterprise-grade security</strong>, fully local deployment, highly extensible with system-level capabilities. Zero remote behavior.</p>
+    </td>
+    <td width="50%">
+      <h3>🔌 Multi-dimensional Extensions</h3>
+      <p><strong>MCP / Skills / API providers</strong> — all freely configurable. 130+ built-in providers, or add your own via <code>/config diy</code>.</p>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%">
+      <h3>⚡️ Multi-Agent Orchestration</h3>
+      <p><strong>Enable multi-agent orchestration for sub-Agents with custom model configs.</strong> Let each model do what it does best.</p>
+    </td>
+    <td width="50%">
+      <h3>📱 Multi-channel Connectivity</h3>
+      <p>Connect via cc-connect to <strong>WeChat, Feishu, WeCom, DingTalk, Slack</strong> and more. Remotely control your Scream from any chat app.</p>
+    </td>
+  </tr>
+</table>
+
+---
+
+## 🚀 Quick Start
+
+### Step 1: Install
+
+Prerequisite: **Node.js >= 22**. Also recommended: **Git**.
+
+**Recommended: npm install (all platforms)**
+
+```bash
+npm install -g scream-code
+```
+
+After installation, the `scream` command is added to PATH. First install takes about 2-5 minutes.
+
+- Start TUI: `scream`
+- Auto-permission mode: `scream --auto`
+- Auto-approve mode: `scream -y`
+- Switch language after startup: `/language`
+
+### Step 2: Configure AI Service
+
+On first launch, if no model is configured, an interactive setup wizard (`/config`) starts automatically. Choose from built-in providers or use `/config diy` for custom APIs.
+
+**Multiple models supported** — switch anytime with `/model`:
+
+> Custom APIs supported (DeepSeek, OpenAI, Anthropic, MiniMax, Qwen, SiliconFlow, etc.) via `/config diy`.
+
+After configuration, use `/model` to switch or remove models without restarting. Use `/model diy` to configure sub-Agent models.
+
+### Approval Panel
+
+When it needs to modify files or run commands, an approval panel appears. Press number keys to select, Enter to confirm.
+
+---
+
+## 📖 Features
+
+| Feature | Description |
+|---------|-------------|
+| 💬 **Conversational Interaction** | Describe what you need in natural language — it writes code, edits files, runs commands |
+| 🔒 **Security First** | Must get approval before modifying files; `.env` and sensitive files are blocked by default |
+| 🛡️ **Permission Engine** | Fine-grained control over read/write/execute permissions |
+| ⚙️ **State Machine** | Prevents drift, enforces task granularity, reduces token waste |
+| 🤔 **FusionPlan** | Runs 3 plans from different angles and fuses them into one actionable plan |
+| 🧠 **Memory** | `/memory` — interactive memory notebook, shared across sessions, tag-based |
+| 📚 **SAG Knowledge Base** | `/knowledge` — interactive knowledge base with vector import and visual graph |
+| 💤 **Dream Cleanup** | `/dream` — periodically cleans duplicate and stale records (not available in auto mode) |
+| 🎯 **Goal System** | `/goal` — autonomous goal loop with budget control (iterations/tokens/time) |
+| 💾 **Session Recovery** | Interrupt anytime, resume later — conversation history auto-saved |
+| 🔄 **Multiple Modes** | Interactive mode, silent mode, plan mode, background task mode |
+| 🔌 **MCP Extensions** | Connect external tools (databases, browsers, APIs, etc.) |
+| 🤖 **Multi-Agent Parallel** | Complex tasks are automatically decomposed into parallel sub-Agents |
+| 🎨 **Skill Center** | Browse and install community skills, or create your own |
+| 🐺 **Wolfpack** | Multi-file, multi-task concurrent processing with auto-approval, unlimited sub-Agent concurrency |
+| 🌳 **Multi-Agent Orchestration** | `/config diy` — assign different models to different sub-Agents |
+
+---
+
+## 📱 cc-connect — Remote Control via Chat
+
+Supports WeChat, Feishu, Slack, DingTalk, QQ, Telegram, and more. Install cc-connect after scream-code to control it remotely.
+
+### Step 1: Install
+
+```bash
+npm install -g cc-connect
+```
+
+### Step 2: Configure Platform
+
+Open scream-code, type `/cc-connect`, and follow the prompts to select your platform.
+
+> ⚠️ **Note**: Do not reconfigure after initial setup — it will overwrite existing config.
+
+### Step 3: Start Daemon
+
+Follow the steps to complete setup, then start the background daemon (scream-code can be closed while the daemon runs).
+
+**Remote chat quick commands:**
+
+| Command | Description |
+|---------|-------------|
+| `/new` | Create new session |
+| `/bind setup` | Enable file transfer (PDF, images, etc.) |
+| `/mode` | View available modes |
+| `/mode yolo` | Auto-approve all tools |
+| `/mode default` | Ask before each tool call |
+
+---
+
+## 💡 Inspiration & Thanks
+
+Scream is a tool-oriented Agent framework I rebuilt from scratch based on my own usage habits and understanding of Agent systems. I started with Rust, but the architecture ballooned into a mess. After that lesson, I switched entirely to TypeScript and did a lot of subtraction.
+
+Post-refactor, I focused on three things: parallel scheduling + state machine, convergent memory system design, and maximizing the model's own capabilities. The overall logic borrows from the Agent harness approach, while referencing design decisions from many excellent open-source projects. Scream no longer pursues feature stacking — it's a lightweight Agent foundation that stably and efficiently executes intent.
+
+This project is completely free and open to use. Feedback, suggestions, and improvements are welcome. I'll keep refining it based on real-world usage.
+
+Thanks to these excellent projects for inspiration: pi, gork, kimicli, Gemini, ohmypi, and others.
+
+---
+
+## 🔗 Links
+
+🌐 **Website**: https://scream.chat
+
+---
+
+## ⭐ Star History
+
+<a href="https://www-star-history.com/#LIUTod/scream-code&Date">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=LIUTod/scream-code&type=Date&theme=dark" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=LIUTod/scream-code&type=Date" />
+   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=LIUTod/scream-code&type=Date" />
+ </picture>
+</a>
+
+---
+
+## 📄 License
+
+[MIT](LICENSE) © [LIUTod](https://github.com/LIUTod)
+
+---
+
+<p align="center">
+  Made with ❤️ by <a href="https://github.com/LIUTod">LIUTod</a>
+</p>
+
+---
+
+<h1 id="中文说明">Scream Code 你的本地 Agent 智能助手</h1>
+
+<p align="center">
+  <a href="#readme"><img src="https://img.shields.io/badge/README-English-blue?style=for-the-badge" alt="English README"></a>
+</p>
 
 Scream Code 是一款省心的可在本地部署的全能 AI Agent 助手。你无需硬记代码，无任何远程行为，高安全，用户直接用中/英文下达指令，vibe coding、写代码、查论文、改文件、清理电脑、查资料、制作研报、搜全网信息……你动嘴，它动手！
 
@@ -104,7 +297,7 @@ TUI启动命令`scream`
 
 当它要修改文件或执行命令时，会弹出审批面板：
 
-按数字键选择，回车确认。所有提示都是中文。
+按数字键选择，回车确认。
 
 ---
 
@@ -172,33 +365,3 @@ Scream 是我基于自身使用习惯与对 Agent 系统的理解，从零重构
 这个项目完全免费，开放使用，也欢迎反馈，并给出建议和改进。会持续根据实际使用场景继续打磨。
 
 再次感谢其他优秀的项目给予灵感：pi、gork、kimicli、Gemini、ohmypi 等优秀项目。
-
----
-
-## 🔗 入口
-
-🌐 **官网**：https://scream.chat
-
----
-
-## ⭐ Star History
-
-<a href="https://www.star-history.com/#LIUTod/scream-code&Date">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=LIUTod/scream-code&type=Date&theme=dark" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=LIUTod/scream-code&type=Date" />
-   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=LIUTod/scream-code&type=Date" />
- </picture>
-</a>
-
----
-
-## 📄 License
-
-[MIT](LICENSE) © [LIUTod](https://github.com/LIUTod)
-
----
-
-<p align="center">
-  Made with ❤️ by <a href="https://github.com/LIUTod">LIUTod</a>
-</p>
