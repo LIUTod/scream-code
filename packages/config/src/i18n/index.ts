@@ -9,7 +9,7 @@ const dictionaries: Record<Locale, Record<string, string>> = { zh, en };
 function detectSystemLocale(): Locale {
   // 1. Unix/macOS: standard locale environment variables
   const env = process.env;
-  const envLang = (env.LC_ALL || env.LC_MESSAGES || env.LANG || env.LANGUAGE || '').toLowerCase();
+  const envLang = (env['LC_ALL'] || env['LC_MESSAGES'] || env['LANG'] || env['LANGUAGE'] || '').toLowerCase();
   if (envLang.startsWith('zh')) return 'zh';
   if (envLang.length > 0) return 'en';
 
@@ -23,7 +23,7 @@ function detectSystemLocale(): Locale {
 
   // 3. Windows: check process.env.LANG set by some Node distributions
   if (process.platform === 'win32') {
-    const winLang = (env.LANG || '').toLowerCase();
+    const winLang = (env['LANG'] || '').toLowerCase();
     if (winLang.startsWith('zh')) return 'zh';
   }
 
