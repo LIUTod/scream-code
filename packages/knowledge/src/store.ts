@@ -104,17 +104,6 @@ export class KnowledgeStore {
   }
 
   /**
-   * Proactively load the embedding model (downloads on first call).
-   * Call before ingestion so the user gets a clear download prompt instead
-   * of a mid-ingest failure.
-   */
-  async ensureEmbeddingReady(): Promise<{ ok: boolean; reason?: string }> {
-    if (this.embeddingEngine === undefined) return { ok: false, reason: 'engine not set' };
-    const ok = await this.embeddingEngine.ensureReady();
-    return { ok, reason: ok ? undefined : 'fastembed init failed' };
-  }
-
-  /**
    * Begin a write transaction. Use commitTransaction / rollbackTransaction
    * to close it. Used by ingest to keep chunks/events/entities/edges atomic —
    * a mid-ingest failure leaves no partial rows.

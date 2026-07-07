@@ -14,7 +14,7 @@ import { t } from '@scream-code/config';
 
 import type { SlashCommandHost } from './dispatch';
 import { handleWeb } from './knowledge-web';
-import { getKnowledgeStore, getEmbeddingStatus, ensureEmbeddingReady, waitForEmbedding, type EmbeddingStatus } from './knowledge-store';
+import { getKnowledgeStore, getEmbeddingStatus, startManualEmbeddingDownload, type EmbeddingStatus } from './knowledge-store';
 import { TextInputDialogComponent } from '../components/dialogs/text-input-dialog';
 import { ChoicePickerComponent, type ChoiceOption } from '../components/dialogs/choice-picker';
 import { KnowledgeResultViewer } from '../components/dialogs/knowledge-result-viewer';
@@ -336,6 +336,29 @@ async function handleDelete(host: SlashCommandHost): Promise<void> {
   }
 }
 
+async function handleDownloadModel(host: SlashCommandHost): Promise<void> {
+  // Ensure the store and shared embedding engine are initialized before
+  // attempting a manual download. The menu can be opened without any other
+  // handler having triggered getKnowledgeStore().
+  await getKnowledgeStore();
+
+  const spinner = host.showProgressSpinner(t('kw.embedding_downloading'));
+  try {
+    const { ok, alreadyReady, error } = await startManualEmbeddingDownload();
+    spinner.stop({ ok, label: ok ? t('kw.embedding_ready') : t('kw.embedding_failed') });
+    if (ok) {
+      host.showStatus(alreadyReady ? t('kw.embedding_already_installed') : t('kw.embedding_ready'));
+    } else {
+      const detail = [t('knowledge.download_model_retry_hint'), error].filter(Boolean).join('\n');
+      host.showNotice(t('kw.embedding_failed'), detail);
+    }
+  } catch (error: unknown) {
+    spinner.stop({ ok: false, label: t('kw.embedding_failed') });
+    const msg = error instanceof Error ? error.message : String(error);
+    host.showError(t('knowledge.op_failed', { msg }));
+  }
+}
+
 async function handleStats(host: SlashCommandHost): Promise<void> {
   const store = await getKnowledgeStore();
   const stats = await store.stats();
@@ -362,50 +385,63 @@ export async function handleKnowledgeCommand(
   host: SlashCommandHost,
   _args: string,
 ): Promise<void> {
-  const options: ChoiceOption[] = [
-    {
-      value: 'ingest',
-      label: '📥 ' + t('knowledge.ingest'),
-      description: t('knowledge.ingest_full'),
-    },
-    {
-      value: 'list',
-      label: '📋 ' + t('knowledge.doc_list'),
-      description: t('knowledge.doc_list_desc'),
-    },
-    {
-      value: 'search',
-      label: '🔍 ' + t('knowledge.search'),
-      description: t('knowledge.search_effect'),
-    },
-    {
-      value: 'delete',
-      label: '🗑️ ' + t('knowledge.delete'),
-      description: t('knowledge.delete_desc'),
-      tone: 'danger',
-    },
-    {
-      value: 'stats',
-      label: '📊 ' + t('knowledge.stats'),
-      description: t('knowledge.stats_desc'),
-    },
-    {
-      value: 'web',
-      label: '🌐 ' + t('knowledge.web'),
-      description: t('knowledge.web_desc'),
-    },
-  ];
-
   const formatEmbeddingHint = (status: EmbeddingStatus): string => {
     switch (status) {
-      case 'ready': return '';
-      case 'loading': return ' · ' + t('kw.embedding_downloading');
-      case 'failed': return ' · ' + t('kw.embedding_failed');
+      case 'ready':
+        return '';
+      case 'downloading':
+        return ' · ' + t('kw.embedding_downloading');
+      case 'failed':
+        return ' · ' + t('kw.embedding_failed');
+      case 'idle':
+        return ' · ' + t('kw.embedding_not_downloaded');
     }
   };
 
   const showMenu = (): void => {
     const status = getEmbeddingStatus();
+    const options: ChoiceOption[] = [
+      {
+        value: 'download-model',
+        label:
+          '⬇️ ' +
+          t('knowledge.download_model') +
+          (status === 'ready' ? t('knowledge.download_model_installed') : ''),
+        description: t('knowledge.download_model_desc'),
+      },
+      {
+        value: 'ingest',
+        label: '📥 ' + t('knowledge.ingest'),
+        description: t('knowledge.ingest_full'),
+      },
+      {
+        value: 'list',
+        label: '📋 ' + t('knowledge.doc_list'),
+        description: t('knowledge.doc_list_desc'),
+      },
+      {
+        value: 'search',
+        label: '🔍 ' + t('knowledge.search'),
+        description: t('knowledge.search_effect'),
+      },
+      {
+        value: 'delete',
+        label: '🗑️ ' + t('knowledge.delete'),
+        description: t('knowledge.delete_desc'),
+        tone: 'danger',
+      },
+      {
+        value: 'stats',
+        label: '📊 ' + t('knowledge.stats'),
+        description: t('knowledge.stats_desc'),
+      },
+      {
+        value: 'web',
+        label: '🌐 ' + t('knowledge.web'),
+        description: t('knowledge.web_desc'),
+      },
+    ];
+
     const picker = new ChoicePickerComponent({
       title: t('knowledge.menu_title'),
       hint: t('knowledge.menu_hint') + formatEmbeddingHint(status),
@@ -415,7 +451,8 @@ export async function handleKnowledgeCommand(
         void (async () => {
           host.restoreEditor();
           try {
-            if (value === 'ingest') await handleIngest(host);
+            if (value === 'download-model') await handleDownloadModel(host);
+            else if (value === 'ingest') await handleIngest(host);
             else if (value === 'list') await handleList(host);
             else if (value === 'search') await handleSearch(host);
             else if (value === 'delete') await handleDelete(host);
@@ -433,17 +470,6 @@ export async function handleKnowledgeCommand(
       },
     });
     host.mountEditorReplacement(picker);
-
-    if (status !== 'ready') {
-      ensureEmbeddingReady();
-      void waitForEmbedding().then((finalStatus) => {
-        if (finalStatus === 'ready') {
-          host.showStatus(t('kw.embedding_ready'));
-          // Re-render menu to remove the download hint
-          showMenu();
-        }
-      });
-    }
   };
 
   showMenu();

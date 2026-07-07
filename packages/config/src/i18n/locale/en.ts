@@ -215,6 +215,10 @@ export const en: Record<string, string> = {
   'knowledge.search_effect': 'Enter a query to test multi-hop retrieval',
   'knowledge.web': 'Graph',
   'knowledge.web_desc': 'View interactive knowledge graph in browser',
+  'knowledge.download_model': 'Download vector model',
+  'knowledge.download_model_desc': 'Manually download the bge-small-zh-v1.5 model (~95 MB) to enable semantic search',
+  'knowledge.download_model_installed': ' (installed)',
+  'knowledge.download_model_retry_hint': 'Return to the menu and select Download vector model to retry. A proxy is recommended.',
   'knowledge.menu_title': 'SAG Knowledge Base',
   'knowledge.menu_hint': 'Select an action (Esc to exit)',
   'knowledge.op_failed': 'Operation failed: {msg}',
@@ -1251,6 +1255,8 @@ export const en: Record<string, string> = {
   // ─── Knowledge Web (in-browser) ────
   'kw.lang_toggle': '中文',
   'kw.embedding_downloading': 'Vector model downloading…',
-  'kw.embedding_failed': 'Vector model load failed (try VPN, auto-retry in 5 min)',
+  'kw.embedding_failed': 'Vector model load failed. Return to the menu and select Download to retry.',
   'kw.embedding_ready': 'Vector model ready',
+  'kw.embedding_not_downloaded': 'Vector model not downloaded (select Download vector model)',
+  'kw.embedding_already_installed': 'Vector model already installed, no need to re-download',
 };

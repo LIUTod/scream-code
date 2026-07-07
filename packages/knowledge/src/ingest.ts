@@ -107,25 +107,9 @@ export async function ingestFile(
   onProgress?: IngestProgressCallback,
 ): Promise<{ documentId: string; chunkCount: number; eventCount: number; entityCount: number }> {
   const engine = store.getEmbeddingEngine();
-  // Try loading the model with a 15s timeout. Even if the engine previously
-  // failed (available=false), ensureReady() can retry — background downloads
-  // may have completed since last attempt.
-  let skipEmbed = engine === undefined;
-  if (engine !== undefined) {
-    onProgress?.({ stage: 'embedding-check', message: '检查向量模型...' });
-    try {
-      const ready = await Promise.race([
-        engine.ensureReady(),
-        new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 15_000)),
-      ]);
-      skipEmbed = !ready;
-      if (skipEmbed) {
-        onProgress?.({ stage: 'embedding-check', message: '向量模型未就绪，本次摄入跳过向量嵌入' });
-      }
-    } catch {
-      skipEmbed = true;
-      onProgress?.({ stage: 'embedding-check', message: '向量模型未就绪，本次摄入跳过向量嵌入' });
-    }
+  const skipEmbed = engine === undefined || !engine.available;
+  if (skipEmbed) {
+    onProgress?.({ stage: 'embedding-check', message: '向量模型未就绪，本次摄入跳过向量嵌入' });
   }
 
   // 1. Dedupe by file path.
@@ -352,22 +336,9 @@ export async function ingestContent(
   onProgress?: IngestProgressCallback,
 ): Promise<{ documentId: string; chunkCount: number; eventCount: number; entityCount: number }> {
   const engine = store.getEmbeddingEngine();
-  let skipEmbed = engine === undefined;
-  if (engine !== undefined) {
-    onProgress?.({ stage: 'embedding-check', message: '检查向量模型...' });
-    try {
-      const ready = await Promise.race([
-        engine.ensureReady(),
-        new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 15_000)),
-      ]);
-      skipEmbed = !ready;
-      if (skipEmbed) {
-        onProgress?.({ stage: 'embedding-check', message: '向量模型未就绪，本次摄入跳过向量嵌入' });
-      }
-    } catch {
-      skipEmbed = true;
-      onProgress?.({ stage: 'embedding-check', message: '向量模型未就绪，本次摄入跳过向量嵌入' });
-    }
+  const skipEmbed = engine === undefined || !engine.available;
+  if (skipEmbed) {
+    onProgress?.({ stage: 'embedding-check', message: '向量模型未就绪，本次摄入跳过向量嵌入' });
   }
 
   const sections = chunkMarkdown(params.content);

@@ -1,4 +1,4 @@
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import type { MemoryMemo } from './models.js';
 
@@ -11,8 +11,11 @@ export function buildEmbeddingText(memo: MemoryMemo): string {
 }
 
 export interface EmbeddingEngine {
-  /** Whether the engine loaded successfully. */
+  /** Whether the model is loaded in memory and ready to embed. */
   readonly available: boolean;
+
+  /** Last load/download error message, if any. */
+  readonly lastError?: string;
 
   /**
    * Generate embeddings for a batch of texts.
@@ -72,27 +75,23 @@ function createFastEmbedEngineImpl(cacheDir?: string): EmbeddingEngine {
   let embedder: FastembedModel | null = null;
   let initPromise: Promise<FastembedModel | null> | null = null;
   let loadFailed = false;
+  let lastError: string | undefined;
 
   return {
     get available(): boolean {
-      return !loadFailed;
+      return embedder !== null && !loadFailed;
+    },
+
+    get lastError(): string | undefined {
+      return lastError;
     },
 
     async embedBatch(texts: string[]): Promise<Float32Array[] | null> {
-      if (loadFailed) return null;
+      if (!this.available) return null;
       if (texts.length === 0) return [];
 
       try {
-        if (embedder === null) {
-          initPromise ??= loadEmbedder(cacheDir);
-          embedder = await initPromise;
-          if (embedder === null) {
-            loadFailed = true;
-            return null;
-          }
-        }
-
-        const generator = embedder.embed(texts);
+        const generator = embedder!.embed(texts);
 
         const vectors: Float32Array[] = [];
         for await (const batch of generator) {
@@ -101,8 +100,9 @@ function createFastEmbedEngineImpl(cacheDir?: string): EmbeddingEngine {
           }
         }
         return vectors.length > 0 ? vectors : null;
-      } catch {
+      } catch (error: unknown) {
         loadFailed = true;
+        lastError = error instanceof Error ? error.message : String(error);
         return null;
       }
     },
@@ -124,23 +124,29 @@ function createFastEmbedEngineImpl(cacheDir?: string): EmbeddingEngine {
     async ensureReady(): Promise<boolean> {
       if (embedder !== null) {
         loadFailed = false;
+        lastError = undefined;
         return true;
       }
       try {
         // Reuse in-flight load, or start a fresh one. If a previous load
         // resolved to null (loadFailed), clear it first so we actually retry.
         if (loadFailed || initPromise === null) {
+          loadFailed = false;
+          lastError = undefined;
           initPromise = loadEmbedder(cacheDir);
         }
         embedder = await initPromise;
         if (embedder === null) {
           initPromise = null;
+          lastError = 'fastembed returned an empty model';
           return false;
         }
         loadFailed = false;
+        lastError = undefined;
         return true;
-      } catch {
+      } catch (error: unknown) {
         initPromise = null;
+        lastError = error instanceof Error ? error.message : String(error);
         return false;
       }
     },
@@ -148,33 +154,37 @@ function createFastEmbedEngineImpl(cacheDir?: string): EmbeddingEngine {
 }
 
 async function loadEmbedder(cacheDir?: string): Promise<FastembedModel | null> {
+  const { FlagEmbedding, EmbeddingModel } = await import('fastembed');
+  if (cacheDir !== undefined) {
+    mkdirSync(cacheDir, { recursive: true });
+  }
+  const model = EmbeddingModel.BGESmallZH;
+  const initOpts = cacheDir !== undefined
+    ? { model, cacheDir }
+    : { model };
   try {
-    const { FlagEmbedding, EmbeddingModel } = await import('fastembed');
-    if (cacheDir !== undefined) {
-      mkdirSync(cacheDir, { recursive: true });
+    return await FlagEmbedding.init(initOpts as Parameters<typeof FlagEmbedding.init>[0]);
+  } catch (initError: unknown) {
+    // If init fails due to missing config/tokenizer sidecars, download them
+    // from HuggingFace mirror and retry.
+    const msg = initError instanceof Error ? initError.message : '';
+    if (!/Config file not found|Tokenizer file not found|Tokens map file not found/ui.test(msg)) {
+      throw initError;
     }
-    const model = EmbeddingModel.BGESmallZH;
-    const initOpts = cacheDir !== undefined
-      ? { model, cacheDir }
-      : { model };
-    try {
-      return await FlagEmbedding.init(initOpts as Parameters<typeof FlagEmbedding.init>[0]);
-    } catch (initError: unknown) {
-      // If init fails due to missing config/tokenizer sidecars, download them
-      // from HuggingFace mirror and retry.
-      const msg = initError instanceof Error ? initError.message : '';
-      if (!/Config file not found|Tokenizer file not found|Tokens map file not found/ui.test(msg)) {
-        return null;
-      }
-      try {
-        await ensureFastembedModelSidecars(String(model), cacheDir);
-        return await FlagEmbedding.init(initOpts as Parameters<typeof FlagEmbedding.init>[0]);
-      } catch {
-        return null;
-      }
-    }
-  } catch {
-    return null;
+    await ensureFastembedModelSidecars(String(model), cacheDir);
+    return await FlagEmbedding.init(initOpts as Parameters<typeof FlagEmbedding.init>[0]);
+  }
+}
+
+/**
+ * Remove any previously downloaded model files for the fixed BGESmallZH model.
+ * Called before a manual re-download so that a corrupted/partial cache does not
+ * cause fastembed to fail repeatedly.
+ */
+export function clearEmbeddingModelCache(cacheDir: string): void {
+  const modelDir = join(cacheDir, 'fast-bge-small-zh-v1.5');
+  if (existsSync(modelDir)) {
+    rmSync(modelDir, { recursive: true, force: true });
   }
 }
 
