@@ -1267,4 +1267,7 @@ export const zh: Record<string, string> = {
   'kw.no_data': '暂无数据',
   'kw.no_data_hint': '请先用 /knowledge 导入文档',
   'kw.lang_toggle': 'English',
+  'kw.embedding_downloading': '向量模型下载中…',
+  'kw.embedding_failed': '向量模型加载失败（建议科学上网，5分钟后自动重试）',
+  'kw.embedding_ready': '向量模型已就绪',
 };

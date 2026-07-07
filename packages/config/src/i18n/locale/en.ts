@@ -1267,4 +1267,7 @@ export const en: Record<string, string> = {
   'kw.no_data': 'No data',
   'kw.no_data_hint': 'Please ingest documents with /knowledge first',
   'kw.lang_toggle': '中文',
+  'kw.embedding_downloading': 'Vector model downloading…',
+  'kw.embedding_failed': 'Vector model load failed (try VPN, auto-retry in 5 min)',
+  'kw.embedding_ready': 'Vector model ready',
 };

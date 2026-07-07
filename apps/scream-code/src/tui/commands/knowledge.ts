@@ -14,7 +14,7 @@ import { t } from '@scream-code/config';
 
 import type { SlashCommandHost } from './dispatch';
 import { handleWeb } from './knowledge-web';
-import { getKnowledgeStore } from './knowledge-store';
+import { getKnowledgeStore, getEmbeddingStatus, ensureEmbeddingReady, waitForEmbedding, type EmbeddingStatus } from './knowledge-store';
 import { TextInputDialogComponent } from '../components/dialogs/text-input-dialog';
 import { ChoicePickerComponent, type ChoiceOption } from '../components/dialogs/choice-picker';
 import { KnowledgeResultViewer } from '../components/dialogs/knowledge-result-viewer';
@@ -396,10 +396,19 @@ export async function handleKnowledgeCommand(
     },
   ];
 
+  const formatEmbeddingHint = (status: EmbeddingStatus): string => {
+    switch (status) {
+      case 'ready': return '';
+      case 'loading': return ' · ' + t('kw.embedding_downloading');
+      case 'failed': return ' · ' + t('kw.embedding_failed');
+    }
+  };
+
   const showMenu = (): void => {
+    const status = getEmbeddingStatus();
     const picker = new ChoicePickerComponent({
       title: t('knowledge.menu_title'),
-      hint: t('knowledge.menu_hint'),
+      hint: t('knowledge.menu_hint') + formatEmbeddingHint(status),
       options,
       colors: host.state.theme.colors,
       onSelect: (value: string) => {
@@ -424,6 +433,17 @@ export async function handleKnowledgeCommand(
       },
     });
     host.mountEditorReplacement(picker);
+
+    if (status !== 'ready') {
+      ensureEmbeddingReady();
+      void waitForEmbedding().then((finalStatus) => {
+        if (finalStatus === 'ready') {
+          host.showStatus(t('kw.embedding_ready'));
+          // Re-render menu to remove the download hint
+          showMenu();
+        }
+      });
+    }
   };
 
   showMenu();
