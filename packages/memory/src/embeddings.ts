@@ -171,8 +171,8 @@ async function loadEmbedder(cacheDir?: string): Promise<FastembedModel | null> {
     if (!/Config file not found|Tokenizer file not found|Tokens map file not found/ui.test(msg)) {
       throw initError;
     }
-    await ensureFastembedModelSidecars(String(model), cacheDir);
-    return await FlagEmbedding.init(initOpts as Parameters<typeof FlagEmbedding.init>[0]);
+    await ensureFastembedModelSidecars(model, cacheDir);
+    return FlagEmbedding.init(initOpts as Parameters<typeof FlagEmbedding.init>[0]);
   }
 }
 
