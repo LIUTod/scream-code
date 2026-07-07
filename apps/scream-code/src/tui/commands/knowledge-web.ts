@@ -8,7 +8,7 @@ import { createServer, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 
 import type { KnowledgeStore } from '@scream-code/knowledge';
-import { t } from '@scream-code/config';
+import { t, getLocale } from '@scream-code/config';
 
 import { openUrl } from '../utils/open-url';
 import { getKnowledgeStore } from './knowledge-store';
@@ -38,7 +38,7 @@ const HTML = `<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>__MSG_kw_title__</title>
+<title data-msg="kw_title">__MSG_kw_title__</title>
 <style>
 :root{
   --bg:#fafafa;--bg-soft:#f0f0f0;
@@ -172,27 +172,43 @@ body{background:var(--bg)}
 <canvas id="scene"></canvas>
 <div id="labels"></div>
 <div id="toolbar">
-  <span class="chip">__MSG_kw_entity__<b id="stat-ent">0</b></span>
-  <span class="chip">__MSG_kw_event__<b id="stat-evt">0</b></span>
-  <span class="chip">__MSG_kw_relation__<b id="stat-edg">0</b></span>
+  <span class="chip"><span data-msg="kw_entity">__MSG_kw_entity__</span><b id="stat-ent">0</b></span>
+  <span class="chip"><span data-msg="kw_event">__MSG_kw_event__</span><b id="stat-evt">0</b></span>
+  <span class="chip"><span data-msg="kw_relation">__MSG_kw_relation__</span><b id="stat-edg">0</b></span>
   <span class="sep"></span>
   <div id="search-wrap">
     <svg id="search-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
     <input id="search-input" type="text" placeholder="__MSG_kw_search_placeholder__" autocomplete="off" spellcheck="false">
   </div>
   <span class="sep"></span>
-  <button id="btn-reset">__MSG_kw_btn_reset__</button>
-  <button id="btn-expand">__MSG_kw_btn_expand__</button>
+  <button id="btn-reset" data-msg="kw_btn_reset">__MSG_kw_btn_reset__</button>
+  <button id="btn-expand" data-msg="kw_btn_expand">__MSG_kw_btn_expand__</button>
+  <span class="sep"></span>
+  <button id="btn-lang">__MSG_kw_lang_toggle__</button>
 </div>
-<div id="hint"><b>__MSG_kw_hint_drag__</b></div>
+<div id="hint"><b data-msg="kw_hint_drag">__MSG_kw_hint_drag__</b></div>
 <div id="tooltip"></div>
 <div id="minimap"><canvas id="minimap-canvas"></canvas></div>
 <div id="modal-mask"></div>
 <div id="modal"><button class="close" id="btn-close">&times;</button><div id="modal-body"></div></div>
-<div id="loading"><span class="dot"></span><span class="dot"></span><span class="dot"></span>__MSG_kw_loading__</div>
+<div id="loading"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span data-msg="kw_loading">__MSG_kw_loading__</span></div>
 <div id="error-msg"></div>
 
 <script>
+var DICT=__DICT_INJECT__;
+var curLang='__LOCALE_INJECT__';
+function M(k){return(DICT[curLang]&&DICT[curLang][k])||k}
+function applyLang(){
+  document.title=M('kw_title');
+  document.querySelectorAll('[data-msg]').forEach(function(el){el.textContent=M(el.dataset.msg)});
+  var ph=document.getElementById('search-input');if(ph)ph.placeholder=M('kw_search_placeholder');
+  document.getElementById('btn-lang').textContent=M('kw_lang_toggle');
+}
+function toggleLang(){
+  curLang=curLang==='zh'?'en':'zh';
+  applyLang();
+  if(typeof render==='function')render();
+}
 (function(){
 'use strict';
 
@@ -608,7 +624,7 @@ function showTooltip(sx,sy,id){
   if(data.kind==='entity'){
     var e=eById[id];if(!e)return;
     html+='<div class="tt-name">'+esc(e.name)+'</div>';
-    html+='<div class="tt-meta">'+esc(e.type)+' · '+(e.eventCount||0)+' __MSG_kw_event__</div>';
+    html+='<div class="tt-meta">'+esc(e.type)+' · '+(e.eventCount||0)+' '+M('kw_event')+'</div>';
   }else{
     var ev=evById[id];if(!ev)return;
     html+='<div class="tt-name">'+esc(ev.title)+'</div>';
@@ -770,23 +786,23 @@ function showModal(id,kind,pushNav){
   var mask=document.getElementById('modal-mask');
   var body=document.getElementById('modal-body');
   var html='';
-  if(navStack.length>1)html+='<button class="back-btn" id="btn-back">← __MSG_kw_back__</button>';
+  if(navStack.length>1)html+='<button class="back-btn" id="btn-back">← '+M('kw_back')+'</button>';
   if(kind==='entity'){
     var e=eById[id];
     html+='<div class="type-tag">'+esc(e.type)+'</div>';
     html+='<h3>'+esc(e.name)+'</h3>';
-    html+='<div class="field"><div class="label">__MSG_kw_detail_related__</div><div class="value">'+(e.eventCount||0)+'</div></div>';
+    html+='<div class="field"><div class="label">'+M('kw_detail_related')+'</div><div class="value">'+(e.eventCount||0)+'</div></div>';
     var ce=evByEnt[id]||[];
-    if(ce.length){html+='<div class="divider"></div><div class="field"><div class="label">__MSG_kw_event__</div>';ce.forEach(function(eid){var ev=evById[eid];if(ev)html+='<div class="conn-item" data-id="'+eid+'" data-kind="event"><span>'+esc(ev.title)+'</span></div>'});html+='</div>'}
+    if(ce.length){html+='<div class="divider"></div><div class="field"><div class="label">'+M('kw_event')+'</div>';ce.forEach(function(eid){var ev=evById[eid];if(ev)html+='<div class="conn-item" data-id="'+eid+'" data-kind="event"><span>'+esc(ev.title)+'</span></div>'});html+='</div>'}
   }else{
     var ev=evById[id];
     html+='<div class="type-tag event">EVENT</div>';
     html+='<h3>'+esc(ev.title)+'</h3>';
-    if(ev.summary)html+='<div class="field"><div class="label">__MSG_kw_detail_description__</div><div class="value">'+esc(ev.summary)+'</div></div>';
-    if(ev.category)html+='<div class="field"><div class="label">__MSG_kw_detail_category__</div><div class="value">'+esc(ev.category)+'</div></div>';
-    if(ev.keywords&&ev.keywords.length)html+='<div class="field"><div class="label">__MSG_kw_detail_keywords__</div><div class="value">'+ev.keywords.map(esc).join(' · ')+'</div></div>';
+    if(ev.summary)html+='<div class="field"><div class="label">'+M('kw_detail_description')+'</div><div class="value">'+esc(ev.summary)+'</div></div>';
+    if(ev.category)html+='<div class="field"><div class="label">'+M('kw_detail_category')+'</div><div class="value">'+esc(ev.category)+'</div></div>';
+    if(ev.keywords&&ev.keywords.length)html+='<div class="field"><div class="label">'+M('kw_detail_keywords')+'</div><div class="value">'+ev.keywords.map(esc).join(' · ')+'</div></div>';
     var ce2=entByEv[id]||[];
-    if(ce2.length){html+='<div class="divider"></div><div class="field"><div class="label">__MSG_kw_detail_related__</div>';ce2.forEach(function(eid){var e=eById[eid];if(e)html+='<div class="conn-item" data-id="'+eid+'" data-kind="entity"><span>'+esc(e.name)+'</span><span class="badge">'+esc(e.type)+'</span></div>'});html+='</div>'}
+    if(ce2.length){html+='<div class="divider"></div><div class="field"><div class="label">'+M('kw_detail_related')+'</div>';ce2.forEach(function(eid){var e=eById[eid];if(e)html+='<div class="conn-item" data-id="'+eid+'" data-kind="entity"><span>'+esc(e.name)+'</span><span class="badge">'+esc(e.type)+'</span></div>'});html+='</div>'}
   }
   body.innerHTML=html;
   modal.classList.add('open');mask.classList.add('open');
@@ -1021,7 +1037,7 @@ setTimeout(function(){
   if(document.getElementById('loading').style.display!=='none'){
     document.getElementById('loading').style.display='none';
     errorMsg.style.display='block';
-    errorMsg.innerHTML='<div style="font-size:14px;font-weight:600;margin-bottom:8px;">__MSG_kw_loading__</div><div style="color:#666;font-size:12px;">__MSG_kw_loading_timeout__</div>';
+    errorMsg.innerHTML='<div style="font-size:14px;font-weight:600;margin-bottom:8px;">'+M('kw_loading')+'</div><div style="color:#666;font-size:12px;">'+M('kw_loading_timeout')+'</div>';
   }
 },8000);
 
@@ -1067,8 +1083,11 @@ fetch('/api/graph').then(function(r){return r.json()}).then(function(data){
 }).catch(function(err){
   document.getElementById('loading').style.display='none';
   errorMsg.style.display='block';
-  errorMsg.innerHTML='<div style="font-size:14px;font-weight:600;margin-bottom:8px;">__MSG_kw_no_data__</div><div style="color:#666;font-size:12px;margin-bottom:12px;">'+esc(err.message)+'</div><div style="color:#999;font-size:11px;">__MSG_kw_no_data_hint__</div>';
+  errorMsg.innerHTML='<div style="font-size:14px;font-weight:600;margin-bottom:8px;">'+M('kw_no_data')+'</div><div style="color:#666;font-size:12px;margin-bottom:12px;">'+esc(err.message)+'</div><div style="color:#999;font-size:11px;">'+M('kw_no_data_hint')+'</div>';
 });
+
+applyLang();
+document.getElementById('btn-lang').addEventListener('click',toggleLang);
 
 })();
 </script>
@@ -1116,13 +1135,33 @@ async function serveGraphJSON(store: KnowledgeStore, res: ServerResponse): Promi
   }
 }
 
-function serveHTML(res: ServerResponse): void {
+function serveHTML(res: ServerResponse, locale: string): void {
   res.writeHead(200, {
     'Content-Type': 'text/html; charset=utf-8',
     'Cache-Control': 'no-store',
   });
-  const html = HTML.replace(/__MSG_([a-z0-9_]+)__/g, (_, key: string) => t(key));
-  res.end(html);
+  const dictJson = JSON.stringify({
+    zh: {
+      kw_title:'知识图谱',kw_entity:'实体 ',kw_event:'事件 ',kw_relation:'关系 ',
+      kw_search_placeholder:'搜索节点…',kw_btn_reset:'重置',kw_btn_expand:'展开',
+      kw_hint_drag:'拖拽平移 · 滚轮缩放 · 单击展开 · 双击查看详情',
+      kw_loading:'加载中…',kw_back:'返回',kw_detail_related:'关联',
+      kw_detail_description:'描述',kw_detail_category:'分类',kw_detail_keywords:'关键词',
+      kw_loading_timeout:'加载超时',kw_no_data:'暂无数据',kw_no_data_hint:'请先用 /knowledge 导入文档',
+      kw_lang_toggle:'English',
+    },
+    en: {
+      kw_title:'Knowledge Graph',kw_entity:'Entities ',kw_event:'Events ',kw_relation:'Relations ',
+      kw_search_placeholder:'Search nodes…',kw_btn_reset:'Reset',kw_btn_expand:'Expand',
+      kw_hint_drag:'Drag to pan · Scroll to zoom · Click to expand · Double-click for details',
+      kw_loading:'Loading…',kw_back:'Back',kw_detail_related:'Related',
+      kw_detail_description:'Description',kw_detail_category:'Category',kw_detail_keywords:'Keywords',
+      kw_loading_timeout:'Loading timed out',kw_no_data:'No data',kw_no_data_hint:'Please ingest documents with /knowledge first',
+      kw_lang_toggle:'中文',
+    },
+  });
+  const injected = HTML.replace('__DICT_INJECT__', dictJson).replace('__LOCALE_INJECT__', locale);
+  res.end(injected);
 }
 
 // ─── Public API ─────────────────────────────────────────────────────
@@ -1139,7 +1178,7 @@ export async function handleWeb(host: SlashCommandHost): Promise<void> {
       void serveGraphJSON(store, res);
       return;
     }
-    serveHTML(res);
+    serveHTML(res, getLocale());
   });
   registerServer(server);
 
