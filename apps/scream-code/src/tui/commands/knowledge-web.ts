@@ -807,6 +807,7 @@ function showModal(id,kind,pushNav){
     var e=eById[id];
     html+='<div class="type-tag">'+esc(e.type)+'</div>';
     html+='<h3>'+esc(e.name)+'</h3>';
+    if(e.description)html+='<div class="field"><div class="label">'+M('kw_detail_description')+'</div><div class="value">'+esc(e.description)+'</div></div>';
     html+='<div class="field"><div class="label">'+M('kw_detail_related')+'</div><div class="value">'+(e.eventCount||0)+'</div></div>';
     var ce=evByEnt[id]||[];
     if(ce.length){html+='<div class="divider"></div><div class="field"><div class="label">'+M('kw_event')+'</div>';ce.forEach(function(eid){var ev=evById[eid];if(ev)html+='<div class="conn-item" data-id="'+eid+'" data-kind="event"><span>'+esc(ev.title)+'</span></div>'});html+='</div>'}
@@ -1129,8 +1130,8 @@ async function serveGraphJSON(store: KnowledgeStore, res: ServerResponse): Promi
     }
 
     const data = {
-      entities: entities.map(({ id, sourceId, type, name, normalizedName, eventCount }) => ({
-        id, sourceId, type, name, normalizedName, eventCount,
+      entities: entities.map(({ id, sourceId, type, name, normalizedName, eventCount, description }) => ({
+        id, sourceId, type, name, normalizedName, eventCount, description,
       })),
       events: events.map(({ id, sourceId, documentId, title, rank, summary, category, keywords }) => ({
         id, sourceId, documentId, title, rank, summary, category, keywords,
