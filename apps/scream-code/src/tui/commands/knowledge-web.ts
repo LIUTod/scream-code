@@ -700,18 +700,23 @@ canvas.addEventListener('mousemove',function(e){
   }
 });
 
+var clickTimer=null,dblClickGuard=false;
 canvas.addEventListener('mouseup',function(e){
   if(isPanning){isPanning=false;canvas.style.cursor='grab';return;}
   if(isDragging){startInertia();canvas.style.cursor='grab';return;}
+  if(dblClickGuard)return;
   var dx=e.clientX-mouseDownPos.x,dy=e.clientY-mouseDownPos.y;
   if(dx*dx+dy*dy>25)return;
   var id=pickNode(e.clientX,e.clientY);
   if(id){
-    var data=nodeData.find(function(n){return n.id===id});
-    if(data)toggleNode(id,data.kind);
-    selId=id;navStack=[];
-    focusOn(id);rebuildLabels();
-    if(data)showModal(id,data.kind);
+    if(clickTimer){clearTimeout(clickTimer);clickTimer=null;return;}
+    clickTimer=setTimeout(function(){
+      clickTimer=null;
+      var data=nodeData.find(function(n){return n.id===id});
+      if(data)toggleNode(id,data.kind);
+      selId=id;navStack=[];
+      focusOn(id);rebuildLabels();
+    },250);
   }else{
     selId=null;rebuildLabels();closeModal();
   }
@@ -720,8 +725,19 @@ canvas.addEventListener('mouseup',function(e){
 canvas.addEventListener('contextmenu',function(e){e.preventDefault();});
 canvas.addEventListener('dblclick',function(e){
   e.preventDefault();
+  if(clickTimer){clearTimeout(clickTimer);clickTimer=null;}
+  dblClickGuard=true;
+  setTimeout(function(){dblClickGuard=false;},300);
   var id=pickNode(e.clientX,e.clientY);
-  if(!id){
+  if(id){
+    var data=nodeData.find(function(n){return n.id===id});
+    if(data){
+      if(!expEnt.has(id)&&!expEv.has(id)){expEnt.add(id);}
+      selId=id;navStack=[];
+      focusOn(id);rebuildLabels();
+      showModal(id,data.kind);
+    }
+  }else{
     expEnt.clear();expEv.clear();selId=null;
     if(graphData)graphData.entities.forEach(function(en){expEnt.add(en.id)});
     closeModal();rebuildLabels();fitView();
