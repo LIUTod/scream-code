@@ -87,6 +87,7 @@ npm install -g scream-code
 TUI启动命令`scream`
 自动权限模式启动`scream --auto`
 自动批准模式启动`scream -y`
+启动后切换语言`/language`
 
 ### 第二步：启动并配置 AI 服务
 
