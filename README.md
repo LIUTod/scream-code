@@ -207,7 +207,7 @@ Thanks to these excellent projects for inspiration: pi, pi-tui, gork, kimicli, G
 
 ---
 
-<h1 id="中文说明">Scream Code 你的本地 Agent 智能助手</h1>
+<h2 id="中文说明">Scream Code 你的本地 Agent 智能助手</h2>
 
 <p align="center">
   <a href="#readme"><img src="https://img.shields.io/badge/README-English-blue?style=for-the-badge" alt="English README"></a>
