@@ -667,6 +667,7 @@ function pickNode(sx,sy){
 }
 
 canvas.addEventListener('mousedown',function(e){
+  stopAutoRotate();
   mouseDownPos={x:e.clientX,y:e.clientY};
   isDragging=false;
   dragStart={x:e.clientX,y:e.clientY,rotX:camRotX,rotY:camRotY,panX:camTargetX,panY:camTargetY};
@@ -745,6 +746,7 @@ canvas.addEventListener('dblclick',function(e){
 });
 
 canvas.addEventListener('wheel',function(e){
+  stopAutoRotate();
   e.preventDefault();
   var factor=e.deltaY>0?1.12:0.89;
   var newDist=Math.max(100,Math.min(2500,camDist*factor));
@@ -791,9 +793,41 @@ function fitView(){
   ids.forEach(function(id){var p=nodePositions[id];if(!p)return;if(p.x<x0)x0=p.x;if(p.x>x1)x1=p.x;if(p.y<y0)y0=p.y;if(p.y>y1)y1=p.y;if(p.z<z0)z0=p.z;if(p.z>z1)z1=p.z});
   var cx=(x0+x1)/2,cy=(y0+y1)/2,cz=(z0+z1)/2;
   var span=Math.max(x1-x0,y1-y0,z1-z0);
-  camTargetX=cx;camTargetY=cy;camTargetZ=cz;
-  camDist=Math.max(span*1.6,350);
+  var endTx=cx,endTy=cy,endTz=cz;
+  var endDist=Math.max(span*1.6,350);
+  var startTx=camTargetX,startTy=camTargetY,startTz=camTargetZ,startDist=camDist;
+  var startRotX=camRotX,startRotY=camRotY;
+  var endRotX=0.25,endRotY=0.4;
+  var startTime=performance.now();
+  if(focusAnim)cancelAnimationFrame(focusAnim);
+  function step(now){
+    var t=Math.min(1,(now-startTime)/800);
+    var e=t<.5?2*t*t:1-Math.pow(-2*t+2,2)/2;
+    camTargetX=startTx+(endTx-startTx)*e;
+    camTargetY=startTy+(endTy-startTy)*e;
+    camTargetZ=startTz+(endTz-startTz)*e;
+    camDist=startDist+(endDist-startDist)*e;
+    camRotX=startRotX+(endRotX-startRotX)*e;
+    camRotY=startRotY+(endRotY-startRotY)*e;
+    if(t<1)focusAnim=requestAnimationFrame(step);
+  }
+  focusAnim=requestAnimationFrame(step);
 }
+
+var autoRotRAF=null;
+function startAutoRotate(){
+  var duration=5000,startTime=performance.now();
+  var speed=0.008;
+  function step(now){
+    var elapsed=now-startTime;
+    var t=Math.min(1,elapsed/duration);
+    var fade=1-t;
+    camRotY+=speed*fade;
+    if(t<1)autoRotRAF=requestAnimationFrame(step);
+  }
+  autoRotRAF=requestAnimationFrame(step);
+}
+function stopAutoRotate(){if(autoRotRAF){cancelAnimationFrame(autoRotRAF);autoRotRAF=null;}}
 
 // ─── 模态详情 ────────────────────────────────────────
 function showModal(id,kind,pushNav){
@@ -1097,6 +1131,7 @@ fetch('/api/graph').then(function(r){return r.json()}).then(function(data){
   rebuildLabels();
   fitView();
   animate();
+  startAutoRotate();
 }).catch(function(err){
   document.getElementById('loading').style.display='none';
   errorMsg.style.display='block';
