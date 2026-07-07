@@ -62,7 +62,7 @@ body{background:var(--bg)}
   transition:color .2s;
 }
 .label-3d.root{color:var(--ink);font-weight:600;font-size:11px}
-.label-3d.selected{color:var(--accent);font-weight:600;background:rgba(255,255,255,.95)}
+.label-3d.selected{color:#0d7a3e;font-weight:600;background:rgba(255,255,255,.95)}
 .label-3d.hover{color:var(--ink);background:rgba(255,255,255,.95)}
 
 #toolbar{
@@ -217,7 +217,7 @@ var TYPE_COLORS={
   product:'#db2777',metric:'#9333ea',action:'#dc2626',work:'#7c3aed',
   group:'#4f46e5',subject:'#0d9488',tags:'#666'
 };
-var INK='#1a1a1a',ACCENT='#0066ff',EVENT='#9333ea';
+var INK='#1a1a1a',ACCENT='#0066ff',EVENT='#9333ea',SELECTED='#0d7a3e';
 
 // ─── Canvas ──────────────────────────────────────────
 var canvas=document.getElementById('scene');
@@ -426,10 +426,10 @@ function drawEdges(projMap,connSet){
     var inConn=!connSet||connSet.has(e.entityId)&&connSet.has(e.eventId);
     var opacity;
     if(isDir)opacity=0.9;
-    else if(connSet&&!inConn)opacity=0.03;
-    else opacity=0.18;
+    else if(connSet&&!inConn)opacity=0.08;
+    else opacity=0.35;
     ctx.strokeStyle='rgba(0,0,0,'+opacity+')';
-    ctx.lineWidth=isDir?1.2:0.6;
+    ctx.lineWidth=isDir?1.5:0.8;
     ctx.beginPath();
     ctx.moveTo(pa.x,pa.y);
     ctx.lineTo(pb.x,pb.y);
@@ -444,21 +444,22 @@ function drawNode(p,color,radius,isRoot,isSelected,isHover,isDimmed,isMatch){
   if(r<1){r=1;}
   var alpha=isDimmed?0.2:1;
 
+  var nodeColor=isSelected?SELECTED:color;
+
   if(isRoot){
-    // root 节点稍大，带细环
-    ctx.fillStyle='rgba(0,0,0,'+alpha+')';
+    ctx.fillStyle=isSelected?'rgba(13,122,62,'+alpha+')':'rgba(0,0,0,'+alpha+')';
     ctx.beginPath();ctx.arc(p.x,p.y,r,0,Math.PI*2);ctx.fill();
-    ctx.strokeStyle='rgba(0,0,0,'+(0.3*alpha)+')';
+    ctx.strokeStyle=isSelected?'rgba(13,122,62,'+(0.5*alpha)+')':'rgba(0,0,0,'+(0.3*alpha)+')';
     ctx.lineWidth=0.8;
     ctx.beginPath();ctx.arc(p.x,p.y,r+4,0,Math.PI*2);ctx.stroke();
   }else{
-    ctx.fillStyle='rgba(0,0,0,'+(0.7*alpha)+')';
+    ctx.fillStyle=isSelected?'rgba(13,122,62,'+(0.9*alpha)+')':'rgba(0,0,0,'+(0.7*alpha)+')';
     ctx.beginPath();ctx.arc(p.x,p.y,r,0,Math.PI*2);ctx.fill();
   }
 
-  // 选中：蓝色细环
+  // 选中：深绿色环
   if(isSelected){
-    ctx.strokeStyle=ACCENT;
+    ctx.strokeStyle=SELECTED;
     ctx.lineWidth=1.2;
     ctx.beginPath();ctx.arc(p.x,p.y,r+5,0,Math.PI*2);ctx.stroke();
   }
@@ -500,7 +501,7 @@ function drawNodes(projMap,connSet){
     if(it.type==='entity'){
       var ent=it.data;
       var color=TYPE_COLORS[ent.type]||INK;
-      var radius=ent.isRoot?5:2.5+Math.min(2.5,(ent.eventCount||0)*0.3);
+      var radius=ent.isRoot?6:3+Math.min(4,(ent.eventCount||0)*0.5);
       var isSel=selId===ent.id;
       var isHov=hoveredId===ent.id;
       var isDim=(connSet&&!connSet.has(ent.id))||(searchMatches&&!searchMatches.has(ent.id)&&ent.id!==selId);
@@ -512,7 +513,7 @@ function drawNodes(projMap,connSet){
       var isHov=hoveredId===ev.id;
       var isDim=(connSet&&!connSet.has(ev.id))||(searchMatches&&!searchMatches.has(ev.id)&&ev.id!==selId);
       var isMatch=searchMatches&&searchMatches.has(ev.id);
-      drawNode(it.p,EVENT,3,false,isSel,isHov,isDim,isMatch);
+      drawNode(it.p,EVENT,4,false,isSel,isHov,isDim,isMatch);
     }
   }
 }
@@ -714,7 +715,10 @@ canvas.addEventListener('mouseup',function(e){
     clickTimer=setTimeout(function(){
       clickTimer=null;
       var data=nodeData.find(function(n){return n.id===id});
-      if(data)toggleNode(id,data.kind);
+      if(data){
+        if(data.kind==='entity'&&!expEnt.has(id))expEnt.add(id);
+        if(data.kind==='event'&&!expEv.has(id))expEv.add(id);
+      }
       selId=id;navStack=[];
       focusOn(id);rebuildLabels();
     },250);
