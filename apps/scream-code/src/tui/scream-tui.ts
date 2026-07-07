@@ -10,7 +10,7 @@ import type {
   Session,
 } from '@scream-code/scream-code-sdk';
 import { ScreamHarness } from '@scream-code/scream-code-sdk';
-import { t } from '@scream-code/config';
+import { t, setLocale } from '@scream-code/config';
 import type { CLIOptions } from '#/cli/options';
 
 import {
@@ -97,6 +97,7 @@ function createInitialAppState(input: ScreamTUIStartupInput): AppState {
     : input.cliOptions.yolo
       ? 'yolo'
       : 'manual';
+  setLocale(input.tuiConfig.language);
   return {
     model: '',
     workDir: input.workDir,

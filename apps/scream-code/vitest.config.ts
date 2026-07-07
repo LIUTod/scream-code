@@ -16,5 +16,6 @@ export default defineConfig({
   test: {
     name: 'cli',
     include: ['test/**/*.test.ts', 'test/**/*.test.tsx'],
+    setupFiles: ['test/global-setup.ts'],
   },
 });

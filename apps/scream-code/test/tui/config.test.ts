@@ -59,7 +59,7 @@ notification_condition = "always"
       like: { nickname: undefined, tone: undefined, other: undefined },
       fusionPlan: { timeoutSeconds: 600, workerCount: 3 },
       subagentModels: {},
-      language: 'zh',
+      language: DEFAULT_TUI_CONFIG.language,
     });
   });
 
@@ -75,7 +75,7 @@ command = "   "
       like: { nickname: undefined, tone: undefined, other: undefined },
       fusionPlan: { timeoutSeconds: 600, workerCount: 3 },
       subagentModels: {},
-      language: 'zh',
+      language: DEFAULT_TUI_CONFIG.language,
     });
   });
 

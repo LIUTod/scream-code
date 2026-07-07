@@ -11,7 +11,7 @@ import { dirname, join } from 'node:path';
 
 import { parse as parseToml } from 'smol-toml';
 import { z } from 'zod';
-import { t } from '@scream-code/config';
+import { t, getLocale } from '@scream-code/config';
 
 import { getDataDir } from '#/utils/paths';
 
@@ -81,7 +81,7 @@ export const DEFAULT_NOTIFICATIONS_CONFIG: NotificationsConfig = {
 };
 export const DEFAULT_TUI_CONFIG: TuiConfig = TuiConfigSchema.parse({
   theme: 'auto',
-  language: 'zh',
+  language: getLocale(),
   editorCommand: null,
   notifications: DEFAULT_NOTIFICATIONS_CONFIG,
   like: {},
