@@ -167,13 +167,13 @@ Follow the steps to complete setup, then start the background daemon (scream-cod
 
 ## 💡 Inspiration & Thanks
 
-Scream is a tool-oriented Agent framework I rebuilt from scratch based on my own usage habits and understanding of Agent systems. I started with Rust, but the architecture ballooned into a mess. After that lesson, I switched entirely to TypeScript and did a lot of subtraction.
+Scream Code is a tool-oriented Agent framework I rebuilt from scratch based on my own usage habits and understanding of Agent systems. I started with Rust, but the maintenance overhead kept growing until I had to switch entirely to TypeScript. I've always believed that maximizing the model's own capabilities is the optimal path for Agent tools — in other words, I don't advocate excessive framework constraints, because model development will gradually reduce hallucinations.
 
-Post-refactor, I focused on three things: parallel scheduling + state machine, convergent memory system design, and maximizing the model's own capabilities. The overall logic borrows from the Agent harness approach, while referencing design decisions from many excellent open-source projects. Scream no longer pursues feature stacking — it's a lightweight Agent foundation that stably and efficiently executes intent.
+The overall logic borrows from the Agent harness approach, while referencing design decisions from many excellent open-source projects. Scream no longer pursues feature stacking — it's a lightweight Agent foundation that stably and efficiently executes intent.
 
-This project is completely free and open to use. Feedback, suggestions, and improvements are welcome. I'll keep refining it based on real-world usage.
+This project is completely free and open to use. Forks and modifications are welcome. Feedback, suggestions, and improvements are appreciated. I'll keep refining it within my capacity based on real-world usage.
 
-Thanks to these excellent projects for inspiration: pi, gork, kimicli, Gemini, ohmypi, and others.
+Thanks to these excellent projects for inspiration: pi, pi-tui, gork, kimicli, Gemini, ohmypi, zero, and others.
 
 ---
 
@@ -358,10 +358,10 @@ npm install -g cc-connect
 
 ## 💡 项目灵感与感谢支持
 
-Scream 是我基于自身使用习惯与对 Agent 系统的理解，从零重构的一套工具型 Agent 框架。最早用 Rust 写，架构膨胀得厉害，最后成屎山了。经历了教训之后，彻底转向 TypeScript，也顺便做了大量减法。
+Scream Code 是我基于自身使用习惯以及对 Agent 系统的理解，从零重构的一套工具型 Agent 框架。最早用 Rust 编写，但维护工程量越来越大，不得不彻底转向 TypeScript，我的始终认为，最大化释放模型本身的能力才是 Agent 工具未来发展的最优解，换句话说我并不提倡过度的框架约束，因为模型的发展会逐渐降低幻觉！
 
-重构之后，我把精力集中在三件事上：并行调度和状态机 + 记忆系统的收敛设计 + 最大化释放模型本身的能力上。整体逻辑借鉴了 Agent harness 的思路，同时也参考了不少优秀开源项目的设计取舍与实现细节。现在的 Scream 不再追求功能堆叠，而是一个能稳定、高效执行意图的轻量化 Agent 底座。
+另外 Scream Code 的整体逻辑借鉴了 Agent harness 的思路，同时也参考了不少优秀开源项目的设计取舍与实现细节。现在的 Scream 不再追求功能堆叠，而是一个能稳定、高效执行意图的轻量化 Agent 底座。
 
-这个项目完全免费，开放使用，也欢迎反馈，并给出建议和改进。会持续根据实际使用场景继续打磨。
+这个项目完全免费，开放使用，欢迎魔改，也欢迎反馈，并给出建议和改进。我会在能力范围之内，持续根据实际使用场景继续打磨。
 
-再次感谢其他优秀的项目给予灵感：pi、gork、kimicli、Gemini、ohmypi 等优秀项目。
+再次感谢其他优秀的项目给予灵感：pi、pi-tui、gork、kimicli、Gemini、ohmypi、zero 等优秀项目。
