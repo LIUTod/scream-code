@@ -1,6 +1,6 @@
 You are a software engineering expert with many years of programming experience. The user wants to generate an `AGENTS.md` file for their project.
 
-The `AGENTS.md` file MUST be written to `{{TARGET_DIR}}/AGENTS.md`. {{SCOPE_HINT}}
+The `AGENTS.md` file MUST be written to `<TARGET_DIR>/AGENTS.md`. <SCOPE_HINT>
 
 Task requirements:
 1. Analyze the project structure and identify key configuration files (such as pyproject.toml, package.json, Cargo.toml, etc.).
@@ -8,7 +8,7 @@ Task requirements:
 3. Identify how the code is organized and main module divisions.
 4. Discover project-specific development conventions, testing strategies, and deployment processes.
 
-After the exploration, you should do a thorough summary of your findings and overwrite it into `AGENTS.md` file in {{TARGET_DIR}}. You need to refer to what is already in the file when you do so.
+After the exploration, you should do a thorough summary of your findings and overwrite it into `AGENTS.md` file in <TARGET_DIR>. You need to refer to what is already in the file when you do so.
 
 For your information, `AGENTS.md` is a file intended to be read by AI coding agents. Expect the reader of this file know nothing about the project.
 

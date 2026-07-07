@@ -292,11 +292,11 @@ export class Session {
       const workDir = mainAgent.jian.getcwd();
       const strictCurrentDir = targetDir !== undefined && resolve(targetDir) === resolve(workDir);
       const scopeHint = strictCurrentDir
-        ? 'Strictly analyze only {{TARGET_DIR}}. Do NOT explore any parent directories or sibling directories outside {{TARGET_DIR}}.'
-        : 'You may explore from the current working directory upward to {{TARGET_DIR}} as needed to understand the whole project.';
+        ? 'Strictly analyze only <TARGET_DIR>. Do NOT explore any parent directories or sibling directories outside <TARGET_DIR>.'
+        : 'You may explore from the current working directory upward to <TARGET_DIR> as needed to understand the whole project.';
       const prompt = DEFAULT_INIT_PROMPT
-        .replace(/{{TARGET_DIR}}/g, targetDir ?? 'the project root')
-        .replace(/{{SCOPE_HINT}}/g, scopeHint);
+        .replaceAll('<TARGET_DIR>', targetDir ?? 'the project root')
+        .replaceAll('<SCOPE_HINT>', scopeHint);
       const handle = await mainAgent.subagentHost!.spawn('coder', {
         parentToolCallId: 'generate-agents-md',
         prompt,
