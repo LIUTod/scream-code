@@ -1,6 +1,6 @@
 {
   "name": "@scream-code/migration-legacy",
-  "version": "0.9.1",
+  "version": "0.9.2",
   "description": "Migrate scream-cli (~/.scream/) data into scream-code (~/.scream-code/).",
   "license": "MIT",
   "type": "module",
