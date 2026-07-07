@@ -236,7 +236,7 @@ window.addEventListener('resize',resize);
 
 // 相机
 var camRotX=0.25,camRotY=0.4;
-var camDist=700;
+var camDist=500;
 var camTargetX=0,camTargetY=0,camTargetZ=0;
 var fov=600;
 
