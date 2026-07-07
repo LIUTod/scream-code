@@ -108,9 +108,9 @@ export class Session {
     });
   }
 
-  async init(): Promise<void> {
+  async init(targetDir?: string): Promise<void> {
     this.ensureOpen();
-    await this.rpc.generateAgentsMd({ sessionId: this.id });
+    await this.rpc.generateAgentsMd({ sessionId: this.id, targetDir });
   }
 
   async cancel(): Promise<void> {

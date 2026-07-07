@@ -113,8 +113,8 @@ export class SessionAPIImpl implements PromisableMethods<SessionAPI> {
     await this.session.mcp.removeServer(payload.name);
   }
 
-  generateAgentsMd(_payload: EmptyPayload): Promise<void> {
-    return this.session.generateAgentsMd();
+  generateAgentsMd(payload: { targetDir?: string | undefined }): Promise<void> {
+    return this.session.generateAgentsMd(payload.targetDir);
   }
 
   async prompt({ agentId, ...payload }: AgentScopedPayload<PromptPayload>) {

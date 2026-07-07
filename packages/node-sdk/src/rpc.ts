@@ -72,6 +72,10 @@ export interface SessionIdRpcInput {
   readonly sessionId: string;
 }
 
+export interface GenerateAgentsMdInput extends SessionIdRpcInput {
+  readonly targetDir?: string | undefined;
+}
+
 export interface SetSessionModelRpcInput extends SessionIdRpcInput {
   readonly model: string;
 }
@@ -273,9 +277,9 @@ export class SDKRpcClient {
     });
   }
 
-  async generateAgentsMd(input: SessionIdRpcInput): Promise<void> {
+  async generateAgentsMd(input: GenerateAgentsMdInput): Promise<void> {
     const rpc = await this.getRpc();
-    return rpc.generateAgentsMd({ sessionId: input.sessionId });
+    return rpc.generateAgentsMd({ sessionId: input.sessionId, targetDir: input.targetDir });
   }
 
   async cancel(input: SessionIdRpcInput): Promise<void> {

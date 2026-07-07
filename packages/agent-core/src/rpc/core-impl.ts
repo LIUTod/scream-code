@@ -734,7 +734,7 @@ export class ScreamCore implements PromisableMethods<CoreAPI> {
     }
   }
 
-  generateAgentsMd({ sessionId, ...payload }: SessionScopedPayload<EmptyPayload>): Promise<void> {
+  generateAgentsMd({ sessionId, ...payload }: SessionScopedPayload<{ targetDir?: string | undefined }>): Promise<void> {
     return this.sessionApi(sessionId).generateAgentsMd(payload);
   }
 

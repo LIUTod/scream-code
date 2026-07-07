@@ -411,7 +411,7 @@ export interface SessionAPI extends AgentAPIWithId {
   addMcpServer: (payload: AddMcpServerPayload) => void;
   stopMcpServer: (payload: StopMcpServerPayload) => void;
   removeMcpServer: (payload: RemoveMcpServerPayload) => void;
-  generateAgentsMd: (payload: EmptyPayload) => void;
+  generateAgentsMd: (payload: { targetDir?: string | undefined }) => void;
 }
 
 type SessionAPIWithId = WithSessionId<SessionAPI>;

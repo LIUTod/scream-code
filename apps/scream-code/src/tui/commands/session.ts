@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -12,6 +13,7 @@ import { getLlmNotSetMessage, getNoActiveSessionMessage } from '../constant/scre
 import { isAbortError } from '../utils/errors';
 import { formatErrorMessage } from '../utils/event-payload';
 import { buildExportMarkdown } from '../utils/export-markdown';
+import { ChoicePickerComponent, type ChoiceOption } from '../components/dialogs/choice-picker';
 import type { SlashCommandHost } from './dispatch';
 
 // ---------------------------------------------------------------------------
@@ -165,10 +167,20 @@ export async function handleInitCommand(host: SlashCommandHost): Promise<void> {
     return;
   }
 
+  const workDir = host.state.appState.workDir;
+  const projectRoot = findProjectRoot(workDir);
+  const targetDir = projectRoot === undefined || projectRoot === workDir
+    ? workDir
+    : await selectInitTargetDir(host, workDir, projectRoot);
+  if (targetDir === undefined) {
+    host.showStatus(t('init.cancelled'));
+    return;
+  }
+
   host.deferUserMessages = true;
   host.beginSessionRequest();
   try {
-    await session.init();
+    await session.init(targetDir);
     host.streamingUI.finalizeTurn((item) => {
       host.sendQueuedMessage(session, item);
     });
@@ -183,4 +195,71 @@ export async function handleInitCommand(host: SlashCommandHost): Promise<void> {
   } finally {
     host.deferUserMessages = false;
   }
+}
+
+const PROJECT_ROOT_MARKERS = [
+  'package.json',
+  'Cargo.toml',
+  'pyproject.toml',
+  'go.mod',
+  'pom.xml',
+  'tsconfig.json',
+];
+
+function findProjectRoot(startDir: string): string | undefined {
+  let dir = resolve(startDir);
+  let markerDir: string | undefined;
+  while (true) {
+    if (existsSync(resolve(dir, '.git'))) {
+      return dir;
+    }
+    if (markerDir === undefined) {
+      for (const marker of PROJECT_ROOT_MARKERS) {
+        if (existsSync(resolve(dir, marker))) {
+          markerDir = dir;
+          break;
+        }
+      }
+    }
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return markerDir;
+}
+
+function selectInitTargetDir(
+  host: SlashCommandHost,
+  workDir: string,
+  projectRoot: string,
+): Promise<string | undefined> {
+  const { promise, resolve } = Promise.withResolvers<string | undefined>();
+  const options: ChoiceOption[] = [
+    {
+      value: workDir,
+      label: t('init.current_dir'),
+      description: t('init.current_dir_desc'),
+    },
+    {
+      value: projectRoot,
+      label: t('init.project_root'),
+      description: t('init.project_root_desc'),
+    },
+  ];
+  const picker = new ChoicePickerComponent({
+    title: t('init.select_title'),
+    hint: t('init.select_hint', { currentDir: workDir, projectRoot }),
+    options,
+    colors: host.state.theme.colors,
+    onSelect: (value: string) => {
+      host.restoreEditor();
+      resolve(value);
+    },
+    onCancel: () => {
+      host.restoreEditor();
+      resolve(undefined);
+    },
+  });
+  host.mountEditorReplacement(picker);
+  return promise;
 }

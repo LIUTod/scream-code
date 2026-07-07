@@ -1,4 +1,5 @@
 import { rm } from 'node:fs/promises';
+import { resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { join } from 'pathe';
 import type { Jian } from '@scream-code/jian';
@@ -283,14 +284,22 @@ export class Session {
     agent.useProfile(profile, context);
   }
 
-  async generateAgentsMd(): Promise<void> {
+  async generateAgentsMd(targetDir?: string): Promise<void> {
     await this.skillsReady;
     const mainAgent = this.requireMainAgent();
 
     try {
+      const workDir = mainAgent.jian.getcwd();
+      const strictCurrentDir = targetDir !== undefined && resolve(targetDir) === resolve(workDir);
+      const scopeHint = strictCurrentDir
+        ? 'Strictly analyze only {{TARGET_DIR}}. Do NOT explore any parent directories or sibling directories outside {{TARGET_DIR}}.'
+        : 'You may explore from the current working directory upward to {{TARGET_DIR}} as needed to understand the whole project.';
+      const prompt = DEFAULT_INIT_PROMPT
+        .replace(/{{TARGET_DIR}}/g, targetDir ?? 'the project root')
+        .replace(/{{SCOPE_HINT}}/g, scopeHint);
       const handle = await mainAgent.subagentHost!.spawn('coder', {
         parentToolCallId: 'generate-agents-md',
-        prompt: DEFAULT_INIT_PROMPT,
+        prompt,
         description: 'Initialize AGENTS.md',
         runInBackground: false,
         origin: { kind: 'system_trigger', name: 'init' },

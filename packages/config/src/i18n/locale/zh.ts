@@ -223,6 +223,15 @@ export const zh: Record<string, string> = {
   'knowledge.menu_hint': '选择操作（esc 退出）',
   'knowledge.op_failed': '操作失败: {msg}',
 
+  // ─── Init ─────────────────────
+  'init.select_title': '选择 AGENTS.md 生成位置',
+  'init.select_hint': '当前目录：{currentDir} · 项目根目录：{projectRoot}',
+  'init.current_dir': '当前目录',
+  'init.current_dir_desc': '仅在当前目录生成并分析',
+  'init.project_root': '项目根目录',
+  'init.project_root_desc': '基于当前目录，允许 AI 自行向上探索后生成',
+  'init.cancelled': '已取消初始化',
+
   // ─── 循环 ─────────────────────
   'loop.permission_auto': '权限已切到 auto（循环期间不再弹审批）。',
   'loop.disabled': '循环模式已关闭。',
