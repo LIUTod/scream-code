@@ -1,5 +1,7 @@
 import type { Session } from '@scream-code/scream-code-sdk';
 
+import { t } from '@scream-code/config';
+
 import { AgentGroupComponent } from '../components/messages/agent-group';
 import { AssistantMessageComponent } from '../components/messages/assistant-message';
 import { CompactionComponent } from '../components/dialogs/compaction';
@@ -552,7 +554,7 @@ export class StreamingUIController {
     this.host.onTurnCompleted();
     this.host.transcriptController.commit();
     notifyTerminalOnce(state, `turn-complete:${completedTurnKey}`, {
-      title: 'Scream Code 任务完成',
+      title: t('streamingui.turn_complete_title'),
       body: state.appState.sessionTitle ?? undefined,
     });
   }
@@ -799,7 +801,7 @@ export class StreamingUIController {
       kind: 'tool_call',
       turnId: this._currentTurnId,
       renderMode: 'plain',
-      content: instruction ?? '压缩上下文',
+      content: instruction ?? t('streamingui.compacting'),
       compactionData: {},
     };
     this._activeCompactionBlock = block;

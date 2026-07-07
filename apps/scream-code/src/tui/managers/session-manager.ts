@@ -5,7 +5,8 @@ import type {
   ScreamHarness,
   Session,
 } from '@scream-code/scream-code-sdk';
-import { LLM_NOT_SET_MESSAGE, MAIN_AGENT_ID, NO_ACTIVE_SESSION_MESSAGE } from '../constant/scream-tui';
+import { t } from '@scream-code/config';
+import { getLlmNotSetMessage, MAIN_AGENT_ID, getNoActiveSessionMessage } from '../constant/scream-tui';
 import { formatErrorMessage } from '../utils/event-payload';
 import { isBusy } from '../utils/app-state';
 import { sessionRowsForPicker } from '../utils/session-picker-rows';
@@ -88,11 +89,11 @@ export class SessionManager {
         });
         const target = sessions[0];
         if (target === undefined) {
-          throw new Error(`未找到会话 "${startup.sessionFlag}"。`);
+          throw new Error(t('session.not_found', { sessionId: startup.sessionFlag }));
         }
         if (target.workDir !== workDir) {
           throw new Error(
-            `会话 "${startup.sessionFlag}" 是在其他目录下创建的。\n  cd "${target.workDir}" && scream -r ${startup.sessionFlag}`,
+            t('session.wrong_dir', { sessionId: startup.sessionFlag, workDir: target.workDir }),
           );
         }
         session = await this.host.harness.resumeSession({ id: startup.sessionFlag });
@@ -107,8 +108,8 @@ export class SessionManager {
           session = await this.host.harness.createSession(createSessionOptions);
           this.host.startupNotice =
             this.host.startupNotice !== undefined
-              ? `${this.host.startupNotice}\n"${workDir}" 下没有可继续的会话；正在启动新会话。`
-              : `"${workDir}" 下没有可继续的会话；正在启动新会话。`;
+              ? `${this.host.startupNotice}\n${t('session.no_resumable', { workDir })}`
+              : t('session.no_resumable', { workDir });
         }
       }
     } else {
@@ -120,7 +121,7 @@ export class SessionManager {
     }
 
     if (session === undefined) {
-      throw new Error('启动会话未初始化。');
+      throw new Error(t('session.init_failed'));
     }
     await this.setSession(session);
     await this.syncRuntimeState(session);
@@ -235,15 +236,15 @@ export class SessionManager {
   // ---------------------------------------------------------------------------
   async resumeSession(targetSessionId: string): Promise<{ switched: boolean; session?: Session }> {
     if (targetSessionId === this.host.state.appState.sessionId) {
-      this.host.showStatus('已在该会话中。');
+      this.host.showStatus(t('session.already_in'));
       return { switched: true };
     }
     if (isBusy(this.host.state.appState)) {
-      this.host.showError('流式传输期间无法切换会话 — 请先按 Esc 或 Ctrl-C。');
+      this.host.showError(t('session.switch_streaming'));
       return { switched: false };
     }
     if (this.host.state.appState.isReplaying) {
-      this.host.showError('历史回放期间无法切换会话。');
+      this.host.showError(t('session.switch_replaying'));
       return { switched: false };
     }
 
@@ -252,11 +253,11 @@ export class SessionManager {
       session = await this.host.harness.resumeSession({ id: targetSessionId });
     } catch (error) {
       const msg = formatErrorMessage(error);
-      this.host.showError(`恢复会话 ${targetSessionId} 失败：${msg}`);
+      this.host.showError(t('session.resume_failed', { sessionId: targetSessionId, msg }));
       return { switched: false };
     }
 
-    await this.switchToSession(session, `已恢复会话 (${session.id})。`);
+    await this.switchToSession(session, t('session.resumed', { sessionId: session.id }));
     return { switched: true };
   }
 
@@ -275,13 +276,13 @@ export class SessionManager {
       await this.host.sessionReplay.hydrateFromReplay(session);
     } catch (error) {
       const msg = formatErrorMessage(error);
-      this.host.showError(`重放会话历史失败：${msg}`);
+      this.host.showError(t('session.replay_failed', { msg }));
     } finally {
       this.host.sessionEventHandler.startSubscription();
     }
     const resumeState = session.getResumeState();
     if (resumeState?.warning !== undefined) {
-      this.host.showStatus(`警告：${resumeState.warning}`, this.host.state.theme.colors.warning);
+      this.host.showStatus(t('session.resume_warning', { warning: resumeState.warning }), this.host.state.theme.colors.warning);
     }
     this.host.showStatus(statusMessage);
   }
@@ -291,7 +292,7 @@ export class SessionManager {
   // ---------------------------------------------------------------------------
   async createNewSession(): Promise<void> {
     if (this.host.state.appState.isReplaying) {
-      this.host.showError('历史回放期间无法启动新会话。');
+      this.host.showError(t('session.new_replaying'));
       return;
     }
 
@@ -300,7 +301,7 @@ export class SessionManager {
       session = await this.createSessionFromCurrentState();
     } catch (error) {
       const msg = formatErrorMessage(error);
-      this.host.showError(`启动新会话失败：${msg}`);
+      this.host.showError(t('session.new_failed', { msg }));
       return;
     }
 
@@ -313,7 +314,7 @@ export class SessionManager {
     } catch (error) {
       this.host.sessionEventHandler.startSubscription();
       const msg = formatErrorMessage(error);
-      this.host.showError(`创建后设置失败：${msg}`);
+      this.host.showError(t('session.setup_failed', { msg }));
       return;
     }
     try {
@@ -323,13 +324,13 @@ export class SessionManager {
     }
     this.host.sessionEventHandler.startSubscription();
     this.host.clearTranscriptAndRedraw();
-    this.host.showStatus(`已启动新会话 (${session.id})。`);
+    this.host.showStatus(t('session.new_started', { sessionId: session.id }));
   }
 
   private async createSessionFromCurrentState(): Promise<Session> {
     const model = this.host.state.appState.model.trim();
     if (model.length === 0) {
-      throw new Error(LLM_NOT_SET_MESSAGE);
+      throw new Error(getLlmNotSetMessage());
     }
     return this.host.harness.createSession({
       workDir: this.host.state.appState.workDir,
@@ -370,7 +371,7 @@ export class SessionManager {
   // ---------------------------------------------------------------------------
   private requireSession(): Session {
     if (this.host.session === undefined) {
-      throw new Error(NO_ACTIVE_SESSION_MESSAGE);
+      throw new Error(getNoActiveSessionMessage());
     }
     return this.host.session;
   }

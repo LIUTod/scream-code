@@ -25,6 +25,7 @@ import {
 } from '@earendil-works/pi-tui';
 import chalk from 'chalk';
 import * as path from 'node:path';
+import { t } from '@scream-code/config';
 
 import type { MemoryMemo, MemoryMemoSummary } from '@scream-code/memory';
 import { MemoryMemoStore } from '@scream-code/memory';
@@ -37,13 +38,13 @@ const ELLIPSIS = '…';
 function formatRelativeTime(ts: number): string {
   if (!Number.isFinite(ts) || ts <= 0) return '';
   const diffSec = Math.floor(Math.max(0, Date.now() - ts) / 1000);
-  if (diffSec < 60) return '刚刚';
+  if (diffSec < 60) return t('memory.just_now');
   const minutes = Math.floor(diffSec / 60);
-  if (minutes < 60) return `${String(minutes)} 分钟前`;
+  if (minutes < 60) return t('memory.minutes_ago', { minutes });
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${String(hours)} 小时前`;
+  if (hours < 24) return t('memory.hours_ago', { hours });
   const days = Math.floor(hours / 24);
-  return `${String(days)} 天前`;
+  return t('memory.days_ago', { days });
 }
 
 function singleLine(text: string): string {
@@ -90,9 +91,9 @@ function wrapText(text: string, maxWidth: number): string[] {
 }
 
 function sourceLabel(source: string): string {
-  if (source === 'compaction') return '压缩提取';
-  if (source === 'manual') return '手动记录';
-  return '退出提取';
+  if (source === 'compaction') return t('memory.compaction_extract');
+  if (source === 'manual') return t('memory.manual_record');
+  return t('memory.exit_extract');
 }
 
 function formatProject(memo: MemoryMemoSummary): string {
@@ -290,7 +291,7 @@ export class MemoryPickerComponent extends Container implements Focusable {
 
     // Search input bar
     if (this.isSearching) {
-      const prompt = '搜索: ';
+      const prompt = t('memory.search_label');
       const cursor = '█';
       const input = this.searchInput.length > 0 ? this.searchInput : cursor;
       lines.push(truncateToWidth(
@@ -302,10 +303,10 @@ export class MemoryPickerComponent extends Container implements Focusable {
     }
 
     // Header
-    const headerLabel = '记忆备忘录 ';
+    const headerLabel = t('memory.notebook_title');
     const headerHint = this.searchQuery.length > 0
-      ? '(Esc 清除搜索)'
-      : '(↑↓ 导航，Enter 查看，i 注入，d 删除，/ 搜索，Esc 关闭)';
+      ? t('memory.esc_clear_search')
+      : t('memory.nav_hint');
     const labelWidth = visibleWidth(headerLabel);
     const hintBudget = Math.max(0, width - labelWidth);
     const shownHint = truncateToWidth(headerHint, hintBudget, ELLIPSIS);
@@ -316,7 +317,7 @@ export class MemoryPickerComponent extends Container implements Focusable {
 
     // Loading
     if (this.loading) {
-      lines.push(chalk.hex(c.textMuted)(truncateToWidth('  正在加载...', width, ELLIPSIS)));
+      lines.push(chalk.hex(c.textMuted)(truncateToWidth(`  ${t('memory.loading')}`, width, ELLIPSIS)));
       lines.push(chalk.hex(c.primary)('─'.repeat(width)));
       return lines;
     }
@@ -325,14 +326,14 @@ export class MemoryPickerComponent extends Container implements Focusable {
     if (this.memos.length === 0) {
       if (this.searchQuery.length > 0) {
         lines.push(chalk.hex(c.textMuted)(
-          truncateToWidth(`  未找到匹配 "${this.searchQuery}" 的记忆。`, width, ELLIPSIS),
+          truncateToWidth(`  ${t('memory.no_match', { query: this.searchQuery })}`, width, ELLIPSIS),
         ));
       } else {
         lines.push(chalk.hex(c.textMuted)(
-          truncateToWidth('  暂无记忆备忘录。', width, ELLIPSIS),
+          truncateToWidth(`  ${t('memory.empty')}`, width, ELLIPSIS),
         ));
         lines.push(chalk.hex(c.textMuted)(
-          truncateToWidth('  压缩对话或退出会话时，系统会自动提取并保存。', width, ELLIPSIS),
+          truncateToWidth(t('memory.auto_extract_hint'), width, ELLIPSIS),
         ));
       }
       lines.push(chalk.hex(c.primary)('─'.repeat(width)));
@@ -349,10 +350,10 @@ export class MemoryPickerComponent extends Container implements Focusable {
       const memo = this.memos[this.selectedIndex];
       if (memo) {
         lines.push(truncateToWidth(
-          chalk.hex(c.warning).bold(`  删除: ${memo.userNeed}`),
+          chalk.hex(c.warning).bold(`  ${t('memory.deleting')}${memo.userNeed}`),
           width, ELLIPSIS,
         ));
-        lines.push(chalk.hex(c.warning)('  按 Enter 确认删除，Esc 取消'));
+        lines.push(chalk.hex(c.warning)(t('memory.delete_confirm_hint')));
       }
       lines.push(chalk.hex(c.primary)('─'.repeat(width)));
       return lines;
@@ -378,7 +379,7 @@ export class MemoryPickerComponent extends Container implements Focusable {
 
     if (this.memos.length > visible.length) {
       lines.push('');
-      const footer = `${String(visibleStart + 1)}-${String(visibleStart + visible.length)} / ${String(this.total)} 条`;
+      const footer = t('memory.showing_range', { start: String(visibleStart + 1), end: String(visibleStart + visible.length), total: String(this.total) });
       lines.push(chalk.hex(c.textMuted)(truncateToWidth(footer, width, ELLIPSIS)));
     }
 
@@ -416,7 +417,7 @@ export class MemoryPickerComponent extends Container implements Focusable {
     const sessionLabel = memo.sourceSessionTitle && memo.sourceSessionTitle.length > 0
       ? memo.sourceSessionTitle
       : memo.sourceSessionId.slice(0, 12);
-    const idInfo = `ID: ${memo.id}    来源: ${sessionLabel}`;
+    const idInfo = `${t('memory.id_label')}${memo.id}    ${t('memory.source_label')}${sessionLabel}`;
     card.push(
       indent + chalk.hex(c.textMuted)(truncateToWidth(idInfo, Math.max(8, width - indentWidth), ELLIPSIS)),
     );
@@ -425,8 +426,8 @@ export class MemoryPickerComponent extends Container implements Focusable {
     const project = formatProject(memo);
     const tags = formatTags(memo);
     const metaParts = [
-      project.length > 0 ? `项目: ${project}` : '',
-      tags.length > 0 ? `标签: ${tags}` : '',
+      project.length > 0 ? `${t('memory.project_label')}${project}` : '',
+      tags.length > 0 ? `${t('memory.tags_label')}${tags}` : '',
     ].filter((p) => p.length > 0);
     if (metaParts.length > 0) {
       const metaLine = metaParts.join('    ');
@@ -437,7 +438,7 @@ export class MemoryPickerComponent extends Container implements Focusable {
 
     // Fourth line: approach preview
     if (memo.approach.length > 0) {
-      const approachPreview = '方案: ' + singleLine(memo.approach);
+      const approachPreview = t('memory.plan_label') + singleLine(memo.approach);
       card.push(
         indent + chalk.hex(c.textDim)(truncateToWidth(approachPreview, Math.max(8, width - indentWidth), ELLIPSIS)),
       );
@@ -460,35 +461,35 @@ export class MemoryPickerComponent extends Container implements Focusable {
     const contentWidth = Math.max(8, width - visibleWidth(indent));
 
     lines.push(truncateToWidth(
-      chalk.hex(c.primary).bold(`${indent}需求: ${memo.userNeed}`),
+      chalk.hex(c.primary).bold(`${indent}${t('memory.requirement_label')}${memo.userNeed}`),
       width, ELLIPSIS,
     ));
     lines.push('');
     lines.push(chalk.hex(c.textMuted)(
-      truncateToWidth(`${indent}结果: ${memo.outcome}    来源: ${sourceLabel(memo.extractionSource)}    ${time}`, width, ELLIPSIS),
+      truncateToWidth(`${indent}${t('memory.result_label')}${memo.outcome}    ${t('memory.source_label')}${sourceLabel(memo.extractionSource)}    ${time}`, width, ELLIPSIS),
     ));
     lines.push(chalk.hex(c.textMuted)(
-      truncateToWidth(`${indent}会话: ${sessionLabel}`, width, ELLIPSIS),
+      truncateToWidth(`${indent}${t('memory.session_label')}${sessionLabel}`, width, ELLIPSIS),
     ));
     const project = formatProject(memo);
     const tags = formatTags(memo);
     if (project.length > 0) {
       lines.push(chalk.hex(c.textMuted)(
-        truncateToWidth(`${indent}项目: ${project}`, width, ELLIPSIS),
+        truncateToWidth(`${indent}${t('memory.project_label')}${project}`, width, ELLIPSIS),
       ));
     }
     if (tags.length > 0) {
       lines.push(chalk.hex(c.textMuted)(
-        truncateToWidth(`${indent}标签: ${tags}`, width, ELLIPSIS),
+        truncateToWidth(`${indent}${t('memory.tags_label')}${tags}`, width, ELLIPSIS),
       ));
     }
     lines.push(chalk.hex(c.textMuted)(
-      truncateToWidth(`${indent}ID: ${memo.id}`, width, ELLIPSIS),
+      truncateToWidth(`${indent}${t('memory.id_label')}${memo.id}`, width, ELLIPSIS),
     ));
     lines.push('');
 
     if (memo.approach.length > 0) {
-      const label = '方案: ';
+      const label = t('memory.plan_label');
       const wrapped = wrapText(memo.approach, contentWidth - visibleWidth(label));
       for (let i = 0; i < wrapped.length; i++) {
         const prefix = i === 0 ? `${indent}${label}` : indent + ' '.repeat(visibleWidth(label));
@@ -500,7 +501,7 @@ export class MemoryPickerComponent extends Container implements Focusable {
       lines.push('');
     }
     if (memo.whatFailed.length > 0 && memo.whatFailed !== 'none') {
-      const label = '踩坑: ';
+      const label = t('memory.pitfall_label');
       const wrapped = wrapText(memo.whatFailed, contentWidth - visibleWidth(label));
       for (let i = 0; i < wrapped.length; i++) {
         const prefix = i === 0 ? `${indent}${label}` : indent + ' '.repeat(visibleWidth(label));
@@ -512,7 +513,7 @@ export class MemoryPickerComponent extends Container implements Focusable {
       lines.push('');
     }
     if (memo.whatWorked.length > 0 && memo.whatWorked !== 'none') {
-      const label = '经验: ';
+      const label = t('memory.experience_label');
       const wrapped = wrapText(memo.whatWorked, contentWidth - visibleWidth(label));
       for (let i = 0; i < wrapped.length; i++) {
         const prefix = i === 0 ? `${indent}${label}` : indent + ' '.repeat(visibleWidth(label));
@@ -525,7 +526,7 @@ export class MemoryPickerComponent extends Container implements Focusable {
     }
 
     lines.push(chalk.hex(c.textMuted)(
-      truncateToWidth('  Enter/Esc 返回  |  i 注入  |  d 删除', width, ELLIPSIS),
+      truncateToWidth(t('memory.detail_nav_hint'), width, ELLIPSIS),
     ));
     lines.push(chalk.hex(c.primary)('─'.repeat(width)));
     return lines;

@@ -16,6 +16,7 @@ import {
 } from '#/utils/usage/usage-format';
 import type { ColorPalette } from '#/tui/theme/colors';
 import type { SubagentUsageMap } from '#/tui/types';
+import { t } from '@scream-code/config';
 
 const LEFT_MARGIN = 2;
 const SIDE_PADDING = 1;
@@ -76,7 +77,7 @@ function buildSessionUsageSection(
   const byModel = (usage as { readonly byModel?: Record<string, TokenUsage> } | undefined)
     ?.byModel;
   const entries = Object.entries(byModel ?? {});
-  if (entries.length === 0) return [muted('  尚无 token 用量记录。')];
+  if (entries.length === 0) return [muted(`  ${t('usage.no_token')}`)];
 
   const lines: string[] = [];
   let totalInput = 0;
@@ -87,16 +88,16 @@ function buildSessionUsageSection(
     totalInput += input;
     totalOutput += output;
     lines.push(
-      `  ${muted(model)}  输入 ${value(formatTokenCount(input))}  输出 ${value(
+      `  ${muted(model)}  ${t('usage.input')} ${value(formatTokenCount(input))}  ${t('usage.output')} ${value(
         formatTokenCount(output),
-      )}  总计 ${value(formatTokenCount(input + output))}`,
+      )}  ${t('usage.total')} ${value(formatTokenCount(input + output))}`,
     );
   }
   if (entries.length > 1) {
     lines.push(
-      `  ${muted('总计')}  输入 ${value(formatTokenCount(totalInput))}  输出 ${value(
+      `  ${muted(t('usage.total'))}  ${t('usage.input')} ${value(formatTokenCount(totalInput))}  ${t('usage.output')} ${value(
         formatTokenCount(totalOutput),
-      )}  总计 ${value(formatTokenCount(totalInput + totalOutput))}`,
+      )}  ${t('usage.total')} ${value(formatTokenCount(totalInput + totalOutput))}`,
     );
   }
   return lines;
@@ -111,11 +112,11 @@ function buildManagedUsageSection(
   errorStyle: Colorize,
   severityHex: (sev: 'ok' | 'warn' | 'danger') => string,
 ): string[] {
-  if (error !== undefined) return [accent('计划用量'), errorStyle(`  ${error}`)];
+  if (error !== undefined) return [accent(t('usage.managed_title')), errorStyle(`  ${error}`)];
   if (usage === undefined) return [];
   const { summary, limits } = usage;
   if (summary === null && limits.length === 0) {
-    return [accent('计划用量'), muted('  暂无用量数据。')];
+    return [accent(t('usage.managed_title')), muted(`  ${t('usage.no_data')}`)];
   }
 
   const rows: ManagedUsageRow[] = [];
@@ -125,11 +126,11 @@ function buildManagedUsageSection(
     r.limit > 0 ? Math.max(0, Math.min(r.used / r.limit, 1)) : 0;
   const labelWidth = Math.max(10, ...rows.map((r) => r.label.length));
   const pctWidth = Math.max(...rows.map((r) => `${Math.round(usedRatio(r) * 100)}% used`.length));
-  const out: string[] = [accent('计划用量')];
+  const out: string[] = [accent(t('usage.managed_title'))];
   for (const row of rows) {
     const ratioUsed = usedRatio(row);
     const bar = renderProgressBar(ratioUsed, 20);
-    const pct = `${Math.round(ratioUsed * 100)}% 已用`;
+    const pct = `${Math.round(ratioUsed * 100)}% ${t('usage.used')}`;
     const barColoured = chalk.hex(severityHex(ratioSeverity(ratioUsed)))(bar);
     const label = row.label.padEnd(labelWidth, ' ');
     const resetStr = row.resetHint ? `  ${muted(row.resetHint)}` : '';
@@ -169,7 +170,7 @@ function buildSubagentUsageSection(
   const entries = Object.entries(usage ?? {});
   if (entries.length === 0) return [];
 
-  const lines: string[] = [accent('子 Agent 用量')];
+  const lines: string[] = [accent(t('usage.subagent_title'))];
   let totalInput = 0;
   let totalOutput = 0;
   for (const [name, row] of entries) {
@@ -178,16 +179,16 @@ function buildSubagentUsageSection(
     totalInput += input;
     totalOutput += output;
     lines.push(
-      `  ${muted(name)}  输入 ${value(formatTokenCount(input))}  输出 ${value(
+      `  ${muted(name)}  ${t('usage.input')} ${value(formatTokenCount(input))}  ${t('usage.output')} ${value(
         formatTokenCount(output),
-      )}  总计 ${value(formatTokenCount(input + output))}`,
+      )}  ${t('usage.total')} ${value(formatTokenCount(input + output))}`,
     );
   }
   if (entries.length > 1) {
     lines.push(
-      `  ${muted('总计')}  输入 ${value(formatTokenCount(totalInput))}  输出 ${value(
+      `  ${muted(t('usage.total'))}  ${t('usage.input')} ${value(formatTokenCount(totalInput))}  ${t('usage.output')} ${value(
         formatTokenCount(totalOutput),
-      )}  总计 ${value(formatTokenCount(totalInput + totalOutput))}`,
+      )}  ${t('usage.total')} ${value(formatTokenCount(totalInput + totalOutput))}`,
     );
   }
   return lines;
@@ -203,7 +204,7 @@ export function buildUsageReportLines(options: UsageReportOptions): string[] {
     sev === 'danger' ? colors.error : sev === 'warn' ? colors.warning : colors.success;
 
   const lines: string[] = [
-    accent('会话用量'),
+    accent(t('usage.session_title')),
     ...buildSessionUsageSection(
       options.sessionUsage,
       options.sessionUsageError,
@@ -219,7 +220,7 @@ export function buildUsageReportLines(options: UsageReportOptions): string[] {
     const pct = `${(ratio * 100).toFixed(1)}%`;
     const barColoured = chalk.hex(severityHex(ratioSeverity(ratio)))(bar);
     lines.push('');
-    lines.push(accent('上下文窗口'));
+    lines.push(accent(t('usage.context_window')));
     lines.push(
       `  ${barColoured}  ${value(pct.padStart(6, ' '))}  ` +
         muted(
@@ -256,7 +257,7 @@ export class UsagePanelComponent implements Component {
   constructor(
     private readonly lines: readonly string[],
     private readonly borderHex: string,
-    private readonly title: string = ' 用量 ',
+    private readonly title: string = t('usage.panel_title'),
   ) {}
 
   invalidate(): void {

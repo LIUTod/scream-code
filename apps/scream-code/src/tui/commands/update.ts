@@ -7,6 +7,7 @@
 
 import { spawn } from 'node:child_process';
 
+import { t } from '@scream-code/config';
 import { readUpdateCache } from '#/cli/update/cache';
 import { refreshUpdateCache } from '#/cli/update/refresh';
 import { selectUpdateTarget } from '#/cli/update/select';
@@ -74,8 +75,8 @@ async function runInstallStep(
         resolve({
           ok: false,
           message:
-            `${label}超时，可能因网络原因卡住。\n` +
-            '请检查网络后重试（国内用户建议科学上网）。',
+            `${label}${t('update.timeout')}\n` +
+            t('update.network_hint'),
         });
       }
     }, timeoutMs);
@@ -93,11 +94,11 @@ async function runInstallStep(
         finalize({
           ok: false,
           message:
-            `${label}失败：网络连接异常，请检查网络后重试。\n` +
-            '（国内用户建议科学上网，如遇网络错误请多尝试几次）',
+            `${label}${t('update.network_error')}\n` +
+            t('update.network_hint_retry'),
         });
       } else {
-        finalize({ ok: false, message: `${label}失败：${msg}` });
+        finalize({ ok: false, message: `${label}${t('update.failed', { msg })}` });
       }
     });
 
@@ -107,17 +108,17 @@ async function runInstallStep(
         return;
       }
       const msg = stderr.trim();
-      const detail = signal !== null ? `信号 ${signal}` : `退出码 ${String(code)}`;
+      const detail = signal !== null ? `${t('update.signal')} ${signal}` : `${t('update.exit_code')} ${String(code)}`;
 
       if (isNetworkError(msg)) {
         finalize({
           ok: false,
           message:
-            `${label}失败：网络连接异常，请检查网络后重试。\n` +
-            '（国内用户建议科学上网，如遇网络错误请多尝试几次）',
+            `${label}${t('update.network_error')}\n` +
+            t('update.network_hint_retry'),
         });
       } else {
-        finalize({ ok: false, message: `${label}以 ${detail} 退出：${msg}` });
+        finalize({ ok: false, message: `${label} ${detail}：${msg}` });
       }
     });
   });
@@ -125,11 +126,11 @@ async function runInstallStep(
 
 export async function handleUpdateCommand(host: SlashCommandHost): Promise<void> {
   if (isBusy(host.state.appState)) {
-    host.showError('请在空闲时执行更新。');
+    host.showError(t('update.idle_only'));
     return;
   }
 
-  host.showStatus('正在检测更新...');
+  host.showStatus(t('update.checking'));
 
   // Refresh the cache first so we're checking against the latest release.
   await refreshUpdateCache().catch(() => {});
@@ -137,20 +138,20 @@ export async function handleUpdateCommand(host: SlashCommandHost): Promise<void>
   const target = selectUpdateTarget(host.state.appState.version, cache?.latest ?? null);
   if (target === null) {
     host.showStatus(
-      '✅ 当前已是最新版本（' + host.state.appState.version + '）',
+      '✅ ' + t('update.already_latest', { version: host.state.appState.version }),
       host.state.theme.colors.success,
     );
     return;
   }
 
-  host.showStatus(`正在更新到 ${target.version}...`);
+  host.showStatus(t('update.updating', { version: target.version }));
 
-  host.showStatus('正在通过 npm 安装最新版本...');
+  host.showStatus(t('update.npm_install'));
   const result = await runInstallStep(
     npmExecutable(),
     ['install', '-g', 'scream-code@latest'],
     undefined,
-    '安装 scream-code',
+    t('update.install_label'),
   );
   if (!result.ok) {
     host.showError(`❌ ${result.message}`);
@@ -158,7 +159,7 @@ export async function handleUpdateCommand(host: SlashCommandHost): Promise<void>
   }
 
   host.showStatus(
-    '✅ 更新完成。请重启 Scream Code 以使用新版本。',
+    '✅ ' + t('update.done'),
     host.state.theme.colors.success,
   );
   host.setAppState({ hasNewVersion: false, latestVersion: null });

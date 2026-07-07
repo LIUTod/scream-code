@@ -1,15 +1,17 @@
 import type { Session } from '@scream-code/scream-code-sdk';
 
+import { t } from '@scream-code/config';
+
 import { ClipboardMediaError, readClipboardMedia, readImageFromPath } from '#/utils/clipboard/clipboard-image';
 import { parseImageMeta } from '#/utils/image/image-mime';
 import { editInExternalEditor, resolveEditorCommand } from '#/utils/process/external-editor';
 
 import {
-  CTRL_C_HINT,
-  CTRL_D_HINT,
+  getCtrlCHint,
+  getCtrlDHint,
   EXIT_CONFIRM_WINDOW_MS,
-  LLM_NOT_SET_MESSAGE,
-  NO_ACTIVE_SESSION_MESSAGE,
+  getLlmNotSetMessage,
+  getNoActiveSessionMessage,
 } from '../constant/scream-tui';
 import { formatErrorMessage } from '../utils/event-payload';
 import { isBusy, isStreaming } from '../utils/app-state';
@@ -92,7 +94,7 @@ export class EditorKeyboardController {
       if (editor.getText().length > 0) {
         editor.setText('');
       }
-      this.armPendingExit('ctrl-c', CTRL_C_HINT);
+      this.armPendingExit('ctrl-c', getCtrlCHint());
     };
 
     editor.onCtrlD = () => {
@@ -101,7 +103,7 @@ export class EditorKeyboardController {
         void host.stop();
         return;
       }
-      this.armPendingExit('ctrl-d', CTRL_D_HINT);
+      this.armPendingExit('ctrl-d', getCtrlDHint());
     };
 
     editor.onEscape = () => {
@@ -121,13 +123,13 @@ export class EditorKeyboardController {
       // 如果循环模式正在等待自动重发，则暂停当前迭代，但不完全关闭循环模式。
       if (host.state.appState.loopModeEnabled && host.state.appState.loopPrompt) {
         host.setAppState({ loopPrompt: undefined });
-        host.showStatus('循环已暂停。输入 /loop <提示词> 恢复或修改。');
+        host.showStatus(t('editorkey.loop_paused'));
       }
     };
 
     editor.onShiftTab = () => {
       if (host.session === undefined) {
-        host.showError(NO_ACTIVE_SESSION_MESSAGE);
+        host.showError(getNoActiveSessionMessage());
         return;
       }
       const current = host.state.appState.planMode;
@@ -163,7 +165,7 @@ export class EditorKeyboardController {
         editor.setText('');
         const session = host.session;
         if (host.state.appState.model.trim().length === 0 || session === undefined) {
-          host.showError(LLM_NOT_SET_MESSAGE);
+          host.showError(getLlmNotSetMessage());
         } else {
           host.steerMessage(session, parts);
         }
@@ -233,7 +235,7 @@ export class EditorKeyboardController {
     if (session === undefined) return;
     void session.cancelCompaction().catch((error: unknown) => {
       const message = formatErrorMessage(error);
-      this.host.showError(`取消压缩失败： ${message}`);
+      this.host.showError(t('editorkey.cancel_compaction_failed', { msg: message }));
     });
   }
 
@@ -270,7 +272,7 @@ export class EditorKeyboardController {
     if (state.externalEditorRunning) return;
     const cmd = resolveEditorCommand(state.appState.editorCommand);
     if (cmd === undefined) {
-      this.host.showError('未配置编辑器。请设置 $VISUAL / $EDITOR，或运行 /editor <命令>。');
+      this.host.showError(t('editorkey.editor_not_configured'));
       return;
     }
     this.host.setExternalEditorRunning(true);
@@ -286,7 +288,7 @@ export class EditorKeyboardController {
       }
     } catch (error) {
       const msg = formatErrorMessage(error);
-      this.host.showError(`外部编辑器失败： ${msg}`);
+      this.host.showError(t('editorkey.external_editor_failed', { msg }));
     } finally {
       if (typeof process.stdin.pause === 'function') {
         process.stdin.pause();

@@ -11,6 +11,8 @@
 
 import type { BackgroundTaskInfo, BackgroundTaskStatus } from '@scream-code/scream-code-sdk';
 
+import { t } from '@scream-code/config';
+
 import type { BackgroundAgentStatusData, BackgroundAgentStatusPhase } from '@/tui/types';
 
 const MAX_DETAIL_LENGTH = 240;
@@ -40,24 +42,24 @@ function phaseFromStatus(status: BackgroundTaskStatus): BackgroundAgentStatusPha
 }
 
 function subjectFor(taskId: string): string {
-  return taskId.startsWith('agent-') ? '代理任务' : 'bash 任务';
+  return taskId.startsWith('agent-') ? t('bgtask.agent_task') : t('bgtask.bash_task');
 }
 
 function headlineFor(info: BackgroundTaskInfo): string {
   const subject = subjectFor(info.taskId);
   switch (info.status) {
     case 'running':
-      return `${subject} 已在后台启动`;
+      return t('bgtask.started_bg', { subject });
     case 'awaiting_approval':
-      return `${subject} 等待审批`;
+      return t('bgtask.awaiting_approval', { subject });
     case 'completed':
-      return `${subject} 已在后台完成`;
+      return t('bgtask.completed_bg', { subject });
     case 'failed':
-      return `${subject} 在后台失败`;
+      return t('bgtask.failed_bg', { subject });
     case 'killed':
-      return `${subject} 已停止`;
+      return t('bgtask.killed', { subject });
     case 'lost':
-      return `${subject} 已丢失`;
+      return t('bgtask.lost', { subject });
   }
 }
 
@@ -73,16 +75,16 @@ function detailFor(info: BackgroundTaskInfo): string | undefined {
   }
   if (info.status === 'killed') {
     const reason = truncate(info.stopReason);
-    parts.push(reason !== undefined ? `已停止 — ${reason}` : '已停止');
+    parts.push(reason !== undefined ? t('bgtask.stopped_reason', { reason }) : t('bgtask.stopped'));
   }
   if (info.status === 'awaiting_approval') {
     const reason = truncate(info.approvalReason);
-    if (reason !== undefined) parts.push(`等待中: ${reason}`);
+    if (reason !== undefined) parts.push(t('bgtask.waiting', { reason }));
   }
   if (info.status === 'lost') {
-    parts.push('会话在完成前已重启');
+    parts.push(t('bgtask.session_restarted'));
   }
-  if (info.timedOut === true) parts.push('已超时');
+  if (info.timedOut === true) parts.push(t('bgtask.timed_out'));
 
   return parts.length > 0 ? parts.join(' · ') : undefined;
 }

@@ -7,6 +7,7 @@
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
+import { t } from '@scream-code/config';
 import type { Component, MarkdownTheme } from '@earendil-works/pi-tui';
 import { Markdown, visibleWidth } from '@earendil-works/pi-tui';
 import chalk from 'chalk';
@@ -15,7 +16,7 @@ import { toTerminalHyperlink } from '#/utils/terminal-hyperlink';
 
 const LEFT_MARGIN = 2; // two-space indent matching other tool call children
 const SIDE_PADDING = 1; // space between the │ and the content on each side
-const TITLE_PREFIX = ' 计划: ';
+function getTitlePrefix(): string { return t('planbox.title_prefix'); }
 const TITLE_SUFFIX = ' ';
 
 export interface PlanBoxOptions {
@@ -90,7 +91,7 @@ export class PlanBoxComponent implements Component {
     }
     if (hiddenCount > 0) {
       const footer = chalk.dim(
-        `...（还有 ${String(hiddenCount)} 行，按 ctrl+e 展开）`,
+        t('planbox.more_lines', { count: String(hiddenCount) }),
       );
       const pad = Math.max(0, contentWidth - visibleWidth(footer));
       lines.push(indent + paint('│') + ' ' + footer + ' '.repeat(pad) + ' ' + paint('│'));
@@ -112,9 +113,9 @@ export class PlanBoxComponent implements Component {
   }
 
   private buildTitle(horzLen: number): string {
-    const fallback = ' 计划 ';
+    const fallback = t('planbox.title_fallback');
     const statusSuffix = this.buildStatusSuffix();
-    const fallbackWithStatus = ` 计划${statusSuffix} `;
+    const fallbackWithStatus = `${fallback}${statusSuffix} `;
     const budget = horzLen - 1;
     const fallbackTitle = visibleWidth(fallbackWithStatus) <= budget ? fallbackWithStatus : fallback;
     const planPath = this.planPath;
@@ -124,7 +125,7 @@ export class PlanBoxComponent implements Component {
     const linked = path.isAbsolute(planPath)
       ? toTerminalHyperlink(basename, pathToFileURL(planPath).href)
       : basename;
-    const title = TITLE_PREFIX + linked + statusSuffix + TITLE_SUFFIX;
+    const title = getTitlePrefix() + linked + statusSuffix + TITLE_SUFFIX;
     if (visibleWidth(title) > budget) return fallbackTitle;
     return title;
   }

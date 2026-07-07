@@ -8,6 +8,7 @@ import { isAbsolute, relative, sep } from 'node:path';
 import { Text, Spacer, visibleWidth } from '@earendil-works/pi-tui';
 import type { Component, MarkdownTheme, TUI } from '@earendil-works/pi-tui';
 import chalk from 'chalk';
+import { t } from '@scream-code/config';
 
 import { CachedContainer } from '#/tui/utils/cached-container';
 
@@ -104,11 +105,11 @@ function backgroundFailureMessage(
 ): string | undefined {
   switch (status) {
     case 'lost':
-      return '后台 agent 丢失（会话在完成前已重启）';
+      return t('toolcall.bg_agent_lost');
     case 'killed':
-      return '后台 agent 已终止';
+      return t('toolcall.bg_agent_terminated');
     case 'failed':
-      return '后台 agent 失败';
+      return t('toolcall.bg_agent_failed');
     case 'completed':
     case undefined:
       return undefined;
@@ -1227,7 +1228,7 @@ export class ToolCallComponent extends CachedContainer {
     }
 
     if (toolCall.name === 'ExitPlanMode') {
-      const label = chalk.hex(colors.primary).bold('当前计划');
+      const label = chalk.hex(colors.primary).bold(t('toolcall.current_plan'));
       if (!isFinished || result === undefined || result.is_error === true) {
         return label;
       }
@@ -1235,8 +1236,8 @@ export class ToolCallComponent extends CachedContainer {
       if (outcome.kind === 'approved') {
         const chipText =
           outcome.chosen !== undefined && outcome.chosen.length > 0
-            ? `已批准：${outcome.chosen}`
-            : '已批准';
+            ? t('toolcall.approved', { chosen: outcome.chosen })
+            : t('toolcall.approved_label');
         return `${label}${chalk.hex(colors.success)(` · ${chipText}`)}`;
       }
       return label;
@@ -1245,9 +1246,9 @@ export class ToolCallComponent extends CachedContainer {
     if (toolCall.name === 'AskUserQuestion') {
       const label = isFinished
         ? isError
-          ? '无法收集你的输入'
-          : '已收集你的答案'
-        : '等待你的输入';
+          ? t('toolcall.input_unavailable')
+          : t('toolcall.input_collected')
+        : t('toolcall.waiting_input');
       const tone = isError ? chalk.hex(colors.error) : chalk.hex(colors.primary);
       return `${bullet}${tone.bold(label)}`;
     }
@@ -1256,7 +1257,7 @@ export class ToolCallComponent extends CachedContainer {
       return this.buildSingleSubagentHeader();
     }
 
-    const verb = isFinished ? '已使用' : isTruncated ? '已截断' : '正在使用';
+    const verb = isFinished ? t('toolcall.used') : isTruncated ? t('toolcall.truncated') : t('toolcall.in_use');
     const keyArg = extractKeyArgument(toolCall.name, toolCall.args, this.workspaceDir);
     const decoded = decodeMcpToolName(toolCall.name);
     const verbStyled = isTruncated
@@ -1358,15 +1359,14 @@ export class ToolCallComponent extends CachedContainer {
     const phaseChip = this.formatPhaseChip();
     const headerLabel =
       this.subagentAgentName !== undefined
-        ? `子 agent ${this.subagentAgentName} (${this.formatAgentId()})`
-        : `子 agent (${this.formatAgentId()})`;
+        ? t('toolcall.sub_agent_named', { name: this.subagentAgentName, id: this.formatAgentId() })
+        : t('toolcall.sub_agent', { id: this.formatAgentId() });
     this.addChild(new Text(`  ${dim(`↳ ${headerLabel}`)}${phaseChip}`, 0, 0));
 
     if (this.hiddenSubCallCount > 0) {
-      const suffix = this.hiddenSubCallCount > 1 ? '' : '';
       this.addChild(
         new Text(
-          dim.italic(`    还有 ${String(this.hiddenSubCallCount)} 个 tool call${suffix} ...`),
+          dim.italic(`    ${t('toolcall.more_tools', { count: this.hiddenSubCallCount })}`),
           0,
           0,
         ),
@@ -1380,7 +1380,7 @@ export class ToolCallComponent extends CachedContainer {
       const keyArg = extractKeyArgument(sub.name, sub.args, this.workspaceDir);
       const nameCol = chalk.hex(this.colors.primary)(sub.name);
       const argCol = keyArg ? dim(` (${keyArg})`) : '';
-      this.addChild(new Text(`    ${mark} 已使用 ${nameCol}${argCol}`, 0, 0));
+      this.addChild(new Text(`    ${mark} ${t('toolcall.used')} ${nameCol}${argCol}`, 0, 0));
     }
 
     for (const [id, call] of this.ongoingSubCalls) {
@@ -1388,7 +1388,7 @@ export class ToolCallComponent extends CachedContainer {
       const nameCol = chalk.hex(this.colors.primary)(call.name);
       const argCol = keyArg ? dim(` (${keyArg})`) : '';
       void id;
-      this.addChild(new Text(`    ${dim('…')} 正在使用 ${nameCol}${argCol}`, 0, 0));
+      this.addChild(new Text(`    ${dim('…')} ${t('toolcall.in_use')} ${nameCol}${argCol}`, 0, 0));
     }
 
     if (this.subagentText.length > 0) {
@@ -1429,15 +1429,15 @@ export class ToolCallComponent extends CachedContainer {
     const parts: string[] = [];
     switch (this.subagentPhase) {
       case 'spawning':
-        parts.push('↻ 启动中…');
+        parts.push(`↻ ${t('toolcall.starting')}`);
         break;
       case 'running':
-        parts.push('↻ 运行中');
+        parts.push(`↻ ${t('toolcall.running')}`);
         break;
       case 'done': {
-        parts.push(chalk.hex(this.colors.success)('✓ 已完成'));
+        parts.push(chalk.hex(this.colors.success)(`✓ ${t('toolcall.completed')}`));
         const toolCount = this.finishedSubCalls.length + this.hiddenSubCallCount;
-        if (toolCount > 0) parts.push(`${String(toolCount)} 个 tool`);
+        if (toolCount > 0) parts.push(t('toolcall.tool_count', { count: toolCount }));
         const tokens =
           formatSubagentContextTokens(this.subagentContextTokens) ??
           formatSubagentTokens(this.subagentUsage);
@@ -1445,10 +1445,10 @@ export class ToolCallComponent extends CachedContainer {
         break;
       }
       case 'failed':
-        parts.push(chalk.hex(this.colors.error)('✗ 失败'));
+        parts.push(chalk.hex(this.colors.error)(`✗ ${t('toolcall.failed')}`));
         break;
       case 'backgrounded':
-        parts.push('◐ 后台运行');
+        parts.push(`◐ ${t('toolcall.bg_running')}`);
         break;
     }
     return parts.length > 0 ? dim(` · ${parts.join(' · ')}`) : '';
@@ -1508,7 +1508,7 @@ export class ToolCallComponent extends CachedContainer {
     const statsText = this.formatSingleSubagentStatsText();
     if (isDone) {
       const success = chalk.hex(this.colors.success);
-      return `${bullet}${success.bold(labelText)} ${success(`已完成${descriptionPlain}${statsText}`)}`;
+      return `${bullet}${success.bold(labelText)} ${success(`${t('toolcall.completed')}${descriptionPlain}${statsText}`)}`;
     }
     const stats = chalk.dim(statsText);
     return `${bullet}${label} ${status}${descriptionText}${stats}`;
@@ -1519,22 +1519,22 @@ export class ToolCallComponent extends CachedContainer {
   ): string {
     switch (phase) {
       case 'done':
-        return chalk.hex(this.colors.success)('已完成');
+        return chalk.hex(this.colors.success)(t('toolcall.completed'));
       case 'failed':
-        return chalk.hex(this.colors.error)('失败');
+        return chalk.hex(this.colors.error)(t('toolcall.failed'));
       case 'running':
-        return chalk.hex(this.colors.primary)('运行中');
+        return chalk.hex(this.colors.primary)(t('toolcall.running'));
       case 'backgrounded':
-        return '后台运行';
+        return t('toolcall.bg_running');
       case 'spawning':
       case undefined:
-        return chalk.hex(this.colors.primary)('启动中');
+        return chalk.hex(this.colors.primary)(t('toolcall.starting'));
     }
   }
 
   private formatSingleSubagentStatsText(): string {
     const parts = [
-      `${String(this.subToolActivities.size)} 个 tool`,
+      t('toolcall.tool_count', { count: this.subToolActivities.size }),
     ];
     const elapsed = this.getSubagentElapsedSeconds();
     if (elapsed !== undefined) parts.push(formatElapsed(elapsed));
@@ -1562,7 +1562,7 @@ export class ToolCallComponent extends CachedContainer {
           : activity.phase === 'done'
             ? chalk.hex(this.colors.success)('•')
             : chalk.hex(this.colors.text)('•');
-      const verb = activity.phase === 'ongoing' ? '正在使用' : '已使用';
+      const verb = activity.phase === 'ongoing' ? t('toolcall.in_use') : t('toolcall.used');
       this.addChild(new Text(`  ${mark} ${this.formatSubToolActivity(verb, activity)}`, 0, 0));
     }
 
@@ -1620,7 +1620,7 @@ export class ToolCallComponent extends CachedContainer {
     if (this.result === undefined && this.toolCall.truncated === true) {
       this.addChild(
         new Text(
-          chalk.dim('Tool 调用参数因 max_tokens 被截断 — 调用未执行。'),
+          chalk.dim(t('toolcall.truncation_notice')),
           2,
           0,
         ),
@@ -1653,7 +1653,7 @@ export class ToolCallComponent extends CachedContainer {
         this.addChild(
           new Text(
             chalk.dim(
-              `...（还有 ${String(remaining)} 行，共 ${String(allLines.length)} 行，按 ctrl+o 展开）`,
+              t('toolcall.lines_hidden', { hidden: remaining, total: allLines.length }),
             ),
             2,
             0,
@@ -1728,10 +1728,11 @@ export class ToolCallComponent extends CachedContainer {
       const startedAtMs = this.toolCall.streamingStartedAtMs;
       const elapsedSeconds =
         startedAtMs === undefined ? 0 : Math.max(0, Math.floor((Date.now() - startedAtMs) / 1000));
-      const target = filePath.length > 0 ? ` for ${filePath}` : '';
-      const progress = `正在准备变更${target}... ${formatByteSize(bytes)} · 已用 ${formatElapsed(
-        elapsedSeconds,
-      )}`;
+      const progress = t('toolcall.preparing_changes', {
+        path: filePath.length > 0 ? ` for ${filePath}` : '',
+        bytes: formatByteSize(bytes),
+        elapsed: formatElapsed(elapsedSeconds),
+      });
       this.addChild(new Text(chalk.dim(progress), 2, 0));
       return;
     }
@@ -1804,7 +1805,7 @@ export class ToolCallComponent extends CachedContainer {
     if (!isExitPlanModeOutcomeOutput(result.output)) return undefined;
     const outcome = interpretExitPlanModeOutcome(result.output);
     if (outcome.kind !== 'rejected') return undefined;
-    return { label: '已拒绝', colorHex: this.colors.error };
+    return { label: t('toolcall.rejected'), colorHex: this.colors.error };
   }
 
   private buildContent(): void {
@@ -1831,7 +1832,7 @@ export class ToolCallComponent extends CachedContainer {
         const trimmed = outcome.feedback.trim();
         if (trimmed.length > 0) {
           const labelTone = chalk.hex(this.colors.warning).bold;
-          this.addChild(new Text(labelTone('↪ 建议'), 2, 0));
+          this.addChild(new Text(labelTone(`↪ ${t('toolcall.suggestion')}`), 2, 0));
           for (const line of trimmed.split('\n')) {
             this.addChild(new Text(line, 4, 0));
           }
@@ -1895,14 +1896,14 @@ export class ToolCallComponent extends CachedContainer {
 
     if (!hasAnswers) {
       const noteText =
-        typeof note === 'string' && note.length > 0 ? note : '用户忽略了该问题。';
+        typeof note === 'string' && note.length > 0 ? note : t('toolcall.question_ignored');
       this.addChild(new Text(dim(`  ${noteText}`), 0, 0));
       return true;
     }
 
     for (const [question, answer] of Object.entries(answers as Record<string, unknown>)) {
       const answerText = typeof answer === 'string' ? answer : JSON.stringify(answer);
-      this.addChild(new Text(`  ${dim('问')}  ${question}`, 0, 0));
+      this.addChild(new Text(`  ${dim(t('toolcall.question_label'))}  ${question}`, 0, 0));
       this.addChild(new Text(`  ${accent('→')}  ${answerText}`, 0, 0));
     }
     return true;

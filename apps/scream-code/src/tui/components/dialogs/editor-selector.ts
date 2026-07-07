@@ -1,14 +1,17 @@
+import { t } from '@scream-code/config';
 import { ChoicePickerComponent, type ChoiceOption } from './choice-picker';
 
 import type { ColorPalette } from '#/tui/theme/colors';
 
-const EDITOR_OPTIONS: readonly ChoiceOption[] = [
-  { value: 'code --wait', label: 'VS Code (code --wait)' },
-  { value: 'vim', label: 'Vim' },
-  { value: 'nvim', label: 'Neovim' },
-  { value: 'nano', label: 'Nano' },
-  { value: '', label: '自动检测 ($VISUAL / $EDITOR)' },
-];
+function getEditorOptions(): readonly ChoiceOption[] {
+  return [
+    { value: 'code --wait', label: 'VS Code (code --wait)' },
+    { value: 'vim', label: 'Vim' },
+    { value: 'nvim', label: 'Neovim' },
+    { value: 'nano', label: 'Nano' },
+    { value: '', label: t('editor.auto_detect') },
+  ];
+}
 
 export interface EditorSelectorOptions {
   readonly currentValue: string;
@@ -20,8 +23,8 @@ export interface EditorSelectorOptions {
 export class EditorSelectorComponent extends ChoicePickerComponent {
   constructor(opts: EditorSelectorOptions) {
     super({
-      title: '选择外部编辑器',
-      options: [...EDITOR_OPTIONS],
+      title: t('editor.select_title'),
+      options: [...getEditorOptions()],
       currentValue: opts.currentValue,
       colors: opts.colors,
       onSelect: opts.onSelect,

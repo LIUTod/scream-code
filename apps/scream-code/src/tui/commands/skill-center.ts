@@ -12,6 +12,7 @@
 import type { PluginSummary, SkillSummary } from '@scream-code/scream-code-sdk';
 import { Container, matchesKey, Key, Spacer, type Focusable } from '@earendil-works/pi-tui';
 import chalk from 'chalk';
+import { t } from '@scream-code/config';
 
 import { loadPluginMarketplace, type PluginMarketplaceEntry } from '#/utils/plugin-marketplace';
 
@@ -31,14 +32,14 @@ export async function handleSkillCommand(
 ): Promise<void> {
   const session = host.session;
   if (!session) {
-    host.showError('请先创建或恢复一个会话，再使用 Skill 中心。');
+    host.showError(t('skill.no_session'));
     return;
   }
   await openSkillCenter(host);
 }
 
 async function openSkillCenter(host: SlashCommandHost): Promise<void> {
-  const loading = new SkillCenterLoadingComponent(host, '正在加载 Skill 中心…');
+  const loading = new SkillCenterLoadingComponent(host, t('skill.loading'));
   host.mountEditorReplacement(loading);
 
   const [skillsResult, pluginsResult, marketplaceResult] = await Promise.allSettled([
@@ -60,13 +61,13 @@ async function openSkillCenter(host: SlashCommandHost): Promise<void> {
   const options = buildOptions(host, skills, plugins, marketplace);
   if (options.length === 0) {
     host.restoreEditor();
-    host.showNotice('Skill 中心', '当前没有已安装 Skill 也没有可安装 Skill 包。');
+    host.showNotice(t('skill.center_title'), t('skill.no_skills'));
     return;
   }
 
   const picker = new ChoicePickerComponent({
-    title: 'Skill 中心',
-    hint: 'Enter 激活/安装 · d 卸载 · i 安装并注入 · Esc 返回',
+    title: t('skill.center_title'),
+    hint: t('skill.footer_hint'),
     options,
     colors: host.state.theme.colors,
     searchable: true,
@@ -166,7 +167,7 @@ function buildOptions(
   if (skills.length > 0) {
     options.push({
       value: '__section__installed',
-      label: '── 已安装的 Skill ──',
+      label: '── ' + t('skill.installed') + ' ──',
     });
     for (const skill of skills) {
       const actionKeys: Record<string, () => void> = {};
@@ -196,15 +197,15 @@ function buildOptions(
   if (installable.length > 0) {
     options.push({
       value: '__section__installable',
-      label: '── 可安装的 Skill 包 ──',
+      label: '── ' + t('skill.installable') + ' ──',
     });
     for (const entry of installable) {
       options.push({
         value: `install:${entry.source}`,
         label: entry.displayName,
         description: entry.description
-          ? `${truncate(entry.description, SKILL_DESC_MAX)}  [未安装]`
-          : '[未安装]',
+          ? `${truncate(entry.description, SKILL_DESC_MAX)}  [${t('skill.not_installed')}]`
+          : `[${t('skill.not_installed')}]`,
         actionKeys: {
           i: () => {
             host.restoreEditor();
@@ -251,12 +252,12 @@ async function activateSkillByName(
 ): Promise<void> {
   const session = host.session;
   if (!session) {
-    host.showError('未连接到会话。请先创建或恢复一个会话。');
+    host.showError(t('skill.no_session_activate'));
     return;
   }
   const skill = skills.find((s) => s.name === name);
   if (!skill) {
-    host.showError(`未找到 Skill "${name}"。`);
+    host.showError(t('skill.not_found'));
     return;
   }
   host.sendSkillActivation(session, skill.name, '');
@@ -265,23 +266,23 @@ async function activateSkillByName(
 async function installInjectActivate(host: SlashCommandHost, source: string): Promise<void> {
   const session = host.session;
   if (!session) {
-    host.showError('未连接到会话。请先创建或恢复一个会话。');
+    host.showError(t('skill.no_session_activate'));
     return;
   }
 
-  const spinner = host.showProgressSpinner('正在安装 Skill 包…');
+  const spinner = host.showProgressSpinner(t('skill.installing_package'));
   try {
     const summary = await session.installPlugin(source);
     await session.injectPlugin(summary.id);
-    spinner.stop({ ok: true, label: `"${summary.displayName}" 已安装并注入当前会话。` });
+    spinner.stop({ ok: true, label: `"${summary.displayName}" ${t('skill.installed_injected')}` });
     const allSkills = await session.listSkills();
     const pluginSkills = allSkills.filter(
       (s) => s.pluginId === summary.id && isUserActivatableSkill(s),
     );
     if (pluginSkills.length === 0) {
       host.showNotice(
-        '插件已安装',
-        `${summary.displayName} 已成功安装，但该包没有可手动激活的 Skill。`,
+        t('skill.plugin_installed'),
+        `${summary.displayName} ${t('skill.no_manual_skill')}`,
       );
       return;
     }
@@ -292,8 +293,8 @@ async function installInjectActivate(host: SlashCommandHost, source: string): Pr
     }
     await pickAndActivateSkill(host, pluginSkills, [summary]);
   } catch (error) {
-    spinner.stop({ ok: false, label: '安装失败。' });
-    host.showError(`安装失败: ${error instanceof Error ? error.message : String(error)}`);
+    spinner.stop({ ok: false, label: t('skill.install_failed') });
+    host.showError(t('skill.install_failed_msg', { msg: error instanceof Error ? error.message : String(error) }));
   }
 }
 
@@ -313,8 +314,8 @@ async function pickAndActivateSkill(
   }));
 
   const picker = new ChoicePickerComponent({
-    title: '选择一个 Skill 激活',
-    hint: 'Enter 激活 · Esc 返回',
+    title: t('skill.select_activate'),
+    hint: t('skill.select_hint'),
     options,
     colors: host.state.theme.colors,
     searchable: true,
@@ -338,7 +339,7 @@ async function uninstallByPluginId(
 ): Promise<void> {
   const session = host.session;
   if (!session) {
-    host.showError('未连接到会话。请先创建或恢复一个会话。');
+    host.showError(t('skill.no_session_activate'));
     return;
   }
 
@@ -357,8 +358,8 @@ async function uninstallByPluginId(
   const skillCount = plugin?.skillCount;
   const description =
     skillCount !== undefined && skillCount > 0
-      ? `将卸载整个包（共 ${skillCount} 个 Skill），无法只删除单个 Skill`
-      : '将卸载整个 Skill 包';
+      ? t('skill.uninstall_whole_pkg', { count: skillCount })
+      : t('skill.uninstall_single');
 
   const confirmed = await confirmUninstall(host, label, description);
   if (!confirmed) {
@@ -366,17 +367,17 @@ async function uninstallByPluginId(
     return;
   }
 
-  const spinner = host.showProgressSpinner(`正在卸载 "${label}"…`);
+  const spinner = host.showProgressSpinner(`${t('skill.uninstalling')} "${label}"…`);
   try {
     await session.removePlugin(pluginId);
-    spinner.stop({ ok: true, label: `"${label}" 已卸载。` });
+    spinner.stop({ ok: true, label: `"${label}" ${t('skill.uninstalled')}` });
     host.showNotice(
-      '插件已卸载',
-      '该插件的 Skill 已从当前会话中移除，无需重启会话。',
+      t('skill.plugin_uninstalled'),
+      t('skill.plugin_removed'),
     );
   } catch (error) {
-    spinner.stop({ ok: false, label: '卸载失败。' });
-    host.showError(`卸载失败: ${error instanceof Error ? error.message : String(error)}`);
+    spinner.stop({ ok: false, label: t('skill.uninstall_failed') });
+    host.showError(t('skill.uninstall_failed_msg', { msg: error instanceof Error ? error.message : String(error) }));
   } finally {
     await openSkillCenter(host);
   }
@@ -385,28 +386,28 @@ async function uninstallByPluginId(
 async function uninstallManualSkill(host: SlashCommandHost, skill: SkillSummary): Promise<void> {
   const session = host.session;
   if (!session) {
-    host.showError('未连接到会话。请先创建或恢复一个会话。');
+    host.showError(t('skill.no_session_activate'));
     return;
   }
 
   const confirmed = await confirmUninstall(
     host,
     skill.name,
-    '将删除该 Skill 的安装目录及子 Skill',
+    t('skill.deleting_skill'),
   );
   if (!confirmed) {
     await openSkillCenter(host);
     return;
   }
 
-  const spinner = host.showProgressSpinner(`正在删除 "${skill.name}"…`);
+  const spinner = host.showProgressSpinner(`${t('skill.deleting')} "${skill.name}"…`);
   try {
     await session.removeSkill(skill.name);
-    spinner.stop({ ok: true, label: `"${skill.name}" 已删除。` });
-    host.showNotice('Skill 已删除', '该 Skill 及其子 Skill 已从当前会话中移除。');
+    spinner.stop({ ok: true, label: `"${skill.name}" ${t('skill.deleted')}` });
+    host.showNotice(t('skill.skill_deleted'), t('skill.skill_removed'));
   } catch (error) {
-    spinner.stop({ ok: false, label: '删除失败。' });
-    host.showError(`删除失败: ${error instanceof Error ? error.message : String(error)}`);
+    spinner.stop({ ok: false, label: t('skill.delete_failed') });
+    host.showError(t('skill.delete_failed_msg', { msg: error instanceof Error ? error.message : String(error) }));
   } finally {
     await openSkillCenter(host);
   }
@@ -419,11 +420,11 @@ async function confirmUninstall(
 ): Promise<boolean> {
   return new Promise<boolean>((resolve) => {
     const picker = new ChoicePickerComponent({
-      title: `确认卸载 "${label}"？`,
-      hint: '卸载后可在 Skill 中心重新安装',
+      title: `${t('skill.confirm_uninstall')} "${label}"？`,
+      hint: t('skill.uninstall_reversible'),
       options: [
-        { value: 'no', label: '取消' },
-        { value: 'yes', label: '是，卸载', tone: 'danger', description },
+        { value: 'no', label: t('common.cancel') },
+        { value: 'yes', label: t('skill.uninstall_yes'), tone: 'danger', description },
       ],
       colors: host.state.theme.colors,
       onSelect: (value: string) => {
@@ -442,12 +443,12 @@ async function confirmUninstall(
 function formatSkillDescription(skill: SkillSummary, plugins: readonly PluginSummary[] = []): string {
   const parts: string[] = [];
   if (skill.source) {
-    parts.push(`来源: ${skill.source}`);
+    parts.push(`${t('skill.source_label')} ${skill.source}`);
   }
   if (skill.pluginId !== undefined) {
     const plugin = plugins.find((p) => p.id === skill.pluginId);
     const label = plugin?.displayName ?? skill.pluginId;
-    parts.push(`插件: ${label}`);
+    parts.push(`${t('skill.plugin_label')} ${label}`);
   }
   if (skill.description) {
     parts.push(truncate(skill.description, SKILL_DESC_MAX));

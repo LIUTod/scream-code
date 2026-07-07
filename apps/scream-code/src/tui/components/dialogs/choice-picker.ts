@@ -18,6 +18,8 @@ import {
 } from '@earendil-works/pi-tui';
 import chalk from 'chalk';
 
+import { t } from '@scream-code/config';
+
 import { SELECT_POINTER } from '../../constant/symbols';
 
 import type { ColorPalette } from '#/tui/theme/colors';
@@ -143,13 +145,13 @@ export class ChoicePickerComponent extends Container implements Focusable {
     const view = this.list.view();
     const options = view.items;
 
-    const navParts = ['↑↓ 导航'];
-    if (view.page.pageCount > 1) navParts.push('←→ 翻页');
-    navParts.push('Enter 选择', 'Esc 取消');
+    const navParts = [t('dialog.nav')];
+    if (view.page.pageCount > 1) navParts.push(t('dialog.page'));
+    navParts.push(t('dialog.select'), t('dialog.cancel'));
     const hint = this.opts.hint ?? navParts.join(' · ');
 
     const titleSuffix =
-      searchable && view.query.length === 0 ? chalk.hex(colors.textMuted)('  (输入搜索)') : '';
+      searchable && view.query.length === 0 ? chalk.hex(colors.textMuted)(`  ${t('dialog.search_placeholder')}`) : '';
     const lines: string[] = [
       chalk.hex(colors.primary)('─'.repeat(width)),
       chalk.hex(colors.primary).bold(` ${this.opts.title}`) + titleSuffix,

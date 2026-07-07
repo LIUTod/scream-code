@@ -11,6 +11,7 @@
 
 import type { Component } from '@earendil-works/pi-tui';
 import { truncateToWidth } from '@earendil-works/pi-tui';
+import { t } from '@scream-code/config';
 import chalk from 'chalk';
 
 import type { ColorPalette } from '#/tui/theme/colors';
@@ -132,13 +133,13 @@ export class TodoPanelComponent implements Component {
     const { rows, hidden } = selectVisibleTodos(this.todos);
     const lines: string[] = [
       chalk.hex(c.border)('─'.repeat(width)),
-      chalk.hex(c.primary).bold(' 待办'),
+      chalk.hex(c.primary).bold(t('todo.title')),
     ];
     for (const todo of rows) {
       lines.push(renderRow(todo, c));
     }
     if (hidden > 0) {
-      lines.push(chalk.hex(c.textDim)(`  … 还有 ${hidden} 项`));
+      lines.push(chalk.hex(c.textDim)(t('todo.more_items', { count: hidden })));
     }
 
     return lines.map((line) => truncateToWidth(line, width));

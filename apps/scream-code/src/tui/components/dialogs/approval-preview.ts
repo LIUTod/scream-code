@@ -25,6 +25,7 @@ import {
   visibleWidth,
   type Focusable,
 } from '@earendil-works/pi-tui';
+import { t } from '@scream-code/config';
 import chalk from 'chalk';
 
 import { highlightLines, langFromPath } from '#/tui/components/media/code-highlight';
@@ -190,10 +191,10 @@ export class ApprovalPreviewViewer extends Container implements Focusable {
       ` ${String(lineFrom)}-${String(lineTo)} / ${String(total)} (${String(percent)}%) `,
     );
     const keys =
-      `${key('↑↓')} ${dim('行')}  ` +
-      `${key('PgUp/PgDn')} ${dim('页')}  ` +
-      `${key('g/G')} ${dim('顶/底')}  ` +
-      `${key('Q/Esc/Ctrl+E')} ${dim('返回')}`;
+      `${key('↑↓')} ${dim(t('approvalpreview.key_line'))}  ` +
+      `${key('PgUp/PgDn')} ${dim(t('approvalpreview.key_page'))}  ` +
+      `${key('g/G')} ${dim(t('approvalpreview.key_top_bottom'))}  ` +
+      `${key('Q/Esc/Ctrl+E')} ${dim(t('approvalpreview.key_back'))}`;
     const left = ` ${keys}`;
     const leftW = visibleWidth(left);
     const rightW = visibleWidth(position);

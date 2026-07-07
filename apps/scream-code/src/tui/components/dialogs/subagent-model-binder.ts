@@ -19,23 +19,26 @@ import {
   type TuiConfig,
 } from '#/tui/config';
 import type { SlashCommandHost } from '#/tui/commands/dispatch';
+import { t } from '@scream-code/config';
 
 const FOLLOW_MAIN = '__follow_main__';
 
 let applying = false;
 
-const SUBAGENT_PROFILES: readonly {
+function getSubagentProfiles(): readonly {
   readonly name: string;
   readonly description: string;
-}[] = [
-  { name: 'coder', description: '通用软件工程任务' },
-  { name: 'reviewer', description: '代码审查，发现 bug 和 API 契约违反' },
-  { name: 'writer', description: '内容生产与研究报告' },
-  { name: 'explore', description: '快速代码库探索（只读）' },
-  { name: 'oracle', description: '深度调试与架构决策' },
-  { name: 'plan', description: '实现规划与架构设计（只读）' },
-  { name: 'verify', description: '运行构建/测试/lint 验证改动' },
-];
+}[] {
+  return [
+    { name: 'coder', description: t('subagent.desc_coder') },
+    { name: 'reviewer', description: t('subagent.desc_reviewer') },
+    { name: 'writer', description: t('subagent.desc_writer') },
+    { name: 'explore', description: t('subagent.desc_explore') },
+    { name: 'oracle', description: t('subagent.desc_oracle') },
+    { name: 'plan', description: t('subagent.desc_plan') },
+    { name: 'verify', description: t('subagent.desc_verify') },
+  ];
+}
 
 export function showSubagentModelBinder(host: SlashCommandHost): void {
   mountProfileList(host);
@@ -43,11 +46,11 @@ export function showSubagentModelBinder(host: SlashCommandHost): void {
 
 function mountProfileList(host: SlashCommandHost): void {
   const { subagentModels: bindings, availableModels } = host.state.appState;
-  const options: ChoiceOption[] = SUBAGENT_PROFILES.map((profile) => {
+  const options: ChoiceOption[] = getSubagentProfiles().map((profile) => {
     const alias = bindings[profile.name];
     const bindingLabel =
       alias === undefined
-        ? '跟随主模型'
+        ? t('subagent.follow_main')
         : modelDisplayName(alias, availableModels[alias]);
     return {
       value: profile.name,
@@ -58,8 +61,8 @@ function mountProfileList(host: SlashCommandHost): void {
 
   host.mountEditorReplacement(
     new ChoicePickerComponent({
-      title: '子代理模型绑定',
-      hint: '↑↓ 选择子代理 · Enter 绑定模型 · Esc 取消',
+      title: t('subagent.title'),
+      hint: t('subagent.hint'),
       options,
       colors: host.state.theme.colors,
       onSelect: (profileName) => {
@@ -79,8 +82,8 @@ function mountModelPicker(host: SlashCommandHost, profileName: string): void {
   const options: ChoiceOption[] = [
     {
       value: FOLLOW_MAIN,
-      label: '跟随主模型',
-      description: '使用主代理当前模型（默认）',
+      label: t('subagent.follow_main'),
+      description: t('subagent.follow_main_desc'),
     },
     ...Object.entries(availableModels).map(([alias, cfg]) => ({
       value: alias,
@@ -90,8 +93,8 @@ function mountModelPicker(host: SlashCommandHost, profileName: string): void {
 
   host.mountEditorReplacement(
     new ChoicePickerComponent({
-      title: `绑定 ${profileName}`,
-      hint: '↑↓ 选择模型 · Enter 确认 · Esc 返回',
+      title: t('subagent.bind_title', { profile: profileName }),
+      hint: t('subagent.model_hint'),
       options,
       currentValue: currentBinding,
       colors: host.state.theme.colors,
@@ -129,11 +132,11 @@ async function applyBinding(
     host.setAppState({ subagentModels: updated });
     const label =
       value === FOLLOW_MAIN
-        ? '跟随主模型'
+        ? t('subagent.follow_main')
         : modelDisplayName(value, host.state.appState.availableModels[value]);
     host.showStatus(`${profileName} → ${label}`, host.state.theme.colors.success);
     mountProfileList(host);
   } catch (error) {
-    host.showError(`保存失败：${error instanceof Error ? error.message : String(error)}`);
+    host.showError(t('subagent.save_failed', { msg: error instanceof Error ? error.message : String(error) }));
   }
 }

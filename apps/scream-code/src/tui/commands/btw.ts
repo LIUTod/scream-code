@@ -17,6 +17,7 @@ import {
 } from '@earendil-works/pi-tui';
 import chalk from 'chalk';
 
+import { t } from '@scream-code/config';
 import type { ColorPalette } from '../theme/colors';
 import type { SlashCommandHost } from './dispatch';
 
@@ -145,15 +146,15 @@ export async function handleBtwCommand(
   const question = args.trim();
   if (question.length === 0) {
     host.showNotice(
-      '/btw 用法',
-      '在不中断当前对话的情况下快速提问。\n\n示例：/btw 这个项目有多少个包？\n示例：/btw useEffect 的 cleanup 什么时候执行？',
+      t('btw.usage'),
+      t('btw.desc') + '\n\n' + t('btw.example1') + '\n' + t('btw.example2'),
     );
     return;
   }
 
   const session = host.session;
   if (session === undefined) {
-    host.showError('请先创建或恢复一个会话，再使用 /btw。');
+    host.showError(t('btw.no_session'));
     return;
   }
 

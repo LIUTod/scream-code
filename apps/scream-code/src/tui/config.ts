@@ -11,11 +11,11 @@ import { dirname, join } from 'node:path';
 
 import { parse as parseToml } from 'smol-toml';
 import { z } from 'zod';
+import { t } from '@scream-code/config';
 
 import { getDataDir } from '#/utils/paths';
 
-export const INVALID_TUI_CONFIG_MESSAGE =
-  '~/.scream-code/tui.toml 中的 TUI 配置无效；使用默认配置。';
+export const INVALID_TUI_CONFIG_MESSAGE = t('tui.invalid_config');
 
 export const TuiThemeSchema = z.enum(['dark', 'light', 'auto']);
 
@@ -35,6 +35,7 @@ export type TuiLikePreferences = z.infer<typeof TuiLikePreferencesSchema>;
 
 export const TuiConfigFileSchema = z.object({
   theme: TuiThemeSchema.optional(),
+  language: z.enum(['zh', 'en']).optional(),
   editor: z
     .object({
       command: z.string().optional(),
@@ -58,6 +59,7 @@ export const TuiConfigFileSchema = z.object({
 
 export const TuiConfigSchema = z.object({
   theme: TuiThemeSchema,
+  language: z.enum(['zh', 'en']),
   editorCommand: z.string().nullable(),
   notifications: NotificationsConfigSchema,
   like: TuiLikePreferencesSchema,
@@ -79,6 +81,7 @@ export const DEFAULT_NOTIFICATIONS_CONFIG: NotificationsConfig = {
 };
 export const DEFAULT_TUI_CONFIG: TuiConfig = TuiConfigSchema.parse({
   theme: 'auto',
+  language: 'zh',
   editorCommand: null,
   notifications: DEFAULT_NOTIFICATIONS_CONFIG,
   like: {},
@@ -144,6 +147,7 @@ export function normalizeTuiConfig(config: TuiConfigFileShape): TuiConfig {
   const fusionPlan = config.fusionPlan ?? {};
   return TuiConfigSchema.parse({
     theme: config.theme ?? DEFAULT_TUI_CONFIG.theme,
+    language: config.language ?? DEFAULT_TUI_CONFIG.language,
     editorCommand: command === undefined || command.length === 0 ? null : command,
     notifications: {
       enabled: config.notifications?.enabled ?? DEFAULT_NOTIFICATIONS_CONFIG.enabled,
@@ -192,6 +196,7 @@ export function renderTuiConfig(config: TuiConfig): string {
 # Agent/runtime settings stay in ~/.scream-code/config.toml.
 
 theme = "${config.theme}" # "auto" | "dark" | "light"
+language = "${config.language}" # "zh" | "en"
 
 [editor]
 command = "${escapeTomlBasicString(config.editorCommand ?? '')}" # Empty uses $VISUAL / $EDITOR

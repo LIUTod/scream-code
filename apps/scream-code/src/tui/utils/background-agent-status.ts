@@ -4,6 +4,8 @@ import type {
   BackgroundAgentStatusPhase,
 } from '#/tui/types';
 
+import { t } from '@scream-code/config';
+
 const MAX_BACKGROUND_FIELD_LENGTH = 240;
 
 function normalizeBackgroundField(value: string | undefined): string | undefined {
@@ -23,10 +25,10 @@ export function formatBackgroundAgentTranscript(
   const subject = normalizedAgentName !== undefined ? `${normalizedAgentName} agent` : 'agent';
   const headline =
     phase === 'started'
-      ? `${subject} 已在后台启动`
+      ? t('bgagent.started_bg', { subject })
       : phase === 'completed'
-        ? `${subject} 已在后台完成`
-        : `${subject} 在后台失败`;
+        ? t('bgagent.completed_bg', { subject })
+        : t('bgagent.failed_bg', { subject });
   const tail = phase === 'failed' ? normalizeBackgroundField(extras?.error) : undefined;
   const detailParts = [normalizeBackgroundField(meta.description), tail].filter(
     (part): part is string => part !== undefined,

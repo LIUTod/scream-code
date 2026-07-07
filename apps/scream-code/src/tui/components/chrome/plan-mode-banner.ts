@@ -9,6 +9,7 @@
 
 import type { Component } from '@earendil-works/pi-tui';
 import { truncateToWidth, visibleWidth } from '@earendil-works/pi-tui';
+import { t } from '@scream-code/config';
 import chalk from 'chalk';
 
 import { pathToFileURL } from 'node:url';
@@ -20,8 +21,8 @@ import type { ColorPalette } from '#/tui/theme/colors';
 import type { PlanModeState } from '#/tui/types';
 
 const PLAN_LABEL: Record<Exclude<PlanModeState, 'off'>, string> = {
-  plan: '计划模式',
-  fusionplan: '融合计划模式',
+  plan: t('planmode.plan'),
+  fusionplan: t('planmode.fusionplan'),
 };
 
 export class PlanModeBannerComponent implements Component {

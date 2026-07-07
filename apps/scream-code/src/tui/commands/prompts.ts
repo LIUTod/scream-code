@@ -7,6 +7,8 @@ import {
   type ThinkingEffort,
 } from '@scream-code/scream-code-sdk';
 
+import { t } from '@scream-code/config';
+
 import { ApiKeyInputDialogComponent, type ApiKeyInputResult } from '../components/dialogs/api-key-input-dialog';
 import { ChoicePickerComponent, type ChoiceOption } from '../components/dialogs/choice-picker';
 import { ModelSelectorComponent } from '../components/dialogs/model-selector';
@@ -20,7 +22,7 @@ export function promptLogoutProviderSelection(
 ): Promise<string | undefined> {
   return new Promise((resolve) => {
     const picker = new ChoicePickerComponent({
-      title: '选择要登出的提供商',
+      title: t('prompts.logout_title'),
       options,
       currentValue,
       colors: host.state.theme.colors,
@@ -64,13 +66,13 @@ export function promptCatalogProviderSelection(host: SlashCommandHost, catalog: 
       .toSorted((a, b) => a.label.localeCompare(b.label));
 
     if (options.length === 0) {
-      host.showError('目录中没有支持该 wire 类型的提供商。');
+      host.showError(t('prompts.no_wire_provider'));
       resolve(undefined);
       return;
     }
 
     const picker = new ChoicePickerComponent({
-      title: '选择提供商',
+      title: t('prompts.select_provider'),
       options,
       colors: host.state.theme.colors,
       searchable: true,
@@ -131,35 +133,45 @@ export function runModelSelector(
 
 // ── /config diy prompts ────────────────────────────────────────────────
 
-const WIRE_TYPE_OPTIONS: ChoiceOption[] = [
-  { value: 'openai', label: 'OpenAI 兼容协议', description: '适用于 DeepSeek、OpenAI、Groq 等' },
-  { value: 'anthropic', label: 'Anthropic 协议', description: '适用于 Claude 系列模型' },
-];
-const THINKING_OPTIONS: ChoiceOption[] = [
-  { value: 'off', label: '关闭思考' },
-  { value: 'low', label: '低强度思考' },
-  { value: 'medium', label: '中强度思考' },
-  { value: 'high', label: '高强度思考' },
-];
-const IMAGE_OPTIONS: ChoiceOption[] = [
-  { value: 'off', label: '关闭识图', description: '模型不支持图片输入时请选择此项' },
-  { value: 'on', label: '开启识图', description: '模型支持图片输入时开启，允许发送图片' },
-];
-const VIDEO_OPTIONS: ChoiceOption[] = [
-  { value: 'off', label: '关闭视频', description: '模型不支持视频输入时请选择此项' },
-  { value: 'on', label: '开启视频', description: '模型支持视频输入时开启，允许发送视频' },
-];
-const AUDIO_OPTIONS: ChoiceOption[] = [
-  { value: 'off', label: '关闭音频', description: '模型不支持音频输入时请选择此项' },
-  { value: 'on', label: '开启音频', description: '模型支持音频输入时开启，允许发送音频' },
-];
+function getWireTypeOptions(): ChoiceOption[] {
+  return [
+    { value: 'openai', label: t('prompts.wire_openai'), description: t('prompts.wire_openai_desc') },
+    { value: 'anthropic', label: t('prompts.wire_anthropic'), description: t('prompts.wire_anthropic_desc') },
+  ];
+}
+function getThinkingOptions(): ChoiceOption[] {
+  return [
+    { value: 'off', label: t('prompts.thinking_off') },
+    { value: 'low', label: t('prompts.thinking_low') },
+    { value: 'medium', label: t('prompts.thinking_medium') },
+    { value: 'high', label: t('prompts.thinking_high') },
+  ];
+}
+function getImageOptions(): ChoiceOption[] {
+  return [
+    { value: 'off', label: t('prompts.image_off'), description: t('prompts.image_off_desc') },
+    { value: 'on', label: t('prompts.image_on'), description: t('prompts.image_on_desc') },
+  ];
+}
+function getVideoOptions(): ChoiceOption[] {
+  return [
+    { value: 'off', label: t('prompts.video_off'), description: t('prompts.video_off_desc') },
+    { value: 'on', label: t('prompts.video_on'), description: t('prompts.video_on_desc') },
+  ];
+}
+function getAudioOptions(): ChoiceOption[] {
+  return [
+    { value: 'off', label: t('prompts.audio_off'), description: t('prompts.audio_off_desc') },
+    { value: 'on', label: t('prompts.audio_on'), description: t('prompts.audio_on_desc') },
+  ];
+}
 
 export function promptWireType(host: SlashCommandHost): Promise<string | undefined> {
   return new Promise((resolve) => {
     const picker = new ChoicePickerComponent({
-      title: '选择兼容协议',
-      hint: '选择模型服务商的 API 协议类型',
-      options: WIRE_TYPE_OPTIONS,
+      title: t('prompts.wire_type_title'),
+      hint: t('prompts.wire_type_hint'),
+      options: getWireTypeOptions(),
       colors: host.state.theme.colors,
       onSelect: (value) => { host.restoreEditor(); resolve(value); },
       onCancel: () => { host.restoreEditor(); resolve(undefined); },
@@ -193,9 +205,9 @@ export function promptTextInput(
 export function promptThinkingMode(host: SlashCommandHost): Promise<ThinkingEffort | undefined> {
   return new Promise((resolve) => {
     const picker = new ChoicePickerComponent({
-      title: '思考模式',
-      hint: '选择模型思考强度（需要模型支持）',
-      options: THINKING_OPTIONS,
+      title: t('prompts.thinking_title'),
+      hint: t('prompts.thinking_hint'),
+      options: getThinkingOptions(),
       colors: host.state.theme.colors,
       onSelect: (value) => { host.restoreEditor(); resolve(value as ThinkingEffort); },
       onCancel: () => { host.restoreEditor(); resolve(undefined); },
@@ -207,9 +219,9 @@ export function promptThinkingMode(host: SlashCommandHost): Promise<ThinkingEffo
 export function promptImageMode(host: SlashCommandHost): Promise<boolean | undefined> {
   return new Promise((resolve) => {
     const picker = new ChoicePickerComponent({
-      title: '多模态配置 · 图片输入',
-      hint: '模型不支持请选择关闭',
-      options: IMAGE_OPTIONS,
+      title: t('prompts.image_title'),
+      hint: t('prompts.modal_off_hint'),
+      options: getImageOptions(),
       colors: host.state.theme.colors,
       onSelect: (value) => { host.restoreEditor(); resolve(value === 'on'); },
       onCancel: () => { host.restoreEditor(); resolve(undefined); },
@@ -221,9 +233,9 @@ export function promptImageMode(host: SlashCommandHost): Promise<boolean | undef
 export function promptVideoMode(host: SlashCommandHost): Promise<boolean | undefined> {
   return new Promise((resolve) => {
     const picker = new ChoicePickerComponent({
-      title: '多模态配置 · 视频输入',
-      hint: '模型不支持请选择关闭',
-      options: VIDEO_OPTIONS,
+      title: t('prompts.video_title'),
+      hint: t('prompts.modal_off_hint'),
+      options: getVideoOptions(),
       colors: host.state.theme.colors,
       onSelect: (value) => { host.restoreEditor(); resolve(value === 'on'); },
       onCancel: () => { host.restoreEditor(); resolve(undefined); },
@@ -235,9 +247,9 @@ export function promptVideoMode(host: SlashCommandHost): Promise<boolean | undef
 export function promptAudioMode(host: SlashCommandHost): Promise<boolean | undefined> {
   return new Promise((resolve) => {
     const picker = new ChoicePickerComponent({
-      title: '多模态配置 · 音频输入',
-      hint: '模型不支持请选择关闭',
-      options: AUDIO_OPTIONS,
+      title: t('prompts.audio_title'),
+      hint: t('prompts.modal_off_hint'),
+      options: getAudioOptions(),
       colors: host.state.theme.colors,
       onSelect: (value) => { host.restoreEditor(); resolve(value === 'on'); },
       onCancel: () => { host.restoreEditor(); resolve(undefined); },

@@ -13,6 +13,7 @@
  */
 
 import { Container, Text, Spacer } from '@earendil-works/pi-tui';
+import { t } from '@scream-code/config';
 import chalk from 'chalk';
 
 import type { ColorPalette } from '#/tui/theme/colors';
@@ -20,9 +21,9 @@ import type { ColorPalette } from '#/tui/theme/colors';
 const ARGS_PREVIEW_MAX = 200;
 
 const TRIGGER_LABEL: Record<string, string> = {
-  'user-slash': '（用户触发）',
-  'model-tool': '（模型调用）',
-  'nested-skill': '（嵌套调用）',
+  'user-slash': t('skillact.user_trigger'),
+  'model-tool': t('skillact.model_trigger'),
+  'nested-skill': t('skillact.nested_trigger'),
 };
 
 export class SkillActivationComponent extends Container {
@@ -36,7 +37,7 @@ export class SkillActivationComponent extends Container {
     this.addChild(new Spacer(1));
     const triggerLabel = trigger !== undefined ? chalk.hex(colors.textDim)(TRIGGER_LABEL[trigger] ?? '') : '';
     const head =
-      chalk.hex(colors.primary).bold('▶ 已激活 skill：') +
+      chalk.hex(colors.primary).bold(t('skillact.activated')) +
       chalk.hex(colors.roleUser).bold(name) +
       (triggerLabel.length > 0 ? ' ' + triggerLabel : '');
     this.addChild(new Text(head, 0, 0));

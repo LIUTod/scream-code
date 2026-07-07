@@ -8,6 +8,7 @@ import {
   type Session,
   type SessionStatus,
 } from '@scream-code/scream-code-sdk';
+import { setLocale } from '@scream-code/config';
 
 import { loadTuiConfig, TuiConfigParseError } from '#/tui/config';
 import type { CLIOptions, PromptOutputFormat } from './options';
@@ -59,9 +60,11 @@ export async function runPrompt(
   let promptTuiConfig;
   try {
     promptTuiConfig = await loadTuiConfig();
+    setLocale(promptTuiConfig.language);
   } catch (error) {
     if (!(error instanceof TuiConfigParseError)) throw error;
     promptTuiConfig = error.fallback;
+    setLocale(promptTuiConfig.language);
   }
   const promptSubagentModels = promptTuiConfig.subagentModels;
   harness.setSubagentModelBindings(() => promptSubagentModels);

@@ -21,6 +21,7 @@ import chalk from 'chalk';
 
 import type { ColorPalette } from '@/tui/theme/colors';
 import { printableChar } from '@/tui/utils/printable-key';
+import { t } from '@scream-code/config';
 
 const ELLIPSIS = '…';
 
@@ -60,7 +61,7 @@ export class KnowledgeResultViewer extends Container implements Focusable {
     this.colors = props.colors;
     this.onClose = props.onClose;
     this.terminal = terminal;
-    this.lines = props.content.length > 0 ? props.content.split('\n') : ['(空)'];
+    this.lines = props.content.length > 0 ? props.content.split('\n') : [t('kresult.empty')];
   }
 
   handleInput(data: string): void {
@@ -171,10 +172,10 @@ export class KnowledgeResultViewer extends Container implements Focusable {
       ` ${String(lineFrom)}-${String(lineTo)} / ${String(total)} (${String(percent)}%) `,
     );
     const keys =
-      `${key('↑↓')} ${dim('行')}  ` +
-      `${key('PgUp/PgDn')} ${dim('页')}  ` +
-      `${key('g/G')} ${dim('顶/底')}  ` +
-      `${key('Q/Esc/Enter')} ${dim('返回')}`;
+      `${key('↑↓')} ${dim(t('kresult.line'))}  ` +
+      `${key('PgUp/PgDn')} ${dim(t('kresult.page'))}  ` +
+      `${key('g/G')} ${dim(t('kresult.top_bottom'))}  ` +
+      `${key('Q/Esc/Enter')} ${dim(t('kresult.back'))}`;
     const left = ` ${keys}`;
     const leftW = visibleWidth(left);
     const rightW = visibleWidth(position);

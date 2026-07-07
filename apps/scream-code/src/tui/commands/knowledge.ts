@@ -10,6 +10,7 @@ import {
   type LlmCaller,
   type KnowledgeSource,
 } from '@scream-code/knowledge';
+import { t } from '@scream-code/config';
 
 import type { SlashCommandHost } from './dispatch';
 import { handleWeb } from './knowledge-web';
@@ -79,33 +80,33 @@ function formatProgress(progress: IngestProgress): string {
     case 'embedding-check':
       return progress.message;
     case 'chunking':
-      return `切分文件中...`;
+      return t('knowledge.chunking');
     case 'embedding-chunks':
-      return `嵌入 chunks: ${progress.chunkIndex}/${progress.totalChunks}`;
+      return t('knowledge.embedding_chunks', { index: String(progress.chunkIndex), total: String(progress.totalChunks) });
     case 'extracting':
-      return `抽取事件: ${progress.chunkIndex}/${progress.totalChunks}`;
+      return t('knowledge.extracting', { index: String(progress.chunkIndex), total: String(progress.totalChunks) });
     case 'embedding-events':
-      return `嵌入 events: ${progress.chunkIndex}/${progress.totalChunks}`;
+      return t('knowledge.embedding_events', { index: String(progress.chunkIndex), total: String(progress.totalChunks) });
     case 'embedding-entities':
-      return `嵌入 entities...`;
+      return t('knowledge.embedding_entities');
     case 'embedding-relations':
-      return `嵌入关系...`;
+      return t('knowledge.embedding_relations');
     case 'completed':
       return progress.message;
     case 'error':
-      return `错误: ${progress.message}`;
+      return t('knowledge.error', { msg: progress.message });
   }
 }
 
 async function handleIngest(host: SlashCommandHost): Promise<void> {
-  const filePath = await promptTextInput(host, '摄入文件/文件夹', {
-    subtitle: '输入要摄入的 markdown/txt 文件路径，或包含这些文件的文件夹路径',
-    placeholder: '/path/to/doc.md 或 /path/to/docs',
+  const filePath = await promptTextInput(host, t('knowledge.ingest'), {
+    subtitle: t('knowledge.ingest_desc'),
+    placeholder: t('knowledge.path_placeholder'),
     allowEmpty: false,
   });
   if (filePath === undefined) return;
   if (filePath.trim().length === 0) {
-    host.showError('路径不能为空');
+    host.showError(t('error.path_empty'));
     return;
   }
 
@@ -113,53 +114,53 @@ async function handleIngest(host: SlashCommandHost): Promise<void> {
   try {
     stats = await stat(filePath);
   } catch {
-    host.showError(`路径不存在: ${filePath}`);
+    host.showError(t('error.path_not_exist', { path: filePath }));
     return;
   }
 
   const store = await getKnowledgeStore();
   const llm = makeLlmCaller(host);
 
-  const spinner = host.showProgressSpinner('开始摄入...');
+  const spinner = host.showProgressSpinner(t('knowledge.ingesting'));
   try {
     if (stats.isDirectory()) {
       const result = await ingestDirectory(store, llm, filePath, (progress) => {
         spinner.setLabel(formatProgress(progress));
       });
-      spinner.stop({ ok: result.failed === 0, label: '批量摄入完成' });
+      spinner.stop({ ok: result.failed === 0, label: t('knowledge.batch_done') });
       if (result.failed > 0) {
         const summary = [
-          `成功: ${result.succeeded} 个文件`,
-          `失败: ${result.failed} 个文件`,
-          `总计: ${result.totalChunks} chunks, ${result.totalEvents} events, ${result.totalEntities} entities`,
+          t('knowledge.succeeded', { count: String(result.succeeded) }),
+          t('knowledge.failed', { count: String(result.failed) }),
+          t('knowledge.ingest_summary', { chunks: String(result.totalChunks), events: String(result.totalEvents), entities: String(result.totalEntities) }),
           '',
-          '失败文件:',
+          t('knowledge.failed_files'),
           ...result.errors.map((e) => `  • ${basename(e.filePath)}: ${e.message}`),
         ].join('\n');
-        host.showNotice('批量摄入完成（部分失败）', summary);
+        host.showNotice(t('knowledge.batch_partial'), summary);
       } else {
         host.showNotice(
-          '批量摄入完成',
-          `成功: ${result.succeeded} 个文件\n${result.totalChunks} chunks, ${result.totalEvents} events, ${result.totalEntities} entities`,
+          t('knowledge.batch_done'),
+          `${t('knowledge.succeeded', { count: String(result.succeeded) })}\n${result.totalChunks} chunks, ${result.totalEvents} events, ${result.totalEntities} entities`,
         );
       }
     } else {
       if (!isSupportedFile(filePath)) {
-        spinner.stop({ ok: false, label: '不支持的文件格式' });
-        host.showError('仅支持 .md、.markdown、.txt 文件');
+        spinner.stop({ ok: false, label: t('error.unsupported_format') });
+        host.showError(t('error.unsupported_format'));
         return;
       }
       const result = await ingestFile(store, llm, filePath, (progress) => {
         spinner.setLabel(formatProgress(progress));
       });
-      spinner.stop({ ok: true, label: '摄入完成' });
+      spinner.stop({ ok: true, label: t('knowledge.ingest_done') });
       host.showNotice(
-        '摄入完成',
-        `文件: ${basename(filePath)}\nchunks: ${result.chunkCount}\nevents: ${result.eventCount}\nentities: ${result.entityCount}`,
+        t('knowledge.ingest_done'),
+        `${t('knowledge.file_label')}: ${basename(filePath)}\nchunks: ${result.chunkCount}\nevents: ${result.eventCount}\nentities: ${result.entityCount}`,
       );
     }
   } catch (error) {
-    spinner.stop({ ok: false, label: '摄入失败' });
+    spinner.stop({ ok: false, label: t('knowledge.ingest_fail') });
     throw error;
   }
 }
@@ -176,14 +177,14 @@ async function handleList(host: SlashCommandHost): Promise<void> {
   }
 
   if (entries.length === 0) {
-    await showResultViewer(host, '知识库文档', '知识库为空，请先用 /knowledge 摄入文档');
+    await showResultViewer(host, t('knowledge.docs_title'), t('knowledge.empty'));
     return;
   }
 
   const { promise, resolve } = Promise.withResolvers<void>();
   const tree = new KnowledgeDocumentTree(
     {
-      title: '知识库文档',
+      title: t('knowledge.docs_title'),
       entries,
       colors: host.state.theme.colors,
       onClose: () => {
@@ -198,45 +199,45 @@ async function handleList(host: SlashCommandHost): Promise<void> {
 }
 
 async function handleSearch(host: SlashCommandHost): Promise<void> {
-  const query = await promptTextInput(host, '搜索测试', {
-    subtitle: '输入查询，测试多跳检索',
-    placeholder: '例如：A 公司的竞争对手是谁',
+  const query = await promptTextInput(host, t('knowledge.search'), {
+    subtitle: t('knowledge.search_desc'),
+    placeholder: t('knowledge.search_placeholder'),
     allowEmpty: false,
   });
   if (query === undefined || query.trim().length === 0) return;
 
   const store = await getKnowledgeStore();
   const llm = makeLlmCaller(host);
-  const spinner = host.showProgressSpinner('搜索中...');
+  const spinner = host.showProgressSpinner(t('knowledge.searching'));
   let results;
   try {
     results = await multiSearch(store, llm, query, { topK: 5 });
   } catch (error) {
-    spinner.stop({ ok: false, label: '搜索失败' });
+    spinner.stop({ ok: false, label: t('knowledge.search_fail') });
     throw error;
   }
-  spinner.stop({ ok: true, label: '搜索完成' });
+  spinner.stop({ ok: true, label: t('knowledge.search_done') });
 
   const engine = store.getEmbeddingEngine();
   const degraded = engine === undefined || !engine.available;
 
   if (results.length === 0) {
-    await showResultViewer(host, '搜索结果', `查询 "${query}" 未命中任何 chunk${degraded ? '\n\n⚠️ 向量模型未就绪，当前为关键词检索模式。如下载失败，建议开启科学上网后重启。' : ''}`);
+    await showResultViewer(host, t('knowledge.search_result'), `${t('knowledge.no_hits', { query })}${degraded ? '\n\n⚠️ ' + t('knowledge.vector_degraded') : ''}`);
     return;
   }
 
-  const lines: string[] = [`查询: ${query}`, ''];
+  const lines: string[] = [`${t('knowledge.query_label')}: ${query}`, ''];
   if (degraded) {
-    lines.push('⚠️ 向量模型未就绪，当前为关键词检索模式。如下载失败，建议开启科学上网后重启。');
+    lines.push('⚠️ ' + t('knowledge.vector_degraded'));
     lines.push('');
   }
   for (const [i, r] of results.entries()) {
-    lines.push(`#${i + 1} [score=${r.score.toFixed(3)}] ${r.heading ?? '(无标题)'}`);
-    lines.push(`   来源: ${r.sourceName}`);
+    lines.push(`#${i + 1} [score=${r.score.toFixed(3)}] ${r.heading ?? t('knowledge.no_title')}`);
+    lines.push(`   ${t('knowledge.source_label')}: ${r.sourceName}`);
     lines.push(`   ${r.content}`);
     lines.push('');
   }
-  await showResultViewer(host, `搜索结果 (${results.length})`, lines.join('\n'));
+  await showResultViewer(host, `${t('knowledge.search_result')} (${results.length})`, lines.join('\n'));
 }
 
 function pickSourceToDelete(
@@ -251,8 +252,8 @@ function pickSourceToDelete(
     tone: 'danger',
   }));
   const picker = new ChoicePickerComponent({
-    title: '选择要删除的文档',
-    hint: '删除后无法恢复，关联的 chunks/events/entities 会级联删除（Esc 取消）',
+    title: t('knowledge.delete_pick'),
+    hint: t('knowledge.cascade_warning'),
     options,
     colors: host.state.theme.colors,
     onSelect: (value: string) => {
@@ -276,19 +277,19 @@ function confirmDeleteSource(
   const options: ChoiceOption[] = [
     {
       value: 'cancel',
-      label: '取消',
-      description: '返回，不删除任何数据',
+      label: t('common.cancel'),
+      description: t('knowledge.no_delete_data'),
     },
     {
       value: 'confirm',
-      label: '确认删除',
-      description: `级联删除：${source.name}`,
+      label: t('knowledge.confirm_delete'),
+      description: `${t('knowledge.cascade_delete')}: ${source.name}`,
       tone: 'danger',
     },
   ];
   const picker = new ChoicePickerComponent({
-    title: `确认删除「${source.name}」？`,
-    hint: '此操作不可恢复，关联的 chunks/events/entities 会级联删除（Esc 取消）',
+    title: t('knowledge.confirm_delete_name', { name: source.name }),
+    hint: t('knowledge.cascade_warning'),
     options,
     colors: host.state.theme.colors,
     onSelect: (value: string) => {
@@ -308,7 +309,7 @@ async function handleDelete(host: SlashCommandHost): Promise<void> {
   const store = await getKnowledgeStore();
   const sources = await store.listSources();
   if (sources.length === 0) {
-    host.showNotice('知识库为空', '没有可删除的文档');
+    host.showNotice(t('knowledge.empty'), t('knowledge.no_delete'));
     return;
   }
 
@@ -317,21 +318,21 @@ async function handleDelete(host: SlashCommandHost): Promise<void> {
 
   const source = sources.find((s) => s.id === sourceId);
   if (source === undefined) {
-    host.showError('删除失败：文档不存在');
+    host.showError(t('knowledge.delete_fail_not_found'));
     return;
   }
 
   const confirmed = await confirmDeleteSource(host, source);
   if (!confirmed) {
-    host.showNotice('已取消', '未删除任何文档');
+    host.showNotice(t('knowledge.cancelled'), t('knowledge.no_delete'));
     return;
   }
 
   const ok = await store.deleteSource(sourceId);
   if (ok) {
-    host.showNotice('已删除', '文档已从知识库移除');
+    host.showNotice(t('knowledge.deleted'), t('knowledge.doc_removed'));
   } else {
-    host.showError('删除失败：文档不存在');
+    host.showError(t('knowledge.delete_fail_not_found'));
   }
 }
 
@@ -339,7 +340,7 @@ async function handleStats(host: SlashCommandHost): Promise<void> {
   const store = await getKnowledgeStore();
   const stats = await store.stats();
   const lines: string[] = [
-    '知识库统计',
+    t('knowledge.stats'),
     '─────────────',
     `sources:   ${stats.sources}`,
     `documents: ${stats.documents}`,
@@ -347,14 +348,14 @@ async function handleStats(host: SlashCommandHost): Promise<void> {
     `events:    ${stats.events}`,
     `entities:  ${stats.entities}`,
     '',
-    '说明:',
-    '  sources   = 摄入的文件/来源数',
-    '  documents = 文档元数据记录数',
-    '  chunks    = 切片数（按标题切分）',
-    '  events    = LLM 抽取的融合事件数',
-    '  entities  = 去重后的实体数',
+    `${t('knowledge.stats_note')}:`,
+    `  sources   = ${t('knowledge.stats_sources')}`,
+    `  documents = ${t('knowledge.stats_documents')}`,
+    `  chunks    = ${t('knowledge.stats_chunks')}`,
+    `  events    = ${t('knowledge.stats_events')}`,
+    `  entities  = ${t('knowledge.stats_entities')}`,
   ];
-  await showResultViewer(host, '知识库统计', lines.join('\n'));
+  await showResultViewer(host, t('knowledge.stats'), lines.join('\n'));
 }
 
 export async function handleKnowledgeCommand(
@@ -364,41 +365,41 @@ export async function handleKnowledgeCommand(
   const options: ChoiceOption[] = [
     {
       value: 'ingest',
-      label: '📥 摄入文件/文件夹',
-      description: '从 markdown/txt 文件或文件夹摄入知识（chunk + 抽事件 + 抽实体）',
+      label: '📥 ' + t('knowledge.ingest'),
+      description: t('knowledge.ingest_full'),
     },
     {
       value: 'list',
-      label: '📋 文档列表',
-      description: '查看所有已摄入的文档',
+      label: '📋 ' + t('knowledge.doc_list'),
+      description: t('knowledge.doc_list_desc'),
     },
     {
       value: 'search',
-      label: '🔍 搜索测试',
-      description: '输入查询，测试多跳检索效果',
+      label: '🔍 ' + t('knowledge.search'),
+      description: t('knowledge.search_effect'),
     },
     {
       value: 'delete',
-      label: '🗑️ 删除文档',
-      description: '从知识库删除一个文档（级联删除关联数据）',
+      label: '🗑️ ' + t('knowledge.delete'),
+      description: t('knowledge.delete_desc'),
       tone: 'danger',
     },
     {
       value: 'stats',
-      label: '📊 统计信息',
-      description: '查看知识库整体统计',
+      label: '📊 ' + t('knowledge.stats'),
+      description: t('knowledge.stats_desc'),
     },
     {
       value: 'web',
-      label: '🌐 知识图谱',
-      description: '在浏览器中查看交互式知识图谱',
+      label: '🌐 ' + t('knowledge.web'),
+      description: t('knowledge.web_desc'),
     },
   ];
 
   const showMenu = (): void => {
     const picker = new ChoicePickerComponent({
-      title: 'SAG知识库管理',
-      hint: '选择操作（esc 退出）',
+      title: t('knowledge.menu_title'),
+      hint: t('knowledge.menu_hint'),
       options,
       colors: host.state.theme.colors,
       onSelect: (value: string) => {
@@ -413,7 +414,7 @@ export async function handleKnowledgeCommand(
             else if (value === 'web') await handleWeb(host);
           } catch (error: unknown) {
             const msg = error instanceof Error ? error.message : String(error);
-            host.showError(`操作失败: ${msg}`);
+            host.showError(t('knowledge.op_failed', { msg }));
           }
           showMenu();
         })();

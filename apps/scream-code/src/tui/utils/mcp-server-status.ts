@@ -1,5 +1,7 @@
 import type { McpServerInfo, McpServerStatusEvent } from '@scream-code/scream-code-sdk';
 
+import { t } from '@scream-code/config';
+
 export type McpServerStatusSnapshot = McpServerInfo | McpServerStatusEvent['server'];
 
 export const MCP_STARTUP_STATUS_ROW_LIMIT = 4;
@@ -58,14 +60,14 @@ export function formatMcpStartupStatusSummary(
   }
 
   const parts: string[] = [];
-  if (failed > 0) parts.push(`${failed} 失败`);
-  if (needsAuth > 0) parts.push(`${needsAuth} 需要认证`);
-  if (connecting > 0) parts.push(`${connecting} 连接中`);
-  if (connected > 0) parts.push(`${connected} 已连接`);
-  if (disabled > 0) parts.push(`${disabled} 已禁用`);
+  if (failed > 0) parts.push(t('mcpstatus.failed', { count: failed }));
+  if (needsAuth > 0) parts.push(t('mcpstatus.needs_auth', { count: needsAuth }));
+  if (connecting > 0) parts.push(t('mcpstatus.connecting', { count: connecting }));
+  if (connected > 0) parts.push(t('mcpstatus.connected', { count: connected }));
+  if (disabled > 0) parts.push(t('mcpstatus.disabled_count', { count: disabled }));
   const detail = parts.join(', ');
-  if (visibleCount === 0) return `MCP 服务器: ${detail}`;
-  return `MCP 服务器: ${hidden.length} 个更多 (${detail})`;
+  if (visibleCount === 0) return t('mcpstatus.summary', { detail });
+  return t('mcpstatus.more_summary', { count: hidden.length, detail });
 }
 
 export function mcpServerStatusKey(server: McpServerStatusSnapshot): string {

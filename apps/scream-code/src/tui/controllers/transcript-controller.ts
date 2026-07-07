@@ -5,6 +5,7 @@ import {
   Spacer,
 } from '@earendil-works/pi-tui';
 import type { ApprovalRequest, ApprovalResponse } from '@scream-code/scream-code-sdk';
+import { t } from '@scream-code/config';
 import chalk from 'chalk';
 
 import { CompactionComponent } from '../components/dialogs/compaction';
@@ -235,13 +236,13 @@ export class TranscriptController {
     const parts: string[] = [];
     switch (response.decision) {
       case 'approved':
-        parts.push(response.scope === 'session' ? '已批准（当前会话）' : '已批准');
+        parts.push(response.scope === 'session' ? t('tc.approved_session') : t('tc.approved'));
         break;
       case 'rejected':
-        parts.push('已拒绝');
+        parts.push(t('tc.rejected'));
         break;
       case 'cancelled':
-        parts.push('已取消');
+        parts.push(t('tc.cancelled'));
         break;
     }
     parts.push(`: ${request.action}`);
@@ -326,7 +327,7 @@ export class TranscriptController {
   showError(message: string): void {
     const cleaned = replaceTabs(message);
     // Transcript keeps the fuller (8-line) error for history/replay.
-    this.showStatus(`错误：${truncateErrorMessage(cleaned)}`, this.host.state.theme.colors.error);
+    this.showStatus(`${t('tc.error_prefix')}${truncateErrorMessage(cleaned)}`, this.host.state.theme.colors.error);
     // Banner shows a tighter (3-line) preview pinned above the input so a
     // turn-ending error can't scroll out of view before the user returns.
     this.host.state.errorBanner.setMessage(cleaned);

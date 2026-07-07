@@ -17,6 +17,7 @@ import {
   truncateToWidth,
 } from '@earendil-works/pi-tui';
 import chalk from 'chalk';
+import { t } from '@scream-code/config';
 
 import type { ColorPalette } from '#/tui/theme/colors';
 
@@ -33,16 +34,16 @@ export interface HelpPanelCommand {
 
 /** Static list — keep in sync with the global editor bindings. */
 export const DEFAULT_KEYBOARD_SHORTCUTS: readonly KeyboardShortcut[] = [
-  { keys: 'Shift-Tab', description: '切换计划模式' },
+  { keys: 'Shift-Tab', description: t('help.toggle_plan') },
   // { keys: 'Ctrl-G', description: 'Edit in external editor ($VISUAL / $EDITOR)' },
-  { keys: 'Ctrl-O', description: '切换工具输出展开' },
-  { keys: 'Ctrl-S', description: '中途干预 — 在流式传输中插入后续提示' },
-  { keys: 'Shift-Enter / Ctrl-J', description: '插入换行' },
-  { keys: 'Ctrl-C', description: '中断流 / 清空输入' },
-  { keys: 'Ctrl-D', description: '退出（空输入时）' },
-  { keys: 'Esc', description: '关闭对话框 / 中断流' },
-  { keys: '↑ / ↓', description: '浏览输入历史' },
-  { keys: 'Enter', description: '提交' },
+  { keys: 'Ctrl-O', description: t('help.toggle_output') },
+  { keys: 'Ctrl-S', description: t('help.interrupt') },
+  { keys: 'Shift-Enter / Ctrl-J', description: t('help.newline') },
+  { keys: 'Ctrl-C', description: t('help.cancel_stream') },
+  { keys: 'Ctrl-D', description: t('help.exit') },
+  { keys: 'Esc', description: t('help.close_dialog') },
+  { keys: '↑ / ↓', description: t('help.browse_history') },
+  { keys: 'Enter', description: t('help.submit') },
 ];
 
 export interface HelpPanelOptions {
@@ -110,20 +111,20 @@ export class HelpPanelComponent extends Container implements Focusable {
     const cmdWidth = Math.max(12, ...cmdLabels.map((l) => l.length));
     const lines: string[] = [
       accent('─'.repeat(width)),
-      accent.bold(' 帮助 ') + muted('· Esc / Enter / q 关闭 · ↑↓ 滚动'),
+      accent.bold(t('help.title')) + muted(` · ${t('help.close_hint')}`),
       '',
       // Greeting
-      `  ${dim('Scream 已准备好帮助您！发送消息即可开始。')}`,
+      `  ${dim(t('help.welcome_msg'))}`,
       '',
       // Section: keyboard shortcuts
-      `  ${chalk.bold('键盘快捷键')}`,
+      `  ${chalk.bold(t('help.shortcuts'))}`,
       ...shortcuts.map((s) => `    ${kbdColor(s.keys.padEnd(kbdWidth))}  ${dim(s.description)}`),
       '',
       // Section: slash commands
-      `  ${chalk.bold('斜杠命令')}`,
+      `  ${chalk.bold(t('help.slash_commands'))}`,
       ...sortedCmds.map((cmd, i) => {
         const label = cmdLabels[i] ?? `/${cmd.name}`;
-        return `    ${slashColor(label.padEnd(cmdWidth))}  ${dim(cmd.description)}`;
+        return `    ${slashColor(label.padEnd(cmdWidth))}  ${dim(t(cmd.description))}`;
       }),
       '',
       accent('─'.repeat(width)),
@@ -136,7 +137,7 @@ export class HelpPanelComponent extends Container implements Focusable {
       this.scrollTop = Math.max(0, Math.min(this.scrollTop, content.length - maxVisible));
       const slice = content.slice(this.scrollTop, this.scrollTop + maxVisible);
       const scrollInfo = muted(
-        ` 显示 ${String(this.scrollTop + 1)}-${String(this.scrollTop + slice.length)} / ${String(content.length)}`,
+        ` ${t('help.showing_range', { start: String(this.scrollTop + 1), end: String(this.scrollTop + slice.length), total: String(content.length) })}`,
       );
       return [lines[0] ?? '', ...slice, scrollInfo, lines.at(-1) ?? ''].map((line) =>
         truncateToWidth(line, width),

@@ -46,7 +46,7 @@ describe('PlanBoxComponent', () => {
     });
     const out = strip(box.render(60).join('\n'));
     const top = out.split('\n')[0]!;
-    expect(top).toContain(' 计划 · Rejected ');
+    expect(top).toContain(' 计划  · Rejected ');
   });
 
   it('keeps path status title to the basename without leaking directories', () => {

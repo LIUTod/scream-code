@@ -1,6 +1,7 @@
 import { execSync } from 'node:child_process';
 
 import { ScreamHarness, log, resolveScreamHome } from '@scream-code/scream-code-sdk';
+import { setLocale } from '@scream-code/config';
 
 import { CLI_UI_MODE } from '#/constant/app';
 import type { TuiConfig } from '#/tui/config';
@@ -22,9 +23,11 @@ export async function runShell(
   let configWarning: string | undefined;
   try {
     tuiConfig = await loadTuiConfig();
+    setLocale(tuiConfig.language);
   } catch (error) {
     if (!(error instanceof TuiConfigParseError)) throw error;
     tuiConfig = error.fallback;
+    setLocale(tuiConfig.language);
     configWarning = error.message;
   }
 

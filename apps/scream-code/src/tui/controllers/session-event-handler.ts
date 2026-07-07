@@ -1,4 +1,5 @@
 import chalk from 'chalk';
+import { t } from '@scream-code/config';
 import type {
   AgentStatusUpdatedEvent,
   AssistantDeltaEvent,
@@ -156,7 +157,7 @@ export class SessionEventHandler {
       if (event.type === 'tool.progress') {
         const authOpened = mcpOAuthOpener.handleToolProgress(event);
         if (authOpened !== undefined) {
-          host.showStatus(`已在浏览器中打开 ${authOpened.serverName} 的授权页面`);
+          host.showStatus(t('handler.oauth_page_opened', { serverName: authOpened.serverName }));
         }
       }
       this.handleEvent(event, sendQueued);
@@ -172,7 +173,7 @@ export class SessionEventHandler {
     } catch (error) {
       if (host.session !== session || host.aborted) return;
       const message = error instanceof Error ? error.message : String(error);
-      host.showError(`同步 MCP 服务器状态失败： ${message}`);
+      host.showError(t('handler.mcp_sync_failed', { message }));
       return;
     }
     if (host.session !== session || host.state.appState.sessionId !== session.id) return;
@@ -377,8 +378,8 @@ export class SessionEventHandler {
     if (!loopModeEnabled || loopPrompt === undefined) return;
 
     if (isLoopLimitExpired(loopLimit)) {
-      const reason = loopLimit?.kind === 'duration' ? '时间' : '次数';
-      this.disableLoop(`循环${reason}限制已到，循环模式已关闭。`);
+      const reason = loopLimit?.kind === 'duration' ? t('handler.loop_limit_time') : t('handler.loop_limit_count');
+      this.disableLoop(t('handler.loop_limit_reached', { reason, suffix: '' }));
       return;
     }
 
@@ -427,7 +428,7 @@ export class SessionEventHandler {
 
       if (result.passed) {
         this.host.setAppState({ loopVerifying: false });
-        this.disableLoop(`✓ 验证通过，循环结束（${currentIteration} 次迭代）。`);
+        this.disableLoop(t('handler.loop_verify_passed', { iteration: currentIteration }));
         return;
       }
       this.host.setAppState({ loopVerifying: false, loopLastVerifyPassed: false });
@@ -435,9 +436,9 @@ export class SessionEventHandler {
 
     if (!consumeLoopLimitIteration(this.host.state.appState.loopLimit)) {
       const limit = this.host.state.appState.loopLimit;
-      const reason = limit?.kind === 'duration' ? '时间' : '次数';
-      const suffix = verifier ? '，验证未通过' : '';
-      this.disableLoop(`循环${reason}限制已到${suffix}，循环模式已关闭。`);
+      const reason = limit?.kind === 'duration' ? t('handler.loop_limit_time') : t('handler.loop_limit_count');
+      const suffix = verifier ? t('handler.loop_verify_not_passed') : '';
+      this.disableLoop(t('handler.loop_limit_reached', { reason, suffix }));
       return;
     }
 
@@ -470,10 +471,10 @@ export class SessionEventHandler {
 
     const title =
       truncatedCount > 0
-        ? '模型达到 max_tokens 限制 — 工具调用在运行前被截断。'
-        : '模型达到 max_tokens 限制 — 未发出工具调用。';
+        ? t('handler.max_tokens_truncated')
+        : t('handler.max_tokens_no_tool');
     const detail = this.isAnthropicSessionActive()
-      ? '如果此限制对您的模型不合适，请在 scream-code 配置中为模型别名设置 `max_output_size`。'
+      ? t('handler.max_tokens_hint')
       : undefined;
     this.host.showNotice(title, detail);
   }
@@ -498,13 +499,13 @@ export class SessionEventHandler {
     const reason = event.reason;
     if (reason === 'error') return;
     if (reason === 'aborted' || reason === undefined || reason === '') {
-      this.host.showStatus('用户中断', this.host.state.theme.colors.error);
+      this.host.showStatus(t('handler.user_interrupted'), this.host.state.theme.colors.error);
       return;
     }
     this.host.showError(
       reason === 'max_steps'
-        ? '达到每轮步骤限制（max_steps）'
-        : `步骤中断 (${reason})`,
+        ? t('handler.max_steps_reached')
+        : t('handler.step_interrupted', { reason }),
     );
   }
 
@@ -669,7 +670,7 @@ export class SessionEventHandler {
   }
 
   private handleSessionWarning(event: WarningEvent): void {
-    this.host.showStatus(`警告： ${event.message}`, this.host.state.theme.colors.warning);
+    this.host.showStatus(t('handler.warning_prefix', { message: event.message }), this.host.state.theme.colors.warning);
   }
 
   private renderMcpServerStatus(server: McpServerStatusSnapshot): void {
@@ -687,19 +688,19 @@ export class SessionEventHandler {
         return;
       }
       case 'failed': {
-        const message = `MCP 服务器 "${server.name}" 失败${server.error !== undefined ? `: ${server.error}` : ''}`;
+        const message = t('handler.mcp_server_failed', { name: server.name, error: server.error !== undefined ? `: ${server.error}` : '' });
         this.finalizeMcpServerStatusRow(server.name, message, colors.error);
         return;
       }
       case 'needs-auth': {
-        const message = `MCP 服务器 "${server.name}" 需要 OAuth 认证，请运行 /mcp`;
+        const message = t('handler.mcp_server_needs_auth', { name: server.name });
         this.finalizeMcpServerStatusRow(server.name, message, colors.warning);
         return;
       }
       case 'disabled':
         this.finalizeMcpServerStatusRow(
           server.name,
-          `MCP 服务器 "${server.name}" 已禁用`,
+          t('handler.mcp_server_disabled', { name: server.name }),
           colors.textMuted,
         );
         return;
@@ -711,7 +712,7 @@ export class SessionEventHandler {
 
   private showMcpServerStatusSpinner(name: string): void {
     const { state } = this.host;
-    const label = `MCP 服务器 "${name}" 正在连接…`;
+    const label = t('handler.mcp_server_connecting', { name });
     const existing = this.mcpServerStatusSpinners.get(name);
     if (existing !== undefined) {
       existing.setLabel(label);
@@ -754,7 +755,7 @@ export class SessionEventHandler {
       kind: 'skill_activation',
       turnId: undefined,
       renderMode: 'plain',
-      content: `已激活技能： ${event.skillName}`,
+      content: t('handler.skill_activated', { skillName: event.skillName }),
       skillActivationId: event.activationId,
       skillName: event.skillName,
       skillArgs: event.skillArgs,
@@ -808,9 +809,8 @@ export class SessionEventHandler {
       });
       if (anomaly !== null) {
         this.host.showNotice(
-          'Storm Breaker（风暴守护者）',
-          `检测到异常压缩节奏：${anomaly.detail}` +
-            '可能存在工具调用循环或超长输出，建议查看最近几步的对话记录。',
+          t('handler.storm_breaker_title'),
+          t('handler.storm_breaker_detail', { detail: anomaly.detail }),
         );
       }
     }

@@ -7,6 +7,7 @@
 
 import type { Component, TUI } from '@earendil-works/pi-tui';
 import { Text } from '@earendil-works/pi-tui';
+import { t } from '@scream-code/config';
 import chalk from 'chalk';
 
 import {
@@ -122,7 +123,7 @@ export class ThinkingComponent implements Component {
         : '';
       return [
         '',
-        spinner + chalk.hex(this.color)('思考中...') + rateSuffix,
+        spinner + chalk.hex(this.color)(t('thinking.in_progress')) + rateSuffix,
         ...visibleLines.map((line) => MESSAGE_INDENT + line),
       ];
     }

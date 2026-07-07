@@ -124,13 +124,13 @@ describe('FooterComponent — context NaN resilience', () => {
   it('renders plan badge on line 1 in plan mode', () => {
     const footer = makeFooter(baseState({ planMode: 'plan' }));
     const [line1] = footer.render(120);
-    expect(strip(line1 ?? '')).toMatch(/\bplan\b/);
+    expect(strip(line1 ?? '')).toMatch(/计划/);
   });
 
   it('renders fusion badge on line 1 in fusion plan mode', () => {
     const footer = makeFooter(baseState({ planMode: 'fusionplan' }));
     const [line1] = footer.render(120);
-    expect(strip(line1 ?? '')).toMatch(/\bfusion\b/);
+    expect(strip(line1 ?? '')).toMatch(/融合计划/);
   });
 
   it('highlights the pull request badge separately from git status text', () => {

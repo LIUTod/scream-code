@@ -3,6 +3,7 @@ import type {
   ScreamHarness,
   Session,
 } from '@scream-code/scream-code-sdk';
+import { t } from '@scream-code/config';
 import { MemoryMemoStore, type MemoryMemoSummary } from '@scream-code/memory';
 import { getDataDir } from '#/utils/paths';
 import type { TUIState } from '../tui-state';
@@ -141,11 +142,11 @@ export class DialogManager {
                   permission: this.host.state.appState.permissionMode,
                 });
                 if (session) {
-                  await this.host.switchToSession(session, `已连接 CC 会话 (${session.id})。`);
+                  await this.host.switchToSession(session, t('dialog.cc_session_connected', { id: session.id }));
                   this.hideSessionPicker();
                 }
               } catch {
-                this.host.showError(`创建会话失败`);
+                this.host.showError(t('dialog.create_session_failed'));
               }
             }
           });
@@ -154,7 +155,7 @@ export class DialogManager {
         onDelete: (sessionId: string) => {
           const row = this.host.getSessions().find((s) => s.id === sessionId);
           if (row?.metadata?.['source'] === 'cc-connect') {
-            this.host.showStatus('CC 会话由 cc-connect 管理，请在聊天通道中操作。');
+            this.host.showStatus(t('dialog.cc_managed'));
             return;
           }
           void this.host.deleteSession(sessionId).then(async () => {
@@ -209,7 +210,7 @@ export class DialogManager {
         },
         onInject: (memo) => {
           this.host.sendNormalUserInput(formatMemoryMemoForInjection(memo));
-          this.host.showStatus(`已注入备忘录 #${memo.id}`);
+          this.host.showStatus(t('dialog.memo_injected', { id: memo.id }));
           this.host.state.activeDialog = null;
           this.restoreEditor();
         },
@@ -228,7 +229,7 @@ export class DialogManager {
   showApprovalPanel(payload: ApprovalPanelData): void {
     this.host.patchLivePane({ pendingApproval: { data: payload } });
     notifyTerminalOnce(this.host.state, `approval:${payload.id}`, {
-      title: 'Scream Code 需要审批',
+      title: t('dialog.approval_title'),
       body: payload.tool_name,
     });
     const panel = new ApprovalPanelComponent(
@@ -298,7 +299,7 @@ export class DialogManager {
   showQuestionDialog(payload: QuestionPanelData): void {
     this.host.patchLivePane({ pendingQuestion: { data: payload } });
     notifyTerminalOnce(this.host.state, `question:${payload.id}`, {
-      title: 'Scream Code 需要您的回答',
+      title: t('dialog.question_title'),
       body: payload.questions[0]?.question,
     });
     const dialog = new QuestionDialogComponent(

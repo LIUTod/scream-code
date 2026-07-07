@@ -1,5 +1,6 @@
 import type { Component } from '@earendil-works/pi-tui';
 import { Text } from '@earendil-works/pi-tui';
+import { t } from '@scream-code/config';
 import { CachedContainer } from '../../utils/cached-container';
 import chalk from 'chalk';
 
@@ -41,7 +42,7 @@ class CommittedMessageComponent implements Component {
         const text = entry.content.trim();
         if (text.length === 0) return [];
         const images = entry.imageAttachmentIds !== undefined && entry.imageAttachmentIds.length > 0
-          ? ` [${entry.imageAttachmentIds.length} 个附件]`
+          ? ` [${t('transcript.attachments', { count: entry.imageAttachmentIds.length })}]`
           : '';
         return new UserMessageComponent(`${text}${images}`, colors, undefined).render(width);
       }
@@ -51,7 +52,7 @@ class CommittedMessageComponent implements Component {
         const maxLen = 200;
         const snippet = text.length > maxLen ? `${text.slice(0, maxLen)}…` : text;
         return new Text(
-          `  ${chalk.hex(colors.roleAssistant)('助手：')}${chalk.hex(colors.text)(snippet)}`,
+          `  ${chalk.hex(colors.roleAssistant)(t('transcript.assistant'))}${chalk.hex(colors.text)(snippet)}`,
           0,
           0,
         ).render(width);
@@ -59,7 +60,7 @@ class CommittedMessageComponent implements Component {
       case 'thinking': {
         const text = entry.content.trim();
         if (text.length === 0) return [];
-        return new Text(`  ${chalk.hex(colors.textDim)('思考：')}${text}`, 0, 0).render(width);
+        return new Text(`  ${chalk.hex(colors.textDim)(t('transcript.thinking'))}${text}`, 0, 0).render(width);
       }
       case 'tool_call': {
         const data = entry.toolCallData;
@@ -70,7 +71,7 @@ class CommittedMessageComponent implements Component {
           ? `${trimmed.slice(0, 160)}${trimmed.length > 160 ? '…' : ''}`
           : '…';
         return new Text(
-          `  ${chalk.hex(colors.textDim)(`工具 ${name}：`)}${summary}`,
+          `  ${chalk.hex(colors.textDim)(t('transcript.tool_name', { name }))}${summary}`,
           0,
           0,
         ).render(width);
@@ -84,7 +85,7 @@ class CommittedMessageComponent implements Component {
       case 'skill_activation': {
         const text = entry.skillName ?? entry.content;
         return new Text(
-          `  ${chalk.hex(colors.textDim)(`已激活技能：${text}`)}`,
+          `  ${chalk.hex(colors.textDim)(t('transcript.activated_skill', { name: text }))}`,
           0,
           0,
         ).render(width);
@@ -121,7 +122,7 @@ export class CommittedTranscriptComponent extends CachedContainer {
     if (count === 0) {
       this.header.setText('');
     } else {
-      this.header.setText(`  ${chalk.hex(this.colors.textDim)(`↑ 还有 ${count} 条历史消息`)}`);
+      this.header.setText(`  ${chalk.hex(this.colors.textDim)(t('transcript.more_history', { count }))}`);
     }
     this.invalidate();
   }

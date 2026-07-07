@@ -18,6 +18,8 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { readdir, rm, stat } from 'node:fs/promises';
 
+import { t } from '@scream-code/config';
+
 import {
   ccConnectSupportsDaemon,
   ccConnectVersion,
@@ -37,12 +39,14 @@ interface ActionDef {
   tone?: 'danger';
 }
 
-const ACTIONS: ActionDef[] = [
-  { label: '启动', action: 'start', description: '启动 cc-connect 后台守护进程' },
-  { label: '关闭', action: 'stop', description: '停止 cc-connect 后台守护进程' },
-  { label: '重启', action: 'restart', description: '重启 cc-connect 后台守护进程' },
-  { label: '卸载', action: 'uninstall', description: '彻底卸载 cc-connect（守护进程 + 配置 + npm 包）', tone: 'danger' },
-];
+function getActions(): ActionDef[] {
+  return [
+    { label: t('cc.start'), action: 'start', description: t('cc.start_desc') },
+    { label: t('cc.stop'), action: 'stop', description: t('cc.stop_desc') },
+    { label: t('cc.restart'), action: 'restart', description: t('cc.restart_desc') },
+    { label: t('cc.uninstall'), action: 'uninstall', description: t('cc.uninstall_desc'), tone: 'danger' },
+  ];
+}
 
 // ── Platform-aware command builder ─────────────────────────────────────
 
@@ -225,7 +229,7 @@ async function findCcConnectResidualPaths(excludePath: string): Promise<string[]
 export async function handleCcCommand(host: SlashCommandHost): Promise<void> {
   const daemon = resolveDaemonMode();
 
-  const options: ChoiceOption[] = ACTIONS.map((a) => ({
+  const options: ChoiceOption[] = getActions().map((a) => ({
     label: a.label,
     value: a.action,
     description: a.description,
@@ -233,7 +237,7 @@ export async function handleCcCommand(host: SlashCommandHost): Promise<void> {
   }));
 
   const picker = new ChoicePickerComponent({
-    title: `cc-connect 守护进程管理 (${daemon.method})`,
+    title: `${t('cc.manage_title')} (${daemon.method})`,
     options,
     colors: host.state.theme.colors,
     onSelect: (value) => {
@@ -256,21 +260,21 @@ export async function handleCcCommand(host: SlashCommandHost): Promise<void> {
 // ── Lifecycle (start/stop/restart) ─────────────────────────────────────
 
 function runLifecycleAction(host: SlashCommandHost, daemon: DaemonMode, action: LifecycleAction): void {
-  const label = action === 'start' ? '启动' : action === 'stop' ? '关闭' : '重启';
+  const label = action === 'start' ? t('common.start') : action === 'stop' ? t('common.stop') : t('common.restart');
   const cmd = daemon.buildCmd(action);
 
-  host.showStatus(`正在${label} cc-connect...`);
+  host.showStatus(t('cc.operating', { label }));
 
   void (async () => {
     const { ok, output } = await runCmd(cmd);
     if (ok) {
       host.showStatus(
-        `✅ cc-connect 已${label}` + (output ? `（${output}）` : ''),
+        t('cc.started', { label }) + (output ? `（${output}）` : ''),
         host.state.theme.colors.success,
       );
       host.refreshCcStatus();
     } else {
-      host.showError(`❌ ${label}失败：${output || '未知错误'}`);
+      host.showError(t('cc.start_failed', { label, output: output || '未知错误' }));
     }
   })();
 }
@@ -285,22 +289,22 @@ function buildUninstallSummary(
   residualPaths: string[] = [],
 ): string {
   const lines = [
-    '将执行以下清理：',
-    `· 停止并卸载 ${daemon.method} 守护进程`,
-    '· 删除配置目录 ~/.cc-connect（含会话记录、配置、日志）',
+    t('cc.will_clean'),
+    t('cc.clean_daemon', { label: daemon.method }),
+    t('cc.clean_config', { detail: t('cc.clean_config.detail') }),
     '· 执行 npm uninstall -g cc-connect',
   ];
   if (install.version) {
-    lines.push(`· 当前版本：v${install.version}`);
+    lines.push(t('cc.current_version', { version: install.version }));
   }
   if (install.entry) {
-    lines.push(`· 安装路径：${install.entry}`);
+    lines.push(t('cc.install_path', { path: install.entry }));
   }
   if (daemon.method.includes('pm2')) {
-    lines.splice(2, 0, '· 删除 pm2 进程 + 启动项（startup.bat / schtasks）');
+    lines.splice(2, 0, t('cc.clean_pm2'));
   }
   if (residualPaths.length > 0) {
-    lines.push(`· 清理 ${residualPaths.length} 个残留文件（launchd/systemd/pm2 日志）`);
+    lines.push(t('cc.clean_residual', { count: residualPaths.length }));
   }
   return lines.join('\n');
 }
@@ -312,8 +316,8 @@ async function confirmAndUninstall(host: SlashCommandHost, daemon: DaemonMode): 
   const install = detectCcConnectInstall();
   if (!isCcConnectInstalled(install)) {
     host.showNotice(
-      '未识别 cc-connect 安装',
-      '未在默认 npm 全局路径下检测到 cc-connect 安装，已中止卸载。\n建议将此情况发送给 scream，由其指导手动清理。',
+      t('cc.not_detected'),
+      t('cc.not_detected_desc'),
     );
     return;
   }
@@ -329,13 +333,13 @@ async function confirmAndUninstall(host: SlashCommandHost, daemon: DaemonMode): 
   );
   if (!confirmed) return;
 
-  const spinner = host.showProgressSpinner('正在卸载 cc-connect…');
+  const spinner = host.showProgressSpinner(t('cc.uninstalling'));
   const steps: { label: string; ok: boolean; output: string }[] = [];
 
   // Step 1: stop daemon (best-effort, ignore errors — process may already be gone)
   const stopCmd = daemon.buildCmd('stop');
   const stopResult = await runCmd(stopCmd);
-  steps.push({ label: '停止守护进程', ok: stopResult.ok, output: stopResult.output });
+  steps.push({ label: t('cc.stop_daemon'), ok: stopResult.ok, output: stopResult.output });
 
   // Step 2: platform-specific scheduler/pm2 cleanup
   await cleanupSchedulerOrPm2(daemon, steps);
@@ -343,10 +347,10 @@ async function confirmAndUninstall(host: SlashCommandHost, daemon: DaemonMode): 
   // Step 3: delete ~/.cc-connect (config + sessions + logs — the critical one)
   try {
     await rm(configDir, { recursive: true, force: true });
-    steps.push({ label: `删除 ${configDir}`, ok: true, output: '' });
+    steps.push({ label: `${t('cc.delete_label')} ${configDir}`, ok: true, output: '' });
   } catch (error) {
     steps.push({
-      label: `删除 ${configDir}`,
+      label: `${t('cc.delete_label')} ${configDir}`,
       ok: false,
       output: error instanceof Error ? error.message : String(error),
     });
@@ -366,7 +370,7 @@ async function confirmAndUninstall(host: SlashCommandHost, daemon: DaemonMode): 
       }
     }
     steps.push({
-      label: `清理残留文件 (${residualPaths.length})`,
+      label: t('cc.clean_files', { count: `${residualPaths.length}` }),
       ok: failed.length === 0,
       output: [...deleted, ...failed].join('\n'),
     });
@@ -379,17 +383,17 @@ async function confirmAndUninstall(host: SlashCommandHost, daemon: DaemonMode): 
   const allOk = steps.every((s) => s.ok);
   spinner.stop({
     ok: allOk,
-    label: allOk ? 'cc-connect 已彻底卸载' : '部分步骤失败，详见下方提示',
+    label: allOk ? t('cc.uninstall_done') : t('cc.uninstall_partial'),
   });
 
   const summary = steps.map((s) => `${s.ok ? '✓' : '✗'} ${s.label}${s.output ? `：${s.output}` : ''}`).join('\n');
   if (allOk) {
     host.showNotice(
-      'cc-connect 已卸载',
-      `${summary}\n\n建议重启 Scream Code 以确保 cc-connect 状态完全清空。`,
+      t('cc.uninstalled'),
+      `${summary}\n\n${t('cc.restart_hint')}`,
     );
   } else {
-    host.showNotice('卸载部分失败', summary);
+    host.showNotice(t('cc.uninstall_partial_label'), summary);
   }
   host.refreshCcStatus();
 }
@@ -414,7 +418,7 @@ async function cleanupSchedulerOrPm2(
       // Skip anything weird to prevent command injection via shell interpolation.
       if (!/^[a-zA-Z0-9._-]+$/.test(name)) continue;
       const r = await runCmd(`pm2 delete "${name}" 2>nul`);
-      steps.push({ label: `pm2 delete ${name} (残留)`, ok: r.ok, output: r.output });
+      steps.push({ label: `pm2 delete ${name} (${t('cc.residual')})`, ok: r.ok, output: r.output });
     }
 
     // Persist the cleaned-up process list so pm2 resurrect won't bring back
@@ -426,11 +430,11 @@ async function cleanupSchedulerOrPm2(
     const startupBat = await runCmd(
       `if exist "%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\cc-connect-startup.bat" del /q "%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\cc-connect-startup.bat"`,
     );
-    steps.push({ label: '删除 cc-connect-startup.bat', ok: startupBat.ok, output: startupBat.output });
+    steps.push({ label: `${t('cc.delete_label')} cc-connect-startup.bat`, ok: startupBat.ok, output: startupBat.output });
 
     // Scheduled task that resurrects pm2 at logon (if it exists)
     const schtask = await runCmd('schtasks /query /tn "cc-connect-pm2" 2>nul && schtasks /delete /tn "cc-connect-pm2" /f || echo no-such-task');
-    steps.push({ label: '删除 schtasks cc-connect-pm2', ok: schtask.ok, output: schtask.output });
+    steps.push({ label: `${t('cc.delete_label')} schtasks cc-connect-pm2`, ok: schtask.ok, output: schtask.output });
     return;
   }
 
@@ -439,7 +443,7 @@ async function cleanupSchedulerOrPm2(
     const daemonUninstall = await runCmd('cc-connect daemon uninstall');
     steps.push({ label: 'cc-connect daemon uninstall', ok: daemonUninstall.ok, output: daemonUninstall.output });
     const schtask = await runCmd('schtasks /query /tn "cc-connect-daemon" 2>nul && schtasks /delete /tn "cc-connect-daemon" /f || echo no-such-task');
-    steps.push({ label: '删除 schtasks cc-connect-daemon', ok: schtask.ok, output: schtask.output });
+    steps.push({ label: `${t('cc.delete_label')} schtasks cc-connect-daemon`, ok: schtask.ok, output: schtask.output });
     return;
   }
 
@@ -451,11 +455,11 @@ async function cleanupSchedulerOrPm2(
 function confirmCcConnectUninstall(host: SlashCommandHost, summary: string): Promise<boolean> {
   return new Promise<boolean>((resolve) => {
     const picker = new ChoicePickerComponent({
-      title: '确认彻底卸载 cc-connect？',
-      hint: '此操作不可撤销，所有 cc-connect 数据将被清除',
+      title: t('cc.confirm_uninstall'),
+      hint: t('cc.uninstall_irreversible'),
       options: [
-        { value: 'no', label: '取消' },
-        { value: 'yes', label: '确认卸载', tone: 'danger', description: summary },
+        { value: 'no', label: t('common.cancel') },
+        { value: 'yes', label: t('cc.confirm_uninstall_btn'), tone: 'danger', description: summary },
       ],
       colors: host.state.theme.colors,
       onSelect: (value: string) => {

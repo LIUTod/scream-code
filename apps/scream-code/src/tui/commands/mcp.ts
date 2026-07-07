@@ -15,6 +15,7 @@ import {
   type Focusable,
 } from '@earendil-works/pi-tui';
 import chalk from 'chalk';
+import { t } from '@scream-code/config';
 
 import { getDataDir } from '#/utils/paths';
 import type { ColorPalette } from '#/tui/theme/colors';
@@ -38,7 +39,7 @@ const RECOMMENDED: McpRecommendation[] = [
   {
     name: 'peekaboo',
     displayName: 'Peekaboo',
-    description: 'macOS 桌面自动化：截图/点击/键入/滚动/窗口管理（Background delivery，无需聚焦）',
+    description: t('mcp.desktop_desc'),
     command: 'npx',
     args: ['-y', '@steipete/peekaboo', 'mcp'],
     macOnly: true,
@@ -46,7 +47,7 @@ const RECOMMENDED: McpRecommendation[] = [
   {
     name: 'chrome-devtools',
     displayName: 'Chrome DevTools',
-    description: '浏览器自动化：46 个工具，支持导航/点击/填表/截图/性能分析/内存调试/扩展管理',
+    description: t('mcp.browser_desc'),
     command: 'npx',
     args: ['-y', 'chrome-devtools-mcp@latest', '--no-usage-statistics'],
   },
@@ -55,11 +56,11 @@ const RECOMMENDED: McpRecommendation[] = [
 // ─── 状态映射 ─────────────────────────────────────────────────────────
 
 const STATUS_LABELS: Record<string, string> = {
-  pending: '⏳ 连接中',
-  connected: '🔌 已连接',
-  failed: '❌ 失败',
-  disabled: '⏸ 已停用',
-  'needs-auth': '🔐 需授权',
+  pending: t('mcp.connecting'),
+  connected: t('mcp.connected'),
+  failed: t('mcp.failed'),
+  disabled: t('mcp.disabled'),
+  'needs-auth': t('mcp.auth_required'),
 };
 
 // ─── Handler ──────────────────────────────────────────────────────────
@@ -69,7 +70,7 @@ export async function handleMcpCommand(
   _args: string,
 ): Promise<void> {
   if (!host.session) {
-    host.showError('请先创建或恢复一个会话。');
+    host.showError(t('mcp.no_session'));
     return;
   }
   await openMcpPanel(host);
@@ -99,12 +100,12 @@ async function openMcpPanel(host: SlashCommandHost): Promise<void> {
     const s = await loadServers(host);
     const r = buildRows(s);
     const cc = s.filter((x) => x.status === 'connected').length;
-    picker.refresh(r, `MCP 管理（${cc}/${s.length} 已连接）`);
+    picker.refresh(r, t('mcp.manage_title', { count: `${cc}/${s.length}` }));
     host.mountEditorReplacement(picker);
   };
 
   picker = new McpPickerComponent({
-    title: `MCP 管理（${connectedCount}/${servers.length} 已连接）`,
+    title: t('mcp.manage_title', { count: `${connectedCount}/${servers.length}` }),
     rows,
     colors: host.state.theme.colors,
     onEnter: (row) => {
@@ -139,7 +140,7 @@ async function loadServers(
     return await host.session.listMcpServers();
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
-    host.showError(`加载 MCP 服务器失败：${msg}`);
+    host.showError(t('mcp.load_failed', { msg }));
     return [];
   }
 }
@@ -160,7 +161,7 @@ function buildRows(
   );
 
   if (servers.length > 0) {
-    rows.push({ kind: 'installed', name: '', label: '── 已安装 ──', status: '__section' });
+    rows.push({ kind: 'installed', name: '', label: '── ' + t('mcp.installed') + ' ──', status: '__section' });
     for (const s of servers) {
       const statusLabel = STATUS_LABELS[s.status] ?? s.status;
       const toolInfo = s.status === 'connected' ? `${s.toolCount} tools` : '';
@@ -177,11 +178,11 @@ function buildRows(
     }
   } else {
     rows.push({
-      kind: 'installed', name: '', label: '暂无已安装的 MCP 服务器', status: '__empty',
+      kind: 'installed', name: '', label: t('mcp.no_installed'), status: '__empty',
     });
   }
 
-  rows.push({ kind: 'recommended', name: '', label: '── 推荐 MCP（Enter 安装）──', status: '__section' });
+  rows.push({ kind: 'recommended', name: '', label: '── ' + t('mcp.recommended') + ' ──', status: '__section' });
   for (const rec of RECOMMENDED) {
     const alreadyInstalled = installedNames.has(rec.name);
     const platformUnavailable = rec.macOnly && process.platform !== 'darwin';
@@ -190,10 +191,10 @@ function buildRows(
       name: rec.name,
       label: rec.displayName,
       description: platformUnavailable
-        ? `${rec.description}  [仅支持 macOS]`
+        ? `${rec.description}  [${t('mcp.macos_only')}]`
         : alreadyInstalled
-          ? `${rec.description}  [已安装]`
-          : `${rec.description}  [Enter 安装]`,
+          ? `${rec.description}  [${t('mcp.installed')}]`
+          : `${rec.description}  [${t('mcp.install_enter')}]`,
       alreadyInstalled: alreadyInstalled || platformUnavailable,
     });
   }
@@ -209,7 +210,7 @@ async function handleEnter(
 ): Promise<void> {
   if (row.kind === 'recommended') {
     if (row.alreadyInstalled) {
-      host.showStatus(`${row.label} 已安装，无需重复安装。`);
+      host.showStatus(t('mcp.already_installed', { name: row.label }));
       return;
     }
     const rec = RECOMMENDED.find((r) => r.name === row.name);
@@ -231,7 +232,7 @@ async function handleDelete(
   if (row.kind !== 'installed' || !row.status || row.status === '__section' || row.status === '__empty') {
     return;
   }
-  const confirmed = await confirmAction(host, `确认卸载 "${row.label}"？`);
+  const confirmed = await confirmAction(host, t('mcp.uninstall_confirm', { name: row.label }));
   if (!confirmed) return;
   await uninstallMcp(host, row.name);
 }
@@ -241,8 +242,8 @@ async function confirmAction(host: SlashCommandHost, title: string): Promise<boo
     const picker = new McpPickerComponent({
       title,
       rows: [
-        { kind: 'installed', name: 'no', label: '取消' },
-        { kind: 'installed', name: 'yes', label: '是，卸载' },
+        { kind: 'installed', name: 'no', label: t('common.cancel') },
+        { kind: 'installed', name: 'yes', label: t('mcp.uninstall_yes') },
       ],
       colors: host.state.theme.colors,
       onEnter: (r) => {
@@ -268,9 +269,9 @@ async function installMcp(host: SlashCommandHost, rec: McpRecommendation): Promi
   const session = host.session;
   if (!session) return;
 
-  const spinner = host.showProgressSpinner(`正在安装 ${rec.displayName}...`);
+  const spinner = host.showProgressSpinner(`${t('mcp.installing')} ${rec.displayName}...`);
 
-  spinner.setLabel(`正在配置 ${rec.displayName}...`);
+  spinner.setLabel(`${t('mcp.configuring')} ${rec.displayName}...`);
   try {
     await writeMcpConfig(host, rec.name, rec.command, rec.args);
     await session.addMcpServer(rec.name, {
@@ -278,14 +279,14 @@ async function installMcp(host: SlashCommandHost, rec: McpRecommendation): Promi
       command: rec.command,
       args: rec.args,
     });
-    spinner.stop({ ok: true, label: `${rec.displayName} 安装成功并已启动。` });
+    spinner.stop({ ok: true, label: t('mcp.install_success', { name: rec.displayName }) });
   } catch (error) {
-    spinner.stop({ ok: false, label: `${rec.displayName} 安装失败。` });
+    spinner.stop({ ok: false, label: t('mcp.install_fail', { name: rec.displayName }) });
     const msg = error instanceof Error ? error.message : String(error);
     const hint = msg.includes('Timed out') || msg.includes('ETIMEDOUT') || msg.includes('ENOTFOUND')
-      ? '网络超时，建议检查网络或开启加速后重试。'
+      ? t('mcp.network_timeout')
       : '';
-    host.showError(hint ? `安装失败：${msg}\n${hint}` : `安装失败：${msg}`);
+    host.showError(hint ? t('mcp.install_failed', { msg: `${msg}\n${hint}` }) : t('mcp.install_failed', { msg }));
   }
 }
 
@@ -294,10 +295,10 @@ async function disableMcp(host: SlashCommandHost, name: string): Promise<void> {
   if (!session) return;
   try {
     await session.stopMcpServer(name);
-    host.showStatus(`${name} 已停用。`);
+    host.showStatus(t('mcp.disabled_done', { name }));
   } catch (error) {
     host.showError(
-      `停用失败: ${error instanceof Error ? error.message : String(error)}`,
+      t('mcp.disable_failed', { msg: error instanceof Error ? error.message : String(error) }),
     );
   }
 }
@@ -307,10 +308,10 @@ async function enableMcp(host: SlashCommandHost, name: string): Promise<void> {
   if (!session) return;
   try {
     await session.reconnectMcpServer(name);
-    host.showStatus(`${name} 已检测到安装，正在启动...`);
+    host.showStatus(`${name} ${t('mcp.detected_starting')}`);
   } catch (error) {
     host.showError(
-      `启动失败: ${error instanceof Error ? error.message : String(error)}`,
+      t('mcp.start_failed', { msg: error instanceof Error ? error.message : String(error) }),
     );
   }
 }
@@ -321,10 +322,10 @@ async function uninstallMcp(host: SlashCommandHost, name: string): Promise<void>
   try {
     await session.removeMcpServer(name);
     await removeMcpConfig(host, name);
-    host.showStatus(`${name} 已卸载。`);
+    host.showStatus(t('mcp.uninstalled', { name }));
   } catch (error) {
     host.showError(
-      `卸载失败: ${error instanceof Error ? error.message : String(error)}`,
+      t('mcp.uninstall_failed', { msg: error instanceof Error ? error.message : String(error) }),
     );
   }
 }
@@ -491,7 +492,7 @@ class McpPickerComponent extends Container implements Focusable {
     lines.push(chalk.hex(colors.primary).bold(truncateToWidth(this.title, width, ELLIPSIS)));
 
     // Hint
-    const hint = 'Enter 安装/启停  d 卸载  Esc 返回';
+    const hint = t('mcp.footer_hint');
     lines.push(chalk.hex(colors.textMuted)(truncateToWidth(hint, width, ELLIPSIS)));
     lines.push(chalk.hex(colors.primary)('─'.repeat(width)));
 

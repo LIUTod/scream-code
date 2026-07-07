@@ -21,6 +21,7 @@ import chalk from 'chalk';
 
 import { STATUS_BULLET } from '#/tui/constant/symbols';
 import type { ColorPalette } from '#/tui/theme/colors';
+import { t } from '@scream-code/config';
 
 import type { ToolCallComponent, ToolCallSubagentSnapshot } from './tool-call';
 
@@ -150,23 +151,23 @@ export class AgentGroupComponent extends Container {
       const types = new Set(snapshots.map((s) => s.agentName).filter((n) => n !== undefined));
       const headerLabel =
         types.size === 1
-          ? `${String(total)} 个 ${[...types][0]} agent 已完成`
-          : `${String(total)} 个 agent 已完成`;
+          ? t('agentgroup.n_agent_done', { total: String(total), name: [...types][0]! })
+          : t('agentgroup.n_agents_done', { total: String(total) });
       const totalTools = snapshots.reduce((acc, s) => acc + s.toolCount, 0);
       const totalTokens = snapshots.reduce((acc, s) => acc + s.tokens, 0);
       const tail = formatHeaderTail(totalTools, totalTokens);
       return `${bullet}${chalk.hex(colors.primary).bold(headerLabel)}${tail}`;
     }
 
-    let headerText = `正在运行 ${String(total)} 个 agent`;
+    let headerText = t('agentgroup.running_n_agents', { total: String(total) });
     // Mixed status gets a breakdown so the current state is clear.
     if (finished > 0) {
       const running = total - finished;
       const parts: string[] = [];
-      if (done > 0) parts.push(`${String(done)} 已完成`);
-      if (failed > 0) parts.push(`${String(failed)} 失败`);
-      if (running > 0) parts.push(`${String(running)} 运行中`);
-      headerText = `正在运行 ${String(total)} 个 agent（${parts.join('、')}）`;
+      if (done > 0) parts.push(`${String(done)} ${t('agentgroup.done')}`);
+      if (failed > 0) parts.push(`${String(failed)} ${t('agentgroup.failed')}`);
+      if (running > 0) parts.push(`${String(running)} ${t('agentgroup.running')}`);
+      headerText = t('agentgroup.running_n_agents_mixed', { total: String(total), parts: parts.join('、') });
     }
     return `${bullet}${chalk.hex(colors.primary).bold(headerText)}`;
   }
@@ -178,7 +179,7 @@ export class AgentGroupComponent extends Container {
     // First-level branch line.
     const branch1 = isLast ? '└─' : '├─';
     const agentType = snap.agentName ?? 'agent';
-    const desc = snap.toolCallDescription || '（无描述）';
+    const desc = snap.toolCallDescription || t('agentgroup.no_desc');
     const tail = formatLineTail(snap, colors);
     const namePart = chalk.hex(colors.primary)(agentType);
     const descPart = dim(`· ${desc}`);
@@ -190,8 +191,8 @@ export class AgentGroupComponent extends Container {
     const branch2 = isLast ? '   ' : '│  ';
     if (snap.phase === 'failed') {
       // Show one error line; error messages can be long.
-      const errLine = (snap.errorText ?? '失败').split('\n').at(0) ?? '失败';
-      const errStr = chalk.hex(colors.error)(`错误：${errLine}`);
+      const errLine = (snap.errorText ?? t('agentgroup.failed')).split('\n').at(0) ?? t('agentgroup.failed');
+      const errStr = chalk.hex(colors.error)(`${t('agentgroup.error')}${errLine}`);
       this.bodyContainer.addChild(new Text(`  ${branch2}    ${errStr}`, 0, 0));
       return;
     }
@@ -200,7 +201,7 @@ export class AgentGroupComponent extends Container {
       return;
     }
     // Running or not-yet-started agents show latest activity, with a fallback.
-    const activity = snap.latestActivity ?? '初始化中…';
+    const activity = snap.latestActivity ?? t('agentgroup.initializing');
     this.bodyContainer.addChild(new Text(`  ${branch2}    ${dim(activity)}`, 0, 0));
   }
 
@@ -225,13 +226,13 @@ function formatStats(snap: ToolCallSubagentSnapshot): string {
 
 function formatLineTail(snap: ToolCallSubagentSnapshot, colors: ColorPalette): string {
   if (snap.phase === 'done') {
-    return chalk.dim(' · ') + chalk.hex(colors.success)('✓ 已完成');
+    return chalk.dim(' · ') + chalk.hex(colors.success)(t('agentgroup.check_done'));
   }
   if (snap.phase === 'failed') {
-    return chalk.dim(' · ') + chalk.hex(colors.error)('✗ 失败');
+    return chalk.dim(' · ') + chalk.hex(colors.error)(t('agentgroup.cross_failed'));
   }
   if (snap.phase === 'backgrounded') {
-    return chalk.dim(' · ◐ 后台运行');
+    return chalk.dim(` · ${t('agentgroup.bg_running')}`);
   }
   return '';
 }

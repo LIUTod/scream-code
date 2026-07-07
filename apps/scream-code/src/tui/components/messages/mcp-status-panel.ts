@@ -2,6 +2,7 @@ import type { McpServerInfo } from '@scream-code/scream-code-sdk';
 import chalk from 'chalk';
 
 import type { ColorPalette } from '#/tui/theme/colors';
+import { t } from '@scream-code/config';
 
 export interface McpStatusReportOptions {
   readonly colors: ColorPalette;
@@ -17,11 +18,11 @@ const STATUS_PRIORITY: Record<McpServerInfo['status'], number> = {
 };
 
 const STATUS_LABEL: Record<McpServerInfo['status'], string> = {
-  connected: '已连接',
-  pending: '等待中',
-  'needs-auth': '需认证',
-  failed: '失败',
-  disabled: '已禁用',
+  connected: t('mcppanel.connected'),
+  pending: t('mcppanel.pending'),
+  'needs-auth': t('mcppanel.needs_auth'),
+  failed: t('mcppanel.failed'),
+  disabled: t('mcppanel.disabled'),
 };
 
 const SUMMARY_ORDER: readonly McpServerInfo['status'][] = [
@@ -55,7 +56,7 @@ function formatToolCount(server: McpServerInfo): string {
 }
 
 function formatToolsAvailable(count: number): string {
-  return `${count} 个 tool 可用`;
+  return t('mcppanel.tools_available', { count });
 }
 
 function sortedServers(servers: readonly McpServerInfo[]): McpServerInfo[] {
@@ -90,27 +91,27 @@ export function buildMcpStatusReportLines(options: McpStatusReportOptions): stri
   const value = chalk.hex(colors.text);
   const error = chalk.hex(colors.error);
 
-  const lines: string[] = [accent('服务器')];
+  const lines: string[] = [accent(t('mcppanel.servers'))];
 
   if (servers.length === 0) {
-    lines.push(muted('  未配置 MCP 服务器。运行 /mcp 添加一个。'));
+    lines.push(muted(`  ${t('mcppanel.no_config')}`));
     return lines;
   }
 
-  const nameWidth = Math.max('名称'.length, ...servers.map((server) => server.name.length));
+  const nameWidth = Math.max(t('mcppanel.name').length, ...servers.map((server) => server.name.length));
   const statusWidth = Math.max(
-    '状态'.length,
+    t('mcppanel.status').length,
     ...servers.map((server) => STATUS_LABEL[server.status].length),
   );
   const transportWidth = Math.max(
-    '传输方式'.length,
+    t('mcppanel.transport').length,
     ...servers.map((server) => server.transport.length),
   );
 
   lines.push(
-    `  ${muted('名称'.padEnd(nameWidth))}  ${muted('状态'.padEnd(statusWidth))}  ${muted(
-      '传输方式'.padEnd(transportWidth),
-    )}  ${muted('工具')}`,
+    `  ${muted(t('mcppanel.name').padEnd(nameWidth))}  ${muted(t('mcppanel.status').padEnd(statusWidth))}  ${muted(
+      t('mcppanel.transport').padEnd(transportWidth),
+    )}  ${muted(t('mcppanel.tools'))}`,
   );
 
   for (const server of servers) {
@@ -129,10 +130,10 @@ export function buildMcpStatusReportLines(options: McpStatusReportOptions): stri
       server.error !== undefined &&
       server.error.trim().length > 0
     ) {
-      lines.push(`    ${muted('错误：')} ${error(server.error.trim())}`);
+      lines.push(`    ${muted(t('mcppanel.error'))} ${error(server.error.trim())}`);
     }
     if (server.status === 'needs-auth') {
-      lines.push(`    ${muted('操作：')} ${value(`运行 /mcp 管理服务器。`)}`);
+      lines.push(`    ${muted(t('mcppanel.action'))} ${value(t('mcppanel.run_mcp'))}`);
     }
   }
 

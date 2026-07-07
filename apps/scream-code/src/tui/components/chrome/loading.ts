@@ -1,4 +1,5 @@
 import process from "node:process";
+import { t } from '@scream-code/config';
 import type { ResolvedTheme } from "#/tui/theme/colors";
 
 const { stdout, stdin } = process;
@@ -100,7 +101,7 @@ function renderSheen(
   return `${fg(...color)}${char}${RESET}`
 }
 
-const LOADING_TEXT = 'Ai正在加载中...'
+function getLoadingText(): string { return t('loading.ai') }
 function buildShimmerPalette(n: number, breatheColor: [number, number, number]) {
   const size = Math.max(8, Math.min(20, Math.ceil(n * 1.5)))
   const palette: [number, number, number][] = []
@@ -116,7 +117,7 @@ function buildShimmerPalette(n: number, breatheColor: [number, number, number]) 
 }
 
 function renderShimmer(pulse: number, breatheColor: [number, number, number]) {
-  const chars = LOADING_TEXT.split('')
+  const chars = getLoadingText().split('')
   const n = chars.length
   const palette = buildShimmerPalette(n, breatheColor)
   let out = ''
@@ -174,7 +175,7 @@ export function runLoadingAnimation(
 
   if (!ansi) {
     for (const line of LOGO) stdout.write(`${fg(...LOGO_RGB)}${line}${RESET}\n`)
-    stdout.write(`${BOLD}${fg(...THEME_PRIMARY[theme])}正在唤醒核心...${RESET}\n`)
+    stdout.write(`${BOLD}${fg(...THEME_PRIMARY[theme])}${t('loading.waking')}${RESET}\n`)
     return Promise.resolve()
   }
 
@@ -214,12 +215,12 @@ export function runLoadingAnimation(
       if (phase === 'loading') {
         lines.push(centerPad(renderShimmer(shimmerPulse, breatheColor), cols))
       } else {
-        lines.push(centerPad(`${BOLD}${fg(...breatheColor)}按下 ENTER 唤醒核心${RESET}`, cols))
+        lines.push(centerPad(`${BOLD}${fg(...breatheColor)}${t('loading.press_enter')}${RESET}`, cols))
       }
 
       lines.push('')
       lines.push('')
-      lines.push(centerPad(`${fg(...DIM_RGB)}按住 Ctrl+C 即可退出 Scream Code${RESET}`, cols))
+      lines.push(centerPad(`${fg(...DIM_RGB)}${t('loading.quit_hint')}${RESET}`, cols))
 
       while (lines.length < rows) lines.push('')
 
@@ -233,7 +234,7 @@ export function runLoadingAnimation(
         isReversing = !isReversing
         sheenPos = 0
       }
-      shimmerPulse = (shimmerPulse + 1) % LOADING_TEXT.length
+      shimmerPulse = (shimmerPulse + 1) % getLoadingText().length
       breatheFrame = (breatheFrame + 1) % BREATHE_STEPS
       render()
     }
@@ -282,7 +283,7 @@ export function runLoadingAnimation(
         stdout.write('\u001B[?1049l')
       }
       for (const line of LOGO) stdout.write(`${fg(...LOGO_RGB)}${line}${RESET}\n`)
-      stdout.write(`${BOLD}${fg(...primary)}正在唤醒核心...${RESET}\n`)
+      stdout.write(`${BOLD}${fg(...primary)}${t('loading.waking')}${RESET}\n`)
       resolve()
       return
     }

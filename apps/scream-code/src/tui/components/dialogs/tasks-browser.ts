@@ -27,6 +27,7 @@ import chalk from 'chalk';
 
 import type { ColorPalette } from '@/tui/theme/colors';
 import { printableChar } from '@/tui/utils/printable-key';
+import { t } from '@scream-code/config';
 
 const ELLIPSIS = '…';
 
@@ -337,16 +338,16 @@ export class TasksBrowserApp extends Container implements Focusable {
     const counts = countByStatus(this.props.tasks);
     const countSegments: string[] = [];
     if (counts.running > 0)
-      countSegments.push(chalk.hex(colors.success)(` ${String(counts.running)} 运行中 `));
+      countSegments.push(chalk.hex(colors.success)(` ${String(counts.running)} ${t('taskbrowser.running')} `));
     if (counts.awaiting > 0)
-      countSegments.push(chalk.hex(colors.warning)(` ${String(counts.awaiting)} 等待中 `));
+      countSegments.push(chalk.hex(colors.warning)(` ${String(counts.awaiting)} ${t('taskbrowser.awaiting')} `));
     if (counts.completed > 0)
-      countSegments.push(chalk.hex(colors.textDim)(` ${String(counts.completed)} 已完成 `));
+      countSegments.push(chalk.hex(colors.textDim)(` ${String(counts.completed)} ${t('taskbrowser.completed')} `));
     if (counts.terminalFailed > 0)
       countSegments.push(
-        chalk.hex(colors.error)(` ${String(counts.terminalFailed)} 已中断 `),
+        chalk.hex(colors.error)(` ${String(counts.terminalFailed)} ${t('taskbrowser.interrupted')} `),
       );
-    const totals = chalk.hex(colors.textMuted)(` ${String(this.props.tasks.length)} 总计 `);
+    const totals = chalk.hex(colors.textMuted)(` ${String(this.props.tasks.length)} ${t('taskbrowser.total')} `);
 
     const composed = title + filterText + countSegments.join('') + totals;
     return fitExactly(composed, width);
@@ -360,18 +361,18 @@ export class TasksBrowserApp extends Container implements Focusable {
     if (this.pendingStopTaskId !== undefined) {
       const warn = (text: string): string => chalk.hex(colors.warning).bold(text);
       const line =
-        ` ${warn('停止')} ${chalk.hex(colors.text)(this.pendingStopTaskId)}? ` +
-        `${key('Y')} ${dim('确认')}  ${key('N')} ${dim('取消')} `;
+        ` ${warn(t('taskbrowser.stop'))} ${chalk.hex(colors.text)(this.pendingStopTaskId)}? ` +
+        `${key('Y')} ${dim(t('taskbrowser.confirm'))}  ${key('N')} ${dim(t('taskbrowser.cancel'))} `;
       return fitExactly(line, width);
     }
 
     const parts = [
-      ` ${key('↑↓')} ${dim('选择')}`,
-      `${key('Enter/O')} ${dim('输出')}`,
-      `${key('S')} ${dim('停止')}`,
-      `${key('R')} ${dim('刷新')}`,
-      `${key('Tab')} ${dim('筛选')}`,
-      `${key('Q/Esc')} ${dim('退出')} `,
+      ` ${key('↑↓')} ${dim(t('taskbrowser.select'))}`,
+      `${key('Enter/O')} ${dim(t('taskbrowser.output'))}`,
+      `${key('S')} ${dim(t('taskbrowser.stop_action'))}`,
+      `${key('R')} ${dim(t('taskbrowser.refresh'))}`,
+      `${key('Tab')} ${dim(t('taskbrowser.filter'))}`,
+      `${key('Q/Esc')} ${dim(t('taskbrowser.exit'))} `,
     ];
     const left = parts.join('  ');
     const flash = this.props.flashMessage;
@@ -440,8 +441,8 @@ export class TasksBrowserApp extends Container implements Focusable {
     if (this.sortedVisible.length === 0) {
       const empty =
         this.props.filter === 'active'
-          ? '无活跃任务。Tab = 显示全部。'
-          : '本会话无后台任务。';
+          ? t('taskbrowser.no_active')
+          : t('taskbrowser.no_tasks');
       const lines: string[] = [chalk.hex(this.props.colors.textMuted)(empty)];
       while (lines.length < innerHeight) lines.push('');
       return this.renderFrame(title, lines, width, height);
@@ -522,48 +523,48 @@ export class TasksBrowserApp extends Container implements Focusable {
     const innerHeight = Math.max(0, height - 2);
     const task = this.sortedVisible[this.selectedIndex];
     if (task === undefined) {
-      const empty = chalk.hex(colors.textMuted)('从列表中选择一个任务。');
+      const empty = chalk.hex(colors.textMuted)(t('taskbrowser.select_task'));
       const lines: string[] = [empty];
       while (lines.length < innerHeight) lines.push('');
-      return this.renderFrame('详情', lines, width, height);
+      return this.renderFrame(t('taskbrowser.detail'), lines, width, height);
     }
 
     const label = (text: string): string => chalk.hex(colors.textMuted)(text.padEnd(14));
     const value = (text: string): string => chalk.hex(colors.text)(text);
 
     const lines: string[] = [
-      `${label('任务 ID：')}${value(task.taskId)}`,
-      `${label('状态：')}${chalk.hex(statusColor(colors, task.status))(STATUS_LABEL[task.status])}`,
-      `${label('描述：')}${value(singleLine(task.description) || '—')}`,
+      `${label(t('taskbrowser.task_id'))}${value(task.taskId)}`,
+      `${label(t('taskbrowser.status'))}${chalk.hex(statusColor(colors, task.status))(STATUS_LABEL[task.status])}`,
+      `${label(t('taskbrowser.description'))}${value(singleLine(task.description) || '—')}`,
     ];
     if (task.command && task.command !== task.description) {
-      lines.push(`${label('命令：')}${value(singleLine(task.command))}`);
+      lines.push(`${label(t('taskbrowser.command'))}${value(singleLine(task.command))}`);
     }
     const timing =
       task.status === 'running' || task.status === 'awaiting_approval'
-        ? `运行中 ${formatRelativeTime(task.startedAt)}`
+        ? `${t('taskbrowser.running_time')} ${formatRelativeTime(task.startedAt)}`
         : task.endedAt !== null && task.endedAt !== undefined
-          ? `已完成 ${formatRelativeTime(task.endedAt)}`
+          ? `${t('taskbrowser.completed_time')} ${formatRelativeTime(task.endedAt)}`
           : '';
-    if (timing.length > 0) lines.push(`${label('时间：')}${chalk.hex(colors.textMuted)(timing)}`);
-    if (task.pid > 0) lines.push(`${label('进程 ID：')}${chalk.hex(colors.textMuted)(String(task.pid))}`);
+    if (timing.length > 0) lines.push(`${label(t('taskbrowser.time'))}${chalk.hex(colors.textMuted)(timing)}`);
+    if (task.pid > 0) lines.push(`${label(t('taskbrowser.process_id'))}${chalk.hex(colors.textMuted)(String(task.pid))}`);
     if (task.exitCode !== null && task.exitCode !== undefined) {
-      lines.push(`${label('退出码：')}${chalk.hex(colors.textMuted)(String(task.exitCode))}`);
+      lines.push(`${label(t('taskbrowser.exit_code'))}${chalk.hex(colors.textMuted)(String(task.exitCode))}`);
     }
     if (task.stopReason !== undefined && task.stopReason.length > 0) {
-      lines.push(`${label('停止原因：')}${chalk.hex(colors.textMuted)(task.stopReason)}`);
+      lines.push(`${label(t('taskbrowser.stop_reason'))}${chalk.hex(colors.textMuted)(task.stopReason)}`);
     }
     if (task.timedOut === true) {
-      lines.push(`${label('已超时：')}${chalk.hex(colors.warning)('是')}`);
+      lines.push(`${label(t('taskbrowser.timed_out'))}${chalk.hex(colors.warning)(t('taskbrowser.yes'))}`);
     }
     if (task.approvalReason !== undefined && task.approvalReason.length > 0) {
       lines.push(
-        `${label('等待中：')}${chalk.hex(colors.warning)(singleLine(task.approvalReason))}`,
+        `${label(t('taskbrowser.awaiting_label'))}${chalk.hex(colors.warning)(singleLine(task.approvalReason))}`,
       );
     }
 
     while (lines.length < innerHeight) lines.push('');
-    return this.renderFrame('详情', lines, width, height);
+    return this.renderFrame(t('taskbrowser.detail'), lines, width, height);
   }
 
   private renderPreviewFrame(width: number, height: number): string[] {

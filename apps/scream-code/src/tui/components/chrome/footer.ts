@@ -9,6 +9,7 @@
 import type { Component, TUI } from '@earendil-works/pi-tui';
 import { truncateToWidth, visibleWidth } from '@earendil-works/pi-tui';
 import chalk from 'chalk';
+import { t } from '@scream-code/config';
 
 import type { ColorPalette } from '#/tui/theme/colors';
 import type { AppState } from '#/tui/types';
@@ -48,22 +49,24 @@ export interface ToolbarTip {
   readonly priority?: number;
 }
 
-export const TOOLBAR_TIPS: readonly ToolbarTip[] = [
-  { text: 'shift+tab: 计划模式' },
-  { text: '/model: 切换模型' },
-  { text: 'ctrl+s: 中途干预', priority: 2 },
-  { text: '/compact: 压缩上下文', priority: 2 },
-  { text: 'ctrl+o: 展开工具输出' },
-  { text: '/tasks: 后台任务' },
-  { text: 'shift+enter: 换行' },
-  { text: '/init: 生成 AGENTS.md', priority: 2 },
-  { text: '@: 提及文件' },
-  { text: 'ctrl+c: 取消' },
-  { text: '/skill: 打开 Skill 中心', priority: 2 },
-  { text: '/help: 显示命令' },
-  { text: '/config: 选择并配置你常用的模型商', solo: true, priority: 3 },
-  { text: '让 Scream 安排任务，例如 "2个小时后提醒我去拿快递"', solo: true, priority: 3 },
-];
+export function getToolbarTips(): readonly ToolbarTip[] {
+  return [
+    { text: t('footer.shift_tab') },
+    { text: t('footer.model') },
+    { text: t('footer.ctrl_s'), priority: 2 },
+    { text: t('footer.compact'), priority: 2 },
+    { text: t('footer.ctrl_o') },
+    { text: t('footer.tasks') },
+    { text: t('footer.shift_enter') },
+    { text: t('footer.init'), priority: 2 },
+    { text: t('footer.at') },
+    { text: t('footer.ctrl_c') },
+    { text: t('footer.skill'), priority: 2 },
+    { text: t('footer.help') },
+    { text: t('footer.config'), solo: true, priority: 3 },
+    { text: t('footer.reminder'), solo: true, priority: 3 },
+  ];
+}
 
 /**
  * Expand tips into a rotation sequence using smooth weighted round-robin
@@ -92,7 +95,14 @@ export function buildWeightedTips(tips: readonly ToolbarTip[]): readonly Toolbar
   return seq;
 }
 
-export const ROTATION: readonly ToolbarTip[] = buildWeightedTips(TOOLBAR_TIPS);
+let _rotation: readonly ToolbarTip[] | null = null;
+function getRotation(): readonly ToolbarTip[] {
+  if (_rotation === null) _rotation = buildWeightedTips(getToolbarTips());
+  return _rotation;
+}
+
+/** Invalidate cached rotation (call after locale change). */
+export function invalidateRotation(): void { _rotation = null; }
 
 export function currentTipIndex(): number {
   return Math.floor(Date.now() / TIP_ROTATE_INTERVAL_MS);
@@ -107,12 +117,13 @@ export function currentTipIndex(): number {
  * tips on their own and avoiding "X | X".
  */
 export function tipsForIndex(index: number): { primary: string; pair: string | null } {
-  const n = ROTATION.length;
+  const rotation = getRotation();
+  const n = rotation.length;
   if (n === 0) return { primary: '', pair: null };
   const offset = ((index % n) + n) % n;
-  const current = ROTATION[offset]!;
+  const current = rotation[offset]!;
   if (n === 1 || current.solo) return { primary: current.text, pair: null };
-  const next = ROTATION[(offset + 1) % n]!;
+  const next = rotation[(offset + 1) % n]!;
   if (next.solo || next.text === current.text) return { primary: current.text, pair: null };
   return { primary: current.text, pair: current.text + TIP_SEPARATOR + next.text };
 }
@@ -141,9 +152,9 @@ function safeUsage(usage: number): number {
 function formatContextStatus(usage: number, tokens?: number, maxTokens?: number): string {
   const pct = `${(safeUsage(usage) * 100).toFixed(1)}%`;
   if (maxTokens && maxTokens > 0 && tokens !== undefined) {
-    return `上下文：${pct} (${formatTokenCount(tokens)}/${formatTokenCount(maxTokens)})`;
+    return t('footer.context', { pct, tokens: formatTokenCount(tokens), maxTokens: formatTokenCount(maxTokens) });
   }
-  return `上下文：${pct}`;
+  return t('footer.context_short', { pct });
 }
 
 // Context-usage threshold coloring. Pure percent — works uniformly across
@@ -191,18 +202,18 @@ function buildStatusLine(
   streamingStartTime: number,
 ): string {
   if (streamingPhase === 'idle') {
-    return '○ 空闲';
+    return t('status.idle');
   }
 
   let label: string;
   if (streamingPhase === 'tool') {
-    label = '执行中';
+    label = t('status.tool');
   } else if (streamingPhase === 'waiting') {
-    label = '等待响应';
+    label = t('status.waiting');
   } else if (streamingPhase === 'thinking') {
-    label = '思考中';
+    label = t('status.thinking');
   } else if (streamingPhase === 'composing') {
-    label = '输出中';
+    label = t('status.composing');
   } else {
     label = '';
   }
@@ -333,32 +344,32 @@ export class FooterComponent implements Component {
 
     // ── Line 1: mode badges + model + [N task(s) running] + [N agent(s) running] + cwd + git + hints ──
     const left: string[] = [];
-    if (state.permissionMode === 'auto') left.push(chalk.hex(colors.warning).bold('auto'));
-    if (state.permissionMode === 'yolo') left.push(chalk.hex(colors.warning).bold('YES'));
+    if (state.permissionMode === 'auto') left.push(chalk.hex(colors.warning).bold(t('badge.auto')));
+    if (state.permissionMode === 'yolo') left.push(chalk.hex(colors.warning).bold(t('badge.yes')));
     if (state.planMode !== 'off') {
       const isFusion = state.planMode === 'fusionplan';
-      left.push(chalk.hex(isFusion ? colors.fusionPlanMode : colors.planMode).bold(isFusion ? 'fusion' : 'plan'));
+      left.push(chalk.hex(isFusion ? colors.fusionPlanMode : colors.planMode).bold(isFusion ? t('badge.fusion') : t('badge.plan')));
     }
-    if (state.wolfpackMode) left.push(chalk.hex(colors.primary).bold('wolfpack'));
+    if (state.wolfpackMode) left.push(chalk.hex(colors.primary).bold(t('badge.wolfpack')));
     if (state.loopModeEnabled) {
       const iter = state.loopIteration;
       const limit = state.loopLimit;
-      let badge = 'loop';
+      let badge = t('badge.loop');
       if (limit?.kind === 'iterations') {
-        badge = `loop ${iter}/${limit.initial}`;
+        badge = `${t('badge.loop')} ${iter}/${limit.initial}`;
       } else if (limit?.kind === 'duration') {
         const remainMs = Math.max(0, limit.deadlineMs - Date.now());
         badge = remainMs >= 60_000
-          ? `loop ${Math.ceil(remainMs / 60_000)}m`
-          : `loop ${Math.max(1, Math.ceil(remainMs / 1_000))}s`;
+          ? `${t('badge.loop')} ${Math.ceil(remainMs / 60_000)}m`
+          : `${t('badge.loop')} ${Math.max(1, Math.ceil(remainMs / 1_000))}s`;
       }
       const substate = resolveLoopSubstate(state);
-      if (substate === 'verifying') badge += ' · 验证中';
+      if (substate === 'verifying') badge += ' · ' + t('status.verifying');
       if (state.loopLastVerifyPassed === false) badge += ' · ✗';
       left.push(chalk.hex(colors.primary).bold(badge));
     }
     if (state.goalActive) {
-      left.push(chalk.hex(colors.primary).bold('goal'));
+      left.push(chalk.hex(colors.primary).bold(t('badge.goal')));
     }
 
     const model = shortenModel(modelDisplayName(state));
@@ -374,15 +385,13 @@ export class FooterComponent implements Component {
     // (shell processes) and `agent-*` tasks (background subagents) get
     // separate badges so the user can distinguish them at a glance.
     if (this.backgroundBashTaskCount > 0) {
-      const noun = this.backgroundBashTaskCount === 1 ? '个任务' : '个任务';
       left.push(
-        chalk.hex(colors.primary)(`[${String(this.backgroundBashTaskCount)}${noun} 运行中]`),
+        chalk.hex(colors.primary)(`[${t('footer.tasks_running', { count: String(this.backgroundBashTaskCount) })}]`),
       );
     }
     if (this.backgroundAgentCount > 0) {
-      const noun = this.backgroundAgentCount === 1 ? '个代理' : '个代理';
       left.push(
-        chalk.hex(colors.primary)(`[${String(this.backgroundAgentCount)}${noun} 运行中]`),
+        chalk.hex(colors.primary)(`[${t('footer.agents_running', { count: String(this.backgroundAgentCount) })}]`),
       );
     }
 

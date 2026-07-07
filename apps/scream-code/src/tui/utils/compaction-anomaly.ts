@@ -5,6 +5,8 @@
  * test/tui/compaction-anomaly.test.ts.
  */
 
+import { t } from '@scream-code/config';
+
 export interface CompactionAnomalyInput {
   /** Wall-clock time (ms) of the most recent compaction completion, or undefined. */
   readonly lastFinishedAt: number | undefined;
@@ -48,7 +50,7 @@ export function detectCompactionAnomaly(
     if (elapsed >= 0 && elapsed < RAPID_REFIRE_MS) {
       return {
         kind: 'rapid_refire',
-        detail: `上次压缩结束仅 ${(elapsed / 1000).toFixed(1)} 秒后再次触发自动压缩。`,
+        detail: t('anomaly.rapid_refire', { elapsed: (elapsed / 1000).toFixed(1) }),
       };
     }
   }
@@ -60,7 +62,7 @@ export function detectCompactionAnomaly(
       const pct = (ratio * 100).toFixed(0);
       return {
         kind: 'first_step_blowup',
-        detail: `会话首次自动压缩时上下文已达 ${pct}%，可能存在巨型文件读取或初始 prompt 过大。`,
+        detail: t('anomaly.first_step_blowup', { pct }),
       };
     }
   }

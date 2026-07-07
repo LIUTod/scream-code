@@ -17,6 +17,7 @@ import {
   wrapTextWithAnsi,
 } from '@earendil-works/pi-tui';
 import chalk from 'chalk';
+import { t } from '@scream-code/config';
 
 import type {
   PendingQuestion,
@@ -27,12 +28,12 @@ import type { ColorPalette } from '#/tui/theme/colors';
 
 const NUMBER_KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9'];
 const MAX_BODY_LINES = 12;
-const DEFAULT_OTHER_LABEL = '其他';
-const NOT_ANSWERED_LABEL = '未回答';
-const REVIEW_TITLE = '提交前检查您的答案';
-const SUBMIT_PROMPT = '准备好提交答案了吗？';
-const UNANSWERED_WARNING = '部分问题尚未回答。';
-const SUBMIT_ACTIONS = ['提交', '取消'] as const;
+const DEFAULT_OTHER_LABEL_KEY = 'question.other';
+const NOT_ANSWERED_LABEL_KEY = 'question.unanswered';
+const REVIEW_TITLE_KEY = 'question.check_before_submit';
+const SUBMIT_PROMPT_KEY = 'question.ready_to_submit';
+const UNANSWERED_WARNING_KEY = 'question.partial_unanswered';
+const SUBMIT_ACTIONS_KEYS = ['question.submit', 'question.cancel'] as const;
 
 interface DisplayOption {
   readonly label: string;
@@ -237,12 +238,12 @@ export class QuestionDialogComponent extends Container implements Focusable {
   private handleSubmitInput(data: string): void {
     if (matchesKey(data, Key.up)) {
       this.submitActionIdx =
-        (this.submitActionIdx - 1 + SUBMIT_ACTIONS.length) % SUBMIT_ACTIONS.length;
+        (this.submitActionIdx - 1 + SUBMIT_ACTIONS_KEYS.length) % SUBMIT_ACTIONS_KEYS.length;
       this.reviewMessage = undefined;
       return;
     }
     if (matchesKey(data, Key.down)) {
-      this.submitActionIdx = (this.submitActionIdx + 1) % SUBMIT_ACTIONS.length;
+      this.submitActionIdx = (this.submitActionIdx + 1) % SUBMIT_ACTIONS_KEYS.length;
       this.reviewMessage = undefined;
       return;
     }
@@ -459,13 +460,13 @@ export class QuestionDialogComponent extends Container implements Focusable {
     const success = chalk.hex(colors.success);
 
     const renderWidth = Math.max(1, width);
-    const lines: string[] = [accent('─'.repeat(renderWidth)), accent.bold(' 问题'), ''];
+    const lines: string[] = [accent('─'.repeat(renderWidth)), accent.bold(t('question.label')), ''];
     this.pushTabs(lines);
     lines.push('');
 
     appendWrapped(lines, ' ? ', '   ', question.question, renderWidth, accent);
     if (this.isEditingOther()) {
-      lines.push(dim('   输入答案，然后按 Enter 保存。'));
+      lines.push(dim(t('question.input_hint')));
     }
 
     if (question.body !== undefined && question.body.trim().length > 0) {
@@ -476,7 +477,7 @@ export class QuestionDialogComponent extends Container implements Focusable {
         appendWrapped(lines, '   ', '   ', bodyLine, renderWidth, dim);
       }
       if (bodyLines.length > visibleBodyLines.length) {
-        lines.push(dim(`   ... ${String(bodyLines.length - visibleBodyLines.length)} 更多行`));
+        lines.push(dim(`   ... ${String(bodyLines.length - visibleBodyLines.length)} ${t('question.more_lines')}`));
       }
     }
 
@@ -538,7 +539,7 @@ export class QuestionDialogComponent extends Container implements Focusable {
     if (visibleEnd < options.length || visibleStart > 0) {
       lines.push(
         dim(
-          `   显示 ${String(visibleStart + 1)}-${String(visibleEnd)} / ${String(options.length)}`,
+          `   ${t('question.showing_range', { start: String(visibleStart + 1), end: String(visibleEnd), total: String(options.length) })}`,
         ),
       );
     }
@@ -558,12 +559,12 @@ export class QuestionDialogComponent extends Container implements Focusable {
     const warning = chalk.hex(colors.warning);
 
     const renderWidth = Math.max(1, width);
-    const lines: string[] = [accent('─'.repeat(renderWidth)), accent.bold(' 问题'), ''];
+    const lines: string[] = [accent('─'.repeat(renderWidth)), accent.bold(t('question.label')), ''];
     this.pushTabs(lines);
     lines.push('');
-    lines.push(text.bold(` ${REVIEW_TITLE}`));
+    lines.push(text.bold(` ${t(REVIEW_TITLE_KEY)}`));
     const reviewWarning =
-      this.reviewMessage ?? (this.hasUnansweredQuestions() ? UNANSWERED_WARNING : undefined);
+      this.reviewMessage ?? (this.hasUnansweredQuestions() ? t(UNANSWERED_WARNING_KEY) : undefined);
     if (reviewWarning !== undefined) {
       lines.push(warning(`  ${reviewWarning}`));
     }
@@ -589,16 +590,16 @@ export class QuestionDialogComponent extends Container implements Focusable {
           renderWidth,
         );
       } else {
-        lines.push(`  ${dim('→')}  ${dim(NOT_ANSWERED_LABEL)}`);
+        lines.push(`  ${dim('→')}  ${dim(t(NOT_ANSWERED_LABEL_KEY))}`);
       }
     }
 
     lines.push('');
-    lines.push(text(` ${SUBMIT_PROMPT}`));
+    lines.push(text(` ${t(SUBMIT_PROMPT_KEY)}`));
     lines.push('');
 
-    for (let i = 0; i < SUBMIT_ACTIONS.length; i++) {
-      const label = SUBMIT_ACTIONS[i];
+    for (let i = 0; i < SUBMIT_ACTIONS_KEYS.length; i++) {
+      const label = t(SUBMIT_ACTIONS_KEYS[i]!);
       if (label === undefined) continue;
       const num = i + 1;
       if (i === this.submitActionIdx) {
@@ -632,7 +633,7 @@ export class QuestionDialogComponent extends Container implements Focusable {
       else tabs.push(dim(`(○) ${label}`));
     }
 
-    const submitLabel = '提交';
+    const submitLabel = t('question.submit');
     if (this.isSubmitTab()) tabs.push(active(` ${submitLabel} `));
     else tabs.push(dim(` ${submitLabel} `));
 
@@ -642,10 +643,10 @@ export class QuestionDialogComponent extends Container implements Focusable {
   private buildQuestionHint(dim: (s: string) => string, questionIdx: number): string {
     if (this.isEditingOther()) {
       const parts: string[] = [
-        '输入答案',
-        '↵ 保存',
-        ...(this.totalTabs() > 1 ? ['tab 切换'] : []),
-        'esc 取消',
+        t('question.input_placeholder'),
+        t('question.save_hint'),
+        ...(this.totalTabs() > 1 ? [t('question.tab_switch')] : []),
+        t('question.esc_cancel'),
       ];
       return dim(`  ${parts.join('  ')}`);
     }
@@ -653,21 +654,21 @@ export class QuestionDialogComponent extends Container implements Focusable {
     const optionCount = Math.min(this.displayOptions(questionIdx).length, NUMBER_KEYS.length);
     const numberHint = optionCount <= 1 ? '1' : `1-${String(optionCount)}`;
     const question = this.request.data.questions[questionIdx];
-    if (question === undefined) return dim('  esc 取消');
+    if (question === undefined) return dim(`  ${t('question.esc_cancel')}`);
 
     const parts: string[] = [
-      '▲/▼ 选择',
-      `${numberHint} / ↵ ${question.multi_select ? '切换' : '选择'}`,
+      t('question.arrow_select'),
+      `${numberHint} / ↵ ${question.multi_select ? t('question.toggle') : t('question.choose')}`,
     ];
-    if (this.totalTabs() > 1) parts.push('←/→/tab 切换');
-    parts.push('esc 取消');
+    if (this.totalTabs() > 1) parts.push(t('question.tab_arrow_switch'));
+    parts.push(t('question.esc_cancel'));
     return dim(`  ${parts.join('  ')}`);
   }
 
   private buildSubmitHint(dim: (s: string) => string): string {
-    const parts: string[] = ['▲/▼ 选择', '1/2 选择', '↵ 确认'];
-    if (this.totalTabs() > 1) parts.push('←/→/tab 切换');
-    parts.push('esc 取消');
+    const parts: string[] = [t('question.arrow_select'), '1/2', t('question.enter_confirm')];
+    if (this.totalTabs() > 1) parts.push(t('question.tab_arrow_switch'));
+    parts.push(t('question.esc_cancel'));
     return dim(`  ${parts.join('  ')}`);
   }
 
@@ -717,7 +718,7 @@ export class QuestionDialogComponent extends Container implements Focusable {
         kind: 'preset' as const,
       })),
       {
-        label: question.other_label?.length ? question.other_label : DEFAULT_OTHER_LABEL,
+        label: question.other_label?.length ? question.other_label : t(DEFAULT_OTHER_LABEL_KEY),
         description: question.other_description?.length ? question.other_description : undefined,
         kind: 'other' as const,
       },

@@ -12,6 +12,8 @@ import {
 } from '@earendil-works/pi-tui';
 import chalk from 'chalk';
 
+import { t } from '@scream-code/config';
+
 import { formatSessionLabel } from '#/migration/index';
 import type { ColorPalette } from '#/tui/theme/colors';
 import { printableChar } from '#/tui/utils/printable-key';
@@ -156,29 +158,29 @@ export class SessionPickerComponent extends Container implements Focusable {
     const lines: string[] = [chalk.hex(colors.primary)('─'.repeat(width))];
 
     if (this.loading) {
-      lines.push(chalk.hex(colors.primary).bold(truncateToWidth('会话', width, ELLIPSIS)));
+      lines.push(chalk.hex(colors.primary).bold(truncateToWidth(t('session.title'), width, ELLIPSIS)));
       lines.push(
-        chalk.hex(colors.textMuted)(truncateToWidth('正在加载会话...', width, ELLIPSIS)),
+        chalk.hex(colors.textMuted)(truncateToWidth(t('session.loading'), width, ELLIPSIS)),
       );
       lines.push(chalk.hex(colors.primary)('─'.repeat(width)));
       return lines;
     }
 
     if (this.sessions.length === 0) {
-      lines.push(chalk.hex(colors.primary).bold(truncateToWidth('会话', width, ELLIPSIS)));
+      lines.push(chalk.hex(colors.primary).bold(truncateToWidth(t('session.title'), width, ELLIPSIS)));
       lines.push(
         chalk.hex(colors.textMuted)(
-          truncateToWidth('未找到会话。按 Escape 关闭。', width, ELLIPSIS),
+          truncateToWidth(t('session_picker.empty'), width, ELLIPSIS),
         ),
       );
       lines.push(chalk.hex(colors.primary)('─'.repeat(width)));
       return lines;
     }
 
-    const headerLabel = '会话 ';
+    const headerLabel = t('session.picker_title');
     const headerHint = this.confirmingDelete
-      ? '⚠️ 按 Enter 确认删除，Esc 取消'
-      : '(↑↓ 导航，Enter 选择，d 删除，Esc 取消)';
+      ? t('session.delete_confirm')
+      : t('session.picker_hint');
     const labelWidth = visibleWidth(headerLabel);
     const hintBudget = Math.max(0, width - labelWidth);
     const shownHint = truncateToWidth(headerHint, hintBudget, ELLIPSIS);

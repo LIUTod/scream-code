@@ -4,10 +4,11 @@ import { pathToFileURL } from 'node:url';
 
 import type { Session } from '@scream-code/scream-code-sdk';
 
+import { t } from '@scream-code/config';
 import { detectInstallSource } from '#/cli/update/source';
 import { detectShellEnvironment } from '#/utils/process/shell-env';
 import { toTerminalHyperlink } from '#/utils/terminal-hyperlink';
-import { LLM_NOT_SET_MESSAGE, NO_ACTIVE_SESSION_MESSAGE } from '../constant/scream-tui';
+import { getLlmNotSetMessage, getNoActiveSessionMessage } from '../constant/scream-tui';
 import { isAbortError } from '../utils/errors';
 import { formatErrorMessage } from '../utils/event-payload';
 import { buildExportMarkdown } from '../utils/export-markdown';
@@ -31,7 +32,7 @@ export async function handleTitleCommand(host: SlashCommandHost, args: string): 
 
   const session = host.session;
   if (session === undefined) {
-    host.showError(NO_ACTIVE_SESSION_MESSAGE);
+    host.showError(getNoActiveSessionMessage());
     return;
   }
 
@@ -50,7 +51,7 @@ export async function handleForkCommand(host: SlashCommandHost, args: string): P
   void args;
   const session = host.session;
   if (session === undefined) {
-    host.showError(NO_ACTIVE_SESSION_MESSAGE);
+    host.showError(getNoActiveSessionMessage());
     return;
   }
 
@@ -90,15 +91,15 @@ function forkSourceTitle(host: SlashCommandHost, session: Session): string {
 export async function handleExportMdCommand(host: SlashCommandHost, args: string): Promise<void> {
   const session = host.session;
   if (session === undefined) {
-    host.showError(NO_ACTIVE_SESSION_MESSAGE);
+    host.showError(getNoActiveSessionMessage());
     return;
   }
 
-  host.showStatus('正在导出会话为 Markdown…');
+  host.showStatus(t('session.exporting_md'));
   try {
     const context = await session.getContext();
     if (context.history.length === 0) {
-      host.showError('没有消息可导出。');
+      host.showError(t('session.no_messages'));
       return;
     }
 
@@ -134,11 +135,11 @@ export async function handleExportMdCommand(host: SlashCommandHost, args: string
 export async function handleExportDebugZipCommand(host: SlashCommandHost): Promise<void> {
   const session = host.session;
   if (session === undefined) {
-    host.showError(NO_ACTIVE_SESSION_MESSAGE);
+    host.showError(getNoActiveSessionMessage());
     return;
   }
 
-  host.showStatus('正在导出会话…');
+  host.showStatus(t('session.exporting'));
   try {
     const installSource = detectInstallSource();
     const shellEnv = detectShellEnvironment();
@@ -160,7 +161,7 @@ export async function handleExportDebugZipCommand(host: SlashCommandHost): Promi
 export async function handleInitCommand(host: SlashCommandHost): Promise<void> {
   const session = host.session;
   if (host.state.appState.model.trim().length === 0 || session === undefined) {
-    host.showError(LLM_NOT_SET_MESSAGE);
+    host.showError(getLlmNotSetMessage());
     return;
   }
 

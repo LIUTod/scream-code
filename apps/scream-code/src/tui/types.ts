@@ -64,6 +64,7 @@ export interface AppState {
   hasNewVersion: boolean;
   latestVersion: string | null;
   editorCommand: string | null;
+  language: 'zh' | 'en';
   notifications: NotificationsConfig;
   like: TuiLikePreferences;
   fusionPlan: TuiConfig['fusionPlan'];

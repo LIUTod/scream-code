@@ -1,3 +1,4 @@
+import { t } from '@scream-code/config';
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
@@ -56,7 +57,7 @@ export function buildRoleAdditionalText(prefs: TuiLikePreferences): string {
     items.push(`- Other: ${prefs.other.trim()}`);
   }
   if (items.length === 0) return '';
-  lines.push('', ...items, '', '用户通过 /like 设置的偏好具有最高优先级，每次回复都必须遵守。');
+  lines.push('', ...items, '', t('like.priority'));
   return lines.join('\n');
 }
 
@@ -85,36 +86,36 @@ async function persistLikePreferences(
 export async function handleLikeCommand(host: SlashCommandHost): Promise<void> {
   const current = host.state.appState.like ?? {};
 
-  const nickname = await promptTextInput(host, '设置昵称', {
-    subtitle: '你希望我怎么称呼你？留空表示不设置。',
-    placeholder: '例如：Alex',
+  const nickname = await promptTextInput(host, t('like.nickname'), {
+    subtitle: t('like.nickname_hint'),
+    placeholder: t('like.nickname_example'),
     initialValue: current.nickname,
     allowEmpty: true,
   });
   if (nickname === undefined) {
-    host.showStatus('已取消 /like 设置', host.state.theme.colors.textDim);
+    host.showStatus(t('like.cancelled'), host.state.theme.colors.textDim);
     return;
   }
 
-  const tone = await promptTextInput(host, '设置回应语气', {
-    subtitle: '例如：友好、专业、幽默、简洁等（留空表示不设置）',
-    placeholder: '例如：友好而专业',
+  const tone = await promptTextInput(host, t('like.tone'), {
+    subtitle: t('like.tone_hint'),
+    placeholder: t('like.tone_example'),
     initialValue: current.tone,
     allowEmpty: true,
   });
   if (tone === undefined) {
-    host.showStatus('已取消 /like 设置', host.state.theme.colors.textDim);
+    host.showStatus(t('like.cancelled'), host.state.theme.colors.textDim);
     return;
   }
 
-  const other = await promptTextInput(host, '其他偏好', {
-    subtitle: '例如：多说例子、先给结论再展开、避免术语等（留空表示不设置）',
-    placeholder: '例如：请用中文回答，避免缩写',
+  const other = await promptTextInput(host, t('like.other'), {
+    subtitle: t('like.other_hint'),
+    placeholder: t('like.other_example'),
     initialValue: current.other,
     allowEmpty: true,
   });
   if (other === undefined) {
-    host.showStatus('已取消 /like 设置', host.state.theme.colors.textDim);
+    host.showStatus(t('like.cancelled'), host.state.theme.colors.textDim);
     return;
   }
 
@@ -125,5 +126,5 @@ export async function handleLikeCommand(host: SlashCommandHost): Promise<void> {
   };
 
   await persistLikePreferences(host, prefs);
-  host.showStatus('偏好已保存（下次新会话生效）', host.state.theme.colors.success);
+  host.showStatus(t('like.saved'), host.state.theme.colors.success);
 }

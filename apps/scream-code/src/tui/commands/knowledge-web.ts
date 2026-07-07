@@ -8,6 +8,7 @@ import { createServer, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 
 import type { KnowledgeStore } from '@scream-code/knowledge';
+import { t } from '@scream-code/config';
 
 import { openUrl } from '../utils/open-url';
 import { getKnowledgeStore } from './knowledge-store';
@@ -37,7 +38,7 @@ const HTML = `<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Scream 知识图谱</title>
+<title>__MSG_kw_title__</title>
 <style>
 :root{
   --bg:#fafafa;--bg-soft:#f0f0f0;
@@ -171,24 +172,24 @@ body{background:var(--bg)}
 <canvas id="scene"></canvas>
 <div id="labels"></div>
 <div id="toolbar">
-  <span class="chip">实体<b id="stat-ent">0</b></span>
-  <span class="chip">事件<b id="stat-evt">0</b></span>
-  <span class="chip">关系<b id="stat-edg">0</b></span>
+  <span class="chip">__MSG_kw_entity__<b id="stat-ent">0</b></span>
+  <span class="chip">__MSG_kw_event__<b id="stat-evt">0</b></span>
+  <span class="chip">__MSG_kw_relation__<b id="stat-edg">0</b></span>
   <span class="sep"></span>
   <div id="search-wrap">
     <svg id="search-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
-    <input id="search-input" type="text" placeholder="搜索..." autocomplete="off" spellcheck="false">
+    <input id="search-input" type="text" placeholder="__MSG_kw_search_placeholder__" autocomplete="off" spellcheck="false">
   </div>
   <span class="sep"></span>
-  <button id="btn-reset">重置</button>
-  <button id="btn-expand">全部</button>
+  <button id="btn-reset">__MSG_kw_btn_reset__</button>
+  <button id="btn-expand">__MSG_kw_btn_expand__</button>
 </div>
-<div id="hint"><b>拖拽</b>旋转 · <b>滚轮</b>缩放 · <b>右键</b>平移 · <b>单击</b>详情 · <b>Esc</b>关闭</div>
+<div id="hint"><b>__MSG_kw_hint_drag__</b></div>
 <div id="tooltip"></div>
 <div id="minimap"><canvas id="minimap-canvas"></canvas></div>
 <div id="modal-mask"></div>
 <div id="modal"><button class="close" id="btn-close">&times;</button><div id="modal-body"></div></div>
-<div id="loading"><span class="dot"></span><span class="dot"></span><span class="dot"></span>加载中</div>
+<div id="loading"><span class="dot"></span><span class="dot"></span><span class="dot"></span>__MSG_kw_loading__</div>
 <div id="error-msg"></div>
 
 <script>
@@ -607,7 +608,7 @@ function showTooltip(sx,sy,id){
   if(data.kind==='entity'){
     var e=eById[id];if(!e)return;
     html+='<div class="tt-name">'+esc(e.name)+'</div>';
-    html+='<div class="tt-meta">'+esc(e.type)+' · '+(e.eventCount||0)+' 事件</div>';
+    html+='<div class="tt-meta">'+esc(e.type)+' · '+(e.eventCount||0)+' __MSG_kw_event__</div>';
   }else{
     var ev=evById[id];if(!ev)return;
     html+='<div class="tt-name">'+esc(ev.title)+'</div>';
@@ -769,23 +770,23 @@ function showModal(id,kind,pushNav){
   var mask=document.getElementById('modal-mask');
   var body=document.getElementById('modal-body');
   var html='';
-  if(navStack.length>1)html+='<button class="back-btn" id="btn-back">← 返回</button>';
+  if(navStack.length>1)html+='<button class="back-btn" id="btn-back">← __MSG_kw_back__</button>';
   if(kind==='entity'){
     var e=eById[id];
     html+='<div class="type-tag">'+esc(e.type)+'</div>';
     html+='<h3>'+esc(e.name)+'</h3>';
-    html+='<div class="field"><div class="label">关联事件</div><div class="value">'+(e.eventCount||0)+' 个</div></div>';
+    html+='<div class="field"><div class="label">__MSG_kw_detail_related__</div><div class="value">'+(e.eventCount||0)+'</div></div>';
     var ce=evByEnt[id]||[];
-    if(ce.length){html+='<div class="divider"></div><div class="field"><div class="label">事件列表</div>';ce.forEach(function(eid){var ev=evById[eid];if(ev)html+='<div class="conn-item" data-id="'+eid+'" data-kind="event"><span>'+esc(ev.title)+'</span></div>'});html+='</div>'}
+    if(ce.length){html+='<div class="divider"></div><div class="field"><div class="label">__MSG_kw_event__</div>';ce.forEach(function(eid){var ev=evById[eid];if(ev)html+='<div class="conn-item" data-id="'+eid+'" data-kind="event"><span>'+esc(ev.title)+'</span></div>'});html+='</div>'}
   }else{
     var ev=evById[id];
     html+='<div class="type-tag event">EVENT</div>';
     html+='<h3>'+esc(ev.title)+'</h3>';
-    if(ev.summary)html+='<div class="field"><div class="label">摘要</div><div class="value">'+esc(ev.summary)+'</div></div>';
-    if(ev.category)html+='<div class="field"><div class="label">分类</div><div class="value">'+esc(ev.category)+'</div></div>';
-    if(ev.keywords&&ev.keywords.length)html+='<div class="field"><div class="label">关键词</div><div class="value">'+ev.keywords.map(esc).join(' · ')+'</div></div>';
+    if(ev.summary)html+='<div class="field"><div class="label">__MSG_kw_detail_description__</div><div class="value">'+esc(ev.summary)+'</div></div>';
+    if(ev.category)html+='<div class="field"><div class="label">__MSG_kw_detail_category__</div><div class="value">'+esc(ev.category)+'</div></div>';
+    if(ev.keywords&&ev.keywords.length)html+='<div class="field"><div class="label">__MSG_kw_detail_keywords__</div><div class="value">'+ev.keywords.map(esc).join(' · ')+'</div></div>';
     var ce2=entByEv[id]||[];
-    if(ce2.length){html+='<div class="divider"></div><div class="field"><div class="label">关联实体</div>';ce2.forEach(function(eid){var e=eById[eid];if(e)html+='<div class="conn-item" data-id="'+eid+'" data-kind="entity"><span>'+esc(e.name)+'</span><span class="badge">'+esc(e.type)+'</span></div>'});html+='</div>'}
+    if(ce2.length){html+='<div class="divider"></div><div class="field"><div class="label">__MSG_kw_detail_related__</div>';ce2.forEach(function(eid){var e=eById[eid];if(e)html+='<div class="conn-item" data-id="'+eid+'" data-kind="entity"><span>'+esc(e.name)+'</span><span class="badge">'+esc(e.type)+'</span></div>'});html+='</div>'}
   }
   body.innerHTML=html;
   modal.classList.add('open');mask.classList.add('open');
@@ -1020,7 +1021,7 @@ setTimeout(function(){
   if(document.getElementById('loading').style.display!=='none'){
     document.getElementById('loading').style.display='none';
     errorMsg.style.display='block';
-    errorMsg.innerHTML='<div style="font-size:14px;font-weight:600;margin-bottom:8px;">加载超时</div><div style="color:#666;font-size:12px;">数据未在 8 秒内返回，请检查终端</div>';
+    errorMsg.innerHTML='<div style="font-size:14px;font-weight:600;margin-bottom:8px;">__MSG_kw_loading__</div><div style="color:#666;font-size:12px;">__MSG_kw_loading_timeout__</div>';
   }
 },8000);
 
@@ -1066,7 +1067,7 @@ fetch('/api/graph').then(function(r){return r.json()}).then(function(data){
 }).catch(function(err){
   document.getElementById('loading').style.display='none';
   errorMsg.style.display='block';
-  errorMsg.innerHTML='<div style="font-size:14px;font-weight:600;margin-bottom:8px;">无法加载</div><div style="color:#666;font-size:12px;margin-bottom:12px;">'+esc(err.message)+'</div><div style="color:#999;font-size:11px;">请先用 /knowledge 摄入文档</div>';
+  errorMsg.innerHTML='<div style="font-size:14px;font-weight:600;margin-bottom:8px;">__MSG_kw_no_data__</div><div style="color:#666;font-size:12px;margin-bottom:12px;">'+esc(err.message)+'</div><div style="color:#999;font-size:11px;">__MSG_kw_no_data_hint__</div>';
 });
 
 })();
@@ -1120,7 +1121,8 @@ function serveHTML(res: ServerResponse): void {
     'Content-Type': 'text/html; charset=utf-8',
     'Cache-Control': 'no-store',
   });
-  res.end(HTML);
+  const html = HTML.replace(/__MSG_([a-z0-9_]+)__/g, (_, key: string) => t(key));
+  res.end(html);
 }
 
 // ─── Public API ─────────────────────────────────────────────────────
@@ -1129,7 +1131,7 @@ export async function handleWeb(host: SlashCommandHost): Promise<void> {
   const store = await getKnowledgeStore();
   const s = await store.stats();
   if (s.entities === 0 && s.events === 0) {
-    throw new Error('知识库为空，请先用 /knowledge 摄入文档');
+    throw new Error(t('knowledge.empty_store'));
   }
 
   const server = createServer((req, res) => {
@@ -1152,5 +1154,5 @@ export async function handleWeb(host: SlashCommandHost): Promise<void> {
   const port = (server.address() as AddressInfo).port;
   const url = `http://127.0.0.1:${port}`;
   openUrl(url);
-  host.showStatus(`知识图谱已打开: ${url}`);
+  host.showStatus(t('knowledge.web_opened', { url }));
 }

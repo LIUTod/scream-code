@@ -4,6 +4,7 @@ import type {
   SlashCommand,
 } from '@earendil-works/pi-tui';
 import type { Session } from '@scream-code/scream-code-sdk';
+import { t } from '@scream-code/config';
 
 import {
   dispatchInput,
@@ -14,7 +15,7 @@ import {
 } from '../commands';
 import { FileMentionProvider } from '../components/editor/file-mention-provider';
 import { QueuePaneComponent } from '../components/panes/queue-pane';
-import { LLM_NOT_SET_MESSAGE, MAIN_AGENT_ID } from '../constant/scream-tui';
+import { getLlmNotSetMessage, MAIN_AGENT_ID } from '../constant/scream-tui';
 import type {
   PlanModeState,
   QueuedMessage,
@@ -114,7 +115,7 @@ export class InputController {
   handleInput(text: string): void {
     if (text.trim().length === 0) return;
     if (this.host.state.appState.isReplaying) {
-      this.host.showError('会话历史正在回放时无法发送输入。');
+      this.host.showError(t('input.replay_blocked'));
       return;
     }
     void this.persistInputHistory(text);
@@ -124,12 +125,12 @@ export class InputController {
 
   async sendNormalUserInput(text: string): Promise<void> {
     if (this.host.state.appState.model.trim().length === 0) {
-      this.host.showError(LLM_NOT_SET_MESSAGE);
+      this.host.showError(getLlmNotSetMessage());
       return;
     }
     const session = this.host.session;
     if (session === undefined) {
-      this.host.showError(LLM_NOT_SET_MESSAGE);
+      this.host.showError(getLlmNotSetMessage());
       return;
     }
 
@@ -187,7 +188,7 @@ export class InputController {
     this.host.state.errorBanner.clear();
     void session.steer(input.join('\n\n')).catch((error: unknown) => {
       const message = formatErrorMessage(error);
-      this.host.showError(`引导失败：${message}`);
+      this.host.showError(t('input.guide_failed', { message }));
     });
   }
   handlePlanModeStateChange(state: PlanModeState): void {
@@ -357,7 +358,7 @@ export class InputController {
 
     void session.prompt(options?.parts ?? input).catch((error: unknown) => {
       const message = formatErrorMessage(error);
-      this.host.failSessionRequest(`发送失败：${message}`);
+      this.host.failSessionRequest(t('input.send_failed', { message }));
     });
   }
 
@@ -385,14 +386,14 @@ export class InputController {
       extraction.imageAttachmentIds.length > 0 &&
       !this.supportsCurrentModelCapability('image_in')
     ) {
-      this.host.showError('当前模型不支持图片输入。');
+      this.host.showError(t('error.image_not_supported'));
       return false;
     }
     if (
       extraction.videoAttachmentIds.length > 0 &&
       !this.supportsCurrentModelCapability('video_in')
     ) {
-      this.host.showError('当前模型不支持视频输入。');
+      this.host.showError(t('error.video_not_supported'));
       return false;
     }
     return true;

@@ -1,5 +1,6 @@
 import type { Component } from '@earendil-works/pi-tui';
 import { Spacer, Text, visibleWidth } from '@earendil-works/pi-tui';
+import { t } from '@scream-code/config';
 import chalk from 'chalk';
 
 import { STATUS_BULLET } from '#/tui/constant/symbols';
@@ -23,7 +24,7 @@ export class CronMessageComponent implements Component {
     private readonly colors: ColorPalette,
   ) {
     const missed = data.missedCount !== undefined;
-    this.title = missed ? '错过的定时提醒' : '定时提醒触发';
+    this.title = missed ? t('cronmsg.missed_reminder') : t('cronmsg.reminder_fired');
     this.detail = cronDetail(data);
     this.titleColor = data.stale === true || missed ? colors.warning : colors.accent;
     this.promptText = new Text(chalk.hex(colors.text)(prompt), 0, 0);
@@ -71,13 +72,13 @@ function cronDetail(data: CronTranscriptData): string | undefined {
   const parts: string[] = [];
   if (data.cron !== undefined && data.cron.length > 0) parts.push(data.cron);
   if (data.jobId !== undefined && data.jobId.length > 0) parts.push(`job ${data.jobId}`);
-  if (data.recurring === false) parts.push('一次性');
+  if (data.recurring === false) parts.push(t('cronmsg.one_time'));
   if (data.coalescedCount !== undefined && data.coalescedCount > 1) {
-    parts.push(`${String(data.coalescedCount)} 次合并触发`);
+    parts.push(t('cronmsg.coalesced', { count: String(data.coalescedCount) }));
   }
   if (data.missedCount !== undefined) {
-    parts.push(`${String(data.missedCount)} 次错过`);
+    parts.push(t('cronmsg.missed', { count: String(data.missedCount) }));
   }
-  if (data.stale === true) parts.push('最终投递');
+  if (data.stale === true) parts.push(t('cronmsg.final_delivery'));
   return parts.length > 0 ? parts.join(' | ') : undefined;
 }

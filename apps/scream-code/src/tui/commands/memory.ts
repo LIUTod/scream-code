@@ -1,5 +1,6 @@
 import type { MemoryMemoSummary } from '@scream-code/memory';
 
+import { t } from '@scream-code/config';
 import type { SlashCommandHost } from './dispatch';
 
 export async function handleMemoryCommand(host: SlashCommandHost, _args: string): Promise<void> {
@@ -14,20 +15,20 @@ export function formatMemoryMemoForInjection(memo: MemoryMemoSummary): string {
       : memo.sourceSessionId.slice(0, 12);
 
   const lines = [
-    '[用户从记忆备忘录中注入了以下历史记录]',
+    t('memory.inject_prefix'),
     '',
-    `## 历史备忘录 #${memo.id}`,
+    `## ${t('memory.history_title')} #${memo.id}`,
     '',
-    `- **用户需求**: ${memo.userNeed}`,
-    `- **执行方案**: ${memo.approach || '(无)'}`,
-    `- **完成结果**: ${memo.outcome}`,
-    `- **踩坑记录**: ${memo.whatFailed && memo.whatFailed !== 'none' ? memo.whatFailed : '无'}`,
-    `- **成功经验**: ${memo.whatWorked && memo.whatWorked !== 'none' ? memo.whatWorked : '无'}`,
-    `- **来源会话**: ${sessionLabel}`,
-    `- **记录时间**: ${date}`,
+    `- **${t('memory.requirement')}**: ${memo.userNeed}`,
+    `- **${t('memory.plan')}**: ${memo.approach || t('memory.plan_none')}`,
+    `- **${t('memory.result')}**: ${memo.outcome}`,
+    `- **${t('memory.pitfall')}**: ${memo.whatFailed && memo.whatFailed !== 'none' ? memo.whatFailed : t('memory.pitfall_none')}`,
+    `- **${t('memory.experience')}**: ${memo.whatWorked && memo.whatWorked !== 'none' ? memo.whatWorked : t('memory.experience_none')}`,
+    `- **${t('memory.source_session')}**: ${sessionLabel}`,
+    `- **${t('memory.record_time')}**: ${date}`,
     '',
     '---',
-    '请参考以上历史经验来处理当前问题。特别注意踩坑记录中的错误不要重犯。',
+    t('memory.inject_hint'),
   ];
 
   return lines.join('\n');

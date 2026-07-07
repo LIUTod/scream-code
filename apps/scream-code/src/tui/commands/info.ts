@@ -1,5 +1,7 @@
 import type { McpServerInfo, SessionStatus, SessionUsage } from '@scream-code/scream-code-sdk';
 
+import { t } from '@scream-code/config';
+
 import { buildMcpStatusReportLines } from '../components/messages/mcp-status-panel';
 import { buildStatusReportLines } from '../components/messages/status-panel';
 import { buildUsageReportLines, UsagePanelComponent, type ManagedUsageReport } from '../components/messages/usage-panel';
@@ -76,7 +78,7 @@ export async function showMcpServers(host: SlashCommandHost): Promise<void> {
   try {
     servers = await host.requireSession().listMcpServers();
   } catch (error) {
-    host.showError(`加载 MCP 服务器失败：${formatErrorMessage(error)}`);
+    host.showError(t('info.mcp_load_failed', { msg: formatErrorMessage(error) }));
     return;
   }
 

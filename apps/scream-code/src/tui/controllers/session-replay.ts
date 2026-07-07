@@ -8,6 +8,7 @@ import type {
   Session,
   ToolCall,
 } from '@scream-code/scream-code-sdk';
+import { t } from '@scream-code/config';
 
 import { ToolCallComponent } from '../components/messages/tool-call';
 import type { TodoItem } from '../components/chrome/todo-panel';
@@ -60,7 +61,7 @@ export class SessionReplayRenderer {
     try {
       const main = session.getResumeState()?.agents['main'];
       if (main === undefined) {
-        this.host.showError('此会话的历史记录不可用。');
+        this.host.showError(t('replay.history_unavailable'));
         return false;
       }
 
@@ -70,7 +71,7 @@ export class SessionReplayRenderer {
       return true;
     } catch (error) {
       const message = formatErrorMessage(error);
-      this.host.showError(`回放会话历史失败： ${message}`);
+      this.host.showError(t('replay.history_failed', { message }));
       return false;
     } finally {
       this.host.setAppState({ isReplaying: false });
@@ -341,7 +342,7 @@ export class SessionReplayRenderer {
     context.skillActivationIds.add(skill.activationId);
     sessionEventHandler.renderedSkillActivationIds.add(skill.activationId);
     this.host.appendTranscriptEntry({
-      ...replayEntry(context, 'skill_activation', `已激活技能： ${skill.skillName}`, 'plain'),
+      ...replayEntry(context, 'skill_activation', t('replay.skill_activated', { skillName: skill.skillName }), 'plain'),
       skillActivationId: skill.activationId,
       skillName: skill.skillName,
       skillArgs: skill.skillArgs,
@@ -393,8 +394,8 @@ export class SessionReplayRenderer {
   private renderPermissionUpdate(context: ReplayRenderContext, mode: PermissionMode): void {
     if (mode === 'yolo') {
       this.host.appendTranscriptEntry(
-        replayEntry(context, 'status', 'YES 模式：开启', 'notice', {
-          detail: '所有操作将自动批准。请谨慎使用。',
+        replayEntry(context, 'status', t('replay.yes_mode_on'), 'notice', {
+          detail: t('replay.yes_mode_on_detail'),
         }),
       );
       return;
@@ -403,7 +404,7 @@ export class SessionReplayRenderer {
       replayEntry(
         context,
         'status',
-        mode === 'manual' ? 'YES 模式：关闭' : `权限模式： ${mode}`,
+        mode === 'manual' ? t('replay.yes_mode_off') : t('replay.permission_mode', { mode }),
         'notice',
       ),
     );
@@ -422,13 +423,13 @@ export class SessionReplayRenderer {
     const parts: string[] = [];
     switch (result.decision) {
       case 'approved':
-        parts.push(result.scope === 'session' ? '已批准（当前会话）' : '已批准');
+        parts.push(result.scope === 'session' ? t('replay.approved_session') : t('replay.approved'));
         break;
       case 'rejected':
-        parts.push('已拒绝');
+        parts.push(t('replay.rejected'));
         break;
       case 'cancelled':
-        parts.push('已取消');
+        parts.push(t('replay.cancelled'));
         break;
     }
     parts.push(`: ${record.action}`);
@@ -453,15 +454,15 @@ export class SessionReplayRenderer {
     switch (result.decision) {
       case 'rejected':
         content =
-          result.selectedLabel === 'Revise' ? '计划已退回修订' : '计划审查已拒绝';
+          result.selectedLabel === 'Revise' ? t('replay.plan_revise') : t('replay.plan_rejected');
         break;
       case 'cancelled':
-        content = '计划审查已取消';
+        content = t('replay.plan_cancelled');
         break;
     }
     const detail =
       result.feedback !== undefined && result.feedback.length > 0
-        ? `反馈： ${result.feedback}`
+        ? t('replay.feedback_prefix', { feedback: result.feedback })
         : undefined;
     this.host.appendTranscriptEntry(replayEntry(context, 'status', content, 'notice', { detail }));
   }
@@ -513,12 +514,12 @@ export class SessionReplayRenderer {
     if (origin.status === 'lost') {
       status = {
         ...status,
-        headline: status.headline.replace(' 在后台失败', ' 在后台丢失'),
+        headline: status.headline.replace(t('replay.bg_failed_suffix'), t('replay.bg_lost_suffix')),
       };
     } else if (origin.status === 'killed') {
       status = {
         ...status,
-        headline: status.headline.replace(' 在后台失败', ' stopped'),
+        headline: status.headline.replace(t('replay.bg_failed_suffix'), t('replay.bg_stopped_suffix')),
       };
     }
     this.host.appendTranscriptEntry({

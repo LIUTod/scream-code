@@ -7,6 +7,7 @@ import {
   visibleWidth,
   type Focusable,
 } from '@earendil-works/pi-tui';
+import { t } from '@scream-code/config';
 import chalk from 'chalk';
 
 import type { ColorPalette } from '#/tui/theme/colors';
@@ -28,7 +29,7 @@ export interface TextInputDialogOptions {
   readonly colors: ColorPalette;
 }
 
-const FOOTER = 'Enter 提交 · Esc 取消';
+function getFooter(): string { return t('textinput.footer'); }
 
 function maskText(text: string): string {
   // Preserve ANSI sequences, mask everything else.
@@ -92,7 +93,7 @@ export class TextInputDialogComponent extends Container implements Focusable {
       '…',
     );
     const subtitleText = this.emptyHinted
-      ? '输入不能为空。'
+      ? t('textinput.empty_hint')
       : (this.opts.subtitle ?? '');
     const subtitleLine = truncateToWidth(
       chalk.hex(this.opts.colors.textDim)(subtitleText),
@@ -100,7 +101,7 @@ export class TextInputDialogComponent extends Container implements Focusable {
       '…',
     );
     const footerLine = truncateToWidth(
-      chalk.hex(this.opts.colors.textDim)(FOOTER),
+      chalk.hex(this.opts.colors.textDim)(getFooter()),
       innerWidth,
       '…',
     );

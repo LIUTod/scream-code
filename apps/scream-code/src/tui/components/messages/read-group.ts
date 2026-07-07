@@ -24,6 +24,7 @@
 import type { TUI } from '@earendil-works/pi-tui';
 import { Container, Spacer, Text } from '@earendil-works/pi-tui';
 import chalk from 'chalk';
+import { t } from '@scream-code/config';
 
 import { STATUS_BULLET } from '#/tui/constant/symbols';
 import type { ColorPalette } from '#/tui/theme/colors';
@@ -236,21 +237,21 @@ export class ReadGroupComponent extends Container {
 
     if (pending > 0) {
       const bullet = chalk.hex(colors.roleAssistant)(STATUS_BULLET);
-      const label = chalk.hex(colors.primary).bold(`正在读取 ${String(total)} 个文件…`);
+      const label = chalk.hex(colors.primary).bold(t('readgroup.reading', { count: total }));
       return `${bullet}${label}`;
     }
 
     // All reads have finished, either successfully or with failures.
     if (failed === total) {
       const bullet = chalk.hex(colors.error)('✗ ');
-      const label = chalk.hex(colors.error).bold(`已读取 ${String(total)} 个文件`);
-      return `${bullet}${label}${chalk.hex(colors.error)(' · 失败')}`;
+      const label = chalk.hex(colors.error).bold(t('readgroup.read', { count: total }));
+      return `${bullet}${label}${chalk.hex(colors.error)(t('readgroup.failed_suffix'))}`;
     }
 
     const bullet = chalk.hex(colors.success)(STATUS_BULLET);
-    const label = chalk.hex(colors.primary).bold(`已读取 ${String(total)} 个文件`);
-    const linesPart = dim(` · ${String(totalLines)} ${totalLines === 1 ? '行' : '行'}`);
-    const failPart = failed > 0 ? chalk.hex(colors.error)(` · ${String(failed)} 失败`) : '';
+    const label = chalk.hex(colors.primary).bold(t('readgroup.read', { count: total }));
+    const linesPart = dim(t('readgroup.lines_suffix', { count: totalLines }));
+    const failPart = failed > 0 ? chalk.hex(colors.error)(t('readgroup.failed_count', { count: failed })) : '';
     return `${bullet}${label}${linesPart}${failPart}`;
   }
 
@@ -263,11 +264,11 @@ export class ReadGroupComponent extends Container {
 
     let tail: string;
     if (snap.phase === 'pending') {
-      tail = dim(' · 读取中…');
+      tail = dim(t('readgroup.reading_suffix'));
     } else if (snap.phase === 'failed') {
-      tail = chalk.hex(colors.error)(' · 失败');
+      tail = chalk.hex(colors.error)(t('readgroup.failed_suffix'));
     } else {
-      tail = dim(` · ${String(snap.lines)} 行`);
+      tail = dim(t('readgroup.lines_suffix', { count: snap.lines }));
     }
     return `  ${branch} ${pathPart}${tail}`;
   }
@@ -280,11 +281,11 @@ export class ReadGroupComponent extends Container {
 
     let tail: string;
     if (result.failed) {
-      tail = chalk.hex(colors.error)(' · 失败');
+      tail = chalk.hex(colors.error)(t('readgroup.failed_suffix'));
     } else {
-      tail = dim(` · ${String(result.lines)} 行`);
+      tail = dim(t('readgroup.lines_suffix', { count: result.lines }));
       if (result.hasConflicts) {
-        tail = `${tail}${chalk.hex(colors.warning)(' ⚠ 冲突')}`;
+        tail = `${tail}${chalk.hex(colors.warning)(` ⚠ ${t('readgroup.conflict_suffix')}`)}`;
       }
     }
     return `  ${branch} ${pathPart}${tail}`;

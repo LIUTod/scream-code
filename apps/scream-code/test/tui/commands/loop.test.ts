@@ -23,6 +23,7 @@ function makeAppState(overrides: Partial<AppState> = {}): AppState {
     isReplaying: false,
     streamingPhase: 'idle',
     streamingStartTime: 0,
+    language: 'zh',
     theme: 'dark',
     version: '0.0.0-test',
     hasNewVersion: false,

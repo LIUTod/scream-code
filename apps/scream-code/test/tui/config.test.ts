@@ -56,9 +56,10 @@ notification_condition = "always"
       theme: 'light',
       editorCommand: 'code --wait',
       notifications: { enabled: false, condition: 'always' },
-      like: {},
+      like: { nickname: undefined, tone: undefined, other: undefined },
       fusionPlan: { timeoutSeconds: 600, workerCount: 3 },
       subagentModels: {},
+      language: 'zh',
     });
   });
 
@@ -71,9 +72,10 @@ command = "   "
       theme: 'auto',
       editorCommand: null,
       notifications: { enabled: true, condition: 'unfocused' },
-      like: {},
+      like: { nickname: undefined, tone: undefined, other: undefined },
       fusionPlan: { timeoutSeconds: 600, workerCount: 3 },
       subagentModels: {},
+      language: 'zh',
     });
   });
 
@@ -101,9 +103,10 @@ command = "   "
     await saveTuiConfig(
       {
         theme: 'light',
+        language: 'zh',
         editorCommand: 'vim',
         notifications: { enabled: false, condition: 'always' },
-        like: {},
+        like: { nickname: undefined, tone: undefined, other: undefined },
         fusionPlan: { timeoutSeconds: 600, workerCount: 3 },
         subagentModels: {},
       },
@@ -114,9 +117,10 @@ command = "   "
       theme: 'light',
       editorCommand: 'vim',
       notifications: { enabled: false, condition: 'always' },
-      like: {},
+      like: { nickname: undefined, tone: undefined, other: undefined },
       fusionPlan: { timeoutSeconds: 600, workerCount: 3 },
       subagentModels: {},
+      language: 'zh',
     });
   });
 });

@@ -1,5 +1,6 @@
 import type { Component } from '@earendil-works/pi-tui';
 import { Container, Text } from '@earendil-works/pi-tui';
+import { t } from '@scream-code/config';
 import chalk from 'chalk';
 
 import type { ColorPalette } from '#/tui/theme/colors';
@@ -68,7 +69,7 @@ export class ShellExecutionComponent extends Container {
         maxLines: previewLines,
         maxBytes: MAX_SHELL_OUTPUT_BYTES,
         hintFormatter: (remaining) =>
-          `...（还有 ${String(remaining)} 行，按 ctrl+o 展开）`,
+          t('shell.more_lines', { count: String(remaining) }),
       }),
     );
   }

@@ -329,7 +329,7 @@ describe('ToolCallComponent', () => {
     );
 
     const out = strip(component.render(100).join('\n'));
-    expect(out).toContain('计划 · 已拒绝');
+    expect(out).toContain('计划  · 已拒绝');
     expect(out).toContain('↪ 建议');
     expect(out).toContain('please rethink step 2');
   });
@@ -352,7 +352,7 @@ describe('ToolCallComponent', () => {
     );
 
     const out = strip(component.render(100).join('\n'));
-    expect(out).toContain('计划 · 已拒绝');
+    expect(out).toContain('计划  · 已拒绝');
     expect(out).toContain('Rejected Plan');
     expect(out).not.toContain('Plan rejected by user.');
     expect(out).not.toContain('Plan mode remains active.');
@@ -550,7 +550,7 @@ describe('ToolCallComponent', () => {
     });
 
     let out = strip(component.render(120).join('\n'));
-    expect(out).toContain('Explore Agent 启动中 (explore project xxx) · 0 个 tool · 0s');
+    expect(out).toContain('Explore Agent 启动中… (explore project xxx) · 0 个 tool · 0s');
     expect(out).not.toContain('Using Agent');
     expect(out).not.toContain('Used Agent');
 

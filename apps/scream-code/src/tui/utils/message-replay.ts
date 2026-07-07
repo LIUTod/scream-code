@@ -8,6 +8,8 @@ import type {
   ToolCall,
 } from '@scream-code/scream-code-sdk';
 
+import { t } from '@scream-code/config';
+
 import type {
   AppState,
   BackgroundAgentMetadata,
@@ -286,7 +288,7 @@ const HOOK_RESULT_RE =
   /<hook_result\s+hook_event="([^"]+)">\n?([\s\S]*?)\n?<\/hook_result>/g;
 
 function formatHookResultBlock(event: string, body: string, blocked: boolean): string {
-  return `*${event} hook${blocked ? ' 已阻止' : ''}*\n\n${body.trim() || '（空）'}`;
+  return `*${event} hook${blocked ? t('replayhook.blocked') : ''}*\n\n${body.trim() || t('replayhook.empty')}`;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

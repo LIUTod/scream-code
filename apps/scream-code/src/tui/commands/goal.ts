@@ -1,3 +1,4 @@
+import { t } from '@scream-code/config';
 import type { Component } from '@earendil-works/pi-tui';
 
 import type { SlashCommandHost } from './dispatch';
@@ -55,7 +56,7 @@ export function parseGoalCommand(rawArgs: string): ParsedGoalCommand {
     return {
       kind: 'error',
       severity: 'hint',
-      message: '请提供目标描述，例如 `/goal 实现登录功能`。',
+      message: t('goal.need_desc'),
     };
   }
   return { kind: 'create', objective, replace };
@@ -93,7 +94,7 @@ export async function handleGoalCommand(host: SlashCommandHost, args: string): P
 async function createGoal(host: SlashCommandHost, parsed: ParsedGoalCommand & { kind: 'create' }): Promise<void> {
   const session = host.session;
   if (session === undefined) {
-    host.showError('没有活跃的会话。');
+    host.showError(t('error.no_session'));
     return;
   }
 
@@ -101,17 +102,15 @@ async function createGoal(host: SlashCommandHost, parsed: ParsedGoalCommand & { 
   // context each round, which would destroy goal's working notes.
   if (detectGoalLoopConflict(host.state.appState, 'enable_goal') === 'loop_active') {
     host.showNotice(
-      'Storm Breaker（风暴守护者）',
-      '当前已开启循环模式（/loop）。/goal 与 /loop 语义冲突：' +
-        'loop 每轮重置上下文，会破坏 goal 的工作笔记迭代。' +
-        '请先 /loop 关闭循环模式，再设置目标。',
+      t('goal.storm_breaker'),
+      t('goal.conflict_loop'),
     );
     return;
   }
 
   try {
     await session.createGoal(parsed.objective, { replace: parsed.replace });
-    host.showStatus(`🎯 目标已设置：${parsed.objective}`);
+    host.showStatus(t('goal.set', { objective: parsed.objective }));
 
     // Auto-start: send the objective as user input to begin execution
     if (!isBusy(host.state.appState)) {
@@ -121,85 +120,85 @@ async function createGoal(host: SlashCommandHost, parsed: ParsedGoalCommand & { 
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    host.showError(`创建目标失败：${message}`);
+    host.showError(t('goal.create_failed', { msg: message }));
   }
 }
 
 async function pauseGoal(host: SlashCommandHost): Promise<void> {
   const session = host.session;
   if (session === undefined) {
-    host.showError('没有活跃的会话。');
+    host.showError(t('error.no_session'));
     return;
   }
 
   try {
     const result = await session.getGoal();
     if (result.goal === null) {
-      host.showStatus('🎯 当前没有激活的目标。');
+      host.showStatus(t('goal.no_active'));
       return;
     }
 
     await session.updateGoalStatus('paused');
-    host.showStatus('🎯 目标已暂停。使用 `/goal resume` 恢复。');
+    host.showStatus(t('goal.paused'));
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    host.showError(`暂停目标失败：${message}`);
+    host.showError(t('goal.pause_failed', { msg: message }));
   }
 }
 
 async function resumeGoal(host: SlashCommandHost): Promise<void> {
   const session = host.session;
   if (session === undefined) {
-    host.showError('没有活跃的会话。');
+    host.showError(t('error.no_session'));
     return;
   }
 
   try {
     const result = await session.getGoal();
     if (result.goal === null) {
-      host.showStatus('🎯 没有可恢复的目标。使用 `/goal <指令>` 设置新目标。');
+      host.showStatus(t('goal.no_resumable'));
       return;
     }
 
     await session.updateGoalStatus('active');
-    host.showStatus('🎯 目标已恢复。');
+    host.showStatus(t('goal.resumed'));
 
     // Resume execution
     if (!isBusy(host.state.appState)) {
-      host.sendQueuedMessage(session, { text: '继续执行当前目标。', agentId: undefined });
+      host.sendQueuedMessage(session, { text: t('goal.resume_hint'), agentId: undefined });
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    host.showError(`恢复目标失败：${message}`);
+    host.showError(t('goal.resume_failed', { msg: message }));
   }
 }
 
 export async function handleGoalOffCommand(host: SlashCommandHost): Promise<void> {
   const session = host.session;
   if (session === undefined) {
-    host.showError('没有活跃的会话。');
+    host.showError(t('error.no_session'));
     return;
   }
 
   try {
     const result = await session.getGoal();
     if (result.goal === null) {
-      host.showStatus('🎯 当前没有激活的目标。');
+      host.showStatus(t('goal.no_active'));
       return;
     }
 
     await session.cancelGoal();
-    host.showStatus('🎯 目标已取消。');
+    host.showStatus(t('goal.cancelled'));
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    host.showError(`取消目标失败：${message}`);
+    host.showError(t('goal.cancel_failed', { msg: message }));
   }
 }
 
 async function showGoalStatus(host: SlashCommandHost): Promise<void> {
   const session = host.session;
   if (session === undefined) {
-    host.showStatus('🎯 当前没有活跃的会话。');
+    host.showStatus(t('error.no_session'));
     return;
   }
 
@@ -214,7 +213,7 @@ async function showGoalStatus(host: SlashCommandHost): Promise<void> {
     host.state.ui.requestRender();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    host.showError(`获取目标状态失败：${message}`);
+    host.showError(t('goal.status_failed', { msg: message }));
   }
 }
 

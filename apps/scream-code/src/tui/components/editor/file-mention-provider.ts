@@ -32,6 +32,8 @@
 
 import { basename } from 'node:path';
 
+import { t } from '@scream-code/config';
+
 import {
   CombinedAutocompleteProvider,
   fuzzyFilter,
@@ -71,9 +73,10 @@ export class FileMentionProvider implements AutocompleteProvider {
       }
       const name = ac.value ?? (ac as { name?: string }).name ?? '';
       const desc = ac.description ?? '';
+      const resolvedDesc = desc ? t(desc) : '';
       return {
         value: name,
-        label: `/${name}${desc ? ` — ${desc}` : ''}`,
+        label: `/${name}${resolvedDesc ? ` — ${resolvedDesc}` : ''}`,
       };
     });
     this.inner = new CombinedAutocompleteProvider(slashCommands, workDir, fdPath);

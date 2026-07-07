@@ -1,11 +1,12 @@
 import type { Component, Focusable } from '@earendil-works/pi-tui';
 
 import type { ScreamHarness, Session } from '@scream-code/scream-code-sdk';
+import { t } from '@scream-code/config';
 
 import type { Theme } from '../theme';
 import type { ResolvedTheme } from '../theme/colors';
 import {
-  LLM_NOT_SET_MESSAGE,
+  getLlmNotSetMessage,
 } from '../constant/scream-tui';
 import { formatErrorMessage } from '../utils/event-payload';
 import { parseSlashInput } from './parse';
@@ -35,6 +36,7 @@ import {
   showPermissionPicker,
   showSettingsSelector,
 } from './config';
+import { handleLanguageCommand } from './language';
 import { showMcpServers, showStatusReport, showUsage } from './info';
 import {
   handleExportDebugZipCommand,
@@ -182,7 +184,7 @@ async function executeSlashCommand(host: SlashCommandHost, input: string): Promi
     case 'skill': {
       const session = host.session;
       if (host.state.appState.model.trim().length === 0 || session === undefined) {
-        host.showError(LLM_NOT_SET_MESSAGE);
+        host.showError(getLlmNotSetMessage());
         return;
       }
       host.sendSkillActivation(session, intent.skillName, intent.args);
@@ -226,12 +228,12 @@ async function handleBuiltInSlashCommand(
       return;
     case 'sessions':
       host.showSessionPicker().catch((error: unknown) => {
-        host.showError(`打开会话选择器失败：${formatErrorMessage(error)}`);
+        host.showError(t('dispatch.session_picker_failed', { error: formatErrorMessage(error) }));
       });
       return;
     case 'tasks':
       host.tasksBrowserController.show().catch((error: unknown) => {
-        host.showError(`打开任务浏览器失败：${formatErrorMessage(error)}`);
+        host.showError(t('dispatch.tasks_browser_failed', { error: formatErrorMessage(error) }));
       });
       return;
     case 'btw':
@@ -245,6 +247,9 @@ async function handleBuiltInSlashCommand(
       return;
     case 'theme':
       await handleThemeCommand(host, args);
+      return;
+    case 'language':
+      handleLanguageCommand(host);
       return;
     case 'model':
       handleModelCommand(host, args);
@@ -263,12 +268,12 @@ async function handleBuiltInSlashCommand(
       return;
     case 'usage':
       showUsage(host).catch((error: unknown) => {
-        host.showError(`显示使用情况失败：${formatErrorMessage(error)}`);
+        host.showError(t('dispatch.usage_failed', { error: formatErrorMessage(error) }));
       });
       return;
     case 'status':
       showStatusReport(host).catch((error: unknown) => {
-        host.showError(`显示状态报告失败：${formatErrorMessage(error)}`);
+        host.showError(t('dispatch.status_failed', { error: formatErrorMessage(error) }));
       });
       return;
     case 'title':

@@ -1,3 +1,4 @@
+import { t } from '@scream-code/config';
 import {
   applyCatalogProvider,
   catalogBaseUrl,
@@ -51,7 +52,7 @@ export async function handleConnectCommand(host: SlashCommandHost, args: string)
   };
   host.cancelInFlight = cancel;
 
-  const spinner = host.showProgressSpinner(`正在拉取最新模型目录...`);
+  const spinner = host.showProgressSpinner(t('auth.fetching_models'));
   try {
     catalog = await fetchCatalog(url, controller.signal);
     spinner.stop({ ok: true, label: 'Catalog loaded.' });
@@ -136,7 +137,7 @@ export async function handleLogoutCommand(host: SlashCommandHost): Promise<void>
   const providerIds = Object.keys(config.providers ?? {}).toSorted();
 
   if (providerIds.length === 0) {
-    host.showStatus('没有已配置的模型商。');
+    host.showStatus(t('auth.no_providers'));
     return;
   }
 
@@ -168,7 +169,7 @@ export async function handleLogoutCommand(host: SlashCommandHost): Promise<void>
       availableProviders: updated.providers ?? {},
     });
   }
-  host.showStatus(`已删除模型商: ${target}.`);
+  host.showStatus(t('auth.deleted', { name: target }));
 }
 
 // ── /config diy — manual provider setup ────────────────────────────────
@@ -179,26 +180,26 @@ async function handleDiyConfig(host: SlashCommandHost): Promise<void> {
   if (wire === undefined) return;
 
   // Step 2 — base URL
-  const baseUrl = await promptTextInput(host, '输入服务商 API 地址', {
-    subtitle: '例如 https://api.deepseek.com（可粘贴）',
+  const baseUrl = await promptTextInput(host, t('auth.input_api_url'), {
+    subtitle: t('auth.api_url_hint'),
   });
   if (baseUrl === undefined) return;
 
   // Step 3 — API key (plain-text so users can paste)
-  const apiKey = await promptTextInput(host, '输入 API Key', {
-    subtitle: '密钥保存到 ~/.scream/config.toml（可粘贴，Esc 取消）',
+  const apiKey = await promptTextInput(host, t('auth.input_api_key'), {
+    subtitle: t('auth.api_key_hint'),
   });
   if (apiKey === undefined) return;
 
   // Step 4 — model ID
-  const modelId = await promptTextInput(host, '输入模型型号', {
-    subtitle: '例如 deepseek-v4-flash',
+  const modelId = await promptTextInput(host, t('auth.input_model'), {
+    subtitle: t('auth.model_hint'),
   });
   if (modelId === undefined) return;
 
   // Step 5 — max context tokens
-  const maxContextStr = await promptTextInput(host, '输入模型最大上下文长度 (tokens)', {
-    subtitle: '默认 131072，DeepSeek V4 填 1000000',
+  const maxContextStr = await promptTextInput(host, t('auth.input_context'), {
+    subtitle: t('auth.context_hint'),
     placeholder: '131072',
   });
   if (maxContextStr === undefined) return;
@@ -264,5 +265,5 @@ async function handleDiyConfig(host: SlashCommandHost): Promise<void> {
   });
 
   await host.authFlow.refreshConfigAfterLogin();
-  host.showStatus(`已连接: ${providerId} · ${modelId} (${wire})`);
+  host.showStatus(t('auth.connected', { name: `${providerId} · ${modelId} (${wire})` }));
 }

@@ -15,6 +15,7 @@
 
 import { Container, Text, Spacer } from '@earendil-works/pi-tui';
 import type { TUI } from '@earendil-works/pi-tui';
+import { t } from '@scream-code/config';
 import chalk from 'chalk';
 
 import { STATUS_BULLET } from '#/tui/constant/symbols';
@@ -75,7 +76,7 @@ export class CompactionComponent extends Container {
   private buildHeader(): string {
     if (this.done) {
       const bullet = chalk.hex(this.colors.success)(STATUS_BULLET);
-      const label = chalk.hex(this.colors.success).bold('压缩完成');
+      const label = chalk.hex(this.colors.success).bold(t('compaction.done'));
       const detail =
         this.tokensBefore !== undefined && this.tokensAfter !== undefined
           ? chalk.dim(` (${String(this.tokensBefore)} → ${String(this.tokensAfter)} token)`)
@@ -84,11 +85,11 @@ export class CompactionComponent extends Container {
     }
     if (this.canceled) {
       const bullet = chalk.hex(this.colors.warning)(STATUS_BULLET);
-      const label = chalk.hex(this.colors.warning).bold('压缩已取消');
+      const label = chalk.hex(this.colors.warning).bold(t('compaction.canceled'));
       return `${bullet}${label}`;
     }
     const bullet = this.blinkOn ? chalk.hex(this.colors.roleAssistant)(STATUS_BULLET) : '  ';
-    const label = chalk.hex(this.colors.primary).bold('正在压缩上下文...');
+    const label = chalk.hex(this.colors.primary).bold(t('compaction.in_progress'));
     return `${bullet}${label}`;
   }
 

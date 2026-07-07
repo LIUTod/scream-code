@@ -25,6 +25,7 @@ function makeStartupInput(): ScreamTUIStartupInput {
     },
     tuiConfig: {
       theme: 'dark',
+      language: 'zh',
       editorCommand: null,
       notifications: { enabled: true, condition: 'unfocused' },
       like: {},

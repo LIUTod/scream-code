@@ -7,6 +7,7 @@ import {
   visibleWidth,
   type Focusable,
 } from '@earendil-works/pi-tui';
+import { t } from '@scream-code/config';
 import chalk from 'chalk';
 
 import type { ColorPalette } from '#/tui/theme/colors';
@@ -15,7 +16,7 @@ export type ApiKeyInputResult =
   | { readonly kind: 'ok'; readonly value: string }
   | { readonly kind: 'cancel' };
 
-const FOOTER = 'Enter 提交 · Esc 取消';
+function getFooter(): string { return t('apikey.footer'); }
 
 function maskInputLine(raw: string): string {
   const prefix = '> ';
@@ -61,8 +62,8 @@ export class ApiKeyInputDialogComponent extends Container implements Focusable {
     super();
     this.onDone = onDone;
     this.colors = colors;
-    this.title = `输入 ${platformName} 的 API 密钥`;
-    this.subtitle = '您的密钥将保存到 ~/.scream-code/config.toml';
+    this.title = t('apikey.title', { name: platformName });
+    this.subtitle = t('apikey.subtitle');
     this.input.onSubmit = (value) => {
       this.submit(value);
     };
@@ -98,9 +99,9 @@ export class ApiKeyInputDialogComponent extends Container implements Focusable {
 
     const border = (s: string): string => chalk.hex(this.colors.primary)(s);
     const titleStyled = chalk.bold.hex(this.colors.textStrong)(this.title);
-    const subtitleText = this.emptyHinted ? 'API 密钥不能为空。' : this.subtitle;
+    const subtitleText = this.emptyHinted ? t('apikey.empty_hint') : this.subtitle;
     const subtitleStyled = chalk.hex(this.colors.textDim)(subtitleText);
-    const footerStyled = chalk.hex(this.colors.textDim)(FOOTER);
+    const footerStyled = chalk.hex(this.colors.textDim)(getFooter());
 
     const titleLine = truncateToWidth(titleStyled, innerWidth, '…');
     const subtitleLine = truncateToWidth(subtitleStyled, innerWidth, '…');

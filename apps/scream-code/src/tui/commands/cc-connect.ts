@@ -11,6 +11,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, dirname } from "node:path";
 
+import { t } from '@scream-code/config';
+
 import { ChoicePickerComponent, type ChoiceOption } from "../components/dialogs/choice-picker";
 import type { SlashCommandHost } from "./dispatch";
 import { getDaemonInstructions } from "../../cli/cc-connect-daemon";
@@ -24,16 +26,18 @@ interface PlatformDef {
   note?: string;
 }
 
-const PLATFORMS: PlatformDef[] = [
-  { name: "微信", type: "weixin", setupCmd: "weixin setup --project default" },
-  { name: "飞书", type: "feishu", setupCmd: "feishu setup --project default" },
-  { name: "Telegram", type: "telegram", setupCmd: "telegram setup --project default", note: "需先在 @BotFather 创建 bot" },
-  { name: "钉钉", type: "dingtalk", setupCmd: "dingtalk setup --project default" },
-  { name: "Discord", type: "discord", setupCmd: "discord setup --project default" },
-  { name: "Slack", type: "slack", setupCmd: "slack setup --project default" },
-  { name: "QQ", type: "qq", setupCmd: "qq setup --project default", note: "需要 NapCat/OneBot" },
-  { name: "企业微信", type: "wecom", setupCmd: "wecom setup --project default", note: "需要公网 IP" },
-];
+function getPlatforms(): PlatformDef[] {
+  return [
+    { name: "微信", type: "weixin", setupCmd: "weixin setup --project default" },
+    { name: "飞书", type: "feishu", setupCmd: "feishu setup --project default" },
+    { name: "Telegram", type: "telegram", setupCmd: "telegram setup --project default", note: t('ccconnect.note_botfather') },
+    { name: "钉钉", type: "dingtalk", setupCmd: "dingtalk setup --project default" },
+    { name: "Discord", type: "discord", setupCmd: "discord setup --project default" },
+    { name: "Slack", type: "slack", setupCmd: "slack setup --project default" },
+    { name: "QQ", type: "qq", setupCmd: "qq setup --project default", note: t('ccconnect.note_napcat') },
+    { name: "企业微信", type: "wecom", setupCmd: "wecom setup --project default", note: t('ccconnect.note_wecom') },
+  ];
+}
 
 const CONFIG_PATH = join(homedir(), ".cc-connect", "config.toml");
 
@@ -110,7 +114,7 @@ function generateConfig(platform: PlatformDef): void {
 
   // Fresh config file
   const content = [
-    '# 全局：允许/禁止图片和文件回传到聊天（on = 开启，off = 关闭）',
+    t('ccconnect.config_comment_attachment'),
     'attachment_send = "on"',
     '',
     '[[projects]]',
@@ -151,40 +155,40 @@ function buildNoticeText(
 
   // ── Header ──
   if (isReconfigure) {
-    parts.push(`${platform.name} 已配置（配置不会丢失）`);
+    parts.push(t('ccconnect.reconfigured', { name: platform.name }));
     parts.push("");
-    parts.push(`配置文件：${CONFIG_PATH}`);
+    parts.push(t('ccconnect.config_path', { path: CONFIG_PATH }));
   } else {
-    parts.push(`✔ ${platform.name} 通道配置完成`);
+    parts.push(t('ccconnect.config_done', { name: platform.name }));
     parts.push("");
-    parts.push(`配置文件已写入：${CONFIG_PATH}`);
+    parts.push(t('ccconnect.config_written', { path: CONFIG_PATH }));
   }
 
   // ── Quick Reference (front & center) ──
   parts.push("");
-  parts.push("📋 常用管理指令（建议复制保存）：");
+  parts.push(t('ccconnect.quick_ref'));
   parts.push("");
-  parts.push(`  pm2 status                         查看运行状态（online = 正常）`);
-  parts.push(`  pm2 restart cc-connect             重启服务`);
-  parts.push(`  pm2 stop cc-connect                停止服务`);
-  parts.push(`  pm2 logs cc-connect                查看日志`);
-  parts.push(`  pm2 delete cc-connect              完全删除`);
+  parts.push(t('ccconnect.pm2_status'));
+  parts.push(t('ccconnect.pm2_restart'));
+  parts.push(t('ccconnect.pm2_stop'));
+  parts.push(t('ccconnect.pm2_logs'));
+  parts.push(t('ccconnect.pm2_delete'));
   if (isReconfigure) {
     parts.push("");
-    parts.push("  ⚠ 不要再次运行 /cc-connect 并选择相同平台，否则会覆盖已有配置！");
-    parts.push("    如需更换平台，请先删除 C:\\Users\\<用户名>\\.cc-connect\\config.toml");
+    parts.push(t('ccconnect.reconfigure_warning'));
+    parts.push(t('ccconnect.reconfigure_change'));
   }
 
   // ── Detailed setup steps ──
   parts.push("");
   parts.push(SEP);
   parts.push("");
-  parts.push("📋 初始化步骤（仅首次配置时需要，按顺序执行）：");
+  parts.push(t('ccconnect.init_steps'));
   parts.push("");
 
   // Step 1: Platform auth
   const noteTag = platform.note ? `（${platform.note}）` : "";
-  parts.push(`  第 1 步：平台认证${noteTag}`);
+  parts.push(t('ccconnect.step_platform_auth', { note: noteTag }));
   parts.push(`    cc-connect ${platform.setupCmd}`);
   parts.push("");
 
@@ -195,12 +199,12 @@ function buildNoticeText(
   }
   let stepNum = 2;
   for (const step of daemon.steps) {
-    const onceTag = step.once ? "（一次性）" : "";
+    const onceTag = step.once ? t('ccconnect.once_tag') : "";
     const isAutoDone = step.command.includes("cc-connect-startup.bat");
-    parts.push(`  第 ${stepNum} 步：${step.label}${onceTag}`);
+    parts.push(t('ccconnect.step_n', { num: stepNum, label: step.label, once: onceTag }));
     if (isAutoDone) {
       // Bat file already written by ScreamCode — not a command to run.
-      parts.push(`    ✅ 已自动完成，无需手动操作 （${step.command}）`);
+      parts.push(t('ccconnect.auto_done', { command: step.command }));
     } else {
       parts.push(`    ${step.command}`);
     }
@@ -211,17 +215,17 @@ function buildNoticeText(
   parts.push("");
   parts.push(SEP);
   parts.push("");
-  parts.push(`更多指令 (${daemon.method})：`);
+  parts.push(t('ccconnect.more_commands', { method: daemon.method }));
   for (const cmd of daemon.helpCommands) {
     parts.push(`  ${cmd}`);
   }
 
   parts.push("");
-  parts.push("💡 激活附件回传（让 Agent 能发图片和文件）：");
-  parts.push("  在聊天窗口发送 /bind setup");
+  parts.push(t('ccconnect.attachment_hint'));
+  parts.push(t('ccconnect.bind_setup'));
   parts.push("");
-  parts.push("💡 开机自启已通过 Startup 文件夹中的 cc-connect-startup.bat 实现。");
-  parts.push("  如需手动重启服务：pm2 resurrect");
+  parts.push(t('ccconnect.autostart_hint'));
+  parts.push(t('ccconnect.manual_restart'));
 
   return parts.join("\n");
 }
@@ -232,45 +236,45 @@ export async function handleChannelCommand(host: SlashCommandHost, _args: string
   const cc = checkCcConnect();
   if (!cc.installed) {
     host.showNotice(
-      "cc-connect 未安装",
-      "请先在终端运行：\n\n  npm install -g cc-connect\n\n安装完成后重新输入 /cc-connect 配置平台。",
+      t('ccconnect.not_installed'),
+      t('ccconnect.install_guide'),
     );
     return;
   }
 
   const configuredType = readConfiguredType();
 
-  const options: ChoiceOption[] = PLATFORMS.map((p) => {
+  const options: ChoiceOption[] = getPlatforms().map((p) => {
     const isConfigured = configuredType === p.type;
     return {
       value: p.type,
-      label: isConfigured ? `${p.name} ✔ 已配置` : p.name,
+      label: isConfigured ? t('ccconnect.already_configured', { name: p.name }) : p.name,
       description: p.note,
     };
   });
 
   const picker = new ChoicePickerComponent({
-    title: "cc-connect 快速通道配置",
-    hint: "选择要连接的平台，配置将自动写入 ~/.cc-connect/config.toml",
+    title: t('ccconnect.picker_title'),
+    hint: t('ccconnect.picker_hint'),
     options,
     currentValue: configuredType,
     colors: host.state.theme.colors,
     onSelect: (value: string) => {
       host.restoreEditor();
 
-      const platform = PLATFORMS.find((p) => p.type === value);
+      const platform = getPlatforms().find((p) => p.type === value);
       if (!platform) {
-        host.showError("内部错误");
+        host.showError(t('error.internal'));
         return;
       }
 
       if (configuredType === value) {
-        host.showNotice(`${platform.name} 已配置`, buildNoticeText(platform, true));
+        host.showNotice(t('ccconnect.reconfigured', { name: platform.name }), buildNoticeText(platform, true));
         return;
       }
 
       generateConfig(platform);
-      host.showNotice(`✔ ${platform.name} 通道配置完成`, buildNoticeText(platform, false));
+      host.showNotice(t('ccconnect.config_done', { name: platform.name }), buildNoticeText(platform, false));
     },
     onCancel: () => {
       host.restoreEditor();

@@ -1,5 +1,6 @@
 import type { Component } from '@earendil-works/pi-tui';
 
+import { t } from '@scream-code/config';
 import { WelcomeComponent } from '../components/chrome/welcome';
 import { AgentGroupComponent } from '../components/messages/agent-group';
 import { AssistantMessageComponent } from '../components/messages/assistant-message';
@@ -10,7 +11,7 @@ import { ThinkingComponent } from '../components/messages/thinking';
 import { isBusy } from '../utils/app-state';
 import { ToolCallComponent } from '../components/messages/tool-call';
 import { UserMessageComponent } from '../components/messages/user-message';
-import { NO_ACTIVE_SESSION_MESSAGE } from '../constant/scream-tui';
+import { getNoActiveSessionMessage } from '../constant/scream-tui';
 import type { TranscriptEntry } from '../types';
 import { formatErrorMessage } from '../utils/event-payload';
 import { getTranscriptComponentEntry } from '../utils/transcript-component-metadata';
@@ -23,26 +24,26 @@ export async function handleRevokeCommand(
   args: string = '',
 ): Promise<void> {
   if (isBusy(host.state.appState)) {
-    host.showError('无法在 streaming 中撤回 — 请先按 Esc 或 Ctrl-C 取消。');
+    host.showError(t('revoke.streaming'));
     return;
   }
 
   const count = parseRevokeCount(args);
   if (count === undefined) {
-    host.showError('用法：/revoke [数量]，数量为正整数。');
+    host.showError(t('revoke.usage'));
     return;
   }
 
   const session = host.session;
   if (session === undefined) {
-    host.showError(NO_ACTIVE_SESSION_MESSAGE);
+    host.showError(getNoActiveSessionMessage());
     return;
   }
 
   const entries = host.state.transcriptEntries;
   const lastUserIndex = findRevokeAnchorEntryIndex(entries, count);
   if (lastUserIndex === undefined) {
-    host.showError('没有可以撤回的内容。');
+    host.showError(t('revoke.nothing'));
     return;
   }
 
@@ -50,7 +51,7 @@ export async function handleRevokeCommand(
     await session.undoHistory(count);
   } catch (error) {
     const message = formatErrorMessage(error);
-    host.showError(`撤回失败：${message}`);
+    host.showError(t('revoke.failed', { msg: message }));
     return;
   }
 

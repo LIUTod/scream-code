@@ -1,4 +1,5 @@
 import type { Session, ScreamHarness } from '@scream-code/scream-code-sdk';
+import { t } from '@scream-code/config';
 import { GutterContainer } from '../components/chrome/gutter-container';
 import { CHROME_GUTTER } from '../constant/rendering';
 import type { AuthFlowController } from './auth-flow';
@@ -174,8 +175,8 @@ export class LifecycleController {
   private startExtractionCountdown(): void {
     if (this.memoryCountdownTimer !== undefined) return;
     this.host.showNotice(
-      '15 分钟未操作，即将整理会话记忆',
-      `按 Ctrl+W 取消（${Math.round(LifecycleController.MEMORY_COUNTDOWN_MS / 1000)} 秒后自动开始）`,
+      t('lifecycle.memory_countdown'),
+      t('lifecycle.memory_cancel_hint', { seconds: String(Math.round(LifecycleController.MEMORY_COUNTDOWN_MS / 1000)) }),
     );
     this.host.state.ui.requestRender();
     this.memoryCountdownTimer = setTimeout(() => {
@@ -188,7 +189,7 @@ export class LifecycleController {
     if (this.memoryCountdownTimer === undefined) return;
     clearTimeout(this.memoryCountdownTimer);
     this.memoryCountdownTimer = undefined;
-    this.host.showStatus('已取消记忆提取', this.host.state.theme.colors.textDim);
+    this.host.showStatus(t('lifecycle.memory_cancelled'), this.host.state.theme.colors.textDim);
     this.startMemoryIdleTimer();
   }
 
@@ -201,16 +202,16 @@ export class LifecycleController {
     if (state.appState.isReplaying) return;
     if (session === undefined) return;
 
-    this.host.showStatus('正在整理会话记忆...', state.theme.colors.textDim);
+    this.host.showStatus(t('lifecycle.memory_processing'), state.theme.colors.textDim);
     state.ui.requestRender();
     try {
       const count = await session.extractMemoriesOnExit();
       this.host.showStatus(
-        count > 0 ? `已沉淀 ${count} 条记忆至备忘录` : '本次无需沉淀新记忆',
+        count > 0 ? t('lifecycle.memory_done', { count: String(count) }) : t('lifecycle.memory_none'),
         state.theme.colors.textDim,
       );
     } catch {
-      this.host.showStatus('记忆整理失败，稍后再试', state.theme.colors.warning);
+      this.host.showStatus(t('lifecycle.memory_failed'), state.theme.colors.warning);
     } finally {
       this.lastMemoryExtractionTime = Date.now();
       state.ui.requestRender();

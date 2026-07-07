@@ -13,6 +13,7 @@
 import type { Component, TUI } from '@earendil-works/pi-tui';
 import { truncateToWidth, visibleWidth } from '@earendil-works/pi-tui';
 import chalk from 'chalk';
+import { t } from '@scream-code/config';
 
 import type { ColorPalette } from '#/tui/theme/colors';
 import type { AppState, RecentSession } from '#/tui/types';
@@ -22,11 +23,13 @@ import { BREATHE_CYCLE_MS, BREATHE_INTERVAL_MS, getBreathingFrame, resetBreathin
 const HUE_STOPS = 24;
 const SUB_STEPS = 5;
 
-const WELCOME_TIPS: readonly string[] = [
-  '/config  配置模型',
-  '/sessions  恢复历史会话',
-  '/  输入后打开快捷菜单',
-];
+function getWelcomeTips(): readonly string[] {
+  return [
+    t('welcome.config'),
+    t('welcome.sessions'),
+    t('welcome.quick_menu'),
+  ];
+}
 
 const WELCOME_SESSION_SLOTS = 3;
 const LEFT_COLUMN_WIDTH = 22;
@@ -103,13 +106,13 @@ function buildBreathingPalette(primaryHex: string, hueStops: number, subSteps: n
 
 function formatTimeAgo(timestamp: number): string {
   const seconds = Math.floor((Date.now() - timestamp) / 1000);
-  if (seconds < 60) return '刚刚';
+  if (seconds < 60) return t('welcome.just_now');
   const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}分钟前`;
+  if (minutes < 60) return t('welcome.minutes_ago', { minutes });
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}小时前`;
+  if (hours < 24) return t('welcome.hours_ago', { hours });
   const days = Math.floor(hours / 24);
-  return `${days}天前`;
+  return t('welcome.days_ago', { days });
 }
 
 function padSpaces(n: number): string {
@@ -190,7 +193,7 @@ export class WelcomeComponent implements Component {
     const isLoggedOut = !this.state.model;
     const activeModel = this.state.availableModels[this.state.model];
     const modelValue = isLoggedOut
-      ? chalk.hex(this.colors.warning)('未设置')
+      ? chalk.hex(this.colors.warning)(t('common.not_set'))
       : (activeModel?.displayName ?? activeModel?.model ?? this.state.model);
 
     const like = this.state.like;
@@ -200,8 +203,8 @@ export class WelcomeComponent implements Component {
         (like.other ?? '').trim(),
     );
     const likeValue = likeActive
-      ? chalk.hex(this.colors.success)('like已激活')
-      : chalk.hex(this.colors.textDim)('like未加载');
+      ? chalk.hex(this.colors.success)(t('welcome.like_active'))
+      : chalk.hex(this.colors.textDim)(t('welcome.like_inactive'));
 
     let versionValue: string;
     if (this.state.hasNewVersion && this.state.latestVersion !== null) {
@@ -219,14 +222,14 @@ export class WelcomeComponent implements Component {
 
     // Right column content.
     const tipLines: string[] = [];
-    for (const tip of WELCOME_TIPS) {
+    for (const tip of getWelcomeTips()) {
       tipLines.push(` ${dim('•')} ${muted(tip)}`);
     }
 
     const sessionLines: string[] = [];
     const sessions = this.recentSessions.slice(0, WELCOME_SESSION_SLOTS);
     if (sessions.length === 0) {
-      sessionLines.push(` ${dim('•')} ${muted('无最近会话')}`);
+      sessionLines.push(` ${dim('•')} ${muted(t('welcome.no_recent'))}`);
     } else {
       for (const session of sessions) {
         const name = session.title ?? session.id;
@@ -244,7 +247,7 @@ export class WelcomeComponent implements Component {
         ` ${titleColor('Tips')}`,
         ...tipLines,
         boxColor('─'.repeat(rightCol)),
-        ` ${titleColor('最近会话')}`,
+        ` ${titleColor(t('welcome.recent'))}`,
         ...sessionLines,
       ];
       separatorRow = 1 + tipLines.length;

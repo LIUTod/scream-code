@@ -13,3 +13,6 @@ export type {
 } from './identity';
 
 export { isRecord } from './utils';
+
+export { t, getLocale, setLocale } from './i18n';
+export type { Locale } from './i18n';

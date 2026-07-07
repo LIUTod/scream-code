@@ -1,11 +1,13 @@
+import { t } from '@scream-code/config';
 import { DEFAULT_OAUTH_PROVIDER_NAME } from '#/constant/app';
 
 export { DEFAULT_OAUTH_PROVIDER_NAME, PRODUCT_NAME } from '#/constant/app';
 
-export const LLM_NOT_SET_MESSAGE = 'LLM 未设置，运行 /config 自定义模型配置';
-export const NO_ACTIVE_SESSION_MESSAGE = '没有活动会话。运行 /config 自定义模型配置。';
-export const CTRL_D_HINT = '再次按 Ctrl+D 退出';
-export const CTRL_C_HINT = '再次按 Ctrl+C 退出';
+export function getLlmNotSetMessage(): string { return t('constant.llm_not_set'); }
+export function getNoActiveSessionMessage(): string { return t('constant.no_active_session'); }
+export function getCtrlDHint(): string { return t('constant.ctrl_d_hint'); }
+export function getCtrlCHint(): string { return t('constant.ctrl_c_hint'); }
+
 export const MAIN_AGENT_ID = 'main';
 export const EXIT_CONFIRM_WINDOW_MS = 1500;
 

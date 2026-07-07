@@ -1,5 +1,6 @@
 import type { BackgroundTaskInfo, Session } from '@scream-code/scream-code-sdk';
 import type { Component, ProcessTerminal, TUI } from '@earendil-works/pi-tui';
+import { t } from '@scream-code/config';
 
 import { TaskOutputViewer } from '../components/dialogs/task-output-viewer';
 import { TasksBrowserApp, type TasksFilter } from '../components/dialogs/tasks-browser';
@@ -52,7 +53,7 @@ export class TasksBrowserController {
 
     const session = this.host.session;
     if (session === undefined) {
-      this.host.showError('没有活动会话。');
+      this.host.showError(t('tasks.no_session'));
       return;
     }
 
@@ -61,7 +62,7 @@ export class TasksBrowserController {
       tasks = await session.listBackgroundTasks({ activeOnly: false });
     } catch (error) {
       this.host.showError(
-        `加载任务失败： ${error instanceof Error ? error.message : String(error)}`,
+        t('tasks.load_failed', { msg: error instanceof Error ? error.message : String(error) }),
       );
       return;
     }
@@ -152,7 +153,7 @@ export class TasksBrowserController {
     } catch (error) {
       if (!opts.silent) {
         const message = error instanceof Error ? error.message : String(error);
-        this.flash(`输出刷新失败： ${message}`);
+        this.flash(t('tasks.refresh_output_failed', { msg: message }));
       }
       return;
     }
@@ -213,7 +214,7 @@ export class TasksBrowserController {
     } catch (error) {
       if (!opts.silent) {
         this.flash(
-          `刷新失败： ${error instanceof Error ? error.message : String(error)}`,
+          t('tasks.refresh_failed', { msg: error instanceof Error ? error.message : String(error) }),
         );
       }
       return;
@@ -268,7 +269,7 @@ export class TasksBrowserController {
       },
       onStopIgnored: (taskId, reason) => {
         if (reason === 'terminal') {
-          this.flash(`${taskId} 已是终止状态 — 无需停止。`);
+          this.flash(t('tasks.already_stopped', { name: taskId }));
         }
       },
     };
@@ -293,7 +294,7 @@ export class TasksBrowserController {
   }
 
   private handleRefresh(): void {
-    this.flash('正在刷新…', 600);
+    this.flash(t('tasks.refreshing'), 600);
     void this.refresh();
   }
 
@@ -303,17 +304,17 @@ export class TasksBrowserController {
 
     const session = this.host.session;
     if (session === undefined) {
-      this.flash('没有活动会话。');
+      this.flash(t('tasks.no_session'));
       return;
     }
 
-    this.flash(`正在停止 ${taskId}…`, 1500);
+    this.flash(t('tasks.stopping', { name: taskId }), 1500);
     try {
-      await session.stopBackgroundTask(taskId, { reason: '用户发起停止' });
+      await session.stopBackgroundTask(taskId, { reason: t('tasks.user_stopped') });
       await this.refresh({ silent: true });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      this.flash(`停止失败： ${message}`);
+      this.flash(t('tasks.stop_failed', { msg: message }));
     }
   }
 
@@ -325,7 +326,7 @@ export class TasksBrowserController {
 
     const session = this.host.session;
     if (session === undefined) {
-      this.flash('没有活动会话。');
+      this.flash(t('tasks.no_session'));
       return;
     }
 
@@ -334,7 +335,7 @@ export class TasksBrowserController {
       output = await session.getBackgroundTaskOutput(taskId);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      this.flash(`无法打开输出： ${message}`);
+      this.flash(t('tasks.open_output_failed', { msg: message }));
       return;
     }
     const current = state.tasksBrowser;

@@ -19,6 +19,7 @@ import {
   type Focusable,
 } from '@earendil-works/pi-tui';
 import type { BackgroundTaskInfo, BackgroundTaskStatus } from '@scream-code/scream-code-sdk';
+import { t } from '@scream-code/config';
 import chalk from 'chalk';
 
 import type { ColorPalette } from '@/tui/theme/colors';
@@ -107,7 +108,7 @@ export class TaskOutputViewer extends Container implements Focusable {
   }
 
   private splitOutput(output: string): string[] {
-    return (output.length > 0 ? output : '[no output captured]').split('\n');
+    return (output.length > 0 ? output : t('taskviewer.no_output')).split('\n');
   }
 
   // ── input ──────────────────────────────────────────────────────────
@@ -246,10 +247,10 @@ export class TaskOutputViewer extends Container implements Focusable {
       ` ${String(lineFrom)}-${String(lineTo)} / ${String(total)} (${String(percent)}%) `,
     );
     const keys =
-      `${key('↑↓')} ${dim('行')}  ` +
-      `${key('PgUp/PgDn')} ${dim('页')}  ` +
-      `${key('g/G')} ${dim('顶/底')}  ` +
-      `${key('Q/Esc')} ${dim('返回')}`;
+      `${key('↑↓')} ${dim(t('taskviewer.key_line'))}  ` +
+      `${key('PgUp/PgDn')} ${dim(t('taskviewer.key_page'))}  ` +
+      `${key('g/G')} ${dim(t('taskviewer.key_top_bottom'))}  ` +
+      `${key('Q/Esc')} ${dim(t('approvalpreview.key_back'))}`;
     const left = ` ${keys}`;
     const leftW = visibleWidth(left);
     const rightW = visibleWidth(position);

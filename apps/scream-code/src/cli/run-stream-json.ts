@@ -20,6 +20,7 @@ import {
   resolveScreamHome,
   type Session,
 } from "@scream-code/scream-code-sdk";
+import { setLocale } from "@scream-code/config";
 
 import { loadTuiConfig, TuiConfigParseError } from "#/tui/config";
 import { createScreamCodeHostIdentity } from "./version";
@@ -460,9 +461,11 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
   let streamTuiConfig;
   try {
     streamTuiConfig = await loadTuiConfig();
+    setLocale(streamTuiConfig.language);
   } catch (error) {
     if (!(error instanceof TuiConfigParseError)) throw error;
     streamTuiConfig = error.fallback;
+    setLocale(streamTuiConfig.language);
   }
   const streamSubagentModels = streamTuiConfig.subagentModels;
   harness.setSubagentModelBindings(() => streamSubagentModels);

@@ -1,4 +1,5 @@
 import type { ModelAlias, ThinkingEffort } from '@scream-code/scream-code-sdk';
+import { t } from '@scream-code/config';
 import {
   Container,
   Key,
@@ -190,18 +191,18 @@ export class ModelSelectorComponent extends Container implements Focusable {
     const view = this.list.view();
     const choices = view.items;
 
-    const navParts = ['↑↓ 模型', '←→ 思考等级'];
-    if (view.page.pageCount > 1) navParts.push('PgUp/PgDn 翻页');
-    navParts.push('Enter 切换模型', 'Esc 取消');
+    const navParts = [t('model.nav_model'), t('model.nav_thinking')];
+    if (view.page.pageCount > 1) navParts.push(t('model.nav_page'));
+    navParts.push(t('model.nav_select'), t('model.nav_cancel'));
 
     const titleSuffix =
-      searchable && view.query.length === 0 ? chalk.hex(colors.textMuted)('  (输入搜索)') : '';
+      searchable && view.query.length === 0 ? chalk.hex(colors.textMuted)(`  ${t('model.search_placeholder')}`) : '';
     const lines: string[] = [
       chalk.hex(colors.primary)('─'.repeat(width)),
-      chalk.hex(colors.primary).bold(' 选择模型') + titleSuffix,
+      chalk.hex(colors.primary).bold(t('model.select_title')) + titleSuffix,
     ];
     if (searchable && view.query.length > 0) {
-      lines.push(chalk.hex(colors.primary)(' 搜索：') + chalk.hex(colors.text)(view.query));
+      lines.push(chalk.hex(colors.primary)(t('model.search_label')) + chalk.hex(colors.text)(view.query));
     }
     lines.push(chalk.hex(colors.textMuted)(` ${navParts.join(' · ')}`));
     lines.push('');
@@ -224,13 +225,13 @@ export class ModelSelectorComponent extends Container implements Focusable {
     }
 
     lines.push('');
-    lines.push(chalk.hex(colors.textMuted)(' Thinking（全局设置）'));
+    lines.push(chalk.hex(colors.textMuted)(t('model.thinking_global')));
     const selected = choices[view.selectedIndex];
     if (selected !== undefined) {
       lines.push(this.renderThinkingControl(selected.model));
     }
     lines.push('');
-    lines.push(chalk.hex(colors.textMuted)(' 多模态能力'));
+    lines.push(chalk.hex(colors.textMuted)(t('model.multimodal')));
     if (selected !== undefined) {
       lines.push(this.renderImageControl(selected.model));
       lines.push(this.renderVideoControl(selected.model));
@@ -273,24 +274,24 @@ export class ModelSelectorComponent extends Container implements Focusable {
     // Vision capability is read-only — it reflects whatever the catalog/config
     // declares. Users cannot override it from the model selector.
     if (modelHasImageIn(model)) {
-      return `  ${chalk.hex(colors.textMuted)('识图')}: ${chalk.hex(colors.success).bold('✓ 支持')}`;
+      return `  ${chalk.hex(colors.textMuted)(t('model.image'))}: ${chalk.hex(colors.success).bold(t('model.supported'))}`;
     }
-    return `  ${chalk.hex(colors.textMuted)('识图')}: ${chalk.hex(colors.textDim)('✗ 不支持')}`;
+    return `  ${chalk.hex(colors.textMuted)(t('model.image'))}: ${chalk.hex(colors.textDim)(t('model.not_supported'))}`;
   }
 
   private renderVideoControl(model: ModelAlias): string {
     const { colors } = this.opts;
     if (modelHasVideoIn(model)) {
-      return `  ${chalk.hex(colors.textMuted)('视频')}: ${chalk.hex(colors.success).bold('✓ 支持')}`;
+      return `  ${chalk.hex(colors.textMuted)(t('model.video'))}: ${chalk.hex(colors.success).bold(t('model.supported'))}`;
     }
-    return `  ${chalk.hex(colors.textMuted)('视频')}: ${chalk.hex(colors.textDim)('✗ 不支持')}`;
+    return `  ${chalk.hex(colors.textMuted)(t('model.video'))}: ${chalk.hex(colors.textDim)(t('model.not_supported'))}`;
   }
 
   private renderAudioControl(model: ModelAlias): string {
     const { colors } = this.opts;
     if (modelHasAudioIn(model)) {
-      return `  ${chalk.hex(colors.textMuted)('音频')}: ${chalk.hex(colors.success).bold('✓ 支持')}`;
+      return `  ${chalk.hex(colors.textMuted)(t('model.audio'))}: ${chalk.hex(colors.success).bold(t('model.supported'))}`;
     }
-    return `  ${chalk.hex(colors.textMuted)('音频')}: ${chalk.hex(colors.textDim)('✗ 不支持')}`;
+    return `  ${chalk.hex(colors.textMuted)(t('model.audio'))}: ${chalk.hex(colors.textDim)(t('model.not_supported'))}`;
   }
 }

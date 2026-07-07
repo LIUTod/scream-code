@@ -5,6 +5,7 @@ import chalk from 'chalk';
 
 import { formatTokenCount } from '#/utils/usage/usage-format';
 import { UsagePanelComponent } from './usage-panel';
+import { t } from '@scream-code/config';
 
 const WRAP_WIDTH = 72;
 const MAX_OBJECTIVE_LINES = 6;
@@ -60,13 +61,13 @@ function statusColor(status: string): string {
 function statusLabel(status: string): string {
   switch (status) {
     case 'active':
-      return '▶ 运行中';
+      return t('goalpanel.active');
     case 'complete':
-      return '✅ 已完成';
+      return t('goalpanel.complete');
     case 'blocked':
-      return '🚫 已阻塞';
+      return t('goalpanel.blocked');
     case 'paused':
-      return '⏸ 已暂停';
+      return t('goalpanel.paused');
     default:
       return status;
   }
@@ -120,7 +121,7 @@ export function buildGoalReportLines(goal: GoalSnapshotData, colors: { primary: 
     if (parts.length > 0) {
       lines.push(row('Stop', value(parts.join(', '))));
     } else {
-      lines.push(muted('  No stop condition — runs until evaluated complete.'));
+      lines.push(muted(t('goalpanel.no_stop_condition')));
     }
   }
 
@@ -131,12 +132,12 @@ function buildEmptyGoalLines(colors: { text: string; textDim: string }): string[
   const value = chalk.hex(colors.text);
   const muted = chalk.hex(colors.textDim);
   return [
-    value('未开启任务'),
+    value(t('goalpanel.no_goal')),
     '',
-    `${muted('/goal')} ${value('<目标描述>')}   ${muted('创建并启动目标')}`,
-    `${muted('/goal pause')}       ${muted('暂停当前目标')}`,
-    `${muted('/goal resume')}      ${muted('恢复已暂停的目标')}`,
-    `${muted('/goaloff')}          ${muted('取消当前目标')}`,
+    `${muted('/goal')} ${value(t('goalpanel.goal_placeholder'))}   ${muted(t('goalpanel.create_goal'))}`,
+    `${muted('/goal pause')}       ${muted(t('goalpanel.pause_goal'))}`,
+    `${muted('/goal resume')}      ${muted(t('goalpanel.resume_goal'))}`,
+    `${muted('/goaloff')}          ${muted(t('goalpanel.cancel_goal'))}`,
   ];
 }
 

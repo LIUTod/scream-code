@@ -25,6 +25,7 @@ import type {
   KnowledgeDocument,
   KnowledgeSource,
 } from '@scream-code/knowledge';
+import { t } from '@scream-code/config';
 
 const ELLIPSIS = '…';
 
@@ -190,7 +191,7 @@ export class KnowledgeDocumentTree extends Container implements Focusable {
           out.push({
             kind: 'chunk',
             sourceId: entry.source.id,
-            heading: chunk.heading ?? '(无标题)',
+            heading: chunk.heading ?? t('kdoctree.no_title'),
           });
         }
       }
@@ -248,7 +249,7 @@ export class KnowledgeDocumentTree extends Container implements Focusable {
 
     const out: string[] = [top];
     if (lines.length === 0) {
-      const empty = chalk.hex(this.colors.textMuted)('(空)');
+      const empty = chalk.hex(this.colors.textMuted)(t('kdoctree.empty'));
       out.push(
         chalk.hex(stroke)('│ ') +
           fitExactly(empty, innerWidth) +
@@ -319,11 +320,11 @@ export class KnowledgeDocumentTree extends Container implements Focusable {
     );
 
     const keys =
-      `${key('↑↓')} ${dim('移动')}  ` +
-      `${key('→/Enter')} ${dim('展开')}  ` +
-      `${key('←')} ${dim('折叠')}  ` +
-      `${key('g/G')} ${dim('顶/底')}  ` +
-      `${key('Q/Esc')} ${dim('返回')}`;
+      `${key('↑↓')} ${dim(t('kdoctree.move'))}  ` +
+      `${key('→/Enter')} ${dim(t('kdoctree.expand'))}  ` +
+      `${key('←')} ${dim(t('kdoctree.collapse'))}  ` +
+      `${key('g/G')} ${dim(t('kdoctree.top_bottom'))}  ` +
+      `${key('Q/Esc')} ${dim(t('kdoctree.back'))}`;
     const left = ` ${keys}`;
     const leftW = visibleWidth(left);
     const rightW = visibleWidth(position);

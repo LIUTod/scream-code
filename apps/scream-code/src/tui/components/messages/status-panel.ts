@@ -8,6 +8,7 @@ import type { ModelAlias, PermissionMode, SessionStatus, ThinkingEffort } from '
 import chalk from 'chalk';
 
 import { PRODUCT_NAME } from '#/constant/app';
+import { t } from '@scream-code/config';
 import type { ColorPalette } from '#/tui/theme/colors';
 import type { PlanModeState } from '#/tui/types';
 import {
@@ -54,7 +55,7 @@ function displayModelName(alias: string, models: Record<string, ModelAlias>): st
 
 function formatModelStatus(options: StatusReportOptions): string {
   const model = options.status?.model ?? options.model;
-  if (model.trim().length === 0) return '未设置';
+  if (model.trim().length === 0) return t('status.not_set');
 
   const level = options.status?.thinkingLevel ?? options.thinkingLevel;
   const thinking = level === 'off' ? 'off' : 'on';
@@ -105,18 +106,18 @@ export function buildStatusReportLines(options: StatusReportOptions): string[] {
           : 'plan'
         : 'off';
   const planModeLabel = planMode === 'off' ? 'off' : planMode === 'plan' ? 'plan' : 'fusion';
-  const sessionId = options.sessionId.trim().length > 0 ? options.sessionId : '无';
+  const sessionId = options.sessionId.trim().length > 0 ? options.sessionId : t('status.none');
   const rows: FieldRow[] = [
-    { label: '模型名称', value: formatModelStatus(options) },
-    { label: '工作目录', value: options.workDir },
-    { label: '权限模式', value: permission },
-    { label: '计划模式', value: planModeLabel },
-    { label: '会话编号', value: sessionId },
+    { label: t('status.model_name'), value: formatModelStatus(options) },
+    { label: t('status.work_dir'), value: options.workDir },
+    { label: t('status.permission_mode'), value: permission },
+    { label: t('status.plan_mode'), value: planModeLabel },
+    { label: t('status.session_id'), value: sessionId },
   ];
   const title = options.sessionTitle?.trim();
-  if (title !== undefined && title.length > 0) rows.push({ label: '会话标题', value: title });
+  if (title !== undefined && title.length > 0) rows.push({ label: t('status.session_title'), value: title });
   if (options.statusError !== undefined) {
-    rows.push({ label: '状态警告', value: options.statusError, severity: 'error' });
+    rows.push({ label: t('status.status_warning'), value: options.statusError, severity: 'error' });
   }
 
   const lines: string[] = [
@@ -127,7 +128,7 @@ export function buildStatusReportLines(options: StatusReportOptions): string[] {
 
   const { ratio, tokens, maxTokens } = contextValues(options);
   lines.push('');
-  lines.push(accent('上下文窗口'));
+  lines.push(accent(t('status.context_window')));
   if (maxTokens > 0) {
     const safeRatio = safeUsageRatio(ratio);
     const bar = renderProgressBar(safeRatio, 20);
@@ -137,7 +138,7 @@ export function buildStatusReportLines(options: StatusReportOptions): string[] {
         muted(`(${formatTokenCount(tokens)} / ${formatTokenCount(maxTokens)})`),
     );
   } else {
-    lines.push(`  ${muted('暂无上下文窗口数据。')}`);
+    lines.push(`  ${muted(t('status.no_context_data'))}`);
   }
 
   const managedSection = buildManagedUsageReportLines({

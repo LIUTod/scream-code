@@ -1,5 +1,7 @@
 import type { ContentPart, ContextMessage, PromptOrigin, ToolCall } from '@scream-code/scream-code-sdk';
 
+import { t } from '@scream-code/config';
+
 const HINT_KEYS = ['path', 'file_path', 'command', 'query', 'url', 'name', 'pattern'] as const;
 
 const MAX_HINT_WIDTH = 60;
@@ -42,13 +44,13 @@ export function formatContentPartMd(part: ContentPart): string {
       return part.text;
     case 'think':
       if (!part.think.trim()) return '';
-      return `<details><summary>思考</summary>\n\n${part.think}\n\n</details>`;
+      return `<details><summary>${t('export.thinking')}</summary>\n\n${part.think}\n\n</details>`;
     case 'image_url':
-      return '[图片]';
+      return t('export.image');
     case 'audio_url':
-      return '[音频]';
+      return t('export.audio');
     case 'video_url':
-      return '[视频]';
+      return t('export.video');
     default:
       return `[${(part as ContentPart).type}]`;
   }
@@ -57,7 +59,7 @@ export function formatContentPartMd(part: ContentPart): string {
 export function formatToolCallMd(tc: ToolCall): string {
   const argsRaw = tc.arguments ?? '{}';
   const hint = extractToolCallHint(argsRaw);
-  let title = `#### 工具调用: ${tc.name}`;
+  let title = t('export.tool_call', { name: tc.name });
   if (hint) {
     title += ` (\`${hint}\`)`;
   }
@@ -81,7 +83,7 @@ function formatToolResultMd(msg: ContextMessage, toolName: string, hint: string)
   }
   const resultText = parts.join('\n');
 
-  let summary = `工具结果: ${toolName}`;
+  let summary = t('export.tool_result', { name: toolName });
   if (hint) summary += ` (\`${hint}\`)`;
 
   return (
@@ -129,7 +131,7 @@ export function groupIntoTurns(history: readonly ContextMessage[]): ContextMessa
 }
 
 function formatTurnMd(messages: readonly ContextMessage[], turnNumber: number): string {
-  const lines: string[] = [`## 轮次 ${String(turnNumber)}`, ''];
+  const lines: string[] = [t('export.turn', { number: String(turnNumber) }), ''];
 
   const toolCallInfo = new Map<string, { name: string; hint: string }>();
   let assistantHeaderWritten = false;
@@ -138,7 +140,7 @@ function formatTurnMd(messages: readonly ContextMessage[], turnNumber: number): 
     if (isInternalMessage(msg)) continue;
 
     if (msg.role === 'user') {
-      lines.push('### 用户', '');
+      lines.push(t('export.user'), '');
       for (const part of msg.content) {
         const text = formatContentPartMd(part);
         if (text.trim()) {
@@ -147,7 +149,7 @@ function formatTurnMd(messages: readonly ContextMessage[], turnNumber: number): 
       }
     } else if (msg.role === 'assistant') {
       if (!assistantHeaderWritten) {
-        lines.push('### 助手', '');
+        lines.push(t('export.assistant'), '');
         assistantHeaderWritten = true;
       }
 
@@ -165,10 +167,10 @@ function formatTurnMd(messages: readonly ContextMessage[], turnNumber: number): 
       }
     } else if (msg.role === 'tool') {
       const tcId = msg.toolCallId ?? '';
-      const info = toolCallInfo.get(tcId) ?? { name: '未知', hint: '' };
+      const info = toolCallInfo.get(tcId) ?? { name: t('export.unknown'), hint: '' };
       lines.push(formatToolResultMd(msg, info.name, info.hint), '');
     } else if (msg.role === 'system') {
-      lines.push(`### 系统`, '');
+      lines.push(`### ${t('export.system')}`, '');
       for (const part of msg.content) {
         const text = formatContentPartMd(part);
         if (text.trim()) {
@@ -202,10 +204,10 @@ function buildOverview(
   );
 
   return [
-    '## 概览',
+    t('export.overview'),
     '',
-    topic ? `- **主题**: ${topic}` : '- **主题**: （空）',
-    `- **对话**: ${String(turns.length)} 轮 | ${String(toolCallCount)} 次工具调用`,
+    topic ? t('export.topic', { topic }) : t('export.topic_empty'),
+    t('export.conversation_stats', { turns: String(turns.length), toolCalls: String(toolCallCount) }),
     '',
     '---',
   ].join('\n');
@@ -231,7 +233,7 @@ export function buildExportMarkdown(input: BuildExportMarkdownInput): string {
     `token_count: ${String(tokenCount)}`,
     '---',
     '',
-    '# Scream 会话导出',
+    t('export.session_title'),
     '',
   ];
 

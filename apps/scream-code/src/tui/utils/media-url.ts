@@ -1,9 +1,11 @@
+import { t } from '@scream-code/config';
+
 export type MediaUrlKind = 'audio' | 'image' | 'video';
 
 const MEDIA_KIND_LABELS: Record<MediaUrlKind, string> = {
-  audio: '音频',
-  image: '图片',
-  video: '视频',
+  audio: t('mediaurl.audio'),
+  image: t('mediaurl.image'),
+  video: t('mediaurl.video'),
 };
 
 export function mediaUrlPartToText(kind: MediaUrlKind, url: string): string {

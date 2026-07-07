@@ -1,3 +1,5 @@
+import { t } from '@scream-code/config';
+
 export type LoopLimitConfig =
   | {
       kind: 'iterations';
@@ -47,7 +49,7 @@ const TIME_UNITS_MS: Record<string, number> = {
   hours: 3_600_000,
 };
 
-const LOOP_USAGE = '用法：/loop [次数|时长] [提示词]。示例：/loop 10、/loop 5m、/loop 10 继续优化';
+function getLoopUsage(): string { return t('looplimit.usage'); }
 
 /**
  * 将 `/loop` 参数解析为可选的前置限制和可选的内联提示词。
@@ -55,7 +57,7 @@ const LOOP_USAGE = '用法：/loop [次数|时长] [提示词]。示例：/loop 
  * 其他内容都视为提示词文本，因此 `/loop` 后面跟普通 prose 会开启无限制循环。
  * 失败时返回错误信息字符串。
  */
-const VERIFY_USAGE = '验证命令需用引号包裹，例如：--verify "pnpm lint"';
+function getVerifyUsage(): string { return t('looplimit.verify_usage'); }
 
 function extractVerifyFlag(
   input: string,
@@ -66,7 +68,7 @@ function extractVerifyFlag(
     const remaining = input.replace(match[0], '').replace(/\s{2,}/g, ' ').trim();
     return { verifier: { command }, remaining };
   }
-  if (/\b--verify\b/.test(input)) return VERIFY_USAGE;
+  if (/\b--verify\b/.test(input)) return getVerifyUsage();
   return undefined;
 }
 
@@ -96,7 +98,7 @@ export function parseLoopLimitArgs(args: string): ParsedLoopArgs | string {
   // 纯整数（可选正负号）：迭代次数，除非下一个 token 是时间单位（"10 minutes"）。
   if (/^[+-]?\d+$/.test(token)) {
     if (token.startsWith('-')) {
-      return '循环次数必须是正整数。';
+      return t('looplimit.iteration_must_be_positive');
     }
     if (rest) {
       const restTokens = rest.split(/\s+/);
@@ -123,13 +125,13 @@ export function parseLoopLimitArgs(args: string): ParsedLoopArgs | string {
   }
 
   // 看起来像限制但无法解析（"-1"、"1.5h"、"10x10"）。
-  return LOOP_USAGE;
+  return getLoopUsage();
 }
 
 function makeIterations(amountText: string): LoopLimitConfig | string {
   const amount = Number(amountText);
   if (!Number.isSafeInteger(amount) || amount <= 0) {
-    return '循环次数必须是正整数。';
+    return t('looplimit.iteration_must_be_positive');
   }
   return { kind: 'iterations', iterations: amount };
 }
@@ -137,7 +139,7 @@ function makeIterations(amountText: string): LoopLimitConfig | string {
 function makeDuration(amountText: string, unitMs: number): LoopLimitConfig | string {
   const amount = Number(amountText);
   if (!Number.isSafeInteger(amount) || amount <= 0) {
-    return '循环时长必须为正数。';
+    return t('looplimit.duration_must_be_positive');
   }
   return { kind: 'duration', durationMs: amount * unitMs };
 }
@@ -149,20 +151,20 @@ function parseCompoundDuration(token: string): LoopLimitConfig | string | undefi
   let totalMs = 0;
   for (const segment of segments) {
     const match = /^(\d+)([a-z]+)$/.exec(segment);
-    if (!match) return LOOP_USAGE;
+    if (!match) return getLoopUsage();
     const unitName = match[2];
-    if (unitName === undefined) return LOOP_USAGE;
+    if (unitName === undefined) return getLoopUsage();
     const unitMs = TIME_UNITS_MS[unitName];
     if (unitMs === undefined) {
-      return '循环时长单位必须是秒、分钟或小时。';
+      return t('looplimit.duration_unit_invalid');
     }
     const amount = Number(match[1]);
     if (!Number.isSafeInteger(amount) || amount <= 0) {
-      return '循环时长必须为正数。';
+      return t('looplimit.duration_must_be_positive');
     }
     totalMs += amount * unitMs;
   }
-  if (totalMs <= 0) return '循环时长必须为正数。';
+  if (totalMs <= 0) return t('looplimit.duration_must_be_positive');
   return { kind: 'duration', durationMs: totalMs };
 }
 
@@ -201,7 +203,7 @@ export function isLoopLimitExpired(
 
 export function describeLoopLimit(config: LoopLimitConfig): string {
   if (config.kind === 'iterations') {
-    return `${config.iterations} 次`;
+    return t('looplimit.iterations', { count: config.iterations });
   }
   return formatDuration(config.durationMs);
 }
@@ -211,22 +213,22 @@ export function describeLoopLimitRuntime(
   nowMs = Date.now(),
 ): string {
   if (limit.kind === 'iterations') {
-    return `剩余 ${limit.remaining}/${limit.initial} 次`;
+    return t('looplimit.remaining_iterations', { remaining: limit.remaining, initial: limit.initial });
   }
   const remainingMs = limit.deadlineMs - nowMs;
-  if (remainingMs <= 0) return '已过期';
-  return `剩余 ${formatDuration(remainingMs)}`;
+  if (remainingMs <= 0) return t('looplimit.expired');
+  return t('looplimit.remaining_duration', { duration: formatDuration(remainingMs) });
 }
 
 function formatDuration(durationMs: number): string {
   if (durationMs % 3_600_000 === 0) {
     const hours = durationMs / 3_600_000;
-    return `${hours} 小时`;
+    return t('looplimit.hours', { count: hours });
   }
   if (durationMs % 60_000 === 0) {
     const minutes = durationMs / 60_000;
-    return `${minutes} 分钟`;
+    return t('looplimit.minutes', { count: minutes });
   }
   const seconds = durationMs / 1_000;
-  return `${seconds} 秒`;
+  return t('looplimit.seconds', { count: seconds });
 }

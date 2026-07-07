@@ -1,4 +1,5 @@
 import type { PermissionMode, Session, ThinkingEffort } from '@scream-code/scream-code-sdk';
+import { t } from '@scream-code/config';
 
 import { EditorSelectorComponent } from '../components/dialogs/editor-selector';
 import { ModelSelectorComponent } from '../components/dialogs/model-selector';
@@ -7,10 +8,11 @@ import { SettingsSelectorComponent, type SettingsSelection } from '../components
 import { showSubagentModelBinder } from '../components/dialogs/subagent-model-binder';
 import { ThemeSelectorComponent } from '../components/dialogs/theme-selector';
 import { saveTuiConfig } from '../config';
+import { handleLanguageCommand } from './language';
 import { isBusy } from '../utils/app-state';
 import { formatTokenCount } from '#/utils/usage/usage-format';
 import type { Theme } from '../theme';
-import { NO_ACTIVE_SESSION_MESSAGE } from '../constant/scream-tui';
+import { getNoActiveSessionMessage } from '../constant/scream-tui';
 import { isTheme } from '../theme/index';
 import { formatErrorMessage } from '../utils/event-payload';
 import { showUsage } from './info';
@@ -64,14 +66,14 @@ export function shouldGuardCompaction(
 export async function handlePlanCommand(host: SlashCommandHost, args: string): Promise<void> {
   const session = host.session;
   if (session === undefined) {
-    host.showError(NO_ACTIVE_SESSION_MESSAGE);
+    host.showError(getNoActiveSessionMessage());
     return;
   }
 
   const subcmd = args.trim().toLowerCase();
   if (subcmd === 'clear') {
     await session.clearPlan();
-    host.showNotice('计划已清除');
+    host.showNotice(t('config.plan_cleared'));
     return;
   }
 
@@ -118,7 +120,7 @@ async function applyPlanMode(host: SlashCommandHost, session: Session, state: Pl
 export async function handleFusionPlanCommand(host: SlashCommandHost, args: string): Promise<void> {
   const session = host.session;
   if (session === undefined) {
-    host.showError(NO_ACTIVE_SESSION_MESSAGE);
+    host.showError(getNoActiveSessionMessage());
     return;
   }
 
@@ -138,7 +140,7 @@ export async function handleFusionPlanCommand(host: SlashCommandHost, args: stri
 export async function handleYoloCommand(host: SlashCommandHost, args: string): Promise<void> {
   const session = host.session;
   if (session === undefined) {
-    host.showError(NO_ACTIVE_SESSION_MESSAGE);
+    host.showError(getNoActiveSessionMessage());
     return;
   }
 
@@ -147,23 +149,23 @@ export async function handleYoloCommand(host: SlashCommandHost, args: string): P
 
   if (subcmd === 'on') {
     if (currentMode === 'yolo') {
-      host.showNotice('YES 模式已开启');
+      host.showNotice(t('config.yolo_already_on'));
       return;
     }
     await session.setPermission('yolo');
     host.setAppState({ permissionMode: 'yolo' });
-    host.showNotice('YES 模式：开启', '工作区工具自动批准。');
+    host.showNotice(t('config.yolo_on'), t('config.yolo_on_desc'));
     return;
   }
 
   if (subcmd === 'off') {
     if (currentMode !== 'yolo') {
-      host.showNotice('YES 模式已关闭');
+      host.showNotice(t('config.yolo_already_off'));
       return;
     }
     await session.setPermission('manual');
     host.setAppState({ permissionMode: 'manual' });
-    host.showNotice('YES 模式：关闭');
+    host.showNotice(t('config.yolo_off'));
     return;
   }
 
@@ -171,18 +173,18 @@ export async function handleYoloCommand(host: SlashCommandHost, args: string): P
   if (currentMode === 'yolo') {
     await session.setPermission('manual');
     host.setAppState({ permissionMode: 'manual' });
-    host.showNotice('YES 模式：关闭');
+    host.showNotice(t('config.yolo_off'));
   } else {
     await session.setPermission('yolo');
     host.setAppState({ permissionMode: 'yolo' });
-    host.showNotice('YES 模式：开启', '工作区工具已自动批准。');
+    host.showNotice(t('config.yolo_toggle_on'), t('config.yolo_toggle_on_desc'));
   }
 }
 
 export async function handleAutoCommand(host: SlashCommandHost, args: string): Promise<void> {
   const session = host.session;
   if (session === undefined) {
-    host.showError(NO_ACTIVE_SESSION_MESSAGE);
+    host.showError(getNoActiveSessionMessage());
     return;
   }
 
@@ -191,23 +193,23 @@ export async function handleAutoCommand(host: SlashCommandHost, args: string): P
 
   if (subcmd === 'on') {
     if (currentMode === 'auto') {
-      host.showNotice('自动模式已开启');
+      host.showNotice(t('config.auto_already_on'));
       return;
     }
     await session.setPermission('auto');
     host.setAppState({ permissionMode: 'auto' });
-    host.showNotice('自动模式：开启', '工具自动批准。代理不会提问。');
+    host.showNotice(t('config.auto_on'), t('config.auto_on_desc'));
     return;
   }
 
   if (subcmd === 'off') {
     if (currentMode !== 'auto') {
-      host.showNotice('自动模式已关闭');
+      host.showNotice(t('config.auto_already_off'));
       return;
     }
     await session.setPermission('manual');
     host.setAppState({ permissionMode: 'manual' });
-    host.showNotice('自动模式：关闭');
+    host.showNotice(t('config.auto_off'));
     return;
   }
 
@@ -215,18 +217,18 @@ export async function handleAutoCommand(host: SlashCommandHost, args: string): P
   if (currentMode === 'auto') {
     await session.setPermission('manual');
     host.setAppState({ permissionMode: 'manual' });
-    host.showNotice('自动模式：关闭');
+    host.showNotice(t('config.auto_off'));
   } else {
     await session.setPermission('auto');
     host.setAppState({ permissionMode: 'auto' });
-    host.showNotice('自动模式：开启', '工具自动批准。代理不会提问。');
+    host.showNotice(t('config.auto_toggle_on'), t('config.auto_toggle_on_desc'));
   }
 }
 
 export async function handleWolfpackCommand(host: SlashCommandHost, args: string): Promise<void> {
   const session = host.session;
   if (session === undefined) {
-    host.showError(NO_ACTIVE_SESSION_MESSAGE);
+    host.showError(getNoActiveSessionMessage());
     return;
   }
 
@@ -248,10 +250,10 @@ async function applyWolfpackMode(host: SlashCommandHost, session: Session, enabl
     await session.setWolfpackMode(enabled);
     host.setAppState({ wolfpackMode: enabled });
     if (enabled) {
-      host.showNotice('WolfPack 模式：开启', '批量并发代理已激活。');
+      host.showNotice(t('wolfpack.on'), t('wolfpack.on_desc'));
       return;
     }
-    host.showNotice('WolfPack 模式：关闭');
+    host.showNotice(t('wolfpack.off'));
   } catch (error) {
     const msg = formatErrorMessage(error);
     host.showError(`Failed to set wolfpack mode: ${msg}`);
@@ -261,7 +263,7 @@ async function applyWolfpackMode(host: SlashCommandHost, session: Session, enabl
 export async function handleCompactCommand(host: SlashCommandHost, args: string): Promise<void> {
   const session = host.session;
   if (session === undefined) {
-    host.showError(NO_ACTIVE_SESSION_MESSAGE);
+    host.showError(getNoActiveSessionMessage());
     return;
   }
   const customInstruction = args.trim() || undefined;
@@ -356,6 +358,7 @@ async function applyEditorChoice(host: SlashCommandHost, value: string): Promise
   try {
     await saveTuiConfig({
       theme: host.state.appState.theme,
+      language: host.state.appState.language,
       editorCommand,
       notifications: host.state.appState.notifications,
       like: host.state.appState.like,
@@ -589,6 +592,7 @@ async function applyThemeChoice(host: SlashCommandHost, theme: Theme): Promise<v
   try {
     await saveTuiConfig({
       theme,
+      language: host.state.appState.language,
       editorCommand: host.state.appState.editorCommand,
       notifications: host.state.appState.notifications,
       like: host.state.appState.like,
@@ -662,6 +666,7 @@ function handleSettingsSelection(host: SlashCommandHost, value: SettingsSelectio
   host.restoreEditor();
   switch (value) {
     case 'model': showModelPicker(host); return;
+    case 'language': handleLanguageCommand(host); return;
     case 'permission': showPermissionPicker(host); return;
     case 'theme': showThemePicker(host); return;
     case 'editor': showEditorPicker(host); return;

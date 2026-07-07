@@ -15,6 +15,7 @@ import {
   visibleWidth,
 } from '@earendil-works/pi-tui';
 import chalk from 'chalk';
+import { t } from '@scream-code/config';
 
 import { highlightLines, langFromPath } from '#/tui/components/media/code-highlight';
 import { renderDiffLinesClustered } from '#/tui/components/media/diff-preview';
@@ -175,17 +176,17 @@ function isDuplicateBriefBlock(block: DisplayBlock, description: string): boolea
 function headerFor(toolName: string): string {
   switch (toolName) {
     case 'Bash':
-      return '是否执行此命令？';
+      return t('approval.header.command');
     case 'Write':
-      return '是否写入此文件？';
+      return t('approval.header.file_write');
     case 'Edit':
-      return '是否应用这些编辑？';
+      return t('approval.header.file_edit');
     case 'TaskStop':
-      return '是否停止此任务？';
+      return t('approval.header.stop_task');
     case 'ExitPlanMode':
-      return '是否按此计划构建？';
+      return t('approval.header.plan');
     default:
-      return `是否批准 ${toolName}？`;
+      return t('approval.header.generic', { name: toolName });
   }
 }
 
@@ -371,7 +372,7 @@ export class ApprovalPanelComponent extends Container implements Focusable {
 
     lines.push('');
     if (this.feedbackMode) {
-      lines.push(indent(dim('输入反馈 · ↵ 提交。')));
+      lines.push(indent(dim(t('approval.feedback_hint'))));
     } else {
       const expandHint = hasPreviewable ? ' · ctrl+e preview' : '';
       lines.push(
