@@ -4,17 +4,21 @@ import { t } from '@scream-code/config';
 import type { ApprovalPanelResponse } from '#/tui/components/dialogs/approval-panel';
 import type { ApprovalPanelChoice, ApprovalPanelData, DisplayBlock } from '#/tui/reverse-rpc/types';
 
-const DEFAULT_APPROVAL_CHOICES: ApprovalPanelChoice[] = [
-  { label: t('approval.allow_once'), response: 'approved' },
-  { label: t('approval.allow_session'), response: 'approved_for_session' },
-  { label: t('approval.deny'), response: 'rejected' },
-  { label: t('approval.deny_feedback'), response: 'rejected', requires_feedback: true },
-];
+function getDefaultApprovalChoices(): ApprovalPanelChoice[] {
+  return [
+    { label: t('approval.allow_once'), response: 'approved' },
+    { label: t('approval.allow_session'), response: 'approved_for_session' },
+    { label: t('approval.deny'), response: 'rejected' },
+    { label: t('approval.deny_feedback'), response: 'rejected', requires_feedback: true },
+  ];
+}
 
-const PLAN_REJECT_CHOICES: ApprovalPanelChoice[] = [
-  { label: t('approval.deny'), response: 'rejected', selected_label: t('approval.deny') },
-  { label: t('approval.revise'), response: 'rejected', selected_label: t('approval.revise'), requires_feedback: true },
-];
+function getPlanRejectChoices(): ApprovalPanelChoice[] {
+  return [
+    { label: t('approval.deny'), response: 'rejected', selected_label: t('approval.deny') },
+    { label: t('approval.revise'), response: 'rejected', selected_label: t('approval.revise'), requires_feedback: true },
+  ];
+}
 
 export function adaptApprovalRequest(event: ApprovalRequest): ApprovalPanelData {
   const resolved = resolveDisplay(event.toolName, event.display, event.action);
@@ -209,19 +213,21 @@ function describeApproval(display: ToolInputDisplay, action: string): string {
   }
 }
 
-const DANGER_PATTERNS: Array<{ pattern: RegExp; label: string }> = [
-  { pattern: /\brm\s+(-[a-zA-Z]*[rRfF][a-zA-Z]*|--recursive|--force)/i, label: t('approval.danger.recursive_delete') },
-  { pattern: /\bsudo\b/i, label: 'sudo' },
-  { pattern: /\b(curl|wget)\b[^|]*\|\s*(sh|bash|zsh)\b/i, label: t('approval.danger.pipe_to_shell') },
-  { pattern: /\bdd\b[^|]*\bof=/i, label: t('approval.danger.dd_write') },
-  { pattern: /\bmkfs\b/i, label: 'mkfs' },
-  { pattern: />\s*\/dev\/(sd|nvme|disk|hd)/i, label: t('approval.danger.raw_device') },
-  { pattern: /\bchmod\s+-R?\s*777\b/i, label: 'chmod 777' },
-  { pattern: /:\(\)\s*\{\s*:\|:&\s*\}/i, label: t('approval.danger.fork_bomb') },
-];
+function getDangerPatterns(): Array<{ pattern: RegExp; label: string }> {
+  return [
+    { pattern: /\brm\s+(-[a-zA-Z]*[rRfF][a-zA-Z]*|--recursive|--force)/i, label: t('approval.danger.recursive_delete') },
+    { pattern: /\bsudo\b/i, label: 'sudo' },
+    { pattern: /\b(curl|wget)\b[^|]*\|\s*(sh|bash|zsh)\b/i, label: t('approval.danger.pipe_to_shell') },
+    { pattern: /\bdd\b[^|]*\bof=/i, label: t('approval.danger.dd_write') },
+    { pattern: /\bmkfs\b/i, label: 'mkfs' },
+    { pattern: />\s*\/dev\/(sd|nvme|disk|hd)/i, label: t('approval.danger.raw_device') },
+    { pattern: /\bchmod\s+-R?\s*777\b/i, label: 'chmod 777' },
+    { pattern: /:\(\)\s*\{\s*:\|:&\s*\}/i, label: t('approval.danger.fork_bomb') },
+  ];
+}
 
 function detectDanger(command: string): string | undefined {
-  for (const { pattern, label } of DANGER_PATTERNS) {
+  for (const { pattern, label } of getDangerPatterns()) {
     if (pattern.test(command)) return label;
   }
   return undefined;
@@ -337,7 +343,7 @@ function adaptChoices(toolName: string, display: ToolInputDisplay): ApprovalPane
     return adaptPlanReviewChoices(display);
   }
 
-  return DEFAULT_APPROVAL_CHOICES.map((choice) => cloneChoice(choice));
+  return getDefaultApprovalChoices().map((choice) => cloneChoice(choice));
 }
 
 function adaptPlanReviewChoices(display: ToolInputDisplay): ApprovalPanelChoice[] {
@@ -349,7 +355,7 @@ function adaptPlanReviewChoices(display: ToolInputDisplay): ApprovalPanelChoice[
           selected_label: option.label,
         }))
       : [{ label: t('approval.approve'), response: 'approved' as const, selected_label: t('approval.approve') }];
-  return [...optionChoices, ...PLAN_REJECT_CHOICES].map((choice) => cloneChoice(choice));
+  return [...optionChoices, ...getPlanRejectChoices()].map((choice) => cloneChoice(choice));
 }
 
 function cloneChoice(choice: ApprovalPanelChoice): ApprovalPanelChoice {
