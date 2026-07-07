@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <a href="#中文说明"><img src="https://img.shields.io/badge/README-中文-blue?style=for-the-badge" alt="Chinese README"></a>
+  <a href="#中文说明"><img src="https://img.shields.io/badge/点击查看中文版说明-blue?style=for-the-badge" alt="Chinese README"></a>
 </p>
 
 <p align="center">
