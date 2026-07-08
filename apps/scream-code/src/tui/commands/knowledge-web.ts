@@ -232,7 +232,7 @@ function resize(){
   ctx.setTransform(DPR,0,0,DPR,0,0);
 }
 resize();
-window.addEventListener('resize',resize);
+window.addEventListener('resize',function(){resize();markDirty()});
 
 // 相机
 var camRotX=0.25,camRotY=0.4;
@@ -612,6 +612,7 @@ function startInertia(){
     camRotY+=velRotY;
     camRotX=Math.max(-1.2,Math.min(1.2,camRotX+velRotX));
     velRotX*=0.94;velRotY*=0.94;
+    markDirty();
     inertiaRAF=requestAnimationFrame(step);
   }
   inertiaRAF=requestAnimationFrame(step);
@@ -689,14 +690,16 @@ canvas.addEventListener('mousemove',function(e){
     velRotY=(e.clientX-lastMoveX)/dt*0.005;
     velRotX=(e.clientY-lastMoveY)/dt*0.005;
     lastMoveTime=now;lastMoveX=e.clientX;lastMoveY=e.clientY;
+    markDirty();
   }else if(isPanning){
     var pdx=e.clientX-dragStart.x,pdy=e.clientY-dragStart.y;
     var scale=fov/camDist;
     camTargetX=dragStart.panX - pdx*scale;
     camTargetY=dragStart.panY + pdy*scale;
+    markDirty();
   }else{
     var id=pickNode(e.clientX,e.clientY);
-    if(id!==hoveredId){hoveredId=id;canvas.style.cursor=id?'pointer':'grab';}
+    if(id!==hoveredId){hoveredId=id;canvas.style.cursor=id?'pointer':'grab';markDirty();}
     if(id)showTooltip(e.clientX,e.clientY,id);
     else hideTooltip();
   }
@@ -720,10 +723,10 @@ canvas.addEventListener('mouseup',function(e){
         if(data.kind==='event'&&!expEv.has(id))expEv.add(id);
       }
       selId=id;navStack=[];
-      focusOn(id);rebuildLabels();
+      focusOn(id);rebuildLabels();markDirty();
     },250);
   }else{
-    selId=null;rebuildLabels();closeModal();
+    selId=null;rebuildLabels();closeModal();markDirty();
   }
 });
 
@@ -739,13 +742,13 @@ canvas.addEventListener('dblclick',function(e){
     if(data){
       if(!expEnt.has(id)&&!expEv.has(id)){expEnt.add(id);}
       selId=id;navStack=[];
-      focusOn(id);rebuildLabels();
+      focusOn(id);rebuildLabels();markDirty();
       showModal(id,data.kind);
     }
   }else{
     expEnt.clear();expEv.clear();selId=null;
     if(graphData)graphData.entities.forEach(function(en){expEnt.add(en.id)});
-    closeModal();rebuildLabels();fitView();
+    closeModal();rebuildLabels();fitView();markDirty();
   }
 });
 
@@ -763,6 +766,7 @@ canvas.addEventListener('wheel',function(e){
   var scaleAfter=fov/camDist;
   camTargetX=worldX - (mx-W/2)/scaleAfter;
   camTargetY=worldY + (my-H/2)/scaleAfter;
+  markDirty();
 },{passive:false});
 
 function focusOn(id){
@@ -782,6 +786,7 @@ function focusOn(id){
     camTargetY=startTy+(endTy-startTy)*e;
     camTargetZ=startTz+(endTz-startTz)*e;
     camDist=startDist+(endDist-startDist)*e;
+    markDirty();
     if(t<1)focusAnim=requestAnimationFrame(step);
   }
   focusAnim=requestAnimationFrame(step);
@@ -792,7 +797,7 @@ function fitView(){
   var ids=[];
   vis.entities.forEach(function(id){ids.push(id)});
   vis.events.forEach(function(id){ids.push(id)});
-  if(!ids.length){camTargetX=0;camTargetY=0;camTargetZ=0;camDist=700;return}
+  if(!ids.length){camTargetX=0;camTargetY=0;camTargetZ=0;camDist=700;markDirty();return}
   var x0=Infinity,x1=-Infinity,y0=Infinity,y1=-Infinity,z0=Infinity,z1=-Infinity;
   ids.forEach(function(id){var p=nodePositions[id];if(!p)return;if(p.x<x0)x0=p.x;if(p.x>x1)x1=p.x;if(p.y<y0)y0=p.y;if(p.y>y1)y1=p.y;if(p.z<z0)z0=p.z;if(p.z>z1)z1=p.z});
   var cx=(x0+x1)/2,cy=(y0+y1)/2,cz=(z0+z1)/2;
@@ -813,6 +818,7 @@ function fitView(){
     camDist=startDist+(endDist-startDist)*e;
     camRotX=startRotX+(endRotX-startRotX)*e;
     camRotY=startRotY+(endRotY-startRotY)*e;
+    markDirty();
     if(t<1)focusAnim=requestAnimationFrame(step);
   }
   focusAnim=requestAnimationFrame(step);
@@ -827,6 +833,7 @@ function startAutoRotate(){
     var t=Math.min(1,elapsed/duration);
     var fade=1-t;
     camRotY+=speed*fade;
+    markDirty();
     if(t<1)autoRotRAF=requestAnimationFrame(step);
   }
   autoRotRAF=requestAnimationFrame(step);
@@ -889,14 +896,14 @@ function esc(s){if(!s)return'';return String(s).replace(/&/g,'&amp;').replace(/<
 document.getElementById('btn-reset').onclick=function(){
   expEnt.clear();expEv.clear();selId=null;
   if(graphData)graphData.entities.forEach(function(e){expEnt.add(e.id)});
-  closeModal();rebuildLabels();fitView();
+  closeModal();rebuildLabels();fitView();markDirty();
 };
 document.getElementById('btn-expand').onclick=function(){
   if(graphData){
     graphData.entities.forEach(function(e){expEnt.add(e.id)});
     graphData.events.forEach(function(e){expEv.add(e.id)});
   }
-  selId=null;closeModal();rebuildLabels();fitView();
+  selId=null;closeModal();rebuildLabels();fitView();markDirty();
 };
 document.getElementById('btn-close').onclick=closeModal;
 document.getElementById('modal-mask').addEventListener('click',closeModal);
@@ -938,11 +945,12 @@ window.addEventListener('keydown',function(e){
   if(e.key==='Escape'){
     if(document.getElementById('modal').classList.contains('open'))closeModal();
     else{selId=null;rebuildLabels()}
+    markDirty();
   }else if(e.key===' '){
     e.preventDefault();
     expEnt.clear();expEv.clear();selId=null;
     if(graphData)graphData.entities.forEach(function(en){expEnt.add(en.id)});
-    closeModal();rebuildLabels();fitView();
+    closeModal();rebuildLabels();fitView();markDirty();
   }else if(e.key==='ArrowRight'||e.key==='ArrowDown'){e.preventDefault();navigateRelated('next');}
   else if(e.key==='ArrowLeft'||e.key==='ArrowUp'){e.preventDefault();navigateRelated('prev');}
 });
@@ -952,7 +960,7 @@ var searchInput=document.getElementById('search-input');
 var searchQuery='',searchMatches=null;
 searchInput.addEventListener('input',function(){
   searchQuery=searchInput.value.trim().toLowerCase();
-  if(!searchQuery){searchMatches=null;rebuildLabels();return}
+  if(!searchQuery){searchMatches=null;rebuildLabels();markDirty();return}
   searchMatches=new Set();
   var firstMatch=null;
   if(graphData){
@@ -983,9 +991,10 @@ searchInput.addEventListener('input',function(){
     });
     selId=firstMatch;focusOn(firstMatch);rebuildLabels();
   }
+  markDirty();
 });
 searchInput.addEventListener('keydown',function(e){
-  if(e.key==='Escape'){searchInput.value='';searchQuery='';searchMatches=null;rebuildLabels();searchInput.blur();}
+  if(e.key==='Escape'){searchInput.value='';searchQuery='';searchMatches=null;rebuildLabels();searchInput.blur();markDirty();}
   else if(e.key==='Enter'&&searchMatches&&searchMatches.size>0){
     var first=Array.from(searchMatches)[0];
     var data=nodeData.find(function(n){return n.id===first});
@@ -1065,15 +1074,20 @@ miniCanvas.addEventListener('click',function(e){
     var e=t<.5?2*t*t:1-Math.pow(-2*t+2,2)/2;
     camTargetX=startTx+(worldX-startTx)*e;
     camTargetZ=startTz+(worldZ-startTz)*e;
+    markDirty();
     if(t<1)focusAnim=requestAnimationFrame(step);
   }
   focusAnim=requestAnimationFrame(step);
 });
 
 // ─── 主渲染循环 ──────────────────────────────────────
+var dirty=true;
+function markDirty(){dirty=true}
 function animate(){
   requestAnimationFrame(animate);
   if(!graphData)return;
+  if(!dirty)return;
+  dirty=false;
   frameTime=performance.now();
   ctx.clearRect(0,0,W,H);
   ctx.fillStyle='#fafafa';
@@ -1136,6 +1150,7 @@ fetch('/api/graph').then(function(r){return r.json()}).then(function(data){
   fitView();
   animate();
   startAutoRotate();
+  new EventSource('/api/heartbeat');
 }).catch(function(err){
   document.getElementById('loading').style.display='none';
   errorMsg.style.display='block';
@@ -1232,6 +1247,20 @@ export async function handleWeb(host: SlashCommandHost): Promise<void> {
   const server = createServer((req, res) => {
     if (req.url === '/api/graph') {
       void serveGraphJSON(store, res);
+      return;
+    }
+    if (req.url === '/api/heartbeat') {
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-store',
+        Connection: 'keep-alive',
+      });
+      const timer = setInterval(() => { res.write(': ping\n\n'); }, 15_000);
+      res.on('close', () => {
+        clearInterval(timer);
+        server.close();
+      });
+      res.write(': ok\n\n');
       return;
     }
     serveHTML(res, getLocale());
