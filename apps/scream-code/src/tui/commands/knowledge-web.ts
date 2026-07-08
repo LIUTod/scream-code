@@ -250,33 +250,6 @@ var graphData;
 var nodePositions={};
 var nodeData=[];
 
-// 节点漂浮参数：每个节点独立相位，渲染时叠加微小偏移
-var floatParams={};
-var frameTime=0;
-function ensureFloat(id){
-  if(floatParams[id])return;
-  floatParams[id]={
-    phaseX:Math.random()*Math.PI*2,
-    phaseY:Math.random()*Math.PI*2,
-    phaseZ:Math.random()*Math.PI*2,
-    ampX:1.5+Math.random()*2.5,
-    ampY:1.5+Math.random()*2.5,
-    ampZ:1+Math.random()*2,
-    speed:0.0004+Math.random()*0.0004
-  };
-}
-// 返回某节点当前帧的漂浮后位置（不修改原 nodePositions，避免拾取错位）
-function floatingPos(id,t){
-  var p=nodePositions[id];if(!p)return p;
-  var f=floatParams[id];if(!f)return p;
-  if(t===undefined)t=frameTime;
-  return{
-    x:p.x+Math.sin(t*f.speed+f.phaseX)*f.ampX,
-    y:p.y+Math.cos(t*f.speed*1.1+f.phaseY)*f.ampY,
-    z:p.z+Math.sin(t*f.speed*0.8+f.phaseZ)*f.ampZ
-  };
-}
-
 // ─── 3D 投影 ──────────────────────────────────────────
 function project(p){
   var cosY=Math.cos(camRotY),sinY=Math.sin(camRotY);
@@ -380,10 +353,6 @@ function buildNebulae(){
         baseX:p.x+r*Math.sin(phi)*Math.cos(theta),
         baseY:p.y+r*Math.sin(phi)*Math.sin(theta),
         baseZ:p.z+r*Math.cos(phi),
-        phase:Math.random()*Math.PI*2,
-        ampX:2+Math.random()*4,
-        ampY:2+Math.random()*4,
-        ampZ:1+Math.random()*3,
         size:0.5+Math.random()*0.8,
         op:0.15+Math.random()*0.2
       });
@@ -391,19 +360,14 @@ function buildNebulae(){
   });
 }
 
-function drawNebulae(t){
+function drawNebulae(){
   ctx.save();
   for(var i=0;i<nebulaDots.length;i++){
     var d=nebulaDots[i];
-    // 不规则漂浮
-    var x=d.baseX+Math.sin(t*0.0003+d.phase)*d.ampX;
-    var y=d.baseY+Math.cos(t*0.0004+d.phase*1.3)*d.ampY;
-    var z=d.baseZ+Math.sin(t*0.0002+d.phase*0.7)*d.ampZ;
-    var p=project({x:x,y:y,z:z});
+    var p=project({x:d.baseX,y:d.baseY,z:d.baseZ});
     if(p.z<=0)continue;
     var r=Math.max(0.3,d.size*p.scale*0.5);
     if(r<0.4)continue;
-    // 远处淡，近处稍清晰
     var alpha=d.op*Math.min(1,p.scale*1.5);
     ctx.fillStyle='rgba(0,0,0,'+alpha.toFixed(3)+')';
     ctx.beginPath();
@@ -580,7 +544,7 @@ function computeProjMap(){
   vis.events.forEach(function(id){visAll.add(id)});
   var map={allIds:visAll};
   visAll.forEach(function(id){
-    var p=floatingPos(id);
+    var p=nodePositions[id];
     if(p)map[id]=project(p);
   });
   return map;
@@ -651,7 +615,7 @@ function pickNode(sx,sy){
   vis.events.forEach(function(id){visAll.add(id)});
   var best=null,bestDist=Infinity;
   visAll.forEach(function(id){
-    var p=floatingPos(id);if(!p)return;
+    var p=nodePositions[id];if(!p)return;
     var sp=project(p);
     if(sp.z<=0)return;
     var data=nodeData.find(function(n){return n.id===id});
@@ -1088,11 +1052,10 @@ function animate(){
   if(!graphData)return;
   if(!dirty)return;
   dirty=false;
-  frameTime=performance.now();
   ctx.clearRect(0,0,W,H);
   ctx.fillStyle='#fafafa';
   ctx.fillRect(0,0,W,H);
-  drawNebulae(frameTime);
+  drawNebulae();
   var projMap=computeProjMap();
   var connSet=computeConnSet(projMap.allIds);
   drawEdges(projMap,connSet);
@@ -1145,7 +1108,6 @@ fetch('/api/graph').then(function(r){return r.json()}).then(function(data){
   });
   forceLayout3D();
   buildNebulae();
-  nodeData.forEach(function(n){ensureFloat(n.id)});
   rebuildLabels();
   fitView();
   animate();
