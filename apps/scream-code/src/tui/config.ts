@@ -15,7 +15,6 @@ import { t, getLocale } from '@scream-code/config';
 
 import { getDataDir } from '#/utils/paths';
 
-export const INVALID_TUI_CONFIG_MESSAGE = t('tui.invalid_config');
 
 export const TuiThemeSchema = z.enum(['dark', 'light', 'auto']);
 
@@ -101,7 +100,7 @@ export class TuiConfigParseError extends Error {
   override readonly name = 'TuiConfigParseError';
   readonly fallback: TuiConfig;
   constructor(fallback: TuiConfig) {
-    super(INVALID_TUI_CONFIG_MESSAGE);
+    super(t('tui.invalid_config'));
     this.fallback = fallback;
   }
 }

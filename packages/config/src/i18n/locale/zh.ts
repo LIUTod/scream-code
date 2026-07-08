@@ -565,7 +565,7 @@ export const zh: Record<string, string> = {
   'skill.skill_removed': '该 Skill 及其子 Skill 已从当前会话中移除。',
   'skill.delete_failed': '删除失败。',
   'skill.delete_failed_msg': '删除失败: {msg}',
-  'skill.confirm_uninstall': '确认卸载',
+  'skill.confirm_uninstall': '确认卸载 "{label}"？',
   'skill.uninstall_reversible': '卸载后可在 Skill 中心重新安装',
   'skill.uninstall_yes': '是，卸载',
   // ─── tool-call ────────────────
@@ -1027,8 +1027,6 @@ export const zh: Record<string, string> = {
   'market.design_card_desc': '14 种设计卡片生成（封面/图文/社交分享/长篇排版），Parchment × Swiss 双风格体系',
   'market.superpowers_name': 'Superpowers 开发技能包',
   'market.superpowers_desc': '14 个开发方法论技能：TDD、系统调试、代码审查、子代理驱动开发、并行代理、头脑风暴等',
-  'market.audio_name': 'Audio Skill 录音分析',
-  'market.audio_desc': '本地录音分析自动化，含 RAG 知识库。适用于销售录音复盘、会议纪要、质量评分等',
   'market.scrapling_name': 'Scrapling 网页爬取',
   'market.scrapling_desc': '基于 Scrapling 的智能爬虫技能，支持 Cloudflare/WAF 绕过、登录会话、自动抓取解析',
   'market.astock_name': 'A 股数据分析',

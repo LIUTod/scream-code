@@ -26,14 +26,6 @@
       "tags": ["tdd", "debugging", "code-review", "subagent", "methodology"]
     },
     {
-      "id": "audio-skill",
-      "name": "Audio Skill 录音分析",
-      "description": "本地录音分析自动化，含 RAG 知识库。适用于销售录音复盘、会议纪要、质量评分等",
-      "source": "https://github.com/LIUTod/audio-skill",
-      "author": "LIUTod",
-      "tags": ["audio", "rag", "recording", "analysis"]
-    },
-    {
       "id": "scrapling-skill",
       "name": "Scrapling 网页爬取",
       "description": "基于 Scrapling 的智能爬虫技能，支持 Cloudflare/WAF 绕过、登录会话、自动抓取解析",

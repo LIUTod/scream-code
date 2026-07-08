@@ -565,7 +565,7 @@ export const en: Record<string, string> = {
   'skill.skill_removed': 'This skill and its sub-skills have been removed from the current session.',
   'skill.delete_failed': 'Delete failed.',
   'skill.delete_failed_msg': 'Delete failed: {msg}',
-  'skill.confirm_uninstall': 'Confirm Uninstall',
+  'skill.confirm_uninstall': 'Uninstall "{label}"?',
   'skill.uninstall_reversible': 'You can reinstall from the Skill center later',
   'skill.uninstall_yes': 'Yes, uninstall',
   // ─── tool-call ────────────────
@@ -1027,8 +1027,6 @@ export const en: Record<string, string> = {
   'market.design_card_desc': '14 design card generators (cover/photo/social/long-form), Parchment × Swiss dual-style system',
   'market.superpowers_name': 'Superpowers Dev Skill Pack',
   'market.superpowers_desc': '14 dev methodology skills: TDD, system debugging, code review, subagent-driven dev, parallel agents, brainstorming, etc.',
-  'market.audio_name': 'Audio Skill Recording Analysis',
-  'market.audio_desc': 'Local recording analysis automation with RAG knowledge base. For sales review, meeting minutes, quality scoring, etc.',
   'market.scrapling_name': 'Scrapling Web Scraper',
   'market.scrapling_desc': 'Smart scraper based on Scrapling, supports Cloudflare/WAF bypass, login sessions, auto-extraction',
   'market.astock_name': 'A-Share Data Analysis',

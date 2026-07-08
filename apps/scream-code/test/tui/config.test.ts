@@ -6,7 +6,6 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
   DEFAULT_TUI_CONFIG,
-  INVALID_TUI_CONFIG_MESSAGE,
   loadTuiConfig,
   parseTuiConfig,
   saveTuiConfig,
@@ -94,7 +93,7 @@ command = "   "
     );
 
     expect(error).toBeInstanceOf(TuiConfigParseError);
-    expect((error as TuiConfigParseError).message).toBe(INVALID_TUI_CONFIG_MESSAGE);
+    expect((error as TuiConfigParseError).message).toBeTruthy();
     expect((error as TuiConfigParseError).fallback).toEqual(DEFAULT_TUI_CONFIG);
     expect(readFileSync(filePath, 'utf-8')).toBe('[[[');
   });

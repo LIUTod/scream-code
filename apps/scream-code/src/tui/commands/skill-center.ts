@@ -19,7 +19,7 @@ import { loadPluginMarketplace, type PluginMarketplaceEntry } from '#/utils/plug
 import { ChoicePickerComponent, type ChoiceOption } from '../components/dialogs/choice-picker';
 import type { SlashCommandHost } from './dispatch';
 import { MoonLoader } from '../components/chrome/moon-loader';
-import { FALLBACK_SKILL_MARKETPLACE, type FallbackMarketplaceEntry } from './skill-marketplace';
+import { getFallbackSkillMarketplace, type FallbackMarketplaceEntry } from './skill-marketplace';
 import { isUserActivatableSkill } from './skills';
 
 const SKILL_DESC_MAX = 60;
@@ -152,7 +152,7 @@ async function loadMarketplace(host: SlashCommandHost): Promise<readonly Marketp
     });
     return plugins;
   } catch {
-    return [...FALLBACK_SKILL_MARKETPLACE];
+    return [...getFallbackSkillMarketplace()];
   }
 }
 
@@ -420,7 +420,7 @@ async function confirmUninstall(
 ): Promise<boolean> {
   return new Promise<boolean>((resolve) => {
     const picker = new ChoicePickerComponent({
-      title: `${t('skill.confirm_uninstall')} "${label}"？`,
+      title: t('skill.confirm_uninstall', { label }),
       hint: t('skill.uninstall_reversible'),
       options: [
         { value: 'no', label: t('common.cancel') },
