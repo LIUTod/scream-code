@@ -123,9 +123,6 @@ importers:
       '@scream-code/memory':
         specifier: workspace:*
         version: link:../../packages/memory
-      '@scream-code/migration-legacy':
-        specifier: workspace:^
-        version: link:../../packages/migration-legacy
       '@scream-code/scream-code-sdk':
         specifier: workspace:^
         version: link:../../packages/node-sdk
@@ -286,22 +283,6 @@ importers:
       pathe:
         specifier: ^2.0.3
         version: 2.0.3
-
-  packages/migration-legacy:
-    dependencies:
-      '@scream-code/agent-core':
-        specifier: workspace:^
-        version: link:../agent-core
-      smol-toml:
-        specifier: ^1.6.1
-        version: 1.6.1
-      zod:
-        specifier: 'catalog:'
-        version: 4.4.3
-    devDependencies:
-      '@scream-code/jian':
-        specifier: workspace:^
-        version: link:../jian
 
   packages/node-sdk:
     dependencies:

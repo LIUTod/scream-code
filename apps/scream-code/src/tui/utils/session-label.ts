@@ -1,9 +1,9 @@
 /**
- * Pure helpers for composing session labels in the session picker.
+ * Helpers for composing session labels in the session picker.
  *
  * Detection rule for the `[imported]` badge: `metadata.imported_from_scream_cli`
  * is strictly the boolean `true`. This mirrors the value written by
- * `migration-legacy` into the session's `state.json` `custom` block.
+ * the old migration-legacy package into the session's `state.json` `custom` block.
  */
 
 const IMPORTED_BADGE = '[已导入]';

@@ -2,13 +2,10 @@ import { Command, Option } from 'commander';
 
 import { CLI_COMMAND_NAME } from '#/constant/app';
 
-import { registerMigrateCommand } from '#/migration/index';
-
 import type { CLIOptions } from './options';
 import { registerExportCommand } from './sub/export';
 
 export type MainCommandHandler = (opts: CLIOptions) => void;
-export type MigrateCommandHandler = () => void;
 export type PluginNodeRunnerHandler = (entry: string, args: readonly string[]) => void;
 export type StreamJsonHandler = (opts: {
   resume?: string;
@@ -24,7 +21,6 @@ export type ChannelSetupHandler = () => void;
 export function createProgram(
   version: string,
   onMain: MainCommandHandler,
-  onMigrate: MigrateCommandHandler,
   onPluginNodeRunner: PluginNodeRunnerHandler = () => {},
   onStreamJson: StreamJsonHandler = () => {},
   onChannelSetup: ChannelSetupHandler = () => {},
@@ -87,7 +83,6 @@ export function createProgram(
     .option('--wolfpack', '启动时默认开启 WolfPack 批量并发模式。', false);
 
   registerExportCommand(program);
-  registerMigrateCommand(program, onMigrate);
 
   // Hidden subcommand for cc-connect / Claude Code stream-json protocol.
   // cc-connect spawns: scream stream-json --output-format stream-json --input-format stream-json

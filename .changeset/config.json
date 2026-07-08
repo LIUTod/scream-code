@@ -12,7 +12,6 @@
     "@scream-code/jian",
     "@scream-code/ltod",
     "@scream-code/memory",
-    "@scream-code/migration-legacy",
     "@scream-code/scream-code-sdk"
   ],
   "snapshot": {

@@ -14,7 +14,7 @@ import chalk from 'chalk';
 
 import { t } from '@scream-code/config';
 
-import { formatSessionLabel } from '#/migration/index';
+import { formatSessionLabel } from '#/tui/utils/session-label';
 import type { ColorPalette } from '#/tui/theme/colors';
 import { printableChar } from '#/tui/utils/printable-key';
 import { SELECT_POINTER } from '../../constant/symbols';

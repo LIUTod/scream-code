@@ -51,12 +51,6 @@ export async function handleMainCommand(opts: CLIOptions, version: string): Prom
   await runShell(validated.options, version);
 }
 
-/** `scream migrate` — permanently disabled. */
-async function handleMigrateCommand(): Promise<void> {
-  process.stdout.write('迁移功能已取消，不再支持从 scream-cli 导入数据。\n');
-  process.exit(0);
-}
-
 export function main(): void {
   initProcessName();
 
@@ -74,14 +68,6 @@ export function main(): void {
             operation,
           }),
         );
-        process.stderr.write(`查看日志：${resolveGlobalLogPath(resolveScreamHome())}\n`);
-        process.exit(1);
-      });
-    },
-    () => {
-      void handleMigrateCommand().catch(async (error: unknown) => {
-        await logStartupFailure('运行迁移', error);
-        process.stderr.write(formatStartupError(error, { operation: '运行迁移' }));
         process.stderr.write(`查看日志：${resolveGlobalLogPath(resolveScreamHome())}\n`);
         process.exit(1);
       });

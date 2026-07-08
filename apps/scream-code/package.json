@@ -74,7 +74,6 @@
     "@scream-code/config": "workspace:^",
     "@scream-code/knowledge": "workspace:*",
     "@scream-code/memory": "workspace:*",
-    "@scream-code/migration-legacy": "workspace:^",
     "@scream-code/scream-code-sdk": "workspace:^",
     "@types/semver": "^7.7.0",
     "tsx": "^4.21.0"
