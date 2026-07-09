@@ -5,7 +5,7 @@ import { SessionPickerComponent } from '#/tui/components/dialogs/session-picker'
 import { getColorPalette } from '#/tui/theme/colors';
 
 function stripAnsi(text: string): string {
-  return text.replaceAll(/\[[0-?]*[ -/]*[@-~]/g, '');
+  return text.replaceAll(/\[[0-?]*[ -/]*[@-~]/g, '');
 }
 
 function renderPlain(component: SessionPickerComponent, width = 120): string {
@@ -27,12 +27,14 @@ describe('SessionPickerComponent', () => {
           id: 'ses_minutes',
           title: 'minutes old',
           work_dir: '/tmp/project',
+          session_dir: '/home/.scream-code/sessions/wd_tmp_xxx/ses_minutes',
           updated_at: now - 2 * 60 * 1000,
         },
         {
           id: 'ses_hours',
           title: 'hours old',
           work_dir: '/tmp/project',
+          session_dir: '/home/.scream-code/sessions/wd_tmp_xxx/ses_hours',
           updated_at: now - 3 * 60 * 60 * 1000,
         },
       ],
@@ -41,6 +43,7 @@ describe('SessionPickerComponent', () => {
       colors: getColorPalette('dark'),
       onSelect: vi.fn(),
       onCancel: vi.fn(),
+      onStatus: vi.fn(),
     });
 
     const output = renderPlain(component);
@@ -61,6 +64,7 @@ describe('SessionPickerComponent', () => {
           title: 'Refactor sessions list',
           last_prompt: 'please redesign the picker UI',
           work_dir: '/tmp/project',
+          session_dir: '/home/.scream-code/sessions/wd_tmp_xxx/ses_01HXYABCDEFGHIJK',
           updated_at: now - 60 * 1000,
         },
       ],
@@ -69,6 +73,7 @@ describe('SessionPickerComponent', () => {
       colors: getColorPalette('dark'),
       onSelect: vi.fn(),
       onCancel: vi.fn(),
+      onStatus: vi.fn(),
     });
 
     const output = renderPlain(component);
@@ -77,7 +82,7 @@ describe('SessionPickerComponent', () => {
     // Session id is rendered in full, never abbreviated with an ellipsis.
     expect(output).toContain('ses_01HXYABCDEFGHIJK');
     expect(output).not.toMatch(/ses_01\S*…/);
-    expect(output).toContain('/tmp/project');
+    expect(output).toContain('/home/.scream-code/sessions/wd_tmp_xxx/ses_01HXYABCDEFGHIJK');
     expect(output).toContain('please redesign the picker UI');
   });
 
@@ -91,6 +96,7 @@ describe('SessionPickerComponent', () => {
           id: 'ses_no_prompt',
           title: 'no prompt yet',
           work_dir: '/tmp/project',
+          session_dir: '/home/.scream-code/sessions/wd_tmp_xxx/ses_no_prompt',
           updated_at: now - 60 * 1000,
         },
       ],
@@ -99,6 +105,7 @@ describe('SessionPickerComponent', () => {
       colors: getColorPalette('dark'),
       onSelect: vi.fn(),
       onCancel: vi.fn(),
+      onStatus: vi.fn(),
     });
 
     const output = renderPlain(component);
@@ -118,6 +125,7 @@ describe('SessionPickerComponent', () => {
           title: 'long prompt',
           last_prompt: longPrompt,
           work_dir: '/tmp/project',
+          session_dir: '/home/.scream-code/sessions/wd_tmp_xxx/ses_long',
           updated_at: now - 60 * 1000,
         },
       ],
@@ -126,6 +134,7 @@ describe('SessionPickerComponent', () => {
       colors: getColorPalette('dark'),
       onSelect: vi.fn(),
       onCancel: vi.fn(),
+      onStatus: vi.fn(),
     });
 
     const lines = component.render(60).map((line) => stripAnsi(line));
@@ -146,12 +155,14 @@ describe('SessionPickerComponent', () => {
           id: 'ses_current',
           title: 'this is current',
           work_dir: '/tmp/project',
+          session_dir: '/home/.scream-code/sessions/wd_tmp_xxx/ses_current',
           updated_at: now,
         },
         {
           id: 'ses_other',
           title: 'not current',
           work_dir: '/tmp/project',
+          session_dir: '/home/.scream-code/sessions/wd_tmp_xxx/ses_other',
           updated_at: now - 60 * 1000,
         },
       ],
@@ -160,6 +171,7 @@ describe('SessionPickerComponent', () => {
       colors: getColorPalette('dark'),
       onSelect: vi.fn(),
       onCancel: vi.fn(),
+      onStatus: vi.fn(),
     });
 
     const lines = component.render(120).map((line) => stripAnsi(line));
@@ -179,6 +191,7 @@ describe('SessionPickerComponent', () => {
           id: 'ses_inline_time',
           title: 'Short title',
           work_dir: '/tmp/project',
+          session_dir: '/home/.scream-code/sessions/wd_tmp_xxx/ses_inline_time',
           updated_at: now - 5 * 60 * 1000,
         },
       ],
@@ -187,6 +200,7 @@ describe('SessionPickerComponent', () => {
       colors: getColorPalette('dark'),
       onSelect: vi.fn(),
       onCancel: vi.fn(),
+      onStatus: vi.fn(),
     });
 
     const lines = component.render(120).map((line) => stripAnsi(line));
@@ -208,6 +222,7 @@ describe('SessionPickerComponent', () => {
           id: 'ses_imported',
           title: 'Migrated session',
           work_dir: '/tmp/project',
+          session_dir: '/home/.scream-code/sessions/wd_tmp_xxx/ses_imported',
           updated_at: now - 60 * 1000,
           metadata: { imported_from_scream_cli: true },
         },
@@ -215,6 +230,7 @@ describe('SessionPickerComponent', () => {
           id: 'ses_native',
           title: 'Fresh session',
           work_dir: '/tmp/project',
+          session_dir: '/home/.scream-code/sessions/wd_tmp_xxx/ses_native',
           updated_at: now - 60 * 1000,
         },
       ],
@@ -223,6 +239,7 @@ describe('SessionPickerComponent', () => {
       colors: getColorPalette('dark'),
       onSelect: vi.fn(),
       onCancel: vi.fn(),
+      onStatus: vi.fn(),
     });
 
     const lines = component.render(120).map((line) => stripAnsi(line));
@@ -244,6 +261,7 @@ describe('SessionPickerComponent', () => {
           last_prompt:
             '我们要渲染几个：sessionid title lastPrompt。工作目录，修改时间。需要重新设计下 UI。',
           work_dir: '/Users/someone/Desktop/中文目录/very-long-project-folder-name',
+          session_dir: '/home/.scream-code/sessions/wd_somexxx/ses_cjk_long_session_id_value',
           updated_at: now - 5 * 60 * 1000,
         },
       ],
@@ -252,6 +270,7 @@ describe('SessionPickerComponent', () => {
       colors: getColorPalette('dark'),
       onSelect: vi.fn(),
       onCancel: vi.fn(),
+      onStatus: vi.fn(),
     });
 
     for (const width of [40, 80, 120, 238]) {

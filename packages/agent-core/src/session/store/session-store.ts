@@ -1,5 +1,4 @@
 import { cp, mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
-import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, relative } from 'pathe';
 
 import { z } from 'zod';
@@ -12,7 +11,7 @@ import {
   removeSessionIndexEntry,
 } from '#/session/store/session-index';
 import { encodeWorkDirKey, normalizeWorkDir } from '#/session/store/workdir-key';
-import type { JsonObject, JsonValue, ListSessionsPayload, SessionSummary } from '#/rpc/core-api';
+import type { JsonObject, ListSessionsPayload, SessionSummary } from '#/rpc/core-api';
 
 const SessionSummaryStateSchema = z.object({
   customTitle: z.string().optional(),
