@@ -153,15 +153,15 @@ Open scream-code, type `/cc-connect`, and follow the prompts to select your plat
 
 Follow the steps to complete setup, then start the background daemon (scream-code can be closed while the daemon runs).
 
-**Remote chat quick commands:**
+**cc-connect remote chat quick commands (only the following are supported):**
 
 | Command | Description |
 |---------|-------------|
-| `/new` | Create new session |
-| `/bind setup` | Enable file transfer (PDF, images, etc.) |
-| `/mode` | View available modes |
-| `/mode yolo` | Auto-approve all tools |
-| `/mode default` | Ask before each tool call |
+| `/new` | Overwrite and create new session |
+| `/current` | View current session status |
+| `/mode [name]` | Switch mode |
+| `/reasoning [level]` | View or switch reasoning effort |
+| `/stop` | Stop current execution |
 
 ---
 

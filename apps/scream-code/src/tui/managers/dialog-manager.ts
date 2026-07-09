@@ -154,9 +154,11 @@ export class DialogManager {
         onCancel,
         onDelete: (sessionId: string) => {
           const row = this.host.getSessions().find((s) => s.id === sessionId);
-          const isCc = row?.metadata?.['source'] === 'cc-connect';
-          const realId = isCc ? (row?.metadata?.['agentSessionId'] as string) : sessionId;
-          void this.host.deleteSession(realId).then(async () => {
+          if (row?.metadata?.['source'] === 'cc-connect') {
+            this.host.showStatus(t('dialog.cc_managed'));
+            return;
+          }
+          void this.host.deleteSession(sessionId).then(async () => {
             await this.host.fetchSessions();
             if (this.host.getSessions().length === 0) {
               this.hideSessionPicker();

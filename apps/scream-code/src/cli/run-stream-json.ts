@@ -491,7 +491,7 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
 
   let session: Session | undefined;
   let currentSessionId: string | undefined;
-  let sessionKey = "";
+  let sessionKey = "cc-connect-main";
 
   // Pending approvals awaiting control_response from cc-connect.
   const pendingApprovals = new Map<
@@ -603,11 +603,9 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
       }
 
       // ── Create or reuse session ──────────────────────────────────────
-      // When cc-connect passes --resume, use that session ID directly.
-      // Otherwise generate a unique key so each new cc-connect session
-      // (/new command) gets its own scream-code session instead of all
-      // sharing the hardcoded "cc-connect-main" key.
-      sessionKey = opts.resume ?? `cc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      // One channel = one session.  Use --resume if cc-connect passes one,
+      // otherwise fall back to the deterministic key.
+      sessionKey = opts.resume ?? "cc-connect-main";
       const { permission: mappedPermission, planMode: mappedPlanMode } = mapCcConnectMode(
         opts.permissionMode,
       );
@@ -670,8 +668,8 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
         currentSessionId = session.id;
         writer.setSessionId(session.id);
         writer.setModel(opts.model ?? config.defaultModel ?? "");
-        // Emit the session ID so cc-connect stores it and passes it
-        // back via --resume on /switch.
+        // Emit the deterministic session key so cc-connect stores it
+        // and passes it back via --resume next time.
         writer.emitSystem(sessionKey, opts.model ?? config.defaultModel);
 
         // ── Approval handler wired to cc-connect control_request ─────────

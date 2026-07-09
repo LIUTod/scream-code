@@ -1,6 +1,6 @@
 {
   "name": "@scream-code/ltod",
-  "version": "0.9.3",
+  "version": "0.9.4",
   "private": true,
   "description": "The LLM abstraction layer for modern AI agent applications",
   "license": "MIT",
