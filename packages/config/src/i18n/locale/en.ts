@@ -163,7 +163,7 @@ export const en: Record<string, string> = {
   'knowledge.embedding_relations': 'Embedding relations...',
   'knowledge.error': 'Error: {msg}',
   'knowledge.ingest': 'Ingest files',
-  'knowledge.ingest_desc': 'Enter a markdown/txt file or folder path to ingest',
+  'knowledge.ingest_desc': 'Enter a markdown/txt file or folder path [Ingestion calls LLM for event extraction; for large files, consider a cost-effective model]',
   'knowledge.ingesting': 'Starting ingest...',
   'knowledge.ingest_done': 'Ingest complete',
   'knowledge.ingest_fail': 'Ingest failed',

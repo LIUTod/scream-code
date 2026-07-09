@@ -32,7 +32,7 @@ async function embedOrNulls(
 }
 
 /** LLM concurrency for extraction — kept low to avoid rate-limit bursts. */
-const LLM_CONCURRENCY = 3;
+const LLM_CONCURRENCY = 20;
 const SUPPORTED_EXTENSIONS = new Set(['.md', '.markdown', '.txt']);
 
 /** Read a file and return its content. */

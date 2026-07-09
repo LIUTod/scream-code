@@ -163,7 +163,7 @@ export const zh: Record<string, string> = {
   'knowledge.embedding_relations': '嵌入关系...',
   'knowledge.error': '错误: {msg}',
   'knowledge.ingest': '摄入文件/文件夹',
-  'knowledge.ingest_desc': '输入要摄入的 markdown/txt 文件路径，或包含这些文件的文件夹路径',
+  'knowledge.ingest_desc': '输入 markdown/txt 文件或文件夹路径【摄入后首次抽取事件关联需要调用llm，文件过大建议更换性价比模型】',
   'knowledge.ingesting': '开始摄入...',
   'knowledge.ingest_done': '摄入完成',
   'knowledge.ingest_fail': '摄入失败',
