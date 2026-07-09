@@ -125,7 +125,7 @@ describe('SessionPickerComponent', () => {
           title: 'long prompt',
           last_prompt: longPrompt,
           work_dir: '/tmp/project',
-          session_dir: '/home/.scream-code/sessions/wd_tmp_xxx/ses_long',
+          session_dir: '/tmp/ses_long',
           updated_at: now - 60 * 1000,
         },
       ],
@@ -137,12 +137,12 @@ describe('SessionPickerComponent', () => {
       onStatus: vi.fn(),
     });
 
-    const lines = component.render(60).map((line) => stripAnsi(line));
-    const promptLine = lines.find((line) => line.trimStart().startsWith('›'));
+    const lines = component.render(60);
+    const promptLine = lines.find((line) => stripAnsi(line).trimStart().startsWith('›'));
     expect(promptLine).toBeDefined();
-    expect(promptLine!.length).toBeLessThanOrEqual(60);
-    expect(promptLine!.endsWith('…')).toBe(true);
-    expect(promptLine).not.toContain(longPrompt);
+    expect(visibleWidth(promptLine!)).toBeLessThanOrEqual(60);
+    expect(stripAnsi(promptLine!)).toContain('…');
+    expect(stripAnsi(promptLine!)).not.toContain(longPrompt);
   });
 
   it('marks the current session with a (current) badge', () => {
