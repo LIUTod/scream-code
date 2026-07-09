@@ -14,6 +14,7 @@ export function sessionRowsForPicker(
       title: session.title ?? null,
       last_prompt: session.lastPrompt ?? null,
       work_dir: session.workDir,
+      session_dir: session.sessionDir ?? '',
       updated_at: session.updatedAt ?? session.createdAt ?? 0,
       metadata: session.metadata,
     }));

@@ -24,6 +24,7 @@ export interface SessionRow {
   readonly title: string | null;
   readonly last_prompt?: string | null;
   readonly work_dir: string;
+  readonly session_dir: string;
   readonly updated_at: number;
   readonly metadata?: Readonly<Record<string, unknown>> | undefined;
 }
@@ -285,15 +286,18 @@ export class SessionPickerComponent extends Container implements Focusable {
     const metaGap = '   ';
     const metaGapWidth = visibleWidth(metaGap);
     const idLineWidth = indentWidth + idWidth;
-    const aliasedDir = homeAlias(session.work_dir);
-    const dirWidth = visibleWidth(aliasedDir);
+    // CC sessions show their storage path; normal sessions also show storage path.
+    const displayDir = session.session_dir
+      ? homeAlias(session.session_dir)
+      : homeAlias(session.work_dir);
+    const dirWidth = visibleWidth(displayDir);
 
     if (idLineWidth + metaGapWidth + dirWidth <= width) {
       card.push(
         indent +
           chalk.hex(colors.textMuted)(fullId) +
           chalk.hex(colors.textDim)(metaGap) +
-          chalk.hex(colors.textMuted)(aliasedDir),
+          chalk.hex(colors.textMuted)(displayDir),
       );
     } else {
       // Not enough room for both on one line — keep the id intact and put the
@@ -305,7 +309,7 @@ export class SessionPickerComponent extends Container implements Focusable {
           ),
       );
       const dirBudget = Math.max(8, width - indentWidth);
-      const dir = truncatePathLeft(aliasedDir, dirBudget);
+      const dir = truncatePathLeft(displayDir, dirBudget);
       card.push(indent + chalk.hex(colors.textMuted)(dir));
     }
 
