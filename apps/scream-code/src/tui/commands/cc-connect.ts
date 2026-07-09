@@ -124,7 +124,7 @@ function generateConfig(platform: PlatformDef): void {
     'type = "claudecode"',
     '',
     '[projects.agent.options]',
-    `cli_path = '${escapeSingleQuotes(detectScreamPath())}'`,
+    `cmd = '${escapeSingleQuotes(detectScreamPath())}'`,
     `work_dir = '${escapeSingleQuotes(process.cwd())}'`,
     'mode = "default"',
     '',

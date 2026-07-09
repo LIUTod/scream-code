@@ -185,7 +185,7 @@ function generateConfig(cliPath: string, platformType: string): string {
     'type = "claudecode"',
     '',
     '[projects.agent.options]',
-    `cli_path = '${cliPath}'`,
+    `cmd = '${cliPath}'`,
     `work_dir = '${workDir}'`,
     'mode = "default"',
     '',

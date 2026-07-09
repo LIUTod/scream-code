@@ -48,7 +48,12 @@ interface StdinControlResponse {
   };
 }
 
-type StdinMessage = StdinUserMessage | StdinControlResponse;
+interface StdinControlCancel {
+  type: "control_cancel_request";
+  request_id: string;
+}
+
+type StdinMessage = StdinUserMessage | StdinControlResponse | StdinControlCancel;
 
 interface StdinContentBlock {
   type: "text" | "image";
@@ -130,9 +135,9 @@ interface ClaudeResultEvent {
 interface ClaudeControlRequestEvent {
   type: "control_request";
   request_id: string;
-  tool_use: {
-    id: string;
-    name: string;
+  request: {
+    subtype: "can_use_tool";
+    tool_name: string;
     input: unknown;
   };
 }
@@ -152,6 +157,12 @@ interface StreamJsonOptions {
   skillsDirs: string[];
   appendSystemPrompt?: string;
   appendSystemPromptFile?: string;
+  systemPrompt?: string;
+  allowedTools?: string;
+  disallowedTools?: string;
+  effort?: string;
+  maxContextTokens?: string;
+  pluginDirs: string[];
 }
 
 interface TokenUsage {
@@ -181,9 +192,11 @@ class ClaudeStreamJsonWriter {
   }
 
   /** Emit the `system` / `init` event.  Called once after session creation. */
-  emitSystem(sessionId: string): void {
+  emitSystem(sessionId: string, model?: string): void {
     this.sessionId = sessionId;
-    this.writeJson({ type: "system", subtype: "init", session_id: sessionId });
+    const event: Record<string, unknown> = { type: "system", subtype: "init", session_id: sessionId };
+    if (model) event["model"] = model;
+    this.writeLine(JSON.stringify(event));
   }
 
   /** Accumulate assistant text delta.  Flush buffered thinking first. */
@@ -324,12 +337,14 @@ class ClaudeStreamJsonWriter {
     });
   }
 
-  /** Emit a `control_request` event for cc-connect permission flow. */
+  /** Emit a `control_request` event for cc-connect permission flow.
+   *  Format matches cc-connect's handleControlRequest which expects
+   *  `request.subtype = "can_use_tool"`, `request.tool_name`, `request.input`. */
   emitControlRequest(requestId: string, toolCallId: string, toolName: string, input: unknown): void {
     this.writeJson({
       type: "control_request",
       request_id: requestId,
-      tool_use: { id: toolCallId, name: toolName, input },
+      request: { subtype: "can_use_tool", tool_name: toolName, input },
     });
   }
 
@@ -390,7 +405,7 @@ async function* readStdinMessages(): AsyncGenerator<StdinMessage> {
       continue;
     }
 
-    if (msg.type === "user" || msg.type === "control_response") {
+    if (msg.type === "user" || msg.type === "control_response" || msg.type === "control_cancel_request") {
       yield msg;
     } else {
       log.debug("stream-json: ignoring unknown stdin message type", {
@@ -476,7 +491,7 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
 
   let session: Session | undefined;
   let currentSessionId: string | undefined;
-  let sessionKey = "cc-connect-main";
+  let sessionKey = "";
 
   // Pending approvals awaiting control_response from cc-connect.
   const pendingApprovals = new Map<
@@ -487,11 +502,11 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
   // Subagent id → name mapping (completed/failed events only carry id).
   const subagentNames = new Map<string, string>();
 
-  // cc-connect passes --append-system-prompt (text) and/or
-  // --append-system-prompt-file (path to a file containing the prompt) with
-  // instructions for cc-connect send --image / --file etc.  Inject them into
-  // the agent's system prompt via the project-level AGENTS.md so the agent
-  // knows how to deliver generated files back to the chat user.
+  // cc-connect passes --system-prompt (replaces default), --append-system-prompt
+  // (text), and/or --append-system-prompt-file (path to a file containing the
+  // prompt) with instructions for cc-connect send --image / --file etc.
+  // Inject them into the agent's system prompt via the project-level AGENTS.md
+  // so the agent knows how to deliver generated files back to the chat user.
   const agentsMdPath = join(workDir, ".scream-code", "AGENTS.md");
   let originalAgentsMd: string | undefined;
   let injectedAgentsMd = false;
@@ -518,7 +533,8 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
     }
   }
 
-  if (appendPrompt) {
+  const hasSystemPrompt = opts.systemPrompt && opts.systemPrompt.trim().length > 0;
+  if (hasSystemPrompt || appendPrompt) {
     try { originalAgentsMd = await readFile(agentsMdPath, "utf-8"); } catch { /* new file */ }
     await mkdir(join(workDir, ".scream-code"), { recursive: true });
     const sendHint =
@@ -526,13 +542,21 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
       '  cc-connect send --image /absolute/path/to/image.png\n' +
       '  cc-connect send --file /absolute/path/to/file.pdf\n' +
       '当用户要求你发送文件、截图、生成的图片时，使用 Bash 工具执行上述命令即可。\n';
-    const ccPrompt = `${sendHint}\n${appendPrompt}`;
+    // --system-prompt replaces the default; --append-system-prompt appends.
+    const systemSection = hasSystemPrompt
+      ? `# System Prompt (from --system-prompt)\n\n${opts.systemPrompt}\n`
+      : "";
+    const appendSection = appendPrompt ? appendPrompt : "";
+    const ccPrompt = `${sendHint}\n${systemSection}\n${appendSection}`;
     const merged = originalAgentsMd
       ? `${ccPrompt}\n\n${originalAgentsMd}`
       : ccPrompt;
     await writeFile(agentsMdPath, merged, "utf-8");
     injectedAgentsMd = true;
-    log.info("stream-json: injected cc-connect system prompt into AGENTS.md");
+    log.info("stream-json: injected cc-connect system prompt into AGENTS.md", {
+      hasSystemPrompt,
+      hasAppendPrompt: appendPrompt.length > 0,
+    });
   }
 
   try {
@@ -559,6 +583,18 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
         continue;
       }
 
+      if (msg.type === "control_cancel_request") {
+        const pending = pendingApprovals.get(msg.request_id);
+        if (pending) {
+          pendingApprovals.delete(msg.request_id);
+          pending.resolve({
+            decision: "rejected",
+            feedback: "Permission request cancelled",
+          });
+        }
+        continue;
+      }
+
       // msg.type === "user"
       const userText = extractUserText(msg);
       if (!userText) {
@@ -567,9 +603,11 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
       }
 
       // ── Create or reuse session ──────────────────────────────────────
-      // One channel = one session.  Use --resume if cc-connect passes one,
-      // otherwise fall back to the deterministic key.
-      sessionKey = opts.resume ?? "cc-connect-main";
+      // When cc-connect passes --resume, use that session ID directly.
+      // Otherwise generate a unique key so each new cc-connect session
+      // (/new command) gets its own scream-code session instead of all
+      // sharing the hardcoded "cc-connect-main" key.
+      sessionKey = opts.resume ?? `cc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       const { permission: mappedPermission, planMode: mappedPlanMode } = mapCcConnectMode(
         opts.permissionMode,
       );
@@ -610,6 +648,7 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
               model,
               permission: mappedPermission,
               planMode: mappedPlanMode,
+              thinking: opts.effort,
             });
             log.info("stream-json: recreated session", {
               sessionId: session.id,
@@ -623,6 +662,7 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
             model,
             permission: mappedPermission,
             planMode: mappedPlanMode,
+            thinking: opts.effort,
           });
           log.info("stream-json: created session", { sessionId: session.id });
         }
@@ -630,9 +670,9 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
         currentSessionId = session.id;
         writer.setSessionId(session.id);
         writer.setModel(opts.model ?? config.defaultModel ?? "");
-        // Emit the deterministic session key so cc-connect stores it
-        // and passes it back via --resume next time.
-        writer.emitSystem(sessionKey);
+        // Emit the session ID so cc-connect stores it and passes it
+        // back via --resume on /switch.
+        writer.emitSystem(sessionKey, opts.model ?? config.defaultModel);
 
         // ── Approval handler wired to cc-connect control_request ─────────
         function sendControlRequest(
@@ -656,19 +696,49 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
           return promise;
         }
 
+        // Build tool whitelist/blacklist from cc-connect flags.
+        const allowedSet = opts.allowedTools
+          ? new Set(opts.allowedTools.split(",").map((t) => t.trim()).filter(Boolean))
+          : undefined;
+        const disallowedSet = opts.disallowedTools
+          ? new Set(opts.disallowedTools.split(",").map((t) => t.trim()).filter(Boolean))
+          : undefined;
+
+        function isToolBlocked(toolName: string): boolean {
+          if (disallowedSet?.has(toolName)) return true;
+          if (allowedSet && allowedSet.size > 0 && !allowedSet.has(toolName)) return true;
+          return false;
+        }
+
         switch (opts.permissionMode) {
           case "yolo":
           case "bypassPermissions":
-            session.setApprovalHandler(() => ({ decision: "approved" }));
+            session.setApprovalHandler((request) => {
+              if (isToolBlocked(request.toolName)) {
+                return { decision: "rejected", feedback: `Tool ${request.toolName} is disallowed` };
+              }
+              return { decision: "approved" };
+            });
             break;
           case "dontAsk":
-            session.setApprovalHandler(() => ({
-              decision: "rejected",
-              feedback: "dontAsk 模式下工具调用被自动拒绝",
-            }));
+            session.setApprovalHandler((request) => {
+              if (disallowedSet?.has(request.toolName)) {
+                return { decision: "rejected", feedback: `Tool ${request.toolName} is disallowed` };
+              }
+              if (allowedSet?.has(request.toolName)) {
+                return { decision: "approved" };
+              }
+              return ({
+                decision: "rejected",
+                feedback: "dontAsk mode: tool call auto-denied",
+              });
+            });
             break;
           case "acceptEdits":
             session.setApprovalHandler((request) => {
+              if (isToolBlocked(request.toolName)) {
+                return { decision: "rejected", feedback: `Tool ${request.toolName} is disallowed` };
+              }
               if (["Edit", "Write"].includes(request.toolName)) {
                 return { decision: "approved" };
               }
@@ -677,7 +747,12 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
             break;
           default:
             // default / plan / auto → all route through control_request
-            session.setApprovalHandler((request) => sendControlRequest(request));
+            session.setApprovalHandler((request) => {
+              if (isToolBlocked(request.toolName)) {
+                return { decision: "rejected", feedback: `Tool ${request.toolName} is disallowed` };
+              }
+              return sendControlRequest(request);
+            });
             break;
         }
         session.setQuestionHandler(() => null);
@@ -763,10 +838,8 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
         }
 
         // Translate ScreamCode events to Claude stream-json dialect.
-        // We deliberately suppress thinking, tool_call, and tool_result
-        // events so chat platforms only see the final text result.
-        // cc-connect's TypingIndicator (supported by weixin/feishu/etc.)
-        // handles the "thinking..." status independently of these events.
+        // Forward thinking, tool_use, and tool_result events so cc-connect
+        // can display tool progress in chat platforms (Feishu/Telegram/etc.).
         const type = event.type;
         if (type === "turn.step.started" || type === "turn.step.interrupted") {
           writer.flushAssistant();
@@ -774,6 +847,14 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
           writer.discardAssistant();
         } else if (type === "assistant.delta") {
           writer.writeAssistantDelta(event.delta);
+        } else if (type === "thinking.delta") {
+          writer.writeThinkingDelta(event.delta);
+        } else if (type === "tool.call.started") {
+          writer.writeToolCall(event.toolCallId, event.name, event.args);
+        } else if (type === "tool.call.delta") {
+          writer.writeToolCallDelta(event.toolCallId, event.name, event.argumentsPart);
+        } else if (type === "tool.result") {
+          writer.writeToolResult(event.toolCallId, event.output, event.isError);
         } else if (type === "turn.step.completed") {
           if (event.usage) {
             const inputTotal =
@@ -813,9 +894,6 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
             finish(new Error(errMsg), code);
           }
         }
-        // thinking.delta, tool.call.*, tool.result are intentionally
-        // suppressed — the agent uses tools internally but we don't
-        // broadcast that to the chat platform.
         // All other event types are silently ignored.
       });
 

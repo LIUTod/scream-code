@@ -14,6 +14,12 @@ export type StreamJsonHandler = (opts: {
   skillsDirs: string[];
   appendSystemPrompt?: string;
   appendSystemPromptFile?: string;
+  systemPrompt?: string;
+  allowedTools?: string;
+  disallowedTools?: string;
+  effort?: string;
+  maxContextTokens?: string;
+  pluginDirs: string[];
 }) => void;
 
 export type ChannelSetupHandler = () => void;
@@ -90,9 +96,10 @@ export function createProgram(
   // Flags are sourced from cc-connect's agent/claudecode/session.go (v1.3.2+).
   // We register every flag cc-connect may pass so Commander doesn't reject them.
   // Flags we actually use: --input-format, --output-format, --resume, --model, --permission-mode,
-  //   --append-system-prompt, --append-system-prompt-file, --skills-dir (scream-code extension).
-  // Flags accepted but ignored: --permission-prompt-tool, --replay-user-messages, --verbose,
-  //   --system-prompt, --allowedTools, --disallowedTools, --effort, --max-context-tokens, --plugin-dir.
+  //   --append-system-prompt, --append-system-prompt-file, --system-prompt, --skills-dir,
+  //   --allowedTools, --disallowedTools, --effort.
+  // Flags accepted but no-op: --permission-prompt-tool, --replay-user-messages, --verbose,
+  //   --max-context-tokens, --plugin-dir (scream-code manages MCP via config.toml).
   program
     .command('stream-json', { hidden: true })
     .option('--input-format <fmt>', 'stream-json')
@@ -103,12 +110,12 @@ export function createProgram(
     .option('--permission-prompt-tool <mode>', '(ignored, cc-connect compat)')
     .option('--replay-user-messages', '(ignored, cc-connect compat)')
     .option('--verbose', '(ignored, cc-connect compat)')
-    .option('--system-prompt <text>', '(ignored, cc-connect compat)')
+    .option('--system-prompt <text>', '(passed through to agent system prompt)')
     .option('--append-system-prompt <text>', '(passed through to agent)')
     .option('--append-system-prompt-file <path>', '(passed through to agent; file contents are read and merged)')
-    .option('--allowedTools <list>', '(ignored, cc-connect compat)')
-    .option('--disallowedTools <list>', '(ignored, cc-connect compat)')
-    .option('--effort <value>', '(ignored, cc-connect compat)')
+    .option('--allowedTools <list>', '(comma-separated tool whitelist)')
+    .option('--disallowedTools <list>', '(comma-separated tool blacklist)')
+    .option('--effort <value>', '(reasoning effort: low/medium/high/max)')
     .option('--max-context-tokens <N>', '(ignored, cc-connect compat)')
     .option(
       '--skills-dir <dir>',
@@ -130,6 +137,12 @@ export function createProgram(
         skillsDirs: (subOpts['skillsDir'] as string[]) ?? [],
         appendSystemPrompt: subOpts['appendSystemPrompt'] as string | undefined,
         appendSystemPromptFile: subOpts['appendSystemPromptFile'] as string | undefined,
+        systemPrompt: subOpts['systemPrompt'] as string | undefined,
+        allowedTools: subOpts['allowedTools'] as string | undefined,
+        disallowedTools: subOpts['disallowedTools'] as string | undefined,
+        effort: subOpts['effort'] as string | undefined,
+        maxContextTokens: subOpts['maxContextTokens'] as string | undefined,
+        pluginDirs: (subOpts['pluginDir'] as string[]) ?? [],
       });
     });
 

@@ -236,12 +236,9 @@ export class SessionPickerComponent extends Container implements Focusable {
 
     const time = formatRelativeTime(session.updated_at);
     const isCcConnect = session.metadata?.['source'] === 'cc-connect';
-    const platform = isCcConnect
-      ? (session.metadata?.['agentType'] as string | undefined) ?? 'cc'
-      : undefined;
     const badge = [
       isCurrent ? CURRENT_BADGE : '',
-      platform ? `💬 ${platform}` : '',
+      isCcConnect ? '💬 cc' : '',
     ]
       .filter((p) => p.length > 0)
       .join(' ');
