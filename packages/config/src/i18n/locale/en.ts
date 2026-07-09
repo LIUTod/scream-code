@@ -440,6 +440,7 @@ export const en: Record<string, string> = {
   'session.title': 'Sessions',
   'session.loading': 'Loading sessions...',
   'session_picker.empty': 'No sessions found. Press Escape to close.',
+  'session_picker.cc_restricted': 'CC sessions cannot be switched or deleted',
   'session.picker_title': 'Sessions ',
   'session.delete_confirm': '⚠️ Press Enter to confirm delete, Esc to cancel',
   'session.picker_hint': '(↑↓ Navigate, Enter Select, d Delete, Esc Cancel)',

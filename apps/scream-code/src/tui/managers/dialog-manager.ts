@@ -123,6 +123,9 @@ export class DialogManager {
         loading: this.host.getIsLoadingSessions(),
         currentSessionId: this.host.getCurrentSessionId(),
         colors: this.host.state.theme.colors,
+        onStatus: (message: string) => {
+          this.host.showStatus(message);
+        },
         onSelect: (pickerId: string) => {
           const row = this.host.getSessions().find((s) => s.id === pickerId);
           const isCc = row?.metadata?.['source'] === 'cc-connect';

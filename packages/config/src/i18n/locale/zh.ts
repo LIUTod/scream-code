@@ -440,6 +440,7 @@ export const zh: Record<string, string> = {
   'session.title': '会话',
   'session.loading': '正在加载会话...',
   'session_picker.empty': '未找到会话。按 Escape 关闭。',
+  'session_picker.cc_restricted': 'CC专属会话不支持切换或删除',
   'session.picker_title': '会话 ',
   'session.delete_confirm': '⚠️ 按 Enter 确认删除，Esc 取消',
   'session.picker_hint': '(↑↓ 导航，Enter 选择，d 删除，Esc 取消)',

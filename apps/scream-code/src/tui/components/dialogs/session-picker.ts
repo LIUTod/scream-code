@@ -86,6 +86,7 @@ export class SessionPickerComponent extends Container implements Focusable {
   private onSelect: (sessionId: string) => void;
   private onCancel: () => void;
   private onDelete: ((sessionId: string) => void | Promise<void>) | undefined;
+  private onStatus: (message: string) => void;
   private maxVisibleSessions: number;
   private loading: boolean;
 
@@ -101,6 +102,7 @@ export class SessionPickerComponent extends Container implements Focusable {
     onSelect: (sessionId: string) => void;
     onCancel: () => void;
     onDelete?: ((sessionId: string) => void | Promise<void>) | undefined;
+    onStatus: (message: string) => void;
     maxVisibleSessions?: number;
   }) {
     super();
@@ -111,6 +113,7 @@ export class SessionPickerComponent extends Container implements Focusable {
     this.onSelect = opts.onSelect;
     this.onCancel = opts.onCancel;
     this.onDelete = opts.onDelete;
+    this.onStatus = opts.onStatus;
     this.maxVisibleSessions = opts.maxVisibleSessions ?? 4;
   }
 
@@ -128,7 +131,15 @@ export class SessionPickerComponent extends Container implements Focusable {
       if (!session) return;
       if (this.confirmingDelete) {
         this.confirmingDelete = false;
+        if (session.metadata?.['source'] === 'cc-connect') {
+          this.onStatus(t('session_picker.cc_restricted'));
+          return;
+        }
         void this.onDelete?.(session.id);
+        return;
+      }
+      if (session.metadata?.['source'] === 'cc-connect') {
+        this.onStatus(t('session_picker.cc_restricted'));
         return;
       }
       this.onSelect(session.id);
@@ -147,7 +158,12 @@ export class SessionPickerComponent extends Container implements Focusable {
     const k = printableChar(data);
     if ((k === 'd' || k === 'D') && !this.confirmingDelete && this.sessions.length > 0) {
       const session = this.sessions[this.selectedIndex];
-      if (session && session.id !== this.currentSessionId) {
+      if (!session) return;
+      if (session.metadata?.['source'] === 'cc-connect') {
+        this.onStatus(t('session_picker.cc_restricted'));
+        return;
+      }
+      if (session.id !== this.currentSessionId) {
         this.confirmingDelete = true;
       }
     }

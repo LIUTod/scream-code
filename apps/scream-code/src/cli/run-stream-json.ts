@@ -647,6 +647,7 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
               permission: mappedPermission,
               planMode: mappedPlanMode,
               thinking: opts.effort,
+              metadata: { source: 'cc-connect', agentType: 'scream-code' },
             });
             log.info("stream-json: recreated session", {
               sessionId: session.id,
@@ -661,6 +662,7 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
             permission: mappedPermission,
             planMode: mappedPlanMode,
             thinking: opts.effort,
+            metadata: { source: 'cc-connect', agentType: 'scream-code' },
           });
           log.info("stream-json: created session", { sessionId: session.id });
         }

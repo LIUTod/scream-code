@@ -24,32 +24,6 @@ const SessionSummaryStateSchema = z.object({
 
 type SessionSummaryState = z.infer<typeof SessionSummaryStateSchema>;
 
-// ── cc-connect session file schema ────────────────────────────────────
-
-const CcConnectHistoryEntrySchema = z.object({
-  role: z.string(),
-  content: z.string(),
-  timestamp: z.string().optional(),
-});
-
-const CcConnectSessionSchema = z.object({
-  id: z.string(),
-  name: z.string().optional(),
-  agent_session_id: z.string().optional(),
-  agent_type: z.string().optional(),
-  history: z.array(CcConnectHistoryEntrySchema).nullable().optional(),
-  created_at: z.string().optional(),
-  updated_at: z.string().optional(),
-});
-
-const CcConnectSnapshotSchema = z.object({
-  sessions: z.record(z.string(), CcConnectSessionSchema).optional(),
-  active_session: z.record(z.string(), z.string()).optional(),
-  version: z.number().optional(),
-});
-
-type CcConnectSession = z.infer<typeof CcConnectSessionSchema>;
-
 export interface CreateSessionRecordInput {
   readonly id: string;
   readonly workDir: string;
@@ -230,20 +204,10 @@ export class SessionStore {
   private async listAll(): Promise<readonly SessionSummary[]> {
     const index = await readSessionIndex(this.homeDir, this.sessionsDir);
     const sessions: SessionSummary[] = [];
-    const seenAgentIds = new Set<string>();
     for (const entry of index.values()) {
       if (!(await isDirectory(entry.sessionDir))) continue;
       const summary = await this.summaryFromDir(entry.sessionId, entry.sessionDir, entry.workDir);
       sessions.push(summary);
-      seenAgentIds.add(entry.sessionId);
-    }
-
-    // Merge cc-connect sessions.
-    try {
-      const ccSessions = await listCcConnectSessions(seenAgentIds);
-      sessions.push(...ccSessions);
-    } catch {
-      // cc-connect not installed or data directory unreadable — skip silently.
     }
 
     sessions.sort(compareSessionSummary);
@@ -479,119 +443,3 @@ function compareSessionSummary(a: SessionSummary, b: SessionSummary): number {
   return 0;
 }
 
-// ── cc-connect session discovery ───────────────────────────────────────
-
-const CC_CONNECT_SESSIONS_DIR = join(homedir(), '.cc-connect', 'sessions');
-
-/**
- * Scan `~/.cc-connect/sessions/*.json` and return ScreamCode-compatible
- * SessionSummary entries for every cc-connect session that has a
- * non-empty agent_session_id (i.e. can actually be resumed).
- *
- * Sessions whose `agent_session_id` already appears in `seenAgentIds` are
- * skipped — the native ScreamCode session takes precedence.
- */
-async function listCcConnectSessions(
-  seenAgentIds: Set<string>,
-): Promise<SessionSummary[]> {
-  let entries: string[];
-  try {
-    entries = await readdir(CC_CONNECT_SESSIONS_DIR);
-  } catch {
-    return [];
-  }
-
-  const results: SessionSummary[] = [];
-  for (const name of entries) {
-    if (!name.endsWith('.json')) continue;
-    const projectName = name.slice(0, -5); // strip ".json"
-    const filePath = join(CC_CONNECT_SESSIONS_DIR, name);
-    const parsed = await readCcConnectSnapshot(filePath);
-    if (parsed === undefined) continue;
-
-    for (const [, ccSession] of Object.entries(parsed.sessions ?? {})) {
-      const agentId = ccSession.agent_session_id?.trim();
-      if (!agentId || agentId.length === 0) continue;
-      // Deduplicate: if a native ScreamCode session already tracks this
-      // agent session ID, skip the CC wrapper.
-      if (seenAgentIds.has(agentId)) continue;
-
-      const summary = ccSessionToSummary(ccSession, agentId, projectName);
-      if (summary !== undefined) {
-        results.push(summary);
-        seenAgentIds.add(agentId);
-      }
-    }
-  }
-  return results;
-}
-
-async function readCcConnectSnapshot(
-  filePath: string,
-): Promise<z.infer<typeof CcConnectSnapshotSchema> | undefined> {
-  try {
-    const raw = await readFile(filePath, 'utf-8');
-    const parsed = JSON.parse(raw) as unknown;
-    const result = CcConnectSnapshotSchema.safeParse(parsed);
-    return result.success ? result.data : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-/** Extract the last user-message content for a preview in the picker. */
-function lastPromptFromCcHistory(
-  history: readonly z.infer<typeof CcConnectHistoryEntrySchema>[] | null | undefined,
-): string | undefined {
-  if (!history || history.length === 0) return undefined;
-  // Walk backwards to find the last user message.
-  for (let i = history.length - 1; i >= 0; i--) {
-    const entry = history[i];
-    if (entry && entry.role === 'user' && entry.content?.trim().length > 0) {
-      return entry.content.trim();
-    }
-  }
-  return undefined;
-}
-
-function ccSessionToSummary(
-  cc: CcConnectSession,
-  agentSessionId: string,
-  projectName: string,
-): SessionSummary | undefined {
-  const id = `cc:${projectName}/${cc.id}`;
-  const createdAt = parseCcTimestamp(cc.created_at);
-  const updatedAt = parseCcTimestamp(cc.updated_at) ?? createdAt;
-  if (createdAt === undefined && updatedAt === undefined) return undefined;
-
-  const title = cc.name?.trim() ?? cc.id;
-  const lastPrompt = lastPromptFromCcHistory(cc.history);
-
-  const metadata: Record<string, JsonValue> = {
-    source: 'cc-connect',
-    agentSessionId,
-    ccProject: projectName,
-    ccSessionId: cc.id,
-  };
-  if (cc.agent_type) {
-    metadata['agentType'] = cc.agent_type;
-  }
-
-  return {
-    id,
-    workDir: homedir(),
-    sessionDir: '',
-    createdAt: createdAt ?? updatedAt!,
-    updatedAt: updatedAt ?? createdAt!,
-    title: title.length > 0 ? title : undefined,
-    lastPrompt,
-    metadata,
-  };
-}
-
-/** Parse an ISO-8601 timestamp with optional timezone offset to epoch ms. */
-function parseCcTimestamp(value: string | undefined): number | undefined {
-  if (!value) return undefined;
-  const ms = Date.parse(value);
-  return Number.isFinite(ms) ? ms : undefined;
-}
