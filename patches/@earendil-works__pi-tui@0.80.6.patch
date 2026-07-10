@@ -11,36 +11,15 @@ index 6c03aeec4148571558713e885ac7f7df18a511bc..39ce2144efe59c9a006ac9a57347763f
              }
              if (kb.matches(data, "tui.input.tab")) {
 diff --git a/dist/tui.js b/dist/tui.js
-index 62574431ce65ff9e6d7e68407b2563dcef5c8f3e..00ba9f05025a5aad3aeccc27514d64fa1c34a639 100644
+index 62574431ce65ff9e6d7e68407b2563dcef5c8f3e..064fc0a93c3fd849d891f852ad4243c59a172e34 100644
 --- a/dist/tui.js
 +++ b/dist/tui.js
-@@ -431,7 +431,15 @@ export class TUI extends Container {
-     start() {
-         this.stopped = false;
-         this.terminal.start((data) => this.handleInput(data), () => this.requestRender());
--        this.terminal.hideCursor();
-+        // Enter alternate screen buffer to prevent viewport jump-to-top flashes
-+        // during fullRender(true). Alternate screen has no scrollback, so
-+        // \x1b[2J\x1b[H clears only the alternate buffer without disturbing the
-+        // user's scroll position. Skip on Windows ConPTY — its alternate screen
-+        // support is incomplete and can cause EPIPE crashes.
-+        if (process.platform !== "win32") {
-+            this.terminal.write("\x1b[?1049h");
-+            this.terminal.hideCursor();
-+        }
-         if (this.terminalColorSchemeNotificationsEnabled) {
-             this.terminal.write("\x1b[?2031h");
-         }
-@@ -493,6 +501,12 @@ export class TUI extends Container {
-             this.terminal.write("\r\n");
-         }
-         this.terminal.showCursor();
-+        // Exit alternate screen buffer before stopping terminal.
-+        // Must come after showCursor() so cursor is visible in main buffer.
-+        // Skip on Windows ConPTY — its alternate screen support is incomplete.
-+        if (process.platform !== "win32") {
-+            this.terminal.write("\x1b[?1049l");
-+        }
-         this.terminal.stop();
-     }
-     requestRender(force = false) {
+@@ -1004,7 +1004,7 @@ export class TUI extends Container {
+             let buffer = "\x1b[?2026h"; // Begin synchronized output
+             if (clear) {
+                 buffer += this.deleteKittyImages(this.previousKittyImageIds);
+-                buffer += "\x1b[2J\x1b[H\x1b[3J"; // Clear screen, home, then clear scrollback
++                buffer += "\x1b[2J\x1b[H"; // Clear screen and home cursor (preserve scrollback)
+             }
+             for (let i = 0; i < newLines.length; i++) {
+                 if (i > 0)
