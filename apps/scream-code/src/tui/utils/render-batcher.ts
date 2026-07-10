@@ -60,7 +60,7 @@ export function createRenderBatcher(
         batchDepth--;
         if (batchDepth === 0 && batchNeedsRender) {
           batchNeedsRender = false;
-          scheduleRender(true);
+          scheduleRender(pendingForce);
         }
       }
     },
