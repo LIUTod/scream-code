@@ -30,7 +30,7 @@ describe('createRenderBatcher', () => {
     expect(doRender).toHaveBeenCalledWith(true);
   });
 
-  it('defers renders inside batchUpdate and queues one force render at the end', async () => {
+  it('defers renders inside batchUpdate and queues a render at the end', async () => {
     const doRender = vi.fn();
     const batcher = createRenderBatcher(doRender);
 
@@ -44,7 +44,7 @@ describe('createRenderBatcher', () => {
     expect(doRender).not.toHaveBeenCalled();
     await Promise.resolve();
     expect(doRender).toHaveBeenCalledTimes(1);
-    expect(doRender).toHaveBeenCalledWith(true);
+    expect(doRender).toHaveBeenCalledWith(false);
   });
 
   it('only renders once for nested batches', async () => {
