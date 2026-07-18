@@ -17,6 +17,12 @@ const SHADOW_CHARS = new Set(['╚','═','╝','║','╔','╗','╠','╣','�
 const SHEEN_STEP = 4
 const SHEEN_INTERVAL_MS = 60
 const LOADING_DURATION_MS = 1500
+
+// Full SCREAM CODE art needs 85 columns; with side margins 87 is comfortable.
+const FULL_LOGO_MIN_COLS = 87
+
+// Compact logo face for narrow terminals.
+const COMPACT_LOGO = ['██▄▄▄██', '▐█▄▀▄█▌']
 const THEME_PRIMARY: Record<ResolvedTheme, [number, number, number]> = {
   dark: [204, 251, 35],    // #ccfb23
   light: [75, 122, 6],     // #4B7A06
@@ -174,7 +180,12 @@ export function runLoadingAnimation(
   const ansi = supportsAnsi()
 
   if (!ansi) {
-    for (const line of LOGO) stdout.write(`${fg(...LOGO_RGB)}${line}${RESET}\n`)
+    const { cols } = getTerminalSize()
+    if (cols >= FULL_LOGO_MIN_COLS) {
+      for (const line of LOGO) stdout.write(`${fg(...LOGO_RGB)}${line}${RESET}\n`)
+    } else {
+      for (const line of COMPACT_LOGO) stdout.write(`${fg(...BLOCK_RGB)}${line}${RESET}\n`)
+    }
     stdout.write(`${BOLD}${fg(...THEME_PRIMARY[theme])}${t('loading.waking')}${RESET}\n`)
     return Promise.resolve()
   }
@@ -197,18 +208,26 @@ export function runLoadingAnimation(
     function render() {
       const { cols, rows } = getTerminalSize()
       const lines: string[] = []
+      const useFullLogo = cols >= FULL_LOGO_MIN_COLS
 
-      const contentHeight = LOGO.length + 5
+      const contentHeight = useFullLogo ? LOGO.length + 5 : COMPACT_LOGO.length + 5
       const topPad = Math.max(0, Math.floor((rows - contentHeight) / 2))
       for (let i = 0; i < topPad; i++) lines.push('')
 
       const breatheColor = breathePalette[breatheFrame] ?? primary
-      for (const line of LOGO) {
-        let colored = ''
-        for (let ci = 0; ci < line.length; ci++) {
-          colored += renderSheen(line[ci]!, ci, sheenPos, isReversing, breatheColor)
+      if (useFullLogo) {
+        for (const line of LOGO) {
+          let colored = ''
+          for (let ci = 0; ci < line.length; ci++) {
+            colored += renderSheen(line[ci]!, ci, sheenPos, isReversing, breatheColor)
+          }
+          lines.push(centerPad(colored, cols))
         }
-        lines.push(centerPad(colored, cols))
+      } else {
+        for (const line of COMPACT_LOGO) {
+          const colored = `${fg(...BLOCK_RGB)}${line}${RESET}`
+          lines.push(centerPad(colored, cols))
+        }
       }
       lines.push('')
 
@@ -282,7 +301,12 @@ export function runLoadingAnimation(
       if (process.platform !== 'win32') {
         stdout.write('\u001B[?1049l')
       }
-      for (const line of LOGO) stdout.write(`${fg(...LOGO_RGB)}${line}${RESET}\n`)
+      const { cols: fallbackCols } = getTerminalSize()
+      if (fallbackCols >= FULL_LOGO_MIN_COLS) {
+        for (const line of LOGO) stdout.write(`${fg(...LOGO_RGB)}${line}${RESET}\n`)
+      } else {
+        for (const line of COMPACT_LOGO) stdout.write(`${fg(...BLOCK_RGB)}${line}${RESET}\n`)
+      }
       stdout.write(`${BOLD}${fg(...primary)}${t('loading.waking')}${RESET}\n`)
       resolve()
       return
