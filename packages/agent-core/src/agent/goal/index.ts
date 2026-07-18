@@ -15,7 +15,7 @@ import type { AgentRecordOf } from '../records/types';
 const MAX_GOAL_OBJECTIVE_LENGTH = 4000;
 
 /** Maximum number of working notes kept per goal. */
-const MAX_GOAL_NOTES = 10;
+const MAX_GOAL_NOTES = 30;
 /** Maximum characters per note. */
 const MAX_NOTE_LENGTH = 200;
 

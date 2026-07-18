@@ -2,7 +2,6 @@ import { t } from '@scream-code/config';
 import type { Component } from '@liutod-scream/pi-tui';
 
 import type { SlashCommandHost } from './dispatch';
-import { ChoicePickerComponent, type ChoiceOption } from '../components/dialogs/choice-picker';
 import { GoalStatusMessageComponent } from '../components/messages/goal-panel';
 import { isBusy } from '../utils/app-state';
 import { detectGoalConflict } from '../utils/goal-loop-conflict';
@@ -113,43 +112,51 @@ async function createGoal(host: SlashCommandHost, parsed: ParsedGoalCommand & { 
 
 // ── Goal Configuration Wizard ──────────────────────────────────────────
 
-type BudgetChoice = { value: number; unit: 'turns' | 'tokens' | 'milliseconds'; label: string };
-type JudgeChoice = 'ai' | 'shell' | 'none';
-
 async function showGoalConfigWizard(
   host: SlashCommandHost,
   session: NonNullable<SlashCommandHost['session']>,
   objective: string,
   replace: boolean,
 ): Promise<void> {
-  // Step 1: Budget type
-  const budgetType = await pickBudgetType(host, objective);
-  if (budgetType === undefined) return; // cancelled
+  const { TextInputDialogComponent } = await import('../components/dialogs/text-input-dialog');
 
-  // Step 2: Budget value (skip if 'none')
-  let budget: BudgetChoice | undefined;
-  if (budgetType !== 'none') {
-    budget = await pickBudgetValue(host, objective, budgetType);
-    if (budget === undefined) return;
-  }
+  // Step 1: Turn limit (0 = unlimited)
+  const turnInput = await promptNumber(host, TextInputDialogComponent, {
+    title: t('goal.wizard_title', { objective }),
+    subtitle: t('goal.budget_turns_hint'),
+    placeholder: '10',
+  });
+  if (turnInput === undefined) return;
 
-  // Step 3: Judge type
-  const judgeType = await pickJudgeType(host, objective);
-  if (judgeType === undefined) return;
+  // Step 2: Token limit (0 = unlimited)
+  const tokenInput = await promptNumber(host, TextInputDialogComponent, {
+    title: t('goal.wizard_title', { objective }),
+    subtitle: t('goal.budget_tokens_hint'),
+    placeholder: '200000',
+  });
+  if (tokenInput === undefined) return;
 
-  // Step 4: Shell command (if judge is shell)
-  let completionCriterion: string | undefined;
-  if (judgeType === 'shell') {
-    completionCriterion = await pickShellCommand(host, objective);
-    if (completionCriterion === undefined) return;
-  }
+  // Step 3: Time limit in minutes (0 = unlimited)
+  const timeInput = await promptNumber(host, TextInputDialogComponent, {
+    title: t('goal.wizard_title', { objective }),
+    subtitle: t('goal.budget_time_hint'),
+    placeholder: '30',
+  });
+  if (timeInput === undefined) return;
 
   // Create goal with configured options
   try {
-    await session.createGoal(objective, { replace, completionCriterion });
-    if (budget !== undefined) {
-      await session.setGoalBudget(budget.value, budget.unit);
+    await session.createGoal(objective, { replace });
+
+    // Set budgets (skip if 0 = unlimited)
+    const budgets: Array<{ value: number; unit: 'turns' | 'tokens' | 'minutes' }> = [];
+    if (turnInput > 0) budgets.push({ value: turnInput, unit: 'turns' });
+    if (tokenInput > 0) budgets.push({ value: tokenInput, unit: 'tokens' });
+    if (timeInput > 0) budgets.push({ value: timeInput, unit: 'minutes' });
+    for (const b of budgets) {
+      await session.setGoalBudget(b.value, b.unit);
     }
+
     host.showStatus(t('goal.set', { objective }));
 
     if (!isBusy(host.state.appState)) {
@@ -163,105 +170,32 @@ async function showGoalConfigWizard(
   }
 }
 
-function pickBudgetType(host: SlashCommandHost, objective: string): Promise<'turns' | 'tokens' | 'time' | 'none' | undefined> {
-  return pickChoice(host, {
-    title: t('goal.wizard_title', { objective }),
-    options: [
-      { value: 'turns', label: t('goal.budget_turns'), description: t('goal.budget_turns_desc') },
-      { value: 'tokens', label: t('goal.budget_tokens'), description: t('goal.budget_tokens_desc') },
-      { value: 'time', label: t('goal.budget_time'), description: t('goal.budget_time_desc') },
-      { value: 'none', label: t('goal.budget_none'), description: t('goal.budget_none_desc') },
-    ],
-  });
-}
-
-function pickBudgetValue(host: SlashCommandHost, objective: string, type: 'turns' | 'tokens' | 'time'): Promise<BudgetChoice | undefined> {
-  const options: ChoiceOption[] = type === 'turns'
-    ? [
-        { value: '5', label: '5' },
-        { value: '10', label: '10' },
-        { value: '20', label: '20' },
-        { value: '50', label: '50' },
-      ]
-    : type === 'tokens'
-      ? [
-          { value: '50000', label: '50K' },
-          { value: '100000', label: '100K' },
-          { value: '200000', label: '200K' },
-          { value: '500000', label: '500K' },
-        ]
-      : [
-          { value: '300000', label: '5 min' },
-          { value: '900000', label: '15 min' },
-          { value: '1800000', label: '30 min' },
-          { value: '3600000', label: '1 hour' },
-        ];
-
-  return new Promise<BudgetChoice | undefined>((resolve) => {
-    const picker = new ChoicePickerComponent({
-      title: t('goal.wizard_title', { objective }),
-      options,
-      colors: host.state.theme.colors,
-      onSelect: (val: string) => {
-        host.restoreEditor();
-        const num = Number(val);
-        resolve({ value: num, unit: type === 'time' ? 'milliseconds' : type, label: options.find(o => o.value === val)?.label ?? val });
-      },
-      onCancel: () => {
-        host.restoreEditor();
-        resolve(undefined);
-      },
-    });
-    host.mountEditorReplacement(picker);
-  });
-}
-
-function pickJudgeType(host: SlashCommandHost, objective: string): Promise<JudgeChoice | undefined> {
-  return pickChoice(host, {
-    title: t('goal.wizard_title', { objective }),
-    options: [
-      { value: 'ai', label: t('goal.judge_ai'), description: t('goal.judge_ai_desc') },
-      { value: 'shell', label: t('goal.judge_shell'), description: t('goal.judge_shell_desc') },
-      { value: 'none', label: t('goal.judge_manual'), description: t('goal.judge_manual_desc') },
-    ],
-  });
-}
-
-async function pickShellCommand(host: SlashCommandHost, objective: string): Promise<string | undefined> {
-  const { TextInputDialogComponent } = await import('../components/dialogs/text-input-dialog');
-  return new Promise<string | undefined>((resolve) => {
+/** Prompt user for a non-negative integer. Returns undefined on cancel. */
+function promptNumber(
+  host: SlashCommandHost,
+  TextInputDialogComponent: typeof import('../components/dialogs/text-input-dialog').TextInputDialogComponent,
+  opts: { title: string; subtitle: string; placeholder: string },
+): Promise<number | undefined> {
+  return new Promise<number | undefined>((resolve) => {
     const dialog = new TextInputDialogComponent(
       (result) => {
         host.restoreEditor();
-        resolve(result.kind === 'ok' && result.value.trim().length > 0 ? result.value.trim() : undefined);
+        if (result.kind !== 'ok') {
+          resolve(undefined);
+          return;
+        }
+        const parsed = parseInt(result.value.trim(), 10);
+        resolve(Number.isNaN(parsed) || parsed < 0 ? 0 : parsed);
       },
       {
-        title: t('goal.shell_command_prompt'),
-        placeholder: 'pnpm test',
-        allowEmpty: false,
+        title: opts.title,
+        subtitle: opts.subtitle,
+        placeholder: opts.placeholder,
+        allowEmpty: true,
         colors: host.state.theme.colors,
       },
     );
     host.mountEditorReplacement(dialog);
-  });
-}
-
-function pickChoice<T extends string>(host: SlashCommandHost, opts: { title: string; options: ChoiceOption[] }): Promise<T | undefined> {
-  return new Promise<T | undefined>((resolve) => {
-    const picker = new ChoicePickerComponent({
-      title: opts.title,
-      options: opts.options,
-      colors: host.state.theme.colors,
-      onSelect: (val: string) => {
-        host.restoreEditor();
-        resolve(val as T);
-      },
-      onCancel: () => {
-        host.restoreEditor();
-        resolve(undefined);
-      },
-    });
-    host.mountEditorReplacement(picker);
   });
 }
 
