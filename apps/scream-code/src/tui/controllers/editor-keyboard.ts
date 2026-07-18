@@ -36,6 +36,9 @@ export interface EditorKeyboardHost {
   toggleToolOutputExpansion(): void;
   togglePlanExpansion(): boolean;
   hideSessionPicker(): void;
+  hideMemoryPicker(): void;
+  hideHelpPanel(): void;
+  restoreEditor(): void;
   stop(exitCode?: number): Promise<void>;
   handlePlanModeStateChange(state: PlanModeState): void;
   clearQueuedMessages(): void;
@@ -110,6 +113,18 @@ export class EditorKeyboardController {
       if (this.pendingExit) this.clearPendingExit();
       if (host.state.activeDialog === 'session-picker') {
         host.hideSessionPicker();
+        return;
+      }
+      if (host.state.activeDialog === 'memory-picker') {
+        host.hideMemoryPicker();
+        return;
+      }
+      if (host.state.activeDialog === 'help') {
+        host.hideHelpPanel();
+        return;
+      }
+      if (host.state.activeDialog === 'overlay') {
+        host.restoreEditor();
         return;
       }
       if (host.state.appState.isCompacting) {

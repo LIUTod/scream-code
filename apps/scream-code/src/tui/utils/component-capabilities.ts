@@ -1,3 +1,5 @@
+import type { Container } from '@liutod-scream/pi-tui';
+
 export interface Expandable {
   setExpanded(expanded: boolean): void;
 }
@@ -37,4 +39,11 @@ export function hasDispose(value: unknown): value is Disposable {
     'dispose' in value &&
     typeof (value as Disposable).dispose === 'function'
   );
+}
+
+export function disposeChildren(container: Container): void {
+  for (const child of container.children) {
+    if (hasDispose(child)) child.dispose();
+  }
+  container.clear();
 }

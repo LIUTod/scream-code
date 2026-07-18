@@ -21,6 +21,7 @@ import type { SlashCommandHost } from './dispatch';
 import { MoonLoader } from '../components/chrome/moon-loader';
 import { getFallbackSkillMarketplace, type FallbackMarketplaceEntry } from './skill-marketplace';
 import { isUserActivatableSkill } from './skills';
+import { type Disposable } from '../utils/component-capabilities';
 
 const SKILL_DESC_MAX = 60;
 
@@ -85,7 +86,7 @@ async function openSkillCenter(host: SlashCommandHost): Promise<void> {
 }
 // ─── Loading overlay ───────────────────────────────────────────────────────
 
-class SkillCenterLoadingComponent extends Container implements Focusable {
+class SkillCenterLoadingComponent extends Container implements Focusable, Disposable {
   focused = false;
   private readonly loader: MoonLoader;
   private readonly host: SlashCommandHost;
@@ -118,6 +119,11 @@ class SkillCenterLoadingComponent extends Container implements Focusable {
 
   stop(): void {
     this.loader.stop();
+  }
+
+  dispose(): void {
+    this.cancelled = true;
+    this.stop();
   }
 }
 async function loadActivatableSkills(host: SlashCommandHost): Promise<readonly SkillSummary[]> {

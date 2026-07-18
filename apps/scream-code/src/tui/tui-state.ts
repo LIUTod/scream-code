@@ -60,7 +60,7 @@ export interface TUIState {
   planExpanded: boolean;
   sessions: SessionRow[];
   loadingSessions: boolean;
-  activeDialog: 'session-picker' | 'memory-picker' | 'help' | null;
+  activeDialog: 'session-picker' | 'memory-picker' | 'help' | 'overlay' | null;
   tasksBrowser: TasksBrowserState | undefined;
   externalEditorRunning: boolean;
   queuedMessages: QueuedMessage[];

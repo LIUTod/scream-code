@@ -20,6 +20,7 @@ import { adaptPanelResponse } from '../reverse-rpc/approval/adapter';
 import type { ApprovalController } from '../reverse-rpc/approval/controller';
 import type { QuestionController } from '../reverse-rpc/question/controller';
 import type { ApprovalPanelData, QuestionPanelData } from '../reverse-rpc/types';
+import { disposeChildren } from '../utils/component-capabilities';
 
 export interface DialogManagerHost {
   readonly state: TUIState;
@@ -65,16 +66,17 @@ export class DialogManager {
   // =========================================================================
   private mountEditorReplacement(panel: Component & Focusable): void {
     this.host.exitFullScreenTakeover();
-    this.host.state.editorContainer.clear();
+    disposeChildren(this.host.state.editorContainer);
     this.host.state.editorContainer.addChild(panel);
     this.host.state.ui.setFocus(panel);
     this.host.state.ui.requestRender();
   }
 
   private restoreEditor(): void {
-    this.host.state.editorContainer.clear();
+    disposeChildren(this.host.state.editorContainer);
     this.host.state.editorContainer.addChild(this.host.state.editor);
     this.host.state.ui.setFocus(this.host.state.editor);
+    this.host.state.activeDialog = null;
     this.host.state.ui.requestRender();
   }
 

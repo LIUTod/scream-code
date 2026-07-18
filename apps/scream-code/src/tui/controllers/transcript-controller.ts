@@ -29,7 +29,7 @@ import { ImageAttachmentStore, type ImageAttachment } from '../utils/image-attac
 import { truncateErrorMessage } from '../utils/event-payload';
 import { replaceTabs } from '../utils/sanitize';
 import { nextTranscriptId } from '../utils/transcript-id';
-import { hasDispose, isExpandable, isPlanExpandable } from '../utils/component-capabilities';
+import { disposeChildren, isExpandable, isPlanExpandable } from '../utils/component-capabilities';
 import { isStreaming } from '../utils/app-state';
 import { CommittedTranscriptComponent } from '../components/transcript/committed-transcript';
 import { ReadGroupComponent, parseReadGroupOutput } from '../components/messages/read-group';
@@ -298,10 +298,7 @@ export class TranscriptController {
     // Dispose live components before clearing the container so their timers
     // (AssistantMessageComponent fade, ToolCallComponent streaming/elapsed
     // timers) don't keep firing requestRender for ~1.2s into the next session.
-    for (const child of state.transcriptContainer.children) {
-      if (hasDispose(child)) child.dispose();
-    }
-    state.transcriptContainer.clear();
+    disposeChildren(state.transcriptContainer);
     this.clearTerminalInlineImages();
     state.todoPanel.clear();
     state.todoPanelContainer.clear();

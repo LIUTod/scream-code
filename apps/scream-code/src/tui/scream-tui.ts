@@ -23,6 +23,8 @@ import {
   type SkillListSession,
 } from './commands';
 import { clearGoalState } from './commands/goal';
+import { clearInfoPanelState } from './commands/info';
+import { disposeChildren } from './utils/component-capabilities';
 
 import type { HelpPanelCommand } from './components/dialogs/help-panel';
 import { AuthFlowController } from './controllers/auth-flow';
@@ -754,6 +756,7 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
     this.sessionEventHandler.stopAllMcpServerStatusSpinners();
     // Clear goal panel timer/refs to prevent stale timer firing on new session.
     clearGoalState();
+    clearInfoPanelState(this.state);
     // Clear scrollback when switching/creating sessions so old session content
     // doesn't linger in terminal scroll history. The viewport itself is cleared
     // by the force render below (fullRender emits \x1b[2J\x1b[H).
@@ -815,7 +818,7 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
   // =========================================================================
 
   private swapEditor(component: Component & Focusable): void {
-    this.state.editorContainer.clear();
+    disposeChildren(this.state.editorContainer);
     this.state.editorContainer.addChild(component);
     this.state.ui.setFocus(component);
     this.state.ui.requestRender();
@@ -830,17 +833,19 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
   mountEditorReplacement(panel: Component & Focusable): void {
     this.exitFullScreenTakeover();
     this.swapEditor(panel);
+    this.state.activeDialog = 'overlay';
   }
 
   restoreEditor(): void {
     this.swapEditor(this.state.editor);
+    this.state.activeDialog = null;
   }
 
   showHelpPanel(): void {
     this.dialogManager.showHelpPanel(this.getSlashCommands() as unknown as readonly HelpPanelCommand[]);
   }
 
-  private hideHelpPanel(): void {
+  hideHelpPanel(): void {
     this.dialogManager.hideHelpPanel();
   }
 

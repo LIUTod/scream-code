@@ -353,7 +353,7 @@ export class LifecycleController {
 
   private resolveActivityPaneMode(): EffectiveActivityPaneMode {
     const { state } = this.host;
-    if (state.activeDialog === 'session-picker' || state.activeDialog === 'memory-picker') return 'hidden';
+    if (state.activeDialog !== null) return 'hidden';
     if (state.livePane.pendingApproval !== null) return 'hidden';
     if (state.appState.isCompacting) return 'hidden';
     if (state.livePane.pendingQuestion !== null) return 'hidden';

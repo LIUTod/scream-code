@@ -20,6 +20,7 @@ import chalk from 'chalk';
 import { t } from '@scream-code/config';
 import type { ColorPalette } from '../theme/colors';
 import type { SlashCommandHost } from './dispatch';
+import { type Disposable } from '../utils/component-capabilities';
 
 // ─── Spinner ─────────────────────────────────────────────────────────────────
 
@@ -29,8 +30,9 @@ const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', 
 
 type BtwStatus = 'loading' | 'done' | 'error';
 
-class BtwOverlayComponent extends Container implements Focusable {
+class BtwOverlayComponent extends Container implements Focusable, Disposable {
   focused = false;
+  private disposed = false;
   private spinnerFrame = 0;
   private spinnerInterval: ReturnType<typeof setInterval> | undefined;
   private status: BtwStatus = 'loading';
@@ -63,6 +65,7 @@ class BtwOverlayComponent extends Container implements Focusable {
   }
 
   setAnswer(text: string): void {
+    if (this.disposed) return;
     this.answer = text;
     this.status = 'done';
     this.markdown = new Markdown(text.trim(), 0, 0, this.markdownTheme);
@@ -71,6 +74,7 @@ class BtwOverlayComponent extends Container implements Focusable {
   }
 
   setError(error: string): void {
+    if (this.disposed) return;
     this.answer = error;
     this.status = 'error';
     this.stopSpinner();
@@ -93,6 +97,11 @@ class BtwOverlayComponent extends Container implements Focusable {
   }
 
   private cleanup(): void {
+    this.stopSpinner();
+  }
+
+  dispose(): void {
+    this.disposed = true;
     this.stopSpinner();
   }
 

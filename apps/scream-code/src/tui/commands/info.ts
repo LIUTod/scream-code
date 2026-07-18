@@ -1,4 +1,5 @@
 import type { McpServerInfo, SessionStatus, SessionUsage } from '@scream-code/scream-code-sdk';
+import type { Component } from '@liutod-scream/pi-tui';
 
 import { t } from '@scream-code/config';
 
@@ -7,6 +8,7 @@ import { buildStatusReportLines } from '../components/messages/status-panel';
 import { buildUsageReportLines, UsagePanelComponent, type ManagedUsageReport } from '../components/messages/usage-panel';
 import { isManagedUsageProvider } from '../constant/scream-tui';
 import { formatErrorMessage } from '../utils/event-payload';
+import type { TUIState } from '../tui-state';
 import type { SlashCommandHost } from './dispatch';
 
 interface SessionUsageResult {
@@ -24,6 +26,27 @@ interface ManagedUsageResult {
   readonly error?: string;
 }
 
+const INFO_PANEL_DISMISS_MS = 10_000;
+
+let activeInfoPanel: Component | undefined;
+let activeInfoTimer: ReturnType<typeof setTimeout> | undefined;
+
+function dismissInfoPanel(state: TUIState): void {
+  if (activeInfoTimer !== undefined) {
+    clearTimeout(activeInfoTimer);
+    activeInfoTimer = undefined;
+  }
+  if (activeInfoPanel !== undefined) {
+    state.transcriptContainer.removeChild(activeInfoPanel);
+    activeInfoPanel = undefined;
+    state.ui.requestRender();
+  }
+}
+
+export function clearInfoPanelState(state: TUIState): void {
+  dismissInfoPanel(state);
+}
+
 export async function showUsage(host: SlashCommandHost): Promise<void> {
   const sessionUsage = await loadSessionUsageReport(host);
   const managedUsage = await loadManagedUsageReport(host);
@@ -38,8 +61,11 @@ export async function showUsage(host: SlashCommandHost): Promise<void> {
     managedUsageError: managedUsage?.error,
     subagentUsage: host.state.appState.subagentUsage,
   });
+  dismissInfoPanel(host.state);
   const panel = new UsagePanelComponent(lines, host.state.theme.colors.primary);
   host.state.transcriptContainer.addChild(panel);
+  activeInfoPanel = panel;
+  activeInfoTimer = setTimeout(() => { dismissInfoPanel(host.state); }, INFO_PANEL_DISMISS_MS);
   host.state.ui.requestRender();
 }
 
@@ -68,8 +94,11 @@ export async function showStatusReport(host: SlashCommandHost): Promise<void> {
     managedUsage: managedUsage?.usage,
     managedUsageError: managedUsage?.error,
   });
+  dismissInfoPanel(host.state);
   const panel = new UsagePanelComponent(lines, host.state.theme.colors.primary, ' Status ');
   host.state.transcriptContainer.addChild(panel);
+  activeInfoPanel = panel;
+  activeInfoTimer = setTimeout(() => { dismissInfoPanel(host.state); }, INFO_PANEL_DISMISS_MS);
   host.state.ui.requestRender();
 }
 
@@ -87,8 +116,11 @@ export async function showMcpServers(host: SlashCommandHost): Promise<void> {
     servers,
   });
   const title = servers.length > 0 ? ` MCP (${servers.length}) ` : ' MCP ';
+  dismissInfoPanel(host.state);
   const panel = new UsagePanelComponent(lines, host.state.theme.colors.primary, title);
   host.state.transcriptContainer.addChild(panel);
+  activeInfoPanel = panel;
+  activeInfoTimer = setTimeout(() => { dismissInfoPanel(host.state); }, INFO_PANEL_DISMISS_MS);
   host.state.ui.requestRender();
 }
 
