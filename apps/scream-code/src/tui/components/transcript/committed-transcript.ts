@@ -97,6 +97,8 @@ class CommittedMessageComponent implements Component {
       }
       case 'welcome':
         return [];
+      case 'tool_result':
+        return [];
     }
   }
 }

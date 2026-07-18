@@ -777,8 +777,8 @@ export class StreamingUIController {
         kind: 'tool_result',
         turnId: this._currentTurnId,
         renderMode: 'plain',
-        content: result,
-        toolCall: matchedCall,
+        content: typeof result === 'string' ? result : result.output ?? '',
+        toolCallData: matchedCall,
       };
       this.host.pushTranscriptEntry(entry);
       this.host.transcriptController.registerLiveComponent(completed, entry);

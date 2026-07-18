@@ -869,19 +869,19 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
     this.dialogManager.hideMemoryPicker();
   }
 
-  private showApprovalPanel(payload: ApprovalPanelData): void {
+  showApprovalPanel(payload: ApprovalPanelData): void {
     this.dialogManager.showApprovalPanel(payload);
   }
 
-  private hideApprovalPanel(): void {
+  hideApprovalPanel(): void {
     this.dialogManager.hideApprovalPanel();
   }
 
-  private showQuestionDialog(payload: QuestionPanelData): void {
+  showQuestionDialog(payload: QuestionPanelData): void {
     this.dialogManager.showQuestionDialog(payload);
   }
 
-  private hideQuestionDialog(): void {
+  hideQuestionDialog(): void {
     this.dialogManager.hideQuestionDialog();
   }
 

@@ -171,6 +171,7 @@ export type TranscriptEntryKind =
   | 'user'
   | 'assistant'
   | 'tool_call'
+  | 'tool_result'
   | 'thinking'
   | 'status'
   | 'skill_activation'

@@ -48,9 +48,9 @@ export interface SessionManagerHost {
   refreshSessionTitle(): void;
   updateQueueDisplay(): void;
   appendApprovalTranscriptEntry(request: ApprovalRequest, response: ApprovalResponse): void;
-  showApprovalPanel(payload: import('../reverse-rpc/approval/types').ApprovalPanelData): void;
+  showApprovalPanel(payload: import('../reverse-rpc/types').ApprovalPanelData): void;
   hideApprovalPanel(): void;
-  showQuestionDialog(payload: import('../reverse-rpc/question/types').QuestionPanelData): void;
+  showQuestionDialog(payload: import('../reverse-rpc/types').QuestionPanelData): void;
   hideQuestionDialog(): void;
   hasSessionContent(): boolean;
   stopMemoryIdleTimer(): void;

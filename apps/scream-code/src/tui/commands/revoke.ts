@@ -113,6 +113,7 @@ function isRevokeContextEntry(entry: TranscriptEntry): boolean {
     case 'user':
     case 'assistant':
     case 'tool_call':
+    case 'tool_result':
     case 'thinking':
     case 'skill_activation':
       return true;
