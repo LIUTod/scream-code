@@ -11,8 +11,8 @@
  * operation.
  */
 
-import type { Component } from '@earendil-works/pi-tui';
-import { truncateToWidth } from '@earendil-works/pi-tui';
+import type { Component } from '@liutod-scream/pi-tui';
+import { truncateToWidth } from '@liutod-scream/pi-tui';
 import chalk from 'chalk';
 
 import { STATUS_BULLET } from '#/tui/constant/symbols';

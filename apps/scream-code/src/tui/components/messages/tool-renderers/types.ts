@@ -1,4 +1,4 @@
-import type { Component } from '@earendil-works/pi-tui';
+import type { Component } from '@liutod-scream/pi-tui';
 
 import { RESULT_PREVIEW_LINES } from '#/tui/constant/rendering';
 import type { ColorPalette } from '#/tui/theme/colors';

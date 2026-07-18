@@ -6,8 +6,8 @@
  *   Line 2: context: XX.X% (tokens/max)
  */
 
-import type { Component, TUI } from '@earendil-works/pi-tui';
-import { truncateToWidth, visibleWidth } from '@earendil-works/pi-tui';
+import type { Component, TUI } from '@liutod-scream/pi-tui';
+import { truncateToWidth, visibleWidth } from '@liutod-scream/pi-tui';
 import chalk from 'chalk';
 import { t } from '@scream-code/config';
 

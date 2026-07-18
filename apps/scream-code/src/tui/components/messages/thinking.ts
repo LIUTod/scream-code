@@ -5,8 +5,8 @@
  * Supports expand/collapse via Ctrl+O (shared with tool output).
  */
 
-import type { Component, TUI } from '@earendil-works/pi-tui';
-import { Text } from '@earendil-works/pi-tui';
+import type { Component, TUI } from '@liutod-scream/pi-tui';
+import { Text } from '@liutod-scream/pi-tui';
 import { t } from '@scream-code/config';
 import chalk from 'chalk';
 

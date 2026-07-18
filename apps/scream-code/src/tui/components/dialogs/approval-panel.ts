@@ -13,7 +13,7 @@ import {
   type Focusable,
   truncateToWidth,
   visibleWidth,
-} from '@earendil-works/pi-tui';
+} from '@liutod-scream/pi-tui';
 import chalk from 'chalk';
 import { t } from '@scream-code/config';
 

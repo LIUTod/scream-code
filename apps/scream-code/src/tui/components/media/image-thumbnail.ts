@@ -12,7 +12,7 @@
  * the viewport; pi-tui handles proportional scaling internally.
  */
 
-import { Container, Image, Text, type Component, type ImageTheme, getCapabilities } from '@earendil-works/pi-tui';
+import { Container, Image, Text, type Component, type ImageTheme, getCapabilities } from '@liutod-scream/pi-tui';
 import chalk from 'chalk';
 
 import type { ColorPalette } from '#/tui/theme/colors';

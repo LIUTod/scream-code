@@ -17,7 +17,7 @@ import {
   truncateToWidth,
   visibleWidth,
   type Focusable,
-} from '@earendil-works/pi-tui';
+} from '@liutod-scream/pi-tui';
 import type { BackgroundTaskInfo, BackgroundTaskStatus } from '@scream-code/scream-code-sdk';
 import { t } from '@scream-code/config';
 import chalk from 'chalk';

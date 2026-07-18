@@ -1,5 +1,5 @@
 import type { BackgroundTaskInfo, Session } from '@scream-code/scream-code-sdk';
-import type { Component, ProcessTerminal, TUI } from '@earendil-works/pi-tui';
+import type { Component, ProcessTerminal, TUI } from '@liutod-scream/pi-tui';
 import { t } from '@scream-code/config';
 
 import { TaskOutputViewer } from '../components/dialogs/task-output-viewer';

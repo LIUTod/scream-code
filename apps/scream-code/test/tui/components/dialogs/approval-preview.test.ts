@@ -1,4 +1,4 @@
-import type { Terminal } from '@earendil-works/pi-tui';
+import type { Terminal } from '@liutod-scream/pi-tui';
 import { describe, expect, it } from 'vitest';
 
 import {

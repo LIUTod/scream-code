@@ -1,4 +1,4 @@
-import type { Component } from '@earendil-works/pi-tui';
+import type { Component } from '@liutod-scream/pi-tui';
 import { describe, expect, it } from 'vitest';
 
 import { pickResultRenderer } from '#/tui/components/messages/tool-renderers/registry';

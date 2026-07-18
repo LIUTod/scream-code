@@ -1,4 +1,4 @@
-import { CURSOR_MARKER } from '@earendil-works/pi-tui';
+import { CURSOR_MARKER } from '@liutod-scream/pi-tui';
 import { describe, expect, it } from 'vitest';
 
 import { ApprovalPanelComponent } from '#/tui/components/dialogs/approval-panel';

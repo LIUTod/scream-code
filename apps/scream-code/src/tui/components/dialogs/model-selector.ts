@@ -6,7 +6,7 @@ import {
   matchesKey,
   truncateToWidth,
   type Focusable,
-} from '@earendil-works/pi-tui';
+} from '@liutod-scream/pi-tui';
 import chalk from 'chalk';
 
 import { DEFAULT_OAUTH_PROVIDER_NAME, PRODUCT_NAME } from '#/constant/app';

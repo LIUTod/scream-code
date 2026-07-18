@@ -4,8 +4,8 @@
  * the pattern stays consistent across command-triggered panels.
  */
 
-import type { Component } from '@earendil-works/pi-tui';
-import { truncateToWidth, visibleWidth } from '@earendil-works/pi-tui';
+import type { Component } from '@liutod-scream/pi-tui';
+import { truncateToWidth, visibleWidth } from '@liutod-scream/pi-tui';
 import type { SessionUsage, TokenUsage } from '@scream-code/scream-code-sdk';
 import chalk from 'chalk';
 import {

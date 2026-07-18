@@ -1,4 +1,4 @@
-import { Container, type Component } from '@earendil-works/pi-tui';
+import { Container, type Component } from '@liutod-scream/pi-tui';
 
 /**
  * A Container that caches its rendered lines until explicitly invalidated or

@@ -12,7 +12,7 @@
  * metadata.
  */
 
-import { Container, Text, Spacer } from '@earendil-works/pi-tui';
+import { Container, Text, Spacer } from '@liutod-scream/pi-tui';
 import { t } from '@scream-code/config';
 import chalk from 'chalk';
 

@@ -3,7 +3,7 @@ import {
   type Component,
   getCapabilities,
   Spacer,
-} from '@earendil-works/pi-tui';
+} from '@liutod-scream/pi-tui';
 import type { ApprovalRequest, ApprovalResponse } from '@scream-code/scream-code-sdk';
 import { t } from '@scream-code/config';
 import chalk from 'chalk';

@@ -14,11 +14,6 @@ overrides:
   ssh2@1.17.0>cpu-features: '-'
   ssh2@1.17.0>nan: '-'
 
-patchedDependencies:
-  '@earendil-works/pi-tui@0.80.6':
-    hash: 1f65f074df6d61187ffe611f3f974182b0d296744adb03c981b13c0046a467cd
-    path: patches/@earendil-works__pi-tui@0.80.6.patch
-
 importers:
 
   .:
@@ -77,9 +72,9 @@ importers:
 
   apps/scream-code:
     dependencies:
-      '@earendil-works/pi-tui':
-        specifier: ^0.80.6
-        version: 0.80.6(patch_hash=1f65f074df6d61187ffe611f3f974182b0d296744adb03c981b13c0046a467cd)
+      '@liutod-scream/pi-tui':
+        specifier: ^0.80.10
+        version: 0.80.10
       '@mariozechner/clipboard':
         specifier: ^0.3.2
         version: 0.3.9
@@ -477,10 +472,6 @@ packages:
     resolution: {integrity: sha512-ooWCrlZP11i8GImSjTHYHLkvFDP48nS4+204nGb1RiX/WXYHmJA2III9/e2DWVabCESdW7hBAEzHRqUn9OUVvQ==}
     engines: {node: '>=0.1.90'}
 
-  '@earendil-works/pi-tui@0.80.6':
-    resolution: {integrity: sha512-bSuzS4EVSqEPj/Qr/p9eqCESfKsGuDNbl77EGci8Iaqqt/C/XCBZL1MjXaxSWW1NsT5afjp/Cb0NTPzOLv/aPA==}
-    engines: {node: '>=22.19.0'}
-
   '@emnapi/core@1.10.0':
     resolution: {integrity: sha512-yq6OkJ4p82CAfPl0u9mQebQHKPJkY7WrIuk205cTYnYe+k2Z8YBh11FrbRG/H6ihirqcacOgl2BIO8oyMQLeXw==}
 
@@ -856,6 +847,10 @@ packages:
 
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
+
+  '@liutod-scream/pi-tui@0.80.10':
+    resolution: {integrity: sha512-LRr5aDHtxhp7v2dbvqSjTb/BKJvMrEn3AFvqECbicnEnR5WJBuSdV/hwBVspVUVdiUwP48VDn3A5seoowYCgfA==}
+    engines: {node: '>=22.19.0'}
 
   '@loaderkit/resolve@1.0.6':
     resolution: {integrity: sha512-G8FdIoF5CypfwmD9rl8BXod5HDn8JqB0CCNBXDTaRZ+yRYhARrrSToX1zg1zy9jX3zLqigsELwhT4gNtkdQAUg==}
@@ -3968,11 +3963,6 @@ snapshots:
   '@colors/colors@1.5.0':
     optional: true
 
-  '@earendil-works/pi-tui@0.80.6(patch_hash=1f65f074df6d61187ffe611f3f974182b0d296744adb03c981b13c0046a467cd)':
-    dependencies:
-      get-east-asian-width: 1.6.0
-      marked: 18.0.5
-
   '@emnapi/core@1.10.0':
     dependencies:
       '@emnapi/wasi-threads': 1.2.1
@@ -4202,6 +4192,11 @@ snapshots:
     dependencies:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
+
+  '@liutod-scream/pi-tui@0.80.10':
+    dependencies:
+      get-east-asian-width: 1.6.0
+      marked: 18.0.5
 
   '@loaderkit/resolve@1.0.6':
     dependencies:

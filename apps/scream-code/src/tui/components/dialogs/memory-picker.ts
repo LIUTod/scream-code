@@ -22,7 +22,7 @@ import {
   visibleWidth,
   type Focusable,
   type TUI,
-} from '@earendil-works/pi-tui';
+} from '@liutod-scream/pi-tui';
 import chalk from 'chalk';
 import * as path from 'node:path';
 import { t } from '@scream-code/config';

@@ -2,8 +2,8 @@
  * Renders a user message in the transcript.
  */
 
-import type { Component } from '@earendil-works/pi-tui';
-import { Spacer, Text, visibleWidth } from '@earendil-works/pi-tui';
+import type { Component } from '@liutod-scream/pi-tui';
+import { Spacer, Text, visibleWidth } from '@liutod-scream/pi-tui';
 import chalk from 'chalk';
 
 import { ImageThumbnail } from '#/tui/components/media/image-thumbnail';

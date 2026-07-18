@@ -9,7 +9,7 @@
  * the edge and adding them would just churn the diff renderer.
  */
 
-import { Container } from '@earendil-works/pi-tui';
+import { Container } from '@liutod-scream/pi-tui';
 
 export class GutterContainer extends Container {
   constructor(

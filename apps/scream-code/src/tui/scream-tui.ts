@@ -1,7 +1,7 @@
 import {
   type Component,
   type Focusable,
-} from '@earendil-works/pi-tui';
+} from '@liutod-scream/pi-tui';
 import type {
   ApprovalRequest,
   ApprovalResponse,

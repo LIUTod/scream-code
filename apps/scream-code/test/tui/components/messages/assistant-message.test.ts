@@ -1,5 +1,5 @@
-import { visibleWidth } from '@earendil-works/pi-tui';
-import type { TUI } from '@earendil-works/pi-tui';
+import { visibleWidth } from '@liutod-scream/pi-tui';
+import type { TUI } from '@liutod-scream/pi-tui';
 import chalk from 'chalk';
 import { describe, expect, it, vi } from 'vitest';
 

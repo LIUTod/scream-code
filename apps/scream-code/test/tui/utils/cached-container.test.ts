@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 
-import { Text } from '@earendil-works/pi-tui';
+import { Text } from '@liutod-scream/pi-tui';
 import { CachedContainer } from '#/tui/utils/cached-container';
 
 describe('CachedContainer', () => {

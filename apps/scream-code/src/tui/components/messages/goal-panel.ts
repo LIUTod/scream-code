@@ -1,5 +1,5 @@
-import type { Component } from '@earendil-works/pi-tui';
-import { visibleWidth } from '@earendil-works/pi-tui';
+import type { Component } from '@liutod-scream/pi-tui';
+import { visibleWidth } from '@liutod-scream/pi-tui';
 import type { GoalSnapshotData } from '@scream-code/scream-code-sdk';
 import chalk from 'chalk';
 

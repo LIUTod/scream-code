@@ -1,5 +1,5 @@
-import type { Component } from '@earendil-works/pi-tui';
-import { Text } from '@earendil-works/pi-tui';
+import type { Component } from '@liutod-scream/pi-tui';
+import { Text } from '@liutod-scream/pi-tui';
 import chalk from 'chalk';
 
 import type { ColorPalette } from '#/tui/theme/colors';

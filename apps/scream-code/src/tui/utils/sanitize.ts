@@ -1,4 +1,4 @@
-import { truncateToWidth } from '@earendil-works/pi-tui';
+import { truncateToWidth } from '@liutod-scream/pi-tui';
 import * as os from 'node:os';
 
 /** Replace tabs with spaces, keeping column alignment. Default tab width 4. */

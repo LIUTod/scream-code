@@ -8,8 +8,8 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import { t } from '@scream-code/config';
-import type { Component, MarkdownTheme } from '@earendil-works/pi-tui';
-import { Markdown, visibleWidth } from '@earendil-works/pi-tui';
+import type { Component, MarkdownTheme } from '@liutod-scream/pi-tui';
+import { Markdown, visibleWidth } from '@liutod-scream/pi-tui';
 import chalk from 'chalk';
 
 import { toTerminalHyperlink } from '#/utils/terminal-hyperlink';

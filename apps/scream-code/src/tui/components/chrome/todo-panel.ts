@@ -9,8 +9,8 @@
  * is issued.
  */
 
-import type { Component } from '@earendil-works/pi-tui';
-import { truncateToWidth } from '@earendil-works/pi-tui';
+import type { Component } from '@liutod-scream/pi-tui';
+import { truncateToWidth } from '@liutod-scream/pi-tui';
 import { t } from '@scream-code/config';
 import chalk from 'chalk';
 

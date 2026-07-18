@@ -1,4 +1,4 @@
-import type { Component, Focusable } from '@earendil-works/pi-tui';
+import type { Component, Focusable } from '@liutod-scream/pi-tui';
 import type {
   ScreamHarness,
   Session,

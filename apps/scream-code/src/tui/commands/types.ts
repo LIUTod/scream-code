@@ -1,4 +1,4 @@
-import type { SlashCommand } from '@earendil-works/pi-tui';
+import type { SlashCommand } from '@liutod-scream/pi-tui';
 import type { FlagId } from '@scream-code/scream-code-sdk';
 
 export type SlashCommandAvailability = 'always' | 'idle-only';

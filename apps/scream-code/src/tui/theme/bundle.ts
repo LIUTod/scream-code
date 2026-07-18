@@ -1,4 +1,4 @@
-import type { MarkdownTheme } from '@earendil-works/pi-tui';
+import type { MarkdownTheme } from '@liutod-scream/pi-tui';
 
 import { getColorPalette, type ColorPalette, type ResolvedTheme } from './colors';
 import { createMarkdownTheme } from './pi-tui-theme';

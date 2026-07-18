@@ -10,7 +10,7 @@
  */
 
 import type { PluginSummary, SkillSummary } from '@scream-code/scream-code-sdk';
-import { Container, matchesKey, Key, Spacer, type Focusable } from '@earendil-works/pi-tui';
+import { Container, matchesKey, Key, Spacer, type Focusable } from '@liutod-scream/pi-tui';
 import chalk from 'chalk';
 import { t } from '@scream-code/config';
 

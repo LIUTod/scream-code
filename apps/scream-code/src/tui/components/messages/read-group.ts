@@ -21,8 +21,8 @@
  *   src/conflict.ts · 12 lines ⚠ conflict
  */
 
-import type { TUI } from '@earendil-works/pi-tui';
-import { Container, Spacer, Text } from '@earendil-works/pi-tui';
+import type { TUI } from '@liutod-scream/pi-tui';
+import { Container, Spacer, Text } from '@liutod-scream/pi-tui';
 import chalk from 'chalk';
 import { t } from '@scream-code/config';
 

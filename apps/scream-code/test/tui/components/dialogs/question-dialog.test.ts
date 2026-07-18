@@ -1,4 +1,4 @@
-import { CURSOR_MARKER } from '@earendil-works/pi-tui';
+import { CURSOR_MARKER } from '@liutod-scream/pi-tui';
 import chalk from 'chalk';
 import { beforeAll, describe, expect, it } from 'vitest';
 

@@ -1,4 +1,4 @@
-import { Container, Text } from '@earendil-works/pi-tui';
+import { Container, Text } from '@liutod-scream/pi-tui';
 import chalk from 'chalk';
 
 import type { QueuedMessage } from '../../types';

@@ -1,5 +1,5 @@
-import type { Component } from '@earendil-works/pi-tui';
-import { resetCapabilitiesCache, setCapabilities } from '@earendil-works/pi-tui';
+import type { Component } from '@liutod-scream/pi-tui';
+import { resetCapabilitiesCache, setCapabilities } from '@liutod-scream/pi-tui';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {

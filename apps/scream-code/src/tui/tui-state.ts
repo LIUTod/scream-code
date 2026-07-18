@@ -2,7 +2,7 @@ import {
   Container,
   ProcessTerminal,
   TUI,
-} from '@earendil-works/pi-tui';
+} from '@liutod-scream/pi-tui';
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { getLogDir } from '#/utils/paths';
 import { createRenderBatcher, type RenderBatchController } from './utils/render-batcher';

@@ -5,7 +5,7 @@
  * cleanly. No raw `chalk.gray` / `chalk.dim` / `chalk.white` here.
  */
 
-import type { MarkdownTheme, EditorTheme } from '@earendil-works/pi-tui';
+import type { MarkdownTheme, EditorTheme } from '@liutod-scream/pi-tui';
 import chalk from 'chalk';
 import { highlight, supportsLanguage } from 'cli-highlight';
 

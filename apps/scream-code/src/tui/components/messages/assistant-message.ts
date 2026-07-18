@@ -5,8 +5,8 @@
  * to align after the bullet.
  */
 
-import type { Component, MarkdownTheme, TUI } from '@earendil-works/pi-tui';
-import { Container, Markdown, visibleWidth } from '@earendil-works/pi-tui';
+import type { Component, MarkdownTheme, TUI } from '@liutod-scream/pi-tui';
+import { Container, Markdown, visibleWidth } from '@liutod-scream/pi-tui';
 import chalk from 'chalk';
 
 import { MESSAGE_INDENT } from '#/tui/constant/rendering';

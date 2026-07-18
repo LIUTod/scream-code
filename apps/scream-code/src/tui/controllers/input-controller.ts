@@ -2,7 +2,7 @@ import type {
   AutocompleteItem,
   Component,
   SlashCommand,
-} from '@earendil-works/pi-tui';
+} from '@liutod-scream/pi-tui';
 import type { Session } from '@scream-code/scream-code-sdk';
 import { t } from '@scream-code/config';
 

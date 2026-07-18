@@ -1,4 +1,4 @@
-import { Container, Spacer } from '@earendil-works/pi-tui';
+import { Container, Spacer } from '@liutod-scream/pi-tui';
 
 import type { MoonLoader } from '../chrome/moon-loader';
 import type { PulseWaveLoader } from '../chrome/pulse-wave-loader';

@@ -42,7 +42,7 @@ import {
   type AutocompleteProvider,
   type AutocompleteSuggestions,
   type SlashCommand,
-} from '@earendil-works/pi-tui';
+} from '@liutod-scream/pi-tui';
 
 import type { GitLsFilesCache, GitSnapshot } from '#/utils/git/git-ls-files';
 

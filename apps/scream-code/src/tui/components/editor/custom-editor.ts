@@ -2,7 +2,7 @@
  * Custom editor extending pi-tui Editor with app-level keybindings.
  */
 
-import { Editor, isKeyRelease, matchesKey, Key, visibleWidth, type TUI } from '@earendil-works/pi-tui';
+import { Editor, isKeyRelease, matchesKey, Key, visibleWidth, type TUI } from '@liutod-scream/pi-tui';
 import type { ThinkingEffort } from '@scream-code/scream-code-sdk';
 import chalk from 'chalk';
 

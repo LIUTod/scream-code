@@ -15,8 +15,8 @@
  * - Ungrouping is not implemented. Once formed, a group stays grouped.
  */
 
-import type { TUI } from '@earendil-works/pi-tui';
-import { Container, Spacer, Text } from '@earendil-works/pi-tui';
+import type { TUI } from '@liutod-scream/pi-tui';
+import { Container, Spacer, Text } from '@liutod-scream/pi-tui';
 import chalk from 'chalk';
 
 import { STATUS_BULLET } from '#/tui/constant/symbols';

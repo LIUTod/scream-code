@@ -1,4 +1,4 @@
-import { Container, Spacer, Text } from '@earendil-works/pi-tui';
+import { Container, Spacer, Text } from '@liutod-scream/pi-tui';
 import chalk from 'chalk';
 
 import { replaceTabs } from '../../utils/sanitize';

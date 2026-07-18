@@ -5,8 +5,8 @@
 
 import { isAbsolute, relative, sep } from 'node:path';
 
-import { Text, Spacer, visibleWidth } from '@earendil-works/pi-tui';
-import type { Component, MarkdownTheme, TUI } from '@earendil-works/pi-tui';
+import { Text, Spacer, visibleWidth } from '@liutod-scream/pi-tui';
+import type { Component, MarkdownTheme, TUI } from '@liutod-scream/pi-tui';
 import chalk from 'chalk';
 import { t } from '@scream-code/config';
 
