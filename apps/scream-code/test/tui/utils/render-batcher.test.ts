@@ -47,6 +47,19 @@ describe('createRenderBatcher', () => {
     expect(doRender).toHaveBeenCalledWith(false);
   });
 
+  it('preserves force flag from requestRender(true) inside batchUpdate', async () => {
+    const doRender = vi.fn();
+    const batcher = createRenderBatcher(doRender);
+
+    batcher.batchUpdate(() => {
+      batcher.requestRender(true);
+    });
+
+    await Promise.resolve();
+    expect(doRender).toHaveBeenCalledTimes(1);
+    expect(doRender).toHaveBeenCalledWith(true);
+  });
+
   it('only renders once for nested batches', async () => {
     const doRender = vi.fn();
     const batcher = createRenderBatcher(doRender);

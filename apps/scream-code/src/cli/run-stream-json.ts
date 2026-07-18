@@ -12,6 +12,7 @@
 
 import { createInterface } from "node:readline";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { writeFileSync, unlinkSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
 import {
@@ -906,6 +907,11 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
             sessionId: session?.id,
             error: msg,
           });
+          // Reject pending approvals so session.prompt() doesn't hang.
+          for (const [, pending] of pendingApprovals) {
+            pending.resolve({ decision: "rejected", feedback: "会话已重置" });
+          }
+          pendingApprovals.clear();
           // Close and delete in the background, fire-and-forget.
           void session?.close().catch(() => {});
           void harness.deleteSession(sessionKey).catch(() => {});
@@ -951,13 +957,15 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
       // Best-effort cleanup
     }
 
-    // Restore AGENTS.md to its original state (undo cc-connect injection)
+    // Restore AGENTS.md to its original state (undo cc-connect injection).
+    // Synchronous I/O so SIGTERM can't interrupt mid-restore and leave the
+    // injected file in the user's project.
     if (injectedAgentsMd) {
       try {
         if (originalAgentsMd === undefined) {
-          await rm(agentsMdPath, { force: true });
+          if (existsSync(agentsMdPath)) unlinkSync(agentsMdPath);
         } else {
-          await writeFile(agentsMdPath, originalAgentsMd, "utf-8");
+          writeFileSync(agentsMdPath, originalAgentsMd, "utf-8");
         }
       } catch {
         // Best-effort cleanup

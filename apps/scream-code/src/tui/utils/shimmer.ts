@@ -91,8 +91,8 @@ function tierFor(intensity: number): Tier {
 const shimmerDefaultCache = new WeakMap<ColorPalette, ShimmerPalette>();
 
 function defaultPalette(colors: ColorPalette): ShimmerPalette {
-  const cached = shimmerDefaultCache.get(colors);
-  if (cached) return cached;
+  // Always rebuild — Object.assign(theme.colors, ...) in applyTheme mutates
+  // the same object in place, so a stale cache would return outdated values.
   const p: ShimmerPalette = {
     low: colors.textDim,
     mid: colors.textMuted,

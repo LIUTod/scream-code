@@ -10,13 +10,13 @@ import {
 
 describe('buildFadeTable', () => {
   it('produces FADE_BUCKETS entries', () => {
-    const table = buildFadeTable('#4EC87E', '#E0E0E0');
+    const table = buildFadeTable('#ccfb23', '#E0E0E0');
     expect(table).toHaveLength(FADE_BUCKETS);
   });
 
   it('starts at accent and ends at ink', () => {
-    const table = buildFadeTable('#4EC87E', '#E0E0E0');
-    expect(table[0]!.toLowerCase()).toBe('#4ec87e');
+    const table = buildFadeTable('#ccfb23', '#E0E0E0');
+    expect(table[0]!.toLowerCase()).toBe('#ccfb23');
     expect(table[FADE_BUCKETS - 1]!.toLowerCase()).toBe('#e0e0e0');
   });
 
@@ -37,10 +37,10 @@ describe('buildFadeTable', () => {
 });
 
 describe('fadeColor', () => {
-  const table = buildFadeTable('#4EC87E', '#E0E0E0');
+  const table = buildFadeTable('#ccfb23', '#E0E0E0');
 
   it('returns accent at age 0', () => {
-    expect(fadeColor(0, table, false).toLowerCase()).toBe('#4ec87e');
+    expect(fadeColor(0, table, false).toLowerCase()).toBe('#ccfb23');
   });
 
   it('returns ink at age >= FADE_MS', () => {
@@ -52,7 +52,7 @@ describe('fadeColor', () => {
     const halfAge = FADE_MS / 2;
     const mid = fadeColor(halfAge, table, false);
     // Should be somewhere between accent and ink — not equal to either.
-    expect(mid.toLowerCase()).not.toBe('#4ec87e');
+    expect(mid.toLowerCase()).not.toBe('#ccfb23');
     expect(mid.toLowerCase()).not.toBe('#e0e0e0');
   });
 
@@ -62,7 +62,7 @@ describe('fadeColor', () => {
   });
 
   it('does not throw on negative age', () => {
-    expect(fadeColor(-100, table, false).toLowerCase()).toBe('#4ec87e');
+    expect(fadeColor(-100, table, false).toLowerCase()).toBe('#ccfb23');
   });
 });
 

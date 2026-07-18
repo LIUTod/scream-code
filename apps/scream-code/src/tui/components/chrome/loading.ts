@@ -18,8 +18,8 @@ const SHEEN_STEP = 4
 const SHEEN_INTERVAL_MS = 60
 const LOADING_DURATION_MS = 1500
 const THEME_PRIMARY: Record<ResolvedTheme, [number, number, number]> = {
-  dark: [78, 200, 126],   // #4EC87E
-  light: [14, 122, 56],  // #0E7A38
+  dark: [204, 251, 35],    // #ccfb23
+  light: [75, 122, 6],     // #4B7A06
 }
 const BLOCK_RGB: [number, number, number] = [255, 255, 255]
 const LOGO_RGB: [number, number, number] = [136, 136, 136]

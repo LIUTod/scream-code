@@ -138,15 +138,26 @@ export class InputController {
   }
 
   private dispatchUserInput(text: string, session: Session): void {
-    // When loop mode is waiting for its first prompt, capture it and reserve
-    // one iteration from the budget.
-    if (this.host.state.appState.loopModeEnabled && !this.host.state.appState.loopPrompt) {
+    // When loop mode is waiting for its first prompt, capture it.
+    // The iteration budget is consumed after validation succeeds.
+    const isLoopCapture = this.host.state.appState.loopModeEnabled && !this.host.state.appState.loopPrompt;
+    if (isLoopCapture) {
       this.host.setAppState({ loopPrompt: text });
-      consumeLoopLimitIteration(this.host.state.appState.loopLimit);
     }
 
     const extraction = extractMediaAttachments(text, this.host.imageStore);
-    if (!this.validateMediaCapabilities(extraction)) return;
+    if (!this.validateMediaCapabilities(extraction)) {
+      // Validation failed — undo the loop prompt capture so the iteration
+      // isn't wasted on a rejected message.
+      if (isLoopCapture) {
+        this.host.setAppState({ loopPrompt: undefined });
+      }
+      return;
+    }
+
+    if (isLoopCapture) {
+      consumeLoopLimitIteration(this.host.state.appState.loopLimit);
+    }
 
     if (extraction.hasMedia) {
       this.sendMessage(session, text, {

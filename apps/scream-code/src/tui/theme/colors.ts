@@ -13,35 +13,33 @@
  */
 
 const dark = {
-  green: '#4EC87E',
-  blue: '#72A4E9',
-  cyan: '#5BC0BE',
+  yellowGreen: '#ccfb23',
+  pink400: '#FF6B9D',
+  cyan400: '#56D4DD',
+  amber400: '#E8A838',
+  amber500: '#FFA726',
   gray50: '#F5F5F5',
   gray100: '#E0E0E0',
   gray500: '#888888',
   gray600: '#767676',
   gray700: '#5A5A5A',
-  greenLight: '#7AD99B',
+  yellowGreenLight: '#E0F5A0',
   red: '#E85454',
   redLight: '#F08585',
-  amber400: '#E8A838',
-  gold400: '#FBD700',
-  tangerine400: '#FF5401',
-  orange300: '#FFCB6B',
+  gold400: '#FFD166',
 } as const;
 
 const light = {
-  green: '#0E7A38',
-  blue: '#2563EB',
-  cyan: '#00838F',
+  yellowGreen700: '#4B7A06',
+  pink700: '#C2185B',
+  cyan800: '#006978',
   gray900: '#1A1A1A',
   gray700: '#454545',
   gray600: '#5F5F5F',
   gray500: '#737373',
   red: '#B91C1C',
   amber800: '#92660A',
-  gold700: '#8C7600',
-  tangerine700: '#B33A00',
+  amber700: '#9A6B00',
   orange700: '#9A4A00',
 } as const;
 
@@ -90,10 +88,10 @@ export interface ColorPalette {
 }
 
 export const darkColors: ColorPalette = {
-  primary: dark.green,
-  accent: dark.tangerine400,
-  planMode: '#00FFFF',
-  fusionPlanMode: '#ffff66',
+  primary: dark.yellowGreen,
+  accent: dark.pink400,
+  planMode: dark.cyan400,
+  fusionPlanMode: dark.amber500,
   text: dark.gray100,
   textStrong: dark.gray50,
   textDim: dark.gray500,
@@ -107,21 +105,21 @@ export const darkColors: ColorPalette = {
 
   // Surface
   border: dark.gray700,
-  borderFocus: dark.gold400,
+  borderFocus: dark.yellowGreenLight,
 
   // State
-  success: dark.green,
+  success: dark.yellowGreen,
   warning: dark.amber400,
   error: dark.red,
 
-  diffAdded: dark.green,
+  diffAdded: dark.yellowGreen,
   diffRemoved: dark.red,
-  diffAddedStrong: dark.greenLight,
+  diffAddedStrong: dark.yellowGreenLight,
   diffRemovedStrong: dark.redLight,
   diffGutter: dark.gray600,
   diffMeta: dark.gray500,
 
-  roleUser: dark.orange300,
+  roleUser: dark.gold400,
   roleAssistant: dark.gray100,
   roleThinking: dark.gray500,
   roleTool: dark.amber400,
@@ -130,10 +128,10 @@ export const darkColors: ColorPalette = {
 };
 
 export const lightColors: ColorPalette = {
-  primary: light.green,
-  accent: light.tangerine700,
-  planMode: '#00838F',
-  fusionPlanMode: '#8C7600',
+  primary: light.yellowGreen700,
+  accent: light.pink700,
+  planMode: light.cyan800,
+  fusionPlanMode: light.amber700,
   text: light.gray900,
   textStrong: light.gray900,
   textDim: light.gray700,
@@ -147,15 +145,15 @@ export const lightColors: ColorPalette = {
 
   // Surface
   border: light.gray500,
-  borderFocus: light.gold700,
+  borderFocus: light.yellowGreen700,
 
   // State
-  success: light.green,
+  success: light.yellowGreen700,
   warning: light.amber800,
   error: light.red,
-  diffAdded: light.green,
+  diffAdded: light.yellowGreen700,
   diffRemoved: light.red,
-  diffAddedStrong: light.green,
+  diffAddedStrong: light.yellowGreen700,
   diffRemovedStrong: light.red,
   diffGutter: light.gray500,
   diffMeta: light.gray600,

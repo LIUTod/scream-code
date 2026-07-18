@@ -228,3 +228,12 @@ function dismissGoalPanel(host: SlashCommandHost): void {
     host.state.ui.requestRender();
   }
 }
+
+/** Clear goal panel state on session switch to prevent stale timer/panel leaks. */
+export function clearGoalState(): void {
+  if (activeGoalTimer !== undefined) {
+    clearTimeout(activeGoalTimer);
+    activeGoalTimer = undefined;
+  }
+  activeGoalPanel = undefined;
+}

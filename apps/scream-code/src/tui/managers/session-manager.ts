@@ -12,6 +12,7 @@ import { isBusy } from '../utils/app-state';
 import { sessionRowsForPicker } from '../utils/session-picker-rows';
 import { createApprovalRequestHandler } from '../reverse-rpc/approval/handler';
 import { createQuestionAskHandler } from '../reverse-rpc/question/handler';
+import { registerReverseRPCHandlers } from '../reverse-rpc/index';
 import type { ApprovalController } from '../reverse-rpc/approval/controller';
 import type { QuestionController } from '../reverse-rpc/question/controller';
 import type { AppState, PlanModeState, TUIStartupOptions } from '../types';
@@ -47,6 +48,10 @@ export interface SessionManagerHost {
   refreshSessionTitle(): void;
   updateQueueDisplay(): void;
   appendApprovalTranscriptEntry(request: ApprovalRequest, response: ApprovalResponse): void;
+  showApprovalPanel(payload: import('../reverse-rpc/approval/types').ApprovalPanelData): void;
+  hideApprovalPanel(): void;
+  showQuestionDialog(payload: import('../reverse-rpc/question/types').QuestionPanelData): void;
+  hideQuestionDialog(): void;
   hasSessionContent(): boolean;
   stopMemoryIdleTimer(): void;
 }
@@ -158,7 +163,9 @@ export class SessionManager {
       sessionId: session.id,
       model: status.model ?? '',
       thinkingLevel: status.thinkingLevel as import('@scream-code/scream-code-sdk').ThinkingEffort,
-      planMode: (status.planMode ? 'plan' : 'off') as PlanModeState,
+      planMode: (status.planMode
+        ? status.planStrategy === 'fusion' ? 'fusionplan' : 'plan'
+        : 'off') as PlanModeState,
       contextTokens: status.contextTokens,
       maxContextTokens: status.maxContextTokens,
       contextUsage: status.contextUsage,
@@ -210,6 +217,26 @@ export class SessionManager {
       }),
     );
     session.setQuestionHandler(createQuestionAskHandler(this.host.questionController));
+    // Re-register reverse RPC UI hooks after they were cleared by
+    // clearReverseRpcPanels() during session switch.
+    if (this.host.reverseRpcDisposers.length === 0) {
+      this.host.reverseRpcDisposers.push(
+        ...registerReverseRPCHandlers(this.host.approvalController, this.host.questionController, {
+          showApprovalPanel: (payload) => {
+            this.host.showApprovalPanel(payload);
+          },
+          hideApprovalPanel: () => {
+            this.host.hideApprovalPanel();
+          },
+          showQuestionDialog: (payload) => {
+            this.host.showQuestionDialog(payload);
+          },
+          hideQuestionDialog: () => {
+            this.host.hideQuestionDialog();
+          },
+        }),
+      );
+    }
   }
 
   // ---------------------------------------------------------------------------

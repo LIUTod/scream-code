@@ -772,6 +772,16 @@ export class StreamingUIController {
       );
       if (state.toolOutputExpanded) completed.setExpanded(true);
       if (state.planExpanded) completed.setPlanExpanded(true);
+      const entry: TranscriptEntry = {
+        id: nextTranscriptId(),
+        kind: 'tool_result',
+        turnId: this._currentTurnId,
+        renderMode: 'plain',
+        content: result,
+        toolCall: matchedCall,
+      };
+      this.host.pushTranscriptEntry(entry);
+      this.host.transcriptController.registerLiveComponent(completed, entry);
       state.transcriptContainer.addChild(completed);
       state.ui.requestRender();
     }

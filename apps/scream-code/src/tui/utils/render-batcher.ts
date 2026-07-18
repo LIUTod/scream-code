@@ -8,7 +8,7 @@
  * 1. Microtask coalescing: multiple `requestRender()` calls in the same
  *    microtask are collapsed into one underlying call.
  * 2. `batchUpdate()`: inside a batch, render requests are suppressed and a
- *    single force render is scheduled when the batch ends.
+ *    single render is scheduled when the batch ends.
  */
 
 export interface RenderBatchController {
@@ -16,7 +16,7 @@ export interface RenderBatchController {
   requestRender(force?: boolean): void;
 
   /**
-   * Execute `fn` without rendering; a single force render is queued when the
+   * Execute `fn` without rendering; a single render is queued when the
    * outermost batch completes. Nested batches are supported and only render
    * once at the end of the outermost batch.
    */
@@ -30,6 +30,7 @@ export function createRenderBatcher(
   let pendingForce = false;
   let batchDepth = 0;
   let batchNeedsRender = false;
+  let batchForce = false;
 
   const scheduleRender = (force: boolean): void => {
     pendingForce ||= force;
@@ -47,6 +48,7 @@ export function createRenderBatcher(
     requestRender(force = false): void {
       if (batchDepth > 0) {
         batchNeedsRender = true;
+        batchForce ||= force;
         return;
       }
       scheduleRender(force);
@@ -60,7 +62,9 @@ export function createRenderBatcher(
         batchDepth--;
         if (batchDepth === 0 && batchNeedsRender) {
           batchNeedsRender = false;
-          scheduleRender(pendingForce);
+          const force = batchForce;
+          batchForce = false;
+          scheduleRender(force || pendingForce);
         }
       }
     },

@@ -22,6 +22,7 @@ import {
   type ScreamSlashCommand,
   type SkillListSession,
 } from './commands';
+import { clearGoalState } from './commands/goal';
 
 import type { HelpPanelCommand } from './components/dialogs/help-panel';
 import { AuthFlowController } from './controllers/auth-flow';
@@ -751,6 +752,8 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
 
   clearTranscriptAndRedraw(): void {
     this.sessionEventHandler.stopAllMcpServerStatusSpinners();
+    // Clear goal panel timer/refs to prevent stale timer firing on new session.
+    clearGoalState();
     // Clear scrollback when switching/creating sessions so old session content
     // doesn't linger in terminal scroll history. The viewport itself is cleared
     // by the force render below (fullRender emits \x1b[2J\x1b[H).

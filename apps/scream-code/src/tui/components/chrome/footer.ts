@@ -173,7 +173,7 @@ function pickContextColor(usage: number, colors: ColorPalette): string {
 
 // ── Gradient status line for footer line 2 ───────────────────────────
 
-const BRAND_COLORS = ['#72A4E9', '#A78BFA', '#34D399'];
+const BRAND_COLORS = ['#ccfb23', '#56D4DD', '#FF6B9D'];
 const GRADIENT_CYCLE_MS = 4000;
 const SPINNER_FRAMES = ['●', '◉', '◎', '◌', '○', '◌', '◎', '◉'];
 const SPINNER_TICK_MS = 120;

@@ -1,6 +1,6 @@
 {
   "name": "@scream-code/knowledge",
-  "version": "0.9.7",
+  "version": "0.10.0",
   "private": true,
   "description": "Local knowledge base library for scream-code agent retrieval",
   "license": "MIT",

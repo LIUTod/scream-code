@@ -18,12 +18,18 @@ import type { SlashCommandHost } from './dispatch';
 
 const activeServers = new Set<Server>();
 
+const activeTimers = new Set<ReturnType<typeof setInterval>>();
+
 function registerServer(server: Server): void {
   activeServers.add(server);
   server.on('close', () => { activeServers.delete(server); });
 }
 
 function closeAllServers(): void {
+  for (const timer of activeTimers) {
+    clearInterval(timer);
+  }
+  activeTimers.clear();
   for (const server of activeServers) {
     server.close();
   }
@@ -1218,8 +1224,10 @@ export async function handleWeb(host: SlashCommandHost): Promise<void> {
         Connection: 'keep-alive',
       });
       const timer = setInterval(() => { res.write(': ping\n\n'); }, 15_000);
+      activeTimers.add(timer);
       res.on('close', () => {
         clearInterval(timer);
+        activeTimers.delete(timer);
         server.close();
       });
       res.write(': ok\n\n');
