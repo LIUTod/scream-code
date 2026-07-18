@@ -57,8 +57,6 @@ import { openUrl } from '../utils/open-url';
 import { McpOAuthAuthorizationUrlOpener } from '../utils/mcp-oauth';
 import { setProcessTitle } from '../utils/proctitle';
 import { formatStepDebugTiming } from '#/utils/usage/debug-timing';
-import { consumeLoopLimitIteration, isLoopLimitExpired } from '../utils/loop-limit';
-import { runShellVerifier } from '../utils/loop-verifier';
 import { nextTranscriptId } from '../utils/transcript-id';
 import { canTransitionTo } from '../streaming-phase';
 import { detectCompactionAnomaly } from '../utils/compaction-anomaly';
@@ -368,81 +366,6 @@ export class SessionEventHandler {
     this.host.streamingUI.resetToolUi();
 
     this.host.streamingUI.finalizeTurn(sendQueued);
-
-    // Auto-resubmit loop prompt after turn completes, if loop mode is active.
-    this.maybeScheduleLoopAutoSubmit();
-  }
-
-  private maybeScheduleLoopAutoSubmit(): void {
-    const { loopModeEnabled, loopPrompt, loopLimit } = this.host.state.appState;
-    if (!loopModeEnabled || loopPrompt === undefined) return;
-
-    if (isLoopLimitExpired(loopLimit)) {
-      const reason = loopLimit?.kind === 'duration' ? t('handler.loop_limit_time') : t('handler.loop_limit_count');
-      this.disableLoop(t('handler.loop_limit_reached', { reason, suffix: '' }));
-      return;
-    }
-
-    // Brief delay so the user has a chance to press Esc between iterations.
-    setTimeout(() => {
-      void this.advanceLoopIteration(loopPrompt);
-    }, 800);
-  }
-
-  private disableLoop(message: string): void {
-    this.host.setAppState({
-      loopModeEnabled: false,
-      loopPrompt: undefined,
-      loopLimit: undefined,
-      loopVerifier: undefined,
-      loopIteration: 0,
-      loopLastVerifyPassed: undefined,
-      loopVerifying: false,
-    });
-    this.host.showStatus(message);
-  }
-
-  private async advanceLoopIteration(loopPrompt: string): Promise<void> {
-    const state = this.host.state.appState;
-    if (
-      !state.loopModeEnabled ||
-      state.loopPrompt !== loopPrompt ||
-      state.streamingPhase !== 'idle'
-    ) {
-      return;
-    }
-
-    const currentIteration = state.loopIteration + 1;
-    this.host.setAppState({ loopIteration: currentIteration });
-
-    const verifier = state.loopVerifier;
-    if (verifier) {
-      this.host.setAppState({ loopVerifying: true });
-      const result = await runShellVerifier(verifier, state.workDir);
-      // verifier 期间用户可能按 Esc 暂停或修改 prompt，需重新检查
-      const after = this.host.state.appState;
-      if (!after.loopModeEnabled || after.loopPrompt !== loopPrompt) {
-        this.host.setAppState({ loopVerifying: false });
-        return;
-      }
-
-      if (result.passed) {
-        this.host.setAppState({ loopVerifying: false });
-        this.disableLoop(t('handler.loop_verify_passed', { iteration: currentIteration }));
-        return;
-      }
-      this.host.setAppState({ loopVerifying: false, loopLastVerifyPassed: false });
-    }
-
-    if (!consumeLoopLimitIteration(this.host.state.appState.loopLimit)) {
-      const limit = this.host.state.appState.loopLimit;
-      const reason = limit?.kind === 'duration' ? t('handler.loop_limit_time') : t('handler.loop_limit_count');
-      const suffix = verifier ? t('handler.loop_verify_not_passed') : '';
-      this.disableLoop(t('handler.loop_limit_reached', { reason, suffix }));
-      return;
-    }
-
-    this.host.sendNormalUserInput(loopPrompt);
   }
 
   private handleStepBegin(event: TurnStepStartedEvent): void {

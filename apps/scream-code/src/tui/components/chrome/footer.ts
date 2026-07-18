@@ -13,7 +13,6 @@ import { t } from '@scream-code/config';
 
 import type { ColorPalette } from '#/tui/theme/colors';
 import type { AppState } from '#/tui/types';
-import { resolveLoopSubstate } from '#/tui/loop-state';
 import { shimmerText } from '#/tui/utils/shimmer';
 import {
   createGitStatusCache,
@@ -351,23 +350,6 @@ export class FooterComponent implements Component {
       left.push(chalk.hex(isFusion ? colors.fusionPlanMode : colors.planMode).bold(isFusion ? t('badge.fusion') : t('badge.plan')));
     }
     if (state.wolfpackMode) left.push(chalk.hex(colors.primary).bold(t('badge.wolfpack')));
-    if (state.loopModeEnabled) {
-      const iter = state.loopIteration;
-      const limit = state.loopLimit;
-      let badge = t('badge.loop');
-      if (limit?.kind === 'iterations') {
-        badge = `${t('badge.loop')} ${iter}/${limit.initial}`;
-      } else if (limit?.kind === 'duration') {
-        const remainMs = Math.max(0, limit.deadlineMs - Date.now());
-        badge = remainMs >= 60_000
-          ? `${t('badge.loop')} ${Math.ceil(remainMs / 60_000)}m`
-          : `${t('badge.loop')} ${Math.max(1, Math.ceil(remainMs / 1_000))}s`;
-      }
-      const substate = resolveLoopSubstate(state);
-      if (substate === 'verifying') badge += ' · ' + t('status.verifying');
-      if (state.loopLastVerifyPassed === false) badge += ' · ✗';
-      left.push(chalk.hex(colors.primary).bold(badge));
-    }
     if (state.goalActive) {
       left.push(chalk.hex(colors.primary).bold(t('badge.goal')));
     }

@@ -42,13 +42,6 @@ export const BUILTIN_SLASH_COMMANDS = [
         : 'idle-only';
     },
   },
-  {
-    name: 'loop',
-    aliases: [],
-    description: 'registry.loop_desc',
-    priority: 121,
-    availability: 'always',
-  },
 
   // ── 记忆 / 会话 ──
   {

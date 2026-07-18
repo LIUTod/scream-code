@@ -14,6 +14,7 @@ import { isAbortError } from '../utils/errors';
 import { formatErrorMessage } from '../utils/event-payload';
 import { buildExportMarkdown } from '../utils/export-markdown';
 import { ChoicePickerComponent, type ChoiceOption } from '../components/dialogs/choice-picker';
+import { TextInputDialogComponent } from '../components/dialogs/text-input-dialog';
 import type { SlashCommandHost } from './dispatch';
 
 // ---------------------------------------------------------------------------
@@ -22,13 +23,22 @@ import type { SlashCommandHost } from './dispatch';
 
 export async function handleTitleCommand(host: SlashCommandHost, args: string): Promise<void> {
   const title = args.trim();
+
   if (title.length === 0) {
-    const current = host.state.appState.sessionTitle;
-    host.showStatus(
-      current !== null && current.length > 0
-        ? `Session title: ${current}`
-        : `Session title: (not set) — id: ${host.state.appState.sessionId}`,
-    );
+    const session = host.session;
+    if (session === undefined) {
+      host.showError(getNoActiveSessionMessage());
+      return;
+    }
+    const current = host.state.appState.sessionTitle ?? '';
+    const newTitle = await promptTitleInput(host, current);
+    if (newTitle === undefined || newTitle.length === 0) return;
+    try {
+      await host.harness.renameSession({ id: session.id, title: newTitle });
+      host.showStatus(`Session title set to: ${newTitle}`);
+    } catch (error) {
+      host.showError(`Failed to set title: ${formatErrorMessage(error)}`);
+    }
     return;
   }
 
@@ -42,11 +52,29 @@ export async function handleTitleCommand(host: SlashCommandHost, args: string): 
   try {
     await host.harness.renameSession({ id: session.id, title: newTitle });
   } catch (error) {
-    const msg = formatErrorMessage(error);
-    host.showError(`Failed to set title: ${msg}`);
+    host.showError(`Failed to set title: ${formatErrorMessage(error)}`);
     return;
   }
   host.showStatus(`Session title set to: ${newTitle}`);
+}
+
+function promptTitleInput(host: SlashCommandHost, current: string): Promise<string | undefined> {
+  const { promise, resolve } = Promise.withResolvers<string | undefined>();
+  const dialog = new TextInputDialogComponent(
+    (result) => {
+      host.restoreEditor();
+      resolve(result.kind === 'ok' ? result.value : undefined);
+    },
+    {
+      title: t('title.dialog_title'),
+      initialValue: current,
+      placeholder: t('title.placeholder'),
+      allowEmpty: false,
+      colors: host.state.theme.colors,
+    },
+  );
+  host.mountEditorReplacement(dialog);
+  return promise;
 }
 
 export async function handleForkCommand(host: SlashCommandHost, args: string): Promise<void> {

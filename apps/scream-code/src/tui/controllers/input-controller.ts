@@ -27,7 +27,6 @@ import { formatErrorMessage } from '../utils/event-payload';
 import { isBusy, isStreaming } from '../utils/app-state';
 import type { ImageAttachmentStore } from '../utils/image-attachment-store';
 import { extractMediaAttachments } from '../utils/image-placeholder';
-import { consumeLoopLimitIteration } from '../utils/loop-limit';
 import { BREATHE_CYCLE_MS, getBreathingFrame, resetBreathingClock } from '#/tui/utils/breathing-clock';
 import { appendInputHistory, loadInputHistory } from '#/utils/history/input-history';
 import { getInputHistoryFile } from '#/utils/paths';
@@ -138,25 +137,9 @@ export class InputController {
   }
 
   private dispatchUserInput(text: string, session: Session): void {
-    // When loop mode is waiting for its first prompt, capture it.
-    // The iteration budget is consumed after validation succeeds.
-    const isLoopCapture = this.host.state.appState.loopModeEnabled && !this.host.state.appState.loopPrompt;
-    if (isLoopCapture) {
-      this.host.setAppState({ loopPrompt: text });
-    }
-
     const extraction = extractMediaAttachments(text, this.host.imageStore);
     if (!this.validateMediaCapabilities(extraction)) {
-      // Validation failed — undo the loop prompt capture so the iteration
-      // isn't wasted on a rejected message.
-      if (isLoopCapture) {
-        this.host.setAppState({ loopPrompt: undefined });
-      }
       return;
-    }
-
-    if (isLoopCapture) {
-      consumeLoopLimitIteration(this.host.state.appState.loopLimit);
     }
 
     if (extraction.hasMedia) {

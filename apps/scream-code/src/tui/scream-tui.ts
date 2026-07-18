@@ -135,13 +135,6 @@ function createInitialAppState(input: ScreamTUIStartupInput): AppState {
     goalContinuationCount: 0,
     ccConnectActive: false,
     wolfpackMode: input.cliOptions.wolfpack === true,
-    loopModeEnabled: false,
-    loopPrompt: undefined,
-    loopLimit: undefined,
-    loopVerifier: undefined,
-    loopIteration: 0,
-    loopLastVerifyPassed: undefined,
-    loopVerifying: false,
     recentSessions: [],
     subagentUsage: {},
   };

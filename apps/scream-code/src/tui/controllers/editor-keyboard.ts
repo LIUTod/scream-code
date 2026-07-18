@@ -135,11 +135,6 @@ export class EditorKeyboardController {
         this.cancelCurrentStream();
         return;
       }
-      // 如果循环模式正在等待自动重发，则暂停当前迭代，但不完全关闭循环模式。
-      if (host.state.appState.loopModeEnabled && host.state.appState.loopPrompt) {
-        host.setAppState({ loopPrompt: undefined });
-        host.showStatus(t('editorkey.loop_paused'));
-      }
     };
 
     editor.onShiftTab = () => {
