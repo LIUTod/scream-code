@@ -401,6 +401,14 @@ export class SDKRpcClient {
     });
   }
 
+  async getWolfpackMode(input: SessionIdRpcInput): Promise<boolean> {
+    const rpc = await this.getRpc();
+    return rpc.getWolfpackMode({
+      sessionId: input.sessionId,
+      agentId: this.interactiveAgentId,
+    });
+  }
+
   async getPlan(input: SessionIdRpcInput): Promise<SessionPlan> {
     const rpc = await this.getRpc();
     return rpc.getPlan({
@@ -465,12 +473,13 @@ export class SDKRpcClient {
   async getStatus(input: SessionIdRpcInput): Promise<SessionStatus> {
     const rpc = await this.getRpc();
     const agentId = this.interactiveAgentId;
-    const [config, context, permission, plan, usage] = await Promise.all([
+    const [config, context, permission, plan, usage, wolfpackMode] = await Promise.all([
       rpc.getConfig({ sessionId: input.sessionId, agentId }),
       rpc.getContext({ sessionId: input.sessionId, agentId }),
       rpc.getPermission({ sessionId: input.sessionId, agentId }),
       rpc.getPlan({ sessionId: input.sessionId, agentId }),
       rpc.getUsage({ sessionId: input.sessionId, agentId }),
+      rpc.getWolfpackMode({ sessionId: input.sessionId, agentId }),
     ]);
     const maxContextTokens = config.modelCapabilities?.max_context_tokens ?? 0;
     const contextTokens = context.tokenCount;
@@ -482,6 +491,7 @@ export class SDKRpcClient {
       permission: permission.mode,
       planMode: plan !== null,
       planStrategy: plan?.strategy,
+      wolfpackMode,
       contextTokens,
       maxContextTokens,
       contextUsage,

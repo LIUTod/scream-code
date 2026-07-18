@@ -565,6 +565,9 @@ export class SessionEventHandler {
           : 'plan'
         : 'off';
     }
+    if (event.wolfpackMode !== undefined) {
+      patch.wolfpackMode = event.wolfpackMode;
+    }
     if (event.permission !== undefined) {
       patch.permissionMode = event.permission;
     }

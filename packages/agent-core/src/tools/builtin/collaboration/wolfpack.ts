@@ -42,6 +42,9 @@ export const WolfPackToolInputSchema = z.object({
 
 export type WolfPackToolInput = z.infer<typeof WolfPackToolInputSchema>;
 
+/** Default per-subagent timeout (5 minutes). */
+const DEFAULT_SUBAGENT_TIMEOUT_MS = 5 * 60 * 1000;
+
 export class WolfPackTool implements BuiltinTool<WolfPackToolInput> {
   readonly name: string = 'WolfPack';
   readonly description: string;
@@ -54,6 +57,7 @@ export class WolfPackTool implements BuiltinTool<WolfPackToolInput> {
       subagents?: ResolvedAgentProfile['subagents'];
       log?: Logger;
       allowedSpawns?: string[];
+      timeoutMs?: number;
     },
   ) {
     const visibleSubagents = filterSubagentsBySpawns(options?.subagents, options?.allowedSpawns);
@@ -63,10 +67,12 @@ export class WolfPackTool implements BuiltinTool<WolfPackToolInput> {
       : WOLFPACK_DESCRIPTION;
     this.log = options?.log;
     this.allowedSpawns = options?.allowedSpawns;
+    this.timeoutMs = options?.timeoutMs ?? DEFAULT_SUBAGENT_TIMEOUT_MS;
   }
 
   private readonly log?: Logger;
   private readonly allowedSpawns?: string[];
+  private readonly timeoutMs: number;
 
   resolveExecution(args: WolfPackToolInput): ToolExecution {
     return {
@@ -90,7 +96,7 @@ export class WolfPackTool implements BuiltinTool<WolfPackToolInput> {
 
     if (!this.isEnabled()) {
       return {
-        output: 'WolfPack 模式未开启。请输入 /wolfpack 打开后再试。',
+        output: 'WolfPack mode is not enabled. Use /wolfpack to enable it first.',
         isError: true,
       };
     }
@@ -140,7 +146,11 @@ export class WolfPackTool implements BuiltinTool<WolfPackToolInput> {
         const { item, handle } = value;
 
         try {
-          const completion = await handle.completion;
+          const completion = await withTimeout(
+            handle.completion,
+            this.timeoutMs,
+            ctx.signal,
+          );
           return {
             item,
             result: completion.result,
@@ -168,7 +178,7 @@ export class WolfPackTool implements BuiltinTool<WolfPackToolInput> {
 
     for (const settled of completions) {
       if (settled.status === 'fulfilled') {
-        const { item, result: _result, success, agentId } = settled.value;
+        const { item, result, success, agentId } = settled.value;
         if (success) {
           successCount++;
           lines.push(`### ${item} (OK)`);
@@ -178,6 +188,9 @@ export class WolfPackTool implements BuiltinTool<WolfPackToolInput> {
         }
         if (agentId !== undefined) {
           lines.push(`agent_id: ${agentId}`);
+        }
+        if (result.length > 0) {
+          lines.push(result);
         }
       } else {
         failureCount++;
@@ -208,4 +221,51 @@ function filterSubagentsBySpawns(
   return Object.fromEntries(
     Object.entries(subagents).filter(([name]) => allowedSpawns.includes(name)),
   );
+}
+
+/**
+ * Wraps a promise with a per-subagent timeout. If the parent signal aborts
+ * before the timeout fires, the timeout is cleared and the parent abort
+ * propagates naturally. On timeout, the returned promise rejects with a
+ * descriptive error.
+ */
+function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  parentSignal: AbortSignal,
+): Promise<T> {
+  if (parentSignal.aborted) return Promise.reject(new Error('Aborted before start'));
+
+  return new Promise<T>((resolve, reject) => {
+    let settled = false;
+
+    const cleanup = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      parentSignal.removeEventListener('abort', onParentAbort);
+    };
+
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(new Error(`Subagent timed out after ${timeoutMs / 1000}s`));
+    }, timeoutMs);
+
+    const onParentAbort = () => {
+      cleanup();
+      reject(new Error('The subagent was stopped before it finished.'));
+    };
+    parentSignal.addEventListener('abort', onParentAbort, { once: true });
+
+    promise.then(
+      (value) => {
+        cleanup();
+        resolve(value);
+      },
+      (error) => {
+        cleanup();
+        reject(error);
+      },
+    );
+  });
 }

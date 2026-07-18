@@ -282,6 +282,10 @@ export class SessionAPIImpl implements PromisableMethods<SessionAPI> {
     return this.getAgent(agentId).setGoalBudget(payload);
   }
 
+  getWolfpackMode({ agentId }: AgentScopedPayload<EmptyPayload>) {
+    return this.getAgent(agentId).getWolfpackMode({});
+  }
+
   private getAgent(agentId: string): PromisableMethods<AgentAPI> {
     const agent = this.session.agents.get(agentId);
     if (agent === undefined) {

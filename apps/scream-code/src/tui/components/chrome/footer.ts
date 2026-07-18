@@ -349,7 +349,7 @@ export class FooterComponent implements Component {
       const isFusion = state.planMode === 'fusionplan';
       left.push(chalk.hex(isFusion ? colors.fusionPlanMode : colors.planMode).bold(isFusion ? t('badge.fusion') : t('badge.plan')));
     }
-    if (state.wolfpackMode) left.push(chalk.hex(colors.primary).bold(t('badge.wolfpack')));
+    if (state.wolfpackMode) left.push(chalk.hex(colors.wolfpackMode).bold(t('badge.wolfpack')));
     if (state.goalActive) {
       left.push(chalk.hex(colors.primary).bold(t('badge.goal')));
     }

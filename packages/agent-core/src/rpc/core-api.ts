@@ -394,6 +394,7 @@ export interface AgentAPI {
   cancelGoal: (payload: EmptyPayload) => GoalSnapshotData | null;
   getGoal: (payload: EmptyPayload) => GetGoalResult;
   setGoalBudget: (payload: SetGoalBudgetPayload) => GoalSnapshotData;
+  getWolfpackMode: (payload: EmptyPayload) => boolean;
 }
 
 type AgentAPIWithId = WithAgentId<AgentAPI>;

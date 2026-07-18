@@ -528,6 +528,9 @@ export class Agent {
         }
         return this.goal.setBudgetLimits({ budgetLimits }, 'user');
       },
+      getWolfpackMode: () => {
+        return this.wolfpackMode.isActive;
+      },
     };
   }
 
@@ -717,6 +720,7 @@ export class Agent {
       contextUsage,
       planMode: this.planMode.isActive,
       planStrategy: this.planMode.isActive ? this.planMode.strategy : undefined,
+      wolfpackMode: this.wolfpackMode.isActive,
       permission: this.permission.mode,
       usage,
     });

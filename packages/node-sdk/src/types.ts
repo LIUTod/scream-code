@@ -152,6 +152,7 @@ export interface SessionStatus {
   readonly permission: PermissionMode;
   readonly planMode: boolean;
   readonly planStrategy?: 'normal' | 'fusion';
+  readonly wolfpackMode: boolean;
   readonly contextTokens: number;
   readonly maxContextTokens: number;
   readonly contextUsage: number;
