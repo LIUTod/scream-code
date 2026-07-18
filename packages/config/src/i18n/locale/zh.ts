@@ -138,6 +138,7 @@ export const zh: Record<string, string> = {
   'welcome.recent': '最近会话',
   'welcome.like_active': 'like已激活',
   'welcome.like_inactive': 'like未加载',
+  'welcome.help_hint': '/help 查看帮助',
 
   // ─── 加载 ─────────────────────
   'loading.ai': 'Ai正在加载中...',
@@ -448,6 +449,7 @@ export const zh: Record<string, string> = {
   'help.title': ' 帮助 ',
   'help.close_hint': 'Esc / Enter / q 关闭 · ↑↓ 滚动',
   'help.welcome_msg': 'Scream 已准备好帮助您！发送消息即可开始。',
+  'help.hidden_commands': '/config diy 自定义模型服务商   /model diy 多代理编排配置',
   'help.shortcuts': '键盘快捷键',
   'help.slash_commands': '斜杠命令',
   'help.showing_range': '显示 {start}-{end} / {total}',

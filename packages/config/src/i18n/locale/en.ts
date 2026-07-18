@@ -138,6 +138,7 @@ export const en: Record<string, string> = {
   'welcome.recent': 'Recent sessions',
   'welcome.like_active': 'like active',
   'welcome.like_inactive': 'like not loaded',
+  'welcome.help_hint': '/help for help',
 
   // ─── Loading ──────────────────
   'loading.ai': 'AI is loading...',
@@ -448,6 +449,7 @@ export const en: Record<string, string> = {
   'help.title': ' Help ',
   'help.close_hint': 'Esc / Enter / q Close · ↑↓ Scroll',
   'help.welcome_msg': 'Scream is ready to help! Send a message to get started.',
+  'help.hidden_commands': '/config diy Custom model provider   /model diy Multi-agent orchestration',
   'help.shortcuts': 'Keyboard Shortcuts',
   'help.slash_commands': 'Slash Commands',
   'help.showing_range': 'Showing {start}-{end} / {total}',

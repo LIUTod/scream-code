@@ -115,6 +115,7 @@ export class HelpPanelComponent extends Container implements Focusable {
       '',
       // Greeting
       `  ${dim(t('help.welcome_msg'))}`,
+      `  ${muted(t('help.hidden_commands'))}`,
       '',
       // Section: keyboard shortcuts
       `  ${chalk.bold(t('help.shortcuts'))}`,

@@ -264,7 +264,6 @@ export class TranscriptController {
       state.appState,
       state.theme.colors,
       state.ui,
-      state.appState.recentSessions,
     );
     welcome.borderTitle = 'Scream Code';
     this.welcomeComponent = welcome;

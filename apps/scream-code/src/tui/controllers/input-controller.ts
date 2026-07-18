@@ -210,6 +210,7 @@ export class InputController {
           : this.host.state.theme.colors.planMode
         : this.host.state.theme.colors.primary;
       this.host.state.editor.borderColor = (s: string) => chalk.hex(colorToken)(s);
+      this.host.state.editor.borderHex = colorToken;
       this.host.state.ui.requestRender();
     }
   }
@@ -247,6 +248,7 @@ export class InputController {
     // Fall back to static green.
     const colorToken = this.host.state.theme.colors.primary;
     this.host.state.editor.borderColor = (s: string) => chalk.hex(colorToken)(s);
+    this.host.state.editor.borderHex = colorToken;
     this.host.state.ui.requestRender();
   }
 
@@ -263,6 +265,7 @@ export class InputController {
       const hue = (baseHue + (getBreathingFrame() / BREATHE_FRAMES) * 360) % 360;
       const hex = hslToHex(hue, 90, 70);
       editor.borderColor = (s: string) => chalk.hex(hex)(s);
+      editor.borderHex = hex;
       ui.requestRender();
     }, BREATHE_INTERVAL_MS);
     if (this.breatheTimeout === null) {

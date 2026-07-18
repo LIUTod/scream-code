@@ -220,6 +220,8 @@ export class CustomEditor extends Editor {
   thinking = false;
   /** Current thinking effort level (e.g. low, medium, high). Used to annotate the think label. */
   thinkingLevel: ThinkingEffort = 'off';
+  /** Current border colour hex — kept in sync with borderColor by the host. */
+  borderHex = '';
 
   private consumingPaste = false;
   private consumeBuffer = '';
@@ -305,7 +307,7 @@ export class CustomEditor extends Editor {
       }
     }
     if (this.thinking) {
-      injectThinkLabel(lines, width, this.thinkingLevel, this.borderColor ?? ((s: string) => s));
+      injectThinkLabel(lines, width, this.thinkingLevel, this.borderColor ?? ((s: string) => s), this.borderHex);
     }
     return lines;
   }
@@ -536,19 +538,31 @@ export function wrapWithSideBorders(
   });
 }
 
-const THINK_LABEL = ' Think ';
 const THINK_LABEL_MIN_WIDTH = 14;
 
+function isLightBg(hex: string): boolean {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return luminance > 0.5;
+}
+
 /**
- * Embed a small "think" label into the top border line of the editor.
+ * Embed a small "think" badge into the top border line of the editor.
  * The label only appears when the active model has thinking enabled.
  * Works with pi-tui's flat two-line design (no side borders).
+ *
+ * The badge uses the border colour as background with black text for
+ * maximum contrast against the bright border colours (yellow-green,
+ * cyan, amber) used across themes.
  */
 function injectThinkLabel(
   lines: string[],
   width: number,
   thinkingLevel: ThinkingEffort,
   paint: (s: string) => string,
+  borderHex: string,
 ): void {
   if (width < THINK_LABEL_MIN_WIDTH) return;
   const topIdx = lines.findIndex((line) => {
@@ -557,11 +571,13 @@ function injectThinkLabel(
   });
   if (topIdx === -1) return;
 
-  const label = thinkingLevel !== 'off' ? ` Think ${thinkingLevel} ` : THINK_LABEL;
-  const labelBlock = `─${label}─`;
-  const labelVis = visibleWidth(labelBlock);
-  const leftDashCount = width - 1 - labelVis;
+  const label = thinkingLevel !== 'off' ? ` Think ${thinkingLevel} ` : ' Think ';
+  const badge = borderHex
+    ? chalk.bgHex(borderHex).hex(isLightBg(borderHex) ? '#000000' : '#FFFFFF')(label)
+    : chalk.bgBlack.white(label);
+  const badgeVis = visibleWidth(badge);
+  const leftDashCount = width - 1 - badgeVis;
   if (leftDashCount < 1) return;
 
-  lines[topIdx] = paint('─'.repeat(leftDashCount) + labelBlock + '─');
+  lines[topIdx] = paint('─'.repeat(leftDashCount)) + badge + paint('─');
 }
