@@ -1,5 +1,5 @@
 <p align="center">
-  <img width="128" height="11" alt="welcome_副本" src="https://github.com/user-attachments/assets/11d86774-b308-4cf7-857b-4c313670ade4" />
+  <img width="128" height="128" alt="welcome_副本" src="https://github.com/user-attachments/assets/11d86774-b308-4cf7-857b-4c313670ade4" />
 </p>
 
 <p align="center">
