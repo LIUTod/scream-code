@@ -125,6 +125,8 @@ export const zh: Record<string, string> = {
   'input.replay_blocked': '会话历史正在回放时无法发送输入。',
   'input.send_failed': '发送失败：{message}',
   'input.guide_failed': '引导失败：{message}',
+  'input.large_confirm': '输入内容为 {count} 字符，确认发送？(y/n)',
+  'input.large_cancelled': '输入已取消。',
 
   // ─── 欢迎 ─────────────────────
   'welcome.config': '/config  配置模型',

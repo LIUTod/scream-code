@@ -111,12 +111,47 @@ export class InputController {
       this.#startBreathing();
     }
   }
+  private pendingLargeInput: string | null = null;
+  private static readonly LARGE_INPUT_THRESHOLD = 5000;
+
   handleInput(text: string): void {
+    // If we have a pending large-input confirmation, check for y/n
+    if (this.pendingLargeInput !== null) {
+      const answer = text.trim().toLowerCase();
+      if (answer === 'y' || answer === 'yes') {
+        const pending = this.pendingLargeInput;
+        this.pendingLargeInput = null;
+        void this.persistInputHistory(pending);
+        dispatchInput(this.host, pending);
+        this.host.stopMemoryIdleTimer();
+      } else {
+        this.pendingLargeInput = null;
+        this.host.showStatus(t('input.large_cancelled'), this.host.state.theme.colors.textDim);
+        // If the user typed something other than a plain "n"/"no" cancellation
+        // (e.g. a slash command like /help), process it as new input
+        if (answer !== 'n' && answer !== 'no' && text.trim().length > 0) {
+          this.handleInput(text);
+        }
+      }
+      return;
+    }
+
     if (text.trim().length === 0) return;
     if (this.host.state.appState.isReplaying) {
       this.host.showError(t('input.replay_blocked'));
       return;
     }
+
+    // Large input interception: ask for confirmation before sending
+    if (text.length > InputController.LARGE_INPUT_THRESHOLD) {
+      this.pendingLargeInput = text;
+      this.host.showStatus(
+        t('input.large_confirm', { count: text.length }),
+        this.host.state.theme.colors.warning,
+      );
+      return;
+    }
+
     void this.persistInputHistory(text);
     dispatchInput(this.host, text);
     this.host.stopMemoryIdleTimer();

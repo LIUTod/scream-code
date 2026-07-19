@@ -125,6 +125,8 @@ export const en: Record<string, string> = {
   'input.replay_blocked': 'Cannot send input while session history is replaying.',
   'input.send_failed': 'Send failed: {message}',
   'input.guide_failed': 'Guide failed: {message}',
+  'input.large_confirm': 'Input is {count} characters. Send anyway? (y/n)',
+  'input.large_cancelled': 'Input cancelled.',
 
   // ─── Welcome ──────────────────
   'welcome.config': '/config  Configure model',
