@@ -180,7 +180,17 @@ export class ContextMemory {
       },
       ...this._history.slice(summary.compactedCount),
     ];
-    this.openSteps.clear();
+    // Prune open-step mappings by reference instead of clearing them all:
+    // a step that is still in flight lives at the history tail and survives
+    // the compaction slice, so its tool.call/content.part events must keep
+    // landing. Dropping the mapping while tool.result events still append
+    // would orphan tool exchanges (tool_result without tool_use → API 400).
+    const survivingMessages = new Set<ContextMessage>(this._history);
+    for (const [uuid, message] of this.openSteps) {
+      if (!survivingMessages.has(message)) {
+        this.openSteps.delete(uuid);
+      }
+    }
     this.flushDeferredMessagesIfToolExchangeClosed();
     this._tokenCount = summary.tokensAfter;
     this.tokenCountCoveredMessageCount = this._history.length;

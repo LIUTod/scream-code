@@ -262,18 +262,21 @@ export class SessionManager {
   // ---------------------------------------------------------------------------
   // Resume / switch
   // ---------------------------------------------------------------------------
-  async resumeSession(targetSessionId: string): Promise<{ switched: boolean; session?: Session }> {
+  async resumeSession(targetSessionId: string): Promise<{ switched: boolean; session?: Session; blocked?: boolean }> {
     if (targetSessionId === this.host.state.appState.sessionId) {
       this.host.showStatus(t('session.already_in'));
       return { switched: true };
     }
     if (isBusy(this.host.state.appState)) {
       this.host.showError(t('session.switch_streaming'));
-      return { switched: false };
+      // blocked: the refusal is transient state, not "session missing" —
+      // callers (cc-connect picker) must not treat it as a reason to create
+      // and force-switch to a new session mid-stream.
+      return { switched: false, blocked: true };
     }
     if (this.host.state.appState.isReplaying) {
       this.host.showError(t('session.switch_replaying'));
-      return { switched: false };
+      return { switched: false, blocked: true };
     }
 
     let session: Session;

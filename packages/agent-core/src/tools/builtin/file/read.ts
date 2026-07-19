@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import type { Jian, StatResult } from '@scream-code/jian';
 import { z } from 'zod';
 
@@ -15,7 +17,7 @@ import {
   suffixResolutionNotice,
 } from '../../support/suffix-match';
 import type { WorkspaceConfig } from '../../support/workspace';
-import { makeCarriageReturnsVisible, type LineEndingStyle, computeAnchor, toModelTextView } from './line-endings';
+import { makeCarriageReturnsVisible, type LineEndingStyle } from './line-endings';
 import { formatConflictNotice, scanConflictLines } from './conflict-detect';
 import readDescriptionTemplate from './read.md';
 
@@ -331,7 +333,11 @@ export class ReadTool implements BuiltinTool<ReadInput> {
   ): Promise<ExecutableToolResult> {
     const selectedEntries: ReadLineEntry[] = [];
     const flags: LineEndingFlags = { hasCrLf: false, hasLf: false, hasLoneCr: false };
-    const rawBuffer: string[] = [];
+    // Feed the full-file anchor hash incrementally (raw + CRLF-normalized)
+    // instead of buffering every line — a multi-GB file must not OOM when
+    // the caller only asked for 50 lines.
+    const rawHash = createHash('sha256');
+    const normalizedHash = createHash('sha256');
     let currentLineNo = 0;
     let maxLinesReached = false;
     let collectionClosed = false;
@@ -342,7 +348,8 @@ export class ReadTool implements BuiltinTool<ReadInput> {
       }
       currentLineNo += 1;
       updateLineEndingFlags(flags, rawLine);
-      rawBuffer.push(rawLine);
+      rawHash.update(rawLine);
+      normalizedHash.update(rawLine.replaceAll('\r\n', '\n'));
       if (collectionClosed) {
         if (effectiveLimit >= MAX_LINES && currentLineNo >= lineOffset) {
           maxLinesReached = true;
@@ -367,7 +374,7 @@ export class ReadTool implements BuiltinTool<ReadInput> {
     }
 
     const lineEndingStyle = lineEndingStyleFromFlags(flags);
-    const anchor = computeAnchor(toModelTextView(rawBuffer.join('')).text);
+    const anchor = (lineEndingStyle === 'crlf' ? normalizedHash : rawHash).digest('hex').slice(0, 8);
     const renderedLines: string[] = [];
     const truncatedLineNumbers: number[] = [];
     let bytes = 0;
@@ -415,7 +422,8 @@ export class ReadTool implements BuiltinTool<ReadInput> {
     const tailCount = Math.abs(lineOffset);
     const entries: ReadLineEntry[] = [];
     const flags: LineEndingFlags = { hasCrLf: false, hasLf: false, hasLoneCr: false };
-    const rawBuffer: string[] = [];
+    const rawHash = createHash('sha256');
+    const normalizedHash = createHash('sha256');
     let currentLineNo = 0;
 
     for await (const rawLine of this.jian.readLines(safePath, { errors: 'strict' })) {
@@ -424,7 +432,8 @@ export class ReadTool implements BuiltinTool<ReadInput> {
       }
       currentLineNo += 1;
       updateLineEndingFlags(flags, rawLine);
-      rawBuffer.push(rawLine);
+      rawHash.update(rawLine);
+      normalizedHash.update(rawLine.replaceAll('\r\n', '\n'));
       entries.push({
         lineNo: currentLineNo,
         rawContent: stripTrailingLf(rawLine),
@@ -435,7 +444,7 @@ export class ReadTool implements BuiltinTool<ReadInput> {
     }
 
     const lineEndingStyle = lineEndingStyleFromFlags(flags);
-    const anchor = computeAnchor(toModelTextView(rawBuffer.join('')).text);
+    const anchor = (lineEndingStyle === 'crlf' ? normalizedHash : rawHash).digest('hex').slice(0, 8);
     let renderedCandidates = entries.slice(0, effectiveLimit).map((entry) => {
       return { entry, rendered: renderLine(entry, lineEndingStyle) };
     });

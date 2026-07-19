@@ -850,9 +850,11 @@ export class SessionEventHandler {
     const { streamingUI } = this.host;
     const backgroundMeta = this.backgroundAgentMetadata.get(event.subagentId);
     if (backgroundMeta !== undefined) {
+      // Look up the task id BEFORE deleting the metadata — findAgentTaskId
+      // reads this map, so deleting first makes the dedupe guard dead code.
+      const taskId = this.findAgentTaskId(event.subagentId);
       this.backgroundAgentMetadata.delete(event.subagentId);
       this.syncBackgroundAgentBadge();
-      const taskId = this.findAgentTaskId(event.subagentId);
       if (taskId !== undefined && this.backgroundTaskTranscriptedTerminal.has(taskId)) {
         return;
       }
@@ -879,6 +881,9 @@ export class SessionEventHandler {
     const { streamingUI } = this.host;
     const backgroundMeta = this.backgroundAgentMetadata.get(event.subagentId);
     if (backgroundMeta !== undefined) {
+      // Look up the task id BEFORE deleting the metadata — findAgentTaskId
+      // reads this map, so deleting first makes the dedupe guard dead code.
+      const taskId = this.findAgentTaskId(event.subagentId);
       this.backgroundAgentMetadata.delete(event.subagentId);
       this.syncBackgroundAgentBadge();
       // Push the real subagent error onto the parent Agent card too —
@@ -892,7 +897,6 @@ export class SessionEventHandler {
         status: 'failed',
         errorText: event.error,
       });
-      const taskId = this.findAgentTaskId(event.subagentId);
       if (taskId !== undefined && this.backgroundTaskTranscriptedTerminal.has(taskId)) {
         return;
       }

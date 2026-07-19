@@ -38,6 +38,10 @@ const DEFAULT_USER_AGENT =
 
 const DEFAULT_MAX_BYTES = 10 * 1024 * 1024;
 
+// Hard ceiling per request — a server that accepts the connection and then
+// stalls must not hang the tool call (and the whole agent turn) forever.
+const FETCH_TIMEOUT_MS = 30_000;
+
 // Readability's .d.ts references the global `Document` type, but this
 // package compiles with `lib: ES2023` (no DOM). Extracting the
 // constructor parameter type keeps us off the global `Document` name
@@ -205,6 +209,7 @@ export class LocalFetchURLProvider implements UrlFetcher {
     const response = await this.fetchImpl(url, {
       method: 'GET',
       headers: { 'User-Agent': this.userAgent },
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
 
     if (response.status >= 400) {
@@ -224,6 +229,11 @@ export class LocalFetchURLProvider implements UrlFetcher {
     if (contentLengthRaw !== null) {
       const cl = Number(contentLengthRaw);
       if (Number.isFinite(cl) && cl > this.maxBytes) {
+        // Same drain as the error branch above — otherwise the socket is
+        // leaked out of the keep-alive pool.
+        await response.body?.cancel().catch(() => {
+          /* already closed */
+        });
         throw new Error(
           `Response body too large: ${String(cl)} bytes exceeds maxBytes (${String(this.maxBytes)}).`,
         );

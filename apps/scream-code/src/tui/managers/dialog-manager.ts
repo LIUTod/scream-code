@@ -33,7 +33,7 @@ export interface DialogManagerHost {
   /** 退出 /tasks 等全屏接管组件,让后续 editor 替换能挂载到真实容器。 */
   exitFullScreenTakeover(): void;
   sendNormalUserInput(text: string): void;
-  resumeSession(sessionId: string): Promise<boolean>;
+  resumeSession(sessionId: string): Promise<{ switched: boolean; blocked?: boolean }>;
   switchToSession(session: Session, message: string): Promise<void>;
   deleteSession(sessionId: string): Promise<void>;
   fetchSessions(): Promise<void>;
@@ -133,12 +133,16 @@ export class DialogManager {
           const isCc = row?.metadata?.['source'] === 'cc-connect';
           const realId = isCc ? (row.metadata['agentSessionId'] as string) : pickerId;
 
-          void this.host.resumeSession(realId).then(async (switched) => {
+          void this.host.resumeSession(realId).then(async ({ switched, blocked }) => {
             if (switched) {
               this.hideSessionPicker();
               return;
             }
-            if (isCc) {
+            // Only create a fresh cc session when the resume failed because
+            // the session genuinely doesn't exist — never when the refusal
+            // was transient busy/replaying state (that would force-switch
+            // away from a live streaming session and soft-lock the UI).
+            if (isCc && blocked !== true) {
               try {
                 const session = await this.host.harness.createSession({
                   id: realId,
@@ -154,6 +158,8 @@ export class DialogManager {
                 this.host.showError(t('dialog.create_session_failed'));
               }
             }
+          }).catch((error: unknown) => {
+            this.host.showError(error instanceof Error ? error.message : String(error));
           });
         },
         onCancel,
@@ -170,6 +176,8 @@ export class DialogManager {
             } else if (this.host.state.activeDialog === 'session-picker') {
               this.mountSessionPicker(onCancel);
             }
+          }).catch((error: unknown) => {
+            this.host.showError(error instanceof Error ? error.message : String(error));
           });
         },
       }),

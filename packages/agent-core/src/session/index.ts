@@ -339,7 +339,13 @@ export class Session {
       await this.options.jian.mkdir(this.options.homedir, { parents: true, existOk: true });
       await this.options.jian.writeText(this.metadataPath, text);
     };
-    this.writeMetadataPromise = this.writeMetadataPromise.then(() => write());
+    // Recover from a rejected link: without the rejection arm, one failed
+    // write would latch the chain and silently stop all future metadata
+    // persistence for the session's lifetime.
+    this.writeMetadataPromise = this.writeMetadataPromise.then(
+      () => write(),
+      () => write(),
+    );
     return this.writeMetadataPromise;
   }
 

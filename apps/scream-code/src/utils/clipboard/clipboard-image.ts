@@ -119,6 +119,10 @@ function isWaylandSession(env: NodeJS.ProcessEnv): boolean {
   return Boolean(env['WAYLAND_DISPLAY']) || env['XDG_SESSION_TYPE'] === 'wayland';
 }
 
+function isX11Session(env: NodeJS.ProcessEnv): boolean {
+  return Boolean(env['DISPLAY']);
+}
+
 function isWSL(env: NodeJS.ProcessEnv): boolean {
   if (env['WSL_DISTRO_NAME'] !== undefined || env['WSLENV'] !== undefined) return true;
   try {
@@ -487,7 +491,7 @@ export async function readClipboardMedia(options?: {
     const wayland = isWaylandSession(env);
     const wsl = isWSL(env);
 
-    if (wayland || wsl) {
+    if (wayland || wsl || isX11Session(env)) {
       const fileMedia = readClipboardFileMediaViaWlPaste() ?? readClipboardFileMediaViaXclip();
       if (fileMedia !== null) return fileMedia;
       image = readClipboardImageViaWlPaste() ?? readClipboardImageViaXclip();

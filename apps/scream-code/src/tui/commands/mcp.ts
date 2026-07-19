@@ -35,33 +35,39 @@ interface McpRecommendation {
   macOnly?: boolean;
 }
 
-const RECOMMENDED: McpRecommendation[] = [
-  {
-    name: 'peekaboo',
-    displayName: 'Peekaboo',
-    description: t('mcp.desktop_desc'),
-    command: 'npx',
-    args: ['-y', '@steipete/peekaboo', 'mcp'],
-    macOnly: true,
-  },
-  {
-    name: 'chrome-devtools',
-    displayName: 'Chrome DevTools',
-    description: t('mcp.browser_desc'),
-    command: 'npx',
-    args: ['-y', 'chrome-devtools-mcp@latest', '--no-usage-statistics'],
-  },
-];
+// Built per call — t() must be evaluated after any runtime /language switch,
+// not once at module load.
+function getRecommended(): McpRecommendation[] {
+  return [
+    {
+      name: 'peekaboo',
+      displayName: 'Peekaboo',
+      description: t('mcp.desktop_desc'),
+      command: 'npx',
+      args: ['-y', '@steipete/peekaboo', 'mcp'],
+      macOnly: true,
+    },
+    {
+      name: 'chrome-devtools',
+      displayName: 'Chrome DevTools',
+      description: t('mcp.browser_desc'),
+      command: 'npx',
+      args: ['-y', 'chrome-devtools-mcp@latest', '--no-usage-statistics'],
+    },
+  ];
+}
 
 // ─── 状态映射 ─────────────────────────────────────────────────────────
 
-const STATUS_LABELS: Record<string, string> = {
-  pending: t('mcp.connecting'),
-  connected: t('mcp.connected'),
-  failed: t('mcp.failed'),
-  disabled: t('mcp.disabled'),
-  'needs-auth': t('mcp.auth_required'),
-};
+function getStatusLabels(): Record<string, string> {
+  return {
+    pending: t('mcp.connecting'),
+    connected: t('mcp.connected'),
+    failed: t('mcp.failed'),
+    disabled: t('mcp.disabled'),
+    'needs-auth': t('mcp.auth_required'),
+  };
+}
 
 // ─── Handler ──────────────────────────────────────────────────────────
 
@@ -163,7 +169,7 @@ function buildRows(
   if (servers.length > 0) {
     rows.push({ kind: 'installed', name: '', label: '── ' + t('mcp.installed') + ' ──', status: '__section' });
     for (const s of servers) {
-      const statusLabel = STATUS_LABELS[s.status] ?? s.status;
+      const statusLabel = getStatusLabels()[s.status] ?? s.status;
       const toolInfo = s.status === 'connected' ? `${s.toolCount} tools` : '';
       const errorInfo = s.error ? ` — ${sanitizeDesc(s.error)}` : '';
       rows.push({
@@ -183,7 +189,7 @@ function buildRows(
   }
 
   rows.push({ kind: 'recommended', name: '', label: '── ' + t('mcp.recommended') + ' ──', status: '__section' });
-  for (const rec of RECOMMENDED) {
+  for (const rec of getRecommended()) {
     const alreadyInstalled = installedNames.has(rec.name);
     const platformUnavailable = rec.macOnly && process.platform !== 'darwin';
     rows.push({
@@ -213,7 +219,7 @@ async function handleEnter(
       host.showStatus(t('mcp.already_installed', { name: row.label }));
       return;
     }
-    const rec = RECOMMENDED.find((r) => r.name === row.name);
+    const rec = getRecommended().find((r) => r.name === row.name);
     if (!rec) return;
     await installMcp(host, rec);
   } else if (row.kind === 'installed' && row.status && row.status !== '__section' && row.status !== '__empty') {

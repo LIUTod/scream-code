@@ -387,6 +387,15 @@ export function messagesToGoogleGenAIContents(messages: Message[]): GoogleConten
         j += 1;
       }
 
+      if (toolMessages.length === 0) {
+        // Same invariant as the partial case below: a dangling function_call
+        // turn with zero responses is always rejected by Gemini/Vertex with a
+        // 400 — fail here with a useful message instead.
+        throw new ChatProviderError(
+          `Missing tool responses for ids: ${expectedToolCallIds.join(', ')}`,
+        );
+      }
+
       if (toolMessages.length > 0) {
         // Sort tool results to match the order of tool calls in the assistant
         // message, and reject incomplete / duplicated / unexpected results.

@@ -126,9 +126,13 @@ export class TurnFlow {
 
     // Initialize dream tracker and record new session on first turn
     if (this.turnId === -1) {
-      void this.agent.dreamTracker.init().then(() =>
-        this.agent.dreamTracker.recordNewSession(),
-      );
+      void this.agent.dreamTracker
+        .init()
+        .then(() => this.agent.dreamTracker.recordNewSession())
+        .catch(() => {
+          // Dream tracking is best-effort — a filesystem hiccup must not
+          // surface as an unhandled rejection on the first turn.
+        });
     }
 
     // Per-turn setup (usage window, `turn.started`, appending the prompt)

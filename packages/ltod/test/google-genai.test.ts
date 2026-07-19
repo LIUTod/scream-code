@@ -342,6 +342,12 @@ describe('GoogleGenAIChatProvider', () => {
             },
           ],
         },
+        {
+          role: 'tool',
+          toolCallId: 'add_call_sig',
+          content: [{ type: 'text', text: '5' }],
+          toolCalls: [],
+        },
       ];
       const body = await captureRequestBody(provider, '', [], history);
 

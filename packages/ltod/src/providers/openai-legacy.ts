@@ -343,6 +343,7 @@ export class OpenAILegacyChatProvider implements ChatProvider {
   private _defaultHeaders: Record<string, string> | undefined;
   private _reasoningKey: string | undefined;
   private _reasoningEffort: string | undefined;
+  private _thinkingExplicitlyOff = false;
   private _generationKwargs: OpenAILegacyGenerationKwargs;
   private _toolMessageConversion: ToolMessageConversion;
   private _client: OpenAI | undefined;
@@ -424,8 +425,10 @@ export class OpenAILegacyChatProvider implements ChatProvider {
     // (e.g. One API) that require reasoning_effort when messages contain reasoning_content.
     // Skip when the caller already pinned reasoning_effort via withGenerationKwargs —
     // their value would otherwise be silently overwritten below.
+    // Also skip when thinking was explicitly turned off — 'off' maps to undefined
+    // and must not be resurrected by the auto-enable.
     // See: https://github.com/LIUTod/scream-code/issues/1616
-    if (reasoningEffort === undefined && kwargs['reasoning_effort'] === undefined) {
+    if (!this._thinkingExplicitlyOff && reasoningEffort === undefined && kwargs['reasoning_effort'] === undefined) {
       const hasThinkPart = history.some((message) =>
         message.content.some((part) => part.type === 'think'),
       );
@@ -478,6 +481,7 @@ export class OpenAILegacyChatProvider implements ChatProvider {
     const reasoningEffort = thinkingEffortToReasoningEffort(effort);
     const clone = this._clone();
     clone._reasoningEffort = reasoningEffort;
+    clone._thinkingExplicitlyOff = effort === 'off';
     return clone;
   }
 

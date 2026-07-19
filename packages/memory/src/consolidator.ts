@@ -120,6 +120,7 @@ export async function applyConsolidation(
         whatWorked: worked || 'none',
         whatFailed: failed || 'none',
         tags: normalizeTags(plan.resolved.flatMap((m) => m.tags ?? [])),
+        projectDir: plan.resolved[0]!.projectDir,
         extractionSource: 'compaction',
       });
       await store.append(archive);
@@ -144,6 +145,7 @@ export async function applyConsolidation(
         whatWorked: worked || 'none',
         whatFailed: failed || 'none',
         tags: normalizeTags(plan.stale.flatMap((m) => m.tags ?? [])),
+        projectDir: plan.stale[0]!.projectDir,
         extractionSource: 'compaction',
       });
       await store.append(archive);
@@ -168,6 +170,7 @@ export async function applyConsolidation(
       whatFailed: group.merged.whatFailed,
       whatWorked: group.merged.whatWorked,
       tags: group.merged.tags ?? mergedTags,
+      projectDir: newest.projectDir,
       extractionSource: 'compaction',
     });
     // 先 append merged，确保崩溃时新记录已落盘

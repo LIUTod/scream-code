@@ -560,6 +560,49 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
     });
   }
 
+  let cleaned = false;
+  const runCleanup = async (): Promise<void> => {
+    if (cleaned) return;
+    cleaned = true;
+    // Reject any pending approvals so the core doesn't hang on shutdown.
+    for (const [, pending] of pendingApprovals) {
+      pending.resolve({ decision: "rejected", feedback: "会话已结束" });
+    }
+    pendingApprovals.clear();
+
+    // Emit resume hint so user knows how to continue
+    if (currentSessionId) {
+      writer.emitResumeHint(sessionKey);
+    }
+
+    try {
+      if (session) {
+        await session.close();
+      }
+      await harness.close();
+    } catch {
+      // Best-effort cleanup
+    }
+
+    // Restore AGENTS.md to its original state (undo cc-connect injection).
+    // Synchronous I/O so SIGTERM can't interrupt mid-restore and leave the
+    // injected file in the user's project.
+    if (injectedAgentsMd) {
+      try {
+        if (originalAgentsMd === undefined) {
+          if (existsSync(agentsMdPath)) unlinkSync(agentsMdPath);
+        } else {
+          writeFileSync(agentsMdPath, originalAgentsMd, "utf-8");
+        }
+      } catch {
+        // Best-effort cleanup
+      }
+    }
+  };
+  // Without these, SIGINT/SIGTERM kills the process instantly and the
+  // AGENTS.md injection would be left behind in the user's project.
+  const uninstallTerminationHandlers = installStreamJsonTerminationHandlers(runCleanup);
+
   try {
     await harness.ensureConfigFile();
     const config = await harness.getConfig();
@@ -901,8 +944,13 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
       session.prompt(userText).catch((error: unknown) => {
         const msg = error instanceof Error ? error.message : String(error);
         // Orphaned tool_calls in session history — recreate the session
-        // so the next message starts fresh.
-        if (msg.includes("insufficient tool messages") || msg.includes("tool_calls")) {
+        // so the next message starts fresh. Match only the orphaned-history
+        // error shapes; a transient 400 that merely mentions tool_calls
+        // (e.g. malformed arguments) must not wipe the user's conversation.
+        const isOrphanedToolCalls =
+          msg.includes("insufficient tool messages") ||
+          (msg.includes("tool_calls") && msg.includes("followed by tool messages"));
+        if (isOrphanedToolCalls) {
           log.warn("stream-json: resetting session after tool call mismatch", {
             sessionId: session?.id,
             error: msg,
@@ -922,7 +970,13 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
         finish(error instanceof Error ? error : new Error(msg));
       });
 
-      await turnPromise;
+      try {
+        await turnPromise;
+      } catch {
+        // finish() already emitted this turn's result event. The daemon
+        // keeps serving subsequent messages — a single failed or cancelled
+        // turn must not kill the whole cc-connect process.
+      }
     }
   } catch (error) {
     // finish() already emitted the result event and set exitCode for
@@ -937,40 +991,8 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
       log.error("stream-json: turn error (exitCode already set)", { error });
     }
   } finally {
-    // Reject any pending approvals so the core doesn't hang on shutdown.
-    for (const [, pending] of pendingApprovals) {
-      pending.resolve({ decision: "rejected", feedback: "会话已结束" });
-    }
-    pendingApprovals.clear();
-
-    // Emit resume hint so user knows how to continue
-    if (currentSessionId) {
-      writer.emitResumeHint(sessionKey);
-    }
-
-    try {
-      if (session) {
-        await session.close();
-      }
-      await harness.close();
-    } catch {
-      // Best-effort cleanup
-    }
-
-    // Restore AGENTS.md to its original state (undo cc-connect injection).
-    // Synchronous I/O so SIGTERM can't interrupt mid-restore and leave the
-    // injected file in the user's project.
-    if (injectedAgentsMd) {
-      try {
-        if (originalAgentsMd === undefined) {
-          if (existsSync(agentsMdPath)) unlinkSync(agentsMdPath);
-        } else {
-          writeFileSync(agentsMdPath, originalAgentsMd, "utf-8");
-        }
-      } catch {
-        // Best-effort cleanup
-      }
-    }
+    uninstallTerminationHandlers();
+    await runCleanup();
   }
 }
 

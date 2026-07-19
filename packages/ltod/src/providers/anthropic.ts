@@ -1091,8 +1091,14 @@ export class AnthropicChatProvider implements ChatProvider {
       });
     }
 
+    // Budget-based thinking has no mapping for xhigh/max (they only exist as
+    // adaptive effort levels) — clampEffort deliberately preserves xhigh for
+    // opus-4-7 because the adaptive branch can express it, but the
+    // non-adaptive branch would crash in budgetTokensForEffort.
+    const budgetEffort =
+      effectiveEffort === 'xhigh' || effectiveEffort === 'max' ? 'high' : effectiveEffort;
     const kwargs: Partial<AnthropicGenerationKwargs> = {
-      thinking: { type: 'enabled', budget_tokens: budgetTokensForEffort(effectiveEffort) },
+      thinking: { type: 'enabled', budget_tokens: budgetTokensForEffort(budgetEffort) },
       betaFeatures: newBetas,
     };
     if (supportsEffortParam(this._model, adaptive)) {

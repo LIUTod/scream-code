@@ -1052,7 +1052,7 @@ describe('Agent compaction', () => {
     ]);
   });
 
-  it('fails the turn with compaction.unable when auto compaction has no compactable prefix', async () => {
+  it('skips auto compaction when there is no compactable prefix instead of failing the turn', async () => {
     const ctx = testAgent();
     ctx.configure({
       provider: CATALOGUED_PROVIDER,
@@ -1063,18 +1063,19 @@ describe('Agent compaction', () => {
     });
     const oversizedPrompt = `initial-pending-verbatim:${'x'.repeat(8_000)}`;
 
+    ctx.mockNextResponse({ type: 'text', text: 'ok' });
     await ctx.rpc.prompt({ input: [{ type: 'text', text: oversizedPrompt }] });
     const events = await ctx.untilTurnEnd();
 
+    // Auto compaction with no safe split prefix must degrade gracefully —
+    // the turn proceeds and a genuine context overflow surfaces as the
+    // provider's error, not a synthetic compaction.unable from beforeStep.
     expect(eventIndex(events, 'compaction.started')).toBe(-1);
-    expect(ctx.llmCalls).toHaveLength(0);
+    expect(ctx.llmCalls).toHaveLength(1);
     expect(events).toContainEqual(
       expect.objectContaining({
         event: 'turn.ended',
-        args: expect.objectContaining({
-          reason: 'failed',
-          error: expect.objectContaining({ code: 'compaction.unable' }),
-        }),
+        args: expect.objectContaining({ reason: 'completed' }),
       }),
     );
     await ctx.expectResumeMatches();

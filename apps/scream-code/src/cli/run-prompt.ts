@@ -1,3 +1,6 @@
+import { realpathSync } from 'node:fs';
+import { resolve } from 'node:path';
+
 import chalk from 'chalk';
 import {
   ScreamHarness,
@@ -140,7 +143,7 @@ async function resolvePromptSession(
     if (target === undefined) {
       throw new Error(`未找到会话 "${opts.session}"。`);
     }
-    if (target.workDir !== workDir) {
+    if (!sameWorkDir(target.workDir, workDir)) {
       stderr.write(
         `${chalk.yellow(
           `会话 "${opts.session}" 是在其他目录下创建的。\n` +
@@ -698,4 +701,23 @@ function hasTurnId(event: Event): event is Event & { readonly turnId: number } {
 function formatTurnEndedFailure(event: Extract<Event, { type: 'turn.ended' }>): string {
   if (event.error !== undefined) return `${event.error.code}: ${event.error.message}`;
   return `提示回合结束，原因：${event.reason}`;
+}
+/**
+ * Compare two working directories tolerating symlink aliases (/tmp vs
+ * /private/tmp on macOS), trailing separators, and Windows case
+ * differences. Falls back to resolved-string compare when either path
+ * doesn't exist on disk.
+ */
+function sameWorkDir(a: string, b: string): boolean {
+  const normalize = (p: string): string => {
+    let out = resolve(p);
+    try {
+      out = realpathSync(out);
+    } catch {
+      // Path doesn't exist — keep the resolved form.
+    }
+    out = out.replace(/[/\\]+$/, '');
+    return process.platform === 'win32' ? out.toLowerCase() : out;
+  };
+  return normalize(a) === normalize(b);
 }

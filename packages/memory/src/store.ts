@@ -56,7 +56,12 @@ export class MemoryMemoStore {
 
   async init(): Promise<void> {
     if (this.initPromise) return this.initPromise;
-    this.initPromise = this._doInit();
+    // Reset the cached promise on failure so a transient error (disk hiccup,
+    // locked db) doesn't brick the store for the process lifetime.
+    this.initPromise = this._doInit().catch((error: unknown) => {
+      this.initPromise = null;
+      throw error;
+    });
     return this.initPromise;
   }
 
@@ -74,6 +79,11 @@ export class MemoryMemoStore {
 
   /** Close the database handle and checkpoint WAL. */
   close(): void {
+    if (this.embeddingTimer !== undefined) {
+      clearTimeout(this.embeddingTimer);
+      this.embeddingTimer = undefined;
+    }
+    this.embeddingQueue.clear();
     if (this.db !== undefined) {
       this.db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
       this.db.close();
@@ -463,7 +473,10 @@ export class MemoryMemoStore {
           memo.recordedAt,
           memo.projectDir ?? '',
           JSON.stringify(memo.tags ?? []),
-        ) as { rowid: number };
+        ) as { rowid: number } | undefined;
+        // INSERT OR IGNORE yields no RETURNING row on duplicates — skip the
+        // FTS row instead of crashing the whole migration.
+        if (row === undefined) continue;
         insertFts.run(
           row.rowid,
           toFtsText(memo.userNeed),
@@ -568,6 +581,7 @@ export class MemoryMemoStore {
     const deleteFts = this.db.prepare(
       "INSERT INTO memos_fts(memos_fts, rowid) VALUES ('delete', ?)",
     );
+    const deleteEmbedding = this.db.prepare('DELETE FROM memory_embeddings WHERE memory_id = ?');
     this.db.exec('BEGIN TRANSACTION');
     try {
       const oldRow = selectRow.get(id) as { rowid: number } | undefined;
@@ -602,7 +616,11 @@ export class MemoryMemoStore {
         toFtsText(updated.whatWorked),
         toFtsText(updated.sourceSessionTitle ?? ''),
       );
+      // Content changed — drop the stale embedding so the re-scheduled one
+      // isn't skipped by flushEmbeddings' "already has embedding" check.
+      deleteEmbedding.run(id);
       this.db.exec('COMMIT');
+      this.scheduleEmbedding(updated);
       return true;
     } catch {
       this.db.exec('ROLLBACK');

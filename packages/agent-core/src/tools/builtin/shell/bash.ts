@@ -635,7 +635,7 @@ export class BashTool implements BuiltinTool<BashInput> {
     }
 
     if (timeoutMs !== undefined) {
-      setTimeout(() => {
+      const timer = setTimeout(() => {
         void (async (): Promise<void> => {
           if (proc.exitCode !== null) {
             await backgroundManager.settlePendingExits();
@@ -647,6 +647,9 @@ export class BashTool implements BuiltinTool<BashInput> {
           }
         })();
       }, timeoutMs);
+      // Don't hold the event loop open for the full timeout after the task
+      // has already finished (timeout can be as long as 24h).
+      timer.unref();
     }
 
     // register() synchronously inserts taskId into the manager's Map, so

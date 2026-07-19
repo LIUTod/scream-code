@@ -246,9 +246,9 @@ function parseToolCallArguments(
 function repairTruncatedJson(raw: string): string {
   let repaired = raw.trimEnd();
 
-  // Track state
-  let braceOpen = 0;
-  let bracketOpen = 0;
+  // Track state — a real open-container stack so closers come out in true
+  // LIFO order ({"a": [ truncated → ]} not ]}).
+  const openStack: string[] = [];
   let inString = false;
   let stringHasEscape = false;
   let lastNonWhitespace = '';
@@ -269,10 +269,13 @@ function repairTruncatedJson(raw: string): string {
 
     if (inString) continue;
 
-    if (ch === '{') braceOpen++;
-    if (ch === '}') braceOpen--;
-    if (ch === '[') bracketOpen++;
-    if (ch === ']') bracketOpen--;
+    if (ch === '{') openStack.push('}');
+    else if (ch === '[') openStack.push(']');
+    else if (ch === '}' || ch === ']') {
+      if (openStack.length > 0 && openStack[openStack.length - 1] === ch) {
+        openStack.pop();
+      }
+    }
 
     if (!/\s/.test(ch)) lastNonWhitespace = ch;
   }
@@ -287,19 +290,9 @@ function repairTruncatedJson(raw: string): string {
     repaired += 'null';
   }
 
-  // Close containers in correct order (LIFO)
-  const closers: string[] = [];
-  while (bracketOpen > 0) {
-    closers.push(']');
-    bracketOpen--;
-  }
-  while (braceOpen > 0) {
-    closers.push('}');
-    braceOpen--;
-  }
-
-  if (closers.length > 0) {
-    repaired += closers.join('');
+  // Close containers in reverse order of opening (LIFO)
+  for (let i = openStack.length - 1; i >= 0; i--) {
+    repaired += openStack[i];
   }
 
   return repaired;

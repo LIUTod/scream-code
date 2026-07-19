@@ -707,9 +707,9 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
     this.sessionManager.resetSessionRuntime();
   }
 
-  async resumeSession(targetSessionId: string): Promise<boolean> {
+  async resumeSession(targetSessionId: string): Promise<{ switched: boolean; blocked?: boolean }> {
     const result = await this.sessionManager.resumeSession(targetSessionId);
-    return result.switched;
+    return { switched: result.switched, blocked: result.blocked };
   }
 
   async switchToSession(session: Session, statusMessage: string): Promise<void> {

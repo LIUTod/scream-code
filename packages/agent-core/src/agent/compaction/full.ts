@@ -238,7 +238,14 @@ export class FullCompaction {
     }
     const compactedCount = this.strategy.computeCompactCount(this.agent.context.history, data.source);
     if (compactedCount === 0) {
-      throw new ScreamError(ErrorCodes.COMPACTION_UNABLE, 'No prefix that can be compacted in current history.');
+      // Auto path must degrade gracefully: with no safe split prefix (e.g. one
+      // giant unsplittable message), throwing here would hard-fail every
+      // subsequent step's beforeStep hook until context is manually cleared.
+      // The manual /compact path keeps the error so the user gets feedback.
+      if (data.source === 'manual') {
+        throw new ScreamError(ErrorCodes.COMPACTION_UNABLE, 'No prefix that can be compacted in current history.');
+      }
+      return;
     }
     this.agent.records.logRecord({
       type: 'full_compaction.begin',

@@ -2,19 +2,24 @@ import { t } from '@scream-code/config';
 
 export type MediaUrlKind = 'audio' | 'image' | 'video';
 
-const MEDIA_KIND_LABELS: Record<MediaUrlKind, string> = {
-  audio: t('mediaurl.audio'),
-  image: t('mediaurl.image'),
-  video: t('mediaurl.video'),
-};
+// Built per call — t() must be evaluated after any runtime /language switch,
+// not once at module load.
+function getMediaKindLabels(): Record<MediaUrlKind, string> {
+  return {
+    audio: t('mediaurl.audio'),
+    image: t('mediaurl.image'),
+    video: t('mediaurl.video'),
+  };
+}
 
 export function mediaUrlPartToText(kind: MediaUrlKind, url: string): string {
+  const labels = getMediaKindLabels();
   const summary = summarizeDataUrl(url);
   if (summary !== undefined) {
     const size = summary.bytes !== undefined ? `, ${formatByteSize(summary.bytes)}` : '';
-    return `[${MEDIA_KIND_LABELS[kind]} ${summary.mime}${size}]`;
+    return `[${labels[kind]} ${summary.mime}${size}]`;
   }
-  return `<${MEDIA_KIND_LABELS[kind]} url="${escapeAttribute(url)}">`;
+  return `<${labels[kind]} url="${escapeAttribute(url)}">`;
 }
 
 export function summarizeDataUrl(url: string): { mime: string; bytes?: number } | undefined {

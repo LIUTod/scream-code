@@ -70,7 +70,12 @@ export class KnowledgeStore {
 
   async init(): Promise<void> {
     if (this.initPromise) return this.initPromise;
-    this.initPromise = this._doInit();
+    // Reset the cached promise on failure so a transient error doesn't
+    // brick the store for the process lifetime.
+    this.initPromise = this._doInit().catch((error: unknown) => {
+      this.initPromise = null;
+      throw error;
+    });
     return this.initPromise;
   }
 
@@ -82,7 +87,51 @@ export class KnowledgeStore {
     this.db.exec('PRAGMA foreign_keys = ON;');
     this.db.exec('PRAGMA busy_timeout = 5000;');
     this.createSchema();
+    this.migrateFtsTokenization();
     this.initialized = true;
+  }
+
+  /**
+   * One-time migration: FTS rows written before toFtsText pre-tokenization
+   * indexed raw text (CJK runs became single tokens and are unsearchable).
+   * Rebuild all three FTS tables from the content tables with toFtsText.
+   * Tracked via PRAGMA user_version so it runs exactly once.
+   */
+  private migrateFtsTokenization(): void {
+    if (this.db === undefined) return;
+    const row = this.db.prepare('PRAGMA user_version').get() as { user_version: number };
+    if (row.user_version >= 1) return;
+    this.db.exec('DELETE FROM knowledge_chunks_fts');
+    this.db.exec('DELETE FROM knowledge_events_fts');
+    this.db.exec('DELETE FROM knowledge_entities_fts');
+    const chunks = this.db
+      .prepare('SELECT rowid, heading, content FROM knowledge_chunks')
+      .all() as Array<{ rowid: number; heading: string | null; content: string }>;
+    const insChunk = this.db.prepare(
+      'INSERT INTO knowledge_chunks_fts (rowid, heading, content) VALUES (?, ?, ?)',
+    );
+    for (const c of chunks) {
+      insChunk.run(c.rowid, toFtsText(c.heading ?? ''), toFtsText(c.content));
+    }
+    const events = this.db
+      .prepare('SELECT rowid, title, summary, content FROM knowledge_events')
+      .all() as Array<{ rowid: number; title: string; summary: string | null; content: string }>;
+    const insEvent = this.db.prepare(
+      'INSERT INTO knowledge_events_fts (rowid, title, summary, content) VALUES (?, ?, ?, ?)',
+    );
+    for (const e of events) {
+      insEvent.run(e.rowid, toFtsText(e.title), toFtsText(e.summary ?? ''), toFtsText(e.content));
+    }
+    const entities = this.db
+      .prepare('SELECT rowid, name, description FROM knowledge_entities')
+      .all() as Array<{ rowid: number; name: string; description: string | null }>;
+    const insEntity = this.db.prepare(
+      'INSERT INTO knowledge_entities_fts (rowid, name, description) VALUES (?, ?, ?)',
+    );
+    for (const e of entities) {
+      insEntity.run(e.rowid, toFtsText(e.name), toFtsText(e.description ?? ''));
+    }
+    this.db.exec('PRAGMA user_version = 1');
   }
 
   close(): void {
@@ -284,7 +333,40 @@ export class KnowledgeStore {
   async deleteSource(id: string): Promise<boolean> {
     await this.init();
     if (this.db === undefined) return false;
+    // External-content FTS tables don't follow the FK cascade — collect the
+    // indexed rows first, then issue explicit 'delete' commands after the
+    // content rows are gone. (A 'rebuild' would re-index raw text and undo
+    // the toFtsText CJK pre-tokenization, so it is not an option.)
+    const chunkRows = this.db
+      .prepare('SELECT rowid, heading, content FROM knowledge_chunks WHERE source_id = ?')
+      .all(id) as Array<{ rowid: number; heading: string | null; content: string }>;
+    const eventRows = this.db
+      .prepare('SELECT rowid, title, summary, content FROM knowledge_events WHERE source_id = ?')
+      .all(id) as Array<{ rowid: number; title: string; summary: string | null; content: string }>;
+    const entityRows = this.db
+      .prepare('SELECT rowid, name, description FROM knowledge_entities WHERE source_id = ?')
+      .all(id) as Array<{ rowid: number; name: string; description: string | null }>;
     const result = this.db.prepare('DELETE FROM knowledge_sources WHERE id = ?').run(id);
+    if (result.changes > 0) {
+      const delChunk = this.db.prepare(
+        "INSERT INTO knowledge_chunks_fts (knowledge_chunks_fts, rowid, heading, content) VALUES ('delete', ?, ?, ?)",
+      );
+      for (const row of chunkRows) {
+        delChunk.run(row.rowid, toFtsText(row.heading ?? ''), toFtsText(row.content));
+      }
+      const delEvent = this.db.prepare(
+        "INSERT INTO knowledge_events_fts (knowledge_events_fts, rowid, title, summary, content) VALUES ('delete', ?, ?, ?, ?)",
+      );
+      for (const row of eventRows) {
+        delEvent.run(row.rowid, toFtsText(row.title), toFtsText(row.summary ?? ''), toFtsText(row.content));
+      }
+      const delEntity = this.db.prepare(
+        "INSERT INTO knowledge_entities_fts (knowledge_entities_fts, rowid, name, description) VALUES ('delete', ?, ?, ?)",
+      );
+      for (const row of entityRows) {
+        delEntity.run(row.rowid, toFtsText(row.name), toFtsText(row.description ?? ''));
+      }
+    }
     return result.changes > 0;
   }
 
@@ -390,12 +472,14 @@ export class KnowledgeStore {
         createdAt,
       );
     // FTS5 external-content table — insert into it manually.
+    // toFtsText pre-tokenizes CJK so MATCH queries (which use the same
+    // tokenizer via buildFtsQuery) can find sub-word matches.
     this.db
       .prepare(
         `INSERT INTO knowledge_chunks_fts (rowid, heading, content)
          VALUES ((SELECT rowid FROM knowledge_chunks WHERE id = ?), ?, ?)`,
       )
-      .run(id, params.heading ?? '', params.content);
+      .run(id, toFtsText(params.heading ?? ''), toFtsText(params.content));
     return {
       id,
       sourceId: params.sourceId,
@@ -487,7 +571,7 @@ export class KnowledgeStore {
         `INSERT INTO knowledge_events_fts (rowid, title, summary, content)
          VALUES ((SELECT rowid FROM knowledge_events WHERE id = ?), ?, ?, ?)`,
       )
-      .run(id, params.title, params.summary ?? '', params.content);
+      .run(id, toFtsText(params.title), toFtsText(params.summary ?? ''), toFtsText(params.content));
     return {
       id,
       sourceId: params.sourceId,
@@ -575,16 +659,41 @@ export class KnowledgeStore {
       .get(params.sourceId, params.type, normalizedName) as Record<string, unknown> | undefined;
 
     if (existing !== undefined) {
+      const existingId = String(existing['id']);
+      let descriptionChanged = false;
       // Update description if new one is provided and existing is null.
       if (params.description !== null && existing['description'] === null) {
         this.db
           .prepare('UPDATE knowledge_entities SET description = ? WHERE id = ?')
-          .run(params.description, String(existing['id']));
+          .run(params.description, existingId);
+        existing['description'] = params.description;
+        descriptionChanged = true;
       }
       if (params.embedding !== null && existing['embedding_json'] === null) {
         this.db
           .prepare('UPDATE knowledge_entities SET embedding_json = ? WHERE id = ?')
-          .run(vectorToJson(params.embedding), String(existing['id']));
+          .run(vectorToJson(params.embedding), existingId);
+        existing['embedding_json'] = vectorToJson(params.embedding);
+      }
+      if (descriptionChanged) {
+        // Refresh the FTS row so the new description is searchable.
+        const ftsRow = this.db
+          .prepare('SELECT rowid, name, description FROM knowledge_entities WHERE id = ?')
+          .get(existingId) as { rowid: number; name: string; description: string | null } | undefined;
+        if (ftsRow !== undefined) {
+          // The old FTS row has an empty description (the update only runs
+          // when the stored description was null).
+          this.db
+            .prepare(
+              "INSERT INTO knowledge_entities_fts (knowledge_entities_fts, rowid, name, description) VALUES ('delete', ?, ?, ?)",
+            )
+            .run(ftsRow.rowid, toFtsText(ftsRow.name), '');
+          this.db
+            .prepare(
+              `INSERT INTO knowledge_entities_fts (rowid, name, description) VALUES (?, ?, ?)`,
+            )
+            .run(ftsRow.rowid, toFtsText(ftsRow.name), toFtsText(ftsRow.description ?? ''));
+        }
       }
       return rowToEntity(existing);
     }
@@ -612,7 +721,7 @@ export class KnowledgeStore {
         `INSERT INTO knowledge_entities_fts (rowid, name, description)
          VALUES ((SELECT rowid FROM knowledge_entities WHERE id = ?), ?, ?)`,
       )
-      .run(id, params.name, params.description ?? '');
+      .run(id, toFtsText(params.name), toFtsText(params.description ?? ''));
     return {
       id,
       sourceId: params.sourceId,
