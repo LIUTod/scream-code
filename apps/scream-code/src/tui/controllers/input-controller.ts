@@ -125,12 +125,19 @@ export class InputController {
         dispatchInput(this.host, pending);
         this.host.stopMemoryIdleTimer();
       } else {
+        const pending = this.pendingLargeInput;
         this.pendingLargeInput = null;
         this.host.showStatus(t('input.large_cancelled'), this.host.state.theme.colors.textDim);
         // If the user typed something other than a plain "n"/"no" cancellation
         // (e.g. a slash command like /help), process it as new input
         if (answer !== 'n' && answer !== 'no' && text.trim().length > 0) {
+          // Restore the rejected large input so it isn't lost, then process
+          // the new input on top of it.
+          this.host.state.editor.setText(pending);
           this.handleInput(text);
+        } else {
+          // Restore the rejected input so the user doesn't lose a long paste
+          this.host.state.editor.setText(pending);
         }
       }
       return;
