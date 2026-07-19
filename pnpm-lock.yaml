@@ -73,8 +73,8 @@ importers:
   apps/scream-code:
     dependencies:
       '@liutod-scream/pi-tui':
-        specifier: ^0.80.13
-        version: 0.80.13
+        specifier: ^0.80.14
+        version: 0.80.14
       '@mariozechner/clipboard':
         specifier: ^0.3.2
         version: 0.3.9
@@ -848,8 +848,8 @@ packages:
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
 
-  '@liutod-scream/pi-tui@0.80.13':
-    resolution: {integrity: sha512-A+tXFXyJwraPKwl31R6fonEzeIQY6p6KADfuMEHx9blpo16Weoh/ZWPUdGRHi5oldU96qK7YtgASlfVnr8FQZg==}
+  '@liutod-scream/pi-tui@0.80.14':
+    resolution: {integrity: sha512-P/jep/S7hs//ZntlgFOYVLHfz9jzHyr8ONWdURkq2zEEfwsJHAJ6pTQ3PCMHYawI41RfoEdxDE3bnxhO3MOqfA==}
     engines: {node: '>=22.19.0'}
 
   '@loaderkit/resolve@1.0.6':
@@ -4198,7 +4198,7 @@ snapshots:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
 
-  '@liutod-scream/pi-tui@0.80.13':
+  '@liutod-scream/pi-tui@0.80.14':
     dependencies:
       get-east-asian-width: 1.6.0
       marked: 18.0.5
