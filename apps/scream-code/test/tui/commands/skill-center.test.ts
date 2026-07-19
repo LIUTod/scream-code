@@ -55,7 +55,7 @@ function makeHost(session?: MockSession): SlashCommandHost {
     state: {
       appState: { workDir: '/tmp' },
       theme: { colors: darkColors },
-      ui: { requestRender: vi.fn() },
+      ui: { requestRender: vi.fn(), requestComponentRender: vi.fn() },
     },
     showError: vi.fn(),
     showNotice: vi.fn(),

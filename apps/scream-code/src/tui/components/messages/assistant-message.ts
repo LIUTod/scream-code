@@ -144,7 +144,7 @@ export class AssistantMessageComponent implements Component {
       // Invalidate cache so render picks up the next fade bucket.
       this.cachedWidth = undefined;
       this.cachedLines = undefined;
-      this.ui?.requestRender();
+      this.ui?.requestComponentRender(this);
       if (age >= FADE_MS) {
         this.stopFade();
       }

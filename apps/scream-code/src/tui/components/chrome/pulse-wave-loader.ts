@@ -61,7 +61,7 @@ export class PulseWaveLoader extends Text {
     const step = PULSE_WAVE_FRAMES[this.currentFrame] ?? PULSE_WAVE_FRAMES[0];
     const cells = [0, 1, 2].map((idx) => this.renderCell(idx, step.active, step.forward));
     this.setText(cells.join(' '));
-    this.ui.requestRender();
+    this.ui.requestComponentRender(this);
   }
 
   private renderCell(index: number, active: number, forward: boolean): string {

@@ -136,7 +136,8 @@ describe('AssistantMessageComponent', () => {
     vi.useFakeTimers();
     try {
       const requestRender = vi.fn();
-      const ui = { requestRender } as unknown as TUI;
+      const requestComponentRender = vi.fn();
+      const ui = { requestRender, requestComponentRender } as unknown as TUI;
       const component = new AssistantMessageComponent(
         createMarkdownTheme(darkColors),
         darkColors,
@@ -170,7 +171,8 @@ describe('AssistantMessageComponent', () => {
     process.env['SCREAM_REDUCED_MOTION'] = '1';
     try {
       const requestRender = vi.fn();
-      const ui = { requestRender } as unknown as TUI;
+      const requestComponentRender = vi.fn();
+      const ui = { requestRender, requestComponentRender } as unknown as TUI;
       const component = new AssistantMessageComponent(
         createMarkdownTheme(darkColors),
         darkColors,
@@ -197,7 +199,8 @@ describe('AssistantMessageComponent', () => {
     vi.useFakeTimers();
     try {
       const requestRender = vi.fn();
-      const ui = { requestRender } as unknown as TUI;
+      const requestComponentRender = vi.fn();
+      const ui = { requestRender, requestComponentRender } as unknown as TUI;
       const component = new AssistantMessageComponent(
         createMarkdownTheme(darkColors),
         darkColors,
@@ -206,10 +209,10 @@ describe('AssistantMessageComponent', () => {
       );
 
       component.updateContent('hello');
-      const callsBefore = requestRender.mock.calls.length;
+      const callsBefore = requestComponentRender.mock.calls.length;
       component.dispose();
       vi.advanceTimersByTime(FADE_MS * 2);
-      expect(requestRender.mock.calls.length).toBe(callsBefore);
+      expect(requestComponentRender.mock.calls.length).toBe(callsBefore);
     } finally {
       vi.useRealTimers();
     }

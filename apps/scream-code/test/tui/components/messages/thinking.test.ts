@@ -36,21 +36,21 @@ describe('ThinkingComponent', () => {
 
   it('animates the live spinner and stops on finalize', () => {
     vi.useFakeTimers();
-    const requestRender = vi.fn();
+    const requestComponentRender = vi.fn();
     const component = new ThinkingComponent('step', darkColors, true, 'live', {
-      requestRender,
+      requestComponentRender,
     } as unknown as TUI);
 
     expect(strip(component.render(80).join('\n'))).toContain('⠋ 思考中...');
 
     vi.advanceTimersByTime(80);
-    expect(requestRender).toHaveBeenCalled();
+    expect(requestComponentRender).toHaveBeenCalled();
     expect(strip(component.render(80).join('\n'))).toContain('⠙ 思考中...');
 
     component.finalize();
-    requestRender.mockClear();
+    requestComponentRender.mockClear();
     vi.advanceTimersByTime(160);
-    expect(requestRender).not.toHaveBeenCalled();
+    expect(requestComponentRender).not.toHaveBeenCalled();
     vi.useRealTimers();
   });
 

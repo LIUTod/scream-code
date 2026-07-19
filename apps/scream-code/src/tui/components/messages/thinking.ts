@@ -155,7 +155,7 @@ export class ThinkingComponent implements Component {
     if (this.ui === undefined || this.spinnerInterval !== undefined) return;
     this.spinnerInterval = setInterval(() => {
       this.spinnerFrame = (this.spinnerFrame + 1) % BRAILLE_SPINNER_FRAMES.length;
-      this.ui?.requestRender();
+      this.ui?.requestComponentRender(this);
     }, BRAILLE_SPINNER_INTERVAL_MS);
   }
 

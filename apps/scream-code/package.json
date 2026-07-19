@@ -1,6 +1,6 @@
 {
   "name": "scream-code",
-  "version": "0.10.1",
+  "version": "0.10.2",
   "description": "A terminal-native AI agent for builders",
   "license": "MIT",
   "author": "ScreamCli",
@@ -57,7 +57,7 @@
     "smoke": "node dist/main.mjs --version"
   },
   "dependencies": {
-    "@liutod-scream/pi-tui": "^0.80.14",
+    "@liutod-scream/pi-tui": "^0.80.15",
     "@mariozechner/clipboard": "^0.3.2",
     "chalk": "^5.4.1",
     "cli-highlight": "^2.1.11",

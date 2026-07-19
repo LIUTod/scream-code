@@ -249,7 +249,7 @@ export class FooterComponent implements Component {
   private gitCache: GitStatusCache;
   private gitCacheWorkDir: string;
   private transientHint: string | null = null;
-  private shimmerTimer: ReturnType<typeof setInterval> | null = null;
+  private statusTimer: ReturnType<typeof setInterval> | null = null;
   /**
    * Non-terminal background-task counts split by kind so the footer can
    * render two distinct badges. `bashTasks` covers `bash-*` BPM tasks
@@ -269,22 +269,20 @@ export class FooterComponent implements Component {
   }
 
   setState(state: AppState): void {
-    const wasThinking = this.state?.streamingPhase === 'thinking';
+    const prevPhase = this.state?.streamingPhase;
     if (state.workDir !== this.gitCacheWorkDir) {
       this.gitCacheWorkDir = state.workDir;
       this.gitCache = createGitStatusCache(state.workDir, { onChange: this.onGitStatusChange });
     }
     this.state = state;
-    // Shimmer is a 30fps decorative timer. While streaming, every frame is
-    // a fullRender(true) risk in pi-tui (any spurious diff above the
-    // viewport triggers `\x1b[2J\x1b[H` and snaps content to the top on
-    // ConPTY / gnome). Restrict shimmer to the thinking phase only —
-    // waiting/composing/tool have their own activity indicators already.
-    const isThinking = state.streamingPhase === 'thinking';
-    if (isThinking && !wasThinking) {
-      this.#startShimmer();
-    } else if (!isThinking && wasThinking) {
-      this.#stopShimmer();
+    // The status line (spinner frame, elapsed seconds, thinking shimmer) is
+    // time-driven, so the footer owns a repaint timer for every non-idle
+    // phase. Every tick is a component-scoped render — cheap for the footer
+    // subtree, and it never forces the whole tree to recompose. 30fps is
+    // reserved for the thinking shimmer gradient; other phases only need the
+    // 120ms spinner/elapsed cadence.
+    if (state.streamingPhase !== prevPhase) {
+      this.#restartStatusTimer(state.streamingPhase);
     }
   }
 
@@ -315,26 +313,30 @@ export class FooterComponent implements Component {
   invalidate(): void {}
 
   /**
-   * Stop the shimmer animation timer. Idempotent — safe to call even when
+   * Stop the status timer. Idempotent — safe to call even when
    * the timer isn't running. Call this when the component is disposed.
    */
   dispose(): void {
-    this.#stopShimmer();
+    this.#stopStatusTimer();
   }
 
-  // ── Shimmer animation ───────────────────────────────────────────────
+  // ── Status line animation ───────────────────────────────────────────
 
-  #startShimmer(): void {
-    if (this.shimmerTimer) return;
-    this.shimmerTimer = setInterval(() => {
-      this.ui.requestRender();
-    }, 1000 / 30);
+  #restartStatusTimer(phase: AppState['streamingPhase']): void {
+    this.#stopStatusTimer();
+    if (phase === 'idle') return;
+    const intervalMs = phase === 'thinking' ? 1000 / 30 : SPINNER_TICK_MS;
+    this.statusTimer = setInterval(() => {
+      // Self-contained repaint: a component-scoped frame re-renders only the
+      // footer subtree instead of the whole component tree.
+      this.ui.requestComponentRender(this);
+    }, intervalMs);
   }
 
-  #stopShimmer(): void {
-    if (!this.shimmerTimer) return;
-    clearInterval(this.shimmerTimer);
-    this.shimmerTimer = null;
+  #stopStatusTimer(): void {
+    if (!this.statusTimer) return;
+    clearInterval(this.statusTimer);
+    this.statusTimer = null;
   }
 
   render(width: number): string[] {
