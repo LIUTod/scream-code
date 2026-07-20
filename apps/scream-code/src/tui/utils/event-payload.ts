@@ -2,6 +2,7 @@ import { isScreamError } from '@scream-code/scream-code-sdk';
 
 import {
   MAX_TRANSCRIPT_ERROR_LINES,
+  STREAMING_ARGS_BUFFER_MAX_CHARS,
   STREAMING_ARGS_FIELD_RE,
   STREAMING_ARGS_PREVIEW_MAX_CHARS,
 } from '#/tui/constant/streaming';
@@ -10,9 +11,9 @@ export function appendStreamingArgsPreview(
   current: string | undefined,
   next: string | null | undefined,
 ): string {
-  const existing = (current ?? '').slice(0, STREAMING_ARGS_PREVIEW_MAX_CHARS);
+  const existing = (current ?? '').slice(0, STREAMING_ARGS_BUFFER_MAX_CHARS);
   if (next === null || next === undefined || next.length === 0) return existing;
-  const remaining = STREAMING_ARGS_PREVIEW_MAX_CHARS - existing.length;
+  const remaining = STREAMING_ARGS_BUFFER_MAX_CHARS - existing.length;
   if (remaining <= 0) return existing;
   return `${existing}${next.slice(0, remaining)}`;
 }

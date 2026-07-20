@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { MAX_TRANSCRIPT_ERROR_LINES, STREAMING_ARGS_PREVIEW_MAX_CHARS } from '#/tui/constant/streaming';
+import {
+  MAX_TRANSCRIPT_ERROR_LINES,
+  STREAMING_ARGS_BUFFER_MAX_CHARS,
+  STREAMING_ARGS_PREVIEW_MAX_CHARS,
+} from '#/tui/constant/streaming';
 import {
   appendStreamingArgsPreview,
   parseStreamingArgs,
@@ -15,10 +19,14 @@ describe('streaming tool argument payload helpers', () => {
     });
   });
 
-  it('caps accumulated streaming preview text', () => {
-    const current = 'a'.repeat(STREAMING_ARGS_PREVIEW_MAX_CHARS - 2);
+  it('accumulates well past the parse-preview window, bounded by the buffer cap', () => {
+    // The 8KB parse window must NOT cap accumulation — live previews read
+    // from the tail of the full buffer.
+    const current = 'a'.repeat(STREAMING_ARGS_PREVIEW_MAX_CHARS * 2);
+    expect(appendStreamingArgsPreview(current, 'bcdef')).toBe(`${current}bcdef`);
 
-    expect(appendStreamingArgsPreview(current, 'bcdef')).toBe(`${current}bc`);
+    const nearCap = 'a'.repeat(STREAMING_ARGS_BUFFER_MAX_CHARS - 2);
+    expect(appendStreamingArgsPreview(nearCap, 'bcdef')).toBe(`${nearCap}bc`);
   });
 
   it('parses only bounded preview fields from oversized streaming arguments', () => {

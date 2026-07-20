@@ -247,24 +247,20 @@ function unescapeJsonString(s: string): string {
 }
 
 /**
- * Pull the live value of a JSON string field out of partially-streamed
- * arguments, even if the closing quote hasn't arrived yet. Handles the
- * common JSON string escapes so `\n` in a streamed `content` becomes a
- * real newline we can highlight. Returns `undefined` if the field hasn't
- * started streaming yet.
+ * Scan a JSON string value starting at `start` (just after the opening
+ * quote), unescaping into plain text. Stops at the closing quote or at
+ * `end`, tolerating truncation (an incomplete escape at the boundary
+ * simply ends the scan). Shared by the partial-args extractor and the
+ * Write streaming tail preview.
  */
-function extractPartialStringField(text: string, key: string): string | undefined {
-  const opener = new RegExp(`"${key}"\\s*:\\s*"`);
-  const match = opener.exec(text);
-  if (match === null) return undefined;
-  const start = match.index + match[0].length;
+function unescapeJsonStringValue(text: string, start: number, end: number = text.length): string {
   let out = '';
   let i = start;
-  while (i < text.length) {
+  while (i < end) {
     const ch = text[i];
     if (ch === '\\') {
       const next = text[i + 1];
-      if (next === undefined) return out;
+      if (next === undefined || i + 1 >= end) return out;
       switch (next) {
         case 'n':
           out += '\n';
@@ -291,7 +287,7 @@ function extractPartialStringField(text: string, key: string): string | undefine
           out += '/';
           break;
         case 'u': {
-          if (i + 5 >= text.length) return out;
+          if (i + 5 >= end) return out;
           const hex = text.slice(i + 2, i + 6);
           const code = Number.parseInt(hex, 16);
           if (Number.isNaN(code)) return out;
@@ -310,6 +306,19 @@ function extractPartialStringField(text: string, key: string): string | undefine
     i++;
   }
   return out;
+}
+
+/**
+ * Pull the live value of a JSON string field out of partially-streamed
+ * arguments, even if the closing quote hasn't arrived yet. Returns
+ * `undefined` if the field hasn't started streaming yet.
+ */
+function extractPartialStringField(text: string, key: string): string | undefined {
+  const opener = new RegExp(`"${key}"\\s*:\\s*"`);
+  const match = opener.exec(text);
+  if (match === null) return undefined;
+  const start = match.index + match[0].length;
+  return unescapeJsonStringValue(text, start);
 }
 
 function parseArgsPreview(value: string): Record<string, unknown> {
@@ -541,6 +550,19 @@ export class ToolCallComponent extends CachedContainer {
   // authoritative final state.
   private progressLines: string[] = [];
   private static readonly MAX_PROGRESS_LINES = 24;
+
+  // ── Write streaming tail preview state ─────────────────────────────
+  // The streaming preview renders from the TAIL of the accumulating args
+  // JSON (not the 8KB head), so the visible line window keeps scrolling
+  // while a large file is being written. `writeStreamContentStart` is the
+  // offset just after the content field's opening quote; the newline
+  // counter tracks exact line numbers incrementally — the stream is
+  // append-only, so each frame only scans the newly appended region.
+  private writeStreamContentStart = -1;
+  private writeStreamNlScanOffset = 0;
+  private writeStreamNlCount = 0;
+  private writeStreamLang: string | undefined;
+  private static readonly WRITE_STREAM_TAIL_RAW_CHARS = 4096;
 
   /**
    * Registered by a group container (`AgentGroupComponent` or
@@ -1696,27 +1718,7 @@ export class ToolCallComponent extends CachedContainer {
     const name = this.toolCall.name;
     const previewText = streamText.slice(0, STREAMING_ARGS_PREVIEW_MAX_CHARS);
     if (name === 'Write') {
-      const content = extractPartialStringField(previewText, 'content');
-      if (content === undefined || content.length === 0) return;
-      const filePath =
-        extractPartialStringField(previewText, 'file_path') ??
-        extractPartialStringField(previewText, 'path') ??
-        '';
-      const lang = langFromPath(filePath);
-      const allLines = highlightLines(content, lang);
-      const maxLines = COMMAND_PREVIEW_LINES;
-      const scrollLines =
-        allLines.length > maxLines
-          ? allLines.slice(allLines.length - maxLines)
-          : allLines;
-      for (const [i, line] of scrollLines.entries()) {
-        const originalLineNumber =
-          allLines.length > maxLines
-            ? allLines.length - maxLines + i
-            : i;
-        const lineNum = chalk.dim(String(originalLineNumber + 1).padStart(4) + '  ');
-        this.addChild(new Text(lineNum + line, 2, 0));
-      }
+      this.buildWriteStreamingPreview(streamText);
       return;
     }
     if (name === 'Edit') {
@@ -1724,7 +1726,9 @@ export class ToolCallComponent extends CachedContainer {
         extractPartialStringField(previewText, 'file_path') ??
         extractPartialStringField(previewText, 'path') ??
         '';
-      const bytes = Buffer.byteLength(previewText, 'utf8');
+      // Byte progress must measure the FULL stream, not the bounded preview
+      // buffer — otherwise the counter visibly freezes once args pass 8KB.
+      const bytes = Buffer.byteLength(streamText, 'utf8');
       const startedAtMs = this.toolCall.streamingStartedAtMs;
       const elapsedSeconds =
         startedAtMs === undefined ? 0 : Math.max(0, Math.floor((Date.now() - startedAtMs) / 1000));
@@ -1750,6 +1754,68 @@ export class ToolCallComponent extends CachedContainer {
     }
     // Unknown tools: nothing sensible to stream without a schema, so
     // leave the body blank and let the header do the talking.
+  }
+
+  /**
+   * Live Write preview: renders the last COMMAND_PREVIEW_LINES lines of the
+   * file being written, reading from the TAIL of the accumulating args JSON
+   * so the window keeps scrolling for arbitrarily large files (the old
+   * head-bounded preview visibly froze once args passed 8KB). Line numbers
+   * stay exact via an incremental newline counter. Per-frame cost is
+   * O(delta + tail), independent of total file size.
+   */
+  private buildWriteStreamingPreview(streamText: string): void {
+    // A new stream resets the cached offsets (defensive: components are
+    // per-tool-call, but args can in theory restart).
+    if (streamText.length < this.writeStreamNlScanOffset) {
+      this.writeStreamContentStart = -1;
+      this.writeStreamLang = undefined;
+    }
+    if (this.writeStreamContentStart < 0) {
+      const opener = /"content"\s*:\s*"/.exec(streamText);
+      if (opener === null) return;
+      this.writeStreamContentStart = opener.index + opener[0].length;
+      this.writeStreamNlScanOffset = this.writeStreamContentStart;
+      this.writeStreamNlCount = 0;
+      const filePath =
+        extractPartialStringField(streamText, 'file_path') ?? extractPartialStringField(streamText, 'path') ?? '';
+      this.writeStreamLang = langFromPath(filePath);
+    }
+    const contentStart = this.writeStreamContentStart;
+    const tailStart = Math.max(contentStart, streamText.length - ToolCallComponent.WRITE_STREAM_TAIL_RAW_CHARS);
+
+    // Advance the newline counter exactly to the fragment start, scanning
+    // only the newly appended region.
+    while (this.writeStreamNlScanOffset < tailStart) {
+      const idx = streamText.indexOf('\\n', this.writeStreamNlScanOffset);
+      if (idx === -1 || idx >= tailStart) break;
+      this.writeStreamNlCount++;
+      this.writeStreamNlScanOffset = idx + 2;
+    }
+
+    // A fragment cut mid-content starts mid-line (possibly mid escape
+    // sequence): drop the partial first line. The dropped span contains no
+    // newline by construction, so the counter needs no adjustment.
+    let fragmentStart = tailStart;
+    if (tailStart > contentStart) {
+      const firstNl = streamText.indexOf('\\n', tailStart);
+      if (firstNl === -1) return;
+      fragmentStart = firstNl + 2;
+    }
+    const fragmentEnd = Math.min(streamText.length, fragmentStart + ToolCallComponent.WRITE_STREAM_TAIL_RAW_CHARS);
+    const fragment = unescapeJsonStringValue(streamText, fragmentStart, fragmentEnd);
+    if (fragment.length === 0) return;
+
+    const lines = highlightLines(fragment, this.writeStreamLang);
+    const displayLines = lines.slice(-COMMAND_PREVIEW_LINES);
+    // The counter reached only tailStart; when a partial first line was
+    // dropped, that dropped line still occupies a line number.
+    const firstFragmentLineNo = this.writeStreamNlCount + (tailStart > contentStart ? 2 : 1);
+    const skipped = lines.length - displayLines.length;
+    for (const [i, line] of displayLines.entries()) {
+      const lineNum = chalk.dim(String(firstFragmentLineNo + skipped + i).padStart(4) + '  ');
+      this.addChild(new Text(lineNum + line, 2, 0));
+    }
   }
 
   private buildPlanPreview(): void {

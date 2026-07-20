@@ -988,6 +988,42 @@ describe('ToolCallComponent', () => {
     expect(out).not.toContain('按 ctrl+o 展开');
   });
 
+  it('keeps the Write streaming preview scrolling past the 8KB preview cap', () => {
+    // ~9KB at 200 lines, ~18KB at 400 — far past STREAMING_ARGS_PREVIEW_MAX_CHARS.
+    const make = (n: number): string => {
+      const lines: string[] = [];
+      for (let i = 1; i <= n; i++) lines.push(`line${String(i).padStart(3, '0')} padding-padding`);
+      return lines.join('\\n');
+    };
+    const component = new ToolCallComponent(
+      {
+        id: 'call_write_tail',
+        name: 'Write',
+        args: {},
+        streamingArguments: `{"file_path":"big.txt","content":"${make(200)}`,
+      },
+      undefined,
+      darkColors,
+    );
+    const early = strip(component.render(100).join('\n'));
+    expect(early).toContain('line200');
+
+    // The stream keeps growing — the preview must advance to the live tail
+    // instead of freezing at the old head-bounded cutoff.
+    component.updateToolCall({
+      id: 'call_write_tail',
+      name: 'Write',
+      args: {},
+      streamingArguments: `{"file_path":"big.txt","content":"${make(400)}`,
+    });
+    const late = strip(component.render(100).join('\n'));
+    expect(late).toContain('line400');
+    expect(late).not.toContain('line200');
+    // Exact line numbers via the incremental newline counter.
+    expect(late).toContain(' 400');
+    expect(late).not.toContain(' 190');
+  });
+
   it('switches a streaming tool call to Truncated when the step ended with max_tokens', () => {
     const lines: string[] = [];
     for (let i = 1; i <= 10; i++) lines.push(`line${String(i)}`);
