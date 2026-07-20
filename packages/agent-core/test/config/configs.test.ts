@@ -111,15 +111,6 @@ timeout = 5
 event = "Stop"
 command = "echo stop"
 
-[services.scream_cli_search]
-base_url = "https://api.scream.com/coding/v1/search"
-api_key = "sk-search"
-custom_headers = { "X-Search" = "1" }
-
-[services.scream_cli_fetch]
-base_url = "https://api.scream.com/coding/v1/fetch"
-api_key = "sk-fetch"
-
 [notifications]
 claim_stale_after_ms = 15000
 `;
@@ -184,8 +175,6 @@ describe('harness config TOML loader', () => {
         command: 'echo stop',
       },
     ]);
-    expect(config.services?.screamCliSearch?.customHeaders).toEqual({ 'X-Search': '1' });
-    expect(config.services?.screamCliFetch?.apiKey).toBe('sk-fetch');
 
     expect('theme' in config).toBe(false);
     expect(config.raw?.['theme']).toBe('dark');

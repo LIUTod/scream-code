@@ -11,7 +11,6 @@ import {
   WebSearchTool,
   type WebSearchProvider,
 } from '../../src/tools/builtin/web/web-search';
-import { ScreamCliWebSearchProvider } from '../../src/tools/providers/scream-cli-web-search';
 import { toolContentString } from './fixtures/fake-jian';
 import { executeTool } from './fixtures/execute-tool';
 
@@ -244,6 +243,7 @@ describe('WebSearchTool', () => {
       limit: 10,
       includeContent: true,
       toolCallId: 'c4',
+      signal,
     });
   });
 
@@ -262,28 +262,5 @@ describe('WebSearchTool', () => {
     const tool = new WebSearchTool(fakeProvider());
     expect(tool.description.toLowerCase()).toMatch(/internet|search the web/);
     expect(tool.description.toLowerCase()).toContain('search');
-  });
-});
-
-describe('ScreamCliWebSearchProvider', () => {
-  it('does not force-refresh request auth after a 401 response', async () => {
-    const getAccessToken = vi.fn().mockResolvedValue('fresh-token');
-    const fetchImpl = vi
-      .fn<typeof fetch>()
-      .mockResolvedValue(new Response('unauthorized', { status: 401 }));
-    const provider = new ScreamCliWebSearchProvider({
-      tokenProvider: { getAccessToken },
-      baseUrl: 'https://search.example/v1',
-      fetchImpl,
-    });
-
-    await expect(provider.search('query')).rejects.toThrow(/HTTP 401/);
-
-    expect(getAccessToken).toHaveBeenCalledTimes(1);
-    expect(getAccessToken).toHaveBeenCalledWith();
-    expect(fetchImpl).toHaveBeenCalledTimes(1);
-    expect(fetchImpl.mock.calls[0]?.[1]?.headers).toMatchObject({
-      Authorization: 'Bearer fresh-token',
-    });
   });
 });

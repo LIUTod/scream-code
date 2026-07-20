@@ -6,10 +6,9 @@ import { getRootLogger, log } from '#/logging/logger';
 import { PluginManager } from '#/plugin';
 import { FetchCache } from '#/tools/providers/fetch-cache';
 import { LocalFetchURLProvider } from '#/tools/providers/local-fetch-url';
-import { ScreamCliFetchURLProvider } from '#/tools/providers/scream-cli-fetch-url';
 import { DuckDuckGoSearchProvider } from '#/tools/providers/duckduckgo-search';
+import { BaiduSearchProvider, So360SearchProvider, SogouSearchProvider } from '#/tools/providers/domestic-search';
 import { FallbackSearchProvider } from '#/tools/providers/fallback-search';
-import { ScreamCliWebSearchProvider } from '#/tools/providers/scream-cli-web-search';
 import type { PromisableMethods } from '#/utils/types';
 import { getCoreVersion } from '#/version';
 import { resolveThinkingLevel } from '../agent/config/thinking';
@@ -22,7 +21,6 @@ import {
   resolveScreamHome,
   writeConfigFile,
   type ScreamConfig,
-  type ScreamCliServiceConfig,
 } from '../config';
 import {
   FLAG_DEFINITIONS,
@@ -37,7 +35,7 @@ import { Session, type SessionMeta, type SessionSkillConfig } from '../session';
 import type { SkillRoot } from '../skill';
 import { exportSessionDirectory } from '../session/export';
 import {
-  ProviderManager, type BearerTokenProvider,
+  ProviderManager,
   type OAuthTokenProviderResolver
 } from '../session/provider-manager';
 import { SessionAPIImpl } from '../session/rpc';
@@ -110,8 +108,6 @@ import { proxyWithExtraPayload } from './types';
 import { JianShellNotFoundError, LocalJian, type Jian } from '@scream-code/jian';
 import type { WebSearchProvider } from '../tools/builtin';
 import type { ToolServices } from '../tools/support/services';
-
-const SCREAM_CODE_PROVIDER_NAME = 'managed:scream-code';
 
 type AgentScopedPayload<T> = T & { readonly agentId: string };
 type SessionScopedPayload<T> = T & { readonly sessionId: string };
@@ -815,11 +811,7 @@ export class ScreamCore implements PromisableMethods<CoreAPI> {
     if (this.runtime !== undefined) {
       return this.runtime;
     }
-    const runtime = await createRuntimeConfig({
-      config,
-      screamRequestHeaders: this.screamRequestHeaders,
-      resolveOAuthTokenProvider: this.resolveOAuthTokenProvider,
-    });
+    const runtime = await createRuntimeConfig({ config });
     this.runtime = runtime;
     return runtime;
   }
@@ -909,77 +901,30 @@ export class ScreamCore implements PromisableMethods<CoreAPI> {
 
 async function createRuntimeConfig(input: {
   readonly config: ScreamConfig;
-  readonly screamRequestHeaders?: Record<string, string> | undefined;
-  readonly resolveOAuthTokenProvider?: OAuthTokenProviderResolver | undefined;
 }): Promise<ToolServices> {
   const fetchCache = new FetchCache();
-  const localFetcher = new LocalFetchURLProvider({ cache: fetchCache });
-  const fetchService = input.config.services?.screamCliFetch;
 
   return {
-    urlFetcher:
-      fetchService?.baseUrl === undefined
-        ? localFetcher
-        : new ScreamCliFetchURLProvider({
-            baseUrl: fetchService.baseUrl,
-            localFallback: localFetcher,
-            defaultHeaders: input.screamRequestHeaders,
-            cache: fetchCache,
-            ...serviceCredentials(fetchService, input.resolveOAuthTokenProvider),
-          }),
+    urlFetcher: new LocalFetchURLProvider({ cache: fetchCache }),
     webSearcher: buildWebSearcher(input),
   };
 }
 
 function buildWebSearcher(input: {
   readonly config: ScreamConfig;
-  readonly screamRequestHeaders?: Record<string, string> | undefined;
-  readonly resolveOAuthTokenProvider?: OAuthTokenProviderResolver | undefined;
 }): WebSearchProvider | undefined {
-  const searchService = input.config.services?.screamCliSearch;
-  const ddgEnabled = input.config.services?.duckduckgo?.enabled !== false;
+  const services = input.config.services;
 
-  const screamProvider: WebSearchProvider | undefined =
-    searchService?.baseUrl !== undefined
-      ? new ScreamCliWebSearchProvider({
-          baseUrl: searchService.baseUrl,
-          defaultHeaders: input.screamRequestHeaders,
-          ...serviceCredentials(searchService, input.resolveOAuthTokenProvider),
-        })
-      : undefined;
+  // Chain order: global engine first, then domestic (China-reachable)
+  // engines as the tail — Baidu is the final always-on fallback.
+  const providers: WebSearchProvider[] = [];
+  if (services?.duckduckgo?.enabled !== false) providers.push(new DuckDuckGoSearchProvider());
+  if (services?.sogou?.enabled !== false) providers.push(new SogouSearchProvider());
+  if (services?.so360?.enabled !== false) providers.push(new So360SearchProvider());
+  if (services?.baidu?.enabled !== false) providers.push(new BaiduSearchProvider());
 
-  const ddgProvider: WebSearchProvider | undefined = ddgEnabled
-    ? new DuckDuckGoSearchProvider()
-    : undefined;
-
-  if (screamProvider && ddgProvider) {
-    return new FallbackSearchProvider([screamProvider, ddgProvider]);
-  }
-  return screamProvider ?? ddgProvider;
-}
-
-function serviceCredentials(
-  service: ScreamCliServiceConfig,
-  resolveOAuthTokenProvider: OAuthTokenProviderResolver | undefined,
-): {
-  readonly apiKey?: string | undefined;
-  readonly tokenProvider?: BearerTokenProvider | undefined;
-  readonly customHeaders?: Record<string, string> | undefined;
-} {
-  const apiKey = nonEmptyString(service.apiKey);
-  return {
-    apiKey,
-    tokenProvider:
-      service.oauth !== undefined
-        ? resolveOAuthTokenProvider?.(SCREAM_CODE_PROVIDER_NAME, service.oauth)
-        : undefined,
-    customHeaders: service.customHeaders,
-  };
-}
-
-function nonEmptyString(value: string | undefined): string | undefined {
-  const trimmed = value?.trim();
-  return trimmed === undefined || trimmed.length === 0 ? undefined : trimmed;
+  if (providers.length === 0) return undefined;
+  return providers.length === 1 ? providers[0] : new FallbackSearchProvider(providers);
 }
 
 function requiredWorkDir(operation: string, value: string): string {

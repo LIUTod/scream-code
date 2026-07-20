@@ -27,9 +27,11 @@ export interface WebSearchResult {
 }
 
 export interface WebSearchProvider {
+  /** Short identifier used in fallback-chain failure summaries. */
+  readonly name?: string | undefined;
   search(
     query: string,
-    options?: { limit?: number; includeContent?: boolean; toolCallId?: string },
+    options?: { limit?: number; includeContent?: boolean; toolCallId?: string; signal?: AbortSignal },
   ): Promise<WebSearchResult[]>;
 }
 
@@ -81,11 +83,13 @@ export class WebSearchTool implements BuiltinTool<WebSearchInput> {
   private async execution(
     args: WebSearchInput,
     {
+    signal,
     toolCallId,
     }: ExecutableToolContext,
   ): Promise<ExecutableToolResult> {
     try {
-      const opts: { limit?: number; includeContent?: boolean; toolCallId?: string } = {
+      const opts: { limit?: number; includeContent?: boolean; toolCallId?: string; signal?: AbortSignal } = {
+        signal,
         toolCallId,
       };
       if (args.limit !== undefined) opts.limit = args.limit;

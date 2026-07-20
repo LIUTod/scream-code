@@ -13,7 +13,6 @@ import {
   type ScreamConfig,
   type LoopControl,
   type ModelAlias,
-  type ScreamCliServiceConfig,
   type OAuthRef,
   type PermissionConfig,
   type ProviderConfig,
@@ -412,29 +411,18 @@ function permissionRuleToToml(
 }
 
 function servicesToToml(services: ServicesConfig, rawServices: unknown): Record<string, unknown> {
+  // Engine toggles share the same key shape in TOML and the typed config
+  // (single-word names, `enabled` field), so they can be written straight
+  // back over the raw clone — including keys first introduced by a
+  // setConfig patch that have no raw counterpart yet.
   const out = cloneRecord(rawServices);
-  if (services.screamCliSearch !== undefined) {
-    out['scream_cli_search'] = serviceToToml(services.screamCliSearch);
-  } else {
-    delete out['scream_cli_search'];
-  }
-  if (services.screamCliFetch !== undefined) {
-    out['scream_cli_fetch'] = serviceToToml(services.screamCliFetch);
-  } else {
-    delete out['scream_cli_fetch'];
-  }
-  return out;
-}
-
-function serviceToToml(service: ScreamCliServiceConfig): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(service)) {
-    if (key === 'oauth' && value !== undefined) {
-      out[camelToSnake(key)] = oauthToToml(value as OAuthRef);
-    } else if (key === 'customHeaders' && value !== undefined) {
-      out[camelToSnake(key)] = cloneUnknown(value);
-    } else {
-      setDefined(out, camelToSnake(key), value);
+  for (const key of ['duckduckgo', 'sogou', 'so360', 'baidu'] as const) {
+    const toggle = services[key];
+    // Guard the undefined case: a partial patch (all fields optional) must
+    // never overwrite an existing on-disk value with undefined.
+    if (toggle?.enabled !== undefined) {
+      const existing = isPlainObject(out[key]) ? out[key] : {};
+      out[key] = { ...existing, enabled: toggle.enabled };
     }
   }
   return out;

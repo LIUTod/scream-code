@@ -124,25 +124,23 @@ export const HookDefSchema = z
 
 export type HookDefConfig = z.infer<typeof HookDefSchema>;
 
-export const ScreamCliServiceConfigSchema = z.object({
-  baseUrl: z.string().optional(),
-  apiKey: z.string().optional(),
-  oauth: OAuthRefSchema.optional(),
-  customHeaders: StringRecordSchema.optional(),
-});
-
-export type ScreamCliServiceConfig = z.infer<typeof ScreamCliServiceConfigSchema>;
-
 export const DuckDuckGoConfigSchema = z.object({
   enabled: z.boolean().default(true),
 });
 
 export type DuckDuckGoConfig = z.infer<typeof DuckDuckGoConfigSchema>;
 
+export const DomesticSearchConfigSchema = z.object({
+  enabled: z.boolean().default(true),
+});
+
+export type DomesticSearchConfig = z.infer<typeof DomesticSearchConfigSchema>;
+
 export const ServicesConfigSchema = z.object({
-  screamCliSearch: ScreamCliServiceConfigSchema.optional(),
-  screamCliFetch: ScreamCliServiceConfigSchema.optional(),
   duckduckgo: DuckDuckGoConfigSchema.optional(),
+  sogou: DomesticSearchConfigSchema.optional(),
+  so360: DomesticSearchConfigSchema.optional(),
+  baidu: DomesticSearchConfigSchema.optional(),
 });
 
 export type ServicesConfig = z.infer<typeof ServicesConfigSchema>;
@@ -236,12 +234,13 @@ const ThinkingConfigPatchSchema = ThinkingConfigSchema.partial();
 const PermissionConfigPatchSchema = PermissionConfigSchema.partial();
 const LoopControlPatchSchema = LoopControlSchema.partial();
 const BackgroundConfigPatchSchema = BackgroundConfigSchema.partial();
-const ScreamCliServiceConfigPatchSchema = ScreamCliServiceConfigSchema.partial();
 const DuckDuckGoConfigPatchSchema = DuckDuckGoConfigSchema.partial();
+const DomesticSearchConfigPatchSchema = DomesticSearchConfigSchema.partial();
 const ServicesConfigPatchSchema = z.object({
-  screamCliSearch: ScreamCliServiceConfigPatchSchema.optional(),
-  screamCliFetch: ScreamCliServiceConfigPatchSchema.optional(),
   duckduckgo: DuckDuckGoConfigPatchSchema.optional(),
+  sogou: DomesticSearchConfigPatchSchema.optional(),
+  so360: DomesticSearchConfigPatchSchema.optional(),
+  baidu: DomesticSearchConfigPatchSchema.optional(),
 });
 
 export const ScreamConfigPatchSchema = z

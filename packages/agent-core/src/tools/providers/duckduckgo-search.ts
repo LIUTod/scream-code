@@ -1,19 +1,22 @@
 /**
- * DuckDuckGoSearchProvider — free web search via DuckDuckGo.
+ * DuckDuckGoSearchProvider — free web search via DuckDuckGo's no-JS HTML
+ * frontend.
  *
- * Uses two complementary DuckDuckGo data sources:
- *   1. Instant Answer API (`api.duckduckgo.com`) — always available, no auth,
- *      returns instant answers and related topics as structured JSON.
- *   2. Lite HTML page (`lite.duckduckgo.com`) — returns full web search
- *      results as minimal HTML; parsed via regex. May be CAPTCHA-blocked
- *      from datacenter IPs.
+ * POSTs `q=…` to `html.duckduckgo.com/html/` with browser-like headers and
+ * parses the static results page. Two earlier approaches were dropped:
+ *   - Instant Answer API (`api.duckduckgo.com`): only returns content for
+ *     Wikipedia/Wolfram-Alpha-style topics — empty for the vast majority of
+ *     agent queries (omp #3799).
+ *   - Lite endpoint (`lite.duckduckgo.com`) with a bare request: high
+ *     bot-detection rate without a browser User-Agent.
  *
- * The provider never throws — individual search methods return an empty
- * array on failure so that a FallbackSearchProvider can continue to the
- * next provider in the chain.
+ * Hard failures (network error, non-2xx, bot-detection page) THROW so a
+ * FallbackSearchProvider can record the reason and try the next provider.
+ * An empty array means the search ran fine but matched nothing.
  */
 
 import type { WebSearchProvider, WebSearchResult } from '../builtin';
+import { withHardTimeout } from './search-timeout';
 
 // ── Options ────────────────────────────────────────────────────────────
 
@@ -22,27 +25,23 @@ export interface DuckDuckGoSearchProviderOptions {
   fetchImpl?: typeof fetch;
 }
 
-// ── DuckDuckGo API shapes ───────────────────────────────────────────────
+// ── Request ─────────────────────────────────────────────────────────────
 
-interface DuckDuckGoRelatedTopic {
-  readonly FirstURL?: string;
-  readonly Text?: string;
-  readonly Name?: string;
-  readonly Topics?: DuckDuckGoRelatedTopic[];
-}
+const DUCKDUCKGO_HTML_URL = 'https://html.duckduckgo.com/html/';
 
-interface DuckDuckGoApiResponse {
-  readonly Abstract?: string;
-  readonly AbstractText?: string;
-  readonly AbstractURL?: string;
-  readonly AbstractSource?: string;
-  readonly Heading?: string;
-  readonly RelatedTopics?: DuckDuckGoRelatedTopic[];
-}
+/**
+ * Browser-like UA so DDG serves the standard results page instead of the
+ * mobile/noscript variants, and is less likely to trip bot detection.
+ * DDG answers automation it suspects with HTTP 202 plus an anomaly modal;
+ * the body check (not the status) is the reliable signal.
+ */
+const BROWSER_USER_AGENT =
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36';
 
 // ── Implementation ─────────────────────────────────────────────────────
 
 export class DuckDuckGoSearchProvider implements WebSearchProvider {
+  readonly name = 'duckduckgo';
   private readonly fetchImpl: typeof fetch;
 
   constructor(options: DuckDuckGoSearchProviderOptions = {}) {
@@ -51,238 +50,116 @@ export class DuckDuckGoSearchProvider implements WebSearchProvider {
 
   async search(
     query: string,
-    options?: { limit?: number; includeContent?: boolean; toolCallId?: string },
+    options?: { limit?: number; includeContent?: boolean; toolCallId?: string; signal?: AbortSignal },
   ): Promise<WebSearchResult[]> {
     const limit = options?.limit ?? 5;
 
-    // 1. Try Instant Answer API first — always available, no auth, no CAPTCHA risk.
-    let results = await this.searchViaApi(query, limit);
+    const form = new URLSearchParams({ q: query, kl: 'us-en' });
+    // Match the real browser form submission (omp's template).
+    form.set('b', '');
 
-    // 2. If the API returned nothing useful, try scraping the Lite HTML page.
-    if (results.length === 0) {
-      results = await this.searchViaLite(query, limit);
+    const response = await this.fetchImpl(DUCKDUCKGO_HTML_URL, {
+      method: 'POST',
+      body: form.toString(),
+      headers: {
+        Accept:
+          'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+        'Accept-Language': 'en,en-US;q=0.9',
+        'Content-Type': 'application/x-www-form-urlencoded',
+        Referer: 'https://html.duckduckgo.com/',
+        'Upgrade-Insecure-Requests': '1',
+        'User-Agent': BROWSER_USER_AGENT,
+      },
+      signal: withHardTimeout(options?.signal),
+    });
+
+    const html = await response.text();
+    if (!response.ok && response.status !== 202) {
+      throw new Error(`DuckDuckGo request failed: HTTP ${String(response.status)}`);
+    }
+    if (isAnomalyResponse(html)) {
+      throw new Error(
+        'DuckDuckGo blocked the request with a bot-detection challenge (common from datacenter/shared-egress IPs)',
+      );
     }
 
-    return results;
-  }
-
-  // ── Instant Answer API ──────────────────────────────────────────────
-
-  /**
-   * Query the DuckDuckGo Instant Answer API.
-   *
-   * Returns up to `limit` results built from the abstract and flattened
-   * RelatedTopics. Returns `[]` on any failure (network error, non-2xx,
-   * parse failure) so callers can fall through to the next method.
-   */
-  private async searchViaApi(query: string, limit: number): Promise<WebSearchResult[]> {
-    const url = `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1`;
-    let response: Response;
-    try {
-      response = await this.fetchImpl(url);
-    } catch {
-      return [];
-    }
-
-    if (response.status !== 200) {
-      await drainBody(response);
-      return [];
-    }
-
-    let json: DuckDuckGoApiResponse;
-    try {
-      json = (await response.json()) as DuckDuckGoApiResponse;
-    } catch {
-      return [];
-    }
-
-    return this.buildApiResults(json, limit);
-  }
-
-  private buildApiResults(json: DuckDuckGoApiResponse, limit: number): WebSearchResult[] {
-    const results: WebSearchResult[] = [];
-
-    // Abstract / instant answer — always first if present.
-    if (json.AbstractText && json.AbstractURL && json.AbstractText.trim().length > 0) {
-      results.push({
-        title: json.Heading && json.Heading.trim().length > 0 ? json.Heading : json.AbstractSource ?? 'DuckDuckGo',
-        url: json.AbstractURL,
-        snippet: json.AbstractText,
-      });
-    }
-
-    // Flatten RelatedTopics hierarchically.
-    if (json.RelatedTopics && json.RelatedTopics.length > 0) {
-      const flattened = flattenRelatedTopics(json.RelatedTopics);
-      for (const topic of flattened) {
-        if (results.length >= limit) break;
-        const url = topic.FirstURL ?? '';
-        const text = topic.Text ?? '';
-        if (url === '' || text === '') continue;
-        results.push({ title: text, url, snippet: text });
-      }
-    }
-
-    return results.slice(0, limit);
-  }
-
-  // ── Lite HTML scraping ──────────────────────────────────────────────
-
-  /**
-   * Scrape DuckDuckGo Lite search results.
-   *
-   * Lite is a minimal HTML table with no JavaScript, designed for basic
-   * browsers. It may return a CAPTCHA page from datacenter IPs — in that
-   * case we return `[]` so the caller can fall through.
-   */
-  private async searchViaLite(query: string, limit: number): Promise<WebSearchResult[]> {
-    const url = `https://lite.duckduckgo.com/lite/?q=${encodeURIComponent(query)}`;
-    let response: Response;
-    try {
-      response = await this.fetchImpl(url);
-    } catch {
-      return [];
-    }
-
-    if (response.status !== 200) {
-      await drainBody(response);
-      return [];
-    }
-
-    let html: string;
-    try {
-      html = await response.text();
-    } catch {
-      return [];
-    }
-
-    // Detect CAPTCHA / bot-detection page.
-    if (isCaptchaPage(html)) return [];
-
-    return parseLiteResults(html, limit);
+    return parseHtmlResults(html).slice(0, limit);
   }
 }
 
-// ── RelatedTopics flattening ───────────────────────────────────────────
+// ── Bot-detection ────────────────────────────────────────────────────────
 
-/**
- * Recursively flatten DuckDuckGo RelatedTopics.
- *
- * The API nests topics in two ways:
- *   - A direct topic has `FirstURL` + `Text` (may lack `Topics`).
- *   - A category group has a `Name` and nested `Topics[]`.
- * We walk both shapes, returning a flat list of leaf topics.
- */
-function flattenRelatedTopics(
-  topics: readonly DuckDuckGoRelatedTopic[],
-): DuckDuckGoRelatedTopic[] {
-  const out: DuckDuckGoRelatedTopic[] = [];
-  for (const topic of topics) {
-    if (topic.Topics && topic.Topics.length > 0) {
-      // Category group — recurse into its topics.
-      out.push(...flattenRelatedTopics(topic.Topics));
-    } else if (topic.FirstURL) {
-      // Direct topic entry.
-      out.push(topic);
-    }
-  }
-  return out;
+/** `true` when DDG returned the bot-challenge modal instead of results. */
+function isAnomalyResponse(html: string): boolean {
+  return html.includes('anomaly-modal') || html.includes('anomaly.js');
 }
 
-// ── CAPTCHA detection ──────────────────────────────────────────────────
+// ── HTML parsing ─────────────────────────────────────────────────────────
 
 /**
- * Return true if the HTML looks like a DuckDuckGo bot-detection / CAPTCHA page.
+ * Each result lives in a `<div class="result …">` container with
+ * `<a class="result__a">` for the title link and an optional
+ * `<a|div|span class="result__snippet">` sibling for the preview text.
+ * Sponsored rows, missing snippets, and the pagination row are tolerated.
  */
-function isCaptchaPage(html: string): boolean {
-  return (
-    html.includes('anomaly-modal') ||
-    html.includes('challenge-form') ||
-    html.includes('g-recaptcha') ||
-    html.includes('data-testid="anomaly-modal"')
-  );
-}
+const RESULT_BLOCK_RE =
+  /<div\b[^>]*\bclass="[^"]*\bresult\b[^"]*"[^>]*>([\s\S]*?)(?=<div\b[^>]*\bclass="[^"]*\bresult\b|<div\b[^>]*\bclass="[^"]*\bnav-link\b|$)/g;
+const RESULT_TITLE_RE = /<a\b[^>]*\bclass="[^"]*\bresult__a\b[^"]*"[^>]*\bhref="([^"]+)"[^>]*>([\s\S]*?)<\/a>/;
+const RESULT_SNIPPET_RE =
+  /<(?:a|div|span)\b[^>]*\bclass="[^"]*\bresult__snippet\b[^"]*"[^>]*>([\s\S]*?)<\/(?:a|div|span)>/;
 
-// ── Lite HTML parsing ──────────────────────────────────────────────────
-
-/**
- * DuckDuckGo Lite result rows are inside `<tr>` blocks with a predictable
- * anchor shape. This regex extracts the `<a class="result-link"...>` block
- * and the following snippet text from the same row.
- *
- * The Lite markup is intentionally minimal (no JS, no CSS classes beyond a
- * handful of utility names), so a DOM parser is unnecessary overhead.
- */
-const LITE_RESULT_RE =
-  /<a\s[^>]*?\bclass\s*=\s*["'][^"']*result-link[^"']*["'][^>]*?\bhref\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
-
-const LITE_SNIPPET_RE =
-  /<td\s[^>]*?\bclass\s*=\s*["'][^"']*result-snippet[^"']*["'][^>]*>([\s\S]*?)<\/td>/gi;
-
-/** Strip HTML tags and decode common HTML entities. */
-function stripHtmlAndDecode(text: string): string {
-  const stripped = text.replaceAll(/<[^>]*>/g, '');
-  return stripped
-    .replaceAll('&amp;', '&')
-    .replaceAll('&lt;', '<')
-    .replaceAll('&gt;', '>')
-    .replaceAll('&quot;', '"')
-    .replaceAll('&#x27;', "'")
-    .replaceAll('&#39;', "'")
-    .replaceAll('&nbsp;', ' ')
+/** Strip inline tags (DDG wraps query terms in `<b>`) and decode entities. */
+function decodeHtmlText(value: string): string {
+  return value
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&#(\d+);/g, (_, code: string) => String.fromCharCode(Number(code)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, code: string) => String.fromCharCode(Number.parseInt(code, 16)))
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/\s+/g, ' ')
     .trim();
 }
 
-/** Unwrap a DuckDuckGo redirect URL to the real target if possible. */
-function unwrapDdgRedirect(url: string): string {
-  // DDG wraps external links as //duckduckgo.com/l/?uddg=<encoded_url>&rut=...
-  const uddgMatch = url.match(/[?&]uddg=([^&]+)/);
-  if (uddgMatch?.[1]) {
+/**
+ * Resolve a DDG result href to the underlying target URL. DDG routes
+ * outbound clicks through `//duckduckgo.com/l/?uddg=<encoded>`; handles
+ * redirect wrappers, protocol-relative links, and plain absolute URLs.
+ */
+function unwrapResultUrl(href: string): string | undefined {
+  if (href === '') return undefined;
+  const decoded = href.replace(/&amp;/gi, '&');
+  const wrapMatch = decoded.match(/[?&]uddg=([^&]+)/);
+  if (wrapMatch?.[1] !== undefined) {
     try {
-      return decodeURIComponent(uddgMatch[1]);
+      return decodeURIComponent(wrapMatch[1]);
     } catch {
-      return url;
+      return undefined;
     }
   }
-  return url;
+  if (decoded.startsWith('//')) return `https:${decoded}`;
+  if (decoded.startsWith('http://') || decoded.startsWith('https://')) return decoded;
+  return undefined;
 }
 
-function parseLiteResults(html: string, limit: number): WebSearchResult[] {
+function parseHtmlResults(html: string): WebSearchResult[] {
   const results: WebSearchResult[] = [];
-
-  // Extract result-link `<a>` blocks.
-  const linkMatches = html.matchAll(LITE_RESULT_RE);
-  for (const match of linkMatches) {
-    if (results.length >= limit) break;
-    const href = unwrapDdgRedirect(match[1] ?? '');
-    const title = stripHtmlAndDecode(match[2] ?? '');
-    if (href === '' || title === '') continue;
-    results.push({ title, url: href, snippet: title });
+  const seen = new Set<string>();
+  for (const match of html.matchAll(RESULT_BLOCK_RE)) {
+    const block = match[1] ?? '';
+    const title = RESULT_TITLE_RE.exec(block);
+    if (title === null) continue;
+    const url = unwrapResultUrl(title[1] ?? '');
+    if (url === undefined || seen.has(url)) continue;
+    const titleText = decodeHtmlText(title[2] ?? '');
+    if (titleText === '') continue;
+    seen.add(url);
+    const snippet = RESULT_SNIPPET_RE.exec(block);
+    const snippetText = snippet !== null ? decodeHtmlText(snippet[1] ?? '') : '';
+    results.push({ title: titleText, url, snippet: snippetText !== '' ? snippetText : titleText });
   }
-
-  // Enrich with snippets from result-snippet `<td>` blocks if available.
-  const snippetMatches = html.matchAll(LITE_SNIPPET_RE);
-  let snippetIndex = 0;
-  for (const match of snippetMatches) {
-    if (snippetIndex >= results.length) break;
-    const snippet = stripHtmlAndDecode(match[1] ?? '');
-    const entry = results[snippetIndex];
-    if (entry && snippet.length > 0) {
-      entry.snippet = snippet;
-    }
-    snippetIndex++;
-  }
-
   return results;
-}
-
-// ── Helpers ────────────────────────────────────────────────────────────
-
-/** Drain a response body so the connection can be reused. */
-async function drainBody(response: Response): Promise<void> {
-  try {
-    await response.text();
-  } catch {
-    // ignore
-  }
 }

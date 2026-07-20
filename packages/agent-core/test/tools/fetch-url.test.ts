@@ -12,7 +12,6 @@ import {
   HttpFetchError,
   type UrlFetcher,
 } from '../../src/tools/builtin/web/fetch-url';
-import { ScreamCliFetchURLProvider } from '../../src/tools/providers/scream-cli-fetch-url';
 import { toolContentString } from './fixtures/fake-jian';
 import { executeTool } from './fixtures/execute-tool';
 
@@ -258,31 +257,5 @@ describe('FetchURLTool', () => {
     // "full response body" phrasing).
     const message = (result as { message?: string }).message ?? '';
     expect(message).toContain('full response body');
-  });
-});
-
-describe('ScreamCliFetchURLProvider', () => {
-  it('does not force-refresh request auth after a 401 response', async () => {
-    const getAccessToken = vi.fn().mockResolvedValue('fresh-token');
-    const localFallback = fakeFetcher('fallback content');
-    const fetchImpl = vi
-      .fn<typeof fetch>()
-      .mockResolvedValue(new Response('unauthorized', { status: 401 }));
-    const provider = new ScreamCliFetchURLProvider({
-      tokenProvider: { getAccessToken },
-      baseUrl: 'https://fetch.example/v1',
-      localFallback,
-      fetchImpl,
-    });
-
-    await expect(provider.fetch('https://example.com/page')).resolves.toEqual({
-      content: 'fallback content',
-      kind: 'extracted',
-    });
-
-    expect(getAccessToken).toHaveBeenCalledTimes(1);
-    expect(getAccessToken).toHaveBeenCalledWith();
-    expect(fetchImpl).toHaveBeenCalledTimes(1);
-    expect(localFallback.fetch).toHaveBeenCalledWith('https://example.com/page', {});
   });
 });
