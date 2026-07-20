@@ -254,3 +254,82 @@ describe('CustomEditor think label', () => {
     expect(out).not.toContain('think');
   });
 });
+
+describe('CustomEditor permission mode badge', () => {
+  function topBorder(editor: CustomEditor, width = 40): string {
+    const lines = editor.render(width);
+    return lines[0] ?? '';
+  }
+
+  it('always shows the mode badge at the top-left of the border', () => {
+    const editor = makeEditor();
+    editor.permissionMode = 'manual';
+
+    const out = topBorder(editor);
+
+    expect(out.startsWith('──')).toBe(true);
+    expect(out).toContain('manual');
+  });
+
+  it('shows auto and yolo modes with their own labels', () => {
+    const editor = makeEditor();
+
+    editor.permissionMode = 'auto';
+    expect(topBorder(editor)).toContain('auto');
+
+    editor.permissionMode = 'yolo';
+    expect(topBorder(editor)).toContain('yolo');
+  });
+
+  it('composes the mode badge on the left and the think badge on the right', () => {
+    const editor = makeEditor();
+    editor.permissionMode = 'auto';
+    editor.thinking = true;
+    editor.thinkingLevel = 'high';
+
+    const out = topBorder(editor, 60);
+    const modeIdx = out.indexOf('auto');
+    const thinkIdx = out.indexOf('Think high');
+
+    expect(modeIdx).toBeGreaterThanOrEqual(0);
+    expect(thinkIdx).toBeGreaterThan(modeIdx);
+  });
+
+  it('keeps the scroll indicator instead of badges when the editor is scrolled', () => {
+    const editor = makeEditor();
+    editor.permissionMode = 'auto';
+    editor.thinking = true;
+    // Overflow the visible window: the cursor sits on the last line, so
+    // pi-tui renders "─── ↑ N more ───" as the top border, and the
+    // indicator must win over the badges.
+    for (let i = 0; i < 30; i++) {
+      editor.handleInput('\n');
+    }
+
+    const out = topBorder(editor);
+
+    expect(out).toContain('↑');
+    expect(out).not.toContain('auto');
+  });
+
+  it('drops the mode badge on very narrow terminals', () => {
+    const editor = makeEditor();
+    editor.permissionMode = 'auto';
+
+    const out = topBorder(editor, 8);
+
+    expect(out).not.toContain('auto');
+  });
+
+  it('inserts no extra rows — the box stays border/input/border', () => {
+    const editor = makeEditor();
+    editor.handleInput('hello');
+
+    const lines = editor.render(40);
+
+    expect(lines.length).toBe(3);
+    expect(lines[0]).toContain('─');
+    expect(lines[1]).toContain('hello');
+    expect(lines[2]).toMatch(/^─+$/);
+  });
+});

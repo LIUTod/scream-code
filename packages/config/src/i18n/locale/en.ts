@@ -1059,19 +1059,9 @@ export const en: Record<string, string> = {
   // ─── Config command ────────────
   'config.plan_cleared': 'Plan cleared',
   'config.yolo_already_on': 'YES mode is already on',
-  'config.yolo_on': 'YES mode: on',
-  'config.yolo_on_desc': 'Workspace tools auto-approved.',
   'config.yolo_already_off': 'YES mode is already off',
-  'config.yolo_off': 'YES mode: off',
-  'config.yolo_toggle_on': 'YES mode: on',
-  'config.yolo_toggle_on_desc': 'Workspace tools have been auto-approved.',
   'config.auto_already_on': 'Auto mode is already on',
-  'config.auto_on': 'Auto mode: on',
-  'config.auto_on_desc': 'Tools auto-approved. Agent will not ask questions.',
   'config.auto_already_off': 'Auto mode is already off',
-  'config.auto_off': 'Auto mode: off',
-  'config.auto_toggle_on': 'Auto mode: on',
-  'config.auto_toggle_on_desc': 'Tools auto-approved. Agent will not ask questions.',
 
   // ─── Settings selector ─────────
   'settings.title': 'Settings',

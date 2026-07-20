@@ -154,7 +154,6 @@ export async function handleYoloCommand(host: SlashCommandHost, args: string): P
     }
     await session.setPermission('yolo');
     host.setAppState({ permissionMode: 'yolo' });
-    host.showNotice(t('config.yolo_on'), t('config.yolo_on_desc'));
     return;
   }
 
@@ -165,7 +164,6 @@ export async function handleYoloCommand(host: SlashCommandHost, args: string): P
     }
     await session.setPermission('manual');
     host.setAppState({ permissionMode: 'manual' });
-    host.showNotice(t('config.yolo_off'));
     return;
   }
 
@@ -173,11 +171,9 @@ export async function handleYoloCommand(host: SlashCommandHost, args: string): P
   if (currentMode === 'yolo') {
     await session.setPermission('manual');
     host.setAppState({ permissionMode: 'manual' });
-    host.showNotice(t('config.yolo_off'));
   } else {
     await session.setPermission('yolo');
     host.setAppState({ permissionMode: 'yolo' });
-    host.showNotice(t('config.yolo_toggle_on'), t('config.yolo_toggle_on_desc'));
   }
 }
 
@@ -198,7 +194,6 @@ export async function handleAutoCommand(host: SlashCommandHost, args: string): P
     }
     await session.setPermission('auto');
     host.setAppState({ permissionMode: 'auto' });
-    host.showNotice(t('config.auto_on'), t('config.auto_on_desc'));
     return;
   }
 
@@ -209,7 +204,6 @@ export async function handleAutoCommand(host: SlashCommandHost, args: string): P
     }
     await session.setPermission('manual');
     host.setAppState({ permissionMode: 'manual' });
-    host.showNotice(t('config.auto_off'));
     return;
   }
 
@@ -217,11 +211,9 @@ export async function handleAutoCommand(host: SlashCommandHost, args: string): P
   if (currentMode === 'auto') {
     await session.setPermission('manual');
     host.setAppState({ permissionMode: 'manual' });
-    host.showNotice(t('config.auto_off'));
   } else {
     await session.setPermission('auto');
     host.setAppState({ permissionMode: 'auto' });
-    host.showNotice(t('config.auto_toggle_on'), t('config.auto_toggle_on_desc'));
   }
 }
 

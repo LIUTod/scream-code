@@ -3,7 +3,7 @@
  */
 
 import { Editor, isKeyRelease, matchesKey, Key, visibleWidth, type TUI } from '@liutod-scream/pi-tui';
-import type { ThinkingEffort } from '@scream-code/scream-code-sdk';
+import type { PermissionMode, ThinkingEffort } from '@scream-code/scream-code-sdk';
 import chalk from 'chalk';
 
 import type { ColorPalette } from '#/tui/theme/colors';
@@ -220,6 +220,8 @@ export class CustomEditor extends Editor {
   thinking = false;
   /** Current thinking effort level (e.g. low, medium, high). Used to annotate the think label. */
   thinkingLevel: ThinkingEffort = 'off';
+  /** Current permission mode — always shown as a badge at the top-left of the input box border. */
+  permissionMode: PermissionMode = 'manual';
   /** Current border colour hex — kept in sync with borderColor by the host. */
   borderHex = '';
 
@@ -306,9 +308,13 @@ export class CustomEditor extends Editor {
         lines[firstContentIdx] = withPrompt;
       }
     }
-    if (this.thinking) {
-      injectThinkLabel(lines, width, this.thinkingLevel, this.borderColor ?? ((s: string) => s), this.borderHex);
-    }
+    injectBorderBadges(lines, width, {
+      mode: this.permissionMode,
+      thinking: this.thinking,
+      thinkingLevel: this.thinkingLevel,
+      paint: this.borderColor ?? ((s: string) => s),
+      borderHex: this.borderHex,
+    });
     return lines;
   }
 
@@ -539,6 +545,7 @@ export function wrapWithSideBorders(
 }
 
 const THINK_LABEL_MIN_WIDTH = 14;
+const MODE_BADGE_MIN_WIDTH = 10;
 
 function isLightBg(hex: string): boolean {
   const r = parseInt(hex.slice(1, 3), 16);
@@ -548,36 +555,62 @@ function isLightBg(hex: string): boolean {
   return luminance > 0.5;
 }
 
+function makeBadge(label: string, bgHex: string): string {
+  return bgHex
+    ? chalk.bgHex(bgHex).hex(isLightBg(bgHex) ? '#000000' : '#FFFFFF')(label)
+    : chalk.bgBlack.white(label);
+}
+
+interface BorderBadgeOptions {
+  mode: PermissionMode;
+  thinking: boolean;
+  thinkingLevel: ThinkingEffort;
+  paint: (s: string) => string;
+  borderHex: string;
+}
+
 /**
- * Embed a small "think" badge into the top border line of the editor.
- * The label only appears when the active model has thinking enabled.
- * Works with pi-tui's flat two-line design (no side borders).
- *
- * The badge uses the border colour as background with black text for
- * maximum contrast against the bright border colours (yellow-green,
- * cyan, amber) used across themes.
+ * Compose the editor's top border line with up to two badges: the
+ * permission mode badge at the left (always shown) and the think badge at
+ * the right (only when thinking is enabled). Each badge is a solid colour
+ * block with black/white text picked by background luminance. When the
+ * editor is scrolled, pi-tui's `↑ N more` indicator keeps the line — it
+ * signals hidden content, which matters more than the badges. On narrow
+ * terminals the think badge drops first, then the mode badge.
  */
-function injectThinkLabel(
-  lines: string[],
-  width: number,
-  thinkingLevel: ThinkingEffort,
-  paint: (s: string) => string,
-  borderHex: string,
-): void {
-  if (width < THINK_LABEL_MIN_WIDTH) return;
+function injectBorderBadges(lines: string[], width: number, opts: BorderBadgeOptions): void {
   const topIdx = lines.findIndex((line) => {
     const plain = stripSgr(line);
     return plain.length > 0 && plain[0] === '─';
   });
   if (topIdx === -1) return;
+  // Scrolled editor: keep the "↑ N more" indicator instead of the badges.
+  if (stripSgr(lines[topIdx]!).includes('↑')) return;
 
-  const label = thinkingLevel !== 'off' ? ` Think ${thinkingLevel} ` : ' Think ';
-  const badge = borderHex
-    ? chalk.bgHex(borderHex).hex(isLightBg(borderHex) ? '#000000' : '#FFFFFF')(label)
-    : chalk.bgBlack.white(label);
-  const badgeVis = visibleWidth(badge);
-  const leftDashCount = width - 1 - badgeVis;
-  if (leftDashCount < 1) return;
+  const { paint } = opts;
+  let left = '';
+  let right = paint('─');
 
-  lines[topIdx] = paint('─'.repeat(leftDashCount)) + badge + paint('─');
+  if (width >= MODE_BADGE_MIN_WIDTH) {
+    // Mode labels stay in English across locales: they are mode names, not
+    // prose. The badge takes the border's own colour (fluorescent green by
+    // default) so it always matches the input box; bold keeps it readable
+    // against the surrounding dashes.
+    const badgeText = ` ${opts.mode} `;
+    left =
+      paint('──') + (opts.borderHex ? chalk.hex(opts.borderHex).bold(badgeText) : paint(badgeText));
+  }
+  if (opts.thinking && width >= THINK_LABEL_MIN_WIDTH) {
+    const label = opts.thinkingLevel !== 'off' ? ` Think ${opts.thinkingLevel} ` : ' Think ';
+    right = makeBadge(label, opts.borderHex) + paint('─');
+  }
+
+  const fill = width - visibleWidth(left) - visibleWidth(right);
+  if (fill < 0) {
+    // Both badges together overflow: keep the mode badge only.
+    const modeOnlyFill = width - visibleWidth(left) - 1;
+    lines[topIdx] = modeOnlyFill >= 0 ? left + paint('─'.repeat(modeOnlyFill)) + paint('─') : paint('─'.repeat(width));
+    return;
+  }
+  lines[topIdx] = left + paint('─'.repeat(fill)) + right;
 }

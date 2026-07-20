@@ -1059,19 +1059,9 @@ export const zh: Record<string, string> = {
   // ─── Config command ────────────
   'config.plan_cleared': '计划已清除',
   'config.yolo_already_on': 'YES 模式已开启',
-  'config.yolo_on': 'YES 模式：开启',
-  'config.yolo_on_desc': '工作区工具自动批准。',
   'config.yolo_already_off': 'YES 模式已关闭',
-  'config.yolo_off': 'YES 模式：关闭',
-  'config.yolo_toggle_on': 'YES 模式：开启',
-  'config.yolo_toggle_on_desc': '工作区工具已自动批准。',
   'config.auto_already_on': '自动模式已开启',
-  'config.auto_on': '自动模式：开启',
-  'config.auto_on_desc': '工具自动批准。代理不会提问。',
   'config.auto_already_off': '自动模式已关闭',
-  'config.auto_off': '自动模式：关闭',
-  'config.auto_toggle_on': '自动模式：开启',
-  'config.auto_toggle_on_desc': '工具自动批准。代理不会提问。',
 
   // ─── Settings selector ─────────
   'settings.title': '设置',

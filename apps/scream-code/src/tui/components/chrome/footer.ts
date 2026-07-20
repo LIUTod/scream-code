@@ -344,9 +344,10 @@ export class FooterComponent implements Component {
     const state = this.state;
 
     // ── Line 1: mode badges + model + [N task(s) running] + [N agent(s) running] + cwd + git + hints ──
+    // Permission mode is NOT rendered here — it lives in the editor's top
+    // border (CustomEditor permissionMode badge), next to the input it
+    // governs.
     const left: string[] = [];
-    if (state.permissionMode === 'auto') left.push(chalk.hex(colors.warning).bold(t('badge.auto')));
-    if (state.permissionMode === 'yolo') left.push(chalk.hex(colors.warning).bold(t('badge.yes')));
     if (state.planMode !== 'off') {
       const isFusion = state.planMode === 'fusionplan';
       left.push(chalk.hex(isFusion ? colors.fusionPlanMode : colors.planMode).bold(isFusion ? t('badge.fusion') : t('badge.plan')));

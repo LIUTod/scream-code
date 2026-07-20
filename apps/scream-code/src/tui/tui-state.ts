@@ -155,6 +155,7 @@ export function createTUIState(options: ScreamTUIOptions): TUIState {
   const editor = new CustomEditor(ui, theme.colors);
   editor.thinking = initialAppState.thinkingLevel !== 'off';
   editor.thinkingLevel = initialAppState.thinkingLevel;
+  editor.permissionMode = initialAppState.permissionMode ?? 'manual';
   const footer = new FooterComponent({ ...initialAppState }, theme.colors, ui, () => {
     ui.requestRender();
   });
