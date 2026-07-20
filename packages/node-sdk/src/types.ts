@@ -28,7 +28,6 @@ export type {
   McpServerInfo,
   McpStartupMetrics,
   ModelAlias,
-  ScreamCliServiceConfig,
   OAuthRef,
   PluginGithubMetadata,
   PluginGithubRef,

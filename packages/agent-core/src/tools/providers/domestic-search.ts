@@ -101,8 +101,8 @@ async function searchEngine(
     const titleText = decodeHtmlText(title[2] ?? '');
     if (titleText === '') continue;
     seen.add(url);
-    const snippetMatch = spec.snippetRe?.exec(block);
-    const snippetText = snippetMatch != null ? decodeHtmlText(snippetMatch[1] ?? '') : '';
+    const snippetMatch = spec.snippetRe === undefined ? null : spec.snippetRe.exec(block);
+    const snippetText = snippetMatch !== null ? decodeHtmlText(snippetMatch[1] ?? '') : '';
     results.push({ title: titleText, url, snippet: snippetText !== '' ? snippetText : titleText });
   }
   return results;
