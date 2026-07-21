@@ -21,7 +21,54 @@ import { Readability } from '@mozilla/readability';
 import { parseHTML as rawParseHTML } from 'linkedom';
 
 import { HttpFetchError, type UrlFetcher, type UrlFetchResult } from '../builtin';
+import { convertBufferWithMarkit } from '../../utils/markit';
 import { FetchCache } from './fetch-cache';
+
+/** Document types the markit engine converts to markdown. */
+const CONVERTIBLE_EXTENSIONS = new Set(['.pdf', '.docx', '.pptx', '.xlsx', '.epub']);
+const CONVERTIBLE_MIME_PREFIXES: ReadonlyArray<readonly [string, string]> = [
+  ['application/pdf', '.pdf'],
+  ['application/x-pdf', '.pdf'],
+  ['application/vnd.openxmlformats-officedocument.wordprocessingml.document', '.docx'],
+  ['application/vnd.openxmlformats-officedocument.presentationml.presentation', '.pptx'],
+  ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', '.xlsx'],
+  ['application/epub+zip', '.epub'],
+];
+
+/**
+ * Decide whether a response is a convertible document, from Content-Type
+ * first and the URL path extension as fallback. `confident: true` means the
+ * Content-Type itself declared a document type (conversion failure is a real
+ * error); `confident: false` means only the URL extension matched (an HTML
+ * page at a .pdf URL must fall back to normal extraction).
+ */
+function resolveDocumentExtension(
+  url: string,
+  contentType: string,
+): { extension: string; confident: boolean } | undefined {
+  for (const [prefix, extension] of CONVERTIBLE_MIME_PREFIXES) {
+    if (contentType.startsWith(prefix)) return { extension, confident: true };
+  }
+  // The URL extension is only a guess — never override a declared text type
+  // (an HTML viewer page at a .pdf URL is not a document).
+  if (contentType.length > 0 && !contentType.startsWith('application/octet-stream') && !contentType.startsWith('binary/octet-stream')) {
+    return undefined;
+  }
+  try {
+    const pathname = new URL(url).pathname.toLowerCase();
+    const dot = pathname.lastIndexOf('.');
+    if (dot >= 0) {
+      const extension = pathname.slice(dot);
+      if (CONVERTIBLE_EXTENSIONS.has(extension)) return { extension, confident: false };
+    }
+  } catch {
+    // Malformed URL — the fetch itself already succeeded, ignore.
+  }
+  return undefined;
+}
+
+/** Hard ceiling for one markit conversion (omp uses 20s; allow slow hosts). */
+const CONVERSION_TIMEOUT_MS = 30_000;
 
 export interface LocalFetchURLProviderOptions {
   readonly userAgent?: string;
@@ -240,6 +287,16 @@ export class LocalFetchURLProvider implements UrlFetcher {
       }
     }
 
+    const contentType = (response.headers.get('content-type') ?? '').toLowerCase();
+
+    // Convertible documents (PDF/Office) take the markit path: binary fetch
+    // capped by maxBytes, then document → markdown conversion. Detect before
+    // the text path — `response.text()` on a PDF is binary garbage.
+    const documentExtension = resolveDocumentExtension(url, contentType);
+    if (documentExtension !== undefined) {
+      return this.fetchDocument(response, documentExtension.extension, contentType, documentExtension.confident);
+    }
+
     const body = await response.text();
 
     // Servers may omit content-length — measure again defensively.
@@ -250,12 +307,51 @@ export class LocalFetchURLProvider implements UrlFetcher {
       );
     }
 
-    const contentType = (response.headers.get('content-type') ?? '').toLowerCase();
+    return this.extractTextResponse(body, contentType);
+  }
+
+  /** Text-path extraction shared by the normal flow and the document fallback. */
+  private extractTextResponse(body: string, contentType: string): UrlFetchResult {
     if (contentType.startsWith('text/plain') || contentType.startsWith('text/markdown')) {
       return { content: body, kind: 'passthrough' };
     }
-
     return { content: this.extractMainContent(body), kind: 'extracted' };
+  }
+
+  /**
+   * Fetch a convertible document (PDF/Office) as binary and convert it to
+   * markdown via the markit engine (lazy-loaded, cached on disk).
+   *
+   * `confident` distinguishes detection strength: a convertible Content-Type
+   * means conversion failure is a real error (corrupt document), while an
+   * extension-only guess (e.g. an HTML viewer page at a .pdf URL) falls back
+   * to the normal text extraction path instead of erroring (omp's behavior).
+   */
+  private async fetchDocument(
+    response: Response,
+    extension: string,
+    contentType: string,
+    confident: boolean,
+  ): Promise<UrlFetchResult> {
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    if (bytes.byteLength > this.maxBytes) {
+      throw new Error(
+        `Response body too large: ${String(bytes.byteLength)} bytes exceeds maxBytes (${String(this.maxBytes)}).`,
+      );
+    }
+
+    const converted = await convertBufferWithMarkit(
+      bytes,
+      extension,
+      AbortSignal.timeout(CONVERSION_TIMEOUT_MS),
+    );
+    if (!converted.ok) {
+      if (!confident) {
+        return this.extractTextResponse(new TextDecoder().decode(bytes), contentType);
+      }
+      throw new Error(`Document conversion failed (${extension}): ${converted.error ?? 'unknown error'}`);
+    }
+    return { content: converted.content, kind: 'extracted' };
   }
 
   private extractMainContent(html: string): string {

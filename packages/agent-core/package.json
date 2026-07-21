@@ -52,8 +52,12 @@
     "@scream-code/memory": "workspace:*",
     "ajv": "^8.18.0",
     "ajv-formats": "^3.0.1",
+    "fast-xml-parser": "^5.10.1",
+    "fflate": "^0.8.3",
     "js-yaml": "^4.1.1",
     "linkedom": "^0.18.12",
+    "mammoth": "^1.12.0",
+    "mupdf": "^1.28.0",
     "nunjucks": "^3.2.4",
     "open": "^10.2.0",
     "pathe": "^2.0.3",
@@ -63,6 +67,8 @@
     "retry": "0.13.1",
     "smol-toml": "^1.6.1",
     "tar": "^7.5.13",
+    "turndown": "^7.2.4",
+    "turndown-plugin-gfm": "^1.0.2",
     "yauzl": "^3.3.0",
     "yazl": "^3.3.1",
     "zod": "catalog:"
@@ -75,6 +81,7 @@
     "@types/regexp.escape": "^2.0.0",
     "@types/retry": "0.12.0",
     "@types/tar": "^7.0.87",
+    "@types/turndown": "^5.0.6",
     "@types/yauzl": "^2.10.3",
     "@types/yazl": "^2.4.6"
   }
