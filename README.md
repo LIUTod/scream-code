@@ -213,7 +213,7 @@ Thanks to these excellent projects for inspiration: pi, pi-tui, gork, kimicli, G
   <a href="#readme"><img src="https://img.shields.io/badge/README-English-blue?style=for-the-badge" alt="English README"></a>
 </p>
 
-Scream Code 是一款省心的可在本地部署的全能 AI Agent 助手。你无需硬记代码，无任何远程行为，高安全，用户直接用中/英文下达指令，vibe coding、写代码、查论文、改文件、清理电脑、查资料、制作研报、搜全网信息……你动嘴，它动手！ 桌面级app下载去这.https://scream.chat/
+Scream Code 是一款省心的可在本地部署的全能 AI Agent 助手。你无需硬记代码，无任何远程行为，高安全，用户直接用中/英文下达指令，vibe coding、写代码、查论文、改文件、清理电脑、查资料、制作研报、搜全网信息……你动嘴，它动手！ 
 
 ---
 
