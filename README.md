@@ -24,7 +24,7 @@
 
 ---
 
-Scream Code is a hassle-free, locally deployable, all-in-one AI Agent assistant. No remote calls, high security — just tell it what you need in natural language (Chinese or English). Vibe coding, write code, search papers, edit files, clean your machine, research, generate reports, search the web... You speak, it acts! Desktop App Download You Can GOOOO！！[scream.chat](https://scream.chat/)
+Scream Code is a hassle-free, locally deployable, all-in-one AI Agent assistant. No remote calls, high security — just tell it what you need in natural language (Chinese or English). Vibe coding, write code, search papers, edit files, clean your machine, research, generate reports, search the web... You speak, it acts! Desktop App Download You Can GOOOO！！[scream.chat](https://scream.chat/) （There might be a bug.）
 
 ---
 
