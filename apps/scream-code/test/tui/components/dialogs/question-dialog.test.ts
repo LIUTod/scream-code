@@ -1,6 +1,6 @@
 import { CURSOR_MARKER } from '@liutod-scream/pi-tui';
 import chalk from 'chalk';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { QuestionDialogComponent } from '#/tui/components/dialogs/question-dialog';
 import type { PendingQuestion } from '#/tui/reverse-rpc/types';
@@ -222,7 +222,7 @@ describe('QuestionDialogComponent', () => {
 
     dialog.handleInput('3');
     let out = strip(dialog.render(80).join('\n'));
-    expect(out).toContain('→ [3] Custom:');
+    expect(out).toContain('█ 3. Custom:');
     expect(out).not.toContain('Type your own answer');
 
     dialog.handleInput('H');
@@ -295,8 +295,8 @@ describe('QuestionDialogComponent', () => {
     dialog.handleInput('\u001B[D');
 
     const out = dialog.render(80).join('\n');
-    expect(out).toContain(chalk.hex(darkColors.success).bold('  → [1] A'));
-    expect(out).not.toContain(chalk.hex(darkColors.primary)('  → [1] A'));
+    expect(out).toContain(chalk.hex(darkColors.success).bold(`  ${chalk.hex(darkColors.primary)('█')} 1. A`));
+    expect(out).not.toContain('→ [1] A');
   });
 
   it('stretches the border to the full available width', () => {
@@ -356,7 +356,7 @@ describe('QuestionDialogComponent', () => {
     const { dialog } = makeDialog(pending);
 
     const out = dialog.render(80).join('\n');
-    expect(out).toContain(chalk.bgHex(darkColors.primary).hex(darkColors.text).bold(' First '));
+    expect(out).toContain(chalk.bgHex(darkColors.primary).hex('#000000').bold(' █ First '));
     expect(out).not.toContain('(■) First');
   });
 
@@ -533,4 +533,54 @@ describe('QuestionDialogComponent', () => {
     });
   });
 
+});
+
+describe('QuestionDialogComponent — wizard pulse', () => {
+  const pending = () => makePending([
+    {
+      question: 'Pick one?',
+      multi_select: false,
+      options: [{ label: 'A' }, { label: 'B' }],
+    },
+  ]);
+
+  it('advances the pixel frame on the timer and requests component-scoped renders', () => {
+    vi.useFakeTimers();
+    try {
+      const requestComponentRender = vi.fn();
+      const ui = { requestComponentRender } as never;
+      const dialog = new QuestionDialogComponent(pending(), () => {}, darkColors, 6, undefined, undefined, ui);
+
+      const first = strip(dialog.render(80).join('\n'));
+      expect(first).toContain('█ 1. A');
+
+      vi.advanceTimersByTime(250); // 2 frames: █ → ▓ → ▒
+      const pulsed = strip(dialog.render(80).join('\n'));
+      expect(pulsed).toContain('▒ 1. A');
+      expect(requestComponentRender).toHaveBeenCalledWith(dialog);
+
+      dialog.stop();
+      vi.clearAllTimers();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('stops the pulse on submit and on Esc (no ghost timer)', () => {
+    vi.useFakeTimers();
+    try {
+      const ui = { requestComponentRender: vi.fn() } as never;
+
+      const submitted = new QuestionDialogComponent(pending(), () => {}, darkColors, 6, undefined, undefined, ui);
+      submitted.handleInput('\r'); // answer → auto-advance to submit tab
+      submitted.handleInput('\r'); // submit
+      expect(vi.getTimerCount()).toBe(0);
+
+      const cancelled = new QuestionDialogComponent(pending(), () => {}, darkColors, 6, undefined, undefined, ui);
+      cancelled.handleInput('');
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

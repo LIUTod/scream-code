@@ -12,6 +12,7 @@ import {
   Key,
   decodeKittyPrintable,
   type Focusable,
+  type TUI,
   truncateToWidth,
   visibleWidth,
   wrapTextWithAnsi,
@@ -19,12 +20,13 @@ import {
 import chalk from 'chalk';
 import { t } from '@scream-code/config';
 
+import { PIXEL_PULSE_FRAMES, PIXEL_PULSE_INTERVAL_MS } from '#/tui/constant/rendering';
 import type {
   PendingQuestion,
   QuestionPanelResponse,
   QuestionSubmissionMethod,
 } from '#/tui/reverse-rpc/types';
-import type { ColorPalette } from '#/tui/theme/colors';
+import { contrastTextHex, type ColorPalette } from '#/tui/theme/colors';
 
 const NUMBER_KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9'];
 const MAX_BODY_LINES = 12;
@@ -101,6 +103,9 @@ export class QuestionDialogComponent extends Container implements Focusable {
 
   private readonly onToggleToolOutput: (() => void) | undefined;
   private readonly onTogglePlanExpand: (() => void) | undefined;
+  private readonly ui: TUI | undefined;
+  private animFrame = 0;
+  private intervalId: ReturnType<typeof setInterval> | null = null;
 
   constructor(
     request: PendingQuestion,
@@ -109,6 +114,7 @@ export class QuestionDialogComponent extends Container implements Focusable {
     maxVisibleOptions = 6,
     onToggleToolOutput?: () => void,
     onTogglePlanExpand?: () => void,
+    ui?: TUI,
   ) {
     super();
     this.request = request;
@@ -117,6 +123,7 @@ export class QuestionDialogComponent extends Container implements Focusable {
     this.maxVisibleOptions = maxVisibleOptions;
     this.onToggleToolOutput = onToggleToolOutput;
     this.onTogglePlanExpand = onTogglePlanExpand;
+    this.ui = ui;
     this.otherInput.onSubmit = (value) => {
       this.commitOtherInput(value, 'enter');
     };
@@ -128,18 +135,45 @@ export class QuestionDialogComponent extends Container implements Focusable {
     this.otherDrafts = Array.from({ length: total }, (): string => '');
     this.committedOtherValues = Array.from({ length: total }, (): string | undefined => undefined);
     this.answers = Array.from({ length: total }, (): string | undefined => undefined);
+
+    // Tests construct the dialog without a TUI: no timer, the pulse stays
+    // on the first frame so snapshots stay deterministic.
+    if (this.ui !== undefined) {
+      this.intervalId = setInterval(() => {
+        this.animFrame = (this.animFrame + 1) % PIXEL_PULSE_FRAMES.length;
+        this.ui?.requestComponentRender(this);
+      }, PIXEL_PULSE_INTERVAL_MS);
+    }
+  }
+
+  /** Stop the wizard pulse. Idempotent; called on respond and on hide. */
+  stop(): void {
+    if (this.intervalId !== null) {
+      clearInterval(this.intervalId);
+      this.intervalId = null;
+    }
+  }
+
+  private respond(response: QuestionPanelResponse): void {
+    this.stop();
+    this.onAnswer(response);
+  }
+
+  /** Breathing pixel block in the brand fluorescent green. */
+  private pulseBlock(): string {
+    return chalk.hex(this.colors.primary)(PIXEL_PULSE_FRAMES[this.animFrame]!);
   }
 
   // ── Input ─────────────────────────────────────────────────────────
 
   handleInput(data: string): void {
     if (matchesKey(data, Key.escape)) {
-      this.onAnswer({ answers: [] });
+      this.respond({ answers: [] });
       return;
     }
 
     if (matchesKey(data, Key.ctrl('c')) || matchesKey(data, Key.ctrl('d'))) {
-      this.onAnswer({ answers: [] });
+      this.respond({ answers: [] });
       return;
     }
 
@@ -423,7 +457,7 @@ export class QuestionDialogComponent extends Container implements Focusable {
 
   private executeSubmitAction(actionIdx: number, method: QuestionSubmissionMethod): void {
     if (actionIdx === 1) {
-      this.onAnswer({ answers: [] });
+      this.respond({ answers: [] });
       return;
     }
 
@@ -437,7 +471,7 @@ export class QuestionDialogComponent extends Container implements Focusable {
       const answer = this.answers[i];
       if (answer !== undefined && answer.length > 0) out[i] = answer;
     }
-    this.onAnswer({ answers: out, method: this.lastAnswerMethod ?? method });
+    this.respond({ answers: out, method: this.lastAnswerMethod ?? method });
   }
 
   // ── Render ────────────────────────────────────────────────────────
@@ -507,21 +541,24 @@ export class QuestionDialogComponent extends Container implements Focusable {
 
       let tone: (s: string) => string;
       let prefix: string;
+      const pulse = this.pulseBlock();
+      const primaryBold = chalk.hex(this.colors.primary).bold;
       if (question.multi_select) {
         const checked = isSelected ? '✓' : ' ';
-        prefix = `  [${checked}] `;
+        // Tri-state: cursor rides the breathing block, checked rides success.
+        prefix = isCursor ? `  ${pulse} [${checked}] ` : `    [${checked}] `;
         if (isSelected && isCursor) tone = (s) => success.bold(s);
         else if (isSelected) tone = success;
-        else if (isCursor) tone = accent;
+        else if (isCursor) tone = primaryBold;
         else tone = dim;
       } else if (isSelected && this.isAnswered(questionIdx)) {
-        prefix = isCursor ? `  → [${String(num)}] ` : `    [${String(num)}] `;
+        prefix = isCursor ? `  ${pulse} ${String(num)}. ` : `  ✓ ${String(num)}. `;
         tone = isCursor ? (s) => success.bold(s) : success;
       } else if (isCursor) {
-        prefix = `  → [${String(num)}] `;
-        tone = accent;
+        prefix = `  ${pulse} ${String(num)}. `;
+        tone = primaryBold;
       } else {
-        prefix = `    [${String(num)}] `;
+        prefix = `    ${String(num)}. `;
         tone = dim;
       }
       const continuation = ' '.repeat(visibleWidth(prefix));
@@ -603,9 +640,9 @@ export class QuestionDialogComponent extends Container implements Focusable {
       if (label === undefined) continue;
       const num = i + 1;
       if (i === this.submitActionIdx) {
-        lines.push(accent(`  → [${String(num)}] ${label}`));
+        lines.push(chalk.hex(this.colors.primary).bold(`  ${this.pulseBlock()} ${String(num)}. ${label}`));
       } else {
-        lines.push(dim(`    [${String(num)}] ${label}`));
+        lines.push(dim(`    ${String(num)}. ${label}`));
       }
     }
 
@@ -618,7 +655,11 @@ export class QuestionDialogComponent extends Container implements Focusable {
 
   private pushTabs(lines: string[]): void {
     const dim = chalk.hex(this.colors.textDim);
-    const active = chalk.bgHex(this.colors.primary).hex(this.colors.text).bold;
+    // Active step tag: fluorescent bg with contrast-picked text — white on
+    // #ccfb23 is unreadable, so the fg follows the bg luminance.
+    const active = chalk
+      .bgHex(this.colors.primary)
+      .hex(contrastTextHex(this.colors.primary)).bold;
 
     const tabs: string[] = [];
     for (let i = 0; i < this.request.data.questions.length; i++) {
@@ -628,13 +669,15 @@ export class QuestionDialogComponent extends Container implements Focusable {
         question.header !== undefined && question.header.length > 0
           ? question.header
           : `Q${String(i + 1)}`;
-      if (i === this.currentTab) tabs.push(active(` ${label} `));
-      else if (this.isAnswered(i)) tabs.push(chalk.hex(this.colors.success)(`(✓) ${label}`));
+      if (i === this.currentTab) {
+        // Active step: bg tag with a breathing left edge ("you are here").
+        tabs.push(active(` ${PIXEL_PULSE_FRAMES[this.animFrame]!} ${label} `));
+      } else if (this.isAnswered(i)) tabs.push(chalk.hex(this.colors.success)(`(✓) ${label}`));
       else tabs.push(dim(`(○) ${label}`));
     }
 
     const submitLabel = t('question.submit');
-    if (this.isSubmitTab()) tabs.push(active(` ${submitLabel} `));
+    if (this.isSubmitTab()) tabs.push(active(` ${PIXEL_PULSE_FRAMES[this.animFrame]!} ${submitLabel} `));
     else tabs.push(dim(` ${submitLabel} `));
 
     lines.push(` ${tabs.join('  ')}`);
@@ -755,18 +798,19 @@ export class QuestionDialogComponent extends Container implements Focusable {
     if (question === undefined) return option.label;
 
     let prefix: string;
+    const pulse = this.pulseBlock();
     if (question.multi_select) {
       const checked = isSelected ? '✓' : ' ';
-      const body = `  [${checked}] ${option.label}: `;
+      const body = `  ${pulse} [${checked}] ${option.label}: `;
       prefix = isSelected
         ? chalk.hex(this.colors.success).bold(body)
-        : chalk.hex(this.colors.primary)(body);
+        : chalk.hex(this.colors.primary).bold(body);
     } else {
-      const body = `  → [${String(num)}] ${option.label}: `;
+      const body = `  ${pulse} ${String(num)}. ${option.label}: `;
       prefix =
         isSelected && this.isAnswered(questionIdx)
           ? chalk.hex(this.colors.success).bold(body)
-          : chalk.hex(this.colors.primary)(body);
+          : chalk.hex(this.colors.primary).bold(body);
     }
 
     const inputWidth = Math.max(4, width - visibleWidth(prefix) + 2);

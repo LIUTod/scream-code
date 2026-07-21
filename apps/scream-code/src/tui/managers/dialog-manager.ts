@@ -51,6 +51,7 @@ export interface DialogManagerHost {
  */
 export class DialogManager {
   private activeApprovalPanel: ApprovalPanelComponent | undefined;
+  private activeQuestionDialog: QuestionDialogComponent | undefined;
   private approvalPreview:
     | {
         component: ApprovalPreviewViewer;
@@ -315,6 +316,8 @@ export class DialogManager {
   // Question dialog
   // =========================================================================
   showQuestionDialog(payload: QuestionPanelData): void {
+    // Defensive: a second dialog must not orphan the previous one's timer.
+    this.activeQuestionDialog?.stop();
     this.host.patchLivePane({ pendingQuestion: { data: payload } });
     notifyTerminalOnce(this.host.state, `question:${payload.id}`, {
       title: t('dialog.question_title'),
@@ -323,6 +326,7 @@ export class DialogManager {
     const dialog = new QuestionDialogComponent(
       { data: payload },
       (response) => {
+        dialog.stop();
         this.host.questionController.respond(response);
       },
       this.host.state.theme.colors,
@@ -333,11 +337,15 @@ export class DialogManager {
       () => {
         this.host.togglePlanExpansion();
       },
+      this.host.state.ui,
     );
+    this.activeQuestionDialog = dialog;
     this.mountEditorReplacement(dialog);
   }
 
   hideQuestionDialog(): void {
+    this.activeQuestionDialog?.stop();
+    this.activeQuestionDialog = undefined;
     this.host.patchLivePane({ pendingQuestion: null });
     this.restoreEditor();
   }

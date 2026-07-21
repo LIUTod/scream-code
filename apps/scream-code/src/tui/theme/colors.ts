@@ -174,3 +174,20 @@ export type ResolvedTheme = 'dark' | 'light';
 export function getColorPalette(theme: ResolvedTheme): ColorPalette {
   return theme === 'dark' ? darkColors : lightColors;
 }
+
+/**
+ * True when a hex background is light enough to need dark text on top
+ * (relative luminance above 0.5). Shared by badge/tag renderers so a
+ * fluorescent-green block never gets unreadable white text.
+ */
+export function isLightBgHex(hex: string): boolean {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return (0.299 * r + 0.587 * g + 0.114 * b) / 255 > 0.5;
+}
+
+/** Foreground colour with readable contrast on the given hex background. */
+export function contrastTextHex(bgHex: string): string {
+  return isLightBgHex(bgHex) ? '#000000' : '#FFFFFF';
+}
