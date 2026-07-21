@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import type { Event } from '@scream-code/scream-code-sdk';
+import type { Event, Session } from '@scream-code/scream-code-sdk';
 import {
   SessionEventHandler,
   type SessionEventHost,
@@ -59,6 +59,7 @@ function createMockHost(): SessionEventHost {
       pendingQuestion: null,
       viewer: null,
     },
+    queuedMessages: [],
     transcriptEntries,
     theme: {
       colors: {
@@ -78,6 +79,7 @@ function createMockHost(): SessionEventHost {
     aborted: false,
     sessionEventUnsubscribe: undefined,
     streamingUI,
+    deferUserMessages: false,
     tasksBrowserController,
     requireSession: vi.fn(),
     setAppState: vi.fn((patch) => {
@@ -96,6 +98,7 @@ function createMockHost(): SessionEventHost {
     sendQueuedMessage: vi.fn(),
     sendNormalUserInput: vi.fn(),
     shiftQueuedMessage: vi.fn(),
+    updateQueueDisplay: vi.fn(),
     markMemoryExtracted: vi.fn(),
   };
 
@@ -188,6 +191,81 @@ describe('SessionEventHandler', () => {
 
     expect(host.streamingUI.finalizeTurn).toHaveBeenCalled();
     expect(host.streamingUI.resetToolUi).toHaveBeenCalled();
+  });
+
+  it('auto-drains queued messages into a boundary steer on step completed', () => {
+    const host = createMockHost();
+    const steer = vi.fn().mockResolvedValue(undefined);
+    host.session = { steer } as unknown as Session;
+    host.state.queuedMessages = [
+      { text: 'first queued', agentId: 'main' },
+      { text: 'second queued', agentId: 'main' },
+    ];
+    const handler = new SessionEventHandler(host);
+
+    handler.handleEvent(
+      {
+        ...baseEvent('turn.step.completed'),
+        turnId: 1,
+        step: 1,
+        finishReason: 'tool_use',
+      } as unknown as Event,
+      vi.fn(),
+    );
+
+    expect(host.state.queuedMessages).toEqual([]);
+    expect(host.updateQueueDisplay).toHaveBeenCalled();
+    expect(steer).toHaveBeenCalledTimes(2);
+    expect(steer).toHaveBeenNthCalledWith(1, 'first queued', { interrupt: false });
+    expect(steer).toHaveBeenNthCalledWith(2, 'second queued', { interrupt: false });
+    // Each drained message also lands in the transcript as a user entry.
+    const transcript = (host.appendTranscriptEntry as ReturnType<typeof vi.fn>).mock.calls;
+    expect(transcript).toHaveLength(2);
+    expect(transcript[0]?.[0]).toMatchObject({ kind: 'user', content: 'first queued' });
+  });
+
+  it('does not drain the queue while compacting', () => {
+    const host = createMockHost();
+    const steer = vi.fn().mockResolvedValue(undefined);
+    host.session = { steer } as unknown as Session;
+    host.state.appState.isCompacting = true;
+    host.state.queuedMessages = [{ text: 'wait for compaction', agentId: 'main' }];
+    const handler = new SessionEventHandler(host);
+
+    handler.handleEvent(
+      {
+        ...baseEvent('turn.step.completed'),
+        turnId: 1,
+        step: 1,
+        finishReason: 'tool_use',
+      } as unknown as Event,
+      vi.fn(),
+    );
+
+    expect(steer).not.toHaveBeenCalled();
+    expect(host.state.queuedMessages).toHaveLength(1);
+  });
+
+  it('does not drain the queue while user messages are deferred (/init, make-skill)', () => {
+    const host = createMockHost();
+    const steer = vi.fn().mockResolvedValue(undefined);
+    host.session = { steer } as unknown as Session;
+    (host as { deferUserMessages: boolean }).deferUserMessages = true;
+    host.state.queuedMessages = [{ text: 'do not inject into init', agentId: 'main' }];
+    const handler = new SessionEventHandler(host);
+
+    handler.handleEvent(
+      {
+        ...baseEvent('turn.step.completed'),
+        turnId: 1,
+        step: 1,
+        finishReason: 'tool_use',
+      } as unknown as Event,
+      vi.fn(),
+    );
+
+    expect(steer).not.toHaveBeenCalled();
+    expect(host.state.queuedMessages).toHaveLength(1);
   });
 
   it('accumulates subagent token usage by profile name', () => {

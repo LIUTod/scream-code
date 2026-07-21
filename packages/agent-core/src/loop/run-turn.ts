@@ -39,6 +39,13 @@ export interface RunTurnInput {
   readonly log?: Logger | undefined;
   readonly maxSteps?: number | undefined;
   readonly maxRetryAttempts?: number;
+  /**
+   * Poll for queued user steering while a tool batch is in flight. When it
+   * flips true, the batch's tools are interrupted (user-cancellation abort)
+   * so the steered message reaches the model at the next step instead of
+   * waiting out a long-running command (omp's executeToolCalls pattern).
+   */
+  readonly hasPendingSteer?: (() => boolean) | undefined;
 }
 
 export async function runTurn(input: RunTurnInput): Promise<TurnResult> {
@@ -85,6 +92,7 @@ export async function runTurn(input: RunTurnInput): Promise<TurnResult> {
         currentStep: steps,
         maxRetryAttempts,
         recordUsage: recordStepUsage,
+        hasPendingSteer: input.hasPendingSteer,
       });
       activeStep = undefined;
 

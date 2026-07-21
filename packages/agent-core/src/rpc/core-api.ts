@@ -136,6 +136,12 @@ export interface PromptPayload {
 }
 export interface SteerPayload {
   readonly input: readonly ContentPart[];
+  /**
+   * When false, the steer joins at the next step boundary without
+   * interrupting an in-flight tool batch (auto-drained queue). Default
+   * (undefined) interrupts immediately, as an explicit user steer should.
+   */
+  readonly interrupt?: boolean | undefined;
 }
 export interface CancelPayload {
   readonly turnId?: number;

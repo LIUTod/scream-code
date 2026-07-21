@@ -74,6 +74,44 @@ export class APIProviderRateLimitError extends APIStatusError {
 }
 
 /**
+ * HTTP status error meaning the conversation history sent to the provider
+ * has orphaned tool calls (an assistant `tool_calls` block whose matching
+ * tool results are missing). Recoverable only by rebuilding the history —
+ * retrying the same request always fails. Carried as a distinct class so
+ * callers can reset the session on THIS kind alone instead of sniffing
+ * error message text.
+ */
+export class APIOrphanedToolCallError extends APIStatusError {
+  constructor(statusCode: number, message: string, requestId?: string | null) {
+    super(statusCode, message, requestId);
+    this.name = 'APIOrphanedToolCallError';
+  }
+}
+
+/**
+ * Message-text parity check shared by normalizeAPIStatusError and
+ * isOrphanedToolCallError. Mirrors the historical two-includes semantics:
+ * the fragments may appear in any order.
+ */
+function isOrphanedToolCallMessage(lowerMessage: string): boolean {
+  return (
+    lowerMessage.includes('insufficient tool messages') ||
+    (lowerMessage.includes('tool_calls') && lowerMessage.includes('followed by tool messages'))
+  );
+}
+
+/**
+ * True when an error signals orphaned tool calls in the request history.
+ * instanceof is checked first (provider threw the typed error); the message
+ * patterns are the fallback for errors that crossed wrapping boundaries
+ * (session/RPC layers re-wrapping the provider error).
+ */
+export function isOrphanedToolCallError(error: unknown): boolean {
+  if (error instanceof APIOrphanedToolCallError) return true;
+  return isOrphanedToolCallMessage(errorMessage(error).toLowerCase());
+}
+
+/**
  * The API returned an empty response (no content, no tool calls).
  */
 export class APIEmptyResponseError extends ChatProviderError {
@@ -134,6 +172,9 @@ export function normalizeAPIStatusError(
   }
   if (isContextOverflowStatusError(statusCode, message)) {
     return new APIContextOverflowError(statusCode, message, requestId);
+  }
+  if (statusCode === 400 && isOrphanedToolCallMessage(message.toLowerCase())) {
+    return new APIOrphanedToolCallError(statusCode, message, requestId);
   }
   return new APIStatusError(statusCode, message, requestId);
 }

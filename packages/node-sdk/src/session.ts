@@ -100,11 +100,12 @@ export class Session {
     });
   }
 
-  async steer(input: string | PromptInput): Promise<void> {
+  async steer(input: string | PromptInput, opts?: { interrupt?: boolean | undefined }): Promise<void> {
     this.ensureOpen();
     await this.rpc.steer({
       sessionId: this.id,
       input: normalizePromptInput(input),
+      interrupt: opts?.interrupt,
     });
   }
 

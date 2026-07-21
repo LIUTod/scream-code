@@ -17,6 +17,7 @@ import { join } from "node:path";
 
 import {
   ScreamHarness,
+  isOrphanedToolCallError,
   log,
   resolveScreamHome,
   type Session,
@@ -944,13 +945,11 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
       session.prompt(userText).catch((error: unknown) => {
         const msg = error instanceof Error ? error.message : String(error);
         // Orphaned tool_calls in session history — recreate the session
-        // so the next message starts fresh. Match only the orphaned-history
-        // error shapes; a transient 400 that merely mentions tool_calls
-        // (e.g. malformed arguments) must not wipe the user's conversation.
-        const isOrphanedToolCalls =
-          msg.includes("insufficient tool messages") ||
-          (msg.includes("tool_calls") && msg.includes("followed by tool messages"));
-        if (isOrphanedToolCalls) {
+        // so the next message starts fresh. The ltod classifier matches
+        // only the orphaned-history shapes; a transient 400 that merely
+        // mentions tool_calls (e.g. malformed arguments) must not wipe the
+        // user's conversation.
+        if (isOrphanedToolCallError(error)) {
           log.warn("stream-json: resetting session after tool call mismatch", {
             sessionId: session?.id,
             error: msg,

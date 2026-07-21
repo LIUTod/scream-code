@@ -24,7 +24,7 @@ import {
 } from '../tools/args-validator';
 import { PathSecurityError } from '../tools/policies/path-access';
 
-import { isUserCancellation } from '../utils/abort';
+import { isUserCancellation, userCancellationReason } from '../utils/abort';
 import { errorMessage, isAbortError } from './errors';
 import type { LoopEventDispatcher, LoopToolCallEvent } from './events';
 import type { LLM, LLMChatResponse } from './llm';
@@ -42,6 +42,7 @@ import type {
 } from './types';
 
 const GRACE_TIMEOUT_MS = 2_000;
+const STEER_POLL_INTERVAL_MS = 150;
 const TOOL_OUTPUT_EMPTY = 'Tool output is empty.';
 const TOOL_OUTPUT_NON_TEXT = 'Tool returned non-text content.';
 
@@ -70,6 +71,7 @@ export interface ToolCallStepContext {
   readonly turnId: string;
   readonly currentStep: number;
   readonly stepUuid: string;
+  readonly hasPendingSteer?: (() => boolean) | undefined;
 }
 
 type PreflightedToolCall = RunnableToolCall | RejectedToolCall;
@@ -125,6 +127,37 @@ export async function runToolCallBatch(
   const pendingResults: Array<Promise<PendingToolResult>> = [];
   let stopTurn = false;
 
+  // Mid-batch steer interruption: while tools run, poll for a queued user
+  // message and interrupt the batch when one arrives — the message then
+  // reaches the model at the next step instead of waiting out a long
+  // command. The steer controller merges into every tool's signal, so the
+  // entire downstream path (prepare checks, execute, grace race) treats it
+  // exactly like a user cancellation.
+  const steerController =
+    step.hasPendingSteer !== undefined ? new AbortController() : undefined;
+  const effectiveStep: ToolCallStepContext =
+    steerController === undefined
+      ? step
+      : { ...step, signal: AbortSignal.any([step.signal, steerController.signal]) };
+  const abortOnSteer = (): void => {
+    if (step.hasPendingSteer?.() === true && steerController !== undefined && !steerController.signal.aborted) {
+      steerController.abort(userCancellationReason());
+    }
+  };
+  abortOnSteer(); // Covers a steer queued between the model response and batch start.
+  const steerPoll =
+    steerController === undefined
+      ? undefined
+      : setInterval(() => {
+          // A throwing host callback must never become an uncaught exception
+          // inside a timer — that would crash the whole process mid-turn.
+          try {
+            abortOnSteer();
+          } catch {
+            // Skip this tick; the next poll retries.
+          }
+        }, STEER_POLL_INTERVAL_MS);
+
   try {
     for (let index = 0; index < calls.length; index += 1) {
       const call = calls[index]!;
@@ -133,15 +166,15 @@ export async function runToolCallBatch(
       // for remaining tools and settle them with synthetic abort results.
       // This avoids running preflight, resolveExecution, hooks, and
       // dispatching tool.call events for tools that will never execute.
-      if (step.signal.aborted) {
+      if (effectiveStep.signal.aborted) {
         await dispatchToolCall(step, call, call.args);
         pendingResults.push(
-          Promise.resolve(makeErrorToolResult(call, call.args, abortedToolOutput(call.toolName, step.signal))),
+          Promise.resolve(makeErrorToolResult(call, call.args, abortedToolOutput(call.toolName, effectiveStep.signal))),
         );
         continue;
       }
 
-      const prepared = await prepareToolCall(step, call);
+      const prepared = await prepareToolCall(effectiveStep, call);
       pendingResults.push(scheduler.add(prepared.task));
 
       if (prepared.stopBatchAfterThis === true) {
@@ -158,7 +191,7 @@ export async function runToolCallBatch(
     // provider order. Await all tasks so each recorded `tool.call` gets a
     // paired `tool.result`; the caller checks abort before writing `step.end`.
     for (const pendingResult of pendingResults) {
-      const result = await finalizePendingToolResult(step, await pendingResult);
+      const result = await finalizePendingToolResult(effectiveStep, await pendingResult);
       if (result.stopTurn === true) stopTurn = true;
       await step.dispatchEvent({
         type: 'tool.result',
@@ -168,6 +201,7 @@ export async function runToolCallBatch(
       });
     }
   } finally {
+    if (steerPoll !== undefined) clearInterval(steerPoll);
     // Preparation or result dispatch can throw after execution has started.
     // Always settle spawned tasks before the caller continues so rejected
     // execute promises cannot surface as detached unhandled rejections.

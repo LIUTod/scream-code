@@ -2,10 +2,12 @@ import {
   APIConnectionError,
   APIContextOverflowError,
   APIEmptyResponseError,
+  APIOrphanedToolCallError,
   APIProviderRateLimitError,
   APIStatusError,
   APITimeoutError,
   ChatProviderError,
+  isOrphanedToolCallError,
   isProviderRateLimitError,
   isRetryableGenerateError,
   normalizeAPIStatusError,
@@ -252,5 +254,49 @@ describe('isProviderRateLimitError', () => {
     expect(isProviderRateLimitError(new APIStatusError(500, 'server error'))).toBe(false);
     expect(isProviderRateLimitError(new APIConnectionError('connection refused'))).toBe(false);
     expect(isProviderRateLimitError(new Error('something else'))).toBe(false);
+  });
+});
+
+describe('APIOrphanedToolCallError classification', () => {
+  it('normalizeAPIStatusError maps 400 orphaned-history messages to the typed error', () => {
+    const insufficient = normalizeAPIStatusError(
+      400,
+      'messages.6: insufficient tool messages following assistant tool_calls',
+    );
+    expect(insufficient).toBeInstanceOf(APIOrphanedToolCallError);
+    expect(insufficient.statusCode).toBe(400);
+
+    const followed = normalizeAPIStatusError(
+      400,
+      "messages.4: `tool_calls` must be followed by tool messages",
+    );
+    expect(followed).toBeInstanceOf(APIOrphanedToolCallError);
+  });
+
+  it('normalizeAPIStatusError leaves unrelated 400s as plain APIStatusError', () => {
+    const malformed = normalizeAPIStatusError(400, 'invalid arguments for tool_calls: malformed JSON');
+    expect(malformed).toBeInstanceOf(APIStatusError);
+    expect(malformed).not.toBeInstanceOf(APIOrphanedToolCallError);
+  });
+
+  it('isOrphanedToolCallError matches the typed error by class', () => {
+    expect(isOrphanedToolCallError(new APIOrphanedToolCallError(400, 'x'))).toBe(true);
+  });
+
+  it('isOrphanedToolCallError matches wrapped errors by message, in any fragment order', () => {
+    expect(isOrphanedToolCallError(new Error('insufficient tool messages'))).toBe(true);
+    expect(
+      isOrphanedToolCallError(new Error('must be followed by tool messages (tool_calls)')),
+    ).toBe(true);
+    // ScreamError-style wrapping: prefix text around the provider message.
+    expect(
+      isOrphanedToolCallError(new Error('provider.api_error: insufficient tool messages (request id abc)')),
+    ).toBe(true);
+  });
+
+  it('isOrphanedToolCallError rejects transient 400s that merely mention tool_calls', () => {
+    expect(isOrphanedToolCallError(new Error('invalid arguments for tool_calls: malformed JSON'))).toBe(false);
+    expect(isOrphanedToolCallError(new APIStatusError(400, 'bad request'))).toBe(false);
+    expect(isOrphanedToolCallError(new Error('network unreachable'))).toBe(false);
   });
 });

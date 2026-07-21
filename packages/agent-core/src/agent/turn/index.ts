@@ -36,6 +36,12 @@ interface ActiveTurn {
 interface BufferedSteer {
   readonly input: readonly ContentPart[];
   readonly origin: PromptOrigin;
+  /**
+   * When false, the steer only joins at the next step boundary (the TUI's
+   * auto-drained queue). Undefined/true additionally interrupts an in-flight
+   * tool batch (explicit Ctrl+S steer).
+   */
+  readonly interrupt?: boolean | undefined;
 }
 
 export interface TurnEndResult {
@@ -98,14 +104,18 @@ export class TurnFlow {
 
   // Returns the new turnId, or null if the input was buffered as a steer
   // message or the turn was marked as resuming.
-  steer(input: readonly ContentPart[], origin: PromptOrigin = USER_PROMPT_ORIGIN): number | null {
+  steer(
+    input: readonly ContentPart[],
+    origin: PromptOrigin = USER_PROMPT_ORIGIN,
+    opts?: { interrupt?: boolean | undefined },
+  ): number | null {
     this.agent.records.logRecord({
       type: 'turn.steer',
       input,
       origin,
     });
     if (this.activeTurn) {
-      this.steerBuffer.push({ input, origin });
+      this.steerBuffer.push({ input, origin, interrupt: opts?.interrupt });
       return null;
     }
     return this.launch(input, origin);
@@ -533,6 +543,13 @@ export class TurnFlow {
           log: this.agent.log,
           maxSteps: loopControl?.maxStepsPerTurn,
           maxRetryAttempts: loopControl?.maxRetriesPerStep,
+          // Only interactive user steers interrupt an in-flight tool batch.
+          // Background/cron/hook steers keep the old behavior — they wait
+          // for the step boundary so a background completion never kills
+          // the user's running command mid-flight. Auto-drained queue
+          // messages (interrupt: false) also join only at the boundary.
+          hasPendingSteer: () =>
+            this.steerBuffer.some((steer) => steer.origin.kind === 'user' && steer.interrupt !== false),
           hooks: {
             beforeStep: async ({ signal: stepSignal, stepNumber }) => {
               this.flushSteerBuffer();

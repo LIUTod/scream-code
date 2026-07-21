@@ -40,6 +40,7 @@ import { StatusMessageComponent } from '../components/messages/status-message';
 import { MAIN_AGENT_ID } from '../constant/scream-tui';
 import {
   argsRecord,
+  formatErrorMessage,
   isTodoItemShape,
   serializeToolResultOutput,
   stringValue,
@@ -90,6 +91,7 @@ export interface SessionEventHost {
   aborted: boolean;
   sessionEventUnsubscribe: (() => void) | undefined;
   readonly streamingUI: StreamingUIController;
+  readonly deferUserMessages: boolean;
 
   requireSession(): Session;
   setAppState(patch: Partial<AppState>): void;
@@ -102,6 +104,7 @@ export interface SessionEventHost {
   sendQueuedMessage(session: Session, item: QueuedMessage): void;
   sendNormalUserInput(text: string): void;
   shiftQueuedMessage(): QueuedMessage | undefined;
+  updateQueueDisplay(): void;
   readonly tasksBrowserController: TasksBrowserController;
   markMemoryExtracted(): void;
 }
@@ -385,6 +388,7 @@ export class SessionEventHandler {
   private handleStepCompleted(event: TurnStepCompletedEvent): void {
     this.host.streamingUI.flushNow();
     this.maybeShowDebugTiming(event);
+    this.drainQueuedMessagesIntoSteer();
     if (event.finishReason !== 'max_tokens') return;
 
     const truncatedCount = this.host.streamingUI.markStepTruncated(
@@ -406,6 +410,43 @@ export class SessionEventHandler {
     if (process.env['SCREAM_CODE_DEBUG'] !== '1') return;
     const text = formatStepDebugTiming(event);
     if (text !== undefined) this.host.showStatus(text);
+  }
+
+  /**
+   * Auto-insert queued messages at the step boundary. The current step has
+   * finished, so queued input is steered in with interrupt: false — it
+   * never kills in-flight tools; it reaches the model at the next call.
+   * Race-safe by design: if the turn already ended between the event and
+   * the steer call, the core launches a fresh turn with the message.
+   * (Ctrl+S remains the immediate-interrupt path.)
+   *
+   * Skipped while `deferUserMessages` is set: /init and make-skill run
+   * system-triggered flows whose steps must not receive user input.
+   */
+  private drainQueuedMessagesIntoSteer(): void {
+    const { state } = this.host;
+    const session = this.host.session;
+    if (session === undefined || state.appState.isCompacting || this.host.deferUserMessages) return;
+    const items = state.queuedMessages;
+    if (items.length === 0) return;
+    state.queuedMessages = [];
+    this.host.updateQueueDisplay();
+    for (const item of items) {
+      this.host.appendTranscriptEntry({
+        id: nextTranscriptId(),
+        kind: 'user',
+        turnId: this.host.streamingUI.getTurnContext().turnId,
+        renderMode: 'plain',
+        content: item.text,
+        ...(item.imageAttachmentIds !== undefined && item.imageAttachmentIds.length > 0
+          ? { imageAttachmentIds: item.imageAttachmentIds }
+          : {}),
+      });
+      void session.steer(item.parts ?? item.text, { interrupt: false }).catch((error: unknown) => {
+        const message = formatErrorMessage(error);
+        this.host.showError(t('input.guide_failed', { message }));
+      });
+    }
   }
 
   private isAnthropicSessionActive(): boolean {

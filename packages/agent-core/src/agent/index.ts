@@ -31,6 +31,7 @@ import { FullCompaction, MicroCompaction, type CompactionStrategy } from './comp
 import { CronManager } from './cron';
 import { ConfigState } from './config';
 import { ContextMemory } from './context';
+import { USER_PROMPT_ORIGIN } from './context/types';
 import { GoalMode } from './goal';
 import { HookEngine } from '../session/hooks';
 import { InjectionManager } from './injection/manager';
@@ -388,7 +389,7 @@ export class Agent {
         this.turn.prompt(payload.input);
       },
       steer: (payload) => {
-        this.turn.steer(payload.input);
+        this.turn.steer(payload.input, USER_PROMPT_ORIGIN, { interrupt: payload.interrupt });
       },
       cancel: (payload) => {
         this.turn.cancel(payload.turnId);

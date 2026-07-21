@@ -1317,6 +1317,61 @@ function bashCallWithId(id: string, command: string): ToolCall {
   };
 }
 
+describe('steer interrupt lanes', () => {
+  const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+  it('default steer interrupts a pending approval and injects at the next step', async () => {
+    const ctx = testAgent({ jian: createCommandJian('approved') });
+    ctx.configure({ tools: ['Bash'] });
+
+    ctx.mockNextResponse({ type: 'text', text: 'I will ask first.' }, bashCallWithId('call_bash', 'printf approved'));
+    ctx.mockNextResponse({ type: 'text', text: 'Saw the steer.' });
+    await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Run Bash, then listen' }] });
+    await ctx.takeApprovalRequest();
+    ctx.lastLlmInput(); // consume step 1 input
+
+    // Explicit user steer (no interrupt flag) — must abort the pending
+    // approval once the mid-batch poll fires instead of waiting it out.
+    await ctx.rpc.steer({ input: [{ type: 'text', text: 'Change of plans.' }] });
+
+    // The turn completes without the approval ever being answered, and the
+    // model saw the steered message.
+    await ctx.untilTurnEnd();
+    expect(ctx.llmCalls).toHaveLength(2);
+    const lastHistory = JSON.stringify(ctx.llmCalls.at(-1)?.history);
+    expect(lastHistory).toContain('Change of plans.');
+    // The tool was interrupted, not executed: no "approved" command output.
+    expect(lastHistory).toContain('manually interrupted');
+    expect(lastHistory).not.toContain('"text":"approved"');
+    await ctx.expectResumeMatches();
+  });
+
+  it('interrupt: false steer leaves the approval alone and joins after the tool', async () => {
+    const ctx = testAgent({ jian: createCommandJian('approved') });
+    ctx.configure({ tools: ['Bash'] });
+
+    ctx.mockNextResponse({ type: 'text', text: 'I will ask first.' }, bashCallWithId('call_bash', 'printf approved'));
+    ctx.mockNextResponse({ type: 'text', text: 'Approved, and I saw the queue.' });
+    await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Run Bash, then listen' }] });
+    const approval = await ctx.takeApprovalRequest();
+    ctx.lastLlmInput(); // consume step 1 input
+
+    // Auto-drained queue lane: boundary-only, must NOT abort the approval.
+    await ctx.rpc.steer({ input: [{ type: 'text', text: 'Queued follow-up.' }], interrupt: false });
+    await sleep(300); // poll fires, but this lane does not interrupt
+
+    approval.respond({ decision: 'approved', selectedLabel: 'approve' });
+    await ctx.untilTurnEnd();
+
+    expect(ctx.llmCalls).toHaveLength(2);
+    const lastHistory = JSON.stringify(ctx.llmCalls.at(-1)?.history);
+    // The tool ran normally (approval answered), then the queued message joined.
+    expect(lastHistory).toContain('approved');
+    expect(lastHistory).toContain('Queued follow-up.');
+    await ctx.expectResumeMatches();
+  });
+});
+
 
 function singleAttemptAgentOptions(): Pick<TestAgentOptions, 'initialConfig'> {
   return {

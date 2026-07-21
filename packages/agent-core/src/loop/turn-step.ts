@@ -35,6 +35,7 @@ export interface ExecuteLoopStepDeps {
   readonly currentStep: number;
   readonly maxRetryAttempts?: number;
   readonly recordUsage: (usage: TokenUsage) => void;
+  readonly hasPendingSteer?: (() => boolean) | undefined;
 }
 
 export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<{
@@ -84,6 +85,7 @@ export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<{
     turnId,
     currentStep,
     stepUuid,
+    hasPendingSteer: deps.hasPendingSteer,
   };
 
   await dispatchEvent({

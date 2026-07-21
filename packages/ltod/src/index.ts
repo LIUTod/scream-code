@@ -57,11 +57,13 @@ export {
   APIConnectionError,
   APIContextOverflowError,
   APIEmptyResponseError,
+  APIOrphanedToolCallError,
   APIProviderRateLimitError,
   APIStatusError,
   APITimeoutError,
   ChatProviderError,
   isContextOverflowStatusError,
+  isOrphanedToolCallError,
   isProviderRateLimitError,
   isRetryableGenerateError,
 } from './errors';

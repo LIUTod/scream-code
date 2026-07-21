@@ -127,6 +127,21 @@ export class EditorKeyboardController {
         host.restoreEditor();
         return;
       }
+      // A non-empty queue intercepts Esc: cancel the queue and restore its
+      // texts to the editor instead of aborting the running turn. The
+      // global Esc interrupt only fires when nothing is queued.
+      if (host.state.queuedMessages.length > 0) {
+        const restored = host.state.queuedMessages
+          .map((m: QueuedMessage) => m.text.trim())
+          .filter((text: string) => text.length > 0);
+        host.clearQueuedMessages();
+        const existing = host.state.editor.getText();
+        const parts = [...restored, existing].filter((s) => s.trim().length > 0);
+        host.state.editor.setText(parts.join('\n'));
+        host.updateQueueDisplay();
+        host.state.ui.requestRender();
+        return;
+      }
       if (host.state.appState.isCompacting) {
         this.cancelCurrentCompaction();
         return;

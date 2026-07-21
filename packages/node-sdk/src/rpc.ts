@@ -68,6 +68,11 @@ export interface SessionPromptRpcInput {
   readonly input: PromptInput;
 }
 
+export interface SessionSteerRpcInput extends SessionPromptRpcInput {
+  /** false = join at the next step boundary without interrupting running tools. */
+  readonly interrupt?: boolean | undefined;
+}
+
 export interface SessionIdRpcInput {
   readonly sessionId: string;
 }
@@ -268,12 +273,13 @@ export class SDKRpcClient {
     });
   }
 
-  async steer(input: SessionPromptRpcInput): Promise<void> {
+  async steer(input: SessionSteerRpcInput): Promise<void> {
     const rpc = await this.getRpc();
     return rpc.steer({
       sessionId: input.sessionId,
       agentId: this.interactiveAgentId,
       input: input.input,
+      interrupt: input.interrupt,
     });
   }
 
