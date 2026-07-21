@@ -332,7 +332,7 @@ export class TranscriptController {
 
   showProgressSpinner(label: string): LoginProgressSpinnerHandle {
     const tint = (s: string): string => chalk.hex(this.host.state.theme.colors.primary)(s);
-    const spinner = new MoonLoader(this.host.state.ui, 'braille', tint, label);
+    const spinner = new MoonLoader(this.host.state.ui, tint, label);
     const spacer = new Spacer(1);
     const container = this.host.state.transcriptContainer;
     container.addChild(spacer);

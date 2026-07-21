@@ -240,6 +240,8 @@ export class DialogManager {
   // Approval panel
   // =========================================================================
   showApprovalPanel(payload: ApprovalPanelData): void {
+    // Defensive: a second panel must not orphan the previous one's timer.
+    this.activeApprovalPanel?.stop();
     this.host.patchLivePane({ pendingApproval: { data: payload } });
     notifyTerminalOnce(this.host.state, `approval:${payload.id}`, {
       title: t('dialog.approval_title'),
@@ -248,6 +250,7 @@ export class DialogManager {
     const panel = new ApprovalPanelComponent(
       { data: payload },
       (response: ApprovalPanelResponse) => {
+        panel.stop();
         this.host.approvalController.respond(adaptPanelResponse(response));
       },
       this.host.state.theme.colors,
@@ -260,6 +263,7 @@ export class DialogManager {
       (block) => {
         this.openApprovalPreview(panel, block);
       },
+      this.host.state.ui,
     );
     this.activeApprovalPanel = panel;
     this.mountEditorReplacement(panel);
@@ -269,6 +273,7 @@ export class DialogManager {
     if (this.approvalPreview !== undefined) {
       this.closeApprovalPreview();
     }
+    this.activeApprovalPanel?.stop();
     this.activeApprovalPanel = undefined;
     this.host.patchLivePane({ pendingApproval: null });
     this.restoreEditor();

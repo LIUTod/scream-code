@@ -11,6 +11,7 @@ import {
   Key,
   decodeKittyPrintable,
   type Focusable,
+  type TUI,
   truncateToWidth,
   visibleWidth,
 } from '@liutod-scream/pi-tui';
@@ -19,6 +20,7 @@ import { t } from '@scream-code/config';
 
 import { highlightLines, langFromPath } from '#/tui/components/media/code-highlight';
 import { renderDiffLinesClustered } from '#/tui/components/media/diff-preview';
+import { PIXEL_PULSE_FRAMES, PIXEL_PULSE_INTERVAL_MS } from '#/tui/constant/rendering';
 import type {
   ApprovalPanelChoice,
   DiffDisplayBlock,
@@ -203,6 +205,9 @@ export class ApprovalPanelComponent extends Container implements Focusable {
   private readonly onOpenPreview:
     | ((block: DiffDisplayBlock | FileContentDisplayBlock) => void)
     | undefined;
+  private readonly ui: TUI | undefined;
+  private animFrame = 0;
+  private intervalId: ReturnType<typeof setInterval> | null = null;
 
   constructor(
     request: PendingApproval,
@@ -211,6 +216,7 @@ export class ApprovalPanelComponent extends Container implements Focusable {
     onToggleToolOutput?: () => void,
     onTogglePlanExpand?: () => void,
     onOpenPreview?: (block: DiffDisplayBlock | FileContentDisplayBlock) => void,
+    ui?: TUI,
   ) {
     super();
     this.request = request;
@@ -219,6 +225,7 @@ export class ApprovalPanelComponent extends Container implements Focusable {
     this.onToggleToolOutput = onToggleToolOutput;
     this.onTogglePlanExpand = onTogglePlanExpand;
     this.onOpenPreview = onOpenPreview;
+    this.ui = ui;
     this.feedbackInput.onSubmit = (value) => {
       this.submit(this.selectedIndex, value);
     };
@@ -226,11 +233,28 @@ export class ApprovalPanelComponent extends Container implements Focusable {
       this.feedbackMode = false;
       this.feedbackInput.setValue('');
     };
+    // Tests construct the panel without a TUI: no timer, the indicator
+    // stays on the first frame so snapshots stay deterministic.
+    if (this.ui !== undefined) {
+      this.intervalId = setInterval(() => {
+        this.animFrame = (this.animFrame + 1) % PIXEL_PULSE_FRAMES.length;
+        this.ui?.requestComponentRender(this);
+      }, PIXEL_PULSE_INTERVAL_MS);
+    }
+  }
+
+  /** Stop the selection pulse. Idempotent; called on submit and on hide. */
+  stop(): void {
+    if (this.intervalId !== null) {
+      clearInterval(this.intervalId);
+      this.intervalId = null;
+    }
   }
 
   private submit(index: number, feedback: string = ''): void {
     const option = this.choiceAt(index);
     if (!option) return;
+    this.stop();
     this.onResponse({
       response: option.response,
       feedback: feedback || undefined,
@@ -255,6 +279,7 @@ export class ApprovalPanelComponent extends Container implements Focusable {
       matchesKey(data, Key.ctrl('c')) ||
       matchesKey(data, Key.ctrl('d'))
     ) {
+      this.stop();
       this.onResponse({ response: 'rejected' });
       return;
     }
@@ -316,11 +341,12 @@ export class ApprovalPanelComponent extends Container implements Focusable {
     this.feedbackInput.focused = this.focused && this.feedbackMode;
     const { data } = this.request;
     const blockStyles = makeBlockStyles(this.colors);
-    const borderColor = chalk.hex(this.colors.borderFocus);
-    const borderColorBold = chalk.bold.hex(this.colors.borderFocus);
-    const selectColorBold = chalk.bold.hex(this.colors.accent);
+    // Frame and focus share the brand fluorescent green: pastel borderFocus
+    // reads muddy on dark terminals, so the bars/title/indicator all use
+    // the vivid primary — hierarchy comes from bold and the pulse, not hue.
+    const borderColor = chalk.hex(this.colors.primary);
+    const borderColorBold = chalk.bold.hex(this.colors.primary);
     const dim = chalk.hex(this.colors.textDim);
-    const strong = chalk.hex(this.colors.textStrong);
     const horizontalBar = borderColor('─'.repeat(width));
     const indent = (s: string): string => `  ${s}`;
 
@@ -364,9 +390,13 @@ export class ApprovalPanelComponent extends Container implements Focusable {
       if (this.feedbackMode && option.requires_feedback === true && isSelected) {
         lines.push(indent(this.renderInlineFeedbackLine(width - 2, labelWithNum)));
       } else if (isSelected) {
-        lines.push(indent(`${selectColorBold('▶')} ${selectColorBold(labelWithNum)}`));
+        // Breathing pixel block + bold label in the same vivid primary —
+        // the selected row reads as one visual unit.
+        const indicator = chalk.hex(this.colors.primary)(PIXEL_PULSE_FRAMES[this.animFrame]!);
+        const selectedLabel = chalk.bold.hex(this.colors.primary)(labelWithNum);
+        lines.push(indent(`${indicator} ${selectedLabel}`));
       } else {
-        lines.push(indent(strong(`  ${labelWithNum}`)));
+        lines.push(indent(dim(`  ${labelWithNum}`)));
       }
     }
 
@@ -415,8 +445,9 @@ export class ApprovalPanelComponent extends Container implements Focusable {
   }
 
   private renderInlineFeedbackLine(width: number, labelWithNum: string): string {
-    const selectColorBold = chalk.bold.hex(this.colors.accent);
-    const prefix = `${selectColorBold('▶')} ${selectColorBold(labelWithNum)}  `;
+    const indicator = chalk.hex(this.colors.primary)(PIXEL_PULSE_FRAMES[this.animFrame]!);
+    const selectedLabel = chalk.bold.hex(this.colors.primary)(labelWithNum);
+    const prefix = `${indicator} ${selectedLabel}  `;
     const inputWidth = Math.max(4, width - visibleWidth(prefix) + 2);
     const inputLine = this.feedbackInput.render(inputWidth)[0] ?? '> ';
     const inlineInput = inputLine.startsWith('> ') ? inputLine.slice(2) : inputLine;

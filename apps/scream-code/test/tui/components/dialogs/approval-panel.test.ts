@@ -1,5 +1,5 @@
 import { CURSOR_MARKER } from '@liutod-scream/pi-tui';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { ApprovalPanelComponent } from '#/tui/components/dialogs/approval-panel';
 import type {
@@ -112,7 +112,7 @@ describe('ApprovalPanelComponent', () => {
     dialog.handleInput('4');
 
     const out = strip(dialog.render(80).join('\n'));
-    expect(out).toContain('▶ 4. Reject with feedback');
+    expect(out).toContain('█ 4. Reject with feedback');
     expect(out).not.toContain('\n  > ');
   });
 
@@ -440,5 +440,54 @@ describe('ApprovalPanelComponent', () => {
     expect(responses).toEqual([
       { response: 'rejected', feedback: 'no', selected_label: 'Revise' },
     ]);
+  });
+});
+
+describe('ApprovalPanelComponent — selection pulse', () => {
+  it('advances the pixel frame on the timer and requests component-scoped renders', () => {
+    vi.useFakeTimers();
+    try {
+      const requestComponentRender = vi.fn();
+      const ui = { requestComponentRender } as never;
+      const dialog = new ApprovalPanelComponent(makePending(), () => {}, COLORS, undefined, undefined, undefined, ui);
+
+      const first = strip(dialog.render(80).join('\n'));
+      expect(first).toContain('█ 1. Approve once');
+
+      vi.advanceTimersByTime(250); // 2 frames: █ → ▓ → ▒
+      const pulsed = strip(dialog.render(80).join('\n'));
+      expect(pulsed).toContain('▒ 1. Approve once');
+      expect(requestComponentRender).toHaveBeenCalledWith(dialog);
+
+      dialog.stop();
+      vi.clearAllTimers();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('stops the pulse on submit and on reject keys (no ghost timer)', () => {
+    vi.useFakeTimers();
+    try {
+      const responses: unknown[] = [];
+      const ui = { requestComponentRender: vi.fn() } as never;
+
+      const approved = new ApprovalPanelComponent(makePending(), (r) => responses.push(r), COLORS, undefined, undefined, undefined, ui);
+      approved.handleInput('\r');
+      expect(vi.getTimerCount()).toBe(0);
+
+      const rejected = new ApprovalPanelComponent(makePending(), (r) => responses.push(r), COLORS, undefined, undefined, undefined, ui);
+      rejected.handleInput('');
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('renders static first frame when no TUI is provided (test/headless path)', () => {
+    const dialog = new ApprovalPanelComponent(makePending(), () => {}, COLORS);
+    const out = strip(dialog.render(80).join('\n'));
+    expect(out).toContain('█ 1. Approve once');
+    expect(out).toContain('  2. Approve for this session');
   });
 });

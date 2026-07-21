@@ -20,8 +20,10 @@ export const MAX_SHELL_OUTPUT_BYTES = 128 * 1024;
 export const BRAILLE_SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 export const BRAILLE_SPINNER_INTERVAL_MS = 80;
 
-export const MOON_SPINNER_FRAMES = ['💬', '🗯️', '🫯', '💭', '💬', '🗯️', '🫯', '💭'];
-export const MOON_SPINNER_INTERVAL_MS = 120;
+// Breathing pixel block: selection indicator pulse (approval panel choices).
+// Single-cell width so the layout never shifts between frames.
+export const PIXEL_PULSE_FRAMES = ['█', '▓', '▒', '░', '▒', '▓'];
+export const PIXEL_PULSE_INTERVAL_MS = 100;
 
 // Pulse-wave animation: 3-box breathing indicator à la Grok's PromptLoadingBoxes.
 // Each frame defines which box is "active" (full colour) and the wave's direction.

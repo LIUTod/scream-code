@@ -686,7 +686,7 @@ export class SessionEventHandler {
       return;
     }
     const tint = (s: string): string => chalk.hex(state.theme.colors.textMuted)(s);
-    const spinner = new MoonLoader(state.ui, 'braille', tint, label);
+    const spinner = new MoonLoader(state.ui, tint, label);
     state.transcriptContainer.addChild(spinner);
     this.mcpServerStatusSpinners.set(name, spinner);
     state.ui.requestRender();

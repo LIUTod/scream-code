@@ -99,7 +99,7 @@ class SkillCenterLoadingComponent extends Container implements Focusable, Dispos
     super();
     this.host = host;
     const tint = (s: string): string => chalk.hex(host.state.theme.colors.primary)(s);
-    this.loader = new MoonLoader(host.state.ui, 'braille', tint, this.label);
+    this.loader = new MoonLoader(host.state.ui, tint, this.label);
     this.addChild(new Spacer(1));
     this.addChild(this.loader);
   }

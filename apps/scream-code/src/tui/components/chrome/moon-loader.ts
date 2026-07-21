@@ -1,34 +1,18 @@
 import { Text } from '@liutod-scream/pi-tui';
 import type { TUI } from '@liutod-scream/pi-tui';
 
-import {
-  BRAILLE_SPINNER_FRAMES,
-  BRAILLE_SPINNER_INTERVAL_MS,
-  MOON_SPINNER_FRAMES,
-  MOON_SPINNER_INTERVAL_MS,
-} from '#/tui/constant/rendering';
-
-export type SpinnerStyle = 'moon' | 'braille';
+import { BRAILLE_SPINNER_FRAMES, BRAILLE_SPINNER_INTERVAL_MS } from '#/tui/constant/rendering';
 
 export class MoonLoader extends Text {
   private currentFrame = 0;
   private intervalId: ReturnType<typeof setInterval> | null = null;
   private ui: TUI;
-  private frames: string[];
-  private interval: number;
   private colorFn?: (s: string) => string;
   private label: string;
 
-  constructor(
-    ui: TUI,
-    style: SpinnerStyle = 'moon',
-    colorFn?: (s: string) => string,
-    label: string = '',
-  ) {
+  constructor(ui: TUI, colorFn?: (s: string) => string, label: string = '') {
     super('', 1, 0);
     this.ui = ui;
-    this.frames = style === 'moon' ? [...MOON_SPINNER_FRAMES] : [...BRAILLE_SPINNER_FRAMES];
-    this.interval = style === 'moon' ? MOON_SPINNER_INTERVAL_MS : BRAILLE_SPINNER_INTERVAL_MS;
     this.colorFn = colorFn;
     this.label = label;
     this.start();
@@ -37,9 +21,9 @@ export class MoonLoader extends Text {
   start(): void {
     this.updateDisplay();
     this.intervalId = setInterval(() => {
-      this.currentFrame = (this.currentFrame + 1) % this.frames.length;
+      this.currentFrame = (this.currentFrame + 1) % BRAILLE_SPINNER_FRAMES.length;
       this.updateDisplay();
-    }, this.interval);
+    }, BRAILLE_SPINNER_INTERVAL_MS);
   }
 
   stop(): void {
@@ -60,7 +44,7 @@ export class MoonLoader extends Text {
   }
 
   private updateDisplay(): void {
-    const frame = this.frames[this.currentFrame]!;
+    const frame = BRAILLE_SPINNER_FRAMES[this.currentFrame]!;
     const coloredFrame = this.colorFn ? this.colorFn(frame) : frame;
     this.setText(this.label ? `${coloredFrame} ${this.label}` : coloredFrame);
     this.ui.requestComponentRender(this);

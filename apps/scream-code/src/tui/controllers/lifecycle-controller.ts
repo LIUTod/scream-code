@@ -16,7 +16,7 @@ import { isDeadTerminalError } from '../utils/dead-terminal';
 import { isStreaming } from '../utils/app-state';
 import { installTerminalFocusTracking } from '../utils/terminal-focus';
 import { installTerminalThemeTracking } from '../utils/terminal-theme';
-import { MoonLoader, type SpinnerStyle } from '../components/chrome/moon-loader';
+import { MoonLoader } from '../components/chrome/moon-loader';
 import { PulseWaveLoader } from '../components/chrome/pulse-wave-loader';
 import { ActivityPaneComponent, type ActivityPaneMode } from '../components/panes/activity-pane';
 import chalk from 'chalk';
@@ -320,7 +320,7 @@ export class LifecycleController {
         break;
       }
       case 'composing': {
-        const spinner = this.ensureActivitySpinner('braille', 'working...', (s) =>
+        const spinner = this.ensureActivitySpinner('working...', (s) =>
           chalk.hex(state.theme.colors.primary)(s),
         );
         state.activityContainer.addChild(
@@ -385,17 +385,12 @@ export class LifecycleController {
   }
 
   private ensureActivitySpinner(
-    style: SpinnerStyle,
     label = '',
     colorFn?: (s: string) => string,
   ): MoonLoader {
-    if (this.host.state.activitySpinner?.style !== style) {
-      this.stopActivitySpinner();
-    }
-
     if (this.host.state.activitySpinner === null) {
-      const instance = new MoonLoader(this.host.state.ui, style, colorFn, label);
-      this.host.state.activitySpinner = { instance, style };
+      const instance = new MoonLoader(this.host.state.ui, colorFn, label);
+      this.host.state.activitySpinner = { instance };
       return instance;
     }
 
