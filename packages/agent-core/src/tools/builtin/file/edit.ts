@@ -81,8 +81,8 @@ export class EditTool implements BuiltinTool<EditInput> {
     private readonly lspRegistry?: LspRegistry,
   ) {}
 
-  resolveExecution(args: EditInput): ToolExecution {
-    const path = resolvePathAccessPath(args.path, {
+  async resolveExecution(args: EditInput): Promise<ToolExecution> {
+    const path = await resolvePathAccessPath(args.path, {
       jian: this.jian,
       workspace: this.workspace,
       operation: 'write',

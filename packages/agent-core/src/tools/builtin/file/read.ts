@@ -195,8 +195,8 @@ export class ReadTool implements BuiltinTool<ReadInput> {
     private readonly workspace: WorkspaceConfig,
   ) {}
 
-  resolveExecution(args: ReadInput): ToolExecution {
-    const path = resolvePathAccessPath(args.path, {
+  async resolveExecution(args: ReadInput): Promise<ToolExecution> {
+    const path = await resolvePathAccessPath(args.path, {
       jian: this.jian,
       workspace: this.workspace,
       operation: 'read',

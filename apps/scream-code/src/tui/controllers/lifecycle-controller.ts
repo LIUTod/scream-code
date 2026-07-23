@@ -129,11 +129,11 @@ export class LifecycleController {
   startCcConnectPolling(): void {
     const POLL_INTERVAL_MS = 30_000;
     void checkCcConnectActive().then((active) => {
-      this.host.state.appState.ccConnectActive = active;
+      this.host.setAppState({ ccConnectActive: active });
     });
     this.ccConnectPollTimer = setInterval(() => {
       void checkCcConnectActive().then((active) => {
-        this.host.state.appState.ccConnectActive = active;
+        this.host.setAppState({ ccConnectActive: active });
       });
     }, POLL_INTERVAL_MS);
   }
@@ -148,7 +148,7 @@ export class LifecycleController {
   refreshCcStatus(): void {
     setTimeout(() => {
       void checkCcConnectActive().then((active) => {
-        this.host.state.appState.ccConnectActive = active;
+        this.host.setAppState({ ccConnectActive: active });
       });
     }, 3000);
   }

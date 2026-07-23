@@ -421,6 +421,62 @@ describe('generate()', () => {
     ]);
   });
 
+  it.each([
+    ['number', 99],
+    ['string', 'item_missing'],
+  ] as const)(
+    'fails fast for an unknown %s tool-call delta index without mutating pending args',
+    async (_kind, index) => {
+      const pending: ToolCall = {
+        type: 'function',
+        id: 'tc-known',
+        name: 'search',
+        arguments: null,
+        _streamIndex: index === 99 ? 0 : 'item_known',
+      };
+      const onToolCall = vi.fn<(toolCall: ToolCall) => void>();
+      const provider = createMockProvider(
+        createMockStream([
+          pending,
+          { type: 'tool_call_part', argumentsPart: '{"wrong":true}', index },
+        ]),
+      );
+
+      await expect(generate(provider, '', [], [], { onToolCall })).rejects.toThrow(
+        new RegExp(`unknown index .*${String(index)}.*Provider: mock, model: mock-model`),
+      );
+      expect(pending.arguments).toBeNull();
+      expect(onToolCall).not.toHaveBeenCalled();
+    },
+  );
+
+  it('keeps valid indexed interleaving isolated', async () => {
+    const stream = createMockStream([
+      {
+        type: 'function',
+        id: 'tc-a',
+        name: 'search',
+        arguments: null,
+        _streamIndex: 0,
+      },
+      {
+        type: 'function',
+        id: 'tc-b',
+        name: 'search',
+        arguments: null,
+        _streamIndex: 1,
+      },
+      { type: 'tool_call_part', argumentsPart: '{"a":', index: 0 },
+      { type: 'tool_call_part', argumentsPart: '{"b":', index: 1 },
+      { type: 'tool_call_part', argumentsPart: '1}', index: 0 },
+      { type: 'tool_call_part', argumentsPart: '2}', index: 1 },
+    ]);
+
+    const result = await generate(createMockProvider(stream), '', [], []);
+
+    expect(result.message.toolCalls.map((call) => call.arguments)).toEqual(['{"a":1}', '{"b":2}']);
+  });
+
   it('falls back to sequential merge when ToolCallPart has no index', async () => {
     // Back-compat: providers that do not emit `index` continue to work
     // when there is a single tool call in flight.

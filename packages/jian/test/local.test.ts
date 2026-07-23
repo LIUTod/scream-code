@@ -919,6 +919,52 @@ describe('LocalJian optional root sandbox', () => {
     const outside = join(tempDir, 'outside.txt');
     await expect(narrowed.writeText(outside, 'x')).rejects.toThrow('Path outside allowed root directory');
   });
+
+  it.skipIf(process.platform === 'win32')(
+    'resolves a missing leaf through the nearest physical ancestor',
+    async () => {
+      const { symlink } = await import('node:fs/promises');
+      const outside = join(tempDir, 'outside');
+      await mkdir(outside);
+      await symlink(outside, join(sandboxDir, 'link'));
+      const jian = await LocalJian.create(sandboxDir);
+
+      await expect(
+        jian.realpath(join(sandboxDir, 'link', 'new', 'file.txt'), { allowMissing: true }),
+      ).resolves.toBe(join(outside, 'new', 'file.txt'));
+    },
+  );
+
+  it.skipIf(process.platform === 'win32')('fails closed for a broken symlink', async () => {
+    const { symlink } = await import('node:fs/promises');
+    const broken = join(sandboxDir, 'broken');
+    await symlink(join(tempDir, 'missing-target'), broken);
+    const jian = await LocalJian.create(sandboxDir);
+
+    await expect(jian.realpath(join(broken, 'file.txt'), { allowMissing: true })).rejects.toThrow();
+  });
+
+  it.skipIf(process.platform === 'win32')(
+    'does not traverse a directory symlink outside explicit glob roots',
+    async () => {
+      const { symlink, writeFile } = await import('node:fs/promises');
+      const outside = join(tempDir, 'outside');
+      await mkdir(outside);
+      await writeFile(join(outside, 'secret.txt'), 'secret');
+      await symlink(outside, join(sandboxDir, 'outside-link'));
+      await writeFile(join(sandboxDir, 'inside.txt'), 'inside');
+      const jian = await LocalJian.create(sandboxDir);
+      const matches: string[] = [];
+
+      for await (const match of jian.glob(sandboxDir, '**/*.txt', {
+        allowedRoots: [sandboxDir],
+      })) {
+        matches.push(match);
+      }
+
+      expect(matches).toEqual([join(sandboxDir, 'inside.txt')]);
+    },
+  );
 });
 
 async function streamToString(stream: NodeJS.ReadableStream): Promise<string> {

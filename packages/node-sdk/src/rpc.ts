@@ -38,6 +38,7 @@ import type {
   PluginInfo,
   PluginSummary,
   ReloadSummary,
+  RuntimeSystemPrompt,
   CompactOptions,
   SessionPlan,
   SessionStatus,
@@ -96,6 +97,10 @@ export interface SetSessionThinkingRpcInput extends SessionIdRpcInput {
 
 export interface SetSessionPermissionRpcInput extends SessionIdRpcInput {
   readonly mode: PermissionMode;
+}
+
+export interface SetRuntimeSystemPromptRpcInput extends SessionIdRpcInput {
+  readonly prompt: RuntimeSystemPrompt;
 }
 
 export interface SetSessionPlanModeRpcInput extends SessionIdRpcInput {
@@ -293,6 +298,14 @@ export class SDKRpcClient {
     return rpc.cancel({
       sessionId: input.sessionId,
       agentId: this.interactiveAgentId,
+    });
+  }
+
+  async setRuntimeSystemPrompt(input: SetRuntimeSystemPromptRpcInput): Promise<void> {
+    const rpc = await this.getRpc();
+    return rpc.setRuntimeSystemPrompt({
+      sessionId: input.sessionId,
+      prompt: input.prompt,
     });
   }
 

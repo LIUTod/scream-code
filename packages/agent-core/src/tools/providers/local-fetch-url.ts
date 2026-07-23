@@ -88,6 +88,8 @@ const DEFAULT_MAX_BYTES = 10 * 1024 * 1024;
 // Hard ceiling per request — a server that accepts the connection and then
 // stalls must not hang the tool call (and the whole agent turn) forever.
 const FETCH_TIMEOUT_MS = 30_000;
+const MAX_REDIRECTS = 5;
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 
 // Readability's .d.ts references the global `Document` type, but this
 // package compiles with `lib: ES2023` (no DOM). Extracting the
@@ -219,6 +221,12 @@ const defaultDnsLookup = async (hostname: string): Promise<string[]> => {
   return result.map((a) => a.address);
 };
 
+async function cancelResponseBody(response: Response): Promise<void> {
+  await response.body?.cancel().catch(() => {
+    // The body may already be closed by the fetch implementation.
+  });
+}
+
 export class LocalFetchURLProvider implements UrlFetcher {
   private readonly userAgent: string;
   private readonly fetchImpl: typeof fetch;
@@ -243,71 +251,93 @@ export class LocalFetchURLProvider implements UrlFetcher {
       return cached;
     }
 
-    // SSRF check (including DNS resolution) only on cache miss — a cached
-    // entry is a snapshot of content already fetched from a safe address.
-    await assertSafeFetchTarget(url, this.allowPrivateAddresses, this.dnsLookup);
-
     const result = await this.fetchFresh(url);
     this.cache.set(key, result);
     return result;
   }
 
   private async fetchFresh(url: string): Promise<UrlFetchResult> {
-    const response = await this.fetchImpl(url, {
-      method: 'GET',
-      headers: { 'User-Agent': this.userAgent },
-      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-    });
+    const signal = AbortSignal.timeout(FETCH_TIMEOUT_MS);
+    let currentUrl = url;
 
-    if (response.status >= 400) {
-      // Drain the unused body so undici can release the socket back to
-      // the keep-alive pool instead of leaking it on error paths.
-      await response.body?.cancel().catch(() => {
-        /* already closed */
-      });
-      throw new HttpFetchError(
-        response.status,
-        `HTTP ${String(response.status)} ${response.statusText}`,
+    for (let redirectCount = 0; ; redirectCount++) {
+      await assertSafeFetchTarget(
+        currentUrl,
+        this.allowPrivateAddresses,
+        this.dnsLookup,
       );
-    }
 
-    // Reject oversized responses before buffering the full body.
-    const contentLengthRaw = response.headers.get('content-length');
-    if (contentLengthRaw !== null) {
-      const cl = Number(contentLengthRaw);
-      if (Number.isFinite(cl) && cl > this.maxBytes) {
-        // Same drain as the error branch above — otherwise the socket is
-        // leaked out of the keep-alive pool.
-        await response.body?.cancel().catch(() => {
-          /* already closed */
-        });
-        throw new Error(
-          `Response body too large: ${String(cl)} bytes exceeds maxBytes (${String(this.maxBytes)}).`,
+      const response = await this.fetchImpl(currentUrl, {
+        method: 'GET',
+        headers: { 'User-Agent': this.userAgent },
+        redirect: 'manual',
+        signal,
+      });
+
+      if (REDIRECT_STATUSES.has(response.status)) {
+        const location = response.headers.get('location');
+        await cancelResponseBody(response);
+        if (location === null || location.trim().length === 0) {
+          throw new Error(`HTTP redirect ${String(response.status)} is missing a Location header.`);
+        }
+        if (redirectCount >= MAX_REDIRECTS) {
+          throw new Error(`Too many redirects (maximum ${String(MAX_REDIRECTS)}).`);
+        }
+        try {
+          currentUrl = new URL(location, currentUrl).href;
+        } catch {
+          throw new Error(`Invalid redirect Location: "${location}"`);
+        }
+        continue;
+      }
+
+      if (response.status >= 400) {
+        await cancelResponseBody(response);
+        throw new HttpFetchError(
+          response.status,
+          `HTTP ${String(response.status)} ${response.statusText}`,
         );
       }
+
+      // Reject oversized responses before buffering the full body.
+      const contentLengthRaw = response.headers.get('content-length');
+      if (contentLengthRaw !== null) {
+        const cl = Number(contentLengthRaw);
+        if (Number.isFinite(cl) && cl > this.maxBytes) {
+          await cancelResponseBody(response);
+          throw new Error(
+            `Response body too large: ${String(cl)} bytes exceeds maxBytes (${String(this.maxBytes)}).`,
+          );
+        }
+      }
+
+      const contentType = (response.headers.get('content-type') ?? '').toLowerCase();
+
+      // Convertible documents (PDF/Office) take the markit path: binary fetch
+      // capped by maxBytes, then document → markdown conversion. Detect before
+      // the text path — `response.text()` on a PDF is binary garbage.
+      const documentExtension = resolveDocumentExtension(currentUrl, contentType);
+      if (documentExtension !== undefined) {
+        return this.fetchDocument(
+          response,
+          documentExtension.extension,
+          contentType,
+          documentExtension.confident,
+        );
+      }
+
+      const body = await response.text();
+
+      // Servers may omit content-length — measure again defensively.
+      const actualBytes = Buffer.byteLength(body, 'utf8');
+      if (actualBytes > this.maxBytes) {
+        throw new Error(
+          `Response body too large: ${String(actualBytes)} bytes exceeds maxBytes (${String(this.maxBytes)}).`,
+        );
+      }
+
+      return this.extractTextResponse(body, contentType);
     }
-
-    const contentType = (response.headers.get('content-type') ?? '').toLowerCase();
-
-    // Convertible documents (PDF/Office) take the markit path: binary fetch
-    // capped by maxBytes, then document → markdown conversion. Detect before
-    // the text path — `response.text()` on a PDF is binary garbage.
-    const documentExtension = resolveDocumentExtension(url, contentType);
-    if (documentExtension !== undefined) {
-      return this.fetchDocument(response, documentExtension.extension, contentType, documentExtension.confident);
-    }
-
-    const body = await response.text();
-
-    // Servers may omit content-length — measure again defensively.
-    const actualBytes = Buffer.byteLength(body, 'utf8');
-    if (actualBytes > this.maxBytes) {
-      throw new Error(
-        `Response body too large: ${String(actualBytes)} bytes exceeds maxBytes (${String(this.maxBytes)}).`,
-      );
-    }
-
-    return this.extractTextResponse(body, contentType);
   }
 
   /** Text-path extraction shared by the normal flow and the document fallback. */

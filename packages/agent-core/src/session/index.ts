@@ -7,7 +7,7 @@ import type { Jian } from '@scream-code/jian';
 import { ErrorCodes, ScreamError } from '#/errors';
 import { getRootLogger, log } from '#/logging/logger';
 import type { Logger, SessionLogHandle } from '#/logging/types';
-import type { ScreamConfig, SDKSessionRPC } from '#/rpc';
+import type { RuntimeSystemPrompt, ScreamConfig, SDKSessionRPC } from '#/rpc';
 import { proxyWithExtraPayload } from '#/rpc/types';
 
 import { Agent, type AgentOptions, type AgentType } from '../agent';
@@ -109,6 +109,7 @@ export class Session {
     custom: {},
   };
   private writeMetadataPromise = Promise.resolve();
+  private runtimeSystemPrompt: RuntimeSystemPrompt = {};
 
   constructor(public readonly options: SessionOptions) {
     // Attach the per-session log sink up front so the constructor's
@@ -322,6 +323,19 @@ export class Session {
     }
   }
 
+  setRuntimeSystemPrompt(prompt: RuntimeSystemPrompt): void {
+    this.runtimeSystemPrompt = {
+      replace: normalizeRuntimePromptPart(prompt.replace),
+      append: normalizeRuntimePromptPart(prompt.append),
+    };
+  }
+
+  private effectiveSystemPrompt(basePrompt: string): string {
+    const base = this.runtimeSystemPrompt.replace ?? basePrompt;
+    const append = this.runtimeSystemPrompt.append;
+    return append === undefined ? base : `${base}\n\n${append}`;
+  }
+
   get hasActiveTurn(): boolean {
     for (const agent of this.agents.values()) {
       if (agent.turn.hasActiveTurn) return true;
@@ -508,6 +522,7 @@ export class Session {
       permission: this.permissionOptions(parentAgentId, config.permission),
       log: this.log.createChild({ agentId: id }),
       pluginSessionStarts: type === 'main' ? this.options.pluginSessionStarts : undefined,
+      resolveRuntimeSystemPrompt: (basePrompt) => this.effectiveSystemPrompt(basePrompt),
     });
   }
 
@@ -589,6 +604,12 @@ export class Session {
 }
 
 export * from './subagent-host';
+
+function normalizeRuntimePromptPart(value: string | undefined): string | undefined {
+  if (value === undefined) return;
+  const normalized = value.trim();
+  return normalized.length === 0 ? undefined : normalized;
+}
 
 function initCompletionReminder(agentsMd: string): string {
   const latest =

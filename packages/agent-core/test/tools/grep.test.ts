@@ -1449,8 +1449,10 @@ describe('GrepTool', () => {
   it('aborts while resolving the ripgrep path without spawning', async () => {
     const controller = new AbortController();
     const exec = vi.fn();
+    const locatorStarted = Promise.withResolvers<void>();
     vi.mocked(ensureRgPath).mockImplementationOnce(({ signal: locatorSignal } = {}) => {
       expect(locatorSignal).toBe(controller.signal);
+      locatorStarted.resolve();
       return new Promise((_resolve, reject) => {
         const rejectAbort = (): void => {
           const error = new Error('Aborted');
@@ -1467,6 +1469,7 @@ describe('GrepTool', () => {
     const tool = new GrepTool(createFakeJian({ exec }), workspace);
 
     const resultPromise = executeTool(tool, context({ pattern: 'hit' }, controller.signal));
+    await locatorStarted.promise;
     controller.abort();
     const result = await Promise.race([
       resultPromise,

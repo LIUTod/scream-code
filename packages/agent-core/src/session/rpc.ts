@@ -26,6 +26,7 @@ import type {
   SetActiveToolsPayload,
   SetModelPayload,
   SetPermissionPayload,
+  SetRuntimeSystemPromptPayload,
   SetThinkingPayload,
   SkillSummary,
   SteerPayload,
@@ -52,6 +53,10 @@ type AgentScopedPayload<T> = T & { agentId: string };
 
 export class SessionAPIImpl implements PromisableMethods<SessionAPI> {
   constructor(protected readonly session: Session) {}
+
+  setRuntimeSystemPrompt(payload: SetRuntimeSystemPromptPayload): void {
+    this.session.setRuntimeSystemPrompt(payload.prompt);
+  }
 
   async renameSession(payload: RenameSessionPayload): Promise<void> {
     const title = payload.title.trim();

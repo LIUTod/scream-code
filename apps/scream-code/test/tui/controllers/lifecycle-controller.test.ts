@@ -1,6 +1,7 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { LifecycleController } from '#/tui/controllers/lifecycle-controller';
+import * as ccConnectStatus from '#/tui/utils/cc-connect-status';
 import type { LifecycleControllerHost } from '#/tui/controllers/lifecycle-controller';
 import type { ScreamHarness, Session } from '@scream-code/scream-code-sdk';
 import type { AppState, ScreamTUIOptions } from '#/tui/types';
@@ -14,7 +15,7 @@ import type { SessionManager } from '#/tui/managers/session-manager';
 
 function createMockHost(): LifecycleControllerHost {
   const host: LifecycleControllerHost = {
-    state: {} as TUIState,
+    state: { appState: {} as AppState } as TUIState,
     options: {} as ScreamTUIOptions,
     harness: {} as ScreamHarness,
     session: undefined,
@@ -50,6 +51,47 @@ function createDeadTerminalError(code: 'EIO' | 'EPIPE' | 'ENOTCONN'): Error {
 }
 
 describe('LifecycleController', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  describe('cc-connect status', () => {
+    it('commits the initial and interval poll results through setAppState', async () => {
+      vi.useFakeTimers();
+      vi.spyOn(ccConnectStatus, 'checkCcConnectActive')
+        .mockResolvedValueOnce(true)
+        .mockResolvedValueOnce(false);
+      const host = createMockHost();
+      const controller = new LifecycleController(host);
+
+      controller.startCcConnectPolling();
+      await Promise.resolve();
+      expect(host.setAppState).toHaveBeenNthCalledWith(1, { ccConnectActive: true });
+
+      vi.advanceTimersByTime(30_000);
+      await Promise.resolve();
+      expect(host.setAppState).toHaveBeenNthCalledWith(2, { ccConnectActive: false });
+
+      controller.stopCcConnectPolling();
+    });
+
+    it('commits the delayed refresh through setAppState after three seconds', async () => {
+      vi.useFakeTimers();
+      vi.spyOn(ccConnectStatus, 'checkCcConnectActive').mockResolvedValue(true);
+      const host = createMockHost();
+      const controller = new LifecycleController(host);
+
+      controller.refreshCcStatus();
+      vi.advanceTimersByTime(2999);
+      expect(host.setAppState).not.toHaveBeenCalled();
+
+      vi.advanceTimersByTime(1);
+      await Promise.resolve();
+      expect(host.setAppState).toHaveBeenCalledWith({ ccConnectActive: true });
+    });
+  });
+
   describe('installSignalHandlers', () => {
     it('emergency-exits on stdin EIO (read EIO)', () => {
       const host = createMockHost();

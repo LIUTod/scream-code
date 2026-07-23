@@ -239,7 +239,8 @@ export class PermissionManager {
       }
     } else {
       response = {
-        decision: 'approved',
+        decision: 'cancelled',
+        feedback: 'Approval handler is unavailable.',
       };
     }
 

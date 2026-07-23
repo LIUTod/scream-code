@@ -37,6 +37,8 @@ export interface Jian {
   chdir(path: string): Promise<void>;
   /** Return a new Jian with the given `cwd`. */
   withCwd(cwd: string): Jian;
+  /** Return the physical path, optionally resolving through the nearest existing ancestor. */
+  realpath(path: string, options?: { allowMissing?: boolean }): Promise<string>;
   /** Return stat metadata for `path`. */
   stat(path: string, options?: { followSymlinks?: boolean }): Promise<StatResult>;
   /** Yield entry names in the directory at `path`. */
@@ -45,7 +47,7 @@ export interface Jian {
   glob(
     path: string,
     pattern: string,
-    options?: { caseSensitive?: boolean },
+    options?: { caseSensitive?: boolean; allowedRoots?: readonly string[] },
   ): AsyncGenerator<string>;
 
   // ── File operations (async) ─────────────────────────────────────────

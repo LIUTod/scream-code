@@ -134,9 +134,15 @@ export async function multiSearchWithTrace(
   for (const { event } of titleMatches) seedEventIds.add(event.id);
 
   if (seedEventIds.size === 0) {
-    fallbackReason = 'no seed events; used direct chunk vector search';
     const results = await chunkVectorFallback(store, queryVec, topK);
-    return { results, trace: { steps, rerankedEventTitles, fallbackReason } };
+    if (results.length > 0) {
+      fallbackReason = 'no seed events; used direct chunk vector search';
+      return { results, trace: { steps, rerankedEventTitles, fallbackReason } };
+    }
+    fallbackReason =
+      'no seed events and direct chunk vector search returned no results; used FTS5 keyword fallback';
+    const ftsResults = await ftsFallback(store, query, topK);
+    return { results: ftsResults, trace: { steps, rerankedEventTitles, fallbackReason } };
   }
 
   // 4. BFS expand — 1 hop
@@ -205,9 +211,15 @@ export async function multiSearchWithTrace(
   );
 
   if (candidates.length === 0) {
-    fallbackReason = 'no graph-reachable events with content; used chunk vector fallback';
     const results = await chunkVectorFallback(store, queryVec, topK);
-    return { results, trace: { steps, rerankedEventTitles, fallbackReason } };
+    if (results.length > 0) {
+      fallbackReason = 'no graph-reachable events with content; used chunk vector fallback';
+      return { results, trace: { steps, rerankedEventTitles, fallbackReason } };
+    }
+    fallbackReason =
+      'no graph-reachable events with content and chunk vector search returned no results; used FTS5 keyword fallback';
+    const ftsResults = await ftsFallback(store, query, topK);
+    return { results: ftsResults, trace: { steps, rerankedEventTitles, fallbackReason } };
   }
 
   // 6. LLM rerank
@@ -312,6 +324,12 @@ export async function multiSearchWithTrace(
       const result = await store.buildSearchResult(chunk.id, score);
       if (result !== undefined) results.push(result);
     }
+  }
+
+  if (results.length === 0) {
+    fallbackReason = 'vector retrieval returned no results; used FTS5 keyword fallback';
+    const ftsResults = await ftsFallback(store, query, topK);
+    return { results: ftsResults, trace: { steps, rerankedEventTitles, fallbackReason } };
   }
 
   return { results, trace: { steps, rerankedEventTitles, fallbackReason } };

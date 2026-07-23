@@ -76,7 +76,9 @@ describe('GlobTool', () => {
     const result = await executeTool(tool, context({ pattern: 'src/**/*.ts', path: '/workspace' }));
 
     expect(result.output).toBe('src/new.ts\nsrc/old.ts');
-    expect(glob).toHaveBeenCalledWith('/workspace', 'src/**/*.ts');
+    expect(glob).toHaveBeenCalledWith('/workspace', 'src/**/*.ts', {
+      allowedRoots: ['/workspace'],
+    });
   });
 
   it('uses the backend path class when displaying paths relative to a windows root', async () => {
@@ -93,7 +95,9 @@ describe('GlobTool', () => {
     const result = await executeTool(tool, context({ pattern: 'src/**/*.ts', path: 'C:\\WORKSPACE' }));
 
     expect(result.output).toBe('src/old.ts');
-    expect(glob).toHaveBeenCalledWith('C:/WORKSPACE', 'src/**/*.ts');
+    expect(glob).toHaveBeenCalledWith('C:/WORKSPACE', 'src/**/*.ts', {
+      allowedRoots: ['C:/WORKSPACE'],
+    });
   });
 
   it('rejects pure wildcard patterns before walking the tree', async () => {
@@ -140,7 +144,9 @@ describe('GlobTool', () => {
     const result = await executeTool(tool, context({ pattern: '*.ts' }));
 
     expect(glob).toHaveBeenCalledTimes(1);
-    expect(glob).toHaveBeenCalledWith('/workspace', '*.ts');
+    expect(glob).toHaveBeenCalledWith('/workspace', '*.ts', {
+      allowedRoots: ['/workspace'],
+    });
     expect(result.output).toBe('a.ts\nshared.ts');
   });
 
@@ -155,7 +161,9 @@ describe('GlobTool', () => {
 
     expect(result.output).toBe('pkg/a.ts');
     expect(glob).toHaveBeenCalledTimes(1);
-    expect(glob).toHaveBeenCalledWith('/extra', 'pkg/**/*.ts');
+    expect(glob).toHaveBeenCalledWith('/extra', 'pkg/**/*.ts', {
+      allowedRoots: ['/extra'],
+    });
   });
 
   it('filters directories when include_dirs is false', async () => {
@@ -214,7 +222,9 @@ describe('GlobTool', () => {
 
       expect(result.output).toContain('read_content.py');
       expect(result.output).toContain('utils.py');
-      expect(glob).toHaveBeenCalledWith('/skills', '*.py');
+      expect(glob).toHaveBeenCalledWith('/skills', '*.py', {
+        allowedRoots: ['/skills'],
+      });
     });
 
     it('searches inside a subdirectory of an additionalDir entry', async () => {
@@ -522,7 +532,9 @@ describe('GlobTool', () => {
     const result = await executeTool(tool, context({ pattern: '*.py', path: 'relative/path' }));
 
     expect(result.isError).toBeFalsy();
-    expect(glob).toHaveBeenCalledWith('/workspace/relative/path', '*.py');
+    expect(glob).toHaveBeenCalledWith('/workspace/relative/path', '*.py', {
+      allowedRoots: ['/workspace/relative/path'],
+    });
   });
 
   it('expands a leading "~/" path before applying the workspace guard', async () => {
@@ -542,7 +554,9 @@ describe('GlobTool', () => {
 
     expect(result.isError).toBeFalsy();
     expect(result.output).not.toContain('not an absolute path');
-    expect(glob).toHaveBeenCalledWith('/home/test', '*.py');
+    expect(glob).toHaveBeenCalledWith('/home/test', '*.py', {
+      allowedRoots: ['/home/test'],
+    });
   });
 
   it('accepts a path sharing the workspace prefix but outside it', async () => {
@@ -561,7 +575,9 @@ describe('GlobTool', () => {
     );
 
     expect(result.isError).toBeFalsy();
-    expect(glob).toHaveBeenCalledWith('/parent/workdir-sneaky', '*.py');
+    expect(glob).toHaveBeenCalledWith('/parent/workdir-sneaky', '*.py', {
+      allowedRoots: ['/parent/workdir-sneaky'],
+    });
   });
 
   it('locks down rejection phrasing and large-directory caveats in the description', () => {

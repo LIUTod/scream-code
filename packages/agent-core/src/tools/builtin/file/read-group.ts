@@ -124,7 +124,7 @@ export class ReadGroupTool implements BuiltinTool<ReadGroupInput> {
     private readonly workspace: WorkspaceConfig,
   ) {}
 
-  resolveExecution(args: ReadGroupInput): ToolExecution {
+  async resolveExecution(args: ReadGroupInput): Promise<ToolExecution> {
     const paths = args.paths.slice(0, MAX_READ_GROUP_FILES);
     const readTool = new ReadTool(this.jian, this.workspace);
 
@@ -135,7 +135,7 @@ export class ReadGroupTool implements BuiltinTool<ReadGroupInput> {
     const items: ResolvedItem[] = [];
     for (const path of paths) {
       try {
-        const exec = readTool.resolveExecution({
+        const exec = await readTool.resolveExecution({
           path,
           line_offset: args.line_offset,
           n_lines: args.n_lines,

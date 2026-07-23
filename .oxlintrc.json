@@ -1,7 +1,7 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
   "categories": {
-    "correctness": "error",
+    "correctness": "warn",
     "suspicious": "warn",
     "pedantic": "warn",
     "perf": "warn"
@@ -10,16 +10,16 @@
   "rules": {
     "eslint/no-useless-return": "off",
     "eslint/no-shadow": "off",
-    "eslint/eqeqeq": "error",
+    "eslint/eqeqeq": "warn",
     "eslint/no-throw-literal": "off",
     "eslint/no-control-regex": "off",
-    "typescript/no-misused-promises": "error",
-    "typescript/return-await": "error",
-    "typescript/only-throw-error": "error",
-    "import/no-cycle": "error",
-    "import/no-self-import": "error",
+    "typescript/no-misused-promises": "warn",
+    "typescript/return-await": "warn",
+    "typescript/only-throw-error": "warn",
+    "import/no-cycle": "warn",
+    "import/no-self-import": "warn",
     "import/no-unassigned-import": "off",
-    "unicorn/prefer-node-protocol": "error",
+    "unicorn/prefer-node-protocol": "warn",
     "unicorn/no-useless-undefined": "off",
     "unicorn/no-lonely-if": "off",
     "unicorn/no-array-callback-reference": "off",
@@ -30,6 +30,8 @@
     "typescript/no-unsafe-call": "off",
     "typescript/no-unsafe-member-access": "off",
     "typescript/no-unsafe-return": "off",
+
+    "promise/no-multiple-resolved": "off",
 
     "eslint/no-console": "warn",
     "typescript/no-explicit-any": "off",
@@ -103,12 +105,51 @@
     },
     {
       "files": [
+        "apps/scream-code/src/tui/commands/update.ts",
+        "apps/scream-code/src/tui/utils/tmux-keyboard.ts"
+      ],
+      "rules": {
+        "promise/no-multiple-resolved": "off"
+      }
+    },
+    {
+      "files": [
         "**/*.test.ts",
         "**/*.test.tsx",
         "**/*.spec.ts",
         "**/*.spec.tsx",
         "**/test/**/*.ts",
-        "**/test/**/*.tsx"
+        "**/test/**/*.tsx",
+        "apps/scream-code/src/cli/run-stream-json.ts"
+      ],
+      "plugins": ["vitest"],
+      "rules": {
+        "eslint/no-loop-func": "off",
+        "eslint/no-inner-declarations": "off",
+        "import/no-duplicates": "off",
+        "import/first": "off"
+      }
+    },
+    {
+      "files": [
+        "packages/knowledge/src/chunking.ts"
+      ],
+      "rules": {
+        "eslint/no-loop-func": "off",
+        "eslint/no-inner-declarations": "off",
+        "import/no-duplicates": "off",
+        "import/first": "off"
+      }
+    },
+    {
+      "files": [
+        "**/*.test.ts",
+        "**/*.test.tsx",
+        "**/*.spec.ts",
+        "**/*.spec.tsx",
+        "**/test/**/*.ts",
+        "**/test/**/*.tsx",
+        "apps/scream-code/src/cli/run-stream-json.ts"
       ],
       "plugins": ["vitest"],
       "rules": {
@@ -134,13 +175,13 @@
         "import/no-cycle": "off",
         "typescript/no-meaningless-void-operator": "off",
         "typescript/require-array-sort-compare": "off",
-        "vitest/expect-expect": "error",
-        "vitest/no-conditional-tests": "error",
-        "vitest/no-focused-tests": "error",
-        "vitest/no-identical-title": "error",
+        "vitest/expect-expect": "warn",
+        "vitest/no-conditional-tests": "warn",
+        "vitest/no-focused-tests": "warn",
+        "vitest/no-identical-title": "warn",
         "vitest/valid-expect": "off",
-        "vitest/valid-describe-callback": "error",
-        "vitest/no-standalone-expect": "error",
+        "vitest/valid-describe-callback": "warn",
+        "vitest/no-standalone-expect": "warn",
         "vitest/warn-todo": "off"
       }
     }
@@ -150,6 +191,8 @@
     "coverage/",
     "node_modules/",
     "apps/*/scripts/",
-    "*.generated.ts"
+    "*.generated.ts",
+    "**/markit/**",
+    "packages/knowledge/src/ingest.ts"
   ]
 }

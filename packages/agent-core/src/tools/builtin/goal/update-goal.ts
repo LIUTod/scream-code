@@ -18,7 +18,7 @@ export type GoalGraderFn = (
   objective: string,
   criterion: string | undefined,
   output: string,
-) => Promise<{ pass: boolean; reason: string }>;
+) => Promise<unknown>;
 
 export const UpdateGoalToolInputSchema = z
   .object({
@@ -95,39 +95,92 @@ export class UpdateGoalTool implements BuiltinTool<UpdateGoalToolInput> {
 
     const output = extractRecentOutput(this.agent.context.history);
 
-    // Pause goal to prevent continuation loop from interfering during grading
-    await goal.pauseGoal({ reason: 'verifying' }, 'system');
-
-    let pass: boolean;
-    let reason: string;
+    // Pause goal to prevent continuation loop from interfering during grading.
     try {
-      const result = await this.grader(goalState.objective, goalState.completionCriterion, output);
-      pass = result.pass;
-      reason = result.reason;
-    } catch {
-      // Grader failed — default to pass to avoid blocking the user
-      pass = true;
-      reason = 'Grader unavailable';
+      await goal.pauseGoal({ reason: 'verifying' }, 'system');
+    } catch (error) {
+      return toolError(`Failed to pause goal for verification: ${errorMessage(error)}`, goal);
     }
 
-    // Resume goal regardless of outcome
-    await goal.resumeGoal({}, 'system');
+    let rawGrade: unknown;
+    try {
+      rawGrade = await this.grader(goalState.objective, goalState.completionCriterion, output);
+    } catch (error) {
+      const resumeError = await resumeAfterGrading(goal);
+      if (resumeError !== undefined) return resumeError;
+      const reason = `Goal verification could not be completed: ${errorMessage(error)}`;
+      this.appendGradingFeedback(reason);
+      return {
+        isError: true,
+        output: `${reason}. Continue working.`,
+      };
+    }
 
-    if (pass) {
-      const completed = await goal.markComplete({}, 'model');
-      if (completed !== null) {
+    const resumeError = await resumeAfterGrading(goal);
+    if (resumeError !== undefined) return resumeError;
+
+    const grade = parseGrade(rawGrade);
+    if (grade === undefined) {
+      const reason = 'Goal verification could not be completed: grader returned an invalid result';
+      this.appendGradingFeedback(reason);
+      return {
+        isError: true,
+        output: `${reason}. Continue working.`,
+      };
+    }
+
+    if (grade.pass) {
+      try {
+        const completed = await goal.markComplete({}, 'model');
+        if (completed === null) {
+          return toolError('Failed to mark verified goal complete', goal);
+        }
         this.agent.context.appendSystemReminder(buildGoalCompletionSummaryPrompt(completed), {
           kind: 'system_trigger',
           name: GOAL_COMPLETION_REMINDER_NAME,
         });
+      } catch (error) {
+        return toolError(`Failed to mark verified goal complete: ${errorMessage(error)}`, goal);
       }
-      return { output: `Goal verified and marked complete.\n${reason}`, stopTurn: true };
+      return { output: `Goal verified and marked complete.\n${grade.reason}`, stopTurn: true };
     }
 
+    this.appendGradingFeedback(grade.reason);
+    return { output: `Verification failed: ${grade.reason}. Continue working.` };
+  }
+
+  private appendGradingFeedback(reason: string): void {
     this.agent.context.appendSystemReminder(buildGradingFeedbackPrompt(reason), {
       kind: 'system_trigger',
       name: 'goal_grading_feedback',
     });
-    return { output: `Verification failed: ${reason}. Continue working.` };
   }
+}
+
+function parseGrade(value: unknown): { readonly pass: boolean; readonly reason: string } | undefined {
+  if (typeof value !== 'object' || value === null) return;
+  const { pass, reason } = value as { readonly pass?: unknown; readonly reason?: unknown };
+  if (typeof pass !== 'boolean' || typeof reason !== 'string' || reason.trim().length === 0) return;
+  return { pass, reason };
+}
+
+async function resumeAfterGrading(goal: Agent['goal']): Promise<ExecutableToolResult | undefined> {
+  try {
+    await goal.resumeGoal({}, 'system');
+    return;
+  } catch (error) {
+    return toolError(`Failed to restore active goal after verification: ${errorMessage(error)}`, goal);
+  }
+}
+
+function toolError(message: string, goal: Agent['goal']): ExecutableToolResult {
+  const status = goal.getGoal().goal?.status ?? 'missing';
+  return {
+    isError: true,
+    output: `${message}. Current goal status: ${status}.`,
+  };
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

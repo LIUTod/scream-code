@@ -32,6 +32,7 @@ export {
   readBytes,
   readLines,
   readText,
+  realpath,
   runWithJian,
   setCurrentJian,
   stat,

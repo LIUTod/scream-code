@@ -84,7 +84,7 @@ interface GraderResult {
 function parseGraderResponse(text: string): GraderResult {
   try {
     const match = text.match(/\{[\s\S]*\}/);
-    if (!match) return { pass: true, reason: 'No JSON found in grader response', summary: '' };
+    if (!match) return { pass: false, reason: 'No JSON found in grader response', summary: '' };
     const parsed = JSON.parse(match[0]) as {
       pass?: unknown;
       reason?: unknown;
@@ -137,7 +137,7 @@ function parseGraderResponse(text: string): GraderResult {
 
     return { pass: overallPass, reason: reasonParts.join('\n'), summary };
   } catch {
-    return { pass: true, reason: 'Failed to parse grader response', summary: '' };
+    return { pass: false, reason: 'Failed to parse grader response', summary: '' };
   }
 }
 

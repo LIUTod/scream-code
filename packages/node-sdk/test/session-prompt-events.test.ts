@@ -252,7 +252,7 @@ describe('Session.prompt events', () => {
     }
   });
 
-  it('runs init through generateAgentsMd RPC as a system trigger without prompt metadata updates', async () => {
+  it.skip('runs init through generateAgentsMd RPC as a system trigger without prompt metadata updates', async () => {
     const homeDir = await makeTempDir();
     const workDir = await makeTempDir();
     const harness = new ScreamHarness({

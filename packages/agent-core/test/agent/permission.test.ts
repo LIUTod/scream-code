@@ -1641,6 +1641,40 @@ describe('ExitPlanMode permission policy', () => {
     });
   });
 
+  it('runs the ExitPlanMode cancellation resolver when no approval handler exists', async () => {
+    const { manager, exit, record } = makePlanPermissionManager({
+      mode: 'manual',
+      plan: '# Draft Plan',
+      approvalHandlerAvailable: false,
+    });
+
+    const result = await manager.beforeToolCall(
+      hookContext({
+        id: 'call_exit_no_handler',
+        toolName: 'ExitPlanMode',
+        args: {},
+        execution: planReviewExecution({ plan: '# Draft Plan', path: '/tmp/plan.md' }),
+      }),
+    );
+
+    expect(exit).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      syntheticResult: {
+        isError: false,
+        output: 'Plan approval dismissed. Plan mode remains active.',
+      },
+    });
+    expect(record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'permission.record_approval_result',
+        result: {
+          decision: 'cancelled',
+          feedback: 'Approval handler is unavailable.',
+        },
+      }),
+    );
+  });
+
   it('keeps plan mode active when plan approval request fails', async () => {
     const { manager, exit, record } = makePlanPermissionManager({
       mode: 'manual',
@@ -2084,9 +2118,61 @@ describe('Approval cancellation', () => {
       block: true,
       reason: expect.stringContaining('approval request was cancelled'),
     });
+  });
 
-    
-    
+  it.each([
+    ['fallback ask', undefined],
+    ['user ask rule', { decision: 'ask', scope: 'user', pattern: 'Bash' } satisfies PermissionRule],
+  ] as const)('fails closed for %s when no approval handler is available', async (_label, rule) => {
+    const { manager, record } = makePermissionManager(async () => ({ decision: 'approved' }), {
+      approvalHandlerAvailable: false,
+    });
+    if (rule !== undefined) manager.rules.push(rule);
+
+    await expect(manager.beforeToolCall(hookContext({ id: 'call_no_handler' }))).resolves.toEqual({
+      block: true,
+      reason:
+        'Tool "Bash" was not run because the approval request was cancelled. Reason: Approval handler is unavailable.',
+    });
+    expect(record).toHaveBeenCalledWith({
+      type: 'permission.record_approval_result',
+      turnId: 0,
+      toolCallId: 'call_no_handler',
+      toolName: 'Bash',
+      action: 'run command',
+      sessionApprovalRule: undefined,
+      result: {
+        decision: 'cancelled',
+        feedback: 'Approval handler is unavailable.',
+      },
+    });
+  });
+
+  it.each(['auto', 'yolo'] as const)(
+    'keeps %s pre-approval independent of an approval handler',
+    async (mode) => {
+      const { manager, record } = makePermissionManager(async () => ({ decision: 'rejected' }), {
+        approvalHandlerAvailable: false,
+      });
+      manager.mode = mode;
+
+      await expect(manager.beforeToolCall(hookContext({ id: `call_${mode}` }))).resolves.toBeUndefined();
+      expect(record).not.toHaveBeenCalled();
+    },
+  );
+
+  it('keeps WolfPack spawn pre-approval independent of an approval handler', async () => {
+    const { manager, record } = makePermissionManager(async () => ({ decision: 'rejected' }), {
+      approvalHandlerAvailable: false,
+      wolfpackModeActive: true,
+    });
+
+    await expect(
+      manager.beforeToolCall(
+        hookContext({ id: 'call_wolfpack', toolName: 'WolfPack', args: { items: [] } }),
+      ),
+    ).resolves.toBeUndefined();
+    expect(record).not.toHaveBeenCalled();
   });
 });
 
@@ -3164,6 +3250,8 @@ function makePermissionManager(
     readonly cwd?: string;
     readonly agentType?: Agent['type'];
     readonly hooks?: Agent['hooks'];
+    readonly approvalHandlerAvailable?: boolean;
+    readonly wolfpackModeActive?: boolean;
   } = {},
 ): {
   manager: PermissionManager;
@@ -3180,8 +3268,9 @@ function makePermissionManager(
     emitStatusUpdated: vi.fn(),
     records: { logRecord: record },
     replayBuilder: { push: vi.fn() },
-    rpc: { requestApproval },
+    rpc: options.approvalHandlerAvailable === false ? {} : { requestApproval },
     hooks: options.hooks,
+    wolfpackMode: { isActive: options.wolfpackModeActive ?? false },
     planMode: {
       get isActive() {
         return options.planModeActive ?? false;
@@ -3204,6 +3293,7 @@ function makePlanPermissionManager(input: {
   readonly path?: string | undefined;
   readonly approval?: ApprovalResponse | undefined;
   readonly approvalError?: Error | undefined;
+  readonly approvalHandlerAvailable?: boolean;
 }): {
   manager: PermissionManager;
   record: ReturnType<typeof vi.fn>;
@@ -3224,7 +3314,7 @@ function makePlanPermissionManager(input: {
     emitStatusUpdated: vi.fn(),
     records: { logRecord: record },
     replayBuilder: { push: vi.fn() },
-    rpc: { requestApproval },
+    rpc: input.approvalHandlerAvailable === false ? {} : { requestApproval },
     log: { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() },
     planMode: {
       get isActive() {

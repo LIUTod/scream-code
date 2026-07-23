@@ -77,7 +77,7 @@ function outputParts(result: ExecutableToolResult): ContentPart[] {
 }
 
 describe('ReadMediaFileTool', () => {
-  it('has name, parameters, and path-scoped resource accesses', () => {
+  it('has name, parameters, and path-scoped resource accesses', async () => {
     const tool = makeReadMediaTool();
 
     expect(tool.name).toBe('ReadMediaFile');
@@ -90,7 +90,7 @@ describe('ReadMediaFileTool', () => {
         path: { type: 'string' },
       },
     });
-    const execution = tool.resolveExecution({ path: '/workspace/sample.png' });
+    const execution = await tool.resolveExecution({ path: '/workspace/sample.png' });
     expect(execution.isError).toBeFalsy();
     if (execution.isError === true) throw new Error('expected runnable execution');
     expect(execution.accesses).toEqual(ToolAccesses.readFile('/workspace/sample.png'));

@@ -85,6 +85,7 @@ import type {
   SetModelPayload,
   SetModelResult,
   SetPermissionPayload,
+  SetRuntimeSystemPromptPayload,
   SetPluginEnabledPayload,
   SetPluginMcpServerEnabledPayload,
   EnterPlanPayload,
@@ -114,6 +115,7 @@ type SessionScopedPayload<T> = T & { readonly sessionId: string };
 type SessionAgentPayload<T> = SessionScopedPayload<AgentScopedPayload<T>>;
 type RenameSessionRequest = SessionScopedPayload<RenameSessionPayload>;
 type UpdateSessionMetadataRequest = SessionScopedPayload<UpdateSessionMetadataPayload>;
+type SetRuntimeSystemPromptRequest = SessionScopedPayload<SetRuntimeSystemPromptPayload>;
 
 
 export interface ScreamCoreOptions {
@@ -447,6 +449,10 @@ export class ScreamCore implements PromisableMethods<CoreAPI> {
 
     await writeConfigFile(this.configPath, config);
     return this.config = loadRuntimeConfig(this.configPath);
+  }
+
+  setRuntimeSystemPrompt({ sessionId, ...payload }: SetRuntimeSystemPromptRequest) {
+    return this.sessionApi(sessionId).setRuntimeSystemPrompt(payload);
   }
 
   prompt({ sessionId, ...payload }: SessionAgentPayload<PromptPayload>) {

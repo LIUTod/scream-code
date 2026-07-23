@@ -156,7 +156,10 @@ export async function generate(
         }
         continue;
       }
-      // Unknown index — fall through to the sequential logic as a safety net.
+      throw new Error(
+        `Received a tool call argument delta for unknown index ${JSON.stringify(part.index)}. ` +
+          `Provider: ${provider.name}, model: ${provider.modelName}`,
+      );
     }
 
     if (pendingPart === null) {

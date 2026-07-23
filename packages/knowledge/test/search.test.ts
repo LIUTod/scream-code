@@ -2,7 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'pathe';
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ingestContent } from '../src/ingest.js';
 import { multiSearch, multiSearchWithTrace } from '../src/search.js';
@@ -210,6 +210,7 @@ describe('multiSearchWithTrace', () => {
   });
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     store.close();
     await rm(tmpDir, { recursive: true, force: true });
   });
@@ -238,12 +239,174 @@ describe('multiSearchWithTrace', () => {
     expect(trace.fallbackReason).toBeNull();
   });
 
-  it('records fallbackReason when knowledge base is empty', async () => {
-    const llm = makeStubLlm();
-    const { results, trace } = await multiSearchWithTrace(store, llm, 'anything', { topK: 3 });
-    expect(results).toEqual([]);
-    expect(trace.fallbackReason).not.toBeNull();
+  it('falls back to FTS when no seed or chunk vectors exist', async () => {
+    const source = await store.createSource({ name: 'legacy.md' });
+    const document = await store.createDocument({
+      sourceId: source.id,
+      title: 'legacy.md',
+    });
+    const chunk = await store.insertChunk({
+      sourceId: source.id,
+      documentId: document.id,
+      rank: 0,
+      heading: 'Legacy knowledge',
+      content: 'The migration handbook explains historical deployment steps.',
+      rawContent: null,
+      embedding: null,
+    });
+
+    const { results, trace } = await multiSearchWithTrace(
+      store,
+      makeStubLlm(),
+      'migration handbook',
+      { topK: 3 },
+    );
+
+    expect(results.map((result) => result.chunkId)).toEqual([chunk.id]);
+    expect(trace.fallbackReason).toBe(
+      'no seed events and direct chunk vector search returned no results; used FTS5 keyword fallback',
+    );
     expect(trace.rerankedEventTitles).toEqual([]);
+  });
+
+  it('falls back to FTS when graph seeds resolve to no candidates or chunk vectors', async () => {
+    const source = await store.createSource({ name: 'legacy.md' });
+    const document = await store.createDocument({
+      sourceId: source.id,
+      title: 'legacy.md',
+    });
+    const chunk = await store.insertChunk({
+      sourceId: source.id,
+      documentId: document.id,
+      rank: 0,
+      heading: 'Operations',
+      content: 'Operations recovery procedures for the archived service.',
+      rawContent: null,
+      embedding: null,
+    });
+    vi.spyOn(store, 'findEventsByTitleVector').mockResolvedValue([
+      {
+        event: {
+          id: 'missing-event',
+          sourceId: source.id,
+          documentId: document.id,
+          chunkId: chunk.id,
+          rank: 0,
+          title: 'Missing event',
+          summary: null,
+          content: '',
+          category: null,
+          keywords: [],
+          titleEmbedding: null,
+          contentEmbedding: null,
+          createdAt: 0,
+        },
+        score: 1,
+      },
+    ]);
+
+    const { results, trace } = await multiSearchWithTrace(
+      store,
+      makeStubLlm(),
+      'operations recovery',
+      { topK: 2 },
+    );
+
+    expect(results.map((result) => result.chunkId)).toEqual([chunk.id]);
+    expect(trace.fallbackReason).toBe(
+      'no graph-reachable events with content and chunk vector search returned no results; used FTS5 keyword fallback',
+    );
+  });
+
+  it('falls back to FTS when graph retrieval and chunk backfill build no results', async () => {
+    const source = await store.createSource({ name: 'legacy.md' });
+    const document = await store.createDocument({
+      sourceId: source.id,
+      title: 'legacy.md',
+    });
+    const chunk = await store.insertChunk({
+      sourceId: source.id,
+      documentId: document.id,
+      rank: 0,
+      heading: 'Terminal fallback',
+      content: 'Terminal fallback procedures for historical records.',
+      rawContent: null,
+      embedding: null,
+    });
+    const engine = store.getEmbeddingEngine()!;
+    const [eventEmbedding] = (await engine.embedBatch(['terminal fallback']))!;
+    await store.insertEvent({
+      sourceId: source.id,
+      documentId: document.id,
+      chunkId: chunk.id,
+      rank: 0,
+      title: 'Terminal fallback',
+      summary: null,
+      content: 'Historical record',
+      category: null,
+      keywords: [],
+      titleEmbedding: eventEmbedding!,
+      contentEmbedding: eventEmbedding!,
+    });
+    const buildSearchResult = store.buildSearchResult.bind(store);
+    vi.spyOn(store, 'buildSearchResult').mockImplementation(
+      (chunkId, score, eventId = null) =>
+        eventId === null
+          ? buildSearchResult(chunkId, score, eventId)
+          : Promise.resolve(undefined),
+    );
+
+    const { results, trace } = await multiSearchWithTrace(
+      store,
+      makeStubLlm(),
+      'terminal fallback',
+      { topK: 1 },
+    );
+
+    expect(results.map((result) => result.chunkId)).toEqual([chunk.id]);
+    expect(trace.fallbackReason).toBe(
+      'vector retrieval returned no results; used FTS5 keyword fallback',
+    );
+  });
+
+  it('uses FTS only when the complete vector retrieval result is empty', async () => {
+    const source = await store.createSource({ name: 'vectors.md' });
+    const document = await store.createDocument({
+      sourceId: source.id,
+      title: 'vectors.md',
+    });
+    const engine = store.getEmbeddingEngine()!;
+    const [embedding] = (await engine.embedBatch(['vector handbook']))!;
+    const vectorChunk = await store.insertChunk({
+      sourceId: source.id,
+      documentId: document.id,
+      rank: 0,
+      heading: 'Vector result',
+      content: 'A vector-only result.',
+      rawContent: null,
+      embedding: embedding!,
+    });
+    await store.insertChunk({
+      sourceId: source.id,
+      documentId: document.id,
+      rank: 1,
+      heading: 'Keyword result',
+      content: 'vector handbook keyword-only result',
+      rawContent: null,
+      embedding: null,
+    });
+    const ftsSpy = vi.spyOn(store, 'ftsSearchChunks');
+
+    const { results, trace } = await multiSearchWithTrace(
+      store,
+      makeStubLlm(),
+      'vector handbook',
+      { topK: 3 },
+    );
+
+    expect(results.map((result) => result.chunkId)).toEqual([vectorChunk.id]);
+    expect(ftsSpy).not.toHaveBeenCalled();
+    expect(trace.fallbackReason).toBe('no seed events; used direct chunk vector search');
   });
 
   it('each step has non-negative durationMs and a non-empty detail', async () => {

@@ -79,6 +79,10 @@ export function writeBytes(path: string, data: Buffer): Promise<number> {
   return getCurrentJian().writeBytes(path, data);
 }
 
+export function realpath(path: string, options?: { allowMissing?: boolean }): Promise<string> {
+  return getCurrentJian().realpath(path, options);
+}
+
 export function stat(path: string, options?: { followSymlinks?: boolean }): Promise<StatResult> {
   return getCurrentJian().stat(path, options);
 }
@@ -97,7 +101,7 @@ export function iterdir(path: string): AsyncGenerator<string> {
 export function glob(
   path: string,
   pattern: string,
-  options?: { caseSensitive?: boolean },
+  options?: { caseSensitive?: boolean; allowedRoots?: readonly string[] },
 ): AsyncGenerator<string> {
   return getCurrentJian().glob(path, pattern, options);
 }

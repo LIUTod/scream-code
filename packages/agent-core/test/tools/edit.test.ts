@@ -15,9 +15,9 @@ function context(args: EditInput) {
 }
 
 describe('EditTool', () => {
-  it('exposes before/after on the file_io display so the approval panel can render a diff', () => {
+  it('exposes before/after on the file_io display so the approval panel can render a diff', async () => {
     const tool = new EditTool(createFakeJian(), PERMISSIVE_WORKSPACE);
-    const execution = tool.resolveExecution({
+    const execution = await tool.resolveExecution({
       path: '/tmp/foo.ts',
       old_string: 'a\nb\nc',
       new_string: 'a\nB\nc',

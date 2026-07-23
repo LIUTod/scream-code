@@ -105,10 +105,10 @@ export class GlobTool implements BuiltinTool<GlobInput> {
         : GLOB_DESCRIPTION;
   }
 
-  resolveExecution(args: GlobInput): ToolExecution {
+  async resolveExecution(args: GlobInput): Promise<ToolExecution> {
     let path: string | undefined;
     if (args.path !== undefined) {
-      path = resolvePathAccessPath(args.path, {
+      path = await resolvePathAccessPath(args.path, {
         jian: this.jian,
         workspace: this.workspace,
         operation: 'search',
@@ -237,7 +237,9 @@ export class GlobTool implements BuiltinTool<GlobInput> {
       let truncated = false;
 
       outer: for (const root of searchRoots) {
-        for await (const filePath of this.jian.glob(root, args.pattern)) {
+        for await (const filePath of this.jian.glob(root, args.pattern, {
+          allowedRoots: [root],
+        })) {
           yielded++;
           if (yielded >= YIELD_SAFETY_CAP) {
             truncated = true;

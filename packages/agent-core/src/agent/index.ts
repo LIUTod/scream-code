@@ -91,6 +91,7 @@ export interface AgentOptions {
   readonly permission?: PermissionManagerOptions | undefined;
   readonly log?: Logger;
   readonly pluginSessionStarts?: readonly EnabledPluginSessionStart[];
+  readonly resolveRuntimeSystemPrompt?: ((basePrompt: string) => string) | undefined;
 }
 
 export class Agent {
@@ -135,6 +136,7 @@ export class Agent {
 
   private lastLlmConfigLogSignature?: string;
   private readonly sharedEmbeddingEngine: EmbeddingEngine;
+  private readonly resolveRuntimeSystemPrompt: (basePrompt: string) => string;
 
   constructor(options: AgentOptions) {
     this.type = options.type ?? 'main';
@@ -145,6 +147,7 @@ export class Agent {
     this.rpc = options.rpc;
     this.toolServices = options.toolServices;
     this.pluginSessionStarts = options.pluginSessionStarts ?? [];
+    this.resolveRuntimeSystemPrompt = options.resolveRuntimeSystemPrompt ?? ((basePrompt) => basePrompt);
     this.rawGenerate = options.generate ?? generate;
     this.modelProvider = options.modelProvider;
     this.subagentHost = options.subagentHost;
@@ -288,7 +291,7 @@ export class Agent {
     return new LtodLLM({
       provider,
       modelName: model,
-      systemPrompt: this.config.systemPrompt,
+      systemPrompt: this.resolveRuntimeSystemPrompt(this.config.systemPrompt),
       capability: this.config.modelCapabilities,
       generate: this.generate,
       completionBudgetConfig,

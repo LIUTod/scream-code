@@ -78,9 +78,9 @@ export class LspTool implements BuiltinTool<LspInput> {
     private readonly lspRegistry: LspRegistry,
   ) {}
 
-  resolveExecution(args: LspInput): ToolExecution {
+  async resolveExecution(args: LspInput): Promise<ToolExecution> {
     const isWrite = args.operation === 'rename' && args.apply === true;
-    const path = resolvePathAccessPath(args.path, {
+    const path = await resolvePathAccessPath(args.path, {
       jian: this.agent.jian,
       workspace: this.workspace,
       operation: isWrite ? 'write' : 'read',

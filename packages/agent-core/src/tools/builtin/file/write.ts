@@ -64,8 +64,8 @@ export class WriteTool implements BuiltinTool<WriteInput> {
     private readonly lspRegistry?: LspRegistry,
   ) {}
 
-  resolveExecution(args: WriteInput): ToolExecution {
-    const path = resolvePathAccessPath(args.path, {
+  async resolveExecution(args: WriteInput): Promise<ToolExecution> {
+    const path = await resolvePathAccessPath(args.path, {
       jian: this.jian,
       workspace: this.workspace,
       operation: 'write',

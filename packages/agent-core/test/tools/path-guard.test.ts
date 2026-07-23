@@ -28,6 +28,7 @@ const WIN_WORKSPACE: WorkspaceConfig = {
 const POSIX_JIAN = {
   pathClass: () => 'posix' as const,
   gethome: () => '/home/test',
+  realpath: async (path: string) => path,
 };
 
 describe('path access policy', () => {
@@ -117,8 +118,8 @@ describe('path access policy', () => {
     ).toThrow(/sensitive-file pattern/);
   });
 
-  it('resolves only the canonical path for file tools', () => {
-    const result = resolvePathAccessPath('src/../README.md', {
+  it('resolves only the canonical path for file tools', async () => {
+    const result = await resolvePathAccessPath('src/../README.md', {
       jian: POSIX_JIAN,
       workspace: { workspaceDir: '/workspace/project', additionalDirs: [] },
       operation: 'read',
@@ -127,24 +128,52 @@ describe('path access policy', () => {
     expect(result).toBe('/workspace/project/README.md');
   });
 
-  it('expands home for file tools unless explicitly disabled', () => {
+  it('expands home for file tools unless explicitly disabled', async () => {
     const workspace = { workspaceDir: '/workspace', additionalDirs: [] };
 
     expect(
-      resolvePathAccessPath('~/notes/today.txt', {
+      await resolvePathAccessPath('~/notes/today.txt', {
         jian: POSIX_JIAN,
         workspace,
         operation: 'read',
       }),
     ).toBe('/home/test/notes/today.txt');
     expect(
-      resolvePathAccessPath('~/notes/today.txt', {
+      await resolvePathAccessPath('~/notes/today.txt', {
         jian: POSIX_JIAN,
         workspace,
         operation: 'read',
         expandHome: false,
       }),
     ).toBe('/workspace/~/notes/today.txt');
+  });
+
+  it('rejects a lexical workspace path whose physical target escapes through a symlink', async () => {
+    const jian = {
+      ...POSIX_JIAN,
+      realpath: async (path: string) => {
+        if (path === '/workspace/project/link/secret.txt') return '/outside/secret.txt';
+        return path;
+      },
+    };
+
+    await expect(
+      resolvePathAccessPath('/workspace/project/link/secret.txt', {
+        jian,
+        workspace: { workspaceDir: '/workspace/project', additionalDirs: [] },
+        operation: 'read',
+      }),
+    ).rejects.toMatchObject({ code: 'PATH_OUTSIDE_WORKSPACE' });
+  });
+
+  it('allows a missing file whose physical ancestor remains inside the workspace', async () => {
+    await expect(
+      resolvePathAccessPath('/workspace/project/new/file.txt', {
+        jian: POSIX_JIAN,
+        workspace: { workspaceDir: '/workspace/project', additionalDirs: [] },
+        operation: 'write',
+      }),
+    ).resolves.toBe('/workspace/project/new/file.txt');
   });
 
   it('legacy assertPathAllowed keeps strict shared-prefix behavior', () => {

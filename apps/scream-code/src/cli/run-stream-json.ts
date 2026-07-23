@@ -11,9 +11,7 @@
  */
 
 import { createInterface } from "node:readline";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { writeFileSync, unlinkSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { readFile, rm } from "node:fs/promises";
 
 import {
   ScreamHarness,
@@ -28,6 +26,32 @@ import { loadTuiConfig, TuiConfigParseError } from "#/tui/config";
 import { createScreamCodeHostIdentity } from "./version";
 
 // ─── Types ────────────────────────────────────────────────────────────────
+
+export interface RuntimePromptInput {
+  readonly systemPrompt?: string | undefined;
+  readonly appendSystemPrompt?: string | undefined;
+  readonly appendSystemPromptFileContent?: string | undefined;
+}
+
+export function buildStreamJsonRuntimePrompt(input: RuntimePromptInput): {
+  readonly replace?: string | undefined;
+  readonly append: string;
+} {
+  const sendHint =
+    '【重要】你可以通过以下命令向用户发送图片或文件：\n' +
+    '  cc-connect send --image /absolute/path/to/image.png\n' +
+    '  cc-connect send --file /absolute/path/to/file.pdf\n' +
+    '当用户要求你发送文件、截图、生成的图片时，使用 Bash 工具执行上述命令即可。';
+  const appendParts = [
+    sendHint,
+    input.appendSystemPrompt?.trim(),
+    input.appendSystemPromptFileContent?.trim(),
+  ].filter((part): part is string => part !== undefined && part.length > 0);
+  return {
+    replace: input.systemPrompt?.trim() || undefined,
+    append: appendParts.join('\n\n'),
+  };
+}
 
 interface StdinUserMessage {
   type: "user";
@@ -504,28 +528,16 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
   // Subagent id → name mapping (completed/failed events only carry id).
   const subagentNames = new Map<string, string>();
 
-  // cc-connect passes --system-prompt (replaces default), --append-system-prompt
-  // (text), and/or --append-system-prompt-file (path to a file containing the
-  // prompt) with instructions for cc-connect send --image / --file etc.
-  // Inject them into the agent's system prompt via the project-level AGENTS.md
-  // so the agent knows how to deliver generated files back to the chat user.
-  const agentsMdPath = join(workDir, ".scream-code", "AGENTS.md");
-  let originalAgentsMd: string | undefined;
-  let injectedAgentsMd = false;
-
-  // Merge text + file sources. cc-connect may pass either or both; the file
-  // variant is newer (Claude Code SDK parity) and typically carries the
-  // bulk of platform-specific instructions.
-  let appendPrompt = opts.appendSystemPrompt ?? "";
+  // cc-connect passes an optional replacement prompt plus append text/file.
+  // Keep the overlay in session memory: mutating project AGENTS.md creates
+  // crash and concurrency hazards and can overwrite user edits.
+  let appendSystemPromptFileContent: string | undefined;
   if (opts.appendSystemPromptFile) {
     try {
-      const fileContent = await readFile(opts.appendSystemPromptFile, "utf-8");
-      appendPrompt = appendPrompt
-        ? `${appendPrompt}\n\n${fileContent}`
-        : fileContent;
+      appendSystemPromptFileContent = await readFile(opts.appendSystemPromptFile, "utf-8");
       log.info("stream-json: loaded append-system-prompt-file", {
         path: opts.appendSystemPromptFile,
-        bytes: fileContent.length,
+        bytes: appendSystemPromptFileContent.length,
       });
     } catch (error) {
       log.warn("stream-json: failed to read append-system-prompt-file", {
@@ -535,31 +547,11 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
     }
   }
 
-  const hasSystemPrompt = opts.systemPrompt && opts.systemPrompt.trim().length > 0;
-  if (hasSystemPrompt || appendPrompt) {
-    try { originalAgentsMd = await readFile(agentsMdPath, "utf-8"); } catch { /* new file */ }
-    await mkdir(join(workDir, ".scream-code"), { recursive: true });
-    const sendHint =
-      '【重要】你可以通过以下命令向用户发送图片或文件：\n' +
-      '  cc-connect send --image /absolute/path/to/image.png\n' +
-      '  cc-connect send --file /absolute/path/to/file.pdf\n' +
-      '当用户要求你发送文件、截图、生成的图片时，使用 Bash 工具执行上述命令即可。\n';
-    // --system-prompt replaces the default; --append-system-prompt appends.
-    const systemSection = hasSystemPrompt
-      ? `# System Prompt (from --system-prompt)\n\n${opts.systemPrompt}\n`
-      : "";
-    const appendSection = appendPrompt ? appendPrompt : "";
-    const ccPrompt = `${sendHint}\n${systemSection}\n${appendSection}`;
-    const merged = originalAgentsMd
-      ? `${ccPrompt}\n\n${originalAgentsMd}`
-      : ccPrompt;
-    await writeFile(agentsMdPath, merged, "utf-8");
-    injectedAgentsMd = true;
-    log.info("stream-json: injected cc-connect system prompt into AGENTS.md", {
-      hasSystemPrompt,
-      hasAppendPrompt: appendPrompt.length > 0,
-    });
-  }
+  const runtimeSystemPrompt = buildStreamJsonRuntimePrompt({
+    systemPrompt: opts.systemPrompt,
+    appendSystemPrompt: opts.appendSystemPrompt,
+    appendSystemPromptFileContent,
+  });
 
   let cleaned = false;
   const runCleanup = async (): Promise<void> => {
@@ -584,24 +576,7 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
     } catch {
       // Best-effort cleanup
     }
-
-    // Restore AGENTS.md to its original state (undo cc-connect injection).
-    // Synchronous I/O so SIGTERM can't interrupt mid-restore and leave the
-    // injected file in the user's project.
-    if (injectedAgentsMd) {
-      try {
-        if (originalAgentsMd === undefined) {
-          if (existsSync(agentsMdPath)) unlinkSync(agentsMdPath);
-        } else {
-          writeFileSync(agentsMdPath, originalAgentsMd, "utf-8");
-        }
-      } catch {
-        // Best-effort cleanup
-      }
-    }
   };
-  // Without these, SIGINT/SIGTERM kills the process instantly and the
-  // AGENTS.md injection would be left behind in the user's project.
   const uninstallTerminationHandlers = installStreamJsonTerminationHandlers(runCleanup);
 
   try {
@@ -712,6 +687,7 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
           log.info("stream-json: created session", { sessionId: session.id });
         }
 
+        await session.setRuntimeSystemPrompt(runtimeSystemPrompt);
         currentSessionId = session.id;
         writer.setSessionId(session.id);
         writer.setModel(opts.model ?? config.defaultModel ?? "");
@@ -966,7 +942,7 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
           finish(new Error("会话已自动重置，请重新发送你的消息。"));
           return;
         }
-        finish(error instanceof Error ? error : new Error(msg));
+        throw error instanceof Error ? error : new Error(msg);
       });
 
       try {

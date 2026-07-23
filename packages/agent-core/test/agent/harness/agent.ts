@@ -103,6 +103,7 @@ export interface TestAgentOptions {
   readonly onEvent?: ((event: AgentRecord) => AgentRecord | undefined) | undefined;
   readonly persistence?: AgentRecordPersistence | undefined;
   readonly log?: Logger;
+  readonly resolveRuntimeSystemPrompt?: AgentOptions['resolveRuntimeSystemPrompt'];
 }
 
 interface ConfigureOptions {
@@ -186,6 +187,7 @@ export class AgentTestContext {
       permission: options.permission,
       hookEngine: options.hookEngine,
       log: options.log,
+      resolveRuntimeSystemPrompt: options.resolveRuntimeSystemPrompt,
     });
     this.rpc = this.createPromiseAgentApi(this.agent);
     // The Agent constructor now eagerly binds a SIGUSR1 listener via
@@ -965,6 +967,7 @@ function createResumeNoSideEffectJian(initialCwd: string): Jian {
     chdir: async (next: string) => {
       cwd = next;
     },
+    realpath: () => fail('realpath'),
     stat: () => fail('stat'),
     iterdir: () => fail('iterdir'),
     glob: () => fail('glob'),

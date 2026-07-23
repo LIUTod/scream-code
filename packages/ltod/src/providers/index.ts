@@ -13,24 +13,35 @@ export type ProviderConfig =
   | ({ type: 'openai_responses' } & OpenAIResponsesOptions)
   | ({ type: 'vertexai' } & GoogleGenAIOptions);
 
+type VertexModeGuard<T extends ProviderConfig> = T extends { type: 'vertexai' }
+  ? T extends { vertexai: infer TVertex }
+    ? false extends TVertex
+      ? never
+      : unknown
+    : unknown
+  : unknown;
+
 export type ProviderType = ProviderConfig['type'];
 
-export function createProvider(config: ProviderConfig): ChatProvider {
-  switch (config.type) {
+export function createProvider<const T extends ProviderConfig>(
+  config: T & VertexModeGuard<T>,
+): ChatProvider {
+  const providerConfig: ProviderConfig = config;
+  switch (providerConfig.type) {
     case 'anthropic':
-      return new AnthropicChatProvider(config);
+      return new AnthropicChatProvider(providerConfig);
     case 'openai':
-      return new OpenAILegacyChatProvider(config);
+      return new OpenAILegacyChatProvider(providerConfig);
     case 'scream':
-      return new ScreamChatProvider(config);
+      return new ScreamChatProvider(providerConfig);
     case 'google-genai':
-      return new GoogleGenAIChatProvider(config);
+      return new GoogleGenAIChatProvider(providerConfig);
     case 'openai_responses':
-      return new OpenAIResponsesChatProvider(config);
+      return new OpenAIResponsesChatProvider(providerConfig);
     case 'vertexai':
-      return new GoogleGenAIChatProvider(config);
+      return new GoogleGenAIChatProvider({ ...providerConfig, vertexai: true });
     default: {
-      const exhaustive: never = config;
+      const exhaustive: never = providerConfig;
       throw new Error(`Unknown provider type: ${String(exhaustive)}`);
     }
   }

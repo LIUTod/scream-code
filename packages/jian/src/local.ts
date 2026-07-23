@@ -10,11 +10,11 @@ import {
   readdir,
   readFile,
   stat,
-  realpath,
+  realpath as fsRealpath,
   writeFile,
 } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { isAbsolute, join, normalize } from 'pathe';
+import { basename, dirname, isAbsolute, join, normalize } from 'pathe';
 import type { Readable, Writable } from 'node:stream';
 
 import { detectEnvironmentFromNode, type Environment } from './environment';
@@ -83,9 +83,13 @@ const isWindows: boolean = process.platform === 'win32';
  * lexical check only; it does not resolve symlinks.
  */
 function isWithinDirectory(candidate: string, base: string): boolean {
-  if (candidate === base) return true;
-  const prefix = base.endsWith('/') ? base : `${base}/`;
-  return candidate.startsWith(prefix);
+  const normalizedCandidate = normalize(candidate);
+  const normalizedBase = normalize(base);
+  const comparableCandidate = isWindows ? normalizedCandidate.toLowerCase() : normalizedCandidate;
+  const comparableBase = isWindows ? normalizedBase.toLowerCase() : normalizedBase;
+  if (comparableCandidate === comparableBase) return true;
+  const prefix = comparableBase.endsWith('/') ? comparableBase : `${comparableBase}/`;
+  return comparableCandidate.startsWith(prefix);
 }
 
 /**
@@ -305,8 +309,8 @@ export class LocalJian implements Jian {
         this._rootDir!,
       );
     }
-    const realPath = await realpath(lexical);
-    const realRoot = await realpath(this._rootDir!);
+    const realPath = await fsRealpath(lexical);
+    const realRoot = await fsRealpath(this._rootDir!);
     if (!isWithinDirectory(realPath, realRoot)) {
       throw new JianPathOutsideRootError(
         `Path outside allowed root directory (via symlink): ${lexical}`,
@@ -353,6 +357,37 @@ export class LocalJian implements Jian {
     this._cwd = resolved;
   }
 
+  async realpath(path: string, options?: { allowMissing?: boolean }): Promise<string> {
+    const lexical = this._resolvePath(path);
+    try {
+      return normalize(await fsRealpath(lexical));
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (!options?.allowMissing || (code !== 'ENOENT' && code !== 'ENOTDIR')) throw error;
+    }
+
+    const missingSegments: string[] = [];
+    let ancestor = lexical;
+    while (true) {
+      try {
+        await lstat(ancestor);
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code !== 'ENOENT' && code !== 'ENOTDIR') throw error;
+        const parent = dirname(ancestor);
+        if (parent === ancestor) throw error;
+        missingSegments.push(basename(ancestor));
+        ancestor = parent;
+        continue;
+      }
+
+      // The ancestor exists. A failure here means it is inaccessible or a
+      // dangling symlink, not a normal missing leaf, so fail closed.
+      const physicalAncestor = normalize(await fsRealpath(ancestor));
+      return normalize(join(physicalAncestor, ...missingSegments.toReversed()));
+    }
+  }
+
   async stat(path: string, options?: { followSymlinks?: boolean }): Promise<StatResult> {
     const followSymlinks = options?.followSymlinks ?? true;
     const resolved = this._rootDir !== undefined && followSymlinks
@@ -386,10 +421,14 @@ export class LocalJian implements Jian {
   async *glob(
     path: string,
     pattern: string,
-    options?: { caseSensitive?: boolean },
+    options?: { caseSensitive?: boolean; allowedRoots?: readonly string[] },
   ): AsyncGenerator<string> {
     const resolved = this._resolvePath(path);
     const caseSensitive = options?.caseSensitive ?? true;
+    const physicalAllowedRoots = options?.allowedRoots === undefined
+      ? undefined
+      : await Promise.all(options.allowedRoots.map((root) => this.realpath(root, { allowMissing: true })));
+    if (!(await this._isWithinPhysicalRoots(resolved, physicalAllowedRoots))) return;
     // NOTE: patterns are split on '/' only. Windows users passing `**\\*.txt`
     // get a single segment — backslashes are treated literally. Use POSIX-style.
     const patternParts = pattern.split('/');
@@ -407,7 +446,13 @@ export class LocalJian implements Jian {
     } catch {
       // base does not exist / not accessible — walker handles via its own catch
     }
-    yield* this._globWalk(resolved, patternParts, caseSensitive, initVisited);
+    yield* this._globWalk(
+      resolved,
+      patternParts,
+      caseSensitive,
+      initVisited,
+      physicalAllowedRoots,
+    );
   }
 
   // `visited` holds the `(stDev, stIno)` keys of directories on the
@@ -435,7 +480,9 @@ export class LocalJian implements Jian {
     patternParts: string[],
     caseSensitive: boolean,
     visited: Set<string>,
+    physicalAllowedRoots: readonly string[] | undefined,
   ): AsyncGenerator<string> {
+    if (!(await this._isWithinPhysicalRoots(basePath, physicalAllowedRoots))) return;
     if (patternParts.length === 0) {
       return;
     }
@@ -459,7 +506,13 @@ export class LocalJian implements Jian {
       // because case (a) inside the child recursion already yields those
       // results.
       if (remainingParts.length > 0) {
-        yield* this._globWalk(basePath, remainingParts, caseSensitive, visited);
+        yield* this._globWalk(
+          basePath,
+          remainingParts,
+          caseSensitive,
+          visited,
+          physicalAllowedRoots,
+        );
       } else {
         // Pattern ends with `**`: yield basePath itself (zero-dir match).
         yield basePath;
@@ -490,8 +543,12 @@ export class LocalJian implements Jian {
             patternParts,
             caseSensitive,
             key !== null ? new Set([...visited, key]) : visited,
+            physicalAllowedRoots,
           );
-        } else if (remainingParts.length === 0) {
+        } else if (
+          remainingParts.length === 0 &&
+          (await this._isWithinPhysicalRoots(fullPath, physicalAllowedRoots))
+        ) {
           // Pattern ends with `**`: non-directory entries match too
           // (since `**` matches "anything").
           yield fullPath;
@@ -516,7 +573,9 @@ export class LocalJian implements Jian {
         const fullPath = join(basePath, entry);
         if (this._rootDir && !isWithinDirectory(fullPath, this._rootDir)) continue;
         if (remainingParts.length === 0) {
-          yield fullPath;
+          if (await this._isWithinPhysicalRoots(fullPath, physicalAllowedRoots)) {
+            yield fullPath;
+          }
         } else {
           let entryStat;
           try {
@@ -532,10 +591,24 @@ export class LocalJian implements Jian {
               remainingParts,
               caseSensitive,
               key !== null ? new Set([...visited, key]) : visited,
+              physicalAllowedRoots,
             );
           }
         }
       }
+    }
+  }
+
+  private async _isWithinPhysicalRoots(
+    path: string,
+    physicalAllowedRoots: readonly string[] | undefined,
+  ): Promise<boolean> {
+    if (physicalAllowedRoots === undefined) return true;
+    try {
+      const physicalPath = normalize(await fsRealpath(path));
+      return physicalAllowedRoots.some((root) => isWithinDirectory(physicalPath, root));
+    } catch {
+      return false;
     }
   }
 

@@ -141,8 +141,8 @@ export class ReadMediaFileTool implements BuiltinTool<ReadMediaFileInput> {
     this.description = buildDescription(capabilities);
   }
 
-  resolveExecution(args: ReadMediaFileInput): ToolExecution {
-    const path = resolvePathAccessPath(args.path, {
+  async resolveExecution(args: ReadMediaFileInput): Promise<ToolExecution> {
+    const path = await resolvePathAccessPath(args.path, {
       jian: this.jian,
       workspace: this.workspace,
       operation: 'read',

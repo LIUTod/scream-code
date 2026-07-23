@@ -13,6 +13,10 @@ import {
   messagesToGoogleGenAIContents,
 } from '#/providers/google-genai';
 import type { Tool } from '#/tool';
+import {
+  createProvider as createProviderFromConfig,
+  type ProviderConfig,
+} from '#/providers/index';
 import { describe, it, expect, vi } from 'vitest';
 
 function makeGenerateContentResponse() {
@@ -583,6 +587,41 @@ describe('GoogleGenAIChatProvider', () => {
   });
 
   describe('vertexai message conversion', () => {
+    it('createProvider forces Vertex AI mode and preserves its configuration', () => {
+      const provider = createProviderFromConfig({
+        type: 'vertexai',
+        model: 'gemini-2.5-pro',
+        project: 'contract-project',
+        location: 'us-central1',
+        stream: false,
+      });
+
+      expect(provider).toBeInstanceOf(GoogleGenAIChatProvider);
+      expect(provider.modelName).toBe('gemini-2.5-pro');
+      expect(() =>
+        createProviderFromConfig({
+          type: 'vertexai',
+          model: 'gemini-2.5-pro',
+          project: 'contract-project',
+          location: 'us-central1',
+          apiKey: 'conflicting-api-key',
+        }),
+      ).toThrow(/Project\/location and API key are mutually exclusive/);
+    });
+
+    it('keeps google-genai in Gemini API mode', () => {
+      const config: ProviderConfig = {
+        type: 'google-genai',
+        model: 'gemini-2.5-flash',
+        apiKey: 'test-key',
+        vertexai: false,
+      };
+      const provider = createProviderFromConfig(config);
+
+      expect(provider).toBeInstanceOf(GoogleGenAIChatProvider);
+      expect(provider.modelName).toBe('gemini-2.5-flash');
+    });
+
     it('vertexai provider converts messages the same way', async () => {
       const provider = createProvider({ vertexai: true });
       const history: Message[] = [

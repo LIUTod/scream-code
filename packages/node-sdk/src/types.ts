@@ -39,6 +39,7 @@ export type {
   ProviderConfig,
   ProviderType,
   ReloadSummary,
+  RuntimeSystemPrompt,
   ResumedAgentState,
   ServicesConfig,
   ShellEnvironment,

@@ -182,10 +182,10 @@ export class GrepTool implements BuiltinTool<GrepInput> {
     private readonly workspace: WorkspaceConfig,
   ) {}
 
-  resolveExecution(args: GrepInput): ToolExecution {
+  async resolveExecution(args: GrepInput): Promise<ToolExecution> {
     let path: string | undefined;
     if (args.path !== undefined) {
-      path = resolvePathAccessPath(args.path, {
+      path = await resolvePathAccessPath(args.path, {
         jian: this.jian,
         workspace: this.workspace,
         operation: 'search',

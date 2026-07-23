@@ -1,10 +1,10 @@
 /**
  * Path safety guards used by Read/Write/Edit/Grep/Glob.
  *
- * Canonicalization is **lexical** only (no `realpath` / symlink following).
- * Mirrors `JianPath.canonical()` and keeps the guard backend-aware:
- * callers should pass the active Jian path class so SSH paths stay POSIX
- * even when the host Node process is running on Windows.
+ * Canonicalization first applies the existing lexical policy, then resolves
+ * the physical target through Jian so symlinks cannot escape an allowed root.
+ * The checks remain backend-aware: callers pass the active Jian path class so
+ * SSH paths stay POSIX even when the host Node process is running on Windows.
  *
  * Shared-prefix escapes (a path like `/workspace-evil` passing a naive
  * `startswith('/workspace')` check) are blocked by requiring a path
@@ -183,7 +183,7 @@ export interface ResolvePathAccessOptions {
 }
 
 export interface ResolvePathAccessPathOptions {
-  readonly jian: Pick<Jian, 'pathClass' | 'gethome'>;
+  readonly jian: Pick<Jian, 'pathClass' | 'gethome' | 'realpath'>;
   readonly workspace: WorkspaceConfig;
   readonly operation: PathAccessOperation;
   readonly policy?: WorkspaceAccessPolicy;
@@ -283,17 +283,64 @@ export function resolvePathAccess(
   return { path: canonical, outsideWorkspace };
 }
 
-export function resolvePathAccessPath(
+export async function resolvePathAccessPath(
   path: string,
   options: ResolvePathAccessPathOptions,
-): string {
+): Promise<string> {
   const { jian, workspace, operation, policy, expandHome = true } = options;
-  return resolvePathAccess(path, workspace.workspaceDir, workspace, {
+  const pathClass = jian.pathClass();
+  const access = resolvePathAccess(path, workspace.workspaceDir, workspace, {
     operation,
     policy,
-    pathClass: jian.pathClass(),
+    pathClass,
     homeDir: expandHome ? jian.gethome() : undefined,
-  }).path;
+  });
+
+  let physicalPath: string;
+  let physicalRoots: string[];
+  try {
+    physicalPath = await jian.realpath(access.path, { allowMissing: true });
+    physicalRoots = access.outsideWorkspace
+      ? []
+      : await Promise.all(
+          [workspace.workspaceDir, ...workspace.additionalDirs].map((root) =>
+            jian.realpath(root, { allowMissing: true }),
+          ),
+        );
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new PathSecurityError(
+      'PATH_OUTSIDE_WORKSPACE',
+      path,
+      access.path,
+      `Cannot resolve the physical path for "${path}": ${detail}`,
+    );
+  }
+
+  if (
+    !access.outsideWorkspace &&
+    !physicalRoots.some((root) => isWithinDirectory(physicalPath, root, pathClass))
+  ) {
+    throw new PathSecurityError(
+      'PATH_OUTSIDE_WORKSPACE',
+      path,
+      physicalPath,
+      outsideWorkspaceMessage(path, physicalPath, workspace, operation),
+    );
+  }
+
+  const effectivePolicy = policy ?? DEFAULT_WORKSPACE_ACCESS_POLICY;
+  if (effectivePolicy.checkSensitive && isSensitiveFile(physicalPath)) {
+    throw new PathSecurityError(
+      'PATH_SENSITIVE',
+      path,
+      physicalPath,
+      `"${path}" resolves to a sensitive-file pattern (env / credential / SSH key). ` +
+        `Access is blocked to protect secrets.`,
+    );
+  }
+
+  return physicalPath;
 }
 
 /**

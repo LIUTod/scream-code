@@ -52,7 +52,7 @@ export async function findUniqueSuffixMatch(
   let timer: NodeJS.Timeout | undefined;
   try {
     const globPromise = (async () => {
-      for await (const filePath of jian.glob(searchRoot, pattern)) {
+      for await (const filePath of jian.glob(searchRoot, pattern, { allowedRoots: [searchRoot] })) {
         matches.push(filePath);
         if (matches.length > 1) break;
       }
@@ -112,7 +112,7 @@ export async function partitionExistingPaths(
   const settled = await Promise.all(
     paths.map(async (path) => {
       try {
-        const safePath = resolvePathAccessPath(path, {
+        const safePath = await resolvePathAccessPath(path, {
           jian,
           workspace,
           operation: 'read',

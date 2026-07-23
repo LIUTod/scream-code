@@ -63,6 +63,17 @@ describe('Agent config', () => {
     await ctx.expectResumeMatches();
   });
 
+  it('applies a runtime system prompt without mutating persisted config state', () => {
+    const ctx = testAgent({
+      resolveRuntimeSystemPrompt: (basePrompt) => `${basePrompt}\n\nruntime append`,
+    });
+    ctx.configure();
+
+    expect(ctx.agent.llm.systemPrompt).toBe(`${DEFAULT_TEST_SYSTEM_PROMPT}\n\nruntime append`);
+    expect(ctx.agent.config.systemPrompt).toBe(DEFAULT_TEST_SYSTEM_PROMPT);
+    expect(ctx.newEvents()).not.toContain('runtime append');
+  });
+
   it('useProfile emits the rendered system prompt and active tools', async () => {
     const ctx = testAgent();
     ctx.configure();

@@ -60,9 +60,9 @@ describe('WriteTool', () => {
     expect(params.properties.path.description).toMatch(/absolute/i);
   });
 
-  it('exposes the content on the file_io display so the approval panel can preview it', () => {
+  it('exposes the content on the file_io display so the approval panel can preview it', async () => {
     const tool = new WriteTool(createFakeJian(), PERMISSIVE_WORKSPACE);
-    const execution = tool.resolveExecution({
+    const execution = await tool.resolveExecution({
       path: '/tmp/new.txt',
       content: 'hello\nworld',
     });
@@ -77,13 +77,13 @@ describe('WriteTool', () => {
     });
   });
 
-  it('matches permission args with negated glob path semantics', () => {
+  it('matches permission args with negated glob path semantics', async () => {
     const tool = new WriteTool(createFakeJian(), {
       workspaceDir: '/workspace',
       additionalDirs: [],
     });
-    const insideSrc = tool.resolveExecution({ path: './src/a.ts', content: 'x' });
-    const outsideSrc = tool.resolveExecution({ path: './README.md', content: 'x' });
+    const insideSrc = await tool.resolveExecution({ path: './src/a.ts', content: 'x' });
+    const outsideSrc = await tool.resolveExecution({ path: './README.md', content: 'x' });
     if (insideSrc.isError === true || outsideSrc.isError === true) {
       throw new TypeError('expected runnable execution');
     }
