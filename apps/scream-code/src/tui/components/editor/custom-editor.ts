@@ -223,7 +223,7 @@ export class CustomEditor extends Editor {
   /** Current permission mode — always shown as a badge at the top-left of the input box border. */
   permissionMode: PermissionMode = 'manual';
   /** Current border colour hex — kept in sync with borderColor by the host. */
-  borderHex = '';
+  borderHex = '#79eb00';
 
   private consumingPaste = false;
   private consumeBuffer = '';

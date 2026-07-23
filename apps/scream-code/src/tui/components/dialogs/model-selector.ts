@@ -29,7 +29,7 @@ export interface ModelSelection {
   readonly thinkingLevel: ThinkingEffort;
 }
 
-const DEFAULT_THINKING_LEVELS: readonly ThinkingEffort[] = ['off', 'low', 'medium', 'high'];
+const DEFAULT_THINKING_LEVELS: readonly ThinkingEffort[] = ['off', 'low', 'medium', 'high', 'max'];
 
 export function modelDisplayName(alias: string, model: ModelAlias | undefined): string {
   return model?.displayName ?? model?.model ?? alias;

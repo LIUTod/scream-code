@@ -75,7 +75,7 @@ describe('ChoicePickerComponent', () => {
     const modelOutput = model.render(120).map(strip);
     expect(modelOutput).toContain('  ❯ Scream K2 (Scream Code) ← current');
     expect(modelOutput).toContain(' Thinking（全局设置）');
-    expect(modelOutput).toContain('  off  low  medium  [ high ]');
+    expect(modelOutput).toContain('  off  low  medium  [ high ]  max');
     expect(modelOutput).toContain(' 多模态能力');
     expect(modelOutput).toContain('  识图: ✗ 不支持');
     expect(modelOutput).toContain('  视频: ✗ 不支持');
@@ -129,7 +129,7 @@ describe('ChoicePickerComponent', () => {
     picker.handleInput('\u001B[C');
     picker.handleInput('\r');
 
-    expect(onSelect).toHaveBeenCalledWith({ alias: 'scream', thinkingLevel: 'off' });
+    expect(onSelect).toHaveBeenCalledWith({ alias: 'scream', thinkingLevel: 'max' });
   });
 
   it('forces always-thinking models on and unsupported models off', () => {
@@ -158,7 +158,7 @@ describe('ChoicePickerComponent', () => {
       onCancel: vi.fn(),
     });
 
-    expect(picker.render(120).map(strip)).toContain('  [ low ]  medium  high');
+    expect(picker.render(120).map(strip)).toContain('  [ low ]  medium  high  max');
     picker.handleInput('\u001B[C');
     picker.handleInput('\r');
     expect(onSelect).toHaveBeenLastCalledWith({ alias: 'always', thinkingLevel: 'medium' });
@@ -196,7 +196,7 @@ describe('ChoicePickerComponent', () => {
     // Right (ESC[C) cycles to the next thinking level, proving it is an interactive control.
     picker.handleInput('\u001B[C');
     picker.handleInput('\r');
-    expect(onSelect).toHaveBeenLastCalledWith({ alias: 'okapi', thinkingLevel: 'off' });
+    expect(onSelect).toHaveBeenLastCalledWith({ alias: 'okapi', thinkingLevel: 'max' });
   });
   it('fires onChangeThinking immediately when cycling thinking with arrows', () => {
     const onChangeThinking = vi.fn();
@@ -218,15 +218,15 @@ describe('ChoicePickerComponent', () => {
       onCancel: vi.fn(),
     });
 
-    // Right cycles high -> off (wraps), firing onChangeThinking each step.
-    picker.handleInput('[C');
+    // Right cycles high -> max -> off, firing onChangeThinking each step.
+    picker.handleInput('\u001B[C');
+    expect(onChangeThinking).toHaveBeenLastCalledWith('scream', 'max');
+    picker.handleInput('\u001B[C');
     expect(onChangeThinking).toHaveBeenLastCalledWith('scream', 'off');
-    picker.handleInput('[C');
-    expect(onChangeThinking).toHaveBeenLastCalledWith('scream', 'low');
-    // Left cycles low -> off -> high (wraps).
-    picker.handleInput('[D');
-    expect(onChangeThinking).toHaveBeenLastCalledWith('scream', 'off');
-    picker.handleInput('[D');
+    // Left cycles off -> max -> high (wraps).
+    picker.handleInput('\u001B[D');
+    expect(onChangeThinking).toHaveBeenLastCalledWith('scream', 'max');
+    picker.handleInput('\u001B[D');
     expect(onChangeThinking).toHaveBeenLastCalledWith('scream', 'high');
   });
 
@@ -262,7 +262,7 @@ describe('ChoicePickerComponent', () => {
     picker.handleInput('\u001B[B');
     picker.handleInput('\r');
 
-    expect(onSelect).toHaveBeenCalledWith({ alias: 'thinking', thinkingLevel: 'high' });
+    expect(onSelect).toHaveBeenCalledWith({ alias: 'thinking', thinkingLevel: 'max' });
   });
 });
 
@@ -493,7 +493,7 @@ describe('ModelSelectorComponent search and pagination', () => {
     // Right cycles thinking to the next level and must NOT change the page.
     selector.handleInput(RIGHT);
     expect(rendered(selector)).toContain('Page 2/3');
-    expect(rendered(selector)).toContain('[ off ]');
+    expect(rendered(selector)).toContain('[ max ]');
 
     // Left cycles thinking back, page still unchanged.
     selector.handleInput(LEFT);
