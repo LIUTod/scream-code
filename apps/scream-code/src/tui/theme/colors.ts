@@ -121,7 +121,7 @@ export const darkColors: ColorPalette = {
   diffGutter: dark.gray600,
   diffMeta: dark.gray500,
 
-  roleUser: dark.gold400,
+  roleUser: '#f7e308',
   roleAssistant: dark.gray100,
   roleThinking: dark.gray500,
   roleTool: dark.amber400,
@@ -161,7 +161,7 @@ export const lightColors: ColorPalette = {
   diffGutter: light.gray500,
   diffMeta: light.gray600,
 
-  roleUser: light.orange700,
+  roleUser: '#bd5302',
   roleAssistant: light.gray900,
   roleThinking: light.gray700,
   roleTool: light.amber800,

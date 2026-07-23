@@ -51,7 +51,7 @@ export class UserMessageComponent implements Component {
       lines.push(line);
     }
 
-    // Text — first line gets the ┃ border, continuation lines get blank padding.
+    // Text — first line gets the ■ border, continuation lines get blank padding.
     const textLines = this.textComponent.render(contentWidth);
     for (let i = 0; i < textLines.length; i++) {
       const prefix = i === 0 ? border : ' '.repeat(borderWidth);
