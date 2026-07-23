@@ -24,7 +24,7 @@
 
 ---
 
-Scream Code is a hassle-free, locally deployable, all-in-one AI Agent assistant. No remote calls, high security — just tell it what you need in natural language (Chinese or English). Vibe coding, write code, search papers, edit files, clean your machine, research, generate reports, search the web... You speak, it acts! Desktop App Download You Can GOOOO！！[scream.chat](https://scream.chat/) （There might be a bug.）
+Scream Code is a hassle-free, locally deployable, all-in-one AI Agent assistant. No remote calls, high security — just tell it what you need in natural language (Chinese or English). Vibe coding, write code, search papers, edit files, clean your machine, research, generate reports, search the web... You speak, it acts! 
 
 ---
 
@@ -180,18 +180,6 @@ Thanks to these excellent projects for inspiration: pi, pi-tui, gork, kimicli, G
 ## 🔗 Links
 
 🌐 **Website**: https://scream.chat
-
----
-
-## ⭐ Star History
-
-<a href="https://www-star-history.com/#LIUTod/scream-code&Date">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=LIUTod/scream-code&type=Date&theme=dark" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=LIUTod/scream-code&type=Date" />
-   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=LIUTod/scream-code&type=Date" />
- </picture>
-</a>
 
 ---
 
