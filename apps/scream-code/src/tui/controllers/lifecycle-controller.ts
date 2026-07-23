@@ -223,7 +223,7 @@ export class LifecycleController {
   }
 
   onTurnCompleted(): void {
-    this.startMemoryIdleTimer();
+    // Idle memory extraction disabled — extraction is now manual-only via /memory.
   }
 
   startEventLoop(): void {

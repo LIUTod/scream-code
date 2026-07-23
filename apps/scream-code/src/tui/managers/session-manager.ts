@@ -188,7 +188,7 @@ export class SessionManager {
   // ---------------------------------------------------------------------------
   async closeSession(reason?: string): Promise<void> {
     const previous = this.unloadCurrentSession(reason ?? 'closing');
-    await previous?.close();
+    await previous?.close({ extractMemories: false });
   }
 
   private unloadCurrentSession(reason: string): Session | undefined {

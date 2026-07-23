@@ -570,7 +570,7 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
 
     try {
       if (session) {
-        await session.close();
+        await session.close({ extractMemories: false });
       }
       await harness.close();
     } catch {
@@ -936,7 +936,7 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
           }
           pendingApprovals.clear();
           // Close and delete in the background, fire-and-forget.
-          void session?.close().catch(() => {});
+          void session?.close({ extractMemories: false }).catch(() => {});
           void harness.deleteSession(sessionKey).catch(() => {});
           session = undefined;
           finish(new Error("会话已自动重置，请重新发送你的消息。"));

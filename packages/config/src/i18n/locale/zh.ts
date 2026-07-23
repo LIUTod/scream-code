@@ -113,16 +113,7 @@ export const zh: Record<string, string> = {
   'footer.tasks_running': '{count}个任务 运行中',
   'footer.agents_running': '{count}个代理 运行中',
 
-  // ─── 生命周期 ─────────────────
-  'lifecycle.memory_countdown': '15 分钟未操作，即将整理会话记忆',
-  'lifecycle.memory_cancel_hint': '按 Ctrl+W 取消（{seconds} 秒后自动开始）',
-  'lifecycle.memory_cancelled': '已取消记忆提取',
-  'lifecycle.memory_processing': '正在整理会话记忆...',
-  'lifecycle.memory_done': '已沉淀 {count} 条记忆至备忘录',
-  'lifecycle.memory_none': '本次无需沉淀新记忆',
-  'lifecycle.memory_failed': '记忆整理失败，稍后再试',
 
-  // ─── 输入 ─────────────────────
   'input.replay_blocked': '会话历史正在回放时无法发送输入。',
   'input.send_failed': '发送失败：{message}',
   'input.guide_failed': '引导失败：{message}',
@@ -1093,7 +1084,6 @@ export const zh: Record<string, string> = {
 
   // ─── ScreamTUI ─────────────────
   'tui.resume_warning': '警告：{warning}',
-  'tui.organizing_memory': '正在整理会话记忆...',
   'tui.skill_failed': 'Skill "{skill}" 执行失败：{message}',
   'tui.replay_no_new_session': '历史回放期间无法启动新会话。',
 

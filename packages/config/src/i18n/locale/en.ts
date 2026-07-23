@@ -113,16 +113,7 @@ export const en: Record<string, string> = {
   'footer.tasks_running': '{count} tasks running',
   'footer.agents_running': '{count} agents running',
 
-  // ─── Lifecycle ────────────────
-  'lifecycle.memory_countdown': 'No activity for 15 min, about to extract session memories',
-  'lifecycle.memory_cancel_hint': 'Press Ctrl+W to cancel (auto-starts in {seconds}s)',
-  'lifecycle.memory_cancelled': 'Memory extraction cancelled',
-  'lifecycle.memory_processing': 'Extracting session memories...',
-  'lifecycle.memory_done': 'Extracted {count} memories to notebook',
-  'lifecycle.memory_none': 'No new memories to extract',
-  'lifecycle.memory_failed': 'Memory extraction failed, try again later',
 
-  // ─── Input ────────────────────
   'input.replay_blocked': 'Cannot send input while session history is replaying.',
   'input.send_failed': 'Send failed: {message}',
   'input.guide_failed': 'Guide failed: {message}',
@@ -1093,7 +1084,6 @@ export const en: Record<string, string> = {
 
   // ─── ScreamTUI ─────────────────
   'tui.resume_warning': 'Warning: {warning}',
-  'tui.organizing_memory': 'Organizing session memory...',
   'tui.skill_failed': 'Skill "{skill}" failed: {message}',
   'tui.replay_no_new_session': 'Cannot start a new session during history replay.',
 

@@ -395,10 +395,6 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
     this.lifecycleController.disposeTerminalTracking();
     this.inputController.dispose();
     this.state.footer.dispose();
-    this.showStatus(t('tui.organizing_memory'), this.state.theme.colors.textDim);
-    await new Promise<void>((resolve) => {
-      setTimeout(resolve, 0);
-    });
     await this.closeSession();
     await this.harness.close();
     this.sessionEventHandler.stopAllMcpServerStatusSpinners();
