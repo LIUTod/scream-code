@@ -23,6 +23,23 @@ describe('default agent profiles', () => {
     expect(prompt).toContain('/workspace');
   });
 
+  it('bundles the writer as a full document-production specialist', () => {
+    const writer = DEFAULT_AGENT_PROFILES['writer'];
+    const prompt = writer?.systemPrompt(promptContext);
+
+    expect(writer?.description).toContain('document specialist');
+    expect(writer?.tools).toEqual(
+      expect.arrayContaining(['Read', 'ReadMediaFile', 'Write', 'Edit', 'Bash', 'WebSearch', 'FetchURL']),
+    );
+    expect(prompt).toContain('full document lifecycle');
+    expect(prompt).toContain('If the caller requests a file, create or edit the actual file');
+    expect(prompt).toContain('DOCX');
+    expect(prompt).toContain('translation');
+    expect(prompt).toContain('Quality assurance before handoff');
+    expect(prompt).not.toContain('Your only output is Markdown content');
+    expect(prompt).not.toContain('Start every substantial piece with a "Why This Matters" section');
+  });
+
   it('fails loudly when an embedded system prompt source is missing', () => {
     expect(() =>
       loadAgentProfilesFromSources(['profile/default/agent.yaml'], {

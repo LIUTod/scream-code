@@ -24,7 +24,7 @@ const FULL_LOGO_MIN_COLS = 87
 // Compact logo face for narrow terminals.
 const COMPACT_LOGO = ['██▄▄▄██', '▐█▄▀▄█▌']
 const THEME_PRIMARY: Record<ResolvedTheme, [number, number, number]> = {
-  dark: [204, 251, 35],    // #ccfb23
+  dark: [121, 235, 0],     // #79eb00
   light: [75, 122, 6],     // #4B7A06
 }
 const BLOCK_RGB: [number, number, number] = [255, 255, 255]

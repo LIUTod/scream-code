@@ -622,6 +622,10 @@ The `Agent` tool accepts optional `target`, `change`, and `acceptance` fields. W
 
 Key files: `packages/agent-core/src/tools/builtin/collaboration/agent.ts`, `packages/agent-core/src/tools/builtin/collaboration/agent.md`.
 
+The bundled `writer` profile is the document-lifecycle specialist, not a Markdown-only report generator. It handles research, drafting, rewriting, editing, proofreading, translation, summarization, template completion, and production or revision of requested document artifacts. When a file is requested it should create or edit the actual artifact, preserve supplied templates and unrelated formatting, and verify the finished output before handing exact paths back to the parent agent.
+
+Key files: `packages/agent-core/src/profile/default/writer.yaml`, `packages/agent-core/src/profile/default/agent.yaml`, `packages/agent-core/src/profile/default/system.md`.
+
 ### TodoList Phases
 
 `TodoList` items support an optional `phase` field. Items sharing the same phase are rendered together, while preserving input order within each phase. The phase is preserved across state round-trips.

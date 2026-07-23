@@ -13,7 +13,7 @@
  */
 
 const dark = {
-  yellowGreen: '#ccfb23',
+  yellowGreen: '#79eb00',
   pink400: '#FF6B9D',
   cyan400: '#56D4DD',
   amber400: '#E8A838',

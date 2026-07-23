@@ -135,6 +135,7 @@ function createInitialAppState(input: ScreamTUIStartupInput): AppState {
     goalContinuationCount: 0,
     ccConnectActive: false,
     wolfpackMode: input.cliOptions.wolfpack === true,
+    reconnectAttempt: 0,
     recentSessions: [],
     subagentUsage: {},
   };
@@ -293,6 +294,7 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
         this.lifecycleController.startCcConnectPolling();
       } catch (error) {
         this.lifecycleController.disposeTerminalTracking();
+        this.state.footer.dispose();
         this.state.ui.stop();
         throw error;
       }
@@ -392,6 +394,7 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
     this.reverseRpcDisposers.length = 0;
     this.lifecycleController.disposeTerminalTracking();
     this.inputController.dispose();
+    this.state.footer.dispose();
     this.showStatus(t('tui.organizing_memory'), this.state.theme.colors.textDim);
     await new Promise<void>((resolve) => {
       setTimeout(resolve, 0);

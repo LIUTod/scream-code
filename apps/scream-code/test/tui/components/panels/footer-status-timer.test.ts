@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { TUI } from '@liutod-scream/pi-tui';
 
 import { FooterComponent } from '#/tui/components/chrome/footer';
@@ -29,73 +29,79 @@ function baseState(overrides: Partial<AppState> = {}): AppState {
   } as AppState;
 }
 
-describe('FooterComponent — status timer', () => {
+describe('FooterComponent — active status animation', () => {
   afterEach(() => {
     vi.useRealTimers();
   });
 
   function makeFooter(state: AppState) {
+    const requestRender = vi.fn();
     const requestComponentRender = vi.fn();
-    const ui = { requestRender: vi.fn(), requestComponentRender } as unknown as TUI;
+    const ui = { requestRender, requestComponentRender } as unknown as TUI;
     const footer = new FooterComponent(state, darkColors, ui);
-    return { footer, requestComponentRender };
+    return { footer, requestRender, requestComponentRender };
   }
 
-  it('stays quiet while idle and ticks on entering a streaming phase', () => {
+  it('stays quiet while idle and ticks independently in every active phase', () => {
     vi.useFakeTimers();
-    const { footer, requestComponentRender } = makeFooter(baseState());
+    const { footer, requestRender, requestComponentRender } = makeFooter(baseState());
 
-    vi.advanceTimersByTime(1000);
-    expect(requestComponentRender).not.toHaveBeenCalled();
-
-    footer.setState(baseState({ streamingPhase: 'waiting' }));
     vi.advanceTimersByTime(500);
-    expect(requestComponentRender.mock.calls.length).toBeGreaterThan(0);
+    expect(requestRender).not.toHaveBeenCalled();
+
+    for (const phase of ['waiting', 'tool', 'composing'] as const) {
+      footer.setState(baseState({ streamingPhase: phase }));
+      requestRender.mockClear();
+      vi.advanceTimersByTime(500);
+      expect(requestRender.mock.calls.length).toBeGreaterThanOrEqual(4);
+    }
+    expect(requestComponentRender).not.toHaveBeenCalled();
     footer.dispose();
   });
 
-  it('ticks with the component as the render target', () => {
+  it('uses the normal render scheduler at 30fps while thinking', () => {
     vi.useFakeTimers();
-    const { footer, requestComponentRender } = makeFooter(baseState());
+    const { footer, requestRender, requestComponentRender } = makeFooter(baseState());
+
     footer.setState(baseState({ streamingPhase: 'thinking' }));
     vi.advanceTimersByTime(200);
-    expect(requestComponentRender).toHaveBeenCalledWith(footer);
+
+    expect(requestRender.mock.calls.length).toBeGreaterThanOrEqual(5);
+    expect(requestComponentRender).not.toHaveBeenCalled();
     footer.dispose();
   });
 
   it('stops ticking when the phase returns to idle and on dispose', () => {
     vi.useFakeTimers();
-    const { footer, requestComponentRender } = makeFooter(baseState());
-
-    footer.setState(baseState({ streamingPhase: 'composing' }));
-    vi.advanceTimersByTime(300);
-    expect(requestComponentRender.mock.calls.length).toBeGreaterThan(0);
-
-    footer.setState(baseState({ streamingPhase: 'idle' }));
-    requestComponentRender.mockClear();
-    vi.advanceTimersByTime(1000);
-    expect(requestComponentRender).not.toHaveBeenCalled();
+    const { footer, requestRender } = makeFooter(baseState());
 
     footer.setState(baseState({ streamingPhase: 'tool' }));
     vi.advanceTimersByTime(300);
-    expect(requestComponentRender.mock.calls.length).toBeGreaterThan(0);
-    footer.dispose();
-    requestComponentRender.mockClear();
+    expect(requestRender.mock.calls.length).toBeGreaterThan(0);
+
+    footer.setState(baseState({ streamingPhase: 'idle' }));
+    requestRender.mockClear();
     vi.advanceTimersByTime(1000);
-    expect(requestComponentRender).not.toHaveBeenCalled();
+    expect(requestRender).not.toHaveBeenCalled();
+
+    footer.setState(baseState({ streamingPhase: 'thinking' }));
+    vi.advanceTimersByTime(100);
+    footer.dispose();
+    requestRender.mockClear();
+    vi.advanceTimersByTime(1000);
+    expect(requestRender).not.toHaveBeenCalled();
   });
 
   it('does not stack timers across rapid phase transitions', () => {
     vi.useFakeTimers();
-    const { footer, requestComponentRender } = makeFooter(baseState());
+    const { footer, requestRender } = makeFooter(baseState());
     for (const phase of ['waiting', 'thinking', 'tool', 'composing'] as const) {
       footer.setState(baseState({ streamingPhase: phase }));
     }
-    // One interval worth of time must produce at most a handful of ticks —
-    // stacked timers would multiply the call count.
-    requestComponentRender.mockClear();
+
+    requestRender.mockClear();
     vi.advanceTimersByTime(120);
-    expect(requestComponentRender.mock.calls.length).toBeLessThanOrEqual(2);
+    expect(requestRender.mock.calls.length).toBe(1);
     footer.dispose();
   });
 });

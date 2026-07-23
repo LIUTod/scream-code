@@ -55,6 +55,8 @@ export interface AppState {
   goalContinuationCount: number;
   ccConnectActive: boolean;
   wolfpackMode: boolean;
+  /** Current retry attempt during a step retry (1-indexed); 0 = no retry in progress. */
+  reconnectAttempt: number;
   recentSessions: RecentSession[];
   subagentUsage: SubagentUsageMap;
 }

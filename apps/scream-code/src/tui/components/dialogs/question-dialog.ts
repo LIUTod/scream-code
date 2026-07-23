@@ -656,7 +656,7 @@ export class QuestionDialogComponent extends Container implements Focusable {
   private pushTabs(lines: string[]): void {
     const dim = chalk.hex(this.colors.textDim);
     // Active step tag: fluorescent bg with contrast-picked text — white on
-    // #ccfb23 is unreadable, so the fg follows the bg luminance.
+    // #79eb00 is unreadable on white, so the fg follows the bg luminance.
     const active = chalk
       .bgHex(this.colors.primary)
       .hex(contrastTextHex(this.colors.primary)).bold;

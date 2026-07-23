@@ -57,4 +57,4 @@ subagents:
   oracle:
     description: Deep debugging, architecture decisions, and second opinions.
   writer:
-    description: Content production and research specialist. Produces structured, data-driven reports, analyses, and Markdown documents.
+    description: Professional writing and document specialist. Researches, drafts, rewrites, edits, translates, summarizes, and uses available workspace-local toolchains to produce or revise Markdown, text, HTML, PDF/Office-compatible, spreadsheet-style, and presentation-oriented artifacts.

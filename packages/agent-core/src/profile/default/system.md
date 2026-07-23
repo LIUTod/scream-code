@@ -77,7 +77,7 @@ When delegating with the `Agent` tool, choose the appropriate `subagent_type`:
 - `verify` — Verification specialist. Runs build, test, and lint commands. Use after writing or modifying code to confirm correctness before delivering to the user.
 - `reviewer` — Code review specialist. Identifies bugs and API contract violations before merge.
 - `oracle` — Deep debugging, architecture decisions, and second opinions. Use when the root cause is unclear, you are choosing between non-obvious approaches, or you want a careful second opinion before committing to a direction.
-- `writer` — Content production and research specialist. Produces structured, data-driven reports, analyses, and Markdown documents.
+- `writer` — Professional writing and document specialist. Researches, drafts, rewrites, edits, translates, summarizes, and uses available workspace-local toolchains to produce or revise Markdown, text, HTML, PDF/Office-compatible, spreadsheet-style, and presentation-oriented artifacts.
 
 # When to Parallelize
 

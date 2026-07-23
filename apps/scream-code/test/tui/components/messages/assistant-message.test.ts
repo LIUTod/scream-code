@@ -148,8 +148,8 @@ describe('AssistantMessageComponent', () => {
       component.updateContent('hello');
       const initial = component.render(80);
       const initialBullet = initial[1] ?? '';
-      // primary = #ccfb23 = rgb(204, 251, 35)
-      expect(bulletRgb(initialBullet)).toBe('204;251;35');
+      // primary = #79eb00 = rgb(121, 235, 0)
+      expect(bulletRgb(initialBullet)).toBe('121;235;0');
 
       vi.advanceTimersByTime(FADE_MS + 100);
       const settled = component.render(80);

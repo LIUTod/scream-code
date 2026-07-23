@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import chalk from 'chalk';
 
 import { FooterComponent, formatFooterGitBadge, buildWeightedTips } from '#/tui/components/chrome/footer';
@@ -103,6 +103,26 @@ describe('FooterComponent — context NaN resilience', () => {
     const on = makeFooter(baseState({ model: 'k2', thinkingLevel: 'high' }));
 
     expect(strip(on.render(120)[0]!)).not.toContain('思考中');
+  });
+
+  it('keeps active status animation out of red and pink hues', () => {
+    const previousLevel = chalk.level;
+    chalk.level = 3;
+    const now = vi.spyOn(Date, 'now').mockReturnValue(2_000);
+    try {
+      const footer = makeFooter(
+        baseState({ streamingPhase: 'thinking', streamingStartTime: 1_000 }),
+      );
+      const out = footer.render(200).join('');
+
+      expect(strip(out)).toContain('思考中');
+      expect(out).toContain(hexToSgr('#4ADE80'));
+      expect(out).not.toContain(hexToSgr('#FF6B9D'));
+      footer.dispose();
+    } finally {
+      now.mockRestore();
+      chalk.level = previousLevel;
+    }
   });
 
   it('renders transient hints replacing the status area', () => {

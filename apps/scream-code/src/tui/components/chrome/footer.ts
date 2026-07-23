@@ -172,7 +172,10 @@ function pickContextColor(usage: number, colors: ColorPalette): string {
 
 // ── Gradient status line for footer line 2 ───────────────────────────
 
-const BRAND_COLORS = ['#ccfb23', '#56D4DD', '#FF6B9D'];
+// Keep active-status motion inside the product's cool/acid palette. Red and
+// pink read as error states in the terminal, so the spinner never crosses
+// those hues while the agent is working normally.
+const BRAND_COLORS = ['#79eb00', '#56D4DD', '#4ADE80', '#FACC15'];
 const GRADIENT_CYCLE_MS = 4000;
 const SPINNER_FRAMES = ['●', '◉', '◎', '◌', '○', '◌', '◎', '◉'];
 const SPINNER_TICK_MS = 120;
@@ -199,9 +202,17 @@ function lerpGradient(t: number): string {
 function buildStatusLine(
   streamingPhase: AppState['streamingPhase'],
   streamingStartTime: number,
+  reconnectAttempt: number,
 ): string {
   if (streamingPhase === 'idle') {
     return t('status.idle');
+  }
+
+  // Reconnection takes priority over normal status display. Each retry
+  // fires ~20s apart and counts up to the provider's maxAttempts.
+  if (reconnectAttempt > 0) {
+    return chalk.hex('#E85454').bold('◎') + ' ' +
+      chalk.hex('#E85454')(`${t('status.reconnecting')} ${String(reconnectAttempt)}`);
   }
 
   let label: string;
@@ -269,19 +280,18 @@ export class FooterComponent implements Component {
   }
 
   setState(state: AppState): void {
-    const prevPhase = this.state?.streamingPhase;
+    const previousPhase = this.state?.streamingPhase;
     if (state.workDir !== this.gitCacheWorkDir) {
       this.gitCacheWorkDir = state.workDir;
       this.gitCache = createGitStatusCache(state.workDir, { onChange: this.onGitStatusChange });
     }
     this.state = state;
-    // The status line (spinner frame, elapsed seconds, thinking shimmer) is
-    // time-driven, so the footer owns a repaint timer for every non-idle
-    // phase. Every tick is a component-scoped render — cheap for the footer
-    // subtree, and it never forces the whole tree to recompose. 30fps is
-    // reserved for the thinking shimmer gradient; other phases only need the
-    // 120ms spinner/elapsed cadence.
-    if (state.streamingPhase !== prevPhase) {
+    // Keep one wall-clock-driven animation source independent from token/tool
+    // output. It uses the normal full-render scheduler (the pre-component-tick
+    // path), so frames coalesce with stream renders instead of competing with
+    // them as requestComponentRender jobs. Thinking needs 30fps for the model
+    // shimmer; other active phases use the spinner's 120ms cadence.
+    if (state.streamingPhase !== previousPhase) {
       this.#restartStatusTimer(state.streamingPhase);
     }
   }
@@ -312,24 +322,19 @@ export class FooterComponent implements Component {
 
   invalidate(): void {}
 
-  /**
-   * Stop the status timer. Idempotent — safe to call even when
-   * the timer isn't running. Call this when the component is disposed.
-   */
+  /** Stop the active-status timer. Idempotent and safe during disposal. */
   dispose(): void {
     this.#stopStatusTimer();
   }
 
-  // ── Status line animation ───────────────────────────────────────────
+  // ── Active status animation ─────────────────────────────────────────
 
   #restartStatusTimer(phase: AppState['streamingPhase']): void {
     this.#stopStatusTimer();
     if (phase === 'idle') return;
     const intervalMs = phase === 'thinking' ? 1000 / 30 : SPINNER_TICK_MS;
     this.statusTimer = setInterval(() => {
-      // Self-contained repaint: a component-scoped frame re-renders only the
-      // footer subtree instead of the whole component tree.
-      this.ui.requestComponentRender(this);
+      this.ui.requestRender();
     }, intervalMs);
   }
 
@@ -396,6 +401,7 @@ export class FooterComponent implements Component {
       const statusLine = buildStatusLine(
         state.streamingPhase,
         state.streamingStartTime,
+        state.reconnectAttempt,
       );
       const ccDot = state.ccConnectActive
         ? chalk.hex(colors.success)('●')

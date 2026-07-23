@@ -30,6 +30,7 @@ export const en: Record<string, string> = {
   'status.composing': 'Writing',
   'status.tool': 'Running',
   'status.waiting': 'Waiting',
+  'status.reconnecting': 'Reconnecting',
 
   // ─── Approval ─────────────────
   'approval.allow_once': 'Allow Once',

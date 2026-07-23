@@ -31,6 +31,7 @@ import type {
   TurnStartedEvent,
   TurnStepCompletedEvent,
   TurnStepInterruptedEvent,
+  TurnStepRetryingEvent,
   TurnStepStartedEvent,
   WarningEvent,
 } from '@scream-code/scream-code-sdk';
@@ -214,7 +215,7 @@ export class SessionEventHandler {
       case 'turn.step.started': this.handleStepBegin(event); break;
       case 'turn.step.interrupted': this.handleStepInterrupted(event); break;
       case 'turn.step.completed': this.handleStepCompleted(event); break;
-      case 'turn.step.retrying': break;
+      case 'turn.step.retrying': this.handleStepRetrying(event); break;
       case 'tool.progress': this.handleToolProgress(event); break;
       case 'assistant.delta': this.handleAssistantDelta(event); break;
       case 'hook.result': this.handleHookResult(event); break;
@@ -361,7 +362,7 @@ export class SessionEventHandler {
   }
 
   private handleTurnEnd(event: TurnEndedEvent, sendQueued: (item: QueuedMessage) => void): void {
-    this.host.streamingUI.flushNow();
+    this.host.setAppState({ reconnectAttempt: 0 });
     const todos = this.host.state.todoPanel.getTodos();
     if (todos.length > 0 && todos.every((t) => t.status === 'done')) {
       this.host.streamingUI.setTodoList([]);
@@ -404,6 +405,10 @@ export class SessionEventHandler {
       ? t('handler.max_tokens_hint')
       : undefined;
     this.host.showNotice(title, detail);
+  }
+
+  private handleStepRetrying(event: TurnStepRetryingEvent): void {
+    this.host.setAppState({ reconnectAttempt: event.nextAttempt });
   }
 
   private maybeShowDebugTiming(event: TurnStepCompletedEvent): void {
