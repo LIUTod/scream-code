@@ -291,6 +291,8 @@ export class GoalMode {
       );
     }
     state.terminalReason = undefined;
+    state.blockedStreak = 0;
+    state.lastBlockedReason = undefined;
     this.applyStatus(state, 'active');
     this.persistState(state, {
       change: { kind: 'lifecycle', status: 'active', reason: input.reason, actor },
