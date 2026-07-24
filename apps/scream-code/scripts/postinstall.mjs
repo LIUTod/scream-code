@@ -130,6 +130,11 @@ async function main() {
   // rename) live in the helpers.
   if (!isGlobalInstall()) return;
 
+  // Best-effort Windows desktop shortcut — runs unconditionally on
+  // every global install, independent of the legacy migration flow.
+  // Must stay near the top so it isn't skipped by early returns below.
+  createDesktopShortcut();
+
   // Step 2: locate our own installed package root once and share it
   // with both detection (skip files inside our package) and
   // reachability (only count our shim as "found").
@@ -262,14 +267,6 @@ async function main() {
     },
     pm,
   );
-
-  // Best-effort Windows desktop shortcut; must stay inside main() so it
-  // is covered by the top-level catch and never fails the install.
-  try {
-    createDesktopShortcut();
-  } catch {
-    // Never fail the install over a shortcut.
-  }
 }
 
 main().catch((err) => {
