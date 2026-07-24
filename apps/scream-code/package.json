@@ -57,7 +57,7 @@
     "smoke": "node dist/main.mjs --version"
   },
   "dependencies": {
-    "@liutod-scream/pi-tui": "^0.80.21",
+    "@liutod-scream/pi-tui": "^0.80.23",
     "@mariozechner/clipboard": "^0.3.2",
     "chalk": "^5.4.1",
     "cli-highlight": "^2.1.11",

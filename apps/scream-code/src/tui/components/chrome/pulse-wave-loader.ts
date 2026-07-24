@@ -61,7 +61,10 @@ export class PulseWaveLoader extends Text {
     const step = PULSE_WAVE_FRAMES[this.currentFrame] ?? PULSE_WAVE_FRAMES[0];
     const cells = [0, 1, 2].map((idx) => this.renderCell(idx, step.active, step.forward));
     this.setText(cells.join(' '));
-    this.ui.requestComponentRender(this);
+    // Use a full render so the footer status timer updates in sync with the
+    // pulse wave during the 'waiting' phase, when no other render activity is
+    // happening. Component-scoped render would skip the footer lines.
+    this.ui.requestRender();
   }
 
   private renderCell(index: number, active: number, forward: boolean): string {

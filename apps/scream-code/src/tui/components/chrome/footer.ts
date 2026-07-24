@@ -286,12 +286,6 @@ export class FooterComponent implements Component {
       this.gitCache = createGitStatusCache(state.workDir, { onChange: this.onGitStatusChange });
     }
     this.state = state;
-    // Wall-clock-driven animation: the status timer fires at 30fps (thinking)
-    // or 120ms (other phases) and calls requestComponentRender(this) so the
-    // footer (timer + shimmer) updates independently from the transcript.
-    // When streaming is active the request is absorbed into the next full
-    // render; when the transcript is quiet the footer gets a cheap partial
-    // render that only diffs its own lines.
     if (state.streamingPhase !== previousPhase) {
       this.#restartStatusTimer(state.streamingPhase);
     }
@@ -334,17 +328,8 @@ export class FooterComponent implements Component {
     this.#stopStatusTimer();
     if (phase === 'idle') return;
     const intervalMs = phase === 'thinking' ? 1000 / 30 : SPINNER_TICK_MS;
-    // 'waiting' phase has no streaming output, so a full requestRender() is
-    // safe and reliable (matches v0.10.5 behavior). Other phases use
-    // requestComponentRender for independent partial renders that don't
-    // block on transcript diff.
-    const useComponentRender = phase !== 'waiting';
     this.statusTimer = setInterval(() => {
-      if (useComponentRender) {
-        (this.ui as TUI & { requestComponentRender(component: Component): void }).requestComponentRender(this);
-      } else {
-        this.ui.requestRender();
-      }
+      this.ui.requestRender();
     }, intervalMs);
   }
 
