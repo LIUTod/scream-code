@@ -753,13 +753,17 @@ export class SessionEventHandler {
     });
   }
 
-  private handleGoalUpdated(event: { snapshot: { objective: string; status: string } | null }): void {
+  private handleGoalUpdated(event: { snapshot: { objective: string; status: string; turnsUsed?: number; wallClockMs?: number } | null }): void {
     const snapshot = event.snapshot;
     if (snapshot === null) {
       this.host.setAppState({ goal: null, goalActive: false });
     } else {
       this.host.setAppState({
-        goal: snapshot.objective,
+        goal: {
+          objective: snapshot.objective,
+          turnsUsed: snapshot.turnsUsed ?? 0,
+          wallClockMs: snapshot.wallClockMs ?? 0,
+        },
         goalActive: snapshot.status === 'active',
       });
     }

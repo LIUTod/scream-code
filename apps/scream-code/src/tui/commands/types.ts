@@ -11,6 +11,11 @@ export interface ScreamSlashCommand<Name extends string = string> extends SlashC
   readonly availability?: SlashCommandAvailability | ((args: string) => SlashCommandAvailability);
   /** When set, the command is hidden from the palette and blocked unless this flag is enabled. */
   readonly experimentalFlag?: FlagId;
+  /**
+   * Ghost-text hint shown after `/command ` (without leading slash).
+   * Maps to pi-tui's `SlashCommand.argumentHint` -> `Editor.setArgumentHints`.
+   */
+  readonly argumentHint?: string;
 }
 
 export interface ParsedSlashInput {

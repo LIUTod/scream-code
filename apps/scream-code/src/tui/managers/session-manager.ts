@@ -171,7 +171,11 @@ export class SessionManager {
       maxContextTokens: status.maxContextTokens,
       contextUsage: status.contextUsage,
       sessionTitle: session.summary?.title ?? null,
-      goal: goal?.objective ?? null,
+      goal: goal ? {
+        objective: goal.objective,
+        turnsUsed: goal.turnsUsed ?? 0,
+        wallClockMs: goal.wallClockMs ?? 0,
+      } : null,
       goalActive: goal?.status === 'active',
       goalContinuationCount: 0,
     });

@@ -21,6 +21,13 @@ export interface RecentSession {
 
 export type PlanModeState = 'off' | 'plan' | 'fusionplan';
 
+/** Lightweight goal info for the footer badge. */
+export interface GoalBadgeInfo {
+  readonly objective: string;
+  readonly turnsUsed: number;
+  readonly wallClockMs: number;
+}
+
 export interface AppState {
   model: string;
   workDir: string;
@@ -50,7 +57,7 @@ export interface AppState {
   availableModels: Record<string, ModelAlias>;
   availableProviders: Record<string, ProviderConfig>;
   sessionTitle: string | null;
-  goal: string | null;
+  goal: GoalBadgeInfo | null;
   goalActive: boolean;
   goalContinuationCount: number;
   ccConnectActive: boolean;

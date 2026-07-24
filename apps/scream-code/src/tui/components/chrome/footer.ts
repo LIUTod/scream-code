@@ -156,6 +156,20 @@ function formatContextStatus(usage: number, tokens?: number, maxTokens?: number)
   return t('footer.context_short', { pct });
 }
 
+/** Format goal wall-clock duration compactly: `3m`, `1m30s`, `45s`. */
+function formatGoalDuration(ms: number): string {
+  const totalSeconds = Math.floor(ms / 1000);
+  if (totalSeconds < 60) return `${totalSeconds}s`;
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return seconds > 0 ? `${minutes}m${seconds}s` : `${minutes}m`;
+}
+
+/** Build the footer goal badge: `GOAL 3m · 7 turns`. */
+function formatGoalBadge(wallClockMs: number, turnsUsed: number): string {
+  return `GOAL ${formatGoalDuration(wallClockMs)} · ${turnsUsed} turns`;
+}
+
 // Context-usage threshold coloring. Pure percent — works uniformly across
 // all model context windows (256k / 1M / etc.) without hardcoding absolute
 // token counts that misfire when the window size differs from the assumed
@@ -353,8 +367,10 @@ export class FooterComponent implements Component {
       left.push(chalk.hex(isFusion ? colors.fusionPlanMode : colors.planMode).bold(isFusion ? t('badge.fusion') : t('badge.plan')));
     }
     if (state.wolfpackMode) left.push(chalk.hex(colors.wolfpackMode).bold(t('badge.wolfpack')));
-    if (state.goalActive) {
-      left.push(chalk.hex(colors.primary).bold(t('badge.goal')));
+    if (state.goalActive && state.goal) {
+      const g = state.goal;
+      const goalLabel = formatGoalBadge(g.wallClockMs, g.turnsUsed);
+      left.push(chalk.hex(colors.primary).bold(goalLabel));
     }
 
     const model = shortenModel(modelDisplayName(state));

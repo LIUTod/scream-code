@@ -34,6 +34,7 @@ export const BUILTIN_SLASH_COMMANDS = [
     name: 'goal',
     aliases: ['goaloff'],
     description: 'registry.goal_desc',
+    argumentHint: '[objective]',
     priority: 122,
     availability: (args) => {
       const trimmed = args.trim();
@@ -48,6 +49,7 @@ export const BUILTIN_SLASH_COMMANDS = [
     name: 'memory',
     aliases: ['memo', 'mem'],
     description: 'registry.memory_desc',
+    argumentHint: '[query]',
     priority: 120,
     availability: 'always',
   },
@@ -55,6 +57,7 @@ export const BUILTIN_SLASH_COMMANDS = [
     name: 'knowledge',
     aliases: ['know'],
     description: 'registry.knowledge_desc',
+    argumentHint: '[query]',
     priority: 119,
     availability: 'always',
   },
@@ -70,6 +73,7 @@ export const BUILTIN_SLASH_COMMANDS = [
     name: 'model',
     aliases: [],
     description: 'registry.model_desc',
+    argumentHint: '[alias]',
     priority: 120,
   },
   {

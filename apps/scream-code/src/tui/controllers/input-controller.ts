@@ -102,6 +102,18 @@ export class InputController {
       state.gitLsFilesCache,
     );
     state.editor.setAutocompleteProvider(provider);
+
+    // Collect argument hints for ghost-text display after `/command `.
+    const argumentHints = new Map<string, string>();
+    for (const cmd of visible) {
+      if (cmd.argumentHint === undefined) continue;
+      argumentHints.set(cmd.name, cmd.argumentHint);
+      for (const alias of cmd.aliases) {
+        argumentHints.set(alias, cmd.argumentHint);
+      }
+    }
+    state.editor.setArgumentHints(argumentHints);
+
     state.editor.onFirstInput = () => {
       this.host.stopWelcomeBreathing();
       this.#permanentlyStopBreathing();
