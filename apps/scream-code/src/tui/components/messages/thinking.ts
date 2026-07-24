@@ -48,14 +48,16 @@ export class ThinkingComponent implements Component {
     mode: ThinkingRenderMode = 'finalized',
     ui?: TUI,
   ) {
-    this.text = text;
+    // Strip leading newlines so the STATUS_BULLET aligns with the first
+    // actual content line, not an empty line from the model's thinking output.
+    this.text = text.replace(/^\n+/, '');
     this.color = colors.roleThinking;
     this.dimColor = colors.textDim;
     this.accentColor = colors.primary;
     this.showMarker = showMarker;
     this.mode = mode;
     this.ui = ui;
-    this.textComponent = new Text(this.styled(text), 0, 0);
+    this.textComponent = new Text(this.styled(this.text), 0, 0);
     if (mode === 'live') {
       this.startSpinner();
     }
@@ -67,11 +69,12 @@ export class ThinkingComponent implements Component {
   }
 
   setText(text: string): void {
-    if (this.text === text) return;
-    this.text = text;
+    const trimmed = text.replace(/^\n+/, '');
+    if (this.text === trimmed) return;
+    this.text = trimmed;
     this.cachedWidth = undefined;
     this.cachedLines = undefined;
-    this.textComponent.setText(this.styled(text));
+    this.textComponent.setText(this.styled(trimmed));
   }
 
   private styled(text: string): string {
