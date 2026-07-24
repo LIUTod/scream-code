@@ -30,7 +30,7 @@ export const zh: Record<string, string> = {
   'status.composing': '输出中',
   'status.tool': '执行中',
   'status.waiting': '等待响应',
-  'status.reconnecting': '重连',
+  'status.reconnecting': '重连尝试中',
 
   // ─── 审批 ─────────────────────
   'approval.allow_once': '批准一次',

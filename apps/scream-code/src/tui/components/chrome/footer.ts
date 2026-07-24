@@ -192,7 +192,7 @@ function pickContextColor(usage: number, colors: ColorPalette): string {
 const BRAND_COLORS = ['#79eb00', '#56D4DD', '#4ADE80', '#FACC15'];
 const GRADIENT_CYCLE_MS = 4000;
 const SPINNER_FRAMES = ['●', '◉', '◎', '◌', '○', '◌', '◎', '◉'];
-const SPINNER_TICK_MS = 120;
+const SPINNER_TICK_MS = 60;
 
 function hexToRgb(hex: string): [number, number, number] {
   const v = parseInt(hex.slice(1), 16);
@@ -222,9 +222,10 @@ function buildStatusLine(
     return t('status.idle');
   }
 
-  // Reconnection takes priority over normal status display. Each retry
-  // fires ~20s apart and counts up to the provider's maxAttempts.
-  if (reconnectAttempt > 0) {
+  // Reconnection indicator only shows during the 'waiting' phase. Once
+  // the model starts thinking/composing or a tool runs, the retry has
+  // succeeded and the normal status should be displayed instead.
+  if (reconnectAttempt > 0 && streamingPhase === 'waiting') {
     return chalk.hex('#E85454').bold('◎') + ' ' +
       chalk.hex('#E85454')(`${t('status.reconnecting')} ${String(reconnectAttempt)}`);
   }
@@ -341,7 +342,7 @@ export class FooterComponent implements Component {
   #restartStatusTimer(phase: AppState['streamingPhase']): void {
     this.#stopStatusTimer();
     if (phase === 'idle') return;
-    const intervalMs = phase === 'thinking' ? 1000 / 30 : SPINNER_TICK_MS;
+    const intervalMs = 1000 / 60;
     this.statusTimer = setInterval(() => {
       this.ui.requestRender();
     }, intervalMs);

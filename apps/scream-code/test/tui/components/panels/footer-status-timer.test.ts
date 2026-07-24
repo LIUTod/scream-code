@@ -97,7 +97,7 @@ describe('FooterComponent - active status animation', () => {
     }
 
     requestRender.mockClear();
-    vi.advanceTimersByTime(120);
+    vi.advanceTimersByTime(17);
     expect(requestRender.mock.calls.length).toBe(1);
     footer.dispose();
   });

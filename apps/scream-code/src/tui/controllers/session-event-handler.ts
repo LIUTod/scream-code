@@ -383,6 +383,7 @@ export class SessionEventHandler {
     });
     this.host.setAppState({
       streamingPhase: 'waiting',
+      reconnectAttempt: 0,
     });
   }
 
