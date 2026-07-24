@@ -334,12 +334,17 @@ export class FooterComponent implements Component {
     this.#stopStatusTimer();
     if (phase === 'idle') return;
     const intervalMs = phase === 'thinking' ? 1000 / 30 : SPINNER_TICK_MS;
+    // 'waiting' phase has no streaming output, so a full requestRender() is
+    // safe and reliable (matches v0.10.5 behavior). Other phases use
+    // requestComponentRender for independent partial renders that don't
+    // block on transcript diff.
+    const useComponentRender = phase !== 'waiting';
     this.statusTimer = setInterval(() => {
-      // Use component-scoped render so the footer (timer + shimmer) updates
-      // independently from the transcript. When the transcript is quiet this
-      // is a cheap partial render (only footer lines); when streaming is
-      // active the request is absorbed into the next full render.
-      (this.ui as TUI & { requestComponentRender(component: Component): void }).requestComponentRender(this);
+      if (useComponentRender) {
+        (this.ui as TUI & { requestComponentRender(component: Component): void }).requestComponentRender(this);
+      } else {
+        this.ui.requestRender();
+      }
     }, intervalMs);
   }
 

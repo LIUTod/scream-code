@@ -50,13 +50,19 @@ describe('FooterComponent — active status animation', () => {
     expect(requestRender).not.toHaveBeenCalled();
     expect(requestComponentRender).not.toHaveBeenCalled();
 
-    for (const phase of ['waiting', 'tool', 'composing'] as const) {
+    // 'waiting' uses requestRender (no streaming output to compete with);
+    // 'tool' and 'composing' use requestComponentRender for independent partial renders.
+    footer.setState(baseState({ streamingPhase: 'waiting' }));
+    requestRender.mockClear();
+    vi.advanceTimersByTime(500);
+    expect(requestRender.mock.calls.length).toBeGreaterThanOrEqual(4);
+
+    for (const phase of ['tool', 'composing'] as const) {
       footer.setState(baseState({ streamingPhase: phase }));
       requestComponentRender.mockClear();
       vi.advanceTimersByTime(500);
       expect(requestComponentRender.mock.calls.length).toBeGreaterThanOrEqual(4);
     }
-    expect(requestRender).not.toHaveBeenCalled();
     footer.dispose();
   });
 
