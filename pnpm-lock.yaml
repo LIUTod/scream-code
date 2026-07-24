@@ -73,8 +73,8 @@ importers:
   apps/scream-code:
     dependencies:
       '@liutod-scream/pi-tui':
-        specifier: ^0.80.19
-        version: 0.80.19
+        specifier: ^0.80.21
+        version: 0.80.21
       '@mariozechner/clipboard':
         specifier: ^0.3.2
         version: 0.3.9
@@ -872,8 +872,8 @@ packages:
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
 
-  '@liutod-scream/pi-tui@0.80.19':
-    resolution: {integrity: sha512-ttIOn9kCk2cRT78WImODctwKJ3mE4v8q+o3NFRZF3UoSZYrgvPcvFKSd7dF2iRx0hsot6LQbB7HojSX9dzfzuw==}
+  '@liutod-scream/pi-tui@0.80.21':
+    resolution: {integrity: sha512-6jaD9bAwfnMb3k9lciukk0YmdsD3AbBGc4SqSeMW43OrKlFu1FSqU74k1sdC/4luIPfc5nlV2tAqcfc7jNGRUA==}
     engines: {node: '>=22.19.0'}
 
   '@loaderkit/resolve@1.0.6':
@@ -3055,8 +3055,8 @@ packages:
     resolution: {integrity: sha512-/+5VFTchJDoVj3bhoqi6UeymcD00DAwb1nJwamzPvHEszJ4FpF6SNNbUbOS8yI56qHzdV8eK0qEfOSiodkTdxg==}
     engines: {node: '>= 0.4'}
 
-  postcss@8.5.19:
-    resolution: {integrity: sha512-Mz8SaolMd8nB+G13WkORcxQKHZ/NE4xXevtkJHVuG+guo9/wYKlIMTKAqGdEmYOXR2ijPjTYNHssizdaVSUNdQ==}
+  postcss@8.5.22:
+    resolution: {integrity: sha512-KBDEIpLrvpv16pp3K0Fw+UCoZfopFjjgeB+0tA/aaThfEE74kKDLrgg603YvOWJyg3+WYtyq3xYsQWsIyZlPqQ==}
     engines: {node: ^10 || ^12 || >=14}
 
   prettier@2.8.8:
@@ -4336,7 +4336,7 @@ snapshots:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
 
-  '@liutod-scream/pi-tui@0.80.19':
+  '@liutod-scream/pi-tui@0.80.21':
     dependencies:
       get-east-asian-width: 1.6.0
       marked: 18.0.5
@@ -6406,7 +6406,7 @@ snapshots:
 
   possible-typed-array-names@1.1.0: {}
 
-  postcss@8.5.19:
+  postcss@8.5.22:
     dependencies:
       nanoid: 3.3.16
       picocolors: 1.1.1
@@ -7108,7 +7108,7 @@ snapshots:
       esbuild: 0.25.12
       fdir: 6.5.0(picomatch@4.0.5)
       picomatch: 4.0.5
-      postcss: 8.5.19
+      postcss: 8.5.22
       rollup: 4.62.2
       tinyglobby: 0.2.17
     optionalDependencies:
