@@ -25,6 +25,10 @@ export const UpdateGoalToolInputSchema = z
     status: z
       .enum(['active', 'complete', 'paused', 'blocked'])
       .describe('The lifecycle status to set for the current goal.'),
+    reason: z
+      .string()
+      .optional()
+      .describe('Optional reason for the status change, especially for blocked.'),
   })
   .strict();
 
@@ -74,14 +78,21 @@ export class UpdateGoalTool implements BuiltinTool<UpdateGoalToolInput> {
           return this.handleComplete(goal);
         }
         if (args.status === 'blocked') {
-          const blocked = await goal.markBlocked({}, 'model');
+          const blocked = await goal.markBlocked(
+            args.reason !== undefined ? { reason: args.reason } : {},
+            'model',
+          );
           if (blocked !== null) {
             this.agent.context.appendSystemReminder(buildGoalBlockedReasonPrompt(blocked), {
               kind: 'system_trigger',
               name: GOAL_BLOCKED_REMINDER_NAME,
             });
+            return { output: 'Goal marked blocked.', stopTurn: true };
           }
-          return { output: 'Goal marked blocked.', stopTurn: true };
+          // Not enough consecutive blocked attempts; goal stays active.
+          return {
+            output: 'Goal remains active. Report the same blocker in subsequent turns to confirm it cannot be resolved. Continue working on the goal in the meantime.',
+          };
         }
         await goal.pauseGoal({}, 'model');
         return { output: 'Goal paused.', stopTurn: true };

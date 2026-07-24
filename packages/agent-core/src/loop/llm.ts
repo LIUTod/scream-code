@@ -34,6 +34,9 @@ export interface LLMRequestLogContext {
 export interface LLMStreamTiming {
   readonly firstTokenLatencyMs: number;
   readonly streamDurationMs: number;
+  readonly requestBuildMs?: number;
+  readonly serverFirstTokenMs?: number;
+  readonly serverDecodeMs?: number;
 }
 
 export interface LLMChatParams {

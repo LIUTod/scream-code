@@ -62,9 +62,11 @@ const GOAL_CONTINUATION_PROMPT = [
   'reassess. Call UpdateGoal with `complete` only when all required work is done, any stated',
   'validation has passed, and there is no useful next action. Do not mark complete after only',
   'producing a plan, summary, first pass, or partial result. If an external condition or required',
-  'user input prevents progress, or the objective cannot be completed as stated, call UpdateGoal',
-  'with `blocked`. Otherwise keep going — use the existing conversation context and your tools,',
-  'and do not ask the user for input unless a real blocker prevents progress.',
+  'user input prevents progress, call UpdateGoal with `blocked` and include a `reason`. The goal',
+  'will only be marked blocked after you report the same blocker for at least 3 consecutive',
+  'turns, so first try alternative approaches. Otherwise keep going — use the existing',
+  'conversation context and your tools, and do not ask the user for input unless a real blocker',
+  'prevents progress.',
 ].join(' ');
 
 const GOAL_CONTINUATION_ORIGIN: PromptOrigin = {

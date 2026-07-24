@@ -16,6 +16,7 @@
  */
 
 import {
+  APIContextOverflowError,
   emptyUsage,
   generate as ltodGenerate,
   type GenerateOptions,
@@ -92,6 +93,7 @@ export class LtodLLM implements LLM {
   }
 
   async chat(params: LLMChatParams): Promise<LLMChatResponse> {
+    const chatStartedAt = Date.now();
     let requestStartedAt = Date.now();
     let firstChunkAt: number | undefined;
     let streamEndedAt: number | undefined;
@@ -125,20 +127,31 @@ export class LtodLLM implements LLM {
         ? obfuscateMessages(this.obfuscator, params.messages)
         : params.messages;
 
-    const result = await this.generate(
-      effectiveProvider,
-      this.systemPrompt,
-      [...params.tools],
-      outboundMessages,
-      callbacks,
-      generateOptions(params, {
-        onRequestStart: markRequestStart,
-        onStreamEnd: () => {
-          markStreamEnd();
-          flushPending();
-        },
-      }),
-    );
+    const runGenerate = (messages: Message[]) =>
+      this.generate(
+        effectiveProvider,
+        this.systemPrompt,
+        [...params.tools],
+        messages,
+        callbacks,
+        generateOptions(params, {
+          onRequestStart: markRequestStart,
+          onStreamEnd: () => {
+            markStreamEnd();
+            flushPending();
+          },
+        }),
+      );
+
+    let result: Awaited<ReturnType<GenerateFn>>;
+    try {
+      result = await runGenerate(outboundMessages);
+    } catch (error) {
+      if (!(error instanceof APIContextOverflowError)) throw error;
+      const strippedMessages = stripMediaFromMessages(outboundMessages);
+      if (strippedMessages === null) throw error;
+      result = await runGenerate(strippedMessages);
+    }
 
     // result.message stays in placeholder form so persisted assistant
     // messages carry `#XXXXXX#` tokens, not raw secrets. Deobfuscation
@@ -172,7 +185,7 @@ export class LtodLLM implements LLM {
       streamTiming:
         firstChunkAt === undefined
           ? undefined
-          : buildStreamTiming(requestStartedAt, firstChunkAt, streamEndedAt),
+          : buildStreamTiming(chatStartedAt, requestStartedAt, firstChunkAt, streamEndedAt),
     };
 
     return response;
@@ -184,6 +197,7 @@ export class LtodLLM implements LLM {
 }
 
 function buildStreamTiming(
+  chatStartedAt: number,
   requestStartedAt: number,
   firstChunkAt: number,
   streamEndedAt: number | undefined,
@@ -192,6 +206,9 @@ function buildStreamTiming(
   return {
     firstTokenLatencyMs: Math.max(0, firstChunkAt - requestStartedAt),
     streamDurationMs: Math.max(0, outputEndedAt - firstChunkAt),
+    requestBuildMs: Math.max(0, requestStartedAt - chatStartedAt),
+    serverFirstTokenMs: Math.max(0, firstChunkAt - requestStartedAt),
+    serverDecodeMs: Math.max(0, outputEndedAt - firstChunkAt),
   };
 }
 
@@ -375,4 +392,23 @@ export function buildMessagesWithSystem(systemPrompt: string, history: Message[]
     { role: 'system', content: [{ type: 'text', text: systemPrompt }], toolCalls: [] },
     ...history,
   ];
+}
+
+/**
+ * Remove image parts from messages for context-overflow retry.
+ * Returns null when no media was found (no point retrying without media).
+ */
+function stripMediaFromMessages(messages: Message[]): Message[] | null {
+  let hasMedia = false;
+  const stripped = messages.map((msg) => {
+    const newContent = msg.content.filter((part) => {
+      if (part.type !== 'text' && part.type !== 'think') {
+        hasMedia = true;
+        return false;
+      }
+      return true;
+    });
+    return { ...msg, content: newContent };
+  });
+  return hasMedia ? stripped : null;
 }

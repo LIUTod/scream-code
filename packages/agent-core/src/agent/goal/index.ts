@@ -14,6 +14,9 @@ import type { AgentRecordOf } from '../records/types';
 /** Maximum objective length in characters. */
 const MAX_GOAL_OBJECTIVE_LENGTH = 4000;
 
+/** Consecutive markBlocked calls with the same reason required before blocking. */
+const BLOCKED_STREAK_THRESHOLD = 3;
+
 /** Maximum number of working notes kept per goal. */
 const MAX_GOAL_NOTES = 30;
 /** Maximum characters per note. */
@@ -52,6 +55,8 @@ interface GoalState {
   budgetLimits: GoalBudgetLimits;
   terminalReason?: string;
   notes: GoalNote[];
+  blockedStreak: number;
+  lastBlockedReason?: string;
 }
 
 export interface GoalBudgetReport {
@@ -150,6 +155,7 @@ export class GoalMode {
       wallClockMs: 0,
       budgetLimits: {},
       notes: [],
+      blockedStreak: 0,
     };
     this.state = state;
   }
@@ -227,6 +233,7 @@ export class GoalMode {
       wallClockResumedAt: Date.now(),
       budgetLimits: {},
       notes: [],
+      blockedStreak: 0,
     };
 
     this.persistState(state);
@@ -324,8 +331,28 @@ export class GoalMode {
   ): Promise<GoalSnapshot | null> {
     const state = this.state;
     if (state === undefined || state.status !== 'active') return null;
+
+    // 3-strike audit: only for model-initiated blocks. User/runtime/system
+    // blocks (budget exhaustion, user interrupt) take effect immediately.
+    if (actor === 'model') {
+      const reason = input.reason ?? '';
+      if (reason === (state.lastBlockedReason ?? '')) {
+        state.blockedStreak += 1;
+      } else {
+        state.blockedStreak = 1;
+        state.lastBlockedReason = reason;
+      }
+
+      if (state.blockedStreak < BLOCKED_STREAK_THRESHOLD) {
+        this.persistState(state, { silent: true });
+        return null;
+      }
+    }
+
     this.applyStatus(state, 'blocked');
     state.terminalReason = input.reason;
+    state.blockedStreak = 0;
+    state.lastBlockedReason = undefined;
     this.persistState(state, {
       change: { kind: 'lifecycle', status: 'blocked', reason: input.reason, actor },
     });
