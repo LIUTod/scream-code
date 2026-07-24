@@ -74,9 +74,11 @@ export class FileMentionProvider implements AutocompleteProvider {
       const name = ac.value ?? (ac as { name?: string }).name ?? '';
       const desc = ac.description ?? '';
       const resolvedDesc = desc ? t(desc) : '';
+      const aliases = (cmd as { aliases?: readonly string[] }).aliases;
+      const aliasStr = aliases && aliases.length > 0 ? ` (${aliases.join(', ')})` : '';
       return {
         value: name,
-        label: `/${name}${resolvedDesc ? ` — ${resolvedDesc}` : ''}`,
+        label: `/${name}${aliasStr}${resolvedDesc ? ` — ${resolvedDesc}` : ''}`,
       };
     });
     this.inner = new CombinedAutocompleteProvider(slashCommands, workDir, fdPath);
