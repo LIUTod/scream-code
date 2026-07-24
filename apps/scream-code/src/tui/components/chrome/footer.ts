@@ -286,11 +286,12 @@ export class FooterComponent implements Component {
       this.gitCache = createGitStatusCache(state.workDir, { onChange: this.onGitStatusChange });
     }
     this.state = state;
-    // Keep one wall-clock-driven animation source independent from token/tool
-    // output. It uses the normal full-render scheduler (the pre-component-tick
-    // path), so frames coalesce with stream renders instead of competing with
-    // them as requestComponentRender jobs. Thinking needs 30fps for the model
-    // shimmer; other active phases use the spinner's 120ms cadence.
+    // Wall-clock-driven animation: the status timer fires at 30fps (thinking)
+    // or 120ms (other phases) and calls requestComponentRender(this) so the
+    // footer (timer + shimmer) updates independently from the transcript.
+    // When streaming is active the request is absorbed into the next full
+    // render; when the transcript is quiet the footer gets a cheap partial
+    // render that only diffs its own lines.
     if (state.streamingPhase !== previousPhase) {
       this.#restartStatusTimer(state.streamingPhase);
     }
@@ -334,7 +335,11 @@ export class FooterComponent implements Component {
     if (phase === 'idle') return;
     const intervalMs = phase === 'thinking' ? 1000 / 30 : SPINNER_TICK_MS;
     this.statusTimer = setInterval(() => {
-      this.ui.requestRender();
+      // Use component-scoped render so the footer (timer + shimmer) updates
+      // independently from the transcript. When the transcript is quiet this
+      // is a cheap partial render (only footer lines); when streaming is
+      // active the request is absorbed into the next full render.
+      (this.ui as TUI & { requestComponentRender(component: Component): void }).requestComponentRender(this);
     }, intervalMs);
   }
 
