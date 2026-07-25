@@ -28,7 +28,7 @@ import type { ContentPart, Message, ToolCall } from '@scream-code/ltod';
 function hashString(input: string): string {
   let hash = 5381;
   for (let i = 0; i < input.length; i++) {
-    hash = ((hash << 5) + hash + input.codePointAt(i)) | 0;
+    hash = ((hash << 5) + hash + (input.codePointAt(i) ?? 0)) | 0;
   }
   return (hash >>> 0).toString(36);
 }
