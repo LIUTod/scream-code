@@ -1,9 +1,12 @@
 import type { Agent } from '#/agent';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { z } from 'zod';
 
 import {
   GOAL_BLOCKED_REMINDER_NAME,
   GOAL_COMPLETION_REMINDER_NAME,
+  type GoalNote,
 } from '../../../agent/goal';
 import {
   buildGoalBlockedReasonPrompt,
@@ -35,6 +38,8 @@ export const UpdateGoalToolInputSchema = z
 export type UpdateGoalToolInput = z.infer<typeof UpdateGoalToolInputSchema>;
 
 const MAX_GRADER_OUTPUT_CHARS = 4000;
+/** Maximum characters of `git diff --stat HEAD` to append to the grader input. */
+const MAX_DIFF_STAT_CHARS = 2000;
 
 function extractRecentOutput(history: readonly { role: string; content: { type: string; text?: string }[] }[]): string {
   const parts: string[] = [];
@@ -51,6 +56,56 @@ function extractRecentOutput(history: readonly { role: string; content: { type: 
   }
   const joined = parts.join('\n\n');
   return joined.length > MAX_GRADER_OUTPUT_CHARS ? `${joined.slice(0, MAX_GRADER_OUTPUT_CHARS)}…` : joined;
+}
+
+/**
+ * Append cross-turn working notes to the output seen by the grader. Notes are
+ * written by the agent across continuation turns, so they provide focused
+ * context (key findings, constraints, partial results) without exposing the
+ * full text of previously rejected outputs.
+ */
+function appendGoalNotes(output: string, notes: readonly GoalNote[]): string {
+  if (notes.length === 0) return output;
+  const noteLines = notes.map((note) => `• ${note.content}`).join('\n');
+  return `${output}\n\n## Cross-turn working notes\n${noteLines}`;
+}
+
+const execFileAsync = promisify(execFile);
+
+/**
+ * Fetch a concise git diff stat against HEAD for the current working directory.
+ * Using HEAD includes both staged and unstaged changes, so the reviewer sees
+ * every file touched during the turn even if the agent ran `git add`. Returns
+ * `null` when there are no changes. Throws when git is unavailable or the
+ * directory is not a git repository.
+ */
+/** Exported for testing only. */
+export async function fetchGitDiffStat(cwd: string): Promise<string | null> {
+  const { stdout } = await execFileAsync('git', ['diff', '--stat', 'HEAD'], { cwd });
+  const stat = stdout.trim();
+  return stat.length > 0 ? stat : null;
+}
+
+/**
+ * Append a git diff stat to the grader input so the reviewer can correlate the
+ * agent's claims with the actual files changed during the turn. Very large
+ * stats are truncated to avoid overflowing the reviewer's context window. When
+ * git is unavailable, a note is appended so the reviewer knows why no diff is
+ * present.
+ */
+async function appendGitDiffStat(output: string, cwd: string): Promise<string> {
+  let stat: string | null;
+  try {
+    stat = await fetchGitDiffStat(cwd);
+  } catch {
+    return `${output}\n\n## Changes this turn\n(Git diff unavailable — workspace may not be a git repository or git is not installed.)`;
+  }
+  if (stat === null) return output;
+  const trimmed =
+    stat.length > MAX_DIFF_STAT_CHARS
+      ? `${stat.slice(0, MAX_DIFF_STAT_CHARS)}…\n(diff stat truncated)`
+      : stat;
+  return `${output}\n\n## Changes this turn\n${trimmed}`;
 }
 
 export class UpdateGoalTool implements BuiltinTool<UpdateGoalToolInput> {
@@ -105,6 +160,8 @@ export class UpdateGoalTool implements BuiltinTool<UpdateGoalToolInput> {
     if (!goalState) return { output: 'No active goal.' };
 
     const output = extractRecentOutput(this.agent.context.history);
+    const outputWithNotes = appendGoalNotes(output, goalState.notes);
+    const outputWithContext = await appendGitDiffStat(outputWithNotes, this.agent.config?.cwd ?? '');
 
     // Pause goal to prevent continuation loop from interfering during grading.
     try {
@@ -115,7 +172,7 @@ export class UpdateGoalTool implements BuiltinTool<UpdateGoalToolInput> {
 
     let rawGrade: unknown;
     try {
-      rawGrade = await this.grader(goalState.objective, goalState.completionCriterion, output);
+      rawGrade = await this.grader(goalState.objective, goalState.completionCriterion, outputWithContext);
     } catch (error) {
       const resumeError = await resumeAfterGrading(goal);
       if (resumeError !== undefined) return resumeError;

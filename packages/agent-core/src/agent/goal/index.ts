@@ -18,9 +18,9 @@ const MAX_GOAL_OBJECTIVE_LENGTH = 4000;
 const BLOCKED_STREAK_THRESHOLD = 3;
 
 /** Maximum number of working notes kept per goal. */
-const MAX_GOAL_NOTES = 30;
+const MAX_GOAL_NOTES = 60;
 /** Maximum characters per note. */
-const MAX_NOTE_LENGTH = 200;
+const MAX_NOTE_LENGTH = 400;
 
 export interface GoalNote {
   readonly content: string;

@@ -163,6 +163,13 @@ function buildGoalReminder(goal: GoalSnapshot): string {
       'and any remaining work or blockers. Do not rely on the UpdateGoal argument alone; the reviewer ' +
       'and the user must see this summary in your natural-language reply.',
   );
+  lines.push('');
+  lines.push(
+    'Important: before calling UpdateGoal with `complete`, always call WriteGoalNote first to ' +
+      'summarize the key findings, constraints, or partial results from this turn. The reviewer will ' +
+      'see these notes together with your final output, so include anything that helps them evaluate ' +
+      'cross-turn context. Keep the note concise and actionable.',
+  );
   return lines.join('\n');
 }
 

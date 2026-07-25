@@ -10,7 +10,7 @@ export const WriteGoalNoteInputSchema = z
     content: z
       .string()
       .min(1)
-      .max(200)
+      .max(400)
       .describe(
         'A concise note about what you learned, verified, or decided. ' +
           'Notes are injected into future continuation turns so you can build on prior work.',
