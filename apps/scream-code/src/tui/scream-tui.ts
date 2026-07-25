@@ -287,14 +287,11 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
   // =========================================================================
 
   async start(): Promise<void> {
-    // Tight mode: reduce horizontal padding when the terminal is narrow
-    // (below 60 columns) to maximize content area. Re-evaluated on resize.
     this.tightModeHandler = (): void => {
       setTightMode((process.stdout.columns ?? 80) < 60);
     };
     this.tightModeHandler();
     process.stdout.on('resize', this.tightModeHandler);
-
     this.lifecycleController.installSignalHandlers();
     try {
       const shouldReplayHistory = await this.initMainTui();
@@ -390,8 +387,6 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
   async stop(exitCode?: number): Promise<void> {
     if (this.isShuttingDown) return;
     this.isShuttingDown = true;
-    // Remove the tight-mode resize listener and reset global tight state so
-    // a subsequent TUI instance in the same process starts clean.
     if (this.tightModeHandler !== null) {
       process.stdout.off('resize', this.tightModeHandler);
       this.tightModeHandler = null;
@@ -772,7 +767,7 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
     // Clear scrollback when switching/creating sessions so old session content
     // doesn't linger in terminal scroll history. The viewport itself is cleared
     // by the force render below (fullRender emits \x1b[2J\x1b[H).
-    this.state.terminal.write('\x1B[3J');
+    this.state.terminal.write('\u001B[3J');
     this.transcriptController.clearAndRedraw();
     // Force a full redraw: requestRender(true) resets previousLines so pi-tui
     // can't skip the render by diffing against stale old content.
