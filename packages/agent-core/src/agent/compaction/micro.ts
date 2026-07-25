@@ -262,7 +262,18 @@ export class MicroCompaction {
     // would reclaim fewer than pruneMinReclaimTokens, the prefix is already
     // mostly markers — leave it alone and let full compaction take over.
     const { beforeTokens, afterTokens } = this.measureEffect(history, nextCutoff);
-    if (beforeTokens - afterTokens < config.pruneMinReclaimTokens) return;
+    const reclaimTokens = beforeTokens - afterTokens;
+    if (reclaimTokens < config.pruneMinReclaimTokens) return;
+
+    // Cache warmth guard: breaking the provider's prompt cache prefix by
+    // truncating at nextCutoff forces the suffix to be re-cached. The suffix
+    // was cached at cacheRead rates (~0.1x base) and must be rewritten at
+    // cacheWrite rates (~1.25x base), so the real cost delta is ~1.15x.
+    // If that exceeds the tokens we'd reclaim, skip and let full compaction
+    // (which rebuilds the cache anyway) handle it later.
+    const suffixTokens = estimateTokensForMessages(history.slice(nextCutoff));
+    const CACHE_BREAK_COST = 1.15;
+    if (suffixTokens * CACHE_BREAK_COST > reclaimTokens) return;
 
     this.apply(nextCutoff);
   }

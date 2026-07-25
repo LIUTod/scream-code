@@ -451,28 +451,47 @@ function toolResultOutputForModel(result: ExecutableToolResult): string | Conten
   return truncateContentParts(output);
 }
 
-/** Truncate a plain-text tool output that exceeds MAX_TOOL_RESULT_TOKENS. */
+/** Truncate a plain-text tool output that exceeds MAX_TOOL_RESULT_TOKENS.
+ *  Tail-biased: keeps 25% head + 75% tail so error messages and test
+ *  failures (usually at the end) survive truncation. */
 function truncateToolOutput(text: string): string {
   if (estimateTokens(text) <= MAX_TOOL_RESULT_TOKENS) return text;
-  // Walk backwards to find a safe cut point within budget, reserving room
-  // for the truncation notice.
   const noticeTokens = estimateTokens(TOOL_TRUNCATION_NOTICE);
   const budget = MAX_TOOL_RESULT_TOKENS - noticeTokens;
   if (budget <= 0) return TOOL_TRUNCATION_NOTICE.trim();
 
-  // Character-level truncation: preserve the first ~budget tokens' worth of text.
-  let kept = '';
-  let tokens = 0;
+  const headBudget = Math.floor(budget * 0.25);
+  const tailBudget = budget - headBudget;
+
+  // Collect head (forward iteration).
+  let head = '';
+  let headTokens = 0;
   for (const ch of text) {
     const chTokens = ch.codePointAt(0)! <= 127 ? 1 / 4 : 1;
-    if (tokens + chTokens > budget) break;
-    kept += ch;
-    tokens += chTokens;
+    if (headTokens + chTokens > headBudget) break;
+    head += ch;
+    headTokens += chTokens;
   }
-  return kept + TOOL_TRUNCATION_NOTICE;
+
+  // Collect tail (backward iteration, collect then reverse to avoid O(n²) prepend).
+  const reversed = [...text].toReversed();
+  const tailChars: string[] = [];
+  let tailTokens = 0;
+  for (const ch of reversed) {
+    const chTokens = ch.codePointAt(0)! <= 127 ? 1 / 4 : 1;
+    if (tailTokens + chTokens > tailBudget) break;
+    tailChars.push(ch);
+    tailTokens += chTokens;
+  }
+  const tail = tailChars.toReversed().join('');
+
+  const omitted = Math.max(0, Math.round(estimateTokens(text) - headTokens - tailTokens));
+  const notice = `\n[content truncated - ~${omitted} tokens omitted]\n`;
+  return head + notice + tail;
 }
 
-/** Truncate oversized text parts in a ContentPart array. */
+/** Truncate oversized text parts in a ContentPart array.
+ *  Tail-biased: keeps 25% head + 75% tail. */
 function truncateContentParts(parts: readonly ContentPart[]): ContentPart[] {
   let totalTokens = 0;
   for (const p of parts) {
@@ -484,34 +503,75 @@ function truncateContentParts(parts: readonly ContentPart[]): ContentPart[] {
   const budget = MAX_TOOL_RESULT_TOKENS - noticeTokens;
   if (budget <= 0) return [{ type: 'text', text: TOOL_TRUNCATION_NOTICE.trim() }];
 
-  const result: ContentPart[] = [];
-  let used = 0;
-  for (const p of parts) {
+  const headBudget = Math.floor(budget * 0.25);
+  const tailBudget = budget - headBudget;
+
+  // Forward pass: collect head parts.
+  const headParts: ContentPart[] = [];
+  let headUsed = 0;
+  let headEnd = 0;
+  for (let i = 0; i < parts.length; i++) {
+    const p = parts[i]!;
     if (p.type !== 'text') {
-      result.push(p);
+      headParts.push(p);
+      headEnd = i + 1;
       continue;
     }
     const partTokens = estimateTokens(p.text);
-    if (used + partTokens <= budget) {
-      result.push(p);
-      used += partTokens;
+    if (headUsed + partTokens <= headBudget) {
+      headParts.push(p);
+      headUsed += partTokens;
+      headEnd = i + 1;
     } else {
-      // Partial truncation of this text part.
-      const remaining = budget - used;
-      let kept = '';
-      let t = 0;
-      for (const ch of p.text) {
-        const chTokens = ch.codePointAt(0)! <= 127 ? 1 / 4 : 1;
-        if (t + chTokens > remaining) break;
-        kept += ch;
-        t += chTokens;
+      const remaining = headBudget - headUsed;
+      if (remaining > 0) {
+        let kept = '';
+        let t = 0;
+        for (const ch of p.text) {
+          const chTokens = ch.codePointAt(0)! <= 127 ? 1 / 4 : 1;
+          if (t + chTokens > remaining) break;
+          kept += ch;
+          t += chTokens;
+        }
+        if (kept.length > 0) headParts.push({ type: 'text', text: kept });
       }
-      if (kept.length > 0) result.push({ type: 'text', text: kept });
       break;
     }
   }
-  result.push({ type: 'text', text: TOOL_TRUNCATION_NOTICE });
-  return result;
+
+  // Backward pass: collect tail parts (from end, skipping head range).
+  const tailParts: ContentPart[] = [];
+  let tailUsed = 0;
+  for (let i = parts.length - 1; i >= headEnd; i--) {
+    const p = parts[i]!;
+    if (p.type !== 'text') {
+      tailParts.unshift(p);
+      continue;
+    }
+    const partTokens = estimateTokens(p.text);
+    if (tailUsed + partTokens <= tailBudget) {
+      tailParts.unshift(p);
+      tailUsed += partTokens;
+    } else {
+      const remaining = tailBudget - tailUsed;
+      if (remaining > 0) {
+        const chars = [...p.text];
+        let kept = '';
+        let t = 0;
+        for (let j = chars.length - 1; j >= 0; j--) {
+          const chTokens = chars[j]!.codePointAt(0)! <= 127 ? 1 / 4 : 1;
+          if (t + chTokens > remaining) break;
+          kept = chars[j]! + kept;
+          t += chTokens;
+        }
+        if (kept.length > 0) tailParts.unshift({ type: 'text', text: kept });
+      }
+      break;
+    }
+  }
+
+  const omitted = Math.max(0, Math.round(totalTokens - headUsed - tailUsed));
+  return [...headParts, { type: 'text', text: `[content truncated - ~${omitted} tokens omitted]` }, ...tailParts];
 }
 
 function isEmptyOutputText(output: string): boolean {

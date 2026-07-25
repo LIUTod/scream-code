@@ -1,6 +1,15 @@
 import type { ContentPart, Message, Tool } from '@scream-code/ltod';
 
 /**
+ * WeakMap cache for per-message token estimates. Messages are immutable once
+ * settled (streaming `partial` messages never enter compaction paths), so the
+ * cache is safe. Spread copies created by micro-compaction ({ ...msg, content })
+ * are new objects → natural cache miss → re-estimated. Original objects retain
+ * their cached count, avoiding O(n²) re-scans during compaction detection.
+ */
+const messageTokenCache = new WeakMap<Message, number>();
+
+/**
  * Estimate token count from text using a character-based heuristic.
  *   - ASCII (~4 chars per token)
  *   - CJK and other non-ASCII (~1 char per token)
@@ -40,6 +49,8 @@ export function estimateTokensForTools(tools: readonly Tool[]): number {
 }
 
 export function estimateTokensForMessage(message: Message): number {
+  const cached = messageTokenCache.get(message);
+  if (cached !== undefined) return cached;
   let total = estimateTokens(message.role);
   for (const part of message.content) {
     total += estimateTokensForContentPart(part);
@@ -50,6 +61,7 @@ export function estimateTokensForMessage(message: Message): number {
       total += estimateTokens(JSON.stringify(call.arguments));
     }
   }
+  messageTokenCache.set(message, total);
   return total;
 }
 
