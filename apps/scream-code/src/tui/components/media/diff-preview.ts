@@ -34,6 +34,19 @@ function makeDiffStyles(colors: ColorPalette): DiffStyles {
 }
 
 const ANSI_RE = /\u001B\[[0-9;]*m/;
+const ANSI_RESET_RE = /\u001B\[(?:0|39)m/g;
+
+/**
+ * Extract the leading ANSI SGR prefix a chalk-style color function applies,
+ * e.g. `\x1b[38;2;121;235;0m` for a truecolor hex. Returns `''` when the
+ * function emits no color (chalk level 0 / non-color environment).
+ */
+function extractAnsiPrefix(fn: (s: string) => string): string {
+  const sentinel = '\u0000';
+  const styled = fn(sentinel);
+  const idx = styled.indexOf(sentinel);
+  return idx >= 0 ? styled.slice(0, idx) : '';
+}
 
 /** Visualize leading whitespace: tabs as `->`, leading spaces as `·`. */
 function visualizeIndent(line: string): { text: string; indentEnd: number } {
@@ -62,6 +75,11 @@ function visualizeIndent(line: string): { text: string; indentEnd: number } {
  * runs on the raw code first; indent visualization then runs on the
  * highlighted string - leading whitespace carries no token color, so it is
  * still plain and can be replaced and dimmed without disturbing the tokens.
+ *
+ * When highlighting is on and produced token colors, the diff line color is
+ * layered as the base foreground: syntax tokens override it, but every ANSI
+ * reset re-injects the diff color so non-token spans (punctuation, operators,
+ * whitespace) stay green/red instead of falling back to the terminal default.
  * When highlighting is off (streaming) or produced no token colors, the code
  * part is colored with the diff line color instead.
  */
@@ -77,6 +95,18 @@ function renderDiffCode(
   const rest = text.slice(indentEnd);
   const dimIndent = indent.length > 0 ? chalk.dim(indent) : indent;
   if (highlight && ANSI_RE.test(rest)) {
+    // Layer the diff color as the base foreground: syntax tokens override it,
+    // but every ANSI reset re-injects the diff color so non-token spans
+    // (punctuation, operators, whitespace) stay green/red instead of falling
+    // back to the terminal default. Function-form replace avoids any risk of
+    // `$` pattern interpretation in the prefix string.
+    // Note: colorFn must be a foreground-only chalk function (e.g. chalk.hex).
+    // Compound functions (chalk.bold.hex) would leave non-foreground attributes
+    // un-reset by the trailing \x1b[39m.
+    const prefix = extractAnsiPrefix(colorFn);
+    if (prefix.length > 0) {
+      return dimIndent + prefix + rest.replace(ANSI_RESET_RE, (m) => m + prefix) + '\u001B[39m';
+    }
     return dimIndent + rest;
   }
   return dimIndent + colorFn(rest);
