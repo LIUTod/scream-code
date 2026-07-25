@@ -752,6 +752,9 @@ export const zh: Record<string, string> = {
   'goalpanel.pause_goal': '暂停当前目标',
   'goalpanel.resume_goal': '恢复已暂停的目标',
   'goalpanel.cancel_goal': '取消当前目标',
+  'goalpanel.update_goal': '修改当前目标',
+  'goalpanel.status_goal': '查看目标状态',
+  'goalpanel.replace_goal': '替换目标（重置进度）',
   'goalpanel.no_stop_condition': '  No stop condition — runs until evaluated complete.',
 
   // ─── 知识结果查看器 ─────────────

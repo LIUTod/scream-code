@@ -752,6 +752,9 @@ export const en: Record<string, string> = {
   'goalpanel.pause_goal': 'Pause current goal',
   'goalpanel.resume_goal': 'Resume paused goal',
   'goalpanel.cancel_goal': 'Cancel current goal',
+  'goalpanel.update_goal': 'Update current objective',
+  'goalpanel.status_goal': 'Show goal status',
+  'goalpanel.replace_goal': 'Replace goal (resets progress)',
   'goalpanel.no_stop_condition': '  No stop condition — runs until evaluated complete.',
 
   // ─── Knowledge result viewer ────
