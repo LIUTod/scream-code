@@ -240,6 +240,8 @@ export const zh: Record<string, string> = {
   'goal.resume_failed': '恢复目标失败：{msg}',
   'goal.cancel_failed': '取消目标失败：{msg}',
   'goal.status_failed': '获取目标状态失败：{msg}',
+  'goal.updated': '目标已更新：{objective}',
+  'goal.update_failed': '更新目标失败：{msg}',
   'goal.resume_hint': '继续执行当前目标。',
   'goal.wizard_title': '目标：{objective}',
   'goal.budget_turns_hint': '轮次限制（0 = 不限制）',

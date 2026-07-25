@@ -240,6 +240,8 @@ export const en: Record<string, string> = {
   'goal.resume_failed': 'Failed to resume goal: {msg}',
   'goal.cancel_failed': 'Failed to cancel goal: {msg}',
   'goal.status_failed': 'Failed to get goal status: {msg}',
+  'goal.updated': 'Goal objective updated: {objective}',
+  'goal.update_failed': 'Failed to update goal: {msg}',
   'goal.resume_hint': 'Continue the current goal.',
   'goal.wizard_title': 'Goal: {objective}',
   'goal.budget_turns_hint': 'Turn limit (0 = unlimited)',

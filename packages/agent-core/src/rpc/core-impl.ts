@@ -101,6 +101,7 @@ import type {
   UpdateSessionMetadataPayload,
   CreateGoalPayload,
   UpdateGoalStatusPayload,
+  UpdateGoalObjectivePayload,
   SetGoalBudgetPayload,
 } from './core-api';
 import type { ResumedAgentState, ResumeSessionResult } from './resumed';
@@ -607,6 +608,10 @@ export class ScreamCore implements PromisableMethods<CoreAPI> {
 
   updateGoalStatus({ sessionId, ...payload }: SessionAgentPayload<UpdateGoalStatusPayload>) {
     return this.sessionApi(sessionId).updateGoalStatus(payload);
+  }
+
+  updateGoalObjective({ sessionId, ...payload }: SessionAgentPayload<UpdateGoalObjectivePayload>) {
+    return this.sessionApi(sessionId).updateGoalObjective(payload);
   }
 
   cancelGoal({ sessionId, ...payload }: SessionAgentPayload<EmptyPayload>) {

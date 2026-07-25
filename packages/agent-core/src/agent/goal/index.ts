@@ -177,6 +177,7 @@ export class GoalMode {
       state.wallClockResumedAt = undefined;
     }
     if (record.budgetLimits !== undefined) state.budgetLimits = record.budgetLimits;
+    if (record.objective !== undefined) state.objective = record.objective;
   }
 
   restoreClear(_record: AgentRecordOf<'goal.clear'>): void {
@@ -309,6 +310,39 @@ export class GoalMode {
     state.budgetLimits = { ...state.budgetLimits, ...input.budgetLimits };
     this.persistState(state);
     this.appendGoalUpdate({ budgetLimits: state.budgetLimits });
+    return this.toSnapshot(state);
+  }
+
+  async updateObjective(
+    input: { objective: string },
+    _actor: GoalActor = 'user',
+  ): Promise<GoalSnapshot> {
+    const state = this.requireState();
+    const objective = input.objective.trim();
+    if (objective.length === 0) {
+      throw new ScreamError(ErrorCodes.GOAL_OBJECTIVE_EMPTY, 'Goal objective cannot be empty');
+    }
+    if (state.status === 'complete') {
+      throw new ScreamError(
+        ErrorCodes.GOAL_STATUS_INVALID,
+        'Cannot update a completed goal.',
+      );
+    }
+    if (state.status === 'blocked') {
+      throw new ScreamError(
+        ErrorCodes.GOAL_STATUS_INVALID,
+        'Cannot update a blocked goal. Resume it first.',
+      );
+    }
+    state.objective = objective;
+    // Append a note so the agent and grader know the objective changed.
+    const noteContent = `Goal objective updated by user: ${objective}`.slice(0, MAX_NOTE_LENGTH);
+    state.notes.push({ content: noteContent, time: Date.now() });
+    if (state.notes.length > MAX_GOAL_NOTES) {
+      state.notes = state.notes.slice(-MAX_GOAL_NOTES);
+    }
+    this.persistState(state);
+    this.appendGoalUpdate({ objective });
     return this.toSnapshot(state);
   }
 

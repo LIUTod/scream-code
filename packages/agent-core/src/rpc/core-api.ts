@@ -337,6 +337,10 @@ export interface UpdateGoalStatusPayload {
   readonly status: 'active' | 'complete' | 'paused' | 'blocked';
 }
 
+export interface UpdateGoalObjectivePayload {
+  readonly objective: string;
+}
+
 export interface SetGoalBudgetPayload {
   readonly value: number;
   readonly unit: 'turns' | 'tokens' | 'milliseconds' | 'seconds' | 'minutes' | 'hours';
@@ -404,6 +408,7 @@ export interface AgentAPI {
   generateText: (payload: GenerateTextPayload) => Promise<GenerateTextResult>;
   createGoal: (payload: CreateGoalPayload) => GoalSnapshotData;
   updateGoalStatus: (payload: UpdateGoalStatusPayload) => GoalSnapshotData | null;
+  updateGoalObjective: (payload: UpdateGoalObjectivePayload) => GoalSnapshotData;
   cancelGoal: (payload: EmptyPayload) => GoalSnapshotData | null;
   getGoal: (payload: EmptyPayload) => GetGoalResult;
   setGoalBudget: (payload: SetGoalBudgetPayload) => GoalSnapshotData;

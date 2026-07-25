@@ -20,6 +20,7 @@ export type ParsedGoalCommand =
   | { readonly kind: 'pause' }
   | { readonly kind: 'resume' }
   | { readonly kind: 'off' }
+  | { readonly kind: 'update'; readonly objective: string }
   | { readonly kind: 'create'; readonly objective: string; readonly replace: boolean }
   | { readonly kind: 'error'; readonly message: string; readonly severity?: 'error' | 'hint' };
 
@@ -38,6 +39,14 @@ export function parseGoalCommand(rawArgs: string): ParsedGoalCommand {
   const first = tokens[0];
   if (first !== undefined && CONTROL_SUBCOMMANDS.has(first) && tokens.length === 1) {
     return { kind: first as 'pause' | 'resume' | 'off' };
+  }
+
+  if (first === 'update') {
+    const objective = tokens.slice(1).join(' ').trim();
+    if (objective.length === 0) {
+      return { kind: 'error', severity: 'hint', message: t('goal.need_desc') };
+    }
+    return { kind: 'update', objective };
   }
 
   let index = 0;
@@ -82,6 +91,9 @@ export async function handleGoalCommand(host: SlashCommandHost, args: string): P
       return;
     case 'off':
       await handleGoalOffCommand(host);
+      return;
+    case 'update':
+      await updateGoalObjective(host, parsed);
       return;
     case 'create':
       await createGoal(host, parsed);
@@ -245,6 +257,31 @@ async function resumeGoal(host: SlashCommandHost): Promise<void> {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     host.showError(t('goal.resume_failed', { msg: message }));
+  }
+}
+
+async function updateGoalObjective(
+  host: SlashCommandHost,
+  parsed: ParsedGoalCommand & { kind: 'update' },
+): Promise<void> {
+  const session = host.session;
+  if (session === undefined) {
+    host.showError(t('error.no_session'));
+    return;
+  }
+
+  try {
+    const result = await session.getGoal();
+    if (result.goal === null) {
+      host.showStatus(t('goal.no_active'));
+      return;
+    }
+
+    await session.updateGoalObjective(parsed.objective);
+    host.showStatus(t('goal.updated', { objective: parsed.objective }));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    host.showError(t('goal.update_failed', { msg: message }));
   }
 }
 

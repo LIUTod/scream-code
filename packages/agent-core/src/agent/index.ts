@@ -510,6 +510,9 @@ export class Agent {
         // status === 'active'
         return this.goal.resumeGoal({}, 'user');
       },
+      updateGoalObjective: async (payload) => {
+        return this.goal.updateObjective({ objective: payload.objective }, 'user');
+      },
       cancelGoal: async () => {
         return this.goal.cancelGoal('user');
       },

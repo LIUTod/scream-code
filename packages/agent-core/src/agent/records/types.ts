@@ -89,6 +89,7 @@ export interface AgentRecordEvents {
     budgetLimits?: GoalBudgetLimits;
     reason?: string;
     actor?: GoalActor;
+    objective?: string;
   };
   'goal.clear': {};
 

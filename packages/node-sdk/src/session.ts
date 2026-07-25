@@ -474,6 +474,11 @@ export class Session {
     return this.rpc.updateGoalStatus({ sessionId: this.id, status });
   }
 
+  async updateGoalObjective(objective: string): Promise<GoalSnapshotData> {
+    this.ensureOpen();
+    return this.rpc.updateGoalObjective({ sessionId: this.id, objective });
+  }
+
   async cancelGoal(): Promise<GoalSnapshotData | null> {
     this.ensureOpen();
     return this.rpc.cancelGoal({ sessionId: this.id });

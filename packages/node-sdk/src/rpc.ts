@@ -127,6 +127,10 @@ export interface UpdateGoalStatusRpcInput extends SessionIdRpcInput {
   readonly status: 'active' | 'complete' | 'paused' | 'blocked';
 }
 
+export interface UpdateGoalObjectiveRpcInput extends SessionIdRpcInput {
+  readonly objective: string;
+}
+
 export interface SetGoalBudgetRpcInput extends SessionIdRpcInput {
   readonly value: number;
   readonly unit: 'turns' | 'tokens' | 'milliseconds' | 'seconds' | 'minutes' | 'hours';
@@ -353,6 +357,15 @@ export class SDKRpcClient {
       sessionId: input.sessionId,
       agentId: this.interactiveAgentId,
       status: input.status,
+    });
+  }
+
+  async updateGoalObjective(input: UpdateGoalObjectiveRpcInput): Promise<import('@scream-code/agent-core').GoalSnapshotData> {
+    const rpc = await this.getRpc();
+    return rpc.updateGoalObjective({
+      sessionId: input.sessionId,
+      agentId: this.interactiveAgentId,
+      objective: input.objective,
     });
   }
 
