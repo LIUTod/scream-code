@@ -73,11 +73,19 @@ export class TruncatedOutputComponent implements Component {
     this.collapseHintFormatter = options.collapseHintFormatter;
     const tint = options.isError ? chalk.hex(options.colors.error) : chalk.dim;
     const cleaned = trimTrailingEmptyLines(output.split('\n')).join('\n');
+    // Error output may contain ANSI codes from the command (npm/npx color
+    // output in PTY mode). \x1b[0m drops the error tint, background codes
+    // render as solid color blocks. Strip them so the tint applies uniformly.
+    const stripped = options.isError ? cleaned.replaceAll(/\u001B\[[0-9;]*m/g, '') : cleaned;
     const truncated =
       options.maxBytes === undefined
-        ? cleaned
-        : truncateTailBytes(cleaned, options.maxBytes);
-    this.textComponent = new Text(tint(truncated), 2, 0);
+        ? stripped
+        : truncateTailBytes(stripped, options.maxBytes);
+    // Tint per-line so each line carries its own ANSI reset. Without this the
+    // trailing padding Text.render appends inherits the fg color, and terminals
+    // that paint colored spaces show a solid color block instead of text.
+    const tinted = truncated.split('\n').map((line) => tint(line)).join('\n');
+    this.textComponent = new Text(tinted, 2, 0);
   }
 
   invalidate(): void {
