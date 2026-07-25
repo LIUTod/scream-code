@@ -764,6 +764,7 @@ export class SessionEventHandler {
           objective: snapshot.objective,
           turnsUsed: snapshot.turnsUsed ?? 0,
           wallClockMs: snapshot.wallClockMs ?? 0,
+          wallClockBaseAt: Date.now(),
         },
         goalActive: snapshot.status === 'active',
       });

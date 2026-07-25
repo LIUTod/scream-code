@@ -101,4 +101,57 @@ describe('FooterComponent - active status animation', () => {
     expect(requestRender.mock.calls.length).toBe(1);
     footer.dispose();
   });
+
+  it('keeps the goal wall-clock badge ticking between goal.updated events', () => {
+    vi.useFakeTimers();
+    const now = Date.now();
+    vi.setSystemTime(now);
+    const { footer } = makeFooter(
+      baseState({
+        goalActive: true,
+        goal: {
+          objective: 'test goal',
+          turnsUsed: 3,
+          wallClockMs: 5_000,
+          wallClockBaseAt: now,
+        },
+      }),
+    );
+
+    const line0 = footer.render(200)[0];
+    expect(line0).toContain('GOAL 5s · 3 turns');
+
+    vi.advanceTimersByTime(2_500);
+    const line1 = footer.render(200)[0];
+    expect(line1).toContain('GOAL 7s · 3 turns');
+
+    footer.dispose();
+  });
+
+  it('keeps ticking while a goal is active even when streaming is idle', () => {
+    vi.useFakeTimers();
+    const { footer, requestRender } = makeFooter(
+      baseState({
+        streamingPhase: 'idle',
+        goalActive: true,
+        goal: {
+          objective: 'test goal',
+          turnsUsed: 1,
+          wallClockMs: 0,
+          wallClockBaseAt: Date.now(),
+        },
+      }),
+    );
+
+    requestRender.mockClear();
+    vi.advanceTimersByTime(500);
+    expect(requestRender.mock.calls.length).toBeGreaterThanOrEqual(4);
+
+    footer.setState(baseState({ streamingPhase: 'idle', goalActive: false, goal: null }));
+    requestRender.mockClear();
+    vi.advanceTimersByTime(500);
+    expect(requestRender).not.toHaveBeenCalled();
+
+    footer.dispose();
+  });
 });

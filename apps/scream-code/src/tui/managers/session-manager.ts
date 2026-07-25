@@ -175,6 +175,7 @@ export class SessionManager {
         objective: goal.objective,
         turnsUsed: goal.turnsUsed ?? 0,
         wallClockMs: goal.wallClockMs ?? 0,
+        wallClockBaseAt: Date.now(),
       } : null,
       goalActive: goal?.status === 'active',
       goalContinuationCount: 0,

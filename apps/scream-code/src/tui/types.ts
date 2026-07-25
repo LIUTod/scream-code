@@ -26,6 +26,9 @@ export interface GoalBadgeInfo {
   readonly objective: string;
   readonly turnsUsed: number;
   readonly wallClockMs: number;
+  /** Timestamp (ms) when the TUI last received a goal snapshot. Used to keep
+   * the footer wall-clock timer ticking between sparse `goal.updated` events. */
+  readonly wallClockBaseAt: number;
 }
 
 export interface AppState {

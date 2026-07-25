@@ -12,7 +12,7 @@ import chalk from 'chalk';
 import { t } from '@scream-code/config';
 
 import type { ColorPalette } from '#/tui/theme/colors';
-import type { AppState } from '#/tui/types';
+import type { AppState, GoalBadgeInfo } from '#/tui/types';
 import { shimmerText } from '#/tui/utils/shimmer';
 import {
   createGitStatusCache,
@@ -165,9 +165,16 @@ function formatGoalDuration(ms: number): string {
   return seconds > 0 ? `${minutes}m${seconds}s` : `${minutes}m`;
 }
 
-/** Build the footer goal badge: `GOAL 3m · 7 turns`. */
-function formatGoalBadge(wallClockMs: number, turnsUsed: number): string {
-  return `GOAL ${formatGoalDuration(wallClockMs)} · ${turnsUsed} turns`;
+/** Build the footer goal badge: `GOAL 3m · 7 turns`.
+ *
+ * The TUI only receives `goal.updated` events on state changes, so we keep a
+ * local base timestamp and add the elapsed time since the last snapshot to
+ * produce a live wall-clock reading between sparse events.
+ */
+function formatGoalBadge(goal: GoalBadgeInfo): string {
+  const elapsedSinceSnapshot = Date.now() - goal.wallClockBaseAt;
+  const liveWallClockMs = goal.wallClockMs + Math.max(0, elapsedSinceSnapshot);
+  return `GOAL ${formatGoalDuration(liveWallClockMs)} · ${goal.turnsUsed} turns`;
 }
 
 // Context-usage threshold coloring. Pure percent — works uniformly across
@@ -292,17 +299,19 @@ export class FooterComponent implements Component {
     this.onGitStatusChange = onGitStatusChange;
     this.gitCacheWorkDir = state.workDir;
     this.gitCache = createGitStatusCache(state.workDir, { onChange: this.onGitStatusChange });
+    this.#restartStatusTimer(state.streamingPhase, state.goalActive);
   }
 
   setState(state: AppState): void {
     const previousPhase = this.state?.streamingPhase;
+    const previousGoalActive = this.state?.goalActive;
     if (state.workDir !== this.gitCacheWorkDir) {
       this.gitCacheWorkDir = state.workDir;
       this.gitCache = createGitStatusCache(state.workDir, { onChange: this.onGitStatusChange });
     }
     this.state = state;
-    if (state.streamingPhase !== previousPhase) {
-      this.#restartStatusTimer(state.streamingPhase);
+    if (state.streamingPhase !== previousPhase || state.goalActive !== previousGoalActive) {
+      this.#restartStatusTimer(state.streamingPhase, state.goalActive);
     }
   }
 
@@ -339,9 +348,12 @@ export class FooterComponent implements Component {
 
   // ── Active status animation ─────────────────────────────────────────
 
-  #restartStatusTimer(phase: AppState['streamingPhase']): void {
+  #restartStatusTimer(
+    phase: AppState['streamingPhase'],
+    goalActive: boolean,
+  ): void {
     this.#stopStatusTimer();
-    if (phase === 'idle') return;
+    if (phase === 'idle' && !goalActive) return;
     const intervalMs = 1000 / 60;
     this.statusTimer = setInterval(() => {
       this.ui.requestRender();
@@ -369,8 +381,7 @@ export class FooterComponent implements Component {
     }
     if (state.wolfpackMode) left.push(chalk.hex(colors.wolfpackMode).bold(t('badge.wolfpack')));
     if (state.goalActive && state.goal) {
-      const g = state.goal;
-      const goalLabel = formatGoalBadge(g.wallClockMs, g.turnsUsed);
+      const goalLabel = formatGoalBadge(state.goal);
       left.push(chalk.hex(colors.primary).bold(goalLabel));
     }
 
