@@ -27,6 +27,8 @@ const TEMPLATED = new Set([
   'agent/compaction/compaction-update-instruction.md',
   'tools/builtin/file/read.md',
   'tools/builtin/file/read-media.md',
+  'tools/builtin/file/glob.md',
+  'tools/builtin/file/grep.md',
   'tools/builtin/shell/bash.md',
   'tools/builtin/collaboration/skill-tool.md',
 ]);

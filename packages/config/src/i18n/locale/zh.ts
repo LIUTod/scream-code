@@ -947,7 +947,8 @@ export const zh: Record<string, string> = {
   'thinking.in_progress': '思考中...',
 
   // ─── shell-execution ───────────
-  'shell.more_lines': '...（还有 {count} 行，按 ctrl+o 展开）',
+  'shell.more_lines': '▸ 还有 {count} 行，按 ctrl+o 展开',
+  'shell.collapse_hint': '▾ 按 ctrl+o 折叠',
 
   // ─── cc-connect 通道配置 ──────
   'ccconnect.note_botfather': '需先在 @BotFather 创建 bot',

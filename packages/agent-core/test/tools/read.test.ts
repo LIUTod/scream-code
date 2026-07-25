@@ -525,7 +525,8 @@ describe('ReadTool', () => {
 
     const result = await executeTool(tool, context({ path: '/tmp/long.txt' }));
 
-    expect(result.output).toContain('Lines [1, 3] were truncated.');
+    expect(result.output).toContain('Lines [1, 3]');
+    expect(result.output).toContain('were truncated');
     expect(result.output).toContain('...');
   });
 
@@ -783,7 +784,8 @@ describe('ReadTool', () => {
     expect(result.isError).toBeFalsy();
     // Last 3 lines = 3, 4, 5; line 4 is the long one.
     expect(result.output).toContain('Total lines in file: 5.');
-    expect(result.output).toContain('Lines [4] were truncated.');
+    expect(result.output).toContain('Lines [4]');
+    expect(result.output).toContain('were truncated');
   });
 });
 

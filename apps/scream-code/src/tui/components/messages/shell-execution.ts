@@ -5,10 +5,9 @@ import chalk from 'chalk';
 
 import type { ColorPalette } from '#/tui/theme/colors';
 import type { ToolCallBlockData, ToolResultBlockData } from '#/tui/types';
-import { MAX_SHELL_OUTPUT_BYTES } from '#/tui/constant/rendering';
+import { MAX_SHELL_OUTPUT_BYTES, TOOL_OUTPUT_PREVIEW_LINES } from '#/tui/constant/rendering';
 
 import type { ResultRenderer } from './tool-renderers/types';
-import { PREVIEW_LINES } from './tool-renderers/types';
 import { TruncatedOutputComponent } from './tool-renderers/truncated';
 
 export interface ShellExecutionOptions {
@@ -39,7 +38,7 @@ export class ShellExecutionComponent extends Container {
         options.result,
         options.colors,
         options.expanded ?? false,
-        options.resultPreviewLines ?? PREVIEW_LINES,
+        options.resultPreviewLines ?? TOOL_OUTPUT_PREVIEW_LINES,
       );
     }
   }
@@ -70,6 +69,7 @@ export class ShellExecutionComponent extends Container {
         maxBytes: MAX_SHELL_OUTPUT_BYTES,
         hintFormatter: (remaining) =>
           t('shell.more_lines', { count: String(remaining) }),
+        collapseHintFormatter: () => t('shell.collapse_hint'),
       }),
     );
   }

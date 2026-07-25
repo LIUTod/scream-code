@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { setLocale } from '@scream-code/config';
 import {
   ShellExecutionComponent,
   shellExecutionResultRenderer,
@@ -25,25 +26,33 @@ describe('ShellExecutionComponent', () => {
   });
 
   it('keeps collapsed shell output short and expands on demand', () => {
+    setLocale('zh');
+    const lines = Array.from({ length: 20 }, (_, i) =>
+      `line${String(i + 1).padStart(2, '0')}`,
+    );
+    const output = lines.join('\n');
+
     const collapsed = new ShellExecutionComponent({
       result: {
         tool_call_id: 'call_shell',
-        output: ['line1', 'line2', 'line3', 'line4', 'line5'].join('\n'),
+        output,
         is_error: false,
       },
       colors: darkColors,
     });
 
     const collapsedOutput = collapsed.render(100).map(strip).join('\n');
-    expect(collapsedOutput).toContain('line1');
-    expect(collapsedOutput).toContain('line3');
-    expect(collapsedOutput).not.toContain('line4');
-    expect(collapsedOutput).toContain('...（还有 2 行，按 ctrl+o 展开）');
+    // Tail preview: last 15 lines shown, first 5 hidden.
+    expect(collapsedOutput).toContain('line06');
+    expect(collapsedOutput).toContain('line20');
+    expect(collapsedOutput).not.toContain('line01');
+    expect(collapsedOutput).not.toContain('line05');
+    expect(collapsedOutput).toContain('▸ 还有 5 行，按 ctrl+o 展开');
 
     const expanded = new ShellExecutionComponent({
       result: {
         tool_call_id: 'call_shell',
-        output: ['line1', 'line2', 'line3', 'line4', 'line5'].join('\n'),
+        output,
         is_error: false,
       },
       colors: darkColors,
@@ -51,9 +60,10 @@ describe('ShellExecutionComponent', () => {
     });
 
     const expandedOutput = expanded.render(100).map(strip).join('\n');
-    expect(expandedOutput).toContain('line4');
-    expect(expandedOutput).toContain('line5');
+    expect(expandedOutput).toContain('line01');
+    expect(expandedOutput).toContain('line20');
     expect(expandedOutput).not.toContain('ctrl+o to expand');
+    expect(expandedOutput).toContain('▾ 按 ctrl+o 折叠');
   });
 
   it('renders unbounded command preview when previewLines is undefined', () => {

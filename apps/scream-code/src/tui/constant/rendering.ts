@@ -12,6 +12,12 @@ export const RESULT_PREVIEW_LINES = 3;
 export const THINKING_PREVIEW_LINES = 2;
 export const COMMAND_PREVIEW_LINES = 10;
 
+// Tail-preview cap for tool/shell output. Outputs longer than this default to
+// a collapsed TAIL preview (newest lines - where command errors land) with an
+// expand hint at the top, so a long command result no longer explodes the
+// transcript. Larger than RESULT_PREVIEW_LINES so the preview stays useful.
+export const TOOL_OUTPUT_PREVIEW_LINES = 15;
+
 // Shell output is capped before wrapping to prevent a single huge command
 // result from hanging the renderer.
 export const MAX_SHELL_OUTPUT_BYTES = 128 * 1024;

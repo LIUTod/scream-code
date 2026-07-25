@@ -27,6 +27,7 @@ import type { BuiltinTool } from '../../../agent/tool';
 import { isAbortError } from '../../../loop/errors';
 import { ToolAccesses } from '../../../loop/tool-access';
 import type { ExecutableToolResult, ToolExecution } from '../../../loop/types';
+import { renderPrompt } from '../../../utils/render-prompt';
 import { resolvePathAccessPath } from '../../policies/path-access';
 import type { PathClass } from '../../policies/path-access';
 import { isSensitiveFile, SENSITIVE_DOT_VARIANT_SUFFIXES } from '../../policies/sensitive';
@@ -37,7 +38,7 @@ import { literalRulePattern, matchesGlobRuleSubject } from '../../support/rule-m
 import { ToolResultBuilder } from '../../support/result-builder';
 import type { ToolResultDisplay } from '../../display';
 import type { WorkspaceConfig } from '../../support/workspace';
-import GREP_DESCRIPTION from './grep.md';
+import grepDescriptionTemplate from './grep.md';
 
 export const GrepInputSchema = z.object({
   pattern: z.string().describe('Regular expression to search for.'),
@@ -173,6 +174,10 @@ const SENSITIVE_GLOBS_TO_EXCLUDE = [
 // Runtime rg output uses NUL as the path boundary; the regex handles
 // line-oriented output without NUL delimiters.
 const CONTENT_LINE_RE = /^(.*?)([:-])(\d+)\2/;
+
+const GREP_DESCRIPTION = renderPrompt(grepDescriptionTemplate, {
+  DEFAULT_HEAD_LIMIT,
+});
 
 export class GrepTool implements BuiltinTool<GrepInput> {
   readonly name = 'Grep' as const;

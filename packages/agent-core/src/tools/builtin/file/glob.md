@@ -12,5 +12,5 @@ Rejected patterns (no literal anchor — nothing bounds the result set):
 
 Large-directory warning — avoid recursing into dependency/build output even with an anchor:
 - `node_modules/**/*.js`, `.venv/**/*.py`, `__pycache__/**`, `target/**` all match technically but
-  typically produce thousands of results that truncate at the match cap and waste the caller context.
+  typically produce thousands of results that truncate at the {{ MAX_MATCHES }}-match cap and waste the caller context.
   Prefer specific subpaths like `node_modules/react/src/**/*.js`.

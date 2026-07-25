@@ -1,9 +1,13 @@
 import type { Component } from '@liutod-scream/pi-tui';
+import { setLocale } from '@scream-code/config';
 import { describe, expect, it } from 'vitest';
 
 import { pickResultRenderer } from '#/tui/components/messages/tool-renderers/registry';
 import { darkColors } from '#/tui/theme/colors';
 import type { ToolCallBlockData, ToolResultBlockData } from '#/tui/types';
+
+// Ensure deterministic i18n output for assertion matching.
+setLocale('en');
 
 function strip(text: string): string {
   return text.replaceAll(/\[[0-9;]*m/g, '');
@@ -28,18 +32,25 @@ describe('tool-result registry', () => {
   it('falls back to truncated renderer for unknown tools', () => {
     const renderer = pickResultRenderer('SomethingUnknown');
     const out = strip(joinRender(renderer(call('SomethingUnknown'), result('a\nb\nc\nd\ne'), ctx)));
-    expect(out).toContain('a');
-    expect(out).toContain('b');
-    expect(out).toContain('c');
-    expect(out).not.toContain('\nd');
-    expect(out).toContain('... (2 more lines, ctrl+o to expand)');
+    // Tail preview: last 3 lines shown, first 2 hidden, expand hint on top.
+    expect(out).toContain('▸ 2 lines hidden, press ctrl+o to expand');
+    expect(out).toContain('  c');
+    expect(out).toContain('  d');
+    expect(out).toContain('  e');
+    expect(out).not.toContain('  a');
+    expect(out).not.toContain('  b');
   });
 
   it('uses truncated renderer for Bash to preserve raw output UX', () => {
     const renderer = pickResultRenderer('Bash');
     const out = strip(joinRender(renderer(call('Bash'), result('one\ntwo\nthree\nfour'), ctx)));
+    // Bash renders raw output (no summary chip); under the 15-line collapse
+    // threshold all four lines are shown verbatim with no expand hint.
     expect(out).toContain('one');
-    expect(out).toContain('...（还有 1 行，按 ctrl+o 展开）');
+    expect(out).toContain('two');
+    expect(out).toContain('three');
+    expect(out).toContain('four');
+    expect(out).not.toContain('ctrl+o');
   });
 
   it('Read renders line count · extension glance when collapsed', () => {

@@ -7,7 +7,7 @@
  */
 
 import type { Component, TUI } from '@liutod-scream/pi-tui';
-import { truncateToWidth, visibleWidth } from '@liutod-scream/pi-tui';
+import { sliceByColumn, truncateToWidth, visibleWidth } from '@liutod-scream/pi-tui';
 import chalk from 'chalk';
 import { t } from '@scream-code/config';
 
@@ -274,6 +274,38 @@ export function formatFooterGitBadge(status: GitStatus, colors: ColorPalette): s
   return `${base} ${pullRequest}`;
 }
 
+/**
+ * Middle-truncate a (possibly ANSI-colored) string to `maxWidth` visible
+ * columns, keeping a head and a tail fragment joined by `ellipsis`. The
+ * remaining budget is split roughly in half so both the start and the end of
+ * the original content stay visible - e.g. `GOAL 3m · 7 turns` becomes
+ * `GOAL… turns` (head `GOAL`, tail `turns`). ANSI styling is preserved via
+ * sliceByColumn, which carries the active SGR state into the tail; a reset is
+ * emitted around the ellipsis so a colour opened in the head never bleeds
+ * across it. Exported for unit testing.
+ */
+export function truncateMiddle(line: string, maxWidth: number, ellipsis: string): string {
+  if (maxWidth <= 0) return '';
+  const textWidth = visibleWidth(line);
+  if (textWidth <= maxWidth) return line;
+  const ellipsisWidth = visibleWidth(ellipsis);
+  if (ellipsisWidth >= maxWidth) {
+    // Ellipsis alone fills the budget: fall back to a head-only truncation.
+    return truncateToWidth(line, maxWidth, ellipsis);
+  }
+  const keepWidth = maxWidth - ellipsisWidth;
+  const headWidth = Math.max(0, Math.ceil(keepWidth / 2));
+  const tailWidth = keepWidth - headWidth;
+  const head = headWidth > 0 ? sliceByColumn(line, 0, headWidth) : '';
+  const tail = tailWidth > 0 ? sliceByColumn(line, textWidth - tailWidth, tailWidth) : '';
+  // Reset around the ellipsis: the head may have opened a colour that is not
+  // closed at the cut, and the tail re-applies its own SGR state via
+  // sliceByColumn's pendingAnsi carry-over, so the resets isolate the ellipsis
+  // without corrupting either side.
+  const RESET = '\u001B[0m';
+  return head + RESET + ellipsis + RESET + tail;
+}
+
 export class FooterComponent implements Component {
   private state: AppState;
   private colors: ColorPalette;
@@ -439,16 +471,33 @@ export class FooterComponent implements Component {
     const rightWidth = visibleWidth(rightText);
     const gap = 3;
 
+    const ellipsis = chalk.hex(colors.textDim)('…');
+
+    // Three-stage progressive truncation keeps the footer on a single line at
+    // any terminal width:
+    //   1. Shrink LEFT with a middle ellipsis (head + tail kept) until
+    //      LEFT + gap + RIGHT fits, so RIGHT stays visible.
+    //   2. If RIGHT still cannot fit after shrinking LEFT (its width plus the
+    //      gap already exceeds the line), drop RIGHT and show LEFT alone,
+    //      padded to the full width.
+    //   3. If LEFT alone exceeds the width, truncate LEFT to the width.
     let line1: string;
     if (leftWidth + gap + rightWidth <= width) {
       const pad = width - leftWidth - rightWidth;
       line1 = leftLine + ' '.repeat(pad) + rightText;
-    } else if (leftWidth <= width) {
-      line1 = leftLine;
     } else {
-      line1 = truncateToWidth(leftLine, width, '…');
+      const targetLeft = width - gap - rightWidth;
+      if (targetLeft > 0) {
+        const shrunkLeft = truncateMiddle(leftLine, targetLeft, ellipsis);
+        const pad = width - visibleWidth(shrunkLeft) - rightWidth;
+        line1 = shrunkLeft + ' '.repeat(pad) + rightText;
+      } else if (leftWidth <= width) {
+        line1 = leftLine + ' '.repeat(width - leftWidth);
+      } else {
+        line1 = truncateMiddle(leftLine, width, ellipsis);
+      }
     }
 
-    return [truncateToWidth(line1, width)];
+    return [truncateToWidth(line1, width, '…')];
   }
 }

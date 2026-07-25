@@ -533,7 +533,9 @@ export class ReadTool implements BuiltinTool<ReadInput> {
       parts.push('End of file reached.');
     }
     if (input.truncatedLineNumbers.length > 0) {
-      parts.push(`Lines [${input.truncatedLineNumbers.join(', ')}] were truncated.`);
+      parts.push(
+        `Lines [${input.truncatedLineNumbers.join(', ')}] exceed the ${String(MAX_LINE_LENGTH)}-char limit and were truncated. Re-read with line_offset and n_lines=1 to view individual long lines in full.`,
+      );
     }
     if (input.lineEndingStyle === 'mixed') {
       parts.push(

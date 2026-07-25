@@ -1,6 +1,7 @@
 import type { TUI } from '@liutod-scream/pi-tui';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { setLocale } from '@scream-code/config';
 import { ToolCallComponent } from '#/tui/components/messages/tool-call';
 import { STATUS_BULLET } from '#/tui/constant/symbols';
 import { darkColors } from '#/tui/theme/colors';
@@ -51,6 +52,10 @@ describe('ToolCallComponent', () => {
   });
 
   it('keeps collapsed tool results short and expands on demand', () => {
+    setLocale('zh');
+    const lines = Array.from({ length: 20 }, (_, i) =>
+      `line${String(i + 1).padStart(2, '0')}`,
+    );
     const component = new ToolCallComponent(
       {
         id: 'call_shell',
@@ -59,25 +64,27 @@ describe('ToolCallComponent', () => {
       },
       {
         tool_call_id: 'call_shell',
-        output: ['line1', 'line2', 'line3', 'line4', 'line5'].join('\n'),
+        output: lines.join('\n'),
         is_error: false,
       },
       darkColors,
     );
 
     const collapsed = strip(component.render(100).join('\n'));
-    expect(collapsed).toContain('line1');
-    expect(collapsed).toContain('line2');
-    expect(collapsed).toContain('line3');
-    expect(collapsed).not.toContain('line4');
-    expect(collapsed).toContain('...（还有 2 行，按 ctrl+o 展开）');
+    // Tail preview: last 15 lines shown, first 5 hidden.
+    expect(collapsed).toContain('line06');
+    expect(collapsed).toContain('line20');
+    expect(collapsed).not.toContain('line01');
+    expect(collapsed).not.toContain('line05');
+    expect(collapsed).toContain('▸ 还有 5 行，按 ctrl+o 展开');
 
     component.setExpanded(true);
 
     const expanded = strip(component.render(100).join('\n'));
-    expect(expanded).toContain('line4');
-    expect(expanded).toContain('line5');
+    expect(expanded).toContain('line01');
+    expect(expanded).toContain('line20');
     expect(expanded).not.toContain('按 ctrl+o 展开');
+    expect(expanded).toContain('▾ 按 ctrl+o 折叠');
   });
 
   it('hides tool output bodies that start with a <system tag', () => {

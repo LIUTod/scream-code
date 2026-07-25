@@ -35,6 +35,7 @@ import { z } from 'zod';
 import type { BuiltinTool } from '../../../agent/tool';
 import { ToolAccesses } from '../../../loop/tool-access';
 import type { ExecutableToolResult, ToolExecution } from '../../../loop/types';
+import { renderPrompt } from '../../../utils/render-prompt';
 import { resolvePathAccessPath } from '../../policies/path-access';
 import type { PathClass } from '../../policies/path-access';
 import { toInputJsonSchema } from '../../support/input-schema';
@@ -42,7 +43,7 @@ import { listDirectory } from '../../support/list-directory';
 import { literalRulePattern, matchesGlobRuleSubject } from '../../support/rule-match';
 import { scanCache } from '../../support/scan-cache';
 import type { WorkspaceConfig } from '../../support/workspace';
-import GLOB_DESCRIPTION from './glob.md';
+import globDescriptionTemplate from './glob.md';
 
 export const GlobInputSchema = z.object({
   pattern: z.string().describe('Glob pattern to match files/directories.'),
@@ -64,6 +65,10 @@ export const GlobInputSchema = z.object({
 export type GlobInput = z.Infer<typeof GlobInputSchema>;
 
 export const MAX_MATCHES = 1000;
+
+const GLOB_DESCRIPTION = renderPrompt(globDescriptionTemplate, {
+  MAX_MATCHES,
+});
 
 /**
  * Path-shape hint appended to the tool description only on a Windows
