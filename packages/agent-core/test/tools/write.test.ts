@@ -20,8 +20,8 @@ describe('WriteTool', () => {
     const tool = new WriteTool(createFakeJian(), PERMISSIVE_WORKSPACE);
 
     expect(tool.name).toBe('Write');
-    expect(tool.description).toContain('exactly as provided');
-    expect(tool.description).toContain('append adds content to the end without adding a newline');
+    // "exactly as provided" and mode defaults are in the field-level schema
+    // describe, not the tool-level description.
     expect(tool.description).toContain('does not preserve or infer the previous line-ending style');
     expect(tool.parameters).toMatchObject({
       type: 'object',

@@ -1,6 +1,6 @@
 Schedule a prompt to be enqueued at a future time. Use for both recurring schedules and one-shot reminders.
 
-Uses standard 5-field cron in the user's local timezone: minute hour day-of-month month day-of-week. `0 9 * * *` means 9am local — no timezone conversion needed.
+`0 9 * * *` means 9am local — no timezone conversion needed.
 
 ## One-shot tasks (recurring: false)
 
@@ -9,7 +9,7 @@ Pin minute/hour/day-of-month/month to specific values:
   "remind me at 2:30pm today to check the deploy" → cron: "30 14 <today_dom> <today_month> *", recurring: false
   "tomorrow morning, run the smoke test" → cron: "57 8 <tomorrow_dom> <tomorrow_month> *", recurring: false
 
-## Recurring jobs (recurring: true, the default)
+## Recurring jobs
 
 For "every N minutes" / "every hour" / "weekdays at 9am" requests:
   "*/5 * * * *" (every 5 min), "0 * * * *" (hourly), "0 9 * * 1-5" (weekdays at 9am local)
@@ -63,7 +63,7 @@ Bench / acceptance tests can set `SCREAM_CRON_NO_JITTER=1` to disable jitter ent
 
 ## One-shot vs recurring — when to pick which
 
-Use `recurring: false` for "remind me at X" style requests, single deadlines, "in N minutes do Y", and any task that should not repeat. Use `recurring: true` for periodic polling (CI status, build watchers, scheduled reports), workday rituals, and anything the user explicitly described as recurring.
+Use one-shot for "remind me at X" style requests, single deadlines, and any task that should not repeat. Use recurring for periodic polling (CI status, build watchers, scheduled reports), workday rituals, and anything the user explicitly described as recurring.
 
 ## Session lifetime
 

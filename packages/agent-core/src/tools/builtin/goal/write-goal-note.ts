@@ -23,8 +23,8 @@ export type WriteGoalNoteInput = z.infer<typeof WriteGoalNoteInputSchema>;
 export class WriteGoalNoteTool implements BuiltinTool<WriteGoalNoteInput> {
   readonly name = 'WriteGoalNote' as const;
   readonly description =
-    'Record a working note during goal execution. Notes persist across continuation turns and are injected automatically. ' +
-    'Use this to record facts you verified, dead ends you hit, decisions you made, or anything future-you should not re-derive.';
+    'Record a working note during goal execution. ' +
+    'Use this for dead ends you hit, decisions you made, or anything future-you should not re-derive.';
   readonly parameters: Record<string, unknown> = toInputJsonSchema(WriteGoalNoteInputSchema);
 
   constructor(private readonly agent: Agent) {}

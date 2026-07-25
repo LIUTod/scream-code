@@ -248,10 +248,14 @@ describe('TaskListTool', () => {
       expect(tool.description.length).toBeGreaterThan(120);
     });
 
-    it('documents the limit parameter bounds and default', () => {
-      expect(tool.description).toContain('limit');
-      expect(tool.description).toContain('20');
-      expect(tool.description).toMatch(/1\s*(to|-|–|and)\s*100|between 1 and 100/i);
+    it('documents the limit parameter bounds and default in the schema', () => {
+      const params = tool.parameters as {
+        properties: Record<string, Record<string, unknown>>;
+      };
+      const limit = params.properties['limit'];
+      expect(limit?.['minimum']).toBe(1);
+      expect(limit?.['maximum']).toBe(100);
+      expect(limit?.['default']).toBe(20);
     });
 
     it('warns that active_only=false may include lost tasks from a prior process', () => {
@@ -267,9 +271,11 @@ describe('TaskListTool', () => {
       expect(tool.description).toMatch(/re-?enumerate|re-?discover/i);
     });
 
-    it('recommends keeping the default active_only=true', () => {
-      expect(tool.description).toContain('active_only');
-      expect(tool.description).toContain('true');
+    it('documents the active_only default in the schema', () => {
+      const params = tool.parameters as {
+        properties: Record<string, Record<string, unknown>>;
+      };
+      expect(params.properties['active_only']?.['default']).toBe(true);
     });
 
     it('directs locating a task ID here before using TaskOutput for detail', () => {

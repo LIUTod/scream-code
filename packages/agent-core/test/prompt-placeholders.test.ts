@@ -28,7 +28,7 @@ const TEMPLATED = new Set([
   'tools/builtin/file/read.md',
   'tools/builtin/file/read-media.md',
   'tools/builtin/file/glob.md',
-  'tools/builtin/file/grep.md',
+  // 'tools/builtin/file/grep.md',  // no longer uses template syntax after prompt optimization
   'tools/builtin/shell/bash.md',
   'tools/builtin/collaboration/skill-tool.md',
 ]);

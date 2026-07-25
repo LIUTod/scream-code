@@ -1,9 +1,7 @@
 Cancel a scheduled cron job by id.
 
 Use this tool to remove a cron task previously scheduled with
-`CronCreate`. The `id` is the 8-hex value returned by `CronCreate`, or
-shown in the `id:` column of `CronList` — quote it verbatim, no
-prefix.
+`CronCreate`. Quote the id verbatim, no prefix.
 
 Behaviour by task kind:
 

@@ -46,8 +46,7 @@ export class MemoryWriteTool implements BuiltinTool<MemoryWriteInput> {
   readonly description =
     'Write a new memory memo to the global memory memo store. ' +
     'Call this when the user explicitly asks to save an experience, lesson, or summary to memory, ' +
-    'for example "保存到记忆", "保存到备忘录", "总结并保存", "永久记忆", "记录我的记忆", "记住这个", "添加到记忆", or "存入记忆库". ' +
-    'Summarize the user need, approach taken, final outcome, what failed, what worked, and 3-5 tags.';
+    'for example "保存到记忆", "保存到备忘录", "总结并保存", "永久记忆", "记录我的记忆", "记住这个", "添加到记忆", or "存入记忆库".';
   readonly parameters: Record<string, unknown> = toInputJsonSchema(MemoryWriteInputSchema);
 
   constructor(private readonly agent: Agent) {}

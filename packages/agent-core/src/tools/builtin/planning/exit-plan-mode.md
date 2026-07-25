@@ -10,13 +10,9 @@ Only use this tool for tasks that require planning implementation steps. For res
 
 ## Multiple Approaches
 If your plan contains multiple alternative approaches:
-- Pass them via the `options` parameter so the user can choose which approach to execute.
-- Each option should have a concise label and a brief description of trade-offs.
 - If you recommend one option, append "(Recommended)" to its label.
 - In yolo and manual modes, the user will see all options alongside Reject and Revise choices.
-- Provide up to 3 options; the host adds the standard rejection and revision controls. When the plan offers a real choice, 2-3 distinct approaches work best.
 - Passing a single option is allowed and is equivalent to a plain plan approval (no approach choice is surfaced to the user).
-- Do NOT use "Reject", "Reject and Exit", "Revise", or "Approve" as option labels - these are reserved by the system.
 
 ## Before Using
 - In auto permission mode, do NOT use AskUserQuestion; make the best decision from available context.

@@ -3,12 +3,8 @@ Getting user sign-off on your approach via ExitPlanMode before writing code prev
 
 ## Planning Modes
 
-The host supports two planning strategies. You can request either one via this tool:
-
-- **Normal plan** (default): You investigate the codebase, design a single implementation approach, write it to the plan file, and present it for approval. Best when the task is straightforward or you are already confident about the right approach.
-- **Fusion plan**: Invoke the FusionPlan tool to spawn multiple independent planning subagents in parallel, each exploring a different angle, then synthesize their outputs into one consolidated plan. Best when the task is ambiguous, has many valid approaches, crosses many files, or when exploration itself adds significant value. Fusion plan may take longer but tends to surface risks and alternatives you might miss.
-
-To request a fusion plan, include `mode: 'fusion'` in your tool arguments. When in fusion strategy, call the FusionPlan tool to generate the plan.
+- **Normal plan**: You investigate the codebase, design a single approach, write it to the plan file, and present it for approval.
+- **Fusion plan**: Invoke the FusionPlan tool to spawn parallel planning subagents, each exploring a different angle, then synthesize their outputs into one plan. Fusion plan may take longer but tends to surface risks and alternatives you might miss.
 
 ### When to choose which mode
 

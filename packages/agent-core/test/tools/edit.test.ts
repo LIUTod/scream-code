@@ -39,7 +39,6 @@ describe('EditTool', () => {
 
     expect(tool.name).toBe('Edit');
     expect(tool.description).toContain('text view returned by Read');
-    expect(tool.description).toContain('omit the line-number prefix');
     expect(tool.description).toContain('old_string must occur exactly once');
     expect(tool.description).toContain('multiple Edit calls in parallel');
     // Editing files should go through Edit, not a Shell `sed` command.

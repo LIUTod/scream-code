@@ -21,7 +21,7 @@ export type SetGoalBudgetToolInput = z.infer<typeof SetGoalBudgetToolInputSchema
 
 export class SetGoalBudgetTool implements BuiltinTool<SetGoalBudgetToolInput> {
   readonly name = 'SetGoalBudget' as const;
-  readonly description = 'Set a hard budget limit for the current goal. Accepts one limit at a time (turns, tokens, or time). The goal will be blocked when the budget is reached.';
+  readonly description = 'Set a hard budget limit for the current goal. The goal will be blocked when the budget is reached.';
   readonly parameters: Record<string, unknown> = toInputJsonSchema(SetGoalBudgetToolInputSchema);
 
   constructor(private readonly agent: Agent) {}

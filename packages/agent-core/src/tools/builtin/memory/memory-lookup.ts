@@ -82,8 +82,7 @@ export class MemoryLookupTool implements BuiltinTool<MemoryLookupInput> {
     'Call this when the current task may benefit from prior work, when you encounter a ' +
     'repeating error or pattern, or when you are unsure of the best approach. ' +
     'Returns memos ranked by relevance, including the approach taken, the outcome, ' +
-    'what failed, what worked, project, and tags. By default searches globally; ' +
-    'use scope: project to restrict results to the current project.';
+    'what failed, what worked, project, and tags.';
   readonly parameters: Record<string, unknown> = toInputJsonSchema(MemoryLookupInputSchema);
 
   constructor(private readonly agent: Agent) {}

@@ -65,8 +65,7 @@ export type LspInput = z.infer<typeof LspInputSchema>;
 export class LspTool implements BuiltinTool<LspInput> {
   readonly name = 'LSP' as const;
   readonly description = [
-    'Query a language server for code intelligence.',
-    "Use 'references' to find all usages of a symbol, 'definition' to jump to where a symbol is defined, 'diagnostics' to get type errors and warnings for a file, and 'rename' to rename a symbol across all its references.",
+    'Query a language server for code intelligence: find usages, jump to definitions, get diagnostics, or rename a symbol across all references.',
     'The language server is started automatically for supported file types (TypeScript/JavaScript, Python, Rust, Go).',
     'Rename requires the typescript-language-server (or equivalent) binary on PATH for the file type.',
   ].join(' ');

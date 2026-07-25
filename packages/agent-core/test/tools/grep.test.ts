@@ -262,11 +262,15 @@ describe('GrepTool', () => {
       expect(tool.description).toContain('\\{');
     });
 
-    it('explains hidden files, include_ignored, and sensitive-file behavior', () => {
+    it('explains hidden files in the description; include_ignored and sensitive-file behavior in the schema', () => {
       const tool = new GrepTool(createFakeJian(), workspace);
-      expect(tool.description).toContain('include_ignored');
       expect(tool.description.toLowerCase()).toContain('hidden file');
-      expect(tool.description).toContain('.env');
+      // include_ignored and .env sensitive-file behavior are documented in
+      // the field-level schema describe, not the tool-level description.
+      const params = tool.parameters as {
+        properties: Record<string, { description?: string }>;
+      };
+      expect(params.properties['include_ignored']?.description ?? '').toContain('.env');
     });
   });
 
@@ -1933,13 +1937,13 @@ describe('GrepTool', () => {
     expect(output).toContain('my-project/.env');
   });
 
-  it('locks the grep description to ripgrep-tip phrasing about hidden files and include_ignored', () => {
+  it('locks the grep description to ripgrep-tip phrasing about hidden files', () => {
     const tool = new GrepTool(createFakeJian(), workspace);
 
     expect(tool.description).toContain('ripgrep');
     expect(tool.description).toContain('Hidden files');
-    expect(tool.description).toContain('include_ignored');
-    expect(tool.description).toMatch(/sensitive/i);
+    // include_ignored and sensitive-file behavior are in the field-level
+    // schema describe, not the tool-level description.
     expect(tool.description).toMatch(/ALWAYS use Grep tool instead of running `grep` or `rg`/);
   });
 

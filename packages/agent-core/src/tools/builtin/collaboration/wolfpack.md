@@ -2,28 +2,18 @@ Use WolfPack to spawn multiple subagents in parallel for batch operations.
 This is ideal when processing many independent items (files, checks, searches)
 that all use the same subagent type and follow a similar pattern.
 
-Input:
-- description: Brief (3-5 word) task summary.
-- subagent_type: Subagent profile name. Defaults to "coder". Choose the profile
-  that best matches the batch task — using the right type materially improves
-  output quality. See the agent type list below for which type fits which job.
-- prompt_template: A prompt pattern where each item value is substituted in
-  to produce a per-item prompt. See the parameter schema for placeholder syntax.
-- items: Array of item strings. Each item gets its own subagent (no limit).
-
-Items must be independent — no subagent depends on another's output.
+Items must be independent - no subagent depends on another's output.
 If items depend on each other, use separate Agent calls instead.
 
 Choosing subagent_type for the batch:
-- Batch code review, audit, or bug-finding across files → reviewer
-- Batch writing, reports, or long-form content → writer
-- Batch read-only exploration (find files, grep, understand modules) → explore
-- Batch verification (run build/test/lint per item) → verify
-- Batch deep debugging or architecture decisions → oracle
-- Batch planning or design work → plan
-- General engineering tasks with no specialised match → coder (default)
+- Batch code review, audit, or bug-finding across files -> reviewer
+- Batch writing, reports, or long-form content -> writer
+- Batch read-only exploration (find files, grep, understand modules) -> explore
+- Batch verification (run build/test/lint per item) -> verify
+- Batch deep debugging or architecture decisions -> oracle
+- Batch planning or design work -> plan
+- General engineering tasks with no specialised match -> coder (default)
 
 Example: review source files for OWASP vulnerabilities by setting items to the file
 paths, subagent_type to "reviewer", and prompt_template to the review instruction.
 All items are processed in parallel.
-
