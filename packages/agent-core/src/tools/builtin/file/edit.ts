@@ -18,6 +18,7 @@ import type { LspRegistry } from '../../../lsp/registry';
 import { resolvePathAccessPath } from '../../policies/path-access';
 import { toInputJsonSchema } from '../../support/input-schema';
 import { literalRulePattern, matchesPathRuleSubject } from '../../support/rule-match';
+import { scanCache } from '../../support/scan-cache';
 import type { WorkspaceConfig } from '../../support/workspace';
 import { scanConflictLines } from './conflict-detect';
 import { fetchDiagnostics, formatDiagnosticsHint, formatDiagnosticsNotice } from './lsp-diagnostics';
@@ -104,11 +105,16 @@ export class EditTool implements BuiltinTool<EditInput> {
           pathClass: this.jian.pathClass(),
           homeDir: this.jian.gethome(),
         }),
-      execute: () => this.execution(args, path),
+      execute: ({ signal }) => this.execution(args, path, signal),
     };
   }
 
-  private async execution(args: EditInput, safePath: string): Promise<ExecutableToolResult> {
+  private async execution(
+    args: EditInput,
+    safePath: string,
+    signal?: AbortSignal,
+  ): Promise<ExecutableToolResult> {
+    signal?.throwIfAborted();
     const result = await this.executionCore(args, safePath);
     const inputHash = hashEditPayload({
       path: args.path,
@@ -252,6 +258,7 @@ export class EditTool implements BuiltinTool<EditInput> {
           safePath,
           materializeModelText(newContent, modelView.lineEndingStyle),
         );
+        scanCache.clear();
         const { notice, hasErrors } = await this.appendDiagnostics(safePath);
         const output = `Replaced 1 occurrence in ${args.path}${notice}`;
         return hasErrors ? { isError: true, output } : { output };
@@ -275,6 +282,7 @@ export class EditTool implements BuiltinTool<EditInput> {
         safePath,
         materializeModelText(newContent, modelView.lineEndingStyle),
       );
+      scanCache.clear();
       const { notice, hasErrors } = await this.appendDiagnostics(safePath);
       const output = `Replaced ${String(replacementCount)} occurrences in ${args.path}${notice}`;
       return hasErrors ? { isError: true, output } : { output };

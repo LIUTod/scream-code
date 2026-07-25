@@ -14,6 +14,7 @@ function createMockHost(): SessionEventHost {
   const streamingUI = {
     setStep: vi.fn(),
     setTurnId: vi.fn(),
+    resetLiveText: vi.fn(),
     resetToolUi: vi.fn(),
     flushNow: vi.fn(),
     finalizeLiveTextBuffers: vi.fn(),
@@ -191,6 +192,25 @@ describe('SessionEventHandler', () => {
 
     expect(host.streamingUI.finalizeTurn).toHaveBeenCalled();
     expect(host.streamingUI.resetToolUi).toHaveBeenCalled();
+  });
+
+  it('resets live text and tool UI on step retrying', () => {
+    const host = createMockHost();
+    const handler = new SessionEventHandler(host);
+
+    handler.handleEvent(
+      {
+        ...baseEvent('turn.step.retrying'),
+        turnId: 1,
+        attempt: 1,
+        nextAttempt: 2,
+      } as unknown as Event,
+      vi.fn(),
+    );
+
+    expect(host.streamingUI.resetLiveText).toHaveBeenCalled();
+    expect(host.streamingUI.resetToolUi).toHaveBeenCalled();
+    expect(host.setAppState).toHaveBeenCalledWith({ reconnectAttempt: 2 });
   });
 
   it('auto-drains queued messages into a boundary steer on step completed', () => {

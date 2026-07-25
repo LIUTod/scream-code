@@ -1,6 +1,7 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { type GlobInput, GlobInputSchema, GlobTool, MAX_MATCHES } from '../../src/tools/builtin/file/glob';
+import { scanCache } from '../../src/tools/support/scan-cache';
 import type { WorkspaceConfig } from '../../src/tools/support/workspace';
 import { createFakeJian } from './fixtures/fake-jian';
 import { executeTool } from './fixtures/execute-tool';
@@ -21,6 +22,9 @@ function context(args: GlobInput) {
 }
 
 describe('GlobTool', () => {
+  beforeEach(() => {
+    scanCache.clear();
+  });
   it('exposes current metadata and schema', () => {
     const tool = new GlobTool(createFakeJian(), workspace);
 
@@ -587,6 +591,31 @@ describe('GlobTool', () => {
     expect(tool.description).toMatch(/\*\*\/\*\.py/);
     expect(tool.description).toContain('node_modules');
     expect(tool.description).not.toContain('On Windows');
+  });
+
+  it('respects abort signal during enumeration via heartbeat checks', async () => {
+    const controller = new AbortController();
+    const paths = Array.from({ length: 300 }, (_, i) => `/workspace/src/file-${i}.ts`);
+    const glob = vi.fn().mockReturnValue(asyncPaths(paths));
+    const tool = new GlobTool(
+      createFakeJian({
+        glob,
+        stat: vi.fn().mockResolvedValue(stat(1)),
+      }),
+      workspace,
+    );
+
+    controller.abort();
+
+    // AbortError is re-thrown (not swallowed into a generic error result) so
+    // the tool runtime can route it to abortedToolOutput with "do not retry"
+    // semantics.
+    await expect(
+      executeTool(tool, {
+        ...context({ pattern: 'src/**/*.ts' }),
+        signal: controller.signal,
+      }),
+    ).rejects.toThrow();
   });
 
   it('mentions Windows path forms in the description on win32 backends', () => {

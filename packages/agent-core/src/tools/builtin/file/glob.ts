@@ -40,6 +40,7 @@ import type { PathClass } from '../../policies/path-access';
 import { toInputJsonSchema } from '../../support/input-schema';
 import { listDirectory } from '../../support/list-directory';
 import { literalRulePattern, matchesGlobRuleSubject } from '../../support/rule-match';
+import { scanCache } from '../../support/scan-cache';
 import type { WorkspaceConfig } from '../../support/workspace';
 import GLOB_DESCRIPTION from './glob.md';
 
@@ -122,11 +123,16 @@ export class GlobTool implements BuiltinTool<GlobInput> {
       display: { kind: 'file_io', operation: 'glob', path: searchRoots[0]! },
       approvalRule: literalRulePattern(this.name, args.pattern),
       matchesRule: (ruleArgs) => matchesGlobRuleSubject(ruleArgs, args.pattern),
-      execute: () => this.execution(args, searchRoots),
+      execute: ({ signal }) => this.execution(args, searchRoots, signal),
     };
   }
 
-  private async execution(args: GlobInput, searchRoots: string[]): Promise<ExecutableToolResult> {
+  private async execution(
+    args: GlobInput,
+    searchRoots: string[],
+    signal?: AbortSignal,
+  ): Promise<ExecutableToolResult> {
+    signal?.throwIfAborted();
     if (startsWithDoubleStarPrefix(args.pattern)) {
       let tree: string;
       try {
@@ -219,6 +225,13 @@ export class GlobTool implements BuiltinTool<GlobInput> {
     }
 
     try {
+      // Check scan cache before walking. Cached output is keyed by root,
+      // pattern, and include_dirs and is invalidated on file writes.
+      const cachedOutput = scanCache.get(searchRoots[0]!, args.pattern, includeDirs);
+      if (cachedOutput !== undefined) {
+        return { output: cachedOutput };
+      }
+
       // Two counters, two jobs:
       //   - `entries.length` caps the *unique* paths we return, so a
       //     truncation warning only fires after MAX_MATCHES real hits.
@@ -241,6 +254,9 @@ export class GlobTool implements BuiltinTool<GlobInput> {
           allowedRoots: [root],
         })) {
           yielded++;
+          if (signal && yielded % 128 === 0) {
+            signal.throwIfAborted();
+          }
           if (yielded >= YIELD_SAFETY_CAP) {
             truncated = true;
             break outer;
@@ -279,20 +295,29 @@ export class GlobTool implements BuiltinTool<GlobInput> {
       const relBase = searchRoots[0] ?? this.workspace.workspaceDir;
       const displayLines = paths.map((p) => relativizeIfUnder(p, relBase, pathClass));
 
+      let output: string;
       if (entries.length === 0 && !truncated) {
-        return { output: 'No matches found' };
+        output = 'No matches found';
+      } else {
+        const lines: string[] = [];
+        if (truncated) {
+          lines.push(`[Truncated at ${String(MAX_MATCHES)} matches — use a more specific pattern]`);
+          lines.push(`Only the first ${String(MAX_MATCHES)} matches are returned.`);
+        }
+        lines.push(...displayLines);
+        if (!truncated && entries.length === MAX_MATCHES) {
+          lines.push(`Found ${String(entries.length)} matches`);
+        }
+        output = lines.join('\n');
       }
-      const lines: string[] = [];
-      if (truncated) {
-        lines.push(`[Truncated at ${String(MAX_MATCHES)} matches — use a more specific pattern]`);
-        lines.push(`Only the first ${String(MAX_MATCHES)} matches are returned.`);
-      }
-      lines.push(...displayLines);
-      if (!truncated && entries.length === MAX_MATCHES) {
-        lines.push(`Found ${String(entries.length)} matches`);
-      }
-      return { output: lines.join('\n') };
+      scanCache.set(searchRoots[0]!, args.pattern, includeDirs, output);
+      return { output };
     } catch (error) {
+      // Re-throw AbortError so the tool runtime (runRunnableToolCall) can
+      // route it to abortedToolOutput with "do not retry" semantics. Without
+      // this, the catch below would swallow it into a generic error result
+      // that the model might retry.
+      if (signal?.aborted) throw error;
       if (error !== null && typeof error === 'object' && 'code' in error) {
         const code = (error as { code?: string }).code;
         const path = searchRoots[0] ?? this.workspace.workspaceDir;

@@ -13,6 +13,7 @@ import {
   buildGoalCompletionSummaryPrompt,
   buildGradingFeedbackPrompt,
 } from './outcome-prompts';
+import { GraderEmissionGuard } from './emission-guard';
 import type { BuiltinTool } from '../../../agent/tool';
 import type { ExecutableToolResult, ToolExecution } from '../../../loop/types';
 import { toInputJsonSchema } from '../../support/input-schema';
@@ -40,6 +41,12 @@ export type UpdateGoalToolInput = z.infer<typeof UpdateGoalToolInputSchema>;
 const MAX_GRADER_OUTPUT_CHARS = 4000;
 /** Maximum characters of `git diff --stat HEAD` to append to the grader input. */
 const MAX_DIFF_STAT_CHARS = 2000;
+
+/**
+ * Module-level emission guard. Deduplicates grader FAIL feedback per goal so
+ * the referee cannot trap the agent in a loop by repeating the same reason.
+ */
+const graderEmissionGuard = new GraderEmissionGuard();
 
 function extractRecentOutput(history: readonly { role: string; content: { type: string; text?: string }[] }[]): string {
   const parts: string[] = [];
@@ -200,6 +207,11 @@ export class UpdateGoalTool implements BuiltinTool<UpdateGoalToolInput> {
     if (grade.pass) {
       try {
         const completed = await goal.markComplete({}, 'model');
+        // Clear the emission-guard dedup bucket for this goal so a subsequent
+        // goal with the same objective does not inherit stale dedup state.
+        // Called after markComplete resolves (whether null or a snapshot) so
+        // the bucket is cleared as soon as the referee accepts the goal.
+        graderEmissionGuard.resetGoal(goalState.objective);
         if (completed === null) {
           return toolError('Failed to mark verified goal complete', goal);
         }
@@ -213,8 +225,18 @@ export class UpdateGoalTool implements BuiltinTool<UpdateGoalToolInput> {
       return { output: `Goal verified and marked complete.\n${grade.reason}`, stopTurn: true };
     }
 
-    this.appendGradingFeedback(grade.reason);
-    return { output: `Verification failed: ${grade.reason}. Continue working.` };
+    // Deduplicate grader feedback before injection. If the referee repeats a
+    // reason already seen for this goal, skip injecting it into context (the
+    // agent already has the earlier feedback) and nudge it to address that.
+    const denoised = graderEmissionGuard.filter(grade.reason, goalState.objective);
+    if (denoised !== null) {
+      this.appendGradingFeedback(denoised);
+      return { output: `Verification failed: ${denoised}. Continue working.` };
+    }
+    return {
+      output:
+        'Previous verification feedback still applies. Address the earlier feedback and retry.',
+    };
   }
 
   private appendGradingFeedback(reason: string): void {

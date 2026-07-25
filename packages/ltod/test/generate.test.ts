@@ -211,6 +211,13 @@ describe('generate()', () => {
     await expect(generate(provider, '', [], [])).rejects.toThrow(/only thinking content/);
   });
 
+  it('throws APIEmptyResponseError for text-only whitespace response', async () => {
+    const stream = createMockStream([{ type: 'text', text: '   \n\t  ' }]);
+    const provider = createMockProvider(stream);
+
+    await expect(generate(provider, '', [], [])).rejects.toThrow(/empty or whitespace text/);
+  });
+
   it('succeeds for think + real text', async () => {
     const stream = createMockStream([
       { type: 'think', think: 'Let me think...' },

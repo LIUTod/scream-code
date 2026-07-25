@@ -16,6 +16,7 @@ import type { LspRegistry } from '../../../lsp/registry';
 import { resolvePathAccessPath } from '../../policies/path-access';
 import { toInputJsonSchema } from '../../support/input-schema';
 import { literalRulePattern, matchesPathRuleSubject } from '../../support/rule-match';
+import { scanCache } from '../../support/scan-cache';
 import type { WorkspaceConfig } from '../../support/workspace';
 import { scanConflictLines } from './conflict-detect';
 import { fetchDiagnostics, formatDiagnosticsHint, formatDiagnosticsNotice } from './lsp-diagnostics';
@@ -81,11 +82,16 @@ export class WriteTool implements BuiltinTool<WriteInput> {
           pathClass: this.jian.pathClass(),
           homeDir: this.jian.gethome(),
         }),
-      execute: () => this.execution(args, path),
+      execute: ({ signal }) => this.execution(args, path, signal),
     };
   }
 
-  private async execution(args: WriteInput, safePath: string): Promise<ExecutableToolResult> {
+  private async execution(
+    args: WriteInput,
+    safePath: string,
+    signal?: AbortSignal,
+  ): Promise<ExecutableToolResult> {
+    signal?.throwIfAborted();
     const parentError = await this.checkParentDirectory(safePath);
     if (parentError !== undefined) {
       return { isError: true, output: parentError };
@@ -111,6 +117,7 @@ export class WriteTool implements BuiltinTool<WriteInput> {
       } else {
         await this.jian.writeText(safePath, args.content);
       }
+      scanCache.clear();
       // Report the number of UTF-8 bytes this call wrote to disk. The string
       // length would only equal the byte count for pure ASCII content, so it
       // is not used here.

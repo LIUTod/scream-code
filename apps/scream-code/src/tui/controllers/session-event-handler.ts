@@ -409,6 +409,11 @@ export class SessionEventHandler {
   }
 
   private handleStepRetrying(event: TurnStepRetryingEvent): void {
+    // Discard partial live deltas from the failed attempt so the retry does
+    // not append to (and visually duplicate) the interrupted content. The
+    // transcript is unaffected - only the ephemeral UI draft is reset.
+    this.host.streamingUI.resetLiveText();
+    this.host.streamingUI.resetToolUi();
     this.host.setAppState({ reconnectAttempt: event.nextAttempt });
   }
 

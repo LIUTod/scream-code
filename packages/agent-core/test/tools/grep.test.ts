@@ -1388,7 +1388,9 @@ describe('GrepTool', () => {
     expect(result).toMatchObject({ isError: true });
     expect(result.output).toContain('Failed to grep: error: unclosed character class');
     expect(result.output).toContain('ripgrep stderr:');
-    expect(exec).toHaveBeenCalledTimes(1);
+    // Regex syntax errors trigger a --fixed-strings fallback retry, so exec
+    // is called twice: once for the original pattern, once for the fallback.
+    expect(exec).toHaveBeenCalledTimes(2);
   });
 
   it('surfaces ripgrep failures even when stderr is empty', async () => {

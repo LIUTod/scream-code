@@ -206,6 +206,18 @@ export async function generate(
     );
   }
 
+  // Substantively empty: text parts exist but every one is whitespace/empty,
+  // and there are no tool calls. Some flaky proxies return a bare `stop` with
+  // an empty text part - treat that as incomplete so the bounded retry in
+  // chatWithRetry can recover automatically.
+  if (!hasText && !hasToolCalls && message.content.some((p) => p.type === 'text')) {
+    throw new APIEmptyResponseError(
+      'The API returned a response containing only empty or whitespace text. ' +
+        'This usually indicates a truncated or malformed stream. ' +
+        `Provider: ${provider.name}, model: ${provider.modelName}.`,
+    );
+  }
+
   // Fire onToolCall for every fully-assembled tool call, in final order.
   if (callbacks?.onToolCall !== undefined) {
     for (const toolCall of message.toolCalls) {
