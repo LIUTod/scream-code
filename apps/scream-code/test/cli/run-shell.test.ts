@@ -115,9 +115,13 @@ vi.mock('../../src/tui/theme/detect', () => ({
   detectTerminalTheme: mocks.detectTerminalTheme,
 }));
 
-vi.mock('node:child_process', () => ({
-  execSync: mocks.execSync,
-}));
+vi.mock('node:child_process', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:child_process')>();
+  return {
+    ...actual,
+    execSync: mocks.execSync,
+  };
+});
 
 vi.mock('../../src/tui/components/chrome/loading', () => ({
   runLoadingAnimation: mocks.runLoadingAnimation,
