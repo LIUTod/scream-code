@@ -83,15 +83,22 @@ describe('renderDiffLines', () => {
     expect(stripAnsi(rawAdd)).toContain('bar');
     // Inverse escape (chalk.inverse emits \x1b[7m) should be present in the raw output
     // — that is the intra-line highlight marker
-    expect(rawDelete).toContain('\x1b[7m');
-    expect(rawAdd).toContain('\x1b[7m');
+    expect(rawDelete).toContain('\x1B[7m');
+    expect(rawAdd).toContain('\x1B[7m');
   });
 
   it('keeps whole-line coloring for multi-line delete/add blocks', () => {
     const output = renderDiffLines('old line 1\nold line 2', 'new line 1\nnew line 2', 'test.ts', COLORS, false, 1, 1);
     const raw = output.join('\n');
     // No inverse highlight — multi-line blocks stay as whole-line green/red
-    expect(raw).not.toContain('\x1b[7m');
+    expect(raw).not.toContain('\x1B[7m');
+  });
+
+  it('visualizes leading tabs as -> in multi-line diff blocks', () => {
+    const output = renderDiffLines('old1\nold2', '\tnew1\n\tnew2', 'test.ts', COLORS, false, 1, 1);
+    const text = stripAnsi(output.join('\n'));
+    expect(text).toContain('->new1');
+    expect(text).toContain('->new2');
   });
 });
 

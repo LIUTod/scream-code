@@ -50,6 +50,20 @@ export function parseMemoryMemos(text: string): MemoryMemo[] {
   return memos;
 }
 
+/**
+ * Strip injected memory-memo content from text before writing it back to the
+ * store, preventing feedback loops where recalled/compacted content gets
+ * re-stored. Removes fenced ```memory-memo blocks (the format emitted by
+ * compaction and exit-time extraction) and any <memories>...</memories>
+ * wrapper an injector might use.
+ */
+export function stripMemoryTags(text: string): string {
+  return text
+    .replaceAll(/```memory-memo[\s\S]*?```/gi, '')
+    .replaceAll(/<memories>[\s\S]*?<\/memories>/gi, '')
+    .trim();
+}
+
 /** System prompt for exit-time extraction — instructs the LLM how to extract. */
 export const EXIT_EXTRACTION_SYSTEM_PROMPT =
   '你是一个任务经验提取助手。任务是从对话记录中识别已完成的任务闭环，提炼出任务经验记录。用对话的主要语言输出（中文对话用中文，英文对话用英文）。只输出指定的 JSON 格式，不要调用任何工具。';

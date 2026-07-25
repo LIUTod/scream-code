@@ -353,7 +353,7 @@ export class GrepTool implements BuiltinTool<GrepInput> {
 
     const builder = new ToolResultBuilder();
     builder.write(combined);
-    const result = builder.ok(sideChannelMessages.join('\n'));
+    const result = await builder.ok(sideChannelMessages.join('\n'));
     const display = buildSearchResultsDisplay(args, limited, mode, contentIncludesLineNumbers);
     if (display === undefined) return result;
     if (result.isError === true) return result;

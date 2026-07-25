@@ -7,7 +7,7 @@
 
 import type { MarkdownTheme, EditorTheme } from '@liutod-scream/pi-tui';
 import chalk from 'chalk';
-import { highlight, supportsLanguage } from 'cli-highlight';
+import { highlight, supportsLanguage, type Theme } from 'cli-highlight';
 
 import type { ColorPalette } from './colors';
 
@@ -19,10 +19,65 @@ import type { ColorPalette } from './colors';
 // eslint-disable-next-line no-control-regex -- intentionally matches the ESC byte that opens ANSI SGR sequences.
 const HEADING_HASH_PREFIX = /^((?:\u001B\[[0-9;]*m)*)#{1,6}[ \t]+/;
 
+/**
+ * Map cli-highlight syntax tokens onto the ColorPalette so code blocks follow
+ * the active theme instead of cli-highlight's built-in colors. cli-highlight
+ * takes one formatter function per token; tokens not listed here fall back to
+ * its DEFAULT_THEME.
+ */
+function createCodeHighlightTheme(colors: ColorPalette): Theme {
+  const keyword = chalk.hex(colors.primary);
+  const str = chalk.hex(colors.success);
+  const comment = chalk.hex(colors.textDim);
+  const num = chalk.hex(colors.warning);
+  const fn = chalk.hex(colors.primary);
+  const cls = chalk.hex(colors.accent);
+  const text = chalk.hex(colors.text);
+  const muted = chalk.hex(colors.textMuted);
+  return {
+    keyword,
+    built_in: fn,
+    type: cls,
+    literal: num,
+    number: num,
+    regexp: str,
+    string: str,
+    subst: str,
+    symbol: num,
+    class: cls,
+    function: fn,
+    title: fn,
+    params: text,
+    comment,
+    doctag: comment,
+    meta: muted,
+    'meta-keyword': keyword,
+    'meta-string': str,
+    section: keyword,
+    tag: cls,
+    name: fn,
+    'builtin-name': fn,
+    attr: num,
+    attribute: num,
+    variable: text,
+    bullet: num,
+    code: str,
+    emphasis: (s) => chalk.italic(s),
+    strong: (s) => chalk.bold(s),
+    formula: text,
+    link: chalk.hex(colors.mdLink),
+    quote: chalk.hex(colors.mdQuote),
+    addition: chalk.hex(colors.diffAdded),
+    deletion: chalk.hex(colors.diffRemoved),
+    default: text,
+  };
+}
+
 export function createMarkdownTheme(colors: ColorPalette): MarkdownTheme {
   const stripHash = (text: string): string => text.replace(HEADING_HASH_PREFIX, '$1');
   const muted = chalk.hex(colors.textMuted);
   const border = chalk.hex(colors.border);
+  const codeTheme = createCodeHighlightTheme(colors);
   return {
     heading: (text) => chalk.bold.hex(colors.text)(stripHash(text)),
     link: (text) => chalk.hex(colors.mdLink)(text),
@@ -46,7 +101,7 @@ export function createMarkdownTheme(colors: ColorPalette): MarkdownTheme {
       const language =
         normalizedLang !== undefined && supportsLanguage(normalizedLang) ? normalizedLang : 'text';
       try {
-        const highlighted = highlight(code, { language, ignoreIllegals: true });
+        const highlighted = highlight(code, { language, ignoreIllegals: true, theme: codeTheme });
         return highlighted.split('\n');
       } catch {
         return code.split('\n');

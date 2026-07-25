@@ -20,6 +20,14 @@ import { STATUS_BULLET } from '#/tui/constant/symbols';
 import type { ColorPalette } from '#/tui/theme/colors';
 import { easeSpeedRatio, getSharedSpeedTracker, lerpHex, SPEED_MAX } from '#/tui/utils/speed-tracker';
 
+/** gpt-5 reasoning summaries contain empty HTML comment padding sentinels
+ * like `<!-- -->`. Strip them to keep the thinking display clean. */
+const EMPTY_COMMENT_RE = /<!--\s*-->/g;
+
+function filterThinkingNoise(text: string): string {
+  return text.replace(EMPTY_COMMENT_RE, '');
+}
+
 export type ThinkingRenderMode = 'live' | 'finalized';
 
 export class ThinkingComponent implements Component {
@@ -78,7 +86,7 @@ export class ThinkingComponent implements Component {
   }
 
   private styled(text: string): string {
-    return chalk.hex(this.color).italic(text);
+    return chalk.hex(this.color).italic(filterThinkingNoise(text));
   }
 
   finalize(): void {

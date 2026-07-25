@@ -17,6 +17,7 @@ const CONTROL_SUBCOMMANDS = new Set(['pause', 'resume', 'off']);
 
 export type ParsedGoalCommand =
   | { readonly kind: 'status' }
+  | { readonly kind: 'setup' }
   | { readonly kind: 'pause' }
   | { readonly kind: 'resume' }
   | { readonly kind: 'off' }
@@ -39,6 +40,12 @@ export function parseGoalCommand(rawArgs: string): ParsedGoalCommand {
   const first = tokens[0];
   if (first !== undefined && CONTROL_SUBCOMMANDS.has(first) && tokens.length === 1) {
     return { kind: first as 'pause' | 'resume' | 'off' };
+  }
+
+  // `/goal setup` launches a guided, LLM-refined goal flow; any trailing
+  // text is ignored (use `/goal -- setup` to create a goal literally named setup).
+  if (first === 'setup') {
+    return { kind: 'setup' };
   }
 
   if (first === 'update') {
@@ -83,6 +90,9 @@ export async function handleGoalCommand(host: SlashCommandHost, args: string): P
     case 'status':
       await showGoalStatus(host);
       return;
+    case 'setup':
+      await guidedGoalSetup(host);
+      return;
     case 'pause':
       await pauseGoal(host);
       return;
@@ -120,6 +130,70 @@ async function createGoal(host: SlashCommandHost, parsed: ParsedGoalCommand & { 
 
   // Launch configuration wizard
   await showGoalConfigWizard(host, session, parsed.objective, parsed.replace);
+}
+
+// ── Guided goal setup (LLM-refined objective) ──────────────────────────
+
+const GOAL_REFINER_SYSTEM_PROMPT =
+  'You are a goal refiner. Given a brief task description, produce a single clear, actionable objective sentence (max 200 chars). Do not add explanations, quotes, or prefixes.';
+
+/**
+ * Guided goal creation: collect a brief task description, refine it via the
+ * LLM into a single objective sentence, let the user confirm/edit, then enter
+ * the standard configuration wizard. Falls back to the raw description if the
+ * LLM call fails.
+ */
+async function guidedGoalSetup(host: SlashCommandHost): Promise<void> {
+  const session = host.session;
+  if (session === undefined) {
+    host.showError(t('error.no_session'));
+    return;
+  }
+
+  if (detectGoalConflict(host.state.appState, 'enable_goal') === 'goal_active') {
+    host.showNotice(
+      t('goal.storm_breaker'),
+      t('goal.conflict_loop'),
+    );
+    return;
+  }
+
+  const { TextInputDialogComponent } = await import('../components/dialogs/text-input-dialog');
+
+  // Step 1: user briefly describes the task (must be non-empty)
+  const initialDesc = await promptText(host, TextInputDialogComponent, {
+    title: t('goal.setup_title_initial'),
+    subtitle: t('goal.setup_desc_hint'),
+    placeholder: t('goal.setup_desc_placeholder'),
+    allowEmpty: false,
+  });
+  if (initialDesc === undefined) return;
+
+  // Step 2: LLM refines the description into a single objective sentence
+  host.showStatus(t('goal.setup_refining'));
+  let objective: string;
+  try {
+    const text = await session.generateText(GOAL_REFINER_SYSTEM_PROMPT, initialDesc);
+    objective = text.trim();
+    if (objective.length === 0) objective = initialDesc;
+  } catch {
+    // LLM failure: fall back to the user's raw description
+    objective = initialDesc;
+  }
+
+  // Step 3: user confirms or edits the refined objective
+  const confirmed = await promptText(host, TextInputDialogComponent, {
+    title: t('goal.setup_title_confirm'),
+    subtitle: t('goal.setup_confirm_hint'),
+    placeholder: objective,
+    initialValue: objective,
+    allowEmpty: true,
+  });
+  if (confirmed === undefined) return;
+  const finalObjective = confirmed.trim() || objective;
+
+  // Step 4: enter the existing configuration wizard (turns/tokens/time)
+  await showGoalConfigWizard(host, session, finalObjective, false);
 }
 
 // ── Goal Configuration Wizard ──────────────────────────────────────────
@@ -204,6 +278,35 @@ function promptNumber(
         subtitle: opts.subtitle,
         placeholder: opts.placeholder,
         allowEmpty: true,
+        colors: host.state.theme.colors,
+      },
+    );
+    host.mountEditorReplacement(dialog);
+  });
+}
+
+/** Prompt user for free-form text. Returns undefined on cancel. */
+function promptText(
+  host: SlashCommandHost,
+  TextInputDialogComponent: typeof import('../components/dialogs/text-input-dialog').TextInputDialogComponent,
+  opts: { title: string; subtitle: string; placeholder: string; initialValue?: string; allowEmpty: boolean },
+): Promise<string | undefined> {
+  return new Promise<string | undefined>((resolve) => {
+    const dialog = new TextInputDialogComponent(
+      (result) => {
+        host.restoreEditor();
+        if (result.kind !== 'ok') {
+          resolve(undefined);
+          return;
+        }
+        resolve(result.value.trim());
+      },
+      {
+        title: opts.title,
+        subtitle: opts.subtitle,
+        placeholder: opts.placeholder,
+        initialValue: opts.initialValue,
+        allowEmpty: opts.allowEmpty,
         colors: host.state.theme.colors,
       },
     );

@@ -27,6 +27,7 @@ import { USER_PROMPT_ORIGIN, type PromptOrigin, type ContextMessage } from '../c
 import { renderUserPromptHookBlockResult, renderUserPromptHookResult } from '../../session/hooks';
 import { looksLikeVerificationCommand } from '../working-set';
 import { ToolCallDeduplicator } from './tool-dedup';
+import { isBudgetNearExhaustion } from '../goal';
 
 interface ActiveTurn {
   controller: AbortController;
@@ -72,6 +73,15 @@ const GOAL_CONTINUATION_PROMPT = [
 const GOAL_CONTINUATION_ORIGIN: PromptOrigin = {
   kind: 'system_trigger',
   name: 'goal_continuation',
+};
+
+const GOAL_BUDGET_STEER_PROMPT =
+  'Budget nearly exhausted. Wrap up immediately: verify your work, run tests, ' +
+  'and call UpdateGoal with status "complete" or "blocked". Do not start any new work.';
+
+const GOAL_BUDGET_STEER_ORIGIN: PromptOrigin = {
+  kind: 'system_trigger',
+  name: 'goal_budget_steer',
 };
 
 export class TurnFlow {
@@ -326,6 +336,21 @@ export class TurnFlow {
       }
 
       await this.agent.goal.incrementTurn();
+
+      // Budget steer: when the goal budget is nearly exhausted (or just
+      // crossed the line), replace the continuation prompt with a convergence
+      // steer so the model wraps up instead of starting new discretionary work.
+      const budgetSnapshot = this.agent.goal.getGoal().goal;
+      if (
+        budgetSnapshot !== null &&
+        budgetSnapshot.status === 'active' &&
+        (budgetSnapshot.budget.overBudget ||
+          isBudgetNearExhaustion(budgetSnapshot.budget, 0.2))
+      ) {
+        turnInput = [{ type: 'text', text: GOAL_BUDGET_STEER_PROMPT }];
+        turnOrigin = GOAL_BUDGET_STEER_ORIGIN;
+      }
+
       const end = await this.runOneTurn(turnId, turnInput, turnOrigin, signal, false);
 
       if (end.event.reason === 'cancelled') {
@@ -539,7 +564,11 @@ export class TurnFlow {
           turnId: String(turnId),
           signal,
           llm: this.agent.llm,
-          buildMessages: () => this.agent.context.messages,
+          // Use messagesForLLM (not the bare `messages` getter) so each
+          // LLM-bound build is fingerprinted for prefix-stability / prompt
+          // cache observation. The returned messages are identical; this
+          // only adds observability.
+          buildMessages: () => this.agent.context.messagesForLLM(),
           dispatchEvent: this.buildDispatchEvent(turnId),
           tools: this.agent.tools.loopTools,
           log: this.agent.log,

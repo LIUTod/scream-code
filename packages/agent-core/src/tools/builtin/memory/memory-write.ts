@@ -1,4 +1,4 @@
-import { createMemoryMemo, generateTags, normalizeTags } from '@scream-code/memory';
+import { createMemoryMemo, generateTags, normalizeTags, stripMemoryTags } from '@scream-code/memory';
 import { dirname, basename } from 'pathe';
 import { z } from 'zod';
 
@@ -68,22 +68,28 @@ export class MemoryWriteTool implements BuiltinTool<MemoryWriteInput> {
           : 'unknown';
         const sourceSessionTitle = await this.agent.getSessionTitle();
 
-        const whatFailed = args.whatFailed?.trim();
-        const whatWorked = args.whatWorked?.trim();
+        // Strip any injected memory-memo content from the fields before storing,
+        // so recalled/compacted content cannot be re-stored and form a feedback
+        // loop (recall -> consolidate -> re-recall).
+        const userNeed = stripMemoryTags(args.userNeed);
+        const approach = stripMemoryTags(args.approach);
+        const outcome = stripMemoryTags(args.outcome);
+        const whatFailed = stripMemoryTags(args.whatFailed ?? '');
+        const whatWorked = stripMemoryTags(args.whatWorked ?? '');
         const tags = normalizeTags(
           args.tags !== undefined && args.tags.length > 0
             ? args.tags
-            : generateTags(`${args.userNeed} ${args.approach}`),
+            : generateTags(`${userNeed} ${approach}`),
         );
 
         const memo = createMemoryMemo({
           sourceSessionId: sessionId,
           sourceSessionTitle,
-          userNeed: args.userNeed,
-          approach: args.approach,
-          outcome: args.outcome,
-          whatFailed: whatFailed === undefined || whatFailed.length === 0 ? 'none' : whatFailed,
-          whatWorked: whatWorked === undefined || whatWorked.length === 0 ? 'none' : whatWorked,
+          userNeed,
+          approach,
+          outcome,
+          whatFailed: whatFailed.length === 0 ? 'none' : whatFailed,
+          whatWorked: whatWorked.length === 0 ? 'none' : whatWorked,
           tags,
           extractionSource: 'manual',
           projectDir: this.agent.config.cwd,

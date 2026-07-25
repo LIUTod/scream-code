@@ -135,6 +135,7 @@ function buildEmptyGoalLines(colors: { text: string; textDim: string }): string[
     value(t('goalpanel.no_goal')),
     '',
     `${muted('/goal')} ${value(t('goalpanel.goal_placeholder'))}   ${muted(t('goalpanel.create_goal'))}`,
+    `${muted('/goal setup')}      ${muted(t('goalpanel.setup_goal'))}`,
     `${muted('/goal update')} ${value('<new objective>')}   ${muted(t('goalpanel.update_goal'))}`,
     `${muted('/goal status')}      ${muted(t('goalpanel.status_goal'))}`,
     `${muted('/goal replace')} ${value('<new objective>')}   ${muted(t('goalpanel.replace_goal'))}`,

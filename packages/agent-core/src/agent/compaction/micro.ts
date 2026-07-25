@@ -25,6 +25,8 @@ export interface MicroCompactionConfig {
   truncatedMarker: string;
   /** Placeholder text for tool results explicitly marked useless. */
   uselessMarker: string;
+  /** Placeholder text for zero-match Grep/Glob results elided by micro-compaction. */
+  noMatchesMarker: string;
 }
 
 const DEFAULT_CONFIG: MicroCompactionConfig = {
@@ -35,6 +37,7 @@ const DEFAULT_CONFIG: MicroCompactionConfig = {
   minContextUsageRatio: 0.5,
   truncatedMarker: '[Old tool result content cleared]',
   uselessMarker: '[Uneventful result elided]',
+  noMatchesMarker: '[no matches]',
 };
 
 /**
@@ -63,46 +66,137 @@ function computeCutoff(
   return cutoff;
 }
 
+/** Tool names whose results are file reads eligible for supersede pruning. */
+const READ_TOOL_NAMES = new Set(['Read', 'ReadGroup']);
+
+/** Tool names whose empty results can be elided as a no-match marker. */
+const SEARCH_TOOL_NAMES = new Set(['Grep', 'Glob']);
+
+/** Exact tool-result texts that indicate a zero-match search result. */
+const ZERO_MATCH_TEXTS = new Set(['No matches found', 'No non-sensitive matches found']);
+
 /**
- * Walk the message list and find Read tool calls whose file paths were
- * superseded by a later Read of the same path. Returns a map from the
- * superseded tool call's ID to the file path (for the marker text).
+ * Parse a tool call's arguments JSON. Returns undefined for null or malformed
+ * JSON - persisted history can carry truncated arguments that must not crash
+ * compaction. `ToolCall.arguments` is a JSON string (or null), never a parsed
+ * object, so every consumer must go through this helper.
+ */
+function parseToolCallArguments(
+  argumentsJson: string | null | undefined,
+): Record<string, unknown> | undefined {
+  if (argumentsJson === null || argumentsJson === undefined) return undefined;
+  try {
+    const parsed = JSON.parse(argumentsJson);
+    return typeof parsed === 'object' && parsed !== null
+      ? (parsed as Record<string, unknown>)
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Extract the file paths targeted by a read tool call. `Read` carries a
+ * single `path`; `ReadGroup` carries a `paths` array. Returns an empty array
+ * for non-read tools or calls whose arguments don't yield usable paths.
+ */
+function extractReadFilePaths(
+  name: string,
+  args: Record<string, unknown> | undefined,
+): readonly string[] {
+  if (args === undefined) return [];
+  if (name === 'Read') {
+    const path = typeof args['path'] === 'string' ? (args['path'] as string) : undefined;
+    return path !== undefined && path.length > 0 ? [path] : [];
+  }
+  if (name === 'ReadGroup') {
+    const paths = args['paths'];
+    if (!Array.isArray(paths)) return [];
+    return paths.filter((p): p is string => typeof p === 'string' && p.length > 0);
+  }
+  return [];
+}
+
+/** Concatenate the `text` parts of a message's content into a single string. */
+function extractTextContent(content: readonly ContentPart[]): string {
+  let text = '';
+  for (const part of content) {
+    if (typeof part === 'object' && part !== null && part.type === 'text') {
+      text += part.text;
+    }
+  }
+  return text;
+}
+
+/** Build a toolCallId -> tool-name map by scanning assistant messages. */
+function buildToolCallNameMap(
+  messages: readonly ContextMessage[],
+): Map<string, string> {
+  const names = new Map<string, string>();
+  for (const msg of messages) {
+    if (msg.role !== 'assistant') continue;
+    for (const tc of msg.toolCalls) {
+      names.set(tc.id, tc.name);
+    }
+  }
+  return names;
+}
+
+/**
+ * Whether a tool result is a zero-match Grep/Glob result eligible for elision.
+ * Only exact-match the canonical empty-result texts so results carrying extra
+ * information (sensitive-file filter notices, pagination notices, errors) are
+ * preserved verbatim.
+ */
+function isZeroMatchSearchResult(
+  toolName: string | undefined,
+  content: readonly ContentPart[],
+): boolean {
+  if (toolName === undefined || !SEARCH_TOOL_NAMES.has(toolName)) return false;
+  const text = extractTextContent(content).trim();
+  return ZERO_MATCH_TEXTS.has(text);
+}
+
+/**
+ * Walk the message list and find Read/ReadGroup tool calls whose file paths
+ * were superseded by a later read of the same path. Returns a map from the
+ * superseded tool call's ID to the list of file paths covered by the newer
+ * read (a ReadGroup can cover several).
  *
- * Only considers tool results before the cutoff line — newer reads are
- * protected and their results are kept verbatim.
+ * Only considers tool results before the cutoff line - newer reads are
+ * protected and their results are kept verbatim. The comparison uses the raw
+ * path strings from the tool arguments; path canonicalization would need
+ * workspace context the compaction layer doesn't have, so the same file read
+ * via two different spellings is treated as two different files (safe: it
+ * just misses a supersede opportunity rather than dropping a distinct result).
  */
 function findSupersededPaths(
   messages: readonly ContextMessage[],
   cutoff: number,
-): Map<string, string> {
-  const superseded = new Map<string, string>();
-  const readCalls = new Map<string, { filePath: string; index: number }>();
+): Map<string, readonly string[]> {
+  const superseded = new Map<string, readonly string[]>();
+  const latestReadByPath = new Map<string, { toolCallId: string; index: number }>();
 
   for (let i = 0; i < messages.length; i++) {
     const msg = messages[i];
     if (msg === undefined) continue;
-
-    if (msg.role === 'assistant' && msg.toolCalls.length > 0) {
-      for (const tc of msg.toolCalls) {
-        if (
-          tc.name === 'Read' &&
-          tc.id !== undefined &&
-          tc.arguments !== undefined
-        ) {
-          const filePath = (
-            typeof tc.arguments === 'object' && tc.arguments !== null
-              ? (tc.arguments as Record<string, unknown>)['file_path']
-              : undefined
-          ) as string | undefined;
-          if (filePath !== undefined) {
-            for (const [prevId, prev] of readCalls) {
-              if (prev.filePath === filePath && prev.index < cutoff) {
-                superseded.set(prevId, filePath);
-              }
-            }
-            readCalls.set(tc.id, { filePath, index: i });
+    if (msg.role !== 'assistant' || msg.toolCalls.length === 0) continue;
+    for (const tc of msg.toolCalls) {
+      if (!READ_TOOL_NAMES.has(tc.name)) continue;
+      const args = parseToolCallArguments(tc.arguments);
+      const paths = extractReadFilePaths(tc.name, args);
+      if (paths.length === 0) continue;
+      for (const filePath of paths) {
+        const prev = latestReadByPath.get(filePath);
+        if (prev !== undefined && prev.index < cutoff) {
+          const existing = superseded.get(prev.toolCallId);
+          if (existing === undefined) {
+            superseded.set(prev.toolCallId, [filePath]);
+          } else if (!existing.includes(filePath)) {
+            superseded.set(prev.toolCallId, [...existing, filePath]);
           }
         }
+        latestReadByPath.set(filePath, { toolCallId: tc.id, index: i });
       }
     }
   }
@@ -175,37 +269,48 @@ export class MicroCompaction {
 
   /**
    * Apply micro-compaction to a message list: replace old tool results
-   * before the cutoff line with truncated markers. Read results for files
-   * that were re-read later get a supersede marker so the model knows
-   * the old content is stale. Tool results explicitly marked useless are
-   * elided with a short notice regardless of size, since they carry no
-   * actionable information.
+   * before the cutoff line with truncated markers. Read/ReadGroup results
+   * for files that were re-read later get a supersede marker (listing the
+   * covered paths) so the model knows the old content is stale. Zero-match
+   * Grep/Glob results are elided to a short `[no matches]` notice regardless
+   * of size. Tool results explicitly marked useless are elided with a short
+   * notice regardless of size, since they carry no actionable information.
    */
   compact(messages: readonly ContextMessage[]): readonly ContextMessage[] {
     const config = this.config;
     const superseded = findSupersededPaths(messages, this.cutoff);
+    const toolNames = buildToolCallNameMap(messages);
     const result: ContextMessage[] = [];
     let i = 0;
     for (const msg of messages) {
-      const isUseless =
-        i < this.cutoff &&
-        msg.role === 'tool' &&
-        msg.toolCallId !== undefined &&
-        msg.useless === true;
+      const isOld = i < this.cutoff;
+      const toolCallId = msg.toolCallId;
+      const isTool = msg.role === 'tool' && toolCallId !== undefined;
+      const isUseless = isOld && isTool && msg.useless === true;
+      const isZeroMatch =
+        isOld &&
+        isTool &&
+        toolCallId !== undefined &&
+        isZeroMatchSearchResult(toolNames.get(toolCallId), msg.content);
       const isOversizedTruncatable =
-        i < this.cutoff &&
-        msg.role === 'tool' &&
-        msg.toolCallId !== undefined &&
+        isOld &&
+        isTool &&
         estimateTokensForMessages([msg]) >= config.minContentTokens;
       if (isUseless) {
         result.push({
           ...msg,
           content: [{ type: 'text', text: config.uselessMarker } as ContentPart],
         } as ContextMessage);
+      } else if (isZeroMatch) {
+        result.push({
+          ...msg,
+          content: [{ type: 'text', text: config.noMatchesMarker } as ContentPart],
+        } as ContextMessage);
       } else if (isOversizedTruncatable) {
+        const paths = toolCallId !== undefined ? superseded.get(toolCallId) : undefined;
         const marker =
-          msg.toolCallId !== undefined && superseded.has(msg.toolCallId)
-            ? `[Superseded by a newer read of ${superseded.get(msg.toolCallId)}]`
+          paths !== undefined && paths.length > 0
+            ? `[Superseded by a newer read of ${paths.join(', ')}]`
             : config.truncatedMarker;
         result.push({
           ...msg,
@@ -235,22 +340,33 @@ export class MicroCompaction {
   ): { truncatedToolResultCount: number; beforeTokens: number; afterTokens: number } {
     let markerTokenCount: number | undefined;
     let uselessMarkerTokenCount: number | undefined;
+    let noMatchesMarkerTokenCount: number | undefined;
     let truncatedToolResultCount = 0;
     let beforeTokens = 0;
     let afterTokens = 0;
+    const toolNames = buildToolCallNameMap(messages);
     for (let i = 0; i < messages.length && i < cutoff; i++) {
       const message = messages[i];
       if (message?.role !== 'tool' || message.toolCallId === undefined) continue;
 
       const contentTokens = estimateTokensForMessages([message]);
       const isUseless = message.useless === true;
-      if (!isUseless && contentTokens < this.config.minContentTokens) continue;
+      const isZeroMatch = isZeroMatchSearchResult(
+        toolNames.get(message.toolCallId),
+        message.content,
+      );
+      if (!isUseless && !isZeroMatch && contentTokens < this.config.minContentTokens) continue;
 
       if (isUseless) {
         uselessMarkerTokenCount ??= estimateTokens(this.config.uselessMarker);
         truncatedToolResultCount += 1;
         beforeTokens += contentTokens;
         afterTokens += uselessMarkerTokenCount;
+      } else if (isZeroMatch) {
+        noMatchesMarkerTokenCount ??= estimateTokens(this.config.noMatchesMarker);
+        truncatedToolResultCount += 1;
+        beforeTokens += contentTokens;
+        afterTokens += noMatchesMarkerTokenCount;
       } else {
         markerTokenCount ??= estimateTokens(this.config.truncatedMarker);
         truncatedToolResultCount += 1;

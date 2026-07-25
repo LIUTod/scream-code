@@ -1781,6 +1781,210 @@ describe('Agent compaction', () => {
     });
   });
 
+  describe('prompt-cache-aware pruning', () => {
+    it('supersedes an old Read result when the same file is re-read later', () => {
+      const micro = new MicroCompaction({} as never, {
+        keepRecentMessages: 0,
+        minContentTokens: 0,
+        minContextUsageRatio: 0,
+        truncatedMarker: '[cleared]',
+        uselessMarker: '[uneventful]',
+        noMatchesMarker: '[no matches]',
+      });
+      // @ts-expect-error: cutoff is private; set directly to exercise compact().
+      micro.cutoff = 3;
+      const history: ContextMessage[] = [
+        {
+          role: 'assistant',
+          content: [],
+          toolCalls: [
+            { type: 'function', id: 'tc_old', name: 'Read', arguments: JSON.stringify({ path: '/a.ts' }) },
+          ],
+        },
+        {
+          role: 'tool',
+          toolCallId: 'tc_old',
+          toolCalls: [],
+          content: [{ type: 'text', text: 'old file content'.repeat(50) }],
+        } as ContextMessage,
+        {
+          role: 'assistant',
+          content: [],
+          toolCalls: [
+            { type: 'function', id: 'tc_new', name: 'Read', arguments: JSON.stringify({ path: '/a.ts' }) },
+          ],
+        },
+        {
+          role: 'tool',
+          toolCallId: 'tc_new',
+          toolCalls: [],
+          content: [{ type: 'text', text: 'fresh file content'.repeat(50) }],
+        } as ContextMessage,
+      ];
+      const out = micro.compact(history);
+      // Old read (i=1, before cutoff) is superseded by the newer read.
+      expect(out[1]!.content[0]).toMatchObject({
+        type: 'text',
+        text: '[Superseded by a newer read of /a.ts]',
+      });
+      // New read (i=3, at/past cutoff) is kept verbatim.
+      expect(out[3]!.content[0]).toMatchObject({
+        type: 'text',
+        text: 'fresh file content'.repeat(50),
+      });
+    });
+
+    it('supersedes a ReadGroup result when a later Read covers one of its files', () => {
+      const micro = new MicroCompaction({} as never, {
+        keepRecentMessages: 0,
+        minContentTokens: 0,
+        minContextUsageRatio: 0,
+        truncatedMarker: '[cleared]',
+        uselessMarker: '[uneventful]',
+        noMatchesMarker: '[no matches]',
+      });
+      // @ts-expect-error: cutoff is private; set directly to exercise compact().
+      micro.cutoff = 3;
+      const history: ContextMessage[] = [
+        {
+          role: 'assistant',
+          content: [],
+          toolCalls: [
+            {
+              type: 'function',
+              id: 'tc_rg',
+              name: 'ReadGroup',
+              arguments: JSON.stringify({ paths: ['/a.ts', '/b.ts'] }),
+            },
+          ],
+        },
+        {
+          role: 'tool',
+          toolCallId: 'tc_rg',
+          toolCalls: [],
+          content: [{ type: 'text', text: 'grouped file contents'.repeat(50) }],
+        } as ContextMessage,
+        {
+          role: 'assistant',
+          content: [],
+          toolCalls: [
+            { type: 'function', id: 'tc_reread', name: 'Read', arguments: JSON.stringify({ path: '/a.ts' }) },
+          ],
+        },
+        {
+          role: 'tool',
+          toolCallId: 'tc_reread',
+          toolCalls: [],
+          content: [{ type: 'text', text: 're-read of /a.ts'.repeat(50) }],
+        } as ContextMessage,
+      ];
+      const out = micro.compact(history);
+      expect(out[1]!.content[0]).toMatchObject({
+        type: 'text',
+        text: '[Superseded by a newer read of /a.ts]',
+      });
+    });
+
+    it('elides zero-match Grep/Glob results to the no-matches marker regardless of size', () => {
+      const micro = new MicroCompaction({} as never, {
+        keepRecentMessages: 0,
+        minContentTokens: 1000,
+        minContextUsageRatio: 0,
+        truncatedMarker: '[cleared]',
+        uselessMarker: '[uneventful]',
+        noMatchesMarker: '[no matches]',
+      });
+      // @ts-expect-error: cutoff is private; set directly to exercise compact().
+      micro.cutoff = 3;
+      const history: ContextMessage[] = [
+        {
+          role: 'assistant',
+          content: [],
+          toolCalls: [
+            { type: 'function', id: 'tc_grep', name: 'Grep', arguments: JSON.stringify({ pattern: 'foo' }) },
+            { type: 'function', id: 'tc_glob', name: 'Glob', arguments: JSON.stringify({ pattern: '*.xyz' }) },
+          ],
+        },
+        {
+          role: 'tool',
+          toolCallId: 'tc_grep',
+          toolCalls: [],
+          content: [{ type: 'text', text: 'No non-sensitive matches found' }],
+        } as ContextMessage,
+        {
+          role: 'tool',
+          toolCallId: 'tc_glob',
+          toolCalls: [],
+          content: [{ type: 'text', text: 'No matches found' }],
+        } as ContextMessage,
+      ];
+      const out = micro.compact(history);
+      // Zero-match results are short (below minContentTokens) but still elided.
+      expect(out[1]!.content[0]).toMatchObject({ type: 'text', text: '[no matches]' });
+      expect(out[2]!.content[0]).toMatchObject({ type: 'text', text: '[no matches]' });
+    });
+
+    it('keeps zero-match results past the cutoff line verbatim', () => {
+      const micro = new MicroCompaction({} as never, {
+        keepRecentMessages: 1,
+        minContentTokens: 0,
+        minContextUsageRatio: 0,
+        truncatedMarker: '[cleared]',
+        uselessMarker: '[uneventful]',
+        noMatchesMarker: '[no matches]',
+      });
+      // @ts-expect-error: cutoff is private; set directly to exercise compact().
+      micro.cutoff = 0;
+      const history: ContextMessage[] = [
+        {
+          role: 'assistant',
+          content: [],
+          toolCalls: [
+            { type: 'function', id: 'tc_grep', name: 'Grep', arguments: JSON.stringify({ pattern: 'foo' }) },
+          ],
+        },
+        {
+          role: 'tool',
+          toolCallId: 'tc_grep',
+          toolCalls: [],
+          content: [{ type: 'text', text: 'No matches found' }],
+        } as ContextMessage,
+      ];
+      const out = micro.compact(history);
+      expect(out[1]!.content[0]).toMatchObject({ type: 'text', text: 'No matches found' });
+    });
+
+    it('counts zero-match elision savings in estimateSavings', () => {
+      const micro = new MicroCompaction({} as never, {
+        keepRecentMessages: 0,
+        minContentTokens: 1000,
+        minContextUsageRatio: 0,
+        truncatedMarker: '[cleared]',
+        uselessMarker: '[uneventful]',
+        noMatchesMarker: '[no matches]',
+      });
+      // @ts-expect-error: cutoff is private; set directly to exercise compact().
+      micro.cutoff = 2;
+      const history: ContextMessage[] = [
+        {
+          role: 'assistant',
+          content: [],
+          toolCalls: [
+            { type: 'function', id: 'tc_grep', name: 'Grep', arguments: JSON.stringify({ pattern: 'foo' }) },
+          ],
+        },
+        {
+          role: 'tool',
+          toolCallId: 'tc_grep',
+          toolCalls: [],
+          content: [{ type: 'text', text: 'No matches found' }],
+        } as ContextMessage,
+      ];
+      const savings = micro.estimateSavings(history);
+      expect(savings).toBeGreaterThan(0);
+    });
+  });
+
   describe('iterative summary update', () => {
     it('uses the update instruction when a prior compaction summary exists at history head', async () => {
       const ctx = testAgent();
@@ -2002,7 +2206,7 @@ function normalizeInputText(text: string): string {
 function lastCompactionInstruction(ctx: TestAgentContext): string {
   const last = ctx.llmCalls.at(-1);
   if (!last) throw new Error('No LLM call recorded');
-  const lastUser = [...last.history].reverse().find((m) => m.role === 'user');
+  const lastUser = [...last.history].toReversed().find((m) => m.role === 'user');
   if (!lastUser) throw new Error('No user message in last LLM call');
   const text = lastUser.content
     .filter((p): p is { type: 'text'; text: string } => p.type === 'text')

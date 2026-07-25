@@ -247,6 +247,12 @@ export const zh: Record<string, string> = {
   'goal.budget_turns_hint': '轮次限制（0 = 不限制）',
   'goal.budget_tokens_hint': 'Token 限制（0 = 不限制）',
   'goal.budget_time_hint': '时间限制，单位分钟（0 = 不限制）',
+  'goal.setup_title_initial': '目标引导 (1/2)',
+  'goal.setup_desc_hint': '简述你的任务：',
+  'goal.setup_desc_placeholder': '例如：重构认证模块',
+  'goal.setup_refining': '正在提炼目标...',
+  'goal.setup_title_confirm': '目标引导 (2/2)',
+  'goal.setup_confirm_hint': '已提炼目标（可编辑后确认）：',
 
   // ─── 更新 ─────────────────────
   'update.timeout': '超时，可能因网络原因卡住。',
@@ -749,6 +755,7 @@ export const zh: Record<string, string> = {
   'goalpanel.paused': '⏸ 已暂停',
   'goalpanel.no_goal': '未开启任务',
   'goalpanel.create_goal': '创建并启动目标',
+  'goalpanel.setup_goal': '引导式目标创建',
   'goalpanel.pause_goal': '暂停当前目标',
   'goalpanel.resume_goal': '恢复已暂停的目标',
   'goalpanel.cancel_goal': '取消当前目标',

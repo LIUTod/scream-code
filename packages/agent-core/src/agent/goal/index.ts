@@ -72,6 +72,29 @@ export interface GoalBudgetReport {
   readonly overBudget: boolean;
 }
 
+/**
+ * Returns true when any configured budget has less than `threshold` of its
+ * allowance remaining (e.g. 0.2 = under 20% left). Budgets that are not
+ * configured (null) are ignored. Used to steer the model toward convergence
+ * before a hard over-budget block fires.
+ */
+export function isBudgetNearExhaustion(budget: GoalBudgetReport, threshold: number): boolean {
+  if (budget.turnBudget !== null && budget.remainingTurns !== null && budget.turnBudget > 0) {
+    if (budget.remainingTurns / budget.turnBudget < threshold) return true;
+  }
+  if (budget.tokenBudget !== null && budget.remainingTokens !== null && budget.tokenBudget > 0) {
+    if (budget.remainingTokens / budget.tokenBudget < threshold) return true;
+  }
+  if (
+    budget.wallClockBudgetMs !== null &&
+    budget.remainingWallClockMs !== null &&
+    budget.wallClockBudgetMs > 0
+  ) {
+    if (budget.remainingWallClockMs / budget.wallClockBudgetMs < threshold) return true;
+  }
+  return false;
+}
+
 export interface GoalSnapshot {
   readonly goalId: string;
   readonly objective: string;

@@ -23,6 +23,10 @@
  *     truncation marker so a runaway command cannot OOM the host.
  */
 
+import { randomUUID } from 'node:crypto';
+import { writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { Readable } from 'node:stream';
 import { StringDecoder } from 'node:string_decoder';
 
@@ -520,7 +524,16 @@ export class BashTool implements BuiltinTool<BashInput> {
     }, timeoutMs);
 
     try {
-      const builder = new ToolResultBuilder();
+      const builder = new ToolResultBuilder({
+        artifactSink: async (fullOutput) => {
+          // Persist the full, untruncated output to a temp file so the model
+          // can recover the elided middle via the Read tool. The path is the
+          // artifact reference appended to the truncated output.
+          const artifactPath = join(tmpdir(), `scream-bash-output-${randomUUID()}.log`);
+          await writeFile(artifactPath, fullOutput, 'utf8');
+          return artifactPath;
+        },
+      });
       const [, exitCode] = await Promise.all([
         Promise.all([
           readStreamIntoBuilder(proc.stdout, builder),

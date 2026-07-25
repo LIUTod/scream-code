@@ -345,7 +345,7 @@ Batch parallel subagent orchestration. Toggles `wolfpackMode` in `AppState`. Whe
 
 Persistent goal injection that survives turns and session resumes.
 
-- **TUI**: `src/tui/commands/goal.ts` — subcommands: `status`, `pause`, `resume`, `replace`. `/goaloff` cancels entirely.
+- **TUI**: `src/tui/commands/goal.ts` — subcommands: `status`, `pause`, `resume`, `replace`, `update`, `setup`. `/goaloff` cancels entirely. `/goal setup` runs a guided, LLM-refined objective flow (brief description -> `session.generateText` refinement -> user confirm/edit -> config wizard).
 - **State**: `AppState.goal`, `goalActive`, `goalContinuationCount`. Injected into the system prompt by `GoalInjectionProvider`.
 - **Storage**: persisted in session metadata (`custom.goal`) so goals survive session switch and resume.
 - **Footer badge**: 🎯 + truncated goal text (green) when active.

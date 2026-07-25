@@ -4,6 +4,7 @@ import type { Agent } from '..';
 import type { ExecutableToolResult, LoopRecordedEvent } from '../../loop';
 import { estimateTokens, estimateTokensForMessages } from '../../utils/tokens';
 import type { CompactionResult } from '../compaction';
+import { messageFingerprint, stablePrefixLength } from './prefix-fingerprint';
 import { project } from './projector';
 import {
   USER_PROMPT_ORIGIN,
@@ -45,6 +46,19 @@ export class ContextMemory {
   private openSteps: Map<string, ContextMessage> = new Map();
   private pendingToolResultIds = new Set<string>();
   private deferredMessages: ContextMessage[] = [];
+
+  /**
+   * Per-message fingerprints captured from the last message list handed to
+   * the LLM via {@link messagesForLLM}. Used to measure prefix stability
+   * across calls: a provider prompt cache only hits when the leading
+   * messages are byte-identical to the previous request, so the length of
+   * the matching prefix here approximates the cacheable prefix length.
+   *
+   * Reset on {@link clear}; a compaction naturally produces a 0-length
+   * stable prefix (the summary replaces the head), which is the correct
+   * cache-break signal rather than a reset.
+   */
+  private lastSentFingerprints: string[] = [];
 
   constructor(protected readonly agent: Agent) {}
 
@@ -98,6 +112,7 @@ export class ContextMemory {
     this.openSteps.clear();
     this.pendingToolResultIds.clear();
     this.deferredMessages = [];
+    this.lastSentFingerprints = [];
     this.agent.injection.onContextClear();
     this.agent.emitStatusUpdated();
   }
@@ -166,6 +181,19 @@ export class ContextMemory {
 
   }
 
+  /**
+   * Apply a full compaction summary.
+   *
+   * Prefix-stability note: this is a **replaceHead** operation, not a
+   * replaceTail. The first `compactedCount` messages are collapsed into a
+   * single summary message; the trailing recent messages are preserved
+   * verbatim. This necessarily breaks the provider prompt cache for the
+   * whole prefix (the summary is new content), which is inherent to
+   * summarization and cannot be avoided. After compaction the new prefix
+   * `[summary, ...tail]` is stable again until the next compaction or
+   * micro-compaction cutoff advance, so subsequent append-only steps resume
+   * hitting the cache.
+   */
   applyCompaction(summary: CompactionResult): void {
     this.agent.records.logRecord({
       type: 'context.apply_compaction',
@@ -224,8 +252,75 @@ export class ContextMemory {
     // truncated to a short marker, freeing context tokens without an
     // LLM call. Detect() is a no-op when the micro-compaction flag is
     // off (env: SCREAM_CODE_EXPERIMENTAL_MICRO_COMPACTION=0).
+    //
+    // Prefix-stability note: detect() only ever advances the cutoff
+    // forward (never retreats), and compact() replaces old tool results
+    // with a stable marker that does not change once written. So a given
+    // message's bytes change at most once (full -> marker) and then stay
+    // fixed. The transition is a one-time cache break; steady-state
+    // append-only turns still hit the cache. LLM-bound callers should
+    // prefer {@link messagesForLLM} which adds prefix-stability
+    // observability on top of this getter.
     this.agent.microCompaction.detect();
     return project(this.agent.microCompaction.compact(this.history));
+  }
+
+  /**
+   * Build the message list for an LLM call, with prefix-stability
+   * observation.
+   *
+   * This is the LLM-bound counterpart of the {@link messages} getter: it
+   * runs the same detect + compact + project pipeline, then fingerprints
+   * the result and logs how much of the prefix survived since the last
+   * call. A stable prefix length equal to the previous message count means
+   * the provider prompt cache should hit; a smaller value means an early
+   * message mutated (compaction summary, micro-compaction truncation, or a
+   * projection repair) and the cache broke from that index.
+   *
+   * Behavior is otherwise identical to the getter - this is observation
+   * only, it does not alter the messages returned.
+   */
+  messagesForLLM(): Message[] {
+    // detect() is also run by fullCompaction.beforeStep at the step
+    // boundary; mirroring it here keeps this path behavior-identical to
+    // the `messages` getter when called directly (e.g. tests).
+    this.agent.microCompaction.detect();
+    const messages = project(this.agent.microCompaction.compact(this.history));
+    this.observePrefixStability(messages);
+    return messages;
+  }
+
+  /**
+   * Compare the projected messages against the last LLM-bound batch and
+   * log the stable-prefix length. Pure observation: no state that affects
+   * message content is mutated, only the fingerprint baseline used by the
+   * next call's comparison.
+   */
+  private observePrefixStability(messages: readonly Message[]): void {
+    const prev = this.lastSentFingerprints;
+    const stable = stablePrefixLength(prev, messages);
+    // Capture this call's fingerprints for the next comparison. Computed
+    // unconditionally so the baseline always reflects the latest sent
+    // bytes, even when nothing is logged.
+    this.lastSentFingerprints = messages.map(messageFingerprint);
+
+    // First call in a session has no baseline; nothing to compare.
+    if (prev.length === 0) return;
+
+    const appended = messages.length - prev.length;
+    const prefixIntact = stable >= prev.length;
+    // Only log when the prefix broke (the interesting event). A pure
+    // append (prefixIntact && appended > 0) is the cache-friendly happy
+    // path and would just noise the log.
+    if (prefixIntact) return;
+
+    this.agent.log.debug('prefix-stability: provider prompt cache prefix broke', {
+      stablePrefixLength: stable,
+      prevMessageCount: prev.length,
+      currentMessageCount: messages.length,
+      appendedSinceLast: appended,
+      breakIndex: stable,
+    });
   }
 
   appendLoopEvent(event: LoopRecordedEvent): void {

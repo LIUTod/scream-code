@@ -247,6 +247,12 @@ export const en: Record<string, string> = {
   'goal.budget_turns_hint': 'Turn limit (0 = unlimited)',
   'goal.budget_tokens_hint': 'Token limit (0 = unlimited)',
   'goal.budget_time_hint': 'Time limit in minutes (0 = unlimited)',
+  'goal.setup_title_initial': 'Goal Setup (1/2)',
+  'goal.setup_desc_hint': 'Describe your task briefly:',
+  'goal.setup_desc_placeholder': 'e.g. refactor auth module',
+  'goal.setup_refining': 'Refining objective...',
+  'goal.setup_title_confirm': 'Goal Setup (2/2)',
+  'goal.setup_confirm_hint': 'Refined objective (edit if needed):',
 
   // ─── Update ───────────────────
   'update.timeout': 'Timed out, possibly due to network issues.',
@@ -749,6 +755,7 @@ export const en: Record<string, string> = {
   'goalpanel.paused': '⏸ Paused',
   'goalpanel.no_goal': 'No goal set',
   'goalpanel.create_goal': 'Create and start a goal',
+  'goalpanel.setup_goal': 'Guided goal setup',
   'goalpanel.pause_goal': 'Pause current goal',
   'goalpanel.resume_goal': 'Resume paused goal',
   'goalpanel.cancel_goal': 'Cancel current goal',
