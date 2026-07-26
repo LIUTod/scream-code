@@ -2,7 +2,7 @@
  * Scream Web UI server.
  *
  * Embeds a Session instance and exposes it over HTTP + WebSocket.
- * Spawned by the /web slash command via startWebServerForSession.
+ * Spawned by `scream web` CLI subcommand via runWebServer.
  *
  * Architecture: agent-core is fully UI-agnostic. This module is a third
  * consumer of the same SDK (alongside run-shell TUI and run-stream-json),
@@ -16,12 +16,18 @@ import { exec } from 'node:child_process';
 import { WebSocketServer, WebSocket } from 'ws';
 
 import {
+  ScreamHarness,
+  resolveScreamHome,
   log,
   type Session,
   type Event,
   type SessionStatus,
   type PermissionMode,
 } from '@scream-code/scream-code-sdk';
+import { setLocale } from '@scream-code/config';
+
+import { loadTuiConfig, TuiConfigParseError } from '#/tui/config';
+import { createScreamCodeHostIdentity } from '#/cli/version';
 
 // ─── Types ────────────────────────────────────────────────────────────────
 
@@ -412,10 +418,6 @@ class WebSession {
     };
   }
 
-  get connectionCount(): number {
-    return this.connections.size;
-  }
-
   private buildMessages(): ChatMessage[] {
     const messages: ChatMessage[] = [];
     let currentAssistant: ChatMessage | null = null;
@@ -502,7 +504,7 @@ class WebSession {
   }
 }
 
-// ─── TUI integration: /web slash command ──────────────────────────────────
+// ─── Web server for an existing session ────────────────────────────────────
 
 export interface WebServerHandle {
   readonly url: string;
@@ -525,7 +527,7 @@ export async function startWebServerForSession(session: Session, opts: {
   });
 
   const baseDir = import.meta.dirname;
-  const prodPublicDir = join(baseDir, '..', 'public');
+  const prodPublicDir = join(baseDir, 'public');
   const devPublicDir = join(baseDir, 'frontend', 'dist');
   let publicDir = prodPublicDir;
   try {
@@ -605,4 +607,83 @@ export async function startWebServerForSession(session: Session, opts: {
   };
 
   return { url, close };
+}
+
+// ─── Standalone CLI entry: scream web ─────────────────────────────────────
+
+export interface WebServerOptions {
+  readonly port: number;
+  readonly workDir: string;
+  readonly model?: string;
+  readonly yolo: boolean;
+  readonly auto: boolean;
+  readonly open: boolean;
+  readonly skillsDirs: string[];
+}
+
+export async function runWebServer(opts: WebServerOptions): Promise<void> {
+  const homeDir = resolveScreamHome();
+  const workDir = opts.workDir;
+
+  const harness = new ScreamHarness({
+    homeDir,
+    identity: createScreamCodeHostIdentity('dev'),
+    uiMode: 'print',
+    skillDirs: opts.skillsDirs,
+  });
+
+  try {
+    const tuiConfig = await loadTuiConfig();
+    setLocale(tuiConfig.language);
+    harness.setSubagentModelBindings(() => tuiConfig.subagentModels);
+  } catch (error) {
+    if (error instanceof TuiConfigParseError) {
+      setLocale(error.fallback.language);
+    } else {
+      throw error;
+    }
+  }
+
+  await harness.ensureConfigFile();
+  const config = await harness.getConfig();
+
+  const permission: PermissionMode = opts.yolo ? 'yolo' : opts.auto ? 'auto' : 'manual';
+  const session = await harness.createSession({
+    workDir,
+    model: opts.model ?? config.defaultModel,
+    permission,
+  });
+
+  log.info('web: session created', { sessionId: session.id, workDir });
+
+  const handle = await startWebServerForSession(session, {
+    port: opts.port,
+    workDir,
+    yolo: opts.yolo,
+    open: opts.open,
+  });
+
+  const cleanup = async (): Promise<void> => {
+    try {
+      await handle.close();
+      await harness.close();
+    } catch {
+      // Best-effort
+    }
+  };
+
+  process.on('SIGINT', () => {
+    void cleanup().finally(() => process.exit(0));
+  });
+  process.on('SIGTERM', () => {
+    void cleanup().finally(() => process.exit(0));
+  });
+
+  // eslint-disable-next-line no-console
+  console.log(
+    `\n  Scream Web UI ready: ${handle.url}\n` +
+      `  Working directory: ${workDir}\n` +
+      `  Session: ${session.id}\n` +
+      `  Permission: ${opts.yolo ? 'yolo' : opts.auto ? 'auto' : 'manual'}\n`,
+  );
 }

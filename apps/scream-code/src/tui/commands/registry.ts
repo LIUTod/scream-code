@@ -110,13 +110,6 @@ export const BUILTIN_SLASH_COMMANDS = [
     priority: 117,
     availability: 'always',
   },
-  {
-    name: 'web',
-    aliases: [],
-    description: 'registry.web_desc',
-    priority: 116,
-    availability: 'always',
-  },
 
   // ── 帮助 / 信息 ──
   {

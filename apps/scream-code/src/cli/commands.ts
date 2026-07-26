@@ -24,12 +24,22 @@ export type StreamJsonHandler = (opts: {
 
 export type ChannelSetupHandler = () => void;
 
+export type WebHandler = (opts: {
+  port: number;
+  model?: string;
+  yolo: boolean;
+  auto: boolean;
+  open: boolean;
+  skillsDirs: string[];
+}) => void;
+
 export function createProgram(
   version: string,
   onMain: MainCommandHandler,
   onPluginNodeRunner: PluginNodeRunnerHandler = () => {},
   onStreamJson: StreamJsonHandler = () => {},
   onChannelSetup: ChannelSetupHandler = () => {},
+  onWeb: WebHandler = () => {},
 ): Command {
   const program = new Command(CLI_COMMAND_NAME)
     .description('下一代智能体的起点')
@@ -143,6 +153,32 @@ export function createProgram(
         effort: subOpts['effort'] as string | undefined,
         maxContextTokens: subOpts['maxContextTokens'] as string | undefined,
         pluginDirs: (subOpts['pluginDir'] as string[]) ?? [],
+      });
+    });
+
+  // `scream web` - browser-based chat UI (third consumer of agent-core).
+  program
+    .command('web')
+    .description('启动浏览器 Web UI')
+    .option('--port <port>', '端口号', '3210')
+    .option('--model <model>', 'LLM 模型别名')
+    .option('-y, --yolo', '自动批准所有操作', false)
+    .option('--auto', '以自动权限模式启动', false)
+    .option('--no-open', '不自动打开浏览器')
+    .option(
+      '--skills-dir <dir>',
+      '从该目录加载技能（可多次指定）',
+      (value: string, previous: string[]) => [...(previous ?? []), value],
+      [] as string[],
+    )
+    .action((subOpts: Record<string, unknown>) => {
+      onWeb({
+        port: parseInt(subOpts['port'] as string, 10) || 3210,
+        model: subOpts['model'] as string | undefined,
+        yolo: (subOpts['yolo'] as boolean) ?? false,
+        auto: (subOpts['auto'] as boolean) ?? false,
+        open: subOpts['open'] !== false,
+        skillsDirs: (subOpts['skillsDir'] as string[]) ?? [],
       });
     });
 

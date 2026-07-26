@@ -1086,11 +1086,6 @@ export const en: Record<string, string> = {
   // ─── Dispatch errors ───────────
   'dispatch.session_picker_failed': 'Failed to open session picker: {error}',
   'dispatch.tasks_browser_failed': 'Failed to open tasks browser: {error}',
-  'dispatch.web_no_session': 'No active session to launch Web UI',
-  'dispatch.web_already_running': 'Web UI already running at {url}',
-  'dispatch.web_started_title': 'Web UI Started',
-  'dispatch.web_started_desc': 'Browser opened at {url}',
-  'dispatch.web_start_failed': 'Failed to start Web UI: {error}',
   'dispatch.usage_failed': 'Failed to show usage: {error}',
   'dispatch.status_failed': 'Failed to show status report: {error}',
 
@@ -1147,7 +1142,6 @@ export const en: Record<string, string> = {
   'registry.plan_desc': 'Toggle plan mode',
   'registry.fusionplan_desc': 'Toggle fusion plan mode (multi-agent parallel planning)',
   'registry.tasks_desc': 'Browse background tasks',
-  'registry.web_desc': 'Launch browser Web UI for this session',
   'registry.help_desc': 'Show available commands and shortcuts',
   'registry.status_desc': 'Show current session and runtime status',
   'registry.usage_desc': 'Show token usage and context window',

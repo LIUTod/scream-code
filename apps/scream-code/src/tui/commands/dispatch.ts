@@ -57,7 +57,6 @@ import { handleSkillCommand } from './skill-center';
 import { handleBtwCommand } from './btw';
 import { handleLikeCommand } from './like';
 import { handleKnowledgeCommand } from './knowledge';
-import { handleWebCommand } from './web';
 
 // ---------------------------------------------------------------------------
 // Re-exports — keep existing consumers working
@@ -234,9 +233,6 @@ async function handleBuiltInSlashCommand(
       host.tasksBrowserController.show().catch((error: unknown) => {
         host.showError(t('dispatch.tasks_browser_failed', { error: formatErrorMessage(error) }));
       });
-      return;
-    case 'web':
-      await handleWebCommand(host, args);
       return;
     case 'btw':
       await handleBtwCommand(host, args);

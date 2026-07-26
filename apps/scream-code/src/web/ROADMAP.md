@@ -136,19 +136,20 @@
 
 ---
 
-### Phase 4：架构收敛 ✅ 已完成（单 session / TUI 集成导向）
+### Phase 4：架构收敛 ✅ 已完成（独立 CLI 导向，对齐 Kimi）
 
-**当前形态**：独立的 `scream web` CLI 子命令已移除。Web UI 只能通过 TUI 内的 `/web` slash 命令启动，直接复用当前 TUI 的 Session 实例（`startWebServerForSession(session, …)`）。
+**当前形态**：Web UI 通过独立的 `scream web` CLI 子命令启动（与 `scream` TUI、`scream stream-json` 平级）。没有 TUI `/web` slash 命令。
 
 | 决策 | 状态 | 说明 |
 |------|------|------|
-| 单 session | ✅ | 无 SessionManager / sidebar，每个 Web server 绑定一个活 Session |
-| WS 路由 | ✅ | 固定 `ws://host/`，不再带 `?sessionId=` 查询参数 |
-| REST API | ✅ | 仅保留 `GET /api/v1/sessions/:id/snapshot`，无 session 列表/新建/删除/导出接口 |
-| 持久化存储 | ❌ 已移除 | journal 纯内存，server 关闭即丢弃（TUI session 本身有自己的历史） |
-| 多 session / 导出 / 归档恢复 | ❌ 已移除 | 相关前后端代码（SessionSidebar、fetchSessions 等）已全部删除 |
-| 文件上传 | ❌ | 后续可加，本机优先级低 |
-| slash 命令 | ❌ | 后续可加（Web UI 复用 TUI session，TUI 侧已支持） |
+| 启动方式 | ✅ | `scream web --port --model -y --auto --no-open` |
+| 单 session | ✅ | 每个 web server 实例绑定一个新创建的 Session |
+| WS 路由 | ✅ | 固定 `ws://host/`，无 `?sessionId=` 查询参数 |
+| REST API | ✅ | 仅保留 `GET /api/v1/sessions/:id/snapshot` |
+| 持久化存储 | ❌ | journal 纯内存，server 关闭即丢弃 |
+| 多 session / 导出 / 归档恢复 | ❌ | 相关前后端代码已全部删除 |
+| 文件上传 | ❌ | 后续可加 |
+| slash 命令 | ❌ | 后续可加 |
 | 移动端独立 shell | ❌ | 已有响应式布局，独立 shell 后续 |
 
 ## 4. 接口总览（目标形态）
