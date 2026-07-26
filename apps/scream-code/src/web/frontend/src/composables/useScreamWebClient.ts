@@ -23,7 +23,7 @@ export interface UseScreamWebClientReturn {
   clearMessages: () => void;
   appendSystemMessage: (text: string) => void;
   abort: () => void;
-  resolveApproval: (id: string, decision: 'approved' | 'rejected', feedback?: string) => void;
+  resolveApproval: (id: string, decision: 'approved' | 'rejected', feedback?: string, scope?: 'once' | 'session') => void;
   fetchSessions: () => Promise<void>;
   fetchGitStatus: () => Promise<void>;
   createSession: () => Promise<void>;
@@ -87,7 +87,7 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
   function applySnapshot(snapshot: SessionSnapshot): void {
     messages.value = snapshot.messages.map((m) => ({ ...m, id: m.id ?? generateId() }));
     pendingApprovals.value = snapshot.pendingApprovals;
-    status.value = snapshot.status;
+    status.value = { ...snapshot.status, busy: snapshot.busy };
     workDir.value = snapshot.workDir;
   }
 
@@ -135,9 +135,18 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
         epoch = hello.epoch;
         startHeartbeat(hello.heartbeat_ms);
         send({ type: 'client_hello', lastSeq: seq, epoch });
-        fetchSnapshot();
-        void fetchSessions();
-        void fetchGitStatus();
+        // Only activate archived sessions; skip if already active to avoid extra reconnect.
+        if (hello.active === false) {
+          void activateSession(hello.sessionId).then(() => {
+            fetchSnapshot();
+            void fetchSessions();
+            void fetchGitStatus();
+          });
+        } else {
+          fetchSnapshot();
+          void fetchSessions();
+          void fetchGitStatus();
+        }
         break;
       }
       case 'event': {
@@ -348,9 +357,9 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
     });
   }
 
-  function resolveApproval(id: string, decision: 'approved' | 'rejected', feedback?: string): void {
+  function resolveApproval(id: string, decision: 'approved' | 'rejected', feedback?: string, scope?: 'once' | 'session'): void {
     pendingApprovals.value = pendingApprovals.value.filter((a) => a.id !== id);
-    send({ type: 'approval_response', id, decision, ...(feedback ? { feedback } : {}) });
+    send({ type: 'approval_response', id, decision, ...(feedback ? { feedback } : {}), ...(scope ? { scope } : {}) });
   }
 
   // ── Session management ──────────────────────────────────────────────────
@@ -362,6 +371,14 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
       sessions.value = await res.json();
     } catch {
       // Best-effort
+    }
+  }
+
+  async function activateSession(sessionId: string): Promise<void> {
+    try {
+      await fetch(`${API_BASE}/sessions/${sessionId}/activate`, { method: 'POST' });
+    } catch {
+      // Best-effort — archived sessions may already be active or unknown.
     }
   }
 

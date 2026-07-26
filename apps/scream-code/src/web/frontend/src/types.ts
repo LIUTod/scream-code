@@ -43,6 +43,7 @@ export interface SessionSnapshot {
   messages: ChatMessage[];
   pendingApprovals: ApprovalRequest[];
   status: SessionStatus;
+  busy: boolean;
 }
 
 export interface SessionListItem {
@@ -73,6 +74,7 @@ export interface ServerHello {
   epoch: number;
   sessionId: string;
   workDir: string;
+  active: boolean;
 }
 
 export interface JournalEvent {
@@ -93,4 +95,5 @@ export type WsMessage =
   | { type: 'user_message'; clientMessageId?: string; text: string }
   | { type: 'command_result'; command: string; ok: boolean; message: string }
   | { type: 'resync_required'; reason: string }
+  | { type: 'pong' }
   | { type: 'error'; code?: string; message: string };

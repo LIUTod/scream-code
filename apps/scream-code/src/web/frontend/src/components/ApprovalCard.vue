@@ -7,7 +7,7 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
-  (e: 'resolve', id: string, decision: 'approved' | 'rejected', feedback?: string): void;
+  (e: 'resolve', id: string, decision: 'approved' | 'rejected', feedback?: string, scope?: 'once' | 'session'): void;
 }>();
 
 const minimized = ref(false);
@@ -41,11 +41,11 @@ function isBusy(id: string): boolean {
   return busyIds.value.has(id);
 }
 
-function act(decision: 'approved' | 'rejected', feedback?: string) {
+function act(decision: 'approved' | 'rejected', feedback?: string, scope?: 'once' | 'session') {
   const req = current.value;
   if (!req || isBusy(req.id)) return;
   busyIds.value = new Set([...busyIds.value, req.id]);
-  emit('resolve', req.id, decision, feedback);
+  emit('resolve', req.id, decision, feedback, scope);
 }
 
 function submitFeedback() {
@@ -70,11 +70,11 @@ function onKeydown(e: KeyboardEvent) {
   switch (e.key) {
     case '1':
       e.preventDefault();
-      act('approved');
+      act('approved', undefined, 'once');
       break;
     case '2':
       e.preventDefault();
-      act('approved'); // Server scopes approvals to the session on approve.
+      act('approved', undefined, 'session');
       break;
     case '3':
       e.preventDefault();
@@ -123,14 +123,14 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
         <button
           class="btn btn-approve"
           :disabled="isBusy(current.id)"
-          @click="act('approved')"
+          @click="act('approved', undefined, 'once')"
         >
           <kbd>1</kbd> 批准
         </button>
         <button
           class="btn btn-session"
           :disabled="isBusy(current.id)"
-          @click="act('approved')"
+          @click="act('approved', undefined, 'session')"
         >
           <kbd>2</kbd> 会话批准
         </button>

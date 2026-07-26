@@ -58,6 +58,14 @@ function pickSlashCommand(cmd?: SlashCommand) {
 /* ── Steer queue (messages queued while a turn is running) ───────────────── */
 const steerQueue = ref<string[]>([]);
 
+// Clear steer queue when switching sessions to prevent cross-session sends.
+watch(
+  () => props.sessionId,
+  () => {
+    steerQueue.value = [];
+  },
+);
+
 watch(
   () => props.busy,
   (busy) => {

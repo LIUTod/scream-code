@@ -82,6 +82,7 @@ interface SessionSnapshot {
   readonly messages: ChatMessage[];
   readonly pendingApprovals: ApprovalRequestMessage[];
   readonly status: SessionStatus;
+  readonly busy: boolean;
   readonly createdAt: number;
   readonly title: string;
 }
@@ -197,7 +198,16 @@ async function loadJournal(homeDir: string, sessionId: string): Promise<Array<Jo
   try {
     const data = await readFile(getJournalPath(homeDir, sessionId), 'utf-8');
     const lines = data.split('\n').filter((l) => l.trim().length > 0);
-    return lines.map((l) => JSON.parse(l) as JournalEntry | PersistedUserMessage);
+    const results: Array<JournalEntry | PersistedUserMessage> = [];
+    for (const line of lines) {
+      try {
+        results.push(JSON.parse(line) as JournalEntry | PersistedUserMessage);
+      } catch {
+        // Skip corrupt lines instead of dropping entire session history.
+        log.warn('web: skipping corrupt journal line', { sessionId });
+      }
+    }
+    return results;
   } catch {
     return [];
   }
@@ -609,11 +619,16 @@ class WebSession {
         if (handler) {
           this.pendingApprovals.delete(id);
           const feedback = typeof msg['feedback'] === 'string' ? (msg['feedback'] as string) : undefined;
-          handler({ decision, scope: decision === 'approved' ? 'session' : undefined, feedback });
+          const scope = msg['scope'] === 'session' ? 'session' : undefined;
+          handler({ decision, scope: decision === 'approved' ? scope : undefined, feedback });
           this.broadcast({ type: 'approval_resolved', id }, false);
         }
         break;
       }
+      case 'ping':
+        this.send(ws, { type: 'pong' });
+        state.lastPongAt = Date.now();
+        break;
       case 'pong':
         state.lastPongAt = Date.now();
         break;
@@ -740,6 +755,7 @@ class WebSession {
         maxContextTokens: 0,
         contextUsage: 0,
       },
+      busy: this.busy,
       createdAt: this.createdAt,
       title: this.title,
     };
@@ -932,10 +948,14 @@ class SessionManager {
 
   async activateSession(sessionId: string): Promise<WebSession | null> {
     const existing = this.sessions.get(sessionId);
-    if (existing?.isActive) return existing;
+    if (!existing) {
+      // Unknown sessionId: reject to prevent zombie session creation.
+      return null;
+    }
+    if (existing.isActive) return existing;
     // Reactivate an archived session by creating a new agent session.
     const session = await this.harness.createSession({
-      workDir: existing?.workDir ?? this.workDir,
+      workDir: existing.workDir,
       model: this.model,
       permission: this.permission,
     });
