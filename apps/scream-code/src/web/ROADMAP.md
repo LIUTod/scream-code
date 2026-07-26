@@ -136,19 +136,19 @@
 
 ---
 
-### Phase 4：高级功能
+### Phase 4：高级功能 ✅ 已完成（本机使用导向）
 
-**目标**：追上 kimi 的完整体验。
+**目标**：追上 kimi 的完整体验（本机场景）。
 
-| 功能 | 说明 |
-|------|------|
-| 文件上传 | `POST /api/v1/files` multipart，50MB 上限；图片/视频消息内渲染，其他文件显示 chip。 |
-| 多 session / workspace | sidebar 列出会话，支持新建、归档、fork、子会话。 |
-| 持久化存储 | session journal 落盘到 `~/.scream/sessions/<id>/journal.jsonl`，server 重启可恢复。 |
-| 导出/分享 | 导出当前会话为 Markdown / JSON；生成只读分享链接（需 token）。 |
-| slash 命令 | `/compact`、 `/set-model`、 `/clear` 等快捷指令。 |
-| MCP / 工具市场 | web 端查看已加载 skills、开关 MCP server。 |
-| 移动端独立 shell | 底部 tab、sheet 切换会话、键盘高度适配。 |
+| 功能 | 状态 | 说明 |
+|------|------|------|
+| 多 session | ✅ | SessionManager + Map，sidebar 列表，新建/切换/删除 |
+| 持久化存储 | ✅ | journal 落盘到 `~/.scream/web-sessions/<id>.jsonl`，server 重启恢复 |
+| 导出 | ✅ | 导出当前会话为 Markdown 下载 |
+| 归档会话恢复 | ✅ | 切换到旧会话时自动 reactivate agent session |
+| 文件上传 | ❌ | 后续可加，本机优先级低 |
+| slash 命令 | ❌ | 后续可加 |
+| 移动端独立 shell | ❌ | 已有响应式布局，独立 shell 后续 |
 
 ## 4. 接口总览（目标形态）
 

@@ -38,6 +38,17 @@ export interface SessionSnapshot {
   messages: ChatMessage[];
   pendingApprovals: ApprovalRequest[];
   status: SessionStatus;
+  createdAt: number;
+  title: string;
+}
+
+export interface SessionListItem {
+  sessionId: string;
+  workDir: string;
+  title: string;
+  createdAt: number;
+  messageCount: number;
+  active: boolean;
 }
 
 export interface ServerHello {

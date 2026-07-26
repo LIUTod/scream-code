@@ -3,7 +3,15 @@ import type { ChatMessage, ApprovalRequest, SessionSnapshot, SessionStatus, WsMe
 
 export type ConnectionStatus = 'connecting' | 'connected' | 'reconnecting' | 'disconnected';
 
-const WS_URL = `ws://${window.location.host}`;
+export interface SessionListItem {
+  sessionId: string;
+  workDir: string;
+  title: string;
+  createdAt: number;
+  messageCount: number;
+  active: boolean;
+}
+
 const API_BASE = '/api/v1';
 const HEARTBEAT_TIMEOUT_MS = 2 * 30000;
 
@@ -16,9 +24,16 @@ export interface UseScreamWebClientReturn {
   sessionId: Ref<string | null>;
   workDir: Ref<string | null>;
   isBusy: Ref<boolean>;
+  sessions: Ref<SessionListItem[]>;
+  currentSessionId: Ref<string | null>;
   sendPrompt: (text: string) => void;
   abort: () => void;
   resolveApproval: (id: string, decision: 'approved' | 'rejected') => void;
+  fetchSessions: () => Promise<void>;
+  createSession: () => Promise<void>;
+  switchSession: (sessionId: string) => Promise<void>;
+  deleteSession: (sessionId: string) => Promise<void>;
+  exportSession: (sessionId: string) => Promise<void>;
 }
 
 export function useScreamWebClient(): UseScreamWebClientReturn {
@@ -30,6 +45,8 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
   const sessionId = ref<string | null>(null);
   const workDir = ref<string | null>(null);
   const isBusy = computed(() => status.value.busy);
+  const sessions = ref<SessionListItem[]>([]);
+  const currentSessionId = ref<string | null>(null);
 
   let ws: WebSocket | null = null;
   let heartbeatTimer: number | null = null;
@@ -39,6 +56,14 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
   let epoch = 0;
   let reconnectAttempt = 0;
   const sentMessageIds = new Set<string>();
+
+  function wsUrl(): string {
+    const base = `ws://${window.location.host}`;
+    if (currentSessionId.value) {
+      return `${base}/?sessionId=${encodeURIComponent(currentSessionId.value)}`;
+    }
+    return `${base}/`;
+  }
 
   function setConnectionStatus(s: ConnectionStatus) {
     connectionStatus.value = s;
@@ -58,7 +83,7 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
       const snapshot: SessionSnapshot = await res.json();
       applySnapshot(snapshot);
     } catch {
-      // Snapshot is best-effort.
+      // Best-effort
     }
   }
 
@@ -109,10 +134,12 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
         const hello = msg as ServerHello;
         sessionId.value = hello.sessionId;
         workDir.value = hello.workDir;
+        currentSessionId.value = hello.sessionId;
         epoch = hello.epoch;
         startHeartbeat(hello.heartbeat_ms);
         send({ type: 'client_hello', lastSeq: seq, epoch });
         fetchSnapshot();
+        void fetchSessions();
         break;
       }
       case 'event': {
@@ -155,12 +182,7 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
     switch (payload.type) {
       case 'turn.started': {
         status.value = { ...status.value, busy: true };
-        messages.value.push({
-          id: generateId(),
-          role: 'assistant',
-          content: '',
-          tools: [],
-        });
+        messages.value.push({ id: generateId(), role: 'assistant', content: '', tools: [] });
         break;
       }
       case 'assistant.delta': {
@@ -169,18 +191,13 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
         break;
       }
       case 'thinking.delta': {
-        // Phase 2: merge into current assistant message as a collapsible block.
         const last = lastAssistantMessage();
         if (last) {
           const thinkingTool = last.tools.find((t) => t.name === 'thinking');
           if (thinkingTool) {
             thinkingTool.output = (thinkingTool.output ?? '') + String(payload.delta);
           } else {
-            last.tools.push({
-              toolCallId: 'thinking',
-              name: 'thinking',
-              output: String(payload.delta),
-            });
+            last.tools.push({ toolCallId: 'thinking', name: 'thinking', output: String(payload.delta) });
           }
         }
         break;
@@ -188,11 +205,7 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
       case 'tool.call.started': {
         const last = lastAssistantMessage();
         if (last) {
-          last.tools.push({
-            toolCallId: String(payload.toolCallId),
-            name: String(payload.name),
-            args: payload.args,
-          });
+          last.tools.push({ toolCallId: String(payload.toolCallId), name: String(payload.name), args: payload.args });
         }
         break;
       }
@@ -222,6 +235,7 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
           if (last) last.isError = true;
           error.value = String(payload.error?.message ?? 'Turn failed');
         }
+        void fetchSessions();
         break;
       }
       case 'session.meta.updated': {
@@ -253,7 +267,11 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
 
     setConnectionStatus('connecting');
     error.value = null;
-    ws = new WebSocket(WS_URL);
+    seq = 0;
+    epoch = 0;
+    messages.value = [];
+    pendingApprovals.value = [];
+    ws = new WebSocket(wsUrl());
 
     ws.onopen = () => {
       setConnectionStatus('connected');
@@ -286,12 +304,7 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
     if (!text || status.value.busy) return;
     const clientMessageId = `client_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     sentMessageIds.add(clientMessageId);
-    messages.value.push({
-      id: generateId(),
-      role: 'user',
-      content: text,
-      tools: [],
-    });
+    messages.value.push({ id: generateId(), role: 'user', content: text, tools: [] });
     send({ type: 'prompt', text, clientMessageId });
   }
 
@@ -304,10 +317,82 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
     send({ type: 'approval_response', id, decision });
   }
 
+  // ── Session management ──────────────────────────────────────────────────
+
+  async function fetchSessions(): Promise<void> {
+    try {
+      const res = await fetch(`${API_BASE}/sessions`);
+      if (!res.ok) return;
+      sessions.value = await res.json();
+    } catch {
+      // Best-effort
+    }
+  }
+
+  async function createSession(): Promise<void> {
+    try {
+      const res = await fetch(`${API_BASE}/sessions`, { method: 'POST' });
+      if (!res.ok) return;
+      const item: SessionListItem = await res.json();
+      sessions.value = [item, ...sessions.value];
+      await switchSession(item.sessionId);
+    } catch (error) {
+      console.error('Failed to create session', error); // eslint-disable-line no-console
+    }
+  }
+
+  async function switchSession(targetId: string): Promise<void> {
+    if (currentSessionId.value === targetId && connectionStatus.value === 'connected') return;
+    currentSessionId.value = targetId;
+    // Close existing connection and reconnect to the new session.
+    if (ws) {
+      ws.onclose = null;
+      ws.close();
+      ws = null;
+    }
+    stopHeartbeat();
+    connect();
+  }
+
+  async function deleteSession(targetId: string): Promise<void> {
+    try {
+      const res = await fetch(`${API_BASE}/sessions/${targetId}`, { method: 'DELETE' });
+      if (!res.ok) return;
+      sessions.value = sessions.value.filter((s) => s.sessionId !== targetId);
+      // If we deleted the current session, switch to the first remaining.
+      if (currentSessionId.value === targetId) {
+        const next = sessions.value[0];
+        if (next) {
+          await switchSession(next.sessionId);
+        } else {
+          await createSession();
+        }
+      }
+    } catch (error) {
+      console.error('Failed to delete session', error); // eslint-disable-line no-console
+    }
+  }
+
+  async function exportSession(targetId: string): Promise<void> {
+    try {
+      const res = await fetch(`${API_BASE}/sessions/${targetId}/export`);
+      if (!res.ok) return;
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${targetId}.md`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Failed to export session', error); // eslint-disable-line no-console
+    }
+  }
+
   // Initial connection.
   connect();
+  void fetchSessions();
 
-  // Reconnect when browser comes back online or tab becomes visible.
   window.addEventListener('online', () => connect());
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden && connectionStatus.value !== 'connected') connect();
@@ -322,8 +407,15 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
     sessionId,
     workDir,
     isBusy,
+    sessions,
+    currentSessionId,
     sendPrompt,
     abort,
     resolveApproval,
+    fetchSessions,
+    createSession,
+    switchSession,
+    deleteSession,
+    exportSession,
   };
 }
