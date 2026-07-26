@@ -90,6 +90,7 @@ npm install -g scream-code
 After installation, the `scream` command is added to PATH. First install takes about 2-5 minutes.
 
 - Start TUI: `scream`
+- Start Web UI: `scream web`
 - Auto-permission mode: `scream --auto`
 - Auto-approve mode: `scream -y`
 - Switch language after startup: `/language`
@@ -115,6 +116,7 @@ When it needs to modify files or run commands, an approval panel appears. Press 
 | Feature | Description |
 |---------|-------------|
 | 💬 **Conversational Interaction** | Describe what you need in natural language — it writes code, edits files, runs commands |
+| 🌐 **Web UI** | `scream web` — browser-based chat with multi-session, model switching, and full TUI parity |
 | 🔒 **Security First** | Must get approval before modifying files; `.env` and sensitive files are blocked by default |
 | 🛡️ **Permission Engine** | Fine-grained control over read/write/execute permissions |
 | ⚙️ **State Machine** | Prevents drift, enforces task granularity, reduces token waste |
@@ -130,6 +132,29 @@ When it needs to modify files or run commands, an approval panel appears. Press 
 | 🎨 **Skill Center** | Browse and install community skills, or create your own |
 | 🐺 **Wolfpack** | Multi-file, multi-task concurrent processing with auto-approval, unlimited sub-Agent concurrency |
 | 🌳 **Multi-Agent Orchestration** | `/config diy` — assign different models to different sub-Agents |
+
+---
+
+## 🌐 Web UI — Browser-Based Chat
+
+Launch the web interface with `scream web` — no terminal required. Full TUI parity in your browser.
+
+```bash
+scream web              # Start on default port 3210
+scream web --port 3222  # Custom port
+scream web -y           # Auto-approve mode
+scream web --auto       # Auto permission mode
+scream web --no-open    # Don't auto-open browser
+```
+
+**Features:**
+- 💬 **Full chat experience** — same agent-core as TUI, zero feature loss
+- 📂 **Multi-session** — sidebar with create/switch/delete/export, persistent across restarts
+- 🔄 **Model switching** — click model pill to switch models and thinking levels
+- ⌨️ **Slash commands** — `/compact` `/auto` `/yes` `/plan` `/fork` `/title` `/status` `/usage` `/btw` and more
+- 🎨 **Themes** — light/dark/system with smooth transitions
+- 📱 **Mobile responsive** — works on phones and tablets
+- 🔒 **Local only** — binds to 127.0.0.1, no external access
 
 ---
 
