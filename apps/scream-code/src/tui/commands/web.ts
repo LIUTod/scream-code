@@ -18,7 +18,6 @@ export async function handleWebCommand(host: SlashCommandHost, _args: string): P
   }
 
   const port = 3210;
-  const homeDir = host.harness.homeDir;
   const workDir = session.workDir;
 
   let yolo = false;
@@ -33,7 +32,6 @@ export async function handleWebCommand(host: SlashCommandHost, _args: string): P
     activeHandle = await startWebServerForSession(session, {
       port,
       workDir,
-      homeDir,
       yolo,
       open: true,
     });

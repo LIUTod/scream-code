@@ -117,7 +117,7 @@ class WebSession {
   readonly permission: PermissionMode;
   readonly createdAt: number;
 
-  private session: Session | null;
+  private session: Session;
   private readonly connections = new Map<WebSocket, ConnectionState>();
   private readonly journal: JournalEntry[] = [];
   private readonly userMessages: Array<{ msg: ChatMessage; beforeSeq: number }> = [];
@@ -141,7 +141,7 @@ class WebSession {
   private readonly yolo: boolean;
 
   constructor(
-    session: Session | null,
+    session: Session,
     opts: {
       workDir: string;
       permission: PermissionMode;
@@ -159,16 +159,10 @@ class WebSession {
     this.createdAt = opts.createdAt;
     if (opts.title) this.title = opts.title;
 
-    if (session) {
-      void this.refreshStatus();
-      this.subscribeEvents();
-      this.setupApprovalHandler();
-    }
+    void this.refreshStatus();
+    this.subscribeEvents();
+    this.setupApprovalHandler();
     this.startHeartbeat();
-  }
-
-  get isActive(): boolean {
-    return this.session !== null;
   }
 
   // ── Event journal ──────────────────────────────────────────────────────
@@ -185,7 +179,6 @@ class WebSession {
   }
 
   private subscribeEvents(): void {
-    if (!this.session) return;
     this.unsubscribe = this.session.onEvent((event) => {
       if (event.type === 'turn.started') {
         this.busy = true;
@@ -201,7 +194,6 @@ class WebSession {
   }
 
   private async refreshStatus(): Promise<void> {
-    if (!this.session) return;
     try {
       this.cachedStatus = await this.session.getStatus();
     } catch {
@@ -238,7 +230,6 @@ class WebSession {
       epoch: this.epoch,
       sessionId: this.sessionId,
       workDir: this.workDir,
-      active: this.isActive,
       title: this.title,
     });
   }
@@ -289,10 +280,6 @@ class WebSession {
       case 'prompt': {
         const text = msg['text'] as string;
         const clientMessageId = msg['clientMessageId'] as string | undefined;
-        if (!this.session) {
-          this.send(ws, { type: 'error', code: 'session.inactive', message: 'Session is archived (read-only)' });
-          return;
-        }
         if (!text || this.busy) {
           this.send(ws, { type: 'error', code: 'session.busy', message: 'Session is busy' });
           return;
@@ -305,7 +292,6 @@ class WebSession {
         break;
       }
       case 'abort': {
-        if (!this.session) return;
         void this.session.cancel().catch((error: unknown) => {
           this.sendError(ws, error);
         });
@@ -356,7 +342,6 @@ class WebSession {
   // ── Approvals ──────────────────────────────────────────────────────────
 
   private setupApprovalHandler(): void {
-    if (!this.session) return;
     this.session.setApprovalHandler((request) => {
       if (this.yolo) {
         return { decision: 'approved' };
@@ -513,10 +498,7 @@ class WebSession {
       ws.terminate();
     }
     this.connections.clear();
-    if (this.session) {
-      await this.session.close({ extractMemories: false });
-      this.session = null;
-    }
+    await this.session.close({ extractMemories: false });
   }
 }
 
@@ -530,7 +512,6 @@ export interface WebServerHandle {
 export async function startWebServerForSession(session: Session, opts: {
   readonly port: number;
   readonly workDir: string;
-  readonly homeDir: string;
   readonly yolo: boolean;
   readonly open: boolean;
 }): Promise<WebServerHandle> {
