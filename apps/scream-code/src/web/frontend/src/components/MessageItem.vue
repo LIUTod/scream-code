@@ -82,7 +82,12 @@ function editResend() {
           :active="streaming"
         />
         <div v-if="realTools.length" class="tools-section">
-          <ToolCard v-for="tool in realTools" :key="tool.toolCallId" :tool="tool" />
+          <ToolCard
+            v-for="(tool, i) in realTools"
+            :key="tool.toolCallId"
+            :tool="tool"
+            :style="{ animationDelay: `${Math.min(i, 10) * 50}ms` }"
+          />
         </div>
       </template>
 
@@ -110,6 +115,26 @@ function editResend() {
   gap: var(--space-3);
   padding: var(--space-4) var(--space-5);
   max-width: 100%;
+  animation: msg-in var(--dur-msg-user) var(--ease-out) both;
+}
+.message.assistant {
+  animation-duration: var(--dur-msg-assistant);
+  animation-delay: 60ms;
+}
+@keyframes msg-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .message {
+    animation: none;
+  }
 }
 .message.user {
   flex-direction: row-reverse;

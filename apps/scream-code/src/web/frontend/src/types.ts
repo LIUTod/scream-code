@@ -26,15 +26,31 @@ export interface ApprovalRequest {
   display?: unknown;
 }
 
+export interface TokenUsage {
+  inputOther: number;
+  output: number;
+  inputCacheRead: number;
+  inputCacheCreation: number;
+}
+
+export interface SessionUsage {
+  byModel?: Record<string, TokenUsage>;
+  currentTurn?: TokenUsage;
+  total?: TokenUsage;
+}
+
 export interface SessionStatus {
   busy: boolean;
   model?: string;
   thinkingLevel?: string;
   permission?: 'manual' | 'auto' | 'yolo' | string;
+  planMode?: boolean;
+  wolfpackMode?: boolean;
   contextTokens?: number;
   maxContextTokens?: number;
   /** Context usage fraction (0..1) or percent (0..100). */
   contextUsage?: number;
+  usage?: SessionUsage;
 }
 
 export interface SessionSnapshot {
@@ -68,6 +84,22 @@ export interface GitStatus {
   diffStat?: string;
 }
 
+export interface ModelInfo {
+  alias: string;
+  provider: string;
+  model: string;
+  displayName?: string;
+  maxContextSize: number;
+  thinkingLevels?: string[];
+}
+
+export interface ModelsResponse {
+  models: ModelInfo[];
+  defaultModel?: string;
+  defaultThinking?: boolean;
+  thinkingEffort?: string;
+}
+
 export interface ServerHello {
   type: 'server_hello';
   heartbeat_ms: number;
@@ -94,6 +126,7 @@ export type WsMessage =
   | { type: 'approval_resolved'; id: string }
   | { type: 'user_message'; clientMessageId?: string; text: string }
   | { type: 'command_result'; command: string; ok: boolean; message: string }
+  | { type: 'status'; status: SessionStatus }
   | { type: 'resync_required'; reason: string }
   | { type: 'pong' }
   | { type: 'error'; code?: string; message: string };

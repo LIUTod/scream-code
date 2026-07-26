@@ -105,6 +105,32 @@ interface SessionMetadata {
   readonly permission: PermissionMode;
 }
 
+interface ModelListItem {
+  readonly alias: string;
+  readonly provider: string;
+  readonly model: string;
+  readonly displayName?: string | undefined;
+  readonly maxContextSize: number;
+  readonly thinkingLevels?: readonly string[] | undefined;
+}
+
+interface ModelListResponse {
+  readonly models: ModelListItem[];
+  readonly defaultModel?: string | undefined;
+  readonly defaultThinking: boolean;
+  readonly thinkingEffort?: string | undefined;
+}
+
+/** Error carrying an HTTP status code for REST handlers. */
+class HttpError extends Error {
+  constructor(
+    readonly statusCode: number,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
 interface ConnectionState {
   ws: WebSocket;
   lastPongAt: number;
@@ -116,6 +142,9 @@ interface ConnectionState {
 const HEARTBEAT_INTERVAL_MS = 30_000;
 const HEARTBEAT_TIMEOUT_MS = 2 * HEARTBEAT_INTERVAL_MS;
 const API_PREFIX = '/api/v1';
+
+/** Thinking levels accepted by the /thinking endpoint (mirrors ThinkingEffort). */
+const VALID_THINKING_LEVELS = new Set(['off', 'low', 'medium', 'high', 'xhigh', 'max']);
 
 const contentTypes: Record<string, string> = {
   js: 'application/javascript',
@@ -133,6 +162,33 @@ const contentTypes: Record<string, string> = {
   woff: 'font/woff',
   ttf: 'font/ttf',
 };
+
+// ─── HTTP helpers ─────────────────────────────────────────────────────────
+
+/** Reads and parses a JSON request body (64 KiB cap). */
+function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
+  return new Promise((resolve, reject) => {
+    let data = '';
+    req.on('data', (chunk: Buffer) => {
+      data += chunk.toString('utf-8');
+      if (data.length > 64 * 1024) {
+        reject(new HttpError(413, 'Request body too large'));
+      }
+    });
+    req.on('end', () => {
+      if (!data) {
+        resolve({});
+        return;
+      }
+      try {
+        resolve(JSON.parse(data) as Record<string, unknown>);
+      } catch {
+        reject(new HttpError(400, 'Invalid JSON body'));
+      }
+    });
+    req.on('error', reject);
+  });
+}
 
 // ─── Volatility classification ────────────────────────────────────────────
 
@@ -194,14 +250,14 @@ async function loadMetadata(homeDir: string, sessionId: string): Promise<Session
   }
 }
 
-async function loadJournal(homeDir: string, sessionId: string): Promise<Array<JournalEntry | PersistedUserMessage>> {
+async function loadJournal(homeDir: string, sessionId: string): Promise<PersistedEntry[]> {
   try {
     const data = await readFile(getJournalPath(homeDir, sessionId), 'utf-8');
     const lines = data.split('\n').filter((l) => l.trim().length > 0);
-    const results: Array<JournalEntry | PersistedUserMessage> = [];
+    const results: PersistedEntry[] = [];
     for (const line of lines) {
       try {
-        results.push(JSON.parse(line) as JournalEntry | PersistedUserMessage);
+        results.push(JSON.parse(line) as PersistedEntry);
       } catch {
         // Skip corrupt lines instead of dropping entire session history.
         log.warn('web: skipping corrupt journal line', { sessionId });
@@ -341,12 +397,14 @@ function exportToMarkdown(messages: ChatMessage[], title: string): string {
   return out;
 }
 
+type PersistedEntry = (JournalEntry & { readonly type: 'journal' }) | PersistedUserMessage;
+
 // ─── WebSession ───────────────────────────────────────────────────────────
 
 class WebSession {
   readonly sessionId: string;
   readonly workDir: string;
-  readonly permission: PermissionMode;
+  permission: PermissionMode;
   readonly createdAt: number;
 
   private session: Session | null;
@@ -360,11 +418,16 @@ class WebSession {
 
   private readonly pendingApprovals = new Map<
     string,
-    (response: {
-      decision: 'approved' | 'rejected';
-      scope?: 'session';
-      feedback?: string;
-    }) => void
+    {
+      resolve: (response: {
+        decision: 'approved' | 'rejected';
+        scope?: 'session';
+        feedback?: string;
+      }) => void;
+      toolName: string;
+      action?: string;
+      display?: unknown;
+    }
   >();
 
   private heartbeatTimer: NodeJS.Timeout | null = null;
@@ -372,6 +435,11 @@ class WebSession {
   private busy = false;
   private readonly homeDir: string | null;
   private readonly yolo: boolean;
+  /** Fork hook supplied by SessionManager; absent in standalone mode. */
+  private readonly onFork?: (sourceId: string) => Promise<{ sessionId: string; title: string } | null>;
+
+  /** Whether the title was set manually via /title and should not be auto-derived. */
+  private customTitle = false;
 
   constructor(
     session: Session | null,
@@ -383,6 +451,7 @@ class WebSession {
       createdAt: number;
       homeDir?: string;
       title?: string;
+      onFork?: (sourceId: string) => Promise<{ sessionId: string; title: string } | null>;
     },
   ) {
     this.session = session;
@@ -392,6 +461,7 @@ class WebSession {
     this.yolo = opts.yolo;
     this.homeDir = opts.homeDir ?? null;
     this.createdAt = opts.createdAt;
+    this.onFork = opts.onFork;
     if (opts.title) this.title = opts.title;
 
     if (session) {
@@ -404,6 +474,28 @@ class WebSession {
 
   get isActive(): boolean {
     return this.session !== null;
+  }
+
+  get isBusy(): boolean {
+    return this.busy;
+  }
+
+  getTitle(): string {
+    return this.title;
+  }
+
+  /** Return in-memory durable journal entries for fork copy (avoids file persistence race). */
+  getDurableJournalEntries(): PersistedEntry[] {
+    const entries: PersistedEntry[] = [];
+    for (const e of this.journal) {
+      if (!e.volatile) {
+        entries.push({ type: 'journal', ...e });
+      }
+    }
+    for (const um of this.userMessages) {
+      entries.push({ type: 'user_message', text: um.msg.content, beforeSeq: um.beforeSeq });
+    }
+    return entries;
   }
 
   // ── Persistence ────────────────────────────────────────────────────────
@@ -421,7 +513,7 @@ class WebSession {
     await appendJournalLine(this.homeDir, this.sessionId, line);
   }
 
-  loadFromPersisted(entries: Array<JournalEntry | PersistedUserMessage>): void {
+  loadFromPersisted(entries: PersistedEntry[]): void {
     for (const entry of entries) {
       if ('type' in entry && entry.type === 'user_message') {
         const um = entry as PersistedUserMessage;
@@ -432,14 +524,15 @@ class WebSession {
         this.nextSeq = Math.max(this.nextSeq, je.seq + 1);
       }
     }
-    // Derive title from loaded messages.
+    // Derive title from loaded messages unless a custom title was set.
     const msgs = this.buildMessages();
-    if (msgs.length > 0) {
+    if (msgs.length > 0 && !this.customTitle) {
       this.title = deriveTitle(msgs);
     }
   }
 
   async updateTitle(): Promise<void> {
+    if (this.customTitle) return;
     const msgs = this.buildMessages();
     const newTitle = deriveTitle(msgs);
     if (newTitle !== this.title) {
@@ -542,8 +635,8 @@ class WebSession {
   private removeConnection(ws: WebSocket): void {
     this.connections.delete(ws);
     if (this.connections.size === 0) {
-      for (const [, resolve] of this.pendingApprovals) {
-        resolve({ decision: 'rejected', feedback: 'Browser disconnected' });
+      for (const [, approval] of this.pendingApprovals) {
+        approval.resolve({ decision: 'rejected', feedback: 'Browser disconnected' });
       }
       this.pendingApprovals.clear();
     }
@@ -609,18 +702,19 @@ class WebSession {
       }
       case 'command': {
         const command = msg['command'] as string;
-        void this.handleCommand(ws, command);
+        const args = typeof msg['args'] === 'string' ? (msg['args'] as string) : undefined;
+        void this.handleCommand(ws, command, args);
         break;
       }
       case 'approval_response': {
         const id = msg['id'] as string;
         const decision = msg['decision'] as 'approved' | 'rejected';
-        const handler = this.pendingApprovals.get(id);
-        if (handler) {
+        const approval = this.pendingApprovals.get(id);
+        if (approval) {
           this.pendingApprovals.delete(id);
           const feedback = typeof msg['feedback'] === 'string' ? (msg['feedback'] as string) : undefined;
           const scope = msg['scope'] === 'session' ? 'session' : undefined;
-          handler({ decision, scope: decision === 'approved' ? scope : undefined, feedback });
+          approval.resolve({ decision, scope: decision === 'approved' ? scope : undefined, feedback });
           this.broadcast({ type: 'approval_resolved', id }, false);
         }
         break;
@@ -662,28 +756,120 @@ class WebSession {
 
   // ── Slash commands ───────────────────────────────────────────────────────
 
-  private async handleCommand(ws: WebSocket, command: string): Promise<void> {
-    if (command === 'compact') {
-      if (!this.session) {
-        this.send(ws, { type: 'command_result', command, ok: false, message: '会话已归档（只读），无法压缩。' });
-        return;
-      }
-      if (this.busy) {
-        this.send(ws, { type: 'command_result', command, ok: false, message: '会话忙碌中，无法压缩，请稍后再试。' });
-        return;
-      }
-      this.broadcast({ type: 'command_result', command, ok: true, message: '正在压缩会话上下文…' }, false);
-      try {
-        await this.session.compact();
-        await this.refreshStatus();
-        this.broadcast({ type: 'command_result', command, ok: true, message: '会话上下文已压缩。' }, false);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        this.broadcast({ type: 'command_result', command, ok: false, message: `压缩失败：${message}` }, false);
-      }
+  private async handleCommand(ws: WebSocket, command: string, args?: string): Promise<void> {
+    const ok = (message: string): void => {
+      this.broadcast({ type: 'command_result', command, ok: true, message }, false);
+    };
+    const fail = (message: string): void => {
+      this.broadcast({ type: 'command_result', command, ok: false, message }, false);
+    };
+    const errMsg = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+
+    if (!this.session) {
+      fail('会话已归档（只读），无法执行该命令。');
       return;
     }
-    this.send(ws, { type: 'command_result', command, ok: false, message: `未知命令：/${command}` });
+
+    switch (command) {
+      case 'compact': {
+        if (this.busy) {
+          fail('会话忙碌中，无法压缩，请稍后再试。');
+          return;
+        }
+        ok('正在压缩会话上下文…');
+        try {
+          await this.session.compact();
+          await this.refreshStatus();
+          ok('会话上下文已压缩。');
+        } catch (error) {
+          fail(`压缩失败：${errMsg(error)}`);
+        }
+        return;
+      }
+      case 'auto':
+      case 'yes': {
+        const mode: PermissionMode = command === 'auto' ? 'auto' : 'yolo';
+        try {
+          await this.session.setPermission(mode);
+          this.permission = mode;
+          await this.refreshStatus();
+          ok(`权限模式已切换为 ${mode}`);
+        } catch (error) {
+          fail(`切换权限失败：${errMsg(error)}`);
+        }
+        return;
+      }
+      case 'plan': {
+        if (this.busy) {
+          fail('会话忙碌中，无法切换计划模式，请稍后再试。');
+          return;
+        }
+        try {
+          if (this.cachedStatus === null) await this.refreshStatus();
+          const next = !this.cachedStatus?.planMode;
+          await this.session.setPlanMode(next);
+          await this.refreshStatus();
+          ok(`计划模式已${next ? '开启' : '关闭'}`);
+        } catch (error) {
+          fail(`切换计划模式失败：${errMsg(error)}`);
+        }
+        return;
+      }
+      case 'fork': {
+        if (this.busy) {
+          fail('会话忙碌中，无法 fork，请稍后再试。');
+          return;
+        }
+        if (!this.onFork) {
+          fail('当前运行环境不支持 fork。');
+          return;
+        }
+        try {
+          // Pass the live agent session.id, not the web sessionId,
+          // so fork copies the current agent state (not a stale archived one).
+          const result = await this.onFork(this.session.id);
+          if (!result) {
+            fail('Fork 失败：无法复制当前会话。');
+            return;
+          }
+          ok(`会话已 fork，新会话 ID：${result.sessionId}`);
+        } catch (error) {
+          fail(`Fork 失败：${errMsg(error)}`);
+        }
+        return;
+      }
+      case 'title': {
+        const title = args?.trim();
+        if (!title) {
+          fail('请提供新标题，用法：/title 新标题');
+          return;
+        }
+        this.title = title;
+        this.customTitle = true;
+        if (this.homeDir) {
+          await saveMetadata(this.homeDir, this.getMetadata());
+        }
+        ok('会话标题已更新');
+        return;
+      }
+      case 'btw': {
+        const question = args?.trim();
+        if (!question) {
+          fail('请提供侧问内容，用法：/btw 你的问题');
+          return;
+        }
+        ok('正在思考侧问题…');
+        try {
+          const answer = await this.session.sideQuestion(question);
+          ok(answer || '（无回复）');
+        } catch (error) {
+          fail(`侧问失败：${errMsg(error)}`);
+        }
+        return;
+      }
+      default:
+        fail(`未知命令：/${command}`);
+    }
   }
 
   // ── Approvals ──────────────────────────────────────────────────────────
@@ -699,7 +885,12 @@ class WebSession {
       }
       return new Promise((resolve) => {
         const id = `req_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-        this.pendingApprovals.set(id, resolve);
+        this.pendingApprovals.set(id, {
+          resolve,
+          toolName: request.toolName,
+          action: request.action,
+          display: request.display,
+        });
         const payload: ApprovalRequestMessage = {
           id,
           toolName: request.toolName,
@@ -737,13 +928,13 @@ class WebSession {
       sessionId: this.sessionId,
       workDir: this.workDir,
       model: this.cachedStatus?.model ?? 'unknown',
-      permission: this.permission,
+      permission: this.cachedStatus?.permission ?? this.permission,
       messages: this.buildMessages(),
-      pendingApprovals: Array.from(this.pendingApprovals.entries()).map(([id, _]) => ({
+      pendingApprovals: Array.from(this.pendingApprovals.entries()).map(([id, approval]) => ({
         id,
-        toolName: 'pending',
-        action: undefined,
-        display: undefined,
+        toolName: approval.toolName,
+        action: approval.action,
+        display: approval.display,
       })),
       status: this.cachedStatus ?? {
         model: 'unknown',
@@ -770,6 +961,30 @@ class WebSession {
       messageCount: this.buildMessages().length,
       active: this.isActive,
     };
+  }
+
+  /** Latest cached session status (may be null before the first refresh). */
+  getStatus(): SessionStatus | null {
+    return this.cachedStatus;
+  }
+
+  /** Switch the underlying agent session's model, then sync status + metadata. */
+  async switchModel(alias: string): Promise<void> {
+    if (!this.session) throw new HttpError(409, '会话已归档（只读），无法切换模型。');
+    await this.session.setModel(alias);
+    await this.refreshStatus();
+    this.broadcast({ type: 'status', status: this.cachedStatus }, false);
+    if (this.homeDir) {
+      await saveMetadata(this.homeDir, this.getMetadata());
+    }
+  }
+
+  /** Switch the underlying agent session's thinking level, then sync status. */
+  async switchThinking(level: string): Promise<void> {
+    if (!this.session) throw new HttpError(409, '会话已归档（只读），无法切换思考强度。');
+    await this.session.setThinking(level);
+    await this.refreshStatus();
+    this.broadcast({ type: 'status', status: this.cachedStatus }, false);
   }
 
   get connectionCount(): number {
@@ -853,8 +1068,8 @@ class WebSession {
       clearInterval(this.heartbeatTimer);
       this.heartbeatTimer = null;
     }
-    for (const [, resolve] of this.pendingApprovals) {
-      resolve({ decision: 'rejected', feedback: 'Server shutting down' });
+    for (const [, approval] of this.pendingApprovals) {
+      approval.resolve({ decision: 'rejected', feedback: 'Server shutting down' });
     }
     this.pendingApprovals.clear();
     this.unsubscribe?.();
@@ -939,6 +1154,7 @@ class SessionManager {
       yolo: this.yolo,
       homeDir: this.homeDir,
       createdAt,
+      onFork: (id) => this.forkSession(id),
     });
     await saveMetadata(this.homeDir, webSession.getMetadata());
     this.sessions.set(sessionId, webSession);
@@ -981,6 +1197,7 @@ class SessionManager {
       homeDir: this.homeDir,
       createdAt: meta.createdAt,
       title: meta.title,
+      onFork: (id) => this.forkSession(id),
     });
     // Reload persisted journal into the reactivated session.
     const entries = await loadJournal(this.homeDir, sessionId);
@@ -995,6 +1212,47 @@ class SessionManager {
     return this.sessions.get(sessionId);
   }
 
+  /**
+   * Fork an active session: harness.forkSession copies the agent state into a
+   * new session, and we additionally copy the source's durable journal so the
+   * forked web session displays the same prior conversation.
+   */
+  async forkSession(sourceId: string): Promise<{ sessionId: string; title: string } | null> {
+    const source = this.sessions.get(sourceId);
+    if (!source || !source.isActive || source.isBusy) return null;
+    try {
+      const session = await this.harness.forkSession({ id: sourceId });
+      const newId = session.id;
+      const createdAt = Date.now();
+      const title = `${source.getTitle()} (fork)`;
+      const webSession = new WebSession(session, {
+        sessionId: newId,
+        workDir: this.workDir,
+        permission: source.getMetadata().permission,
+        yolo: this.yolo,
+        homeDir: this.homeDir,
+        createdAt,
+        title,
+        onFork: (id) => this.forkSession(id),
+      });
+      // Copy durable journal + user messages from the source's in-memory state
+      // (not from disk, to avoid race with fire-and-forget persistence).
+      const entries = source.getDurableJournalEntries();
+      if (entries.length > 0) {
+        const lines = entries.map((e) => JSON.stringify(e)).join('\n') + '\n';
+        await writeFile(getJournalPath(this.homeDir, newId), lines);
+      }
+      webSession.loadFromPersisted(entries);
+      await saveMetadata(this.homeDir, webSession.getMetadata());
+      this.sessions.set(newId, webSession);
+      log.info('web: session forked', { sourceId, newId });
+      return { sessionId: newId, title };
+    } catch (error) {
+      log.warn('web: fork failed', { sourceId, error: String(error) });
+      return null;
+    }
+  }
+
   list(): SessionListItem[] {
     return Array.from(this.sessions.values())
       .map((s) => s.getListItem())
@@ -1007,6 +1265,98 @@ class SessionManager {
     await ws.delete();
     this.sessions.delete(sessionId);
     return true;
+  }
+
+  /** List available model aliases from the harness config (reloaded). */
+  async listModels(): Promise<ModelListResponse> {
+    const config = await this.harness.getConfig({ reload: true });
+    const models: ModelListItem[] = Object.entries(config.models ?? {}).map(([alias, m]) => ({
+      alias,
+      provider: m.provider,
+      model: m.model,
+      displayName: m.displayName,
+      maxContextSize: m.maxContextSize,
+      thinkingLevels: m.thinkingLevels,
+    }));
+    return {
+      models,
+      defaultModel: config.defaultModel,
+      defaultThinking: config.defaultThinking ?? false,
+      thinkingEffort: config.thinking?.effort,
+    };
+  }
+
+  /**
+   * Switch a session's model (mirrors the TUI `/model` flow): validates the
+   * alias, guards against context overflow (Storm Breaker), applies it to the
+   * live session, and persists it as the default model.
+   */
+  async switchModel(sessionId: string, alias: string): Promise<WebSession> {
+    const ws = this.sessions.get(sessionId);
+    if (!ws) throw new HttpError(404, 'Session not found');
+    if (!ws.isActive) throw new HttpError(409, '会话已归档（只读），无法切换模型。');
+    if (ws.isBusy) throw new HttpError(409, '会话忙碌中，无法切换模型 — 请先停止当前回合。');
+
+    const config = await this.harness.getConfig({ reload: true });
+    const target = config.models?.[alias];
+    if (!target) throw new HttpError(400, `未知模型别名：${alias}`);
+
+    // Storm Breaker guard (TUI parity): refuse to switch to a model whose
+    // context window is smaller than the session's current token count.
+    const status = ws.getStatus();
+    const currentTokens = status?.contextTokens ?? 0;
+    if (status?.model !== alias && target.maxContextSize < currentTokens) {
+      throw new HttpError(
+        409,
+        `无法切换到模型「${alias}」：当前会话上下文 ${currentTokens} tokens 已超出该模型上限 ${target.maxContextSize}。` +
+          '建议先执行 /compact 压缩上下文，或选择上下文窗口更大的模型。',
+      );
+    }
+
+    await ws.switchModel(alias);
+
+    // Persist as the default model (TUI persistModelSelection parity).
+    if (config.defaultModel !== alias) {
+      try {
+        await this.harness.setConfig({ defaultModel: alias });
+      } catch (error) {
+        log.warn('web: failed to persist default model', { error: String(error) });
+      }
+    }
+    return ws;
+  }
+
+  /**
+   * Switch a session's thinking level (TUI changeThinkingLevel parity). The
+   * thinking default is persisted only when the session's model is already
+   * the default model.
+   */
+  async switchThinking(sessionId: string, level: string): Promise<WebSession> {
+    const ws = this.sessions.get(sessionId);
+    if (!ws) throw new HttpError(404, 'Session not found');
+    if (!ws.isActive) throw new HttpError(409, '会话已归档（只读），无法切换思考强度。');
+    if (!VALID_THINKING_LEVELS.has(level)) throw new HttpError(400, `未知思考强度：${level}`);
+    if (ws.isBusy) throw new HttpError(409, '会话忙碌中，无法切换思考强度 — 请先停止当前回合。');
+
+    await ws.switchThinking(level);
+
+    try {
+      const config = await this.harness.getConfig({ reload: true });
+      if (config.defaultModel === ws.getStatus()?.model) {
+        const effectiveThinking = level !== 'off';
+        await this.harness.setConfig({
+          defaultThinking: effectiveThinking,
+          thinking: {
+            ...config.thinking,
+            mode: effectiveThinking ? 'on' : 'off',
+            ...(effectiveThinking ? { effort: level } : {}),
+          },
+        });
+      }
+    } catch (error) {
+      log.warn('web: failed to persist thinking default', { error: String(error) });
+    }
+    return ws;
   }
 
   async closeAll(): Promise<void> {
@@ -1108,7 +1458,7 @@ export async function startWebServerForSession(session: Session, opts: {
   });
 
   await new Promise<void>((resolve) => {
-    httpServer.listen(opts.port, resolve);
+    httpServer.listen(opts.port, '127.0.0.1', resolve);
   });
 
   const url = `http://localhost:${opts.port}`;
@@ -1240,6 +1590,57 @@ export async function runWebServer(opts: WebServerOptions): Promise<void> {
       return;
     }
 
+    // List available models (from harness config, reloaded)
+    if (url === `${API_PREFIX}/models` && method === 'GET') {
+      try {
+        const models = await manager.listModels();
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(models));
+      } catch (error) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ code: 500, message: String(error) }));
+      }
+      return;
+    }
+
+    // Switch model
+    const modelMatch = new RegExp(`^${API_PREFIX}/sessions/([^/]+)/model$`).exec(url);
+    if (modelMatch && method === 'POST') {
+      try {
+        const body = await readJsonBody(req);
+        const alias = typeof body['model'] === 'string' ? body['model'].trim() : '';
+        if (!alias) throw new HttpError(400, '缺少 model 字段');
+        const ws = await manager.switchModel(modelMatch[1]!, alias);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, status: ws.getSnapshot().status }));
+      } catch (error) {
+        const code = error instanceof HttpError ? error.statusCode : 500;
+        const message = error instanceof Error ? error.message : String(error);
+        res.writeHead(code, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ code, message }));
+      }
+      return;
+    }
+
+    // Switch thinking level
+    const thinkingMatch = new RegExp(`^${API_PREFIX}/sessions/([^/]+)/thinking$`).exec(url);
+    if (thinkingMatch && method === 'POST') {
+      try {
+        const body = await readJsonBody(req);
+        const level = typeof body['level'] === 'string' ? body['level'].trim() : '';
+        if (!level) throw new HttpError(400, '缺少 level 字段');
+        const ws = await manager.switchThinking(thinkingMatch[1]!, level);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, status: ws.getSnapshot().status }));
+      } catch (error) {
+        const code = error instanceof HttpError ? error.statusCode : 500;
+        const message = error instanceof Error ? error.message : String(error);
+        res.writeHead(code, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ code, message }));
+      }
+      return;
+    }
+
     // Export to Markdown
     const exportMatch = new RegExp(`^${API_PREFIX}/sessions/([^/]+)/export$`).exec(url);
     if (exportMatch && method === 'GET') {
@@ -1360,7 +1761,7 @@ export async function runWebServer(opts: WebServerOptions): Promise<void> {
   });
 
   await new Promise<void>((resolve) => {
-    httpServer.listen(opts.port, resolve);
+    httpServer.listen(opts.port, '127.0.0.1', resolve);
   });
 
   const url = `http://localhost:${opts.port}`;

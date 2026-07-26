@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue';
+import { ref, onMounted, watch, provide } from 'vue';
 import ChatView from './components/ChatView.vue';
 
 type Theme = 'light' | 'dark' | 'system';
 
 const theme = ref<Theme>('system');
+const effectiveTheme = ref<'light' | 'dark'>('dark');
+provide('effectiveTheme', effectiveTheme);
 
 const THEME_COLORS: Record<'light' | 'dark', string> = {
   light: '#ffffff',
@@ -15,15 +17,23 @@ function applyTheme() {
   const root = document.documentElement;
   const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
   const effective = theme.value === 'system' ? (prefersDark ? 'dark' : 'light') : theme.value;
+  effectiveTheme.value = effective;
   root.dataset.theme = effective;
   const meta = document.querySelector('meta[name="theme-color"]');
   if (meta) meta.setAttribute('content', THEME_COLORS[effective]);
 }
 
+let themeTimer: number | null = null;
+
 function setTheme(t: Theme) {
   theme.value = t;
   localStorage.setItem('scream-theme', t);
+  // Briefly enable cross-property transitions so the theme swap animates.
+  const root = document.documentElement;
+  root.classList.add('theme-transition');
   applyTheme();
+  if (themeTimer !== null) clearTimeout(themeTimer);
+  themeTimer = window.setTimeout(() => root.classList.remove('theme-transition'), 320);
 }
 
 onMounted(() => {
@@ -79,12 +89,21 @@ window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', app
   cursor: pointer;
   font-size: var(--font-size-base);
   opacity: 0.6;
-  transition: opacity var(--dur-fast), background var(--dur-fast);
+  transition:
+    opacity var(--dur-fast),
+    background var(--dur-fast),
+    transform var(--dur-fast) var(--ease-out);
 }
 .theme-btn.active,
 .theme-btn:hover {
   background: var(--color-hover);
   opacity: 1;
+}
+.theme-btn:hover {
+  transform: scale(1.1);
+}
+.theme-btn:active {
+  transform: scale(0.94);
 }
 @media (max-width: 640px) {
   .theme-switcher {

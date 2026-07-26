@@ -56,8 +56,14 @@ function renderInline(tokens: marked.Token[]): (string | ReturnType<typeof h>)[]
         return h('strong', { class: 'md-strong' }, renderInline(token.tokens));
       case 'em':
         return h('em', { class: 'md-em' }, renderInline(token.tokens));
-      case 'link':
-        return h('a', { class: 'md-a', href: token.href, target: '_blank', rel: 'noopener' }, renderInline(token.tokens));
+      case 'link': {
+        const href = token.href;
+        // Only allow safe protocols to prevent XSS via javascript: links.
+        if (href && !/^(https?:|mailto:|#|\/)/i.test(href)) {
+          return token.raw ?? '';
+        }
+        return h('a', { class: 'md-a', href, target: '_blank', rel: 'noopener' }, renderInline(token.tokens));
+      }
       default:
         return token.raw ?? '';
     }

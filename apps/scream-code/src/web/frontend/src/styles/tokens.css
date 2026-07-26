@@ -47,5 +47,15 @@
   --dur-fast: 120ms;
   --dur-base: 160ms;
   --dur-slow: 240ms;
+  --dur-slower: 320ms;
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* Message entrance */
+  --dur-msg-user: 200ms;
+  --dur-msg-assistant: 250ms;
+
+  /* Sidebar */
+  --sidebar-width: 260px;
+  --sidebar-width-collapsed: 48px;
 }

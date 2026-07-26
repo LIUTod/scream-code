@@ -288,7 +288,14 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
   cursor: pointer;
   background: var(--color-surface);
   color: var(--color-text);
-  transition: background var(--dur-fast), border-color var(--dur-fast), opacity var(--dur-fast);
+  transition:
+    background var(--dur-fast),
+    border-color var(--dur-fast),
+    opacity var(--dur-fast),
+    transform var(--dur-fast) var(--ease-out);
+}
+.btn:active:not(:disabled) {
+  transform: scale(0.97);
 }
 .btn kbd {
   font-family: var(--font-mono);

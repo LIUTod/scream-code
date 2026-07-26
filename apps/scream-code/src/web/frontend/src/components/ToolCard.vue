@@ -102,7 +102,23 @@ function truncateOutput(s: string | undefined, max = 4000): string {
   border-radius: var(--radius-lg);
   overflow: hidden;
   font-size: var(--font-size-sm);
+  animation: tool-in var(--dur-msg-assistant) var(--ease-out) both;
   transition: border-color var(--dur-base);
+}
+@keyframes tool-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tool-card {
+    animation: none;
+  }
 }
 .tool-card.is-error {
   border-color: var(--color-danger);

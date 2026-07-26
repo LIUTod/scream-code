@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue';
+import { ref, watch, inject } from 'vue';
 import { createHighlighterCore } from 'shiki/core';
 import { createOnigurumaEngine } from 'shiki/engine/oniguruma';
 
@@ -7,6 +7,8 @@ const props = defineProps<{
   code: string;
   lang?: string;
 }>();
+
+const effectiveTheme = inject<import('vue').Ref<'light' | 'dark'>>('effectiveTheme', ref('dark'));
 
 const highlighted = ref('');
 const copied = ref(false);
@@ -41,7 +43,7 @@ async function render() {
   const lang = props.lang?.toLowerCase() ?? 'text';
   const supportedLangs = new Set(['javascript', 'typescript', 'python', 'bash', 'shell', 'json', 'yaml', 'html', 'css', 'vue', 'diff']);
   const effectiveLang = supportedLangs.has(lang) ? lang : lang === 'js' ? 'javascript' : lang === 'ts' ? 'typescript' : lang === 'py' ? 'python' : lang === 'sh' ? 'bash' : 'text';
-  const theme = document.documentElement.dataset.theme === 'light' ? 'github-light' : 'github-dark';
+  const theme = effectiveTheme.value === 'light' ? 'github-light' : 'github-dark';
 
   try {
     const h = await ensureHighlighter();
@@ -63,7 +65,7 @@ function copy() {
 }
 
 watch(
-  () => [props.code, props.lang, document.documentElement.dataset.theme],
+  () => [props.code, props.lang, effectiveTheme.value],
   () => render(),
   { immediate: true },
 );

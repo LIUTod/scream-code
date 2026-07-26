@@ -23,8 +23,9 @@ const emit = defineEmits<{
       @mousedown.prevent="emit('select', cmd)"
       @mouseenter="emit('hover', i)"
     >
-      <span class="slash-name">/{{ cmd.name }}</span>
+      <span class="slash-name">/{{ cmd.name }}<span v-if="cmd.aliases?.length" class="slash-aliases">{{ cmd.aliases.map((a) => `/${a}`).join(' ') }}</span></span>
       <span class="slash-desc">{{ cmd.description }}</span>
+      <span v-if="cmd.acceptsInput" class="slash-badge slash-badge-input">输入参数</span>
       <span v-if="cmd.target === 'backend'" class="slash-badge">服务端</span>
     </button>
     <div class="slash-hint">↑↓ 选择 · Enter/Tab 执行 · Esc 关闭</div>
@@ -74,6 +75,12 @@ const emit = defineEmits<{
   color: var(--color-accent);
   flex-shrink: 0;
 }
+.slash-aliases {
+  font-weight: 400;
+  color: var(--color-text-faint);
+  margin-left: var(--space-2);
+  font-size: var(--font-size-xs);
+}
 .slash-desc {
   flex: 1;
   color: var(--color-text-muted);
@@ -88,6 +95,11 @@ const emit = defineEmits<{
   border-radius: var(--radius-full);
   padding: 0 var(--space-2);
   flex-shrink: 0;
+}
+.slash-badge-input {
+  color: var(--color-accent);
+  border-color: var(--color-accent-bd);
+  background: var(--color-accent-soft);
 }
 .slash-hint {
   padding: var(--space-1) var(--space-3) var(--space-2);

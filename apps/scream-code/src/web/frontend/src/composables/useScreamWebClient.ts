@@ -1,5 +1,5 @@
 import { ref, computed, type Ref } from 'vue';
-import type { ChatMessage, ApprovalRequest, SessionSnapshot, SessionListItem, SessionStatus, GitStatus, WsMessage, ServerHello } from '../types';
+import type { ChatMessage, ApprovalRequest, SessionSnapshot, SessionListItem, SessionStatus, GitStatus, ModelInfo, ModelsResponse, WsMessage, ServerHello } from '../types';
 
 export type ConnectionStatus = 'connecting' | 'connected' | 'reconnecting' | 'disconnected';
 
@@ -18,18 +18,23 @@ export interface UseScreamWebClientReturn {
   sessions: Ref<SessionListItem[]>;
   currentSessionId: Ref<string | null>;
   gitStatus: Ref<GitStatus | null>;
+  models: Ref<ModelInfo[]>;
   sendPrompt: (text: string) => void;
-  sendCommand: (command: string) => void;
+  sendCommand: (command: string, args?: string) => void;
   clearMessages: () => void;
   appendSystemMessage: (text: string) => void;
   abort: () => void;
   resolveApproval: (id: string, decision: 'approved' | 'rejected', feedback?: string, scope?: 'once' | 'session') => void;
   fetchSessions: () => Promise<void>;
   fetchGitStatus: () => Promise<void>;
+  fetchModels: () => Promise<void>;
+  switchModel: (alias: string) => Promise<void>;
+  switchThinking: (level: string) => Promise<void>;
   createSession: () => Promise<void>;
   switchSession: (sessionId: string) => Promise<void>;
   deleteSession: (sessionId: string) => Promise<void>;
   exportSession: (sessionId: string) => Promise<void>;
+  fetchSnapshot: () => Promise<void>;
 }
 
 export function useScreamWebClient(): UseScreamWebClientReturn {
@@ -44,6 +49,7 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
   const sessions = ref<SessionListItem[]>([]);
   const currentSessionId = ref<string | null>(null);
   const gitStatus = ref<GitStatus | null>(null);
+  const models = ref<ModelInfo[]>([]);
 
   let ws: WebSocket | null = null;
   let heartbeatTimer: number | null = null;
@@ -183,11 +189,24 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
           isError: !msg.ok,
           ts: Date.now(),
         });
+        // fork/title change the session list - refresh the sidebar.
+        if (msg.command === 'fork' || msg.command === 'title') {
+          void fetchSessions();
+        }
+        // auto/yes/plan/compact change session state - refresh snapshot to update UI.
+        if (msg.ok && ['auto', 'yes', 'plan', 'compact'].includes(msg.command)) {
+          fetchSnapshot();
+        }
         break;
       }
       case 'resync_required': {
         seq = 0;
         fetchSnapshot();
+        break;
+      }
+      case 'status': {
+        // Server-pushed status sync (e.g. model/thinking switched from another tab).
+        status.value = { ...status.value, ...msg.status };
         break;
       }
       case 'error': {
@@ -322,6 +341,18 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
 
   function sendPrompt(text: string): void {
     if (!text || status.value.busy) return;
+    if (connectionStatus.value !== 'connected') {
+      messages.value.push({
+        id: generateId(),
+        role: 'system',
+        content: '连接已断开，消息未发送。正在尝试重连...',
+        tools: [],
+        isError: true,
+        ts: Date.now(),
+      });
+      connect();
+      return;
+    }
     const clientMessageId = `client_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     sentMessageIds.add(clientMessageId);
     messages.value.push({ id: generateId(), role: 'user', content: text, tools: [], ts: Date.now() });
@@ -334,12 +365,14 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
 
   // ── Slash commands / local message ops ──────────────────────────────────
 
-  function sendCommand(command: string): void {
-    if (status.value.busy) {
+  function sendCommand(command: string, args?: string): void {
+    // Side questions are designed to run during an active turn; other commands
+    // mutate session state and must wait until the turn settles.
+    if (status.value.busy && command !== 'btw') {
       appendSystemMessage(`会话忙碌中，无法执行 /${command}，请稍后再试。`);
       return;
     }
-    send({ type: 'command', command });
+    send({ type: 'command', command, ...(args ? { args } : {}) });
   }
 
   function clearMessages(): void {
@@ -391,6 +424,52 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
     } catch {
       // Best-effort — git status is optional chrome.
     }
+  }
+
+  // ── Model / thinking switching (TUI /model parity) ────────────────────────
+
+  async function fetchModels(): Promise<void> {
+    try {
+      const res = await fetch(`${API_BASE}/models`);
+      if (!res.ok) return;
+      const data: ModelsResponse = await res.json();
+      models.value = data.models;
+    } catch {
+      // Best-effort — model picker stays hidden when unavailable.
+    }
+  }
+
+  /** POST a session mutation and apply the returned status / surface errors. */
+  async function postSessionSwitch(path: string, body: Record<string, unknown>, okMessage: string): Promise<void> {
+    if (!sessionId.value) return;
+    try {
+      const res = await fetch(`${API_BASE}/sessions/${sessionId.value}/${path}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = (await res.json()) as { status?: SessionStatus; message?: string };
+      if (!res.ok) {
+        appendSystemMessage(data.message ?? `请求失败（HTTP ${res.status}）`);
+        return;
+      }
+      if (data.status) {
+        status.value = { ...status.value, ...data.status };
+      }
+      appendSystemMessage(okMessage);
+    } catch (error) {
+      appendSystemMessage(`请求失败：${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  async function switchModel(alias: string): Promise<void> {
+    if (alias === status.value.model) return;
+    await postSessionSwitch('model', { model: alias }, `已切换模型：${alias}`);
+  }
+
+  async function switchThinking(level: string): Promise<void> {
+    if (level === status.value.thinkingLevel) return;
+    await postSessionSwitch('thinking', { level }, `思考强度已切换为 ${level}`);
   }
 
   async function createSession(): Promise<void> {
@@ -456,6 +535,7 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
   // Initial connection.
   connect();
   void fetchSessions();
+  void fetchModels();
 
   window.addEventListener('online', () => connect());
   document.addEventListener('visibilitychange', () => {
@@ -474,6 +554,7 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
     sessions,
     currentSessionId,
     gitStatus,
+    models,
     sendPrompt,
     sendCommand,
     clearMessages,
@@ -482,9 +563,13 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
     resolveApproval,
     fetchSessions,
     fetchGitStatus,
+    fetchModels,
+    switchModel,
+    switchThinking,
     createSession,
     switchSession,
     deleteSession,
     exportSession,
+    fetchSnapshot,
   };
 }

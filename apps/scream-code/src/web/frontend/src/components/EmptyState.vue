@@ -19,7 +19,9 @@ const SUGGESTIONS = [
 
 <template>
   <div class="empty-state">
-    <div class="empty-logo">■</div>
+    <div class="empty-logo">
+      <img src="/icon.ico" alt="Scream" class="logo-img" />
+    </div>
     <h1 class="empty-title">Scream Web UI</h1>
     <p class="empty-subtitle">给 Scream 发消息，开始处理你的任务</p>
 
@@ -49,22 +51,40 @@ const SUGGESTIONS = [
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: var(--space-3);
-  padding: var(--space-6) var(--space-4);
+  gap: var(--space-4);
+  padding: var(--space-8) var(--space-4);
   color: var(--color-text-muted);
 }
 
 .empty-logo {
-  font-size: 44px;
-  color: var(--color-accent);
-  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 72px;
+  height: 72px;
+  background: var(--color-accent-soft);
+  border: 1px solid var(--color-accent-bd);
+  border-radius: var(--radius-xl);
+  box-shadow: 0 0 24px var(--color-accent-glow), var(--shadow-sm);
+  overflow: hidden;
+}
+
+.logo-img {
+  width: 48px;
+  height: 48px;
+  object-fit: contain;
 }
 
 .empty-title {
   margin: 0;
-  font-size: var(--font-size-2xl);
+  font-size: 28px;
   font-weight: 700;
-  color: var(--color-text);
+  letter-spacing: -0.01em;
+  background: linear-gradient(120deg, var(--color-text) 30%, var(--color-accent) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
 }
 
 .empty-subtitle {
@@ -85,26 +105,34 @@ const SUGGESTIONS = [
   flex-direction: column;
   align-items: center;
   gap: var(--space-2);
-  padding: var(--space-4) var(--space-5);
-  min-width: 120px;
+  padding: var(--space-5) var(--space-6);
+  min-width: 128px;
   background: var(--color-surface);
   border: 1px solid var(--color-line);
   border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xs);
   cursor: pointer;
   font-size: var(--font-size-sm);
+  font-weight: 500;
   color: var(--color-text);
   transition:
-    border-color var(--dur-fast),
-    background var(--dur-fast),
-    transform var(--dur-fast);
+    border-color var(--dur-base) var(--ease-out),
+    background var(--dur-base) var(--ease-out),
+    box-shadow var(--dur-base) var(--ease-out),
+    transform var(--dur-base) var(--ease-out);
 }
 .suggestion-card:hover {
   border-color: var(--color-accent-bd, var(--color-accent));
   background: var(--color-accent-soft, var(--color-hover));
-  transform: translateY(-1px);
+  box-shadow: var(--shadow-md), 0 0 16px var(--color-accent-glow);
+  transform: translateY(-2px);
+}
+.suggestion-card:active {
+  transform: translateY(0);
+  box-shadow: var(--shadow-xs);
 }
 .suggestion-icon {
-  font-size: var(--font-size-xl);
+  font-size: var(--font-size-2xl);
 }
 .suggestion-title {
   white-space: nowrap;
@@ -119,6 +147,7 @@ const SUGGESTIONS = [
   border: 1px solid var(--color-line);
   border-radius: var(--radius-full);
   background: var(--color-surface);
+  box-shadow: var(--shadow-xs);
   font-size: var(--font-size-xs);
   max-width: 80%;
 }

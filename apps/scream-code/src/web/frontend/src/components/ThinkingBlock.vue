@@ -81,6 +81,22 @@ function closePanel() {
   width: 100%;
   margin-top: var(--space-2);
   font-weight: 425;
+  animation: think-in var(--dur-msg-assistant) var(--ease-out) both;
+}
+@keyframes think-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .thinking-block {
+    animation: none;
+  }
 }
 
 /* Collapsed teaser */

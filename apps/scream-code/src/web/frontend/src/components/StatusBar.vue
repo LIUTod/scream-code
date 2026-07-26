@@ -17,6 +17,7 @@ const props = withDefaults(
 
 const emit = defineEmits<{
   (e: 'refresh-git'): void;
+  (e: 'toggle-sidebar'): void;
 }>();
 
 const showDiff = ref(false);
@@ -86,7 +87,8 @@ const gitTitle = computed(() => {
 <template>
   <header class="status-bar">
     <div class="brand">
-      <span class="logo">■</span>
+      <button class="hamburger" aria-label="会话列表" title="会话列表" @click="emit('toggle-sidebar')">☰</button>
+      <img src="/icon.ico" alt="Scream" class="logo" />
       <span class="title">Scream Web UI</span>
     </div>
 
@@ -103,7 +105,7 @@ const gitTitle = computed(() => {
         class="info-item context"
         :title="tokenTitle"
       >
-        <ContextRing :usage="status.contextUsage" :size="16" />
+        <ContextRing :usage="status.contextUsage" :size="18" />
         <span>{{ usagePercent }}%</span>
       </span>
       <span v-if="workDir" class="info-item workdir" :title="workDir">{{ workDir }}</span>
@@ -144,10 +146,11 @@ const gitTitle = computed(() => {
 .status-bar {
   display: flex;
   align-items: center;
-  gap: var(--space-4);
+  gap: var(--space-5);
   padding: var(--space-3) var(--space-5);
   background: var(--color-surface);
   border-bottom: 1px solid var(--color-line);
+  box-shadow: var(--shadow-xs);
   flex-shrink: 0;
 }
 .brand {
@@ -157,15 +160,42 @@ const gitTitle = computed(() => {
   font-weight: 600;
   font-size: var(--font-size-base);
 }
+.hamburger {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background: transparent;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  cursor: pointer;
+  font-size: var(--font-size-base);
+  line-height: 1;
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out),
+    transform var(--dur-fast) var(--ease-out);
+}
+.hamburger:hover {
+  background: var(--color-hover);
+  border-color: var(--color-line-strong);
+}
+.hamburger:active {
+  transform: scale(0.92);
+}
 .logo {
-  color: var(--color-accent);
-  font-size: var(--font-size-xl);
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
+  filter: drop-shadow(0 0 6px var(--color-accent-glow));
 }
 .info {
   flex: 1;
   display: flex;
   align-items: center;
-  gap: var(--space-4);
+  gap: var(--space-5);
   font-size: var(--font-size-xs);
   color: var(--color-text-muted);
   overflow-x: auto;
@@ -204,13 +234,20 @@ const gitTitle = computed(() => {
   border: 1px solid var(--color-line);
   border-radius: var(--radius-full);
   background: var(--color-surface-raised);
-  padding: 2px var(--space-2);
+  box-shadow: var(--shadow-xs);
+  padding: 3px 10px;
   cursor: pointer;
-  transition: border-color var(--dur-fast), background var(--dur-fast);
+  transition:
+    border-color var(--dur-base) var(--ease-out),
+    background var(--dur-base) var(--ease-out),
+    box-shadow var(--dur-base) var(--ease-out),
+    transform var(--dur-base) var(--ease-out);
 }
 .info-item.git:hover {
   border-color: var(--color-accent-bd);
   background: var(--color-accent-soft);
+  box-shadow: var(--shadow-sm), 0 0 10px var(--color-accent-glow);
+  transform: translateY(-1px);
 }
 .git-icon {
   color: var(--color-accent);
@@ -316,6 +353,9 @@ const gitTitle = computed(() => {
   .status-bar {
     padding: var(--space-2) var(--space-3);
     gap: var(--space-3);
+  }
+  .hamburger {
+    display: inline-flex;
   }
   .info-item.workdir,
   .info-item:not(.context):not(.model) {

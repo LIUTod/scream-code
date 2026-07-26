@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue';
-import type { SessionStatus } from '../types';
-import { filterSlashCommands, type SlashCommand } from '../commands';
+import type { ModelInfo, SessionStatus } from '../types';
+import { filterSlashCommands, resolveCommandName, type SlashCommand } from '../commands';
 import ContextRing from './ContextRing.vue';
+import ModelPicker from './ModelPicker.vue';
 import SlashMenu from './SlashMenu.vue';
 
 const props = withDefaults(
@@ -10,14 +11,17 @@ const props = withDefaults(
     busy: boolean;
     status?: SessionStatus;
     sessionId?: string | null;
+    models?: ModelInfo[];
   }>(),
-  { status: undefined, sessionId: null },
+  { status: undefined, sessionId: null, models: () => [] },
 );
 
 const emit = defineEmits<{
   (e: 'send', text: string): void;
   (e: 'abort'): void;
-  (e: 'command', name: string): void;
+  (e: 'command', name: string, args?: string): void;
+  (e: 'switch-model', alias: string): void;
+  (e: 'switch-thinking', level: string): void;
 }>();
 
 const text = ref('');
@@ -50,6 +54,17 @@ watch(slashQuery, () => {
 function pickSlashCommand(cmd?: SlashCommand) {
   const chosen = cmd ?? slashCommands.value[slashIndex.value];
   if (!chosen) return;
+  if (chosen.acceptsInput) {
+    // Keep the command prefix so the user can type arguments, then send.
+    // History is recorded when the full `/cmd args` is sent.
+    text.value = `/${chosen.name} `;
+    slashDismissed.value = true;
+    nextTick(() => {
+      textareaRef.value?.focus();
+      autoResize();
+    });
+    return;
+  }
   pushHistory(`/${chosen.name}`);
   resetInput();
   emit('command', chosen.name);
@@ -196,6 +211,16 @@ function resetInput() {
 function send() {
   const t = text.value.trim();
   if (!t) return;
+  if (t.startsWith('/')) {
+    const sp = t.indexOf(' ');
+    const raw = (sp === -1 ? t.slice(1) : t.slice(1, sp)).toLowerCase();
+    const name = resolveCommandName(raw);
+    const args = sp === -1 ? '' : t.slice(sp + 1).trim();
+    pushHistory(t);
+    emit('command', name, args);
+    resetInput();
+    return;
+  }
   if (props.busy) {
     queueSteer();
     return;
@@ -265,12 +290,54 @@ function insertText(content: string) {
   });
 }
 
-defineExpose({ insertText });
+defineExpose({ insertText, openModelPicker });
 
 /* ── Status pills ────────────────────────────────────────────────────────── */
 const model = computed(() => props.status?.model);
 const permission = computed(() => props.status?.permission);
 const contextUsage = computed(() => props.status?.contextUsage);
+
+/* ── Model picker (TUI /model parity) ────────────────────────────────────── */
+const pickerOpen = ref(false);
+
+const THINKING_LABELS: Record<string, string> = {
+  off: '关闭',
+  low: '低',
+  medium: '中',
+  high: '高',
+  xhigh: '超高',
+  max: '最大',
+};
+
+const thinkingLevel = computed(() => props.status?.thinkingLevel);
+const thinkingLabel = computed(() => {
+  const level = thinkingLevel.value;
+  if (!level || level === 'none') return '';
+  return THINKING_LABELS[level] ?? level;
+});
+
+/** Whether the model pill is clickable (models list available from backend). */
+const modelSwitchable = computed(() => props.models.length > 0);
+
+/** Open the model picker; returns false when no models are configured. */
+function openModelPicker(): boolean {
+  if (!modelSwitchable.value) return false;
+  pickerOpen.value = true;
+  return true;
+}
+
+function toggleModelPicker() {
+  if (!modelSwitchable.value) return;
+  pickerOpen.value = !pickerOpen.value;
+}
+
+function onApplyModel(alias: string) {
+  emit('switch-model', alias);
+}
+
+function onApplyThinking(level: string) {
+  emit('switch-thinking', level);
+}
 
 const permissionClass = computed(() => {
   switch (permission.value) {
@@ -291,6 +358,17 @@ const permissionLabel = computed(() => {
 
 <template>
   <div class="composer">
+    <Transition name="picker">
+      <ModelPicker
+        v-if="pickerOpen"
+        :models="models"
+        :current-model="model"
+        :current-thinking="thinkingLevel"
+        @apply-model="onApplyModel"
+        @apply-thinking="onApplyThinking"
+        @close="pickerOpen = false"
+      />
+    </Transition>
     <SlashMenu
       v-if="slashVisible"
       :commands="slashCommands"
@@ -309,7 +387,15 @@ const permissionLabel = computed(() => {
 
     <div class="composer-footer">
       <div class="composer-pills">
-        <span v-if="model" class="pill pill-model" :title="`当前模型：${model}（启动时通过 --model 指定）`">
+        <button
+          v-if="model && modelSwitchable"
+          class="pill pill-model pill-btn"
+          :title="`当前模型：${model}，点击切换模型 / 思考强度`"
+          @click="toggleModelPicker"
+        >
+          ◆ {{ model }}<template v-if="thinkingLabel"> · {{ thinkingLabel }}</template>
+        </button>
+        <span v-else-if="model" class="pill pill-model" :title="`当前模型：${model}（启动时通过 --model 指定）`">
           ◆ {{ model }}
         </span>
         <span v-if="permission" :class="['pill', permissionClass]" :title="`权限模式：${permission}`">
@@ -354,15 +440,22 @@ const permissionLabel = computed(() => {
   resize: none;
   min-height: 36px;
   max-height: 25vh;
-  transition: border-color var(--dur-fast), box-shadow var(--dur-fast);
+  box-shadow: var(--shadow-xs);
+  transition:
+    border-color var(--dur-base) var(--ease-out),
+    box-shadow var(--dur-base) var(--ease-out);
+}
+.composer-input:hover:not(:focus) {
+  border-color: var(--color-line-strong);
 }
 .composer-input:focus {
   outline: none;
   border-color: var(--color-accent);
-  box-shadow: 0 0 0 3px var(--color-accent-soft);
+  box-shadow: 0 0 0 3px var(--color-accent-soft), 0 0 16px var(--color-accent-glow);
 }
 .composer-input::placeholder {
   color: var(--color-text-faint);
+  opacity: 0.8;
 }
 
 .composer-footer {
@@ -388,11 +481,13 @@ const permissionLabel = computed(() => {
   display: inline-flex;
   align-items: center;
   gap: var(--space-1);
-  padding: 2px var(--space-2);
+  padding: 3px 10px;
   border-radius: var(--radius-full);
   border: 1px solid var(--color-line);
   background: var(--color-surface);
+  box-shadow: var(--shadow-xs);
   font-size: var(--font-size-xs);
+  font-weight: 500;
   color: var(--color-text-muted);
   white-space: nowrap;
   flex-shrink: 0;
@@ -403,13 +498,38 @@ const permissionLabel = computed(() => {
   border-color: var(--color-accent-bd);
   background: var(--color-accent-soft);
 }
+.pill-btn {
+  cursor: pointer;
+  transition:
+    filter var(--dur-fast),
+    transform var(--dur-fast);
+}
+.pill-btn:hover {
+  filter: brightness(1.1);
+  transform: translateY(-1px);
+}
+
+/* Model picker transition */
+.picker-enter-active,
+.picker-leave-active {
+  transition:
+    opacity var(--dur-base) var(--ease-out),
+    transform var(--dur-base) var(--ease-out);
+}
+.picker-enter-from,
+.picker-leave-to {
+  opacity: 0;
+  transform: translateY(6px);
+}
 .perm-manual {
   color: var(--color-text-muted);
+  border-color: var(--color-line-strong);
+  background: var(--color-surface-raised);
 }
 .perm-auto {
-  color: var(--color-warning);
-  border-color: var(--color-warning);
-  background: var(--color-warning-soft);
+  color: var(--color-success);
+  border-color: var(--color-success);
+  background: var(--color-success-soft);
 }
 .perm-yolo {
   color: var(--color-danger);
@@ -437,22 +557,36 @@ const permissionLabel = computed(() => {
   font-size: var(--font-size-sm);
   font-weight: 600;
   cursor: pointer;
-  transition: opacity var(--dur-fast), background var(--dur-fast);
+  transition:
+    opacity var(--dur-fast),
+    box-shadow var(--dur-base) var(--ease-out),
+    transform var(--dur-base) var(--ease-out),
+    filter var(--dur-base) var(--ease-out);
 }
 .btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
 }
 .btn-primary {
-  background: var(--color-accent);
+  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-hover) 100%);
   color: var(--color-on-accent);
+  box-shadow: var(--shadow-xs);
 }
 .btn-primary:hover:not(:disabled) {
-  background: var(--color-accent-hover);
+  filter: brightness(1.08);
+  transform: scale(1.04);
+  box-shadow: var(--shadow-sm), 0 0 12px var(--color-accent-glow);
+}
+.btn-primary:active:not(:disabled) {
+  transform: scale(0.98);
 }
 .btn-danger {
   background: var(--color-danger);
   color: #fff;
+  box-shadow: var(--shadow-xs);
+}
+.btn-danger:hover {
+  filter: brightness(1.1);
 }
 
 @media (max-width: 640px) {
