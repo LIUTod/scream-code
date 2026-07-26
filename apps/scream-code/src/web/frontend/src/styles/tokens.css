@@ -1,0 +1,51 @@
+/* ─── Design tokens (theme-independent scales & seeds) ───────────────────── */
+
+:root {
+  /* Color seeds */
+  --accent-primary: #79eb00;
+  --accent-primary-light: #2da44e;
+  --surface-light: #f6f7f9;
+  --surface-dark: #161b22;
+
+  /* Spacing scale (4px grid) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 28px;
+  --space-8: 32px;
+
+  /* Radius scale */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-2xl: 20px;
+  --radius-full: 999px;
+
+  /* Typography */
+  --font-ui: "Inter", -apple-system, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+  --font-size-xs: 12px;
+  --font-size-sm: 13px;
+  --font-size-base: 14px;
+  --font-size-lg: 16px;
+  --font-size-xl: 18px;
+  --font-size-2xl: 22px;
+
+  /* Z-index scale */
+  --z-base: 0;
+  --z-dock: 20;
+  --z-overlay: 50;
+  --z-modal: 100;
+  --z-toast: 200;
+
+  /* Transitions */
+  --dur-fast: 120ms;
+  --dur-base: 160ms;
+  --dur-slow: 240ms;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+}

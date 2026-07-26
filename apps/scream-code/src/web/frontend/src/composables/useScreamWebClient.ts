@@ -1,5 +1,5 @@
 import { ref, computed, type Ref } from 'vue';
-import type { ChatMessage, ApprovalRequest, SessionSnapshot, SessionStatus, WsMessage, ServerHello } from '../types';
+import type { ChatMessage, ApprovalRequest, SessionSnapshot, SessionListItem, SessionStatus, GitStatus, WsMessage, ServerHello } from '../types';
 
 export type ConnectionStatus = 'connecting' | 'connected' | 'reconnecting' | 'disconnected';
 
@@ -15,9 +15,21 @@ export interface UseScreamWebClientReturn {
   sessionId: Ref<string | null>;
   workDir: Ref<string | null>;
   isBusy: Ref<boolean>;
+  sessions: Ref<SessionListItem[]>;
+  currentSessionId: Ref<string | null>;
+  gitStatus: Ref<GitStatus | null>;
   sendPrompt: (text: string) => void;
+  sendCommand: (command: string) => void;
+  clearMessages: () => void;
+  appendSystemMessage: (text: string) => void;
   abort: () => void;
-  resolveApproval: (id: string, decision: 'approved' | 'rejected') => void;
+  resolveApproval: (id: string, decision: 'approved' | 'rejected', feedback?: string) => void;
+  fetchSessions: () => Promise<void>;
+  fetchGitStatus: () => Promise<void>;
+  createSession: () => Promise<void>;
+  switchSession: (sessionId: string) => Promise<void>;
+  deleteSession: (sessionId: string) => Promise<void>;
+  exportSession: (sessionId: string) => Promise<void>;
 }
 
 export function useScreamWebClient(): UseScreamWebClientReturn {
@@ -29,6 +41,9 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
   const sessionId = ref<string | null>(null);
   const workDir = ref<string | null>(null);
   const isBusy = computed(() => status.value.busy);
+  const sessions = ref<SessionListItem[]>([]);
+  const currentSessionId = ref<string | null>(null);
+  const gitStatus = ref<GitStatus | null>(null);
 
   let ws: WebSocket | null = null;
   let heartbeatTimer: number | null = null;
@@ -40,7 +55,11 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
   const sentMessageIds = new Set<string>();
 
   function wsUrl(): string {
-    return `ws://${window.location.host}/`;
+    const base = `ws://${window.location.host}`;
+    if (currentSessionId.value) {
+      return `${base}/?sessionId=${encodeURIComponent(currentSessionId.value)}`;
+    }
+    return `${base}/`;
   }
 
   function setConnectionStatus(s: ConnectionStatus) {
@@ -112,10 +131,13 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
         const hello = msg as ServerHello;
         sessionId.value = hello.sessionId;
         workDir.value = hello.workDir;
+        currentSessionId.value = hello.sessionId;
         epoch = hello.epoch;
         startHeartbeat(hello.heartbeat_ms);
         send({ type: 'client_hello', lastSeq: seq, epoch });
         fetchSnapshot();
+        void fetchSessions();
+        void fetchGitStatus();
         break;
       }
       case 'event': {
@@ -131,6 +153,7 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
           role: 'user',
           content: msg.text,
           tools: [],
+          ts: Date.now(),
         });
         break;
       }
@@ -140,6 +163,17 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
       }
       case 'approval_resolved': {
         pendingApprovals.value = pendingApprovals.value.filter((a) => a.id !== msg.id);
+        break;
+      }
+      case 'command_result': {
+        messages.value.push({
+          id: generateId(),
+          role: 'system',
+          content: msg.message,
+          tools: [],
+          isError: !msg.ok,
+          ts: Date.now(),
+        });
         break;
       }
       case 'resync_required': {
@@ -158,7 +192,7 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
     switch (payload.type) {
       case 'turn.started': {
         status.value = { ...status.value, busy: true };
-        messages.value.push({ id: generateId(), role: 'assistant', content: '', tools: [] });
+        messages.value.push({ id: generateId(), role: 'assistant', content: '', tools: [], ts: Date.now() });
         break;
       }
       case 'assistant.delta': {
@@ -211,6 +245,8 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
           if (last) last.isError = true;
           error.value = String(payload.error?.message ?? 'Turn failed');
         }
+        void fetchSessions();
+        void fetchGitStatus();
         break;
       }
       case 'session.meta.updated': {
@@ -279,7 +315,7 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
     if (!text || status.value.busy) return;
     const clientMessageId = `client_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     sentMessageIds.add(clientMessageId);
-    messages.value.push({ id: generateId(), role: 'user', content: text, tools: [] });
+    messages.value.push({ id: generateId(), role: 'user', content: text, tools: [], ts: Date.now() });
     send({ type: 'prompt', text, clientMessageId });
   }
 
@@ -287,13 +323,122 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
     send({ type: 'abort' });
   }
 
-  function resolveApproval(id: string, decision: 'approved' | 'rejected'): void {
+  // ── Slash commands / local message ops ──────────────────────────────────
+
+  function sendCommand(command: string): void {
+    if (status.value.busy) {
+      appendSystemMessage(`会话忙碌中，无法执行 /${command}，请稍后再试。`);
+      return;
+    }
+    send({ type: 'command', command });
+  }
+
+  function clearMessages(): void {
+    messages.value = [];
+    pendingApprovals.value = [];
+  }
+
+  function appendSystemMessage(text: string): void {
+    messages.value.push({
+      id: generateId(),
+      role: 'system',
+      content: text,
+      tools: [],
+      ts: Date.now(),
+    });
+  }
+
+  function resolveApproval(id: string, decision: 'approved' | 'rejected', feedback?: string): void {
     pendingApprovals.value = pendingApprovals.value.filter((a) => a.id !== id);
-    send({ type: 'approval_response', id, decision });
+    send({ type: 'approval_response', id, decision, ...(feedback ? { feedback } : {}) });
+  }
+
+  // ── Session management ──────────────────────────────────────────────────
+
+  async function fetchSessions(): Promise<void> {
+    try {
+      const res = await fetch(`${API_BASE}/sessions`);
+      if (!res.ok) return;
+      sessions.value = await res.json();
+    } catch {
+      // Best-effort
+    }
+  }
+
+  async function fetchGitStatus(): Promise<void> {
+    try {
+      const res = await fetch(`${API_BASE}/git/status`);
+      if (!res.ok) return;
+      const gs: GitStatus = await res.json();
+      gitStatus.value = gs.isRepo ? gs : null;
+    } catch {
+      // Best-effort — git status is optional chrome.
+    }
+  }
+
+  async function createSession(): Promise<void> {
+    try {
+      const res = await fetch(`${API_BASE}/sessions`, { method: 'POST' });
+      if (!res.ok) return;
+      const item: SessionListItem = await res.json();
+      sessions.value = [item, ...sessions.value];
+      await switchSession(item.sessionId);
+    } catch (error) {
+      console.error('Failed to create session', error); // eslint-disable-line no-console
+    }
+  }
+
+  async function switchSession(targetId: string): Promise<void> {
+    if (currentSessionId.value === targetId && connectionStatus.value === 'connected') return;
+    currentSessionId.value = targetId;
+    // Close existing connection and reconnect to the new session.
+    if (ws) {
+      ws.onclose = null;
+      ws.close();
+      ws = null;
+    }
+    stopHeartbeat();
+    connect();
+  }
+
+  async function deleteSession(targetId: string): Promise<void> {
+    try {
+      const res = await fetch(`${API_BASE}/sessions/${targetId}`, { method: 'DELETE' });
+      if (!res.ok) return;
+      sessions.value = sessions.value.filter((s) => s.sessionId !== targetId);
+      // If we deleted the current session, switch to the first remaining.
+      if (currentSessionId.value === targetId) {
+        const next = sessions.value[0];
+        if (next) {
+          await switchSession(next.sessionId);
+        } else {
+          await createSession();
+        }
+      }
+    } catch (error) {
+      console.error('Failed to delete session', error); // eslint-disable-line no-console
+    }
+  }
+
+  async function exportSession(targetId: string): Promise<void> {
+    try {
+      const res = await fetch(`${API_BASE}/sessions/${targetId}/export`);
+      if (!res.ok) return;
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${targetId}.md`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Failed to export session', error); // eslint-disable-line no-console
+    }
   }
 
   // Initial connection.
   connect();
+  void fetchSessions();
 
   window.addEventListener('online', () => connect());
   document.addEventListener('visibilitychange', () => {
@@ -309,8 +454,20 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
     sessionId,
     workDir,
     isBusy,
+    sessions,
+    currentSessionId,
+    gitStatus,
     sendPrompt,
+    sendCommand,
+    clearMessages,
+    appendSystemMessage,
     abort,
     resolveApproval,
+    fetchSessions,
+    fetchGitStatus,
+    createSession,
+    switchSession,
+    deleteSession,
+    exportSession,
   };
 }

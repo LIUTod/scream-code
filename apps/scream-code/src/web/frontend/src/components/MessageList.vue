@@ -1,34 +1,76 @@
 <script setup lang="ts">
-import { ref, watch, nextTick } from 'vue';
+import { computed, nextTick, ref, watch } from 'vue';
 import type { ChatMessage } from '../types';
 import MessageItem from './MessageItem.vue';
+import EmptyState from './EmptyState.vue';
 
-const props = defineProps<{
-  messages: ChatMessage[];
+const props = withDefaults(
+  defineProps<{
+    messages: ChatMessage[];
+    busy?: boolean;
+    workDir?: string | null;
+  }>(),
+  { busy: false, workDir: null },
+);
+
+const emit = defineEmits<{
+  (e: 'edit', content: string): void;
+  (e: 'pick', text: string): void;
 }>();
 
 const listRef = ref<HTMLElement | null>(null);
 
+const latestUserId = computed(() => {
+  for (let i = props.messages.length - 1; i >= 0; i--) {
+    if (props.messages[i]!.role === 'user') return props.messages[i]!.id;
+  }
+  return null;
+});
+
+const lastMessageId = computed(() => props.messages.at(-1)?.id ?? null);
+
+/** Streaming content length — drives scroll pinning during deltas. */
+const streamLength = computed(() => {
+  const last = props.messages.at(-1);
+  if (!last) return 0;
+  let len = last.content.length;
+  for (const t of last.tools) len += t.output?.length ?? 0;
+  return len;
+});
+
+function isNearBottom(): boolean {
+  const el = listRef.value;
+  if (!el) return true;
+  return el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+}
+
+function scrollToBottom() {
+  nextTick(() => {
+    const el = listRef.value;
+    if (el) el.scrollTop = el.scrollHeight;
+  });
+}
+
 watch(
-  () => props.messages.length,
+  () => [props.messages.length, streamLength.value],
   () => {
-    nextTick(() => {
-      if (listRef.value) {
-        listRef.value.scrollTop = listRef.value.scrollHeight;
-      }
-    });
+    if (isNearBottom()) scrollToBottom();
   },
 );
 </script>
 
 <template>
   <div ref="listRef" class="message-list">
-    <div v-if="messages.length === 0" class="empty-state">
-      <div class="empty-icon">■</div>
-      <div class="empty-title">Scream Web UI</div>
-      <div class="empty-desc">给 Scream 发消息，开始处理你的任务。</div>
-    </div>
-    <MessageItem v-for="message in messages" :key="message.id" :message="message" />
+    <EmptyState v-if="messages.length === 0" :work-dir="workDir" @pick="(t) => emit('pick', t)" />
+    <MessageItem
+      v-for="message in messages"
+      :key="message.id"
+      :message="message"
+      :is-latest-user="message.id === latestUserId"
+      :idle="!busy"
+      :streaming="busy && message.id === lastMessageId && message.role === 'assistant'"
+      @edit="(content) => emit('edit', content)"
+    />
   </div>
 </template>
 
@@ -38,26 +80,5 @@ watch(
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-}
-.empty-state {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-dim);
-  gap: 8px;
-}
-.empty-icon {
-  font-size: 32px;
-  color: var(--accent);
-}
-.empty-title {
-  font-size: 18px;
-  font-weight: 600;
-  color: var(--text);
-}
-.empty-desc {
-  font-size: 14px;
 }
 </style>

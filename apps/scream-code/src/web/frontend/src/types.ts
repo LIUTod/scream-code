@@ -5,6 +5,8 @@ export interface ChatMessage {
   tools: ToolMessage[];
   isError?: boolean;
   pending?: boolean;
+  /** Client-side creation time (ms epoch). Absent for snapshot-restored messages. */
+  ts?: number;
 }
 
 export interface ToolMessage {
@@ -13,6 +15,8 @@ export interface ToolMessage {
   args?: unknown;
   output?: string;
   isError?: boolean;
+  /** Tool call awaiting an external signal (e.g. approval) before it can finish. */
+  suspended?: boolean;
 }
 
 export interface ApprovalRequest {
@@ -25,8 +29,11 @@ export interface ApprovalRequest {
 export interface SessionStatus {
   busy: boolean;
   model?: string;
+  thinkingLevel?: string;
+  permission?: 'manual' | 'auto' | 'yolo' | string;
   contextTokens?: number;
   maxContextTokens?: number;
+  /** Context usage fraction (0..1) or percent (0..100). */
   contextUsage?: number;
 }
 
@@ -36,6 +43,28 @@ export interface SessionSnapshot {
   messages: ChatMessage[];
   pendingApprovals: ApprovalRequest[];
   status: SessionStatus;
+}
+
+export interface SessionListItem {
+  sessionId: string;
+  workDir: string;
+  title: string;
+  createdAt: number;
+  messageCount: number;
+  active: boolean;
+}
+
+export interface GitStatus {
+  isRepo: boolean;
+  branch?: string;
+  ahead?: number;
+  behind?: number;
+  /** Files with changes (staged + unstaged + untracked). */
+  changed?: number;
+  adds?: number;
+  dels?: number;
+  /** `git diff --stat HEAD` summary text. */
+  diffStat?: string;
 }
 
 export interface ServerHello {
@@ -62,5 +91,6 @@ export type WsMessage =
   | { type: 'approval_request'; id: string; toolName: string; action?: string; display?: unknown }
   | { type: 'approval_resolved'; id: string }
   | { type: 'user_message'; clientMessageId?: string; text: string }
+  | { type: 'command_result'; command: string; ok: boolean; message: string }
   | { type: 'resync_required'; reason: string }
   | { type: 'error'; code?: string; message: string };

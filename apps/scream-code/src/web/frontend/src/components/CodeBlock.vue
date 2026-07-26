@@ -81,8 +81,8 @@ watch(
 
 <style scoped>
 .code-block {
-  background: var(--code-bg);
-  border: 1px solid var(--border);
+  background: var(--color-surface-sunken);
+  border: 1px solid var(--color-line);
   border-radius: 8px;
   margin: 0.75em 0;
   overflow: hidden;
@@ -92,27 +92,27 @@ watch(
   justify-content: space-between;
   align-items: center;
   padding: 6px 12px;
-  background: var(--surface);
-  border-bottom: 1px solid var(--border);
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-line);
   font-size: 12px;
 }
 .code-lang {
-  color: var(--text-dim);
+  color: var(--color-text-muted);
   text-transform: lowercase;
   font-family: "SF Mono", "Cascadia Code", monospace;
 }
 .code-copy {
   background: transparent;
-  border: 1px solid var(--border);
-  color: var(--text-dim);
+  border: 1px solid var(--color-line);
+  color: var(--color-text-muted);
   border-radius: 4px;
   padding: 2px 8px;
   cursor: pointer;
   font-size: 12px;
 }
 .code-copy:hover {
-  color: var(--text);
-  border-color: var(--text-dim);
+  color: var(--color-text);
+  border-color: var(--color-text-muted);
 }
 .code-content :deep(pre) {
   margin: 0;

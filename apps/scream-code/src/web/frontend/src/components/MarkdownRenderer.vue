@@ -37,6 +37,9 @@ function renderToken(token: marked.Token): ReturnType<typeof h>[] {
       return [h('hr', { class: 'md-hr' })];
     case 'space':
       return [];
+    case 'text':
+      // List items deliver their inline content as a nested `text` token.
+      return [h('span', { class: 'md-text' }, token.tokens ? renderInline(token.tokens) : token.text)];
     default:
       return [];
   }
@@ -67,22 +70,22 @@ function renderInline(tokens: marked.Token[]): (string | ReturnType<typeof h>)[]
 .markdown-body :deep(.md-h1), .markdown-body :deep(.md-h2), .markdown-body :deep(.md-h3) {
   margin: 1em 0 0.5em; font-weight: 600;
 }
-.markdown-body :deep(.md-h1) { font-size: 1.5em; border-bottom: 1px solid var(--border); padding-bottom: 0.3em; }
+.markdown-body :deep(.md-h1) { font-size: 1.5em; border-bottom: 1px solid var(--color-line); padding-bottom: 0.3em; }
 .markdown-body :deep(.md-h2) { font-size: 1.3em; }
 .markdown-body :deep(.md-h3) { font-size: 1.15em; }
 .markdown-body :deep(.md-ul), .markdown-body :deep(.md-ol) { margin: 0.6em 0; padding-left: 1.5em; }
 .markdown-body :deep(.md-li) { margin: 0.25em 0; }
 .markdown-body :deep(.md-blockquote) {
-  margin: 0.6em 0; padding-left: 1em; border-left: 3px solid var(--accent);
-  color: var(--text-dim);
+  margin: 0.6em 0; padding-left: 1em; border-left: 3px solid var(--color-accent);
+  color: var(--color-text-muted);
 }
 .markdown-body :deep(.md-code) {
-  background: var(--code-bg); padding: 0.15em 0.35em; border-radius: 4px;
-  font-family: "SF Mono", "Cascadia Code", monospace; font-size: 0.9em;
+  background: var(--color-surface-sunken); padding: 0.15em 0.35em; border-radius: 4px;
+  font-family: var(--font-mono); font-size: 0.9em;
 }
-.markdown-body :deep(.md-a) { color: var(--blue); text-decoration: none; }
+.markdown-body :deep(.md-a) { color: var(--color-info); text-decoration: none; }
 .markdown-body :deep(.md-a:hover) { text-decoration: underline; }
-.markdown-body :deep(.md-hr) { border: none; border-top: 1px solid var(--border); margin: 1em 0; }
+.markdown-body :deep(.md-hr) { border: none; border-top: 1px solid var(--color-line); margin: 1em 0; }
 .markdown-body :deep(.md-strong) { font-weight: 600; }
 .markdown-body :deep(.md-em) { font-style: italic; }
 </style>
