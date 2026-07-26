@@ -1151,3 +1151,110 @@ export async function runWebServer(opts: WebServerOptions): Promise<void> {
     }
   });
 }
+
+// ─── TUI integration: /web slash command ──────────────────────────────────
+
+export interface WebServerHandle {
+  readonly url: string;
+  readonly close: () => Promise<void>;
+}
+
+export async function startWebServerForSession(session: Session, opts: {
+  readonly port: number;
+  readonly workDir: string;
+  readonly homeDir: string;
+  readonly yolo: boolean;
+  readonly open: boolean;
+}): Promise<WebServerHandle> {
+  const permission = opts.yolo ? 'yolo' : 'manual';
+  const webSession = new WebSession(session, {
+    sessionId: session.id,
+    workDir: opts.workDir,
+    permission,
+    yolo: opts.yolo,
+    homeDir: opts.homeDir,
+    createdAt: Date.now(),
+  });
+
+  const baseDir = import.meta.dirname;
+  const prodPublicDir = join(baseDir, '..', 'public');
+  const devPublicDir = join(baseDir, 'frontend', 'dist');
+  let publicDir = prodPublicDir;
+  try {
+    await access(join(devPublicDir, 'index.html'));
+    publicDir = devPublicDir;
+  } catch {
+    // Fall back to prodPublicDir.
+  }
+
+  const httpServer: HttpServer = createServer(async (req: IncomingMessage, res) => {
+    const url = req.url ?? '/';
+    const method = req.method ?? 'GET';
+
+    const snapshotMatch = new RegExp(`^${API_PREFIX}/sessions/([^/]+)/snapshot$`).exec(url);
+    if (snapshotMatch && method === 'GET') {
+      const sid = snapshotMatch[1]!;
+      if (sid !== webSession.sessionId) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ code: 404, message: 'Session not found' }));
+        return;
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(webSession.getSnapshot()));
+      return;
+    }
+
+    if (url === '/' || url === '/index.html') {
+      try {
+        const html = await readFile(join(publicDir, 'index.html'), 'utf-8');
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+        res.end(html);
+      } catch {
+        res.writeHead(500, { 'Content-Type': 'text/plain' });
+        res.end('Failed to load web UI. Did you run pnpm web:build?');
+      }
+      return;
+    }
+
+    const safeUrl = url.replaceAll(/\?.*$/g, '').replaceAll(/\.{2,}/g, '');
+    try {
+      const filePath = join(publicDir, safeUrl);
+      const ext = filePath.split('.').pop() ?? '';
+      const contentType = contentTypes[ext] ?? 'application/octet-stream';
+      const data = await readFile(filePath);
+      res.writeHead(200, { 'Content-Type': contentType });
+      res.end(data);
+    } catch {
+      res.writeHead(404, { 'Content-Type': 'text/plain' });
+      res.end('Not found');
+    }
+  });
+
+  const wss = new WebSocketServer({ server: httpServer });
+
+  wss.on('connection', (ws: WebSocket) => {
+    webSession.addConnection(ws);
+  });
+
+  await new Promise<void>((resolve) => {
+    httpServer.listen(opts.port, resolve);
+  });
+
+  const url = `http://localhost:${opts.port}`;
+
+  if (opts.open) {
+    const openCmd =
+      process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'start' : 'xdg-open';
+    exec(`${openCmd} ${url}`);
+  }
+
+  const close = async (): Promise<void> => {
+    wss.close();
+    await webSession.close();
+    await new Promise<void>((resolve) => {
+      httpServer.close(() => resolve());
+    });
+  };
+
+  return { url, close };
+}

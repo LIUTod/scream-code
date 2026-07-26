@@ -1086,6 +1086,11 @@ export const zh: Record<string, string> = {
   // ─── Dispatch errors ───────────
   'dispatch.session_picker_failed': '打开会话选择器失败：{error}',
   'dispatch.tasks_browser_failed': '打开任务浏览器失败：{error}',
+  'dispatch.web_no_session': '没有活跃会话，无法启动 Web UI',
+  'dispatch.web_already_running': 'Web UI 已在运行：{url}',
+  'dispatch.web_started_title': 'Web UI 已启动',
+  'dispatch.web_started_desc': '浏览器已打开：{url}',
+  'dispatch.web_start_failed': '启动 Web UI 失败：{error}',
   'dispatch.usage_failed': '显示使用情况失败：{error}',
   'dispatch.status_failed': '显示状态报告失败：{error}',
 
@@ -1142,6 +1147,7 @@ export const zh: Record<string, string> = {
   'registry.plan_desc': '切换计划模式',
   'registry.fusionplan_desc': '切换融合计划模式（多子代理并行规划）',
   'registry.tasks_desc': '浏览后台任务',
+  'registry.web_desc': '启动浏览器 Web UI（复用当前会话）',
   'registry.help_desc': '显示可用命令和快捷键',
   'registry.status_desc': '显示当前会话和运行时状态',
   'registry.usage_desc': '显示 token 用量和上下文窗口',
