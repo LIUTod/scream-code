@@ -18,7 +18,7 @@
  */
 
 import { createServer, type Server as HttpServer, type IncomingMessage } from 'node:http';
-import { readFile } from 'node:fs/promises';
+import { readFile, access } from 'node:fs/promises';
 import { join } from 'node:path';
 import { exec } from 'node:child_process';
 import { WebSocketServer, WebSocket } from 'ws';
@@ -99,6 +99,25 @@ interface ConnectionState {
 const HEARTBEAT_INTERVAL_MS = 30_000;
 const HEARTBEAT_TIMEOUT_MS = 2 * HEARTBEAT_INTERVAL_MS;
 const API_PREFIX = '/api/v1';
+
+const contentTypes: Record<string, string> = {
+  js: 'application/javascript',
+  mjs: 'application/javascript',
+  css: 'text/css',
+  html: 'text/html; charset=utf-8',
+  json: 'application/json',
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  gif: 'image/gif',
+  svg: 'image/svg+xml',
+  ico: 'image/x-icon',
+  woff2: 'font/woff2',
+  woff: 'font/woff',
+  ttf: 'font/ttf',
+};
+
+// Volatility classification
 
 // ─── Volatility classification ────────────────────────────────────────────
 
@@ -559,7 +578,16 @@ export async function runWebServer(opts: WebServerOptions): Promise<void> {
   const webSession = new WebSession(session, { workDir, permission, yolo: opts.yolo });
 
   // ── HTTP server: serve the chat page and REST API ──────────────────────
-  const __dirname = import.meta.dirname;
+  const baseDir = import.meta.dirname;
+  const prodPublicDir = join(baseDir, '..', 'public');
+  const devPublicDir = join(baseDir, 'frontend', 'dist');
+  let publicDir = prodPublicDir;
+  try {
+    await access(join(devPublicDir, 'index.html'));
+    publicDir = devPublicDir;
+  } catch {
+    // Fall back to prodPublicDir below.
+  }
   const httpServer: HttpServer = createServer(async (req: IncomingMessage, res) => {
     const url = req.url ?? '/';
 
@@ -577,22 +605,32 @@ export async function runWebServer(opts: WebServerOptions): Promise<void> {
       return;
     }
 
-    // Static HTML
+    // Static assets from the Vite build output
     if (url === '/' || url === '/index.html') {
       try {
-        const htmlPath = join(__dirname, 'public', 'index.html');
-        const html = await readFile(htmlPath, 'utf-8');
+        const html = await readFile(join(publicDir, 'index.html'), 'utf-8');
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
         res.end(html);
       } catch {
         res.writeHead(500, { 'Content-Type': 'text/plain' });
-        res.end('Failed to load web UI');
+        res.end('Failed to load web UI. Did you run pnpm web:build?');
       }
       return;
     }
 
-    res.writeHead(404, { 'Content-Type': 'text/plain' });
-    res.end('Not found');
+    // Serve other static assets (JS/CSS/fonts) from the build output.
+    const safeUrl = url.replaceAll(/\?.*$/g, '').replaceAll(/\.{2,}/g, '');
+    try {
+      const filePath = join(publicDir, safeUrl);
+      const ext = filePath.split('.').pop() ?? '';
+      const contentType = contentTypes[ext] ?? 'application/octet-stream';
+      const data = await readFile(filePath);
+      res.writeHead(200, { 'Content-Type': contentType });
+      res.end(data);
+    } catch {
+      res.writeHead(404, { 'Content-Type': 'text/plain' });
+      res.end('Not found');
+    }
   });
 
   // ── WebSocket server ───────────────────────────────────────────────────
