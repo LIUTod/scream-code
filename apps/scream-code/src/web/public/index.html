@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Scream Web UI</title>
+<style>
+  :root {
+    --bg: #0d1117; --surface: #161b22; --border: #30363d;
+    --text: #e6edf3; --text-dim: #8b949e; --accent: #79eb00;
+    --red: #e85454; --blue: #58a6ff; --yellow: #f7e308;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+    background: var(--bg); color: var(--text); height: 100vh;
+    display: flex; flex-direction: column;
+  }
+  header {
+    background: var(--surface); border-bottom: 1px solid var(--border);
+    padding: 12px 20px; display: flex; align-items: center; gap: 12px;
+  }
+  header h1 { font-size: 16px; font-weight: 600; }
+  #status { font-size: 12px; color: var(--text-dim); margin-left: auto; }
+  #status.connected { color: var(--accent); }
+  #messages {
+    flex: 1; overflow-y: auto; padding: 16px 20px; display: flex;
+    flex-direction: column; gap: 12px;
+  }
+  .msg { max-width: 85%; padding: 10px 14px; border-radius: 12px; font-size: 14px; line-height: 1.6; }
+  .msg.user { background: #1f6feb33; align-self: flex-end; }
+  .msg.assistant { background: var(--surface); border: 1px solid var(--border); align-self: flex-start; }
+  .msg.assistant pre { background: var(--bg); padding: 8px; border-radius: 6px; overflow-x: auto; margin-top: 6px; }
+  .msg.error { background: #e8545433; border: 1px solid var(--red); color: var(--red); }
+  .thinking {
+    background: #f7e30811; border: 1px solid #f7e30844; border-radius: 8px;
+    padding: 8px 12px; font-size: 13px; color: var(--text-dim); font-style: italic;
+    align-self: flex-start; max-width: 85%; cursor: pointer;
+  }
+  .thinking .content { display: none; margin-top: 6px; white-space: pre-wrap; }
+  .thinking.expanded .content { display: block; }
+  .thinking .label { font-weight: 600; color: var(--yellow); }
+  .tool-card {
+    background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--blue);
+    border-radius: 6px; padding: 8px 12px; font-size: 13px; align-self: flex-start; max-width: 85%;
+  }
+  .tool-card .name { color: var(--blue); font-weight: 600; }
+  .tool-card .args { color: var(--text-dim); margin-top: 4px; white-space: pre-wrap; word-break: break-all; }
+  .tool-card .result { margin-top: 6px; padding: 6px 8px; background: var(--bg); border-radius: 4px;
+    white-space: pre-wrap; word-break: break-word; font-family: "SF Mono", "Cascadia Code", monospace; font-size: 12px; }
+  .tool-card.error { border-left-color: var(--red); }
+  .tool-card.error .result { color: var(--red); }
+  .approval-overlay {
+    position: fixed; inset: 0; background: #000a; display: flex;
+    align-items: center; justify-content: center; z-index: 100;
+  }
+  .approval-box {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+    padding: 20px 24px; max-width: 500px; width: 90%;
+  }
+  .approval-box h3 { margin-bottom: 12px; }
+  .approval-box .action { font-family: monospace; background: var(--bg); padding: 8px; border-radius: 6px; margin: 12px 0; }
+  .approval-box .buttons { display: flex; gap: 12px; margin-top: 16px; }
+  .approval-box button {
+    flex: 1; padding: 8px 16px; border-radius: 8px; border: none; cursor: pointer; font-size: 14px; font-weight: 600;
+  }
+  .btn-approve { background: var(--accent); color: #000; }
+  .btn-reject { background: var(--border); color: var(--text); }
+  #input-bar {
+    border-top: 1px solid var(--border); padding: 12px 20px; display: flex; gap: 8px;
+  }
+  #input {
+    flex: 1; background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+    padding: 10px 14px; color: var(--text); font-size: 14px; font-family: inherit; resize: none;
+    max-height: 200px; min-height: 42px;
+  }
+  #send {
+    background: var(--accent); color: #000; border: none; border-radius: 8px;
+    padding: 0 20px; font-weight: 600; cursor: pointer; font-size: 14px;
+  }
+  #send:disabled { opacity: 0.4; cursor: not-allowed; }
+</style>
+</head>
+<body>
+<header>
+  <h1>■ Scream Web UI</h1>
+  <span id="status">connecting...</span>
+</header>
+<div id="messages"></div>
+<div id="input-bar">
+  <textarea id="input" rows="1" placeholder="给 Scream 发消息... (Enter 发送, Shift+Enter 换行)" autofocus></textarea>
+  <button id="send">发送</button>
+</div>
+
+<script>
+const ws = new WebSocket(`ws://${location.host}`);
+const statusEl = document.getElementById('status');
+const messagesEl = document.getElementById('messages');
+const inputEl = document.getElementById('input');
+const sendBtn = document.getElementById('send');
+
+let busy = false;
+let currentAssistant = null;
+let currentThinking = null;
+
+// ── WebSocket ──────────────────────────────────────────────────────
+ws.onopen = () => { statusEl.textContent = 'connected'; statusEl.classList.add('connected'); };
+ws.onclose = () => { statusEl.textContent = 'disconnected'; statusEl.classList.remove('connected'); setBusy(false); };
+ws.onerror = () => { statusEl.textContent = 'connection error'; };
+
+ws.onmessage = (e) => {
+  let msg;
+  try { msg = JSON.parse(e.data); } catch { return; }
+  switch (msg.type) {
+    case 'session_init': onSessionInit(msg); break;
+    case 'event': onEvent(msg.event); break;
+    case 'approval_request': onApprovalRequest(msg); break;
+    case 'error': addError(msg.message); break;
+  }
+};
+
+// ── Session ────────────────────────────────────────────────────────
+function onSessionInit(msg) {
+  statusEl.textContent = `session: ${msg.sessionId.slice(0, 8)} · ${msg.workDir}`;
+}
+
+// ── Agent events ───────────────────────────────────────────────────
+function onEvent(event) {
+  const t = event.type;
+  if (t === 'turn.started') {
+    setBusy(true);
+    currentAssistant = null;
+    currentThinking = null;
+  } else if (t === 'assistant.delta') {
+    if (!currentAssistant) {
+      currentAssistant = addMsg('assistant', '');
+    }
+    currentAssistant.textContent += event.delta;
+    scrollDown();
+  } else if (t === 'thinking.delta') {
+    if (!currentThinking) {
+      currentThinking = document.createElement('div');
+      currentThinking.className = 'thinking';
+      currentThinking.innerHTML = '<span class="label">💭 思考中</span><div class="content"></div>';
+      currentThinking.onclick = () => currentThinking.classList.toggle('expanded');
+      messagesEl.appendChild(currentThinking);
+    }
+    currentThinking.querySelector('.content').textContent += event.delta;
+    scrollDown();
+  } else if (t === 'tool.call.started') {
+    currentThinking = null;
+    const card = document.createElement('div');
+    card.className = 'tool-card';
+    card.id = `tool-${event.toolCallId}`;
+    const argsStr = formatArgs(event.args);
+    card.innerHTML = `<span class="name">🔧 ${escapeHtml(event.name)}</span><div class="args">${argsStr}</div>`;
+    messagesEl.appendChild(card);
+    scrollDown();
+  } else if (t === 'tool.result') {
+    const card = document.getElementById(`tool-${event.toolCallId}`);
+    if (card) {
+      if (event.isError) card.classList.add('error');
+      const result = document.createElement('div');
+      result.className = 'result';
+      result.textContent = truncate(String(event.output), 2000);
+      card.appendChild(result);
+    }
+    scrollDown();
+  } else if (t === 'turn.ended') {
+    setBusy(false);
+    currentAssistant = null;
+    currentThinking = null;
+    if (event.reason === 'failed') {
+      addError(event.error?.message ?? 'Turn failed');
+    }
+  } else if (t === 'error') {
+    addError(event.error?.message ?? 'Unknown error');
+  }
+}
+
+// ── Approval ───────────────────────────────────────────────────────
+function onApprovalRequest(msg) {
+  const overlay = document.createElement('div');
+  overlay.className = 'approval-overlay';
+  const actionText = msg.display?.description ?? msg.action ?? 'execute';
+  overlay.innerHTML = `
+    <div class="approval-box">
+      <h3>🔧 ${escapeHtml(msg.toolName)} 请求批准</h3>
+      <div class="action">${escapeHtml(actionText)}</div>
+      <div class="buttons">
+        <button class="btn-reject">拒绝</button>
+        <button class="btn-approve">批准</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  overlay.querySelector('.btn-approve').onclick = () => {
+    ws.send(JSON.stringify({ type: 'approval_response', id: msg.id, decision: 'approved' }));
+    overlay.remove();
+  };
+  overlay.querySelector('.btn-reject').onclick = () => {
+    ws.send(JSON.stringify({ type: 'approval_response', id: msg.id, decision: 'rejected' }));
+    overlay.remove();
+  };
+}
+
+// ── Helpers ────────────────────────────────────────────────────────
+function addMsg(cls, text) {
+  const el = document.createElement('div');
+  el.className = `msg ${cls}`;
+  el.textContent = text;
+  messagesEl.appendChild(el);
+  scrollDown();
+  return el;
+}
+
+function addError(text) {
+  const el = document.createElement('div');
+  el.className = 'msg error';
+  el.textContent = text;
+  messagesEl.appendChild(el);
+  scrollDown();
+}
+
+function setBusy(b) {
+  busy = b;
+  sendBtn.disabled = b;
+  sendBtn.textContent = b ? '...' : '发送';
+}
+
+function scrollDown() {
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function formatArgs(args) {
+  if (!args) return '';
+  try { return escapeHtml(JSON.stringify(args, null, 2)); } catch { return escapeHtml(String(args)); }
+}
+
+function truncate(s, max) {
+  return s.length > max ? s.slice(0, max) + `\n... (${s.length - max} more chars)` : s;
+}
+
+// ── Input ──────────────────────────────────────────────────────────
+function send() {
+  const text = inputEl.value.trim();
+  if (!text || busy) return;
+  addMsg('user', text);
+  ws.send(JSON.stringify({ type: 'prompt', text }));
+  inputEl.value = '';
+  inputEl.style.height = 'auto';
+}
+
+sendBtn.onclick = send;
+inputEl.onkeydown = (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+};
+inputEl.oninput = () => {
+  inputEl.style.height = 'auto';
+  inputEl.style.height = Math.min(inputEl.scrollHeight, 200) + 'px';
+};
+</script>
+</body>
+</html>

@@ -43,6 +43,7 @@
   },
   "scripts": {
     "build": "tsdown",
+    "postbuild": "node scripts/copy-web-assets.mjs",
     "dev": "node scripts/dev.mjs",
     "dev:cli-only": "tsx --import ../../build/register-raw-text-loader.mjs ./src/main.ts",
     "dev:prod": "node dist/main.mjs",
@@ -67,6 +68,7 @@
     "mupdf": "^1.28.0",
     "semver": "^7.7.4",
     "smol-toml": "^1.6.1",
+    "ws": "^8.21.1",
     "zod": "^4.3.6"
   },
   "devDependencies": {
@@ -77,6 +79,7 @@
     "@scream-code/memory": "workspace:*",
     "@scream-code/scream-code-sdk": "workspace:^",
     "@types/semver": "^7.7.0",
+    "@types/ws": "^8.18.1",
     "tsx": "^4.21.0"
   },
   "engines": {
