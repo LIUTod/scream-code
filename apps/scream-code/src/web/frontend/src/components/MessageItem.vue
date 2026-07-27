@@ -2,8 +2,11 @@
 import { computed, ref } from 'vue';
 import type { ChatMessage, ToolMessage } from '../types';
 import MarkdownRenderer from './MarkdownRenderer.vue';
-import ToolCard from './ToolCard.vue';
+import GenericToolCard from './GenericToolCard.vue';
+import EditToolCard from './EditToolCard.vue';
+import ToolGroup from './ToolGroup.vue';
 import ThinkingBlock from './ThinkingBlock.vue';
+import { groupConsecutiveTools, isEditTool } from '../utils/toolGroup';
 
 const props = withDefaults(
   defineProps<{
@@ -32,6 +35,7 @@ const avatarIcon = computed(() =>
 
 const thinkingTools = computed(() => props.message.tools.filter((t) => t.name === 'thinking'));
 const realTools = computed(() => props.message.tools.filter((t) => t.name !== 'thinking'));
+const groupedTools = computed(() => groupConsecutiveTools(realTools.value));
 
 const timestamp = computed(() => {
   if (!props.message.ts) return '';
@@ -82,12 +86,11 @@ function editResend() {
           :active="streaming"
         />
         <div v-if="realTools.length" class="tools-section">
-          <ToolCard
-            v-for="(tool, i) in realTools"
-            :key="tool.toolCallId"
-            :tool="tool"
-            :style="{ animationDelay: `${Math.min(i, 10) * 50}ms` }"
-          />
+          <template v-for="group in groupedTools" :key="group.tools[0]!.toolCallId">
+            <ToolGroup v-if="group.tools.length > 1" :name="group.name" :tools="group.tools" />
+            <EditToolCard v-else-if="isEditTool(group.name)" :tool="group.tools[0]!" />
+            <GenericToolCard v-else :tool="group.tools[0]!" />
+          </template>
         </div>
       </template>
 

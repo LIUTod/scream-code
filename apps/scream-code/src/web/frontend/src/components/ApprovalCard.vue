@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch, onMounted, onBeforeUnmount } from 'vue';
 import type { ApprovalRequest } from '../types';
+import Button from './ui/Button.vue';
 
 const props = defineProps<{
   approvals: ApprovalRequest[];
@@ -120,34 +121,35 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
       </div>
 
       <div class="approval-buttons">
-        <button
-          class="btn btn-approve"
+        <Button
+          variant="primary"
           :disabled="isBusy(current.id)"
           @click="act('approved', undefined, 'once')"
         >
           <kbd>1</kbd> 批准
-        </button>
-        <button
-          class="btn btn-session"
+        </Button>
+        <Button
+          variant="secondary"
           :disabled="isBusy(current.id)"
           @click="act('approved', undefined, 'session')"
         >
           <kbd>2</kbd> 会话批准
-        </button>
-        <button
-          class="btn btn-reject"
+        </Button>
+        <Button
+          variant="danger"
           :disabled="isBusy(current.id)"
           @click="act('rejected')"
         >
           <kbd>3</kbd> 拒绝
-        </button>
-        <button
-          :class="['btn btn-feedback', { active: feedbackOpen }]"
+        </Button>
+        <Button
+          variant="secondary"
+          :class="{ 'feedback-active': feedbackOpen }"
           :disabled="isBusy(current.id)"
           @click="feedbackOpen = !feedbackOpen"
         >
           <kbd>4</kbd> 反馈
-        </button>
+        </Button>
         <span v-if="isBusy(current.id)" class="busy-indicator" aria-label="处理中">
           <span class="spinner" /> 处理中…
         </span>
@@ -279,25 +281,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
   padding: var(--space-3);
   flex-wrap: wrap;
 }
-.btn {
-  border: 1px solid var(--color-line);
-  border-radius: var(--radius-md);
-  padding: var(--space-1) var(--space-3);
-  font-size: var(--font-size-sm);
-  font-weight: 600;
-  cursor: pointer;
-  background: var(--color-surface);
-  color: var(--color-text);
-  transition:
-    background var(--dur-fast),
-    border-color var(--dur-fast),
-    opacity var(--dur-fast),
-    transform var(--dur-fast) var(--ease-out);
-}
-.btn:active:not(:disabled) {
-  transform: scale(0.97);
-}
-.btn kbd {
+.approval-buttons kbd {
   font-family: var(--font-mono);
   font-size: 10px;
   background: var(--color-surface-sunken);
@@ -306,35 +290,13 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
   padding: 0 var(--space-1);
   margin-right: var(--space-1);
 }
-.btn:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-.btn-approve {
-  background: var(--color-accent);
-  border-color: var(--color-accent);
-  color: var(--color-on-accent);
-}
-.btn-approve kbd {
+.ui-btn--primary kbd {
   background: rgba(0, 0, 0, 0.15);
   border-color: transparent;
 }
-.btn-approve:hover:not(:disabled) {
-  background: var(--color-accent-hover);
-}
-.btn-session:hover:not(:disabled) {
-  border-color: var(--color-accent-bd);
-  background: var(--color-accent-soft);
-}
-.btn-reject:hover:not(:disabled) {
-  border-color: var(--color-danger);
-  background: var(--color-danger-soft);
-  color: var(--color-danger);
-}
-.btn-feedback.active,
-.btn-feedback:hover:not(:disabled) {
-  border-color: var(--color-warning);
-  background: var(--color-warning-soft);
+.feedback-active {
+  border-color: var(--color-warning) !important;
+  background: var(--color-warning-soft) !important;
 }
 
 .busy-indicator {

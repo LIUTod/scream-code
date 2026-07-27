@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, watch, provide } from 'vue';
 import ChatView from './components/ChatView.vue';
+import Toast from './components/ui/Toast.vue';
 
 type Theme = 'light' | 'dark' | 'system';
 
@@ -61,6 +62,7 @@ window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', app
       </button>
     </div>
     <ChatView />
+    <Toast />
   </div>
 </template>
 

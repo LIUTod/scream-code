@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import type { SessionStatus, SessionUsage, TokenUsage } from '../types';
+import Dialog from './ui/Dialog.vue';
 
 const props = defineProps<{
   mode: 'status' | 'usage';
@@ -53,98 +54,35 @@ const hasUsage = computed(() => present(props.status.usage) || present(props.sta
 </script>
 
 <template>
-  <div class="info-overlay" @click.self="emit('close')">
-    <div class="info-panel" role="dialog" aria-modal="true" :aria-label="heading">
-      <div class="info-header">
-        <span class="info-title">{{ heading }}</span>
-        <button class="info-close" aria-label="关闭" @click="emit('close')">✕</button>
-      </div>
-      <div class="info-body">
-        <template v-if="mode === 'status'">
-          <div class="info-row"><span class="info-key">会话 ID</span><span class="info-val mono">{{ sessionId ?? '-' }}</span></div>
-          <div class="info-row"><span class="info-key">工作目录</span><span class="info-val mono">{{ workDir ?? '-' }}</span></div>
-          <div class="info-row"><span class="info-key">模型</span><span class="info-val">{{ status.model ?? '-' }}</span></div>
-          <div class="info-row"><span class="info-key">权限模式</span><span class="info-val">{{ permLabel(status.permission) }}</span></div>
-          <div class="info-row"><span class="info-key">思考级别</span><span class="info-val">{{ status.thinkingLevel ?? '-' }}</span></div>
-          <div class="info-row"><span class="info-key">计划模式</span><span class="info-val">{{ boolLabel(status.planMode) }}</span></div>
-          <div class="info-row"><span class="info-key">WolfPack 模式</span><span class="info-val">{{ boolLabel(status.wolfpackMode) }}</span></div>
-          <div class="info-row"><span class="info-key">上下文</span><span class="info-val">{{ fmtNum(status.contextTokens) }} / {{ fmtNum(status.maxContextTokens) }} ({{ usagePct(status.contextUsage) }})</span></div>
-        </template>
-        <template v-else>
-          <div class="info-row"><span class="info-key">上下文 Token</span><span class="info-val">{{ fmtNum(status.contextTokens) }} / {{ fmtNum(status.maxContextTokens) }}</span></div>
-          <div class="info-row"><span class="info-key">上下文占比</span><span class="info-val">{{ usagePct(status.contextUsage) }}</span></div>
-          <div v-if="status.usage?.total" class="info-row"><span class="info-key">累计 Token</span><span class="info-val">{{ fmtNum(sumTokens(status.usage.total)) }}</span></div>
-          <div v-if="status.usage?.currentTurn" class="info-row"><span class="info-key">当前回合</span><span class="info-val">{{ fmtNum(sumTokens(status.usage.currentTurn)) }}</span></div>
-          <template v-if="modelRows(status.usage).length">
-            <div class="info-subhead">按模型</div>
-            <div v-for="row in modelRows(status.usage)" :key="row.model" class="info-row info-row-model">
-              <span class="info-val mono">{{ row.model }}</span>
-              <span class="info-val">{{ fmtNum(row.tokens) }}（输出 {{ fmtNum(row.output) }} · 缓存读 {{ fmtNum(row.cacheRead) }}）</span>
-            </div>
-          </template>
-          <div v-if="!hasUsage" class="info-empty">暂无用量数据</div>
-        </template>
-      </div>
-    </div>
-  </div>
+  <Dialog :open="true" :title="heading" @close="emit('close')">
+    <template v-if="mode === 'status'">
+      <div class="info-row"><span class="info-key">会话 ID</span><span class="info-val mono">{{ sessionId ?? '-' }}</span></div>
+      <div class="info-row"><span class="info-key">工作目录</span><span class="info-val mono">{{ workDir ?? '-' }}</span></div>
+      <div class="info-row"><span class="info-key">模型</span><span class="info-val">{{ status.model ?? '-' }}</span></div>
+      <div class="info-row"><span class="info-key">权限模式</span><span class="info-val">{{ permLabel(status.permission) }}</span></div>
+      <div class="info-row"><span class="info-key">思考级别</span><span class="info-val">{{ status.thinkingLevel ?? '-' }}</span></div>
+      <div class="info-row"><span class="info-key">计划模式</span><span class="info-val">{{ boolLabel(status.planMode) }}</span></div>
+      <div class="info-row"><span class="info-key">WolfPack 模式</span><span class="info-val">{{ boolLabel(status.wolfpackMode) }}</span></div>
+      <div class="info-row"><span class="info-key">上下文</span><span class="info-val">{{ fmtNum(status.contextTokens) }} / {{ fmtNum(status.maxContextTokens) }} ({{ usagePct(status.contextUsage) }})</span></div>
+    </template>
+    <template v-else>
+      <div class="info-row"><span class="info-key">上下文 Token</span><span class="info-val">{{ fmtNum(status.contextTokens) }} / {{ fmtNum(status.maxContextTokens) }}</span></div>
+      <div class="info-row"><span class="info-key">上下文占比</span><span class="info-val">{{ usagePct(status.contextUsage) }}</span></div>
+      <div v-if="status.usage?.total" class="info-row"><span class="info-key">累计 Token</span><span class="info-val">{{ fmtNum(sumTokens(status.usage.total)) }}</span></div>
+      <div v-if="status.usage?.currentTurn" class="info-row"><span class="info-key">当前回合</span><span class="info-val">{{ fmtNum(sumTokens(status.usage.currentTurn)) }}</span></div>
+      <template v-if="modelRows(status.usage).length">
+        <div class="info-subhead">按模型</div>
+        <div v-for="row in modelRows(status.usage)" :key="row.model" class="info-row info-row-model">
+          <span class="info-val mono">{{ row.model }}</span>
+          <span class="info-val">{{ fmtNum(row.tokens) }}（输出 {{ fmtNum(row.output) }} · 缓存读 {{ fmtNum(row.cacheRead) }}）</span>
+        </div>
+      </template>
+      <div v-if="!hasUsage" class="info-empty">暂无用量数据</div>
+    </template>
+  </Dialog>
 </template>
 
 <style scoped>
-.info-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.45);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: var(--z-overlay);
-  padding: var(--space-3);
-}
-.info-panel {
-  width: 100%;
-  max-width: 480px;
-  max-height: 80vh;
-  overflow: auto;
-  background: var(--color-surface-raised);
-  border: 1px solid var(--color-line);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-md, 0 8px 24px rgba(0, 0, 0, 0.18));
-  display: flex;
-  flex-direction: column;
-}
-.info-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: var(--space-3) var(--space-4);
-  border-bottom: 1px solid var(--color-line);
-}
-.info-title {
-  font-size: var(--font-size-base);
-  font-weight: 600;
-  color: var(--color-text);
-}
-.info-close {
-  border: none;
-  background: transparent;
-  color: var(--color-text-muted);
-  font-size: var(--font-size-base);
-  cursor: pointer;
-  padding: var(--space-1);
-  border-radius: var(--radius-md);
-  line-height: 1;
-  transition: background var(--dur-fast), color var(--dur-fast);
-}
-.info-close:hover {
-  background: var(--color-hover);
-  color: var(--color-text);
-}
-.info-body {
-  padding: var(--space-2) var(--space-4) var(--space-4);
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-}
 .info-row {
   display: flex;
   align-items: flex-start;

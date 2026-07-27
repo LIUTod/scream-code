@@ -1,12 +1,14 @@
 <script setup lang="ts">
+import { ref } from 'vue';
 import type { SessionListItem } from '../types';
+import IconButton from './ui/IconButton.vue';
+import Dialog from './ui/Dialog.vue';
+import Button from './ui/Button.vue';
 
 defineProps<{
   sessions: SessionListItem[];
   currentSessionId: string | null;
-  /** Desktop: icon-only narrow sidebar. */
   collapsed?: boolean;
-  /** Mobile: sidebar rendered as a slide-in overlay. */
   mobileOpen?: boolean;
 }>();
 
@@ -18,9 +20,16 @@ const emit = defineEmits<{
   (e: 'toggle'): void;
 }>();
 
+const deleteConfirmId = ref<string | null>(null);
+
 function confirmDelete(id: string) {
-  if (window.confirm('确定要删除这个会话吗？此操作不可恢复。')) {
-    emit('delete', id);
+  deleteConfirmId.value = id;
+}
+
+function confirmDeleteConfirmed() {
+  if (deleteConfirmId.value) {
+    emit('delete', deleteConfirmId.value);
+    deleteConfirmId.value = null;
   }
 }
 
@@ -72,8 +81,8 @@ function formatTime(ts: number): string {
             </div>
           </div>
           <div class="session-actions" @click.stop>
-            <button class="icon-btn" title="导出 Markdown" @click="emit('export', s.sessionId)">📥</button>
-            <button class="icon-btn danger" title="删除" @click="confirmDelete(s.sessionId)">🗑</button>
+            <IconButton label="导出 Markdown" @click="emit('export', s.sessionId)">📥</IconButton>
+            <IconButton label="删除" variant="danger" @click="confirmDelete(s.sessionId)">🗑</IconButton>
           </div>
         </div>
       </TransitionGroup>
@@ -83,6 +92,14 @@ function formatTime(ts: number): string {
         <div class="empty-hint">点击上方按钮开始新会话</div>
       </div>
     </div>
+
+    <Dialog :open="deleteConfirmId !== null" title="删除会话" @close="deleteConfirmId = null">
+      <p style="color: var(--color-text-muted); font-size: var(--font-size-sm); margin: 0;">确定要删除这个会话吗？此操作不可恢复。</p>
+      <template #footer>
+        <Button variant="ghost" size="sm" @click="deleteConfirmId = null">取消</Button>
+        <Button variant="danger" size="sm" @click="confirmDeleteConfirmed">删除</Button>
+      </template>
+    </Dialog>
   </aside>
 </template>
 
@@ -277,22 +294,6 @@ function formatTime(ts: number): string {
 .session-item.active .session-actions {
   opacity: 1;
   transform: translateX(0);
-}
-.icon-btn {
-  background: transparent;
-  border: none;
-  padding: var(--space-1);
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  font-size: var(--font-size-sm);
-  line-height: 1;
-  transition: background var(--dur-fast) var(--ease-out);
-}
-.icon-btn:hover {
-  background: var(--color-hover);
-}
-.icon-btn.danger:hover {
-  background: var(--color-danger-soft);
 }
 .empty-sessions {
   padding: var(--space-8) var(--space-3);

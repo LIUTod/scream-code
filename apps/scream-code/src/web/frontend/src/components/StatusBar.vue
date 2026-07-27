@@ -3,6 +3,7 @@ import { computed, ref } from 'vue';
 import type { ConnectionStatus } from '../composables/useScreamWebClient';
 import type { GitStatus, SessionStatus } from '../types';
 import ContextRing from './ContextRing.vue';
+import Dialog from './ui/Dialog.vue';
 
 const props = withDefaults(
   defineProps<{
@@ -130,18 +131,10 @@ const gitTitle = computed(() => {
       <span class="label">{{ labels[connectionStatus] }}</span>
     </div>
 
-    <Teleport to="body">
-      <div v-if="showDiff && gitStatus" class="diff-overlay" @click.self="showDiff = false">
-        <div class="diff-modal" role="dialog" aria-label="Git diff 统计">
-          <div class="diff-header">
-            <span class="diff-title">⎇ {{ gitStatus.branch ?? 'detached' }} — diff 统计</span>
-            <button class="diff-close" title="关闭" @click="showDiff = false">✕</button>
-          </div>
-          <pre v-if="gitStatus.diffStat" class="diff-body">{{ gitStatus.diffStat }}</pre>
-          <div v-else class="diff-empty">工作区干净，没有变更。</div>
-        </div>
-      </div>
-    </Teleport>
+    <Dialog :open="showDiff && !!gitStatus" :title="`\u23c7 ${gitStatus?.branch ?? 'detached'} - diff \u7edf\u8ba1`" @close="showDiff = false">
+      <pre v-if="gitStatus?.diffStat" class="diff-body">{{ gitStatus.diffStat }}</pre>
+      <div v-else class="diff-empty">\u5de5\u4f5c\u533a\u5e72\u51c0\uff0c\u6ca1\u6709\u53d8\u66f4\u3002</div>
+    </Dialog>
   </header>
 </template>
 
@@ -277,49 +270,6 @@ const gitTitle = computed(() => {
   color: var(--color-text-muted);
 }
 
-.diff-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.45);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: var(--z-modal);
-}
-.diff-modal {
-  width: min(640px, 90vw);
-  max-height: 70vh;
-  display: flex;
-  flex-direction: column;
-  background: var(--color-surface-raised);
-  border: 1px solid var(--color-line);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-lg);
-  overflow: hidden;
-}
-.diff-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: var(--space-3) var(--space-4);
-  border-bottom: 1px solid var(--color-line);
-}
-.diff-title {
-  font-weight: 600;
-  font-size: var(--font-size-sm);
-  color: var(--color-text);
-}
-.diff-close {
-  border: none;
-  background: transparent;
-  color: var(--color-text-muted);
-  cursor: pointer;
-  font-size: var(--font-size-base);
-  padding: var(--space-1);
-}
-.diff-close:hover {
-  color: var(--color-text);
-}
 .diff-body {
   margin: 0;
   padding: var(--space-3) var(--space-4);

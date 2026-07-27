@@ -2,6 +2,7 @@
 import { computed, nextTick, ref, watch } from 'vue';
 import type { ModelInfo, SessionStatus } from '../types';
 import { filterSlashCommands, resolveCommandName, type SlashCommand } from '../commands';
+import Button from './ui/Button.vue';
 import ContextRing from './ContextRing.vue';
 import ModelPicker from './ModelPicker.vue';
 import SlashMenu from './SlashMenu.vue';
@@ -411,8 +412,8 @@ const permissionLabel = computed(() => {
       </div>
 
       <div class="composer-actions">
-        <button v-if="busy" class="btn btn-danger" @click="abort">■ 停止</button>
-        <button v-else class="btn btn-primary" :disabled="!text.trim()" @click="send">发送 ⏎</button>
+        <Button v-if="busy" variant="danger" @click="abort">■ 停止</Button>
+        <Button v-else variant="primary" :disabled="!text.trim()" @click="send">发送 ⏎</Button>
       </div>
     </div>
   </div>
@@ -550,44 +551,6 @@ const permissionLabel = computed(() => {
   align-items: center;
   flex-shrink: 0;
 }
-.btn {
-  border: none;
-  border-radius: var(--radius-md);
-  padding: var(--space-2) var(--space-4);
-  font-size: var(--font-size-sm);
-  font-weight: 600;
-  cursor: pointer;
-  transition:
-    opacity var(--dur-fast),
-    box-shadow var(--dur-base) var(--ease-out),
-    transform var(--dur-base) var(--ease-out),
-    filter var(--dur-base) var(--ease-out);
-}
-.btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-.btn-primary {
-  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-hover) 100%);
-  color: var(--color-on-accent);
-  box-shadow: var(--shadow-xs);
-}
-.btn-primary:hover:not(:disabled) {
-  filter: brightness(1.08);
-  transform: scale(1.04);
-  box-shadow: var(--shadow-sm), 0 0 12px var(--color-accent-glow);
-}
-.btn-primary:active:not(:disabled) {
-  transform: scale(0.98);
-}
-.btn-danger {
-  background: var(--color-danger);
-  color: #fff;
-  box-shadow: var(--shadow-xs);
-}
-.btn-danger:hover {
-  filter: brightness(1.1);
-}
 
 @media (max-width: 640px) {
   .composer {
@@ -595,9 +558,6 @@ const permissionLabel = computed(() => {
   }
   .pill .ring-label {
     display: none;
-  }
-  .btn {
-    padding: var(--space-2) var(--space-3);
   }
 }
 </style>

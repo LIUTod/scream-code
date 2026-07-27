@@ -1,5 +1,6 @@
 import { ref, computed, type Ref } from 'vue';
 import type { ChatMessage, ApprovalRequest, SessionSnapshot, SessionListItem, SessionStatus, GitStatus, ModelInfo, ModelsResponse, WsMessage, ServerHello } from '../types';
+import { useToast } from './useToast';
 
 export type ConnectionStatus = 'connecting' | 'connected' | 'reconnecting' | 'disconnected';
 
@@ -38,6 +39,7 @@ export interface UseScreamWebClientReturn {
 }
 
 export function useScreamWebClient(): UseScreamWebClientReturn {
+  const { showToast } = useToast();
   const connectionStatus = ref<ConnectionStatus>('connecting');
   const messages = ref<ChatMessage[]>([]);
   const pendingApprovals = ref<ApprovalRequest[]>([]);
@@ -362,15 +364,7 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
   function sendPrompt(text: string): void {
     if (!text || status.value.busy) return;
     if (connectionStatus.value !== 'connected') {
-      messages.value.push({
-        id: generateId(),
-        role: 'system',
-        content: '连接已断开，消息未发送。正在尝试重连...',
-        tools: [],
-        isError: true,
-        ts: Date.now(),
-        local: true,
-      });
+      showToast('连接已断开，正在尝试重连...', 'error');
       connect();
       return;
     }
@@ -390,7 +384,7 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
     // Side questions are designed to run during an active turn; other commands
     // mutate session state and must wait until the turn settles.
     if (status.value.busy && command !== 'btw') {
-      appendSystemMessage(`会话忙碌中，无法执行 /${command}，请稍后再试。`);
+      showToast(`会话忙碌中，无法执行 /${command}，请稍后再试。`, 'warning');
       return;
     }
     // Show pending feedback for commands that take time.
@@ -487,7 +481,7 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
       });
       const data = (await res.json()) as { status?: SessionStatus; message?: string };
       if (!res.ok) {
-        appendSystemMessage(data.message ?? `请求失败（HTTP ${res.status}）`);
+        showToast(data.message ?? `请求失败（HTTP ${res.status}）`, 'error');
         return;
       }
       if (data.status) {
@@ -495,7 +489,7 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
       }
       appendSystemMessage(okMessage);
     } catch (error) {
-      appendSystemMessage(`请求失败：${error instanceof Error ? error.message : String(error)}`);
+      showToast(`请求失败：${error instanceof Error ? error.message : String(error)}`, 'error');
     }
   }
 

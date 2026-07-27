@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { ref, onMounted, onBeforeUnmount } from 'vue';
 import { useScreamWebClient } from '../composables/useScreamWebClient';
+import { useResizable } from '../composables/useResizable';
 import { slashHelpText } from '../commands';
 import StatusBar from './StatusBar.vue';
 import MessageList from './MessageList.vue';
@@ -8,6 +9,8 @@ import Composer from './Composer.vue';
 import ApprovalCard from './ApprovalCard.vue';
 import SessionSidebar from './SessionSidebar.vue';
 import InfoPanel from './InfoPanel.vue';
+import SearchSessionsDialog from './SearchSessionsDialog.vue';
+import ResizeHandle from './ResizeHandle.vue';
 
 const {
   connectionStatus,
@@ -74,6 +77,26 @@ function onSwitchSession(id: string) {
   switchSession(id);
 }
 
+/* ── Session search (Cmd+K) ─────────────────────────────────────────────── */
+const searchOpen = ref(false);
+
+function onGlobalKeydown(e: KeyboardEvent) {
+  if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+    e.preventDefault();
+    searchOpen.value = !searchOpen.value;
+  }
+}
+onMounted(() => window.addEventListener('keydown', onGlobalKeydown));
+onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKeydown));
+
+/* ── Sidebar resize (desktop) ───────────────────────────────────────────── */
+const { width: sidebarWidth, dragging: sidebarDragging, onPointerDown: onSidebarResize } = useResizable({
+  storageKey: 'scream-sidebar-width',
+  defaultWidth: 260,
+  min: 180,
+  max: 480,
+});
+
 function onCreateSession() {
   sidebarMobileOpen.value = false;
   void createSession();
@@ -131,7 +154,7 @@ function onCommand(name: string, args?: string) {
 </script>
 
 <template>
-  <div class="chat-view">
+  <div class="chat-view" :style="{ '--sidebar-width': sidebarWidth + 'px' }">
     <SessionSidebar
       :sessions="sessions"
       :current-session-id="currentSessionId"
@@ -142,6 +165,11 @@ function onCommand(name: string, args?: string) {
       @delete="deleteSession"
       @export="exportSession"
       @toggle="toggleSidebar"
+    />
+    <ResizeHandle
+      v-if="!sidebarCollapsed"
+      :dragging="sidebarDragging"
+      @pointerdown="onSidebarResize"
     />
     <div
       v-if="sidebarMobileOpen"
@@ -186,6 +214,14 @@ function onCommand(name: string, args?: string) {
         />
       </div>
     </div>
+
+    <SearchSessionsDialog
+      v-if="searchOpen"
+      :sessions="sessions"
+      :active-id="currentSessionId"
+      @select="onSwitchSession"
+      @close="searchOpen = false"
+    />
   </div>
 </template>
 
