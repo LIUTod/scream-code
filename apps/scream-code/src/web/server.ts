@@ -1106,6 +1106,8 @@ class WebSession {
 
 class SessionManager {
   private readonly sessions = new Map<string, WebSession>();
+  /** In-flight activation promises to deduplicate concurrent calls. */
+  private readonly activating = new Map<string, Promise<WebSession | null>>();
   private readonly harness: ScreamHarness;
   private readonly homeDir: string;
   private readonly workDir: string;
@@ -1174,6 +1176,22 @@ class SessionManager {
   }
 
   async activateSession(sessionId: string): Promise<WebSession | null> {
+    // Deduplicate concurrent activation calls: if two WS connections arrive
+    // for the same archived session simultaneously, both would create a new
+    // agent session and the first would be orphaned (resource leak).
+    const pending = this.activating.get(sessionId);
+    if (pending) return pending;
+
+    const promise = this.doActivateSession(sessionId);
+    this.activating.set(sessionId, promise);
+    try {
+      return await promise;
+    } finally {
+      this.activating.delete(sessionId);
+    }
+  }
+
+  private async doActivateSession(sessionId: string): Promise<WebSession | null> {
     const existing = this.sessions.get(sessionId);
     if (!existing) {
       // Unknown sessionId: reject to prevent zombie session creation.
@@ -1188,18 +1206,9 @@ class SessionManager {
     });
     // The new agent session has a different ID; we keep the original web sessionId
     // for persistence continuity but swap the underlying agent session.
-    const meta = existing?.getMetadata() ?? {
-      sessionId,
-      workDir: this.workDir,
-      title: 'Reactivated Session',
-      createdAt: Date.now(),
-      model: this.model,
-      permission: this.permission,
-    };
+    const meta = existing.getMetadata();
     // Close old web session's connections but keep journal.
-    if (existing) {
-      await existing.close();
-    }
+    await existing.close();
     const reactivated = new WebSession(session, {
       sessionId,
       workDir: meta.workDir,
