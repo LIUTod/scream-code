@@ -2,10 +2,10 @@
 import { computed, nextTick, ref, watch } from 'vue';
 import type { ModelInfo, SessionStatus } from '../types';
 import { filterSlashCommands, resolveCommandName, type SlashCommand } from '../commands';
-import Button from './ui/Button.vue';
 import ContextRing from './ContextRing.vue';
 import ModelPicker from './ModelPicker.vue';
 import SlashMenu from './SlashMenu.vue';
+import SvgIcon from './ui/SvgIcon.vue';
 
 const props = withDefaults(
   defineProps<{
@@ -291,6 +291,15 @@ function insertText(content: string) {
   });
 }
 
+/** Append a trigger token (@ /) and refocus — used by quick-action chips. */
+function insertToken(token: string) {
+  text.value += token;
+  nextTick(() => {
+    autoResize();
+    textareaRef.value?.focus();
+  });
+}
+
 defineExpose({ insertText, openModelPicker });
 
 /* ── Status pills ────────────────────────────────────────────────────────── */
@@ -380,40 +389,29 @@ const permissionLabel = computed(() => {
     <textarea
       ref="textareaRef"
       v-model="text"
+      id="composer-input"
+      name="message"
       class="composer-input"
       rows="1"
-      :placeholder="busy ? '回合进行中：Enter/Ctrl+S 排队消息，随下一轮注入' : '给 Scream 发消息… (Enter 发送, Shift+Enter 换行, / 命令, ↑↓ 历史)'"
+      :placeholder="busy ? '回合进行中：Enter/Ctrl+S 排队消息，随下一轮注入' : '输入消息，@ 提及，/ 触发指令'"
       @keydown="onKeydown"
     />
 
     <div class="composer-footer">
-      <div class="composer-pills">
-        <button
-          v-if="model && modelSwitchable"
-          class="pill pill-model pill-btn"
-          :title="`当前模型：${model}，点击切换模型 / 思考强度`"
-          @click="toggleModelPicker"
-        >
-          ◆ {{ model }}<template v-if="thinkingLabel"> · {{ thinkingLabel }}</template>
-        </button>
-        <span v-else-if="model" class="pill pill-model" :title="`当前模型：${model}（启动时通过 --model 指定）`">
-          ◆ {{ model }}
-        </span>
-        <span v-if="permission" :class="['pill', permissionClass]" :title="`权限模式：${permission}`">
-          {{ permissionLabel }}
-        </span>
-        <span v-if="contextUsage !== undefined" class="pill pill-ring">
-          <ContextRing :usage="contextUsage" :size="16" />
-          <span class="ring-label">上下文</span>
-        </span>
-        <span v-if="steerQueue.length" class="pill pill-queue" title="运行结束后自动发送">
-          已排队 {{ steerQueue.length }} 条
-        </span>
+      <div class="composer-quick-actions">
+        <button class="quick-action" title="插入 @ 提及" @click="insertToken('@')"><SvgIcon name="at" :size="18" /><span>提及</span></button>
+        <button class="quick-action" title="插入 / 触发指令" @click="insertToken('/')"><SvgIcon name="command" :size="18" /><span>指令</span></button>
+        <span v-if="permission" :class="['permission-label', permissionClass]" :title="`权限模式：${permission}`">{{ permissionLabel }}</span>
+        <span v-if="steerQueue.length" class="queue-label" title="运行结束后自动发送">已排队 {{ steerQueue.length }} 条</span>
       </div>
 
       <div class="composer-actions">
-        <Button v-if="busy" variant="danger" @click="abort">■ 停止</Button>
-        <Button v-else variant="primary" :disabled="!text.trim()" @click="send">发送 ⏎</Button>
+        <button v-if="model" :class="['model-select', { clickable: modelSwitchable }]" :disabled="!modelSwitchable" :title="`当前模型：${model}`" @click="toggleModelPicker">
+          <SvgIcon name="brain" :size="17" /><span>{{ model }}</span><template v-if="thinkingLabel"> · {{ thinkingLabel }}</template><SvgIcon v-if="modelSwitchable" name="chevron-down" :size="14" />
+        </button>
+        <span v-if="contextUsage !== undefined" class="context-label" title="上下文使用率"><ContextRing :usage="contextUsage" :size="17" /></span>
+        <button v-if="busy" class="stop-btn" title="停止当前回合" @click="abort"><SvgIcon name="stop" :size="17" /><span>停止</span></button>
+        <button v-else class="send-btn" :disabled="!text.trim()" title="发送 (Enter)" aria-label="发送" @click="send"><SvgIcon name="send" :size="19" /></button>
       </div>
     </div>
   </div>
@@ -426,33 +424,34 @@ const permissionLabel = computed(() => {
   flex-direction: column;
   gap: var(--space-2);
   padding: var(--space-3) var(--space-4);
+  background: var(--color-surface);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-sm);
+  transition:
+    border-color var(--dur-base) var(--ease-out),
+    box-shadow var(--dur-base) var(--ease-out);
+}
+.composer:focus-within {
+  border-color: var(--color-accent-bd);
+  box-shadow: var(--shadow-sm), 0 0 0 3px var(--color-accent-soft);
 }
 
 .composer-input {
   width: 100%;
-  background: var(--color-bg);
-  border: 1px solid var(--color-line);
-  border-radius: var(--radius-lg);
-  padding: var(--space-2) var(--space-3);
+  background: transparent;
+  border: none;
+  padding: var(--space-1) 0;
   color: var(--color-text);
   font-size: var(--font-size-base);
   font-family: inherit;
   line-height: 1.5;
   resize: none;
-  min-height: 36px;
+  min-height: 32px;
   max-height: 25vh;
-  box-shadow: var(--shadow-xs);
-  transition:
-    border-color var(--dur-base) var(--ease-out),
-    box-shadow var(--dur-base) var(--ease-out);
-}
-.composer-input:hover:not(:focus) {
-  border-color: var(--color-line-strong);
 }
 .composer-input:focus {
   outline: none;
-  border-color: var(--color-accent);
-  box-shadow: 0 0 0 3px var(--color-accent-soft), 0 0 16px var(--color-accent-glow);
 }
 .composer-input::placeholder {
   color: var(--color-text-faint);
@@ -546,18 +545,99 @@ const permissionLabel = computed(() => {
   background: var(--color-info-soft);
 }
 
+.quick-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--color-line);
+  background: var(--color-surface-sunken);
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+  cursor: pointer;
+  transition:
+    border-color var(--dur-fast),
+    color var(--dur-fast),
+    background var(--dur-fast);
+}
+.quick-chip:hover {
+  border-color: var(--color-accent-bd);
+  color: var(--color-accent);
+  background: var(--color-accent-soft);
+}
+.chip-icon {
+  font-weight: 700;
+}
+
+.send-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-hover) 100%);
+  color: var(--color-on-accent);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  box-shadow: var(--shadow-xs);
+  transition:
+    filter var(--dur-fast),
+    transform var(--dur-fast),
+    box-shadow var(--dur-fast);
+}
+.send-btn:hover:not(:disabled) {
+  filter: brightness(1.08);
+  box-shadow: var(--shadow-sm), 0 0 12px var(--color-accent-glow);
+}
+.send-btn:active:not(:disabled) {
+  transform: scale(0.94);
+}
+
 .composer-actions {
   display: flex;
   align-items: center;
   flex-shrink: 0;
 }
 
+/* Prototype-style large input card */
+.composer {
+  gap: 14px;
+  min-height: 132px;
+  padding: 18px 19px 14px;
+  border-radius: 16px;
+  border-color: var(--color-line-strong);
+  box-shadow: 0 8px 24px rgba(22, 32, 24, 0.06);
+}
+.composer-input {
+  min-height: 54px;
+  padding: 0;
+  font-size: 14px;
+  line-height: 1.65;
+}
+.composer-footer { justify-content: space-between; min-width: 0; }
+.composer-quick-actions,.composer-actions { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.composer-quick-actions { flex: 1; overflow-x: auto; scrollbar-width: none; }
+.composer-quick-actions::-webkit-scrollbar { display: none; }
+.quick-action { height: 32px; display: inline-flex; align-items: center; gap: 6px; padding: 0 9px; flex-shrink: 0; border: 0; border-radius: 8px; background: transparent; color: var(--color-text-muted); font-size: 11px; cursor: pointer; }
+.quick-action:hover { color: var(--color-accent); background: var(--color-accent-soft); }
+.permission-label,.queue-label { padding: 3px 8px; border: 1px solid var(--color-line); border-radius: var(--radius-full); color: var(--color-text-muted); background: var(--color-surface-sunken); font-size: 10px; white-space: nowrap; }
+.model-select { max-width: 230px; height: 34px; display: flex; align-items: center; gap: 6px; padding: 0 10px; border: 1px solid var(--color-line); border-radius: 9px; background: var(--color-surface-sunken); color: var(--color-text-muted); font-size: 11px; white-space: nowrap; }
+.model-select span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.model-select.clickable { cursor: pointer; }
+.model-select.clickable:hover { color: var(--color-accent); border-color: var(--color-accent-bd); }
+.context-label { height: 34px; display: grid; place-items: center; }
+.send-btn { width: 40px; height: 40px; border-radius: 11px; background: var(--color-accent); }
+.stop-btn { height: 38px; display: inline-flex; align-items: center; gap: 6px; padding: 0 12px; border: 1px solid var(--color-danger); border-radius: 10px; background: var(--color-danger-soft); color: var(--color-danger); font-size: 11px; cursor: pointer; }
 @media (max-width: 640px) {
-  .composer {
-    padding: var(--space-2) var(--space-3);
-  }
-  .pill .ring-label {
-    display: none;
-  }
+  .composer { min-height: 116px; padding: 14px; }
+  .quick-action span,.permission-label,.context-label { display: none; }
+  .model-select { max-width: 145px; }
+  .stop-btn span { display: none; }
 }
 </style>

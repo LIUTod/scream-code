@@ -2,15 +2,15 @@
 import { ref, onMounted, watch, provide } from 'vue';
 import ChatView from './components/ChatView.vue';
 import Toast from './components/ui/Toast.vue';
-
-type Theme = 'light' | 'dark' | 'system';
+import type { Theme } from './theme';
 
 const theme = ref<Theme>('system');
 const effectiveTheme = ref<'light' | 'dark'>('dark');
 provide('effectiveTheme', effectiveTheme);
+provide('theme', theme);
 
 const THEME_COLORS: Record<'light' | 'dark', string> = {
-  light: '#ffffff',
+  light: '#f7f8f7',
   dark: '#0d1117',
 };
 
@@ -36,6 +36,7 @@ function setTheme(t: Theme) {
   if (themeTimer !== null) clearTimeout(themeTimer);
   themeTimer = window.setTimeout(() => root.classList.remove('theme-transition'), 320);
 }
+provide('setTheme', setTheme);
 
 onMounted(() => {
   const saved = localStorage.getItem('scream-theme') as Theme | null;
@@ -50,17 +51,6 @@ window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', app
 
 <template>
   <div class="app">
-    <div class="theme-switcher">
-      <button
-        v-for="t in ['light', 'dark', 'system'] as Theme[]"
-        :key="t"
-        :class="['theme-btn', { active: theme === t }]"
-        :title="t === 'light' ? '浅色' : t === 'dark' ? '深色' : '跟随系统'"
-        @click="setTheme(t)"
-      >
-        {{ t === 'light' ? '☀️' : t === 'dark' ? '🌙' : '⚙️' }}
-      </button>
-    </div>
     <ChatView />
     <Toast />
   </div>
@@ -69,48 +59,5 @@ window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', app
 <style scoped>
 .app {
   position: relative;
-}
-.theme-switcher {
-  position: fixed;
-  top: var(--space-3);
-  right: var(--space-5);
-  z-index: var(--z-overlay);
-  display: flex;
-  gap: var(--space-1);
-  background: var(--color-surface-raised);
-  border: 1px solid var(--color-line);
-  border-radius: var(--radius-md);
-  padding: var(--space-1);
-  box-shadow: var(--shadow-sm);
-}
-.theme-btn {
-  background: transparent;
-  border: none;
-  border-radius: var(--radius-sm);
-  padding: var(--space-1) var(--space-2);
-  cursor: pointer;
-  font-size: var(--font-size-base);
-  opacity: 0.6;
-  transition:
-    opacity var(--dur-fast),
-    background var(--dur-fast),
-    transform var(--dur-fast) var(--ease-out);
-}
-.theme-btn.active,
-.theme-btn:hover {
-  background: var(--color-hover);
-  opacity: 1;
-}
-.theme-btn:hover {
-  transform: scale(1.1);
-}
-.theme-btn:active {
-  transform: scale(0.94);
-}
-@media (max-width: 640px) {
-  .theme-switcher {
-    top: var(--space-2);
-    right: var(--space-3);
-  }
 }
 </style>

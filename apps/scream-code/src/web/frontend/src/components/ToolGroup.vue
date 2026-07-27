@@ -1,144 +1,61 @@
-<!-- Collapsible group for consecutive same-type tool calls.
-     Header shows tool name + count + aggregate status. -->
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import type { ToolMessage } from '../types';
-import { aggregateStatus, toolStatus, type ToolStatus } from '../utils/toolGroup';
+import { aggregateStatus, type ToolStatus, isEditTool } from '../utils/toolGroup';
 import GenericToolCard from './GenericToolCard.vue';
 import EditToolCard from './EditToolCard.vue';
-import { isEditTool } from '../utils/toolGroup';
+import SvgIcon from './ui/SvgIcon.vue';
 
-const props = defineProps<{
-  name: string;
-  tools: ToolMessage[];
-}>();
-
-const open = ref(true);
-const count = computed(() => props.tools.length);
+const props = defineProps<{ name: string; tools: ToolMessage[] }>();
+const open = ref(false);
+const userToggled = ref(false);
 const status = computed<ToolStatus>(() => aggregateStatus(props.tools));
-
-const statusIcon = computed(() => {
-  switch (status.value) {
-    case 'ok': return '✓';
-    case 'error': return '✗';
-    case 'running': return '';
-    default: return '';
-  }
-});
-
-function toggle() {
-  open.value = !open.value;
-}
+const completedCount = computed(() => props.tools.filter((tool) => tool.output !== undefined && !tool.isError).length);
+watch(status, (value) => {
+  if (!userToggled.value && value === 'running') open.value = true;
+}, { immediate: true });
+function toggle() { userToggled.value = true; open.value = !open.value; }
 </script>
 
 <template>
-  <div :class="['tool-group', { open }]">
-    <button class="tool-group-head" type="button" :aria-expanded="open" @click="toggle">
-      <span :class="['status-dot', status]">
-        <template v-if="statusIcon">{{ statusIcon }}</template>
+  <section :class="['tool-process', { open, error: status === 'error' }]">
+    <button class="process-head" type="button" :aria-expanded="open" @click="toggle">
+      <span :class="['process-icon', status]"><SvgIcon :name="status === 'ok' ? 'check' : 'terminal'" :size="18" /></span>
+      <span class="process-copy">
+        <strong>工具调用过程</strong>
+        <small>{{ status === 'running' ? '正在执行' : status === 'error' ? '包含失败调用' : `已完成 ${completedCount} 项` }}</small>
       </span>
-      <span class="tg-name">{{ name }}</span>
-      <span class="tg-count">×{{ count }}</span>
-      <span :class="['tg-chevron', { open }]">▸</span>
+      <span class="tool-names" :title="tools.map((tool) => tool.name).join('、')">{{ tools.map((tool) => tool.name).join(' · ') }}</span>
+      <span class="count">{{ tools.length }}</span>
+      <SvgIcon name="chevron-down" :size="17" class="chevron" />
     </button>
-    <div :class="['tool-group-body', { open }]">
-      <div class="tool-group-inner">
-        <component
-          :is="isEditTool(name) ? EditToolCard : GenericToolCard"
-          v-for="tool in tools"
-          :key="tool.toolCallId"
-          :tool="tool"
-        />
+    <div class="process-collapse">
+      <div class="process-inner">
+        <component :is="isEditTool(tool.name) ? EditToolCard : GenericToolCard" v-for="tool in tools" :key="tool.toolCallId" :tool="tool" />
       </div>
     </div>
-  </div>
+  </section>
 </template>
 
 <style scoped>
-.tool-group {
-  display: flex;
-  flex-direction: column;
-  background: var(--color-surface);
-  border: 1px solid var(--color-line);
-  border-radius: var(--radius-lg);
-  overflow: hidden;
-  font-size: var(--font-size-sm);
-  animation: tool-in var(--dur-msg-assistant) var(--ease-out) both;
-}
-@keyframes tool-in {
-  from { opacity: 0; transform: translateY(6px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-@media (prefers-reduced-motion: reduce) {
-  .tool-group { animation: none; }
-}
-
-.tool-group-head {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  width: 100%;
-  padding: var(--space-2) var(--space-3);
-  border: none;
-  background: var(--color-surface-raised);
-  color: var(--color-text-muted);
-  font-size: var(--font-size-sm);
-  text-align: left;
-  cursor: pointer;
-  user-select: none;
-  transition: background var(--dur-fast);
-}
-.tool-group-head:hover { background: var(--color-hover); }
-
-.status-dot {
-  width: 16px; height: 16px;
-  border-radius: var(--radius-full);
-  display: inline-flex; align-items: center; justify-content: center;
-  font-size: 10px; font-weight: 700; flex-shrink: 0;
-}
-.status-dot.ok { background: var(--color-success-soft); color: var(--color-success); }
-.status-dot.error { background: var(--color-danger-soft); color: var(--color-danger); }
-.status-dot.running { background: var(--color-accent); animation: pulse-dot 1.2s var(--ease-out) infinite; }
-@keyframes pulse-dot {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.35; transform: scale(0.75); }
-}
-
-.tg-name {
-  font-family: var(--font-mono);
-  font-weight: 600;
-  color: var(--color-text);
-}
-.tg-count {
-  color: var(--color-text-faint);
-  font-size: var(--font-size-xs);
-}
-.tg-chevron {
-  margin-left: auto;
-  color: var(--color-text-faint);
-  font-size: var(--font-size-xs);
-  transition: transform var(--dur-base) var(--ease-out);
-  flex-shrink: 0;
-}
-.tg-chevron.open { transform: rotate(90deg); }
-
-.tool-group-body {
-  display: grid;
-  grid-template-rows: 0fr;
-  overflow: hidden;
-  transition: grid-template-rows var(--dur-base) var(--ease-out);
-}
-.tool-group-body.open { grid-template-rows: 1fr; }
-.tool-group-inner {
-  min-height: 0;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  padding: var(--space-1) var(--space-2) var(--space-2);
-  background: var(--color-surface-sunken);
-}
-.tool-group-inner > * {
-  border-radius: var(--radius-md);
-}
+.tool-process { overflow:hidden; border:1px solid var(--color-line); border-radius:13px; background:var(--color-surface); box-shadow:0 2px 8px rgba(20,35,24,.025); }
+.tool-process.error { border-color:color-mix(in srgb,var(--color-danger) 42%,var(--color-line)); }
+.process-head { width:100%; min-height:58px; display:flex; align-items:center; gap:11px; padding:10px 13px; border:0; background:var(--color-surface); color:var(--color-text); text-align:left; cursor:pointer; }
+.process-head:hover { background:var(--color-hover); }
+.process-icon { width:34px; height:34px; display:grid; place-items:center; flex-shrink:0; border-radius:9px; color:var(--color-accent); background:var(--color-accent-soft); }
+.process-icon.error { color:var(--color-danger); background:var(--color-danger-soft); }
+.process-icon.running { animation:pulse 1.2s infinite; }
+.process-copy { display:flex; flex-direction:column; flex-shrink:0; }
+.process-copy strong { font-size:12px; }
+.process-copy small { margin-top:3px; color:var(--color-text-faint); font-size:10px; }
+.tool-names { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--color-text-muted); font:10px var(--font-mono); text-align:right; }
+.count { min-width:22px; height:22px; display:grid; place-items:center; border-radius:11px; color:var(--color-accent); background:var(--color-accent-soft); font-size:10px; }
+.chevron { color:var(--color-text-faint); transition:transform var(--dur-base) var(--ease-out); }
+.open .chevron { transform:rotate(180deg); }
+.process-collapse { display:grid; grid-template-rows:0fr; transition:grid-template-rows var(--dur-base) var(--ease-out); }
+.open .process-collapse { grid-template-rows:1fr; }
+.process-inner { min-height:0; overflow:hidden; display:flex; flex-direction:column; gap:8px; padding:0 10px; background:var(--color-surface-sunken); }
+.open .process-inner { padding-top:10px; padding-bottom:10px; border-top:1px solid var(--color-line); }
+@keyframes pulse { 50% { opacity:.35; } }
+@media (max-width:640px) { .tool-names { display:none; } .process-head { padding:9px 10px; } }
 </style>

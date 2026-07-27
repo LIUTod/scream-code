@@ -4,6 +4,7 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import type { SessionListItem } from '../types';
 import Dialog from './ui/Dialog.vue';
+import SvgIcon from './ui/SvgIcon.vue';
 
 const props = defineProps<{
   sessions: SessionListItem[];
@@ -82,13 +83,15 @@ onMounted(() => {
   <Dialog :open="true" @close="emit('close')">
     <template #header>
       <div class="sd-search-wrap">
-        <span class="sd-icon">🔍</span>
+        <span class="sd-icon"><SvgIcon name="search" :size="19" /></span>
         <input
           ref="inputRef"
           v-model="query"
           class="sd-input"
           type="text"
           placeholder="搜索会话..."
+          id="session-search-input"
+          name="session-search"
           autocomplete="off"
           spellcheck="false"
           @keydown="onKeydown"

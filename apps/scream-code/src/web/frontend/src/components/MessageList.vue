@@ -91,10 +91,13 @@ const showSkeleton = computed(() => {
 <style scoped>
 .message-list {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
+  padding: 12px 0 8px;
   overscroll-behavior: contain;
+  background: var(--color-surface);
 }
 
 /* Skeleton loading placeholder */

@@ -1,13 +1,15 @@
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount } from 'vue';
+import { computed, onBeforeUnmount, onMounted, provide, ref } from 'vue';
 import { useScreamWebClient } from '../composables/useScreamWebClient';
 import { useResizable } from '../composables/useResizable';
 import { slashHelpText } from '../commands';
-import StatusBar from './StatusBar.vue';
+import TopBar from './TopBar.vue';
+import ChatHeader from './ChatHeader.vue';
 import MessageList from './MessageList.vue';
 import Composer from './Composer.vue';
 import ApprovalCard from './ApprovalCard.vue';
 import SessionSidebar from './SessionSidebar.vue';
+import RightPanel from './RightPanel.vue';
 import InfoPanel from './InfoPanel.vue';
 import SearchSessionsDialog from './SearchSessionsDialog.vue';
 import ResizeHandle from './ResizeHandle.vue';
@@ -44,8 +46,20 @@ const composerRef = ref<InstanceType<typeof Composer> | null>(null);
 const infoVisible = ref(false);
 const infoMode = ref<'status' | 'usage'>('status');
 
+/* ── Model switchability (injected by TopBar) ────────────────────────────── */
+const modelSwitchable = computed(() => models.value.length > 0);
+provide('modelSwitchable', modelSwitchable);
+
+/* ── Current session title ───────────────────────────────────────────────── */
+const currentTitle = computed(() => {
+  const s = sessions.value.find((s) => s.sessionId === currentSessionId.value);
+  return s?.title ?? null;
+});
+
 /* ── Sidebar collapse (desktop) / overlay (mobile) ───────────────────────── */
-const SIDEBAR_KEY = 'scream-sidebar-collapsed';
+// Versioned key intentionally ignores the pre-prototype layout's persisted
+// collapsed state. From v2 onward, explicit desktop toggles remain persistent.
+const SIDEBAR_KEY = 'scream-sidebar-collapsed-v2';
 const sidebarCollapsed = ref(false);
 const sidebarMobileOpen = ref(false);
 
@@ -77,7 +91,26 @@ function onSwitchSession(id: string) {
   switchSession(id);
 }
 
-/* ── Session search (Cmd+K) ─────────────────────────────────────────────── */
+/* ── Right panel (auto-hidden by CSS below 1100px) ───────────────────────── */
+const RIGHTBAR_KEY = 'scream-rightbar-open';
+const rightbarOpen = ref(true);
+
+try {
+  rightbarOpen.value = localStorage.getItem(RIGHTBAR_KEY) !== '0';
+} catch {
+  // Storage unavailable — default to visible.
+}
+
+function toggleRightbar() {
+  rightbarOpen.value = !rightbarOpen.value;
+  try {
+    localStorage.setItem(RIGHTBAR_KEY, rightbarOpen.value ? '1' : '0');
+  } catch {
+    // Best-effort persistence.
+  }
+}
+
+/* ── Session search (Cmd+K) ──────────────────────────────────────────────── */
 const searchOpen = ref(false);
 
 function onGlobalKeydown(e: KeyboardEvent) {
@@ -89,12 +122,12 @@ function onGlobalKeydown(e: KeyboardEvent) {
 onMounted(() => window.addEventListener('keydown', onGlobalKeydown));
 onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKeydown));
 
-/* ── Sidebar resize (desktop) ───────────────────────────────────────────── */
+/* ── Sidebar resize (desktop) ────────────────────────────────────────────── */
 const { width: sidebarWidth, dragging: sidebarDragging, onPointerDown: onSidebarResize } = useResizable({
   storageKey: 'scream-sidebar-width',
-  defaultWidth: 260,
-  min: 180,
-  max: 480,
+  defaultWidth: 360,
+  min: 300,
+  max: 440,
 });
 
 function onCreateSession() {
@@ -106,20 +139,27 @@ function onEditResend(content: string) {
   composerRef.value?.insertText(content);
 }
 
+function showInfo(mode: 'status' | 'usage') {
+  void fetchSnapshot();
+  infoMode.value = mode;
+  infoVisible.value = true;
+}
+
+function openModelPicker() {
+  const opened = composerRef.value?.openModelPicker() ?? false;
+  if (!opened) {
+    appendSystemMessage(`当前模型：${status.value.model ?? 'unknown'}`);
+  }
+}
+
 function onCommand(name: string, args?: string) {
   switch (name) {
     case 'compact':
       sendCommand('compact');
       break;
-    case 'model': {
-      // Open the model picker; fall back to a read-only status message when
-      // the backend has no models configured.
-      const opened = composerRef.value?.openModelPicker() ?? false;
-      if (!opened) {
-        appendSystemMessage(`当前模型：${status.value.model ?? 'unknown'}`);
-      }
+    case 'model':
+      openModelPicker();
       break;
-    }
     case 'clear':
       clearMessages();
       break;
@@ -138,14 +178,10 @@ function onCommand(name: string, args?: string) {
       sendCommand(name, args);
       break;
     case 'status':
-      void fetchSnapshot();
-      infoMode.value = 'status';
-      infoVisible.value = true;
+      showInfo('status');
       break;
     case 'usage':
-      void fetchSnapshot();
-      infoMode.value = 'usage';
-      infoVisible.value = true;
+      showInfo('usage');
       break;
     default:
       appendSystemMessage(`未知命令：/${name}`);
@@ -154,10 +190,12 @@ function onCommand(name: string, args?: string) {
 </script>
 
 <template>
-  <div class="chat-view" :style="{ '--sidebar-width': sidebarWidth + 'px' }">
+  <div class="workbench" :class="{ 'sidebar-is-collapsed': sidebarCollapsed }" :style="{ '--sidebar-width': sidebarWidth + 'px' }">
     <SessionSidebar
       :sessions="sessions"
       :current-session-id="currentSessionId"
+      :status="status"
+      :busy="isBusy"
       :collapsed="sidebarCollapsed"
       :mobile-open="sidebarMobileOpen"
       @create="onCreateSession"
@@ -165,55 +203,74 @@ function onCommand(name: string, args?: string) {
       @delete="deleteSession"
       @export="exportSession"
       @toggle="toggleSidebar"
+      @open-search="searchOpen = true"
+      @show-info="showInfo"
+      @help="onCommand('help')"
     />
-    <ResizeHandle
-      v-if="!sidebarCollapsed"
-      :dragging="sidebarDragging"
-      @pointerdown="onSidebarResize"
+    <ResizeHandle v-if="!sidebarCollapsed" class="sidebar-resize" :dragging="sidebarDragging" @pointerdown="onSidebarResize" />
+    <div v-if="sidebarMobileOpen" class="sidebar-backdrop" aria-hidden="true" @click="sidebarMobileOpen = false" />
+
+    <TopBar
+      :connection-status="connectionStatus"
+      :status="status"
+      :busy="isBusy"
+      :git-status="gitStatus"
+      @refresh-git="fetchGitStatus"
+      @toggle-sidebar="toggleSidebar"
+      @open-model-picker="openModelPicker"
     />
-    <div
-      v-if="sidebarMobileOpen"
-      class="sidebar-backdrop"
-      aria-hidden="true"
-      @click="sidebarMobileOpen = false"
-    />
-    <div class="chat-main">
-      <StatusBar
-        :connection-status="connectionStatus"
+
+    <main class="workbench-body">
+      <div class="chat-main chat-inset">
+        <ChatHeader
+          :title="currentTitle"
+          :busy="isBusy"
+          @rename="(t) => sendCommand('title', t)"
+          @export="currentSessionId && exportSession(currentSessionId)"
+          @clear="clearMessages"
+          @toggle-rightbar="toggleRightbar"
+        />
+        <MessageList :messages="messages" :busy="isBusy" :work-dir="workDir" @edit="onEditResend" @pick="sendPrompt" />
+        <div class="composer-dock">
+          <ApprovalCard :approvals="pendingApprovals" @resolve="resolveApproval" />
+          <Composer
+            ref="composerRef"
+            :busy="isBusy"
+            :status="status"
+            :session-id="sessionId"
+            :models="models"
+            @send="sendPrompt"
+            @abort="abort"
+            @command="onCommand"
+            @switch-model="switchModel"
+            @switch-thinking="switchThinking"
+          />
+        </div>
+      </div>
+
+      <RightPanel
+        v-if="rightbarOpen"
+        class="rightbar-host"
         :status="status"
+        :busy="isBusy"
         :session-id="sessionId"
         :work-dir="workDir"
         :git-status="gitStatus"
-        @refresh-git="fetchGitStatus"
-        @toggle-sidebar="toggleSidebar"
+        :message-count="messages.length"
+        @quick-command="onCommand"
+        @insert="onEditResend"
+        @show-info="showInfo"
       />
-      <MessageList :messages="messages" :busy="isBusy" :work-dir="workDir" @edit="onEditResend" @pick="sendPrompt" />
+    </main>
 
-      <InfoPanel
-        v-if="infoVisible"
-        :mode="infoMode"
-        :status="status"
-        :session-id="sessionId"
-        :work-dir="workDir"
-        @close="infoVisible = false"
-      />
-
-      <div class="composer-dock">
-        <ApprovalCard :approvals="pendingApprovals" @resolve="resolveApproval" />
-        <Composer
-          ref="composerRef"
-          :busy="isBusy"
-          :status="status"
-          :session-id="sessionId"
-          :models="models"
-          @send="sendPrompt"
-          @abort="abort"
-          @command="onCommand"
-          @switch-model="switchModel"
-          @switch-thinking="switchThinking"
-        />
-      </div>
-    </div>
+    <InfoPanel
+      v-if="infoVisible"
+      :mode="infoMode"
+      :status="status"
+      :session-id="sessionId"
+      :work-dir="workDir"
+      @close="infoVisible = false"
+    />
 
     <SearchSessionsDialog
       v-if="searchOpen"
@@ -226,50 +283,31 @@ function onCommand(name: string, args?: string) {
 </template>
 
 <style scoped>
-.chat-view {
-  display: flex;
+.workbench {
+  display: grid;
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+  grid-template-rows: var(--topbar-height) minmax(0, 1fr);
+  grid-template-areas: "sidebar topbar" "sidebar body";
   height: 100vh;
   height: 100dvh;
   overflow: hidden;
   background: var(--color-bg);
   color: var(--color-text);
 }
-.chat-main {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  overflow: hidden;
-}
-.composer-dock {
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  padding: var(--space-2) var(--space-3) var(--space-3);
-  border-top: 1px solid var(--color-line);
-  background: var(--color-surface);
-}
-.sidebar-backdrop {
-  display: none;
-}
-@media (max-width: 640px) {
-  .sidebar-backdrop {
-    display: block;
-    position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.45);
-    z-index: calc(var(--z-overlay) - 1);
-    animation: backdrop-in var(--dur-slow) var(--ease-out);
-  }
-  @keyframes backdrop-in {
-    from { opacity: 0; }
-    to { opacity: 1; }
-  }
-}
-@media (max-width: 640px) {
-  .composer-dock {
-    padding: var(--space-2) var(--space-2) var(--space-2);
-  }
+.workbench.sidebar-is-collapsed { grid-template-columns: var(--sidebar-width-collapsed) minmax(0, 1fr); }
+.workbench-body { grid-area: body; display:flex; min-width:0; min-height:0; overflow:hidden; }
+.chat-inset { flex:1; min-width:0; min-height:0; display:flex; flex-direction:column; margin:14px 0 14px 14px; overflow:hidden; border:1px solid var(--color-line); border-radius:15px; background:var(--color-surface); box-shadow:0 3px 12px rgba(18,34,22,.035); }
+.composer-dock { flex-shrink:0; display:flex; flex-direction:column; gap:8px; padding:10px 24px 18px; background:var(--color-surface); }
+.rightbar-host { flex-shrink:0; }
+.sidebar-resize { position:fixed; top:0; bottom:0; left:var(--sidebar-width); z-index:calc(var(--z-dock) + 3); }
+.sidebar-backdrop { display:none; }
+@media (max-width:1100px) { .rightbar-host { display:none; } .chat-inset { margin-right:14px; } }
+@media (max-width:640px) {
+  .workbench,.workbench.sidebar-is-collapsed { grid-template-columns:minmax(0,1fr); grid-template-rows:64px minmax(0,1fr); grid-template-areas:"topbar" "body"; }
+  .sidebar-resize { display:none; }
+  .sidebar-backdrop { display:block; position:fixed; inset:0; background:rgba(15,20,16,.42); z-index:calc(var(--z-overlay) - 1); animation:backdrop-in var(--dur-slow) var(--ease-out); }
+  .chat-inset { margin:8px; border-radius:12px; }
+  .composer-dock { padding:8px; }
+  @keyframes backdrop-in { from { opacity:0; } to { opacity:1; } }
 }
 </style>

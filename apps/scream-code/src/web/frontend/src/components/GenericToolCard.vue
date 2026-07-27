@@ -66,9 +66,8 @@ function formatArgs(): string {
   }
 }
 
-function truncateOutput(s: string | undefined, max = 4000): string {
-  if (!s) return '';
-  return s.length > max ? s.slice(0, max) + `\n… (${s.length - max} more chars)` : s;
+function formatOutput(s: string | undefined): string {
+  return s ?? '';
 }
 </script>
 
@@ -87,7 +86,7 @@ function truncateOutput(s: string | undefined, max = 4000): string {
       <div class="tool-collapse-inner">
         <div class="tool-body">
           <pre v-if="formatArgs()" class="tool-args"><code>{{ formatArgs() }}</code></pre>
-          <pre v-if="tool.output !== undefined" class="tool-result"><code>{{ truncateOutput(tool.output) || '(无输出)' }}</code></pre>
+          <pre v-if="tool.output !== undefined" class="tool-result"><code>{{ formatOutput(tool.output) || '(无输出)' }}</code></pre>
           <div v-else class="tool-running-hint">执行中…</div>
         </div>
       </div>

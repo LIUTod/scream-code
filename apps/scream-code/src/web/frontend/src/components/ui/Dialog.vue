@@ -1,14 +1,28 @@
 <!-- Reusable modal dialog with Teleport. Replaces ad-hoc overlay patterns
-     in StatusBar (diff modal) and InfoPanel. -->
+     in TopBar (diff modal) and InfoPanel. -->
 <script setup lang="ts">
-defineProps<{
-  open: boolean;
-  title?: string;
-  closable?: boolean;
-  maxWidth?: string;
-}>();
+import { onBeforeUnmount, onMounted } from 'vue';
+
+const props = withDefaults(
+  defineProps<{
+    open: boolean;
+    title?: string;
+    closable?: boolean;
+    maxWidth?: string;
+  }>(),
+  { title: undefined, closable: true, maxWidth: undefined },
+);
 
 const emit = defineEmits<{ (e: 'close'): void }>();
+
+function onGlobalKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape' && props.open && props.closable !== false) {
+    e.stopPropagation();
+    emit('close');
+  }
+}
+onMounted(() => window.addEventListener('keydown', onGlobalKeydown, true));
+onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKeydown, true));
 </script>
 
 <template>

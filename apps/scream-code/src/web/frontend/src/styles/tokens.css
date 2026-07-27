@@ -55,7 +55,9 @@
   --dur-msg-user: 200ms;
   --dur-msg-assistant: 250ms;
 
-  /* Sidebar */
-  --sidebar-width: 260px;
-  --sidebar-width-collapsed: 48px;
+  /* Layout chrome */
+  --sidebar-width: 360px;
+  --sidebar-width-collapsed: 64px;
+  --rightbar-width: 360px;
+  --topbar-height: 76px;
 }

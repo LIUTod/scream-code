@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import SvgIcon from './ui/SvgIcon.vue';
+
 withDefaults(
   defineProps<{
     workDir?: string | null;
@@ -11,9 +13,9 @@ const emit = defineEmits<{
 }>();
 
 const SUGGESTIONS = [
-  { icon: '✍️', title: '帮我写一个函数', prompt: '帮我写一个函数' },
-  { icon: '📖', title: '解释这段代码', prompt: '解释这段代码' },
-  { icon: '🐞', title: '调试这个问题', prompt: '调试这个问题' },
+  { icon: 'edit', title: '帮我写一个函数', prompt: '帮我写一个函数' },
+  { icon: 'clipboard', title: '解释这段代码', prompt: '解释这段代码' },
+  { icon: 'activity', title: '调试这个问题', prompt: '调试这个问题' },
 ];
 </script>
 
@@ -32,7 +34,7 @@ const SUGGESTIONS = [
         class="suggestion-card"
         @click="emit('pick', s.prompt)"
       >
-        <span class="suggestion-icon">{{ s.icon }}</span>
+        <span class="suggestion-icon"><SvgIcon :name="s.icon" :size="22" /></span>
         <span class="suggestion-title">{{ s.title }}</span>
       </button>
     </div>
