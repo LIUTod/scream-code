@@ -703,7 +703,8 @@ class WebSession {
       case 'command': {
         const command = msg['command'] as string;
         const args = typeof msg['args'] === 'string' ? (msg['args'] as string) : undefined;
-        void this.handleCommand(ws, command, args);
+        const pendingMsgId = typeof msg['pendingMsgId'] === 'string' ? (msg['pendingMsgId'] as string) : undefined;
+        void this.handleCommand(ws, command, args, pendingMsgId);
         break;
       }
       case 'approval_response': {
@@ -756,12 +757,12 @@ class WebSession {
 
   // ── Slash commands ───────────────────────────────────────────────────────
 
-  private async handleCommand(ws: WebSocket, command: string, args?: string): Promise<void> {
+  private async handleCommand(ws: WebSocket, command: string, args?: string, pendingMsgId?: string): Promise<void> {
     const ok = (message: string): void => {
-      this.broadcast({ type: 'command_result', command, ok: true, message }, false);
+      this.broadcast({ type: 'command_result', command, ok: true, message, pendingMsgId }, false);
     };
     const fail = (message: string): void => {
-      this.broadcast({ type: 'command_result', command, ok: false, message }, false);
+      this.broadcast({ type: 'command_result', command, ok: false, message, pendingMsgId }, false);
     };
     const errMsg = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
@@ -1733,8 +1734,19 @@ export async function runWebServer(opts: WebServerOptions): Promise<void> {
     if (sessionId) {
       const webSession = manager.get(sessionId);
       if (webSession) {
-        webSession.addConnection(ws);
-        log.info('web: client connected', { sessionId, connections: webSession.connectionCount });
+        if (webSession.isActive) {
+          webSession.addConnection(ws);
+          log.info('web: client connected', { sessionId, connections: webSession.connectionCount });
+          return;
+        }
+        // Archived session: reactivate before connecting.
+        void manager.activateSession(sessionId).then((reactivated) => {
+          if (reactivated) {
+            reactivated.addConnection(ws);
+          } else {
+            ws.close(1008, 'Session not found');
+          }
+        });
         return;
       }
       // Session not found in memory; try to activate from persisted.

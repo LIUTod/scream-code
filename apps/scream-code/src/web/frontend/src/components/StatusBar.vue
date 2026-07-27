@@ -100,6 +100,9 @@ const gitTitle = computed(() => {
           · {{ status.thinkingLevel }}
         </span>
       </span>
+      <span v-if="status.planMode" class="info-item plan" title="计划模式已开启">
+        📋 Plan
+      </span>
       <span
         v-if="usagePercent !== null"
         class="info-item context"
@@ -227,6 +230,15 @@ const gitTitle = computed(() => {
   max-width: 260px;
   direction: rtl;
   text-align: left;
+}
+.info-item.plan {
+  color: var(--color-accent);
+  font-weight: 600;
+  background: var(--color-accent-soft);
+  border: 1px solid var(--color-accent-bd);
+  border-radius: var(--radius-full);
+  padding: 2px 8px;
+  font-size: var(--font-size-xs);
 }
 .info-item.git {
   font-family: var(--font-mono);

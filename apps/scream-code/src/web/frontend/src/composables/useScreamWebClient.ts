@@ -181,14 +181,28 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
         break;
       }
       case 'command_result': {
-        messages.value.push({
-          id: generateId(),
-          role: 'system',
-          content: msg.message,
-          tools: [],
-          isError: !msg.ok,
-          ts: Date.now(),
-        });
+        // Update pending message if it exists, otherwise add new message.
+        const pendingIdx = msg.pendingMsgId
+          ? messages.value.findIndex((m) => m.id === msg.pendingMsgId)
+          : -1;
+        if (pendingIdx >= 0) {
+          const existing = messages.value[pendingIdx];
+          messages.value[pendingIdx] = {
+            ...existing,
+            content: msg.message,
+            isError: !msg.ok,
+            pending: false,
+          };
+        } else {
+          messages.value.push({
+            id: generateId(),
+            role: 'system',
+            content: msg.message,
+            tools: [],
+            isError: !msg.ok,
+            ts: Date.now(),
+          });
+        }
         // fork/title change the session list - refresh the sidebar.
         if (msg.command === 'fork' || msg.command === 'title') {
           void fetchSessions();
@@ -278,13 +292,12 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
         break;
       }
       case 'session.meta.updated': {
-        status.value = {
-          ...status.value,
-          model: payload.model as string | undefined,
-          contextTokens: payload.contextTokens as number | undefined,
-          maxContextTokens: payload.maxContextTokens as number | undefined,
-          contextUsage: payload.contextUsage as number | undefined,
-        };
+        const patch: Partial<SessionStatus> = {};
+        if (payload.model !== undefined) patch.model = payload.model as string;
+        if (payload.contextTokens !== undefined) patch.contextTokens = payload.contextTokens as number;
+        if (payload.maxContextTokens !== undefined) patch.maxContextTokens = payload.maxContextTokens as number;
+        if (payload.contextUsage !== undefined) patch.contextUsage = payload.contextUsage as number;
+        status.value = { ...status.value, ...patch };
         break;
       }
       case 'error': {
@@ -372,7 +385,21 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
       appendSystemMessage(`会话忙碌中，无法执行 /${command}，请稍后再试。`);
       return;
     }
-    send({ type: 'command', command, ...(args ? { args } : {}) });
+    // Show pending feedback for commands that take time.
+    const pendingCommands = ['compact', 'plan', 'auto', 'yes', 'fork', 'title'];
+    let pendingMsgId: string | null = null;
+    if (pendingCommands.includes(command)) {
+      pendingMsgId = generateId();
+      messages.value.push({
+        id: pendingMsgId,
+        role: 'system',
+        content: `正在执行 /${command}${args ? ` ${args}` : ''}...`,
+        tools: [],
+        pending: true,
+        ts: Date.now(),
+      });
+    }
+    send({ type: 'command', command, ...(args ? { args } : {}), ...(pendingMsgId ? { pendingMsgId } : {}) });
   }
 
   function clearMessages(): void {
