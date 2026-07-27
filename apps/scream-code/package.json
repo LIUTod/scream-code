@@ -1,6 +1,6 @@
 {
   "name": "scream-code",
-  "version": "0.10.10",
+  "version": "0.10.11",
   "description": "A terminal-native AI agent for builders",
   "license": "MIT",
   "author": "ScreamCli",
@@ -42,8 +42,7 @@
     "access": "public"
   },
   "scripts": {
-    "build": "tsdown && pnpm exec vite build src/web/frontend",
-    "postbuild": "node scripts/copy-web-assets.mjs",
+    "build": "tsdown && pnpm exec vite build src/web/frontend && node scripts/copy-web-assets.mjs",
     "dev": "node scripts/dev.mjs",
     "dev:cli-only": "tsx --import ../../build/register-raw-text-loader.mjs ./src/main.ts",
     "dev:prod": "node dist/main.mjs",
