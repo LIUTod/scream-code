@@ -445,6 +445,8 @@ class WebSession {
   private heartbeatTimer: NodeJS.Timeout | null = null;
   private unsubscribe: (() => void) | null = null;
   private busy = false;
+  /** pendingMsgId awaiting compaction completion/cancellation event. */
+  private pendingCompactionMsgId: string | null = null;
   private readonly homeDir: string | null;
   private readonly yolo: boolean;
   /** Fork hook supplied by SessionManager; absent in standalone mode. */
@@ -606,6 +608,22 @@ class WebSession {
       }
       const entry = this.appendEvent(event);
       this.broadcast({ type: 'event', seq: entry.seq, epoch: entry.epoch, payload: event }, entry.volatile);
+      // Compaction runs async after begin(); report success/failure only when
+      // the worker actually finishes, so the UI shows "compressing -> done".
+      if (event.type === 'compaction.completed') {
+        const msgId = this.pendingCompactionMsgId;
+        this.pendingCompactionMsgId = null;
+        void this.refreshStatus().then(() => this.broadcastStatus());
+        if (msgId) {
+          this.broadcast({ type: 'command_result', command: 'compact', ok: true, message: '会话上下文已压缩。', pendingMsgId: msgId }, false);
+        }
+      } else if (event.type === 'compaction.cancelled') {
+        const msgId = this.pendingCompactionMsgId;
+        this.pendingCompactionMsgId = null;
+        if (msgId) {
+          this.broadcast({ type: 'command_result', command: 'compact', ok: false, message: `压缩已取消${event.reason ? `：${event.reason}` : '。'}`, pendingMsgId: msgId }, false);
+        }
+      }
     });
   }
 
@@ -808,13 +826,18 @@ class WebSession {
           fail('会话忙碌中，无法压缩，请稍后再试。');
           return;
         }
-        ok('正在压缩会话上下文…');
+        if (this.pendingCompactionMsgId !== null) {
+          fail('正在压缩中，请稍候。');
+          return;
+        }
+        this.pendingCompactionMsgId = pendingMsgId ?? null;
         try {
+          // begin() starts an async compaction worker and returns immediately.
+          // Success/failure is reported when the compaction.completed /
+          // compaction.cancelled event arrives (handled in subscribeEvents).
           await this.session.compact();
-          await this.refreshStatus();
-          this.broadcastStatus();
-          ok('会话上下文已压缩。');
         } catch (error) {
+          this.pendingCompactionMsgId = null;
           fail(`压缩失败：${errMsg(error)}`);
         }
         return;

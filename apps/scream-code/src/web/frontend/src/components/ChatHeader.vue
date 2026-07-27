@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { nextTick, ref, watch } from 'vue';
+import { inject, nextTick, ref, watch } from 'vue';
+import type { Ref } from 'vue';
 import SvgIcon from './ui/SvgIcon.vue';
 
 const props = withDefaults(defineProps<{ title?: string | null; busy?: boolean }>(), { title: null, busy: false });
@@ -25,6 +26,8 @@ function commit() {
   else draft.value = props.title ?? '';
 }
 function cancel() { editing.value = false; draft.value = props.title ?? ''; }
+const showThinking = inject<Ref<boolean>>('showThinking', ref(true));
+const showTools = inject<Ref<boolean>>('showTools', ref(true));
 </script>
 
 <template>
@@ -44,6 +47,8 @@ function cancel() { editing.value = false; draft.value = props.title ?? ''; }
     <div class="header-actions">
       <button class="text-action" title="导出会话为 Markdown" @click="emit('export')"><SvgIcon name="upload" :size="18" /><span>导出</span></button>
       <button class="text-action" title="清空本地消息列表" @click="emit('clear')"><SvgIcon name="broom" :size="18" /><span>清空</span></button>
+      <button :class="['text-action', { dimmed: !showThinking }]" :title="showThinking ? '隐藏思考链' : '显示思考链'" @click="showThinking = !showThinking"><SvgIcon name="brain" :size="18" /><span>思考</span></button>
+      <button :class="['text-action', { dimmed: !showTools }]" :title="showTools ? '隐藏工具链' : '显示工具链'" @click="showTools = !showTools"><SvgIcon name="terminal" :size="18" /><span>工具</span></button>
       <button class="icon-action" title="显示或隐藏右侧面板" aria-label="显示或隐藏右侧面板" @click="emit('toggle-rightbar')"><SvgIcon name="panel-right" :size="19" /></button>
     </div>
   </div>
@@ -66,6 +71,8 @@ h1 { margin:0; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-sp
 .icon-action.edit { width:28px; height:28px; border:0; opacity:0; }
 .chat-header:hover .icon-action.edit,.icon-action.edit:focus-visible { opacity:1; }
 .text-action:hover,.icon-action:hover { color:var(--color-accent); border-color:var(--color-accent-bd); background:var(--color-accent-soft); }
+.text-action.dimmed { opacity:0.4; }
+.text-action.dimmed:hover { opacity:0.7; }
 @keyframes pulse { 50% { opacity:.3; } }
 @media (max-width:640px) { .chat-header { min-height:72px; padding:12px 14px; } h1 { font-size:17px; } .status-line { margin-top:4px; } .text-action { width:36px; padding:0; } .text-action span { display:none; } .icon-action.edit { opacity:1; } }
 </style>

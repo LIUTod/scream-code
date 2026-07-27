@@ -110,6 +110,12 @@ function toggleRightbar() {
   }
 }
 
+/* ── Thinking / tool chain visibility (toggled from ChatHeader) ───────────── */
+const showThinking = ref(true);
+const showTools = ref(true);
+provide('showThinking', showThinking);
+provide('showTools', showTools);
+
 /* ── Session search (Cmd+K) ──────────────────────────────────────────────── */
 const searchOpen = ref(false);
 

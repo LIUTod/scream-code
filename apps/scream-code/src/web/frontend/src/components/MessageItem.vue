@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, inject, ref } from 'vue';
+import type { Ref } from 'vue';
 import type { ChatMessage } from '../types';
 import MarkdownRenderer from './MarkdownRenderer.vue';
 import ToolGroup from './ToolGroup.vue';
@@ -21,6 +22,8 @@ const thinkingTools = computed(() => props.message.tools.filter((tool) => tool.n
 const realTools = computed(() => props.message.tools.filter((tool) => tool.name !== 'thinking'));
 const timestamp = computed(() => props.message.ts ? new Date(props.message.ts).toLocaleTimeString('zh-CN', { hour:'2-digit', minute:'2-digit' }) : '');
 const canEdit = computed(() => isUser.value && props.isLatestUser && props.idle);
+const showThinking = inject<Ref<boolean>>('showThinking', ref(true));
+const showTools = inject<Ref<boolean>>('showTools', ref(true));
 async function copyContent() {
   try { await navigator.clipboard.writeText(props.message.content); }
   catch {
@@ -54,8 +57,10 @@ async function copyContent() {
         <time v-if="timestamp">{{ timestamp }}</time>
       </div>
       <div class="assistant-body">
-        <ThinkingBlock v-for="tool in thinkingTools" :key="tool.toolCallId" :tool="tool" :active="streaming" />
-        <ToolGroup v-if="realTools.length" name="工具调用过程" :tools="realTools" />
+        <template v-if="showThinking">
+          <ThinkingBlock v-for="tool in thinkingTools" :key="tool.toolCallId" :tool="tool" :active="streaming" />
+        </template>
+        <ToolGroup v-if="realTools.length && showTools" name="工具调用过程" :tools="realTools" />
         <MarkdownRenderer v-if="message.content" class="assistant-content" :content="message.content" />
         <span v-else-if="streaming" class="streaming-cursor" aria-label="正在生成" />
         <div v-if="message.content" class="message-meta">
@@ -67,7 +72,7 @@ async function copyContent() {
 </template>
 
 <style scoped>
-.message { width:100%; max-width:920px; margin:0 auto; padding:18px 32px; animation:message-in var(--dur-msg-user) var(--ease-out) both; }
+.message { width:100%; padding:18px 32px; animation:message-in var(--dur-msg-user) var(--ease-out) both; }
 .message.user { display:flex; justify-content:flex-end; padding-top:22px; }
 .user-wrap { max-width:min(76%,680px); display:flex; flex-direction:column; align-items:flex-end; }
 .user-bubble { padding:13px 17px; border:1px solid var(--color-accent-bd); border-radius:17px 17px 5px 17px; background:var(--color-accent-soft); color:var(--color-text); line-height:1.65; white-space:pre-wrap; word-break:break-word; }
