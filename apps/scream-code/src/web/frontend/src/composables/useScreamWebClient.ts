@@ -91,7 +91,11 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
   }
 
   function applySnapshot(snapshot: SessionSnapshot): void {
-    messages.value = snapshot.messages.map((m) => ({ ...m, id: m.id ?? generateId() }));
+    // Preserve local-only messages (command results, system notices) that are
+    // not in the server journal. Without this, applySnapshot's full replace
+    // would drop them - the "闪一下" bug.
+    const localMsgs = messages.value.filter((m) => m.local);
+    messages.value = [...snapshot.messages.map((m) => ({ ...m, id: m.id ?? generateId() })), ...localMsgs];
     pendingApprovals.value = snapshot.pendingApprovals;
     status.value = { ...snapshot.status, busy: snapshot.busy };
     workDir.value = snapshot.workDir;
@@ -201,15 +205,18 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
             tools: [],
             isError: !msg.ok,
             ts: Date.now(),
+            local: true,
           });
         }
         // fork/title change the session list - refresh the sidebar.
         if (msg.command === 'fork' || msg.command === 'title') {
           void fetchSessions();
         }
-        // auto/yes/plan/compact change session state - refresh snapshot to update UI.
-        if (msg.ok && ['auto', 'yes', 'plan', 'compact'].includes(msg.command)) {
-          fetchSnapshot();
+        // compact changes message history - refresh snapshot to get the
+        // compacted messages. Local messages (command results etc.) are
+        // preserved by applySnapshot, so no manual save/restore needed.
+        if (msg.ok && msg.command === 'compact') {
+          void fetchSnapshot();
         }
         break;
       }
@@ -362,6 +369,7 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
         tools: [],
         isError: true,
         ts: Date.now(),
+        local: true,
       });
       connect();
       return;
@@ -397,6 +405,7 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
         tools: [],
         pending: true,
         ts: Date.now(),
+        local: true,
       });
     }
     send({ type: 'command', command, ...(args ? { args } : {}), ...(pendingMsgId ? { pendingMsgId } : {}) });
@@ -414,6 +423,7 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
       content: text,
       tools: [],
       ts: Date.now(),
+      local: true,
     });
   }
 

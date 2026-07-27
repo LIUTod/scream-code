@@ -598,6 +598,13 @@ class WebSession {
     }
   }
 
+  /** Push cached status to all connected clients (model/permission/plan/etc). */
+  private broadcastStatus(): void {
+    if (this.cachedStatus) {
+      this.broadcast({ type: 'status', status: this.cachedStatus }, false);
+    }
+  }
+
   // ── Connections ────────────────────────────────────────────────────────
 
   addConnection(ws: WebSocket): void {
@@ -781,6 +788,7 @@ class WebSession {
         try {
           await this.session.compact();
           await this.refreshStatus();
+          this.broadcastStatus();
           ok('会话上下文已压缩。');
         } catch (error) {
           fail(`压缩失败：${errMsg(error)}`);
@@ -794,6 +802,7 @@ class WebSession {
           await this.session.setPermission(mode);
           this.permission = mode;
           await this.refreshStatus();
+          this.broadcastStatus();
           ok(`权限模式已切换为 ${mode}`);
         } catch (error) {
           fail(`切换权限失败：${errMsg(error)}`);
@@ -810,6 +819,7 @@ class WebSession {
           const next = !this.cachedStatus?.planMode;
           await this.session.setPlanMode(next);
           await this.refreshStatus();
+          this.broadcastStatus();
           ok(`计划模式已${next ? '开启' : '关闭'}`);
         } catch (error) {
           fail(`切换计划模式失败：${errMsg(error)}`);

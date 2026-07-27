@@ -7,6 +7,8 @@ export interface ChatMessage {
   pending?: boolean;
   /** Client-side creation time (ms epoch). Absent for snapshot-restored messages. */
   ts?: number;
+  /** Locally created (command results, system notices) - preserved across snapshot refresh. */
+  local?: boolean;
 }
 
 export interface ToolMessage {
