@@ -50,11 +50,13 @@ interface PersistedUserMessage {
   readonly type: 'user_message';
   readonly text: string;
   readonly beforeSeq: number;
+  readonly clientMessageId?: string;
 }
 
 interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
+  clientMessageId?: string;
   tools: ToolMessage[];
   isError?: boolean;
 }
@@ -77,6 +79,8 @@ interface ApprovalRequestMessage {
 interface SessionSnapshot {
   readonly sessionId: string;
   readonly workDir: string;
+  readonly seq: number;
+  readonly epoch: number;
   readonly model: string;
   readonly permission: PermissionMode;
   readonly messages: ChatMessage[];
@@ -169,13 +173,21 @@ const contentTypes: Record<string, string> = {
 function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
     let data = '';
+    let size = 0;
+    let rejected = false;
     req.on('data', (chunk: Buffer) => {
-      data += chunk.toString('utf-8');
-      if (data.length > 64 * 1024) {
+      if (rejected) return;
+      size += chunk.length;
+      if (size > 64 * 1024) {
+        rejected = true;
+        data = '';
         reject(new HttpError(413, 'Request body too large'));
+        return;
       }
+      data += chunk.toString('utf-8');
     });
     req.on('end', () => {
+      if (rejected) return;
       if (!data) {
         resolve({});
         return;
@@ -493,7 +505,12 @@ class WebSession {
       }
     }
     for (const um of this.userMessages) {
-      entries.push({ type: 'user_message', text: um.msg.content, beforeSeq: um.beforeSeq });
+      entries.push({
+        type: 'user_message',
+        text: um.msg.content,
+        beforeSeq: um.beforeSeq,
+        clientMessageId: um.msg.clientMessageId,
+      });
     }
     return entries;
   }
@@ -506,10 +523,10 @@ class WebSession {
     await appendJournalLine(this.homeDir, this.sessionId, line);
   }
 
-  private async persistUserMessage(text: string, beforeSeq: number): Promise<void> {
-    this.userMessages.push({ msg: { role: 'user', content: text, tools: [] }, beforeSeq });
+  private async persistUserMessage(text: string, beforeSeq: number, clientMessageId?: string): Promise<void> {
+    this.userMessages.push({ msg: { role: 'user', content: text, clientMessageId, tools: [] }, beforeSeq });
     if (!this.homeDir) return;
-    const line = JSON.stringify({ type: 'user_message', text, beforeSeq } satisfies PersistedUserMessage);
+    const line = JSON.stringify({ type: 'user_message', text, beforeSeq, clientMessageId } satisfies PersistedUserMessage);
     await appendJournalLine(this.homeDir, this.sessionId, line);
   }
 
@@ -517,7 +534,10 @@ class WebSession {
     for (const entry of entries) {
       if ('type' in entry && entry.type === 'user_message') {
         const um = entry as PersistedUserMessage;
-        this.userMessages.push({ msg: { role: 'user', content: um.text, tools: [] }, beforeSeq: um.beforeSeq });
+        this.userMessages.push({
+          msg: { role: 'user', content: um.text, clientMessageId: um.clientMessageId, tools: [] },
+          beforeSeq: um.beforeSeq,
+        });
       } else {
         const je = entry as JournalEntry;
         this.journal.push(je);
@@ -686,17 +706,21 @@ class WebSession {
         const text = msg['text'] as string;
         const clientMessageId = msg['clientMessageId'] as string | undefined;
         if (!this.session) {
-          this.send(ws, { type: 'error', code: 'session.inactive', message: 'Session is archived (read-only)' });
+          this.send(ws, { type: 'error', code: 'session.inactive', message: 'Session is archived (read-only)', clientMessageId });
           return;
         }
         if (!text || this.busy) {
-          this.send(ws, { type: 'error', code: 'session.busy', message: 'Session is busy' });
+          this.send(ws, { type: 'error', code: 'session.busy', message: 'Session is busy', clientMessageId });
           return;
         }
-        void this.persistUserMessage(text, this.nextSeq);
+        // Reserve the turn synchronously before broadcasting acceptance so a
+        // second tab cannot race another prompt into the same agent session.
+        this.busy = true;
+        void this.persistUserMessage(text, this.nextSeq, clientMessageId);
         this.broadcast({ type: 'user_message', clientMessageId, text }, false);
         void this.session.prompt(text).catch((error: unknown) => {
-          this.sendError(ws, error);
+          this.busy = false;
+          this.sendError(ws, error, clientMessageId);
         });
         break;
       }
@@ -757,9 +781,9 @@ class WebSession {
     }
   }
 
-  private sendError(ws: WebSocket, error: unknown): void {
+  private sendError(ws: WebSocket, error: unknown, clientMessageId?: string): void {
     const message = error instanceof Error ? error.message : String(error);
-    this.send(ws, { type: 'error', message });
+    this.send(ws, { type: 'error', message, clientMessageId });
   }
 
   // ── Slash commands ───────────────────────────────────────────────────────
@@ -938,6 +962,8 @@ class WebSession {
     return {
       sessionId: this.sessionId,
       workDir: this.workDir,
+      seq: this.nextSeq - 1,
+      epoch: this.epoch,
       model: this.cachedStatus?.model ?? 'unknown',
       permission: this.cachedStatus?.permission ?? this.permission,
       messages: this.buildMessages(),
@@ -1544,9 +1570,13 @@ export async function runWebServer(opts: WebServerOptions): Promise<void> {
   const manager = new SessionManager({ harness, homeDir, workDir, model, permission, yolo: opts.yolo });
   await manager.init();
 
-  // Create an initial active session if none exist.
+  // Resume the most recent session for this working directory, but never
+  // auto-create one: sessions are created only on explicit user action.
   if (!manager.list().some((s) => s.active)) {
-    await manager.createSession();
+    const recent = manager.list().find((s) => s.workDir === workDir);
+    if (recent) {
+      await manager.activateSession(recent.sessionId);
+    }
   }
 
   // ── HTTP server ────────────────────────────────────────────────────────
@@ -1788,7 +1818,10 @@ export async function runWebServer(opts: WebServerOptions): Promise<void> {
         return;
       }
     }
-    ws.close(1008, 'No active session available');
+    // No session exists yet (fresh install or all deleted): keep the socket
+    // open in an idle state instead of closing, so the client does not enter
+    // a reconnect loop. The user creates the first session explicitly.
+    ws.send(JSON.stringify({ type: 'server_empty' }));
   });
 
   await new Promise<void>((resolve) => {

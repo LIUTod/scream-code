@@ -9,6 +9,8 @@ export interface ChatMessage {
   ts?: number;
   /** Locally created (command results, system notices) - preserved across snapshot refresh. */
   local?: boolean;
+  /** Stable id used to reconcile optimistic user messages with server snapshots. */
+  clientMessageId?: string;
 }
 
 export interface ToolMessage {
@@ -58,6 +60,8 @@ export interface SessionStatus {
 export interface SessionSnapshot {
   sessionId: string;
   workDir: string;
+  seq: number;
+  epoch: number;
   messages: ChatMessage[];
   pendingApprovals: ApprovalRequest[];
   status: SessionStatus;
@@ -131,4 +135,5 @@ export type WsMessage =
   | { type: 'status'; status: SessionStatus }
   | { type: 'resync_required'; reason: string }
   | { type: 'pong' }
-  | { type: 'error'; code?: string; message: string };
+  | { type: 'server_empty' }
+  | { type: 'error'; code?: string; message: string; clientMessageId?: string };

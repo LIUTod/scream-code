@@ -1,8 +1,8 @@
-import { ref, computed, type Ref } from 'vue';
-import type { ChatMessage, ApprovalRequest, SessionSnapshot, SessionListItem, SessionStatus, GitStatus, ModelInfo, ModelsResponse, WsMessage, ServerHello } from '../types';
+import { ref, computed, onBeforeUnmount, type Ref } from 'vue';
+import type { ChatMessage, ApprovalRequest, SessionSnapshot, SessionListItem, SessionStatus, GitStatus, ModelInfo, ModelsResponse, WsMessage } from '../types';
 import { useToast } from './useToast';
 
-export type ConnectionStatus = 'connecting' | 'connected' | 'reconnecting' | 'disconnected';
+export type ConnectionStatus = 'connecting' | 'connected' | 'reconnecting' | 'disconnected' | 'idle';
 
 const API_BASE = '/api/v1';
 const HEARTBEAT_TIMEOUT_MS = 2 * 30000;
@@ -44,10 +44,11 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
   const messages = ref<ChatMessage[]>([]);
   const pendingApprovals = ref<ApprovalRequest[]>([]);
   const status = ref<SessionStatus>({ busy: false });
+  const promptPending = ref(false);
   const error = ref<string | null>(null);
   const sessionId = ref<string | null>(null);
   const workDir = ref<string | null>(null);
-  const isBusy = computed(() => status.value.busy);
+  const isBusy = computed(() => status.value.busy || promptPending.value);
   const sessions = ref<SessionListItem[]>([]);
   const currentSessionId = ref<string | null>(null);
   const gitStatus = ref<GitStatus | null>(null);
@@ -56,18 +57,27 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
   let ws: WebSocket | null = null;
   let heartbeatTimer: number | null = null;
   let reconnectTimer: number | null = null;
+  let snapshotRetryTimer: number | null = null;
   let lastPongAt = Date.now();
   let seq = 0;
   let epoch = 0;
   let reconnectAttempt = 0;
-  const sentMessageIds = new Set<string>();
+  let sessionGeneration = 0;
+  let connectionGeneration = 0;
+  let promptGeneration = 0;
+  let liveGeneration = 0;
+  let sessionMutationGeneration = 0;
+  let pendingPromptAccepted = false;
+  let disposed = false;
+  const sentMessageIds = new Map<string, { messageId: string; connectionGeneration: number }>();
 
   function wsUrl(): string {
-    const base = `ws://${window.location.host}`;
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const base = `${protocol}//${window.location.host}/api/v1/ws`;
     if (currentSessionId.value) {
-      return `${base}/?sessionId=${encodeURIComponent(currentSessionId.value)}`;
+      return `${base}?sessionId=${encodeURIComponent(currentSessionId.value)}`;
     }
-    return `${base}/`;
+    return base;
   }
 
   function setConnectionStatus(s: ConnectionStatus) {
@@ -80,12 +90,40 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
     }
   }
 
+  function scheduleSnapshotRetry(): void {
+    if (disposed || snapshotRetryTimer !== null) return;
+    snapshotRetryTimer = window.setTimeout(() => {
+      snapshotRetryTimer = null;
+      void fetchSnapshot();
+    }, 250);
+  }
+
   async function fetchSnapshot(): Promise<void> {
-    if (!sessionId.value) return;
+    const targetSessionId = sessionId.value;
+    if (!targetSessionId) return;
+    const targetSessionGeneration = sessionGeneration;
+    const targetConnectionGeneration = connectionGeneration;
+    const targetPromptGeneration = promptGeneration;
+    const targetLiveGeneration = liveGeneration;
     try {
-      const res = await fetch(`${API_BASE}/sessions/${sessionId.value}/snapshot`);
+      const res = await fetch(`${API_BASE}/sessions/${targetSessionId}/snapshot`);
       if (!res.ok) return;
       const snapshot: SessionSnapshot = await res.json();
+      if (
+        sessionId.value !== targetSessionId ||
+        snapshot.sessionId !== targetSessionId ||
+        sessionGeneration !== targetSessionGeneration ||
+        connectionGeneration !== targetConnectionGeneration
+      ) return;
+      if (
+        promptGeneration !== targetPromptGeneration ||
+        liveGeneration !== targetLiveGeneration ||
+        (epoch !== 0 && snapshot.epoch !== epoch) ||
+        (snapshot.epoch === epoch && snapshot.seq < seq)
+      ) {
+        scheduleSnapshotRetry();
+        return;
+      }
       applySnapshot(snapshot);
     } catch {
       // Best-effort
@@ -97,9 +135,34 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
     // not in the server journal. Without this, applySnapshot's full replace
     // would drop them - the "闪一下" bug.
     const localMsgs = messages.value.filter((m) => m.local);
-    messages.value = [...snapshot.messages.map((m) => ({ ...m, id: m.id ?? generateId() })), ...localMsgs];
+    const pendingClientId = sentMessageIds.keys().next().value;
+    const pendingEntry = pendingClientId ? sentMessageIds.get(pendingClientId) : undefined;
+    const pendingLocal = pendingEntry
+      ? messages.value.find((m) => m.id === pendingEntry.messageId)
+      : undefined;
+    const pendingCovered = Boolean(
+      pendingClientId && snapshot.messages.some((m) => m.clientMessageId === pendingClientId),
+    );
+    const pendingLost = Boolean(
+      pendingEntry && !pendingCovered && pendingEntry.connectionGeneration < connectionGeneration,
+    );
+    if (pendingLost && pendingLocal) pendingLocal.isError = true;
+    const pendingMessages = pendingLocal && !pendingCovered ? [pendingLocal] : [];
+    messages.value = [
+      ...snapshot.messages.map((m) => ({ ...m, id: m.id ?? generateId() })),
+      ...localMsgs,
+      ...pendingMessages,
+    ];
     pendingApprovals.value = snapshot.pendingApprovals;
     status.value = { ...snapshot.status, busy: snapshot.busy };
+    if (pendingCovered || pendingLost) {
+      promptPending.value = false;
+      pendingPromptAccepted = false;
+      sentMessageIds.clear();
+      if (pendingLost) showToast('消息未送达，已恢复连接。', 'error');
+    }
+    seq = snapshot.seq;
+    epoch = snapshot.epoch;
     workDir.value = snapshot.workDir;
   }
 
@@ -127,7 +190,7 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
   }
 
   function scheduleReconnect(): void {
-    if (reconnectTimer !== null) return;
+    if (disposed || reconnectTimer !== null) return;
     setConnectionStatus('reconnecting');
     reconnectAttempt++;
     const delay = Math.min(1000 * 2 ** reconnectAttempt, 30000);
@@ -140,22 +203,26 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
   function handleMessage(msg: WsMessage): void {
     switch (msg.type) {
       case 'server_hello': {
-        const hello = msg as ServerHello;
+        const hello = msg;
         sessionId.value = hello.sessionId;
         workDir.value = hello.workDir;
         currentSessionId.value = hello.sessionId;
+        const resumeEpoch = epoch;
         epoch = hello.epoch;
         startHeartbeat(hello.heartbeat_ms);
-        send({ type: 'client_hello', lastSeq: seq, epoch });
+        send({ type: 'client_hello', lastSeq: seq, epoch: resumeEpoch });
+        if (resumeEpoch !== 0 && resumeEpoch !== hello.epoch) seq = 0;
+        setConnectionStatus('connected');
+        reconnectAttempt = 0;
         // Only activate archived sessions; skip if already active to avoid extra reconnect.
-        if (hello.active === false) {
+        if (!hello.active) {
           void activateSession(hello.sessionId).then(() => {
-            fetchSnapshot();
+            void fetchSnapshot();
             void fetchSessions();
             void fetchGitStatus();
           });
         } else {
-          fetchSnapshot();
+          void fetchSnapshot();
           void fetchSessions();
           void fetchGitStatus();
         }
@@ -168,21 +235,28 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
         break;
       }
       case 'user_message': {
-        if (msg.clientMessageId && sentMessageIds.has(msg.clientMessageId)) break;
+        liveGeneration++;
+        if (msg.clientMessageId && sentMessageIds.has(msg.clientMessageId)) {
+          pendingPromptAccepted = true;
+          break;
+        }
         messages.value.push({
           id: generateId(),
           role: 'user',
           content: msg.text,
+          clientMessageId: msg.clientMessageId,
           tools: [],
           ts: Date.now(),
         });
         break;
       }
       case 'approval_request': {
+        liveGeneration++;
         pendingApprovals.value = [...pendingApprovals.value, { id: msg.id, toolName: msg.toolName, action: msg.action, display: msg.display }];
         break;
       }
       case 'approval_resolved': {
+        liveGeneration++;
         pendingApprovals.value = pendingApprovals.value.filter((a) => a.id !== msg.id);
         break;
       }
@@ -224,24 +298,48 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
       }
       case 'resync_required': {
         seq = 0;
-        fetchSnapshot();
+        void fetchSnapshot();
         break;
       }
       case 'status': {
+        liveGeneration++;
         // Server-pushed status sync (e.g. model/thinking switched from another tab).
         status.value = { ...status.value, ...msg.status };
         break;
       }
       case 'error': {
         error.value = msg.message;
+        if (msg.clientMessageId) {
+          const pendingEntry = sentMessageIds.get(msg.clientMessageId);
+          if (pendingEntry) {
+            sentMessageIds.delete(msg.clientMessageId);
+            promptPending.value = false;
+            pendingPromptAccepted = false;
+            const local = messages.value.find((m) => m.id === pendingEntry.messageId);
+            if (local) local.isError = true;
+            showToast(`消息未发送：${msg.message}`, 'error');
+          }
+        }
         break;
       }
+      case 'server_empty': {
+        // Server has no session yet; stay idle instead of reconnect-looping.
+        setConnectionStatus('idle');
+        break;
+      }
+      case 'pong':
+        break;
     }
   }
 
   function onEvent(payload: { type: string; [key: string]: unknown }): void {
     switch (payload.type) {
       case 'turn.started': {
+        if (pendingPromptAccepted) {
+          promptPending.value = false;
+          pendingPromptAccepted = false;
+          sentMessageIds.clear();
+        }
         status.value = { ...status.value, busy: true };
         messages.value.push({ id: generateId(), role: 'assistant', content: '', tools: [], ts: Date.now() });
         break;
@@ -324,32 +422,37 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
   }
 
   function connect(): void {
-    if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) return;
+    if (disposed || (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN))) return;
 
     setConnectionStatus('connecting');
     error.value = null;
-    seq = 0;
-    epoch = 0;
-    messages.value = [];
-    pendingApprovals.value = [];
-    ws = new WebSocket(wsUrl());
+    connectionGeneration++;
+    const socket = new WebSocket(wsUrl());
+    ws = socket;
 
-    ws.onopen = () => {
-      setConnectionStatus('connected');
-      reconnectAttempt = 0;
-    };
-
-    ws.onclose = () => {
+    socket.onclose = (event) => {
+      if (ws !== socket) return;
+      ws = null;
       stopHeartbeat();
+      if (connectionStatus.value === 'idle') return;
+      // 1008 = server rejected the session (deleted or unknown): go idle
+      // instead of reconnect-looping; the user picks another session.
+      if (event.code === 1008) {
+        sessionId.value = null;
+        currentSessionId.value = null;
+        setConnectionStatus('idle');
+        return;
+      }
       setConnectionStatus('disconnected');
       scheduleReconnect();
     };
 
-    ws.onerror = () => {
-      setConnectionStatus('reconnecting');
+    socket.onerror = () => {
+      if (ws === socket) setConnectionStatus('reconnecting');
     };
 
-    ws.onmessage = (e) => {
+    socket.onmessage = (e) => {
+      if (ws !== socket) return;
       lastPongAt = Date.now();
       let msg: WsMessage;
       try {
@@ -362,15 +465,23 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
   }
 
   function sendPrompt(text: string): void {
-    if (!text || status.value.busy) return;
+    if (!text || isBusy.value) return;
+    if (connectionStatus.value === 'idle') {
+      showToast('暂无会话，请先新建会话。', 'warning');
+      return;
+    }
     if (connectionStatus.value !== 'connected') {
       showToast('连接已断开，正在尝试重连...', 'error');
       connect();
       return;
     }
     const clientMessageId = `client_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    sentMessageIds.add(clientMessageId);
-    messages.value.push({ id: generateId(), role: 'user', content: text, tools: [], ts: Date.now() });
+    const localMessageId = generateId();
+    sentMessageIds.set(clientMessageId, { messageId: localMessageId, connectionGeneration });
+    promptGeneration++;
+    pendingPromptAccepted = false;
+    promptPending.value = true;
+    messages.value.push({ id: localMessageId, role: 'user', content: text, clientMessageId, tools: [], ts: Date.now() });
     send({ type: 'prompt', text, clientMessageId });
   }
 
@@ -381,9 +492,18 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
   // ── Slash commands / local message ops ──────────────────────────────────
 
   function sendCommand(command: string, args?: string): void {
+    if (connectionStatus.value === 'idle') {
+      showToast('暂无会话，请先新建会话。', 'warning');
+      return;
+    }
+    if (connectionStatus.value !== 'connected') {
+      showToast('连接已断开，命令未发送。', 'error');
+      connect();
+      return;
+    }
     // Side questions are designed to run during an active turn; other commands
     // mutate session state and must wait until the turn settles.
-    if (status.value.busy && command !== 'btw') {
+    if (isBusy.value && command !== 'btw') {
       showToast(`会话忙碌中，无法执行 /${command}，请稍后再试。`, 'warning');
       return;
     }
@@ -422,6 +542,11 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
   }
 
   function resolveApproval(id: string, decision: 'approved' | 'rejected', feedback?: string, scope?: 'once' | 'session'): void {
+    if (connectionStatus.value !== 'connected') {
+      showToast('连接已断开，审批结果未发送。', 'error');
+      connect();
+      return;
+    }
     pendingApprovals.value = pendingApprovals.value.filter((a) => a.id !== id);
     send({ type: 'approval_response', id, decision, ...(feedback ? { feedback } : {}), ...(scope ? { scope } : {}) });
   }
@@ -472,14 +597,22 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
 
   /** POST a session mutation and apply the returned status / surface errors. */
   async function postSessionSwitch(path: string, body: Record<string, unknown>, okMessage: string): Promise<void> {
-    if (!sessionId.value) return;
+    const targetSessionId = sessionId.value;
+    if (!targetSessionId) return;
+    const targetSessionGeneration = sessionGeneration;
+    const requestGeneration = ++sessionMutationGeneration;
     try {
-      const res = await fetch(`${API_BASE}/sessions/${sessionId.value}/${path}`, {
+      const res = await fetch(`${API_BASE}/sessions/${targetSessionId}/${path}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
       const data = (await res.json()) as { status?: SessionStatus; message?: string };
+      if (
+        sessionId.value !== targetSessionId ||
+        sessionGeneration !== targetSessionGeneration ||
+        sessionMutationGeneration !== requestGeneration
+      ) return;
       if (!res.ok) {
         showToast(data.message ?? `请求失败（HTTP ${res.status}）`, 'error');
         return;
@@ -489,6 +622,11 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
       }
       appendSystemMessage(okMessage);
     } catch (error) {
+      if (
+        sessionId.value !== targetSessionId ||
+        sessionGeneration !== targetSessionGeneration ||
+        sessionMutationGeneration !== requestGeneration
+      ) return;
       showToast(`请求失败：${error instanceof Error ? error.message : String(error)}`, 'error');
     }
   }
@@ -506,18 +644,39 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
   async function createSession(): Promise<void> {
     try {
       const res = await fetch(`${API_BASE}/sessions`, { method: 'POST' });
-      if (!res.ok) return;
+      if (!res.ok) {
+        showToast(`新建会话失败（HTTP ${res.status}）`, 'error');
+        return;
+      }
       const item: SessionListItem = await res.json();
       sessions.value = [item, ...sessions.value];
       await switchSession(item.sessionId);
     } catch (error) {
-      console.error('Failed to create session', error); // eslint-disable-line no-console
+      showToast(`新建会话失败：${error instanceof Error ? error.message : String(error)}`, 'error');
     }
   }
 
   async function switchSession(targetId: string): Promise<void> {
     if (currentSessionId.value === targetId && connectionStatus.value === 'connected') return;
     currentSessionId.value = targetId;
+    sessionId.value = targetId;
+    sessionGeneration++;
+    seq = 0;
+    epoch = 0;
+    messages.value = [];
+    pendingApprovals.value = [];
+    status.value = { busy: false };
+    promptPending.value = false;
+    pendingPromptAccepted = false;
+    sentMessageIds.clear();
+    if (reconnectTimer !== null) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+    if (snapshotRetryTimer !== null) {
+      clearTimeout(snapshotRetryTimer);
+      snapshotRetryTimer = null;
+    }
     // Close existing connection and reconnect to the new session.
     if (ws) {
       ws.onclose = null;
@@ -531,7 +690,10 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
   async function deleteSession(targetId: string): Promise<void> {
     try {
       const res = await fetch(`${API_BASE}/sessions/${targetId}`, { method: 'DELETE' });
-      if (!res.ok) return;
+      if (!res.ok) {
+        showToast(`删除会话失败（HTTP ${res.status}）`, 'error');
+        return;
+      }
       sessions.value = sessions.value.filter((s) => s.sessionId !== targetId);
       // If we deleted the current session, switch to the first remaining.
       if (currentSessionId.value === targetId) {
@@ -539,18 +701,38 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
         if (next) {
           await switchSession(next.sessionId);
         } else {
-          await createSession();
+          // No sessions left: go idle instead of silently creating one.
+          sessionId.value = null;
+          currentSessionId.value = null;
+          seq = 0;
+          epoch = 0;
+          messages.value = [];
+          pendingApprovals.value = [];
+          status.value = { busy: false };
+          promptPending.value = false;
+          pendingPromptAccepted = false;
+          sentMessageIds.clear();
+          if (ws) {
+            ws.onclose = null;
+            ws.close();
+            ws = null;
+          }
+          stopHeartbeat();
+          setConnectionStatus('idle');
         }
       }
     } catch (error) {
-      console.error('Failed to delete session', error); // eslint-disable-line no-console
+      showToast(`删除会话失败：${error instanceof Error ? error.message : String(error)}`, 'error');
     }
   }
 
   async function exportSession(targetId: string): Promise<void> {
     try {
       const res = await fetch(`${API_BASE}/sessions/${targetId}/export`);
-      if (!res.ok) return;
+      if (!res.ok) {
+        showToast(`导出会话失败（HTTP ${res.status}）`, 'error');
+        return;
+      }
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -559,7 +741,7 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
       a.click();
       URL.revokeObjectURL(url);
     } catch (error) {
-      console.error('Failed to export session', error); // eslint-disable-line no-console
+      showToast(`导出会话失败：${error instanceof Error ? error.message : String(error)}`, 'error');
     }
   }
 
@@ -568,9 +750,33 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
   void fetchSessions();
   void fetchModels();
 
-  window.addEventListener('online', () => connect());
-  document.addEventListener('visibilitychange', () => {
+  const handleOnline = () => {
+    connect();
+  };
+  const handleVisibilityChange = () => {
     if (!document.hidden && connectionStatus.value !== 'connected') connect();
+  };
+  window.addEventListener('online', handleOnline);
+  document.addEventListener('visibilitychange', handleVisibilityChange);
+
+  onBeforeUnmount(() => {
+    disposed = true;
+    window.removeEventListener('online', handleOnline);
+    document.removeEventListener('visibilitychange', handleVisibilityChange);
+    stopHeartbeat();
+    if (reconnectTimer !== null) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+    if (snapshotRetryTimer !== null) {
+      clearTimeout(snapshotRetryTimer);
+      snapshotRetryTimer = null;
+    }
+    if (ws) {
+      ws.onclose = null;
+      ws.close();
+      ws = null;
+    }
   });
 
   return {

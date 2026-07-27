@@ -29,7 +29,7 @@ const themeOptions: readonly { value: Theme; icon: string; label: string }[] = [
   { value: 'system', icon: 'monitor', label: '跟随系统' },
 ];
 const labels: Record<ConnectionStatus, string> = {
-  connecting: '连接中', connected: '已连接', reconnecting: '重连中', disconnected: '已断开',
+  connecting: '连接中', connected: '已连接', reconnecting: '重连中', disconnected: '已断开', idle: '空闲',
 };
 const modelSwitchable = inject<Ref<boolean>>('modelSwitchable', ref(false));
 const showDiff = ref(false);

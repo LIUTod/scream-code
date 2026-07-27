@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, watch, provide } from 'vue';
+import { ref, onBeforeUnmount, onMounted, watch, provide } from 'vue';
 import ChatView from './components/ChatView.vue';
 import Toast from './components/ui/Toast.vue';
 import type { Theme } from './theme';
@@ -28,7 +28,11 @@ let themeTimer: number | null = null;
 
 function setTheme(t: Theme) {
   theme.value = t;
-  localStorage.setItem('scream-theme', t);
+  try {
+    localStorage.setItem('scream-theme', t);
+  } catch {
+    // Storage can be unavailable in restricted/private browsing contexts.
+  }
   // Briefly enable cross-property transitions so the theme swap animates.
   const root = document.documentElement;
   root.classList.add('theme-transition');
@@ -39,14 +43,24 @@ function setTheme(t: Theme) {
 provide('setTheme', setTheme);
 
 onMounted(() => {
-  const saved = localStorage.getItem('scream-theme') as Theme | null;
-  if (saved) theme.value = saved;
+  try {
+    const saved = localStorage.getItem('scream-theme') as Theme | null;
+    if (saved === 'light' || saved === 'dark' || saved === 'system') theme.value = saved;
+  } catch {
+    // Fall back to the system theme when storage is unavailable.
+  }
   applyTheme();
 });
 
 watch(theme, applyTheme);
 
-window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme);
+const colorScheme = window.matchMedia('(prefers-color-scheme: dark)');
+colorScheme.addEventListener('change', applyTheme);
+onBeforeUnmount(() => {
+  colorScheme.removeEventListener('change', applyTheme);
+  if (themeTimer !== null) clearTimeout(themeTimer);
+  document.documentElement.classList.remove('theme-transition');
+});
 </script>
 
 <template>
