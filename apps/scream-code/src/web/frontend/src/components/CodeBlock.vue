@@ -14,40 +14,78 @@ const highlighted = ref('');
 const copied = ref(false);
 
 let highlighter: Awaited<ReturnType<typeof createHighlighterCore>> | null = null;
+const loadedLangs = new Set<string>();
+const loadingLangs = new Map<string, Promise<void>>();
 
-async function ensureHighlighter() {
+// Common aliases mapped to shiki language module names.
+const LANG_ALIASES: Record<string, string> = {
+  js: 'javascript', ts: 'typescript', py: 'python', sh: 'bash', shell: 'bash',
+  shscript: 'bash', 'shell-script': 'bash', yml: 'yaml', md: 'markdown',
+  rs: 'rust', rb: 'ruby', go: 'go', java: 'java', c: 'c', cpp: 'cpp',
+  'c++': 'cpp', cs: 'csharp', 'c#': 'csharp', kt: 'kotlin', kts: 'kotlin',
+  scala: 'scala', swift: 'swift', dart: 'dart', lua: 'lua', r: 'r',
+  sql: 'sql', toml: 'toml', ini: 'ini', xml: 'xml', svelte: 'svelte',
+  astro: 'astro', dockerfile: 'docker', makefile: 'make', graphql: 'graphql',
+  proto: 'protobuf', pl: 'perl', pm: 'perl',
+};
+
+async function ensureHighlighter(): Promise<typeof highlighter> {
   if (highlighter) return highlighter;
-  const [githubDark, githubLight, js, ts, py, bash, json, yaml, html, css, vue, diff] = await Promise.all([
+  const [githubDark, githubLight] = await Promise.all([
     import('shiki/themes/github-dark.mjs'),
     import('shiki/themes/github-light.mjs'),
-    import('shiki/langs/javascript.mjs'),
-    import('shiki/langs/typescript.mjs'),
-    import('shiki/langs/python.mjs'),
-    import('shiki/langs/bash.mjs'),
-    import('shiki/langs/json.mjs'),
-    import('shiki/langs/yaml.mjs'),
-    import('shiki/langs/html.mjs'),
-    import('shiki/langs/css.mjs'),
-    import('shiki/langs/vue.mjs'),
-    import('shiki/langs/diff.mjs'),
   ]);
   highlighter = await createHighlighterCore({
     themes: [githubDark.default, githubLight.default],
-    langs: [js.default, ts.default, py.default, bash.default, json.default, yaml.default, html.default, css.default, vue.default, diff.default],
+    langs: [],
     engine: createOnigurumaEngine(() => import('shiki/wasm')),
   });
   return highlighter;
 }
 
+async function ensureLang(langName: string): Promise<boolean> {
+  if (loadedLangs.has(langName)) return true;
+  if (loadingLangs.has(langName)) {
+    await loadingLangs.get(langName);
+    return loadedLangs.has(langName);
+  }
+
+  const promise = (async () => {
+    try {
+      const h = await ensureHighlighter();
+      // Try to dynamically import the language grammar.
+      const mod = await import(`shiki/langs/${langName}.mjs`);
+      await h.loadLanguage(mod.default);
+      loadedLangs.add(langName);
+    } catch {
+      // Language not available in shiki - will fall back to plaintext.
+    }
+  })();
+
+  loadingLangs.set(langName, promise);
+  await promise;
+  loadingLangs.delete(langName);
+  return loadedLangs.has(langName);
+}
+
+function resolveLang(rawLang: string): string {
+  const lower = rawLang.toLowerCase();
+  return LANG_ALIASES[lower] ?? lower;
+}
+
 async function render() {
-  const lang = props.lang?.toLowerCase() ?? 'text';
-  const supportedLangs = new Set(['javascript', 'typescript', 'python', 'bash', 'shell', 'json', 'yaml', 'html', 'css', 'vue', 'diff']);
-  const effectiveLang = supportedLangs.has(lang) ? lang : lang === 'js' ? 'javascript' : lang === 'ts' ? 'typescript' : lang === 'py' ? 'python' : lang === 'sh' ? 'bash' : 'text';
+  const rawLang = props.lang?.toLowerCase() ?? 'text';
+  const langName = resolveLang(rawLang);
   const theme = effectiveTheme.value === 'light' ? 'github-light' : 'github-dark';
 
   try {
     const h = await ensureHighlighter();
-    highlighted.value = h.codeToHtml(props.code, { lang: effectiveLang, theme });
+    const loaded = await ensureLang(langName);
+    if (loaded) {
+      highlighted.value = h.codeToHtml(props.code, { lang: langName, theme });
+    } else {
+      highlighted.value = `<pre class="shiki-fallback"><code>${escapeHtml(props.code)}</code></pre>`;
+    }
   } catch {
     highlighted.value = `<pre class="shiki-fallback"><code>${escapeHtml(props.code)}</code></pre>`;
   }
@@ -129,4 +167,12 @@ watch(
 .code-content :deep(.line) { display: block; }
 .code-content :deep(.line.add) { background: #23863633; }
 .code-content :deep(.line.del) { background: #da363333; }
+.code-content :deep(.shiki-fallback) {
+  margin: 0;
+  padding: 12px;
+  overflow-x: auto;
+  font-size: 13px;
+  line-height: 1.6;
+  font-family: "SF Mono", "Cascadia Code", monospace;
+}
 </style>

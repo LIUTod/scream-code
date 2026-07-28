@@ -3,19 +3,54 @@ import { computed, h, defineComponent } from 'vue';
 import { marked } from 'marked';
 import CodeBlock from './CodeBlock.vue';
 
+// Enable GFM features (task lists, tables, strikethrough) and line breaks.
+marked.setOptions({ gfm: true, breaks: false });
+
 export default defineComponent({
   props: {
     content: { type: String, required: true },
   },
   setup(props) {
     const nodes = computed(() => {
-      const tokens = marked.lexer(props.content);
+      const safeContent = trimPartialClosingFences(props.content);
+      const tokens = marked.lexer(safeContent);
       return tokens.flatMap((token) => renderToken(token));
     });
 
     return () => h('div', { class: 'markdown-body' }, nodes.value);
   },
 });
+
+/**
+ * During streaming, a ``` fence may be open but not yet closed.
+ * marked.lexer will treat everything after an unclosed ``` as code content,
+ * swallowing the rest of the message. Trim the trailing unclosed fence
+ * so the partial code block renders as text instead.
+ */
+function trimPartialClosingFences(content: string): string {
+  // Count ``` fences in the content.
+  const fenceRegex = /^(`{3,})/gm;
+  let openFence: string | null = null;
+  let openFenceIndex = -1;
+  let openFenceLength = 0;
+  let match: RegExpExecArray | null;
+  while ((match = fenceRegex.exec(content)) !== null) {
+    const fence = match[1]!;
+    if (openFence === null) {
+      openFence = fence;
+      openFenceIndex = match.index;
+      openFenceLength = fence.length;
+    } else if (fence.length >= openFenceLength) {
+      // Closing fence found.
+      openFence = null;
+    }
+  }
+  if (openFence !== null) {
+    // Unclosed fence: trim everything from the opening fence onwards.
+    return content.substring(0, openFenceIndex).trimEnd();
+  }
+  return content;
+}
 
 function renderToken(token: marked.Token): ReturnType<typeof h>[] {
   switch (token.type) {
@@ -28,9 +63,14 @@ function renderToken(token: marked.Token): ReturnType<typeof h>[] {
     case 'blockquote':
       return [h('blockquote', { class: 'md-blockquote' }, token.tokens.flatMap((t) => renderToken(t)))];
     case 'list': {
-      const items = token.items.map((item) =>
-        h('li', { class: 'md-li' }, item.tokens.flatMap((t) => renderToken(t))),
-      );
+      const items = (token as { items: { task: boolean; checked: boolean; tokens: marked.Token[] }[] }).items.map((item) => {
+        const children: (ReturnType<typeof h> | string)[] = [];
+        if (item.task) {
+          children.push(h('input', { type: 'checkbox', checked: item.checked, disabled: true, class: 'md-checkbox' }));
+        }
+        children.push(...item.tokens.flatMap((t) => renderToken(t)));
+        return h('li', { class: ['md-li', item.task ? 'md-task' : ''] }, children);
+      });
       return [h(token.ordered ? 'ol' : 'ul', { class: token.ordered ? 'md-ol' : 'md-ul' }, items)];
     }
     case 'hr':
@@ -44,12 +84,10 @@ function renderToken(token: marked.Token): ReturnType<typeof h>[] {
     case 'br':
       return [h('br')];
     case 'text':
-      // List items deliver their inline content as a nested `text` token.
       return [h('span', { class: 'md-text' }, token.tokens ? renderInline(token.tokens) : token.text)];
     case 'def':
       return [];
     default:
-      // Fallback: render raw text so content is never silently lost.
       return [h('p', { class: 'md-p' }, token.raw ?? '')];
   }
 }
@@ -98,6 +136,8 @@ function renderInline(tokens: marked.Token[]): (string | ReturnType<typeof h>)[]
         return h('br');
       case 'html':
         return h('span', { innerHTML: token.text });
+      case 'escape':
+        return token.text;
       default:
         return token.raw ?? '';
     }
@@ -115,6 +155,8 @@ function renderInline(tokens: marked.Token[]): (string | ReturnType<typeof h>)[]
 .markdown-body :deep(.md-h3) { font-size: 1.15em; }
 .markdown-body :deep(.md-ul), .markdown-body :deep(.md-ol) { margin: 0.6em 0; padding-left: 1.5em; }
 .markdown-body :deep(.md-li) { margin: 0.25em 0; }
+.markdown-body :deep(.md-task) { list-style: none; margin-left: -1.2em; }
+.markdown-body :deep(.md-checkbox) { margin-right: 6px; vertical-align: middle; }
 .markdown-body :deep(.md-blockquote) {
   margin: 0.6em 0; padding-left: 1em; border-left: 3px solid var(--color-accent);
   color: var(--color-text-muted);
