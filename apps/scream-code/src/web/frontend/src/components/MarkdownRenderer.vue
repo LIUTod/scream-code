@@ -37,12 +37,39 @@ function renderToken(token: marked.Token): ReturnType<typeof h>[] {
       return [h('hr', { class: 'md-hr' })];
     case 'space':
       return [];
+    case 'html':
+      return [h('div', { class: 'md-html', innerHTML: token.text })];
+    case 'table':
+      return [h('div', { class: 'md-table-wrap', style: 'overflow-x:auto' }, [renderTable(token)])];
+    case 'br':
+      return [h('br')];
     case 'text':
       // List items deliver their inline content as a nested `text` token.
       return [h('span', { class: 'md-text' }, token.tokens ? renderInline(token.tokens) : token.text)];
-    default:
+    case 'def':
       return [];
+    default:
+      // Fallback: render raw text so content is never silently lost.
+      return [h('p', { class: 'md-p' }, token.raw ?? '')];
   }
+}
+
+function renderTable(token: marked.Token): ReturnType<typeof h> {
+  const t = token as { header: marked.Token[]; rows: marked.Token[][]; align: ('center' | 'left' | 'right' | null)[] };
+  const headerCells = (t.header ?? []).map((cell, i) => {
+    const align = t.align?.[i];
+    return h('th', { class: 'md-th', style: align ? `text-align:${align}` : '' }, cell.tokens ? renderInline(cell.tokens) : String((cell as { text?: string }).text ?? ''));
+  });
+  const bodyRows = (t.rows ?? []).map((row) =>
+    h('tr', {}, row.map((cell, i) => {
+      const align = t.align?.[i];
+      return h('td', { class: 'md-td', style: align ? `text-align:${align}` : '' }, cell.tokens ? renderInline(cell.tokens) : String((cell as { text?: string }).text ?? ''));
+    })),
+  );
+  return h('table', { class: 'md-table' }, [
+    h('thead', {}, [h('tr', {}, headerCells)]),
+    h('tbody', {}, bodyRows),
+  ]);
 }
 
 function renderInline(tokens: marked.Token[]): (string | ReturnType<typeof h>)[] {
@@ -56,14 +83,21 @@ function renderInline(tokens: marked.Token[]): (string | ReturnType<typeof h>)[]
         return h('strong', { class: 'md-strong' }, renderInline(token.tokens));
       case 'em':
         return h('em', { class: 'md-em' }, renderInline(token.tokens));
+      case 'del':
+        return h('del', { class: 'md-del' }, renderInline(token.tokens));
       case 'link': {
         const href = token.href;
-        // Only allow safe protocols to prevent XSS via javascript: links.
         if (href && !/^(https?:|mailto:|#|\/)/i.test(href)) {
           return token.raw ?? '';
         }
         return h('a', { class: 'md-a', href, target: '_blank', rel: 'noopener' }, renderInline(token.tokens));
       }
+      case 'image':
+        return h('img', { class: 'md-img', src: token.href, alt: token.text ?? '', loading: 'lazy' });
+      case 'br':
+        return h('br');
+      case 'html':
+        return h('span', { innerHTML: token.text });
       default:
         return token.raw ?? '';
     }
@@ -94,4 +128,10 @@ function renderInline(tokens: marked.Token[]): (string | ReturnType<typeof h>)[]
 .markdown-body :deep(.md-hr) { border: none; border-top: 1px solid var(--color-line); margin: 1em 0; }
 .markdown-body :deep(.md-strong) { font-weight: 600; }
 .markdown-body :deep(.md-em) { font-style: italic; }
+.markdown-body :deep(.md-del) { text-decoration: line-through; }
+.markdown-body :deep(.md-img) { max-width: 100%; border-radius: 8px; }
+.markdown-body :deep(.md-table) { border-collapse: collapse; width: 100%; margin: 0.6em 0; font-size: 0.9em; }
+.markdown-body :deep(.md-th), .markdown-body :deep(.md-td) { border: 1px solid var(--color-line); padding: 6px 10px; text-align: left; }
+.markdown-body :deep(.md-th) { background: var(--color-surface-sunken); font-weight: 600; }
+.markdown-body :deep(.md-html) { margin: 0.6em 0; }
 </style>
