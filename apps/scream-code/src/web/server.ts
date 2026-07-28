@@ -1951,7 +1951,14 @@ export async function startWebServerForSession(session: Session, opts: {
     await webSession.close();
     throw error;
   }
-  await new Promise<void>((resolve) => {
+  await new Promise<void>((resolve, reject) => {
+    httpServer.once('error', (err: NodeJS.ErrnoException) => {
+      if (err.code === 'EADDRINUSE') {
+        reject(new Error(`端口 ${opts.port} 已被占用，请先关闭占用该端口的进程，或使用 --port <port> 指定其他端口。`));
+      } else {
+        reject(err);
+      }
+    });
     httpServer.listen(opts.port, '127.0.0.1', resolve);
   });
 
@@ -2287,7 +2294,14 @@ export async function runWebServer(opts: WebServerOptions): Promise<void> {
     ws.send(JSON.stringify({ type: 'server_empty' }));
   });
 
-  await new Promise<void>((resolve) => {
+  await new Promise<void>((resolve, reject) => {
+    httpServer.once('error', (err: NodeJS.ErrnoException) => {
+      if (err.code === 'EADDRINUSE') {
+        reject(new Error(`端口 ${opts.port} 已被占用，请先关闭占用该端口的进程，或使用 --port <port> 指定其他端口。`));
+      } else {
+        reject(err);
+      }
+    });
     httpServer.listen(opts.port, '127.0.0.1', resolve);
   });
 
