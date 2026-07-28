@@ -13,6 +13,7 @@ import { isMcpToolName, qualifyMcpToolName } from '../../mcp/tool-naming';
 import type { MCPClient } from '../../mcp/types';
 import { DEFAULT_AGENT_PROFILES } from '../../profile';
 import { extendWorkspaceWithSkillRoots } from '../../skill';
+import type { TodoItem } from '../../todo';
 import * as b from '../../tools/builtin';
 import { LspTool } from '../../tools/builtin/lsp-tool';
 import { LspRegistry } from '../../lsp/registry';
@@ -27,6 +28,14 @@ import type {
 } from './types';
 
 export * from './types';
+
+function cloneTodos(todos: readonly TodoItem[]): TodoItem[] {
+  return todos.map((todo) => ({
+    title: todo.title,
+    status: todo.status,
+    phase: todo.phase,
+  }));
+}
 
 const CRITERIA_SYSTEM_PROMPT = [
   'You generate concrete, verifiable acceptance criteria for a given objective.',
@@ -262,12 +271,24 @@ export class ToolManager {
   }
 
   updateStore<K extends ToolStoreKey>(key: K, value: ToolStoreData[K]): void {
+    const storedValue = (
+      key === 'todo'
+        ? cloneTodos((value ?? []) as readonly TodoItem[])
+        : value
+    ) as ToolStoreData[K];
     this.agent.records.logRecord({
       type: 'tools.update_store',
       key,
-      value,
+      value: storedValue,
     });
-    this.store[key] = value;
+    this.store[key] = storedValue;
+    if (key === 'todo') {
+      this.agent.emitEvent({ type: 'todo.updated', todos: this.getTodos() });
+    }
+  }
+
+  getTodos(): readonly TodoItem[] {
+    return cloneTodos(this.store.todo ?? []);
   }
 
   registerUserTool(input: UserToolRegistration): void {

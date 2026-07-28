@@ -15,7 +15,8 @@
  * not a separate engine. Zero changes to agent-core or node-sdk.
  */
 
-import { createServer, type Server as HttpServer, type IncomingMessage } from 'node:http';
+import { createServer, type Server as HttpServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { readFile, writeFile, access, mkdir, readdir, unlink } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -27,15 +28,20 @@ import {
   ScreamHarness,
   resolveScreamHome,
   log,
+  ErrorCodes,
+  isScreamError,
   type Session,
   type Event,
   type SessionStatus,
   type PermissionMode,
+  type GoalSnapshotData,
+  type TodoItem,
 } from '@scream-code/scream-code-sdk';
 import { setLocale } from '@scream-code/config';
 
 import { loadTuiConfig, TuiConfigParseError } from '#/tui/config';
 import { createScreamCodeHostIdentity } from '#/cli/version';
+import { refineGoal } from '#/utils/goal-refiner';
 
 // ─── Types ────────────────────────────────────────────────────────────────
 
@@ -89,6 +95,8 @@ interface SessionSnapshot {
   readonly busy: boolean;
   readonly createdAt: number;
   readonly title: string;
+  readonly goal: GoalSnapshotData | null;
+  readonly todos: readonly TodoItem[];
 }
 
 interface SessionListItem {
@@ -102,11 +110,19 @@ interface SessionListItem {
 
 interface SessionMetadata {
   readonly sessionId: string;
+  readonly coreSessionId?: string;
   readonly workDir: string;
   readonly title: string;
   readonly createdAt: number;
   readonly model: string;
   readonly permission: PermissionMode;
+}
+
+type GoalBudgetUnit = 'turns' | 'tokens' | 'milliseconds' | 'seconds' | 'minutes' | 'hours';
+
+interface GoalBudgetInput {
+  readonly value: number;
+  readonly unit: GoalBudgetUnit;
 }
 
 interface ModelListItem {
@@ -130,6 +146,7 @@ class HttpError extends Error {
   constructor(
     readonly statusCode: number,
     message: string,
+    readonly code?: string,
   ) {
     super(message);
   }
@@ -170,6 +187,19 @@ const contentTypes: Record<string, string> = {
 // ─── HTTP helpers ─────────────────────────────────────────────────────────
 
 /** Reads and parses a JSON request body (64 KiB cap). */
+function cloneSnapshot<T>(value: T): T {
+  return structuredClone(value);
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function sendJson(res: ServerResponse, statusCode: number, body: unknown): void {
+  res.writeHead(statusCode, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify(body));
+}
+
 function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
     let data = '';
@@ -193,12 +223,101 @@ function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
         return;
       }
       try {
-        resolve(JSON.parse(data) as Record<string, unknown>);
+        const parsed: unknown = JSON.parse(data);
+        if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+          reject(new HttpError(400, 'JSON body must be an object'));
+          return;
+        }
+        resolve(parsed as Record<string, unknown>);
       } catch {
         reject(new HttpError(400, 'Invalid JSON body'));
       }
     });
     req.on('error', reject);
+  });
+}
+
+function requiredString(body: Record<string, unknown>, field: string): string {
+  const value = body[field];
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    throw new HttpError(400, `Missing or empty ${field} field`, 'request.invalid');
+  }
+  return value.trim();
+}
+
+function optionalString(body: Record<string, unknown>, field: string): string | undefined {
+  const value = body[field];
+  if (value === undefined) return undefined;
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    throw new HttpError(400, `${field} must be a non-empty string`, 'request.invalid');
+  }
+  return value.trim();
+}
+
+function optionalBoolean(body: Record<string, unknown>, field: string, fallback: boolean): boolean {
+  const value = body[field];
+  if (value === undefined) return fallback;
+  if (typeof value !== 'boolean') throw new HttpError(400, `${field} must be a boolean`, 'request.invalid');
+  return value;
+}
+
+function parseGoalBudgets(body: Record<string, unknown>): readonly GoalBudgetInput[] {
+  const raw = body['budgets'];
+  if (raw === undefined) return [];
+  if (!Array.isArray(raw)) throw new HttpError(400, 'budgets must be an array', 'request.invalid');
+
+  const validUnits = new Set<GoalBudgetUnit>(['turns', 'tokens', 'milliseconds', 'seconds', 'minutes', 'hours']);
+  const seen = new Set<'turns' | 'tokens' | 'time'>();
+  return raw.map((item) => {
+    if (item === null || typeof item !== 'object' || Array.isArray(item)) {
+      throw new HttpError(400, 'Each budget must be an object', 'request.invalid');
+    }
+    const value = (item as Record<string, unknown>)['value'];
+    const unit = (item as Record<string, unknown>)['unit'];
+    if (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0) {
+      throw new HttpError(400, 'Budget value must be a positive safe integer', 'request.invalid');
+    }
+    if (typeof unit !== 'string' || !validUnits.has(unit as GoalBudgetUnit)) {
+      throw new HttpError(400, 'Budget unit must be turns, tokens, milliseconds, seconds, minutes, or hours', 'request.invalid');
+    }
+    const typedUnit = unit as GoalBudgetUnit;
+    const dimension = typedUnit === 'turns' || typedUnit === 'tokens' ? typedUnit : 'time';
+    if (seen.has(dimension)) {
+      throw new HttpError(400, `Duplicate budget dimension: ${dimension}`, 'request.invalid');
+    }
+    seen.add(dimension);
+    return { value, unit: typedUnit };
+  });
+}
+
+function toHttpError(error: unknown): HttpError {
+  if (error instanceof HttpError) return error;
+  if (isScreamError(error)) {
+    switch (error.code) {
+      case ErrorCodes.GOAL_OBJECTIVE_EMPTY:
+      case ErrorCodes.GOAL_OBJECTIVE_TOO_LONG:
+      case ErrorCodes.REQUEST_INVALID:
+        return new HttpError(400, error.message, error.code);
+      case ErrorCodes.GOAL_NOT_FOUND:
+      case ErrorCodes.SESSION_NOT_FOUND:
+        return new HttpError(404, error.message, error.code);
+      case ErrorCodes.GOAL_ALREADY_EXISTS:
+      case ErrorCodes.GOAL_NOT_RESUMABLE:
+      case ErrorCodes.GOAL_STATUS_INVALID:
+      case ErrorCodes.TURN_AGENT_BUSY:
+        return new HttpError(409, error.message, error.code);
+      default:
+        return new HttpError(500, error.message, error.code);
+    }
+  }
+  return new HttpError(500, errorMessage(error));
+}
+
+function sendHttpError(res: ServerResponse, error: unknown): void {
+  const mapped = toHttpError(error);
+  sendJson(res, mapped.statusCode, {
+    code: mapped.code ?? mapped.statusCode,
+    message: mapped.message,
   });
 }
 
@@ -426,6 +545,14 @@ class WebSession {
   private nextSeq = 1;
   private epoch = 1;
   private cachedStatus: SessionStatus | null = null;
+  private cachedGoal: GoalSnapshotData | null = null;
+  private cachedTodos: readonly TodoItem[] = [];
+  private goalEventRevision = 0;
+  private todoEventRevision = 0;
+  private goalMutationTail: Promise<void> = Promise.resolve();
+  private pendingGoalMutations = 0;
+  private readonly coreSessionId: string;
+  readonly ready: Promise<void>;
   private title = 'New Session';
 
   private readonly pendingApprovals = new Map<
@@ -463,6 +590,7 @@ class WebSession {
       yolo: boolean;
       sessionId: string;
       createdAt: number;
+      coreSessionId?: string;
       homeDir?: string;
       title?: string;
       onFork?: (sourceId: string) => Promise<{ sessionId: string; title: string } | null>;
@@ -475,13 +603,18 @@ class WebSession {
     this.yolo = opts.yolo;
     this.homeDir = opts.homeDir ?? null;
     this.createdAt = opts.createdAt;
+    this.coreSessionId = session?.id ?? opts.coreSessionId ?? opts.sessionId;
     this.onFork = opts.onFork;
     if (opts.title) this.title = opts.title;
 
     if (session) {
-      void this.refreshStatus();
+      // Subscribe before the initial reads. Revision checks below prevent an
+      // in-flight RPC result from overwriting a newer event snapshot.
       this.subscribeEvents();
       this.setupApprovalHandler();
+      this.ready = this.initializeCoreState();
+    } else {
+      this.ready = Promise.resolve();
     }
     this.startHeartbeat();
   }
@@ -544,6 +677,11 @@ class WebSession {
         const je = entry as JournalEntry;
         this.journal.push(je);
         this.nextSeq = Math.max(this.nextSeq, je.seq + 1);
+        if (this.session === null && je.payload.agentId === 'main' && je.payload.type === 'goal.updated') {
+          this.cachedGoal = cloneSnapshot(je.payload.snapshot);
+        } else if (this.session === null && je.payload.agentId === 'main' && je.payload.type === 'todo.updated') {
+          this.cachedTodos = cloneSnapshot(je.payload.todos);
+        }
       }
     }
     // Derive title from loaded messages unless a custom title was set.
@@ -568,6 +706,7 @@ class WebSession {
   getMetadata(): SessionMetadata {
     return {
       sessionId: this.sessionId,
+      coreSessionId: this.coreSessionId,
       workDir: this.workDir,
       title: this.title,
       createdAt: this.createdAt,
@@ -579,11 +718,14 @@ class WebSession {
   // ── Event journal ──────────────────────────────────────────────────────
 
   private appendEvent(event: Event): JournalEntry {
+    const payload = event.type === 'goal.updated' || event.type === 'todo.updated'
+      ? cloneSnapshot(event)
+      : event;
     const entry: JournalEntry = {
       seq: this.nextSeq++,
       epoch: this.epoch,
-      volatile: isVolatileEvent(event),
-      payload: event,
+      volatile: isVolatileEvent(payload),
+      payload,
     };
     this.journal.push(entry);
     // Persist durable events only.
@@ -596,18 +738,30 @@ class WebSession {
   private subscribeEvents(): void {
     if (!this.session) return;
     this.unsubscribe = this.session.onEvent((event) => {
+      // Goal/Todo state belongs to the interactive main agent. Other event
+      // families retain their existing subagent visibility.
+      if ((event.type === 'goal.updated' || event.type === 'todo.updated') && event.agentId !== 'main') return;
+
       if (event.type === 'turn.started') {
         this.busy = true;
       } else if (event.type === 'turn.ended') {
         this.busy = false;
         // Update title after each exchange.
         void this.updateTitle();
+      } else if (event.type === 'goal.updated') {
+        this.goalEventRevision += 1;
+        this.cachedGoal = cloneSnapshot(event.snapshot);
+      } else if (event.type === 'todo.updated') {
+        this.todoEventRevision += 1;
+        this.cachedTodos = cloneSnapshot(event.todos);
       }
       if (event.type === 'session.meta.updated' || event.type === 'turn.ended') {
         void this.refreshStatus();
       }
+      // Goal/Todo are ordinary durable core events. They receive exactly one
+      // journal sequence and are replayed/broadcast by this shared path.
       const entry = this.appendEvent(event);
-      this.broadcast({ type: 'event', seq: entry.seq, epoch: entry.epoch, payload: event }, entry.volatile);
+      this.broadcast({ type: 'event', seq: entry.seq, epoch: entry.epoch, payload: entry.payload }, entry.volatile);
       // Compaction runs async after begin(); report success/failure only when
       // the worker actually finishes, so the UI shows "compressing -> done".
       if (event.type === 'compaction.completed') {
@@ -625,6 +779,27 @@ class WebSession {
         }
       }
     });
+  }
+
+  private async initializeCoreState(): Promise<void> {
+    const session = this.session;
+    if (!session) return;
+
+    const goalRevision = this.goalEventRevision;
+    const todoRevision = this.todoEventRevision;
+    const [status, goal, todos] = await Promise.all([
+      session.getStatus().catch(() => null),
+      session.getGoal(),
+      session.getTodos(),
+    ]);
+
+    if (status !== null) this.cachedStatus = status;
+    if (this.goalEventRevision === goalRevision) {
+      this.cachedGoal = cloneSnapshot(goal.goal);
+    }
+    if (this.todoEventRevision === todoRevision) {
+      this.cachedTodos = cloneSnapshot(todos);
+    }
   }
 
   private async refreshStatus(): Promise<void> {
@@ -727,7 +902,7 @@ class WebSession {
           this.send(ws, { type: 'error', code: 'session.inactive', message: 'Session is archived (read-only)', clientMessageId });
           return;
         }
-        if (!text || this.busy) {
+        if (!text || this.busy || this.pendingGoalMutations > 0) {
           this.send(ws, { type: 'error', code: 'session.busy', message: 'Session is busy', clientMessageId });
           return;
         }
@@ -791,7 +966,7 @@ class WebSession {
       this.send(ws, { type: 'resync_required', reason: 'seq_out_of_range' });
       return;
     }
-    const missing = this.journal.slice(lastSeq);
+    const missing = this.journal.filter((entry) => entry.seq > lastSeq);
     for (const entry of missing) {
       if (!entry.volatile) {
         this.send(ws, { type: 'event', seq: entry.seq, epoch: entry.epoch, payload: entry.payload });
@@ -883,9 +1058,7 @@ class WebSession {
           return;
         }
         try {
-          // Pass the live agent session.id, not the web sessionId,
-          // so fork copies the current agent state (not a stale archived one).
-          const result = await this.onFork(this.session.id);
+          const result = await this.onFork(this.sessionId);
           if (!result) {
             fail('Fork 失败：无法复制当前会话。');
             return;
@@ -982,7 +1155,7 @@ class WebSession {
   // ── Snapshot ───────────────────────────────────────────────────────────
 
   getSnapshot(): SessionSnapshot {
-    return {
+    return cloneSnapshot({
       sessionId: this.sessionId,
       workDir: this.workDir,
       seq: this.nextSeq - 1,
@@ -1009,7 +1182,9 @@ class WebSession {
       busy: this.busy,
       createdAt: this.createdAt,
       title: this.title,
-    };
+      goal: this.cachedGoal,
+      todos: this.cachedTodos,
+    });
   }
 
   getListItem(): SessionListItem {
@@ -1045,6 +1220,154 @@ class WebSession {
     await this.session.setThinking(level);
     await this.refreshStatus();
     this.broadcast({ type: 'status', status: this.cachedStatus }, false);
+  }
+
+  getCoreSessionId(): string {
+    return this.coreSessionId;
+  }
+
+  async refineGoalDescription(description: string): Promise<string> {
+    await this.ready;
+    const session = this.requireGoalSession();
+    return refineGoal(session, description);
+  }
+
+  async createGoal(
+    objective: string,
+    completionCriterion: string | undefined,
+    replace: boolean,
+    budgets: readonly GoalBudgetInput[],
+  ): Promise<GoalSnapshotData> {
+    return this.serializeGoalMutation(async (session) => {
+      let goal = await session.createGoal(objective, { completionCriterion, replace });
+      try {
+        for (const budget of budgets) {
+          goal = await session.setGoalBudget(budget.value, budget.unit);
+        }
+      } catch (error) {
+        const recovery = await this.pauseOrClearUnsafeActiveGoal(session);
+        throw new HttpError(500, `Goal configuration failed and the new goal was ${recovery}: ${errorMessage(error)}`);
+      }
+
+      try {
+        await this.startGoalExecution(session, objective);
+      } catch (error) {
+        const recovery = await this.pauseOrClearUnsafeActiveGoal(session);
+        throw new HttpError(500, `Goal was created but execution could not start; it was ${recovery}: ${errorMessage(error)}`);
+      }
+      return cloneSnapshot(goal);
+    });
+  }
+
+  async updateGoal(objective: string | undefined, budgets: readonly GoalBudgetInput[]): Promise<GoalSnapshotData> {
+    return this.serializeGoalMutation(async (session) => {
+      const current = await session.getGoal();
+      if (current.goal === null) {
+        throw new HttpError(404, 'Goal not found', ErrorCodes.GOAL_NOT_FOUND);
+      }
+
+      let goal = current.goal;
+      if (objective !== undefined) goal = await session.updateGoalObjective(objective);
+      for (const budget of budgets) {
+        goal = await session.setGoalBudget(budget.value, budget.unit);
+      }
+      return cloneSnapshot(goal);
+    });
+  }
+
+  async pauseGoal(): Promise<GoalSnapshotData> {
+    return this.serializeGoalMutation(async (session) => {
+      const goal = await session.updateGoalStatus('paused');
+      if (goal === null) throw new HttpError(404, 'Goal not found', ErrorCodes.GOAL_NOT_FOUND);
+      return cloneSnapshot(goal);
+    }, true);
+  }
+
+  async resumeGoal(): Promise<GoalSnapshotData> {
+    return this.serializeGoalMutation(async (session) => {
+      const current = await session.getGoal();
+      if (current.goal === null) {
+        throw new HttpError(404, 'Goal not found', ErrorCodes.GOAL_NOT_FOUND);
+      }
+      const goal = await session.updateGoalStatus('active');
+      if (goal === null) throw new HttpError(404, 'Goal not found', ErrorCodes.GOAL_NOT_FOUND);
+
+      try {
+        await this.startGoalExecution(
+          session,
+          'Continue working toward the active goal. Review current progress and remaining work before proceeding.',
+        );
+      } catch (error) {
+        const recovery = await this.pauseOrClearUnsafeActiveGoal(session);
+        throw new HttpError(500, `Goal was resumed but execution could not continue; it was ${recovery}: ${errorMessage(error)}`);
+      }
+      return cloneSnapshot(goal);
+    });
+  }
+
+  async cancelGoal(): Promise<void> {
+    await this.serializeGoalMutation(async (session) => {
+      const current = await session.getGoal();
+      if (current.goal === null) {
+        throw new HttpError(404, 'Goal not found', ErrorCodes.GOAL_NOT_FOUND);
+      }
+      await session.cancelGoal();
+    }, true);
+  }
+
+  private requireGoalSession(allowBusy = false): Session {
+    if (!this.session) {
+      throw new HttpError(409, 'Session is archived (read-only)', ErrorCodes.SESSION_CLOSED);
+    }
+    if (!allowBusy && this.busy) {
+      throw new HttpError(409, 'Session is busy', ErrorCodes.TURN_AGENT_BUSY);
+    }
+    return this.session;
+  }
+
+  private serializeGoalMutation<T>(
+    mutation: (session: Session) => Promise<T>,
+    allowBusy = false,
+  ): Promise<T> {
+    this.pendingGoalMutations += 1;
+    const run = this.goalMutationTail.then(async () => {
+      await this.ready;
+      return mutation(this.requireGoalSession(allowBusy));
+    });
+    this.goalMutationTail = run.then(() => undefined, () => undefined);
+    return run.finally(() => {
+      this.pendingGoalMutations -= 1;
+    });
+  }
+
+  private async startGoalExecution(session: Session, prompt: string): Promise<void> {
+    this.busy = true;
+    await this.persistUserMessage(prompt, this.nextSeq);
+    this.broadcast({ type: 'user_message', text: prompt }, false);
+    try {
+      await session.prompt(prompt);
+    } catch (error) {
+      this.busy = false;
+      throw error;
+    }
+  }
+
+  private async clearUnsafeActiveGoal(session: Session): Promise<void> {
+    try {
+      await session.cancelGoal();
+    } catch (rollbackError) {
+      throw new HttpError(500, `Goal setup failed and rollback also failed: ${errorMessage(rollbackError)}`);
+    }
+  }
+
+  private async pauseOrClearUnsafeActiveGoal(session: Session): Promise<'paused' | 'cancelled'> {
+    try {
+      await session.updateGoalStatus('paused');
+      return 'paused';
+    } catch {
+      await this.clearUnsafeActiveGoal(session);
+      return 'cancelled';
+    }
   }
 
   get connectionCount(): number {
@@ -1151,9 +1474,80 @@ class WebSession {
   }
 }
 
+async function handleGoalRoute(
+  req: IncomingMessage,
+  res: ServerResponse,
+  url: string,
+  resolveSession: (sessionId: string) => WebSession | undefined,
+): Promise<boolean> {
+  const match = new RegExp(`^${API_PREFIX}/sessions/([^/]+)/goal(?:/(refine|pause|resume|cancel))?$`).exec(url);
+  if (!match) return false;
+
+  const webSession = resolveSession(match[1]!);
+  if (!webSession) {
+    sendJson(res, 404, { code: ErrorCodes.SESSION_NOT_FOUND, message: 'Session not found' });
+    return true;
+  }
+
+  const operation = match[2];
+  const method = req.method ?? 'GET';
+  const expectedMethod = operation === undefined ? new Set(['POST', 'PATCH']) : new Set(['POST']);
+  if (!expectedMethod.has(method)) {
+    res.setHeader('Allow', [...expectedMethod].join(', '));
+    sendJson(res, 405, { code: 405, message: 'Method not allowed' });
+    return true;
+  }
+
+  try {
+    const body = await readJsonBody(req);
+    if (operation === 'refine') {
+      const objective = await webSession.refineGoalDescription(requiredString(body, 'description'));
+      sendJson(res, 200, { objective });
+      return true;
+    }
+    if (operation === 'pause') {
+      await webSession.pauseGoal();
+      sendJson(res, 202, { ok: true });
+      return true;
+    }
+    if (operation === 'resume') {
+      await webSession.resumeGoal();
+      sendJson(res, 202, { ok: true });
+      return true;
+    }
+    if (operation === 'cancel') {
+      await webSession.cancelGoal();
+      sendJson(res, 202, { ok: true });
+      return true;
+    }
+
+    const budgets = parseGoalBudgets(body);
+    if (method === 'POST') {
+      await webSession.createGoal(
+        requiredString(body, 'objective'),
+        optionalString(body, 'completionCriterion'),
+        optionalBoolean(body, 'replace', false),
+        budgets,
+      );
+      sendJson(res, 202, { ok: true });
+      return true;
+    }
+
+    const objective = optionalString(body, 'objective');
+    if (objective === undefined && body['budgets'] === undefined) {
+      throw new HttpError(400, 'PATCH requires objective or budgets', 'request.invalid');
+    }
+    await webSession.updateGoal(objective, budgets);
+    sendJson(res, 202, { ok: true });
+  } catch (error) {
+    sendHttpError(res, error);
+  }
+  return true;
+}
+
 // ─── SessionManager ───────────────────────────────────────────────────────
 
-class SessionManager {
+export class SessionManager {
   private readonly sessions = new Map<string, WebSession>();
   /** In-flight activation promises to deduplicate concurrent calls. */
   private readonly activating = new Map<string, Promise<WebSession | null>>();
@@ -1188,6 +1582,7 @@ class SessionManager {
       const entries = await loadJournal(this.homeDir, meta.sessionId);
       const ws = new WebSession(null, {
         sessionId: meta.sessionId,
+        coreSessionId: meta.coreSessionId ?? meta.sessionId,
         workDir: meta.workDir,
         permission: meta.permission,
         yolo: this.yolo,
@@ -1218,6 +1613,12 @@ class SessionManager {
       createdAt,
       onFork: (id) => this.forkSession(id),
     });
+    try {
+      await webSession.ready;
+    } catch (error) {
+      await webSession.close();
+      throw error;
+    }
     await saveMetadata(this.homeDir, webSession.getMetadata());
     this.sessions.set(sessionId, webSession);
     log.info('web: session created', { sessionId, workDir: this.workDir });
@@ -1247,17 +1648,10 @@ class SessionManager {
       return null;
     }
     if (existing.isActive) return existing;
-    // Reactivate an archived session by creating a new agent session.
-    const session = await this.harness.createSession({
-      workDir: existing.workDir,
-      model: this.model,
-      permission: this.permission,
-    });
-    // The new agent session has a different ID; we keep the original web sessionId
-    // for persistence continuity but swap the underlying agent session.
+    // Reactivate the exact persisted core session. Never create an empty core
+    // session and present the web journal as if restoration succeeded.
     const meta = existing.getMetadata();
-    // Close old web session's connections but keep journal.
-    await existing.close();
+    const session = await this.harness.resumeSession({ id: meta.coreSessionId ?? meta.sessionId });
     const reactivated = new WebSession(session, {
       sessionId,
       workDir: meta.workDir,
@@ -1266,11 +1660,21 @@ class SessionManager {
       homeDir: this.homeDir,
       createdAt: meta.createdAt,
       title: meta.title,
+      coreSessionId: session.id,
       onFork: (id) => this.forkSession(id),
     });
     // Reload persisted journal into the reactivated session.
     const entries = await loadJournal(this.homeDir, sessionId);
     reactivated.loadFromPersisted(entries);
+    try {
+      await reactivated.ready;
+    } catch (error) {
+      await reactivated.close();
+      throw error;
+    }
+    // Replace the archived wrapper only after core restoration and initial
+    // Goal/Todo hydration have succeeded.
+    await existing.close();
     this.sessions.set(sessionId, reactivated);
     await saveMetadata(this.homeDir, reactivated.getMetadata());
     log.info('web: session reactivated', { sessionId });
@@ -1290,7 +1694,7 @@ class SessionManager {
     const source = this.sessions.get(sourceId);
     if (!source || !source.isActive || source.isBusy) return null;
     try {
-      const session = await this.harness.forkSession({ id: sourceId });
+      const session = await this.harness.forkSession({ id: source.getCoreSessionId() });
       const newId = session.id;
       const createdAt = Date.now();
       const title = `${source.getTitle()} (fork)`;
@@ -1312,6 +1716,12 @@ class SessionManager {
         await writeFile(getJournalPath(this.homeDir, newId), lines);
       }
       webSession.loadFromPersisted(entries);
+      try {
+        await webSession.ready;
+      } catch (error) {
+        await webSession.close();
+        throw error;
+      }
       await saveMetadata(this.homeDir, webSession.getMetadata());
       this.sessions.set(newId, webSession);
       log.info('web: session forked', { sourceId, newId });
@@ -1473,6 +1883,10 @@ export async function startWebServerForSession(session: Session, opts: {
     const url = req.url ?? '/';
     const method = req.method ?? 'GET';
 
+    if (await handleGoalRoute(req, res, url, (sessionId) => sessionId === webSession.sessionId ? webSession : undefined)) {
+      return;
+    }
+
     const snapshotMatch = new RegExp(`^${API_PREFIX}/sessions/([^/]+)/snapshot$`).exec(url);
     if (snapshotMatch && method === 'GET') {
       const sid = snapshotMatch[1]!;
@@ -1481,8 +1895,12 @@ export async function startWebServerForSession(session: Session, opts: {
         res.end(JSON.stringify({ code: 404, message: 'Session not found' }));
         return;
       }
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(webSession.getSnapshot()));
+      try {
+        await webSession.ready;
+        sendJson(res, 200, webSession.getSnapshot());
+      } catch (error) {
+        sendHttpError(res, error);
+      }
       return;
     }
 
@@ -1526,11 +1944,19 @@ export async function startWebServerForSession(session: Session, opts: {
     webSession.addConnection(ws);
   });
 
+  try {
+    await webSession.ready;
+  } catch (error) {
+    wss.close();
+    await webSession.close();
+    throw error;
+  }
   await new Promise<void>((resolve) => {
     httpServer.listen(opts.port, '127.0.0.1', resolve);
   });
 
-  const url = `http://localhost:${opts.port}`;
+  const address = httpServer.address() as AddressInfo;
+  const url = `http://localhost:${address.port}`;
 
   if (opts.open) {
     const openCmd =
@@ -1640,6 +2066,10 @@ export async function runWebServer(opts: WebServerOptions): Promise<void> {
       return;
     }
 
+    if (await handleGoalRoute(req, res, url, (sessionId) => manager.get(sessionId))) {
+      return;
+    }
+
     // Snapshot
     const snapshotMatch = new RegExp(`^${API_PREFIX}/sessions/([^/]+)/snapshot$`).exec(url);
     if (snapshotMatch && method === 'GET') {
@@ -1650,8 +2080,12 @@ export async function runWebServer(opts: WebServerOptions): Promise<void> {
         res.end(JSON.stringify({ code: 404, message: 'Session not found' }));
         return;
       }
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(ws.getSnapshot()));
+      try {
+        await ws.ready;
+        sendJson(res, 200, ws.getSnapshot());
+      } catch (error) {
+        sendHttpError(res, error);
+      }
       return;
     }
 
@@ -1818,6 +2252,9 @@ export async function runWebServer(opts: WebServerOptions): Promise<void> {
           } else {
             ws.close(1008, 'Session not found');
           }
+        }).catch((error: unknown) => {
+          log.warn('web: session activation failed', { sessionId, error: errorMessage(error) });
+          ws.close(1011, 'Session activation failed');
         });
         return;
       }
@@ -1828,6 +2265,9 @@ export async function runWebServer(opts: WebServerOptions): Promise<void> {
         } else {
           ws.close(1008, 'Session not found');
         }
+      }).catch((error: unknown) => {
+        log.warn('web: session activation failed', { sessionId, error: errorMessage(error) });
+        ws.close(1011, 'Session activation failed');
       });
       return;
     }

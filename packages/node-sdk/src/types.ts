@@ -24,6 +24,8 @@ export type {
   ScreamConfigPatch,
   GetGoalResult,
   GoalSnapshotData,
+  TodoItem,
+  TodoStatus,
   LoopControl,
   McpServerInfo,
   McpStartupMetrics,

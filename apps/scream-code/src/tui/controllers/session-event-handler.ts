@@ -17,6 +17,7 @@ import type {
   Session,
   SessionMetaUpdatedEvent,
   SkillActivatedEvent,
+  TodoUpdatedEvent,
   SubagentCompletedEvent,
   SubagentFailedEvent,
   SubagentSpawnedEvent,
@@ -42,7 +43,6 @@ import { MAIN_AGENT_ID } from '../constant/scream-tui';
 import {
   argsRecord,
   formatErrorMessage,
-  isTodoItemShape,
   serializeToolResultOutput,
   stringValue,
 } from '../utils/event-payload';
@@ -244,6 +244,7 @@ export class SessionEventHandler {
       case 'mcp.server.status': this.renderMcpServerStatus(event.server); break;
       case 'tool.list.updated': break;
       case 'goal.updated': this.handleGoalUpdated(event); break;
+      case 'todo.updated': this.handleTodoUpdated(event); break;
       default: break;
     }
   }
@@ -364,7 +365,7 @@ export class SessionEventHandler {
   private handleTurnEnd(event: TurnEndedEvent, sendQueued: (item: QueuedMessage) => void): void {
     this.host.setAppState({ reconnectAttempt: 0 });
     const todos = this.host.state.todoPanel.getTodos();
-    if (todos.length > 0 && todos.every((t) => t.status === 'done')) {
+    if (todos.length > 0 && todos.every((todo) => todo.status === 'done')) {
       this.host.streamingUI.setTodoList([]);
     }
     this.host.streamingUI.resetToolUi();
@@ -587,18 +588,7 @@ export class SessionEventHandler {
       synthetic: event.synthetic,
       display: event.display,
     };
-    const matchedCall = streamingUI.completeToolResult(event.toolCallId, resultData);
-    if (matchedCall !== undefined && matchedCall.name === 'TodoList' && !event.isError) {
-      const rawTodos = (matchedCall.args as { todos?: unknown }).todos;
-      if (Array.isArray(rawTodos)) {
-        const sanitized = rawTodos
-          .filter((todo): todo is { title: string; status: 'pending' | 'in_progress' | 'done' } =>
-            isTodoItemShape(todo),
-          )
-          .map((t) => ({ title: t.title, status: t.status }));
-        streamingUI.setTodoList(sanitized);
-      }
-    }
+    streamingUI.completeToolResult(event.toolCallId, resultData);
     if (canTransitionTo(this.host.state.appState.streamingPhase, 'waiting')) {
       this.host.setAppState({ streamingPhase: 'waiting' });
     }
@@ -774,6 +764,10 @@ export class SessionEventHandler {
         goalActive: snapshot.status === 'active',
       });
     }
+  }
+
+  private handleTodoUpdated(event: TodoUpdatedEvent): void {
+    this.host.streamingUI.setTodoList(event.todos);
   }
 
   private handleCompactionBegin(event: CompactionStartedEvent): void {

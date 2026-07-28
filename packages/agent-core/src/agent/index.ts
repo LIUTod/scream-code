@@ -519,6 +519,9 @@ export class Agent {
       getGoal: () => {
         return this.goal.getGoal();
       },
+      getTodos: () => {
+        return this.tools.getTodos();
+      },
       setGoalBudget: async (payload) => {
         const { value, unit } = payload;
         let budgetLimits: import('./goal').GoalBudgetLimits;

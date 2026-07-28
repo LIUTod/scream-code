@@ -19,9 +19,14 @@ const {
   messages,
   pendingApprovals,
   status,
+  goal,
+  todos,
+  goalRequestPending,
+  goalRequestError,
   sessionId,
   workDir,
   isBusy,
+  isArchived,
   sessions,
   currentSessionId,
   gitStatus,
@@ -40,6 +45,12 @@ const {
   fetchSnapshot,
   switchModel,
   switchThinking,
+  refineGoal,
+  createGoal,
+  updateGoal,
+  pauseGoal,
+  resumeGoal,
+  cancelGoal,
 } = useScreamWebClient();
 
 const composerRef = ref<InstanceType<typeof Composer> | null>(null);
@@ -257,15 +268,22 @@ function onCommand(name: string, args?: string) {
       <RightPanel
         v-if="rightbarOpen"
         class="rightbar-host"
-        :status="status"
         :busy="isBusy"
         :session-id="sessionId"
-        :work-dir="workDir"
-        :git-status="gitStatus"
-        :message-count="messages.length"
+        :connection-status="connectionStatus"
+        :archived="isArchived"
+        :goal="goal"
+        :todos="todos"
+        :goal-request-pending="goalRequestPending"
+        :goal-request-error="goalRequestError"
+        :refine-goal="refineGoal"
+        :create-goal="createGoal"
+        :update-goal="updateGoal"
+        :pause-goal="pauseGoal"
+        :resume-goal="resumeGoal"
+        :cancel-goal="cancelGoal"
         @quick-command="onCommand"
         @insert="onEditResend"
-        @show-info="showInfo"
       />
     </main>
 

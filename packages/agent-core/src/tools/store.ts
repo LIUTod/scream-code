@@ -1,5 +1,5 @@
+import type { TodoItem } from '../todo';
 import type { ReviewFinding } from './builtin/collaboration/report-finding';
-import type { TodoItem } from './builtin/state/todo-list';
 
 export interface ToolStoreData {
   /** Structured todo list used by TodoListTool. */

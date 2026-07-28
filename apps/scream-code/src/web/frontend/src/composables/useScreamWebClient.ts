@@ -1,5 +1,27 @@
 import { ref, computed, onBeforeUnmount, type Ref } from 'vue';
-import type { ChatMessage, ApprovalRequest, SessionSnapshot, SessionListItem, SessionStatus, GitStatus, ModelInfo, ModelsResponse, WsMessage } from '../types';
+import type {
+  ApprovalRequest,
+  ChatMessage,
+  CreateGoalRequest,
+  GitStatus,
+  GoalSnapshot,
+  ModelInfo,
+  ModelsResponse,
+  SessionListItem,
+  SessionSnapshot,
+  SessionStatus,
+  TodoItem,
+  UpdateGoalRequest,
+  WsMessage,
+} from '../types';
+import {
+  acceptJournalEvent,
+  applyGoalTodoEvent,
+  buildCreateGoalBody,
+  buildUpdateGoalBody,
+  canApplySnapshot,
+  isCurrentSessionRequest,
+} from '../utils/goalTodoState';
 import { useToast } from './useToast';
 
 export type ConnectionStatus = 'connecting' | 'connected' | 'reconnecting' | 'disconnected' | 'idle';
@@ -12,10 +34,15 @@ export interface UseScreamWebClientReturn {
   messages: Ref<ChatMessage[]>;
   pendingApprovals: Ref<ApprovalRequest[]>;
   status: Ref<SessionStatus>;
+  goal: Ref<GoalSnapshot | null>;
+  todos: Ref<TodoItem[]>;
+  goalRequestPending: Ref<boolean>;
+  goalRequestError: Ref<string | null>;
   error: Ref<string | null>;
   sessionId: Ref<string | null>;
   workDir: Ref<string | null>;
   isBusy: Ref<boolean>;
+  isArchived: Ref<boolean>;
   sessions: Ref<SessionListItem[]>;
   currentSessionId: Ref<string | null>;
   gitStatus: Ref<GitStatus | null>;
@@ -31,6 +58,12 @@ export interface UseScreamWebClientReturn {
   fetchModels: () => Promise<void>;
   switchModel: (alias: string) => Promise<void>;
   switchThinking: (level: string) => Promise<void>;
+  refineGoal: (description: string) => Promise<string | null>;
+  createGoal: (request: CreateGoalRequest) => Promise<boolean>;
+  updateGoal: (request: UpdateGoalRequest) => Promise<boolean>;
+  pauseGoal: () => Promise<boolean>;
+  resumeGoal: () => Promise<boolean>;
+  cancelGoal: () => Promise<boolean>;
   createSession: () => Promise<void>;
   switchSession: (sessionId: string) => Promise<void>;
   deleteSession: (sessionId: string) => Promise<void>;
@@ -44,6 +77,10 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
   const messages = ref<ChatMessage[]>([]);
   const pendingApprovals = ref<ApprovalRequest[]>([]);
   const status = ref<SessionStatus>({ busy: false });
+  const goal = ref<GoalSnapshot | null>(null);
+  const todos = ref<TodoItem[]>([]);
+  const goalRequestPending = ref(false);
+  const goalRequestError = ref<string | null>(null);
   const promptPending = ref(false);
   const error = ref<string | null>(null);
   const sessionId = ref<string | null>(null);
@@ -51,6 +88,8 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
   const isBusy = computed(() => status.value.busy || promptPending.value);
   const sessions = ref<SessionListItem[]>([]);
   const currentSessionId = ref<string | null>(null);
+  const sessionActive = ref(false);
+  const isArchived = computed(() => sessionId.value !== null && !sessionActive.value);
   const gitStatus = ref<GitStatus | null>(null);
   const models = ref<ModelInfo[]>([]);
 
@@ -67,6 +106,10 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
   let promptGeneration = 0;
   let liveGeneration = 0;
   let sessionMutationGeneration = 0;
+  let goalMutationGeneration = 0;
+  let goalAwaitingMutation: { generation: number } | null = null;
+  let goalRequestInFlight = false;
+  let snapshotRetryGoalGeneration: number | null = null;
   let pendingPromptAccepted = false;
   let disposed = false;
   const sentMessageIds = new Map<string, { messageId: string; connectionGeneration: number }>();
@@ -90,15 +133,38 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
     }
   }
 
+  function syncGoalRequestPending(): void {
+    goalRequestPending.value = goalRequestInFlight || goalAwaitingMutation !== null;
+  }
+
+  function resetGoalRequestState(): void {
+    goalMutationGeneration++;
+    goalAwaitingMutation = null;
+    goalRequestInFlight = false;
+    snapshotRetryGoalGeneration = null;
+    goalRequestPending.value = false;
+    goalRequestError.value = null;
+  }
+
+  function eventErrorMessage(value: unknown, fallback: string): string {
+    if (value !== null && typeof value === 'object') {
+      const message = (value as Record<string, unknown>)['message'];
+      if (typeof message === 'string') return message;
+    }
+    return fallback;
+  }
+
   function scheduleSnapshotRetry(): void {
     if (disposed || snapshotRetryTimer !== null) return;
     snapshotRetryTimer = window.setTimeout(() => {
       snapshotRetryTimer = null;
-      void fetchSnapshot();
+      const goalGeneration = snapshotRetryGoalGeneration;
+      snapshotRetryGoalGeneration = null;
+      void fetchSnapshot(goalGeneration ?? undefined);
     }, 250);
   }
 
-  async function fetchSnapshot(): Promise<void> {
+  async function fetchSnapshot(goalGeneration?: number): Promise<void> {
     const targetSessionId = sessionId.value;
     if (!targetSessionId) return;
     const targetSessionGeneration = sessionGeneration;
@@ -107,30 +173,43 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
     const targetLiveGeneration = liveGeneration;
     try {
       const res = await fetch(`${API_BASE}/sessions/${targetSessionId}/snapshot`);
-      if (!res.ok) return;
+      if (!res.ok) {
+        if (goalGeneration !== undefined && goalAwaitingMutation?.generation === goalGeneration) {
+          snapshotRetryGoalGeneration = goalGeneration;
+          scheduleSnapshotRetry();
+        }
+        return;
+      }
       const snapshot: SessionSnapshot = await res.json();
-      if (
-        sessionId.value !== targetSessionId ||
-        snapshot.sessionId !== targetSessionId ||
-        sessionGeneration !== targetSessionGeneration ||
-        connectionGeneration !== targetConnectionGeneration
-      ) return;
-      if (
-        promptGeneration !== targetPromptGeneration ||
-        liveGeneration !== targetLiveGeneration ||
-        (epoch !== 0 && snapshot.epoch !== epoch) ||
-        (snapshot.epoch === epoch && snapshot.seq < seq)
-      ) {
+      if (!canApplySnapshot({
+        snapshot,
+        targetSessionId,
+        currentSessionId: sessionId.value,
+        targetSessionGeneration,
+        currentSessionGeneration: sessionGeneration,
+        targetConnectionGeneration,
+        currentConnectionGeneration: connectionGeneration,
+        targetPromptGeneration,
+        currentPromptGeneration: promptGeneration,
+        targetLiveGeneration,
+        currentLiveGeneration: liveGeneration,
+        currentEpoch: epoch,
+        currentSeq: seq,
+      })) {
+        if (goalGeneration !== undefined) snapshotRetryGoalGeneration = goalGeneration;
         scheduleSnapshotRetry();
         return;
       }
-      applySnapshot(snapshot);
+      applySnapshot(snapshot, goalGeneration);
     } catch {
-      // Best-effort
+      if (goalGeneration !== undefined && goalAwaitingMutation?.generation === goalGeneration) {
+        snapshotRetryGoalGeneration = goalGeneration;
+        scheduleSnapshotRetry();
+      }
     }
   }
 
-  function applySnapshot(snapshot: SessionSnapshot): void {
+  function applySnapshot(snapshot: SessionSnapshot, goalGeneration?: number): void {
     // Preserve local-only messages (command results, system notices) that are
     // not in the server journal. Without this, applySnapshot's full replace
     // would drop them - the "闪一下" bug.
@@ -155,6 +234,17 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
     ];
     pendingApprovals.value = snapshot.pendingApprovals;
     status.value = { ...snapshot.status, busy: snapshot.busy };
+    goal.value = snapshot.goal;
+    todos.value = snapshot.todos;
+    if (
+      goalGeneration !== undefined &&
+      goalAwaitingMutation !== null &&
+      goalAwaitingMutation.generation === goalGeneration &&
+      goalMutationGeneration === goalGeneration
+    ) {
+      goalAwaitingMutation = null;
+      syncGoalRequestPending();
+    }
     if (pendingCovered || pendingLost) {
       promptPending.value = false;
       pendingPromptAccepted = false;
@@ -207,6 +297,7 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
         sessionId.value = hello.sessionId;
         workDir.value = hello.workDir;
         currentSessionId.value = hello.sessionId;
+        sessionActive.value = hello.active;
         const resumeEpoch = epoch;
         epoch = hello.epoch;
         startHeartbeat(hello.heartbeat_ms);
@@ -216,7 +307,8 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
         reconnectAttempt = 0;
         // Only activate archived sessions; skip if already active to avoid extra reconnect.
         if (!hello.active) {
-          void activateSession(hello.sessionId).then(() => {
+          void activateSession(hello.sessionId).then((active) => {
+            if (active && sessionId.value === hello.sessionId) sessionActive.value = true;
             void fetchSnapshot();
             void fetchSessions();
             void fetchGitStatus();
@@ -229,8 +321,17 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
         break;
       }
       case 'event': {
-        if (typeof msg.seq === 'number') seq = Math.max(seq, msg.seq);
-        if (typeof msg.epoch === 'number') epoch = msg.epoch;
+        const decision = acceptJournalEvent(epoch, seq, msg);
+        if (decision === 'resync') {
+          epoch = msg.epoch;
+          seq = 0;
+          void fetchSnapshot();
+          break;
+        }
+        if (decision === 'duplicate') break;
+        seq = msg.seq;
+        epoch = msg.epoch;
+        liveGeneration++;
         onEvent(msg.payload);
         break;
       }
@@ -333,6 +434,19 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
   }
 
   function onEvent(payload: { type: string; [key: string]: unknown }): void {
+    const goalTodoState = applyGoalTodoEvent({ goal: goal.value, todos: todos.value }, payload);
+    goal.value = goalTodoState.goal;
+    todos.value = goalTodoState.todos;
+    if (
+      payload.type === 'goal.updated' &&
+      goalAwaitingMutation !== null &&
+      goalAwaitingMutation.generation === goalMutationGeneration
+    ) {
+      goalAwaitingMutation = null;
+      snapshotRetryGoalGeneration = null;
+      syncGoalRequestPending();
+    }
+
     switch (payload.type) {
       case 'turn.started': {
         if (pendingPromptAccepted) {
@@ -392,7 +506,7 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
         if (payload.reason === 'failed') {
           const last = lastAssistantMessage();
           if (last) last.isError = true;
-          error.value = String(payload.error?.message ?? 'Turn failed');
+          error.value = eventErrorMessage(payload.error, 'Turn failed');
         }
         void fetchSessions();
         void fetchGitStatus();
@@ -408,7 +522,7 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
         break;
       }
       case 'error': {
-        error.value = String(payload.error?.message ?? 'Unknown error');
+        error.value = eventErrorMessage(payload.error, 'Unknown error');
         break;
       }
     }
@@ -426,6 +540,7 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
 
     setConnectionStatus('connecting');
     error.value = null;
+    resetGoalRequestState();
     connectionGeneration++;
     const socket = new WebSocket(wsUrl());
     ws = socket;
@@ -438,8 +553,13 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
       // 1008 = server rejected the session (deleted or unknown): go idle
       // instead of reconnect-looping; the user picks another session.
       if (event.code === 1008) {
+        sessionGeneration++;
+        resetGoalRequestState();
         sessionId.value = null;
         currentSessionId.value = null;
+        sessionActive.value = false;
+        goal.value = null;
+        todos.value = [];
         setConnectionStatus('idle');
         return;
       }
@@ -563,11 +683,20 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
     }
   }
 
-  async function activateSession(sessionId: string): Promise<void> {
+  async function activateSession(targetSessionId: string): Promise<boolean> {
+    const targetSessionGeneration = sessionGeneration;
+    const targetConnectionGeneration = connectionGeneration;
     try {
-      await fetch(`${API_BASE}/sessions/${sessionId}/activate`, { method: 'POST' });
+      const res = await fetch(`${API_BASE}/sessions/${targetSessionId}/activate`, { method: 'POST' });
+      return res.ok && connectionGeneration === targetConnectionGeneration && isCurrentSessionRequest(
+        sessionId.value,
+        sessionGeneration,
+        targetSessionId,
+        targetSessionGeneration,
+      );
     } catch {
       // Best-effort — archived sessions may already be active or unknown.
+      return false;
     }
   }
 
@@ -600,6 +729,7 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
     const targetSessionId = sessionId.value;
     if (!targetSessionId) return;
     const targetSessionGeneration = sessionGeneration;
+    const targetConnectionGeneration = connectionGeneration;
     const requestGeneration = ++sessionMutationGeneration;
     try {
       const res = await fetch(`${API_BASE}/sessions/${targetSessionId}/${path}`, {
@@ -611,6 +741,7 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
       if (
         sessionId.value !== targetSessionId ||
         sessionGeneration !== targetSessionGeneration ||
+        connectionGeneration !== targetConnectionGeneration ||
         sessionMutationGeneration !== requestGeneration
       ) return;
       if (!res.ok) {
@@ -625,6 +756,7 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
       if (
         sessionId.value !== targetSessionId ||
         sessionGeneration !== targetSessionGeneration ||
+        connectionGeneration !== targetConnectionGeneration ||
         sessionMutationGeneration !== requestGeneration
       ) return;
       showToast(`请求失败：${error instanceof Error ? error.message : String(error)}`, 'error');
@@ -639,6 +771,123 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
   async function switchThinking(level: string): Promise<void> {
     if (level === status.value.thinkingLevel) return;
     await postSessionSwitch('thinking', { level }, `思考强度已切换为 ${level}`);
+  }
+
+  async function requestGoal(
+    path: string,
+    method: 'POST' | 'PATCH',
+    body: Record<string, unknown>,
+    waitForState: boolean,
+  ): Promise<Record<string, unknown> | null> {
+    const targetSessionId = sessionId.value;
+    if (!targetSessionId) {
+      goalRequestError.value = '暂无可操作的会话。';
+      return null;
+    }
+    if (connectionStatus.value !== 'connected') {
+      goalRequestError.value = '连接已断开，请等待重连后再试。';
+      return null;
+    }
+    if (isArchived.value) {
+      goalRequestError.value = '当前会话已归档，无法修改 Goal。';
+      return null;
+    }
+    if (goalRequestInFlight || goalAwaitingMutation !== null) return null;
+
+    const targetSessionGeneration = sessionGeneration;
+    const requestGeneration = ++goalMutationGeneration;
+    goalRequestInFlight = true;
+    syncGoalRequestPending();
+    goalRequestError.value = null;
+    try {
+      const res = await fetch(`${API_BASE}/sessions/${targetSessionId}/goal${path}`, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json().catch(() => ({})) as Record<string, unknown>;
+      if (
+        !isCurrentSessionRequest(
+          sessionId.value,
+          sessionGeneration,
+          targetSessionId,
+          targetSessionGeneration,
+        ) || goalMutationGeneration !== requestGeneration
+      ) return null;
+      if (!res.ok) {
+        goalRequestError.value = typeof data['message'] === 'string'
+          ? data['message']
+          : `请求失败（HTTP ${res.status}）`;
+        return null;
+      }
+      if (waitForState) {
+        goalAwaitingMutation = { generation: requestGeneration };
+        snapshotRetryGoalGeneration = requestGeneration;
+      }
+      return data;
+    } catch (requestError) {
+      if (
+        isCurrentSessionRequest(
+          sessionId.value,
+          sessionGeneration,
+          targetSessionId,
+          targetSessionGeneration,
+        ) && goalMutationGeneration === requestGeneration
+      ) {
+        goalRequestError.value = `请求失败：${requestError instanceof Error ? requestError.message : String(requestError)}`;
+      }
+      return null;
+    } finally {
+      if (
+        isCurrentSessionRequest(
+          sessionId.value,
+          sessionGeneration,
+          targetSessionId,
+          targetSessionGeneration,
+        ) && goalMutationGeneration === requestGeneration
+      ) {
+        goalRequestInFlight = false;
+        syncGoalRequestPending();
+      }
+    }
+  }
+
+  async function refineGoal(description: string): Promise<string | null> {
+    const data = await requestGoal('/refine', 'POST', { description }, false);
+    return typeof data?.['objective'] === 'string' ? data['objective'] : null;
+  }
+
+  async function createGoal(request: CreateGoalRequest): Promise<boolean> {
+    const data = await requestGoal('', 'POST', buildCreateGoalBody(request), true);
+    if (data === null) return false;
+    if (goalAwaitingMutation !== null) void fetchSnapshot(goalAwaitingMutation.generation);
+    return true;
+  }
+
+  async function updateGoal(request: UpdateGoalRequest): Promise<boolean> {
+    const data = await requestGoal('', 'PATCH', buildUpdateGoalBody(request), true);
+    if (data === null) return false;
+    if (goalAwaitingMutation !== null) void fetchSnapshot(goalAwaitingMutation.generation);
+    return true;
+  }
+
+  async function runGoalLifecycle(path: '/pause' | '/resume' | '/cancel'): Promise<boolean> {
+    const data = await requestGoal(path, 'POST', {}, true);
+    if (data === null) return false;
+    if (goalAwaitingMutation !== null) void fetchSnapshot(goalAwaitingMutation.generation);
+    return true;
+  }
+
+  function pauseGoal(): Promise<boolean> {
+    return runGoalLifecycle('/pause');
+  }
+
+  function resumeGoal(): Promise<boolean> {
+    return runGoalLifecycle('/resume');
+  }
+
+  function cancelGoal(): Promise<boolean> {
+    return runGoalLifecycle('/cancel');
   }
 
   async function createSession(): Promise<void> {
@@ -661,11 +910,15 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
     currentSessionId.value = targetId;
     sessionId.value = targetId;
     sessionGeneration++;
+    resetGoalRequestState();
     seq = 0;
     epoch = 0;
     messages.value = [];
     pendingApprovals.value = [];
     status.value = { busy: false };
+    goal.value = null;
+    todos.value = [];
+    sessionActive.value = false;
     promptPending.value = false;
     pendingPromptAccepted = false;
     sentMessageIds.clear();
@@ -702,13 +955,18 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
           await switchSession(next.sessionId);
         } else {
           // No sessions left: go idle instead of silently creating one.
+          sessionGeneration++;
+          resetGoalRequestState();
           sessionId.value = null;
           currentSessionId.value = null;
+          sessionActive.value = false;
           seq = 0;
           epoch = 0;
           messages.value = [];
           pendingApprovals.value = [];
           status.value = { busy: false };
+          goal.value = null;
+          todos.value = [];
           promptPending.value = false;
           pendingPromptAccepted = false;
           sentMessageIds.clear();
@@ -784,10 +1042,15 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
     messages,
     pendingApprovals,
     status,
+    goal,
+    todos,
+    goalRequestPending,
+    goalRequestError,
     error,
     sessionId,
     workDir,
     isBusy,
+    isArchived,
     sessions,
     currentSessionId,
     gitStatus,
@@ -803,6 +1066,12 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
     fetchModels,
     switchModel,
     switchThinking,
+    refineGoal,
+    createGoal,
+    updateGoal,
+    pauseGoal,
+    resumeGoal,
+    cancelGoal,
     createSession,
     switchSession,
     deleteSession,

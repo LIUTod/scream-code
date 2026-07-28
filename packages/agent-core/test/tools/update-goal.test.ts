@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi, type Mock } from 'vitest';
 
 import type { Agent } from '../../src/agent';
 import { GoalMode } from '../../src/agent/goal';
@@ -14,8 +14,10 @@ const signal = new AbortController().signal;
 function createGoalAgent(): {
   readonly agent: Agent;
   readonly appendSystemReminder: ReturnType<typeof vi.fn>;
+  readonly emitEvent: Mock;
 } {
   const appendSystemReminder = vi.fn();
+  const emitEvent = vi.fn();
   const agent = {
     context: {
       history: [
@@ -27,10 +29,10 @@ function createGoalAgent(): {
       appendSystemReminder,
     },
     records: { logRecord: vi.fn() },
-    emitEvent: vi.fn(),
+    emitEvent,
   } as unknown as Agent;
   Object.assign(agent, { goal: new GoalMode(agent) });
-  return { agent, appendSystemReminder };
+  return { agent, appendSystemReminder, emitEvent };
 }
 
 async function executeComplete(agent: Agent, grader: GoalGraderFn): Promise<ExecutableToolResult> {
@@ -132,6 +134,52 @@ describe('UpdateGoal completion grading', () => {
     expect(pauseGoal).toHaveBeenCalled();
     expect(grader).not.toHaveBeenCalled();
     expect(agent.goal.getGoal().goal?.status).toBe('active');
+  });
+
+  it('emits a complete snapshot for every panel-visible goal update', async () => {
+    const { agent, emitEvent } = createGoalAgent();
+    await agent.goal.createGoal({ objective: 'Initial objective' });
+    emitEvent.mockClear();
+
+    await agent.goal.recordTokenUsage(7);
+    await agent.goal.incrementTurn();
+    await agent.goal.addNote('Observed an important detail');
+    await agent.goal.setBudgetLimits({ budgetLimits: { tokenBudget: 100 } });
+    await agent.goal.updateObjective({ objective: 'Updated objective' });
+    await agent.goal.pauseGoal({ reason: 'Waiting for input' }, 'user');
+    await agent.goal.resumeGoal({}, 'user');
+
+    const updates = emitEvent.mock.calls.map(([event]) => event);
+    expect(updates).toHaveLength(7);
+    expect(updates.map((event) => event.type)).toEqual(Array(7).fill('goal.updated'));
+    expect(updates.map((event) => event.snapshot.status)).toEqual([
+      'active',
+      'active',
+      'active',
+      'active',
+      'active',
+      'paused',
+      'active',
+    ]);
+    expect(updates.map((event) => event.snapshot.tokensUsed)).toEqual(Array(7).fill(7));
+    expect(updates.map((event) => event.snapshot.turnsUsed)).toEqual([0, 1, 1, 1, 1, 1, 1]);
+    expect(updates.map((event) => event.snapshot.notes.length)).toEqual([0, 0, 1, 1, 2, 2, 2]);
+    expect(updates[3]?.snapshot.budget).toMatchObject({
+      tokenBudget: 100,
+      remainingTokens: 93,
+    });
+    expect(updates[4]?.snapshot.objective).toBe('Updated objective');
+    for (const event of updates) {
+      expect(event.snapshot).toMatchObject({
+        goalId: expect.any(String),
+        objective: expect.any(String),
+        turnsUsed: expect.any(Number),
+        tokensUsed: 7,
+        wallClockMs: expect.any(Number),
+        budget: expect.any(Object),
+        notes: expect.any(Array),
+      });
+    }
   });
 
   it('reports a resume failure with the actual paused state and never completes', async () => {

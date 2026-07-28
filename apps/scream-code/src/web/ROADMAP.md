@@ -136,20 +136,20 @@
 
 ---
 
-### Phase 4：架构收敛 ✅ 已完成（独立 CLI 导向，对齐 Kimi）
+### Phase 4：架构收敛 ✅ 已完成（独立 CLI + 多会话）
 
 **当前形态**：Web UI 通过独立的 `scream web` CLI 子命令启动（与 `scream` TUI、`scream stream-json` 平级）。没有 TUI `/web` slash 命令。
 
 | 决策 | 状态 | 说明 |
 |------|------|------|
 | 启动方式 | ✅ | `scream web --port --model -y --auto --no-open` |
-| 单 session | ✅ | 每个 web server 实例绑定一个新创建的 Session |
-| WS 路由 | ✅ | 固定 `ws://host/`，无 `?sessionId=` 查询参数 |
-| REST API | ✅ | 仅保留 `GET /api/v1/sessions/:id/snapshot` |
-| 持久化存储 | ❌ | journal 纯内存，server 关闭即丢弃 |
-| 多 session / 导出 / 归档恢复 | ❌ | 相关前后端代码已全部删除 |
+| 多 session | ✅ | `SessionManager` 按 Web ID 管理会话；metadata 单独保存 `coreSessionId`，恢复调用 `resumeSession` |
+| WS 路由 | ✅ | `?sessionId=` 选择会话；无参数时连接首个 active 会话 |
+| REST API | ✅ | 会话列表/创建/恢复/导出、snapshot、模型/思考切换及 Goal 操作 |
+| 持久化存储 | ✅ | durable event journal + metadata 落盘；volatile delta 仅实时发送 |
+| 归档恢复 / fork | ✅ | 恢复和 fork 均使用核心 Session ID，不以空会话冒充恢复 |
+| Goal / Todo 状态 | ✅ | snapshot 来自核心 RPC；`goal.updated` / `todo.updated` 复用统一 journal/seq/epoch 通道 |
 | 文件上传 | ❌ | 后续可加 |
-| slash 命令 | ❌ | 后续可加 |
 | 移动端独立 shell | ❌ | 已有响应式布局，独立 shell 后续 |
 
 ## 4. 接口总览（目标形态）
@@ -172,7 +172,13 @@
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | `/api/v1/sessions/:id/snapshot` | 完整当前状态 |
+| GET | `/api/v1/sessions/:id/snapshot` | 完整当前状态（含核心 Goal/Todo 快照） |
+| POST | `/api/v1/sessions/:id/goal/refine` | LLM refine，失败回退原始描述 |
+| POST | `/api/v1/sessions/:id/goal` | 创建或显式 replace Goal、配置预算并启动 objective |
+| PATCH | `/api/v1/sessions/:id/goal` | 更新 objective 和/或预算 |
+| POST | `/api/v1/sessions/:id/goal/pause` | 暂停 Goal |
+| POST | `/api/v1/sessions/:id/goal/resume` | 恢复 Goal 并继续执行 |
+| POST | `/api/v1/sessions/:id/goal/cancel` | 取消 Goal |
 | GET | `/api/v1/sessions/:id/status` | tokens / cost / busy |
 | GET | `/api/v1/sessions/:id/messages` | 分页历史消息 |
 | POST | `/api/v1/sessions/:id/prompt` | 提交 prompt |
@@ -200,7 +206,13 @@ interface SessionSnapshot {
   messages: ChatMessage[];
   pendingApprovals: ApprovalRequest[];
   status: SessionStatus;
+  goal: GoalSnapshotData | null;
+  todos: TodoItem[];
 }
+
+// Goal/Todo 状态事实源始终是核心：先订阅事件再读取初始 RPC，
+// 用 revision 防止旧 RPC 覆盖新事件；实时更新沿用统一 journal/seq/epoch。
+// REST 结果仅确认 mutation 已接受，不作为前端状态副本。
 
 interface SessionStatus {
   busy: boolean;
@@ -216,7 +228,7 @@ interface SessionStatus {
 - **后端尽量复用现有 `ScreamHarness` 和 `Session`**，不改造 agent-core。
 - **前端先用最轻量方案**，例如 Phase 1 仍用裸 HTML，Phase 2 再迁 Vite+Vue。
 - **REST 接口从 `/api/v1` 开始**，保持版本化，旧 WS 路径做兼容。
-- ** journal 先从内存实现**，Phase 4 再考虑落盘和索引。
+- **journal 分层持久化**：durable 事件落盘，volatile 流式事件仅实时发送；统一复用 seq/epoch 恢复协议。
 
 ## 7. 下一步建议
 

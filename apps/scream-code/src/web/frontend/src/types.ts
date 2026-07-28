@@ -57,6 +57,63 @@ export interface SessionStatus {
   usage?: SessionUsage;
 }
 
+export type GoalStatus = 'active' | 'paused' | 'blocked' | 'complete';
+
+export interface GoalBudgetReport {
+  tokenBudget: number | null;
+  turnBudget: number | null;
+  wallClockBudgetMs: number | null;
+  remainingTokens: number | null;
+  remainingTurns: number | null;
+  remainingWallClockMs: number | null;
+  overBudget: boolean;
+}
+
+export interface GoalNote {
+  content: string;
+  time: number;
+}
+
+export interface GoalSnapshot {
+  goalId: string;
+  objective: string;
+  completionCriterion?: string;
+  status: GoalStatus;
+  turnsUsed: number;
+  tokensUsed: number;
+  wallClockMs: number;
+  budget: GoalBudgetReport;
+  terminalReason?: string;
+  notes: GoalNote[];
+}
+
+export type TodoStatus = 'pending' | 'in_progress' | 'done';
+
+export interface TodoItem {
+  title: string;
+  status: TodoStatus;
+  phase?: string;
+}
+
+export type GoalBudgetUnit = 'turns' | 'tokens' | 'milliseconds' | 'seconds' | 'minutes' | 'hours';
+
+export interface GoalBudgetInput {
+  value: number;
+  unit: GoalBudgetUnit;
+}
+
+export interface CreateGoalRequest {
+  objective: string;
+  completionCriterion?: string;
+  replace?: boolean;
+  budgets: GoalBudgetInput[];
+}
+
+export interface UpdateGoalRequest {
+  objective?: string;
+  budgets?: GoalBudgetInput[];
+}
+
 export interface SessionSnapshot {
   sessionId: string;
   workDir: string;
@@ -66,6 +123,12 @@ export interface SessionSnapshot {
   pendingApprovals: ApprovalRequest[];
   status: SessionStatus;
   busy: boolean;
+  createdAt: number;
+  title: string;
+  model: string;
+  permission: string;
+  goal: GoalSnapshot | null;
+  todos: TodoItem[];
 }
 
 export interface SessionListItem {
@@ -131,7 +194,7 @@ export type WsMessage =
   | { type: 'approval_request'; id: string; toolName: string; action?: string; display?: unknown }
   | { type: 'approval_resolved'; id: string }
   | { type: 'user_message'; clientMessageId?: string; text: string }
-  | { type: 'command_result'; command: string; ok: boolean; message: string }
+  | { type: 'command_result'; command: string; ok: boolean; message: string; pendingMsgId?: string }
   | { type: 'status'; status: SessionStatus }
   | { type: 'resync_required'; reason: string }
   | { type: 'pong' }

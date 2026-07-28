@@ -17,20 +17,10 @@ import { z } from 'zod';
 
 import type { BuiltinTool } from '../../../agent/tool';
 import type { ToolExecution } from '../../../loop/types';
+import type { TodoItem, TodoStatus } from '../../../todo';
 import { toInputJsonSchema } from '../../support/input-schema';
 import type { ToolStore } from '../../store';
 import DESCRIPTION from './todo-list.md';
-
-// ── TODO state shape ─────────────────────────────────────────────────
-
-export type TodoStatus = 'pending' | 'in_progress' | 'done';
-
-export interface TodoItem {
-  readonly title: string;
-  readonly status: TodoStatus;
-  /** Optional phase name. Items sharing the same phase are grouped together when rendered. */
-  readonly phase?: string;
-}
 
 const TODO_STORE_KEY = 'todo';
 

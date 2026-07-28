@@ -16,6 +16,7 @@ import {
   type SDKAPI,
   type SDKRPCClient,
   type SessionMeta,
+  type TodoItem,
   type ToolCallRequest,
   type ToolCallResponse,
 } from '@scream-code/agent-core';
@@ -380,6 +381,14 @@ export class SDKRpcClient {
   async getGoal(input: SessionIdRpcInput): Promise<import('@scream-code/agent-core').GetGoalResult> {
     const rpc = await this.getRpc();
     return rpc.getGoal({
+      sessionId: input.sessionId,
+      agentId: this.interactiveAgentId,
+    });
+  }
+
+  async getTodos(input: SessionIdRpcInput): Promise<readonly TodoItem[]> {
+    const rpc = await this.getRpc();
+    return rpc.getTodos({
       sessionId: input.sessionId,
       agentId: this.interactiveAgentId,
     });

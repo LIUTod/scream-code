@@ -58,7 +58,7 @@ export type {
   FlagId,
   FlagSurface,
 } from '@scream-code/agent-core';
-export type { GoalSnapshotData } from '@scream-code/agent-core';
+export type { GoalSnapshotData, TodoItem, TodoStatus } from '@scream-code/agent-core';
 
 export * from '#/events';
 export type * from '#/types';

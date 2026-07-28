@@ -105,7 +105,7 @@ export type {
 } from '@scream-code/agent-core';
 
 export type { CronFiredEvent, CronJobOrigin, CronMissedOrigin } from '@scream-code/agent-core';
-export type { GoalUpdatedEvent } from '@scream-code/agent-core';
+export type { GoalUpdatedEvent, TodoUpdatedEvent } from '@scream-code/agent-core';
 
 export type MaybePromise<T> = T | Promise<T>;
 

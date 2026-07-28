@@ -622,6 +622,10 @@ export class ScreamCore implements PromisableMethods<CoreAPI> {
     return this.sessionApi(sessionId).getGoal(payload);
   }
 
+  getTodos({ sessionId, ...payload }: SessionAgentPayload<EmptyPayload>) {
+    return this.sessionApi(sessionId).getTodos(payload);
+  }
+
   setGoalBudget({ sessionId, ...payload }: SessionAgentPayload<SetGoalBudgetPayload>) {
     return this.sessionApi(sessionId).setGoalBudget(payload);
   }

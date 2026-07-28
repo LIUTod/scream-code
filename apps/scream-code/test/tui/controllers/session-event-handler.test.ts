@@ -21,6 +21,7 @@ function createMockHost(): SessionEventHost {
     finalizeAssistantStream: vi.fn(),
     finalizeTurn: vi.fn(),
     registerToolCall: vi.fn(),
+    completeToolResult: vi.fn(),
     scheduleFlush: vi.fn(),
     appendAssistantDelta: vi.fn(),
     appendThinkingDelta: vi.fn(),
@@ -286,6 +287,47 @@ describe('SessionEventHandler', () => {
 
     expect(steer).not.toHaveBeenCalled();
     expect(host.state.queuedMessages).toHaveLength(1);
+  });
+
+  it('updates the todo panel only from core todo.updated snapshots', () => {
+    const host = createMockHost();
+    const handler = new SessionEventHandler(host);
+    const setTodoList = vi.mocked(host.streamingUI.setTodoList);
+    const completeToolResult = vi.mocked(host.streamingUI.completeToolResult);
+    completeToolResult.mockReturnValue({
+      id: 'call_todo',
+      name: 'TodoList',
+      args: { todos: [{ title: 'stale tool args', status: 'pending' }] },
+    });
+
+    handler.handleEvent(
+      {
+        ...baseEvent('tool.result'),
+        turnId: 1,
+        toolCallId: 'call_todo',
+        output: 'Todo list updated.',
+        isError: false,
+      } as unknown as Event,
+      vi.fn(),
+    );
+    expect(setTodoList).not.toHaveBeenCalled();
+
+    handler.handleEvent(
+      {
+        ...baseEvent('todo.updated'),
+        todos: [
+          { title: 'core snapshot', status: 'in_progress', phase: 'Core' },
+          { title: 'next step', status: 'pending', phase: 'TUI' },
+        ],
+      } as unknown as Event,
+      vi.fn(),
+    );
+
+    expect(setTodoList).toHaveBeenCalledTimes(1);
+    expect(setTodoList).toHaveBeenCalledWith([
+      { title: 'core snapshot', status: 'in_progress', phase: 'Core' },
+      { title: 'next step', status: 'pending', phase: 'TUI' },
+    ]);
   });
 
   it('accumulates subagent token usage by profile name', () => {

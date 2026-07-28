@@ -5,6 +5,7 @@ import type { SlashCommandHost } from './dispatch';
 import { GoalStatusMessageComponent } from '../components/messages/goal-panel';
 import { isBusy } from '../utils/app-state';
 import { detectGoalConflict } from '../utils/goal-loop-conflict';
+import { refineGoal } from '../../utils/goal-refiner';
 
 const GOAL_STATUS_DISMISS_MS = 10_000;
 
@@ -134,9 +135,6 @@ async function createGoal(host: SlashCommandHost, parsed: ParsedGoalCommand & { 
 
 // ── Guided goal setup (LLM-refined objective) ──────────────────────────
 
-const GOAL_REFINER_SYSTEM_PROMPT =
-  'You are a goal refiner. Given a brief task description, produce a single clear, actionable objective sentence (max 200 chars). Do not add explanations, quotes, or prefixes.';
-
 /**
  * Guided goal creation: collect a brief task description, refine it via the
  * LLM into a single objective sentence, let the user confirm/edit, then enter
@@ -171,15 +169,7 @@ async function guidedGoalSetup(host: SlashCommandHost): Promise<void> {
 
   // Step 2: LLM refines the description into a single objective sentence
   host.showStatus(t('goal.setup_refining'));
-  let objective: string;
-  try {
-    const text = await session.generateText(GOAL_REFINER_SYSTEM_PROMPT, initialDesc);
-    objective = text.trim();
-    if (objective.length === 0) objective = initialDesc;
-  } catch {
-    // LLM failure: fall back to the user's raw description
-    objective = initialDesc;
-  }
+  const objective = await refineGoal(session, initialDesc);
 
   // Step 3: user confirms or edits the refined objective
   const confirmed = await promptText(host, TextInputDialogComponent, {

@@ -8,6 +8,7 @@ import type { McpServerConfig } from '#/config/schema';
 import type { ExperimentalFlagMap } from '#/flags';
 import type { ResumeSessionResult } from '#/rpc/resumed';
 import type { SessionMeta } from '#/session';
+import type { TodoItem } from '#/todo';
 import type { BackgroundTaskInfo } from '#/tools/builtin';
 import type { ContentPart } from '@scream-code/ltod';
 
@@ -411,6 +412,7 @@ export interface AgentAPI {
   updateGoalObjective: (payload: UpdateGoalObjectivePayload) => GoalSnapshotData;
   cancelGoal: (payload: EmptyPayload) => GoalSnapshotData | null;
   getGoal: (payload: EmptyPayload) => GetGoalResult;
+  getTodos: (payload: EmptyPayload) => readonly TodoItem[];
   setGoalBudget: (payload: SetGoalBudgetPayload) => GoalSnapshotData;
   getWolfpackMode: (payload: EmptyPayload) => boolean;
 }

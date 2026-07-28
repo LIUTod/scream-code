@@ -626,11 +626,19 @@ The bundled `writer` profile is the document-lifecycle specialist, not a Markdow
 
 Key files: `packages/agent-core/src/profile/default/writer.yaml`, `packages/agent-core/src/profile/default/agent.yaml`, `packages/agent-core/src/profile/default/system.md`.
 
-### TodoList Phases
+### Goal / Todo State
 
 `TodoList` items support an optional `phase` field. Items sharing the same phase are rendered together, while preserving input order within each phase. The phase is preserved across state round-trips.
 
-Key files: `packages/agent-core/src/tools/builtin/state/todo-list.ts`, `packages/agent-core/src/tools/builtin/state/todo-list.md`.
+The canonical public DTO is `TodoItem` in `packages/agent-core/src/todo.ts`. Successful Todo writes and clears persist the complete list and emit a `todo.updated` full snapshot; query mode is read-only and emits nothing. `AgentAPI.getTodos()` exposes a defensive snapshot through Session RPC and the node SDK. Record replay restores the tool store without surfacing live events. The TUI consumes `todo.updated` for live updates and uses restored core state for initial hydration rather than parsing TodoList tool calls or results.
+
+Every Goal mutation that changes its visible state—including lifecycle, objective, budget, token/turn accounting, and notes—emits `goal.updated` with the complete current snapshot. Goal restore remains silent and retains the existing resume/terminal normalization semantics.
+
+Web snapshots read Goal/Todo through the node SDK after subscribing to core events, then use revision guards so late initial RPC reads cannot overwrite newer events. Main-agent `goal.updated` / `todo.updated` events flow through the existing durable journal exactly once, preserving multi-tab broadcast and seq/epoch reconnect replay. Web metadata keeps Web IDs separate from `coreSessionId`; activation resumes the core ID instead of creating an empty replacement session.
+
+The Web frontend hydrates Goal/Todo only from session snapshots and full `goal.updated` / `todo.updated` journal events. Its right panel keeps the existing quick actions above a complete Goal manager and a read-only, phase-grouped core Todo view; session/connection generations plus epoch/seq guards prevent stale snapshots and mutation responses from crossing session switches or reconnects.
+
+Key files: `packages/agent-core/src/todo.ts`, `packages/agent-core/src/agent/goal/index.ts`, `packages/agent-core/src/tools/builtin/state/todo-list.ts`, `packages/agent-core/src/tools/builtin/state/todo-list.md`, `apps/scream-code/src/tui/controllers/session-event-handler.ts`, `apps/scream-code/src/web/server.ts`, `apps/scream-code/src/web/frontend/src/composables/useScreamWebClient.ts`, `apps/scream-code/src/web/frontend/src/components/GoalPanel.vue`, `apps/scream-code/src/web/frontend/src/components/TodoPanel.vue`, `apps/scream-code/src/utils/goal-refiner.ts`.
 
 ### Verification Protocol and Convergence Gate
 

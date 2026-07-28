@@ -52,7 +52,7 @@ async function copyContent() {
 
     <div v-else class="assistant-wrap">
       <div v-if="isAssistant" class="assistant-brand">
-        <span class="assistant-avatar"><img src="/icon.ico" alt="" /></span>
+        <span class="assistant-avatar"><img src="/icon.ico" alt="" draggable="false" @error="(e) => (e.target as HTMLImageElement).style.visibility = 'hidden'" @load="(e) => (e.target as HTMLImageElement).style.visibility = 'visible'" style="visibility:hidden" /></span>
         <div><strong>Scream Code</strong><span><i :class="{ streaming }" />{{ streaming ? '正在生成回复' : 'Agent 回复' }}</span></div>
         <time v-if="timestamp">{{ timestamp }}</time>
       </div>
@@ -79,7 +79,7 @@ async function copyContent() {
 .assistant-wrap { width:100%; }
 .assistant-brand { display:flex; align-items:center; gap:10px; margin-bottom:13px; }
 .assistant-avatar { width:34px; height:34px; display:grid; place-items:center; border-radius:10px; background:var(--color-accent-soft); }
-.assistant-avatar img { width:23px; height:23px; object-fit:contain; }
+.assistant-avatar img { width:23px; height:23px; object-fit:contain; transition:visibility 0s; }
 .assistant-brand > div { display:flex; flex:1; flex-direction:column; }
 .assistant-brand strong { font-size:13px; }
 .assistant-brand span { display:flex; align-items:center; gap:5px; margin-top:3px; color:var(--color-text-muted); font-size:10px; }

@@ -453,7 +453,7 @@ export class GoalMode {
     if (state === undefined || state.status !== 'active') return null;
     const delta = Math.max(0, tokenDelta);
     state.tokensUsed += delta;
-    this.persistState(state, { silent: true });
+    this.persistState(state);
     this.appendGoalUpdate({ tokensUsed: state.tokensUsed });
     return this.toSnapshot(state);
   }
@@ -476,7 +476,7 @@ export class GoalMode {
     if (state.notes.length > MAX_GOAL_NOTES) {
       state.notes = state.notes.slice(-MAX_GOAL_NOTES);
     }
-    this.persistState(state, { silent: true });
+    this.persistState(state);
     return this.toSnapshot(state);
   }
 
@@ -563,7 +563,7 @@ export class GoalMode {
       wallClockMs: liveWallClockMs(state, Date.now()),
       budget: computeBudgetReport(state, Date.now()),
       terminalReason: state.terminalReason,
-      notes: state.notes,
+      notes: state.notes.map((note) => ({ ...note })),
     };
   }
 }

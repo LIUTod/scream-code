@@ -288,6 +288,10 @@ export class SessionAPIImpl implements PromisableMethods<SessionAPI> {
     return this.getAgent(agentId).getGoal(payload);
   }
 
+  getTodos({ agentId, ...payload }: AgentScopedPayload<EmptyPayload>) {
+    return this.getAgent(agentId).getTodos(payload);
+  }
+
   setGoalBudget({ agentId, ...payload }: AgentScopedPayload<SetGoalBudgetPayload>) {
     return this.getAgent(agentId).setGoalBudget(payload);
   }

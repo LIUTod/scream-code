@@ -1,6 +1,12 @@
 import { describe, expectTypeOf, it } from 'vitest';
 
-import type { ApprovalRequest, ApprovalResponse, Event, QuestionRequest } from '#/index';
+import type {
+  ApprovalRequest,
+  ApprovalResponse,
+  Event,
+  QuestionRequest,
+  TodoItem,
+} from '#/index';
 
 type EventByType<T extends Event['type']> = Extract<Event, { readonly type: T }>;
 
@@ -28,6 +34,11 @@ describe('Event public types', () => {
     expectTypeOf<EventByType<'turn.step.completed'>['llmStreamDurationMs']>().toEqualTypeOf<
       number | undefined
     >();
+  });
+
+  it('exposes canonical todo snapshots on update events', () => {
+    expectTypeOf<EventByType<'todo.updated'>['todos']>().toEqualTypeOf<readonly TodoItem[]>();
+    expectTypeOf<TodoItem['phase']>().toEqualTypeOf<string | undefined>();
   });
 
   it('narrows subagent lifecycle events by type', () => {
@@ -81,6 +92,7 @@ describe('Event public types', () => {
         case 'background.task.terminated':
         case 'cron.fired':
         case 'goal.updated':
+        case 'todo.updated':
           return;
         default:
           assertNever(event);

@@ -11,10 +11,11 @@ import { describe, expect, it } from 'vitest';
 import {
   TodoListInputSchema,
   TodoListTool,
-  type TodoItem,
 } from '../../src/tools/builtin/state/todo-list';
+import type { TodoItem } from '../../src/todo';
 import type { ToolStore } from '../../src/tools/store';
 import { executeTool } from './fixtures/execute-tool';
+import { testAgent } from '../agent/harness/agent';
 
 const signal = new AbortController().signal;
 
@@ -148,6 +149,66 @@ describe('TodoListTool', () => {
 
     expect(result).toMatchObject({ isError: false, output: 'Todo list cleared.' });
     expect(getTodos()).toEqual([]);
+  });
+
+  it('preserves item order and phase through writes and grouped query output', async () => {
+    const { tool, getTodos } = makeTool();
+    const todos: TodoItem[] = [
+      { title: 'phase-b first', status: 'pending', phase: 'Phase B' },
+      { title: 'phase-a first', status: 'in_progress', phase: 'Phase A' },
+      { title: 'phase-b second', status: 'done', phase: 'Phase B' },
+    ];
+
+    await executeTool(tool, context({ todos }));
+    const query = await executeTool(tool, context({}));
+
+    expect(getTodos()).toEqual(todos);
+    expect(query.output).toBe(
+      'Current todo list:\n\n## Phase B\n  [pending] phase-b first\n  [done] phase-b second\n\n## Phase A\n  [in_progress] phase-a first',
+    );
+  });
+
+  it('emits complete snapshots only for successful writes and clears', async () => {
+    const ctx = testAgent();
+    const tool = new TodoListTool(ctx.agent.tools.toolStore);
+    const todos: TodoItem[] = [
+      { title: 'first', status: 'in_progress', phase: 'Build' },
+      { title: 'second', status: 'pending', phase: 'Verify' },
+    ];
+
+    await executeTool(tool, context({ todos }));
+    await executeTool(tool, context({}));
+    await executeTool(tool, context({ todos: [] }));
+
+    const updates = ctx.allEvents.filter(
+      (event) => event.type === '[rpc]' && event.event === 'todo.updated',
+    );
+    expect(updates).toEqual([
+      {
+        type: '[rpc]',
+        event: 'todo.updated',
+        args: { todos },
+      },
+      {
+        type: '[rpc]',
+        event: 'todo.updated',
+        args: { todos: [] },
+      },
+    ]);
+  });
+
+  it('returns defensive todo snapshots and does not retain caller-owned items', () => {
+    const ctx = testAgent();
+    const input: TodoItem[] = [{ title: 'original', status: 'pending', phase: 'Plan' }];
+
+    ctx.agent.tools.updateStore('todo', input);
+    input[0] = { title: 'mutated input', status: 'done' };
+    const firstRead = ctx.agent.tools.getTodos() as TodoItem[];
+    firstRead[0] = { title: 'mutated read', status: 'done' };
+
+    expect(ctx.agent.tools.getTodos()).toEqual([
+      { title: 'original', status: 'pending', phase: 'Plan' },
+    ]);
   });
 
   it('resolveExecution description reflects the mode', () => {

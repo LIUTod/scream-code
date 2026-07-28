@@ -6,6 +6,7 @@ import type {
   CompactOptions,
   GetGoalResult,
   GoalSnapshotData,
+  TodoItem,
   McpServerInfo,
   McpStartupMetrics,
   PermissionMode,
@@ -487,6 +488,11 @@ export class Session {
   async getGoal(): Promise<GetGoalResult> {
     this.ensureOpen();
     return this.rpc.getGoal({ sessionId: this.id });
+  }
+
+  async getTodos(): Promise<readonly TodoItem[]> {
+    this.ensureOpen();
+    return this.rpc.getTodos({ sessionId: this.id });
   }
 
   async setGoalBudget(value: number, unit: 'turns' | 'tokens' | 'milliseconds' | 'seconds' | 'minutes' | 'hours'): Promise<GoalSnapshotData> {

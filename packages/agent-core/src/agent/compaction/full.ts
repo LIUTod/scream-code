@@ -33,7 +33,7 @@ import type { CompactionBeginData, CompactionResult } from './types';
 import { DEFAULT_COMPACTION_CONFIG, DefaultCompactionStrategy, type CompactionStrategy } from './strategy';
 import { basename, dirname } from 'pathe';
 import { parseMemoryMemos } from '@scream-code/memory';
-import type { TodoItem } from '../../tools/builtin/state/todo-list';
+import type { TodoItem } from '../../todo';
 import type { ContextMessage } from '../context/types';
 import {
   createFileOps,

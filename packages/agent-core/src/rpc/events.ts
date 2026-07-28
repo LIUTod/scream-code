@@ -5,6 +5,7 @@ import type { GoalChange, GoalSnapshot } from '../agent/goal';
 import type { ScreamErrorPayload } from '../errors';
 import type { PermissionMode } from '../agent/permission';
 import type { SkillSource } from '../skill';
+import type { TodoItem } from '../todo';
 import type { BackgroundTaskInfo } from '../tools/background/manager';
 import type { ToolInputDisplay, ToolResultDisplay } from '../tools/display';
 
@@ -85,6 +86,11 @@ export interface GoalUpdatedEvent {
   readonly type: 'goal.updated';
   readonly snapshot: GoalSnapshot | null;
   readonly change?: GoalChange | undefined;
+}
+
+export interface TodoUpdatedEvent {
+  readonly type: 'todo.updated';
+  readonly todos: readonly TodoItem[];
 }
 
 export interface WarningEvent {
@@ -336,6 +342,7 @@ export type AgentEvent =
   | BackgroundTaskUpdatedEvent
   | BackgroundTaskTerminatedEvent
   | CronFiredEvent
-  | GoalUpdatedEvent;
+  | GoalUpdatedEvent
+  | TodoUpdatedEvent;
 
 export type Event = AgentEvent & { agentId: string; sessionId: string };

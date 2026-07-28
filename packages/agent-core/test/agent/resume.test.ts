@@ -119,12 +119,11 @@ describe('Agent resume', () => {
 
     await ctx.agent.resume();
 
-    expect(ctx.agent.tools.storeData()).toEqual({
-      todo: [
-        { title: 'Inspect resume snapshot', status: 'done' },
-        { title: 'Hydrate TUI todo panel', status: 'in_progress' },
-      ],
-    });
+    expect(ctx.agent.tools.getTodos()).toEqual([
+      { title: 'Inspect resume snapshot', status: 'done' },
+      { title: 'Hydrate TUI todo panel', status: 'in_progress' },
+    ]);
+    expect(ctx.newEvents()).toMatchInlineSnapshot(`[]`);
     await ctx.expectResumeMatches();
   });
 
