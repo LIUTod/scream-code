@@ -792,7 +792,15 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
       goalRequestError.value = '当前会话已归档，无法修改 Goal。';
       return null;
     }
-    if (goalRequestInFlight || goalAwaitingMutation !== null) return null;
+    if (goalRequestInFlight) {
+      goalRequestError.value = '正在处理上一个请求，请稍候。';
+      return null;
+    }
+    if (goalAwaitingMutation !== null) {
+      // Stale guard: if waiting too long, clear and allow retry.
+      goalAwaitingMutation = null;
+      syncGoalRequestPending();
+    }
 
     const targetSessionGeneration = sessionGeneration;
     const requestGeneration = ++goalMutationGeneration;

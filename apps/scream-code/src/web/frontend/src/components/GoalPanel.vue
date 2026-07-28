@@ -44,7 +44,7 @@ const refinedHint = ref(false);
 
 const connected = computed(() => props.connectionStatus === 'connected');
 const baseDisabled = computed(() => !props.sessionId || !connected.value || props.archived || props.pending);
-const createDisabled = computed(() => baseDisabled.value || props.busy);
+const createDisabled = computed(() => baseDisabled.value);
 const statusLabel = computed(() => ({
   active: '进行中',
   paused: '已暂停',
