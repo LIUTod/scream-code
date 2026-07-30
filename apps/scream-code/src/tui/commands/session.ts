@@ -238,9 +238,7 @@ function findProjectRoot(startDir: string): string | undefined {
   let dir = resolve(startDir);
   let markerDir: string | undefined;
   while (true) {
-    if (existsSync(resolve(dir, '.git'))) {
-      return dir;
-    }
+    const hasGit = existsSync(resolve(dir, '.git'));
     if (markerDir === undefined) {
       for (const marker of PROJECT_ROOT_MARKERS) {
         if (existsSync(resolve(dir, marker))) {
@@ -248,6 +246,18 @@ function findProjectRoot(startDir: string): string | undefined {
           break;
         }
       }
+    }
+    if (hasGit) {
+      // .git found. If no marker yet, or marker is at this same level, this is the root.
+      if (markerDir === undefined || markerDir === dir) {
+        return dir;
+      }
+      // .git is above the nearest marker. Check whether this dir also has a marker
+      // (monorepo root with .git + package.json). If it does, treat it as project root.
+      // If not, the .git is likely incidental (e.g. accidental `git init` in home dir)
+      // and the marker directory is the real project root.
+      const hasMarkerHere = PROJECT_ROOT_MARKERS.some((m) => existsSync(resolve(dir, m)));
+      return hasMarkerHere ? dir : markerDir;
     }
     const parent = dirname(dir);
     if (parent === dir) break;
