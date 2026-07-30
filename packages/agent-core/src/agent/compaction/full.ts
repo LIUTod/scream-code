@@ -152,6 +152,66 @@ function canSplitAfterContext(messages: readonly ContextMessage[], index: number
  *  disabled for the remainder of the turn. Resets each turn. */
 const MAX_CONSECUTIVE_FAILURES = 3;
 
+/** Maximum number of recent tool calls to include in the compaction summary. */
+const MAX_TOOL_CALL_HISTORY = 15;
+
+/** Truncate tool call arguments to a brief summary for the compaction history. */
+function truncateArgsForSummary(args: string | null): string {
+  if (args === null || args === undefined) return '';
+  try {
+    const parsed = JSON.parse(args);
+    if (typeof parsed !== 'object' || parsed === null) return '';
+    const entries = Object.entries(parsed as Record<string, unknown>);
+    const parts: string[] = [];
+    for (const [key, value] of entries) {
+      const valStr = typeof value === 'string'
+        ? value.length > 50 ? `"${value.slice(0, 50)}…"` : `"${value}"`
+        : String(value);
+      parts.push(`${key}=${valStr}`);
+    }
+    return parts.slice(0, 3).join(', ');
+  } catch {
+    return args.slice(0, 80);
+  }
+}
+
+/** Extract a brief tool-call history from compacted messages so the model
+ *  knows what was already tried after compaction. Prevents repeating
+ *  failed approaches. */
+function formatToolCallHistory(messages: readonly ContextMessage[]): string {
+  const resultStatus = new Map<string, boolean>();
+  for (const msg of messages) {
+    if (msg.role === 'tool' && msg.toolCallId !== undefined) {
+      resultStatus.set(msg.toolCallId, msg.isError === true);
+    }
+  }
+
+  interface ToolCallEntry {
+    name: string;
+    argsSummary: string;
+    isError: boolean;
+  }
+  const entries: ToolCallEntry[] = [];
+  for (const msg of messages) {
+    if (msg.role !== 'assistant' || msg.toolCalls.length === 0) continue;
+    for (const tc of msg.toolCalls) {
+      const isError = resultStatus.get(tc.id) ?? false;
+      const argsSummary = truncateArgsForSummary(tc.arguments);
+      entries.push({ name: tc.name, argsSummary, isError });
+    }
+  }
+
+  if (entries.length === 0) return '';
+
+  const recent = entries.slice(-MAX_TOOL_CALL_HISTORY);
+  const lines = recent.map((e) => {
+    const status = e.isError ? 'error' : 'success';
+    return `- ${e.name}(${e.argsSummary}) -> ${status}`;
+  });
+
+  return ['## Recent Tool Calls', '', ...lines].join('\n');
+}
+
 /** Minimal system prompt used during compaction. The full agent system
  *  prompt contains tool descriptions and runtime injections that contradict
  *  the compaction instruction ("DO NOT CALL ANY TOOLS"). This compact prompt
@@ -563,7 +623,8 @@ export class FullCompaction {
       for (const msg of messagesToCompactForOps) {
         extractFileOpsFromMessage(msg, fileOps);
       }
-      const processedSummary = this.postProcessSummary(summary, fileOps);
+      const toolCallHistory = formatToolCallHistory(messagesToCompactForOps);
+      const processedSummary = this.postProcessSummary(summary, fileOps, toolCallHistory);
       const tokensAfter = estimateTokens(processedSummary) + estimateTokensForMessages(recent);
 
       const result: CompactionResult = {
@@ -717,7 +778,7 @@ export class FullCompaction {
    * compression. Without this, both are lost after compaction because the
    * original messages containing them are removed from the context window.
    */
-  private postProcessSummary(summary: string, fileOps: FileOperations): string {
+  private postProcessSummary(summary: string, fileOps: FileOperations, toolCallHistory: string): string {
     const storeData = this.agent.tools.storeData();
     const todos = (storeData['todo'] as readonly TodoItem[] | undefined) ?? [];
 
@@ -733,6 +794,8 @@ export class FullCompaction {
 
     const filesSection = formatFileOperations(fileOps);
     if (filesSection.length > 0) sections.push(filesSection);
+
+    if (toolCallHistory.length > 0) sections.push(toolCallHistory);
 
     return sections.join('\n\n');
   }

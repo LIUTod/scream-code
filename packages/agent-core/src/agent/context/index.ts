@@ -24,8 +24,15 @@ const TOOL_OUTPUT_EMPTY_TEXT = 'Tool output is empty.';
 /** Maximum token count for tool results persisted in conversation history.
  *  Results exceeding this limit are truncated to avoid bloating every
  *  subsequent API request with stale data.  The model can re-read the
- *  full content via read_file when needed. */
-const MAX_TOOL_RESULT_TOKENS = 8000;
+ *  full content via read_file when needed.
+ *
+ *  Lowered from 8000 to 5000 to reduce input-context pressure on long
+ *  sessions. When input grows large, the available output space
+ *  (context_window - input_tokens) shrinks, causing the model to hit
+ *  max_tokens before emitting a tool call. Smaller tool-result footprints
+ *  leave more room for output. The current turn always sees the full
+ *  result via streaming; only the history copy is truncated. */
+const MAX_TOOL_RESULT_TOKENS = 5000;
 
 const TOOL_TRUNCATION_NOTICE =
   '\n[content truncated — use read_file to re-read if needed]';

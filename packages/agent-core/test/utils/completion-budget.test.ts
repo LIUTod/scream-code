@@ -50,13 +50,24 @@ describe('computeCompletionBudgetCap', () => {
     ).toBe(1);
   });
 
-  it('uses the model context window when no hard cap is set', () => {
+  it('caps the model context window at OUTPUT_TOKEN_CAP when no hard cap is set', () => {
     const maxCtx = 100000;
     const cap = computeCompletionBudgetCap({
       budget: { fallback: 32000 },
       capability: makeCapability(maxCtx),
     });
-    expect(cap).toBe(maxCtx);
+    // max_tokens is an output-only limit, not the full context window.
+    // Capped at 64K (aligned with oh-my-pi's OUTPUT_CAP_WHEN_UNKNOWN) to
+    // prevent the context-window value from being used as max_tokens.
+    expect(cap).toBe(64_000);
+  });
+
+  it('uses the model context window directly when it is below OUTPUT_TOKEN_CAP', () => {
+    const cap = computeCompletionBudgetCap({
+      budget: { fallback: 32000 },
+      capability: makeCapability(10_000),
+    });
+    expect(cap).toBe(10_000);
   });
 
   it('uses the explicit hard cap when configured', () => {

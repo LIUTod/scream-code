@@ -34,7 +34,7 @@ const DEFAULT_CONFIG: MicroCompactionConfig = {
   keepRecentTokens: 40_000,
   pruneMinReclaimTokens: 20_000,
   minContentTokens: 100,
-  minContextUsageRatio: 0.5,
+  minContextUsageRatio: 0.3,
   truncatedMarker: '[Old tool result content cleared]',
   uselessMarker: '[Uneventful result elided]',
   noMatchesMarker: '[no matches]',

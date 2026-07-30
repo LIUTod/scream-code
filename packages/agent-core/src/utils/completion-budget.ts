@@ -46,18 +46,31 @@ function parseEnvBudget(raw: string | undefined): EnvBudget {
 
 /**
  * Compute the effective `max_completion_tokens` cap.
+ *
+ * Aligned with oh-my-pi's approach: use a reasonable output-token cap
+ * instead of the full context window. `max_context_tokens` is the total
+ * (input + output) budget, not the output-only budget. Using it as
+ * max_tokens tells the API "generate up to 128K output tokens", which is
+ * incorrect - the actual max output is much smaller. The API server
+ * clamps it to context_window - input_tokens, which shrinks as context
+ * grows, causing "max_tokens limit - no tool call" errors on long
+ * sessions.
+ *
+ * The 64K cap matches oh-my-pi's OUTPUT_CAP_WHEN_UNKNOWN and is well
+ * above any current model's real output limit (typically 8K-32K), so it
+ * never artificially limits output while preventing the context-window
+ * value from being used directly.
  */
+const OUTPUT_TOKEN_CAP = 64_000;
+
 export function computeCompletionBudgetCap(args: {
   readonly budget: CompletionBudgetConfig;
   readonly capability: ModelCapability | undefined;
 }): number {
   const maxCtx = args.capability?.max_context_tokens ?? 0;
-  // The provider backend computes the safe request-specific value from the
-  // serialized prompt. Locally using the largest cap avoids cutting off
-  // thinking before the model produces a summary.
   const cap =
     args.budget.hardCap ??
-    (maxCtx > 0 ? maxCtx : args.budget.fallback ?? DEFAULT_UNKNOWN_CONTEXT_FALLBACK);
+    (maxCtx > 0 ? Math.min(maxCtx, OUTPUT_TOKEN_CAP) : args.budget.fallback ?? DEFAULT_UNKNOWN_CONTEXT_FALLBACK);
   return Math.max(MIN_FLOOR, cap);
 }
 
