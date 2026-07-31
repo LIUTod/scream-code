@@ -31,17 +31,21 @@ const TodoItemSchema = z.object({
     .string()
     .min(1)
     .describe('Short, actionable title for the todo. Required field name is `title`, not `content` or `name`.'),
-  status: z.enum(['pending', 'in_progress', 'done']).describe('Current status of the todo.'),
+  status: z.enum(['pending', 'in_progress', 'done', 'blocked']).describe('Current status of the todo. Use "blocked" when the task is waiting on something external.'),
   phase: z
     .string()
     .optional()
     .describe(
       'Optional phase/group for the todo. Items in the same phase are rendered together. Complete one phase before starting the next.',
     ),
+  blocker: z
+    .string()
+    .optional()
+    .describe('Required when status is "blocked": short note explaining what the task is waiting on.'),
 });
 
 export interface TodoListInput {
-  todos?: Array<{ title: string; status: TodoStatus; phase?: string }>;
+  todos?: Array<{ title: string; status: TodoStatus; phase?: string; blocker?: string }>;
 }
 
 export const TodoListInputSchema: z.ZodType<TodoListInput> = z.object({
@@ -82,6 +86,9 @@ function renderTodoList(todos: readonly TodoItem[]): string {
     for (const item of items) {
       const marker = statusMarker(item.status);
       lines.push(`  ${marker} ${item.title}`);
+      if (item.status === 'blocked' && item.blocker) {
+        lines.push(`      ↳ blocked: ${item.blocker}`);
+      }
     }
   }
   return lines.join('\n');
@@ -95,6 +102,8 @@ function statusMarker(status: TodoStatus): string {
       return '[in_progress]';
     case 'done':
       return '[done]';
+    case 'blocked':
+      return '[blocked]';
     default: {
       const _exhaustive: never = status;
       return _exhaustive;
@@ -144,7 +153,7 @@ export class TodoListTool implements BuiltinTool<TodoListInput> {
   private setTodos(todos: readonly TodoItem[]): void {
     this.store.set(
       TODO_STORE_KEY,
-      todos.map((todo) => ({ title: todo.title, status: todo.status, phase: todo.phase })),
+      todos.map((todo) => ({ title: todo.title, status: todo.status, phase: todo.phase, blocker: todo.blocker })),
     );
   }
 }

@@ -16,11 +16,12 @@ import chalk from 'chalk';
 
 import type { ColorPalette } from '#/tui/theme/colors';
 
-export type TodoStatus = 'pending' | 'in_progress' | 'done';
+export type TodoStatus = 'pending' | 'in_progress' | 'done' | 'blocked';
 
 export interface TodoItem {
   readonly title: string;
   readonly status: TodoStatus;
+  readonly blocker?: string;
 }
 
 const MAX_VISIBLE = 5;
@@ -57,7 +58,7 @@ export function selectVisibleTodos(todos: readonly TodoItem[]): VisibleTodos {
   const done: number[] = [];
   for (const [i, todo] of todos.entries()) {
     if (todo.status === 'in_progress') inProgress.push(i);
-    else if (todo.status === 'pending') pending.push(i);
+    else if (todo.status === 'pending' || todo.status === 'blocked') pending.push(i);
     else done.push(i);
   }
 
@@ -149,6 +150,9 @@ export class TodoPanelComponent implements Component {
 function renderRow(todo: TodoItem, colors: ColorPalette): string {
   const marker = statusMarker(todo.status, colors);
   const titleStyled = styleTitle(todo.title, todo.status, colors);
+  if (todo.status === 'blocked' && todo.blocker) {
+    return `  ${marker} ${titleStyled} ${chalk.hex(colors.warning)(`↳ ${todo.blocker}`)}`;
+  }
   return `  ${marker} ${titleStyled}`;
 }
 
@@ -158,6 +162,8 @@ function statusMarker(status: TodoStatus, colors: ColorPalette): string {
       return chalk.hex(colors.primary).bold('■');
     case 'done':
       return chalk.hex(colors.success)('✓');
+    case 'blocked':
+      return chalk.hex(colors.warning)('⊗');
     case 'pending':
       return chalk.hex(colors.textDim)('○');
   }
@@ -169,6 +175,8 @@ function styleTitle(title: string, status: TodoStatus, colors: ColorPalette): st
       return chalk.hex(colors.text).bold(title);
     case 'done':
       return chalk.hex(colors.textDim).strikethrough(title);
+    case 'blocked':
+      return chalk.hex(colors.warning)(title);
     case 'pending':
       return chalk.hex(colors.text)(title);
   }
