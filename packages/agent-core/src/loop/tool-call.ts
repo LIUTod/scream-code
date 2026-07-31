@@ -45,6 +45,10 @@ const GRACE_TIMEOUT_MS = 2_000;
 const STEER_POLL_INTERVAL_MS = 150;
 const TOOL_OUTPUT_EMPTY = 'Tool output is empty.';
 const TOOL_OUTPUT_NON_TEXT = 'Tool returned non-text content.';
+const UNEXECUTED_TOOL_CALL_OUTPUT =
+  'This tool call was not executed: the model response ended before tool execution could start ' +
+  '(the provider stream was interrupted). Do not assume the tool ran - ' +
+  're-issue the call if it is still needed.';
 
 const validators = new WeakMap<ExecutableTool, ToolArgsValidator>();
 
@@ -115,6 +119,47 @@ type ToolCallDisplayFields = Pick<LoopToolCallEvent, 'description' | 'display'>;
 
 export interface ToolCallBatchResult {
   readonly stopTurn: boolean;
+}
+
+/**
+ * Record tool calls that arrived in a truncated response (max_tokens,
+ * paused, unknown) but were never executed. Each call gets a `tool.call`
+ * event immediately followed by a synthetic `tool.result` with an error
+ * output, so the transcript stays balanced and strict providers don't
+ * reject the next step for an empty assistant message or dangling
+ * tool_use without a paired tool_result.
+ */
+export async function recordUnexecutedToolCalls(
+  step: ToolCallStepContext,
+  response: LLMChatResponse,
+): Promise<void> {
+  for (const toolCall of response.toolCalls) {
+    const parsedArgs = parseToolCallArguments(toolCall.arguments);
+    if (!parsedArgs.success) {
+      step.log?.debug('recording unexecuted tool call with unparseable arguments', {
+        toolName: toolCall.name,
+        toolCallId: toolCall.id,
+        rawLength: toolCall.arguments?.length ?? 0,
+        error: parsedArgs.error,
+      });
+    }
+    await step.dispatchEvent({
+      type: 'tool.call',
+      uuid: toolCall.id,
+      turnId: step.turnId,
+      step: step.currentStep,
+      stepUuid: step.stepUuid,
+      toolCallId: toolCall.id,
+      name: toolCall.name,
+      args: parsedArgs.success ? parsedArgs.data : {},
+    });
+    await step.dispatchEvent({
+      type: 'tool.result',
+      parentUuid: toolCall.id,
+      toolCallId: toolCall.id,
+      result: { output: UNEXECUTED_TOOL_CALL_OUTPUT, isError: true },
+    });
+  }
 }
 
 export async function runToolCallBatch(
@@ -306,7 +351,7 @@ function repairTruncatedJson(raw: string): string {
     if (ch === '{') openStack.push('}');
     else if (ch === '[') openStack.push(']');
     else if (ch === '}' || ch === ']') {
-      if (openStack.length > 0 && openStack[openStack.length - 1] === ch) {
+      if (openStack.length > 0 && openStack.at(-1) === ch) {
         openStack.pop();
       }
     }

@@ -15,8 +15,8 @@ import type { Logger } from '#/logging/types';
 import type { LoopEventDispatcher } from './events';
 import type { LLM, LLMChatParams, LLMChatResponse } from './llm';
 import { chatWithRetry } from './retry';
-import { runToolCallBatch, type ToolCallStepContext } from './tool-call';
-import type { ExecutableTool, LoopHooks, LoopMessageBuilder, LoopStepStopReason } from './types';
+import { recordUnexecutedToolCalls, runToolCallBatch, type ToolCallStepContext } from './tool-call';
+import type { ExecutableTool, LoopHooks, LoopMessageBuilder, LoopStepStopReason, RecordStepUsageResult } from './types';
 
 type ChatStreamingCallbacks = Pick<
   LLMChatParams,
@@ -30,11 +30,18 @@ export interface ExecuteLoopStepDeps {
   readonly dispatchEvent: LoopEventDispatcher;
   readonly llm: LLM;
   readonly tools?: readonly ExecutableTool[] | undefined;
+  /**
+   * Per-step tool table builder. When present it wins over `tools` and is
+   * re-invoked before every step, so a tool loaded mid-turn is dispatchable
+   * on the very next step and runtime tool visibility stays fresh.
+   */
+  readonly buildTools?: (() => readonly ExecutableTool[]) | undefined;
   readonly hooks?: LoopHooks | undefined;
   readonly log?: Logger | undefined;
   readonly currentStep: number;
   readonly maxRetryAttempts?: number;
-  readonly recordUsage: (usage: TokenUsage) => void;
+  readonly recordUsage:
+    (usage: TokenUsage) => RecordStepUsageResult | void | Promise<RecordStepUsageResult | void>;
   readonly hasPendingSteer?: (() => boolean) | undefined;
 }
 
@@ -49,6 +56,7 @@ export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<{
     dispatchEvent,
     llm,
     tools,
+    buildTools,
     hooks,
     log,
     currentStep,
@@ -70,13 +78,18 @@ export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<{
 
   signal.throwIfAborted();
 
+  // Resolve the tool table AFTER beforeStep so it reflects the same state as
+  // the messages built below (beforeStep can run compaction, which discards
+  // loaded dynamic tool schemas). buildTools wins over the static snapshot.
+  const effectiveTools = buildTools !== undefined ? buildTools() : tools;
+
   const messages = await buildMessages();
   signal.throwIfAborted();
 
   const stepUuid = randomUUID();
 
   const step: ToolCallStepContext = {
-    tools,
+    tools: effectiveTools,
     hooks,
     log,
     dispatchEvent,
@@ -97,7 +110,7 @@ export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<{
 
   const chatParams: LLMChatParams = {
     messages,
-    tools: tools ?? [],
+    tools: effectiveTools ?? [],
     signal,
     ...createChatStreamingCallbacks({
       dispatchEvent,
@@ -117,17 +130,29 @@ export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<{
     log,
   });
   const usage = response.usage;
-  recordUsage(usage);
+  const usageResult = await recordUsage(usage);
+  const stopTurnAfterUsage = usageResult?.stopTurn === true;
   const stopReason = deriveStepStopReason(response);
 
   // Execute tools only when the normalized response shape represents a tool
   // step. Provider terminal diagnostics such as filtering or truncation must
   // not trigger side-effecting tool execution even if a malformed response also
   // contains tool calls.
-  let effectiveStopReason = stopReason;
-  if (stopReason === 'tool_use') {
+  let effectiveStopReason: LoopStepStopReason =
+    stopTurnAfterUsage && stopReason === 'tool_use' ? 'end_turn' : stopReason;
+  if (effectiveStopReason === 'tool_use') {
     const toolBatch = await runToolCallBatch(step, response);
     if (toolBatch.stopTurn) effectiveStopReason = 'end_turn';
+  } else if (
+    (stopReason === 'paused' || stopReason === 'unknown' || stopReason === 'max_tokens') &&
+    response.toolCalls.length > 0
+  ) {
+    // The provider stream broke off (paused / overloaded / token limit) while
+    // the response still carries tool calls - possibly cut off mid-arguments.
+    // Record each call and close it with a synthetic interrupted result:
+    // dropping them would lose the model's intent and can persist an
+    // assistant message strict providers reject as empty.
+    await recordUnexecutedToolCalls(step, response);
   }
 
   // When a tool batch runs, it drains paired `tool.result` events even when
@@ -146,9 +171,10 @@ export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<{
     ...stepEndProviderDiagnostics(response, effectiveStopReason),
   });
 
+  let stopTurnAfterStep = stopTurnAfterUsage;
   if (hooks?.afterStep !== undefined) {
     try {
-      await hooks.afterStep({
+      const afterStep = await hooks.afterStep({
         turnId,
         stepNumber: currentStep,
         usage,
@@ -156,12 +182,17 @@ export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<{
         signal,
         llm,
       });
+      stopTurnAfterStep = stopTurnAfterStep || afterStep?.stopTurn === true;
     } catch {
       // The step is already sealed; observer hooks cannot change the result.
     }
   }
 
-  return { usage, stopReason: effectiveStopReason };
+  return {
+    usage,
+    stopReason:
+      stopTurnAfterStep && effectiveStopReason === 'tool_use' ? 'end_turn' : effectiveStopReason,
+  };
 }
 
 function deriveStepStopReason(response: LLMChatResponse): LoopStepStopReason {
