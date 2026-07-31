@@ -296,7 +296,7 @@ export async function handleThemeCommand(host: SlashCommandHost, args: string): 
   await applyThemeChoice(host, theme);
 }
 
-export function handleModelCommand(host: SlashCommandHost, args: string): void {
+export async function handleModelCommand(host: SlashCommandHost, args: string): Promise<void> {
   const trimmed = args.trim();
   if (trimmed === 'diy') {
     if (isBusy(host.state.appState)) {
@@ -308,6 +308,7 @@ export function handleModelCommand(host: SlashCommandHost, args: string): void {
   }
   const alias = trimmed;
   if (alias.length === 0) {
+    await refreshModelsForPicker(host);
     showModelPicker(host);
     return;
   }
@@ -316,6 +317,32 @@ export function handleModelCommand(host: SlashCommandHost, args: string): void {
     return;
   }
   showModelPicker(host, alias);
+}
+
+/**
+ * Reload provider/model config before showing the model picker so models
+ * added via /config or /config diy since startup are visible without
+ * restarting. Times out after 2 seconds and falls back to the existing
+ * state if the reload is slow.
+ */
+async function refreshModelsForPicker(host: SlashCommandHost): Promise<void> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const config = await Promise.race([
+      host.harness.getConfig({ reload: true }),
+      new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error('refresh timeout')), 2_000);
+      }),
+    ]);
+    host.setAppState({
+      availableModels: config.models ?? host.state.appState.availableModels,
+      availableProviders: config.providers ?? host.state.appState.availableProviders,
+    });
+  } catch {
+    // Refresh failed or timed out - use whatever is already in state.
+  } finally {
+    if (timeoutId !== undefined) clearTimeout(timeoutId);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -501,6 +528,8 @@ async function performModelSwitch(host: SlashCommandHost, alias: string, thinkin
   }
 
   const session = host.session;
+  let effectiveAlias = alias;
+  let effectiveThinking = thinkingLevel;
   try {
     if (session === undefined && needsSessionActivation) {
       await host.authFlow.activateModelAfterLogin(alias, thinkingLevel);
@@ -511,6 +540,11 @@ async function performModelSwitch(host: SlashCommandHost, alias: string, thinkin
       if (thinkingChanged) {
         await session.setThinking(thinkingLevel);
       }
+      // Confirm the actual model/thinking after switch - the provider may
+      // override the requested alias (e.g. routing to a different variant).
+      const confirmed = await session.getStatus().catch(() => null);
+      if (confirmed?.model !== undefined) effectiveAlias = confirmed.model;
+      if (confirmed?.thinkingLevel !== undefined) effectiveThinking = confirmed.thinkingLevel as ThinkingEffort;
     }
   } catch (error) {
     const msg = formatErrorMessage(error);
@@ -518,7 +552,7 @@ async function performModelSwitch(host: SlashCommandHost, alias: string, thinkin
     return;
   }
 
-  host.setAppState({ model: alias, thinkingLevel });
+  host.setAppState({ model: effectiveAlias, thinkingLevel: effectiveThinking });
 
   let persisted = false;
 
@@ -526,15 +560,21 @@ async function performModelSwitch(host: SlashCommandHost, alias: string, thinkin
     persisted = await persistModelSelection(host, alias, thinkingLevel);
   } catch (error) {
     const msg = formatErrorMessage(error);
-    host.showError(`Switched to ${alias}, but failed to save default: ${msg}`);
+    host.showError(`Switched to ${effectiveAlias}, but failed to save default: ${msg}`);
     return;
   }
 
+  // Warn about prompt-cache invalidation when switching models mid-conversation.
+  const hasHistory = host.state.appState.contextTokens > 0;
+  const cacheWarning = modelChanged && hasHistory
+    ? ' Note: switching models invalidates the existing prompt cache - use /new to avoid extra token costs.'
+    : '';
+
   const status: string = (() => {
-    if (modelChanged) return `Switched to ${alias} with thinking ${thinkingLevel}.`;
-    if (thinkingChanged) return `Thinking set to ${thinkingLevel} for ${alias}.`;
-    if (persisted) return `Saved ${alias} with thinking ${thinkingLevel} as default.`;
-    return `Already using ${alias} with thinking ${thinkingLevel}.`;
+    if (modelChanged) return `Switched to ${effectiveAlias} with thinking ${effectiveThinking}.${cacheWarning}`;
+    if (thinkingChanged) return `Thinking set to ${effectiveThinking} for ${effectiveAlias}.`;
+    if (persisted) return `Saved ${effectiveAlias} with thinking ${effectiveThinking} as default.`;
+    return `Already using ${effectiveAlias} with thinking ${effectiveThinking}.`;
   })();
   host.showStatus(status, host.state.theme.colors.success);
 }
