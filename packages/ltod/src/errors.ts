@@ -89,6 +89,18 @@ export class APIOrphanedToolCallError extends APIStatusError {
 }
 
 /**
+ * HTTP status error that specifically means the request body was too large
+ * for the provider to accept (HTTP 413). The most common cause is a large
+ * media payload (images) accumulated in the conversation history.
+ */
+export class APIRequestTooLargeError extends APIStatusError {
+  constructor(statusCode: number, message: string, requestId?: string | null) {
+    super(statusCode, message, requestId);
+    this.name = 'APIRequestTooLargeError';
+  }
+}
+
+/**
  * Message-text parity check shared by normalizeAPIStatusError and
  * isOrphanedToolCallError. Mirrors the historical two-includes semantics:
  * the fragments may appear in any order.
@@ -170,8 +182,14 @@ export function normalizeAPIStatusError(
   if (statusCode === 429) {
     return new APIProviderRateLimitError(message, requestId, parseRateLimitReason(message));
   }
+  // Context overflow must be checked BEFORE the generic 413 branch: a 413
+  // whose message matches overflow patterns is a context-window problem
+  // (needs compaction), not a body-size problem (needs media degradation).
   if (isContextOverflowStatusError(statusCode, message)) {
     return new APIContextOverflowError(statusCode, message, requestId);
+  }
+  if (statusCode === 413) {
+    return new APIRequestTooLargeError(statusCode, message, requestId);
   }
   if (statusCode === 400 && isOrphanedToolCallMessage(message.toLowerCase())) {
     return new APIOrphanedToolCallError(statusCode, message, requestId);
@@ -193,6 +211,73 @@ export function isProviderRateLimitError(error: unknown): boolean {
 
   const lowerMessage = errorMessage(error).toLowerCase();
   return PROVIDER_RATE_LIMIT_MESSAGE_PATTERNS.some((pattern) => pattern.test(lowerMessage));
+}
+
+// ---------------------------------------------------------------------------
+// Media / structural request recovery
+// ---------------------------------------------------------------------------
+
+const IMAGE_FORMAT_STATUS_MESSAGE_PATTERNS = [
+  /unsupported image (?:url|format|type)/,
+  /does not represent a valid image/,
+  /could not (?:process|decode) (?:the |input )?image/,
+  /unable to process (?:the |input )?image/,
+  /failed to decode (?:the )?image/,
+  /invalid image(?: data| type| format)?/,
+] as const;
+
+const IMAGE_FORMAT_PROVIDER_MESSAGE_PATTERNS = [
+  /unsupported media type for base64 image/,
+  /invalid data url for image/,
+] as const;
+
+const MEDIA_TYPE_FIELD_PATTERN = /(?:media|mime)_?type/;
+
+export function isImageFormatError(error: unknown): boolean {
+  if (error instanceof APIStatusError) {
+    if (error instanceof APIContextOverflowError) return false;
+    if (error instanceof APIRequestTooLargeError) return false;
+    if (error.statusCode !== 400) return false;
+    const lowerMessage = error.message.toLowerCase();
+    return (
+      IMAGE_FORMAT_STATUS_MESSAGE_PATTERNS.some((pattern) => pattern.test(lowerMessage)) ||
+      (MEDIA_TYPE_FIELD_PATTERN.test(lowerMessage) && lowerMessage.includes('image'))
+    );
+  }
+  if (error instanceof ChatProviderError) {
+    const lowerMessage = error.message.toLowerCase();
+    return IMAGE_FORMAT_PROVIDER_MESSAGE_PATTERNS.some((pattern) => pattern.test(lowerMessage));
+  }
+  return false;
+}
+
+const STRUCTURAL_REQUEST_MESSAGE_PATTERNS = [
+  /text content blocks must be non-empty/,
+  /text content blocks must contain non-whitespace/,
+  /first message must use the .*user.* role/,
+  /roles must alternate/,
+  /multiple .*(?:user|assistant).* roles in a row/,
+  /tool_use[\s\S]*ids must be unique/,
+  /must not be empty/,
+] as const;
+
+export function isRecoverableRequestStructureError(error: unknown): boolean {
+  if (error instanceof APIStatusError) {
+    if (error instanceof APIContextOverflowError) return false;
+    if (error.statusCode !== 400 && error.statusCode !== 422) return false;
+    const lowerMessage = error.message.toLowerCase();
+    return STRUCTURAL_REQUEST_MESSAGE_PATTERNS.some((pattern) => pattern.test(lowerMessage));
+  }
+  return false;
+}
+
+export function isRequestTooLargeError(error: unknown): boolean {
+  // Context overflow (413 with overflow message) must NOT be treated as a
+  // request-too-large media issue - it needs compaction, not media stripping.
+  if (error instanceof APIContextOverflowError) return false;
+  if (error instanceof APIRequestTooLargeError) return true;
+  if (error instanceof APIStatusError) return error.statusCode === 413;
+  return false;
 }
 
 function getStatusCode(error: unknown): number | undefined {

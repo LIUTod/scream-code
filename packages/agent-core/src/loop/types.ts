@@ -48,6 +48,17 @@ export type LoopTerminalStepStopReason = Exclude<LoopStepStopReason, 'tool_use'>
 export type LoopTurnStopReason = LoopTerminalStepStopReason | 'aborted';
 
 /**
+ * Shared mutable state tracking the active media projection mode for a turn.
+ * When a step fails because the provider rejects media (too large, bad
+ * format), the recovery logic flips the mode and subsequent steps in the
+ * same turn use the degraded/stripped projection directly, avoiding a
+ * wasted failed request per step.
+ */
+export interface MediaProjectionState {
+  mode: 'normal' | 'degraded' | 'stripped';
+}
+
+/**
  * @deprecated Legacy umbrella union. Use `LoopStepStopReason` for per-step
  * model responses and `LoopTurnStopReason` for `TurnResult`.
  */

@@ -25,6 +25,7 @@ import type {
   LoopMessageBuilder,
   LoopTerminalStepStopReason,
   LoopTurnStopReason,
+  MediaProjectionState,
   RecordStepUsageResult,
   TurnResult,
 } from './types';
@@ -78,6 +79,9 @@ export async function runTurn(input: RunTurnInput): Promise<TurnResult> {
   // Normal exits overwrite this with the completed step's stop reason.
   let stopReason: LoopTurnStopReason = 'end_turn';
   let activeStep: number | undefined;
+  // Shared mutable state: once a step recovers via media degradation, all
+  // subsequent steps in this turn use the same projection directly.
+  const mediaProjection: MediaProjectionState = { mode: 'normal' };
   const recordStepUsage = async (
     stepUsage: TokenUsage,
   ): Promise<RecordStepUsageResult | void> => {
@@ -109,6 +113,7 @@ export async function runTurn(input: RunTurnInput): Promise<TurnResult> {
         maxRetryAttempts,
         recordUsage: recordStepUsage,
         hasPendingSteer: input.hasPendingSteer,
+        mediaProjection,
       });
       activeStep = undefined;
 

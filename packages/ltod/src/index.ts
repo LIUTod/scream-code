@@ -59,12 +59,16 @@ export {
   APIEmptyResponseError,
   APIOrphanedToolCallError,
   APIProviderRateLimitError,
+  APIRequestTooLargeError,
   APIStatusError,
   APITimeoutError,
   ChatProviderError,
   isContextOverflowStatusError,
+  isImageFormatError,
   isOrphanedToolCallError,
   isProviderRateLimitError,
+  isRecoverableRequestStructureError,
+  isRequestTooLargeError,
   isRetryableGenerateError,
 } from './errors';
 

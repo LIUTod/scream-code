@@ -9,14 +9,15 @@
 
 import { randomUUID } from 'node:crypto';
 
-import type { TokenUsage } from '@scream-code/ltod';
+import { isImageFormatError, isRecoverableRequestStructureError, isRequestTooLargeError, type TokenUsage } from '@scream-code/ltod';
 import type { Logger } from '#/logging/types';
 
 import type { LoopEventDispatcher } from './events';
 import type { LLM, LLMChatParams, LLMChatResponse } from './llm';
+import { degradeMedia, stripMedia } from './media-projection';
 import { chatWithRetry } from './retry';
 import { recordUnexecutedToolCalls, runToolCallBatch, type ToolCallStepContext } from './tool-call';
-import type { ExecutableTool, LoopHooks, LoopMessageBuilder, LoopStepStopReason, RecordStepUsageResult } from './types';
+import type { ExecutableTool, LoopHooks, LoopMessageBuilder, LoopStepStopReason, MediaProjectionState, RecordStepUsageResult } from './types';
 
 type ChatStreamingCallbacks = Pick<
   LLMChatParams,
@@ -43,6 +44,7 @@ export interface ExecuteLoopStepDeps {
   readonly recordUsage:
     (usage: TokenUsage) => RecordStepUsageResult | void | Promise<RecordStepUsageResult | void>;
   readonly hasPendingSteer?: (() => boolean) | undefined;
+  readonly mediaProjection?: MediaProjectionState | undefined;
 }
 
 export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<{
@@ -62,6 +64,7 @@ export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<{
     currentStep,
     maxRetryAttempts,
     recordUsage,
+    mediaProjection,
   } = deps;
 
   if (hooks?.beforeStep !== undefined) {
@@ -108,8 +111,17 @@ export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<{
     step: currentStep,
   });
 
+  // Apply sticky media projection from a previous step's recovery (so the
+  // same degradation is used without a wasted failed request per step).
+  let effectiveMessages = messages;
+  if (mediaProjection?.mode === 'degraded') {
+    effectiveMessages = degradeMedia(messages);
+  } else if (mediaProjection?.mode === 'stripped') {
+    effectiveMessages = stripMedia(messages);
+  }
+
   const chatParams: LLMChatParams = {
-    messages,
+    messages: effectiveMessages,
     tools: effectiveTools ?? [],
     signal,
     ...createChatStreamingCallbacks({
@@ -119,16 +131,85 @@ export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<{
       stepUuid,
     }),
   };
-  const response: LLMChatResponse = await chatWithRetry({
-    llm,
-    params: chatParams,
-    dispatchEvent,
-    turnId,
-    currentStep,
-    stepUuid,
-    maxAttempts: maxRetryAttempts,
-    log,
-  });
+
+  let response: LLMChatResponse;
+  try {
+    response = await chatWithRetry({
+      llm,
+      params: chatParams,
+      dispatchEvent,
+      turnId,
+      currentStep,
+      stepUuid,
+      maxAttempts: maxRetryAttempts,
+      log,
+    });
+  } catch (error) {
+    // Media degradation recovery: if the provider rejects the request
+    // because of media (too large or bad format), transform the messages
+    // and retry once. The sticky `mediaProjection` state ensures
+    // subsequent steps in the same turn use the degraded projection
+    // directly without re-failing.
+    if (mediaProjection !== undefined && !signal.aborted) {
+      if (
+        isRequestTooLargeError(error) &&
+        mediaProjection.mode !== 'degraded' &&
+        mediaProjection.mode !== 'stripped'
+      ) {
+        mediaProjection.mode = 'degraded';
+        effectiveMessages = degradeMedia(messages);
+        log?.warn('request too large - retrying with media degraded');
+        response = await chatWithRetry({
+          llm,
+          params: { ...chatParams, messages: effectiveMessages },
+          dispatchEvent,
+          turnId,
+          currentStep,
+          stepUuid,
+          maxAttempts: maxRetryAttempts,
+          log,
+        });
+      } else if (
+        isRequestTooLargeError(error) &&
+        mediaProjection.mode === 'degraded'
+      ) {
+        mediaProjection.mode = 'stripped';
+        effectiveMessages = stripMedia(messages);
+        log?.warn('request still too large with degraded media - retrying with all media stripped');
+        response = await chatWithRetry({
+          llm,
+          params: { ...chatParams, messages: effectiveMessages },
+          dispatchEvent,
+          turnId,
+          currentStep,
+          stepUuid,
+          maxAttempts: maxRetryAttempts,
+          log,
+        });
+      } else if (
+        isImageFormatError(error) &&
+        mediaProjection.mode !== 'stripped'
+      ) {
+        mediaProjection.mode = 'stripped';
+        effectiveMessages = stripMedia(messages);
+        log?.warn('image format error - retrying with all media stripped');
+        response = await chatWithRetry({
+          llm,
+          params: { ...chatParams, messages: effectiveMessages },
+          dispatchEvent,
+          turnId,
+          currentStep,
+          stepUuid,
+          maxAttempts: maxRetryAttempts,
+          log,
+        });
+      } else {
+        throw error;
+      }
+    } else {
+      throw error;
+    }
+  }
   const usage = response.usage;
   const usageResult = await recordUsage(usage);
   const stopTurnAfterUsage = usageResult?.stopTurn === true;
