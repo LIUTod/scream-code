@@ -6,7 +6,7 @@
  */
 
 import type { Component, TUI } from '@liutod-scream/pi-tui';
-import { Text } from '@liutod-scream/pi-tui';
+import { Text, truncateToWidth } from '@liutod-scream/pi-tui';
 import { t } from '@scream-code/config';
 import chalk from 'chalk';
 
@@ -18,6 +18,7 @@ import {
 } from '#/tui/constant/rendering';
 import { STATUS_BULLET } from '#/tui/constant/symbols';
 import type { ColorPalette } from '#/tui/theme/colors';
+import { isRenderCacheEnabled } from '#/tui/utils/render-cache';
 import { easeSpeedRatio, getSharedSpeedTracker, lerpHex, SPEED_MAX } from '#/tui/utils/speed-tracker';
 
 /** gpt-5 reasoning summaries contain empty HTML comment padding sentinels
@@ -98,7 +99,11 @@ export class ThinkingComponent implements Component {
   }
 
   dispose(): void {
-    this.stopSpinner();
+    // Finalize so the component stops rendering in live mode (spinner +
+    // "thinking..." label). Without this, a disposed-but-still-visible
+    // component shows a frozen spinner line that looks like a duplicate
+    // thinking block when a new one starts (e.g. after a step retry).
+    this.finalize();
   }
 
   setExpanded(expanded: boolean): void {
@@ -111,7 +116,12 @@ export class ThinkingComponent implements Component {
   render(width: number): string[] {
     // Live mode is intentionally not cached: the spinner frame changes every
     // 80 ms, and returning a stale cached array would freeze the animation.
-    if (this.mode === 'finalized' && this.cachedLines !== undefined && this.cachedWidth === width) {
+    if (
+      isRenderCacheEnabled() &&
+      this.mode === 'finalized' &&
+      this.cachedLines !== undefined &&
+      this.cachedWidth === width
+    ) {
       return this.cachedLines;
     }
 
@@ -146,19 +156,25 @@ export class ThinkingComponent implements Component {
     }
 
     if (this.expanded || contentLines.length <= THINKING_PREVIEW_LINES) {
-      this.cachedWidth = width;
-      this.cachedLines = rendered;
+      if (isRenderCacheEnabled()) {
+        this.cachedWidth = width;
+        this.cachedLines = rendered;
+      }
       return rendered;
     }
 
     // Leading blank + first PREVIEW_LINES content lines + hint line.
     const truncated = rendered.slice(0, 1 + THINKING_PREVIEW_LINES);
     const remaining = contentLines.length - THINKING_PREVIEW_LINES;
+    const hint = `... (${String(remaining)} more lines, ctrl+o to expand)`;
+    const hintWidth = Math.max(0, width - MESSAGE_INDENT.length);
     truncated.push(
-      MESSAGE_INDENT + chalk.dim(`... (${String(remaining)} more lines, ctrl+o to expand)`),
+      MESSAGE_INDENT + chalk.dim(truncateToWidth(hint, hintWidth, '…')),
     );
-    this.cachedWidth = width;
-    this.cachedLines = truncated;
+    if (isRenderCacheEnabled()) {
+      this.cachedWidth = width;
+      this.cachedLines = truncated;
+    }
     return truncated;
   }
 

@@ -6,12 +6,13 @@
  */
 
 import type { Component, MarkdownTheme, TUI } from '@liutod-scream/pi-tui';
-import { Container, Markdown, visibleWidth } from '@liutod-scream/pi-tui';
+import { Container, Markdown, truncateToWidth, visibleWidth } from '@liutod-scream/pi-tui';
 import chalk from 'chalk';
 
 import { MESSAGE_INDENT } from '#/tui/constant/rendering';
 import { STATUS_BULLET } from '#/tui/constant/symbols';
 import type { ColorPalette } from '#/tui/theme/colors';
+import { isRenderCacheEnabled } from '#/tui/utils/render-cache';
 import {
   FADE_MS,
   buildFadeTable,
@@ -94,14 +95,16 @@ export class AssistantMessageComponent implements Component {
   }
 
   render(width: number): string[] {
-    if (this.cachedLines !== undefined && this.cachedWidth === width) {
+    const safeWidth = Math.max(0, width);
+
+    if (isRenderCacheEnabled() && this.cachedLines !== undefined && this.cachedWidth === safeWidth) {
       return this.cachedLines;
     }
 
     if (this.lastText.trim().length === 0) return [];
 
     const prefix = this.showBullet ? STATUS_BULLET : MESSAGE_INDENT;
-    const contentWidth = Math.max(1, width - visibleWidth(prefix));
+    const contentWidth = Math.max(1, safeWidth - visibleWidth(prefix));
     const contentLines = this.contentContainer.render(contentWidth);
 
     const activeBulletColor = this.currentBulletColor();
@@ -115,9 +118,13 @@ export class AssistantMessageComponent implements Component {
       lines.push(p + contentLines[i]);
     }
 
-    this.cachedWidth = width;
-    this.cachedLines = lines;
-    return lines;
+    const rendered = lines.map((line) => truncateToWidth(line, safeWidth, '…'));
+
+    if (isRenderCacheEnabled()) {
+      this.cachedWidth = safeWidth;
+      this.cachedLines = rendered;
+    }
+    return rendered;
   }
 
   private currentBulletColor(): string {

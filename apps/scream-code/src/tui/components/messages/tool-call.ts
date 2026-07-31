@@ -5,7 +5,7 @@
 
 import { isAbsolute, relative, sep } from 'node:path';
 
-import { Text, Spacer, visibleWidth } from '@liutod-scream/pi-tui';
+import { Text, Spacer, truncateToWidth, visibleWidth } from '@liutod-scream/pi-tui';
 import type { Component, MarkdownTheme, TUI } from '@liutod-scream/pi-tui';
 import chalk from 'chalk';
 import { t } from '@scream-code/config';
@@ -38,6 +38,7 @@ const APPROVED_PLAN_MARKER = '## Approved Plan:';
 const STREAMING_PROGRESS_INTERVAL_MS = 1000;
 const SUBAGENT_ELAPSED_INTERVAL_MS = 1000;
 const PROGRESS_URL_RE = /https?:\/\/\S+/g;
+const MAX_PROGRESS_LINE_CHARS = 10_000;
 
 type SubagentTextKind = 'thinking' | 'text';
 
@@ -607,6 +608,23 @@ export class ToolCallComponent extends CachedContainer {
     this.syncSubagentElapsedTimer();
   }
 
+  // Second-level cache for truncated output. CachedContainer returns the
+  // same raw array reference on cache hits; we compare by identity to avoid
+  // re-running truncateToWidth and to preserve the render-identity contract
+  // (two consecutive render() calls at the same width return the same ref).
+  private truncatedCache: { rawLines: string[]; lines: string[] } | undefined;
+
+  override render(width: number): string[] {
+    const safeWidth = Math.max(0, width);
+    const raw = super.render(safeWidth);
+    if (this.truncatedCache !== undefined && this.truncatedCache.rawLines === raw) {
+      return this.truncatedCache.lines;
+    }
+    const lines = raw.map((line) => truncateToWidth(line, safeWidth, '…'));
+    this.truncatedCache = { rawLines: raw, lines };
+    return lines;
+  }
+
   setExpanded(expanded: boolean): void {
     if (this.expanded === expanded) return;
     this.expanded = expanded;
@@ -667,7 +685,11 @@ export class ToolCallComponent extends CachedContainer {
   appendProgress(text: string): void {
     if (this.result !== undefined) return;
     for (const line of text.split('\n')) {
-      this.progressLines.push(line);
+      this.progressLines.push(
+        line.length > MAX_PROGRESS_LINE_CHARS
+          ? line.slice(0, MAX_PROGRESS_LINE_CHARS) + '…'
+          : line,
+      );
     }
     while (this.progressLines.length > ToolCallComponent.MAX_PROGRESS_LINES) {
       this.progressLines.shift();

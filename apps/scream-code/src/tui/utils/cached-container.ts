@@ -1,5 +1,7 @@
 import { Container, type Component } from '@liutod-scream/pi-tui';
 
+import { isRenderCacheEnabled } from '#/tui/utils/render-cache';
+
 /**
  * A Container that caches its rendered lines until explicitly invalidated or
  * its child list changes.
@@ -40,14 +42,22 @@ export class CachedContainer extends Container {
   }
 
   override render(width: number): string[] {
-    if (!this.dirty && this.cachedWidth === width && this.cachedLines !== undefined) {
+    if (
+      isRenderCacheEnabled() &&
+      !this.dirty &&
+      this.cachedWidth === width &&
+      this.cachedLines !== undefined
+    ) {
       return this.cachedLines;
     }
 
-    this.cachedWidth = width;
-    this.cachedLines = super.render(width);
-    this.dirty = false;
-    return this.cachedLines;
+    const lines = super.render(width);
+    if (isRenderCacheEnabled()) {
+      this.cachedWidth = width;
+      this.cachedLines = lines;
+      this.dirty = false;
+    }
+    return lines;
   }
 
   protected markDirty(): void {
