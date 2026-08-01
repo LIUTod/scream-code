@@ -231,8 +231,9 @@ describe('BashTool', () => {
       await vi.advanceTimersByTimeAsync(1);
       const result = await running;
 
-      expect(proc.kill).toHaveBeenCalled();
-      expect(result.output).toContain('Command killed by timeout (2s)');
+      // Auto-background: process is NOT killed on timeout, moved to background instead.
+      expect(proc.kill).not.toHaveBeenCalled();
+      expect(result.output).toContain('Command timed out after 2s');
     } finally {
       vi.useRealTimers();
     }
@@ -747,10 +748,10 @@ describe('BashTool', () => {
       const result = await running;
 
       expect(result).toMatchObject({
-        isError: true,
-        brief: 'Killed by timeout (1s)',
+        isError: false,
       });
-      expect(result.output).toContain('Command killed by timeout (1s)');
+      expect(result.output).toContain('Command timed out after 1s');
+      expect(result.output).toContain('still running in the background');
     } finally {
       vi.useRealTimers();
     }

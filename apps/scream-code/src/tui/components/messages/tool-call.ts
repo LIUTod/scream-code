@@ -1262,7 +1262,18 @@ export class ToolCallComponent extends CachedContainer {
 
     let bullet: string;
     if (isFinished) {
-      bullet = isError ? chalk.hex(colors.error)('✗ ') : chalk.hex(colors.success)(STATUS_BULLET);
+      if (isError) {
+        // Distinguish user-initiated abort/cancel from genuine tool errors:
+        // aborts are expected (user pressed Ctrl-C or interrupted), so they
+        // use the warning color rather than the error color.
+        const output = typeof result?.output === 'string' ? result.output : '';
+        const isAborted = /\b(?:aborted|cancelled|canceled)\b/i.test(output);
+        bullet = isAborted
+          ? chalk.hex(colors.warning)('⊙ ')
+          : chalk.hex(colors.error)('✗ ');
+      } else {
+        bullet = chalk.hex(colors.success)(STATUS_BULLET);
+      }
     } else if (isTruncated) {
       bullet = chalk.hex(colors.error)('✗ ');
     } else {

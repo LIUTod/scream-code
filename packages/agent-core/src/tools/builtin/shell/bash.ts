@@ -41,6 +41,7 @@ import { toInputJsonSchema } from '../../support/input-schema';
 import { literalRulePattern, matchesGlobRuleSubject } from '../../support/rule-match';
 import { ToolResultBuilder } from '../../support/result-builder';
 import bashDescriptionTemplate from './bash.md';
+import { createBackgroundTask, drainCompletedBackgroundTasks } from './background-tasks';
 
 const MS_PER_SECOND = 1000;
 const DEFAULT_TIMEOUT_S = 60;
@@ -423,11 +424,19 @@ export class BashTool implements BuiltinTool<BashInput> {
   }
 
   private async execution(args: BashInput, signal: AbortSignal): Promise<ExecutableToolResult> {
+    // Drain completed background tasks from previous timeout-detached commands.
+    const completedBg = drainCompletedBackgroundTasks();
+    const bgPrefix = completedBg.length > 0
+      ? completedBg.map((t) =>
+        `[Background task ${t.id} completed] Command: ${t.command}\nExit code: ${String(t.exitCode)} (${(t.elapsedMs / 1000).toFixed(1)}s)\nOutput:\n${t.output}\n---\n`
+      ).join('')
+      : '';
+
     if (signal.aborted) {
-      return { isError: true, output: 'Aborted before command started' };
+      return { isError: true, output: bgPrefix + 'Aborted before command started' };
     }
     if (args.command.length === 0) {
-      return { isError: true, output: 'Command cannot be empty.' };
+      return { isError: true, output: bgPrefix + 'Command cannot be empty.' };
     }
 
     const validationError = validateCommand(args.command, this.isWindowsBash);
@@ -468,7 +477,6 @@ export class BashTool implements BuiltinTool<BashInput> {
       // some platforms and throws on others — either is safe to ignore.
     }
 
-    let timedOut = false;
     let aborted = false;
     let killed = false;
 
@@ -518,37 +526,62 @@ export class BashTool implements BuiltinTool<BashInput> {
     };
     signal.addEventListener('abort', onAbort);
 
-    const timeoutHandle = setTimeout(() => {
-      timedOut = true;
-      void killProc();
-    }, timeoutMs);
+    // Use a race between process completion and timeout. On timeout we
+    // move the still-running process to the background instead of killing
+    // it, so long-running commands (npm install, cargo build, etc.) are
+    // not lost.
+    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+    const timeoutPromise = new Promise<{ timedOut: true }>((resolve) => {
+      if (timeoutMs !== undefined) {
+        timeoutHandle = setTimeout(() => resolve({ timedOut: true }), timeoutMs);
+      }
+    });
 
     try {
       const builder = new ToolResultBuilder({
         artifactSink: async (fullOutput) => {
-          // Persist the full, untruncated output to a temp file so the model
-          // can recover the elided middle via the Read tool. The path is the
-          // artifact reference appended to the truncated output.
           const artifactPath = join(tmpdir(), `scream-bash-output-${randomUUID()}.log`);
           await writeFile(artifactPath, fullOutput, 'utf8');
           return artifactPath;
         },
       });
-      const [, exitCode] = await Promise.all([
+      if (bgPrefix.length > 0) builder.write(bgPrefix);
+      const completionPromise = Promise.all([
         Promise.all([
           readStreamIntoBuilder(proc.stdout, builder),
           readStreamIntoBuilder(proc.stderr, builder),
         ]),
         proc.wait(),
-      ]);
+      ]).then(([, exitCode]) => ({ timedOut: false as const, exitCode }));
 
-      if (timedOut) {
+      // When timeoutMs is undefined (disable_timeout), the timeout promise
+      // never settles, so the race just waits on the completion promise.
+      const raceResult =
+        timeoutMs !== undefined
+          ? await Promise.race([completionPromise, timeoutPromise])
+          : await completionPromise;
+
+      if (raceResult.timedOut) {
+        // Process is still running - move to background instead of killing.
         const timeoutLabel =
           timeoutMs % 1000 === 0 ? `${String(timeoutMs / 1000)}s` : `${String(timeoutMs)}ms`;
-        return builder.error(`Command killed by timeout (${timeoutLabel})`, {
-          brief: `Killed by timeout (${timeoutLabel})`,
-        });
+        const taskId = createBackgroundTask(
+          command,
+          completionPromise.then(({ exitCode }) => ({ exitCode, output: builder.toString() })),
+        );
+        const outputSoFar = builder.toString();
+        return {
+          output:
+            `Command timed out after ${timeoutLabel} but is still running in the background (task: ${taskId}).\n` +
+            `Output so far (${String(builder.nChars)} chars):\n${outputSoFar}\n` +
+            `---\nThe command will complete in the background. The result will be included in your next Bash call.`,
+          isError: false,
+        } satisfies ExecutableToolResult;
       }
+
+      // Process completed normally (or was aborted).
+      const { exitCode } = raceResult;
+
       if (aborted) {
         return builder.error('Interrupted by user', { brief: 'Interrupted by user' });
       }
@@ -572,7 +605,7 @@ export class BashTool implements BuiltinTool<BashInput> {
         output: error instanceof Error ? error.message : String(error),
       };
     } finally {
-      clearTimeout(timeoutHandle);
+      if (timeoutHandle !== undefined) clearTimeout(timeoutHandle);
       signal.removeEventListener('abort', onAbort);
     }
   }
