@@ -443,6 +443,7 @@ export const zh: Record<string, string> = {
   'help.toggle_output': '切换工具输出展开',
   'help.interrupt': '中途干预 — 在流式传输中插入后续提示',
   'help.newline': '插入换行',
+  'help.external_editor': '在外部编辑器中编辑 ($VISUAL / $EDITOR)',
   'help.cancel_stream': '中断流 / 清空输入',
   'help.exit': '退出（空输入时）',
   'help.close_dialog': '关闭对话框 / 中断流',

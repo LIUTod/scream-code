@@ -4,6 +4,9 @@
  * 查看已安装的 MCP 服务器状态，一键安装推荐服务器。 */
 
 import { writeFile, readFile, mkdir } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { execSync } from 'node:child_process';
+import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 
 import {
@@ -33,6 +36,10 @@ interface McpRecommendation {
   args: string[];
   /** If true, only available on macOS */
   macOnly?: boolean;
+  /** Environment variables for the MCP server. {INSTALL_DIR} is replaced with the clone path. */
+  env?: Record<string, string>;
+  /** If set, the repo is cloned to ~/.scream-code/mcp/<name>/ before configuring. */
+  gitUrl?: string;
 }
 
 // Built per call — t() must be evaluated after any runtime /language switch,
@@ -40,19 +47,22 @@ interface McpRecommendation {
 function getRecommended(): McpRecommendation[] {
   return [
     {
-      name: 'peekaboo',
-      displayName: 'Peekaboo',
-      description: t('mcp.desktop_desc'),
-      command: 'npx',
-      args: ['-y', '@steipete/peekaboo', 'mcp'],
-      macOnly: true,
-    },
-    {
       name: 'chrome-devtools',
       displayName: 'Chrome DevTools',
       description: t('mcp.browser_desc'),
       command: 'npx',
       args: ['-y', 'chrome-devtools-mcp@latest', '--no-usage-statistics'],
+    },
+    {
+      name: 'scream-life',
+      displayName: 'ScreamLife',
+      description: 'Decision memory system - captures and analyzes your decisions during conversations',
+      command: 'bun',
+      args: ['{INSTALL_DIR}/Core/mcp-server.ts'],
+      env: {
+        SCREAM_LIFE_DB_PATH: '{INSTALL_DIR}/Data/scream-life.db',
+      },
+      gitUrl: 'https://github.com/LIUTod/scream-life.git',
     },
   ];
 }
@@ -279,12 +289,40 @@ async function installMcp(host: SlashCommandHost, rec: McpRecommendation): Promi
 
   spinner.setLabel(`${t('mcp.configuring')} ${rec.displayName}...`);
   try {
-    await writeMcpConfig(host, rec.name, rec.command, rec.args);
-    await session.addMcpServer(rec.name, {
+    // For MCPs that require a local clone (gitUrl), clone or update the repo
+    // and resolve {INSTALL_DIR} placeholders in args and env.
+    let resolvedArgs = rec.args;
+    let resolvedEnv = rec.env;
+    if (rec.gitUrl !== undefined) {
+      const installDir = join(getDataDir(), 'mcp', rec.name);
+      if (existsSync(join(installDir, '.git'))) {
+        spinner.setLabel(`Updating ${rec.displayName}...`);
+        execSync(`git pull --ff-only`, { cwd: installDir, stdio: 'pipe', timeout: 30_000 });
+      } else {
+        spinner.setLabel(`Cloning ${rec.displayName}...`);
+        await mkdir(installDir, { recursive: true });
+        execSync(`git clone --depth 1 ${rec.gitUrl} "${installDir}"`, { stdio: 'pipe', timeout: 60_000 });
+      }
+      // Ensure Data/ directory exists for DB_PATH env var
+      await mkdir(join(installDir, 'Data'), { recursive: true });
+      resolvedArgs = rec.args.map((a) => a.replaceAll('{INSTALL_DIR}', installDir));
+      if (resolvedEnv !== undefined) {
+        resolvedEnv = Object.fromEntries(
+          Object.entries(resolvedEnv).map(([k, v]) => [k, v.replaceAll('{INSTALL_DIR}', installDir)]),
+        );
+      }
+    }
+
+    await writeMcpConfig(host, rec.name, rec.command, resolvedArgs, resolvedEnv);
+    const serverConfig: { transport: 'stdio'; command: string; args: string[]; env?: Record<string, string> } = {
       transport: 'stdio',
       command: rec.command,
-      args: rec.args,
-    });
+      args: resolvedArgs,
+    };
+    if (resolvedEnv !== undefined && Object.keys(resolvedEnv).length > 0) {
+      serverConfig.env = resolvedEnv;
+    }
+    await session.addMcpServer(rec.name, serverConfig);
     spinner.stop({ ok: true, label: t('mcp.install_success', { name: rec.displayName }) });
   } catch (error) {
     spinner.stop({ ok: false, label: t('mcp.install_fail', { name: rec.displayName }) });
@@ -343,6 +381,7 @@ async function writeMcpConfig(
   name: string,
   command: string,
   args: string[],
+  env?: Record<string, string>,
 ): Promise<void> {
   const homeDir = getDataDir();
   const configPath = join(homeDir, 'mcp.json');
@@ -355,7 +394,11 @@ async function writeMcpConfig(
 
   const servers: Record<string, unknown> =
     (data['mcpServers'] as Record<string, unknown>) ?? {};
-  servers[name] = { transport: 'stdio', command, args, startupTimeoutMs: 300_000 };
+  const config: Record<string, unknown> = { transport: 'stdio', command, args, startupTimeoutMs: 300_000 };
+  if (env !== undefined && Object.keys(env).length > 0) {
+    config['env'] = env;
+  }
+  servers[name] = config;
   data['mcpServers'] = servers;
 
   await mkdir(dirname(configPath), { recursive: true });

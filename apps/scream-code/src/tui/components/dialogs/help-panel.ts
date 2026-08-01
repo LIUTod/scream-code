@@ -35,7 +35,7 @@ export interface HelpPanelCommand {
 /** Static list — keep in sync with the global editor bindings. */
 export const DEFAULT_KEYBOARD_SHORTCUTS: readonly KeyboardShortcut[] = [
   { keys: 'Shift-Tab', description: t('help.toggle_plan') },
-  // { keys: 'Ctrl-G', description: 'Edit in external editor ($VISUAL / $EDITOR)' },
+  { keys: 'Ctrl-G', description: t('help.external_editor') },
   { keys: 'Ctrl-O', description: t('help.toggle_output') },
   { keys: 'Ctrl-S', description: t('help.interrupt') },
   { keys: 'Shift-Enter / Ctrl-J', description: t('help.newline') },

@@ -443,6 +443,7 @@ export const en: Record<string, string> = {
   'help.toggle_output': 'Toggle tool output expansion',
   'help.interrupt': 'Interrupt — insert follow-up prompt during streaming',
   'help.newline': 'Insert newline',
+  'help.external_editor': 'Edit in external editor ($VISUAL / $EDITOR)',
   'help.cancel_stream': 'Cancel stream / Clear input',
   'help.exit': 'Exit (when input is empty)',
   'help.close_dialog': 'Close dialog / Cancel stream',
