@@ -570,12 +570,41 @@ export class SessionEventHandler {
   }
 
   private handleToolProgress(event: ToolProgressEvent): void {
-    if (event.update.kind !== 'status') return;
+    // Completion notification for a Bash command that was moved to the
+    // background on timeout. Surfaced through the tool.progress custom
+    // channel so the user knows when the long-running task finished even
+    // though its Bash call already returned. Custom notifications carry no
+    // `text`, so this branch must run before the text guard below.
+    if (event.update.kind === 'custom' && event.update.customKind === 'background.task.terminated') {
+      const data = event.update.customData as
+        | { id?: unknown; command?: unknown; exitCode?: unknown }
+        | undefined;
+      const id = typeof data?.id === 'string' ? data.id : '';
+      const command = typeof data?.command === 'string' ? data.command : '';
+      const exitCode = typeof data?.exitCode === 'number' ? data.exitCode : -1;
+      const preview = command.length > 60 ? `${command.slice(0, 59)}…` : command;
+      if (exitCode === 0) {
+        this.host.showNotice(t('bash.background_completed', { id, command: preview }));
+      } else {
+        this.host.showNotice(
+          t('bash.background_failed', { id, command: preview, exitCode: String(exitCode) }),
+        );
+      }
+      return;
+    }
+
     const text = event.update.text;
     if (text === undefined || text.length === 0) return;
+
     const tc = this.host.streamingUI.getToolComponent(event.toolCallId);
     if (tc === undefined) return;
-    tc.appendProgress(text);
+    if (event.update.kind === 'status') {
+      tc.appendProgress(text);
+      return;
+    }
+    if (event.update.kind === 'stdout' || event.update.kind === 'stderr') {
+      tc.appendLiveOutput(text);
+    }
   }
 
   private handleToolResult(event: ToolResultEvent): void {

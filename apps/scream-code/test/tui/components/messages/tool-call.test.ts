@@ -318,6 +318,96 @@ describe('ToolCallComponent', () => {
     expect(header).toContain('当前计划 · 已批准：Pragmatic refactor');
   });
 
+  it('chips Auto-approved when ExitPlanMode passes in auto permission mode without a chosen option', () => {
+    const component = new ToolCallComponent(
+      {
+        id: 'call_exit_auto',
+        name: 'ExitPlanMode',
+        args: {},
+      },
+      {
+        tool_call_id: 'call_exit_auto',
+        output:
+          'Exited plan mode. Plan mode deactivated. All tools are now available.\n' +
+          'Plan saved to: /tmp/plan.md\n\n' +
+          '## Approved Plan:\n# Plan body',
+        is_error: false,
+      },
+      darkColors,
+    );
+    component.setPermissionMode('auto');
+    const header = strip(component.render(100).join('\n')).split('\n')[1] ?? '';
+    expect(header).toContain('当前计划 · 自动批准');
+  });
+
+  it('keeps the Approved chip in auto mode when the user picked an option', () => {
+    const component = new ToolCallComponent(
+      {
+        id: 'call_exit_auto_chosen',
+        name: 'ExitPlanMode',
+        args: {},
+      },
+      {
+        tool_call_id: 'call_exit_auto_chosen',
+        output:
+          'Exited plan mode. Selected approach: Pragmatic refactor\n' +
+          'Execute ONLY the selected approach. Do not execute any unselected alternatives.\n\n' +
+          'Plan mode deactivated. All tools are now available.\n' +
+          'Plan saved to: /tmp/plan.md\n\n' +
+          '## Approved Plan:\n# body',
+        is_error: false,
+      },
+      darkColors,
+    );
+    component.setPermissionMode('auto');
+    const header = strip(component.render(100).join('\n')).split('\n')[1] ?? '';
+    expect(header).toContain('当前计划 · 已批准：Pragmatic refactor');
+  });
+
+  it('renders live stdout while a Bash tool runs and drops it once the result lands', () => {
+    const component = new ToolCallComponent(
+      {
+        id: 'call_bash_live',
+        name: 'Bash',
+        args: { command: 'printf hello' },
+      },
+      undefined,
+      darkColors,
+    );
+    component.appendLiveOutput('LIVE_MARKER_ONE\nLIVE_MARKER_TWO\n');
+    const out = strip(component.render(100).join('\n'));
+    expect(out).toContain('LIVE_MARKER_ONE');
+    expect(out).toContain('LIVE_MARKER_TWO');
+
+    component.setResult({
+      tool_call_id: 'call_bash_live',
+      output: 'final result',
+      is_error: false,
+    });
+    const after = strip(component.render(100).join('\n'));
+    expect(after).toContain('final result');
+    expect(after).not.toContain('LIVE_MARKER_ONE');
+    expect(after).not.toContain('LIVE_MARKER_TWO');
+  });
+
+  it('caps live output with a tail-preserving truncation marker', () => {
+    const component = new ToolCallComponent(
+      {
+        id: 'call_bash_trunc',
+        name: 'Bash',
+        args: { command: 'yes' },
+      },
+      undefined,
+      darkColors,
+    );
+    component.appendLiveOutput('x'.repeat(50_001));
+    // The collapsed preview only shows the tail, so the truncation marker
+    // (at the head of the capped buffer) is visible once expanded.
+    component.setExpanded(true);
+    const out = strip(component.render(100).join('\n'));
+    expect(out).toContain('[...truncated]');
+  });
+
   it('renders Rejected in the plan box title and keeps revise feedback visible', () => {
     const component = new ToolCallComponent(
       {

@@ -34,7 +34,7 @@ import type { Jian, JianProcess } from '@scream-code/jian';
 import { z } from 'zod';
 
 import type { BuiltinTool } from '../../../agent/tool';
-import type { ExecutableToolResult, ToolExecution } from '../../../loop/types';
+import type { ExecutableToolContext, ExecutableToolResult, ToolExecution } from '../../../loop/types';
 import { renderPrompt } from '../../../utils/render-prompt';
 import type { BackgroundProcessManager } from '../../background/manager';
 import { toInputJsonSchema } from '../../support/input-schema';
@@ -390,7 +390,7 @@ export class BashTool implements BuiltinTool<BashInput> {
       },
       approvalRule: literalRulePattern(this.name, args.command),
       matchesRule: (ruleArgs) => matchesGlobRuleSubject(ruleArgs, args.command),
-      execute: ({ signal }) => this.execution(args, signal),
+      execute: (ctx) => this.execution(args, ctx),
     };
   }
 
@@ -423,7 +423,8 @@ export class BashTool implements BuiltinTool<BashInput> {
     return this.jian.execWithEnv(shellArgs, mergedEnv);
   }
 
-  private async execution(args: BashInput, signal: AbortSignal): Promise<ExecutableToolResult> {
+  private async execution(args: BashInput, ctx: ExecutableToolContext): Promise<ExecutableToolResult> {
+    const { signal, onUpdate } = ctx;
     // Drain completed background tasks from previous timeout-detached commands.
     const completedBg = drainCompletedBackgroundTasks();
     const bgPrefix = completedBg.length > 0
@@ -479,6 +480,14 @@ export class BashTool implements BuiltinTool<BashInput> {
 
     let aborted = false;
     let killed = false;
+    // Live stdout/stderr forwarding is disabled once the command is moved to
+    // background on timeout (the Bash result has already left) or the turn is
+    // aborted, so the TUI never receives trailing output it can no longer use.
+    let streaming = true;
+    const forwardChunk = (kind: 'stdout' | 'stderr', text: string): void => {
+      if (!streaming || signal.aborted || onUpdate === undefined) return;
+      onUpdate({ kind, text });
+    };
 
     const killProc = async (): Promise<void> => {
       if (killed) return;
@@ -548,8 +557,8 @@ export class BashTool implements BuiltinTool<BashInput> {
       if (bgPrefix.length > 0) builder.write(bgPrefix);
       const completionPromise = Promise.all([
         Promise.all([
-          readStreamIntoBuilder(proc.stdout, builder),
-          readStreamIntoBuilder(proc.stderr, builder),
+          readStreamIntoBuilder(proc.stdout, builder, (text) => forwardChunk('stdout', text)),
+          readStreamIntoBuilder(proc.stderr, builder, (text) => forwardChunk('stderr', text)),
         ]),
         proc.wait(),
       ]).then(([, exitCode]) => ({ timedOut: false as const, exitCode }));
@@ -563,12 +572,36 @@ export class BashTool implements BuiltinTool<BashInput> {
 
       if (raceResult.timedOut) {
         // Process is still running - move to background instead of killing.
+        streaming = false;
         const timeoutLabel =
           timeoutMs % 1000 === 0 ? `${String(timeoutMs / 1000)}s` : `${String(timeoutMs)}ms`;
         const taskId = createBackgroundTask(
           command,
           completionPromise.then(({ exitCode }) => ({ exitCode, output: builder.toString() })),
         );
+        // Surface a completion notification through the tool.progress custom
+        // channel once the backgrounded command exits, so the user is not
+        // left guessing about a long-running task that outlived its Bash
+        // call. The model still receives the full result on the next Bash
+        // call via drainCompletedBackgroundTasks.
+        if (onUpdate !== undefined) {
+          void completionPromise.then(
+            ({ exitCode }) => {
+              onUpdate({
+                kind: 'custom',
+                customKind: 'background.task.terminated',
+                customData: { id: taskId, command, exitCode },
+              });
+            },
+            () => {
+              onUpdate({
+                kind: 'custom',
+                customKind: 'background.task.terminated',
+                customData: { id: taskId, command, exitCode: -1 },
+              });
+            },
+          );
+        }
         const outputSoFar = builder.toString();
         return {
           output:
@@ -717,16 +750,38 @@ export class BashTool implements BuiltinTool<BashInput> {
   }
 }
 
+const LIVE_OUTPUT_FLUSH_MS = 100;
+
 async function readStreamIntoBuilder(
   stream: Readable,
   builder: ToolResultBuilder,
+  onChunk?: (text: string) => void,
 ): Promise<void> {
   const decoder = new StringDecoder('utf8');
+  let pending = '';
+  let lastFlush = 0;
+  const flush = (force: boolean): void => {
+    if (pending.length === 0) return;
+    if (!force && Date.now() - lastFlush < LIVE_OUTPUT_FLUSH_MS) return;
+    onChunk?.(pending);
+    pending = '';
+    lastFlush = Date.now();
+  };
   for await (const chunk of stream) {
     const buf: Buffer = typeof chunk === 'string' ? Buffer.from(chunk, 'utf8') : (chunk as Buffer);
-    builder.write(decoder.write(buf));
+    const text = decoder.write(buf);
+    builder.write(text);
+    if (onChunk !== undefined) {
+      pending += text;
+      flush(false);
+    }
   }
-  builder.write(decoder.end());
+  const tail = decoder.end();
+  builder.write(tail);
+  if (onChunk !== undefined) {
+    pending += tail;
+    flush(true);
+  }
 }
 
 function shellQuote(s: string): string {

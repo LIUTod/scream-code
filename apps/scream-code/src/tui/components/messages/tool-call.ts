@@ -22,12 +22,12 @@ import {
 import { STATUS_BULLET } from '#/tui/constant/symbols';
 import type { ColorPalette } from '#/tui/theme/colors';
 import type { ToolCallBlockData, ToolResultBlockData } from '#/tui/types';
-import type { TokenUsage, ToolResultDisplay } from '@scream-code/scream-code-sdk';
+import type { PermissionMode, TokenUsage, ToolResultDisplay } from '@scream-code/scream-code-sdk';
 import { appendStreamingArgsPreview } from '#/tui/utils/event-payload';
 import { decodeMcpToolName } from '#/tui/utils/mcp-tool-name';
 
 import { PlanBoxComponent } from './plan-box';
-import { ShellExecutionComponent } from './shell-execution';
+import { ShellExecutionComponent, shellExecutionResultRenderer } from './shell-execution';
 import { countNonEmptyLines, pickChip } from './tool-renderers/chip';
 import { pickResultRenderer } from './tool-renderers/registry';
 
@@ -39,6 +39,7 @@ const STREAMING_PROGRESS_INTERVAL_MS = 1000;
 const SUBAGENT_ELAPSED_INTERVAL_MS = 1000;
 const PROGRESS_URL_RE = /https?:\/\/\S+/g;
 const MAX_PROGRESS_LINE_CHARS = 10_000;
+const MAX_LIVE_OUTPUT_CHARS = 50_000;
 
 type SubagentTextKind = 'thinking' | 'text';
 
@@ -551,6 +552,10 @@ export class ToolCallComponent extends CachedContainer {
   // authoritative final state.
   private progressLines: string[] = [];
   private static readonly MAX_PROGRESS_LINES = 24;
+  /** Live stdout/stderr accumulated via appendLiveOutput while the tool runs. */
+  private liveOutput = '';
+  /** Session permission mode at card creation; drives ExitPlanMode chip wording. */
+  private permissionMode: PermissionMode | undefined;
 
   // ── Write streaming tail preview state ─────────────────────────────
   // The streaming preview renders from the TAIL of the accumulating args
@@ -653,6 +658,7 @@ export class ToolCallComponent extends CachedContainer {
     // authoritative final state. Without this clear, a finished tool would
     // show both the streamed status lines and the final output stacked.
     this.progressLines = [];
+    this.liveOutput = '';
     this.finalizeSubagentElapsedIfNeeded();
     this.syncStreamingProgressTimer();
     this.syncSubagentElapsedTimer();
@@ -696,6 +702,38 @@ export class ToolCallComponent extends CachedContainer {
     }
     this.rebuildBody();
     this.notifySnapshotChange();
+    this.ui?.requestRender();
+  }
+
+  /**
+   * Append live stdout/stderr from a running tool (Bash). Kept separate
+   * from appendProgress so streaming command output renders with the same
+   * tail-preview styling as the final result. The buffer is capped and
+   * tail-preserving so a runaway command cannot grow the box unboundedly;
+   * the block is dropped entirely once the real result lands.
+   */
+  appendLiveOutput(text: string): void {
+    if (this.result !== undefined || text.length === 0) return;
+    this.liveOutput += text;
+    if (this.liveOutput.length > MAX_LIVE_OUTPUT_CHARS) {
+      this.liveOutput = `[...truncated]\n${this.liveOutput.slice(this.liveOutput.length - MAX_LIVE_OUTPUT_CHARS)}`;
+    }
+    // rebuildContent (not rebuildBody) so the args-driven call preview —
+    // which may still be streaming Write/Edit content — is not rebuilt on
+    // every output chunk.
+    this.rebuildContent();
+    this.notifySnapshotChange();
+    this.ui?.requestRender();
+  }
+
+  /**
+   * Records the session permission mode so ExitPlanMode can render an
+   * honest "auto-approved" chip when the plan passed without user review.
+   */
+  setPermissionMode(mode: PermissionMode): void {
+    if (this.permissionMode === mode) return;
+    this.permissionMode = mode;
+    this.headerText.setText(this.buildHeader());
     this.ui?.requestRender();
   }
 
@@ -1289,6 +1327,14 @@ export class ToolCallComponent extends CachedContainer {
       }
       const outcome = interpretExitPlanModeOutcome(result.output);
       if (outcome.kind === 'approved') {
+        // In auto permission mode the plan passes without user review, so a
+        // warning-toned "auto-approved" chip is more honest than implying
+        // the user picked it. User approval always carries a chosen label
+        // when options were offered, so the two cases never collide.
+        const autoApproved = this.permissionMode === 'auto' && outcome.chosen === undefined;
+        if (autoApproved) {
+          return `${label}${chalk.hex(colors.warning)(` · ${t('toolcall.auto_approved')}`)}`;
+        }
         const chipText =
           outcome.chosen !== undefined && outcome.chosen.length > 0
             ? t('toolcall.approved', { chosen: outcome.chosen })
@@ -1346,6 +1392,7 @@ export class ToolCallComponent extends CachedContainer {
       this.children.pop();
     }
     this.buildProgressBlock();
+    this.buildLiveOutputBlock();
     this.buildContent();
     this.buildSubagentBlock();
   }
@@ -1359,6 +1406,7 @@ export class ToolCallComponent extends CachedContainer {
     this.buildCallPreview();
     this.callPreviewEndIndex = this.children.length;
     this.buildProgressBlock();
+    this.buildLiveOutputBlock();
     this.buildContent();
     this.buildSubagentBlock();
   }
@@ -1390,6 +1438,25 @@ export class ToolCallComponent extends CachedContainer {
         : chalk.dim(raw);
       PROGRESS_URL_RE.lastIndex = 0;
       this.addChild(new Text(styled, 2, 0));
+    }
+  }
+
+  /**
+   * Render live stdout/stderr while the tool is still running. Reuses the
+   * shell result renderer so the streaming tail matches the final output's
+   * preview styling (including ctrl+o expansion); the block is skipped once
+   * the real result has landed.
+   */
+  private buildLiveOutputBlock(): void {
+    if (this.result !== undefined) return;
+    if (this.liveOutput.length === 0) return;
+    const components = shellExecutionResultRenderer(
+      this.toolCall,
+      { tool_call_id: this.toolCall.id, output: this.liveOutput, is_error: false },
+      { expanded: this.expanded, colors: this.colors },
+    );
+    for (const component of components) {
+      this.addChild(component);
     }
   }
 

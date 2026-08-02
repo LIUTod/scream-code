@@ -668,6 +668,7 @@ export class StreamingUIController {
       state.theme.markdownTheme,
       state.appState.workDir,
     );
+    tc.setPermissionMode(state.appState.permissionMode);
     const entry: TranscriptEntry = {
       id: nextTranscriptId(),
       kind: 'tool_call',
@@ -770,6 +771,7 @@ export class StreamingUIController {
         state.theme.markdownTheme,
         state.appState.workDir,
       );
+      completed.setPermissionMode(state.appState.permissionMode);
       if (state.toolOutputExpanded) completed.setExpanded(true);
       if (state.planExpanded) completed.setPlanExpanded(true);
       const entry: TranscriptEntry = {

@@ -557,6 +557,7 @@ export const zh: Record<string, string> = {
   'toolcall.current_plan': '当前计划',
   'toolcall.approved': '已批准：{chosen}',
   'toolcall.approved_label': '已批准',
+  'toolcall.auto_approved': '自动批准',
   'toolcall.input_unavailable': '无法收集你的输入',
   'toolcall.input_collected': '已收集你的答案',
   'toolcall.waiting_input': '等待你的输入',
@@ -796,6 +797,8 @@ export const zh: Record<string, string> = {
   // ─── background-task-status ────
   'bgtask.agent_task': '代理任务',
   'bgtask.bash_task': 'bash 任务',
+  'bash.background_completed': '后台任务 {id} 已完成：{command}',
+  'bash.background_failed': '后台任务 {id} 执行失败（退出码 {exitCode}）：{command}',
   'bgtask.started_bg': '{subject} 已在后台启动',
   'bgtask.awaiting_approval': '{subject} 等待审批',
   'bgtask.completed_bg': '{subject} 已在后台完成',

@@ -557,6 +557,7 @@ export const en: Record<string, string> = {
   'toolcall.current_plan': 'Current Plan',
   'toolcall.approved': 'Approved: {chosen}',
   'toolcall.approved_label': 'Approved',
+  'toolcall.auto_approved': 'Auto-approved',
   'toolcall.input_unavailable': 'Could not collect your input',
   'toolcall.input_collected': 'Collected your answer',
   'toolcall.waiting_input': 'Waiting for your input',
@@ -796,6 +797,8 @@ export const en: Record<string, string> = {
   // ─── background-task-status ────
   'bgtask.agent_task': 'Agent task',
   'bgtask.bash_task': 'Bash task',
+  'bash.background_completed': 'Background task {id} completed: {command}',
+  'bash.background_failed': 'Background task {id} failed (exit {exitCode}): {command}',
   'bgtask.started_bg': '{subject} started in background',
   'bgtask.awaiting_approval': '{subject} awaiting approval',
   'bgtask.completed_bg': '{subject} completed in background',

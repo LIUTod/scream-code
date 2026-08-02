@@ -429,4 +429,78 @@ describe('SessionEventHandler', () => {
       },
     });
   });
+
+  it('surfaces a background-task completion notice from a custom tool.progress event', () => {
+    const host = createMockHost();
+    const handler = new SessionEventHandler(host);
+
+    handler.handleEvent(
+      {
+        ...baseEvent('tool.progress'),
+        turnId: 1,
+        toolCallId: 'call_bash_1',
+        update: {
+          kind: 'custom',
+          customKind: 'background.task.terminated',
+          customData: { id: 'abc12345', command: 'sleep 70', exitCode: 0 },
+        },
+      } as unknown as Event,
+      vi.fn(),
+    );
+
+    expect(host.showNotice).toHaveBeenCalledTimes(1);
+    expect(host.showNotice).toHaveBeenCalledWith(expect.stringContaining('abc12345'));
+
+    handler.handleEvent(
+      {
+        ...baseEvent('tool.progress'),
+        turnId: 1,
+        toolCallId: 'call_bash_2',
+        update: {
+          kind: 'custom',
+          customKind: 'background.task.terminated',
+          customData: { id: 'def67890', command: 'make build', exitCode: 2 },
+        },
+      } as unknown as Event,
+      vi.fn(),
+    );
+
+    expect(host.showNotice).toHaveBeenCalledTimes(2);
+    expect(host.showNotice).toHaveBeenLastCalledWith(expect.stringContaining('退出码 2'));
+  });
+
+  it('forwards stdout/stderr tool progress to the live output renderer', () => {
+    const host = createMockHost();
+    const appendLiveOutput = vi.fn();
+    const appendProgress = vi.fn();
+    (host.streamingUI.getToolComponent as ReturnType<typeof vi.fn>).mockReturnValue({
+      appendLiveOutput,
+      appendProgress,
+    });
+    const handler = new SessionEventHandler(host);
+
+    handler.handleEvent(
+      {
+        ...baseEvent('tool.progress'),
+        turnId: 1,
+        toolCallId: 'call_bash_3',
+        update: { kind: 'stdout', text: 'building...' },
+      } as unknown as Event,
+      vi.fn(),
+    );
+    expect(appendLiveOutput).toHaveBeenCalledWith('building...');
+    expect(appendProgress).not.toHaveBeenCalled();
+
+    handler.handleEvent(
+      {
+        ...baseEvent('tool.progress'),
+        turnId: 1,
+        toolCallId: 'call_bash_4',
+        update: { kind: 'status', text: 'working' },
+      } as unknown as Event,
+      vi.fn(),
+    );
+    expect(appendProgress).toHaveBeenCalledWith('working');
+    expect(appendLiveOutput).toHaveBeenCalledTimes(1);
+  });
 });

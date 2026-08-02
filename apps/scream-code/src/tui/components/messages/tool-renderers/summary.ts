@@ -183,7 +183,7 @@ const globGlance: GlanceFn = (_toolCall, result, colors) => {
   // Extension counts: `.ts: 5, .md: 3, ...`
   const extCounts = countExtensions(lines);
   const extEntries = [...extCounts.entries()]
-    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .toSorted((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
     .slice(0, MAX_EXTENSION_COUNTS);
   const extLine = extEntries
     .map(([ext, count]) => `${dim(ext)}:${dim(` ${String(count)}`)}`)
@@ -226,12 +226,77 @@ const readGlance: GlanceFn = (toolCall, result, colors) => {
   return parts.join(dim(' · '));
 };
 
+interface WebSearchEntry {
+  readonly title: string;
+  readonly url: string;
+}
+
+/**
+ * Parse the fixed WebSearch output protocol emitted by
+ * `web-search.ts` (`Title: …` / `Date: …` / `URL: …` / `Snippet: …`,
+ * entries separated by `---`) into structured entries so the collapsed
+ * card can show a title/URL glance instead of a bare "N results" chip.
+ */
+function parseWebSearchOutput(output: string): WebSearchEntry[] {
+  const entries: WebSearchEntry[] = [];
+  let title: string | undefined;
+  let url: string | undefined;
+  let inSnippet = false;
+  for (const line of output.split('\n')) {
+    if (line.startsWith('---')) {
+      if (title !== undefined || url !== undefined) {
+        entries.push({ title: title ?? '', url: url ?? '' });
+      }
+      title = undefined;
+      url = undefined;
+      inSnippet = false;
+      continue;
+    }
+    // Page content appended by `include_content` may contain arbitrary
+    // lines; stop field parsing once the snippet begins so a `Title:` /
+    // `URL:` / `---` inside the body cannot corrupt the current entry.
+    if (inSnippet) continue;
+    if (line.startsWith('Snippet: ')) {
+      inSnippet = true;
+    } else if (line.startsWith('Title: ')) {
+      title = line.slice('Title: '.length);
+    } else if (line.startsWith('URL: ')) {
+      url = line.slice('URL: '.length);
+    }
+  }
+  if (title !== undefined || url !== undefined) {
+    entries.push({ title: title ?? '', url: url ?? '' });
+  }
+  return entries;
+}
+
+function truncateText(text: string, max = 60): string {
+  return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
+}
+
+const webSearchGlance: GlanceFn = (_toolCall, result, colors) => {
+  const entries = parseWebSearchOutput(result.output);
+  if (entries.length === 0) return '';
+  const titleColor = chalk.hex(colors.roleTool);
+  const dim = chalk.dim;
+  const lines = entries.slice(0, GLANCE_SAMPLES).map((e) => {
+    const title = e.title.length > 0 ? titleColor(truncateText(e.title)) : '';
+    const url = e.url.length > 0 ? dim(truncateText(e.url)) : '';
+    return [title, url].filter((s) => s.length > 0).join(dim(' — '));
+  });
+  const remaining = entries.length - GLANCE_SAMPLES;
+  if (remaining > 0) {
+    lines.push(dim(`+${String(remaining)} more`));
+  }
+  return lines.join('\n');
+};
+
 // ── Exports ──────────────────────────────────────────────────────────
 
 // Tools whose chip already conveys everything — the body is empty in
 // the collapsed state and only the raw output appears when expanded.
 export const fetchSummary: ResultRenderer = withGlance(null);
-export const webSearchSummary: ResultRenderer = withGlance(null);
+export const webSearchSummary: ResultRenderer = withGlance(webSearchGlance);
 export const thinkSummary: ResultRenderer = withGlance(null);
 export const editSummary: ResultRenderer = withGlance(null);
 export const writeSummary: ResultRenderer = withGlance(null);
