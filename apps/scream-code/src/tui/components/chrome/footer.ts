@@ -148,12 +148,31 @@ function safeUsage(usage: number): number {
   return safeUsageRatio(usage);
 }
 
+const CONTEXT_BAR_WIDTH = 10;
+const CONTEXT_BAR_FILLED = '▰';
+const CONTEXT_BAR_EMPTY = '▱';
+
+/**
+ * Half-block progress bar for context usage: `▰▰▰▱▱▱▱▱▱▱` (10 cells).
+ * Filled cells are rounded from the clamped ratio, so 0% is all-empty and
+ * >=100% is all-filled; NaN/undefined coerce through safeUsageRatio first.
+ */
+function formatContextBar(usage: number, width: number = CONTEXT_BAR_WIDTH): string {
+  const clamped = Math.min(1, Math.max(0, safeUsageRatio(usage)));
+  const filled = Math.round(clamped * width);
+  return CONTEXT_BAR_FILLED.repeat(filled) + CONTEXT_BAR_EMPTY.repeat(width - filled);
+}
+
 function formatContextStatus(usage: number, tokens?: number, maxTokens?: number): string {
   const pct = `${(safeUsage(usage) * 100).toFixed(1)}%`;
+  // The bar precedes the percentage so the footer reads
+  // `上下文：▰▰▰▱▱▱▱▱▱▱  28.8% (287.9k/1.0M)`; both share the usage color.
+  // Two spaces after the bar keep the percentage from feeling cramped.
+  const barAndPct = `${formatContextBar(usage)}  ${pct}`;
   if (maxTokens && maxTokens > 0 && tokens !== undefined) {
-    return t('footer.context', { pct, tokens: formatTokenCount(tokens), maxTokens: formatTokenCount(maxTokens) });
+    return t('footer.context', { pct: barAndPct, tokens: formatTokenCount(tokens), maxTokens: formatTokenCount(maxTokens) });
   }
-  return t('footer.context_short', { pct });
+  return t('footer.context_short', { pct: barAndPct });
 }
 
 /** Format goal wall-clock duration compactly: `3m`, `1m30s`, `45s`. */

@@ -69,11 +69,11 @@ function wideFooter(): FooterComponent {
 }
 
 describe('FooterComponent - progressive truncation', () => {
-  it('fits without truncation at columns=120 (no ellipsis, RIGHT visible)', () => {
+  it('fits without truncation at columns=160 (no ellipsis, RIGHT visible)', () => {
     const footer = wideFooter();
-    const [line1] = footer.render(120);
+    const [line1] = footer.render(160);
     expect(line1).toBeDefined();
-    expect(visibleWidth(line1!)).toBeLessThanOrEqual(120);
+    expect(visibleWidth(line1!)).toBeLessThanOrEqual(160);
     const stripped = strip(line1!);
     expect(stripped).not.toContain('…');
     expect(stripped).toContain('GOAL');
@@ -96,7 +96,7 @@ describe('FooterComponent - progressive truncation', () => {
     expect(visibleWidth(line1!)).toBeLessThanOrEqual(70);
     expect(stripped).toContain('…');
     expect(stripped).toContain('上下文'); // RIGHT survived
-    expect(stripped).toContain('GOAL'); // head of LEFT kept
+    expect(stripped).toMatch(/计划  GO/); // head of LEFT kept
   });
 
   it('stage 2: drops RIGHT when it cannot fit even after shrinking LEFT', () => {
