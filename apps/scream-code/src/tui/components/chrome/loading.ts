@@ -1,5 +1,6 @@
 import process from "node:process";
 import { t } from '@scream-code/config';
+import { loadTuiConfig, saveTuiConfig } from '#/tui/config';
 import type { ResolvedTheme } from "#/tui/theme/colors";
 
 const { stdout, stdin } = process;
@@ -174,7 +175,7 @@ function supportsAnsi(): boolean {
   ansiSupported = false; return false
 }
 
-export function runLoadingAnimation(
+export async function runLoadingAnimation(
   theme: ResolvedTheme = 'dark',
 ): Promise<void> {
   const ansi = supportsAnsi()
@@ -187,8 +188,18 @@ export function runLoadingAnimation(
       for (const line of COMPACT_LOGO) stdout.write(`${fg(...BLOCK_RGB)}${line}${RESET}\n`)
     }
     stdout.write(`${BOLD}${fg(...THEME_PRIMARY[theme])}${t('loading.waking')}${RESET}\n`)
-    return Promise.resolve()
+    return
   }
+
+  // Read the persisted auto-start toggle. Ctrl+E during the animation flips it
+  // for FUTURE launches only; this launch keeps the value it booted with.
+  let autoStart = false
+  try {
+    const cfg = await loadTuiConfig()
+    autoStart = cfg.autoStart
+  } catch { /* fall back to default */ }
+  const autoStartAtBoot = autoStart
+  let toggled = false // whether Ctrl+E was pressed this launch
 
   return new Promise((resolve) => {
     if (process.platform !== 'win32') {
@@ -239,7 +250,13 @@ export function runLoadingAnimation(
 
       lines.push('')
       lines.push('')
-      lines.push(centerPad(`${fg(...DIM_RGB)}${t('loading.quit_hint')}${RESET}`, cols))
+      // Before Ctrl+E is pressed: show the action hint. After pressing it:
+      // show the persisted toggle state so the user sees the new default.
+      const rightText = toggled
+        ? (autoStart ? t('loading.auto_start_on') : t('loading.auto_start_off'))
+        : t('loading.auto_start_hint')
+      const hint = `${t('loading.quit_hint')}   ${rightText}`
+      lines.push(centerPad(`${fg(...DIM_RGB)}${hint}${RESET}`, cols))
 
       while (lines.length < rows) lines.push('')
 
@@ -262,6 +279,20 @@ export function runLoadingAnimation(
       const key = data.toString()
       if (key === '\u0003') {
         interrupt()
+        return
+      }
+      if (key === '\u0005') {
+        // Ctrl+E: toggle the persisted auto-start flag for FUTURE launches.
+        // This launch keeps the value it booted with.
+        toggled = true
+        autoStart = !autoStart
+        void (async () => {
+          try {
+            const cfg = await loadTuiConfig()
+            await saveTuiConfig({ ...cfg, autoStart })
+          } catch { /* best effort - toggle still applies for display */ }
+        })()
+        render()
         return
       }
       if ((key === '\r' || key === '\n') && phase === 'ready') {
@@ -324,6 +355,14 @@ export function runLoadingAnimation(
     void minDelay.then(() => {
       phase = 'ready'
       render()
+      // Auto-start: skip waiting for Enter when the persisted toggle is on.
+      // A short delay lets the user see the "ready" state before entering.
+      if (autoStartAtBoot) {
+        setTimeout(() => {
+          cleanup()
+          resolve()
+        }, 350)
+      }
     })
   })
 }

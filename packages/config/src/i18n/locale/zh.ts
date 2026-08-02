@@ -139,6 +139,9 @@ export const zh: Record<string, string> = {
   'loading.waking': '正在唤醒核心...',
   'loading.press_enter': '按下 ENTER 唤醒核心',
   'loading.quit_hint': '按住 Ctrl+C 即可退出 Scream Code',
+  'loading.auto_start_hint': 'Ctrl+E 即可切换一键启动',
+  'loading.auto_start_on': 'Ctrl+E 即可切换一键启动（默认启动开）',
+  'loading.auto_start_off': 'Ctrl+E 即可切换一键启动（默认启动关）',
 
   // ─── 语言 ─────────────────────
   'language.picker_title': '语言 / Language',

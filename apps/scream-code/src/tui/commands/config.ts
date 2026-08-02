@@ -7,7 +7,7 @@ import { PermissionSelectorComponent } from '../components/dialogs/permission-se
 import { SettingsSelectorComponent, type SettingsSelection } from '../components/dialogs/settings-selector';
 import { showSubagentModelBinder } from '../components/dialogs/subagent-model-binder';
 import { ThemeSelectorComponent } from '../components/dialogs/theme-selector';
-import { saveTuiConfig } from '../config';
+import { loadTuiConfig, saveTuiConfig } from '../config';
 import { handleLanguageCommand } from './language';
 import { isBusy } from '../utils/app-state';
 import { formatTokenCount } from '#/utils/usage/usage-format';
@@ -376,6 +376,7 @@ async function applyEditorChoice(host: SlashCommandHost, value: string): Promise
   const editorCommand = value.length > 0 ? value : null;
   try {
     await saveTuiConfig({
+      ...(await loadTuiConfig()),
       theme: host.state.appState.theme,
       language: host.state.appState.language,
       editorCommand,
@@ -623,6 +624,7 @@ async function applyThemeChoice(host: SlashCommandHost, theme: Theme): Promise<v
   }
   try {
     await saveTuiConfig({
+      ...(await loadTuiConfig()),
       theme,
       language: host.state.appState.language,
       editorCommand: host.state.appState.editorCommand,

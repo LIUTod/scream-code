@@ -49,6 +49,7 @@ function makeStartupInput(
       fusionPlan: { timeoutSeconds: 600, workerCount: 3 },
       subagentModels: {},
       ...tuiConfig,
+      autoStart: tuiConfig.autoStart ?? false,
     },
     version: "0.0.0-test",
     workDir: "/tmp/proj-a",

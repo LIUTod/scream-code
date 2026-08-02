@@ -54,6 +54,7 @@ notification_condition = "always"
     expect(config).toEqual({
       theme: 'light',
       editorCommand: 'code --wait',
+      autoStart: false,
       notifications: { enabled: false, condition: 'always' },
       like: { nickname: undefined, tone: undefined, other: undefined },
       fusionPlan: { timeoutSeconds: 600, workerCount: 3 },
@@ -69,6 +70,7 @@ command = "   "
 `);
     expect(config).toEqual({
       theme: 'auto',
+      autoStart: false,
       editorCommand: null,
       notifications: { enabled: true, condition: 'unfocused' },
       like: { nickname: undefined, tone: undefined, other: undefined },
@@ -104,6 +106,7 @@ command = "   "
         theme: 'light',
         language: 'zh',
         editorCommand: 'vim',
+        autoStart: false,
         notifications: { enabled: false, condition: 'always' },
         like: { nickname: undefined, tone: undefined, other: undefined },
         fusionPlan: { timeoutSeconds: 600, workerCount: 3 },
@@ -114,6 +117,7 @@ command = "   "
 
     expect(await loadTuiConfig(filePath)).toEqual({
       theme: 'light',
+      autoStart: false,
       editorCommand: 'vim',
       notifications: { enabled: false, condition: 'always' },
       like: { nickname: undefined, tone: undefined, other: undefined },

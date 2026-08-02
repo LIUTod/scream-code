@@ -139,6 +139,9 @@ export const en: Record<string, string> = {
   'loading.waking': 'Waking core...',
   'loading.press_enter': 'Press ENTER to wake core',
   'loading.quit_hint': 'Hold Ctrl+C to quit Scream Code',
+  'loading.auto_start_hint': 'Ctrl+E to toggle auto-start',
+  'loading.auto_start_on': 'Ctrl+E to toggle auto-start (ON)',
+  'loading.auto_start_off': 'Ctrl+E to toggle auto-start (OFF)',
 
   // ─── Language ─────────────────
   'language.picker_title': 'Language / 语言',
