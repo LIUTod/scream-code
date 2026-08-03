@@ -16,6 +16,8 @@ export interface ScreamSlashCommand<Name extends string = string> extends SlashC
    * Maps to pi-tui's `SlashCommand.argumentHint` -> `Editor.setArgumentHints`.
    */
   readonly argumentHint?: string;
+  /** Skill origin when this command was registered from a skill. */
+  readonly source?: 'project' | 'user' | 'extra' | 'builtin';
 }
 
 export interface ParsedSlashInput {

@@ -92,7 +92,12 @@ export class InputController {
   constructor(private readonly host: InputControllerHost) {}
 
   setupAutocomplete(): void {
-    const visible = this.host.getSlashCommands().filter((cmd) => !cmd.name.startsWith('skill:'));
+    // Hide builtin skills from the autocomplete dropdown (they are too
+    // many to be useful), but keep user/project/extra skills discoverable
+    // so installed skills surface when the user types `/`.
+    const visible = this.host
+      .getSlashCommands()
+      .filter((cmd) => !(cmd.name.startsWith('skill:') && cmd.source === 'builtin'));
     const slashCommands: (AutocompleteItem | SlashCommand)[] = visible.map((cmd) => cmd);
     const { state } = this.host;
     const provider = new FileMentionProvider(

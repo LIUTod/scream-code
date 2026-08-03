@@ -36,19 +36,21 @@ export function buildSkillSlashCommands(
       name: commandName,
       aliases: [],
       description: skill.description ?? '',
+      source: skill.source,
     });
 
     // Also register the bare name so built-in skills like /dream
     // appear in autocomplete. Skip names that collide with built-in
     // slash commands (e.g. /make-skill) to avoid duplicate entries.
-    // The `skill:` prefixed entries above are still filtered out by
-    // setupAutocomplete() to avoid cluttering the dropdown with ~40 entries.
+    // The `skill:` prefixed entries above are filtered by autocomplete to
+    // hide builtin skills only; user/project skills stay discoverable.
     if (skill.source === 'builtin' && !reservedNames.has(skill.name)) {
       commandMap.set(skill.name, skill.name);
       commands.push({
         name: skill.name,
         aliases: [],
         description: skill.description ?? '',
+        source: skill.source,
       });
     }
   }

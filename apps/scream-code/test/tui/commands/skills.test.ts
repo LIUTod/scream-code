@@ -55,4 +55,20 @@ describe('skill slash commands', () => {
     expect(built.commandMap.get('skill:dream')).toBe('dream');
     expect(built.commandMap.get('dream')).toBe('dream');
   });
+
+  it('carries the skill source onto slash commands for autocomplete filtering', () => {
+    const built = buildSkillSlashCommands([
+      skill('review', 'prompt'),
+      skill('commit', 'flow', { source: 'project' }),
+      skill('dream', 'inline', { source: 'builtin' }),
+    ]);
+    const byName = new Map(built.commands.map((c) => [c.name, c]));
+    // No source set → undefined (kept visible by the autocomplete filter).
+    expect(byName.get('skill:review')?.source).toBeUndefined();
+    // User/project skills surface in `/` autocomplete.
+    expect(byName.get('skill:commit')?.source).toBe('project');
+    // Builtin skills carry the marker the autocomplete filter hides on.
+    expect(byName.get('skill:dream')?.source).toBe('builtin');
+    expect(byName.get('dream')?.source).toBe('builtin');
+  });
 });
