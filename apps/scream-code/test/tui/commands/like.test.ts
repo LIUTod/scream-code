@@ -53,6 +53,26 @@ describe('buildRoleAdditionalText', () => {
     expect(result).not.toContain('Other');
   });
 
+  it('includes prohibitions in a dedicated Do NOT section', () => {
+    const result = buildRoleAdditionalText({
+      nickname: 'Alex',
+      doNot: 'Never touch user config files without asking',
+    });
+    expect(result).toContain('## Do NOT');
+    expect(result).toContain('Never touch user config files without asking');
+    // The prohibition section sits after the preference list.
+    expect(result.indexOf('## Do NOT')).toBeGreaterThan(result.indexOf('- Nickname'));
+  });
+
+  it('emits the Do NOT section even when only prohibitions are set', () => {
+    const result = buildRoleAdditionalText({
+      doNot: 'Never delete data without confirmation',
+    });
+    expect(result).toContain('## Do NOT');
+    expect(result).toContain('Never delete data without confirmation');
+    expect(result).toContain('HIGHEST PRIORITY');
+  });
+
   it('marks the block as highest priority with bilingual anchor', () => {
     const result = buildRoleAdditionalText({ nickname: 'Alex' });
     expect(result).toContain('HIGHEST PRIORITY');

@@ -28,6 +28,8 @@ export const TuiLikePreferencesSchema = z.object({
   nickname: z.string().optional(),
   tone: z.string().optional(),
   other: z.string().optional(),
+  /** Explicit prohibitions: things the user does NOT want done. */
+  doNot: z.string().optional(),
 });
 
 export type TuiLikePreferences = z.infer<typeof TuiLikePreferencesSchema>;

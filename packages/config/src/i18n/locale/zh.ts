@@ -367,6 +367,9 @@ export const zh: Record<string, string> = {
   'like.other': '其他偏好',
   'like.other_hint': '例如：多说例子、先给结论再展开、避免术语等（留空表示不设置）',
   'like.other_example': '例如：请用中文回答，避免缩写',
+  'like.do_not': '用户禁止',
+  'like.do_not_hint': '用户明确不让做的事。Agent 绝不能做这些。',
+  'like.do_not_example': '例如：未经询问绝不修改用户的配置文件',
   'like.cancelled': '已取消 /like 设置',
   'like.saved': '偏好已保存（下次新会话生效）',
 

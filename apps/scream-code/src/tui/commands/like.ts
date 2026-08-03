@@ -56,8 +56,17 @@ export function buildRoleAdditionalText(prefs: TuiLikePreferences): string {
   if (prefs.other !== undefined && prefs.other.trim().length > 0) {
     items.push(`- Other: ${prefs.other.trim()}`);
   }
-  if (items.length === 0) return '';
-  lines.push('', ...items, '', t('like.priority'));
+  const doNot = prefs.doNot?.trim();
+  if (items.length === 0 && (doNot === undefined || doNot.length === 0)) return '';
+  lines.push('', ...items);
+  if (doNot !== undefined && doNot.length > 0) {
+    lines.push(
+      '',
+      '## Do NOT (explicit prohibitions — NEVER do these)',
+      doNot,
+    );
+  }
+  lines.push('', t('like.priority'));
   return lines.join('\n');
 }
 
@@ -75,11 +84,29 @@ async function persistLikePreferences(
     ...current,
     like: prefs,
   };
-  await saveTuiConfig(updated, configPath);
-
-  const roleAdditional = buildRoleAdditionalText(prefs);
-  await writeFile(await getUserPrefsPath(), roleAdditional, 'utf-8');
-
+  try {
+    await saveTuiConfig(updated, configPath);
+    await writeFile(await getUserPrefsPath(), buildRoleAdditionalText(prefs), 'utf-8');
+  } catch (error) {
+    // Roll BOTH stores back to their previous state so they never diverge.
+    // writeFile is non-atomic, so a partial failure could otherwise leave a
+    // truncated user-prefs.md while tui.toml carries the old value.
+    try {
+      await saveTuiConfig(current, configPath);
+    } catch {
+      // Best-effort rollback; the original error below is the real signal.
+    }
+    try {
+      await writeFile(
+        await getUserPrefsPath(),
+        buildRoleAdditionalText(current.like ?? {}),
+        'utf-8',
+      );
+    } catch {
+      // Best-effort rollback; the original error below is the real signal.
+    }
+    throw error;
+  }
   host.setAppState({ like: prefs });
 }
 
@@ -119,10 +146,22 @@ export async function handleLikeCommand(host: SlashCommandHost): Promise<void> {
     return;
   }
 
+  const doNot = await promptTextInput(host, t('like.do_not'), {
+    subtitle: t('like.do_not_hint'),
+    placeholder: t('like.do_not_example'),
+    initialValue: current.doNot,
+    allowEmpty: true,
+  });
+  if (doNot === undefined) {
+    host.showStatus(t('like.cancelled'), host.state.theme.colors.textDim);
+    return;
+  }
+
   const prefs: TuiLikePreferences = {
     nickname: nickname.trim().length > 0 ? nickname.trim() : undefined,
     tone: tone.trim().length > 0 ? tone.trim() : undefined,
     other: other.trim().length > 0 ? other.trim() : undefined,
+    doNot: doNot.trim().length > 0 ? doNot.trim() : undefined,
   };
 
   await persistLikePreferences(host, prefs);

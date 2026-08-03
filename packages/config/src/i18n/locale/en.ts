@@ -367,6 +367,9 @@ export const en: Record<string, string> = {
   'like.other': 'Other preferences',
   'like.other_hint': 'e.g. more examples, conclusion first, avoid jargon (leave empty to skip)',
   'like.other_example': 'e.g. Answer in English, avoid abbreviations',
+  'like.do_not': 'User Prohibitions',
+  'like.do_not_hint': 'Things the user explicitly does NOT want done. The agent must NEVER do these.',
+  'like.do_not_example': 'e.g. Never modify user config files without asking',
   'like.cancelled': '/like setup cancelled',
   'like.saved': 'Preferences saved (takes effect in next session)',
 
