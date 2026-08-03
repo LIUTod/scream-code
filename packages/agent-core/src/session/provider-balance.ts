@@ -66,7 +66,47 @@ const deepseekFetcher: BalanceFetcher = {
   },
 };
 
-const fetchers: BalanceFetcher[] = [deepseekFetcher];
+const kimiFetcher: BalanceFetcher = {
+  matches: (baseUrl) => {
+    try {
+      // 国内站生产端点; the international platform issues independent
+      // keys and its balance endpoint is not documented, so it stays
+      // unmatched and silently hides the badge.
+      return new URL(baseUrl).hostname === 'api.moonshot.cn';
+    } catch {
+      return false;
+    }
+  },
+  fetch: async (baseUrl, apiKey) => {
+    try {
+      // Kimi documents /v1/users/me/balance; the OpenAI-compat base_url
+      // may or may not already carry the /v1 prefix, so anchor at origin.
+      const root = new URL(baseUrl).origin;
+      const res = await fetch(`${root}/v1/users/me/balance`, {
+        headers: {
+          Accept: 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+        },
+        signal: AbortSignal.timeout(5000),
+      });
+      if (!res.ok) return null;
+      const data = (await res.json()) as {
+        code?: number;
+        data?: { available_balance?: number };
+      };
+      // available_balance is a float in CNY; failures/missing fields → null.
+      if (typeof data.data?.available_balance !== 'number') return null;
+      return {
+        currency: 'CNY',
+        totalBalance: data.data.available_balance.toFixed(2),
+      };
+    } catch {
+      return null;
+    }
+  },
+};
+
+const fetchers: BalanceFetcher[] = [deepseekFetcher, kimiFetcher];
 
 /**
  * Look up the balance for the given provider endpoint.

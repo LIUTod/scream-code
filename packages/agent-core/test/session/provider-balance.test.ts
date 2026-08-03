@@ -66,6 +66,33 @@ describe('fetchProviderBalance', () => {
     }
   });
 
+  test('queries the Kimi balance endpoint and formats the available balance', async () => {
+    mockFetchOnce({
+      code: 0,
+      data: { available_balance: 49.58894, voucher_balance: 46.58893, cash_balance: 3.00001 },
+      scode: '0x0',
+      status: true,
+    });
+    const result = await fetchProviderBalance('https://api.moonshot.cn', 'sk-kimi');
+    expect(result).toEqual({ currency: 'CNY', totalBalance: '49.59' });
+    const [url, init] = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(String(url)).toBe('https://api.moonshot.cn/v1/users/me/balance');
+    expect((init as RequestInit).headers).toMatchObject({ Authorization: 'Bearer sk-kimi' });
+  });
+
+  test('anchors the Kimi /v1 path at the origin even when base_url already has /v1', async () => {
+    mockFetchOnce({ data: { available_balance: 1.234 } });
+    await fetchProviderBalance('https://api.moonshot.cn/v1', 'sk-kimi');
+    const [url] = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(String(url)).toBe('https://api.moonshot.cn/v1/users/me/balance');
+  });
+
+  test('returns null when the Kimi payload lacks an available balance', async () => {
+    mockFetchOnce({ code: 0, data: {}, scode: '0x0', status: true });
+    const result = await fetchProviderBalance('https://api.moonshot.cn', 'sk-kimi');
+    expect(result).toBeNull();
+  });
+
   test('returns null when the endpoint reports an error status', async () => {
     mockFetchOnce({}, false);
     const result = await fetchProviderBalance('https://api.deepseek.com', 'sk-bad');
