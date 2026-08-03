@@ -121,6 +121,21 @@ describe('skill discovery', () => {
     expect(warnings.some((message) => message.includes('Ignoring flat skill'))).toBe(true);
   });
 
+  it('ignores common documentation markdown in flat skill discovery', async () => {
+    const { projectDir } = await makeWorkspace();
+    const projectRoot = join(projectDir, '.scream-code', 'skills');
+    await writeSkill(projectRoot, 'README.md', ['# Humanizer', '', 'Docs body.']);
+    await writeSkill(projectRoot, 'CHANGELOG.md', ['## 1.0.0', '', 'Entry.']);
+    await writeSkill(projectRoot, 'actual.md', ['Actual flat skill.']);
+
+    const roots: SkillRoot[] = [{ path: projectRoot, source: 'project' }];
+    const skills = await discoverSkills({ roots });
+
+    expect(skills.map((skill) => skill.name)).toEqual(['actual']);
+    expect(skills.some((skill) => skill.name === 'README')).toBe(false);
+    expect(skills.some((skill) => skill.name === 'CHANGELOG')).toBe(false);
+  });
+
   it('keeps flow skills user-visible while excluding them from model invocation', async () => {
     const { repoDir } = await makeWorkspace();
     const projectRoot = join(repoDir, '.scream-code', 'skills');

@@ -88,9 +88,10 @@ export function createMarkdownTheme(colors: ColorPalette): MarkdownTheme {
     quote: (text) => chalk.hex(colors.mdQuote)(text),
     quoteBorder: (text) => chalk.hex(colors.mdQuote)(text),
     hr: (text) => border(text),
-    // Table header cells take the accent ramp so the header row reads as a
-    // heading even though markdown only marks the first row specially.
-    tableHeader: (text) => chalk.bold.hex(colors.accent)(text),
+    // Table header cells take a warm amber so the header row reads as a
+    // heading distinct from the cool-toned body text; the accent ramp felt
+    // too loud and the cyan too flat for tables.
+    tableHeader: (text) => chalk.bold.hex(colors.fusionPlanMode)(text),
     // Match the assistant-message bullet so list markers read like a reply
     // prefix. Ordered lists arrive as `"1. "` / `"2. "` and are left
     // untouched by the leading-dash anchor.

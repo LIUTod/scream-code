@@ -14,6 +14,28 @@ const PROJECT_GENERIC_DIRS = ['.agents/skills'] as const;
 // loop forever. Real skill trees are 1-3 levels deep.
 const MAX_SKILL_SCAN_DEPTH = 8;
 
+/**
+ * Common documentation files shipped inside downloaded skill/plugin bundles
+ * are not skills; matched (case-insensitively) against top-level flat .md
+ * entries so e.g. README.md does not surface as a /skill:README entry.
+ */
+const DOCUMENTATION_MARKDOWN_LOWER = new Set([
+  'readme.md',
+  'changelog.md',
+  'changes.md',
+  'history.md',
+  'license.md',
+  'copying.md',
+  'authors.md',
+  'notice.md',
+  'contributing.md',
+  'security.md',
+  'code_of_conduct.md',
+  'architecture.md',
+  'design.md',
+  'notes.md',
+]);
+
 export interface SkillPathContext {
   readonly userHomeDir: string;
   readonly workDir: string;
@@ -154,8 +176,7 @@ export async function discoverSkills(
     for (const entry of entries) {
       // A directory holding SKILL.md is a skill bundle: register it and do not
       // descend, so its bundled references/scripts are never scanned.
-      if (await isFile(join(dirPath, entry, 'SKILL.md'))) {
-        directorySkills.add(entry);
+      if (await isFile(join(dirPath, entry, 'SKILL.md'))) {        directorySkills.add(entry);
         continue;
       }
       if (entry === 'node_modules' || entry.startsWith('.')) continue;
@@ -200,6 +221,10 @@ export async function discoverSkills(
       for (const entry of entries) {
         if (!entry.endsWith('.md')) continue;
         if (entry === 'SKILL.md') continue;
+        // Common documentation files shipped inside downloaded skill/plugin
+        // bundles are not skills — skip them so e.g. README.md does not
+        // surface as a /skill:README entry next to the real skill.
+        if (DOCUMENTATION_MARKDOWN_LOWER.has(entry.toLowerCase())) continue;
         const skillName = entry.slice(0, -'.md'.length);
         if (directorySkills.has(skillName)) {
           warn(

@@ -38,6 +38,7 @@ import {
   CombinedAutocompleteProvider,
   fuzzyFilter,
   fuzzyMatch,
+  truncateToWidth,
   type AutocompleteItem,
   type AutocompleteProvider,
   type AutocompleteSuggestions,
@@ -76,9 +77,13 @@ export class FileMentionProvider implements AutocompleteProvider {
       const resolvedDesc = desc ? t(desc) : '';
       const aliases = (cmd as { aliases?: readonly string[] }).aliases;
       const aliasStr = aliases && aliases.length > 0 ? ` (${aliases.join(', ')})` : '';
+      // Truncate the description so a long skill description can never
+      // wrap the autocomplete line — a wrapped item breaks the renderer's
+      // one-item-per-row assumption and corrupts the scroll viewport.
+      const shortDesc = resolvedDesc ? truncateToWidth(resolvedDesc, 60, '…') : '';
       return {
         value: name,
-        label: `/${name}${aliasStr}${resolvedDesc ? ` — ${resolvedDesc}` : ''}`,
+        label: `/${name}${aliasStr}${shortDesc ? ` — ${shortDesc}` : ''}`,
       };
     });
     this.inner = new CombinedAutocompleteProvider(slashCommands, workDir, fdPath);
