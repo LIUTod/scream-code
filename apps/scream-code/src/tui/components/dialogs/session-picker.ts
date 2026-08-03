@@ -17,7 +17,7 @@ import { t } from '@scream-code/config';
 import { formatSessionLabel } from '#/tui/utils/session-label';
 import type { ColorPalette } from '#/tui/theme/colors';
 import { printableChar } from '#/tui/utils/printable-key';
-import { SELECT_POINTER } from '../../constant/symbols';
+import { CHECKBOX_OFF, CHECKBOX_ON, SELECT_POINTER } from '../../constant/symbols';
 
 export interface SessionRow {
   readonly id: string;
@@ -87,6 +87,7 @@ export class SessionPickerComponent extends Container implements Focusable {
   private onSelect: (sessionId: string) => void;
   private onCancel: () => void;
   private onDelete: ((sessionId: string) => void | Promise<void>) | undefined;
+  private onDeleteMany: ((sessionIds: string[]) => void | Promise<void>) | undefined;
   private onStatus: (message: string) => void;
   private maxVisibleSessions: number;
   private loading: boolean;
@@ -94,6 +95,8 @@ export class SessionPickerComponent extends Container implements Focusable {
   focused = false;
   private selectedIndex = 0;
   private confirmingDelete = false;
+  /** Session ids ticked for batch delete (space toggles, a selects all). */
+  private selectedIds = new Set<string>();
 
   constructor(opts: {
     sessions: SessionRow[];
@@ -103,6 +106,7 @@ export class SessionPickerComponent extends Container implements Focusable {
     onSelect: (sessionId: string) => void;
     onCancel: () => void;
     onDelete?: ((sessionId: string) => void | Promise<void>) | undefined;
+    onDeleteMany?: ((sessionIds: string[]) => void | Promise<void>) | undefined;
     onStatus: (message: string) => void;
     maxVisibleSessions?: number;
   }) {
@@ -114,6 +118,7 @@ export class SessionPickerComponent extends Container implements Focusable {
     this.onSelect = opts.onSelect;
     this.onCancel = opts.onCancel;
     this.onDelete = opts.onDelete;
+    this.onDeleteMany = opts.onDeleteMany;
     this.onStatus = opts.onStatus;
     this.maxVisibleSessions = opts.maxVisibleSessions ?? 4;
   }
@@ -132,6 +137,17 @@ export class SessionPickerComponent extends Container implements Focusable {
       if (!session) return;
       if (this.confirmingDelete) {
         this.confirmingDelete = false;
+        if (this.selectedIds.size > 0) {
+          // Guard against callers that mount the picker without the batch
+          // callback: keep the confirm state and surface why nothing happened.
+          if (this.onDeleteMany === undefined) {
+            this.confirmingDelete = true;
+            this.onStatus(t('session_picker.batch_delete_unavailable'));
+            return;
+          }
+          void this.onDeleteMany?.([...this.selectedIds]);
+          return;
+        }
         if (session.metadata?.['source'] === 'cc-connect') {
           this.onStatus(t('session_picker.cc_restricted'));
           return;
@@ -147,11 +163,13 @@ export class SessionPickerComponent extends Container implements Focusable {
       return;
     }
     if (matchesKey(data, Key.up)) {
+      if (this.confirmingDelete) return;
       this.selectedIndex = Math.max(0, this.selectedIndex - 1);
       this.confirmingDelete = false;
       return;
     }
     if (matchesKey(data, Key.down)) {
+      if (this.confirmingDelete) return;
       this.selectedIndex = Math.min(this.sessions.length - 1, this.selectedIndex + 1);
       this.confirmingDelete = false;
       return;
@@ -167,6 +185,31 @@ export class SessionPickerComponent extends Container implements Focusable {
       if (session.id !== this.currentSessionId) {
         this.confirmingDelete = true;
       }
+    }
+    if (k === ' ' && !this.confirmingDelete) {
+      const session = this.sessions[this.selectedIndex];
+      // The current session and cc-connect sessions cannot be deleted, so
+      // they are excluded from batch selection up front.
+      if (!session || session.id === this.currentSessionId) return;
+      if (session.metadata?.['source'] === 'cc-connect') {
+        this.onStatus(t('session_picker.cc_restricted'));
+        return;
+      }
+      if (this.selectedIds.has(session.id)) this.selectedIds.delete(session.id);
+      else this.selectedIds.add(session.id);
+      return;
+    }
+    if (k === 'a' || k === 'A') {
+      if (this.confirmingDelete) return;
+      if (this.sessions.length === 0) return;
+      const selectable = this.sessions.filter(
+        (s) => s.id !== this.currentSessionId && s.metadata?.['source'] !== 'cc-connect',
+      );
+      if (selectable.length === 0) return;
+      const allSelected = selectable.every((s) => this.selectedIds.has(s.id));
+      if (allSelected) this.selectedIds.clear();
+      else for (const s of selectable) this.selectedIds.add(s.id);
+      return;
     }
   }
 
@@ -196,8 +239,12 @@ export class SessionPickerComponent extends Container implements Focusable {
 
     const headerLabel = t('session.picker_title');
     const headerHint = this.confirmingDelete
-      ? t('session.delete_confirm')
-      : t('session.picker_hint');
+      ? this.selectedIds.size > 0
+        ? t('session_picker.batch_delete_confirm', { count: String(this.selectedIds.size) })
+        : t('session.delete_confirm')
+      : this.selectedIds.size > 0
+        ? t('session_picker.batch_hint', { count: String(this.selectedIds.size) })
+        : t('session.picker_hint');
     const labelWidth = visibleWidth(headerLabel);
     const hintBudget = Math.max(0, width - labelWidth);
     const shownHint = truncateToWidth(headerHint, hintBudget, ELLIPSIS);
@@ -246,6 +293,7 @@ export class SessionPickerComponent extends Container implements Focusable {
   ): string[] {
     const colors = this.colors;
     const pointer = isSelected ? SELECT_POINTER : ' ';
+    const check = this.selectedIds.has(session.id) ? CHECKBOX_ON : CHECKBOX_OFF;
     const indent = '  ';
     const indentWidth = visibleWidth(indent);
     const titleColor = isSelected ? colors.primary : colors.text;
@@ -269,15 +317,17 @@ export class SessionPickerComponent extends Container implements Focusable {
     const trailingParts = [time, badge].filter((p) => p.length > 0);
     const trailingText = trailingParts.length > 0 ? '  ' + trailingParts.join('  ') : '';
     const trailingWidth = visibleWidth(trailingText);
-    const headerPrefixWidth = visibleWidth(pointer) + 1; // pointer + space
+    const headerPrefixWidth = visibleWidth(pointer) + 1 + visibleWidth(check) + 1; // pointer + space + check + space
     const titleBudget = Math.max(8, width - headerPrefixWidth - trailingWidth);
     const shownTitle = truncateToWidth(singleLine(titleSource), titleBudget, ELLIPSIS);
 
+    const checkColor = this.selectedIds.has(session.id) ? colors.primary : colors.textDim;
     let header = chalk.hex(isSelected ? colors.primary : colors.textDim)(pointer + ' ');
+    header += chalk.hex(checkColor)(check + ' ');
     header += titleStyle(shownTitle);
     if (time.length > 0) header += '  ' + chalk.hex(colors.textDim)(time);
     if (badge.length > 0) header += '  ' + chalk.hex(colors.success)(badge);
-    const card: string[] = [header];
+    const card: string[] = [truncateToWidth(header, width)];
 
     // Session id is rendered in full (no truncation). The directory wraps to
     // its own line if it would push past the terminal edge.

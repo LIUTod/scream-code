@@ -181,6 +181,42 @@ export class DialogManager {
             this.host.showError(error instanceof Error ? error.message : String(error));
           });
         },
+        onDeleteMany: (sessionIds: string[]) => {
+          // cc-connect sessions are managed externally and skipped in batch
+          // deletes; the picker already excludes them from selection, this
+          // is a belt-and-suspenders guard.
+          const ccIds = new Set(
+            this.host
+              .getSessions()
+              .filter((s) => s.metadata?.['source'] === 'cc-connect')
+              .map((s) => s.id),
+          );
+          const deletable = sessionIds.filter((id) => !ccIds.has(id));
+          if (deletable.length === 0) {
+            this.host.showStatus(t('dialog.cc_managed'));
+            return;
+          }
+          void (async () => {
+            for (const id of deletable) {
+              try {
+                await this.host.deleteSession(id);
+              } catch (error) {
+                this.host.showError(
+                  error instanceof Error ? error.message : String(error),
+                );
+                break; // stop on the first failure to avoid cascading errors
+              }
+            }
+            await this.host.fetchSessions();
+            if (this.host.getSessions().length === 0) {
+              this.hideSessionPicker();
+            } else if (this.host.state.activeDialog === 'session-picker') {
+              this.mountSessionPicker(onCancel);
+            }
+          })().catch((error: unknown) => {
+            this.host.showError(error instanceof Error ? error.message : String(error));
+          });
+        },
       }),
     );
   }

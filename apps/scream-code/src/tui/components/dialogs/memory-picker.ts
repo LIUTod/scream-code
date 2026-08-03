@@ -13,7 +13,7 @@
  *   Esc     Cancel / back
  */
 
-import { SELECT_POINTER } from '../../constant/symbols';
+import { CHECKBOX_OFF, CHECKBOX_ON, SELECT_POINTER } from '../../constant/symbols';
 import {
   Container,
   matchesKey,
@@ -132,6 +132,8 @@ export class MemoryPickerComponent extends Container implements Focusable {
   private searchQuery = '';
   private isSearching = false;
   private searchInput = '';
+  /** Memo ids ticked for batch delete (space toggles, a selects all). */
+  private selectedIds = new Set<string>();
 
   private memos: MemoryMemoSummary[];
   private total: number;
@@ -161,6 +163,8 @@ export class MemoryPickerComponent extends Container implements Focusable {
       this.memos = result.memos;
       this.total = result.total;
       this.selectedIndex = 0;
+      // A data reload invalidates any batch selection.
+      this.selectedIds.clear();
     } catch {
       this.memos = [];
       this.total = 0;
@@ -196,8 +200,12 @@ export class MemoryPickerComponent extends Container implements Focusable {
 
     if (this.mode === 'confirmDelete') {
       if (matchesKey(data, Key.enter)) {
-        const memo = this.memos[this.selectedIndex];
-        if (memo) void this.deleteAndReload(memo.id);
+        if (this.selectedIds.size > 0) {
+          void this.deleteSelectedAndReload();
+        } else {
+          const memo = this.memos[this.selectedIndex];
+          if (memo) void this.deleteAndReload(memo.id);
+        }
         return;
       }
       if (matchesKey(data, Key.escape)) {
@@ -248,7 +256,24 @@ export class MemoryPickerComponent extends Container implements Focusable {
       return;
     }
     if (ch === 'd' || ch === 'D') {
-      if (this.memos.length > 0) this.mode = 'confirmDelete';
+      if (this.selectedIds.size > 0 || this.memos.length > 0) this.mode = 'confirmDelete';
+      return;
+    }
+    if (ch === ' ') {
+      const memo = this.memos[this.selectedIndex];
+      if (memo) {
+        if (this.selectedIds.has(memo.id)) this.selectedIds.delete(memo.id);
+        else this.selectedIds.add(memo.id);
+        this.ui?.requestRender();
+      }
+      return;
+    }
+    if (ch === 'a' || ch === 'A') {
+      if (this.memos.length === 0) return;
+      const allSelected = this.memos.every((memo) => this.selectedIds.has(memo.id));
+      if (allSelected) this.selectedIds.clear();
+      else for (const memo of this.memos) this.selectedIds.add(memo.id);
+      this.ui?.requestRender();
       return;
     }
     if (ch === '/') {
@@ -282,6 +307,20 @@ export class MemoryPickerComponent extends Container implements Focusable {
     this.ui?.requestRender();
   }
 
+  private async deleteSelectedAndReload(): Promise<void> {
+    const ids = [...this.selectedIds];
+    for (const id of ids) {
+      try {
+        await this.store.delete(id);
+      } catch { /* keep going */ }
+    }
+    // loadMemos clears selectedIds (a reload invalidates the selection) and
+    // resets the index, so nothing stays highlighted after a batch delete.
+    await this.loadMemos();
+    this.mode = 'list';
+    this.ui?.requestRender();
+  }
+
   override render(width: number): string[] {
     const c = this.colors;
     const lines: string[] = [];
@@ -306,7 +345,9 @@ export class MemoryPickerComponent extends Container implements Focusable {
     const headerLabel = t('memory.notebook_title');
     const headerHint = this.searchQuery.length > 0
       ? t('memory.esc_clear_search')
-      : t('memory.nav_hint');
+      : this.selectedIds.size > 0
+        ? t('memory.batch_hint', { count: String(this.selectedIds.size) })
+        : t('memory.nav_hint');
     const labelWidth = visibleWidth(headerLabel);
     const hintBudget = Math.max(0, width - labelWidth);
     const shownHint = truncateToWidth(headerHint, hintBudget, ELLIPSIS);
@@ -347,13 +388,23 @@ export class MemoryPickerComponent extends Container implements Focusable {
 
     // Confirm delete
     if (this.mode === 'confirmDelete') {
-      const memo = this.memos[this.selectedIndex];
-      if (memo) {
+      if (this.selectedIds.size > 0) {
         lines.push(truncateToWidth(
-          chalk.hex(c.warning).bold(`  ${t('memory.deleting')}${memo.userNeed}`),
+          chalk.hex(c.warning).bold(
+            t('memory.batch_delete_confirm', { count: String(this.selectedIds.size) }),
+          ),
           width, ELLIPSIS,
         ));
-        lines.push(chalk.hex(c.warning)(t('memory.delete_confirm_hint')));
+        lines.push(chalk.hex(c.warning)(t('memory.batch_delete_hint')));
+      } else {
+        const memo = this.memos[this.selectedIndex];
+        if (memo) {
+          lines.push(truncateToWidth(
+            chalk.hex(c.warning).bold(`  ${t('memory.deleting')}${memo.userNeed}`),
+            width, ELLIPSIS,
+          ));
+          lines.push(chalk.hex(c.warning)(t('memory.delete_confirm_hint')));
+        }
       }
       lines.push(chalk.hex(c.primary)('─'.repeat(width)));
       return lines;
@@ -394,6 +445,7 @@ export class MemoryPickerComponent extends Container implements Focusable {
   ): string[] {
     const c = this.colors;
     const pointer = isSelected ? SELECT_POINTER : ' ';
+    const check = this.selectedIds.has(memo.id) ? CHECKBOX_ON : CHECKBOX_OFF;
     const indent = '  ';
     const indentWidth = visibleWidth(indent);
     const titleColor = isSelected ? c.primary : c.text;
@@ -404,11 +456,13 @@ export class MemoryPickerComponent extends Container implements Focusable {
     const trailingParts = [time, src].filter((p) => p.length > 0);
     const trailingText = trailingParts.length > 0 ? '  ' + trailingParts.join('  ') : '';
     const trailingWidth = visibleWidth(trailingText);
-    const headerPrefixWidth = visibleWidth(pointer) + 1;
+    const headerPrefixWidth = visibleWidth(pointer) + 1 + visibleWidth(check) + 1;
     const titleBudget = Math.max(8, width - headerPrefixWidth - trailingWidth);
     const shownTitle = truncateToWidth(singleLine(memo.userNeed), titleBudget, ELLIPSIS);
 
+    const checkColor = this.selectedIds.has(memo.id) ? c.primary : c.textDim;
     let header = chalk.hex(isSelected ? c.primary : c.textDim)(pointer + ' ');
+    header += chalk.hex(checkColor)(check + ' ');
     header += titleStyle(shownTitle);
     if (trailingText.length > 0) header += chalk.hex(c.textDim)(trailingText);
     const card: string[] = [truncateToWidth(header, width, ELLIPSIS)];
