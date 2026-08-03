@@ -122,8 +122,8 @@ describe('skill discovery', () => {
   });
 
   it('ignores common documentation markdown in flat skill discovery', async () => {
-    const { projectDir } = await makeWorkspace();
-    const projectRoot = join(projectDir, '.scream-code', 'skills');
+    const { repoDir } = await makeWorkspace();
+    const projectRoot = join(repoDir, '.scream-code', 'skills');
     await writeSkill(projectRoot, 'README.md', ['# Humanizer', '', 'Docs body.']);
     await writeSkill(projectRoot, 'CHANGELOG.md', ['## 1.0.0', '', 'Entry.']);
     await writeSkill(projectRoot, 'actual.md', ['Actual flat skill.']);
