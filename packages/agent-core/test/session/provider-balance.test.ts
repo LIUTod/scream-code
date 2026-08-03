@@ -54,9 +54,9 @@ describe('fetchProviderBalance', () => {
     });
     const result = await fetchProviderBalance('https://api.deepseek.com', 'sk-test');
     expect(result).toEqual({ currency: 'CNY', totalBalance: '110.00' });
-    const [url, init] = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
-    expect(String(url)).toBe('https://api.deepseek.com/user/balance');
-    expect((init as RequestInit).headers).toMatchObject({
+    const call = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(String(call?.[0])).toBe('https://api.deepseek.com/user/balance');
+    expect((call?.[1] as RequestInit | undefined)?.headers).toMatchObject({
       Accept: 'application/json',
       Authorization: 'Bearer sk-test',
     });
@@ -71,8 +71,9 @@ describe('fetchProviderBalance', () => {
     ]) {
       mockFetchOnce({ balance_infos: [{ currency: 'CNY', total_balance: '5.00' }] });
       await fetchProviderBalance(baseUrl, 'sk-test');
-      const [url] = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls.at(-1) ?? [];
-      expect(String(url)).toBe('https://api.deepseek.com/user/balance');
+      const calls = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls;
+      const call = calls.at(-1);
+      expect(String(call?.[0])).toBe('https://api.deepseek.com/user/balance');
     }
   });
 
@@ -85,16 +86,16 @@ describe('fetchProviderBalance', () => {
     });
     const result = await fetchProviderBalance('https://api.moonshot.cn', 'sk-kimi');
     expect(result).toEqual({ currency: 'CNY', totalBalance: '49.59' });
-    const [url, init] = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
-    expect(String(url)).toBe('https://api.moonshot.cn/v1/users/me/balance');
-    expect((init as RequestInit).headers).toMatchObject({ Authorization: 'Bearer sk-kimi' });
+    const call = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(String(call?.[0])).toBe('https://api.moonshot.cn/v1/users/me/balance');
+    expect((call?.[1] as RequestInit | undefined)?.headers).toMatchObject({ Authorization: 'Bearer sk-kimi' });
   });
 
   test('anchors the Kimi /v1 path at the origin even when base_url already has /v1', async () => {
     mockFetchOnce({ data: { available_balance: 1.234 } });
     await fetchProviderBalance('https://api.moonshot.cn/v1', 'sk-kimi');
-    const [url] = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
-    expect(String(url)).toBe('https://api.moonshot.cn/v1/users/me/balance');
+    const call = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(String(call?.[0])).toBe('https://api.moonshot.cn/v1/users/me/balance');
   });
 
   test('returns null when the Kimi payload lacks an available balance', async () => {
