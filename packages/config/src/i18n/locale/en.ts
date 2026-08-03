@@ -698,6 +698,8 @@ export const en: Record<string, string> = {
   'subagent.bind_title': 'Bind {profile}',
   'subagent.model_hint': '↑↓ Select model · Enter confirm · Esc back',
   'subagent.save_failed': 'Save failed: {msg}',
+  'subagent.stale_binding': '{alias} (stale)',
+  'subagent.invalid_alias': 'Model alias {alias} does not exist',
 
   // ─── Knowledge document tree ────
   'kdoctree.no_title': '(untitled)',

@@ -51,7 +51,9 @@ function mountProfileList(host: SlashCommandHost): void {
     const bindingLabel =
       alias === undefined
         ? t('subagent.follow_main')
-        : modelDisplayName(alias, availableModels[alias]);
+        : availableModels[alias] !== undefined
+          ? modelDisplayName(alias, availableModels[alias])
+          : t('subagent.stale_binding', { alias });
     return {
       value: profile.name,
       label: `${profile.name}  →  ${bindingLabel}`,
@@ -121,6 +123,12 @@ async function applyBinding(
   const configPath = getTuiConfigPath();
   try {
     const current = await loadTuiConfig(configPath);
+    // Reject writes of an alias that is no longer configured (orphan
+    // bindings silently fell back to the parent model before this guard).
+    if (value !== FOLLOW_MAIN && host.state.appState.availableModels[value] === undefined) {
+      host.showError(t('subagent.invalid_alias', { alias: value }));
+      return;
+    }
     const updated: Record<string, string> = { ...current.subagentModels };
     if (value === FOLLOW_MAIN) {
       delete updated[profileName];

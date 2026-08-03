@@ -698,6 +698,8 @@ export const zh: Record<string, string> = {
   'subagent.bind_title': '绑定 {profile}',
   'subagent.model_hint': '↑↓ 选择模型 · Enter 确认 · Esc 返回',
   'subagent.save_failed': '保存失败：{msg}',
+  'subagent.stale_binding': '{alias}（已失效）',
+  'subagent.invalid_alias': '模型别名 {alias} 不存在',
 
   // ─── 知识文档树 ─────────────────
   'kdoctree.no_title': '(无标题)',
