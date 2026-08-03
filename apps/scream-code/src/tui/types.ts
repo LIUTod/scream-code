@@ -8,6 +8,7 @@ import type {
   ToolInputDisplay,
   ToolResultDisplay,
 } from '@scream-code/scream-code-sdk';
+import type { ProviderBalance } from '@scream-code/agent-core';
 import type { NotificationsConfig, TuiConfig, TuiLikePreferences } from './config';
 import type { PendingApproval, PendingQuestion } from './reverse-rpc/types';
 import type { Theme } from './theme';
@@ -41,6 +42,8 @@ export interface AppState {
   contextUsage: number;
   contextTokens: number;
   maxContextTokens: number;
+  /** Current provider account balance (null = unknown / not applicable). */
+  providerBalance: ProviderBalance | null;
   isCompacting: boolean;
   lastCompactionFinishedAt: number | undefined;
   autoCompactionCount: number;

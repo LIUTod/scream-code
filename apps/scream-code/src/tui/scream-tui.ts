@@ -112,6 +112,7 @@ function createInitialAppState(input: ScreamTUIStartupInput): AppState {
     contextUsage: 0,
     contextTokens: 0,
     maxContextTokens: 0,
+    providerBalance: null,
     isCompacting: false,
     lastCompactionFinishedAt: undefined,
     autoCompactionCount: 0,

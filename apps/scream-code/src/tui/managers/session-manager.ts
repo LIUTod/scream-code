@@ -10,6 +10,7 @@ import { getLlmNotSetMessage, MAIN_AGENT_ID, getNoActiveSessionMessage } from '.
 import { formatErrorMessage } from '../utils/event-payload';
 import { isBusy } from '../utils/app-state';
 import { sessionRowsForPicker } from '../utils/session-picker-rows';
+import { refreshProviderBalance } from '../api-balance';
 import { createApprovalRequestHandler } from '../reverse-rpc/approval/handler';
 import { createQuestionAskHandler } from '../reverse-rpc/question/handler';
 import { registerReverseRPCHandlers } from '../reverse-rpc/index';
@@ -179,7 +180,13 @@ export class SessionManager {
       } : null,
       goalActive: goal?.status === 'active',
       goalContinuationCount: 0,
+      // Clear any balance from a previous session/provider; the lookup
+      // below commits the fresh value asynchronously.
+      providerBalance: null,
     });
+    // Kick off a provider balance lookup once the model is known at
+    // startup / session restore; the footer renders it when it lands.
+    refreshProviderBalance(status.model ?? '', (patch) => this.host.setAppState(patch));
   }
 
   private async activateRuntime(): Promise<void> {

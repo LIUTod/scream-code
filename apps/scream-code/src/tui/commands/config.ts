@@ -16,6 +16,7 @@ import { getNoActiveSessionMessage } from '../constant/scream-tui';
 import { isTheme } from '../theme/index';
 import { formatErrorMessage } from '../utils/event-payload';
 import { showUsage } from './info';
+import { refreshProviderBalance } from '../api-balance';
 import type { PlanModeState } from '../types';
 import type { SlashCommandHost } from './dispatch';
 
@@ -553,7 +554,10 @@ async function performModelSwitch(host: SlashCommandHost, alias: string, thinkin
     return;
   }
 
-  host.setAppState({ model: effectiveAlias, thinkingLevel: effectiveThinking });
+  host.setAppState({ model: effectiveAlias, thinkingLevel: effectiveThinking, providerBalance: null });
+  // Refresh the balance badge for the newly selected provider (async; the
+  // null above clears any stale balance from the previous provider).
+  refreshProviderBalance(effectiveAlias, (patch) => host.setAppState(patch));
 
   let persisted = false;
 

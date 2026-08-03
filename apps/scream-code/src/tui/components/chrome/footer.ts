@@ -152,6 +152,12 @@ const CONTEXT_BAR_WIDTH = 10;
 const CONTEXT_BAR_FILLED = '▰';
 const CONTEXT_BAR_EMPTY = '▱';
 
+function currencySymbol(currency: string): string {
+  if (currency === 'CNY') return '¥';
+  if (currency === 'USD') return '$';
+  return `${currency} `; // unknown currency: show the code as its own label
+}
+
 /**
  * Half-block progress bar for context usage: `▰▰▰▱▱▱▱▱▱▱` (10 cells).
  * Filled cells are rounded from the clamped ratio, so 0% is all-empty and
@@ -442,6 +448,12 @@ export class FooterComponent implements Component {
         left.push(shimmerText(model, colors));
       } else {
         left.push(chalk.hex(colors.textDim)(model));
+      }
+      const balance = state.providerBalance;
+      if (balance !== null && balance !== undefined) {
+        left.push(chalk.hex(colors.textDim)(
+          `${currencySymbol(balance.currency)}${balance.totalBalance}`,
+        ));
       }
     }
 
