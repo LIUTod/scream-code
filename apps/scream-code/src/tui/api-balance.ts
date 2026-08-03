@@ -11,6 +11,7 @@
 import { join } from 'node:path';
 import {
   fetchProviderBalance,
+  isSupportedBalanceProvider,
   readConfigFile,
   type ProviderBalance,
 } from '@scream-code/agent-core';
@@ -89,6 +90,23 @@ export async function getProviderBalanceForModel(
   const balance = await loadBalance(providerName);
   cache.set(providerName, { balance, at: Date.now() });
   return balance;
+}
+
+/**
+ * True when the given model is served by a provider whose balance we can
+ * query. Pure local check (config lookup + hostname match, no network) —
+ * the poller uses it to skip unsupported providers entirely.
+ */
+export function supportsBalance(model: string): boolean {
+  const providerName = model.split('/')[0] ?? '';
+  if (providerName.length === 0) return false;
+  try {
+    const config = readConfigFile(join(getDataDir(), 'config.toml'));
+    const baseUrl = config.providers?.[providerName]?.baseUrl;
+    return baseUrl !== undefined && isSupportedBalanceProvider(baseUrl);
+  } catch {
+    return false;
+  }
 }
 
 /** Drop cached balances so the next lookup hits the vendor again. */

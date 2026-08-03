@@ -1233,5 +1233,6 @@ export const zh: Record<string, string> = {
   'kw.embedding_failed': '向量模型加载失败，请返回菜单选择重新下载（建议科学上网）',
   'kw.embedding_ready': '向量模型已就绪',
   'kw.embedding_not_downloaded': '向量模型未下载（选择「下载向量模型」手动下载）',
+  'kw.embedding_data_intact': ' —— 你的知识数据仍然存在，下载模型后即可正常使用',
   'kw.embedding_already_installed': '向量模型已安装，无需重新下载',
 };

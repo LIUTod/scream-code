@@ -392,9 +392,9 @@ export async function handleKnowledgeCommand(
       case 'downloading':
         return ' · ' + t('kw.embedding_downloading');
       case 'failed':
-        return ' · ' + t('kw.embedding_failed');
+        return ' · ' + t('kw.embedding_failed') + t('kw.embedding_data_intact');
       case 'idle':
-        return ' · ' + t('kw.embedding_not_downloaded');
+        return ' · ' + t('kw.embedding_not_downloaded') + t('kw.embedding_data_intact');
     }
   };
 

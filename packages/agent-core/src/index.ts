@@ -51,6 +51,7 @@ export type {
   OAuthTokenProviderResolver,
 } from './session/provider-manager';
 export { fetchProviderBalance } from './session/provider-balance';
+export { isSupportedBalanceProvider } from './session/provider-balance';
 export type { ProviderBalance } from './session/provider-balance';
 
 // ─── Wire records (for in-monorepo consumers like apps/vis) ────────────────

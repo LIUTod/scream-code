@@ -73,6 +73,7 @@ import type { SessionRow } from './components/dialogs/session-picker';
 import { detectTmuxKeyboardWarning } from './utils/tmux-keyboard';
 import { SessionManager } from './managers/session-manager';
 import { DialogManager } from './managers/dialog-manager';
+import { refreshProviderBalance, supportsBalance } from './api-balance';
 
 export type { TUIState } from './tui-state';
 export { createTUIState } from './tui-state';
@@ -161,6 +162,8 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
   private tightModeHandler: (() => void) | null = null;
   readonly reverseRpcDisposers: Array<() => void> = [];
   startupNotice: string | undefined;
+  /** Interval handle for the periodic provider-balance refresh. */
+  private balancePollTimer: NodeJS.Timeout | undefined;
   private readonly updatePrefetched: boolean;
   readonly sessionManager: SessionManager;
   readonly dialogManager: DialogManager;
@@ -300,6 +303,7 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
       try {
         await this.finishStartup(shouldReplayHistory);
         this.lifecycleController.startCcConnectPolling();
+        this.startBalancePolling();
       } catch (error) {
         this.lifecycleController.disposeTerminalTracking();
         this.state.footer.dispose();
@@ -341,6 +345,21 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
     this.state.editorContainer.addChild(this.state.editor);
     this.state.ui.setFocus(this.state.editor);
     return shouldReplayHistory;
+  }
+
+  /**
+   * Refresh the provider balance badge every 60s, but only for providers
+   * whose balance we can actually query (local hostname check, no network
+   * for unsupported ones). The api-balance layer caches per provider for
+   * 60s, so each tick either serves the cache or performs one real lookup.
+   */
+  private startBalancePolling(): void {
+    this.balancePollTimer ??= setInterval(() => {
+      const model = this.state.appState.model;
+      if (supportsBalance(model)) {
+        refreshProviderBalance(model, (patch) => this.setAppState(patch));
+      }
+    }, 60_000);
   }
 
   private async finishStartup(shouldReplayHistory: boolean): Promise<void> {
@@ -394,6 +413,10 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
     }
     setTightMode(false);
     this.lifecycleController.stopCcConnectPolling();
+    if (this.balancePollTimer !== undefined) {
+      clearInterval(this.balancePollTimer);
+      this.balancePollTimer = undefined;
+    }
     this.lifecycleController.uninstallSignalHandlers();
     this.aborted = true;
     // Cancel any in-flight operation (e.g. OAuth login flow) before teardown.

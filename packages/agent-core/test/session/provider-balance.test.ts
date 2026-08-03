@@ -1,5 +1,5 @@
 import { test, describe, expect, vi, afterEach } from 'vitest';
-import { fetchProviderBalance } from '../../src/session/provider-balance';
+import { fetchProviderBalance, isSupportedBalanceProvider } from '../../src/session/provider-balance';
 
 const originalFetch = globalThis.fetch;
 
@@ -33,6 +33,16 @@ describe('fetchProviderBalance', () => {
       expect(result).toBeNull();
       expect(vi.isMockFunction(globalThis.fetch)).toBe(false);
     }
+  });
+
+  test('isSupportedBalanceProvider only accepts official endpoints locally', () => {
+    expect(isSupportedBalanceProvider('https://api.deepseek.com')).toBe(true);
+    expect(isSupportedBalanceProvider('https://api.deepseek.com/anthropic')).toBe(true);
+    expect(isSupportedBalanceProvider('https://api.moonshot.cn')).toBe(true);
+    expect(isSupportedBalanceProvider('https://api.moonshot.cn/v1')).toBe(true);
+    expect(isSupportedBalanceProvider('https://api.deepseek.com.evil.com')).toBe(false);
+    expect(isSupportedBalanceProvider('https://gateway.example.com')).toBe(false);
+    expect(isSupportedBalanceProvider('not a url')).toBe(false);
   });
 
   test('queries the DeepSeek balance endpoint and parses the first info entry', async () => {

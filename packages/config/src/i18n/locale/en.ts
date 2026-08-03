@@ -1232,5 +1232,6 @@ export const en: Record<string, string> = {
   'kw.embedding_failed': 'Vector model load failed. Return to the menu and select Download to retry.',
   'kw.embedding_ready': 'Vector model ready',
   'kw.embedding_not_downloaded': 'Vector model not downloaded (select Download vector model)',
+  'kw.embedding_data_intact': ' — your knowledge data is still there; download the model to use it again',
   'kw.embedding_already_installed': 'Vector model already installed, no need to re-download',
 };

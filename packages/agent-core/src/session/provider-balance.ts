@@ -121,3 +121,12 @@ export async function fetchProviderBalance(
   if (!fetcher) return null;
   return fetcher.fetch(baseUrl, apiKey);
 }
+
+/**
+ * True when the given base URL belongs to a vendor we can query balances
+ * for. Pure local check (no network) — used to skip polling for
+ * unsupported providers.
+ */
+export function isSupportedBalanceProvider(baseUrl: string): boolean {
+  return fetchers.some((f) => f.matches(baseUrl));
+}
