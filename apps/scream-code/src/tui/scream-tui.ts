@@ -114,6 +114,7 @@ function createInitialAppState(input: ScreamTUIStartupInput): AppState {
     contextTokens: 0,
     maxContextTokens: 0,
     providerBalance: null,
+    balanceUpdatedAt: 0,
     isCompacting: false,
     lastCompactionFinishedAt: undefined,
     autoCompactionCount: 0,
@@ -417,8 +418,7 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
       clearInterval(this.balancePollTimer);
       this.balancePollTimer = undefined;
     }
-    this.lifecycleController.uninstallSignalHandlers();
-    this.aborted = true;
+    this.lifecycleController.uninstallSignalHandlers();    this.aborted = true;
     // Cancel any in-flight operation (e.g. OAuth login flow) before teardown.
     this.cancelInFlight?.();
     this.cancelInFlight = undefined;

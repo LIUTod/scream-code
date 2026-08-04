@@ -15,6 +15,7 @@ function fakeInitialAppState(): AppState {
     contextUsage: 0,
     contextTokens: 0,
     providerBalance: null,
+    balanceUpdatedAt: 0,
     maxContextTokens: 0,
     isCompacting: false,
     lastCompactionFinishedAt: undefined,

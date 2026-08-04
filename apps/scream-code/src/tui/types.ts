@@ -44,6 +44,8 @@ export interface AppState {
   maxContextTokens: number;
   /** Current provider account balance (null = unknown / not applicable). */
   providerBalance: ProviderBalance | null;
+  /** Monotonic timestamp of the last balance fetch (drives the flash). */
+  balanceUpdatedAt: number;
   isCompacting: boolean;
   lastCompactionFinishedAt: number | undefined;
   autoCompactionCount: number;

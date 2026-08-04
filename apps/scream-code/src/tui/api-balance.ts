@@ -123,11 +123,16 @@ export function invalidateBalanceCache(): void {
  */
 export function refreshProviderBalance(
   model: string,
-  setAppState: (patch: { providerBalance: ProviderBalance | null }) => void,
+  setAppState: (patch: {
+    providerBalance: ProviderBalance | null;
+    balanceUpdatedAt: number;
+  }) => void,
 ): void {
   const requestId = ++latestRequestId;
   void getProviderBalanceForModel(model).then((balance) => {
     if (requestId !== latestRequestId) return; // superseded by a newer lookup
-    setAppState({ providerBalance: balance });
+    // balanceUpdatedAt drives the footer flash on every completed fetch,
+    // regardless of whether the value itself changed.
+    setAppState({ providerBalance: balance, balanceUpdatedAt: Date.now() });
   });
 }

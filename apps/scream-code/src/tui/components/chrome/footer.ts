@@ -151,6 +151,7 @@ function safeUsage(usage: number): number {
 const CONTEXT_BAR_WIDTH = 10;
 const CONTEXT_BAR_FILLED = '▰';
 const CONTEXT_BAR_EMPTY = '▱';
+const BALANCE_FLASH_MS = 1500;
 
 function currencySymbol(currency: string): string {
   if (currency === 'CNY') return '¥';
@@ -348,6 +349,10 @@ export class FooterComponent implements Component {
    * respective badge.
    */
   private backgroundBashTaskCount = 0;
+  /** Balance flash animation: shimmer the badge until this timestamp. */
+  private balanceFlashUntil = 0;
+  private balanceFlashTimer: NodeJS.Timeout | undefined;
+  private lastBalanceUpdatedAt = 0;
   private backgroundAgentCount = 0;
   constructor(state: AppState, colors: ColorPalette, ui: TUI, onGitStatusChange: () => void = () => {}) {
     this.state = state;
@@ -366,10 +371,36 @@ export class FooterComponent implements Component {
       this.gitCacheWorkDir = state.workDir;
       this.gitCache = createGitStatusCache(state.workDir, { onChange: this.onGitStatusChange });
     }
+    // A completed balance fetch (60s poll or model switch) flashes the
+    // badge with a shimmer sweep, even when the value is unchanged; a null
+    // (unsupported provider) still counts as a fetch completion. States
+    // without the field (older test fixtures) never flash.
+    if (
+      state.balanceUpdatedAt !== undefined &&
+      state.balanceUpdatedAt !== this.lastBalanceUpdatedAt
+    ) {
+      this.lastBalanceUpdatedAt = state.balanceUpdatedAt;
+      this.startBalanceFlash();
+    }
     this.state = state;
     if (state.streamingPhase !== previousPhase || state.goalActive !== previousGoalActive) {
       this.#restartStatusTimer(state.streamingPhase, state.goalActive);
     }
+  }
+
+  /** Drive the shimmer for BALANCE_FLASH_MS, then let the badge settle. */
+  private startBalanceFlash(): void {
+    this.balanceFlashUntil = Date.now() + BALANCE_FLASH_MS;
+    if (this.balanceFlashTimer !== undefined) return;
+    const tick = (): void => {
+      this.ui?.requestRender();
+      if (Date.now() < this.balanceFlashUntil) {
+        this.balanceFlashTimer = setTimeout(tick, 50);
+      } else {
+        this.balanceFlashTimer = undefined;
+      }
+    };
+    tick();
   }
 
   setColors(colors: ColorPalette): void {
@@ -451,9 +482,12 @@ export class FooterComponent implements Component {
       }
       const balance = state.providerBalance;
       if (balance !== null && balance !== undefined) {
-        left.push(chalk.hex(colors.textDim)(
-          `${currencySymbol(balance.currency)}${balance.totalBalance}`,
-        ));
+        const text = `${currencySymbol(balance.currency)}${balance.totalBalance}`;
+        if (Date.now() < this.balanceFlashUntil) {
+          left.push(shimmerText(text, colors));
+        } else {
+          left.push(chalk.hex(colors.textDim)(text));
+        }
       }
     }
 
