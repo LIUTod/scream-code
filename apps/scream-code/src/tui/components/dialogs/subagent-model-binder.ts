@@ -37,6 +37,7 @@ function getSubagentProfiles(): readonly {
     { name: 'oracle', description: t('subagent.desc_oracle') },
     { name: 'plan', description: t('subagent.desc_plan') },
     { name: 'verify', description: t('subagent.desc_verify') },
+    { name: 'worker', description: t('subagent.desc_worker') },
   ];
 }
 

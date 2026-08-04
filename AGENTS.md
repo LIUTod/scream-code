@@ -626,6 +626,10 @@ The bundled `writer` profile is the document-lifecycle specialist, not a Markdow
 
 Key files: `packages/agent-core/src/profile/default/writer.yaml`, `packages/agent-core/src/profile/default/agent.yaml`, `packages/agent-core/src/profile/default/system.md`.
 
+The bundled `worker` profile is the office/document automation specialist, distinct from code work (coder) and content writing (writer). It performs format conversion (docx/pdf/md/html/images/media), batch file processing, file organization, and document transformation. Its operating rules: never overwrite originals (output goes to an `output/` directory or a `_converted` suffix), parse the task scope before bulk work and list missing information instead of guessing, sample one file before batches larger than 3, deliver a plain-language reviewable checklist (what/command/products/how to verify/failures), and clean up partial products on failure so the task can be retried safely.
+
+Key files: `packages/agent-core/src/profile/default/worker.yaml`, `packages/agent-core/src/profile/default/agent.yaml`, `packages/agent-core/src/profile/default/system.md`.
+
 ### Goal / Todo State
 
 `TodoList` items support an optional `phase` field. Items sharing the same phase are rendered together, while preserving input order within each phase. The phase is preserved across state round-trips.

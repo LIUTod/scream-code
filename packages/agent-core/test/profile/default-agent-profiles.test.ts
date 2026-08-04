@@ -40,6 +40,23 @@ describe('default agent profiles', () => {
     expect(prompt).not.toContain('Start every substantial piece with a "Why This Matters" section');
   });
 
+  it('bundles the worker as an office automation specialist', () => {
+    const worker = DEFAULT_AGENT_PROFILES['worker'];
+    const prompt = worker?.systemPrompt(promptContext);
+
+    expect(worker?.description).toContain('Office');
+    expect(worker?.tools).toEqual(
+      expect.arrayContaining(['Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep', 'KnowledgeLookup']),
+    );
+    expect(prompt).toContain('OUTPUT ISOLATION');
+    expect(prompt).toContain('SAMPLE BEFORE BATCH');
+    expect(prompt).toContain('more than 3 files');
+    expect(prompt).toContain('REVIEWABLE DELIVERY');
+    expect(prompt).toContain('CLEAN FAILURES');
+    expect(prompt).toContain('Do not read or modify code files');
+    expect(prompt).not.toContain('codebase exploration specialist');
+  });
+
   it('fails loudly when an embedded system prompt source is missing', () => {
     expect(() =>
       loadAgentProfilesFromSources(['profile/default/agent.yaml'], {

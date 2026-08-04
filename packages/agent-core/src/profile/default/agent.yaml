@@ -56,5 +56,7 @@ subagents:
     description: Code review specialist. Identifies bugs and API contract violations before merge.
   oracle:
     description: Deep debugging, architecture decisions, and second opinions.
+  worker:
+    description: Office and document automation worker. Performs format conversion, batch file processing, file organization, and document transformation; never modifies code and does not write content.
   writer:
     description: Professional writing and document specialist. Researches, drafts, rewrites, edits, translates, summarizes, and uses available workspace-local toolchains to produce or revise Markdown, text, HTML, PDF/Office-compatible, spreadsheet-style, and presentation-oriented artifacts.

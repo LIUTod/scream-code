@@ -8,6 +8,7 @@ import reviewerYaml from './default/reviewer.yaml';
 import systemMd from './default/system.md';
 import verifyYaml from './default/verify.yaml';
 import writerYaml from './default/writer.yaml';
+import workerYaml from './default/worker.yaml';
 import { loadAgentProfilesFromSources } from './load';
 
 // Keyed by the source path the profile loader expects: profile YAML files
@@ -20,13 +21,14 @@ const PROFILE_SOURCES: Record<string, string> = {
   'profile/default/reviewer.yaml': reviewerYaml,
   'profile/default/system.md': systemMd,
   'profile/default/verify.yaml': verifyYaml,
+  'profile/default/worker.yaml': workerYaml,
   'profile/default/writer.yaml': writerYaml,
 };
 
 export const DEFAULT_INIT_PROMPT = initMd;
 
 export const DEFAULT_AGENT_PROFILES = loadAgentProfilesFromSources(
-  ['agent.yaml', 'coder.yaml', 'explore.yaml', 'oracle.yaml', 'plan.yaml', 'reviewer.yaml', 'verify.yaml', 'writer.yaml'].map(
+  ['agent.yaml', 'coder.yaml', 'explore.yaml', 'oracle.yaml', 'plan.yaml', 'reviewer.yaml', 'verify.yaml', 'worker.yaml', 'writer.yaml'].map(
     (file) => `profile/default/${file}`,
   ),
   PROFILE_SOURCES,
