@@ -8,6 +8,7 @@ import {
   DEFAULT_TUI_CONFIG,
   loadTuiConfig,
   parseTuiConfig,
+  renderTuiConfig,
   saveTuiConfig,
   TuiConfigParseError,
 } from '#/tui/config';
@@ -61,6 +62,23 @@ notification_condition = "always"
       subagentModels: {},
       language: DEFAULT_TUI_CONFIG.language,
     });
+  });
+
+  it('preserves like.doNot through normalize and render round-trips', () => {
+    const doNot = 'Never touch config without asking';
+    // normalize keeps doNot when present
+    const parsed = parseTuiConfig(`
+[like]
+nickname = "Boss"
+doNot = "${doNot}"
+`);
+    expect(parsed.like?.doNot).toBe(doNot);
+    // render writes doNot back so it survives a save cycle
+    const rendered = renderTuiConfig({
+      ...DEFAULT_TUI_CONFIG,
+      like: { nickname: 'Boss', doNot },
+    });
+    expect(rendered).toContain(`doNot = "${doNot}"`);
   });
 
   it('normalizes an empty editor command to auto-detect', () => {

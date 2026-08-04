@@ -51,6 +51,9 @@ const {
   pauseGoal,
   resumeGoal,
   cancelGoal,
+  like,
+  fetchLike,
+  updateLike,
 } = useScreamWebClient();
 
 const composerRef = ref<InstanceType<typeof Composer> | null>(null);
@@ -136,7 +139,10 @@ function onGlobalKeydown(e: KeyboardEvent) {
     searchOpen.value = !searchOpen.value;
   }
 }
-onMounted(() => window.addEventListener('keydown', onGlobalKeydown));
+onMounted(() => {
+  window.addEventListener('keydown', onGlobalKeydown);
+  void fetchLike();
+});
 onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKeydown));
 
 /* ── Sidebar resize (desktop) ────────────────────────────────────────────── */
@@ -282,7 +288,8 @@ function onCommand(name: string, args?: string) {
         :pause-goal="pauseGoal"
         :resume-goal="resumeGoal"
         :cancel-goal="cancelGoal"
-        @quick-command="onCommand"
+        :like="like"
+        :update-like="updateLike"
         @insert="onEditResend"
       />
     </main>

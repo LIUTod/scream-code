@@ -1,5 +1,12 @@
-export interface ChatMessage {
-  id: string;
+/** User preferences from /like (nickname/tone/other/doNot), shared with the TUI. */
+export interface LikePreferences {
+  nickname?: string;
+  tone?: string;
+  other?: string;
+  doNot?: string;
+}
+
+export interface ChatMessage {  id: string;
   role: 'user' | 'assistant' | 'system';
   content: string;
   tools: ToolMessage[];
@@ -58,7 +65,6 @@ export interface SessionStatus {
 }
 
 export type GoalStatus = 'active' | 'paused' | 'blocked' | 'complete';
-
 export interface GoalBudgetReport {
   tokenBudget: number | null;
   turnBudget: number | null;

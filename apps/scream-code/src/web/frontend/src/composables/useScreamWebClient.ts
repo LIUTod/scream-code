@@ -724,6 +724,35 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
     }
   }
 
+  // ── Like preferences (TUI /like parity) ──────────────────────────────────
+
+  const like = ref<LikePreferences>({});
+
+  async function fetchLike(): Promise<void> {
+    try {
+      const res = await fetch(`${API_BASE}/like`);
+      if (!res.ok) return;
+      like.value = (await res.json()) as LikePreferences;
+    } catch {
+      // Best-effort — like panel stays empty when unavailable.
+    }
+  }
+
+  async function updateLike(prefs: LikePreferences): Promise<boolean> {
+    try {
+      const res = await fetch(`${API_BASE}/like`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(prefs),
+      });
+      if (!res.ok) return false;
+      like.value = prefs;
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   /** POST a session mutation and apply the returned status / surface errors. */
   async function postSessionSwitch(path: string, body: Record<string, unknown>, okMessage: string): Promise<void> {
     const targetSessionId = sessionId.value;
@@ -1063,6 +1092,9 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
     currentSessionId,
     gitStatus,
     models,
+    like,
+    fetchLike,
+    updateLike,
     sendPrompt,
     sendCommand,
     clearMessages,

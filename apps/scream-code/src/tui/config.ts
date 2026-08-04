@@ -164,6 +164,7 @@ export function normalizeTuiConfig(config: TuiConfigFileShape): TuiConfig {
       nickname: normalizeOptionalString(like.nickname),
       tone: normalizeOptionalString(like.tone),
       other: normalizeOptionalString(like.other),
+      doNot: normalizeOptionalString(like.doNot),
     },
     fusionPlan: {
       timeoutSeconds: fusionPlan.timeoutSeconds ?? DEFAULT_TUI_CONFIG.fusionPlan.timeoutSeconds,
@@ -196,6 +197,7 @@ export function renderTuiConfig(config: TuiConfig): string {
   const nickname = escapeTomlBasicString(config.like.nickname ?? '');
   const tone = escapeTomlBasicString(config.like.tone ?? '');
   const other = escapeTomlBasicString(config.like.other ?? '');
+  const doNot = escapeTomlBasicString(config.like.doNot ?? '');
   const subagentModelsBlock = renderSubagentModelsBlock(config.subagentModels);
   return `# ~/.scream-code/tui.toml
 # Terminal UI preferences for scream-code.
@@ -216,6 +218,7 @@ notification_condition = "${config.notifications.condition}" # "unfocused" | "al
 nickname = "${nickname}"
 tone = "${tone}"
 other = "${other}"
+doNot = "${doNot}"
 
 [fusionPlan]
 timeoutSeconds = ${config.fusionPlan.timeoutSeconds} # 30..3600, default 600

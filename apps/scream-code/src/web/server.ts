@@ -39,7 +39,9 @@ import {
 } from '@scream-code/scream-code-sdk';
 import { setLocale } from '@scream-code/config';
 
-import { loadTuiConfig, TuiConfigParseError } from '#/tui/config';
+import { loadTuiConfig, saveTuiConfig, TuiConfigParseError, type TuiLikePreferences, TuiLikePreferencesSchema } from '#/tui/config';
+import { buildRoleAdditionalText } from '#/tui/commands/like';
+import { getDataDir } from '#/utils/paths';
 import { createScreamCodeHostIdentity } from '#/cli/version';
 import { refineGoal } from '#/utils/goal-refiner';
 
@@ -200,6 +202,37 @@ function sendJson(res: ServerResponse, statusCode: number, body: unknown): void 
   res.end(JSON.stringify(body));
 }
 
+const TUI_CONFIG_PATH = join(getDataDir(), 'tui.toml');
+
+/** Load the user's /like preferences (shared with the TUI via tui.toml). */
+async function loadLikePreferences(): Promise<TuiLikePreferences> {
+  const config = await loadTuiConfig(TUI_CONFIG_PATH);
+  return config.like ?? {};
+}
+
+/** Persist like preferences to tui.toml + user-prefs.md, rolling both back on failure. */
+async function saveLikePreferences(prefs: TuiLikePreferences): Promise<void> {
+  const current = await loadTuiConfig(TUI_CONFIG_PATH);
+  const prefsPath = join(getDataDir(), 'user-prefs.md');
+  try {
+    await saveTuiConfig({ ...current, like: prefs }, TUI_CONFIG_PATH);
+    await writeFile(prefsPath, buildRoleAdditionalText(prefs), 'utf-8');
+  } catch (error) {
+    // writeFile is non-atomic: roll BOTH stores back so they never diverge.
+    try {
+      await saveTuiConfig(current, TUI_CONFIG_PATH);
+    } catch {
+      // best-effort rollback
+    }
+    try {
+      await writeFile(prefsPath, buildRoleAdditionalText(current.like ?? {}), 'utf-8');
+    } catch {
+      // best-effort rollback
+    }
+    throw error;
+  }
+}
+
 function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
     let data = '';
@@ -313,8 +346,7 @@ function toHttpError(error: unknown): HttpError {
   return new HttpError(500, errorMessage(error));
 }
 
-function sendHttpError(res: ServerResponse, error: unknown): void {
-  const mapped = toHttpError(error);
+function sendHttpError(res: ServerResponse, error: unknown): void {  const mapped = toHttpError(error);
   sendJson(res, mapped.statusCode, {
     code: mapped.code ?? mapped.statusCode,
     message: mapped.message,
@@ -2104,9 +2136,29 @@ export async function runWebServer(opts: WebServerOptions): Promise<void> {
       return;
     }
 
-    // List available models (from harness config, reloaded)
-    if (url === `${API_PREFIX}/models` && method === 'GET') {
+    // Like preferences (shared with the TUI via tui.toml + user-prefs.md)
+    if (url === `${API_PREFIX}/like` && method === 'GET') {
       try {
+        sendJson(res, 200, await loadLikePreferences());
+      } catch (error) {
+        sendHttpError(res, error);
+      }
+      return;
+    }
+    if (url === `${API_PREFIX}/like` && method === 'PUT') {
+      try {
+        const body = await readJsonBody(req);
+        const prefs = TuiLikePreferencesSchema.parse(body);
+        await saveLikePreferences(prefs);
+        sendJson(res, 200, { ok: true });
+      } catch (error) {
+        sendHttpError(res, error);
+      }
+      return;
+    }
+
+    // List available models (from harness config, reloaded)
+    if (url === `${API_PREFIX}/models` && method === 'GET') {      try {
         const models = await manager.listModels();
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(models));
