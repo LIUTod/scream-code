@@ -38,7 +38,7 @@ Scream Code is a hassle-free, locally deployable, all-in-one AI Agent assistant.
     </td>
     <td width="50%">
       <h3>🐺 Wolfpack Mode</h3>
-      <p><strong>Unlimited intelligent batch concurrency</strong> — multiple Agents collaborate in parallel. Built-in coder/explore/plan/verify/reviewer/oracle/writer sub-agents. No item limit.</p>
+      <p><strong>Unlimited intelligent batch concurrency</strong> — multiple Agents collaborate in parallel. Built-in coder/explore/plan/verify/reviewer/oracle/writer/worker sub-agents. No item limit.</p>
     </td>
   </tr>
   <tr>
@@ -240,7 +240,7 @@ Scream Code 是一款省心的可在本地部署的全能 AI Agent 助手。你�
     </td>
     <td width="50%">
       <h3>🐺 Wolfpack 群狼模式</h3>
-      <p><strong>无限制智能批量并发</strong>多Agent协同，并行处理大项目任务。内置coder/explore/plan/verify/reviewer/oracle/writer 等多种子 Agent，精准识别任务类型，item 数量无上限。</p>
+      <p><strong>无限制智能批量并发</strong>多Agent协同，并行处理大项目任务。内置coder/explore/plan/verify/reviewer/oracle/writer/worker 等多种子 Agent，精准识别任务类型，item 数量无上限。</p>
     </td>
   </tr>
   <tr>
