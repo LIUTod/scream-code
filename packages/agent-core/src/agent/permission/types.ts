@@ -18,8 +18,10 @@ export type PermissionRuleScope = 'turn-override' | 'session-runtime' | 'project
  *   - `manual` — rule set drives decision; unmatched tool calls ask
  *   - `yolo`   — only deny rules can block; everything else allows
  *   - `auto`   — caller may bypass rule checks entirely
+ *   - `ask`    — read-only Q&A: mutating tools (incl. Bash and MCP) are
+ *     denied; only read/search/dialogue tools may run
  */
-export type PermissionMode = 'manual' | 'yolo' | 'auto';
+export type PermissionMode = 'manual' | 'yolo' | 'auto' | 'ask';
 
 /**
  * A single permission rule. `pattern` is the DSL form (`Read(/etc/**)`,

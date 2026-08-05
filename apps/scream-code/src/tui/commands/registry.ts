@@ -18,6 +18,13 @@ export const BUILTIN_SLASH_COMMANDS = [
     availability: 'always',
   },
   {
+    name: 'ask',
+    aliases: ['ask'],
+    description: 'registry.ask_desc',
+    priority: 122,
+    availability: 'always',
+  },
+  {
     name: 'wolfpack',
     aliases: ['wp'],
     description: 'registry.wolfpack_desc',

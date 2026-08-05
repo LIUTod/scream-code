@@ -151,7 +151,7 @@ export class Session {
     if (!isPermissionMode(mode)) {
       throw new ScreamError(
         ErrorCodes.SESSION_PERMISSION_MODE_INVALID,
-        'Session permission mode must be yolo, manual, or auto',
+        'Session permission mode must be yolo, manual, auto, or ask',
       );
     }
     await this.rpc.setPermission({ sessionId: this.id, mode });
@@ -609,7 +609,7 @@ function normalizeOptionalString(value: string | undefined): string | undefined 
 }
 
 function isPermissionMode(value: unknown): value is PermissionMode {
-  return value === 'yolo' || value === 'manual' || value === 'auto';
+  return value === 'yolo' || value === 'manual' || value === 'auto' || value === 'ask';
 }
 
 function resumeStateFromSummary(

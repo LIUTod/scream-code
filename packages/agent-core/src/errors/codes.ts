@@ -179,7 +179,7 @@ export const SCREAM_ERROR_INFO = {
     title: 'Invalid permission mode',
     retryable: false,
     public: true,
-    action: 'Use one of: yolo / manual / auto.',
+    action: 'Use one of: yolo / manual / auto / ask.',
   },
   'session.thinking_empty': {
     title: 'Thinking value is empty',

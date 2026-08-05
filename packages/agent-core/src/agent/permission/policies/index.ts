@@ -1,5 +1,6 @@
 import type { Agent } from '../..';
 import type { PermissionPolicy } from '../types';
+import { AskModeGuardDenyPermissionPolicy } from './ask-mode-guard-deny';
 import { AutoModeApprovePermissionPolicy } from './auto-mode-approve';
 import { AutoModeAskUserQuestionDenyPermissionPolicy } from './auto-mode-ask-user-question-deny';
 import { DefaultToolApprovePermissionPolicy } from './default-tool-approve';
@@ -32,6 +33,8 @@ export function createPermissionDecisionPolicies(agent: Agent): readonly Permiss
     new AutoModeAskUserQuestionDenyPermissionPolicy(agent),
     // plan mode: Write/Edit outside the plan file, or TaskStop → deny.
     new PlanModeGuardDenyPermissionPolicy(agent),
+    // ask mode: mutating tools (Bash/Write/Edit/Cron/TaskStop/MCP) → deny.
+    new AskModeGuardDenyPermissionPolicy(agent),
     // User-configured deny rule matches → deny.
     new UserConfiguredDenyPermissionPolicy(agent),
     // auto mode → approve (any auto-mode block must be a deny rule above this).

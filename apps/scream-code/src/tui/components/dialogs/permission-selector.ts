@@ -22,11 +22,16 @@ function getPermissionOptions(): readonly ChoiceOption[] {
       label: 'YES',
       description: t('permission.yolo_desc'),
     },
+    {
+      value: 'ask',
+      label: 'ASK',
+      description: t('permission.ask_desc'),
+    },
   ];
 }
 
 function isPermissionModeChoice(value: string): value is PermissionMode {
-  return value === 'manual' || value === 'auto' || value === 'yolo';
+  return value === 'manual' || value === 'auto' || value === 'yolo' || value === 'ask';
 }
 
 export interface PermissionSelectorOptions {

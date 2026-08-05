@@ -839,6 +839,7 @@ export const zh: Record<string, string> = {
   'permission.auto': '自动',
   'permission.auto_desc': '完全无交互运行。工具操作自动批准，跳过代理问题以便其自行决策。',
   'permission.yolo_desc': '自动批准工具操作和计划转换。需要您输入时代理仍会明确提问。',
+  'permission.ask_desc': '只读问答模式：直接对话回答，不修改文件、不运行命令、不调用 MCP 工具。',
   'permission.select_title': '选择权限模式',
 
   // ─── theme-selector ────────────
@@ -1085,6 +1086,8 @@ export const zh: Record<string, string> = {
   'config.plan_cleared': '计划已清除',
   'config.yolo_already_on': 'YES 模式已开启',
   'config.yolo_already_off': 'YES 模式已关闭',
+  'config.ask_already_on': 'ASK 模式已开启',
+  'config.ask_already_off': 'ASK 模式已关闭',
   'config.auto_already_on': '自动模式已开启',
   'config.auto_already_off': '自动模式已关闭',
 
@@ -1135,6 +1138,7 @@ export const zh: Record<string, string> = {
   // ─── Registry ──────────────────
   'registry.auto_desc': '切换自动权限模式',
   'registry.yolo_desc': '切换至自动批准模式(yolo)',
+  'registry.ask_desc': '切换至只读问答模式(ask)',
   'registry.wolfpack_desc': '切换群狼协作模式，自动批准+批量并发',
   'registry.sessions_desc': '浏览并恢复会话',
   'registry.goal_desc': '查看/管理自动目标',

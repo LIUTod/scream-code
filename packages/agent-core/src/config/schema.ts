@@ -63,7 +63,7 @@ export const ThinkingConfigSchema = z.object({
 
 export type ThinkingConfig = z.infer<typeof ThinkingConfigSchema>;
 
-export const PermissionModeSchema = z.enum(['yolo', 'manual', 'auto']);
+export const PermissionModeSchema = z.enum(['yolo', 'manual', 'auto', 'ask']);
 
 export const PermissionRuleDecisionSchema = z.enum(['allow', 'deny', 'ask']);
 export const PermissionRuleScopeSchema = z.enum([

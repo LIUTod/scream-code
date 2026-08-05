@@ -838,6 +838,7 @@ export const en: Record<string, string> = {
   'permission.auto': 'Auto',
   'permission.auto_desc': 'Run fully without interaction. Tool operations are auto-approved; agent questions are skipped so it can decide on its own.',
   'permission.yolo_desc': 'Auto-approve tool operations and plan transitions. The agent will still explicitly ask when it needs your input.',
+  'permission.ask_desc': 'Read-only Q&A mode: answer in conversation, never modify files, run commands, or call MCP tools.',
   'permission.select_title': 'Select permission mode',
 
   // ─── theme-selector ────────────
@@ -1084,6 +1085,8 @@ export const en: Record<string, string> = {
   'config.plan_cleared': 'Plan cleared',
   'config.yolo_already_on': 'YES mode is already on',
   'config.yolo_already_off': 'YES mode is already off',
+  'config.ask_already_on': 'ASK mode is already on',
+  'config.ask_already_off': 'ASK mode is already off',
   'config.auto_already_on': 'Auto mode is already on',
   'config.auto_already_off': 'Auto mode is already off',
 
@@ -1134,6 +1137,7 @@ export const en: Record<string, string> = {
   // ─── Registry ──────────────────
   'registry.auto_desc': 'Toggle auto permission mode',
   'registry.yolo_desc': 'Toggle auto-approve mode (yolo)',
+  'registry.ask_desc': 'Toggle read-only Q&A mode (ask)',
   'registry.wolfpack_desc': 'Toggle wolfpack mode, auto-approve + batch concurrency',
   'registry.sessions_desc': 'Browse and restore sessions',
   'registry.goal_desc': 'View/manage auto goals',

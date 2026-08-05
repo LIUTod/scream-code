@@ -53,7 +53,7 @@ export type {
 export type { ScreamHostIdentity } from '@scream-code/config';
 export type { ContentPart, Role, ToolCall } from '@scream-code/ltod';
 
-export type PermissionMode = 'yolo' | 'manual' | 'auto';
+export type PermissionMode = 'yolo' | 'manual' | 'auto' | 'ask';
 
 export type TextPromptPart = Extract<ContentPart, { type: 'text' }>;
 export type PromptPart = Extract<ContentPart, { type: 'text' | 'image_url' | 'video_url' }>;
