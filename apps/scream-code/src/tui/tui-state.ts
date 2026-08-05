@@ -86,10 +86,11 @@ export function createTUIState(options: ScreamTUIOptions): TUIState {
 
   const terminal = new ProcessTerminal();
   const ui = new TUI(terminal);
-  // Keep differential rendering when content shrinks (e.g. transcript commit,
-  // tool-call collapse). Without this, pi-tui defaults to clearing the whole
-  // screen and recalculating the viewport, which causes visible jumps.
-  ui.setClearOnShrink(false);
+  // Clear-and-repaint when content shrinks (e.g. transcript commit, tool-call
+  // collapse, end of turn). The repaint is wrapped in synchronized output so
+  // it is atomic, and it re-pins the viewport to the content end so the editor
+  // stays at the bottom instead of lagging a row behind when content shrinks.
+  ui.setClearOnShrink(true);
 
   // ── Render safety net ──────────────────────────────────────────────
   // pi-tui's doRender() runs inside process.nextTick + setTimeout, so
