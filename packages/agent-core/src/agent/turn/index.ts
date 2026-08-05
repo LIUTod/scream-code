@@ -790,6 +790,12 @@ export class TurnFlow {
             authorizeToolExecution: async (ctx) => {
               return this.agent.permission.beforeToolCall(ctx);
             },
+            // Feed preflight-rejected calls (unknown tool / malformed args)
+            // into the repeat breaker so the same invalid call re-issued
+            // across steps fires the 3/5/8 reminders; the returned reminder
+            // is appended to the rejection output the model sees.
+            onToolCallRejected: async ({ toolCallId, toolName, args, rawArguments }) =>
+              deduper.registerSkipped(toolCallId, toolName, args, rawArguments),
             finalizeToolResult: async (ctx) => {
               // Resolve dedup BEFORE firing the PostToolUse hook so same-step
               // dups (whose ctx.result is the dedup placeholder) report the

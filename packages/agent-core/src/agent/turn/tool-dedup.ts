@@ -2,6 +2,7 @@ import type { ContentPart } from '@scream-code/ltod';
 
 import type { ExecutableToolResult } from '../../loop/types';
 
+import { parseToolCallArguments } from '../../loop/tool-call';
 import { canonicalDedupArgs } from './canonical-args';
 
 const REMINDER_TEXT_1 =
@@ -192,6 +193,59 @@ export class ToolCallDeduplicator {
   }
 
   /**
+   * Projects the consecutive streak that a call at `index` in the current
+   * step's call list ends, extending the cross-step streak carried in
+   * `consecutiveKey`/`consecutiveCount`.
+   */
+  private projectStreak(index: number): number {
+    let lastKey = this.consecutiveKey;
+    let streak = this.consecutiveCount;
+    for (let i = 0; i <= index; i += 1) {
+      const k = this.stepCalls[i]!;
+      if (k === lastKey) {
+        streak += 1;
+      } else {
+        lastKey = k;
+        streak = 1;
+      }
+    }
+    return streak;
+  }
+
+  /**
+   * Registers a tool call that never reached `prepareToolExecution` — e.g.
+   * preflight rejected it (unknown tool / malformed args) — so the repeat
+   * breaker can count it. Without this, re-issuing the same invalid call
+   * would never fire the 3/5/8 reminders. Returns a reminder string to
+   * append to the rejection output when a streak threshold is reached,
+   * else null.
+   *
+   * `rawArguments` is the provider's raw arguments string. Args that failed
+   * JSON parsing are keyed on the raw text so different malformed attempts
+   * do not count as repeats of each other.
+   */
+  registerSkipped(
+    toolCallId: string,
+    toolName: string,
+    args: unknown,
+    rawArguments?: string | null,
+  ): string | null {
+    if (this.callKeyByCallId.has(toolCallId)) return null;
+    const keyArgs =
+      rawArguments !== undefined &&
+      rawArguments !== null &&
+      !parseToolCallArguments(rawArguments).success
+        ? rawArguments
+        : args;
+    const registered = this.checkSameStep(toolCallId, toolName, keyArgs);
+    if (registered !== null) return null; // duplicate or storm-suppressed: the first occurrence owns the streak
+    const streak = this.projectStreak(this.stepCalls.length - 1);
+    if (streak === 3) return REMINDER_TEXT_1;
+    if (streak === 5 || streak === 8) return makeReminderText2(toolName, streak, args);
+    return null;
+  }
+
+  /**
    * Called from `finalizeToolResult`, in provider order. For first-occurrence
    * calls, projects the consecutive streak ending at this call and, if the
    * threshold is reached, appends the system reminder, then resolves the
@@ -220,17 +274,7 @@ export class ToolCallDeduplicator {
     if (index === undefined) return result;
     this.originalCallIndex.delete(toolCallId);
 
-    let lastKey = this.consecutiveKey;
-    let streak = this.consecutiveCount;
-    for (let i = 0; i <= index; i += 1) {
-      const k = this.stepCalls[i]!;
-      if (k === lastKey) {
-        streak += 1;
-      } else {
-        lastKey = k;
-        streak = 1;
-      }
-    }
+    const streak = this.projectStreak(index);
 
     let finalResult = result;
     if (streak === 3) {

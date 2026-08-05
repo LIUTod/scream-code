@@ -30,6 +30,16 @@ import type {
   TurnResult,
 } from './types';
 
+/**
+ * Consecutive steps whose tool calls were ALL rejected during preflight
+ * (unknown tool / malformed args) before the turn stops. Deliberately
+ * generous — the repeat breaker's 3/5/8 reminders fire first and let a
+ * healthy model self-correct, so this final breaker only trips on genuine
+ * model failure after enough fully-rejected steps (8) to never hit a
+ * one-off slip.
+ */
+const MAX_CONSECUTIVE_REJECTED_STEPS = 8;
+
 export interface RunTurnInput {
   readonly turnId: string;
   readonly signal: AbortSignal;
@@ -76,6 +86,7 @@ export async function runTurn(input: RunTurnInput): Promise<TurnResult> {
   } = input;
   let usage: TokenUsage = emptyUsage();
   let steps = 0;
+  let consecutiveRejectedSteps = 0;
   // Normal exits overwrite this with the completed step's stop reason.
   let stopReason: LoopTurnStopReason = 'end_turn';
   let activeStep: number | undefined;
@@ -116,6 +127,26 @@ export async function runTurn(input: RunTurnInput): Promise<TurnResult> {
         mediaProjection,
       });
       activeStep = undefined;
+
+      // Invalid-tool-call circuit breaker: a model that keeps emitting calls
+      // that fail preflight (unknown tool / malformed args) would otherwise
+      // burn steps and tokens, bounded only by maxSteps. Any step with at
+      // least one runnable call resets the counter, so this only fires after
+      // a run of fully-rejected steps.
+      if (stepResult.totalCalls > 0) {
+        if (stepResult.rejectedCalls === stepResult.totalCalls) {
+          consecutiveRejectedSteps += 1;
+        } else {
+          consecutiveRejectedSteps = 0;
+        }
+        if (consecutiveRejectedSteps >= MAX_CONSECUTIVE_REJECTED_STEPS) {
+          log?.warn(
+            `repeated invalid tool calls — stopping turn after ${consecutiveRejectedSteps} consecutive all-rejected steps`,
+          );
+          stopReason = 'end_turn';
+          break;
+        }
+      }
 
       if (stepResult.stopReason === 'tool_use') {
         continue;

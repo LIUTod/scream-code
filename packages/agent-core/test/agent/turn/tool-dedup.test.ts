@@ -399,4 +399,49 @@ describe('ToolCallDeduplicator', () => {
       expect(finalDup).toEqual(dupCached);
     });
   });
+
+  describe('registerSkipped (preflight-rejected calls)', () => {
+    it('returns the 3-streak reminder when the same rejected call repeats across steps', () => {
+      const dedup = new ToolCallDeduplicator();
+      dedup.beginStep();
+      expect(dedup.registerSkipped('s1', 'no_such_tool', {}, '{}')).toBeNull();
+      dedup.endStep();
+      dedup.beginStep();
+      expect(dedup.registerSkipped('s2', 'no_such_tool', {}, '{}')).toBeNull();
+      dedup.endStep();
+      dedup.beginStep();
+      expect(dedup.registerSkipped('s3', 'no_such_tool', {}, '{}')).toContain(
+        'You are repeating the exact same tool call',
+      );
+      dedup.endStep();
+    });
+
+    it('escalates to the detailed reminder at 5 and 8, null otherwise', () => {
+      const dedup = new ToolCallDeduplicator();
+      for (let i = 1; i <= 8; i += 1) {
+        dedup.beginStep();
+        const reminder = dedup.registerSkipped(`s${i}`, 'no_such_tool', {}, '{}');
+        dedup.endStep();
+        if (i === 3) {
+          expect(reminder).toContain('You are repeating the exact same tool call');
+        } else if (i === 5 || i === 8) {
+          expect(reminder).toContain('Repeated tool call detected:');
+        } else {
+          expect(reminder).toBeNull();
+        }
+      }
+    });
+
+    it('does not count different malformed raw arguments as repeats', () => {
+      // Each malformed raw arguments string differs; because parse fails they
+      // are keyed on the raw text, so they never form a consecutive streak.
+      const dedup = new ToolCallDeduplicator();
+      for (let i = 1; i <= 12; i += 1) {
+        dedup.beginStep();
+        const reminder = dedup.registerSkipped(`s${i}`, 'no_such_tool', {}, `{bad json ${i}`);
+        dedup.endStep();
+        expect(reminder).toBeNull();
+      }
+    });
+  });
 });

@@ -119,6 +119,10 @@ type ToolCallDisplayFields = Pick<LoopToolCallEvent, 'description' | 'display'>;
 
 export interface ToolCallBatchResult {
   readonly stopTurn: boolean;
+  /** Tool calls that failed preflight (unknown tool / malformed args). */
+  readonly rejectedCount: number;
+  /** Total tool calls in this step's response. */
+  readonly totalCalls: number;
 }
 
 /**
@@ -166,8 +170,11 @@ export async function runToolCallBatch(
   step: ToolCallStepContext,
   response: LLMChatResponse,
 ): Promise<ToolCallBatchResult> {
-  if (response.toolCalls.length === 0) return { stopTurn: false };
+  if (response.toolCalls.length === 0) {
+    return { stopTurn: false, rejectedCount: 0, totalCalls: 0 };
+  }
   const calls = response.toolCalls.map((toolCall) => preflightToolCall(step.tools, toolCall));
+  const rejectedCount = calls.filter((call) => call.kind === 'rejected').length;
   const scheduler = new ToolScheduler<PendingToolResult>();
   const pendingResults: Array<Promise<PendingToolResult>> = [];
   let stopTurn = false;
@@ -252,7 +259,7 @@ export async function runToolCallBatch(
     // execute promises cannot surface as detached unhandled rejections.
     await Promise.allSettled(pendingResults);
   }
-  return { stopTurn };
+  return { stopTurn, rejectedCount, totalCalls: response.toolCalls.length };
 }
 
 /**
@@ -298,7 +305,7 @@ function preflightToolCall(
   return { kind: 'runnable', toolCall, toolName, tool, args: parsedArgs.data };
 }
 
-function parseToolCallArguments(
+export function parseToolCallArguments(
   raw: string | null,
 ):
   | { readonly success: true; readonly data: unknown }
@@ -416,7 +423,25 @@ async function prepareToolCall(
     };
   };
 
-  if (call.kind === 'rejected') return settleError(call.args, call.output);
+  if (call.kind === 'rejected') {
+    // Feed validation-rejected calls to the repeat breaker so re-issuing the
+    // same invalid call fires the 3/5/8 reminders (and the loop-level turn
+    // breaker can count it) instead of silently retrying forever. A throwing
+    // observer must never break the tool batch, so the reminder is best-effort.
+    let reminder: string | null | void;
+    try {
+      reminder = await step.hooks?.onToolCallRejected?.({
+        toolCallId: call.toolCall.id,
+        toolName: call.toolName,
+        args: call.args,
+        rawArguments: call.toolCall.arguments,
+      });
+    } catch {
+      reminder = null;
+    }
+    const output = reminder ? `${call.output}\n${reminder}` : call.output;
+    return settleError(call.args, output);
+  }
 
   const decision = await runPrepareToolExecutionHook(step, call);
   if (decision.kind === 'blocked' || decision.kind === 'hookFailed') {

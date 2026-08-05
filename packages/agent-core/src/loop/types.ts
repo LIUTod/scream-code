@@ -253,6 +253,19 @@ export interface LoopHooks {
   beforeStep?: BeforeStepHook | undefined;
   afterStep?: AfterStepHook | undefined;
   prepareToolExecution?: PrepareToolExecutionHook | undefined;
+  /**
+   * Called when a tool call is rejected in preflight (unknown tool / malformed
+   * args). Return a reminder string to append to the rejection output when a
+   * repeated-streak threshold is hit (3/5/8), or null/void for none.
+   */
+  onToolCallRejected?:
+    | ((ctx: {
+        readonly toolCallId: string;
+        readonly toolName: string;
+        readonly args: unknown;
+        readonly rawArguments: string | null;
+      }) => string | null | void | Promise<string | null | void>)
+    | undefined;
   authorizeToolExecution?: AuthorizeToolExecutionHook | undefined;
   finalizeToolResult?: FinalizeToolResultHook | undefined;
   shouldContinueAfterStop?: ShouldContinueAfterStopHook | undefined;

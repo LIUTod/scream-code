@@ -50,6 +50,10 @@ export interface ExecuteLoopStepDeps {
 export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<{
   readonly usage: TokenUsage;
   readonly stopReason: LoopStepStopReason;
+  /** Tool calls rejected during preflight in this step (unknown tool / malformed args). */
+  readonly rejectedCalls: number;
+  /** Total tool calls in this step's response. */
+  readonly totalCalls: number;
 }> {
   const {
     turnId,
@@ -221,8 +225,12 @@ export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<{
   // contains tool calls.
   let effectiveStopReason: LoopStepStopReason =
     stopTurnAfterUsage && stopReason === 'tool_use' ? 'end_turn' : stopReason;
+  let rejectedCalls = 0;
+  let totalCalls = 0;
   if (effectiveStopReason === 'tool_use') {
     const toolBatch = await runToolCallBatch(step, response);
+    rejectedCalls = toolBatch.rejectedCount;
+    totalCalls = toolBatch.totalCalls;
     if (toolBatch.stopTurn) effectiveStopReason = 'end_turn';
   } else if (
     (stopReason === 'paused' || stopReason === 'unknown' || stopReason === 'max_tokens') &&
@@ -273,6 +281,8 @@ export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<{
     usage,
     stopReason:
       stopTurnAfterStep && effectiveStopReason === 'tool_use' ? 'end_turn' : effectiveStopReason,
+    rejectedCalls,
+    totalCalls,
   };
 }
 
