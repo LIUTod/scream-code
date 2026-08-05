@@ -4,6 +4,7 @@ import type {
   CreateSessionOptions,
   ScreamHarness,
   Session,
+  SessionSummary,
 } from '@scream-code/scream-code-sdk';
 import { t } from '@scream-code/config';
 import { getLlmNotSetMessage, MAIN_AGENT_ID, getNoActiveSessionMessage } from '../constant/scream-tui';
@@ -18,6 +19,30 @@ import type { ApprovalController } from '../reverse-rpc/approval/controller';
 import type { QuestionController } from '../reverse-rpc/question/controller';
 import type { AppState, PlanModeState, TUIStartupOptions } from '../types';
 import type { TUIState } from '../tui-state';
+
+/**
+ * How recently a session must have been touched for the empty-session pruner
+ * to leave it alone. Guards against sweeping a fresh empty session that
+ * another terminal is about to use.
+ */
+const PRUNE_EMPTY_SESSION_GRACE_MS = 5 * 60 * 1000;
+
+/**
+ * A session is prunable when it never received a user prompt and never got a
+ * title (auto-generated or custom) — i.e. an empty shell left behind by a
+ * one-off startup. Archived sessions and sessions touched within the grace
+ * window are kept.
+ */
+export function isPrunableEmptySession(
+  summary: Pick<SessionSummary, 'archived' | 'lastPrompt' | 'title' | 'updatedAt'>,
+  now: number,
+  graceMs: number = PRUNE_EMPTY_SESSION_GRACE_MS,
+): boolean {
+  if (summary.archived) return false;
+  if (summary.lastPrompt !== undefined) return false;
+  if (summary.title) return false;
+  return now - summary.updatedAt > graceMs;
+}
 import type { SessionEventHandler } from '../controllers/session-event-handler';
 import type { SessionReplayRenderer } from '../controllers/session-replay';
 import type { StreamingUIController } from '../controllers/streaming-ui';
@@ -139,11 +164,39 @@ export class SessionManager {
     }
 
     this.host.state.startupState = 'ready';
+    // Prune empty sessions (never had a user prompt, never renamed) so the
+    // session list does not accumulate one-off empty shells from repeated
+    // startups. Best-effort — cleanup failures never block startup.
+    await this.pruneEmptySessions(workDir, session.id);
     // Subscribe to session events for the newly initialized session. This is
     // required for the initial createSession path; resume/switch paths call
     // startSubscription in their own flows.
     this.host.sessionEventHandler.startSubscription();
     return { session, shouldReplay: shouldReplayHistory };
+  }
+
+  /**
+   * Deletes sessions in this workdir that never received a user prompt and
+   * were never renamed — repeated startups otherwise leave a growing pile of
+   * one-off empty session shells. The session about to be used is skipped, as
+   * are archived sessions, any session that produced a prompt or a title, and
+   * any session touched within the grace window (protects a fresh empty
+   * session being used from another terminal). Best-effort: cleanup failures
+   * never block startup.
+   */
+  private async pruneEmptySessions(workDir: string, currentSessionId: string): Promise<void> {
+    try {
+      const now = Date.now();
+      const summaries = await this.host.harness.listSessions({ workDir });
+      for (const summary of summaries) {
+        if (summary.id === currentSessionId) continue;
+        if (isPrunableEmptySession(summary, now)) {
+          await this.host.harness.deleteSession(summary.id);
+        }
+      }
+    } catch (error) {
+      this.host.showStatus(`Session cleanup skipped: ${String(error)}`);
+    }
   }
 
   // ---------------------------------------------------------------------------
