@@ -1,6 +1,7 @@
 import type { Session, ScreamHarness } from '@scream-code/scream-code-sdk';
 import { t } from '@scream-code/config';
 import { GutterContainer } from '../components/chrome/gutter-container';
+import { FlexSpacer } from '@liutod-scream/pi-tui';
 import { CHROME_GUTTER } from '../constant/rendering';
 import type { AuthFlowController } from './auth-flow';
 import type { SessionEventHandler } from './session-event-handler';
@@ -241,6 +242,10 @@ export class LifecycleController {
     ui.addChild(this.host.state.queueContainer);
     ui.addChild(this.host.state.errorBannerContainer);
     ui.addChild(this.host.state.planModeBannerContainer);
+    // FlexSpacer absorbs free vertical space so the editor and footer stay
+    // pinned to the terminal bottom instead of floating up when content
+    // shrinks (e.g. during a tool call with no streaming output).
+    ui.addChild(new FlexSpacer());
     ui.addChild(this.host.state.editorContainer);
   }
 
