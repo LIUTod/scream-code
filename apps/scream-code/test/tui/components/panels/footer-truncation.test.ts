@@ -89,14 +89,17 @@ describe('FooterComponent - progressive truncation', () => {
 
   it('stage 1: shrinks LEFT with a middle ellipsis to keep RIGHT visible', () => {
     const footer = wideFooter();
-    // width 70: full LEFT+RIGHT ~110 > 70, but a shrunk LEFT (<=32) + gap + RIGHT fits.
+    // width 70: full LEFT+RIGHT > 70, so a shrunk LEFT (head + tail via
+    // truncateMiddle) + gap + RIGHT fits. The water-level bar's brackets make
+    // RIGHT 2 cols wider than the old half-block bar, so the LEFT head keeps
+    // the 计划 badge plus the GOAL badge's leading letter (G), not "GO".
     const [line1] = footer.render(70);
     expect(line1).toBeDefined();
     const stripped = strip(line1!);
     expect(visibleWidth(line1!)).toBeLessThanOrEqual(70);
     expect(stripped).toContain('…');
     expect(stripped).toContain('上下文'); // RIGHT survived
-    expect(stripped).toMatch(/计划  GO/); // head of LEFT kept
+    expect(stripped).toMatch(/计划  G/); // head of LEFT kept (计划 + GOAL's first letter)
   });
 
   it('stage 2: drops RIGHT when it cannot fit even after shrinking LEFT', () => {

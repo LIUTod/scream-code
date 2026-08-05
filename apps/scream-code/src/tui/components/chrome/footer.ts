@@ -149,8 +149,11 @@ function safeUsage(usage: number): number {
 }
 
 const CONTEXT_BAR_WIDTH = 10;
-const CONTEXT_BAR_FILLED = '▰';
-const CONTEXT_BAR_EMPTY = '▱';
+// Water-level progress bar glyphs: solid depth (█) with a foam transition
+// (▓▒) hugging the water line; unused cells read as air (░).
+const CONTEXT_BAR_DEEP = '█';
+const CONTEXT_BAR_FOAM = '▓▒';
+const CONTEXT_BAR_AIR = '░';
 const BALANCE_FLASH_MS = 1500;
 
 function currencySymbol(currency: string): string {
@@ -160,22 +163,32 @@ function currencySymbol(currency: string): string {
 }
 
 /**
- * Half-block progress bar for context usage: `▰▰▰▱▱▱▱▱▱▱` (10 cells).
- * Filled cells are rounded from the clamped ratio, so 0% is all-empty and
- * >=100% is all-filled; NaN/undefined coerce through safeUsageRatio first.
+ * Water-level progress bar for context usage: `[█████▓▒░░░]` (10 cells).
+ * Used cells read as water — solid depth (█) with a foam transition (▓▒)
+ * hugging the water line; unused cells read as air (░). Cell count is
+ * rounded from the clamped ratio, so 0% is all-air and >=100% is all-water;
+ * NaN/undefined coerce through safeUsageRatio first. The closing bracket is
+ * part of the returned string so a trailing background cell is never
+ * swallowed by the terminal.
  */
 function formatContextBar(usage: number, width: number = CONTEXT_BAR_WIDTH): string {
   const clamped = Math.min(1, Math.max(0, safeUsageRatio(usage)));
   const filled = Math.round(clamped * width);
-  return CONTEXT_BAR_FILLED.repeat(filled) + CONTEXT_BAR_EMPTY.repeat(width - filled);
+  const foam = Math.min(2, filled);
+  const deep = Math.max(0, filled - foam);
+  const used = CONTEXT_BAR_DEEP.repeat(deep) + CONTEXT_BAR_FOAM.slice(0, foam);
+  const air = CONTEXT_BAR_AIR.repeat(width - filled);
+  return `[${used}${air}]`;
 }
 
-function formatContextStatus(usage: number, tokens?: number, maxTokens?: number): string {
+function formatContextStatus(usage: number, tokens?: number, maxTokens?: number, barWidth = CONTEXT_BAR_WIDTH): string {
   const pct = `${(safeUsage(usage) * 100).toFixed(1)}%`;
   // The bar precedes the percentage so the footer reads
-  // `上下文：▰▰▰▱▱▱▱▱▱▱  28.8% (287.9k/1.0M)`; both share the usage color.
+  // `上下文：[█▓▒░░░░░░░]  28.8% (287.9k/1.0M)`; both share the usage color.
   // Two spaces after the bar keep the percentage from feeling cramped.
-  const barAndPct = `${formatContextBar(usage)}  ${pct}`;
+  // `barWidth` 0 collapses the bar to plain percent on narrow terminals.
+  const bar = barWidth > 0 ? `${formatContextBar(usage, barWidth)}  ` : '';
+  const barAndPct = `${bar}${pct}`;
   if (maxTokens && maxTokens > 0 && tokens !== undefined) {
     return t('footer.context', { pct: barAndPct, tokens: formatTokenCount(tokens), maxTokens: formatTokenCount(maxTokens) });
   }
@@ -527,8 +540,11 @@ export class FooterComponent implements Component {
         ? chalk.hex(colors.success)('●')
         : chalk.hex(colors.textDim)('●');
       const contextColor = pickContextColor(state.contextUsage, colors);
+      // Collapse the water-level bar on narrow terminals so the percentage
+      // itself is never squeezed out: 10 cells on wide, 6 mid, 0 = plain text.
+      const contextBarWidth = width >= 68 ? CONTEXT_BAR_WIDTH : width >= 52 ? 6 : 0;
       const contextPart = chalk.hex(contextColor)(
-        formatContextStatus(state.contextUsage, state.contextTokens, state.maxContextTokens),
+        formatContextStatus(state.contextUsage, state.contextTokens, state.maxContextTokens, contextBarWidth),
       );
       const statusPart = chalk.hex(colors.textDim)(`  ${statusLine}`);
       rightText = `${ccDot} ${contextPart}${statusPart}`;

@@ -53,7 +53,7 @@ describe('FooterComponent — context NaN resilience', () => {
     const fc = makeFooter(baseState({ contextUsage: Number.NaN }));
     const out = strip(fc.render(120).join(''));
     expect(out).not.toMatch(/NaN/);
-    expect(out).toMatch(/上下文：▱▱▱▱▱▱▱▱▱▱  0\.0%/);
+    expect(out).toContain('上下文：[░░░░░░░░░░]  0.0%');
   });
 
   it('undefined-ish (coerced) usage → renders 0.0%', () => {
@@ -62,19 +62,19 @@ describe('FooterComponent — context NaN resilience', () => {
     );
     const out = strip(fc.render(120).join(''));
     expect(out).not.toMatch(/NaN/);
-    expect(out).toMatch(/上下文：▱▱▱▱▱▱▱▱▱▱  0\.0%/);
+    expect(out).toContain('上下文：[░░░░░░░░░░]  0.0%');
   });
 
   it('clamps ratios above 1.0 → renders 100.0%', () => {
     const fc = makeFooter(baseState({ contextUsage: 1.5 }));
     const out = strip(fc.render(120).join(''));
-    expect(out).toMatch(/上下文：▰▰▰▰▰▰▰▰▰▰  100\.0%/);
+    expect(out).toContain('上下文：[████████▓▒]  100.0%');
   });
 
   it('ratio 0.427 → renders 42.7%', () => {
     const fc = makeFooter(baseState({ contextUsage: 0.427 }));
     const out = strip(fc.render(200).join(''));
-    expect(out).toMatch(/上下文：▰▰▰▰▱▱▱▱▱▱  42\.7%/);
+    expect(out).toContain('上下文：[██▓▒░░░░░░]  42.7%');
   });
 
   it('tokens provided but max=0 → falls back to percent-only, no division-by-zero artefact', () => {
@@ -83,7 +83,7 @@ describe('FooterComponent — context NaN resilience', () => {
     );
     const out = strip(fc.render(200).join(''));
     expect(out).not.toMatch(/Infinity|NaN/);
-    expect(out).toMatch(/上下文：▱▱▱▱▱▱▱▱▱▱  0\.0%/);
+    expect(out).toContain('上下文：[░░░░░░░░░░]  0.0%');
     // With maxTokens=0, token-count annotation is suppressed.
     expect(out).not.toMatch(/\(500\//);
   });
@@ -96,23 +96,23 @@ describe('FooterComponent — context NaN resilience', () => {
     const out = strip(footer.render(200).join(''));
     expect(out).toContain('scream-k2-5');
     expect(out).not.toContain(' k2 ');
-    expect(out).toMatch(/上下文：▰▰▰▰▰▱▱▱▱▱  50\.0%/);
+    expect(out).toContain('上下文：[███▓▒░░░░░]  50.0%');
   });
 
-  it('renders a half-block progress bar ahead of the percentage', () => {
+  it('renders a water-level progress bar ahead of the percentage', () => {
     const fc = makeFooter(
       baseState({ contextUsage: 0.288, contextTokens: 288_000, maxContextTokens: 1_000_000 }),
     );
     const out = strip(fc.render(200).join(''));
-    // 28.8% × 10 cells = 2.88 → 3 filled half-blocks.
-    expect(out).toContain('上下文：▰▰▰▱▱▱▱▱▱▱  28.8% (288.0k/1.0M)');
+    // 28.8% × 10 cells = 2.88 → 3 filled cells: 1 deep + 2 foam.
+    expect(out).toContain('上下文：[█▓▒░░░░░░░]  28.8% (288.0k/1.0M)');
   });
 
   it('renders an all-empty bar at 0% and an all-filled bar at >=100%', () => {
     const empty = strip(makeFooter(baseState({ contextUsage: 0 })).render(200).join(''));
-    expect(empty).toContain('上下文：▱▱▱▱▱▱▱▱▱▱  0.0%');
+    expect(empty).toContain('上下文：[░░░░░░░░░░]  0.0%');
     const full = strip(makeFooter(baseState({ contextUsage: 1.5 })).render(200).join(''));
-    expect(full).toContain('上下文：▰▰▰▰▰▰▰▰▰▰  100.0%');
+    expect(full).toContain('上下文：[████████▓▒]  100.0%');
   });
 
   it('does not show a thinking label in the footer', () => {
@@ -154,7 +154,7 @@ describe('FooterComponent — context NaN resilience', () => {
     const footer = makeFooter(baseState());
 
     const [line1] = footer.render(120);
-    expect(strip(line1 ?? '')).toContain('上下文：▱▱▱▱▱▱▱▱▱▱  0.0%');
+    expect(strip(line1 ?? '')).toContain('上下文：[░░░░░░░░░░]  0.0%');
   });
 
   it('renders plan badge on line 1 in plan mode', () => {
