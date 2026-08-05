@@ -236,6 +236,8 @@ export class TurnFlow {
     this.activeTurn = null;
   }
 
+  private maxTokensRecoveryAttempted = false;
+
   private flushSteerBuffer(): boolean {
     const steers = this.steerBuffer;
     if (steers.length === 0) return false;
@@ -630,9 +632,32 @@ export class TurnFlow {
               deduper.endStep();
             },
             // oxlint-disable-next-line no-loop-func -- stop hook continuation state is scoped to this turn.
-            shouldContinueAfterStop: async ({ signal }) => {
+            shouldContinueAfterStop: async ({ signal, stopReason }) => {
               if (this.flushSteerBuffer()) return { continue: true };
               signal.throwIfAborted();
+
+              // Output-limit recovery: when the response was truncated at
+              // max_tokens, compact the context once and continue so long
+              // output resumes instead of ending the turn. Bounded to one
+              // recovery per agent session (like the overflow recovery),
+              // which matches the bounded-retry semantics of truncation
+              // recovery: repeated truncations after a recovery let the turn
+              // end normally rather than compacting in a loop. max_tokens
+              // with tool calls is handled separately as an interrupted
+              // tool-call result, and subagent turns keep their
+              // fail-on-truncation semantics.
+              if (
+                stopReason === 'max_tokens' &&
+                !this.maxTokensRecoveryAttempted &&
+                this.agent.config.profileName === 'agent'
+              ) {
+                this.maxTokensRecoveryAttempted = true;
+                this.agent.fullCompaction.begin({
+                  source: 'auto',
+                  instruction: 'The previous response was truncated by the output limit. Compact the context and continue.',
+                });
+                return { continue: true };
+              }
 
               // Convergence gate: prevent the turn from ending on an empty step,
               // a missing TodoList update for an active goal, a blocking (non-exploratory)
