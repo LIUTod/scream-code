@@ -163,13 +163,11 @@ function currencySymbol(currency: string): string {
 }
 
 /**
- * Water-level progress bar for context usage: `[█████▓▒░░░]` (10 cells).
+ * Water-level progress bar for context usage: `█████▓▒░░░` (10 cells).
  * Used cells read as water — solid depth (█) with a foam transition (▓▒)
  * hugging the water line; unused cells read as air (░). Cell count is
  * rounded from the clamped ratio, so 0% is all-air and >=100% is all-water;
- * NaN/undefined coerce through safeUsageRatio first. The closing bracket is
- * part of the returned string so a trailing background cell is never
- * swallowed by the terminal.
+ * NaN/undefined coerce through safeUsageRatio first.
  */
 function formatContextBar(usage: number, width: number = CONTEXT_BAR_WIDTH): string {
   const clamped = Math.min(1, Math.max(0, safeUsageRatio(usage)));
@@ -178,13 +176,13 @@ function formatContextBar(usage: number, width: number = CONTEXT_BAR_WIDTH): str
   const deep = Math.max(0, filled - foam);
   const used = CONTEXT_BAR_DEEP.repeat(deep) + CONTEXT_BAR_FOAM.slice(0, foam);
   const air = CONTEXT_BAR_AIR.repeat(width - filled);
-  return `[${used}${air}]`;
+  return `${used}${air}`;
 }
 
 function formatContextStatus(usage: number, tokens?: number, maxTokens?: number, barWidth = CONTEXT_BAR_WIDTH): string {
   const pct = `${(safeUsage(usage) * 100).toFixed(1)}%`;
   // The bar precedes the percentage so the footer reads
-  // `上下文：[█▓▒░░░░░░░]  28.8% (287.9k/1.0M)`; both share the usage color.
+  // `上下文：█▓▒░░░░░░░  28.8% (287.9k/1.0M)`; both share the usage color.
   // Two spaces after the bar keep the percentage from feeling cramped.
   // `barWidth` 0 collapses the bar to plain percent on narrow terminals.
   const bar = barWidth > 0 ? `${formatContextBar(usage, barWidth)}  ` : '';

@@ -13,7 +13,7 @@ export function formatTokenCount(n: number): string {
 }
 
 /**
- * Build a `[███░░░░░░░]` style bar. Returns a plain-ASCII string with
+ * Build a `███░░░░░░░` style bar. Returns a plain-ASCII string with
  * `filled`/`empty` glyphs — colouring is the caller's responsibility.
  */
 export function renderProgressBar(ratio: number, width = 20, filled = '█', empty = '░'): string {
