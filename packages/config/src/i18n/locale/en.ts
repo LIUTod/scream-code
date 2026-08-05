@@ -423,6 +423,7 @@ export const en: Record<string, string> = {
   'session_picker.empty': 'No sessions found. Press Escape to close.',
   'session_picker.cc_restricted': 'CC sessions cannot be switched or deleted. Use the file path below to manage manually',
   'session_picker.batch_delete_confirm': 'Delete {count} selected sessions?',
+  'session_picker.batch_delete_hint': '  Press Enter to confirm batch delete, Esc to cancel',
   'session_picker.batch_delete_unavailable': 'Batch delete is not available here.',
   'session_picker.batch_hint': '[space] select · [a] all · [d] delete selected ({count})',
   'session.picker_title': 'Sessions ',

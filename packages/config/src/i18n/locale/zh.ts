@@ -424,6 +424,7 @@ export const zh: Record<string, string> = {
   'session_picker.empty': '未找到会话。按 Escape 关闭。',
   'session_picker.cc_restricted': 'CC专属会话不支持切换或删除，请点击或复制下方文件路径进入手动管理',
   'session_picker.batch_delete_confirm': '删除选中的 {count} 个会话？',
+  'session_picker.batch_delete_hint': '  按 Enter 确认批量删除，Esc 取消',
   'session_picker.batch_delete_unavailable': '此处不支持批量删除。',
   'session_picker.batch_hint': '[空格] 选择 · [a] 全选 · [d] 删除选中（{count}）',
   'session.picker_title': '会话 ',

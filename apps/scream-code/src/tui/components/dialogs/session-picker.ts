@@ -238,20 +238,35 @@ export class SessionPickerComponent extends Container implements Focusable {
     }
 
     const headerLabel = t('session.picker_title');
-    const headerHint = this.confirmingDelete
-      ? this.selectedIds.size > 0
-        ? t('session_picker.batch_delete_confirm', { count: String(this.selectedIds.size) })
-        : t('session.delete_confirm')
-      : this.selectedIds.size > 0
+    const headerHint =
+      this.selectedIds.size > 0
         ? t('session_picker.batch_hint', { count: String(this.selectedIds.size) })
         : t('session.picker_hint');
     const labelWidth = visibleWidth(headerLabel);
     const hintBudget = Math.max(0, width - labelWidth);
     const shownHint = truncateToWidth(headerHint, hintBudget, ELLIPSIS);
-    const hintColor = this.confirmingDelete ? colors.warning : colors.textMuted;
     lines.push(
-      chalk.hex(colors.primary).bold(headerLabel) + chalk.hex(hintColor)(shownHint),
+      chalk.hex(colors.primary).bold(headerLabel) + chalk.hex(colors.textMuted)(shownHint),
     );
+
+    // Full confirm prompt on its own line(s) — never squeezed into the header
+    // row, so new users always see how to confirm (Enter) or cancel (Esc).
+    if (this.confirmingDelete) {
+      if (this.selectedIds.size > 0) {
+        lines.push(
+          chalk.hex(colors.warning).bold(
+            truncateToWidth(
+              t('session_picker.batch_delete_confirm', { count: String(this.selectedIds.size) }),
+              width,
+              ELLIPSIS,
+            ),
+          ),
+        );
+        lines.push(chalk.hex(colors.warning)(t('session_picker.batch_delete_hint')));
+      } else {
+        lines.push(chalk.hex(colors.warning)(t('session.delete_confirm')));
+      }
+    }
     lines.push('');
 
     const visibleStart = Math.max(
