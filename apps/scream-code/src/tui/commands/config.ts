@@ -249,7 +249,8 @@ export async function handleRlmCommand(host: SlashCommandHost, args: string): Pr
   }
 }
 
-/** /rlm-max-depth [N] — query or set the maximum RLM recursion depth. */
+/** /rlm-max-depth [N] — query or set the maximum RLM recursion depth.
+ * N=0 or no limit means unlimited (the default). */
 export async function handleRlmMaxDepthCommand(host: SlashCommandHost, args: string): Promise<void> {
   const session = host.session;
   if (session === undefined) {
@@ -258,17 +259,21 @@ export async function handleRlmMaxDepthCommand(host: SlashCommandHost, args: str
   }
   const arg = args.trim();
   if (arg.length === 0) {
-    host.showStatus('RLM max depth: run /rlm-max-depth <N> (1–10) to set it.');
+    host.showStatus('RLM max depth: run /rlm-max-depth <N> (0 or blank = unlimited) to set it.');
     return;
   }
   const parsed = Number(arg);
-  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 10) {
-    host.showError(`Invalid rlm-max-depth: ${arg} (expected integer 1–10).`);
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    host.showError(`Invalid rlm-max-depth: ${arg} (expected a non-negative integer, 0 = unlimited).`);
     return;
   }
   try {
     await session.setRlmMaxDepth(parsed);
-    host.showStatus(`RLM max depth set to ${parsed}.`, host.state.theme.colors.success);
+    if (parsed === 0) {
+      host.showStatus('RLM recursion depth set to unlimited.', host.state.theme.colors.success);
+    } else {
+      host.showStatus(`RLM max depth set to ${parsed}.`, host.state.theme.colors.success);
+    }
   } catch (error) {
     const msg = formatErrorMessage(error);
     host.showError(`Failed to set rlm max depth: ${msg}`);

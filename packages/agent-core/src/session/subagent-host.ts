@@ -77,11 +77,9 @@ export class SessionSubagentHost {
       this.ownerAgentId,
     );
     // RLM recursion depth: a subagent spawned from an RLM kernel runs one
-    // level deeper than its parent, so the rlm.run handler can cap nested
-    // rlm() spawns. Depth is carried on the agent instance, not the process.
-    // The max-depth cap is inherited too — otherwise /rlm-max-depth 2+ would
-    // never take effect because children default to max=1 and would reject
-    // any grandchild spawn regardless of the parent's configured limit.
+    // level deeper than its parent. Depth is carried on the agent instance,
+    // not the process. The max-depth cap is inherited too, so /rlm-max-depth
+    // configured on the root applies uniformly to every descendant.
     agent.setRlmDepth(parent.getRlmDepth() + 1);
     agent.setRlmMaxDepth(parent.getRlmMaxDepth());
     const controller = new AbortController();

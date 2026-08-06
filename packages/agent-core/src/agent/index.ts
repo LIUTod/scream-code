@@ -244,13 +244,13 @@ export class Agent {
   }
 
   private rlmEnabled = false;
-  /** RLM recursion depth: 0 for the root agent, +1 per spawned subagent.
-   * Capped by rlmMaxDepth in the rlm.run host handler so a model cannot
-   * recurse rlm() subagents without bound. */
+  /** RLM recursion depth: 0 for the root agent, +1 per spawned subagent. */
   private rlmDepth = 0;
-  /** Maximum allowed RLM recursion depth (default 1: root may spawn children,
-   * children may not spawn grandchildren). Configurable via /rlm-max-depth. */
-  private rlmMaxDepth = 1;
+  /** Maximum allowed RLM recursion depth. `Infinity` (the default) means
+   * unlimited recursion. Set to a positive integer via /rlm-max-depth to
+   * cap the chain (e.g. 1 = root may spawn children, children may not spawn
+   * grandchildren); 0 is treated as unlimited as well. */
+  private rlmMaxDepth = Infinity;
 
   getRlmDepth(): number {
     return this.rlmDepth;
@@ -265,7 +265,11 @@ export class Agent {
   }
 
   setRlmMaxDepth(maxDepth: number): void {
-    this.rlmMaxDepth = Math.max(1, Math.min(10, Math.trunc(maxDepth)));
+    if (!Number.isFinite(maxDepth) || maxDepth <= 0) {
+      this.rlmMaxDepth = Infinity;
+      return;
+    }
+    this.rlmMaxDepth = Math.trunc(maxDepth);
   }
 
   /** Disposes the persistent python kernel (if any) and resets RLM mode.

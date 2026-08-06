@@ -235,9 +235,9 @@ interface McpToolEntry {
  *
  * Recursion guard: a subagent may only spawn its own rlm() children if its
  * depth is below the cap. Depth is carried on each agent instance (root = 0,
- * every spawned subagent = parent + 1), so a model cannot recurse rlm()
- * subagents without bound and burn tokens on an infinite spawn chain. The
- * cap itself is per-agent (setRlmMaxDepth / /rlm-max-depth), default 1.
+ * every spawned subagent = parent + 1). The cap is per-agent
+ * (setRlmMaxDepth / /rlm-max-depth); it is `Infinity` by default — unlimited
+ * recursion — and a positive integer when the user opts into a limit.
  */
 function createRlmHostHandlers(agent: Agent): HostRequestHandlers {
   const handles = new Map<
