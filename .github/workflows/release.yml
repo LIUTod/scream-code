@@ -74,11 +74,13 @@ jobs:
       - name: Build workspace packages
         run: pnpm run build:packages
 
-      - name: Typecheck
-        run: pnpm run typecheck
-
-      - name: Test
-        run: pnpm run test
+      # Windows job exists to verify the RLM persistent-kernel tests run on a
+      # real Windows python (spawn python/python3 + pipe REPL + file bridge).
+      # agent-core is where RLM lives and its tests do not depend on the
+      # @scream-code/config workspace link (which resolves inconsistently on
+      # Windows). Typecheck is covered by the linux job.
+      - name: Test (agent-core)
+        run: pnpm --filter @scream-code/agent-core test
 
   release:
     name: Release
