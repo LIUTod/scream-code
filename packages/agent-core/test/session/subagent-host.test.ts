@@ -94,6 +94,81 @@ describe('SessionSubagentHost', () => {
     ]);
   });
 
+  it('lets a child inherit RLM mode from a parent running RLM', async () => {
+    const parent = testAgent();
+    parent.configure();
+    parent.newEvents();
+    // Enable RLM on the parent (as /rlm does), so spawned children inherit it.
+    (parent.agent as unknown as { inheritRlm(): void }).inheritRlm();
+
+    const summary =
+      'Completed the subagent task completely and returned a detailed enough summary for the parent agent to continue confidently without repeating the child agent work. '.repeat(
+        2,
+      );
+    const child = testAgent();
+    child.mockNextResponse({ type: 'text', text: summary });
+    const session = fakeSession(parent.agent, child.agent);
+    const host = new SessionSubagentHost(session, 'main');
+
+    const handle = await host.spawn('coder', {
+      parentToolCallId: 'call_agent',
+      prompt: 'Implement the fix',
+      description: 'Fix bug',
+      runInBackground: false,
+      signal,
+    });
+    await handle.completion;
+
+    // The child inherited RLM: python tool mounted, recursion chain continues.
+    const childAgent = child.agent as unknown as {
+      getRlmEnabled(): boolean;
+      getRlmDepth(): number;
+      getRlmMaxDepth(): number;
+      tools: { getActiveTools(): string[] };
+    };
+    expect(childAgent.getRlmEnabled()).toBe(true);
+    expect(childAgent.getRlmDepth()).toBe(1); // parent depth 0 + 1
+    expect(childAgent.getRlmMaxDepth()).toBe(Infinity); // inherited unlimited
+    // The critical assertion: the python tool must actually be mounted after
+    // profile application — otherwise the child cannot call rlm() and the
+    // recursion chain stops at the first level (a regression this test must
+    // catch).
+    expect(childAgent.tools.getActiveTools()).toContain('python');
+  });
+
+  it('does not give RLM to a child when the parent is not in RLM mode', async () => {
+    const parent = testAgent();
+    parent.configure();
+    parent.newEvents();
+
+    const summary =
+      'Completed the subagent task completely and returned a detailed enough summary for the parent agent to continue confidently without repeating the child agent work. '.repeat(
+        2,
+      );
+    const child = testAgent();
+    child.mockNextResponse({ type: 'text', text: summary });
+    const session = fakeSession(parent.agent, child.agent);
+    const host = new SessionSubagentHost(session, 'main');
+
+    const handle = await host.spawn('coder', {
+      parentToolCallId: 'call_agent',
+      prompt: 'Implement the fix',
+      description: 'Fix bug',
+      runInBackground: false,
+      signal,
+    });
+    await handle.completion;
+
+    const childAgent = child.agent as unknown as {
+      getRlmEnabled(): boolean;
+      getRlmDepth(): number;
+      tools: { getActiveTools(): string[] };
+    };
+    expect(childAgent.getRlmEnabled()).toBe(false);
+    expect(childAgent.getRlmDepth()).toBe(1);
+    expect(childAgent.tools.getActiveTools()).not.toContain('python');
+  });
+
   it('ignores blocking results from subagent lifecycle hooks', async () => {
     const trigger = vi.fn(async () => [{ action: 'block', reason: 'observer only' }]);
     const fireAndForgetTrigger = vi.fn(() => Promise.resolve([{ action: 'block' }]));

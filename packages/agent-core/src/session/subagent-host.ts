@@ -80,6 +80,9 @@ export class SessionSubagentHost {
     // level deeper than its parent. Depth is carried on the agent instance,
     // not the process. The max-depth cap is inherited too, so /rlm-max-depth
     // configured on the root applies uniformly to every descendant.
+    // RLM inheritance itself is applied in configureChild, after the profile
+    // has mounted its tools — doing it here would be wiped by useProfile's
+    // setActiveTools(profile.tools) overwrite.
     agent.setRlmDepth(parent.getRlmDepth() + 1);
     agent.setRlmMaxDepth(parent.getRlmMaxDepth());
     const controller = new AbortController();
@@ -326,6 +329,15 @@ export class SessionSubagentHost {
 
     const context = await prepareSystemPromptContext(child.jian);
     child.useProfile(profile, context);
+
+    // RLM inheritance must happen AFTER useProfile mounts the profile's tools
+    // (setActiveTools overwrites the active set). Mounting python here means
+    // the child can keep spawning its own subagents — the recursion chain
+    // continues down the tree instead of stopping at the first level. Only
+    // applies when the parent is actually running in RLM mode.
+    if (parent.getRlmEnabled()) {
+      child.inheritRlm();
+    }
   }
 
   private resolveModelBinding(profileName: string): string | undefined {

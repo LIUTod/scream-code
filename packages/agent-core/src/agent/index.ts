@@ -315,6 +315,30 @@ export class Agent {
     this.emitStatusUpdated();
   }
 
+  /** Returns whether RLM (persistent python mode) is currently enabled. */
+  getRlmEnabled(): boolean {
+    return this.rlmEnabled;
+  }
+
+  /**
+   * Lets a subagent inherit RLM mode from its parent at spawn time: mounts
+   * the python tool (so the child can keep recursing) and records rlm.enter,
+   * mirroring setRlmEnabled(true). The rlm.enter record keeps enter/exit
+   * symmetric: the child's disposeRlm (triggered by session close) emits
+   * rlm.exit, so a subagent's records must contain the matching enter or the
+   * pair is unbalanced. A status event is NOT emitted here — the child's own
+   * turn is about to start and the parent's record already represents this
+   * recursion chain. Non-RLM parents never call this.
+   */
+  inheritRlm(): void {
+    this.rlmEnabled = true;
+    const current = this.tools.getActiveTools();
+    if (!current.includes('python')) {
+      this.tools.setActiveTools([...current, 'python']);
+    }
+    this.records.logRecord({ type: 'rlm.enter' });
+  }
+
   /** Restores RLM mode from a persisted record during replay. Does not log
    * a new record and does not emit a status update (both are suppressed while
    * records are restoring). */
