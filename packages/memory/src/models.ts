@@ -27,6 +27,10 @@ export interface MemoryMemo {
   projectDir: string;
   /** Semantic tags summarizing the task domain (3-5 items). */
   tags?: string[];
+  /** Optional note/suggestion attached to this memo — a soft, AI-readable
+   * supplement (e.g. a reusable behavioural hint) that helps future turns
+   * understand the memo. Advisory only, not a user-enforced preference. */
+  note?: string;
 }
 
 /** JSONL envelope — one line in entries.jsonl. */
@@ -50,6 +54,7 @@ export interface MemoryMemoSummary {
   recordedAt: number;
   projectDir: string;
   tags?: string[];
+  note?: string;
 }
 
 /** Result of listing/filtering memos. */
@@ -85,6 +90,7 @@ export function createMemoryMemo(
     recordedAt: partial.recordedAt ?? Date.now(),
     projectDir: partial.projectDir ?? '',
     tags: normalizedTags(partial.tags),
+    note: partial.note,
   };
 }
 
@@ -107,5 +113,6 @@ export function toSummary(memo: MemoryMemo): MemoryMemoSummary {
     recordedAt: memo.recordedAt,
     projectDir: memo.projectDir,
     tags: memo.tags,
+    note: memo.note,
   };
 }

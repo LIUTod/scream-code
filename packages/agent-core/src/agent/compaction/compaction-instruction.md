@@ -27,7 +27,8 @@ For each completed task loop found, output a structured experience record **at t
   "outcome": "<final result, e.g. '完成', '部分完成', '失败: reason'>",
   "whatFailed": "<dead ends tried — things that didn't work, or 'none'>",
   "whatWorked": "<key actions that ultimately worked, or 'none'>",
-  "tags": ["<tag1>", "<tag2>", "<tag3>"]
+  "tags": ["<tag1>", "<tag2>", "<tag3>"],
+  "note": "<optional: a soft, AI-readable note/suggestion that makes the record easier for future turns to understand — e.g. '这类任务先查接口可用性再写代码'. Omit if none>"
 }
 ```
 
@@ -35,9 +36,10 @@ Guidelines:
 - Record important failed attempts in "whatFailed" to help avoid repeating mistakes.
 - Record key successful actions in "whatWorked" to help reuse effective approaches.
 - Include 3-5 semantic "tags" summarizing the task domain, tech stack, or action type (e.g. ["react", "auth", "部署"]).
+- "note" is optional: a one-sentence advisory note that helps future AI understand/reuse the record faster. It is a soft suggestion, not a user-enforced rule.
 - Skip in-progress work unless it contains a valuable error+fix experience.
 - Merge closely related sub-tasks into a single record.
-- Use the exact field names and JSON format shown above.
+- Use the exact field names and JSON format shown above (no extra fields beyond "note").
 
 If no completed task loops are found in the compacted messages, output:
 ```memory-memo

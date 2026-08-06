@@ -520,6 +520,7 @@ export const en: Record<string, string> = {
   'memory.session_label': 'Session: ',
   'memory.pitfall_label': 'Pitfalls: ',
   'memory.experience_label': 'Experience: ',
+  'memory.note_label': 'Note: ',
   'memory.detail_nav_hint': '  Enter/Esc Back  |  i Inject  |  d Delete',
 
   // ─── skill-center ─────────────

@@ -578,6 +578,18 @@ export class MemoryPickerComponent extends Container implements Focusable {
       }
       lines.push('');
     }
+    if (memo.note !== undefined && memo.note.length > 0) {
+      const label = t('memory.note_label');
+      const wrapped = wrapText(memo.note, contentWidth - visibleWidth(label));
+      for (let i = 0; i < wrapped.length; i++) {
+        const prefix = i === 0 ? `${indent}${label}` : indent + ' '.repeat(visibleWidth(label));
+        lines.push(truncateToWidth(
+          chalk.hex(c.textMuted)(prefix + wrapped[i]),
+          width, ELLIPSIS,
+        ));
+      }
+      lines.push('');
+    }
 
     lines.push(chalk.hex(c.textMuted)(
       truncateToWidth(t('memory.detail_nav_hint'), width, ELLIPSIS),

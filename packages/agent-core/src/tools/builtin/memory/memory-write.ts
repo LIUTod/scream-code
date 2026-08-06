@@ -32,6 +32,10 @@ export const MemoryWriteInputSchema = z.object({
     .array(z.string())
     .optional()
     .describe('3-5 semantic tags summarizing the task domain, tech stack, or action type (e.g. ["react", "auth", "部署"]).'),
+  note: z
+    .string()
+    .optional()
+    .describe('Optional advisory note that helps future AI understand/reuse this memo faster — a soft suggestion, not a user-enforced rule.'),
 });
 
 export type MemoryWriteInput = z.infer<typeof MemoryWriteInputSchema>;
@@ -80,6 +84,7 @@ export class MemoryWriteTool implements BuiltinTool<MemoryWriteInput> {
             ? args.tags
             : generateTags(`${userNeed} ${approach}`),
         );
+        const note = args.note ? stripMemoryTags(args.note).trim() : undefined;
 
         const memo = createMemoryMemo({
           sourceSessionId: sessionId,
@@ -90,6 +95,7 @@ export class MemoryWriteTool implements BuiltinTool<MemoryWriteInput> {
           whatFailed: whatFailed.length === 0 ? 'none' : whatFailed,
           whatWorked: whatWorked.length === 0 ? 'none' : whatWorked,
           tags,
+          note: note && note.length > 0 ? note : undefined,
           extractionSource: 'manual',
           projectDir: this.agent.config.cwd,
         });

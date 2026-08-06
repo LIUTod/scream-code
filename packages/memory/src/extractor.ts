@@ -26,6 +26,7 @@ export function parseMemoryMemos(text: string): MemoryMemo[] {
 
       const rawTags = parsed['tags'];
       const tags = Array.isArray(rawTags) ? normalizeTags(rawTags) : undefined;
+      const note = typeof parsed['note'] === 'string' ? parsed['note'].trim() : undefined;
 
       memos.push(
         createMemoryMemo({
@@ -37,6 +38,7 @@ export function parseMemoryMemos(text: string): MemoryMemo[] {
           whatWorked:
             typeof parsed['whatWorked'] === 'string' ? parsed['whatWorked'].trim() : 'none',
           tags,
+          note: note && note.length > 0 ? note : undefined,
           extractionSource: 'compaction',
           sourceSessionId: '', // filled in by caller
           sourceSessionTitle: '', // filled in by caller
@@ -90,7 +92,8 @@ export function buildExitExtractionPrompt(
   "outcome": "<最终结果，如'完成'、'部分完成'、'失败：原因'>",
   "whatFailed": "<踩坑记录：试了但不行的路，无则填 'none'>",
   "whatWorked": "<成功经验：最终奏效的关键动作，无则填 'none'>",
-  "tags": ["<标签1>", "<标签2>", "<标签3>"]
+  "tags": ["<标签1>", "<标签2>", "<标签3>"],
+  "note": "<可选：给 AI 的补充说明/建议——让未来理解这条经验更容易，如'这类任务先查接口可用性再写代码'。无则省略>"
 }
 \`\`\`
 
@@ -98,9 +101,10 @@ export function buildExitExtractionPrompt(
 - tags 是 3-5 个语义标签，概括任务领域/技术栈/动作类型，例如 ["react", "auth", "部署"]
 - whatFailed 记录重要的错误尝试，帮助未来避免重蹈覆辙
 - whatWorked 记录最终成功的关键动作，帮助未来复用经验
+- note 是可选字段，写一句能让未来 AI 更快理解/复用这条经验的说明或建议（软性提示，非强制规则）
 - 跳过未完成的工作，除非其中包含有价值的踩坑经验
 - 将紧密相关的子任务合并为一条记录
-- 严格遵守字段名和 JSON 格式，不要添加额外字段
+- 严格遵守字段名和 JSON 格式（除 note 外不要添加额外字段）
 
 如果没有已完成的任务闭环，输出：
 \`\`\`memory-memo

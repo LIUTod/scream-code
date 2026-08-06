@@ -521,6 +521,7 @@ export const zh: Record<string, string> = {
   'memory.session_label': '会话: ',
   'memory.pitfall_label': '踩坑: ',
   'memory.experience_label': '经验: ',
+  'memory.note_label': '笔记: ',
   'memory.detail_nav_hint': '  Enter/Esc 返回  |  i 注入  |  d 删除',
 
   // ─── skill-center ─────────────
