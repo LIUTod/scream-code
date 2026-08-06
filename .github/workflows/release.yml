@@ -67,6 +67,13 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # The root typecheck script depends on workspace package dists
+      # (build:packages). pnpm install does not build them (no prepare
+      # script), and the ubuntu job passes only because its cache happens to
+      # carry the dists — Windows starts cold, so build explicitly.
+      - name: Build workspace packages
+        run: pnpm run build:packages
+
       - name: Typecheck
         run: pnpm run typecheck
 
