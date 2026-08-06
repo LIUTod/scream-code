@@ -232,6 +232,7 @@ export class SessionEventHandler {
       case 'compaction.completed': this.handleCompactionEnd(event, sendQueued); break;
       case 'compaction.blocked': break;
       case 'compaction.cancelled': this.handleCompactionCancel(event, sendQueued); break;
+      case 'skill_candidate': this.handleSkillCandidate(event); break;
       case 'subagent.spawned': this.handleSubagentSpawned(event); break;
       case 'subagent.started': this.handleSubagentStarted(event); break;
       case 'subagent.completed': this.handleSubagentCompleted(event); break;
@@ -861,6 +862,40 @@ export class SessionEventHandler {
     this.host.streamingUI.cancelCompaction();
     this.lastCompactionTrigger = undefined;
     this.finishCompaction(sendQueued);
+  }
+
+  /** Candidates already prompted this session, to avoid repeating the request. */
+  private promptedSkillCandidates = new Set<string>();
+
+  /**
+   * Handles a `skill_candidate` event emitted after compaction detected a
+   * reusable process in the summary. Best-effort and non-fatal: if the session
+   * is unavailable or the prompt fails, nothing happens — the user simply sees
+   * no confirmation. When it works, the model runs an AskUserQuestion dialog
+   * (确定/忽略) so the user can confirm or dismiss with a single keystroke,
+   * then generates the skill via MakeSkillPlanTool on confirmation.
+   */
+  private handleSkillCandidate(event: Extract<Event, { type: 'skill_candidate' }>): void {
+    try {
+      const { name, purpose } = event.candidate;
+      if (name.length === 0) return;
+      if (this.promptedSkillCandidates.has(name)) return;
+      this.promptedSkillCandidates.add(name);
+      const session = this.host.session;
+      if (session === undefined) return;
+      const purposeText = purpose ? `（${purpose}）` : '';
+      const request =
+        `检测到可复用过程「${name}」${purposeText}。` +
+        '请用 AskUserQuestion 工具询问用户是否将其保存为可复用技能（选项：生成 / 忽略）。' +
+        '用户选择「生成」后，用 MakeSkillPlanTool 生成该技能；选择「忽略」则直接说明已跳过。';
+      void session.prompt(request).catch(() => {
+        // Fire-and-forget confirmation: a prompt failure (e.g. session closed)
+        // is swallowed so it never surfaces as an unhandled rejection. The user
+        // simply sees no confirmation in that rare case.
+      });
+    } catch {
+      // Best-effort: a failure here never interrupts the event loop or the session.
+    }
   }
 
   private finishCompaction(sendQueued: (item: QueuedMessage) => void): void {

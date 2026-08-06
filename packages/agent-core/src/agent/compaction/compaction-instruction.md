@@ -100,3 +100,13 @@ If no completed task loops are found in the compacted messages, output:
 
 - [Detailed non tool use user message]
 - ...
+
+## Skill candidates
+
+Scan the compressed messages for reusable processes (project-specific build
+steps, recurring debugging patterns, or tool workflows). If any is genuinely
+worth capturing as a reusable skill, output at the very end, at most one:
+
+[[skill-candidate: <name>|<one-line purpose>|<evidence>]]
+
+Omit if none.

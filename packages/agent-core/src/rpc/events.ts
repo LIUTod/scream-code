@@ -273,6 +273,16 @@ export interface CompactionCompletedEvent {
   readonly result: CompactionResult;
 }
 
+/** A reusable process worth capturing as a skill, detected from a compaction summary. */
+export interface SkillCandidateEvent {
+  readonly type: 'skill_candidate';
+  readonly candidate: {
+    readonly name: string;
+    readonly purpose: string;
+    readonly evidence: string;
+  };
+}
+
 export interface BackgroundTaskStartedEvent {
   readonly type: 'background.task.started';
   readonly info: BackgroundTaskInfo;
@@ -338,6 +348,7 @@ export type AgentEvent =
   | CompactionBlockedEvent
   | CompactionCancelledEvent
   | CompactionCompletedEvent
+  | SkillCandidateEvent
   | BackgroundTaskStartedEvent
   | BackgroundTaskUpdatedEvent
   | BackgroundTaskTerminatedEvent

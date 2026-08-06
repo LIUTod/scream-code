@@ -643,6 +643,7 @@ export class FullCompaction {
       this.lowWaterMark = Math.floor(this.effectiveTokenCount * 1.1);
       await this.extractAndStoreMemos(processedSummary);
       this.triggerPostCompactHook(data, result);
+      this.detectSkillCandidates(processedSummary);
 
       // Compaction succeeded — reset circuit breaker
       this.consecutiveCompactionFailures = 0;
@@ -770,6 +771,32 @@ export class FullCompaction {
       count: memos.length,
       sessionId,
     });
+  }
+
+  /**
+   * Detects [[skill-candidate: <name>|<purpose>|<evidence>]] markers in the
+   * compaction summary and emits a `skill_candidate` event for each one (at
+   * most one per compact). Best-effort and fully isolated: a parse failure or
+   * a missing marker never affects compaction or memory extraction — this
+   * method only reads the summary and emits an event.
+   */
+  private detectSkillCandidates(summary: string): void {
+    try {
+      const matches = summary.matchAll(
+        /\[\[skill-candidate:\s*([^|\]]+)\|([^|\]]+)\|([^|\]]+)\]\]/g,
+      );
+      for (const m of matches) {
+        const name = m[1]!.trim();
+        if (name.length === 0) continue;
+        this.agent.emitEvent({
+          type: 'skill_candidate',
+          candidate: { name, purpose: m[2]!.trim(), evidence: m[3]!.trim() },
+        });
+        break; // at most one candidate per compact
+      }
+    } catch (error) {
+      this.agent.log.warn('Skill candidate detection failed', { error: String(error) });
+    }
   }
 
   /**

@@ -503,4 +503,61 @@ describe('SessionEventHandler', () => {
     expect(appendProgress).toHaveBeenCalledWith('working');
     expect(appendLiveOutput).toHaveBeenCalledTimes(1);
   });
+
+  describe('skill_candidate', () => {
+    function makeHandlerWithSession() {
+      const host = createMockHost();
+      const prompt = vi.fn().mockResolvedValue(undefined);
+      host.session = { prompt } as unknown as Session;
+      const handler = new SessionEventHandler(host);
+      return { handler, prompt, host };
+    }
+
+    function candidateEvent(name: string, purpose = 'test purpose'): Event {
+      return {
+        type: 'skill_candidate',
+        sessionId: 'ses-test',
+        agentId: 'main',
+        candidate: { name, purpose, evidence: 'evidence' },
+      } as unknown as Event;
+    }
+
+    it('prompts the session with an AskUserQuestion request when a candidate is detected', () => {
+      const { handler, prompt } = makeHandlerWithSession();
+      handler.handleEvent(candidateEvent('weather-report-doc'), vi.fn());
+      expect(prompt).toHaveBeenCalledTimes(1);
+      const request = String(prompt.mock.calls[0]![0]);
+      expect(request).toContain('weather-report-doc');
+      expect(request).toContain('AskUserQuestion');
+      expect(request).toContain('生成');
+    });
+
+    it('deduplicates candidates by name within a session', () => {
+      const { handler, prompt } = makeHandlerWithSession();
+      handler.handleEvent(candidateEvent('build-flow'), vi.fn());
+      handler.handleEvent(candidateEvent('build-flow'), vi.fn());
+      expect(prompt).toHaveBeenCalledTimes(1);
+    });
+
+    it('is a no-op when there is no active session', () => {
+      const host = createMockHost();
+      expect(host.session).toBeUndefined();
+      const handler = new SessionEventHandler(host);
+      expect(() => handler.handleEvent(candidateEvent('x'), vi.fn())).not.toThrow();
+    });
+
+    it('is a no-op for an empty candidate name', () => {
+      const { handler, prompt } = makeHandlerWithSession();
+      handler.handleEvent(candidateEvent(''), vi.fn());
+      expect(prompt).not.toHaveBeenCalled();
+    });
+
+    it('survives a prompt rejection (no unhandled rejection)', async () => {
+      const { handler, prompt } = makeHandlerWithSession();
+      prompt.mockRejectedValueOnce(new Error('session closed'));
+      handler.handleEvent(candidateEvent('x'), vi.fn());
+      await vi.waitFor(() => expect(prompt).toHaveBeenCalled());
+      // The .catch() swallows the rejection; the test simply must not throw.
+    });
+  });
 });
