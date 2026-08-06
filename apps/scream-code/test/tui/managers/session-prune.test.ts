@@ -33,6 +33,12 @@ describe('isPrunableEmptySession', () => {
     expect(isPrunableEmptySession(summary({ title: '' }), now)).toBe(true);
   });
 
+  it('prunes a session whose title is still the placeholder "New Session"', () => {
+    // The default title set at session creation is 'New Session'; such a
+    // session is untitled in practice and must be pruned like a no-title one.
+    expect(isPrunableEmptySession(summary({ title: 'New Session' }), now)).toBe(true);
+  });
+
   it('keeps archived sessions', () => {
     expect(isPrunableEmptySession(summary({ archived: true }), now)).toBe(false);
   });
