@@ -33,6 +33,8 @@ import {
   handleWolfpackCommand,
   handleThemeCommand,
   handleYoloCommand,
+  handleRlmCommand,
+  handleRlmMaxDepthCommand,
   showModelPicker,
   showPermissionPicker,
   showSettingsSelector,
@@ -283,6 +285,12 @@ async function handleBuiltInSlashCommand(
       return;
     case 'ask':
       await handleAskCommand(host, args);
+      return;
+    case 'rlm':
+      await handleRlmCommand(host, args);
+      return;
+    case 'rlm-max-depth':
+      await handleRlmMaxDepthCommand(host, args);
       return;
     case 'auto':
       await handleAutoCommand(host, args);

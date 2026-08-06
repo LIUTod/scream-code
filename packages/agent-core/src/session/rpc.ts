@@ -24,6 +24,8 @@ import type {
   RegisterToolPayload,
   SessionAPI,
   SetActiveToolsPayload,
+  SetRlmEnabledPayload,
+  SetRlmMaxDepthPayload,
   SetModelPayload,
   SetPermissionPayload,
   SetRuntimeSystemPromptPayload,
@@ -198,6 +200,14 @@ export class SessionAPIImpl implements PromisableMethods<SessionAPI> {
     return this.getAgent(agentId).setActiveTools(payload);
   }
 
+  setRlmEnabled({ agentId, ...payload }: AgentScopedPayload<SetRlmEnabledPayload>) {
+    return this.getAgent(agentId).setRlmEnabled(payload);
+  }
+
+  setRlmMaxDepth({ agentId, ...payload }: AgentScopedPayload<SetRlmMaxDepthPayload>) {
+    return this.getAgent(agentId).setRlmMaxDepth(payload);
+  }
+
   stopBackground({ agentId, ...payload }: AgentScopedPayload<StopBackgroundPayload>) {
     return this.getAgent(agentId).stopBackground(payload);
   }
@@ -298,6 +308,10 @@ export class SessionAPIImpl implements PromisableMethods<SessionAPI> {
 
   getWolfpackMode({ agentId }: AgentScopedPayload<EmptyPayload>) {
     return this.getAgent(agentId).getWolfpackMode({});
+  }
+
+  getRlmEnabled({ agentId }: AgentScopedPayload<EmptyPayload>) {
+    return this.getAgent(agentId).getRlmEnabled({});
   }
 
   private getAgent(agentId: string): PromisableMethods<AgentAPI> {

@@ -190,6 +190,13 @@ export interface UnregisterToolPayload {
 export interface SetActiveToolsPayload {
   readonly names: readonly string[];
 }
+
+export interface SetRlmEnabledPayload {
+  readonly enabled: boolean;
+}
+export interface SetRlmMaxDepthPayload {
+  readonly maxDepth: number;
+}
 export interface StopBackgroundPayload {
   readonly taskId: string;
   /** Free-form human-readable reason persisted with the task record. */
@@ -391,6 +398,8 @@ export interface AgentAPI {
   registerTool: (payload: RegisterToolPayload) => void;
   unregisterTool: (payload: UnregisterToolPayload) => void;
   setActiveTools: (payload: SetActiveToolsPayload) => void;
+  setRlmEnabled: (payload: SetRlmEnabledPayload) => void;
+  setRlmMaxDepth: (payload: SetRlmMaxDepthPayload) => void;
   stopBackground: (payload: StopBackgroundPayload) => void;
   clearContext: (payload: EmptyPayload) => void;
   undoHistory: (payload: UndoHistoryPayload) => void;
@@ -415,6 +424,7 @@ export interface AgentAPI {
   getTodos: (payload: EmptyPayload) => readonly TodoItem[];
   setGoalBudget: (payload: SetGoalBudgetPayload) => GoalSnapshotData;
   getWolfpackMode: (payload: EmptyPayload) => boolean;
+  getRlmEnabled: (payload: EmptyPayload) => boolean;
 }
 
 type AgentAPIWithId = WithAgentId<AgentAPI>;

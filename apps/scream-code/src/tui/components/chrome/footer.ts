@@ -479,6 +479,7 @@ export class FooterComponent implements Component {
       left.push(chalk.hex(isFusion ? colors.fusionPlanMode : colors.planMode).bold(isFusion ? t('badge.fusion') : t('badge.plan')));
     }
     if (state.wolfpackMode) left.push(chalk.hex(colors.wolfpackMode).bold(t('badge.wolfpack')));
+    if (state.rlmEnabled) left.push(chalk.hex(colors.rlmMode).bold(t('badge.rlm')));
     if (state.goalActive && state.goal) {
       const goalLabel = formatGoalBadge(state.goal);
       left.push(chalk.hex(colors.primary).bold(goalLabel));

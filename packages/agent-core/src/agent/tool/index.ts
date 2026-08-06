@@ -3,6 +3,8 @@ import type { ChatProvider, Tool } from '@scream-code/ltod';
 import picomatch from 'picomatch';
 
 import type { Agent } from '..';
+import type { HostRequestHandlers } from '../../tools/builtin/python/python';
+import type { SubagentHandle } from '../../session/subagent-host';
 import { makeErrorPayload } from '../../errors';
 import type { ExecutableTool, ExecutableToolResult } from '../../loop';
 import { createMcpAuthTool } from '../../mcp/auth-tool';
@@ -223,6 +225,84 @@ function createGoalGrader(agent: Agent): GoalGraderFn {
 interface McpToolEntry {
   readonly tool: ExecutableTool;
   readonly serverName: string;
+}
+
+/**
+ * Host bridge handlers for the /rlm python kernel: `rlm.run` spawns a
+ * subagent (reusing the subagent host) and returns its handle id;
+ * `rlm.result` waits for that subagent's final summary. Handles are kept in
+ * a closure map for the lifetime of the ToolManager (one per session).
+ *
+ * Recursion guard: a subagent may only spawn its own rlm() children if its
+ * depth is below the cap. Depth is carried on each agent instance (root = 0,
+ * every spawned subagent = parent + 1), so a model cannot recurse rlm()
+ * subagents without bound and burn tokens on an infinite spawn chain. The
+ * cap itself is per-agent (setRlmMaxDepth / /rlm-max-depth), default 1.
+ */
+function createRlmHostHandlers(agent: Agent): HostRequestHandlers {
+  const handles = new Map<
+    string,
+    { completion: SubagentHandle['completion']; name: string; controller: AbortController }
+  >();
+  return {
+    'rlm.run': async (payload) => {
+      const host = agent.subagentHost;
+      if (host === undefined) throw new Error('subagent host unavailable');
+      if (agent.getRlmDepth() >= agent.getRlmMaxDepth()) {
+        throw new Error(
+          `RLM recursion depth limit reached (depth ${agent.getRlmDepth()}, max ${agent.getRlmMaxDepth()}). ` +
+            'Nested rlm() subagents are not allowed.',
+        );
+      }
+      const task = String(payload['task'] ?? '');
+      const name = String(payload['name'] ?? 'subagent').slice(0, 64);
+      const controller = new AbortController();
+      const handle = await host.spawn('coder', {
+        parentToolCallId: `rlm_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        prompt: task,
+        description: `rlm subagent: ${name}`,
+        runInBackground: false,
+        signal: controller.signal,
+      });
+      handles.set(handle.agentId, { completion: handle.completion, name, controller });
+      // The kernel may be killed/restarted between rlm.run and rlm.result,
+      // which would otherwise leave the handle in the map forever and keep
+      // the subagent's completion promise alive with no consumer. Deleting on
+      // settlement bounds the map to in-flight children only. Use .then with
+      // both callbacks (not .finally) so a rejected completion — subagent
+      // failure, or abort via the __dispose__ hook — is consumed instead of
+      // surfacing as an unhandled promise rejection (which crashes the
+      // process on Node >= 15).
+      void handle.completion.then(
+        () => {
+          handles.delete(handle.agentId);
+        },
+        () => {
+          handles.delete(handle.agentId);
+        },
+      );
+      return { id: handle.agentId, name };
+    },
+    'rlm.result': async (payload) => {
+      const id = String(payload['id']);
+      const entry = handles.get(id);
+      if (entry === undefined) throw new Error(`unknown rlm handle: ${id}`);
+      const completion = await entry.completion;
+      return { result: completion.result };
+    },
+    // Convention hook invoked by PythonTool.dispose: cancels every in-flight
+    // rlm() subagent so a kernel teardown (session close / /rlm off) does not
+    // leave children burning tokens with no consumer. After disposal the map
+    // is cleared; late rlm.result calls then fail with "unknown rlm handle"
+    // instead of awaiting a promise that will never resolve.
+    __dispose__: async () => {
+      for (const { controller } of handles.values()) {
+        controller.abort(new Error('rlm kernel disposed'));
+      }
+      handles.clear();
+      return {};
+    },
+  };
 }
 
 export class ToolManager {
@@ -557,6 +637,14 @@ export class ToolManager {
     });
   }
 
+  getActiveTools(): readonly string[] {
+    return [...this.enabledTools];
+  }
+
+  getBuiltinTool(name: string): BuiltinTool | undefined {
+    return this.builtinTools.get(name);
+  }
+
   setActiveTools(names: readonly string[]): void {
     this.agent.records.logRecord({
       type: 'tools.set_active_tools',
@@ -656,6 +744,13 @@ export class ToolManager {
           allowBackground,
           availableTools: this.enabledTools,
         }),
+        // /rlm mode: persistent python kernel. Registered but NOT enabled by
+        // default — activated only when the /rlm command adds 'python' to the
+        // active tools (setActiveTools), so default behaviour is unchanged.
+        // Host handlers are ALWAYS passed so the kernel bootstrap always
+        // defines rlm()/rlm_wait() — the handler body checks subagentHost at
+        // call time (never at construction), so rlm() never NameErrors.
+        new b.PythonTool(cwd, { hostHandlers: createRlmHostHandlers(this.agent) }),
         (modelCapabilities.image_in || modelCapabilities.video_in) &&
           new b.ReadMediaFileTool(jian, workspace, modelCapabilities, videoUploader),
         new b.EnterPlanModeTool(this.agent),

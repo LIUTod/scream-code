@@ -50,6 +50,8 @@ export interface ColorPalette {
   planMode: string;
   fusionPlanMode: string;
   wolfpackMode: string;
+  /** RLM (persistent-python) mode badge — bright yellow. */
+  rlmMode: string;
   // Text
   text: string;
   textStrong: string;
@@ -94,6 +96,7 @@ export const darkColors: ColorPalette = {
   planMode: dark.cyan400,
   fusionPlanMode: dark.amber500,
   wolfpackMode: '#C084FC',
+  rlmMode: '#FFD700',
   text: dark.gray100,
   textStrong: dark.gray50,
   textDim: dark.gray500,
@@ -135,6 +138,7 @@ export const lightColors: ColorPalette = {
   planMode: light.cyan800,
   fusionPlanMode: light.amber700,
   wolfpackMode: '#7C3AED',
+  rlmMode: '#A16207',
   text: light.gray900,
   textStrong: light.gray900,
   textDim: light.gray700,

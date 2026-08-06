@@ -155,6 +155,7 @@ export interface SessionStatus {
   readonly planMode: boolean;
   readonly planStrategy?: 'normal' | 'fusion';
   readonly wolfpackMode: boolean;
+  readonly rlmEnabled: boolean;
   readonly contextTokens: number;
   readonly maxContextTokens: number;
   readonly contextUsage: number;

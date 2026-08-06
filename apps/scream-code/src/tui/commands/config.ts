@@ -218,6 +218,63 @@ export async function handleAskCommand(host: SlashCommandHost, args: string): Pr
   }
 }
 
+export async function handleRlmCommand(host: SlashCommandHost, args: string): Promise<void> {
+  const session = host.session;
+  if (session === undefined) {
+    host.showError(getNoActiveSessionMessage());
+    return;
+  }
+
+  const subcmd = args.trim().toLowerCase();
+  let enabled: boolean;
+  if (subcmd.length === 0) enabled = !host.state.appState.rlmEnabled;
+  else if (subcmd === 'on') enabled = true;
+  else if (subcmd === 'off') enabled = false;
+  else {
+    host.showError(`Unknown rlm subcommand: ${subcmd}`);
+    return;
+  }
+
+  try {
+    await session.setRlmEnabled(enabled);
+    host.setAppState({ rlmEnabled: enabled });
+    if (enabled) {
+      host.showNotice(t('config.rlm_on'));
+      return;
+    }
+    host.showNotice(t('config.rlm_off'));
+  } catch (error) {
+    const msg = formatErrorMessage(error);
+    host.showError(`Failed to set rlm mode: ${msg}`);
+  }
+}
+
+/** /rlm-max-depth [N] — query or set the maximum RLM recursion depth. */
+export async function handleRlmMaxDepthCommand(host: SlashCommandHost, args: string): Promise<void> {
+  const session = host.session;
+  if (session === undefined) {
+    host.showError(getNoActiveSessionMessage());
+    return;
+  }
+  const arg = args.trim();
+  if (arg.length === 0) {
+    host.showStatus('RLM max depth: run /rlm-max-depth <N> (1–10) to set it.');
+    return;
+  }
+  const parsed = Number(arg);
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 10) {
+    host.showError(`Invalid rlm-max-depth: ${arg} (expected integer 1–10).`);
+    return;
+  }
+  try {
+    await session.setRlmMaxDepth(parsed);
+    host.showStatus(`RLM max depth set to ${parsed}.`, host.state.theme.colors.success);
+  } catch (error) {
+    const msg = formatErrorMessage(error);
+    host.showError(`Failed to set rlm max depth: ${msg}`);
+  }
+}
+
 export async function handleAutoCommand(host: SlashCommandHost, args: string): Promise<void> {
   const session = host.session;
   if (session === undefined) {

@@ -1207,6 +1207,7 @@ class WebSession {
         permission: this.permission,
         planMode: false,
         wolfpackMode: false,
+        rlmEnabled: false,
         contextTokens: 0,
         maxContextTokens: 0,
         contextUsage: 0,

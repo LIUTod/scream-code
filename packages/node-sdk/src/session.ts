@@ -303,6 +303,29 @@ export class Session {
    * for unknown or already-terminal task ids are no-ops at the core
    * level — this method does not throw in those cases.
    */
+  /**
+   * Enables or disables the /rlm persistent-python mode. When enabled, the
+   * `python` tool (persistent kernel) is added to the active tools; when
+   * disabled it is removed and its kernel is disposed. Default is disabled.
+   */
+  async setRlmEnabled(enabled: boolean): Promise<void> {
+    this.ensureOpen();
+    await this.rpc.setRlmEnabled({
+      sessionId: this.id,
+      enabled,
+    });
+  }
+
+  /** Sets the maximum RLM recursion depth (default 1). Depth 1 means the root
+   * kernel may spawn rlm() children but they cannot spawn grandchildren. */
+  async setRlmMaxDepth(maxDepth: number): Promise<void> {
+    this.ensureOpen();
+    await this.rpc.setRlmMaxDepth({
+      sessionId: this.id,
+      maxDepth,
+    });
+  }
+
   async stopBackgroundTask(
     taskId: string,
     options: { reason?: string } = {},

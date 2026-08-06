@@ -640,6 +640,9 @@ export class SessionEventHandler {
     if (event.wolfpackMode !== undefined) {
       patch.wolfpackMode = event.wolfpackMode;
     }
+    if (event.rlmEnabled !== undefined) {
+      patch.rlmEnabled = event.rlmEnabled;
+    }
     if (event.permission !== undefined) {
       patch.permissionMode = event.permission;
     }

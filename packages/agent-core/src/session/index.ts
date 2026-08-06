@@ -217,6 +217,11 @@ export class Session {
       await Promise.allSettled(
         Array.from(this.agents.values(), async (agent) => agent.cron?.stop()),
       );
+      // Dispose any persistent python kernel started by /rlm so no orphaned
+      // process survives the session.
+      for (const agent of this.agents.values()) {
+        agent.disposeRlm?.();
+      }
       await this.stopBackgroundTasksOnExit();
       await this.flushMetadata();
       await this.triggerSessionEnd('exit');

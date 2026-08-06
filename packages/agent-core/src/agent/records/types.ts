@@ -76,6 +76,9 @@ export interface AgentRecordEvents {
   'wolfpack.enter': {};
   'wolfpack.exit': {};
 
+  'rlm.enter': {};
+  'rlm.exit': {};
+
   'goal.create': {
     goalId: string;
     objective: string;

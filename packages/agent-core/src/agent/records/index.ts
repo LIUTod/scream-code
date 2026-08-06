@@ -73,6 +73,12 @@ function restoreAgentRecord(agent: Agent, input: AgentRecord): void {
     case 'wolfpack.exit':
       agent.wolfpackMode.exit();
       return;
+    case 'rlm.enter':
+      agent.restoreRlm(true);
+      return;
+    case 'rlm.exit':
+      agent.restoreRlm(false);
+      return;
     case 'goal.create':
       agent.goal.restoreCreate(input);
       return;

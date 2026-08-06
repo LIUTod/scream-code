@@ -81,6 +81,8 @@ import type {
   ResumeSessionPayload,
   SessionSummary,
   SetActiveToolsPayload,
+  SetRlmEnabledPayload,
+  SetRlmMaxDepthPayload,
   SetScreamConfigPayload,
   SetModelPayload,
   SetModelResult,
@@ -532,6 +534,14 @@ export class ScreamCore implements PromisableMethods<CoreAPI> {
     return this.sessionApi(sessionId).setActiveTools(payload);
   }
 
+  setRlmEnabled({ sessionId, ...payload }: SessionAgentPayload<SetRlmEnabledPayload>) {
+    return this.sessionApi(sessionId).setRlmEnabled(payload);
+  }
+
+  setRlmMaxDepth({ sessionId, ...payload }: SessionAgentPayload<SetRlmMaxDepthPayload>) {
+    return this.sessionApi(sessionId).setRlmMaxDepth(payload);
+  }
+
   stopBackground({ sessionId, ...payload }: SessionAgentPayload<StopBackgroundPayload>) {
     return this.sessionApi(sessionId).stopBackground(payload);
   }
@@ -632,6 +642,10 @@ export class ScreamCore implements PromisableMethods<CoreAPI> {
 
   getWolfpackMode({ sessionId, ...payload }: SessionAgentPayload<EmptyPayload>) {
     return this.sessionApi(sessionId).getWolfpackMode(payload);
+  }
+
+  getRlmEnabled({ sessionId, ...payload }: SessionAgentPayload<EmptyPayload>) {
+    return this.sessionApi(sessionId).getRlmEnabled(payload);
   }
 
   updateSessionMetadata({ sessionId, ...payload }: UpdateSessionMetadataRequest): Promise<void> {

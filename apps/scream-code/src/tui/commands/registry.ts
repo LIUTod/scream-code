@@ -25,6 +25,21 @@ export const BUILTIN_SLASH_COMMANDS = [
     availability: 'always',
   },
   {
+    name: 'rlm',
+    aliases: ['rlm'],
+    description: 'registry.rlm_desc',
+    priority: 120,
+    availability: 'always',
+  },
+  {
+    name: 'rlm-max-depth',
+    aliases: [],
+    description: 'registry.rlm_max_depth_desc',
+    argumentHint: '[N]',
+    priority: 119,
+    availability: 'always',
+  },
+  {
     name: 'wolfpack',
     aliases: ['wp'],
     description: 'registry.wolfpack_desc',

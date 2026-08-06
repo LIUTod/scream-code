@@ -221,6 +221,7 @@ export class SessionManager {
         ? status.planStrategy === 'fusion' ? 'fusionplan' : 'plan'
         : 'off') as PlanModeState,
       wolfpackMode: status.wolfpackMode,
+      rlmEnabled: status.rlmEnabled,
       contextTokens: status.contextTokens,
       maxContextTokens: status.maxContextTokens,
       contextUsage: status.contextUsage,

@@ -52,6 +52,7 @@ export interface AgentStatusUpdatedEvent {
   readonly planMode?: boolean | undefined;
   readonly planStrategy?: 'normal' | 'fusion' | undefined;
   readonly wolfpackMode?: boolean | undefined;
+  readonly rlmEnabled?: boolean | undefined;
   readonly permission?: PermissionMode | undefined;
   readonly usage?: UsageStatus | undefined;
 }

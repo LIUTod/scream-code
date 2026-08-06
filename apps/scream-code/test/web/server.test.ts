@@ -44,6 +44,7 @@ const STATUS: SessionStatus = {
   permission: 'manual',
   planMode: false,
   wolfpackMode: false,
+  rlmEnabled: false,
   contextTokens: 10,
   maxContextTokens: 1000,
   contextUsage: 0.01,

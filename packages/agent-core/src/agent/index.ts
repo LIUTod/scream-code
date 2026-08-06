@@ -243,6 +243,92 @@ export class Agent {
     })();
   }
 
+  private rlmEnabled = false;
+  /** RLM recursion depth: 0 for the root agent, +1 per spawned subagent.
+   * Capped by rlmMaxDepth in the rlm.run host handler so a model cannot
+   * recurse rlm() subagents without bound. */
+  private rlmDepth = 0;
+  /** Maximum allowed RLM recursion depth (default 1: root may spawn children,
+   * children may not spawn grandchildren). Configurable via /rlm-max-depth. */
+  private rlmMaxDepth = 1;
+
+  getRlmDepth(): number {
+    return this.rlmDepth;
+  }
+
+  setRlmDepth(depth: number): void {
+    this.rlmDepth = Math.max(0, depth);
+  }
+
+  getRlmMaxDepth(): number {
+    return this.rlmMaxDepth;
+  }
+
+  setRlmMaxDepth(maxDepth: number): void {
+    this.rlmMaxDepth = Math.max(1, Math.min(10, Math.trunc(maxDepth)));
+  }
+
+  /** Disposes the persistent python kernel (if any) and resets RLM mode.
+   * Called on session close so no orphaned kernel process is left behind.
+   * Only touches state when RLM was actually enabled — a session that never
+   * used /rlm must not emit a spurious setActiveTools record (which would
+   * pollute the wire log and, on a subagent that does not re-apply a profile
+   * on resume, could strip MCP access patterns). */
+  disposeRlm(): void {
+    if (!this.rlmEnabled) return;
+    this.rlmEnabled = false;
+    const withoutPython = this.tools.getActiveTools().filter((name) => name !== 'python');
+    this.tools.setActiveTools(withoutPython);
+    (this.tools.getBuiltinTool('python') as { dispose?: () => void } | undefined)?.dispose?.();
+    // Symmetric with setRlmEnabled(false): persist rlm.exit so a close →
+    // resume replay restores rlmEnabled=false (and the python tool removal
+    // above stays consistent). Without this, replay would see only rlm.enter
+    // → badge lit, python tool removed by the close record → broken state.
+    this.records.logRecord({ type: 'rlm.exit' });
+  }
+
+  /**
+   * Enables or disables the /rlm persistent-python mode. On enable, the
+   * `python` tool is added to the active tools; on disable it is removed and
+   * its kernel is disposed. Default state (disabled) leaves the tool list and
+   * default behaviour untouched.
+   */
+  private setRlmEnabled(enabled: boolean): void {
+    this.rlmEnabled = enabled;
+    const current = this.tools.getActiveTools();
+    if (enabled) {
+      if (!current.includes('python')) {
+        this.tools.setActiveTools([...current, 'python']);
+      }
+    } else {
+      const withoutPython = current.filter((name) => name !== 'python');
+      if (withoutPython.length !== current.length) {
+        this.tools.setActiveTools(withoutPython);
+      }
+      (this.tools.getBuiltinTool('python') as { dispose?: () => void } | undefined)?.dispose?.();
+    }
+    this.records.logRecord({ type: enabled ? 'rlm.enter' : 'rlm.exit' });
+    this.emitStatusUpdated();
+  }
+
+  /** Restores RLM mode from a persisted record during replay. Does not log
+   * a new record and does not emit a status update (both are suppressed while
+   * records are restoring). */
+  restoreRlm(enabled: boolean): void {
+    this.rlmEnabled = enabled;
+    const current = this.tools.getActiveTools();
+    if (enabled) {
+      if (!current.includes('python')) {
+        this.tools.setActiveTools([...current, 'python']);
+      }
+    } else {
+      const withoutPython = current.filter((name) => name !== 'python');
+      if (withoutPython.length !== current.length) {
+        this.tools.setActiveTools(withoutPython);
+      }
+    }
+  }
+
   private initKnowledgeStore(store: KnowledgeStore | undefined): Promise<void> {
     if (store === undefined) return Promise.resolve();
     return (async () => {
@@ -450,6 +536,12 @@ export class Agent {
       setActiveTools: (payload) => {
         this.tools.setActiveTools(payload.names);
       },
+      setRlmEnabled: (payload) => {
+        this.setRlmEnabled(payload.enabled);
+      },
+      setRlmMaxDepth: (payload) => {
+        this.setRlmMaxDepth(payload.maxDepth);
+      },
       stopBackground: (payload) => {
         void this.background.stop(payload.taskId, payload.reason);
       },
@@ -540,6 +632,9 @@ export class Agent {
       },
       getWolfpackMode: () => {
         return this.wolfpackMode.isActive;
+      },
+      getRlmEnabled: () => {
+        return this.rlmEnabled;
       },
     };
   }
@@ -731,6 +826,7 @@ export class Agent {
       planMode: this.planMode.isActive,
       planStrategy: this.planMode.isActive ? this.planMode.strategy : undefined,
       wolfpackMode: this.wolfpackMode.isActive,
+      rlmEnabled: this.rlmEnabled,
       permission: this.permission.mode,
       usage,
     });
