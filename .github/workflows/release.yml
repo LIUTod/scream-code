@@ -39,10 +39,44 @@ jobs:
       - name: Test
         run: pnpm run test
 
+  ci-check-windows:
+    name: Pre-release checks (windows)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: 'pnpm'
+
+      # The RLM kernel tests spawn a real python interpreter (python3 on
+      # POSIX, python on Windows). Windows runners do not ship python, so it
+      # must be installed explicitly — otherwise the persistent-kernel tests
+      # fail with "No python interpreter found".
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.x'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm run typecheck
+
+      - name: Test
+        run: pnpm run test
+
   release:
     name: Release
     runs-on: ubuntu-latest
-    needs: ci-check
+    needs: [ci-check, ci-check-windows]
     if: github.repository_owner == 'LIUTod'
     permissions:
       contents: write
