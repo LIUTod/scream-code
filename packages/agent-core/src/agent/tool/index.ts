@@ -242,7 +242,18 @@ interface McpToolEntry {
 function createRlmHostHandlers(agent: Agent): HostRequestHandlers {
   const handles = new Map<
     string,
-    { completion: SubagentHandle['completion']; name: string; controller: AbortController }
+    {
+      completion: SubagentHandle['completion'];
+      name: string;
+      controller: AbortController;
+      /** Result cached after the child settles, so a late rlm_wait can still
+       * retrieve it. Previously the handle was deleted on settlement, which
+       * made rlm_wait fail with "unknown rlm handle" whenever the subagent
+       * finished faster than the caller got around to waiting — a real
+       * race that burned child results. The entry is only removed once the
+       * result has been consumed (or on kernel teardown). */
+      result?: unknown;
+    }
   >();
   return {
     'rlm.run': async (payload) => {
@@ -264,21 +275,26 @@ function createRlmHostHandlers(agent: Agent): HostRequestHandlers {
         runInBackground: false,
         signal: controller.signal,
       });
-      handles.set(handle.agentId, { completion: handle.completion, name, controller });
-      // The kernel may be killed/restarted between rlm.run and rlm.result,
-      // which would otherwise leave the handle in the map forever and keep
-      // the subagent's completion promise alive with no consumer. Deleting on
-      // settlement bounds the map to in-flight children only. Use .then with
-      // both callbacks (not .finally) so a rejected completion — subagent
-      // failure, or abort via the __dispose__ hook — is consumed instead of
-      // surfacing as an unhandled promise rejection (which crashes the
-      // process on Node >= 15).
+      const entry: { completion: SubagentHandle['completion']; name: string; controller: AbortController; result?: unknown } = {
+        completion: handle.completion,
+        name,
+        controller,
+      };
+      handles.set(handle.agentId, entry);
+      // Cache the result when the child settles. The entry stays in the map
+      // until rlm.result consumes it (or teardown), so a fast subagent never
+      // races the caller's rlm_wait. Use .then with both callbacks (not
+      // .finally) so a rejected completion is consumed instead of surfacing
+      // as an unhandled promise rejection (which crashes the process on
+      // Node >= 15).
       void handle.completion.then(
-        () => {
-          handles.delete(handle.agentId);
+        (result) => {
+          entry.result = result;
         },
         () => {
-          handles.delete(handle.agentId);
+          // Child failed or was aborted; keep the entry so rlm.result can
+          // surface the error rather than "unknown rlm handle".
+          entry.result = undefined;
         },
       );
       return { id: handle.agentId, name };
@@ -287,8 +303,14 @@ function createRlmHostHandlers(agent: Agent): HostRequestHandlers {
       const id = String(payload['id']);
       const entry = handles.get(id);
       if (entry === undefined) throw new Error(`unknown rlm handle: ${id}`);
+      if (entry.result !== undefined) {
+        handles.delete(id);
+        return { result: entry.result };
+      }
       const completion = await entry.completion;
-      return { result: completion.result };
+      const result = completion.result;
+      handles.delete(id);
+      return { result };
     },
     // Convention hook invoked by PythonTool.dispose: cancels every in-flight
     // rlm() subagent so a kernel teardown (session close / /rlm off) does not

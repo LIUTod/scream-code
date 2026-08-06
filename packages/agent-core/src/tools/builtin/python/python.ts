@@ -170,7 +170,11 @@ export class PythonTool implements BuiltinTool<PythonInput> {
       'processing. Run shell commands with the Bash tool instead. In RLM mode the ' +
       'kernel also provides `rlm(task, name="subagent")` to spawn a subagent ' +
       '(returns a handle immediately) and `rlm_wait(handle, timeout)` to await its ' +
-      'final summary. Code runs under the current permission mode; mutating ' +
+      'final summary. The kernel is a line-oriented REPL: multi-line blocks ' +
+      '(def/for/if) written as separate lines can fail with SyntaxError, so ' +
+      'write orchestration code as single-line statements (list comprehensions, ' +
+      'single-line assignments) or ensure blocks are complete and terminated by ' +
+      'a blank line. Code runs under the current permission mode; mutating ' +
       'operations follow the same approval rules as other tools.';
   }
 
