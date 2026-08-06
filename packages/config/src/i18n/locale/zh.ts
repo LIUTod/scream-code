@@ -1143,7 +1143,7 @@ export const zh: Record<string, string> = {
   'registry.auto_desc': '切换自动权限模式',
   'registry.yolo_desc': '切换至自动批准模式(yolo)',
   'registry.ask_desc': '切换至只读问答模式(ask)',
-  'registry.rlm_desc': '切换持久化 Python RLM 模式(/rlm 切换开关)',
+  'registry.rlm_desc': 'RLM 模式：面向长任务的持久 Python 工作环境，支持无限递归子代理(/rlm 切换开关)',
   'registry.rlm_max_depth_desc': '设置 RLM 递归深度上限(/rlm-max-depth N)',
   'registry.wolfpack_desc': '切换群狼协作模式，自动批准+批量并发',
   'registry.sessions_desc': '浏览并恢复会话',

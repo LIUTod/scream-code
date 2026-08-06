@@ -71,6 +71,16 @@ Scream Code is a hassle-free, locally deployable, all-in-one AI Agent assistant.
       <p>Connect via cc-connect to <strong>WeChat, Feishu, WeCom, DingTalk, Slack</strong> and more. Remotely control your Scream from any chat app.</p>
     </td>
   </tr>
+  <tr>
+    <td width="50%">
+      <h3>🐍 RLM Mode</h3>
+      <p><strong>A persistent Python workspace for long-running tasks</strong> — state survives across calls, kernels self-heal from crashes, and <code>rlm()</code> spawns unlimited recursive subagents (parent → child → grandchild…). Opt-in via <code>/rlm</code>, zero impact when off.</p>
+    </td>
+    <td width="50%">
+      <h3>🧩 /rlm-max-depth</h3>
+      <p><strong>Configurable recursion cap</strong> — unlimited by default; set a positive integer to bound the recursion chain, <code>0</code> for unlimited again.</p>
+    </td>
+  </tr>
 </table>
 
 ---
@@ -271,6 +281,16 @@ Scream Code 是一款省心的可在本地部署的全能 AI Agent 助手。你�
     <td width="50%">
       <h3>📱 多渠道互联</h3>
       <p>通过 cc-connect 打通<strong>微信、飞书、企微、钉钉、slack</strong>等平台，随时随地在App上远程调用你的scream。</p>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%">
+      <h3>🐍 RLM 模式</h3>
+      <p><strong>面向长任务的持久 Python 工作环境</strong>——状态跨调用保留，内核崩溃自动复活，<code>rlm()</code> 支持无限递归子代理（父→子→孙…）。<code>/rlm</code> 按需开启，关闭时零影响。</p>
+    </td>
+    <td width="50%">
+      <h3>🧩 /rlm-max-depth</h3>
+      <p><strong>可配置的递归深度上限</strong>——默认无限；设正整数可限制递归链层数，<code>0</code> 恢复无限。</p>
     </td>
   </tr>
 </table>

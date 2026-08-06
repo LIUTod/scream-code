@@ -341,6 +341,19 @@ Batch parallel subagent orchestration. Toggles `wolfpackMode` in `AppState`. Whe
 - **Records**: `wolfpack.enter` / `wolfpack.exit` for session replay recovery
 - **Footer badge**: `wolfpack` in brand blue when active
 
+### RLM Mode (`/rlm`)
+
+Persistent-python runtime: a long-lived `python3 -u -i` kernel where state (variables, imports, loaded data) survives across tool calls, plus a subagent bridge so the model can spawn recursive subagents from code.
+
+- **Entry**: `/rlm` toggles on/off with no args; `/rlm on|off` explicit. `/rlm-max-depth N` sets the recursion cap (0 = unlimited, the default is unlimited).
+- **Kernel**: `packages/agent-core/src/tools/builtin/python/python.ts` — `PythonTool` with a base64 single-line `exec` bootstrap injecting `rlm()`/`rlm_wait()` bridge helpers. Replies go through a `/tmp` file bridge (`scream-rlm-<pid>-<id>.json`) to avoid stdin read/write contention.
+- **State machine**: `packages/agent-core/src/agent/index.ts` — `setRlmEnabled` / `getRlmEnabled` / `inheritRlm` / `rlmDepth` / `rlmMaxDepth` (default `Infinity` = unlimited recursion).
+- **Recursion**: `packages/agent-core/src/session/subagent-host.ts` — spawned children inherit depth `parent+1`, the max-depth cap, and RLM mode itself (python tool mounted after the child profile is applied), so the chain continues parent → child → grandchild … indefinitely.
+- **Host handlers**: `packages/agent-core/src/agent/tool/index.ts` — `rlm.run` (spawn, depth-checked) / `rlm.result` (wait) / `__dispose__` (abort in-flight children on kernel teardown).
+- **Resilience**: graceful interrupt first (SIGINT, 1.5s grace, state preserved), SIGKILL only if the kernel does not settle; `_snapshot()`/`_restore()` pickle state so a crashed kernel is resurrected with variables intact.
+- **Records**: `rlm.enter` / `rlm.exit` for session replay recovery.
+- **Footer badge**: `RLM` in bright yellow when active.
+
 ### Goal System (`/goal`, `/goaloff`)
 
 Persistent goal injection that survives turns and session resumes.
@@ -357,7 +370,7 @@ The goal system runs in an autonomous loop (`driveGoal()` in `packages/agent-cor
 - **WriteGoalNote tool**: `packages/agent-core/src/tools/builtin/goal/write-goal-note.ts` — lets the model record working notes (max 10 notes × 200 chars). Notes are stored in `GoalMode` memory state, not in conversation context, so compaction cannot lose them.
 - **GoalInjector**: `packages/agent-core/src/agent/injection/goal.ts` — injects notes into each continuation turn under `## Working Notes`. Also prompts the model to use WriteGoalNote when discovering facts or hitting dead ends.
 - **Lifecycle**: notes are cleared when the goal completes or is cancelled. Notes do not survive session resume (model re-accumulates them).
-- **TUI ordering**: `/goal` is 5th in the quick command list (priority 122, after sessions).
+- **TUI ordering**: `/goal` is 6th in the quick command list (priority 120, after rlm).
 
 ### Loop Mode (`/loop`)
 
@@ -370,7 +383,7 @@ Stateless retry with an optional `--verify` shell gate. Each iteration re-sends 
 - **Auto-submit**: `src/tui/controllers/session-event-handler.ts` — `advanceLoopIteration` runs the verifier after each turn, stops on pass, decrements the limit, and re-sends the prompt. Esc during the verifier pauses without corrupting state.
 - **Auto permission**: opening loop with `permissionMode === 'manual'` auto-switches to `auto` (via `ensureAutoPermission`) so iterations don't block on approval. Closing loop does **not** restore the previous mode.
 - **Footer badge**: `loop N/M` (iterations), `loop Nm` / `loop Ns` (duration), ` · ✗` suffix when the last verify failed
-- **TUI ordering**: `/loop` sits below `/goal` (priority 121) — it is a lightweight tool, not a goal replacement.
+- **TUI ordering**: `/loop` is a lightweight inner-loop mode, not part of the quick command priority list — it is a tool for driving repeated verify cycles, not a goal replacement.
 
 One-click cc-connect daemon life cycle management (cross-platform).
 

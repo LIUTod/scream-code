@@ -1142,7 +1142,7 @@ export const en: Record<string, string> = {
   'registry.auto_desc': 'Toggle auto permission mode',
   'registry.yolo_desc': 'Toggle auto-approve mode (yolo)',
   'registry.ask_desc': 'Toggle read-only Q&A mode (ask)',
-  'registry.rlm_desc': 'Toggle persistent-python RLM mode (/rlm toggles)',
+  'registry.rlm_desc': 'RLM mode: a persistent Python workspace for long-running tasks with unlimited recursive subagents (/rlm toggles)',
   'registry.rlm_max_depth_desc': 'Set RLM recursion depth limit (/rlm-max-depth N)',
   'registry.wolfpack_desc': 'Toggle wolfpack mode, auto-approve + batch concurrency',
   'registry.sessions_desc': 'Browse and restore sessions',

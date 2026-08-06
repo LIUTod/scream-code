@@ -21,14 +21,14 @@ export const BUILTIN_SLASH_COMMANDS = [
     name: 'ask',
     aliases: ['ask'],
     description: 'registry.ask_desc',
-    priority: 122,
+    priority: 123,
     availability: 'always',
   },
   {
     name: 'rlm',
     aliases: ['rlm'],
     description: 'registry.rlm_desc',
-    priority: 120,
+    priority: 121,
     availability: 'always',
   },
   {
@@ -43,21 +43,21 @@ export const BUILTIN_SLASH_COMMANDS = [
     name: 'wolfpack',
     aliases: ['wp'],
     description: 'registry.wolfpack_desc',
-    priority: 123,
+    priority: 122,
     availability: 'always',
   },
   {
     name: 'sessions',
     aliases: ['resume'],
     description: 'registry.sessions_desc',
-    priority: 122,
+    priority: 119,
   },
   {
     name: 'goal',
     aliases: ['goaloff'],
     description: 'registry.goal_desc',
     argumentHint: '[objective]',
-    priority: 122,
+    priority: 120,
     availability: (args) => {
       const trimmed = args.trim();
       return trimmed === '' || trimmed === 'status' || trimmed === 'pause' || trimmed === 'off'
