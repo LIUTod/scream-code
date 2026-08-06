@@ -74,13 +74,16 @@ jobs:
       - name: Build workspace packages
         run: pnpm run build:packages
 
-      # Windows job exists to verify the RLM persistent-kernel tests run on a
-      # real Windows python (spawn python/python3 + pipe REPL + file bridge).
-      # agent-core is where RLM lives and its tests do not depend on the
-      # @scream-code/config workspace link (which resolves inconsistently on
-      # Windows). Typecheck is covered by the linux job.
-      - name: Test (agent-core)
-        run: pnpm --filter @scream-code/agent-core test
+      # Windows job verifies the RLM persistent-kernel tests on a real
+      # Windows python (spawn python/python3 + pipe REPL + file bridge).
+      # Only the RLM tests run here: the rest of the agent-core suite has
+      # pre-existing platform-sensitive cases (hook termination, output
+      # projection) that are linux-covered; running them on Windows would
+      # fail for reasons unrelated to RLM. agent-core has no dependency on
+      # the @scream-code/config workspace link, so this job avoids that
+      # Windows pnpm resolution quirk too.
+      - name: Test (RLM on Windows)
+        run: pnpm --filter @scream-code/agent-core exec vitest run test/tools/builtin/python.test.ts test/tools/builtin/rlm-interrupt.test.ts
 
   release:
     name: Release
