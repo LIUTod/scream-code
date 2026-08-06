@@ -87,6 +87,7 @@ describe('Event public types', () => {
         case 'compaction.blocked':
         case 'compaction.cancelled':
         case 'compaction.completed':
+        case 'skill_candidate':
         case 'background.task.started':
         case 'background.task.updated':
         case 'background.task.terminated':
