@@ -100,7 +100,20 @@ describe('rlm interrupt + snapshot', () => {
     const tool = makeRlmTool(snapshotPath);
     await runTool(tool, { code: 'a = 1', timeout: 15 });
     tool.dispose();
+    // unlink is fire-and-forget inside dispose; poll until it lands (bounded)
+    // instead of asserting immediately, which races on slow CI machines.
     const { access } = await import('node:fs/promises');
-    await expect(access(snapshotPath)).rejects.toThrow();
+    const deadline = Date.now() + 5000;
+    let gone = false;
+    while (Date.now() < deadline) {
+      try {
+        await access(snapshotPath);
+      } catch {
+        gone = true;
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    expect(gone).toBe(true);
   }, 60_000);
 });
