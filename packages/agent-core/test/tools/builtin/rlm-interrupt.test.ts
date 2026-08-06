@@ -23,7 +23,12 @@ function makeRlmTool(snapshotPath?: string): PythonTool {
 }
 
 describe('rlm interrupt + snapshot', () => {
-  it('preserves state across SIGINT timeout and never mis-hits stale markers', async () => {
+  // SIGINT graceful interrupt only applies on POSIX; on Windows the kernel
+  // is restarted on timeout (Node signals are unreliable for pipe children),
+  // so the POSIX-specific assertions are skipped there.
+  const win = process.platform === 'win32';
+
+  (win ? it.skip : it)('preserves state across SIGINT timeout and never mis-hits stale markers', async () => {
     const tool = makeRlmTool();
     // Case 1: infinite loop with tiny timeout → SIGINT path (kernel survives).
     const r1 = await runTool(tool, { code: 'import time\nx = 42\ntime.sleep(30)', timeout: 1 });
