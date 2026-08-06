@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn, type ChildProcess, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -170,12 +170,9 @@ export class PythonTool implements BuiltinTool<PythonInput> {
       'processing. Run shell commands with the Bash tool instead. In RLM mode the ' +
       'kernel also provides `rlm(task, name="subagent")` to spawn a subagent ' +
       '(returns a handle immediately) and `rlm_wait(handle, timeout)` to await its ' +
-      'final summary. The kernel is a line-oriented REPL: multi-line blocks ' +
-      '(def/for/if) written as separate lines can fail with SyntaxError, so ' +
-      'write orchestration code as single-line statements (list comprehensions, ' +
-      'single-line assignments) or ensure blocks are complete and terminated by ' +
-      'a blank line. Code runs under the current permission mode; mutating ' +
-      'operations follow the same approval rules as other tools.';
+      'final summary. Multi-line code (def/for/if) is fully supported. ' +
+      'Code runs under the current permission mode; mutating operations follow ' +
+      'the same approval rules as other tools.';
   }
 
   dispose(): void {
@@ -203,20 +200,17 @@ export class PythonTool implements BuiltinTool<PythonInput> {
     this.kernelBusy = false;
     this.kernelStderr = '';
     this.kernelStderrOffset = 0;
-    const proc = spawn('python3', ['-u', '-i'], {
-      cwd: this.cwd,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
+    const proc = await this.spawnKernel();
     this.kernel = proc;
-    // A missing python3 (ENOENT) or a kernel that dies instantly emits an
+    // A missing python (ENOENT) or a kernel that dies instantly emits an
     // 'error' event; without a listener it would crash the agent process.
     // Attach the listener here so ensureKernel can detect the failure and
     // surface a real message instead of an unhandled 'error' event.
     let spawnError: Error | undefined;
-    proc.on('error', (error) => {
+    proc.on('error', (error: Error) => {
       spawnError = error;
     });
-    // When the process fails to spawn (e.g. python3 not installed), Node
+    // When the process fails to spawn (e.g. python not installed), Node
     // emits 'error' on the stdio streams as well — without listeners those
     // become uncaught exceptions that crash the agent. Swallow them; the
     // readUntilMarker 'end'/'close'/'error' path settles the call.
@@ -233,7 +227,7 @@ export class PythonTool implements BuiltinTool<PythonInput> {
       proc.stdin.write(`${buildRlmBootstrap(this.snapshotPath)}\n`);
       const boot = await this.readUntilMarker(proc.stdout, '__SCREAM_BOOT_DONE__', KERNEL_START_TIMEOUT_MS);
       if (!boot.found) {
-        // Bootstrap failed (missing python3, SyntaxError in the injected
+        // Bootstrap failed (missing python, SyntaxError in the injected
         // helpers, or a kernel that died on startup). Kill the process so a
         // broken kernel is never reused, and surface the captured error.
         void proc.kill('SIGKILL');
@@ -244,6 +238,55 @@ export class PythonTool implements BuiltinTool<PythonInput> {
       }
     }
     return proc;
+  }
+
+  /** Candidate python commands, platform-first order. Exposed for tests:
+   * POSIX prefers `python3`, Windows prefers `python`. Both fall back to the
+   * other on ENOENT so a machine with either interpreter works. */
+  static pythonCandidates(platform: NodeJS.Platform = process.platform): string[] {
+    return platform === 'win32' ? ['python', 'python3'] : ['python3', 'python'];
+  }
+
+  /**
+   * Spawns the kernel, resolving the python command per platform.
+   *
+   * The command name differs across platforms: POSIX ships `python3`; Windows
+   * commonly exposes only `python` (python3 may or may not exist as an alias).
+   * We prefer the platform-default name first and fall back to the other on
+   * ENOENT, so a Windows install with either `python` or `python3` works.
+   */
+  private async spawnKernel(): Promise<ChildProcessWithoutNullStreams> {
+    const candidates = PythonTool.pythonCandidates();
+    let lastError: Error | undefined;
+    for (const command of candidates) {
+      try {
+        return await this.trySpawn(command);
+      } catch (error) {
+        lastError = error as Error;
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+        // ENOENT → command not found; try the next candidate.
+      }
+    }
+    throw lastError ?? new Error(`No python interpreter found (tried: ${candidates.join(', ')})`);
+  }
+
+  private trySpawn(command: string): Promise<ChildProcessWithoutNullStreams> {
+    return new Promise((resolve, reject) => {
+      const proc = spawn(command, ['-u', '-i'], {
+        cwd: this.cwd,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+      // A missing command emits 'error' (ENOENT) asynchronously; reject so
+      // spawnKernel can fall back to the next candidate. A successful spawn
+      // resolves once the process is running.
+      proc.once('error', (error) => {
+        reject(error);
+      });
+      proc.once('spawn', () => {
+        proc.off('error', reject);
+        resolve(proc);
+      });
+    });
   }
 
   private drainStderr(proc: ChildProcess): void {
@@ -383,14 +426,62 @@ export class PythonTool implements BuiltinTool<PythonInput> {
     try {
       const proc = await this.ensureKernel();
       const timeoutMs = (args.timeout ?? DEFAULT_TIMEOUT_MS / 1000) * 1000;
-      // A blank line terminates any open multi-line block in the interactive
-      // REPL, so the DONE marker always runs on its own statement. When RLM
-      // state snapshots are active (hostHandlers present), the snapshot is
-      // taken after the user code completes, so kernel restarts can restore it.
+      // User code runs through a double-layer base64 single-line exec —
+      // the same mechanism the bootstrap uses. Multi-line blocks written
+      // straight to stdin fail in pipe mode (python -i block parsing is
+      // broken for pipes), which produced spurious SyntaxErrors/NameErrors
+      // on def/for/if blocks.
+      // The wrapper preserves REPL echo semantics:
+      //   - a bare expression (x + 1, len(data)) → eval → its value prints
+      //   - statements/multi-line → exec runs them in the kernel globals so
+      //     names persist; if the final statement is a trailing expression
+      //     (x = 42\nx + 1), the head is executed then the tail is eval'd
+      //     and echoed — matching the old per-line REPL behaviour instead of
+      //     silently swallowing the result.
+      // The wrapper imports base64 itself (each exec is an isolated scope —
+      // relying on the bootstrap's import would NameError) and passes
+      // globals() so evaluated/executed names persist in the kernel.
+      // The DONE marker and snapshot run on their own statements after it.
+      const codeB64 = Buffer.from(args.code, 'utf8').toString('base64');
+      const wrapperPy =
+        'import ast as _ast, base64 as _b\n' +
+        `__c = _b.b64decode('${codeB64}').decode()\n` +
+        'try:\n' +
+        '    try:\n' +
+        '        __r = eval(__c, globals())\n' +
+        '        if __r is not None:\n' +
+        '            print(repr(__r))\n' +
+        '    except SyntaxError:\n' +
+        '        __tree = _ast.parse(__c)\n' +
+        '        __tail = __tree.body[-1] if __tree.body else None\n' +
+        '        if isinstance(__tail, _ast.Expr) and not any(\n' +
+        '            isinstance(n, (_ast.ClassDef, _ast.FunctionDef, _ast.AsyncFunctionDef))\n' +
+        '            for n in _ast.walk(__tail)):\n' +
+        '            __lines = __c.split("\\n")\n' +
+        '            __head = "\\n".join(__lines[: __tail.lineno - 1] + [__lines[__tail.lineno - 1][: __tail.col_offset]])\n' +
+        '            if __head.strip():\n' +
+        '                exec(__head, globals())\n' +
+        '            __r = eval(_ast.unparse(__tail.value), globals())\n' +
+        '            if __r is not None:\n' +
+        '                print(repr(__r))\n' +
+        '        else:\n' +
+        '            exec(__c, globals())\n' +
+        'except BaseException as __e:\n' +
+        '    # Show the user\u2019s own source lines (the raw REPL traceback\n' +
+        '    # only exposes the base64 wrapper line, which is useless for\n' +
+        '    # debugging), then re-raise so the kernel prints the real stack\n' +
+        '    # and the tool flags the call as an error.\n' +
+        '    print("Traceback (most recent call last):")\n' +
+        '    for __i, __ln in enumerate(__c.split("\\n"), 1):\n' +
+        '        print(f"  File \\"<user_code>\\", line {__i}")\n' +
+        '        print(f"    {__ln}")\n' +
+        '    print(f"{type(__e).__name__}: {__e}")\n' +
+        '    raise';
+      const wrapperB64 = Buffer.from(wrapperPy, 'utf8').toString('base64');
       const codeWithDone =
         this.hostHandlers !== undefined
-          ? `${args.code}\n\nprint('${PY_DONE_MARKER}')\n_snapshot()\n`
-          : `${args.code}\n\nprint('${PY_DONE_MARKER}')\n`;
+          ? `exec(__import__('base64').b64decode('${wrapperB64}').decode(), globals())\nprint('${PY_DONE_MARKER}')\n_snapshot()\n`
+          : `exec(__import__('base64').b64decode('${wrapperB64}').decode(), globals())\nprint('${PY_DONE_MARKER}')\n`;
       const writeOk = proc.stdin!.write(codeWithDone);
       if (!writeOk) {
         await new Promise<void>((resolve) => {
@@ -441,11 +532,16 @@ export class PythonTool implements BuiltinTool<PythonInput> {
         // emit a KeyboardInterrupt traceback right after, which should be
         // surfaced in the timeout message (not swallowed into the offset).
         const preInterruptOffset = this.kernelStderrOffset;
-        // Graceful interrupt first: SIGINT (Ctrl-C equivalent) unwinds the
-        // running statement and returns to the REPL prompt without killing
-        // the kernel, so accumulated state survives. interruptKernel returns
-        // true only when the process actually exited.
-        const exited = await this.interruptKernel(proc, 1500);
+        // Graceful interrupt: SIGINT (Ctrl-C equivalent) unwinds the running
+        // statement and returns to the REPL prompt without killing the
+        // kernel, so accumulated state survives. On Windows this is skipped:
+        // Node's kill('SIGINT') is only emulated there and does not reliably
+        // deliver a real signal to a pipe-driven python child, so the grace
+        // wait would burn the full 1.5s then restart anyway — just restart.
+        const exited =
+          process.platform === 'win32'
+            ? true
+            : await this.interruptKernel(proc, 1500);
         if (exited) {
           // The kernel process is gone. Restart on the next call.
           void proc.kill('SIGKILL');

@@ -1,3 +1,6 @@
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+
 import { describe, expect, it } from 'vitest';
 
 import type { ExecutableToolContext } from '#/loop/types';
@@ -12,9 +15,11 @@ async function runTool(t: PythonTool, args: { code: string; timeout?: number }):
 }
 
 /** hostHandlers are required for the RLM bootstrap (snapshot/_restore) to be
- * injected; an empty record is enough for the snapshot path. */
+ * injected; an empty record is enough for the snapshot path. Uses
+ * process.cwd() (not a POSIX '/tmp') so the kernel spawn cwd exists on
+ * Windows CI too. */
 function makeRlmTool(snapshotPath?: string): PythonTool {
-  return new PythonTool('/tmp', { hostHandlers: {}, ...(snapshotPath ? { snapshotPath } : {}) });
+  return new PythonTool(process.cwd(), { hostHandlers: {}, ...(snapshotPath ? { snapshotPath } : {}) });
 }
 
 describe('rlm interrupt + snapshot', () => {
@@ -71,7 +76,7 @@ describe('rlm interrupt + snapshot', () => {
   }, 60_000);
 
   it('restores RLM state from snapshot after a kernel crash', async () => {
-    const snapshotPath = `/tmp/scream-rlm-test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.pkl`;
+    const snapshotPath = join(tmpdir(), `scream-rlm-test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.pkl`);
     const tool = makeRlmTool(snapshotPath);
     // Set state, let the auto-snapshot persist it after execution.
     const r1 = await runTool(tool, { code: 'k = "kept"\ndata = [1, 2, 3]', timeout: 15 });
@@ -96,7 +101,7 @@ describe('rlm interrupt + snapshot', () => {
   }, 90_000);
 
   it('removes the snapshot file on dispose (no tmpdir accumulation)', async () => {
-    const snapshotPath = `/tmp/scream-rlm-test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.pkl`;
+    const snapshotPath = join(tmpdir(), `scream-rlm-test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.pkl`);
     const tool = makeRlmTool(snapshotPath);
     await runTool(tool, { code: 'a = 1', timeout: 15 });
     tool.dispose();
@@ -115,5 +120,36 @@ describe('rlm interrupt + snapshot', () => {
       await new Promise((r) => setTimeout(r, 50));
     }
     expect(gone).toBe(true);
+  }, 60_000);
+
+  it('executes multi-line def/for/if blocks correctly', async () => {
+    // Regression for the pipe-mode REPL bug: multi-line blocks written
+    // straight to stdin produced spurious SyntaxError/NameError. Code is now
+    // wrapped in a single-line exec(base64(...)), so blocks must work.
+    const tool = makeRlmTool();
+    const r1 = await runTool(
+      tool,
+      {
+        code: 'def make_task(x):\n    return {"task": x}\n\nresult = make_task("c")\nprint(result["task"])',
+        timeout: 15,
+      },
+    );
+    expect(r1.isError).toBe(false);
+    expect(r1.output).toContain('c');
+
+    // The def must persist across calls (kernel state), and a for-loop block
+    // works too.
+    const r2 = await runTool(tool, { code: 'make_task("again")["task"]', timeout: 15 });
+    expect(r2.isError).toBe(false);
+    expect(r2.output).toContain('again');
+
+    const r3 = await runTool(
+      tool,
+      { code: 'nums = [i * 2 for i in range(3)]\nsum(nums)', timeout: 15 },
+    );
+    expect(r3.isError).toBe(false);
+    expect(r3.output).toContain('6');
+
+    tool.dispose();
   }, 60_000);
 });

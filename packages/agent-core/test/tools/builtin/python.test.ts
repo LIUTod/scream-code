@@ -22,6 +22,12 @@ describe('PythonTool (persistent kernel)', () => {
     tool.dispose();
   });
 
+  it('prefers python3 on POSIX and python on Windows', () => {
+    expect(PythonTool.pythonCandidates('darwin')).toEqual(['python3', 'python']);
+    expect(PythonTool.pythonCandidates('linux')).toEqual(['python3', 'python']);
+    expect(PythonTool.pythonCandidates('win32')).toEqual(['python', 'python3']);
+  });
+
   it('executes code and persists state across calls', async () => {
     const r1 = await runTool(tool, { code: 'a = 1' });
     expect(r1.isError).toBeFalsy();
