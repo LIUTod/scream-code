@@ -1,4 +1,5 @@
 import type { ScreamHarness, Session, ThinkingEffort } from '@scream-code/scream-code-sdk';
+import { DEFAULT_CATALOG_URL, fetchCatalog, resolveScreamHome, saveCatalogCache } from '@scream-code/scream-code-sdk';
 import type { ScreamConfig } from '@scream-code/agent-core';
 import type { SkillListSession } from '../commands';
 
@@ -34,6 +35,24 @@ export class AuthFlowController {
       availableModels: config.models ?? {},
       availableProviders: config.providers ?? {},
     });
+    // Background: try to refresh the remote catalog cache so the next
+    // /config (or offline fallback) uses the latest model list. Purely
+    // best-effort — network failure is swallowed, never blocks startup.
+    void this.prefetchCatalogCache();
+  }
+
+  /**
+   * Best-effort background catalog refresh. Fetches the remote catalog and,
+   * on success, updates the on-disk cache. On failure it stays silent: the
+   * existing cache (or built-in) keeps working. Never throws.
+   */
+  async prefetchCatalogCache(): Promise<void> {
+    try {
+      const catalog = await fetchCatalog(DEFAULT_CATALOG_URL);
+      saveCatalogCache(catalog, resolveScreamHome());
+    } catch {
+      // Network unavailable — keep the existing cache; /config falls back.
+    }
   }
 
   async activateModelAfterLogin(model: string, thinkingLevel?: ThinkingEffort): Promise<void> {

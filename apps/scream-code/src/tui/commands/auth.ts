@@ -74,7 +74,7 @@ export async function handleConnectCommand(host: SlashCommandHost, args: string)
           catalog = fallback;
         } else {
           spinner.stop({ ok: false, label: 'Failed to load catalog.' });
-          host.showError(`Failed to fetch catalog: ${formatErrorMessage(error)}`);
+          host.showError(t('auth.catalog_fetch_failed', { error: formatErrorMessage(error) }));
         }
       }
     }

@@ -344,6 +344,7 @@ export const zh: Record<string, string> = {
 
   // ─── 认证 ─────────────────────
   'auth.fetching_models': '正在拉取最新模型目录...',
+  'auth.catalog_fetch_failed': '拉取远程模型目录失败: {error}。请检查网络（目录站点在你的网络环境下可能无法访问）后重试，或使用 /config diy 自行配置服务商。',
   'auth.no_providers': '没有已配置的模型商。',
   'auth.deleted': '已删除模型商: {name}',
   'auth.input_api_url': '输入服务商 API 地址',

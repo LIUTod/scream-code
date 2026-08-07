@@ -343,6 +343,7 @@ export const en: Record<string, string> = {
 
   // ─── Auth ─────────────────────
   'auth.fetching_models': 'Fetching latest model catalog...',
+  'auth.catalog_fetch_failed': 'Failed to fetch the remote model catalog: {error}. Check your network (the catalog host may be unreachable in your region) and retry, or use /config diy to set up a provider manually.',
   'auth.no_providers': 'No model providers configured.',
   'auth.deleted': 'Deleted provider: {name}',
   'auth.input_api_url': 'Enter provider API URL',
