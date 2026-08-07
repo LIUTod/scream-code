@@ -379,5 +379,7 @@ function uiContainsFooter(driver: StartupDriver): boolean {
     const children = (node as { children?: unknown[] }).children;
     return Array.isArray(children) && children.some(visit);
   };
-  return visit(driver.state.ui);
+  // The footer now lives inside the layout root's fixed dock (not in
+  // ui.children), so search both the children list and the layout root.
+  return visit(driver.state.ui) || visit(driver.state.layoutRoot);
 }

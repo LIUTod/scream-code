@@ -277,7 +277,11 @@ export class LifecycleController {
         visible: (viewport) => viewport.width >= 60,
       },
       { component: this.host.state.editorContainer, shrink: 1, minSize: 3 },
-      { component: this.ensureFooterWrap(), shrink: 1, minSize: 1 },
+      {
+        component: this.ensureFooterWrap(),
+        shrink: 1,
+        minSize: 1,
+      },
     ]);
     const layoutRoot = new VStack([
       { component: transcriptScrollView, basis: 0, grow: 1, shrink: 1, minSize: 1 },
@@ -290,16 +294,18 @@ export class LifecycleController {
   }
 
   mountFooter(): void {
-    this.footerWrap = new GutterContainer(CHROME_GUTTER, CHROME_GUTTER);
-    this.footerWrap.addChild(this.host.state.footer);
-    // Footer is now part of the fixed dock in buildLayout; no standalone addChild.
+    // The container is created at buildLayout time (so the dock references a
+    // stable instance); the footer component itself is only added once init
+    // succeeds. A failed resume therefore never leaves the footer mounted.
+    this.ensureFooterWrap();
+    this.footerWrap!.addChild(this.host.state.footer);
   }
 
   private ensureFooterWrap(): GutterContainer {
     if (this.footerWrap === undefined) {
-      this.mountFooter();
+      this.footerWrap = new GutterContainer(CHROME_GUTTER, CHROME_GUTTER);
     }
-    return this.footerWrap!;
+    return this.footerWrap;
   }
 
   refreshTerminalThemeTracking(): void {
