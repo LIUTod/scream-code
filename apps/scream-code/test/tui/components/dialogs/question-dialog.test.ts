@@ -547,8 +547,8 @@ describe('QuestionDialogComponent — wizard pulse', () => {
   it('advances the pixel frame on the timer and requests component-scoped renders', () => {
     vi.useFakeTimers();
     try {
-      const requestComponentRender = vi.fn();
-      const ui = { requestComponentRender } as never;
+      const requestRender = vi.fn();
+      const ui = { requestRender } as never;
       const dialog = new QuestionDialogComponent(pending(), () => {}, darkColors, 6, undefined, undefined, ui);
 
       const first = strip(dialog.render(80).join('\n'));
@@ -557,7 +557,7 @@ describe('QuestionDialogComponent — wizard pulse', () => {
       vi.advanceTimersByTime(250); // 2 frames: █ → ▓ → ▒
       const pulsed = strip(dialog.render(80).join('\n'));
       expect(pulsed).toContain('▒ 1. A');
-      expect(requestComponentRender).toHaveBeenCalledWith(dialog);
+      expect(requestRender).toHaveBeenCalled();
 
       dialog.stop();
       vi.clearAllTimers();
@@ -569,7 +569,7 @@ describe('QuestionDialogComponent — wizard pulse', () => {
   it('stops the pulse on submit and on Esc (no ghost timer)', () => {
     vi.useFakeTimers();
     try {
-      const ui = { requestComponentRender: vi.fn() } as never;
+      const ui = { requestRender: vi.fn() } as never;
 
       const submitted = new QuestionDialogComponent(pending(), () => {}, darkColors, 6, undefined, undefined, ui);
       submitted.handleInput('\r'); // answer → auto-advance to submit tab

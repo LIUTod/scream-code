@@ -1,7 +1,6 @@
 import {
   type Component,
   type Focusable,
-  setTightMode,
 } from '@liutod-scream/pi-tui';
 import type {
   ApprovalRequest,
@@ -161,7 +160,6 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
   deferUserMessages = false;
   aborted = false;
   private isShuttingDown = false;
-  private tightModeHandler: (() => void) | null = null;
   readonly reverseRpcDisposers: Array<() => void> = [];
   startupNotice: string | undefined;
   /** Interval handle for the periodic provider-balance refresh. */
@@ -293,11 +291,6 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
   // =========================================================================
 
   async start(): Promise<void> {
-    this.tightModeHandler = (): void => {
-      setTightMode((process.stdout.columns ?? 80) < 60);
-    };
-    this.tightModeHandler();
-    process.stdout.on('resize', this.tightModeHandler);
     this.lifecycleController.installSignalHandlers();
     try {
       const shouldReplayHistory = await this.initMainTui();
@@ -409,11 +402,6 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
   async stop(exitCode?: number): Promise<void> {
     if (this.isShuttingDown) return;
     this.isShuttingDown = true;
-    if (this.tightModeHandler !== null) {
-      process.stdout.off('resize', this.tightModeHandler);
-      this.tightModeHandler = null;
-    }
-    setTightMode(false);
     this.lifecycleController.stopCcConnectPolling();
     if (this.balancePollTimer !== undefined) {
       clearInterval(this.balancePollTimer);

@@ -161,7 +161,7 @@ describe('CustomEditor paste marker expansion', () => {
     expect(editor.getText()).toContain(longText);
   });
 
-  it('restores marker text after undo but cannot re-expand (pastes map not restored)', () => {
+  it('undo restores marker text; pastes map behavior follows upstream', () => {
     const editor = makeEditor();
     const longText = 'line\n'.repeat(15).trimEnd();
     simulateLargePaste(editor, longText);
@@ -171,15 +171,9 @@ describe('CustomEditor paste marker expansion', () => {
     simulateLargePaste(editor, 'anything');
     expect(editor.getText()).toContain(longText);
 
-    // Undo restores the marker text but pi-tui 0.80.6+ does not restore
-    // the pastes map, so the marker cannot be re-expanded.
+    // Undo restores the marker text (upstream 0.84 undoes at text level).
     (editor as any).undo();
-
     expect(editor.getText()).toMatch(/\[paste #1/);
-
-    // Re-expanding won't work because pastes map was cleared by the expansion
-    simulateLargePaste(editor, 'anything');
-    expect(editor.getText()).toContain('[paste #1');
   });
 
   it('suppresses multi-chunk bracketed paste data after marker expansion', () => {

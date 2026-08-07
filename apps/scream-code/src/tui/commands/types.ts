@@ -12,8 +12,8 @@ export interface ScreamSlashCommand<Name extends string = string> extends SlashC
   /** When set, the command is hidden from the palette and blocked unless this flag is enabled. */
   readonly experimentalFlag?: FlagId;
   /**
-   * Ghost-text hint shown after `/command ` (without leading slash).
-   * Maps to pi-tui's `SlashCommand.argumentHint` -> `Editor.setArgumentHints`.
+   * Argument hint shown in the autocomplete dropdown for `/command ` (without
+   * leading slash). Maps to pi-tui's `AutocompleteItem.argumentHint`.
    */
   readonly argumentHint?: string;
   /** Skill origin when this command was registered from a skill. */

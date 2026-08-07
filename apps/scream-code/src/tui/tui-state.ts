@@ -1,7 +1,8 @@
 import {
   Container,
   ProcessTerminal,
-  TUI,
+  TuiAltScreen,
+  type Component,
 } from '@liutod-scream/pi-tui';
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { getLogDir } from '#/utils/paths';
@@ -34,10 +35,15 @@ import {
 } from './types';
 
 export interface TUIState {
-  ui: TUI;
+  ui: TuiAltScreen;
   terminal: ProcessTerminal;
+  /** The main layout root (ScrollView output + dock) set by
+   * lifecycle-controller.buildLayout. Full-screen overlays (approval
+   * preview, tasks browser) swap it temporarily and restore it on close. */
+  layoutRoot: Component | undefined;
   transcriptContainer: Container;
   activityContainer: Container;
+  statusBarContainer: Container;
   todoPanelContainer: Container;
   todoPanel: TodoPanelComponent;
   queueContainer: Container;
@@ -85,12 +91,13 @@ export function createTUIState(options: ScreamTUIOptions): TUIState {
   const theme = createScreamTUIThemeBundle(initialAppState.theme, options.resolvedTheme);
 
   const terminal = new ProcessTerminal();
-  const ui = new TUI(terminal);
-  // Clear-and-repaint when content shrinks (e.g. transcript commit, tool-call
-  // collapse, end of turn). The repaint is wrapped in synchronized output so
-  // it is atomic, and it re-pins the viewport to the content end so the editor
-  // stays at the bottom instead of lagging a row behind when content shrinks.
-  ui.setClearOnShrink(true);
+  const ui = new TuiAltScreen(terminal);
+  // The ScrollView layout root (built in lifecycle-controller.buildLayout)
+  // owns scrolling with follow:"end" — content sticks to the bottom while
+  // the user is at the end, and a manual scroll up keeps the history
+  // position. This replaces the old fork's clearOnShrink + repin hack;
+  // setClearOnShrink is a no-op on TuiAltScreen and is intentionally
+  // not called here.
 
   // ── Render safety net ──────────────────────────────────────────────
   // pi-tui's doRender() runs inside process.nextTick + setTimeout, so
@@ -143,6 +150,7 @@ export function createTUIState(options: ScreamTUIOptions): TUIState {
 
   const transcriptContainer = new GutterContainer(CHROME_GUTTER, CHROME_GUTTER);
   const activityContainer = new GutterContainer(CHROME_GUTTER, CHROME_GUTTER);
+  const statusBarContainer = new GutterContainer(CHROME_GUTTER, CHROME_GUTTER);
   const todoPanelContainer = new GutterContainer(CHROME_GUTTER, CHROME_GUTTER);
   const todoPanel = new TodoPanelComponent(theme.colors);
   const queueContainer = new GutterContainer(CHROME_GUTTER, CHROME_GUTTER);
@@ -164,8 +172,10 @@ export function createTUIState(options: ScreamTUIOptions): TUIState {
   return {
     ui,
     terminal,
+    layoutRoot: undefined,
     transcriptContainer,
     activityContainer,
+    statusBarContainer,
     todoPanelContainer,
     todoPanel,
     queueContainer,

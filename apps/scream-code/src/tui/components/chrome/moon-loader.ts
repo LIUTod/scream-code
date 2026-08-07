@@ -47,6 +47,6 @@ export class MoonLoader extends Text {
     const frame = BRAILLE_SPINNER_FRAMES[this.currentFrame]!;
     const coloredFrame = this.colorFn ? this.colorFn(frame) : frame;
     this.setText(this.label ? `${coloredFrame} ${this.label}` : coloredFrame);
-    this.ui.requestComponentRender(this);
+    this.ui.requestRender();
   }
 }

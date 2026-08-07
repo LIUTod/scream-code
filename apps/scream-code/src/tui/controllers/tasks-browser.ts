@@ -1,5 +1,5 @@
 import type { BackgroundTaskInfo, Session } from '@scream-code/scream-code-sdk';
-import type { Component, ProcessTerminal, TUI } from '@liutod-scream/pi-tui';
+import type { Component, ProcessTerminal, TuiAltScreen } from '@liutod-scream/pi-tui';
 import { t } from '@scream-code/config';
 
 import { TaskOutputViewer } from '../components/dialogs/task-output-viewer';
@@ -12,7 +12,8 @@ export interface TasksBrowserHost {
     readonly tasksBrowser: TasksBrowserState | undefined;
     readonly theme: { readonly colors: ColorPalette };
     readonly terminal: ProcessTerminal;
-    readonly ui: TUI;
+    readonly ui: TuiAltScreen;
+    readonly layoutRoot: Component | undefined;
     readonly editor: CustomEditor;
   };
   readonly backgroundTasks: ReadonlyMap<string, BackgroundTaskInfo>;
@@ -23,7 +24,7 @@ export interface TasksBrowserHost {
 
 export type TasksBrowserState = {
   component: TasksBrowserApp;
-  savedChildren: readonly Component[];
+  savedLayoutRoot: Component | undefined;
   filter: TasksFilter;
   selectedTaskId: string | undefined;
   tailOutput: string | undefined;
@@ -35,7 +36,7 @@ export type TasksBrowserState = {
   viewer:
     | {
         component: TaskOutputViewer;
-        savedChildren: readonly Component[];
+        savedLayoutRoot: Component | undefined;
         taskId: string;
         output: string;
         refreshId: number;
@@ -84,9 +85,8 @@ export class TasksBrowserController {
       state.terminal,
     );
 
-    const savedChildren = [...state.ui.children];
-    state.ui.clear();
-    state.ui.addChild(component);
+    const savedLayoutRoot = state.layoutRoot;
+    state.ui.setLayoutRoot(component);
     state.ui.setFocus(component);
     state.ui.requestRender(true);
 
@@ -96,7 +96,7 @@ export class TasksBrowserController {
 
     this.host.setTasksBrowser({
       component,
-      savedChildren,
+      savedLayoutRoot,
       filter,
       selectedTaskId,
       tailOutput: undefined,
@@ -121,10 +121,7 @@ export class TasksBrowserController {
     if (browser.pollTimer !== undefined) clearInterval(browser.pollTimer);
     if (browser.flashTimer !== undefined) clearTimeout(browser.flashTimer);
 
-    state.ui.clear();
-    for (const child of browser.savedChildren) {
-      state.ui.addChild(child);
-    }
+    state.ui.setLayoutRoot(browser.savedLayoutRoot);
     this.host.setTasksBrowser(undefined);
     state.ui.setFocus(state.editor);
     state.ui.requestRender(true);
@@ -355,9 +352,8 @@ export class TasksBrowserController {
       state.terminal,
     );
 
-    const savedBrowserChildren = [...state.ui.children];
-    state.ui.clear();
-    state.ui.addChild(viewer);
+    const savedBrowserLayout = state.layoutRoot;
+    state.ui.setLayoutRoot(viewer);
     state.ui.setFocus(viewer);
     state.ui.requestRender(true);
 
@@ -367,7 +363,7 @@ export class TasksBrowserController {
 
     browser.viewer = {
       component: viewer,
-      savedChildren: savedBrowserChildren,
+      savedLayoutRoot: savedBrowserLayout,
       taskId,
       output,
       refreshId: 0,
@@ -431,10 +427,7 @@ export class TasksBrowserController {
     const viewer = browser.viewer;
     clearInterval(viewer.pollTimer);
     browser.viewer = undefined;
-    this.host.state.ui.clear();
-    for (const child of viewer.savedChildren) {
-      this.host.state.ui.addChild(child);
-    }
+    this.host.state.ui.setLayoutRoot(viewer.savedLayoutRoot);
     this.host.state.ui.setFocus(browser.component);
     this.host.state.ui.requestRender(true);
   }

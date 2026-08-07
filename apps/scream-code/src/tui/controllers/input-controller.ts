@@ -108,17 +108,9 @@ export class InputController {
     );
     state.editor.setAutocompleteProvider(provider);
 
-    // Collect argument hints for ghost-text display after `/command `.
-    const argumentHints = new Map<string, string>();
-    for (const cmd of visible) {
-      if (cmd.argumentHint === undefined) continue;
-      argumentHints.set(cmd.name, cmd.argumentHint);
-      for (const alias of cmd.aliases) {
-        argumentHints.set(alias, cmd.argumentHint);
-      }
-    }
-    state.editor.setArgumentHints(argumentHints);
-
+    // Ghost-text argument hints (setArgumentHints) were a scream-fork editor
+    // API; upstream pi-tui 0.84 removed it. Argument hints now surface via
+    // the autocomplete dropdown (AutocompleteItem.argumentHint) instead.
     state.editor.onFirstInput = () => {
       this.host.stopWelcomeBreathing();
       this.#permanentlyStopBreathing();

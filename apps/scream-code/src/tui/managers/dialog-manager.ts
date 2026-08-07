@@ -55,7 +55,7 @@ export class DialogManager {
   private approvalPreview:
     | {
         component: ApprovalPreviewViewer;
-        savedChildren: readonly Component[];
+        savedLayoutRoot: Component | undefined;
         panel: ApprovalPanelComponent;
       }
     | undefined;
@@ -318,7 +318,7 @@ export class DialogManager {
 
   private openApprovalPreview(panel: ApprovalPanelComponent, block: ApprovalPreviewBlock): void {
     if (this.approvalPreview !== undefined) return;
-    const savedChildren = [...this.host.state.ui.children];
+    const savedLayoutRoot = this.host.state.layoutRoot;
     const viewer = new ApprovalPreviewViewer(
       {
         block,
@@ -329,21 +329,18 @@ export class DialogManager {
       },
       this.host.state.terminal,
     );
-    this.host.state.ui.clear();
-    this.host.state.ui.addChild(viewer);
+    // TuiAltScreen renders its layout root, not ui.children. Replace the
+    // root with the full-screen viewer, and restore the main layout on close.
+    this.host.state.ui.setLayoutRoot(viewer);
     this.host.state.ui.setFocus(viewer);
     this.host.state.ui.requestRender(true);
-    this.approvalPreview = { component: viewer, savedChildren, panel };
+    this.approvalPreview = { component: viewer, savedLayoutRoot, panel };
   }
-
   private closeApprovalPreview(): void {
     const preview = this.approvalPreview;
     if (preview === undefined) return;
     this.approvalPreview = undefined;
-    this.host.state.ui.clear();
-    for (const child of preview.savedChildren) {
-      this.host.state.ui.addChild(child);
-    }
+    this.host.state.ui.setLayoutRoot(preview.savedLayoutRoot);
     this.host.state.ui.setFocus(preview.panel);
     this.host.state.ui.requestRender(true);
   }

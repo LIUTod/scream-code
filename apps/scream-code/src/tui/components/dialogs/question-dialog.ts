@@ -141,7 +141,7 @@ export class QuestionDialogComponent extends Container implements Focusable {
     if (this.ui !== undefined) {
       this.intervalId = setInterval(() => {
         this.animFrame = (this.animFrame + 1) % PIXEL_PULSE_FRAMES.length;
-        this.ui?.requestComponentRender(this);
+        this.ui?.requestRender();
       }, PIXEL_PULSE_INTERVAL_MS);
     }
   }

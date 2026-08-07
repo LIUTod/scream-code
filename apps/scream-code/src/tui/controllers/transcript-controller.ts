@@ -29,7 +29,7 @@ import { ImageAttachmentStore, type ImageAttachment } from '../utils/image-attac
 import { truncateErrorMessage } from '../utils/event-payload';
 import { replaceTabs } from '../utils/sanitize';
 import { nextTranscriptId } from '../utils/transcript-id';
-import { disposeChildren, isExpandable, isPlanExpandable } from '../utils/component-capabilities';
+import { disposeChildren, isPlanExpandable } from '../utils/component-capabilities';
 import { isStreaming } from '../utils/app-state';
 import { CommittedTranscriptComponent } from '../components/transcript/committed-transcript';
 import { ReadGroupComponent, parseReadGroupOutput } from '../components/messages/read-group';
@@ -355,18 +355,11 @@ export class TranscriptController {
 
   toggleToolOutputExpansion(): void {
     const { state } = this.host;
+    // Flip the global preference only; existing transcript entries keep their
+    // current expansion state (matches upstream pi: setExpanded is applied
+    // when a tool component is created, not retroactively). This keeps a
+    // long history from being force-expanded/collapsed all at once.
     state.toolOutputExpanded = !state.toolOutputExpanded;
-    const walk = (children: readonly Component[]): void => {
-      for (const child of children) {
-        if (isExpandable(child)) {
-          child.setExpanded(state.toolOutputExpanded);
-        }
-        if ('children' in child && Array.isArray((child as { children?: unknown }).children)) {
-          walk((child as { children: readonly Component[] }).children);
-        }
-      }
-    };
-    walk(state.transcriptContainer.children);
     state.ui.requestRender();
   }
 

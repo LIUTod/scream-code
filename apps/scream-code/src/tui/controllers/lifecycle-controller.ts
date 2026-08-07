@@ -1,7 +1,8 @@
 import type { Session, ScreamHarness } from '@scream-code/scream-code-sdk';
 import { t } from '@scream-code/config';
+import { Container, ScrollView, VStack, type Component } from '@liutod-scream/pi-tui';
 import { GutterContainer } from '../components/chrome/gutter-container';
-import { FlexSpacer } from '@liutod-scream/pi-tui';
+import { StatusBarPaneComponent } from '../components/panes/status-bar-pane';
 import { CHROME_GUTTER } from '../constant/rendering';
 import type { AuthFlowController } from './auth-flow';
 import type { SessionEventHandler } from './session-event-handler';
@@ -55,6 +56,7 @@ export interface LifecycleControllerHost {
 
 export class LifecycleController {
   private signalCleanupHandlers: Array<() => void> = [];
+  private footerWrap: GutterContainer | undefined;
   private ccConnectPollTimer: ReturnType<typeof setInterval> | undefined;
   private memoryIdleTimer: ReturnType<typeof setTimeout> | undefined;
   private memoryCountdownTimer: ReturnType<typeof setTimeout> | undefined;
@@ -62,6 +64,9 @@ export class LifecycleController {
   private terminalFocusTrackingDispose: (() => void) | undefined;
   private terminalThemeTrackingDispose: (() => void) | undefined;
   private lastActivityMode: string | undefined;
+  /** The active status-bar loader (PulseWaveLoader or MoonLoader). Owned by
+   * this controller; stopped before replacement to avoid leaking timers. */
+  private statusBarLoader: { stop(): void } | undefined;
 
   private static readonly MEMORY_IDLE_MS = 15 * 60 * 1000; // 15 minutes
   private static readonly MEMORY_COUNTDOWN_MS = 15 * 1000; // 15 seconds
@@ -236,23 +241,65 @@ export class LifecycleController {
   buildLayout(): void {
     const { ui } = this.host.state;
     ui.clear();
-    ui.addChild(this.host.state.transcriptContainer);
-    ui.addChild(this.host.state.activityContainer);
-    ui.addChild(this.host.state.todoPanelContainer);
-    ui.addChild(this.host.state.queueContainer);
-    ui.addChild(this.host.state.errorBannerContainer);
-    ui.addChild(this.host.state.planModeBannerContainer);
-    // FlexSpacer absorbs free vertical space so the editor and footer stay
-    // pinned to the terminal bottom instead of floating up when content
-    // shrinks (e.g. during a tool call with no streaming output).
-    ui.addChild(new FlexSpacer());
-    ui.addChild(this.host.state.editorContainer);
+    // Official pi-tui layout (mirrors coding-agent interactive-mode):
+    //   - ScrollView wraps the output regions (transcript/activity/queue),
+    //     so scrolling only moves the output, not the chrome.
+    //   - A fixed VStack dock holds todo + banners + editor + footer,
+    //     pinned to the bottom (grow: 0).
+    const scrollContent = new Container();
+    scrollContent.addChild(this.host.state.transcriptContainer);
+    scrollContent.addChild(this.host.state.activityContainer);
+    scrollContent.addChild(this.host.state.queueContainer);
+    const transcriptScrollView = new ScrollView(scrollContent, {
+      follow: 'end',
+      primary: true,
+      scrollbar: 'auto',
+    });
+    const dock = new VStack([
+      // Hide the todo panel on narrow terminals so the editor and footer
+      // keep enough room (replaces the removed setTightMode gutter collapse).
+      {
+        component: this.host.state.todoPanelContainer,
+        shrink: 1,
+        minSize: 0,
+        visible: (viewport) => viewport.width >= 90,
+      },
+      { component: this.host.state.errorBannerContainer, shrink: 1, minSize: 0 },
+      { component: this.host.state.planModeBannerContainer, shrink: 1, minSize: 0 },
+      // Fixed one-line status bar above the editor: current work phase
+      // (thinking/working/tool) with its spinner. Empty when idle. minSize 1
+      // guarantees the bar survives dock shrink (tool calls resize the
+      // editor, and a minSize 0 bar would be squeezed to zero height).
+      {
+        component: this.host.state.statusBarContainer,
+        shrink: 1,
+        minSize: 1,
+        visible: (viewport) => viewport.width >= 60,
+      },
+      { component: this.host.state.editorContainer, shrink: 1, minSize: 3 },
+      { component: this.ensureFooterWrap(), shrink: 1, minSize: 1 },
+    ]);
+    const layoutRoot = new VStack([
+      { component: transcriptScrollView, basis: 0, grow: 1, shrink: 1, minSize: 1 },
+      { component: dock, basis: 'auto', grow: 0, shrink: 1, minSize: 1 },
+    ]);
+    ui.setLayoutRoot(layoutRoot);
+    // Keep the root reachable so full-screen overlays (approval preview,
+    // tasks browser) can swap the layout temporarily and restore it.
+    this.host.state.layoutRoot = layoutRoot;
   }
 
   mountFooter(): void {
-    const footerWrap = new GutterContainer(CHROME_GUTTER, CHROME_GUTTER);
-    footerWrap.addChild(this.host.state.footer);
-    this.host.state.ui.addChild(footerWrap);
+    this.footerWrap = new GutterContainer(CHROME_GUTTER, CHROME_GUTTER);
+    this.footerWrap.addChild(this.host.state.footer);
+    // Footer is now part of the fixed dock in buildLayout; no standalone addChild.
+  }
+
+  private ensureFooterWrap(): GutterContainer {
+    if (this.footerWrap === undefined) {
+      this.mountFooter();
+    }
+    return this.footerWrap!;
   }
 
   refreshTerminalThemeTracking(): void {
@@ -299,59 +346,72 @@ export class LifecycleController {
     }
 
     this.lastActivityMode = effectiveMode;
+    this.updateStatusBar(effectiveMode);
     const { state } = this.host;
     state.activityContainer.clear();
-
+    // The status bar (above the editor) now owns the live work-phase
+    // indicator (spinner / pulse wave). The activity pane no longer renders
+    // a duplicate indicator — it stays empty. We still stop the shared
+    // activity spinner/pulse timers so nothing leaks.
     switch (effectiveMode) {
       case 'hidden':
-        this.stopActivitySpinner();
-        this.stopPulseWave();
-        state.ui.requestRender();
-        return;
-      case 'waiting': {
-        this.stopActivitySpinner();
-        const pulseWave = this.ensurePulseWave();
-        state.activityContainer.addChild(
-          new ActivityPaneComponent({
-            mode: 'waiting',
-            pulseWave,
-          }),
-        );
-        break;
-      }
-      case 'thinking': {
+      case 'idle':
         this.stopActivitySpinner();
         this.stopPulseWave();
         break;
-      }
-      case 'composing': {
-        const spinner = this.ensureActivitySpinner('working...', (s) =>
-          chalk.hex(state.theme.colors.primary)(s),
-        );
-        state.activityContainer.addChild(
-          new ActivityPaneComponent({
-            mode: 'composing',
-            spinner,
-          }),
-        );
-        break;
-      }
-      case 'tool': {
-        this.stopActivitySpinner();
-        const pulseWave = this.ensurePulseWave();
-        state.activityContainer.addChild(
-          new ActivityPaneComponent({
-            mode: 'tool',
-            pulseWave,
-          }),
-        );
-        break;
-      }
-      case 'idle': {
+      case 'waiting':
+      case 'thinking':
+      case 'composing':
+      case 'tool':
         this.stopActivitySpinner();
         this.stopPulseWave();
         break;
-      }
+    }
+    state.ui.requestRender();
+  }
+
+  /**
+   * Updates the fixed status bar above the editor to reflect the current
+   * work phase. Called only when the phase actually changes. Uses its OWN
+   * spinner/pulse instances (a component can only have one parent, so the
+   * activity pane's instances must not be shared). Recreating a loader on
+   * every call would leak setInterval timers (each PulseWaveLoader.start()
+   * registers one and the old instance is never stopped), so the previous
+   * instance is explicitly stopped before a new one is mounted. Idle leaves
+   * the bar empty.
+   */
+  private updateStatusBar(mode: EffectiveActivityPaneMode): void {
+    const { state } = this.host;
+    state.statusBarContainer.clear();
+    // Tear down the previous loader's interval before replacing it.
+    this.statusBarLoader?.stop();
+    this.statusBarLoader = undefined;
+
+    switch (mode) {
+      case 'waiting':
+      case 'composing':
+      case 'tool':
+        // All working phases show the same pulse wave. PulseWaveLoader
+        // renders reliably under layout-root swaps (an approval dialog
+        // replaces the root and restores it); the MoonLoader animation did
+        // not survive that restore, so a single wave is used everywhere.
+        {
+          const loader = new PulseWaveLoader(state.ui, state.theme.colors.primary);
+          this.statusBarLoader = loader;
+          state.statusBarContainer.addChild(
+            new StatusBarPaneComponent({ mode, label: '', pulseWave: loader }),
+          );
+        }
+        break;
+      case 'thinking':
+        // Thinking indicator lives in the output-area thinking block
+        // (spinner + "thinking..." + toks/s); showing it again here would
+        // duplicate. Leave the status bar empty during thinking.
+        break;
+      case 'idle':
+      case 'hidden':
+        // Bar stays empty.
+        break;
     }
     state.ui.requestRender();
   }
@@ -389,35 +449,11 @@ export class LifecycleController {
     this.host.state.terminalState.progressActive = active;
   }
 
-  private ensureActivitySpinner(
-    label = '',
-    colorFn?: (s: string) => string,
-  ): MoonLoader {
-    if (this.host.state.activitySpinner === null) {
-      const instance = new MoonLoader(this.host.state.ui, colorFn, label);
-      this.host.state.activitySpinner = { instance };
-      return instance;
-    }
-
-    this.host.state.activitySpinner.instance.setLabel(label);
-    if (colorFn !== undefined) {
-      this.host.state.activitySpinner.instance.setColorFn(colorFn);
-    }
-    return this.host.state.activitySpinner.instance;
-  }
-
   private stopActivitySpinner(): void {
     if (this.host.state.activitySpinner !== null) {
       this.host.state.activitySpinner.instance.stop();
       this.host.state.activitySpinner = null;
     }
-  }
-
-  private ensurePulseWave(): PulseWaveLoader {
-    if (this.host.state.pulseWave !== null) return this.host.state.pulseWave;
-    const instance = new PulseWaveLoader(this.host.state.ui, this.host.state.theme.colors.primary);
-    this.host.state.pulseWave = instance;
-    return instance;
   }
 
   private stopPulseWave(): void {

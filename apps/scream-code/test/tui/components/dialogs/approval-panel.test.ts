@@ -447,8 +447,8 @@ describe('ApprovalPanelComponent — selection pulse', () => {
   it('advances the pixel frame on the timer and requests component-scoped renders', () => {
     vi.useFakeTimers();
     try {
-      const requestComponentRender = vi.fn();
-      const ui = { requestComponentRender } as never;
+      const requestRender = vi.fn();
+      const ui = { requestRender } as never;
       const dialog = new ApprovalPanelComponent(makePending(), () => {}, COLORS, undefined, undefined, undefined, ui);
 
       const first = strip(dialog.render(80).join('\n'));
@@ -457,7 +457,7 @@ describe('ApprovalPanelComponent — selection pulse', () => {
       vi.advanceTimersByTime(250); // 2 frames: █ → ▓ → ▒
       const pulsed = strip(dialog.render(80).join('\n'));
       expect(pulsed).toContain('▒ 1. Approve once');
-      expect(requestComponentRender).toHaveBeenCalledWith(dialog);
+      expect(requestRender).toHaveBeenCalled();
 
       dialog.stop();
       vi.clearAllTimers();
@@ -470,7 +470,7 @@ describe('ApprovalPanelComponent — selection pulse', () => {
     vi.useFakeTimers();
     try {
       const responses: unknown[] = [];
-      const ui = { requestComponentRender: vi.fn() } as never;
+      const ui = { requestRender: vi.fn() } as never;
 
       const approved = new ApprovalPanelComponent(makePending(), (r) => responses.push(r), COLORS, undefined, undefined, undefined, ui);
       approved.handleInput('\r');
