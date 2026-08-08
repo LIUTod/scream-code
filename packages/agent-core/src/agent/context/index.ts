@@ -284,15 +284,20 @@ export class ContextMemory {
    * message mutated (compaction summary, micro-compaction truncation, or a
    * projection repair) and the cache broke from that index.
    *
-   * Behavior is otherwise identical to the getter - this is observation
-   * only, it does not alter the messages returned.
+   * Unlike the read-only `messages` getter, this path closes any trailing
+   * in-flight tool call by synthesizing an error result (synthesizeMissing):
+   * these messages go straight to the provider, which rejects an assistant
+   * tool_calls message with no matching tool result (e.g. after a network
+   * drop mid-batch).
    */
   messagesForLLM(): Message[] {
     // detect() is also run by fullCompaction.beforeStep at the step
     // boundary; mirroring it here keeps this path behavior-identical to
     // the `messages` getter when called directly (e.g. tests).
     this.agent.microCompaction.detect();
-    const messages = project(this.agent.microCompaction.compact(this.history));
+    const messages = project(this.agent.microCompaction.compact(this.history), {
+      synthesizeMissing: true,
+    });
     this.observePrefixStability(messages);
     return messages;
   }
@@ -416,6 +421,34 @@ export class ContextMemory {
 
   private hasOpenToolExchange(): boolean {
     return this.pendingToolResultIds.size > 0;
+  }
+
+  /**
+   * Defensive teardown for a live turn that ended — normally, cancelled, or
+   * failed — while recorded tool calls were still awaiting results (e.g. the
+   * batch's result dispatch died after a `tool.call` was already recorded,
+   * like a network drop mid-execution). Synthesizes an error result for each
+   * dangling call so the exchange closes: left open, the assistant tool_calls
+   * message would have no matching tool message and the next request would be
+   * rejected by the provider ("must be followed by tool messages responding
+   * to each tool_call_id"). No-op when the exchange is already closed.
+   */
+  closeAbandonedToolExchange(output: string): number {
+    if (this.pendingToolResultIds.size === 0) return 0;
+    const interruptedToolCallIds = [...this.pendingToolResultIds];
+    for (const toolCallId of interruptedToolCallIds) {
+      this.appendLoopEvent({
+        type: 'tool.result',
+        parentUuid: toolCallId,
+        toolCallId,
+        result: {
+          output,
+          isError: true,
+        },
+      });
+    }
+    this.flushDeferredMessagesIfToolExchangeClosed();
+    return interruptedToolCallIds.length;
   }
 
   private pushHistory(...messages: ContextMessage[]): void {

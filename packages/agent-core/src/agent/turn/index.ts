@@ -22,6 +22,18 @@ import {
   type LoopTurnStopReason,
 } from '../../loop/index';
 import type { AgentEvent, TurnEndedEvent } from '../../rpc';
+
+/** Builds the error text synthesized for tool calls abandoned when a live
+ * turn ends (cancelled, failed, or completed) before their results arrived. */
+function abandonedToolResultOutput(ended: TurnEndedEvent): string {
+  const cause =
+    ended.reason === 'cancelled'
+      ? 'the turn was cancelled'
+      : ended.reason === 'failed'
+        ? `the turn failed${ended.error !== undefined ? ` (${ended.error.message})` : ''}`
+        : 'the turn ended';
+  return `Tool call did not complete: ${cause} before its result was recorded. Do not assume the tool completed successfully.`;
+}
 import { abortable, userCancellationReason } from '../../utils/abort';
 import { USER_PROMPT_ORIGIN, type PromptOrigin, type ContextMessage } from '../context';
 import { renderUserPromptHookBlockResult, renderUserPromptHookResult } from '../../session/hooks';
@@ -253,6 +265,11 @@ export class TurnFlow {
       this.activeTurn = null;
     }
     this.steerBuffer.length = 0;
+    // NOTE: do NOT close abandoned tool exchanges here. This project keeps an
+    // unresolved exchange open through compaction (its assistant tool_calls +
+    // partial tool results are preserved for the next live turn), and the
+    // live-turn teardown (runTurn's end) already closes exchanges for
+    // interrupted turns — which covers the network-drop case the user hits.
   }
 
   private async turnWorker(
@@ -388,6 +405,13 @@ export class TurnFlow {
     this.agent.usage.beginTurn();
     this.agent.emitEvent({ type: 'turn.started', turnId, origin });
     const ended: TurnEndedEvent = { type: 'turn.ended', turnId, reason: 'completed' };
+    // Same guard as the model-driven turn end: never leave a tool exchange
+    // open when the turn ends.
+    try {
+      this.agent.context.closeAbandonedToolExchange(abandonedToolResultOutput(ended));
+    } catch (error) {
+      console.error('closeAbandonedToolExchange failed', error);
+    }
     this.agent.usage.endTurn();
     this.agent.emitEvent(ended);
     return ended;
@@ -484,6 +508,18 @@ export class TurnFlow {
     // instant turn.ended fires. A goal drive keeps the active turn across its
     // continuation turns and releases it in `turnWorker` instead (`standalone`
     // is false for those).
+    // A live turn must never end with recorded tool calls still awaiting
+    // results — a network drop mid-batch would leave an assistant tool_calls
+    // message with no matching tool results, and the next request would be
+    // rejected by the provider. Close any abandoned exchange now by
+    // synthesizing error results (mirrors upstream handling). Guarded so this
+    // repair can never turn a finished turn into a crash.
+    try {
+      this.agent.context.closeAbandonedToolExchange(abandonedToolResultOutput(ended));
+    } catch (error) {
+      // best-effort: the turn already ended; surface nothing beyond a log.
+      console.error('closeAbandonedToolExchange failed', error);
+    }
     if (this.currentId === turnId) {
       this.agent.usage.endTurn();
     }

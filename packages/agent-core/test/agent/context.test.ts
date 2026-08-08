@@ -648,3 +648,112 @@ function textOf(message: Message): string {
     .map((part) => part.text)
     .join('');
 }
+
+describe('Agent context closeAbandonedToolExchange', () => {
+  it('synthesizes error results for pending tool calls and closes the exchange', () => {
+    const ctx = testAgent();
+    ctx.configure();
+    ctx.agent.context.appendUserMessage([{ type: 'text', text: 'do it' }]);
+    ctx.dispatch({
+      type: 'context.append_loop_event',
+      event: { type: 'step.begin', uuid: 's', turnId: 't', step: 1 },
+    });
+    // Record two tool calls; only one result arrives (simulating a network
+    // drop mid-batch: call_b never completes).
+    ctx.dispatch({
+      type: 'context.append_loop_event',
+      event: { type: 'tool.call', uuid: 'ca', turnId: 't', step: 1, stepUuid: 's', toolCallId: 'call_a', name: 'bash', args: {} },
+    });
+    ctx.dispatch({
+      type: 'context.append_loop_event',
+      event: { type: 'tool.call', uuid: 'cb', turnId: 't', step: 1, stepUuid: 's', toolCallId: 'call_b', name: 'bash', args: {} },
+    });
+    ctx.dispatch({
+      type: 'context.append_loop_event',
+      event: { type: 'tool.result', parentUuid: 'ca', toolCallId: 'call_a', result: { output: 'ok' } },
+    });
+
+    const closed = ctx.agent.context.closeAbandonedToolExchange('interrupted');
+    expect(closed).toBe(1);
+
+    const toolMessages = ctx.agent.context.history.filter((m) => m.role === 'tool');
+    expect(toolMessages).toHaveLength(2);
+    expect(toolMessages.find((m) => m.toolCallId === 'call_a')?.isError).toBeUndefined();
+    expect(toolMessages.find((m) => m.toolCallId === 'call_b')?.isError).toBe(true);
+
+    // idempotent: nothing left to close
+    expect(ctx.agent.context.closeAbandonedToolExchange('again')).toBe(0);
+  });
+
+  it('is a no-op when there is no open exchange', () => {
+    const ctx = testAgent();
+    ctx.configure();
+    expect(ctx.agent.context.closeAbandonedToolExchange('x')).toBe(0);
+  });
+});
+
+describe('project tool exchange repair (port of upstream)', () => {
+  const userMsg = (text: string): ContextMessage => ({
+    role: 'user',
+    content: [{ type: 'text', text }],
+    toolCalls: [],
+    origin: { kind: 'user' },
+  });
+  const assistantMsg = (ids: string[]): ContextMessage => ({
+    role: 'assistant',
+    content: [{ type: 'text', text: 'thinking' }],
+    toolCalls: ids.map((id) => ({ type: 'function' as const, id, name: 'bash', arguments: '' })),
+    origin: { kind: 'user' },
+  });
+  const toolMsg = (id: string): ContextMessage => ({
+    role: 'tool',
+    content: [{ type: 'text', text: 'ok' }],
+    toolCalls: [],
+    toolCallId: id,
+    origin: { kind: 'user' },
+  });
+
+  it('leaves a pending trailing tool call without a result untouched', () => {
+    const out = project([userMsg('u1'), assistantMsg(['a', 'b']), toolMsg('a')]);
+    expect(out.map((m) => [m.role, m.toolCallId])).toEqual([
+      ['user', undefined],
+      ['assistant', undefined],
+      ['tool', 'a'],
+    ]);
+    expect(out.some((m) => m.toolCallId === 'b')).toBe(false);
+  });
+
+  it('synthesizes a result for a mid-history orphan (model already moved on)', () => {
+    const out = project([userMsg('u1'), assistantMsg(['a']), userMsg('u2'), assistantMsg(['b']), toolMsg('b')]);
+    const aIndex = out.findIndex((m) => m.toolCalls.some((tc) => tc.id === 'a'));
+    expect(out[aIndex + 1]).toMatchObject({ role: 'tool', toolCallId: 'a' });
+    expect(textOf(out[aIndex + 1]!)).toContain('did not complete');
+  });
+
+  it('closes a mid-history orphan while leaving the trailing in-flight call untouched', () => {
+    const out = project([userMsg('u1'), assistantMsg(['a']), userMsg('u2'), assistantMsg(['b'])]);
+    const aIndex = out.findIndex((m) => m.toolCalls.some((tc) => tc.id === 'a'));
+    expect(out[aIndex + 1]).toMatchObject({ role: 'tool', toolCallId: 'a' });
+    expect(out.some((m) => m.toolCallId === 'b')).toBe(false);
+  });
+
+  it('synthesizes a missing trailing result when synthesizeMissing is set', () => {
+    const out = project([userMsg('u1'), assistantMsg(['a', 'b']), toolMsg('a')], { synthesizeMissing: true });
+    expect(out.map((m) => [m.role, m.toolCallId])).toEqual([
+      ['user', undefined],
+      ['assistant', undefined],
+      ['tool', 'a'],
+      ['tool', 'b'],
+    ]);
+    expect(out.at(-1)).toMatchObject({ role: 'tool', toolCallId: 'b' });
+  });
+
+  it('leaves an already well-formed history unchanged (idempotent)', () => {
+    const out = project([userMsg('u1'), assistantMsg(['a']), toolMsg('a')]);
+    expect(out.map((m) => [m.role, m.toolCallId])).toEqual([
+      ['user', undefined],
+      ['assistant', undefined],
+      ['tool', 'a'],
+    ]);
+  });
+});
