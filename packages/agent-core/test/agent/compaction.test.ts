@@ -169,6 +169,7 @@ describe('Agent compaction', () => {
       maxCompactionPerTurn: 3,
       maxRecentMessages: 3,
       maxRecentUserMessages: Infinity,
+      maxRecentTokens: 20_000,
       maxRecentSizeRatio: 0.2,
       minOverflowReductionRatio: 0.05,
     });
@@ -203,12 +204,12 @@ describe('Agent compaction', () => {
       [wire] context.append_message     { "message": { "role": "user", "content": [ { "type": "text", "text": "recent user three" } ], "toolCalls": [], "origin": { "kind": "user" } }, "time": "<time>" }
       [wire] full_compaction.begin      { "source": "manual", "instruction": "Keep the important test facts.", "time": "<time>" }
       [emit] compaction.started         { "trigger": "manual", "instruction": "Keep the important test facts." }
-      [wire] usage.record               { "model": "scream-code", "usage": { "inputOther": 1059, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "session", "time": "<time>" }
-      [emit] agent.status.updated       { "model": "scream-code", "thinkingLevel": "off", "contextTokens": 120, "maxContextTokens": 256000, "contextUsage": 0.00046875, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "permission": "manual", "usage": { "byModel": { "scream-code": { "inputOther": 1059, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 1059, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
+      [wire] usage.record               { "model": "scream-code", "usage": { "inputOther": 1354, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "session", "time": "<time>" }
+      [emit] agent.status.updated       { "model": "scream-code", "thinkingLevel": "off", "contextTokens": 120, "maxContextTokens": 256000, "contextUsage": 0.00046875, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "permission": "manual", "usage": { "byModel": { "scream-code": { "inputOther": 1354, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 1354, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
       [wire] full_compaction.complete   { "time": "<time>" }
-      [emit] compaction.completed       { "result": { "summary": "Compacted summary.", "compactedCount": 6, "tokensBefore": 39, "tokensAfter": 5 } }
-      [wire] context.apply_compaction   { "summary": "Compacted summary.", "compactedCount": 6, "tokensBefore": 39, "tokensAfter": 5, "time": "<time>" }
-      [emit] agent.status.updated       { "model": "scream-code", "thinkingLevel": "off", "contextTokens": 5, "maxContextTokens": 256000, "contextUsage": 0.00001953125, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "permission": "manual", "usage": { "byModel": { "scream-code": { "inputOther": 1059, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 1059, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
+      [emit] compaction.completed       { "result": { "summary": "> The conversation before this point was compacted: 6 earlier message(s) were omitted and are covered by this summary. Treat the summary below as working notes, not verbatim history — the messages after it continue from here.\\n\\nCompacted summary.", "compactedCount": 6, "tokensBefore": 39, "tokensAfter": 62 } }
+      [wire] context.apply_compaction   { "summary": "> The conversation before this point was compacted: 6 earlier message(s) were omitted and are covered by this summary. Treat the summary below as working notes, not verbatim history — the messages after it continue from here.\\n\\nCompacted summary.", "compactedCount": 6, "tokensBefore": 39, "tokensAfter": 62, "time": "<time>" }
+      [emit] agent.status.updated       { "model": "scream-code", "thinkingLevel": "off", "contextTokens": 62, "maxContextTokens": 256000, "contextUsage": 0.0002421875, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "permission": "manual", "usage": { "byModel": { "scream-code": { "inputOther": 1354, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 1354, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
     `);
     expect(ctx.lastLlmInput()).toMatchInlineSnapshot(`
       system: "You are a conversation context compaction assistant. Your job is to summarize the conversation above into a structured summary. Output text only. DO NOT CALL ANY TOOLS. Follow the compaction instruction in the last user message exactly. Pay special attention to the Memory Memo Extraction section — you MUST output memory-memo blocks for every completed task loop."
@@ -226,7 +227,9 @@ describe('Agent compaction', () => {
       [
         {
           "role": "assistant",
-          "text": "Compacted summary.",
+          "text": "> The conversation before this point was compacted: 6 earlier message(s) were omitted and are covered by this summary. Treat the summary below as working notes, not verbatim history — the messages after it continue from here.
+
+      Compacted summary.",
         },
       ]
     `);
@@ -527,7 +530,7 @@ describe('Agent compaction', () => {
     expect(authKeys).toEqual(['fresh-token', 'forced-refresh-token', 'fresh-token']);
     expect(tokenCalls).toEqual([undefined, true, undefined]);
     expect(ctx.compactHistory()).toEqual([
-      { role: 'assistant', text: 'Recovered compacted summary.' },
+      expect.objectContaining({ role: 'assistant', text: expect.stringContaining('Recovered compacted summary.') }),
     ]);
     await ctx.expectResumeMatches();
   });
@@ -677,14 +680,14 @@ describe('Agent compaction', () => {
 
     expect(attempts).toBe(3);
     expect(ctx.compactHistory()).toEqual([
-      { role: 'assistant', text: 'Recovered compacted summary.' },
+      expect.objectContaining({ role: 'assistant', text: expect.stringContaining('Recovered compacted summary.') }),
     ]);
     expect(
       ctx.allEvents.filter((event) => event.event === 'compaction.completed'),
     ).toEqual([
       expect.objectContaining({
         args: expect.objectContaining({
-          result: expect.objectContaining({ summary: 'Recovered compacted summary.' }),
+          result: expect.objectContaining({ summary: expect.stringContaining('Recovered compacted summary.') }),
         }),
       }),
     ]);
@@ -962,12 +965,12 @@ describe('Agent compaction', () => {
       [wire] full_compaction.begin      { "source": "manual", "time": "<time>" }
       [emit] compaction.started         { "trigger": "manual" }
       [wire] context.append_message     { "message": { "role": "user", "content": [ { "type": "text", "text": "new user while compacting" } ], "toolCalls": [], "origin": { "kind": "user" } }, "time": "<time>" }
-      [wire] usage.record               { "model": "scream-code", "usage": { "inputOther": 1038, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "session", "time": "<time>" }
-      [emit] agent.status.updated       { "model": "scream-code", "thinkingLevel": "off", "contextTokens": 80, "maxContextTokens": 256000, "contextUsage": 0.0003125, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "permission": "manual", "usage": { "byModel": { "scream-code": { "inputOther": 1038, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 1038, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
+      [wire] usage.record               { "model": "scream-code", "usage": { "inputOther": 1332, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "session", "time": "<time>" }
+      [emit] agent.status.updated       { "model": "scream-code", "thinkingLevel": "off", "contextTokens": 80, "maxContextTokens": 256000, "contextUsage": 0.0003125, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "permission": "manual", "usage": { "byModel": { "scream-code": { "inputOther": 1332, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 1332, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
       [wire] full_compaction.complete   { "time": "<time>" }
-      [emit] compaction.completed       { "result": { "summary": "Compacted prefix.", "compactedCount": 4, "tokensBefore": 25, "tokensAfter": 5 } }
-      [wire] context.apply_compaction   { "summary": "Compacted prefix.", "compactedCount": 4, "tokensBefore": 25, "tokensAfter": 5, "time": "<time>" }
-      [emit] agent.status.updated       { "model": "scream-code", "thinkingLevel": "off", "contextTokens": 5, "maxContextTokens": 256000, "contextUsage": 0.00001953125, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "permission": "manual", "usage": { "byModel": { "scream-code": { "inputOther": 1038, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 1038, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
+      [emit] compaction.completed       { "result": { "summary": "> The conversation before this point was compacted: 4 earlier message(s) were omitted and are covered by this summary. Treat the summary below as working notes, not verbatim history — the messages after it continue from here.\\n\\nCompacted prefix.", "compactedCount": 4, "tokensBefore": 25, "tokensAfter": 62 } }
+      [wire] context.apply_compaction   { "summary": "> The conversation before this point was compacted: 4 earlier message(s) were omitted and are covered by this summary. Treat the summary below as working notes, not verbatim history — the messages after it continue from here.\\n\\nCompacted prefix.", "compactedCount": 4, "tokensBefore": 25, "tokensAfter": 62, "time": "<time>" }
+      [emit] agent.status.updated       { "model": "scream-code", "thinkingLevel": "off", "contextTokens": 62, "maxContextTokens": 256000, "contextUsage": 0.0002421875, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "permission": "manual", "usage": { "byModel": { "scream-code": { "inputOther": 1332, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 1332, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
     `);
     expect(ctx.lastLlmInput()).toMatchInlineSnapshot(`
       system: "You are a conversation context compaction assistant. Your job is to summarize the conversation above into a structured summary. Output text only. DO NOT CALL ANY TOOLS. Follow the compaction instruction in the last user message exactly. Pay special attention to the Memory Memo Extraction section — you MUST output memory-memo blocks for every completed task loop."
@@ -983,7 +986,9 @@ describe('Agent compaction', () => {
       [
         {
           "role": "assistant",
-          "text": "Compacted prefix.",
+          "text": "> The conversation before this point was compacted: 4 earlier message(s) were omitted and are covered by this summary. Treat the summary below as working notes, not verbatim history — the messages after it continue from here.
+
+      Compacted prefix.",
         },
         {
           "role": "user",
@@ -1016,8 +1021,8 @@ describe('Agent compaction', () => {
       [emit] compaction.started       { "trigger": "manual" }
       [wire] context.clear            { "time": "<time>" }
       [emit] agent.status.updated     { "model": "scream-code", "thinkingLevel": "off", "contextTokens": 0, "maxContextTokens": 256000, "contextUsage": 0, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "permission": "manual" }
-      [wire] usage.record             { "model": "scream-code", "usage": { "inputOther": 1038, "output": 7, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "session", "time": "<time>" }
-      [emit] agent.status.updated     { "model": "scream-code", "thinkingLevel": "off", "contextTokens": 0, "maxContextTokens": 256000, "contextUsage": 0, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "permission": "manual", "usage": { "byModel": { "scream-code": { "inputOther": 1038, "output": 7, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 1038, "output": 7, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
+      [wire] usage.record             { "model": "scream-code", "usage": { "inputOther": 1332, "output": 7, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "session", "time": "<time>" }
+      [emit] agent.status.updated     { "model": "scream-code", "thinkingLevel": "off", "contextTokens": 0, "maxContextTokens": 256000, "contextUsage": 0, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "permission": "manual", "usage": { "byModel": { "scream-code": { "inputOther": 1332, "output": 7, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 1332, "output": 7, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
       [wire] full_compaction.cancel   { "time": "<time>" }
       [emit] compaction.cancelled     { "reason": "上下文已被更改（如 /revoke），压缩已取消" }
     `);
@@ -1059,20 +1064,20 @@ describe('Agent compaction', () => {
       [wire] full_compaction.begin       { "source": "auto", "time": "<time>" }
       [emit] compaction.started          { "trigger": "auto" }
       [emit] compaction.blocked          { "turnId": 0 }
-      [wire] usage.record                { "model": "scream-code", "usage": { "inputOther": 1037, "output": 9, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "session", "time": "<time>" }
-      [emit] agent.status.updated        { "model": "scream-code", "thinkingLevel": "off", "contextTokens": 950000, "maxContextTokens": 256000, "contextUsage": 3.7109375, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "permission": "manual", "usage": { "byModel": { "scream-code": { "inputOther": 1037, "output": 9, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 1037, "output": 9, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
+      [wire] usage.record                { "model": "scream-code", "usage": { "inputOther": 1319, "output": 9, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "session", "time": "<time>" }
+      [emit] agent.status.updated        { "model": "scream-code", "thinkingLevel": "off", "contextTokens": 950000, "maxContextTokens": 256000, "contextUsage": 3.7109375, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "permission": "manual", "usage": { "byModel": { "scream-code": { "inputOther": 1319, "output": 9, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 1319, "output": 9, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
       [wire] full_compaction.complete    { "time": "<time>" }
-      [emit] compaction.completed        { "result": { "summary": "Auto compacted summary.", "compactedCount": 4, "tokensBefore": 46, "tokensAfter": 28 } }
-      [wire] context.apply_compaction    { "summary": "Auto compacted summary.", "compactedCount": 4, "tokensBefore": 46, "tokensAfter": 28, "time": "<time>" }
-      [emit] agent.status.updated        { "model": "scream-code", "thinkingLevel": "off", "contextTokens": 28, "maxContextTokens": 256000, "contextUsage": 0.000109375, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "permission": "manual", "usage": { "byModel": { "scream-code": { "inputOther": 1037, "output": 9, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 1037, "output": 9, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
+      [emit] compaction.completed        { "result": { "summary": "> The conversation before this point was compacted: 2 earlier message(s) were omitted and are covered by this summary. Treat the summary below as working notes, not verbatim history — the messages after it continue from here.\\n\\nAuto compacted summary.", "compactedCount": 2, "tokensBefore": 46, "tokensAfter": 98 } }
+      [wire] context.apply_compaction    { "summary": "> The conversation before this point was compacted: 2 earlier message(s) were omitted and are covered by this summary. Treat the summary below as working notes, not verbatim history — the messages after it continue from here.\\n\\nAuto compacted summary.", "compactedCount": 2, "tokensBefore": 46, "tokensAfter": 98, "time": "<time>" }
+      [emit] agent.status.updated        { "model": "scream-code", "thinkingLevel": "off", "contextTokens": 98, "maxContextTokens": 256000, "contextUsage": 0.0003828125, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "permission": "manual", "usage": { "byModel": { "scream-code": { "inputOther": 1319, "output": 9, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 1319, "output": 9, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
       [wire] context.append_loop_event   { "event": { "type": "step.begin", "uuid": "<uuid-1>", "turnId": "0", "step": 1 }, "time": "<time>" }
       [emit] turn.step.started           { "turnId": 0, "step": 1, "stepId": "<uuid-1>" }
       [emit] assistant.delta             { "turnId": 0, "delta": "I can answer after compaction." }
       [wire] context.append_loop_event   { "event": { "type": "content.part", "uuid": "<uuid-2>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "part": { "type": "text", "text": "I can answer after compaction." } }, "time": "<time>" }
-      [wire] context.append_loop_event   { "event": { "type": "step.end", "uuid": "<uuid-1>", "turnId": "0", "step": 1, "usage": { "inputOther": 31, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }, "time": "<time>" }
-      [emit] turn.step.completed         { "turnId": 0, "step": 1, "stepId": "<uuid-1>", "usage": { "inputOther": 31, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }
-      [wire] usage.record                { "model": "scream-code", "usage": { "inputOther": 31, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
-      [emit] agent.status.updated        { "model": "scream-code", "thinkingLevel": "off", "contextTokens": 42, "maxContextTokens": 256000, "contextUsage": 0.0001640625, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "permission": "manual", "usage": { "byModel": { "scream-code": { "inputOther": 1068, "output": 20, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 1068, "output": 20, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 31, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
+      [wire] context.append_loop_event   { "event": { "type": "step.end", "uuid": "<uuid-1>", "turnId": "0", "step": 1, "usage": { "inputOther": 101, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }, "time": "<time>" }
+      [emit] turn.step.completed         { "turnId": 0, "step": 1, "stepId": "<uuid-1>", "usage": { "inputOther": 101, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }
+      [wire] usage.record                { "model": "scream-code", "usage": { "inputOther": 101, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
+      [emit] agent.status.updated        { "model": "scream-code", "thinkingLevel": "off", "contextTokens": 112, "maxContextTokens": 256000, "contextUsage": 0.0004375, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "permission": "manual", "usage": { "byModel": { "scream-code": { "inputOther": 1420, "output": 20, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 1420, "output": 20, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 101, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
       [emit] turn.ended                  { "turnId": 0, "reason": "completed" }
     `);
     expect(ctx.llmInputs()).toMatchInlineSnapshot(`
@@ -1082,14 +1087,14 @@ describe('Agent compaction', () => {
         messages:
           user: text "old user one"
           assistant: text "old assistant one"
-          user: text "old user two"
-          assistant: text "old assistant two"
           user: text <compaction-instruction>
 
       call 2:
         system: <system-prompt>
         messages:
-          assistant: text "Auto compacted summary."
+          assistant: text "> The conversation before this point was compacted: 2 earlier message(s) were omitted and are covered by this summary. Treat the summary below as working notes, not verbatim history — the messages after it continue from here.\\n\\nAuto compacted summary."
+          user: text "old user two"
+          assistant: text "old assistant two"
           user: text "recent user three"
           assistant: text "recent assistant three"
           user: text "Answer after compacting"
@@ -1268,7 +1273,7 @@ describe('Agent compaction', () => {
 
     expect(ctx.llmCalls).toHaveLength(1);
     expect(ctx.compactHistory()).toEqual([
-      { role: 'assistant', text: 'Compacted after no-op cancel.' },
+      expect.objectContaining({ role: 'assistant', text: expect.stringContaining('Compacted after no-op cancel.') }),
     ]);
     await ctx.expectResumeMatches();
   });
@@ -1324,7 +1329,7 @@ describe('Agent compaction', () => {
     expect(ctx.llmCalls).toHaveLength(2);
     const [compactionCall, answerCall] = ctx.llmCalls;
     expect(messageText(compactionCall?.history.at(-1))).toContain('<!-- Compression Priorities');
-    expect(answerCall?.history.map(messageText)).toContain('Reserved compacted summary.');
+    expect(answerCall?.history.map(messageText).some((t) => t.includes('Reserved compacted summary.'))).toBe(true);
     await ctx.expectResumeMatches();
   });
 
@@ -1350,7 +1355,7 @@ describe('Agent compaction', () => {
     const compactionTexts = compactionCall?.history.map(messageText) ?? [];
     expect(compactionTexts.some((text) => text.includes('keep-this-pending-verbatim'))).toBe(false);
     expect(compactionCall?.history.map((message) => message.role)).toEqual(['user', 'assistant', 'user']);
-    expect(answerCall?.history.map(messageText)).toContain('Oversized prompt summary.');
+    expect(answerCall?.history.map(messageText).some((t) => t.includes('Oversized prompt summary.'))).toBe(true);
     expect(messageText(answerCall?.history.at(-1))).toBe(oversizedPrompt);
     await ctx.expectResumeMatches();
   });
@@ -1377,7 +1382,7 @@ describe('Agent compaction', () => {
     const compactionTexts = compactionCall?.history.map(messageText) ?? [];
     expect(compactionTexts.some((text) => text.includes('ratio-pending-verbatim'))).toBe(false);
     expect(compactionCall?.history.map((message) => message.role)).toEqual(['user', 'assistant', 'user']);
-    expect(answerCall?.history.map(messageText)).toContain('Ratio compacted summary.');
+    expect(answerCall?.history.map(messageText).some((t) => t.includes('Ratio compacted summary.'))).toBe(true);
     expect(messageText(answerCall?.history.at(-1))).toBe(pendingPrompt);
 
     await ctx.expectResumeMatches();
@@ -1426,7 +1431,7 @@ describe('Agent compaction', () => {
       expect.objectContaining({
         event: 'context.apply_compaction',
         args: expect.objectContaining({
-          summary: 'Overflow compacted summary.',
+          summary: expect.stringContaining('Overflow compacted summary.'),
           compactedCount: 2,
         }),
       }),
@@ -1450,7 +1455,9 @@ describe('Agent compaction', () => {
           "user: <compaction-instruction>",
         ],
         [
-          "assistant: Overflow compacted summary.",
+          "assistant: > The conversation before this point was compacted: 2 earlier message(s) were omitted and are covered by this summary. Treat the summary below as working notes, not verbatim history — the messages after it continue from here.
+
+      Overflow compacted summary.",
           "user: Retry after provider overflow",
         ],
       ]
@@ -1507,7 +1514,7 @@ describe('Agent compaction', () => {
       expect.objectContaining({
         event: 'context.apply_compaction',
         args: expect.objectContaining({
-          summary: 'Unknown window compacted summary.',
+          summary: expect.stringContaining('Unknown window compacted summary.'),
           compactedCount: 2,
         }),
       }),
@@ -1572,7 +1579,7 @@ describe('Agent compaction', () => {
       expect.objectContaining({
         event: 'context.apply_compaction',
         args: expect.objectContaining({
-          summary: 'Placeholder compacted summary.',
+          summary: expect.stringContaining('Placeholder compacted summary.'),
           compactedCount: 2,
         }),
       }),
@@ -1600,12 +1607,12 @@ describe('Agent compaction', () => {
       [wire] full_compaction.begin       { "source": "auto", "time": "<time>" }
       [emit] compaction.started          { "trigger": "auto" }
       [emit] compaction.blocked          { "turnId": 0 }
-      [wire] usage.record                { "model": "mock-model", "usage": { "inputOther": 1021, "output": 9, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "session", "time": "<time>" }
-      [emit] agent.status.updated        { "model": "mock-model", "thinkingLevel": "off", "contextTokens": 0, "maxContextTokens": 1000000, "contextUsage": 0, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "permission": "manual", "usage": { "byModel": { "mock-model": { "inputOther": 1021, "output": 9, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 1021, "output": 9, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
+      [wire] usage.record                { "model": "mock-model", "usage": { "inputOther": 1315, "output": 9, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "session", "time": "<time>" }
+      [emit] agent.status.updated        { "model": "mock-model", "thinkingLevel": "off", "contextTokens": 0, "maxContextTokens": 1000000, "contextUsage": 0, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "permission": "manual", "usage": { "byModel": { "mock-model": { "inputOther": 1315, "output": 9, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 1315, "output": 9, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
       [wire] full_compaction.complete    { "time": "<time>" }
-      [emit] compaction.completed        { "result": { "summary": "First compacted summary.", "compactedCount": 1, "tokensBefore": 8, "tokensAfter": 6 } }
-      [wire] context.apply_compaction    { "summary": "First compacted summary.", "compactedCount": 1, "tokensBefore": 8, "tokensAfter": 6, "time": "<time>" }
-      [emit] agent.status.updated        { "model": "mock-model", "thinkingLevel": "off", "contextTokens": 6, "maxContextTokens": 1000000, "contextUsage": 0.000006, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "permission": "manual", "usage": { "byModel": { "mock-model": { "inputOther": 1021, "output": 9, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 1021, "output": 9, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
+      [emit] compaction.completed        { "result": { "summary": "> The conversation before this point was compacted: 1 earlier message(s) were omitted and are covered by this summary. Treat the summary below as working notes, not verbatim history — the messages after it continue from here.\\n\\nFirst compacted summary.", "compactedCount": 1, "tokensBefore": 8, "tokensAfter": 64 } }
+      [wire] context.apply_compaction    { "summary": "> The conversation before this point was compacted: 1 earlier message(s) were omitted and are covered by this summary. Treat the summary below as working notes, not verbatim history — the messages after it continue from here.\\n\\nFirst compacted summary.", "compactedCount": 1, "tokensBefore": 8, "tokensAfter": 64, "time": "<time>" }
+      [emit] agent.status.updated        { "model": "mock-model", "thinkingLevel": "off", "contextTokens": 64, "maxContextTokens": 1000000, "contextUsage": 0.000064, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "permission": "manual", "usage": { "byModel": { "mock-model": { "inputOther": 1315, "output": 9, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 1315, "output": 9, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
       [wire] context.append_loop_event   { "event": { "type": "step.begin", "uuid": "<uuid-1>", "turnId": "0", "step": 1 }, "time": "<time>" }
       [emit] turn.step.started           { "turnId": 0, "step": 1, "stepId": "<uuid-1>" }
       [emit] assistant.delta             { "turnId": 0, "delta": "I need a tool." }
@@ -1615,10 +1622,10 @@ describe('Agent compaction', () => {
       [emit] tool.call.started           { "turnId": 0, "toolCallId": "call_missing", "name": "MissingTool", "args": {} }
       [wire] context.append_loop_event   { "event": { "type": "tool.result", "parentUuid": "call_missing", "toolCallId": "call_missing", "result": { "output": "Tool \\"MissingTool\\" not found", "isError": true } }, "time": "<time>" }
       [emit] tool.result                 { "turnId": 0, "toolCallId": "call_missing", "output": "Tool \\"MissingTool\\" not found", "isError": true }
-      [wire] context.append_loop_event   { "event": { "type": "step.end", "uuid": "<uuid-1>", "turnId": "0", "step": 1, "usage": { "inputOther": 9, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "tool_use" }, "time": "<time>" }
-      [emit] turn.step.completed         { "turnId": 0, "step": 1, "stepId": "<uuid-1>", "usage": { "inputOther": 9, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "tool_use" }
-      [wire] usage.record                { "model": "mock-model", "usage": { "inputOther": 9, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
-      [emit] agent.status.updated        { "model": "mock-model", "thinkingLevel": "off", "contextTokens": 20, "maxContextTokens": 1000000, "contextUsage": 0.00002, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "permission": "manual", "usage": { "byModel": { "mock-model": { "inputOther": 1030, "output": 20, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 1030, "output": 20, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 9, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
+      [wire] context.append_loop_event   { "event": { "type": "step.end", "uuid": "<uuid-1>", "turnId": "0", "step": 1, "usage": { "inputOther": 67, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "tool_use" }, "time": "<time>" }
+      [emit] turn.step.completed         { "turnId": 0, "step": 1, "stepId": "<uuid-1>", "usage": { "inputOther": 67, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "tool_use" }
+      [wire] usage.record                { "model": "mock-model", "usage": { "inputOther": 67, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
+      [emit] agent.status.updated        { "model": "mock-model", "thinkingLevel": "off", "contextTokens": 78, "maxContextTokens": 1000000, "contextUsage": 0.000078, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "permission": "manual", "usage": { "byModel": { "mock-model": { "inputOther": 1382, "output": 20, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 1382, "output": 20, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 67, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
       [emit] turn.step.interrupted       { "turnId": 0, "step": 2, "reason": "error", "message": "Compaction limit exceeded (1)" }
       [emit] turn.ended                  { "turnId": 0, "reason": "failed", "error": { "code": "context.overflow", "message": "Compaction limit exceeded (1)", "name": "ScreamError", "details": { "maxCompactions": 1, "turnId": 0 }, "retryable": true } }
     `);
@@ -1636,15 +1643,16 @@ describe('Agent compaction', () => {
       call 2:
         system: <system-prompt>
         messages:
-          assistant: text "First compacted summary."
+          assistant: text "> The conversation before this point was compacted: 1 earlier message(s) were omitted and are covered by this summary. Treat the summary below as working notes, not verbatim history — the messages after it continue from here.\\n\\nFirst compacted summary."
     `);
     await ctx.expectResumeMatches();
   });
 
   describe('bugfixes', () => {
-    it('maxRecentUserMessages defaults to 2 (not Infinity)', () => {
-      // The default config should cap recent user messages at 2 so that
-      // oversized consecutive user prompts don't evade compaction.
+    it('default config caps recent user messages at 8 with token budget fallback', () => {
+      // The default config caps recent user messages at 8 (was 2) and the
+      // recent tail at 20k tokens / 20% of the window, so oversized
+      // consecutive user prompts still cannot evade compaction.
       const strategy = new DefaultCompactionStrategy(() => 1_000);
       const messages = [
         textMessage('user', 'old user'),
@@ -1654,8 +1662,9 @@ describe('Agent compaction', () => {
         textMessage('user', `pending user three ${'x'.repeat(1_200)}`),
       ];
 
-      // With maxRecentUserMessages=2, only the last 2 user messages stay,
-      // so the first user+assistant pair gets compacted.
+      // The three oversized user prompts exceed the 20% token budget of the
+      // 1000-token window, so only the first user+assistant pair gets
+      // compacted — the oversized tail cannot evade compaction.
       expect(strategy.computeCompactCount(messages, 'auto')).toBe(2);
     });
 
@@ -1683,6 +1692,93 @@ describe('Agent compaction', () => {
       ];
       const out = micro.compact(messages);
       expect(out[0]!.content[0]!).toEqual({ type: 'text', text: 'tool output' });
+    });
+  });
+
+  describe('compaction-time memory extraction', () => {
+    it('stores a fallback memo when the summary omits memory-memo blocks', async () => {
+      const dir = mkdtempSync(join(tmpdir(), 'scream-memo-fallback-'));
+      const ctx = testAgent({ screamHomeDir: dir });
+      ctx.configure({
+        provider: CATALOGUED_PROVIDER,
+        modelCapabilities: CATALOGUED_MODEL_CAPABILITIES,
+      });
+      // One user message with no memory-memo block in the returned summary.
+      ctx.appendExchange(1, 'keep working on the widget parser', 'old assistant one', 20);
+      const compacted = ctx.once('context.apply_compaction');
+      ctx.mockNextResponse({ type: 'text', text: 'Compacted summary.' });
+      await ctx.rpc.beginCompaction({});
+      await compacted;
+
+      // Memo extraction runs after the apply_compaction event; poll until the
+      // fallback memo is visible in the store.
+      const store = ctx.agent.memoStore!;
+      await vi.waitFor(async () => {
+        const result = await store.list();
+        expect(result.memos).toHaveLength(1);
+        return result.memos[0]!;
+      });
+      const memo = (await store.list()).memos[0]!;
+      expect(memo.userNeed).toContain('widget parser');
+      expect(memo.outcome).toBe('进行中');
+      expect(memo.extractionSource).toBe('compaction');
+      expect(memo.tags).toContain('compaction-fallback');
+    });
+
+    it('does not store a fallback memo when the summary explicitly says none', async () => {
+      const dir = mkdtempSync(join(tmpdir(), 'scream-memo-none-'));
+      const ctx = testAgent({ screamHomeDir: dir });
+      ctx.configure({
+        provider: CATALOGUED_PROVIDER,
+        modelCapabilities: CATALOGUED_MODEL_CAPABILITIES,
+      });
+      ctx.appendExchange(1, 'just a quick question', 'old assistant one', 20);
+      const compacted = ctx.once('context.apply_compaction');
+      ctx.mockNextResponse({
+        type: 'text',
+        text: 'Compacted summary.\n\n```memory-memo\n{"none": true}\n```',
+      });
+      await ctx.rpc.beginCompaction({});
+      await compacted;
+
+      // Extraction runs after apply_compaction; give it a beat, then assert no
+      // memo was written (the explicit none marker suppresses the fallback).
+      const store = ctx.agent.memoStore!;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      const result = await store.list();
+      expect(result.memos).toHaveLength(0);
+    });
+
+    it('stores memos parsed from the summary memory-memo blocks', async () => {
+      const dir = mkdtempSync(join(tmpdir(), 'scream-memo-blocks-'));
+      const ctx = testAgent({ screamHomeDir: dir });
+      ctx.configure({
+        provider: CATALOGUED_PROVIDER,
+        modelCapabilities: CATALOGUED_MODEL_CAPABILITIES,
+      });
+      ctx.appendExchange(1, 'fix the flaky test', 'old assistant one', 20);
+      const compacted = ctx.once('context.apply_compaction');
+      ctx.mockNextResponse({
+        type: 'text',
+        text:
+          'Compacted summary.\n\n```memory-memo\n' +
+          '{"userNeed": "fix the flaky test", "approach": "ran vitest with -t filter", ' +
+          '"outcome": "完成", "whatFailed": "full suite", "whatWorked": "filtered run", ' +
+          '"tags": ["vitest"]}\n```',
+      });
+      await ctx.rpc.beginCompaction({});
+      await compacted;
+
+      const store = ctx.agent.memoStore!;
+      await vi.waitFor(async () => {
+        const result = await store.list();
+        expect(result.memos).toHaveLength(1);
+        return result.memos[0]!;
+      });
+      const memo = (await store.list()).memos[0]!;
+      expect(memo.userNeed).toBe('fix the flaky test');
+      expect(memo.outcome).toBe('完成');
+      expect(memo.extractionSource).toBe('compaction');
     });
   });
 
@@ -2301,6 +2397,7 @@ function testCompactionStrategy(maxSize: number = 1_000): DefaultCompactionStrat
     maxCompactionPerTurn: 3,
     maxRecentMessages: 10,
     maxRecentUserMessages: Infinity,
+    maxRecentTokens: 20_000,
     maxRecentSizeRatio: 0.2,
     minOverflowReductionRatio: 0.05,
   });
@@ -2315,6 +2412,7 @@ function overflowOnlyCompactionStrategy(maxSize: number = 14): DefaultCompaction
     maxCompactionPerTurn: 3,
     maxRecentMessages: 3,
     maxRecentUserMessages: Infinity,
+    maxRecentTokens: 20_000,
     maxRecentSizeRatio: 0.2,
     minOverflowReductionRatio: 0.05,
   });

@@ -35,6 +35,7 @@ function createMockHost(): SessionEventHost {
     getToolComponent: vi.fn().mockReturnValue(undefined),
     getActiveToolCall: vi.fn().mockReturnValue(undefined),
     onToolCallStart: vi.fn(),
+    hasActiveTurn: vi.fn().mockReturnValue(false),
   } as unknown as StreamingUIController;
 
   const tasksBrowserController = {
@@ -72,6 +73,9 @@ function createMockHost(): SessionEventHost {
     },
     todoPanel: {
       getTodos: vi.fn().mockReturnValue([]),
+    },
+    transcriptContainer: {
+      children: [],
     },
   } as unknown as TUIState;
 
@@ -558,6 +562,106 @@ describe('SessionEventHandler', () => {
       handler.handleEvent(candidateEvent('x'), vi.fn());
       await vi.waitFor(() => expect(prompt).toHaveBeenCalled());
       // The .catch() swallows the rejection; the test simply must not throw.
+    });
+
+    it('queues the candidate while a turn is active and prompts at turn end', () => {
+      const { handler, prompt, host } = makeHandlerWithSession();
+      vi.mocked(host.streamingUI.hasActiveTurn).mockReturnValue(true);
+      handler.handleEvent(candidateEvent('queued-flow'), vi.fn());
+      // Not prompted while the turn is still streaming.
+      expect(prompt).not.toHaveBeenCalled();
+
+      // Turn ends: the queued candidate is flushed and prompted. Note the
+      // flush runs on turn.ended itself (handleEvent re-set _currentTurnId
+      // from the event before dispatch, so hasActiveTurn() is true here too —
+      // the queue must not gate on it).
+      handler.handleEvent(
+        { type: 'turn.ended', sessionId: 'ses-test', agentId: 'main', turnId: 't1', reason: 'completed' } as unknown as Event,
+        vi.fn(),
+      );
+      expect(prompt).toHaveBeenCalledTimes(1);
+      expect(String(prompt.mock.calls[0]![0])).toContain('queued-flow');
+    });
+
+    it('flushes all queued candidates at turn end', () => {
+      const { handler, prompt, host } = makeHandlerWithSession();
+      vi.mocked(host.streamingUI.hasActiveTurn).mockReturnValue(true);
+      handler.handleEvent(candidateEvent('flow-a'), vi.fn());
+      handler.handleEvent(candidateEvent('flow-b'), vi.fn());
+      expect(prompt).not.toHaveBeenCalled();
+
+      handler.handleEvent(
+        { type: 'turn.ended', sessionId: 'ses-test', agentId: 'main', turnId: 't1', reason: 'completed' } as unknown as Event,
+        vi.fn(),
+      );
+      expect(prompt).toHaveBeenCalledTimes(2);
+    });
+
+    it('flushes queued candidates even when hasActiveTurn is still true at turn.ended', () => {
+      // Regression: handleEvent re-sets _currentTurnId from the turn.ended
+      // event before dispatch, so hasActiveTurn() is true during turn-end
+      // handling. The flush must not gate on it or the queue never drains.
+      const { handler, prompt, host } = makeHandlerWithSession();
+      vi.mocked(host.streamingUI.hasActiveTurn).mockReturnValue(true);
+      handler.handleEvent(candidateEvent('drain-me'), vi.fn());
+      expect(prompt).not.toHaveBeenCalled();
+
+      // Keep hasActiveTurn() true the whole time — as in production.
+      handler.handleEvent(
+        { type: 'turn.ended', sessionId: 'ses-test', agentId: 'main', turnId: 't1', reason: 'completed' } as unknown as Event,
+        vi.fn(),
+      );
+      expect(prompt).toHaveBeenCalledTimes(1);
+      expect(String(prompt.mock.calls[0]![0])).toContain('drain-me');
+    });
+
+    it('defers the flush when the user has queued messages, to protect them from agent_busy', () => {
+      const { handler, prompt, host } = makeHandlerWithSession();
+      // Queue a user message awaiting send (e.g. typed while the turn streamed).
+      host.state.queuedMessages = [{ text: 'queued user message', agentId: 'main' }];
+      vi.mocked(host.streamingUI.hasActiveTurn).mockReturnValue(true);
+      handler.handleEvent(candidateEvent('queued-flow'), vi.fn());
+      expect(prompt).not.toHaveBeenCalled();
+
+      // Turn ends while a user message is still queued: the candidate must NOT
+      // be prompted now (its prompt would race ahead of the queued message via
+      // setTimeout(0) and the user message would be dropped as agent_busy).
+      handler.handleEvent(
+        { type: 'turn.ended', sessionId: 'ses-test', agentId: 'main', turnId: 't1', reason: 'completed' } as unknown as Event,
+        vi.fn(),
+      );
+      expect(prompt).not.toHaveBeenCalled();
+
+      // The queued user message is sent; once that turn ends and the queue is
+      // empty, the deferred candidate flushes.
+      host.state.queuedMessages = [];
+      handler.handleEvent(
+        { type: 'turn.ended', sessionId: 'ses-test', agentId: 'main', turnId: 't2', reason: 'completed' } as unknown as Event,
+        vi.fn(),
+      );
+      expect(prompt).toHaveBeenCalledTimes(1);
+      expect(String(prompt.mock.calls[0]![0])).toContain('queued-flow');
+    });
+
+    it('drops queued candidates when the runtime state resets (session switch)', () => {
+      const { handler, prompt, host } = makeHandlerWithSession();
+      vi.mocked(host.streamingUI.hasActiveTurn).mockReturnValue(true);
+      handler.handleEvent(candidateEvent('stale-session-flow'), vi.fn());
+      expect(prompt).not.toHaveBeenCalled();
+
+      // Session switch clears the queue and the dedupe set.
+      handler.resetRuntimeState();
+      handler.handleEvent(
+        { type: 'turn.ended', sessionId: 'ses-test', agentId: 'main', turnId: 't1', reason: 'completed' } as unknown as Event,
+        vi.fn(),
+      );
+      expect(prompt).not.toHaveBeenCalled();
+
+      // A fresh candidate in the new session still prompts immediately.
+      vi.mocked(host.streamingUI.hasActiveTurn).mockReturnValue(false);
+      handler.handleEvent(candidateEvent('new-session-flow'), vi.fn());
+      expect(prompt).toHaveBeenCalledTimes(1);
+      expect(String(prompt.mock.calls[0]![0])).toContain('new-session-flow');
     });
   });
 });

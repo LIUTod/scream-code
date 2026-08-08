@@ -7,8 +7,16 @@ export interface CompactionConfig {
   blockRatio: number;
   reservedContextSize: number;
   maxCompactionPerTurn: number;
+  /** Max recent messages kept verbatim after compaction (assistant/tool/user). */
   maxRecentMessages: number;
+  /** Max recent user messages kept verbatim after compaction. */
   maxRecentUserMessages: number;
+  /** Absolute token budget for the verbatim recent tail. Caps how much of the
+   *  context window the preserved tail may consume regardless of the relative
+   *  `maxRecentSizeRatio` — keeps the tail large enough to preserve task
+   *  continuity after compaction without letting it starve the summary. */
+  maxRecentTokens: number;
+  /** Relative token budget (fraction of the model window) for the recent tail. */
   maxRecentSizeRatio: number;
   minOverflowReductionRatio: number;
   /** Multiplier for max output tokens when estimating turn growth.
@@ -21,8 +29,12 @@ export const DEFAULT_COMPACTION_CONFIG: CompactionConfig = {
   blockRatio: 0.85, // 10% proactive window between trigger and block
   reservedContextSize: 50_000,
   maxCompactionPerTurn: 3,
-  maxRecentMessages: 4,
-  maxRecentUserMessages: 2,
+  // Preserve a generous verbatim tail so the model retains task continuity
+  // right after compaction (industry practice keeps ~20k tokens). The tail is
+  // bounded by both message counts and the absolute/relative token budgets.
+  maxRecentMessages: 16,
+  maxRecentUserMessages: 8,
+  maxRecentTokens: 20_000,
   maxRecentSizeRatio: 0.2,
   minOverflowReductionRatio: 0.05,
   turnGrowthMultiplier: 2.5, // maxOutput + 1.5x avg tool result growth
@@ -95,8 +107,9 @@ export class DefaultCompactionStrategy implements CompactionStrategy {
     // 2. At least one recent message must be preserved
     // 3. At most maxRecentMessages recent messages should be preserved
     // 4. At most maxRecentUserMessages recent user messages should be preserved
-    // 5. At most maxRecentSizeRatio * maxSize recent messages should be preserved
-    // 6. N should be as small as possible
+    // 5. At most maxRecentSizeRatio * maxSize recent tokens should be preserved
+    // 6. At most maxRecentTokens absolute tokens should be preserved
+    // 7. N should be as small as possible
 
     let recentMessages = 1;
     let recentUserMessages = 0;
@@ -118,6 +131,7 @@ export class DefaultCompactionStrategy implements CompactionStrategy {
 
       const reachesMax = recentMessages >= this.config.maxRecentMessages
         || recentUserMessages >= this.config.maxRecentUserMessages
+        || recentSize >= this.config.maxRecentTokens
         || recentSize >= this.maxSize * this.config.maxRecentSizeRatio;
       if (reachesMax && bestN !== undefined) {
         break;

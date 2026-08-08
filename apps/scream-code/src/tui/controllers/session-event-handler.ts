@@ -141,6 +141,11 @@ export class SessionEventHandler {
     this.renderedSkillActivationIds.clear();
     this.renderedMcpServerStatusKeys.clear();
     this.stopAllMcpServerStatusSpinners();
+    // Drop queued skill candidates and the per-session prompt dedupe set when
+    // the session changes, so a candidate queued in one session can never be
+    // prompted into a different session.
+    this.pendingSkillCandidates = [];
+    this.promptedSkillCandidates.clear();
     this.host.setAppState({ subagentUsage: {} });
   }
 
@@ -370,6 +375,28 @@ export class SessionEventHandler {
       this.host.streamingUI.setTodoList([]);
     }
     this.host.streamingUI.resetToolUi();
+
+    // Flush skill candidates that were queued while a turn was streaming. A
+    // turn.ended event itself is the turn-end signal — do NOT gate on
+    // hasActiveTurn() here: handleEvent() re-set _currentTurnId from the event
+    // before dispatching, so the check would always be true and the queue would
+    // never flush.
+    //
+    // If the user has queued messages waiting to send, defer the flush: the
+    // candidate prompt would otherwise enter the RPC queue before the queued
+    // user message (both travel via setTimeout(0)), start its own turn first,
+    // and the user's message would be dropped as agent_busy. The candidates
+    // stay pending and flush after the user's turn ends.
+    if (this.pendingSkillCandidates.length > 0 && this.host.state.queuedMessages.length === 0) {
+      const pending = this.pendingSkillCandidates;
+      this.pendingSkillCandidates = [];
+      const session = this.host.session;
+      if (session !== undefined) {
+        for (const candidate of pending) {
+          this.promptSkillCandidate(session, candidate.name, candidate.purpose);
+        }
+      }
+    }
 
     this.host.streamingUI.finalizeTurn(sendQueued);
   }
@@ -870,6 +897,11 @@ export class SessionEventHandler {
   /** Candidates already prompted this session, to avoid repeating the request. */
   private promptedSkillCandidates = new Set<string>();
 
+  /** Skill candidates detected while a turn was still active. Flushed at the
+   *  next turn end so the AskUserQuestion dialog never interrupts an ongoing
+   *  response. */
+  private pendingSkillCandidates: Array<{ name: string; purpose: string }> = [];
+
   /**
    * Handles a `skill_candidate` event emitted after compaction detected a
    * reusable process in the summary. Best-effort and non-fatal: if the session
@@ -877,6 +909,10 @@ export class SessionEventHandler {
    * no confirmation. When it works, the model runs an AskUserQuestion dialog
    * (确定/忽略) so the user can confirm or dismiss with a single keystroke,
    * then generates the skill via MakeSkillPlanTool on confirmation.
+   *
+   * If a turn is still streaming (the compaction finished while the agent was
+   * mid-response), the candidate is queued and prompted at the next turn end —
+   * never interrupting the running turn.
    */
   private handleSkillCandidate(event: Extract<Event, { type: 'skill_candidate' }>): void {
     try {
@@ -886,19 +922,38 @@ export class SessionEventHandler {
       this.promptedSkillCandidates.add(name);
       const session = this.host.session;
       if (session === undefined) return;
-      const purposeText = purpose ? `（${purpose}）` : '';
-      const request =
-        `检测到可复用过程「${name}」${purposeText}。` +
-        '请用 AskUserQuestion 工具询问用户是否将其保存为可复用技能（选项：生成 / 忽略）。' +
-        '用户选择「生成」后，用 MakeSkillPlanTool 生成该技能；选择「忽略」则直接说明已跳过。';
-      void session.prompt(request).catch(() => {
-        // Fire-and-forget confirmation: a prompt failure (e.g. session closed)
-        // is swallowed so it never surfaces as an unhandled rejection. The user
-        // simply sees no confirmation in that rare case.
-      });
+
+      if (this.host.streamingUI.hasActiveTurn()) {
+        this.pendingSkillCandidates.push({ name, purpose });
+        return;
+      }
+      this.promptSkillCandidate(session, name, purpose);
     } catch {
       // Best-effort: a failure here never interrupts the event loop or the session.
     }
+  }
+
+  /** Fire the AskUserQuestion prompt for a skill candidate. On failure, surface
+   *  a status hint instead of failing silently so the user still learns the
+   *  candidate was detected. */
+  private promptSkillCandidate(
+    session: Session,
+    name: string,
+    purpose: string,
+  ): void {
+    const purposeText = purpose ? `（${purpose}）` : '';
+    const request =
+      `检测到可复用过程「${name}」${purposeText}。` +
+      '请用 AskUserQuestion 工具询问用户是否将其保存为可复用技能（选项：生成 / 忽略）。' +
+      '用户选择「生成」后，用 MakeSkillPlanTool 生成该技能；选择「忽略」则直接说明已跳过。';
+    void session.prompt(request).catch(() => {
+      // Fire-and-forget confirmation: a prompt failure (e.g. session closed)
+      // is surfaced as a status hint so the user knows the candidate existed.
+      this.host.showStatus(
+        `检测到可复用过程「${name}」，但询问失败。可稍后手动处理。`,
+        this.host.state.theme.colors.warning,
+      );
+    });
   }
 
   private finishCompaction(sendQueued: (item: QueuedMessage) => void): void {

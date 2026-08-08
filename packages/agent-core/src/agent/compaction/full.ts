@@ -32,7 +32,7 @@ import { renderMessagesToText } from './render-messages';
 import type { CompactionBeginData, CompactionResult } from './types';
 import { DEFAULT_COMPACTION_CONFIG, DefaultCompactionStrategy, type CompactionStrategy } from './strategy';
 import { basename, dirname } from 'pathe';
-import { parseMemoryMemos } from '@scream-code/memory';
+import { parseMemoryMemos, createMemoryMemo, type MemoryMemo } from '@scream-code/memory';
 import type { TodoItem } from '../../todo';
 import type { ContextMessage } from '../context/types';
 import {
@@ -645,7 +645,7 @@ export class FullCompaction {
         extractFileOpsFromMessage(msg, fileOps);
       }
       const toolCallHistory = formatToolCallHistory(messagesToCompactForOps);
-      const processedSummary = this.postProcessSummary(summary, fileOps, toolCallHistory);
+      const processedSummary = this.postProcessSummary(summary, fileOps, toolCallHistory, compactedCount);
       const tokensAfter = estimateTokens(processedSummary) + estimateTokensForMessages(recent);
 
       const fileLists = computeFileLists(fileOps);
@@ -676,7 +676,7 @@ export class FullCompaction {
       // the compressed context. 110% margin accounts for normal per-step token
       // growth that shouldn't count as "needing compaction again."
       this.lowWaterMark = Math.floor(this.effectiveTokenCount * 1.1);
-      await this.extractAndStoreMemos(processedSummary);
+      await this.extractAndStoreMemos(processedSummary, messagesToCompactForOps);
       this.triggerPostCompactHook(data, result);
       this.detectSkillCandidates(processedSummary);
 
@@ -759,8 +759,15 @@ export class FullCompaction {
     });
   }
 
-  /** Extract memory memos from compaction summary and store them. */
-  private async extractAndStoreMemos(summary: string): Promise<void> {
+  /** Extract memory memos from compaction summary and store them. When the
+   *  summary carries no memory-memo block, fall back to recording the most
+   *  recent real user message from the compacted history as a low-confidence
+   *  in-progress memo, so an ongoing task survives compaction even if the
+   *  model omitted the extraction section. */
+  private async extractAndStoreMemos(
+    summary: string,
+    messagesToCompact?: readonly ContextMessage[],
+  ): Promise<void> {
     const memoStore = this.agent.memoStore;
     if (!memoStore) {
       this.agent.log.info('Memory memo store not available, skipping extraction');
@@ -771,10 +778,26 @@ export class FullCompaction {
       summaryLen: summary.length,
     });
 
-    const memos = parseMemoryMemos(summary);
+    let memos = parseMemoryMemos(summary);
     this.agent.log.info('Memory memo parse result', {
       memoCount: memos.length,
     });
+
+    if (memos.length === 0 && messagesToCompact !== undefined) {
+      // Distinguish "model wrote nothing" from "model explicitly said no
+      // tasks" ({"none": true}): parseMemoryMemos skips the none marker, so
+      // it surfaces here as an empty list. Only fall back when the summary
+      // actually lacks a none marker — otherwise the model's judgment that
+      // there is nothing worth recording would be overridden.
+      const explicitlyNone = /```memory-memo[\s\S]*?"none"\s*:\s*true[\s\S]*?```/.test(summary);
+      const fallback = explicitlyNone ? undefined : this.buildFallbackMemo(messagesToCompact);
+      if (fallback !== undefined) {
+        memos = [fallback];
+        this.agent.log.info('Compaction summary carried no memory-memo; stored fallback memo', {
+          userNeed: fallback.userNeed.slice(0, 120),
+        });
+      }
+    }
 
     if (memos.length === 0) return;
 
@@ -808,6 +831,35 @@ export class FullCompaction {
     });
   }
 
+  /** Build a low-confidence fallback memo from the most recent real user
+   *  message in the compacted history (origin.kind === 'user'), so an ongoing
+   *  task is not lost when the summary omits the memory-memo section. */
+  private buildFallbackMemo(messages: readonly ContextMessage[]): MemoryMemo | undefined {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const msg = messages[i];
+      if (msg === undefined || msg.role !== 'user' || msg.origin?.kind !== 'user') continue;
+      const text = msg.content
+        .filter((p): p is { type: 'text'; text: string } => p.type === 'text')
+        .map((p) => p.text)
+        .join('')
+        .trim();
+      if (text.length === 0) continue;
+      return createMemoryMemo({
+        sourceSessionId: '',
+        userNeed: text.slice(0, 300),
+        approach:
+          '（压缩时自动兜底记录：压缩摘要未生成完整任务经验提取，此处记录最近一条用户请求，用于跨压缩恢复进行中任务。请结合会话上下文核实。）',
+        outcome: '进行中',
+        whatFailed: 'none',
+        whatWorked: 'none',
+        tags: ['compaction-fallback'],
+        note: '低置信度自动记录：建议后续在上下文恢复后核实并补充完整经验。',
+        extractionSource: 'compaction',
+      });
+    }
+    return undefined;
+  }
+
   /**
    * Detects [[skill-candidate: <name>|<purpose>|<evidence>]] markers in the
    * compaction summary and emits a `skill_candidate` event for each one (at
@@ -839,16 +891,39 @@ export class FullCompaction {
    * the compaction summary so active tasks and file context survive
    * compression. Without this, both are lost after compaction because the
    * original messages containing them are removed from the context window.
+   *
+   * When messages were actually compacted (`compactedCount > 0`), a leading
+   * elision note tells the model how much of the conversation is missing and
+   * that the summary is working notes, not verbatim history — so the tail
+   * messages after the summary are not mistaken for a continuous conversation.
    */
-  private postProcessSummary(summary: string, fileOps: FileOperations, toolCallHistory: string): string {
+  private postProcessSummary(
+    summary: string,
+    fileOps: FileOperations,
+    toolCallHistory: string,
+    compactedCount: number,
+  ): string {
     const storeData = this.agent.tools.storeData();
     const todos = (storeData['todo'] as readonly TodoItem[] | undefined) ?? [];
 
-    // Strip a previous <files> section when the incoming summary is a reused
-    // prior summary (iterative/isUpdate compaction), so the freshly computed
-    // file list below replaces it instead of duplicating it.
-    const base = summary.trim().replaceAll(/<files>[\s\S]*?<\/files>\s*/g, '').trimEnd();
+    // Strip a previous <files> section and a previous elision note when the
+    // incoming summary is a reused prior summary (iterative/isUpdate
+    // compaction), so the freshly computed file list and elision note below
+    // replace them instead of duplicating them.
+    const base = summary
+      .trim()
+      .replaceAll(/<files>[\s\S]*?<\/files>\s*/g, '')
+      .replace(/^> The conversation before this point was compacted:[\s\S]*?continue from here\.\s*\n+/m, '')
+      .trimEnd();
     const sections: string[] = [];
+    if (compactedCount > 0) {
+      sections.push(
+        `> The conversation before this point was compacted: ` +
+          `${String(compactedCount)} earlier message(s) were omitted and are ` +
+          `covered by this summary. Treat the summary below as working notes, ` +
+          `not verbatim history — the messages after it continue from here.`,
+      );
+    }
     if (base.length > 0) sections.push(base);
 
     if (todos.length > 0) {

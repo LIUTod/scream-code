@@ -104,6 +104,9 @@ export interface TestAgentOptions {
   readonly persistence?: AgentRecordPersistence | undefined;
   readonly log?: Logger;
   readonly resolveRuntimeSystemPrompt?: AgentOptions['resolveRuntimeSystemPrompt'];
+  /** When set, the agent builds a real MemoryMemoStore under this directory
+   *  (used by tests exercising compaction-time memory extraction). */
+  readonly screamHomeDir?: string | undefined;
 }
 
 interface ConfigureOptions {
@@ -188,6 +191,7 @@ export class AgentTestContext {
       hookEngine: options.hookEngine,
       log: options.log,
       resolveRuntimeSystemPrompt: options.resolveRuntimeSystemPrompt,
+      screamHomeDir: options.screamHomeDir,
     });
     this.rpc = this.createPromiseAgentApi(this.agent);
     // The Agent constructor now eagerly binds a SIGUSR1 listener via

@@ -13,18 +13,20 @@ The goal of compaction is to keep essential code patterns, technical details, an
 
 ## 任务经验提取
 
-AFTER completing the compaction summary below, scan the messages being compacted for **completed task loops**. A task loop is "completed" when:
+AFTER completing the compaction summary below, scan the messages being compacted for **task loops**. A task loop is "completed" when:
 - The user made a clear request or asked a specific question
 - You provided a solution or answer
 - The outcome is clear (success, partial success, or failure)
 
-For each completed task loop found, output a structured experience record **at the very end of your response**:
+**You MUST output at least one memory-memo block** (or the `{"none": true}` marker) at the very end of your response — omitting the section entirely is not allowed. Record completed task loops as full experience records; record **in-progress work** as a lower-priority record whose "outcome" is "进行中" (so the ongoing task survives compaction and can be resumed later).
+
+For each task loop found, output a structured experience record **at the very end of your response**:
 
 ```memory-memo
 {
   "userNeed": "<the user's need or goal, one sentence>",
   "approach": "<what was done — the approach taken, 2-4 sentences>",
-  "outcome": "<final result, e.g. '完成', '部分完成', '失败: reason'>",
+  "outcome": "<final result, e.g. '完成', '部分完成', '失败: reason', or '进行中' for in-progress work>",
   "whatFailed": "<dead ends tried — things that didn't work, or 'none'>",
   "whatWorked": "<key actions that ultimately worked, or 'none'>",
   "tags": ["<tag1>", "<tag2>", "<tag3>"],
@@ -37,11 +39,11 @@ Guidelines:
 - Record key successful actions in "whatWorked" to help reuse effective approaches.
 - Include 3-5 semantic "tags" summarizing the task domain, tech stack, or action type (e.g. ["react", "auth", "部署"]).
 - "note" is optional: a one-sentence advisory note that helps future AI understand/reuse the record faster. It is a soft suggestion, not a user-enforced rule.
-- Skip in-progress work unless it contains a valuable error+fix experience.
+- For in-progress work: record it with "outcome": "进行中" and describe where the task stands and what remains — this is what lets the agent resume seamlessly after compaction.
 - Merge closely related sub-tasks into a single record.
 - Use the exact field names and JSON format shown above (no extra fields beyond "note").
 
-If no completed task loops are found in the compacted messages, output:
+If no task loops (completed or in-progress) are found in the compacted messages, output:
 ```memory-memo
 {"none": true}
 ```
@@ -53,7 +55,8 @@ If no completed task loops are found in the compacted messages, output:
 3. **Code Evolution**: Final working versions only (remove intermediate attempts)
 4. **System Context**: Project structure, dependencies, environment setup
 5. **Design Decisions**: Architectural choices and their rationale
-6. **TODO Items**: Unfinished tasks and known issues
+6. **Next Steps**: The ordered, actionable plan going forward
+7. **TODO Items**: Unfinished tasks and known issues
 
 <!-- Required Output Structure -->
 
@@ -75,6 +78,17 @@ If no completed task loops are found in the compacted messages, output:
 
 - [Issue]: [Status/Next steps]
 - ...
+
+## Key Decisions
+
+- [Decision]: [rationale] — preserve architectural choices and why they were made
+- ...
+
+## Next Steps
+
+1. [The very next actionable step]
+2. [Then this]
+3. ...
 
 ## Code State
 
@@ -110,5 +124,12 @@ steps, recurring debugging patterns, or tool workflows). If any is genuinely
 worth capturing as a reusable skill, output at the very end, at most one:
 
 [[skill-candidate: <name>|<one-line purpose>|<evidence>]]
+
+- The evidence must be concrete and verifiable: exact file paths, commands, or
+  step sequences from the conversation (e.g. "run `pnpm vitest run -t compaction`
+  in packages/agent-core to reproduce the compaction snapshots"). Vague evidence
+  like "used a script" is not acceptable.
+- Only emit a candidate when the process is genuinely reusable beyond this one
+  task; do not emit for one-off actions.
 
 Omit if none.
