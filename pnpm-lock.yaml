@@ -128,6 +128,9 @@ importers:
       '@scream-code/config':
         specifier: workspace:^
         version: link:../../packages/config
+      '@scream-code/evals':
+        specifier: workspace:^
+        version: link:../../packages/evals
       '@scream-code/knowledge':
         specifier: workspace:*
         version: link:../../packages/knowledge
@@ -278,6 +281,18 @@ importers:
         version: 2.4.6
 
   packages/config: {}
+
+  packages/evals:
+    devDependencies:
+      '@scream-code/scream-code-sdk':
+        specifier: workspace:^
+        version: link:../node-sdk
+      '@types/node':
+        specifier: ^22.15.3
+        version: 22.19.19
+      vitest:
+        specifier: 4.1.4
+        version: 4.1.4(@types/node@22.19.19)(@vitest/coverage-v8@4.1.4)(vite@6.4.2(@types/node@22.19.19)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.22.3)(yaml@2.9.0))
 
   packages/jian:
     dependencies:
@@ -7609,11 +7624,11 @@ snapshots:
       magic-string: 0.30.21
       obug: 2.1.1
       pathe: 2.0.3
-      picomatch: 4.0.4
+      picomatch: 4.0.5
       std-env: 4.1.0
       tinybench: 2.9.0
       tinyexec: 1.2.3
-      tinyglobby: 0.2.16
+      tinyglobby: 0.2.17
       tinyrainbow: 3.1.0
       vite: 6.4.2(@types/node@22.19.19)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.22.3)(yaml@2.9.0)
       why-is-node-running: 2.3.0

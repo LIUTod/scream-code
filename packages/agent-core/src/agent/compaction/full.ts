@@ -36,9 +36,11 @@ import { parseMemoryMemos } from '@scream-code/memory';
 import type { TodoItem } from '../../todo';
 import type { ContextMessage } from '../context/types';
 import {
+  computeFileLists,
   createFileOps,
   extractFileOpsFromMessage,
   formatFileOperations,
+  type FileLists,
   type FileOperations,
 } from './file-operations';
 
@@ -240,6 +242,10 @@ export class FullCompaction {
    *  limit → overflow → compact cycle from consuming the entire
    *  maxCompactionPerTurn budget with marginal savings. */
   private reactiveAttempted = false;
+  /** File lists from the most recent successful compaction. Merged into the
+   *  next compaction's file operations so file context accumulates across
+   *  repeated compactions instead of being reset each round. */
+  private lastCompactionFiles: FileLists | undefined;
   protected compacting: {
     abortController: AbortController;
     promise: Promise<void>;
@@ -620,6 +626,21 @@ export class FullCompaction {
       const recent = originalHistory.slice(compactedCount);
       const messagesToCompactForOps = originalHistory.slice(0, compactedCount);
       const fileOps = createFileOps();
+      // Merge the previous compaction's file lists first so file context
+      // survives across repeated compactions (files touched before the last
+      // compaction stay known to the next round). Only merge while the
+      // previous compaction summary is still the history head: after a
+      // /clear, /revoke or /undo the compacted prefix is gone, so the stale
+      // lists must not leak files that are no longer part of the context.
+      if (
+        this.lastCompactionFiles !== undefined &&
+        extractPreviousSummary(originalHistory) !== null
+      ) {
+        for (const f of this.lastCompactionFiles.readFiles) fileOps.read.add(f);
+        for (const f of this.lastCompactionFiles.modifiedFiles) fileOps.edited.add(f);
+      } else {
+        this.lastCompactionFiles = undefined;
+      }
       for (const msg of messagesToCompactForOps) {
         extractFileOpsFromMessage(msg, fileOps);
       }
@@ -627,16 +648,30 @@ export class FullCompaction {
       const processedSummary = this.postProcessSummary(summary, fileOps, toolCallHistory);
       const tokensAfter = estimateTokens(processedSummary) + estimateTokensForMessages(recent);
 
+      const fileLists = computeFileLists(fileOps);
+      // Cap persisted lists so repeated compactions cannot grow them without
+      // bound. The on-screen <files> section additionally elides at FILE_LIMIT
+      // in formatFileOperations (existing behaviour); the persisted lists keep
+      // the full recent history up to this cap.
+      const MAX_PERSISTED_FILES = 100;
+      const readFiles = fileLists.readFiles.slice(0, MAX_PERSISTED_FILES);
+      const modifiedFiles = fileLists.modifiedFiles.slice(0, MAX_PERSISTED_FILES);
       const result: CompactionResult = {
         summary: processedSummary,
         compactedCount,
         tokensBefore,
         tokensAfter,
+        // Attach only non-empty lists so serialized records/events stay
+        // byte-identical to before when no file context exists (existing
+        // inline snapshots in tests are unaffected).
+        ...(readFiles.length > 0 ? { readFiles } : {}),
+        ...(modifiedFiles.length > 0 ? { modifiedFiles } : {}),
         ...(isUpdate ? { isUpdate: true } : {}),
       };
       this.markCompleted();
       this.agent.emitEvent({ type: 'compaction.completed', result });
       this.agent.context.applyCompaction(result);
+      this.lastCompactionFiles = fileLists;
       // Set lowWaterMark AFTER applyCompaction so effectiveTokenCount reflects
       // the compressed context. 110% margin accounts for normal per-step token
       // growth that shouldn't count as "needing compaction again."
@@ -809,7 +844,12 @@ export class FullCompaction {
     const storeData = this.agent.tools.storeData();
     const todos = (storeData['todo'] as readonly TodoItem[] | undefined) ?? [];
 
-    const sections: string[] = [summary.trim()];
+    // Strip a previous <files> section when the incoming summary is a reused
+    // prior summary (iterative/isUpdate compaction), so the freshly computed
+    // file list below replaces it instead of duplicating it.
+    const base = summary.trim().replaceAll(/<files>[\s\S]*?<\/files>\s*/g, '').trimEnd();
+    const sections: string[] = [];
+    if (base.length > 0) sections.push(base);
 
     if (todos.length > 0) {
       const lines = todos.map((t) => {

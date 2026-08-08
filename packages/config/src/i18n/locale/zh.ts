@@ -1116,6 +1116,17 @@ export const zh: Record<string, string> = {
   'dispatch.tasks_browser_failed': '打开任务浏览器失败：{error}',
   'dispatch.usage_failed': '显示使用情况失败：{error}',
   'dispatch.status_failed': '显示状态报告失败：{error}',
+  'dispatch.eval_no_model': '没有可用的模型。请先通过 /connect 或 /config 配置模型。',
+  'dispatch.eval_started': '正在运行端到端评测（模型：{model}）…完成后将显示结果',
+  'dispatch.eval_running': '评测已在运行中，请等待完成',
+  'dispatch.eval_progress': '评测 {completed}/{total}：{name}（已通过 {passed}，未通过 {failed}）…',
+  'dispatch.eval_passed': '通过',
+  'dispatch.eval_failed_count': '未通过',
+  'dispatch.eval_failed': '评测失败：{error}',
+  'dispatch.eval_suggest_error': '可能是网络连接、API 配置或账户余额的问题，请检查后重试',
+  'dispatch.eval_suggest_timeout': '任务执行超时，可能是网络较慢或模型响应时间较长，可更换模型后重试',
+  'dispatch.eval_suggest_tool': '文件读写工具执行未成功，请检查工作目录权限；若重试后仍失败，请反馈',
+  'dispatch.eval_suggest_answer': '模型回答可能不完整或不正确，可尝试更换更强的模型后重试',
 
   // ─── Constants ─────────────────
   'constant.llm_not_set': 'LLM 未设置，运行 /config 自定义模型配置',
@@ -1197,6 +1208,7 @@ export const zh: Record<string, string> = {
   'registry.update_desc': '手动更新 Scream Code 到最新版本',
   'registry.version_desc': '显示版本信息',
   'registry.logout_desc': '删除已配置的模型',
+  'registry.eval_desc': '运行端到端测试（Agent健康度检查）',
   'registry.exit_desc': '退出应用',
 
   // ─── Knowledge web HTML ────────

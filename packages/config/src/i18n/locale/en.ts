@@ -1115,6 +1115,17 @@ export const en: Record<string, string> = {
   'dispatch.tasks_browser_failed': 'Failed to open tasks browser: {error}',
   'dispatch.usage_failed': 'Failed to show usage: {error}',
   'dispatch.status_failed': 'Failed to show status report: {error}',
+  'dispatch.eval_no_model': 'No model available. Configure one via /connect or /config first.',
+  'dispatch.eval_started': 'Running end-to-end evals (model: {model})… results will appear when done',
+  'dispatch.eval_running': 'An eval run is already in progress, please wait',
+  'dispatch.eval_progress': 'Eval {completed}/{total}: {name} ({passed} passed, {failed} failed)…',
+  'dispatch.eval_passed': 'passed',
+  'dispatch.eval_failed_count': 'failed',
+  'dispatch.eval_failed': 'Eval run failed: {error}',
+  'dispatch.eval_suggest_error': 'This may be a network, API config, or account balance issue — please check and retry',
+  'dispatch.eval_suggest_timeout': 'The task timed out; this is often a slow network or slow model response. Try a different model and retry',
+  'dispatch.eval_suggest_tool': 'A file read/write tool did not complete. Please check directory permissions; if it still fails after retrying, please report it',
+  'dispatch.eval_suggest_answer': 'The model answer may be incomplete or incorrect. Try a stronger model and retry',
 
   // ─── Constants ─────────────────
   'constant.llm_not_set': 'LLM not set, run /config to configure model',
@@ -1196,6 +1207,7 @@ export const en: Record<string, string> = {
   'registry.update_desc': 'Manually update Scream Code to latest version',
   'registry.version_desc': 'Show version info',
   'registry.logout_desc': 'Remove configured models',
+  'registry.eval_desc': 'Run end-to-end tests (Agent health check)',
   'registry.exit_desc': 'Exit application',
 
   // ─── Knowledge web HTML ────────

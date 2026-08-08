@@ -1,0 +1,21 @@
+{
+  "name": "@scream-code/evals",
+  "version": "0.12.7",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "eval": "vitest run --config vitest.eval.config.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "devDependencies": {
+    "@scream-code/scream-code-sdk": "workspace:^",
+    "@types/node": "^22.15.3",
+    "vitest": "4.1.4"
+  }
+}

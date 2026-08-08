@@ -308,6 +308,12 @@ export const BUILTIN_SLASH_COMMANDS = [
     description: 'registry.logout_desc',
     priority: 93,
   },
+  {
+    name: 'eval',
+    aliases: [],
+    description: 'registry.eval_desc',
+    priority: 92,
+  },
 
   // ── 退出（最后） ──
   {

@@ -38,6 +38,10 @@ export interface CompactionResult {
   readonly compactedCount: number;
   readonly tokensBefore: number;
   readonly tokensAfter: number;
+  /** Files read in the compacted history (present when non-empty). */
+  readonly readFiles?: readonly string[] | undefined;
+  /** Files written or edited in the compacted history (present when non-empty). */
+  readonly modifiedFiles?: readonly string[] | undefined;
 }
 
 export type TurnEndReason = 'completed' | 'cancelled' | 'failed';

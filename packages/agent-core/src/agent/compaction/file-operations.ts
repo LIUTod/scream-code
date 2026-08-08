@@ -40,13 +40,32 @@ export function extractFileOpsFromMessage(message: Message, ops: FileOperations)
   }
 }
 
+export interface FileLists {
+  /** Files read in the compacted history (sorted, deduped). */
+  readonly readFiles: string[];
+  /** Files written or edited in the compacted history (sorted, deduped). */
+  readonly modifiedFiles: string[];
+}
+
+/** Projects a `FileOperations` accumulator into the persistent, sorted
+ *  file lists stored on `CompactionResult`. Unlike `formatFileOperations`
+ *  this keeps the full list (no `FILE_LIMIT` elision) so later compactions
+ *  can merge the previous round's file context without losing entries. */
+export function computeFileLists(ops: FileOperations): FileLists {
+  const modified = new Set<string>([...ops.edited, ...ops.written]);
+  return {
+    readFiles: [...ops.read].toSorted(),
+    modifiedFiles: [...modified].toSorted(),
+  };
+}
+
 const FILE_LIMIT = 20;
 
 export function formatFileOperations(ops: FileOperations): string {
   const modified = new Set<string>([...ops.edited, ...ops.written]);
-  const readOnly = [...ops.read].filter((f) => !modified.has(f)).sort();
-  const modifiedFiles = [...modified].sort();
-  const all = [...new Set([...readOnly, ...modifiedFiles])].sort();
+  const readOnly = [...ops.read].filter((f) => !modified.has(f)).toSorted();
+  const modifiedFiles = [...modified].toSorted();
+  const all = [...new Set([...readOnly, ...modifiedFiles])].toSorted();
   if (all.length === 0) return '';
 
   const mode = new Map<string, 'Read' | 'Write' | 'RW'>();
@@ -65,7 +84,7 @@ export function formatFileOperations(ops: FileOperations): string {
 }
 
 export function upsertFileOperations(summary: string, ops: FileOperations): string {
-  const base = summary.replace(/<files>[\s\S]*?<\/files>\s*/g, '').trimEnd();
+  const base = summary.replaceAll(/<files>[\s\S]*?<\/files>\s*/g, '').trimEnd();
   const filesSection = formatFileOperations(ops);
   return filesSection.length > 0 ? `${base}\n\n${filesSection}` : base;
 }

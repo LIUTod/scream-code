@@ -1,6 +1,6 @@
 {
   "name": "scream-code",
-  "version": "0.12.6",
+  "version": "0.12.7",
   "description": "A terminal-native AI agent for builders",
   "license": "MIT",
   "author": "ScreamCli",
@@ -74,6 +74,7 @@
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@scream-code/agent-core": "workspace:^",
     "@scream-code/config": "workspace:^",
+    "@scream-code/evals": "workspace:^",
     "@scream-code/knowledge": "workspace:*",
     "@scream-code/memory": "workspace:*",
     "@scream-code/scream-code-sdk": "workspace:^",

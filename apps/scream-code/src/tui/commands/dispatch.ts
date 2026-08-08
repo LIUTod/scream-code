@@ -60,6 +60,7 @@ import { handleSkillCommand } from './skill-center';
 import { handleBtwCommand } from './btw';
 import { handleLikeCommand } from './like';
 import { handleKnowledgeCommand } from './knowledge';
+import { runEvalCommand } from './eval';
 
 // ---------------------------------------------------------------------------
 // Re-exports — keep existing consumers working
@@ -339,6 +340,9 @@ async function handleBuiltInSlashCommand(
       return;
     case 'logout':
       await handleLogoutCommand(host);
+      return;
+    case 'eval':
+      runEvalCommand(host);
       return;
     case 'memory':
       await handleMemoryCommand(host, args);

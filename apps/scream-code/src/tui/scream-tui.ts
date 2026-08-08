@@ -23,6 +23,7 @@ import {
   type SkillListSession,
 } from './commands';
 import { clearGoalState } from './commands/goal';
+import { clearEvalPanelState } from './commands/eval';
 import { clearInfoPanelState } from './commands/info';
 import { disposeChildren } from './utils/component-capabilities';
 
@@ -777,6 +778,7 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
     // Clear goal panel timer/refs to prevent stale timer firing on new session.
     clearGoalState();
     clearInfoPanelState(this.state);
+    clearEvalPanelState(this.state);
     // Clear scrollback when switching/creating sessions so old session content
     // doesn't linger in terminal scroll history. The viewport itself is cleared
     // by the force render below (fullRender emits \x1b[2J\x1b[H).

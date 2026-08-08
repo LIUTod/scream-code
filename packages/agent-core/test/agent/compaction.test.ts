@@ -179,8 +179,7 @@ describe('Agent compaction', () => {
     expect(strategy.shouldBlock(28_000)).toBe(true);
   });
 
-  it('runs manual compaction and applies the compacted context', async () => {
-    const ctx = testAgent();
+  it('runs manual compaction and applies the compacted context', async () => {    const ctx = testAgent();
     ctx.configure({
       provider: CATALOGUED_PROVIDER,
       modelCapabilities: CATALOGUED_MODEL_CAPABILITIES,
@@ -260,6 +259,170 @@ describe('Agent compaction', () => {
         },
       ]
     `);
+    await ctx.expectResumeMatches();
+  });
+
+  it('accumulates file lists across repeated compactions', async () => {
+    const ctx = testAgent();
+    ctx.configure({
+      provider: CATALOGUED_PROVIDER,
+      modelCapabilities: CATALOGUED_MODEL_CAPABILITIES,
+    });
+    // First round: one Read of "alpha.ts" inside the compactable prefix.
+    ctx.appendExchange(1, 'old user one', 'old assistant one', 20);
+    ctx.dispatch({
+      type: 'context.append_loop_event',
+      event: {
+        type: 'step.begin',
+        uuid: 'file-step-one',
+        turnId: '',
+        step: 2,
+      },
+    });
+    ctx.dispatch({
+      type: 'context.append_loop_event',
+      event: {
+        type: 'tool.call',
+        uuid: 'call_alpha',
+        turnId: '',
+        step: 2,
+        stepUuid: 'file-step-one',
+        toolCallId: 'call_alpha',
+        name: 'Read',
+        args: { path: 'alpha.ts' },
+      },
+    });
+    ctx.dispatch({
+      type: 'context.append_loop_event',
+      event: {
+        type: 'step.end',
+        uuid: 'file-step-one',
+        turnId: '',
+        step: 2,
+        finishReason: 'tool_use',
+      },
+    });
+    ctx.dispatch({
+      type: 'context.append_loop_event',
+      event: {
+        type: 'tool.result',
+        parentUuid: 'call_alpha',
+        toolCallId: 'call_alpha',
+        result: { output: 'alpha content' },
+      },
+    });
+    ctx.appendExchange(3, 'recent user', 'recent assistant', 120);
+
+    const firstCompacted = new Promise<void>((resolve) => {
+      ctx.emitter.once('context.apply_compaction', () => {
+        resolve();
+      });
+    });
+    ctx.mockNextResponse({ type: 'text', text: 'First summary.' });
+    await ctx.rpc.beginCompaction({ instruction: 'compact' });
+    await firstCompacted;
+    const applyRecords = () =>
+      ctx.allEvents.filter(
+        (e): e is (typeof ctx.allEvents)[number] =>
+          e.type === '[wire]' && e.event === 'context.apply_compaction',
+      );
+    const firstApply = applyRecords()[0];
+    expect(firstApply).toBeDefined();
+    expect((firstApply as { args?: unknown }).args).toMatchObject({
+      readFiles: ['alpha.ts'],
+    });
+    // No modified files in round one → the field is omitted from the record.
+    expect(
+      ((firstApply as { args?: Record<string, unknown> }).args ?? {})['modifiedFiles'],
+    ).toBeUndefined();
+
+    // Second round: the prefix now includes the first summary; the new
+    // exchange reads "beta.ts" and writes "gamma.ts". The previous file
+    // lists must be merged in, not reset.
+    ctx.appendExchange(4, 'more user', 'more assistant', 30);
+    ctx.dispatch({
+      type: 'context.append_loop_event',
+      event: {
+        type: 'step.begin',
+        uuid: 'file-step-two',
+        turnId: '',
+        step: 3,
+      },
+    });
+    ctx.dispatch({
+      type: 'context.append_loop_event',
+      event: {
+        type: 'tool.call',
+        uuid: 'call_beta',
+        turnId: '',
+        step: 3,
+        stepUuid: 'file-step-two',
+        toolCallId: 'call_beta',
+        name: 'Read',
+        args: { path: 'beta.ts' },
+      },
+    });
+    ctx.dispatch({
+      type: 'context.append_loop_event',
+      event: {
+        type: 'tool.call',
+        uuid: 'call_gamma',
+        turnId: '',
+        step: 3,
+        stepUuid: 'file-step-two',
+        toolCallId: 'call_gamma',
+        name: 'Write',
+        args: { path: 'gamma.ts' },
+      },
+    });
+    ctx.dispatch({
+      type: 'context.append_loop_event',
+      event: {
+        type: 'step.end',
+        uuid: 'file-step-two',
+        turnId: '',
+        step: 3,
+        finishReason: 'tool_use',
+      },
+    });
+    ctx.dispatch({
+      type: 'context.append_loop_event',
+      event: {
+        type: 'tool.result',
+        parentUuid: 'call_beta',
+        toolCallId: 'call_beta',
+        result: { output: 'beta content' },
+      },
+    });
+    ctx.dispatch({
+      type: 'context.append_loop_event',
+      event: {
+        type: 'tool.result',
+        parentUuid: 'call_gamma',
+        toolCallId: 'call_gamma',
+        result: { output: 'gamma written' },
+      },
+    });
+
+    const secondCompacted = new Promise<void>((resolve) => {
+      ctx.emitter.once('context.apply_compaction', () => {
+        resolve();
+      });
+    });
+    ctx.mockNextResponse({ type: 'text', text: 'Second summary.' });
+    await ctx.rpc.beginCompaction({ instruction: 'compact again' });
+    await secondCompacted;
+
+    // Files from the first round survive into the second round.
+    const applyRecords2 = ctx.allEvents.filter(
+      (e): e is (typeof ctx.allEvents)[number] =>
+        e.type === '[wire]' && e.event === 'context.apply_compaction',
+    );
+    expect(applyRecords2).toHaveLength(2);
+    expect((applyRecords2[1] as { args?: unknown }).args).toMatchObject({
+      readFiles: ['alpha.ts', 'beta.ts'],
+      modifiedFiles: ['gamma.ts'],
+    });
     await ctx.expectResumeMatches();
   });
 
