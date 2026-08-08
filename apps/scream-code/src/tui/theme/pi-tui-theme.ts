@@ -25,7 +25,15 @@ const HEADING_HASH_PREFIX = /^((?:\u001B\[[0-9;]*m)*)#{1,6}[ \t]+/;
  * takes one formatter function per token; tokens not listed here fall back to
  * its DEFAULT_THEME.
  */
-function createCodeHighlightTheme(colors: ColorPalette): Theme {
+/**
+ * Markdown code-block highlight theme: green-dominant mapping (keyword,
+ * function, built_in → primary; strings → success; numbers → warning;
+ * comments → textDim). Kept distinct from the shared preview theme in
+ * code-highlight-theme.ts on purpose — markdown code blocks use the green
+ * primary hue, while file-preview panels use the classic blue/red/yellow
+ * scheme mapped to the same palette. Both follow the active theme.
+ */
+function createMarkdownCodeHighlightTheme(colors: ColorPalette): Theme {
   const keyword = chalk.hex(colors.primary);
   const str = chalk.hex(colors.success);
   const comment = chalk.hex(colors.textDim);
@@ -77,7 +85,7 @@ export function createMarkdownTheme(colors: ColorPalette): MarkdownTheme {
   const stripHash = (text: string): string => text.replace(HEADING_HASH_PREFIX, '$1');
   const muted = chalk.hex(colors.textMuted);
   const border = chalk.hex(colors.border);
-  const codeTheme = createCodeHighlightTheme(colors);
+  const codeTheme = createMarkdownCodeHighlightTheme(colors);
   return {
     heading: (text) => chalk.bold.hex(colors.text)(stripHash(text)),
     link: (text) => chalk.hex(colors.mdLink)(text),

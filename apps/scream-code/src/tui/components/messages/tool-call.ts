@@ -1759,7 +1759,7 @@ export class ToolCallComponent extends CachedContainer {
       if (content.length === 0) return;
       const filePath = str(this.toolCall.args['file_path'] ?? this.toolCall.args['path']);
       const lang = langFromPath(filePath);
-      const allLines = highlightLines(content, lang);
+      const allLines = highlightLines(content, lang, this.colors);
       // Cap as soon as args finalize, not just when result lands. Otherwise the
       // brief render tick between finalized args and result draws the full file,
       // and the snap back to the collapsed cap triggers pi-tui's full-redraw
@@ -1906,7 +1906,7 @@ export class ToolCallComponent extends CachedContainer {
     const fragment = unescapeJsonStringValue(streamText, fragmentStart, fragmentEnd);
     if (fragment.length === 0) return;
 
-    const lines = highlightLines(fragment, this.writeStreamLang);
+    const lines = highlightLines(fragment, this.writeStreamLang, this.colors);
     const displayLines = lines.slice(-COMMAND_PREVIEW_LINES);
     // The counter reached only tailStart; when a partial first line was
     // dropped, that dropped line still occupies a line number.

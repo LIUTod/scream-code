@@ -237,7 +237,7 @@ function buildDiffBody(block: DiffDisplayBlock, colors: ColorPalette): BuiltBody
 
 function buildFileContentBody(block: FileContentDisplayBlock, colors: ColorPalette): BuiltBody {
   const lang = block.language ?? langFromPath(block.path);
-  const highlighted = highlightLines(block.content, lang);
+  const highlighted = highlightLines(block.content, lang, colors);
   const gutter = chalk.hex(colors.diffGutter);
   const lines = highlighted.map(
     (line, i) => gutter(String(i + 1).padStart(4) + '  ') + line,

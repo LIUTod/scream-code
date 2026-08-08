@@ -7,6 +7,9 @@ import { extname } from 'node:path';
 
 import { highlight, supportsLanguage } from 'cli-highlight';
 
+import type { ColorPalette } from '../../theme/colors';
+import { createCodeHighlightTheme } from '../../theme/code-highlight-theme';
+
 const EXT_LANG_MAP: Record<string, string> = {
   ts: 'typescript',
   tsx: 'typescript',
@@ -41,11 +44,15 @@ export function langFromPath(filePath: string): string | undefined {
   return supportsLanguage(lang) ? lang : undefined;
 }
 
-export function highlightLines(code: string, lang: string | undefined): string[] {
+export function highlightLines(code: string, lang: string | undefined, colors: ColorPalette): string[] {
   const normalizedLang = lang?.trim().toLowerCase();
   if (!normalizedLang || !supportsLanguage(normalizedLang)) return code.split('\n');
   try {
-    return highlight(code, { language: normalizedLang, ignoreIllegals: true }).split('\n');
+    return highlight(code, {
+      language: normalizedLang,
+      ignoreIllegals: true,
+      theme: createCodeHighlightTheme(colors),
+    }).split('\n');
   } catch {
     return code.split('\n');
   }

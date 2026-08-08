@@ -71,10 +71,12 @@ function visualizeIndent(line: string): { text: string; indentEnd: number } {
 
 /**
  * Render a diff line's code with leading-whitespace visualization (tabs as
- * `->`, spaces as `·`, dimmed) and optional syntax highlighting. Highlighting
- * runs on the raw code first; indent visualization then runs on the
- * highlighted string - leading whitespace carries no token color, so it is
- * still plain and can be replaced and dimmed without disturbing the tokens.
+ * `->`, spaces as `·`, dimmed) and optional syntax highlighting. Indent
+ * visualization runs on the raw code FIRST, then highlighting runs on the
+ * stripped remainder: once the text is ANSI-tinted (the theme's `default`
+ * color wraps whitespace too), a leading tab is no longer the first raw
+ * character and would be missed. The dimmed indent itself carries no token
+ * color.
  *
  * When highlighting is on and produced token colors, the diff line color is
  * layered as the base foreground: syntax tokens override it, but every ANSI
@@ -88,13 +90,18 @@ function renderDiffCode(
   colorFn: (s: string) => string,
   highlight: boolean,
   lang: string | undefined,
+  colors: ColorPalette,
 ): string {
-  const source = highlight ? (highlightLines(code, lang)[0] ?? code) : code;
-  const { text, indentEnd } = visualizeIndent(source);
+  // Visualize leading tabs/spaces BEFORE syntax highlighting: once the text
+  // is ANSI-tinted (the theme's `default` color wraps whitespace too), the
+  // leading tab is no longer the first raw character and visualizeIndent
+  // would miss it. Order matters here.
+  const { text, indentEnd } = visualizeIndent(code);
   const indent = text.slice(0, indentEnd);
   const rest = text.slice(indentEnd);
   const dimIndent = indent.length > 0 ? chalk.dim(indent) : indent;
-  if (highlight && ANSI_RE.test(rest)) {
+  const source = highlight ? (highlightLines(rest, lang, colors)[0] ?? rest) : rest;
+  if (highlight && ANSI_RE.test(source)) {
     // Layer the diff color as the base foreground: syntax tokens override it,
     // but every ANSI reset re-injects the diff color so non-token spans
     // (punctuation, operators, whitespace) stay green/red instead of falling
@@ -105,11 +112,11 @@ function renderDiffCode(
     // un-reset by the trailing \x1b[39m.
     const prefix = extractAnsiPrefix(colorFn);
     if (prefix.length > 0) {
-      return dimIndent + prefix + rest.replace(ANSI_RESET_RE, (m) => m + prefix) + '\u001B[39m';
+      return dimIndent + prefix + source.replace(ANSI_RESET_RE, (m) => m + prefix) + '\u001B[39m';
     }
-    return dimIndent + rest;
+    return dimIndent + source;
   }
-  return dimIndent + colorFn(rest);
+  return dimIndent + colorFn(source);
 }
 
 /**
@@ -300,7 +307,7 @@ export function renderDiffLines(
     output.push(
       s.gutter(String(line.lineNum).padStart(4) + ' ') +
         color(`${marker} `) +
-        renderDiffCode(line.code, color, doHighlight, lang),
+        renderDiffCode(line.code, color, doHighlight, lang, colors),
     );
     i += 1;
   }
@@ -385,15 +392,16 @@ function formatDiffRow(
   s: DiffStyles,
   doHighlight: boolean,
   lang: string | undefined,
+  colors: ColorPalette,
 ): string {
   const gutter = s.gutter(String(line.lineNum).padStart(4) + ' ');
   if (line.kind === 'add') {
-    return gutter + s.add('+ ') + renderDiffCode(line.code, s.add, doHighlight, lang);
+    return gutter + s.add('+ ') + renderDiffCode(line.code, s.add, doHighlight, lang, colors);
   }
   if (line.kind === 'delete') {
-    return gutter + s.del('- ') + renderDiffCode(line.code, s.del, doHighlight, lang);
+    return gutter + s.del('- ') + renderDiffCode(line.code, s.del, doHighlight, lang, colors);
   }
-  return gutter + '  ' + renderDiffCode(line.code, (x) => x, doHighlight, lang);
+  return gutter + '  ' + renderDiffCode(line.code, (x) => x, doHighlight, lang, colors);
 }
 
 /**
@@ -482,7 +490,7 @@ export function renderDiffLinesClustered(
         i += 2;
         continue;
       }
-      output.push(formatDiffRow(line, s, doHighlight, lang));
+      output.push(formatDiffRow(line, s, doHighlight, lang, colors));
       body++;
       if (line.kind !== 'context') shownChanges++;
       prevEnd = i;

@@ -84,7 +84,7 @@ function renderDisplayBlock(
     case 'file_content': {
       const lang = block.language ?? langFromPath(block.path);
       const content = replaceTabs(block.content);
-      const allLines = highlightLines(content, lang);
+      const allLines = highlightLines(content, lang, colors);
       const shown = allLines.slice(0, CONTENT_SUMMARY_MAX_LINES);
       const lines = [s.strong(block.path)];
       for (const [i, line] of shown.entries()) {
