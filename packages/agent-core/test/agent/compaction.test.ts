@@ -138,8 +138,13 @@ describe('Agent compaction', () => {
   it('reserves response context by default before the ratio threshold is reached', () => {
     const strategy = new DefaultCompactionStrategy(() => 256_000);
 
-    expect(strategy.shouldCompact(210_000)).toBe(true);
-    expect(strategy.shouldBlock(210_000)).toBe(true);
+    // Ratio threshold: 85% of 256k = 217.6k → 218k triggers.
+    expect(strategy.shouldCompact(218_000)).toBe(true);
+    expect(strategy.shouldBlock(231_000)).toBe(true); // 90% of 256k = 230.4k
+
+    // Reserved-context path: used + 20k reserved ≥ 256k → 236k triggers even
+    // though it is below the 90% block ratio.
+    expect(strategy.shouldBlock(236_000)).toBe(true);
   });
 
   it('backs off overflow compaction by at least five percent of the context window', () => {

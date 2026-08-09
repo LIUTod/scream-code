@@ -25,17 +25,20 @@ export interface CompactionConfig {
 }
 
 export const DEFAULT_COMPACTION_CONFIG: CompactionConfig = {
-  triggerRatio: 0.75,
-  blockRatio: 0.85, // 10% proactive window between trigger and block
-  reservedContextSize: 50_000,
+  // Tuned for current mainstream large-context models (256K–1M tokens).
+  // Compact at 85% and block at 90%: with a 1M window that leaves 100K
+  // tokens for the compaction request itself and output buffering.
+  triggerRatio: 0.85,
+  blockRatio: 0.90, // 5% window between trigger and block
+  reservedContextSize: 20_000,
   maxCompactionPerTurn: 3,
   // Preserve a generous verbatim tail so the model retains task continuity
-  // right after compaction (industry practice keeps ~20k tokens). The tail is
-  // bounded by both message counts and the absolute/relative token budgets.
-  maxRecentMessages: 16,
-  maxRecentUserMessages: 8,
-  maxRecentTokens: 20_000,
-  maxRecentSizeRatio: 0.2,
+  // right after compaction. Bounded by both message counts and the
+  // absolute/relative token budgets.
+  maxRecentMessages: 24,
+  maxRecentUserMessages: 12,
+  maxRecentTokens: 30_000,
+  maxRecentSizeRatio: 0.25,
   minOverflowReductionRatio: 0.05,
   turnGrowthMultiplier: 2.5, // maxOutput + 1.5x avg tool result growth
 };
