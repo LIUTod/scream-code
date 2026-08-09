@@ -16,6 +16,7 @@ export const SCREAM_CODE_LOG_DIR_NAME = 'logs';
 export const SCREAM_CODE_UPDATE_DIR_NAME = 'updates';
 export const SCREAM_CODE_UPDATE_STATE_FILE_NAME = 'latest.json';
 export const SCREAM_CODE_INPUT_HISTORY_DIR_NAME = 'user-history';
+export const SCREAM_CODE_UI_PREFERENCES_FILE_NAME = 'ui-preferences.json';
 
 // Managed Scream auth provider key shared with OAuth/SDK config.
 export const DEFAULT_OAUTH_PROVIDER_NAME = 'managed:scream-code';

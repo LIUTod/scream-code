@@ -51,6 +51,9 @@ export interface SessionReplayHost {
   setAppState(patch: Partial<AppState>): void;
   showError(msg: string): void;
   appendTranscriptEntry(entry: TranscriptEntry): void;
+  /** Force a status-bar refresh (hides the empty-session hint after a replay
+   *  repopulated the transcript while the activity mode stayed idle). */
+  forceUpdateStatusBar(): void;
 }
 
 export class SessionReplayRenderer {
@@ -75,6 +78,10 @@ export class SessionReplayRenderer {
       return false;
     } finally {
       this.host.setAppState({ isReplaying: false });
+      // Replay has (re)populated the transcript: refresh the status bar so the
+      // empty-session hint disappears when history was restored (mode may have
+      // stayed idle across the switch, which normally short-circuits updates).
+      this.host.forceUpdateStatusBar();
     }
   }
 

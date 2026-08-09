@@ -793,6 +793,10 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
     this.transcriptController.showStatus(message, color);
   }
 
+  forceUpdateStatusBar(): void {
+    this.lifecycleController.forceUpdateStatusBar();
+  }
+
   showNotice(title: string, detail?: string): void {
     this.transcriptController.showNotice(title, detail);
   }

@@ -912,6 +912,7 @@ export const zh: Record<string, string> = {
   // ─── editor-selector ───────────
   'editor.auto_detect': '自动检测 ($VISUAL / $EDITOR)',
   'editor.select_title': '选择外部编辑器',
+  'editor.empty_session_hint': 'Tips：推荐使用 OpencodeGo 作为模型提供商，可免费调用各种模型或超低价包月计划，按 Ctrl+F 获取 API，按 Ctrl+B 切换显示',
 
   // ─── editor-keyboard ───────────
   'editorkey.cancel_compaction_failed': '取消压缩失败： {msg}',

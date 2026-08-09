@@ -2,6 +2,7 @@ import type { Session, ScreamHarness } from '@scream-code/scream-code-sdk';
 import { t } from '@scream-code/config';
 import { Container, ScrollView, VStack, type Component } from '@liutod-scream/pi-tui';
 import { GutterContainer } from '../components/chrome/gutter-container';
+import { isEmptySessionHintDismissed } from '../utils/ui-preferences';
 import { StatusBarPaneComponent } from '../components/panes/status-bar-pane';
 import { CHROME_GUTTER } from '../constant/rendering';
 import type { AuthFlowController } from './auth-flow';
@@ -416,10 +417,36 @@ export class LifecycleController {
         break;
       case 'idle':
       case 'hidden':
-        // Bar stays empty.
+        // When the chat is completely empty (fresh session / just switched),
+        // show a one-line hint above the editor pointing at the model-provider
+        // partner page, with Ctrl+F to open it. Once the user sends anything
+        // the phase leaves idle and the bar rebuilds, so the hint disappears
+        // automatically — no extra state to clean up.
+        if (
+          mode === 'idle'
+          && state.transcriptEntries.length === 0
+          && !isEmptySessionHintDismissed()
+        ) {
+          // Quiet interactive cue: dimmed label, lighter than body text.
+          state.statusBarContainer.addChild(
+            new StatusBarPaneComponent({
+              mode: 'idle',
+              label: t('editor.empty_session_hint'),
+              labelColor: state.theme.colors.textDim,
+            }),
+          );
+        }
         break;
     }
     state.ui.requestRender();
+  }
+
+  /** Force a status-bar refresh even when the mode is unchanged. Used after
+   *  session switches/clears: the transcript is emptied, so the empty-session
+   *  hint must (re)appear even though idle -> idle normally short-circuits. */
+  forceUpdateStatusBar(): void {
+    this.lastActivityMode = undefined;
+    this.updateActivityPane();
   }
 
   private resolveActivityPaneMode(): EffectiveActivityPaneMode {

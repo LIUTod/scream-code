@@ -1,4 +1,5 @@
 import { Container, HStack, Text, type Component } from '@liutod-scream/pi-tui';
+import chalk from 'chalk';
 
 import type { MoonLoader } from '../chrome/moon-loader';
 import type { PulseWaveLoader } from '../chrome/pulse-wave-loader';
@@ -8,6 +9,7 @@ export type StatusBarMode = 'idle' | 'waiting' | 'thinking' | 'composing' | 'too
 export interface StatusBarPaneOptions {
   readonly mode: StatusBarMode;
   readonly label: string;
+  readonly labelColor?: string;
   readonly spinner?: MoonLoader;
   readonly pulseWave?: PulseWaveLoader;
 }
@@ -31,6 +33,15 @@ export class StatusBarPaneComponent extends Container {
   update(options: StatusBarPaneOptions): void {
     this.clear();
     if (options.mode === 'idle') {
+      // Idle normally renders nothing, but the empty-session hint (a static
+      // one-line label above the editor) is rendered when provided, dimmed
+      // below body-text contrast so it reads as a quiet interactive cue.
+      if (options.label.length > 0) {
+        const text = options.labelColor !== undefined
+          ? chalk.hex(options.labelColor)(options.label)
+          : options.label;
+        this.addChild(new Text(text, 1, 0));
+      }
       return;
     }
     // Pulse wave + optional label sit on one line via HStack (Container

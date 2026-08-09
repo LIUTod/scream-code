@@ -911,6 +911,7 @@ export const en: Record<string, string> = {
   // ─── editor-selector ───────────
   'editor.auto_detect': 'Auto detect ($VISUAL / $EDITOR)',
   'editor.select_title': 'Select external editor',
+  'editor.empty_session_hint': 'Tips: Use OpencodeGo as your model provider: free models or a low-cost plan. Ctrl+F: get an API key. Ctrl+B: toggle this tip.',
 
   // ─── editor-keyboard ───────────
   'editorkey.cancel_compaction_failed': 'Cancel compaction failed: {msg}',

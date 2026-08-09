@@ -30,6 +30,10 @@ export interface DialogManagerHost {
 
   showError(message: string): void;
   showStatus(message: string, color?: string): void;
+  /** Force a status-bar refresh; invalidates the activity-mode cache so the
+   *  empty-session hint reacts to dialog open/close (the dialog itself is not
+   *  a phase transition, so the cache would otherwise go stale). */
+  forceUpdateStatusBar(): void;
   /** 退出 /tasks 等全屏接管组件,让后续 editor 替换能挂载到真实容器。 */
   exitFullScreenTakeover(): void;
   sendNormalUserInput(text: string): void;
@@ -71,6 +75,7 @@ export class DialogManager {
     this.host.state.editorContainer.addChild(panel);
     this.host.state.ui.setFocus(panel);
     this.host.state.ui.requestRender();
+    this.host.forceUpdateStatusBar();
   }
 
   private restoreEditor(): void {
@@ -79,6 +84,7 @@ export class DialogManager {
     this.host.state.ui.setFocus(this.host.state.editor);
     this.host.state.activeDialog = null;
     this.host.state.ui.requestRender();
+    this.host.forceUpdateStatusBar();
   }
 
   // =========================================================================

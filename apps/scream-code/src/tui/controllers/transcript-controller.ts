@@ -41,6 +41,9 @@ export interface TranscriptControllerHost {
 
   showStatus(message: string, color?: string): void;
   batchUpdate<T>(fn: () => T): T;
+  /** Force a status-bar refresh (e.g. to re-show the empty-session hint after
+   *  the transcript was cleared, even when the activity mode is unchanged). */
+  forceUpdateStatusBar(): void;
 }
 export class TranscriptController {
   private welcomeComponent: WelcomeComponent | undefined;
@@ -304,6 +307,10 @@ export class TranscriptController {
     state.errorBanner.clear();
     imageStore.clear();
     this.renderWelcome();
+    // The transcript is now empty: force the status bar to refresh so the
+    // empty-session hint (Ctrl+F) (re)appears even when the activity mode
+    // stayed idle across the switch (idle -> idle normally short-circuits).
+    this.host.forceUpdateStatusBar();
   }
 
   showStatus(message: string, color?: string): void {

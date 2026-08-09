@@ -5,11 +5,14 @@ import { t } from '@scream-code/config';
 import { ClipboardMediaError, readClipboardMedia, readImageFromPath } from '#/utils/clipboard/clipboard-image';
 import { parseImageMeta } from '#/utils/image/image-mime';
 import { editInExternalEditor, resolveEditorCommand } from '#/utils/process/external-editor';
+import { openUrl } from '#/tui/utils/open-url';
+import { isEmptySessionHintDismissed, toggleEmptySessionHint } from '#/tui/utils/ui-preferences';
 
 import {
   getCtrlCHint,
   getCtrlDHint,
   EXIT_CONFIRM_WINDOW_MS,
+  EMPTY_SESSION_HINT_URL,
   getLlmNotSetMessage,
   getNoActiveSessionMessage,
 } from '../constant/scream-tui';
@@ -38,6 +41,8 @@ export interface EditorKeyboardHost {
   hideSessionPicker(): void;
   hideMemoryPicker(): void;
   hideHelpPanel(): void;
+  /** Force a status-bar refresh (hides the empty-session hint after Ctrl+B). */
+  forceUpdateStatusBar(): void;
   restoreEditor(): void;
   stop(exitCode?: number): Promise<void>;
   handlePlanModeStateChange(state: PlanModeState): void;
@@ -107,6 +112,27 @@ export class EditorKeyboardController {
         return;
       }
       this.armPendingExit('ctrl-d', getCtrlDHint());
+    };
+
+    // Ctrl+F opens the partner model-provider page, but ONLY while the
+    // empty-session hint is visible (no transcript yet AND not dismissed).
+    // Returns true only then; otherwise the base editor keeps its own
+    // Ctrl+F binding (cursorRight).
+    editor.onCtrlF = () => {
+      if (host.state.transcriptEntries.length > 0) return false;
+      if (isEmptySessionHintDismissed()) return false;
+      openUrl(EMPTY_SESSION_HINT_URL);
+      return true;
+    };
+
+    // Ctrl+B toggles the empty-session provider hint on/off (persisted to
+    // ui-preferences.json). Only active while the chat is empty; the hint is
+    // the only thing this key controls here, so toggling works both ways.
+    editor.onCtrlB = () => {
+      if (host.state.transcriptEntries.length > 0) return false;
+      toggleEmptySessionHint();
+      host.forceUpdateStatusBar();
+      return true;
     };
 
     editor.onEscape = () => {

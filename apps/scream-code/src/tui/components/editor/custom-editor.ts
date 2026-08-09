@@ -39,7 +39,7 @@ function imagePathBoundaryEnd(payload: string, segmentStart: number, extensionEn
 function normalizePastedImagePath(path: string): string {
   const trimmed = path.trim();
   const first = trimmed[0];
-  const last = trimmed[trimmed.length - 1];
+  const last = trimmed.at(-1);
   const unquoted =
     trimmed.length > 1 && (first === '"' || first === "'") && last === first ? trimmed.slice(1, -1) : trimmed;
   return unquoted.replace(SHELL_ESCAPED_PATH_CHAR_REGEX, '$1');
@@ -169,6 +169,11 @@ export class CustomEditor extends Editor {
   public onEscape?: () => void;
   public onCtrlD?: () => void;
   public onCtrlC?: () => void;
+  /** Return true when the key was handled (consumed); false falls through to
+   *  the base editor's own binding (pi-tui maps Ctrl+F to cursorRight). */
+  public onCtrlF?: () => boolean;
+  /** Same contract as onCtrlF: true consumes the key, false falls through. */
+  public onCtrlB?: () => boolean;
   public onToggleToolExpand?: () => void;
   // Returns true when a plan card actually handled the toggle. When it
   // returns false (no plan in the transcript) the keystroke falls through
@@ -396,6 +401,19 @@ export class CustomEditor extends Editor {
     if (matchesKey(normalized, Key.ctrl('c'))) {
       this.onCtrlC?.();
       return;
+    }
+
+    if (matchesKey(normalized, Key.ctrl('b'))) {
+      const handled = this.onCtrlB?.() ?? false;
+      if (handled) return;
+    }
+
+    if (matchesKey(normalized, Key.ctrl('f'))) {
+      // Only consume Ctrl+F when the host handled it (empty-session hint).
+      // Otherwise fall through so the base editor keeps its own binding
+      // (pi-tui maps Ctrl+F to cursorRight).
+      const handled = this.onCtrlF?.() ?? false;
+      if (handled) return;
     }
 
     if (matchesKey(normalized, Key.ctrl('g'))) {
