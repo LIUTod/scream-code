@@ -14,6 +14,8 @@ import { getDataDir } from '#/utils/paths';
 export interface UiPreferences {
   /** User pressed Ctrl+B to permanently hide the empty-session provider hint. */
   emptySessionHintDismissed?: boolean;
+  /** Whether the per-turn elapsed marker (session snapshot timer) is shown. */
+  turnElapsedEnabled?: boolean;
 }
 
 const EMPTY: UiPreferences = {};
@@ -58,4 +60,19 @@ export function toggleEmptySessionHint(): boolean {
   prefs.emptySessionHintDismissed = dismissed;
   writeUiPreferences(prefs);
   return dismissed;
+}
+
+/** Whether the per-turn elapsed marker is enabled (default on). */
+export function isTurnElapsedEnabled(): boolean {
+  return readUiPreferences().turnElapsedEnabled !== false;
+}
+
+/** Toggle the per-turn elapsed marker via /snaptimer. Returns the new state:
+ *  true = shown, false = hidden. Persisted immediately. */
+export function toggleTurnElapsed(): boolean {
+  const prefs = readUiPreferences();
+  const enabled = prefs.turnElapsedEnabled !== false;
+  prefs.turnElapsedEnabled = !enabled;
+  writeUiPreferences(prefs);
+  return !enabled;
 }

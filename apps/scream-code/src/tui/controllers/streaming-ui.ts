@@ -14,6 +14,7 @@ import { appendStreamingArgsPreview, parseStreamingArgs } from '../utils/event-p
 import { estimateTokens, getSharedSpeedTracker } from '../utils/speed-tracker';
 import { notifyTerminalOnce } from '../utils/terminal-notification';
 import { nextTranscriptId } from '../utils/transcript-id';
+import { isTurnElapsedEnabled } from '../utils/ui-preferences';
 import type { TodoItem } from '../components/chrome/todo-panel';
 import type { TranscriptController } from './transcript-controller';
 import type {
@@ -54,6 +55,10 @@ export class StreamingUIController {
   // ---------------------------------------------------------------------------
 
   private _currentTurnId: string | undefined = undefined;
+  /** Wall-clock start of the current turn, stamped at user submission.
+   *  Independent of streamingPhase transitions so tool/thinking pauses do
+   *  not reset the elapsed time. 0 = no active turn. */
+  private turnStartAt = 0;
   private _currentStep = 0;
   private _assistantDraft = '';
   private _thinkingDraft = '';
@@ -529,18 +534,28 @@ export class StreamingUIController {
     this.finalizeAssistantStream();
   }
 
+  /** Stamped when the user submits a message; the single source of truth for
+   *  turn elapsed time (covers all tool calls and thinking in between). */
+  markTurnStarted(): void {
+    this.turnStartAt = Date.now();
+  }
+
   finalizeTurn(sendQueued: (item: QueuedMessage) => void): void {
     const { state } = this.host;
     if (state.appState.streamingPhase === 'idle') return;
     this.host.deferUserMessages = false;
+    const turnStartTime = this.turnStartAt !== 0 ? this.turnStartAt : state.appState.streamingStartTime;
     const completedTurnKey =
-      this._currentTurnId ?? `local:${String(state.appState.streamingStartTime)}`;
+      this._currentTurnId ?? `local:${String(turnStartTime)}`;
     this.finalizeLiveTextBuffers();
     this.resetToolCallState();
     this._currentTurnId = undefined;
 
     const next = this.host.shiftQueuedMessage();
     if (next !== undefined) {
+      // The turn's output is complete (finalizeLiveTextBuffers already ran);
+      // stamp its elapsed marker too before the queued turn takes over.
+      this.appendTurnSummaryLine(completedTurnKey, turnStartTime);
       this.host.setAppState({ streamingPhase: 'idle' });
       this.host.resetLivePane();
       setTimeout(() => {
@@ -552,11 +567,36 @@ export class StreamingUIController {
     this.host.setAppState({ streamingPhase: 'idle' });
     this.host.resetLivePane();
     this.host.onTurnCompleted();
+    this.appendTurnSummaryLine(completedTurnKey, turnStartTime);
     this.host.transcriptController.commit();
     notifyTerminalOnce(state, `turn-complete:${completedTurnKey}`, {
       title: t('streamingui.turn_complete_title'),
       body: state.appState.sessionTitle ?? undefined,
     });
+  }
+
+  /** Format an elapsed duration as "xh ym", "ym zs", or "zs" (two-digit
+   *  minutes/seconds when shown). e.g. 60120 -> "16h 42m", 1422 -> "23m 42s",
+   *  12 -> "12s". */
+  private formatElapsed(totalSec: number): string {
+    const s = Math.max(0, Math.floor(totalSec));
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const r = s % 60;
+    if (h > 0) return `${h}h ${m}m`;
+    if (m > 0) return `${m}m ${r}s`;
+    return `${r}s`;
+  }
+
+  /** Flush the turn elapsed marker against the final character of the
+   *  assistant's reply: " 23m 42s" in light grey. No-op when disabled
+   *  via /timer. */
+  private appendTurnSummaryLine(turnKey: string, turnStartTime: number): void {
+    if (!isTurnElapsedEnabled()) return;
+    const { transcriptController } = this.host;
+    const elapsedSec = (Date.now() - turnStartTime) / 1000;
+    const elapsed = this.formatElapsed(elapsedSec);
+    transcriptController.appendElapsedToLastAssistant(` ${elapsed}`, turnKey);
   }
 
   // ---------------------------------------------------------------------------

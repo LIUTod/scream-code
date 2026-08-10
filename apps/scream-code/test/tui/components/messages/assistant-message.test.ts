@@ -215,3 +215,24 @@ describe('AssistantMessageComponent', () => {
     }
   });
 });
+
+describe('AssistantMessageComponent.appendToLastLine', () => {
+  it('appends the elapsed suffix flush to the last non-empty line', () => {
+    const component = new AssistantMessageComponent(createMarkdownTheme(darkColors), darkColors);
+    component.updateContent('第一行\n第二行内容');
+    component.appendToLastLine(' 23m 42s');
+    const rendered = component.render(60).join('\n');
+    expect(rendered).toContain('23m 42s');
+    // suffix sits right after the content with no padding between
+    const last = rendered.split('\n').filter(Boolean).pop() ?? '';
+    expect(last.trimEnd()).toMatch(/\S 23m 42s$/);
+  });
+
+  it('does not clip the suffix when the content line is truncated', () => {
+    const component = new AssistantMessageComponent(createMarkdownTheme(darkColors), darkColors);
+    component.updateContent('x'.repeat(120));
+    component.appendToLastLine(' 12s');
+    const rendered = component.render(60).join('\n');
+    expect(rendered).toContain('12s');
+  });
+});

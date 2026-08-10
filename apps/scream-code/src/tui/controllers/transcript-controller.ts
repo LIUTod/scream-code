@@ -234,6 +234,28 @@ export class TranscriptController {
     return component ?? null;
   }
 
+  /** Append a suffix to the given turn's final assistant message last line.
+   *  Used to place the turn elapsed marker flush against the last character
+   *  of the assistant's reply. Turn-scoped so a tool-only turn never stamps
+   *  the previous turn's message. No-op when this turn has no assistant
+   *  entry with a matching turnId. */
+  appendElapsedToLastAssistant(suffix: string, turnId: string): void {
+    const entries = this.host.state.transcriptEntries;
+    for (let i = entries.length - 1; i >= 0; i--) {
+      const entry = entries[i];
+      if (entry === undefined || entry.kind !== 'assistant') continue;
+      if (entry.turnId !== turnId) continue;
+      for (const [component, mapped] of this.liveComponentToEntry) {
+        if (mapped === entry && component instanceof AssistantMessageComponent) {
+          component.appendToLastLine(suffix);
+          this.host.state.ui.requestRender();
+          return;
+        }
+      }
+      return;
+    }
+  }
+
   appendApprovalEntry(request: ApprovalRequest, response: ApprovalResponse): void {
     if (request.toolName === 'ExitPlanMode' || request.display.kind === 'plan_review') return;
     const parts: string[] = [];

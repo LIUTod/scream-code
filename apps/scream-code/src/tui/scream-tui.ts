@@ -494,6 +494,7 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
   // =========================================================================
 
   beginSessionRequest(): void {
+    this.streamingUI.markTurnStarted();
     this.streamingUI.setTurnId(undefined);
     this.streamingUI.resetLiveText();
     this.streamingUI.resetToolUi();

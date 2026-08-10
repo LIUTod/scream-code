@@ -58,6 +58,7 @@ import { handleMemoryCommand } from './memory';
 import { handleMakeSkillCommand } from './make-skill';
 import { handleSkillCommand } from './skill-center';
 import { handleBtwCommand } from './btw';
+import { handleSnapTimerCommand } from './snaptimer';
 import { handleLikeCommand } from './like';
 import { handleKnowledgeCommand } from './knowledge';
 import { runEvalCommand } from './eval';
@@ -240,6 +241,9 @@ async function handleBuiltInSlashCommand(
       return;
     case 'btw':
       await handleBtwCommand(host, args);
+      return;
+    case 'snaptimer':
+      await handleSnapTimerCommand(host, args);
       return;
     case 'mcp':
       await handleMcpCommand(host, args);

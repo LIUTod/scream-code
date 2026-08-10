@@ -28,6 +28,7 @@ export class AssistantMessageComponent implements Component {
   private bulletColor: string;
   private accentColor: string;
   private lastText = '';
+  private suffixText: string | undefined;
   private showBullet: boolean;
   private cachedWidth: number | undefined;
   private cachedLines: string[] | undefined;
@@ -90,6 +91,16 @@ export class AssistantMessageComponent implements Component {
     this.contentContainer.invalidate?.();
   }
 
+  /** Store a grey suffix to render flush against the final character of the
+   *  last non-empty line. Kept out of the markdown source so it is not parsed
+   *  or re-colored as content. */
+  appendToLastLine(suffix: string): void {
+    this.suffixText = suffix;
+    this.cachedWidth = undefined;
+    this.cachedLines = undefined;
+    this.contentContainer.invalidate?.();
+  }
+
   dispose(): void {
     this.stopFade();
   }
@@ -119,6 +130,22 @@ export class AssistantMessageComponent implements Component {
     }
 
     const rendered = lines.map((line) => truncateToWidth(line, safeWidth, '…'));
+
+    // Grey elapsed marker flush against the last non-empty line. Appended
+    // after truncation so truncateToWidth never clips the suffix; trailing
+    // padding spaces from markdown rendering are stripped first so the
+    // suffix sits right after the content.
+    if (this.suffixText !== undefined) {
+      let li = rendered.length - 1;
+      while (li >= 0 && rendered[li] !== undefined && rendered[li]!.trim().length === 0) li--;
+      if (li >= 0) {
+        const line = rendered[li]!.replace(/[ \t]+(\x1B\[[0-9;]*m)*$/, (match) => {
+          const codes = match.match(/\x1B\[[0-9;]*m/g);
+          return codes !== null ? codes.join('') : '';
+        });
+        rendered[li] = line + chalk.hex('#999999')(this.suffixText);
+      }
+    }
 
     if (isRenderCacheEnabled()) {
       this.cachedWidth = safeWidth;
