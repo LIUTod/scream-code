@@ -73,8 +73,8 @@ export function buildRoleAdditionalText(prefs: TuiLikePreferences): string {
       '',
       '## Tool priority (set via /like — HIGHEST PRIORITY)',
       prefs.toolPriority === 'skill'
-        ? 'When executing tasks, prefer the Skill tool first. If no skill matches, use MCP tools. Only fall back to built-in tools last.'
-        : 'When executing tasks, prefer MCP tools first. If no MCP tool matches, use the Skill tool. Only fall back to built-in tools last.',
+        ? 'For every user request, first analyze the intent, then check all installed skills and try to solve the problem with a matching one. Only when no installed skill fits should you fall back to MCP tools or decide on your own how to solve it.'
+        : 'For every user request, first analyze the intent, then check all available MCP tools and try to solve the problem with one. Only when no MCP tool fits should you fall back to the Skill tool or decide on your own how to solve it.',
     );
   }
   lines.push('', t('like.priority'));

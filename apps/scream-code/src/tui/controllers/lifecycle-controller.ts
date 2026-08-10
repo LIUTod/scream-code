@@ -437,7 +437,9 @@ export class LifecycleController {
             new StatusBarPaneComponent({
               mode: 'idle',
               label: t(tip.i18nKey),
-              labelColor: state.theme.colors.textDim,
+              // Fixed light grey, deliberately theme-independent: the tip
+              // carousel reads as a quiet cue in both dark and light themes.
+              labelColor: '#999999',
             }),
           );
           this.startTipRotation();
