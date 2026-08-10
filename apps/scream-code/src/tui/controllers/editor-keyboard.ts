@@ -1,4 +1,4 @@
-import type { Session } from '@scream-code/scream-code-sdk';
+import type { Session, ScreamHarness, ThinkingEffort } from '@scream-code/scream-code-sdk';
 
 import { t } from '@scream-code/config';
 
@@ -21,11 +21,15 @@ import { isBusy, isStreaming } from '../utils/app-state';
 import type { ImageAttachmentStore } from '../utils/image-attachment-store';
 import type { AppState, PendingExit, PlanModeState, QueuedMessage } from '../types';
 import type { TUIState } from '../tui-state';
+import { changeThinkingLevel, getModelCycleLevel } from '../commands/config';
+import type { AuthFlowController } from './auth-flow';
 
 export interface EditorKeyboardHost {
   state: TUIState;
   session: Session | undefined;
   cancelInFlight: (() => void) | undefined;
+  readonly harness: ScreamHarness;
+  readonly authFlow: AuthFlowController;
 
   setAppState(patch: Partial<AppState>): void;
   showStatus(msg: string, color?: string): void;
@@ -187,6 +191,20 @@ export class EditorKeyboardController {
       const next: PlanModeState =
         current === 'off' ? 'plan' : current === 'plan' ? 'fusionplan' : 'off';
       host.handlePlanModeStateChange(next);
+    };
+
+    // Empty-buffer Tab cycles the thinking effort by one level. The editor's
+    // handleTabCompletion hands off here only when the buffer is empty; with
+    // any content Tab still triggers autocomplete (unchanged).
+    editor.onEmptyTab = () => {
+      if (host.session === undefined) return;
+      if (isBusy(host.state.appState)) return;
+      const alias = host.state.appState.model;
+      if (alias.trim().length === 0) return;
+      const current = host.state.appState.thinkingLevel;
+      const next = getModelCycleLevel(host.state.appState.availableModels, alias, current);
+      if (next === current) return;
+      void changeThinkingLevel(host, alias, next).catch(() => {});
     };
 
     editor.onOpenExternalEditor = () => {

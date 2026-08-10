@@ -1,8 +1,8 @@
-import type { PermissionMode, Session, ThinkingEffort } from '@scream-code/scream-code-sdk';
+import type { PermissionMode, Session, ScreamHarness, ThinkingEffort, ModelAlias } from '@scream-code/scream-code-sdk';
 import { t } from '@scream-code/config';
 
 import { EditorSelectorComponent } from '../components/dialogs/editor-selector';
-import { ModelSelectorComponent } from '../components/dialogs/model-selector';
+import { ModelSelectorComponent, getThinkingLevels } from '../components/dialogs/model-selector';
 import { PermissionSelectorComponent } from '../components/dialogs/permission-selector';
 import { SettingsSelectorComponent, type SettingsSelection } from '../components/dialogs/settings-selector';
 import { showSubagentModelBinder } from '../components/dialogs/subagent-model-binder';
@@ -17,8 +17,10 @@ import { isTheme } from '../theme/index';
 import { formatErrorMessage } from '../utils/event-payload';
 import { showUsage } from './info';
 import { refreshProviderBalance } from '../api-balance';
-import type { PlanModeState } from '../types';
+import type { AppState, PlanModeState } from '../types';
 import type { SlashCommandHost } from './dispatch';
+import type { AuthFlowController } from '../controllers/auth-flow';
+import type { TUIState } from '../tui-state';
 
 /**
  * Storm Breaker guard for model switches. Returns the (currentTokens,
@@ -542,7 +544,39 @@ export function showModelPicker(host: SlashCommandHost, selectedValue: string = 
  * model, the running session is updated too; otherwise only the default is
  * persisted.
  */
-async function changeThinkingLevel(host: SlashCommandHost, alias: string, level: ThinkingEffort): Promise<void> {
+/** Cycle the thinking effort for a model to the next supported level.
+ *  Returns the next level (wrapping around to the first when at the end).
+ *  Uses the model's declared thinkingLevels; falls back to the full set
+ *  when the model is not found in the catalog. */
+export function getModelCycleLevel(
+  models: Record<string, ModelAlias>,
+  alias: string,
+  current: ThinkingEffort,
+): ThinkingEffort {
+  const model = models[alias];
+  // Use getThinkingLevels so models that don't support thinking return
+  // ['off'] (single level -> next===current -> no-op), and the fallback
+  // set matches DEFAULT_THINKING_LEVELS exactly.
+  const levels = model ? getThinkingLevels(model) : (['off', 'low', 'medium', 'high', 'max'] as const);
+  const idx = levels.indexOf(current);
+  const nextIdx = idx < 0 ? 0 : (idx + 1) % levels.length;
+  return levels[nextIdx] ?? 'off';
+}
+
+/** Minimal host interface for {@link changeThinkingLevel}. Both
+ *  {@link SlashCommandHost} and {@link EditorKeyboardHost} satisfy it. */
+export interface ThinkingLevelHost {
+  state: TUIState;
+  session: Session | undefined;
+  readonly harness: ScreamHarness;
+  readonly authFlow: AuthFlowController;
+  setAppState(patch: Partial<AppState>): void;
+  showError(msg: string): void;
+  showStatus(msg: string, color?: string): void;
+}
+
+/** @public exported for reuse by the editor's empty-Tab thinking cycle. */
+export async function changeThinkingLevel(host: ThinkingLevelHost, alias: string, level: ThinkingEffort): Promise<void> {
   if (isBusy(host.state.appState)) {
     host.showError('Cannot change thinking while streaming — press Esc or Ctrl-C first.');
     return;
@@ -583,7 +617,7 @@ async function changeThinkingLevel(host: SlashCommandHost, alias: string, level:
   host.showStatus(status, host.state.theme.colors.success);
 }
 
-async function persistThinkingDefault(host: SlashCommandHost, alias: string, level: ThinkingEffort): Promise<boolean> {
+async function persistThinkingDefault(host: ThinkingLevelHost, alias: string, level: ThinkingEffort): Promise<boolean> {
   const config = await host.harness.getConfig({ reload: true });
   const effectiveThinking = level !== 'off';
   const existingEffort = config.thinking?.effort;

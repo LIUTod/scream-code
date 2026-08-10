@@ -89,7 +89,7 @@ function thinkingAvailability(model: ModelAlias): ThinkingAvailability {
   return 'unsupported';
 }
 
-function getThinkingLevels(model: ModelAlias): readonly ThinkingEffort[] {
+export function getThinkingLevels(model: ModelAlias): readonly ThinkingEffort[] {
   const availability = thinkingAvailability(model);
   if (availability === 'unsupported') return ['off'];
   const base = model.thinkingLevels ?? DEFAULT_THINKING_LEVELS;
