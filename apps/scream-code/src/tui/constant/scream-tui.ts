@@ -14,6 +14,32 @@ export const EXIT_CONFIRM_WINDOW_MS = 1500;
 /** Partner model-provider page opened by Ctrl+F while the chat is empty. */
 export const EMPTY_SESSION_HINT_URL = 'https://opencode.ai/go?ref=75NKVRZQCY';
 
+/** Tips shown in rotation above the editor when the chat is empty.
+ *  `isAd` marks the partner tip - only it responds to Ctrl+F. */
+export interface SessionTip {
+  readonly i18nKey: string;
+  readonly isAd: boolean;
+}
+
+export const SESSION_TIPS: readonly SessionTip[] = [
+  { i18nKey: 'editor.tip_ad', isAd: true },
+  { i18nKey: 'editor.tip_1', isAd: false },
+  { i18nKey: 'editor.tip_2', isAd: false },
+  { i18nKey: 'editor.tip_3', isAd: false },
+  { i18nKey: 'editor.tip_4', isAd: false },
+  { i18nKey: 'editor.tip_5', isAd: false },
+  { i18nKey: 'editor.tip_6', isAd: false },
+  { i18nKey: 'editor.tip_7', isAd: false },
+  { i18nKey: 'editor.tip_8', isAd: false },
+  { i18nKey: 'editor.tip_9', isAd: false },
+  { i18nKey: 'editor.tip_10', isAd: false },
+  { i18nKey: 'editor.tip_11', isAd: false },
+  { i18nKey: 'editor.tip_12', isAd: false },
+];
+
+/** Interval for random tip rotation (ms). */
+export const TIP_ROTATION_INTERVAL_MS = 6000;
+
 export function isManagedUsageProvider(
   providerKey: string | undefined,
 ): providerKey is typeof DEFAULT_OAUTH_PROVIDER_NAME {

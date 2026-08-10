@@ -22,7 +22,9 @@ import type { ImageAttachmentStore } from '../utils/image-attachment-store';
 import type { AppState, PendingExit, PlanModeState, QueuedMessage } from '../types';
 import type { TUIState } from '../tui-state';
 import { changeThinkingLevel, getModelCycleLevel } from '../commands/config';
+import { SESSION_TIPS } from '../constant/scream-tui';
 import type { AuthFlowController } from './auth-flow';
+import type { LifecycleController } from './lifecycle-controller';
 
 export interface EditorKeyboardHost {
   state: TUIState;
@@ -30,6 +32,7 @@ export interface EditorKeyboardHost {
   cancelInFlight: (() => void) | undefined;
   readonly harness: ScreamHarness;
   readonly authFlow: AuthFlowController;
+  readonly lifecycleController: LifecycleController;
 
   setAppState(patch: Partial<AppState>): void;
   showStatus(msg: string, color?: string): void;
@@ -125,6 +128,9 @@ export class EditorKeyboardController {
     editor.onCtrlF = () => {
       if (host.state.transcriptEntries.length > 0) return false;
       if (isEmptySessionHintDismissed()) return false;
+      // Only the ad tip responds to Ctrl+F; other tips fall through.
+      const isAd = SESSION_TIPS[host.lifecycleController.currentTipIdx]?.isAd ?? false;
+      if (!isAd) return false;
       openUrl(EMPTY_SESSION_HINT_URL);
       return true;
     };

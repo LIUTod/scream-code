@@ -3,6 +3,7 @@ import { t } from '@scream-code/config';
 import { Container, ScrollView, VStack, type Component } from '@liutod-scream/pi-tui';
 import { GutterContainer } from '../components/chrome/gutter-container';
 import { isEmptySessionHintDismissed } from '../utils/ui-preferences';
+import { SESSION_TIPS, TIP_ROTATION_INTERVAL_MS } from '../constant/scream-tui';
 import { StatusBarPaneComponent } from '../components/panes/status-bar-pane';
 import { CHROME_GUTTER } from '../constant/rendering';
 import type { AuthFlowController } from './auth-flow';
@@ -68,6 +69,8 @@ export class LifecycleController {
   /** The active status-bar loader (PulseWaveLoader or MoonLoader). Owned by
    * this controller; stopped before replacement to avoid leaking timers. */
   private statusBarLoader: { stop(): void } | undefined;
+  private tipRotationTimer: ReturnType<typeof setInterval> | undefined;
+  private currentTipIndex = Math.floor(Math.random() * SESSION_TIPS.length);
 
   private static readonly MEMORY_IDLE_MS = 15 * 60 * 1000; // 15 minutes
   private static readonly MEMORY_COUNTDOWN_MS = 15 * 1000; // 15 seconds
@@ -393,6 +396,7 @@ export class LifecycleController {
     // Tear down the previous loader's interval before replacing it.
     this.statusBarLoader?.stop();
     this.statusBarLoader = undefined;
+    this.stopTipRotation();
 
     switch (mode) {
       case 'waiting':
@@ -428,13 +432,15 @@ export class LifecycleController {
           && !isEmptySessionHintDismissed()
         ) {
           // Quiet interactive cue: dimmed label, lighter than body text.
+          const tip = SESSION_TIPS[this.currentTipIndex] ?? SESSION_TIPS[0]!;
           state.statusBarContainer.addChild(
             new StatusBarPaneComponent({
               mode: 'idle',
-              label: t('editor.empty_session_hint'),
+              label: t(tip.i18nKey),
               labelColor: state.theme.colors.textDim,
             }),
           );
+          this.startTipRotation();
         }
         break;
     }
@@ -447,6 +453,34 @@ export class LifecycleController {
   forceUpdateStatusBar(): void {
     this.lastActivityMode = undefined;
     this.updateActivityPane();
+  }
+
+  /** Current tip index (for Ctrl+F to check if the visible tip is the ad). */
+  get currentTipIdx(): number {
+    return this.currentTipIndex;
+  }
+
+  /** Start the random tip rotation timer. Picks a random tip different
+   *  from the current one and refreshes the status bar. */
+  private startTipRotation(): void {
+    if (this.tipRotationTimer !== undefined) return;
+    this.tipRotationTimer = setInterval(() => {
+      if (SESSION_TIPS.length <= 1) return;
+      let next: number;
+      do {
+        next = Math.floor(Math.random() * SESSION_TIPS.length);
+      } while (next === this.currentTipIndex);
+      this.currentTipIndex = next;
+      this.lastActivityMode = undefined;
+      this.updateActivityPane();
+    }, TIP_ROTATION_INTERVAL_MS);
+  }
+
+  private stopTipRotation(): void {
+    if (this.tipRotationTimer !== undefined) {
+      clearInterval(this.tipRotationTimer);
+      this.tipRotationTimer = undefined;
+    }
   }
 
   private resolveActivityPaneMode(): EffectiveActivityPaneMode {
