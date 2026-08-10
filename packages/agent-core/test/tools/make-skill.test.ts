@@ -41,10 +41,12 @@ function validPlanJson(): string {
   return JSON.stringify({
     name: 'react-form-validate',
     description: 'Use zod and react-hook-form to build form validation.',
+    whenToUse: 'When the user needs form validation with react-hook-form or zod.',
     content:
       '---\n' +
       'name: react-form-validate\n' +
       'description: Use zod and react-hook-form to build form validation.\n' +
+      'when-to-use: When the user needs form validation with react-hook-form or zod.\n' +
       'type: inline\n' +
       '---\n' +
       '\n' +
@@ -200,6 +202,45 @@ describe('MakeSkillPlanTool', () => {
     });
 
     expect(result.isError).toBe(true);
+  });
+
+  it('rejects a plan whose content frontmatter lacks when-to-use', async () => {
+    const agent = {
+      context: { history: [makeContextMessage('user', 'Hi')] },
+      config: { provider: {} as unknown as Parameters<Agent['generate']>[0] },
+      generate: vi.fn().mockResolvedValue({
+        message: {
+          content: JSON.stringify({
+            name: 'missing-when-to-use',
+            description: 'A skill without trigger guidance.',
+            whenToUse: 'Should be used for X.',
+            content:
+              '---\n' +
+              'name: missing-when-to-use\n' +
+              'description: A skill without trigger guidance.\n' +
+              'type: inline\n' +
+              '---\n' +
+              '\n' +
+              '# Missing\n',
+            files: [],
+          }),
+        },
+      }),
+    } as unknown as Agent;
+
+    const tool = new MakeSkillPlanTool(agent);
+    const result = await runTool(tool, {
+      type: 'workflow',
+      nameHint: '',
+      purpose: '',
+      focus: '',
+    });
+
+    // The plan JSON has whenToUse, but the SKILL.md content omits the
+    // when-to-use frontmatter — validation must catch that (it is what
+    // actually powers the listing's "When to use" line).
+    expect(result.isError).toBe(true);
+    expect(String(result.output)).toContain('when-to-use');
   });
 });
 

@@ -31,6 +31,7 @@ export type MakeSkillPlanInput = z.infer<typeof MakeSkillPlanInputSchema>;
 interface SkillPlan {
   readonly name: string;
   readonly description: string;
+  readonly whenToUse: string;
   readonly content: string;
   readonly files: readonly { readonly path: string; readonly content: string }[];
 }
@@ -50,6 +51,7 @@ Analyze the conversation transcript and the user's explicit guidance, then produ
 The package must contain:
 - name: kebab-case skill name. Prefer the user's nameHint if it is valid kebab-case; otherwise derive a concise name from the purpose.
 - description: one sentence describing when to use this skill.
+- when-to-use: **required** — 1-2 sentences describing the specific situations/trigger conditions that should make the agent use this skill (e.g. "when the user asks to convert a document to PDF", "when debugging a vitest snapshot failure"). This drives the skill listing's "When to use" line, which is how the model decides to invoke the skill. Never leave it empty.
 - content: the complete Markdown body of SKILL.md, following the MANDATORY structure below.
 - files: optional supporting files (e.g. scripts, data files) relative to the skill directory. Empty array if none.
 
@@ -61,6 +63,7 @@ Every generated skill MUST follow this exact section structure. Do not omit any 
 ---
 name: <kebab-case-name>
 description: <one-sentence-purpose>
+when-to-use: <specific trigger situations for this skill>
 ---
 
 # <Title>
@@ -224,6 +227,7 @@ function parsePlanJson(rawText: string): SkillPlan {
     .object({
       name: z.string(),
       description: z.string(),
+      whenToUse: z.string(),
       content: z.string(),
       files: z
         .array(
@@ -264,8 +268,16 @@ function validateSkillPlan(plan: SkillPlan, nameHint: string): void {
     }
   }
 
+  if (plan.whenToUse.trim().length === 0) {
+    throw new ScreamError(
+      ErrorCodes.REQUEST_INVALID,
+      'Generated skill plan is missing the required "whenToUse" field. Describe the specific situations that should trigger this skill (it powers the skill listing\'s "When to use" line).',
+    );
+  }
+
+  let parsedSkill;
   try {
-    parseSkillText({
+    parsedSkill = parseSkillText({
       skillMdPath: `/builtin/skills/${plan.name}.md`,
       skillDirName: plan.name,
       source: 'user',
@@ -275,6 +287,17 @@ function validateSkillPlan(plan: SkillPlan, nameHint: string): void {
     throw new ScreamError(
       ErrorCodes.REQUEST_INVALID,
       `Generated SKILL.md is not valid: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+
+  // The installed SKILL.md's own frontmatter must carry when-to-use (the plan
+  // JSON field above is only an authoring hint; what actually powers the
+  // listing's "When to use" line is the parsed content frontmatter).
+  const contentWhenToUse = parsedSkill.metadata.whenToUse;
+  if (typeof contentWhenToUse !== 'string' || contentWhenToUse.trim().length === 0) {
+    throw new ScreamError(
+      ErrorCodes.REQUEST_INVALID,
+      'Generated SKILL.md is missing the required "when-to-use" frontmatter field. Add 1-2 sentences describing the specific situations that should trigger this skill (it powers the skill listing\'s "When to use" line).',
     );
   }
 }

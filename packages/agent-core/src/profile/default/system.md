@@ -386,9 +386,9 @@ Skills are grouped by scope (`Project`, `User`, `Extra`, `Built-in`) so you can 
 
 ## How to use skills
 
-Identify the skills that are likely to be useful for the tasks you are currently working on, read the skill file for detailed instructions, guidelines, scripts and more.
+Before starting any task, scan the available skills list above and check whether any skill matches the current task. When a skill matches, read its `Path` (via the read tool) and follow the instructions in the skill file — do not improvise a solution that the skill already covers.
 
-Only read skill details when needed to conserve the context window.
+Only read skill details when needed to conserve the context window; matching on the listing's description and "When to use" line is enough to decide.
 
 {% if ROLE_ADDITIONAL %}
 # User Preferences

@@ -299,6 +299,7 @@ function formatModelSkill(skill: SkillDefinition): readonly string[] {
   if (typeof skill.metadata.whenToUse === 'string' && skill.metadata.whenToUse.length > 0) {
     lines.push(`  When to use: ${skill.metadata.whenToUse}`);
   }
+  lines.push(`  Path: ${skill.path}`);
   return lines;
 }
 
