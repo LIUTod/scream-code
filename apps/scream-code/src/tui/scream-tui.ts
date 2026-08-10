@@ -650,6 +650,9 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
       this.state.editor.thinking = patch.thinkingLevel !== 'off';
       this.state.editor.thinkingLevel = patch.thinkingLevel ?? 'off';
     }
+    if ('like' in patch) {
+      this.state.editor.toolPriority = patch.like?.toolPriority;
+    }
     if ('permissionMode' in patch) {
       this.state.editor.permissionMode = patch.permissionMode ?? 'manual';
     }

@@ -11,6 +11,7 @@ import {
   type TuiLikePreferences,
 } from '../config';
 import { TextInputDialogComponent } from '../components/dialogs/text-input-dialog';
+import { ChoicePickerComponent } from '../components/dialogs/choice-picker';
 import { getDataDir } from '#/utils/paths';
 
 function promptTextInput(
@@ -56,14 +57,24 @@ export function buildRoleAdditionalText(prefs: TuiLikePreferences): string {
   if (prefs.other !== undefined && prefs.other.trim().length > 0) {
     items.push(`- Other: ${prefs.other.trim()}`);
   }
-  const doNot = prefs.doNot?.trim();
-  if (items.length === 0 && (doNot === undefined || doNot.length === 0)) return '';
+  const doNot = prefs?.doNot?.trim();
+  const hasToolPriority = prefs?.toolPriority !== undefined && prefs.toolPriority !== 'default';
+  if (items.length === 0 && (doNot === undefined || doNot.length === 0) && !hasToolPriority) return '';
   lines.push('', ...items);
   if (doNot !== undefined && doNot.length > 0) {
     lines.push(
       '',
       '## Do NOT (explicit prohibitions — NEVER do these)',
       doNot,
+    );
+  }
+  if (hasToolPriority) {
+    lines.push(
+      '',
+      '## Tool priority (set via /like — HIGHEST PRIORITY)',
+      prefs.toolPriority === 'skill'
+        ? 'When executing tasks, prefer the Skill tool first. If no skill matches, use MCP tools. Only fall back to built-in tools last.'
+        : 'When executing tasks, prefer MCP tools first. If no MCP tool matches, use the Skill tool. Only fall back to built-in tools last.',
     );
   }
   lines.push('', t('like.priority'));
@@ -157,13 +168,51 @@ export async function handleLikeCommand(host: SlashCommandHost): Promise<void> {
     return;
   }
 
+  // Step 5: preferred tool dispatch priority (skill-first / mcp-first / default).
+  // Reuses the choice picker; the selection is persisted with the other prefs.
+  const toolPriority = await promptToolPriority(host, current.toolPriority);
+  if (toolPriority === undefined) {
+    host.showStatus(t('like.cancelled'), host.state.theme.colors.textDim);
+    return;
+  }
+
   const prefs: TuiLikePreferences = {
     nickname: nickname.trim().length > 0 ? nickname.trim() : undefined,
     tone: tone.trim().length > 0 ? tone.trim() : undefined,
     other: other.trim().length > 0 ? other.trim() : undefined,
     doNot: doNot.trim().length > 0 ? doNot.trim() : undefined,
+    toolPriority,
   };
 
   await persistLikePreferences(host, prefs);
   host.showStatus(t('like.saved'), host.state.theme.colors.success);
+}
+
+function promptToolPriority(
+  host: SlashCommandHost,
+  current: TuiLikePreferences['toolPriority'],
+): Promise<'default' | 'skill' | 'mcp' | undefined> {
+  const { promise, resolve } = Promise.withResolvers<'default' | 'skill' | 'mcp' | undefined>();
+  const options = [
+    { value: 'default', label: t('like.tool_priority_default') },
+    { value: 'skill', label: t('like.tool_priority_skill') },
+    { value: 'mcp', label: t('like.tool_priority_mcp') },
+  ];
+  const picker = new ChoicePickerComponent({
+    title: t('like.tool_priority_title'),
+    hint: t('like.tool_priority_hint'),
+    options,
+    currentValue: current ?? 'default',
+    colors: host.state.theme.colors,
+    onSelect: (value) => {
+      host.restoreEditor();
+      resolve(value as 'default' | 'skill' | 'mcp');
+    },
+    onCancel: () => {
+      host.restoreEditor();
+      resolve(undefined);
+    },
+  });
+  host.mountEditorReplacement(picker);
+  return promise;
 }

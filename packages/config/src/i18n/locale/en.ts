@@ -370,6 +370,11 @@ export const en: Record<string, string> = {
   'like.do_not': 'User Prohibitions',
   'like.do_not_hint': 'Things the user explicitly does NOT want done. The agent must NEVER do these.',
   'like.do_not_example': 'e.g. Never modify user config files without asking',
+  'like.tool_priority_title': 'Choose tool dispatch preference',
+  'like.tool_priority_hint': 'Which tools the agent should prefer when executing tasks (a badge shows in the input box corner)',
+  'like.tool_priority_default': 'Default (no preference)',
+  'like.tool_priority_skill': 'Skill first (Skill > MCP > built-in)',
+  'like.tool_priority_mcp': 'MCP first (MCP > Skill > built-in)',
   'like.cancelled': '/like setup cancelled',
   'like.saved': 'Preferences saved (takes effect in next session)',
 

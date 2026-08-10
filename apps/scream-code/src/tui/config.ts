@@ -30,6 +30,8 @@ export const TuiLikePreferencesSchema = z.object({
   other: z.string().optional(),
   /** Explicit prohibitions: things the user does NOT want done. */
   doNot: z.string().optional(),
+  /** Preferred tool dispatch priority: skill-first, mcp-first, or default. */
+  toolPriority: z.enum(['default', 'skill', 'mcp']).optional(),
 });
 
 export type TuiLikePreferences = z.infer<typeof TuiLikePreferencesSchema>;
@@ -50,7 +52,17 @@ export const TuiConfigFileSchema = z.object({
       notification_condition: NotificationConditionSchema.optional(),
     })
     .optional(),
-  like: TuiLikePreferencesSchema.optional(),
+  // TOML file shape: like block uses snake_case keys (tool_priority).
+  // The runtime TuiLikePreferences (camelCase) is produced by normalizeTuiConfig.
+  like: z
+    .object({
+      nickname: z.string().optional(),
+      tone: z.string().optional(),
+      other: z.string().optional(),
+      doNot: z.string().optional(),
+      tool_priority: z.enum(['default', 'skill', 'mcp']).optional(),
+    })
+    .optional(),
   fusionPlan: z
     .object({
       timeoutSeconds: z.number().int().min(30).max(3600).optional(),
@@ -165,6 +177,7 @@ export function normalizeTuiConfig(config: TuiConfigFileShape): TuiConfig {
       tone: normalizeOptionalString(like.tone),
       other: normalizeOptionalString(like.other),
       doNot: normalizeOptionalString(like.doNot),
+      toolPriority: like.tool_priority === 'default' ? undefined : like.tool_priority,
     },
     fusionPlan: {
       timeoutSeconds: fusionPlan.timeoutSeconds ?? DEFAULT_TUI_CONFIG.fusionPlan.timeoutSeconds,
@@ -219,6 +232,7 @@ nickname = "${nickname}"
 tone = "${tone}"
 other = "${other}"
 doNot = "${doNot}"
+tool_priority = "${config.like.toolPriority ?? 'default'}" # "default" | "skill" | "mcp"
 
 [fusionPlan]
 timeoutSeconds = ${config.fusionPlan.timeoutSeconds} # 30..3600, default 600

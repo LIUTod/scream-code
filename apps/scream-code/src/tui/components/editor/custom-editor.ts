@@ -225,6 +225,9 @@ export class CustomEditor extends Editor {
   thinking = false;
   /** Current thinking effort level (e.g. low, medium, high). Used to annotate the think label. */
   thinkingLevel: ThinkingEffort = 'off';
+  /** Preferred tool dispatch priority ('skill' | 'mcp' | 'default' | undefined).
+   *  When set to skill/mcp, a "First" badge is shown before the think badge. */
+  toolPriority: 'default' | 'skill' | 'mcp' | undefined;
   /** Current permission mode — always shown as a badge at the top-left of the input box border. */
   permissionMode: PermissionMode = 'manual';
   /** Current border colour hex — kept in sync with borderColor by the host. */
@@ -317,6 +320,7 @@ export class CustomEditor extends Editor {
       mode: this.permissionMode,
       thinking: this.thinking,
       thinkingLevel: this.thinkingLevel,
+      toolPriority: this.toolPriority,
       paint: this.borderColor ?? ((s: string) => s),
       borderHex: this.borderHex,
     });
@@ -583,6 +587,7 @@ interface BorderBadgeOptions {
   mode: PermissionMode;
   thinking: boolean;
   thinkingLevel: ThinkingEffort;
+  toolPriority: 'default' | 'skill' | 'mcp' | undefined;
   paint: (s: string) => string;
   borderHex: string;
 }
@@ -618,9 +623,15 @@ function injectBorderBadges(lines: string[], width: number, opts: BorderBadgeOpt
     left =
       paint('──') + (opts.borderHex ? chalk.hex(opts.borderHex).bold(badgeText) : paint(badgeText));
   }
+  // Right-side badges, built rightmost-first: think badge sits at the far
+  // right, the First (tool priority) badge just left of it.
   if (opts.thinking && width >= THINK_LABEL_MIN_WIDTH) {
     const label = opts.thinkingLevel !== 'off' ? ` Think ${opts.thinkingLevel} ` : ' Think ';
-    right = makeBadge(label, opts.borderHex) + paint('─');
+    right = makeBadge(label, opts.borderHex) + right;
+  }
+  if (opts.toolPriority === 'skill' || opts.toolPriority === 'mcp') {
+    const label = ` First ${opts.toolPriority} `;
+    right = makeBadge(label, opts.borderHex) + paint('─') + right;
   }
 
   const fill = width - visibleWidth(left) - visibleWidth(right);

@@ -371,6 +371,11 @@ export const zh: Record<string, string> = {
   'like.do_not': '用户禁止',
   'like.do_not_hint': '用户明确不让做的事。Agent 绝不能做这些。',
   'like.do_not_example': '例如：未经询问绝不修改用户的配置文件',
+  'like.tool_priority_title': '选择工具调用偏好',
+  'like.tool_priority_hint': '设置 Agent 执行任务时优先调用哪类工具（选择后徽章会显示在输入框右上角）',
+  'like.tool_priority_default': '默认（无优先）',
+  'like.tool_priority_skill': 'Skill 优先（Skill > MCP > 内置工具）',
+  'like.tool_priority_mcp': 'MCP 优先（MCP > Skill > 内置工具）',
   'like.cancelled': '已取消 /like 设置',
   'like.saved': '偏好已保存（下次新会话生效）',
 
