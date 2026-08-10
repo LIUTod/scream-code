@@ -559,7 +559,7 @@ describe('handleSkillCommand', () => {
     const picker = getLastMountedPicker(host);
     const out = rendered(picker);
     expect(out).toContain('── 可安装的 Skill 包 ──');
-    expect(out).toContain('GSAP 动画技能包');
+    expect(out).toContain('Contract Review Pro 合同审查');
   });
 
   it('ignores section headers on Enter and refreshes the panel', async () => {
