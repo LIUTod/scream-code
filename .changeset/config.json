@@ -1,19 +1,24 @@
 {
   "changelog": ["@changesets/changelog-github", { "repo": "LIUTod/scream-code", "disableThanks": true }],
   "commit": false,
-  "fixed": [],
+  "fixed": [
+    [
+      "@scream-code/agent-core",
+      "@scream-code/config",
+      "@scream-code/evals",
+      "@scream-code/jian",
+      "@scream-code/knowledge",
+      "@scream-code/ltod",
+      "@scream-code/memory",
+      "@scream-code/scream-code-sdk",
+      "scream-code"
+    ]
+  ],
   "linked": [],
   "access": "public",
   "baseBranch": "main",
   "updateInternalDependencies": "patch",
-  "ignore": [
-    "@scream-code/agent-core",
-    "@scream-code/config",
-    "@scream-code/jian",
-    "@scream-code/ltod",
-    "@scream-code/memory",
-    "@scream-code/scream-code-sdk"
-  ],
+  "ignore": [],
   "snapshot": {
     "useCalculatedVersion": true,
     "prereleaseTemplate": "{tag}-{commit}"

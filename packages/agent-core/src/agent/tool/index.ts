@@ -30,6 +30,7 @@ import type {
 } from './types';
 
 export * from './types';
+export { defineUserTool, type DefineUserToolInput } from './define-tool';
 
 function cloneTodos(todos: readonly TodoItem[]): TodoItem[] {
   return todos.map((todo) => ({
