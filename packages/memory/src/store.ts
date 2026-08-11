@@ -898,6 +898,11 @@ export class MemoryMemoStore {
       reenqueue();
     } finally {
       this.embeddingFlushing = false;
+      // Clear the timer reference so scheduleEmbedding's ensureReady path
+      // (which checks `embeddingTimer === undefined`) can arm a new flush
+      // after a late engine load. Without this, the first flush leaves the
+      // timer stale and subsequent late-ready writes never trigger a flush.
+      this.embeddingTimer = undefined;
     }
   }
 
