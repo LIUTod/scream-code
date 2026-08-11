@@ -62,8 +62,11 @@ describe('calculateRateLimitBackoffMs', () => {
     }
   });
 
-  it('falls back to the conservative QUOTA backoff for UNKNOWN', () => {
-    expect(calculateRateLimitBackoffMs('UNKNOWN')).toBe(30 * 60 * 1000);
+  it('falls back to a short 20s backoff for UNKNOWN (avoids multi-hour hang)', () => {
+    // UNKNOWN is a classified 429 with no recognized reason; it is not
+    // evidence of quota exhaustion, so a 30min backoff (30min x ~9 retries)
+    // would hang a turn for hours. Match SERVER_ERROR's 20s instead.
+    expect(calculateRateLimitBackoffMs('UNKNOWN')).toBe(20 * 1000);
   });
 });
 

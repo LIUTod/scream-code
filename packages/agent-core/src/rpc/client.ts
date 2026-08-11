@@ -36,14 +36,19 @@ export function createRPC<Left extends Record<string, any>, Right extends Record
   const right = createControlledPromise<PromisableMethods<Right>>();
 
   function simulateNetwork<T>(data: T): Promise<T> {
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       setTimeout(() => {
         // NOTE: emitEvent fires through this path. If any event carries
         // non-JSON-serializable values (BigInt, cycles, functions),
-        // JSON.stringify throws, the RPC rejects, and the event is lost.
-        // All Event members must be JSON-safe by construction.
-        const serialized = JSON.stringify(data);
-        resolve(serialized === undefined ? (undefined as T) : JSON.parse(serialized));
+        // JSON.stringify throws. Catch it and reject the promise instead of
+        // letting the throw escape the timer callback into an uncaught
+        // exception that crashes the host.
+        try {
+          const serialized = JSON.stringify(data);
+          resolve(serialized === undefined ? (undefined as T) : JSON.parse(serialized));
+        } catch (error) {
+          reject(error);
+        }
       }, 0);
     });
   }
@@ -55,7 +60,15 @@ export function createRPC<Left extends Record<string, any>, Right extends Record
   function mapRpcFunction(fn: Function): Function {
     return async (payload: any, options?: RPCCallOptions) => {
       const signal = options?.signal;
-      const rpcPayload = await simulateNetwork(payload);
+      let rpcPayload: any;
+      try {
+        rpcPayload = await simulateNetwork(payload);
+      } catch (error) {
+        // Non-serializable inbound payload: surface as a normal rejection
+        // instead of an unhandledRejection.
+        signal?.throwIfAborted();
+        throw fromScreamErrorPayload(toScreamErrorPayload(error));
+      }
       signal?.throwIfAborted();
       let response: RpcResponse;
       try {
@@ -65,9 +78,16 @@ export function createRPC<Left extends Record<string, any>, Right extends Record
         signal?.throwIfAborted();
         response = { ok: false, error: toScreamErrorPayload(error) };
       }
-      const remoteResponse = await simulateNetwork(response);
-      if (remoteResponse.ok) return remoteResponse.value;
-      throw fromScreamErrorPayload(remoteResponse.error);
+      try {
+        const remoteResponse = await simulateNetwork(response);
+        if (remoteResponse.ok) return remoteResponse.value;
+        throw fromScreamErrorPayload(remoteResponse.error);
+      } catch (error) {
+        // simulateNetwork rejection (non-serializable response) or the
+        // remote error both land here; the caller sees a normal rejection.
+        signal?.throwIfAborted();
+        throw fromScreamErrorPayload(toScreamErrorPayload(error));
+      }
     };
   }
 

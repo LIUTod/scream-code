@@ -82,8 +82,10 @@ export function parseRateLimitReason(errorMessage: string): RateLimitReason {
 
 /**
  * Backoff in ms for a given reason. MODEL_CAPACITY gets jitter to avoid
- * thundering herd. UNKNOWN falls back to the conservative QUOTA backoff
- * — safer to wait too long than to hammer a rate-limited endpoint.
+ * thundering herd. UNKNOWN (a classified 429 with no recognized reason)
+ * uses the short 20s SERVER_ERROR backoff — a 30min x ~9 attempt hang
+ * would be far worse than a failed turn, and UNKNOWN is not evidence of
+ * quota exhaustion.
  */
 export function calculateRateLimitBackoffMs(reason: RateLimitReason): number {
   switch (reason) {
@@ -96,7 +98,11 @@ export function calculateRateLimitBackoffMs(reason: RateLimitReason): number {
     case 'SERVER_ERROR':
       return SERVER_ERROR_BACKOFF_MS;
     default:
-      return QUOTA_EXHAUSTED_BACKOFF_MS;
+      // UNKNOWN: a classified 429 with no recognized reason. Keep the retry
+      // short (20s like SERVER_ERROR) instead of the 30min quota backoff —
+      // 30min x ~9 attempts would hang a turn for hours, and UNKNOWN is not
+      // evidence of quota exhaustion.
+      return SERVER_ERROR_BACKOFF_MS;
   }
 }
 

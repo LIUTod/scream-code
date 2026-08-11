@@ -13,6 +13,17 @@ import { toInputJsonSchema } from '../../support/input-schema';
 
 const PY_DONE_MARKER = '__SCREAM_PY_DONE__';
 const BOOT_DONE_MARKER = '__SCREAM_BOOT_DONE__';
+
+/** Head/tail output cap for python tool results — mirrors the generic tool
+ * result builder (50k chars, 20k tail) so a runaway print loop cannot balloon
+ * the snapshot into memory/TUI exhaustion. */
+const MAX_OUTPUT_CHARS = 50_000;
+const TAIL_CHARS = 20_000;
+const TRUNCATION_MARKER = '[...truncated]';
+function truncateOutput(output: string): string {
+  if (output.length <= MAX_OUTPUT_CHARS) return output;
+  return `${output.slice(0, MAX_OUTPUT_CHARS - TAIL_CHARS)}\n${TRUNCATION_MARKER}\n${output.slice(-TAIL_CHARS)}`;
+}
 const DEFAULT_TIMEOUT_MS = 60_000;
 const MAX_TIMEOUT_MS = 5 * 60_000;
 const KERNEL_START_TIMEOUT_MS = 30_000;
@@ -548,7 +559,7 @@ export class PythonTool implements BuiltinTool<PythonInput> {
           this.kernel = undefined;
           return {
             isError: true,
-            output: `Python execution timed out after ${Math.round(timeoutMs / 1000)}s (kernel restarted).\n${merged}`,
+            output: `Python execution timed out after ${Math.round(timeoutMs / 1000)}s (kernel restarted).\n${truncateOutput(merged)}`,
           };
         }
         // Kernel still alive: SIGINT unwound the statement and the REPL is
@@ -565,7 +576,7 @@ export class PythonTool implements BuiltinTool<PythonInput> {
           this.kernel = undefined;
           return {
             isError: true,
-            output: `Python execution timed out after ${Math.round(timeoutMs / 1000)}s (kernel restarted).\n${merged}`,
+            output: `Python execution timed out after ${Math.round(timeoutMs / 1000)}s (kernel restarted).\n${truncateOutput(merged)}`,
           };
         }
         await this.drainStderrQuiet(proc);
@@ -586,11 +597,12 @@ export class PythonTool implements BuiltinTool<PythonInput> {
         const timedOutMerged = [merged, interruptStderr].filter((part) => part.length > 0).join('\n');
         return {
           isError: true,
-          output: `Python execution timed out after ${Math.round(timeoutMs / 1000)}s (kernel interrupted; state preserved).\n${timedOutMerged}`,
+          output: `Python execution timed out after ${Math.round(timeoutMs / 1000)}s (kernel interrupted; state preserved).\n${truncateOutput(timedOutMerged)}`,
         };
       }
       const isError = merged.includes('Traceback') || merged.toLowerCase().includes('error:');
-      return { isError, output: merged.length > 0 ? merged : '(no output)' };
+      const finalOutput = truncateOutput(merged);
+      return { isError, output: finalOutput.length > 0 ? finalOutput : '(no output)' };
     } finally {
       this.kernelBusy = false;
     }

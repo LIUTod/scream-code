@@ -73,6 +73,8 @@ export class TurnFlow {
   private steerBuffer: BufferedSteer[] = [];
   private turnId = -1;
   private currentTurnId = -1;
+  /** Turn id returned to callers of prompt()/steer()/launch(). Stays fixed for the whole run, including goal continuation turns that advance `turnId`/`currentTurnId`. */
+  private rootTurnId: number | undefined;
   private activeTurn: 'resuming' | ActiveTurn | null = null;
   private readonly currentStepByTurn = new Map<number, number>();
   private currentStep = 0;
@@ -144,6 +146,7 @@ export class TurnFlow {
     // lives in `runOneTurn`, so a goal-driven run emits a clean start/end
     // pair per continuation turn rather than one mega-turn.
     const turnId = this.allocateTurnId();
+    this.rootTurnId = turnId;
     const controller = new AbortController();
     const promise = this.turnWorker(turnId, input, origin, controller.signal);
     this.activeTurn = { controller, promise };
@@ -169,7 +172,14 @@ export class TurnFlow {
 
   cancel(turnId?: number, reason?: unknown): void {
     this.agent.records.logRecord({ type: 'turn.cancel', turnId });
-    if (turnId !== undefined && turnId !== this.currentId) {
+    // Accept the caller's root turn id OR the current continuation id:
+    // goal-driven runs advance turnId/currentTurnId every continuation turn,
+    // while prompt()/steer() hand callers the fixed root id.
+    if (
+      turnId !== undefined &&
+      turnId !== this.currentId &&
+      turnId !== this.rootTurnId
+    ) {
       return;
     }
     const cancelReason = reason ?? userCancellationReason();
@@ -331,6 +341,7 @@ export class TurnFlow {
       // steer so the model wraps up instead of starting new discretionary work.
       const budgetSnapshot = this.agent.goal.getGoal().goal;
       if (
+        turnId !== firstTurnId &&
         budgetSnapshot !== null &&
         budgetSnapshot.status === 'active' &&
         (budgetSnapshot.budget.overBudget ||

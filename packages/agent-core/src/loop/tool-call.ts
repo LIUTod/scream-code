@@ -861,7 +861,11 @@ function makeToolResult(
 }
 
 function toolResultStopsTurn(result: ExecutableToolResult): boolean {
-  return result.isError === true && result.stopTurn === true;
+  // stopTurn is declared only on the error result, but goal tools also set it
+  // on successful "marked blocked/complete" results. Accept either — the goal
+  // tools rely on a successful stopTurn to end the goal run without another
+  // model step.
+  return 'stopTurn' in result && result.stopTurn === true;
 }
 
 function makeErrorToolResult(

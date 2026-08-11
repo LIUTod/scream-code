@@ -469,7 +469,7 @@ export class Session {
       type: 'error',
       agentId: 'main',
       ...makeErrorPayload(ErrorCodes.MCP_STARTUP_FAILED, message),
-    });
+    }).catch(() => {});
   }
 
   private onMcpServerStatusChange(entry: McpServerEntry): void {
@@ -485,7 +485,7 @@ export class Session {
         toolCount: entry.toolCount,
         error: entry.error,
       },
-    });
+    }).catch(() => {});
   }
 
   private backgroundTaskTimeoutMs(): number | undefined {

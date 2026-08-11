@@ -121,6 +121,10 @@ export class ContextMemory {
     this.deferredMessages = [];
     this.lastSentFingerprints = [];
     this.agent.injection.onContextClear();
+    // History was emptied; the micro-compaction cutoff line refers to the
+    // pre-clear layout and would elide tool results in the new session's
+    // prefix once the token ratio recovers. Reset so detect() recomputes.
+    this.agent.microCompaction.reset();
     this.agent.emitStatusUpdated();
   }
 
@@ -179,6 +183,11 @@ export class ContextMemory {
         i === 0 // leading injection
       ) {
         this._history.splice(i, 1);
+        // Notify injectors: the removed message may be the very injection
+        // an injector recorded (injectedAt), so positions must be adjusted —
+        // otherwise reminders (user prefs, goal, plugin session) silently stop
+        // re-injecting until the next compaction or /clear.
+        this.agent.injection.onContextMessageRemoved(i);
       }
     }
 
@@ -186,6 +195,11 @@ export class ContextMemory {
       // Throw nothing — this is a best-effort operation.
     }
 
+    // Undo rewound the history; the micro-compaction cutoff line refers to
+    // the pre-undo layout and would silently elide tool results in the
+    // remaining (now shifted) prefix. Reset it so the next detect() recomputes
+    // from the new history. Mirrors clear()/applyCompaction().
+    this.agent.microCompaction.reset();
   }
 
   /**

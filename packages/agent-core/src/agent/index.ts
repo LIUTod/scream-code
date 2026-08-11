@@ -828,7 +828,9 @@ export class Agent {
 
   emitEvent(event: AgentEvent): void {
     if (this.records.restoring) return;
-    void this.rpc?.emitEvent?.(event);
+    // Fire-and-forget: a non-serializable event must not surface as an
+    // unhandledRejection (Node >=15 terminates on those).
+    void this.rpc?.emitEvent?.(event)?.catch(() => {});
   }
 
   emitStatusUpdated(): void {
