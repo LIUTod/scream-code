@@ -52,6 +52,22 @@
 - Prefer package-local imports. When crossing packages, import from the package's public `index.ts` or documented subpaths.
 - For Node built-ins, prefer namespace imports: `import * as fs from 'node:fs/promises'`, `import * as path from 'node:path'`.
 
+### agent-core 包内依赖方向
+
+`packages/agent-core/src` 的顶层目录分三层（依赖只允许向下）：
+
+- **支持层**（任何层可依赖，不得依赖上层）：`utils/` `errors/` `flags/` `logging/` `config/` `profile/` `lsp/` `markit/`
+- **编排层**（依赖支持层与工具层公开契约）：`agent/` `session/` `rpc/` `loop/`
+- **工具层**（依赖支持层，与 `loop/`、`agent/tool` 的公开契约）：`tools/` `mcp/` `plugin/` `skill/`
+
+规则：
+
+- **允许** `import type` 跨层（类型编译后擦除，无运行时耦合）——工具层可 `import type` 编排层类型（`GoalSnapshot`、`PlanData`、`CronManager`、`ContextMessage` 等），但不得 `import type` 编排层**类实例的私有实现细节**。
+- **禁止** `tools/` 等工具层**值导入**编排层运行时实现（`agent/goal`、`agent/context`、`agent/plan`、`agent/cron` 的类实例与常量）。工具要访问 agent 状态**优先走执行上下文（`ToolContext`）**；既有代码中工具通过构造注入 `Agent`（约 18 处）是历史模式，新代码应避免直接从 agent 内部取状态；工具需要的常量应定义在工具本地，或由编排层提供显式契约导出。
+- `agent/` 可以值导入 `tools/`（既有模式，含 `tools/cron/*`、`tools/support/*` 等深层路径；新代码优先走公开入口）。
+- **既有例外（不得新增）**：`agent/cron/manager.ts` 值导入 `tools/cron/` 的 clock/scheduler/cron-fire-xml/persist/session-store 是历史遗留的实现复用，新代码不得复制此模式；重构时优先把共享逻辑移到支持层或 `agent/cron` 本地。
+- 新增跨层**值导入**前，先说明为何无法通过 `ToolContext` 或本地常量解决。
+
 ---
 
 ## Code Quality & Style
@@ -59,6 +75,7 @@
 ### TypeScript
 
 - Avoid `any`. If unavoidable, add a short comment explaining why.
+- Keep the codebase erasable-TypeScript compatible (Node strip-only): do **not** introduce `enum`, `namespace`/`module`, `import =`, or `export =` — constructs that need JS emit. Use string-literal unions instead of `enum`. The current codebase has zero `enum` usages; keep it that way.
 - Do **not** introduce new `ReturnType<>` usage for new code; prefer explicit type names. Existing uses (e.g., timer IDs) should migrate to named aliases when touched.
 - Avoid inline type imports such as `import('pkg').Type` or `import('./module').Type`. Use top-level imports.
 - Optional object properties: pass `undefined` directly — do not use conditional spread.
@@ -124,6 +141,8 @@ All text rendered in the TUI must be sanitized. Raw content — file contents, e
 
 Test the contract the system exposes — not the easiest internal detail to assert.
 
+- Issue-specific regression tests go under `packages/*/test/**/regressions/<issue-number>-<short-slug>.test.ts` (name includes the issue number so failures trace back to the report). General tests live next to the code they cover.
+
 - Every new test must defend one **concrete, externally observable contract**: behavior, output shape, state transition, error mapping, or a regression-prone parsing boundary. If you cannot name the contract, do not add the test.
 - No placeholder tests, tautologies, or "the code ran" assertions (`expect(true).toBe(true)`, bare `not.toThrow()`, non-empty string checks, length-grew checks, "prompt exists" checks without semantic assertion).
 - Prefer contract-level tests over implementation details. Avoid asserting internal helper wiring, field assignment, singleton identity, incidental ordering, prompt boilerplate, or passthrough option forwarding unless another component depends on that exact detail.
@@ -159,6 +178,30 @@ Test the contract the system exposes — not the easiest internal detail to asse
 ### Changesets
 
 When generating a changeset (`.changeset/*.md`), never decide on a `major` bump on your own. `major` is reserved for breaking changes — renamed or removed commands/arguments, removed public APIs, changed behavior semantics, or incompatible user configuration. When you judge a change to meet the major criteria, stop and ask the user for confirmation first; only write `major` after they explicitly agree. Otherwise default to `minor` (fall back to `patch` when the change is clearly a fix with no new surface).
+
+### Releasing
+
+**Lockstep versioning**: all 10 packages share one version; every release bumps them together. 9 packages are private (not published to npm); only `apps/scream-code` (`scream-code`) is published.
+
+- The release pipeline runs through changesets: record changes with `pnpm changeset add`, push to `main`, and the GitHub Actions workflow (`release.yml`) opens a "ci: release packages" version PR that bumps all fixed-group packages and generates their `CHANGELOG.md`. Merge the version PR, then publish manually (`pnpm publish`) — the workflow currently has no `publish` step; add one only if npm trusted publishing is configured.
+- `.changeset/config.json` defines the 9-package fixed group (`@scream-code/*` + `scream-code`) so any bump keeps them in sync. The **root `package.json` is not a workspace and changesets never touches it** — sync its `version` manually when releasing (one line; the other 9 packages are automatic).
+- Tag releases as `vX.Y.Z` (with the `v` prefix). Never edit released `CHANGELOG.md` sections.
+- **Never hand-edit the 9 packages' `package.json` versions to release** — that bypasses the lockstep group and skips CHANGELOG generation. Exceptions require an explicit user request (e.g. a hotfix bump with a follow-up changeset).
+
+### Git
+
+- **Never commit, push, or publish unless explicitly asked** (see above). When committing is asked for:
+  - Stage only files you changed in this session — explicit `git add <path>`; **never** `git add -A` / `git add .`.
+  - Run `git status` before committing and verify the staged set contains only your files.
+- Never run: `git reset --hard`, `git checkout .`, `git clean -fd`, `git stash`, `git commit --no-verify`.
+- If a rebase/merge conflict occurs, resolve only files you modified; if a conflict is in a file you did not touch, abort and ask the user.
+- Never force-push.
+
+### Dependency Safety
+
+- Treat npm dependency and lockfile changes as reviewed code. Direct external dependencies currently use caret ranges (`^x.y.z`) — keep that convention, but never upgrade a batch of deps blindly.
+- Before upgrading behavior-sensitive dependencies (network stacks, parsers, SDKs), read the target version's changelog and evaluate functional impact — do not apply blindly.
+- Lockfile changes ship with the code that caused them and are reviewed like code; never commit lockfile changes silently.
 
 ---
 

@@ -3,11 +3,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { z } from 'zod';
 
-import {
-  GOAL_BLOCKED_REMINDER_NAME,
-  GOAL_COMPLETION_REMINDER_NAME,
-  type GoalNote,
-} from '../../../agent/goal';
+import type { GoalNote } from '../../../agent/goal';
 import {
   buildGoalBlockedReasonPrompt,
   buildGoalCompletionSummaryPrompt,
@@ -17,6 +13,14 @@ import { GraderEmissionGuard } from './emission-guard';
 import type { BuiltinTool } from '../../../agent/tool';
 import type { ExecutableToolResult, ToolExecution } from '../../../loop/types';
 import { toInputJsonSchema } from '../../support/input-schema';
+
+/**
+ * Reminder names the goal tools attach to follow-up user messages.
+ * Defined locally (not in the goal engine) so `tools/` never value-imports
+ * the orchestration layer — see agent-core dependency direction rules.
+ */
+export const GOAL_COMPLETION_REMINDER_NAME = 'goal_completion_summary';
+export const GOAL_BLOCKED_REMINDER_NAME = 'goal_blocked_reason';
 
 export type GoalGraderFn = (
   objective: string,

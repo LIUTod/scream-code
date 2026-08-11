@@ -138,9 +138,6 @@ interface GoalReasonInput {
   readonly reason?: string;
 }
 
-export const GOAL_COMPLETION_REMINDER_NAME = 'goal_completion_summary';
-export const GOAL_BLOCKED_REMINDER_NAME = 'goal_blocked_reason';
-
 export class GoalMode {
   private state: GoalState | undefined;
 
