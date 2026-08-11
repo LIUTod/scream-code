@@ -782,8 +782,27 @@ export class MemoryMemoStore {
    * batch flush runs after a short quiet period. Never blocks the caller.
    */
   scheduleEmbedding(memo: MemoryMemo): void {
-    if (this.embeddingEngine === undefined || !this.embeddingEngine.available) return;
+    // Always enqueue — never drop. If the engine isn't ready yet, kick an
+    // async model load; a late-ready engine flushes the preserved queue.
     this.embeddingQueue.add(memo.id);
+    if (this.embeddingEngine === undefined) return;
+    if (!this.embeddingEngine.available) {
+      void this.embeddingEngine
+        .ensureReady()
+        .then((ready) => {
+          if (
+            ready &&
+            this.embeddingQueue.size > 0 &&
+            this.embeddingTimer === undefined
+          ) {
+            this.embeddingTimer = setTimeout(() => {
+              void this.flushEmbeddings();
+            }, 2000);
+          }
+        })
+        .catch(() => {});
+      return;
+    }
     if (this.embeddingTimer !== undefined) {
       clearTimeout(this.embeddingTimer);
     }
@@ -808,12 +827,21 @@ export class MemoryMemoStore {
     }
 
     this.embeddingFlushing = true;
+
+    // Snapshot the queue up front (so failures below can restore it) and
+    // define the re-enqueue helper OUTSIDE the try, since the outer catch
+    // must be able to restore ids on any failure path.
+    const ids = [...this.embeddingQueue];
+    this.embeddingQueue.clear();
+    const reenqueue = (): void => {
+      for (const id of ids) {
+        this.embeddingQueue.add(id);
+      }
+    };
+
     try {
       await this.init();
       if (this.db === undefined) return;
-
-      const ids = [...this.embeddingQueue];
-      this.embeddingQueue.clear();
 
       // Collect memos that still need embeddings.
       const pending: Array<{ id: string; text: string }> = [];
@@ -836,6 +864,10 @@ export class MemoryMemoStore {
         this.markEmbeddingFailure(
           new Error(vectors === null ? 'embedBatch returned null' : 'embedding count mismatch'),
         );
+        // Re-enqueue the failed ids so a later flush (triggered by the next
+        // write, or by a late-ready engine) retries them — honoring the
+        // "caller retries on the next flush" contract in embeddings.ts.
+        reenqueue();
         return;
       }
 
@@ -859,9 +891,11 @@ export class MemoryMemoStore {
       } catch (error) {
         this.db.exec('ROLLBACK');
         this.markEmbeddingFailure(error instanceof Error ? error : new Error(String(error)));
+        reenqueue();
       }
     } catch (error) {
       this.markEmbeddingFailure(error instanceof Error ? error : new Error(String(error)));
+      reenqueue();
     } finally {
       this.embeddingFlushing = false;
     }

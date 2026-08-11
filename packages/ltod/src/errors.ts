@@ -65,11 +65,48 @@ export class APIContextOverflowError extends APIStatusError {
  */
 export class APIProviderRateLimitError extends APIStatusError {
   readonly reason: RateLimitReason;
+  /** Server-provided `Retry-After` in milliseconds, when the response header
+   * was available. Consumed by the loop's `readRetryAfterMs`. */
+  readonly retryAfterMs: number | undefined;
 
-  constructor(message: string, requestId?: string | null, reason?: RateLimitReason) {
+  constructor(
+    message: string,
+    requestId?: string | null,
+    reason?: RateLimitReason,
+    retryAfterMs?: number | undefined,
+  ) {
     super(429, message, requestId);
     this.name = 'APIProviderRateLimitError';
     this.reason = reason ?? 'UNKNOWN';
+    this.retryAfterMs = retryAfterMs;
+  }
+}
+
+/**
+ * Cap applied to a server-provided `Retry-After` so a misbehaving/large value
+ * cannot hijack the loop's own bounded backoff (retry.ts caps at 32s) and
+ * reintroduce multi-hour hangs. 60s covers every realistic rate-limit window
+ * while keeping a hard bound.
+ */
+const MAX_RETRY_AFTER_MS = 60_000;
+
+/** Parse a `Retry-After` header value (delta-seconds) into milliseconds,
+ * capped at MAX_RETRY_AFTER_MS. Tolerates HTTP-date values (returns undefined
+ * for those) and any headers-lookup failure — this is an optimization, never
+ * a crash. */
+export function readRetryAfterMsFromHeaders(
+  get: (name: string) => string | null | undefined,
+): number | undefined {
+  try {
+    const value = get('retry-after');
+    if (value === null || value === undefined) return undefined;
+    const seconds = Number.parseInt(value, 10);
+    if (Number.isFinite(seconds) && seconds > 0) {
+      return Math.min(seconds * 1000, MAX_RETRY_AFTER_MS);
+    }
+    return undefined;
+  } catch {
+    return undefined;
   }
 }
 
@@ -178,9 +215,10 @@ export function normalizeAPIStatusError(
   statusCode: number,
   message: string,
   requestId?: string | null,
+  retryAfterMs?: number | undefined,
 ): APIStatusError {
   if (statusCode === 429) {
-    return new APIProviderRateLimitError(message, requestId, parseRateLimitReason(message));
+    return new APIProviderRateLimitError(message, requestId, parseRateLimitReason(message), retryAfterMs);
   }
   // Context overflow must be checked BEFORE the generic 413 branch: a 413
   // whose message matches overflow patterns is a context-window problem

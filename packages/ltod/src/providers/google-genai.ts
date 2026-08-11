@@ -650,7 +650,8 @@ const TIMEOUT_RE = /timed?\s*out|timeout|deadline/i;
  * Convert a Google GenAI SDK error (or raw Error) to a ltod `ChatProviderError`.
  */
 export function convertGoogleGenAIError(error: unknown): ChatProviderError {
-  // Google SDK's exported ApiError carries an HTTP status code
+  // Google SDK's exported ApiError carries an HTTP status code (no headers:
+  // the SDK discards the raw response, so Retry-After is not available here).
   if (error instanceof GoogleApiError) {
     return normalizeAPIStatusError(error.status, error.message);
   }

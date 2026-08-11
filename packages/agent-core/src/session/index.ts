@@ -179,11 +179,31 @@ export class Session {
     // default profile so the resumed session is usable. Native sessions always
     // replay a non-empty system prompt and never enter this branch.
     const main = this.agents.get('main');
-    const profile = DEFAULT_AGENT_PROFILES['agent'];
-    // Reload AGENTS.md on every resume so edits take effect
-    // without requiring session deletion / recreation.
-    if (main !== undefined && profile !== undefined) {
-      await this.bootstrapAgentProfile(main, profile);
+    if (main !== undefined) {
+      if (main.context.history.length === 0) {
+        // A session migrated from an external tool replays an empty wire
+        // without the `config.update` bootstrap events a natively-created
+        // agent writes, so the main agent comes back with an empty system
+        // prompt and no tools. Apply the default profile so it is usable.
+        const profile = DEFAULT_AGENT_PROFILES['agent'];
+        if (profile !== undefined) {
+          await this.bootstrapAgentProfile(main, profile);
+        }
+      } else {
+        // Native session: keep its (possibly custom) profile, but re-read
+        // AGENTS.md on every resume so edits take effect without requiring
+        // session deletion / recreation.
+        const profileName = main.config.profileName;
+        // DEFAULT_AGENT_PROFILES holds the built-in profiles; an unknown or
+        // undefined profile name falls back to the default so the session is
+        // never left without a system prompt or tools.
+        const profile =
+          (profileName !== undefined ? DEFAULT_AGENT_PROFILES[profileName] : undefined) ??
+          DEFAULT_AGENT_PROFILES['agent'];
+        if (profile !== undefined) {
+          await this.bootstrapAgentProfile(main, profile);
+        }
+      }
     }
     if (main !== undefined && this.metadata.custom?.['recap']) {
       main.context.appendSystemReminder(this.metadata.custom['recap'] as string, {

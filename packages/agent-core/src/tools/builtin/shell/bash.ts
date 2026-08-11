@@ -49,6 +49,9 @@ const MAX_TIMEOUT_S = 5 * 60;
 const DEFAULT_BACKGROUND_TIMEOUT_S = 10 * 60;
 const MAX_BACKGROUND_TIMEOUT_S = 24 * 60 * 60;
 const SIGTERM_GRACE_MS = 5_000;
+/** After the process exits, how long to keep draining stdout/stderr before
+ * declaring completion (grandchildren may hold the pipe open). */
+const STREAM_GRACE_MS = 500;
 
 export const BashInputSchema = z
   .object({
@@ -555,13 +558,42 @@ export class BashTool implements BuiltinTool<BashInput> {
         },
       });
       if (bgPrefix.length > 0) builder.write(bgPrefix);
-      const completionPromise = Promise.all([
-        Promise.all([
-          readStreamIntoBuilder(proc.stdout, builder, (text) => forwardChunk('stdout', text)),
-          readStreamIntoBuilder(proc.stderr, builder, (text) => forwardChunk('stderr', text)),
-        ]),
-        proc.wait(),
-      ]).then(([, exitCode]) => ({ timedOut: false as const, exitCode }));
+      const stdoutDone = readStreamIntoBuilder(proc.stdout, builder, (text) => forwardChunk('stdout', text));
+      const stderrDone = readStreamIntoBuilder(proc.stderr, builder, (text) => forwardChunk('stderr', text));
+      // A destroy() below aborts the for-await read, rejecting its promise
+      // with ERR_STREAM_PREMATURE_CLOSE. Swallow that here — the streams are
+      // intentionally torn down after the grace window; an unhandled
+      // rejection would crash the host (Node >= 15).
+      const stdoutSettled = stdoutDone.catch(() => undefined);
+      const stderrSettled = stderrDone.catch(() => undefined);
+      // Completion is signalled by PROCESS EXIT, not stream 'end':
+      // grandchildren that inherit the pipe (e.g. `daemonize &` or a fork
+      // that keeps stdout open) make the streams never emit 'end', and
+      // waiting on them would falsely "time out" an already-finished command.
+      // Allow a short grace window for buffered output after exit, then
+      // destroy the streams and finish. Normal large outputs are already
+      // consumed while the process runs, so this does not truncate them.
+      const completionPromise = proc
+        .wait()
+        .then(async (exitCode) => {
+          await Promise.race([
+            Promise.all([stdoutSettled, stderrSettled]),
+            new Promise<void>((resolve) => {
+              setTimeout(resolve, STREAM_GRACE_MS);
+            }),
+          ]);
+          try {
+            proc.stdout.destroy();
+          } catch {
+            /* ignore */
+          }
+          try {
+            proc.stderr.destroy();
+          } catch {
+            /* ignore */
+          }
+          return { timedOut: false as const, exitCode };
+        });
 
       // When timeoutMs is undefined (disable_timeout), the timeout promise
       // never settles, so the race just waits on the completion promise.

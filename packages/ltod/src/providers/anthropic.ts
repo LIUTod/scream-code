@@ -4,6 +4,7 @@ import {
   APITimeoutError,
   ChatProviderError,
   normalizeAPIStatusError,
+  readRetryAfterMsFromHeaders,
 } from '#/errors';
 import type { ContentPart, Message, StreamedMessagePart, ToolCall } from '#/message';
 import {
@@ -553,7 +554,11 @@ export function convertAnthropicError(error: unknown): ChatProviderError {
   // APIError with a status code => status error
   if (error instanceof AnthropicAPIError && typeof error.status === 'number') {
     const reqId = error.requestID ?? null;
-    return normalizeAPIStatusError(error.status, error.message, reqId);
+    // The SDK error carries response headers directly on `error.headers`.
+    const retryAfterMs = readRetryAfterMsFromHeaders(
+      (name) => (error as { headers?: Headers }).headers?.get(name) ?? undefined,
+    );
+    return normalizeAPIStatusError(error.status, error.message, reqId, retryAfterMs);
   }
   // APIUserAbortError — keep it as DOMException('AbortError')
   if (error instanceof AnthropicUserAbortError) {

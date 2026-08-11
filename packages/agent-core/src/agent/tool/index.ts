@@ -661,7 +661,10 @@ export class ToolManager {
   }
 
   getActiveTools(): readonly string[] {
-    return [...this.enabledTools];
+    // Include MCP glob patterns: they are stored separately from exact-name
+    // tools, but they ARE part of the active set. A get → set round-trip
+    // (model switching via /rlm) must not silently drop MCP tools.
+    return [...this.enabledTools, ...this.mcpAccessPatterns];
   }
 
   getBuiltinTool(name: string): BuiltinTool | undefined {

@@ -729,8 +729,9 @@ export class OpenAIResponsesStreamedMessage implements StreamedMessage {
             if (item.type === 'function_call') {
               // The Responses API routes streaming argument deltas via
               // `item_id`, which matches `item.id` on output_item.added.
-              // Preserve it so the generate loop can dispatch interleaved
-              // deltas across parallel function calls correctly.
+              // Preserve the snapshot (when the gateway ships one) so the
+              // generate loop can dispatch interleaved deltas across parallel
+              // function calls correctly.
               const streamIndex = responseStreamIndex(item.itemId, outputIndex);
               setFunctionCallArguments(streamIndex, item.arguments ?? '');
               const tc: ToolCall = {

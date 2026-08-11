@@ -101,7 +101,10 @@ function createFastEmbedEngineImpl(cacheDir?: string): EmbeddingEngine {
         }
         return vectors.length > 0 ? vectors : null;
       } catch (error: unknown) {
-        loadFailed = true;
+        // A runtime failure of one batch is NOT a load failure. Marking
+        // loadFailed here would permanently degrade this shared engine (and
+        // with it both /memory and /knowledge vector search). Keep the error
+        // for diagnostics; the caller retries on the next flush.
         lastError = error instanceof Error ? error.message : String(error);
         return null;
       }
@@ -145,7 +148,13 @@ function createFastEmbedEngineImpl(cacheDir?: string): EmbeddingEngine {
         lastError = undefined;
         return true;
       } catch (error: unknown) {
+        // A MODEL-LOAD failure is a load failure: mark it so `available`
+        // reports false and the next ensureReady() actually retries the load
+        // (instead of silently recycling a failed embedder). Runtime embed
+        // batch failures (embedBatch) intentionally do NOT set this flag —
+        // they retry on the next flush.
         initPromise = null;
+        loadFailed = true;
         lastError = error instanceof Error ? error.message : String(error);
         return false;
       }
