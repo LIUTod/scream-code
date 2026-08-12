@@ -82,6 +82,7 @@ export interface ColorPalette {
 
   // Roles
   roleUser: string;
+  roleUserBg: string;
   roleAssistant: string;
   roleThinking: string;
   roleTool: string;
@@ -125,6 +126,7 @@ export const darkColors: ColorPalette = {
   diffMeta: dark.gray500,
 
   roleUser: '#f7e308',
+  roleUserBg: '#f7e308',
   roleAssistant: dark.gray100,
   roleThinking: dark.gray500,
   roleTool: dark.amber400,
@@ -166,6 +168,7 @@ export const lightColors: ColorPalette = {
   diffMeta: light.gray600,
 
   roleUser: '#bd5302',
+  roleUserBg: '#bd5302',
   roleAssistant: light.gray900,
   roleThinking: light.gray700,
   roleTool: light.amber800,

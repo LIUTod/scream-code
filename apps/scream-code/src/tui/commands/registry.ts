@@ -132,6 +132,13 @@ export const BUILTIN_SLASH_COMMANDS = [
     availability: 'always',
   },
   {
+    name: 'hl',
+    aliases: ['highlight'],
+    description: 'registry.hl_desc',
+    priority: 177,
+    availability: 'always',
+  },
+  {
     name: 'snaptimer',
     aliases: ['timer'],
     description: 'registry.snaptimer_desc',

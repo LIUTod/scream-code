@@ -16,6 +16,8 @@ export interface UiPreferences {
   emptySessionHintDismissed?: boolean;
   /** Whether the per-turn elapsed marker (session snapshot timer) is shown. */
   turnElapsedEnabled?: boolean;
+  /** Whether user messages render with a highlight background block (/hl). */
+  userMessageHighlightEnabled?: boolean;
 }
 
 const EMPTY: UiPreferences = {};
@@ -73,6 +75,21 @@ export function toggleTurnElapsed(): boolean {
   const prefs = readUiPreferences();
   const enabled = prefs.turnElapsedEnabled !== false;
   prefs.turnElapsedEnabled = !enabled;
+  writeUiPreferences(prefs);
+  return !enabled;
+}
+
+/** Whether user messages render with a highlight background block (default on). */
+export function isUserMessageHighlightEnabled(): boolean {
+  return readUiPreferences().userMessageHighlightEnabled !== false;
+}
+
+/** Toggle the user-message highlight block via /hl. Returns the new state:
+ *  true = highlighted, false = default (no background). Persisted immediately. */
+export function toggleUserMessageHighlight(): boolean {
+  const prefs = readUiPreferences();
+  const enabled = prefs.userMessageHighlightEnabled !== false;
+  prefs.userMessageHighlightEnabled = !enabled;
   writeUiPreferences(prefs);
   return !enabled;
 }
