@@ -110,10 +110,17 @@ function renderDisplayBlock(
       }
       const command = replaceTabs(block.command);
       const cmdLines = command.length > 0 ? command.split('\n') : [''];
-      cmdLines.forEach((cmdLine, idx) => {
+      const shownCmd = cmdLines.slice(0, CONTENT_SUMMARY_MAX_LINES);
+      shownCmd.forEach((cmdLine, idx) => {
         const prefix = idx === 0 ? s.accent('$') : s.dim('·');
         lines.push(`${prefix} ${s.strong(cmdLine)}`);
       });
+      const remainingCmd = cmdLines.length - shownCmd.length;
+      if (remainingCmd > 0) {
+        lines.push(
+          s.dim(`  … ${String(remainingCmd)} more line${remainingCmd > 1 ? 's' : ''} hidden`),
+        );
+      }
       if (block.description !== undefined && block.description.length > 0) {
         lines.push(`  ${s.dim(replaceTabs(block.description))}`);
       }

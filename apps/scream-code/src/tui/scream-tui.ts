@@ -9,6 +9,7 @@ import type {
   PermissionMode,
   Session,
 } from '@scream-code/scream-code-sdk';
+import { OnboardingCardComponent } from './components/dialogs/onboarding-card';
 import { ScreamHarness } from '@scream-code/scream-code-sdk';
 import { t, setLocale } from '@scream-code/config';
 import type { CLIOptions } from '#/cli/options';
@@ -340,6 +341,15 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
     this.state.editorContainer.clear();
     this.state.editorContainer.addChild(this.state.editor);
     this.state.ui.setFocus(this.state.editor);
+    // First-run experience: no configured model → surface the onboarding
+    // card (configure now / skip) instead of leaving the user to find
+    // /config on their own. Mount AFTER the editorContainer teardown above,
+    // otherwise mountEditorReplacement's card gets cleared by it. Skipped
+    // when the user explicitly asked for the session picker (-s): that flow
+    // mounts its own editor replacement and must win.
+    if (!this.state.appState.model && this.state.startupState !== 'picker') {
+      void this.showOnboardingCard();
+    }
     return shouldReplayHistory;
   }
 
@@ -775,6 +785,40 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
 
   private renderWelcome(): void {
     this.transcriptController.renderWelcome();
+  }
+
+  /** First-run: no configured model → show the onboarding card (configure
+   * now / skip). Configure routes through the same /config connect flow. */
+  private async showOnboardingCard(): Promise<void> {
+    // Mirror /config's config read: a non-empty defaultModel means the user
+    // already configured a model → skip the card entirely.
+    try {
+      const config = await this.harness.getConfig({ reload: true });
+      if ((config.defaultModel ?? '').trim().length > 0) {
+        return;
+      }
+    } catch {
+      // Config read failed — fall through and still show the card.
+    }
+    const card = new OnboardingCardComponent({
+      colors: this.state.theme.colors,
+      onConfigure: () => {
+        // Enter /config connect flow (provider → api key → model).
+        void import('./commands/dispatch')
+          .then(({ handleConnectCommand }) => handleConnectCommand(this, ''))
+          .finally(() => {
+            // Restore the editor on EVERY outcome — success, user cancel,
+            // or failure (catalog unreachable / zero models / write error).
+            // Otherwise the card stays mounted and inert (activated=true),
+            // and pi-tui's single-focus routing swallows all keys → TUI frozen.
+            this.restoreEditor();
+          });
+      },
+      onSkip: () => {
+        this.restoreEditor();
+      },
+    });
+    this.mountEditorReplacement(card);
   }
 
   clearTranscriptAndRedraw(): void {
