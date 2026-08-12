@@ -977,6 +977,42 @@ export class SessionEventHandler {
 
   private handleSubagentSpawned(event: SubagentSpawnedEvent): void {
     const { streamingUI } = this.host;
+
+    // WolfPack spawns N subagents from a single tool call. To render each as
+    // an independent tree entry (AgentGroupComponent groups 2+ Agent cards),
+    // each subagent gets its own ToolCallComponent keyed by subagentId (not
+    // parentToolCallId, which would overwrite). Route subsequent events to
+    // the per-subagent card by storing subagentId as the routing key.
+    const parentToolCall = streamingUI.getActiveToolCall(event.parentToolCallId);
+    const isWolfPack = parentToolCall?.name === 'WolfPack';
+
+    if (isWolfPack) {
+      const routingId = event.subagentId;
+      this.subagentInfo.set(event.subagentId, {
+        parentToolCallId: routingId,
+        name: event.subagentName,
+      });
+      const description = event.description ?? `${event.subagentName} agent`;
+      const { turnId, step } = streamingUI.getTurnContext();
+      const toolCall: ToolCallBlockData = {
+        id: routingId,
+        name: 'Agent',
+        args: { description, subagent_type: event.subagentName },
+        description,
+        step,
+        turnId,
+      };
+      streamingUI.onToolCallStart(toolCall);
+      const tc = streamingUI.getToolComponent(routingId);
+      if (tc === undefined) return;
+      tc.onSubagentSpawned({
+        agentId: event.subagentId,
+        agentName: event.subagentName,
+        runInBackground: event.runInBackground,
+      });
+      return;
+    }
+
     this.subagentInfo.set(event.subagentId, {
       parentToolCallId: event.parentToolCallId,
       name: event.subagentName,
@@ -1009,7 +1045,12 @@ export class SessionEventHandler {
 
   private handleSubagentStarted(event: SubagentStartedEvent): void {
     if (event.runInBackground) return;
-    const tc = this.host.streamingUI.getToolComponent(event.parentToolCallId);
+    // For WolfPack subagents the ToolCallComponent is keyed by subagentId
+    // (see handleSubagentSpawned). Route via subagentInfo to find the
+    // correct card; fall back to parentToolCallId for normal Agent.
+    const info = this.subagentInfo.get(event.subagentId);
+    const routingId = info?.parentToolCallId ?? event.parentToolCallId;
+    const tc = this.host.streamingUI.getToolComponent(routingId);
     if (tc === undefined) return;
     tc.onSubagentStarted({
       agentId: event.subagentId,
@@ -1039,7 +1080,10 @@ export class SessionEventHandler {
       this.appendBackgroundAgentEntry('completed', backgroundMeta, extras);
       return;
     }
-    const tc = streamingUI.getToolComponent(event.parentToolCallId);
+    // Route to the per-subagent card (WolfPack) or parent card (normal Agent).
+    const info = this.subagentInfo.get(event.subagentId);
+    const routingId = info?.parentToolCallId ?? event.parentToolCallId;
+    const tc = streamingUI.getToolComponent(routingId);
     if (tc === undefined) return;
     tc.onSubagentCompleted({
       contextTokens: event.contextTokens,
@@ -1079,10 +1123,14 @@ export class SessionEventHandler {
       this.appendBackgroundAgentEntry('failed', backgroundMeta, { error: event.error });
       return;
     }
-    const tc = streamingUI.getToolComponent(event.parentToolCallId);
+    const tc = streamingUI.getToolComponent(
+      this.subagentInfo.get(event.subagentId)?.parentToolCallId ?? event.parentToolCallId,
+    );
     if (tc === undefined) return;
     tc.onSubagentFailed({ error: event.error });
-    streamingUI.removeToolComponentIfInactive(event.parentToolCallId);
+    streamingUI.removeToolComponentIfInactive(
+      this.subagentInfo.get(event.subagentId)?.parentToolCallId ?? event.parentToolCallId,
+    );
   }
 
   private recordSubagentUsage(

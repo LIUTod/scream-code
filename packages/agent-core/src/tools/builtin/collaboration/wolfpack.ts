@@ -79,9 +79,10 @@ export class WolfPackTool implements BuiltinTool<WolfPackToolInput> {
       description: `WolfPack: ${args.description} (${args.items.length} agents)`,
       accesses: ToolAccesses.none(),
       display: {
-        kind: 'generic',
-        summary: `WolfPack: ${args.description}`,
-        detail: { itemCount: args.items.length, subagent_type: args.subagent_type },
+        kind: 'agent_call',
+        agent_name: args.subagent_type ?? 'coder',
+        prompt: `WolfPack: ${args.description} (${args.items.length} agents)`,
+        background: false,
       },
       approvalRule: this.name,
       execute: (ctx) => this.execution(args, ctx),
