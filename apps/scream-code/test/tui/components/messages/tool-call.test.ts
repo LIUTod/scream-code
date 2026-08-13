@@ -774,7 +774,7 @@ describe('ToolCallComponent', () => {
     expect(out).toContain('正在使用 Read (file5.ts)');
   });
 
-  it('wraps single subagent thinking and output with hanging indentation', () => {
+  it('renders single subagent thinking and output as truncated single rows', () => {
     vi.useFakeTimers();
     vi.setSystemTime(0);
     const component = new ToolCallComponent(
@@ -801,11 +801,45 @@ describe('ToolCallComponent', () => {
     );
 
     const lines = strip(component.render(34).join('\n')).split('\n');
-    expect(lines).toContain('  ◌ thinking words that should    ');
-    expect(lines).toContain('    wrap with a clean hanging     ');
-    expect(lines).toContain('    indent                        ');
-    expect(lines).toContain('  └ output words that should also ');
-    expect(lines).toContain('    wrap with a clean hanging     ');
+    // Each preview is one truncated row with the ellipsis suffix — wrapping
+    // would make the card height bounce while the text streams.
+    const thinkingRow = lines.find((l) => l.startsWith('  ◌ thinking'));
+    expect(thinkingRow).toBeDefined();
+    expect(thinkingRow).toMatch(/\.\.\.\s*$/);
+    const outputRow = lines.find((l) => l.startsWith('  └ output'));
+    expect(outputRow).toBeDefined();
+    expect(outputRow).toMatch(/\.\.\.\s*$/);
+    // No wrapped continuation rows remain.
+    expect(lines.some((l) => l.trimStart().startsWith('wrap with a clean'))).toBe(false);
+  });
+
+  it('keeps the standalone card height stable while subagent text streams', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    const component = new ToolCallComponent(
+      {
+        id: 'call_agent_stable',
+        name: 'Agent',
+        args: { description: 'stable height' },
+      },
+      undefined,
+      darkColors,
+    );
+    component.onSubagentSpawned({
+      agentId: 'sub_stable',
+      agentName: 'explore',
+      runInBackground: false,
+    });
+    component.appendSubagentText('short thinking', 'thinking');
+    component.appendSubagentText('short output', 'text');
+    const heightBefore = component.render(60).length;
+
+    // The preview rows keep growing past the viewport width; truncated
+    // single rows must keep the total card height unchanged.
+    component.appendSubagentText('x'.repeat(500), 'thinking');
+    component.appendSubagentText('y'.repeat(500), 'text');
+    const heightAfter = component.render(60).length;
+    expect(heightAfter).toBe(heightBefore);
   });
 
   it('renders failed single subagents with the dedicated header and error text', () => {

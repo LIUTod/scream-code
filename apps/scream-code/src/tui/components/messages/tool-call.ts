@@ -1686,9 +1686,14 @@ export class ToolCallComponent extends CachedContainer {
 
     const outputLine = tailNonEmptyLines(this.subagentText, 1).at(-1);
     const thinkingLine = tailNonEmptyLines(this.subagentThinkingText, 1).at(-1);
+    // Both preview rows are truncated to a single line: while streaming,
+    // the tail text grows on every delta, so wrapping it would make the
+    // card height bounce as the wrapped row count changes.
     if (this.getDerivedSubagentPhase() !== 'done' && thinkingLine !== undefined) {
       this.addChild(
-        new WrappedLine(`  ${chalk.dim('◌')} `, '    ', chalk.dim(thinkingLine)),
+        new WrappedLine(`  ${chalk.dim('◌')} `, '    ', chalk.dim(thinkingLine), {
+          truncate: true,
+        }),
       );
     }
     if (outputLine !== undefined) {
@@ -1697,6 +1702,7 @@ export class ToolCallComponent extends CachedContainer {
           `  ${chalk.hex(this.colors.text)('└')} `,
           '    ',
           chalk.hex(this.colors.text)(outputLine),
+          { truncate: true },
         ),
       );
     }
