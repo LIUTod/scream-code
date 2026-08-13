@@ -28,6 +28,7 @@ import { decodeMcpToolName } from '#/tui/utils/mcp-tool-name';
 
 import { PlanBoxComponent } from './plan-box';
 import { ShellExecutionComponent, shellExecutionResultRenderer } from './shell-execution';
+import { WrappedLine } from './wrapped-line';
 import { countNonEmptyLines, pickChip } from './tool-renderers/chip';
 import { pickResultRenderer } from './tool-renderers/registry';
 
@@ -455,28 +456,6 @@ function tailNonEmptyLines(text: string, maxLines: number): string[] {
     .map((line) => line.trimEnd())
     .filter((line) => line.trim().length > 0)
     .slice(-maxLines);
-}
-
-class PrefixedWrappedLine implements Component {
-  constructor(
-    private readonly firstPrefix: string,
-    private readonly continuationPrefix: string,
-    private readonly text: string,
-  ) { }
-
-  invalidate(): void { }
-
-  render(width: number): string[] {
-    const prefixWidth = Math.max(
-      visibleWidth(this.firstPrefix),
-      visibleWidth(this.continuationPrefix),
-    );
-    const contentWidth = Math.max(1, width - prefixWidth);
-    const lines = new Text(this.text, 0, 0).render(contentWidth);
-    return lines.map((line, index) =>
-      index === 0 ? `${this.firstPrefix}${line}` : `${this.continuationPrefix}${line}`,
-    );
-  }
 }
 
 export class ToolCallComponent extends CachedContainer {
@@ -979,6 +958,9 @@ export class ToolCallComponent extends CachedContainer {
     const phase = this.getDerivedSubagentPhase();
     const shouldTick =
       this.isSingleSubagentView() &&
+      // A card borrowed by a group renders through the group's snapshot
+      // path; its own 1s header ticker would just emit wasted renders.
+      this.onSnapshotChange === undefined &&
       this.subagentStartedAtMs !== undefined &&
       (phase === 'spawning' || phase === 'running');
     if (!shouldTick) {
@@ -1516,7 +1498,7 @@ export class ToolCallComponent extends CachedContainer {
     if (this.subagentText.length > 0) {
       const tailLines = this.subagentText.split('\n').slice(-3);
       for (const line of tailLines) {
-        this.addChild(new Text(`    ${dim(line)}`, 0, 0));
+        this.addChild(new WrappedLine('    ', '    ', dim(line)));
       }
     }
 
@@ -1692,7 +1674,7 @@ export class ToolCallComponent extends CachedContainer {
       const errorLine = tailNonEmptyLines(this.subagentError, 1).at(-1);
       if (errorLine !== undefined) {
         this.addChild(
-          new PrefixedWrappedLine(
+          new WrappedLine(
             `  ${chalk.hex(this.colors.error)('└')} `,
             '    ',
             chalk.hex(this.colors.error)(errorLine),
@@ -1706,12 +1688,12 @@ export class ToolCallComponent extends CachedContainer {
     const thinkingLine = tailNonEmptyLines(this.subagentThinkingText, 1).at(-1);
     if (this.getDerivedSubagentPhase() !== 'done' && thinkingLine !== undefined) {
       this.addChild(
-        new PrefixedWrappedLine(`  ${chalk.dim('◌')} `, '    ', chalk.dim(thinkingLine)),
+        new WrappedLine(`  ${chalk.dim('◌')} `, '    ', chalk.dim(thinkingLine)),
       );
     }
     if (outputLine !== undefined) {
       this.addChild(
-        new PrefixedWrappedLine(
+        new WrappedLine(
           `  ${chalk.hex(this.colors.text)('└')} `,
           '    ',
           chalk.hex(this.colors.text)(outputLine),

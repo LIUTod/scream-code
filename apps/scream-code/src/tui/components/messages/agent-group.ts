@@ -24,6 +24,7 @@ import type { ColorPalette } from '#/tui/theme/colors';
 import { t } from '@scream-code/config';
 
 import type { ToolCallComponent, ToolCallSubagentSnapshot } from './tool-call';
+import { WrappedLine } from './wrapped-line';
 
 const THROTTLE_MS = 200;
 
@@ -176,7 +177,8 @@ export class AgentGroupComponent extends Container {
     const colors = this.colors;
     const dim = chalk.dim;
 
-    // First-level branch line.
+    // First-level branch line. The description is truncated to one row so
+    // the branch never grows tall, keeping the group's height stable.
     const branch1 = isLast ? '└─' : '├─';
     const agentType = snap.agentName ?? 'agent';
     const desc = snap.toolCallDescription || t('agentgroup.no_desc');
@@ -184,16 +186,27 @@ export class AgentGroupComponent extends Container {
     const namePart = chalk.hex(colors.primary)(agentType);
     const descPart = dim(`· ${desc}`);
     const stats = formatStats(snap);
-    const line1 = `  ${branch1} ${namePart} ${descPart}${stats}${tail}`;
-    this.bodyContainer.addChild(new Text(line1, 0, 0));
+    const line1Content = `${namePart} ${descPart}${stats}${tail}`;
+    const branchPrefix = `  ${branch1} `;
+    // Continuation keeps the vertical connector (or blank for the last
+    // entry, where the tree terminates) aligned under the first column.
+    const branchContinuation = isLast ? '     ' : '  │  ';
+    this.bodyContainer.addChild(
+      new WrappedLine(branchPrefix, branchContinuation, line1Content, { truncate: true }),
+    );
 
-    // Second-level line: latest activity, or Error for failures.
-    const branch2 = isLast ? '   ' : '│  ';
+    // Second-level line: latest activity, or Error for failures. The
+    // activity is truncated to one row: it changes on every throttle tick
+    // while streaming, so wrapping it would make the group height bounce.
+    const childPrefix = `  ${isLast ? '   ' : '│  '}    `;
     if (snap.phase === 'failed') {
-      // Show one error line; error messages can be long.
-      const errLine = (snap.errorText ?? t('agentgroup.failed')).split('\n').at(0) ?? t('agentgroup.failed');
+      // Show one error line; error messages can be long. Wrapped (not
+      // truncated) so the error text stays readable.
+      const errLine =
+        (snap.errorText ?? t('agentgroup.failed')).split(/\r\n|\r|\n/).at(0) ??
+        t('agentgroup.failed');
       const errStr = chalk.hex(colors.error)(`${t('agentgroup.error')}${errLine}`);
-      this.bodyContainer.addChild(new Text(`  ${branch2}    ${errStr}`, 0, 0));
+      this.bodyContainer.addChild(new WrappedLine(childPrefix, childPrefix, errStr));
       return;
     }
     if (snap.phase === 'done' || snap.phase === 'backgrounded') {
@@ -202,7 +215,9 @@ export class AgentGroupComponent extends Container {
     }
     // Running or not-yet-started agents show latest activity, with a fallback.
     const activity = snap.latestActivity ?? t('agentgroup.initializing');
-    this.bodyContainer.addChild(new Text(`  ${branch2}    ${dim(activity)}`, 0, 0));
+    this.bodyContainer.addChild(
+      new WrappedLine(childPrefix, childPrefix, dim(activity), { truncate: true }),
+    );
   }
 
   /** Releases throttle timers so destroyed components cannot refresh later. */
@@ -219,7 +234,9 @@ export class AgentGroupComponent extends Container {
 
 function formatStats(snap: ToolCallSubagentSnapshot): string {
   const dim = chalk.dim;
-  const tools = ` · ${String(snap.toolCount)} tool${snap.toolCount === 1 ? '' : 's'}`;
+  // Only show the tool counter once tools actually ran — a bare "· 0 tools"
+  // during startup is noise.
+  const tools = snap.toolCount > 0 ? ` · ${String(snap.toolCount)} tool${snap.toolCount === 1 ? '' : 's'}` : '';
   const tokens = snap.tokens > 0 ? ` · ${formatTokens(snap.tokens)}` : '';
   return dim(`${tools}${tokens}`);
 }

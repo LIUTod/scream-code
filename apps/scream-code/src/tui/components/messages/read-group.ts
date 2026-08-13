@@ -30,6 +30,7 @@ import { STATUS_BULLET } from '#/tui/constant/symbols';
 import type { ColorPalette } from '#/tui/theme/colors';
 
 import type { ToolCallComponent, ToolCallReadSnapshot } from './tool-call';
+import { WrappedLine } from './wrapped-line';
 
 const THROTTLE_MS = 200;
 // Column-0 git merge conflict markers. Read's output prefixes each line
@@ -198,7 +199,7 @@ export class ReadGroupComponent extends Container {
     );
     visibleSnapshots.forEach((snap, idx) => {
       const isLast = idx === visibleSnapshots.length - 1;
-      this.bodyContainer.addChild(new Text(this.buildBodyLine(snap, isLast), 0, 0));
+      this.addBodyBranch(snap.filePath ?? '', isLast, this.buildBodyTail(snap));
     });
 
     this.lastFlushPhases.clear();
@@ -224,7 +225,7 @@ export class ReadGroupComponent extends Container {
     this.bodyContainer.clear();
     results.forEach((r, idx) => {
       const isLast = idx === results.length - 1;
-      this.bodyContainer.addChild(new Text(this.buildDirectBodyLine(r, isLast), 0, 0));
+      this.addBodyBranch(r.filePath, isLast, this.buildDirectBodyTail(r));
     });
 
     this.invalidate();
@@ -255,40 +256,41 @@ export class ReadGroupComponent extends Container {
     return `${bullet}${label}${linesPart}${failPart}`;
   }
 
-  private buildBodyLine(snap: ToolCallReadSnapshot, isLast: boolean): string {
-    const colors = this.colors;
-    const dim = chalk.dim;
+  /**
+   * Renders one tree-branch body line with a hanging-indent continuation,
+   * so a path longer than the viewport keeps its branch connector instead
+   * of breaking the tree.
+   */
+  private addBodyBranch(path: string, isLast: boolean, tail: string): void {
     const branch = isLast ? '└─' : '├─';
-    const path = snap.filePath ?? '';
-    const pathPart = chalk.hex(colors.text)(path);
-
-    let tail: string;
-    if (snap.phase === 'pending') {
-      tail = dim(t('readgroup.reading_suffix'));
-    } else if (snap.phase === 'failed') {
-      tail = chalk.hex(colors.error)(t('readgroup.failed_suffix'));
-    } else {
-      tail = dim(t('readgroup.lines_suffix', { count: snap.lines }));
-    }
-    return `  ${branch} ${pathPart}${tail}`;
+    const prefix = `  ${branch} `;
+    const continuation = isLast ? '     ' : '  │  ';
+    this.bodyContainer.addChild(
+      new WrappedLine(prefix, continuation, `${chalk.hex(this.colors.text)(path)}${tail}`),
+    );
   }
 
-  private buildDirectBodyLine(result: DirectResult, isLast: boolean): string {
-    const colors = this.colors;
+  private buildBodyTail(snap: ToolCallReadSnapshot): string {
     const dim = chalk.dim;
-    const branch = isLast ? '└─' : '├─';
-    const pathPart = chalk.hex(colors.text)(result.filePath);
-
-    let tail: string;
-    if (result.failed) {
-      tail = chalk.hex(colors.error)(t('readgroup.failed_suffix'));
-    } else {
-      tail = dim(t('readgroup.lines_suffix', { count: result.lines }));
-      if (result.hasConflicts) {
-        tail = `${tail}${chalk.hex(colors.warning)(` ⚠ ${t('readgroup.conflict_suffix')}`)}`;
-      }
+    if (snap.phase === 'pending') {
+      return dim(t('readgroup.reading_suffix'));
     }
-    return `  ${branch} ${pathPart}${tail}`;
+    if (snap.phase === 'failed') {
+      return chalk.hex(this.colors.error)(t('readgroup.failed_suffix'));
+    }
+    return dim(t('readgroup.lines_suffix', { count: snap.lines }));
+  }
+
+  private buildDirectBodyTail(result: DirectResult): string {
+    const dim = chalk.dim;
+    if (result.failed) {
+      return chalk.hex(this.colors.error)(t('readgroup.failed_suffix'));
+    }
+    let tail = dim(t('readgroup.lines_suffix', { count: result.lines }));
+    if (result.hasConflicts) {
+      tail = `${tail}${chalk.hex(this.colors.warning)(` ⚠ ${t('readgroup.conflict_suffix')}`)}`;
+    }
+    return tail;
   }
 
   /** Releases throttle timers so destroyed components cannot refresh later. */
