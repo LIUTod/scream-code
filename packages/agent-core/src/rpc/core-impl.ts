@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { homedir } from 'node:os';
+import { readFile, stat, writeFile } from 'node:fs/promises';
+import { homedir, release } from 'node:os';
+import { join } from 'pathe';
 
 import { ErrorCodes, ScreamError } from '#/errors';
 import { getRootLogger, log } from '#/logging/logger';
@@ -109,7 +111,7 @@ import type {
 import type { ResumedAgentState, ResumeSessionResult } from './resumed';
 import type { SDKRPC } from './sdk-api';
 import { proxyWithExtraPayload } from './types';
-import { JianShellNotFoundError, LocalJian, type Jian } from '@scream-code/jian';
+import { JianShellNotFoundError, LocalJian, type Environment, type Jian } from '@scream-code/jian';
 import type { WebSearchProvider } from '../tools/builtin';
 import type { ToolServices } from '../tools/support/services';
 
@@ -129,6 +131,65 @@ export interface ScreamCoreOptions {
   readonly resolveOAuthTokenProvider?: OAuthTokenProviderResolver | undefined;
   readonly skillDirs?: readonly string[];
   readonly subagentModelBindings?: () => Record<string, string | undefined>;
+}
+
+const ENV_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+interface EnvironmentCacheEntry extends Environment {
+  /** Unix ms timestamp of when this entry was written. */
+  cachedAt: number;
+}
+
+/**
+ * Reads a previously detected host environment from the scream home dir.
+ * Windows environment detection walks PATH and stats dozens of candidates
+ * (~60-110 filesystem probes), so every fresh process paid that cost at
+ * startup. Returns `undefined` when the cache is missing, expired, or the
+ * entry's shell no longer exists (verified with a single stat).
+ */
+export async function readEnvironmentCache(homeDir: string): Promise<Environment | undefined> {
+  try {
+    const raw = await readFile(join(homeDir, 'environment-cache.json'), 'utf8');
+    const entry = JSON.parse(raw) as EnvironmentCacheEntry;
+    if (typeof entry?.cachedAt !== 'number' || Date.now() - entry.cachedAt >= ENV_CACHE_TTL_MS) {
+      return undefined;
+    }
+    if (entry.osVersion !== release()) {
+      return undefined;
+    }
+    if (typeof entry.shellPath !== 'string' || entry.shellPath.length === 0) {
+      return undefined;
+    }
+    // SCREAM_SHELL_PATH is a documented explicit override (see
+    // detectEnvironment). If it is set and differs from the cached shell,
+    // the cache must not win — treat it as a miss. Compare like the
+    // detector does: trimmed, and case-insensitively on Windows where
+    // paths are case-insensitive.
+    const explicitShell = process.env['SCREAM_SHELL_PATH']?.trim();
+    if (explicitShell !== undefined && explicitShell.length > 0) {
+      const same =
+        process.platform === 'win32'
+          ? explicitShell.toLowerCase() === entry.shellPath.toLowerCase()
+          : explicitShell === entry.shellPath;
+      if (!same) {
+        return undefined;
+      }
+    }
+    const st = await stat(entry.shellPath);
+    if (!st.isFile()) {
+      return undefined;
+    }
+    const { cachedAt: _cachedAt, ...env } = entry;
+    return env;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Persists a detected host environment so the next process can skip detection. */
+export async function writeEnvironmentCache(homeDir: string, env: Environment): Promise<void> {
+  const entry: EnvironmentCacheEntry = { ...env, cachedAt: Date.now() };
+  await writeFile(join(homeDir, 'environment-cache.json'), JSON.stringify(entry), 'utf8');
 }
 
 export class ScreamCore implements PromisableMethods<CoreAPI> {
@@ -160,7 +221,7 @@ export class ScreamCore implements PromisableMethods<CoreAPI> {
       homeDir: this.homeDir,
       configPath: options.configPath,
     });
-    this.jian = LocalJian.create().catch((error: unknown) => {
+    this.jian = this.resolveLocalJian().catch((error: unknown) => {
       if (error instanceof JianShellNotFoundError) {
         throw new ScreamError(ErrorCodes.SHELL_GIT_BASH_NOT_FOUND, error.message);
       }
@@ -191,9 +252,30 @@ export class ScreamCore implements PromisableMethods<CoreAPI> {
     this.subagentModelBindings = getter;
   }
 
-  /** Resolve the shell environment so missing Git Bash is surfaced early. */
+  /**
+   * Resolve the shell environment so missing Git Bash is surfaced early.
+   */
   async preflight(): Promise<void> {
     await this.jian;
+  }
+
+  /**
+   * Builds the LocalJian, preferring a cached host environment so Windows
+   * startups skip the expensive PATH/filesystem detection. On a cache miss
+   * the full detection runs once and the result is persisted for the next
+   * process.
+   */
+  private async resolveLocalJian(): Promise<LocalJian> {
+    const cached = await readEnvironmentCache(this.homeDir);
+    if (cached !== undefined) {
+      return LocalJian.create(undefined, undefined, cached);
+    }
+    const jian = await LocalJian.create();
+    await writeEnvironmentCache(this.homeDir, jian.osEnv).catch(() => {
+      // Cache writes are best-effort: a read-only home dir just means the
+      // next startup re-detects.
+    });
+    return jian;
   }
 
   async createSession(input: CreateSessionPayload): Promise<SessionSummary> {

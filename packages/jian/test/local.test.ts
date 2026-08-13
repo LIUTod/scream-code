@@ -5,7 +5,6 @@ import { join } from 'node:path';
 import { JianFileExistsError } from '#/errors';
 import { LocalJian } from '#/local';
 import { afterEach, beforeEach, describe, expect, it, test, vi } from 'vitest';
-
 function nodeArgs(code: string): string[] {
   return ['node', '-e', code];
 }
@@ -18,6 +17,19 @@ describe('LocalJian', () => {
     jian = await LocalJian.create();
     tempDir = await realpath(await mkdtemp(join(tmpdir(), 'jian-test-')));
     await jian.chdir(tempDir);
+  });
+
+  it('create with an injected environment skips platform detection', async () => {
+    const injected = {
+      osKind: 'Linux' as const,
+      osArch: 'x64',
+      osVersion: 'fake-version',
+      shellName: 'bash' as const,
+      shellPath: '/bin/bash',
+      homeDirectory: '/home/fake',
+    };
+    const jian = await LocalJian.create(undefined, undefined, injected);
+    expect(jian.osEnv).toEqual(injected);
   });
 
   afterEach(async () => {

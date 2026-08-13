@@ -270,8 +270,11 @@ export class LocalJian implements Jian {
    * callers can therefore operate on independent working directories
    * without polluting one another.
    */
-  static async create(cwd?: string, rootDir?: string): Promise<LocalJian> {
-    const osEnv = await detectEnvironmentFromNode();
+  static async create(cwd?: string, rootDir?: string, env?: Environment): Promise<LocalJian> {
+    // Allow callers that already know the host environment (e.g. from a
+    // disk cache) to skip the platform detection entirely — on Windows that
+    // probe walks PATH and stat's dozens of candidates, which slows startup.
+    const osEnv = env ?? (await detectEnvironmentFromNode());
     return new LocalJian(osEnv, cwd, rootDir);
   }
 
