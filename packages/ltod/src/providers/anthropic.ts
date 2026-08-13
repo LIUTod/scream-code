@@ -575,6 +575,7 @@ export function convertAnthropicError(error: unknown): ChatProviderError {
 }
 class AnthropicStreamedMessage implements StreamedMessage {
   private _id: string | null = null;
+  private _model: string | null = null;
   private _usage: TokenUsage = {
     inputOther: 0,
     output: 0,
@@ -618,6 +619,10 @@ class AnthropicStreamedMessage implements StreamedMessage {
     return this._id;
   }
 
+  get model(): string | null {
+    return this._model;
+  }
+
   get usage(): TokenUsage | null {
     return this._usage;
   }
@@ -656,6 +661,7 @@ class AnthropicStreamedMessage implements StreamedMessage {
 
   private async *_convertNonStreamResponse(response: {
     id: string;
+    model?: string;
     stop_reason?: string | null;
     usage: {
       input_tokens: number;
@@ -675,6 +681,7 @@ class AnthropicStreamedMessage implements StreamedMessage {
     }>;
   }): AsyncGenerator<StreamedMessagePart> {
     this._id = response.id;
+    this._model = response.model ?? null;
     this._extractUsage(response.usage);
     this._captureStopReason(response.stop_reason);
 
@@ -720,6 +727,7 @@ class AnthropicStreamedMessage implements StreamedMessage {
         if (eventType === 'message_start') {
           const startEvt = evt as unknown as RawMessageStartEvent;
           this._id = startEvt.message.id;
+          this._model = startEvt.message.model ?? null;
           this._extractUsage(
             startEvt.message.usage as {
               input_tokens?: number;

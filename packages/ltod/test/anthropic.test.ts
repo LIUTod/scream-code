@@ -1,4 +1,5 @@
 import { ChatProviderError } from '#/errors';
+import { generate } from '#/generate';
 import type { ContentPart, Message, StreamedMessagePart, ToolCall } from '#/message';
 import { AnthropicChatProvider, resolveDefaultMaxTokens } from '#/providers/anthropic';
 import type { Tool } from '#/tool';
@@ -2152,5 +2153,20 @@ describe('AnthropicChatProvider constructor max_tokens', () => {
 
   it('clamps defaultMaxTokens above the documented ceiling for known models', async () => {
     expect(await maxTokensFor('claude-opus-4-7', { defaultMaxTokens: 999999 })).toBe(128000);
+  });
+});
+
+describe('reported model capture', () => {
+  it('captures the serving model from a non-streaming Anthropic reply', async () => {
+    const provider = createProvider();
+    (provider as any)._client.messages.create = vi
+      .fn()
+      .mockResolvedValue(makeAnthropicResponse('actual-anthropic-model'));
+
+    const result = await generate(provider, '', [], [
+      { role: 'user', content: [{ type: 'text', text: 'hi' }], toolCalls: [] },
+    ]);
+
+    expect(result.model).toBe('actual-anthropic-model');
   });
 });

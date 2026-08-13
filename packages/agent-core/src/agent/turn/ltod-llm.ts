@@ -182,6 +182,7 @@ export class LtodLLM implements LLM {
       providerFinishReason: result.finishReason ?? undefined,
       rawFinishReason: result.rawFinishReason ?? undefined,
       usage: result.usage ?? emptyUsage(),
+      model: result.model ?? undefined,
       streamTiming:
         firstChunkAt === undefined
           ? undefined

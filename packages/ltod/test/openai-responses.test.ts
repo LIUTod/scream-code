@@ -1736,3 +1736,21 @@ function makeAsyncIterable(
     },
   };
 }
+
+describe('reported model capture', () => {
+  it('captures the serving model from a non-streaming Responses API reply', async () => {
+    const provider = createProvider();
+    (provider as any)._stream = false;
+    const resp = makeResponsesAPIResponse();
+    resp['model'] = 'actual-resp-model';
+
+    ((provider as any)._client.responses as unknown as Record<string, unknown>)['create'] =
+      vi.fn().mockResolvedValue(resp);
+
+    const result = await generate(provider, '', [], [
+      { role: 'user', content: [{ type: 'text', text: 'hi' }], toolCalls: [] },
+    ]);
+
+    expect(result.model).toBe('actual-resp-model');
+  });
+});

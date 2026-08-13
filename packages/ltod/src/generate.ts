@@ -29,6 +29,13 @@ type StoredToolCall = Omit<ToolCall, '_streamIndex'>;
 export interface GenerateResult {
   /** Provider-assigned response identifier, or `null` if unavailable. */
   readonly id: string | null;
+  /**
+   * The model identifier reported by the provider in the response payload —
+   * the model that actually served the request (may differ from the
+   * requested model when a gateway routes elsewhere). `undefined` when the
+   * provider adapter does not surface it.
+   */
+  readonly model?: string | null;
   /** The fully-assembled assistant message with merged content parts and tool calls. */
   readonly message: Message;
   /** Token usage for this generation, or `null` if not reported. */
@@ -228,6 +235,7 @@ export async function generate(
 
   return {
     id: stream.id,
+    model: stream.model,
     message,
     usage: stream.usage,
     finishReason: stream.finishReason,

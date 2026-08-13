@@ -197,4 +197,15 @@ describe('runTurn — streaming callbacks', () => {
     expect(lastContent).toBeGreaterThanOrEqual(0);
     expect(stepEnd).toBeGreaterThan(lastContent);
   });
+
+  it('surfaces the provider-reported model on step.end', async () => {
+    const llm = new StreamingLLM(async (params) => {
+      params.onTextDelta?.('hi');
+      return { ...makeEndTurnResponse('hi'), model: 'served-model-x' };
+    });
+    const { sink } = await runWithLLM(llm);
+    const stepEnd = sink.byType('step.end');
+    expect(stepEnd.length).toBe(1);
+    expect(stepEnd[0]?.reportedModel).toBe('served-model-x');
+  });
 });

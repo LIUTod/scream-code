@@ -56,6 +56,14 @@ export interface StreamedMessage {
   [Symbol.asyncIterator](): AsyncIterator<StreamedMessagePart>;
   /** Provider-assigned response identifier, or `null` if not available. */
   readonly id: string | null;
+  /**
+   * The model identifier reported by the provider in the response payload —
+   * the model that actually served the request. This can differ from the
+   * requested model when a gateway routes to a different backend, so it is
+   * tracked separately from `ChatProvider.modelName`. `undefined` when the
+   * provider adapter does not surface it (or `null` when absent).
+   */
+  readonly model?: string | null;
   /** Token usage statistics, populated after the stream completes. */
   readonly usage: TokenUsage | null;
   /**

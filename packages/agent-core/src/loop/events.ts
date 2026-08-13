@@ -22,6 +22,13 @@ export interface LoopStepEndEvent {
   readonly llmFirstTokenLatencyMs?: number | undefined;
   readonly llmStreamDurationMs?: number | undefined;
   /**
+   * The model identifier the provider reported in the response payload —
+   * the model that actually served this step. Differs from the requested
+   * model when a gateway routes to a different backend. Present only when
+   * the provider surfaced it.
+   */
+  readonly reportedModel?: string | undefined;
+  /**
    * Provider diagnostics are optional and must not drive loop control.
    * Use `finishReason` for normalized behavior.
    */

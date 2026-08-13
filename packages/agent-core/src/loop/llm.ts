@@ -69,6 +69,12 @@ export interface LLMChatResponse {
   rawFinishReason?: string;
   usage: TokenUsage;
   streamTiming?: LLMStreamTiming;
+  /**
+   * The model identifier reported by the provider in the response payload —
+   * the model that actually served the request. Differs from `LLM.modelName`
+   * (the requested model) when a gateway routes to a different backend.
+   */
+  model?: string;
 }
 
 export interface LLM {

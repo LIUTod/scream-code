@@ -191,6 +191,7 @@ function convertMessage(
 }
 export class OpenAILegacyStreamedMessage implements StreamedMessage {
   private _id: string | null = null;
+  private _model: string | null = null;
   private _usage: TokenUsage | null = null;
   private _finishReason: FinishReason | null = null;
   private _rawFinishReason: string | null = null;
@@ -207,6 +208,9 @@ export class OpenAILegacyStreamedMessage implements StreamedMessage {
         reasoningKey,
       );
     } else {
+      // Non-streaming responses report the serving model in the payload.
+      const reported = (response as OpenAI.Chat.ChatCompletion).model;
+      this._model = typeof reported === 'string' && reported.length > 0 ? reported : null;
       this._iter = this._convertNonStreamResponse(
         response as OpenAI.Chat.ChatCompletion,
         reasoningKey,
@@ -216,6 +220,10 @@ export class OpenAILegacyStreamedMessage implements StreamedMessage {
 
   get id(): string | null {
     return this._id;
+  }
+
+  get model(): string | null {
+    return this._model;
   }
 
   get usage(): TokenUsage | null {
@@ -287,6 +295,12 @@ export class OpenAILegacyStreamedMessage implements StreamedMessage {
       for await (const chunk of response) {
         if (chunk.id) {
           this._id = chunk.id;
+        }
+
+        // Streaming chunks report the serving model on (at least) the first
+        // chunk; capture the first non-empty value.
+        if (this._model === null && typeof chunk.model === 'string' && chunk.model.length > 0) {
+          this._model = chunk.model;
         }
 
         if (chunk.usage) {

@@ -1468,4 +1468,48 @@ describe('OpenAILegacyChatProvider — non-indexed streaming tool_calls', () => 
 
     expect(parts).toEqual([]);
   });
+
+  describe('reported model capture', () => {
+    it('captures the serving model from a non-streaming response', async () => {
+      const provider = createProvider({ stream: false });
+      (
+        provider as unknown as { _client: { chat: { completions: { create: unknown } } } }
+      )._client.chat.completions.create = vi
+        .fn()
+        .mockResolvedValue(makeChatCompletionResponse('actual-served-model'));
+
+      const result = await generate(provider, '', [], [
+        { role: 'user', content: [{ type: 'text', text: 'hi' }], toolCalls: [] },
+      ]);
+
+      expect(result.model).toBe('actual-served-model');
+    });
+
+    it('captures the serving model from the first streaming chunk', async () => {
+      const provider = createProvider({ stream: true });
+      const chunk: Record<string, unknown> = {
+        id: 'chatcmpl-model',
+        object: 'chat.completion.chunk',
+        created: 1234567890,
+        model: 'actual-streamed-model',
+        choices: [
+          {
+            index: 0,
+            delta: { content: 'hi' },
+            finish_reason: 'stop',
+          },
+        ],
+      };
+
+      (
+        provider as unknown as { _client: { chat: { completions: { create: unknown } } } }
+      )._client.chat.completions.create = vi.fn().mockResolvedValue(mockStream([chunk]));
+
+      const result = await generate(provider, '', [], [
+        { role: 'user', content: [{ type: 'text', text: 'hi' }], toolCalls: [] },
+      ]);
+
+      expect(result.model).toBe('actual-streamed-model');
+    });
+  });
 });

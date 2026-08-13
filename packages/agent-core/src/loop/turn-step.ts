@@ -257,6 +257,7 @@ export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<{
     finishReason: effectiveStopReason,
     llmFirstTokenLatencyMs: response.streamTiming?.firstTokenLatencyMs,
     llmStreamDurationMs: response.streamTiming?.streamDurationMs,
+    reportedModel: response.model,
     ...stepEndProviderDiagnostics(response, effectiveStopReason),
   });
 

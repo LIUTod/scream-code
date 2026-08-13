@@ -509,6 +509,7 @@ function convertTool(tool: Tool): ResponseToolParam {
 }
 export class OpenAIResponsesStreamedMessage implements StreamedMessage {
   private _id: string | null = null;
+  private _model: string | null = null;
   private _usage: TokenUsage | null = null;
   private _finishReason: FinishReason | null = null;
   private _rawFinishReason: string | null = null;
@@ -524,6 +525,10 @@ export class OpenAIResponsesStreamedMessage implements StreamedMessage {
 
   get id(): string | null {
     return this._id;
+  }
+
+  get model(): string | null {
+    return this._model;
   }
 
   get usage(): TokenUsage | null {
@@ -568,6 +573,7 @@ export class OpenAIResponsesStreamedMessage implements StreamedMessage {
     response: RawObject,
   ): AsyncGenerator<StreamedMessagePart> {
     this._id = readStringField(response, 'id') ?? null;
+    this._model = readNullableStringField(response, 'model') ?? null;
     const usage = readObjectField(response, 'usage');
     if (usage !== undefined) {
       this._extractUsage(usage);
@@ -716,6 +722,12 @@ export class OpenAIResponsesStreamedMessage implements StreamedMessage {
             const respId = readStringField(responseObject, 'id');
             if (respId !== undefined) {
               this._id = respId;
+            }
+            // The response object also reports the serving model; capture the
+            // first non-empty value.
+            const respModel = readNullableStringField(responseObject, 'model');
+            if (respModel !== undefined) {
+              this._model = respModel;
             }
             break;
           }
