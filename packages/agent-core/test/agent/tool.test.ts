@@ -291,11 +291,16 @@ describe('Agent tools', () => {
       [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "<auto-mode-enter-reminder>" } ], "toolCalls": [], "origin": { "kind": "injection", "variant": "permission_mode" } }, "time": "<time>" }
       [wire] context.append_loop_event   { "event": { "type": "step.begin", "uuid": "<uuid-1>", "turnId": "0", "step": 1 }, "time": "<time>" }
       [emit] turn.step.started           { "turnId": 0, "step": 1, "stepId": "<uuid-1>" }
+      [wire] request.header              { "provider": "scream", "model": "mock-model", "modelAlias": "mock-model", "systemPrompt": "You are a deterministic test agent.", "activeTools": [ "Lookup" ], "messagesCount": 2, "estimatedInputTokens": 133, "time": "<time>" }
       [emit] assistant.delta             { "turnId": 0, "delta": "I will look it up." }
       [emit] tool.call.delta             { "turnId": 0, "toolCallId": "call_lookup", "name": "Lookup", "argumentsPart": "{\\"query\\":\\"moon\\"}" }
-      [wire] context.append_loop_event   { "event": { "type": "content.part", "uuid": "<uuid-2>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "part": { "type": "text", "text": "I will look it up." } }, "time": "<time>" }
+      [wire] context.append_loop_event   { "event": { "type": "block.start", "uuid": "<uuid-2>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "index": 0, "blockType": "text" }, "time": "<time>" }
+      [wire] context.append_loop_event   { "event": { "type": "content.part", "uuid": "<uuid-3>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "part": { "type": "text", "text": "I will look it up." } }, "time": "<time>" }
+      [wire] context.append_loop_event   { "event": { "type": "block.end", "uuid": "<uuid-4>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "index": 0, "blockType": "text" }, "time": "<time>" }
+      [wire] context.append_loop_event   { "event": { "type": "block.start", "uuid": "<uuid-5>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "index": 0, "blockType": "tool-call" }, "time": "<time>" }
       [wire] context.append_loop_event   { "event": { "type": "tool.call", "uuid": "call_lookup", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "toolCallId": "call_lookup", "name": "Lookup", "args": { "query": "moon" }, "description": "Look up a short test value." }, "time": "<time>" }
       [emit] tool.call.started           { "turnId": 0, "toolCallId": "call_lookup", "name": "Lookup", "args": { "query": "moon" }, "description": "Look up a short test value." }
+      [wire] context.append_loop_event   { "event": { "type": "block.end", "uuid": "<uuid-6>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "index": 0, "blockType": "tool-call" }, "time": "<time>" }
       [emit] toolCall                    { "turnId": 0, "toolCallId": "call_lookup", "args": { "query": "moon" } }
     `);
     expect(ctx.lastLlmInput()).toMatchInlineSnapshot(`
@@ -315,12 +320,15 @@ describe('Agent tools', () => {
       [wire] usage.record                { "model": "mock-model", "usage": { "inputOther": 88, "output": 16, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
       [emit] agent.status.updated        { "model": "mock-model", "thinkingLevel": "off", "contextTokens": 104, "maxContextTokens": 1000000, "contextUsage": 0.000104, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "permission": "auto", "usage": { "byModel": { "mock-model": { "inputOther": 88, "output": 16, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 88, "output": 16, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 88, "output": 16, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
       [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "<system-reminder>\\nThis task spans multiple steps. Use TodoList to track the remaining work and current phase.\\n</system-reminder>" } ], "toolCalls": [], "origin": { "kind": "system_trigger", "name": "todo_suggested" } }, "time": "<time>" }
-      [wire] context.append_loop_event   { "event": { "type": "step.begin", "uuid": "<uuid-3>", "turnId": "0", "step": 2 }, "time": "<time>" }
-      [emit] turn.step.started           { "turnId": 0, "step": 2, "stepId": "<uuid-3>" }
+      [wire] context.append_loop_event   { "event": { "type": "step.begin", "uuid": "<uuid-7>", "turnId": "0", "step": 2 }, "time": "<time>" }
+      [emit] turn.step.started           { "turnId": 0, "step": 2, "stepId": "<uuid-7>" }
+      [wire] request.header              { "provider": "scream", "model": "mock-model", "modelAlias": "mock-model", "systemPrompt": "You are a deterministic test agent.", "activeTools": [ "Lookup" ], "messagesCount": 5, "estimatedInputTokens": 186, "time": "<time>" }
       [emit] assistant.delta             { "turnId": 0, "delta": "The lookup result is moon-result." }
-      [wire] context.append_loop_event   { "event": { "type": "content.part", "uuid": "<uuid-4>", "turnId": "0", "step": 2, "stepUuid": "<uuid-3>", "part": { "type": "text", "text": "The lookup result is moon-result." } }, "time": "<time>" }
-      [wire] context.append_loop_event   { "event": { "type": "step.end", "uuid": "<uuid-3>", "turnId": "0", "step": 2, "usage": { "inputOther": 141, "output": 12, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }, "time": "<time>" }
-      [emit] turn.step.completed         { "turnId": 0, "step": 2, "stepId": "<uuid-3>", "usage": { "inputOther": 141, "output": 12, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }
+      [wire] context.append_loop_event   { "event": { "type": "block.start", "uuid": "<uuid-8>", "turnId": "0", "step": 2, "stepUuid": "<uuid-7>", "index": 0, "blockType": "text" }, "time": "<time>" }
+      [wire] context.append_loop_event   { "event": { "type": "content.part", "uuid": "<uuid-9>", "turnId": "0", "step": 2, "stepUuid": "<uuid-7>", "part": { "type": "text", "text": "The lookup result is moon-result." } }, "time": "<time>" }
+      [wire] context.append_loop_event   { "event": { "type": "block.end", "uuid": "<uuid-10>", "turnId": "0", "step": 2, "stepUuid": "<uuid-7>", "index": 0, "blockType": "text" }, "time": "<time>" }
+      [wire] context.append_loop_event   { "event": { "type": "step.end", "uuid": "<uuid-7>", "turnId": "0", "step": 2, "usage": { "inputOther": 141, "output": 12, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }, "time": "<time>" }
+      [emit] turn.step.completed         { "turnId": 0, "step": 2, "stepId": "<uuid-7>", "usage": { "inputOther": 141, "output": 12, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }
       [wire] usage.record                { "model": "mock-model", "usage": { "inputOther": 141, "output": 12, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
       [emit] agent.status.updated        { "model": "mock-model", "thinkingLevel": "off", "contextTokens": 153, "maxContextTokens": 1000000, "contextUsage": 0.000153, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "permission": "auto", "usage": { "byModel": { "mock-model": { "inputOther": 229, "output": 28, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 229, "output": 28, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 229, "output": 28, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
       [emit] turn.ended                  { "turnId": 0, "reason": "completed" }
@@ -343,12 +351,15 @@ describe('Agent tools', () => {
       [emit] turn.started                 { "turnId": 1, "origin": { "kind": "user" } }
       [wire] context.append_message       { "message": { "role": "user", "content": [ { "type": "text", "text": "Can you still use Lookup?" } ], "toolCalls": [], "origin": { "kind": "user" } }, "time": "<time>" }
       [wire] context.append_message       { "message": { "role": "user", "content": [ { "type": "text", "text": "<system-reminder>\\n## 当前会话状态\\n\\n### 最近操作\\n\\n- ✅ Lookup — moon\\n\\n</system-reminder>" } ], "toolCalls": [], "origin": { "kind": "injection", "variant": "session_memory" } }, "time": "<time>" }
-      [wire] context.append_loop_event    { "event": { "type": "step.begin", "uuid": "<uuid-5>", "turnId": "1", "step": 1 }, "time": "<time>" }
-      [emit] turn.step.started            { "turnId": 1, "step": 1, "stepId": "<uuid-5>" }
+      [wire] context.append_loop_event    { "event": { "type": "step.begin", "uuid": "<uuid-11>", "turnId": "1", "step": 1 }, "time": "<time>" }
+      [emit] turn.step.started            { "turnId": 1, "step": 1, "stepId": "<uuid-11>" }
+      [wire] request.header               { "provider": "scream", "model": "mock-model", "modelAlias": "mock-model", "systemPrompt": "You are a deterministic test agent.", "activeTools": [], "messagesCount": 8, "estimatedInputTokens": 199, "time": "<time>" }
       [emit] assistant.delta              { "turnId": 1, "delta": "No lookup tool is available." }
-      [wire] context.append_loop_event    { "event": { "type": "content.part", "uuid": "<uuid-6>", "turnId": "1", "step": 1, "stepUuid": "<uuid-5>", "part": { "type": "text", "text": "No lookup tool is available." } }, "time": "<time>" }
-      [wire] context.append_loop_event    { "event": { "type": "step.end", "uuid": "<uuid-5>", "turnId": "1", "step": 1, "usage": { "inputOther": 190, "output": 10, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }, "time": "<time>" }
-      [emit] turn.step.completed          { "turnId": 1, "step": 1, "stepId": "<uuid-5>", "usage": { "inputOther": 190, "output": 10, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }
+      [wire] context.append_loop_event    { "event": { "type": "block.start", "uuid": "<uuid-12>", "turnId": "1", "step": 1, "stepUuid": "<uuid-11>", "index": 0, "blockType": "text" }, "time": "<time>" }
+      [wire] context.append_loop_event    { "event": { "type": "content.part", "uuid": "<uuid-13>", "turnId": "1", "step": 1, "stepUuid": "<uuid-11>", "part": { "type": "text", "text": "No lookup tool is available." } }, "time": "<time>" }
+      [wire] context.append_loop_event    { "event": { "type": "block.end", "uuid": "<uuid-14>", "turnId": "1", "step": 1, "stepUuid": "<uuid-11>", "index": 0, "blockType": "text" }, "time": "<time>" }
+      [wire] context.append_loop_event    { "event": { "type": "step.end", "uuid": "<uuid-11>", "turnId": "1", "step": 1, "usage": { "inputOther": 190, "output": 10, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }, "time": "<time>" }
+      [emit] turn.step.completed          { "turnId": 1, "step": 1, "stepId": "<uuid-11>", "usage": { "inputOther": 190, "output": 10, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }
       [wire] usage.record                 { "model": "mock-model", "usage": { "inputOther": 190, "output": 10, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
       [emit] agent.status.updated         { "model": "mock-model", "thinkingLevel": "off", "contextTokens": 200, "maxContextTokens": 1000000, "contextUsage": 0.0002, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "permission": "auto", "usage": { "byModel": { "mock-model": { "inputOther": 419, "output": 38, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 419, "output": 38, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 190, "output": 10, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
       [emit] turn.ended                   { "turnId": 1, "reason": "completed" }

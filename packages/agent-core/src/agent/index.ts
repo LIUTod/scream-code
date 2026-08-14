@@ -467,6 +467,19 @@ export class Agent {
     if (partialMessageCount > 0) {
       requestMetadata.partialMessageCount = partialMessageCount;
     }
+    // Per-request snapshot in the wire log so the request can be rebuilt
+    // later (provider identity, model, rendered system prompt, active tools,
+    // message count).
+    this.records.logRecord({
+      type: 'request.header',
+      provider: provider.name,
+      model: provider.modelName,
+      modelAlias: this.config.modelAlias ?? '',
+      systemPrompt,
+      activeTools: tools.map((t) => t.name),
+      messagesCount: history.length,
+      estimatedInputTokens: requestMetadata.estimatedInputTokens ?? 0,
+    });
     this.log.info('llm request', {
       ...context,
       ...requestMetadata,

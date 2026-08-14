@@ -22,6 +22,7 @@ import {
   type JsonType,
   type ToolArgsValidator,
 } from '../tools/args-validator';
+import { randomUUID } from 'node:crypto';
 import { PathSecurityError } from '../tools/policies/path-access';
 
 import { isUserCancellation, userCancellationReason } from '../utils/abort';
@@ -80,6 +81,11 @@ export interface ToolCallStepContext {
 
 type PreflightedToolCall = RunnableToolCall | RejectedToolCall;
 
+// Per-step counter for executed tool-call block indices, keyed by stepUuid
+// (the base step and its effective variant share the same uuid, so batch
+// calls that pass either object share one monotonic sequence).
+const executedToolCallBlockIndex = new Map<string, number>();
+
 interface RunnableToolCall {
   readonly kind: 'runnable';
   readonly toolCall: ToolCall;
@@ -137,7 +143,7 @@ export async function recordUnexecutedToolCalls(
   step: ToolCallStepContext,
   response: LLMChatResponse,
 ): Promise<void> {
-  for (const toolCall of response.toolCalls) {
+  for (const [toolCallIndex, toolCall] of response.toolCalls.entries()) {
     const parsedArgs = parseToolCallArguments(toolCall.arguments);
     if (!parsedArgs.success) {
       step.log?.debug('recording unexecuted tool call with unparseable arguments', {
@@ -147,6 +153,17 @@ export async function recordUnexecutedToolCalls(
         error: parsedArgs.error,
       });
     }
+    // Mark the tool-call block so the step's block sequence (thinking/text/
+    // tool-call) is preserved in the trajectory.
+    await step.dispatchEvent({
+      type: 'block.start',
+      uuid: randomUUID(),
+      turnId: step.turnId,
+      step: step.currentStep,
+      stepUuid: step.stepUuid,
+      index: toolCallIndex,
+      blockType: 'tool-call',
+    });
     await step.dispatchEvent({
       type: 'tool.call',
       uuid: toolCall.id,
@@ -156,6 +173,15 @@ export async function recordUnexecutedToolCalls(
       toolCallId: toolCall.id,
       name: toolCall.name,
       args: parsedArgs.success ? parsedArgs.data : {},
+    });
+    await step.dispatchEvent({
+      type: 'block.end',
+      uuid: randomUUID(),
+      turnId: step.turnId,
+      step: step.currentStep,
+      stepUuid: step.stepUuid,
+      index: toolCallIndex,
+      blockType: 'tool-call',
     });
     await step.dispatchEvent({
       type: 'tool.result',
@@ -887,6 +913,21 @@ async function dispatchToolCall(
   displayFields?: ToolCallDisplayFields | undefined,
 ): Promise<void> {
   const { toolCall, toolName } = call;
+  // Mark the executed tool-call block so the step's block sequence
+  // (thinking/text/tool-call) is preserved in the trajectory. The index is
+  // a per-type ordinal (tool-call counts from 0 across the step), keyed by
+  // stepUuid so base/effective step objects share one sequence.
+  const index = executedToolCallBlockIndex.get(step.stepUuid) ?? 0;
+  executedToolCallBlockIndex.set(step.stepUuid, index + 1);
+  await step.dispatchEvent({
+    type: 'block.start',
+    uuid: randomUUID(),
+    turnId: step.turnId,
+    step: step.currentStep,
+    stepUuid: step.stepUuid,
+    index,
+    blockType: 'tool-call',
+  });
   await step.dispatchEvent({
     type: 'tool.call',
     uuid: toolCall.id,
@@ -898,5 +939,14 @@ async function dispatchToolCall(
     args,
     description: displayFields?.description,
     display: displayFields?.display,
+  });
+  await step.dispatchEvent({
+    type: 'block.end',
+    uuid: randomUUID(),
+    turnId: step.turnId,
+    step: step.currentStep,
+    stepUuid: step.stepUuid,
+    index,
+    blockType: 'tool-call',
   });
 }

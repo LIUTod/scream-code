@@ -336,6 +336,8 @@ function createChatStreamingCallbacks(deps: {
   readonly stepUuid: string;
 }): ChatStreamingCallbacks {
   const { dispatchEvent, turnId, currentStep, stepUuid } = deps;
+  let textIndex = 0;
+  let thinkIndex = 0;
 
   return {
     onTextDelta: (delta) => {
@@ -353,6 +355,16 @@ function createChatStreamingCallbacks(deps: {
       });
     },
     onTextPart: async (part) => {
+      const index = textIndex++;
+      await dispatchEvent({
+        type: 'block.start',
+        uuid: randomUUID(),
+        turnId,
+        step: currentStep,
+        stepUuid,
+        index,
+        blockType: 'text',
+      });
       await dispatchEvent({
         type: 'content.part',
         uuid: randomUUID(),
@@ -361,8 +373,27 @@ function createChatStreamingCallbacks(deps: {
         stepUuid,
         part,
       });
+      await dispatchEvent({
+        type: 'block.end',
+        uuid: randomUUID(),
+        turnId,
+        step: currentStep,
+        stepUuid,
+        index,
+        blockType: 'text',
+      });
     },
     onThinkPart: async (part) => {
+      const index = thinkIndex++;
+      await dispatchEvent({
+        type: 'block.start',
+        uuid: randomUUID(),
+        turnId,
+        step: currentStep,
+        stepUuid,
+        index,
+        blockType: 'thinking',
+      });
       await dispatchEvent({
         type: 'content.part',
         uuid: randomUUID(),
@@ -370,6 +401,15 @@ function createChatStreamingCallbacks(deps: {
         step: currentStep,
         stepUuid,
         part,
+      });
+      await dispatchEvent({
+        type: 'block.end',
+        uuid: randomUUID(),
+        turnId,
+        step: currentStep,
+        stepUuid,
+        index,
+        blockType: 'thinking',
       });
     },
   };

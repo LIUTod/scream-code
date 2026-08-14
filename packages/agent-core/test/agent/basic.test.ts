@@ -16,10 +16,15 @@ it('runs a text-only agent turn from prompt to completion', async () => {
     [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "Hello" } ], "toolCalls": [], "origin": { "kind": "user" } }, "time": "<time>" }
     [wire] context.append_loop_event   { "event": { "type": "step.begin", "uuid": "<uuid-1>", "turnId": "0", "step": 1 }, "time": "<time>" }
     [emit] turn.step.started           { "turnId": 0, "step": 1, "stepId": "<uuid-1>" }
+    [wire] request.header              { "provider": "scream", "model": "mock-model", "modelAlias": "mock-model", "systemPrompt": "You are a deterministic test agent.", "activeTools": [], "messagesCount": 1, "estimatedInputTokens": 12, "time": "<time>" }
     [emit] thinking.delta              { "turnId": 0, "delta": "<think-1>" }
     [emit] assistant.delta             { "turnId": 0, "delta": "<text-1>" }
-    [wire] context.append_loop_event   { "event": { "type": "content.part", "uuid": "<uuid-2>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "part": { "type": "think", "think": "<think-1>" } }, "time": "<time>" }
-    [wire] context.append_loop_event   { "event": { "type": "content.part", "uuid": "<uuid-3>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "part": { "type": "text", "text": "<text-1>" } }, "time": "<time>" }
+    [wire] context.append_loop_event   { "event": { "type": "block.start", "uuid": "<uuid-2>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "index": 0, "blockType": "thinking" }, "time": "<time>" }
+    [wire] context.append_loop_event   { "event": { "type": "content.part", "uuid": "<uuid-3>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "part": { "type": "think", "think": "<think-1>" } }, "time": "<time>" }
+    [wire] context.append_loop_event   { "event": { "type": "block.end", "uuid": "<uuid-4>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "index": 0, "blockType": "thinking" }, "time": "<time>" }
+    [wire] context.append_loop_event   { "event": { "type": "block.start", "uuid": "<uuid-5>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "index": 0, "blockType": "text" }, "time": "<time>" }
+    [wire] context.append_loop_event   { "event": { "type": "content.part", "uuid": "<uuid-6>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "part": { "type": "text", "text": "<text-1>" } }, "time": "<time>" }
+    [wire] context.append_loop_event   { "event": { "type": "block.end", "uuid": "<uuid-7>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "index": 0, "blockType": "text" }, "time": "<time>" }
     [wire] context.append_loop_event   { "event": { "type": "step.end", "uuid": "<uuid-1>", "turnId": "0", "step": 1, "usage": { "inputOther": 3, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }, "time": "<time>" }
     [emit] turn.step.completed         { "turnId": 0, "step": 1, "stepId": "<uuid-1>", "usage": { "inputOther": 3, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }
     [wire] usage.record                { "model": "mock-model", "usage": { "inputOther": 3, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
@@ -93,9 +98,12 @@ it('runs an agent turn through builtin tool approval and execution', async () =>
     [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "Run a command that prints lookup-result" } ], "toolCalls": [], "origin": { "kind": "user" } }, "time": "<time>" }
     [wire] context.append_loop_event   { "event": { "type": "step.begin", "uuid": "<uuid-1>", "turnId": "0", "step": 1 }, "time": "<time>" }
     [emit] turn.step.started           { "turnId": 0, "step": 1, "stepId": "<uuid-1>" }
+    [wire] request.header              { "provider": "scream", "model": "mock-model", "modelAlias": "mock-model", "systemPrompt": "You are a deterministic test agent.", "activeTools": [ "Bash" ], "messagesCount": 1, "estimatedInputTokens": 1133, "time": "<time>" }
     [emit] assistant.delta             { "turnId": 0, "delta": "I will run that." }
     [emit] tool.call.delta             { "turnId": 0, "toolCallId": "call_bash", "name": "Bash", "argumentsPart": "{\\"command\\":\\"printf lookup-result\\",\\"timeout\\":60}" }
-    [wire] context.append_loop_event   { "event": { "type": "content.part", "uuid": "<uuid-2>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "part": { "type": "text", "text": "I will run that." } }, "time": "<time>" }
+    [wire] context.append_loop_event   { "event": { "type": "block.start", "uuid": "<uuid-2>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "index": 0, "blockType": "text" }, "time": "<time>" }
+    [wire] context.append_loop_event   { "event": { "type": "content.part", "uuid": "<uuid-3>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "part": { "type": "text", "text": "I will run that." } }, "time": "<time>" }
+    [wire] context.append_loop_event   { "event": { "type": "block.end", "uuid": "<uuid-4>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "index": 0, "blockType": "text" }, "time": "<time>" }
     [emit] requestApproval             { "turnId": 0, "toolCallId": "call_bash", "toolName": "Bash", "action": "Running: printf lookup-result", "display": { "kind": "command", "command": "printf lookup-result", "cwd": "<cwd>", "language": "bash" } }
   `);
   expect(ctx.lastLlmInput()).toMatchInlineSnapshot(`
@@ -108,8 +116,10 @@ it('runs an agent turn through builtin tool approval and execution', async () =>
   ctx.mockNextResponse({ type: 'text', text: 'The command printed lookup-result.' });
   expect(await ctx.untilTurnEnd()).toMatchInlineSnapshot(`
     [wire] permission.record_approval_result   { "turnId": 0, "toolCallId": "call_bash", "toolName": "Bash", "action": "Running: printf lookup-result", "result": { "decision": "approved", "selectedLabel": "approve" }, "time": "<time>" }
+    [wire] context.append_loop_event           { "event": { "type": "block.start", "uuid": "<uuid-5>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "index": 0, "blockType": "tool-call" }, "time": "<time>" }
     [wire] context.append_loop_event           { "event": { "type": "tool.call", "uuid": "call_bash", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "toolCallId": "call_bash", "name": "Bash", "args": { "command": "printf lookup-result", "timeout": 60 }, "description": "Running: printf lookup-result", "display": { "kind": "command", "command": "printf lookup-result", "cwd": "<cwd>", "language": "bash" } }, "time": "<time>" }
     [emit] tool.call.started                   { "turnId": 0, "toolCallId": "call_bash", "name": "Bash", "args": { "command": "printf lookup-result", "timeout": 60 }, "description": "Running: printf lookup-result", "display": { "kind": "command", "command": "printf lookup-result", "cwd": "<cwd>", "language": "bash" } }
+    [wire] context.append_loop_event           { "event": { "type": "block.end", "uuid": "<uuid-6>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "index": 0, "blockType": "tool-call" }, "time": "<time>" }
     [emit] tool.progress                       { "turnId": 0, "toolCallId": "call_bash", "update": { "kind": "stdout", "text": "lookup-result" } }
     [wire] context.append_loop_event           { "event": { "type": "tool.result", "parentUuid": "call_bash", "toolCallId": "call_bash", "result": { "output": "lookup-result" } }, "time": "<time>" }
     [emit] tool.result                         { "turnId": 0, "toolCallId": "call_bash", "output": "lookup-result" }
@@ -118,12 +128,15 @@ it('runs an agent turn through builtin tool approval and execution', async () =>
     [wire] usage.record                        { "model": "mock-model", "usage": { "inputOther": 11, "output": 22, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
     [emit] agent.status.updated                { "model": "mock-model", "thinkingLevel": "off", "contextTokens": 33, "maxContextTokens": 1000000, "contextUsage": 0.000033, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "permission": "manual", "usage": { "byModel": { "mock-model": { "inputOther": 11, "output": 22, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 11, "output": 22, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 11, "output": 22, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
     [wire] context.append_message              { "message": { "role": "user", "content": [ { "type": "text", "text": "<system-reminder>\\nThis task spans multiple steps. Use TodoList to track the remaining work and current phase.\\n</system-reminder>" } ], "toolCalls": [], "origin": { "kind": "system_trigger", "name": "todo_suggested" } }, "time": "<time>" }
-    [wire] context.append_loop_event           { "event": { "type": "step.begin", "uuid": "<uuid-3>", "turnId": "0", "step": 2 }, "time": "<time>" }
-    [emit] turn.step.started                   { "turnId": 0, "step": 2, "stepId": "<uuid-3>" }
+    [wire] context.append_loop_event           { "event": { "type": "step.begin", "uuid": "<uuid-7>", "turnId": "0", "step": 2 }, "time": "<time>" }
+    [emit] turn.step.started                   { "turnId": 0, "step": 2, "stepId": "<uuid-7>" }
+    [wire] request.header                      { "provider": "scream", "model": "mock-model", "modelAlias": "mock-model", "systemPrompt": "You are a deterministic test agent.", "activeTools": [ "Bash" ], "messagesCount": 4, "estimatedInputTokens": 1193, "time": "<time>" }
     [emit] assistant.delta                     { "turnId": 0, "delta": "The command printed lookup-result." }
-    [wire] context.append_loop_event           { "event": { "type": "content.part", "uuid": "<uuid-4>", "turnId": "0", "step": 2, "stepUuid": "<uuid-3>", "part": { "type": "text", "text": "The command printed lookup-result." } }, "time": "<time>" }
-    [wire] context.append_loop_event           { "event": { "type": "step.end", "uuid": "<uuid-3>", "turnId": "0", "step": 2, "usage": { "inputOther": 71, "output": 12, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }, "time": "<time>" }
-    [emit] turn.step.completed                 { "turnId": 0, "step": 2, "stepId": "<uuid-3>", "usage": { "inputOther": 71, "output": 12, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }
+    [wire] context.append_loop_event           { "event": { "type": "block.start", "uuid": "<uuid-8>", "turnId": "0", "step": 2, "stepUuid": "<uuid-7>", "index": 0, "blockType": "text" }, "time": "<time>" }
+    [wire] context.append_loop_event           { "event": { "type": "content.part", "uuid": "<uuid-9>", "turnId": "0", "step": 2, "stepUuid": "<uuid-7>", "part": { "type": "text", "text": "The command printed lookup-result." } }, "time": "<time>" }
+    [wire] context.append_loop_event           { "event": { "type": "block.end", "uuid": "<uuid-10>", "turnId": "0", "step": 2, "stepUuid": "<uuid-7>", "index": 0, "blockType": "text" }, "time": "<time>" }
+    [wire] context.append_loop_event           { "event": { "type": "step.end", "uuid": "<uuid-7>", "turnId": "0", "step": 2, "usage": { "inputOther": 71, "output": 12, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }, "time": "<time>" }
+    [emit] turn.step.completed                 { "turnId": 0, "step": 2, "stepId": "<uuid-7>", "usage": { "inputOther": 71, "output": 12, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }
     [wire] usage.record                        { "model": "mock-model", "usage": { "inputOther": 71, "output": 12, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
     [emit] agent.status.updated                { "model": "mock-model", "thinkingLevel": "off", "contextTokens": 83, "maxContextTokens": 1000000, "contextUsage": 0.000083, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "permission": "manual", "usage": { "byModel": { "mock-model": { "inputOther": 82, "output": 34, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 82, "output": 34, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 82, "output": 34, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
     [emit] turn.ended                          { "turnId": 0, "reason": "completed" }

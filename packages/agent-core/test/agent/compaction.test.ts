@@ -209,6 +209,7 @@ describe('Agent compaction', () => {
       [wire] context.append_message     { "message": { "role": "user", "content": [ { "type": "text", "text": "recent user three" } ], "toolCalls": [], "origin": { "kind": "user" } }, "time": "<time>" }
       [wire] full_compaction.begin      { "source": "manual", "instruction": "Keep the important test facts.", "time": "<time>" }
       [emit] compaction.started         { "trigger": "manual", "instruction": "Keep the important test facts." }
+      [wire] request.header             { "provider": "scream", "model": "scream-code", "modelAlias": "scream-code", "systemPrompt": "You are a deterministic test agent.", "activeTools": [], "messagesCount": 7, "estimatedInputTokens": 1363, "time": "<time>" }
       [wire] usage.record               { "model": "scream-code", "usage": { "inputOther": 1354, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "session", "time": "<time>" }
       [emit] agent.status.updated       { "model": "scream-code", "thinkingLevel": "off", "contextTokens": 120, "maxContextTokens": 256000, "contextUsage": 0.00046875, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "permission": "manual", "usage": { "byModel": { "scream-code": { "inputOther": 1354, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 1354, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
       [wire] full_compaction.complete   { "time": "<time>" }
@@ -970,6 +971,7 @@ describe('Agent compaction', () => {
       [wire] full_compaction.begin      { "source": "manual", "time": "<time>" }
       [emit] compaction.started         { "trigger": "manual" }
       [wire] context.append_message     { "message": { "role": "user", "content": [ { "type": "text", "text": "new user while compacting" } ], "toolCalls": [], "origin": { "kind": "user" } }, "time": "<time>" }
+      [wire] request.header             { "provider": "scream", "model": "scream-code", "modelAlias": "scream-code", "systemPrompt": "You are a deterministic test agent.", "activeTools": [], "messagesCount": 5, "estimatedInputTokens": 1341, "time": "<time>" }
       [wire] usage.record               { "model": "scream-code", "usage": { "inputOther": 1332, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "session", "time": "<time>" }
       [emit] agent.status.updated       { "model": "scream-code", "thinkingLevel": "off", "contextTokens": 80, "maxContextTokens": 256000, "contextUsage": 0.0003125, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "permission": "manual", "usage": { "byModel": { "scream-code": { "inputOther": 1332, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 1332, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
       [wire] full_compaction.complete   { "time": "<time>" }
@@ -1026,6 +1028,7 @@ describe('Agent compaction', () => {
       [emit] compaction.started       { "trigger": "manual" }
       [wire] context.clear            { "time": "<time>" }
       [emit] agent.status.updated     { "model": "scream-code", "thinkingLevel": "off", "contextTokens": 0, "maxContextTokens": 256000, "contextUsage": 0, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "permission": "manual" }
+      [wire] request.header           { "provider": "scream", "model": "scream-code", "modelAlias": "scream-code", "systemPrompt": "You are a deterministic test agent.", "activeTools": [], "messagesCount": 5, "estimatedInputTokens": 1341, "time": "<time>" }
       [wire] usage.record             { "model": "scream-code", "usage": { "inputOther": 1332, "output": 7, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "session", "time": "<time>" }
       [emit] agent.status.updated     { "model": "scream-code", "thinkingLevel": "off", "contextTokens": 0, "maxContextTokens": 256000, "contextUsage": 0, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "permission": "manual", "usage": { "byModel": { "scream-code": { "inputOther": 1332, "output": 7, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 1332, "output": 7, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
       [wire] full_compaction.cancel   { "time": "<time>" }
@@ -1069,6 +1072,7 @@ describe('Agent compaction', () => {
       [wire] full_compaction.begin       { "source": "auto", "time": "<time>" }
       [emit] compaction.started          { "trigger": "auto" }
       [emit] compaction.blocked          { "turnId": 0 }
+      [wire] request.header              { "provider": "scream", "model": "scream-code", "modelAlias": "scream-code", "systemPrompt": "You are a deterministic test agent.", "activeTools": [], "messagesCount": 3, "estimatedInputTokens": 1328, "time": "<time>" }
       [wire] usage.record                { "model": "scream-code", "usage": { "inputOther": 1319, "output": 9, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "session", "time": "<time>" }
       [emit] agent.status.updated        { "model": "scream-code", "thinkingLevel": "off", "contextTokens": 950000, "maxContextTokens": 256000, "contextUsage": 3.7109375, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "permission": "manual", "usage": { "byModel": { "scream-code": { "inputOther": 1319, "output": 9, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 1319, "output": 9, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
       [wire] full_compaction.complete    { "time": "<time>" }
@@ -1077,8 +1081,11 @@ describe('Agent compaction', () => {
       [emit] agent.status.updated        { "model": "scream-code", "thinkingLevel": "off", "contextTokens": 98, "maxContextTokens": 256000, "contextUsage": 0.0003828125, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "permission": "manual", "usage": { "byModel": { "scream-code": { "inputOther": 1319, "output": 9, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 1319, "output": 9, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
       [wire] context.append_loop_event   { "event": { "type": "step.begin", "uuid": "<uuid-1>", "turnId": "0", "step": 1 }, "time": "<time>" }
       [emit] turn.step.started           { "turnId": 0, "step": 1, "stepId": "<uuid-1>" }
+      [wire] request.header              { "provider": "scream", "model": "scream-code", "modelAlias": "scream-code", "systemPrompt": "You are a deterministic test agent.", "activeTools": [], "messagesCount": 6, "estimatedInputTokens": 110, "time": "<time>" }
       [emit] assistant.delta             { "turnId": 0, "delta": "I can answer after compaction." }
-      [wire] context.append_loop_event   { "event": { "type": "content.part", "uuid": "<uuid-2>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "part": { "type": "text", "text": "I can answer after compaction." } }, "time": "<time>" }
+      [wire] context.append_loop_event   { "event": { "type": "block.start", "uuid": "<uuid-2>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "index": 0, "blockType": "text" }, "time": "<time>" }
+      [wire] context.append_loop_event   { "event": { "type": "content.part", "uuid": "<uuid-3>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "part": { "type": "text", "text": "I can answer after compaction." } }, "time": "<time>" }
+      [wire] context.append_loop_event   { "event": { "type": "block.end", "uuid": "<uuid-4>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "index": 0, "blockType": "text" }, "time": "<time>" }
       [wire] context.append_loop_event   { "event": { "type": "step.end", "uuid": "<uuid-1>", "turnId": "0", "step": 1, "usage": { "inputOther": 101, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }, "time": "<time>" }
       [emit] turn.step.completed         { "turnId": 0, "step": 1, "stepId": "<uuid-1>", "usage": { "inputOther": 101, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }
       [wire] usage.record                { "model": "scream-code", "usage": { "inputOther": 101, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
@@ -1611,6 +1618,7 @@ describe('Agent compaction', () => {
       [wire] full_compaction.begin       { "source": "auto", "time": "<time>" }
       [emit] compaction.started          { "trigger": "auto" }
       [emit] compaction.blocked          { "turnId": 0 }
+      [wire] request.header              { "provider": "scream", "model": "mock-model", "modelAlias": "mock-model", "systemPrompt": "You are a deterministic test agent.", "activeTools": [], "messagesCount": 2, "estimatedInputTokens": 1324, "time": "<time>" }
       [wire] usage.record                { "model": "mock-model", "usage": { "inputOther": 1315, "output": 9, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "session", "time": "<time>" }
       [emit] agent.status.updated        { "model": "mock-model", "thinkingLevel": "off", "contextTokens": 0, "maxContextTokens": 1000000, "contextUsage": 0, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "permission": "manual", "usage": { "byModel": { "mock-model": { "inputOther": 1315, "output": 9, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 1315, "output": 9, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
       [wire] full_compaction.complete    { "time": "<time>" }
@@ -1619,11 +1627,16 @@ describe('Agent compaction', () => {
       [emit] agent.status.updated        { "model": "mock-model", "thinkingLevel": "off", "contextTokens": 64, "maxContextTokens": 1000000, "contextUsage": 0.000064, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "permission": "manual", "usage": { "byModel": { "mock-model": { "inputOther": 1315, "output": 9, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 1315, "output": 9, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
       [wire] context.append_loop_event   { "event": { "type": "step.begin", "uuid": "<uuid-1>", "turnId": "0", "step": 1 }, "time": "<time>" }
       [emit] turn.step.started           { "turnId": 0, "step": 1, "stepId": "<uuid-1>" }
+      [wire] request.header              { "provider": "scream", "model": "mock-model", "modelAlias": "mock-model", "systemPrompt": "You are a deterministic test agent.", "activeTools": [], "messagesCount": 1, "estimatedInputTokens": 76, "time": "<time>" }
       [emit] assistant.delta             { "turnId": 0, "delta": "I need a tool." }
       [emit] tool.call.delta             { "turnId": 0, "toolCallId": "call_missing", "name": "MissingTool", "argumentsPart": "{}" }
-      [wire] context.append_loop_event   { "event": { "type": "content.part", "uuid": "<uuid-2>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "part": { "type": "text", "text": "I need a tool." } }, "time": "<time>" }
+      [wire] context.append_loop_event   { "event": { "type": "block.start", "uuid": "<uuid-2>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "index": 0, "blockType": "text" }, "time": "<time>" }
+      [wire] context.append_loop_event   { "event": { "type": "content.part", "uuid": "<uuid-3>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "part": { "type": "text", "text": "I need a tool." } }, "time": "<time>" }
+      [wire] context.append_loop_event   { "event": { "type": "block.end", "uuid": "<uuid-4>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "index": 0, "blockType": "text" }, "time": "<time>" }
+      [wire] context.append_loop_event   { "event": { "type": "block.start", "uuid": "<uuid-5>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "index": 0, "blockType": "tool-call" }, "time": "<time>" }
       [wire] context.append_loop_event   { "event": { "type": "tool.call", "uuid": "call_missing", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "toolCallId": "call_missing", "name": "MissingTool", "args": {} }, "time": "<time>" }
       [emit] tool.call.started           { "turnId": 0, "toolCallId": "call_missing", "name": "MissingTool", "args": {} }
+      [wire] context.append_loop_event   { "event": { "type": "block.end", "uuid": "<uuid-6>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "index": 0, "blockType": "tool-call" }, "time": "<time>" }
       [wire] context.append_loop_event   { "event": { "type": "tool.result", "parentUuid": "call_missing", "toolCallId": "call_missing", "result": { "output": "Tool \\"MissingTool\\" not found", "isError": true } }, "time": "<time>" }
       [emit] tool.result                 { "turnId": 0, "toolCallId": "call_missing", "output": "Tool \\"MissingTool\\" not found", "isError": true }
       [wire] context.append_loop_event   { "event": { "type": "step.end", "uuid": "<uuid-1>", "turnId": "0", "step": 1, "usage": { "inputOther": 67, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "tool_use" }, "time": "<time>" }

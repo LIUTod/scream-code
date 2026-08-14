@@ -118,6 +118,7 @@ describe('Agent turn flow', () => {
       [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "Trigger generate failure" } ], "toolCalls": [], "origin": { "kind": "user" } }, "time": "<time>" }
       [wire] context.append_loop_event   { "event": { "type": "step.begin", "uuid": "<uuid-1>", "turnId": "0", "step": 1 }, "time": "<time>" }
       [emit] turn.step.started           { "turnId": 0, "step": 1, "stepId": "<uuid-1>" }
+      [wire] request.header              { "provider": "scream", "model": "mock-model", "modelAlias": "mock-model", "systemPrompt": "You are a deterministic test agent.", "activeTools": [], "messagesCount": 1, "estimatedInputTokens": 16, "time": "<time>" }
       [emit] turn.step.interrupted       { "turnId": 0, "step": 1, "reason": "error", "message": "Unexpected generate call #1" }
       [emit] turn.ended                  { "turnId": 0, "reason": "failed", "error": { "code": "internal", "message": "Unexpected generate call #1", "name": "Error", "retryable": false, "details": { "turnId": 0 } } }
     `);
@@ -133,7 +134,7 @@ describe('Agent turn flow', () => {
     await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Hello without login' }] });
 
     expect(await ctx.untilTurnEnd()).toMatchInlineSnapshot(`
-      [wire] metadata                 { "protocol_version": "1.3", "created_at": "<time>" }
+      [wire] metadata                 { "protocol_version": "1.4", "created_at": "<time>" }
       [wire] turn.prompt              { "input": [ { "type": "text", "text": "Hello without login" } ], "origin": { "kind": "user" }, "time": "<time>" }
       [emit] turn.started             { "turnId": 0, "origin": { "kind": "user" } }
       [wire] context.append_message   { "message": { "role": "user", "content": [ { "type": "text", "text": "Hello without login" } ], "toolCalls": [], "origin": { "kind": "user" } }, "time": "<time>" }
@@ -1156,9 +1157,12 @@ describe('Agent turn flow', () => {
       [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "Run a command" } ], "toolCalls": [], "origin": { "kind": "user" } }, "time": "<time>" }
       [wire] context.append_loop_event   { "event": { "type": "step.begin", "uuid": "<uuid-1>", "turnId": "0", "step": 1 }, "time": "<time>" }
       [emit] turn.step.started           { "turnId": 0, "step": 1, "stepId": "<uuid-1>" }
+      [wire] request.header              { "provider": "scream", "model": "mock-model", "modelAlias": "mock-model", "systemPrompt": "You are a deterministic test agent.", "activeTools": [ "Bash" ], "messagesCount": 1, "estimatedInputTokens": 1127, "time": "<time>" }
       [emit] assistant.delta             { "turnId": 0, "delta": "I will run Bash." }
       [emit] tool.call.delta             { "turnId": 0, "toolCallId": "call_bash", "name": "Bash", "argumentsPart": "{\\"command\\":\\"printf should-not-run\\",\\"timeout\\":60}" }
-      [wire] context.append_loop_event   { "event": { "type": "content.part", "uuid": "<uuid-2>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "part": { "type": "text", "text": "I will run Bash." } }, "time": "<time>" }
+      [wire] context.append_loop_event   { "event": { "type": "block.start", "uuid": "<uuid-2>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "index": 0, "blockType": "text" }, "time": "<time>" }
+      [wire] context.append_loop_event   { "event": { "type": "content.part", "uuid": "<uuid-3>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "part": { "type": "text", "text": "I will run Bash." } }, "time": "<time>" }
+      [wire] context.append_loop_event   { "event": { "type": "block.end", "uuid": "<uuid-4>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "index": 0, "blockType": "text" }, "time": "<time>" }
       [emit] requestApproval             { "turnId": 0, "toolCallId": "call_bash", "toolName": "Bash", "action": "Running: printf should-not-run", "display": { "kind": "command", "command": "printf should-not-run", "cwd": "<cwd>", "language": "bash" } }
     `);
     expect(ctx.lastLlmInput()).toMatchInlineSnapshot(`
@@ -1171,8 +1175,10 @@ describe('Agent turn flow', () => {
 
     expect(await ctx.untilTurnEnd()).toMatchInlineSnapshot(`
       [wire] turn.cancel                 { "turnId": 0, "time": "<time>" }
+      [wire] context.append_loop_event   { "event": { "type": "block.start", "uuid": "<uuid-5>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "index": 0, "blockType": "tool-call" }, "time": "<time>" }
       [wire] context.append_loop_event   { "event": { "type": "tool.call", "uuid": "call_bash", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "toolCallId": "call_bash", "name": "Bash", "args": { "command": "printf should-not-run", "timeout": 60 }, "description": "Running: printf should-not-run", "display": { "kind": "command", "command": "printf should-not-run", "cwd": "<cwd>", "language": "bash" } }, "time": "<time>" }
       [emit] tool.call.started           { "turnId": 0, "toolCallId": "call_bash", "name": "Bash", "args": { "command": "printf should-not-run", "timeout": 60 }, "description": "Running: printf should-not-run", "display": { "kind": "command", "command": "printf should-not-run", "cwd": "<cwd>", "language": "bash" } }
+      [wire] context.append_loop_event   { "event": { "type": "block.end", "uuid": "<uuid-6>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "index": 0, "blockType": "tool-call" }, "time": "<time>" }
       [wire] context.append_loop_event   { "event": { "type": "tool.result", "parentUuid": "call_bash", "toolCallId": "call_bash", "result": { "output": "The user manually interrupted \\"Bash\\" (and anything else running at the same time). This was a deliberate user action, not a system error, timeout, or capacity limit. Do not retry automatically or guess at the cause — wait for the user's next instruction.", "isError": true } }, "time": "<time>" }
       [emit] tool.result                 { "turnId": 0, "toolCallId": "call_bash", "output": "The user manually interrupted \\"Bash\\" (and anything else running at the same time). This was a deliberate user action, not a system error, timeout, or capacity limit. Do not retry automatically or guess at the cause — wait for the user's next instruction.", "isError": true }
       [emit] turn.step.interrupted       { "turnId": 0, "step": 1, "reason": "aborted" }
@@ -1203,9 +1209,12 @@ describe('Agent turn flow', () => {
       [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "Run Bash, then listen" } ], "toolCalls": [], "origin": { "kind": "user" } }, "time": "<time>" }
       [wire] context.append_loop_event   { "event": { "type": "step.begin", "uuid": "<uuid-1>", "turnId": "0", "step": 1 }, "time": "<time>" }
       [emit] turn.step.started           { "turnId": 0, "step": 1, "stepId": "<uuid-1>" }
+      [wire] request.header              { "provider": "scream", "model": "mock-model", "modelAlias": "mock-model", "systemPrompt": "You are a deterministic test agent.", "activeTools": [ "Bash" ], "messagesCount": 1, "estimatedInputTokens": 1129, "time": "<time>" }
       [emit] assistant.delta             { "turnId": 0, "delta": "I will ask first." }
       [emit] tool.call.delta             { "turnId": 0, "toolCallId": "call_bash", "name": "Bash", "argumentsPart": "{\\"command\\":\\"printf approved\\",\\"timeout\\":60}" }
-      [wire] context.append_loop_event   { "event": { "type": "content.part", "uuid": "<uuid-2>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "part": { "type": "text", "text": "I will ask first." } }, "time": "<time>" }
+      [wire] context.append_loop_event   { "event": { "type": "block.start", "uuid": "<uuid-2>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "index": 0, "blockType": "text" }, "time": "<time>" }
+      [wire] context.append_loop_event   { "event": { "type": "content.part", "uuid": "<uuid-3>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "part": { "type": "text", "text": "I will ask first." } }, "time": "<time>" }
+      [wire] context.append_loop_event   { "event": { "type": "block.end", "uuid": "<uuid-4>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "index": 0, "blockType": "text" }, "time": "<time>" }
       [emit] requestApproval             { "turnId": 0, "toolCallId": "call_bash", "toolName": "Bash", "action": "Running: printf approved", "display": { "kind": "command", "command": "printf approved", "cwd": "<cwd>", "language": "bash" } }
     `);
     expect(ctx.lastLlmInput()).toMatchInlineSnapshot(`
@@ -1228,8 +1237,10 @@ describe('Agent turn flow', () => {
 
     expect(await ctx.untilTurnEnd()).toMatchInlineSnapshot(`
       [wire] permission.record_approval_result   { "turnId": 0, "toolCallId": "call_bash", "toolName": "Bash", "action": "Running: printf approved", "result": { "decision": "approved", "selectedLabel": "approve" }, "time": "<time>" }
+      [wire] context.append_loop_event           { "event": { "type": "block.start", "uuid": "<uuid-5>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "index": 0, "blockType": "tool-call" }, "time": "<time>" }
       [wire] context.append_loop_event           { "event": { "type": "tool.call", "uuid": "call_bash", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "toolCallId": "call_bash", "name": "Bash", "args": { "command": "printf approved", "timeout": 60 }, "description": "Running: printf approved", "display": { "kind": "command", "command": "printf approved", "cwd": "<cwd>", "language": "bash" } }, "time": "<time>" }
       [emit] tool.call.started                   { "turnId": 0, "toolCallId": "call_bash", "name": "Bash", "args": { "command": "printf approved", "timeout": 60 }, "description": "Running: printf approved", "display": { "kind": "command", "command": "printf approved", "cwd": "<cwd>", "language": "bash" } }
+      [wire] context.append_loop_event           { "event": { "type": "block.end", "uuid": "<uuid-6>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "index": 0, "blockType": "tool-call" }, "time": "<time>" }
       [emit] tool.progress                       { "turnId": 0, "toolCallId": "call_bash", "update": { "kind": "stdout", "text": "approved" } }
       [wire] context.append_loop_event           { "event": { "type": "tool.result", "parentUuid": "call_bash", "toolCallId": "call_bash", "result": { "output": "approved" } }, "time": "<time>" }
       [emit] tool.result                         { "turnId": 0, "toolCallId": "call_bash", "output": "approved" }
@@ -1239,12 +1250,15 @@ describe('Agent turn flow', () => {
       [emit] agent.status.updated                { "model": "mock-model", "thinkingLevel": "off", "contextTokens": 29, "maxContextTokens": 1000000, "contextUsage": 0.000029, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "permission": "manual", "usage": { "byModel": { "mock-model": { "inputOther": 7, "output": 22, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 7, "output": 22, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 7, "output": 22, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
       [wire] context.append_message              { "message": { "role": "user", "content": [ { "type": "text", "text": "Also mention the steer." } ], "toolCalls": [], "origin": { "kind": "user" } }, "time": "<time>" }
       [wire] context.append_message              { "message": { "role": "user", "content": [ { "type": "text", "text": "<system-reminder>\\nThis task spans multiple steps. Use TodoList to track the remaining work and current phase.\\n</system-reminder>" } ], "toolCalls": [], "origin": { "kind": "system_trigger", "name": "todo_suggested" } }, "time": "<time>" }
-      [wire] context.append_loop_event           { "event": { "type": "step.begin", "uuid": "<uuid-3>", "turnId": "0", "step": 2 }, "time": "<time>" }
-      [emit] turn.step.started                   { "turnId": 0, "step": 2, "stepId": "<uuid-3>" }
+      [wire] context.append_loop_event           { "event": { "type": "step.begin", "uuid": "<uuid-7>", "turnId": "0", "step": 2 }, "time": "<time>" }
+      [emit] turn.step.started                   { "turnId": 0, "step": 2, "stepId": "<uuid-7>" }
+      [wire] request.header                      { "provider": "scream", "model": "mock-model", "modelAlias": "mock-model", "systemPrompt": "You are a deterministic test agent.", "activeTools": [ "Bash" ], "messagesCount": 5, "estimatedInputTokens": 1194, "time": "<time>" }
       [emit] assistant.delta                     { "turnId": 0, "delta": "Approved, and I saw the steer." }
-      [wire] context.append_loop_event           { "event": { "type": "content.part", "uuid": "<uuid-4>", "turnId": "0", "step": 2, "stepUuid": "<uuid-3>", "part": { "type": "text", "text": "Approved, and I saw the steer." } }, "time": "<time>" }
-      [wire] context.append_loop_event           { "event": { "type": "step.end", "uuid": "<uuid-3>", "turnId": "0", "step": 2, "usage": { "inputOther": 72, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }, "time": "<time>" }
-      [emit] turn.step.completed                 { "turnId": 0, "step": 2, "stepId": "<uuid-3>", "usage": { "inputOther": 72, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }
+      [wire] context.append_loop_event           { "event": { "type": "block.start", "uuid": "<uuid-8>", "turnId": "0", "step": 2, "stepUuid": "<uuid-7>", "index": 0, "blockType": "text" }, "time": "<time>" }
+      [wire] context.append_loop_event           { "event": { "type": "content.part", "uuid": "<uuid-9>", "turnId": "0", "step": 2, "stepUuid": "<uuid-7>", "part": { "type": "text", "text": "Approved, and I saw the steer." } }, "time": "<time>" }
+      [wire] context.append_loop_event           { "event": { "type": "block.end", "uuid": "<uuid-10>", "turnId": "0", "step": 2, "stepUuid": "<uuid-7>", "index": 0, "blockType": "text" }, "time": "<time>" }
+      [wire] context.append_loop_event           { "event": { "type": "step.end", "uuid": "<uuid-7>", "turnId": "0", "step": 2, "usage": { "inputOther": 72, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }, "time": "<time>" }
+      [emit] turn.step.completed                 { "turnId": 0, "step": 2, "stepId": "<uuid-7>", "usage": { "inputOther": 72, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }
       [wire] usage.record                        { "model": "mock-model", "usage": { "inputOther": 72, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
       [emit] agent.status.updated                { "model": "mock-model", "thinkingLevel": "off", "contextTokens": 83, "maxContextTokens": 1000000, "contextUsage": 0.000083, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "permission": "manual", "usage": { "byModel": { "mock-model": { "inputOther": 79, "output": 33, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 79, "output": 33, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 79, "output": 33, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
       [emit] turn.ended                          { "turnId": 0, "reason": "completed" }
@@ -1274,9 +1288,12 @@ describe('Agent turn flow', () => {
       [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "Start the active turn" } ], "toolCalls": [], "origin": { "kind": "user" } }, "time": "<time>" }
       [wire] context.append_loop_event   { "event": { "type": "step.begin", "uuid": "<uuid-1>", "turnId": "0", "step": 1 }, "time": "<time>" }
       [emit] turn.step.started           { "turnId": 0, "step": 1, "stepId": "<uuid-1>" }
+      [wire] request.header              { "provider": "scream", "model": "mock-model", "modelAlias": "mock-model", "systemPrompt": "You are a deterministic test agent.", "activeTools": [ "Bash" ], "messagesCount": 1, "estimatedInputTokens": 1129, "time": "<time>" }
       [emit] assistant.delta             { "turnId": 0, "delta": "I will wait for approval." }
       [emit] tool.call.delta             { "turnId": 0, "toolCallId": "call_bash", "name": "Bash", "argumentsPart": "{\\"command\\":\\"printf should-not-run\\",\\"timeout\\":60}" }
-      [wire] context.append_loop_event   { "event": { "type": "content.part", "uuid": "<uuid-2>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "part": { "type": "text", "text": "I will wait for approval." } }, "time": "<time>" }
+      [wire] context.append_loop_event   { "event": { "type": "block.start", "uuid": "<uuid-2>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "index": 0, "blockType": "text" }, "time": "<time>" }
+      [wire] context.append_loop_event   { "event": { "type": "content.part", "uuid": "<uuid-3>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "part": { "type": "text", "text": "I will wait for approval." } }, "time": "<time>" }
+      [wire] context.append_loop_event   { "event": { "type": "block.end", "uuid": "<uuid-4>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "index": 0, "blockType": "text" }, "time": "<time>" }
       [emit] requestApproval             { "turnId": 0, "toolCallId": "call_bash", "toolName": "Bash", "action": "Running: printf should-not-run", "display": { "kind": "command", "command": "printf should-not-run", "cwd": "<cwd>", "language": "bash" } }
     `);
     expect(ctx.lastLlmInput()).toMatchInlineSnapshot(`
@@ -1294,8 +1311,10 @@ describe('Agent turn flow', () => {
     await ctx.rpc.cancel({ turnId: 0 });
     expect(await ctx.untilTurnEnd()).toMatchInlineSnapshot(`
       [wire] turn.cancel                 { "turnId": 0, "time": "<time>" }
+      [wire] context.append_loop_event   { "event": { "type": "block.start", "uuid": "<uuid-5>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "index": 0, "blockType": "tool-call" }, "time": "<time>" }
       [wire] context.append_loop_event   { "event": { "type": "tool.call", "uuid": "call_bash", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "toolCallId": "call_bash", "name": "Bash", "args": { "command": "printf should-not-run", "timeout": 60 }, "description": "Running: printf should-not-run", "display": { "kind": "command", "command": "printf should-not-run", "cwd": "<cwd>", "language": "bash" } }, "time": "<time>" }
       [emit] tool.call.started           { "turnId": 0, "toolCallId": "call_bash", "name": "Bash", "args": { "command": "printf should-not-run", "timeout": 60 }, "description": "Running: printf should-not-run", "display": { "kind": "command", "command": "printf should-not-run", "cwd": "<cwd>", "language": "bash" } }
+      [wire] context.append_loop_event   { "event": { "type": "block.end", "uuid": "<uuid-6>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "index": 0, "blockType": "tool-call" }, "time": "<time>" }
       [wire] context.append_loop_event   { "event": { "type": "tool.result", "parentUuid": "call_bash", "toolCallId": "call_bash", "result": { "output": "The user manually interrupted \\"Bash\\" (and anything else running at the same time). This was a deliberate user action, not a system error, timeout, or capacity limit. Do not retry automatically or guess at the cause — wait for the user's next instruction.", "isError": true } }, "time": "<time>" }
       [emit] tool.result                 { "turnId": 0, "toolCallId": "call_bash", "output": "The user manually interrupted \\"Bash\\" (and anything else running at the same time). This was a deliberate user action, not a system error, timeout, or capacity limit. Do not retry automatically or guess at the cause — wait for the user's next instruction.", "isError": true }
       [emit] turn.step.interrupted       { "turnId": 0, "step": 1, "reason": "aborted" }

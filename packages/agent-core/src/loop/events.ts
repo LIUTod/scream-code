@@ -79,6 +79,32 @@ export interface LoopToolResultEvent {
   readonly result: ExecutableToolResult;
 }
 
+/**
+ * Marks the start of a content block in the step's output stream. The
+ * per-block-type index (thinking/text/tool-call each count from 0) plus the
+ * event order reconstructs the full block sequence of a step, matching the
+ * trajectory structure of the reference implementation.
+ */
+export interface LoopBlockStartEvent {
+  readonly type: 'block.start';
+  readonly uuid: string;
+  readonly turnId: string;
+  readonly step: number;
+  readonly stepUuid: string;
+  readonly index: number;
+  readonly blockType: 'thinking' | 'text' | 'tool-call';
+}
+
+export interface LoopBlockEndEvent {
+  readonly type: 'block.end';
+  readonly uuid: string;
+  readonly turnId: string;
+  readonly step: number;
+  readonly stepUuid: string;
+  readonly index: number;
+  readonly blockType: 'thinking' | 'text' | 'tool-call';
+}
+
 export interface LoopTurnInterruptedEvent {
   readonly type: 'turn.interrupted';
   readonly reason: LoopInterruptReason;
@@ -115,7 +141,9 @@ export type LoopRecordedEvent =
   | LoopStepEndEvent
   | LoopContentPartEvent
   | LoopToolCallEvent
-  | LoopToolResultEvent;
+  | LoopToolResultEvent
+  | LoopBlockStartEvent
+  | LoopBlockEndEvent;
 
 export type LoopLiveOnlyEvent =
   | LoopTurnInterruptedEvent
@@ -158,7 +186,9 @@ function isRecordedEvent(event: LoopEvent): event is LoopRecordedEvent {
     event.type === 'step.end' ||
     event.type === 'content.part' ||
     event.type === 'tool.call' ||
-    event.type === 'tool.result'
+    event.type === 'tool.result' ||
+    event.type === 'block.start' ||
+    event.type === 'block.end'
   );
 }
 

@@ -64,6 +64,17 @@ export interface AgentRecordEvents {
     usageScope?: UsageRecordScope | undefined;
   };
 
+  /** Per-request snapshot so a request can be reconstructed from the log. */
+  'request.header': {
+    provider: string;
+    model: string;
+    modelAlias: string;
+    systemPrompt: string;
+    activeTools: readonly string[];
+    messagesCount: number;
+    estimatedInputTokens: number;
+  };
+
   'full_compaction.cancel': {};
   'full_compaction.complete': {};
 
