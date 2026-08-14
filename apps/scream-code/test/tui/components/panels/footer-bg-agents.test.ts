@@ -42,7 +42,7 @@ function makeFooter(state: AppState) {
 describe('FooterComponent — background task / agent badges', () => {
   it('omits both badges when counts are 0', () => {
     const footer = makeFooter(baseState());
-    const [line1] = footer.render(120);
+    const [line1] = footer.render(160);
     expect(line1).toBeDefined();
     expect(strip(line1!)).not.toMatch(/tasks? running/);
     expect(strip(line1!)).not.toMatch(/agents? running/);
@@ -51,7 +51,7 @@ describe('FooterComponent — background task / agent badges', () => {
   it('renders the task badge alone when only bash tasks are running', () => {
     const footer = makeFooter(baseState());
     footer.setBackgroundCounts({ bashTasks: 1, agentTasks: 0 });
-    const out = strip(footer.render(120)[0]!);
+    const out = strip(footer.render(160)[0]!);
     expect(out).toMatch(/\[1个任务 运行中\]/);
     expect(out).not.toMatch(/agents? running/);
   });
@@ -59,7 +59,7 @@ describe('FooterComponent — background task / agent badges', () => {
   it('renders the agent badge alone when only agent tasks are running', () => {
     const footer = makeFooter(baseState());
     footer.setBackgroundCounts({ bashTasks: 0, agentTasks: 1 });
-    const out = strip(footer.render(120)[0]!);
+    const out = strip(footer.render(160)[0]!);
     expect(out).toMatch(/\[1个代理 运行中\]/);
     expect(out).not.toMatch(/tasks? running/);
   });
@@ -67,7 +67,7 @@ describe('FooterComponent — background task / agent badges', () => {
   it('renders both badges side by side when both are non-zero', () => {
     const footer = makeFooter(baseState());
     footer.setBackgroundCounts({ bashTasks: 2, agentTasks: 3 });
-    const out = strip(footer.render(120)[0]!);
+    const out = strip(footer.render(160)[0]!);
     expect(out).toMatch(/\[2个任务 运行中\]/);
     expect(out).toMatch(/\[3个代理 运行中\]/);
     // Task badge appears before agent badge in the line.
@@ -77,7 +77,7 @@ describe('FooterComponent — background task / agent badges', () => {
   it('pluralizes correctly across both badges', () => {
     const footer = makeFooter(baseState());
     footer.setBackgroundCounts({ bashTasks: 1, agentTasks: 1 });
-    const out = strip(footer.render(120)[0]!);
+    const out = strip(footer.render(160)[0]!);
     expect(out).toMatch(/\[1个任务 运行中\]/);
     expect(out).toMatch(/\[1个代理 运行中\]/);
   });
@@ -85,9 +85,9 @@ describe('FooterComponent — background task / agent badges', () => {
   it('updates badges live via setBackgroundCounts', () => {
     const footer = makeFooter(baseState());
     footer.setBackgroundCounts({ bashTasks: 2, agentTasks: 1 });
-    expect(strip(footer.render(120)[0]!)).toMatch(/\[2个任务 运行中\]/);
+    expect(strip(footer.render(160)[0]!)).toMatch(/\[2个任务 运行中\]/);
     footer.setBackgroundCounts({ bashTasks: 0, agentTasks: 0 });
-    const after = strip(footer.render(120)[0]!);
+    const after = strip(footer.render(160)[0]!);
     expect(after).not.toMatch(/tasks? running/);
     expect(after).not.toMatch(/agents? running/);
   });
@@ -95,7 +95,7 @@ describe('FooterComponent — background task / agent badges', () => {
   it('clamps negative counts to 0', () => {
     const footer = makeFooter(baseState());
     footer.setBackgroundCounts({ bashTasks: -5, agentTasks: -2 });
-    const out = strip(footer.render(120)[0]!);
+    const out = strip(footer.render(160)[0]!);
     expect(out).not.toMatch(/tasks? running/);
     expect(out).not.toMatch(/agents? running/);
   });

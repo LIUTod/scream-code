@@ -420,6 +420,12 @@ export class SessionEventHandler {
     this.host.streamingUI.flushNow();
     this.maybeShowDebugTiming(event);
     this.drainQueuedMessagesIntoSteer();
+    if (event.usage !== undefined) {
+      const prev = this.host.state.appState.sessionUsage;
+      this.host.setAppState({
+        sessionUsage: prev === undefined ? event.usage : addTokenUsage(prev, event.usage),
+      });
+    }
     if (event.finishReason !== 'max_tokens') return;
 
     const truncatedCount = this.host.streamingUI.markStepTruncated(

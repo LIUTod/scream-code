@@ -108,8 +108,9 @@ export const zh: Record<string, string> = {
   'footer.help': '/help: 显示命令',
   'footer.config': '/config: 选择并配置你常用的模型商',
   'footer.reminder': '让 Scream 安排任务，例如 "2个小时后提醒我去拿快递"',
-  'footer.context': '上下文：{pct} ({tokens}/{maxTokens})',
-  'footer.context_short': '上下文：{pct}',
+  'footer.context': '上下文: {bar} ({tokens}/{maxTokens})',
+  'footer.context_short': '上下文: {bar}',
+  'footer.hit': '命中',
   'footer.tasks_running': '{count}个任务 运行中',
   'footer.agents_running': '{count}个代理 运行中',
 

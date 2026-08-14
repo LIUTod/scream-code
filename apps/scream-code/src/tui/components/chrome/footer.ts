@@ -180,17 +180,14 @@ function formatContextBar(usage: number, width: number = CONTEXT_BAR_WIDTH): str
 }
 
 function formatContextStatus(usage: number, tokens?: number, maxTokens?: number, barWidth = CONTEXT_BAR_WIDTH): string {
-  const pct = `${(safeUsage(usage) * 100).toFixed(1)}%`;
-  // The bar precedes the percentage so the footer reads
-  // `上下文：█▓▒░░░░░░░  28.8% (287.9k/1.0M)`; both share the usage color.
-  // Two spaces after the bar keep the percentage from feeling cramped.
-  // `barWidth` 0 collapses the bar to plain percent on narrow terminals.
-  const bar = barWidth > 0 ? `${formatContextBar(usage, barWidth)}  ` : '';
-  const barAndPct = `${bar}${pct}`;
+  // Bar only: `█▓▒░░░░░░░ (287.9k/1.0M)`. No percentage and no "Context:" label
+  // — the footer already groups this visually, so those were redundant noise.
+  // `barWidth` 0 collapses the bar on narrow terminals.
+  const bar = barWidth > 0 ? formatContextBar(usage, barWidth) : '';
   if (maxTokens && maxTokens > 0 && tokens !== undefined) {
-    return t('footer.context', { pct: barAndPct, tokens: formatTokenCount(tokens), maxTokens: formatTokenCount(maxTokens) });
+    return t('footer.context', { bar, tokens: formatTokenCount(tokens), maxTokens: formatTokenCount(maxTokens) });
   }
-  return t('footer.context_short', { pct: barAndPct });
+  return t('footer.context_short', { bar });
 }
 
 /** Format goal wall-clock duration compactly: `3m`, `1m30s`, `45s`. */
@@ -538,6 +535,28 @@ export class FooterComponent implements Component {
       const ccDot = state.ccConnectActive
         ? chalk.hex(colors.success)('●')
         : chalk.hex(colors.textDim)('●');
+      // Session token usage: input (cache read + created + other) and output.
+      // Session token usage (from turn.step.completed accumulation), used for
+      // the cache hit rate below. Defensive default so footer rendering never
+      // crashes on a partial state (some call sites/tests build AppState
+      // incrementally).
+      const sessionUsage = state.sessionUsage ?? {
+        inputOther: 0,
+        output: 0,
+        inputCacheRead: 0,
+        inputCacheCreation: 0,
+      };
+      // Cache hit rate = cache-read / (cache-read + cache-created + non-cached
+      // input) — the full billed input, matching how providers count tokens.
+      // `--` until the session has produced input tokens (no data yet, so a
+      // "0%" would be misleading).
+      const totalInput =
+        sessionUsage.inputCacheRead + sessionUsage.inputCacheCreation + sessionUsage.inputOther;
+      const hitRate = totalInput > 0 ? Math.round((sessionUsage.inputCacheRead / totalInput) * 100) : undefined;
+      const hitColor = hitRate !== undefined && hitRate >= 80 ? colors.success : colors.textDim;
+      const segHit = chalk.hex(hitColor)(
+        `${t('footer.hit')} ${hitRate === undefined ? '--' : `${hitRate}%`}`,
+      );
       const contextColor = pickContextColor(state.contextUsage, colors);
       // Collapse the water-level bar on narrow terminals so the percentage
       // itself is never squeezed out: 10 cells on wide, 6 mid, 0 = plain text.
@@ -545,8 +564,8 @@ export class FooterComponent implements Component {
       const contextPart = chalk.hex(contextColor)(
         formatContextStatus(state.contextUsage, state.contextTokens, state.maxContextTokens, contextBarWidth),
       );
-      const statusPart = chalk.hex(colors.textDim)(`  ${statusLine}`);
-      rightText = `${ccDot} ${contextPart}${statusPart}`;
+      const statusPart = chalk.hex(colors.textDim)(`· ${statusLine}`);
+      rightText = `${ccDot} ${contextPart} ${segHit} ${statusPart}`;
     }
     const rightWidth = visibleWidth(rightText);
     const gap = 3;

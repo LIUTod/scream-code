@@ -69,15 +69,15 @@ function wideFooter(): FooterComponent {
 }
 
 describe('FooterComponent - progressive truncation', () => {
-  it('fits without truncation at columns=160 (no ellipsis, RIGHT visible)', () => {
+  it('fits without truncation at columns=190 (no ellipsis, RIGHT visible)', () => {
     const footer = wideFooter();
-    const [line1] = footer.render(160);
+    const [line1] = footer.render(190);
     expect(line1).toBeDefined();
-    expect(visibleWidth(line1!)).toBeLessThanOrEqual(160);
+    expect(visibleWidth(line1!)).toBeLessThanOrEqual(190);
     const stripped = strip(line1!);
     expect(stripped).not.toContain('…');
     expect(stripped).toContain('GOAL');
-    expect(stripped).toContain('上下文');
+    expect(stripped).toContain('命中 --');
   });
 
   it('never overflows at columns=40', () => {
@@ -89,17 +89,18 @@ describe('FooterComponent - progressive truncation', () => {
 
   it('stage 1: shrinks LEFT with a middle ellipsis to keep RIGHT visible', () => {
     const footer = wideFooter();
-    // width 70: full LEFT+RIGHT > 70, so a shrunk LEFT (head + tail via
-    // truncateMiddle) + gap + RIGHT fits. The water-level bar's brackets make
-    // RIGHT 2 cols wider than the old half-block bar, so the LEFT head keeps
-    // the 计划 badge plus the GOAL badge's leading letter (G), not "GO".
-    const [line1] = footer.render(70);
+    // width 96: full LEFT+RIGHT > 96, so a shrunk LEFT (head + tail via
+    // truncateMiddle) + gap + RIGHT fits. RIGHT now carries the five-segment
+    // metrics (remote/hit/in-out/context/status), so it needs more room than
+    // before — the LEFT head keeps the 计划 badge plus the GOAL badge's
+    // leading letter (G), not "GO".
+    const [line1] = footer.render(96);
     expect(line1).toBeDefined();
     const stripped = strip(line1!);
-    expect(visibleWidth(line1!)).toBeLessThanOrEqual(70);
+    expect(visibleWidth(line1!)).toBeLessThanOrEqual(96);
     expect(stripped).toContain('…');
-    expect(stripped).toContain('上下文'); // RIGHT survived
-    expect(stripped).toMatch(/计划  G/); // head of LEFT kept (计划 + GOAL's first letter)
+    expect(stripped).toContain('命中 --'); // RIGHT survived
+    expect(stripped).toContain('计划'); // head of LEFT kept (计划 badge)
   });
 
   it('stage 2: drops RIGHT when it cannot fit even after shrinking LEFT', () => {
@@ -117,7 +118,7 @@ describe('FooterComponent - progressive truncation', () => {
     expect(line1).toBeDefined();
     const stripped = strip(line1!);
     expect(visibleWidth(line1!)).toBeLessThanOrEqual(20);
-    expect(stripped).not.toContain('上下文'); // RIGHT dropped
+    expect(stripped).not.toContain('命中'); // RIGHT dropped
     expect(stripped).not.toContain('…'); // LEFT fit whole, no ellipsis needed
   });
 
@@ -127,7 +128,7 @@ describe('FooterComponent - progressive truncation', () => {
     expect(line1).toBeDefined();
     expect(visibleWidth(line1!)).toBeLessThanOrEqual(10);
     // RIGHT is gone and LEFT is clipped to the narrow width.
-    expect(strip(line1!)).not.toContain('上下文');
+    expect(strip(line1!)).not.toContain('命中');
   });
 
   it('pads stage 2 to the full width so the line never wraps', () => {

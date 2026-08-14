@@ -42,6 +42,8 @@ export interface AppState {
   contextUsage: number;
   contextTokens: number;
   maxContextTokens: number;
+  /** Cumulative token usage for the current session (all turns summed). */
+  sessionUsage: TokenUsage;
   /** Current provider account balance (null = unknown / not applicable). */
   providerBalance: ProviderBalance | null;
   /** Monotonic timestamp of the last balance fetch (drives the flash). */

@@ -114,6 +114,7 @@ function createInitialAppState(input: ScreamTUIStartupInput): AppState {
     contextUsage: 0,
     contextTokens: 0,
     maxContextTokens: 0,
+    sessionUsage: { inputOther: 0, output: 0, inputCacheRead: 0, inputCacheCreation: 0 },
     providerBalance: null,
     balanceUpdatedAt: 0,
     isCompacting: false,
@@ -653,6 +654,17 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
     // when the new session happens to share the same planMode.
     const sessionChanged =
       'sessionId' in patch && this.state.appState.sessionId !== prevSessionId;
+    if (sessionChanged) {
+      // Per-session token/usage statistics: reset when switching sessions so
+      // the cache hit rate reflects the current session only. (Compaction's
+      // summary calls bypass the step loop, so they never pollute this.)
+      this.state.appState.sessionUsage = {
+        inputOther: 0,
+        output: 0,
+        inputCacheRead: 0,
+        inputCacheCreation: 0,
+      };
+    }
     if (planModeChanged || sessionChanged) {
       this.updateEditorBorderHighlight();
       this.state.planModeBanner.setPlanMode(this.state.appState.planMode ?? 'off');
