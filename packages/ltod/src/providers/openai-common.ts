@@ -226,21 +226,34 @@ export function extractUsage(usage: unknown): TokenUsage | null {
   const completionTokens = typeof u['completion_tokens'] === 'number' ? u['completion_tokens'] : 0;
 
   let cached = 0;
-  // ScreamCli proprietary: top-level cached_tokens
-  if (typeof u['cached_tokens'] === 'number') {
-    cached = u['cached_tokens'];
-  } else if (
-    typeof u['prompt_tokens_details'] === 'object' &&
-    u['prompt_tokens_details'] !== null
-  ) {
-    const details = u['prompt_tokens_details'] as Record<string, unknown>;
-    if (typeof details['cached_tokens'] === 'number') {
-      cached = details['cached_tokens'];
+  let other = 0;
+  // DeepSeek: prompt_cache_hit_tokens / prompt_cache_miss_tokens (explicit
+  // split; `prompt_tokens` is the sum of both). Must be checked before the
+  // OpenAI `cached_tokens` fallback.
+  if (typeof u['prompt_cache_hit_tokens'] === 'number') {
+    cached = u['prompt_cache_hit_tokens'];
+    other =
+      typeof u['prompt_cache_miss_tokens'] === 'number'
+        ? u['prompt_cache_miss_tokens']
+        : Math.max(0, promptTokens - cached);
+  } else {
+    // ScreamCli proprietary: top-level cached_tokens
+    if (typeof u['cached_tokens'] === 'number') {
+      cached = u['cached_tokens'];
+    } else if (
+      typeof u['prompt_tokens_details'] === 'object' &&
+      u['prompt_tokens_details'] !== null
+    ) {
+      const details = u['prompt_tokens_details'] as Record<string, unknown>;
+      if (typeof details['cached_tokens'] === 'number') {
+        cached = details['cached_tokens'];
+      }
     }
+    other = Math.max(0, promptTokens - cached);
   }
 
   return {
-    inputOther: Math.max(0, promptTokens - cached),
+    inputOther: other,
     output: completionTokens,
     inputCacheRead: cached,
     inputCacheCreation: 0,

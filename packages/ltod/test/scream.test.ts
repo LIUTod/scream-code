@@ -1453,6 +1453,37 @@ describe('extractUsage', () => {
     });
   });
 
+  it('extracts usage with DeepSeek prompt_cache_hit_tokens/miss_tokens', () => {
+    const usage = extractUsage({
+      prompt_tokens: 1000,
+      completion_tokens: 100,
+      total_tokens: 1100,
+      prompt_cache_hit_tokens: 780,
+      prompt_cache_miss_tokens: 220,
+    });
+    expect(usage).toEqual({
+      inputOther: 220,
+      output: 100,
+      inputCacheRead: 780,
+      inputCacheCreation: 0,
+    });
+  });
+
+  it('falls back to prompt_tokens - cached when DeepSeek miss is absent', () => {
+    const usage = extractUsage({
+      prompt_tokens: 1000,
+      completion_tokens: 100,
+      total_tokens: 1100,
+      prompt_cache_hit_tokens: 700,
+    });
+    expect(usage).toEqual({
+      inputOther: 300,
+      output: 100,
+      inputCacheRead: 700,
+      inputCacheCreation: 0,
+    });
+  });
+
   it('extracts usage with OpenAI prompt_tokens_details', () => {
     const usage = extractUsage({
       prompt_tokens: 100,
