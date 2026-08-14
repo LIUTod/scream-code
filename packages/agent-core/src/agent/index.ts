@@ -256,6 +256,14 @@ export class Agent {
     return this.rlmDepth;
   }
 
+  /** The system prompt the agent actually sends after runtime resolution
+   *  (a custom `resolveRuntimeSystemPrompt` hook may replace/append to the
+   *  base profile prompt — compaction must reuse this exact string so its
+   *  request shares the routed prefix and hits the KV cache). */
+  getRuntimeSystemPrompt(): string {
+    return this.resolveRuntimeSystemPrompt(this.config.systemPrompt);
+  }
+
   setRlmDepth(depth: number): void {
     this.rlmDepth = Math.max(0, depth);
   }

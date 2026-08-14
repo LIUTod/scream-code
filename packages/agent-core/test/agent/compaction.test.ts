@@ -217,7 +217,7 @@ describe('Agent compaction', () => {
       [emit] agent.status.updated       { "model": "scream-code", "thinkingLevel": "off", "contextTokens": 62, "maxContextTokens": 256000, "contextUsage": 0.0002421875, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "permission": "manual", "usage": { "byModel": { "scream-code": { "inputOther": 1354, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 1354, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
     `);
     expect(ctx.lastLlmInput()).toMatchInlineSnapshot(`
-      system: "You are a conversation context compaction assistant. Your job is to summarize the conversation above into a structured summary. Output text only. DO NOT CALL ANY TOOLS. Follow the compaction instruction in the last user message exactly. Pay special attention to the Memory Memo Extraction section — you MUST output memory-memo blocks for every completed task loop."
+      system: <system-prompt>
       tools: []
       messages:
         user: text "old user one"
@@ -933,7 +933,7 @@ describe('Agent compaction', () => {
     await compacted;
 
     expect(ctx.lastLlmInput()).toMatchInlineSnapshot(`
-      system: "You are a conversation context compaction assistant. Your job is to summarize the conversation above into a structured summary. Output text only. DO NOT CALL ANY TOOLS. Follow the compaction instruction in the last user message exactly. Pay special attention to the Memory Memo Extraction section — you MUST output memory-memo blocks for every completed task loop."
+      system: <system-prompt>
       tools: []
       messages:
         user: text "old user one"
@@ -978,7 +978,7 @@ describe('Agent compaction', () => {
       [emit] agent.status.updated       { "model": "scream-code", "thinkingLevel": "off", "contextTokens": 62, "maxContextTokens": 256000, "contextUsage": 0.0002421875, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "permission": "manual", "usage": { "byModel": { "scream-code": { "inputOther": 1332, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 1332, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
     `);
     expect(ctx.lastLlmInput()).toMatchInlineSnapshot(`
-      system: "You are a conversation context compaction assistant. Your job is to summarize the conversation above into a structured summary. Output text only. DO NOT CALL ANY TOOLS. Follow the compaction instruction in the last user message exactly. Pay special attention to the Memory Memo Extraction section — you MUST output memory-memo blocks for every completed task loop."
+      system: <system-prompt>
       tools: []
       messages:
         user: text "old user one"
@@ -1032,7 +1032,7 @@ describe('Agent compaction', () => {
       [emit] compaction.cancelled     { "reason": "上下文已被更改（如 /revoke），压缩已取消" }
     `);
     expect(ctx.lastLlmInput()).toMatchInlineSnapshot(`
-      system: "You are a conversation context compaction assistant. Your job is to summarize the conversation above into a structured summary. Output text only. DO NOT CALL ANY TOOLS. Follow the compaction instruction in the last user message exactly. Pay special attention to the Memory Memo Extraction section — you MUST output memory-memo blocks for every completed task loop."
+      system: <system-prompt>
       tools: []
       messages:
         user: text "old user one"
@@ -1087,7 +1087,7 @@ describe('Agent compaction', () => {
     `);
     expect(ctx.llmInputs()).toMatchInlineSnapshot(`
       call 1:
-        system: "You are a conversation context compaction assistant. Your job is to summarize the conversation above into a structured summary. Output text only. DO NOT CALL ANY TOOLS. Follow the compaction instruction in the last user message exactly. Pay special attention to the Memory Memo Extraction section — you MUST output memory-memo blocks for every completed task loop."
+        system: <system-prompt>
         tools: []
         messages:
           user: text "old user one"
@@ -1095,7 +1095,6 @@ describe('Agent compaction', () => {
           user: text <compaction-instruction>
 
       call 2:
-        system: <system-prompt>
         messages:
           assistant: text "> The conversation before this point was compacted: 2 earlier message(s) were omitted and are covered by this summary. Treat the summary below as working notes, not verbatim history — the messages after it continue from here.\\n\\nAuto compacted summary."
           user: text "old user two"
@@ -1639,14 +1638,13 @@ describe('Agent compaction', () => {
     );
     expect(ctx.llmInputs()).toMatchInlineSnapshot(`
       call 1:
-        system: "You are a conversation context compaction assistant. Your job is to summarize the conversation above into a structured summary. Output text only. DO NOT CALL ANY TOOLS. Follow the compaction instruction in the last user message exactly. Pay special attention to the Memory Memo Extraction section — you MUST output memory-memo blocks for every completed task loop."
+        system: <system-prompt>
         tools: []
         messages:
           user: text "Trigger repeated compaction"
           user: text <compaction-instruction>
 
       call 2:
-        system: <system-prompt>
         messages:
           assistant: text "> The conversation before this point was compacted: 1 earlier message(s) were omitted and are covered by this summary. Treat the summary below as working notes, not verbatim history — the messages after it continue from here.\\n\\nFirst compacted summary."
     `);

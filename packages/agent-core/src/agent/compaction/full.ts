@@ -214,18 +214,10 @@ function formatToolCallHistory(messages: readonly ContextMessage[]): string {
   return ['## Recent Tool Calls', '', ...lines].join('\n');
 }
 
-/** Minimal system prompt used during compaction. The full agent system
- *  prompt contains tool descriptions and runtime injections that contradict
- *  the compaction instruction ("DO NOT CALL ANY TOOLS"). This compact prompt
- *  keeps the LLM focused and explicitly references the memory-memo extraction
- *  section inside compaction-instruction.md. */
-const COMPACTION_SYSTEM_PROMPT =
-  'You are a conversation context compaction assistant. ' +
-  'Your job is to summarize the conversation above into a structured summary. ' +
-  'Output text only. DO NOT CALL ANY TOOLS. ' +
-  'Follow the compaction instruction in the last user message exactly. ' +
-  'Pay special attention to the Memory Memo Extraction section — ' +
-  'you MUST output memory-memo blocks for every completed task loop.';
+/** Compaction now reuses the agent's real system prompt (see summarizeOnce)
+ *  so the request shares the routed prefix and hits the KV cache. The
+ *  instruction templates (compaction-instruction.md / -update) carry the
+ *  "DO NOT CALL ANY TOOLS" rule and the memory-memo extraction section. */
 
 export class FullCompaction {
   protected compactionCountInTurn = 0;
@@ -540,8 +532,18 @@ export class FullCompaction {
         const instruction = isUpdate
           ? COMPACTION_UPDATE_INSTRUCTION(data.instruction)
           : COMPACTION_INSTRUCTION(data.instruction);
+        // Project the *given* slice through the same markers the main loop
+        // applies (micro-compaction placeholder substitution for old tool
+        // results, driven by the same monotonic cutoff). synthesizeMissing
+        // stays off: the main loop only synthesizes the *tail* of the full
+        // history, while this shadowed prefix sits mid-history where the
+        // main request keeps unresolved exchanges as-is — synthesizing here
+        // would add a result the main prefix doesn't have and break the KV
+        // prefix. The slice content (including the re-summarize fallback's
+        // second half / merged message) is honored verbatim; the caller is
+        // responsible for passing the exact messages to summarize.
         const messages = [
-          ...project(messagesToCompact),
+          ...project(this.agent.microCompaction.compact(messagesToCompact)),
           {
             role: 'user',
             content: [
@@ -555,8 +557,18 @@ export class FullCompaction {
         ];
         const response = await this.agent.generate(
           this.agent.config.provider,
-          COMPACTION_SYSTEM_PROMPT,
-          [],
+          // Reuse the agent's real system prompt so the compaction request
+          // shares the exact prefix of the last routed request — the KV cache
+          // hits instead of paying full price for the whole history. The
+          // compaction instruction (a tail user message) already forbids tool
+          // calls, so the tool descriptions in the main system prompt don't
+          // cause the model to call anything.
+          this.agent.getRuntimeSystemPrompt(),
+          // Same tool set (sorted by name) the main loop sends — tools are
+          // part of the cache prefix for prefix-caching backends, so an empty
+          // or reordered list would break the prefix right after the system
+          // prompt and only the system segment would hit.
+          [...this.agent.tools.loopTools],
           messages,
           undefined,
           { signal },
