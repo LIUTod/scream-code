@@ -8,6 +8,12 @@ export default defineConfig({
       include: ['packages/*/src/**/*.ts', 'apps/*/src/**/*.ts'],
       exclude: ['**/*.test.ts', '**/*.spec.ts', '**/dist/**'],
       reporter: ['text', 'html'],
+      thresholds: {
+        statements: 62,
+        branches: 56,
+        functions: 66,
+        lines: 64,
+      },
     },
   },
 });

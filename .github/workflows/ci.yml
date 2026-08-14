@@ -44,7 +44,7 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build:packages
-      - run: pnpm run test
+      - run: pnpm run test:coverage
 
   lint:
     runs-on: ubuntu-latest
