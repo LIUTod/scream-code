@@ -25,12 +25,12 @@ export const zh: Record<string, string> = {
   'tasks.open_output_failed': '无法打开输出：{msg}',
 
   // ─── 状态栏 ───────────────────
-  'status.idle': '○ 空闲',
+  'status.idle': '○ 空闲中',
   'status.thinking': '思考中',
   'status.composing': '输出中',
   'status.tool': '执行中',
-  'status.waiting': '等待响应',
-  'status.reconnecting': '重连尝试中',
+  'status.waiting': '等待中',
+  'status.reconnecting': '重连中',
 
   // ─── 审批 ─────────────────────
   'approval.allow_once': '批准一次',
