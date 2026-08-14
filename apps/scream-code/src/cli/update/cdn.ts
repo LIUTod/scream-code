@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { valid } from 'semver';
 
-const NPM_TIMEOUT_MS = 8_000;
+const NPM_TIMEOUT_MS = 3_000;
 
 /**
  * Resolve the npm executable name for the current platform.

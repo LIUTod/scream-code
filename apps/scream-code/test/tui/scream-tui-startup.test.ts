@@ -54,6 +54,9 @@ function makeStartupInput(
     version: "0.0.0-test",
     workDir: "/tmp/proj-a",
     resolvedTheme,
+    // Skip the real npm lookup in startup tests: the network check would
+    // otherwise hang for up to NPM_TIMEOUT_MS and trip the test timeout.
+    updatePrefetched: true,
   };
 }
 
