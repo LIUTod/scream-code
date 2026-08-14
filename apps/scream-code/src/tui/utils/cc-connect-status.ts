@@ -24,7 +24,12 @@ export function checkCcConnectActive(): Promise<boolean> {
 
 function pgrep(pattern: string): Promise<boolean> {
   return new Promise((resolve) => {
-    exec(`pgrep -f ${escapeShell(pattern)}`, { timeout: 3000 }, (error, stdout) => {
+    // LC_ALL=C avoids macOS pgrep's "illegal byte sequence" regex failure on
+    // non-UTF-8 command lines; the bracketed pattern prevents matching the
+    // shell that runs this very command (its argv contains "[c]c-connect",
+    // which the regex [c]c-connect does not match).
+    const bracketed = pattern.replace(/^([a-z])/, '[$1]');
+    exec(`LC_ALL=C pgrep -f ${escapeShell(bracketed)}`, { timeout: 3000 }, (error, stdout) => {
       if (error) { resolve(false); return; }
       resolve(stdout.trim().length > 0);
     });
@@ -73,7 +78,7 @@ function checkPm2(): Promise<boolean | undefined> {
 /** Query process command lines via PowerShell Get-CimInstance. Returns undefined if unavailable. */
 function checkPowerShell(): Promise<boolean | undefined> {
   return new Promise((resolve) => {
-    const cmd = `powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*cc-connect*' } | Measure-Object | Select-Object -ExpandProperty Count"`;
+    const cmd = `powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*cc-connect*' -and $_.Name -ne 'cmd.exe' -and $_.ProcessId -ne $PID } | Measure-Object | Select-Object -ExpandProperty Count"`;
     exec(cmd, { timeout: 5000, windowsHide: true }, (error, stdout) => {
       if (error) { resolve(undefined); return; }
       const count = parseInt(stdout.trim(), 10);
