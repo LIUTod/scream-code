@@ -16,4 +16,6 @@ export type AgentConfigUpdateData = Partial<{
   profileName: string;
   thinkingLevel: string;
   systemPrompt: string;
+  /** Tool names active at the time of this update, for request reconstruction. */
+  activeTools: readonly string[];
 }>;

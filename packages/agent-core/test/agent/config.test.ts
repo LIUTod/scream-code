@@ -86,7 +86,7 @@ describe('Agent config', () => {
     ctx.agent.useProfile(profile);
 
     expect(ctx.newEvents()).toMatchInlineSnapshot(`
-      [wire] config.update            { "profileName": "test-profile", "systemPrompt": "Profile system prompt.", "time": "<time>" }
+      [wire] config.update            { "profileName": "test-profile", "systemPrompt": "Profile system prompt.", "activeTools": [ "Bash" ], "time": "<time>" }
       [emit] agent.status.updated     { "model": "mock-model", "thinkingLevel": "off", "contextTokens": 0, "maxContextTokens": 1000000, "contextUsage": 0, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "permission": "manual" }
       [wire] tools.set_active_tools   { "names": [ "Bash" ], "time": "<time>" }
     `);

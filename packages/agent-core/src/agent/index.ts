@@ -486,7 +486,7 @@ export class Agent {
       cwdListing: context?.cwdListing,
       agentsMd: context?.agentsMd,
     });
-    this.config.update({ profileName: profile.name, systemPrompt });
+    this.config.update({ profileName: profile.name, systemPrompt, activeTools: profile.tools });
     this.tools.setActiveTools(profile.tools);
   }
 
