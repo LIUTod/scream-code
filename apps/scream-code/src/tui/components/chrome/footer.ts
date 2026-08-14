@@ -13,7 +13,7 @@ import { t } from '@scream-code/config';
 
 import type { ColorPalette } from '#/tui/theme/colors';
 import type { AppState, GoalBadgeInfo } from '#/tui/types';
-import { shimmerText } from '#/tui/utils/shimmer';
+import { shimmerText, shimmerTextWithPalette } from '#/tui/utils/shimmer';
 import {
   createGitStatusCache,
   formatGitBadgeBase,
@@ -450,7 +450,11 @@ export class FooterComponent implements Component {
   ): void {
     this.#stopStatusTimer();
     if (phase === 'idle' && !goalActive) return;
-    const intervalMs = 1000 / 60;
+    // 30fps: the 30 cells/s shimmer band advances exactly one cell per frame
+    // (the smoothest setting), and halves the render pressure vs 60fps so
+    // streaming/tool work gets serviced faster — the glow keeps flowing even
+    // while the event loop is busy with real work.
+    const intervalMs = 1000 / 30;
     this.statusTimer = setInterval(() => {
       this.ui.requestRender();
     }, intervalMs);
@@ -484,8 +488,20 @@ export class FooterComponent implements Component {
 
     const model = shortenModel(modelDisplayName(state));
     if (model) {
-      if (state.streamingPhase === 'thinking') {
+      if (state.streamingPhase === 'thinking' || state.streamingPhase === 'waiting' || state.streamingPhase === 'composing') {
+        // Reasoning/latency states keep the default green shimmer.
         left.push(shimmerText(model, colors));
+      } else if (state.streamingPhase === 'tool') {
+        // A tool is executing: switch the glow to cyan so the user can tell
+        // "working on it" from "running a tool" at a glance. Same grey→tint
+        // structure as the thinking glow — only the peak color changes.
+        left.push(
+          shimmerTextWithPalette(model, {
+            low: colors.textDim,
+            mid: colors.textMuted,
+            high: colors.planMode,
+          }),
+        );
       } else {
         left.push(chalk.hex(colors.textDim)(model));
       }
