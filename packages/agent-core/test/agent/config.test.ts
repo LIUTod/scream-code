@@ -125,7 +125,7 @@ describe('Agent config', () => {
       [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "Run Bash before config changes" } ], "toolCalls": [], "origin": { "kind": "user" } }, "time": "<time>" }
       [wire] context.append_loop_event   { "event": { "type": "step.begin", "uuid": "<uuid-1>", "turnId": "0", "step": 1 }, "time": "<time>" }
       [emit] turn.step.started           { "turnId": 0, "step": 1, "stepId": "<uuid-1>" }
-      [wire] request.header              { "provider": "scream", "model": "mock-model", "modelAlias": "mock-model", "systemPrompt": "You are a deterministic test agent.", "activeTools": [ "Bash" ], "messagesCount": 1, "estimatedInputTokens": 1131, "time": "<time>" }
+      [wire] request.header              { "provider": "scream", "model": "mock-model", "modelAlias": "mock-model", "systemPrompt": "You are a deterministic test agent.", "activeTools": [ "Bash" ], "messagesCount": 1, "estimatedInputTokens": "<tokens>", "time": "<time>" }
       [emit] assistant.delta             { "turnId": 0, "delta": "I will run Bash." }
       [emit] tool.call.delta             { "turnId": 0, "toolCallId": "call_bash", "name": "Bash", "argumentsPart": "{\\"command\\":\\"printf original-result\\",\\"timeout\\":60}" }
       [wire] context.append_loop_event   { "event": { "type": "block.start", "uuid": "<uuid-2>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "index": 0, "blockType": "text" }, "time": "<time>" }
@@ -170,7 +170,7 @@ describe('Agent config', () => {
       [wire] context.append_message              { "message": { "role": "user", "content": [ { "type": "text", "text": "<system-reminder>\\nThis task spans multiple steps. Use TodoList to track the remaining work and current phase.\\n</system-reminder>" } ], "toolCalls": [], "origin": { "kind": "system_trigger", "name": "todo_suggested" } }, "time": "<time>" }
       [wire] context.append_loop_event           { "event": { "type": "step.begin", "uuid": "<uuid-7>", "turnId": "0", "step": 2 }, "time": "<time>" }
       [emit] turn.step.started                   { "turnId": 0, "step": 2, "stepId": "<uuid-7>" }
-      [wire] request.header                      { "provider": "scream", "model": "mock-model", "modelAlias": "changed-model", "systemPrompt": "You are a deterministic test agent.", "activeTools": [ "Bash" ], "messagesCount": 4, "estimatedInputTokens": 1192, "time": "<time>" }
+      [wire] request.header                      { "provider": "scream", "model": "mock-model", "modelAlias": "changed-model", "systemPrompt": "You are a deterministic test agent.", "activeTools": [ "Bash" ], "messagesCount": 4, "estimatedInputTokens": "<tokens>", "time": "<time>" }
       [emit] assistant.delta                     { "turnId": 0, "delta": "Still using the original turn config." }
       [wire] context.append_loop_event           { "event": { "type": "block.start", "uuid": "<uuid-8>", "turnId": "0", "step": 2, "stepUuid": "<uuid-7>", "index": 0, "blockType": "text" }, "time": "<time>" }
       [wire] context.append_loop_event           { "event": { "type": "content.part", "uuid": "<uuid-9>", "turnId": "0", "step": 2, "stepUuid": "<uuid-7>", "part": { "type": "text", "text": "Still using the original turn config." } }, "time": "<time>" }
@@ -199,7 +199,7 @@ describe('Agent config', () => {
       [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "<system-reminder>\\n## 当前会话状态\\n\\n### 最近操作\\n\\n- ✅ Bash — printf original-result\\n\\n</system-reminder>" } ], "toolCalls": [], "origin": { "kind": "injection", "variant": "session_memory" } }, "time": "<time>" }
       [wire] context.append_loop_event   { "event": { "type": "step.begin", "uuid": "<uuid-11>", "turnId": "1", "step": 1 }, "time": "<time>" }
       [emit] turn.step.started           { "turnId": 1, "step": 1, "stepId": "<uuid-11>" }
-      [wire] request.header              { "provider": "scream", "model": "changed-model", "modelAlias": "changed-model", "systemPrompt": "Changed system prompt.", "activeTools": [], "messagesCount": 7, "estimatedInputTokens": 128, "time": "<time>" }
+      [wire] request.header              { "provider": "scream", "model": "changed-model", "modelAlias": "changed-model", "systemPrompt": "Changed system prompt.", "activeTools": [], "messagesCount": 7, "estimatedInputTokens": "<tokens>", "time": "<time>" }
       [emit] assistant.delta             { "turnId": 1, "delta": "Now the changed config is active." }
       [wire] context.append_loop_event   { "event": { "type": "block.start", "uuid": "<uuid-12>", "turnId": "1", "step": 1, "stepUuid": "<uuid-11>", "index": 0, "blockType": "text" }, "time": "<time>" }
       [wire] context.append_loop_event   { "event": { "type": "content.part", "uuid": "<uuid-13>", "turnId": "1", "step": 1, "stepUuid": "<uuid-11>", "part": { "type": "text", "text": "Now the changed config is active." } }, "time": "<time>" }

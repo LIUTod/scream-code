@@ -285,6 +285,11 @@ function normalizeObjectField(
 ): unknown {
   if ((key === 'time' || key === 'created_at') && typeof value === 'number') return '<time>';
   if (key === 'cwd' && typeof value === 'string') return '<cwd>';
+  // Token estimates are derived from rendered message content, which can
+  // embed environment-specific strings (e.g. the plan-file path inside the
+  // plan-mode reminder). Normalize the count so snapshots stay stable
+  // across machines; precise estimates are asserted directly in tests.
+  if (key === 'estimatedInputTokens' && typeof value === 'number') return '<tokens>';
   return normalizeValue(value, uuidLabels);
 }
 
