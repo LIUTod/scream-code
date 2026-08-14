@@ -77,7 +77,7 @@ describe('FooterComponent - progressive truncation', () => {
     const stripped = strip(line1!);
     expect(stripped).not.toContain('…');
     expect(stripped).toContain('GOAL');
-    expect(stripped).toContain('命中 --');
+    expect(stripped).toContain('HitR: --');
   });
 
   it('never overflows at columns=40', () => {
@@ -99,7 +99,7 @@ describe('FooterComponent - progressive truncation', () => {
     const stripped = strip(line1!);
     expect(visibleWidth(line1!)).toBeLessThanOrEqual(96);
     expect(stripped).toContain('…');
-    expect(stripped).toContain('命中 --'); // RIGHT survived
+    expect(stripped).toContain('HitR: --'); // RIGHT survived
     expect(stripped).toContain('计划'); // head of LEFT kept (计划 badge)
   });
 
@@ -118,7 +118,7 @@ describe('FooterComponent - progressive truncation', () => {
     expect(line1).toBeDefined();
     const stripped = strip(line1!);
     expect(visibleWidth(line1!)).toBeLessThanOrEqual(20);
-    expect(stripped).not.toContain('命中'); // RIGHT dropped
+    expect(stripped).not.toContain('HitR'); // RIGHT dropped
     expect(stripped).not.toContain('…'); // LEFT fit whole, no ellipsis needed
   });
 
@@ -128,7 +128,7 @@ describe('FooterComponent - progressive truncation', () => {
     expect(line1).toBeDefined();
     expect(visibleWidth(line1!)).toBeLessThanOrEqual(10);
     // RIGHT is gone and LEFT is clipped to the narrow width.
-    expect(strip(line1!)).not.toContain('命中');
+    expect(strip(line1!)).not.toContain('HitR');
   });
 
   it('pads stage 2 to the full width so the line never wraps', () => {

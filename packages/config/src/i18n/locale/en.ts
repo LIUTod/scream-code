@@ -109,7 +109,7 @@ export const en: Record<string, string> = {
   'footer.config': '/config: Configure your model provider',
   'footer.reminder': 'Let Scream schedule tasks, e.g. "remind me to pick up the package in 2 hours"',
   'footer.context': 'Context: {bar} ({tokens}/{maxTokens})',  'footer.context_short': 'Context: {bar}',
-  'footer.hit': 'hit',
+  'footer.hit': 'HitR',
   'footer.tasks_running': '{count} tasks running',
   'footer.agents_running': '{count} agents running',
 

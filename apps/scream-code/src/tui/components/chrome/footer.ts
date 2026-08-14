@@ -568,10 +568,13 @@ export class FooterComponent implements Component {
       // "0%" would be misleading).
       const totalInput =
         sessionUsage.inputCacheRead + sessionUsage.inputCacheCreation + sessionUsage.inputOther;
-      const hitRate = totalInput > 0 ? Math.round((sessionUsage.inputCacheRead / totalInput) * 100) : undefined;
-      const hitColor = hitRate !== undefined && hitRate >= 80 ? colors.success : colors.textDim;
+      const hitRatePct = totalInput > 0 ? (sessionUsage.inputCacheRead / totalInput) * 100 : undefined;
+      // Colour only when the hit rate is genuinely high (90%+); below that it
+      // stays muted so a mid-rate session doesn't read as "good". Threshold
+      // uses the precise value so 89.99% never flips to green.
+      const hitColor = hitRatePct !== undefined && hitRatePct >= 90 ? colors.success : colors.textDim;
       const segHit = chalk.hex(hitColor)(
-        `${t('footer.hit')} ${hitRate === undefined ? '--' : `${hitRate}%`}`,
+        `${t('footer.hit')}: ${hitRatePct === undefined ? '--' : `${hitRatePct.toFixed(2)}%`}`,
       );
       const contextColor = pickContextColor(state.contextUsage, colors);
       // Collapse the water-level bar on narrow terminals so the percentage
