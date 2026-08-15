@@ -1,6 +1,6 @@
 <p align="center">
   <a href="https://scream.chat">
-    <img width="800" height="800" alt="welcome_副本" src="https://github.com/user-attachments/assets/c6bbda94-af32-4907-8cbb-07cf55207e1b" />
+    <img width="80" height="80" alt="welcome_副本" src="https://github.com/user-attachments/assets/c6bbda94-af32-4907-8cbb-07cf55207e1b" />
   </a>
 </p>
 
