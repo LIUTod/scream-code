@@ -4,7 +4,7 @@
   </a>
 </p>
 
-<p align="center">A local agent with zero remote data behavior — code, work, and build freely, entirely on your machine.</p>
+<p align="center">A local agent with zero remote data behavior — write code, run tasks, research, code or work as you please.</p>
 
 <p align="center">
   <a href="https://www.npmjs.com/package/scream-code"><img alt="npm" src="https://img.shields.io/npm/v/scream-code?style=flat-square&logo=npm&logoColor=white" /></a>
@@ -38,7 +38,7 @@ scream --auto     # auto permission mode
 scream -y         # auto-approve mode
 ```
 
-On first launch Scream walks you through model setup (`/config`). 130+ providers built in — or point it at any OpenAI-compatible endpoint with `/config diy`. Switch models anytime with `/model`, no restart needed.
+On first launch Scream walks you through model setup (`/config`). 130+ providers built in — or point it at any OpenAI-compatible endpoint with `/config diy`. Switch models anytime with `/model`, no restart needed — or use `/model diy` to give each sub-agent its own model, letting every model do what it does best.
 
 When Scream wants to modify files or run commands, an approval panel pops up — pick a number, press Enter.
 
@@ -51,7 +51,7 @@ When Scream wants to modify files or run commands, an approval panel pops up —
 - **RLM Mode** — persistent Python workspace for long-running tasks, with unlimited recursive sub-agents.
 - **Session Trace** — `/trace` exports any session as a self-contained, offline interactive HTML timeline.
 - **Context Search** — `/search` (Ctrl+Shift+F) full-screen keyword search over the conversation.
-- **Cache Hit Rate** — per-session HitR in the status bar, persisted across restarts, green at ≥ 90%.
+- **High Cache Hit Rate** — per-session HitR in the status bar, tuned across compatible protocols to maximize cache hits without compromising quality.
 - **MCP / Skills / 130+ providers** — all DIY-configurable; ships with browser (46 tools) and macOS desktop automation.
 - **Remote Control** — drive Scream from WeChat, Feishu, Slack, DingTalk, QQ, Telegram, Discord via cc-connect.
 
