@@ -17,7 +17,9 @@
   <a href="README.md">English</a> |
   <a href="README.zh.md">简体中文</a>
 </p>
-<img width="861" height="550" alt="企业微信20260815-160500" src="https://github.com/user-attachments/assets/874cbda7-11aa-41de-821f-e9390f62a765" />
+<p align="center">
+  <img width="861" height="550" alt="企业微信20260815-160500" src="https://github.com/user-attachments/assets/874cbda7-11aa-41de-821f-e9390f62a765" />
+</p>
 
 ---
 

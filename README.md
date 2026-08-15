@@ -1,6 +1,6 @@
 <p align="center">
   <a href="https://scream.chat">
-    <img width="280" alt="Scream Code" src="assets/logo.svg" />
+    <img width="80" height="80" alt="welcome_副本" src="https://github.com/user-attachments/assets/c6bbda94-af32-4907-8cbb-07cf55207e1b" />
   </a>
 </p>
 
@@ -16,6 +16,10 @@
 <p align="center">
   <a href="README.md">English</a> |
   <a href="README.zh.md">简体中文</a>
+</p>
+
+<p align="center">
+  <img width="861" height="550" alt="Scream Code" src="https://github.com/user-attachments/assets/874cbda7-11aa-41de-821f-e9390f62a765" />
 </p>
 
 ---
