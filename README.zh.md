@@ -4,7 +4,7 @@
   </a>
 </p>
 
-<p align="center">一款本地 Agent，无任何远程数据行为。用它自由 coding、随心 working——写代码、跑任务、查资料，随你发挥。</p>
+<p align="center">一款本地 Agent，无任何远程数据行为。用它自由写代码、跑任务、查资料，coding 或 working随你发挥。</p>
 
 <p align="center">
   <a href="https://www.npmjs.com/package/scream-code"><img alt="npm" src="https://img.shields.io/npm/v/scream-code?style=flat-square&logo=npm&logoColor=white" /></a>
@@ -38,7 +38,7 @@ scream --auto     # 自动权限模式
 scream -y         # 自动批准模式
 ```
 
-首次启动会自动进入模型配置向导（`/config`）。内置 130+ 模型商，或用 `/config diy` 指向任意 OpenAI 兼容端点。配置后用 `/model` 随时切换，无需重启。
+首次启动会自动进入模型配置向导（`/config`）。内置 130+ 模型商，或用 `/config diy` 指向任意 OpenAI 兼容端点。配置后用 `/model` 随时切换，无需重启，亦或者通过 `/model diy` 为子Agent 配置不同的模型，让模型去做最擅长的工作。
 
 当它要修改文件或执行命令时，会弹出审批面板：按数字键选择，回车确认。
 
@@ -51,7 +51,7 @@ scream -y         # 自动批准模式
 - **RLM 模式** — 面向长任务的持久 Python 工作环境，状态跨调用保留，`rlm()` 支持无限递归子代理。
 - **会话轨迹 `/trace`** — 将会话导出为自包含、离线的交互式 HTML 时间轴（含工具调用、JSON 导出）。
 - **上下文搜索 `/search`** — 全屏关键词搜索（等同 Ctrl+Shift+F），输入即过滤，Esc 关闭。
-- **缓存命中率 HitR** — 状态栏会话级命中率，重启保持，≥ 90% 绿色高亮；缓存写 token 单独统计。
+- **高缓存命中率 HitR** — 状态栏会话级命中率，适配多种兼容协议，工作不降智的情况下最大化优化了缓存命中率。
 - **MCP / Skill / 130+ 模型商** — 全部可 DIY 配置；内置浏览器自动化（46 工具）与 macOS 桌面自动化。
 - **多渠道远程控制** — 通过 cc-connect 打通微信、飞书、Slack、钉钉、QQ、Telegram、Discord。
 
