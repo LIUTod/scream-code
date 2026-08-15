@@ -658,12 +658,17 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
       // Per-session token/usage statistics: reset when switching sessions so
       // the cache hit rate reflects the current session only. (Compaction's
       // summary calls bypass the step loop, so they never pollute this.)
-      this.state.appState.sessionUsage = {
-        inputOther: 0,
-        output: 0,
-        inputCacheRead: 0,
-        inputCacheCreation: 0,
-      };
+      // A patch that carries its own sessionUsage (e.g. syncRuntimeState
+      // seeding the durable per-session turn total on resume) wins over the
+      // reset — the seed was captured after the assign above.
+      if (!('sessionUsage' in patch)) {
+        this.state.appState.sessionUsage = {
+          inputOther: 0,
+          output: 0,
+          inputCacheRead: 0,
+          inputCacheCreation: 0,
+        };
+      }
     }
     if (planModeChanged || sessionChanged) {
       this.updateEditorBorderHighlight();

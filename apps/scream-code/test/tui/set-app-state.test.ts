@@ -44,6 +44,31 @@ function makeDriver(): SetAppStateDriver {
   return driver;
 }
 
+describe('setAppState sessionUsage reset semantics', () => {
+  it('keeps a patch-provided sessionUsage when the session changes (durable HitR seed)', () => {
+    const driver = makeDriver();
+    driver.setAppState({ sessionId: 'sess-a' });
+    const seed = { inputOther: 100, output: 10, inputCacheRead: 900, inputCacheCreation: 0 };
+
+    driver.setAppState({ sessionId: 'sess-b', sessionUsage: seed });
+
+    expect(driver.state.appState.sessionUsage).toEqual(seed);
+  });
+
+  it('resets sessionUsage to zero on session switch without a seed', () => {
+    const driver = makeDriver();
+    driver.setAppState({ sessionId: 'sess-a' });
+    driver.setAppState({ sessionId: 'sess-b' });
+
+    expect(driver.state.appState.sessionUsage).toEqual({
+      inputOther: 0,
+      output: 0,
+      inputCacheRead: 0,
+      inputCacheCreation: 0,
+    });
+  });
+});
+
 describe('setAppState streamingStartTime auto-stamp', () => {
   it('stamps streamingStartTime when transitioning idle → waiting', () => {
     const driver = makeDriver();

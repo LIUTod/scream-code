@@ -526,7 +526,11 @@ export class SDKRpcClient {
     const maxContextTokens = config.modelCapabilities?.max_context_tokens ?? 0;
     const contextTokens = context.tokenCount;
     const contextUsage = maxContextTokens > 0 ? contextTokens / maxContextTokens : 0;
-    const hasUsage = usage.byModel !== undefined || usage.total !== undefined || usage.currentTurn !== undefined;
+    const hasUsage =
+      usage.byModel !== undefined ||
+      usage.total !== undefined ||
+      usage.currentTurn !== undefined ||
+      usage.turnTotal !== undefined;
     return {
       model: config.modelAlias ?? config.provider?.model,
       thinkingLevel: config.thinkingLevel,

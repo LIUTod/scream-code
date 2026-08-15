@@ -16,6 +16,12 @@ export interface UsageStatus {
   readonly byModel?: Record<string, TokenUsage> | undefined;
   readonly currentTurn?: TokenUsage | undefined;
   readonly total?: TokenUsage | undefined;
+  /**
+   * Session-wide turn-scoped usage total (scope 'turn' only). Durable: on
+   * resume it is restored from the wire log, so per-session HitR survives
+   * process restarts. Excludes compaction summaries (scope 'session').
+   */
+  readonly turnTotal?: TokenUsage | undefined;
 }
 
 export interface ToolUpdate {

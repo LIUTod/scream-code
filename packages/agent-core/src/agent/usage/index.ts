@@ -12,6 +12,14 @@ function copyUsage(usage: TokenUsage): TokenUsage {
 export class UsageRecorder {
   private readonly byModel: Record<string, TokenUsage> = {};
   private currentTurn: TokenUsage | undefined;
+  /**
+   * Session-wide, turn-scoped usage only (`scope === 'turn'`). Restored from
+   * the wire log on resume (records restore replays `usage.record` with its
+   * original scope), so the TUI's per-session HitR survives process restarts
+   * instead of resetting to zero. Compaction summaries (scope 'session')
+   * never enter this total, matching the live turn.step.completed accumulation.
+   */
+  private turnTotal: TokenUsage | undefined;
 
   constructor(protected readonly agent?: Agent) {}
 
@@ -23,7 +31,12 @@ export class UsageRecorder {
     this.currentTurn = undefined;
   }
 
-  record(model: string, usage: TokenUsage, scope: UsageRecordScope = 'session'): void {
+  record(
+    model: string,
+    usage: TokenUsage,
+    scope: UsageRecordScope = 'session',
+    opts?: { skipCurrentTurn?: boolean },
+  ): void {
     this.agent?.records.logRecord({
       type: 'usage.record',
       model,
@@ -34,8 +47,15 @@ export class UsageRecorder {
     this.byModel[model] = current === undefined ? copyUsage(usage) : addUsage(current, usage);
 
     if (scope === 'turn') {
-      this.currentTurn =
-        this.currentTurn === undefined ? copyUsage(usage) : addUsage(this.currentTurn, usage);
+      // Wire restore replays turn records to rebuild turnTotal, but must not
+      // touch currentTurn — a resumed agent has no live turn (it stays
+      // undefined until the next beginTurn).
+      if (opts?.skipCurrentTurn !== true) {
+        this.currentTurn =
+          this.currentTurn === undefined ? copyUsage(usage) : addUsage(this.currentTurn, usage);
+      }
+      this.turnTotal =
+        this.turnTotal === undefined ? copyUsage(usage) : addUsage(this.turnTotal, usage);
     }
     this.agent?.emitStatusUpdated();
   }
@@ -48,6 +68,7 @@ export class UsageRecorder {
       byModel: hasByModel ? byModel : undefined,
       total: hasByModel ? totalUsage(byModel) : undefined,
       currentTurn: currentTurn === undefined ? undefined : copyUsage(currentTurn),
+      ...(this.turnTotal !== undefined ? { turnTotal: copyUsage(this.turnTotal) } : {}),
     };
   }
 
@@ -56,7 +77,8 @@ export class UsageRecorder {
     if (
       status.byModel === undefined &&
       status.total === undefined &&
-      status.currentTurn === undefined
+      status.currentTurn === undefined &&
+      status.turnTotal === undefined
     ) {
       return undefined;
     }

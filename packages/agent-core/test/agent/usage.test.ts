@@ -101,6 +101,84 @@ describe('Agent usage', () => {
     expect(usage.data().currentTurn).toBeUndefined();
   });
 
+  it('accumulates a durable turn-scoped total for HitR', () => {
+    const usage = new UsageRecorder();
+
+    // Session-scoped records (e.g. compaction summaries) must NOT enter the
+    // turn total — they are not part of the TUI's live HitR accumulation.
+    usage.record('model-a', {
+      inputOther: 1000,
+      output: 2000,
+      inputCacheRead: 3000,
+      inputCacheCreation: 4000,
+    });
+
+    usage.beginTurn();
+    usage.record(
+      'model-a',
+      {
+        inputOther: 1,
+        output: 2,
+        inputCacheRead: 3,
+        inputCacheCreation: 4,
+      },
+      'turn',
+    );
+    usage.record(
+      'model-a',
+      {
+        inputOther: 10,
+        output: 20,
+        inputCacheRead: 30,
+        inputCacheCreation: 40,
+      },
+      'turn',
+    );
+    usage.endTurn();
+
+    // A later turn still accumulates onto the same session-wide total.
+    usage.beginTurn();
+    usage.record(
+      'model-b',
+      {
+        inputOther: 100,
+        output: 200,
+        inputCacheRead: 300,
+        inputCacheCreation: 400,
+      },
+      'turn',
+    );
+    usage.endTurn();
+
+    expect(usage.data()).toMatchObject({
+      // Scope-agnostic session total: session + both turns.
+      total: {
+        inputOther: 1111,
+        output: 2222,
+        inputCacheRead: 3333,
+        inputCacheCreation: 4444,
+      },
+      // Turn-only, durable across endTurn.
+      turnTotal: {
+        inputOther: 111,
+        output: 222,
+        inputCacheRead: 333,
+        inputCacheCreation: 444,
+      },
+    });
+  });
+
+  it('keeps turnTotal undefined when only session-scoped usage was recorded', () => {
+    const usage = new UsageRecorder();
+    usage.record('model-a', {
+      inputOther: 1,
+      output: 2,
+      inputCacheRead: 3,
+      inputCacheCreation: 4,
+    });
+    expect(usage.data().turnTotal).toBeUndefined();
+  });
+
   it('returns immutable status snapshots', () => {
     const usage = new UsageRecorder();
 

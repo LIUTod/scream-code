@@ -234,6 +234,11 @@ export class SessionManager {
       contextTokens: status.contextTokens,
       maxContextTokens: status.maxContextTokens,
       contextUsage: status.contextUsage,
+      // Seed the per-session HitR with the session's durable turn-scoped usage
+      // (restored from the wire log on resume) so it survives process restarts.
+      // When absent (fresh session) the sessionChanged reset keeps it at zero
+      // and the footer renders "--".
+      ...(status.usage?.turnTotal !== undefined ? { sessionUsage: status.usage.turnTotal } : {}),
       sessionTitle: session.summary?.title ?? null,
       goal: goal ? {
         objective: goal.objective,

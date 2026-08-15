@@ -47,7 +47,13 @@ function restoreAgentRecord(agent: Agent, input: AgentRecord): void {
       agent.permission.recordApprovalResult(input);
       return;
     case 'usage.record':
-      agent.usage.record(input.model, input.usage, 'session');
+      // Preserve the original scope so the recorder's turn-scoped total
+      // (turnTotal) is restored correctly on resume; hardcoding 'session'
+      // here would zero it out. skipCurrentTurn keeps a resumed agent's
+      // currentTurn undefined — there is no live turn during restore.
+      agent.usage.record(input.model, input.usage, input.usageScope ?? 'session', {
+        skipCurrentTurn: true,
+      });
       return;
     case 'full_compaction.begin':
       agent.fullCompaction.begin(input);

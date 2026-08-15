@@ -146,6 +146,12 @@ export interface SessionUsage {
   readonly byModel?: Record<string, TokenUsage> | undefined;
   readonly currentTurn?: TokenUsage | undefined;
   readonly total?: TokenUsage | undefined;
+  /**
+   * Turn-scoped session total (scope 'turn' only, excludes compaction
+   * summaries). Durable: restored from the wire log on resume so the TUI's
+   * per-session cache hit rate survives process restarts.
+   */
+  readonly turnTotal?: TokenUsage | undefined;
 }
 
 export interface SessionStatus {
