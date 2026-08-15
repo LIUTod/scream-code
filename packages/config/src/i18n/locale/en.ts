@@ -931,6 +931,8 @@ export const en: Record<string, string> = {
   'editor.tip_10': '💡 Tips: Type /rlm to enable runtime memory for better cross-turn recall  [Ctrl+B to hide Tips]',
   'editor.tip_11': '💡 Tips: Press Ctrl+D (on empty input) to quit, press again to confirm  [Ctrl+B to hide Tips]',
   'editor.tip_12': '💡 Tips: Type /sessions to browse and resume past sessions  [Ctrl+B to hide Tips]',
+  'editor.tip_13': '💡 Tips: Press Ctrl+Shift+F or type /search to search the conversation  [Ctrl+B to hide Tips]',
+  'editor.tip_14': '💡 Tips: Drag to select text and release to copy to the system clipboard  [Ctrl+B to hide Tips]',
 
   // ─── editor-keyboard ───────────
   'editorkey.cancel_compaction_failed': 'Cancel compaction failed: {msg}',
@@ -1201,6 +1203,7 @@ export const en: Record<string, string> = {
   'registry.update_desc': 'Manually update Scream Code to latest version',
   'registry.version_desc': 'Show version info',
   'registry.logout_desc': 'Remove configured models',
+  'registry.search_desc': 'Search the conversation context (Esc to close)',
   'registry.eval_desc': 'Run end-to-end tests (Agent health check)',
   'registry.exit_desc': 'Exit application',
 

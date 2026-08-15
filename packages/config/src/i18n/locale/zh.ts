@@ -932,6 +932,8 @@ export const zh: Record<string, string> = {
   'editor.tip_10': '💡 Tips：输入 /rlm 可开启运行时记忆，让 Agent 跨轮记住更多上下文  【Ctrl+B 关闭 Tips】',
   'editor.tip_11': '💡 Tips：按 Ctrl+D（空输入时）可快速退出，再按一次确认  【Ctrl+B 关闭 Tips】',
   'editor.tip_12': '💡 Tips：输入 /sessions 可查看并恢复历史会话  【Ctrl+B 关闭 Tips】',
+  'editor.tip_13': '💡 Tips：按 Ctrl+Shift+F 或输入 /search 可搜索会话历史  【Ctrl+B 关闭 Tips】',
+  'editor.tip_14': '💡 Tips：拖选文本松手即可复制到系统剪贴板  【Ctrl+B 关闭 Tips】',
 
   // ─── editor-keyboard ───────────
   'editorkey.cancel_compaction_failed': '取消压缩失败： {msg}',
@@ -1202,6 +1204,7 @@ export const zh: Record<string, string> = {
   'registry.update_desc': '手动更新 Scream Code 到最新版本',
   'registry.version_desc': '显示版本信息',
   'registry.logout_desc': '删除已配置的模型',
+  'registry.search_desc': '上下文关键词搜索，ESC 关闭',
   'registry.eval_desc': '运行端到端测试（Agent健康度检查）',
   'registry.exit_desc': '退出应用',
 

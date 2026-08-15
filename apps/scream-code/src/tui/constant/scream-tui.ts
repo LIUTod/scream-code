@@ -35,6 +35,8 @@ export const SESSION_TIPS: readonly SessionTip[] = [
   { i18nKey: 'editor.tip_10', isAd: false },
   { i18nKey: 'editor.tip_11', isAd: false },
   { i18nKey: 'editor.tip_12', isAd: false },
+  { i18nKey: 'editor.tip_13', isAd: false },
+  { i18nKey: 'editor.tip_14', isAd: false },
 ];
 
 /** Interval for random tip rotation (ms). */
