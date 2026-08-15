@@ -4,7 +4,7 @@
   </a>
 </p>
 
-<p align="center">你的本地全能 AI Agent 智能助手。完全离线 · 无任何远程行为 · 数据不出本机。</p>
+<p align="center">一款本地 Agent，无任何远程数据行为。用它自由 coding、随心 working——写代码、跑任务、查资料，随你发挥。</p>
 
 <p align="center">
   <a href="https://www.npmjs.com/package/scream-code"><img alt="npm" src="https://img.shields.io/npm/v/scream-code?style=flat-square&logo=npm&logoColor=white" /></a>

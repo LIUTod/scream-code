@@ -4,7 +4,7 @@
   </a>
 </p>
 
-<p align="center">Your local, all-in-one AI agent assistant. Fully offline — no remote calls, your data never leaves your machine.</p>
+<p align="center">A local agent with zero remote data behavior — code, work, and build freely, entirely on your machine.</p>
 
 <p align="center">
   <a href="https://www.npmjs.com/package/scream-code"><img alt="npm" src="https://img.shields.io/npm/v/scream-code?style=flat-square&logo=npm&logoColor=white" /></a>
