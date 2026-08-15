@@ -1205,6 +1205,7 @@ export const zh: Record<string, string> = {
   'registry.version_desc': '显示版本信息',
   'registry.logout_desc': '删除已配置的模型',
   'registry.search_desc': '上下文关键词搜索，ESC 关闭',
+  'registry.trace_desc': '查看会话工作轨迹',
   'registry.eval_desc': '运行端到端测试（Agent健康度检查）',
   'registry.exit_desc': '退出应用',
 

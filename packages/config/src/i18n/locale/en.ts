@@ -1204,6 +1204,7 @@ export const en: Record<string, string> = {
   'registry.version_desc': 'Show version info',
   'registry.logout_desc': 'Remove configured models',
   'registry.search_desc': 'Search the conversation context (Esc to close)',
+  'registry.trace_desc': 'View the session working trajectory',
   'registry.eval_desc': 'Run end-to-end tests (Agent health check)',
   'registry.exit_desc': 'Exit application',
 

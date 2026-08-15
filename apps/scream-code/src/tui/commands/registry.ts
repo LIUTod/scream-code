@@ -322,6 +322,13 @@ export const BUILTIN_SLASH_COMMANDS = [
     priority: 178,
     availability: 'always',
   },
+  {
+    name: 'trace',
+    aliases: [],
+    description: 'registry.trace_desc',
+    priority: 177,
+    availability: 'always',
+  },
 
   // ── 退出（最后） ──
   {

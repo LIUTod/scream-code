@@ -23,6 +23,7 @@ import type { TUIState } from '../tui-state';
 
 import { handleConnectCommand, handleLogoutCommand } from './auth';
 import { handleSearchCommand } from './search';
+import { handleTraceCommand } from './trace';
 import {
   handleAskCommand,
   handleAutoCommand,
@@ -74,6 +75,7 @@ export {
   handleLogoutCommand,
 } from './auth';
 export { handleSearchCommand } from './search';
+export { handleTraceCommand } from './trace';
 export {
   handleAutoCommand,
   handleCompactCommand,
@@ -353,6 +355,9 @@ async function handleBuiltInSlashCommand(
       return;
     case 'search':
       handleSearchCommand(host);
+      return;
+    case 'trace':
+      handleTraceCommand(host);
       return;
     case 'eval':
       runEvalCommand(host);
