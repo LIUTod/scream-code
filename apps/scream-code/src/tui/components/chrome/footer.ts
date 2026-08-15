@@ -573,9 +573,12 @@ export class FooterComponent implements Component {
       // stays muted so a mid-rate session doesn't read as "good". Threshold
       // uses the precise value so 89.99% never flips to green.
       const hitColor = hitRatePct !== undefined && hitRatePct >= 90 ? colors.success : colors.textDim;
-      const segHit = chalk.hex(hitColor)(
-        `${t('footer.hit')}: ${hitRatePct === undefined ? '--' : `${hitRatePct.toFixed(2)}%`}`,
-      );
+      // Label stays muted; only the percentage carries the hit-rate colour
+      // (green ≥90%, muted otherwise) so a high rate doesn't flood the line.
+      const segHit =
+        chalk.hex(colors.textDim)(`${t('footer.hit')}:`) +
+        ' ' +
+        chalk.hex(hitColor)(hitRatePct === undefined ? '--' : `${hitRatePct.toFixed(2)}%`);
       const contextColor = pickContextColor(state.contextUsage, colors);
       // Collapse the water-level bar on narrow terminals so the percentage
       // itself is never squeezed out: 10 cells on wide, 6 mid, 0 = plain text.
@@ -583,8 +586,8 @@ export class FooterComponent implements Component {
       const contextPart = chalk.hex(contextColor)(
         formatContextStatus(state.contextUsage, state.contextTokens, state.maxContextTokens, contextBarWidth),
       );
-      const statusPart = chalk.hex(colors.textDim)(`· ${statusLine}`);
-      rightText = `${ccDot} ${contextPart} ${segHit} ${statusPart}`;
+      const statusPart = chalk.hex(colors.textDim)(` ${statusLine}`);
+      rightText = `${ccDot} ${segHit} ${contextPart} ${statusPart}`;
     }
     const rightWidth = visibleWidth(rightText);
     const gap = 3;
