@@ -22,6 +22,7 @@ import type { AppState, LoginProgressSpinnerHandle, PlanModeState, QueuedMessage
 import type { TUIState } from '../tui-state';
 
 import { handleConnectCommand, handleLogoutCommand } from './auth';
+import { handleSearchCommand } from './search';
 import {
   handleAskCommand,
   handleAutoCommand,
@@ -72,6 +73,7 @@ export {
   handleConnectCommand,
   handleLogoutCommand,
 } from './auth';
+export { handleSearchCommand } from './search';
 export {
   handleAutoCommand,
   handleCompactCommand,
@@ -348,6 +350,9 @@ async function handleBuiltInSlashCommand(
       return;
     case 'logout':
       await handleLogoutCommand(host);
+      return;
+    case 'search':
+      handleSearchCommand(host);
       return;
     case 'eval':
       runEvalCommand(host);

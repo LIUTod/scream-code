@@ -315,6 +315,13 @@ export const BUILTIN_SLASH_COMMANDS = [
     description: 'registry.logout_desc',
     priority: 179,
   },
+  {
+    name: 'search',
+    aliases: [],
+    description: 'registry.search_desc',
+    priority: 178,
+    availability: 'always',
+  },
 
   // ── 退出（最后） ──
   {
