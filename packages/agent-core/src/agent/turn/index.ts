@@ -21,6 +21,9 @@ import {
   type LoopTurnStopReason,
 } from '../../loop/index';
 import type { AgentEvent, TurnEndedEvent } from '../../rpc';
+
+/** Cap on how long the first turn waits for MCP servers to finish loading. */
+const MCP_WAIT_TIMEOUT_MS = 10_000;
 import {
   GOAL_BUDGET_STEER_ORIGIN,
   GOAL_BUDGET_STEER_PROMPT,
@@ -573,7 +576,14 @@ export class TurnFlow {
   private async runTurn(turnId: number, signal: AbortSignal): Promise<LoopTurnStopReason> {
     let stopHookContinuationUsed = false;
     const deduper = new ToolCallDeduplicator();
-    await this.agent.mcp?.waitForInitialLoad(signal);
+    // Wait for MCP initial load, but bound it: a slow or hung server must
+    // never stall the first turn indefinitely. Each server already isolates
+    // its own startup timeout, so here we only cap the aggregate wait — on
+    // timeout we degrade to "MCP tools not ready yet" instead of blocking.
+    await Promise.race([
+      this.agent.mcp?.waitForInitialLoad(signal) ?? Promise.resolve(),
+      new Promise<void>((resolve) => setTimeout(resolve, MCP_WAIT_TIMEOUT_MS)),
+    ]);
     while (true) {
       signal.throwIfAborted();
       const model = this.agent.config.model;

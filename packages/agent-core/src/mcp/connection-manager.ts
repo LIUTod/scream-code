@@ -85,6 +85,13 @@ export class McpConnectionManager {
   constructor(private readonly options: McpConnectionManagerOptions = {}) {
     this.oauthService = options.oauthService;
     this.log = options.log ?? defaultLog;
+    // Last-resort cleanup: whatever way the host process dies (clean exit,
+    // external SIGTERM/SIGKILL, closed terminal), stdio children must not
+    // survive as zombie processes. `process.exit` runs handlers synchronously,
+    // so this is the one path that still executes — `close()` is async and
+    // cannot run here. Multiple managers register multiple handlers; each
+    // kills only its own children and `killSync` is idempotent.
+    process.on('exit', () => this.killAllSync());
   }
 
   /**
@@ -397,6 +404,22 @@ export class McpConnectionManager {
     } catch {
       // Suppress close errors — the server is going away regardless and we
       // don't want them masking the original startup failure.
+    }
+  }
+
+  /**
+   * Synchronously signal every still-running stdio child process. Registered
+   * as a `process.on('exit')` fallback so MCP children never survive the host
+   * — whether the app exits cleanly, is killed, or the terminal is closed.
+   * `close()` (async) remains the graceful path; this only runs when the
+   * event loop is already unwinding.
+   */
+  killAllSync(): void {
+    for (const entry of this.entries.values()) {
+      const client = entry.client;
+      if (client instanceof StdioMcpClient) {
+        client.killSync();
+      }
     }
   }
 

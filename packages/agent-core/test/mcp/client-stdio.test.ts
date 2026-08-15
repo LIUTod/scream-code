@@ -264,4 +264,27 @@ describe('StdioMcpClient', () => {
     await new Promise((r) => setTimeout(r, 100));
     expect(closes).toEqual([]);
   }, 15000);
+
+  it('killSync terminates the child process synchronously', async () => {
+    const client = new StdioMcpClient({
+      transport: 'stdio',
+      command: process.execPath,
+      args: [fixture],
+    });
+    try {
+      await client.connect();
+      const pid = (
+        client as unknown as { transport: { pid: number | null } }
+      ).transport.pid;
+      expect(pid).toBeGreaterThan(0);
+
+      client.killSync();
+      // The signal is delivered asynchronously; give the OS a moment.
+      await new Promise((r) => setTimeout(r, 150));
+      // process.kill(pid, 0) throws ESRCH once the process is gone.
+      expect(() => process.kill(pid!, 0)).toThrow();
+    } finally {
+      await client.close();
+    }
+  }, 15000);
 });

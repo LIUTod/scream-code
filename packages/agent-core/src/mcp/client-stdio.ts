@@ -108,6 +108,22 @@ export class StdioMcpClient implements MCPClient {
   }
 
   /**
+   * Synchronously terminate the child process, for the process-exit fallback
+   * where `close()` (async, awaits transport cleanup) cannot run. The SDK
+   * transport exposes the child pid but not the child handle, so we signal it
+   * directly. Safe to call on an already-exited or never-started process.
+   */
+  killSync(): void {
+    const pid = this.transport.pid;
+    if (pid === null || pid <= 0) return;
+    try {
+      process.kill(pid, 'SIGTERM');
+    } catch {
+      // ESRCH (already gone) or EPERM (not ours) — nothing to do.
+    }
+  }
+
+  /**
    * Register a listener that fires when the underlying transport closes on
    * its own — i.e. the caller has not yet invoked {@link close}. At most one
    * listener can be installed; later registrations replace earlier ones.
