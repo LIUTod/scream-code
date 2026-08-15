@@ -57,6 +57,6 @@
   },
   "packageManager": "pnpm@10.33.0",
   "dependencies": {
-    "@liutod-scream/pi-tui": "^0.84.2"
+    "@liutod-scream/pi-tui": "^0.84.4"
   }
 }
