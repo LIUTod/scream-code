@@ -6,6 +6,7 @@ import {
 } from '@liutod-scream/pi-tui';
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { getLogDir } from '#/utils/paths';
+import { writeTextClipboard } from '#/utils/clipboard/clipboard-text';
 import { createRenderBatcher, type RenderBatchController } from './utils/render-batcher';
 
 import { ErrorBannerComponent } from './components/chrome/error-banner';
@@ -91,7 +92,18 @@ export function createTUIState(options: ScreamTUIOptions): TUIState {
   const theme = createScreamTUIThemeBundle(initialAppState.theme, options.resolvedTheme);
 
   const terminal = new ProcessTerminal();
-  const ui = new TuiAltScreen(terminal);
+  const ui = new TuiAltScreen(terminal, undefined, undefined, {
+    // Copy selected text into the system clipboard via platform commands;
+    // return true/false so the TUI flashes "Copied!" / "Copy failed".
+    copySelection: async (text) => {
+      try {
+        await writeTextClipboard(text);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+  });
   // The ScrollView layout root (built in lifecycle-controller.buildLayout)
   // owns scrolling with follow:"end" — content sticks to the bottom while
   // the user is at the end, and a manual scroll up keeps the history
