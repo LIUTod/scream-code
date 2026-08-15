@@ -17,7 +17,8 @@
   <a href="README.md">English</a> |
   <a href="README.zh.md">简体中文</a>
 </p>
-<img width="3840" height="2160" alt="3dc13391-6c68-42aa-b19f-833d35ae23a3" src="https://github.com/user-attachments/assets/bd5ad96c-b2c8-46cf-9c06-0d78844fc069" />
+<img width="3840" height="2160" alt="1fd3f8f7-659e-4394-87bb-263489254ed2" src="https://github.com/user-attachments/assets/ac742018-de31-4420-bad5-82428946480f" />
+
 ---
 
 ### 安装
