@@ -1,6 +1,6 @@
 <p align="center">
   <a href="https://scream.chat">
-    <img width="280" alt="Scream Code" src="assets/logo.svg" />
+    <img width="280" alt="Scream Code" src="assets/logo.svg?v=2" />
   </a>
 </p>
 
