@@ -227,6 +227,11 @@ export function extractUsage(usage: unknown): TokenUsage | null {
 
   let cached = 0;
   let other = 0;
+  let created = 0;
+  const details =
+    typeof u['prompt_tokens_details'] === 'object' && u['prompt_tokens_details'] !== null
+      ? (u['prompt_tokens_details'] as Record<string, unknown>)
+      : undefined;
   // DeepSeek: prompt_cache_hit_tokens / prompt_cache_miss_tokens (explicit
   // split; `prompt_tokens` is the sum of both). Must be checked before the
   // OpenAI `cached_tokens` fallback.
@@ -240,23 +245,25 @@ export function extractUsage(usage: unknown): TokenUsage | null {
     // ScreamCli proprietary: top-level cached_tokens
     if (typeof u['cached_tokens'] === 'number') {
       cached = u['cached_tokens'];
-    } else if (
-      typeof u['prompt_tokens_details'] === 'object' &&
-      u['prompt_tokens_details'] !== null
-    ) {
-      const details = u['prompt_tokens_details'] as Record<string, unknown>;
-      if (typeof details['cached_tokens'] === 'number') {
-        cached = details['cached_tokens'];
-      }
+    } else if (details !== undefined && typeof details['cached_tokens'] === 'number') {
+      cached = details['cached_tokens'];
     }
     other = Math.max(0, promptTokens - cached);
+    // OpenRouter-compatible providers report the cache-write count separately
+    // (`prompt_tokens_details.cache_write_tokens`); it is already included in
+    // prompt_tokens, so pull it out of `other` into inputCacheCreation to keep
+    // the three input buckets disjoint (mirrors the reference harness mapping).
+    if (details !== undefined && typeof details['cache_write_tokens'] === 'number') {
+      created = details['cache_write_tokens'];
+      other = Math.max(0, other - created);
+    }
   }
 
   return {
     inputOther: other,
     output: completionTokens,
     inputCacheRead: cached,
-    inputCacheCreation: 0,
+    inputCacheCreation: created,
   };
 }
 /**

@@ -1499,6 +1499,39 @@ describe('extractUsage', () => {
     });
   });
 
+  it('extracts OpenRouter cache_write_tokens into inputCacheCreation', () => {
+    // prompt_tokens includes both the cache read and the cache write; the
+    // write count is reported separately under prompt_tokens_details.
+    const usage = extractUsage({
+      prompt_tokens: 100,
+      completion_tokens: 20,
+      total_tokens: 120,
+      prompt_tokens_details: { cached_tokens: 30, cache_write_tokens: 40 },
+    });
+    expect(usage).toEqual({
+      inputOther: 30,
+      output: 20,
+      inputCacheRead: 30,
+      inputCacheCreation: 40,
+    });
+  });
+
+  it('keeps DeepSeek split untouched when cache_write_tokens is absent', () => {
+    const usage = extractUsage({
+      prompt_tokens: 1000,
+      completion_tokens: 100,
+      total_tokens: 1100,
+      prompt_cache_hit_tokens: 780,
+      prompt_cache_miss_tokens: 220,
+    });
+    expect(usage).toEqual({
+      inputOther: 220,
+      output: 100,
+      inputCacheRead: 780,
+      inputCacheCreation: 0,
+    });
+  });
+
   it('returns null for null/undefined', () => {
     const undef: unknown = undefined;
     expect(extractUsage(null)).toBeNull();
