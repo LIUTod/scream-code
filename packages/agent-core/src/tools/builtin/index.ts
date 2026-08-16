@@ -36,6 +36,7 @@ export * from './planning/exit-plan-mode';
 export * from './planning/fusion-plan';
 export * from './python/python';
 export * from './shell/bash';
+export * from './state/inspect-own-assets';
 export * from './state/todo-list';
 export * from './web/fetch-url';
 export * from './web/web-search';

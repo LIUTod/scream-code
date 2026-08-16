@@ -5,6 +5,7 @@ const DEFAULT_APPROVE_TOOLS: Record<string, true> = {
   Grep: true,
   Glob: true,
   ReadMediaFile: true,
+  InspectOwnAssets: true,
   SetTodoList: true,
   TodoList: true,
   TaskList: true,

@@ -686,6 +686,16 @@ The bundled `worker` profile is the office/document automation specialist, disti
 
 Key files: `packages/agent-core/src/profile/default/worker.yaml`, `packages/agent-core/src/profile/default/agent.yaml`, `packages/agent-core/src/profile/default/system.md`.
 
+### Self Assets Map & InspectOwnAssets
+
+The base system prompt carries a **Self Assets** section that tells the main agent where its own persistent configuration and data live, and what it must never touch. The accompanying `InspectOwnAssets` tool lets the agent actually inspect those assets — read-only, no write path.
+
+- **Self Assets injection**: `buildSelfMap()` (`packages/agent-core/src/profile/self-map.ts`) renders the map (config.toml / tui.toml / user-prefs.md / mcp.json / AGENTS.md / skills / plugins / memory / knowledge, plus core-code and runtime-artifact boundaries). It is injected as the `SCREAM_SELF_ASSETS` template variable in `buildTemplateVars` (`profile/resolve.ts`) and rendered in the `# Self Assets` section of `profile/default/system.md`. Paths are anchored deliberately: user-level AGENTS.md and skills resolve against the OS home (`~/.scream-code/...`) regardless of `SCREAM_CODE_HOME`; everything else against the scream home. `buildSelfMap` must stay pure and synchronous (no async path lookups — `resolveSkillInstallPaths` is async and cannot be used there).
+- **InspectOwnAssets tool**: `packages/agent-core/src/tools/builtin/state/inspect-own-assets.ts` (+ `.md` description). Registered in `ToolManager.initializeBuiltinTools()` **main-agent only** (`this.agent.type === 'main'`), listed in `profile/default/agent.yaml` under the main agent's `tools`, and added to the auto-approve whitelist in `agent/permission/policies/default-tool-approve.ts` (read-only, like Read/Grep/Glob). Subagent profiles define their own tool lists, so the tool is not exposed to subagents. It supports `scope` = `all | skills | mcp | config | memory | knowledge`; reports existence/size/frontmatter status (dir skills: `---` + `name:` within the first 25 lines, bounded 32 KiB read; flat skills: always ok, name from filename; skips dot-entries, node_modules and the 14 documentation filenames), mcp.json parse status + server count (1 MiB oversize guard), plugin-managed skills under `<screamHome>/plugins/managed/<id>/SKILL.md`, and git-root-anchored project skills via `resolveSkillInstallPaths`. Strictly read-only; declares `ToolAccesses.readTree`/`readFile` conservatively.
+- **Tests**: `test/tools/inspect-own-assets.test.ts` (unit, temp dir tree) and `test/tools/inspect-own-assets.e2e.test.ts` (real agent: registration, `useProfile(DEFAULT_AGENT_PROFILES['agent'])` wiring into model-visible `loopTools`, execution).
+
+Key files: `packages/agent-core/src/profile/self-map.ts`, `packages/agent-core/src/profile/resolve.ts`, `packages/agent-core/src/profile/default/system.md`, `packages/agent-core/src/tools/builtin/state/inspect-own-assets.ts`, `packages/agent-core/src/agent/tool/index.ts`, `packages/agent-core/src/profile/default/agent.yaml`.
+
 ### Goal / Todo State
 
 `TodoList` items support an optional `phase` field. Items sharing the same phase are rendered together, while preserving input order within each phase. The phase is preserved across state round-trips.
