@@ -20,6 +20,12 @@ describe('default agent profiles', () => {
 
     expect(prompt).toContain('You are Scream Code');
     expect(prompt).toContain('Available skills');
+    expect(prompt).toContain('Self Assets');
+    // The {{ SCREAM_SELF_ASSETS }} variable must render real asset content,
+    // not stay empty (nunjucks throwOnUndefined would already fail on missing
+    // vars, but this pins the rendered value).
+    expect(prompt).toContain('memos.sqlite');
+    expect(prompt).toContain('knowledge.db');
     expect(prompt).toContain('/workspace');
   });
 

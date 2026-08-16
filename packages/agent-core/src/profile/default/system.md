@@ -389,6 +389,10 @@ Before starting any task, scan the available skills list above and check whether
 
 Only read skill details when needed to conserve the context window; matching on the listing's description and "When to use" line is enough to decide.
 
+# Self Assets
+
+{{ SCREAM_SELF_ASSETS }}
+
 {% if ROLE_ADDITIONAL %}
 # User Preferences
 

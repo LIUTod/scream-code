@@ -1,4 +1,8 @@
+import { homedir } from 'node:os';
+
+import { resolveScreamHome } from '../config/path';
 import { renderPrompt } from '../utils/render-prompt';
+import { buildSelfMap } from './self-map';
 import type {
   RawAgentProfile,
   RawSubagentProfile,
@@ -162,6 +166,11 @@ function buildTemplateVars(
     SCREAM_WORK_DIR_LS: context.cwdListing ?? '',
     SCREAM_AGENTS_MD: context.agentsMd ?? '',
     SCREAM_SKILLS: skills,
+    SCREAM_SELF_ASSETS: buildSelfMap({
+      homeDir: resolveScreamHome(),
+      userHomeDir: homedir(),
+      cwd: context.cwd,
+    }),
     SCREAM_ADDITIONAL_DIRS_INFO: context.additionalDirsInfo ?? '',
     ROLE_ADDITIONAL: mergeRoleAdditional(context.roleAdditional, promptVars),
   };
