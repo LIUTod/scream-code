@@ -166,19 +166,29 @@ function draftKey(): string {
   return `scream-draft:${props.sessionId ?? 'default'}`;
 }
 
+let draftTimer: ReturnType<typeof setTimeout> | undefined;
+
 watch(text, () => {
   autoResize();
-  try {
-    if (text.value) localStorage.setItem(draftKey(), text.value);
-    else localStorage.removeItem(draftKey());
-  } catch {
-    // Best-effort.
-  }
+  // Debounce draft persistence so keystrokes do not hit localStorage on every
+  // input event.
+  clearTimeout(draftTimer);
+  draftTimer = setTimeout(() => {
+    try {
+      if (text.value) localStorage.setItem(draftKey(), text.value);
+      else localStorage.removeItem(draftKey());
+    } catch {
+      // Best-effort.
+    }
+  }, 300);
 });
 
 watch(
   () => props.sessionId,
   () => {
+    // Drop any pending draft write from the previous session so a stale
+    // timer cannot persist the old text under the new session's key.
+    clearTimeout(draftTimer);
     loadHistory();
     let draft = '';
     try {

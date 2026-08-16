@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, inject, ref } from 'vue';
+import { computed, inject, onBeforeUnmount, ref } from 'vue';
 import type { Ref } from 'vue';
 import type { ChatMessage } from '../types';
 import MarkdownRenderer from './MarkdownRenderer.vue';
@@ -24,6 +24,48 @@ const timestamp = computed(() => props.message.ts ? new Date(props.message.ts).t
 const canEdit = computed(() => isUser.value && props.isLatestUser && props.idle);
 const showThinking = inject<Ref<boolean>>('showThinking', ref(true));
 const showTools = inject<Ref<boolean>>('showTools', ref(true));
+
+/** Text-to-speech playback state for the read-aloud button. */
+const speaking = ref(false);
+let speakOnEnd: ((() => void) | null) = null;
+
+function toggleSpeak(): void {
+  if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+  if (speaking.value) {
+    window.speechSynthesis.cancel();
+    speaking.value = false;
+    speakOnEnd = null;
+    return;
+  }
+  const text = props.message.content;
+  if (!text) return;
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.lang = 'zh-CN';
+  const handler = () => {
+    // Guard: only this utterance's end/error may reset the speaking state.
+    // A stale handler from a previously cancelled utterance must not clear a
+    // newer read's state.
+    if (speakOnEnd !== handler) return;
+    speaking.value = false;
+    speakOnEnd = null;
+  };
+  speakOnEnd = handler;
+  utterance.addEventListener('end', handler);
+  utterance.addEventListener('error', handler);
+  // cancel() then speak() in the same tick can drop the new utterance in
+  // Chrome; defer the speak by one frame.
+  window.speechSynthesis.cancel(); // Clear any stale queue.
+  requestAnimationFrame(() => {
+    window.speechSynthesis.speak(utterance);
+  });
+  speaking.value = true;
+}
+
+onBeforeUnmount(() => {
+  if (speaking.value && 'speechSynthesis' in window) {
+    window.speechSynthesis.cancel();
+  }
+});
 async function copyContent() {
   try { await navigator.clipboard.writeText(props.message.content); }
   catch {
@@ -61,10 +103,11 @@ async function copyContent() {
           <ThinkingBlock v-for="tool in thinkingTools" :key="tool.toolCallId" :tool="tool" :active="streaming" />
         </template>
         <ToolGroup v-if="realTools.length && showTools" name="工具调用过程" :tools="realTools" />
-        <MarkdownRenderer v-if="message.content" class="assistant-content" :content="message.content" />
+        <MarkdownRenderer v-if="message.content" class="assistant-content" :content="message.content" :streaming="streaming" />
         <span v-else-if="streaming" class="streaming-cursor" aria-label="正在生成" />
         <div v-if="message.content" class="message-meta">
           <button :title="copied ? '已复制' : '复制内容'" @click="copyContent"><SvgIcon :name="copied ? 'check' : 'copy'" :size="14" />{{ copied ? '已复制' : '复制' }}</button>
+          <button :title="speaking ? '停止朗读' : '朗读'" @click="toggleSpeak"><SvgIcon :name="speaking ? 'speaker-off' : 'speaker'" :size="14" />{{ speaking ? '停止' : '朗读' }}</button>
         </div>
       </div>
     </div>

@@ -253,7 +253,7 @@ function onCommand(name: string, args?: string) {
           @clear="clearMessages"
           @toggle-rightbar="toggleRightbar"
         />
-        <MessageList :messages="messages" :busy="isBusy" :work-dir="workDir" @edit="onEditResend" @pick="sendPrompt" />
+        <MessageList :messages="messages" :busy="isBusy" :work-dir="workDir" :session-id="currentSessionId ?? ''" @edit="onEditResend" @pick="sendPrompt" />
         <div class="composer-dock">
           <ApprovalCard :approvals="pendingApprovals" @resolve="resolveApproval" />
           <Composer
@@ -271,10 +271,9 @@ function onCommand(name: string, args?: string) {
         </div>
       </div>
 
-      <RightPanel
-        v-if="rightbarOpen"
-        class="rightbar-host"
-        :busy="isBusy"
+      <div class="rightbar-host" :class="{ 'rightbar-collapsed': !rightbarOpen }">
+        <RightPanel
+          :busy="isBusy"
         :session-id="sessionId"
         :connection-status="connectionStatus"
         :archived="isArchived"
@@ -292,6 +291,7 @@ function onCommand(name: string, args?: string) {
         :update-like="updateLike"
         @insert="onEditResend"
       />
+      </div>
     </main>
 
     <InfoPanel
@@ -329,7 +329,8 @@ function onCommand(name: string, args?: string) {
 .workbench-body { grid-area: body; display:flex; min-width:0; min-height:0; overflow:hidden; }
 .chat-inset { flex:1; min-width:0; min-height:0; display:flex; flex-direction:column; margin:14px 0 14px 14px; overflow:hidden; border:1px solid var(--color-line); border-radius:15px; background:var(--color-surface); box-shadow:0 3px 12px rgba(18,34,22,.035); }
 .composer-dock { flex-shrink:0; display:flex; flex-direction:column; gap:8px; padding:10px 24px 18px; background:var(--color-surface); }
-.rightbar-host { flex-shrink:0; }
+.rightbar-host { flex-shrink:0; overflow:hidden; transition:width 200ms var(--ease-out), opacity 160ms var(--ease-out); }
+.rightbar-host.rightbar-collapsed { width:0 !important; opacity:0; visibility:hidden; pointer-events:none; }
 .sidebar-resize { position:fixed; top:0; bottom:0; left:var(--sidebar-width); z-index:calc(var(--z-dock) + 3); }
 .sidebar-backdrop { display:none; }
 @media (max-width:1100px) { .rightbar-host { display:none; } .chat-inset { margin-right:14px; } }

@@ -6,6 +6,20 @@
     <meta name="theme-color" content="#0d1117" />
     <link rel="icon" href="/icon.ico" type="image/x-icon" />
     <title>Scream Web UI</title>
+    <script>
+      // Set the theme before first paint to avoid a dark/light flash (FOUC).
+      (function () {
+        try {
+          var saved = localStorage.getItem('scream-theme');
+          var dark =
+            saved === 'dark' ||
+            (saved !== 'light' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+          document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+        } catch (e) {
+          /* storage unavailable - fall back to defaults */
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="app"></div>

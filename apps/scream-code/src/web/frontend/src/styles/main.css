@@ -97,3 +97,16 @@ html.theme-transition *::after {
     padding-bottom: calc(var(--space-3) + env(safe-area-inset-bottom));
   }
 }
+
+/* Global reduced-motion fallback: neutralise every animation/transition when
+   the user prefers reduced motion (component-level overrides still apply). */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

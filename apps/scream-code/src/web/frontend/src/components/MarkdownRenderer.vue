@@ -1,5 +1,5 @@
 <script lang="ts">
-import { computed, h, defineComponent } from 'vue';
+import { computed, h, defineComponent, ref, watch } from 'vue';
 import { marked } from 'marked';
 import CodeBlock from './CodeBlock.vue';
 
@@ -9,12 +9,48 @@ marked.setOptions({ gfm: true, breaks: false });
 export default defineComponent({
   props: {
     content: { type: String, required: true },
+    streaming: { type: Boolean, default: false },
   },
   setup(props) {
+    // While streaming, coalesce re-renders to at most one per animation
+    // frame (chunks arrive as separate macrotasks; Vue's microtask batching
+    // cannot merge them). When streaming ends, force one full render with
+    // the final content so nothing is left in a stale frame.
+    const renderContent = ref(props.content);
+    let rafId: number | null = null;
+
+    watch(
+      () => props.content,
+      (value) => {
+        if (!props.streaming) {
+          renderContent.value = value;
+          return;
+        }
+        if (rafId !== null) return;
+        rafId = requestAnimationFrame(() => {
+          rafId = null;
+          renderContent.value = props.content;
+        });
+      },
+    );
+
+    watch(
+      () => props.streaming,
+      (streaming, wasStreaming) => {
+        if (wasStreaming && !streaming) {
+          if (rafId !== null) {
+            cancelAnimationFrame(rafId);
+            rafId = null;
+          }
+          renderContent.value = props.content;
+        }
+      },
+    );
+
     const nodes = computed(() => {
-      const safeContent = trimPartialClosingFences(props.content);
+      const safeContent = trimPartialClosingFences(renderContent.value);
       const tokens = marked.lexer(safeContent);
-      return tokens.flatMap((token) => renderToken(token));
+      return tokens.flatMap((token) => renderToken(token, props.streaming));
     });
 
     return () => h('div', { class: 'markdown-body' }, nodes.value);
@@ -52,23 +88,23 @@ function trimPartialClosingFences(content: string): string {
   return content;
 }
 
-function renderToken(token: marked.Token): ReturnType<typeof h>[] {
+function renderToken(token: marked.Token, streaming = false): ReturnType<typeof h>[] {
   switch (token.type) {
     case 'paragraph':
       return [h('p', { class: 'md-p' }, renderInline(token.tokens))];
     case 'heading':
       return [h(`h${token.depth}`, { class: `md-h${token.depth}` }, renderInline(token.tokens))];
     case 'code':
-      return [h(CodeBlock, { code: token.text, lang: token.lang ?? 'text' })];
+      return [h(CodeBlock, { code: token.text, lang: token.lang ?? 'text', streaming })];
     case 'blockquote':
-      return [h('blockquote', { class: 'md-blockquote' }, token.tokens.flatMap((t) => renderToken(t)))];
+      return [h('blockquote', { class: 'md-blockquote' }, token.tokens.flatMap((t) => renderToken(t, streaming)))];
     case 'list': {
       const items = (token as { items: { task: boolean; checked: boolean; tokens: marked.Token[] }[] }).items.map((item) => {
         const children: (ReturnType<typeof h> | string)[] = [];
         if (item.task) {
           children.push(h('input', { type: 'checkbox', checked: item.checked, disabled: true, class: 'md-checkbox' }));
         }
-        children.push(...item.tokens.flatMap((t) => renderToken(t)));
+        children.push(...item.tokens.flatMap((t) => renderToken(t, streaming)));
         return h('li', { class: ['md-li', item.task ? 'md-task' : ''] }, children);
       });
       return [h(token.ordered ? 'ol' : 'ul', { class: token.ordered ? 'md-ol' : 'md-ul' }, items)];

@@ -10,8 +10,10 @@ const props = withDefaults(
     messages: ChatMessage[];
     busy?: boolean;
     workDir?: string | null;
+    /** Current session id - used to persist/restore the scroll position. */
+    sessionId?: string;
   }>(),
-  { busy: false, workDir: null },
+  { busy: false, workDir: null, sessionId: '' },
 );
 
 const emit = defineEmits<{
@@ -51,23 +53,89 @@ function isNearBottom(): boolean {
   return el.scrollHeight - el.scrollTop - el.clientHeight < 80;
 }
 
+function prefersReducedMotion(): boolean {
+  return typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
 function scrollToBottom(behavior: ScrollBehavior): void {
-  nextTick(() => {
+  // Wait for the DOM update, then scroll. rAF is more reliable than
+  // nextTick for read-after-write scroll offsets.
+  requestAnimationFrame(() => {
     const el = listRef.value;
     if (!el) return;
-    el.scrollTo({ top: el.scrollHeight, behavior });
+    const finalBehavior: ScrollBehavior = prefersReducedMotion() ? 'auto' : behavior;
+    el.scrollTo({ top: el.scrollHeight, behavior: finalBehavior });
   });
 }
 
-function onScroll(): void {
-  showScrollButton.value = !isNearBottom();
+let saveScrollRaf: number | null = null;
+
+/** Persist the current scroll offset (rAF-coalesced) for session switches/refresh. */
+function saveScrollPosition(): void {
+  const el = listRef.value;
+  const sid = props.sessionId;
+  if (!el || !sid) return;
+  if (saveScrollRaf !== null) return;
+  saveScrollRaf = requestAnimationFrame(() => {
+    saveScrollRaf = null;
+    try {
+      localStorage.setItem(`scream-scroll:${sid}`, String(el!.scrollTop));
+    } catch {
+      // Best-effort.
+    }
+  });
 }
+
+function restoreScrollPosition(): void {
+  const el = listRef.value;
+  const sid = props.sessionId;
+  if (!el || !sid) return;
+  let saved: string | null = null;
+  try {
+    saved = localStorage.getItem(`scream-scroll:${sid}`);
+  } catch {
+    // Best-effort.
+  }
+  if (saved) el.scrollTop = Number(saved);
+}
+
+function onScroll(): void {
+  const el = listRef.value;
+  if (!el) return;
+  const awayFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight > 80;
+  showScrollButton.value = awayFromBottom;
+  // User scrolled up during a pinned turn -> release the pin so streaming
+  // deltas stop dragging them back down.
+  if (awayFromBottom && forceScroll) {
+    forceScroll = false;
+  }
+  if (!props.busy) {
+    saveScrollPosition();
+  }
+}
+
+let restoredForSession = '';
+
+watch(
+  () => props.sessionId,
+  () => {
+    // Session switched: clear the restore marker so the first content load
+    // restores the saved position instead of force-scrolling to bottom.
+    restoredForSession = '';
+  },
+);
 
 watch(
   () => [props.messages.length, streamLength.value],
   ([len], [oldLen]) => {
     // New message added -> always scroll to bottom and pin subsequent deltas.
     if (len !== oldLen) {
+      // First load for this session: restore the saved scroll position.
+      if (len > 0 && restoredForSession !== props.sessionId) {
+        restoredForSession = props.sessionId;
+        requestAnimationFrame(() => requestAnimationFrame(restoreScrollPosition));
+        return;
+      }
       forceScroll = true;
       showScrollButton.value = false;
       scrollToBottom('smooth');
@@ -99,10 +167,16 @@ const showSkeleton = computed(() => {
 
 onMounted(() => {
   listRef.value?.addEventListener('scroll', onScroll, { passive: true });
+  // Refresh recovery: restore the saved scroll position once rendered.
+  requestAnimationFrame(() => requestAnimationFrame(restoreScrollPosition));
 });
 
 onUnmounted(() => {
   listRef.value?.removeEventListener('scroll', onScroll);
+  if (saveScrollRaf !== null) {
+    cancelAnimationFrame(saveScrollRaf);
+    saveScrollRaf = null;
+  }
 });
 </script>
 

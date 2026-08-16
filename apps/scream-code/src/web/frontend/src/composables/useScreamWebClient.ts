@@ -23,6 +23,7 @@ import {
   isCurrentSessionRequest,
 } from '../utils/goalTodoState';
 import { useToast } from './useToast';
+import { useThrottledFlush } from './useThrottledFlush';
 
 export type ConnectionStatus = 'connecting' | 'connected' | 'reconnecting' | 'disconnected' | 'idle';
 
@@ -210,6 +211,12 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
   }
 
   function applySnapshot(snapshot: SessionSnapshot, goalGeneration?: number): void {
+    // The snapshot is authoritative (server journal includes volatile deltas):
+    // drop any locally buffered stream chunks so they cannot be re-appended
+    // to the new snapshot's last message (background-tab + reconnect case).
+    pendingAssistantDelta = '';
+    pendingThinkingDelta = '';
+    pendingToolProgress.clear();
     // Preserve local-only messages (command results, system notices) that are
     // not in the server journal. Without this, applySnapshot's full replace
     // would drop them - the "闪一下" bug.
@@ -433,6 +440,48 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
     }
   }
 
+  // ── Streaming coalescing ──────────────────────────────────────────────
+  // Stream chunks arrive as separate macrotasks; coalesce content deltas and
+  // tool progress into at most one state flush per animation frame so the
+  // renderer does not run O(chunks) full passes.
+  let pendingAssistantDelta = '';
+  let pendingThinkingDelta = '';
+  const pendingToolProgress = new Map<string, string>();
+  let streamDisposed = false;
+
+  function flushStreaming(): void {
+    if (streamDisposed) return;
+    const last = lastAssistantMessage();
+    if (!last) {
+      pendingAssistantDelta = '';
+      pendingThinkingDelta = '';
+      pendingToolProgress.clear();
+      return;
+    }
+    if (pendingAssistantDelta) {
+      last.content += pendingAssistantDelta;
+      pendingAssistantDelta = '';
+    }
+    if (pendingThinkingDelta) {
+      const thinkingTool = last.tools.find((t) => t.name === 'thinking');
+      if (thinkingTool) {
+        thinkingTool.output = (thinkingTool.output ?? '') + pendingThinkingDelta;
+      } else {
+        last.tools.push({ toolCallId: 'thinking', name: 'thinking', output: pendingThinkingDelta });
+      }
+      pendingThinkingDelta = '';
+    }
+    if (pendingToolProgress.size > 0) {
+      for (const [toolCallId, output] of pendingToolProgress) {
+        const tool = last.tools.find((t) => t.toolCallId === toolCallId);
+        if (tool) tool.output = output;
+      }
+      pendingToolProgress.clear();
+    }
+  }
+
+  const streamFlush = useThrottledFlush(flushStreaming);
+
   function onEvent(payload: { type: string; [key: string]: unknown }): void {
     const goalTodoState = applyGoalTodoEvent({ goal: goal.value, todos: todos.value }, payload);
     goal.value = goalTodoState.goal;
@@ -454,25 +503,19 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
           pendingPromptAccepted = false;
           sentMessageIds.clear();
         }
+        streamFlush.flushNow();
         status.value = { ...status.value, busy: true };
         messages.value.push({ id: generateId(), role: 'assistant', content: '', tools: [], ts: Date.now() });
         break;
       }
       case 'assistant.delta': {
-        const last = lastAssistantMessage();
-        if (last) last.content += String(payload.delta);
+        pendingAssistantDelta += String(payload.delta);
+        streamFlush.schedule();
         break;
       }
       case 'thinking.delta': {
-        const last = lastAssistantMessage();
-        if (last) {
-          const thinkingTool = last.tools.find((t) => t.name === 'thinking');
-          if (thinkingTool) {
-            thinkingTool.output = (thinkingTool.output ?? '') + String(payload.delta);
-          } else {
-            last.tools.push({ toolCallId: 'thinking', name: 'thinking', output: String(payload.delta) });
-          }
-        }
+        pendingThinkingDelta += String(payload.delta);
+        streamFlush.schedule();
         break;
       }
       case 'tool.call.started': {
@@ -483,6 +526,9 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
         break;
       }
       case 'tool.result': {
+        // Clear any buffered progress for this tool so a stale progress frame
+        // cannot overwrite the authoritative result at the next flush.
+        pendingToolProgress.delete(String(payload.toolCallId));
         const last = lastAssistantMessage();
         if (last) {
           const tool = last.tools.find((t) => t.toolCallId === payload.toolCallId);
@@ -494,14 +540,13 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
         break;
       }
       case 'tool.progress': {
-        const last = lastAssistantMessage();
-        if (last) {
-          const tool = last.tools.find((t) => t.toolCallId === payload.toolCallId);
-          if (tool) tool.output = String(payload.message ?? payload.output);
-        }
+        // Progress is overwrite-semantics: keep only the latest text per tool.
+        pendingToolProgress.set(String(payload.toolCallId), String(payload.message ?? payload.output));
+        streamFlush.schedule();
         break;
       }
       case 'turn.ended': {
+        streamFlush.flushNow();
         status.value = { ...status.value, busy: false };
         if (payload.reason === 'failed') {
           const last = lastAssistantMessage();
@@ -1056,6 +1101,8 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
 
   onBeforeUnmount(() => {
     disposed = true;
+    streamDisposed = true;
+    streamFlush.dispose();
     window.removeEventListener('online', handleOnline);
     document.removeEventListener('visibilitychange', handleVisibilityChange);
     stopHeartbeat();

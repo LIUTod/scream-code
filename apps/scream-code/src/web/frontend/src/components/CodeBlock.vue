@@ -6,11 +6,18 @@ import { createOnigurumaEngine } from 'shiki/engine/oniguruma';
 const props = defineProps<{
   code: string;
   lang?: string;
+  /** True while the enclosing message is still streaming. */
+  streaming?: boolean;
 }>();
 
-const effectiveTheme = inject<import('vue').Ref<'light' | 'dark'>>('effectiveTheme', ref('dark'));
+const effectiveTheme = inject<import('vue').Ref<'light' | 'dark'>>(
+  'effectiveTheme',
+  ref(typeof document !== 'undefined' && document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light'),
+);
 
 const highlighted = ref('');
+/** Lightweight escaped rendering used while streaming (no shiki highlight). */
+const plainHtml = ref('');
 const copied = ref(false);
 
 let highlighter: Awaited<ReturnType<typeof createHighlighterCore>> | null = null;
@@ -103,9 +110,27 @@ function copy() {
 }
 
 watch(
-  () => [props.code, props.lang, effectiveTheme.value],
-  () => render(),
+  () => [props.code, props.lang, effectiveTheme.value] as const,
+  ([code]) => {
+    if (props.streaming) {
+      // During streaming, skip shiki highlighting (expensive per chunk) and
+      // render a lightweight escaped plain-text fallback instead.
+      plainHtml.value = `<pre class="shiki-fallback"><code>${escapeHtml(code)}</code></pre>`;
+    } else {
+      void render();
+    }
+  },
   { immediate: true },
+);
+
+watch(
+  () => props.streaming,
+  (streaming, wasStreaming) => {
+    if (wasStreaming && !streaming) {
+      // Fence just closed: do the real highlight once with the final code.
+      void render();
+    }
+  },
 );
 </script>
 
@@ -115,7 +140,7 @@ watch(
       <span class="code-lang">{{ lang || 'text' }}</span>
       <button class="code-copy" @click="copy">{{ copied ? '已复制' : '复制' }}</button>
     </div>
-    <div class="code-content" v-html="highlighted"></div>
+    <div class="code-content" v-html="props.streaming ? plainHtml : (highlighted || plainHtml)"></div>
   </div>
 </template>
 

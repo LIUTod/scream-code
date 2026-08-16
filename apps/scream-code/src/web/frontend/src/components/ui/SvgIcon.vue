@@ -51,6 +51,8 @@ withDefaults(defineProps<{ name: string; size?: number }>(), { size: 20 });
     <template v-else-if="name === 'terminal'"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="m7 9 3 3-3 3m5 0h5" /></template>
     <template v-else-if="name === 'folder'"><path d="M3 6h7l2 2h9v11H3Z" /></template>
     <template v-else-if="name === 'check'"><path d="m5 12 4 4L19 6" /></template>
+    <template v-else-if="name === 'speaker'"><path d="M11 5 6 9H3v6h3l5 4V5z" /><path d="M15.5 8.5a5 5 0 0 1 0 7" /><path d="M18 6a8.5 8.5 0 0 1 0 12" /></template>
+    <template v-else-if="name === 'speaker-off'"><path d="M11 5 6 9H3v6h3l5 4V5z" /><path d="m16 9 5 6M21 9l-5 6" /></template>
     <template v-else-if="name === 'copy'"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4H4v12h4" /></template>
   </svg>
 </template>
