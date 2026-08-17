@@ -198,6 +198,15 @@ var collapsedCalls = false;
 var timeMode = false;
 var selectedIndex = -1;
 var rowEls = [];
+var PAGE = 300;
+var renderedCount = 0;
+var filtered = [];
+var shown = 0;
+var lastTurn = null;
+var turnCounts = {};
+function ensureRow(idx) {
+  while (rowEls.length <= idx && renderedCount < filtered.length) renderChunk();
+}
 function showTip(text, x, y) {
   tip.innerHTML = text;
   tip.style.display = 'block';
@@ -253,9 +262,10 @@ function section(title, value, cls) {
   return '<div class="section"><h4>' + title + '</h4><div class="payload' + (cls ? ' ' + cls : '') + '">' + esc(value) + '</div></div>';
 }
 function showDetail(i) {
+  ensureRow(i);
   if (selectedIndex === i) { hideDetail(); return; }
   selectedIndex = i;
-  var cell = cells[i];
+  var cell = filtered[i];
   for (var k = 0; k < rowEls.length; k++) rowEls[k].classList.remove('selected');
   if (rowEls[i]) {
     rowEls[i].classList.add('selected');
@@ -284,6 +294,8 @@ function renderTimeline(visible) {
   timeline.innerHTML = '';
   if (visible.length < 2) return;
   var n = visible.length;
+  // Sample spans on huge documents so the timeline strip stays light.
+  var sampleStep = Math.max(1, Math.ceil(n / 1500));
   if (timeMode && visible.every(function (c) { return c.startedAt !== undefined; })) {
     var min = Infinity, max = -Infinity;
     for (var i = 0; i < n; i++) {
@@ -304,13 +316,13 @@ function renderTimeline(visible) {
       scaled.push([cs - min, ce - min]);
     }
     total = max - min;
-    for (var k = 0; k < n; k++) {
+    for (var k = 0; k < n; k += sampleStep) {
       var span = makeSpan(visible[k], k, (scaled[k][0] / total) * 100, (scaled[k][1] - scaled[k][0]) / total * 100);
       timeline.appendChild(span);
     }
   } else {
     var widthPct = 100 / n;
-    for (var m = 0; m < n; m++) {
+    for (var m = 0; m < n; m += sampleStep) {
       var sp = makeSpan(visible[m], m, m * widthPct, widthPct - 0.4);
       timeline.appendChild(sp);
     }
@@ -370,15 +382,25 @@ function render() {
     if (q && !(c.text + ' ' + (c.outputDetail || '') + ' ' + (c.thinkingDetail || '')).toLowerCase().includes(q)) return false;
     return true;
   });
-  var filtered = currentFiltered;
+  filtered = currentFiltered;
   renderTimeline(filtered);
   tbody.innerHTML = '';
   rowEls = [];
-  var shown = 0;
-  var lastTurn = null;
-  var turnCounts = {};
+  renderedCount = 0;
+  shown = 0;
+  lastTurn = null;
+  turnCounts = {};
   for (var i = 0; i < filtered.length; i++) turnCounts[filtered[i].turn || 0] = (turnCounts[filtered[i].turn || 0] || 0) + 1;
-  for (var i2 = 0; i2 < filtered.length; i2++) {
+  renderChunk();
+  updateCount();
+}
+function updateCount() {
+  var el = document.getElementById('count');
+  if (el) el.textContent = shown + ' / ' + filtered.length + ' 条';
+}
+function renderChunk() {
+  var end = Math.min(filtered.length, renderedCount + PAGE);
+  for (var i2 = renderedCount; i2 < end; i2++) {
     var cell = filtered[i2];
     var turn = cell.turn || 0;
     var row;
@@ -407,7 +429,7 @@ function render() {
             if (turnsBtn) turnsBtn.classList.remove('on');
             render();
             var idx = currentFiltered.findIndex(function (c) { return c.turn === t; });
-            if (idx >= 0 && rowEls[idx]) { rowEls[idx].scrollIntoView({ block: 'center' }); showDetail(idx); }
+            if (idx >= 0) { ensureRow(idx); if (rowEls[idx]) { rowEls[idx].scrollIntoView({ block: 'center' }); showDetail(idx); } }
           };
         })(turn));
         tbody.appendChild(trow);
@@ -460,8 +482,9 @@ function render() {
     shown++;
     lastTurn = turn;
   }
+  renderedCount = end;
   if (!shown) tbody.innerHTML = '<tr><td colspan="2"><div class="placeholder">无匹配记录</div></td></tr>';
-  document.getElementById('count').textContent = shown + ' 条';
+  updateCount();
 }
 if (searchInput) searchInput.addEventListener('input', render);
 if (turnsBtn) turnsBtn.addEventListener('click', function () { collapsedTurns = !collapsedTurns; turnsBtn.classList.toggle('on', collapsedTurns); render(); });
@@ -504,6 +527,7 @@ function locateAt(clientX) {
   var n = currentFiltered.length;
   if (n < 2) return;
   var idx = Math.round(p * (n - 1));
+  ensureRow(idx);
   if (rowEls[idx] && rowEls[idx].scrollIntoView) rowEls[idx].scrollIntoView({ block: 'center' });
 }
 function timelineRectLeft() {
@@ -526,7 +550,10 @@ function syncLocatorFromTable() {
   var trackRect = track.getBoundingClientRect();
   locator.style.left = (trackRect.left - timelineRectLeft() + p * trackRect.width - 1) + 'px';
 }
-if (tablePane) tablePane.addEventListener('scroll', syncLocatorFromTable);
+if (tablePane) tablePane.addEventListener('scroll', function () {
+  syncLocatorFromTable();
+  if (tablePane.scrollTop + tablePane.clientHeight >= tablePane.scrollHeight - 60 && renderedCount < filtered.length) renderChunk();
+});
 render();
 syncLocatorFromTable();
 `;
@@ -584,9 +611,9 @@ export function renderTraceHtml(doc: TraceDocument): string {
     </aside>
   </div>
 </div>
+<div class="tip" id="tip"></div>
 <script id="data" type="application/json">${dataJson}</script>
 <script>${RENDER_JS}</script>
-<div class="tip" id="tip"></div>
 </body>
 </html>`;
 }

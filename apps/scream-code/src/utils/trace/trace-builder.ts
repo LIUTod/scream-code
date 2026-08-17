@@ -438,7 +438,59 @@ export function buildTraceCells({ wirePath }: BuildTraceInput): TraceCell[] {
   finalizeStep(undefined);
   flushPendingSystem(undefined);
 
-  return cells;
+  return capTraceSize(cells);
+}
+
+/**
+ * Long sessions produce tens of thousands of cells with multi-MB detail
+ * payloads, which previously bloated the trace HTML (up to ~60MB) and froze
+ * the browser. Two mitigations, applied at build time:
+ *  1. Truncate per-cell detail text (thinking/output/input/result) to a cap.
+ *  2. Beyond a cell-count cap, collapse the oldest cells into per-turn
+ *     summary rows so the document stays bounded while early turns remain
+ *     visible in the ledger.
+ */
+const MAX_DETAIL = 4000;
+const MAX_CELLS = 4000;
+
+function truncateDetail(value: string | undefined, max = MAX_DETAIL): string | undefined {
+  if (!value || value.length <= max) return value;
+  return `${value.slice(0, max)}\n…[已截断 ${value.length - max} 字符]`;
+}
+
+function capTraceSize(cells: TraceCell[]): TraceCell[] {
+  for (const cell of cells) {
+    cell.text = truncateDetail(cell.text, 240) ?? '';
+    if (cell.thinkingDetail) cell.thinkingDetail = truncateDetail(cell.thinkingDetail);
+    if (cell.outputDetail) cell.outputDetail = truncateDetail(cell.outputDetail);
+    if (cell.inputDetail) cell.inputDetail = truncateDetail(cell.inputDetail);
+    if (cell.result) cell.result = truncateDetail(cell.result);
+  }
+  if (cells.length <= MAX_CELLS) return cells;
+
+  const keep = cells.slice(-MAX_CELLS);
+  const early = cells.slice(0, cells.length - MAX_CELLS);
+  let firstTurn: number | undefined;
+  let lastTurn: number | undefined;
+  for (const cell of early) {
+    if (cell.turn === undefined) continue;
+    if (firstTurn === undefined || cell.turn < firstTurn) firstTurn = cell.turn;
+    if (lastTurn === undefined || cell.turn > lastTurn) lastTurn = cell.turn;
+  }
+  const range =
+    firstTurn !== undefined && lastTurn !== undefined
+      ? `（回合 ${firstTurn}-${lastTurn}）`
+      : '';
+  return [
+    {
+      index: 1,
+      kind: 'system',
+      text: `更早的轨迹已折叠${range}：${early.length} 条记录`,
+      timeSeconds: null,
+      startedAt: early.find((c) => c.startedAt !== undefined && c.startedAt !== null)?.startedAt ?? null,
+    },
+    ...keep,
+  ];
 }
 
 interface WireRow {
