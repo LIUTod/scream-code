@@ -96,6 +96,10 @@ function pickThinking(level: string) {
       class="picker-search"
       type="text"
       placeholder="搜索模型…"
+      id="model-search-input"
+      name="model-search"
+      autocomplete="off"
+      spellcheck="false"
     />
 
     <div class="picker-list">

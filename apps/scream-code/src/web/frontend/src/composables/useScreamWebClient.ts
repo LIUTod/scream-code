@@ -115,6 +115,13 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
   let disposed = false;
   const sentMessageIds = new Map<string, { messageId: string; connectionGeneration: number }>();
 
+  // ── Per-turn runtime stats ───────────────────────────────────────────────
+  let turnNumber = 0;
+  let turnStartAt = 0;
+  let turnFirstTokenAt: number | null = null;
+  let activeToolMs = 0;
+  const activeToolStarts = new Map<string, number>();
+
   function wsUrl(): string {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const base = `${protocol}//${window.location.host}/api/v1/ws`;
@@ -239,6 +246,15 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
       ...localMsgs,
       ...pendingMessages,
     ];
+    // Re-anchor the per-turn counter to the latest snapshotted turn so a new
+    // session (or restored history) does not keep counting up across sessions.
+    for (let i = messages.value.length - 1; i >= 0; i--) {
+      const stats = messages.value[i]?.turnStats;
+      if (stats && typeof stats.turn === 'number' && stats.turn > 0) {
+        turnNumber = stats.turn;
+        break;
+      }
+    }
     pendingApprovals.value = snapshot.pendingApprovals;
     status.value = { ...snapshot.status, busy: snapshot.busy };
     goal.value = snapshot.goal;
@@ -505,15 +521,38 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
         }
         streamFlush.flushNow();
         status.value = { ...status.value, busy: true };
-        messages.value.push({ id: generateId(), role: 'assistant', content: '', tools: [], ts: Date.now() });
+        turnNumber += 1;
+        turnStartAt = Date.now();
+        turnFirstTokenAt = null;
+        activeToolMs = 0;
+        activeToolStarts.clear();
+        messages.value.push({
+          id: generateId(),
+          role: 'assistant',
+          content: '',
+          tools: [],
+          ts: Date.now(),
+          turnStats: {
+            turn: turnNumber,
+            step: 0,
+            status: 'running',
+            firstTokenMs: null,
+            llmMs: 0,
+            toolMs: 0,
+            tokens: null,
+            tokensPerSec: null,
+          },
+        });
         break;
       }
       case 'assistant.delta': {
+        if (turnFirstTokenAt === null) turnFirstTokenAt = Date.now();
         pendingAssistantDelta += String(payload.delta);
         streamFlush.schedule();
         break;
       }
       case 'thinking.delta': {
+        if (turnFirstTokenAt === null) turnFirstTokenAt = Date.now();
         pendingThinkingDelta += String(payload.delta);
         streamFlush.schedule();
         break;
@@ -522,13 +561,20 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
         const last = lastAssistantMessage();
         if (last) {
           last.tools.push({ toolCallId: String(payload.toolCallId), name: String(payload.name), args: payload.args });
+          if (last.turnStats) last.turnStats.step += 1;
         }
+        activeToolStarts.set(String(payload.toolCallId), Date.now());
         break;
       }
       case 'tool.result': {
         // Clear any buffered progress for this tool so a stale progress frame
         // cannot overwrite the authoritative result at the next flush.
         pendingToolProgress.delete(String(payload.toolCallId));
+        const startedAt = activeToolStarts.get(String(payload.toolCallId));
+        if (startedAt !== undefined) {
+          activeToolMs += Date.now() - startedAt;
+          activeToolStarts.delete(String(payload.toolCallId));
+        }
         const last = lastAssistantMessage();
         if (last) {
           const tool = last.tools.find((t) => t.toolCallId === payload.toolCallId);
@@ -553,6 +599,21 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
           if (last) last.isError = true;
           error.value = eventErrorMessage(payload.error, 'Turn failed');
         }
+        const last = lastAssistantMessage();
+        const llmMs = Date.now() - turnStartAt;
+        const usage = status.value.usage?.currentTurn;
+        const tokens = usage
+          ? usage.inputOther + usage.output + usage.inputCacheRead + usage.inputCacheCreation
+          : null;
+        if (last && last.turnStats) {
+          last.turnStats.status = 'done';
+          last.turnStats.llmMs = llmMs;
+          last.turnStats.toolMs = activeToolMs;
+          last.turnStats.firstTokenMs = turnFirstTokenAt !== null ? turnFirstTokenAt - turnStartAt : null;
+          last.turnStats.tokens = tokens;
+          last.turnStats.tokensPerSec =
+            tokens !== null && llmMs > 0 ? Math.round((tokens / llmMs) * 1000) : null;
+        }
         void fetchSessions();
         void fetchGitStatus();
         break;
@@ -563,6 +624,30 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
         if (payload.contextTokens !== undefined) patch.contextTokens = payload.contextTokens as number;
         if (payload.maxContextTokens !== undefined) patch.maxContextTokens = payload.maxContextTokens as number;
         if (payload.contextUsage !== undefined) patch.contextUsage = payload.contextUsage as number;
+        status.value = { ...status.value, ...patch };
+        break;
+      }
+      case 'agent.status.updated': {
+        const patch: Partial<SessionStatus> = {};
+        if (payload.model !== undefined) patch.model = payload.model as string;
+        if (payload.thinkingLevel !== undefined) patch.thinkingLevel = payload.thinkingLevel as string;
+        if (payload.contextTokens !== undefined) patch.contextTokens = payload.contextTokens as number;
+        if (payload.maxContextTokens !== undefined) patch.maxContextTokens = payload.maxContextTokens as number;
+        if (payload.contextUsage !== undefined) patch.contextUsage = payload.contextUsage as number;
+        if (payload.usage !== undefined) {
+          patch.usage = payload.usage as SessionUsage;
+          // Late-arriving token usage: backfill the last settled assistant turn
+          // so the stats row shows tokens even when usage lands after turn.ended.
+          const turn = payload.usage as SessionUsage | undefined;
+          if (turn?.currentTurn) {
+            const last = lastAssistantMessage();
+            const tokens = turn.currentTurn.inputOther + turn.currentTurn.output + turn.currentTurn.inputCacheRead + turn.currentTurn.inputCacheCreation;
+            if (last?.turnStats && last.turnStats.status === 'done' && last.turnStats.tokens === null) {
+              last.turnStats.tokens = tokens;
+              last.turnStats.tokensPerSec = last.turnStats.llmMs ? Math.round((tokens / last.turnStats.llmMs) * 1000) : null;
+            }
+          }
+        }
         status.value = { ...status.value, ...patch };
         break;
       }

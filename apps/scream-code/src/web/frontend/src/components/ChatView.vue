@@ -1,15 +1,17 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, provide, ref } from 'vue';
+import { computed, inject, onBeforeUnmount, onMounted, provide, ref } from 'vue';
+import type { Ref } from 'vue';
 import { useScreamWebClient } from '../composables/useScreamWebClient';
 import { useResizable } from '../composables/useResizable';
 import { slashHelpText } from '../commands';
-import TopBar from './TopBar.vue';
+import type { Theme } from '../theme';
 import ChatHeader from './ChatHeader.vue';
 import MessageList from './MessageList.vue';
 import Composer from './Composer.vue';
 import ApprovalCard from './ApprovalCard.vue';
 import SessionSidebar from './SessionSidebar.vue';
 import RightPanel from './RightPanel.vue';
+import RightRail from './RightRail.vue';
 import InfoPanel from './InfoPanel.vue';
 import SearchSessionsDialog from './SearchSessionsDialog.vue';
 import ResizeHandle from './ResizeHandle.vue';
@@ -67,20 +69,28 @@ provide('modelSwitchable', modelSwitchable);
 /* ── Current session title ───────────────────────────────────────────────── */
 const currentTitle = computed(() => {
   const s = sessions.value.find((s) => s.sessionId === currentSessionId.value);
-  return s?.title ?? null;
+  const stored = s?.title;
+  if (stored && stored !== '新会话' && stored !== 'New Session') return stored;
+  // Untitled session: summarise the first user message instead of a bare label.
+  const firstUser = messages.value.find((m) => m.role === 'user');
+  if (firstUser) {
+    const text = firstUser.content.replace(/\s+/g, ' ').trim();
+    if (text) return text.length > 24 ? `${text.slice(0, 24)}…` : text;
+  }
+  return stored ?? null;
 });
 
 /* ── Sidebar collapse (desktop) / overlay (mobile) ───────────────────────── */
 // Versioned key intentionally ignores the pre-prototype layout's persisted
 // collapsed state. From v2 onward, explicit desktop toggles remain persistent.
 const SIDEBAR_KEY = 'scream-sidebar-collapsed-v2';
-const sidebarCollapsed = ref(false);
+const sidebarCollapsed = ref(true);
 const sidebarMobileOpen = ref(false);
 
 try {
-  sidebarCollapsed.value = localStorage.getItem(SIDEBAR_KEY) === '1';
+  sidebarCollapsed.value = localStorage.getItem(SIDEBAR_KEY) !== '0';
 } catch {
-  // Storage unavailable — default to expanded.
+  // Storage unavailable — default to collapsed.
 }
 
 function isMobileViewport(): boolean {
@@ -105,14 +115,14 @@ function onSwitchSession(id: string) {
   switchSession(id);
 }
 
-/* ── Right panel (auto-hidden by CSS below 1100px) ───────────────────────── */
-const RIGHTBAR_KEY = 'scream-rightbar-open';
-const rightbarOpen = ref(true);
+/* ── Right panel (collapsed to an icon rail by default, like the sidebar) ─ */
+const RIGHTBAR_KEY = 'scream-rightbar-collapsed-v2';
+const rightbarOpen = ref(false);
 
 try {
-  rightbarOpen.value = localStorage.getItem(RIGHTBAR_KEY) !== '0';
+  rightbarOpen.value = localStorage.getItem(RIGHTBAR_KEY) === '1';
 } catch {
-  // Storage unavailable — default to visible.
+  // Storage unavailable — default to collapsed.
 }
 
 function toggleRightbar() {
@@ -122,6 +132,14 @@ function toggleRightbar() {
   } catch {
     // Best-effort persistence.
   }
+}
+
+const theme = inject<Ref<Theme>>('theme', ref('system' as Theme));
+const setTheme = inject<(t: Theme) => void>('setTheme', () => {});
+function cycleTheme() {
+  const order: Theme[] = ['light', 'dark', 'system'];
+  const next = order[(order.indexOf(theme.value) + 1) % order.length];
+  setTheme(next);
 }
 
 /* ── Thinking / tool chain visibility (toggled from ChatHeader) ───────────── */
@@ -137,6 +155,9 @@ function onGlobalKeydown(e: KeyboardEvent) {
   if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
     e.preventDefault();
     searchOpen.value = !searchOpen.value;
+  } else if ((e.metaKey || e.ctrlKey) && e.key === 'n') {
+    e.preventDefault();
+    onCreateSession();
   }
 }
 onMounted(() => {
@@ -233,16 +254,6 @@ function onCommand(name: string, args?: string) {
     <ResizeHandle v-if="!sidebarCollapsed" class="sidebar-resize" :dragging="sidebarDragging" @pointerdown="onSidebarResize" />
     <div v-if="sidebarMobileOpen" class="sidebar-backdrop" aria-hidden="true" @click="sidebarMobileOpen = false" />
 
-    <TopBar
-      :connection-status="connectionStatus"
-      :status="status"
-      :busy="isBusy"
-      :git-status="gitStatus"
-      @refresh-git="fetchGitStatus"
-      @toggle-sidebar="toggleSidebar"
-      @open-model-picker="openModelPicker"
-    />
-
     <main class="workbench-body">
       <div class="chat-main chat-inset">
         <ChatHeader
@@ -252,8 +263,19 @@ function onCommand(name: string, args?: string) {
           @export="currentSessionId && exportSession(currentSessionId)"
           @clear="clearMessages"
           @toggle-rightbar="toggleRightbar"
+          @menu="toggleSidebar"
         />
-        <MessageList :messages="messages" :busy="isBusy" :work-dir="workDir" :session-id="currentSessionId ?? ''" @edit="onEditResend" @pick="sendPrompt" />
+        <MessageList
+          :messages="messages"
+          :busy="isBusy"
+          :work-dir="workDir"
+          :session-id="currentSessionId ?? ''"
+          :model="status.model ?? null"
+          :context-usage="status.contextUsage ?? null"
+          :connected="connectionStatus === 'connected'"
+          @edit="onEditResend"
+          @pick="sendPrompt"
+        />
         <div class="composer-dock">
           <ApprovalCard :approvals="pendingApprovals" @resolve="resolveApproval" />
           <Composer
@@ -272,25 +294,39 @@ function onCommand(name: string, args?: string) {
       </div>
 
       <div class="rightbar-host" :class="{ 'rightbar-collapsed': !rightbarOpen }">
-        <RightPanel
+        <RightRail
+          v-if="!rightbarOpen"
+          :theme="theme"
           :busy="isBusy"
-        :session-id="sessionId"
-        :connection-status="connectionStatus"
-        :archived="isArchived"
-        :goal="goal"
-        :todos="todos"
-        :goal-request-pending="goalRequestPending"
-        :goal-request-error="goalRequestError"
-        :refine-goal="refineGoal"
-        :create-goal="createGoal"
-        :update-goal="updateGoal"
-        :pause-goal="pauseGoal"
-        :resume-goal="resumeGoal"
-        :cancel-goal="cancelGoal"
-        :like="like"
-        :update-like="updateLike"
-        @insert="onEditResend"
-      />
+          @expand="toggleRightbar"
+          @select="toggleRightbar"
+          @cycle-theme="cycleTheme"
+        />
+        <div v-else class="rightbar-open">
+          <RightPanel
+            :busy="isBusy"
+            :session-id="sessionId"
+            :connection-status="connectionStatus"
+            :archived="isArchived"
+            :goal="goal"
+            :todos="todos"
+            :goal-request-pending="goalRequestPending"
+            :goal-request-error="goalRequestError"
+            :refine-goal="refineGoal"
+            :create-goal="createGoal"
+            :update-goal="updateGoal"
+            :pause-goal="pauseGoal"
+            :resume-goal="resumeGoal"
+            :cancel-goal="cancelGoal"
+            :like="like"
+            :update-like="updateLike"
+            :status="status"
+            :git-status="gitStatus"
+            @refresh-git="fetchGitStatus"
+            @toggle="toggleRightbar"
+            @insert="onEditResend"
+          />
+        </div>
       </div>
     </main>
 
@@ -317,8 +353,8 @@ function onCommand(name: string, args?: string) {
 .workbench {
   display: grid;
   grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
-  grid-template-rows: var(--topbar-height) minmax(0, 1fr);
-  grid-template-areas: "sidebar topbar" "sidebar body";
+  grid-template-rows: minmax(0, 1fr);
+  grid-template-areas: "sidebar body";
   height: 100vh;
   height: 100dvh;
   overflow: hidden;
@@ -329,13 +365,14 @@ function onCommand(name: string, args?: string) {
 .workbench-body { grid-area: body; display:flex; min-width:0; min-height:0; overflow:hidden; }
 .chat-inset { flex:1; min-width:0; min-height:0; display:flex; flex-direction:column; margin:14px 0 14px 14px; overflow:hidden; border:1px solid var(--color-line); border-radius:15px; background:var(--color-surface); box-shadow:0 3px 12px rgba(18,34,22,.035); }
 .composer-dock { flex-shrink:0; display:flex; flex-direction:column; gap:8px; padding:10px 24px 18px; background:var(--color-surface); }
-.rightbar-host { flex-shrink:0; overflow:hidden; transition:width 200ms var(--ease-out), opacity 160ms var(--ease-out); }
-.rightbar-host.rightbar-collapsed { width:0 !important; opacity:0; visibility:hidden; pointer-events:none; }
+.rightbar-host { flex-shrink:0; width:var(--sidebar-width-collapsed); overflow:hidden; transition:width 200ms var(--ease-out), opacity 160ms var(--ease-out); }
+.rightbar-host .rightbar-open { width:var(--rightbar-width, 348px); height:100%; overflow:hidden auto; padding:14px; }
+.rightbar-host:not(.rightbar-collapsed) { width:var(--rightbar-width, 348px); }
 .sidebar-resize { position:fixed; top:0; bottom:0; left:var(--sidebar-width); z-index:calc(var(--z-dock) + 3); }
 .sidebar-backdrop { display:none; }
 @media (max-width:1100px) { .rightbar-host { display:none; } .chat-inset { margin-right:14px; } }
 @media (max-width:640px) {
-  .workbench,.workbench.sidebar-is-collapsed { grid-template-columns:minmax(0,1fr); grid-template-rows:64px minmax(0,1fr); grid-template-areas:"topbar" "body"; }
+  .workbench,.workbench.sidebar-is-collapsed { grid-template-columns:minmax(0,1fr); grid-template-rows:minmax(0,1fr); grid-template-areas:"body"; }
   .sidebar-resize { display:none; }
   .sidebar-backdrop { display:block; position:fixed; inset:0; background:rgba(15,20,16,.42); z-index:calc(var(--z-overlay) - 1); animation:backdrop-in var(--dur-slow) var(--ease-out); }
   .chat-inset { margin:8px; border-radius:12px; }

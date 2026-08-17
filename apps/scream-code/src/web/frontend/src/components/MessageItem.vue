@@ -5,6 +5,7 @@ import type { ChatMessage } from '../types';
 import MarkdownRenderer from './MarkdownRenderer.vue';
 import ToolGroup from './ToolGroup.vue';
 import ThinkingBlock from './ThinkingBlock.vue';
+import TurnStats from './TurnStats.vue';
 import SvgIcon from './ui/SvgIcon.vue';
 
 const props = withDefaults(defineProps<{
@@ -105,6 +106,7 @@ async function copyContent() {
         <ToolGroup v-if="realTools.length && showTools" name="工具调用过程" :tools="realTools" />
         <MarkdownRenderer v-if="message.content" class="assistant-content" :content="message.content" :streaming="streaming" />
         <span v-else-if="streaming" class="streaming-cursor" aria-label="正在生成" />
+        <TurnStats v-if="message.turnStats" :stats="message.turnStats" />
         <div v-if="message.content" class="message-meta">
           <button :title="copied ? '已复制' : '复制内容'" @click="copyContent"><SvgIcon :name="copied ? 'check' : 'copy'" :size="14" />{{ copied ? '已复制' : '复制' }}</button>
           <button :title="speaking ? '停止朗读' : '朗读'" @click="toggleSpeak"><SvgIcon :name="speaking ? 'speaker-off' : 'speaker'" :size="14" />{{ speaking ? '停止' : '朗读' }}</button>

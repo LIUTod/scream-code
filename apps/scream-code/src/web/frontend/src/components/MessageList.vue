@@ -12,8 +12,14 @@ const props = withDefaults(
     workDir?: string | null;
     /** Current session id - used to persist/restore the scroll position. */
     sessionId?: string;
+    /** Current model label shown in the empty-state status bar. */
+    model?: string | null;
+    /** Context usage (0..1 or 0..100) shown in the empty-state status bar. */
+    contextUsage?: number | null;
+    /** Connection state shown in the empty-state status bar. */
+    connected?: boolean;
   }>(),
-  { busy: false, workDir: null, sessionId: '' },
+  { busy: false, workDir: null, sessionId: '', model: null, contextUsage: null, connected: false },
 );
 
 const emit = defineEmits<{
@@ -183,7 +189,14 @@ onUnmounted(() => {
 <template>
   <div class="message-list-wrapper">
     <div ref="listRef" class="message-list">
-      <EmptyState v-if="messages.length === 0" :work-dir="workDir" @pick="(t) => emit('pick', t)" />
+      <EmptyState
+        v-if="messages.length === 0"
+        :work-dir="workDir"
+        :model="model"
+        :context-usage="contextUsage"
+        :connected="connected"
+        @pick="(t) => emit('pick', t)"
+      />
       <MessageItem
         v-for="message in messages"
         :key="message.id"

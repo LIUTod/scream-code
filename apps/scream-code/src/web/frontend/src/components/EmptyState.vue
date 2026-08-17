@@ -4,8 +4,11 @@ import SvgIcon from './ui/SvgIcon.vue';
 withDefaults(
   defineProps<{
     workDir?: string | null;
+    model?: string | null;
+    contextUsage?: number | null;
+    connected?: boolean;
   }>(),
-  { workDir: null },
+  { workDir: null, model: null, contextUsage: null, connected: false },
 );
 
 const emit = defineEmits<{
@@ -17,6 +20,13 @@ const SUGGESTIONS = [
   { icon: 'clipboard', title: '解释这段代码', prompt: '解释这段代码' },
   { icon: 'activity', title: '调试这个问题', prompt: '调试这个问题' },
 ];
+
+function fmtContext(usage: number | null | undefined): string {
+  if (usage === null || usage === undefined) return '—';
+  // Context usage may be a 0..1 fraction or 0..100 percent; normalise for display.
+  const pct = usage <= 1 ? Math.round(usage * 100) : Math.round(usage);
+  return `${Math.min(pct, 100)}%`;
+}
 </script>
 
 <template>
@@ -42,6 +52,24 @@ const SUGGESTIONS = [
     <div v-if="workDir" class="empty-workdir" :title="workDir">
       <span class="workdir-label">工作目录</span>
       <span class="workdir-path">{{ workDir }}</span>
+    </div>
+
+    <div class="empty-status" aria-label="连接与模型状态">
+      <span class="status-dot" :class="connected ? 'on' : 'off'" />
+      <span class="status-item">{{ connected ? '已连接' : '未连接' }}</span>
+      <template v-if="model">
+        <span class="status-sep">·</span>
+        <span class="status-item">模型 {{ model }}</span>
+      </template>
+      <template v-if="contextUsage !== null && contextUsage !== undefined">
+        <span class="status-sep">·</span>
+        <span class="status-item">上下文 {{ fmtContext(contextUsage) }}</span>
+      </template>
+    </div>
+
+    <div class="empty-shortcuts" aria-hidden="true">
+      <span><kbd>⌘K</kbd> 搜索会话</span>
+      <span><kbd>⌘N</kbd> 新建会话</span>
     </div>
   </div>
 </template>
@@ -164,6 +192,54 @@ const SUGGESTIONS = [
   white-space: nowrap;
   direction: rtl;
   text-align: left;
+}
+
+.empty-status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-full);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-xs);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  max-width: 90%;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-text-faint);
+}
+.status-dot.on {
+  background: var(--color-success);
+  box-shadow: 0 0 6px var(--color-success);
+}
+.status-sep { opacity: 0.4; }
+.status-item { white-space: nowrap; }
+
+.empty-shortcuts {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-4);
+  color: var(--color-text-faint);
+  font-size: 11px;
+}
+.empty-shortcuts kbd {
+  display: inline-block;
+  padding: 1px 5px;
+  border: 1px solid var(--color-line);
+  border-bottom-width: 2px;
+  border-radius: var(--radius-xs);
+  background: var(--color-surface);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--color-text-muted);
 }
 
 @media (max-width: 640px) {

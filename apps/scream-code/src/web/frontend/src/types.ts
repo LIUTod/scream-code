@@ -18,6 +18,26 @@ export interface ChatMessage {  id: string;
   local?: boolean;
   /** Stable id used to reconcile optimistic user messages with server snapshots. */
   clientMessageId?: string;
+  /** Per-turn runtime stats (round/step/timing/tokens). */
+  turnStats?: TurnStats;
+}
+
+/** Per-assistant-turn runtime statistics, shown as the turn tail row. */
+export interface TurnStats {
+  turn: number;
+  step: number;
+  /** Live-turn indicator; set to 'done' once the turn settles. */
+  status: 'running' | 'done';
+  /** Wall time from turn start to first model token (ms). */
+  firstTokenMs: number | null;
+  /** Accumulated LLM wall time (ms). */
+  llmMs: number | null;
+  /** Accumulated tool execution wall time (ms). */
+  toolMs: number | null;
+  /** Total tokens consumed this turn (from usage.currentTurn when available). */
+  tokens: number | null;
+  /** Tokens per second of LLM wall time. */
+  tokensPerSec: number | null;
 }
 
 export interface ToolMessage {

@@ -1411,6 +1411,7 @@ class WebSession {
     const messages: ChatMessage[] = [];
     let currentAssistant: ChatMessage | null = null;
     let userIndex = 0;
+    let turnCount = 0;
 
     const flushUserMessagesBefore = (seq: number): void => {
       while (userIndex < this.userMessages.length) {
@@ -1425,10 +1426,26 @@ class WebSession {
       const event = entry.payload;
       flushUserMessagesBefore(entry.seq);
       switch (event.type) {
-        case 'turn.started':
-          currentAssistant = { role: 'assistant', content: '', tools: [] };
+        case 'turn.started': {
+          turnCount += 1;
+          currentAssistant = {
+            role: 'assistant',
+            content: '',
+            tools: [],
+            turnStats: {
+              turn: turnCount,
+              step: 0,
+              status: 'done',
+              firstTokenMs: null,
+              llmMs: null,
+              toolMs: null,
+              tokens: null,
+              tokensPerSec: null,
+            },
+          };
           messages.push(currentAssistant);
           break;
+        }
         case 'assistant.delta':
           if (currentAssistant) {
             currentAssistant.content += event.delta;
@@ -1441,6 +1458,7 @@ class WebSession {
               name: event.name,
               args: event.args,
             });
+            if (currentAssistant.turnStats) currentAssistant.turnStats.step += 1;
           }
           break;
         }

@@ -116,6 +116,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
           v-model="feedbackText"
           class="feedback-input"
           rows="2"
+          name="approval-feedback"
+          aria-label="拒绝反馈"
           placeholder="输入反馈，Enter 提交（将作为拒绝原因反馈给 Agent）"
         />
       </div>

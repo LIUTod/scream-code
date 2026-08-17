@@ -63,7 +63,7 @@ function confirmDelete() {
     <div class="brand-head">
       <div class="brand-symbol"><img src="/icon.ico" alt="" /></div>
       <div class="brand-copy"><strong>Scream Code</strong><span>智能开发工作台</span></div>
-      <button class="collapse-btn" :title="collapsed ? '展开侧栏' : '收起侧栏'" :aria-label="collapsed ? '展开侧栏' : '收起侧栏'" @click="emit('toggle')"><SvgIcon :name="collapsed ? 'chevron-right' : 'chevron-left'" :size="19" /></button>
+      <button class="collapse-btn" :title="collapsed ? '展开侧栏' : '收起侧栏'" :aria-label="collapsed ? '展开侧栏' : '收起侧栏'" @click="emit('toggle')"><SvgIcon :name="collapsed ? 'panel-right' : 'panel-left'" :size="collapsed ? 18 : 16" /></button>
     </div>
 
     <div class="primary-actions">
@@ -129,6 +129,8 @@ function confirmDelete() {
 .brand-copy span { margin-top:3px; color:var(--color-text-muted); font-size:11px; }
 .collapse-btn,.square-action,.filter-btn,.session-actions button { display:grid; place-items:center; border:1px solid var(--color-line); background:var(--color-surface); color:var(--color-text-muted); cursor:pointer; }
 .collapse-btn { width:34px; height:34px; border-radius:9px; }
+.sidebar.collapsed .collapse-btn { width:36px; height:36px; border-radius:10px; color:var(--color-text-muted); }
+.sidebar.collapsed .collapse-btn:hover { color:var(--color-accent); background:var(--color-accent-soft); }
 .primary-actions { display:flex; gap:9px; padding:20px 18px 12px; }
 .new-session { flex:1; height:48px; display:flex; align-items:center; justify-content:center; gap:9px; border:0; border-radius:11px; background:var(--color-accent); color:var(--color-on-accent); font-weight:650; cursor:pointer; box-shadow:0 5px 14px var(--color-accent-glow); }
 .new-session:hover { background:var(--color-accent-hover); }
@@ -182,7 +184,7 @@ dt { color:var(--color-text-muted); } dd { max-width:165px; margin:0; overflow:h
 .sidebar-footer button:hover { color:var(--color-accent); background:var(--color-accent-soft); }
 .dialog-copy { margin:0; color:var(--color-text-muted); font-size:13px; }
 @keyframes pulse { 50% { opacity:.3; } }
-@media (min-width:641px) { .sidebar.collapsed { width:var(--sidebar-width-collapsed); } .sidebar.collapsed .brand-head { justify-content:center; padding:0; } .sidebar.collapsed .brand-copy,.sidebar.collapsed .brand-symbol,.sidebar.collapsed .new-session span,.sidebar.collapsed .square-action,.sidebar.collapsed .search-row,.sidebar.collapsed .list-heading,.sidebar.collapsed .group-label,.sidebar.collapsed .session-info,.sidebar.collapsed .session-actions,.sidebar.collapsed .view-all,.sidebar.collapsed .agent-card,.sidebar.collapsed .sidebar-footer span { display:none; } .sidebar.collapsed .primary-actions { padding:16px 10px; } .sidebar.collapsed .new-session { width:44px; flex:none; } .sidebar.collapsed .session-list { padding:0 9px; } .sidebar.collapsed .session-item { justify-content:center; min-height:48px; padding:7px; } .sidebar.collapsed .sidebar-footer { grid-template-columns:1fr; padding:10px; } }
+@media (min-width:641px) { .sidebar.collapsed { width:var(--sidebar-width-collapsed); } .sidebar.collapsed .brand-head { justify-content:center; padding:18px 10px 0; height:auto; border-bottom:none; } .sidebar.collapsed .brand-copy,.sidebar.collapsed .brand-symbol,.sidebar.collapsed .new-session span,.sidebar.collapsed .square-action,.sidebar.collapsed .search-row,.sidebar.collapsed .list-heading,.sidebar.collapsed .group-label,.sidebar.collapsed .session-info,.sidebar.collapsed .session-actions,.sidebar.collapsed .view-all,.sidebar.collapsed .agent-card,.sidebar.collapsed .sidebar-footer span { display:none; } .sidebar.collapsed .primary-actions { padding:16px 10px; } .sidebar.collapsed .new-session { width:44px; flex:none; } .sidebar.collapsed .session-list { padding:0 9px; } .sidebar.collapsed .session-item { justify-content:center; min-height:48px; padding:7px; } .sidebar.collapsed .sidebar-footer { grid-template-columns:1fr; padding:10px; } }
 @media (max-height:820px) { .agent-card dl div:nth-child(3),.agent-card .usage-track { display:none; } .agent-card { padding:11px 13px; } }
 @media (max-width:640px) { .sidebar { position:fixed; inset:0 auto 0 0; width:min(340px,88vw); transform:translateX(-100%); transition:transform var(--dur-slow) var(--ease-out); box-shadow:none; } .sidebar.mobile-open { transform:translateX(0); box-shadow:var(--shadow-xl); } .collapse-btn { display:none; } }
 </style>

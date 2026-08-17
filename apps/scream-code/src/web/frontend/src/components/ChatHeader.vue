@@ -9,6 +9,7 @@ const emit = defineEmits<{
   (e: 'export'): void;
   (e: 'clear'): void;
   (e: 'toggle-rightbar'): void;
+  (e: 'menu'): void;
 }>();
 const editing = ref(false);
 const draft = ref('');
@@ -32,6 +33,9 @@ const showTools = inject<Ref<boolean>>('showTools', ref(true));
 
 <template>
   <div class="chat-header">
+    <button class="mobile-menu" aria-label="打开会话列表" title="打开会话列表" @click="emit('menu')">
+      <SvgIcon name="menu" />
+    </button>
     <div class="title-area">
       <input v-if="editing" id="session-title-input" ref="inputRef" v-model="draft" name="session-title" class="title-input" maxlength="80" @keydown.enter.prevent="commit" @keydown.esc.prevent="cancel" @blur="commit" />
       <template v-else>
@@ -49,12 +53,13 @@ const showTools = inject<Ref<boolean>>('showTools', ref(true));
       <button class="text-action" title="清空本地消息列表" @click="emit('clear')"><SvgIcon name="broom" :size="18" /><span>清空</span></button>
       <button :class="['text-action', { dimmed: !showThinking }]" :title="showThinking ? '隐藏思考链' : '显示思考链'" @click="showThinking = !showThinking"><SvgIcon name="brain" :size="18" /><span>思考</span></button>
       <button :class="['text-action', { dimmed: !showTools }]" :title="showTools ? '隐藏工具链' : '显示工具链'" @click="showTools = !showTools"><SvgIcon name="terminal" :size="18" /><span>工具</span></button>
-      <button class="icon-action" title="显示或隐藏右侧面板" aria-label="显示或隐藏右侧面板" @click="emit('toggle-rightbar')"><SvgIcon name="panel-right" :size="19" /></button>
+      <button class="icon-action rightbar-action" title="显示或隐藏右侧面板" aria-label="显示或隐藏右侧面板" @click="emit('toggle-rightbar')"><SvgIcon name="panel-right" :size="19" /></button>
     </div>
   </div>
 </template>
 
 <style scoped>
+.mobile-menu { display:none; width:36px; height:36px; place-items:center; border:1px solid var(--color-line); border-radius:9px; background:var(--color-surface); color:var(--color-text); flex-shrink:0; cursor:pointer; }
 .chat-header { min-height:88px; display:flex; align-items:center; gap:18px; padding:17px 24px; background:var(--color-surface); border-bottom:1px solid var(--color-line); flex-shrink:0; }
 .title-area { flex:1; min-width:0; }
 .title-copy { min-width:0; }
@@ -74,5 +79,5 @@ h1 { margin:0; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-sp
 .text-action.dimmed { opacity:0.4; }
 .text-action.dimmed:hover { opacity:0.7; }
 @keyframes pulse { 50% { opacity:.3; } }
-@media (max-width:640px) { .chat-header { min-height:72px; padding:12px 14px; } h1 { font-size:17px; } .status-line { margin-top:4px; } .text-action { width:36px; padding:0; } .text-action span { display:none; } .icon-action.edit { opacity:1; } }
+@media (max-width:640px) { .mobile-menu { display:grid; } .rightbar-action { display:none; } .chat-header { min-height:72px; padding:12px 14px; } h1 { font-size:17px; } .status-line { margin-top:4px; } .text-action { width:36px; padding:0; } .text-action span { display:none; } .icon-action.edit { opacity:1; } }
 </style>
