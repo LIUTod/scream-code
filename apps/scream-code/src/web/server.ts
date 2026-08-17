@@ -67,6 +67,17 @@ interface ChatMessage {
   clientMessageId?: string;
   tools: ToolMessage[];
   isError?: boolean;
+  /** Per-turn runtime stats (round/step/timing/tokens) for the web UI. */
+  turnStats?: {
+    turn: number;
+    step: number;
+    status: 'running' | 'done';
+    firstTokenMs: number | null;
+    llmMs: number | null;
+    toolMs: number | null;
+    tokens: number | null;
+    tokensPerSec: number | null;
+  };
 }
 
 interface ToolMessage {
@@ -1428,7 +1439,7 @@ class WebSession {
       switch (event.type) {
         case 'turn.started': {
           turnCount += 1;
-          currentAssistant = {
+          const assistant: ChatMessage = {
             role: 'assistant',
             content: '',
             tools: [],
@@ -1443,7 +1454,8 @@ class WebSession {
               tokensPerSec: null,
             },
           };
-          messages.push(currentAssistant);
+          currentAssistant = assistant;
+          messages.push(assistant);
           break;
         }
         case 'assistant.delta':
