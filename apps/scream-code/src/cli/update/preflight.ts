@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 
+import { globalPrefixForScream, installLatestArgs } from './prefix';
 import { promptForInstallConfirmation, type InstallPromptOptions } from './prompt';
 import { refreshUpdateCache } from './refresh';
 import { selectUpdateTarget } from './select';
@@ -34,11 +35,16 @@ function formatErrorMessage(error: unknown): string {
 }
 
 function renderManualUpdateMessage(currentVersion: string, target: UpdateTarget): string {
+  const prefix = globalPrefixForScream();
+  const installCommand =
+    prefix !== undefined
+      ? `npm install -g --prefix ${prefix} scream-code@latest`
+      : 'npm install -g scream-code@latest';
   return (
     `Scream Code 有新版本可用 ` +
     `(${currentVersion} -> ${target.version})。\n` +
     `自动更新失败，请手动执行：\n` +
-    `  npm install -g scream-code@latest\n`
+    `  ${installCommand}\n`
   );
 }
 
@@ -61,7 +67,7 @@ async function promptInstall(
 
 async function installUpdate(): Promise<void> {
   return new Promise<void>((resolve, reject) => {
-    const child = spawn(npmExecutable(), ['install', '-g', 'scream-code@latest'], { stdio: 'inherit' });
+    const child = spawn(npmExecutable(), installLatestArgs(), { stdio: 'inherit' });
     const timer = setTimeout(() => {
       child.kill('SIGTERM');
       reject(new Error('npm install 超时'));
@@ -108,7 +114,11 @@ export async function runUpdatePreflight(
     const decision = decideUpdateAction(target, isInteractive);
     if (decision === 'none' || target === null) return 'continue';
 
-    const installCommand = 'npm install -g scream-code@latest';
+    const prefix = globalPrefixForScream();
+    const installCommand =
+      prefix !== undefined
+        ? `npm install -g --prefix ${prefix} scream-code@latest`
+        : 'npm install -g scream-code@latest';
 
     if (decision === 'manual-command') {
       stdout.write(renderManualUpdateMessage(currentVersion, target));

@@ -8,6 +8,7 @@
 import { spawn } from 'node:child_process';
 
 import { t } from '@scream-code/config';
+import { installLatestArgs } from '#/cli/update/prefix';
 import { readUpdateCache } from '#/cli/update/cache';
 import { refreshUpdateCache } from '#/cli/update/refresh';
 import { selectUpdateTarget } from '#/cli/update/select';
@@ -149,7 +150,7 @@ export async function handleUpdateCommand(host: SlashCommandHost): Promise<void>
   host.showStatus(t('update.npm_install'));
   const result = await runInstallStep(
     npmExecutable(),
-    ['install', '-g', 'scream-code@latest'],
+    installLatestArgs(),
     undefined,
     t('update.install_label'),
   );
