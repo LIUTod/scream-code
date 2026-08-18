@@ -394,6 +394,13 @@ export class ToolManager {
     return cloneTodos(this.store.todo ?? []);
   }
 
+  /**
+   * Register a user/plugin tool. This is the public entry point for any
+   * third-party extension (plugins, skills, future harness adapters) to expose
+   * a tool — built-in tools use the internal `builtinTools` map and should not
+   * route through here. Prefer `defineTool()` for the typed high-level API;
+   * this method takes a hand-written registration.
+   */
   registerUserTool(input: UserToolRegistration): void {
     this.agent.records.logRecord({
       type: 'tools.register_user_tool',
@@ -434,6 +441,10 @@ export class ToolManager {
     this.enabledTools.delete(name);
   }
 
+  /**
+   * Register an MCP server (and its tools). Public entry point for third-party
+   * extensions to expose MCP-backed tools; built-in tooling does not use it.
+   */
   registerMcpServer(
     serverName: string,
     client: MCPClient,

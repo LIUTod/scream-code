@@ -33,6 +33,19 @@ describe('parseManifest', () => {
     expect(result.diagnostics).toEqual([]);
   });
 
+  it('parses the optional config block from the manifest', async () => {
+    const root = await makePlugin({
+      'scream.plugin.json': JSON.stringify({
+        name: 'cfg-demo',
+        version: '1.0.0',
+        config: { model: 'default-model', maxSteps: 3 },
+      }),
+    });
+    const result = await parseManifest(root);
+    expect(result.manifest?.config).toEqual({ model: 'default-model', maxSteps: 3 });
+    expect(result.diagnostics).toEqual([]);
+  });
+
   it('prefers root scream.plugin.json when .scream-plugin/plugin.json also exists', async () => {
     const root = await makePlugin({
       'scream.plugin.json': JSON.stringify({ name: 'root-version', version: '1.0.0' }),

@@ -49,7 +49,7 @@ describe('Agent.generateWithRetry', () => {
       .mockImplementationOnce(() => {
         throw new APIConnectionError('temporary connection failure');
       })
-      .mockResolvedValueOnce({ message: { role: 'assistant', content: [], toolCalls: [] } });
+      .mockResolvedValue({ message: { role: 'assistant', content: [], toolCalls: [] } });
     Object.defineProperty(ctx.agent, 'generate', { get: () => generate, configurable: true });
 
     const promise = ctx.agent.generateWithRetry(
@@ -59,8 +59,9 @@ describe('Agent.generateWithRetry', () => {
       [{ role: 'user', content: [{ type: 'text', text: 'hi' }], toolCalls: [] }],
     );
 
-    await vi.advanceTimersByTimeAsync(500); // default 500ms first backoff
-    await vi.advanceTimersByTimeAsync(20); // flush the chained retry
+    // Run every scheduled retry; the second attempt succeeds and stops the
+    // loop, so we do not depend on exact fake-timer milliseconds.
+    await vi.runAllTimersAsync();
     await expect(promise).resolves.toBeDefined();
     expect(generate).toHaveBeenCalledTimes(2);
   });

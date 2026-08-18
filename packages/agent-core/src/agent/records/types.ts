@@ -134,6 +134,12 @@ export type AgentRecordOf<K extends keyof AgentRecordEvents> = Extract<
   { readonly type: K }
 >;
 
+/**
+ * Storage abstraction for the append-only session wire log. Swapping the
+ * backing store (filesystem today, in-memory for tests, SQLite/remote later)
+ * means implementing this interface — agent code never touches the store
+ * implementation directly.
+ */
 export interface AgentRecordPersistence {
   read(): AsyncIterable<AgentRecord>;
   append(input: AgentRecord): void;

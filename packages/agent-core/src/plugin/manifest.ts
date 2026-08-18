@@ -156,6 +156,13 @@ export async function parseManifest(pluginRoot: string): Promise<ParsedManifestR
   const skillInstructions =
     typeof raw['skillInstructions'] === 'string' ? raw['skillInstructions'] : undefined;
 
+  const config =
+    typeof raw['config'] === 'object' &&
+    raw['config'] !== null &&
+    !Array.isArray(raw['config'])
+      ? (raw['config'] as Readonly<Record<string, unknown>>)
+      : undefined;
+
   recordUnsupportedRuntimeFields(raw, diagnostics);
 
   const manifest: PluginManifest = {
@@ -171,6 +178,7 @@ export async function parseManifest(pluginRoot: string): Promise<ParsedManifestR
     mcpServers: await readMcpServers(pluginRoot, raw['mcpServers'], diagnostics),
     interface: readInterface(raw['interface']),
     skillInstructions,
+    config,
   };
 
   return { manifest, manifestKind, manifestPath, shadowedManifestPath, diagnostics };

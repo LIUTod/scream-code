@@ -97,6 +97,35 @@ export interface AgentOptions {
   readonly resolveRuntimeSystemPrompt?: ((basePrompt: string) => string) | undefined;
 }
 
+/**
+ * Stable service manifest for the agent runtime. Lists the core engine
+ * subsystems that extensions may need to reach (future plugin adapters, SDK
+ * consumers, subagent hosts). Modeled after the `inject` contract used by
+ * plugin-based harnesses: a consumer declares what it needs and gets a stable,
+ * documented handle instead of reaching into Agent internals. The Agent still
+ * owns the subsystems; `services` is the read-only manifest view.
+ */
+export interface AgentServices {
+  readonly records: AgentRecords;
+  readonly context: ContextMemory;
+  readonly config: ConfigState;
+  readonly turn: TurnFlow;
+  readonly injection: InjectionManager;
+  readonly permission: PermissionManager;
+  readonly planMode: PlanMode;
+  readonly usage: UsageRecorder;
+  readonly tools: ToolManager;
+  readonly skills: SkillManager | null;
+  readonly background: BackgroundManager;
+  readonly goal: GoalMode;
+  readonly sessionMemory: SessionMemory;
+  readonly workingSet: WorkingSet;
+  readonly fullCompaction: FullCompaction;
+  readonly microCompaction: MicroCompaction;
+  /** Resolve the runtime system prompt (base profile prompt + configured hook). */
+  systemPrompt(): string;
+}
+
 export class Agent {
   readonly type: AgentType;
   readonly jian: Jian;
@@ -136,6 +165,9 @@ export class Agent {
   readonly workingSet: WorkingSet;
   readonly dreamTracker: DreamTracker;
   readonly replayBuilder: ReplayBuilder;
+
+  /** Read-only manifest of the core engine subsystems (see {@link AgentServices}). */
+  readonly services: AgentServices;
 
   private lastLlmConfigLogSignature?: string;
   private readonly sharedEmbeddingEngine: EmbeddingEngine;
@@ -208,6 +240,25 @@ export class Agent {
     this.workingSet = new WorkingSet();
     this.dreamTracker = new DreamTracker(screamHomeDir ?? '');
     this.replayBuilder = new ReplayBuilder(this);
+    this.services = {
+      records: this.records,
+      context: this.context,
+      config: this.config,
+      turn: this.turn,
+      injection: this.injection,
+      permission: this.permission,
+      planMode: this.planMode,
+      usage: this.usage,
+      tools: this.tools,
+      skills: this.skills,
+      background: this.background,
+      goal: this.goal,
+      sessionMemory: this.sessionMemory,
+      workingSet: this.workingSet,
+      fullCompaction: this.fullCompaction,
+      microCompaction: this.microCompaction,
+      systemPrompt: () => this.getRuntimeSystemPrompt(),
+    };
   }
 
   /**

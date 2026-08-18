@@ -20,6 +20,14 @@ export interface BlobStoreOptions {
   readonly maxCacheSize?: number;
 }
 
+/**
+ * Blob storage for large message content (images, files, videos). Content above
+ * the size threshold is offloaded to blobs in `blobsDir` and referenced from
+ * wire records as `blobref:` URLs; `rehydrateParts` resolves them back to
+ * inline data when a session is loaded. A single filesystem implementation is
+ * used across the engine; the class boundary is what keeps blob details out of
+ * the wire/records code.
+ */
 export class BlobStore {
   private readonly blobsDir: string;
   private readonly threshold: number;

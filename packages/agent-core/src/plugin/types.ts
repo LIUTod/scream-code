@@ -37,6 +37,13 @@ export interface PluginManifest {
   readonly mcpServers?: Readonly<Record<string, McpServerConfig>>;
   readonly interface?: PluginInterface;
   readonly skillInstructions?: string;
+  /**
+   * Default plugin configuration (plain data). Reserved as the future home of
+   * a typed `configSchema` when plugins gain a code entry point — the declared
+   * contract mirrors `Config` in code-plugin harnesses so a future adapter can
+   * map configs losslessly. Optional; absent = plugin runs with no config.
+   */
+  readonly config?: Readonly<Record<string, unknown>>;
 }
 
 export interface PluginMcpServerState {
