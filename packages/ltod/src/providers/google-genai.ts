@@ -705,6 +705,10 @@ export class GoogleGenAIChatProvider implements ChatProvider {
   private _buildClient(apiKey: string | undefined): GenAIClient {
     return new GenAIClient({
       apiKey,
+      // The genai SDK performs no internal retry on LLM calls when
+      // `httpOptions.retryOptions` is unset (apiCall fetches directly), so
+      // retries are exclusively owned by the engine's retry layer here — unlike
+      // the openai/anthropic SDKs, there is no built-in retry to disable.
       ...(this._vertexai
         ? {
             vertexai: true,

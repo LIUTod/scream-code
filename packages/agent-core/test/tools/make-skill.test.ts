@@ -164,7 +164,7 @@ describe('MakeSkillPlanTool', () => {
         ],
       },
       config: { provider: {} as unknown as Parameters<Agent['generate']>[0] },
-      generate: vi.fn().mockResolvedValue({
+      generateWithRetry: vi.fn().mockResolvedValue({
         message: { content: validPlanJson() },
       }),
     } as unknown as Agent;
@@ -181,14 +181,14 @@ describe('MakeSkillPlanTool', () => {
     const plan = JSON.parse(typeof result.output === 'string' ? result.output : '');
     expect(plan.name).toBe('react-form-validate');
     expect(plan.files).toHaveLength(1);
-    expect(agent.generate).toHaveBeenCalledTimes(1);
+    expect(agent.generateWithRetry).toHaveBeenCalledTimes(1);
   });
 
   it('returns an error when the LLM response is not valid JSON', async () => {
     const agent = {
       context: { history: [makeContextMessage('user', 'Hi')] },
       config: { provider: {} as unknown as Parameters<Agent['generate']>[0] },
-      generate: vi.fn().mockResolvedValue({
+      generateWithRetry: vi.fn().mockResolvedValue({
         message: { content: 'not json' },
       }),
     } as unknown as Agent;
@@ -208,7 +208,7 @@ describe('MakeSkillPlanTool', () => {
     const agent = {
       context: { history: [makeContextMessage('user', 'Hi')] },
       config: { provider: {} as unknown as Parameters<Agent['generate']>[0] },
-      generate: vi.fn().mockResolvedValue({
+      generateWithRetry: vi.fn().mockResolvedValue({
         message: {
           content: JSON.stringify({
             name: 'missing-when-to-use',

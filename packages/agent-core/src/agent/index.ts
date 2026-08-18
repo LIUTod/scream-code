@@ -8,12 +8,15 @@ import type { Logger } from '#/logging/types';
 import type { AgentAPI, AgentEvent, ScreamConfig, SDKAgentRPC, UsageStatus } from '#/rpc';
 import {
   generate,
+  isRetryableGenerateError,
   type ChatProvider,
   type Message,
   type Tool,
 } from '@scream-code/ltod';
 
 import type { EnabledPluginSessionStart } from '#/plugin';
+
+import { computeDelayMs, retryBackoffDelays } from '../loop/retry';
 
 import type { McpConnectionManager } from '../mcp';
 import type { PreparedSystemPromptContext, ResolvedAgentProfile } from '../profile';
@@ -403,6 +406,35 @@ export class Agent {
     };
   }
 
+  /**
+   * Bounded-retry wrapper around `generate` for auxiliary LLM calls (exit
+   * memory extraction, side questions, knowledge-base text generation, skill
+   * plan generation). These call the model directly, outside the loop's
+   * step-retry layer, and SDK-level retries are disabled — without this they
+   * would hard-fail on any transient 429/5xx. Mirrors the main loop's policy:
+   * only retryable errors, exponential backoff, bounded attempts.
+   */
+  async generateWithRetry(
+    provider: ChatProvider,
+    systemPrompt: string,
+    tools: readonly Tool[],
+    messages: readonly Message[],
+    maxAttempts = 3,
+  ): Promise<Awaited<ReturnType<typeof generate>>> {
+    const delays = retryBackoffDelays(maxAttempts);
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await this.generate(provider, systemPrompt, [...tools], [...messages]);
+      } catch (error) {
+        if (attempt >= maxAttempts || !isRetryableGenerateError(error)) throw error;
+        const delayMs = computeDelayMs(error, delays, attempt);
+        await new Promise((resolve) => {
+          setTimeout(resolve, delayMs);
+        });
+      }
+    }
+  }
+
   get llm(): LtodLLM {
     const model = this.config.model;
     const provider = this.config.provider.withThinking(this.config.thinkingLevel);
@@ -733,7 +765,7 @@ export class Agent {
     const userPrompt = buildExitExtractionPrompt(sessionId, history.length, sampleText);
 
     try {
-      const response = await this.generate(
+      const response = await this.generateWithRetry(
         this.config.provider,
         EXIT_EXTRACTION_SYSTEM_PROMPT,
         [], // no tools — extraction only
@@ -811,7 +843,7 @@ export class Agent {
       return 'No model configured. Run `scream config` or use `/model` to set a default model.';
     }
 
-    const response = await this.generate(
+    const response = await this.generateWithRetry(
       this.config.provider,
       system,
       [],
@@ -835,7 +867,7 @@ export class Agent {
     if (!this.config.hasModel) {
       throw new Error('No model configured. Run `scream config` or use `/model` to set a default model.');
     }
-    const response = await this.generate(
+    const response = await this.generateWithRetry(
       this.config.provider,
       systemPrompt,
       [],

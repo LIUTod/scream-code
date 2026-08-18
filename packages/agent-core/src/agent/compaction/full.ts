@@ -24,6 +24,7 @@ import { renderPrompt } from '../../utils/render-prompt';
 import {
   estimateTokens,
   estimateTokensForMessages,
+  estimateTokensForTools,
 } from '../../utils/tokens';
 import { project } from '../context/projector';
 import compactionInstructionTemplate from './compaction-instruction.md';
@@ -523,7 +524,15 @@ export class FullCompaction {
     compactedCount: number,
   ): Promise<void> {
     const originalHistory = [...this.agent.context.history];
-    const tokensBefore = estimateTokensForMessages(originalHistory);
+    // Full-request basis: the compaction request carries the same system prompt
+    // and tool schemas as the main loop, so count them too. Without them the
+    // reported context size dips to a messages-only estimate after compaction
+    // and jumps back on the next exchange (the measured-anchor basis the
+    // context gauge uses includes system prompt and non-deferred tools).
+    const systemPromptTokens = estimateTokens(this.agent.getRuntimeSystemPrompt());
+    const toolTokens = estimateTokensForTools(this.agent.tools.loopTools);
+    const tokensBefore =
+      systemPromptTokens + toolTokens + estimateTokensForMessages(originalHistory);
     const model = this.agent.config.model;
     // Detect a prior compaction summary at the head of history. If present,
     // use the iterative-update instruction so the LLM merges new content into
@@ -667,7 +676,8 @@ export class FullCompaction {
       }
       const toolCallHistory = formatToolCallHistory(messagesToCompactForOps);
       const processedSummary = this.postProcessSummary(summary, fileOps, toolCallHistory, compactedCount);
-      const tokensAfter = estimateTokens(processedSummary) + estimateTokensForMessages(recent);
+      const tokensAfter =
+        systemPromptTokens + toolTokens + estimateTokens(processedSummary) + estimateTokensForMessages(recent);
 
       const fileLists = computeFileLists(fileOps);
       // Cap persisted lists so repeated compactions cannot grow them without

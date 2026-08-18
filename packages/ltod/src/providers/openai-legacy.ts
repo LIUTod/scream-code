@@ -527,6 +527,10 @@ export class OpenAILegacyChatProvider implements ChatProvider {
     const clientOpts: Record<string, unknown> = {
       apiKey,
       baseURL: this._baseUrl,
+      // Retry is owned by the engine's step-retry layer (abortable, observable,
+      // single budget). The SDK's built-in retries sleep on a backoff that
+      // never observes the request AbortSignal, so disable them.
+      maxRetries: 0,
     };
     const defaultHeaders = mergeRequestHeaders(this._defaultHeaders, auth?.headers);
     if (defaultHeaders !== undefined) {

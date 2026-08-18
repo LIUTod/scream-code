@@ -103,7 +103,7 @@ export async function chatWithRetry(input: ChatWithRetryInput): Promise<LLMChatR
   }
 }
 
-function computeDelayMs(error: unknown, delays: number[], attempt: number): number {
+export function computeDelayMs(error: unknown, delays: number[], attempt: number): number {
   // A server `Retry-After` (carried on the error) overrides the computed
   // backoff. The chosen delay is what gets reported on the
   // `step.retrying` event via `delayMs` either way.

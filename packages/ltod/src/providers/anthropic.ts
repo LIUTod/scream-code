@@ -1067,6 +1067,11 @@ export class AnthropicChatProvider implements ChatProvider {
       apiKey,
       baseURL: this._baseUrl,
       defaultHeaders: this._defaultHeaders,
+      // Retry is owned by the engine's step-retry layer (abortable, observable
+      // via turn.step.retrying, single budget). The SDK's built-in retries
+      // sleep on a backoff that never observes the request AbortSignal and
+      // would double-count the retry budget, so disable them.
+      maxRetries: 0,
     });
   }
 

@@ -559,6 +559,34 @@ export class ContextMemory {
       });
     }
   }
+
+  /**
+   * Drop in-flight assistant messages that cannot be serialized into a valid
+   * provider request. An interrupted or empty step leaves an open assistant
+   * message whose content is either empty or only "think" parts; after
+   * projection it serializes to a message with no content and no tool_calls,
+   * which strict OpenAI-compatible gateways reject with a 400 on every later
+   * request. Messages carrying any sendable part (text / image / audio / video)
+   * or tool calls are kept.
+   */
+  dropVacuousOpenMessages(): void {
+    for (const [uuid, message] of this.openSteps) {
+      const hasSendableContent = message.content.some((part) => part.type !== 'think');
+      if (hasSendableContent || message.toolCalls.length > 0) continue;
+      const index = this._history.indexOf(message);
+      if (index !== -1) {
+        this._history.splice(index, 1);
+        this.agent.injection.onContextMessageRemoved(index);
+        // Keep the token gauge consistent with the history: the removed message
+        // contributed nothing sendable, but its think parts still counted.
+        if (index < this.tokenCountCoveredMessageCount) {
+          this.tokenCountCoveredMessageCount--;
+          this._tokenCount = Math.max(0, this._tokenCount - estimateTokensForMessages([message]));
+        }
+      }
+      this.openSteps.delete(uuid);
+    }
+  }
 }
 
 function toolResultOutputForModel(result: ExecutableToolResult): string | ContentPart[] {

@@ -1538,3 +1538,10 @@ describe('extractUsage', () => {
     expect(extractUsage(undef)).toBeNull();
   });
 });
+
+describe('Scream provider client retry configuration', () => {
+  it('disables SDK-level retries so the engine owns the retry budget', () => {
+    const provider = createProvider(false);
+    expect((provider as any)._client.maxRetries).toBe(0);
+  });
+});

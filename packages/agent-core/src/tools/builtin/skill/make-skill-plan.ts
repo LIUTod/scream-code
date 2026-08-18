@@ -140,7 +140,7 @@ export class MakeSkillPlanTool implements BuiltinTool<MakeSkillPlanInput> {
     const transcript = buildTranscript(this.agent.context.history);
     const userPrompt = buildUserPrompt(args, transcript);
 
-    const response = await this.agent.generate(
+    const response = await this.agent.generateWithRetry(
       this.agent.config.provider,
       SYSTEM_PROMPT,
       [],

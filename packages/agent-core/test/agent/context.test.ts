@@ -757,3 +757,82 @@ describe('project tool exchange repair (port of upstream)', () => {
     ]);
   });
 });
+
+describe('dropVacuousOpenMessages', () => {
+  it('drops an interrupted step that only carried thinking content', () => {
+    const ctx = testAgent();
+    ctx.configure();
+
+    ctx.agent.context.appendUserMessage([{ type: 'text', text: 'user prompt' }]);
+    ctx.dispatch({
+      type: 'context.append_loop_event',
+      event: { type: 'step.begin', uuid: 'interrupted', turnId: 't', step: 1 },
+    });
+    ctx.dispatch({
+      type: 'context.append_loop_event',
+      event: {
+        type: 'content.part',
+        uuid: 'interrupted',
+        stepUuid: 'interrupted',
+        turnId: 't',
+        step: 1,
+        part: { type: 'think', think: 'internal reasoning only' },
+      },
+    });
+
+    expect(ctx.agent.context.history).toHaveLength(2); // user + thinking-only assistant
+
+    ctx.agent.context.dropVacuousOpenMessages();
+
+    // The thinking-only assistant message cannot serialize into a valid request
+    // (no content, no tool_calls), so it must be dropped along with its open step.
+    expect(ctx.agent.context.history).toHaveLength(1);
+    expect(ctx.agent.context.history[0]).toMatchObject({ role: 'user' });
+    expect(ctx.agent.context.snapshot().openSteps.has('interrupted')).toBe(false);
+  });
+
+  it('keeps open steps that carry sendable content or tool calls', () => {
+    const ctx = testAgent();
+    ctx.configure();
+
+    ctx.agent.context.appendUserMessage([{ type: 'text', text: 'user prompt' }]);
+    ctx.dispatch({
+      type: 'context.append_loop_event',
+      event: { type: 'step.begin', uuid: 'with-text', turnId: 't', step: 1 },
+    });
+    ctx.dispatch({
+      type: 'context.append_loop_event',
+      event: {
+        type: 'content.part',
+        uuid: 'with-text',
+        stepUuid: 'with-text',
+        turnId: 't',
+        step: 1,
+        part: { type: 'text', text: 'partial answer' },
+      },
+    });
+    ctx.dispatch({
+      type: 'context.append_loop_event',
+      event: { type: 'step.begin', uuid: 'with-tool', turnId: 't', step: 2 },
+    });
+    ctx.dispatch({
+      type: 'context.append_loop_event',
+      event: {
+        type: 'tool.call',
+        stepUuid: 'with-tool',
+        uuid: 'with-tool',
+        turnId: 't',
+        step: 2,
+        toolCallId: 'call_tool',
+        name: 'Bash',
+        args: { command: 'ls' },
+      },
+    });
+
+    ctx.agent.context.dropVacuousOpenMessages();
+
+    expect(ctx.agent.context.history).toHaveLength(3); // user + text assistant + tool assistant
+    expect(ctx.agent.context.snapshot().openSteps.has('with-text')).toBe(true);
+    expect(ctx.agent.context.snapshot().openSteps.has('with-tool')).toBe(true);
+  });
+});

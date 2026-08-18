@@ -55,6 +55,7 @@ export class ScreamFiles {
             apiKey: options.apiKey,
             baseURL: options.baseUrl,
             defaultHeaders: options.defaultHeaders,
+            maxRetries: 0,
           });
   }
 
@@ -149,6 +150,9 @@ export class ScreamFiles {
           apiKey: requireProviderApiKey('ScreamFiles.uploadVideo', a, this._apiKey),
           baseURL: this._baseUrl,
           defaultHeaders,
+          // Retry is owned by the engine; the SDK's built-in retries sleep on a
+          // backoff that never observes the request AbortSignal.
+          maxRetries: 0,
         });
       },
     );

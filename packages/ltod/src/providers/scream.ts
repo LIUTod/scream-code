@@ -386,6 +386,7 @@ export class ScreamChatProvider implements ChatProvider {
             apiKey: this._apiKey,
             baseURL: this._baseUrl,
             defaultHeaders: this._defaultHeaders,
+            maxRetries: 0,
           });
   }
 
@@ -562,6 +563,7 @@ export class ScreamChatProvider implements ChatProvider {
           apiKey: requireProviderApiKey('ScreamChatProvider', a, this._apiKey),
           baseURL: this._baseUrl,
           defaultHeaders,
+          maxRetries: 0,
         });
       },
     );

@@ -263,6 +263,12 @@ export class AgentRecords {
       this.restore(record);
     }
 
+    // A turn that ended mid-step leaves an open assistant message in the wire
+    // (step.begin is persisted, step.end is not). The live path drops such
+    // vacuous messages at turn end; mirror that here so a resumed session's
+    // history matches what the interrupted live session actually retained.
+    this.agent.context.dropVacuousOpenMessages();
+
     if (shouldRewrite) {
       this.persistence.rewrite(replayedRecords);
       await this.persistence.flush();

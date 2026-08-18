@@ -2170,3 +2170,10 @@ describe('reported model capture', () => {
     expect(result.model).toBe('actual-anthropic-model');
   });
 });
+
+describe('Anthropic client retry configuration', () => {
+  it('disables SDK-level retries so the engine owns the retry budget', () => {
+    const provider = createStreamProvider();
+    expect((provider as any)._client.maxRetries).toBe(0);
+  });
+});

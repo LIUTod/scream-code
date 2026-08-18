@@ -504,6 +504,16 @@ export class TurnFlow {
       // best-effort: the turn already ended; surface nothing beyond a log.
       console.error('closeAbandonedToolExchange failed', error);
     }
+    // Drop open assistant messages that carry no sendable content (empty or
+    // thinking-only) so the next request never serializes a content-less
+    // assistant message that strict providers reject. Runs after
+    // closeAbandonedToolExchange, which synthesizes results for tool-calling
+    // steps; this only removes messages without tool calls.
+    try {
+      this.agent.context.dropVacuousOpenMessages();
+    } catch (error) {
+      console.error('dropVacuousOpenMessages failed', error);
+    }
     if (this.currentId === turnId) {
       this.agent.usage.endTurn();
     }

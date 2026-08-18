@@ -211,3 +211,67 @@ describe('AgentRecords context snapshot replay', () => {
     expect(withSnapshot.agent.context.data()).toEqual(withoutSnapshot.agent.context.data());
   });
 });
+
+describe('replay-time vacuous message cleanup', () => {
+  it('drops an interrupted step whose assistant message is empty after replay', async () => {
+    // A turn that died mid-step persists step.begin but never step.end. The
+    // replay path must drop the resulting empty assistant message, matching
+    // what the live path (dropVacuousOpenMessages at turn end) retained.
+    const wire: AgentRecord[] = [
+      METADATA,
+      userMessage('user prompt'),
+      {
+        type: 'context.append_loop_event',
+        event: {
+          type: 'step.begin',
+          uuid: 'interrupted',
+          turnId: 't',
+          step: 0,
+        },
+      },
+    ];
+
+    const ctx = replayWire(wire);
+    await ctx.agent.records.replay();
+
+    expect(ctx.agent.context.history).toHaveLength(1);
+    expect(ctx.agent.context.history[0]).toMatchObject({ role: 'user' });
+    expect(ctx.agent.context.snapshot().openSteps.has('interrupted')).toBe(false);
+  });
+
+  it('keeps open steps with tool calls after replay', async () => {
+    const wire: AgentRecord[] = [
+      METADATA,
+      userMessage('user prompt'),
+      {
+        type: 'context.append_loop_event',
+        event: {
+          type: 'step.begin',
+          uuid: 'in-flight',
+          turnId: 't',
+          step: 0,
+        },
+      },
+      {
+        type: 'context.append_loop_event',
+        event: {
+          type: 'tool.call',
+          stepUuid: 'in-flight',
+          uuid: 'in-flight',
+          turnId: 't',
+          step: 0,
+          toolCallId: 'call_1',
+          name: 'Bash',
+          args: { command: 'ls' },
+        },
+      },
+    ];
+
+    const ctx = replayWire(wire);
+    await ctx.agent.records.replay();
+
+    // A tool-calling step is not vacuous: keep the open step and its message.
+    expect(ctx.agent.context.history).toHaveLength(2);
+    expect(ctx.agent.context.snapshot().openSteps.has('in-flight')).toBe(true);
+  });
+});
