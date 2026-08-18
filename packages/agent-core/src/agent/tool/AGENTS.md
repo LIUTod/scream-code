@@ -1,24 +1,29 @@
 # tool — Tool Registry & Runtime
 
-## 职责
-- 维护工具注册表（内置 + 用户 + MCP），`loopTools` 排序生成发往 LLM 的 tool schemas
-- **注册入口（第三方扩展请走这里）**：
-  - `registerUserTool(definition)` — 用户/插件工具
-  - `registerMcpServer(...)` — MCP server 接入
-  - 内置工具在 `tools/builtin/` 各自定义后注册
-- 工具调度：执行工具调用（`runTool`），处理结果回写 context
-- 参数校验：工具定义含 schema，调用时校验
+## Responsibility
+- Maintain the tool registry (built-in + user + MCP); `loopTools` produces the
+  sorted tool schemas sent to the LLM
+- **Registration entry points (third-party extensions use these)**:
+  - `registerUserTool(definition)` — user/plugin tools
+  - `registerMcpServer(...)` — MCP server integration
+  - built-in tools live in `tools/builtin/` and register after definition
+- Tool dispatch: execute tool calls (`runTool`), write results back to context
+- Argument validation: tool definitions carry schemas, validated on call
 
-## 依赖
-- 依赖：`Agent`（hub）、MCP 客户端、BlobStore（大输出 offload）
-- 被依赖：`AgentServices.tools`、`LtodLLM`（读 loopTools）、插件/技能加载
+## Dependencies
+- Depends on: `Agent` (hub), MCP clients, BlobStore (large output offload)
+- Depended on by: `AgentServices.tools`, `LtodLLM` (reads loopTools),
+  plugin/skill loading
 
-## 边界
-- 不做：不实现工具的具体逻辑（那是各工具模块/插件的事）
-- `loopTools` 顺序确定性：`.toSorted()` 排序——**不要破坏**（provider 前缀缓存依赖字节稳定）
-- 注册是幂等的：同名工具注册需显式处理（用户工具覆盖内置？看调用点约定）
-- MCP 工具随 MCP server 生命周期启停
+## Boundaries
+- Does NOT: implement tool logic (that is each tool module / plugin's job)
+- `loopTools` determinism: sorted via `.toSorted()` — do NOT break it
+  (provider prefix cache depends on byte-stable schemas)
+- Registration is idempotent: duplicate names need explicit handling (user tool
+  overriding built-in? see call-site conventions)
+- MCP tools come and go with their server's lifecycle
 
-## 扩展点
-- 新增工具 = 调 `registerUserTool`（不碰核心）；未来 dsh 插件适配器也走这两个注册口
-- 新工具能力分类（fs/lsp/web...）= 新 builtin 模块 + 注册
+## Extension points
+- New tool = call `registerUserTool` (no core changes); a future harness
+  adapter also exposes tools through these two entry points
+- New tool capability class (fs/lsp/web...) = new builtin module + registration

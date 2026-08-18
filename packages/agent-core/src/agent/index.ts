@@ -174,6 +174,7 @@ export class Agent {
   private readonly resolveRuntimeSystemPrompt: (basePrompt: string) => string;
 
   constructor(options: AgentOptions) {
+    // ── Group 1: external dependencies (injected via AgentOptions) ────────────
     this.type = options.type ?? 'main';
     this.jian = options.jian;
     this.screamConfig = options.config;
@@ -194,6 +195,11 @@ export class Agent {
     this.sharedEmbeddingEngine = createFastEmbedEngine(embedCacheDir);
     this.log = options.log ?? log;
 
+    // ── Group 2: infrastructure (blob store → wire persistence → compaction) ──
+    // Order matters: records is created first because every later subsystem
+    // logs state changes through it; full/micro compaction depend on context,
+    // which is created in Group 3 — they only hold a hub reference and are
+    // driven on demand, so their position here is safe.
     this.blobStore = options.homedir
       ? new BlobStore({ blobsDir: join(options.homedir, 'blobs') })
       : undefined;
@@ -211,6 +217,10 @@ export class Agent {
     );
     this.fullCompaction = new FullCompaction(this, options.compactionStrategy);
     this.microCompaction = new MicroCompaction(this);
+
+    // ── Group 3: core session services (context/config/turn/injection/…) ─────
+    // context is the heart: it owns history/token gauge and is consumed by
+    // turn, injection and planMode. skills feeds tools; permission guards runs.
     this.context = new ContextMemory(this);
     this.config = new ConfigState(this);
     this.turn = new TurnFlow(this);
@@ -221,6 +231,10 @@ export class Agent {
     this.usage = new UsageRecorder(this);
     this.skills = options.skills ? new SkillManager(this, options.skills) : null;
     this.tools = new ToolManager(this);
+
+    // ── Group 4: derived services (background/goal/stores/dream/replay) ───────
+    // Dependent on Groups 1-3; memoStore/knowledgeStore are async-initialized
+    // (memoStoreReady/knowledgeStoreReady) and shared across sessions.
     this.background = new BackgroundManager(this);
     this.cron = this.type === 'sub' ? null : new CronManager(this);
     this.goal = new GoalMode(this);

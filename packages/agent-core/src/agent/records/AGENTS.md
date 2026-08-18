@@ -1,20 +1,31 @@
 # records — Session Wire Log & Replay
 
-## 职责
-- 持久化 agent 的全部状态变更：`logRecord(type, payload)` 写 append-only wire.jsonl（`AgentRecordPersistence` 抽象，默认文件实现）
-- Resume 重放：`replay()` 从 wire 恢复内存状态（快照起跳：有 `context.snapshot` 时跳过其前的折叠 context 记录）
-- 版本迁移：`migrateWireRecord` + `WireMigration`，wire 版本升级时逐条迁移
-- blob 引用：大 content 经 `BlobStore.offload` 落盘为 `blobref:`，replay 后 `rehydrateParts`
+## Responsibility
+- Persist every agent state change: `logRecord(type, payload)` writes the
+  append-only wire.jsonl (behind the `AgentRecordPersistence` abstraction;
+  filesystem is the default implementation)
+- Resume replay: `replay()` restores in-memory state from the wire (snapshot
+  fast-path: when a `context.snapshot` record exists, skip the folded
+  context-content records that predate it)
+- Version migration: `migrateWireRecord` + `WireMigration`; migrate records
+  one-by-one when the wire protocol version bumps
+- Blob references: large content is offloaded to blobs via `BlobStore.offload`
+  as `blobref:` URLs; `rehydrateParts` resolves them back on load
 
-## 依赖
-- 依赖：`Agent`（hub）、`AgentRecordPersistence`、`BlobStore`
-- 被依赖：`ContextMemory`、`Agent`（所有状态方法调 `logRecord`）
+## Dependencies
+- Depends on: `Agent` (hub), `AgentRecordPersistence`, `BlobStore`
+- Depended on by: `ContextMemory`, `Agent` (every state method calls `logRecord`)
 
-## 边界
-- 不做：不负责状态"如何更新"（那是各子系统方法），只负责"记录 + 恢复 + 迁移"
-- restore 契约：`restoreAgentRecord` 不得 emit UI 事件 / 调 LLM / 执行工具 / 触碰 fs
-- 快照机制（`context.snapshot`）：compaction 后写入，replay 跳过其前折叠记录——改 record 类型时务必保持向后兼容（未知类型静默忽略）
+## Boundaries
+- Does NOT: decide how state is updated (that is each subsystem's job); it only
+  records, restores and migrates
+- Restore contract: `restoreAgentRecord` must NOT emit UI events / call the LLM
+  / run tools / touch the filesystem
+- Snapshot mechanism (`context.snapshot`): written after compaction; replay
+  skips folded records before it. When adding record types keep backward
+  compatibility — unknown types are silently ignored
 
-## 扩展点
-- 换存储 = 实现 `AgentRecordPersistence`（已含 InMemory + FileSystem 两实现）
-- 新状态类型 = 在 `AgentRecordEvents` 加类型 + `restoreAgentRecord` 加 case
+## Extension points
+- Swap the backing store = implement `AgentRecordPersistence` (InMemory and
+  FileSystem implementations already exist)
+- New state type = add to `AgentRecordEvents` + a `restoreAgentRecord` case
