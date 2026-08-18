@@ -11,8 +11,8 @@ export function getCtrlCHint(): string { return t('constant.ctrl_c_hint'); }
 export const MAIN_AGENT_ID = 'main';
 export const EXIT_CONFIRM_WINDOW_MS = 1500;
 
-/** Partner model-provider page opened by Ctrl+F while the chat is empty. */
-export const EMPTY_SESSION_HINT_URL = 'https://opencode.ai/go?ref=75NKVRZQCY';
+/** Repository page opened by Ctrl+F while the chat is empty (feedback / star). */
+export const EMPTY_SESSION_HINT_URL = 'https://github.com/LIUTod/scream-code';
 
 /** Tips shown in rotation above the editor when the chat is empty.
  *  `isAd` marks the partner tip - only it responds to Ctrl+F. */

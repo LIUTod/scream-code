@@ -917,8 +917,8 @@ export const en: Record<string, string> = {
   // ─── editor-selector ───────────
   'editor.auto_detect': 'Auto detect ($VISUAL / $EDITOR)',
   'editor.select_title': 'Select external editor',
-  'editor.empty_session_hint': 'Tips: Use OpencodeGo as your model provider: free models or a low-cost plan. Ctrl+F: get an API key. Ctrl+B: toggle this tip.',
-  'editor.tip_ad': '💡 Tips: Use OpencodeGo as your model provider: free models or a low-cost plan. Ctrl+F: get an API key  [Ctrl+B to hide Tips]',
+  'editor.empty_session_hint': 'Tips: Like this project or hit an issue? Give feedback or a star on GitHub. Ctrl+B: toggle this tip.',
+  'editor.tip_ad': '💡 Tips: Like this project or hit an issue? Give feedback or a star on GitHub  [Ctrl+B to hide Tips]',
   'editor.tip_1': '💡 Tips: Press Tab on an empty input to cycle thinking effort  [Ctrl+B to hide Tips]',
   'editor.tip_2': '💡 Tips: Type / to see all commands, type @ to reference a file path  [Ctrl+B to hide Tips]',
   'editor.tip_3': '💡 Tips: Press Shift+Tab to switch plan mode  [Ctrl+B to hide Tips]',

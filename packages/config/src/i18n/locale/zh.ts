@@ -918,8 +918,8 @@ export const zh: Record<string, string> = {
   // ─── editor-selector ───────────
   'editor.auto_detect': '自动检测 ($VISUAL / $EDITOR)',
   'editor.select_title': '选择外部编辑器',
-  'editor.empty_session_hint': 'Tips：推荐使用 OpencodeGo 作为模型提供商，可免费调用各种模型或超低价包月计划，按 Ctrl+F 获取 API，按 Ctrl+B 切换显示',
-  'editor.tip_ad': '💡 Tips：推荐使用 OpencodeGo 作为模型提供商，可免费调用各种模型或超低价包月计划，按 Ctrl+F 获取 API  【Ctrl+B 关闭 Tips】',
+  'editor.empty_session_hint': 'Tips：如果你支持本项目或遇到问题，欢迎在 GitHub 上反馈或点个星标。按 Ctrl+B 切换显示',
+  'editor.tip_ad': '💡 Tips：如果你支持本项目或遇到问题，欢迎在 GitHub 上反馈或点个星标  【Ctrl+B 关闭 Tips】',
   'editor.tip_1': '💡 Tips：空输入框状态下可按下 Tab 切换模型思考等级  【Ctrl+B 关闭 Tips】',
   'editor.tip_2': '💡 Tips：输入 / 查看所有命令，输入 @ 引用文件路径  【Ctrl+B 关闭 Tips】',
   'editor.tip_3': '💡 Tips：按 Shift+Tab 切换 plan 模式  【Ctrl+B 关闭 Tips】',

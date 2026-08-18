@@ -121,7 +121,7 @@ export class EditorKeyboardController {
       this.armPendingExit('ctrl-d', getCtrlDHint());
     };
 
-    // Ctrl+F opens the partner model-provider page, but ONLY while the
+    // Ctrl+F opens the repository page (feedback / star), but ONLY while the
     // empty-session hint is visible (no transcript yet AND not dismissed).
     // Returns true only then; otherwise the base editor keeps its own
     // Ctrl+F binding (cursorRight).
