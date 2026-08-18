@@ -2,9 +2,9 @@ import type { ContentPart, TokenUsage } from '@scream-code/ltod';
 
 import type { LoopRecordedEvent } from '../../loop';
 import type { ToolStoreUpdate } from '../../tools/store';
-import type { CompactionBeginData, CompactionResult } from '../compaction';
+import type { CompactedHistory, CompactionBeginData, CompactionResult } from '../compaction';
 import type { AgentConfigUpdateData } from '../config';
-import type { ContextMessage, PromptOrigin } from '../context';
+import type { ContextMemoryJSONSnapshot, ContextMessage, PromptOrigin } from '../context';
 import type { GoalActor, GoalBudgetLimits, GoalStatus } from '../goal';
 import type { PermissionApprovalResultRecord, PermissionMode } from '../permission';
 import type { UserToolRegistration } from '../tool';
@@ -83,6 +83,18 @@ export interface AgentRecordEvents {
   'context.clear': {};
   'context.undo': { count: number };
   'context.apply_compaction': CompactionResult;
+  /**
+   * Point-in-time snapshot of the folded context memory, written right after a
+   * successful full compaction. On resume the replayer restores this snapshot
+   * and skips every context-content record that predates it, instead of
+   * replaying hundreds of thousands of folded append events. `compactedHistory`
+   * carries the full-compaction debug trail, which would otherwise be rebuilt
+   * from the pre-fold history that the snapshot skips.
+   */
+  'context.snapshot': {
+    snapshot: ContextMemoryJSONSnapshot;
+    compactedHistory: readonly CompactedHistory[];
+  };
 
   'wolfpack.enter': {};
   'wolfpack.exit': {};

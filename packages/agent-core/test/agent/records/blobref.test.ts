@@ -395,4 +395,42 @@ describe('blobref', () => {
     await store.rehydrate(recordLarge2);
     expect(firstImageUrl(recordLarge2)).toBe('[media missing]');
   });
+
+  it('offloads large media embedded in context.snapshot history', async () => {
+    const { store, blobsDir } = await makeStore();
+    const payload = 'B'.repeat(5000);
+    const dataUri = `data:image/png;base64,${payload}`;
+
+    const record: AgentRecord = {
+      type: 'context.snapshot',
+      snapshot: {
+        history: [
+          {
+            role: 'user',
+            content: [{ type: 'image_url', imageUrl: { url: dataUri } }],
+            toolCalls: [],
+          },
+        ],
+        tokenCount: 0,
+        tokenCountCoveredMessageCount: 0,
+        openSteps: [],
+        pendingToolResultIds: [],
+        deferredMessages: [],
+      },
+      compactedHistory: [],
+    };
+
+    const offloaded = await store.offload(record);
+
+    const snapshot = (
+      offloaded as unknown as { snapshot: { history: { content: { imageUrl: { url: string } }[] }[] } }
+    ).snapshot;
+    const url = snapshot.history[0]!.content[0]!.imageUrl.url;
+    expect(isBlobRef(url)).toBe(true);
+    expect(url.startsWith('blobref:image/png;')).toBe(true);
+
+    const files = await readdir(blobsDir);
+    expect(files).toHaveLength(1);
+    expect((await readFile(join(blobsDir, files[0]!))).toString('base64')).toBe(payload);
+  });
 });

@@ -274,6 +274,15 @@ export class FullCompaction {
     return this._compactedHistory;
   }
 
+  /**
+   * Restore the compaction debug trail from a `context.snapshot` record. During
+   * snapshot replay the pre-fold history is skipped, so `markCompleted` can no
+   * longer re-render it — the snapshot carries the trail instead.
+   */
+  restoreCompactedHistory(entries: readonly CompactedHistory[]): void {
+    this._compactedHistory = [...entries];
+  }
+
   /** One-shot: true if session memory summary should be injected at the next step. */
   shouldInjectSessionSummary(): boolean {
     if (this._shouldInjectSessionSummary) {

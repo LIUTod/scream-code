@@ -46,6 +46,24 @@ export interface ContextMemorySnapshot {
   readonly deferredMessages: readonly ContextMessage[];
 }
 
+/**
+ * JSON-serializable form of {@link ContextMemorySnapshot} used for the
+ * `context.snapshot` wire record. `openSteps` stores each in-flight step's
+ * message **index** into `history` (not the message itself) so that restoring
+ * can recover the live object-reference identity between the history array and
+ * the open-steps map — `content.part`/`tool.call` mutations land on the same
+ * object the history holds. `pendingToolResultIds` is a plain array instead of
+ * a Set so the record survives JSON.stringify.
+ */
+export interface ContextMemoryJSONSnapshot {
+  readonly history: readonly ContextMessage[];
+  readonly tokenCount: number;
+  readonly tokenCountCoveredMessageCount: number;
+  readonly openSteps: readonly (readonly [string, number])[];
+  readonly pendingToolResultIds: readonly string[];
+  readonly deferredMessages: readonly ContextMessage[];
+}
+
 export class ContextMemory {
   private _history: ContextMessage[] = [];
   private _tokenCount = 0;
@@ -85,6 +103,46 @@ export class ContextMemory {
     this._tokenCount = snapshot.tokenCount;
     this.tokenCountCoveredMessageCount = snapshot.tokenCountCoveredMessageCount;
     this.openSteps = new Map(snapshot.openSteps);
+    this.pendingToolResultIds = new Set(snapshot.pendingToolResultIds);
+    this.deferredMessages = [...snapshot.deferredMessages];
+  }
+
+  /**
+   * JSON-safe snapshot for wire persistence. `openSteps` values are recorded as
+   * their index into `history` so restoring can rebuild the live reference
+   * identity between history messages and open steps (see
+   * {@link ContextMemoryJSONSnapshot}).
+   */
+  toJSONSnapshot(): ContextMemoryJSONSnapshot {
+    return {
+      history: [...this._history],
+      tokenCount: this._tokenCount,
+      tokenCountCoveredMessageCount: this.tokenCountCoveredMessageCount,
+      openSteps: [...this.openSteps.entries()].map(
+        ([uuid, message]) => [uuid, this._history.indexOf(message)] as const,
+      ),
+      pendingToolResultIds: [...this.pendingToolResultIds],
+      deferredMessages: [...this.deferredMessages],
+    };
+  }
+
+  /**
+   * Restore from a JSON-safe snapshot produced by {@link toJSONSnapshot}.
+   * Open steps are re-attached to the exact history message objects they
+   * pointed at, preserving reference identity: later `content.part`/`tool.call`
+   * events and `applyCompaction` pruning operate on the same objects the
+   * history array holds, exactly as they did in the live session.
+   */
+  restoreJSONSnapshot(snapshot: ContextMemoryJSONSnapshot): void {
+    this._history = [...snapshot.history];
+    this._tokenCount = snapshot.tokenCount;
+    this.tokenCountCoveredMessageCount = snapshot.tokenCountCoveredMessageCount;
+    const openSteps = new Map<string, ContextMessage>();
+    for (const [uuid, historyIndex] of snapshot.openSteps) {
+      const message = this._history[historyIndex];
+      if (message !== undefined) openSteps.set(uuid, message);
+    }
+    this.openSteps = openSteps;
     this.pendingToolResultIds = new Set(snapshot.pendingToolResultIds);
     this.deferredMessages = [...snapshot.deferredMessages];
   }
@@ -246,6 +304,19 @@ export class ContextMemory {
     this.agent.injection.onContextCompacted(summary.compactedCount);
     this.agent.emitStatusUpdated();
     this.agent.microCompaction.reset();
+
+    // Persist a point-in-time snapshot of the freshly folded context so the next
+    // resume can restore it directly and skip replaying the (potentially hundreds
+    // of thousands of) append/compaction records that were folded away. Only the
+    // live path writes it — during replay the snapshot record is what we restore
+    // from, so re-logging it here would be redundant.
+    if (!this.agent.records.restoring) {
+      this.agent.records.logRecord({
+        type: 'context.snapshot',
+        snapshot: this.toJSONSnapshot(),
+        compactedHistory: [...this.agent.fullCompaction.compactedHistory],
+      });
+    }
   }
 
   data(): AgentContextData {
@@ -335,10 +406,21 @@ export class ContextMemory {
 
     const appended = messages.length - prev.length;
     const prefixIntact = stable >= prev.length;
-    // Only log when the prefix broke (the interesting event). A pure
-    // append (prefixIntact && appended > 0) is the cache-friendly happy
-    // path and would just noise the log.
-    if (prefixIntact) return;
+    // Cache-friendly happy path: the whole previous prefix survived and the new
+    // call only appended to the tail. Log the estimated cached-prefix token count
+    // so the prompt-cache hit rate can be quantified, not just the break events.
+    if (prefixIntact) {
+      if (appended > 0) {
+        this.agent.log.debug('prefix-stability: provider prompt cache prefix hit', {
+          stablePrefixLength: stable,
+          cachedPrefixTokens: estimateTokensForMessages(messages.slice(0, stable)),
+          prevMessageCount: prev.length,
+          currentMessageCount: messages.length,
+          appendedSinceLast: appended,
+        });
+      }
+      return;
+    }
 
     this.agent.log.debug('prefix-stability: provider prompt cache prefix broke', {
       stablePrefixLength: stable,

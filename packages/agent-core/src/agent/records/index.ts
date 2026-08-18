@@ -22,6 +22,31 @@ export type { BlobStoreOptions } from './blobref';
 // Contract: restore MUST NOT emit UI events, call the LLM, execute tools, or
 // touch the filesystem in a way that triggers external side effects. Each case
 // should reproduce the in-memory state the live handler left behind, nothing more.
+
+/**
+ * Record types whose state is fully captured by a `context.snapshot` record.
+ * When a snapshot exists, every one of these that predates it is skipped during
+ * replay because the snapshot already holds the folded context memory. Note
+ * `micro_compaction.apply` is written with an `as never` cast (it is not part of
+ * the AgentRecord union), so it is matched here by its literal type string.
+ *
+ * `full_compaction.complete` is included because its only lasting effect is
+ * pushing onto `compactedHistory` — a debug trail rendered from the pre-fold
+ * history. Snapshot replay skips that pre-fold history, so the trail would be
+ * re-rendered as empty; the snapshot carries the trail itself instead.
+ */
+const SNAPSHOT_FOLDED_CONTEXT_TYPES: ReadonlySet<string> = new Set([
+  'context.append_message',
+  'context.append_loop_event',
+  'context.apply_compaction',
+  'micro_compaction.apply',
+  'full_compaction.complete',
+]);
+
+function isSnapshotFoldedContextRecord(type: string): boolean {
+  return SNAPSHOT_FOLDED_CONTEXT_TYPES.has(type);
+}
+
 function restoreAgentRecord(agent: Agent, input: AgentRecord): void {
   switch (input.type) {
     case 'metadata':
@@ -108,6 +133,20 @@ function restoreAgentRecord(agent: Agent, input: AgentRecord): void {
       return;
     case 'context.apply_compaction':
       agent.context.applyCompaction(input);
+      return;
+    case 'context.snapshot':
+      agent.context.restoreJSONSnapshot(input.snapshot);
+      agent.fullCompaction.restoreCompactedHistory(input.compactedHistory);
+      // The folded context records were skipped, so `appendMessage`'s
+      // pushHistory side effects never ran for them. Re-run the two observable
+      // ones (replay log for RPC playback, background notification marking) so
+      // snapshot replay matches a full replay exactly.
+      for (const message of agent.context.history) {
+        if (message.origin?.kind === 'background_task') {
+          agent.background.markDeliveredNotification(message.origin);
+        }
+        agent.replayBuilder.push({ type: 'message', message });
+      }
       return;
     case 'tools.register_user_tool':
       agent.tools.registerUserTool(input);
@@ -202,8 +241,28 @@ export class AgentRecords {
         };
       }
       replayedRecords.push(migratedRecord);
-      this.restore(migratedRecord);
     }
+
+    // Snapshot fast-path: when a `context.snapshot` record exists, restore it and
+    // skip every context-content record that predates it. Those appends/compactions
+    // were already folded into the snapshot, so re-applying them is redundant work
+    // that dominates resume time on long sessions (hundreds of thousands of records
+    // collapsing into a handful of live messages). Metadata and other subsystem
+    // records are still applied in order, both before and after the snapshot.
+    let snapshotIndex = -1;
+    for (let i = replayedRecords.length - 1; i >= 0; i--) {
+      if (replayedRecords[i]?.type === 'context.snapshot') {
+        snapshotIndex = i;
+        break;
+      }
+    }
+    for (let i = 0; i < replayedRecords.length; i++) {
+      const record = replayedRecords[i];
+      if (!record) continue;
+      if (i < snapshotIndex && isSnapshotFoldedContextRecord(record.type)) continue;
+      this.restore(record);
+    }
+
     if (shouldRewrite) {
       this.persistence.rewrite(replayedRecords);
       await this.persistence.flush();

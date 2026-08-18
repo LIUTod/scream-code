@@ -62,6 +62,35 @@ export class BlobStore {
           },
         };
       }
+      case 'context.snapshot': {
+        // The snapshot carries the folded history inline; without offloading it,
+        // large media embedded in those messages would bloat the wire record and
+        // defeat the whole point of the snapshot. History/deferred messages are
+        // offloaded exactly like `context.append_message` records.
+        const history = await Promise.all(
+          record.snapshot.history.map(async (message) => {
+            const content = await this.offloadParts(message.content);
+            return content === message.content ? message : { ...message, content };
+          }),
+        );
+        const deferredMessages = await Promise.all(
+          record.snapshot.deferredMessages.map(async (message) => {
+            const content = await this.offloadParts(message.content);
+            return content === message.content ? message : { ...message, content };
+          }),
+        );
+        const historyChanged = history.some(
+          (message, i) => message !== record.snapshot.history[i],
+        );
+        const deferredChanged = deferredMessages.some(
+          (message, i) => message !== record.snapshot.deferredMessages[i],
+        );
+        if (!historyChanged && !deferredChanged) return record;
+        return {
+          ...record,
+          snapshot: { ...record.snapshot, history, deferredMessages },
+        };
+      }
       default:
         return record;
     }
