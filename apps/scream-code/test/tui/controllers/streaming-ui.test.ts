@@ -1,7 +1,8 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { StreamingUIController } from '#/tui/controllers/streaming-ui';
 import type { StreamingUIHost } from '#/tui/controllers/streaming-ui';
+import { getSharedSpeedTracker, resetSharedSpeedTracker } from '#/tui/utils/speed-tracker';
 import type { ToolCallBlockData } from '#/tui/types';
 
 function createMockHost(): StreamingUIHost {
@@ -11,6 +12,16 @@ function createMockHost(): StreamingUIHost {
         streamingPhase: 'idle',
         streamingStartTime: 0,
       },
+      theme: {
+        markdownTheme: {} as unknown as StreamingUIHost['state']['theme']['markdownTheme'],
+        colors: {},
+      },
+      transcriptContainer: {
+        addChild: vi.fn(),
+      } as unknown as StreamingUIHost['state']['transcriptContainer'],
+      ui: {
+        requestRender: vi.fn(),
+      } as unknown as StreamingUIHost['state']['ui'],
     } as unknown as StreamingUIHost['state'],
     session: undefined,
     setAppState: vi.fn(),
@@ -23,7 +34,12 @@ function createMockHost(): StreamingUIHost {
     shiftQueuedMessage: vi.fn(),
     pushTranscriptEntry: vi.fn(),
     onTurnCompleted: vi.fn(),
-    transcriptController: {} as unknown as StreamingUIHost['transcriptController'],
+    transcriptController: {
+      registerLiveComponent: vi.fn(),
+      markPending: vi.fn(),
+      unmarkPending: vi.fn(),
+      commit: vi.fn(),
+    } as unknown as StreamingUIHost['transcriptController'],
   };
 }
 
@@ -108,5 +124,68 @@ describe('StreamingUIController', () => {
 
     expect(controller.getTurnContext()).toEqual({ turnId: 'turn-42', step: 3 });
     expect(controller.hasActiveTurn()).toBe(true);
+  });
+});
+
+describe('smooth streaming (token pacing)', () => {
+  afterEach(() => {
+    resetSharedSpeedTracker();
+  });
+
+  it('advances the shown cursor by the per-frame budget and never freezes', () => {
+    const controller = new StreamingUIController(createMockHost());
+    const updates: string[] = [];
+    (controller as unknown as { onStreamingTextUpdate: (text: string) => void }).onStreamingTextUpdate =
+      (text: string) => updates.push(text);
+
+    // No speed samples yet → budget uses the default assumed rate (50 tok/s →
+    // ceil(50 * 0.05 * 2.5) = 7 chars/frame), so the first block flows instead
+    // of crawling at MIN=1.
+    controller.appendAssistantDelta('abcdefghij');
+    for (let i = 0; i < 10; i++) {
+      (controller as unknown as { flush: () => void }).flush();
+    }
+
+    expect(updates[0]).toBe('abcdefg');
+    expect(updates.at(-1)).toBe('abcdefghij'); // fully shown → frame stops
+    expect(controller.hasPending()).toBe(false);
+  });
+
+  it('finalize renders any remaining un-shown text in one shot', () => {
+    const controller = new StreamingUIController(createMockHost());
+    const updates: string[] = [];
+    (controller as unknown as { onStreamingTextUpdate: (text: string) => void }).onStreamingTextUpdate =
+      (text: string) => updates.push(text);
+
+    controller.appendAssistantDelta('hello world');
+    (controller as unknown as { flush: () => void }).flush(); // only budgeted chars shown
+    controller.finalizeAssistantStream();
+
+    expect(updates.at(-1)).toBe('hello world'); // rest flushed on end
+  });
+
+  it('resetLiveText clears the shown cursor and pending state', () => {
+    const controller = new StreamingUIController(createMockHost());
+    controller.appendAssistantDelta('xyz');
+    controller.resetLiveText();
+    expect(
+      (controller as unknown as { _shownAssistantLength: number })._shownAssistantLength,
+    ).toBe(0);
+    expect(controller.hasPending()).toBe(false);
+  });
+
+  it('tracks a fast arrival rate instead of falling back to the minimum budget', () => {
+    const controller = new StreamingUIController(createMockHost());
+    const updates: string[] = [];
+    (controller as unknown as { onStreamingTextUpdate: (text: string) => void }).onStreamingTextUpdate =
+      (text: string) => updates.push(text);
+
+    // Simulate a fast model: budget scales to the arrival rate
+    // (80 tok/s → ceil(80 * 0.05 * 2.5) = 10 chars/frame), not MIN=1.
+    getSharedSpeedTracker().observe(80);
+    controller.appendAssistantDelta('x'.repeat(50));
+    (controller as unknown as { flush: () => void }).flush();
+
+    expect(updates[0]).toBe('x'.repeat(10));
   });
 });

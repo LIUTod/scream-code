@@ -19,6 +19,36 @@ export const STREAMING_ARGS_BUFFER_MAX_CHARS = 1024 * 1024;
 // Coalesces high-frequency model/tool deltas before rebuilding TUI components.
 export const STREAMING_UI_FLUSH_MS = 50;
 
+// --- Smooth streaming (token pacing) ----------------------------------------
+// Decouples arrival from display: token deltas land in the draft buffer and a
+// per-frame budget advances how much is shown, so fast models stream smoothly
+// instead of dumping 50ms bursts, slow models keep up (arrival-triggered) and
+// network bursts are smoothed across frames instead of jumping in one block.
+
+// Frame cadence for the progressive renderer. 50ms (20fps) keeps the stream
+// visibly smooth while bounding markdown re-parses: every frame re-renders the
+// full text, so a higher cadence would double re-parse cost for little visible
+// gain (the pacing budget, not the frame rate, is what smooths bursts).
+export const SMOOTH_FRAME_MS = 50;
+
+// Minimum chars shown per frame: keeps the stream moving even when the model
+// is slow or the rate window is empty (never freeze mid-stream).
+export const MIN_CHARS_PER_FRAME = 1;
+
+// Ceiling chars per frame: with the arrival rate clamped to SPEED_MAX (200
+// tok/s), the largest reachable budget is ceil(200 * 0.05 * 2.5) = 25 chars
+// per frame (~500 chars/s). One oversized network burst is thus spread over
+// frames instead of rendered at once.
+export const MAX_CHARS_PER_FRAME = 25;
+
+// Assumed arrival rate used until the first speed sample lands, so the very
+// first (often large) block is paced sensibly instead of crawling at MIN=1.
+export const DEFAULT_ARRIVAL_TOK_PER_SEC = 50;
+
+// Average chars per token used to convert the measured token/s arrival rate
+// into a per-frame char budget (EN ~4 chars/token, CJK ~1, mixed ~2.5).
+export const CHARS_PER_TOKEN = 2.5;
+
 // Bounds pathological provider error bodies (e.g. a proxy 502 whose body is a
 // full HTML page) rendered inline in the transcript so they can't flood the
 // scrollback. Full text is still kept in the persisted session.

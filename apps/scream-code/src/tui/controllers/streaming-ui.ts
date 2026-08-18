@@ -8,7 +8,14 @@ import { CompactionComponent } from '../components/dialogs/compaction';
 import { ReadGroupComponent, parseReadGroupOutput } from '../components/messages/read-group';
 import { ThinkingComponent } from '../components/messages/thinking';
 import { ToolCallComponent } from '../components/messages/tool-call';
-import { STREAMING_UI_FLUSH_MS } from '../constant/streaming';
+import {
+  CHARS_PER_TOKEN,
+  DEFAULT_ARRIVAL_TOK_PER_SEC,
+  MAX_CHARS_PER_FRAME,
+  MIN_CHARS_PER_FRAME,
+  SMOOTH_FRAME_MS,
+  STREAMING_UI_FLUSH_MS,
+} from '../constant/streaming';
 import { hasDispose } from '../utils/component-capabilities';
 import { appendStreamingArgsPreview, parseStreamingArgs } from '../utils/event-payload';
 import { estimateTokens, getSharedSpeedTracker } from '../utils/speed-tracker';
@@ -61,6 +68,13 @@ export class StreamingUIController {
   private turnStartAt = 0;
   private _currentStep = 0;
   private _assistantDraft = '';
+  /**
+   * Chars of `_assistantDraft` already shown on screen. The smooth renderer
+   * advances this by a per-frame budget (clamped to the arrival rate), so
+   * bursts are spread across frames instead of rendered in one block and slow
+   * streams keep up. Reset alongside the draft.
+   */
+  private _shownAssistantLength = 0;
   private _thinkingDraft = '';
   private lastDeltaAt: number | undefined;
   private _thinkingEntry: TranscriptEntry | undefined = undefined;
@@ -165,6 +179,7 @@ export class StreamingUIController {
 
   clearAssistantDraft(): void {
     this._assistantDraft = '';
+    this._shownAssistantLength = 0;
   }
 
   // ---------------------------------------------------------------------------
@@ -415,7 +430,9 @@ export class StreamingUIController {
     return (
       this.pendingAssistantFlush ||
       this.pendingThinkingFlush ||
-      this.pendingToolCallFlushIds.size > 0
+      this.pendingToolCallFlushIds.size > 0 ||
+      // Smooth streaming: un-shown assistant text still needs more frames.
+      this._shownAssistantLength < this._assistantDraft.length
     );
   }
 
@@ -437,13 +454,13 @@ export class StreamingUIController {
     this.pendingToolCallFlushIds.clear();
   }
 
-  scheduleFlush(): void {
+  scheduleFlush(frameMs: number = STREAMING_UI_FLUSH_MS): void {
     if (!this.hasPending()) return;
     if (this.flushTimer !== undefined) return;
     const delay =
       this.lastFlushAt === undefined
         ? 0
-        : Math.max(0, STREAMING_UI_FLUSH_MS - (Date.now() - this.lastFlushAt));
+        : Math.max(0, frameMs - (Date.now() - this.lastFlushAt));
     this.flushTimer = setTimeout(() => {
       this.flushTimer = undefined;
       this.flush();
@@ -468,12 +485,53 @@ export class StreamingUIController {
     if (shouldFlushThinking && this._thinkingDraft.length > 0) {
       this.onThinkingUpdate(this._thinkingDraft);
     }
-    if (shouldFlushAssistant) {
-      this.onStreamingTextUpdate(this._assistantDraft);
+    if (shouldFlushAssistant || this._shownAssistantLength < this._assistantDraft.length) {
+      // Smooth streaming: advance the shown length by this frame's budget and
+      // render only up to it. Remaining text is picked up by the next frame
+      // (frame continuation also runs when no new delta arrived).
+      const shown = this.advanceAssistantShown();
+      if (shown > 0) {
+        this.onStreamingTextUpdate(this._assistantDraft.slice(0, shown));
+      }
     }
     for (const id of toolCallIds) {
       this.flushToolCallPreview(id);
     }
+    // If assistant text is still ahead of what was shown, schedule the next
+    // frame (at the smooth frame cadence) so the stream keeps flowing without
+    // waiting for another delta.
+    if (this._shownAssistantLength < this._assistantDraft.length) {
+      this.scheduleFlush(SMOOTH_FRAME_MS);
+    }
+  }
+
+  /**
+   * Advance the smooth-render cursor by this frame's character budget.
+   * Budget clamps to the measured arrival rate (fast models keep up, slow
+   * models never fall behind) with a floor so the stream never freezes and a
+   * ceiling so one oversized burst is spread across frames.
+   */
+  private advanceAssistantShown(): number {
+    const draft = this._assistantDraft;
+    if (this._shownAssistantLength >= draft.length) {
+      return this._shownAssistantLength;
+    }
+    const measured = getSharedSpeedTracker().getSpeed();
+    // Until the first speed sample lands, pace by an assumed arrival rate so
+    // the first (often large) block flows instead of crawling at MIN=1.
+    const tokPerSec = measured > 0 ? measured : DEFAULT_ARRIVAL_TOK_PER_SEC;
+    const budget = Math.min(
+      MAX_CHARS_PER_FRAME,
+      Math.max(
+        MIN_CHARS_PER_FRAME,
+        Math.ceil(tokPerSec * (SMOOTH_FRAME_MS / 1000) * CHARS_PER_TOKEN),
+      ),
+    );
+    this._shownAssistantLength = Math.min(
+      draft.length,
+      this._shownAssistantLength + budget,
+    );
+    return this._shownAssistantLength;
   }
 
   markAssistantDirty(): void {
@@ -495,11 +553,19 @@ export class StreamingUIController {
   }
 
   finalizeAssistantStream(): void {
+    // Force the remaining un-shown text onto the screen in one shot: mark the
+    // assistant pending (it may already have been flushed frame-by-frame) so
+    // the final flush renders the complete draft.
+    if (this._shownAssistantLength < this._assistantDraft.length) {
+      this._shownAssistantLength = this._assistantDraft.length;
+    }
+    this.pendingAssistantFlush = true;
     this.flushNow();
     if (this._streamingBlock !== null) {
       this.onStreamingTextEnd();
     }
     this._assistantDraft = '';
+    this._shownAssistantLength = 0;
     this.host.updateActivityPane();
     this.host.state.ui.requestRender();
   }
@@ -507,8 +573,11 @@ export class StreamingUIController {
   resetLiveText(): void {
     this.pendingAssistantFlush = false;
     this.pendingThinkingFlush = false;
-    this.clearFlushTimerIfIdle();
     this._assistantDraft = '';
+    this._shownAssistantLength = 0;
+    // Clear the timer after the draft/shown reset so hasPending() no longer
+    // sees un-shown text and the idle check can drop a stale continuation frame.
+    this.clearFlushTimerIfIdle();
     this._streamingBlock = null;
     this._thinkingDraft = '';
     this.lastDeltaAt = undefined;
