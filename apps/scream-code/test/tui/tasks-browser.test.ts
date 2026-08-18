@@ -166,6 +166,21 @@ describe('TasksBrowserApp — full-screen rendering', () => {
     expect(out).toContain('listening on :3000');
   });
 
+  it('strips terminal control sequences from tail output before rendering', () => {
+    const out = strip(
+      makeApp({
+        tasks: [task({ taskId: 'bash-aaaaaaaa' })],
+        selectedTaskId: 'bash-aaaaaaaa',
+        tailOutput: 'progress 10%\rprogress 90%\u001B[2Jdone',
+      })
+        .render(120)
+        .join('\n'),
+    );
+    // The raw escape sequence is gone and the pieces are joined contiguously.
+    expect(out).not.toContain('progress 10%\rprogress 90%\u001B[2Jdone');
+    expect(out).toContain('progress 10%progress 90%done');
+  });
+
   it('shows a loading state when tail is loading', () => {
     const out = strip(
       makeApp({

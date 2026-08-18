@@ -27,6 +27,7 @@ import chalk from 'chalk';
 
 import type { ColorPalette } from '@/tui/theme/colors';
 import { printableChar } from '@/tui/utils/printable-key';
+import { sanitizeShellOutput } from '@/tui/utils/sanitize';
 import { t } from '@scream-code/config';
 
 const ELLIPSIS = '…';
@@ -581,7 +582,7 @@ export class TasksBrowserApp extends Container implements Focusable {
     if (this.props.tailLoading) body = '[loading…]';
     else if (this.props.tailOutput === undefined || this.props.tailOutput.length === 0)
       body = '[no output captured]';
-    else body = this.props.tailOutput;
+    else body = sanitizeShellOutput(this.props.tailOutput);
 
     const rawLines = body.split('\n');
     const tailLines = rawLines.slice(-innerHeight);

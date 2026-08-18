@@ -24,6 +24,7 @@ import chalk from 'chalk';
 
 import type { ColorPalette } from '@/tui/theme/colors';
 import { printableChar } from '@/tui/utils/printable-key';
+import { sanitizeShellOutput } from '@/tui/utils/sanitize';
 
 const ELLIPSIS = '…';
 
@@ -108,7 +109,8 @@ export class TaskOutputViewer extends Container implements Focusable {
   }
 
   private splitOutput(output: string): string[] {
-    return (output.length > 0 ? output : t('taskviewer.no_output')).split('\n');
+    const sanitized = sanitizeShellOutput(output);
+    return (sanitized.length > 0 ? sanitized : t('taskviewer.no_output')).split('\n');
   }
 
   // ── input ──────────────────────────────────────────────────────────
