@@ -30,6 +30,7 @@ import {
 } from '../utils/tokens';
 import type { PromisableMethods } from '../utils/types';
 import { BackgroundManager } from './background';
+import { EventSubscriptionBus } from './events';
 import { FullCompaction, MicroCompaction, type CompactionStrategy } from './compaction';
 import { CronManager } from './cron';
 import { ConfigState } from './config';
@@ -141,6 +142,8 @@ export class Agent {
   readonly mcp?: McpConnectionManager;
   readonly hooks?: HookEngine;
   readonly log: Logger;
+  /** In-process event bus for extensions running inside the agent process. */
+  readonly eventBus: EventSubscriptionBus;
 
   readonly blobStore: BlobStore | undefined;
   readonly records: AgentRecords;
@@ -189,6 +192,7 @@ export class Agent {
     this.subagentHost = options.subagentHost;
     this.mcp = options.mcp;
     this.hooks = options.hookEngine;
+    this.eventBus = new EventSubscriptionBus();
     const embedCacheDir = options.screamHomeDir !== undefined
       ? join(options.screamHomeDir, 'cache', 'fastembed')
       : undefined;
@@ -946,6 +950,9 @@ export class Agent {
 
   emitEvent(event: AgentEvent): void {
     if (this.records.restoring) return;
+    // Deliver to in-process subscribers (extensions) first, then broadcast to
+    // the host. Subscriber errors are swallowed by the bus itself.
+    this.eventBus.dispatch(event);
     // Fire-and-forget: a non-serializable event must not surface as an
     // unhandledRejection (Node >=15 terminates on those).
     void this.rpc?.emitEvent?.(event)?.catch(() => {});

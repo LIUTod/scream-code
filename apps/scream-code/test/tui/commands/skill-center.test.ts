@@ -98,7 +98,7 @@ describe('handleSkillCommand', () => {
     const host = makeHost(undefined);
     await handleSkillCommand(host, '');
     expect(host.showError).toHaveBeenCalledWith(
-      '请先创建或恢复一个会话，再使用 Skill 中心。',
+      '请先创建或恢复一个会话，再使用 Plugin 中心。',
     );
     expect(host.mountEditorReplacement).not.toHaveBeenCalled();
   });
@@ -129,9 +129,9 @@ describe('handleSkillCommand', () => {
     
     const picker = getLastMountedPicker(host);
     const out = rendered(picker);
-    expect(out).toContain('── 已安装的 Skill ──');
+    expect(out).toContain('── 已安装的 Plugin ──');
     expect(out).toContain('daily-report');
-    expect(out).toContain('── 可安装的 Skill 包 ──');
+    expect(out).toContain('── 可安装的 Plugin 包 ──');
     expect(out).toContain('Demo Pack');
     expect(out).not.toContain('dream');
   });
@@ -243,7 +243,7 @@ describe('handleSkillCommand', () => {
     expect(rendered(confirmPicker)).toContain('确认卸载 "My Pack"？');
     // 必须明确告知用户：plugin Skill 只能整包卸载，无法单独删除。
     expect(rendered(confirmPicker)).toContain('将卸载整个包');
-    expect(rendered(confirmPicker)).toContain('共 1 个 Skill');
+    expect(rendered(confirmPicker)).toContain('共 1 个 Plugin');
   });
 
   it('warns about multi-skill impact when uninstalling a plugin with several skills', async () => {
@@ -300,7 +300,7 @@ describe('handleSkillCommand', () => {
       expect(rendered(getLastMountedPicker(host))).toContain('确认卸载 "Multi Pack"？');
     });
     const confirmPicker = getLastMountedPicker(host);
-    expect(rendered(confirmPicker)).toContain('共 3 个 Skill');
+    expect(rendered(confirmPicker)).toContain('共 3 个 Plugin');
   });
 
   it('uninstalls a plugin when confirming the uninstall picker', async () => {
@@ -426,7 +426,7 @@ describe('handleSkillCommand', () => {
     const confirmPicker = getLastMountedPicker(host);
     const out = rendered(confirmPicker);
     expect(out).toContain('确认卸载 "manual-skill"？');
-    expect(out).toContain('将删除该 Skill 的安装目录及子 Skill');
+    expect(out).toContain('将删除该 Plugin 的安装目录及子 Plugin');
   });
 
   it('deletes a manual skill when confirming the uninstall picker', async () => {
@@ -558,7 +558,7 @@ describe('handleSkillCommand', () => {
 
     const picker = getLastMountedPicker(host);
     const out = rendered(picker);
-    expect(out).toContain('── 可安装的 Skill 包 ──');
+    expect(out).toContain('── 可安装的 Plugin 包 ──');
     expect(out).toContain('Contract Review Pro 合同审查');
   });
 

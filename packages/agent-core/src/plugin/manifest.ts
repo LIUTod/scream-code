@@ -2,6 +2,7 @@ import { readdir, realpath, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 
 import { McpServerConfigSchema, type McpServerConfig } from '../config/schema';
+import type { HookDef } from '../session/hooks/types';
 import {
   PLUGIN_NAME_REGEX,
   type PluginDiagnostic,
@@ -16,12 +17,13 @@ const CLAUDE_PLUGIN_DIR_PATH = '.claude-plugin/plugin.json';
 const BARE_SKILL_PATH = 'SKILL.md';
 
 // Fields that look like third-party runtime extensions (Claude / Codex / old
-// Scream CLI). We do not run them; emit an info diagnostic so plugin authors and
-// users can see why a field is silently ignored.
+// Scream CLI). We do not run these; emit an info diagnostic so plugin authors
+// and users can see why a field is silently ignored. `entryPoint` and `hooks`
+// ARE executed (code plugins + external-command hooks); `tools` is deliberately
+// left here — code plugins register tools from their entry point instead.
 const UNSUPPORTED_RUNTIME_FIELDS = [
   'tools',
   'commands',
-  'hooks',
   'apps',
   'inject',
   'configFile',
@@ -165,6 +167,9 @@ export async function parseManifest(pluginRoot: string): Promise<ParsedManifestR
 
   recordUnsupportedRuntimeFields(raw, diagnostics);
 
+  const entryPoint = await readEntryPoint(pluginRoot, raw['entryPoint'], diagnostics);
+  const hooks = readHooks(pluginRoot, raw['hooks'], diagnostics);
+
   const manifest: PluginManifest = {
     name,
     version: stringField(raw, 'version'),
@@ -179,6 +184,8 @@ export async function parseManifest(pluginRoot: string): Promise<ParsedManifestR
     interface: readInterface(raw['interface']),
     skillInstructions,
     config,
+    entryPoint,
+    hooks,
   };
 
   return { manifest, manifestKind, manifestPath, shadowedManifestPath, diagnostics };
@@ -195,6 +202,74 @@ function recordUnsupportedRuntimeFields(
       message: `"${field}" is present but not supported by Scream plugins`,
     });
   }
+}
+
+async function readEntryPoint(
+  pluginRoot: string,
+  raw: unknown,
+  diagnostics: PluginDiagnostic[],
+): Promise<string | undefined> {
+  if (raw === undefined) return undefined;
+  if (typeof raw !== 'string') {
+    diagnostics.push({ severity: 'warn', message: '"entryPoint" must be a string' });
+    return undefined;
+  }
+  return resolvePluginPathField({
+    pluginRoot,
+    field: 'entryPoint',
+    value: raw,
+    diagnostics,
+  });
+}
+
+/**
+ * Parse a plugin's declared hooks (external-command HookEngine channel). Each
+ * entry mirrors {@link HookDef}: event, optional matcher, command (a `./`
+ * relative command is resolved against the plugin root), optional timeout.
+ * Unknown event names are kept (cast): they can never match a HookEngine
+ * trigger, so they are inert rather than harmful.
+ */
+function readHooks(
+  pluginRoot: string,
+  raw: unknown,
+  diagnostics: PluginDiagnostic[],
+): readonly HookDef[] | undefined {
+  if (raw === undefined) return undefined;
+  if (!Array.isArray(raw)) {
+    diagnostics.push({ severity: 'warn', message: '"hooks" must be an array' });
+    return undefined;
+  }
+  const out: HookDef[] = [];
+  for (const entry of raw) {
+    if (!isObject(entry)) {
+      diagnostics.push({ severity: 'warn', message: '"hooks" entries must be objects' });
+      continue;
+    }
+    const event = stringField(entry, 'event');
+    if (event === undefined) {
+      diagnostics.push({ severity: 'warn', message: '"hooks" entry is missing "event"' });
+      continue;
+    }
+    let command = stringField(entry, 'command');
+    if (command === undefined) {
+      diagnostics.push({ severity: 'warn', message: '"hooks" entry is missing "command"' });
+      continue;
+    }
+    if (command.startsWith('./')) {
+      command = path.resolve(pluginRoot, command);
+    }
+    const timeout = typeof entry['timeout'] === 'number' ? entry['timeout'] : undefined;
+    const hook: HookDef = {
+      event: event as HookDef['event'],
+      command,
+      ...(stringField(entry, 'matcher') !== undefined
+        ? { matcher: stringField(entry, 'matcher') }
+        : {}),
+      ...(timeout !== undefined ? { timeout } : {}),
+    };
+    out.push(hook);
+  }
+  return out.length > 0 ? out : undefined;
 }
 
 async function resolveSkillsField(

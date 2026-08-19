@@ -33,6 +33,44 @@ export class HookEngine {
     return result;
   }
 
+  /**
+   * Register a hook at runtime (e.g. when a plugin activates). Returns an
+   * unregister function for symmetric removal when the plugin deactivates.
+   * The existing constructor-injected hooks are unaffected; the byEvent map
+   * stays the single source of truth so trigger paths need no changes.
+   */
+  register(hook: HookDef): () => void {
+    const entries = this.byEvent.get(hook.event) ?? [];
+    entries.push(hook);
+    this.byEvent.set(hook.event, entries);
+    return () => {
+      this.unregister(hook);
+    };
+  }
+
+  /**
+   * Register several hooks at once (e.g. a plugin's manifest hooks). Returns
+   * a single function that unregisters all of them.
+   */
+  registerAll(hooks: readonly HookDef[]): () => void {
+    const unregisters = hooks.map((hook) => this.register(hook));
+    return () => {
+      for (const unregister of unregisters) unregister();
+    };
+  }
+
+  private unregister(hook: HookDef): void {
+    const entries = this.byEvent.get(hook.event);
+    if (entries === undefined) return;
+    // lastIndexOf so a hook registered multiple times is removed once per
+    // unregister call.
+    const index = entries.lastIndexOf(hook);
+    if (index >= 0) {
+      entries.splice(index, 1);
+      if (entries.length === 0) this.byEvent.delete(hook.event);
+    }
+  }
+
   trigger(event: string, args: HookEngineTriggerArgs = {}): Promise<HookResult[]> {
     try {
       return this.triggerInner(event, args).catch((): HookResult[] => []);

@@ -153,10 +153,17 @@ export const BUILTIN_SLASH_COMMANDS = [
     availability: 'always',
   },
   {
-    name: 'skill',
-    aliases: ['skills', 'plugin', 'plugins'],
-    description: 'registry.skill_desc',
+    name: 'plugin',
+    aliases: ['skills', 'skill', 'plugins'],
+    description: 'registry.plugin_desc',
     priority: 202,
+    availability: 'always',
+  },
+  {
+    name: 'extension',
+    aliases: ['extensions'],
+    description: 'registry.extension_desc',
+    priority: 203,
     availability: 'always',
   },
   {

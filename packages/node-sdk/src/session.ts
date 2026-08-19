@@ -1,5 +1,6 @@
 import { ErrorCodes, ScreamError, type AgentContextData, type ScreamErrorCode } from '@scream-code/agent-core';
 import { type ApprovalHandler, type Event, type QuestionHandler } from '#/events';
+import type { PluginExtensionSummary } from '@scream-code/agent-core';
 import type { SDKRpcClient } from '#/rpc';
 import type {
   BackgroundTaskInfo,
@@ -443,6 +444,27 @@ export class Session {
       name: skillName,
       ...(skillArgs !== undefined ? { args: skillArgs } : {}),
     });
+  }
+
+  /**
+   * Activate a code-entry plugin (manifest `entryPoint`) on the session's main
+   * agent. Lazy and isolated: the plugin's code runs only after this call.
+   */
+  async activatePlugin(pluginId: string): Promise<void> {
+    this.ensureOpen();
+    await this.rpc.activatePlugin({ sessionId: this.id, pluginId });
+  }
+
+  /** Deactivate a code-entry plugin (removes its hooks, runs its deactivate). */
+  async deactivatePlugin(pluginId: string): Promise<void> {
+    this.ensureOpen();
+    await this.rpc.deactivatePlugin({ sessionId: this.id, pluginId });
+  }
+
+  /** Code plugins the runtime can load, with their activation state. */
+  async pluginExtensionStatus(): Promise<readonly PluginExtensionSummary[]> {
+    this.ensureOpen();
+    return this.rpc.pluginExtensionStatus({ sessionId: this.id });
   }
 
   /**

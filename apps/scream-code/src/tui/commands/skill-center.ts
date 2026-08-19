@@ -33,14 +33,14 @@ export async function handleSkillCommand(
 ): Promise<void> {
   const session = host.session;
   if (!session) {
-    host.showError(t('skill.no_session'));
+    host.showError(t('plugin.no_session'));
     return;
   }
   await openSkillCenter(host);
 }
 
 async function openSkillCenter(host: SlashCommandHost): Promise<void> {
-  const loading = new SkillCenterLoadingComponent(host, t('skill.loading'));
+  const loading = new SkillCenterLoadingComponent(host, t('plugin.loading'));
   host.mountEditorReplacement(loading);
 
   const [skillsResult, pluginsResult, marketplaceResult] = await Promise.allSettled([
@@ -62,13 +62,13 @@ async function openSkillCenter(host: SlashCommandHost): Promise<void> {
   const options = buildOptions(host, skills, plugins, marketplace);
   if (options.length === 0) {
     host.restoreEditor();
-    host.showNotice(t('skill.center_title'), t('skill.no_skills'));
+    host.showNotice(t('plugin.center_title'), t('plugin.no_plugins'));
     return;
   }
 
   const picker = new ChoicePickerComponent({
-    title: t('skill.center_title'),
-    hint: t('skill.footer_hint'),
+    title: t('plugin.center_title'),
+    hint: t('plugin.footer_hint'),
     options,
     colors: host.state.theme.colors,
     searchable: true,
@@ -173,7 +173,7 @@ function buildOptions(
   if (skills.length > 0) {
     options.push({
       value: '__section__installed',
-      label: '── ' + t('skill.installed') + ' ──',
+      label: '── ' + t('plugin.installed') + ' ──',
     });
     for (const skill of skills) {
       const actionKeys: Record<string, () => void> = {};
@@ -203,15 +203,15 @@ function buildOptions(
   if (installable.length > 0) {
     options.push({
       value: '__section__installable',
-      label: '── ' + t('skill.installable') + ' ──',
+      label: '── ' + t('plugin.installable') + ' ──',
     });
     for (const entry of installable) {
       options.push({
         value: `install:${entry.source}`,
         label: entry.displayName,
         description: entry.description
-          ? `${truncate(entry.description, SKILL_DESC_MAX)}  [${t('skill.not_installed')}]`
-          : `[${t('skill.not_installed')}]`,
+          ? `${truncate(entry.description, SKILL_DESC_MAX)}  [${t('plugin.not_installed')}]`
+          : `[${t('plugin.not_installed')}]`,
         actionKeys: {
           i: () => {
             host.restoreEditor();
@@ -258,12 +258,12 @@ async function activateSkillByName(
 ): Promise<void> {
   const session = host.session;
   if (!session) {
-    host.showError(t('skill.no_session_activate'));
+    host.showError(t('plugin.no_session_activate'));
     return;
   }
   const skill = skills.find((s) => s.name === name);
   if (!skill) {
-    host.showError(t('skill.not_found'));
+    host.showError(t('plugin.not_found'));
     return;
   }
   host.sendSkillActivation(session, skill.name, '');
@@ -272,23 +272,23 @@ async function activateSkillByName(
 async function installInjectActivate(host: SlashCommandHost, source: string): Promise<void> {
   const session = host.session;
   if (!session) {
-    host.showError(t('skill.no_session_activate'));
+    host.showError(t('plugin.no_session_activate'));
     return;
   }
 
-  const spinner = host.showProgressSpinner(t('skill.installing_package'));
+  const spinner = host.showProgressSpinner(t('plugin.installing_package'));
   try {
     const summary = await session.installPlugin(source);
     await session.injectPlugin(summary.id);
-    spinner.stop({ ok: true, label: `"${summary.displayName}" ${t('skill.installed_injected')}` });
+    spinner.stop({ ok: true, label: `"${summary.displayName}" ${t('plugin.installed_injected')}` });
     const allSkills = await session.listSkills();
     const pluginSkills = allSkills.filter(
       (s) => s.pluginId === summary.id && isUserActivatableSkill(s),
     );
     if (pluginSkills.length === 0) {
       host.showNotice(
-        t('skill.plugin_installed'),
-        `${summary.displayName} ${t('skill.no_manual_skill')}`,
+        t('plugin.plugin_installed'),
+        `${summary.displayName} ${t('plugin.no_manual_plugin')}`,
       );
       return;
     }
@@ -299,8 +299,8 @@ async function installInjectActivate(host: SlashCommandHost, source: string): Pr
     }
     await pickAndActivateSkill(host, pluginSkills, [summary]);
   } catch (error) {
-    spinner.stop({ ok: false, label: t('skill.install_failed') });
-    host.showError(t('skill.install_failed_msg', { msg: error instanceof Error ? error.message : String(error) }));
+    spinner.stop({ ok: false, label: t('plugin.install_failed') });
+    host.showError(t('plugin.install_failed_msg', { msg: error instanceof Error ? error.message : String(error) }));
   }
 }
 
@@ -320,8 +320,8 @@ async function pickAndActivateSkill(
   }));
 
   const picker = new ChoicePickerComponent({
-    title: t('skill.select_activate'),
-    hint: t('skill.select_hint'),
+    title: t('plugin.select_activate'),
+    hint: t('plugin.select_hint'),
     options,
     colors: host.state.theme.colors,
     searchable: true,
@@ -345,7 +345,7 @@ async function uninstallByPluginId(
 ): Promise<void> {
   const session = host.session;
   if (!session) {
-    host.showError(t('skill.no_session_activate'));
+    host.showError(t('plugin.no_session_activate'));
     return;
   }
 
@@ -364,8 +364,8 @@ async function uninstallByPluginId(
   const skillCount = plugin?.skillCount;
   const description =
     skillCount !== undefined && skillCount > 0
-      ? t('skill.uninstall_whole_pkg', { count: skillCount })
-      : t('skill.uninstall_single');
+      ? t('plugin.uninstall_whole_pkg', { count: skillCount })
+      : t('plugin.uninstall_single');
 
   const confirmed = await confirmUninstall(host, label, description);
   if (!confirmed) {
@@ -373,17 +373,17 @@ async function uninstallByPluginId(
     return;
   }
 
-  const spinner = host.showProgressSpinner(`${t('skill.uninstalling')} "${label}"…`);
+  const spinner = host.showProgressSpinner(`${t('plugin.uninstalling')} "${label}"…`);
   try {
     await session.removePlugin(pluginId);
-    spinner.stop({ ok: true, label: `"${label}" ${t('skill.uninstalled')}` });
+    spinner.stop({ ok: true, label: `"${label}" ${t('plugin.uninstalled')}` });
     host.showNotice(
-      t('skill.plugin_uninstalled'),
-      t('skill.plugin_removed'),
+      t('plugin.plugin_uninstalled'),
+      t('plugin.plugin_removed'),
     );
   } catch (error) {
-    spinner.stop({ ok: false, label: t('skill.uninstall_failed') });
-    host.showError(t('skill.uninstall_failed_msg', { msg: error instanceof Error ? error.message : String(error) }));
+    spinner.stop({ ok: false, label: t('plugin.uninstall_failed') });
+    host.showError(t('plugin.uninstall_failed_msg', { msg: error instanceof Error ? error.message : String(error) }));
   } finally {
     await openSkillCenter(host);
   }
@@ -392,28 +392,28 @@ async function uninstallByPluginId(
 async function uninstallManualSkill(host: SlashCommandHost, skill: SkillSummary): Promise<void> {
   const session = host.session;
   if (!session) {
-    host.showError(t('skill.no_session_activate'));
+    host.showError(t('plugin.no_session_activate'));
     return;
   }
 
   const confirmed = await confirmUninstall(
     host,
     skill.name,
-    t('skill.deleting_skill'),
+    t('plugin.deleting_plugin'),
   );
   if (!confirmed) {
     await openSkillCenter(host);
     return;
   }
 
-  const spinner = host.showProgressSpinner(`${t('skill.deleting')} "${skill.name}"…`);
+  const spinner = host.showProgressSpinner(`${t('plugin.deleting')} "${skill.name}"…`);
   try {
     await session.removeSkill(skill.name);
-    spinner.stop({ ok: true, label: `"${skill.name}" ${t('skill.deleted')}` });
-    host.showNotice(t('skill.skill_deleted'), t('skill.skill_removed'));
+    spinner.stop({ ok: true, label: `"${skill.name}" ${t('plugin.deleted')}` });
+    host.showNotice(t('plugin.plugin_deleted'), t('plugin.skill_removed'));
   } catch (error) {
-    spinner.stop({ ok: false, label: t('skill.delete_failed') });
-    host.showError(t('skill.delete_failed_msg', { msg: error instanceof Error ? error.message : String(error) }));
+    spinner.stop({ ok: false, label: t('plugin.delete_failed') });
+    host.showError(t('plugin.delete_failed_msg', { msg: error instanceof Error ? error.message : String(error) }));
   } finally {
     await openSkillCenter(host);
   }
@@ -426,11 +426,11 @@ async function confirmUninstall(
 ): Promise<boolean> {
   return new Promise<boolean>((resolve) => {
     const picker = new ChoicePickerComponent({
-      title: t('skill.confirm_uninstall', { label }),
-      hint: t('skill.uninstall_reversible'),
+      title: t('plugin.confirm_uninstall', { label }),
+      hint: t('plugin.uninstall_reversible'),
       options: [
         { value: 'no', label: t('common.cancel') },
-        { value: 'yes', label: t('skill.uninstall_yes'), tone: 'danger', description },
+        { value: 'yes', label: t('plugin.uninstall_yes'), tone: 'danger', description },
       ],
       colors: host.state.theme.colors,
       onSelect: (value: string) => {
@@ -449,12 +449,12 @@ async function confirmUninstall(
 function formatSkillDescription(skill: SkillSummary, plugins: readonly PluginSummary[] = []): string {
   const parts: string[] = [];
   if (skill.source) {
-    parts.push(`${t('skill.source_label')} ${skill.source}`);
+    parts.push(`${t('plugin.source_label')} ${skill.source}`);
   }
   if (skill.pluginId !== undefined) {
     const plugin = plugins.find((p) => p.id === skill.pluginId);
     const label = plugin?.displayName ?? skill.pluginId;
-    parts.push(`${t('skill.plugin_label')} ${label}`);
+    parts.push(`${t('plugin.plugin_label')} ${label}`);
   }
   if (skill.description) {
     parts.push(truncate(skill.description, SKILL_DESC_MAX));

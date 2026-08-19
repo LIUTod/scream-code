@@ -8,3 +8,5 @@ export type { PluginManagerOptions } from './manager';
 export { resolveInstallSource } from './source';
 export type { InstallSource, ResolvedSource } from './source';
 export { downloadZip, extractZip } from './archive';
+export { ExtensionRuntime } from './runtime/extension';
+export type { DiscoveredExtension, ExtensionContext, ExtensionModule } from './runtime/types';

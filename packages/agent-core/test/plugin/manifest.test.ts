@@ -236,7 +236,6 @@ describe('parseManifest', () => {
         config_file: 'legacy-cfg.json',
         inject: { foo: 'bar' },
         bootstrap: { skill: 'using-demo' },
-        hooks: { sessionStart: { skill: 'using-demo' } },
         apps: './apps',
       }),
     });
@@ -249,7 +248,6 @@ describe('parseManifest', () => {
       'config_file',
       'inject',
       'bootstrap',
-      'hooks',
       'apps',
     ]) {
       expect(result.diagnostics).toContainEqual(

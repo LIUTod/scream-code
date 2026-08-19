@@ -1,4 +1,5 @@
 import type { McpServerConfig } from '../config/schema';
+import type { HookDef } from '../session/hooks/types';
 
 export type PluginDiagnosticSeverity = 'error' | 'warn' | 'info';
 
@@ -37,6 +38,18 @@ export interface PluginManifest {
   readonly mcpServers?: Readonly<Record<string, McpServerConfig>>;
   readonly interface?: PluginInterface;
   readonly skillInstructions?: string;
+  /**
+   * Absolute path to the plugin's JS entry point (bootstrap). When present the
+   * plugin is a "code plugin": its module exports `activate(context)` (and
+   * optionally `deactivate()`). Lazily activated via the ExtensionRuntime.
+   */
+  readonly entryPoint?: string;
+  /**
+   * Shell hooks this plugin declares (the existing external-command HookEngine
+   * channel). Injected into the agent's HookEngine on activate and removed on
+   * deactivate. Same shape as the session-level `HookDef`.
+   */
+  readonly hooks?: readonly HookDef[];
   /**
    * Default plugin configuration (plain data). Reserved as the future home of
    * a typed `configSchema` when plugins gain a code entry point — the declared

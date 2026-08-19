@@ -5,7 +5,7 @@ import { join } from 'pathe';
 
 import { ErrorCodes, ScreamError } from '#/errors';
 import { getRootLogger, log } from '#/logging/logger';
-import { PluginManager } from '#/plugin';
+import { ExtensionRuntime, PluginManager } from '#/plugin';
 import { FetchCache } from '#/tools/providers/fetch-cache';
 import { LocalFetchURLProvider } from '#/tools/providers/local-fetch-url';
 import { DuckDuckGoSearchProvider } from '#/tools/providers/duckduckgo-search';
@@ -208,6 +208,8 @@ export class ScreamCore implements PromisableMethods<CoreAPI> {
   private subagentModelBindings?: () => Record<string, string | undefined>;
   private readonly sessionStore: SessionStore;
   readonly plugins: PluginManager;
+  /** Loads/activates code-entry plugins (manifest `entryPoint`). */
+  readonly extensionRuntime = new ExtensionRuntime();
   private pluginsReady: Promise<void>;
   private pluginsLoadError: Error | undefined;
 
@@ -606,6 +608,70 @@ export class ScreamCore implements PromisableMethods<CoreAPI> {
 
   registerTool({ sessionId, ...payload }: SessionAgentPayload<RegisterToolPayload>) {
     return this.sessionApi(sessionId).registerTool(payload);
+  }
+
+  /**
+   * Activate a code plugin (one with a manifest `entryPoint`) on the session's
+   * main agent: injects declared manifest hooks into the agent's HookEngine and
+   * calls the plugin's `activate(context)`.
+   */
+  async activatePlugin({
+    sessionId,
+    pluginId,
+  }: {
+    sessionId: string;
+    pluginId: string;
+  }): Promise<void> {
+    await this.pluginsReady;
+    const session = this.sessions.get(sessionId);
+    if (session === undefined) {
+      throw new ScreamError(ErrorCodes.SESSION_NOT_FOUND, `Session "${sessionId}" was not found`, {
+        details: { sessionId },
+      });
+    }
+    const agent = session.agents.get('main');
+    if (agent === undefined) {
+      throw new ScreamError(
+        ErrorCodes.AGENT_NOT_FOUND,
+        `Session "${sessionId}" has no main agent`,
+        { details: { sessionId } },
+      );
+    }
+    const plugin = this.plugins.list().find((record) => record.id === pluginId);
+    if (plugin === undefined) {
+      throw new ScreamError(ErrorCodes.PLUGIN_NOT_FOUND, `Plugin "${pluginId}" was not found`, {
+        details: { pluginId },
+      });
+    }
+    const [extension] = this.extensionRuntime.discover([plugin]);
+    if (extension === undefined) {
+      throw new ScreamError(
+        ErrorCodes.PLUGIN_NOT_FOUND,
+        `Plugin "${pluginId}" has no code entry point`,
+        { details: { pluginId } },
+      );
+    }
+    await this.extensionRuntime.activate(agent, extension);
+  }
+
+  /** Deactivate a code plugin (removes its hooks and runs its deactivate). */
+  async deactivatePlugin({ pluginId }: { pluginId: string }): Promise<void> {
+    await this.pluginsReady;
+    await this.extensionRuntime.deactivate(pluginId);
+  }
+
+  /** Code plugins the runtime can load, with their activation state. */
+  async pluginExtensionStatus(): Promise<
+    readonly { pluginId: string; entryPoint: string; active: boolean }[]
+  > {
+    await this.pluginsReady;
+    return this.extensionRuntime
+      .discover(this.plugins.list())
+      .map((extension) => ({
+        pluginId: extension.pluginId,
+        entryPoint: extension.entryPoint,
+        active: this.extensionRuntime.isActive(extension.pluginId),
+      }));
   }
 
   unregisterTool({ sessionId, ...payload }: SessionAgentPayload<UnregisterToolPayload>) {

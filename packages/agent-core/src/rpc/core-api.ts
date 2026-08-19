@@ -448,6 +448,21 @@ export interface SessionAPI extends AgentAPIWithId {
 
 type SessionAPIWithId = WithSessionId<SessionAPI>;
 
+export interface ActivatePluginPayload {
+  readonly sessionId: string;
+  readonly pluginId: string;
+}
+
+export interface DeactivatePluginPayload {
+  readonly pluginId: string;
+}
+
+export interface PluginExtensionSummary {
+  readonly pluginId: string;
+  readonly entryPoint: string;
+  readonly active: boolean;
+}
+
 export interface CoreAPI extends SessionAPIWithId {
   getCoreInfo: (payload: EmptyPayload) => CoreInfo;
   getExperimentalFlags: (payload: EmptyPayload) => ExperimentalFlagMap;
@@ -460,6 +475,9 @@ export interface CoreAPI extends SessionAPIWithId {
   resumeSession: (payload: ResumeSessionPayload) => ResumeSessionResult;
   forkSession: (payload: ForkSessionPayload) => ResumeSessionResult;
   listSessions: (payload: ListSessionsPayload) => readonly SessionSummary[];
+  activatePlugin: (payload: ActivatePluginPayload) => Promise<void>;
+  deactivatePlugin: (payload: DeactivatePluginPayload) => Promise<void>;
+  pluginExtensionStatus: (payload: EmptyPayload) => readonly PluginExtensionSummary[];
   exportSession: (payload: ExportSessionPayload) => ExportSessionResult;
   listPlugins: (payload: EmptyPayload) => readonly PluginSummary[];
   installPlugin: (payload: InstallPluginPayload) => PluginSummary;

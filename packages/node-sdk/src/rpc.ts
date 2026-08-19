@@ -83,6 +83,14 @@ export interface GenerateAgentsMdInput extends SessionIdRpcInput {
   readonly targetDir?: string | undefined;
 }
 
+export interface ActivatePluginRpcInput extends SessionIdRpcInput {
+  readonly pluginId: string;
+}
+
+export interface DeactivatePluginRpcInput extends SessionIdRpcInput {
+  readonly pluginId: string;
+}
+
 export interface SetSessionModelRpcInput extends SessionIdRpcInput {
   readonly model: string;
 }
@@ -711,6 +719,30 @@ export class SDKRpcClient {
       agentId: this.interactiveAgentId,
       name: input.name,
       args: input.args,
+    });
+  }
+
+  async activatePlugin(input: ActivatePluginRpcInput): Promise<void> {
+    const rpc = await this.getRpc();
+    return rpc.activatePlugin({
+      sessionId: input.sessionId,
+      pluginId: input.pluginId,
+    });
+  }
+
+  async deactivatePlugin(input: DeactivatePluginRpcInput): Promise<void> {
+    const rpc = await this.getRpc();
+    return rpc.deactivatePlugin({
+      pluginId: input.pluginId,
+    });
+  }
+
+  async pluginExtensionStatus(
+    input: SessionIdRpcInput,
+  ): Promise<readonly import('@scream-code/agent-core').PluginExtensionSummary[]> {
+    const rpc = await this.getRpc();
+    return rpc.pluginExtensionStatus({
+      sessionId: input.sessionId,
     });
   }
 
