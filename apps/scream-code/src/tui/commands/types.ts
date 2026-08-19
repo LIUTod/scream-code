@@ -6,6 +6,12 @@ export type SlashCommandAvailability = 'always' | 'idle-only';
 export interface ScreamSlashCommand<Name extends string = string> extends SlashCommand {
   readonly name: Name;
   readonly aliases: readonly string[];
+  /**
+   * Aliases that route to this command but are NOT shown in autocomplete or
+   * help (e.g. a legacy command name kept for user habits). Distinct from
+   * `aliases` (which are both routable and shown).
+   */
+  readonly hiddenAliases?: readonly string[];
   readonly description: string;
   readonly priority?: number;
   readonly availability?: SlashCommandAvailability | ((args: string) => SlashCommandAvailability);

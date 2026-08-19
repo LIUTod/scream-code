@@ -34,6 +34,7 @@ const DOCUMENTATION_MARKDOWN_LOWER = new Set([
   'architecture.md',
   'design.md',
   'notes.md',
+  'agents.md',
 ]);
 
 export interface SkillPathContext {

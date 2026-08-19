@@ -888,7 +888,7 @@ export const en: Record<string, string> = {
   'skillact.user_trigger': '(user triggered)',
   'skillact.model_trigger': '(model invoked)',
   'skillact.nested_trigger': '(nested call)',
-  'skillact.activated': '▶ Activated skill: ',
+  'skillact.activated': '▶ Activated plugin: ',
 
   // ─── media-url ─────────────────
   'mediaurl.audio': 'Audio',
@@ -900,7 +900,7 @@ export const en: Record<string, string> = {
   'transcript.assistant': 'Assistant: ',
   'transcript.thinking': 'Thinking: ',
   'transcript.tool_name': 'Tool {name}: ',
-  'transcript.activated_skill': 'Activated skill: {name}',
+  'transcript.activated_skill': 'Activated plugin: {name}',
   'transcript.more_history': '↑ {count} more history message(s)',
 
   // ─── compaction ────────────────

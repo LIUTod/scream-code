@@ -154,7 +154,8 @@ export const BUILTIN_SLASH_COMMANDS = [
   },
   {
     name: 'plugin',
-    aliases: ['skills', 'skill', 'plugins'],
+    aliases: ['skills', 'plugins'],
+    hiddenAliases: ['skill'],
     description: 'registry.plugin_desc',
     priority: 202,
     availability: 'always',
@@ -352,7 +353,10 @@ export type BuiltinSlashCommandName = BuiltinSlashCommand['name'];
 export function findBuiltInSlashCommand(commandName: string): BuiltinSlashCommand | undefined {
   const commands = BUILTIN_SLASH_COMMANDS as readonly ScreamSlashCommand<BuiltinSlashCommandName>[];
   return commands.find(
-    (command) => command.name === commandName || command.aliases.includes(commandName),
+    (command) =>
+      command.name === commandName ||
+      command.aliases.includes(commandName) ||
+      command.hiddenAliases?.includes(commandName) === true,
   ) as BuiltinSlashCommand | undefined;
 }
 

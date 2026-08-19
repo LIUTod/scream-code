@@ -889,7 +889,7 @@ export const zh: Record<string, string> = {
   'skillact.user_trigger': '（用户触发）',
   'skillact.model_trigger': '（模型调用）',
   'skillact.nested_trigger': '（嵌套调用）',
-  'skillact.activated': '▶ 已激活 skill：',
+  'skillact.activated': '▶ 已激活插件：',
 
   // ─── media-url ─────────────────
   'mediaurl.audio': '音频',
@@ -901,7 +901,7 @@ export const zh: Record<string, string> = {
   'transcript.assistant': '助手：',
   'transcript.thinking': '思考：',
   'transcript.tool_name': '工具 {name}：',
-  'transcript.activated_skill': '已激活技能：{name}',
+  'transcript.activated_skill': '已激活插件：{name}',
   'transcript.more_history': '↑ 还有 {count} 条历史消息',
 
   // ─── compaction ────────────────
