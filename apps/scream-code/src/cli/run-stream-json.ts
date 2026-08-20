@@ -511,8 +511,33 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
   const streamSubagentModels = streamTuiConfig.subagentModels;
   harness.setSubagentModelBindings(() => streamSubagentModels);
 
+  // cc-connect closes our stdout when it kills/restarts the agent (idle
+  // timeout, /restart, config change). Writing after that raises EPIPE as an
+  // unhandled error and crashes the process. The pipe is gone — results can
+  // no longer be delivered — so exit quietly instead of burning tokens as a
+  // zombie waiting for a signal that may never come.
+  const handleStdoutClosed = (): void => {
+    log.debug("stream-json: stdout closed (EPIPE), exiting");
+    process.exit(0);
+  };
+  process.stdout.on("error", (error: NodeJS.ErrnoException) => {
+    if (error.code === "EPIPE") {
+      handleStdoutClosed();
+      return;
+    }
+    log.error("stream-json: stdout error", { error: String(error) });
+  });
+
   const writer = new ClaudeStreamJsonWriter((line) => {
-    process.stdout.write(`${line}\n`);
+    try {
+      process.stdout.write(`${line}\n`);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "EPIPE") {
+        handleStdoutClosed();
+        return;
+      }
+      throw error;
+    }
   });
 
   let session: Session | undefined;

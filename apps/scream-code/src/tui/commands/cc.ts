@@ -221,7 +221,7 @@ async function findCcConnectResidualPaths(excludePath: string): Promise<string[]
       // doesn't exist — skip
     }
   }
-  return existing.sort();
+  return existing.toSorted();
 }
 
 // ── Command handler ────────────────────────────────────────────────────
@@ -274,7 +274,7 @@ function runLifecycleAction(host: SlashCommandHost, daemon: DaemonMode, action: 
       );
       host.refreshCcStatus();
     } else {
-      host.showError(t('cc.start_failed', { label, output: output || '未知错误' }));
+      host.showError(t('cc.start_failed', { label, output: output || t('cc.unknown_error') }));
     }
   })();
 }
@@ -292,7 +292,7 @@ function buildUninstallSummary(
     t('cc.will_clean'),
     t('cc.clean_daemon', { label: daemon.method }),
     t('cc.clean_config', { detail: t('cc.clean_config.detail') }),
-    '· 执行 npm uninstall -g cc-connect',
+    t('cc.uninstall_step_npm'),
   ];
   if (install.version) {
     lines.push(t('cc.current_version', { version: install.version }));
