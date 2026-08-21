@@ -15,6 +15,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AgentOptions } from '../../src/agent';
 import type { ContextMessage } from '../../src/agent/context';
 import {
+  COMPACTION_INSTRUCTION,
+  COMPACTION_UPDATE_INSTRUCTION,
   createFileOps,
   DefaultCompactionStrategy,
   extractFileOpsFromMessage,
@@ -210,12 +212,12 @@ describe('Agent compaction', () => {
       [wire] full_compaction.begin      { "source": "manual", "instruction": "Keep the important test facts.", "time": "<time>" }
       [emit] compaction.started         { "trigger": "manual", "instruction": "Keep the important test facts." }
       [wire] request.header             { "provider": "scream", "model": "scream-code", "modelAlias": "scream-code", "systemPrompt": "You are a deterministic test agent.", "activeTools": [], "messagesCount": 7, "estimatedInputTokens": "<tokens>", "time": "<time>" }
-      [wire] usage.record               { "model": "scream-code", "usage": { "inputOther": 1354, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "session", "time": "<time>" }
-      [emit] agent.status.updated       { "model": "scream-code", "thinkingLevel": "off", "contextTokens": 120, "maxContextTokens": 256000, "contextUsage": 0.00046875, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "permission": "manual", "usage": { "byModel": { "scream-code": { "inputOther": 1354, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 1354, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
+      [wire] usage.record               { "model": "scream-code", "usage": { "inputOther": 1408, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "session", "time": "<time>" }
+      [emit] agent.status.updated       { "model": "scream-code", "thinkingLevel": "off", "contextTokens": 120, "maxContextTokens": 256000, "contextUsage": 0.00046875, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "permission": "manual", "usage": { "byModel": { "scream-code": { "inputOther": 1408, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 1408, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
       [wire] full_compaction.complete   { "time": "<time>" }
       [emit] compaction.completed       { "result": { "summary": "> The conversation before this point was compacted: 6 earlier message(s) were omitted and are covered by this summary. Treat the summary below as working notes, not verbatim history — the messages after it continue from here.\\n\\nCompacted summary.", "compactedCount": 6, "tokensBefore": 48, "tokensAfter": 71 } }
       [wire] context.apply_compaction   { "summary": "> The conversation before this point was compacted: 6 earlier message(s) were omitted and are covered by this summary. Treat the summary below as working notes, not verbatim history — the messages after it continue from here.\\n\\nCompacted summary.", "compactedCount": 6, "tokensBefore": 48, "tokensAfter": 71, "time": "<time>" }
-      [emit] agent.status.updated       { "model": "scream-code", "thinkingLevel": "off", "contextTokens": 71, "maxContextTokens": 256000, "contextUsage": 0.00027734375, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "permission": "manual", "usage": { "byModel": { "scream-code": { "inputOther": 1354, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 1354, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
+      [emit] agent.status.updated       { "model": "scream-code", "thinkingLevel": "off", "contextTokens": 71, "maxContextTokens": 256000, "contextUsage": 0.00027734375, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "permission": "manual", "usage": { "byModel": { "scream-code": { "inputOther": 1408, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 1408, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
       [wire] context.snapshot           { "snapshot": { "history": [ { "role": "assistant", "content": [ { "type": "text", "text": "> The conversation before this point was compacted: 6 earlier message(s) were omitted and are covered by this summary. Treat the summary below as working notes, not verbatim history — the messages after it continue from here.\\n\\nCompacted summary." } ], "toolCalls": [], "origin": { "kind": "compaction_summary" } } ], "tokenCount": 71, "tokenCountCoveredMessageCount": 1, "openSteps": [], "pendingToolResultIds": [], "deferredMessages": [] }, "compactedHistory": [ { "text": "--- message 1 role=user ---\\ntext:\\n  old user one\\n\\n--- message 2 role=assistant ---\\ntext:\\n  old assistant one\\n\\n--- message 3 role=user ---\\ntext:\\n  old user two\\n\\n--- message 4 role=assistant ---\\ntext:\\n  old assistant two\\n\\n--- message 5 role=user ---\\ntext:\\n  recent user three\\n\\n--- message 6 role=assistant ---\\ntext:\\n  recent assistant three" } ], "time": "<time>" }
     `);
     expect(ctx.lastLlmInput()).toMatchInlineSnapshot(`
@@ -974,12 +976,12 @@ describe('Agent compaction', () => {
       [emit] compaction.started         { "trigger": "manual" }
       [wire] context.append_message     { "message": { "role": "user", "content": [ { "type": "text", "text": "new user while compacting" } ], "toolCalls": [], "origin": { "kind": "user" } }, "time": "<time>" }
       [wire] request.header             { "provider": "scream", "model": "scream-code", "modelAlias": "scream-code", "systemPrompt": "You are a deterministic test agent.", "activeTools": [], "messagesCount": 5, "estimatedInputTokens": "<tokens>", "time": "<time>" }
-      [wire] usage.record               { "model": "scream-code", "usage": { "inputOther": 1332, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "session", "time": "<time>" }
-      [emit] agent.status.updated       { "model": "scream-code", "thinkingLevel": "off", "contextTokens": 80, "maxContextTokens": 256000, "contextUsage": 0.0003125, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "permission": "manual", "usage": { "byModel": { "scream-code": { "inputOther": 1332, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 1332, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
+      [wire] usage.record               { "model": "scream-code", "usage": { "inputOther": 1386, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "session", "time": "<time>" }
+      [emit] agent.status.updated       { "model": "scream-code", "thinkingLevel": "off", "contextTokens": 80, "maxContextTokens": 256000, "contextUsage": 0.0003125, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "permission": "manual", "usage": { "byModel": { "scream-code": { "inputOther": 1386, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 1386, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
       [wire] full_compaction.complete   { "time": "<time>" }
       [emit] compaction.completed       { "result": { "summary": "> The conversation before this point was compacted: 4 earlier message(s) were omitted and are covered by this summary. Treat the summary below as working notes, not verbatim history — the messages after it continue from here.\\n\\nCompacted prefix.", "compactedCount": 4, "tokensBefore": 34, "tokensAfter": 71 } }
       [wire] context.apply_compaction   { "summary": "> The conversation before this point was compacted: 4 earlier message(s) were omitted and are covered by this summary. Treat the summary below as working notes, not verbatim history — the messages after it continue from here.\\n\\nCompacted prefix.", "compactedCount": 4, "tokensBefore": 34, "tokensAfter": 71, "time": "<time>" }
-      [emit] agent.status.updated       { "model": "scream-code", "thinkingLevel": "off", "contextTokens": 71, "maxContextTokens": 256000, "contextUsage": 0.00027734375, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "permission": "manual", "usage": { "byModel": { "scream-code": { "inputOther": 1332, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 1332, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
+      [emit] agent.status.updated       { "model": "scream-code", "thinkingLevel": "off", "contextTokens": 71, "maxContextTokens": 256000, "contextUsage": 0.00027734375, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "permission": "manual", "usage": { "byModel": { "scream-code": { "inputOther": 1386, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 1386, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
       [wire] context.snapshot           { "snapshot": { "history": [ { "role": "assistant", "content": [ { "type": "text", "text": "> The conversation before this point was compacted: 4 earlier message(s) were omitted and are covered by this summary. Treat the summary below as working notes, not verbatim history — the messages after it continue from here.\\n\\nCompacted prefix." } ], "toolCalls": [], "origin": { "kind": "compaction_summary" } }, { "role": "user", "content": [ { "type": "text", "text": "new user while compacting" } ], "toolCalls": [], "origin": { "kind": "user" } } ], "tokenCount": 71, "tokenCountCoveredMessageCount": 2, "openSteps": [], "pendingToolResultIds": [], "deferredMessages": [] }, "compactedHistory": [ { "text": "--- message 1 role=user ---\\ntext:\\n  old user one\\n\\n--- message 2 role=assistant ---\\ntext:\\n  old assistant one\\n\\n--- message 3 role=user ---\\ntext:\\n  recent user two\\n\\n--- message 4 role=assistant ---\\ntext:\\n  recent assistant two\\n\\n--- message 5 role=user ---\\ntext:\\n  new user while compacting" } ], "time": "<time>" }
     `);
     expect(ctx.lastLlmInput()).toMatchInlineSnapshot(`
@@ -1032,8 +1034,8 @@ describe('Agent compaction', () => {
       [wire] context.clear            { "time": "<time>" }
       [emit] agent.status.updated     { "model": "scream-code", "thinkingLevel": "off", "contextTokens": 0, "maxContextTokens": 256000, "contextUsage": 0, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "permission": "manual" }
       [wire] request.header           { "provider": "scream", "model": "scream-code", "modelAlias": "scream-code", "systemPrompt": "You are a deterministic test agent.", "activeTools": [], "messagesCount": 5, "estimatedInputTokens": "<tokens>", "time": "<time>" }
-      [wire] usage.record             { "model": "scream-code", "usage": { "inputOther": 1332, "output": 7, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "session", "time": "<time>" }
-      [emit] agent.status.updated     { "model": "scream-code", "thinkingLevel": "off", "contextTokens": 0, "maxContextTokens": 256000, "contextUsage": 0, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "permission": "manual", "usage": { "byModel": { "scream-code": { "inputOther": 1332, "output": 7, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 1332, "output": 7, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
+      [wire] usage.record             { "model": "scream-code", "usage": { "inputOther": 1386, "output": 7, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "session", "time": "<time>" }
+      [emit] agent.status.updated     { "model": "scream-code", "thinkingLevel": "off", "contextTokens": 0, "maxContextTokens": 256000, "contextUsage": 0, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "permission": "manual", "usage": { "byModel": { "scream-code": { "inputOther": 1386, "output": 7, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 1386, "output": 7, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
       [wire] full_compaction.cancel   { "time": "<time>" }
       [emit] compaction.cancelled     { "reason": "上下文已被更改（如 /revoke），压缩已取消" }
     `);
@@ -1076,12 +1078,12 @@ describe('Agent compaction', () => {
       [emit] compaction.started          { "trigger": "auto" }
       [emit] compaction.blocked          { "turnId": 0 }
       [wire] request.header              { "provider": "scream", "model": "scream-code", "modelAlias": "scream-code", "systemPrompt": "You are a deterministic test agent.", "activeTools": [], "messagesCount": 3, "estimatedInputTokens": "<tokens>", "time": "<time>" }
-      [wire] usage.record                { "model": "scream-code", "usage": { "inputOther": 1319, "output": 9, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "session", "time": "<time>" }
-      [emit] agent.status.updated        { "model": "scream-code", "thinkingLevel": "off", "contextTokens": 950000, "maxContextTokens": 256000, "contextUsage": 3.7109375, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "permission": "manual", "usage": { "byModel": { "scream-code": { "inputOther": 1319, "output": 9, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 1319, "output": 9, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
+      [wire] usage.record                { "model": "scream-code", "usage": { "inputOther": 1373, "output": 9, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "session", "time": "<time>" }
+      [emit] agent.status.updated        { "model": "scream-code", "thinkingLevel": "off", "contextTokens": 950000, "maxContextTokens": 256000, "contextUsage": 3.7109375, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "permission": "manual", "usage": { "byModel": { "scream-code": { "inputOther": 1373, "output": 9, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 1373, "output": 9, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
       [wire] full_compaction.complete    { "time": "<time>" }
       [emit] compaction.completed        { "result": { "summary": "> The conversation before this point was compacted: 2 earlier message(s) were omitted and are covered by this summary. Treat the summary below as working notes, not verbatim history — the messages after it continue from here.\\n\\nAuto compacted summary.", "compactedCount": 2, "tokensBefore": 55, "tokensAfter": 107 } }
       [wire] context.apply_compaction    { "summary": "> The conversation before this point was compacted: 2 earlier message(s) were omitted and are covered by this summary. Treat the summary below as working notes, not verbatim history — the messages after it continue from here.\\n\\nAuto compacted summary.", "compactedCount": 2, "tokensBefore": 55, "tokensAfter": 107, "time": "<time>" }
-      [emit] agent.status.updated        { "model": "scream-code", "thinkingLevel": "off", "contextTokens": 107, "maxContextTokens": 256000, "contextUsage": 0.00041796875, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "permission": "manual", "usage": { "byModel": { "scream-code": { "inputOther": 1319, "output": 9, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 1319, "output": 9, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
+      [emit] agent.status.updated        { "model": "scream-code", "thinkingLevel": "off", "contextTokens": 107, "maxContextTokens": 256000, "contextUsage": 0.00041796875, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "permission": "manual", "usage": { "byModel": { "scream-code": { "inputOther": 1373, "output": 9, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 1373, "output": 9, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
       [wire] context.snapshot            { "snapshot": { "history": [ { "role": "assistant", "content": [ { "type": "text", "text": "> The conversation before this point was compacted: 2 earlier message(s) were omitted and are covered by this summary. Treat the summary below as working notes, not verbatim history — the messages after it continue from here.\\n\\nAuto compacted summary." } ], "toolCalls": [], "origin": { "kind": "compaction_summary" } }, { "role": "user", "content": [ { "type": "text", "text": "old user two" } ], "toolCalls": [], "origin": { "kind": "user" } }, { "role": "assistant", "content": [ { "type": "text", "text": "old assistant two" } ], "toolCalls": [] }, { "role": "user", "content": [ { "type": "text", "text": "recent user three" } ], "toolCalls": [], "origin": { "kind": "user" } }, { "role": "assistant", "content": [ { "type": "text", "text": "recent assistant three" } ], "toolCalls": [] }, { "role": "user", "content": [ { "type": "text", "text": "Answer after compacting" } ], "toolCalls": [], "origin": { "kind": "user" } } ], "tokenCount": 107, "tokenCountCoveredMessageCount": 6, "openSteps": [ [ "step-2", 2 ], [ "step-3", 4 ] ], "pendingToolResultIds": [], "deferredMessages": [] }, "compactedHistory": [ { "text": "--- message 1 role=user ---\\ntext:\\n  old user one\\n\\n--- message 2 role=assistant ---\\ntext:\\n  old assistant one\\n\\n--- message 3 role=user ---\\ntext:\\n  old user two\\n\\n--- message 4 role=assistant ---\\ntext:\\n  old assistant two\\n\\n--- message 5 role=user ---\\ntext:\\n  recent user three\\n\\n--- message 6 role=assistant ---\\ntext:\\n  recent assistant three\\n\\n--- message 7 role=user ---\\ntext:\\n  Answer after compacting" } ], "time": "<time>" }
       [wire] context.append_loop_event   { "event": { "type": "step.begin", "uuid": "<uuid-1>", "turnId": "0", "step": 1 }, "time": "<time>" }
       [emit] turn.step.started           { "turnId": 0, "step": 1, "stepId": "<uuid-1>" }
@@ -1093,7 +1095,7 @@ describe('Agent compaction', () => {
       [wire] context.append_loop_event   { "event": { "type": "step.end", "uuid": "<uuid-1>", "turnId": "0", "step": 1, "usage": { "inputOther": 101, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }, "time": "<time>" }
       [emit] turn.step.completed         { "turnId": 0, "step": 1, "stepId": "<uuid-1>", "usage": { "inputOther": 101, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }
       [wire] usage.record                { "model": "scream-code", "usage": { "inputOther": 101, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
-      [emit] agent.status.updated        { "model": "scream-code", "thinkingLevel": "off", "contextTokens": 112, "maxContextTokens": 256000, "contextUsage": 0.0004375, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "permission": "manual", "usage": { "byModel": { "scream-code": { "inputOther": 1420, "output": 20, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 1420, "output": 20, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 101, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "turnTotal": { "inputOther": 101, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
+      [emit] agent.status.updated        { "model": "scream-code", "thinkingLevel": "off", "contextTokens": 112, "maxContextTokens": 256000, "contextUsage": 0.0004375, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "permission": "manual", "usage": { "byModel": { "scream-code": { "inputOther": 1474, "output": 20, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 1474, "output": 20, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 101, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "turnTotal": { "inputOther": 101, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
       [emit] turn.ended                  { "turnId": 0, "reason": "completed" }
     `);
     expect(ctx.llmInputs()).toMatchInlineSnapshot(`
@@ -1623,12 +1625,12 @@ describe('Agent compaction', () => {
       [emit] compaction.started          { "trigger": "auto" }
       [emit] compaction.blocked          { "turnId": 0 }
       [wire] request.header              { "provider": "scream", "model": "mock-model", "modelAlias": "mock-model", "systemPrompt": "You are a deterministic test agent.", "activeTools": [], "messagesCount": 2, "estimatedInputTokens": "<tokens>", "time": "<time>" }
-      [wire] usage.record                { "model": "mock-model", "usage": { "inputOther": 1315, "output": 9, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "session", "time": "<time>" }
-      [emit] agent.status.updated        { "model": "mock-model", "thinkingLevel": "off", "contextTokens": 0, "maxContextTokens": 1000000, "contextUsage": 0, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "permission": "manual", "usage": { "byModel": { "mock-model": { "inputOther": 1315, "output": 9, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 1315, "output": 9, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
+      [wire] usage.record                { "model": "mock-model", "usage": { "inputOther": 1369, "output": 9, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "session", "time": "<time>" }
+      [emit] agent.status.updated        { "model": "mock-model", "thinkingLevel": "off", "contextTokens": 0, "maxContextTokens": 1000000, "contextUsage": 0, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "permission": "manual", "usage": { "byModel": { "mock-model": { "inputOther": 1369, "output": 9, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 1369, "output": 9, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
       [wire] full_compaction.complete    { "time": "<time>" }
       [emit] compaction.completed        { "result": { "summary": "> The conversation before this point was compacted: 1 earlier message(s) were omitted and are covered by this summary. Treat the summary below as working notes, not verbatim history — the messages after it continue from here.\\n\\nFirst compacted summary.", "compactedCount": 1, "tokensBefore": 17, "tokensAfter": 73 } }
       [wire] context.apply_compaction    { "summary": "> The conversation before this point was compacted: 1 earlier message(s) were omitted and are covered by this summary. Treat the summary below as working notes, not verbatim history — the messages after it continue from here.\\n\\nFirst compacted summary.", "compactedCount": 1, "tokensBefore": 17, "tokensAfter": 73, "time": "<time>" }
-      [emit] agent.status.updated        { "model": "mock-model", "thinkingLevel": "off", "contextTokens": 73, "maxContextTokens": 1000000, "contextUsage": 0.000073, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "permission": "manual", "usage": { "byModel": { "mock-model": { "inputOther": 1315, "output": 9, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 1315, "output": 9, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
+      [emit] agent.status.updated        { "model": "mock-model", "thinkingLevel": "off", "contextTokens": 73, "maxContextTokens": 1000000, "contextUsage": 0.000073, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "permission": "manual", "usage": { "byModel": { "mock-model": { "inputOther": 1369, "output": 9, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 1369, "output": 9, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
       [wire] context.snapshot            { "snapshot": { "history": [ { "role": "assistant", "content": [ { "type": "text", "text": "> The conversation before this point was compacted: 1 earlier message(s) were omitted and are covered by this summary. Treat the summary below as working notes, not verbatim history — the messages after it continue from here.\\n\\nFirst compacted summary." } ], "toolCalls": [], "origin": { "kind": "compaction_summary" } } ], "tokenCount": 73, "tokenCountCoveredMessageCount": 1, "openSteps": [], "pendingToolResultIds": [], "deferredMessages": [] }, "compactedHistory": [ { "text": "--- message 1 role=user ---\\ntext:\\n  Trigger repeated compaction" } ], "time": "<time>" }
       [wire] context.append_loop_event   { "event": { "type": "step.begin", "uuid": "<uuid-1>", "turnId": "0", "step": 1 }, "time": "<time>" }
       [emit] turn.step.started           { "turnId": 0, "step": 1, "stepId": "<uuid-1>" }
@@ -1647,7 +1649,7 @@ describe('Agent compaction', () => {
       [wire] context.append_loop_event   { "event": { "type": "step.end", "uuid": "<uuid-1>", "turnId": "0", "step": 1, "usage": { "inputOther": 67, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "tool_use" }, "time": "<time>" }
       [emit] turn.step.completed         { "turnId": 0, "step": 1, "stepId": "<uuid-1>", "usage": { "inputOther": 67, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "tool_use" }
       [wire] usage.record                { "model": "mock-model", "usage": { "inputOther": 67, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
-      [emit] agent.status.updated        { "model": "mock-model", "thinkingLevel": "off", "contextTokens": 78, "maxContextTokens": 1000000, "contextUsage": 0.000078, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "permission": "manual", "usage": { "byModel": { "mock-model": { "inputOther": 1382, "output": 20, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 1382, "output": 20, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 67, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "turnTotal": { "inputOther": 67, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
+      [emit] agent.status.updated        { "model": "mock-model", "thinkingLevel": "off", "contextTokens": 78, "maxContextTokens": 1000000, "contextUsage": 0.000078, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "permission": "manual", "usage": { "byModel": { "mock-model": { "inputOther": 1436, "output": 20, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 1436, "output": 20, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 67, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "turnTotal": { "inputOther": 67, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
       [emit] turn.step.interrupted       { "turnId": 0, "step": 2, "reason": "error", "message": "Compaction limit exceeded (1)" }
       [emit] turn.ended                  { "turnId": 0, "reason": "failed", "error": { "code": "context.overflow", "message": "Compaction limit exceeded (1)", "name": "ScreamError", "details": { "maxCompactions": 1, "turnId": 0 }, "retryable": true } }
     `);
@@ -2497,3 +2499,121 @@ function lastCompactionInstruction(ctx: TestAgentContext): string {
   if (text.length === 0) throw new Error('Last user message has no text content');
   return text;
 }
+
+describe('compaction-time skill candidate detection', () => {
+  it('emits skill_candidate for a valid marker, tolerating | inside evidence', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'scream-skill-cand-'));
+    const ctx = testAgent({ screamHomeDir: dir });
+    ctx.configure({
+      provider: CATALOGUED_PROVIDER,
+      modelCapabilities: CATALOGUED_MODEL_CAPABILITIES,
+    });
+    ctx.appendExchange(1, 'set up the release flow', 'old assistant one', 20);
+    const compacted = ctx.once('context.apply_compaction');
+    // The harness emits RpcLogEntry objects: payload lives under `args`.
+    const candidateEvent = new Promise<{ name: string; purpose: string; evidence: string }>(
+      (resolve) => {
+        ctx.emitter.once('skill_candidate', (e) => {
+          const entry = e as { args: { candidate: { name: string; purpose: string; evidence: string } } };
+          resolve(entry.args.candidate);
+        });
+      },
+    );
+    ctx.mockNextResponse({
+      type: 'text',
+      text: 'Compacted summary.\n\n```memory-memo\n{"none": true}\n```\n\n[[skill-candidate: release-flow|Automate the release|run pnpm build | then gh release create]]',
+    });
+    await ctx.rpc.beginCompaction({});
+    await compacted;
+    const candidate = await candidateEvent;
+    expect(candidate.name).toBe('release-flow');
+    expect(candidate.purpose).toBe('Automate the release');
+    expect(candidate.evidence).toContain('gh release create');
+  });
+
+  it('does not emit for the explicit none marker', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'scream-skill-none-'));
+    const ctx = testAgent({ screamHomeDir: dir });
+    ctx.configure({
+      provider: CATALOGUED_PROVIDER,
+      modelCapabilities: CATALOGUED_MODEL_CAPABILITIES,
+    });
+    ctx.appendExchange(1, 'ask a question', 'old assistant one', 20);
+    let emitted = false;
+    ctx.emitter.once('skill_candidate', () => {
+      emitted = true;
+    });
+    const compacted = ctx.once('context.apply_compaction');
+    ctx.mockNextResponse({
+      type: 'text',
+      text: 'Compacted summary.\n\n[[skill-candidate: none]]',
+    });
+    await ctx.rpc.beginCompaction({});
+    await compacted;
+    // Detection runs synchronously inside compact(); once beginCompaction has
+    // resolved, the emitter has already fired (or not) — no sleep needed.
+    expect(emitted).toBe(false);
+  });
+
+  it('ignores malformed markers without purpose/evidence segments', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'scream-skill-bad-'));
+    const ctx = testAgent({ screamHomeDir: dir });
+    ctx.configure({
+      provider: CATALOGUED_PROVIDER,
+      modelCapabilities: CATALOGUED_MODEL_CAPABILITIES,
+    });
+    ctx.appendExchange(1, 'ask a question', 'old assistant one', 20);
+    let emitted = false;
+    ctx.emitter.once('skill_candidate', () => {
+      emitted = true;
+    });
+    const compacted = ctx.once('context.apply_compaction');
+    ctx.mockNextResponse({
+      type: 'text',
+      text: 'Compacted summary.\n\n[[skill-candidate: just-a-name]]',
+    });
+    await ctx.rpc.beginCompaction({});
+    await compacted;
+    expect(emitted).toBe(false);
+  });
+
+  it('strips markers from the persisted summary and lets the last marker win', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'scream-skill-strip-'));
+    const ctx = testAgent({ screamHomeDir: dir });
+    ctx.configure({
+      provider: CATALOGUED_PROVIDER,
+      modelCapabilities: CATALOGUED_MODEL_CAPABILITIES,
+    });
+    ctx.appendExchange(1, 'set up the release flow', 'old assistant one', 20);
+    let appliedSummary = '';
+    ctx.emitter.once('context.apply_compaction', (e) => {
+      appliedSummary = (e as { args: { summary: string } }).args.summary;
+    });
+    const candidateEvent = new Promise<{ name: string }>((resolve) => {
+      ctx.emitter.once('skill_candidate', (e) => {
+        resolve((e as { args: { candidate: { name: string } } }).args.candidate);
+      });
+    });
+    const compacted = ctx.once('context.apply_compaction');
+    ctx.mockNextResponse({
+      type: 'text',
+      // An old marker carried over first, then this round's marker last.
+      text: 'Compacted summary.\n\n[[skill-candidate: old-flow|stale|old evidence]]\n\n[[skill-candidate: new-flow|fresh|new evidence]]',
+    });
+    await ctx.rpc.beginCompaction({});
+    await compacted;
+    const candidate = await candidateEvent;
+    // The trailing marker is the model's verdict for this round.
+    expect(candidate.name).toBe('new-flow');
+    // Markers are an ephemeral protocol — they must not persist in context.
+    expect(appliedSummary).not.toContain('skill-candidate');
+    expect(appliedSummary).toContain('Compacted summary.');
+  });
+
+  it('both compaction instruction templates mandate the skill-candidate marker', () => {
+    expect(COMPACTION_INSTRUCTION()).toContain('## Skill candidates');
+    expect(COMPACTION_INSTRUCTION()).toContain('[[skill-candidate: none]]');
+    expect(COMPACTION_UPDATE_INSTRUCTION()).toContain('## Skill candidates');
+    expect(COMPACTION_UPDATE_INSTRUCTION()).toContain('[[skill-candidate: none]]');
+  });
+});

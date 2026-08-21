@@ -675,6 +675,10 @@ export class FullCompaction {
         extractFileOpsFromMessage(msg, fileOps);
       }
       const toolCallHistory = formatToolCallHistory(messagesToCompactForOps);
+      // Detect candidates on the RAW model output — postProcessSummary strips
+      // skill-candidate markers from the persisted summary (they are an
+      // ephemeral protocol, not context), so detection must read the raw text.
+      const skillCandidateSummary = summary;
       const processedSummary = this.postProcessSummary(summary, fileOps, toolCallHistory, compactedCount);
       const tokensAfter =
         systemPromptTokens + toolTokens + estimateTokens(processedSummary) + estimateTokensForMessages(recent);
@@ -709,7 +713,7 @@ export class FullCompaction {
       this.lowWaterMark = Math.floor(this.effectiveTokenCount * 1.1);
       await this.extractAndStoreMemos(processedSummary, messagesToCompactForOps);
       this.triggerPostCompactHook(data, result);
-      this.detectSkillCandidates(processedSummary);
+      this.detectSkillCandidates(skillCandidateSummary);
 
       // Compaction succeeded — reset circuit breaker
       this.consecutiveCompactionFailures = 0;
@@ -893,24 +897,36 @@ export class FullCompaction {
 
   /**
    * Detects [[skill-candidate: <name>|<purpose>|<evidence>]] markers in the
-   * compaction summary and emits a `skill_candidate` event for each one (at
-   * most one per compact). Best-effort and fully isolated: a parse failure or
-   * a missing marker never affects compaction or memory extraction — this
-   * method only reads the summary and emits an event.
+   * compaction summary and emits a `skill_candidate` event (at most one per
+   * compact). Best-effort and fully isolated: a parse failure or a missing
+   * marker never affects compaction or memory extraction — this method only
+   * reads the summary and emits an event.
+   *
+   * Tolerant parsing: the evidence segment may contain `|` characters and
+   * newlines, and the explicit `[[skill-candidate: none]]` marker (emitted
+   * when the model found nothing) is recognized and skipped. When several
+   * markers appear (e.g. an old one carried over into an update summary),
+   * the LAST valid candidate wins — the templates mandate the marker as the
+   * final line of the response, so the trailing one is the model's verdict
+   * for this round.
    */
   private detectSkillCandidates(summary: string): void {
     try {
       const matches = summary.matchAll(
-        /\[\[skill-candidate:\s*([^|\]]+)\|([^|\]]+)\|([^|\]]+)\]\]/g,
+        /\[\[skill-candidate:\s*([^|\]]+?)(?:\|([^|\]]*)\|([\s\S]*?))?\]\]/g,
       );
+      let chosen: { name: string; purpose: string; evidence: string } | undefined;
       for (const m of matches) {
-        const name = m[1]!.trim();
+        const name = m[1]?.trim() ?? '';
         if (name.length === 0) continue;
-        this.agent.emitEvent({
-          type: 'skill_candidate',
-          candidate: { name, purpose: m[2]!.trim(), evidence: m[3]!.trim() },
-        });
-        break; // at most one candidate per compact
+        // Explicit "no candidate" marker — expected when nothing qualifies.
+        if (name.toLowerCase() === 'none') continue;
+        // Malformed marker without the purpose/evidence segments — skip.
+        if (m[2] === undefined) continue;
+        chosen = { name, purpose: m[2].trim(), evidence: (m[3] ?? '').trim() };
+      }
+      if (chosen !== undefined) {
+        this.agent.emitEvent({ type: 'skill_candidate', candidate: chosen });
       }
     } catch (error) {
       this.agent.log.warn('Skill candidate detection failed', { error: String(error) });
@@ -944,6 +960,10 @@ export class FullCompaction {
     const base = summary
       .trim()
       .replaceAll(/<files>[\s\S]*?<\/files>\s*/g, '')
+      // Skill-candidate markers are an ephemeral emission protocol, not
+      // context — strip them so old markers never persist into the compacted
+      // summary (where a carried-over marker would mask a new candidate).
+      .replaceAll(/\[\[skill-candidate:[\s\S]*?\]\]\s*/g, '')
       .replace(/^> The conversation before this point was compacted:[\s\S]*?continue from here\.\s*\n+/m, '')
       .trimEnd();
     const sections: string[] = [];

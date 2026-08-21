@@ -22,9 +22,9 @@ AFTER completing the updated summary below, scan ONLY the new messages being com
 - You provided a solution or answer
 - The outcome is clear (success, partial success, or failure)
 
-**You MUST output at least one memory-memo block** (or the `{"none": true}` marker) at the very end of your response — omitting the section entirely is not allowed. Record completed task loops as full experience records; record **in-progress work** as a lower-priority record whose "outcome" is "进行中" (so the ongoing task survives compaction and can be resumed later).
+**You MUST output at least one memory-memo block** (or the `{"none": true}` marker) after the updated summary — omitting the section entirely is not allowed. Record completed task loops as full experience records; record **in-progress work** as a lower-priority record whose "outcome" is "进行中" (so the ongoing task survives compaction and can be resumed later).
 
-For each task loop found, output a structured experience record **at the very end of your response**:
+For each task loop found, output a structured experience record after the updated summary (the skill-candidate marker line described below comes after all memory-memo blocks):
 
 ```memory-memo
 {
@@ -50,6 +50,31 @@ If no task loops (completed or in-progress) are found in the new compacted messa
 ```memory-memo
 {"none": true}
 ```
+
+<!-- Skill Candidate Detection (after memory-memo) -->
+
+## Skill candidates
+
+AFTER the memory-memo block(s), scan ONLY the new messages being compacted
+(not the content already covered by the previous summary — candidates from
+older messages were already considered) for reusable processes
+(project-specific build steps, recurring debugging patterns, or tool
+workflows). Then output exactly one marker as the very LAST line of your
+response — after all memory-memo blocks:
+
+- If a process is genuinely worth capturing as a reusable skill (reusable
+  beyond this one task — do not emit for one-off actions; the evidence must
+  be concrete and verifiable: exact file paths, commands, or step sequences
+  from the new messages):
+
+[[skill-candidate: <name>|<one-line purpose>|<evidence>]]
+
+- If none exists, output instead:
+
+[[skill-candidate: none]]
+
+This marker line is MANDATORY — never omit it, and output at most one
+candidate marker.
 
 <!-- Update Rules -->
 

@@ -18,9 +18,9 @@ AFTER completing the compaction summary below, scan the messages being compacted
 - You provided a solution or answer
 - The outcome is clear (success, partial success, or failure)
 
-**You MUST output at least one memory-memo block** (or the `{"none": true}` marker) at the very end of your response — omitting the section entirely is not allowed. Record completed task loops as full experience records; record **in-progress work** as a lower-priority record whose "outcome" is "进行中" (so the ongoing task survives compaction and can be resumed later).
+**You MUST output at least one memory-memo block** (or the `{"none": true}` marker) after the summary — omitting the section entirely is not allowed. Record completed task loops as full experience records; record **in-progress work** as a lower-priority record whose "outcome" is "进行中" (so the ongoing task survives compaction and can be resumed later).
 
-For each task loop found, output a structured experience record **at the very end of your response**:
+For each task loop found, output a structured experience record after the summary (the skill-candidate marker line described below comes after all memory-memo blocks):
 
 ```memory-memo
 {
@@ -120,16 +120,22 @@ If no task loops (completed or in-progress) are found in the compacted messages,
 ## Skill candidates
 
 Scan the compressed messages for reusable processes (project-specific build
-steps, recurring debugging patterns, or tool workflows). If any is genuinely
-worth capturing as a reusable skill, output at the very end, at most one:
+steps, recurring debugging patterns, or tool workflows). Then output exactly
+one marker as the very LAST line of your response — after all memory-memo
+blocks:
+
+- If a process is genuinely worth capturing as a reusable skill (reusable
+  beyond this one task — do not emit for one-off actions; the evidence must
+  be concrete and verifiable: exact file paths, commands, or step sequences
+  from the conversation, e.g. "run `pnpm vitest run -t compaction` in
+  packages/agent-core to reproduce the compaction snapshots". Vague evidence
+  like "used a script" is not acceptable):
 
 [[skill-candidate: <name>|<one-line purpose>|<evidence>]]
 
-- The evidence must be concrete and verifiable: exact file paths, commands, or
-  step sequences from the conversation (e.g. "run `pnpm vitest run -t compaction`
-  in packages/agent-core to reproduce the compaction snapshots"). Vague evidence
-  like "used a script" is not acceptable.
-- Only emit a candidate when the process is genuinely reusable beyond this one
-  task; do not emit for one-off actions.
+- If none exists, output instead:
 
-Omit if none.
+[[skill-candidate: none]]
+
+This marker line is MANDATORY — never omit it, and output at most one
+candidate marker.

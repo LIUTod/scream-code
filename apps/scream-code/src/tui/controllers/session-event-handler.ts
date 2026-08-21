@@ -925,9 +925,11 @@ export class SessionEventHandler {
       const { name, purpose } = event.candidate;
       if (name.length === 0) return;
       if (this.promptedSkillCandidates.has(name)) return;
-      this.promptedSkillCandidates.add(name);
       const session = this.host.session;
       if (session === undefined) return;
+      // Only record the name once we can actually surface it — adding it
+      // before the session check would permanently swallow the candidate.
+      this.promptedSkillCandidates.add(name);
 
       if (this.host.streamingUI.hasActiveTurn()) {
         this.pendingSkillCandidates.push({ name, purpose });

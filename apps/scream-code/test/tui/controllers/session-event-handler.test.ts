@@ -550,6 +550,22 @@ describe('SessionEventHandler', () => {
       expect(() => handler.handleEvent(candidateEvent('x'), vi.fn())).not.toThrow();
     });
 
+    it('does not swallow the candidate when the session is unavailable', () => {
+      // The dedup set must only be written once the candidate can actually be
+      // surfaced — otherwise a session-availability race would permanently
+      // drop the candidate.
+      const host = createMockHost();
+      expect(host.session).toBeUndefined();
+      const handler = new SessionEventHandler(host);
+      handler.handleEvent(candidateEvent('deferred-flow'), vi.fn());
+
+      // Later, with a session available, the same candidate must still prompt.
+      const prompt = vi.fn().mockResolvedValue(undefined);
+      host.session = { prompt } as unknown as Session;
+      handler.handleEvent(candidateEvent('deferred-flow'), vi.fn());
+      expect(prompt).toHaveBeenCalledTimes(1);
+    });
+
     it('is a no-op for an empty candidate name', () => {
       const { handler, prompt } = makeHandlerWithSession();
       handler.handleEvent(candidateEvent(''), vi.fn());
