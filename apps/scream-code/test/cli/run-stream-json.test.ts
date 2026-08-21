@@ -252,6 +252,9 @@ describe('installStdoutEpipeGuard', () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    // The guard installs a real 'error' listener on process.stdout (EPIPE →
+    // process.exit(0)); drop it so it cannot hijack the test worker's lifetime.
+    process.stdout.removeAllListeners('error');
   });
 
   it('exits cleanly when stdout.write throws EPIPE', () => {
