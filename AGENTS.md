@@ -471,20 +471,103 @@ Collects the user's persona/preferences through a short interactive TUI and inje
 - **Availability**: `always` (works even without an active session).
 
 
-### Skill Center (`/skill`)
+### Session Trace (`/trace`)
 
-管理已安装 Skill 与浏览可安装 Skill 包。原 `/plugin` 命令及其别名已合并为 `/skill` 的兼容别名。
+把当前会话的 wire 日志回放为自包含交互式 HTML 时间轴并在浏览器打开。长会话有专门性能保护。
 
-- **Entry**: `/skill` (aliases: `skills`, `plugin`, `plugins`)
+- **Entry**: `/trace` (availability `always`)
+- **TUI**: `src/tui/commands/trace.ts` — 读 `sessionDir/agents/main/wire.jsonl` → `buildTraceCells` → `renderTraceHtml` → 写 `tmpdir()/scream-trace.html`（固定文件名 + `?v=Date.now()` 防缓存），用 `open`/`cmd start`/`xdg-open` 打开
+- **Builder**: `src/utils/trace/trace-builder.ts` — `buildTraceCells`（user/message/tool 三型 cell）；system-context 记录合并进下一条 user turn；`turn.prompt` 开启新 turn
+- **Renderer**: `src/utils/trace/render-trace-html.ts` — 三车道时间轴 Input/Model/Tools、Seq/Time 双模式、固定双栏 ledger、Turns/Calls 折叠；`</`→`<\/` 转义防脚本逃逸 + title/sessionId HTML 转义
+- **长会话性能**: `MAX_DETAIL=4000` / `MAX_CELLS=4000` 封顶 + 旧 cell 折叠为 per-turn 摘要行；ledger 分页 `PAGE=300`；时间轴采样 `ceil(n/1500)`
+- **Data model**: `src/utils/trace/trace-types.ts` — `TraceCell`（tokens/TTFT/decoding/model/finishReason/turn）
+
+### Conversation Search (`/search`)
+
+打开全屏会话搜索覆盖层（等同 Ctrl+Shift+F）。
+
+- **Entry**: `/search` — `src/tui/commands/search.ts`，打开 full-screen search overlay
+- **i18n**: zh/en 本地化描述
+
+### User Message Highlight (`/hl`)
+
+用户消息渲染 roleUser 主题色背景块，/hl 开关即时重渲染。
+
+- **Entry**: `/hl` (alias: `highlight`) — `src/tui/commands/hl.ts` `toggleUserMessageHighlight` + `requestRender`
+- **Rendering**: `src/tui/components/messages/user-message.ts` — `<system-reminder>` 前缀永不高亮；开启态整行 `bgHex(roleUserBg)` 铺背景 + 对比色文字（图片入块），关闭态仅 roleUser 文字 + ■ 前缀；缓存以 toggle 状态为键
+- **Config**: `ui-preferences.ts` `userMessageHighlightEnabled`（默认开）；主题键 `roleUser`/`roleUserBg`（dark `#f7e308` / light `#bd5302`）
+
+### Turn Elapsed Marker (`/snaptimer`)
+
+每轮结束后在助手最终回复末尾盖浅灰耗时标记（如 ` 23m 42s`），全局开关并持久化。
+
+- **Entry**: `/snaptimer` (alias: `timer`) — `src/tui/commands/snaptimer.ts` `toggleTurnElapsed`
+- **Timing**: `src/tui/controllers/streaming-ui.ts` `markTurnStarted`/`formatElapsed`/`appendTurnSummaryLine`；`transcript-controller.ts` `appendElapsedToLastAssistant` 按 turnId 匹配追加到末行（不进 markdown 源、不进 LLM 上下文）
+- **Config**: `ui-preferences.ts` `turnElapsedEnabled`（默认开），持久化 `<dataDir>/ui-preferences.json`
+
+
+### Plugin Center (`/plugin`) & Code Extensions (`/extension`)
+
+管理已安装插件与浏览可安装插件包；`/extension` 管理代码插件（动态 import 运行时）。`/skill` 是 `/plugin` 的隐藏兼容别名（可路由但不显示在补全/帮助）。
+
+- **Entry**: `/plugin` (aliases: `skills`, `plugins`; hiddenAlias: `skill`), `/extension` (aliases: `extensions`)
 - **TUI**: `src/tui/commands/skill-center.ts` — 选择器面板，支持 `Enter` 激活、`i` 安装并注入、`d` 卸载
-- **Plugin display name**: skill descriptions show the plugin `displayName` (e.g. "GSAP 动画技能包") rather than the raw plugin id, via `formatSkillDescription(skill, plugins)`.
-- **Uninstall impact**: plugin skills can only be uninstalled as a whole package (SDK throws on `removeSkill` for plugin skills). The confirm dialog explicitly surfaces this — `将卸载整个包（共 N 个 Skill），无法只删除单个 Skill` — so the user is not surprised by losing sibling skills. Manual skills still go through `removeSkill` and delete the install unit.
+- **Extension runtime**: `packages/agent-core/src/plugin/runtime/extension.ts` — `discover()`（按 manifest `entryPoint`）、`load()`（缓存动态 import）、`activate()`（先注册 manifest hooks，再调 `module.activate(ExtensionContext)`，失败回滚）、`deactivate()`；`ExtensionContext` = `{ services, events, config, pluginId }`
+- **Event bus**: `packages/agent-core/src/agent/events.ts` — `EventSubscriptionBus.subscribe(type|'*')` / `dispatch()`（handler 抛错被吞，不破坏主循环）；manifest hooks 经 `session/hooks/engine.ts:registerAll` 批量注册
+- **/extension 子命令**: `src/tui/commands/extension.ts` — `activate|deactivate|status [pluginId]`；裸 `/extension` = status；走 `session.activatePlugin` / `deactivatePlugin` / `pluginExtensionStatus`
+- **激活文案统一为 plugin**: `skillact.activated` = "▶ Activated plugin: …"（i18n en/zh）
+- **Plugin display name**: 插件包 Skill 显示 `displayName` 而非原始 plugin id
+- **Uninstall impact**: 插件 Skill 只能整包卸载（SDK 对插件 Skill 抛 `removeSkill`）；确认框明示 `将卸载整个包（共 N 个 Skill）`。手动 Skill 仍走 `removeSkill`
+- **AGENTS.md 排除出 skill 扫描**: `packages/agent-core/src/skill/scanner.ts` 将 `agents.md` 加入 `DOCUMENTATION_MARKDOWN_LOWER`
+- **Marketplace fallback**: `src/tui/commands/skill-marketplace.ts` 提供内置可安装插件包列表
 - **Loading overlay**: `SkillCenterLoadingComponent` 在加载已安装 Skill 与 Marketplace 数据时显示 spinner，避免画面卡顿
-- **Marketplace fallback**: `src/tui/commands/skill-marketplace.ts` 提供内置可安装 Skill 包列表
-- **Core install/remove**: `packages/agent-core/src/session/index.ts` — `Session.removeSkill` 删除手动安装的 skill 安装单元（包含子 Skill）；`Session.injectSkillRoots` 在不重启会话的情况下加载新插件的 Skill
+- **Core install/remove**: `packages/agent-core/src/session/index.ts` — `Session.removeSkill`（手动安装单元）、`Session.injectSkillRoots`（不重启会话加载新插件 Skill）
 - **Registry helpers**: `packages/agent-core/src/skill/registry.ts` — `SkillRegistry.ejectPlugin` / `removeSkillPath`
 - **RPC chain**: `packages/agent-core/src/rpc/core-api.ts` → `core-impl.ts` → `session/rpc.ts` → node-sdk → TUI，新增 `removeSkill` / `injectPlugin`
 - **Tests**: `apps/scream-code/test/tui/commands/skill-center.test.ts`, `packages/agent-core/test/skill/install-paths.test.ts`
+
+
+---
+
+## TUI Runtime Behaviors (apps/scream-code)
+
+### Tool Card Rendering (Bash / Grep)
+
+- **Bash**: `src/tui/components/messages/shell-execution.ts` — 折叠卡始终可见命令（`highlightLines(command,'bash',colors)` 语法高亮 + `$ ` 暗色前缀），折叠限 `SHELL_COMMAND_COLLAPSED_LINES=3` 行，ctrl+o 展开看全命令
+- **Grep**: `tool-renderers/glance-lines.ts` `GlanceLinesComponent` — `truncateToWidth(line, width, '…')` 硬截断不换行；`tool-renderers/summary.ts` `grepGlance` — 结构化 `display.search_results`、`GLANCE_SAMPLES=3` 样本、`path:line` 列对齐、目录 dim + 文件名默认色、行号琥珀色、`+N more`
+
+### Streaming Token Pacing
+
+把"到达"与"显示"解耦——草稿上维护 shown-length 游标，每帧按测量到达速率加预算，快模型平滑、慢模型不冻结、突发展开到多帧。
+
+- **Controller**: `src/tui/controllers/streaming-ui.ts` `flush()`/`advanceAssistantShown()`/`finalizeAssistantStream`（收尾强制全量 flush）
+- **Constants**: `src/tui/constant/streaming.ts` — `SMOOTH_FRAME_MS=50`、`MIN_CHARS_PER_FRAME=1`、`MAX_CHARS_PER_FRAME=25`、`DEFAULT_ARRIVAL_TOK_PER_SEC=50`、`CHARS_PER_TOKEN=2.5`；thinking/tool 仍按 `STREAMING_UI_FLUSH_MS=50`
+- **Speed**: `src/tui/utils/speed-tracker.ts` — `SPEED_WINDOW_MS=3000`、`SPEED_MAX=200`、`getSharedSpeedTracker()`；观测点 `streaming-ui.ts:151-162`
+
+### Cache Hit Rate Footer & Usage Accounting
+
+Footer 常驻显示缓存命中率与 token 用量（会话累计 + 模型徽章辉光）。
+
+- **Footer**: `src/tui/components/chrome/footer.ts` — `${ccDot} ${segHit} ${contextPart} ${statusPart}` 顺序；无输入 token 前显示 `--`；模型徽章 thinking/waiting/composing 绿色 shimmer、tool 执行青色、idle 灰；30fps ticker（`1000/30`ms）
+- **TUI 累计**: `src/tui/controllers/session-event-handler.ts` `handleStepCompleted` 累加 `turn.step.completed` usage 进 `appState.sessionUsage`（compaction 不产生该事件故被排除）
+- **Agent 侧持久化**: `packages/agent-core/src/agent/usage/index.ts` — `turnTotal` 字段、`record(scope:'turn')` 累计、恢复时 `records/index.ts` 保留 `usageScope` 回放重建；`session-manager.ts` `syncRuntimeState` 用 `status.usage.turnTotal` 播种
+- **Cache write 独立记账**: `packages/ltod/src/providers/openai-common.ts` — 从 `prompt_tokens_details.cache_write_tokens` 提出到 `inputCacheCreation`，三桶 disjoint（input/cacheRead/cacheWrite）
+
+### Startup Empty-Session Pruning
+
+启动时删除从未收到用户消息、从未命名的工作目录空会话（best-effort 不阻塞启动）。
+
+- **位置**: `src/tui/managers/session-manager.ts` — `PRUNE_EMPTY_SESSION_GRACE_MS = 5*60*1000` 宽限窗；`isPrunableEmptySession`（archived/lastPrompt 已定义/占位标题/宽限窗内 → 保留）；`isUntitledTitle` 把 'New Session' 视为未命名；跳过即将使用的 session
+
+### Model Refresh & Switch Confirmation
+
+- **刷新**: `src/tui/commands/config.ts` `handleModelCommand` → `refreshModelsForPicker`（`harness.getConfig({reload:true})` 与 2s 超时 race）
+- **状态确认**: `setModel`/`setThinking` 后 `session.getStatus()` 回读 `effectiveAlias`/`effectiveThinking`（provider 可能路由到不同变体）
+- **缓存警告**: 切换模型且 `contextTokens > 0` 时提示 "switching models invalidates the existing prompt cache - use /new to avoid extra token costs."
+
+### Clipboard Copy
+
+选中文本释放鼠标即写入系统剪贴板（`pbcopy` / `wl-copy` / `xclip` / PowerShell），替代多数终端静默丢弃的 OSC 52；失败有降级路径。
 
 
 ---
@@ -508,22 +591,63 @@ Key files: `packages/agent-core/src/tools/builtin/planning/fusion-plan.ts`, `pac
 
 ### Compaction Pipeline
 
-ScreamCode has a three-stage compaction pipeline coordinated at the `beforeStep` hook
+Three-stage compaction pipeline coordinated at the `beforeStep` hook
 in `packages/agent-core/src/agent/turn/index.ts`. Each step, before the LLM call:
 
 ```
 Stage 1: Micro (zero LLM) → truncates old tool results to placeholders, always enabled, triggers at >= 50% usage
-Stage 2: Full  (one LLM)   → LLM summarizes old messages, triggers at >= 75% usage
-Stage 3: Block (safety net) → blocks the turn until compaction completes, triggers at >= 85% usage
+Stage 2: Full  (one LLM)   → LLM summarizes old messages, triggers at >= 85% of the window (or reserved-context rule)
+Stage 3: Block (safety net) → blocks the turn until compaction completes, triggers at >= 90% of the window
 ```
 
 - **Predictive trigger**: estimates next-step token growth and proactively compacts before overflow, rather than waiting for it to happen.
 - **Circuit breaker**: 3 consecutive compaction failures → auto-compaction disabled for the current turn, auto-resets next turn.
-- **Timeout**: `block()` waits up to 60 seconds for compaction, cancels and notifies the user on timeout.
-- **Overflow fast-fail**: when the API returns a context overflow error, `chatWithRetry` no longer retries 3 times — it surfaces the error immediately so the upper layer can trigger emergency compaction.
+- **Timeout**: `block()` waits up to 120 seconds for compaction, cancels and notifies the user on timeout.
+- **Reactive overflow recovery**: when the API returns a context overflow error, `handleOverflowError` starts a compaction and AWAITS it (via `block()`) before the turn retries — it never races the un-compacted context against the provider; runs once per turn.
+- **Retry semantics**: retryable server errors (429/5xx) consume the 5-attempt budget with Retry-After-honoring backoff; context-overflow/truncation shrinks are local and FREE (never consume the server budget), falling back to half-split re-summarization at the minimum split.
+- **Model-switch watermark**: `lowWaterMark` (post-compaction × 1.1) resets when the model alias changes, so a stale mark from a larger model cannot suppress compaction under a smaller one.
+- **Stale-worker guard**: compaction workers are owner-tagged; a late-finishing stale worker cannot cancel a newer compaction, corrupt its circuit breaker, or misapply its result.
 
 Key files: `packages/agent-core/src/agent/compaction/{micro,full,strategy}.ts`,
 `packages/agent-core/src/loop/retry.ts`.
+
+### Stream-JSON Adapter & Channel Bridge
+
+`run-stream-json` 把标准会话事件流编码为行式 JSON 方言（供外部桥/管道消费）；渠道桥把事件复用进即时通讯渠道。
+
+- **方言**: `apps/scream-code/src/cli/run-stream-json.ts` — `ClaudeStreamJsonWriter`（`emitSystem(sessionId)` / `emitResult(subtype, summary, usage?)` / `emitAssistant` / `emitToolDelta`；assistant 事件不带 usage；tool delta 合并后 input 为字符串）、`mapCcConnectMode`（default/acceptEdits/dontAsk→manual、plan→planMode、auto→auto、bypassPermissions/yolo→yolo、未配置兜底 auto）、`extractUserText`（`\n` 连接）
+- **EPIPE 防护**: `installStdoutEpipeGuard()` 工厂 — stdout `error` 事件与 `write` 抛错双路捕获 EPIPE → `process.exit(0)`（静默退出不炸栈）；回归测试 `test/cli/run-stream-json.test.ts`（31 用例）
+- **桥接**: 会话事件（assistant 增量/工具调用/状态/审批/提问）经 `/api/events.mux` 与 `/api/events.host` 双只读 WebSocket 下发；审批与提问由 `POST /api/respond` 回显原 `rpcId`
+
+### Service Manifest & Extension Contracts
+
+- **Manifest**: 插件包 `manifest.json`（含 `entryPoint`），`packages/agent-core/src/plugin/manifest.ts` 解析/校验；117 包是 manifest 发布/解析闭包，不等于浏览器运行时或 import 闭包
+- **Contract 文档**: `apps/scream-code/src/web/migration/protocol-report.md` — 最小协议重实现方案 + 保留 Cordis 插件 ABI 时的 vendor 闭包建议
+- **注册模型**: manifest hooks 经 `session/hooks/engine.ts:registerAll` 批量注册，与 `/extension` 运行时共用
+
+### Output-Truncation Recovery
+
+长输出截断后自动"续写"——从被截断的最后一个文本块（保留其格式前缀）继续生成，而不是让模型重新想象全文。
+
+- **位置**: `packages/agent-core/src/loop/`（finishReason=truncated 分支）— 记录截断位置，下轮 prompt 注入"从 [保留片段] 继续"，避免重复前半段
+- **关系**: 与压缩溢出截断（`TruncatedError` → shrink 重试）是两条独立路径：前者是模型输出截断，后者是输入超限
+
+### Invalid Tool-Call Repeat Breaker
+
+同一工具调用重复失败（同一 toolCallId 连续 N 次抛出相同错误）时中断该循环，防止模型在损坏工具上无限重试。
+
+- **位置**: `packages/agent-core/src/loop/`（工具执行失败聚合）— 按 `toolCallId` 计数，达阈值转错误事件并跳过该工具，保护回合进度
+- **回退**: 模型后续轮次仍可重新发起工具调用（无全局熔断，仅针对卡死循环）
+
+### Approval Rejection Guidance
+
+审批被拒后给模型明确的引导 prompt，让它知道用户拒绝了哪个动作、为什么可能被拒（权限/成本/风险），并给出替代方向——避免模型对拒绝感到困惑或重复提交。
+
+- **位置**: 权限层拒绝路径（`packages/agent-core/src/` permission/approval 相关）→ 拒绝时注入引导文本到下一步
+
+### Anti-Drift Prompt Guidance
+
+system prompt 注入"反漂移"纪律段（context management / verification / anti-drift），约束 LLM 在长会话中不偏离原始需求——配合下方 Verification Protocol 的 convergence gate 双保险。
 
 ### Memory System
 
