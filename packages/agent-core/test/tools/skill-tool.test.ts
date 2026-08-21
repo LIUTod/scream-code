@@ -271,4 +271,23 @@ describe('SkillTool recursion guard', () => {
 
     await expect(execute(tool, { skill: 'loop' })).rejects.toBeInstanceOf(NestedSkillTooDeepError);
   });
+
+  it('embeds registered skill names and descriptions in the tool description', () => {
+    const reg = registry([
+      { ...skill('code-review'), description: 'Reviews code for bugs before merge' },
+      { ...skill('tdd'), description: 'Write failing tests before implementation' },
+    ]);
+    const tool = skillTool(reg);
+
+    expect(tool.description).toContain('code-review');
+    expect(tool.description).toContain('Reviews code for bugs');
+    expect(tool.description).toContain('tdd');
+    expect(tool.description).toContain('Write failing tests');
+  });
+
+  it('shows a fallback when no skills are registered', () => {
+    const tool = skillTool(registry([]));
+
+    expect(tool.description).toContain('(none currently registered)');
+  });
 });

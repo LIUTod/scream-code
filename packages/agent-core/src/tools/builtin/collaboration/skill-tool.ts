@@ -27,6 +27,26 @@ import skillDescriptionTemplate from './skill-tool.md';
 
 export const MAX_SKILL_QUERY_DEPTH = 3;
 
+/** Max skills to list inline in the tool description; rest are summarized. */
+const MAX_INLINE_SKILLS = 15;
+/** Max description length per skill line. */
+const MAX_SKILL_DESC_CHARS = 100;
+
+function buildSkillToolDescription(agent: Agent): string {
+  const skills = agent.skills?.registry.listInvocableSkills() ?? [];
+  const lines: string[] = skills.slice(0, MAX_INLINE_SKILLS).map((s) => {
+    const desc = s.description.trim().replaceAll(/\n/g, ' ').slice(0, MAX_SKILL_DESC_CHARS);
+    return `- ${s.name}: ${desc}`;
+  });
+  if (skills.length > MAX_INLINE_SKILLS) {
+    lines.push(`…${String(skills.length - MAX_INLINE_SKILLS)} more (see skill registry)`);
+  }
+  return renderPrompt(skillDescriptionTemplate, {
+    MAX_SKILL_QUERY_DEPTH,
+    AVAILABLE_SKILLS: lines.length > 0 ? lines.join('\n') : '(none currently registered)',
+  });
+}
+
 export class NestedSkillTooDeepError extends Error {
   readonly skillName?: string;
   readonly depth: number;
@@ -66,15 +86,15 @@ export interface SkillToolOptions {
 
 export class SkillTool implements BuiltinTool<SkillToolInput> {
   readonly name = 'Skill';
-  readonly description: string = renderPrompt(skillDescriptionTemplate, {
-    MAX_SKILL_QUERY_DEPTH,
-  });
+  readonly description: string;
   readonly parameters: Record<string, unknown> = toInputJsonSchema(SkillToolInputSchema);
 
   constructor(
     private readonly agent: Agent,
     private readonly options: SkillToolOptions = {},
-  ) {}
+  ) {
+    this.description = buildSkillToolDescription(agent);
+  }
 
   resolveExecution(args: SkillToolInput): ToolExecution {
     return {

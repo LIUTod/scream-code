@@ -73,6 +73,26 @@ describe('buildRoleAdditionalText', () => {
     expect(result).toContain('HIGHEST PRIORITY');
   });
 
+  it('emits a decision-flow tool-priority section when skill-first', () => {
+    const result = buildRoleAdditionalText({ toolPriority: 'skill' });
+    expect(result).toContain('## Tool priority (set via /like — HIGHEST PRIORITY)');
+    expect(result).toContain('invoke the Skill tool with it as your FIRST action');
+    expect(result).toContain('Consult the skill list shown in the Skill tool description');
+  });
+
+  it('emits a decision-flow tool-priority section when mcp-first', () => {
+    const result = buildRoleAdditionalText({ toolPriority: 'mcp' });
+    expect(result).toContain('## Tool priority (set via /like — HIGHEST PRIORITY)');
+    expect(result).toContain('MCP tool matches THIS request');
+    expect(result).toContain('use it as your FIRST action');
+  });
+
+  it('omits the tool-priority section when set to default (status quo)', () => {
+    const result = buildRoleAdditionalText({ toolPriority: 'default', nickname: 'Alex' });
+    expect(result).not.toContain('## Tool priority');
+    expect(result).toContain('- Nickname');
+  });
+
   it('marks the block as highest priority with bilingual anchor', () => {
     const result = buildRoleAdditionalText({ nickname: 'Alex' });
     expect(result).toContain('HIGHEST PRIORITY');
