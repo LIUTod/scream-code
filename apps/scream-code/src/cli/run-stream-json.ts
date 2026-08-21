@@ -198,7 +198,7 @@ interface TokenUsage {
 
 // ─── Writer ───────────────────────────────────────────────────────────────
 
-class ClaudeStreamJsonWriter {
+export class ClaudeStreamJsonWriter {
   private sessionId = "";
   private msgCounter = 0;
   private pendingText = "";
@@ -442,7 +442,7 @@ async function* readStdinMessages(): AsyncGenerator<StdinMessage> {
 }
 
 /** Extract plain text from a Claude Code-style user message. */
-function extractUserText(msg: StdinUserMessage): string {
+export function extractUserText(msg: StdinUserMessage): string {
   const content = msg.message.content;
   if (typeof content === "string") return content;
   // Multimodal: extract text parts only
@@ -461,7 +461,7 @@ interface MappedMode {
   planMode: boolean;
 }
 
-function mapCcConnectMode(mode: string | undefined): MappedMode {
+export function mapCcConnectMode(mode: string | undefined): MappedMode {
   switch (mode) {
     case "default":
       return { permission: "manual", planMode: false };
@@ -479,6 +479,47 @@ function mapCcConnectMode(mode: string | undefined): MappedMode {
     default:
       return { permission: "auto", planMode: false };
   }
+}
+
+// ─── stdout EPIPE guard ───────────────────────────────────────────────────
+
+/**
+ * Install the stdout EPIPE guard and return the line writer handed to
+ * {@link ClaudeStreamJsonWriter}.
+ *
+ * cc-connect closes our stdout when it kills/restarts the agent (idle
+ * timeout, /restart, config change). Writing after that raises EPIPE as an
+ * unhandled error and crashes the process. The pipe is gone — results can
+ * no longer be delivered — so exit quietly instead of burning tokens as a
+ * zombie waiting for a signal that may never come.
+ *
+ * Both the `error` event on stdout and a throw from `stdout.write` are
+ * covered: EPIPE → process.exit(0); any other error is surfaced (rethrown or
+ * logged) so real I/O failures are not masked.
+ */
+export function installStdoutEpipeGuard(): (line: string) => void {
+  const handleStdoutClosed = (): void => {
+    log.debug("stream-json: stdout closed (EPIPE), exiting");
+    process.exit(0);
+  };
+  process.stdout.on("error", (error: NodeJS.ErrnoException) => {
+    if (error.code === "EPIPE") {
+      handleStdoutClosed();
+      return;
+    }
+    log.error("stream-json: stdout error", { error: String(error) });
+  });
+  return (line: string): void => {
+    try {
+      process.stdout.write(`${line}\n`);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "EPIPE") {
+        handleStdoutClosed();
+        return;
+      }
+      throw error;
+    }
+  };
 }
 
 // ─── main ─────────────────────────────────────────────────────────────────
@@ -511,34 +552,8 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
   const streamSubagentModels = streamTuiConfig.subagentModels;
   harness.setSubagentModelBindings(() => streamSubagentModels);
 
-  // cc-connect closes our stdout when it kills/restarts the agent (idle
-  // timeout, /restart, config change). Writing after that raises EPIPE as an
-  // unhandled error and crashes the process. The pipe is gone — results can
-  // no longer be delivered — so exit quietly instead of burning tokens as a
-  // zombie waiting for a signal that may never come.
-  const handleStdoutClosed = (): void => {
-    log.debug("stream-json: stdout closed (EPIPE), exiting");
-    process.exit(0);
-  };
-  process.stdout.on("error", (error: NodeJS.ErrnoException) => {
-    if (error.code === "EPIPE") {
-      handleStdoutClosed();
-      return;
-    }
-    log.error("stream-json: stdout error", { error: String(error) });
-  });
-
-  const writer = new ClaudeStreamJsonWriter((line) => {
-    try {
-      process.stdout.write(`${line}\n`);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "EPIPE") {
-        handleStdoutClosed();
-        return;
-      }
-      throw error;
-    }
-  });
+  const writeStdout = installStdoutEpipeGuard();
+  const writer = new ClaudeStreamJsonWriter(writeStdout);
 
   let session: Session | undefined;
   let currentSessionId: string | undefined;
