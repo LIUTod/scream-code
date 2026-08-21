@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import chalk from 'chalk';
 
 import { setLocale } from '@scream-code/config';
 import {
@@ -6,6 +7,9 @@ import {
   shellExecutionResultRenderer,
 } from '#/tui/components/messages/shell-execution';
 import { darkColors } from '#/tui/theme/colors';
+
+// Force chalk colors so highlight/dim assertions see real ANSI codes.
+chalk.level = 3;
 
 function strip(text: string): string {
   return text.replaceAll(/\u001B\[[0-9;]*m/g, '');
@@ -83,12 +87,13 @@ describe('ShellExecutionComponent', () => {
   describe('shellExecutionResultRenderer', () => {
     const longCmd = `echo ${'a'.repeat(200)}\necho done`;
 
-    it('omits the command preview when collapsed', () => {
+    it('keeps the command visible but caps it at 3 lines when collapsed', () => {
+      const fiveLineCmd = 'echo one\necho two\necho three\necho four\necho five';
       const components = shellExecutionResultRenderer(
         {
           id: 'call_1',
           name: 'Bash',
-          args: { command: longCmd },
+          args: { command: fiveLineCmd },
         },
         {
           tool_call_id: 'call_1',
@@ -102,8 +107,38 @@ describe('ShellExecutionComponent', () => {
         .flatMap((c) => c.render(100))
         .map(strip)
         .join('\n');
-      expect(rendered).not.toContain('$ echo');
+      expect(rendered).toContain('$ echo one');
+      expect(rendered).toContain('echo three');
+      expect(rendered).not.toContain('echo four');
+      expect(rendered).not.toContain('echo five');
       expect(rendered).toContain('ok');
+    });
+
+    it('highlights the command instead of dimming it', () => {
+      const components = shellExecutionResultRenderer(
+        {
+          id: 'call_1',
+          name: 'Bash',
+          args: { command: 'echo hi' },
+        },
+        {
+          tool_call_id: 'call_1',
+          output: 'ok',
+          is_error: false,
+        },
+        { expanded: false, colors: darkColors },
+      );
+
+      const raw = components
+        .flatMap((c) => c.render(100))
+        .join('\n');
+      const cmdLine = raw.split('\n').find((l) => l.includes('echo'));
+      expect(cmdLine).toBeDefined();
+      // Only the `$ ` prefix may be dim; the command body itself must not be
+      // dim — bash highlighting applies truecolor (38;2;r;g;b) codes instead.
+      expect(cmdLine!.includes('\u001B[2m$ ')).toBe(true);
+      expect(cmdLine!).toMatch(/\u001B\[38;2;\d+;\d+;\d+m/);
+      expect(cmdLine!.includes('\u001B[2mecho')).toBe(false);
     });
 
     it('reveals the full multi-line command when expanded', () => {

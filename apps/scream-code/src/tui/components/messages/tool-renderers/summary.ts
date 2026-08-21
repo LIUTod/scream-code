@@ -11,12 +11,13 @@
  */
 
 import type { Component } from '@liutod-scream/pi-tui';
-import { Text } from '@liutod-scream/pi-tui';
+import { Text, visibleWidth } from '@liutod-scream/pi-tui';
 import chalk from 'chalk';
 
 import type { ColorPalette } from '#/tui/theme/colors';
 import type { ToolCallBlockData, ToolResultBlockData } from '#/tui/types';
 
+import { GlanceLinesComponent } from './glance-lines';
 import { renderTruncated } from './truncated';
 import type { ResultRenderer } from './types';
 
@@ -28,7 +29,7 @@ type GlanceFn = (
   toolCall: ToolCallBlockData,
   result: ToolResultBlockData,
   colors: ColorPalette,
-) => string;
+) => string | Component;
 
 function withGlance(glance: GlanceFn | null): ResultRenderer {
   return (toolCall, result, ctx) => {
@@ -36,16 +37,22 @@ function withGlance(glance: GlanceFn | null): ResultRenderer {
 
     const out: Component[] = [];
     if (glance !== null) {
-      const line = glance(toolCall, result, ctx.colors);
-      if (line.length > 0) {
-        // Indent every line so multi-line glances stay aligned when the
-        // terminal wraps long paths. Without this, wrap continuations
-        // start at column 0 and look unaligned with the first indented row.
-        const indented = line
-          .split('\n')
-          .map((l) => `  ${l}`)
-          .join('\n');
-        out.push(new Text(indented, 0, 0));
+      const glanceOut = glance(toolCall, result, ctx.colors);
+      if (typeof glanceOut === 'string') {
+        if (glanceOut.length > 0) {
+          // Indent every line so multi-line glances stay aligned when the
+          // terminal wraps long paths. Without this, wrap continuations
+          // start at column 0 and look unaligned with the first indented row.
+          const indented = glanceOut
+            .split('\n')
+            .map((l) => `  ${l}`)
+            .join('\n');
+          out.push(new Text(indented, 0, 0));
+        }
+      } else {
+        // Component glances (e.g. Grep samples) manage their own indent and
+        // truncate to render width instead of wrapping.
+        out.push(glanceOut);
       }
     }
     if (ctx.expanded && result.output.length > 0) {
@@ -83,28 +90,39 @@ function readSearchResultsMatches(result: ToolResultBlockData): GrepMatch[] | un
   return display.matches;
 }
 
-function truncateMatchText(text: string, max = 80): string {
-  if (text.length <= max) return text;
-  return `${text.slice(0, max - 1)}…`;
+// Directory part dim, basename in terminal default color — the basename pops
+// without dyeing the whole path in the amber tool color.
+function styleFilePath(path: string): string {
+  const idx = path.lastIndexOf('/');
+  if (idx < 0) return path;
+  return `${chalk.dim(path.slice(0, idx + 1))}${path.slice(idx + 1)}`;
 }
 
 const grepGlance: GlanceFn = (_toolCall, result, colors) => {
   const matches = readSearchResultsMatches(result);
   if (matches !== undefined && matches.length > 0) {
-    const fileColor = chalk.hex(colors.roleTool);
-    const lines = matches.slice(0, GLANCE_SAMPLES).map((m) => {
-      const linePart =
+    const samples = matches.slice(0, GLANCE_SAMPLES);
+    // Column-align: pad `path:line` to the widest sample so every match text
+    // starts in the same column regardless of path length.
+    const plainLocs = samples.map((m) =>
+      m.line > 0 ? `${m.file}:${String(m.line)}` : m.file,
+    );
+    const colWidth = Math.max(...plainLocs.map((s) => visibleWidth(s)));
+    const lineNoColor = chalk.hex(colors.roleTool);
+    const lines = samples.map((m, i) => {
+      const loc =
         m.line > 0
-          ? `${fileColor(m.file)}${chalk.dim(':')}${chalk.hex(colors.primary)(String(m.line))}`
-          : fileColor(m.file);
-      const textPart = chalk.dim(` ${truncateMatchText(m.text.trim())}`);
-      return `${linePart}${textPart}`;
+          ? `${styleFilePath(m.file)}${chalk.dim(':')}${lineNoColor(String(m.line))}`
+          : styleFilePath(m.file);
+      const pad = ' '.repeat(Math.max(0, colWidth - visibleWidth(plainLocs[i] ?? '')));
+      const text = m.text.trim();
+      return text.length > 0 ? `${loc}${pad}  ${chalk.dim(text)}` : `${loc}${pad}`;
     });
     const remaining = matches.length - GLANCE_SAMPLES;
     if (remaining > 0) {
       lines.push(chalk.dim(`+${String(remaining)} more`));
     }
-    return lines.join('\n');
+    return new GlanceLinesComponent(lines);
   }
   // Fallback: parse paths out of the text output for `files_with_matches`
   // mode or older persisted results that don't carry a structured display.
@@ -112,12 +130,11 @@ const grepGlance: GlanceFn = (_toolCall, result, colors) => {
   if (lines.length === 0) return '';
   const samples = lines.slice(0, GLANCE_SAMPLES).map(pathFromGrepLine);
   const remaining = lines.length - samples.length;
-  const fileColor = chalk.hex(colors.roleTool);
-  const out = samples.map((s) => fileColor(s));
+  const out = samples.map((s) => styleFilePath(s));
   if (remaining > 0) {
     out.push(chalk.dim(`+${String(remaining)} more`));
   }
-  return out.join('\n');
+  return new GlanceLinesComponent(out);
 };
 
 function fileBasename(path: string): string {

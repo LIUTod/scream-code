@@ -1,5 +1,6 @@
 import type { Component } from '@liutod-scream/pi-tui';
 import { setLocale } from '@scream-code/config';
+import chalk from 'chalk';
 import { describe, expect, it } from 'vitest';
 
 import { pickResultRenderer } from '#/tui/components/messages/tool-renderers/registry';
@@ -8,6 +9,11 @@ import type { ToolCallBlockData, ToolResultBlockData } from '#/tui/types';
 
 // Ensure deterministic i18n output for assertion matching.
 setLocale('en');
+
+// NOTE: do not force chalk.level globally here — the legacy `strip` helper
+// below leaves raw ESC bytes behind, and several existing assertions rely on
+// plain-text matching. Tests that need real ANSI codes set chalk.level
+// locally and restore it.
 
 function strip(text: string): string {
   return text.replaceAll(/\[[0-9;]*m/g, '');
@@ -177,5 +183,68 @@ describe('tool-result registry', () => {
       ),
     );
     expect(out).toContain('ENOENT: foo.ts not found');
+  });
+});
+
+describe('Grep glance rendering', () => {
+  // Full ANSI strip (the file-level `strip` leaves raw ESC bytes behind,
+  // which would skew column-index assertions).
+  const stripAnsi = (s: string): string => s.replaceAll(/\[[0-9;]*m/g, '');
+
+  function searchResult(matches: { file: string; line: number; text: string }[]): ToolResultBlockData {
+    return {
+      tool_call_id: 'tc',
+      output: 'Found N results',
+      is_error: false,
+      display: { kind: 'search_results', query: 'foo', matches },
+    };
+  }
+
+  const matches = [
+    { file: 'src/a.ts', line: 42, text: 'const foo = bar()' },
+    { file: 'src/tui/deep/longer.ts', line: 7, text: 'baz(qux)' },
+  ];
+
+  it('column-aligns match text regardless of path length', () => {
+    const renderer = pickResultRenderer('Grep');
+    const out = joinRender(
+      renderer(call('Grep', { pattern: 'foo' }), searchResult(matches), ctx),
+    );
+    const lines = out.split('\n').map(stripAnsi);
+    const lineA = lines.find((l) => l.includes('const foo'));
+    const lineB = lines.find((l) => l.includes('baz(qux)'));
+    expect(lineA).toBeDefined();
+    expect(lineB).toBeDefined();
+    expect(lineA!.indexOf('const foo')).toBe(lineB!.indexOf('baz(qux)'));
+  });
+
+  it('truncates to render width without wrapping', () => {
+    const longText = { file: 'src/a.ts', line: 1, text: 'x'.repeat(200) };
+    const renderer = pickResultRenderer('Grep');
+    const out = joinRender(
+      renderer(call('Grep', { pattern: 'foo' }), searchResult([longText]), ctx),
+      40,
+    );
+    const lines = out.split('\n');
+    // One sample => exactly one visual line, never wrapped.
+    expect(lines).toHaveLength(1);
+    expect(stripAnsi(lines[0]!)).toHaveLength(40);
+    expect(stripAnsi(lines[0]!).endsWith('…')).toBe(true);
+  });
+
+  it('dims the directory part and keeps the basename undyed', () => {
+    const prevLevel = chalk.level;
+    chalk.level = 3;
+    try {
+          const renderer = pickResultRenderer('Grep');
+          const raw = joinRender(
+            renderer(call('Grep', { pattern: 'foo' }), searchResult([matches[0]!]), ctx),
+          );
+      // Directory wrapped in dim codes, basename follows after the dim reset.
+      expect(raw).toContain('\u001B[2msrc/\u001B[22m');
+      expect(raw).toContain('a.ts');
+    } finally {
+      chalk.level = prevLevel;
+    }
   });
 });
