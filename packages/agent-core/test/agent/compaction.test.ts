@@ -5,6 +5,7 @@ import { join } from 'pathe';
 import {
   APIConnectionError,
   APIContextOverflowError,
+  APIProviderRateLimitError,
   APIStatusError,
   UNKNOWN_CAPABILITY,
   type Message,
@@ -1480,6 +1481,243 @@ describe('Agent compaction', () => {
       ]
     `);
     await ctx.expectResumeMatches();
+  });
+
+  it('reactive overflow recovery waits for the compaction to apply before resending the main request', async () => {
+    const generate: GenerateFn = async (_provider, _system, _tools, history) => {
+      const snapshot = inputHistorySnapshot(history);
+      if (snapshot.some((s) => s.includes('<compaction-instruction>'))) {
+        // Simulate provider latency: the summary is not instant.
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        return textResult('Slow overflow compaction summary.');
+      }
+      if (snapshot.some((s) => s.includes('Slow overflow compaction summary.'))) {
+        return textResult('Answer after slow compaction.');
+      }
+      throw new APIContextOverflowError(400, 'Context length exceeded', 'req-slow');
+    };
+    const ctx = testAgent({ generate });
+    ctx.configure({ provider: CATALOGUED_PROVIDER, modelCapabilities: CATALOGUED_MODEL_CAPABILITIES });
+    ctx.appendExchange(1, 'old user one', 'old assistant one', 20);
+
+    await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Retry after slow overflow' }] });
+    const events = await ctx.untilTurnEnd();
+    // The recovery path must await the compaction: the apply event must
+    // precede the step that carries the retried main request (which only
+    // returns the answer once the summary is already in the context).
+    const applyIdx = events.findIndex((e) => (e as { event?: string }).event === 'context.apply_compaction');
+    // The step that carries the retried main request is the one AFTER the
+    // interrupted step — the request that only returns once the summary is
+    // already in the context.
+    const interruptedStep = events.findIndex(
+      (e) => (e as { event?: string }).event === 'turn.step.interrupted',
+    );
+    const retriedStepIdx = events.findIndex(
+      (e, i) => (e as { event?: string }).event === 'turn.step.started' && i > interruptedStep,
+    );
+    expect(applyIdx).toBeGreaterThanOrEqual(0);
+    expect(retriedStepIdx).toBeGreaterThan(applyIdx);
+    expect(events).toContainEqual(
+      expect.objectContaining({ event: 'turn.ended', args: expect.objectContaining({ reason: 'completed' }) }),
+    );
+  });
+
+  it('resets the compaction low-water mark when the model alias changes', async () => {
+    // The low-water mark is measured against the previous model's context
+    // window; switching models (a different max_context_tokens) must reset it,
+    // otherwise a stale mark from a large model masks the overflow threshold
+    // of a smaller model and suppresses compaction until the provider
+    // overflows mid-turn (resetForTurn does not run on a model switch).
+    const generate: GenerateFn = async () => textResult('Answer.');
+    const ctx = testAgent({ generate });
+    // Initial model setup (undefined -> 'scream-code') happens here.
+    ctx.configure({ provider: CATALOGUED_PROVIDER, modelCapabilities: CATALOGUED_MODEL_CAPABILITIES });
+
+    const fc = ctx.agent.fullCompaction;
+    const resetSpy = vi.spyOn(fc, 'resetLowWaterMark');
+
+    // Same alias again: no reset.
+    ctx.configure({ provider: CATALOGUED_PROVIDER, modelCapabilities: CATALOGUED_MODEL_CAPABILITIES });
+    expect(resetSpy).not.toHaveBeenCalled();
+
+    // Different alias: reset must fire.
+    ctx.configure({
+      provider: { type: 'scream', apiKey: 'test-key', model: 'small-model' },
+      modelCapabilities: { ...CATALOGUED_MODEL_CAPABILITIES, max_context_tokens: 128_000 },
+    });
+    expect(resetSpy).toHaveBeenCalledTimes(1);
+    resetSpy.mockRestore();
+  });
+
+  it('rejects immediately when the turn is already aborting during reactive overflow', async () => {
+    // Regression guard for the block()-entry abort check: an already-aborted
+    // turn signal must fail the recovery in one tick, not wait out the whole
+    // compaction (up to the 120s block timeout).
+    const LONG_SUMMARY = 'S'.repeat(600_000);
+    const HIST = 'H'.repeat(20_000);
+    const generate: GenerateFn = async (_provider, _system, _tools, history) => {
+      const snapshot = inputHistorySnapshot(history);
+      if (snapshot.some((s) => s.includes('<compaction-instruction>'))) {
+        return textResult(LONG_SUMMARY);
+      }
+      throw new APIContextOverflowError(400, 'Context length exceeded', 'req-abort');
+    };
+    const ctx = testAgent({ generate });
+    ctx.configure({ provider: CATALOGUED_PROVIDER, modelCapabilities: CATALOGUED_MODEL_CAPABILITIES });
+    for (let i = 1; i <= 60; i += 1) {
+      ctx.appendExchange(i, `user ${HIST}${String(i)}`, `assistant ${HIST}${String(i)}`, 1);
+    }
+
+    // Start a compaction so handleOverflowError has something to await.
+    const applied = ctx.once('context.apply_compaction');
+    await ctx.rpc.beginCompaction({});
+    await applied;
+
+    const controller = new AbortController();
+    controller.abort();
+    const start = Date.now();
+    await expect(
+      ctx.agent.fullCompaction.handleOverflowError(controller.signal, new APIContextOverflowError(400, 'x', 'r')),
+    ).rejects.toThrow();
+    expect(Date.now() - start).toBeLessThan(5_000);
+  });
+
+  it('honors the provider Retry-After over the fixed backoff during compaction retries', async () => {
+    const retryModule = await import('../../src/loop/retry');
+    const sleepSpy = vi.spyOn(retryModule, 'sleepForRetry').mockResolvedValue(undefined);
+    try {
+      let compactionCalls = 0;
+      let mainCalls = 0;
+      const generate: GenerateFn = async (_provider, _system, _tools, history) => {
+        const snapshot = inputHistorySnapshot(history);
+        if (snapshot.some((s) => s.includes('<compaction-instruction>'))) {
+          compactionCalls += 1;
+          if (compactionCalls === 1) {
+            throw new APIProviderRateLimitError('rate limited', 'req-rl', 'RATE_LIMIT_EXCEEDED', 15_000);
+          }
+          return textResult('Retry-After compaction summary.');
+        }
+        mainCalls += 1;
+        if (mainCalls === 1) {
+          throw new APIContextOverflowError(400, 'Context length exceeded', 'req-rl-overflow');
+        }
+        return textResult('Answer after rate limited compaction.');
+      };
+      const ctx = testAgent({ generate });
+      ctx.configure({ provider: CATALOGUED_PROVIDER, modelCapabilities: CATALOGUED_MODEL_CAPABILITIES });
+      ctx.appendExchange(1, 'old user one', 'old assistant one', 20);
+
+      await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Retry after rate limit' }] });
+      const events = await ctx.untilTurnEnd();
+      expect(events).toContainEqual(
+        expect.objectContaining({ event: 'turn.ended', args: expect.objectContaining({ reason: 'completed' }) }),
+      );
+      expect(sleepSpy).toHaveBeenCalledWith(15_000, expect.any(AbortSignal));
+    } finally {
+      sleepSpy.mockRestore();
+    }
+  });
+
+  it(
+    'does not discard a possible overflow shrink when the retry budget is exhausted',
+    async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'scream-shrink-'));
+    let overflowCalls = 0;
+    const generate: GenerateFn = async (_provider, _system, _tools, history) => {
+      const snapshot = inputHistorySnapshot(history);
+      if (snapshot.some((s) => s.includes('<compaction-instruction>'))) {
+        // Overflow while the summarizer input still holds many messages: each
+        // overflow is absorbed by an input shrink, but the shrinks cannot
+        // shrink below the split floor (minOverflowReductionRatio), so this
+        // eventually reaches the budget edge with more shrinking still needed.
+        if (history.length > 10) {
+          overflowCalls += 1;
+          throw new APIContextOverflowError(400, 'Context length exceeded', 'req-shrink');
+        }
+        return textResult('Shrunk compaction summary.');
+      }
+      return textResult('Answer after repeated overflow.');
+    };
+    const ctx = testAgent({ generate, screamHomeDir: dir });
+    ctx.configure({ provider: CATALOGUED_PROVIDER, modelCapabilities: CATALOGUED_MODEL_CAPABILITIES });
+    // Long-text history (~120K estimated tokens): the compacted slice stays
+    // above the overflow-shrink floor (5% of the window) for more than
+    // MAX_COMPACTION_RETRY_ATTEMPTS successive overflows.
+    for (let i = 1; i <= 100; i += 1) {
+      ctx.appendExchange(i, `user ${String(i)}`.padEnd(1200, 'x'), `assistant ${String(i)}`.padEnd(1200, 'y'), 300);
+    }
+
+    // Manual compaction awaits the worker directly, so the overflow-retry loop
+    // is exercised deterministically (no reactive-path race).
+    const applied = ctx.once('context.apply_compaction');
+    const failed = new Promise<string>((resolve) => {
+      ctx.emitter.once('error', () => resolve('failed'));
+    });
+    await ctx.rpc.beginCompaction({});
+    const outcome = await Promise.race([applied.then(() => 'applied' as const), failed]);
+    expect(outcome).toBe('applied');
+    expect(
+      ctx.agent.fullCompaction.compactedHistory.some(
+        (m) => m.text.includes('Shrunk compaction summary.') || m.text.includes('--- message'),
+      ),
+    ).toBe(true);
+  },
+  20_000,
+  );
+
+  it('does not emit a stale skill candidate when the final marker is none', async () => {
+    let mainCalls = 0;
+    const generate: GenerateFn = async (_provider, _system, _tools, history) => {
+      const snapshot = inputHistorySnapshot(history);
+      if (snapshot.some((s) => s.includes('<compaction-instruction>'))) {
+        return textResult(
+          'Summary body.\n[[skill-candidate: stale-skill|Stale purpose|carried over evidence]]\n[[skill-candidate: none]]',
+        );
+      }
+      mainCalls += 1;
+      if (mainCalls === 1) {
+        throw new APIContextOverflowError(400, 'Context length exceeded', 'req-cand');
+      }
+      return textResult('Answer after candidate compaction.');
+    };
+    const ctx = testAgent({ generate });
+    ctx.configure({ provider: CATALOGUED_PROVIDER, modelCapabilities: CATALOGUED_MODEL_CAPABILITIES });
+    ctx.appendExchange(1, 'old user one', 'old assistant one', 20);
+
+    await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Compact with stale candidate' }] });
+    const events = await ctx.untilTurnEnd();
+    expect(events.some((e) => (e as { event?: string }).event === 'skill_candidate')).toBe(false);
+  });
+
+  it('emits the trailing skill candidate when a none marker precedes it', async () => {
+    // Behavioral contract (not a regression repro): a `none` verdict clears a
+    // candidate parsed BEFORE it, but a candidate parsed AFTER it must still
+    // win — i.e. `none` is order-sensitive, not an unconditional veto. Guards
+    // the none-clearing fix against a future "clear and stop" refactor.
+    let mainCalls = 0;
+    const generate: GenerateFn = async (_provider, _system, _tools, history) => {
+      const snapshot = inputHistorySnapshot(history);
+      if (snapshot.some((s) => s.includes('<compaction-instruction>'))) {
+        return textResult('Summary body.\n[[skill-candidate: none]]\n[[skill-candidate: late-skill|Late purpose|evidence]]');
+      }
+      mainCalls += 1;
+      if (mainCalls === 1) {
+        throw new APIContextOverflowError(400, 'Context length exceeded', 'req-cand2');
+      }
+      return textResult('Answer after late candidate compaction.');
+    };
+    const ctx = testAgent({ generate });
+    ctx.configure({ provider: CATALOGUED_PROVIDER, modelCapabilities: CATALOGUED_MODEL_CAPABILITIES });
+    ctx.appendExchange(1, 'old user one', 'old assistant one', 20);
+
+    await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Compact with late candidate' }] });
+    const events = await ctx.untilTurnEnd();
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        event: 'skill_candidate',
+        args: expect.objectContaining({ candidate: expect.objectContaining({ name: 'late-skill' }) }),
+      }),
+    );
   });
 
   it('compacts provider overflow when model context size is unknown', async () => {

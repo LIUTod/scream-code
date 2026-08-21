@@ -42,8 +42,12 @@ export class ConfigState {
       this._cwd = changed.cwd;
       void this.agent.jian.chdir(changed.cwd);
     }
-    if (changed.modelAlias) {
+    if (changed.modelAlias && changed.modelAlias !== this._modelAlias) {
       this._modelAlias = changed.modelAlias;
+      // The compaction low-water mark is measured against the previous
+      // model's context window; a different max_context_tokens invalidates
+      // it (a stale mark can mask the overflow threshold of a smaller model).
+      this.agent.fullCompaction.resetLowWaterMark();
     }
     if (changed.profileName) {
       this._profileName = changed.profileName;

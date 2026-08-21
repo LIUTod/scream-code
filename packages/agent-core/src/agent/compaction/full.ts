@@ -18,6 +18,7 @@ import type { Agent } from '..';
 import { isAbortError } from '../../loop/errors';
 import {
   retryBackoffDelays,
+  computeDelayMs,
   sleepForRetry,
 } from '../../loop/retry';
 import { renderPrompt } from '../../utils/render-prompt';
@@ -338,7 +339,7 @@ export class FullCompaction {
       blockedByTurn: false,
     };
     this.compacting = active;
-    active.promise = this.compactionWorker(abortController.signal, data, compactedCount);
+    active.promise = this.compactionWorker(abortController.signal, data, compactedCount, active);
   }
 
   cancel(): void {
@@ -376,6 +377,14 @@ export class FullCompaction {
     this.reactiveAttempted = false;
   }
 
+  /** The low-water mark is measured against the model's context window, so a
+   *  model switch (different max_context_tokens) invalidates it. Without a
+   *  reset, a stale mark from a large model can mask the overflow threshold
+   *  of a smaller model and suppress compaction until the provider overflows. */
+  resetLowWaterMark(): void {
+    this.lowWaterMark = 0;
+  }
+
   async handleOverflowError(signal: AbortSignal, error: unknown) {
     if (this.reactiveAttempted) {
       throw error;
@@ -392,6 +401,24 @@ export class FullCompaction {
       throw error;
     }
     this.reactiveAttempted = true;
+    // Recovery is only meaningful once the compacted context is actually in
+    // place: await the in-flight compaction (bounded by the 120s block timeout
+    // and the turn abort signal) instead of racing the next main request
+    // against it. Without this wait the retry can hit the provider with the
+    // un-compacted context again — unrecoverable, since reactiveAttempted
+    // forbids a second recovery.
+    if (this.compacting) {
+      try {
+        await this.block(signal);
+      } catch (blockError) {
+        // Propagate user aborts; surface the original overflow error when
+        // the compaction itself failed or timed out.
+        if (signal.aborted || isAbortError(blockError)) {
+          throw blockError;
+        }
+        throw error;
+      }
+    }
   }
 
   async beforeStep(signal: AbortSignal): Promise<void> {
@@ -481,9 +508,16 @@ export class FullCompaction {
     const active = this.compacting;
     if (!active) return;
 
+    // Fail fast if the turn is already aborting — otherwise an abort that
+    // landed before the listener below was registered would still wait out
+    // the full compaction instead of returning in one tick.
+    signal.throwIfAborted();
+
     active.blockedByTurn = true;
 
-    const BLOCK_TIMEOUT_MS = 60_000; // 60 seconds
+    // 120 seconds; > max Retry-After (60s) so reactive recovery cannot kill a
+    // compaction that is legitimately backoff-waiting.
+    const BLOCK_TIMEOUT_MS = 120_000;
 
     const timeoutId = setTimeout(() => {
       // Only cancel if this exact compaction is still the active one.
@@ -492,7 +526,7 @@ export class FullCompaction {
       if (this.compacting === active) {
         this.compactionTimedOut = true;
         this.markCanceled(
-          '压缩超时（60秒），已取消。请使用 /compact 手动重试。',
+          '压缩超时（120秒），已取消。请使用 /compact 手动重试。',
         );
       }
     }, BLOCK_TIMEOUT_MS);
@@ -522,6 +556,7 @@ export class FullCompaction {
     signal: AbortSignal,
     data: Readonly<CompactionBeginData>,
     compactedCount: number,
+    owner: NonNullable<typeof this.compacting>,
   ): Promise<void> {
     const originalHistory = [...this.agent.context.history];
     // Full-request basis: the compaction request carries the same system prompt
@@ -611,32 +646,38 @@ export class FullCompaction {
           break;
         } catch (error) {
           if (error instanceof APIContextOverflowError || error instanceof TruncatedError) {
-            // Context overflow: shrink the input and retry. If we've already
-            // shrunk to the minimum safe split, fall back to re-summarizing
-            // the input in halves and merging — this handles the case where
-            // a single oversized message (e.g. a huge tool result) makes
-            // even the smallest split too large for the model.
+            // Context overflow: shrink the input and retry. Shrinks are local
+            // and deterministic (no server round-trip to back off for) and
+            // each one strictly reduces the slice, so they cannot loop — the
+            // split point descends until the fallback below engages — and
+            // they must not consume the retry budget reserved for server-side
+            // retryable failures (429/5xx); a possible shrink is never
+            // discarded at the budget edge.
             const reduced = this.strategy.reduceCompactOnOverflow(messagesToCompact);
             if (reduced < compactedCount) {
               compactedCount = reduced;
-            } else {
-              this.agent.log.warn('compaction overflow at minimum split, falling back to re-summarize', {
-                compactedCount,
-                tokensBefore: estimateTokensForMessages(messagesToCompact),
-              });
-              const result = await summarizeWithFallback(messagesToCompact, summarizeOnce);
-              summary = result.summary;
-              usage = result.usage;
-              break;
+              continue;
             }
+            // Already at the minimum safe split: re-summarize the input in
+            // halves and merge — this handles the case where a single
+            // oversized message (e.g. a huge tool result) makes even the
+            // smallest split too large for the model.
+            this.agent.log.warn('compaction overflow at minimum split, falling back to re-summarize', {
+              compactedCount,
+              tokensBefore: estimateTokensForMessages(messagesToCompact),
+            });
+            const result = await summarizeWithFallback(messagesToCompact, summarizeOnce);
+            summary = result.summary;
+            usage = result.usage;
+            break;
           }
-          else if (!isRetryableGenerateError(error)) {
+          if (!isRetryableGenerateError(error)) {
             throw error;
           }
           if (retryCount + 1 >= MAX_COMPACTION_RETRY_ATTEMPTS) {
             throw error;
           }
-          await sleepForRetry(delays[retryCount]!, signal);
+          await sleepForRetry(computeDelayMs(error, delays, retryCount + 1), signal);
           retryCount += 1;
         }
       }
@@ -644,6 +685,13 @@ export class FullCompaction {
       if (usage !== null) {
         this.agent.usage.record(model, usage);
       }
+
+      // A newer compaction may own the shared state if our abort signal was
+      // ignored by the provider and we are finishing late. Guard BEFORE the
+      // history-change check: a stale worker's history snapshot predates the
+      // newer run's apply, so it would misread the new history as a /revoke
+      // and cancel the newer compaction.
+      if (this.compacting !== owner) return undefined;
 
       const newHistory = this.agent.context.history;
       for (let i = 0; i < originalHistory.length; i++) {
@@ -719,21 +767,29 @@ export class FullCompaction {
       this.consecutiveCompactionFailures = 0;
       this._shouldInjectSessionSummary = true;
     } catch (error) {
-      const wasTimedOut = this.compactionTimedOut;
-      this.compactionTimedOut = false;
+      // A newer compaction may own the shared state if our abort signal was
+      // ignored by the provider and this catch lands late. Never consume or
+      // cancel a newer run's state — settle our own (already abandoned)
+      // blocked turn only.
+      const stale = this.compacting !== null && this.compacting !== owner;
+      const wasTimedOut = stale ? false : this.compactionTimedOut;
+      if (!stale) this.compactionTimedOut = false;
       if (!isAbortError(error) || wasTimedOut) {
-        const active = this.compacting;
-        const blockedByTurn = active?.blockedByTurn === true;
+        const blockedByTurn = stale || owner.blockedByTurn === true;
 
-        // Track consecutive failures for circuit breaker
-        this.consecutiveCompactionFailures += 1;
-        if (this.consecutiveCompactionFailures >= MAX_CONSECUTIVE_FAILURES) {
-          this.agent.emitEvent({
-            type: 'warning',
-            message:
-              `压缩连续失败 ${String(this.consecutiveCompactionFailures)} 次，已自动暂停本回合的自动压缩。使用 /compact 手动重试。`,
-            code: 'compaction_circuit_open',
-          });
+        if (!stale) {
+          // Track consecutive failures for circuit breaker — only for the
+          // current owner; a stale worker must not corrupt the newer run's
+          // failure accounting.
+          this.consecutiveCompactionFailures += 1;
+          if (this.consecutiveCompactionFailures >= MAX_CONSECUTIVE_FAILURES) {
+            this.agent.emitEvent({
+              type: 'warning',
+              message:
+                `压缩连续失败 ${String(this.consecutiveCompactionFailures)} 次，已自动暂停本回合的自动压缩。使用 /compact 手动重试。`,
+              code: 'compaction_circuit_open',
+            });
+          }
         }
 
         this.agent.log.error('compaction failed', {
@@ -744,7 +800,7 @@ export class FullCompaction {
           compactedCount,
           tokensBefore,
         });
-        this.markCanceled();
+        if (!stale) this.markCanceled();
         if (!blockedByTurn) {
           const details: Record<string, unknown> = { model, retryCount };
           const payload =
@@ -756,7 +812,10 @@ export class FullCompaction {
             ...payload,
           });
         }
-        if (blockedByTurn) {
+        // Only a non-stale worker has a blocked turn awaiting this rejection —
+        // a stale worker's rejection is observed by nobody, so throwing would
+        // become an unhandled promise rejection.
+        if (blockedByTurn && !stale) {
           if (isScreamError(error) && error.code === ErrorCodes.AUTH_LOGIN_REQUIRED) throw error;
           throw new ScreamError(ErrorCodes.COMPACTION_FAILED, String(error), { cause: error });
         }
@@ -920,7 +979,12 @@ export class FullCompaction {
         const name = m[1]?.trim() ?? '';
         if (name.length === 0) continue;
         // Explicit "no candidate" marker — expected when nothing qualifies.
-        if (name.toLowerCase() === 'none') continue;
+        // It is this round's verdict, so it clears a candidate parsed earlier
+        // (e.g. a stale marker carried over into an update summary).
+        if (name.toLowerCase() === 'none') {
+          chosen = undefined;
+          continue;
+        }
         // Malformed marker without the purpose/evidence segments — skip.
         if (m[2] === undefined) continue;
         chosen = { name, purpose: m[2].trim(), evidence: (m[3] ?? '').trim() };
