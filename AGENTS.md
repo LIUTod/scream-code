@@ -52,21 +52,21 @@
 - Prefer package-local imports. When crossing packages, import from the package's public `index.ts` or documented subpaths.
 - For Node built-ins, prefer namespace imports: `import * as fs from 'node:fs/promises'`, `import * as path from 'node:path'`.
 
-### agent-core 包内依赖方向
+### agent-core intra-package dependency direction
 
-`packages/agent-core/src` 的顶层目录分三层（依赖只允许向下）：
+`packages/agent-core/src` top-level directories form three layers (dependencies may only point downward):
 
-- **支持层**（任何层可依赖，不得依赖上层）：`utils/` `errors/` `flags/` `logging/` `config/` `profile/` `lsp/` `markit/`
-- **编排层**（依赖支持层与工具层公开契约）：`agent/` `session/` `rpc/` `loop/`
-- **工具层**（依赖支持层，与 `loop/`、`agent/tool` 的公开契约）：`tools/` `mcp/` `plugin/` `skill/`
+- **Support layer** (any layer may depend on it; must not depend upward): `utils/` `errors/` `flags/` `logging/` `config/` `profile/` `lsp/` `markit/`
+- **Orchestration layer** (depends on support-layer and tool-layer public contracts): `agent/` `session/` `rpc/` `loop/`
+- **Tool layer** (depends on the support layer and the public contracts of `loop/` and `agent/tool`): `tools/` `mcp/` `plugin/` `skill/`
 
-规则：
+Rules:
 
-- **允许** `import type` 跨层（类型编译后擦除，无运行时耦合）——工具层可 `import type` 编排层类型（`GoalSnapshot`、`PlanData`、`CronManager`、`ContextMessage` 等），但不得 `import type` 编排层**类实例的私有实现细节**。
-- **禁止** `tools/` 等工具层**值导入**编排层运行时实现（`agent/goal`、`agent/context`、`agent/plan`、`agent/cron` 的类实例与常量）。工具要访问 agent 状态**优先走执行上下文（`ToolContext`）**；既有代码中工具通过构造注入 `Agent`（约 18 处）是历史模式，新代码应避免直接从 agent 内部取状态；工具需要的常量应定义在工具本地，或由编排层提供显式契约导出。
-- `agent/` 可以值导入 `tools/`（既有模式，含 `tools/cron/*`、`tools/support/*` 等深层路径；新代码优先走公开入口）。
-- **既有例外（不得新增）**：`agent/cron/manager.ts` 值导入 `tools/cron/` 的 clock/scheduler/cron-fire-xml/persist/session-store 是历史遗留的实现复用，新代码不得复制此模式；重构时优先把共享逻辑移到支持层或 `agent/cron` 本地。
-- 新增跨层**值导入**前，先说明为何无法通过 `ToolContext` 或本地常量解决。
+- `import type` across layers is allowed (types are erased at compile time — no runtime coupling): the tool layer may `import type` orchestration-layer types (`GoalSnapshot`, `PlanData`, `CronManager`, `ContextMessage`, etc.), but must not `import type` private implementation details of orchestration-layer class instances.
+- The tool layer must NOT **value-import** orchestration-layer runtime implementations (`agent/goal`, `agent/context`, `agent/plan`, `agent/cron` class instances and constants). Tools that need agent state should go through the execution context (`ToolContext`) first; the ~18 existing constructor-injected `Agent` references are a legacy pattern — new code should avoid reading state directly from inside the agent; constants a tool needs should live in the tool or be exported via an explicit orchestration-layer contract.
+- `agent/` may value-import `tools/` (existing pattern, including deep paths like `tools/cron/*`, `tools/support/*`; prefer public entry points in new code).
+- **Existing exception (do not add new ones)**: `agent/cron/manager.ts` value-importing `tools/cron/` clock/scheduler/cron-fire-xml/persist/session-store is a legacy implementation-reuse exception; new code must not copy it; prefer moving shared logic to the support layer or local to `agent/cron`.
+- Before adding a cross-layer **value import**, first explain why it cannot be solved via `ToolContext` or a local constant.
 
 ---
 
@@ -444,7 +444,7 @@ Manual and auto update via npm. Silent background version check runs at startup.
 - **Compare**: `src/cli/update/select.ts` — `semver.gt(latest, current)`.
 - **Refresh**: `src/cli/update/refresh.ts` — `refreshUpdateCache()` calls `fetchLatestVersionFromNpm()`, writes the cache on success, propagates errors so a transient npm blip leaves the existing cache intact.
 - **TUI startup**: `checkForUpdates()` in `scream-tui.ts` calls `refreshUpdateCache()` then `readUpdateCache()` + `selectUpdateTarget()`.
-- **Welcome panel**: shows "有新版本（x.y.z）" when `hasNewVersion` is true.
+- **Welcome panel**: shows "New version available (x.y.z)" when `hasNewVersion` is true.
 - **Preflight**: `src/cli/update/preflight.ts` — `runUpdatePreflight()` prompts interactively (or prints the manual command when non-TTY) and runs `npm install -g scream-code@latest` via `spawn` with `shell: process.platform === 'win32'` and `stdio: 'inherit'`. Single step, no git/pnpm.
 - **Manual trigger**: `/update` in `src/tui/commands/update.ts` — `npm install -g scream-code@latest` via `spawn` with `shell: process.platform === 'win32'`, 5-minute timeout, network-error detection with Chinese user-facing messages.
 
@@ -473,57 +473,57 @@ Collects the user's persona/preferences through a short interactive TUI and inje
 
 ### Session Trace (`/trace`)
 
-把当前会话的 wire 日志回放为自包含交互式 HTML 时间轴并在浏览器打开。长会话有专门性能保护。
+Replays the current session's wire log as a self-contained interactive HTML timeline and opens it in the browser. Long sessions have dedicated performance guards.
 
 - **Entry**: `/trace` (availability `always`)
-- **TUI**: `src/tui/commands/trace.ts` — 读 `sessionDir/agents/main/wire.jsonl` → `buildTraceCells` → `renderTraceHtml` → 写 `tmpdir()/scream-trace.html`（固定文件名 + `?v=Date.now()` 防缓存），用 `open`/`cmd start`/`xdg-open` 打开
-- **Builder**: `src/utils/trace/trace-builder.ts` — `buildTraceCells`（user/message/tool 三型 cell）；system-context 记录合并进下一条 user turn；`turn.prompt` 开启新 turn
-- **Renderer**: `src/utils/trace/render-trace-html.ts` — 三车道时间轴 Input/Model/Tools、Seq/Time 双模式、固定双栏 ledger、Turns/Calls 折叠；`</`→`<\/` 转义防脚本逃逸 + title/sessionId HTML 转义
-- **长会话性能**: `MAX_DETAIL=4000` / `MAX_CELLS=4000` 封顶 + 旧 cell 折叠为 per-turn 摘要行；ledger 分页 `PAGE=300`；时间轴采样 `ceil(n/1500)`
-- **Data model**: `src/utils/trace/trace-types.ts` — `TraceCell`（tokens/TTFT/decoding/model/finishReason/turn）
+- **TUI**: `src/tui/commands/trace.ts` — reads `sessionDir/agents/main/wire.jsonl` → `buildTraceCells` → `renderTraceHtml` → writes `tmpdir()/scream-trace.html` (fixed filename + `?v=Date.now()` anti-cache), opens via `open`/`cmd start`/`xdg-open`
+- **Builder**: `src/utils/trace/trace-builder.ts` — `buildTraceCells` (user/message/tool cell types); system-context records merge into the next user turn; `turn.prompt` starts a new turn
+- **Renderer**: `src/utils/trace/render-trace-html.ts` — three-lane timeline Input/Model/Tools, Seq/Time dual mode, fixed two-column ledger, Turns/Calls folding; `</`→`<\/` escaping against script injection + title/sessionId HTML escaping
+- **Long-session performance**: `MAX_DETAIL=4000` / `MAX_CELLS=4000` caps + old cells fold into per-turn summary rows; ledger pagination `PAGE=300`; timeline sampling `ceil(n/1500)`
+- **Data model**: `src/utils/trace/trace-types.ts` — `TraceCell` (tokens/TTFT/decoding/model/finishReason/turn)
 
 ### Conversation Search (`/search`)
 
-打开全屏会话搜索覆盖层（等同 Ctrl+Shift+F）。
+Opens the full-screen session search overlay (same as Ctrl+Shift+F).
 
-- **Entry**: `/search` — `src/tui/commands/search.ts`，打开 full-screen search overlay
-- **i18n**: zh/en 本地化描述
+- **Entry**: `/search` — `src/tui/commands/search.ts`, opens the full-screen search overlay
+- **i18n**: zh/en localized descriptions
 
 ### User Message Highlight (`/hl`)
 
-用户消息渲染 roleUser 主题色背景块，/hl 开关即时重渲染。
+Renders the user message with the roleUser theme background block; `/hl` toggles it with an immediate re-render.
 
 - **Entry**: `/hl` (alias: `highlight`) — `src/tui/commands/hl.ts` `toggleUserMessageHighlight` + `requestRender`
-- **Rendering**: `src/tui/components/messages/user-message.ts` — `<system-reminder>` 前缀永不高亮；开启态整行 `bgHex(roleUserBg)` 铺背景 + 对比色文字（图片入块），关闭态仅 roleUser 文字 + ■ 前缀；缓存以 toggle 状态为键
-- **Config**: `ui-preferences.ts` `userMessageHighlightEnabled`（默认开）；主题键 `roleUser`/`roleUserBg`（dark `#f7e308` / light `#bd5302`）
+- **Rendering**: `src/tui/components/messages/user-message.ts` — `<system-reminder>` prefixes are never highlighted; when enabled the whole row gets a `bgHex(roleUserBg)` background + contrast text (images go inside the block), when disabled only roleUser-colored text + ■ prefix; the cache is keyed by the toggle state
+- **Config**: `ui-preferences.ts` `userMessageHighlightEnabled` (default on); theme keys `roleUser`/`roleUserBg` (dark `#f7e308` / light `#bd5302`)
 
 ### Turn Elapsed Marker (`/snaptimer`)
 
-每轮结束后在助手最终回复末尾盖浅灰耗时标记（如 ` 23m 42s`），全局开关并持久化。
+Stamps a light-gray elapsed-time marker (e.g. ` 23m 42s`) at the end of the assistant's final reply after each turn; global toggle, persisted.
 
 - **Entry**: `/snaptimer` (alias: `timer`) — `src/tui/commands/snaptimer.ts` `toggleTurnElapsed`
-- **Timing**: `src/tui/controllers/streaming-ui.ts` `markTurnStarted`/`formatElapsed`/`appendTurnSummaryLine`；`transcript-controller.ts` `appendElapsedToLastAssistant` 按 turnId 匹配追加到末行（不进 markdown 源、不进 LLM 上下文）
-- **Config**: `ui-preferences.ts` `turnElapsedEnabled`（默认开），持久化 `<dataDir>/ui-preferences.json`
+- **Timing**: `src/tui/controllers/streaming-ui.ts` `markTurnStarted`/`formatElapsed`/`appendTurnSummaryLine`; `transcript-controller.ts` `appendElapsedToLastAssistant` matches by turnId and appends to the last line (not in the markdown source, not in the LLM context)
+- **Config**: `ui-preferences.ts` `turnElapsedEnabled` (default on), persisted in `<dataDir>/ui-preferences.json`
 
 
 ### Plugin Center (`/plugin`) & Code Extensions (`/extension`)
 
-管理已安装插件与浏览可安装插件包；`/extension` 管理代码插件（动态 import 运行时）。`/skill` 是 `/plugin` 的隐藏兼容别名（可路由但不显示在补全/帮助）。
+Manages installed plugins and browses installable plugin packages; `/extension` manages code plugins (dynamic-import runtime). `/skill` is the hidden compat alias of `/plugin` (routeable but not shown in completion/help).
 
 - **Entry**: `/plugin` (aliases: `skills`, `plugins`; hiddenAlias: `skill`), `/extension` (aliases: `extensions`)
-- **TUI**: `src/tui/commands/skill-center.ts` — 选择器面板，支持 `Enter` 激活、`i` 安装并注入、`d` 卸载
-- **Extension runtime**: `packages/agent-core/src/plugin/runtime/extension.ts` — `discover()`（按 manifest `entryPoint`）、`load()`（缓存动态 import）、`activate()`（先注册 manifest hooks，再调 `module.activate(ExtensionContext)`，失败回滚）、`deactivate()`；`ExtensionContext` = `{ services, events, config, pluginId }`
-- **Event bus**: `packages/agent-core/src/agent/events.ts` — `EventSubscriptionBus.subscribe(type|'*')` / `dispatch()`（handler 抛错被吞，不破坏主循环）；manifest hooks 经 `session/hooks/engine.ts:registerAll` 批量注册
-- **/extension 子命令**: `src/tui/commands/extension.ts` — `activate|deactivate|status [pluginId]`；裸 `/extension` = status；走 `session.activatePlugin` / `deactivatePlugin` / `pluginExtensionStatus`
-- **激活文案统一为 plugin**: `skillact.activated` = "▶ Activated plugin: …"（i18n en/zh）
-- **Plugin display name**: 插件包 Skill 显示 `displayName` 而非原始 plugin id
-- **Uninstall impact**: 插件 Skill 只能整包卸载（SDK 对插件 Skill 抛 `removeSkill`）；确认框明示 `将卸载整个包（共 N 个 Skill）`。手动 Skill 仍走 `removeSkill`
-- **AGENTS.md 排除出 skill 扫描**: `packages/agent-core/src/skill/scanner.ts` 将 `agents.md` 加入 `DOCUMENTATION_MARKDOWN_LOWER`
-- **Marketplace fallback**: `src/tui/commands/skill-marketplace.ts` 提供内置可安装插件包列表
-- **Loading overlay**: `SkillCenterLoadingComponent` 在加载已安装 Skill 与 Marketplace 数据时显示 spinner，避免画面卡顿
-- **Core install/remove**: `packages/agent-core/src/session/index.ts` — `Session.removeSkill`（手动安装单元）、`Session.injectSkillRoots`（不重启会话加载新插件 Skill）
+- **TUI**: `src/tui/commands/skill-center.ts` — picker panel: `Enter` activate, `i` install-and-inject, `d` uninstall
+- **Extension runtime**: `packages/agent-core/src/plugin/runtime/extension.ts` — `discover()` (by manifest `entryPoint`), `load()` (cached dynamic import), `activate()` (register manifest hooks first, then call `module.activate(ExtensionContext)`; roll back on failure), `deactivate()`; `ExtensionContext` = `{ services, events, config, pluginId }`
+- **Event bus**: `packages/agent-core/src/agent/events.ts` — `EventSubscriptionBus.subscribe(type|'*')` / `dispatch()` (handler errors are swallowed, never break the main loop); manifest hooks register in bulk via `session/hooks/engine.ts:registerAll`
+- **/extension subcommands**: `src/tui/commands/extension.ts` — `activate|deactivate|status [pluginId]`; bare `/extension` = status; goes through `session.activatePlugin` / `deactivatePlugin` / `pluginExtensionStatus`
+- **Activation text unified to plugin**: `skillact.activated` = "▶ Activated plugin: …" (i18n en/zh)
+- **Plugin display name**: plugin-package skills show `displayName` instead of the raw plugin id
+- **Uninstall impact**: plugin skills can only be uninstalled as a whole package (the SDK throws `removeSkill` for plugin skills); the confirm dialog spells out that the entire package (N skills) will be removed. Manual skills still go through `removeSkill`
+- **AGENTS.md excluded from skill scanning**: `packages/agent-core/src/skill/scanner.ts` adds `agents.md` to `DOCUMENTATION_MARKDOWN_LOWER`
+- **Marketplace fallback**: `src/tui/commands/skill-marketplace.ts` provides the built-in installable plugin package list
+- **Loading overlay**: `SkillCenterLoadingComponent` shows a spinner while loading installed skills and marketplace data
+- **Core install/remove**: `packages/agent-core/src/session/index.ts` — `Session.removeSkill` (manual install unit), `Session.injectSkillRoots` (loads new plugin skills without restarting the session)
 - **Registry helpers**: `packages/agent-core/src/skill/registry.ts` — `SkillRegistry.ejectPlugin` / `removeSkillPath`
-- **RPC chain**: `packages/agent-core/src/rpc/core-api.ts` → `core-impl.ts` → `session/rpc.ts` → node-sdk → TUI，新增 `removeSkill` / `injectPlugin`
+- **RPC chain**: `packages/agent-core/src/rpc/core-api.ts` → `core-impl.ts` → `session/rpc.ts` → node-sdk → TUI, adding `removeSkill` / `injectPlugin`
 - **Tests**: `apps/scream-code/test/tui/commands/skill-center.test.ts`, `packages/agent-core/test/skill/install-paths.test.ts`
 
 
@@ -533,41 +533,41 @@ Collects the user's persona/preferences through a short interactive TUI and inje
 
 ### Tool Card Rendering (Bash / Grep)
 
-- **Bash**: `src/tui/components/messages/shell-execution.ts` — 折叠卡始终可见命令（`highlightLines(command,'bash',colors)` 语法高亮 + `$ ` 暗色前缀），折叠限 `SHELL_COMMAND_COLLAPSED_LINES=3` 行，ctrl+o 展开看全命令
-- **Grep**: `tool-renderers/glance-lines.ts` `GlanceLinesComponent` — `truncateToWidth(line, width, '…')` 硬截断不换行；`tool-renderers/summary.ts` `grepGlance` — 结构化 `display.search_results`、`GLANCE_SAMPLES=3` 样本、`path:line` 列对齐、目录 dim + 文件名默认色、行号琥珀色、`+N more`
+- **Bash**: `src/tui/components/messages/shell-execution.ts` — collapsed card always shows the command (`highlightLines(command,'bash',colors)` syntax highlight + dim `$ ` prefix), collapsed limit `SHELL_COMMAND_COLLAPSED_LINES=3` lines, ctrl+o expands to see the full command
+- **Grep**: `tool-renderers/glance-lines.ts` `GlanceLinesComponent` — `truncateToWidth(line, width, '…')` hard-truncates without wrapping; `tool-renderers/summary.ts` `grepGlance` — structured `display.search_results`, `GLANCE_SAMPLES=3` samples, `path:line` column alignment, dim directory + default-color filename, amber line number, `+N more`
 
 ### Streaming Token Pacing
 
-把"到达"与"显示"解耦——草稿上维护 shown-length 游标，每帧按测量到达速率加预算，快模型平滑、慢模型不冻结、突发展开到多帧。
+Decouples "arrival" from "display" — a shown-length cursor on the draft gains budget each frame by the measured arrival rate: fast models stay smooth, slow models don't freeze, bursts spread over several frames.
 
-- **Controller**: `src/tui/controllers/streaming-ui.ts` `flush()`/`advanceAssistantShown()`/`finalizeAssistantStream`（收尾强制全量 flush）
-- **Constants**: `src/tui/constant/streaming.ts` — `SMOOTH_FRAME_MS=50`、`MIN_CHARS_PER_FRAME=1`、`MAX_CHARS_PER_FRAME=25`、`DEFAULT_ARRIVAL_TOK_PER_SEC=50`、`CHARS_PER_TOKEN=2.5`；thinking/tool 仍按 `STREAMING_UI_FLUSH_MS=50`
-- **Speed**: `src/tui/utils/speed-tracker.ts` — `SPEED_WINDOW_MS=3000`、`SPEED_MAX=200`、`getSharedSpeedTracker()`；观测点 `streaming-ui.ts:151-162`
+- **Controller**: `src/tui/controllers/streaming-ui.ts` `flush()`/`advanceAssistantShown()`/`finalizeAssistantStream` (forces a full flush at the end)
+- **Constants**: `src/tui/constant/streaming.ts` — `SMOOTH_FRAME_MS=50`, `MIN_CHARS_PER_FRAME=1`, `MAX_CHARS_PER_FRAME=25`, `DEFAULT_ARRIVAL_TOK_PER_SEC=50`, `CHARS_PER_TOKEN=2.5`; thinking/tool still flush at `STREAMING_UI_FLUSH_MS=50`
+- **Speed**: `src/tui/utils/speed-tracker.ts` — `SPEED_WINDOW_MS=3000`, `SPEED_MAX=200`, `getSharedSpeedTracker()`; observation point `streaming-ui.ts:151-162`
 
 ### Cache Hit Rate Footer & Usage Accounting
 
-Footer 常驻显示缓存命中率与 token 用量（会话累计 + 模型徽章辉光）。
+Footer persistently shows the cache hit rate and token usage (session accumulation + model badge glow).
 
-- **Footer**: `src/tui/components/chrome/footer.ts` — `${ccDot} ${segHit} ${contextPart} ${statusPart}` 顺序；无输入 token 前显示 `--`；模型徽章 thinking/waiting/composing 绿色 shimmer、tool 执行青色、idle 灰；30fps ticker（`1000/30`ms）
-- **TUI 累计**: `src/tui/controllers/session-event-handler.ts` `handleStepCompleted` 累加 `turn.step.completed` usage 进 `appState.sessionUsage`（compaction 不产生该事件故被排除）
-- **Agent 侧持久化**: `packages/agent-core/src/agent/usage/index.ts` — `turnTotal` 字段、`record(scope:'turn')` 累计、恢复时 `records/index.ts` 保留 `usageScope` 回放重建；`session-manager.ts` `syncRuntimeState` 用 `status.usage.turnTotal` 播种
-- **Cache write 独立记账**: `packages/ltod/src/providers/openai-common.ts` — 从 `prompt_tokens_details.cache_write_tokens` 提出到 `inputCacheCreation`，三桶 disjoint（input/cacheRead/cacheWrite）
+- **Footer**: `src/tui/components/chrome/footer.ts` — `${ccDot} ${segHit} ${contextPart} ${statusPart}` order; shows `--` before any input tokens; model badge green shimmer while thinking/waiting/composing, cyan during tool execution, gray when idle; 30fps ticker (`1000/30`ms)
+- **TUI accumulation**: `src/tui/controllers/session-event-handler.ts` `handleStepCompleted` accumulates `turn.step.completed` usage into `appState.sessionUsage` (compaction produces no such event, so it is excluded)
+- **Agent-side persistence**: `packages/agent-core/src/agent/usage/index.ts` — `turnTotal` field, `record(scope:'turn')` accumulation, `records/index.ts` keeps `usageScope` on restore/replay; `session-manager.ts` `syncRuntimeState` seeds with `status.usage.turnTotal`
+- **Cache-write separate accounting**: `packages/ltod/src/providers/openai-common.ts` — pulls `prompt_tokens_details.cache_write_tokens` into `inputCacheCreation`; the three buckets are disjoint (input/cacheRead/cacheWrite)
 
 ### Startup Empty-Session Pruning
 
-启动时删除从未收到用户消息、从未命名的工作目录空会话（best-effort 不阻塞启动）。
+On startup, prunes working-directory empty sessions that never received a user message and were never named (best-effort, does not block startup).
 
-- **位置**: `src/tui/managers/session-manager.ts` — `PRUNE_EMPTY_SESSION_GRACE_MS = 5*60*1000` 宽限窗；`isPrunableEmptySession`（archived/lastPrompt 已定义/占位标题/宽限窗内 → 保留）；`isUntitledTitle` 把 'New Session' 视为未命名；跳过即将使用的 session
+- **Location**: `src/tui/managers/session-manager.ts` — `PRUNE_EMPTY_SESSION_GRACE_MS = 5*60*1000` grace window; `isPrunableEmptySession` (keeps archived / already-prompted / placeholder-title / within-grace sessions); `isUntitledTitle` treats 'New Session' as unnamed; skips the session about to be used
 
 ### Model Refresh & Switch Confirmation
 
-- **刷新**: `src/tui/commands/config.ts` `handleModelCommand` → `refreshModelsForPicker`（`harness.getConfig({reload:true})` 与 2s 超时 race）
-- **状态确认**: `setModel`/`setThinking` 后 `session.getStatus()` 回读 `effectiveAlias`/`effectiveThinking`（provider 可能路由到不同变体）
-- **缓存警告**: 切换模型且 `contextTokens > 0` 时提示 "switching models invalidates the existing prompt cache - use /new to avoid extra token costs."
+- **Refresh**: `src/tui/commands/config.ts` `handleModelCommand` → `refreshModelsForPicker` (`harness.getConfig({reload:true})` raced against a 2s timeout)
+- **Status confirmation**: after `setModel`/`setThinking`, `session.getStatus()` re-reads `effectiveAlias`/`effectiveThinking` (the provider may route to a different variant)
+- **Cache warning**: switching models with `contextTokens > 0` prompts "switching models invalidates the existing prompt cache - use /new to avoid extra token costs."
 
 ### Clipboard Copy
 
-选中文本释放鼠标即写入系统剪贴板（`pbcopy` / `wl-copy` / `xclip` / PowerShell），替代多数终端静默丢弃的 OSC 52；失败有降级路径。
+On selection release, writes the selected text to the system clipboard (`pbcopy` / `wl-copy` / `xclip` / PowerShell), replacing the OSC 52 that most terminals silently drop; has a degradation path on failure.
 
 
 ---
@@ -613,48 +613,48 @@ Key files: `packages/agent-core/src/agent/compaction/{micro,full,strategy}.ts`,
 
 ### Stream-JSON Adapter & Channel Bridge
 
-`run-stream-json` 把标准会话事件流编码为行式 JSON 方言（供外部桥/管道消费）；渠道桥把事件复用进即时通讯渠道。
+`run-stream-json` encodes the standard session event stream as a line-based JSON dialect (for external bridges/pipes); the channel bridge re-broadcasts events into IM channels.
 
-- **方言**: `apps/scream-code/src/cli/run-stream-json.ts` — `ClaudeStreamJsonWriter`（`emitSystem(sessionId)` / `emitResult(subtype, summary, usage?)` / `emitAssistant` / `emitToolDelta`；assistant 事件不带 usage；tool delta 合并后 input 为字符串）、`mapCcConnectMode`（default/acceptEdits/dontAsk→manual、plan→planMode、auto→auto、bypassPermissions/yolo→yolo、未配置兜底 auto）、`extractUserText`（`\n` 连接）
-- **EPIPE 防护**: `installStdoutEpipeGuard()` 工厂 — stdout `error` 事件与 `write` 抛错双路捕获 EPIPE → `process.exit(0)`（静默退出不炸栈）；回归测试 `test/cli/run-stream-json.test.ts`（31 用例）
-- **桥接**: 会话事件（assistant 增量/工具调用/状态/审批/提问）经 `/api/events.mux` 与 `/api/events.host` 双只读 WebSocket 下发；审批与提问由 `POST /api/respond` 回显原 `rpcId`
+- **Dialect**: `apps/scream-code/src/cli/run-stream-json.ts` — `ClaudeStreamJsonWriter` (`emitSystem(sessionId)` / `emitResult(subtype, summary, usage?)` / `emitAssistant` / `emitToolDelta`; assistant events carry no usage; merged tool deltas have string input), `mapCcConnectMode` (default/acceptEdits/dontAsk→manual, plan→planMode, auto→auto, bypassPermissions/yolo→yolo, unset→auto), `extractUserText` (joined with `\n`)
+- **EPIPE guard**: `installStdoutEpipeGuard()` factory — catches EPIPE on both the stdout `error` event and `write` throws → `process.exit(0)` (quiet exit, no crash); regression tests `test/cli/run-stream-json.test.ts` (31 cases)
+- **Bridge**: session events (assistant deltas / tool calls / status / approvals / questions) go out over the two read-only WebSockets `/api/events.mux` and `/api/events.host`; approvals and questions reply via `POST /api/respond` echoing the original `rpcId`
 
 ### Service Manifest & Extension Contracts
 
-- **Manifest**: 插件包 `manifest.json`（含 `entryPoint`），`packages/agent-core/src/plugin/manifest.ts` 解析/校验；117 包是 manifest 发布/解析闭包，不等于浏览器运行时或 import 闭包
-- **Contract 文档**: `apps/scream-code/src/web/migration/protocol-report.md` — 最小协议重实现方案 + 保留 Cordis 插件 ABI 时的 vendor 闭包建议
-- **注册模型**: manifest hooks 经 `session/hooks/engine.ts:registerAll` 批量注册，与 `/extension` 运行时共用
+- **Manifest**: plugin packages carry `manifest.json` (incl. `entryPoint`), parsed/validated by `packages/agent-core/src/plugin/manifest.ts`; the 117-package set is the manifest publish/parse closure, not the browser-runtime or TS-import closure
+- **Contract doc**: `apps/scream-code/src/web/migration/protocol-report.md` — minimal protocol reimplementation plan + vendor-closure advice for keeping the Cordis plugin ABI
+- **Registration model**: manifest hooks register in bulk via `session/hooks/engine.ts:registerAll`, shared with the `/extension` runtime
 
 ### Output-Truncation Recovery
 
-长输出截断后自动"续写"——从被截断的最后一个文本块（保留其格式前缀）继续生成，而不是让模型重新想象全文。
+After a long output is truncated, it auto-"continues" — resuming generation from the last truncated text block (keeping its format prefix) instead of making the model re-imagine the whole text.
 
-- **位置**: `packages/agent-core/src/loop/`（finishReason=truncated 分支）— 记录截断位置，下轮 prompt 注入"从 [保留片段] 继续"，避免重复前半段
-- **关系**: 与压缩溢出截断（`TruncatedError` → shrink 重试）是两条独立路径：前者是模型输出截断，后者是输入超限
+- **Location**: `packages/agent-core/src/loop/` (finishReason=truncated branch) — records the truncation point; the next-round prompt injects "continue from [kept fragment]" to avoid repeating the first half
+- **Relation**: distinct from compaction-overflow truncation (`TruncatedError` → shrink retry): the former is model-output truncation, the latter is input-over-limit
 
 ### Invalid Tool-Call Repeat Breaker
 
-同一工具调用重复失败（同一 toolCallId 连续 N 次抛出相同错误）时中断该循环，防止模型在损坏工具上无限重试。
+Interrupts the loop when the same tool call fails repeatedly (the same `toolCallId` throws the same error N consecutive times), preventing the model from retrying forever on a broken tool.
 
-- **位置**: `packages/agent-core/src/loop/`（工具执行失败聚合）— 按 `toolCallId` 计数，达阈值转错误事件并跳过该工具，保护回合进度
-- **回退**: 模型后续轮次仍可重新发起工具调用（无全局熔断，仅针对卡死循环）
+- **Location**: `packages/agent-core/src/loop/` (tool-execution failure aggregation) — counts per `toolCallId`; past the threshold it converts to an error event and skips the tool, protecting turn progress
+- **Fallback**: the model may still re-issue the tool call in later rounds (no global circuit breaker — only stuck loops are cut)
 
 ### Approval Rejection Guidance
 
-审批被拒后给模型明确的引导 prompt，让它知道用户拒绝了哪个动作、为什么可能被拒（权限/成本/风险），并给出替代方向——避免模型对拒绝感到困惑或重复提交。
+After an approval is rejected, the model receives explicit guidance: which action was rejected, why it may have been rejected (permission/cost/risk), and alternative directions — so the model is not confused by the rejection and does not resubmit blindly.
 
-- **位置**: 权限层拒绝路径（`packages/agent-core/src/` permission/approval 相关）→ 拒绝时注入引导文本到下一步
+- **Location**: permission-layer rejection paths (`packages/agent-core/src/` permission/approval related) — injects the guidance text into the next step on rejection
 
 ### Anti-Drift Prompt Guidance
 
-system prompt 注入"反漂移"纪律段（context management / verification / anti-drift），约束 LLM 在长会话中不偏离原始需求——配合下方 Verification Protocol 的 convergence gate 双保险。
+The system prompt carries an "anti-drift" discipline section (context management / verification / anti-drift) that keeps the LLM from diverging from the original request in long sessions — paired with the Verification Protocol's convergence gate below as a second line of defense.
 
 ### Memory System
 
 The agent has a memory system provided by the `@scream-code/memory` package. Positioned as "task experience records" — structured logs of what was tried, what worked, and what failed. Each record also carries 3-5 semantic `tags` and a `projectDir`. Legacy entries without a `projectDir` or `tags` remain visible and usable.
 
 - **Storage**: SQLite database at `<screamHomeDir>/memory/memos.sqlite` (legacy JSONL at `<screamHomeDir>/memory/entries.jsonl` is migrated and kept as `.bak`). Schema includes `project_dir` and `tags`.
-- **Fields**: `userNeed` (需求), `approach` (方案), `outcome` (结果), `whatFailed` (踩坑), `whatWorked` (经验), `projectDir` (项目目录), `tags` (语义标签).
+- **Fields**: `userNeed` (the user's goal), `approach` (what was done), `outcome` (the result), `whatFailed` (dead ends), `whatWorked` (key successful actions), `projectDir` (project directory), `tags` (semantic tags).
 - **Extraction triggers**:
   - Compaction: `extractAndStoreMemos()` in `packages/agent-core/src/agent/compaction/full.ts` — scans compaction summary for `memory-memo` blocks.
   - Session exit: `extractMemoriesOnExit()` in `packages/agent-core/src/agent/index.ts` — takes last 30 messages × 300 chars, calls LLM.
