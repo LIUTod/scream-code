@@ -136,6 +136,7 @@ export function runModelSelector(
 function getWireTypeOptions(): ChoiceOption[] {
   return [
     { value: 'openai', label: t('prompts.wire_openai'), description: t('prompts.wire_openai_desc') },
+    { value: 'openai_responses', label: t('prompts.wire_openai_responses'), description: t('prompts.wire_openai_responses_desc') },
     { value: 'anthropic', label: t('prompts.wire_anthropic'), description: t('prompts.wire_anthropic_desc') },
   ];
 }
@@ -145,6 +146,8 @@ function getThinkingOptions(): ChoiceOption[] {
     { value: 'low', label: t('prompts.thinking_low') },
     { value: 'medium', label: t('prompts.thinking_medium') },
     { value: 'high', label: t('prompts.thinking_high') },
+    { value: 'xhigh', label: t('prompts.thinking_xhigh') },
+    { value: 'max', label: t('prompts.thinking_max') },
   ];
 }
 function getImageOptions(): ChoiceOption[] {

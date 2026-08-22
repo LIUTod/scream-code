@@ -184,10 +184,15 @@ async function handleDiyConfig(host: SlashCommandHost): Promise<void> {
     subtitle: t('auth.api_url_hint'),
   });
   if (baseUrl === undefined) return;
+  if (!baseUrl.trim()) {
+    host.showError(t('auth.error_empty_base_url'));
+    return;
+  }
 
-  // Step 3 — API key (plain-text so users can paste)
+  // Step 3 — API key (masked so shoulder-surfers can't read it)
   const apiKey = await promptTextInput(host, t('auth.input_api_key'), {
     subtitle: t('auth.api_key_hint'),
+    masked: true,
   });
   if (apiKey === undefined) return;
 
@@ -196,6 +201,10 @@ async function handleDiyConfig(host: SlashCommandHost): Promise<void> {
     subtitle: t('auth.model_hint'),
   });
   if (modelId === undefined) return;
+  if (!modelId.trim()) {
+    host.showError(t('auth.error_empty_model_id'));
+    return;
+  }
 
   // Step 5 — max context tokens
   const maxContextStr = await promptTextInput(host, t('auth.input_context'), {
@@ -203,7 +212,12 @@ async function handleDiyConfig(host: SlashCommandHost): Promise<void> {
     placeholder: '131072',
   });
   if (maxContextStr === undefined) return;
-  const maxContextTokens = parseInt(maxContextStr, 10) || 131_072;
+  const parsed = parseInt(maxContextStr, 10);
+  if (Number.isNaN(parsed) || parsed < 4096) {
+    host.showError(t('auth.error_invalid_context_size'));
+    return;
+  }
+  const maxContextTokens = parsed;
 
   // Step 6 — thinking level
   const thinkingLevel = await promptThinkingMode(host);
@@ -236,32 +250,29 @@ async function handleDiyConfig(host: SlashCommandHost): Promise<void> {
     maxOutputSize: wire === 'anthropic' ? 32_000 : undefined,
   };
 
-  // Apply to config — same codepath as the regular catalog flow
-  const existingConfig = await host.harness.getConfig();
-  if (existingConfig.providers[providerId] !== undefined) {
+  // Apply to config via the shared catalog codepath (handles same-provider
+  // old-model cleanup, provider removal, and model/thinking standardization).
+  const config = await host.harness.getConfig();
+  if (config.providers[providerId] !== undefined) {
     await host.harness.removeProvider(providerId);
   }
-
-  const config = await host.harness.getConfig();
-  config.providers[providerId] = {
-    type: wire as 'openai' | 'anthropic',
+  const freshConfig = await host.harness.getConfig();
+  applyCatalogProvider(freshConfig, {
+    providerId,
+    wire: wire as 'openai' | 'openai_responses' | 'anthropic',
     baseUrl,
     apiKey,
-  };
-
-  const models = config.models ?? {};
-  models[`${providerId}/${modelId}`] = catalogModelToAlias(providerId, catalogModel);
-  config.models = models;
-  config.defaultModel = `${providerId}/${modelId}`;
-  config.defaultThinking = thinkingLevel !== 'off';
-  config.thinking = { ...config.thinking, mode: thinkingLevel === 'off' ? 'off' : 'on', effort: thinkingLevel };
+    models: [catalogModel],
+    selectedModelId: modelId,
+    thinkingLevel,
+  });
 
   await host.harness.setConfig({
-    providers: config.providers,
-    models: config.models,
-    defaultModel: config.defaultModel,
-    defaultThinking: config.defaultThinking,
-    thinking: config.thinking,
+    providers: freshConfig.providers,
+    models: freshConfig.models,
+    defaultModel: freshConfig.defaultModel,
+    defaultThinking: freshConfig.defaultThinking,
+    thinking: freshConfig.thinking,
   });
 
   await host.authFlow.refreshConfigAfterLogin();

@@ -162,6 +162,6 @@ export function applyCatalogProvider(
   const thinkingLevel = options.thinkingLevel ?? (options.thinking === true ? 'medium' : 'off');
   config.defaultModel = defaultModel;
   config.defaultThinking = thinkingLevel !== 'off';
-  config.thinking = { ...config.thinking, mode: thinkingLevel === 'off' ? 'off' : 'on', effort: thinkingLevel };
+  config.thinking = { ...config.thinking, mode: thinkingLevel === 'off' ? 'off' : 'on', effort: thinkingLevel === 'off' ? (config.thinking?.effort ?? 'low') : thinkingLevel };
   return { defaultModel };
 }

@@ -557,7 +557,7 @@ export function getModelCycleLevel(
   // Use getThinkingLevels so models that don't support thinking return
   // ['off'] (single level -> next===current -> no-op), and the fallback
   // set matches DEFAULT_THINKING_LEVELS exactly.
-  const levels = model ? getThinkingLevels(model) : (['off', 'low', 'medium', 'high', 'max'] as const);
+  const levels = model ? getThinkingLevels(model) : (['off', 'low', 'medium', 'high', 'xhigh', 'max'] as const);
   const idx = levels.indexOf(current);
   const nextIdx = idx < 0 ? 0 : (idx + 1) % levels.length;
   return levels[nextIdx] ?? 'off';
