@@ -15,6 +15,14 @@ export const SPEED_WINDOW_MS = 3000;
  *  color gauge saturates here. */
 export const SPEED_MAX = 200;
 /**
+ * Instantaneous-rate poison guard. A single delta arriving after a near-zero
+ * interval (bursty providers push one large chunk) yields a wildly
+ * implausible tok/s (tens of thousands). No real model streams that fast, so
+ * observations above this are measurement noise and are dropped rather than
+ * averaged in — keeping the badge real without the old 200 hard clamp.
+ */
+export const MAX_PLAUSIBLE_RATE = 3000;
+/**
  * Chars-per-token estimate for converting character deltas to an approximate
  * token count. 2.5 is a middle ground between English (~4 chars/token) and
  * Chinese (~1 char/token). Pure Chinese underestimates ~2.5x, pure English
@@ -39,11 +47,14 @@ export class SpeedTracker {
 
   /**
    * Record one instantaneous tok/s reading. The raw rate is preserved (no
-   * clamp) so the badge shows real throughput; the 3s windowed average already
-   * smooths outliers. Non-finite or negative rates are ignored.
+   * clamp) so the badge shows real throughput, but implausible readings
+   * (burst measurement noise from a near-zero interval) are dropped so they
+   * cannot poison the 3s windowed average. Non-finite or negative rates are
+   * ignored.
    */
   observe(rate: number, now: number = performance.now()): void {
     if (!Number.isFinite(rate) || rate < 0) return;
+    if (rate > MAX_PLAUSIBLE_RATE) return; // measurement noise, drop it
     this.observations.push({ time: now, rate });
     this.prune(now);
   }

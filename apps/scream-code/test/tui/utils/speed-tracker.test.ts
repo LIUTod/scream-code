@@ -43,9 +43,18 @@ describe('SpeedTracker', () => {
 
   it('keeps the raw rate (no clamping) so the displayed tok/s is real', () => {
     const tracker = new SpeedTracker();
-    tracker.observe(10_000, 0);
-    // No clamp — the actual rate is preserved for display.
-    expect(tracker.getSpeed(100)).toBe(10_000);
+    // 2500 is below the poison guard, so it is kept without clamping.
+    tracker.observe(2500, 0);
+    expect(tracker.getSpeed(100)).toBe(2500);
+  });
+
+  it('drops implausible burst readings that would poison the average', () => {
+    const tracker = new SpeedTracker();
+    // A real high rate (500 tok/s) is kept.
+    tracker.observe(500, 0);
+    // A 21496 tok/s burst (near-zero interval measurement noise) is dropped.
+    tracker.observe(21_496, 100);
+    expect(tracker.getSpeed(200)).toBe(500);
   });
 
   it('ignores non-finite or negative rates', () => {
