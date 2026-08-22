@@ -182,7 +182,9 @@ describe('smooth streaming (token pacing)', () => {
 
     // Simulate a fast model: budget scales to the arrival rate
     // (80 tok/s → ceil(80 * 0.05 * 2.5) = 10 chars/frame), not MIN=1.
-    getSharedSpeedTracker().observe(80);
+    // Seed with the real clock so the windowed getSpeed() (called with a real
+    // performance.now()) keeps this observation in-window.
+    getSharedSpeedTracker().observe(80, 1000, performance.now());
     controller.appendAssistantDelta('x'.repeat(50));
     (controller as unknown as { flush: () => void }).flush();
 

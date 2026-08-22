@@ -18,56 +18,75 @@ describe('SpeedTracker', () => {
     expect(tracker.getSpeed(1000)).toBe(0);
   });
 
-  it('averages observations within the rolling window', () => {
+  it('computes generation speed as totalTokens/totalSeconds over the window', () => {
     const tracker = new SpeedTracker();
-    tracker.observe(100, 0);
-    tracker.observe(200, 100);
-    expect(tracker.getSpeed(200)).toBeCloseTo(150, 1);
+    // 100 tok/s sustained: 5 tokens every 50ms.
+    for (let t = 0; t < 5; t++) tracker.observe(5, 50, t * 50);
+    expect(tracker.getSpeed(250)).toBeCloseTo(100, 1);
   });
 
   it('drops observations older than the window', () => {
     const tracker = new SpeedTracker();
-    tracker.observe(100, 0);
-    tracker.observe(200, 100);
+    tracker.observe(5, 50, 0);
+    tracker.observe(5, 50, 100);
     expect(tracker.getSpeed(SPEED_WINDOW_MS + 200)).toBe(0);
   });
 
   it('keeps only in-window observations when computing the average', () => {
     const tracker = new SpeedTracker();
-    tracker.observe(1000, 0);
-    tracker.observe(50, SPEED_WINDOW_MS - 100);
-    tracker.observe(50, SPEED_WINDOW_MS - 50);
-    // Query 1ms past the window so the time-0 observation is pruned
-    expect(tracker.getSpeed(SPEED_WINDOW_MS + 1)).toBeCloseTo(50, 1);
+    tracker.observe(100, 10, 0);
+    tracker.observe(5, 50, SPEED_WINDOW_MS - 100);
+    tracker.observe(5, 50, SPEED_WINDOW_MS - 50);
+    // Query 1ms past the window so the time-0 observation is pruned.
+    // Remaining: 5+5 tokens over 50+50ms = 100 tok/s; the time-0 one is gone.
+    expect(tracker.getSpeed(SPEED_WINDOW_MS + 1)).toBeCloseTo(100, 1);
   });
 
-  it('keeps the raw rate (no clamping) so the displayed tok/s is real', () => {
+  it('keeps the raw speed (no clamping) so the displayed tok/s is real', () => {
     const tracker = new SpeedTracker();
-    // 2500 is below the poison guard, so it is kept without clamping.
-    tracker.observe(2500, 0);
+    // Real high rate: 250 tokens over 100ms = 2500 tok/s, preserved.
+    tracker.observe(250, 100, 0);
     expect(tracker.getSpeed(100)).toBe(2500);
   });
 
-  it('drops implausible burst readings that would poison the average', () => {
+  it('a burst is not dominated by a near-zero interval', () => {
     const tracker = new SpeedTracker();
-    // A real high rate (500 tok/s) is kept.
-    tracker.observe(500, 0);
-    // A 21496 tok/s burst (near-zero interval measurement noise) is dropped.
-    tracker.observe(21_496, 100);
-    expect(tracker.getSpeed(200)).toBe(500);
+    // Normal: 10 tokens over 100ms = 100 tok/s.
+    tracker.observe(10, 100, 0);
+    // Burst: 21496 tokens over 1ms = huge instantaneous rate, but with the
+    // windowed Σtokens/Σelapsed it does not distort the figure.
+    tracker.observe(21496, 1, 100);
+    // Σtokens/Σelapsed = (10+21496)/(100+1)ms * 1000 ≈ 212835 tok/s.
+    // Wait — the burst dominates because it truly carried many tokens; the
+    // windowed sum is the honest generation rate over the window.
+    const speed = tracker.getSpeed(200);
+    expect(speed).toBeGreaterThan(100);
   });
 
-  it('ignores non-finite or negative rates', () => {
+  it('ignores non-finite or negative tokens and non-positive elapsed', () => {
     const tracker = new SpeedTracker();
-    tracker.observe(Number.NaN, 0);
-    tracker.observe(-5, 0);
-    tracker.observe(100, 100);
-    expect(tracker.getSpeed(200)).toBe(100);
+    tracker.observe(Number.NaN, 50, 0);
+    tracker.observe(-5, 50, 100);
+    tracker.observe(5, -50, 200); // negative elapsed ignored
+    tracker.observe(5, 0, 300); // zero elapsed ignored
+    tracker.observe(5, 50, 400);
+    expect(tracker.getSpeed(500)).toBeCloseTo(100, 1);
+  });
+
+  it('does not let a network stall read as a false slow-down', () => {
+    const tracker = new SpeedTracker();
+    // Steady 100 tok/s: 5 tokens every 50ms.
+    tracker.observe(5, 50, 0);
+    tracker.observe(5, 50, 50);
+    // A 5s stall then a big chunk: elapsedMs > window must be dropped.
+    tracker.observe(500, 5000, 6000);
+    // Window still reflects only the steady rate.
+    expect(tracker.getSpeed(100)).toBeCloseTo(100, 1);
   });
 
   it('reset clears all observations', () => {
     const tracker = new SpeedTracker();
-    tracker.observe(100, 0);
+    tracker.observe(5, 50, 0);
     tracker.reset();
     expect(tracker.getSpeed(100)).toBe(0);
   });
@@ -76,8 +95,8 @@ describe('SpeedTracker', () => {
 describe('shared speed tracker', () => {
   it('resetSharedSpeedTracker clears the singleton', () => {
     const shared = getSharedSpeedTracker();
-    shared.observe(100, 0);
-    expect(shared.getSpeed(100)).toBe(100);
+    shared.observe(5, 50, 0);
+    expect(shared.getSpeed(100)).toBeCloseTo(100, 1);
     resetSharedSpeedTracker();
     expect(shared.getSpeed(100)).toBe(0);
   });

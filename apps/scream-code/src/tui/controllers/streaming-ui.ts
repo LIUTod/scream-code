@@ -154,8 +154,7 @@ export class StreamingUIController {
     if (this.lastDeltaAt !== undefined) {
       const elapsedMs = now - this.lastDeltaAt;
       if (elapsedMs > 0) {
-        const rate = (tokens / elapsedMs) * 1000;
-        getSharedSpeedTracker().observe(rate, now);
+        getSharedSpeedTracker().observe(tokens, elapsedMs, now);
       }
     }
     this.lastDeltaAt = now;

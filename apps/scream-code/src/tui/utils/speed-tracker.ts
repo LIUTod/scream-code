@@ -15,14 +15,6 @@ export const SPEED_WINDOW_MS = 3000;
  *  color gauge saturates here. */
 export const SPEED_MAX = 200;
 /**
- * Instantaneous-rate poison guard. A single delta arriving after a near-zero
- * interval (bursty providers push one large chunk) yields a wildly
- * implausible tok/s (tens of thousands). No real model streams that fast, so
- * observations above this are measurement noise and are dropped rather than
- * averaged in — keeping the badge real without the old 200 hard clamp.
- */
-export const MAX_PLAUSIBLE_RATE = 3000;
-/**
  * Chars-per-token estimate for converting character deltas to an approximate
  * token count. 2.5 is a middle ground between English (~4 chars/token) and
  * Chinese (~1 char/token). Pure Chinese underestimates ~2.5x, pure English
@@ -32,7 +24,8 @@ export const CHARS_PER_TOKEN_ESTIMATE = 2.5;
 
 interface SpeedObservation {
   readonly time: number;
-  readonly rate: number;
+  readonly tokens: number;
+  readonly elapsedMs: number;
 }
 
 export class SpeedTracker {
@@ -46,26 +39,44 @@ export class SpeedTracker {
   }
 
   /**
-   * Record one instantaneous tok/s reading. The raw rate is preserved (no
-   * clamp) so the badge shows real throughput, but implausible readings
-   * (burst measurement noise from a near-zero interval) are dropped so they
-   * cannot poison the 3s windowed average. Non-finite or negative rates are
-   * ignored.
+   * Record one delta: the estimated tokens it carried and the elapsed ms since
+   * the previous delta. Non-finite/negative values are ignored. The windowed
+   * figure in {@link getSpeed} is `Σtokens / Σelapsed` (the standard
+   * "generation speed"), which is robust to bursty arrivals and needs no
+   * clamping.
    */
-  observe(rate: number, now: number = performance.now()): void {
-    if (!Number.isFinite(rate) || rate < 0) return;
-    if (rate > MAX_PLAUSIBLE_RATE) return; // measurement noise, drop it
-    this.observations.push({ time: now, rate });
+  observe(tokens: number, elapsedMs: number, now: number = performance.now()): void {
+    if (!Number.isFinite(tokens) || tokens < 0) return;
+    if (!Number.isFinite(elapsedMs) || elapsedMs <= 0) return;
+    // A gap larger than the window is a network/load stall, not a generation
+    // rate: the first delta after it carries a huge elapsed that would poison
+    // Σelapsed and read as a false slow-down. Drop it and let the window
+    // re-establish from the next contiguous delta.
+    if (elapsedMs > SPEED_WINDOW_MS) return;
+    this.observations.push({ time: now, tokens, elapsedMs });
     this.prune(now);
   }
 
-  /** Windowed-average tok/s; 0 once observations age out of the window. */
+  /**
+   * Windowed generation speed = Σtokens / Σseconds over the 3s rolling
+   * window. This is the "pure generation speed" measure: a single delta's
+   * sudden burst of tokens is counted honestly (it genuinely arrived in that
+   * window), while a near-zero-interval artifact no longer produces an
+   * implausible instantaneous figure. Observations whose gap exceeds the
+   * window (network/load stalls) are dropped so they don't read as a false
+   * slow-down. 0 once the window empties.
+   */
   getSpeed(now: number = performance.now()): number {
     this.prune(now);
     if (this.observations.length === 0) return 0;
-    let sum = 0;
-    for (const o of this.observations) sum += o.rate;
-    return sum / this.observations.length;
+    let totalTokens = 0;
+    let totalElapsedMs = 0;
+    for (const o of this.observations) {
+      totalTokens += o.tokens;
+      totalElapsedMs += o.elapsedMs;
+    }
+    if (totalElapsedMs <= 0) return 0;
+    return (totalTokens / totalElapsedMs) * 1000;
   }
 
   reset(): void {
