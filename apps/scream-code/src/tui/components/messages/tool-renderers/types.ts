@@ -7,6 +7,8 @@ import type { ToolCallBlockData, ToolResultBlockData } from '#/tui/types';
 export interface RendererContext {
   readonly expanded: boolean;
   readonly colors: ColorPalette;
+  /** When true, output is shown even when collapsed (live tool streaming). */
+  readonly isLive?: boolean;
 }
 
 export type ResultRenderer = (

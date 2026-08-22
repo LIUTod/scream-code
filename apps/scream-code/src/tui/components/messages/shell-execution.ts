@@ -107,5 +107,16 @@ export const shellExecutionResultRenderer: ResultRenderer = (
     // ctrl+o reveals the full command (no line cap).
     showCommand: true,
     commandPreviewLines: ctx.expanded ? undefined : SHELL_COMMAND_COLLAPSED_LINES,
+    // Collapsed SUCCESS: hide the output (0 lines) — the truncated component
+    // still renders its "N lines hidden, press ctrl+o" hint.
+    // Collapsed FAILURE: show the tail so the error text stays visible.
+    // Collapsed live: show it so the user sees streaming in real time.
+    resultPreviewLines: ctx.expanded
+      ? undefined
+      : result.is_error
+        ? undefined
+        : ctx.isLive
+          ? undefined
+          : 0,
   }),
 ];

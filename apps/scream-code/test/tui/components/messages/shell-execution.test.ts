@@ -111,7 +111,33 @@ describe('ShellExecutionComponent', () => {
       expect(rendered).toContain('echo three');
       expect(rendered).not.toContain('echo four');
       expect(rendered).not.toContain('echo five');
-      expect(rendered).toContain('ok');
+      // Output is hidden when collapsed — only the expand hint shows.
+      expect(rendered).not.toContain('ok');
+      expect(rendered).toContain('ctrl+o');
+    });
+
+    it('shows the error tail when the command failed', () => {
+      const components = shellExecutionResultRenderer(
+        {
+          id: 'call_err',
+          name: 'Bash',
+          args: { command: 'false' },
+        },
+        {
+          tool_call_id: 'call_err',
+          output: 'bash: false: command not found\nline2\nerror detail',
+          is_error: true,
+        },
+        { expanded: false, colors: darkColors },
+      );
+
+      const rendered = components
+        .flatMap((c) => c.render(100))
+        .map(strip)
+        .join('\n');
+      // Failure: the error tail stays visible even when collapsed.
+      expect(rendered).toContain('bash: false: command not found');
+      expect(rendered).toContain('error detail');
     });
 
     it('highlights the command instead of dimming it', () => {

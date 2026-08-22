@@ -71,12 +71,11 @@ describe('ToolCallComponent', () => {
     );
 
     const collapsed = strip(component.render(100).join('\n'));
-    // Tail preview: last 15 lines shown, first 5 hidden.
-    expect(collapsed).toContain('line06');
-    expect(collapsed).toContain('line20');
+    // Collapsed: output fully hidden, only the expand hint shows.
     expect(collapsed).not.toContain('line01');
-    expect(collapsed).not.toContain('line05');
-    expect(collapsed).toContain('▸ 还有 5 行，按 ctrl+o 展开');
+    expect(collapsed).not.toContain('line06');
+    expect(collapsed).not.toContain('line20');
+    expect(collapsed).toContain('还有 20 行，按 ctrl+o 展开');
 
     component.setExpanded(true);
 
@@ -151,7 +150,15 @@ describe('ToolCallComponent', () => {
     );
 
     const out = strip(component.render(100).join('\n'));
-    expect(out).toContain('first line');
+    // Bash collapsed hides output — the <system-reminder> inside must not leak.
+    expect(out).not.toContain('first line');
+    expect(out).not.toContain('system-reminder');
+
+    // Expanded: the raw output (including the embedded tag) is visible.
+    component.setExpanded(true);
+    const expanded = strip(component.render(100).join('\n'));
+    expect(expanded).toContain('first line');
+    expect(expanded).toContain('system-reminder');
   });
 
   it('renders ExitPlanMode plan from result output when args.plan is absent', () => {
@@ -385,9 +392,15 @@ describe('ToolCallComponent', () => {
       is_error: false,
     });
     const after = strip(component.render(100).join('\n'));
-    expect(after).toContain('final result');
+    // Collapsed: result output hidden (only the command + expand hint show).
+    expect(after).not.toContain('final result');
     expect(after).not.toContain('LIVE_MARKER_ONE');
     expect(after).not.toContain('LIVE_MARKER_TWO');
+
+    // Expanded: the final result is visible.
+    component.setExpanded(true);
+    const expanded = strip(component.render(100).join('\n'));
+    expect(expanded).toContain('final result');
   });
 
   it('caps live output with a tail-preserving truncation marker', () => {
