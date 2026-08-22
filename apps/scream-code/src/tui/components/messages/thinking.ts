@@ -136,7 +136,10 @@ export class ThinkingComponent implements Component {
       const spinner = chalk.hex(this.color)(
         `${BRAILLE_SPINNER_FRAMES[this.spinnerFrame] ?? BRAILLE_SPINNER_FRAMES[0]} `,
       );
-      const rate = Math.min(SPEED_MAX, getSharedSpeedTracker().getSpeed());
+      // Real rate, not clamped — show the actual tok/s so users see true
+      // throughput. SPEED_MAX remains the color-gauge reference (rate >= 200
+      // shows the full accent color; the number keeps rising past it).
+      const rate = getSharedSpeedTracker().getSpeed();
       const rateSuffix = rate > 0.05
         ? chalk.hex(lerpHex(this.dimColor, this.accentColor, easeSpeedRatio(rate / SPEED_MAX)))(
             ` · ${rate.toFixed(1)} toks/s`,

@@ -10,7 +10,9 @@
 
 /** Rolling window (ms) over which streaming-rate observations are averaged. */
 export const SPEED_WINDOW_MS = 3000;
-/** Color/clamp ceiling: a rate at or above this maps to the full accent color. */
+/** Color ceiling: a rate at or above this maps to the full accent color. The
+ *  displayed tok/s is NOT clamped — it keeps rising past this value; only the
+ *  color gauge saturates here. */
 export const SPEED_MAX = 200;
 /**
  * Chars-per-token estimate for converting character deltas to an approximate
@@ -36,13 +38,13 @@ export class SpeedTracker {
   }
 
   /**
-   * Record one instantaneous tok/s reading, clamped to {@link SPEED_MAX} so a
-   * single oversized delta can't poison the windowed average. Non-finite or
-   * negative rates are ignored.
+   * Record one instantaneous tok/s reading. The raw rate is preserved (no
+   * clamp) so the badge shows real throughput; the 3s windowed average already
+   * smooths outliers. Non-finite or negative rates are ignored.
    */
   observe(rate: number, now: number = performance.now()): void {
     if (!Number.isFinite(rate) || rate < 0) return;
-    this.observations.push({ time: now, rate: Math.min(rate, SPEED_MAX) });
+    this.observations.push({ time: now, rate });
     this.prune(now);
   }
 
@@ -83,7 +85,7 @@ export function resetSharedSpeedTracker(): void {
  * from a dim gray toward the theme accent as tok/s rises.
  */
 export function lerpHex(from: string, to: string, t: number): string {
-  const k = t < 0 ? 0 : t > 1 ? 1 : t;
+  const k = t < 0 ? 0 : Math.min(1, t);
   const fr = Number.parseInt(from.slice(1, 3), 16);
   const fg = Number.parseInt(from.slice(3, 5), 16);
   const fb = Number.parseInt(from.slice(5, 7), 16);
@@ -112,6 +114,6 @@ export function estimateTokens(delta: string): number {
  * makes the color jump toward accent as soon as any tokens flow.
  */
 export function easeSpeedRatio(ratio: number): number {
-  const t = ratio < 0 ? 0 : ratio > 1 ? 1 : ratio;
+  const t = ratio < 0 ? 0 : Math.min(1, ratio);
   return t * t * (3 - 2 * t);
 }

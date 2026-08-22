@@ -41,10 +41,11 @@ describe('SpeedTracker', () => {
     expect(tracker.getSpeed(SPEED_WINDOW_MS + 1)).toBeCloseTo(50, 1);
   });
 
-  it('clamps rates to SPEED_MAX so a single burst cannot poison the average', () => {
+  it('keeps the raw rate (no clamping) so the displayed tok/s is real', () => {
     const tracker = new SpeedTracker();
     tracker.observe(10_000, 0);
-    expect(tracker.getSpeed(100)).toBe(SPEED_MAX);
+    // No clamp — the actual rate is preserved for display.
+    expect(tracker.getSpeed(100)).toBe(10_000);
   });
 
   it('ignores non-finite or negative rates', () => {
