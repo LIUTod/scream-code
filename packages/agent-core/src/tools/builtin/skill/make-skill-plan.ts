@@ -223,7 +223,24 @@ function parsePlanJson(rawText: string): SkillPlan {
     );
   }
 
-  const result = z
+  // The SYSTEM_PROMPT instructs the model to emit `when-to-use` (matching the
+  // SKILL.md frontmatter), but the internal schema uses camelCase `whenToUse`.
+  // Accept all three spellings so the model's hyphenated key parses instead of
+  // failing validation. Mirrors the frontmatter aliases in skill/parser.ts.
+  const normalizeWhenToUse = (raw: unknown): unknown => {
+    if (raw !== null && typeof raw === 'object' && !Array.isArray(raw)) {
+      const obj = raw as Record<string, unknown>;
+      if (obj['whenToUse'] === undefined) {
+        const hyphen = obj['when-to-use'];
+        const underscore = obj['when_to_use'];
+        if (typeof hyphen === 'string') obj['whenToUse'] = hyphen;
+        else if (typeof underscore === 'string') obj['whenToUse'] = underscore;
+      }
+    }
+    return raw;
+  };
+
+  const planSchema = z
     .object({
       name: z.string(),
       description: z.string(),
@@ -238,7 +255,9 @@ function parsePlanJson(rawText: string): SkillPlan {
         )
         .default([]),
     })
-    .safeParse(parsed);
+    .transform((plan) => plan);
+
+  const result = z.preprocess(normalizeWhenToUse, planSchema).safeParse(parsed);
 
   if (!result.success) {
     throw new ScreamError(

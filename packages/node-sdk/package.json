@@ -1,6 +1,6 @@
 {
   "name": "@scream-code/scream-code-sdk",
-  "version": "0.14.3",
+  "version": "0.14.5",
   "private": true,
   "description": "TypeScript SDK for the Scream Code Agent",
   "license": "MIT",

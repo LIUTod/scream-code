@@ -204,6 +204,50 @@ describe('MakeSkillPlanTool', () => {
     expect(result.isError).toBe(true);
   });
 
+  it('accepts a plan whose top-level JSON uses the hyphenated when-to-use key', async () => {
+    const agent = {
+      context: { history: [makeContextMessage('user', 'How do I deploy a gateway?')] },
+      config: { provider: {} as unknown as Parameters<Agent['generate']>[0] },
+      generateWithRetry: vi.fn().mockResolvedValue({
+        message: {
+          content: JSON.stringify({
+            name: 'gateway-monitor',
+            description: 'Monitor a gateway deployment.',
+            // The SYSTEM_PROMPT tells the model to emit `when-to-use`, which
+            // must be normalized to the internal `whenToUse` before the zod
+            // schema validates it (regression: this used to fail validation).
+            'when-to-use': 'When the user asks to deploy or monitor a model gateway.',
+            content:
+              '---\n' +
+              'name: gateway-monitor\n' +
+              'description: Monitor a gateway deployment.\n' +
+              'when-to-use: When the user asks to deploy or monitor a model gateway.\n' +
+              'type: inline\n' +
+              '---\n' +
+              '\n' +
+              '# Gateway monitor\n' +
+              '\n' +
+              'Monitor the gateway deployment.\n',
+            files: [],
+          }),
+        },
+      }),
+    } as unknown as Agent;
+
+    const tool = new MakeSkillPlanTool(agent);
+    const result = await runTool(tool, {
+      type: 'tool-chain',
+      nameHint: '',
+      purpose: '',
+      focus: '',
+    });
+
+    expect(result.isError).not.toBe(true);
+    const plan = JSON.parse(typeof result.output === 'string' ? result.output : '');
+    expect(plan.name).toBe('gateway-monitor');
+    expect(plan.whenToUse).toBe('When the user asks to deploy or monitor a model gateway.');
+  });
+
   it('rejects a plan whose content frontmatter lacks when-to-use', async () => {
     const agent = {
       context: { history: [makeContextMessage('user', 'Hi')] },
