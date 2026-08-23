@@ -5,7 +5,12 @@ import chalk from 'chalk';
 
 import type { ColorPalette } from '#/tui/theme/colors';
 import type { ToolCallBlockData, ToolResultBlockData } from '#/tui/types';
-import { MAX_SHELL_OUTPUT_BYTES, TOOL_OUTPUT_PREVIEW_LINES } from '#/tui/constant/rendering';
+import {
+  MAX_SHELL_OUTPUT_BYTES,
+  SHELL_COMMAND_COLLAPSED_LINES,
+  TOOL_OUTPUT_PREVIEW_LINES,
+} from '#/tui/constant/rendering';
+import { highlightLines } from '../media/code-highlight';
 
 import type { ResultRenderer } from './tool-renderers/types';
 import { TruncatedOutputComponent } from './tool-renderers/truncated';
@@ -30,7 +35,11 @@ export class ShellExecutionComponent extends Container {
     super();
 
     if (options.showCommand === true) {
-      this.addCommandPreview(options.command ?? '', options.commandPreviewLines);
+      this.addCommandPreview(
+        options.command ?? '',
+        options.commandPreviewLines,
+        options.colors,
+      );
     }
 
     if (options.result !== undefined) {
@@ -43,13 +52,21 @@ export class ShellExecutionComponent extends Container {
     }
   }
 
-  private addCommandPreview(command: string, previewLines: number | undefined): void {
+  private addCommandPreview(
+    command: string,
+    previewLines: number | undefined,
+    colors: ColorPalette,
+  ): void {
     if (command.length === 0) return;
-    const allLines = command.split('\n');
+    // Bash syntax highlight (same pipeline as Write streaming previews) makes
+    // the command the visually brightest element of the card; on highlight
+    // failure it falls back to plain terminal default color — never dim, so
+    // the command always stands out from the dimmed output below.
+    const allLines = highlightLines(command, 'bash', colors);
     const lines = previewLines === undefined ? allLines : allLines.slice(0, previewLines);
     for (const [i, line] of lines.entries()) {
       const prefix = i === 0 ? '$ ' : '  ';
-      this.addChild(new Text(chalk.dim(prefix + line), 2, 0));
+      this.addChild(new Text(`${chalk.dim(prefix)}${line}`, 2, 0));
     }
   }
 
@@ -85,10 +102,21 @@ export const shellExecutionResultRenderer: ResultRenderer = (
     result,
     colors: ctx.colors,
     expanded: ctx.expanded,
-    // Header truncates long bash commands to 60 chars. When the user expands
-    // the card with ctrl+o, reveal the full command (no line cap) so they
-    // can read what actually ran.
-    showCommand: ctx.expanded,
-    commandPreviewLines: undefined,
+    // The header truncates long bash commands to 60 chars, so the command
+    // stays visible in the body even when collapsed — capped at a few lines.
+    // ctrl+o reveals the full command (no line cap).
+    showCommand: true,
+    commandPreviewLines: ctx.expanded ? undefined : SHELL_COMMAND_COLLAPSED_LINES,
+    // Collapsed SUCCESS: hide the output (0 lines) — the truncated component
+    // still renders its "N lines hidden, press ctrl+o" hint.
+    // Collapsed FAILURE: show the tail so the error text stays visible.
+    // Collapsed live: show it so the user sees streaming in real time.
+    resultPreviewLines: ctx.expanded
+      ? undefined
+      : result.is_error
+        ? undefined
+        : ctx.isLive
+          ? undefined
+          : 0,
   }),
 ];
