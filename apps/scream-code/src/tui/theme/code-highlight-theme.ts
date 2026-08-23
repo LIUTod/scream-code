@@ -18,7 +18,7 @@ import type { ColorPalette } from './colors';
 
 export function createCodeHighlightTheme(colors: ColorPalette): Theme {
   const keyword = chalk.hex(colors.mdCodeBlock); // blue (keywords/types/tags)
-  const str = chalk.hex(colors.mdLink); // cyan (strings/regexps) — not red, which reads as an error
+  const str = chalk.hex(colors.error); // red (strings/regexps)
   const num = chalk.hex(colors.primary); // green (numbers/comments)
   const fn = chalk.hex(colors.warning); // yellow (functions/names/attrs)
   const builtin = chalk.hex(colors.planMode); // cyan (built-ins/literals)

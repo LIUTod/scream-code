@@ -50,12 +50,13 @@ describe('tool-result registry', () => {
   it('uses truncated renderer for Bash to preserve raw output UX', () => {
     const renderer = pickResultRenderer('Bash');
     const out = strip(joinRender(renderer(call('Bash'), result('one\ntwo\nthree\nfour'), ctx)));
-    // Bash collapsed: output lines hidden, only the expand hint shows.
-    expect(out).not.toContain('one');
-    expect(out).not.toContain('two');
-    expect(out).not.toContain('three');
-    expect(out).not.toContain('four');
-    expect(out).toContain('ctrl+o');
+    // Bash renders raw output (no summary chip); under the 15-line collapse
+    // threshold all four lines are shown verbatim with no expand hint.
+    expect(out).toContain('one');
+    expect(out).toContain('two');
+    expect(out).toContain('three');
+    expect(out).toContain('four');
+    expect(out).not.toContain('ctrl+o');
   });
 
   it('Read renders line count · extension glance when collapsed', () => {

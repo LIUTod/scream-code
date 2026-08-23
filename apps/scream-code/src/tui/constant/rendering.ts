@@ -12,15 +12,11 @@ export const RESULT_PREVIEW_LINES = 3;
 export const THINKING_PREVIEW_LINES = 2;
 export const COMMAND_PREVIEW_LINES = 10;
 
-// Collapsed shell cards keep the command visible (so the user can always see
-// what ran) but cap it at this many lines; ctrl+o reveals the full command.
-export const SHELL_COMMAND_COLLAPSED_LINES = 3;
-
 // Tail-preview cap for tool/shell output. Outputs longer than this default to
 // a collapsed TAIL preview (newest lines - where command errors land) with an
 // expand hint at the top, so a long command result no longer explodes the
 // transcript. Larger than RESULT_PREVIEW_LINES so the preview stays useful.
-export const TOOL_OUTPUT_PREVIEW_LINES = 15;
+export const TOOL_OUTPUT_PREVIEW_LINES = 10;
 
 // Shell output is capped before wrapping to prevent a single huge command
 // result from hanging the renderer.

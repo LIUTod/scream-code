@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import chalk from 'chalk';
 
 import { setLocale } from '@scream-code/config';
 import {
@@ -7,9 +6,6 @@ import {
   shellExecutionResultRenderer,
 } from '#/tui/components/messages/shell-execution';
 import { darkColors } from '#/tui/theme/colors';
-
-// Force chalk colors so highlight/dim assertions see real ANSI codes.
-chalk.level = 3;
 
 function strip(text: string): string {
   return text.replaceAll(/\u001B\[[0-9;]*m/g, '');
@@ -46,12 +42,12 @@ describe('ShellExecutionComponent', () => {
     });
 
     const collapsedOutput = collapsed.render(100).map(strip).join('\n');
-    // Tail preview: last 15 lines shown, first 5 hidden.
-    expect(collapsedOutput).toContain('line06');
+    // Tail preview: last 10 lines shown, first 10 hidden.
+    expect(collapsedOutput).toContain('line11');
     expect(collapsedOutput).toContain('line20');
     expect(collapsedOutput).not.toContain('line01');
-    expect(collapsedOutput).not.toContain('line05');
-    expect(collapsedOutput).toContain('▸ 还有 5 行，按 ctrl+o 展开');
+    expect(collapsedOutput).not.toContain('line10');
+    expect(collapsedOutput).toContain('▸ 还有 10 行，按 ctrl+o 展开');
 
     const expanded = new ShellExecutionComponent({
       result: {
@@ -87,13 +83,12 @@ describe('ShellExecutionComponent', () => {
   describe('shellExecutionResultRenderer', () => {
     const longCmd = `echo ${'a'.repeat(200)}\necho done`;
 
-    it('keeps the command visible but caps it at 3 lines when collapsed', () => {
-      const fiveLineCmd = 'echo one\necho two\necho three\necho four\necho five';
+    it('omits the command preview when collapsed', () => {
       const components = shellExecutionResultRenderer(
         {
           id: 'call_1',
           name: 'Bash',
-          args: { command: fiveLineCmd },
+          args: { command: longCmd },
         },
         {
           tool_call_id: 'call_1',
@@ -107,64 +102,8 @@ describe('ShellExecutionComponent', () => {
         .flatMap((c) => c.render(100))
         .map(strip)
         .join('\n');
-      expect(rendered).toContain('$ echo one');
-      expect(rendered).toContain('echo three');
-      expect(rendered).not.toContain('echo four');
-      expect(rendered).not.toContain('echo five');
-      // Output is hidden when collapsed — only the expand hint shows.
-      expect(rendered).not.toContain('ok');
-      expect(rendered).toContain('ctrl+o');
-    });
-
-    it('shows the error tail when the command failed', () => {
-      const components = shellExecutionResultRenderer(
-        {
-          id: 'call_err',
-          name: 'Bash',
-          args: { command: 'false' },
-        },
-        {
-          tool_call_id: 'call_err',
-          output: 'bash: false: command not found\nline2\nerror detail',
-          is_error: true,
-        },
-        { expanded: false, colors: darkColors },
-      );
-
-      const rendered = components
-        .flatMap((c) => c.render(100))
-        .map(strip)
-        .join('\n');
-      // Failure: the error tail stays visible even when collapsed.
-      expect(rendered).toContain('bash: false: command not found');
-      expect(rendered).toContain('error detail');
-    });
-
-    it('highlights the command instead of dimming it', () => {
-      const components = shellExecutionResultRenderer(
-        {
-          id: 'call_1',
-          name: 'Bash',
-          args: { command: 'echo hi' },
-        },
-        {
-          tool_call_id: 'call_1',
-          output: 'ok',
-          is_error: false,
-        },
-        { expanded: false, colors: darkColors },
-      );
-
-      const raw = components
-        .flatMap((c) => c.render(100))
-        .join('\n');
-      const cmdLine = raw.split('\n').find((l) => l.includes('echo'));
-      expect(cmdLine).toBeDefined();
-      // Only the `$ ` prefix may be dim; the command body itself must not be
-      // dim — bash highlighting applies truecolor (38;2;r;g;b) codes instead.
-      expect(cmdLine!.includes('\u001B[2m$ ')).toBe(true);
-      expect(cmdLine!).toMatch(/\u001B\[38;2;\d+;\d+;\d+m/);
-      expect(cmdLine!.includes('\u001B[2mecho')).toBe(false);
+      expect(rendered).not.toContain('$ echo');
+      expect(rendered).toContain('ok');
     });
 
     it('reveals the full multi-line command when expanded', () => {

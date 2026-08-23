@@ -1435,7 +1435,7 @@ export class ToolCallComponent extends CachedContainer {
     const components = shellExecutionResultRenderer(
       this.toolCall,
       { tool_call_id: this.toolCall.id, output: this.liveOutput, is_error: false },
-      { expanded: this.expanded, colors: this.colors, isLive: true },
+      { expanded: this.expanded, colors: this.colors },
     );
     for (const component of components) {
       this.addChild(component);

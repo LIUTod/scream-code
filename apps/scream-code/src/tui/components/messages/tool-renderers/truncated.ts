@@ -110,10 +110,7 @@ export class TruncatedOutputComponent implements Component {
     // an expand hint at the TOP so the preview reads top-down without the
     // hidden head pushing the useful lines out of view.
     const remaining = contentLines.length - this.maxLines;
-    // slice(-0) === slice(0) === whole array in JS; treat maxLines=0 as "no
-    // content shown, hint only" so a zero preview hides all output lines.
-    const tail =
-      this.maxLines <= 0 ? [] : contentLines.slice(-this.maxLines);
+    const tail = contentLines.slice(-this.maxLines);
     const expandHint = this.hintFormatter
       ? this.hintFormatter(remaining)
       : t('shell.more_lines', { count: String(remaining) });
