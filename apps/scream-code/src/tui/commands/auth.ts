@@ -189,10 +189,9 @@ async function handleDiyConfig(host: SlashCommandHost): Promise<void> {
     return;
   }
 
-  // Step 3 — API key (masked so shoulder-surfers can't read it)
+  // Step 3 — API key (plaintext so the user can verify what they typed)
   const apiKey = await promptTextInput(host, t('auth.input_api_key'), {
     subtitle: t('auth.api_key_hint'),
-    masked: true,
   });
   if (apiKey === undefined) return;
 
