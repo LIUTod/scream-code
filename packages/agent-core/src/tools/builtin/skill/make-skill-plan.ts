@@ -51,7 +51,7 @@ Analyze the conversation transcript and the user's explicit guidance, then produ
 The package must contain:
 - name: kebab-case skill name. Prefer the user's nameHint if it is valid kebab-case; otherwise derive a concise name from the purpose.
 - description: one sentence describing when to use this skill.
-- when-to-use: **required** — 1-2 sentences describing the specific situations/trigger conditions that should make the agent use this skill (e.g. "when the user asks to convert a document to PDF", "when debugging a vitest snapshot failure"). This drives the skill listing's "When to use" line, which is how the model decides to invoke the skill. Never leave it empty.
+- when-to-use: **required** — 1-2 sentences describing the specific situations/trigger conditions that should make the agent use this skill. Must include: (a) concrete trigger phrases/keywords the user might say (e.g. "convert", "PDF", "debug", "snapshot"), (b) the specific scenario or task type (e.g. "document conversion", "test debugging"), (c) avoid vague terms like "when needed" or "when appropriate". Use "When the user [action/request]..." or "When [task type]..." format. Examples: "when the user asks to convert a document to PDF", "when debugging a vitest snapshot failure", "when the user requests to deploy a model gateway". This drives the skill listing's "When to use" line, which is how the model decides to invoke the skill. Never leave it empty.
 - content: the complete Markdown body of SKILL.md, following the MANDATORY structure below.
 - files: optional supporting files (e.g. scripts, data files) relative to the skill directory. Empty array if none.
 
@@ -290,7 +290,7 @@ function validateSkillPlan(plan: SkillPlan, nameHint: string): void {
   if (plan.whenToUse.trim().length === 0) {
     throw new ScreamError(
       ErrorCodes.REQUEST_INVALID,
-      'Generated skill plan is missing the required "whenToUse" field. Describe the specific situations that should trigger this skill (it powers the skill listing\'s "When to use" line).',
+      'Generated skill plan is missing the required "whenToUse" field. Describe the specific situations that should trigger this skill with concrete trigger conditions (e.g. "when the user asks to convert a document to PDF") — it powers the skill listing\'s "When to use" line.',
     );
   }
 
