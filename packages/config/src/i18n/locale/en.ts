@@ -1000,6 +1000,7 @@ export const en: Record<string, string> = {
 
   // ─── thinking ──────────────────
   'thinking.in_progress': 'Thinking...',
+  'thinking.more_lines': '... ({count} more lines, ctrl+o to expand)',
 
   // ─── shell-execution ───────────
   'shell.more_lines': '... ({count} more lines, ctrl+o to expand)',

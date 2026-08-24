@@ -1001,6 +1001,7 @@ export const zh: Record<string, string> = {
 
   // ─── thinking ──────────────────
   'thinking.in_progress': '思考中...',
+  'thinking.more_lines': '...（还有 {count} 行，按 ctrl+o 展开）',
 
   // ─── shell-execution ───────────
   'shell.more_lines': '...（还有 {count} 行，按 ctrl+o 展开）',
