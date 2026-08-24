@@ -448,8 +448,9 @@ describe('WriteTool', () => {
 
     expect(result.isError).toBe(true);
     expect(result.output).toContain('Wrote');
-    expect(result.output).toContain('[LSP]');
-    expect(result.output).toContain('Type error');
+    expect(result.output).not.toContain('[LSP]');
+    expect(result.message).toContain('[LSP]');
+    expect(result.message).toContain('Type error');
   });
 
   it('does not mark isError when LSP reports only warnings after write', async () => {
@@ -482,7 +483,8 @@ describe('WriteTool', () => {
     );
 
     expect(result.isError).toBeFalsy();
-    expect(result.output).toContain('[LSP]');
-    expect(result.output).toContain('Unused variable');
+    expect(result.output).not.toContain('[LSP]');
+    expect(result.message).toContain('[LSP]');
+    expect(result.message).toContain('Unused variable');
   });
 });

@@ -53,7 +53,6 @@ export class TruncatedOutputComponent implements Component {
   private readonly expanded: boolean;
   private readonly maxLines: number;
   private readonly hintFormatter: ((remaining: number) => string) | undefined;
-  private readonly collapseHintFormatter: (() => string) | undefined;
 
   constructor(
     output: string,
@@ -64,13 +63,11 @@ export class TruncatedOutputComponent implements Component {
       maxLines?: number;
       maxBytes?: number;
       hintFormatter?: (remaining: number) => string;
-      collapseHintFormatter?: () => string;
     },
   ) {
     this.expanded = options.expanded;
     this.maxLines = options.maxLines ?? PREVIEW_LINES;
     this.hintFormatter = options.hintFormatter;
-    this.collapseHintFormatter = options.collapseHintFormatter;
     const tint = options.isError ? chalk.hex(options.colors.error) : chalk.dim;
     const cleaned = trimTrailingEmptyLines(output.split('\n')).join('\n');
     // Error output may contain ANSI codes from the command (npm/npx color
@@ -95,15 +92,8 @@ export class TruncatedOutputComponent implements Component {
   render(width: number): string[] {
     const contentLines = this.textComponent.render(width);
 
-    if (contentLines.length <= this.maxLines) {
+    if (this.expanded || contentLines.length <= this.maxLines) {
       return contentLines;
-    }
-
-    if (this.expanded) {
-      const collapseHint = this.collapseHintFormatter
-        ? this.collapseHintFormatter()
-        : t('shell.collapse_hint');
-      return [chalk.dim(collapseHint), ...contentLines];
     }
 
     // Collapsed: show the TAIL (newest output, where errors land) and surface

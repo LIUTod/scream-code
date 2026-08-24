@@ -225,6 +225,12 @@ export interface ToolResultEvent {
    * populated by Grep's `content` mode as a `search_results` payload.
    */
   readonly display?: ToolResultDisplay | undefined;
+  /**
+   * Optional human-readable side channel for tool-result metadata that should
+   * not contaminate `output` (e.g. LSP diagnostics appended after Write/Edit).
+   * The TUI renders this separately so it doesn't trigger a second collapse.
+   */
+  readonly message?: string | undefined;
 }
 
 export interface SubagentSpawnedEvent {

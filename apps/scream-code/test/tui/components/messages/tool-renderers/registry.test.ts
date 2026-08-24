@@ -39,7 +39,7 @@ describe('tool-result registry', () => {
     const renderer = pickResultRenderer('SomethingUnknown');
     const out = strip(joinRender(renderer(call('SomethingUnknown'), result('a\nb\nc\nd\ne'), ctx)));
     // Tail preview: last 3 lines shown, first 2 hidden, expand hint on top.
-    expect(out).toContain('▸ 2 lines hidden, press ctrl+o to expand');
+    expect(out).toContain('... (2 more lines, ctrl+o to expand)');
     expect(out).toContain('  c');
     expect(out).toContain('  d');
     expect(out).toContain('  e');

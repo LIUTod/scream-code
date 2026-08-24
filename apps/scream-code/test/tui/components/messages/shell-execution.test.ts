@@ -51,7 +51,7 @@ describe('ShellExecutionComponent', () => {
     expect(collapsedOutput).toContain('line20');
     expect(collapsedOutput).not.toContain('line01');
     expect(collapsedOutput).not.toContain('line05');
-    expect(collapsedOutput).toContain('▸ 还有 5 行，按 ctrl+o 展开');
+    expect(collapsedOutput).toContain('...（还有 5 行，按 ctrl+o 展开）');
 
     const expanded = new ShellExecutionComponent({
       result: {
@@ -67,7 +67,8 @@ describe('ShellExecutionComponent', () => {
     expect(expandedOutput).toContain('line01');
     expect(expandedOutput).toContain('line20');
     expect(expandedOutput).not.toContain('ctrl+o to expand');
-    expect(expandedOutput).toContain('▾ 按 ctrl+o 折叠');
+    expect(expandedOutput).not.toContain('还有 5 行');
+    expect(expandedOutput).not.toContain('按 ctrl+o 折叠');
   });
 
   it('renders unbounded command preview when previewLines is undefined', () => {

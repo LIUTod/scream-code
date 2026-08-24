@@ -650,6 +650,7 @@ export class SessionEventHandler {
       is_error: event.isError,
       synthetic: event.synthetic,
       display: event.display,
+      message: event.message,
     };
     streamingUI.completeToolResult(event.toolCallId, resultData);
     if (canTransitionTo(this.host.state.appState.streamingPhase, 'waiting')) {

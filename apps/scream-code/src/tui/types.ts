@@ -109,6 +109,13 @@ export interface ToolResultBlockData {
    * `search_results`.
    */
   display?: ToolResultDisplay;
+  /**
+   * Optional human-readable side channel for tool-result metadata that should
+   * not be folded into `output` (e.g. LSP diagnostics after Write/Edit).
+   * Rendered separately by tool-call.ts so it doesn't trigger a second
+   * collapse alongside the content preview.
+   */
+  message?: string;
 }
 
 export interface SubagentReplayToolCallData {

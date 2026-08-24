@@ -260,8 +260,11 @@ export class EditTool implements BuiltinTool<EditInput> {
         );
         scanCache.clear();
         const { notice, hasErrors } = await this.appendDiagnostics(safePath);
-        const output = `Replaced 1 occurrence in ${args.path}${notice}`;
-        return hasErrors ? { isError: true, output } : { output };
+        // Diagnostics go to `message` (UI side channel) so Edit's result stays
+        // a single line and the TUI doesn't double-collapse.
+        const output = `Replaced 1 occurrence in ${args.path}`;
+        const message = notice.length > 0 ? notice : undefined;
+        return hasErrors ? { isError: true, output, message } : { output, message };
       }
 
       const parts = content.split(args.old_string);
@@ -284,8 +287,11 @@ export class EditTool implements BuiltinTool<EditInput> {
       );
       scanCache.clear();
       const { notice, hasErrors } = await this.appendDiagnostics(safePath);
-      const output = `Replaced ${String(replacementCount)} occurrences in ${args.path}${notice}`;
-      return hasErrors ? { isError: true, output } : { output };
+      // Diagnostics go to `message` (UI side channel) so Edit's result stays
+      // a single line and the TUI doesn't double-collapse.
+      const output = `Replaced ${String(replacementCount)} occurrences in ${args.path}`;
+      const message = notice.length > 0 ? notice : undefined;
+      return hasErrors ? { isError: true, output, message } : { output, message };
     } catch (error) {
       const code = (error as { code?: unknown } | null)?.code;
       if (code === 'EISDIR') {

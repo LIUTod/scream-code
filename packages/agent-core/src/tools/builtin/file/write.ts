@@ -123,8 +123,12 @@ export class WriteTool implements BuiltinTool<WriteInput> {
       // is not used here.
       const bytesWritten = Buffer.byteLength(args.content, 'utf8');
       const { notice, hasErrors } = await this.appendDiagnostics(safePath);
-      const output = `${mode === 'append' ? 'Appended' : 'Wrote'} ${String(bytesWritten)} bytes to ${args.path}${notice}`;
-      return hasErrors ? { isError: true, output } : { output };
+      // Diagnostics go to `message` (side channel for the UI) instead of
+      // contaminating `output`, so Write's result stays a single line and the
+      // TUI doesn't double-collapse the content preview + result output.
+      const output = `${mode === 'append' ? 'Appended' : 'Wrote'} ${String(bytesWritten)} bytes to ${args.path}`;
+      const message = notice.length > 0 ? notice : undefined;
+      return hasErrors ? { isError: true, output, message } : { output, message };
     } catch (error) {
       const code = (error as { code?: unknown } | null)?.code;
       if (code === 'ENOENT') {

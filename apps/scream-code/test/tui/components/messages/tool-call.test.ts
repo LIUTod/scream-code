@@ -83,7 +83,7 @@ describe('ToolCallComponent', () => {
     expect(expanded).toContain('line01');
     expect(expanded).toContain('line20');
     expect(expanded).not.toContain('按 ctrl+o 展开');
-    expect(expanded).toContain('▾ 按 ctrl+o 折叠');
+    expect(expanded).not.toContain('按 ctrl+o 折叠');
   });
 
   it('hides tool output bodies that start with a <system tag', () => {

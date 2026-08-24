@@ -86,7 +86,6 @@ export class ShellExecutionComponent extends Container {
         maxBytes: MAX_SHELL_OUTPUT_BYTES,
         hintFormatter: (remaining) =>
           t('shell.more_lines', { count: String(remaining) }),
-        collapseHintFormatter: () => t('shell.collapse_hint'),
       }),
     );
   }

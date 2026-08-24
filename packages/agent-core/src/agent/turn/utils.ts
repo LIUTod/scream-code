@@ -92,6 +92,10 @@ export function mapLoopEvent(event: LoopEvent, turnId: number): AgentEvent | und
         isError: event.result.isError,
         display:
           event.result.isError === true ? undefined : event.result.display,
+        // Forward the UI side-channel message (e.g. LSP diagnostics) so the
+        // TUI can render it separately instead of it being folded into the
+        // collapsed result output.
+        message: event.result.message,
       };
     case 'turn.interrupted':
       if (event.activeStep === undefined) return undefined;

@@ -2022,6 +2022,16 @@ export class ToolCallComponent extends CachedContainer {
     for (const component of components) {
       this.addChild(component);
     }
+
+    // Render the UI side-channel message (e.g. LSP diagnostics after Write/
+    // Edit) separately, so it doesn't get folded into the collapsed result
+    // output and trigger a second "ctrl+o to expand" hint alongside the
+    // content preview.
+    if (result.message !== undefined && result.message.length > 0) {
+      for (const line of result.message.split('\n')) {
+        this.addChild(new Text(chalk.dim(line), 2, 0));
+      }
+    }
   }
 
   /**

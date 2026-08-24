@@ -1002,8 +1002,7 @@ export const en: Record<string, string> = {
   'thinking.in_progress': 'Thinking...',
 
   // ─── shell-execution ───────────
-  'shell.more_lines': '▸ {count} lines hidden, press ctrl+o to expand',
-  'shell.collapse_hint': '▾ Press ctrl+o to collapse',
+  'shell.more_lines': '... ({count} more lines, ctrl+o to expand)',
 
   // ─── cc-connect channel config ──
   'ccconnect.note_botfather': 'Create a bot at @BotFather first',
