@@ -3,27 +3,31 @@ import { describe, expect, it } from 'vitest';
 
 import { StatusBarPaneComponent } from '#/tui/components/panes/status-bar-pane';
 
+/** Minimal PulseWaveLoader stand-in: only getFrameText() is consumed. */
+function fakeWave(frame = '⬝') {
+  return { getFrameText: () => frame, invalidate: () => {} } as never;
+}
+
 describe('StatusBarPaneComponent', () => {
-  it('renders the label after a pulse wave on one line for waiting/tool modes', () => {
+  it('renders the label snug after the pulse wave on one line for waiting/tool modes', () => {
     const waiting = new StatusBarPaneComponent({
       mode: 'waiting',
       label: 'Waiting...',
-      pulseWave: new Text('⬝', 0, 0) as never,
+      pulseWave: fakeWave(),
     });
     const waitingLines = waiting.render(80).map((line) => line.trimEnd());
-    // One line, containing both the pulse and the label (ANSI/OSC8 wrapping
-    // around the mock Text is stripped by the terminal; we assert content).
+    // One line, wave and label adjacent (no full-width gap in between).
     expect(waitingLines.length).toBe(1);
-    expect(waitingLines[0]!.includes('Waiting...')).toBe(true);
+    expect(waitingLines[0]).toBe(' ⬝  Waiting...');
 
     const tool = new StatusBarPaneComponent({
       mode: 'tool',
       label: '[working]',
-      pulseWave: new Text('⬝', 0, 0) as never,
+      pulseWave: fakeWave(),
     });
     const toolLines = tool.render(80).map((line) => line.trimEnd());
     expect(toolLines.length).toBe(1);
-    expect(toolLines[0]!.includes('[working]')).toBe(true);
+    expect(toolLines[0]).toBe(' ⬝  [working]');
   });
 
   it('renders the spinner (with its own label) for thinking/composing', () => {
@@ -50,7 +54,7 @@ describe('StatusBarPaneComponent', () => {
     component.update({
       mode: 'waiting',
       label: 'Waiting...',
-      pulseWave: new Text('⬝', 0, 0) as never,
+      pulseWave: fakeWave(),
     });
     const lines = component.render(80).map((line) => line.trimEnd());
     expect(lines.length).toBe(1);

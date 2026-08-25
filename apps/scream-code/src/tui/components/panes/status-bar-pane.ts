@@ -1,8 +1,34 @@
-import { Container, HStack, Text, type Component } from '@liutod-scream/pi-tui';
+import { Container, Text, truncateToWidth, type Component } from '@liutod-scream/pi-tui';
 import chalk from 'chalk';
 
 import type { MoonLoader } from '../chrome/moon-loader';
 import type { PulseWaveLoader } from '../chrome/pulse-wave-loader';
+
+/**
+ * Single-line row: pulse wave immediately followed by its label.
+ *
+ * HStack cannot produce this layout: pi-tui's Text.render pads every line to
+ * the full row width, so each child's intrinsic width equals the full width
+ * and HStack's shrink distribution pushes the label far to the right.
+ * Composing the line manually from the loader's unpadded frame text keeps
+ * the label snug against the wave, and it re-reads the frame on every render
+ * so the wave keeps animating.
+ */
+class PulseWaveLabelRow implements Component {
+  constructor(
+    private readonly wave: PulseWaveLoader,
+    private readonly label: string,
+  ) {}
+
+  render(width: number): string[] {
+    const line = ` ${this.wave.getFrameText()}  ${this.label}`;
+    return [truncateToWidth(line, Math.max(1, width))];
+  }
+
+  invalidate(): void {
+    this.wave.invalidate();
+  }
+}
 
 export type StatusBarMode = 'idle' | 'waiting' | 'thinking' | 'composing' | 'tool';
 
@@ -44,17 +70,14 @@ export class StatusBarPaneComponent extends Container {
       }
       return;
     }
-    // Pulse wave + optional label sit on one line via HStack (Container
-    // stacks vertically). Spinner (MoonLoader) carries its own label, so it
-    // is mounted alone. A bare label (no spinner/pulse) renders as static
-    // text — used while diagnosing animation-render issues.
+    // Pulse wave + optional label sit on one line. Spinner (MoonLoader)
+    // carries its own label, so it is mounted alone. A bare label (no
+    // spinner/pulse) renders as static text — used while diagnosing
+    // animation-render issues.
     if (options.mode === 'waiting' || options.mode === 'tool' || options.mode === 'composing' || options.mode === 'thinking') {
       if (options.pulseWave !== undefined) {
         if (options.label.length > 0) {
-          const row = new HStack();
-          row.addChild(options.pulseWave);
-          row.addChild(new Text(` ${options.label}`, 1, 0));
-          this.addChild(row);
+          this.addChild(new PulseWaveLabelRow(options.pulseWave, options.label));
         } else {
           this.addChild(options.pulseWave);
         }

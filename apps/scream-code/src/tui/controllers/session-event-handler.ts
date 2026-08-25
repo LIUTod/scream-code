@@ -449,7 +449,13 @@ export class SessionEventHandler {
     // transcript is unaffected - only the ephemeral UI draft is reset.
     this.host.streamingUI.resetLiveText();
     this.host.streamingUI.resetToolUi();
-    this.host.setAppState({ reconnectAttempt: event.nextAttempt });
+    this.host.setAppState({
+      reconnectAttempt: event.nextAttempt,
+      reconnectMaxAttempts: event.maxAttempts,
+      reconnectDelayMs: event.delayMs,
+      reconnectStatusCode: event.statusCode,
+      reconnectErrorName: event.errorName,
+    });
   }
 
   private maybeShowDebugTiming(event: TurnStepCompletedEvent): void {

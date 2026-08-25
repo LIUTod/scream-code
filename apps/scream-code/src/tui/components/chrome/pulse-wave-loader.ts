@@ -29,6 +29,15 @@ export class PulseWaveLoader extends Text {
   private intervalId: ReturnType<typeof setInterval> | null = null;
   private ui: TUI;
   private colorHex: string;
+  /** Raw frame text without Text's full-width render padding, exposed so
+   * callers can compose the wave inline with trailing content (e.g. the
+   * reconnect label in the status bar). */
+  private frameText = '';
+
+  /** The current frame's cells ("■ ⬝ ⬝"), unpadded. */
+  getFrameText(): string {
+    return this.frameText;
+  }
 
   constructor(ui: TUI, colorHex: string) {
     super('', 1, 0);
@@ -60,7 +69,8 @@ export class PulseWaveLoader extends Text {
   private updateDisplay(): void {
     const step = PULSE_WAVE_FRAMES[this.currentFrame] ?? PULSE_WAVE_FRAMES[0];
     const cells = [0, 1, 2].map((idx) => this.renderCell(idx, step.active, step.forward));
-    this.setText(cells.join(' '));
+    this.frameText = cells.join(' ');
+    this.setText(this.frameText);
     // Use a full render so the footer status timer updates in sync with the
     // pulse wave during the 'waiting' phase, when no other render activity is
     // happening. Component-scoped render would skip the footer lines.

@@ -66,6 +66,7 @@ export class LifecycleController {
   private terminalFocusTrackingDispose: (() => void) | undefined;
   private terminalThemeTrackingDispose: (() => void) | undefined;
   private lastActivityMode: string | undefined;
+  private lastReconnectAttempt = 0;
   /** The active status-bar loader (PulseWaveLoader or MoonLoader). Owned by
    * this controller; stopped before replacement to avoid leaking timers. */
   private statusBarLoader: { stop(): void } | undefined;
@@ -351,11 +352,17 @@ export class LifecycleController {
     const effectiveMode = this.resolveActivityPaneMode();
     this.syncTerminalProgress(this.shouldShowTerminalProgress(effectiveMode));
 
-    if (effectiveMode === this.lastActivityMode) {
+    // Rebuild the status bar not only on mode change, but also when the
+    // reconnect attempt counter advances: a step retry keeps the mode at
+    // 'waiting', so mode-change alone would leave the reconnect label stale.
+    const reconnectAttempt = this.host.state.appState.reconnectAttempt;
+    const reconnectChanged = reconnectAttempt !== this.lastReconnectAttempt;
+    if (effectiveMode === this.lastActivityMode && !reconnectChanged) {
       return;
     }
 
     this.lastActivityMode = effectiveMode;
+    this.lastReconnectAttempt = reconnectAttempt;
     this.updateStatusBar(effectiveMode);
     const { state } = this.host;
     state.activityContainer.clear();
@@ -410,7 +417,11 @@ export class LifecycleController {
           const loader = new PulseWaveLoader(state.ui, state.theme.colors.primary);
           this.statusBarLoader = loader;
           state.statusBarContainer.addChild(
-            new StatusBarPaneComponent({ mode, label: '', pulseWave: loader }),
+            new StatusBarPaneComponent({
+              mode,
+              label: this.buildReconnectLabel(state),
+              pulseWave: loader,
+            }),
           );
         }
         break;
@@ -447,6 +458,39 @@ export class LifecycleController {
         break;
     }
     state.ui.requestRender();
+  }
+
+  /** Builds the reconnect label shown next to the status-bar pulse wave
+   * while a step retry is in flight, e.g. "重连中 3/10 · 限流 · 20s 后重试".
+   * Returns an empty string when no retry is active. Static by design: the
+   * delay shown is the value from the latest retry event, not a ticking
+   * countdown. */
+  private buildReconnectLabel(state: TUIState): string {
+    const a = state.appState;
+    if (a.reconnectAttempt <= 0) return '';
+    const reasonKey =
+      a.reconnectStatusCode === 429
+        ? 'status.reason_rate_limit'
+        : a.reconnectStatusCode !== undefined && a.reconnectStatusCode >= 500
+          ? 'status.reason_server'
+          : (a.reconnectErrorName ?? '').includes('Timeout')
+            ? 'status.reason_timeout'
+            : 'status.reason_connection';
+    const reason = a.reconnectStatusCode !== undefined
+      ? `${t(reasonKey)} (${String(a.reconnectStatusCode)})`
+      : a.reconnectErrorName !== undefined && a.reconnectErrorName.length > 0
+        ? `${t(reasonKey)} (${a.reconnectErrorName})`
+        : t(reasonKey);
+    const delaySec = Math.max(1, Math.round((a.reconnectDelayMs ?? 0) / 1000));
+    const label = t('status.reconnecting_detail', {
+      attempt: String(a.reconnectAttempt),
+      max: String(a.reconnectMaxAttempts ?? 0),
+      reason,
+      delay: String(delaySec),
+    });
+    // Render in the same dim gray as the thinking chain (theme textDim) so
+    // the reconnect info reads as secondary status text.
+    return chalk.hex(state.theme.colors.textDim)(label);
   }
 
   /** Force a status-bar refresh even when the mode is unchanged. Used after

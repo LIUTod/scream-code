@@ -30,7 +30,11 @@ export const en: Record<string, string> = {
   'status.composing': 'Writing',
   'status.tool': 'Running',
   'status.waiting': 'Waiting',
-  'status.reconnecting': 'Reconnecting',
+  'status.reconnecting_detail': 'Reconnecting {attempt}/{max} · {reason} · retry in {delay}s',
+  'status.reason_rate_limit': 'rate limited',
+  'status.reason_server': 'server error',
+  'status.reason_timeout': 'network timeout',
+  'status.reason_connection': 'connection issue',
 
   // ─── Approval ─────────────────
   'approval.allow_once': 'Allow Once',

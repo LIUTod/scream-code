@@ -30,7 +30,11 @@ export const zh: Record<string, string> = {
   'status.composing': '输出中',
   'status.tool': '执行中',
   'status.waiting': '等待中',
-  'status.reconnecting': '重连中',
+  'status.reconnecting_detail': '重连中 {attempt}/{max} · {reason} · {delay}s 后重试',
+  'status.reason_rate_limit': '限流',
+  'status.reason_server': '服务器错误',
+  'status.reason_timeout': '网络超时',
+  'status.reason_connection': '连接问题',
 
   // ─── 审批 ─────────────────────
   'approval.allow_once': '批准一次',

@@ -257,19 +257,13 @@ function lerpGradient(t: number): string {
 function buildStatusLine(
   streamingPhase: AppState['streamingPhase'],
   streamingStartTime: number,
-  reconnectAttempt: number,
 ): string {
   if (streamingPhase === 'idle') {
     return t('status.idle');
   }
 
-  // Reconnection indicator only shows during the 'waiting' phase. Once
-  // the model starts thinking/composing or a tool runs, the retry has
-  // succeeded and the normal status should be displayed instead.
-  if (reconnectAttempt > 0 && streamingPhase === 'waiting') {
-    return chalk.hex('#E85454').bold('◎') + ' ' +
-      chalk.hex('#E85454')(`${t('status.reconnecting')} ${String(reconnectAttempt)}`);
-  }
+  // Retry detail ("reconnecting N/M · reason · retry in Xs") is rendered in
+  // the status bar above the editor, not in the footer.
 
   let label: string;
   if (streamingPhase === 'tool') {
@@ -546,7 +540,6 @@ export class FooterComponent implements Component {
       const statusLine = buildStatusLine(
         state.streamingPhase,
         state.streamingStartTime,
-        state.reconnectAttempt,
       );
       const ccDot = state.ccConnectActive
         ? chalk.hex(colors.success)('●')
