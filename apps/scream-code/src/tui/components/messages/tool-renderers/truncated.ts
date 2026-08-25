@@ -107,7 +107,11 @@ export class TruncatedOutputComponent implements Component {
     const expandHint = this.hintFormatter
       ? this.hintFormatter(remaining)
       : t('shell.more_lines', { count: String(remaining) });
-    return [chalk.dim(expandHint), ...tail];
+    // Render the hint through Text with the same 2-space padding as the
+    // content lines above, so the hint aligns with the output instead of
+    // sitting at column 0.
+    const hintLines = new Text(chalk.dim(expandHint), 2, 0).render(width);
+    return [...hintLines, ...tail];
   }
 }
 
