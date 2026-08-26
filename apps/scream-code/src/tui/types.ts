@@ -52,6 +52,7 @@ export interface AppState {
   lastCompactionFinishedAt: number | undefined;
   autoCompactionCount: number;
   isReplaying: boolean;
+  isSwitchingSession: boolean;
   streamingPhase: 'idle' | 'waiting' | 'thinking' | 'composing' | 'tool';
   streamingStartTime: number;
   theme: Theme;

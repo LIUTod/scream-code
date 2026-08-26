@@ -69,6 +69,7 @@ import type { Jian } from '@scream-code/jian';
 import type { ToolServices } from '../tools/support/services';
 
 export type { AgentRecord, AgentRecordPersistence } from './records';
+export { REPLAY_TURN_LIMIT } from './replay';
 export type { BuiltinTool, ToolInfo, ToolSource, UserToolRegistration } from './tool';
 
 export type AgentType = 'main' | 'sub' | 'independent';

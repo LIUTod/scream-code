@@ -22,6 +22,7 @@ function fakeInitialAppState(): AppState {
     lastCompactionFinishedAt: undefined,
     autoCompactionCount: 0,
     isReplaying: false,
+    isSwitchingSession: false,
     streamingPhase: 'idle',
     streamingStartTime: 0,
     language: 'zh',

@@ -7,6 +7,7 @@ import {
   type WireMigration,
   type WireMigrationRecord,
 } from './migration';
+import { SNAPSHOT_FOLDED_CONTEXT_TYPES } from './persistence';
 import type { AgentRecord, AgentRecordPersistence } from './types';
 
 export * from './types';
@@ -34,15 +35,10 @@ export type { BlobStoreOptions } from './blobref';
  * pushing onto `compactedHistory` — a debug trail rendered from the pre-fold
  * history. Snapshot replay skips that pre-fold history, so the trail would be
  * re-rendered as empty; the snapshot carries the trail itself instead.
+ *
+ * The canonical definition lives in persistence.ts (it also drives the
+ * parse-skipping fast path during read); imported from there.
  */
-const SNAPSHOT_FOLDED_CONTEXT_TYPES: ReadonlySet<string> = new Set([
-  'context.append_message',
-  'context.append_loop_event',
-  'context.apply_compaction',
-  'micro_compaction.apply',
-  'full_compaction.complete',
-]);
-
 function isSnapshotFoldedContextRecord(type: string): boolean {
   return SNAPSHOT_FOLDED_CONTEXT_TYPES.has(type);
 }

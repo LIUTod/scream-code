@@ -4,7 +4,48 @@ import { dirname } from 'pathe';
 
 import { syncDir } from '../../utils/fs';
 import type { BlobStore } from './blobref';
+import { AGENT_WIRE_PROTOCOL_VERSION } from './migration';
 import { type AgentRecord, type AgentRecordPersistence } from './types';
+
+/**
+ * Record types whose state is fully captured by a `context.snapshot` record.
+ * Canonical definition — records/index.ts imports it for the restore
+ * fast-path. It also drives the parse-skipping fast path in `read()` below:
+ * serialized lines of these types that predate the last snapshot are never
+ * JSON.parse'd.
+ */
+export const SNAPSHOT_FOLDED_CONTEXT_TYPES: ReadonlySet<string> = new Set([
+  'context.append_message',
+  'context.append_loop_event',
+  'context.apply_compaction',
+  'micro_compaction.apply',
+  'full_compaction.complete',
+]);
+
+/**
+ * Serialized-line prefix of a context.snapshot record. Persisted records
+ * always serialize "type" as the first key (locked by test), so a startsWith
+ * probe is exact — a false positive would require an entire line to start
+ * with this JSON prefix, which no other record (or any message content, whose
+ * line starts with its own record "type") can produce.
+ */
+const SNAPSHOT_RECORD_LINE_PREFIX = '{"type":"context.snapshot"';
+
+/** Line prefixes of the folded record types, derived from the set above. */
+const SNAPSHOT_FOLDED_LINE_PREFIXES: readonly string[] = [...SNAPSHOT_FOLDED_CONTEXT_TYPES].map(
+  (type) => `{"type":"${type}"`,
+);
+
+function isSnapshotFoldedLine(line: string): boolean {
+  return SNAPSHOT_FOLDED_LINE_PREFIXES.some((prefix) => line.startsWith(prefix));
+}
+
+/** A buffered physical line from the wire file. */
+interface WireLine {
+  readonly text: string;
+  readonly lineNumber: number;
+  readonly allowTruncated: boolean;
+}
 
 export interface FileSystemAgentRecordPersistenceOptions {
   readonly onError?: ((error: unknown) => void) | undefined;
@@ -60,27 +101,30 @@ export class FileSystemAgentRecordPersistence implements AgentRecordPersistence 
   async *read(): AsyncIterable<AgentRecord> {
     await this.flush();
 
-    let line = '';
+    // Phase 1: buffer raw lines WITHOUT parsing, tracking the last
+    // context.snapshot line via the cheap prefix probe. On long sessions
+    // JSON.parse dominates; buffering strings is cheap in comparison, and the
+    // records array built downstream (records/index.ts replay) already holds
+    // the full parsed result in memory anyway.
+    const lines: WireLine[] = [];
+    let lastSnapshotLineNumber = -1;
+    let pending = '';
     let lineNumber = 0;
     const stream = createReadStream(this.filePath, { encoding: 'utf8' });
     try {
       for await (const chunk of stream) {
-        line += chunk;
-        let newlineIndex = line.indexOf('\n');
+        pending += chunk;
+        let newlineIndex = pending.indexOf('\n');
         while (newlineIndex !== -1) {
-          const rawLine = line.slice(0, newlineIndex);
-          line = line.slice(newlineIndex + 1);
+          let rawLine = pending.slice(0, newlineIndex);
+          pending = pending.slice(newlineIndex + 1);
           lineNumber++;
-
-          const record = parseRecordLine(
-            rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine,
-            lineNumber,
-            this.filePath,
-            false,
-          );
-          if (record !== undefined) yield record;
-
-          newlineIndex = line.indexOf('\n');
+          if (rawLine.endsWith('\r')) rawLine = rawLine.slice(0, -1);
+          if (rawLine.startsWith(SNAPSHOT_RECORD_LINE_PREFIX)) {
+            lastSnapshotLineNumber = lineNumber;
+          }
+          lines.push({ text: rawLine, lineNumber, allowTruncated: false });
+          newlineIndex = pending.indexOf('\n');
         }
       }
     } catch (error) {
@@ -88,10 +132,45 @@ export class FileSystemAgentRecordPersistence implements AgentRecordPersistence 
       if (code === 'ENOENT') return;
       throw error;
     }
-
-    if (line.length > 0) {
+    if (pending.length > 0) {
       lineNumber++;
-      const record = parseRecordLine(line, lineNumber, this.filePath, true);
+      // Unterminated trailing line — the last write may have crashed
+      // mid-flush; parsing it tolerates truncation (see parseRecordLine).
+      lines.push({ text: pending, lineNumber, allowTruncated: true });
+    }
+
+    // Parse-skipping is only safe when no wire migration is needed: a version
+    // mismatch triggers migrations/rewrite that must see EVERY record, so
+    // old/new-version files fall back to full parsing. The version lives in
+    // the first (metadata) line.
+    let skipFoldedBeforeSnapshot = false;
+    if (lines.length > 0) {
+      try {
+        const header = JSON.parse(lines[0]!.text) as { protocol_version?: unknown };
+        skipFoldedBeforeSnapshot = header.protocol_version === AGENT_WIRE_PROTOCOL_VERSION;
+      } catch {
+        skipFoldedBeforeSnapshot = false; // header error re-thrown in phase 2
+      }
+    }
+
+    // Phase 2: parse. Folded records predating the last snapshot are skipped
+    // WITHOUT parsing — the restore fast-path discards them anyway
+    // (records/index.ts snapshot branch), so the yielded stream is identical
+    // while the dominant JSON.parse cost disappears.
+    for (const entry of lines) {
+      if (
+        skipFoldedBeforeSnapshot &&
+        entry.lineNumber < lastSnapshotLineNumber &&
+        isSnapshotFoldedLine(entry.text)
+      ) {
+        continue;
+      }
+      const record = parseRecordLine(
+        entry.text,
+        entry.lineNumber,
+        this.filePath,
+        entry.allowTruncated,
+      );
       if (record !== undefined) yield record;
     }
   }

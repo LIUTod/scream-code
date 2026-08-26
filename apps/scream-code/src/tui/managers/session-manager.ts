@@ -373,29 +373,37 @@ export class SessionManager {
   }
 
   async switchToSession(session: Session, statusMessage: string): Promise<void> {
-    this.resetSessionRuntime();
-    await this.setSession(session);
-    await this.syncRuntimeState(session);
-    this.host.refreshSessionTitle();
-    try {
-      await this.host.refreshSkillCommands(this.host.session);
-    } catch {
-      /* keep the switched session usable even if dynamic skills fail */
+    if (this.host.state.appState.isSwitchingSession) {
+      return;
     }
-    this.host.clearTranscriptAndRedraw();
+    this.host.setAppState({ isSwitchingSession: true });
     try {
-      await this.host.sessionReplay.hydrateFromReplay(session);
-    } catch (error) {
-      const msg = formatErrorMessage(error);
-      this.host.showError(t('session.replay_failed', { msg }));
+      this.resetSessionRuntime();
+      await this.setSession(session);
+      await this.syncRuntimeState(session);
+      this.host.refreshSessionTitle();
+      try {
+        await this.host.refreshSkillCommands(this.host.session);
+      } catch {
+        /* keep the switched session usable even if dynamic skills fail */
+      }
+      this.host.clearTranscriptAndRedraw();
+      try {
+        await this.host.sessionReplay.hydrateFromReplay(session);
+      } catch (error) {
+        const msg = formatErrorMessage(error);
+        this.host.showError(t('session.replay_failed', { msg }));
+      } finally {
+        this.host.sessionEventHandler.startSubscription();
+      }
+      const resumeState = session.getResumeState();
+      if (resumeState?.warning !== undefined) {
+        this.host.showStatus(t('session.resume_warning', { warning: resumeState.warning }), this.host.state.theme.colors.warning);
+      }
+      this.host.showStatus(statusMessage);
     } finally {
-      this.host.sessionEventHandler.startSubscription();
+      this.host.setAppState({ isSwitchingSession: false });
     }
-    const resumeState = session.getResumeState();
-    if (resumeState?.warning !== undefined) {
-      this.host.showStatus(t('session.resume_warning', { warning: resumeState.warning }), this.host.state.theme.colors.warning);
-    }
-    this.host.showStatus(statusMessage);
   }
 
   // ---------------------------------------------------------------------------

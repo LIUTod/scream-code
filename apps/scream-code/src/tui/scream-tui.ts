@@ -121,6 +121,7 @@ function createInitialAppState(input: ScreamTUIStartupInput): AppState {
     lastCompactionFinishedAt: undefined,
     autoCompactionCount: 0,
     isReplaying: false,
+    isSwitchingSession: false,
     streamingPhase: 'idle',
     streamingStartTime: 0,
     theme: input.tuiConfig.theme,

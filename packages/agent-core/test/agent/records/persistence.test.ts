@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { mkdir, readFile, readdir, rm } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'pathe';
 
@@ -279,5 +279,90 @@ describe('InMemoryAgentRecordPersistence', () => {
       },
     ]);
     expect(persistence.records).toEqual(records);
+  });
+});
+
+
+describe('snapshot parse-skipping (read fast path)', () => {
+  const METADATA = {
+    type: 'metadata',
+    protocol_version: AGENT_WIRE_PROTOCOL_VERSION,
+    created_at: 1,
+  };
+
+  function foldedMessage(text: string) {
+    return {
+      type: 'context.append_message',
+      message: { role: 'user', content: [{ type: 'text', text }], toolCalls: [] },
+    };
+  }
+
+  function snapshotRecord() {
+    return {
+      type: 'context.snapshot',
+      snapshot: { memory: {}, forkContext: null },
+      compactedHistory: [],
+    };
+  }
+
+  async function writeFixture(lines: object[]): Promise<string> {
+    const wirePath = await makeWirePath();
+    await writeFile(wirePath, lines.map((l) => JSON.stringify(l)).join('\n') + '\n', 'utf8');
+    return wirePath;
+  }
+
+  async function readTypes(wirePath: string): Promise<string[]> {
+    const persistence = new FileSystemAgentRecordPersistence(wirePath);
+    const records: AgentRecord[] = [];
+    for await (const record of persistence.read()) records.push(record);
+    return records.map((r) => r.type);
+  }
+
+  it('skips folded records predating the last snapshot without parsing them', async () => {
+    const wirePath = await writeFixture([
+      METADATA,
+      foldedMessage('old question'), // folded into the snapshot below
+      { type: 'context.apply_compaction', keep: [] }, // also folded
+      snapshotRecord(),
+      foldedMessage('new question'), // after the snapshot — NOT skipped
+      { type: 'turn.prompt', input: [{ type: 'text', text: 'next' }], origin: { kind: 'user' } },
+    ]);
+
+    expect(await readTypes(wirePath)).toEqual([
+      'metadata',
+      'context.snapshot',
+      'context.append_message',
+      'turn.prompt',
+    ]);
+  });
+
+  it('still parses everything when the wire version differs (migration path)', async () => {
+    const wirePath = await writeFixture([
+      { ...METADATA, protocol_version: Number(AGENT_WIRE_PROTOCOL_VERSION) - 1 },
+      foldedMessage('old question'),
+      snapshotRecord(),
+    ]);
+
+    // Version mismatch requires a full rewrite that migrates every record,
+    // so skipping must be disabled.
+    expect(await readTypes(wirePath)).toEqual([
+      'metadata',
+      'context.append_message',
+      'context.snapshot',
+    ]);
+  });
+
+  it('parses everything when the file has no snapshot', async () => {
+    const wirePath = await writeFixture([
+      METADATA,
+      foldedMessage('q1'),
+      { type: 'context.apply_compaction', keep: [] },
+    ]);
+
+    expect(await readTypes(wirePath)).toEqual([
+      'metadata',
+      'context.append_message',
+      'context.apply_compaction',
+    ]);
   });
 });

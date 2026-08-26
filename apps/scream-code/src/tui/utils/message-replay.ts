@@ -9,6 +9,7 @@ import type {
 } from '@scream-code/scream-code-sdk';
 
 import { t } from '@scream-code/config';
+import { REPLAY_TURN_LIMIT } from '@scream-code/scream-code-sdk';
 
 import type {
   AppState,
@@ -20,7 +21,10 @@ import type {
 import { mediaUrlPartToText } from './media-url';
 import { nextTranscriptId } from './transcript-id';
 
-export const REPLAY_TURN_LIMIT = 10;
+// Single source of truth: the core trims resume replay payloads to this
+// window (agent-core replay/index.ts); re-exported for existing consumers
+// (session-replay.ts).
+export { REPLAY_TURN_LIMIT };
 
 export interface ReplayRenderContext {
   turnIndex: number;

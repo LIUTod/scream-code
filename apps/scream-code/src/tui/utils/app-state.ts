@@ -21,5 +21,5 @@ export function isStreaming(state: AppState): boolean {
 /** True when the session is busy and should reject state-changing operations.
  *  Covers both active streaming and context compaction. */
 export function isBusy(state: AppState): boolean {
-  return isStreaming(state) || state.isCompacting;
+  return isStreaming(state) || state.isCompacting || state.isSwitchingSession;
 }

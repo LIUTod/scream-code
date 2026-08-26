@@ -275,3 +275,46 @@ describe('replay-time vacuous message cleanup', () => {
     expect(ctx.agent.context.snapshot().openSteps.has('in-flight')).toBe(true);
   });
 });
+
+
+describe('file-backed resume with parse-skipping', () => {
+  async function makeWirePath(): Promise<string> {
+    const { mkdtemp } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('pathe');
+    return join(await mkdtemp(join(tmpdir(), 'wire-skip-test-')), 'wire.jsonl');
+  }
+
+  it('restores identical context state from file (skip path) and memory (full parse)', async () => {
+    const { FileSystemAgentRecordPersistence } = await import(
+      '../../../src/agent/records/persistence'
+    );
+    const { readFile, writeFile } = await import('node:fs/promises');
+
+    // Serialize the exact in-memory wire to disk, so file and memory paths
+    // replay byte-identical content.
+    const wire = buildLiveWire();
+    const wirePath = await makeWirePath();
+    await writeFile(wirePath, wire.map((r) => JSON.stringify(r)).join('\n') + '\n', 'utf8');
+
+    // Resume from file: parse-skipping fast path is active.
+    const fromFile = testAgent({
+      persistence: new FileSystemAgentRecordPersistence(wirePath),
+    });
+    await fromFile.agent.records.replay();
+
+    // Resume in memory: full parse, no skipping.
+    const fromMemory = replayWire(buildLiveWire());
+    await fromMemory.agent.records.replay();
+
+    expect(fromFile.agent.context.data()).toEqual(fromMemory.agent.context.data());
+
+    // Serialization-format lock: every line on disk starts with the "type"
+    // key, which the skip probes rely on. If record shapes ever reorder keys,
+    // this fails loudly instead of silently corrupting resumes.
+    const raw = await readFile(wirePath, 'utf8');
+    for (const line of raw.split('\n').filter((l) => l.length > 0)) {
+      expect(line.startsWith('{"type":"')).toBe(true);
+    }
+  });
+});

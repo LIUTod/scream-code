@@ -38,6 +38,10 @@ export {
   toScreamErrorPayload,
 } from '@scream-code/agent-core';
 
+// Replay window shared with the TUI: the core trims replay payloads to the
+// last REPLAY_TURN_LIMIT user turns, and the TUI renders the same window.
+export { REPLAY_TURN_LIMIT } from '@scream-code/agent-core';
+
 // Diagnostic logging — public surface only.
 // RootLogger / getRootLogger / LoggingConfig stay inside agent-core.
 export {
