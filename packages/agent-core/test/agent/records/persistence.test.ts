@@ -365,4 +365,56 @@ describe('snapshot parse-skipping (read fast path)', () => {
       'context.apply_compaction',
     ]);
   });
+
+  it('keeps records containing U+2028/U+2029 line separators intact', async () => {
+    // Unicode line separators inside JSON string content must NOT split a
+    // record — only "\n" (0x0A) terminates a wire line. node:readline-based
+    // splitting would cut these in half and fail to parse.
+    const separatorMessage = {
+      type: 'turn.prompt',
+      input: [{ type: 'text', text: '行内分隔符\u{2028}第二行\u{2029}第三行' }],
+      origin: { kind: 'user' },
+    };
+    const raw =
+      JSON.stringify(METADATA) + '\n' + JSON.stringify(separatorMessage) + '\n';
+    const wirePath = await makeWirePath();
+    await writeFile(wirePath, raw, 'utf8');
+
+    expect(await readTypes(wirePath)).toEqual(['metadata', 'turn.prompt']);
+    const persistence = new FileSystemAgentRecordPersistence(wirePath);
+    for await (const record of persistence.read()) {
+      if (record.type === 'turn.prompt') {
+        expect(
+          (
+            record as Extract<AgentRecord, { type: 'turn.prompt' }>).input[0],
+        ).toMatchObject({ text: '行内分隔符\u{2028}第二行\u{2029}第三行' });
+      }
+    }
+  });
+
+  it('tolerates CRLF line endings and unterminated trailing lines', async () => {
+    const first = { type: 'turn.prompt', input: [{ type: 'text', text: 'crlf line' }], origin: { kind: 'user' } };
+    // Trailing partial record without a newline: tolerated as allowTruncated.
+    const partial = '{"type":"turn.prompt","input":[{"type":"text","text":"trunc';
+    const raw = JSON.stringify(METADATA) + '\r\n' + JSON.stringify(first) + '\r\n' + partial;
+    const wirePath = await makeWirePath();
+    await writeFile(wirePath, raw, 'utf8');
+
+    expect(await readTypes(wirePath)).toEqual(['metadata', 'turn.prompt']);
+  });
+
+  it('handles multi-chunk oversized lines spanning hundreds of stream chunks', async () => {
+    // A single multi-megabyte record exercises the cross-chunk open-line
+    // assembly path (the quadratic-scan regression this guards against).
+    const bigText = 'x'.repeat(3 * 1024 * 1024);
+    const bigRecord = {
+      type: 'turn.prompt',
+      input: [{ type: 'text', text: bigText }],
+      origin: { kind: 'user' },
+    };
+    const wirePath = await makeWirePath();
+    await writeFile(wirePath, JSON.stringify(METADATA) + '\n' + JSON.stringify(bigRecord) + '\n', 'utf8');
+
+    expect(await readTypes(wirePath)).toEqual(['metadata', 'turn.prompt']);
+  });
 });

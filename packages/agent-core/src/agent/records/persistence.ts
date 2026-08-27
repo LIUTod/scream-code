@@ -28,6 +28,9 @@ export const SNAPSHOT_FOLDED_CONTEXT_TYPES: ReadonlySet<string> = new Set([
  * probe is exact — a false positive would require an entire line to start
  * with this JSON prefix, which no other record (or any message content, whose
  * line starts with its own record "type") can produce.
+ *
+ * Probes run on raw UTF-8 bytes (see SNAPSHOT_RECORD_LINE_PREFIX_BYTES): all
+ * characters in these prefixes are ASCII, so byte-level matching is exact.
  */
 const SNAPSHOT_RECORD_LINE_PREFIX = '{"type":"context.snapshot"';
 
@@ -36,13 +39,31 @@ const SNAPSHOT_FOLDED_LINE_PREFIXES: readonly string[] = [...SNAPSHOT_FOLDED_CON
   (type) => `{"type":"${type}"`,
 );
 
-function isSnapshotFoldedLine(line: string): boolean {
-  return SNAPSHOT_FOLDED_LINE_PREFIXES.some((prefix) => line.startsWith(prefix));
+/** UTF-8 bytes of {@link SNAPSHOT_RECORD_LINE_PREFIX}. */
+const SNAPSHOT_RECORD_LINE_PREFIX_BYTES = Buffer.from(SNAPSHOT_RECORD_LINE_PREFIX, 'utf8');
+
+/** UTF-8 bytes of each entry of {@link SNAPSHOT_FOLDED_LINE_PREFIXES}. */
+const SNAPSHOT_FOLDED_LINE_PREFIX_BYTES: readonly Buffer[] = SNAPSHOT_FOLDED_LINE_PREFIXES.map(
+  (prefix) => Buffer.from(prefix, 'utf8'),
+);
+
+function startsWithPrefix(data: Buffer, prefix: Buffer): boolean {
+  return data.length >= prefix.length && data.subarray(0, prefix.length).equals(prefix);
+}
+
+function startsWithAnyPrefix(data: Buffer, prefixes: readonly Buffer[]): boolean {
+  return prefixes.some((prefix) => startsWithPrefix(data, prefix));
 }
 
 /** A buffered physical line from the wire file. */
 interface WireLine {
-  readonly text: string;
+  /**
+   * Raw UTF-8 bytes of the line WITHOUT its terminating newline. Lines are
+   * held as bytes rather than decoded strings so that lines skipped by the
+   * parse filter never pay decode cost or JS-string memory (~2x the byte
+   * size); only surviving lines are decoded exactly once in phase 2.
+   */
+  readonly data: Buffer;
   readonly lineNumber: number;
   readonly allowTruncated: boolean;
 }
@@ -102,29 +123,53 @@ export class FileSystemAgentRecordPersistence implements AgentRecordPersistence 
     await this.flush();
 
     // Phase 1: buffer raw lines WITHOUT parsing, tracking the last
-    // context.snapshot line via the cheap prefix probe. On long sessions
-    // JSON.parse dominates; buffering strings is cheap in comparison, and the
-    // records array built downstream (records/index.ts replay) already holds
-    // the full parsed result in memory anyway.
+    // context.snapshot line via the cheap byte-prefix probe. On long sessions
+    // the file can reach hundreds of MB; holding each line as raw UTF-8 bytes
+    // (instead of decoded JS strings, which cost ~2x memory) keeps GC pressure
+    // during collection near zero. Only lines that survive the phase-2 skip
+    // filter are decoded.
+    //
+    // Line splitting recognizes ONLY "\n" (0x0A): record lines are JSON whose
+    // text content may contain Unicode separators such as U+2028, which must
+    // not break a record in half. Newline scanning runs on Buffers directly
+    // via chunk.indexOf(0x0a) — every byte is examined exactly once (each
+    // chunk is scanned on arrival and leftovers are accumulated per open
+    // line), so splitting stays linear even when a multi-megabyte snapshot
+    // line spans hundreds of stream chunks.
     const lines: WireLine[] = [];
     let lastSnapshotLineNumber = -1;
-    let pending = '';
     let lineNumber = 0;
-    const stream = createReadStream(this.filePath, { encoding: 'utf8' });
+    // Buffers accumulated for the currently open (unterminated) line.
+    let openChunks: Buffer[] = [];
+    const stream = createReadStream(this.filePath);
     try {
-      for await (const chunk of stream) {
-        pending += chunk;
-        let newlineIndex = pending.indexOf('\n');
-        while (newlineIndex !== -1) {
-          let rawLine = pending.slice(0, newlineIndex);
-          pending = pending.slice(newlineIndex + 1);
+      for await (const chunk of stream as AsyncIterable<Buffer>) {
+        // Each incoming chunk is scanned exactly once (Buffer.indexOf is
+        // byte-level), so splitting is linear in file size even when a
+        // multi-megabyte snapshot line spans hundreds of chunks.
+        let searchFrom = 0;
+        for (;;) {
+          const newlineIndex = chunk.indexOf(0x0a, searchFrom);
+          if (newlineIndex === -1) break;
+          const parts =
+            openChunks.length > 0
+              ? [...openChunks, chunk.subarray(searchFrom, newlineIndex)]
+              : [chunk.subarray(searchFrom, newlineIndex)];
+          let lineData = Buffer.concat(parts);
+          // Tolerate a bare "\r" before the newline (CRLF files).
+          if (lineData.length > 0 && lineData.at(-1) === 0x0d) {
+            lineData = lineData.subarray(0, lineData.length - 1);
+          }
           lineNumber++;
-          if (rawLine.endsWith('\r')) rawLine = rawLine.slice(0, -1);
-          if (rawLine.startsWith(SNAPSHOT_RECORD_LINE_PREFIX)) {
+          if (startsWithPrefix(lineData, SNAPSHOT_RECORD_LINE_PREFIX_BYTES)) {
             lastSnapshotLineNumber = lineNumber;
           }
-          lines.push({ text: rawLine, lineNumber, allowTruncated: false });
-          newlineIndex = pending.indexOf('\n');
+          lines.push({ data: lineData, lineNumber, allowTruncated: false });
+          openChunks = [];
+          searchFrom = newlineIndex + 1;
+        }
+        if (searchFrom < chunk.length) {
+          openChunks.push(chunk.subarray(searchFrom));
         }
       }
     } catch (error) {
@@ -132,11 +177,18 @@ export class FileSystemAgentRecordPersistence implements AgentRecordPersistence 
       if (code === 'ENOENT') return;
       throw error;
     }
-    if (pending.length > 0) {
+    // openChunks is only appended to when at least one unconsumed byte
+    // remains, so a non-empty list means the file's last newline was followed
+    // by more bytes — an unterminated trailing line.
+    if (openChunks.length > 0) {
       lineNumber++;
       // Unterminated trailing line — the last write may have crashed
       // mid-flush; parsing it tolerates truncation (see parseRecordLine).
-      lines.push({ text: pending, lineNumber, allowTruncated: true });
+      lines.push({
+        data: Buffer.concat(openChunks),
+        lineNumber,
+        allowTruncated: true,
+      });
     }
 
     // Parse-skipping is only safe when no wire migration is needed: a version
@@ -146,7 +198,9 @@ export class FileSystemAgentRecordPersistence implements AgentRecordPersistence 
     let skipFoldedBeforeSnapshot = false;
     if (lines.length > 0) {
       try {
-        const header = JSON.parse(lines[0]!.text) as { protocol_version?: unknown };
+        const header = JSON.parse(lines[0]!.data.toString('utf8')) as {
+          protocol_version?: unknown;
+        };
         skipFoldedBeforeSnapshot = header.protocol_version === AGENT_WIRE_PROTOCOL_VERSION;
       } catch {
         skipFoldedBeforeSnapshot = false; // header error re-thrown in phase 2
@@ -154,19 +208,19 @@ export class FileSystemAgentRecordPersistence implements AgentRecordPersistence 
     }
 
     // Phase 2: parse. Folded records predating the last snapshot are skipped
-    // WITHOUT parsing — the restore fast-path discards them anyway
+    // WITHOUT parsing or decoding — the restore fast-path discards them anyway
     // (records/index.ts snapshot branch), so the yielded stream is identical
     // while the dominant JSON.parse cost disappears.
     for (const entry of lines) {
       if (
         skipFoldedBeforeSnapshot &&
         entry.lineNumber < lastSnapshotLineNumber &&
-        isSnapshotFoldedLine(entry.text)
+        startsWithAnyPrefix(entry.data, SNAPSHOT_FOLDED_LINE_PREFIX_BYTES)
       ) {
         continue;
       }
       const record = parseRecordLine(
-        entry.text,
+        entry.data.toString('utf8'),
         entry.lineNumber,
         this.filePath,
         entry.allowTruncated,
