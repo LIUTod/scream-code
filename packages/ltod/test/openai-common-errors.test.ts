@@ -346,8 +346,8 @@ describe('reasoningEffortToThinkingEffort', () => {
   it('maps "xhigh" -> xhigh', () => {
     expect(reasoningEffortToThinkingEffort('xhigh')).toBe('xhigh');
   });
-  it('maps "max" -> xhigh (alias)', () => {
-    expect(reasoningEffortToThinkingEffort('max')).toBe('xhigh');
+  it('maps "max" -> max', () => {
+    expect(reasoningEffortToThinkingEffort('max')).toBe('max');
   });
   it('maps "none" -> off', () => {
     expect(reasoningEffortToThinkingEffort('none')).toBe('off');

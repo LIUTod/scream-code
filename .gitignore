@@ -11,6 +11,7 @@ coverage/
 .conductor
 .scream-code
 .scream-stash-dir
+.scream/
 plugins/cdn/
 superpowers
 dream-lock.json

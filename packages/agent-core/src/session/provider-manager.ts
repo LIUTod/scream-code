@@ -109,6 +109,7 @@ export class ProviderManager implements ModelProvider {
       alias.reasoningKey,
       this.options.promptCacheKey,
       alias.adaptiveThinking,
+      alias.forceThinking,
     );
 
     return {
@@ -215,6 +216,7 @@ function toLtodProviderConfig(
   reasoningKey: string | undefined,
   promptCacheKey: string | undefined,
   adaptiveThinking: boolean | undefined,
+  forceThinking: boolean | undefined,
 ): LtodProviderConfig {
   switch (provider.type) {
     case 'anthropic':
@@ -234,6 +236,7 @@ function toLtodProviderConfig(
         baseUrl: providerValue(provider.baseUrl, provider.env, 'OPENAI_BASE_URL'),
         apiKey: providerApiKey(provider),
         reasoningKey,
+        ...(forceThinking !== undefined ? { forceThinking } : {}),
         ...defaultHeadersField(provider.customHeaders),
       };
     case 'scream':
@@ -243,6 +246,7 @@ function toLtodProviderConfig(
         baseUrl: providerValue(provider.baseUrl, provider.env, 'SCREAM_BASE_URL'),
         apiKey: providerApiKey(provider),
         generationKwargs: { prompt_cache_key: promptCacheKey },
+        ...(forceThinking !== undefined ? { forceThinking } : {}),
         ...defaultHeadersField({ ...screamRequestHeaders, ...provider.customHeaders }),
       };
     case 'google-genai':

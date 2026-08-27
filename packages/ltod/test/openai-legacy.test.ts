@@ -636,6 +636,41 @@ describe('OpenAILegacyChatProvider', () => {
 
       expect(body['reasoning_effort']).toBe('high');
     });
+
+    it('.withThinking("max") sends "max" (chat-completions ladder), not "xhigh"', async () => {
+      const provider = createProvider().withThinking('max');
+      const history: Message[] = [
+        { role: 'user', content: [{ type: 'text', text: 'Think' }], toolCalls: [] },
+      ];
+      const body = await captureRequestBody(provider, '', [], history);
+
+      expect(body['reasoning_effort']).toBe('max');
+    });
+
+    it('.withThinking("off") with forceThinking degrades to the lowest effort', async () => {
+      const provider = new OpenAILegacyChatProvider({
+        model: 'glm-5.3-flash',
+        apiKey: 'test-key',
+        stream: false,
+        forceThinking: true,
+      }).withThinking('off');
+      const history: Message[] = [
+        { role: 'user', content: [{ type: 'text', text: 'Think' }], toolCalls: [] },
+      ];
+      const body = await captureRequestBody(provider, '', [], history);
+
+      expect(body['reasoning_effort']).toBe('low');
+    });
+
+    it('.withThinking("off") without forceThinking clears reasoning_effort (legacy)', async () => {
+      const provider = createProvider().withThinking('off');
+      const history: Message[] = [
+        { role: 'user', content: [{ type: 'text', text: 'Think' }], toolCalls: [] },
+      ];
+      const body = await captureRequestBody(provider, '', [], history);
+
+      expect(body['reasoning_effort']).toBeUndefined();
+    });
   });
 
   describe('auto reasoning_effort', () => {

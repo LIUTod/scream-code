@@ -704,6 +704,45 @@ describe('ScreamChatProvider', () => {
         },
       });
     });
+
+    it('maps xhigh and max to the deepest wire level instead of high', async () => {
+      for (const effort of ['xhigh', 'max'] as const) {
+        const provider = createProvider().withThinking(effort);
+        const history: Message[] = [
+          { role: 'user', content: [{ type: 'text', text: 'Think' }], toolCalls: [] },
+        ];
+        const body = await captureRequestBody(provider, '', [], history);
+
+        expect(body['reasoning_effort']).toBe('max');
+        expect(body['thinking']).toEqual({ type: 'enabled' });
+      }
+    });
+
+    it('degrades off to the lowest effort when forceThinking is set', async () => {
+      const provider = new ScreamChatProvider({
+        model: 'glm-5.3',
+        apiKey: 'test-key',
+        stream: false,
+        forceThinking: true,
+      }).withThinking('off');
+      const history: Message[] = [
+        { role: 'user', content: [{ type: 'text', text: 'Think' }], toolCalls: [] },
+      ];
+      const body = await captureRequestBody(provider, '', [], history);
+
+      expect(body['thinking']).toEqual({ type: 'enabled' });
+      expect(body['reasoning_effort']).toBe('low');
+    });
+
+    it('still sends disabled when forceThinking is not set (legacy behavior)', async () => {
+      const provider = createProvider().withThinking('off');
+      const history: Message[] = [
+        { role: 'user', content: [{ type: 'text', text: 'Think' }], toolCalls: [] },
+      ];
+      const body = await captureRequestBody(provider, '', [], history);
+
+      expect(body['thinking']).toEqual({ type: 'disabled' });
+    });
   });
 
   describe('provider properties', () => {

@@ -49,6 +49,9 @@ export const ModelAliasSchema = z.object({
   // model-name version inference. Needed for custom-named Anthropic endpoints
   // whose model name does not encode a parseable Claude version.
   adaptiveThinking: z.boolean().optional(),
+  // Model always thinks and rejects an explicit disable (HTTP 400). When set,
+  // requesting "off" degrades to the lowest reasoning effort instead.
+  forceThinking: z.boolean().optional(),
   // Levels this model supports for explicit thinking effort. If omitted the
   // UI falls back to [off, low, medium, high].
   thinkingLevels: z.array(ThinkingEffortSchema).optional(),

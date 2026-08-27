@@ -206,8 +206,9 @@ export function reasoningEffortToThinkingEffort(
     case 'high':
       return 'high';
     case 'xhigh':
-    case 'max':
       return 'xhigh';
+    case 'max':
+      return 'max';
     case 'none':
       return 'off';
     default:

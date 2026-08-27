@@ -77,6 +77,13 @@ export interface OpenAILegacyOptions {
   defaultHeaders?: Record<string, string>;
   toolMessageConversion?: ToolMessageConversion | undefined;
   clientFactory?: (auth: ProviderRequestAuth) => OpenAI;
+  /**
+   * Model always thinks and rejects an explicit disable request (HTTP 400).
+   * When true, `withThinking('off')` degrades to the lowest reasoning effort
+   * instead of clearing the effort (which these endpoints read as "no
+   * thinking requested").
+   */
+  forceThinking?: boolean | undefined;
 }
 
 export interface OpenAILegacyGenerationKwargs {
@@ -358,6 +365,7 @@ export class OpenAILegacyChatProvider implements ChatProvider {
   private _reasoningKey: string | undefined;
   private _reasoningEffort: string | undefined;
   private _thinkingExplicitlyOff = false;
+  private _forceThinking: boolean | undefined;
   private _generationKwargs: OpenAILegacyGenerationKwargs;
   private _toolMessageConversion: ToolMessageConversion;
   private _client: OpenAI | undefined;
@@ -381,6 +389,7 @@ export class OpenAILegacyChatProvider implements ChatProvider {
         ? normalizedReasoningKey
         : undefined;
     this._reasoningEffort = undefined;
+    this._forceThinking = options.forceThinking;
     this._generationKwargs = {};
     if (options.maxTokens !== undefined) {
       this._generationKwargs.max_tokens = options.maxTokens;
@@ -492,9 +501,26 @@ export class OpenAILegacyChatProvider implements ChatProvider {
   }
 
   withThinking(effort: ThinkingEffort): OpenAILegacyChatProvider {
-    const reasoningEffort = thinkingEffortToReasoningEffort(effort);
+    // Chat-completions endpoints disagree on the effort scale. The shared
+    // `thinkingEffortToReasoningEffort` maps xhigh/max -> 'xhigh', which only
+    // the responses-API wire accepts; chat-completions reasoners (e.g. GLM
+    // series) reject 'xhigh' with HTTP 400 and use a low|medium|high|max
+    // ladder instead, so map to the deepest chat-completions level here.
+    // Always-thinking models additionally reject an explicit disable with
+    // HTTP 400; when forceThinking is set, degrade "off" to the lowest
+    // reasoning effort with thinking left enabled.
+    let mapped = thinkingEffortToReasoningEffort(effort);
+    if (mapped === 'xhigh') {
+      mapped = 'max';
+    }
+    if (effort === 'off' && this._forceThinking === true) {
+      const clone = this._clone();
+      clone._reasoningEffort = 'low';
+      clone._thinkingExplicitlyOff = false;
+      return clone;
+    }
     const clone = this._clone();
-    clone._reasoningEffort = reasoningEffort;
+    clone._reasoningEffort = mapped;
     clone._thinkingExplicitlyOff = effort === 'off';
     return clone;
   }

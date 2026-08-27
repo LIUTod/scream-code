@@ -53,6 +53,12 @@ export interface ScreamOptions {
   defaultHeaders?: Record<string, string> | undefined;
   generationKwargs?: GenerationKwargs | undefined;
   clientFactory?: (auth: ProviderRequestAuth) => OpenAI;
+  /**
+   * Model always thinks and rejects an explicit disable request (HTTP 400).
+   * When true, `withThinking('off')` degrades to the lowest reasoning effort
+   * with thinking enabled instead of sending a disable that would fail.
+   */
+  forceThinking?: boolean | undefined;
 }
 
 export interface GenerationKwargs {
@@ -366,6 +372,7 @@ export class ScreamChatProvider implements ChatProvider {
   private _baseUrl: string | undefined;
   private _defaultHeaders: Record<string, string> | undefined;
   private _generationKwargs: GenerationKwargs;
+  private _forceThinking: boolean | undefined;
   private _client: OpenAI | undefined;
   private _clientFactory: ((auth: ProviderRequestAuth) => OpenAI) | undefined;
   private _files: ScreamFiles | undefined;
@@ -378,6 +385,7 @@ export class ScreamChatProvider implements ChatProvider {
     this._clientFactory = options.clientFactory;
     this._model = options.model;
     this._stream = options.stream ?? true;
+    this._forceThinking = options.forceThinking;
     this._generationKwargs = { ...options.generationKwargs };
     this._client =
       this._apiKey === undefined
@@ -509,14 +517,13 @@ export class ScreamChatProvider implements ChatProvider {
   }
 
   withThinking(effort: ThinkingEffort): ScreamChatProvider {
-    const thinking: ThinkingConfig = {
-      type: effort === 'off' ? 'disabled' : 'enabled',
-    };
+    // OpenAI-compatible reasoning endpoints disagree on the effort scale, so
+    // the mapping here follows what these endpoints actually accept in
+    // `reasoning_effort`: a three-step `low | medium | high | max` ladder.
+    // `xhigh` has no wire representation of its own and maps to `max` (the
+    // deepest supported level) rather than silently downgrading to `high`.
     let reasoningEffort: string | undefined;
     switch (effort) {
-      case 'off':
-        reasoningEffort = undefined;
-        break;
       case 'low':
         reasoningEffort = 'low';
         break;
@@ -524,11 +531,27 @@ export class ScreamChatProvider implements ChatProvider {
         reasoningEffort = 'medium';
         break;
       case 'high':
-      case 'xhigh':
-      case 'max':
         reasoningEffort = 'high';
         break;
+      case 'xhigh':
+      case 'max':
+        reasoningEffort = 'max';
+        break;
+      case 'off':
+        reasoningEffort = undefined;
+        break;
     }
+    if (effort === 'off' && this._forceThinking === true) {
+      // Always-thinking models reject an explicit disable with HTTP 400.
+      // Degrade to the lowest declared reasoning effort instead so the
+      // request still succeeds while keeping thinking on.
+      return this._withGenerationKwargs({ reasoning_effort: 'low' }).withExtraBody({
+        thinking: { type: 'enabled' },
+      });
+    }
+    const thinking: ThinkingConfig = {
+      type: effort === 'off' ? 'disabled' : 'enabled',
+    };
     return this._withGenerationKwargs({ reasoning_effort: reasoningEffort }).withExtraBody({
       thinking,
     });

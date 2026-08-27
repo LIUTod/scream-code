@@ -126,6 +126,10 @@ export function applyEnvModelConfig(config: ScreamConfig, env: Env = process.env
     env['SCREAM_MODEL_ADAPTIVE_THINKING'],
     'SCREAM_MODEL_ADAPTIVE_THINKING',
   );
+  const forceThinking = parseBooleanVar(
+    env['SCREAM_MODEL_FORCE_THINKING'],
+    'SCREAM_MODEL_FORCE_THINKING',
+  );
 
   const alias: ModelAlias = {
     provider: ENV_MODEL_PROVIDER_KEY,
@@ -136,6 +140,7 @@ export function applyEnvModelConfig(config: ScreamConfig, env: Env = process.env
     ...(maxOutputSize !== undefined ? { maxOutputSize } : {}),
     ...(reasoningKey !== undefined ? { reasoningKey } : {}),
     ...(adaptiveThinking !== undefined ? { adaptiveThinking } : {}),
+    ...(forceThinking !== undefined ? { forceThinking } : {}),
   };
 
   const thinkingMode = trimmed(env['SCREAM_MODEL_THINKING_MODE']);
