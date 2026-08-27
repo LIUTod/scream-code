@@ -163,6 +163,64 @@ export interface ReloadSummary {
 
 export const PLUGIN_NAME_REGEX = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 
+/**
+ * Consecutive failed plugin-owned tool calls (or faulty event-handler hits)
+ * that trip the circuit and take the plugin out of service for the session.
+ * A single success clears the streak; recovery is explicit (`ManagePlugin
+ * reset`), never automatic.
+ */
+export const PLUGIN_CIRCUIT_TRIP_THRESHOLD = 3;
+
 export function normalizePluginId(name: string): string {
   return name.toLowerCase();
+}
+
+/**
+ * One sub-action of the hot-apply pass. `plugin.deactivate` and `tools.remove`
+ * exist because tearing a plugin out of a running process is more than a data
+ * change: its code has to be unwound and its in-process tools dropped.
+ */
+export type PluginSyncStep =
+  | 'mcp.add'
+  | 'mcp.remove'
+  | 'skills.inject'
+  | 'skills.eject'
+  | 'tools.remove'
+  | 'plugin.deactivate';
+
+/** One change the hot-apply pass actually made to one live session. */
+export interface PluginSyncApplied {
+  readonly kind: PluginSyncStep;
+  readonly name?: string;
+  readonly session: string;
+}
+
+/**
+ * One sub-action that failed. A failure is always contained: the plugin
+ * mutation that triggered it already succeeded, so the sync is reported, never
+ * rethrown.
+ */
+export interface PluginSyncFailure {
+  readonly step: PluginSyncStep;
+  readonly pluginId?: string;
+  readonly message: string;
+}
+
+/** Outcome of pushing a plugin change into every live session. */
+export interface PluginSyncReport {
+  readonly ok: boolean;
+  readonly sessions: number;
+  readonly applied: readonly PluginSyncApplied[];
+  readonly failed: readonly PluginSyncFailure[];
+}
+
+/** The report field as surfaced by tools: `ok` plus what changed and what broke. */
+export interface PluginSyncSummary {
+  readonly ok: boolean;
+  readonly applied: readonly PluginSyncApplied[];
+  readonly failed: readonly PluginSyncFailure[];
+}
+
+export function summarizePluginSync(report: PluginSyncReport): PluginSyncSummary {
+  return { ok: report.ok, applied: report.applied, failed: report.failed };
 }

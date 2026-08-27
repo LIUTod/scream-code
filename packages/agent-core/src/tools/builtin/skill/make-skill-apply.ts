@@ -66,12 +66,28 @@ export class MakeSkillApplyTool implements BuiltinTool<MakeSkillApplyInput> {
       const result = await writePluginSkillPackage({
         jian: this.agent.jian,
         screamHomeDir,
+        manager: this.agent.toolServices?.plugins,
         package: pkg,
       });
 
+      // Hot-apply: the generated skill registers with the shared plugin table,
+      // so push it into the running session instead of waiting for the next
+      // launch. Skill data only — the generated package has no code entry.
+      const sync = this.agent.toolServices?.pluginSync;
+      let hotApplied = false;
+      if (sync !== undefined) {
+        try {
+          const report = await sync([result.pluginId], { skipMcpAdd: true });
+          hotApplied = report.ok || report.applied.length > 0;
+        } catch {
+          // Advisory: the skill is installed; the next session loads it anyway.
+        }
+      }
+
       return {
         output: `Skill installed to ${result.targetDir}\n\n` +
-          `You can manage it in the Skill Center with /plugin, and invoke it with /${sanitizeSkillName(args.name)} in a new session.`,
+          `You can manage it in the Skill Center with /plugin, and invoke it with /${sanitizeSkillName(args.name)}` +
+          (hotApplied ? ' right away — it was hot-applied to this session.' : ' in a new session.'),
       };
     } catch (error) {
       if (error instanceof ScreamError) {

@@ -315,12 +315,20 @@ export interface BackgroundTaskTerminatedEvent {
   readonly info: BackgroundTaskInfo;
 }
 
-export type ToolListUpdatedReason = 'mcp.connected' | 'mcp.disconnected' | 'mcp.failed';
+export type ToolListUpdatedReason =
+  | 'mcp.connected'
+  | 'mcp.disconnected'
+  | 'mcp.failed'
+  | 'user.registered'
+  | 'user.unregistered';
 
 export interface ToolListUpdatedEvent {
   readonly type: 'tool.list.updated';
   readonly reason: ToolListUpdatedReason;
-  readonly serverName: string;
+  /** Set for the MCP reasons: the server whose tools changed. */
+  readonly serverName?: string;
+  /** Set for the user-tool reasons: the registered/unregistered tool name. */
+  readonly toolName?: string;
 }
 
 export interface McpServerStatusEvent {

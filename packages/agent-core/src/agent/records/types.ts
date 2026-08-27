@@ -46,7 +46,10 @@ export interface AgentRecordEvents {
     id?: string;
   };
 
-  'tools.register_user_tool': UserToolRegistration;
+  // `execute` is stripped before the record is written: a function cannot be
+  // serialized, and a replayed tool must not look like it has an in-process
+  // implementation nobody registered.
+  'tools.register_user_tool': Omit<UserToolRegistration, 'execute'>;
   'tools.unregister_user_tool': {
     name: string;
   };

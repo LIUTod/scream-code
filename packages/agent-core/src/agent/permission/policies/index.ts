@@ -12,6 +12,7 @@ import {
   SensitiveFileAccessAskPermissionPolicy,
 } from './file-access-ask';
 import { GitCwdWriteApprovePermissionPolicy } from './git-cwd-write-approve';
+import { ManagePluginReadOnlyApprovePermissionPolicy } from './manage-plugin-read-only-approve';
 import { PlanModeGuardDenyPermissionPolicy } from './plan-mode-guard-deny';
 import { PlanModeToolApprovePermissionPolicy } from './plan-mode-tool-approve';
 import { PreToolCallHookPermissionPolicy } from './pre-tool-call-hook';
@@ -61,6 +62,9 @@ export function createPermissionDecisionPolicies(agent: Agent): readonly Permiss
     new WolfPackModeApprovePermissionPolicy(agent),
     // Tool is in the default-approve list (read-only / UI helpers) → approve.
     new DefaultToolApprovePermissionPolicy(),
+    // ManagePlugin's read-only actions (list/info/check/marketplace) → approve. Mutating
+    // actions decide nothing here and keep falling through to the approval prompt.
+    new ManagePluginReadOnlyApprovePermissionPolicy(),
     // Write/Edit on POSIX paths inside cwd inside a git work tree → approve.
     new GitCwdWriteApprovePermissionPolicy(agent),
     // Nothing matched → ask.

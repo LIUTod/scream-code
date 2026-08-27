@@ -1,6 +1,19 @@
 import type { AgentServices } from '../../agent';
-import type { EventSubscriptionBus } from '../../agent/events';
+import type { EventHandler, Unsubscribe } from '../../agent/events';
+import type { AgentEvent } from '../../rpc';
 import type { PluginManifest } from '../types';
+
+/**
+ * The event-bus view handed to a single activation. It is the public surface of
+ * `EventSubscriptionBus` an extension uses; the runtime wraps the real bus so
+ * every subscription made during `activate()` can be released if activation
+ * fails (otherwise a half-activated plugin would keep receiving events forever).
+ */
+export interface ExtensionEventBus {
+  subscribe(type: AgentEvent['type'] | '*', handler: EventHandler): Unsubscribe;
+  /** Drop every subscription made through this (per-plugin) view. */
+  clear(): void;
+}
 
 /**
  * Read-only, stable handle handed to an activated code plugin. Exposes the
@@ -12,7 +25,7 @@ export interface ExtensionContext {
   /** Read-only manifest of the agent's subsystems (stable, documented). */
   readonly services: AgentServices;
   /** In-process event bus mirroring `AgentEvent`s broadcast to the host. */
-  readonly events: EventSubscriptionBus;
+  readonly events: ExtensionEventBus;
   /** The plugin's default config (manifest `config` block) or undefined. */
   readonly config: Readonly<Record<string, unknown>> | undefined;
   readonly pluginId: string;

@@ -148,4 +148,29 @@ describe('ScreamCore plugin RPCs', () => {
       expect.objectContaining({ id: 'demo' }),
     );
   });
+
+  it('activatePlugin records an activation failure on the plugin and still rejects', async () => {
+    const home = await mkdtemp(path.join(tmpdir(), 'scream-home-'));
+    const pluginRoot = await mkdtemp(path.join(tmpdir(), 'plugin-'));
+    await writeFile(
+      path.join(pluginRoot, 'scream.plugin.json'),
+      JSON.stringify({ name: 'demo', version: '1.0.0', entryPoint: './missing-entry.js' }),
+      'utf8',
+    );
+
+    const core = new ScreamCore(async () => ({}) as never, { homeDir: home });
+    await new Promise((resolve) => setImmediate(resolve));
+    await core.installPlugin({ source: pluginRoot });
+    expect(core.plugins.get('demo')?.state).toBe('ok');
+    // Only a live main agent has to exist: the entry point is loaded (and fails)
+    // before the agent is used.
+    core.sessions.set('s-1', { agents: new Map([['main', {}]]) } as never);
+
+    await expect(core.activatePlugin({ sessionId: 's-1', pluginId: 'demo' })).rejects.toThrow();
+
+    const record = core.plugins.get('demo');
+    expect(record?.state).toBe('error');
+    expect(record?.diagnostics.at(-1)).toEqual(expect.objectContaining({ severity: 'error' }));
+    expect(core.extensionRuntime.isActive('demo')).toBe(false);
+  });
 });

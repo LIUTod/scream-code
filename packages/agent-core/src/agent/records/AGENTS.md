@@ -21,6 +21,10 @@
   records, restores and migrates
 - Restore contract: `restoreAgentRecord` must NOT emit UI events / call the LLM
   / run tools / touch the filesystem
+- `tools.register_user_tool` records are serializable-only (`name`,
+  `description`, `parameters`, optional `ownerPluginId`): a registered
+  closure (`execute`) never enters the wire — replay falls back to the
+  host-callback path on purpose
 - Snapshot mechanism (`context.snapshot`): written after compaction; replay
   skips folded records before it. When adding record types keep backward
   compatibility — unknown types are silently ignored

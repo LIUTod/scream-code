@@ -14,6 +14,7 @@ import { RecordingContext, type RecordingContextOptions } from './recording-cont
 export interface RunTurnOptions {
   readonly responses: readonly FakeLLMResponse[];
   readonly tools?: readonly ExecutableTool[] | undefined;
+  readonly buildTools?: (() => readonly ExecutableTool[]) | undefined;
   readonly hooks?: LoopHooks | undefined;
   readonly log?: Logger | undefined;
   readonly maxSteps?: number | undefined;
@@ -62,6 +63,7 @@ function buildRunTurnInput(opts: RunTurnOptions): {
       emitLiveEvent: opts.emitLiveEvent ?? fallback.emit,
     }),
     tools: opts.tools,
+    buildTools: opts.buildTools,
     hooks: opts.hooks,
     log: opts.log,
     maxSteps: opts.maxSteps,

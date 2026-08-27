@@ -6,7 +6,7 @@ import type { Agent } from '..';
 import type { HostRequestHandlers } from '../../tools/builtin/python/python';
 import type { SubagentHandle } from '../../session/subagent-host';
 import { makeErrorPayload } from '../../errors';
-import type { ExecutableTool, ExecutableToolResult } from '../../loop';
+import type { ExecutableTool, ExecutableToolContext, ExecutableToolResult } from '../../loop';
 import { createMcpAuthTool } from '../../mcp/auth-tool';
 import { isRetriableMcpCallError } from '../../mcp/client-shared';
 import type { McpConnectionManager, McpServerEntry } from '../../mcp';
@@ -14,6 +14,7 @@ import { mcpResultToExecutableOutput } from '../../mcp/output';
 import { isMcpToolName, qualifyMcpToolName } from '../../mcp/tool-naming';
 import type { MCPClient } from '../../mcp/types';
 import { DEFAULT_AGENT_PROFILES } from '../../profile';
+import { PLUGIN_CIRCUIT_TRIP_THRESHOLD } from '../../plugin/types';
 import { extendWorkspaceWithSkillRoots } from '../../skill';
 import type { TodoItem } from '../../todo';
 import * as b from '../../tools/builtin';
@@ -38,6 +39,28 @@ function cloneTodos(todos: readonly TodoItem[]): TodoItem[] {
     status: todo.status,
     phase: todo.phase,
   }));
+}
+
+/** Parse `plugin-<id>:<server>` back to the owning plugin id (undefined otherwise). */
+function pluginOwnerFromMcpServerName(serverName: string): string | undefined {
+  if (!serverName.startsWith('plugin-')) return undefined;
+  const colon = serverName.indexOf(':');
+  return colon > 'plugin-'.length ? serverName.slice('plugin-'.length, colon) : undefined;
+}
+
+/** Advisory appended to a tool result when its plugin just tripped the circuit. */
+function circuitTripNote(pluginId: string): string {
+  return (
+    `[circuit] Plugin "${pluginId}" failed ${String(PLUGIN_CIRCUIT_TRIP_THRESHOLD)} tool calls in a row ` +
+    'and was disabled; its tools, MCP servers, skills, and hooks were pulled from this session. ' +
+    `Inspect it with ManagePlugin {action:"check", id:"${pluginId}"}; recover with ` +
+    `{action:"reset", id:"${pluginId}"} or abandon it with {action:"remove", id:"${pluginId}"}.`
+  );
+}
+
+/** Render any tool payload for the advisory appendage without '[object Object]'. */
+function describeToolOutput(output: ExecutableToolResult['output']): string {
+  return typeof output === 'string' ? output : JSON.stringify(output);
 }
 
 const CRITERIA_SYSTEM_PROMPT = [
@@ -331,6 +354,11 @@ function createRlmHostHandlers(agent: Agent): HostRequestHandlers {
 export class ToolManager {
   protected builtinTools: Map<string, BuiltinTool> = new Map();
   protected readonly userTools: Map<string, ExecutableTool> = new Map();
+  /** tool name → owning plugin id; the index `unregisterToolsByOwner` reads. */
+  protected readonly toolOwners: Map<string, string> = new Map();
+  /** plugin id → consecutive capability failures; a success resets to zero. */
+  protected readonly circuitFailures: Map<string, number> = new Map();
+  protected readonly trippedPlugins: Set<string> = new Set();
   protected readonly mcpTools: Map<string, McpToolEntry> = new Map();
   /** server name → list of qualified tool names registered for that server. */
   protected readonly mcpToolsByServer: Map<string, string[]> = new Map();
@@ -402,11 +430,17 @@ export class ToolManager {
    * this method takes a hand-written registration.
    */
   registerUserTool(input: UserToolRegistration): void {
+    const { name, description, parameters, ownerPluginId, execute } = input;
+    // The wire record keeps only serializable fields: `execute` is a closure
+    // that cannot be replayed, so a replayed registration correctly falls back
+    // to the host-callback path while ownership (needed for teardown) survives.
     this.agent.records.logRecord({
       type: 'tools.register_user_tool',
-      ...input,
+      name,
+      description,
+      parameters,
+      ...(ownerPluginId !== undefined ? { ownerPluginId } : {}),
     });
-    const { name, description, parameters } = input;
     const tool: ExecutableTool = {
       name,
       description,
@@ -415,14 +449,60 @@ export class ToolManager {
         return {
           description,
           approvalRule: name,
-          execute: async (context) => {
-            return this.agent.rpc!.toolCall!(
-              {
-                turnId: Number(context.turnId),
-                toolCallId: context.toolCallId,
-                args,
-              },
-              { signal: context.signal },
+          execute: async (context: ExecutableToolContext) => {
+            // Every outcome of a plugin-owned tool answers to the circuit
+            // breaker; the note tells the model why the limb just went dead.
+            const noteOutcome = (outcome: ExecutableToolResult): ExecutableToolResult => {
+              if (ownerPluginId === undefined) return outcome;
+              if (this.reportOwnerOutcome(ownerPluginId, outcome.isError !== true) !== 'tripped') {
+                return outcome;
+              }
+              return {
+                ...outcome,
+                output: `${describeToolOutput(outcome.output)}\n\n${circuitTripNote(ownerPluginId)}`,
+              };
+            };
+            if (execute !== undefined) {
+              // In-process path (code plugins): the closure lives in this
+              // process and the host cannot call it. A throwing plugin surfaces
+              // as a tool error — never a broken loop.
+              try {
+                const out = await execute(
+                  (args ?? {}) as Record<string, unknown>,
+                  context,
+                );
+                return noteOutcome(
+                  out ?? { output: `Tool "${name}" returned no result.`, isError: true },
+                );
+              } catch (error) {
+                return noteOutcome({
+                  output: `Tool "${name}" failed: ${
+                    error instanceof Error ? error.message : String(error)
+                  }`,
+                  isError: true,
+                });
+              }
+            }
+            const rpc = this.agent.rpc;
+            if (rpc?.toolCall === undefined) {
+              // A host without an in-band tool callback cannot service plugin
+              // tools; report it as a tool error instead of crashing mid-call.
+              // This is a host capability gap, so it does not charge the
+              // plugin's breaker budget.
+              return {
+                output: `User-registered tool "${name}" cannot execute: host does not support in-band tool callbacks.`,
+                isError: true,
+              };
+            }
+            return noteOutcome(
+              await rpc.toolCall(
+                {
+                  turnId: Number(context.turnId),
+                  toolCallId: context.toolCallId,
+                  args,
+                },
+                { signal: context.signal },
+              ),
             );
           },
         };
@@ -430,6 +510,13 @@ export class ToolManager {
     };
     this.userTools.set(name, tool);
     this.enabledTools.add(name);
+    if (ownerPluginId !== undefined) this.toolOwners.set(name, ownerPluginId);
+    else this.toolOwners.delete(name);
+    this.agent.emitEvent({
+      type: 'tool.list.updated',
+      reason: 'user.registered',
+      toolName: name,
+    });
   }
 
   unregisterUserTool(name: string): void {
@@ -439,6 +526,89 @@ export class ToolManager {
     });
     this.userTools.delete(name);
     this.enabledTools.delete(name);
+    this.toolOwners.delete(name);
+    this.agent.emitEvent({
+      type: 'tool.list.updated',
+      reason: 'user.unregistered',
+      toolName: name,
+    });
+  }
+
+  /**
+   * Drop every user tool owned by `ownerPluginId` (a plugin being removed,
+   * disabled, or circuit-tripped). Returns the removed count. The loop rebuilds
+   * its tool list from `loopTools` on the next step, so no extra refresh is
+   * needed beyond the per-tool events emitted here.
+   */
+  unregisterToolsByOwner(ownerPluginId: string): number {
+    let removed = 0;
+    for (const [toolName, owner] of this.toolOwners) {
+      if (owner !== ownerPluginId) continue;
+      this.unregisterUserTool(toolName);
+      removed += 1;
+    }
+    return removed;
+  }
+
+  /**
+   * Circuit breaker bookkeeping (see `PLUGIN_CIRCUIT_TRIP_THRESHOLD`): every
+   * plugin-owned capability outcome flows here. `ok` clears the streak; a
+   * failure streak reaching the threshold trips the plugin exactly once and
+   * starts its asynchronous teardown. Returns 'tripped' on the call that
+   * crossed the line, so the caller can attach the advisory to its result.
+   */
+  reportOwnerOutcome(pluginId: string, ok: boolean): 'tripped' | undefined {
+    if (this.trippedPlugins.has(pluginId)) return undefined;
+    if (ok) {
+      this.circuitFailures.delete(pluginId);
+      return undefined;
+    }
+    const failures = (this.circuitFailures.get(pluginId) ?? 0) + 1;
+    this.circuitFailures.set(pluginId, failures);
+    if (failures < PLUGIN_CIRCUIT_TRIP_THRESHOLD) return undefined;
+    this.trippedPlugins.add(pluginId);
+    void this.tripPlugin(pluginId, failures);
+    return 'tripped';
+  }
+
+  getCircuitFailures(pluginId: string): number {
+    return this.circuitFailures.get(pluginId) ?? 0;
+  }
+
+  isCircuitTripped(pluginId: string): boolean {
+    return this.trippedPlugins.has(pluginId);
+  }
+
+  /** Clear the breaker for a plugin (ManagePlugin `reset`); it starts clean. */
+  resetCircuit(pluginId: string): void {
+    this.circuitFailures.delete(pluginId);
+    this.trippedPlugins.delete(pluginId);
+  }
+
+  /**
+   * Take a tripped plugin out of service: record why, persist it disabled,
+   * then let the host's session-sync pass tear its code, tools, MCP servers,
+   * and skills out of every live session. Best-effort: a teardown surprise
+   * must never propagate back into the tool loop that detected the failures.
+   */
+  private async tripPlugin(pluginId: string, failures: number): Promise<void> {
+    const services = this.agent.toolServices;
+    try {
+      if (services?.plugins !== undefined) {
+        await services.plugins.markError(
+          pluginId,
+          `circuit tripped after ${String(failures)} consecutive tool failures`,
+        );
+        await services.plugins.setEnabled(pluginId, false);
+      }
+    } catch {
+      // The ledger already recorded the trip; host bookkeeping is advisory.
+    }
+    try {
+      await services?.pluginSync?.([pluginId]);
+    } catch {
+      // Same: the next session start skips the disabled plugin anyway.
+    }
   }
 
   /**
@@ -487,6 +657,10 @@ export class ToolManager {
             description: tool.description,
             approvalRule: qualified,
             execute: async (context) => {
+              // One outcome hook for every path (first call, reconnect
+              // retry, protocol errors): the circuit ledger counts the
+              // FINAL result, so a recovered retry never double-charges.
+              const invoke = async (): Promise<ExecutableToolResult> => {
               // `args` has already been JSON-parsed and schema-validated by
               // the loop's preflight (`loop/tool-call.ts`), so the MCP
               // client gets a plain object directly.
@@ -550,6 +724,19 @@ export class ToolManager {
                   };
                 }
               }
+              };
+              const outcome = await invoke();
+              // Only plugin-owned MCP servers answer to the circuit breaker;
+              // user-configured servers must never burn a breaker budget.
+              const owner = pluginOwnerFromMcpServerName(serverName);
+              if (owner === undefined) return outcome;
+              if (this.reportOwnerOutcome(owner, outcome.isError !== true) !== 'tripped') {
+                return outcome;
+              }
+              return {
+                ...outcome,
+                output: `${describeToolOutput(outcome.output)}\n\n${circuitTripNote(owner)}`,
+              };
             },
           };
         },
@@ -697,6 +884,43 @@ export class ToolManager {
     return this.mcpAccessPatterns.some((pattern) => picomatch.isMatch(name, pattern));
   }
 
+  /** The enabled-name filter a turn freezes at its start. */
+  snapshotEnabledTools(): { names: ReadonlySet<string>; mcpPatterns: readonly string[] } {
+    return { names: new Set(this.enabledTools), mcpPatterns: [...this.mcpAccessPatterns] };
+  }
+
+  /**
+   * Build the offered tool table against an explicit enabled-name filter
+   * while the registration maps (user tools, MCP servers) stay live. A turn
+   * uses this with its frozen filter: a mid-turn `setActiveTools` then
+   * applies to the NEXT turn by design (turn config stability), while a
+   * plugin tool registered — or reclaimed by the breaker — mid-turn still
+   * shows up on the very next step.
+   */
+  loopToolsFor(filter: {
+    names: ReadonlySet<string>;
+    mcpPatterns: readonly string[];
+  }): readonly ExecutableTool[] {
+    const mcpNames = [...this.mcpTools.keys()].filter((name) =>
+      filter.mcpPatterns.some((pattern) => picomatch.isMatch(name, pattern)),
+    );
+    // Mutation goal tools are only offered to the model while a goal exists.
+    const hideGoalMutationTools = this.agent.goal.getGoal().goal === null;
+    return uniq([...filter.names, ...mcpNames])
+      .toSorted((a, b) => a.localeCompare(b))
+      .filter(
+        (name) =>
+          !(hideGoalMutationTools && (name === 'SetGoalBudget' || name === 'UpdateGoal' || name === 'WriteGoalNote')),
+      )
+      .map(
+        (name) =>
+          this.userTools.get(name) ??
+          this.mcpTools.get(name)?.tool ??
+          this.builtinTools.get(name),
+      )
+      .filter((tool) => !!tool);
+  }
+
   *toolInfos(): Iterable<ToolInfo> {
     for (const tool of this.builtinTools.values()) {
       yield {
@@ -820,6 +1044,10 @@ export class ToolManager {
           new b.SkillTool(this.agent),
         this.agent.type === 'main' && new b.MakeSkillPlanTool(this.agent),
         this.agent.type === 'main' && new b.MakeSkillApplyTool(this.agent),
+        // Managing the plugin center is a main-agent concern: it mutates the
+        // process-wide plugin table and can activate code, so subagents never
+        // get the handle.
+        this.agent.type === 'main' && new b.ManagePluginTool(this.agent),
         canSpawn &&
           new b.AgentTool(
             this.agent.subagentHost,
@@ -867,21 +1095,9 @@ export class ToolManager {
   }
 
   get loopTools(): readonly ExecutableTool[] {
-    const mcpNames = [...this.mcpTools.keys()].filter((name) => this.isMcpToolEnabled(name));
-    // Mutation goal tools are only offered to the model while a goal exists.
-    const hideGoalMutationTools = this.agent.goal.getGoal().goal === null;
-    return uniq([...this.enabledTools, ...mcpNames])
-      .toSorted((a, b) => a.localeCompare(b))
-      .filter(
-        (name) =>
-          !(hideGoalMutationTools && (name === 'SetGoalBudget' || name === 'UpdateGoal' || name === 'WriteGoalNote')),
-      )
-      .map(
-        (name) =>
-          this.userTools.get(name) ??
-          this.mcpTools.get(name)?.tool ??
-          this.builtinTools.get(name),
-      )
-      .filter((tool) => !!tool);
+    return this.loopToolsFor({
+      names: this.enabledTools,
+      mcpPatterns: this.mcpAccessPatterns,
+    });
   }
 }

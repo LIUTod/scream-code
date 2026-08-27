@@ -663,6 +663,7 @@ describe('Permission policy chain', () => {
       'yolo-mode-approve',
       'wolfpack-mode-approve',
       'default-tool-approve',
+      'manage-plugin-read-only-approve',
       'git-cwd-write-approve',
       'fallback-ask',
     ]);

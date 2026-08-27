@@ -1,6 +1,10 @@
 import type { AgentEvent } from '#/rpc';
 
-export type EventHandler = (event: AgentEvent) => void;
+/**
+ * A subscriber. It may be `async`: `dispatch` treats a returned promise's
+ * rejection like a synchronous throw, so a bad handler cannot crash the process.
+ */
+export type EventHandler = (event: AgentEvent) => void | Promise<unknown>;
 export type Unsubscribe = () => void;
 
 /**
@@ -48,15 +52,17 @@ export class EventSubscriptionBus {
   }
 
   /**
-   * Deliver an event to matching handlers. A handler that throws is isolated
-   * so a subscriber bug can never break the agent's event loop.
+   * Deliver an event to matching handlers. A handler that throws synchronously
+   * is caught here, and a handler that returns a rejected promise has that
+   * rejection swallowed, so a subscriber bug can never break the agent's event
+   * loop nor crash the process through `unhandledRejection`.
    */
   dispatch(event: AgentEvent): void {
     const typed = this.byType.get(event.type);
     if (typed !== undefined) {
       for (const handler of typed) {
         try {
-          handler(event);
+          void Promise.resolve(handler(event)).catch(noop);
         } catch {
           // Swallow: a subscriber must not break the loop.
         }
@@ -65,11 +71,16 @@ export class EventSubscriptionBus {
     if (this.wildcard.size > 0) {
       for (const handler of this.wildcard) {
         try {
-          handler(event);
+          void Promise.resolve(handler(event)).catch(noop);
         } catch {
           // Swallow.
         }
       }
     }
   }
+}
+
+/** Rejection sink for async subscribers: their failures are deliberately dropped. */
+function noop(): void {
+  // Swallow.
 }

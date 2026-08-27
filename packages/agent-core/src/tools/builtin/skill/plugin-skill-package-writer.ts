@@ -11,10 +11,18 @@ export interface WritePluginSkillPackageOptions {
   readonly jian: Jian;
   readonly screamHomeDir: string;
   readonly package: SkillPackage;
+  /**
+   * The process-wide plugin table. When provided, the generated plugin is
+   * registered on it directly. When omitted, a private PluginManager is built
+   * for this call only (standalone/test use).
+   */
+  readonly manager?: PluginManager;
 }
 
 export interface WritePluginSkillPackageResult {
   readonly targetDir: string;
+  /** Plugin-center id assigned by registerGenerated (needed for hot-apply). */
+  readonly pluginId: string;
 }
 
 const MANIFEST_FILE = 'scream.plugin.json';
@@ -29,7 +37,7 @@ function isSafeRelativePath(filePath: string): boolean {
 export async function writePluginSkillPackage(
   options: WritePluginSkillPackageOptions,
 ): Promise<WritePluginSkillPackageResult> {
-  const { jian, screamHomeDir, package: pkg } = options;
+  const { jian, screamHomeDir, manager, package: pkg } = options;
   const name = sanitizeSkillName(pkg.name);
   const targetDir = join(screamHomeDir, 'plugins', 'managed', name);
 
@@ -82,10 +90,19 @@ export async function writePluginSkillPackage(
     );
   }
 
+  let registered;
   try {
-    const manager = new PluginManager({ screamHomeDir });
-    await manager.load();
-    await manager.registerGenerated(targetDir);
+    if (manager !== undefined) {
+      registered = await manager.registerGenerated(targetDir);
+    } else {
+      // No shared table was injected, so build a throwaway manager that only
+      // writes this entry to disk. Callers that own a live PluginManager must
+      // pass it in: two managers over installed.json clobber each other's
+      // whole table, and the live one would never learn about this plugin.
+      const owned = new PluginManager({ screamHomeDir });
+      await owned.load();
+      registered = await owned.registerGenerated(targetDir);
+    }
   } catch (error) {
     throw new ScreamError(
       ErrorCodes.SKILL_INSTALL_FAILED,
@@ -93,7 +110,7 @@ export async function writePluginSkillPackage(
     );
   }
 
-  return { targetDir };
+  return { targetDir, pluginId: registered.id };
 }
 
 async function pathExists(jian: Jian, filePath: string): Promise<boolean> {

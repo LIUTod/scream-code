@@ -34,6 +34,7 @@ export * from './file/write';
 export * from './planning/enter-plan-mode';
 export * from './planning/exit-plan-mode';
 export * from './planning/fusion-plan';
+export * from './plugin/manage-plugin';
 export * from './python/python';
 export * from './shell/bash';
 export * from './state/inspect-own-assets';

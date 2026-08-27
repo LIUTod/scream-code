@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, realpath, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -304,6 +304,69 @@ describe('PluginManager', () => {
       }),
     );
     expect(manager.pluginSkillRoots()).toEqual([]);
+  });
+
+  it('markError() flags the plugin and appends an error diagnostic', async () => {
+    const home = await makeScreamHome();
+    const root = await makePlugin('demo', { skills: true });
+    const manager = new PluginManager({ screamHomeDir: home });
+    await manager.load();
+    await manager.install(root);
+    expect(manager.get('demo')?.state).toBe('ok');
+
+    await manager.markError('DEMO', 'activate exploded');
+
+    const record = manager.get('demo');
+    expect(record?.state).toBe('error');
+    expect(record?.diagnostics).toContainEqual({ severity: 'error', message: 'activate exploded' });
+    expect(manager.info('demo')?.hasErrors).toBe(true);
+    // An errored plugin stops contributing skills but is never lost.
+    expect(manager.pluginSkillRoots()).toEqual([]);
+    expect(manager.list()).toHaveLength(1);
+  });
+
+  it('markError() keeps earlier diagnostics and persists the record', async () => {
+    const home = await makeScreamHome();
+    const root = await makePlugin('demo');
+    const manager = new PluginManager({ screamHomeDir: home });
+    await manager.load();
+    await manager.install(root);
+    const installedPath = path.join(home, 'plugins', 'installed.json');
+    const readEntry = async (): Promise<{ id: string; updatedAt?: string }> => {
+      const file = JSON.parse(await readFile(installedPath, 'utf8')) as {
+        plugins: Array<{ id: string; updatedAt?: string }>;
+      };
+      return file.plugins[0]!;
+    };
+    const before = await readEntry();
+    // Timestamps are millisecond-precision, so force a gap before each write.
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    await manager.markError('demo', 'first failure');
+    expect((await readEntry()).updatedAt).not.toBe(before.updatedAt);
+    const beforeSecond = await readEntry();
+    await new Promise((resolve) => setTimeout(resolve, 5));
+
+    await manager.markError('demo', 'second failure');
+
+    const after = await readEntry();
+    expect(after.updatedAt).not.toBe(beforeSecond.updatedAt);
+    expect(after.updatedAt).toBe(manager.get('demo')?.updatedAt);
+    const diagnostics = manager.get('demo')?.diagnostics ?? [];
+    // Appended (in order) rather than replacing whatever the manifest parse said.
+    expect(diagnostics.slice(-2)).toEqual([
+      { severity: 'error', message: 'first failure' },
+      { severity: 'error', message: 'second failure' },
+    ]);
+  });
+
+  it('markError() is a no-op for an unknown plugin id', async () => {
+    const home = await makeScreamHome();
+    const manager = new PluginManager({ screamHomeDir: home });
+    await manager.load();
+
+    await expect(manager.markError('ghost', 'boom')).resolves.toBeUndefined();
+
+    expect(manager.list()).toEqual([]);
   });
 
   it('enabledSessionStarts() returns only enabled plugin sessionStart declarations', async () => {

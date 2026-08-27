@@ -33,6 +33,10 @@ tools:
   - Skill
   - MakeSkillPlan
   - MakeSkillApply
+  # Main-agent capability management. Subagent profiles inherit this list, but
+  # the tool is only registered for main agents, so it never reaches their
+  # model-visible tool set.
+  - ManagePlugin
   - WebSearch
   - Agent
   - WolfPack

@@ -11,6 +11,7 @@ import { ScreamError } from '../../src/errors';
 import { PluginManager } from '../../src/plugin/manager';
 import { MakeSkillApplyTool } from '../../src/tools/builtin/skill/make-skill-apply';
 import { MakeSkillPlanTool } from '../../src/tools/builtin/skill/make-skill-plan';
+import { writePluginSkillPackage } from '../../src/tools/builtin/skill/plugin-skill-package-writer';
 import {
   sanitizeSkillName,
   writeSkillPackage,
@@ -376,5 +377,57 @@ describe('MakeSkillApplyTool', () => {
 
     expect(result.isError).not.toBe(true);
     expect(typeof result.output === 'string' ? result.output : '').toContain('Skill installed to');
+  });
+
+  it('registers the new plugin on the shared manager from tool services', async () => {
+    const tmp = await mkdtemp(join(tmpdir(), 'make-skill-test-'));
+    const jian = await makeJian(tmp);
+    const shared = new PluginManager({ screamHomeDir: tmp });
+    await shared.load();
+    const registerGenerated = vi.spyOn(shared, 'registerGenerated');
+    const agent = {
+      jian,
+      screamHomeDir: tmp,
+      toolServices: { plugins: shared },
+    } as unknown as Agent;
+
+    const tool = new MakeSkillApplyTool(agent);
+    const result = await runTool(tool, {
+      name: 'shared-manager-skill',
+      description: 'Shared.',
+      content:
+        '---\nname: shared-manager-skill\ndescription: Shared.\ntype: inline\n---\n\n# Shared\n',
+      files: [],
+    });
+
+    expect(result.isError).not.toBe(true);
+    expect(registerGenerated).toHaveBeenCalledTimes(1);
+    // The live table learned about it without a reload, so no second writer ran.
+    expect(shared.get('shared-manager-skill')?.enabled).toBe(true);
+    expect(shared.summaries().map((s) => s.id)).toEqual(['shared-manager-skill']);
+  });
+});
+
+describe('writePluginSkillPackage', () => {
+  it('falls back to a private manager when no shared manager is injected', async () => {
+    const tmp = await mkdtemp(join(tmpdir(), 'make-skill-test-'));
+    const jian = await makeJian(tmp);
+
+    const written = await writePluginSkillPackage({
+      jian,
+      screamHomeDir: tmp,
+      package: {
+        name: 'fallback-skill',
+        description: 'Fallback.',
+        content:
+          '---\nname: fallback-skill\ndescription: Fallback.\ntype: inline\n---\n\n# Fallback\n',
+        files: [],
+      },
+    });
+
+    expect(written.targetDir).toBe(join(tmp, 'plugins', 'managed', 'fallback-skill'));
+    const manager = new PluginManager({ screamHomeDir: tmp });
+    await manager.load();
+    expect(manager.get('fallback-skill')?.skillCount).toBe(1);
   });
 });

@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import type { McpServerConfig } from '../config/schema';
+import { log } from '../logging/logger';
 import { discoverSkills, type SkillRoot } from '../skill';
 import { downloadZip, extractZip } from './archive';
 import { resolveGithubSource } from './github-resolver';
@@ -12,6 +13,7 @@ import { resolveInstallSource } from './source';
 import {
   type EnabledPluginSessionStart,
   type PluginCapabilityState,
+  type PluginDiagnostic,
   type PluginGithubMetadata,
   type PluginInfo,
   type PluginMcpServerInfo,
@@ -196,6 +198,28 @@ export class PluginManager {
     this.records.set(key, {
       ...current,
       capabilities: nextCapabilities,
+      updatedAt: new Date().toISOString(),
+    });
+    await this.persist();
+  }
+
+  /**
+   * Flag a plugin as failed at runtime (typically its code entry point threw
+   * while activating). The record keeps the reason as an error diagnostic so
+   * `/plugin info` and listings show why the plugin is not usable.
+   */
+  async markError(id: string, message: string): Promise<void> {
+    const key = normalizePluginId(id);
+    const current = this.records.get(key);
+    if (current === undefined) {
+      log.warn('plugin markError for an unknown plugin', { pluginId: id, message });
+      return;
+    }
+    const diagnostic: PluginDiagnostic = { severity: 'error', message };
+    this.records.set(key, {
+      ...current,
+      state: 'error',
+      diagnostics: [...current.diagnostics, diagnostic],
       updatedAt: new Date().toISOString(),
     });
     await this.persist();
@@ -481,7 +505,29 @@ function withMcpServerEnabled(config: McpServerConfig, enabled: boolean): McpSer
 function pluginMcpRuntimeName(pluginId: string, serverName: string): string {
   // Plugin ids cannot contain ":", so this keeps plugin/server pairs unambiguous
   // even when either side contains "-".
-  return `plugin-${pluginId}:${serverName}`;
+  return `${PLUGIN_MCP_RUNTIME_PREFIX}${pluginId}:${serverName}`;
+}
+
+/** Runtime-name prefix that marks an MCP server as contributed by a plugin. */
+export const PLUGIN_MCP_RUNTIME_PREFIX = 'plugin-';
+
+/**
+ * True when an MCP runtime name belongs to a plugin. Anything else is
+ * user-configured and must never be touched by the plugin hot-apply pass.
+ */
+export function isPluginMcpRuntimeName(name: string): boolean {
+  return name.startsWith(PLUGIN_MCP_RUNTIME_PREFIX);
+}
+
+/**
+ * The plugin id embedded in a plugin MCP runtime name, or `undefined` for a
+ * user-configured server or a name that is not well-formed.
+ */
+export function pluginIdFromMcpRuntimeName(name: string): string | undefined {
+  if (!isPluginMcpRuntimeName(name)) return undefined;
+  const separator = name.indexOf(':');
+  if (separator <= PLUGIN_MCP_RUNTIME_PREFIX.length) return undefined;
+  return name.slice(PLUGIN_MCP_RUNTIME_PREFIX.length, separator);
 }
 
 function withPluginMcpRuntime(

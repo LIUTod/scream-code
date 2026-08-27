@@ -56,7 +56,7 @@ export function buildSelfMap(options: BuildSelfMapOptions): string {
     '',
     'Data:',
     `- skills/ — user skills: \`${userSkillsDir}\` (project skills are listed with their \`Path\` under Available skills above)`,
-    `- plugins/ — managed plugins and plugin-managed skills: \`${pluginsDir}\` (installed.json + managed/<name>/)`,
+    `- plugins/ — managed plugins and plugin-managed skills: \`${pluginsDir}\` (installed.json + managed/<name>/); manage them with the \`ManagePlugin\` builtin (read-only actions are free, mutations ask for approval) — never edit installed.json by hand`,
     `- memory/ — persistent cross-session memory: \`${memoryDir}\` (memos.sqlite + entries.jsonl)`,
     `- knowledge/ — local knowledge base (via the KnowledgeLookup tool): \`${knowledgeDir}\` (knowledge.db)`,
     '',

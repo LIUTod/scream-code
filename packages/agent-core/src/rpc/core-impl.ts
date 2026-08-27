@@ -5,7 +5,15 @@ import { join } from 'pathe';
 
 import { ErrorCodes, ScreamError } from '#/errors';
 import { getRootLogger, log } from '#/logging/logger';
-import { ExtensionRuntime, PluginManager } from '#/plugin';
+import {
+  ExtensionRuntime,
+  PluginManager,
+  isPluginMcpRuntimeName,
+  pluginIdFromMcpRuntimeName,
+  type PluginSyncApplied,
+  type PluginSyncFailure,
+  type PluginSyncReport,
+} from '#/plugin';
 import { FetchCache } from '#/tools/providers/fetch-cache';
 import { LocalFetchURLProvider } from '#/tools/providers/local-fetch-url';
 import { DuckDuckGoSearchProvider } from '#/tools/providers/duckduckgo-search';
@@ -33,6 +41,7 @@ import {
 } from '../flags';
 import type { Logger } from '../logging/types';
 import { resolveSessionMcpConfig, type SessionMcpConfig } from '../mcp';
+import type { McpServerConfig } from '../config/schema';
 import { Session, type SessionMeta, type SessionSkillConfig } from '../session';
 import type { SkillRoot } from '../skill';
 import { exportSessionDirectory } from '../session/export';
@@ -651,13 +660,51 @@ export class ScreamCore implements PromisableMethods<CoreAPI> {
         { details: { pluginId } },
       );
     }
-    await this.extensionRuntime.activate(agent, extension);
+    try {
+      await this.extensionRuntime.activate(agent, extension);
+    } catch (error) {
+      // Keep the user-visible failure, but first put the reason on the plugin
+      // record so `/plugin info` explains why it is unusable.
+      await this.markPluginError(pluginId, error);
+      throw error;
+    }
+    // Activation is the user's code-execution approval; the plugin's skills
+    // and MCP servers now hot-apply to every live session.
+    await this.syncSessionsBestEffort([pluginId]);
+  }
+
+  /**
+   * Best-effort bookkeeping for a failed activation: a `markError` failure must
+   * not replace the activation error the caller is about to see.
+   */
+  private async markPluginError(pluginId: string, error: unknown): Promise<void> {
+    const message = error instanceof Error ? error.message : String(error);
+    try {
+      await this.plugins.markError(pluginId, message);
+    } catch (markError: unknown) {
+      log.warn('failed to record plugin activation error', {
+        pluginId,
+        reason: markError instanceof Error ? markError.message : String(markError),
+      });
+    }
   }
 
   /** Deactivate a code plugin (removes its hooks and runs its deactivate). */
   async deactivatePlugin({ pluginId }: { pluginId: string }): Promise<void> {
     await this.pluginsReady;
     await this.extensionRuntime.deactivate(pluginId);
+    // A deactivated plugin's code is gone, so its in-process tools must stop
+    // being offered; leaving them registered would present a broken limb to
+    // the model. Skills and MCP servers stay until disable/remove.
+    for (const session of this.sessions.values()) {
+      for (const agent of session.agents.values()) {
+        try {
+          agent.tools.unregisterToolsByOwner(pluginId);
+        } catch {
+          // Per-agent isolation; the deactivation itself already succeeded.
+        }
+      }
+    }
   }
 
   /** Code plugins the runtime can load, with their activation state. */
@@ -898,17 +945,189 @@ export class ScreamCore implements PromisableMethods<CoreAPI> {
     return this.sessionApi(sessionId).removeMcpServer(payload);
   }
 
+  /**
+   * Push the current plugin table into every live session: plugin MCP servers,
+   * plugin skills, and in-process code/tool teardown for plugins that stopped
+   * being live. This is the hot-apply path behind `ToolServices.pluginSync`
+   * and the plugin write RPCs.
+   *
+   * Contract:
+   * - MCP edits are confined to plugin-owned runtime names (`plugin-<id>:<server>`);
+   *   user-configured servers are never touched.
+   * - `skipMcpAdd` honors "install never executes": skill data hot-applies, but
+   *   no plugin MCP process is started until an explicit enable/activate/reload.
+   * - A changed id whose record is gone, disabled, or errored gets its code
+   *   deactivated and its owned user tools dropped before its capabilities are
+   *   pulled from sessions. A live id is never activated here — running code
+   *   still requires an explicit, separately approved `activate`.
+   * - Every sub-action is isolated: failures accumulate in `failed[]` and this
+   *   returns a report; it never throws back to a caller whose plugin mutation
+   *   already succeeded.
+   */
+  async applyPluginChangesToSessions(
+    changedIds?: readonly string[],
+    options?: { skipMcpAdd?: boolean },
+  ): Promise<PluginSyncReport> {
+    await this.pluginsReady;
+    const applied: PluginSyncApplied[] = [];
+    const failed: PluginSyncFailure[] = [];
+    const messageOf = (error: unknown): string =>
+      error instanceof Error ? error.message : String(error);
+
+    let desired: Record<string, McpServerConfig> = {};
+    // If the desired table cannot be read, MCP deletions must stop too: an
+    // empty-by-fallback map would read as "remove everything" and tear the
+    // healthy plugins' servers down along with it.
+    let desiredUnknown = false;
+    try {
+      desired = this.plugins.enabledMcpServers();
+    } catch (error) {
+      desiredUnknown = true;
+      failed.push({ step: 'mcp.add', message: messageOf(error) });
+    }
+
+    // Targets: explicit ids, or (full rescan) everything installed plus every
+    // plugin still represented inside a session (stale MCP entries the table
+    // no longer wants must still be found to be removed).
+    const targets = new Set<string>(changedIds ?? []);
+    if (changedIds === undefined) {
+      try {
+        for (const record of this.plugins.list()) targets.add(record.id);
+      } catch (error) {
+        failed.push({ step: 'mcp.add', message: messageOf(error) });
+      }
+      for (const [sessionId, session] of this.sessions) {
+        try {
+          for (const entry of session.mcp.list()) {
+            if (!isPluginMcpRuntimeName(entry.name)) continue;
+            const id = pluginIdFromMcpRuntimeName(entry.name);
+            if (id !== undefined) targets.add(id);
+          }
+        } catch (error) {
+          failed.push({ step: 'mcp.remove', message: `session ${sessionId}: ${messageOf(error)}` });
+        }
+      }
+    }
+
+    const isLive = (id: string): boolean => {
+      const record = this.plugins.get(id);
+      return record !== undefined && record.enabled && record.state === 'ok';
+    };
+
+    // Process-level unwind first: the extension runtime and user-tool
+    // ownership are per-process state with no per-session copy.
+    for (const id of targets) {
+      if (isLive(id)) continue;
+      if (this.extensionRuntime.isActive(id)) {
+        try {
+          await this.extensionRuntime.deactivate(id);
+          applied.push({ kind: 'plugin.deactivate', name: id, session: 'host' });
+        } catch (error) {
+          failed.push({ step: 'plugin.deactivate', pluginId: id, message: messageOf(error) });
+        }
+      }
+      for (const [sessionId, session] of this.sessions) {
+        for (const agent of session.agents.values()) {
+          try {
+            const removed = agent.tools.unregisterToolsByOwner(id);
+            if (removed > 0) applied.push({ kind: 'tools.remove', name: id, session: sessionId });
+          } catch (error) {
+            failed.push({ step: 'tools.remove', pluginId: id, message: messageOf(error) });
+          }
+        }
+      }
+    }
+
+    // Per-session capability sync: MCP diff, then skills (eject → inject).
+    for (const [sessionId, session] of this.sessions) {
+      let actualNames = new Set<string>();
+      try {
+        actualNames = new Set(session.mcp.list().map((entry) => entry.name));
+      } catch (error) {
+        failed.push({ step: 'mcp.add', message: messageOf(error) });
+      }
+      for (const id of targets) {
+        const live = isLive(id);
+        // MCP add/remove are only safe while the desired table is known;
+        // a corrupt table must freeze capability edits, not invert them.
+        if (!desiredUnknown) {
+          for (const name of actualNames) {
+            if (!isPluginMcpRuntimeName(name)) continue;
+            if (pluginIdFromMcpRuntimeName(name) !== id) continue;
+            if (live && desired[name] !== undefined) continue;
+            try {
+              await session.mcp.removeServer(name);
+              applied.push({ kind: 'mcp.remove', name, session: sessionId });
+              actualNames.delete(name);
+            } catch (error) {
+              failed.push({ step: 'mcp.remove', pluginId: id, message: messageOf(error) });
+            }
+          }
+          if (live && options?.skipMcpAdd !== true) {
+            for (const [name, config] of Object.entries(desired)) {
+              if (pluginIdFromMcpRuntimeName(name) !== id) continue;
+              if (actualNames.has(name)) continue;
+              try {
+                await session.mcp.addServer(name, config);
+                applied.push({ kind: 'mcp.add', name, session: sessionId });
+                actualNames.add(name);
+              } catch (error) {
+                failed.push({ step: 'mcp.add', pluginId: id, message: messageOf(error) });
+              }
+            }
+          }
+        }
+        try {
+          session.ejectPlugin(id);
+          applied.push({ kind: 'skills.eject', name: id, session: sessionId });
+          if (live) {
+            const roots = this.plugins
+              .pluginSkillRoots()
+              .filter((root) => root.plugin?.id === id);
+            if (roots.length > 0) {
+              await session.injectSkillRoots(roots);
+              applied.push({ kind: 'skills.inject', name: id, session: sessionId });
+            }
+          }
+        } catch (error) {
+          failed.push({
+            step: live ? 'skills.inject' : 'skills.eject',
+            pluginId: id,
+            message: messageOf(error),
+          });
+        }
+      }
+    }
+
+    return { ok: failed.length === 0, sessions: this.sessions.size, applied, failed };
+  }
+
+  /**
+   * Best-effort wrapper for hot-apply after a successful plugin write: the
+   * mutation already landed, so a sync surprise must never fail the RPC or
+   * the tool call that triggered it.
+   */
+  private async syncSessionsBestEffort(
+    changedIds?: readonly string[],
+    options?: { skipMcpAdd?: boolean },
+  ): Promise<void> {
+    try {
+      await this.applyPluginChangesToSessions(changedIds, options);
+    } catch (error) {
+      log.warn('plugin hot-apply failed', {
+        reason: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
   async removePlugin({ id }: RemovePluginPayload): Promise<void> {
     await this.pluginsReady;
     this.assertPluginsLoaded();
     await this.plugins.remove(id);
-    for (const session of this.sessions.values()) {
-      try {
-        session.ejectPlugin(id);
-      } catch {
-        // Ejection is best-effort; the plugin record is already removed.
-      }
-    }
+    // Full teardown in one place: the sync deactivates the plugin's code,
+    // drops its in-process tools, and removes its MCP servers and skills from
+    // every live session (replacing the previous best-effort eject loop).
+    await this.applyPluginChangesToSessions([id]);
   }
 
   generateAgentsMd({ sessionId, ...payload }: SessionScopedPayload<{ targetDir?: string | undefined }>): Promise<void> {
@@ -919,6 +1138,10 @@ export class ScreamCore implements PromisableMethods<CoreAPI> {
     await this.pluginsReady;
     this.assertPluginsLoaded();
     const record = await this.plugins.install(payload.source);
+    // Install-only hot-apply: the plugin's skills become visible now, but no
+    // MCP process is started — that would cross the "install never executes"
+    // boundary. enable/activate/reload complete the capability picture.
+    await this.syncSessionsBestEffort([record.id], { skipMcpAdd: true });
     return this.plugins.summaries().find((s) => s.id === record.id)!;
   }
 
@@ -932,6 +1155,9 @@ export class ScreamCore implements PromisableMethods<CoreAPI> {
     await this.pluginsReady;
     this.assertPluginsLoaded();
     await this.plugins.setEnabled(id, enabled);
+    // Enable hot-adds the plugin's capabilities; disable tears the whole
+    // surface down (code, tools, MCP, skills) through the same sync pass.
+    await this.syncSessionsBestEffort([id]);
   }
 
   async setPluginMcpServerEnabled({
@@ -942,6 +1168,7 @@ export class ScreamCore implements PromisableMethods<CoreAPI> {
     await this.pluginsReady;
     this.assertPluginsLoaded();
     await this.plugins.setMcpServerEnabled(id, server, enabled);
+    await this.syncSessionsBestEffort([id]);
   }
 
 
@@ -949,6 +1176,9 @@ export class ScreamCore implements PromisableMethods<CoreAPI> {
     try {
       const summary = await this.plugins.reload();
       this.pluginsLoadError = undefined;
+      // The table just re-read from disk: full rescan so anything added,
+      // removed, or broken on disk converges in every live session.
+      await this.syncSessionsBestEffort();
       return summary;
     } catch (error) {
       this.pluginsLoadError = error instanceof Error ? error : new Error(String(error));
@@ -985,12 +1215,22 @@ export class ScreamCore implements PromisableMethods<CoreAPI> {
   }
 
   private async resolveRuntime(config: ScreamConfig): Promise<ToolServices> {
-    if (this.runtime !== undefined) {
-      return this.runtime;
-    }
-    const runtime = await createRuntimeConfig({ config });
-    this.runtime = runtime;
-    return runtime;
+    const base = this.runtime ?? (await createRuntimeConfig({ config }));
+    this.runtime = base;
+    // The live PluginManager is handed to tools so a plugin installed from
+    // inside the process registers on the shared table instead of writing
+    // installed.json through a second, disconnected instance. The matching
+    // ExtensionRuntime rides along for the same reason: activation state for
+    // code plugins has exactly one owner per process.
+    return {
+      ...base,
+      plugins: this.plugins,
+      extensionRuntime: this.extensionRuntime,
+      // Tools that mutate plugins push the change into live sessions through
+      // this host-owned entry point (the host owns the session table).
+      pluginSync: (changedIds, syncOptions) =>
+        this.applyPluginChangesToSessions(changedIds, syncOptions),
+    };
   }
 
   private resolveSessionSkillConfig(config: ScreamConfig): SessionSkillConfig {

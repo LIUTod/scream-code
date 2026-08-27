@@ -586,6 +586,10 @@ export class TurnFlow {
   private async runTurn(turnId: number, signal: AbortSignal): Promise<LoopTurnStopReason> {
     let stopHookContinuationUsed = false;
     const deduper = new ToolCallDeduplicator();
+    // Freeze the enabled-tool filter for this turn: a mid-turn setActiveTools
+    // applies to the NEXT turn by design (turn config stability), while the
+    // registration maps stay live for mid-turn plugin tools.
+    const turnToolFilter = this.agent.tools.snapshotEnabledTools();
     // Wait for MCP initial load, but bound it: a slow or hung server must
     // never stall the first turn indefinitely. Each server already isolates
     // its own startup timeout, so here we only cap the aggregate wait — on
@@ -610,6 +614,12 @@ export class TurnFlow {
           buildMessages: () => this.agent.context.messagesForLLM(),
           dispatchEvent: this.buildDispatchEvent(turnId),
           tools: this.agent.tools.loopTools,
+          // Per-step rebuild (buildTools wins over the snapshot above): a
+          // plugin tool registered mid-turn — e.g. right after activate —
+          // must be dispatchable on the very next step of THIS turn. The
+          // enabled-name filter is frozen at turn start, so a mid-turn
+          // setActiveTools still waits for the next turn by design.
+          buildTools: () => this.agent.tools.loopToolsFor(turnToolFilter),
           log: this.agent.log,
           maxSteps: loopControl?.maxStepsPerTurn,
           maxRetryAttempts: loopControl?.maxRetriesPerStep,

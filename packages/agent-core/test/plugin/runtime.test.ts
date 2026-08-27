@@ -23,7 +23,7 @@ function pluginRecord(overrides: Partial<PluginRecord> & { id: string }): Plugin
   } as PluginRecord;
 }
 
-function makeAgent(hooks?: HookEngine): Agent {
+function makeAgent(hooks?: HookEngine, log?: Record<string, unknown>): Agent {
   const services = {
     tools: { registerUserTool: vi.fn(), unregisterUserTool: vi.fn() },
   } as unknown as AgentServices;
@@ -31,7 +31,12 @@ function makeAgent(hooks?: HookEngine): Agent {
     hooks,
     eventBus: new EventSubscriptionBus(),
     services,
+    log,
   } as unknown as Agent;
+}
+
+function manifestWithEntryPoint(entryPoint: string): PluginManifest {
+  return { ...codeManifest, entryPoint };
 }
 
 const codeManifest: PluginManifest = {
@@ -52,6 +57,10 @@ describe('ExtensionRuntime', () => {
     delete (globalThis as any).__pluginActivated;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     delete (globalThis as any).__pluginDeactivated;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    delete (globalThis as any).__liveSubscriptionHits;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    delete (globalThis as any).__leakedSubscriptionHits;
   });
 
   it('discovers only plugins that declare an entryPoint', () => {
@@ -153,5 +162,241 @@ describe('ExtensionRuntime', () => {
     expect(hooks.summary['PreToolUse']).toBe(1);
     expect(hooks.summary['PostToolUse']).toBe(1);
     expect(runtime.isActive('code')).toBe(true);
+  });
+
+  it('keeps a subscription made during a successful activation', async () => {
+    const runtime = new ExtensionRuntime();
+    const agent = makeAgent(new HookEngine());
+    const manifest = manifestWithEntryPoint(path.join(FIXTURE_DIR, 'plugin-entry-subscribe.ts'));
+    const [extension] = runtime.discover([pluginRecord({ id: 'sub', manifest })]);
+
+    await runtime.activate(agent, extension!);
+    agent.eventBus.dispatch({ type: 'turn.started' } as never);
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((globalThis as any).__liveSubscriptionHits).toBe(1);
+  });
+
+  it('releases the plugin subscription on deactivate', async () => {
+    const runtime = new ExtensionRuntime();
+    const agent = makeAgent(new HookEngine());
+    const manifest = manifestWithEntryPoint(path.join(FIXTURE_DIR, 'plugin-entry-subscribe.ts'));
+    const [extension] = runtime.discover([pluginRecord({ id: 'sub', manifest })]);
+    await runtime.activate(agent, extension!);
+    agent.eventBus.dispatch({ type: 'turn.started' } as never);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((globalThis as any).__liveSubscriptionHits).toBe(1);
+
+    await runtime.deactivate('sub');
+    agent.eventBus.dispatch({ type: 'turn.started' } as never);
+
+    // No handler survives the deactivation.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((globalThis as any).__liveSubscriptionHits).toBe(1);
+  });
+
+  it('releases event subscriptions when the module activate throws', async () => {
+    const runtime = new ExtensionRuntime();
+    const agent = makeAgent(new HookEngine());
+    const manifest = manifestWithEntryPoint(
+      path.join(FIXTURE_DIR, 'plugin-entry-subscribe-throw.ts'),
+    );
+    const [extension] = runtime.discover([pluginRecord({ id: 'leaky', manifest })]);
+
+    await expect(runtime.activate(agent, extension!)).rejects.toThrow('subscribe-then-boom');
+    expect(runtime.isActive('leaky')).toBe(false);
+
+    agent.eventBus.dispatch({ type: 'turn.started' } as never);
+
+    // The subscription the failed activation created is gone: the dead handler
+    // never runs, and there is no handle left to leak.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((globalThis as any).__leakedSubscriptionHits).toBeUndefined();
+  });
+
+  it('isolates a throwing module deactivate and still cleans the activation', async () => {
+    const runtime = new ExtensionRuntime();
+    const warn = vi.fn();
+    const hooks = new HookEngine();
+    const agent = makeAgent(hooks, { warn });
+    const manifest = manifestWithEntryPoint(
+      path.join(FIXTURE_DIR, 'plugin-entry-deactivate-throw.ts'),
+    );
+    const [extension] = runtime.discover([pluginRecord({ id: 'bad', manifest })]);
+    await runtime.activate(agent, extension!);
+
+    await expect(runtime.deactivate('bad')).resolves.toBeUndefined();
+
+    expect(hooks.summary['PreToolUse']).toBeUndefined();
+    expect(runtime.isActive('bad')).toBe(false);
+    expect(runtime.activePluginIds()).toEqual([]);
+    expect(warn).toHaveBeenCalledWith(
+      'plugin deactivate failed',
+      expect.objectContaining({ pluginId: 'bad', error: 'deactivate boom' }),
+    );
+  });
+
+  it('deactivateAll drops every activation and isolates a failing one', async () => {
+    const runtime = new ExtensionRuntime();
+    const warn = vi.fn();
+    const hooks = new HookEngine();
+    const agent = makeAgent(hooks, { warn });
+    const good = pluginRecord({ id: 'good', manifest: codeManifest });
+    const bad = pluginRecord({
+      id: 'bad',
+      manifest: manifestWithEntryPoint(
+        path.join(FIXTURE_DIR, 'plugin-entry-deactivate-throw.ts'),
+      ),
+    });
+    for (const extension of runtime.discover([good, bad])) {
+      await runtime.activate(agent, extension);
+    }
+    expect(runtime.activePluginIds()).toEqual(['good', 'bad']);
+
+    await expect(runtime.deactivateAll()).resolves.toBeUndefined();
+
+    // The healthy plugin ran its own deactivate ...
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((globalThis as any).__pluginDeactivated).toBe(true);
+    // ... and the broken one only produced a warning, yet both were unregistered.
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      'plugin deactivate failed',
+      expect.objectContaining({ pluginId: 'bad' }),
+    );
+    expect(runtime.activePluginIds()).toEqual([]);
+    expect(hooks.summary['PreToolUse']).toBeUndefined();
+  });
+
+  it('deactivateAll is a no-op when nothing is active', async () => {
+    const runtime = new ExtensionRuntime();
+    await expect(runtime.deactivateAll()).resolves.toBeUndefined();
+  });
+});
+
+describe('ExtensionRuntime tool ownership', () => {
+  it('stamps ownerPluginId onto tools a plugin registers without one', async () => {
+    const runtime = new ExtensionRuntime();
+    const registerUserTool = vi.fn();
+    const services = {
+      tools: { registerUserTool, unregisterUserTool: vi.fn() },
+    } as unknown as AgentServices;
+    const agent = {
+      hooks: new HookEngine(),
+      eventBus: new EventSubscriptionBus(),
+      services,
+      log: undefined,
+    } as unknown as Agent;
+    const manifest: PluginManifest = {
+      ...codeManifest,
+      entryPoint: path.join(FIXTURE_DIR, 'plugin-entry-registers-tool.ts'),
+    };
+    const [extension] = runtime.discover([pluginRecord({ id: 'owner-demo', manifest })]);
+
+    await runtime.activate(agent, extension!);
+
+    expect(registerUserTool).toHaveBeenCalledTimes(1);
+    const input = registerUserTool.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(input['name']).toBe('fixture_owned_tool');
+    // The ownership stamp is what lets remove/disable/circuit-trip reclaim
+    // exactly this plugin's tools later.
+    expect(input['ownerPluginId']).toBe('owner-demo');
+    // The in-process execute must survive the stamping untouched.
+    expect(typeof input['execute']).toBe('function');
+  });
+
+  it('an explicit ownerPluginId from the plugin wins over the stamp', async () => {
+    const runtime = new ExtensionRuntime();
+    const registerUserTool = vi.fn();
+    const services = {
+      tools: { registerUserTool, unregisterUserTool: vi.fn() },
+    } as unknown as AgentServices;
+    const agent = {
+      hooks: new HookEngine(),
+      eventBus: new EventSubscriptionBus(),
+      services,
+      log: undefined,
+    } as unknown as Agent;
+    const manifest: PluginManifest = {
+      ...codeManifest,
+      entryPoint: path.join(FIXTURE_DIR, 'plugin-entry-explicit-owner.ts'),
+    };
+    const [extension] = runtime.discover([pluginRecord({ id: 'owner-demo', manifest })]);
+
+    await runtime.activate(agent, extension!);
+
+    expect(registerUserTool).toHaveBeenCalledTimes(1);
+    const input = registerUserTool.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(input['ownerPluginId']).toBe('declared-owner');
+  });
+});
+
+describe('ExtensionRuntime event-handler circuit', () => {
+  it('deactivates a plugin whose handler keeps throwing, at the trip threshold', async () => {
+    const runtime = new ExtensionRuntime();
+    const agent = makeAgent(new HookEngine());
+    const manifest: PluginManifest = {
+      ...codeManifest,
+      entryPoint: path.join(FIXTURE_DIR, 'plugin-entry-subscribe-faulty.ts'),
+    };
+    const [extension] = runtime.discover([pluginRecord({ id: 'faulty', manifest })]);
+    await runtime.activate(agent, extension!);
+
+    const fire = () => {
+      // The bus isolates handler throws; the tracked view counts them.
+      agent.eventBus.dispatch({ type: 'turn.started', turnId: '1' } as never);
+    };
+    fire();
+    fire();
+    expect(runtime.isActive('faulty')).toBe(true);
+    fire();
+
+    // The deactivation is async but its map cleanup runs synchronously first.
+    await new Promise((r) => setImmediate(r));
+    expect(runtime.isActive('faulty')).toBe(false);
+    // The 4th dispatch must not hit a handler that has been pulled.
+    const hitsBefore = (globalThis as Record<string, unknown>)['__faultyHandlerHits'] as number;
+    fire();
+    expect((globalThis as Record<string, unknown>)['__faultyHandlerHits'] as number).toBe(
+      hitsBefore,
+    );
+  });
+});
+
+describe('ExtensionRuntime deactivation tool reclaim', () => {
+  it('event-fault deactivation reclaims the plugin-owned user tools too', async () => {
+    const runtime = new ExtensionRuntime();
+    const unregisterToolsByOwner = vi.fn();
+    const services = {
+      tools: {
+        registerUserTool: vi.fn(),
+        unregisterUserTool: vi.fn(),
+        unregisterToolsByOwner,
+      },
+    } as unknown as AgentServices;
+    const agent = {
+      hooks: new HookEngine(),
+      eventBus: new EventSubscriptionBus(),
+      services,
+      log: undefined,
+    } as unknown as Agent;
+    const manifest: PluginManifest = {
+      ...codeManifest,
+      entryPoint: path.join(FIXTURE_DIR, 'plugin-entry-subscribe-faulty.ts'),
+    };
+    const [extension] = runtime.discover([pluginRecord({ id: 'faulty', manifest })]);
+    await runtime.activate(agent, extension!);
+
+    const fire = () => {
+      agent.eventBus.dispatch({ type: 'turn.started', turnId: '1' } as never);
+    };
+    fire();
+    fire();
+    fire();
+    await new Promise((r) => setImmediate(r));
+
+    // A deactivated plugin leaves no "dead limb" tools behind — whatever path
+    // (explicit action, sync teardown, event-fault circuit) caused it.
+    expect(unregisterToolsByOwner).toHaveBeenCalledWith('faulty');
   });
 });
