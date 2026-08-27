@@ -24,6 +24,7 @@ export const MANAGE_PLUGIN_ACTIONS = [
   'info',
   'check',
   'marketplace',
+  'precheck',
   'install',
   'register_generated',
   'enable',
@@ -33,6 +34,7 @@ export const MANAGE_PLUGIN_ACTIONS = [
   'deactivate',
   'remove',
   'reset',
+  'rollback',
   'reload',
 ] as const;
 
@@ -40,7 +42,13 @@ export const MANAGE_PLUGIN_ACTIONS = [
  * Actions that only read plugin state. The permission policy auto-approves
  * exactly this set; nothing here may write state or run plugin code.
  */
-export const MANAGE_PLUGIN_READ_ONLY_ACTIONS = ['list', 'info', 'check', 'marketplace'] as const;
+export const MANAGE_PLUGIN_READ_ONLY_ACTIONS = [
+  'list',
+  'info',
+  'check',
+  'marketplace',
+  'precheck',
+] as const;
 
 export type ManagePluginAction = (typeof MANAGE_PLUGIN_ACTIONS)[number];
 
@@ -54,6 +62,10 @@ export const ManagePluginInputSchema = z.object({
     .string()
     .optional()
     .describe('install: absolute path / GitHub URL / zip URL. register_generated: the generated plugin directory. marketplace: optional catalog URL or local JSON path.'),
+  upgrade: z
+    .boolean()
+    .optional()
+    .describe('install onto an existing plugin id: back up its current files, replace with the incoming ones, and reload. Without it, installing over an existing id silently overwrites.'),
   server: z.string().optional().describe('MCP server name, for set_mcp_enabled.'),
   enabled: z.boolean().optional().describe('Target state, for set_mcp_enabled.'),
   query: z.string().optional().describe('Case-insensitive substring filter, for marketplace.'),
@@ -89,6 +101,7 @@ const NEEDS_ID = new Set<ManagePluginAction>([
   'deactivate',
   'remove',
   'reset',
+  'rollback',
 ]);
 
 function isKnownAction(action: string): action is ManagePluginAction {
@@ -188,11 +201,13 @@ export class ManagePluginTool implements BuiltinTool<ManagePluginInput> {
         case 'info':
           return this.info(manager, args.id!);
         case 'check':
-          return this.check(manager, args.id);
+          return await this.check(manager, args.id);
+        case 'precheck':
+          return await this.precheck(args.source!);
         case 'marketplace':
           return await this.marketplace(args.source, args.query);
         case 'install':
-          return await this.install(manager, args.source!);
+          return await this.install(manager, args.source!, args.upgrade === true);
         case 'register_generated':
           return await this.registerGenerated(manager, args.source!);
         case 'enable':
@@ -237,6 +252,8 @@ export class ManagePluginTool implements BuiltinTool<ManagePluginInput> {
           return await this.remove(manager, args.id!);
         case 'reset':
           return await this.reset(manager, args.id!);
+        case 'rollback':
+          return await this.rollbackPlugin(manager, args.id!);
         case 'reload': {
           const summary = await manager.reload();
           const sync = await this.sync();
@@ -272,15 +289,18 @@ export class ManagePluginTool implements BuiltinTool<ManagePluginInput> {
    * is no persistent reload log, so none is invented: `reload` is what returns
    * a fresh summary after re-reading the table from disk.
    */
-  private check(manager: PluginManager, id?: string): ExecutableToolResult {
+  private async check(manager: PluginManager, id?: string): Promise<ExecutableToolResult> {
     if (id !== undefined && manager.get(id) === undefined) {
       return result(notFound(id, manager), true);
     }
     const records = id === undefined ? manager.list() : [manager.get(id)!];
-    const plugins = records.map((record) => ({
-      ...checkView(record, this.runtime?.isActive(record.id) === true),
-      circuit: this.circuitView(record.id),
-    }));
+    const plugins = await Promise.all(
+      records.map(async (record) => ({
+        ...checkView(record, this.runtime?.isActive(record.id) === true),
+        circuit: this.circuitView(record.id),
+        usage: await this.usageView(record.id),
+      })),
+    );
     const unhealthy = plugins.filter((plugin) => plugin.errors.length > 0 || plugin.state === 'error');
     return result({
       action: 'check',
@@ -295,7 +315,17 @@ export class ManagePluginTool implements BuiltinTool<ManagePluginInput> {
   private async marketplace(source?: string, query?: string): Promise<ExecutableToolResult> {
     try {
       const catalog = await loadPluginMarketplace({ source, workDir: this.agent.config.cwd });
-      const entries = filterMarketplaceEntries(catalog.entries, query);
+      const filtered = filterMarketplaceEntries(catalog.entries, query);
+      // Immune memory annotations are advisory display flags only.
+      const quarantinedIds = new Set<string>();
+      for (const entry of filtered) {
+        const hit = await this.matchQuarantine(entry.source);
+        if (hit !== undefined) quarantinedIds.add(entry.id);
+      }
+      const entries = filtered.map((entry) => ({
+        ...entry,
+        ...(quarantinedIds.has(entry.id) ? { quarantined: true } : {}),
+      }));
       return result({
         action: 'marketplace',
         catalog: catalog.source,
@@ -321,9 +351,78 @@ export class ManagePluginTool implements BuiltinTool<ManagePluginInput> {
    * Install only lands files and registers the record. Nothing is imported or
    * run: activation stays a separate, separately-approved action.
    */
-  private async install(manager: PluginManager, source: string): Promise<ExecutableToolResult> {
+  private async precheck(source: string): Promise<ExecutableToolResult> {
+    const entry =
+      (await this.agent.toolServices?.plugins?.matchQuarantineForSource?.(source)) ?? undefined;
+    return result({
+      action: 'precheck',
+      source,
+      quarantined: entry !== undefined,
+      ...(entry !== undefined
+        ? { entry: { at: entry.at, pluginId: entry.pluginId, reason: entry.reason } }
+        : {}),
+      note:
+        entry === undefined
+          ? 'No unacknowledged incident on record for this origin.'
+          : 'This origin previously produced a circuit-tripped plugin; proceed only with explicit user consent.',
+    });
+  }
+
+  /** Quarantine lookup helper tolerant of hosts without the ledger. */
+  private async matchQuarantine(source: string) {
+    return (
+      (await this.agent.toolServices?.plugins?.matchQuarantineForSource?.(source)) ?? undefined
+    );
+  }
+
+  /** Acknowledge the quarantine warning after an approved install landed. */
+  private async acknowledgeQuarantine(source: string): Promise<void> {
+    try {
+      await this.agent.toolServices?.plugins?.acknowledgeQuarantineForSource?.(source);
+    } catch {
+      // Advisory bookkeeping only.
+    }
+  }
+
+  private async install(
+    manager: PluginManager,
+    source: string,
+    upgrade = false,
+  ): Promise<ExecutableToolResult> {
+    const quarantineHit =
+      (await this.agent.toolServices?.plugins?.matchQuarantineForSource?.(source)) ?? undefined;
+    const quarantineNote =
+      quarantineHit !== undefined
+        ? { quarantine: { at: quarantineHit.at, reason: quarantineHit.reason } }
+        : {};
+    if (upgrade) {
+      const upgraded = await manager.upgrade(source);
+      const sync = await this.sync([upgraded.record.id], { skipMcpAdd: true });
+      await this.acknowledgeQuarantine(source);
+      return result({
+        action: 'install',
+        id: upgraded.record.id,
+        installed: true,
+        upgraded: true,
+        from: upgraded.from,
+        to: upgraded.to,
+        ...(upgraded.warn !== undefined ? { warn: upgraded.warn } : {}),
+        backupPath: upgraded.backupPath,
+        ...quarantineNote,
+        codeExecuted: false,
+        hasCodeEntryPoint: upgraded.record.manifest?.entryPoint !== undefined,
+        record: listView(upgraded.record),
+        ...(sync !== undefined ? { sync } : {}),
+        message:
+          'files replaced from backup-safe upgrade; previous contents restorable via {action:"rollback"}; skills live now, MCP servers start after an approved enable/activate' +
+          (quarantineHit !== undefined
+            ? ` \u26A0 origin previously tripped (${quarantineHit.reason})`
+            : ''),
+      });
+    }
     const record = await manager.install(source);
     const sync = await this.sync([record.id], { skipMcpAdd: true });
+    await this.acknowledgeQuarantine(source);
     return result({
       action: 'install',
       id: record.id,
@@ -332,9 +431,13 @@ export class ManagePluginTool implements BuiltinTool<ManagePluginInput> {
       codeExecuted: false,
       hasCodeEntryPoint: record.manifest?.entryPoint !== undefined,
       record: listView(record),
+      ...quarantineNote,
       ...(sync !== undefined ? { sync } : {}),
       message:
-        'installed, code not executed yet — its skills are live now, MCP servers start after an approved activate/enable; run activate to enable its code tools',
+        'installed, code not executed yet \u2014 its skills are live now, MCP servers start after an approved activate/enable; run activate to enable its code tools' +
+        (quarantineHit !== undefined
+          ? ` \u26A0 origin previously tripped (${quarantineHit.reason})`
+          : ''),
     });
   }
 
@@ -425,11 +528,18 @@ export class ManagePluginTool implements BuiltinTool<ManagePluginInput> {
       // Mirror the RPC path: the reason must be readable on the record, and a
       // failure to write that reason must not mask the activation error.
       await manager.markError(record.id, errorMessage(error)).catch(() => undefined);
+      const upgradedRecently = record.diagnostics.some((d) =>
+        d.message.startsWith('upgraded '),
+      );
       return result(
         fail(
           'activation_failed',
           `Failed to activate "${record.id}": ${errorMessage(error)}`,
-          `Inspect {action:"info", id:"${record.id}"} for the stored diagnostics; fix it or {action:"remove", id:"${record.id}"}.`,
+          `Inspect {action:"info", id:"${record.id}"} for the stored diagnostics; fix it, or ${
+            upgradedRecently
+              ? `{action:"rollback", id:"${record.id}"} to restore the pre-upgrade files, or `
+              : ''
+          }{action:"remove", id:"${record.id}"}.`,
         ),
         true,
       );
@@ -515,6 +625,20 @@ export class ManagePluginTool implements BuiltinTool<ManagePluginInput> {
     };
   }
 
+  /** Advisory usage counters from the host sidecar, formatted for the model. */
+  private async usageView(id: string): Promise<{
+    calls: number;
+    okCalls: number;
+    okRate: number | null;
+    lastUsedAt: string | undefined;
+  }> {
+    const usage =
+      (await this.agent.toolServices?.plugins?.getUsage?.(id)) ??
+      { calls: 0, okCalls: 0, lastUsedAt: undefined };
+    const okRate = usage.calls === 0 ? null : Math.round((usage.okCalls / usage.calls) * 100);
+    return { calls: usage.calls, okCalls: usage.okCalls, okRate, lastUsedAt: usage.lastUsedAt };
+  }
+
   /**
    * Recover a circuit-tripped (or otherwise disabled) plugin: clear the
    * failure ledger, re-derive the record state from disk, enable it, and hot
@@ -557,6 +681,39 @@ export class ManagePluginTool implements BuiltinTool<ManagePluginInput> {
           ? 'Circuit cleared, but the record still reports errors after re-reading the manifest — see {action:"info"}.'
           : 'Circuit cleared and capabilities hot-applied. Code entry points still need a separate approved activate.',
     });
+  }
+
+  /**
+   * Restore a plugin's files from the single-slot backup written by
+   * `upgrade` (install with upgrade:true). Reads-only until success; any
+   * failure is reported as an ordinary tool error.
+   */
+  private async rollbackPlugin(manager: PluginManager, id: string): Promise<ExecutableToolResult> {
+    const record = manager.get(id);
+    if (record === undefined) return result(notFound(id, manager), true);
+    try {
+      const restored = await manager.rollback(record.id);
+      const sync = await this.sync([record.id]);
+      return result({
+        action: 'rollback',
+        id: record.id,
+        rolledBack: true,
+        restoredFrom: restored.restoredFrom,
+        state: restored.record.state,
+        version: restored.record.manifest?.version,
+        ...(sync !== undefined ? { sync } : {}),
+        note: 'Previous files restored and the table reloaded; code entry points still need a separate approved activate.',
+      });
+    } catch (error) {
+      return result(
+        fail(
+          'rollback_unavailable',
+          error instanceof Error ? error.message : String(error),
+          "call action:'info' to confirm the plugin is installed",
+        ),
+        true,
+      );
+    }
   }
 
   /**
@@ -611,6 +768,8 @@ function approvalDescription(args: ManagePluginInput): string {
       return args.id === undefined ? 'Checking all plugins' : `Checking plugin "${args.id}"`;
     case 'marketplace':
       return `Browsing the plugin marketplace${args.source === undefined ? '' : ` at ${args.source}`}`;
+    case 'precheck':
+      return `Prechecking install origin "${args.source}"`;
     case 'install':
       return `Install plugin from source: ${args.source} (downloads code; it is not executed until a separate activate)`;
     case 'register_generated':
@@ -629,10 +788,14 @@ function approvalDescription(args: ManagePluginInput): string {
       return `Remove plugin "${args.id}" from the plugin center`;
     case 'reset':
       return `Reset plugin "${args.id}" — clear its circuit breaker and re-enable it`;
+    case 'rollback':
+      return `Roll back plugin "${args.id}" to its pre-upgrade backup`;
     case 'reload':
       return 'Reload the plugin table from disk';
     default:
-      return `Manage plugin (${String(args.action)})`;
+      // Unreachable while every action is handled above; kept as a guard
+      // against future actions added without a description.
+      return 'Managing plugins';
   }
 }
 

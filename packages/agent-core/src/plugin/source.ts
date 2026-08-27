@@ -5,6 +5,29 @@ export interface GithubRef {
   readonly value: string;
 }
 
+/** Compare dotted numeric versions (e.g. "1.2.0"); undefined when either side has no leading dotted-numeric segment. */
+export function compareManifestVersions(
+  a: string | undefined,
+  b: string | undefined,
+): number | undefined {
+  const parse = (value: string | undefined): readonly number[] | undefined => {
+    if (typeof value !== 'string') return undefined;
+    const match = value.trim().match(/^v?(\d+(?:\.\d+){0,3})/);
+    const captured = match?.[1];
+    if (captured === undefined) return undefined;
+    return captured.split('.').map(Number);
+  };
+  const left = parse(a);
+  const right = parse(b);
+  if (left === undefined || right === undefined) return undefined;
+  for (let index = 0; index < 3; index += 1) {
+    const lhs = left[index] ?? 0;
+    const rhs = right[index] ?? 0;
+    if (lhs !== rhs) return lhs < rhs ? -1 : 1;
+  }
+  return 0;
+}
+
 export type ResolvedSource =
   | { kind: 'local-path'; path: string }
   | { kind: 'zip-url'; path: string }

@@ -558,6 +558,9 @@ export class ToolManager {
    * crossed the line, so the caller can attach the advisory to its result.
    */
   reportOwnerOutcome(pluginId: string, ok: boolean): 'tripped' | undefined {
+    // Usage signal first: every plugin-owned outcome feeds the keep/remove
+    // statistics, success or failure alike (a failed call still counts).
+    this.agent.toolServices?.plugins?.recordUsage?.(pluginId, ok);
     if (this.trippedPlugins.has(pluginId)) return undefined;
     if (ok) {
       this.circuitFailures.delete(pluginId);
@@ -608,6 +611,16 @@ export class ToolManager {
       await services?.pluginSync?.([pluginId]);
     } catch {
       // Same: the next session start skips the disabled plugin anyway.
+    }
+    try {
+      // Immune memory: the lesson must outlive this session even if the user
+      // later removes the broken plugin outright.
+      await services?.plugins?.appendQuarantine(
+        pluginId,
+        `circuit tripped after ${String(failures)} consecutive tool failures`,
+      );
+    } catch {
+      // Quarantine is advisory; never let it mask the breaker outcome.
     }
   }
 

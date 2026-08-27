@@ -57,6 +57,7 @@ When Scream wants to modify files or run commands, an approval panel pops up —
 - **Context Search** — `/search` (Ctrl+Shift+F) full-screen keyword search over the conversation.
 - **High Cache Hit Rate** — per-session HitR in the status bar, tuned across compatible protocols to maximize cache hits without compromising quality.
 - **MCP / Skills / 130+ providers** — all DIY-configurable; ships with browser (46 tools) and macOS desktop automation.
+- **Self-Evolving Plugins** — a built-in `ManagePlugin` tool lets the agent find, make, and install add-on skills/MCP servers itself and hot-apply them to the running session: nothing executes until an approved activate, a circuit breaker reclaims a plugin after repeated failures, immune memory warns before reinstalling a source that already broke, and upgrades keep a rollback-ready backup.
 - **Remote Control** — drive Scream from WeChat, Feishu, Slack, DingTalk, QQ, Telegram, Discord via cc-connect.
 
 ### Slash Commands
@@ -133,6 +134,8 @@ The browser UI shares the same agent-core as the TUI — zero feature loss. Mult
 ### Documentation
 
 Website: [scream.chat](https://scream.chat)
+
+- **Self-Evolution manual** — walk through making, installing, tripping, and rolling back a plugin: `packages/agent-core/docs/self-evolution-e2e.md`.
 
 ### Contributing
 

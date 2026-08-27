@@ -35,7 +35,7 @@ const MAX_SKILL_DESC_CHARS = 100;
 function buildSkillToolDescription(agent: Agent): string {
   const skills = agent.skills?.registry.listInvocableSkills() ?? [];
   const lines: string[] = skills.slice(0, MAX_INLINE_SKILLS).map((s) => {
-    const desc = s.description.trim().replaceAll(/\n/g, ' ').slice(0, MAX_SKILL_DESC_CHARS);
+    const desc = s.description.trim().replaceAll('\n', ' ').slice(0, MAX_SKILL_DESC_CHARS);
     return `- ${s.name}: ${desc}`;
   });
   if (skills.length > MAX_INLINE_SKILLS) {
@@ -145,6 +145,13 @@ export class SkillTool implements BuiltinTool<SkillToolInput> {
       return errorResult(
         `Skill "${skill.name}" is not an inline skill and cannot be invoked by the model in v1.`,
       );
+    }
+
+    // Usage signal for the owning plugin (advisory). Non-plugin skills are
+    // not charged to anyone.
+    const owningPluginId = skill.plugin?.id;
+    if (owningPluginId !== undefined) {
+      this.agent.toolServices?.plugins?.recordUsage?.(owningPluginId, true);
     }
 
     const origin = skillOrigin(skill, skillArgs, currentDepth);
