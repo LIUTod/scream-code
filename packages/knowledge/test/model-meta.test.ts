@@ -18,7 +18,7 @@ function makeEngine(modelName: string, available = true): EmbeddingEngine {
       if (!available) return null;
       return texts.map((t) => {
         const vec = new Float32Array(8);
-        for (let i = 0; i < t.length; i++) vec[i % 8]! += (t.codePointAt(i) % 7) + 1;
+        for (let i = 0; i < t.length; i++) vec[i % 8]! += ((t.codePointAt(i) ?? 0) % 7) + 1;
         return vec;
       });
     },
