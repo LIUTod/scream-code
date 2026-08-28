@@ -1,4 +1,4 @@
-import { open, readFile, readdir, stat } from 'node:fs/promises';
+import { readFile, readdir, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'pathe';
 import { z } from 'zod';
@@ -6,7 +6,9 @@ import { z } from 'zod';
 import type { Agent } from '#/agent';
 import type { BuiltinTool } from '../../../agent/tool';
 import { resolveConfigPath, resolveScreamHome } from '../../../config/path';
+import type { PluginRecord } from '../../../plugin/types';
 import { resolveMcpJsonPaths } from '../../../mcp/config-loader';
+import { SkillParseError, parseSkillFromFile } from '../../../skill/parser';
 import { ToolAccesses } from '../../../loop/tool-access';
 import type { ToolExecution } from '../../../loop/types';
 import { resolveSkillInstallPaths } from '../../../skill/install-paths';
@@ -26,8 +28,15 @@ export const InspectOwnAssetsInputSchema = z.object({
 
 export type InspectOwnAssetsInput = z.infer<typeof InspectOwnAssetsInputSchema>;
 
-/** Bytes to read from the head of a file when checking frontmatter. */
-const FRONTMATTER_READ_LIMIT = 32 * 1024;
+/**
+ * Skills larger than this are reported as broken rather than parsed. Real
+ * skill bundles are a few KB; the cap exists only to guard against reading a
+ * pathological file (e.g. a multi-GB binary misnamed SKILL.md) in one shot.
+ */
+const SKILL_FILE_READ_LIMIT = 4 * 1024 * 1024;
+
+/** Recursion bound for counting nested SKILL.md files inside unregistered dirs. */
+const ORPHAN_SCAN_DEPTH = 4;
 
 /**
  * Common documentation files shipped inside skill/plugin bundles are not
@@ -70,48 +79,88 @@ function describeFile(info: FileInfo): string {
   return `${info.size} bytes`;
 }
 
-type FrontmatterStatus = 'ok' | 'missing' | 'broken';
-
-/** Frontmatter check (bounded read): starts with `---` and contains a `name:` line. */
-async function checkFrontmatter(path: string): Promise<FrontmatterStatus> {
-  let handle;
+async function isFile(path: string): Promise<boolean> {
   try {
-    handle = await open(path, 'r');
-    const buffer = Buffer.alloc(FRONTMATTER_READ_LIMIT);
-    const { bytesRead } = await handle.read(buffer, 0, FRONTMATTER_READ_LIMIT, 0);
-    const head = buffer.subarray(0, bytesRead).toString('utf-8').split('\n').slice(0, 25);
-    if (head[0]?.trim() !== '---') return 'missing';
-    return head.some((line) => /^name\s*:/.test(line)) ? 'ok' : 'broken';
+    return (await stat(path)).isFile();
   } catch {
-    return 'missing';
-  } finally {
-    await handle?.close().catch(() => {});
+    return false;
   }
 }
+
+type FrontmatterStatus = 'ok' | 'missing' | 'broken';
 
 interface SkillEntry {
   readonly name: string;
   readonly path: string;
   readonly kind: 'dir' | 'flat';
   readonly frontmatter: FrontmatterStatus;
+  /** Parse failure detail for `broken` entries (mirrors the registry's view). */
+  readonly reason?: string;
   /** Set for plugin-managed entries: the plugin directory providing the skill. */
   readonly plugin?: string;
+  /** Registration status; set only for plugin-managed entries tracked by the plugin table. */
+  readonly registered?: true;
 }
 
-/** True if a directory is a directory-based skill (contains SKILL.md). */
-async function isSkillDir(dir: string): Promise<boolean> {
+/**
+ * Parse a skill file the same way the registry does (`skill/parser`), so the
+ * inventory's status and names agree with what is actually invocable: a file
+ * whose frontmatter fails YAML parsing is `broken` with the real message, not
+ * a heuristic "ok" based on the presence of a `name:` line.
+ */
+async function parseSkillEntry(
+  path: string,
+  fallbackName: string,
+  requireFrontmatter: boolean,
+): Promise<Pick<SkillEntry, 'name' | 'frontmatter' | 'reason'>> {
+  let info;
   try {
-    const info = await stat(join(dir, 'SKILL.md'));
-    return info.isFile();
+    info = await stat(path);
   } catch {
-    return false;
+    return { name: fallbackName, frontmatter: 'missing' };
+  }
+  if (info.size > SKILL_FILE_READ_LIMIT) {
+    // Oversize files are skipped unjudged rather than labelled broken: the
+    // registry parses without a size cap, so "too large for the inventory"
+    // is a skip, never a verdict on the file's health.
+    return { name: fallbackName, frontmatter: 'ok' };
+  }
+  let text: string;
+  try {
+    text = await readFile(path, 'utf8');
+  } catch {
+    return { name: fallbackName, frontmatter: 'missing' };
+  }
+  if (text.split(/\r?\n/, 1)[0]?.trim() !== '---') {
+    // Directory skills must open with a frontmatter fence; flat skills do not
+    // require one (mirrors skill/parser.ts).
+    if (requireFrontmatter) return { name: fallbackName, frontmatter: 'missing' };
+    return { name: fallbackName, frontmatter: 'ok' };
+  }
+  try {
+    const skill = await parseSkillFromFile({
+      skillMdPath: path,
+      skillDirName: fallbackName,
+      source: 'user',
+    });
+    // The parsed name (frontmatter `name:` falling back to the directory
+    // name) is authoritative — it is exactly what the registry holds.
+    return { name: skill.name, frontmatter: 'ok' };
+  } catch (error) {
+    const reason =
+      error instanceof SkillParseError
+        ? error.message
+        : error instanceof Error
+          ? error.message
+          : String(error);
+    return { name: fallbackName, frontmatter: 'broken', reason };
   }
 }
 
 /**
- * List skill entries under a managed skills directory, mirroring the loader's
- * rules: skip dot-entries, node_modules and README.md; directory skills must
- * contain SKILL.md; flat skills are non-README `.md` files.
+ * List skill entries under a skills directory, mirroring the loader's rules:
+ * skip dot-entries, node_modules and README.md; directory skills must contain
+ * SKILL.md; flat skills are non-README `.md` files (frontmatter optional).
  */
 async function listSkills(dir: string): Promise<SkillEntry[]> {
   let entries;
@@ -124,32 +173,156 @@ async function listSkills(dir: string): Promise<SkillEntry[]> {
   for (const entry of entries) {
     if (entry.name.startsWith('.') || entry.name === 'node_modules') continue;
     if (entry.isDirectory()) {
-      if (!(await isSkillDir(join(dir, entry.name)))) continue;
       const skillMd = join(dir, entry.name, 'SKILL.md');
-      const fm = await checkFrontmatter(skillMd);
-      // Mirror the parser's naming (frontmatter `name:` falling back to the
-      // directory name) so inventory names line up with the skill registry.
-      const skillName = (await readSkillName(skillMd)) ?? entry.name;
-      out.push({ name: skillName, path: skillMd, kind: 'dir', frontmatter: fm });
+      if (!(await isFile(skillMd))) continue;
+      const parsed = await parseSkillEntry(skillMd, entry.name, true);
+      out.push({ ...parsed, path: skillMd, kind: 'dir' });
     } else if (entry.isFile() && entry.name.endsWith('.md')) {
       if (DOCUMENTATION_MARKDOWN_LOWER.has(entry.name.toLowerCase())) continue;
       const path = join(dir, entry.name);
-      // Flat skills fall back to the filename like the parser does
-      // (frontmatter `name:` wins when present); frontmatter stays optional.
-      const skillName = (await readSkillName(path)) ?? entry.name.slice(0, -3);
-      out.push({ name: skillName, path, kind: 'flat', frontmatter: 'ok' });
+      const parsed = await parseSkillEntry(path, entry.name.slice(0, -'.md'.length), false);
+      out.push({ ...parsed, path, kind: 'flat' });
     }
   }
   return out.toSorted((a, b) => a.name.localeCompare(b.name));
 }
 
-function buildInvocableNameSet(agent: Agent): Set<string> {
-  return new Set((agent.skills?.registry.listInvocableSkills() ?? []).map((s) => s.name));
+/** Count every SKILL.md reachable under `dirPath` (inclusive), depth-limited. */
+async function countNestedSkillFiles(dirPath: string, depth: number): Promise<number> {
+  if (depth > ORPHAN_SCAN_DEPTH) return 0;
+  let entries;
+  try {
+    entries = await readdir(dirPath, { withFileTypes: true });
+  } catch {
+    return 0;
+  }
+  let count = 0;
+  for (const entry of entries) {
+    if (entry.name.startsWith('.') || entry.name === 'node_modules') continue;
+    if (entry.isDirectory()) {
+      count += await countNestedSkillFiles(join(dirPath, entry.name), depth + 1);
+    } else if (entry.name === 'SKILL.md') {
+      count++;
+    }
+  }
+  return count;
 }
 
-function formatSkillEntry(entry: SkillEntry, invocable: boolean): string {
+/**
+ * Describe an unregistered directory under the managed plugins root so the
+ * inventory can surface things the plugin table cannot see: orphan skill
+ * bundles, nested skill trees, and dormant code plugins (entryPoint) that
+ * would run arbitrary code on install+activate.
+ */
+async function describeUnregisteredDir(dirPath: string): Promise<string> {
+  const parts: string[] = [];
+  const topLevelSkillMd = await isFile(join(dirPath, 'SKILL.md'));
+  const totalSkills = await countNestedSkillFiles(dirPath, 0);
+  if (topLevelSkillMd) {
+    parts.push(totalSkills > 1 ? `skill bundle (${totalSkills} SKILL.md)` : 'skill bundle');
+  } else if (totalSkills > 0) {
+    parts.push(`${totalSkills} nested skills (not registered)`);
+  }
+  try {
+    const manifestText = await readFile(join(dirPath, 'scream.plugin.json'), 'utf8');
+    let hasEntryPoint = false;
+    try {
+      const manifest = JSON.parse(manifestText) as { entryPoint?: unknown };
+      hasEntryPoint = typeof manifest.entryPoint === 'string' && manifest.entryPoint.length > 0;
+    } catch {
+      parts.push('scream.plugin.json (unparseable)');
+      return parts.join('; ');
+    }
+    parts.push(hasEntryPoint ? 'code plugin (entryPoint)' : 'manifest but not registered');
+  } catch {
+    // No scream.plugin.json — not a plugin by our manifest rules.
+  }
+  if (parts.length === 0) parts.push('no manifest or skill files');
+  return parts.join('; ');
+}
+
+/**
+ * Plugin-managed skills live under `<managedDir>/<plugin>/SKILL.md`. When the
+ * plugin table (via `agent.toolServices.plugins`) is reachable, entries carry
+ * their registration status and unregistered directories are reported in a
+ * dedicated section; without it, the listing falls back to a pure file scan.
+ */
+async function listManagedSkills(
+  managedDir: string,
+  records: ReadonlyMap<string, PluginRecord> | undefined,
+): Promise<{ readonly entries: SkillEntry[]; readonly orphanLines: string[] }> {
+  let plugins;
+  try {
+    plugins = await readdir(managedDir, { withFileTypes: true });
+  } catch {
+    return { entries: [], orphanLines: [] };
+  }
+  const entries: SkillEntry[] = [];
+  const orphanLines: string[] = [];
+  for (const plugin of plugins) {
+    if (!plugin.isDirectory() || plugin.name.startsWith('.')) continue;
+    const dirPath = join(managedDir, plugin.name);
+    const skillMd = join(dirPath, 'SKILL.md');
+    const record = records?.get(plugin.name);
+    if (records === undefined || record === undefined) {
+      if (records === undefined) {
+        // No plugin table in this runtime: mirror the loader's file scan.
+        if (!(await isFile(skillMd))) continue;
+        const parsed = await parseSkillEntry(skillMd, plugin.name, true);
+        entries.push({ ...parsed, path: skillMd, kind: 'dir', plugin: plugin.name });
+      } else if (await isFile(skillMd)) {
+        orphanLines.push(
+          `- ${plugin.name} — ${await describeUnregisteredDir(dirPath)} — \`${dirPath}\``,
+        );
+      } else if (await isFile(join(dirPath, 'scream.plugin.json'))) {
+        orphanLines.push(
+          `- ${plugin.name} — ${await describeUnregisteredDir(dirPath)} — \`${dirPath}\``,
+        );
+      } else if ((await countNestedSkillFiles(dirPath, 0)) > 0) {
+        orphanLines.push(
+          `- ${plugin.name} — ${await describeUnregisteredDir(dirPath)} — \`${dirPath}\``,
+        );
+      }
+      continue;
+    }
+    if (await isFile(skillMd)) {
+      const parsed = await parseSkillEntry(skillMd, plugin.name, true);
+      entries.push({ ...parsed, path: skillMd, kind: 'dir', plugin: plugin.name, registered: true });
+    }
+  }
+  return { entries, orphanLines };
+}
+
+/**
+ * Traffic-light status for a skill entry. The registry is the single source of
+ * truth for what is callable; everything else is a disk-side explanation.
+ */
+function classify(
+  entry: SkillEntry,
+  invocableNames: ReadonlySet<string>,
+  registeredNames: ReadonlySet<string>,
+): string {
+  const variants = [entry.name];
+  if (entry.plugin !== undefined) variants.push(`${entry.plugin}:${entry.name}`);
+  if (variants.some((v) => invocableNames.has(v))) return 'invocable';
+  // Registered in the registry but not invocable (disabled model invocation,
+  // non-inline type, or a renamed `plugin:name` form that is not listable).
+  if (variants.some((v) => registeredNames.has(v))) {
+    return 'not invocable — registered but not invocable';
+  }
+  if (entry.frontmatter === 'broken') {
+    return `not invocable — broken: ${entry.reason ?? 'frontmatter failed to parse'}`;
+  }
+  return 'not invocable — unregistered';
+}
+
+function formatSkillEntry(entry: SkillEntry, status: string): string {
   const origin = entry.plugin === undefined ? '' : ` — plugin: ${entry.plugin}`;
-  return `- ${entry.name} — ${entry.kind === 'dir' ? 'dir' : 'flat'} — ${entry.frontmatter} — ${invocable ? 'invocable' : 'not invocable'}${origin} — \`${entry.path}\``;
+  // `registered` is only ever set to true for plugin-managed entries tracked
+  // by the plugin table; unregistered directories are reported in their own
+  // section instead of as entry-level flags.
+  const registration = entry.registered === true ? ' — registered' : '';
+  return `- ${entry.name} — ${entry.kind} — ${entry.frontmatter} — ${status}${origin}${registration} — \`${entry.path}\``;
 }
 
 async function inspectConfig(home: string, userHome: string): Promise<string> {
@@ -178,104 +351,68 @@ async function inspectSkills(
     userHomeDir: userHome,
     workDir: cwd,
   });
-  const invocableNames = buildInvocableNameSet(agent);
+  const registry = agent.skills?.registry;
+  const invocableNames = new Set((registry?.listInvocableSkills() ?? []).map((s) => s.name));
+  const registeredNames = new Set((registry?.listSkills?.() ?? []).map((s) => s.name));
+
+  // Same entry point as ManagePlugin (agent.toolServices.plugins): no second
+  // parser for installed.json, and no plugin table in the runtime degrades to
+  // a pure file scan.
+  const manager = agent.toolServices?.plugins;
+  const pluginRecords =
+    manager === undefined ? undefined : new Map(manager.list().map((r) => [r.id, r] as const));
+
   const sections: string[] = ['## Skills', ''];
   let invocableCount = 0;
   let totalCount = 0;
 
-  // Plugin skills that lost a name clash are registered under `plugin:name`;
-  // match both forms so renamed entries are not mislabelled as not invocable.
-  const isInvocable = (entry: SkillEntry): boolean =>
-    invocableNames.has(entry.name) ||
-    (entry.plugin !== undefined && invocableNames.has(`${entry.plugin}:${entry.name}`));
-
-  const track = (entry: SkillEntry, invocable: boolean): string => {
+  const track = (entry: SkillEntry): string => {
     totalCount++;
-    if (invocable) invocableCount++;
-    return formatSkillEntry(entry, invocable);
+    if (classify(entry, invocableNames, registeredNames) === 'invocable') invocableCount++;
+    return formatSkillEntry(entry, classify(entry, invocableNames, registeredNames));
   };
 
   const userEntries = await listSkills(userDir);
   sections.push(`User skills (${userDir}): ${userEntries.length === 0 ? 'none' : ''}`);
-  sections.push(...userEntries.map((e) => track(e, isInvocable(e))));
+  sections.push(...userEntries.map(track));
 
   const extraDir = join(home, 'plugins', 'managed');
-  const extraEntries = await listManagedSkills(extraDir);
+  const managed = await listManagedSkills(extraDir, pluginRecords);
   sections.push('');
-  sections.push(`Plugin-managed skills (${extraDir}): ${extraEntries.length === 0 ? 'none' : ''}`);
-  sections.push(...extraEntries.map((e) => track(e, isInvocable(e))));
+  sections.push(`Plugin-managed skills (${extraDir}): ${managed.entries.length === 0 ? 'none' : ''}`);
+  sections.push(...managed.entries.map(track));
+
+  // Plugin-level warnings (e.g. a SKILL.md failing to parse) ride on the
+  // record's diagnostics; surface them next to the plugin's listing so the
+  // plugin table and the inventory can no longer disagree silently.
+  if (pluginRecords !== undefined) {
+    for (const record of pluginRecords.values()) {
+      const warns = record.diagnostics.filter((d) => d.severity === 'warn');
+      if (warns.length === 0) continue;
+      sections.push(
+        `plugin ${record.id}: warnings: [${warns.map((d) => d.message).join(' | ')}]`,
+      );
+    }
+  }
+
+  if (managed.orphanLines.length > 0) {
+    sections.push('');
+    sections.push(`Unregistered plugin dirs (${extraDir}):`);
+    sections.push(...managed.orphanLines);
+  }
 
   const projectEntries = await listSkills(projectDir);
   sections.push('');
   sections.push(`Project skills (${projectDir}): ${projectEntries.length === 0 ? 'none' : ''}`);
-  sections.push(...projectEntries.map((e) => track(e, isInvocable(e))));
+  sections.push(...projectEntries.map((e) => track(e)));
 
   sections.push('');
   sections.push(
     `Invocable now: ${invocableCount}/${totalCount} (against the live skill registry; ` +
-      'entries marked "not invocable" exist on disk but are disabled, shadowed, renamed, or broken)',
+      'entries marked "not invocable" carry their reason — registered-but-not, broken frontmatter, or unregistered)',
   );
 
   return sections.join('\n');
-}
-
-/**
- * Extracts the skill name from SKILL.md frontmatter (best effort) so the
- * inventory name matches what the skill registry holds; returns null when
- * frontmatter is missing or has no name line.
- */
-async function readSkillName(path: string): Promise<string | null> {
-  let handle;
-  try {
-    handle = await open(path, 'r');
-    const buffer = Buffer.alloc(FRONTMATTER_READ_LIMIT);
-    const { bytesRead } = await handle.read(buffer, 0, FRONTMATTER_READ_LIMIT, 0);
-    const head = buffer.subarray(0, bytesRead).toString('utf-8').split('\n').slice(0, 25);
-    if (head[0]?.trim() !== '---') return null;
-    let closed = false;
-    for (const line of head.slice(1)) {
-      const trimmed = line.trim();
-      if (trimmed === '---') {
-        closed = true;
-        break;
-      }
-      const m = /^name\s*:\s*(.+)$/.exec(line);
-      if (m !== null) {
-        const value = m[1]!.trim().replaceAll(/^["']|["']$/g, '');
-        return value.length > 0 ? value : null;
-      }
-    }
-    // Closing fence seen but no `name:` line (or the bounded window ended
-    // inside the frontmatter): fall back to the directory name upstream.
-    return null;
-  } catch {
-    return null;
-  } finally {
-    await handle?.close().catch(() => {});
-  }
-}
-
-/**
- * List plugin-managed skills: each `<dir>/SKILL.md` under a managed plugin
- * directory is a skill entry (Extra source, mirroring plugin/manager.ts).
- */
-async function listManagedSkills(managedDir: string): Promise<SkillEntry[]> {
-  let plugins;
-  try {
-    plugins = await readdir(managedDir, { withFileTypes: true });
-  } catch {
-    return [];
-  }
-  const out: SkillEntry[] = [];
-  for (const plugin of plugins) {
-    if (!plugin.isDirectory() || plugin.name.startsWith('.')) continue;
-    const skillMd = join(managedDir, plugin.name, 'SKILL.md');
-    if (!(await isSkillDir(join(managedDir, plugin.name)))) continue;
-    const fm = await checkFrontmatter(skillMd);
-    const skillName = await readSkillName(skillMd) ?? plugin.name;
-    out.push({ name: skillName, path: skillMd, kind: 'dir', frontmatter: fm, plugin: plugin.name });
-  }
-  return out.toSorted((a, b) => a.name.localeCompare(b.name));
 }
 
 /** mcp.json files larger than this are reported as oversize and not parsed. */

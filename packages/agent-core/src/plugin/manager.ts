@@ -727,7 +727,10 @@ async function recordFrom(input: {
 }): Promise<PluginRecord> {
   const { parsed } = input;
   const hasError = parsed.diagnostics.some((d) => d.severity === 'error');
-  const skills = hasError || parsed.manifest === undefined ? [] : await discoverPluginSkills(input.id, parsed.manifest);
+  const discovery =
+    hasError || parsed.manifest === undefined
+      ? { skills: [] as readonly PluginSkillSummary[], diagnostics: [] as readonly PluginDiagnostic[] }
+      : await discoverPluginSkills(input.id, parsed.manifest);
   return {
     id: input.id,
     root: input.root,
@@ -739,13 +742,13 @@ async function recordFrom(input: {
     originalSource: input.originalSource,
     capabilities: input.capabilities,
     github: input.github,
-    skills,
-    skillCount: skills.length,
+    skills: discovery.skills,
+    skillCount: discovery.skills.length,
     manifest: parsed.manifest,
     manifestKind: parsed.manifestKind,
     manifestPath: parsed.manifestPath,
     shadowedManifestPath: parsed.shadowedManifestPath,
-    diagnostics: parsed.diagnostics,
+    diagnostics: [...parsed.diagnostics, ...discovery.diagnostics],
     skillInstructions: parsed.manifest?.skillInstructions,
   };
 }
@@ -768,18 +771,38 @@ function recordToSummary(record: PluginRecord): PluginSummary {
   };
 }
 
+/** Skills discovered for a plugin plus any skill-level warnings collected en route. */
+interface PluginSkillDiscovery {
+  readonly skills: readonly PluginSkillSummary[];
+  readonly diagnostics: readonly PluginDiagnostic[];
+}
+
 async function discoverPluginSkills(
   pluginId: string,
   manifest: PluginRecord['manifest'],
-): Promise<readonly PluginSkillSummary[]> {
+): Promise<PluginSkillDiscovery> {
   const roots = (manifest?.skills ?? []).map((dir) => ({
     path: dir,
     source: 'extra',
     plugin: { id: pluginId, instructions: manifest?.skillInstructions },
   }) satisfies SkillRoot);
-  if (roots.length === 0) return [];
-  const skills = await discoverSkills({ roots });
-  return skills.map((skill) => ({ name: skill.name, description: skill.description }));
+  if (roots.length === 0) return { skills: [], diagnostics: [] };
+  // Skill-level findings (e.g. a SKILL.md whose frontmatter fails to parse)
+  // are surfaced as plugin diagnostics instead of being dropped into logs,
+  // so `check`/`info`/`list` can explain why a registered plugin has no
+  // (or fewer) skills. They stay warnings: a damaged skill is not a broken
+  // plugin — manifest-level errors remain the only source of `state: error`.
+  const diagnostics: PluginDiagnostic[] = [];
+  const skills = await discoverSkills({
+    roots,
+    onWarning: (message) => {
+      diagnostics.push({ severity: 'warn', message });
+    },
+  });
+  return {
+    skills: skills.map((skill) => ({ name: skill.name, description: skill.description })),
+    diagnostics,
+  };
 }
 
 function recordToInfo(record: PluginRecord): PluginInfo {

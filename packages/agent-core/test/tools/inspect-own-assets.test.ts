@@ -40,7 +40,7 @@ describe('InspectOwnAssetsTool', () => {
     await writeFile(join(userHome, '.scream-code', 'AGENTS.md'), '# User instructions\n');
     await writeFile(
       join(userHome, '.scream-code', 'skills', 'my-skill', 'SKILL.md'),
-      '---\nname: my-skill\n---\nDo things.\n',
+      '---\nname: my-skill\ndescription: does things\n---\nDo things.\n',
     );
     await writeFile(join(userHome, '.scream-code', 'skills', 'bad-skill', 'SKILL.md'), 'no frontmatter here\n');
     await writeFile(join(userHome, '.scream-code', 'skills', 'flat.md'), '---\nname: flat\n---\nFlat skill.\n');
@@ -113,6 +113,7 @@ describe('InspectOwnAssetsTool', () => {
         skills: {
           registry: {
             listInvocableSkills: () => [{ name: 'my-skill' }, { name: 'flat' }],
+            listSkills: () => [{ name: 'my-skill' }, { name: 'flat' }],
           },
         },
       } as unknown as Agent,
@@ -139,7 +140,7 @@ describe('InspectOwnAssetsTool', () => {
     await mkdir(managedDir, { recursive: true });
     await writeFile(
       join(managedDir, 'SKILL.md'),
-      '---\nname: plugin-skill\n---\nFrom a plugin.\n',
+      '---\nname: plugin-skill\ndescription: from a plugin\n---\nFrom a plugin.\n',
     );
     const withRegistry = new InspectOwnAssetsTool(
       {
@@ -147,6 +148,7 @@ describe('InspectOwnAssetsTool', () => {
         skills: {
           registry: {
             listInvocableSkills: () => [{ name: 'plugin-skill' }],
+            listSkills: () => [{ name: 'plugin-skill' }],
           },
         },
       } as unknown as Agent,
@@ -295,7 +297,7 @@ describe('InspectOwnAssetsTool', () => {
     expect(out).toContain('user: oversize');
   });
 
-  it('marks dir skills with frontmatter but no name as broken', async () => {
+  it('marks dir skills with frontmatter but no name as broken (matches the registry parser)', async () => {
     await mkdir(join(userHome, '.scream-code', 'skills', 'named-less'), { recursive: true });
     await writeFile(
       join(userHome, '.scream-code', 'skills', 'named-less', 'SKILL.md'),
@@ -305,7 +307,139 @@ describe('InspectOwnAssetsTool', () => {
     const out = await run('skills');
 
     expect(out).toContain('named-less');
-    expect(out).toContain('broken');
+    expect(out).toContain('broken: Missing required frontmatter field "name"');
+  });
+
+  it('reports broken frontmatter with the real parse message, not a heuristic ok', async () => {
+    // Same failure mode as the real-world tod plugin: an unquoted `: ` inside
+    // the description makes the YAML unparseable even though a `name:` line
+    // exists — a heuristic check would wrongly report it as ok.
+    await mkdir(join(userHome, '.scream-code', 'skills', 'tod-like'), { recursive: true });
+    await writeFile(
+      join(userHome, '.scream-code', 'skills', 'tod-like', 'SKILL.md'),
+      '---\nname: tod-like\ndescription: Core mechanisms: external-anchor\n---\nBody.\n',
+    );
+
+    const out = await run('skills');
+
+    expect(out).toContain('tod-like — dir — broken — not invocable — broken:');
+    expect(out).toContain('bad indentation of a mapping entry');
+  });
+
+  it('distinguishes registered-but-not-invocable skills (registry lists them, invocable does not)', async () => {
+    await mkdir(join(userHome, '.scream-code', 'skills', 'blocked-skill'), { recursive: true });
+    await writeFile(join(userHome, '.scream-code', 'skills', 'blocked-skill', 'SKILL.md'), '---\nname: blocked-skill\ndescription: blocked\n---\nBody.\n');
+    const withRegistry = new InspectOwnAssetsTool(
+      {
+        config: { cwd },
+        skills: {
+          registry: {
+            listInvocableSkills: () => [{ name: 'my-skill' }, { name: 'flat' }],
+            listSkills: () => [
+              { name: 'my-skill' },
+              { name: 'flat' },
+              { name: 'blocked-skill' },
+            ],
+          },
+        },
+      } as unknown as Agent,
+      { homeDir: home, userHomeDir: userHome },
+    );
+    const execution = withRegistry.resolveExecution({ scope: 'skills' });
+    if (execution.isError) throw new TypeError('unexpected error execution');
+    const result = await execution.execute({
+      turnId: 'test',
+      toolCallId: 'test',
+      signal: new AbortController().signal,
+    });
+    expect(result.isError).toBe(false);
+    const out = result.output;
+
+    expect(out).toContain('blocked-skill — dir — ok — not invocable — registered but not invocable');
+    expect(out).toContain('bad-skill — dir — missing — not invocable — unregistered');
+    expect(out).toContain('Invocable now: 2/4');
+  });
+
+  it('crosses plugin-managed skills with the plugin table: registered, warnings, unregistered dirs', async () => {
+    const managedDir = join(home, 'plugins', 'managed');
+    // Registered plugin with a healthy skill.
+    await mkdir(join(managedDir, 'my-plugin'), { recursive: true });
+    await writeFile(
+      join(managedDir, 'my-plugin', 'SKILL.md'),
+      '---\nname: plugin-skill\ndescription: from a plugin\n---\nFrom a plugin.\n',
+    );
+    // Registered plugin whose only skill fails to parse → plugin-level warning.
+    await mkdir(join(managedDir, 'broken-plugin'), { recursive: true });
+    await writeFile(
+      join(managedDir, 'broken-plugin', 'SKILL.md'),
+      '---\nname: broken\ndescription: Core mechanisms: nope\n---\nBody.\n',
+    );
+    // Unregistered: orphan skill bundle.
+    await mkdir(join(managedDir, 'orphan'), { recursive: true });
+    await writeFile(
+      join(managedDir, 'orphan', 'SKILL.md'),
+      '---\nname: orphan-skill\n---\nBody.\n',
+    );
+    // Unregistered: nested skills tree (agent-skills style).
+    await mkdir(join(managedDir, 'agent-skills', 'skills', 'deep'), { recursive: true });
+    await writeFile(
+      join(managedDir, 'agent-skills', 'skills', 'deep', 'SKILL.md'),
+      '---\nname: deep\n---\nBody.\n',
+    );
+    // Unregistered: dormant code plugin (entryPoint) — a landmine if activated.
+    await mkdir(join(managedDir, 'breakme'), { recursive: true });
+    await writeFile(
+      join(managedDir, 'breakme', 'scream.plugin.json'),
+      JSON.stringify({ name: 'breakme', entryPoint: './index.js' }),
+    );
+
+    const withTable = new InspectOwnAssetsTool(
+      {
+        config: { cwd },
+        skills: {
+          registry: {
+            listInvocableSkills: () => [{ name: 'plugin-skill' }],
+            listSkills: () => [{ name: 'plugin-skill' }],
+          },
+        },
+        toolServices: {
+          plugins: {
+            list: () => [
+              { id: 'my-plugin', diagnostics: [] },
+              {
+                id: 'broken-plugin',
+                diagnostics: [
+                  {
+                    severity: 'warn',
+                    message:
+                      'Skipping invalid skill at /x/SKILL.md: Invalid frontmatter in /x/SKILL.md: bad indentation of a mapping entry',
+                  },
+                ],
+              },
+            ],
+          },
+        },
+      } as unknown as Agent,
+      { homeDir: home, userHomeDir: userHome },
+    );
+    const execution = withTable.resolveExecution({ scope: 'skills' });
+    if (execution.isError) throw new TypeError('unexpected error execution');
+    const result = await execution.execute({
+      turnId: 'test',
+      toolCallId: 'test',
+      signal: new AbortController().signal,
+    });
+    expect(result.isError).toBe(false);
+    const out = result.output;
+
+    expect(out).toContain('plugin-skill — dir — ok — invocable — plugin: my-plugin — registered');
+    expect(out).toContain('broken-plugin — dir — broken — not invocable — broken:');
+    expect(out).toContain('plugin broken-plugin: warnings: [Skipping invalid skill');
+    expect(out).toContain('Unregistered plugin dirs');
+    expect(out).toContain('orphan — skill bundle');
+    expect(out).toContain('agent-skills — 1 nested skills (not registered)');
+    expect(out).toContain('breakme — code plugin (entryPoint)');
+    expect(out).toContain('Invocable now: 1/5');
   });
 
   it('filters scopes: a single scope excludes other sections', async () => {
