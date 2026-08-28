@@ -236,6 +236,9 @@ export const zh: Record<string, string> = {
   'knowledge.reembed_done': '重新嵌入完成',
   'knowledge.reembed_summary': 'chunks: {chunks}, events: {events}, entities: {entities}, relations: {relations}',
   'knowledge.reembed_none': '知识库为空，无可重新嵌入的内容',
+  'knowledge.ingest_unchanged': '内容未变化，已跳过',
+  'knowledge.ingest_updated': '已替换旧版本，重新摄入完成',
+  'knowledge.sync_counts': '新增 {created} · 更新 {updated} · 未变化 {unchanged}',
 
   // ─── Init ─────────────────────
   'init.select_title': '选择 AGENTS.md 生成位置',
@@ -1080,12 +1083,6 @@ export const zh: Record<string, string> = {
   'prompts.wire_openai_responses_desc': 'OpenAI Responses API（推理模型）',
   'prompts.wire_anthropic': 'Anthropic 协议',
   'prompts.wire_anthropic_desc': 'Messages API 兼容的服务商',
-  'prompts.thinking_off': '关闭思考',
-  'prompts.thinking_low': '低强度思考',
-  'prompts.thinking_medium': '中强度思考',
-  'prompts.thinking_high': '高强度思考',
-  'prompts.thinking_xhigh': '超高强度思考',
-  'prompts.thinking_max': '最大强度思考',
   'prompts.image_off': '关闭识图',
   'prompts.image_off_desc': '模型不支持图片输入时请选择此项',
   'prompts.image_on': '开启识图',

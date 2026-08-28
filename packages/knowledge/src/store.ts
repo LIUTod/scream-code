@@ -310,6 +310,15 @@ export class KnowledgeStore {
         value TEXT NOT NULL
       );
     `);
+    // Legacy libraries predate the content fingerprint: add the column to
+    // existing tables (CREATE IF NOT EXISTS never alters an existing table).
+    try {
+      this.db.exec('ALTER TABLE knowledge_sources ADD COLUMN content_hash TEXT');
+    } catch (error: unknown) {
+      // Tolerate only the expected "duplicate column" outcome; surface real failures.
+      const message = error instanceof Error ? error.message : String(error);
+      if (!message.includes('duplicate column')) throw error;
+    }
   }
 
   // ── Sources ────────────────────────────────────────────────────────
@@ -318,6 +327,7 @@ export class KnowledgeStore {
     name: string;
     filePath?: string | null;
     description?: string | null;
+    contentHash?: string | null;
   }): Promise<KnowledgeSource> {
     await this.init();
     if (this.db === undefined) throw new Error('knowledge store not initialized');
@@ -325,16 +335,31 @@ export class KnowledgeStore {
     const createdAt = Date.now();
     this.db
       .prepare(
-        'INSERT INTO knowledge_sources (id, name, file_path, description, created_at) VALUES (?, ?, ?, ?, ?)',
+        'INSERT INTO knowledge_sources (id, name, file_path, description, content_hash, created_at) VALUES (?, ?, ?, ?, ?, ?)',
       )
-      .run(id, params.name, params.filePath ?? null, params.description ?? null, createdAt);
+      .run(
+        id,
+        params.name,
+        params.filePath ?? null,
+        params.description ?? null,
+        params.contentHash ?? null,
+        createdAt,
+      );
     return {
       id,
       name: params.name,
       filePath: params.filePath ?? null,
       description: params.description ?? null,
+      contentHash: params.contentHash ?? null,
       createdAt,
     };
+  }
+
+  /** Backfill or refresh a source's content fingerprint (legacy rows / replacements). */
+  async updateSourceContentHash(id: string, contentHash: string): Promise<void> {
+    await this.init();
+    if (this.db === undefined) throw new Error('knowledge store not initialized');
+    this.db.prepare('UPDATE knowledge_sources SET content_hash = ? WHERE id = ?').run(contentHash, id);
   }
 
   async findSourceByFilePath(filePath: string): Promise<KnowledgeSource | undefined> {
@@ -1198,6 +1223,7 @@ function rowToSource(row: Record<string, unknown>): KnowledgeSource {
     name: asString(row['name']),
     filePath: asNullableString(row['file_path']),
     description: asNullableString(row['description']),
+    contentHash: asNullableString(row['content_hash']),
     createdAt: Number(row['created_at']),
   };
 }

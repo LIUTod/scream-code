@@ -235,6 +235,9 @@ export const en: Record<string, string> = {
   'knowledge.reembed_done': 'Re-embed completed',
   'knowledge.reembed_summary': 'chunks: {chunks}, events: {events}, entities: {entities}, relations: {relations}',
   'knowledge.reembed_none': 'Knowledge base is empty; nothing to re-embed',
+  'knowledge.ingest_unchanged': 'Content unchanged, skipped',
+  'knowledge.ingest_updated': 'Previous version replaced; re-ingestion completed',
+  'knowledge.sync_counts': 'new: {created} · updated: {updated} · unchanged: {unchanged}',
 
   // ─── Init ─────────────────────
   'init.select_title': 'Select AGENTS.md location',
@@ -1079,12 +1082,6 @@ export const en: Record<string, string> = {
   'prompts.wire_openai_responses_desc': 'OpenAI Responses API (reasoning models)',
   'prompts.wire_anthropic': 'Anthropic protocol',
   'prompts.wire_anthropic_desc': 'Messages API compatible providers',
-  'prompts.thinking_off': 'Thinking off',
-  'prompts.thinking_low': 'Low thinking',
-  'prompts.thinking_medium': 'Medium thinking',
-  'prompts.thinking_high': 'High thinking',
-  'prompts.thinking_xhigh': 'Extra-high thinking',
-  'prompts.thinking_max': 'Max thinking',
   'prompts.image_off': 'Image off',
   'prompts.image_off_desc': 'Select this when the model does not support image input',
   'prompts.image_on': 'Image on',

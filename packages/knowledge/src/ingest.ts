@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { readdir, readFile } from 'node:fs/promises';
 import { basename, join } from 'pathe';
 
@@ -129,7 +130,13 @@ export async function ingestFile(
   llm: LlmCaller,
   filePath: string,
   onProgress?: IngestProgressCallback,
-): Promise<{ documentId: string; chunkCount: number; eventCount: number; entityCount: number }> {
+): Promise<{
+  documentId: string | null;
+  chunkCount: number;
+  eventCount: number;
+  entityCount: number;
+  outcome: 'created' | 'updated' | 'unchanged';
+}> {
   const engine = store.getEmbeddingEngine();
   const skipEmbed = engine === undefined || !engine.available;
   if (skipEmbed) {
@@ -137,33 +144,47 @@ export async function ingestFile(
   }
   await ensureEmbeddingModelMatches(store, engine);
 
-  // 1. Dedupe by file path.
-  const existing = await store.findSourceByFilePath(filePath);
-  if (existing !== undefined) {
-    onProgress?.({
-      stage: 'error',
-      message: `文件已摄入：${existing.name}（source id=${existing.id}）`,
-    });
-    throw new Error(`文件已摄入过: ${filePath} (source ${existing.id})`);
-  }
-
-  // 2. Read + chunk.
+  // 1. Read + fingerprint the content, then reconcile with any existing source.
   onProgress?.({ stage: 'chunking', message: `读取并切分文件: ${basename(filePath)}` });
   const content = await readFileContent(filePath);
-  const sections = chunkContent(content, getFileExtension(filePath));
-  if (sections.length === 0) {
-    onProgress?.({ stage: 'error', message: '文件无有效内容' });
-    throw new Error('文件无有效内容可摄入');
+  const contentHash = createHash('sha256').update(content).digest('hex');
+
+  const existing = await store.findSourceByFilePath(filePath);
+  let replacedOldVersion = false;
+  if (existing !== undefined) {
+    if (existing.contentHash === contentHash || existing.contentHash === null) {
+      // Unchanged — or a legacy baseline (sources ingested before the
+      // fingerprint existed get stamped with the current hash once).
+      if (existing.contentHash === null) {
+        await store.updateSourceContentHash(existing.id, contentHash);
+      }
+      onProgress?.({ stage: 'completed', message: '内容未变化，已跳过' });
+      return { documentId: null, chunkCount: 0, eventCount: 0, entityCount: 0, outcome: 'unchanged' };
+    }
+    // Content changed: replace. The source file remains on disk, so even if
+    // the re-ingest fails after the delete, re-running ingestion recovers.
+    onProgress?.({ stage: 'chunking', message: `检测到内容变更，替换旧版本: ${existing.name}` });
+    await store.deleteSource(existing.id);
+    replacedOldVersion = true;
   }
+
+  const sections = chunkContent(content, getFileExtension(filePath));
 
   store.beginTransaction();
   try {
+    // The "no effective content" check lives inside the transaction block so a
+    // replaced-source failure is wrapped with the old-version-deleted notice.
+    if (sections.length === 0) {
+      onProgress?.({ stage: 'error', message: '文件无有效内容' });
+      throw new Error('文件无有效内容可摄入');
+    }
     // 3. Create source + document.
     const fileName = basename(filePath);
     const source = await store.createSource({
       name: fileName,
       filePath,
       description: null,
+      contentHash,
     });
     const document = await store.createDocument({
       sourceId: source.id,
@@ -346,9 +367,14 @@ export async function ingestFile(
       chunkCount: chunks.length,
       eventCount: events.length,
       entityCount: uniqueEntities.length,
+      outcome: replacedOldVersion ? 'updated' : 'created',
     };
   } catch (error) {
     store.rollbackTransaction();
+    if (replacedOldVersion) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`旧版本已删除、新版本摄入失败，请重新摄入该文件: ${filePath}（${message}）`);
+    }
     throw error;
   }
 }
@@ -359,7 +385,13 @@ export async function ingestContent(
   llm: LlmCaller,
   params: { name: string; content: string },
   onProgress?: IngestProgressCallback,
-): Promise<{ documentId: string; chunkCount: number; eventCount: number; entityCount: number }> {
+): Promise<{
+  documentId: string | null;
+  chunkCount: number;
+  eventCount: number;
+  entityCount: number;
+  outcome: 'created' | 'updated' | 'unchanged';
+}> {
   const engine = store.getEmbeddingEngine();
   const skipEmbed = engine === undefined || !engine.available;
   if (skipEmbed) {
@@ -504,6 +536,7 @@ export async function ingestContent(
       chunkCount: chunks.length,
       eventCount: events.length,
       entityCount: uniqueEntities.length,
+      outcome: 'created',
     };
   } catch (error) {
     store.rollbackTransaction();
@@ -533,6 +566,9 @@ export async function ingestDirectory(
 ): Promise<{
   succeeded: number;
   failed: number;
+  created: number;
+  updated: number;
+  unchanged: number;
   totalChunks: number;
   totalEvents: number;
   totalEntities: number;
@@ -545,6 +581,9 @@ export async function ingestDirectory(
 
   const errors: Array<{ filePath: string; message: string }> = [];
   let succeeded = 0;
+  let created = 0;
+  let updated = 0;
+  let unchanged = 0;
   let totalChunks = 0;
   let totalEvents = 0;
   let totalEntities = 0;
@@ -559,6 +598,9 @@ export async function ingestDirectory(
     try {
       const result = await ingestFile(store, llm, filePath, fileProgress);
       succeeded += 1;
+      if (result.outcome === 'created') created += 1;
+      else if (result.outcome === 'updated') updated += 1;
+      else unchanged += 1;
       totalChunks += result.chunkCount;
       totalEvents += result.eventCount;
       totalEntities += result.entityCount;
@@ -574,12 +616,15 @@ export async function ingestDirectory(
 
   onProgress?.({
     stage: 'completed',
-    message: `批量摄入完成：${succeeded}/${files.length} 个文件成功，${totalChunks} chunks, ${totalEvents} events, ${totalEntities} entities`,
+    message: `批量摄入完成：新增 ${created} · 更新 ${updated} · 未变化 ${unchanged} · 失败 ${errors.length}（${totalChunks} chunks, ${totalEvents} events, ${totalEntities} entities）`,
   });
 
   return {
     succeeded,
     failed: errors.length,
+    created,
+    updated,
+    unchanged,
     totalChunks,
     totalEvents,
     totalEntities,

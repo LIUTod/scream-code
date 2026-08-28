@@ -141,14 +141,13 @@ function getWireTypeOptions(): ChoiceOption[] {
   ];
 }
 function getThinkingOptions(): ChoiceOption[] {
-  return [
-    { value: 'off', label: t('prompts.thinking_off') },
-    { value: 'low', label: t('prompts.thinking_low') },
-    { value: 'medium', label: t('prompts.thinking_medium') },
-    { value: 'high', label: t('prompts.thinking_high') },
-    { value: 'xhigh', label: t('prompts.thinking_xhigh') },
-    { value: 'max', label: t('prompts.thinking_max') },
-  ];
+  // Raw level tokens instead of translated labels: these are protocol values
+  // the user also sees in the model selector and status line, so keep them
+  // verbatim in every locale.
+  return (['off', 'low', 'medium', 'high', 'xhigh', 'max'] as const).map((level) => ({
+    value: level,
+    label: level,
+  }));
 }
 function getImageOptions(): ChoiceOption[] {
   return [

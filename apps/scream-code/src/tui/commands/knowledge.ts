@@ -134,9 +134,15 @@ async function handleIngest(host: SlashCommandHost): Promise<void> {
       });
       spinner.stop({ ok: result.failed === 0, label: t('knowledge.batch_done') });
       const coverage = await store.embeddingCoverage();
+      const syncLine = t('knowledge.sync_counts', {
+        created: String(result.created),
+        updated: String(result.updated),
+        unchanged: String(result.unchanged),
+      });
       if (result.failed > 0) {
         const summary = [
           t('knowledge.succeeded', { count: String(result.succeeded) }),
+          syncLine,
           t('knowledge.failed', { count: String(result.failed) }),
           t('knowledge.ingest_summary', { chunks: String(result.totalChunks), events: String(result.totalEvents), entities: String(result.totalEntities) }),
           t('knowledge.vector_coverage', { embedded: String(coverage.embedded), total: String(coverage.total) }),
@@ -148,7 +154,7 @@ async function handleIngest(host: SlashCommandHost): Promise<void> {
       } else {
         host.showNotice(
           t('knowledge.batch_done'),
-          `${t('knowledge.succeeded', { count: String(result.succeeded) })}\n${result.totalChunks} chunks, ${result.totalEvents} events, ${result.totalEntities} entities\n${t('knowledge.vector_coverage', { embedded: String(coverage.embedded), total: String(coverage.total) })}`,
+          `${syncLine}\n${result.totalChunks} chunks, ${result.totalEvents} events, ${result.totalEntities} entities\n${t('knowledge.vector_coverage', { embedded: String(coverage.embedded), total: String(coverage.total) })}`,
         );
       }
     } else {
@@ -160,12 +166,25 @@ async function handleIngest(host: SlashCommandHost): Promise<void> {
       const result = await ingestFile(store, llm, filePath, (progress) => {
         spinner.setLabel(formatProgress(progress));
       });
-      spinner.stop({ ok: true, label: t('knowledge.ingest_done') });
-      const coverage = await store.embeddingCoverage();
-      host.showNotice(
-        t('knowledge.ingest_done'),
-        `${t('knowledge.file_label')}: ${basename(filePath)}\nchunks: ${result.chunkCount}\nevents: ${result.eventCount}\nentities: ${result.entityCount}\n${t('knowledge.vector_coverage', { embedded: String(coverage.embedded), total: String(coverage.total) })}`,
-      );
+      const outcomeLabel =
+        result.outcome === 'unchanged'
+          ? t('knowledge.ingest_unchanged')
+          : result.outcome === 'updated'
+            ? t('knowledge.ingest_updated')
+            : t('knowledge.ingest_done');
+      spinner.stop({ ok: true, label: outcomeLabel });
+      if (result.outcome === 'unchanged') {
+        host.showNotice(
+          outcomeLabel,
+          `${t('knowledge.file_label')}: ${basename(filePath)}`,
+        );
+      } else {
+        const coverage = await store.embeddingCoverage();
+        host.showNotice(
+          outcomeLabel,
+          `${t('knowledge.file_label')}: ${basename(filePath)}\nchunks: ${result.chunkCount}\nevents: ${result.eventCount}\nentities: ${result.entityCount}\n${t('knowledge.vector_coverage', { embedded: String(coverage.embedded), total: String(coverage.total) })}`,
+        );
+      }
     }
   } catch (error) {
     spinner.stop({ ok: false, label: t('knowledge.ingest_fail') });

@@ -6,6 +6,8 @@ export interface KnowledgeSource {
   name: string;
   filePath: string | null;
   description: string | null;
+  /** sha256 of the file content at ingest time; null for legacy/programmatic sources. */
+  contentHash: string | null;
   createdAt: number;
 }
 
