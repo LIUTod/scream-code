@@ -57,6 +57,9 @@ function isEntityType(value: string): boolean {
   return ENTITY_TYPES.has(value);
 }
 
+/** Meta key recording which embedding model the stored vectors came from. */
+export const EMBEDDING_MODEL_META_KEY = 'embedding_model';
+
 export class KnowledgeStore {
   private readonly dbPath: string;
   private db: DatabaseSync | undefined;
@@ -180,6 +183,32 @@ export class KnowledgeStore {
     }
   }
 
+  // ── Meta ───────────────────────────────────────────────────────────
+
+  /**
+   * Read a metadata value (e.g. the embedding model identity the library was
+   * built with). Returns null when the key is absent.
+   */
+  async getMeta(key: string): Promise<string | null> {
+    await this.init();
+    if (this.db === undefined) return null;
+    const row = this.db
+      .prepare('SELECT value FROM knowledge_meta WHERE key = ?')
+      .get(key) as { value: unknown } | undefined;
+    return row === undefined ? null : asString(row['value']);
+  }
+
+  /** Write a metadata value (upsert). */
+  async setMeta(key: string, value: string): Promise<void> {
+    await this.init();
+    if (this.db === undefined) throw new Error('knowledge store not initialized');
+    this.db
+      .prepare(
+        'INSERT INTO knowledge_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+      )
+      .run(key, value);
+  }
+
   private createSchema(): void {
     if (this.db === undefined) return;
     this.db.exec(`
@@ -274,6 +303,11 @@ export class KnowledgeStore {
       );
       CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_entities_fts USING fts5(
         name, description, content='knowledge_entities', content_rowid='rowid'
+      );
+
+      CREATE TABLE IF NOT EXISTS knowledge_meta (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
       );
     `);
   }
@@ -947,7 +981,134 @@ export class KnowledgeStore {
     return out;
   }
 
+  // ── Re-embed ───────────────────────────────────────────────────────
+
+  /**
+   * Recompute every embedding for one source from the already-stored texts
+   * (no LLM extraction). Repairs libraries whose vectors are missing
+   * (ingested while the embedding model was unavailable) or stale (produced
+   * by a different model). All texts are embedded up front — any batch
+   * failure aborts before the first write, so the library is never left
+   * half-updated. On success the embedding-model meta is stamped with the
+   * engine's identity, unblocking future ingests after a model change.
+   */
+  async reembedSource(
+    sourceId: string,
+    engine: EmbeddingEngine,
+  ): Promise<{ chunks: number; events: number; entities: number; relations: number }> {
+    await this.init();
+    if (this.db === undefined) throw new Error('knowledge store not initialized');
+    if (!engine.available) throw new Error('embedding engine unavailable');
+
+    // ── Collect texts (same compositions the ingest path embeds) ──
+    const chunkRows = this.db
+      .prepare(
+        'SELECT id, heading, content FROM knowledge_chunks WHERE source_id = ? ORDER BY rank ASC',
+      )
+      .all(sourceId) as Array<{ id: string; heading: string | null; content: string }>;
+    const chunkTexts = chunkRows.map((c) =>
+      c.heading !== null ? `${c.heading}\n${c.content}` : c.content,
+    );
+
+    const eventRows = this.db
+      .prepare('SELECT id, title, content FROM knowledge_events WHERE source_id = ? ORDER BY rank ASC')
+      .all(sourceId) as Array<{ id: string; title: string; content: string }>;
+    const eventTitleTexts = eventRows.map((e) => e.title);
+    const eventContentTexts = eventRows.map((e) => `${e.title}\n\n${e.content}`);
+
+    const entityRows = this.db
+      .prepare('SELECT id, name FROM knowledge_entities WHERE source_id = ?')
+      .all(sourceId) as Array<{ id: string; name: string }>;
+
+    const relationRows = this.db
+      .prepare(
+        `SELECT ee.id, ee.description, e.title, en.name
+         FROM knowledge_event_entities ee
+         JOIN knowledge_events e ON e.id = ee.event_id
+         JOIN knowledge_entities en ON en.id = ee.entity_id
+         WHERE e.source_id = ?`,
+      )
+      .all(sourceId) as Array<{ id: string; description: string | null; title: string; name: string }>;
+    const relationTexts = relationRows.map((r) =>
+      r.description !== null && r.description.length > 0 ? r.description : `${r.title} ${r.name}`,
+    );
+
+    // ── Embed everything before touching the database ──
+    const embedAll = async (texts: string[]): Promise<Float32Array[]> => {
+      if (texts.length === 0) return [];
+      const vectors = await engine.embedBatch(texts);
+      if (vectors === null || vectors.length !== texts.length) {
+        throw new Error('向量嵌入失败，已取消本次重新嵌入');
+      }
+      return vectors;
+    };
+    const chunkVecs = await embedAll(chunkTexts);
+    const eventTitleVecs = await embedAll(eventTitleTexts);
+    const eventContentVecs = await embedAll(eventContentTexts);
+    const entityVecs = await embedAll(entityRows.map((e) => e.name));
+    const relationVecs = await embedAll(relationTexts);
+
+    // ── Write in one transaction ──
+    this.beginTransaction();
+    try {
+      const updChunk = this.db.prepare('UPDATE knowledge_chunks SET embedding_json = ? WHERE id = ?');
+      for (let i = 0; i < chunkRows.length; i++) {
+        updChunk.run(vectorToJson(chunkVecs[i] ?? null), chunkRows[i]!.id);
+      }
+      const updEvent = this.db.prepare(
+        'UPDATE knowledge_events SET title_embedding_json = ?, content_embedding_json = ? WHERE id = ?',
+      );
+      for (let i = 0; i < eventRows.length; i++) {
+        updEvent.run(
+          vectorToJson(eventTitleVecs[i] ?? null),
+          vectorToJson(eventContentVecs[i] ?? null),
+          eventRows[i]!.id,
+        );
+      }
+      const updEntity = this.db.prepare('UPDATE knowledge_entities SET embedding_json = ? WHERE id = ?');
+      for (let i = 0; i < entityRows.length; i++) {
+        updEntity.run(vectorToJson(entityVecs[i] ?? null), entityRows[i]!.id);
+      }
+      const updRelation = this.db.prepare(
+        'UPDATE knowledge_event_entities SET embedding_json = ? WHERE id = ?',
+      );
+      for (let i = 0; i < relationRows.length; i++) {
+        updRelation.run(vectorToJson(relationVecs[i] ?? null), relationRows[i]!.id);
+      }
+      await this.setMeta(EMBEDDING_MODEL_META_KEY, engine.modelName);
+      this.commitTransaction();
+    } catch (error) {
+      this.rollbackTransaction();
+      throw error;
+    }
+
+    return {
+      chunks: chunkRows.length,
+      events: eventRows.length,
+      entities: entityRows.length,
+      relations: relationRows.length,
+    };
+  }
+
   // ── Stats ──────────────────────────────────────────────────────────
+
+  /**
+   * Chunk vector coverage — how many of the stored chunks carry an embedding.
+   * Used by the TUI to surface partial/skipped embedding after an ingest.
+   */
+  async embeddingCoverage(): Promise<{ total: number; embedded: number }> {
+    await this.init();
+    if (this.db === undefined) return { total: 0, embedded: 0 };
+    const row = this.db
+      .prepare(
+        `SELECT COUNT(*) AS total,
+                SUM(CASE WHEN embedding_json IS NOT NULL THEN 1 ELSE 0 END) AS embedded
+         FROM knowledge_chunks`,
+      )
+      .get() as { total: unknown; embedded: unknown } | undefined;
+    if (row === undefined) return { total: 0, embedded: 0 };
+    return { total: Number(row['total'] ?? 0), embedded: Number(row['embedded'] ?? 0) };
+  }
 
   async stats(): Promise<{
     sources: number;

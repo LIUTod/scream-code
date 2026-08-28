@@ -1,5 +1,5 @@
 import { extractQueryEntities, rerankEventsWithLlm } from './extractor.js';
-import type { KnowledgeStore } from './store.js';
+import { EMBEDDING_MODEL_META_KEY, type KnowledgeStore } from './store.js';
 import type {
   KnowledgeSearchOptions,
   KnowledgeSearchResult,
@@ -88,6 +88,18 @@ export async function multiSearchWithTrace(
   const engine = store.getEmbeddingEngine();
   if (engine === undefined || !engine.available) {
     fallbackReason = 'embedding engine unavailable; used FTS5 keyword fallback';
+    const results = await ftsFallback(store, query, topK);
+    return { results, trace: { steps, rerankedEventTitles, fallbackReason } };
+  }
+
+  // Model mismatch guard: comparing the query vector against vectors produced
+  // by a different embedding model is meaningless (scores silently collapse
+  // to 0) — surface it and fall back to keyword search instead.
+  const recordedModel = await store.getMeta(EMBEDDING_MODEL_META_KEY);
+  if (recordedModel !== null && recordedModel !== engine.modelName) {
+    fallbackReason =
+      `embedding model mismatch (library: ${recordedModel}, current: ${engine.modelName}); ` +
+      'used FTS5 keyword fallback';
     const results = await ftsFallback(store, query, topK);
     return { results, trace: { steps, rerankedEventTitles, fallbackReason } };
   }

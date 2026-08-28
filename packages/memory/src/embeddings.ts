@@ -14,6 +14,13 @@ export interface EmbeddingEngine {
   /** Whether the model is loaded in memory and ready to embed. */
   readonly available: boolean;
 
+  /**
+   * Stable identity of the embedding model producing the vectors (e.g.
+   * "bge-small-zh-v1.5"). Persisted alongside stored vectors so consumers can
+   * detect a model change instead of silently comparing incompatible spaces.
+   */
+  readonly modelName: string;
+
   /** Last load/download error message, if any. */
   readonly lastError?: string;
 
@@ -71,6 +78,9 @@ export function createFastEmbedEngine(cacheDir?: string): EmbeddingEngine {
   return engine;
 }
 
+/** Stable identity of the model used by every engine created here. */
+export const EMBEDDING_MODEL_NAME = 'bge-small-zh-v1.5';
+
 function createFastEmbedEngineImpl(cacheDir?: string): EmbeddingEngine {
   let embedder: FastembedModel | null = null;
   let initPromise: Promise<FastembedModel | null> | null = null;
@@ -78,6 +88,8 @@ function createFastEmbedEngineImpl(cacheDir?: string): EmbeddingEngine {
   let lastError: string | undefined;
 
   return {
+    modelName: EMBEDDING_MODEL_NAME,
+
     get available(): boolean {
       return embedder !== null && !loadFailed;
     },

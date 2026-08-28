@@ -5,7 +5,7 @@ import { dirname, join } from 'pathe';
 
 import type { MemoryMemo, MemoryMemoListResult } from './models.js';
 import { toSummary } from './models.js';
-import { buildEmbeddingText, type EmbeddingEngine } from './embeddings.js';
+import { buildEmbeddingText, EMBEDDING_MODEL_NAME, type EmbeddingEngine } from './embeddings.js';
 
 const FILE_NAME = 'entries.jsonl';
 const MIGRATION_MARKER = '.migrated';
@@ -363,7 +363,7 @@ export class MemoryMemoStore {
       CREATE TABLE IF NOT EXISTS memory_embeddings (
         memory_id TEXT PRIMARY KEY REFERENCES memos(id) ON DELETE CASCADE,
         embedding_json TEXT NOT NULL,
-        model TEXT NOT NULL DEFAULT 'bge-small-zh-v1.5',
+        model TEXT NOT NULL DEFAULT '${EMBEDDING_MODEL_NAME}',
         created_at INTEGER NOT NULL
       );
 
@@ -883,7 +883,7 @@ export class MemoryMemoStore {
           insert.run(
             pending[i]!.id,
             JSON.stringify([...vectors[i]!]),
-            'bge-small-zh-v1.5',
+            EMBEDDING_MODEL_NAME,
             now,
           );
         }

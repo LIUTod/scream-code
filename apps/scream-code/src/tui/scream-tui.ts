@@ -10,6 +10,8 @@ import type {
   Session,
 } from '@scream-code/scream-code-sdk';
 import { OnboardingCardComponent } from './components/dialogs/onboarding-card';
+import { EmbeddingSetupCardComponent } from './components/dialogs/embedding-setup-card';
+import { getKnowledgeStore, isEmbeddingModelCached, startManualEmbeddingDownload } from './commands/knowledge-store';
 import { ScreamHarness } from '@scream-code/scream-code-sdk';
 import { t, setLocale } from '@scream-code/config';
 import type { CLIOptions } from '#/cli/options';
@@ -350,7 +352,9 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
     // when the user explicitly asked for the session picker (-s): that flow
     // mounts its own editor replacement and must win.
     if (!this.state.appState.model && this.state.startupState !== 'picker') {
-      void this.showOnboardingCard();
+      void this.showOnboardingCard(() => void this.maybeShowEmbeddingSetup());
+    } else {
+      void this.maybeShowEmbeddingSetup();
     }
     return shouldReplayHistory;
   }
@@ -806,13 +810,16 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
   }
 
   /** First-run: no configured model → show the onboarding card (configure
-   * now / skip). Configure routes through the same /config connect flow. */
-  private async showOnboardingCard(): Promise<void> {
+   * now / skip). Configure routes through the same /config connect flow.
+   * `onDone` fires after the card is dismissed either way — used to chain
+   * the embedding-model setup check so the two first-run cards never stack. */
+  private async showOnboardingCard(onDone?: () => void): Promise<void> {
     // Mirror /config's config read: a non-empty defaultModel means the user
     // already configured a model → skip the card entirely.
     try {
       const config = await this.harness.getConfig({ reload: true });
       if ((config.defaultModel ?? '').trim().length > 0) {
+        onDone?.();
         return;
       }
     } catch {
@@ -830,7 +837,60 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
             // Otherwise the card stays mounted and inert (activated=true),
             // and pi-tui's single-focus routing swallows all keys → TUI frozen.
             this.restoreEditor();
+            onDone?.();
           });
+      },
+      onSkip: () => {
+        this.restoreEditor();
+        onDone?.();
+      },
+    });
+    this.mountEditorReplacement(card);
+  }
+
+  /**
+   * Post-onboarding embedding-model check. Cached model → warm the shared
+   * engine in the background (local files only, no network); missing model →
+   * surface a download card so /knowledge and /memory work on first try.
+   */
+  private async maybeShowEmbeddingSetup(): Promise<void> {
+    if (this.state.startupState === 'picker') return;
+    try {
+      await getKnowledgeStore();
+      if (isEmbeddingModelCached()) {
+        void startManualEmbeddingDownload().catch(() => {
+          // Warm-up is best-effort; the ingest/search gates surface errors
+          // with full context when the user actually needs the model.
+        });
+        return;
+      }
+    } catch {
+      // Store/engine init failure — /knowledge's own flows surface it later.
+      return;
+    }
+    const card = new EmbeddingSetupCardComponent({
+      colors: this.state.theme.colors,
+      onDownload: () => {
+        void (async () => {
+          this.restoreEditor();
+          const spinner = this.showProgressSpinner(t('kw.embedding_downloading'));
+          let ok = false;
+          let error: string | undefined;
+          try {
+            ({ ok, error } = await startManualEmbeddingDownload());
+          } catch (error: unknown) {
+            error = error instanceof Error ? error.message : String(error);
+          }
+          spinner.stop({ ok, label: ok ? t('kw.embedding_ready') : t('kw.embedding_failed') });
+          if (ok) {
+            this.showStatus(t('kw.embedding_ready'));
+          } else {
+            const detail = [t('knowledge.download_model_retry_hint'), error]
+              .filter(Boolean)
+              .join('\n');
+            this.showNotice(t('kw.embedding_failed'), detail);
+          }
+        })();
       },
       onSkip: () => {
         this.restoreEditor();

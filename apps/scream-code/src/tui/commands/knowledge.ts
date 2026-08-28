@@ -14,7 +14,7 @@ import { t } from '@scream-code/config';
 
 import type { SlashCommandHost } from './dispatch';
 import { handleWeb } from './knowledge-web';
-import { getKnowledgeStore, getEmbeddingStatus, startManualEmbeddingDownload, type EmbeddingStatus } from './knowledge-store';
+import { getKnowledgeStore, getEmbeddingStatus, startManualEmbeddingDownload, isEmbeddingModelCached, type EmbeddingStatus } from './knowledge-store';
 import { TextInputDialogComponent } from '../components/dialogs/text-input-dialog';
 import { ChoicePickerComponent, type ChoiceOption } from '../components/dialogs/choice-picker';
 import { KnowledgeResultViewer } from '../components/dialogs/knowledge-result-viewer';
@@ -121,6 +121,11 @@ async function handleIngest(host: SlashCommandHost): Promise<void> {
   const store = await getKnowledgeStore();
   const llm = makeLlmCaller(host);
 
+  // Embedding readiness gate — never fall back to a silent no-vector ingest.
+  // If the model is cached, load it (local files, no network); if it is not
+  // downloaded at all, stop and guide the user to the download menu item.
+  if (!(await ensureEmbeddingReadyInteractive(host))) return;
+
   const spinner = host.showProgressSpinner(t('knowledge.ingesting'));
   try {
     if (stats.isDirectory()) {
@@ -128,11 +133,13 @@ async function handleIngest(host: SlashCommandHost): Promise<void> {
         spinner.setLabel(formatProgress(progress));
       });
       spinner.stop({ ok: result.failed === 0, label: t('knowledge.batch_done') });
+      const coverage = await store.embeddingCoverage();
       if (result.failed > 0) {
         const summary = [
           t('knowledge.succeeded', { count: String(result.succeeded) }),
           t('knowledge.failed', { count: String(result.failed) }),
           t('knowledge.ingest_summary', { chunks: String(result.totalChunks), events: String(result.totalEvents), entities: String(result.totalEntities) }),
+          t('knowledge.vector_coverage', { embedded: String(coverage.embedded), total: String(coverage.total) }),
           '',
           t('knowledge.failed_files'),
           ...result.errors.map((e) => `  • ${basename(e.filePath)}: ${e.message}`),
@@ -141,7 +148,7 @@ async function handleIngest(host: SlashCommandHost): Promise<void> {
       } else {
         host.showNotice(
           t('knowledge.batch_done'),
-          `${t('knowledge.succeeded', { count: String(result.succeeded) })}\n${result.totalChunks} chunks, ${result.totalEvents} events, ${result.totalEntities} entities`,
+          `${t('knowledge.succeeded', { count: String(result.succeeded) })}\n${result.totalChunks} chunks, ${result.totalEvents} events, ${result.totalEntities} entities\n${t('knowledge.vector_coverage', { embedded: String(coverage.embedded), total: String(coverage.total) })}`,
         );
       }
     } else {
@@ -154,15 +161,41 @@ async function handleIngest(host: SlashCommandHost): Promise<void> {
         spinner.setLabel(formatProgress(progress));
       });
       spinner.stop({ ok: true, label: t('knowledge.ingest_done') });
+      const coverage = await store.embeddingCoverage();
       host.showNotice(
         t('knowledge.ingest_done'),
-        `${t('knowledge.file_label')}: ${basename(filePath)}\nchunks: ${result.chunkCount}\nevents: ${result.eventCount}\nentities: ${result.entityCount}`,
+        `${t('knowledge.file_label')}: ${basename(filePath)}\nchunks: ${result.chunkCount}\nevents: ${result.eventCount}\nentities: ${result.entityCount}\n${t('knowledge.vector_coverage', { embedded: String(coverage.embedded), total: String(coverage.total) })}`,
       );
     }
   } catch (error) {
     spinner.stop({ ok: false, label: t('knowledge.ingest_fail') });
     throw error;
   }
+}
+
+/**
+ * Ensure the shared embedding engine is ready before a vector-dependent
+ * operation. Returns true when ready; otherwise shows an error (missing
+ * download) or attempts a cached-model load and reports the outcome.
+ */
+async function ensureEmbeddingReadyInteractive(host: SlashCommandHost): Promise<boolean> {
+  const store = await getKnowledgeStore();
+  const engine = store.getEmbeddingEngine();
+  if (engine !== undefined && engine.available) return true;
+
+  if (!isEmbeddingModelCached()) {
+    host.showError(t('knowledge.model_missing'));
+    return false;
+  }
+  const spinner = host.showProgressSpinner(t('knowledge.loading_model'));
+  const { ok, error } = await startManualEmbeddingDownload();
+  spinner.stop({ ok, label: ok ? t('kw.embedding_ready') : t('kw.embedding_failed') });
+  if (!ok) {
+    const detail = [t('knowledge.download_model_retry_hint'), error].filter(Boolean).join('\n');
+    host.showNotice(t('knowledge.model_load_failed'), detail);
+    return false;
+  }
+  return true;
 }
 
 async function handleList(host: SlashCommandHost): Promise<void> {
@@ -336,6 +369,109 @@ async function handleDelete(host: SlashCommandHost): Promise<void> {
   }
 }
 
+function pickSourceToReembed(
+  host: SlashCommandHost,
+  sources: KnowledgeSource[],
+): Promise<string | undefined> {
+  const { promise, resolve } = Promise.withResolvers<string | undefined>();
+  const options: ChoiceOption[] = sources.map((s) => ({
+    value: s.id,
+    label: s.name,
+    description: s.filePath ?? undefined,
+  }));
+  const picker = new ChoicePickerComponent({
+    title: t('knowledge.reembed_pick'),
+    options,
+    colors: host.state.theme.colors,
+    onSelect: (value: string) => {
+      host.restoreEditor();
+      resolve(value);
+    },
+    onCancel: () => {
+      host.restoreEditor();
+      resolve(undefined);
+    },
+  });
+  host.mountEditorReplacement(picker);
+  return promise;
+}
+
+function confirmReembedSource(host: SlashCommandHost, source: KnowledgeSource): Promise<boolean> {
+  const { promise, resolve } = Promise.withResolvers<boolean>();
+  const options: ChoiceOption[] = [
+    {
+      value: 'cancel',
+      label: t('common.cancel'),
+    },
+    {
+      value: 'confirm',
+      label: t('knowledge.reembed'),
+      description: t('knowledge.reembed_confirm_desc'),
+    },
+  ];
+  const picker = new ChoicePickerComponent({
+    title: t('knowledge.reembed_confirm_name', { name: source.name }),
+    options,
+    colors: host.state.theme.colors,
+    onSelect: (value: string) => {
+      host.restoreEditor();
+      resolve(value === 'confirm');
+    },
+    onCancel: () => {
+      host.restoreEditor();
+      resolve(false);
+    },
+  });
+  host.mountEditorReplacement(picker);
+  return promise;
+}
+
+async function handleReembed(host: SlashCommandHost): Promise<void> {
+  const store = await getKnowledgeStore();
+  const sources = await store.listSources();
+  if (sources.length === 0) {
+    host.showNotice(t('knowledge.empty'), t('knowledge.reembed_none'));
+    return;
+  }
+
+  const sourceId = await pickSourceToReembed(host, sources);
+  if (sourceId === undefined) return;
+  const source = sources.find((s) => s.id === sourceId);
+  if (source === undefined) return;
+
+  if (!(await confirmReembedSource(host, source))) {
+    host.showNotice(t('knowledge.cancelled'));
+    return;
+  }
+
+  // Re-embedding recomputes vectors only — the engine must be ready.
+  if (!(await ensureEmbeddingReadyInteractive(host))) return;
+
+  const engine = store.getEmbeddingEngine();
+  if (engine === undefined) {
+    host.showError(t('knowledge.model_missing'));
+    return;
+  }
+
+  const spinner = host.showProgressSpinner(t('knowledge.reembed'));
+  try {
+    const counts = await store.reembedSource(sourceId, engine);
+    spinner.stop({ ok: true, label: t('knowledge.reembed_done') });
+    host.showNotice(
+      t('knowledge.reembed_done'),
+      t('knowledge.reembed_summary', {
+        chunks: String(counts.chunks),
+        events: String(counts.events),
+        entities: String(counts.entities),
+        relations: String(counts.relations),
+      }),
+    );
+  } catch (error) {
+    spinner.stop({ ok: false, label: t('knowledge.reembed') });
+    throw error;
+  }
+}
+
 async function handleDownloadModel(host: SlashCommandHost): Promise<void> {
   // Ensure the store and shared embedding engine are initialized before
   // attempting a manual download. The menu can be opened without any other
@@ -431,6 +567,11 @@ export async function handleKnowledgeCommand(
         tone: 'danger',
       },
       {
+        value: 'reembed',
+        label: '🔁 ' + t('knowledge.reembed'),
+        description: t('knowledge.reembed_desc'),
+      },
+      {
         value: 'stats',
         label: '📊 ' + t('knowledge.stats'),
         description: t('knowledge.stats_desc'),
@@ -456,6 +597,7 @@ export async function handleKnowledgeCommand(
             else if (value === 'list') await handleList(host);
             else if (value === 'search') await handleSearch(host);
             else if (value === 'delete') await handleDelete(host);
+            else if (value === 'reembed') await handleReembed(host);
             else if (value === 'stats') await handleStats(host);
             else if (value === 'web') await handleWeb(host);
           } catch (error: unknown) {

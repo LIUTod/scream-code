@@ -1,4 +1,4 @@
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { createFastEmbedEngine, clearEmbeddingModelCache, type EmbeddingEngine } from '@scream-code/memory';
@@ -18,6 +18,22 @@ function getEmbeddingCacheDir(): string {
   return dir;
 }
 
+/** Subdirectory fastembed uses for the BGESmallZH model inside the cache dir. */
+const EMBEDDING_MODEL_DIR = 'fast-bge-small-zh-v1.5';
+
+/**
+ * Whether the embedding model has been downloaded to the local cache.
+ * Checks the ONNX weights plus a config sidecar — both required for
+ * FlagEmbedding.init to load without network access.
+ */
+export function isEmbeddingModelCached(): boolean {
+  const modelDir = join(getEmbeddingCacheDir(), EMBEDDING_MODEL_DIR);
+  return (
+    existsSync(join(modelDir, 'model_optimized.onnx')) &&
+    existsSync(join(modelDir, 'config.json'))
+  );
+}
+
 export async function getKnowledgeStore(): Promise<KnowledgeStore> {
   if (knowledgeStoreInstance === undefined) {
     knowledgeStoreInstance = new KnowledgeStore(getDataDir());
@@ -26,10 +42,6 @@ export async function getKnowledgeStore(): Promise<KnowledgeStore> {
     knowledgeStoreInstance.setEmbeddingEngine(embeddingEngineInstance);
   }
   return knowledgeStoreInstance;
-}
-
-export function getEmbeddingEngineInstance(): EmbeddingEngine | undefined {
-  return embeddingEngineInstance;
 }
 
 export function getEmbeddingStatus(): EmbeddingStatus {
@@ -41,11 +53,12 @@ export function getEmbeddingStatus(): EmbeddingStatus {
  * Only mutates embeddingStatus; the actual download is delegated to
  * EmbeddingEngine.ensureReady() and saves the model to the shared cache dir.
  * Returns { ok: true } on success, or { ok: false, error } on failure.
- * Concurrent calls while a download is already in flight are ignored.
+ * Concurrent calls join the in-flight download and share its result instead
+ * of failing — the startup warm-up and a user-initiated download must never
+ * race into a spurious "download already in progress" error.
  */
 export async function startManualEmbeddingDownload(): Promise<{ ok: boolean; alreadyReady?: boolean; error?: string }> {
   if (embeddingEngineInstance === undefined) return { ok: false, error: 'embedding engine not initialized' };
-  if (embeddingStatus === 'downloading') return { ok: false, error: 'download already in progress' };
 
   // If the model is already loaded in this process, nothing to do.
   if (embeddingEngineInstance.available) {
@@ -53,17 +66,37 @@ export async function startManualEmbeddingDownload(): Promise<{ ok: boolean; alr
     return { ok: true, alreadyReady: true };
   }
 
+  // Join an in-flight download rather than rejecting concurrent callers.
+  if (downloadPromise !== undefined) return downloadPromise;
+
   embeddingStatus = 'downloading';
-  let ok = await embeddingEngineInstance.ensureReady();
-  let error = ok ? undefined : embeddingEngineInstance.lastError;
+  downloadPromise = performDownload().finally(() => {
+    downloadPromise = undefined;
+  });
+  return downloadPromise;
+}
 
-  // If the first attempt failed, wipe any partial/corrupted cache and retry once.
-  if (!ok) {
-    clearEmbeddingModelCache(getEmbeddingCacheDir());
-    ok = await embeddingEngineInstance.ensureReady();
-    error = ok ? undefined : embeddingEngineInstance.lastError;
+let downloadPromise: Promise<{ ok: boolean; alreadyReady?: boolean; error?: string }> | undefined;
+
+async function performDownload(): Promise<{ ok: boolean; alreadyReady?: boolean; error?: string }> {
+  try {
+    let ok = await embeddingEngineInstance!.ensureReady();
+    let error = ok ? undefined : embeddingEngineInstance!.lastError;
+
+    // If the first attempt failed, wipe any partial/corrupted cache and retry once.
+    if (!ok) {
+      clearEmbeddingModelCache(getEmbeddingCacheDir());
+      ok = await embeddingEngineInstance!.ensureReady();
+      error = ok ? undefined : embeddingEngineInstance!.lastError;
+    }
+
+    embeddingStatus = ok ? 'ready' : 'failed';
+    return { ok, error };
+  } catch (error: unknown) {
+    // Never let an unexpected failure (disk, fs permission) escape as an
+    // unhandled rejection — surface it as a failed download instead.
+    embeddingStatus = 'failed';
+    const message = error instanceof Error ? error.message : String(error);
+    return { ok: false, error: message };
   }
-
-  embeddingStatus = ok ? 'ready' : 'failed';
-  return { ok, error };
 }

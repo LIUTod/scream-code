@@ -43,6 +43,7 @@ function makeStubEngine(): EmbeddingEngine {
     return vec;
   }
   return {
+    modelName: 'stub-model',
     available: true,
     async embedBatch(texts: string[]): Promise<Float32Array[] | null> {
       return texts.map(embed);

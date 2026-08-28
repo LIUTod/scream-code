@@ -224,6 +224,18 @@ export const zh: Record<string, string> = {
   'knowledge.menu_title': 'SAG知识库管理',
   'knowledge.menu_hint': '选择操作（esc 退出）',
   'knowledge.op_failed': '操作失败: {msg}',
+  'knowledge.loading_model': '加载向量模型中...',
+  'knowledge.model_missing': '尚未下载向量模型，请先在 /knowledge 菜单选择「下载向量模型」',
+  'knowledge.model_load_failed': '向量模型加载失败，本次未摄入任何内容',
+  'knowledge.vector_coverage': '向量嵌入: {embedded}/{total} chunks',
+  'knowledge.reembed': '重新嵌入',
+  'knowledge.reembed_desc': '对指定文档重算全部向量（不重新抽取，不消耗 LLM）',
+  'knowledge.reembed_pick': '选择要重新嵌入的知识',
+  'knowledge.reembed_confirm_name': '重新嵌入「{name}」？',
+  'knowledge.reembed_confirm_desc': '将重算该文档所有 chunks/events/entities 向量',
+  'knowledge.reembed_done': '重新嵌入完成',
+  'knowledge.reembed_summary': 'chunks: {chunks}, events: {events}, entities: {entities}, relations: {relations}',
+  'knowledge.reembed_none': '知识库为空，无可重新嵌入的内容',
 
   // ─── Init ─────────────────────
   'init.select_title': '选择 AGENTS.md 生成位置',
@@ -1288,4 +1300,8 @@ export const zh: Record<string, string> = {
   'kw.embedding_not_downloaded': '向量模型未下载（选择「下载向量模型」手动下载）',
   'kw.embedding_data_intact': ' —— 你的知识数据仍然存在，下载模型后即可正常使用',
   'kw.embedding_already_installed': '向量模型已安装，无需重新下载',
+  'kw.setup_description': '检测到向量模型尚未下载。下载后 /knowledge 知识库与 /memory 记忆将启用语义检索（模型约 95 MB，只需下载一次）。',
+  'kw.setup_download': '立即下载',
+  'kw.setup_skip': '暂不下载',
+  'kw.setup_hint': '↑↓ 选择 · Enter 确认 · Esc 跳过',
 };

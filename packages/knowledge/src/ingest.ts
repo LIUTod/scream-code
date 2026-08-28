@@ -3,7 +3,7 @@ import { basename, join } from 'pathe';
 
 import { chunkMarkdown, chunkText } from './chunking.js';
 import { extractEventFromChunk } from './extractor.js';
-import type { KnowledgeStore } from './store.js';
+import { EMBEDDING_MODEL_META_KEY, type KnowledgeStore } from './store.js';
 import type { EmbeddingEngine } from '@scream-code/memory';
 import type {
   ChunkSection,
@@ -83,6 +83,30 @@ async function mapWithConcurrency<T, R>(
 }
 
 /**
+ * Stamp or verify the embedding-model identity recorded in the library.
+ * A library written by a different model would mix vector spaces — block the
+ * ingest with a clear message instead of silently storing incompatible
+ * embeddings. A legacy library without the marker is stamped with the current
+ * model (all existing data was written by it).
+ */
+async function ensureEmbeddingModelMatches(
+  store: KnowledgeStore,
+  engine: EmbeddingEngine | undefined,
+): Promise<void> {
+  if (engine === undefined) return;
+  const recorded = await store.getMeta(EMBEDDING_MODEL_META_KEY);
+  if (recorded === null) {
+    await store.setMeta(EMBEDDING_MODEL_META_KEY, engine.modelName);
+    return;
+  }
+  if (recorded !== engine.modelName) {
+    throw new Error(
+      `知识库由模型 ${recorded} 嵌入，当前模型为 ${engine.modelName}，请先在 /knowledge 中重新嵌入知识库`,
+    );
+  }
+}
+
+/**
  * Ingest a markdown file into the knowledge base.
  *
  * Steps:
@@ -111,6 +135,7 @@ export async function ingestFile(
   if (skipEmbed) {
     onProgress?.({ stage: 'embedding-check', message: '向量模型未就绪，本次摄入跳过向量嵌入' });
   }
+  await ensureEmbeddingModelMatches(store, engine);
 
   // 1. Dedupe by file path.
   const existing = await store.findSourceByFilePath(filePath);
@@ -340,6 +365,7 @@ export async function ingestContent(
   if (skipEmbed) {
     onProgress?.({ stage: 'embedding-check', message: '向量模型未就绪，本次摄入跳过向量嵌入' });
   }
+  await ensureEmbeddingModelMatches(store, engine);
 
   const sections = chunkMarkdown(params.content);
   if (sections.length === 0) {

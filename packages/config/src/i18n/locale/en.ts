@@ -223,6 +223,18 @@ export const en: Record<string, string> = {
   'knowledge.menu_title': 'SAG Knowledge Base',
   'knowledge.menu_hint': 'Select an action (Esc to exit)',
   'knowledge.op_failed': 'Operation failed: {msg}',
+  'knowledge.loading_model': 'Loading vector model...',
+  'knowledge.model_missing': 'Vector model not downloaded yet. Select "Download vector model" in the /knowledge menu first.',
+  'knowledge.model_load_failed': 'Vector model failed to load. Nothing was ingested.',
+  'knowledge.vector_coverage': 'Vectors: {embedded}/{total} chunks embedded',
+  'knowledge.reembed': 'Re-embed',
+  'knowledge.reembed_desc': 'Recompute all vectors for one document (no re-extraction, no LLM cost)',
+  'knowledge.reembed_pick': 'Pick knowledge to re-embed',
+  'knowledge.reembed_confirm_name': 'Re-embed "{name}"?',
+  'knowledge.reembed_confirm_desc': 'All chunk/event/entity vectors of this document will be recomputed',
+  'knowledge.reembed_done': 'Re-embed completed',
+  'knowledge.reembed_summary': 'chunks: {chunks}, events: {events}, entities: {entities}, relations: {relations}',
+  'knowledge.reembed_none': 'Knowledge base is empty; nothing to re-embed',
 
   // ─── Init ─────────────────────
   'init.select_title': 'Select AGENTS.md location',
@@ -1287,4 +1299,8 @@ export const en: Record<string, string> = {
   'kw.embedding_not_downloaded': 'Vector model not downloaded (select Download vector model)',
   'kw.embedding_data_intact': ' — your knowledge data is still there; download the model to use it again',
   'kw.embedding_already_installed': 'Vector model already installed, no need to re-download',
+  'kw.setup_description': 'The vector model is not downloaded yet. Once downloaded, /knowledge and /memory gain semantic retrieval (about 95 MB, one-time download).',
+  'kw.setup_download': 'Download now',
+  'kw.setup_skip': 'Not now',
+  'kw.setup_hint': '↑↓ select · Enter confirm · Esc skip',
 };
