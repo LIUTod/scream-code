@@ -23,14 +23,17 @@ const EMBEDDING_MODEL_DIR = 'fast-bge-small-zh-v1.5';
 
 /**
  * Whether the embedding model has been downloaded to the local cache.
- * Checks the ONNX weights plus a config sidecar — both required for
- * FlagEmbedding.init to load without network access.
+ * Checks the ONNX weights plus the config and tokenizer sidecars — all
+ * required for FlagEmbedding.init to load without network access (a missing
+ * tokenizer would trigger a network fetch and violate the warm-up's
+ * offline-load guarantee).
  */
 export function isEmbeddingModelCached(): boolean {
   const modelDir = join(getEmbeddingCacheDir(), EMBEDDING_MODEL_DIR);
   return (
     existsSync(join(modelDir, 'model_optimized.onnx')) &&
-    existsSync(join(modelDir, 'config.json'))
+    existsSync(join(modelDir, 'config.json')) &&
+    existsSync(join(modelDir, 'tokenizer.json'))
   );
 }
 

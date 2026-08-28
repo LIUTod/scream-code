@@ -105,6 +105,67 @@ describe('InspectOwnAssetsTool', () => {
     expect(out).toContain(join(userHome, '.scream-code', 'skills'));
   });
 
+  it('marks invocable status against the live registry and reports coverage', async () => {
+    // Swap in an agent whose registry knows my-skill and flat, but not bad-skill.
+    const withRegistry = new InspectOwnAssetsTool(
+      {
+        config: { cwd },
+        skills: {
+          registry: {
+            listInvocableSkills: () => [{ name: 'my-skill' }, { name: 'flat' }],
+          },
+        },
+      } as unknown as Agent,
+      { homeDir: home, userHomeDir: userHome },
+    );
+    const execution = withRegistry.resolveExecution({ scope: 'skills' });
+    if (execution.isError) throw new TypeError('unexpected error execution');
+    const result = await execution.execute({
+      turnId: 'test',
+      toolCallId: 'test',
+      signal: new AbortController().signal,
+    });
+    expect(result.isError).toBe(false);
+    const out = result.output;
+
+    expect(out).toContain('my-skill — dir — ok — invocable');
+    expect(out).toContain('bad-skill — dir — missing — not invocable');
+    expect(out).toContain('flat — flat — ok — invocable');
+    expect(out).toContain('Invocable now: 2/3');
+  });
+
+  it('matches plugin-managed skills by their frontmatter name, tagging the origin', async () => {
+    const managedDir = join(home, 'plugins', 'managed', 'my-plugin');
+    await mkdir(managedDir, { recursive: true });
+    await writeFile(
+      join(managedDir, 'SKILL.md'),
+      '---\nname: plugin-skill\n---\nFrom a plugin.\n',
+    );
+    const withRegistry = new InspectOwnAssetsTool(
+      {
+        config: { cwd },
+        skills: {
+          registry: {
+            listInvocableSkills: () => [{ name: 'plugin-skill' }],
+          },
+        },
+      } as unknown as Agent,
+      { homeDir: home, userHomeDir: userHome },
+    );
+    const execution = withRegistry.resolveExecution({ scope: 'skills' });
+    if (execution.isError) throw new TypeError('unexpected error execution');
+    const result = await execution.execute({
+      turnId: 'test',
+      toolCallId: 'test',
+      signal: new AbortController().signal,
+    });
+    expect(result.isError).toBe(false);
+    const out = result.output;
+
+    expect(out).toContain('plugin-skill — dir — ok — invocable — plugin: my-plugin');
+    expect(out).toContain('Invocable now: 1/4');
+  });
+
   it('reports mcp.json files with server counts (user + project)', async () => {
     const out = await run('mcp');
 

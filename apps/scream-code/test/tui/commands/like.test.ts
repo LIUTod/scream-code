@@ -77,7 +77,8 @@ describe('buildRoleAdditionalText', () => {
     const result = buildRoleAdditionalText({ toolPriority: 'skill' });
     expect(result).toContain('## Tool priority (set via /like — HIGHEST PRIORITY)');
     expect(result).toContain('invoke the Skill tool with it as your FIRST action');
-    expect(result).toContain('Consult the skill list shown in the Skill tool description');
+    expect(result).toContain('answer from an InspectOwnAssets inventory');
+    expect(result).not.toContain('Consult the skill list shown in the Skill tool description');
   });
 
   it('emits a decision-flow tool-priority section when mcp-first', () => {

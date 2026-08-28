@@ -6,7 +6,7 @@
  * (runs the same manual download flow as the /knowledge menu item) or skip.
  */
 
-import type { Component, Focusable } from '@liutod-scream/pi-tui';
+import type { Focusable } from '@liutod-scream/pi-tui';
 import { Container, matchesKey, Key, truncateToWidth, visibleWidth } from '@liutod-scream/pi-tui';
 import chalk from 'chalk';
 

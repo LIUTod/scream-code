@@ -94,6 +94,8 @@ interface SkillEntry {
   readonly path: string;
   readonly kind: 'dir' | 'flat';
   readonly frontmatter: FrontmatterStatus;
+  /** Set for plugin-managed entries: the plugin directory providing the skill. */
+  readonly plugin?: string;
 }
 
 /** True if a directory is a directory-based skill (contains SKILL.md). */
@@ -125,24 +127,29 @@ async function listSkills(dir: string): Promise<SkillEntry[]> {
       if (!(await isSkillDir(join(dir, entry.name)))) continue;
       const skillMd = join(dir, entry.name, 'SKILL.md');
       const fm = await checkFrontmatter(skillMd);
-      out.push({ name: entry.name, path: skillMd, kind: 'dir', frontmatter: fm });
+      // Mirror the parser's naming (frontmatter `name:` falling back to the
+      // directory name) so inventory names line up with the skill registry.
+      const skillName = (await readSkillName(skillMd)) ?? entry.name;
+      out.push({ name: skillName, path: skillMd, kind: 'dir', frontmatter: fm });
     } else if (entry.isFile() && entry.name.endsWith('.md')) {
       if (DOCUMENTATION_MARKDOWN_LOWER.has(entry.name.toLowerCase())) continue;
-      // Flat skills take their name from the filename; the loader does not
-      // require frontmatter for them, so report them as ok.
-      out.push({
-        name: entry.name.slice(0, -3),
-        path: join(dir, entry.name),
-        kind: 'flat',
-        frontmatter: 'ok',
-      });
+      const path = join(dir, entry.name);
+      // Flat skills fall back to the filename like the parser does
+      // (frontmatter `name:` wins when present); frontmatter stays optional.
+      const skillName = (await readSkillName(path)) ?? entry.name.slice(0, -3);
+      out.push({ name: skillName, path, kind: 'flat', frontmatter: 'ok' });
     }
   }
   return out.toSorted((a, b) => a.name.localeCompare(b.name));
 }
 
-function formatSkillEntry(entry: SkillEntry): string {
-  return `- ${entry.name} — ${entry.kind === 'dir' ? 'dir' : 'flat'} — ${entry.frontmatter} — \`${entry.path}\``;
+function buildInvocableNameSet(agent: Agent): Set<string> {
+  return new Set((agent.skills?.registry.listInvocableSkills() ?? []).map((s) => s.name));
+}
+
+function formatSkillEntry(entry: SkillEntry, invocable: boolean): string {
+  const origin = entry.plugin === undefined ? '' : ` — plugin: ${entry.plugin}`;
+  return `- ${entry.name} — ${entry.kind === 'dir' ? 'dir' : 'flat'} — ${entry.frontmatter} — ${invocable ? 'invocable' : 'not invocable'}${origin} — \`${entry.path}\``;
 }
 
 async function inspectConfig(home: string, userHome: string): Promise<string> {
@@ -161,29 +168,91 @@ async function inspectConfig(home: string, userHome: string): Promise<string> {
   return lines.join('\n');
 }
 
-async function inspectSkills(home: string, userHome: string, cwd: string): Promise<string> {
+async function inspectSkills(
+  home: string,
+  userHome: string,
+  cwd: string,
+  agent: Agent,
+): Promise<string> {
   const { userDir, projectDir } = await resolveSkillInstallPaths({
     userHomeDir: userHome,
     workDir: cwd,
   });
+  const invocableNames = buildInvocableNameSet(agent);
   const sections: string[] = ['## Skills', ''];
+  let invocableCount = 0;
+  let totalCount = 0;
+
+  // Plugin skills that lost a name clash are registered under `plugin:name`;
+  // match both forms so renamed entries are not mislabelled as not invocable.
+  const isInvocable = (entry: SkillEntry): boolean =>
+    invocableNames.has(entry.name) ||
+    (entry.plugin !== undefined && invocableNames.has(`${entry.plugin}:${entry.name}`));
+
+  const track = (entry: SkillEntry, invocable: boolean): string => {
+    totalCount++;
+    if (invocable) invocableCount++;
+    return formatSkillEntry(entry, invocable);
+  };
 
   const userEntries = await listSkills(userDir);
   sections.push(`User skills (${userDir}): ${userEntries.length === 0 ? 'none' : ''}`);
-  sections.push(...(userEntries.length > 0 ? userEntries.map(formatSkillEntry) : []));
+  sections.push(...userEntries.map((e) => track(e, isInvocable(e))));
 
   const extraDir = join(home, 'plugins', 'managed');
   const extraEntries = await listManagedSkills(extraDir);
   sections.push('');
   sections.push(`Plugin-managed skills (${extraDir}): ${extraEntries.length === 0 ? 'none' : ''}`);
-  sections.push(...(extraEntries.length > 0 ? extraEntries.map(formatSkillEntry) : []));
+  sections.push(...extraEntries.map((e) => track(e, isInvocable(e))));
 
   const projectEntries = await listSkills(projectDir);
   sections.push('');
   sections.push(`Project skills (${projectDir}): ${projectEntries.length === 0 ? 'none' : ''}`);
-  sections.push(...(projectEntries.length > 0 ? projectEntries.map(formatSkillEntry) : []));
+  sections.push(...projectEntries.map((e) => track(e, isInvocable(e))));
+
+  sections.push('');
+  sections.push(
+    `Invocable now: ${invocableCount}/${totalCount} (against the live skill registry; ` +
+      'entries marked "not invocable" exist on disk but are disabled, shadowed, renamed, or broken)',
+  );
 
   return sections.join('\n');
+}
+
+/**
+ * Extracts the skill name from SKILL.md frontmatter (best effort) so the
+ * inventory name matches what the skill registry holds; returns null when
+ * frontmatter is missing or has no name line.
+ */
+async function readSkillName(path: string): Promise<string | null> {
+  let handle;
+  try {
+    handle = await open(path, 'r');
+    const buffer = Buffer.alloc(FRONTMATTER_READ_LIMIT);
+    const { bytesRead } = await handle.read(buffer, 0, FRONTMATTER_READ_LIMIT, 0);
+    const head = buffer.subarray(0, bytesRead).toString('utf-8').split('\n').slice(0, 25);
+    if (head[0]?.trim() !== '---') return null;
+    let closed = false;
+    for (const line of head.slice(1)) {
+      const trimmed = line.trim();
+      if (trimmed === '---') {
+        closed = true;
+        break;
+      }
+      const m = /^name\s*:\s*(.+)$/.exec(line);
+      if (m !== null) {
+        const value = m[1]!.trim().replaceAll(/^["']|["']$/g, '');
+        return value.length > 0 ? value : null;
+      }
+    }
+    // Closing fence seen but no `name:` line (or the bounded window ended
+    // inside the frontmatter): fall back to the directory name upstream.
+    return null;
+  } catch {
+    return null;
+  } finally {
+    await handle?.close().catch(() => {});
+  }
 }
 
 /**
@@ -203,7 +272,8 @@ async function listManagedSkills(managedDir: string): Promise<SkillEntry[]> {
     const skillMd = join(managedDir, plugin.name, 'SKILL.md');
     if (!(await isSkillDir(join(managedDir, plugin.name)))) continue;
     const fm = await checkFrontmatter(skillMd);
-    out.push({ name: plugin.name, path: skillMd, kind: 'dir', frontmatter: fm });
+    const skillName = await readSkillName(skillMd) ?? plugin.name;
+    out.push({ name: skillName, path: skillMd, kind: 'dir', frontmatter: fm, plugin: plugin.name });
   }
   return out.toSorted((a, b) => a.name.localeCompare(b.name));
 }
@@ -318,7 +388,7 @@ export class InspectOwnAssetsTool implements BuiltinTool<InspectOwnAssetsInput> 
           sections.push(await inspectConfig(home, userHome));
         }
         if (scope === 'all' || scope === 'skills') {
-          sections.push(await inspectSkills(home, userHome, cwd));
+          sections.push(await inspectSkills(home, userHome, cwd, this.agent));
         }
         if (scope === 'all' || scope === 'mcp') {
           sections.push(await inspectMcp(home, cwd));

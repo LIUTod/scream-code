@@ -4,6 +4,8 @@ Invoke a registered skill from the current skill listing. BLOCKING REQUIREMENT: 
 {{ AVAILABLE_SKILLS }}
 This list is a construction-time snapshot; for the live catalog inspect the skill registry.
 
+**Not for inventory questions**: when the user asks what you have — in any wording (skills / plugins / capabilities / MCP / tools) — answer with **InspectOwnAssets** (the full read-only catalog), not this listing. To find or install new capabilities, use **ManagePlugin**. This listing exists for **invocation**: when one of the skills above matches the task at hand.
+
 ## Matching guide
 
 - A skill matches when the user's request involves the scenarios/trigger conditions listed in the skill's "When to use" line.

@@ -73,7 +73,7 @@ export function buildRoleAdditionalText(prefs: TuiLikePreferences): string {
       '',
       '## Tool priority (set via /like — HIGHEST PRIORITY)',
       prefs.toolPriority === 'skill'
-        ? 'For every user request: (1) first analyze the intent, (2) then identify whether any installed skill matches THIS request, (3) if one matches, invoke the Skill tool with it as your FIRST action — before MCP tools or doing it yourself, (4) if none matches, proceed with MCP tools or solve it yourself. Consult the skill list shown in the Skill tool description whenever you are unsure what is installed.'
+        ? 'For every user request: (1) first analyze the intent, (2) then identify whether any installed skill matches THIS request, (3) if one matches, invoke the Skill tool with it as your FIRST action — before MCP tools or doing it yourself, (4) if none matches, proceed with MCP tools or solve it yourself. When the user asks what you have (skills / plugins / capabilities, any wording), answer from an InspectOwnAssets inventory; the skills section of the system prompt is the authoritative view of what is invocable right now.'
         : 'For every user request: (1) first analyze the intent, (2) then identify whether any available MCP tool matches THIS request, (3) if one matches, use it as your FIRST action — before the Skill tool or doing it yourself, (4) if none matches, proceed with the Skill tool or solve it yourself.',
     );
   }
