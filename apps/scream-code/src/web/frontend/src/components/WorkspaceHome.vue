@@ -1,17 +1,19 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 import type { ModelInfo, SessionStatus } from '../types';
 import Composer from './Composer.vue';
 import ModeSwitch, { type WorkspaceMode } from './ModeSwitch.vue';
 import logoUrl from '../assets/logo-v2.svg';
 
-withDefaults(
+const props = withDefaults(
   defineProps<{
     models: ModelInfo[];
     status?: SessionStatus;
     busy: boolean;
+    /** Owned by the shell so the choice survives the home view being unmounted. */
+    mode?: WorkspaceMode;
   }>(),
-  { status: undefined },
+  { status: undefined, mode: 'chat' },
 );
 
 const emit = defineEmits<{
@@ -19,9 +21,15 @@ const emit = defineEmits<{
   (e: 'command', name: string, args?: string): void;
   (e: 'switch-model', alias: string): void;
   (e: 'switch-thinking', level: string): void;
+  (e: 'update:mode', mode: WorkspaceMode): void;
 }>();
 
-const mode = ref<WorkspaceMode>('chat');
+const isGoalMode = computed(() => props.mode === 'goal');
+const modeHint = computed(() =>
+  isGoalMode.value
+    ? '任务模式：提交后将创建执行目标（Goal），Agent 持续执行到完成或预算耗尽；抽屉「Goal 管理」可查看与暂停。'
+    : '直接对话：提问后 Agent 按需调用工具完成你的请求。',
+);
 </script>
 
 <template>
@@ -33,8 +41,10 @@ const mode = ref<WorkspaceMode>('chat');
       <p class="workspace-tagline">你的智能协作伙伴</p>
       <ModeSwitch
         class="workspace-mode"
-        v-model="mode"
+        :model-value="props.mode"
+        @update:model-value="(v) => emit('update:mode', v)"
       />
+      <p class="mode-hint"><span :key="String(isGoalMode)" class="hint-fade">{{ modeHint }}</span></p>
     </section>
     <section class="workspace-composer">
       <Composer
@@ -42,8 +52,8 @@ const mode = ref<WorkspaceMode>('chat');
         :status="status"
         :models="models"
         variant="home"
-        placeholder="输入 @ 引用知识库 / 使用技能 / 或者直接提问..."
-        @send="(t: string) => emit('send', t, mode)"
+        :placeholder="isGoalMode ? '描述你要完成的目标，Enter 创建并开始执行…' : '输入 @ 引用知识库 / 使用技能 / 或者直接提问...'"
+        @send="(t: string) => emit('send', t, props.mode)"
         @command="(n, a) => emit('command', n, a)"
         @switch-model="(a) => emit('switch-model', a)"
         @switch-thinking="(l) => emit('switch-thinking', l)"
@@ -96,6 +106,27 @@ const mode = ref<WorkspaceMode>('chat');
 }
 .workspace-mode {
   margin-top: var(--space-2);
+}
+.mode-hint {
+  margin-top: var(--space-2);
+  max-width: 560px;
+  color: var(--color-text-faint);
+  font-size: var(--font-size-xs);
+  line-height: 1.5;
+  text-align: center;
+}
+/* The hint text swaps when the mode flips; re-keyed span fades it in. */
+.hint-fade {
+  animation: hint-in 0.3s var(--ease-out) both;
+}
+@keyframes hint-in {
+  from { opacity: 0; transform: translateY(2px); }
+  to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hint-fade {
+    animation: none;
+  }
 }
 
 .workspace-composer {

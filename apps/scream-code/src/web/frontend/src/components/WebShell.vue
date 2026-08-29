@@ -80,13 +80,25 @@ async function onWorkspaceSend(text: string, mode: WorkspaceMode) {
   mobileSidebarOpen.value = false;
   if (!currentSessionId.value) await createSession();
   const ready = await waitForConnected();
-  view.value = 'chat';
+  // Only switch away from the home view once the transport is confirmed, so an
+  // offline click keeps the input and the selected mode instead of dropping both.
   if (!ready) return;
+  view.value = 'chat';
   if (mode === 'goal') {
-    await client.createGoal({ objective: text, budgets: [] });
+    try {
+      await client.createGoal({ objective: text, budgets: [] });
+    } catch (error) {
+      appendSystemMessage(`Goal 创建失败：${errorMessageOf(error)}。已保留对话模式，可重新发送。`);
+      sendPrompt(text);
+      return;
+    }
   } else {
     sendPrompt(text);
   }
+}
+function errorMessageOf(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  return String(error);
 }
 
 function onSwitchSession(id: string) {
@@ -141,6 +153,22 @@ try {
 function toggleSidebarCollapse() {
   sidebarCollapsed.value = !sidebarCollapsed.value;
   try { localStorage.setItem(SIDEBAR_STORAGE_KEY, sidebarCollapsed.value ? '1' : '0'); } catch { /* ignore */ }
+}
+
+/** Workspace mode lives in the shell (and localStorage) rather than inside the
+ *  home view, which unmounts when a conversation opens. */
+const MODE_STORAGE_KEY = 'scream-workspace-mode';
+function readStoredWorkspaceMode(): WorkspaceMode {
+  try {
+    return localStorage.getItem(MODE_STORAGE_KEY) === 'goal' ? 'goal' : 'chat';
+  } catch {
+    return 'chat';
+  }
+}
+const workspaceMode = ref<WorkspaceMode>(readStoredWorkspaceMode());
+function setWorkspaceMode(next: WorkspaceMode) {
+  workspaceMode.value = next;
+  try { localStorage.setItem(MODE_STORAGE_KEY, next); } catch { /* ignore */ }
 }
 
 function onGlobalKeydown(e: KeyboardEvent) {
@@ -225,6 +253,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKeydown));
           :models="models"
           :status="status"
           :busy="isBusy"
+          :mode="workspaceMode"
+          @update:mode="setWorkspaceMode"
           @send="onWorkspaceSend"
           @command="onCommand"
           @switch-model="switchModel"

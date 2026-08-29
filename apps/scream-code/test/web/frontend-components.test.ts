@@ -83,6 +83,9 @@ describe('WorkspaceHome', () => {
       props: { models: [], status: undefined, busy: false },
     });
     await wrapper.findAll('.mode-pill')[1]!.trigger('click');
+    // The shell owns the mode; the home view only reports the intent.
+    expect(wrapper.emitted('update:mode')).toEqual([['goal']]);
+    await wrapper.setProps({ mode: 'goal' });
 
     const ta = wrapper.find('.composer-input').element as HTMLTextAreaElement;
     ta.value = '重构前端';

@@ -36,6 +36,14 @@ describe('getLanAddresses', () => {
     expect(getLanAddresses(mock)).toEqual(['100.63.255.254', '172.31.255.254', '10.0.0.1']);
   });
 
+  it('filters the RFC 2544 benchmark block (macOS utun surfaces 198.18.x.x)', () => {
+    const mock = {
+      utun: iface([{ address: '198.18.0.1', family: 'IPv4' }]),
+      en0: iface([{ address: '192.168.1.13', family: 'IPv4' }]),
+    };
+    expect(getLanAddresses(mock)).toEqual(['192.168.1.13']);
+  });
+
   it('deduplicates across interfaces and returns [] when nothing matches', () => {
     const mock: Record<string, readonly NetworkInterfaceInfo[]> = {
       en0: iface([{ address: '192.168.1.5', family: 'IPv4' }]),

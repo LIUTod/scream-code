@@ -21,6 +21,9 @@ export function getLanAddresses(
       const ip = info.address;
       if (inCidr(ip, '169.254.0.0', 16)) continue; // link-local
       if (inCidr(ip, '100.64.0.0', 10)) continue; // carrier-grade NAT
+      // RFC 2544 benchmark block: surfaced by macOS utun interfaces, not a
+      // reachable LAN address.
+      if (inCidr(ip, '198.18.0.0', 15)) continue;
       seen.add(ip);
     }
   }

@@ -12,13 +12,12 @@ const MODES: { id: WorkspaceMode; label: string }[] = [
 </script>
 
 <template>
-  <div class="mode-switch" role="tablist" aria-label="对话模式">
+  <div class="mode-switch" role="group" aria-label="工作模式">
     <button
       v-for="m in MODES"
       :key="m.id"
-      role="tab"
-      :aria-selected="modelValue === m.id"
-      :class="['mode-pill', { active: modelValue === m.id }]"
+      :class="['mode-pill', `is-${m.id}`, { active: modelValue === m.id }]"
+      :aria-pressed="modelValue === m.id"
       @click="emit('update:modelValue', m.id)"
     >
       {{ m.label }}
@@ -38,6 +37,7 @@ const MODES: { id: WorkspaceMode; label: string }[] = [
   border: 0;
 }
 .mode-pill {
+  position: relative;
   min-height: 32px;
   padding: 0 var(--space-4);
   border: none;
@@ -52,6 +52,33 @@ const MODES: { id: WorkspaceMode; label: string }[] = [
     color var(--dur-fast) var(--ease-out),
     box-shadow var(--dur-fast) var(--ease-out);
 }
+/* Activation flash: the ring pops outward once, then settles onto the fill.
+   The two modes are deliberately distinguishable — the goal pill carries a
+   wider halo with a gradient wash, the chat pill a thin bright rim. */
+.mode-pill::before {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0;
+}
+.mode-pill.is-chat.active::before {
+  box-shadow: 0 0 0 1px var(--color-accent-bd), 0 0 10px 1px var(--color-accent-glow);
+  animation: mode-pop 0.35s var(--ease-out) both;
+}
+.mode-pill.is-goal.active::before {
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--color-accent) 55%, transparent),
+    0 0 18px 4px var(--color-accent-glow),
+    inset 0 0 12px color-mix(in srgb, var(--color-accent) 18%, transparent);
+  animation: mode-pop 0.45s var(--ease-out) both;
+}
+@keyframes mode-pop {
+  0% { opacity: 0; transform: scale(0.9); }
+  55% { opacity: 0.9; transform: scale(1.04); }
+  100% { opacity: 1; transform: scale(1); }
+}
 .mode-pill:hover:not(.active) {
   color: var(--color-text);
   background: var(--color-hover);
@@ -65,6 +92,11 @@ const MODES: { id: WorkspaceMode; label: string }[] = [
 @media (max-width: 640px) {
   .mode-pill {
     min-height: 40px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mode-pill::before {
+    animation: none;
   }
 }
 </style>
