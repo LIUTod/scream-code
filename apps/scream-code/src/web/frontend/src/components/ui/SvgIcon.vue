@@ -56,6 +56,15 @@ withDefaults(defineProps<{ name: string; size?: number }>(), { size: 20 });
     <template v-else-if="name === 'copy'"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4H4v12h4" /></template>
     <template v-else-if="name === 'refresh'"><path d="M21 12a9 9 0 1 1-2.6-6.4M21 3v6h-6" /></template>
     <template v-else-if="name === 'target'"><circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="5" /><circle cx="12" cy="12" r="1" /></template>
+    <template v-else-if="name === 'settings'"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1-1.55 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.55-1 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34h.09a1.7 1.7 0 0 0 1-1.55V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.55 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87v.09a1.7 1.7 0 0 0 1.55 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.55 1Z" /></template>
+    <template v-else-if="name === 'home'"><path d="M3 10.5 12 3l9 7.5" /><path d="M5 9.5V21h14V9.5" /></template>
+    <template v-else-if="name === 'bell'"><path d="M6 9a6 6 0 1 1 12 0c0 5 2 6 2 6H4s2-1 2-6" /><path d="M10 19a2 2 0 0 0 4 0" /></template>
+    <template v-else-if="name === 'book'"><path d="M4 5a2 2 0 0 1 2-2h13v18H6a2 2 0 0 0-2 2Z" /><path d="M6 3v18" /></template>
+    <template v-else-if="name === 'layers'"><path d="m12 3 9 5-9 5-9-5Z" /><path d="m3 13 9 5 9-5" /></template>
+    <template v-else-if="name === 'wrench'"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-3-3Z" /></template>
+    <template v-else-if="name === 'arrow-up'"><path d="M12 19V5m0 0-6 6m6-6 6 6" /></template>
+    <template v-else-if="name === 'x'"><path d="M18 6 6 18M6 6l12 12" /></template>
+    <template v-else-if="name === 'file'"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" /><path d="M14 2v6h6" /></template>
   </svg>
 </template>
 

@@ -1,61 +1,152 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, ref } from 'vue';
 import type { ToolMessage } from '../types';
 import { aggregateStatus, type ToolStatus, isEditTool } from '../utils/toolGroup';
 import GenericToolCard from './GenericToolCard.vue';
 import EditToolCard from './EditToolCard.vue';
 import SvgIcon from './ui/SvgIcon.vue';
 
-const props = defineProps<{ name: string; tools: ToolMessage[] }>();
+const props = withDefaults(defineProps<{ name: string; tools: ToolMessage[]; live?: boolean }>(), { live: true });
+/**
+ * The fold is user-driven only. Auto-expanding on `running` turned every agent
+ * turn into a wall of cards; the live state is carried by the status dot and
+ * the meta line inside this same 32px row instead.
+ */
 const open = ref(false);
-const userToggled = ref(false);
-const status = computed<ToolStatus>(() => aggregateStatus(props.tools));
+const status = computed<ToolStatus>(() => aggregateStatus(props.tools, props.live));
 const completedCount = computed(() => props.tools.filter((tool) => tool.output !== undefined && !tool.isError).length);
-watch(status, (value) => {
-  if (!userToggled.value && value === 'running') open.value = true;
-}, { immediate: true });
-function toggle() { userToggled.value = true; open.value = !open.value; }
+const summary = computed(() => {
+  if (status.value === 'running') return '执行中';
+  if (status.value === 'error') return '含失败调用';
+  if (status.value === 'suspended') return '含挂起等待';
+  if (status.value === 'unknown') return '结果未持久化';
+  return `已完成 ${completedCount.value} 项`;
+});
+function toggle() { open.value = !open.value; }
 </script>
 
 <template>
-  <section :class="['tool-process', { open, error: status === 'error' }]">
+  <section :class="['tool-process', { open, running: status === 'running', error: status === 'error' }]">
     <button class="process-head" type="button" :aria-expanded="open" @click="toggle">
-      <span :class="['process-icon', status]"><SvgIcon :name="status === 'ok' ? 'check' : 'terminal'" :size="18" /></span>
-      <span class="process-copy">
-        <strong>工具调用过程</strong>
-        <small>{{ status === 'running' ? '正在执行' : status === 'error' ? '包含失败调用' : `已完成 ${completedCount} 项` }}</small>
+      <SvgIcon name="chevron-down" :size="12" class="chevron" />
+      <span :class="['process-dot', status]" aria-hidden="true" />
+      <span class="process-label">{{ name }}</span>
+      <span class="process-meta">{{ summary }} · {{ tools.length }} 步</span>
+      <span class="process-names" :title="tools.map((tool) => tool.name).join('、')">
+        {{ tools.map((tool) => tool.name).join(' · ') }}
       </span>
-      <span class="tool-names" :title="tools.map((tool) => tool.name).join('、')">{{ tools.map((tool) => tool.name).join(' · ') }}</span>
-      <span class="count">{{ tools.length }}</span>
-      <SvgIcon name="chevron-down" :size="17" class="chevron" />
     </button>
     <div class="process-collapse">
       <div class="process-inner">
-        <component :is="isEditTool(tool.name) ? EditToolCard : GenericToolCard" v-for="tool in tools" :key="tool.toolCallId" :tool="tool" />
+        <component
+          :is="isEditTool(tool.name) ? EditToolCard : GenericToolCard"
+          v-for="tool in props.tools"
+          :key="tool.toolCallId"
+          :tool="tool"
+          :live="live"
+        />
       </div>
     </div>
   </section>
 </template>
 
 <style scoped>
-.tool-process { overflow:hidden; border:1px solid var(--color-line); border-radius:13px; background:var(--color-surface); box-shadow:0 2px 8px rgba(20,35,24,.025); }
-.tool-process.error { border-color:color-mix(in srgb,var(--color-danger) 42%,var(--color-line)); }
-.process-head { width:100%; min-height:58px; display:flex; align-items:center; gap:11px; padding:10px 13px; border:0; background:var(--color-surface); color:var(--color-text); text-align:left; cursor:pointer; }
-.process-head:hover { background:var(--color-hover); }
-.process-icon { width:34px; height:34px; display:grid; place-items:center; flex-shrink:0; border-radius:9px; color:var(--color-accent); background:var(--color-accent-soft); }
-.process-icon.error { color:var(--color-danger); background:var(--color-danger-soft); }
-.process-icon.running { animation:pulse 1.2s infinite; }
-.process-copy { display:flex; flex-direction:column; flex-shrink:0; }
-.process-copy strong { font-size:12px; }
-.process-copy small { margin-top:3px; color:var(--color-text-faint); font-size:10px; }
-.tool-names { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--color-text-muted); font:10px var(--font-mono); text-align:right; }
-.count { min-width:22px; height:22px; display:grid; place-items:center; border-radius:11px; color:var(--color-accent); background:var(--color-accent-soft); font-size:10px; }
-.chevron { color:var(--color-text-faint); transition:transform var(--dur-base) var(--ease-out); }
-.open .chevron { transform:rotate(180deg); }
-.process-collapse { display:grid; grid-template-rows:0fr; transition:grid-template-rows var(--dur-base) var(--ease-out); }
-.open .process-collapse { grid-template-rows:1fr; }
-.process-inner { min-height:0; overflow:hidden; display:flex; flex-direction:column; gap:8px; padding:0 10px; background:var(--color-surface-sunken); }
-.open .process-inner { padding-top:10px; padding-bottom:10px; border-top:1px solid var(--color-line); }
-@keyframes pulse { 50% { opacity:.35; } }
-@media (max-width:640px) { .tool-names { display:none; } .process-head { padding:9px 10px; } }
+/* Collapsed = one 32px text row with no box. The border only appears when
+   expanded, so a fold never reads as a card nested inside another card. */
+.tool-process {
+  overflow: hidden;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  animation: rise-in var(--dur-msg-assistant) var(--ease-out) both;
+  transition:
+    border-color var(--dur-base) var(--ease-out),
+    background var(--dur-base) var(--ease-out);
+}
+.tool-process.open {
+  border-color: var(--color-line);
+  background: var(--color-surface);
+}
+.tool-process.error.open {
+  border-color: color-mix(in srgb, var(--color-danger) 42%, var(--color-line));
+}
+.process-head {
+  width: 100%;
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 var(--space-2);
+  border: 0;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+.process-head:hover { background: var(--color-hover); color: var(--color-text); }
+.process-head:active { background: var(--color-selected); }
+.process-dot {
+  width: 6px;
+  height: 6px;
+  flex-shrink: 0;
+  border-radius: var(--radius-full);
+  background: var(--color-text-faint);
+}
+.process-dot.ok { background: var(--color-success); }
+.process-dot.error { background: var(--color-danger); }
+.process-dot.unknown { background: var(--color-line-strong); }
+.process-dot.suspended { background: var(--color-warning); }
+.process-dot.running {
+  background: var(--color-accent);
+  animation: breathe var(--dur-breathe) ease-in-out infinite;
+}
+.process-label { flex-shrink: 0; font-weight: 600; color: var(--color-text); }
+.process-meta { flex-shrink: 0; color: var(--color-text-faint); }
+.process-names {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text-faint);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.chevron {
+  flex-shrink: 0;
+  color: var(--color-text-faint);
+  transform: rotate(-90deg);
+  transition: transform var(--dur-base) var(--ease-out);
+}
+.open .chevron { transform: none; }
+.process-collapse {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows var(--dur-base) var(--ease-out);
+}
+.open .process-collapse { grid-template-rows: 1fr; }
+.process-inner {
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0 var(--space-2);
+}
+.open .process-inner {
+  padding-top: var(--space-2);
+  padding-bottom: var(--space-2);
+  border-top: 1px solid var(--color-line);
+}
+@media (prefers-reduced-motion: reduce) {
+  .tool-process { animation: none; }
+  .process-dot.running { animation: none; }
+}
+@media (max-width: 640px) {
+  .process-names { display: none; }
+}
 </style>

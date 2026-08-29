@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { ModelInfo, SessionStatus } from '../types';
 import { filterSlashCommands, resolveCommandName, type SlashCommand } from '../commands';
 import ContextRing from './ContextRing.vue';
@@ -13,8 +13,11 @@ const props = withDefaults(
     status?: SessionStatus;
     sessionId?: string | null;
     models?: ModelInfo[];
+    /** 'chat' shows model name + @ 提及; 'home' (workspace central card) shows 通用智能体 + 技能. */
+    variant?: 'chat' | 'home';
+    placeholder?: string;
   }>(),
-  { status: undefined, sessionId: null, models: () => [] },
+  { status: undefined, sessionId: null, models: () => [], variant: 'chat', placeholder: undefined },
 );
 
 const emit = defineEmits<{
@@ -211,6 +214,33 @@ function autoResize() {
   el.style.height = `${Math.min(Math.max(el.scrollHeight, 36), max)}px`;
 }
 
+/* ── Mobile keyboard avoidance (visualViewport) ──────────────────────────── */
+// When the on-screen keyboard shrinks the visual viewport, lift the composer
+// by the height difference so it stays reachable above the keyboard.
+// Conservative: guarded by a 'visualViewport' in window check, ignores small
+// viewport shifts (e.g. mobile URL bar collapses), and restores on unmount.
+const keyboardInset = ref(0);
+
+function syncKeyboardInset(): void {
+  const vv = window.visualViewport;
+  if (!vv) return;
+  const diff = Math.round(window.innerHeight - vv.height - vv.offsetTop);
+  // Only the keyboard produces a large sustained shrink; smaller diffs are
+  // transient chrome changes and are treated as "no keyboard".
+  keyboardInset.value = diff > 120 ? diff : 0;
+}
+
+if ('visualViewport' in window) {
+  onMounted(() => {
+    window.visualViewport?.addEventListener('resize', syncKeyboardInset);
+    syncKeyboardInset();
+  });
+  onBeforeUnmount(() => {
+    window.visualViewport?.removeEventListener('resize', syncKeyboardInset);
+    keyboardInset.value = 0;
+  });
+}
+
 /* ── Send / queue / abort ────────────────────────────────────────────────── */
 function resetInput() {
   text.value = '';
@@ -317,6 +347,14 @@ const model = computed(() => props.status?.model);
 const permission = computed(() => props.status?.permission);
 const contextUsage = computed(() => props.status?.contextUsage);
 
+const inputPlaceholder = computed(
+  () =>
+    props.placeholder ??
+    (props.busy
+      ? '回合进行中：Enter/Ctrl+S 排队消息，随下一轮注入'
+      : '输入消息，@ 提及，/ 触发指令'),
+);
+
 /* ── Model picker (TUI /model parity) ────────────────────────────────────── */
 const pickerOpen = ref(false);
 
@@ -377,18 +415,7 @@ const permissionLabel = computed(() => {
 </script>
 
 <template>
-  <div class="composer">
-    <Transition name="picker">
-      <ModelPicker
-        v-if="pickerOpen"
-        :models="models"
-        :current-model="model"
-        :current-thinking="thinkingLevel"
-        @apply-model="onApplyModel"
-        @apply-thinking="onApplyThinking"
-        @close="pickerOpen = false"
-      />
-    </Transition>
+  <div class="composer" :style="keyboardInset ? { paddingBottom: keyboardInset + 'px' } : undefined">
     <SlashMenu
       v-if="slashVisible"
       :commands="slashCommands"
@@ -403,62 +430,81 @@ const permissionLabel = computed(() => {
       name="message"
       class="composer-input"
       rows="1"
-      :placeholder="busy ? '回合进行中：Enter/Ctrl+S 排队消息，随下一轮注入' : '输入消息，@ 提及，/ 触发指令'"
+      :placeholder="inputPlaceholder"
       @keydown="onKeydown"
     />
 
     <div class="composer-footer">
       <div class="composer-quick-actions">
-        <button class="quick-action" title="插入 @ 提及" @click="insertToken('@')"><SvgIcon name="at" :size="18" /><span>提及</span></button>
-        <button class="quick-action" title="插入 / 触发指令" @click="insertToken('/')"><SvgIcon name="command" :size="18" /><span>指令</span></button>
+        <template v-if="variant === 'home'">
+          <button class="quick-action" title="插入 / 触发指令" @click="insertToken('/')"><SvgIcon name="command" :size="15" /><span>技能</span></button>
+        </template>
+        <template v-else>
+          <button class="quick-action" title="插入 @ 提及" @click="insertToken('@')"><SvgIcon name="at" :size="15" /><span>提及</span></button>
+          <button class="quick-action" title="插入 / 触发指令" @click="insertToken('/')"><SvgIcon name="command" :size="15" /><span>指令</span></button>
+        </template>
         <span v-if="permission" :class="['permission-label', permissionClass]" :title="`权限模式：${permission}`">{{ permissionLabel }}</span>
         <span v-if="steerQueue.length" class="queue-label" title="运行结束后自动发送">已排队 {{ steerQueue.length }} 条</span>
       </div>
 
       <div class="composer-actions">
-        <button v-if="model" :class="['model-select', { clickable: modelSwitchable }]" :disabled="!modelSwitchable" :title="`当前模型：${model}`" @click="toggleModelPicker">
-          <SvgIcon name="brain" :size="17" /><span>{{ model }}</span><template v-if="thinkingLabel"> · {{ thinkingLabel }}</template><SvgIcon v-if="modelSwitchable" name="chevron-down" :size="14" />
+        <button v-if="model" :class="['model-select', { clickable: modelSwitchable }]" :disabled="!modelSwitchable" :title="variant === 'home' ? `当前模型：${model}` : `当前模型：${model}`" @click="toggleModelPicker">
+          <SvgIcon name="brain" :size="15" /><span>{{ variant === 'home' ? '通用智能体' : model }}</span><template v-if="variant !== 'home' && thinkingLabel"> · {{ thinkingLabel }}</template><SvgIcon v-if="modelSwitchable" name="chevron-down" :size="12" />
         </button>
-        <span v-if="contextUsage !== undefined" class="context-label" title="上下文使用率"><ContextRing :usage="contextUsage" :size="17" /></span>
-        <button v-if="busy" class="stop-btn" title="停止当前回合" @click="abort"><SvgIcon name="stop" :size="17" /><span>停止</span></button>
-        <button v-else class="send-btn" :disabled="!text.trim()" title="发送 (Enter)" aria-label="发送" @click="send"><SvgIcon name="send" :size="19" /></button>
+        <Transition name="picker">
+          <ModelPicker
+            v-if="pickerOpen"
+            :models="models"
+            :current-model="model"
+            :current-thinking="thinkingLevel"
+            @apply-model="onApplyModel"
+            @apply-thinking="onApplyThinking"
+            @close="pickerOpen = false"
+          />
+        </Transition>
+        <span v-if="contextUsage !== undefined" class="context-label" title="上下文使用率"><ContextRing :usage="contextUsage" :size="15" /></span>
+        <button v-if="busy" class="stop-btn" title="停止当前回合" @click="abort"><SvgIcon name="stop" :size="14" /><span>停止</span></button>
+        <button v-else class="send-btn" :disabled="!text.trim()" title="发送 (Enter)" aria-label="发送" @click="send"><SvgIcon name="arrow-up" :size="16" /></button>
       </div>
     </div>
   </div>
 </template>
 
 <style scoped>
+/* One bordered surface per region. Everything inside the card is a FLAT
+   control (32px tall, radius-md, no border, no fill until hover) so the card
+   never contains a second layer of boxes. */
 .composer {
   position: relative;
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
-  padding: var(--space-3) var(--space-4);
+  padding: var(--space-3);
   background: var(--color-surface);
-  border: 1px solid var(--color-line);
-  border-radius: var(--radius-xl);
-  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xs);
   transition:
     border-color var(--dur-base) var(--ease-out),
     box-shadow var(--dur-base) var(--ease-out);
 }
 .composer:focus-within {
-  border-color: var(--color-accent-bd);
-  box-shadow: var(--shadow-sm), 0 0 0 3px var(--color-accent-soft);
+  border-color: var(--color-accent);
+  box-shadow: var(--glow-focus);
 }
 
 .composer-input {
   width: 100%;
+  min-height: 44px;
+  max-height: 25vh;
+  padding: 0;
   background: transparent;
   border: none;
-  padding: var(--space-1) 0;
   color: var(--color-text);
   font-size: var(--font-size-base);
   font-family: inherit;
-  line-height: 1.5;
+  line-height: 1.65;
   resize: none;
-  min-height: 32px;
-  max-height: 25vh;
 }
 .composer-input:focus {
   outline: none;
@@ -471,52 +517,9 @@ const permissionLabel = computed(() => {
 .composer-footer {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
-}
-
-.composer-pills {
-  flex: 1;
-  display: flex;
-  align-items: center;
+  justify-content: space-between;
   gap: var(--space-2);
   min-width: 0;
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-.composer-pills::-webkit-scrollbar {
-  display: none;
-}
-
-.pill {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1);
-  padding: 3px 10px;
-  border-radius: var(--radius-full);
-  border: 1px solid var(--color-line);
-  background: var(--color-surface);
-  box-shadow: var(--shadow-xs);
-  font-size: var(--font-size-xs);
-  font-weight: 500;
-  color: var(--color-text-muted);
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-.pill-model {
-  font-family: var(--font-mono);
-  color: var(--color-accent);
-  border-color: var(--color-accent-bd);
-  background: var(--color-accent-soft);
-}
-.pill-btn {
-  cursor: pointer;
-  transition:
-    filter var(--dur-fast),
-    transform var(--dur-fast);
-}
-.pill-btn:hover {
-  filter: brightness(1.1);
-  transform: translateY(-1px);
 }
 
 /* Model picker transition */
@@ -531,123 +534,197 @@ const permissionLabel = computed(() => {
   opacity: 0;
   transform: translateY(6px);
 }
-.perm-manual {
-  color: var(--color-text-muted);
-  border-color: var(--color-line-strong);
-  background: var(--color-surface-raised);
+
+.composer-quick-actions,
+.composer-actions {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
 }
-.perm-auto {
-  color: var(--color-success);
-  border-color: var(--color-success);
-  background: var(--color-success-soft);
+/* Shared control cell: every footer control is the same box metric —
+   32px tall, radius-md, borderless, transparent until hover. Only buttons and
+   status spans; the .model-picker popover must keep its own size. */
+.composer-quick-actions > button,
+.composer-quick-actions > span,
+.composer-actions > button,
+.composer-actions > span {
+  height: 32px;
+  border-radius: var(--radius-md);
 }
-.perm-yolo {
-  color: var(--color-danger);
-  border-color: var(--color-danger);
-  background: var(--color-danger-soft);
+.composer-quick-actions {
+  flex: 1;
+  overflow-x: auto;
+  scrollbar-width: none;
 }
-.pill-ring .ring-label {
-  font-size: var(--font-size-xs);
-}
-.pill-queue {
-  color: var(--color-info);
-  border-color: var(--color-info);
-  background: var(--color-info-soft);
+.composer-quick-actions::-webkit-scrollbar {
+  display: none;
 }
 
-.quick-chip {
+.quick-action {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  padding: 3px 10px;
-  border-radius: var(--radius-full);
-  border: 1px solid var(--color-line);
-  background: var(--color-surface-sunken);
-  font-size: var(--font-size-xs);
-  font-weight: 500;
-  color: var(--color-text-muted);
-  white-space: nowrap;
+  padding: 0 var(--space-2);
   flex-shrink: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
   cursor: pointer;
   transition:
-    border-color var(--dur-fast),
-    color var(--dur-fast),
-    background var(--dur-fast);
+    color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out);
 }
-.quick-chip:hover {
-  border-color: var(--color-accent-bd);
+.quick-action:hover {
   color: var(--color-accent);
-  background: var(--color-accent-soft);
+  background: var(--color-hover);
 }
-.chip-icon {
-  font-weight: 700;
+.quick-action:active {
+  transform: translateY(1px);
+}
+
+/* Status chips: same cell as the buttons, distinguished by tint only — no
+   second border layer inside the card. */
+.permission-label,
+.queue-label {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 var(--space-2);
+  border: 0;
+  color: var(--color-text-muted);
+  background: var(--color-accent-soft);
+  font-size: var(--font-size-xs);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.permission-label.perm-manual {
+  color: var(--color-text-muted);
+  background: var(--color-hover);
+}
+.permission-label.perm-auto {
+  color: var(--color-success);
+  background: var(--color-success-soft);
+}
+.permission-label.perm-yolo {
+  color: var(--color-danger);
+  background: var(--color-danger-soft);
+}
+
+.model-select {
+  max-width: 230px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 var(--space-2);
+  border: 0;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  white-space: nowrap;
+  transition:
+    color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out);
+}
+.model-select span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.model-select.clickable {
+  cursor: pointer;
+}
+.model-select.clickable:hover {
+  color: var(--color-accent);
+  background: var(--color-hover);
+}
+.model-select.clickable:active {
+  transform: translateY(1px);
+}
+.model-select:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+
+.context-label {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
 }
 
 .send-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 34px;
-  height: 34px;
+  width: 32px;
+  flex-shrink: 0;
   border: none;
-  border-radius: var(--radius-md);
-  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-hover) 100%);
+  background: var(--color-accent);
   color: var(--color-on-accent);
-  font-size: var(--font-size-sm);
   cursor: pointer;
   box-shadow: var(--shadow-xs);
   transition:
-    filter var(--dur-fast),
-    transform var(--dur-fast),
-    box-shadow var(--dur-fast);
+    box-shadow var(--dur-base) var(--ease-out),
+    transform var(--dur-base) var(--ease-out),
+    filter var(--dur-base) var(--ease-out),
+    opacity var(--dur-base) var(--ease-out);
 }
 .send-btn:hover:not(:disabled) {
-  filter: brightness(1.08);
-  box-shadow: var(--shadow-sm), 0 0 12px var(--color-accent-glow);
+  box-shadow: var(--glow-accent), var(--shadow-xs);
+  transform: translateY(-1px);
+  filter: brightness(1.04);
 }
 .send-btn:active:not(:disabled) {
-  transform: scale(0.94);
+  transform: translateY(1px);
+  box-shadow: var(--shadow-xs);
+  filter: brightness(0.97);
+}
+.send-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 
-.composer-actions {
-  display: flex;
+.stop-btn {
+  display: inline-flex;
   align-items: center;
+  gap: 5px;
+  padding: 0 var(--space-2);
   flex-shrink: 0;
+  border: 0;
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
+}
+.stop-btn:hover {
+  background: var(--color-danger);
+  color: var(--color-on-accent);
+  box-shadow: var(--shadow-xs);
+}
+.stop-btn:active {
+  transform: translateY(1px);
 }
 
-/* Prototype-style large input card */
-.composer {
-  gap: 14px;
-  min-height: 132px;
-  padding: 18px 19px 14px;
-  border-radius: 16px;
-  border-color: var(--color-line-strong);
-  box-shadow: 0 8px 24px rgba(22, 32, 24, 0.06);
-}
-.composer-input {
-  min-height: 54px;
-  padding: 0;
-  font-size: 14px;
-  line-height: 1.65;
-}
-.composer-footer { justify-content: space-between; min-width: 0; }
-.composer-quick-actions,.composer-actions { display: flex; align-items: center; gap: 7px; min-width: 0; }
-.composer-quick-actions { flex: 1; overflow-x: auto; scrollbar-width: none; }
-.composer-quick-actions::-webkit-scrollbar { display: none; }
-.quick-action { height: 32px; display: inline-flex; align-items: center; gap: 6px; padding: 0 9px; flex-shrink: 0; border: 0; border-radius: 8px; background: transparent; color: var(--color-text-muted); font-size: 11px; cursor: pointer; }
-.quick-action:hover { color: var(--color-accent); background: var(--color-accent-soft); }
-.permission-label,.queue-label { padding: 3px 8px; border: 1px solid var(--color-line); border-radius: var(--radius-full); color: var(--color-text-muted); background: var(--color-surface-sunken); font-size: 10px; white-space: nowrap; }
-.model-select { max-width: 230px; height: 34px; display: flex; align-items: center; gap: 6px; padding: 0 10px; border: 1px solid var(--color-line); border-radius: 9px; background: var(--color-surface-sunken); color: var(--color-text-muted); font-size: 11px; white-space: nowrap; }
-.model-select span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.model-select.clickable { cursor: pointer; }
-.model-select.clickable:hover { color: var(--color-accent); border-color: var(--color-accent-bd); }
-.context-label { height: 34px; display: grid; place-items: center; }
-.send-btn { width: 40px; height: 40px; border-radius: 11px; background: var(--color-accent); }
-.stop-btn { height: 38px; display: inline-flex; align-items: center; gap: 6px; padding: 0 12px; border: 1px solid var(--color-danger); border-radius: 10px; background: var(--color-danger-soft); color: var(--color-danger); font-size: 11px; cursor: pointer; }
 @media (max-width: 640px) {
-  .composer { min-height: 116px; padding: 14px; }
-  .quick-action span,.permission-label,.context-label { display: none; }
+  /* Touch targets grow to 40px; the selector must match the shared 32px rule's
+     specificity, otherwise the desktop metric wins and taps stay 32px. */
+  .composer-quick-actions > button,
+  .composer-quick-actions > span,
+  .composer-actions > button,
+  .composer-actions > span {
+    height: 40px;
+  }
+  .quick-action span,
+  .permission-label,
+  .context-label { display: none; }
+  .quick-action { min-width: 40px; justify-content: center; }
   .model-select { max-width: 145px; }
+  .send-btn { width: 40px; }
   .stop-btn span { display: none; }
 }
 </style>

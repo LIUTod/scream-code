@@ -46,7 +46,7 @@ withDefaults(
 }
 .ui-btn:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 3px var(--color-accent-soft);
+  box-shadow: var(--glow-focus);
 }
 .ui-btn:not(:disabled):active {
   transform: scale(0.97);
@@ -69,14 +69,18 @@ withDefaults(
 
 /* Variants */
 .ui-btn--primary {
-  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-hover) 100%);
+  background: var(--gradient-accent);
   color: var(--color-on-accent);
-  border-color: var(--color-accent);
+  border-color: transparent;
   box-shadow: var(--shadow-xs);
 }
 .ui-btn--primary:not(:disabled):hover {
-  filter: brightness(1.08);
-  box-shadow: var(--shadow-sm), 0 0 12px var(--color-accent-glow);
+  box-shadow: var(--shadow-sm), var(--glow-accent);
+  transform: translateY(-1px);
+}
+.ui-btn--primary:not(:disabled):active {
+  transform: translateY(0) scale(0.97);
+  box-shadow: var(--shadow-xs);
 }
 
 .ui-btn--danger {
@@ -87,16 +91,24 @@ withDefaults(
 }
 .ui-btn--danger:not(:disabled):hover {
   filter: brightness(1.1);
+  box-shadow: var(--shadow-sm), 0 0 12px var(--color-danger-soft);
+}
+.ui-btn--danger:not(:disabled):active {
+  transform: translateY(0) scale(0.97);
 }
 
 .ui-btn--secondary {
   background: var(--color-surface);
-  color: var(--color-text);
-  border-color: var(--color-line);
+  color: var(--color-accent);
+  border-color: var(--color-accent-bd);
 }
 .ui-btn--secondary:not(:disabled):hover {
-  border-color: var(--color-line-strong);
-  background: var(--color-surface-raised);
+  background: var(--color-accent-soft);
+  border-color: var(--color-accent);
+  color: var(--color-accent-hover);
+}
+.ui-btn--secondary:not(:disabled):active {
+  transform: translateY(0) scale(0.97);
 }
 
 .ui-btn--ghost {
@@ -107,5 +119,16 @@ withDefaults(
 .ui-btn--ghost:not(:disabled):hover {
   background: var(--color-hover);
   color: var(--color-text);
+}
+.ui-btn--ghost:not(:disabled):active {
+  transform: translateY(0) scale(0.97);
+}
+
+/* Mobile: comfortable touch targets */
+@media (max-width: 640px) {
+  .ui-btn--sm,
+  .ui-btn--md {
+    min-height: 44px;
+  }
 }
 </style>

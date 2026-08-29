@@ -4,6 +4,7 @@ import { CLI_COMMAND_NAME } from '#/constant/app';
 
 import type { CLIOptions } from './options';
 import { registerExportCommand } from './sub/export';
+import type { WebOptions } from './run-web';
 
 export type MainCommandHandler = (opts: CLIOptions) => void;
 export type PluginNodeRunnerHandler = (entry: string, args: readonly string[]) => void;
@@ -24,14 +25,7 @@ export type StreamJsonHandler = (opts: {
 
 export type ChannelSetupHandler = () => void;
 
-export type WebHandler = (opts: {
-  port: number;
-  model?: string;
-  yolo: boolean;
-  auto: boolean;
-  open: boolean;
-  skillsDirs: string[];
-}) => void;
+export type WebHandler = (opts: WebOptions) => void;
 
 export function createProgram(
   version: string,
@@ -165,6 +159,9 @@ export function createProgram(
     .option('-y, --yolo', '自动批准所有操作', false)
     .option('--auto', '以自动权限模式启动', false)
     .option('--no-open', '不自动打开浏览器')
+    .option('--lan', '开启局域网共享（同网设备凭网关密钥访问）', false)
+    .option('--token <key>', '自定义网关访问密钥（保存后供 --lan 使用）')
+    .option('--reset-password', '交互式重设网关访问密钥', false)
     .option(
       '--skills-dir <dir>',
       '从该目录加载技能（可多次指定）',
@@ -179,6 +176,9 @@ export function createProgram(
         auto: (subOpts['auto'] as boolean) ?? false,
         open: subOpts['open'] !== false,
         skillsDirs: (subOpts['skillsDir'] as string[]) ?? [],
+        lan: (subOpts['lan'] as boolean) ?? false,
+        token: subOpts['token'] as string | undefined,
+        resetPassword: (subOpts['resetPassword'] as boolean) ?? false,
       });
     });
 

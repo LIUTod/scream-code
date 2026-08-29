@@ -29,10 +29,10 @@ function present(v: unknown): boolean {
   return v !== undefined && v !== null;
 }
 function fmtNum(n?: number): string {
-  return present(n) ? n.toLocaleString() : '-';
+  return typeof n === 'number' ? n.toLocaleString() : '-';
 }
 function usagePct(v?: number): string {
-  if (!present(v)) return '-';
+  if (typeof v !== 'number') return '-';
   const p = v > 1 ? v : v * 100;
   return `${p.toFixed(1)}%`;
 }
@@ -108,6 +108,7 @@ const hasUsage = computed(() => present(props.status.usage) || present(props.sta
   color: var(--color-text);
   text-align: right;
   word-break: break-all;
+  font-variant-numeric: tabular-nums;
 }
 .info-row-model .info-val {
   text-align: left;
@@ -118,7 +119,7 @@ const hasUsage = computed(() => present(props.status.usage) || present(props.sta
 .info-subhead {
   margin-top: var(--space-2);
   font-size: var(--font-size-xs);
-  color: var(--color-text-faint);
+  color: var(--color-text-muted);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }

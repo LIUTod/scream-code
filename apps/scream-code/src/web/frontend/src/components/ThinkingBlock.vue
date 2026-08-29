@@ -7,14 +7,49 @@ const props = withDefaults(
     tool: ToolMessage;
     /** True while the parent turn is still streaming thinking deltas. */
     active?: boolean;
+    /** Session REST context for loading truncated thinking on demand. */
+    sessionId?: string;
+    /** Journal seq of the owning message (pagination cursor for the entry API). */
+    msgSeq?: number;
   }>(),
-  { active: false },
+  { active: false, sessionId: '', msgSeq: undefined },
 );
 
 const panelOpen = ref(false);
 const streamRef = ref<HTMLElement | null>(null);
+const loadingFull = ref(false);
+const fullLoaded = ref(false);
 
-const text = computed(() => props.tool.output ?? '');
+const text = ref(props.tool.output ?? '');
+watch(
+  () => props.tool.output,
+  (v) => {
+    if (v !== undefined && !loadingFull.value && !fullLoaded.value) text.value = v;
+  },
+);
+
+const isTruncated = computed(() => Boolean(props.tool.truncated));
+
+/** Load the full thinking body (truncated snapshots only carry a tail excerpt). */
+async function ensureFull(): Promise<void> {
+  if (!isTruncated.value || fullLoaded.value || loadingFull.value) return;
+  if (!props.sessionId || props.msgSeq === undefined) return;
+  loadingFull.value = true;
+  try {
+    const res = await fetch(
+      `/api/v1/sessions/${props.sessionId}/messages?seq=${props.msgSeq}&tool=${encodeURIComponent(props.tool.toolCallId)}`,
+    );
+    const data = (await res.json()) as { output?: string };
+    if (typeof data.output === 'string' && data.output.length > 0) {
+      text.value = data.output;
+      fullLoaded.value = true;
+    }
+  } catch {
+    // Keep the tail excerpt; the panel still shows something honest.
+  } finally {
+    loadingFull.value = false;
+  }
+}
 
 /** Teaser: last non-empty paragraph, shown faded once the turn ends. */
 const teaser = computed(() => {
@@ -32,6 +67,7 @@ watch(text, () => {
 });
 
 function openPanel() {
+  void ensureFull();
   panelOpen.value = true;
 }
 
@@ -45,12 +81,12 @@ function closePanel() {
     <button
       v-if="!active"
       class="thinking-teaser"
-      title="点击查看完整思考过程"
+      :title="isTruncated ? '思考较长，点击查看完整思考过程' : '点击查看完整思考过程'"
       @click="openPanel"
     >
       <span class="teaser-icon">💭</span>
-      <span class="teaser-text">{{ teaser || '思考过程' }}</span>
-      <span class="teaser-open">展开</span>
+      <span class="teaser-text">{{ loadingFull ? '加载完整思考…' : teaser || '思考过程' }}</span>
+      <span class="teaser-open">{{ isTruncated ? '查看全文' : '展开' }}</span>
     </button>
 
     <div v-else class="thinking-stream">
@@ -81,20 +117,14 @@ function closePanel() {
   width: 100%;
   margin-top: var(--space-2);
   font-weight: 425;
-  animation: think-in var(--dur-msg-assistant) var(--ease-out) both;
-}
-@keyframes think-in {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  animation: rise-in var(--dur-msg-assistant) var(--ease-out) both;
 }
 @media (prefers-reduced-motion: reduce) {
   .thinking-block {
+    animation: none;
+  }
+  .stream-dot,
+  .stream-icon {
     animation: none;
   }
 }
@@ -113,11 +143,14 @@ function closePanel() {
   color: var(--color-text-faint);
   font-size: var(--font-size-sm);
   text-align: left;
-  transition: background var(--dur-fast), color var(--dur-fast);
+  transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
 }
 .thinking-teaser:hover {
   background: var(--color-hover);
   color: var(--color-text-muted);
+}
+.thinking-teaser:active {
+  background: var(--color-selected);
 }
 .teaser-icon {
   flex-shrink: 0;
@@ -137,11 +170,13 @@ function closePanel() {
   color: var(--color-text-faint);
 }
 
-/* Streaming window (≈5 lines) */
+/* Streaming window (≈5 lines) — neutral hairline: the accent border made the
+   thinking box shout over the answer it belongs to. */
 .thinking-stream {
   border: 1px solid var(--color-line);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
   background: var(--color-surface);
+  box-shadow: var(--shadow-xs);
   overflow: hidden;
 }
 .stream-header {
@@ -153,16 +188,16 @@ function closePanel() {
   color: var(--color-text-muted);
   background: var(--color-surface-raised);
 }
+.stream-icon {
+  animation: breathe var(--dur-breathe) ease-in-out infinite;
+}
 .stream-dot {
   width: 6px;
   height: 6px;
   border-radius: var(--radius-full);
-  background: var(--color-accent);
-  animation: think-pulse 1.2s var(--ease-out) infinite;
-}
-@keyframes think-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.3; }
+  background: var(--gradient-accent);
+  box-shadow: 0 0 8px var(--color-accent-glow);
+  animation: breathe-glow var(--dur-breathe) ease-in-out infinite;
 }
 .stream-body {
   max-height: calc(5 * 1.6 * var(--font-size-sm));
@@ -198,6 +233,11 @@ function closePanel() {
   from { transform: translateX(24px); opacity: 0; }
   to { transform: translateX(0); opacity: 1; }
 }
+@media (prefers-reduced-motion: reduce) {
+  .thinking-panel {
+    animation: none;
+  }
+}
 .panel-header {
   display: flex;
   align-items: center;
@@ -216,10 +256,14 @@ function closePanel() {
   font-size: var(--font-size-base);
   padding: var(--space-1) var(--space-2);
   border-radius: var(--radius-sm);
+  transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
 }
 .panel-close:hover {
   background: var(--color-hover);
   color: var(--color-text);
+}
+.panel-close:active {
+  background: var(--color-selected);
 }
 .panel-body {
   flex: 1;

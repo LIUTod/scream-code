@@ -12,12 +12,18 @@ export interface ChatMessage {  id: string;
   tools: ToolMessage[];
   isError?: boolean;
   pending?: boolean;
-  /** Client-side creation time (ms epoch). Absent for snapshot-restored messages. */
+  /** Message creation time (ms epoch). Server-populated on finalized turns. */
   ts?: number;
   /** Locally created (command results, system notices) - preserved across snapshot refresh. */
   local?: boolean;
+  /** Model that produced this assistant turn (header label). */
+  model?: string;
   /** Stable id used to reconcile optimistic user messages with server snapshots. */
   clientMessageId?: string;
+  /** Server journal seq — used for older-history pagination. */
+  seq?: number;
+  /** Turn predates durable snapshots: body/thinking unrecoverable after a server restart. */
+  degraded?: boolean;
   /** Per-turn runtime stats (round/step/timing/tokens). */
   turnStats?: TurnStats;
 }
@@ -48,6 +54,8 @@ export interface ToolMessage {
   isError?: boolean;
   /** Tool call awaiting an external signal (e.g. approval) before it can finish. */
   suspended?: boolean;
+  /** Set when the thinking entry was truncated in a snapshot (full text on demand). */
+  truncated?: boolean;
 }
 
 export interface ApprovalRequest {
@@ -146,6 +154,10 @@ export interface SessionSnapshot {
   seq: number;
   epoch: number;
   messages: ChatMessage[];
+  /** True when older history exists beyond `messages` (tail-window snapshot). */
+  olderAvailable?: boolean;
+  /** Journal seq of the oldest message in `messages` — pagination cursor for older history. */
+  oldestSeq?: number;
   pendingApprovals: ApprovalRequest[];
   status: SessionStatus;
   busy: boolean;
@@ -177,6 +189,19 @@ export interface GitStatus {
   dels?: number;
   /** `git diff --stat HEAD` summary text. */
   diffStat?: string;
+  /** per-file porcelain status entries */
+  files?: GitFileChange[];
+}
+
+export interface GitFileChange {
+  /** Repository-root-relative — the canonical key to send back to `/git/diff`. */
+  path: string;
+  /** Work-dir-relative short path for display (falls back to `path`). */
+  displayPath?: string;
+  status: string;
+  adds?: number;
+  dels?: number;
+  untracked?: boolean;
 }
 
 export interface ModelInfo {

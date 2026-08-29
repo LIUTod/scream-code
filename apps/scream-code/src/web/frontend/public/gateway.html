@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0d1117">
+<title>Scream — 访问验证</title>
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    font-family: -apple-system, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+    background: #0d1117; color: #e6edf3; padding: 24px;
+    position: relative;
+  }
+  /* Ambient glow: same shape/params as --ambient-glow (dark) */
+  body::before {
+    content: ""; position: fixed; inset: 0; z-index: 0; pointer-events: none;
+    background:
+      radial-gradient(42rem 30rem at 12% -8%, rgba(121, 235, 0, 0.07), transparent 60%),
+      radial-gradient(50rem 36rem at 105% 112%, rgba(88, 166, 255, 0.05), transparent 60%);
+  }
+  @media (prefers-color-scheme: light) {
+    body { background: #f7f8f7; color: #182019; }
+    body::before {
+      background:
+        radial-gradient(44rem 32rem at 12% -10%, rgba(11, 143, 63, 0.05), transparent 60%),
+        radial-gradient(48rem 34rem at 108% 112%, rgba(9, 105, 218, 0.04), transparent 60%);
+    }
+  }
+  @keyframes rise-in {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .card {
+    position: relative; z-index: 1;
+    width: 100%; max-width: min(360px, calc(100vw - 32px));
+    padding: 28px 24px 24px; border-radius: 16px; text-align: center;
+    background: #161b22; border: 1px solid #30363d;
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.6);
+    animation: rise-in 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  @media (prefers-color-scheme: light) {
+    .card {
+      background: #ffffff; border-color: #e7ebe8;
+      box-shadow: 0 16px 48px rgba(26, 29, 33, 0.18);
+    }
+  }
+  .mark { font-size: 12px; letter-spacing: .2em; text-transform: uppercase; color: #8b949e; margin-bottom: 24px; }
+  h1 { font-size: 17px; font-weight: 600; margin: 0 0 6px; }
+  p.hint { font-size: 13px; color: #8b949e; margin: 0 0 22px; line-height: 1.5; }
+  @media (prefers-color-scheme: light) {
+    .mark, p.hint { color: #667069; }
+  }
+  input {
+    width: 100%; min-height: 44px; padding: 12px 14px; font-size: 15px; border-radius: 10px; text-align: center;
+    border: 1px solid rgba(127,127,127,.35); background: rgba(127,127,127,.08); color: inherit; outline: none;
+    transition: border-color 120ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 120ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  input:focus { border-color: #79eb00; box-shadow: 0 0 0 3px rgba(121, 235, 0, 0.16); }
+  button {
+    width: 100%; min-height: 44px; margin-top: 12px; padding: 12px 14px; font-size: 15px; font-weight: 600; border: none;
+    border-radius: 10px; cursor: pointer; background: linear-gradient(135deg, #a4ff3d 0%, #66cc00 100%); color: #0d1117;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+    transition: box-shadow 120ms cubic-bezier(0.22, 1, 0.36, 1), transform 120ms cubic-bezier(0.22, 1, 0.36, 1), filter 120ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  button:not(:disabled):hover { box-shadow: 0 0 18px rgba(121, 235, 0, 0.28); transform: translateY(-1px); }
+  button:not(:disabled):active { transform: translateY(0); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3); }
+  button:disabled { opacity: .6; cursor: default; }
+  @media (prefers-color-scheme: light) {
+    input:focus { border-color: #16a34a; box-shadow: 0 0 0 3px rgba(11, 143, 63, 0.14); }
+    button { background: linear-gradient(135deg, #16a34a 0%, #0b8f3f 100%); color: #ffffff; box-shadow: 0 1px 2px rgba(26, 29, 33, 0.1); }
+    button:not(:disabled):hover { box-shadow: 0 0 14px rgba(11, 143, 63, 0.2); }
+  }
+  .error { min-height: 18px; font-size: 12.5px; margin-top: 12px; color: #f85149; }
+  .error.warn { color: #d29922; }
+  @media (prefers-color-scheme: light) {
+    .error { color: #cf222e; }
+    .error.warn { color: #9a6700; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .card { animation: none; }
+  }
+</style>
+</head>
+<body>
+<main class="card">
+  <div class="mark">Scream</div>
+  <h1>访问验证</h1>
+  <p class="hint">本服务开启了局域网共享，请输入访问密钥继续。</p>
+  <form id="form">
+    <input id="key" type="password" autocomplete="current-password" placeholder="访问密钥" autofocus>
+    <button id="go" type="submit">进入</button>
+  </form>
+  <div class="error" id="msg" role="alert"></div>
+</main>
+<script>
+(function () {
+  var input = document.getElementById('key');
+  var button = document.getElementById('go');
+  var msg = document.getElementById('msg');
+
+  function safeNext() {
+    var params = new URLSearchParams(location.search);
+    var next = params.get('next') || '/';
+    if (next.charAt(0) !== '/' || next.charAt(1) === '/') next = '/';
+    return next;
+  }
+
+  fetch('/api/v1/gateway/status', { cache: 'no-store' })
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (status) {
+      if (!status || !status.authRequired || status.authenticated) location.replace(safeNext());
+    })
+    .catch(function () { /* 状态不可知时仍显示表单 */ });
+
+  document.getElementById('form').addEventListener('submit', function (event) {
+    event.preventDefault();
+    var key = input.value.trim();
+    if (!key) { msg.textContent = '请输入访问密钥'; msg.className = 'error'; return; }
+    button.disabled = true;
+    msg.textContent = '';
+    fetch('/api/v1/gateway/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: key })
+    }).then(function (res) {
+      return res.json().catch(function () { return {}; }).then(function (body) {
+        return { status: res.status, body: body };
+      });
+    }).then(function (result) {
+      if (result.status === 200 && result.body && result.body.ok) {
+        location.replace(safeNext());
+        return;
+      }
+      button.disabled = false;
+      if (result.status === 429) {
+        var wait = result.body && result.body.retryAfter ? result.body.retryAfter : 60;
+        msg.textContent = '尝试过于频繁，请 ' + wait + ' 秒后重试';
+        msg.className = 'error warn';
+      } else {
+        msg.textContent = '访问密钥错误';
+        msg.className = 'error';
+        input.select();
+      }
+    }).catch(function () {
+      button.disabled = false;
+      msg.textContent = '网络错误，请重试';
+      msg.className = 'error';
+    });
+  });
+})();
+</script>
+</body>
+</html>

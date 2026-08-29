@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import type { ModelInfo } from '../types';
 
 /**
@@ -76,9 +76,46 @@ function displayName(m: ModelInfo): string {
   return m.displayName ?? m.model;
 }
 
+const rootRef = ref<HTMLElement | null>(null);
+
+function onDocMousedown(e: MouseEvent): void {
+  if (rootRef.value && !rootRef.value.contains(e.target as Node)) emit('close');
+}
+
+onMounted(() => document.addEventListener('mousedown', onDocMousedown, true));
+onBeforeUnmount(() => document.removeEventListener('mousedown', onDocMousedown, true));
+
 function pick(alias: string) {
   if (alias !== props.currentModel) emit('apply-model', alias);
   emit('close');
+}
+
+/** Keyboard navigation: search ↓ focuses the first row; ↑/↓ cycles row focus. */
+const listRef = ref<HTMLElement | null>(null);
+
+function rowButtons(): HTMLButtonElement[] {
+  const root = listRef.value;
+  if (!root) return [];
+  return Array.from(root.querySelectorAll<HTMLButtonElement>('.picker-row'));
+}
+
+function focusFirstRow(): void {
+  rowButtons()[0]?.focus();
+}
+
+function onListKeydown(e: KeyboardEvent): void {
+  if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+  const rows = rowButtons();
+  if (rows.length === 0) return;
+  const idx = rows.indexOf(document.activeElement as HTMLButtonElement);
+  e.preventDefault();
+  if (idx === -1) {
+    rows[0]?.focus();
+  } else if (e.key === 'ArrowDown') {
+    rows[(idx + 1) % rows.length]?.focus();
+  } else {
+    rows[(idx - 1 + rows.length) % rows.length]?.focus();
+  }
 }
 
 function pickThinking(level: string) {
@@ -87,9 +124,7 @@ function pickThinking(level: string) {
 </script>
 
 <template>
-  <div class="model-picker-root">
-    <div class="picker-backdrop" @click="emit('close')" />
-    <div class="model-picker" role="dialog" aria-label="模型选择" @keydown.esc="emit('close')">
+  <div ref="rootRef" class="model-picker" role="dialog" aria-label="模型选择" @keydown.esc.stop="emit('close')">
     <input
       ref="searchRef"
       v-model="query"
@@ -100,9 +135,10 @@ function pickThinking(level: string) {
       name="model-search"
       autocomplete="off"
       spellcheck="false"
+      @keydown.arrow-down.prevent="focusFirstRow"
     />
 
-    <div class="picker-list">
+    <div ref="listRef" class="picker-list" @keydown="onListKeydown">
       <div v-if="groups.length === 0" class="picker-empty">无匹配模型</div>
       <div v-for="group in groups" :key="group.provider" class="picker-group">
         <div class="picker-group-title">{{ group.provider }}</div>
@@ -135,21 +171,14 @@ function pickThinking(level: string) {
         </button>
       </div>
     </div>
-    </div>
   </div>
 </template>
 
 <style scoped>
-.picker-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: calc(var(--z-overlay) - 1);
-}
-
 .model-picker {
   position: absolute;
   bottom: 100%;
-  left: var(--space-4);
+  right: 0;
   margin-bottom: var(--space-2);
   z-index: var(--z-overlay);
   display: flex;
@@ -158,10 +187,11 @@ function pickThinking(level: string) {
   max-width: calc(100vw - var(--space-8));
   max-height: 60vh;
   background: var(--color-surface-raised);
-  border: 1px solid var(--color-line-strong);
+  border: 1px solid var(--color-line);
   border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-lg);
+  box-shadow: var(--shadow-xl);
   overflow: hidden;
+  animation: rise-in var(--dur-slower) var(--ease-spring);
 }
 
 .picker-search {
@@ -173,11 +203,12 @@ function pickThinking(level: string) {
   color: var(--color-text);
   font-size: var(--font-size-sm);
   font-family: inherit;
+  transition: border-color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
 }
 .picker-search:focus {
   outline: none;
-  border-color: var(--color-accent);
-  box-shadow: 0 0 0 3px var(--color-accent-soft);
+  border-color: var(--color-accent-bd);
+  box-shadow: var(--glow-focus);
 }
 .picker-search::placeholder {
   color: var(--color-text-faint);
@@ -225,11 +256,14 @@ function pickThinking(level: string) {
     border-color var(--dur-fast);
 }
 .picker-row:hover {
-  background: var(--color-surface-sunken);
+  background: var(--color-hover);
 }
 .picker-row.active {
-  background: var(--color-accent-soft);
+  background: var(--color-selected);
   border-color: var(--color-accent-bd);
+}
+.picker-row.active .row-name {
+  color: var(--color-accent);
 }
 
 .row-main {
@@ -291,16 +325,17 @@ function pickThinking(level: string) {
   font-family: inherit;
   cursor: pointer;
   transition:
-    background var(--dur-fast),
-    color var(--dur-fast),
-    border-color var(--dur-fast);
+    background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out);
 }
 .thinking-btn:hover {
   border-color: var(--color-line-strong);
   color: var(--color-text);
+  background: var(--color-hover);
 }
 .thinking-btn.active {
-  background: var(--color-accent-soft);
+  background: var(--color-selected);
   border-color: var(--color-accent-bd);
   color: var(--color-accent);
   font-weight: 600;
@@ -311,7 +346,12 @@ function pickThinking(level: string) {
     left: var(--space-2);
     right: var(--space-2);
     width: auto;
+    max-width: calc(100vw - 32px);
     max-height: 70vh;
+  }
+  .picker-row,
+  .thinking-btn {
+    min-height: 44px;
   }
 }
 </style>

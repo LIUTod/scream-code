@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onBeforeUnmount, onMounted, watch, provide } from 'vue';
-import ChatView from './components/ChatView.vue';
+import WebShell from './components/WebShell.vue';
 import Toast from './components/ui/Toast.vue';
 import type { Theme } from './theme';
 
@@ -10,8 +10,8 @@ provide('effectiveTheme', effectiveTheme);
 provide('theme', theme);
 
 const THEME_COLORS: Record<'light' | 'dark', string> = {
-  light: '#f7f8f7',
-  dark: '#0d1117',
+  light: '#ffffff',
+  dark: '#101113',
 };
 
 function applyTheme() {
@@ -33,7 +33,6 @@ function setTheme(t: Theme) {
   } catch {
     // Storage can be unavailable in restricted/private browsing contexts.
   }
-  // Briefly enable cross-property transitions so the theme swap animates.
   const root = document.documentElement;
   root.classList.add('theme-transition');
   applyTheme();
@@ -65,7 +64,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="app">
-    <ChatView />
+    <WebShell />
     <Toast />
   </div>
 </template>
@@ -73,5 +72,6 @@ onBeforeUnmount(() => {
 <style scoped>
 .app {
   position: relative;
+  height: 100%;
 }
 </style>

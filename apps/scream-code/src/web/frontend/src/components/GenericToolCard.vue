@@ -1,19 +1,15 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import type { ToolMessage } from '../types';
+import { toolStatus } from '../utils/toolGroup';
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   tool: ToolMessage;
-}>();
+  /** True while the owning turn is still streaming. */
+  live?: boolean;
+}>(), { live: true });
 
-type ToolStatus = 'ok' | 'error' | 'running' | 'suspended';
-
-const status = computed<ToolStatus>(() => {
-  if (props.tool.suspended) return 'suspended';
-  if (props.tool.isError) return 'error';
-  if (props.tool.output === undefined) return 'running';
-  return 'ok';
-});
+const status = computed(() => toolStatus(props.tool, props.live));
 
 const statusIcon = computed(() => {
   switch (status.value) {
@@ -69,6 +65,30 @@ function formatArgs(): string {
 function formatOutput(s: string | undefined): string {
   return s ?? '';
 }
+
+/** Full output text (what would be rendered when expanded). */
+const outputText = computed(() => formatOutput(props.tool.output));
+const outputLarge = computed(() => outputText.value.length > 8192);
+const outputExpanded = ref(false);
+const outputShown = computed(() => (outputLarge.value && !outputExpanded.value ? outputText.value.slice(0, 280) : outputText.value));
+
+async function copyOutput(): Promise<void> {
+  try {
+    await navigator.clipboard?.writeText(outputText.value);
+  } catch {
+    // Clipboard unavailable; ignore.
+  }
+}
+
+/** Workdir-relative image output (e.g. browser/screenshot tools) → inline preview via the file gate. */
+const imageSrc = computed(() => {
+  const t = outputText.value.trim();
+  if (!/^[\w@./-]+\.(png|jpe?g|gif|webp|avif)$/i.test(t)) return null;
+  if (t.includes('..')) return null;
+  if (t.startsWith('/')) return null;
+  if (outputLarge.value) return null;
+  return `/api/v1/files/raw?path=${encodeURIComponent(t)}`;
+});
 </script>
 
 <template>
@@ -86,7 +106,14 @@ function formatOutput(s: string | undefined): string {
       <div class="tool-collapse-inner">
         <div class="tool-body">
           <pre v-if="formatArgs()" class="tool-args"><code>{{ formatArgs() }}</code></pre>
-          <pre v-if="tool.output !== undefined" class="tool-result"><code>{{ formatOutput(tool.output) || '(无输出)' }}</code></pre>
+          <pre v-if="tool.output !== undefined && !imageSrc" class="tool-result"><code>{{ outputShown || '(无输出)' }}</code></pre>
+          <div v-if="tool.output !== undefined && imageSrc" class="tool-image-wrap">
+            <img class="tool-image" :src="imageSrc" alt="" loading="lazy" @error="(e) => ((e.currentTarget as HTMLImageElement).style.display = 'none')" />
+          </div>
+          <div v-if="outputLarge" class="tool-output-actions">
+            <button class="tool-output-btn" @click="outputExpanded = !outputExpanded">{{ outputExpanded ? '收起' : '展开全文' }}</button>
+            <button class="tool-output-btn" @click="copyOutput">复制</button>
+          </div>
           <div v-else class="tool-running-hint">执行中…</div>
         </div>
       </div>
@@ -98,29 +125,26 @@ function formatOutput(s: string | undefined): string {
 .tool-card {
   background: var(--color-surface);
   border: 1px solid var(--color-line);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-xs);
   overflow: hidden;
   font-size: var(--font-size-sm);
-  animation: tool-in var(--dur-msg-assistant) var(--ease-out) both;
-  transition: border-color var(--dur-base);
+  animation: rise-in var(--dur-msg-assistant) var(--ease-out) both;
+  transition: border-color var(--dur-base) var(--ease-out), box-shadow var(--dur-base) var(--ease-out);
 }
-@keyframes tool-in {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+.tool-card:hover {
+  border-color: var(--color-line-strong);
+}
+.tool-card.is-running {
+  border-color: var(--color-accent-bd);
+}
+.tool-card.is-error {
+  border-color: var(--color-danger);
 }
 @media (prefers-reduced-motion: reduce) {
   .tool-card {
     animation: none;
   }
-}
-.tool-card.is-error {
-  border-color: var(--color-danger);
 }
 
 .tool-header {
@@ -131,10 +155,13 @@ function formatOutput(s: string | undefined): string {
   cursor: pointer;
   user-select: none;
   background: var(--color-surface-raised);
-  transition: background var(--dur-fast);
+  transition: background var(--dur-fast) var(--ease-out);
 }
 .tool-header:hover {
   background: var(--color-hover);
+}
+.tool-header:active {
+  background: var(--color-selected);
 }
 .tool-card.is-error .tool-header {
   background: var(--color-danger-soft);
@@ -160,15 +187,18 @@ function formatOutput(s: string | undefined): string {
   color: var(--color-danger);
 }
 .status-dot.running {
-  background: var(--color-accent);
-  animation: pulse-dot 1.2s var(--ease-out) infinite;
+  background: var(--gradient-accent);
+  color: var(--color-on-accent);
+  box-shadow: 0 0 8px var(--color-accent-glow);
+  animation: breathe var(--dur-breathe) ease-in-out infinite;
 }
 .status-dot.suspended {
   background: var(--color-line-strong);
 }
-@keyframes pulse-dot {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.35; transform: scale(0.75); }
+@media (prefers-reduced-motion: reduce) {
+  .status-dot.running {
+    animation: none;
+  }
 }
 
 .tool-name {
@@ -245,5 +275,42 @@ function formatOutput(s: string | undefined): string {
   color: var(--color-text-faint);
   font-size: var(--font-size-xs);
   padding: var(--space-1) var(--space-2);
+  animation: breathe var(--dur-breathe) ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .tool-running-hint {
+    animation: none;
+  }
+}
+.tool-output-actions {
+  display: flex;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+}
+.tool-output-btn {
+  min-height: 24px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  font-size: 11px;
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+.tool-output-btn:hover {
+  border-color: var(--color-accent-bd);
+  color: var(--color-text);
+}
+.tool-image-wrap {
+  padding: var(--space-2);
+}
+.tool-image {
+  display: block;
+  max-width: 100%;
+  max-height: 320px;
+  object-fit: contain;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-line);
 }
 </style>

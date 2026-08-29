@@ -4,18 +4,16 @@
 import { computed, ref, watch } from 'vue';
 import type { ToolMessage } from '../types';
 import { buildEditDiff, type DiffLine } from '../utils/diff';
+import { toolStatus } from '../utils/toolGroup';
 import DiffLines from './DiffLines.vue';
 
-const props = defineProps<{ tool: ToolMessage }>();
+const props = withDefaults(defineProps<{
+  tool: ToolMessage;
+  /** True while the owning turn is still streaming. */
+  live?: boolean;
+}>(), { live: true });
 
-type ToolStatus = 'ok' | 'error' | 'running' | 'suspended';
-
-const status = computed<ToolStatus>(() => {
-  if (props.tool.suspended) return 'suspended';
-  if (props.tool.isError) return 'error';
-  if (props.tool.output === undefined) return 'running';
-  return 'ok';
-});
+const status = computed(() => toolStatus(props.tool, props.live));
 
 const statusIcon = computed(() => {
   switch (status.value) {
@@ -85,20 +83,19 @@ const hasDiff = computed(() => diffLines.value.length > 0);
 .tool-card {
   background: var(--color-surface);
   border: 1px solid var(--color-line);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-xs);
   overflow: hidden;
   font-size: var(--font-size-sm);
-  animation: tool-in var(--dur-msg-assistant) var(--ease-out) both;
-  transition: border-color var(--dur-base);
+  animation: rise-in var(--dur-msg-assistant) var(--ease-out) both;
+  transition: border-color var(--dur-base) var(--ease-out), box-shadow var(--dur-base) var(--ease-out);
 }
-@keyframes tool-in {
-  from { opacity: 0; transform: translateY(6px); }
-  to { opacity: 1; transform: translateY(0); }
-}
+.tool-card:hover { border-color: var(--color-line-strong); }
+.tool-card.is-running { border-color: var(--color-accent-bd); }
+.tool-card.is-error { border-color: var(--color-danger); }
 @media (prefers-reduced-motion: reduce) {
   .tool-card { animation: none; }
 }
-.tool-card.is-error { border-color: var(--color-danger); }
 
 .tool-header {
   display: flex;
@@ -108,9 +105,10 @@ const hasDiff = computed(() => diffLines.value.length > 0);
   cursor: pointer;
   user-select: none;
   background: var(--color-surface-raised);
-  transition: background var(--dur-fast);
+  transition: background var(--dur-fast) var(--ease-out);
 }
 .tool-header:hover { background: var(--color-hover); }
+.tool-header:active { background: var(--color-selected); }
 .tool-card.is-error .tool-header { background: var(--color-danger-soft); }
 
 .status-dot {
@@ -121,11 +119,15 @@ const hasDiff = computed(() => diffLines.value.length > 0);
 }
 .status-dot.ok { background: var(--color-success-soft); color: var(--color-success); }
 .status-dot.error { background: var(--color-danger-soft); color: var(--color-danger); }
-.status-dot.running { background: var(--color-accent); animation: pulse-dot 1.2s var(--ease-out) infinite; }
+.status-dot.running {
+  background: var(--gradient-accent);
+  color: var(--color-on-accent);
+  box-shadow: 0 0 8px var(--color-accent-glow);
+  animation: breathe var(--dur-breathe) ease-in-out infinite;
+}
 .status-dot.suspended { background: var(--color-line-strong); }
-@keyframes pulse-dot {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.35; transform: scale(0.75); }
+@media (prefers-reduced-motion: reduce) {
+  .status-dot.running { animation: none; }
 }
 
 .tool-name {
@@ -204,5 +206,9 @@ const hasDiff = computed(() => diffLines.value.length > 0);
   color: var(--color-text-faint);
   font-size: var(--font-size-xs);
   padding: var(--space-1) var(--space-2);
+  animation: breathe var(--dur-breathe) ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .tool-running-hint { animation: none; }
 }
 </style>

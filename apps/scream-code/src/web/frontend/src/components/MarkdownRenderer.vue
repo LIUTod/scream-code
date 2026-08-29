@@ -1,6 +1,6 @@
 <script lang="ts">
 import { computed, h, defineComponent, ref, watch } from 'vue';
-import { marked } from 'marked';
+import { marked, type Token } from 'marked';
 import CodeBlock from './CodeBlock.vue';
 
 // Enable GFM features (task lists, tables, strikethrough) and line breaks.
@@ -88,56 +88,84 @@ function trimPartialClosingFences(content: string): string {
   return content;
 }
 
-function renderToken(token: marked.Token, streaming = false): ReturnType<typeof h>[] {
-  switch (token.type) {
+/**
+ * Loose view over marked's discriminated token union. Casting through
+ * `unknown` is intentional: the renderers access a superset of fields that
+ * the union cannot express generically, and the `type` switch already
+ * narrows which fields are populated at runtime.
+ */
+interface LooseToken {
+  type: string;
+  raw?: string;
+  text?: string;
+  href?: string;
+  lang?: string;
+  depth?: number;
+  ordered?: boolean;
+  tokens?: Token[];
+  items?: { task: boolean; checked: boolean; tokens: Token[] }[];
+  header?: Token[];
+  rows?: Token[][];
+  align?: ('center' | 'left' | 'right' | null)[];
+}
+
+function asLoose(token: Token): LooseToken {
+  return token as unknown as LooseToken;
+}
+
+function renderToken(token: Token, streaming = false): ReturnType<typeof h>[] {
+  const t = asLoose(token);
+  switch (t.type) {
     case 'paragraph':
-      return [h('p', { class: 'md-p' }, renderInline(token.tokens))];
+      return [h('p', { class: 'md-p' }, renderInline(t.tokens ?? []))];
     case 'heading':
-      return [h(`h${token.depth}`, { class: `md-h${token.depth}` }, renderInline(token.tokens))];
+      return [h(`h${t.depth ?? 2}`, { class: `md-h${t.depth ?? 2}` }, renderInline(t.tokens ?? []))];
     case 'code':
-      return [h(CodeBlock, { code: token.text, lang: token.lang ?? 'text', streaming })];
+      return [h(CodeBlock, { code: t.text ?? '', lang: t.lang ?? 'text', streaming })];
     case 'blockquote':
-      return [h('blockquote', { class: 'md-blockquote' }, token.tokens.flatMap((t) => renderToken(t, streaming)))];
+      return [h('blockquote', { class: 'md-blockquote' }, (t.tokens ?? []).flatMap((n) => renderToken(n, streaming)))];
     case 'list': {
-      const items = (token as { items: { task: boolean; checked: boolean; tokens: marked.Token[] }[] }).items.map((item) => {
+      const items = (t.items ?? []).map((item) => {
         const children: (ReturnType<typeof h> | string)[] = [];
         if (item.task) {
           children.push(h('input', { type: 'checkbox', checked: item.checked, disabled: true, class: 'md-checkbox' }));
         }
-        children.push(...item.tokens.flatMap((t) => renderToken(t, streaming)));
+        children.push(...item.tokens.flatMap((n) => renderToken(n, streaming)));
         return h('li', { class: ['md-li', item.task ? 'md-task' : ''] }, children);
       });
-      return [h(token.ordered ? 'ol' : 'ul', { class: token.ordered ? 'md-ol' : 'md-ul' }, items)];
+      return [h(t.ordered ? 'ol' : 'ul', { class: t.ordered ? 'md-ol' : 'md-ul' }, items)];
     }
     case 'hr':
       return [h('hr', { class: 'md-hr' })];
     case 'space':
       return [];
     case 'html':
-      return [h('div', { class: 'md-html', innerHTML: token.text })];
+      // Raw HTML from the model is dangerous (XSS). Render escaped text.
+      return [h('pre', { class: 'md-raw-html' }, t.text ?? '')];
     case 'table':
-      return [h('div', { class: 'md-table-wrap', style: 'overflow-x:auto' }, [renderTable(token)])];
+      return [h('div', { class: 'md-table-wrap', style: 'overflow-x:auto' }, [renderTable(t)])];
     case 'br':
       return [h('br')];
     case 'text':
-      return [h('span', { class: 'md-text' }, token.tokens ? renderInline(token.tokens) : token.text)];
+      return [h('span', { class: 'md-text' }, t.tokens ? renderInline(t.tokens) : (t.text ?? ''))];
     case 'def':
       return [];
     default:
-      return [h('p', { class: 'md-p' }, token.raw ?? '')];
+      return [h('p', { class: 'md-p' }, t.raw ?? '')];
   }
 }
 
-function renderTable(token: marked.Token): ReturnType<typeof h> {
-  const t = token as { header: marked.Token[]; rows: marked.Token[][]; align: ('center' | 'left' | 'right' | null)[] };
-  const headerCells = (t.header ?? []).map((cell, i) => {
-    const align = t.align?.[i];
-    return h('th', { class: 'md-th', style: align ? `text-align:${align}` : '' }, cell.tokens ? renderInline(cell.tokens) : String((cell as { text?: string }).text ?? ''));
+function renderTable(token: LooseToken): ReturnType<typeof h> {
+  const headerCells = (token.header ?? []).map((cell, i) => {
+    const align = token.align?.[i];
+    const c = asLoose(cell);
+    return h('th', { class: 'md-th', style: align ? `text-align:${align}` : '' }, c.tokens ? renderInline(c.tokens) : String(c.text ?? ''));
   });
-  const bodyRows = (t.rows ?? []).map((row) =>
+  const bodyRows = (token.rows ?? []).map((row) =>
     h('tr', {}, row.map((cell, i) => {
-      const align = t.align?.[i];
-      return h('td', { class: 'md-td', style: align ? `text-align:${align}` : '' }, cell.tokens ? renderInline(cell.tokens) : String((cell as { text?: string }).text ?? ''));
+      const align = token.align?.[i];
+      const c = asLoose(cell);
+      return h('td', { class: 'md-td', style: align ? `text-align:${align}` : '' }, c.tokens ? renderInline(c.tokens) : String(c.text ?? ''));
     })),
   );
   return h('table', { class: 'md-table' }, [
@@ -146,36 +174,37 @@ function renderTable(token: marked.Token): ReturnType<typeof h> {
   ]);
 }
 
-function renderInline(tokens: marked.Token[]): (string | ReturnType<typeof h>)[] {
+function renderInline(tokens: Token[]): (string | ReturnType<typeof h>)[] {
   return tokens.map((token) => {
-    switch (token.type) {
+    const t = asLoose(token);
+    switch (t.type) {
       case 'text':
-        return token.text;
+        return t.text ?? '';
       case 'codespan':
-        return h('code', { class: 'md-code' }, token.text);
+        return h('code', { class: 'md-code' }, t.text ?? '');
       case 'strong':
-        return h('strong', { class: 'md-strong' }, renderInline(token.tokens));
+        return h('strong', { class: 'md-strong' }, renderInline(t.tokens ?? []));
       case 'em':
-        return h('em', { class: 'md-em' }, renderInline(token.tokens));
+        return h('em', { class: 'md-em' }, renderInline(t.tokens ?? []));
       case 'del':
-        return h('del', { class: 'md-del' }, renderInline(token.tokens));
+        return h('del', { class: 'md-del' }, renderInline(t.tokens ?? []));
       case 'link': {
-        const href = token.href;
+        const href = t.href;
         if (href && !/^(https?:|mailto:|#|\/)/i.test(href)) {
-          return token.raw ?? '';
+          return t.raw ?? '';
         }
-        return h('a', { class: 'md-a', href, target: '_blank', rel: 'noopener' }, renderInline(token.tokens));
+        return h('a', { class: 'md-a', href, target: '_blank', rel: 'noopener' }, renderInline(t.tokens ?? []));
       }
       case 'image':
-        return h('img', { class: 'md-img', src: token.href, alt: token.text ?? '', loading: 'lazy' });
+        return h('img', { class: 'md-img', src: t.href, alt: t.text ?? '', loading: 'lazy' });
       case 'br':
         return h('br');
       case 'html':
-        return h('span', { innerHTML: token.text });
+        return h('code', { class: 'md-raw-inline' }, t.text ?? '');
       case 'escape':
-        return token.text;
+        return t.text ?? '';
       default:
-        return token.raw ?? '';
+        return t.raw ?? '';
     }
   });
 }
@@ -192,22 +221,25 @@ function renderInline(tokens: marked.Token[]): (string | ReturnType<typeof h>)[]
 .markdown-body :deep(.md-ul), .markdown-body :deep(.md-ol) { margin: 0.6em 0; padding-left: 1.5em; }
 .markdown-body :deep(.md-li) { margin: 0.25em 0; }
 .markdown-body :deep(.md-task) { list-style: none; margin-left: -1.2em; }
-.markdown-body :deep(.md-checkbox) { margin-right: 6px; vertical-align: middle; }
+.markdown-body :deep(.md-checkbox) { margin-right: 6px; vertical-align: middle; accent-color: var(--color-accent); }
 .markdown-body :deep(.md-blockquote) {
-  margin: 0.6em 0; padding-left: 1em; border-left: 3px solid var(--color-accent);
+  margin: 0.6em 0; padding: var(--space-1) var(--space-4); border-left: 3px solid var(--color-accent);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: var(--color-accent-soft);
   color: var(--color-text-muted);
 }
 .markdown-body :deep(.md-code) {
-  background: var(--color-surface-sunken); padding: 0.15em 0.35em; border-radius: 4px;
+  background: var(--color-surface-sunken); padding: 0.15em 0.35em; border-radius: var(--radius-xs);
+  border: 1px solid var(--color-line);
   font-family: var(--font-mono); font-size: 0.9em;
 }
-.markdown-body :deep(.md-a) { color: var(--color-info); text-decoration: none; }
-.markdown-body :deep(.md-a:hover) { text-decoration: underline; }
+.markdown-body :deep(.md-a) { color: var(--color-info); text-decoration: none; transition: color var(--dur-fast) var(--ease-out); }
+.markdown-body :deep(.md-a:hover) { color: var(--color-accent); text-decoration: underline; }
 .markdown-body :deep(.md-hr) { border: none; border-top: 1px solid var(--color-line); margin: 1em 0; }
 .markdown-body :deep(.md-strong) { font-weight: 600; }
 .markdown-body :deep(.md-em) { font-style: italic; }
-.markdown-body :deep(.md-del) { text-decoration: line-through; }
-.markdown-body :deep(.md-img) { max-width: 100%; border-radius: 8px; }
+.markdown-body :deep(.md-del) { text-decoration: line-through; color: var(--color-text-muted); }
+.markdown-body :deep(.md-img) { max-width: 100%; border-radius: var(--radius-md); }
 .markdown-body :deep(.md-table) { border-collapse: collapse; width: 100%; margin: 0.6em 0; font-size: 0.9em; }
 .markdown-body :deep(.md-th), .markdown-body :deep(.md-td) { border: 1px solid var(--color-line); padding: 6px 10px; text-align: left; }
 .markdown-body :deep(.md-th) { background: var(--color-surface-sunken); font-weight: 600; }

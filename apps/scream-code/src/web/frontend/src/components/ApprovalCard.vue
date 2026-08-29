@@ -162,15 +162,20 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
 
 <style scoped>
 .approval-card {
-  border: 1px solid var(--color-warning);
+  border: 1px solid color-mix(in srgb, var(--color-warning) 45%, var(--color-line));
   border-radius: var(--radius-lg);
   background: var(--color-surface-raised);
   box-shadow: var(--shadow-md);
   overflow: hidden;
+  animation: rise-in var(--dur-msg-assistant) var(--ease-out) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .approval-card { animation: none; }
 }
 
 .approval-minibar {
   width: 100%;
+  min-height: 44px;
   padding: var(--space-2) var(--space-4);
   background: var(--color-warning-soft);
   color: var(--color-warning);
@@ -179,7 +184,10 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
   font-weight: 600;
   cursor: pointer;
   text-align: left;
+  transition: background var(--dur-fast) var(--ease-out);
 }
+.approval-minibar:hover { background: var(--color-hover); }
+.approval-minibar:active { background: var(--color-selected); }
 
 .approval-header {
   display: flex;
@@ -187,10 +195,15 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
   gap: var(--space-2);
   padding: var(--space-2) var(--space-3);
   background: var(--color-warning-soft);
+  border-bottom: 1px solid color-mix(in srgb, var(--color-warning) 25%, var(--color-line));
 }
 .approval-icon {
   color: var(--color-warning);
   flex-shrink: 0;
+  animation: breathe var(--dur-breathe) ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .approval-icon { animation: none; }
 }
 .approval-title {
   display: flex;
@@ -220,12 +233,13 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
   font-weight: 700;
   color: var(--color-warning);
   background: var(--color-warning-soft);
-  border: 1px solid var(--color-warning);
+  border: 1px solid color-mix(in srgb, var(--color-warning) 45%, var(--color-line));
   border-radius: var(--radius-full);
   padding: 0 var(--space-2);
 }
 .icon-btn {
   flex-shrink: 0;
+  min-height: 44px;
   background: transparent;
   border: none;
   color: var(--color-text-muted);
@@ -234,10 +248,14 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
   border-radius: var(--radius-sm);
   font-size: var(--font-size-sm);
   line-height: 1.6;
+  transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
 }
 .icon-btn:hover {
   background: var(--color-hover);
   color: var(--color-text);
+}
+.icon-btn:active {
+  background: var(--color-selected);
 }
 
 .approval-action {
@@ -270,10 +288,12 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
   font-family: inherit;
   font-size: var(--font-size-sm);
   resize: vertical;
+  transition: border-color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
 }
 .feedback-input:focus {
   outline: none;
   border-color: var(--color-warning);
+  box-shadow: var(--glow-focus);
 }
 
 .approval-buttons {
@@ -292,9 +312,36 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
   padding: 0 var(--space-1);
   margin-right: var(--space-1);
 }
-.ui-btn--primary kbd {
+/* 批准主按钮：渐变 + 光晕（安全关键操作，需被注意到） */
+.approval-buttons :deep(.ui-btn--primary) {
+  background: var(--gradient-accent);
+  color: var(--color-on-accent);
+  border-color: transparent;
+  box-shadow: var(--glow-accent);
+}
+.approval-buttons :deep(.ui-btn--primary:not(:disabled):hover) {
+  filter: brightness(1.06);
+}
+.approval-buttons :deep(.ui-btn--primary:not(:disabled):active) {
+  filter: brightness(0.96);
+  transform: translateY(1px);
+}
+.approval-buttons :deep(.ui-btn--primary kbd) {
   background: rgba(0, 0, 0, 0.15);
   border-color: transparent;
+}
+/* 拒绝按钮：danger 语义描边样式 */
+.approval-buttons :deep(.ui-btn--danger) {
+  background: transparent;
+  color: var(--color-danger);
+  border: 1px solid var(--color-danger);
+}
+.approval-buttons :deep(.ui-btn--danger:not(:disabled):hover) {
+  background: var(--color-danger-soft);
+}
+.approval-buttons :deep(.ui-btn--danger:not(:disabled):active) {
+  background: color-mix(in srgb, var(--color-danger-soft) 60%, var(--color-danger) 12%);
+  transform: translateY(1px);
 }
 .feedback-active {
   border-color: var(--color-warning) !important;
@@ -319,5 +366,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
 }
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .spinner { animation-duration: 1.6s; }
 }
 </style>

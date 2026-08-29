@@ -7,5 +7,5 @@
     }
   },
   "include": ["src", "test", "../../packages/agent-core/src/prompt-modules.d.ts"],
-  "exclude": ["src/web/frontend"]
+  "exclude": ["src/web/frontend", "test/web/frontend-components.test.ts", "test/web/markdown-security.test.ts"]
 }

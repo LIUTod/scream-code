@@ -20,7 +20,9 @@ const highlighted = ref('');
 const plainHtml = ref('');
 const copied = ref(false);
 
-let highlighter: Awaited<ReturnType<typeof createHighlighterCore>> | null = null;
+type Highlighter = Awaited<ReturnType<typeof createHighlighterCore>>;
+
+let highlighter: Highlighter | null = null;
 const loadedLangs = new Set<string>();
 const loadingLangs = new Map<string, Promise<void>>();
 
@@ -36,7 +38,7 @@ const LANG_ALIASES: Record<string, string> = {
   proto: 'protobuf', pl: 'perl', pm: 'perl',
 };
 
-async function ensureHighlighter(): Promise<typeof highlighter> {
+async function ensureHighlighter(): Promise<Highlighter> {
   if (highlighter) return highlighter;
   const [githubDark, githubLight] = await Promise.all([
     import('shiki/themes/github-dark.mjs'),
@@ -138,7 +140,7 @@ watch(
   <div class="code-block">
     <div class="code-header">
       <span class="code-lang">{{ lang || 'text' }}</span>
-      <button class="code-copy" @click="copy">{{ copied ? '已复制' : '复制' }}</button>
+      <button :class="['code-copy', { copied }]" @click="copy">{{ copied ? '已复制' : '复制' }}</button>
     </div>
     <div class="code-content" v-html="props.streaming ? plainHtml : (highlighted || plainHtml)"></div>
   </div>
@@ -148,7 +150,7 @@ watch(
 .code-block {
   background: var(--color-surface-sunken);
   border: 1px solid var(--color-line);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   margin: 0.75em 0;
   overflow: hidden;
 }
@@ -156,48 +158,66 @@ watch(
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 6px 12px;
+  padding: var(--space-1) var(--space-3);
   background: var(--color-surface);
   border-bottom: 1px solid var(--color-line);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
 }
 .code-lang {
   color: var(--color-text-muted);
   text-transform: lowercase;
-  font-family: "SF Mono", "Cascadia Code", monospace;
+  font-family: var(--font-mono);
+  letter-spacing: 0.02em;
 }
 .code-copy {
+  display: inline-flex;
+  align-items: center;
   background: transparent;
   border: 1px solid var(--color-line);
   color: var(--color-text-muted);
-  border-radius: 4px;
-  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  padding: 2px var(--space-2);
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--font-size-xs);
+  transition: color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
 }
 .code-copy:hover {
   color: var(--color-text);
-  border-color: var(--color-text-muted);
+  border-color: var(--color-line-strong);
+  background: var(--color-hover);
+}
+.code-copy:active {
+  transform: translateY(1px);
+  background: var(--color-selected);
+}
+.code-copy.copied {
+  color: var(--color-success);
+  border-color: var(--color-success);
+  background: var(--color-success-soft);
 }
 .code-content :deep(pre) {
   margin: 0;
-  padding: 12px;
+  padding: var(--space-3);
   overflow-x: auto;
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   line-height: 1.6;
+  font-family: var(--font-mono);
 }
 .code-content :deep(code) {
-  font-family: "SF Mono", "Cascadia Code", monospace;
+  font-family: var(--font-mono);
 }
 .code-content :deep(.line) { display: block; }
-.code-content :deep(.line.add) { background: #23863633; }
-.code-content :deep(.line.del) { background: #da363333; }
+.code-content :deep(.line.add) { background: var(--color-success-soft); box-shadow: inset 2px 0 0 var(--color-success); }
+.code-content :deep(.line.del) { background: var(--color-danger-soft); box-shadow: inset 2px 0 0 var(--color-danger); }
 .code-content :deep(.shiki-fallback) {
   margin: 0;
-  padding: 12px;
+  padding: var(--space-3);
   overflow-x: auto;
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   line-height: 1.6;
-  font-family: "SF Mono", "Cascadia Code", monospace;
+  font-family: var(--font-mono);
+}
+@media (max-width: 640px) {
+  .code-copy { min-height: 44px; padding: var(--space-1) var(--space-3); }
 }
 </style>

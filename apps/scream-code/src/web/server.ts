@@ -17,9 +17,9 @@
 
 import { createServer, type Server as HttpServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { readFile, writeFile, access, mkdir, readdir, unlink } from 'node:fs/promises';
+import { readFile, writeFile, access, mkdir, readdir, unlink, stat, realpath } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { isAbsolute, join, relative, resolve } from 'node:path';
 import { exec, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { WebSocketServer, WebSocket } from 'ws';
@@ -44,8 +44,16 @@ import { buildRoleAdditionalText } from '#/tui/commands/like';
 import { getDataDir } from '#/utils/paths';
 import { createScreamCodeHostIdentity } from '#/cli/version';
 import { refineGoal } from '#/utils/goal-refiner';
+import { GatewayAuth, gatewayVerdict, isLoopbackAddress } from '#/web/auth';
+import { createFixedWindowLimiter } from '#/web/rateLimit';
+import { getLanAddresses } from '#/web/lan';
+import { FileGate, FileAccessError } from '#/web/files';
+import { toString as qrToString } from 'qrcode';
 
 // ─── Types ────────────────────────────────────────────────────────────────
+
+/** Server-owned journal event kinds (not part of the core event union). */
+type WebJournalEvent = { type: 'web.message.finalized'; message: ChatMessage };
 
 interface JournalEntry {
   readonly seq: number;
@@ -61,12 +69,19 @@ interface PersistedUserMessage {
   readonly clientMessageId?: string;
 }
 
-interface ChatMessage {
-  role: 'user' | 'assistant';
+interface ChatMessage {  role: 'user' | 'assistant';
   content: string;
   clientMessageId?: string;
   tools: ToolMessage[];
   isError?: boolean;
+  /** Real wall-clock time of the turn start (ms epoch). Persisted via finalized snapshots. */
+  ts?: number;
+  /** Model that produced this assistant turn (shown in the message header). */
+  model?: string;
+  /** Journal seq of the event that created this message (used for older-history pagination). */
+  seq?: number;
+  /** True when this assistant turn predates durable message snapshots: body/thinking cannot be rebuilt after a server restart. */
+  degraded?: boolean;
   /** Per-turn runtime stats (round/step/timing/tokens) for the web UI. */
   turnStats?: {
     turn: number;
@@ -86,6 +101,22 @@ interface ToolMessage {
   args: unknown;
   output?: string;
   isError?: boolean;
+  /** Set when the thinking entry was truncated in a snapshot (full text on demand). */
+  truncated?: boolean;
+}
+
+/** Thinking bodies longer than this are delivered as a tail excerpt + on-demand full text. */
+const TRUNCATE_THINKING_LEN = 8 * 1024;
+
+function truncateThinking(messages: ChatMessage[]): void {
+  for (const m of messages) {
+    for (const t of m.tools) {
+      if (t.name === 'thinking' && typeof t.output === 'string' && t.output.length > TRUNCATE_THINKING_LEN) {
+        t.output = `…（前 ${t.output.length - 2048} 字符已省略）\n${t.output.slice(-2048)}`;
+        t.truncated = true;
+      }
+    }
+  }
 }
 
 interface ApprovalRequestMessage {
@@ -103,6 +134,8 @@ interface SessionSnapshot {
   readonly model: string;
   readonly permission: PermissionMode;
   readonly messages: ChatMessage[];
+  readonly olderAvailable?: boolean;
+  readonly oldestSeq?: number;
   readonly pendingApprovals: ApprovalRequestMessage[];
   readonly status: SessionStatus;
   readonly busy: boolean;
@@ -354,6 +387,9 @@ function toHttpError(error: unknown): HttpError {
         return new HttpError(500, error.message, error.code);
     }
   }
+  // The file gate throws FileAccessError with its own status (403 for escapes,
+  // 404 for missing). Without this it was reported as a 500.
+  if (error instanceof FileAccessError) return new HttpError(error.statusCode, error.message);
   return new HttpError(500, errorMessage(error));
 }
 
@@ -362,6 +398,59 @@ function sendHttpError(res: ServerResponse, error: unknown): void {  const mappe
     code: mapped.code ?? mapped.statusCode,
     message: mapped.message,
   });
+}
+
+// ─── File gate routes (read-only) ──────────────────────────────────────────
+
+async function handleFilesRoutes(
+  req: IncomingMessage,
+  res: ServerResponse,
+  url: string,
+  method: string,
+  apiPrefix: string,
+  gate: FileGate,
+): Promise<boolean> {
+  if (method !== 'GET') return false;
+  const [pathOnly, queryPart] = url.split('?');
+  const query = new URLSearchParams(queryPart ?? '');
+  const fail = (error: unknown): void => {
+    const code = error instanceof FileAccessError ? error.statusCode : 500;
+    res.writeHead(code, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ code, message: error instanceof Error ? error.message : String(error) }));
+  };
+
+  if (pathOnly === `${apiPrefix}/files/root`) {
+    sendJson(res, 200, { roots: gate.getRoots() });
+    return true;
+  }
+  if (pathOnly === `${apiPrefix}/files/list`) {
+    try {
+      sendJson(res, 200, { path: query.get('path') ?? '', entries: await gate.list(query.get('path') ?? '') });
+    } catch (error) {
+      fail(error);
+    }
+    return true;
+  }
+  if (pathOnly === `${apiPrefix}/files/read`) {
+    try {
+      sendJson(res, 200, await gate.read(query.get('path') ?? ''));
+    } catch (error) {
+      fail(error);
+    }
+    return true;
+  }
+  if (pathOnly === `${apiPrefix}/files/raw`) {
+    try {
+      const abs = await gate.resolve(query.get('path') ?? '');
+      const data = await readFile(abs);
+      res.writeHead(200, { 'Content-Type': gate.contentType(abs), 'Cache-Control': 'no-store' });
+      res.end(data);
+    } catch (error) {
+      fail(error);
+    }
+    return true;
+  }
+  return false;
 }
 
 // ─── Volatility classification ────────────────────────────────────────────
@@ -488,9 +577,50 @@ interface GitStatusResult {
   readonly adds?: number;
   readonly dels?: number;
   readonly diffStat?: string;
+  readonly files?: GitFileChange[];
+}
+
+interface GitFileChange {
+  /**
+   * Path relative to the **repository root** — the only base `git` itself
+   * speaks, so it is what `/git/diff` must be called with. The old code handed
+   * the UI work-dir-relative paths and then re-prefixed them inside
+   * `getGitFileDiff`, which made every nested file resolve outside the repo and
+   * return an empty patch.
+   */
+  path: string;
+  /** Shorter path relative to the session work dir, for display only. */
+  displayPath: string;
+  status: string;
+  /** Added lines for this file (line count for untracked files). */
+  adds?: number;
+  /** Removed lines for this file. */
+  dels?: number;
+  untracked?: boolean;
 }
 
 const execFileAsync = promisify(execFile);
+
+/** Raw porcelain rows: repo-root-relative path + XY status. `getGitStatus`
+ *  enriches these into full `GitFileChange` records. */
+function parsePorcelainFiles(lines: string[]): Array<{ path: string; status: string }> {
+  const files: Array<{ path: string; status: string }> = [];
+  for (const line of lines) {
+    if (line.startsWith('##')) continue;
+    const status = line.slice(0, 2).replaceAll(' ', '');
+    let p = line.slice(3).trim();
+    if (p.includes(' -> ')) p = p.split(' -> ').pop()!;
+    if (p.startsWith('"') && p.endsWith('"')) {
+      try {
+        p = JSON.parse(p);
+      } catch {
+        // keep quoted form
+      }
+    }
+    files.push({ path: p, status });
+  }
+  return files;
+}
 
 async function git(workDir: string, args: string[]): Promise<string> {
   const { stdout } = await execFileAsync('git', ['-C', workDir, ...args], {
@@ -511,12 +641,20 @@ async function getGitStatus(workDir: string): Promise<GitStatusResult> {
   let ahead: number | undefined;
   let behind: number | undefined;
   let changed = 0;
+  let gitFiles: GitFileChange[] = [];
   try {
-    const [branchOut, statusOut] = await Promise.all([
+    const [branchOut, statusOut, repoTopOut] = await Promise.all([
       git(workDir, ['branch', '--show-current']),
       git(workDir, ['status', '--porcelain', '-b']),
+      git(workDir, ['rev-parse', '--show-toplevel']).catch(() => workDir),
     ]);
     branch = branchOut.trim() || undefined;
+    const repoTop = repoTopOut.trim() || workDir;
+    // porcelain paths are relative to the repo top. `path` keeps that canonical
+    // base (it is what `/git/diff` expects); `displayPath` strips the workdir
+    // prefix purely so the UI can show a short path.
+    const prefix = repoTop !== workDir ? `${relative(repoTop, workDir).replaceAll('\\', '/')}/` : '';
+    const fixPath = (p: string): string => (prefix && p.startsWith(prefix) ? p.slice(prefix.length) : p);
     const statusLines = statusOut.split('\n').filter((l) => l.length > 0);
     const header = statusLines[0] ?? '';
     const aheadMatch = /ahead (\d+)/.exec(header);
@@ -524,6 +662,14 @@ async function getGitStatus(workDir: string): Promise<GitStatusResult> {
     if (aheadMatch) ahead = Number(aheadMatch[1]);
     if (behindMatch) behind = Number(behindMatch[1]);
     changed = statusLines.filter((l) => !l.startsWith('##')).length;
+    const statusFiles = parsePorcelainFiles(statusLines).map((f) => ({
+      path: f.path,
+      displayPath: fixPath(f.path),
+      status: f.status,
+    }));
+    if (statusFiles.length > 0) {
+      gitFiles = statusFiles;
+    }
   } catch {
     // Branch/status failure — fall through with what we have.
   }
@@ -531,6 +677,8 @@ async function getGitStatus(workDir: string): Promise<GitStatusResult> {
   let adds: number | undefined;
   let dels: number | undefined;
   let diffStat: string | undefined;
+  /** Repo-root-relative → per-file line counts, from `git diff --numstat`. */
+  const perFile = new Map<string, { adds: number; dels: number }>();
   try {
     const [numstatOut, diffStatOut] = await Promise.all([
       git(workDir, ['diff', '--numstat', 'HEAD']),
@@ -539,18 +687,109 @@ async function getGitStatus(workDir: string): Promise<GitStatusResult> {
     adds = 0;
     dels = 0;
     for (const line of numstatOut.split('\n')) {
-      const m = /^(\d+)\t(\d+)\t/.exec(line);
-      if (m) {
-        adds += Number(m[1]);
-        dels += Number(m[2]);
-      }
+      const parts = line.split('\t');
+      const m = parts.length >= 3 ? /^(\d+)\t(\d+)\t/.exec(line) : null;
+      if (!m) continue;
+      adds += Number(m[1]);
+      dels += Number(m[2]);
+      perFile.set(normalizeNumstatPath(parts.slice(2).join('\t')), { adds: Number(m[1]), dels: Number(m[2]) });
     }
     diffStat = diffStatOut.trim().split('\n').slice(0, 200).join('\n') || undefined;
   } catch {
     // No HEAD yet (fresh repo) — diff stats unavailable.
   }
 
-  return { isRepo: true, branch, ahead, behind, changed, adds, dels, diffStat };
+  // Untracked files have no numstat row at all; mark them so the UI can label
+  // the row instead of showing a misleading `0`.
+  const untracked = new Set<string>();
+  try {
+    const others = await git(workDir, ['ls-files', '--others', '--exclude-standard', '-z']);
+    for (const p of others.split('\0')) if (p.trim() !== '') untracked.add(p.replaceAll('\\', '/'));
+  } catch {
+    // treat as none
+  }
+  gitFiles = gitFiles.map((file) => {
+    const stats = perFile.get(file.path);
+    const isUntracked = untracked.has(file.path) || file.status.includes('?');
+    return {
+      ...file,
+      status: isUntracked ? '?' : file.status,
+      ...(isUntracked ? { untracked: true } : {}),
+      ...(stats ? { adds: stats.adds, dels: stats.dels } : {}),
+    };
+  });
+
+  return { isRepo: true, branch, ahead, behind, changed, adds, dels, diffStat, files: gitFiles.length > 0 ? gitFiles : undefined };
+}
+
+/**
+ * numstat keys for renames come back as `a/{old => new}/b.ts` or
+ * `old => new`; resolve them to the post-rename path so they match porcelain.
+ */
+function normalizeNumstatPath(raw: string): string {
+  let p = raw.trim().replaceAll('\\', '/');
+  const brace = /\{([^{}]*) => ([^{}]*)\}/.exec(p);
+  if (brace) p = p.replace(brace[0], `${brace[1]}${brace[2]}`);
+  if (p.includes(' => ')) p = p.split(' => ').pop()!.trim();
+  return p.replaceAll('//', '/').replace(/^\.\//, '').replace(/^\/+/, '');
+}
+
+/** Cap for the inlined content of an untracked file. */
+const MAX_INLINE_DIFF_BYTES = 512 * 1024;
+
+/**
+ * Single-file patch. `repoPath` is **repository-root relative** — the same base
+ * `git status` reports, so the UI can hand it straight back.
+ *
+ * Two cases used to return an empty patch and look like "点了没反应":
+ * nested files (the old code re-prefixed workdir-relative paths with `../..`,
+ * resolving them outside the repo) and untracked files (`git diff` has nothing
+ * to say about them). The second case now gets a synthesised added-file patch.
+ */
+async function getGitFileDiff(workDir: string, repoPath: string): Promise<{ path: string; patch: string } | null> {
+  const rel = normalizeNumstatPath(repoPath);
+  if (rel === '') throw new FileAccessError(403, '路径不能为空');
+  let repoTop = '';
+  try {
+    repoTop = (await git(workDir, ['rev-parse', '--show-toplevel'])).trim();
+  } catch {
+    return null;
+  }
+  if (!repoTop) throw new FileAccessError(403, '不在 git 仓库内');
+  const abs = resolve(repoTop, rel);
+  const inside = relative(repoTop, abs);
+  if (inside === '' || inside.startsWith('..') || isAbsolute(inside)) {
+    throw new FileAccessError(403, '路径不属于该仓库');
+  }
+  // Run from the repo top so the pathspec and the reported paths share one base.
+  const patch = await git(repoTop, ['diff', '--no-color', '--', rel]).catch(() => '');
+  if (patch.trim()) return { path: rel, patch };
+
+  const isUntracked = (await git(repoTop, ['ls-files', '--others', '--exclude-standard', '--', rel]).catch(() => '')).trim() !== '';
+  if (!isUntracked) return { path: rel, patch: '' };
+  const header = `--- /dev/null\n+++ b/${rel}\n`;
+  try {
+    // Reading from disk needs the same realpath containment `files.ts` applies:
+    // a symlink committed inside the repo must not let this endpoint read a file
+    // that lives outside the working tree.
+    const [realRoot, realAbs] = await Promise.all([realpath(repoTop), realpath(abs)]);
+    const relCheck = relative(realRoot, realAbs);
+    if (relCheck === '' || relCheck.startsWith('..') || isAbsolute(relCheck)) {
+      throw new FileAccessError(403, '路径不属于该仓库');
+    }
+    const info = await stat(realAbs);
+    if (!info.isFile()) return { path: rel, patch: `${header}@@ -0,0 +1 @@\n+（非普通文件）\n` };
+    if (info.size > MAX_INLINE_DIFF_BYTES) {
+      return { path: rel, patch: `${header}@@ -0,0 +1 @@\n+（文件超过 ${Math.round(MAX_INLINE_DIFF_BYTES / 1024)}KB，未内联显示）\n` };
+    }
+    const content = await readFile(realAbs, 'utf8');
+    if (content.includes('\u0000')) return { path: rel, patch: `${header}@@ -0,0 +1 @@\n+（二进制文件）\n` };
+    const lines = content.replaceAll('\r\n', '\n').split('\n');
+    if (lines.at(-1) === '') lines.pop();
+    return { path: rel, patch: `${header}@@ -0,0 +1,${lines.length} @@\n${lines.map((l) => `+${l}`).join('\n')}\n` };
+  } catch {
+    return { path: rel, patch: `${header}@@ -0,0 +1 @@\n+（读取失败）\n` };
+  }
 }
 
 function exportToMarkdown(messages: ChatMessage[], title: string): string {
@@ -615,6 +854,15 @@ class WebSession {
   private heartbeatTimer: NodeJS.Timeout | null = null;
   private unsubscribe: (() => void) | null = null;
   private busy = false;
+
+  /**
+   * Live assistant message under construction. Mirrors the same state machine
+   * used by buildMessages() so turn.ended can persist a complete durable
+   * snapshot (`web.message.finalized`) — the only source that survives a
+   * server restart (deltas are volatile by design).
+   */
+  private liveAssistant: ChatMessage | null = null;
+  private liveTurnCount = 0;
   /** pendingMsgId awaiting compaction completion/cancellation event. */
   private pendingCompactionMsgId: string | null = null;
   private readonly homeDir: string | null;
@@ -778,6 +1026,23 @@ class WebSession {
     return entry;
   }
 
+  /**
+   * Append + persist a durable journal entry WITHOUT broadcasting it to
+   * clients. Used for server-owned reconstruction material (finalized
+   * assistant snapshots) that clients never consume as live events.
+   */
+  private appendDurableSilent(payload: Record<string, unknown>): JournalEntry {
+    const entry: JournalEntry = {
+      seq: this.nextSeq++,
+      epoch: this.epoch,
+      volatile: false,
+      payload: payload as unknown as Event,
+    };
+    this.journal.push(entry);
+    void this.persistEntry(entry);
+    return entry;
+  }
+
   private subscribeEvents(): void {
     if (!this.session) return;
     this.unsubscribe = this.session.onEvent((event) => {
@@ -787,10 +1052,71 @@ class WebSession {
 
       if (event.type === 'turn.started') {
         this.busy = true;
+        this.liveTurnCount += 1;
+        this.liveAssistant = {
+          role: 'assistant',
+          content: '',
+          tools: [],
+          ts: Date.now(),
+          model: this.cachedStatus?.model,
+          turnStats: {
+            turn: this.liveTurnCount,
+            step: 0,
+            status: 'running',
+            firstTokenMs: null,
+            llmMs: null,
+            toolMs: null,
+            tokens: null,
+            tokensPerSec: null,
+          },
+        };
       } else if (event.type === 'turn.ended') {
         this.busy = false;
+        // Persist the complete assistant snapshot BEFORE turn.ended so the
+        // journal replay sees finalized → turn.ended in order.
+        const live = this.liveAssistant;
+        if (event.reason === 'failed' && live) live.isError = true;
+        if (live) {
+          const base = live.turnStats ?? {
+            turn: this.liveTurnCount,
+            step: 0,
+            firstTokenMs: null,
+            llmMs: null,
+            toolMs: null,
+            tokens: null,
+            tokensPerSec: null,
+          };
+          live.turnStats = { ...base, status: 'done' } as NonNullable<ChatMessage['turnStats']>;
+          this.appendDurableSilent({ type: 'web.message.finalized', message: live });
+        }
+        this.liveAssistant = null;
         // Update title after each exchange.
         void this.updateTitle();
+      } else if (event.type === 'assistant.delta') {
+        const live = this.liveAssistant;
+        if (live) live.content += event.delta;
+      } else if (event.type === 'thinking.delta') {
+        const live = this.liveAssistant;
+        if (live) {
+          const t = live.tools.find((x) => x.name === 'thinking');
+          if (t) t.output = (t.output ?? '') + event.delta;
+          else live.tools.push({ toolCallId: 'thinking', name: 'thinking', args: {}, output: event.delta });
+        }
+      } else if (event.type === 'tool.call.started') {
+        const live = this.liveAssistant;
+        if (live) {
+          live.tools.push({ toolCallId: event.toolCallId, name: event.name, args: event.args });
+          if (live.turnStats) live.turnStats.step += 1;
+        }
+      } else if (event.type === 'tool.result') {
+        const live = this.liveAssistant;
+        if (live) {
+          const tool = live.tools.find((t) => t.toolCallId === event.toolCallId);
+          if (tool) {
+            tool.output = String(event.output);
+            tool.isError = event.isError;
+          }
+        }
       } else if (event.type === 'goal.updated') {
         this.goalEventRevision += 1;
         this.cachedGoal = cloneSnapshot(event.snapshot);
@@ -1197,7 +1523,17 @@ class WebSession {
 
   // ── Snapshot ───────────────────────────────────────────────────────────
 
-  getSnapshot(): SessionSnapshot {
+  getSnapshot(options?: { tail?: number }): SessionSnapshot {
+    const all = this.buildMessages();
+    let messages = all;
+    let olderAvailable: boolean | undefined;
+    let oldestSeq: number | undefined;
+    if (options?.tail && all.length > options.tail) {
+      messages = all.slice(-options.tail);
+      olderAvailable = true;
+      oldestSeq = messages[0]?.seq;
+    }
+    truncateThinking(messages);
     return cloneSnapshot({
       sessionId: this.sessionId,
       workDir: this.workDir,
@@ -1205,7 +1541,9 @@ class WebSession {
       epoch: this.epoch,
       model: this.cachedStatus?.model ?? 'unknown',
       permission: this.cachedStatus?.permission ?? this.permission,
-      messages: this.buildMessages(),
+      messages,
+      olderAvailable,
+      oldestSeq,
       pendingApprovals: Array.from(this.pendingApprovals.entries()).map(([id, approval]) => ({
         id,
         toolName: approval.toolName,
@@ -1229,6 +1567,23 @@ class WebSession {
       goal: this.cachedGoal,
       todos: this.cachedTodos,
     });
+  }
+
+  /** Older history page: messages strictly older than `beforeSeq`, newest-first window of `tail`. */
+  getMessagesOlder(beforeSeq: number, tail: number): { messages: ChatMessage[]; hasMore: boolean } {
+    const all = this.buildMessages();
+    const older = all.filter((m) => (m.seq ?? Number.MAX_SAFE_INTEGER) < beforeSeq);
+    return { messages: older.slice(-tail), hasMore: older.length > tail };
+  }
+
+  /** Full thinking text for a truncated entry (loaded on demand). */
+  getThinkingEntry(seq: number, toolCallId: string): string {
+    const all = this.buildMessages();
+    const msg = all.find((m) => m.seq === seq);
+    const tool = msg?.tools.find((t) => t.toolCallId === toolCallId);
+    if (tool && typeof tool.output === 'string') return tool.output;
+    const thinking = msg?.tools.find((t) => t.name === 'thinking');
+    return thinking && typeof thinking.output === 'string' ? thinking.output : '';
   }
 
   getListItem(): SessionListItem {
@@ -1428,13 +1783,15 @@ class WebSession {
       while (userIndex < this.userMessages.length) {
         const item = this.userMessages[userIndex];
         if (item === undefined || item.beforeSeq > seq) break;
-        messages.push(item.msg);
+        messages.push({ ...item.msg, seq: item.beforeSeq });
         userIndex++;
       }
     };
 
+    let turnFinalized = false;
+
     for (const entry of this.journal) {
-      const event = entry.payload;
+      const event = entry.payload as Event | WebJournalEvent;
       flushUserMessagesBefore(entry.seq);
       switch (event.type) {
         case 'turn.started': {
@@ -1443,6 +1800,8 @@ class WebSession {
             role: 'assistant',
             content: '',
             tools: [],
+            seq: entry.seq,
+            model: this.cachedStatus?.model,
             turnStats: {
               turn: turnCount,
               step: 0,
@@ -1463,6 +1822,14 @@ class WebSession {
             currentAssistant.content += event.delta;
           }
           break;
+        case 'thinking.delta': {
+          if (currentAssistant) {
+            const t = currentAssistant.tools.find((x) => x.name === 'thinking');
+            if (t) t.output = (t.output ?? '') + event.delta;
+            else currentAssistant.tools.push({ toolCallId: 'thinking', name: 'thinking', args: {}, output: event.delta });
+          }
+          break;
+        }
         case 'tool.call.started': {
           if (currentAssistant) {
             currentAssistant.tools.push({
@@ -1484,10 +1851,34 @@ class WebSession {
           }
           break;
         }
+        case 'web.message.finalized': {
+          // Complete durable snapshot of the last turn. Replaces the skeleton
+          // built from the (volatile) delta replay so content/thinking/tools
+          // survive a server restart.
+          const finalized = event.message as ChatMessage;
+          const lastSkeletonSeq = messages.length > 0 && messages.at(-1)?.role === 'assistant'
+            ? messages.at(-1)!.seq
+            : entry.seq;
+          finalized.seq = lastSkeletonSeq;
+          if (messages.length > 0 && messages.at(-1)?.role === 'assistant') {
+            messages[messages.length - 1] = finalized;
+          } else {
+            messages.push(finalized);
+          }
+          currentAssistant = null;
+          turnFinalized = true;
+          break;
+        }
         case 'turn.ended':
           if (event.reason === 'failed' && currentAssistant) {
             currentAssistant.isError = true;
           }
+          // Pre-finalization turn (no durable snapshot): body cannot be
+          // rebuilt after restart — mark it honestly instead of showing "".
+          if (currentAssistant && !turnFinalized && currentAssistant.content === '') {
+            currentAssistant.degraded = true;
+          }
+          turnFinalized = false;
           currentAssistant = null;
           break;
         default:
@@ -1950,7 +2341,7 @@ export async function startWebServerForSession(session: Session, opts: {
       return;
     }
 
-    const snapshotMatch = new RegExp(`^${API_PREFIX}/sessions/([^/]+)/snapshot$`).exec(url);
+    const snapshotMatch = new RegExp(`^${API_PREFIX}/sessions/([^/]+)/snapshot(\\?|$)`).exec(url);
     if (snapshotMatch && method === 'GET') {
       const sid = snapshotMatch[1]!;
       if (sid !== webSession.sessionId) {
@@ -1960,7 +2351,30 @@ export async function startWebServerForSession(session: Session, opts: {
       }
       try {
         await webSession.ready;
-        sendJson(res, 200, webSession.getSnapshot());
+        const query = new URLSearchParams(url.split('?')[1] ?? '');
+        const tail = Number(query.get('tail') ?? '');
+        sendJson(res, 200, Number.isFinite(tail) && tail > 0 ? webSession.getSnapshot({ tail }) : webSession.getSnapshot());
+      } catch (error) {
+        sendHttpError(res, error);
+      }
+      return;
+    }
+
+    // Older message history page (before = seq cursor) + full thinking entry (seq + tool)
+    if (url.startsWith(`${API_PREFIX}/sessions/${webSession.sessionId}/messages?`) && method === 'GET') {
+      try {
+        await webSession.ready;
+        const query = new URLSearchParams(url.split('?')[1] ?? '');
+        const seq = Number(query.get('seq') ?? '0');
+        const tool = query.get('tool') ?? '';
+        if (Number.isFinite(seq) && seq > 0 && tool) {
+          sendJson(res, 200, { output: webSession.getThinkingEntry(seq, tool) });
+          return;
+        }
+        const before = Number(query.get('before') ?? '0');
+        const tail = Number(query.get('tail') ?? '50');
+        const page = Number.isFinite(before) && before > 0 ? webSession.getMessagesOlder(before, Number.isFinite(tail) && tail > 0 ? tail : 50) : { messages: [], hasMore: false };
+        sendJson(res, 200, page);
       } catch (error) {
         sendHttpError(res, error);
       }
@@ -1972,6 +2386,24 @@ export async function startWebServerForSession(session: Session, opts: {
       const gs = await getGitStatus(opts.workDir);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(gs));
+      return;
+    }
+
+    // Single-file git diff
+    if (url.startsWith(`${API_PREFIX}/git/diff?`) && method === 'GET') {
+      const relPath = new URLSearchParams(url.split('?')[1] ?? '').get('path') ?? '';
+      try {
+        const result = await getGitFileDiff(opts.workDir, relPath);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ path: relPath, patch: result?.patch ?? '' }));
+      } catch (error) {
+        sendHttpError(res, error);
+      }
+      return;
+    }
+
+    // File gate (read-only browsing of this session's workdir)
+    if (await handleFilesRoutes(req, res, url, method, API_PREFIX, new FileGate(() => [opts.workDir]))) {
       return;
     }
 
@@ -2055,9 +2487,13 @@ export interface WebServerOptions {
   readonly auto: boolean;
   readonly open: boolean;
   readonly skillsDirs: string[];
+  /** LAN mode: bind 0.0.0.0 and require gateway auth for non-loopback clients. */
+  readonly lan?: boolean;
+  /** Explicit gateway access key (persisted, replacing any stored key). */
+  readonly token?: string;
 }
 
-export async function runWebServer(opts: WebServerOptions): Promise<void> {
+export async function runWebServer(opts: WebServerOptions): Promise<WebServerHandle> {
   const homeDir = resolveScreamHome();
   const workDir = opts.workDir;
 
@@ -2089,12 +2525,27 @@ export async function runWebServer(opts: WebServerOptions): Promise<void> {
   const manager = new SessionManager({ harness, homeDir, workDir, model, permission, yolo: opts.yolo });
   await manager.init();
 
+  // ── Gateway (LAN mode security layer) ───────────────────────────────────
+  const lanMode = opts.lan === true;
+  const host = lanMode ? '0.0.0.0' : '127.0.0.1';
+  const gateway = lanMode ? await GatewayAuth.setup({ homeDir, token: opts.token }) : null;
+  const loginLimiter = createFixedWindowLimiter({ windowMs: 5 * 60_000, max: 10 });
+
   // Resume the most recent session for this working directory, but never
   // auto-create one: sessions are created only on explicit user action.
+  // A stale metadata entry (core session already purged) must not crash
+  // startup — the user simply starts from the empty state.
   if (!manager.list().some((s) => s.active)) {
     const recent = manager.list().find((s) => s.workDir === workDir);
     if (recent) {
-      await manager.activateSession(recent.sessionId);
+      try {
+        await manager.activateSession(recent.sessionId);
+      } catch (error) {
+        log.warn('web: resume of most recent session failed', {
+          sessionId: recent.sessionId,
+          error: errorMessage(error),
+        });
+      }
     }
   }
 
@@ -2113,6 +2564,30 @@ export async function runWebServer(opts: WebServerOptions): Promise<void> {
   const httpServer: HttpServer = createServer(async (req: IncomingMessage, res) => {
     const url = req.url ?? '/';
     const method = req.method ?? 'GET';
+
+    // ── Gateway auth gate (LAN mode) ──────────────────────────────────────
+    // Loopback clients are always trusted; non-local clients must present a
+    // valid gateway session cookie, except for the gateway page and the
+    // gateway API endpoints themselves.
+    if (gateway) {
+      const verdict = gatewayVerdict({
+        loopback: isLoopbackAddress(req.socket.remoteAddress),
+        authenticated: gateway.verifySession(req.headers.cookie),
+        path: url.split('?')[0] ?? '/',
+        method,
+        apiPrefix: API_PREFIX,
+      });
+      if (verdict === 'redirect') {
+        res.writeHead(302, { Location: `/gateway?next=${encodeURIComponent(url)}` });
+        res.end();
+        return;
+      }
+      if (verdict === 'unauthorized') {
+        res.writeHead(401, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ code: 40101, message: 'unauthorized' }));
+        return;
+      }
+    }
 
     // ── REST API ──────────────────────────────────────────────────────────
 
@@ -2141,9 +2616,9 @@ export async function runWebServer(opts: WebServerOptions): Promise<void> {
     }
 
     // Snapshot
-    const snapshotMatch = new RegExp(`^${API_PREFIX}/sessions/([^/]+)/snapshot$`).exec(url);
+    const snapshotMatch = new RegExp(`^${API_PREFIX}/sessions/([^/]+)/snapshot(\\?|$)`).exec(url);
     if (snapshotMatch && method === 'GET') {
-      const sessionId = snapshotMatch[1]!;
+      const sessionId = decodeURIComponent(snapshotMatch[1]!);
       const ws = manager.get(sessionId);
       if (!ws) {
         res.writeHead(404, { 'Content-Type': 'application/json' });
@@ -2152,7 +2627,38 @@ export async function runWebServer(opts: WebServerOptions): Promise<void> {
       }
       try {
         await ws.ready;
-        sendJson(res, 200, ws.getSnapshot());
+        const query = new URLSearchParams(url.split('?')[1] ?? '');
+        const tail = Number(query.get('tail') ?? '');
+        sendJson(res, 200, Number.isFinite(tail) && tail > 0 ? ws.getSnapshot({ tail }) : ws.getSnapshot());
+      } catch (error) {
+        sendHttpError(res, error);
+      }
+      return;
+    }
+
+    // Older message history page (before = seq cursor), or full thinking entry (seq + tool)
+    const olderMatch = /^\/api\/v1\/sessions\/([^/?]+)\/messages(\?|$)/.exec(url);
+    if (olderMatch && method === 'GET') {
+      const sessionId = decodeURIComponent(olderMatch[1]!);
+      const ws = manager.get(sessionId);
+      if (!ws) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ code: 404, message: 'Session not found' }));
+        return;
+      }
+      try {
+        await ws.ready;
+        const query = new URLSearchParams(url.split('?')[1] ?? '');
+        const seq = Number(query.get('seq') ?? '0');
+        const tool = query.get('tool') ?? '';
+        if (Number.isFinite(seq) && seq > 0 && tool) {
+          sendJson(res, 200, { output: ws.getThinkingEntry(seq, tool) });
+          return;
+        }
+        const before = Number(query.get('before') ?? '0');
+        const tail = Number(query.get('tail') ?? '50');
+        const page = Number.isFinite(before) && before > 0 ? ws.getMessagesOlder(before, Number.isFinite(tail) && tail > 0 ? tail : 50) : { messages: [], hasMore: false };
+        sendJson(res, 200, page);
       } catch (error) {
         sendHttpError(res, error);
       }
@@ -2166,6 +2672,29 @@ export async function runWebServer(opts: WebServerOptions): Promise<void> {
       res.end(JSON.stringify(gs));
       return;
     }
+
+    // Single-file git diff
+    if (url.startsWith(`${API_PREFIX}/git/diff?`) && method === 'GET') {
+      const relPath = new URLSearchParams(url.split('?')[1] ?? '').get('path') ?? '';
+      try {
+        const result = await getGitFileDiff(workDir, relPath);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ path: relPath, patch: result?.patch ?? '' }));
+      } catch (error) {
+        sendHttpError(res, error);
+      }
+      return;
+    }
+
+  // ── File gate (read-only browsing of session workdirs) ───────────────────
+
+  function makeFileGate(): FileGate {
+    return new FileGate(() => manager.list().map((s) => s.workDir));
+  }
+
+  if (await handleFilesRoutes(req, res, url, method, API_PREFIX, makeFileGate())) {
+    return;
+  }
 
     // Like preferences (shared with the TUI via tui.toml + user-prefs.md)
     if (url === `${API_PREFIX}/like` && method === 'GET') {
@@ -2292,6 +2821,77 @@ export async function runWebServer(opts: WebServerOptions): Promise<void> {
       return;
     }
 
+    // ── Gateway (LAN mode) ─────────────────────────────────────────────────
+
+    if (gateway && url === `${API_PREFIX}/gateway/status` && method === 'GET') {
+      const loopback = isLoopbackAddress(req.socket.remoteAddress);
+      sendJson(res, 200, {
+        authRequired: true,
+        authenticated: loopback || gateway.verifySession(req.headers.cookie),
+      });
+      return;
+    }
+
+    if (gateway && url === `${API_PREFIX}/gateway/login` && method === 'POST') {
+      const ip = req.socket.remoteAddress ?? 'unknown';
+      const attempt = loginLimiter.hit(ip);
+      if (!attempt.ok) {
+        res.writeHead(429, {
+          'Content-Type': 'application/json',
+          'Retry-After': String(attempt.retryAfterSeconds),
+        });
+        res.end(JSON.stringify({
+          code: 42903,
+          message: `尝试过于频繁，请 ${attempt.retryAfterSeconds} 秒后重试`,
+          retryAfter: attempt.retryAfterSeconds,
+        }));
+        return;
+      }
+      try {
+        const body = await readJsonBody(req);
+        const key = typeof body['key'] === 'string' ? body['key'] : '';
+        if (!gateway.verifyKey(key)) {
+          res.writeHead(401, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ code: 40101, message: '访问密钥错误' }));
+          return;
+        }
+        loginLimiter.reset(ip);
+        const sid = gateway.createSession();
+        res.writeHead(200, {
+          'Content-Type': 'application/json',
+          'Set-Cookie': gateway.sessionCookie(sid),
+          'Cache-Control': 'no-store',
+        });
+        res.end(JSON.stringify({ ok: true }));
+      } catch (error) {
+        sendHttpError(res, error);
+      }
+      return;
+    }
+
+    if (gateway && url === `${API_PREFIX}/gateway/logout` && method === 'POST') {
+      gateway.destroySession(req.headers.cookie);
+      res.writeHead(200, {
+        'Content-Type': 'application/json',
+        'Set-Cookie': gateway.clearCookie(),
+        'Cache-Control': 'no-store',
+      });
+      res.end(JSON.stringify({ ok: true }));
+      return;
+    }
+
+    if (gateway && url === '/gateway' && method === 'GET') {
+      try {
+        const html = await readFile(join(publicDir, 'gateway.html'), 'utf-8');
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+        res.end(html);
+      } catch {
+        res.writeHead(500, { 'Content-Type': 'text/plain' });
+        res.end('gateway page missing — did you run pnpm web:build?');
+      }
+      return;
+    }
+
     // ── Static assets ─────────────────────────────────────────────────────
 
     if (url === '/' || url === '/index.html') {
@@ -2324,6 +2924,10 @@ export async function runWebServer(opts: WebServerOptions): Promise<void> {
   const wss = new WebSocketServer({ server: httpServer });
 
   wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
+    if (gateway && !isLoopbackAddress(req.socket.remoteAddress) && !gateway.verifySession(req.headers.cookie)) {
+      ws.close(1008, 'unauthorized');
+      return;
+    }
     const url = new URL(req.url ?? '/', 'http://localhost');
     const sessionId = url.searchParams.get('sessionId');
 
@@ -2385,10 +2989,12 @@ export async function runWebServer(opts: WebServerOptions): Promise<void> {
         reject(err);
       }
     });
-    httpServer.listen(opts.port, '127.0.0.1', resolve);
+    httpServer.listen(opts.port, host, resolve);
   });
 
-  const url = `http://localhost:${opts.port}`;
+  const address = httpServer.address();
+  const realPort = typeof address === 'object' && address !== null ? address.port : opts.port;
+  const url = `http://localhost:${realPort}`;
 
   if (opts.open) {
     const openCmd =
@@ -2420,11 +3026,39 @@ export async function runWebServer(opts: WebServerOptions): Promise<void> {
     void cleanup().finally(() => process.exit(0));
   });
 
-  // eslint-disable-next-line no-console
-  console.log(
+  let banner =
     `\n  Scream Web UI ready: ${url}\n` +
-      `  Working directory: ${workDir}\n` +
-      `  Sessions: ${manager.list().length} (${manager.list().filter((s) => s.active).length} active)\n` +
-      `  Permission: ${opts.yolo ? 'yolo' : opts.auto ? 'auto' : 'manual'}\n`,
-  );
+    `  Working directory: ${workDir}\n` +
+    `  Sessions: ${manager.list().length} (${manager.list().filter((s) => s.active).length} active)\n` +
+    `  Permission: ${opts.yolo ? 'yolo' : opts.auto ? 'auto' : 'manual'}\n`;
+
+  if (gateway) {
+    const addrs = getLanAddresses();
+    banner += `  LAN mode: on — non-local devices must present the access key\n`;
+    if (addrs.length > 0) {
+      for (const addr of addrs) {
+        banner += `    http://${addr}:${realPort}\n`;
+      }
+    } else {
+      banner += `    (no reachable LAN IPv4 address found)\n`;
+    }
+    if (gateway.plaintext !== null) {
+      banner += `  Access key: ${gateway.plaintext}${gateway.generated ? ' (auto-generated, saved, persists across restarts)' : ''}\n`;
+    } else {
+      banner += `  Access key: (saved in a previous run — use --reset-password to change)\n`;
+    }
+    if (addrs.length > 0) {
+      try {
+        const qr = await qrToString(`http://${addrs[0]!}:${realPort}`, { type: 'terminal', small: true });
+        banner += `\n${qr}\n`;
+      } catch {
+        // QR is best-effort; the URL lines above are sufficient.
+      }
+    }
+  }
+
+  // eslint-disable-next-line no-console
+  console.log(banner);
+
+  return { url, close: cleanup };
 }

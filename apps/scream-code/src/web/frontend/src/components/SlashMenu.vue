@@ -42,12 +42,17 @@ const emit = defineEmits<{
   background: var(--color-surface-raised);
   border: 1px solid var(--color-line);
   border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-md, 0 8px 24px rgba(0, 0, 0, 0.18));
+  box-shadow: var(--shadow-md);
   padding: var(--space-1);
   z-index: var(--z-overlay);
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  transform-origin: bottom center;
+  animation: rise-in var(--dur-fast) var(--ease-out);
+}
+@media (prefers-reduced-motion: reduce) {
+  .slash-menu { animation: none; }
 }
 
 .slash-item {
@@ -55,6 +60,7 @@ const emit = defineEmits<{
   align-items: center;
   gap: var(--space-3);
   width: 100%;
+  min-height: 36px;
   padding: var(--space-2) var(--space-3);
   border: none;
   background: transparent;
@@ -63,11 +69,14 @@ const emit = defineEmits<{
   text-align: left;
   font-size: var(--font-size-sm);
   color: var(--color-text);
-  transition: background var(--dur-fast);
+  transition: background var(--dur-fast) var(--ease-out);
 }
 .slash-item.active,
 .slash-item:hover {
   background: var(--color-hover);
+}
+.slash-item:active {
+  background: var(--color-selected);
 }
 .slash-name {
   font-family: var(--font-mono);
@@ -107,5 +116,9 @@ const emit = defineEmits<{
   color: var(--color-text-faint);
   border-top: 1px solid var(--color-line);
   margin-top: var(--space-1);
+}
+@media (max-width: 640px) {
+  .slash-item { min-height: 44px; }
+  .slash-desc { white-space: normal; }
 }
 </style>

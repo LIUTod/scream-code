@@ -1,11 +1,8 @@
 /* ─── Design tokens (theme-independent scales & seeds) ───────────────────── */
 
 :root {
-  /* Color seeds */
-  --accent-primary: #79eb00;
-  --accent-primary-light: #2da44e;
-  --surface-light: #f6f7f9;
-  --surface-dark: #161b22;
+  /* Color seeds (monochrome prototype: neutral ink on paper) */
+  --accent-primary: #111111;
 
   /* Spacing scale (4px grid) */
   --space-1: 4px;
@@ -50,14 +47,20 @@
   --dur-slower: 320ms;
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
   --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-spring: cubic-bezier(0.34, 1.4, 0.44, 1);
 
   /* Message entrance */
   --dur-msg-user: 200ms;
   --dur-msg-assistant: 250ms;
 
-  /* Layout chrome */
-  --sidebar-width: 360px;
+  /* Motion choreography (quiet layout, precise motion) */
+  --dur-breathe: 2600ms;
+  --shimmer-width: 200%;
+
+  /* Layout chrome (prototype: 288px fixed sidebar) */
+  --sidebar-width: 288px;
+  --sidebar-width-collapsed: 64px;
   --sidebar-width-collapsed: 64px;
   --rightbar-width: 360px;
-  --topbar-height: 76px;
+  --content-max: 840px;
 }

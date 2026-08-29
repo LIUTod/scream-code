@@ -39,16 +39,21 @@ async function confirm(): Promise<void> {
 <template>
   <section class="panel-section like-section">
     <div class="section-heading">
-      <div><span>偏好设置</span><small>/like 用户偏好</small></div>
-      <SvgIcon name="heart" :size="19" />
+      <span class="head-icon"><SvgIcon name="settings" :size="14" /></span>
+      <span class="head-title">偏好设置</span>
+      <span class="head-hint">/like 用户偏好</span>
     </div>
-    <div class="like-fields">
-      <div v-for="f in fields" :key="f.key" class="like-field">
-        <span class="like-label">{{ f.label }}</span>
-        <span class="like-value">{{ (like[f.key] ?? '').trim() || '未设置' }}</span>
+    <div class="panel-body">
+      <dl class="kv-rows">
+        <div v-for="f in fields" :key="f.key" class="kv-row">
+          <dt>{{ f.label }}</dt>
+          <dd>{{ (like[f.key] ?? '').trim() || '未设置' }}</dd>
+        </div>
+      </dl>
+      <div class="panel-actions">
+        <button class="like-edit" @click="open">编辑偏好</button>
       </div>
     </div>
-    <button class="like-edit" @click="open">编辑偏好</button>
 
     <div v-if="editing" class="dialog-overlay" @click.self="editing = false">
       <div class="dialog">
@@ -68,26 +73,33 @@ async function confirm(): Promise<void> {
 </template>
 
 <style scoped>
-.panel-section { padding:17px; border:1px solid var(--color-line); border-radius:14px; background:var(--color-surface); box-shadow:0 2px 8px rgba(20,35,24,.03); }
-.section-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:10px; margin-bottom:14px; color:var(--color-accent); }
-.section-heading > div { display:flex; flex-direction:column; }
-.section-heading span { color:var(--color-text); font-size:14px; font-weight:700; }
-.section-heading small { margin-top:4px; color:var(--color-text-faint); font-size:10px; font-weight:400; }
-.like-fields { display:flex; flex-direction:column; gap:8px; margin-bottom:12px; }
-.like-field { display:flex; flex-direction:column; gap:2px; }
-.like-label { color:var(--color-text-faint); font-size:10px; font-weight:600; text-transform:uppercase; }
-.like-value { color:var(--color-text); font-size:12px; word-break:break-word; }
-.like-edit { width:100%; height:32px; border:1px solid var(--color-line); border-radius:8px; background:var(--color-surface-sunken); color:var(--color-text); font-size:12px; cursor:pointer; }
-.like-edit:hover { border-color:var(--color-accent-bd); color:var(--color-accent); }
-.dialog-overlay { position:fixed; inset:0; background:rgba(0,0,0,.4); display:flex; align-items:center; justify-content:center; z-index:50; }
-.dialog { width:380px; max-width:calc(100vw - 40px); padding:20px; border-radius:14px; background:var(--color-surface); border:1px solid var(--color-line); display:flex; flex-direction:column; gap:12px; }
-.dialog-title { font-size:15px; font-weight:700; color:var(--color-text); }
+/* Card, header anatomy, kv rows and the action strip come from the shared
+   global styles. */
+.like-edit {
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: var(--color-accent-soft);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+.like-edit:hover { background: var(--color-hover); color: var(--color-accent); }
+/* The drawer turns into a `z-index: var(--z-overlay)` layer on mobile, so this
+   editor has to sit above it — z-50 used to bury the modal under the panel. */
+.dialog-overlay { position:fixed; inset:0; background:rgba(0,0,0,.4); display:flex; align-items:center; justify-content:center; z-index:var(--z-modal); }
+.dialog { width:380px; max-width:calc(100vw - 40px); padding:var(--space-5); border-radius:var(--radius-lg); background:var(--color-surface); border:1px solid var(--color-line); display:flex; flex-direction:column; gap:var(--space-3); }
+.dialog-title { font-size:var(--font-size-base); font-weight:700; color:var(--color-text); }
 .dialog-field { display:flex; flex-direction:column; gap:5px; }
-.dialog-field span { font-size:11px; color:var(--color-text-faint); }
-.dialog-field input { padding:8px 10px; border:1px solid var(--color-line); border-radius:8px; background:var(--color-surface-sunken); color:var(--color-text); font-size:12px; }
-.dialog-error { color:var(--color-error, #e5534b); font-size:11px; }
-.dialog-actions { display:flex; justify-content:flex-end; gap:8px; }
-.dialog-actions button { padding:7px 14px; border-radius:8px; border:1px solid var(--color-line); background:var(--color-surface-sunken); color:var(--color-text); font-size:12px; cursor:pointer; }
-.dialog-actions button:last-child { border-color:var(--color-accent); background:var(--color-accent-soft); color:var(--color-accent); }
+.dialog-field span { font-size:var(--font-size-xs); color:var(--color-text-faint); }
+.dialog-field input { height:32px; padding:0 var(--space-2); border:1px solid var(--color-line); border-radius:var(--radius-md); background:var(--color-surface-sunken); color:var(--color-text); font-size:var(--font-size-xs); }
+.dialog-error { color:var(--color-danger); font-size:var(--font-size-xs); }
+.dialog-actions { display:flex; justify-content:flex-end; gap:var(--space-2); }
+.dialog-actions button { min-height:32px; padding:0 var(--space-3); border-radius:var(--radius-md); border:0; background:var(--color-accent-soft); color:var(--color-text-muted); font-size:var(--font-size-xs); cursor:pointer; }
+.dialog-actions button:last-child { background:var(--color-accent); color:var(--color-on-accent); }
 .dialog-actions button:disabled { opacity:.5; cursor:default; }
 </style>

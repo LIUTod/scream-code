@@ -12,8 +12,20 @@ html, body {
   color: var(--color-text);
 }
 
+/* Ambient background glow: static, extremely low contrast, never animated. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background: var(--ambient-glow);
+}
+
 #app {
   height: 100%;
+  position: relative;
+  z-index: 1;
 }
 
 button {
@@ -28,32 +40,53 @@ button:disabled,
   pointer-events: none;
 }
 
-/* Keyboard focus ring */
+/* Keyboard focus ring: quiet neutral halo */
 :focus-visible {
   outline: 2px solid var(--color-accent-bd);
   outline-offset: 2px;
+  box-shadow: var(--glow-focus);
   border-radius: var(--radius-xs);
 }
 
-/* Ripple effect (spawned by main.ts on pointerdown) */
-.ripple-host {
-  position: relative;
-  overflow: hidden;
+/* One highlight per focus target: containers that paint their own
+   `:focus-within` border (the composer card) must suppress the text control's
+   default ring — otherwise a focused textarea draws a second box, an "input
+   inside the input". Buttons keep their ring: they are keyboard stops and the
+   card border says nothing about which one is focused. */
+.composer:focus-within :is(textarea, input):focus-visible,
+.side-search:focus-within :is(textarea, input):focus-visible {
+  outline: none;
+  box-shadow: none;
 }
-.ripple-ink {
-  position: absolute;
-  border-radius: var(--radius-full);
-  background: currentColor;
-  opacity: 0.16;
-  transform: scale(0);
-  pointer-events: none;
-  animation: ripple-spread 480ms var(--ease-out) forwards;
-}
-@keyframes ripple-spread {
-  to {
-    transform: scale(1);
+
+/* ─── Shared motion primitives (quiet layout, precise motion) ─────────────── */
+
+/* Canonical entrance: quiet fade + rise. */
+@keyframes rise-in {
+  from {
     opacity: 0;
+    transform: translateY(6px);
   }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Breathing: alive waiting states (thinking / running indicators). */
+@keyframes breathe {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+@keyframes breathe-glow {
+  0%, 100% { opacity: 0.85; }
+  50% { opacity: 0.35; }
+}
+
+/* Shimmer: skeleton loading. Apply --shimmer-line as the overlay gradient. */
+@keyframes shimmer-slide {
+  from { background-position: var(--shimmer-width) 0; }
+  to { background-position: calc(-1 * var(--shimmer-width)) 0; }
 }
 
 /* Smooth theme switching (class toggled briefly by App.vue) */
@@ -68,24 +101,228 @@ html.theme-transition *::after {
     box-shadow var(--dur-slow) var(--ease-in-out) !important;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .ripple-ink {
-    animation: none;
-    opacity: 0;
-  }
+/* ─── Drawer modules: one card per module, flat inside ──────────────────────
+   Rule that keeps the column readable without falling back into 框中框:
+   • the module card is the ONLY bordered layer;
+   • its header is a 2-row block (icon chip + 标题 / 提示) closed by a hairline;
+   • everything inside the body is flat rows, grids and type scale — no nested
+     borders, except real form fields. */
+.panel-section {
+  overflow: hidden;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+}
+.panel-section .panel-head,
+.panel-section .section-heading {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: var(--space-2);
+  row-gap: 1px;
+  width: 100%;
+  padding: 9px var(--space-3);
+  border: 0;
+  border-bottom: 1px solid var(--color-line);
+  background: transparent;
+  color: var(--color-text);
+  text-align: left;
+}
+.panel-section button.panel-head {
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.panel-section button.panel-head:hover { background: var(--color-hover); }
+.panel-section button.panel-head:hover + .panel-body { background: transparent; }
+.panel-section .head-icon {
+  grid-column: 1;
+  grid-row: 1 / span 2;
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-sunken);
+  /* The glyph must not carry the same weight as the title, otherwise a column
+     of modules reads as a column of identical black marks. */
+  color: var(--color-text-muted);
+}
+.panel-section .head-title {
+  grid-column: 2;
+  grid-row: 1;
+  font-size: var(--font-size-sm);
+  font-weight: 650;
+  letter-spacing: 0.01em;
+}
+.panel-section .head-hint {
+  grid-column: 2;
+  grid-row: 2;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text-faint);
+  font-size: var(--font-size-xs);
+  font-weight: 400;
+}
+.panel-section .head-tail {
+  grid-column: 3;
+  grid-row: 1 / span 2;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex-shrink: 0;
+}
+.panel-section .head-count {
+  min-width: 22px;
+  padding: 1px var(--space-1);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-sunken);
+  color: var(--color-text-muted);
+  font: 600 var(--font-size-xs) var(--font-mono);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.panel-section .panel-head .chevron {
+  color: var(--color-text-faint);
+  flex-shrink: 0;
+  transition: transform var(--dur-base) var(--ease-out);
+}
+.panel-section .panel-head .chevron.rotated { transform: rotate(180deg); }
+.panel-section .panel-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
 }
 
-/* Scrollbar */
+/* Body primitives shared by the modules. */
+.panel-section .stat-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3) var(--space-2);
+}
+.panel-section .stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.panel-section .stat.wide { grid-column: 1 / -1; }
+.panel-section .stat > dt {
+  color: var(--color-text-faint);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.panel-section .stat > dd {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+  color: var(--color-text);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.panel-section .stat > dd.faint { color: var(--color-text-faint); font-weight: 500; }
+.panel-section .stat > dd.mono { font-family: var(--font-mono); font-size: var(--font-size-xs); font-weight: 500; }
+/* Key → value rows with hairline separators: the readable way to pack labels
+   against long, wrapping values inside a 310px column. */
+.panel-section .kv-rows { display: flex; flex-direction: column; }
+.panel-section .kv-row {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  gap: var(--space-2);
+  padding: var(--space-2) 0;
+}
+.panel-section .kv-row + .kv-row { border-top: 1px solid var(--color-line); }
+.panel-section .kv-row > dt {
+  color: var(--color-text-faint);
+  font-size: var(--font-size-xs);
+  overflow-wrap: anywhere;
+}
+.panel-section .kv-row > dd {
+  margin: 0;
+  color: var(--color-text);
+  font-size: var(--font-size-xs);
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+/* Footer action strip inside a card: separated by a hairline, never a box. */
+.panel-section .panel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-line);
+}
+.panel-section .bar {
+  display: block;
+  height: 4px;
+  overflow: hidden;
+  border-radius: var(--radius-full);
+  background: var(--color-line);
+}
+.panel-section .bar > i {
+  display: block;
+  height: 100%;
+  border-radius: var(--radius-full);
+  background: var(--color-accent);
+  transition: width var(--dur-slow) var(--ease-out);
+}
+.panel-section .head-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--color-success);
+}
+/* A collapsed card must not paint a second hairline on top of its own bottom
+   border — panels mark themselves `is-open` when the body is visible. */
+.panel-section:not(.is-open) > .panel-head,
+.panel-section:not(.is-open) > .panel-head-row { border-bottom-color: transparent; }
+.panel-section .head-dot.busy {
+  background: var(--color-accent);
+  box-shadow: 0 0 6px var(--color-accent-glow);
+  animation: breathe-glow var(--dur-breathe) ease-in-out infinite;
+}
+.panel-section .icon-btn {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-faint);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition:
+    color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out),
+    transform var(--dur-fast) var(--ease-out);
+}
+.panel-section .icon-btn:hover { color: var(--color-accent); background: var(--color-hover); }
+.panel-section .icon-btn:not(:disabled):active { transform: scale(0.9); }
+
+/* Scrollbar: thin so it never competes with the content it scrolls. */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 4px;
+  height: 4px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
   background: var(--color-line-strong);
-  border-radius: var(--radius-xs);
+  border-radius: 2px;
 }
 ::-webkit-scrollbar-thumb:hover {
   background: var(--color-text-muted);

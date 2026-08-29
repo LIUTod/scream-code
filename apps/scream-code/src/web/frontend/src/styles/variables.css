@@ -1,72 +1,103 @@
 /* ─── Semantic theme colors (built on tokens.css) ────────────────────────── */
 
+/* Light is the prototype's default monochrome: white paper, ink #111. */
 :root,
+[data-theme="light"] {
+  color-scheme: light;
+  --color-bg: #ffffff;
+  --color-surface: #ffffff;
+  --color-surface-raised: #ffffff;
+  --color-surface-sunken: #f7f7f5;
+  --color-text: #111111;
+  --color-text-muted: #6f6f6b;
+  --color-text-faint: #80807d;
+  --color-line: #e8e8e4;
+  --color-line-strong: #d5d5d0;
+  --color-selected: rgba(17, 17, 17, 0.08);
+  --color-hover: rgba(17, 17, 17, 0.045);
+  --color-accent: #111111;
+  --color-accent-hover: #333333;
+  --color-accent-soft: rgba(17, 17, 17, 0.06);
+  --color-accent-bd: rgba(17, 17, 17, 0.35);
+  --color-accent-glow: rgba(17, 17, 17, 0.12);
+  --color-on-accent: #ffffff;
+  --color-success: #1a7f37;
+  --color-success-soft: rgba(26, 127, 55, 0.1);
+  --color-warning: #9a6700;
+  --color-warning-soft: rgba(154, 103, 0, 0.12);
+  --color-danger: #cf222e;
+  --color-danger-soft: rgba(207, 34, 46, 0.09);
+  --color-info: #0969da;
+  --color-info-soft: rgba(9, 105, 218, 0.09);
+
+  /* Gradients & glow (kept quiet: monochrome ink, no chroma) */
+  --gradient-accent: linear-gradient(135deg, #111111 0%, #2b2b2b 100%);
+  --gradient-accent-soft: linear-gradient(135deg, rgba(17, 17, 17, 0.08), rgba(17, 17, 17, 0.03));
+  --ambient-glow:
+    radial-gradient(42rem 30rem at 12% -8%, rgba(17, 17, 17, 0.028), transparent 60%),
+    radial-gradient(50rem 36rem at 105% 112%, rgba(17, 17, 17, 0.02), transparent 60%);
+  --glow-focus: 0 0 0 3px rgba(17, 17, 17, 0.12);
+  --glow-accent: 0 0 12px rgba(17, 17, 17, 0.16);
+  --shimmer-line: linear-gradient(
+    100deg,
+    rgba(0, 0, 0, 0.035) 40%,
+    rgba(0, 0, 0, 0.07) 50%,
+    rgba(0, 0, 0, 0.035) 60%
+  );
+
+  --shadow-xs: 0 1px 2px rgba(17, 17, 17, 0.05);
+  --shadow-sm: 0 1px 3px rgba(17, 17, 17, 0.08), 0 1px 2px rgba(17, 17, 17, 0.05);
+  --shadow-md: 0 4px 12px rgba(17, 17, 17, 0.1);
+  --shadow-lg: 0 8px 24px rgba(17, 17, 17, 0.12);
+  --shadow-xl: 0 16px 48px rgba(17, 17, 17, 0.16);
+}
+
 [data-theme="dark"] {
   color-scheme: dark;
-  --color-bg: #0d1117;
-  --color-surface: var(--surface-dark);
-  --color-surface-raised: #1c2330;
-  --color-surface-sunken: #0a0d12;
-  --color-text: #e6edf3;
-  --color-text-muted: #8b949e;
-  --color-text-faint: #6e7681;
-  --color-line: #30363d;
-  --color-line-strong: #444c56;
-  --color-selected: rgba(121, 235, 0, 0.16);
-  --color-hover: rgba(177, 186, 196, 0.08);
-  --color-accent: var(--accent-primary);
-  --color-accent-hover: #8eff1f;
-  --color-accent-soft: rgba(121, 235, 0, 0.14);
-  --color-accent-bd: rgba(121, 235, 0, 0.4);
-  --color-accent-glow: rgba(121, 235, 0, 0.22);
-  --color-on-accent: #0d1117;
+  --color-bg: #101113;
+  --color-surface: #17181a;
+  --color-surface-raised: #1c1d1f;
+  --color-surface-sunken: #0c0d0e;
+  --color-text: #ededeb;
+  --color-text-muted: #94948f;
+  --color-text-faint: #7a7a75;
+  --color-line: #2a2b2e;
+  --color-line-strong: #3c3e41;
+  --color-selected: rgba(255, 255, 255, 0.09);
+  --color-hover: rgba(255, 255, 255, 0.05);
+  --color-accent: #f2f2ef;
+  --color-accent-hover: #ffffff;
+  --color-accent-soft: rgba(255, 255, 255, 0.07);
+  --color-accent-bd: rgba(255, 255, 255, 0.35);
+  --color-accent-glow: rgba(255, 255, 255, 0.1);
+  --color-on-accent: #101113;
   --color-success: #3fb950;
-  --color-success-soft: rgba(63, 185, 80, 0.14);
+  --color-success-soft: rgba(63, 185, 80, 0.13);
   --color-warning: #d29922;
-  --color-warning-soft: rgba(210, 153, 34, 0.16);
+  --color-warning-soft: rgba(210, 153, 34, 0.15);
   --color-danger: #f85149;
-  --color-danger-soft: rgba(248, 81, 73, 0.14);
+  --color-danger-soft: rgba(248, 81, 73, 0.13);
   --color-info: #58a6ff;
-  --color-info-soft: rgba(88, 166, 255, 0.14);
+  --color-info-soft: rgba(88, 166, 255, 0.13);
+
+  /* Gradients & glow: neutral silver-on-slate */
+  --gradient-accent: linear-gradient(135deg, #f2f2ef 0%, #c9c9c4 100%);
+  --gradient-accent-soft: linear-gradient(135deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.03));
+  --ambient-glow:
+    radial-gradient(42rem 30rem at 12% -8%, rgba(255, 255, 255, 0.03), transparent 60%),
+    radial-gradient(50rem 36rem at 105% 112%, rgba(255, 255, 255, 0.02), transparent 60%);
+  --glow-focus: 0 0 0 3px rgba(255, 255, 255, 0.14);
+  --glow-accent: 0 0 12px rgba(255, 255, 255, 0.12);
+  --shimmer-line: linear-gradient(
+    100deg,
+    rgba(255, 255, 255, 0.04) 40%,
+    rgba(255, 255, 255, 0.09) 50%,
+    rgba(255, 255, 255, 0.04) 60%
+  );
 
   --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.3);
   --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.4), 0 1px 2px rgba(0, 0, 0, 0.3);
   --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
   --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5);
   --shadow-xl: 0 16px 48px rgba(0, 0, 0, 0.6);
-}
-
-[data-theme="light"] {
-  color-scheme: light;
-  --color-bg: #f7f8f7;
-  --color-surface: #ffffff;
-  --color-surface-raised: #ffffff;
-  --color-surface-sunken: #f5f7f5;
-  --color-text: #182019;
-  --color-text-muted: #667069;
-  --color-text-faint: #98a19b;
-  --color-line: #e7ebe8;
-  --color-line-strong: #d6ddd8;
-  --color-selected: rgba(11, 143, 63, 0.1);
-  --color-hover: rgba(11, 143, 63, 0.055);
-  --color-accent: #0b8f3f;
-  --color-accent-hover: #087735;
-  --color-accent-soft: rgba(22, 163, 74, 0.09);
-  --color-accent-bd: rgba(11, 143, 63, 0.3);
-  --color-accent-glow: rgba(34, 197, 94, 0.22);
-  --color-on-accent: #ffffff;
-  --color-success: #2da44e;
-  --color-success-soft: rgba(45, 164, 78, 0.12);
-  --color-warning: #9a6700;
-  --color-warning-soft: rgba(154, 103, 0, 0.14);
-  --color-danger: #cf222e;
-  --color-danger-soft: rgba(207, 34, 46, 0.1);
-  --color-info: #0969da;
-  --color-info-soft: rgba(9, 105, 218, 0.1);
-
-  --shadow-xs: 0 1px 2px rgba(26, 29, 33, 0.06);
-  --shadow-sm: 0 1px 3px rgba(26, 29, 33, 0.1), 0 1px 2px rgba(26, 29, 33, 0.06);
-  --shadow-md: 0 4px 12px rgba(26, 29, 33, 0.12);
-  --shadow-lg: 0 8px 24px rgba(26, 29, 33, 0.14);
-  --shadow-xl: 0 16px 48px rgba(26, 29, 33, 0.18);
 }

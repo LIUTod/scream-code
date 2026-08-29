@@ -25,6 +25,7 @@ defineProps<{ lines: DiffLine[] }>();
   width: max-content;
   min-width: 100%;
   overflow-x: auto;
+  border-radius: var(--radius-sm);
 }
 .dl {
   display: flex;
@@ -32,6 +33,9 @@ defineProps<{ lines: DiffLine[] }>();
   min-height: 18px;
   white-space: pre;
   width: 100%;
+}
+.dl:hover .dl-text {
+  background: var(--color-hover);
 }
 .dl-gutter {
   flex: none;
@@ -50,6 +54,7 @@ defineProps<{ lines: DiffLine[] }>();
   width: 16px;
   text-align: center;
   user-select: none;
+  font-weight: 600;
 }
 .dl-text {
   flex: none;

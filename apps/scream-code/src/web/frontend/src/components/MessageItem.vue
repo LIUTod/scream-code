@@ -13,15 +13,26 @@ const props = withDefaults(defineProps<{
   isLatestUser?: boolean;
   idle?: boolean;
   streaming?: boolean;
-}>(), { isLatestUser: false, idle: true, streaming: false });
-const emit = defineEmits<{ (e: 'edit', content: string): void }>();
+  /** Show the fork action (latest assistant message, session idle). */
+  canFork?: boolean;
+  /** Timestamp visibility follows grouping: only the last message of a run of
+   *  consecutive assistant messages shows it. */
+  showTimestamp?: boolean;
+  /** Session context for on-demand thinking loading. */
+  sessionId?: string;
+}>(), { isLatestUser: false, idle: true, streaming: false, canFork: false, showTimestamp: true, sessionId: '' });
+const emit = defineEmits<{
+  (e: 'edit', content: string): void;
+  (e: 'retry'): void;
+  (e: 'fork'): void;
+}>();
 const copied = ref(false);
 let copyTimer: number | null = null;
 const isUser = computed(() => props.message.role === 'user');
 const isAssistant = computed(() => props.message.role === 'assistant');
 const thinkingTools = computed(() => props.message.tools.filter((tool) => tool.name === 'thinking'));
 const realTools = computed(() => props.message.tools.filter((tool) => tool.name !== 'thinking'));
-const timestamp = computed(() => props.message.ts ? new Date(props.message.ts).toLocaleTimeString('zh-CN', { hour:'2-digit', minute:'2-digit' }) : '');
+const timestamp = computed(() => props.message.ts !== undefined ? new Date(props.message.ts).toLocaleTimeString('zh-CN', { hour:'2-digit', minute:'2-digit' }) : '');
 const canEdit = computed(() => isUser.value && props.isLatestUser && props.idle);
 const showThinking = inject<Ref<boolean>>('showThinking', ref(true));
 const showTools = inject<Ref<boolean>>('showTools', ref(true));
@@ -87,29 +98,37 @@ async function copyContent() {
   <article :class="['message', message.role, { error: message.isError }]">
     <div v-if="isUser" class="user-wrap">
       <div class="user-bubble">{{ message.content }}</div>
-      <div class="message-meta user-meta">
-        <span v-if="timestamp">{{ timestamp }}</span>
-        <button v-if="canEdit" title="编辑并重新发送" @click="emit('edit', message.content)"><SvgIcon name="edit" :size="14" />编辑重发</button>
+      <div v-if="timestamp || canEdit" class="message-meta user-meta">
+        <button v-if="canEdit" title="编辑并重新发送" @click="emit('edit', message.content)"><SvgIcon name="edit" :size="12" />编辑重发</button>
+        <span v-if="timestamp" class="meta-time">{{ timestamp }}</span>
       </div>
     </div>
 
     <div v-else class="assistant-wrap">
-      <div v-if="isAssistant" class="assistant-brand">
-        <span class="assistant-avatar"><img src="/icon.ico" alt="" draggable="false" @error="(e) => (e.target as HTMLImageElement).style.visibility = 'hidden'" @load="(e) => (e.target as HTMLImageElement).style.visibility = 'visible'" style="visibility:hidden" /></span>
-        <div><strong>Scream Code</strong><span><i :class="{ streaming }" />{{ streaming ? '正在生成回复' : 'Agent 回复' }}</span></div>
-        <time v-if="timestamp">{{ timestamp }}</time>
+      <div
+        v-if="isAssistant && (message.model || streaming)"
+        class="assistant-brand"
+      >
+        <span v-if="message.model" class="brand-model">{{ message.model }}</span>
+        <span v-if="streaming" class="brand-streaming"><i aria-hidden="true" />生成中</span>
       </div>
       <div class="assistant-body">
+        <p v-if="message.degraded" class="degraded-note">该回合早于持久化快照：正文与思考在服务重启后无法恢复（工具记录与消息结构已保留）。</p>
         <template v-if="showThinking">
-          <ThinkingBlock v-for="tool in thinkingTools" :key="tool.toolCallId" :tool="tool" :active="streaming" />
+          <ThinkingBlock v-for="tool in thinkingTools" :key="tool.toolCallId" :tool="tool" :active="streaming" :session-id="sessionId" :msg-seq="message.seq" />
         </template>
-        <ToolGroup v-if="realTools.length && showTools" name="工具调用过程" :tools="realTools" />
+        <ToolGroup v-if="realTools.length && showTools" name="工具调用过程" :tools="realTools" :live="streaming" />
         <MarkdownRenderer v-if="message.content" class="assistant-content" :content="message.content" :streaming="streaming" />
         <span v-else-if="streaming" class="streaming-cursor" aria-label="正在生成" />
         <TurnStats v-if="message.turnStats" :stats="message.turnStats" />
-        <div v-if="message.content" class="message-meta">
-          <button :title="copied ? '已复制' : '复制内容'" @click="copyContent"><SvgIcon :name="copied ? 'check' : 'copy'" :size="14" />{{ copied ? '已复制' : '复制' }}</button>
-          <button :title="speaking ? '停止朗读' : '朗读'" @click="toggleSpeak"><SvgIcon :name="speaking ? 'speaker-off' : 'speaker'" :size="14" />{{ speaking ? '停止' : '朗读' }}</button>
+        <!-- One action row, rendered only when it has something to show:
+             three stacked meta rows were three dead bands under every turn. -->
+        <div v-if="message.content || (message.isError && !streaming) || canFork || (showTimestamp && timestamp)" class="message-meta">
+          <button v-if="message.content" :title="copied ? '已复制' : '复制内容'" @click="copyContent"><SvgIcon :name="copied ? 'check' : 'copy'" :size="12" />{{ copied ? '已复制' : '复制' }}</button>
+          <button v-if="message.content" :title="speaking ? '停止朗读' : '朗读'" @click="toggleSpeak"><SvgIcon :name="speaking ? 'speaker-off' : 'speaker'" :size="12" />{{ speaking ? '停止' : '朗读' }}</button>
+          <button v-if="message.isError && !streaming" class="retry-btn" title="重发最后一条消息" @click="emit('retry')"><SvgIcon name="refresh" :size="12" />重试</button>
+          <button v-if="isAssistant && canFork && !streaming" title="以当前对话为起点创建一个新会话" @click="emit('fork')"><SvgIcon name="fork" :size="12" />Fork</button>
+          <time v-if="showTimestamp && timestamp" class="meta-time">{{ timestamp }}</time>
         </div>
       </div>
     </div>
@@ -117,31 +136,45 @@ async function copyContent() {
 </template>
 
 <style scoped>
-.message { width:100%; padding:18px 32px; animation:message-in var(--dur-msg-user) var(--ease-out) both; }
-.message.user { display:flex; justify-content:flex-end; padding-top:22px; }
-.user-wrap { max-width:min(76%,680px); display:flex; flex-direction:column; align-items:flex-end; }
-.user-bubble { padding:13px 17px; border:1px solid var(--color-accent-bd); border-radius:17px 17px 5px 17px; background:var(--color-accent-soft); color:var(--color-text); line-height:1.65; white-space:pre-wrap; word-break:break-word; }
+/* Gutter matches the composer dock (--space-5) so the text column, the bubble
+   and the input card all share one left/right edge. */
+.message { width:100%; padding:14px var(--space-5); }
+.message.user { display:flex; justify-content:flex-end; padding-top:18px; animation:rise-in var(--dur-msg-user) var(--ease-out) both; }
+.message.assistant { animation:rise-in var(--dur-msg-assistant) var(--ease-out) both; }
+.user-wrap { max-width:85%; display:flex; flex-direction:column; align-items:flex-end; }
+.user-bubble { padding:8px 12px; border:1px solid var(--color-line-strong); border-radius:var(--radius-lg); background:var(--color-accent-soft); color:var(--color-text); line-height:1.65; white-space:pre-wrap; word-break:break-word; }
 .assistant-wrap { width:100%; }
-.assistant-brand { display:flex; align-items:center; gap:10px; margin-bottom:13px; }
-.assistant-avatar { width:34px; height:34px; display:grid; place-items:center; border-radius:10px; background:var(--color-accent-soft); }
-.assistant-avatar img { width:23px; height:23px; object-fit:contain; transition:visibility 0s; }
-.assistant-brand > div { display:flex; flex:1; flex-direction:column; }
-.assistant-brand strong { font-size:13px; }
-.assistant-brand span { display:flex; align-items:center; gap:5px; margin-top:3px; color:var(--color-text-muted); font-size:10px; }
-.assistant-brand i { width:5px; height:5px; border-radius:50%; background:var(--color-success); }
-.assistant-brand i.streaming { background:var(--color-accent); animation:pulse 1.1s infinite; }
-.assistant-brand time { color:var(--color-text-faint); font-size:10px; }
-.assistant-body { padding-left:44px; display:flex; flex-direction:column; gap:13px; min-width:0; color:var(--color-text); line-height:1.75; }
+.assistant-brand { display:flex; align-items:center; gap:8px; margin-bottom:6px; min-height:14px; }
+.brand-model { font-size:11px; color:var(--color-text-faint); letter-spacing:0.01em; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.brand-streaming { display:inline-flex; align-items:center; gap:5px; font-size:11px; color:var(--color-text-muted); }
+.brand-streaming i { width:5px; height:5px; border-radius:50%; background:var(--color-accent); box-shadow:0 0 6px var(--color-accent-glow); animation:breathe var(--dur-breathe) ease-in-out infinite; }
+.degraded-note {
+  margin-bottom: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: 1px dashed var(--color-line-strong);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-sunken);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  line-height: 1.5;
+}
+.message-meta .retry-btn {
+  color: var(--color-danger);
+}
+.message-meta .retry-btn:hover {
+  border-color: var(--color-danger);
+}
+.assistant-body { padding-left:0; display:flex; flex-direction:column; gap:var(--space-2); min-width:0; color:var(--color-text); line-height:1.75; }
 .assistant-content { width:100%; }
 .message.error .assistant-body { color:var(--color-danger); }
-.streaming-cursor { width:8px; height:18px; border-radius:2px; background:var(--color-accent); animation:pulse 1s steps(2) infinite; }
-.message-meta { min-height:20px; display:flex; align-items:center; gap:8px; margin-top:2px; color:var(--color-text-faint); font-size:10px; }
-.user-meta { justify-content:flex-end; margin:5px 4px 0; }
-.message-meta button { display:inline-flex; align-items:center; gap:4px; border:0; border-radius:5px; padding:3px 5px; background:transparent; color:var(--color-text-faint); font-size:10px; cursor:pointer; opacity:0; }
+.streaming-cursor { width:8px; height:18px; border-radius:var(--radius-xs); background:var(--gradient-accent); animation:breathe var(--dur-breathe) ease-in-out infinite; }
+.message-meta { min-height:24px; display:flex; align-items:center; gap:4px; margin-top:2px; color:var(--color-text-faint); font-size:11px; }
+.meta-time { margin-left:auto; padding-left:var(--space-2); font-size:10px; color:var(--color-text-faint); flex-shrink:0; }
+.user-meta { justify-content:flex-end; margin:4px 2px 0; }
+.message-meta button { display:inline-flex; align-items:center; gap:4px; height:24px; border:0; border-radius:var(--radius-sm); padding:0 6px; background:transparent; color:var(--color-text-faint); font-size:11px; cursor:pointer; opacity:0; transition:opacity var(--dur-base) var(--ease-out), background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out); }
 .message:hover .message-meta button,.message-meta button:focus-visible { opacity:1; }
-.message-meta button:hover { color:var(--color-accent); background:var(--color-accent-soft); }
-@keyframes message-in { from { opacity:0; transform:translateY(7px); } to { opacity:1; transform:none; } }
-@keyframes pulse { 50% { opacity:.3; } }
-@media (prefers-reduced-motion:reduce) { .message { animation:none; } }
-@media (max-width:640px) { .message { padding:14px; } .user-wrap { max-width:88%; } .assistant-body { padding-left:0; } .message-meta button { opacity:1; } }
+.message-meta button:hover { color:var(--color-accent); background:var(--color-hover); }
+.message-meta button:active { transform:scale(0.94); background:var(--color-selected); }
+@media (prefers-reduced-motion:reduce) { .message.user,.message.assistant { animation:none; } .assistant-brand i,.streaming-cursor { animation:none; } }
+@media (max-width:640px) { .message { padding:12px var(--space-4); } .user-wrap { max-width:92%; } .message-meta button { opacity:1; min-height:32px; } }
 </style>

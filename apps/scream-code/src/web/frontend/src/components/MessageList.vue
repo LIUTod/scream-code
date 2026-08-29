@@ -18,13 +18,21 @@ const props = withDefaults(
     contextUsage?: number | null;
     /** Connection state shown in the empty-state status bar. */
     connected?: boolean;
+    /** Older history exists beyond the loaded window (pagination sentinel). */
+    olderAvailable?: boolean;
+    /** True while the parent is fetching an older page. */
+    olderLoading?: boolean;
   }>(),
-  { busy: false, workDir: null, sessionId: '', model: null, contextUsage: null, connected: false },
+  { busy: false, workDir: null, sessionId: '', model: null, contextUsage: null, connected: false, olderAvailable: false, olderLoading: false },
 );
 
 const emit = defineEmits<{
   (e: 'edit', content: string): void;
   (e: 'pick', text: string): void;
+  (e: 'retry-connection'): void;
+  (e: 'retry-message'): void;
+  (e: 'load-older'): void;
+  (e: 'fork'): void;
 }>();
 
 const listRef = ref<HTMLElement | null>(null);
@@ -37,6 +45,22 @@ const latestUserId = computed(() => {
 });
 
 const lastMessageId = computed(() => props.messages.at(-1)?.id ?? null);
+const lastAssistantId = computed(() => [...props.messages].reverse().find((m) => m.role === 'assistant')?.id ?? null);
+
+/**
+ * Timestamp grouping: inside a run of consecutive assistant
+ * messages only the LAST one shows its timestamp; a gap > 5 minutes forces it
+ * back on. User/system messages always show theirs (they break the run).
+ */
+function showTimestampFor(index: number): boolean {
+  const m = props.messages[index];
+  if (!m) return false;
+  if (m.role !== 'assistant') return true;
+  const next = props.messages[index + 1];
+  if (!next || next.role !== 'assistant') return true;
+  if (m.ts !== undefined && next.ts !== undefined && next.ts - m.ts > 5 * 60 * 1000) return true;
+  return false;
+}
 
 /** Streaming content length - drives scroll pinning during deltas. */
 const streamLength = computed(() => {
@@ -104,6 +128,25 @@ function restoreScrollPosition(): void {
   }
   if (saved) el.scrollTop = Number(saved);
 }
+
+/** Keep the viewport anchored when an older page is prepended above. */
+let prependAnchorHeight = 0;
+watch(
+  () => props.olderLoading,
+  (loading) => {
+    const el = listRef.value;
+    if (!el) return;
+    if (loading) {
+      prependAnchorHeight = el.scrollHeight;
+    } else if (prependAnchorHeight > 0) {
+      const delta = el.scrollHeight - prependAnchorHeight;
+      if (delta > 0) {
+        el.scrollTop = el.scrollTop + delta;
+      }
+      prependAnchorHeight = 0;
+    }
+  },
+);
 
 function onScroll(): void {
   const el = listRef.value;
@@ -188,7 +231,17 @@ onUnmounted(() => {
 
 <template>
   <div class="message-list-wrapper">
+    <div v-if="!connected && messages.length > 0" class="conn-banner" role="status">
+      <span class="conn-dot" aria-hidden="true" />
+      <span>连接中断，自动恢复中…</span>
+      <button class="conn-retry" @click="emit('retry-connection')">立即重试</button>
+    </div>
     <div ref="listRef" class="message-list">
+      <div v-if="olderAvailable" class="load-older-row">
+        <button class="load-older-btn" :disabled="olderLoading" @click="emit('load-older')">
+          {{ olderLoading ? '加载中…' : '加载更早消息' }}
+        </button>
+      </div>
       <EmptyState
         v-if="messages.length === 0"
         :work-dir="workDir"
@@ -198,16 +251,20 @@ onUnmounted(() => {
         @pick="(t) => emit('pick', t)"
       />
       <MessageItem
-        v-for="message in messages"
+        v-for="(message, index) in messages"
         :key="message.id"
         :message="message"
         :is-latest-user="message.id === latestUserId"
         :idle="!busy"
         :streaming="busy && message.id === lastMessageId && message.role === 'assistant'"
+        :session-id="sessionId"
+        :can-fork="!busy && message.id === lastAssistantId"
+        :show-timestamp="showTimestampFor(index)"
         @edit="(content) => emit('edit', content)"
+        @retry="emit('retry-message')"
+        @fork="emit('fork')"
       />
       <div v-if="showSkeleton" class="message-skeleton" aria-hidden="true">
-        <div class="sk-avatar" />
         <div class="sk-body">
           <div class="sk-line sk-w-60" />
           <div class="sk-line sk-w-90" />
@@ -237,68 +294,128 @@ onUnmounted(() => {
   position: relative;
 }
 
+.load-older-row {
+  display: flex;
+  justify-content: center;
+  padding: var(--space-2);
+}
+.load-older-btn {
+  min-height: 30px;
+  padding: 0 var(--space-4);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-full);
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+  transition:
+    border-color var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+.load-older-btn:hover:not(:disabled) {
+  border-color: var(--color-accent-bd);
+  color: var(--color-text);
+}
+
+.conn-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  background: var(--color-warning-soft);
+  border-bottom: 1px solid var(--color-line);
+  color: var(--color-text);
+  font-size: var(--font-size-sm);
+  flex-shrink: 0;
+}
+.conn-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-full);
+  background: var(--color-warning);
+  animation: breathe var(--dur-breathe) ease-in-out infinite;
+  flex-shrink: 0;
+}
+.conn-retry {
+  margin-left: auto;
+  padding: 3px var(--space-3);
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+  transition:
+    border-color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out);
+}
+.conn-retry:hover {
+  border-color: var(--color-accent-bd);
+  background: var(--color-accent-soft);
+}
+
 .message-list {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  padding: 12px 0 8px;
+  padding: var(--space-3) 0 var(--space-2);
   overscroll-behavior: contain;
   background: var(--color-surface);
 }
 
 .scroll-to-bottom {
   position: absolute;
-  bottom: 8px;
+  bottom: var(--space-2);
   left: 50%;
   transform: translateX(-50%);
   width: 36px;
   height: 36px;
-  border-radius: 50%;
+  border-radius: var(--radius-full);
   border: 1px solid var(--color-line);
   background: var(--color-surface-raised);
   color: var(--color-text-muted);
   display: grid;
   place-items: center;
   cursor: pointer;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+  box-shadow: var(--shadow-md);
   z-index: 10;
-  transition: background 0.15s, color 0.15s;
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out),
+    transform var(--dur-fast) var(--ease-out);
 }
 
 .scroll-to-bottom:hover {
   background: var(--color-accent-soft);
   color: var(--color-accent);
+  border-color: var(--color-accent-bd);
+  transform: translateX(-50%) translateY(-1px);
+}
+.scroll-to-bottom:active {
+  transform: translateX(-50%) translateY(1px);
 }
 
 .scroll-btn-enter-active,
 .scroll-btn-leave-active {
-  transition: opacity 0.2s, transform 0.2s;
+  transition:
+    opacity var(--dur-base) var(--ease-out),
+    transform var(--dur-base) var(--ease-out);
 }
 
 .scroll-btn-enter-from,
 .scroll-btn-leave-to {
   opacity: 0;
-  transform: translateX(-50%) translateY(8px);
+  transform: translateX(-50%) translateY(var(--space-2));
 }
 
-/* Skeleton loading placeholder */
+/* Skeleton placeholder while waiting for the assistant's first delta. */
 .message-skeleton {
   display: flex;
-  gap: var(--space-3);
-  padding: var(--space-4) var(--space-5);
-  animation: sk-in var(--dur-base) var(--ease-out) both;
-}
-@keyframes sk-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-.sk-avatar {
-  width: 28px;
-  height: 28px;
-  border-radius: var(--radius-full);
-  flex-shrink: 0;
+  padding: 14px var(--space-5);
+  animation: rise-in var(--dur-base) var(--ease-out) both;
 }
 .sk-body {
   flex: 1;
@@ -313,24 +430,14 @@ onUnmounted(() => {
 .sk-w-60 { width: 60%; }
 .sk-w-90 { width: 90%; }
 .sk-w-40 { width: 40%; }
-.sk-avatar,
 .sk-line {
-  background: linear-gradient(
-    90deg,
-    var(--color-surface) 25%,
-    var(--color-surface-raised) 50%,
-    var(--color-surface) 75%
-  );
-  background-size: 200% 100%;
-  animation: sk-shimmer 1.2s linear infinite;
-}
-@keyframes sk-shimmer {
-  from { background-position: 200% 0; }
-  to { background-position: -200% 0; }
+  background: var(--shimmer-line);
+  background-size: var(--shimmer-width) 100%;
+  animation: shimmer-slide 1.2s linear infinite;
 }
 @media (prefers-reduced-motion: reduce) {
-  .sk-avatar,
-  .sk-line {
+  .sk-line,
+  .message-skeleton {
     animation: none;
   }
 }

@@ -5,11 +5,13 @@ import type {
   CreateGoalRequest,
   GitStatus,
   GoalSnapshot,
+  LikePreferences,
   ModelInfo,
   ModelsResponse,
   SessionListItem,
   SessionSnapshot,
   SessionStatus,
+  SessionUsage,
   TodoItem,
   UpdateGoalRequest,
   WsMessage,
@@ -33,6 +35,11 @@ const HEARTBEAT_TIMEOUT_MS = 2 * 30000;
 export interface UseScreamWebClientReturn {
   connectionStatus: Ref<ConnectionStatus>;
   messages: Ref<ChatMessage[]>;
+  /** Older history exists beyond the loaded window. */
+  olderAvailable: Ref<boolean>;
+  /** Seq cursor of the oldest loaded message (before-cursor for older pages). */
+  oldestSeq: Ref<number | undefined>;
+  loadOlderMessages: () => Promise<number>;
   pendingApprovals: Ref<ApprovalRequest[]>;
   status: Ref<SessionStatus>;
   goal: Ref<GoalSnapshot | null>;
@@ -48,6 +55,9 @@ export interface UseScreamWebClientReturn {
   currentSessionId: Ref<string | null>;
   gitStatus: Ref<GitStatus | null>;
   models: Ref<ModelInfo[]>;
+  like: Ref<LikePreferences>;
+  fetchLike: () => Promise<void>;
+  updateLike: (prefs: LikePreferences) => Promise<boolean>;
   sendPrompt: (text: string) => void;
   sendCommand: (command: string, args?: string) => void;
   clearMessages: () => void;
@@ -57,6 +67,7 @@ export interface UseScreamWebClientReturn {
   fetchSessions: () => Promise<void>;
   fetchGitStatus: () => Promise<void>;
   fetchModels: () => Promise<void>;
+  reconnectNow: () => void;
   switchModel: (alias: string) => Promise<void>;
   switchThinking: (level: string) => Promise<void>;
   refineGoal: (description: string) => Promise<string | null>;
@@ -76,6 +87,8 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
   const { showToast } = useToast();
   const connectionStatus = ref<ConnectionStatus>('connecting');
   const messages = ref<ChatMessage[]>([]);
+  const olderAvailable = ref(false);
+  const oldestSeq = ref<number | undefined>(undefined);
   const pendingApprovals = ref<ApprovalRequest[]>([]);
   const status = ref<SessionStatus>({ busy: false });
   const goal = ref<GoalSnapshot | null>(null);
@@ -175,12 +188,16 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
   async function fetchSnapshot(goalGeneration?: number): Promise<void> {
     const targetSessionId = sessionId.value;
     if (!targetSessionId) return;
+    // First paint: request a tail-window snapshot so very long sessions do not
+    // ship the whole journal. Reconnects (messages already in memory) keep the
+    // full snapshot to avoid dropping history.
+    const tail = messages.value.length === 0 ? 100 : undefined;
     const targetSessionGeneration = sessionGeneration;
     const targetConnectionGeneration = connectionGeneration;
     const targetPromptGeneration = promptGeneration;
     const targetLiveGeneration = liveGeneration;
     try {
-      const res = await fetch(`${API_BASE}/sessions/${targetSessionId}/snapshot`);
+      const res = await fetch(`${API_BASE}/sessions/${targetSessionId}/snapshot${tail ? `?tail=${tail}` : ''}`);
       if (!res.ok) {
         if (goalGeneration !== undefined && goalAwaitingMutation?.generation === goalGeneration) {
           snapshotRetryGoalGeneration = goalGeneration;
@@ -257,6 +274,8 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
     }
     pendingApprovals.value = snapshot.pendingApprovals;
     status.value = { ...snapshot.status, busy: snapshot.busy };
+    olderAvailable.value = Boolean(snapshot.olderAvailable);
+    oldestSeq.value = snapshot.oldestSeq;
     goal.value = snapshot.goal;
     todos.value = snapshot.todos;
     if (
@@ -532,6 +551,7 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
           content: '',
           tools: [],
           ts: Date.now(),
+          model: status.value.model,
           turnStats: {
             turn: turnNumber,
             step: 0,
@@ -665,10 +685,47 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
     return null;
   }
 
-  function connect(): void {
-    if (disposed || (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN))) return;
+  /** Force an immediate reconnect (connection banner "retry" button). */
+  function reconnectNow(): void {
+    if (disposed) return;
+    if (reconnectTimer !== null) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+    if (ws !== null) {
+      try {
+        ws.close();
+      } catch {
+        // already closed
+      }
+      ws = null;
+    }
+    reconnectAttempt = 0;
+    connect();
+  }
 
-    setConnectionStatus('connecting');
+  /** Fetch and prepend an older history page. Returns the number of messages added. */
+  async function loadOlderMessages(): Promise<number> {
+    const targetSession = sessionId.value;
+    const cursor = oldestSeq.value;
+    if (!targetSession || cursor === undefined) return 0;
+    try {
+      const res = await fetch(`${API_BASE}/sessions/${targetSession}/messages?before=${cursor}&tail=50`);
+      if (!res.ok) return 0;
+      const data = (await res.json()) as { messages: ChatMessage[]; hasMore: boolean };
+      if (data.messages.length === 0) return 0;
+      const older = data.messages.map((m) => ({ ...m, id: m.id ?? generateId() }));
+      messages.value = [...older, ...messages.value];
+      oldestSeq.value = older[0]?.seq ?? cursor;
+      olderAvailable.value = data.hasMore;
+      return older.length;
+    } catch {
+      return 0;
+    }
+  }
+
+  function connect(): void {
+    if (disposed || (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN))) return;    setConnectionStatus('connecting');
     error.value = null;
     resetGoalRequestState();
     connectionGeneration++;
@@ -1236,6 +1293,10 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
     fetchSessions,
     fetchGitStatus,
     fetchModels,
+    reconnectNow,
+    olderAvailable,
+    oldestSeq,
+    loadOlderMessages,
     switchModel,
     switchThinking,
     refineGoal,

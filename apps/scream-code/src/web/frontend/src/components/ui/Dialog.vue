@@ -1,7 +1,7 @@
 <!-- Reusable modal dialog with Teleport. Replaces ad-hoc overlay patterns
      in TopBar (diff modal) and InfoPanel. -->
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted } from 'vue';
+import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 
 const props = withDefaults(
   defineProps<{
@@ -15,12 +15,66 @@ const props = withDefaults(
 
 const emit = defineEmits<{ (e: 'close'): void }>();
 
+const dialogRef = ref<HTMLElement | null>(null);
+let previouslyFocused: HTMLElement | null = null;
+
+const FOCUSABLE_SELECTOR =
+  'a[href], button:not([disabled]), textarea, input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+function focusables(): HTMLElement[] {
+  const root = dialogRef.value;
+  if (!root) return [];
+  return Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter(
+    (el) => el.offsetParent !== null || el === document.activeElement,
+  );
+}
+
 function onGlobalKeydown(e: KeyboardEvent) {
-  if (e.key === 'Escape' && props.open && props.closable !== false) {
+  if (!props.open) return;
+  if (e.key === 'Escape' && props.closable !== false) {
     e.stopPropagation();
     emit('close');
+    return;
+  }
+  if (e.key !== 'Tab') return;
+  // Focus trap: keep Tab cycling inside the dialog while it is open.
+  const items = focusables();
+  if (items.length === 0) {
+    e.preventDefault();
+    dialogRef.value?.focus();
+    return;
+  }
+  const first = items[0]!;
+  const last = items[items.length - 1]!;
+  const active = document.activeElement;
+  if (e.shiftKey) {
+    if (active === first || !dialogRef.value?.contains(active)) {
+      e.preventDefault();
+      last.focus();
+    }
+  } else if (active === last || !dialogRef.value?.contains(active)) {
+    e.preventDefault();
+    first.focus();
   }
 }
+
+watch(
+  () => props.open,
+  (open) => {
+    if (open) {
+      previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      void nextTick(() => {
+        const target = focusables()[0] ?? dialogRef.value;
+        target?.focus();
+      });
+    } else if (previouslyFocused) {
+      previouslyFocused.focus();
+      previouslyFocused = null;
+    }
+  },
+  { immediate: false },
+);
+
 onMounted(() => window.addEventListener('keydown', onGlobalKeydown, true));
 onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKeydown, true));
 </script>
@@ -29,7 +83,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKeydown, tru
   <Teleport to="body">
     <Transition name="dialog">
       <div v-if="open" class="ui-dialog-overlay" @click.self="closable !== false && emit('close')">
-        <div class="ui-dialog" :style="maxWidth ? { maxWidth } : undefined" role="dialog" aria-modal="true">
+        <div ref="dialogRef" class="ui-dialog" :style="maxWidth ? { maxWidth } : undefined" role="dialog" aria-modal="true" tabindex="-1">
           <div v-if="title || $slots.header" class="ui-dialog-header">
             <slot name="header">
               <span class="ui-dialog-title">{{ title }}</span>
@@ -57,12 +111,13 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKeydown, tru
 .ui-dialog-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.45);
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(2px);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: var(--z-overlay);
-  padding: var(--space-3);
+  padding: var(--space-4);
 }
 .ui-dialog {
   width: 100%;
@@ -98,11 +153,17 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKeydown, tru
   padding: var(--space-1);
   border-radius: var(--radius-md);
   line-height: 1;
-  transition: background var(--dur-fast), color var(--dur-fast);
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out),
+    transform var(--dur-fast) var(--ease-out);
 }
 .ui-dialog-close:hover {
   background: var(--color-hover);
   color: var(--color-text);
+}
+.ui-dialog-close:not(:disabled):active {
+  transform: scale(0.9);
 }
 .ui-dialog-body {
   padding: var(--space-2) var(--space-4) var(--space-4);
@@ -120,12 +181,17 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKeydown, tru
   flex-shrink: 0;
 }
 
-/* Transition */
-.dialog-enter-active,
+/* Transition: entrance = rise-in (slower + spring); exit = quiet fade.
+   Mirrors the global rise-in primitive: opacity 0→1 + translateY(6px)→0. */
+.dialog-enter-active {
+  transition: opacity var(--dur-slower) var(--ease-spring);
+}
 .dialog-leave-active {
   transition: opacity var(--dur-base) var(--ease-out);
 }
-.dialog-enter-active .ui-dialog,
+.dialog-enter-active .ui-dialog {
+  transition: transform var(--dur-slower) var(--ease-spring), opacity var(--dur-slower) var(--ease-spring);
+}
 .dialog-leave-active .ui-dialog {
   transition: transform var(--dur-base) var(--ease-out), opacity var(--dur-base) var(--ease-out);
 }
@@ -135,7 +201,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKeydown, tru
 }
 .dialog-enter-from .ui-dialog,
 .dialog-leave-to .ui-dialog {
-  transform: scale(0.96) translateY(8px);
+  transform: translateY(6px);
   opacity: 0;
 }
 </style>

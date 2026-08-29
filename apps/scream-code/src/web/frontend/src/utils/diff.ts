@@ -48,6 +48,43 @@ function backtrack(
   return result;
 }
 
+/** Parse a unified git patch (`@@ -a,b +c,d @@ ...`) into DiffLine[]. */
+export function parseUnifiedDiff(patch: string): DiffLine[] {
+  const out: DiffLine[] = [];
+  const lines = patch.replaceAll('\r\n', '\n').split('\n');
+  let oldNo = 0;
+  let newNo = 0;
+  for (const line of lines) {
+    if (line.startsWith('@@')) {
+      const m = /@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line);
+      oldNo = m ? Number(m[1]) : 0;
+      newNo = m ? Number(m[2]) : 0;
+      const text = line.startsWith('@@')
+        ? line.slice(line.indexOf('@@') + 2, line.lastIndexOf('@@') || line.length)
+        : '';
+      out.push({ type: 'context', text: text.trim() ? `@@ hunk ${oldNo},${newNo} @@` : line, oldNo, newNo });
+      continue;
+    }
+    if (line.startsWith('+++') || line.startsWith('---')) {
+      // File headers keep as context (line numbers unchanged).
+      out.push({ type: 'context', text: line, oldNo, newNo });
+      continue;
+    }
+    if (line.startsWith('+')) {
+      newNo += 1;
+      out.push({ type: 'add', text: line.slice(1), newNo });
+    } else if (line.startsWith('-')) {
+      oldNo += 1;
+      out.push({ type: 'del', text: line.slice(1), oldNo });
+    } else {
+      oldNo += 1;
+      newNo += 1;
+      out.push({ type: 'context', text: line, oldNo, newNo });
+    }
+  }
+  return out;
+}
+
 /** Compute a line-by-line diff between two strings. */
 export function computeDiff(oldStr: string, newStr: string): DiffLine[] {
   const oldLines = oldStr.split('\n');

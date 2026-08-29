@@ -36,7 +36,7 @@ const icons: Record<string, string> = {
   position: fixed;
   top: var(--space-5);
   right: var(--space-5);
-  z-index: 9999;
+  z-index: var(--z-toast);
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
@@ -47,20 +47,16 @@ const icons: Record<string, string> = {
   align-items: center;
   gap: var(--space-2);
   padding: var(--space-2) var(--space-4);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-lg);
   border: 1px solid var(--color-line);
   background: var(--color-surface-raised);
-  box-shadow: var(--shadow-lg, 0 8px 24px rgba(0, 0, 0, 0.18));
+  box-shadow: var(--shadow-xl);
   font-size: var(--font-size-sm);
   color: var(--color-text);
   cursor: pointer;
   pointer-events: auto;
-  max-width: 380px;
-  animation: toast-in var(--dur-base) var(--ease-out);
-}
-@keyframes toast-in {
-  from { opacity: 0; transform: translateX(20px); }
-  to { opacity: 1; transform: translateX(0); }
+  max-width: min(380px, calc(100vw - 32px));
+  animation: rise-in var(--dur-slower) var(--ease-spring);
 }
 .toast-icon {
   flex-shrink: 0;
@@ -82,8 +78,8 @@ const icons: Record<string, string> = {
 /* Transition */
 .toast-enter-active,
 .toast-leave-active {
-  transition: opacity var(--dur-base) var(--ease-out), transform var(--dur-base) var(--ease-out);
+  transition: opacity var(--dur-slower) var(--ease-spring), transform var(--dur-slower) var(--ease-spring);
 }
-.toast-enter-from { opacity: 0; transform: translateX(20px); }
-.toast-leave-to { opacity: 0; transform: translateX(20px); }
+.toast-enter-from { opacity: 0; transform: translateY(6px); }
+.toast-leave-to { opacity: 0; transform: translateY(6px); }
 </style>

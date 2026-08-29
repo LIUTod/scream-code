@@ -84,9 +84,9 @@ function fmtTokens(n: number | null | undefined): string {
   align-items: center;
   flex-wrap: wrap;
   gap: 6px;
-  margin-top: 8px;
+  margin-top: var(--space-2);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   color: var(--color-text-muted);
   user-select: none;
 }
@@ -97,14 +97,7 @@ function fmtTokens(n: number | null | undefined): string {
   font-weight: 600;
   font-size: 12px;
   letter-spacing: 0.02em;
-  background-image: linear-gradient(
-    90deg,
-    var(--color-accent) 0%,
-    var(--color-accent) 40%,
-    var(--color-accent-hover) 50%,
-    var(--color-accent) 60%,
-    var(--color-accent) 100%
-  );
+  background-image: var(--gradient-accent);
   background-size: 200% 100%;
   background-clip: text;
   -webkit-background-clip: text;
