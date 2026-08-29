@@ -178,12 +178,25 @@ export function isRetryableGenerateError(error: unknown): boolean {
     return true;
   }
   if (error instanceof APIProviderRateLimitError) {
-    // Quota exhaustion won't clear in the retry window — retrying just wastes
-    // attempts. Fail fast so the user sees "switch credential" instead of
-    // three 30-min backoffs.
-    return error.reason !== 'QUOTA_EXHAUSTED';
+    // All 429s are retryable — including quota-style messages. Providers
+    // commonly phrase transient quota windows (per-minute token limits,
+    // dynamic concurrency quotas) as "quota exceeded", and those clear within
+    // a minute. A genuinely exhausted account still fails: retry.ts bounds
+    // quota 429s to a few short 30s backoffs instead of an instant fail.
+    return true;
   }
-  return error instanceof APIStatusError && [429, 500, 502, 503, 504].includes(error.statusCode);
+  if (error instanceof APIStatusError) {
+    // Transient server-side conditions: any 5xx (including Cloudflare's
+    // 520-527 family), 408 request-timeout, and a plain 429. Deterministic
+    // 4xx (400/401/402/403/404/409/413/422) mean the request itself is wrong
+    // — retrying them is futile and only delays the real error.
+    return (
+      error.statusCode === 429 ||
+      error.statusCode === 408 ||
+      (error.statusCode >= 500 && error.statusCode < 600)
+    );
+  }
+  return false;
 }
 
 const CONTEXT_OVERFLOW_MESSAGE_PATTERNS = [

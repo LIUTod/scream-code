@@ -19,6 +19,13 @@ import type { LLM, LLMChatParams, LLMChatResponse } from './llm';
 // the error after a couple of quick retries.
 export const DEFAULT_MAX_RETRY_ATTEMPTS = 10;
 
+// Quota-style 429s get fewer attempts than generic retries (3 total):
+// providers phrase transient per-minute quota windows as "quota exceeded",
+// and those clear within ~1 minute, but a genuinely exhausted account must
+// not burn the full 10-attempt budget (≈2-3 min) waiting for nothing.
+// With the 30s quota backoff this totals ≈1 minute before surfacing.
+export const QUOTA_RETRY_ATTEMPTS = 3;
+
 const BASE_DELAY_MS = 500;
 // Per-attempt backoff cap (32s). The default 10-attempt ramp reaches the
 // cap on the 7th retry, so most of the budget is spent at the cap waiting
@@ -69,16 +76,18 @@ export async function chatWithRetry(input: ChatWithRetryInput): Promise<LLMChatR
         throw error;
       }
 
-      // Quota-exhaustion 429s won't clear in the retry window — the account is
-      // out of daily/monthly quota. Fail fast so the user sees "switch
-      // credential" instead of waiting through a 30min backoff ×3.
-      if (error instanceof APIProviderRateLimitError && error.reason === 'QUOTA_EXHAUSTED') {
-        logRequestFailure(input, error, attempt, maxAttempts);
-        throw error;
-      }
+      // Quota-style 429s are retried too — but with a smaller budget. A
+      // provider phrase like "allocated quota exceeded" frequently means a
+      // per-minute or dynamic quota window that clears within a minute, and
+      // failing instantly left subagents dead on the first 429. A genuinely
+      // exhausted account still fails after a few short 30s backoffs.
+      const attemptLimit =
+        error instanceof APIProviderRateLimitError && error.reason === 'QUOTA_EXHAUSTED'
+          ? Math.min(QUOTA_RETRY_ATTEMPTS, maxAttempts)
+          : maxAttempts;
 
-      if (attempt >= maxAttempts || !input.llm.isRetryableError(error)) {
-        logRequestFailure(input, error, attempt, maxAttempts);
+      if (attempt >= attemptLimit || !input.llm.isRetryableError(error)) {
+        logRequestFailure(input, error, attempt, attemptLimit);
         throw error;
       }
 
@@ -94,7 +103,7 @@ export async function chatWithRetry(input: ChatWithRetryInput): Promise<LLMChatR
         stepUuid: input.stepUuid,
         failedAttempt: attempt,
         nextAttempt: attempt + 1,
-        maxAttempts,
+        maxAttempts: attemptLimit,
         delayMs,
         ...retryErrorFields(error),
       });

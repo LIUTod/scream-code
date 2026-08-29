@@ -1,11 +1,12 @@
 /**
  * Rate limit reason classification and backoff calculation.
  *
- * Ported from oh-my-pi `packages/ai/src/rate-limit-utils.ts` (107 lines).
- * Different rate-limit causes need different backoff strategies: a quota-exhausted
- * account won't recover in 30s, and a transient 529 won't need 30min. Classifying
- * by error message text lets us pick the right backoff without provider-specific
- * error code tables.
+ * Different rate-limit causes need different backoff strategies: a
+ * quota-exhausted account won't recover in a short window, and a transient
+ * 529 needs 45-75s. Classifying by error message text lets us pick the right
+ * backoff without provider-specific error code tables. Note that the reason
+ * only biases the delay and the retry budget — every classified 429 is still
+ * retried (bounded), never failed instantly.
  */
 
 export type RateLimitReason =
@@ -15,7 +16,13 @@ export type RateLimitReason =
   | 'SERVER_ERROR'
   | 'UNKNOWN';
 
-const QUOTA_EXHAUSTED_BACKOFF_MS = 30 * 60 * 1000; // 30 min
+// Quota-style 429s are retried a bounded number of times (see retry.ts:
+// QUOTA_RETRY_ATTEMPTS) with a short 30s backoff. Real quota exhaustion fails
+// after ~1 minute of total waiting; transient quota windows (per-minute
+// token limits, dynamic concurrency quotas) clear within that window. A
+// long 30min backoff would turn a transient quota hiccup into a multi-hour
+// hang, which is strictly worse than failing once the short budget is done.
+const QUOTA_EXHAUSTED_BACKOFF_MS = 30 * 1000; // 30s
 const RATE_LIMIT_EXCEEDED_BACKOFF_MS = 30 * 1000; // 30s
 const MODEL_CAPACITY_BASE_MS = 45 * 1000; // 45s base
 const MODEL_CAPACITY_JITTER_MS = 30 * 1000; // 0-30s jitter, total 45-75s
@@ -83,9 +90,9 @@ export function parseRateLimitReason(errorMessage: string): RateLimitReason {
 /**
  * Backoff in ms for a given reason. MODEL_CAPACITY gets jitter to avoid
  * thundering herd. UNKNOWN (a classified 429 with no recognized reason)
- * uses the short 20s SERVER_ERROR backoff — a 30min x ~9 attempt hang
- * would be far worse than a failed turn, and UNKNOWN is not evidence of
- * quota exhaustion.
+ * uses the short 20s SERVER_ERROR backoff — a long quota backoff on an
+ * unrecoverable error would hang a turn for far longer than the value of
+ * retrying, and UNKNOWN is not evidence of quota exhaustion.
  */
 export function calculateRateLimitBackoffMs(reason: RateLimitReason): number {
   switch (reason) {
@@ -99,9 +106,9 @@ export function calculateRateLimitBackoffMs(reason: RateLimitReason): number {
       return SERVER_ERROR_BACKOFF_MS;
     default:
       // UNKNOWN: a classified 429 with no recognized reason. Keep the retry
-      // short (20s like SERVER_ERROR) instead of the 30min quota backoff —
-      // 30min x ~9 attempts would hang a turn for hours, and UNKNOWN is not
-      // evidence of quota exhaustion.
+      // short (20s like SERVER_ERROR) — a long quota backoff on an
+      // unrecoverable error would hang a turn far longer than the value of
+      // retrying, and UNKNOWN is not evidence of quota exhaustion.
       return SERVER_ERROR_BACKOFF_MS;
   }
 }

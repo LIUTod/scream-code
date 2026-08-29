@@ -122,11 +122,11 @@ describe('isRetryableGenerateError', () => {
     expect(isRetryableGenerateError(new APIEmptyResponseError('empty'))).toBe(true);
   });
 
-  it.each([429, 500, 502, 503, 504])('treats HTTP %i as retryable', (statusCode) => {
+  it.each([408, 429, 500, 501, 502, 503, 504, 520, 524])('treats HTTP %i as retryable', (statusCode) => {
     expect(isRetryableGenerateError(new APIStatusError(statusCode, 'retryable'))).toBe(true);
   });
 
-  it.each([400, 401, 403, 404, 422])('treats HTTP %i as non-retryable', (statusCode) => {
+  it.each([400, 401, 402, 403, 404, 409, 413, 422])('treats HTTP %i as non-retryable', (statusCode) => {
     expect(isRetryableGenerateError(new APIStatusError(statusCode, 'non-retryable'))).toBe(false);
   });
 
@@ -138,14 +138,16 @@ describe('isRetryableGenerateError', () => {
     expect(isRetryableGenerateError('boom')).toBe(false);
   });
 
-  it('retries rate-limit 429 unless quota is exhausted', () => {
+  it('retries every rate-limit 429, including quota-exhausted messages', () => {
     const transient = new APIProviderRateLimitError('rate limit per minute', null, 'RATE_LIMIT_EXCEEDED');
     const capacity = new APIProviderRateLimitError('overloaded', null, 'MODEL_CAPACITY_EXHAUSTED');
     const quota = new APIProviderRateLimitError('quota will reset', null, 'QUOTA_EXHAUSTED');
+    const unknown = new APIProviderRateLimitError('something odd', null, 'UNKNOWN');
 
     expect(isRetryableGenerateError(transient)).toBe(true);
     expect(isRetryableGenerateError(capacity)).toBe(true);
-    expect(isRetryableGenerateError(quota)).toBe(false);
+    expect(isRetryableGenerateError(quota)).toBe(true);
+    expect(isRetryableGenerateError(unknown)).toBe(true);
   });
 });
 

@@ -42,8 +42,8 @@ describe('parseRateLimitReason', () => {
 });
 
 describe('calculateRateLimitBackoffMs', () => {
-  it('returns 30min for QUOTA_EXHAUSTED', () => {
-    expect(calculateRateLimitBackoffMs('QUOTA_EXHAUSTED')).toBe(30 * 60 * 1000);
+  it('returns 30s for QUOTA_EXHAUSTED (bounded quota retries, never a 30min hang)', () => {
+    expect(calculateRateLimitBackoffMs('QUOTA_EXHAUSTED')).toBe(30 * 1000);
   });
 
   it('returns 30s for RATE_LIMIT_EXCEEDED', () => {
