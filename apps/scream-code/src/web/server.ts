@@ -2325,12 +2325,20 @@ export async function startWebServerForSession(session: Session, opts: {
   const baseDir = import.meta.dirname;
   const prodPublicDir = join(baseDir, 'public');
   const devPublicDir = join(baseDir, 'frontend', 'dist');
+  // Source tree static dir: when running from source before a build it only
+  // carries the pairing page, so `/gateway` must still resolve instead of 500.
+  const sourcePublicDir = join(baseDir, 'frontend', 'public');
   let publicDir = prodPublicDir;
   try {
     await access(join(devPublicDir, 'index.html'));
     publicDir = devPublicDir;
   } catch {
-    // Fall back to prodPublicDir.
+    try {
+      await access(join(sourcePublicDir, 'gateway.html'));
+      publicDir = sourcePublicDir;
+    } catch {
+      // Fall back to prodPublicDir.
+    }
   }
 
   const httpServer: HttpServer = createServer(async (req: IncomingMessage, res) => {
@@ -2553,12 +2561,20 @@ export async function runWebServer(opts: WebServerOptions): Promise<WebServerHan
   const baseDir = import.meta.dirname;
   const prodPublicDir = join(baseDir, 'public');
   const devPublicDir = join(baseDir, 'frontend', 'dist');
+  // Source tree static dir: when running from source before a build it only
+  // carries the pairing page, so `/gateway` must still resolve instead of 500.
+  const sourcePublicDir = join(baseDir, 'frontend', 'public');
   let publicDir = prodPublicDir;
   try {
     await access(join(devPublicDir, 'index.html'));
     publicDir = devPublicDir;
   } catch {
-    // Fall back to prodPublicDir.
+    try {
+      await access(join(sourcePublicDir, 'gateway.html'));
+      publicDir = sourcePublicDir;
+    } catch {
+      // Fall back to prodPublicDir.
+    }
   }
 
   const httpServer: HttpServer = createServer(async (req: IncomingMessage, res) => {

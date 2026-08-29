@@ -402,3 +402,11 @@ interface SessionStatus {
 | ✅ | 无硬编码密钥 | 未提交 diff 扫描 api_key/secret/token/sk-/ghp_/AKIA/bearer：2 处命中均为文档行与横幅文案 | — |
 | ✅ | `prepublishOnly` 链可靠 | `verify-publish.mjs` 重跑完整 build 并断言 `dist/main.mjs` 存在、版本已注入、`dist/public` 保留 | — |
 | ✅ | 运行时无报错 | 当前 bundle `index-B0XlDIOZ.js` 加载后 console 无 error/warn；空会话正确渲染 empty-state | — |
+
+### CI 失败修复（gateway-auth 500）
+
+**根因**：`test/web/gateway-auth.test.ts`（本次提交新增）访问静态页 `/gateway`，而 CI 的 test 步骤从**不构建 web 产物**——`src/web/frontend/dist` 在 CI 不存在 → 服务器 publicDir 解析落到不存在的 `prodPublicDir` → `/gateway` 500。本地一直绿，是因为本机反复构建过产物（"只在本地能过"的测试假设错误）。复现：移走 `frontend/dist` 后跑该测试 → `GET /gateway` 500，与 CI 完全一致。
+
+**修复（产品级，不动 CI）**：`server.ts` 两处 publicDir 解析（主 server 与 pairing server）增加第三候选 `frontend/public`（源码静态目录，含 `gateway.html`），选择顺序：`frontend/dist`(有 index.html) → `frontend/public`(有 gateway.html) → `dist/public`。源码直跑未构建时对码页不再 500。CI 无需加构建步骤即可全绿。
+
+**验证**：`frontend/dist` 移走后 gateway-auth 12/12 通过（此前 500）；恢复产物后项目 `typecheck` + `web:typecheck` 0 错误、`test/web` 57/57；打包后 `dist/public/gateway.html` 存在，非 `--lan` 模式 `/gateway` 404 为预期（对码页仅 LAN 模式提供）。
