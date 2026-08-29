@@ -9,7 +9,9 @@
  * Platform mapping:
  *   macOS  -> pbcopy
  *   Windows-> powershell Set-Clipboard (base64 payload, avoids quoting issues)
- *   Linux  -> wl-copy (Wayland) / xclip -selection clipboard -i (X11)
+ *   Linux  -> wl-copy (Wayland) / xclip or xsel (X11), tried in a candidate
+ *             chain so a missing tool (Ubuntu ships neither by default)
+ *             falls through to the next one instead of failing outright.
  */
 
 import { spawnSync } from 'node:child_process';
@@ -41,14 +43,35 @@ function detectPlatform() {
   if (process.platform === 'darwin') return 'macos';
   if (process.platform === 'win32') return 'windows';
   if (process.platform === 'linux') {
+    // Just a preference hint for ordering the candidate chain — the chain
+    // still falls through if the preferred tool is missing (Ubuntu ships
+    // neither wl-copy nor xclip by default, and SSH sessions may have no
+    // display variables at all).
     return process.env['WAYLAND_DISPLAY'] ? 'linux-wayland' : 'linux-x11';
   }
   return 'unsupported';
 }
 
+interface ClipboardCandidate {
+  readonly command: string;
+  readonly args: string[];
+}
+
+// Candidate chain for Linux. wl-copy is first on Wayland, xclip first on X11;
+// every candidate is tried in order until one succeeds, so a missing or
+// misbehaving tool never blocks copying when an alternative exists.
+function linuxCandidates(platform: 'linux-wayland' | 'linux-x11'): ClipboardCandidate[] {
+  const wl: ClipboardCandidate = { command: 'wl-copy', args: [] };
+  const xclip: ClipboardCandidate = { command: 'xclip', args: ['-selection', 'clipboard', '-i'] };
+  const xsel: ClipboardCandidate = { command: 'xsel', args: ['--clipboard', '--input'] };
+  return platform === 'linux-wayland'
+    ? [wl, xclip, xsel]
+    : [xclip, xsel, wl];
+}
+
 /**
  * Write `text` to the system clipboard. Throws ClipboardTextError when the
- * platform is unsupported or the underlying command fails, so callers can
+ * platform is unsupported or every candidate command fails, so callers can
  * surface a "Copy failed" indicator.
  */
 export async function writeTextClipboard(
@@ -79,15 +102,19 @@ export async function writeTextClipboard(
       break;
     }
     case 'linux-wayland':
-      command = 'wl-copy';
-      args = [];
-      input = text;
-      break;
-    case 'linux-x11':
-      command = 'xclip';
-      args = ['-selection', 'clipboard', '-i'];
-      input = text;
-      break;
+    case 'linux-x11': {
+      const failures: string[] = [];
+      for (const candidate of linuxCandidates(platform)) {
+        const result = runCommand(candidate.command, candidate.args, text);
+        if (result.ok) return;
+        failures.push(`${candidate.command}: ${result.error ?? 'unknown error'}`);
+      }
+      throw new ClipboardTextError(
+        `failed to copy to clipboard (${failures.join(' | ')}). ` +
+          'Install wl-clipboard (Wayland: sudo apt install wl-clipboard) or ' +
+          'xclip/xsel (X11: sudo apt install xclip xsel)',
+      );
+    }
     default:
       throw new ClipboardTextError(`unsupported clipboard platform: ${process.platform}`);
   }

@@ -35,6 +35,13 @@ import {
   type TUIStartupState,
 } from './types';
 
+// Selection copy falls back to the OSC 52 terminal escape when no platform
+// clipboard tool is available (e.g. bare Ubuntu with neither wl-clipboard nor
+// xclip installed). Terminals cap the OSC 52 payload between ~64KB and
+// 100KB, so larger selections report failure instead of writing a sequence
+// that gets dropped.
+const OSC52_MAX_TEXT_LENGTH = 64 * 1024;
+
 export interface TUIState {
   ui: TuiAltScreen;
   terminal: ProcessTerminal;
@@ -93,14 +100,31 @@ export function createTUIState(options: ScreamTUIOptions): TUIState {
 
   const terminal = new ProcessTerminal();
   const ui = new TuiAltScreen(terminal, undefined, undefined, {
-    // Copy selected text into the system clipboard via platform commands;
-    // return true/false so the TUI flashes "Copied!" / "Copy failed".
+    // Copy selected text into the system clipboard. Platform commands
+    // (pbcopy / powershell / wl-copy / xclip / xsel) are tried first because
+    // they have a verifiable success path; when none is available (bare
+    // Ubuntu ships no clipboard tool by default), fall back to the OSC 52
+    // terminal escape, which a wide range of terminals accept without any
+    // external tool. Unsupported terminals silently drop it, but that is
+    // strictly better than the previous behavior of dead-ending with
+    // "Copy failed" on every selection.
     copySelection: async (text) => {
       try {
         await writeTextClipboard(text);
         return true;
       } catch {
-        return false;
+        // OSC 52 is size-limited: terminals cap the base64 payload between
+        // ~64KB and 100KB, so oversized selections report failure honestly
+        // instead of writing a sequence the terminal will drop anyway.
+        const base64 = Buffer.from(text, 'utf8').toString('base64');
+        if (base64.length > OSC52_MAX_TEXT_LENGTH) return false;
+        try {
+          terminal.write(`\x1B]52;c;${base64}\u0007`);
+        } catch {
+          // Terminal gone — nothing more we can do.
+          return false;
+        }
+        return true;
       }
     },
   });

@@ -46,6 +46,73 @@ describe('writeTextClipboard', () => {
     expect(commands).toEqual(['wl-copy', 'xclip']);
   });
 
+  it('falls through the candidate chain when the preferred Linux tool is missing', async () => {
+    const original = Object.getOwnPropertyDescriptor(process, 'platform');
+    const originalEnv = process.env['WAYLAND_DISPLAY'];
+    const calls: Array<{ command: string; args: string[] }> = [];
+    const run: RunCommand = (command, args) => {
+      calls.push({ command, args });
+      // Simulate a missing preferred tool: first candidate fails (ENOENT),
+      // second succeeds.
+      if (calls.length === 1) return { ok: false, error: 'spawnSync ENOENT' };
+      return { ok: true };
+    };
+    Object.defineProperty(process, 'platform', { value: 'linux' });
+    try {
+      process.env['WAYLAND_DISPLAY'] = ':0';
+      await writeTextClipboard('a', run);
+    } finally {
+      if (original) Object.defineProperty(process, 'platform', original);
+      if (originalEnv === undefined) delete process.env['WAYLAND_DISPLAY'];
+      else process.env['WAYLAND_DISPLAY'] = originalEnv;
+    }
+    expect(calls.map((c) => c.command)).toEqual(['wl-copy', 'xclip']);
+    expect(calls[1]?.args).toEqual(['-selection', 'clipboard', '-i']);
+  });
+
+  it('includes xsel as the third Linux candidate and reports install hints when all fail', async () => {
+    const original = Object.getOwnPropertyDescriptor(process, 'platform');
+    const originalEnv = process.env['WAYLAND_DISPLAY'];
+    const commands: string[] = [];
+    const run: RunCommand = (command) => {
+      commands.push(command);
+      return { ok: false, error: `no ${command} here` };
+    };
+    Object.defineProperty(process, 'platform', { value: 'linux' });
+    try {
+      process.env['WAYLAND_DISPLAY'] = ':0';
+      await expect(writeTextClipboard('a', run)).rejects.toThrow(/wl-clipboard/);
+    } finally {
+      if (original) Object.defineProperty(process, 'platform', original);
+      if (originalEnv === undefined) delete process.env['WAYLAND_DISPLAY'];
+      else process.env['WAYLAND_DISPLAY'] = originalEnv;
+    }
+    expect(commands).toEqual(['wl-copy', 'xclip', 'xsel']);
+  });
+
+  it('tries xclip first on X11 and falls through to xsel before wl-copy', async () => {
+    const original = Object.getOwnPropertyDescriptor(process, 'platform');
+    const originalEnv = process.env['WAYLAND_DISPLAY'];
+    const calls: Array<{ command: string; args: string[] }> = [];
+    const run: RunCommand = (command, args) => {
+      calls.push({ command, args });
+      // Simulate xclip missing (ENOENT); xsel succeeds.
+      if (command === 'xclip') return { ok: false, error: 'spawnSync ENOENT' };
+      return { ok: true };
+    };
+    Object.defineProperty(process, 'platform', { value: 'linux' });
+    try {
+      delete process.env['WAYLAND_DISPLAY'];
+      await writeTextClipboard('a', run);
+    } finally {
+      if (original) Object.defineProperty(process, 'platform', original);
+      if (originalEnv === undefined) delete process.env['WAYLAND_DISPLAY'];
+      else process.env['WAYLAND_DISPLAY'] = originalEnv;
+    }
+    expect(calls.map((c) => c.command)).toEqual(['xclip', 'xsel']);
+    expect(calls[1]?.args).toEqual(['--clipboard', '--input']);
+  });
+
   it('passes base64 to powershell Set-Clipboard on Windows', async () => {
     const original = Object.getOwnPropertyDescriptor(process, 'platform');
     const calls: Array<{ command: string; args: string[] }> = [];
