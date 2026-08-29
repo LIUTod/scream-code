@@ -149,6 +149,34 @@ describe('web message persistence (finalized snapshots)', () => {
     await manager2.closeAll();
   });
 
+  it('drains in-flight metadata writes before close resolves', async () => {
+    const homeDir = await mkdtemp(join(tmpdir(), 'scream-web-msg-'));
+    tempDirs.push(homeDir);
+    const sessionsDir = join(homeDir, 'web-sessions');
+    await mkdir(sessionsDir, { recursive: true });
+    await writeFile(join(sessionsDir, 'web-p3.meta.json'), JSON.stringify({
+      sessionId: 'web-p3', coreSessionId: 'web-p3', workDir: '/tmp/project',
+      title: 'Stale', createdAt: 1, model: 'test-model', permission: 'manual',
+    }));
+    const control = makeFakeSession('web-p3');
+    const manager = await newManager(homeDir, control);
+    const live = await manager.activateSession('web-p3');
+    expect(live).not.toBeNull();
+
+    // A finished turn fires the fire-and-forget title/metadata update. The
+    // journal line landing is NOT sufficient to prove the meta write is done;
+    // close() itself must drain it.
+    turnEvents(control, '正文内容', '思考内容');
+    await waitForJournal(homeDir, 'web-p3', 'web.message.finalized');
+    await manager.closeAll();
+
+    const raw = await readFile(join(sessionsDir, 'web-p3.meta.json'), 'utf-8');
+    const meta = JSON.parse(raw) as { title: string };
+    // Derived from the (user-message-less) transcript; proves the pending
+    // saveMetadata finished and the file was never observed half-written.
+    expect(meta.title).toBe('New Session');
+  });
+
   it('marks pre-snapshot turns as degraded instead of rendering empty bodies', async () => {
     const homeDir = await mkdtemp(join(tmpdir(), 'scream-web-msg-'));
     tempDirs.push(homeDir);

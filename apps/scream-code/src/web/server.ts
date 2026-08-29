@@ -17,7 +17,7 @@
 
 import { createServer, type Server as HttpServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { readFile, writeFile, access, mkdir, readdir, unlink, stat, realpath } from 'node:fs/promises';
+import { readFile, writeFile, access, mkdir, readdir, unlink, stat, realpath, rename } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { exec, execFile } from 'node:child_process';
@@ -496,9 +496,18 @@ async function appendJournalLine(homeDir: string, sessionId: string, line: strin
   }
 }
 
+let metaWriteSeq = 0;
+
 async function saveMetadata(homeDir: string, meta: SessionMetadata): Promise<void> {
   try {
-    await writeFile(getMetaPath(homeDir, meta.sessionId), JSON.stringify(meta, null, 2));
+    // Write to a temp file and rename into place. Plain writeFile truncates
+    // the target before the new bytes land, so a concurrent reader
+    // (listPersistedSessions on server restart) could observe a half-written
+    // JSON document and silently drop the session. rename() is atomic.
+    const path = getMetaPath(homeDir, meta.sessionId);
+    const tmp = `${path}.${process.pid}.${metaWriteSeq++}.tmp`;
+    await writeFile(tmp, JSON.stringify(meta, null, 2));
+    await rename(tmp, path);
   } catch (error) {
     log.warn('web: failed to save metadata', { sessionId: meta.sessionId, error: String(error) });
   }
@@ -956,6 +965,19 @@ class WebSession {
     await appendJournalLine(this.homeDir, this.sessionId, line);
   }
 
+  /** In-flight fire-and-forget persistence writes, drained by close(). */
+  private readonly pendingWrites = new Set<Promise<void>>();
+
+  /** Register a background persistence promise so close() can await it. */
+  private trackPending(promise: Promise<void>): void {
+    const tracked: Promise<void> = promise
+      .catch(() => {})
+      .then(() => {
+        this.pendingWrites.delete(tracked);
+      });
+    this.pendingWrites.add(tracked);
+  }
+
   loadFromPersisted(entries: PersistedEntry[]): void {
     for (const entry of entries) {
       if ('type' in entry && entry.type === 'user_message') {
@@ -1021,7 +1043,7 @@ class WebSession {
     this.journal.push(entry);
     // Persist durable events only.
     if (!entry.volatile) {
-      void this.persistEntry(entry);
+      this.trackPending(this.persistEntry(entry));
     }
     return entry;
   }
@@ -1039,7 +1061,7 @@ class WebSession {
       payload: payload as unknown as Event,
     };
     this.journal.push(entry);
-    void this.persistEntry(entry);
+    this.trackPending(this.persistEntry(entry));
     return entry;
   }
 
@@ -1091,7 +1113,7 @@ class WebSession {
         }
         this.liveAssistant = null;
         // Update title after each exchange.
-        void this.updateTitle();
+        this.trackPending(this.updateTitle());
       } else if (event.type === 'assistant.delta') {
         const live = this.liveAssistant;
         if (live) live.content += event.delta;
@@ -1278,7 +1300,7 @@ class WebSession {
         // Reserve the turn synchronously before broadcasting acceptance so a
         // second tab cannot race another prompt into the same agent session.
         this.busy = true;
-        void this.persistUserMessage(text, this.nextSeq, clientMessageId);
+        this.trackPending(this.persistUserMessage(text, this.nextSeq, clientMessageId));
         this.broadcast({ type: 'user_message', clientMessageId, text }, false);
         void this.session.prompt(text).catch((error: unknown) => {
           this.busy = false;
@@ -1910,6 +1932,10 @@ class WebSession {
     }
     this.pendingApprovals.clear();
     this.unsubscribe?.();
+    // Drain in-flight persistence (journal lines, user messages, title
+    // metadata) before returning, so a process restart never races a
+    // half-written meta.json or misses the final journal lines.
+    await Promise.allSettled(this.pendingWrites);
     for (const [ws] of this.connections) {
       ws.terminate();
     }
