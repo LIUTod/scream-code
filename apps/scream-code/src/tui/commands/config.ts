@@ -19,7 +19,6 @@ import { showUsage } from './info';
 import { refreshProviderBalance } from '../api-balance';
 import type { AppState, PlanModeState } from '../types';
 import type { SlashCommandHost } from './dispatch';
-import type { AuthFlowController } from '../controllers/auth-flow';
 import type { TUIState } from '../tui-state';
 
 /**
@@ -569,7 +568,6 @@ export interface ThinkingLevelHost {
   state: TUIState;
   session: Session | undefined;
   readonly harness: ScreamHarness;
-  readonly authFlow: AuthFlowController;
   setAppState(patch: Partial<AppState>): void;
   showError(msg: string): void;
   showStatus(msg: string, color?: string): void;
@@ -583,13 +581,15 @@ export async function changeThinkingLevel(host: ThinkingLevelHost, alias: string
   }
   const prevLevel = host.state.appState.thinkingLevel;
   const isActiveModel = alias === host.state.appState.model;
+  const session = host.session;
 
   if (isActiveModel && level !== prevLevel) {
-    const session = host.session;
     try {
-      if (session === undefined) {
-        await host.authFlow.activateModelAfterLogin(alias, level);
-      } else {
+      // No active session: skip the runtime change entirely. The level is
+      // persisted as the default below, so the next session starts with it -
+      // picking a thinking level must never create a session behind the
+      // user's back (the lingering transcript hides the closed session).
+      if (session !== undefined) {
         await session.setThinking(level);
       }
     } catch (error) {
@@ -610,7 +610,11 @@ export async function changeThinkingLevel(host: ThinkingLevelHost, alias: string
   }
 
   const status = isActiveModel && level !== prevLevel
-    ? `Thinking set to ${level} for ${alias}.`
+    ? session === undefined
+      ? persisted
+        ? `No active session - thinking ${level} for ${alias} saved as default.`
+        : `No active session - thinking ${level} was NOT saved (${alias} is not the default model, so its level applies only when a new session selects it).`
+      : `Thinking set to ${level} for ${alias}.`
     : persisted
       ? `Saved thinking ${level} as default for ${alias}.`
       : `Thinking already ${level} for ${alias}.`;
@@ -648,14 +652,18 @@ async function performModelSwitch(host: SlashCommandHost, alias: string, thinkin
   const prevThinkingLevel = host.state.appState.thinkingLevel;
   const modelChanged = alias !== prevModel;
   const thinkingChanged = thinkingLevel !== prevThinkingLevel;
-  const needsSessionActivation = modelChanged || thinkingChanged;
+  const session = host.session;
 
   // Storm Breaker guard: refuse to switch to a model whose context window is
   // smaller than the session's current token count. Switching would either
   // truncate the context silently or force an immediate compaction the user
   // did not ask for. Block early with a friendly advisory so the user can
-  // compact first or pick a larger-window model.
-  const overflow = alias !== prevModel ? contextOverflowForModel(host.state.appState, alias) : null;
+  // compact first or pick a larger-window model. Only meaningful with a LIVE
+  // session - without one the stale contextTokens of the closed session must
+  // not veto saving a default (a new session starts from zero anyway).
+  const overflow = session !== undefined && alias !== prevModel
+    ? contextOverflowForModel(host.state.appState, alias)
+    : null;
   if (overflow !== null) {
     host.showNotice(
       'Storm Breaker（风暴守护者）',
@@ -665,13 +673,10 @@ async function performModelSwitch(host: SlashCommandHost, alias: string, thinkin
     return;
   }
 
-  const session = host.session;
   let effectiveAlias = alias;
   let effectiveThinking = thinkingLevel;
   try {
-    if (session === undefined && needsSessionActivation) {
-      await host.authFlow.activateModelAfterLogin(alias, thinkingLevel);
-    } else if (session !== undefined) {
+    if (session !== undefined) {
       if (modelChanged) {
         await session.setModel(alias);
       }
@@ -684,6 +689,11 @@ async function performModelSwitch(host: SlashCommandHost, alias: string, thinkin
       if (confirmed?.model !== undefined) effectiveAlias = confirmed.model;
       if (confirmed?.thinkingLevel !== undefined) effectiveThinking = confirmed.thinkingLevel as ThinkingEffort;
     }
+    // No active session: NEVER silently create one as a side effect of
+    // picking a model. The transcript can linger on screen after the
+    // session was closed (deleted / logged out), so "model switch" must
+    // degrade to a default-config update plus a visible notice instead of
+    // opening a fresh session behind the user's back.
   } catch (error) {
     const msg = formatErrorMessage(error);
     host.showError(`Failed to switch model: ${msg}`);
@@ -701,7 +711,9 @@ async function performModelSwitch(host: SlashCommandHost, alias: string, thinkin
     persisted = await persistModelSelection(host, alias, thinkingLevel);
   } catch (error) {
     const msg = formatErrorMessage(error);
-    host.showError(`Switched to ${effectiveAlias}, but failed to save default: ${msg}`);
+    host.showError(
+      `${session === undefined ? 'Selected' : 'Switched to'} ${effectiveAlias}, but failed to save default: ${msg}`,
+    );
     return;
   }
 
@@ -712,6 +724,9 @@ async function performModelSwitch(host: SlashCommandHost, alias: string, thinkin
     : '';
 
   const status: string = (() => {
+    if (session === undefined && (modelChanged || thinkingChanged)) {
+      return `No active session - ${effectiveAlias} (thinking ${effectiveThinking}) saved as default. It applies when you start a new session.`;
+    }
     if (modelChanged) return `Switched to ${effectiveAlias} with thinking ${effectiveThinking}.${cacheWarning}`;
     if (thinkingChanged) return `Thinking set to ${effectiveThinking} for ${effectiveAlias}.`;
     if (persisted) return `Saved ${effectiveAlias} with thinking ${effectiveThinking} as default.`;
