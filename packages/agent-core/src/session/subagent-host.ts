@@ -54,6 +54,9 @@ export type SubagentHandle = {
 
 export class SessionSubagentHost {
   private readonly activeChildren = new Map<string, ActiveChild>();
+  /** Per-child per-model usage already folded into the parent totals, so a
+   * resumed child's aggregation only adds the delta. */
+  private readonly aggregatedChildUsage = new WeakMap<Agent, Record<string, TokenUsage>>();
 
   constructor(
     private readonly session: Session,
@@ -270,6 +273,30 @@ export class SessionSubagentHost {
 
       const usage = child.usage.data().total;
 
+      // Aggregate the child's usage into the PARENT agent's session totals:
+      // without this, per-session cost/token accounting silently omits every
+      // subagent (their usage only lands on the short-lived child agent).
+      // Session scope, not turn: a background child can finish after the
+      // parent turn already ended, so turn attribution is unreliable.
+      // Delta-based: a RESUMED child (runChild re-entered for the same child
+      // agent) has accumulated additional usage, so only the newly accrued
+      // part is folded in - the previously aggregated amount is not added
+      // twice while the delta still counts.
+      const childByModel = child.usage.data().byModel ?? {};
+      const previous = this.aggregatedChildUsage.get(child) ?? {};
+      for (const [model, childUsage] of Object.entries(childByModel)) {
+        const delta = previous[model] === undefined ? childUsage : subtractUsage(childUsage, previous[model]!);
+        if (isZeroUsage(delta)) continue;
+        try {
+          parent.usage.record(model, delta, 'session');
+        } catch (error) {
+          // Usage accounting is ancillary: a failure here must never fail
+          // the completed subagent (the parent turn already has its result).
+          parent.log.warn('Failed to aggregate subagent usage', { model, error: String(error) });
+        }
+      }
+      this.aggregatedChildUsage.set(child, childByModel);
+
       // Aggregate structured findings produced by reviewer subagents so the
       // parent agent can act on them without re-parsing free-text summaries.
       let findingsBlock = '';
@@ -417,6 +444,25 @@ export class SessionSubagentHost {
       },
     });
   }
+}
+
+/** Element-wise subtraction clamped at zero (usage can never go negative). */
+function subtractUsage(current: TokenUsage, previous: TokenUsage): TokenUsage {
+  return {
+    inputOther: Math.max(0, current.inputOther - previous.inputOther),
+    output: Math.max(0, current.output - previous.output),
+    inputCacheRead: Math.max(0, current.inputCacheRead - previous.inputCacheRead),
+    inputCacheCreation: Math.max(0, current.inputCacheCreation - previous.inputCacheCreation),
+  };
+}
+
+function isZeroUsage(usage: TokenUsage): boolean {
+  return (
+    usage.inputOther === 0 &&
+    usage.output === 0 &&
+    usage.inputCacheRead === 0 &&
+    usage.inputCacheCreation === 0
+  );
 }
 
 async function runChildTurnToCompletion(child: Agent, signal: AbortSignal): Promise<void> {

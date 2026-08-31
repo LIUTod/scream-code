@@ -14,6 +14,11 @@ import type { SDKSessionRPC } from '../../src/rpc';
 import { Session } from '../../src/session';
 import { collectGitContext } from '../../src/session/git-context';
 import { SessionSubagentHost } from '../../src/session/subagent-host';
+
+/** TokenUsage with all fields zero (data().total is undefined pre-record). */
+function zeroUsage() {
+  return { inputOther: 0, output: 0, inputCacheRead: 0, inputCacheCreation: 0 };
+}
 import { abortError, userCancellationReason } from '../../src/utils/abort';
 import { testAgent, type AgentTestContext } from '../agent/harness/agent';
 import { createFakeJian } from '../tools/fixtures/fake-jian';
@@ -209,6 +214,146 @@ describe('SessionSubagentHost', () => {
         event: 'subagent.failed',
       }),
     );
+  });
+
+  it('aggregates subagent usage into the parent session totals', async () => {
+    const parent = testAgent();
+    parent.configure();
+    await parent.rpc.setPermission({ mode: 'yolo' });
+    parent.agent.permission.rules = [
+      { decision: 'allow', scope: 'session-runtime', pattern: 'Read' },
+    ];
+    parent.newEvents();
+    const parentUsage = parent.agent.usage.data().total ?? zeroUsage();
+    expect(parentUsage.inputOther + parentUsage.output).toBe(0);
+
+    const child = testAgent({
+      type: 'sub',
+      permission: { parent: parent.agent.permission },
+    });
+    child.mockNextResponse({
+      type: 'text',
+      text: 'Investigated the request and completed the child task end to end. The relevant module was located, its behavior traced through every call site, and the requested change applied and verified against the existing test suite.',
+    });
+    // The scripted harness never routes usage through the loop (its record()
+    // is never invoked), so seed the child recorder directly to simulate
+    // real provider usage that the child accumulated.
+    child.agent.usage.record('seed-model', { inputOther: 100, output: 20, inputCacheRead: 0, inputCacheCreation: 0 }, 'turn');
+    const session = fakeSession(parent.agent, child.agent);
+    const host = new SessionSubagentHost(session, 'main');
+
+    const handle = await host.spawn('explore', {
+      parentToolCallId: 'call_agent',
+      prompt: 'Find the cause',
+      description: 'Find cause',
+      runInBackground: false,
+      signal,
+    });
+    await handle.completion;
+
+    // The parent never generated on its own, so any parent usage now must be
+    // the aggregated child usage (session scope => survives its lifetime).
+    const childTotal = child.agent.usage.data().total ?? zeroUsage();
+    const parentTotal = parent.agent.usage.data().total ?? zeroUsage();
+    expect(parentTotal.inputOther).toBe(childTotal.inputOther);
+    expect(parentTotal.output).toBe(childTotal.output);
+    expect(parentTotal.inputOther).toBeGreaterThan(0);
+  });
+
+  it('does not double-count usage across a subagent resume', async () => {
+    const parent = testAgent();
+    parent.configure();
+    parent.agent.permission.setMode('yolo');
+    parent.newEvents();
+
+    const child = testAgent({
+      type: 'sub',
+      permission: { parent: parent.agent.permission },
+    });
+    child.configure({ tools: ['Read'] });
+    child.agent.useProfile(
+      profile({ name: 'explore', tools: ['Read'], systemPrompt: 'explore prompt' }),
+    );
+    child.agent.context.appendUserMessage([{ type: 'text', text: 'Earlier context' }]);
+    child.mockNextResponse({
+      type: 'text',
+      text: 'Resumed the subagent from its earlier context and carried the task through to completion, then reported a full and detailed technical summary so the parent agent can continue without repeating prior work.',
+    });
+    child.mockNextResponse({
+      type: 'text',
+      text: 'Resumed the subagent from its earlier context and carried the task through to completion, then reported a full and detailed technical summary so the parent agent can continue without repeating prior work.',
+    });
+    child.mockNextResponse({
+      type: 'text',
+      text: 'Resumed the subagent from its earlier context and carried the task through to completion, then reported a full and detailed technical summary so the parent agent can continue without repeating prior work.',
+    });
+    child.agent.usage.record(
+      'seed-model',
+      { inputOther: 100, output: 20, inputCacheRead: 0, inputCacheCreation: 0 },
+      'turn',
+    );
+
+    const session = fakeSession(parent.agent, child.agent, {
+      'agent-0': {
+        homedir: '/tmp/scream-session/agents/agent-0',
+        type: 'sub',
+        parentAgentId: 'main',
+      },
+    });
+    const host = new SessionSubagentHost(session, 'main');
+
+    const first = await host.resume('agent-0', {
+      parentToolCallId: 'call_agent',
+      prompt: 'Continue from context',
+      description: 'Continue work',
+      runInBackground: false,
+      signal,
+    });
+    await first.completion;
+    const totalAfterFirst = parent.agent.usage.data().total ?? zeroUsage();
+
+    // A resumed child ACCUMULATES more usage; only the new delta may be
+    // folded into the parent - the previously aggregated amount is not
+    // counted twice. Assert the RELATIVE growth (the harness records its own
+    // estimated usage, so absolute numbers are not the contract).
+    // Capture the baseline BEFORE seeding: the seed is real unaggregated
+    // child usage and must be counted in the parent's growth.
+    const childBeforeResume = child.agent.usage.data().total ?? zeroUsage();
+    child.agent.usage.record(
+      'seed-model',
+      { inputOther: 30, output: 10, inputCacheRead: 0, inputCacheCreation: 0 },
+      'turn',
+    );
+    child.mockNextResponse({
+      type: 'text',
+      text: 'The resumed subagent picked the work back up, traced the remaining callsites, and delivered a complete technical summary covering every step and the final verification outcome in detail.',
+    });
+    child.mockNextResponse({
+      type: 'text',
+      text: 'The resumed subagent picked the work back up, traced the remaining callsites, and delivered a complete technical summary covering every step and the final verification outcome in detail.',
+    });
+    child.mockNextResponse({
+      type: 'text',
+      text: 'The resumed subagent picked the work back up, traced the remaining callsites, and delivered a complete technical summary covering every step and the final verification outcome in detail.',
+    });
+    const resumed = await host.resume('agent-0', {
+      parentToolCallId: 'call_agent2',
+      prompt: 'Continue again',
+      description: 'Continue work',
+      runInBackground: false,
+      signal,
+    });
+    await resumed.completion;
+
+    // Contract: the parent's usage growth equals the child's usage growth -
+    // exactly the resumed turn's newly accrued usage, never the already
+    // aggregated amount twice, never part of it omitted.
+    const totalAfterResume = parent.agent.usage.data().total ?? zeroUsage();
+    const childAfterResume = child.agent.usage.data().total ?? zeroUsage();
+    expect(totalAfterResume.inputOther - totalAfterFirst.inputOther)
+      .toBe(childAfterResume.inputOther - childBeforeResume.inputOther);
+    expect(totalAfterResume.output - totalAfterFirst.output)
+      .toBe(childAfterResume.output - childBeforeResume.output);
   });
 
   it('runs a child agent turn and returns the last assistant text', async () => {

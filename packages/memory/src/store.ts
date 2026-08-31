@@ -122,6 +122,23 @@ export class MemoryMemoStore {
     return this.withWriteLock(() => this.appendInternal(entry));
   }
 
+  /**
+   * True when a memo with the same source session + user need + approach
+   * already exists. Used by compaction-summary recovery to re-store memos
+   * idempotently after a crash between compaction apply and extraction.
+   * The approach field keeps two distinct memos that happen to share the
+   * same user need from being collapsed into one.
+   */
+  existsBySourceAndNeed(sourceSessionId: string, userNeed: string, approach: string): boolean {
+    if (this.db === undefined) return false;
+    const row = this.db
+      .prepare(
+        'SELECT 1 FROM memos WHERE source_session_id = ? AND user_need = ? AND approach = ? LIMIT 1',
+      )
+      .get(sourceSessionId, userNeed, approach);
+    return row !== undefined;
+  }
+
   /** Delete a memo by id. */
   async delete(id: string): Promise<boolean> {
     return this.withWriteLock(() => this.deleteInternal(id));

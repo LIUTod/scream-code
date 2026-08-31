@@ -1,5 +1,5 @@
 import { createReadStream } from 'node:fs';
-import { mkdir, open } from 'node:fs/promises';
+import { mkdir, open, rename } from 'node:fs/promises';
 import { dirname } from 'pathe';
 
 import { syncDir } from '../../utils/fs';
@@ -111,6 +111,7 @@ export class FileSystemAgentRecordPersistence implements AgentRecordPersistence 
   private readonly pendingRecords: AgentRecord[] = [];
   private shouldClear = false;
   private directorySynced = false;
+  private rewriteSeq = 0;
   private flushPromise: Promise<void> | undefined;
   private error: unknown;
 
@@ -314,7 +315,29 @@ export class FileSystemAgentRecordPersistence implements AgentRecordPersistence 
     const directory = dirname(this.filePath);
     await mkdir(directory, { recursive: true });
 
-    const fh = await open(this.filePath, shouldClear ? 'w' : 'a');
+    if (shouldClear) {
+      // Rewrite atomically. Opening the live path with 'w' truncates it
+      // before the replacement bytes land, so a crash mid-rewrite destroys
+      // the entire wire file (the only copy of session history). A temp
+      // file + rename keeps the old content until the new one is complete
+      // and makes the swap atomic on POSIX.
+      const tmpPath = `${this.filePath}.${process.pid}.${this.rewriteSeq++}.tmp`;
+      const tmp = await open(tmpPath, 'w');
+      try {
+        if (content.length > 0) {
+          await tmp.writeFile(content, 'utf8');
+        }
+        await tmp.sync();
+      } finally {
+        await tmp.close();
+      }
+      await rename(tmpPath, this.filePath);
+      await syncDir(directory);
+      this.directorySynced = true;
+      return;
+    }
+
+    const fh = await open(this.filePath, 'a');
     try {
       if (content.length > 0) {
         await fh.writeFile(content, 'utf8');

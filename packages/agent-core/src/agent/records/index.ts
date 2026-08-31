@@ -9,6 +9,7 @@ import {
 } from './migration';
 import { SNAPSHOT_FOLDED_CONTEXT_TYPES } from './persistence';
 import type { AgentRecord, AgentRecordPersistence } from './types';
+import { recoverMemosFromCompactionSummary } from '../compaction/full';
 
 export * from './types';
 export { AGENT_WIRE_PROTOCOL_VERSION } from './migration';
@@ -129,6 +130,13 @@ function restoreAgentRecord(agent: Agent, input: AgentRecord): void {
       return;
     case 'context.apply_compaction':
       agent.context.applyCompaction(input);
+      // Recovery: the compaction record hits the wire before the memo
+      // extraction step; a crash in that window loses memos. Re-parse the
+      // persisted summary and re-store whatever the extraction never wrote.
+      // Intentionally fire-and-forget with a symmetric design: the recovery
+      // is idempotent (skips already-stored memos), so an interrupted
+      // attempt simply runs again on the next resume.
+      void recoverMemosFromCompactionSummary(agent, input.summary);
       return;
     case 'context.snapshot':
       agent.context.restoreJSONSnapshot(input.snapshot);
@@ -252,11 +260,26 @@ export class AgentRecords {
         break;
       }
     }
+    // Captured from the last folded apply_compaction record when a snapshot
+    // fast-path skips it: the live extraction step runs after the compaction
+    // record hits the wire, so a crash in that window loses the memos. The
+    // skipped record is not replayed, so recover from the remembered summary
+    // at the snapshot point (idempotent - skips already-stored memos).
+    let foldedCompactionSummary: string | undefined;
     for (let i = 0; i < replayedRecords.length; i++) {
       const record = replayedRecords[i];
       if (!record) continue;
-      if (i < snapshotIndex && isSnapshotFoldedContextRecord(record.type)) continue;
+      if (i < snapshotIndex && isSnapshotFoldedContextRecord(record.type)) {
+        if (record.type === 'context.apply_compaction') {
+          foldedCompactionSummary = record.summary;
+        }
+        continue;
+      }
       this.restore(record);
+      if (record.type === 'context.snapshot' && foldedCompactionSummary !== undefined) {
+        void recoverMemosFromCompactionSummary(this.agent, foldedCompactionSummary);
+        foldedCompactionSummary = undefined;
+      }
     }
 
     // A turn that ended mid-step leaves an open assistant message in the wire

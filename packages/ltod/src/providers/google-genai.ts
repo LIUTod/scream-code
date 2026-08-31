@@ -196,24 +196,31 @@ function createAbortError(): DOMException {
   return new DOMException('The operation was aborted.', 'AbortError');
 }
 
-async function abortPromise(signal: AbortSignal | undefined): Promise<never> {
-  if (signal === undefined) {
-    return new Promise(() => {
-      // Intentionally never settles when no signal is provided.
-    });
-  }
+/**
+ * Race async work against an abort signal, ALWAYS detaching the listener.
+ * The Google GenAI SDK does not accept an AbortSignal, so callers race the
+ * SDK call against the signal manually. A bare `addEventListener({ once })`
+ * inside a losing promise leaks the listener on the caller's signal for the
+ * rest of its lifetime - with a session-scoped signal that accumulates one
+ * listener per request. This wrapper guarantees cleanup in both outcomes.
+ */
+async function abortRace<T>(signal: AbortSignal | undefined, work: Promise<T>): Promise<T> {
+  if (signal === undefined) return work;
   if (signal.aborted) {
     throw createAbortError();
   }
-  return new Promise((_, reject) => {
-    signal.addEventListener(
-      'abort',
-      () => {
-        reject(createAbortError());
-      },
-      { once: true },
-    );
+  let onAbort: (() => void) | undefined = undefined;
+  const abortPromise = new Promise<never>((_, reject) => {
+    onAbort = () => reject(createAbortError());
+    signal.addEventListener('abort', onAbort, { once: true });
   });
+  try {
+    return await Promise.race([work, abortPromise]);
+  } finally {
+    if (onAbort !== undefined) {
+      signal.removeEventListener('abort', onAbort);
+    }
+  }
 }
 
 function messageToGoogleGenAI(message: Message): GoogleContent {
@@ -801,10 +808,10 @@ export class GoogleGenAIChatProvider implements ChatProvider {
       // Once we have a response/stream object, the wrapper below continues to
       // check the signal at each chunk boundary.
       if (this._stream) {
-        const stream = await Promise.race([
+        const stream = await abortRace(
+          options?.signal,
           models.generateContentStream(params),
-          abortPromise(options?.signal),
-        ]);
+        );
         return new GoogleGenAIStreamedMessage(
           stream as AsyncIterable<Record<string, unknown>>,
           true,
@@ -812,10 +819,10 @@ export class GoogleGenAIChatProvider implements ChatProvider {
         );
       }
 
-      const response = await Promise.race([
+      const response = await abortRace(
+        options?.signal,
         models.generateContent(params),
-        abortPromise(options?.signal),
-      ]);
+      );
       return new GoogleGenAIStreamedMessage(
         response as Record<string, unknown>,
         false,

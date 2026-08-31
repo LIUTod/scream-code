@@ -14,6 +14,7 @@ import {
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { AgentOptions } from '../../src/agent';
+import { recoverMemosFromCompactionSummary } from '../../src/agent/compaction/full';
 import type { ContextMessage } from '../../src/agent/context';
 import {
   COMPACTION_INSTRUCTION,
@@ -2853,5 +2854,67 @@ describe('compaction-time skill candidate detection', () => {
     expect(COMPACTION_INSTRUCTION()).toContain('[[skill-candidate: none]]');
     expect(COMPACTION_UPDATE_INSTRUCTION()).toContain('## Skill candidates');
     expect(COMPACTION_UPDATE_INSTRUCTION()).toContain('[[skill-candidate: none]]');
+  });
+});
+
+describe('recoverMemosFromCompactionSummary', () => {
+  const memoBlock = `Some compacted summary text.
+
+\`\`\`memory-memo
+{
+  "userNeed": "Debug the flaky restart test",
+  "approach": "Read persistence code and fix the write ordering",
+  "outcome": "Fixed",
+  "whatFailed": "none",
+  "whatWorked": "atomic rename",
+  "tags": ["persistence", "recovery"]
+}
+\`\`\`
+
+Trailing text.`;
+
+  function fakeAgent(overrides: Record<string, unknown> = {}) {
+    const stored: Array<Record<string, unknown>> = [];
+    const agent = {
+      homedir: '/home/u/sessions/sess_007/agents/main',
+      config: { cwd: '/project/work' },
+      getSessionTitle: vi.fn(async () => 'Debug session'),
+      memoStore: {
+        existsBySourceAndNeed: vi.fn(() => false),
+        append: vi.fn(async (memo: Record<string, unknown>) => {
+          stored.push(memo);
+        }),
+      },
+      log: { warn: vi.fn() },
+    };
+    return { ...agent, ...overrides, stored };
+  }
+
+  it('re-stores memos the extraction step never wrote', async () => {
+    const agent = fakeAgent();
+    await recoverMemosFromCompactionSummary(agent as never, memoBlock);
+
+    expect(agent.memoStore.append).toHaveBeenCalledTimes(1);
+    const memo = agent.stored[0]! as Record<string, unknown>;
+    expect(memo['userNeed']).toBe('Debug the flaky restart test');
+    expect(memo['sourceSessionId']).toBe('sess_007');
+    expect(memo['sourceSessionTitle']).toBe('Debug session');
+    expect(memo['projectDir']).toBe('/project/work');
+  });
+
+  it('is idempotent: skips memos that already exist', async () => {
+    const agent = fakeAgent();
+    agent.memoStore.existsBySourceAndNeed = vi.fn(() => true);
+    await recoverMemosFromCompactionSummary(agent as never, memoBlock);
+    expect(agent.memoStore.append).not.toHaveBeenCalled();
+  });
+
+  it('no-ops without a summary, no memoable text, or a memoStore', async () => {
+    const agent = fakeAgent();
+    await recoverMemosFromCompactionSummary(agent as never, undefined);
+    await recoverMemosFromCompactionSummary(agent as never, '');
+    await recoverMemosFromCompactionSummary(agent as never, 'plain text with no memo blocks');
+    await recoverMemosFromCompactionSummary(fakeAgent({ memoStore: undefined }) as never, memoBlock);
+    expect(agent.memoStore.append).not.toHaveBeenCalled();
   });
 });

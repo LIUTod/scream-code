@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'pathe';
+import { dirname } from 'pathe';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -101,6 +102,37 @@ describe('FileSystemAgentRecordPersistence', () => {
       protocol_version: AGENT_WIRE_PROTOCOL_VERSION,
     });
     expect(records[1]!.type).toBe('turn.prompt');
+  });
+
+  it('rewrote records leave no temp file behind', async () => {
+    const wirePath = await makeWirePath();
+    const persistence = new FileSystemAgentRecordPersistence(wirePath);
+    persistence.append({
+      type: 'turn.prompt',
+      input: [{ type: 'text', text: 'old' }],
+      origin: { kind: 'user' },
+    });
+    persistence.rewrite([
+      {
+        type: 'metadata',
+        protocol_version: AGENT_WIRE_PROTOCOL_VERSION,
+        created_at: 1,
+      },
+      {
+        type: 'turn.prompt',
+        input: [{ type: 'text', text: 'new' }],
+        origin: { kind: 'user' },
+      },
+    ]);
+    await persistence.flush();
+
+    const dir = dirname(wirePath);
+    const files = await readdir(dir);
+    expect(files.filter((f) => f.endsWith('.tmp'))).toEqual([]);
+    const lines = await readLines(wirePath);
+    expect(lines).toHaveLength(2);
+    expect(JSON.parse(lines[0]!)['type']).toBe('metadata');
+    expect(JSON.parse(lines[1]!)['input'][0]['text']).toBe('new');
   });
 
   it('rewrites records from the beginning and then appends after them', async () => {

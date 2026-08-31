@@ -1096,3 +1096,38 @@ function extractPreviousSummary(history: readonly ContextMessage[]): string | nu
   return text.length > 0 ? text : null;
 }
 
+
+/**
+ * Crash-recovery path for compaction memos. `context.apply_compaction` is
+ * written to wire before the extraction step runs; if the process dies in
+ * that window the memos are lost forever (nothing re-extracts them). On wire
+ * replay the summary is available again, so re-parse it and store anything
+ * missing. Idempotent: a healthy replay finds the memos already stored
+ * (existsBySourceAndNeed) and skips them, so recovery never duplicates.
+ */
+export async function recoverMemosFromCompactionSummary(
+  agent: Agent,
+  summary: string | undefined,
+): Promise<void> {
+  const memoStore = agent.memoStore;
+  if (!memoStore || summary === undefined || summary.trim().length === 0) return;
+  const memos = parseMemoryMemos(summary);
+  if (memos.length === 0) return;
+  const sessionId = agent.homedir ? basename(dirname(dirname(agent.homedir))) : 'unknown';
+  const sessionTitle = await agent.getSessionTitle().catch(() => undefined);
+  const projectDir = agent.config.cwd;
+
+  const results = await Promise.allSettled(
+    memos.map(async (memo) => {
+      if (memoStore.existsBySourceAndNeed(sessionId, memo.userNeed, memo.approach)) return;
+      memo.sourceSessionId = sessionId;
+      memo.sourceSessionTitle = sessionTitle ?? '';
+      memo.projectDir = projectDir;
+      await memoStore.append(memo);
+    }),
+  );
+  const failed = results.filter((result) => result.status === 'rejected').length;
+  if (failed > 0) {
+    agent.log.warn('Some recovered memory memos failed to store', { failed });
+  }
+}
