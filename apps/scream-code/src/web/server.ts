@@ -374,6 +374,13 @@ function toHttpError(error: unknown): HttpError {
       case ErrorCodes.GOAL_OBJECTIVE_EMPTY:
       case ErrorCodes.GOAL_OBJECTIVE_TOO_LONG:
       case ErrorCodes.REQUEST_INVALID:
+      case ErrorCodes.SESSION_PERMISSION_MODE_INVALID:
+      case ErrorCodes.SESSION_PLAN_MODE_INVALID:
+      case ErrorCodes.SESSION_WOLFPACK_MODE_INVALID:
+      case ErrorCodes.SESSION_MODEL_EMPTY:
+      case ErrorCodes.SESSION_THINKING_EMPTY:
+      case ErrorCodes.SKILL_NAME_EMPTY:
+      case ErrorCodes.BACKGROUND_TASK_ID_EMPTY:
         return new HttpError(400, error.message, error.code);
       case ErrorCodes.GOAL_NOT_FOUND:
       case ErrorCodes.SESSION_NOT_FOUND:
@@ -1643,6 +1650,43 @@ class WebSession {
     this.broadcast({ type: 'status', status: this.cachedStatus }, false);
   }
 
+  /** Switch permission mode, then sync status + metadata (TUI /auto,/yes parity). */
+  async switchPermission(mode: PermissionMode): Promise<void> {
+    if (!this.session) throw new HttpError(409, '会话已归档（只读），无法切换权限模式。');
+    await this.session.setPermission(mode);
+    this.permission = mode;
+    await this.refreshStatus();
+    this.broadcast({ type: 'status', status: this.cachedStatus }, false);
+    if (this.homeDir) {
+      await saveMetadata(this.homeDir, this.getMetadata());
+    }
+  }
+
+  /** Toggle plan mode, then sync status (TUI /plan parity). */
+  async switchPlanMode(enabled: boolean, strategy?: 'normal' | 'fusion'): Promise<void> {
+    if (!this.session) throw new HttpError(409, '会话已归档（只读），无法切换计划模式。');
+    await this.session.setPlanMode(enabled, strategy);
+    await this.refreshStatus();
+    this.broadcast({ type: 'status', status: this.cachedStatus }, false);
+  }
+
+  /** Toggle wolfpack mode, then sync status. */
+  async switchWolfpackMode(enabled: boolean): Promise<void> {
+    if (!this.session) throw new HttpError(409, '会话已归档（只读），无法切换 Wolfpack 模式。');
+    await this.session.setWolfpackMode(enabled);
+    await this.refreshStatus();
+    this.broadcast({ type: 'status', status: this.cachedStatus }, false);
+  }
+
+  /** Toggle RLM persistent-python mode (+ optional max depth), then sync status. */
+  async switchRlm(enabled: boolean, maxDepth?: number): Promise<void> {
+    if (!this.session) throw new HttpError(409, '会话已归档（只读），无法切换 RLM 模式。');
+    await this.session.setRlmEnabled(enabled);
+    if (maxDepth !== undefined) await this.session.setRlmMaxDepth(maxDepth);
+    await this.refreshStatus();
+    this.broadcast({ type: 'status', status: this.cachedStatus }, false);
+  }
+
   getCoreSessionId(): string {
     return this.coreSessionId;
   }
@@ -1734,6 +1778,18 @@ class WebSession {
       }
       await session.cancelGoal();
     }, true);
+  }
+
+  /**
+   * Public handle to the live core Session for REST RPC forwarding.
+   * Throws 409 for archived (read-only) sessions so handlers never call into a
+   * closed core session instead of silently creating one.
+   */
+  requireLiveSession(): Session {
+    if (!this.session) {
+      throw new HttpError(409, 'Session is archived (read-only)', ErrorCodes.SESSION_CLOSED);
+    }
+    return this.session;
   }
 
   private requireGoalSession(allowBusy = false): Session {
@@ -2324,6 +2380,177 @@ export class SessionManager {
     }
     this.sessions.clear();
   }
+
+  // ── Generic Session RPC forwarding (exposed as REST endpoints) ───────────
+
+  /** Resolve a live session or throw 404/409; the single guard for all handlers. */
+  private getLiveSession(sessionId: string): Session {
+    const ws = this.sessions.get(sessionId);
+    if (!ws) throw new HttpError(404, 'Session not found', ErrorCodes.SESSION_NOT_FOUND);
+    return ws.requireLiveSession();
+  }
+
+  async getSessionStatus(sessionId: string): Promise<ReturnType<Session['getStatus']> extends Promise<infer T> ? T : never> {
+    return this.getLiveSession(sessionId).getStatus();
+  }
+
+  async getSessionUsage(sessionId: string): Promise<ReturnType<Session['getUsage']> extends Promise<infer T> ? T : never> {
+    return this.getLiveSession(sessionId).getUsage();
+  }
+
+  async getSessionContext(sessionId: string): Promise<ReturnType<Session['getContext']> extends Promise<infer T> ? T : never> {
+    return this.getLiveSession(sessionId).getContext();
+  }
+
+  async getSessionPlan(sessionId: string): Promise<ReturnType<Session['getPlan']> extends Promise<infer T> ? T : never> {
+    return this.getLiveSession(sessionId).getPlan();
+  }
+
+  async setPermission(sessionId: string, mode: PermissionMode): Promise<void> {
+    const ws = this.sessions.get(sessionId);
+    if (!ws) throw new HttpError(404, 'Session not found', ErrorCodes.SESSION_NOT_FOUND);
+    await ws.switchPermission(mode);
+  }
+
+  async setPlanMode(sessionId: string, enabled: boolean, strategy?: 'normal' | 'fusion'): Promise<void> {
+    const ws = this.sessions.get(sessionId);
+    if (!ws) throw new HttpError(404, 'Session not found', ErrorCodes.SESSION_NOT_FOUND);
+    await ws.switchPlanMode(enabled, strategy);
+  }
+
+  async clearPlan(sessionId: string): Promise<void> {
+    await this.getLiveSession(sessionId).clearPlan();
+  }
+
+  async setWolfpackMode(sessionId: string, enabled: boolean): Promise<void> {
+    const ws = this.sessions.get(sessionId);
+    if (!ws) throw new HttpError(404, 'Session not found', ErrorCodes.SESSION_NOT_FOUND);
+    await ws.switchWolfpackMode(enabled);
+  }
+
+  async setRlm(sessionId: string, enabled: boolean, maxDepth?: number): Promise<void> {
+    const ws = this.sessions.get(sessionId);
+    if (!ws) throw new HttpError(404, 'Session not found', ErrorCodes.SESSION_NOT_FOUND);
+    await ws.switchRlm(enabled, maxDepth);
+  }
+
+  async undoHistory(sessionId: string, count: number): Promise<void> {
+    await this.getLiveSession(sessionId).undoHistory(count);
+  }
+
+  async compact(sessionId: string, instruction?: string): Promise<void> {
+    await this.getLiveSession(sessionId).compact(instruction ? { instruction } : {});
+  }
+
+  async listSkills(sessionId: string): Promise<ReturnType<Session['listSkills']> extends Promise<infer T> ? T : never> {
+    return this.getLiveSession(sessionId).listSkills();
+  }
+
+  async activateSkill(sessionId: string, name: string, args?: string): Promise<void> {
+    await this.getLiveSession(sessionId).activateSkill(name, args);
+  }
+
+  async removeSkill(sessionId: string, name: string): Promise<void> {
+    await this.getLiveSession(sessionId).removeSkill(name);
+  }
+
+  async listPlugins(sessionId: string): Promise<ReturnType<Session['listPlugins']> extends Promise<infer T> ? T : never> {
+    return this.getLiveSession(sessionId).listPlugins();
+  }
+
+  async getPluginInfo(sessionId: string, id: string): Promise<ReturnType<Session['getPluginInfo']> extends Promise<infer T> ? T : never> {
+    return this.getLiveSession(sessionId).getPluginInfo(id);
+  }
+
+  async installPlugin(sessionId: string, source: string): Promise<ReturnType<Session['installPlugin']> extends Promise<infer T> ? T : never> {
+    return this.getLiveSession(sessionId).installPlugin(source);
+  }
+
+  async setPluginEnabled(sessionId: string, id: string, enabled: boolean): Promise<void> {
+    await this.getLiveSession(sessionId).setPluginEnabled(id, enabled);
+  }
+
+  async setPluginMcpServerEnabled(sessionId: string, id: string, server: string, enabled: boolean): Promise<void> {
+    await this.getLiveSession(sessionId).setPluginMcpServerEnabled(id, server, enabled);
+  }
+
+  async removePlugin(sessionId: string, id: string): Promise<void> {
+    await this.getLiveSession(sessionId).removePlugin(id);
+  }
+
+  async reloadPlugins(sessionId: string): Promise<ReturnType<Session['reloadPlugins']> extends Promise<infer T> ? T : never> {
+    return this.getLiveSession(sessionId).reloadPlugins();
+  }
+
+  async activatePlugin(sessionId: string, id: string): Promise<void> {
+    await this.getLiveSession(sessionId).activatePlugin(id);
+  }
+
+  async deactivatePlugin(sessionId: string, id: string): Promise<void> {
+    await this.getLiveSession(sessionId).deactivatePlugin(id);
+  }
+
+  async injectPlugin(sessionId: string, id: string): Promise<void> {
+    await this.getLiveSession(sessionId).injectPlugin(id);
+  }
+
+  async listMcpServers(sessionId: string): Promise<ReturnType<Session['listMcpServers']> extends Promise<infer T> ? T : never> {
+    return this.getLiveSession(sessionId).listMcpServers();
+  }
+
+  async getMcpStartupMetrics(sessionId: string): Promise<ReturnType<Session['getMcpStartupMetrics']> extends Promise<infer T> ? T : never> {
+    return this.getLiveSession(sessionId).getMcpStartupMetrics();
+  }
+
+  async addMcpServer(sessionId: string, name: string, config: Record<string, unknown>): Promise<void> {
+    await this.getLiveSession(sessionId).addMcpServer(name, config);
+  }
+
+  async reconnectMcpServer(sessionId: string, name: string): Promise<void> {
+    await this.getLiveSession(sessionId).reconnectMcpServer(name);
+  }
+
+  async stopMcpServer(sessionId: string, name: string): Promise<void> {
+    await this.getLiveSession(sessionId).stopMcpServer(name);
+  }
+
+  async removeMcpServer(sessionId: string, name: string): Promise<void> {
+    await this.getLiveSession(sessionId).removeMcpServer(name);
+  }
+
+  async listBackgroundTasks(sessionId: string, activeOnly?: boolean, limit?: number): Promise<ReturnType<Session['listBackgroundTasks']> extends Promise<infer T> ? T : never> {
+    return this.getLiveSession(sessionId).listBackgroundTasks({ activeOnly, limit });
+  }
+
+  async getBackgroundTaskOutput(sessionId: string, taskId: string, tail?: number): Promise<string> {
+    return this.getLiveSession(sessionId).getBackgroundTaskOutput(taskId, tail !== undefined ? { tail } : {});
+  }
+
+  async stopBackgroundTask(sessionId: string, taskId: string, reason?: string): Promise<void> {
+    await this.getLiveSession(sessionId).stopBackgroundTask(taskId, reason !== undefined ? { reason } : {});
+  }
+
+  // ── Harness-level (global) forwarding, no session ────────────────────────
+
+  getConfig(options?: { reload?: boolean }): Promise<ReturnType<ScreamHarness['getConfig']> extends Promise<infer T> ? T : never> {
+    return this.harness.getConfig(options);
+  }
+
+  setConfig(patch: Parameters<ScreamHarness['setConfig']>[0]): Promise<ReturnType<ScreamHarness['setConfig']> extends Promise<infer T> ? T : never> {
+    return this.harness.setConfig(patch);
+  }
+
+  removeProvider(providerId: string): Promise<ReturnType<ScreamHarness['removeProvider']> extends Promise<infer T> ? T : never> {
+    return this.harness.removeProvider(providerId);
+  }
+
+  getExperimentalFlags(): Promise<ReturnType<ScreamHarness['getExperimentalFlags']> extends Promise<infer T> ? T : never> {
+    return this.harness.getExperimentalFlags();
+  }
+
+  preflight(): Promise<void> {
+    return this.harness.preflight();
+  }
 }
 
 // ─── Web server for an existing session ────────────────────────────────────
@@ -2527,6 +2754,369 @@ export interface WebServerOptions {
   readonly token?: string;
 }
 
+// ─── Session-control REST routes (status/usage/context/plan + mode toggles) ─
+// Every route returns `false` so the caller falls through when the URL does not
+// match, and routes are wired in runWebServer after the goal route.
+
+async function handleSessionControlRoutes(
+  req: IncomingMessage,
+  res: ServerResponse,
+  url: string,
+  method: string,
+  manager: SessionManager,
+): Promise<boolean> {
+  // Query set (GET)
+  const statusMatch = new RegExp(`^${API_PREFIX}/sessions/([^/]+)/status$`).exec(url);
+  if (statusMatch && method === 'GET') {
+    try { sendJson(res, 200, await manager.getSessionStatus(decodeURIComponent(statusMatch[1]!))); }
+    catch (error) { sendHttpError(res, error); }
+    return true;
+  }
+  const usageMatch = new RegExp(`^${API_PREFIX}/sessions/([^/]+)/usage$`).exec(url);
+  if (usageMatch && method === 'GET') {
+    try { sendJson(res, 200, await manager.getSessionUsage(decodeURIComponent(usageMatch[1]!))); }
+    catch (error) { sendHttpError(res, error); }
+    return true;
+  }
+  const contextMatch = new RegExp(`^${API_PREFIX}/sessions/([^/]+)/context$`).exec(url);
+  if (contextMatch && method === 'GET') {
+    try { sendJson(res, 200, await manager.getSessionContext(decodeURIComponent(contextMatch[1]!))); }
+    catch (error) { sendHttpError(res, error); }
+    return true;
+  }
+  const planMatch = new RegExp(`^${API_PREFIX}/sessions/([^/]+)/plan$`).exec(url);
+  if (planMatch && method === 'GET') {
+    try { sendJson(res, 200, await manager.getSessionPlan(decodeURIComponent(planMatch[1]!))); }
+    catch (error) { sendHttpError(res, error); }
+    return true;
+  }
+
+  // Mutation set (POST)
+  const permissionMatch = new RegExp(`^${API_PREFIX}/sessions/([^/]+)/permission$`).exec(url);
+  if (permissionMatch && method === 'POST') {
+    try {
+      const body = await readJsonBody(req);
+      const mode = requiredString(body, 'mode') as PermissionMode;
+      await manager.setPermission(decodeURIComponent(permissionMatch[1]!), mode);
+      sendJson(res, 200, { ok: true });
+    } catch (error) { sendHttpError(res, error); }
+    return true;
+  }
+  const planModeMatch = new RegExp(`^${API_PREFIX}/sessions/([^/]+)/plan$`).exec(url);
+  if (planModeMatch && method === 'POST') {
+    try {
+      const body = await readJsonBody(req);
+      const enabled = optionalBoolean(body, 'enabled', true);
+      const strategy = optionalString(body, 'strategy') as 'normal' | 'fusion' | undefined;
+      await manager.setPlanMode(decodeURIComponent(planModeMatch[1]!), enabled, strategy);
+      sendJson(res, 200, { ok: true });
+    } catch (error) { sendHttpError(res, error); }
+    return true;
+  }
+  const clearPlanMatch = new RegExp(`^${API_PREFIX}/sessions/([^/]+)/plan/clear$`).exec(url);
+  if (clearPlanMatch && method === 'POST') {
+    try {
+      await manager.clearPlan(decodeURIComponent(clearPlanMatch[1]!));
+      sendJson(res, 200, { ok: true });
+    } catch (error) { sendHttpError(res, error); }
+    return true;
+  }
+  const wolfpackMatch = new RegExp(`^${API_PREFIX}/sessions/([^/]+)/wolfpack$`).exec(url);
+  if (wolfpackMatch && method === 'POST') {
+    try {
+      const body = await readJsonBody(req);
+      const enabled = optionalBoolean(body, 'enabled', true);
+      await manager.setWolfpackMode(decodeURIComponent(wolfpackMatch[1]!), enabled);
+      sendJson(res, 200, { ok: true });
+    } catch (error) { sendHttpError(res, error); }
+    return true;
+  }
+  const rlmMatch = new RegExp(`^${API_PREFIX}/sessions/([^/]+)/rlm$`).exec(url);
+  if (rlmMatch && method === 'POST') {
+    try {
+      const body = await readJsonBody(req);
+      const enabled = optionalBoolean(body, 'enabled', true);
+      const maxDepth = typeof body['maxDepth'] === 'number' ? Number(body['maxDepth']) : undefined;
+      await manager.setRlm(decodeURIComponent(rlmMatch[1]!), enabled, maxDepth);
+      sendJson(res, 200, { ok: true });
+    } catch (error) { sendHttpError(res, error); }
+    return true;
+  }
+  const undoMatch = new RegExp(`^${API_PREFIX}/sessions/([^/]+)/undo$`).exec(url);
+  if (undoMatch && method === 'POST') {
+    try {
+      const body = await readJsonBody(req);
+      const count = typeof body['count'] === 'number' ? Number(body['count']) : 1;
+      await manager.undoHistory(decodeURIComponent(undoMatch[1]!), count);
+      sendJson(res, 200, { ok: true });
+    } catch (error) { sendHttpError(res, error); }
+    return true;
+  }
+  const compactMatch = new RegExp(`^${API_PREFIX}/sessions/([^/]+)/compact$`).exec(url);
+  if (compactMatch && method === 'POST') {
+    try {
+      const body = await readJsonBody(req);
+      await manager.compact(decodeURIComponent(compactMatch[1]!), optionalString(body, 'instruction'));
+      sendJson(res, 200, { ok: true });
+    } catch (error) { sendHttpError(res, error); }
+    return true;
+  }
+
+  return false;
+}
+
+// ─── Resource REST routes (skills / plugins / MCP / background tasks) ────────
+
+async function handleResourceRoutes(
+  req: IncomingMessage,
+  res: ServerResponse,
+  url: string,
+  method: string,
+  manager: SessionManager,
+): Promise<boolean> {
+  // Skills
+  const skillsMatch = new RegExp(`^${API_PREFIX}/sessions/([^/]+)/skills$`).exec(url);
+  if (skillsMatch && method === 'GET') {
+    try { sendJson(res, 200, await manager.listSkills(decodeURIComponent(skillsMatch[1]!))); }
+    catch (error) { sendHttpError(res, error); }
+    return true;
+  }
+  const skillActivateMatch = new RegExp(`^${API_PREFIX}/sessions/([^/]+)/skills/([^/]+)/activate$`).exec(url);
+  if (skillActivateMatch && method === 'POST') {
+    try {
+      const body = await readJsonBody(req);
+      await manager.activateSkill(decodeURIComponent(skillActivateMatch[1]!), decodeURIComponent(skillActivateMatch[2]!), optionalString(body, 'args'));
+      sendJson(res, 200, { ok: true });
+    } catch (error) { sendHttpError(res, error); }
+    return true;
+  }
+  const skillRemoveMatch = new RegExp(`^${API_PREFIX}/sessions/([^/]+)/skills/([^/]+)$`).exec(url);
+  if (skillRemoveMatch && method === 'DELETE') {
+    try {
+      await manager.removeSkill(decodeURIComponent(skillRemoveMatch[1]!), decodeURIComponent(skillRemoveMatch[2]!));
+      sendJson(res, 200, { ok: true });
+    } catch (error) { sendHttpError(res, error); }
+    return true;
+  }
+
+  // Plugins
+  const pluginsMatch = new RegExp(`^${API_PREFIX}/sessions/([^/]+)/plugins$`).exec(url);
+  if (pluginsMatch && method === 'GET') {
+    try { sendJson(res, 200, await manager.listPlugins(decodeURIComponent(pluginsMatch[1]!))); }
+    catch (error) { sendHttpError(res, error); }
+    return true;
+  }
+  const pluginInstallMatch = new RegExp(`^${API_PREFIX}/sessions/([^/]+)/plugins/install$`).exec(url);
+  if (pluginInstallMatch && method === 'POST') {
+    try {
+      const body = await readJsonBody(req);
+      sendJson(res, 200, await manager.installPlugin(decodeURIComponent(pluginInstallMatch[1]!), requiredString(body, 'source')));
+    } catch (error) { sendHttpError(res, error); }
+    return true;
+  }
+  const pluginReloadMatch = new RegExp(`^${API_PREFIX}/sessions/([^/]+)/plugins/reload$`).exec(url);
+  if (pluginReloadMatch && method === 'POST') {
+    try {
+      sendJson(res, 200, await manager.reloadPlugins(decodeURIComponent(pluginReloadMatch[1]!)));
+    } catch (error) { sendHttpError(res, error); }
+    return true;
+  }
+  // /plugins/:pid/enable, /:pid/mcp/:server/enable, /:pid/activate, /:pid/deactivate, /:pid/inject, DELETE /:pid
+  const pluginEnableMatch = new RegExp(`^${API_PREFIX}/sessions/([^/]+)/plugins/([^/]+)/enable$`).exec(url);
+  if (pluginEnableMatch && method === 'POST') {
+    try {
+      const body = await readJsonBody(req);
+      await manager.setPluginEnabled(decodeURIComponent(pluginEnableMatch[1]!), decodeURIComponent(pluginEnableMatch[2]!), optionalBoolean(body, 'enabled', true));
+      sendJson(res, 200, { ok: true });
+    } catch (error) { sendHttpError(res, error); }
+    return true;
+  }
+  const pluginMcpEnableMatch = new RegExp(`^${API_PREFIX}/sessions/([^/]+)/plugins/([^/]+)/mcp/([^/]+)/enable$`).exec(url);
+  if (pluginMcpEnableMatch && method === 'POST') {
+    try {
+      const body = await readJsonBody(req);
+      await manager.setPluginMcpServerEnabled(
+        decodeURIComponent(pluginMcpEnableMatch[1]!),
+        decodeURIComponent(pluginMcpEnableMatch[2]!),
+        decodeURIComponent(pluginMcpEnableMatch[3]!),
+        optionalBoolean(body, 'enabled', true),
+      );
+      sendJson(res, 200, { ok: true });
+    } catch (error) { sendHttpError(res, error); }
+    return true;
+  }
+  const pluginActivateMatch = new RegExp(`^${API_PREFIX}/sessions/([^/]+)/plugins/([^/]+)/activate$`).exec(url);
+  if (pluginActivateMatch && method === 'POST') {
+    try {
+      await manager.activatePlugin(decodeURIComponent(pluginActivateMatch[1]!), decodeURIComponent(pluginActivateMatch[2]!));
+      sendJson(res, 200, { ok: true });
+    } catch (error) { sendHttpError(res, error); }
+    return true;
+  }
+  const pluginDeactivateMatch = new RegExp(`^${API_PREFIX}/sessions/([^/]+)/plugins/([^/]+)/deactivate$`).exec(url);
+  if (pluginDeactivateMatch && method === 'POST') {
+    try {
+      await manager.deactivatePlugin(decodeURIComponent(pluginDeactivateMatch[1]!), decodeURIComponent(pluginDeactivateMatch[2]!));
+      sendJson(res, 200, { ok: true });
+    } catch (error) { sendHttpError(res, error); }
+    return true;
+  }
+  const pluginInjectMatch = new RegExp(`^${API_PREFIX}/sessions/([^/]+)/plugins/([^/]+)/inject$`).exec(url);
+  if (pluginInjectMatch && method === 'POST') {
+    try {
+      await manager.injectPlugin(decodeURIComponent(pluginInjectMatch[1]!), decodeURIComponent(pluginInjectMatch[2]!));
+      sendJson(res, 200, { ok: true });
+    } catch (error) { sendHttpError(res, error); }
+    return true;
+  }
+  // `install` and `reload` are reserved action words, not plugin ids; exclude
+  // them from the :pid routes so GET/DELETE /plugins/install|reload never hit
+  // getPluginInfo/removePlugin for those words.
+  const pluginInfoMatch = new RegExp(`^${API_PREFIX}/sessions/([^/]+)/plugins/(?!(?:install|reload)$)([^/]+)$`).exec(url);
+  if (pluginInfoMatch && method === 'GET') {
+    try { sendJson(res, 200, await manager.getPluginInfo(decodeURIComponent(pluginInfoMatch[1]!), decodeURIComponent(pluginInfoMatch[2]!))); }
+    catch (error) { sendHttpError(res, error); }
+    return true;
+  }
+  if (pluginInfoMatch && method === 'DELETE') {
+    try {
+      await manager.removePlugin(decodeURIComponent(pluginInfoMatch[1]!), decodeURIComponent(pluginInfoMatch[2]!));
+      sendJson(res, 200, { ok: true });
+    } catch (error) { sendHttpError(res, error); }
+    return true;
+  }
+
+  // MCP servers
+  const mcpMatch = new RegExp(`^${API_PREFIX}/sessions/([^/]+)/mcp$`).exec(url);
+  if (mcpMatch && method === 'GET') {
+    try { sendJson(res, 200, await manager.listMcpServers(decodeURIComponent(mcpMatch[1]!))); }
+    catch (error) { sendHttpError(res, error); }
+    return true;
+  }
+  const mcpMetricsMatch = new RegExp(`^${API_PREFIX}/sessions/([^/]+)/mcp/startup-metrics$`).exec(url);
+  if (mcpMetricsMatch && method === 'GET') {
+    try { sendJson(res, 200, await manager.getMcpStartupMetrics(decodeURIComponent(mcpMetricsMatch[1]!))); }
+    catch (error) { sendHttpError(res, error); }
+    return true;
+  }
+  const mcpAddMatch = new RegExp(`^${API_PREFIX}/sessions/([^/]+)/mcp/add$`).exec(url);
+  if (mcpAddMatch && method === 'POST') {
+    try {
+      const body = await readJsonBody(req);
+      await manager.addMcpServer(decodeURIComponent(mcpAddMatch[1]!), requiredString(body, 'name'), (body['config'] as Record<string, unknown>) ?? {});
+      sendJson(res, 200, { ok: true });
+    } catch (error) { sendHttpError(res, error); }
+    return true;
+  }
+  const mcpReconnectMatch = new RegExp(`^${API_PREFIX}/sessions/([^/]+)/mcp/([^/]+)/reconnect$`).exec(url);
+  if (mcpReconnectMatch && method === 'POST') {
+    try {
+      await manager.reconnectMcpServer(decodeURIComponent(mcpReconnectMatch[1]!), decodeURIComponent(mcpReconnectMatch[2]!));
+      sendJson(res, 200, { ok: true });
+    } catch (error) { sendHttpError(res, error); }
+    return true;
+  }
+  const mcpStopMatch = new RegExp(`^${API_PREFIX}/sessions/([^/]+)/mcp/([^/]+)/stop$`).exec(url);
+  if (mcpStopMatch && method === 'POST') {
+    try {
+      await manager.stopMcpServer(decodeURIComponent(mcpStopMatch[1]!), decodeURIComponent(mcpStopMatch[2]!));
+      sendJson(res, 200, { ok: true });
+    } catch (error) { sendHttpError(res, error); }
+    return true;
+  }
+  // `add`, `reconnect`, `stop`, `startup-metrics` are reserved action words, not
+  // server names; exclude them so DELETE /mcp/add|reconnect|stop|startup-metrics
+  // never removes a segment as if it were a server name.
+  const mcpRemoveMatch = new RegExp(`^${API_PREFIX}/sessions/([^/]+)/mcp/(?!(?:add|reconnect|stop|startup-metrics)$)([^/]+)$`).exec(url);
+  if (mcpRemoveMatch && method === 'DELETE') {
+    try {
+      await manager.removeMcpServer(decodeURIComponent(mcpRemoveMatch[1]!), decodeURIComponent(mcpRemoveMatch[2]!));
+      sendJson(res, 200, { ok: true });
+    } catch (error) { sendHttpError(res, error); }
+    return true;
+  }
+
+  // Background tasks
+  const tasksMatch = new RegExp(`^${API_PREFIX}/sessions/([^/]+)/tasks$`).exec(url);
+  if (tasksMatch && method === 'GET') {
+    try {
+      const query = new URLSearchParams(url.split('?')[1] ?? '');
+      const activeOnly = query.get('activeOnly') === 'true' ? true : query.get('activeOnly') === 'false' ? false : undefined;
+      const limit = query.get('limit') ? Number(query.get('limit')) : undefined;
+      sendJson(res, 200, await manager.listBackgroundTasks(decodeURIComponent(tasksMatch[1]!), activeOnly, limit));
+    } catch (error) { sendHttpError(res, error); }
+    return true;
+  }
+  const taskOutputMatch = new RegExp(`^${API_PREFIX}/sessions/([^/]+)/tasks/([^/]+)/output$`).exec(url);
+  if (taskOutputMatch && method === 'GET') {
+    try {
+      const query = new URLSearchParams(url.split('?')[1] ?? '');
+      const tail = query.get('tail') ? Number(query.get('tail')) : undefined;
+      sendJson(res, 200, { output: await manager.getBackgroundTaskOutput(decodeURIComponent(taskOutputMatch[1]!), decodeURIComponent(taskOutputMatch[2]!), tail) });
+    } catch (error) { sendHttpError(res, error); }
+    return true;
+  }
+  const taskStopMatch = new RegExp(`^${API_PREFIX}/sessions/([^/]+)/tasks/([^/]+)/stop$`).exec(url);
+  if (taskStopMatch && method === 'POST') {
+    try {
+      const body = await readJsonBody(req);
+      await manager.stopBackgroundTask(decodeURIComponent(taskStopMatch[1]!), decodeURIComponent(taskStopMatch[2]!), optionalString(body, 'reason'));
+      sendJson(res, 200, { ok: true });
+    } catch (error) { sendHttpError(res, error); }
+    return true;
+  }
+
+  return false;
+}
+
+// ─── Global (harness-scoped) REST routes: config / flags / preflight ───────
+
+async function handleGlobalRoutes(
+  req: IncomingMessage,
+  res: ServerResponse,
+  url: string,
+  method: string,
+  manager: SessionManager,
+): Promise<boolean> {
+  if (url === `${API_PREFIX}/config` && method === 'GET') {
+    try { sendJson(res, 200, await manager.getConfig()); }
+    catch (error) { sendHttpError(res, error); }
+    return true;
+  }
+  if (url === `${API_PREFIX}/config` && method === 'POST') {
+    try {
+      const body = await readJsonBody(req);
+      const patch = body['patch'];
+      if (patch === null || typeof patch !== 'object' || Array.isArray(patch)) {
+        throw new HttpError(400, 'Missing or invalid patch field', 'request.invalid');
+      }
+      sendJson(res, 200, await manager.setConfig(patch as Parameters<SessionManager['setConfig']>[0]));
+    } catch (error) { sendHttpError(res, error); }
+    return true;
+  }
+  const providerMatch = new RegExp(`^${API_PREFIX}/config/providers/([^/]+)$`).exec(url);
+  if (providerMatch && method === 'DELETE') {
+    try {
+      sendJson(res, 200, await manager.removeProvider(decodeURIComponent(providerMatch[1]!)));
+    } catch (error) { sendHttpError(res, error); }
+    return true;
+  }
+  if (url === `${API_PREFIX}/experimental-flags` && method === 'GET') {
+    try { sendJson(res, 200, await manager.getExperimentalFlags()); }
+    catch (error) { sendHttpError(res, error); }
+    return true;
+  }
+  if (url === `${API_PREFIX}/preflight` && method === 'GET') {
+    try {
+      await manager.preflight();
+      sendJson(res, 200, { ok: true });
+    } catch (error) { sendHttpError(res, error); }
+    return true;
+  }
+
+  return false;
+}
+
 export async function runWebServer(opts: WebServerOptions): Promise<WebServerHandle> {
   const homeDir = resolveScreamHome();
   const workDir = opts.workDir;
@@ -2654,6 +3244,21 @@ export async function runWebServer(opts: WebServerOptions): Promise<WebServerHan
     }
 
     if (await handleGoalRoute(req, res, url, (sessionId) => manager.get(sessionId))) {
+      return;
+    }
+
+    // Session-control REST routes (status/usage/context/plan/mode toggles)
+    if (await handleSessionControlRoutes(req, res, url, method, manager)) {
+      return;
+    }
+
+    // Resource REST routes (skills/plugins/MCP/background tasks)
+    if (await handleResourceRoutes(req, res, url, method, manager)) {
+      return;
+    }
+
+    // Global (harness-scoped) REST routes (config/flags/preflight)
+    if (await handleGlobalRoutes(req, res, url, method, manager)) {
       return;
     }
 

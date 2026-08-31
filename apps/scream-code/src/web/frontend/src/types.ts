@@ -85,6 +85,7 @@ export interface SessionStatus {
   permission?: 'manual' | 'auto' | 'yolo' | string;
   planMode?: boolean;
   wolfpackMode?: boolean;
+  rlmEnabled?: boolean;
   contextTokens?: number;
   maxContextTokens?: number;
   /** Context usage fraction (0..1) or percent (0..100). */
@@ -251,3 +252,158 @@ export type WsMessage =
   | { type: 'pong' }
   | { type: 'server_empty' }
   | { type: 'error'; code?: string; message: string; clientMessageId?: string };
+
+// ─── Session-control / resource / global mirrors (from agent-core) ──────────
+// These mirror the shapes returned by the REST endpoints exposed in server.ts.
+// The frontend does not import @scream-code/agent-core; these are local copies.
+
+export interface ContextMessage {
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  readonly agentId?: string;
+  readonly turn?: number;
+}
+
+export interface AgentContextData {
+  history: readonly ContextMessage[];
+  tokenCount: number;
+}
+
+export interface PlanInfo {
+  id: string;
+  content: string;
+  path: string;
+  strategy: 'normal' | 'fusion';
+}
+
+export type SessionPlan = PlanInfo | null;
+
+export type SkillSource = 'builtin' | 'user' | 'extra' | 'project';
+
+export interface SkillSummary {
+  name: string;
+  description: string;
+  path: string;
+  source: SkillSource;
+  type?: string;
+  disableModelInvocation?: boolean;
+  /** Plugin id when this skill is provided by a plugin package. */
+  pluginId?: string;
+}
+
+export interface PluginMcpServerInfo {
+  name: string;
+  runtimeName: string;
+  enabled: boolean;
+  transport: 'stdio' | 'http';
+  command?: string;
+  args?: readonly string[];
+  cwd?: string;
+  url?: string;
+  envKeys?: readonly string[];
+  headerKeys?: readonly string[];
+}
+
+export type PluginState = 'ok' | 'error';
+export type PluginSource = 'local-path' | 'zip-url' | 'github';
+export type PluginManifestKind = 'scream-plugin-root' | 'scream-plugin-dir' | 'claude-plugin-dir' | 'bare-skill';
+
+export interface PluginSkillSummary {
+  name: string;
+  description: string;
+}
+
+export interface PluginGithubRef {
+  readonly kind: 'branch' | 'tag' | 'sha';
+  readonly value: string;
+}
+
+export interface PluginGithubMetadata {
+  owner: string;
+  repo: string;
+  ref: PluginGithubRef;
+  installedSha?: string;
+}
+
+export interface PluginSummary {
+  id: string;
+  displayName: string;
+  version?: string;
+  enabled: boolean;
+  state: PluginState;
+  skillCount: number;
+  skills: readonly PluginSkillSummary[];
+  mcpServerCount: number;
+  enabledMcpServerCount: number;
+  hasErrors: boolean;
+  source: PluginSource;
+  originalSource?: string;
+  github?: PluginGithubMetadata;
+}
+
+export type PluginDiagnosticSeverity = 'error' | 'warn' | 'info';
+
+export interface PluginDiagnostic {
+  readonly severity: PluginDiagnosticSeverity;
+  readonly message: string;
+}
+
+export interface PluginInfo extends PluginSummary {
+  root: string;
+  installedAt: string;
+  updatedAt?: string;
+  manifestKind?: PluginManifestKind;
+  manifestPath?: string;
+  manifest?: unknown;
+  mcpServers: readonly PluginMcpServerInfo[];
+  shadowedManifestPath?: string;
+  diagnostics: readonly PluginDiagnostic[];
+}
+
+export interface ReloadSummary {
+  added: readonly string[];
+  removed: readonly string[];
+  errors: ReadonlyArray<{ id: string; message: string }>;
+}
+
+export interface McpServerInfo {
+  name: string;
+  transport: 'stdio' | 'http';
+  status: 'pending' | 'connected' | 'failed' | 'disabled' | 'needs-auth';
+  toolCount: number;
+  error?: string;
+}
+
+export interface McpStartupMetrics {
+  durationMs: number;
+}
+
+export type BackgroundTaskStatus = 'running' | 'completed' | 'failed' | 'killed' | 'lost' | 'awaiting_approval';
+
+export interface BackgroundTaskInfo {
+  taskId: string;
+  command: string;
+  description: string;
+  status: BackgroundTaskStatus;
+  pid: number;
+  exitCode: number | null;
+  startedAt: number;
+  endedAt: number | null;
+  approvalReason?: string;
+  timedOut?: boolean;
+  stopReason?: string;
+  timeoutMs?: number;
+  agentId?: string;
+  subagentType?: string;
+  failureReason?: string;
+}
+
+export type ExperimentalFlagMap = Record<string, boolean>;
+
+export interface ScreamConfigPatch {
+  [key: string]: unknown;
+}
+
+export interface ScreamConfig {
+  [key: string]: unknown;
+}

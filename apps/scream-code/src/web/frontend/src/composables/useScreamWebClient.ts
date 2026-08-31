@@ -15,6 +15,19 @@ import type {
   TodoItem,
   UpdateGoalRequest,
   WsMessage,
+  AgentContextData,
+  BackgroundTaskInfo,
+  ExperimentalFlagMap,
+  McpServerInfo,
+  McpStartupMetrics,
+  PlanInfo,
+  PluginInfo,
+  PluginSummary,
+  ReloadSummary,
+  ScreamConfig,
+  ScreamConfigPatch,
+  SessionPlan,
+  SkillSummary,
 } from '../types';
 import {
   acceptJournalEvent,
@@ -81,6 +94,56 @@ export interface UseScreamWebClientReturn {
   deleteSession: (sessionId: string) => Promise<void>;
   exportSession: (sessionId: string) => Promise<void>;
   fetchSnapshot: () => Promise<void>;
+  // ── Session-control / resource / global REST methods (server.ts exposure) ──
+  fetchSessionStatus: () => Promise<void>;
+  fetchSessionUsage: () => Promise<void>;
+  fetchSessionContext: () => Promise<void>;
+  fetchSessionPlan: () => Promise<void>;
+  sessionPlan: Ref<SessionPlan | null>;
+  clearPlan: () => Promise<boolean>;
+  switchPermission: (mode: string) => Promise<boolean>;
+  switchPlanMode: (enabled: boolean, strategy?: 'normal' | 'fusion') => Promise<boolean>;
+  switchWolfpack: (enabled: boolean) => Promise<boolean>;
+  switchRlm: (enabled: boolean, maxDepth?: number) => Promise<boolean>;
+  undoHistory: (count?: number) => Promise<boolean>;
+  compact: (instruction?: string) => Promise<boolean>;
+  skills: Ref<SkillSummary[]>;
+  fetchSkills: () => Promise<void>;
+  activateSkill: (name: string, args?: string) => Promise<boolean>;
+  removeSkill: (name: string) => Promise<boolean>;
+  plugins: Ref<PluginSummary[]>;
+  pluginInfo: Ref<PluginInfo | null>;
+  fetchPlugins: () => Promise<void>;
+  fetchPluginInfo: (id: string) => Promise<void>;
+  installPlugin: (source: string) => Promise<PluginSummary | null>;
+  setPluginEnabled: (id: string, enabled: boolean) => Promise<boolean>;
+  setPluginMcpServerEnabled: (id: string, server: string, enabled: boolean) => Promise<boolean>;
+  removePlugin: (id: string) => Promise<boolean>;
+  reloadPlugins: () => Promise<ReloadSummary | null>;
+  activatePlugin: (id: string) => Promise<boolean>;
+  deactivatePlugin: (id: string) => Promise<boolean>;
+  injectPlugin: (id: string) => Promise<boolean>;
+  mcpServers: Ref<McpServerInfo[]>;
+  mcpStartupMetrics: Ref<McpStartupMetrics | null>;
+  fetchMcpServers: () => Promise<void>;
+  fetchMcpStartupMetrics: () => Promise<void>;
+  addMcpServer: (name: string, config: Record<string, unknown>) => Promise<boolean>;
+  reconnectMcpServer: (name: string) => Promise<boolean>;
+  stopMcpServer: (name: string) => Promise<boolean>;
+  removeMcpServer: (name: string) => Promise<boolean>;
+  backgroundTasks: Ref<BackgroundTaskInfo[]>;
+  backgroundTaskOutput: Ref<string>;
+  fetchBackgroundTasks: (activeOnly?: boolean, limit?: number) => Promise<void>;
+  fetchBackgroundTaskOutput: (taskId: string, tail?: number) => Promise<void>;
+  stopBackgroundTask: (taskId: string, reason?: string) => Promise<boolean>;
+  config: Ref<ScreamConfig | null>;
+  fetchConfig: () => Promise<void>;
+  setConfig: (patch: ScreamConfigPatch) => Promise<boolean>;
+  removeProvider: (providerId: string) => Promise<boolean>;
+  experimentalFlags: Ref<ExperimentalFlagMap | null>;
+  fetchExperimentalFlags: () => Promise<void>;
+  preflightOk: Ref<boolean>;
+  preflight: () => Promise<void>;
 }
 
 export function useScreamWebClient(): UseScreamWebClientReturn {
@@ -106,6 +169,18 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
   const isArchived = computed(() => sessionId.value !== null && !sessionActive.value);
   const gitStatus = ref<GitStatus | null>(null);
   const models = ref<ModelInfo[]>([]);
+  // Session-control / resource / global state mirrors (server.ts exposure).
+  const sessionPlan = ref<SessionPlan | null>(null);
+  const skills = ref<SkillSummary[]>([]);
+  const plugins = ref<PluginSummary[]>([]);
+  const pluginInfo = ref<PluginInfo | null>(null);
+  const mcpServers = ref<McpServerInfo[]>([]);
+  const mcpStartupMetrics = ref<McpStartupMetrics | null>(null);
+  const backgroundTasks = ref<BackgroundTaskInfo[]>([]);
+  const backgroundTaskOutput = ref<string>('');
+  const config = ref<ScreamConfig | null>(null);
+  const experimentalFlags = ref<ExperimentalFlagMap | null>(null);
+  const preflightOk = ref(false);
 
   let ws: WebSocket | null = null;
   let heartbeatTimer: number | null = null;
@@ -1142,6 +1217,14 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
     status.value = { busy: false };
     goal.value = null;
     todos.value = [];
+    sessionPlan.value = null;
+    skills.value = [];
+    plugins.value = [];
+    pluginInfo.value = null;
+    mcpServers.value = [];
+    mcpStartupMetrics.value = null;
+    backgroundTasks.value = [];
+    backgroundTaskOutput.value = '';
     sessionActive.value = false;
     promptPending.value = false;
     pendingPromptAccepted = false;
@@ -1191,6 +1274,14 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
           status.value = { busy: false };
           goal.value = null;
           todos.value = [];
+          sessionPlan.value = null;
+          skills.value = [];
+          plugins.value = [];
+          pluginInfo.value = null;
+          mcpServers.value = [];
+          mcpStartupMetrics.value = null;
+          backgroundTasks.value = [];
+          backgroundTaskOutput.value = '';
           promptPending.value = false;
           pendingPromptAccepted = false;
           sentMessageIds.clear();
@@ -1225,6 +1316,363 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
     } catch (error) {
       showToast(`导出会话失败：${error instanceof Error ? error.message : String(error)}`, 'error');
     }
+  }
+
+  // ── Session-control / resource / global REST methods ────────────────────
+  // These mirror the endpoints exposed in server.ts (see apps/scream-code/src/web/README.md).
+
+  /** Read-only session-scoped fetches, best-effort (no toast on failure). */
+  async function fetchSessionStatus(): Promise<void> {
+    const id = sessionId.value;
+    if (!id) return;
+    try {
+      const res = await fetch(`${API_BASE}/sessions/${id}/status`);
+      if (!res.ok) return;
+      const data: SessionStatus = await res.json();
+      status.value = { ...status.value, ...data };
+    } catch { /* best-effort */ }
+  }
+
+  async function fetchSessionUsage(): Promise<void> {
+    const id = sessionId.value;
+    if (!id) return;
+    try {
+      const res = await fetch(`${API_BASE}/sessions/${id}/usage`);
+      if (!res.ok) return;
+      const usage = (await res.json()) as SessionUsage;
+      status.value = { ...status.value, usage };
+    } catch { /* best-effort */ }
+  }
+
+  async function fetchSessionContext(): Promise<void> {
+    const id = sessionId.value;
+    if (!id) return;
+    try {
+      const res = await fetch(`${API_BASE}/sessions/${id}/context`);
+      if (!res.ok) return;
+      const ctx = (await res.json()) as AgentContextData;
+      if (ctx.tokenCount !== undefined) status.value = { ...status.value, contextTokens: ctx.tokenCount };
+    } catch { /* best-effort */ }
+  }
+
+  async function fetchSessionPlan(): Promise<void> {
+    const id = sessionId.value;
+    if (!id) return;
+    try {
+      const res = await fetch(`${API_BASE}/sessions/${id}/plan`);
+      if (!res.ok) return;
+      sessionPlan.value = (await res.json()) as SessionPlan;
+    } catch { /* best-effort */ }
+  }
+
+  async function clearPlan(): Promise<boolean> {
+    const id = sessionId.value;
+    if (!id) return false;
+    try {
+      const res = await fetch(`${API_BASE}/sessions/${id}/plan/clear`, { method: 'POST' });
+      if (!res.ok) return false;
+      sessionPlan.value = null;
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** POST a session-scoped mutation with a boolean result (mode toggles etc). */
+  async function postSessionAction(path: string, body?: Record<string, unknown>): Promise<boolean> {
+    const id = sessionId.value;
+    if (!id) return false;
+    if (connectionStatus.value !== 'connected') {
+      showToast('连接已断开，操作未发送。', 'error');
+      connect();
+      return false;
+    }
+    try {
+      const res = await fetch(`${API_BASE}/sessions/${id}/${path}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body ?? {}),
+      });
+      if (!res.ok) {
+        const data = (await res.json().catch(() => ({}))) as { message?: string };
+        showToast(data.message ?? `操作失败（HTTP ${res.status}）`, 'error');
+        return false;
+      }
+      return true;
+    } catch (error) {
+      showToast(`操作失败：${error instanceof Error ? error.message : String(error)}`, 'error');
+      return false;
+    }
+  }
+
+  async function switchPermission(mode: string): Promise<boolean> {
+    const ok = await postSessionAction('permission', { mode });
+    if (ok) await fetchSessionStatus();
+    return ok;
+  }
+
+  async function switchPlanMode(enabled: boolean, strategy?: 'normal' | 'fusion'): Promise<boolean> {
+    const ok = await postSessionAction('plan', { enabled, ...(strategy ? { strategy } : {}) });
+    if (ok) await fetchSessionStatus();
+    return ok;
+  }
+
+  async function switchWolfpack(enabled: boolean): Promise<boolean> {
+    const ok = await postSessionAction('wolfpack', { enabled });
+    if (ok) await fetchSessionStatus();
+    return ok;
+  }
+
+  async function switchRlm(enabled: boolean, maxDepth?: number): Promise<boolean> {
+    const ok = await postSessionAction('rlm', { enabled, ...(maxDepth !== undefined ? { maxDepth } : {}) });
+    if (ok) await fetchSessionStatus();
+    return ok;
+  }
+
+  async function undoHistory(count = 1): Promise<boolean> {
+    return postSessionAction('undo', { count });
+  }
+
+  async function compact(instruction?: string): Promise<boolean> {
+    return postSessionAction('compact', (instruction ? { instruction } : {}));
+  }
+
+  async function fetchSkills(): Promise<void> {
+    const id = sessionId.value;
+    if (!id) return;
+    try {
+      const res = await fetch(`${API_BASE}/sessions/${id}/skills`);
+      if (!res.ok) return;
+      skills.value = (await res.json()) as SkillSummary[];
+    } catch { /* best-effort */ }
+  }
+
+  async function activateSkill(name: string, args?: string): Promise<boolean> {
+    return postSessionAction(`skills/${encodeURIComponent(name)}/activate`, (args ? { args } : {}));
+  }
+
+  async function removeSkill(name: string): Promise<boolean> {
+    const id = sessionId.value;
+    if (!id) return false;
+    try {
+      const res = await fetch(`${API_BASE}/sessions/${id}/skills/${encodeURIComponent(name)}`, { method: 'DELETE' });
+      if (!res.ok) return false;
+      skills.value = skills.value.filter((s) => s.name !== name);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async function fetchPlugins(): Promise<void> {
+    const id = sessionId.value;
+    if (!id) return;
+    try {
+      const res = await fetch(`${API_BASE}/sessions/${id}/plugins`);
+      if (!res.ok) return;
+      plugins.value = (await res.json()) as PluginSummary[];
+    } catch { /* best-effort */ }
+  }
+
+  async function fetchPluginInfo(pid: string): Promise<void> {
+    const id = sessionId.value;
+    if (!id) return;
+    try {
+      const res = await fetch(`${API_BASE}/sessions/${id}/plugins/${encodeURIComponent(pid)}`);
+      if (!res.ok) return;
+      pluginInfo.value = (await res.json()) as PluginInfo;
+    } catch { /* best-effort */ }
+  }
+
+  async function installPlugin(source: string): Promise<PluginSummary | null> {
+    const id = sessionId.value;
+    if (!id) return null;
+    try {
+      const res = await fetch(`${API_BASE}/sessions/${id}/plugins/install`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source }),
+      });
+      if (!res.ok) return null;
+      const plugin = (await res.json()) as PluginSummary;
+      await fetchPlugins();
+      return plugin;
+    } catch {
+      return null;
+    }
+  }
+
+  async function setPluginEnabled(pid: string, enabled: boolean): Promise<boolean> {
+    return postSessionAction(`plugins/${encodeURIComponent(pid)}/enable`, { enabled });
+  }
+
+  async function setPluginMcpServerEnabled(pid: string, server: string, enabled: boolean): Promise<boolean> {
+    return postSessionAction(`plugins/${encodeURIComponent(pid)}/mcp/${encodeURIComponent(server)}/enable`, { enabled });
+  }
+
+  async function removePlugin(pid: string): Promise<boolean> {
+    const id = sessionId.value;
+    if (!id) return false;
+    try {
+      const res = await fetch(`${API_BASE}/sessions/${id}/plugins/${encodeURIComponent(pid)}`, { method: 'DELETE' });
+      if (!res.ok) return false;
+      plugins.value = plugins.value.filter((p) => p.id !== pid);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async function reloadPlugins(): Promise<ReloadSummary | null> {
+    const id = sessionId.value;
+    if (!id) return null;
+    try {
+      const res = await fetch(`${API_BASE}/sessions/${id}/plugins/reload`, { method: 'POST' });
+      if (!res.ok) return null;
+      const summary = (await res.json()) as ReloadSummary;
+      await fetchPlugins();
+      return summary;
+    } catch {
+      return null;
+    }
+  }
+
+  async function activatePlugin(pid: string): Promise<boolean> {
+    return postSessionAction(`plugins/${encodeURIComponent(pid)}/activate`);
+  }
+
+  async function deactivatePlugin(pid: string): Promise<boolean> {
+    return postSessionAction(`plugins/${encodeURIComponent(pid)}/deactivate`);
+  }
+
+  async function injectPlugin(pid: string): Promise<boolean> {
+    return postSessionAction(`plugins/${encodeURIComponent(pid)}/inject`);
+  }
+
+  async function fetchMcpServers(): Promise<void> {
+    const id = sessionId.value;
+    if (!id) return;
+    try {
+      const res = await fetch(`${API_BASE}/sessions/${id}/mcp`);
+      if (!res.ok) return;
+      mcpServers.value = (await res.json()) as McpServerInfo[];
+    } catch { /* best-effort */ }
+  }
+
+  async function fetchMcpStartupMetrics(): Promise<void> {
+    const id = sessionId.value;
+    if (!id) return;
+    try {
+      const res = await fetch(`${API_BASE}/sessions/${id}/mcp/startup-metrics`);
+      if (!res.ok) return;
+      mcpStartupMetrics.value = (await res.json()) as McpStartupMetrics;
+    } catch { /* best-effort */ }
+  }
+
+  async function addMcpServer(name: string, config: Record<string, unknown>): Promise<boolean> {
+    return postSessionAction('mcp/add', { name, config });
+  }
+
+  async function reconnectMcpServer(name: string): Promise<boolean> {
+    return postSessionAction(`mcp/${encodeURIComponent(name)}/reconnect`);
+  }
+
+  async function stopMcpServer(name: string): Promise<boolean> {
+    return postSessionAction(`mcp/${encodeURIComponent(name)}/stop`);
+  }
+
+  async function removeMcpServer(name: string): Promise<boolean> {
+    const id = sessionId.value;
+    if (!id) return false;
+    try {
+      const res = await fetch(`${API_BASE}/sessions/${id}/mcp/${encodeURIComponent(name)}`, { method: 'DELETE' });
+      if (!res.ok) return false;
+      mcpServers.value = mcpServers.value.filter((m) => m.name !== name);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async function fetchBackgroundTasks(activeOnly?: boolean, limit?: number): Promise<void> {
+    const id = sessionId.value;
+    if (!id) return;
+    try {
+      const q = new URLSearchParams();
+      if (activeOnly !== undefined) q.set('activeOnly', String(activeOnly));
+      if (limit !== undefined) q.set('limit', String(limit));
+      const qs = q.toString();
+      const res = await fetch(`${API_BASE}/sessions/${id}/tasks${qs ? `?${qs}` : ''}`);
+      if (!res.ok) return;
+      backgroundTasks.value = (await res.json()) as BackgroundTaskInfo[];
+    } catch { /* best-effort */ }
+  }
+
+  async function fetchBackgroundTaskOutput(taskId: string, tail?: number): Promise<void> {
+    const id = sessionId.value;
+    if (!id) return;
+    try {
+      const qs = tail !== undefined ? `?tail=${tail}` : '';
+      const res = await fetch(`${API_BASE}/sessions/${id}/tasks/${encodeURIComponent(taskId)}/output${qs}`);
+      if (!res.ok) return;
+      const data = (await res.json()) as { output: string };
+      backgroundTaskOutput.value = data.output;
+    } catch { /* best-effort */ }
+  }
+
+  async function stopBackgroundTask(taskId: string, reason?: string): Promise<boolean> {
+    return postSessionAction(`tasks/${encodeURIComponent(taskId)}/stop`, (reason ? { reason } : {}));
+  }
+
+  // Global (harness-scoped) methods, no session needed.
+  async function fetchConfig(): Promise<void> {
+    try {
+      const res = await fetch(`${API_BASE}/config`);
+      if (!res.ok) return;
+      config.value = (await res.json()) as ScreamConfig;
+    } catch { /* best-effort */ }
+  }
+
+  async function setConfig(patch: ScreamConfigPatch): Promise<boolean> {
+    try {
+      const res = await fetch(`${API_BASE}/config`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ patch }),
+      });
+      if (!res.ok) return false;
+      config.value = (await res.json()) as ScreamConfig;
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async function removeProvider(providerId: string): Promise<boolean> {
+    try {
+      const res = await fetch(`${API_BASE}/config/providers/${encodeURIComponent(providerId)}`, { method: 'DELETE' });
+      if (!res.ok) return false;
+      await fetchConfig();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async function fetchExperimentalFlags(): Promise<void> {
+    try {
+      const res = await fetch(`${API_BASE}/experimental-flags`);
+      if (!res.ok) return;
+      experimentalFlags.value = (await res.json()) as ExperimentalFlagMap;
+    } catch { /* best-effort */ }
+  }
+
+  async function preflight(): Promise<void> {
+    try {
+      const res = await fetch(`${API_BASE}/preflight`);
+      if (!res.ok) return;
+      preflightOk.value = true;
+    } catch { /* best-effort */ }
   }
 
   // Initial connection.
@@ -1310,5 +1758,55 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
     deleteSession,
     exportSession,
     fetchSnapshot,
+    // Session-control / resource / global exposure (server.ts REST endpoints).
+    fetchSessionStatus,
+    fetchSessionUsage,
+    fetchSessionContext,
+    fetchSessionPlan,
+    sessionPlan,
+    clearPlan,
+    switchPermission,
+    switchPlanMode,
+    switchWolfpack,
+    switchRlm,
+    undoHistory,
+    compact,
+    skills,
+    fetchSkills,
+    activateSkill,
+    removeSkill,
+    plugins,
+    pluginInfo,
+    fetchPlugins,
+    fetchPluginInfo,
+    installPlugin,
+    setPluginEnabled,
+    setPluginMcpServerEnabled,
+    removePlugin,
+    reloadPlugins,
+    activatePlugin,
+    deactivatePlugin,
+    injectPlugin,
+    mcpServers,
+    mcpStartupMetrics,
+    fetchMcpServers,
+    fetchMcpStartupMetrics,
+    addMcpServer,
+    reconnectMcpServer,
+    stopMcpServer,
+    removeMcpServer,
+    backgroundTasks,
+    backgroundTaskOutput,
+    fetchBackgroundTasks,
+    fetchBackgroundTaskOutput,
+    stopBackgroundTask,
+    config,
+    fetchConfig,
+    setConfig,
+    removeProvider,
+    experimentalFlags,
+    fetchExperimentalFlags,
+    preflightOk,
+    preflight,
   };
 }
