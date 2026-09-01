@@ -759,7 +759,16 @@ export class FullCompaction {
       // the compressed context. 110% margin accounts for normal per-step token
       // growth that shouldn't count as "needing compaction again."
       this.lowWaterMark = Math.floor(this.effectiveTokenCount * 1.1);
-      await this.extractAndStoreMemos(processedSummary, messagesToCompactForOps);
+      // Memo extraction is garnish on a successful compaction: it runs AFTER
+      // compaction.completed has fired and the context is already folded, so a
+      // throw here must not fall into the worker's catch below — that would
+      // count a successful compaction against the circuit breaker and emit a
+      // spurious error event after completion.
+      try {
+        await this.extractAndStoreMemos(processedSummary, messagesToCompactForOps);
+      } catch (error) {
+        this.agent.log.warn('Memory memo extraction failed (compaction itself succeeded)', { error });
+      }
       this.triggerPostCompactHook(data, result);
       this.detectSkillCandidates(skillCandidateSummary);
 

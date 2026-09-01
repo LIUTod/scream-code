@@ -207,7 +207,7 @@ function findSupersededPaths(
 /**
  * Lightweight compaction that truncates old tool results without an LLM call.
  *
- * When the context window is filling up (>= 50% by default), old tool result
+ * When the context window is filling up (>= 30% by default), old tool result
  * messages are replaced with a short placeholder. This frees up tokens for the
  * model without the cost and latency of a full compaction.
  *

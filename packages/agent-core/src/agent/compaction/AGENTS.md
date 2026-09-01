@@ -23,7 +23,7 @@
 - Small-window models are no longer the design target
 
 ## Retention contract (what survives a compaction)
-- Verbatim tail: 16 recent messages (8 user) with an absolute 20K-token
+- Verbatim tail: 24 recent messages (12 user) with an absolute 30K-token
   budget, in addition to the relative ratio cap
 - Mandatory `Key Decisions` and `Next Steps` sections in the compaction
   instruction so the summary preserves task continuity
