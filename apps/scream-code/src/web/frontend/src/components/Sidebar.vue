@@ -172,8 +172,15 @@ function sessionTitle(s: SessionListItem): string {
               :title="sessionTitle(s)"
               @click="onSessionClick(s.sessionId)"
             >
-              <span class="session-title">{{ sessionTitle(s) }}</span>
-              <span class="session-meta">{{ relativeTime(s.createdAt) }}</span>
+              <span v-if="s.active" class="session-run" aria-hidden="true" />
+              <span class="session-text">
+                <span class="session-title">{{ sessionTitle(s) }}</span>
+                <span class="session-meta">
+                  <span>{{ relativeTime(s.createdAt) }}</span>
+                  <span class="meta-sep" aria-hidden="true">·</span>
+                  <span>{{ s.messageCount }} 条</span>
+                </span>
+              </span>
               <span
                 class="session-delete"
                 role="button"
@@ -469,6 +476,7 @@ function sessionTitle(s: SessionListItem): string {
   display: flex;
   align-items: center;
   gap: var(--space-2);
+  min-height: 54px;
   padding: var(--space-2) var(--space-3);
   border: none;
   border-radius: var(--radius-md);
@@ -484,18 +492,44 @@ function sessionTitle(s: SessionListItem): string {
 .session-item.active {
   background: var(--color-selected);
 }
-.session-title {
+/* Running indicator: the session's agent is mid-turn. */
+.session-run {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-full);
+  background: var(--color-accent);
+  animation: breathe var(--dur-breathe) ease-in-out infinite;
+  flex-shrink: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .session-run { animation: none; }
+}
+.session-text {
   flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.session-title {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: var(--font-size-sm);
+  line-height: 1.35;
 }
 .session-meta {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   font-size: 11px;
+  line-height: 1.2;
   color: var(--color-text-faint);
   flex-shrink: 0;
+}
+.meta-sep {
+  opacity: 0.6;
 }
 .session-delete {
   position: absolute;

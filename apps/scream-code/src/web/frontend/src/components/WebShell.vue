@@ -155,6 +155,85 @@ function toggleSidebarCollapse() {
   try { localStorage.setItem(SIDEBAR_STORAGE_KEY, sidebarCollapsed.value ? '1' : '0'); } catch { /* ignore */ }
 }
 
+/* ── Draggable sidebar width (180–480px, persisted, double-click resets) ─── */
+const SIDEBAR_WIDTH_KEY = 'scream-sidebar-width';
+const SIDEBAR_MIN = 180;
+const SIDEBAR_MAX = 480;
+const SIDEBAR_DEFAULT = 288;
+
+function readStoredSidebarWidth(): number {
+  try {
+    const raw = Number(localStorage.getItem(SIDEBAR_WIDTH_KEY));
+    if (Number.isFinite(raw) && raw >= SIDEBAR_MIN && raw <= SIDEBAR_MAX) return Math.round(raw);
+  } catch {
+    /* ignore */
+  }
+  return SIDEBAR_DEFAULT;
+}
+
+const sidebarWidth = ref(readStoredSidebarWidth());
+const resizing = ref(false);
+let resizePointerId: number | null = null;
+
+function persistSidebarWidth() {
+  try { localStorage.setItem(SIDEBAR_WIDTH_KEY, String(sidebarWidth.value)); } catch { /* ignore */ }
+}
+
+function onResizePointerDown(e: PointerEvent) {
+  if (sidebarCollapsed.value) return;
+  e.preventDefault();
+  resizing.value = true;
+  resizePointerId = e.pointerId;
+  // Capture keeps the drag alive when the pointer leaves the 12px strip.
+  // Synthetic events (tests/automation) carry an inactive pointerId — the
+  // move/up handlers still work, so a failed capture must not abort the drag.
+  try {
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+  } catch {
+    /* ignore */
+  }
+}
+
+function onResizePointerMove(e: PointerEvent) {
+  if (!resizing.value || e.pointerId !== resizePointerId) return;
+  sidebarWidth.value = Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, Math.round(e.clientX)));
+}
+
+function onResizePointerUp(e: PointerEvent) {
+  if (!resizing.value || e.pointerId !== resizePointerId) return;
+  resizing.value = false;
+  resizePointerId = null;
+  persistSidebarWidth();
+}
+
+function resetSidebarWidth() {
+  sidebarWidth.value = SIDEBAR_DEFAULT;
+  persistSidebarWidth();
+}
+
+function onResizeKeydown(e: KeyboardEvent) {
+  const step = e.shiftKey ? 32 : 12;
+  if (e.key === 'ArrowLeft') {
+    e.preventDefault();
+    sidebarWidth.value = Math.max(SIDEBAR_MIN, sidebarWidth.value - step);
+  } else if (e.key === 'ArrowRight') {
+    e.preventDefault();
+    sidebarWidth.value = Math.min(SIDEBAR_MAX, sidebarWidth.value + step);
+  } else if (e.key === 'Home') {
+    e.preventDefault();
+    sidebarWidth.value = SIDEBAR_MIN;
+  } else if (e.key === 'End') {
+    e.preventDefault();
+    sidebarWidth.value = SIDEBAR_MAX;
+  } else if (e.key === 'Enter') {
+    e.preventDefault();
+    resetSidebarWidth();
+  } else {
+    return;
+  }
+  persistSidebarWidth();
+}
+
 /** Workspace mode lives in the shell (and localStorage) rather than inside the
  *  home view, which unmounts when a conversation opens. */
 const MODE_STORAGE_KEY = 'scream-workspace-mode';
@@ -201,7 +280,11 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKeydown));
 </script>
 
 <template>
-  <div class="shell" :class="{ 'sidebar-collapsed': sidebarCollapsed }">
+  <div
+    class="shell"
+    :class="{ 'sidebar-collapsed': sidebarCollapsed, resizing }"
+    :style="{ '--sidebar-width': sidebarWidth + 'px' }"
+  >
     <Sidebar
       ref="sidebarRef"
       :view="view"
@@ -213,6 +296,26 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKeydown));
       @delete-session="deleteSession"
       @create-session="onCreateSession"
       @toggle-collapse="toggleSidebarCollapse"
+    />
+
+    <div
+      v-if="!sidebarCollapsed"
+      class="sidebar-resize-handle"
+      :class="{ resizing }"
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="调整侧栏宽度"
+      :aria-valuenow="sidebarWidth"
+      aria-valuemin="180"
+      aria-valuemax="480"
+      tabindex="0"
+      title="拖拽调整宽度 · 双击复位"
+      @pointerdown="onResizePointerDown"
+      @pointermove="onResizePointerMove"
+      @pointerup="onResizePointerUp"
+      @pointercancel="onResizePointerUp"
+      @dblclick="resetSidebarWidth"
+      @keydown="onResizeKeydown"
     />
 
     <div v-if="mobileSidebarOpen" class="sidebar-backdrop" aria-hidden="true" @click="mobileSidebarOpen = false" />
@@ -274,6 +377,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKeydown));
 
 <style scoped>
 .shell {
+  position: relative;
   display: grid;
   grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
   /* Collapsed rail morphs the grid track, not just the sidebar's own width,
@@ -287,6 +391,46 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKeydown));
 }
 .shell.sidebar-collapsed {
   grid-template-columns: var(--sidebar-width-collapsed) minmax(0, 1fr);
+}
+/* While dragging, freeze every width transition so the handle tracks the
+   pointer 1:1 instead of lagging behind it, and stop text selection. */
+.shell.resizing {
+  transition: none;
+  user-select: none;
+}
+.shell.resizing :deep(.sidebar) {
+  transition: none;
+}
+
+/* ── Sidebar resize handle: 12px hit area straddling the grid boundary ───── */
+.sidebar-resize-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--sidebar-width) - 6px);
+  width: 12px;
+  cursor: col-resize;
+  touch-action: none;
+  z-index: calc(var(--z-dock) + 1);
+}
+.sidebar-resize-handle::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 5px;
+  width: 2px;
+  border-radius: var(--radius-full);
+  background: transparent;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.sidebar-resize-handle:hover::after,
+.sidebar-resize-handle.resizing::after,
+.sidebar-resize-handle:focus-visible::after {
+  background: var(--color-accent-bd);
+}
+.sidebar-resize-handle:focus-visible {
+  outline: none;
 }
 @media (prefers-reduced-motion: reduce) {
   .shell { transition: none; }
@@ -369,6 +513,9 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKeydown));
 @media (max-width: 640px) {
   .shell {
     grid-template-columns: minmax(0, 1fr);
+  }
+  .sidebar-resize-handle {
+    display: none;
   }
   .topbar {
     display: flex;
