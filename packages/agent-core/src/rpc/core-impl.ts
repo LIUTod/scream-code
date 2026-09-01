@@ -511,44 +511,40 @@ export class ScreamCore implements PromisableMethods<CoreAPI> {
   }
 
   async setScreamConfig(input: SetScreamConfigPayload): Promise<ScreamConfig> {
-    return this.enqueueConfigMutation(async () => {
-      const config = mergeConfigPatch(readConfigFile(this.configPath), input);
-      await writeConfigFile(this.configPath, config);
-      return this.config = loadRuntimeConfig(this.configPath);
-    });
+    const config = mergeConfigPatch(readConfigFile(this.configPath), input);
+    await writeConfigFile(this.configPath, config);
+    return this.config = loadRuntimeConfig(this.configPath);
   }
 
   async removeScreamProvider(input: RemoveScreamProviderPayload): Promise<ScreamConfig> {
-    return this.enqueueConfigMutation(async () => {
-      const config = readConfigFile(this.configPath);
-      delete config.providers[input.providerId];
+    const config = readConfigFile(this.configPath);
+    delete config.providers[input.providerId];
 
-      let removedDefault = false;
-      const existingModels = config.models ?? {};
-      for (const [key, model] of Object.entries(existingModels)) {
-        if (
-          typeof model === 'object' &&
-          model !== null &&
-          !Array.isArray(model) &&
-          model['provider'] === input.providerId
-        ) {
-          delete existingModels[key];
-          if (config.defaultModel === key) removedDefault = true;
-        }
+    let removedDefault = false;
+    const existingModels = config.models ?? {};
+    for (const [key, model] of Object.entries(existingModels)) {
+      if (
+        typeof model === 'object' &&
+        model !== null &&
+        !Array.isArray(model) &&
+        model['provider'] === input.providerId
+      ) {
+        delete existingModels[key];
+        if (config.defaultModel === key) removedDefault = true;
       }
-      config.models = existingModels;
+    }
+    config.models = existingModels;
 
-      if (removedDefault) {
-        config.defaultModel = undefined;
-      }
+    if (removedDefault) {
+      config.defaultModel = undefined;
+    }
 
-      if (config.defaultProvider === input.providerId) {
-        config.defaultProvider = undefined;
-      }
+    if (config.defaultProvider === input.providerId) {
+      config.defaultProvider = undefined;
+    }
 
-      await writeConfigFile(this.configPath, config);
-      return this.config = loadRuntimeConfig(this.configPath);
-    });
+    await writeConfigFile(this.configPath, config);
+    return this.config = loadRuntimeConfig(this.configPath);
   }
 
   setRuntimeSystemPrompt({ sessionId, ...payload }: SetRuntimeSystemPromptRequest) {
@@ -1280,25 +1276,6 @@ export class ScreamCore implements PromisableMethods<CoreAPI> {
 
   private reloadProviderManager(): ScreamConfig {
     return this.config = loadRuntimeConfig(this.configPath);
-  }
-
-  /**
-   * Serialize config-file mutations. Both setScreamConfig and
-   * removeScreamProvider are read-modify-write cycles that read the file
-   * synchronously and then await the write; two calls issued together (e.g.
-   * cycling thinking levels plus confirming a model in the picker fire
-   * back-to-back setConfig patches) would otherwise read the SAME stale
-   * snapshot, and the later write silently reverts the earlier patch — a
-   * lost update that makes e.g. a just-selected default model flip back to
-   * the old one. The queue guarantees each cycle re-reads after the
-   * previous write completed.
-   */
-  private configMutationQueue: Promise<unknown> = Promise.resolve();
-
-  private enqueueConfigMutation<T>(mutate: () => Promise<T>): Promise<T> {
-    const run = this.configMutationQueue.then(mutate, mutate);
-    this.configMutationQueue = run.catch(() => undefined);
-    return run;
   }
 
   private async refreshSessionRuntimeConfig(
