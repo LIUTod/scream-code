@@ -609,7 +609,10 @@ export class FullCompaction {
           } satisfies Message,
         ];
         const response = await this.agent.generate(
-          this.agent.config.provider,
+          // Carry the session's thinking level: the bare provider defaults to
+          // 'off', which always-thinking models reject with HTTP 400 — exactly
+          // the failure the main request path avoids via withThinking.
+          this.agent.config.provider.withThinking(this.agent.config.thinkingLevel),
           // Reuse the agent's real system prompt so the compaction request
           // shares the exact prefix of the last routed request — the KV cache
           // hits instead of paying full price for the whole history. The

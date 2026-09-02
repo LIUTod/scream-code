@@ -16,6 +16,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AgentOptions } from '../../src/agent';
 import { recoverMemosFromCompactionSummary } from '../../src/agent/compaction/full';
 import type { ContextMessage } from '../../src/agent/context';
+import { createScriptedGenerate } from './harness/scripted-generate';
 import {
   COMPACTION_INSTRUCTION,
   COMPACTION_UPDATE_INSTRUCTION,
@@ -187,6 +188,45 @@ describe('Agent compaction', () => {
     expect(strategy.shouldBlock(1)).toBe(false);
     expect(strategy.shouldCompact(28_000)).toBe(true);
     expect(strategy.shouldBlock(28_000)).toBe(true);
+  });
+
+  it('carries the session thinking level into the compaction request provider', async () => {
+    const scripted = createScriptedGenerate();
+    const seenProviders: unknown[] = [];
+    const ctx = testAgent({
+      generate: (chat, systemPrompt, tools, history, callbacks, options) => {
+        seenProviders.push(chat);
+        return scripted.generate(chat, systemPrompt, tools, history, callbacks, options);
+      },
+    });
+    ctx.configure({
+      provider: CATALOGUED_PROVIDER,
+      modelCapabilities: CATALOGUED_MODEL_CAPABILITIES,
+    });
+    ctx.appendExchange(1, 'old user one', 'old assistant one', 20);
+    // config.provider is a GETTER that builds a fresh provider on every
+    // access (config/index.ts:103-105), so reference identity cannot be
+    // asserted. Assert the observable effect instead: withThinking() lands
+    // the thinking flag in the provider's generation kwargs, while a bare
+    // provider (the old compaction path) has no thinking entry at all and
+    // always-thinking endpoints reject it with HTTP 400.
+    const compacted = new Promise<void>((resolve) => {
+      ctx.emitter.once('context.apply_compaction', () => {
+        resolve();
+      });
+    });
+
+    scripted.mockNextResponse({ type: 'text', text: 'Compacted summary.' });
+    await ctx.rpc.beginCompaction({ instruction: 'Keep the important test facts.' });
+    await compacted;
+
+    expect(seenProviders.length).toBeGreaterThan(0);
+    const captured = seenProviders.at(-1) as {
+      _generationKwargs?: { extra_body?: { thinking?: { type: string } } };
+    };
+    expect(captured._generationKwargs?.extra_body?.thinking?.type).toBe(
+      ctx.agent.config.thinkingLevel === 'off' ? 'disabled' : 'enabled',
+    );
   });
 
   it('runs manual compaction and applies the compacted context', async () => {    const ctx = testAgent();
