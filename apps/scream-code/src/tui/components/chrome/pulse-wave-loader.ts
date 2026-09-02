@@ -3,26 +3,32 @@ import type { TUI } from '@liutod-scream/pi-tui';
 import chalk from 'chalk';
 
 import {
+  PULSE_WAVE_CELLS,
   PULSE_WAVE_FRAMES,
   PULSE_WAVE_INTERVAL_MS,
 } from '#/tui/constant/rendering';
 
-const FULL_BOX = '■';
-const DIM_DOT = '⬝';
+/** Leading/trailing glyph: U+2588 (Block Elements — guaranteed single-column
+ * width). The remaining stage cells render muted middle dots (U+00B7). */
+const LEADING_BOX = '■';
 
 /**
- * 3-box pulse-wave loading indicator.
+ * 8-box flowing pulse-wave loading indicator.
  *
- * Cycles through a breathing wave pattern:
- *   ■ ⬝ ⬝  →  ■ ■ ⬝  →  ⬝ ■ ■  →  (bounce back)
+ * A leading box (full primary colour) sweeps across an 8-cell stage, trailed
+ * by a dim box, over a row of muted middle dots:
+ *   ■ 淡 ■ · · · · · ·  →  ■ ■ 淡 ■ · · · ·  →  … →  (bounce back)
+ * (淡 shown here only to mark the trailing box; it renders as primary+dim.)
  *
- * Colouring mirrors Grok's PromptLoadingBoxes:
- *   - active box (distance 0) → full primary colour
- *   - trailing box (distance 1) → ~72 % opacity via chalk dim
- *   - dim dot (distance ≥ 2) → muted
+ * 14-frame ping-pong loop @ 80 ms — the leading edge never teleports, it
+ * walks cell by cell.
+ *
+ * All glyphs are width-safe in terminal fonts (U+2588 Block Elements and
+ * U+00B7 Latin-1) — the earlier ■/⬝ mix reflowed the whole line on every
+ * frame because U+2B1D is not single-column guaranteed.
  *
  * The component auto-starts on construction. Call `stop()` to tear
- * down the interval timer.
+ * down the timer chain.
  */
 export class PulseWaveLoader extends Text {
   private currentFrame = 0;
@@ -97,9 +103,14 @@ export class PulseWaveLoader extends Text {
   }
 
   private updateDisplay(): void {
-    const step = PULSE_WAVE_FRAMES[this.currentFrame] ?? PULSE_WAVE_FRAMES[0];
-    const cells = [0, 1, 2].map((idx) => this.renderCell(idx, step.active, step.forward));
-    this.frameText = cells.join(' ');
+    // The frame list is statically generated (non-empty); the fallback is a
+    // safety net for out-of-range indices only.
+    const step = PULSE_WAVE_FRAMES[this.currentFrame] ?? PULSE_WAVE_FRAMES[0]!;
+    const cells = Array.from({ length: PULSE_WAVE_CELLS }, (_, idx) =>
+      this.renderCell(idx, step.active, step.forward),
+    );
+    // Boxes are glued together (no separators) per the approved design.
+    this.frameText = cells.join('');
     this.setText(this.frameText);
     // Use a full render so the footer status timer updates in sync with the
     // pulse wave during the 'waiting' phase, when no other render activity is
@@ -109,10 +120,9 @@ export class PulseWaveLoader extends Text {
 
   private renderCell(index: number, active: number, forward: boolean): string {
     const distance = forward ? active - index : index - active;
-    const glyph = distance >= 0 && distance < 2 ? FULL_BOX : DIM_DOT;
-
-    if (distance === 0) return chalk.hex(this.colorHex)(glyph);
-    if (distance === 1) return chalk.hex(this.colorHex).dim(glyph);
-    return chalk.dim(glyph);
+    if (distance === 0) return chalk.hex(this.colorHex)(LEADING_BOX);
+    if (distance === 1) return chalk.hex(this.colorHex).dim(LEADING_BOX);
+    // Rest of the stage: muted middle dots (Latin-1, width-safe).
+    return chalk.dim('·');
   }
 }

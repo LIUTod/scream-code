@@ -35,14 +35,17 @@ export const BRAILLE_SPINNER_INTERVAL_MS = 80;
 export const PIXEL_PULSE_FRAMES = ['█', '▓', '▒', '░', '▒', '▓'];
 export const PIXEL_PULSE_INTERVAL_MS = 100;
 
-// Pulse-wave animation: 3-box breathing indicator à la Grok's PromptLoadingBoxes.
+// Pulse-wave animation: 8-box flowing indicator.
 // Each frame defines which box is "active" (full colour) and the wave's direction.
 // Forward  → the active box is the leading edge, previous box is trailing.
 // Backward → the active box is the leading edge moving left.
-export const PULSE_WAVE_FRAMES = [
-  { active: 0, forward: true },
-  { active: 1, forward: true },
-  { active: 2, forward: true },
-  { active: 1, forward: false },
-] as const;
-export const PULSE_WAVE_INTERVAL_MS = 120;
+// The wave runs to the last box and bounces back (ping-pong) so the loop
+// never jumps.
+export const PULSE_WAVE_CELLS = 8;
+const forwardFrames = Array.from({ length: PULSE_WAVE_CELLS }, (_, active) => ({ active, forward: true }));
+const backwardFrames = Array.from({ length: PULSE_WAVE_CELLS - 2 }, (_, i) => ({
+  active: PULSE_WAVE_CELLS - 2 - i,
+  forward: false,
+}));
+export const PULSE_WAVE_FRAMES = [...forwardFrames, ...backwardFrames];
+export const PULSE_WAVE_INTERVAL_MS = 80;
