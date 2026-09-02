@@ -41,7 +41,8 @@ export class ThinkingComponent implements Component {
   private expanded = false;
   private readonly ui: TUI | undefined;
   private spinnerFrame = 0;
-  private spinnerInterval: ReturnType<typeof setInterval> | undefined;
+  private spinnerTimer: ReturnType<typeof setTimeout> | undefined;
+  private lastSpinnerTickAt = 0;
   // Hold a single Text instance so pi-tui's (text, width) → lines cache
   // actually survives across renders. Re-constructing per render destroys
   // the cache and forces full re-wrap on every frame, which dominates CPU
@@ -181,17 +182,42 @@ export class ThinkingComponent implements Component {
     return truncated;
   }
 
+  /**
+   * setTimeout self-rescheduling chain with drift-free frame advancement and
+   * paint-cost backpressure (same pattern as the pi-tui Loader): a slow tick
+   * defers the next one instead of stacking intervals, keeping the live
+   * thinking indicator ≤ ~10% CPU even under slow terminal writes.
+   */
+  private scheduleSpinnerTick(delayMs: number): void {
+    if (this.ui === undefined) return;
+    const timer = setTimeout(() => {
+      if (this.spinnerTimer !== timer) return;
+      const startedAt = performance.now();
+      const elapsed = startedAt - this.lastSpinnerTickAt;
+      if (elapsed >= BRAILLE_SPINNER_INTERVAL_MS) {
+        const steps = Math.floor(elapsed / BRAILLE_SPINNER_INTERVAL_MS);
+        this.spinnerFrame = (this.spinnerFrame + steps) % BRAILLE_SPINNER_FRAMES.length;
+        this.lastSpinnerTickAt += steps * BRAILLE_SPINNER_INTERVAL_MS;
+        this.ui?.requestRender();
+      }
+      const frameCostMs = performance.now() - startedAt;
+      if (this.spinnerTimer !== timer) return;
+      const cadenceDelayMs = Math.max(0, BRAILLE_SPINNER_INTERVAL_MS - frameCostMs);
+      const backpressureDelayMs = frameCostMs * 9;
+      this.scheduleSpinnerTick(Math.max(cadenceDelayMs, backpressureDelayMs));
+    }, delayMs);
+    this.spinnerTimer = timer;
+  }
+
   private startSpinner(): void {
-    if (this.ui === undefined || this.spinnerInterval !== undefined) return;
-    this.spinnerInterval = setInterval(() => {
-      this.spinnerFrame = (this.spinnerFrame + 1) % BRAILLE_SPINNER_FRAMES.length;
-      this.ui?.requestRender();
-    }, BRAILLE_SPINNER_INTERVAL_MS);
+    if (this.ui === undefined || this.spinnerTimer !== undefined) return;
+    this.lastSpinnerTickAt = performance.now();
+    this.scheduleSpinnerTick(BRAILLE_SPINNER_INTERVAL_MS);
   }
 
   private stopSpinner(): void {
-    if (this.spinnerInterval === undefined) return;
-    clearInterval(this.spinnerInterval);
-    this.spinnerInterval = undefined;
+    if (this.spinnerTimer === undefined) return;
+    clearTimeout(this.spinnerTimer);
+    this.spinnerTimer = undefined;
   }
 }

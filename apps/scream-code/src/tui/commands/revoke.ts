@@ -149,6 +149,14 @@ function removeRevokeContextComponents(
   for (let i = children.length - 1; i >= startIndex; i--) {
     const child = children[i];
     if (child !== undefined && isRevokeContextComponent(child)) {
+      // Live ThinkingComponent instances own a spinner tick chain; skipping
+      // dispose here would leave the chain running against a detached child.
+      // Component does not declare dispose, so narrow through a structural
+      // view instead of widening the shared interface.
+      const disposable = child as Partial<Record<"dispose", () => void>>;
+      if (typeof disposable.dispose === "function") {
+        disposable.dispose();
+      }
       children.splice(i, 1);
     }
   }

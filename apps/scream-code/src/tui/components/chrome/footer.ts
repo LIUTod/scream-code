@@ -342,7 +342,7 @@ export class FooterComponent implements Component {
   private gitCache: GitStatusCache;
   private gitCacheWorkDir: string;
   private transientHint: string | null = null;
-  private statusTimer: ReturnType<typeof setInterval> | null = null;
+  private statusTimer: ReturnType<typeof setTimeout> | null = null;
   /**
    * Non-terminal background-task counts split by kind so the footer can
    * render two distinct badges. `bashTasks` covers `bash-*` BPM tasks
@@ -449,14 +449,26 @@ export class FooterComponent implements Component {
     // streaming/tool work gets serviced faster — the glow keeps flowing even
     // while the event loop is busy with real work.
     const intervalMs = 1000 / 30;
-    this.statusTimer = setInterval(() => {
+    // setTimeout self-rescheduling chain (not setInterval): a busy event loop
+    // delays the next tick instead of stacking queued requestRender() calls.
+    this.#scheduleStatusTick(intervalMs, intervalMs);
+  }
+
+  #scheduleStatusTick(intervalMs: number, delayMs: number): void {
+    const timer = setTimeout(() => {
+      if (this.statusTimer !== timer) return;
+      const startedAt = performance.now();
       this.ui.requestRender();
-    }, intervalMs);
+      const tickCostMs = performance.now() - startedAt;
+      if (this.statusTimer !== timer) return;
+      this.#scheduleStatusTick(intervalMs, Math.max(0, intervalMs - tickCostMs));
+    }, delayMs);
+    this.statusTimer = timer;
   }
 
   #stopStatusTimer(): void {
     if (!this.statusTimer) return;
-    clearInterval(this.statusTimer);
+    clearTimeout(this.statusTimer);
     this.statusTimer = null;
   }
 
