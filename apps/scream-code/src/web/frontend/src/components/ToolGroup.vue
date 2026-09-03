@@ -6,7 +6,10 @@ import GenericToolCard from './GenericToolCard.vue';
 import EditToolCard from './EditToolCard.vue';
 import SvgIcon from './ui/SvgIcon.vue';
 
-const props = withDefaults(defineProps<{ name: string; tools: ToolMessage[]; live?: boolean }>(), { live: true });
+const props = withDefaults(
+  defineProps<{ name: string; tools: ToolMessage[]; live?: boolean; workDir?: string; sessionId?: string }>(),
+  { live: true, workDir: '', sessionId: '' },
+);
 /**
  * The fold is user-driven only. Auto-expanding on `running` turned every agent
  * turn into a wall of cards; the live state is carried by the status dot and
@@ -44,6 +47,8 @@ function toggle() { open.value = !open.value; }
           :key="tool.toolCallId"
           :tool="tool"
           :live="live"
+          :work-dir="workDir"
+          :session-id="sessionId"
         />
       </div>
     </div>

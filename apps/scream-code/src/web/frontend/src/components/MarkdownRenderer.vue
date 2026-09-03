@@ -2,9 +2,20 @@
 import { computed, h, defineComponent, ref, watch } from 'vue';
 import { marked, type Token } from 'marked';
 import CodeBlock from './CodeBlock.vue';
+import { openImageLightbox } from '../utils/imageLightbox';
 
 // Enable GFM features (task lists, tables, strikethrough) and line breaks.
 marked.setOptions({ gfm: true, breaks: false });
+
+/**
+ * Size guard for settled messages: a giant log/code dump would otherwise run
+ * marked.lexer over the whole body and patch thousands of vnodes at once.
+ * Long finalized messages render a preview until the user expands them.
+ * Streaming messages are exempt (rAF-coalesced already, and truncating
+ * mid-stream would fight the fence-trim logic).
+ */
+const MAX_INLINE_MARKDOWN_CHARS = 40_000;
+const COLLAPSED_PREVIEW_CHARS = 6_000;
 
 export default defineComponent({
   props: {
@@ -18,6 +29,21 @@ export default defineComponent({
     // the final content so nothing is left in a stale frame.
     const renderContent = ref(props.content);
     let rafId: number | null = null;
+
+    // Size guard: 'expanded' resets whenever the body swaps wholesale (i.e.
+    // the component is reused for a different message via :key-less patching).
+    const expanded = ref(false);
+    let lastSource = props.content;
+    watch(
+      () => props.content,
+      (value) => {
+        if (!value.startsWith(lastSource) && !lastSource.startsWith(value)) expanded.value = false;
+        lastSource = value;
+      },
+    );
+    const guarded = computed(
+      () => !props.streaming && !expanded.value && renderContent.value.length > MAX_INLINE_MARKDOWN_CHARS,
+    );
 
     watch(
       () => props.content,
@@ -48,14 +74,39 @@ export default defineComponent({
     );
 
     const nodes = computed(() => {
-      const safeContent = trimPartialClosingFences(renderContent.value);
+      const source = guarded.value ? previewOf(renderContent.value) : renderContent.value;
+      const safeContent = trimPartialClosingFences(source);
       const tokens = marked.lexer(safeContent);
       return tokens.flatMap((token) => renderToken(token, props.streaming));
     });
 
-    return () => h('div', { class: 'markdown-body' }, nodes.value);
+    const totalChars = computed(() => renderContent.value.length);
+
+    return () => {
+      const children = nodes.value.slice();
+      if (guarded.value) {
+        children.push(
+          h(
+            'button',
+            { class: 'md-expand', type: 'button', onClick: () => { expanded.value = true; } },
+            `展开全文（共 ${totalChars.value.toLocaleString()} 字符，当前仅预览前 ${COLLAPSED_PREVIEW_CHARS.toLocaleString()}）`,
+          ),
+        );
+      }
+      return h('div', { class: 'markdown-body' }, children);
+    };
   },
 });
+
+/**
+ * Cut a giant body down to the preview window at a line boundary (so we never
+ * slice through a code fence mid-line). Anything after the cut is dropped
+ * until the user expands.
+ */
+function previewOf(content: string): string {
+  const cut = content.lastIndexOf('\n', COLLAPSED_PREVIEW_CHARS);
+  return (cut > COLLAPSED_PREVIEW_CHARS / 2 ? content.slice(0, cut) : content.slice(0, COLLAPSED_PREVIEW_CHARS)) + '\n…';
+}
 
 /**
  * During streaming, a ``` fence may be open but not yet closed.
@@ -195,8 +246,22 @@ function renderInline(tokens: Token[]): (string | ReturnType<typeof h>)[] {
         }
         return h('a', { class: 'md-a', href, target: '_blank', rel: 'noopener' }, renderInline(t.tokens ?? []));
       }
-      case 'image':
-        return h('img', { class: 'md-img', src: t.href, alt: t.text ?? '', loading: 'lazy' });
+      case 'image': {
+        // Wrap in a real button so the zoom affordance is keyboard reachable;
+        // the shared lightbox shows the image at natural size.
+        const imgSrc = t.href ?? '';
+        return h(
+          'button',
+          {
+            type: 'button',
+            class: 'md-img-btn',
+            title: '点击图片放大预览',
+            'aria-label': t.text ? `放大预览图片：${t.text}` : '放大预览图片',
+            onClick: () => openImageLightbox(imgSrc, t.text ?? ''),
+          },
+          [h('img', { class: 'md-img', src: imgSrc, alt: t.text ?? '', loading: 'lazy' })],
+        );
+      }
       case 'br':
         return h('br');
       case 'html':
@@ -239,9 +304,31 @@ function renderInline(tokens: Token[]): (string | ReturnType<typeof h>)[] {
 .markdown-body :deep(.md-strong) { font-weight: 600; }
 .markdown-body :deep(.md-em) { font-style: italic; }
 .markdown-body :deep(.md-del) { text-decoration: line-through; color: var(--color-text-muted); }
+.markdown-body :deep(.md-img-btn) { display: block; max-width: 100%; padding: 0; border: 0; background: none; cursor: zoom-in; }
 .markdown-body :deep(.md-img) { max-width: 100%; border-radius: var(--radius-md); }
 .markdown-body :deep(.md-table) { border-collapse: collapse; width: 100%; margin: 0.6em 0; font-size: 0.9em; }
 .markdown-body :deep(.md-th), .markdown-body :deep(.md-td) { border: 1px solid var(--color-line); padding: 6px 10px; text-align: left; }
 .markdown-body :deep(.md-th) { background: var(--color-surface-sunken); font-weight: 600; }
 .markdown-body :deep(.md-html) { margin: 0.6em 0; }
+.markdown-body :deep(.md-expand) {
+  display: block;
+  width: 100%;
+  margin-top: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px dashed var(--color-line-strong);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-sunken);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  font-family: inherit;
+  cursor: pointer;
+  text-align: center;
+  transition:
+    border-color var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+.markdown-body :deep(.md-expand:hover) {
+  border-color: var(--color-accent-bd);
+  color: var(--color-text);
+}
 </style>

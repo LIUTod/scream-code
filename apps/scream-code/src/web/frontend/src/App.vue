@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onBeforeUnmount, onMounted, watch, provide } from 'vue';
 import WebShell from './components/WebShell.vue';
+import ImageLightbox from './components/ImageLightbox.vue';
 import Toast from './components/ui/Toast.vue';
 import type { Theme } from './theme';
 
@@ -65,6 +66,7 @@ onBeforeUnmount(() => {
 <template>
   <div class="app">
     <WebShell />
+    <ImageLightbox />
     <Toast />
   </div>
 </template>

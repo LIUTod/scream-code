@@ -3,6 +3,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import type { ChatMessage } from '../types';
 import MessageItem from './MessageItem.vue';
 import EmptyState from './EmptyState.vue';
+import { formatDayDivider, isSameLocalDay } from '../utils/timeFormat';
 import SvgIcon from './ui/SvgIcon.vue';
 
 const props = withDefaults(
@@ -36,6 +37,9 @@ const emit = defineEmits<{
 }>();
 
 const listRef = ref<HTMLElement | null>(null);
+/** Sentinel at the top of the list; entering the viewport auto-fetches the older page. */
+const topSentinelRef = ref<HTMLElement | null>(null);
+let olderObserver: IntersectionObserver | null = null;
 
 const latestUserId = computed(() => {
   for (let i = props.messages.length - 1; i >= 0; i--) {
@@ -62,6 +66,26 @@ function showTimestampFor(index: number): boolean {
   return false;
 }
 
+/**
+ * Stream dividers (render-only; scroll/unread/anchor behavior is untouched):
+ * - a hairline before every user message except the first rendered row, so
+ *   one question + one answer reads as one block;
+ * - a centered date pill when adjacent messages cross a local midnight.
+ * A day crossing suppresses the hairline at the same slot — the pill is the
+ * stronger separator.
+ */
+function turnDividerBefore(index: number): boolean {
+  const m = props.messages[index];
+  return Boolean(m) && index > 0 && m.role === 'user';
+}
+
+function dayDividerBefore(index: number): string | null {
+  const cur = props.messages[index];
+  const prev = index > 0 ? props.messages[index - 1] : undefined;
+  if (!cur || !prev || cur.ts === undefined || prev.ts === undefined) return null;
+  return isSameLocalDay(prev.ts, cur.ts) ? null : formatDayDivider(cur.ts);
+}
+
 /** Streaming content length - drives scroll pinning during deltas. */
 const streamLength = computed(() => {
   const last = props.messages.at(-1);
@@ -76,6 +100,8 @@ let forceScroll = false;
 
 /** Whether the user has scrolled away from the bottom. */
 const showScrollButton = ref(false);
+/** Messages that arrived while the user was scrolled up (FAB badge). */
+const unreadCount = ref(0);
 
 function isNearBottom(): boolean {
   const el = listRef.value;
@@ -129,22 +155,38 @@ function restoreScrollPosition(): void {
   if (saved) el.scrollTop = Number(saved);
 }
 
-/** Keep the viewport anchored when an older page is prepended above. */
-let prependAnchorHeight = 0;
+/**
+ * Keep the viewport anchored when an older page is prepended above.
+ * The watch source reads element-level state (first id + length), so an
+ * in-place unshift() on the same array reference is detected too.
+ */
+/**
+ * Set by the prepend watcher (registered first, so it runs before the length
+ * watcher on the same flush). Older-page loads must not count as unread or
+ * trigger a scroll-to-bottom.
+ */
+let justPrepended = false;
+
 watch(
-  () => props.olderLoading,
-  (loading) => {
+  () => [props.messages[0]?.id ?? null, props.messages.length] as const,
+  ([firstId, len], [prevFirstId, prevLen]) => {
+    const prepended =
+      len > 0 &&
+      firstId !== null &&
+      prevFirstId !== null &&
+      firstId !== prevFirstId &&
+      len > (prevLen ?? 0);
+    justPrepended = prepended;
+    if (!prepended) return;
+    // Capture the pre-patch scrollHeight now (pre-order watcher, Vue has not
+    // patched the DOM yet) and shift by the inserted height after the patch.
     const el = listRef.value;
     if (!el) return;
-    if (loading) {
-      prependAnchorHeight = el.scrollHeight;
-    } else if (prependAnchorHeight > 0) {
-      const delta = el.scrollHeight - prependAnchorHeight;
-      if (delta > 0) {
-        el.scrollTop = el.scrollTop + delta;
-      }
-      prependAnchorHeight = 0;
-    }
+    const before = el.scrollHeight;
+    nextTick(() => {
+      const delta = el.scrollHeight - before;
+      if (delta > 0) el.scrollTop += delta;
+    });
   },
 );
 
@@ -153,6 +195,8 @@ function onScroll(): void {
   if (!el) return;
   const awayFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight > 80;
   showScrollButton.value = awayFromBottom;
+  // Back at the bottom (however the user got there): the unread badge is done.
+  if (!awayFromBottom) unreadCount.value = 0;
   // User scrolled up during a pinned turn -> release the pin so streaming
   // deltas stop dragging them back down.
   if (awayFromBottom && forceScroll) {
@@ -171,18 +215,31 @@ watch(
     // Session switched: clear the restore marker so the first content load
     // restores the saved position instead of force-scrolling to bottom.
     restoredForSession = '';
+    unreadCount.value = 0;
+    justPrepended = false;
   },
 );
 
 watch(
   () => [props.messages.length, streamLength.value],
   ([len], [oldLen]) => {
-    // New message added -> always scroll to bottom and pin subsequent deltas.
+    // New message added -> scroll to bottom and pin subsequent deltas, UNLESS
+    // the user deliberately scrolled up: then count it as unread instead of
+    // yanking them back down.
     if (len !== oldLen) {
+      const prepended = justPrepended;
+      justPrepended = false;
       // First load for this session: restore the saved scroll position.
       if (len > 0 && restoredForSession !== props.sessionId) {
         restoredForSession = props.sessionId;
         requestAnimationFrame(() => requestAnimationFrame(restoreScrollPosition));
+        return;
+      }
+      // Older-page history load: neither unread nor follow-bottom.
+      if (prepended) return;
+      if (!isNearBottom()) {
+        // Guard against net-negative deltas from message snapshots.
+        unreadCount.value = Math.max(0, unreadCount.value + Math.max(0, len - (oldLen ?? 0)));
         return;
       }
       forceScroll = true;
@@ -205,6 +262,7 @@ watch(
 function handleScrollButtonClick(): void {
   forceScroll = true;
   showScrollButton.value = false;
+  unreadCount.value = 0;
   scrollToBottom('smooth');
 }
 
@@ -216,16 +274,40 @@ const showSkeleton = computed(() => {
 
 onMounted(() => {
   listRef.value?.addEventListener('scroll', onScroll, { passive: true });
+  // Auto-load older history: the sentinel sits above the first message, so it
+  // is only visible when the user has scrolled to the top of the window.
+  if (typeof IntersectionObserver !== 'undefined') {
+    olderObserver = new IntersectionObserver(
+      (entries) => {
+        if (!entries[0]?.isIntersecting) return;
+        if (props.olderAvailable && !props.olderLoading && props.messages.length > 0) {
+          emit('load-older');
+        }
+      },
+      { root: listRef.value, rootMargin: '120px 0px 0px 0px' },
+    );
+    if (topSentinelRef.value) olderObserver.observe(topSentinelRef.value);
+  }
   // Refresh recovery: restore the saved scroll position once rendered.
   requestAnimationFrame(() => requestAnimationFrame(restoreScrollPosition));
 });
 
 onUnmounted(() => {
   listRef.value?.removeEventListener('scroll', onScroll);
+  olderObserver?.disconnect();
+  olderObserver = null;
   if (saveScrollRaf !== null) {
     cancelAnimationFrame(saveScrollRaf);
     saveScrollRaf = null;
   }
+});
+
+// Re-point the observer at the sentinel whenever it (re)mounts with the
+// older-page row, and stop auto-fetching once no older page exists.
+watch(topSentinelRef, (el) => {
+  if (!olderObserver) return;
+  olderObserver.disconnect();
+  if (el) olderObserver.observe(el);
 });
 </script>
 
@@ -237,7 +319,7 @@ onUnmounted(() => {
       <button class="conn-retry" @click="emit('retry-connection')">立即重试</button>
     </div>
     <div ref="listRef" class="message-list">
-      <div v-if="olderAvailable" class="load-older-row">
+      <div v-if="olderAvailable" ref="topSentinelRef" class="load-older-row">
         <button class="load-older-btn" :disabled="olderLoading" @click="emit('load-older')">
           {{ olderLoading ? '加载中…' : '加载更早消息' }}
         </button>
@@ -250,20 +332,25 @@ onUnmounted(() => {
         :connected="connected"
         @pick="(t) => emit('pick', t)"
       />
-      <MessageItem
-        v-for="(message, index) in messages"
-        :key="message.id"
-        :message="message"
-        :is-latest-user="message.id === latestUserId"
-        :idle="!busy"
-        :streaming="busy && message.id === lastMessageId && message.role === 'assistant'"
-        :session-id="sessionId"
-        :can-fork="!busy && message.id === lastAssistantId"
-        :show-timestamp="showTimestampFor(index)"
-        @edit="(content) => emit('edit', content)"
-        @retry="emit('retry-message')"
-        @fork="emit('fork')"
-      />
+      <template v-for="(message, index) in messages" :key="message.id">
+        <div v-if="dayDividerBefore(index)" class="day-divider" role="separator">
+          <span>{{ dayDividerBefore(index) }}</span>
+        </div>
+        <div v-else-if="turnDividerBefore(index)" class="turn-divider" aria-hidden="true" />
+        <MessageItem
+          :message="message"
+          :is-latest-user="message.id === latestUserId"
+          :idle="!busy"
+          :streaming="busy && message.id === lastMessageId && message.role === 'assistant'"
+          :session-id="sessionId"
+          :can-fork="!busy && message.id === lastAssistantId"
+          :show-timestamp="showTimestampFor(index)"
+          :work-dir="workDir ?? undefined"
+          @edit="(content) => emit('edit', content)"
+          @retry="emit('retry-message')"
+          @fork="emit('fork')"
+        />
+      </template>
       <div v-if="showSkeleton" class="message-skeleton" aria-hidden="true">
         <div class="sk-body">
           <div class="sk-line sk-w-60" />
@@ -275,11 +362,13 @@ onUnmounted(() => {
     <Transition name="scroll-btn">
       <button
         v-if="showScrollButton"
-        class="scroll-to-bottom"
+        :class="['scroll-to-bottom', { streaming: busy }]"
         title="滚动到最新消息"
+        :aria-label="unreadCount > 0 ? `滚动到最新消息，${unreadCount} 条新消息` : '滚动到最新消息'"
         @click="handleScrollButtonClick"
       >
         <SvgIcon name="chevron-down" :size="18" />
+        <span v-if="unreadCount > 0" class="scroll-badge">{{ unreadCount > 99 ? '99+' : unreadCount }}</span>
       </button>
     </Transition>
   </div>
@@ -365,6 +454,29 @@ onUnmounted(() => {
   background: var(--color-surface);
 }
 
+/* Turn hairline: 1px, message-gutter left/right margins. */
+.turn-divider {
+  height: 1px;
+  margin: var(--space-1) var(--space-5);
+  background: var(--color-line);
+  flex-shrink: 0;
+}
+/* Cross-day pill: centered, quiet. */
+.day-divider {
+  display: flex;
+  justify-content: center;
+  padding: var(--space-3) 0 0;
+  flex-shrink: 0;
+}
+.day-divider span {
+  padding: 2px 10px;
+  border-radius: var(--radius-full);
+  background: var(--color-surface-sunken);
+  color: var(--color-text-faint);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
 .scroll-to-bottom {
   position: absolute;
   bottom: var(--space-2);
@@ -396,6 +508,37 @@ onUnmounted(() => {
 }
 .scroll-to-bottom:active {
   transform: translateX(-50%) translateY(1px);
+}
+/* Live pulse while the assistant is streaming: the FAB is the "watch it" affordance. */
+.scroll-to-bottom.streaming::after {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--color-accent-bd);
+  animation: scroll-pulse 1.6s var(--ease-out) infinite;
+  pointer-events: none;
+}
+@keyframes scroll-pulse {
+  0% { opacity: 0.9; transform: scale(0.92); }
+  70% { opacity: 0; transform: scale(1.12); }
+  100% { opacity: 0; transform: scale(1.12); }
+}
+.scroll-badge {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  border-radius: var(--radius-full);
+  background: var(--color-accent);
+  color: var(--color-on-accent, #fff);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 17px;
+  text-align: center;
+  box-shadow: 0 0 0 2px var(--color-surface-raised);
 }
 
 .scroll-btn-enter-active,

@@ -2,12 +2,20 @@
 import { computed, ref, watch } from 'vue';
 import type { ToolMessage } from '../types';
 import { toolStatus } from '../utils/toolGroup';
+import { openFileInPanel } from '../utils/fileTabState';
+import { openImageLightbox } from '../utils/imageLightbox';
+import { resolveWrittenPath } from '../utils/turnWrittenFiles';
+import { useToolDuration } from '../composables/useToolDuration';
 
 const props = withDefaults(defineProps<{
   tool: ToolMessage;
   /** True while the owning turn is still streaming. */
   live?: boolean;
-}>(), { live: true });
+  /** Session working directory — resolves relative file paths before opening. */
+  workDir?: string;
+  /** Owning session id, for panel bookkeeping. */
+  sessionId?: string;
+}>(), { live: true, workDir: '', sessionId: '' });
 
 const status = computed(() => toolStatus(props.tool, props.live));
 
@@ -33,7 +41,26 @@ function toggle() {
   expanded.value = !expanded.value;
 }
 
-/** Short one-line parameter summary for the header, e.g. `path="a.ts", cmd="ls"`. */
+const PATH_ARG_FIELDS = new Set(['path', 'file_path', 'filePath', 'file', 'filename']);
+
+/** The tool's file-path argument (when it has one); clickable → right file panel. */
+const filePathArg = computed<string | null>(() => {
+  const args = props.tool.args;
+  if (!args || typeof args !== 'object') return null;
+  for (const [k, v] of Object.entries(args as Record<string, unknown>)) {
+    if (PATH_ARG_FIELDS.has(k) && typeof v === 'string' && v.length > 0 && !v.includes('\n')) return v;
+  }
+  return null;
+});
+
+function openFileArg(): void {
+  const p = filePathArg.value;
+  if (!p) return;
+  openFileInPanel(resolveWrittenPath(p, props.workDir || undefined), { sessionId: props.sessionId || null });
+}
+
+/** Short one-line parameter summary for the header, e.g. `cmd="ls"`. The
+    file-path argument is excluded when rendered as its own clickable chip. */
 const paramSummary = computed(() => {
   const args = props.tool.args;
   if (!args || typeof args !== 'object') {
@@ -41,6 +68,7 @@ const paramSummary = computed(() => {
   }
   const parts: string[] = [];
   for (const [k, v] of Object.entries(args as Record<string, unknown>)) {
+    if (filePathArg.value !== null && PATH_ARG_FIELDS.has(k) && v === filePathArg.value) continue;
     let s: string;
     if (typeof v === 'string') s = v.length > 40 ? `${v.slice(0, 40)}…` : v;
     else {
@@ -70,7 +98,23 @@ function formatOutput(s: string | undefined): string {
 const outputText = computed(() => formatOutput(props.tool.output));
 const outputLarge = computed(() => outputText.value.length > 8192);
 const outputExpanded = ref(false);
-const outputShown = computed(() => (outputLarge.value && !outputExpanded.value ? outputText.value.slice(0, 280) : outputText.value));
+// Collapsed preview keeps the TAIL: for long outputs the most interesting
+// part (errors, final status lines) is at the end.
+const outputShown = computed(() => {
+  const t = outputText.value;
+  return outputLarge.value && !outputExpanded.value ? `…${t.slice(-400)}` : t;
+});
+
+/** Latest streamed progress line (running tools only). */
+const progressText = computed(() => {
+  const p = props.tool.progress;
+  if (!p) return '';
+  const lines = p.split('\n').filter((l) => l.trim());
+  return lines[lines.length - 1]?.slice(0, 60) ?? '';
+});
+
+/** Duration chip: recorded ms when finished, live seconds while running. */
+const durationText = useToolDuration(computed(() => props.tool), status, () => props.live);
 
 async function copyOutput(): Promise<void> {
   try {
@@ -89,6 +133,12 @@ const imageSrc = computed(() => {
   if (outputLarge.value) return null;
   return `/api/v1/files/raw?path=${encodeURIComponent(t)}`;
 });
+
+/** Zoom the tool-output screenshot in the shared lightbox. */
+function zoomImage(): void {
+  const src = imageSrc.value;
+  if (src) openImageLightbox(src);
+}
 </script>
 
 <template>
@@ -98,7 +148,14 @@ const imageSrc = computed(() => {
         <template v-if="statusIcon">{{ statusIcon }}</template>
       </span>
       <span class="tool-name">{{ tool.name }}</span>
+      <button
+        v-if="filePathArg"
+        class="tool-pathlink"
+        :title="`在文件面板中打开 ${filePathArg}`"
+        @click.stop="openFileArg"
+      >{{ filePathArg }}</button>
       <span v-if="paramSummary" class="tool-params" :title="paramSummary">{{ paramSummary }}</span>
+      <span v-if="durationText" class="tool-duration" :class="{ live: tool.durationMs === undefined }">{{ durationText }}</span>
       <span :class="['tool-chevron', { open: expanded }]">▸</span>
     </div>
 
@@ -108,13 +165,15 @@ const imageSrc = computed(() => {
           <pre v-if="formatArgs()" class="tool-args"><code>{{ formatArgs() }}</code></pre>
           <pre v-if="tool.output !== undefined && !imageSrc" class="tool-result"><code>{{ outputShown || '(无输出)' }}</code></pre>
           <div v-if="tool.output !== undefined && imageSrc" class="tool-image-wrap">
-            <img class="tool-image" :src="imageSrc" alt="" loading="lazy" @error="(e) => ((e.currentTarget as HTMLImageElement).style.display = 'none')" />
+            <button type="button" class="tool-image-btn" title="点击图片放大预览" aria-label="放大预览图片" @click="zoomImage">
+              <img class="tool-image" :src="imageSrc" alt="" loading="lazy" @error="(e) => ((e.currentTarget as HTMLImageElement).style.display = 'none')" />
+            </button>
           </div>
           <div v-if="outputLarge" class="tool-output-actions">
             <button class="tool-output-btn" @click="outputExpanded = !outputExpanded">{{ outputExpanded ? '收起' : '展开全文' }}</button>
             <button class="tool-output-btn" @click="copyOutput">复制</button>
           </div>
-          <div v-else class="tool-running-hint">执行中…</div>
+          <div v-else-if="status === 'running'" class="tool-running-hint">{{ progressText || '执行中…' }}</div>
         </div>
       </div>
     </div>
@@ -208,6 +267,27 @@ const imageSrc = computed(() => {
   color: var(--color-text);
   flex-shrink: 0;
 }
+.tool-pathlink {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  color: var(--color-accent);
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 45%;
+  flex-shrink: 1;
+  min-width: 0;
+  /* Keep the tail (file name) visible for long paths. */
+  direction: rtl;
+  text-align: left;
+}
+.tool-pathlink:hover {
+  text-decoration: underline;
+}
 .tool-params {
   font-family: var(--font-mono);
   font-size: var(--font-size-xs);
@@ -217,6 +297,19 @@ const imageSrc = computed(() => {
   white-space: nowrap;
   flex: 1;
   min-width: 0;
+}
+.tool-duration {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.7;
+  color: var(--color-text-faint);
+  background: var(--color-surface-sunken);
+  border-radius: 999px;
+  padding: 0 6px;
+}
+.tool-duration.live {
+  color: var(--color-accent);
 }
 .tool-chevron {
   color: var(--color-text-faint);
@@ -312,5 +405,13 @@ const imageSrc = computed(() => {
   object-fit: contain;
   border-radius: var(--radius-md);
   border: 1px solid var(--color-line);
+}
+.tool-image-btn {
+  display: block;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: zoom-in;
 }
 </style>

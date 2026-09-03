@@ -5,13 +5,20 @@ import { computed, ref, watch } from 'vue';
 import type { ToolMessage } from '../types';
 import { buildEditDiff, type DiffLine } from '../utils/diff';
 import { toolStatus } from '../utils/toolGroup';
+import { openFileInPanel } from '../utils/fileTabState';
+import { resolveWrittenPath } from '../utils/turnWrittenFiles';
+import { useToolDuration } from '../composables/useToolDuration';
 import DiffLines from './DiffLines.vue';
 
 const props = withDefaults(defineProps<{
   tool: ToolMessage;
   /** True while the owning turn is still streaming. */
   live?: boolean;
-}>(), { live: true });
+  /** Session working directory — resolves relative file paths before opening. */
+  workDir?: string;
+  /** Owning session id, for panel bookkeeping. */
+  sessionId?: string;
+}>(), { live: true, workDir: '', sessionId: '' });
 
 const status = computed(() => toolStatus(props.tool, props.live));
 
@@ -53,6 +60,27 @@ function toggle() {
 
 const diffLines = computed<DiffLine[]>(() => editDiff.value?.diff ?? []);
 const hasDiff = computed(() => diffLines.value.length > 0);
+
+/** Duration chip: recorded ms when finished, live seconds while running. */
+const durationText = useToolDuration(computed(() => props.tool), status, () => props.live);
+
+/** Open the edited file in the right panel, pre-set to diff mode. */
+function openFilePath(): void {
+  const p = filePath.value;
+  if (!p) return;
+  openFileInPanel(resolveWrittenPath(p, props.workDir || undefined), {
+    modeHint: 'diff',
+    sessionId: props.sessionId || null,
+  });
+}
+
+/** Latest streamed progress line (running tools only). */
+const progressText = computed(() => {
+  const p = props.tool.progress;
+  if (!p) return '';
+  const lines = p.split('\n').filter((l) => l.trim());
+  return lines[lines.length - 1]?.slice(0, 60) ?? '';
+});
 </script>
 
 <template>
@@ -62,8 +90,14 @@ const hasDiff = computed(() => diffLines.value.length > 0);
         <template v-if="statusIcon">{{ statusIcon }}</template>
       </span>
       <span class="tool-name">{{ tool.name }}</span>
-      <span v-if="filePath" class="tool-filepath" :title="filePath">{{ filePath }}</span>
+      <button
+        v-if="filePath"
+        class="tool-filepath"
+        :title="`在文件面板中打开（diff） ${filePath}`"
+        @click.stop="openFilePath"
+      >{{ filePath }}</button>
       <span v-if="chip" class="diff-chip">{{ chip }}</span>
+      <span v-if="durationText" class="tool-duration" :class="{ live: tool.durationMs === undefined }">{{ durationText }}</span>
       <span :class="['tool-chevron', { open: expanded }]">▸</span>
     </div>
 
@@ -72,7 +106,7 @@ const hasDiff = computed(() => diffLines.value.length > 0);
         <div class="tool-body">
           <DiffLines v-if="hasDiff" :lines="diffLines" />
           <pre v-if="tool.output !== undefined" class="tool-result"><code>{{ tool.output || '(无输出)' }}</code></pre>
-          <div v-else class="tool-running-hint">执行中…</div>
+          <div v-else class="tool-running-hint">{{ progressText || '执行中…' }}</div>
         </div>
       </div>
     </div>
@@ -141,6 +175,10 @@ const hasDiff = computed(() => diffLines.value.length > 0);
   font-family: var(--font-mono);
   font-size: var(--font-size-xs);
   color: var(--color-text-muted);
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -148,6 +186,11 @@ const hasDiff = computed(() => diffLines.value.length > 0);
   min-width: 0;
   direction: rtl;
   text-align: left;
+  transition: color var(--dur-fast) var(--ease-out);
+}
+.tool-filepath:hover {
+  color: var(--color-accent);
+  text-decoration: underline;
 }
 .diff-chip {
   flex-shrink: 0;
@@ -158,6 +201,19 @@ const hasDiff = computed(() => diffLines.value.length > 0);
   border: 1px solid var(--color-line);
   border-radius: var(--radius-full);
   padding: 1px var(--space-2);
+}
+.tool-duration {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.7;
+  color: var(--color-text-faint);
+  background: var(--color-surface-sunken);
+  border-radius: 999px;
+  padding: 0 6px;
+}
+.tool-duration.live {
+  color: var(--color-accent);
 }
 .tool-chevron {
   color: var(--color-text-faint);
