@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
+import { filePanel, toggleFilePanel } from '../utils/fileTabState';
 import SvgIcon from './ui/SvgIcon.vue';
 
 const props = withDefaults(
@@ -88,6 +89,15 @@ const statusText = computed(() => (props.busy ? '运行中' : '就绪'));
         @click="emit('toggle-drawer')"
       >
         <SvgIcon name="panel-right" :size="18" />
+      </button>
+      <button
+        class="ghost-btn"
+        :title="filePanel.panelOpen ? '收起文件面板' : '打开文件面板'"
+        :aria-label="filePanel.panelOpen ? '收起文件面板' : '打开文件面板'"
+        :class="{ active: filePanel.panelOpen }"
+        @click="toggleFilePanel"
+      >
+        <SvgIcon name="file" :size="18" />
       </button>
     </div>
   </header>

@@ -65,6 +65,7 @@ withDefaults(defineProps<{ name: string; size?: number }>(), { size: 20 });
     <template v-else-if="name === 'arrow-up'"><path d="M12 19V5m0 0-6 6m6-6 6 6" /></template>
     <template v-else-if="name === 'x'"><path d="M18 6 6 18M6 6l12 12" /></template>
     <template v-else-if="name === 'file'"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" /><path d="M14 2v6h6" /></template>
+    <template v-else-if="name === 'user'"><circle cx="12" cy="8" r="3.5" /><path d="M5 20a7 7 0 0 1 14 0" /></template>
   </svg>
 </template>
 

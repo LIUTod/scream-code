@@ -1,14 +1,25 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useScreamWebClient } from '../composables/useScreamWebClient';
 import { slashHelpText } from '../commands';
 import type { WorkspaceMode } from './ModeSwitch.vue';
 import type { ShellView } from './Sidebar.vue';
+import {
+  RIGHT_PANEL_MIN_WIDTH,
+  SPLIT_PANEL_MIN_WIDTH,
+  clampPanelWidth,
+  getDefaultRightPanelWidth,
+  getRightPanelMaxWidth,
+  getSidebarMaxWidth,
+} from '../utils/panelLayout';
+import { filePanel, setFilePanelOpen } from '../utils/fileTabState';
 import ConversationView from './ConversationView.vue';
+import FileViewer from './FileViewer.vue';
 import SettingsView from './SettingsView.vue';
 import Sidebar from './Sidebar.vue';
 import SkillsView from './SkillsView.vue';
 import SvgIcon from './ui/SvgIcon.vue';
+import TabBar from './TabBar.vue';
 import WorkspaceHome from './WorkspaceHome.vue';
 
 const client = useScreamWebClient();
@@ -196,7 +207,14 @@ function onResizePointerDown(e: PointerEvent) {
 
 function onResizePointerMove(e: PointerEvent) {
   if (!resizing.value || e.pointerId !== resizePointerId) return;
-  sidebarWidth.value = Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, Math.round(e.clientX)));
+  // Interlock: an open right panel shrinks the sidebar's headroom so the chat
+  // column keeps its minimum width (420px desktop / 320px compact).
+  const max = getSidebarMaxWidth({
+    viewportWidth: viewportWidth.value,
+    rightPanelOpen: filePanel.panelOpen,
+    rightPanelWidth: effectiveRightPanelWidth.value,
+  });
+  sidebarWidth.value = Math.min(max, Math.max(SIDEBAR_MIN, Math.round(e.clientX)));
 }
 
 function onResizePointerUp(e: PointerEvent) {
@@ -213,18 +231,24 @@ function resetSidebarWidth() {
 
 function onResizeKeydown(e: KeyboardEvent) {
   const step = e.shiftKey ? 32 : 12;
+  // Keyboard resize respects the same sidebar↔right-panel interlock.
+  const interlockedMax = getSidebarMaxWidth({
+    viewportWidth: viewportWidth.value,
+    rightPanelOpen: filePanel.panelOpen,
+    rightPanelWidth: effectiveRightPanelWidth.value,
+  });
   if (e.key === 'ArrowLeft') {
     e.preventDefault();
     sidebarWidth.value = Math.max(SIDEBAR_MIN, sidebarWidth.value - step);
   } else if (e.key === 'ArrowRight') {
     e.preventDefault();
-    sidebarWidth.value = Math.min(SIDEBAR_MAX, sidebarWidth.value + step);
+    sidebarWidth.value = Math.min(interlockedMax, sidebarWidth.value + step);
   } else if (e.key === 'Home') {
     e.preventDefault();
     sidebarWidth.value = SIDEBAR_MIN;
   } else if (e.key === 'End') {
     e.preventDefault();
-    sidebarWidth.value = SIDEBAR_MAX;
+    sidebarWidth.value = interlockedMax;
   } else if (e.key === 'Enter') {
     e.preventDefault();
     resetSidebarWidth();
@@ -233,6 +257,113 @@ function onResizeKeydown(e: KeyboardEvent) {
   }
   persistSidebarWidth();
 }
+
+/* ── Right file panel: width clamp interlocked with sidebar and viewport ──── */
+const RIGHT_PANEL_WIDTH_KEY = 'scream-right-panel-width';
+
+const viewportWidth = ref(window.innerWidth);
+const isSplitMode = computed(() => viewportWidth.value >= SPLIT_PANEL_MIN_WIDTH);
+
+function readStoredRightPanelWidth(): number | null {
+  try {
+    const raw = Number(localStorage.getItem(RIGHT_PANEL_WIDTH_KEY));
+    if (Number.isFinite(raw) && raw >= RIGHT_PANEL_MIN_WIDTH) return Math.round(raw);
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+const rightPanelWidth = ref(
+  readStoredRightPanelWidth() ?? getDefaultRightPanelWidth(window.innerWidth),
+);
+const rightResizing = ref(false);
+let rightResizePointerId: number | null = null;
+
+function clampRightPanel(width: number): number {
+  const max = getRightPanelMaxWidth({
+    viewportWidth: viewportWidth.value,
+    sidebarOpen: !sidebarCollapsed.value,
+    sidebarWidth: sidebarWidth.value,
+  });
+  return clampPanelWidth(width, RIGHT_PANEL_MIN_WIDTH, max);
+}
+
+function persistRightPanelWidth() {
+  try { localStorage.setItem(RIGHT_PANEL_WIDTH_KEY, String(rightPanelWidth.value)); } catch { /* ignore */ }
+}
+
+function onRightResizePointerDown(e: PointerEvent) {
+  e.preventDefault();
+  rightResizing.value = true;
+  rightResizePointerId = e.pointerId;
+  try {
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+  } catch {
+    /* ignore */
+  }
+}
+
+function onRightResizePointerMove(e: PointerEvent) {
+  if (!rightResizing.value || e.pointerId !== rightResizePointerId) return;
+  // The handle sits on the panel's LEFT edge: dragging left grows the panel.
+  rightPanelWidth.value = clampRightPanel(window.innerWidth - e.clientX);
+}
+
+function onRightResizePointerUp(e: PointerEvent) {
+  if (!rightResizing.value || e.pointerId !== rightResizePointerId) return;
+  rightResizing.value = false;
+  rightResizePointerId = null;
+  persistRightPanelWidth();
+}
+
+function resetRightPanelWidth() {
+  rightPanelWidth.value = clampRightPanel(getDefaultRightPanelWidth(viewportWidth.value));
+  persistRightPanelWidth();
+}
+
+function onRightResizeKeydown(e: KeyboardEvent) {
+  const step = e.shiftKey ? 32 : 12;
+  if (e.key === 'ArrowLeft') {
+    e.preventDefault();
+    rightPanelWidth.value = clampRightPanel(rightPanelWidth.value + step);
+  } else if (e.key === 'ArrowRight') {
+    e.preventDefault();
+    rightPanelWidth.value = clampRightPanel(rightPanelWidth.value - step);
+  } else if (e.key === 'Enter') {
+    e.preventDefault();
+    resetRightPanelWidth();
+  } else {
+    return;
+  }
+  persistRightPanelWidth();
+}
+
+function closeRightPanel() {
+  setFilePanelOpen(false);
+}
+
+function onWindowResize() {
+  viewportWidth.value = window.innerWidth;
+}
+
+// Crossing the 960px breakpoint mid-drag unmounts the handle (v-if), so the
+// pointerup never fires — release the drag state when the mode flips.
+watch(isSplitMode, () => {
+  if (rightResizing.value) {
+    rightResizing.value = false;
+    rightResizePointerId = null;
+    persistRightPanelWidth();
+  }
+});
+
+/** Effective panel width after the sidebar/viewport interlock. */
+const effectiveRightPanelWidth = computed(() => clampRightPanel(rightPanelWidth.value));
+
+const shellStyle = computed(() => ({
+  '--sidebar-width': `${sidebarWidth.value}px`,
+  '--right-panel-width': `${effectiveRightPanelWidth.value}px`,
+}));
 
 /** Workspace mode lives in the shell (and localStorage) rather than inside the
  *  home view, which unmounts when a conversation opens. */
@@ -273,17 +404,25 @@ function onGlobalKeydown(e: KeyboardEvent) {
 
 onMounted(() => {
   window.addEventListener('keydown', onGlobalKeydown);
+  window.addEventListener('resize', onWindowResize);
   void fetchLike();
   void fetchGitStatus();
 });
-onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKeydown));
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onGlobalKeydown);
+  window.removeEventListener('resize', onWindowResize);
+});
 </script>
 
 <template>
   <div
     class="shell"
-    :class="{ 'sidebar-collapsed': sidebarCollapsed, resizing }"
-    :style="{ '--sidebar-width': sidebarWidth + 'px' }"
+    :class="{
+      'sidebar-collapsed': sidebarCollapsed,
+      resizing: resizing || rightResizing,
+      'right-panel-open': filePanel.panelOpen && isSplitMode,
+    }"
+    :style="shellStyle"
   >
     <Sidebar
       ref="sidebarRef"
@@ -372,6 +511,48 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKeydown));
         <SettingsView v-else-if="view === 'settings'" :like="like" @update-like="client.updateLike" />
       </div>
     </main>
+
+    <!-- Right file panel: overlay drawer below the split breakpoint, third
+         grid column above it. Backdrop only exists in overlay mode. -->
+    <div
+      v-if="filePanel.panelOpen && !isSplitMode"
+      class="right-panel-backdrop"
+      aria-hidden="true"
+      @click="closeRightPanel"
+    />
+    <div
+      v-if="filePanel.panelOpen && isSplitMode"
+      class="right-resize-handle"
+      :class="{ resizing: rightResizing }"
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="调整文件面板宽度"
+      :aria-valuenow="effectiveRightPanelWidth"
+      tabindex="0"
+      title="拖拽调整宽度 · 双击复位"
+      @pointerdown="onRightResizePointerDown"
+      @pointermove="onRightResizePointerMove"
+      @pointerup="onRightResizePointerUp"
+      @pointercancel="onRightResizePointerUp"
+      @dblclick="resetRightPanelWidth"
+      @keydown="onRightResizeKeydown"
+    />
+    <aside
+      v-if="filePanel.panelOpen"
+      class="right-panel"
+      :class="{ overlay: !isSplitMode }"
+      aria-label="文件面板"
+    >
+      <div class="right-panel-head">
+        <TabBar />
+        <button class="right-panel-close" title="收起文件面板" aria-label="收起文件面板" @click="closeRightPanel">
+          <SvgIcon name="chevron-right" :size="16" />
+        </button>
+      </div>
+      <div class="right-panel-body">
+        <FileViewer :client="client" />
+      </div>
+    </aside>
   </div>
 </template>
 
@@ -391,6 +572,14 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKeydown));
 }
 .shell.sidebar-collapsed {
   grid-template-columns: var(--sidebar-width-collapsed) minmax(0, 1fr);
+}
+/* The `right-panel-open` class is only set in split mode (≥960px); below
+   that breakpoint the panel is a fixed overlay and the grid stays 2-col. */
+.shell.right-panel-open {
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr) var(--right-panel-width);
+}
+.shell.right-panel-open.sidebar-collapsed {
+  grid-template-columns: var(--sidebar-width-collapsed) minmax(0, 1fr) var(--right-panel-width);
 }
 /* While dragging, freeze every width transition so the handle tracks the
    pointer 1:1 instead of lagging behind it, and stop text selection. */
@@ -434,6 +623,119 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKeydown));
 }
 @media (prefers-reduced-motion: reduce) {
   .shell { transition: none; }
+}
+
+/* ── Right file panel: third grid column (split) or overlay drawer ───────── */
+.right-resize-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: calc(var(--right-panel-width) - 6px);
+  width: 12px;
+  cursor: col-resize;
+  touch-action: none;
+  z-index: calc(var(--z-dock) + 1);
+}
+.right-resize-handle::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 5px;
+  width: 2px;
+  border-radius: var(--radius-full);
+  background: transparent;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.right-resize-handle:hover::after,
+.right-resize-handle.resizing::after,
+.right-resize-handle:focus-visible::after {
+  background: var(--color-accent-bd);
+}
+.right-resize-handle:focus-visible {
+  outline: none;
+}
+@media (max-width: 959px) {
+  /* The handle is v-if-guarded to split mode; this guards against leftovers. */
+  .right-resize-handle { display: none; }
+}
+
+.right-panel {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  border-left: 1px solid var(--color-line);
+  background: var(--color-surface);
+}
+.right-panel-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  border-bottom: 1px solid var(--color-line);
+  flex-shrink: 0;
+}
+.right-panel-close {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  padding: 0;
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+.right-panel-close:hover {
+  background: var(--color-hover);
+  color: var(--color-text);
+}
+.right-panel-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.right-panel-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.42);
+  z-index: calc(var(--z-overlay) - 1);
+  animation: right-backdrop-in var(--dur-slow) var(--ease-out);
+}
+.right-panel.overlay {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  width: min(var(--right-panel-width), 92vw);
+  z-index: var(--z-overlay);
+  box-shadow: var(--shadow-xl);
+  animation: slide-in-right var(--dur-slower) var(--ease-spring);
+}
+@keyframes right-backdrop-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes slide-in-right {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+@media (max-width: 640px) {
+  .right-panel.overlay {
+    width: 100vw;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .right-panel.overlay,
+  .right-panel-backdrop { animation: none; }
 }
 
 .canvas {

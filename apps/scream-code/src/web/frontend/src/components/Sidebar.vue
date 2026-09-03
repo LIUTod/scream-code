@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import type { SessionListItem } from '../types';
+import { useSidebarState } from '../composables/useSidebarState';
 import SvgIcon from './ui/SvgIcon.vue';
 import logoUrl from '../assets/logo-v2.svg';
 
@@ -30,7 +31,10 @@ const emit = defineEmits<{
 
 /* ── Search filter (⌘K focuses this box) ─────────────────────────────────── */
 const searchRef = ref<HTMLInputElement | null>(null);
-const query = ref('');
+// Query + collapsed spaces live in module-level shared state: WebShell mounts
+// this component twice (desktop rail + mobile drawer) and both copies must
+// show the same list.
+const { query, collapsedSpaces, toggleSpace } = useSidebarState();
 
 function focusSearch(): void {
   searchRef.value?.focus();
@@ -47,8 +51,10 @@ const filteredSessions = computed(() => {
 
 /* ── Spaces: sessions grouped by workDir, collapsible ────────────────────── */
 interface SpaceGroup {
+  /** Stable group key — the full working directory, not the basename, so two
+      different paths with the same last segment never merge. */
+  key: string;
   name: string;
-  workDir: string;
   items: SessionListItem[];
 }
 
@@ -58,28 +64,18 @@ const spaces = computed<SpaceGroup[]>(() => {
     const dir = s.workDir || '默认空间';
     const parts = dir.split(/[\\/]/).filter(Boolean);
     const name = parts.length > 0 ? parts[parts.length - 1]! : dir;
-    const g = groups.get(name);
+    const g = groups.get(dir);
     if (g) g.items.push(s);
-    else groups.set(name, { name, workDir: dir, items: [s] });
+    else groups.set(dir, { key: dir, name, items: [s] });
   }
   // Current session's space first, then by recency.
   const currentDir = props.sessions.find((s) => s.sessionId === props.currentSessionId)?.workDir;
   return [...groups.values()].sort((a, b) => {
-    if (a.workDir === currentDir) return -1;
-    if (b.workDir === currentDir) return 1;
+    if (a.key === currentDir) return -1;
+    if (b.key === currentDir) return 1;
     return (b.items[0]?.createdAt ?? 0) - (a.items[0]?.createdAt ?? 0);
   });
 });
-
-/** Collapsed space names (all expanded by default). */
-const collapsedSpaces = ref<Set<string>>(new Set());
-
-function toggleSpace(name: string): void {
-  const next = new Set(collapsedSpaces.value);
-  if (next.has(name)) next.delete(name);
-  else next.add(name);
-  collapsedSpaces.value = next;
-}
 
 function onSessionClick(id: string): void {
   emit('switch-session', id);
@@ -145,7 +141,7 @@ function sessionTitle(s: SessionListItem): string {
     </label>
 
     <div class="spaces">
-      <div v-for="group in spaces" :key="group.name" class="space-group">
+      <div v-for="group in spaces" :key="group.key" class="space-group">
         <!-- Rail mode: one letter per space; clicking expands the rail and the
              sessions under that space appear again. -->
         <button
@@ -158,12 +154,12 @@ function sessionTitle(s: SessionListItem): string {
           {{ group.name.slice(0, 1).toUpperCase() }}
         </button>
         <template v-else>
-          <button class="space-head" :title="group.workDir" @click="toggleSpace(group.name)">
-            <SvgIcon :name="collapsedSpaces.has(group.name) ? 'chevron-right' : 'chevron-down'" :size="14" />
+          <button class="space-head" :title="group.key" @click="toggleSpace(group.key)">
+            <SvgIcon :name="collapsedSpaces.has(group.key) ? 'chevron-right' : 'chevron-down'" :size="14" />
             <span class="space-name">{{ group.name }}</span>
             <span class="space-count">{{ group.items.length }}</span>
           </button>
-          <div v-if="!collapsedSpaces.has(group.name)" class="space-sessions">
+          <div v-if="!collapsedSpaces.has(group.key)" class="space-sessions">
             <button
               v-for="s in group.items"
               :key="s.sessionId"
