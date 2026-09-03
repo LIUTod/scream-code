@@ -39,6 +39,7 @@ import {
 } from '../utils/goalTodoState';
 import { useToast } from './useToast';
 import { useThrottledFlush } from './useThrottledFlush';
+import { clearToolStarts, recordToolStart, takeToolStart } from '../utils/toolTiming';
 
 export type ConnectionStatus = 'connecting' | 'connected' | 'reconnecting' | 'disconnected' | 'idle';
 
@@ -208,7 +209,6 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
   let turnStartAt = 0;
   let turnFirstTokenAt: number | null = null;
   let activeToolMs = 0;
-  const activeToolStarts = new Map<string, number>();
 
   function wsUrl(): string {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -584,7 +584,9 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
     if (pendingToolProgress.size > 0) {
       for (const [toolCallId, output] of pendingToolProgress) {
         const tool = last.tools.find((t) => t.toolCallId === toolCallId);
-        if (tool) tool.output = output;
+        // Progress is LIVE-only state on tool.progress, so a running tool's
+        // progress frames can never contaminate the final tool.result output.
+        if (tool) tool.progress = output;
       }
       pendingToolProgress.clear();
     }
@@ -619,7 +621,7 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
         turnStartAt = Date.now();
         turnFirstTokenAt = null;
         activeToolMs = 0;
-        activeToolStarts.clear();
+        clearToolStarts();
         messages.value.push({
           id: generateId(),
           role: 'assistant',
@@ -658,24 +660,23 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
           last.tools.push({ toolCallId: String(payload.toolCallId), name: String(payload.name), args: payload.args });
           if (last.turnStats) last.turnStats.step += 1;
         }
-        activeToolStarts.set(String(payload.toolCallId), Date.now());
+        recordToolStart(String(payload.toolCallId));
         break;
       }
       case 'tool.result': {
         // Clear any buffered progress for this tool so a stale progress frame
         // cannot overwrite the authoritative result at the next flush.
         pendingToolProgress.delete(String(payload.toolCallId));
-        const startedAt = activeToolStarts.get(String(payload.toolCallId));
-        if (startedAt !== undefined) {
-          activeToolMs += Date.now() - startedAt;
-          activeToolStarts.delete(String(payload.toolCallId));
-        }
+        const startedAt = takeToolStart(String(payload.toolCallId));
+        if (startedAt !== undefined) activeToolMs += Date.now() - startedAt;
         const last = lastAssistantMessage();
         if (last) {
           const tool = last.tools.find((t) => t.toolCallId === payload.toolCallId);
           if (tool) {
             tool.output = String(payload.output);
             tool.isError = Boolean(payload.isError);
+            tool.progress = undefined;
+            if (startedAt !== undefined) tool.durationMs = Date.now() - startedAt;
           }
         }
         break;

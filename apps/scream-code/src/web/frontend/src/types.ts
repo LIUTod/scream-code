@@ -56,6 +56,10 @@ export interface ToolMessage {
   suspended?: boolean;
   /** Set when the thinking entry was truncated in a snapshot (full text on demand). */
   truncated?: boolean;
+  /** Wall-clock ms of this tool execution, measured client-side on tool.result. */
+  durationMs?: number;
+  /** Latest streamed tool.progress text; only meaningful while running. */
+  progress?: string;
 }
 
 export interface ApprovalRequest {

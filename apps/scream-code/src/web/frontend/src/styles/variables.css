@@ -29,6 +29,7 @@
   --color-danger-soft: rgba(207, 34, 46, 0.09);
   --color-info: #0969da;
   --color-info-soft: rgba(9, 105, 218, 0.09);
+  --color-lightbox-scrim: rgba(17, 17, 17, 0.72);
 
   /* Gradients & glow (kept quiet: monochrome ink, no chroma) */
   --gradient-accent: linear-gradient(135deg, #111111 0%, #2b2b2b 100%);
@@ -79,6 +80,7 @@
   --color-danger-soft: rgba(248, 81, 73, 0.13);
   --color-info: #58a6ff;
   --color-info-soft: rgba(88, 166, 255, 0.13);
+  --color-lightbox-scrim: rgba(4, 5, 6, 0.82);
 
   /* Gradients & glow: neutral silver-on-slate */
   --gradient-accent: linear-gradient(135deg, #f2f2ef 0%, #c9c9c4 100%);

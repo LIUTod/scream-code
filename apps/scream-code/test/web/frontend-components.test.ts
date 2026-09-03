@@ -43,12 +43,13 @@ describe('MessageList header grouping', () => {
 
   it('only the last message of a consecutive assistant run shows its timestamp', () => {
     const wrapper = mount(MessageList, { props: { messages } });
-    // The timestamp lives in the per-turn action row (bottom-right), not the
-    // model header, so a run of assistant turns carries exactly one of them.
-    const times = wrapper.findAll('.message-meta time.meta-time');
+    // Timestamps moved into the role header rows: the assistant one sits next
+    // to the model name, so a run of assistant turns carries exactly one.
+    const times = wrapper.findAll('.assistant-brand time.brand-time');
     expect(times.length).toBe(1);
-    // User messages always keep their timestamp (they break the run).
-    expect(wrapper.findAll('.user-meta .meta-time').length).toBe(1);
+    // User messages always keep their timestamp (they break the run) — now in
+    // the user header row.
+    expect(wrapper.findAll('.user-head .meta-time').length).toBe(1);
   });
 
   it('forces the timestamp back on after a >5 minute gap', () => {
@@ -57,7 +58,7 @@ describe('MessageList header grouping', () => {
       { ...messages[2]!, ts: 6 * 60 * 1000 },
     ];
     const wrapper = mount(MessageList, { props: { messages: spaced } });
-    expect(wrapper.findAll('.message-meta time.meta-time').length).toBe(2);
+    expect(wrapper.findAll('.assistant-brand time.brand-time').length).toBe(2);
   });
 });
 
