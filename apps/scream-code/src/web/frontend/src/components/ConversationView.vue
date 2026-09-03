@@ -172,6 +172,8 @@ function onFork(): void {
             :status="status"
             :session-id="sessionId"
             :models="models"
+            :work-dir="workDir || ''"
+            :messages="messages"
             @send="sendPrompt"
             @abort="abort"
             @command="onCommand"

@@ -1,8 +1,12 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import type { ModelInfo, SessionStatus } from '../types';
+import type { ChatMessage, ModelInfo, SessionStatus } from '../types';
 import { filterSlashCommands, resolveCommandName, type SlashCommand } from '../commands';
+import { useFileAtMention } from '../composables/useFileAtMention';
+import { deriveHistoryFromMessages, mergeInputHistory } from '../utils/inputHistory';
+import AtFileMenu from './AtFileMenu.vue';
 import ContextRing from './ContextRing.vue';
+import HistoryMenu from './HistoryMenu.vue';
 import ModelPicker from './ModelPicker.vue';
 import SlashMenu from './SlashMenu.vue';
 import SvgIcon from './ui/SvgIcon.vue';
@@ -13,11 +17,15 @@ const props = withDefaults(
     status?: SessionStatus;
     sessionId?: string | null;
     models?: ModelInfo[];
+    /** Session working directory — the scope for @ file mentions. */
+    workDir?: string;
     /** 'chat' shows model name + @ 提及; 'home' (workspace central card) shows 通用智能体 + 技能. */
     variant?: 'chat' | 'home';
     placeholder?: string;
+    /** Session journal — source for ↑ input history recall (chat view only). */
+    messages?: ChatMessage[];
   }>(),
-  { status: undefined, sessionId: null, models: () => [], variant: 'chat', placeholder: undefined },
+  { status: undefined, sessionId: null, models: () => [], workDir: '', variant: 'chat', placeholder: undefined },
 );
 
 const emit = defineEmits<{
@@ -30,6 +38,10 @@ const emit = defineEmits<{
 
 const text = ref('');
 const textareaRef = ref<HTMLTextAreaElement | null>(null);
+
+/* ── @ file mention menu (scoped to the session workDir via files REST) ──── */
+const workDirRef = computed(() => props.workDir || undefined);
+const atMention = useFileAtMention(text, textareaRef, workDirRef);
 
 /* ── Slash command menu ──────────────────────────────────────────────────── */
 const slashIndex = ref(0);
@@ -96,11 +108,18 @@ watch(
   },
 );
 
-/* ── History recall (↑↓, shell-style) ────────────────────────────────────── */
+/* ── Input history (↑ opens a menu over the textarea, newest entry first) ── */
 const HISTORY_LIMIT = 50;
-const history = ref<string[]>([]);
-const historyIndex = ref(-1);
-const historyStash = ref('');
+/** Timestamp of the last compositionend — guards Safari's confirmation Enter. */
+let lastCompositionEndAt = 0;
+/** Stored history per session: old→new (localStorage; covers commands/offline). */
+const storedHistory = ref<string[]>([]);
+/** Merged history shown in the menu: newest first, deduped, capped. */
+const history = computed(() =>
+  mergeInputHistory(storedHistory.value, deriveHistoryFromMessages(props.messages ?? []), HISTORY_LIMIT),
+);
+const historyMenuOpen = ref(false);
+const historyIndex = ref(0);
 
 function historyKey(): string {
   return `scream-history:${props.sessionId ?? 'default'}`;
@@ -109,60 +128,64 @@ function historyKey(): string {
 function loadHistory() {
   try {
     const raw = localStorage.getItem(historyKey());
-    history.value = raw ? (JSON.parse(raw) as string[]) : [];
+    storedHistory.value = raw ? (JSON.parse(raw) as string[]) : [];
   } catch {
-    history.value = [];
+    storedHistory.value = [];
   }
-  historyIndex.value = -1;
 }
 
 function pushHistory(entry: string) {
-  if (history.value.at(-1) !== entry) {
-    history.value = [...history.value, entry].slice(-HISTORY_LIMIT);
+  if (storedHistory.value.at(-1) !== entry) {
+    storedHistory.value = [...storedHistory.value, entry].slice(-HISTORY_LIMIT);
     try {
-      localStorage.setItem(historyKey(), JSON.stringify(history.value));
+      localStorage.setItem(historyKey(), JSON.stringify(storedHistory.value));
     } catch {
       // Storage full / unavailable — history is best-effort.
     }
   }
-  historyIndex.value = -1;
-  historyStash.value = '';
 }
 
-function recallHistory(direction: 1 | -1, e: KeyboardEvent) {
-  const el = textareaRef.value;
-  if (!el) return;
-  // Only hijack ↑ on the first line and ↓ on the last line.
-  const beforeCursor = el.value.slice(0, el.selectionStart ?? 0);
-  const afterCursor = el.value.slice(el.selectionEnd ?? 0);
-  if (direction === -1 && beforeCursor.includes('\n')) return;
-  if (direction === 1 && afterCursor.includes('\n')) return;
-
-  if (direction === -1) {
-    if (history.value.length === 0) return;
-    e.preventDefault();
-    if (historyIndex.value === -1) {
-      historyStash.value = text.value;
-      historyIndex.value = history.value.length - 1;
-    } else if (historyIndex.value > 0) {
-      historyIndex.value--;
-    }
-    text.value = history.value[historyIndex.value] ?? '';
-  } else {
-    if (historyIndex.value === -1) return;
-    e.preventDefault();
-    if (historyIndex.value < history.value.length - 1) {
-      historyIndex.value++;
-      text.value = history.value[historyIndex.value] ?? '';
-    } else {
-      historyIndex.value = -1;
-      text.value = historyStash.value;
-    }
-  }
+/** Fill the input from a history entry (Tab/Enter/click) and focus the end. */
+function applyHistoryInput(entry: string) {
+  text.value = entry;
+  historyMenuOpen.value = false;
   nextTick(() => {
-    el.selectionStart = el.selectionEnd = el.value.length;
+    const el = textareaRef.value;
+    if (!el) return;
+    el.focus();
+    el.setSelectionRange(el.value.length, el.value.length);
+    autoResize();
+    // A restored entry may end in an @token; caret moves after this must not
+    // resurrect the @ file menu from it.
+    atMention.reset();
   });
 }
+
+/** ↑ on an empty input: swap menus and start on the newest entry. */
+function openHistoryMenu() {
+  slashDismissed.value = true;
+  atMention.dismiss();
+  historyIndex.value = Math.max(0, history.value.length - 1);
+  historyMenuOpen.value = true;
+}
+
+function historyMove(delta: 1 | -1) {
+  const len = history.value.length;
+  if (len === 0) return;
+  historyIndex.value = Math.min(len - 1, Math.max(0, historyIndex.value + delta));
+}
+
+// The menu items derive from a live computed: journal updates (streamed turn,
+// older-page prepend, snapshot replace) can shrink the list and leave the
+// active index dangling — clamp instead of letting Tab/Enter silently no-op.
+watch(
+  () => history.value.length,
+  () => {
+    if (historyIndex.value >= history.value.length) {
+      historyIndex.value = Math.max(0, history.value.length - 1);
+    }
+  },
+);
 
 /* ── Draft persistence (per session) ─────────────────────────────────────── */
 function draftKey(): string {
@@ -173,6 +196,13 @@ let draftTimer: ReturnType<typeof setTimeout> | undefined;
 
 watch(text, () => {
   autoResize();
+  // Any input change closes the history menu (reference behavior): typing
+  // after ↑ must never let a later Enter overwrite the just-typed text with
+  // a history entry.
+  historyMenuOpen.value = false;
+  // Recompute the @ mention menu (caret-based; the textarea value already
+  // holds the new text at this point).
+  atMention.refresh();
   // Debounce draft persistence so keystrokes do not hit localStorage on every
   // input event.
   clearTimeout(draftTimer);
@@ -193,6 +223,10 @@ watch(
     // timer cannot persist the old text under the new session's key.
     clearTimeout(draftTimer);
     loadHistory();
+    // The history list belongs to the previous session; reset menu state so
+    // neither a stale open menu nor a dangling index crosses sessions.
+    historyMenuOpen.value = false;
+    historyIndex.value = 0;
     let draft = '';
     try {
       draft = localStorage.getItem(draftKey()) ?? '';
@@ -212,6 +246,14 @@ function autoResize() {
   el.style.height = 'auto';
   const max = Math.round(window.innerHeight * 0.25);
   el.style.height = `${Math.min(Math.max(el.scrollHeight, 36), max)}px`;
+}
+
+/**
+ * Re-derive the @ menu when the caret moves without a text change (clicks,
+ * arrow keys, Home/End), so it never latches onto a stale token position.
+ */
+function onCaretMove() {
+  atMention.refresh();
 }
 
 /* ── Mobile keyboard avoidance (visualViewport) ──────────────────────────── */
@@ -241,9 +283,29 @@ if ('visualViewport' in window) {
   });
 }
 
+/* ── Outside-click closes the history menu ───────────────────────────────── */
+// Clicking anywhere outside the menu and the input (e.g. the message list)
+// dismisses the menu. Without this, the menu would stay open after the
+// textarea blurs and Esc (which fires on the textarea) could no longer
+// reach it.
+function onDocumentMousedown(e: MouseEvent) {
+  if (!historyMenuOpen.value) return;
+  const target = e.target as Node | null;
+  if (!(target instanceof Element)) return;
+  if (target.closest('.history-menu') || target.closest('#composer-input')) return;
+  historyMenuOpen.value = false;
+}
+
+onMounted(() => document.addEventListener('mousedown', onDocumentMousedown));
+onBeforeUnmount(() => document.removeEventListener('mousedown', onDocumentMousedown));
+
 /* ── Send / queue / abort ────────────────────────────────────────────────── */
 function resetInput() {
   text.value = '';
+  // The text watcher refreshes from the pre-patch DOM value; clear mention
+  // state explicitly so the menu never flashes after a send.
+  atMention.reset();
+  historyMenuOpen.value = false;
   nextTick(() => {
     if (textareaRef.value) textareaRef.value.style.height = 'auto';
   });
@@ -274,11 +336,41 @@ function send() {
 function queueSteer() {
   const t = text.value.trim();
   if (!t) return;
+  // Record queued input in history too — an aborted/discarded queue must not
+  // make the text unrecoverable via ↑.
+  pushHistory(t);
   steerQueue.value = [...steerQueue.value, t];
   resetInput();
 }
 
 function onKeydown(e: KeyboardEvent) {
+  // The @ file menu claims navigation keys before the slash menu and before
+  // the send/EOL fallthroughs below.
+  if (atMention.visible.value) {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      atMention.move(1);
+      return;
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      atMention.move(-1);
+      return;
+    }
+    if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) {
+      if (e.isComposing) return;
+      // While the directory is still loading there is nothing to confirm, but
+      // the key must not fall through to send a half-typed @query.
+      e.preventDefault();
+      if (atMention.dirLoading.value) return;
+      if (atMention.confirm()) return;
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      atMention.dismiss();
+      return;
+    }
+  }
   if (slashVisible.value) {
     if (e.key === 'ArrowUp') {
       e.preventDefault();
@@ -304,17 +396,53 @@ function onKeydown(e: KeyboardEvent) {
   }
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
     e.preventDefault();
-    queueSteer();
+    // Queue-as-steer only makes sense while a turn is running; idle Ctrl+S
+    // would park the text in steerQueue with no busy-false edge to flush it.
+    if (props.busy) queueSteer();
+    else send();
     return;
   }
+
+  // History menu keyboard flow (menu open; claims nav keys before send).
+  if (historyMenuOpen.value && !e.isComposing) {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      historyMove(1);
+      return;
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      historyMove(-1);
+      return;
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      historyMenuOpen.value = false;
+      return;
+    }
+    if ((e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) && history.value[historyIndex.value] !== undefined) {
+      e.preventDefault();
+      applyHistoryInput(history.value[historyIndex.value]);
+      return;
+    }
+  }
+
   if (e.key === 'Enter' && !e.shiftKey) {
     if (e.isComposing) return;
+    // Safari fires the confirmation Enter keydown after compositionend
+    // (isComposing already false): swallow it so an unconverted pinyin
+    // string is never sent.
+    if (Date.now() - lastCompositionEndAt < 100) return;
     e.preventDefault();
     send();
     return;
   }
-  if (e.key === 'ArrowUp') recallHistory(-1, e);
-  else if (e.key === 'ArrowDown') recallHistory(1, e);
+  // ↑ with an empty input opens the history menu (no IME, not busy);
+  // otherwise ↑/↓ fall through to caret movement / menu navigation above.
+  if (e.key === 'ArrowUp' && !e.isComposing && !props.busy && text.value.trim().length === 0 && history.value.length > 0) {
+    e.preventDefault();
+    openHistoryMenu();
+  }
 }
 
 function abort() {
@@ -325,6 +453,7 @@ function abort() {
 /* ── Edit & resend entry point ───────────────────────────────────────────── */
 function insertText(content: string) {
   text.value = content;
+  historyMenuOpen.value = false;
   nextTick(() => {
     autoResize();
     textareaRef.value?.focus();
@@ -423,6 +552,22 @@ const permissionLabel = computed(() => {
       @select="pickSlashCommand"
       @hover="(i) => (slashIndex = i)"
     />
+    <AtFileMenu
+      v-if="atMention.visible.value"
+      :suggestions="atMention.suggestions.value"
+      :active-index="atMention.index.value"
+      :loading="atMention.dirLoading.value"
+      :work-dir="workDir"
+      @select="(entry) => atMention.confirm(entry)"
+      @hover="(i) => (atMention.index.value = i)"
+    />
+    <HistoryMenu
+      v-if="historyMenuOpen && history.length > 0"
+      :items="history"
+      :active-index="historyIndex"
+      @apply="applyHistoryInput"
+      @hover="(i) => (historyIndex = i)"
+    />
     <textarea
       ref="textareaRef"
       v-model="text"
@@ -432,6 +577,9 @@ const permissionLabel = computed(() => {
       rows="1"
       :placeholder="inputPlaceholder"
       @keydown="onKeydown"
+      @compositionend="lastCompositionEndAt = Date.now()"
+      @click="onCaretMove"
+      @keyup="onCaretMove"
     />
 
     <div class="composer-footer">
