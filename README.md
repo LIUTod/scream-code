@@ -139,7 +139,7 @@ Website: [scream.chat](https://scream.chat)
 
 ### Contributing
 
-Free and open — forks, feedback and pull requests are welcome. Scream is a lightweight agent foundation: maximize the model's own capability, don't over-constrain it with framework. Inspired by pi, pi-tui, gork, kimicli, Gemini, ohmypi, zero and others.
+Free and open — forks, feedback and pull requests are welcome. Scream is a lightweight agent foundation: maximize the model's own capability, don't over-constrain it with framework. Inspired by pi, pi-tui, gork, kimicli, Gemini, ohmypi, and others.
 
 ---
 
