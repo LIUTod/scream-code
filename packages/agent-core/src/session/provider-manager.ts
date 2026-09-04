@@ -254,6 +254,7 @@ function toLtodProviderConfig(
         type: 'google-genai',
         model,
         apiKey: providerApiKey(provider),
+        baseUrl: providerValue(provider.baseUrl, provider.env, 'GOOGLE_GENAI_BASE_URL'),
       };
     case 'openai_responses':
       return {

@@ -1469,6 +1469,34 @@ describe('GoogleGenAIChatProvider', () => {
       expect((caught as DOMException).name).toBe('AbortError');
     });
   });
+
+  describe('baseUrl passthrough', () => {
+    it('forwards a custom baseUrl into the client httpOptions', () => {
+      const provider = new GoogleGenAIChatProvider({
+        model: 'gemini-2.5-flash',
+        apiKey: 'test-key',
+        baseUrl: 'https://proxy.example.com',
+      });
+      const client = (provider as unknown as { _client: { httpOptions?: { baseUrl?: string } } })._client;
+      expect(client.httpOptions?.baseUrl).toBe('https://proxy.example.com');
+    });
+
+    it('omits httpOptions when no baseUrl is given', () => {
+      const provider = createProvider();
+      const client = (provider as unknown as { _client: { httpOptions?: unknown } })._client;
+      expect(client.httpOptions).toBeUndefined();
+    });
+
+    it('ignores an empty-string baseUrl', () => {
+      const provider = new GoogleGenAIChatProvider({
+        model: 'gemini-2.5-flash',
+        apiKey: 'test-key',
+        baseUrl: '',
+      });
+      const client = (provider as unknown as { _client: { httpOptions?: unknown } })._client;
+      expect(client.httpOptions).toBeUndefined();
+    });
+  });
 });
 
 describe('convertGoogleGenAIError (unit)', () => {

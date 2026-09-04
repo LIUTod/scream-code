@@ -178,13 +178,15 @@ async function handleDiyConfig(host: SlashCommandHost): Promise<void> {
   // Step 1 — wire type
   const wire = await promptWireType(host);
   if (wire === undefined) return;
+  const isGoogle = wire === 'google-genai';
 
-  // Step 2 — base URL
-  const baseUrl = await promptTextInput(host, t('auth.input_api_url'), {
-    subtitle: t('auth.api_url_hint'),
+  // Step 2 — base URL (required for every wire type)
+  const baseUrlInput = await promptTextInput(host, t('auth.input_api_url'), {
+    subtitle: isGoogle ? t('auth.api_url_hint_google') : t('auth.api_url_hint'),
   });
-  if (baseUrl === undefined) return;
-  if (!baseUrl.trim()) {
+  if (baseUrlInput === undefined) return;
+  const baseUrl = baseUrlInput.trim();
+  if (!baseUrl) {
     host.showError(t('auth.error_empty_base_url'));
     return;
   }
@@ -197,7 +199,7 @@ async function handleDiyConfig(host: SlashCommandHost): Promise<void> {
 
   // Step 4 — model ID
   const modelId = await promptTextInput(host, t('auth.input_model'), {
-    subtitle: t('auth.model_hint'),
+    subtitle: isGoogle ? t('auth.model_hint_google') : t('auth.model_hint'),
   });
   if (modelId === undefined) return;
   if (!modelId.trim()) {
@@ -207,8 +209,7 @@ async function handleDiyConfig(host: SlashCommandHost): Promise<void> {
 
   // Step 5 — max context tokens
   const maxContextStr = await promptTextInput(host, t('auth.input_context'), {
-    subtitle: t('auth.context_hint'),
-    placeholder: '131072',
+    subtitle: isGoogle ? t('auth.context_hint_google') : t('auth.context_hint'),
   });
   if (maxContextStr === undefined) return;
   const parsed = parseInt(maxContextStr, 10);
@@ -245,6 +246,8 @@ async function handleDiyConfig(host: SlashCommandHost): Promise<void> {
       thinking: thinkingLevel !== 'off',
       tool_use: true,
     },
+    // google-genai maps thinking levels via its own thinking_config; the
+    // reasoning-key convention only applies to anthropic.
     reasoningKey: wire === 'anthropic' ? 'thinking' : undefined,
     maxOutputSize: wire === 'anthropic' ? 32_000 : undefined,
   };
@@ -258,7 +261,7 @@ async function handleDiyConfig(host: SlashCommandHost): Promise<void> {
   const freshConfig = await host.harness.getConfig();
   applyCatalogProvider(freshConfig, {
     providerId,
-    wire: wire as 'openai' | 'openai_responses' | 'anthropic',
+    wire: wire as 'openai' | 'openai_responses' | 'anthropic' | 'google-genai',
     baseUrl,
     apiKey,
     models: [catalogModel],

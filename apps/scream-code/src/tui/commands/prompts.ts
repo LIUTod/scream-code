@@ -138,6 +138,7 @@ function getWireTypeOptions(): ChoiceOption[] {
     { value: 'openai', label: t('prompts.wire_openai'), description: t('prompts.wire_openai_desc') },
     { value: 'openai_responses', label: t('prompts.wire_openai_responses'), description: t('prompts.wire_openai_responses_desc') },
     { value: 'anthropic', label: t('prompts.wire_anthropic'), description: t('prompts.wire_anthropic_desc') },
+    { value: 'google-genai', label: t('prompts.wire_google_genai'), description: t('prompts.wire_google_genai_desc') },
   ];
 }
 function getThinkingOptions(): ChoiceOption[] {

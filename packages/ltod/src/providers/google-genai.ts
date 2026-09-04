@@ -80,6 +80,8 @@ export interface GoogleGenAIOptions {
   project?: string | undefined;
   location?: string | undefined;
   stream?: boolean | undefined;
+  /** Override the API base URL (e.g. a proxy or an on-premise gateway). */
+  baseUrl?: string | undefined;
   clientFactory?: (auth: ProviderRequestAuth) => GenAIClient;
 }
 
@@ -692,6 +694,7 @@ export class GoogleGenAIChatProvider implements ChatProvider {
   private _apiKey: string | undefined;
   private _project: string | undefined;
   private _location: string | undefined;
+  private _baseUrl: string | undefined;
   private _clientFactory: ((auth: ProviderRequestAuth) => GenAIClient) | undefined;
 
   constructor(options: GoogleGenAIOptions) {
@@ -704,6 +707,7 @@ export class GoogleGenAIChatProvider implements ChatProvider {
     this._apiKey = apiKey === undefined || apiKey.length === 0 ? undefined : apiKey;
     this._project = options.project;
     this._location = options.location;
+    this._baseUrl = options.baseUrl;
     this._clientFactory = options.clientFactory;
     this._client =
       this._vertexai || this._apiKey !== undefined ? this._buildClient(this._apiKey) : undefined;
@@ -716,6 +720,9 @@ export class GoogleGenAIChatProvider implements ChatProvider {
       // `httpOptions.retryOptions` is unset (apiCall fetches directly), so
       // retries are exclusively owned by the engine's retry layer here — unlike
       // the openai/anthropic SDKs, there is no built-in retry to disable.
+      ...(this._baseUrl !== undefined && this._baseUrl.length > 0
+        ? { httpOptions: { baseUrl: this._baseUrl } }
+        : {}),
       ...(this._vertexai
         ? {
             vertexai: true,
