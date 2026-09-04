@@ -14,7 +14,7 @@ export function deriveHistoryFromMessages(messages: ChatMessage[], limit = INPUT
   const out: string[] = [];
   for (let i = messages.length - 1; i >= 0 && out.length < limit; i -= 1) {
     const m = messages[i];
-    if (m.role !== 'user' || m.local) continue;
+    if (!m || m.role !== 'user' || m.local) continue;
     const text = (m.content ?? '').trim();
     if (!text || seen.has(text)) continue;
     seen.add(text);
@@ -42,7 +42,10 @@ export function mergeInputHistory(storedOldToNew: readonly string[], derivedNewT
     newestFirst.push(text);
   };
   for (const t of derivedNewToOld) push(t);
-  for (let i = storedOldToNew.length - 1; i >= 0; i -= 1) push(storedOldToNew[i]);
+  for (let i = storedOldToNew.length - 1; i >= 0; i -= 1) {
+    const raw = storedOldToNew[i];
+    if (raw !== undefined) push(raw);
+  }
   // newestFirst is newest→oldest; flip to chronological, keeping the newest.
   return newestFirst.slice(0, limit).toReversed();
 }

@@ -21,7 +21,7 @@ export interface WrittenFile {
 function readToolPath(args: unknown): string | null {
   if (!args || typeof args !== 'object') return null;
   const obj = args as Record<string, unknown>;
-  const value = obj.file_path ?? obj.path;
+  const value = obj['file_path'] ?? obj['path'];
   return typeof value === 'string' && value.length > 0 ? value : null;
 }
 

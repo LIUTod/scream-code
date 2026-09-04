@@ -7,5 +7,15 @@
     }
   },
   "include": ["src", "test", "../../packages/agent-core/src/prompt-modules.d.ts"],
-  "exclude": ["src/web/frontend", "test/web/frontend-components.test.ts", "test/web/markdown-security.test.ts"]
+  "exclude": [
+    "src/web/frontend",
+    "test/web/frontend-components.test.ts",
+    "test/web/markdown-security.test.ts",
+    "test/web/file-mention.test.ts",
+    "test/web/file-tab-state.test.ts",
+    "test/web/image-lightbox.test.ts",
+    "test/web/message-item-density.test.ts",
+    "test/web/message-list-dividers.test.ts",
+    "test/web/message-list-scroll.test.ts"
+  ]
 }

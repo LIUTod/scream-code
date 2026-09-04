@@ -146,7 +146,7 @@ function syncActive(): void {
     return;
   }
   if (!filePanel.tabs.some((tab) => tab.id === filePanel.activeTabId)) {
-    filePanel.activeTabId = filePanel.tabs.at(-1).id;
+    filePanel.activeTabId = filePanel.tabs.at(-1)?.id ?? null;
   }
 }
 
