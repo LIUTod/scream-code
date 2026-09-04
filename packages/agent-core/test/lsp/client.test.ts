@@ -4,6 +4,8 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { Jian, JianProcess } from '@scream-code/jian';
 
+import { LSP_OWNER_TOKEN_ENV } from '../../src/lsp/process-supervisor';
+import type { LspProcessSupervisor } from '../../src/lsp/process-supervisor';
 import { LspClient, pathToUri } from '../../src/lsp/client';
 
 describe('pathToUri', () => {
@@ -85,9 +87,18 @@ function createFakeProcess(responses: Map<number, unknown>): {
           const message = JSON.parse(body) as { id?: number; method: string; params?: unknown };
           if (message.id !== undefined) {
             sentMessages.push({ id: message.id, method: message.method, params: message.params });
-            const response = merged.get(message.id);
-            if (response !== undefined) {
-              emitResponse(message.id, response);
+            // Respond by METHOD for the standard handshake/teardown requests so
+            // a restarted client (fresh request ids) still gets its replies;
+            // anything else falls back to the per-id responses map.
+            if (message.method === 'initialize') {
+              emitResponse(message.id, { capabilities: {} });
+            } else if (message.method === 'shutdown') {
+              emitResponse(message.id, null);
+            } else {
+              const response = merged.get(message.id);
+              if (response !== undefined) {
+                emitResponse(message.id, response);
+              }
             }
           } else {
             sentMessages.push({ id: -1, method: message.method, params: message.params });
@@ -283,6 +294,67 @@ describe('LspClient message parsing', () => {
   });
 });
 
+describe('LspClient supervisor wiring', () => {
+  interface FakeSupervisor extends LspProcessSupervisor {
+    registered: { pid: number; workspaceRoot: string; fingerprint: string }[];
+    unregistered: number[];
+  }
+
+  function createFakeSupervisor(): FakeSupervisor {
+    const registered: { pid: number; workspaceRoot: string; fingerprint: string }[] = [];
+    const unregistered: number[] = [];
+    return {
+      ownerId: 'test-owner-1',
+      registered,
+      unregistered,
+      recoveryReady: Promise.resolve(),
+      register: (proc: JianProcess, workspaceRoot: string, fingerprint: string) => {
+        registered.push({ pid: proc.pid, workspaceRoot, fingerprint });
+      },
+      unregister: (pid: number) => {
+        unregistered.push(pid);
+      },
+    } as unknown as FakeSupervisor;
+  }
+
+  it('injects the owner token env and registers the spawned process', async () => {
+    const { process } = createFakeProcess(new Map([[1, { capabilities: {} }]]));
+    const jian = createFakeJian(process);
+    const execWithEnvSpy = vi.spyOn(jian, 'execWithEnv');
+    const supervisor = createFakeSupervisor();
+    const client = new LspClient(['server'], '/workspace', jian, undefined, supervisor);
+    await client.start();
+
+    expect(execWithEnvSpy).toHaveBeenCalledTimes(1);
+    expect(execWithEnvSpy).toHaveBeenCalledWith(['server'], {
+      [LSP_OWNER_TOKEN_ENV]: 'test-owner-1',
+    });
+    expect(supervisor.registered).toEqual([
+      { pid: 12345, workspaceRoot: '/workspace', fingerprint: 'server' },
+    ]);
+    await client.stop();
+  });
+
+  it('spawns without a supervisor via plain exec', async () => {
+    const { process } = createFakeProcess(new Map([[1, { capabilities: {} }]]));
+    const jian = createFakeJian(process);
+    const execSpy = vi.spyOn(jian, 'exec');
+    const client = new LspClient(['server'], '/workspace', jian);
+    await client.start();
+    expect(execSpy).toHaveBeenCalledTimes(1);
+    await client.stop();
+  });
+
+  it('unregisters the process on stop', async () => {
+    const { process } = createFakeProcess(new Map([[1, { capabilities: {} }]]));
+    const supervisor = createFakeSupervisor();
+    const client = new LspClient(['server'], '/workspace', createFakeJian(process), undefined, supervisor);
+    await client.start();
+    await client.stop();
+    expect(supervisor.unregistered).toEqual([12345]);
+  });
+});
+
 describe('LspClient.stop()', () => {
   it('resets started flag so the client can be restarted', async () => {
     const responses = new Map<number, unknown>([
@@ -352,5 +424,24 @@ describe('LspClient.stop()', () => {
     expect(
       (client as unknown as { openedDocuments: Set<string> }).openedDocuments.size,
     ).toBe(0);
+  });
+
+  it('a restarted client tears down its new process on a second stop', async () => {
+    // Regression: start() resets stopPromise so a stale stop from the first
+    // run cannot short-circuit (and leak) the restarted process, and the
+    // identity guard prevents an in-flight stop closure from clobbering the
+    // new process handle. The fake server responds by method, so both
+    // sessions' initialize/shutdown requests resolve.
+    const responses = new Map<number, unknown>([[1, { capabilities: {} }]]);
+    const { process } = createFakeProcess(responses);
+    const client = new LspClient(['server'], '/workspace', createFakeJian(process));
+    await client.start();
+    await client.stop();
+    // Restart on the same instance.
+    await client.start();
+    expect((client as unknown as { started: boolean }).started).toBe(true);
+    await client.stop();
+    expect((client as unknown as { process: unknown }).process).toBeUndefined();
+    expect((client as unknown as { started: boolean }).started).toBe(false);
   });
 });

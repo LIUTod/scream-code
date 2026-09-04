@@ -17,6 +17,7 @@ You should compose this file according to the actual project content. Do not mak
 Popular sections that people usually write in `AGENTS.md` are:
 
 - Project overview
+- Project map (module layout: main modules and their responsibilities, entry points, and how they connect — keep it concise so an agent can orient without re-exploring)
 - Build and test commands
 - Code style guidelines
 - Testing instructions

@@ -429,6 +429,7 @@ describe('SessionSubagentHost', () => {
       'Bash',
       'Glob',
       'Grep',
+      'LSP',
       'Read',
     ]);
     expect(child.llmCalls[0]?.history).toMatchObject([
@@ -468,6 +469,7 @@ describe('SessionSubagentHost', () => {
       'Edit',
       'Glob',
       'Grep',
+      'LSP',
       'Read',
       'Write',
     ]);

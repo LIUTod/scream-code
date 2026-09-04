@@ -1,5 +1,6 @@
 import { uniq } from '@antfu/utils';
 import type { ChatProvider, Tool } from '@scream-code/ltod';
+import type { Jian } from '@scream-code/jian';
 import picomatch from 'picomatch';
 
 import type { Agent } from '..';
@@ -368,6 +369,8 @@ export class ToolManager {
   protected readonly store: Partial<ToolStoreData> = {};
   private mcpToolStatusUnsubscribe: (() => void) | undefined;
   private lspRegistry: LspRegistry | undefined;
+  /** The jian instance the current registry was built for (reuse guard). */
+  private lspRegistryJian: Jian | undefined;
 
   constructor(protected readonly agent: Agent) {
     this.attachMcpTools();
@@ -984,7 +987,13 @@ export class ToolManager {
       },
       this.agent.skills?.registry.getSkillRoots() ?? [],
     );
-    this.lspRegistry = new LspRegistry(this.agent.jian);
+    // Reuse the existing registry when this agent's jian is unchanged: config
+    // refreshes / skills reloads call initializeBuiltinTools repeatedly, and
+    // rebuilding the registry here would orphan every live LSP server.
+    if (this.lspRegistry === undefined || this.lspRegistryJian !== jian) {
+      this.lspRegistry = new LspRegistry(jian, this.agent.lspSupervisor);
+      this.lspRegistryJian = jian;
+    }
     const allowBackground =
       this.enabledTools.has('TaskList') &&
       this.enabledTools.has('TaskOutput') &&
@@ -1093,6 +1102,19 @@ export class ToolManager {
         .filter((tool) => !!tool)
         .map((tool) => [tool.name, tool] as const),
     );
+  }
+
+  /**
+   * Stop every LSP server this agent started and forget the registry. Called
+   * from session close (and error paths); idempotent.
+   */
+  async disposeLsp(): Promise<void> {
+    const registry = this.lspRegistry;
+    this.lspRegistry = undefined;
+    this.lspRegistryJian = undefined;
+    if (registry !== undefined) {
+      await registry.stopAll();
+    }
   }
 
   private createVideoUploader(provider: ChatProvider): b.VideoUploader | undefined {

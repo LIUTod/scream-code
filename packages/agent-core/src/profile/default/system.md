@@ -38,6 +38,7 @@ You MUST use the specialized built-in tool instead of shell equivalents. The bui
 | `echo ... > file` or heredocs to create files | `Write` |
 | Looking up symbol definitions or references | `LSP` |
 | Renaming a symbol across files | `LSP` |
+| Finding a symbol by name across the workspace | `LSP` (`symbols`) |
 
 Only use `Bash` when the task genuinely requires a shell: running builds/tests, package managers, git operations, starting dev servers, or executing compiled programs.
 
@@ -253,11 +254,25 @@ When searching for information, prefer local sources before falling back to web 
 
 When working with code, use the `LSP` tool for IDE-level, read-only code intelligence:
 
+- `symbols` — search workspace symbols by (approximate) name; needs `query` only. Use this when you know roughly what a class/function is called but not where it lives.
 - `references` — find all usages of a symbol before renaming or refactoring.
 - `definition` — jump to where a symbol is defined.
 - `diagnostics` — see type errors and warnings for a file.
 
-Call `LSP` with the target file `path` and `operation`. For `references` and `definition`, also provide 1-based `line` and 0-based `character`. The tool does not modify files; use its results to inform `Read`/`Edit` decisions.
+Call `LSP` with the target file `path` and `operation`. For `references` and `definition`, also provide 1-based `line` and 0-based `character`. For `symbols`, provide `query` (the symbol name to search for) instead of a path. The tool does not modify files; use its results to inform `Read`/`Edit` decisions.
+
+## Codebase Retrieval Routing
+
+Choose the retrieval path by what you already know — do not default to repeated Grep probing:
+
+| You know this | Use |
+| --- | --- |
+| Exact word, quoted string, filename, path, or regex | `Grep` |
+| A symbol's approximate name (class, function) but not its location | `LSP` with `operation: 'symbols'` and `query` |
+| A concrete file and the symbol position in it | `LSP` `references`/`definition`, then `Read` |
+| Open-world knowledge, current events, external docs | `WebSearch` |
+
+When exploring a new codebase, prefer one structured reconnaissance pass (see the `explore` subagent) over many scattered single-file reads.
 
 # General Guidelines for Coding
 

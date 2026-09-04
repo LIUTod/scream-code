@@ -41,6 +41,7 @@ import {
 } from '../skill';
 import { SessionSubagentHost } from './subagent-host';
 import type { ToolServices } from '../tools/support/services';
+import type { LspProcessSupervisor } from '../lsp/process-supervisor';
 
 export interface SessionOptions {
   readonly jian: Jian;
@@ -59,6 +60,8 @@ export interface SessionOptions {
   readonly mcpConfig?: SessionMcpConfig;
   readonly pluginSessionStarts?: readonly EnabledPluginSessionStart[];
   readonly subagentModelBindings?: () => Record<string, string | undefined>;
+  /** Process supervisor tracking this session's LSP children (shared core-wide). */
+  readonly lspSupervisor?: LspProcessSupervisor | undefined;
 }
 
 export interface SessionSkillConfig {
@@ -97,6 +100,8 @@ export class Session {
   readonly log: Logger;
   private readonly logHandle: SessionLogHandle | undefined;
   readonly hookEngine: HookEngine;
+  /** Core-wide supervisor tracking this session's LSP children. */
+  readonly lspSupervisor: LspProcessSupervisor | undefined;
   private agentIdCounter = 0;
   private readonly skillsReady: Promise<void>;
   private readonly mcpReady: Promise<void>;
@@ -247,7 +252,21 @@ export class Session {
       await this.triggerSessionEnd('exit');
     } finally {
       try {
-        await this.mcp.shutdown();
+        // Stop every LSP server this session started (graceful shutdown
+        // protocol + SIGTERM/SIGKILL escalation) alongside the MCP shutdown.
+        // allSettled keeps both cleanups running even if one fails; the first
+        // rejection is then rethrown so close() still surfaces failures the
+        // way the pre-LSP code did with a bare `await mcp.shutdown()`.
+        const results = await Promise.allSettled([
+          ...Array.from(this.agents.values(), (agent) => agent.tools.disposeLsp()),
+          this.mcp.shutdown(),
+        ]);
+        const failed = results.find(
+          (result): result is PromiseRejectedResult => result.status === 'rejected',
+        );
+        if (failed !== undefined) {
+          throw failed.reason;
+        }
       } finally {
         await this.logHandle?.close();
       }
@@ -537,6 +556,7 @@ export class Session {
       config: this.options.config,
       homedir,
       screamHomeDir: this.options.screamHomeDir,
+      lspSupervisor: this.options.lspSupervisor,
       skills: this.skills,
       rpc: proxyWithExtraPayload(this.rpc, { agentId: id }),
       modelProvider: this.options.providerManager,

@@ -1,4 +1,7 @@
 import type { Jian, JianProcess } from '@scream-code/jian';
+import { spawnSync } from 'node:child_process';
+
+import { LSP_OWNER_TOKEN_ENV, type LspProcessSupervisor } from './process-supervisor';
 
 export interface LspLocation {
   readonly uri: string;
@@ -39,6 +42,14 @@ export interface LspWorkspaceEdit {
   readonly documentChanges?: LspDocumentChange[];
 }
 
+/** Result of `workspace/symbol`: one matched symbol with its location. */
+export interface LspSymbol {
+  readonly name: string;
+  readonly kind: number;
+  readonly location: LspLocation;
+  readonly containerName?: string;
+}
+
 interface JsonRpcMessage {
   readonly jsonrpc: '2.0';
   readonly id?: number;
@@ -50,6 +61,8 @@ interface JsonRpcMessage {
 
 const SEVERITY_LABELS = ['Error', 'Warning', 'Information', 'Hint'];
 const DEFAULT_REQUEST_TIMEOUT_MS = 120_000;
+/** Bounded grace for a graceful SIGTERM before SIGKILL escalation. */
+const STOP_GRACE_MS = 5_000;
 
 export class LspClient {
   private process: JianProcess | undefined;
@@ -69,95 +82,202 @@ export class LspClient {
   private bufferBytes = 0;
   private contentLength = -1;
   private started = false;
+  private stopRequested = false;
+  private stopPromise: Promise<void> | undefined;
 
   constructor(
     private readonly command: string[],
     private readonly workspaceRoot: string,
     private readonly jian: Jian,
     private readonly initializationOptions?: Record<string, unknown>,
+    private readonly supervisor?: LspProcessSupervisor,
   ) {}
 
   async start(): Promise<void> {
     if (this.started) return;
     this.started = true;
+    this.stopRequested = false;
+    // A previous stop() may have set a (resolved) stopPromise; a restarted
+    // client must not short-circuit its next stop() on that stale promise,
+    // or the fresh process would never be torn down.
+    this.stopPromise = undefined;
 
     if (this.command.length === 0) {
       throw new Error('LSP command is empty');
     }
 
-    try {
-      this.process = await this.jian.exec(...this.command);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      throw new Error(`Failed to start language server ${this.command[0]}: ${message}`, {
-        cause: error,
-      });
-    }
-
-    this.process.stdout.on('data', (chunk: Buffer) => {
+    const proc = await this.spawn();
+    this.process = proc;
+    proc.stdout.on('data', (chunk: Buffer) => {
       const text = chunk.toString('utf8');
       this.buffer += text;
       this.bufferBytes += Buffer.byteLength(text, 'utf8');
       this.processMessages();
     });
 
-    this.process.stderr.on('data', (chunk: Buffer) => {
+    proc.stderr.on('data', (chunk: Buffer) => {
       // Ignore stderr noise from language servers.
       void chunk;
     });
 
-    await this.request('initialize', {
-      processId: process.pid,
-      rootUri: pathToUri(this.workspaceRoot),
-      capabilities: {
-        textDocument: {
-          synchronization: { willSave: false, willSaveWaitUntil: false, didSave: false },
-          publishDiagnostics: {
-            relatedInformation: true,
-            versionSupport: false,
-            tagSupport: { valueSet: [1, 2] },
-            codeDescriptionSupport: true,
-            dataSupport: true,
+    // Register with the supervisor right after spawn so the exit hooks and
+    // owner record cover the whole handshake window. Natural exit releases
+    // the entry on its own. `command[0]` is safe: the empty-command guard ran
+    // before spawn.
+    if (this.supervisor !== undefined && proc.pid > 0) {
+      this.supervisor.register(proc, this.workspaceRoot, this.command[0]!);
+    }
+
+    if (this.stopRequested) {
+      // stop() raced the spawn — bail out and clean up instead of leaving a
+      // tracked, uninitialized server running.
+      try {
+        await proc.kill('SIGKILL');
+      } catch {
+        // Already gone.
+      }
+      this.supervisor?.unregister(proc.pid);
+      this.process = undefined;
+      throw new Error('LSP client stopped');
+    }
+
+    try {
+      await this.request('initialize', {
+        processId: process.pid,
+        rootUri: pathToUri(this.workspaceRoot),
+        capabilities: {
+          textDocument: {
+            synchronization: { willSave: false, willSaveWaitUntil: false, didSave: false },
+            publishDiagnostics: {
+              relatedInformation: true,
+              versionSupport: false,
+              tagSupport: { valueSet: [1, 2] },
+              codeDescriptionSupport: true,
+              dataSupport: true,
+            },
+            rename: { prepareSupport: false },
           },
-          rename: { prepareSupport: false },
         },
-      },
-      initializationOptions: this.initializationOptions,
-    });
+        initializationOptions: this.initializationOptions,
+      });
+    } catch (error) {
+      // Handshake failed — the server is unusable; kill it and release the
+      // ownership entry so nothing lingers after start() throws.
+      try {
+        await proc.kill('SIGKILL');
+      } catch {
+        // Already gone.
+      }
+      this.supervisor?.unregister(proc.pid);
+      this.process = undefined;
+      throw error;
+    }
     this.notify('initialized', {});
   }
 
-  async stop(): Promise<void> {
-    for (const { reject, timer } of this.pending.values()) {
-      clearTimeout(timer);
-      reject(new Error('LSP client stopped'));
+  /** Spawn the server, injecting the owner token when a supervisor is set. */
+  private async spawn(): Promise<JianProcess> {
+    try {
+      if (this.supervisor !== undefined) {
+        return await this.jian.execWithEnv(this.command, {
+          [LSP_OWNER_TOKEN_ENV]: this.supervisor.ownerId,
+        });
+      }
+      return await this.jian.exec(...this.command);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`Failed to start language server ${this.command[0]}: ${message}`, {
+        cause: error,
+      });
     }
-    this.pending.clear();
-    this.collectedDiagnostics.clear();
-    this.openedDocuments.clear();
-    this.documentVersion.clear();
-    this.started = false;
-    this.buffer = '';
-    this.bufferBytes = 0;
-    this.contentLength = -1;
+  }
 
-    if (this.process === undefined) return;
-    try {
-      await this.request('shutdown', {});
-    } catch {
-      // Server may have exited or be unresponsive; proceed to kill.
-    }
-    try {
-      this.notify('exit', {});
-    } catch {
-      // Ignore notification failures.
-    }
-    try {
-      await this.process.kill('SIGTERM');
-    } catch {
-      // Already exited or not killable.
-    }
+  async stop(): Promise<void> {
+    // Idempotent and single-flight: concurrent closers share one teardown.
+    this.stopRequested = true;
+    if (this.stopPromise !== undefined) return this.stopPromise;
+
+    this.stopPromise = (async () => {
+      for (const { reject, timer } of this.pending.values()) {
+        clearTimeout(timer);
+        reject(new Error('LSP client stopped'));
+      }
+      this.pending.clear();
+      this.collectedDiagnostics.clear();
+      this.openedDocuments.clear();
+      this.documentVersion.clear();
+      this.started = false;
+      this.buffer = '';
+      this.bufferBytes = 0;
+      this.contentLength = -1;
+
+      const proc = this.process;
+      if (proc === undefined) return;
+      try {
+        await this.request('shutdown', {});
+      } catch {
+        // Server may have exited or be unresponsive; proceed to kill.
+      }
+      try {
+        this.notify('exit', {});
+      } catch {
+        // Ignore notification failures.
+      }
+      try {
+        await proc.kill('SIGTERM');
+      } catch {
+        // Already exited or not killable.
+      }
+      // Bounded grace, then hard-kill the process group: a server that
+      // ignores SIGTERM must not keep running after close() returns.
+      try {
+        await Promise.race([proc.wait(), sleep(STOP_GRACE_MS)]);
+      } catch {
+        // Ignore wait failures.
+      }
+      if (proc.exitCode === null) {
+        try {
+          await proc.kill('SIGKILL');
+        } catch {
+          // Already exited.
+        }
+      }
+      // Clear AFTER the protocol phase — send() short-circuits on undefined
+      // and would silently drop the shutdown/exit messages above. Guard with
+      // identity so a stale stop closure (start() already restarted this
+      // client) cannot clobber the fresh process handle.
+      if (this.process === proc) {
+        this.process = undefined;
+      }
+      this.supervisor?.unregister(proc.pid);
+    })();
+    return this.stopPromise;
+  }
+
+  /** Synchronous group kill — used by exit-path hooks when async work is unsafe. */
+  killSync(): void {
+    const proc = this.process;
     this.process = undefined;
+    this.stopRequested = true;
+    if (proc === undefined || proc.pid <= 0) return;
+    if (process.platform === 'win32') {
+      try {
+        spawnSync('taskkill', ['/T', '/F', '/PID', String(proc.pid)], { stdio: 'ignore' });
+      } catch {
+        // Best effort only; nothing else to fall back to synchronously.
+      }
+      return;
+    }
+    try {
+      process.kill(-proc.pid, 'SIGKILL');
+    } catch {
+      try {
+        process.kill(proc.pid, 'SIGKILL');
+      } catch {
+        // Already gone.
+      }
+    }
+    this.supervisor?.unregister(proc.pid);
   }
 
   didOpen(path: string, content: string, languageId: string): void {
@@ -211,6 +331,37 @@ export class LspClient {
     return Array.isArray(result) ? result : [result];
   }
 
+  /**
+   * Search workspace symbols by (fuzzy) name via `workspace/symbol`. The
+   * query semantics are server-defined: prefix, fuzzy, or token match.
+   */
+  async workspaceSymbols(query: string, timeoutMs = 30_000): Promise<LspSymbol[]> {
+    interface RawSymbolInformation {
+      readonly name: string;
+      readonly kind: number;
+      readonly containerName?: string;
+      readonly location: LspLocation | { readonly uri: string };
+    }
+    const result = (await this.requestWithTimeout('workspace/symbol', { query }, timeoutMs)) as
+      | RawSymbolInformation[]
+      | null;
+    if (result === null) return [];
+    return result.map((symbol) => ({
+      name: symbol.name,
+      kind: symbol.kind,
+      containerName: symbol.containerName,
+      // `SymbolInformation.location` is a full Location per spec, but some
+      // servers answer with a bare uri; normalize so callers stay simple.
+      location:
+        'range' in symbol.location
+          ? symbol.location
+          : {
+              uri: symbol.location.uri,
+              range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } },
+            },
+    }));
+  }
+
   async rename(
     path: string,
     line: number,
@@ -223,6 +374,39 @@ export class LspClient {
       newName,
     })) as LspWorkspaceEdit | null;
     return result;
+  }
+
+  /**
+   * Cheap workspace/symbol probe used to detect whether the server has
+   * loaded a project. `workspace/symbol` servers commonly error with
+   * "No Project" until at least one file was opened and ingested; the probe
+   * distinguishes that state from a working (possibly empty) result.
+   *
+   * Uses a short dedicated timeout: before the project loads, tsserver may
+   * not reply at all, and waiting out the default 120s request timeout here
+   * would stall every caller for minutes.
+   */
+  async hasLoadedProject(query = 'index', timeoutMs = 2_000): Promise<boolean> {
+    try {
+      await this.requestWithTimeout('workspace/symbol', { query }, timeoutMs);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** `request` with a caller-provided timeout (default is the class-wide one). */
+  private requestWithTimeout(method: string, params: unknown, timeoutMs: number): Promise<unknown> {
+    const id = this.nextId++;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        reject(new Error(`LSP request '${method}' timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
+
+      this.pending.set(id, { resolve, reject, timer });
+      this.send({ id, method, params });
+    });
   }
 
   async diagnostics(path: string, timeoutMs = 5000): Promise<LspDiagnostic[]> {

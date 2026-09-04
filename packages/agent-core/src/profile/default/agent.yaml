@@ -12,6 +12,7 @@ tools:
   - Grep
   - Glob
   - Bash
+  - LSP
   - TaskList
   - TaskOutput
   - TaskStop

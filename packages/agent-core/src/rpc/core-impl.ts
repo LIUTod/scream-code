@@ -40,6 +40,7 @@ import {
   type FlagId,
 } from '../flags';
 import type { Logger } from '../logging/types';
+import { LspProcessSupervisor } from '../lsp/process-supervisor';
 import { resolveSessionMcpConfig, type SessionMcpConfig } from '../mcp';
 import type { McpServerConfig } from '../config/schema';
 import { Session, type SessionMeta, type SessionSkillConfig } from '../session';
@@ -216,6 +217,8 @@ export class ScreamCore implements PromisableMethods<CoreAPI> {
   private readonly skillDirs: readonly string[];
   private subagentModelBindings?: () => Record<string, string | undefined>;
   private readonly sessionStore: SessionStore;
+  /** Tracks/reaps LSP child processes for every session in this core. */
+  readonly lspSupervisor: LspProcessSupervisor;
   readonly plugins: PluginManager;
   /** Loads/activates code-entry plugins (manifest `entryPoint`). */
   readonly extensionRuntime = new ExtensionRuntime();
@@ -244,6 +247,12 @@ export class ScreamCore implements PromisableMethods<CoreAPI> {
     this.skillDirs = options.skillDirs ?? [];
     this.subagentModelBindings = options.subagentModelBindings;
     ensureScreamHome(this.homeDir);
+    // Reap stale LSP owners left by crashed hosts before any new session can
+    // start a server. The sweep is async (ps scans) and never blocks startup.
+    this.lspSupervisor = new LspProcessSupervisor({ screamHomeDir: this.homeDir });
+    void this.lspSupervisor.recoverStaleOwners().catch((error: unknown) => {
+      log.error('lsp owner recovery failed', error);
+    });
     this.config = loadRuntimeConfig(this.configPath);
     this.sessionStore = new SessionStore(this.homeDir);
     this.plugins = new PluginManager({ screamHomeDir: this.homeDir });
@@ -332,6 +341,7 @@ export class ScreamCore implements PromisableMethods<CoreAPI> {
       mcpConfig,
       pluginSessionStarts,
       subagentModelBindings: this.subagentModelBindings,
+      lspSupervisor: this.lspSupervisor,
     });
     try {
       session.metadata = {
@@ -428,6 +438,7 @@ export class ScreamCore implements PromisableMethods<CoreAPI> {
       initializeMainAgent: false,
       pluginSessionStarts,
       subagentModelBindings: this.subagentModelBindings,
+      lspSupervisor: this.lspSupervisor,
     });
     let warning: string | undefined;
     try {

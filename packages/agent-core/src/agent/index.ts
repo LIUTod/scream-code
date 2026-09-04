@@ -20,6 +20,7 @@ import { computeDelayMs, retryBackoffDelays } from '../loop/retry';
 
 import type { McpConnectionManager } from '../mcp';
 import type { PreparedSystemPromptContext, ResolvedAgentProfile } from '../profile';
+import type { LspProcessSupervisor } from '../lsp/process-supervisor';
 import type { ModelProvider } from '../session/provider-manager';
 import type { SessionSubagentHost } from '../session/subagent-host';
 import type { SkillRegistry } from '../skill';
@@ -97,6 +98,8 @@ export interface AgentOptions {
   readonly log?: Logger;
   readonly pluginSessionStarts?: readonly EnabledPluginSessionStart[];
   readonly resolveRuntimeSystemPrompt?: ((basePrompt: string) => string) | undefined;
+  /** Process supervisor tracking this agent's LSP children (session-scoped). */
+  readonly lspSupervisor?: LspProcessSupervisor | undefined;
 }
 
 /**
@@ -142,6 +145,8 @@ export class Agent {
   readonly subagentHost?: SessionSubagentHost;
   readonly mcp?: McpConnectionManager;
   readonly hooks?: HookEngine;
+  /** Process supervisor tracking this agent's LSP children (session-scoped). */
+  readonly lspSupervisor: LspProcessSupervisor | undefined;
   readonly log: Logger;
   /** In-process event bus for extensions running inside the agent process. */
   readonly eventBus: EventSubscriptionBus;
@@ -193,6 +198,7 @@ export class Agent {
     this.subagentHost = options.subagentHost;
     this.mcp = options.mcp;
     this.hooks = options.hookEngine;
+    this.lspSupervisor = options.lspSupervisor;
     this.eventBus = new EventSubscriptionBus();
     const embedCacheDir = options.screamHomeDir !== undefined
       ? join(options.screamHomeDir, 'cache', 'fastembed')

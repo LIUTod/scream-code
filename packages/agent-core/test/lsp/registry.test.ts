@@ -175,4 +175,35 @@ describe('LspRegistry', () => {
     await registry.getClient('/workspace/a.ts', '/workspace');
     await expect(registry.stopAll()).resolves.toBeUndefined();
   });
+
+  it('passes the supervisor through to created clients', async () => {
+    const proc = createFakeProcess();
+    const jian = createFakeJian(proc);
+    const registered: unknown[] = [];
+    const unregistered: number[] = [];
+    const supervisor = {
+      ownerId: 'reg-owner',
+      register: (...args: unknown[]) => {
+        registered.push(args);
+      },
+      unregister: (pid: number) => {
+        unregistered.push(pid);
+      },
+    } as unknown as import('../../src/lsp/process-supervisor').LspProcessSupervisor;
+    const registry = new LspRegistry(jian, supervisor);
+    await registry.getClient('/workspace/a.ts', '/workspace');
+    expect(registered).toHaveLength(1);
+    expect(registered[0]).toEqual([proc, '/workspace', 'typescript-language-server']);
+    await registry.stopAll();
+    expect(unregistered).toContain(12345);
+  });
+
+  it('short-circuits getClient after stopAll (stopping flag)', async () => {
+    const jian = createFakeJian(createFakeProcess());
+    const registry = new LspRegistry(jian);
+    await registry.getClient('/workspace/a.ts', '/workspace');
+    await registry.stopAll();
+    const again = await registry.getClient('/workspace/a.ts', '/workspace');
+    expect(again).toBeUndefined();
+  });
 });
