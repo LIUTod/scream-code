@@ -8,6 +8,7 @@ import ConversationHeader from './ConversationHeader.vue';
 import InfoPanel from './InfoPanel.vue';
 import MessageList from './MessageList.vue';
 import SessionDrawer from './SessionDrawer.vue';
+import SessionStatsPanel from './SessionStatsPanel.vue';
 
 const props = defineProps<{ client: UseScreamWebClientReturn }>();
 
@@ -36,8 +37,17 @@ const {
 
 const composerRef = ref<InstanceType<typeof Composer> | null>(null);
 const drawerOpen = ref(false);
+const statsOpen = ref(false);
 const infoVisible = ref(false);
 const infoMode = ref<'status' | 'usage'>('status');
+
+/** Current-turn token total from WS-pushed usage (status.usage.currentTurn). */
+const turnTokens = computed(() => {
+  const t = status.value.usage?.currentTurn;
+  if (!t) return null;
+  const n = t.inputOther + t.output + t.inputCacheRead + t.inputCacheCreation;
+  return n > 0 ? n : null;
+});
 
 const currentTitle = computed(() => {
   const s = props.client.sessions.value.find((x) => x.sessionId === props.client.currentSessionId.value);
@@ -138,12 +148,26 @@ function onFork(): void {
       :title="currentTitle"
       :busy="isBusy"
       :drawer-open="drawerOpen"
+      :stats-open="statsOpen"
+      :turn-tokens="turnTokens"
       @home="emit('home')"
       @rename="onRename"
       @export="sessionId && exportSession(sessionId)"
       @clear="clearMessages"
       @toggle-drawer="drawerOpen = !drawerOpen"
+      @toggle-stats="statsOpen = !statsOpen"
     />
+
+    <!-- Stats dropdown: anchored to the header's right edge; becomes a bottom
+         sheet on small screens (see .stats-anchor media query). -->
+    <div v-if="statsOpen" class="stats-anchor">
+      <SessionStatsPanel
+        :status="status"
+        :fetch-usage="props.client.fetchSessionUsage"
+        :fetch-context="props.client.fetchSessionContext"
+        @close="statsOpen = false"
+      />
+    </div>
 
     <div class="chat-stage">
       <div class="chat-column">
@@ -212,6 +236,33 @@ function onFork(): void {
   display: flex;
   flex-direction: column;
   background: transparent;
+}
+/* Stats dropdown floats below the header's right edge; z-dock keeps it above
+   the message column without covering the mobile top bar. */
+.stats-anchor {
+  position: absolute;
+  top: calc(56px + var(--space-2));
+  right: var(--space-4);
+  z-index: var(--z-dock);
+}
+@media (max-width: 640px) {
+  .stats-anchor {
+    top: auto;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    display: flex;
+    justify-content: stretch;
+    z-index: var(--z-overlay);
+  }
+  .stats-anchor :deep(.stats-panel) {
+    width: 100%;
+    max-width: none;
+    max-height: 70vh;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    border-bottom: none;
+    box-shadow: var(--shadow-xl);
+  }
 }
 .chat-stage {
   flex: 1;

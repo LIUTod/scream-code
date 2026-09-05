@@ -160,7 +160,11 @@ async function copyContent() {
 </script>
 
 <template>
-  <article :class="['message', message.role, { error: message.isError }]">
+  <article
+    :class="['message', message.role, { error: message.isError }]"
+    :data-message-id="message.id"
+    :data-message-role="message.role"
+  >
     <div v-if="isUser" class="user-wrap">
       <div class="user-head">
         <span v-if="timestamp" class="meta-time">{{ timestamp }}</span>

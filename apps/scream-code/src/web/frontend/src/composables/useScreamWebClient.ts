@@ -203,6 +203,55 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
   let pendingPromptAccepted = false;
   let disposed = false;
   const sentMessageIds = new Map<string, { messageId: string; connectionGeneration: number }>();
+  /** G5.4: prompts queued while offline; flushed after a successful hello. */
+  const OFFLINE_KEY = 'scream-offline-prompt-queue';
+  let offlineQueue: string[] = [];
+  try {
+    const raw = localStorage.getItem(OFFLINE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as unknown;
+      if (Array.isArray(parsed)) offlineQueue = parsed.filter((x): x is string => typeof x === 'string');
+    }
+  } catch {
+    offlineQueue = [];
+  }
+  function persistQueue(): void {
+    try {
+      localStorage.setItem(OFFLINE_KEY, JSON.stringify(offlineQueue.slice(0, 20)));
+    } catch {
+      // best effort
+    }
+  }
+  /** Serialized offline flush (G5.4): sends the head item and waits for the
+   *  server echo (user_message with our clientMessageId) before sending the
+   *  next. The server marks the session busy on the first prompt, so sending
+   *  back-to-back would reject every item after the first. */
+  function flushQueue(): void {
+    if (offlineQueue.length === 0) return;
+    const text = offlineQueue[0]!;
+    const clientMessageId = `client_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const localMessageId = generateId();
+    sentMessageIds.set(clientMessageId, { messageId: localMessageId, connectionGeneration });
+    promptGeneration++;
+    pendingPromptAccepted = false;
+    promptPending.value = true;
+    messages.value.push({
+      id: localMessageId,
+      role: 'user',
+      content: text,
+      clientMessageId,
+      tools: [],
+      ts: Date.now(),
+    });
+    recordRecentPrompt(text);
+    send({ type: 'prompt', text, clientMessageId });
+  }
+  /** Drop the head item (server echoed it back) and try the next one. */
+  function flushQueueNext(): void {
+    if (offlineQueue.length > 0) offlineQueue.shift();
+    persistQueue();
+    flushQueue();
+  }
 
   // ── Per-turn runtime stats ───────────────────────────────────────────────
   let turnNumber = 0;
@@ -422,6 +471,12 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
         if (resumeEpoch !== 0 && resumeEpoch !== hello.epoch) seq = 0;
         setConnectionStatus('connected');
         reconnectAttempt = 0;
+        // G5.4: flush prompts queued while offline, oldest first. Send them
+        // ONE AT A TIME: the server marks the session busy synchronously on
+        // the first prompt, so back-to-back sends would be rejected and the
+        // queue was already emptied. Each item is only removed after the
+        // server echoes it back via user_message; a rejection re-queues it.
+        flushQueue();
         // Only activate archived sessions; skip if already active to avoid extra reconnect.
         if (!hello.active) {
           void activateSession(hello.sessionId).then((active) => {
@@ -456,6 +511,9 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
         liveGeneration++;
         if (msg.clientMessageId && sentMessageIds.has(msg.clientMessageId)) {
           pendingPromptAccepted = true;
+          // G5.4: the offline flush sent this; the server echoed it back, so
+          // drop the head item and try the next queued prompt.
+          flushQueueNext();
           break;
         }
         messages.value.push({
@@ -536,6 +594,12 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
             const local = messages.value.find((m) => m.id === pendingEntry.messageId);
             if (local) local.isError = true;
             showToast(`消息未发送：${msg.message}`, 'error');
+            // G5.4: if this was the head of the offline queue, drop it so a
+            // later reconnect does not re-send (and duplicate) the same text.
+            if (offlineQueue.length > 0) {
+              offlineQueue.shift();
+              persistQueue();
+            }
           }
         }
         break;
@@ -848,16 +912,22 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
   }
 
   function sendPrompt(text: string): void {
-    if (!text || isBusy.value) return;
+    if (!text) return;
     if (connectionStatus.value === 'idle') {
       showToast('暂无会话，请先新建会话。', 'warning');
       return;
     }
     if (connectionStatus.value !== 'connected') {
-      showToast('连接已断开，正在尝试重连...', 'error');
+      // G5.4: queue the prompt instead of dropping it, then reconnect. This
+      // runs BEFORE the isBusy guard so a prompt typed mid-disconnect is
+      // never silently discarded.
+      offlineQueue.push(text);
+      persistQueue();
+      showToast('连接已断开，消息已排队，重连后自动发送。', 'warning');
       connect();
       return;
     }
+    if (isBusy.value) return;
     const clientMessageId = `client_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     const localMessageId = generateId();
     sentMessageIds.set(clientMessageId, { messageId: localMessageId, connectionGeneration });
@@ -865,7 +935,31 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
     pendingPromptAccepted = false;
     promptPending.value = true;
     messages.value.push({ id: localMessageId, role: 'user', content: text, clientMessageId, tools: [], ts: Date.now() });
+    recordRecentPrompt(text);
     send({ type: 'prompt', text, clientMessageId });
+  }
+
+  /** G5.5: keep the last few user prompts for the empty-state shortcut chips. */
+  const RECENT_KEY = 'scream-recent-prompts';
+  let recentPrompts: string[] = [];
+  try {
+    const raw = localStorage.getItem(RECENT_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as unknown;
+      if (Array.isArray(parsed)) recentPrompts = parsed.filter((x): x is string => typeof x === 'string');
+    }
+  } catch {
+    recentPrompts = [];
+  }
+  function recordRecentPrompt(text: string): void {
+    const t = text.trim();
+    if (!t) return;
+    recentPrompts = [t, ...recentPrompts.filter((x) => x !== t)].slice(0, 8);
+    try {
+      localStorage.setItem(RECENT_KEY, JSON.stringify(recentPrompts));
+    } catch {
+      // best effort
+    }
   }
 
   function abort(): void {

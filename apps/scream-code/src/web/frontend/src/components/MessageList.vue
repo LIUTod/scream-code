@@ -3,6 +3,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import type { ChatMessage } from '../types';
 import MessageItem from './MessageItem.vue';
 import EmptyState from './EmptyState.vue';
+import ChatMinimap from './ChatMinimap.vue';
 import { formatDayDivider, isSameLocalDay } from '../utils/timeFormat';
 import SvgIcon from './ui/SvgIcon.vue';
 
@@ -359,6 +360,7 @@ watch(topSentinelRef, (el) => {
         </div>
       </div>
     </div>
+    <ChatMinimap :messages="messages" :host="listRef" />
     <Transition name="scroll-btn">
       <button
         v-if="showScrollButton"

@@ -8,8 +8,11 @@ const props = withDefaults(
     title: string | null;
     busy: boolean;
     drawerOpen: boolean;
+    statsOpen: boolean;
+    /** Current-turn token total; shown inside the stats button when > 0. */
+    turnTokens: number | null;
   }>(),
-  { title: null, busy: false, drawerOpen: false },
+  { title: null, busy: false, drawerOpen: false, statsOpen: false, turnTokens: null },
 );
 
 const emit = defineEmits<{
@@ -18,7 +21,15 @@ const emit = defineEmits<{
   (e: 'export'): void;
   (e: 'clear'): void;
   (e: 'toggle-drawer'): void;
+  (e: 'toggle-stats'): void;
 }>();
+
+function fmtTokens(n: number | null): string {
+  if (n === null || n <= 0) return '';
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+  return String(n);
+}
 
 const editing = ref(false);
 const draft = ref('');
@@ -91,6 +102,18 @@ const statusText = computed(() => (props.busy ? '运行中' : '就绪'));
         <SvgIcon name="panel-right" :size="18" />
       </button>
       <button
+        class="ghost-btn stats-btn"
+        :class="{ active: statsOpen }"
+        :title="statsOpen ? '收起会话统计' : '会话统计'"
+        :aria-label="statsOpen ? '收起会话统计' : '会话统计'"
+        :aria-expanded="statsOpen"
+        @pointerdown.stop
+        @click="emit('toggle-stats')"
+      >
+        <SvgIcon name="bar-chart" :size="18" />
+        <span v-if="fmtTokens(turnTokens)" class="stats-token mono">{{ fmtTokens(turnTokens) }}</span>
+      </button>
+      <button
         class="ghost-btn"
         :title="filePanel.panelOpen ? '收起文件面板' : '打开文件面板'"
         :aria-label="filePanel.panelOpen ? '收起文件面板' : '打开文件面板'"
@@ -144,6 +167,19 @@ const statusText = computed(() => (props.busy ? '运行中' : '就绪'));
 .ghost-btn.active {
   color: var(--color-accent);
   background: var(--color-accent-soft);
+}
+.stats-btn {
+  width: auto;
+  min-width: 36px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 var(--space-2);
+}
+.stats-token {
+  font-size: 11px;
+  color: inherit;
+  font-variant-numeric: tabular-nums;
 }
 
 .status-dot {
@@ -207,6 +243,10 @@ const statusText = computed(() => (props.busy ? '运行中' : '就绪'));
   .ghost-btn {
     width: 44px;
     height: 44px;
+  }
+  .stats-btn {
+    width: auto;
+    min-width: 44px;
   }
   .title-btn {
     max-width: 40vw;

@@ -12,7 +12,8 @@ import {
   getRightPanelMaxWidth,
   getSidebarMaxWidth,
 } from '../utils/panelLayout';
-import { filePanel, setFilePanelOpen } from '../utils/fileTabState';
+import { filePanel, openFileInPanel, setFilePanelOpen } from '../utils/fileTabState';
+import { useToast } from '../composables/useToast';
 import ConversationView from './ConversationView.vue';
 import FileViewer from './FileViewer.vue';
 import SettingsView from './SettingsView.vue';
@@ -23,12 +24,15 @@ import TabBar from './TabBar.vue';
 import WorkspaceHome from './WorkspaceHome.vue';
 
 const client = useScreamWebClient();
+const { showToast } = useToast();
 const {
   connectionStatus,
   status,
   isBusy,
   sessions,
   currentSessionId,
+  workDir,
+  gitStatus,
   models,
   like,
   sendPrompt,
@@ -116,6 +120,22 @@ function onSwitchSession(id: string) {
   mobileSidebarOpen.value = false;
   view.value = 'chat';
   switchSession(id);
+}
+
+/** Sidebar file tree → open the file in the right panel. */
+function onOpenFile(path: string) {
+  openFileInPanel(path);
+}
+
+/** Inline rename in the sidebar → /title command (G5.2).
+ *  /title targets the currently active WS session, so renaming a session that
+ *  is not active would silently rename the wrong one. Refuse with a hint. */
+function onRenameSession(id: string, title: string) {
+  if (id !== currentSessionId.value) {
+    showToast('请先点击该会话，再双击重命名。', 'warning');
+    return;
+  }
+  void sendCommand('title', title);
 }
 
 function onCommand(name: string, args?: string) {
@@ -429,12 +449,17 @@ onBeforeUnmount(() => {
       :view="view"
       :sessions="sessions"
       :current-session-id="currentSessionId"
+      :work-dir="workDir"
+      :git-status="gitStatus"
+      :refresh-git="fetchGitStatus"
       :collapsed="sidebarCollapsed"
       @navigate="onNavigate"
       @switch-session="onSwitchSession"
       @delete-session="deleteSession"
       @create-session="onCreateSession"
       @toggle-collapse="toggleSidebarCollapse"
+      @open-file="onOpenFile"
+      @rename-session="onRenameSession"
     />
 
     <div
@@ -463,11 +488,16 @@ onBeforeUnmount(() => {
         :view="view"
         :sessions="sessions"
         :current-session-id="currentSessionId"
+        :work-dir="workDir"
+        :git-status="gitStatus"
+        :refresh-git="fetchGitStatus"
         :show-collapse-toggle="false"
         @navigate="onNavigate"
         @switch-session="onSwitchSession"
         @delete-session="deleteSession"
         @create-session="onCreateSession"
+        @open-file="onOpenFile"
+        @rename-session="onRenameSession"
       />
     </div>
 
@@ -508,7 +538,12 @@ onBeforeUnmount(() => {
           @home="view = 'home'"
         />
         <SkillsView v-else-if="view === 'skills'" @create="onCreateSession" />
-        <SettingsView v-else-if="view === 'settings'" :like="like" @update-like="client.updateLike" />
+        <SettingsView
+          v-else-if="view === 'settings'"
+          :like="like"
+          :client="client"
+          @update-like="client.updateLike"
+        />
       </div>
     </main>
 

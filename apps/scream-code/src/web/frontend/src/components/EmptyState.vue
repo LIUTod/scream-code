@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { onMounted, ref } from 'vue';
 import SvgIcon from './ui/SvgIcon.vue';
 
 withDefaults(
@@ -20,6 +21,21 @@ const SUGGESTIONS = [
   { icon: 'clipboard', title: '解释这段代码', prompt: '解释这段代码' },
   { icon: 'activity', title: '调试这个问题', prompt: '调试这个问题' },
 ];
+
+/** G5.5: recent prompts recorded by the client (localStorage key must match). */
+const RECENT_KEY = 'scream-recent-prompts';
+const recentPrompts = ref<string[]>([]);
+onMounted(() => {
+  try {
+    const raw = localStorage.getItem(RECENT_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as unknown;
+      if (Array.isArray(parsed)) recentPrompts.value = parsed.filter((x): x is string => typeof x === 'string').slice(0, 4);
+    }
+  } catch {
+    recentPrompts.value = [];
+  }
+});
 
 function fmtContext(usage: number | null | undefined): string {
   if (usage === null || usage === undefined) return '—';
@@ -47,6 +63,21 @@ function fmtContext(usage: number | null | undefined): string {
         <span class="suggestion-icon"><SvgIcon :name="s.icon" :size="22" /></span>
         <span class="suggestion-title">{{ s.title }}</span>
       </button>
+    </div>
+
+    <div v-if="recentPrompts.length > 0" class="recent" aria-label="最近输入">
+      <span class="recent-label">最近</span>
+      <div class="recent-chips">
+        <button
+          v-for="(p, i) in recentPrompts"
+          :key="`${i}-${p}`"
+          class="recent-chip"
+          :title="p"
+          @click="emit('pick', p)"
+        >
+          {{ p }}
+        </button>
+      </div>
     </div>
 
     <div v-if="workDir" class="empty-workdir" :title="workDir">
@@ -177,9 +208,50 @@ function fmtContext(usage: number | null | undefined): string {
   border: 1px solid var(--color-line);
   border-radius: var(--radius-full);
   background: var(--color-surface);
-  box-shadow: var(--shadow-xs);
+  max-width: 100%;
+}
+.recent {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+  max-width: 100%;
+}
+.recent-label {
   font-size: var(--font-size-xs);
-  max-width: 80%;
+  color: var(--color-text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.recent-chips {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--space-2);
+  max-width: 560px;
+}
+.recent-chip {
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 4px 12px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-full);
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+  transition:
+    border-color var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out);
+}
+.recent-chip:hover {
+  border-color: var(--color-accent-bd);
+  color: var(--color-text);
+  background: var(--color-hover);
 }
 .workdir-label {
   color: var(--color-text-faint);

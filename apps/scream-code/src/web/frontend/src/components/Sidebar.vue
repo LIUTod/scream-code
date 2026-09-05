@@ -1,24 +1,39 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
-import type { SessionListItem } from '../types';
+import { computed, nextTick, ref } from 'vue';
+import type { GitStatus, SessionListItem } from '../types';
 import { useSidebarState } from '../composables/useSidebarState';
+import { useFileTreeState } from '../composables/useFileTreeState';
+import FileTree from './FileTree.vue';
 import SvgIcon from './ui/SvgIcon.vue';
 import logoUrl from '../assets/logo-v2.svg';
 
 export type ShellView = 'home' | 'chat' | 'skills' | 'settings';
+export type SidebarSection = 'sessions' | 'files';
 
 const props = withDefaults(
   defineProps<{
     view: ShellView;
     sessions: SessionListItem[];
     currentSessionId?: string | null;
+    /** Workdir of the current session — the file tree roots here. */
+    workDir?: string | null;
+    gitStatus?: GitStatus | null;
+    /** Refreshes git status when the file tree's refresh button is hit. */
+    refreshGit?: () => void;
     /** Desktop rail mode: 288px full sidebar collapses to a 64px icon strip. */
     collapsed?: boolean;
     /** The mobile overlay is already a drawer; its toggle would only flip a
         desktop-only grid track, so the button is hidden there. */
     showCollapseToggle?: boolean;
   }>(),
-  { currentSessionId: null, collapsed: false, showCollapseToggle: true },
+  {
+    currentSessionId: null,
+    workDir: null,
+    gitStatus: null,
+    refreshGit: undefined,
+    collapsed: false,
+    showCollapseToggle: true,
+  },
 );
 
 const emit = defineEmits<{
@@ -27,14 +42,16 @@ const emit = defineEmits<{
   (e: 'delete-session', id: string): void;
   (e: 'create-session'): void;
   (e: 'toggle-collapse'): void;
+  (e: 'open-file', path: string): void;
+  (e: 'rename-session', id: string, title: string): void;
 }>();
 
 /* ── Search filter (⌘K focuses this box) ─────────────────────────────────── */
 const searchRef = ref<HTMLInputElement | null>(null);
-// Query + collapsed spaces live in module-level shared state: WebShell mounts
-// this component twice (desktop rail + mobile drawer) and both copies must
-// show the same list.
-const { query, collapsedSpaces, toggleSpace } = useSidebarState();
+// Query + collapsed spaces + active section live in module-level shared state:
+// WebShell mounts this component twice (desktop rail + mobile drawer) and both
+// copies must show the same list.
+const { query, collapsedSpaces, section, toggleSpace } = useSidebarState();
 
 function focusSearch(): void {
   searchRef.value?.focus();
@@ -87,6 +104,37 @@ function confirmDelete(id: string, title: string): void {
   }
 }
 
+function onOpenFile(path: string): void {
+  emit('open-file', path);
+}
+
+/* ── Inline session rename (G5.2) ──────────────────────────────────────── */
+const renameInputRef = ref<HTMLInputElement | null>(null);
+const renamingId = ref<string | null>(null);
+const renameDraft = ref('');
+
+function startRename(s: SessionListItem): void {
+  renamingId.value = s.sessionId;
+  renameDraft.value = sessionTitle(s);
+  nextTick(() => {
+    renameInputRef.value?.focus();
+    renameInputRef.value?.select();
+  });
+}
+function cancelRename(): void {
+  renamingId.value = null;
+  renameDraft.value = '';
+}
+function commitRename(id: string): void {
+  const draft = renameDraft.value.trim();
+  renamingId.value = null;
+  renameDraft.value = '';
+  if (!draft) return;
+  const s = props.sessions.find((x) => x.sessionId === id);
+  if (!s || draft === sessionTitle(s)) return;
+  emit('rename-session', id, draft);
+}
+
 function relativeTime(ts: number): string {
   if (!ts) return '';
   const diff = Date.now() - ts;
@@ -128,19 +176,55 @@ function sessionTitle(s: SessionListItem): string {
       <span v-if="!collapsed">新建对话</span>
     </button>
 
-    <label v-if="!collapsed" class="side-search">
-      <SvgIcon name="search" :size="15" />
-      <input
-        ref="searchRef"
-        v-model="query"
-        type="text"
-        placeholder="搜索会话… (⌘K)"
-        aria-label="搜索会话"
-        spellcheck="false"
-      />
-    </label>
+    <!-- Section switch: session list vs file tree (expanded mode only; the
+         collapsed rail keeps the session dots, no tree chrome). -->
+    <div v-if="!collapsed" class="section-switch" role="tablist" aria-label="侧栏分区">
+      <button
+        class="section-tab"
+        :class="{ active: section === 'sessions' }"
+        role="tab"
+        :aria-selected="section === 'sessions'"
+        @click="section = 'sessions'"
+      >
+        <SvgIcon name="message-circle" :size="13" />
+        <span>会话</span>
+      </button>
+      <button
+        class="section-tab"
+        :class="{ active: section === 'files' }"
+        role="tab"
+        :aria-selected="section === 'files'"
+        @click="section = 'files'"
+      >
+        <SvgIcon name="folder" :size="13" />
+        <span>文件</span>
+      </button>
+    </div>
 
-    <div class="spaces">
+    <!-- Files section: the file tree replaces search + spaces. -->
+    <FileTree
+      v-if="!collapsed && section === 'files'"
+      :work-dir="workDir"
+      :git-status="gitStatus"
+      :refresh-git="refreshGit"
+      @open-file="onOpenFile"
+    />
+
+    <!-- Sessions section. The collapsed rail has no section switch, so it must
+         always show the space dots — the `collapsed ||` guard keeps that. -->
+    <template v-if="collapsed || section === 'sessions'">
+      <label v-if="!collapsed" class="side-search">
+        <SvgIcon name="search" :size="15" />
+        <input
+          ref="searchRef"
+          v-model="query"
+          type="text"
+          placeholder="搜索会话… (⌘K)"
+          aria-label="搜索会话"
+          spellcheck="false"
+        />
+      </label>
+      <div class="spaces">
       <div v-for="group in spaces" :key="group.key" class="space-group">
         <!-- Rail mode: one letter per space; clicking expands the rail and the
              sessions under that space appear again. -->
@@ -160,35 +244,55 @@ function sessionTitle(s: SessionListItem): string {
             <span class="space-count">{{ group.items.length }}</span>
           </button>
           <div v-if="!collapsedSpaces.has(group.key)" class="space-sessions">
-            <button
+            <div
               v-for="s in group.items"
               :key="s.sessionId"
-              class="session-item"
-              :class="{ active: s.sessionId === currentSessionId }"
-              :title="sessionTitle(s)"
-              @click="onSessionClick(s.sessionId)"
+              class="session-item-wrap"
             >
-              <span v-if="s.active" class="session-run" aria-hidden="true" />
-              <span class="session-text">
-                <span class="session-title">{{ sessionTitle(s) }}</span>
-                <span class="session-meta">
-                  <span>{{ relativeTime(s.createdAt) }}</span>
-                  <span class="meta-sep" aria-hidden="true">·</span>
-                  <span>{{ s.messageCount }} 条</span>
-                </span>
-              </span>
-              <span
-                class="session-delete"
-                role="button"
-                tabindex="0"
-                :title="`删除会话 ${sessionTitle(s)}`"
-                aria-label="删除会话"
-                @click.stop="confirmDelete(s.sessionId, sessionTitle(s))"
-                @keydown.enter.stop.prevent="confirmDelete(s.sessionId, sessionTitle(s))"
+              <button
+                class="session-item"
+                :class="{ active: s.sessionId === currentSessionId }"
+                :title="sessionTitle(s)"
+                @click="onSessionClick(s.sessionId)"
+                @dblclick="startRename(s)"
               >
-                <SvgIcon name="trash" :size="14" />
-              </span>
-            </button>
+                <span v-if="s.active" class="session-run" aria-hidden="true" />
+                <span class="session-text">
+                  <span v-if="renamingId === s.sessionId" class="session-rename">
+                    <input
+                      ref="renameInputRef"
+                      v-model="renameDraft"
+                      class="rename-input"
+                      spellcheck="false"
+                      :aria-label="`重命名会话 ${sessionTitle(s)}`"
+                      @click.stop
+                      @keydown.enter.prevent="commitRename(s.sessionId)"
+                      @keydown.esc.prevent="cancelRename()"
+                      @blur="commitRename(s.sessionId)"
+                    />
+                  </span>
+                  <template v-else>
+                    <span class="session-title">{{ sessionTitle(s) }}</span>
+                    <span class="session-meta">
+                      <span>{{ relativeTime(s.createdAt) }}</span>
+                      <span class="meta-sep" aria-hidden="true">·</span>
+                      <span>{{ s.messageCount }} 条</span>
+                    </span>
+                  </template>
+                </span>
+                <span
+                  class="session-delete"
+                  role="button"
+                  tabindex="0"
+                  :title="`删除会话 ${sessionTitle(s)}`"
+                  aria-label="删除会话"
+                  @click.stop="confirmDelete(s.sessionId, sessionTitle(s))"
+                  @keydown.enter.stop.prevent="confirmDelete(s.sessionId, sessionTitle(s))"
+                >
+                  <SvgIcon name="trash" :size="14" />
+                </span>
+              </button>
+            </div>
           </div>
         </template>
       </div>
@@ -196,6 +300,7 @@ function sessionTitle(s: SessionListItem): string {
         {{ query ? '没有匹配的会话' : '还没有会话，点击上方「新建对话」开始' }}
       </p>
     </div>
+    </template>
 
     <nav class="sidebar-foot" aria-label="功能区">
       <button
@@ -409,6 +514,45 @@ function sessionTitle(s: SessionListItem): string {
   color: var(--color-text-faint);
 }
 
+/* ── Section switch (sessions | files) ──────────────────────────────────── */
+.section-switch {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  border: 1px solid var(--color-line);
+  flex-shrink: 0;
+}
+.section-tab {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  flex: 1;
+  min-height: 26px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+.section-tab:hover {
+  background: var(--color-hover);
+  color: var(--color-text);
+}
+.section-tab.active {
+  background: var(--color-selected);
+  color: var(--color-text);
+  font-weight: 600;
+}
+
 /* ── Spaces (collapsible groups owning their sessions) ───────────────────── */
 .spaces {
   flex: 1;
@@ -541,6 +685,28 @@ function sessionTitle(s: SessionListItem): string {
   border: 1px solid var(--color-line);
   color: var(--color-text-muted);
   cursor: pointer;
+}
+
+/* Inline rename input (G5.2) */
+.session-item-wrap {
+  position: relative;
+}
+.session-rename {
+  display: block;
+  width: 100%;
+}
+.rename-input {
+  width: 100%;
+  height: 28px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--color-accent-bd);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-raised);
+  color: var(--color-text);
+  font-size: var(--font-size-xs);
+  font-family: inherit;
+  outline: none;
+  box-shadow: var(--glow-focus);
 }
 .session-item:hover .session-delete,
 .session-delete:focus-visible {

@@ -17,22 +17,7 @@ import {
   filterFileEntries,
   type FileEntryLite,
 } from '../utils/fileFuzzy';
-
-const API = '/api/v1/files';
-const DIR_TTL_MS = 30_000;
-
-interface DirRecord {
-  entries: FileEntryLite[];
-  at: number;
-}
-
-interface ServerFileEntry {
-  name: string;
-  path: string;
-  type: 'file' | 'dir';
-  size: number;
-  mtime: number;
-}
+import { fetchDirEntries } from '../utils/fileDirCache';
 
 /** Collapse "." / ".." segments against an absolute base; null on escape. */
 function resolveDirRel(workDir: string, dirRel: string): string | null {
@@ -58,7 +43,6 @@ export function useFileAtMention(
   textareaRef: Ref<HTMLTextAreaElement | null>,
   workDir: Ref<string | undefined>,
 ) {
-  const dirCache = new Map<string, DirRecord>();
   const activeDir = ref<string | null>(null);
   const dirEntries = ref<FileEntryLite[]>([]);
   const dirLoading = ref(false);
@@ -78,7 +62,7 @@ export function useFileAtMention(
     if (rootPromise) return;
     rootPromise = (async () => {
       try {
-        const res = await fetch(`${API}/root`);
+        const res = await fetch('/api/v1/files/root');
         const data = res.ok ? ((await res.json()) as { roots?: string[] }) : {};
         rootFallback.value = data.roots?.[0] ?? '';
       } catch {
@@ -118,25 +102,16 @@ export function useFileAtMention(
     // Bump the generation even on a cache hit, so an in-flight request for a
     // previous directory can never overwrite this state when it resolves.
     const gen = ++loadGen;
-    const cached = dirCache.get(abs);
-    if (cached && Date.now() - cached.at < DIR_TTL_MS) {
-      dirEntries.value = cached.entries;
-      dirMissing.value = false;
-      return;
-    }
     dirLoading.value = true;
     try {
-      const res = await fetch(`${API}/list?path=${encodeURIComponent(abs)}`);
-      if (!res.ok) throw new Error(String(res.status));
-      const data = (await res.json()) as { entries: ServerFileEntry[] };
+      const entries = await fetchDirEntries(abs);
+      if (entries === null) throw new Error('listing failed');
       if (gen !== loadGen) return; // a newer dir request won the race
       const prefix = relForPath ? `${relForPath.replace(/\/+$/, '')}/` : '';
-      const entries: FileEntryLite[] = data.entries.map((e) => ({
+      dirEntries.value = entries.map((e) => ({
         path: `${prefix}${e.name}`,
         isDir: e.type === 'dir',
       }));
-      dirCache.set(abs, { entries, at: Date.now() });
-      dirEntries.value = entries;
       dirMissing.value = false;
     } catch {
       if (gen !== loadGen) return;

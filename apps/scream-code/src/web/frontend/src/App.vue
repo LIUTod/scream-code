@@ -28,17 +28,45 @@ function applyTheme() {
 let themeTimer: number | null = null;
 
 function setTheme(t: Theme) {
+  const prev = theme.value;
   theme.value = t;
   try {
     localStorage.setItem('scream-theme', t);
   } catch {
     // Storage can be unavailable in restricted/private browsing contexts.
   }
+  if (prev === t) return;
   const root = document.documentElement;
-  root.classList.add('theme-transition');
-  applyTheme();
-  if (themeTimer !== null) clearTimeout(themeTimer);
-  themeTimer = window.setTimeout(() => root.classList.remove('theme-transition'), 320);
+  const prefersReduced =
+    typeof window.matchMedia === 'function' &&
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // G5.3: circular wipe via the View Transition API when available and motion
+  // is allowed; otherwise fall back to the CSS class cross-fade below.
+  const apply = () => {
+    root.classList.add('theme-transition');
+    applyTheme();
+    if (themeTimer !== null) clearTimeout(themeTimer);
+    themeTimer = window.setTimeout(() => root.classList.remove('theme-transition'), 320);
+  };
+  const doc = document as Document & {
+    startViewTransition?: (cb: () => void) => { finished: Promise<void> };
+  };
+  if (typeof doc.startViewTransition === 'function' && !prefersReduced) {
+    const transition = doc.startViewTransition(() => {
+      applyTheme();
+    });
+    // The finished promise rejects when a newer transition supersedes this
+    // one (rapid theme toggling); swallow it and still clear the CSS class.
+    void transition.finished.then(
+      () => root.classList.remove('theme-transition'),
+      () => {
+        root.classList.remove('theme-transition');
+      },
+    );
+    return;
+  }
+  apply();
 }
 provide('setTheme', setTheme);
 
