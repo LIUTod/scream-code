@@ -37,6 +37,30 @@ Usage notes:
 - When the task continues earlier work a subagent already did, prefer resuming that agent (pass its `resume` id) over spawning a fresh instance — the resumed agent keeps its prior context.
 - A subagent's result is only visible to you, not to the user. When the user needs to see what a subagent produced, summarize the relevant parts yourself in your own reply.
 
+## Structured output
+
+When you need a machine-readable result (not a free-form summary), pass `output_schema` with a JSON Schema string. The subagent is instructed to reply with a single JSON object matching the schema; if the reply parses, it is surfaced as a `[structured]` block in the tool output. Use `output_token_hint` to keep structured replies compact (e.g. 1024 for a schema-shaped answer).
+
+Example:
+```
+Agent(prompt="Extract the test commands from this project", output_schema='{"type":"object","properties":{"commands":{"type":"array","items":{"type":"string"}}}}')
+```
+
+## Capability constraints
+
+By default a subagent gets its profile's full tool set. Pass `capability_mode` to restrict it at the tool level (not just by prompting):
+
+- `read-only` — inspection, search, web/memory lookups, and reporting only. No file writes, no command execution, no spawning further agents.
+- `read-write` — additionally file/memory writes. No command execution, no spawning.
+- `execute` — additionally command execution (bash, python). Still no spawning of further agents.
+- `all` — full profile tool set (default).
+
+Restricted modes also remove `Agent` and `SendSubagentMessage`, so a constrained subagent cannot spawn an unconstrained grandchild to bypass the filter.
+
+## Steering running subagents
+
+Use `SendSubagentMessage` to send a directed message to a subagent you own while it is still running: `steer` for a priority redirection, `queue` for context that applies next turn. The message is injected at the subagent's next turn boundary; only the owning parent may message a subagent.
+
 When NOT to use Agent: skip delegation for trivial one-step work (e.g. reading a known file). Almost everything else is a candidate for delegation.
 
 Once a subagent is running, leave that scope to it: do not redo its searches or reads in parallel, and do not abandon it midway and finish the job manually. Both undo the context savings the delegation was meant to buy.

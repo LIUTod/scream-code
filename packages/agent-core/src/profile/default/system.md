@@ -107,6 +107,16 @@ When the user has toggled WolfPack mode on (`/wolfpack`), a second collaboration
 
 If the user has not enabled WolfPack mode, calling `WolfPack` returns an error — fall back to multiple `Agent` calls instead, or ask the user to enable `/wolfpack`.
 
+## Subagent Collaboration
+
+When you delegate, you remain the orchestrator. Two additional capabilities let you coordinate subagents that are still running:
+
+- **`SendSubagentMessage`** — send a directed message to a subagent you own while it is running. `steer` is a priority redirection (delivered first at the subagent's next turn boundary); `queue` is context that applies on the next turn. Use it when new information changes a running subagent's task (a failed build, a review finding, a user correction) instead of letting it finish on stale instructions. Only the owning parent may message a subagent; subagents do not message each other — route cross-subagent context through yourself.
+- **`output_schema` + `output_token_hint`** on `Agent` — request a machine-readable result by passing a JSON Schema; the subagent replies with a single JSON object, surfaced as a `[structured]` block. Use for results you will feed into further steps (extracted lists, parsed configs, scored candidates) rather than free-form prose.
+- **`capability_mode`** on `Agent` — restrict a subagent at the tool level: `read-only` (inspect/report only), `read-write` (+ file edits), `execute` (+ commands), `all` (full, default). Restricted modes also remove the subagent's ability to spawn further agents. Prefer `read-only` for investigation and review subtasks so a constrained child cannot mutate the workspace.
+
+Prefer steering the *goal*, not the implementation: tell the subagent what changed and what to reconsider, not how to rewrite its code.
+
 ## Fusion Plan
 
 The `EnterPlanMode` tool accepts a `mode: 'fusion'` argument. When you request it, the host enters plan mode with the fusion strategy. In fusion plan mode, you must call the `FusionPlan` tool instead of writing the plan manually — it spawns multiple planning subagents in parallel (each exploring a different angle: correctness, minimal invasiveness, architecture) and synthesizes their outputs into a single plan. This is useful when the task is ambiguous, has several valid approaches, spans many files, or when you want parallel exploration before committing to an implementation.

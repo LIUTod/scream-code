@@ -10,6 +10,8 @@ import {
 } from '../profile';
 import { linkAbortSignal, userCancellationReason } from '../utils/abort';
 import { collectGitContext } from './git-context';
+import { SubagentMessageBus, buildSubagentMessage, type SubagentMessageStatus } from './subagent-messages';
+import { filterToolsForCapability, type SubagentCapabilityMode } from './subagent-capability';
 import type { Session } from './index';
 import SUMMARY_CONTINUATION_PROMPT from './summary-continuation.md';
 import { getFindingsFromStore } from '../tools/builtin/collaboration/report-finding';
@@ -33,6 +35,11 @@ type RunSubagentOptions = {
   readonly runInBackground: boolean;
   readonly origin?: PromptOrigin | undefined;
   readonly signal: AbortSignal;
+  /** When set, the child is told to reply with a single JSON object matching
+   *  this JSON Schema; short structured answers skip the summary expansion. */
+  readonly outputSchema?: string | undefined;
+  /** Runtime capability contract; stricter modes strip the child's tool set. */
+  readonly capabilityMode?: SubagentCapabilityMode | undefined;
 };
 
 type SubagentCompletion = {
@@ -63,7 +70,11 @@ export class SessionSubagentHost {
     private readonly ownerAgentId: string,
     readonly backgroundTaskTimeoutMs?: number | undefined,
     private readonly modelBindings?: () => Record<string, string | undefined>,
-  ) {}
+    /** Shared per-session directed-message bus for parent→child messages. */
+    readonly bus?: SubagentMessageBus | undefined,
+  ) {
+    this.bus ??= new SubagentMessageBus();
+  }
 
   async spawn(profileName: string, options: RunSubagentOptions): Promise<SubagentHandle> {
     options.signal.throwIfAborted();
@@ -104,10 +115,11 @@ export class SessionSubagentHost {
         ...options,
         signal: controller.signal,
       },
-      () => this.configureChild(parent, agent, profile),
+      () => this.configureChild(parent, agent, profile, options.capabilityMode),
     ).finally(() => {
       unlinkAbortSignal();
       this.activeChildren.delete(id);
+      this.bus!.clear(id);
     });
 
     return {
@@ -169,11 +181,20 @@ export class SessionSubagentHost {
         const modelAlias = this.resolveValidModelAlias(parent, binding);
         const thinkingLevel = this.resolveThinkingLevel(parent, binding, parent.config.thinkingLevel);
         child.config.update({ modelAlias, thinkingLevel });
+        // Re-apply the capability trim: resume bypasses configureChild, so
+        // without this a stale capability_mode would be silently dropped
+        // while the composed prompt still claims a (stricter) constraint.
+        if (options.capabilityMode !== undefined && options.capabilityMode !== 'all') {
+          child.tools.setActiveTools(
+            filterToolsForCapability(child.tools.getActiveTools(), options.capabilityMode),
+          );
+        }
         return Promise.resolve();
       },
     ).finally(() => {
       unlinkAbortSignal();
       this.activeChildren.delete(agentId);
+      this.bus!.clear(agentId);
     });
 
     return {
@@ -202,6 +223,29 @@ export class SessionSubagentHost {
       return undefined;
     }
     return this.session.agents.get(agentId)?.config.profileName;
+  }
+
+  /**
+   * Send a directed message to a subagent owned by this parent. Ownership is
+   * verified against the session metadata before anything is enqueued; a
+   * message addressed to a foreign or unknown agent is refused as
+   * `not_owned`/`not_found`.
+   */
+  sendMessage(
+    toAgentId: string,
+    operation: 'queue' | 'steer',
+    text: string,
+    overrides?: { inFlightLimit?: number; byteLimit?: number; deadline?: number },
+  ): { status: SubagentMessageStatus; reason?: 'bytes' | 'queue' } {
+    const metadata = this.session.metadata.agents[toAgentId];
+    if (metadata === undefined || metadata.type !== 'sub') return { status: 'not_found' };
+    if (metadata.parentAgentId !== this.ownerAgentId) return { status: 'not_owned' };
+    const child = this.session.agents.get(toAgentId);
+    if (child === undefined || !this.activeChildren.has(toAgentId)) return { status: 'not_active' };
+    const out = this.bus!.send(
+      buildSubagentMessage(this.ownerAgentId, toAgentId, operation, text, overrides),
+    );
+    return { status: out.status, reason: out.reason };
   }
 
   private resolveProfile(parent: Agent, profileName: string): ResolvedAgentProfile {
@@ -253,6 +297,19 @@ export class SessionSubagentHost {
         const gitContext = await collectGitContext(child.jian, child.config.cwd);
         if (gitContext) childPrompt = `${gitContext}\n\n${childPrompt}`;
       }
+      // Parent→child directed messages (P2): any messages queued/steered to
+      // this subagent are injected at EVERY turn start (first turn and each
+      // summary-continuation turn), so a message sent while the child is
+      // mid-run is delivered at its next boundary rather than dropped.
+      const injectParentMessages = (prompt: string): string => {
+        const pending = this.bus!.poll(childId);
+        if (pending.length === 0) return prompt;
+        const messageBlock = pending
+          .map((m) => (m.operation === 'steer' ? `[directive] ${m.text}` : `[message] ${m.text}`))
+          .join('\n\n');
+        return `${prompt}\n\n[parent_messages]\n${messageBlock}`;
+      };
+      childPrompt = injectParentMessages(childPrompt);
       const origin: PromptOrigin = options.origin ?? { kind: 'system_trigger', name: 'subagent' };
       child.turn.prompt([{ type: 'text', text: childPrompt }], origin);
       await runChildTurnToCompletion(child, options.signal);
@@ -262,13 +319,27 @@ export class SessionSubagentHost {
       // the handoff; if it is still short after that, accept it as-is rather
       // than retrying indefinitely.
       let result = lastAssistantText(child);
-      let remainingContinuations = SUMMARY_CONTINUATION_ATTEMPTS;
-      while (remainingContinuations > 0 && result.length < SUMMARY_MIN_LENGTH) {
-        remainingContinuations -= 1;
-        options.signal.throwIfAborted();
-        child.turn.prompt([{ type: 'text', text: SUMMARY_CONTINUATION_PROMPT }], origin);
-        await runChildTurnToCompletion(child, options.signal);
-        result = lastAssistantText(child);
+      // When the parent requested a structured (schema-shaped) answer, do not
+      // expand short replies: a compact JSON object is expected and padding it
+      // with prose would corrupt the parseable result.
+      if (options.outputSchema === undefined) {
+        let remainingContinuations = SUMMARY_CONTINUATION_ATTEMPTS;
+        // Keep going while the summary is short OR parent messages are still
+        // pending: a message that arrived mid-run must be delivered before the
+        // child finalizes (otherwise the finally-clear would drop it silently
+        // while the parent already received "accepted"). remainingContinuations
+        // bounds both conditions.
+        while (
+          remainingContinuations > 0 &&
+          (result.length < SUMMARY_MIN_LENGTH || this.bus!.activeCount(childId) > 0)
+        ) {
+          remainingContinuations -= 1;
+          options.signal.throwIfAborted();
+          const continuation = injectParentMessages(SUMMARY_CONTINUATION_PROMPT);
+          child.turn.prompt([{ type: 'text', text: continuation }], origin);
+          await runChildTurnToCompletion(child, options.signal);
+          result = lastAssistantText(child);
+        }
       }
 
       const usage = child.usage.data().total;
@@ -285,7 +356,7 @@ export class SessionSubagentHost {
       const childByModel = child.usage.data().byModel ?? {};
       const previous = this.aggregatedChildUsage.get(child) ?? {};
       for (const [model, childUsage] of Object.entries(childByModel)) {
-        const delta = previous[model] === undefined ? childUsage : subtractUsage(childUsage, previous[model]!);
+        const delta = previous[model] === undefined ? childUsage : subtractUsage(childUsage, previous[model]);
         if (isZeroUsage(delta)) continue;
         try {
           parent.usage.record(model, delta, 'session');
@@ -340,6 +411,7 @@ export class SessionSubagentHost {
     parent: Agent,
     child: Agent,
     profile: ResolvedAgentProfile,
+    capabilityMode?: SubagentCapabilityMode,
   ): Promise<void> {
     // A subagent uses the model bound to its profile via /model diy when one
     // is configured; otherwise it inherits the parent agent's model. A binding
@@ -364,6 +436,16 @@ export class SessionSubagentHost {
     // applies when the parent is actually running in RLM mode.
     if (parent.getRlmEnabled()) {
       child.inheritRlm();
+    }
+
+    // Capability enforcement (runtime tool filtering) must happen AFTER RLM
+    // inheritance: inheritRlm unconditionally re-adds python, which would
+    // otherwise bypass the trim. The final active set is decided by the
+    // capability mode — execute keeps python, read-only/read-write drop it.
+    if (capabilityMode !== undefined && capabilityMode !== 'all') {
+      const current = child.tools.getActiveTools();
+      const filtered = filterToolsForCapability(current, capabilityMode);
+      child.tools.setActiveTools(filtered);
     }
   }
 

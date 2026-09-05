@@ -100,6 +100,27 @@ export const AgentToolInputSchema = z.preprocess(
       .string()
       .optional()
       .describe('Observable result that proves completion, including any verification command.'),
+    output_schema: z
+      .string()
+      .optional()
+      .describe(
+        'Optional JSON Schema (as a JSON string) describing the structured result the subagent should return. When provided, the subagent is told to reply with a single JSON object conforming to this schema; if the reply parses as JSON it is surfaced as a `[structured]` block in the tool output, alongside the raw text.',
+      ),
+    output_token_hint: z
+      .number()
+      .int()
+      .min(1)
+      .max(32_768)
+      .optional()
+      .describe(
+        'Optional prompt-level hint for the subagent final-answer length (keeps structured replies compact, e.g. 1024 for a schema-shaped answer). Not an enforced cap.',
+      ),
+    capability_mode: z
+      .enum(['read-only', 'read-write', 'execute', 'all'])
+      .optional()
+      .describe(
+        'Runtime capability contract for the subagent. read-only: may inspect but not modify the workspace. read-write: may read and edit files but not run arbitrary commands. execute: may additionally run commands. all: full tool access (default). Restricted modes strip the child tool set at runtime (including MCP and spawning tools) — the constraint is enforced, not just prompted. The parent remains the final gate.',
+      ),
   }),
 );
 
@@ -256,6 +277,8 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
         description: args.description,
         runInBackground,
         signal: backgroundController?.signal ?? foregroundDeadline?.signal ?? signal,
+        outputSchema: args.output_schema,
+        capabilityMode: args.capability_mode,
       };
 
       let handle: SubagentHandle;
@@ -339,6 +362,15 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
           '[summary]',
           result.result,
         ];
+        // Structured output: when a schema was requested, try to parse the
+        // final answer as JSON and surface it as its own block. Parse failure
+        // is non-fatal — the raw text stays in [summary].
+        if (args.output_schema !== undefined) {
+          const structured = parseJsonObject(result.result);
+          if (structured !== undefined) {
+            lines.push('', '[structured]', JSON.stringify(structured));
+          }
+        }
         return { output: lines.join('\n') };
       } catch (error) {
         let message: string;
@@ -384,21 +416,58 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
 function composeSubagentPrompt(args: AgentToolInput): string {
   const hasStructure =
     args.target !== undefined || args.change !== undefined || args.acceptance !== undefined;
-  if (!hasStructure) {
-    return args.prompt;
+  const parts: string[] = [args.prompt];
+  if (hasStructure) {
+    parts.push('');
+    if (args.target !== undefined) parts.push('# Target', args.target, '');
+    if (args.change !== undefined) parts.push('# Change', args.change, '');
+    if (args.acceptance !== undefined) parts.push('# Acceptance', args.acceptance, '');
   }
-
-  const parts: string[] = [args.prompt, ''];
-  if (args.target !== undefined) {
-    parts.push('# Target', args.target, '');
+  if (args.output_schema !== undefined) {
+    const budgetLine =
+      args.output_token_hint !== undefined
+        ? ` Keep your final answer within ${args.output_token_hint} tokens.`
+        : '';
+    parts.push(
+      '',
+      '# Structured Output',
+      `Reply with a single JSON object conforming to this JSON Schema:`,
+      '```json',
+      args.output_schema,
+      '```',
+      'No prose before or after the JSON object.' + budgetLine,
+    );
   }
-  if (args.change !== undefined) {
-    parts.push('# Change', args.change, '');
-  }
-  if (args.acceptance !== undefined) {
-    parts.push('# Acceptance', args.acceptance, '');
+  if (args.capability_mode !== undefined && args.capability_mode !== 'all') {
+    const capabilityLines: Record<string, string> = {
+      'read-only': 'You are read-only: you may inspect files and the workspace, but you must NOT modify, create, or delete anything, and must NOT execute commands.',
+      'read-write':
+        'You may read and edit files, but you must NOT execute commands (including running tests, builds, or terminal commands).',
+      execute:
+        'You may read and edit files and execute commands, but you must not perform actions with irreversible external side effects (publishing, deploying, pushing) without explicit approval from the parent agent.',
+    };
+    parts.push('', '# Capability Constraint', capabilityLines[args.capability_mode] ?? '');
   }
   return parts.join('\n');
+}
+
+/**
+ * Best-effort JSON extraction: strips a ```json fence if present, then tries
+ * to parse. Returns undefined when the text is not parseable as a single JSON
+ * object — callers treat that as "structured output unavailable".
+ */
+function parseJsonObject(text: string): Record<string, unknown> | undefined {
+  const fenced = text.match(/```json\s*([\s\S]*?)```/);
+  const candidate = fenced ? fenced[1]!.trim() : text.trim();
+  try {
+    const parsed = JSON.parse(candidate) as unknown;
+    if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+    return undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export function buildSubagentDescriptions(subagents: ResolvedAgentProfile['subagents']): string {

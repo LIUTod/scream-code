@@ -1081,6 +1081,7 @@ export class ToolManager {
               allowedSpawns,
             },
           ),
+        canSpawn && new b.SendSubagentMessageTool(this.agent.subagentHost),
         canSpawn &&
           new b.WolfPackTool(
             this.agent.subagentHost,
