@@ -16,6 +16,11 @@
     "test/web/image-lightbox.test.ts",
     "test/web/message-item-density.test.ts",
     "test/web/message-list-dividers.test.ts",
-    "test/web/message-list-scroll.test.ts"
+    "test/web/message-list-scroll.test.ts",
+    "test/web/file-tree.test.ts",
+    "test/web/file-dir-cache.test.ts",
+    "test/web/session-stats-panel.test.ts",
+    "test/web/settings-view.test.ts",
+    "test/web/g5-finishing.test.ts"
   ]
 }

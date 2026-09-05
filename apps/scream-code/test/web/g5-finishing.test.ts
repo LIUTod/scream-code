@@ -85,7 +85,7 @@ describe('EmptyState recent prompts (G5.5)', () => {
     });
     await wrapper.vm.$nextTick();
     await wrapper.find('.recent-chip').trigger('click');
-    expect(wrapper.emitted('pick')![0]![0]).toBe('debug the crash');
+    expect(wrapper.emitted('pick')?.[0]?.[0]).toBe('debug the crash');
     localStorage.removeItem('scream-recent-prompts');
   });
 });

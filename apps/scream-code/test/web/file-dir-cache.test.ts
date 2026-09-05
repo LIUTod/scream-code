@@ -35,7 +35,7 @@ describe('fileDirCache (G3.2 regression)', () => {
     stubFetch(async () => {
       calls += 1;
       if (calls === 1) {
-        return await new Promise((res) => {
+        return new Promise((res) => {
           release = res;
         }).then(() => ({ path: '/q', entries: [] }));
       }
@@ -44,7 +44,7 @@ describe('fileDirCache (G3.2 regression)', () => {
     const first = fetchDirEntries('/q'); // in-flight, never resolves yet
     invalidateDirEntry('/q'); // must drop the in-flight entry
     const after = await fetchDirEntries('/q'); // new request, resolves immediately
-    expect(after![0]!.name).toBe('fresh.ts');
+    expect(after?.[0]?.name).toBe('fresh.ts');
     expect(calls).toBe(2);
     release?.({ path: '/q', entries: [] });
     await first; // let the stale promise settle without unhandled rejection

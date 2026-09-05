@@ -156,13 +156,13 @@ describe('SettingsView (G4)', () => {
     const { client } = fakeClient();
     const wrapper = mountView(client);
     const input = wrapper.find('.like-input');
-    await input.setValue('🥔老师');
+    await input.setValue('Test Nickname');
     const saveBtn = wrapper.findAll('button').find((b) => b.text().includes('保存偏好'));
     expect(saveBtn).toBeTruthy();
     await saveBtn!.trigger('click');
     await flushPromises();
     const emitted = wrapper.emitted('update-like');
     expect(emitted).toBeTruthy();
-    expect((emitted![0]![0] as { nickname?: string }).nickname).toBe('🥔老师');
+    expect(emitted?.[0]?.[0]).toMatchObject({ nickname: 'Test Nickname' });
   });
 });

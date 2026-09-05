@@ -76,8 +76,9 @@ describe('FileTree', () => {
     await flushPromises();
 
     // Click the directory row to expand it.
-    const dirRow = wrapper.findAll('.tree-row.is-dir')[0]!;
-    await dirRow.trigger('click');
+    const dirRow = wrapper.findAll('.tree-row.is-dir')[0];
+    expect(dirRow).toBeTruthy();
+    await dirRow?.trigger('click');
     await flushPromises();
 
     expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining(encodeURIComponent(src)));
