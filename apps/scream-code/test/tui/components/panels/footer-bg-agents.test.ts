@@ -50,7 +50,7 @@ describe('FooterComponent — background task / agent badges', () => {
 
   it('renders the task badge alone when only bash tasks are running', () => {
     const footer = makeFooter(baseState());
-    footer.setBackgroundCounts({ bashTasks: 1, agentTasks: 0 });
+    footer.setBackgroundCounts({ bashTasks: 1, agentTasks: 0, foregroundSubagents: 0 });
     const out = strip(footer.render(160)[0]!);
     expect(out).toMatch(/\[1个任务 运行中\]/);
     expect(out).not.toMatch(/agents? running/);
@@ -58,7 +58,7 @@ describe('FooterComponent — background task / agent badges', () => {
 
   it('renders the agent badge alone when only agent tasks are running', () => {
     const footer = makeFooter(baseState());
-    footer.setBackgroundCounts({ bashTasks: 0, agentTasks: 1 });
+    footer.setBackgroundCounts({ bashTasks: 0, agentTasks: 1, foregroundSubagents: 0 });
     const out = strip(footer.render(160)[0]!);
     expect(out).toMatch(/\[1个代理 运行中\]/);
     expect(out).not.toMatch(/tasks? running/);
@@ -66,7 +66,7 @@ describe('FooterComponent — background task / agent badges', () => {
 
   it('renders both badges side by side when both are non-zero', () => {
     const footer = makeFooter(baseState());
-    footer.setBackgroundCounts({ bashTasks: 2, agentTasks: 3 });
+    footer.setBackgroundCounts({ bashTasks: 2, agentTasks: 3, foregroundSubagents: 0 });
     const out = strip(footer.render(160)[0]!);
     expect(out).toMatch(/\[2个任务 运行中\]/);
     expect(out).toMatch(/\[3个代理 运行中\]/);
@@ -76,7 +76,7 @@ describe('FooterComponent — background task / agent badges', () => {
 
   it('pluralizes correctly across both badges', () => {
     const footer = makeFooter(baseState());
-    footer.setBackgroundCounts({ bashTasks: 1, agentTasks: 1 });
+    footer.setBackgroundCounts({ bashTasks: 1, agentTasks: 1, foregroundSubagents: 0 });
     const out = strip(footer.render(160)[0]!);
     expect(out).toMatch(/\[1个任务 运行中\]/);
     expect(out).toMatch(/\[1个代理 运行中\]/);
@@ -84,9 +84,9 @@ describe('FooterComponent — background task / agent badges', () => {
 
   it('updates badges live via setBackgroundCounts', () => {
     const footer = makeFooter(baseState());
-    footer.setBackgroundCounts({ bashTasks: 2, agentTasks: 1 });
+    footer.setBackgroundCounts({ bashTasks: 2, agentTasks: 1, foregroundSubagents: 1 });
     expect(strip(footer.render(160)[0]!)).toMatch(/\[2个任务 运行中\]/);
-    footer.setBackgroundCounts({ bashTasks: 0, agentTasks: 0 });
+    footer.setBackgroundCounts({ bashTasks: 0, agentTasks: 0, foregroundSubagents: 0 });
     const after = strip(footer.render(160)[0]!);
     expect(after).not.toMatch(/tasks? running/);
     expect(after).not.toMatch(/agents? running/);
@@ -94,7 +94,7 @@ describe('FooterComponent — background task / agent badges', () => {
 
   it('clamps negative counts to 0', () => {
     const footer = makeFooter(baseState());
-    footer.setBackgroundCounts({ bashTasks: -5, agentTasks: -2 });
+    footer.setBackgroundCounts({ bashTasks: -5, agentTasks: -2, foregroundSubagents: -3 });
     const out = strip(footer.render(160)[0]!);
     expect(out).not.toMatch(/tasks? running/);
     expect(out).not.toMatch(/agents? running/);
@@ -102,11 +102,36 @@ describe('FooterComponent — background task / agent badges', () => {
 
   it('drops the badges when terminal is too narrow to fit them', () => {
     const footer = makeFooter(baseState());
-    footer.setBackgroundCounts({ bashTasks: 4, agentTasks: 3 });
+    footer.setBackgroundCounts({ bashTasks: 4, agentTasks: 3, foregroundSubagents: 2 });
     // Extremely narrow width: footer primary content fills the line, so leftLine wins.
     const [line1] = footer.render(20);
     expect(line1).toBeDefined();
     expect(strip(line1!)).not.toMatch(/\[4个任务 运行中\]/);
     expect(strip(line1!)).not.toMatch(/\[3个代理 运行中\]/);
+  });
+
+  it('renders the foreground subagents badge alone (P1)', () => {
+    const footer = makeFooter(baseState());
+    footer.setBackgroundCounts({ bashTasks: 0, agentTasks: 0, foregroundSubagents: 2 });
+    const out = strip(footer.render(160)[0]!);
+    expect(out).toMatch(/\[2个子代理 工作中\]/);
+    expect(out).not.toMatch(/tasks? running/);
+    expect(out).not.toMatch(/agents? running/);
+  });
+
+  it('omits the subagents badge when 0 (no collaboration → no badge)', () => {
+    const footer = makeFooter(baseState());
+    footer.setBackgroundCounts({ bashTasks: 0, agentTasks: 0, foregroundSubagents: 0 });
+    const out = strip(footer.render(160)[0]!);
+    expect(out).not.toMatch(/子代理/);
+  });
+
+  it('renders subagents badge alongside background agents (P1 coexistence)', () => {
+    const footer = makeFooter(baseState());
+    footer.setBackgroundCounts({ bashTasks: 1, agentTasks: 1, foregroundSubagents: 3 });
+    const out = strip(footer.render(160)[0]!);
+    expect(out).toMatch(/\[1个任务 运行中\]/);
+    expect(out).toMatch(/\[1个代理 运行中\]/);
+    expect(out).toMatch(/\[3个子代理 工作中\]/);
   });
 });

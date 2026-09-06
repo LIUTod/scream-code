@@ -156,7 +156,7 @@ export class SessionReplayRenderer {
         sessionEventHandler.backgroundTaskTranscriptedTerminal.add(info.taskId);
       }
     }
-    state.footer.setBackgroundCounts(countActiveBackgroundTasks(sessionEventHandler.backgroundTasks));
+    state.footer.setBackgroundCounts({ ...countActiveBackgroundTasks(sessionEventHandler.backgroundTasks), foregroundSubagents: 0 });
     state.ui.requestRender();
   }
 

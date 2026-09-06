@@ -356,6 +356,9 @@ export class FooterComponent implements Component {
   private balanceFlashTimer: NodeJS.Timeout | undefined;
   private lastBalanceUpdatedAt = 0;
   private backgroundAgentCount = 0;
+  /** Foreground (non-background) subagents spawned by the current turn's
+   *  Agent tool. Footer renders a separate badge; 0 hides it. */
+  private foregroundSubagentCount = 0;
   constructor(state: AppState, colors: ColorPalette, ui: TUI, onGitStatusChange: () => void = () => {}) {
     this.state = state;
     this.colors = colors;
@@ -424,9 +427,10 @@ export class FooterComponent implements Component {
    * count produces its own bracketed badge on line 1; zeros hide them
    * independently.
    */
-  setBackgroundCounts(counts: { bashTasks: number; agentTasks: number }): void {
+  setBackgroundCounts(counts: { bashTasks: number; agentTasks: number; foregroundSubagents: number }): void {
     this.backgroundBashTaskCount = Math.max(0, counts.bashTasks);
     this.backgroundAgentCount = Math.max(0, counts.agentTasks);
+    this.foregroundSubagentCount = Math.max(0, counts.foregroundSubagents);
   }
 
   invalidate(): void {}
@@ -533,6 +537,11 @@ export class FooterComponent implements Component {
     if (this.backgroundAgentCount > 0) {
       left.push(
         chalk.hex(colors.primary)(`[${t('footer.agents_running', { count: String(this.backgroundAgentCount) })}]`),
+      );
+    }
+    if (this.foregroundSubagentCount > 0) {
+      left.push(
+        chalk.hex(colors.primary)(`[${t('footer.subagents_working', { count: String(this.foregroundSubagentCount) })}]`),
       );
     }
 

@@ -128,6 +128,10 @@ export class SessionEventHandler {
    */
   private lastCompactionTrigger: 'manual' | 'auto' | undefined;
   backgroundTaskTranscriptedTerminal: Set<string> = new Set();
+  /** Active foreground (non-background) subagents. Footer badge counts them
+   *  separately from background agents: foreground subagents are transient
+   *  (spawned by the current turn's Agent tool), background agents persist. */
+  private foregroundSubagentCount = 0;
   subagentInfo: Map<string, { parentToolCallId: string; name: string }> = new Map();
   renderedSkillActivationIds: Set<string> = new Set();
   renderedMcpServerStatusKeys: Map<string, string> = new Map();
@@ -1040,6 +1044,9 @@ export class SessionEventHandler {
       this.syncBackgroundAgentBadge();
       return;
     }
+    // Foreground subagent: count it in the footer badge (spawn +1).
+    this.foregroundSubagentCount += 1;
+    this.syncBackgroundAgentBadge();
 
     let tc = streamingUI.getToolComponent(event.parentToolCallId);
     if (tc === undefined) {
@@ -1095,6 +1102,9 @@ export class SessionEventHandler {
       this.appendBackgroundAgentEntry('completed', backgroundMeta, extras);
       return;
     }
+    // Foreground subagent: decrement the footer badge (completed -1).
+    this.foregroundSubagentCount = Math.max(0, this.foregroundSubagentCount - 1);
+    this.syncBackgroundAgentBadge();
     // Route to the per-subagent card (WolfPack) or parent card (normal Agent).
     const info = this.subagentInfo.get(event.subagentId);
     const routingId = info?.parentToolCallId ?? event.parentToolCallId;
@@ -1138,6 +1148,9 @@ export class SessionEventHandler {
       this.appendBackgroundAgentEntry('failed', backgroundMeta, { error: event.error });
       return;
     }
+    // Foreground subagent: decrement the footer badge (failed -1).
+    this.foregroundSubagentCount = Math.max(0, this.foregroundSubagentCount - 1);
+    this.syncBackgroundAgentBadge();
     const tc = streamingUI.getToolComponent(
       this.subagentInfo.get(event.subagentId)?.parentToolCallId ?? event.parentToolCallId,
     );
@@ -1327,7 +1340,7 @@ export class SessionEventHandler {
         bashTasks += 1;
       }
     }
-    state.footer.setBackgroundCounts({ bashTasks, agentTasks });
-    state.ui.requestRender();
+    state.footer?.setBackgroundCounts({ bashTasks, agentTasks, foregroundSubagents: this.foregroundSubagentCount });
+    state.ui?.requestRender();
   }
 }

@@ -513,6 +513,8 @@ export class ToolCallComponent extends CachedContainer {
   private backgroundTaskTerminalPhase: 'done' | 'failed' | undefined;
   private subagentContextTokens: number | undefined;
   private subagentUsage: TokenUsage | undefined;
+  /** Latest activity (Using X / Used Y) for the running-phase chip. */
+  private latestActivity: string | undefined;
   private subagentResultSummary: string | undefined;
   private subagentError: string | undefined;
   private streamingProgressTimer: ReturnType<typeof setInterval> | undefined;
@@ -822,7 +824,13 @@ export class ToolCallComponent extends CachedContainer {
       this.finishedSubCalls,
       this.getCombinedSubagentText(),
       this.workspaceDir,
+      // Waiting heuristic: running phase with no tool calls and no text yet
+      // means the subagent is idle — thinking, or blocked on a grandchild.
+      this.subagentPhase === 'running' ? this.ongoingSubCalls.size === 0 && this.subagentText === '' : undefined,
     );
+    // Mirror into the component field so the running-phase chip (buildHeader /
+    // formatPhaseChip) can show "Using X / Used Y" without recomputing.
+    this.latestActivity = latestActivity;
     // Terminal-state priority: SDK `tool.result` is authoritative for Agent
     // tool calls. Once it arrives, force done/failed over intermediate
     // spawning/running states for two reasons:
@@ -1537,6 +1545,9 @@ export class ToolCallComponent extends CachedContainer {
         break;
       case 'running':
         parts.push(`↻ ${t('toolcall.running')}`);
+        if (this.latestActivity !== undefined) {
+          parts.push(dim(this.latestActivity));
+        }
         break;
       case 'done': {
         parts.push(chalk.hex(this.colors.success)(`✓ ${t('toolcall.completed')}`));
@@ -2080,11 +2091,12 @@ export class ToolCallComponent extends CachedContainer {
  *   2. latest finished sub-tool (`Used {name} ({keyArg})`)
  *   3. last non-empty line from accumulated subagent text
  */
-function computeLatestActivity(
+export function computeLatestActivity(
   ongoing: ReadonlyMap<string, OngoingSubCall>,
   finished: readonly FinishedSubCall[],
   text: string,
   workspaceDir?: string,
+  isWaitingHeuristic?: boolean,
 ): string | undefined {
   if (ongoing.size > 0) {
     const lastOngoing = [...ongoing.values()].at(-1);
@@ -2105,6 +2117,9 @@ function computeLatestActivity(
       .find((l) => l.trim().length > 0);
     if (tail !== undefined) return tail.trim();
   }
+  // Running but idle: waiting for a grandchild subagent (thinking) or for the
+  // model — surface it instead of a false "running".
+  if (isWaitingHeuristic === true) return 'Waiting for subagent…';
   return undefined;
 }
 

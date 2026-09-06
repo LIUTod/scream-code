@@ -116,6 +116,7 @@ export const en: Record<string, string> = {
   'footer.hit': 'HitR',
   'footer.tasks_running': '{count} tasks running',
   'footer.agents_running': '{count} agents running',
+  'footer.subagents_working': '{count} subagents working',
 
 
   'input.replay_blocked': 'Cannot send input while session history is replaying.',

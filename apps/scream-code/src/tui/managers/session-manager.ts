@@ -476,7 +476,7 @@ export class SessionManager {
     this.host.streamingUI.resetToolUi();
     this.host.sessionEventHandler.resetRuntimeState();
     this.host.tasksBrowserController.close();
-    this.host.state.footer.setBackgroundCounts({ bashTasks: 0, agentTasks: 0 });
+    this.host.state.footer.setBackgroundCounts({ bashTasks: 0, agentTasks: 0, foregroundSubagents: 0 });
     this.host.streamingUI.setTodoList([]);
     this.host.streamingUI.setTurnId(undefined);
     this.host.streamingUI.setStep(0);

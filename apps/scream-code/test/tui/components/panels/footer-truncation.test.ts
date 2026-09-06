@@ -64,7 +64,7 @@ function wideFooter(): FooterComponent {
     darkColors,
     uiMock,
   );
-  footer.setBackgroundCounts({ bashTasks: 2, agentTasks: 3 });
+  footer.setBackgroundCounts({ bashTasks: 2, agentTasks: 3, foregroundSubagents: 0 });
   return footer;
 }
 
