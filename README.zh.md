@@ -49,6 +49,7 @@ scream -y         # 自动批准模式
 
 - **Goal Loop** — 目标自主驱动，独立裁判 Agent 裁决，支持轮次/Token/时间预算控制，拒绝无效循环。
 - **Wolfpack 群狼模式** — 无限制并行子 Agent（coder / explore / plan / verify / reviewer / oracle / writer / worker）。
+- **子代理协作** — 父→子定向消息（steer / queue）随时调整运行中的子代理；`output_schema` 结构化 JSON 输出；运行时能力隔离（read-only / read-write / execute / full）在工具层强制执行，防止受限子代理越权。
 - **永久记忆备忘录** — 痛点记忆结构化 SQL 提取，FTS5 全文 + Tag 语义 + 向量三重检索，跨会话共享，越用越懂你。
 - **本地 SAG 知识图谱** — 基于 SAG 论文（[arXiv:2606.15971](https://arxiv.org/abs/2606.15971)）的可视化知识库，大幅提升多跳推理，随时导入本地知识。
 - **RLM 模式** — 面向长任务的持久 Python 工作环境，状态跨调用保留，`rlm()` 支持无限递归子代理。
@@ -133,7 +134,7 @@ scream -y         # 自动批准模式
 
 ### 致谢
 
-完全免费、开放使用，欢迎魔改与反馈。Scream 是一个轻量化 Agent 底座——最大化释放模型本身的能力，不做过度的框架约束。灵感来自 pi、pi-tui、gork、kimicli、Gemini、ohmypi、zero 等优秀项目。
+完全免费、开放使用，欢迎魔改与反馈。Scream 是一个轻量化 Agent 底座——最大化释放模型本身的能力，不做过度的框架约束。
 
 ---
 

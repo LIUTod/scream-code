@@ -7,6 +7,7 @@ Specialist subagents:
 - `verify` — build/test/lint checks
 - `reviewer` — code review
 - `oracle` — deep debugging and second opinions
+- `worker` — office and document automation
 - `writer` — reports and documentation
 
 ## Required prompt structure
