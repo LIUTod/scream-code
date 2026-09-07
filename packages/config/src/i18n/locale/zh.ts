@@ -625,6 +625,7 @@ export const zh: Record<string, string> = {
   'toolcall.running': '运行中',
   'toolcall.completed': '已完成',
   'toolcall.tool_count': '{count} 个 tool',
+  'toolcall.turns': '{count} 轮',
   'toolcall.failed': '失败',
   'toolcall.bg_running': '后台运行',
   'toolcall.truncation_notice': 'Tool 调用参数因 max_tokens 被截断 — 调用未执行。',

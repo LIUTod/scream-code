@@ -42,14 +42,20 @@ type RunSubagentOptions = {
   readonly capabilityMode?: SubagentCapabilityMode | undefined;
 };
 
-type SubagentCompletion = {
+export type SubagentCompletion = {
   readonly result: string;
   readonly usage?: TokenUsage;
+  /** Number of child turns (initial turn + summary continuations). */
+  readonly turns?: number;
+  /** Wall-clock run duration in milliseconds (spawn → completion). */
+  readonly durationMs?: number;
+  /** Total assistant tool calls across the child's history. */
+  readonly toolCallCount?: number;
 };
 
 type ActiveChild = {
   readonly controller: AbortController;
-  readonly runInBackground: boolean;
+  runInBackground: boolean;
 };
 
 export type SubagentHandle = {
@@ -205,6 +211,21 @@ export class SessionSubagentHost {
     };
   }
 
+  /**
+   * Flip a child's lifecycle flag to "background". Used when a foreground
+   * Agent call times out and hands its still-running child to the background
+   * task manager: from that point parent-turn cancellation (cancelAll) must
+   * NOT cascade into the child — the background task manager is the sole owner
+   * of its termination (TaskStop → abort callback). Mirrors the reference
+   * implementation's backgrounded lifecycle.
+   */
+  markBackground(agentId: string): void {
+    const child = this.activeChildren.get(agentId);
+    if (child !== undefined) {
+      child.runInBackground = true;
+    }
+  }
+
   cancelAll(reason: unknown = userCancellationReason()): void {
     const foregroundChildren = Array.from(this.activeChildren).filter(
       ([, child]) => !child.runInBackground,
@@ -266,6 +287,8 @@ export class SessionSubagentHost {
     options: RunSubagentOptions,
     prepareChild: () => Promise<void>,
   ): Promise<SubagentCompletion> {
+    const startedAt = Date.now();
+    let turns = 1;
     parent.emitEvent({
       type: 'subagent.spawned',
       subagentId: childId,
@@ -334,6 +357,7 @@ export class SessionSubagentHost {
           (result.length < SUMMARY_MIN_LENGTH || this.bus!.activeCount(childId) > 0)
         ) {
           remainingContinuations -= 1;
+          turns += 1;
           options.signal.throwIfAborted();
           const continuation = injectParentMessages(SUMMARY_CONTINUATION_PROMPT);
           child.turn.prompt([{ type: 'text', text: continuation }], origin);
@@ -384,6 +408,8 @@ export class SessionSubagentHost {
         }
       }
 
+      const durationMs = Date.now() - startedAt;
+      const toolCallCount = countAssistantToolCalls(child);
       parent.emitEvent({
         type: 'subagent.completed',
         subagentId: childId,
@@ -391,9 +417,12 @@ export class SessionSubagentHost {
         resultSummary: result,
         usage,
         contextTokens: child.context.tokenCount,
+        turns,
+        durationMs,
+        toolCallCount,
       });
       this.triggerSubagentStop(parent, profileName, result);
-      return { result: result + findingsBlock, usage };
+      return { result: result + findingsBlock, usage, turns, durationMs, toolCallCount };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       parent.emitEvent({
@@ -564,6 +593,16 @@ function throwIfSubagentStoppedAtMaxTokens(stopReason: LoopTurnStopReason | unde
   if (stopReason === 'max_tokens') {
     throw new Error(`${SUBAGENT_MAX_TOKENS_ERROR}.`);
   }
+}
+
+/** Count assistant tool calls across the child's full history. */
+function countAssistantToolCalls(agent: Agent): number {
+  let count = 0;
+  for (const message of agent.context.history) {
+    if (message.role !== 'assistant') continue;
+    count += message.toolCalls?.length ?? 0;
+  }
+  return count;
 }
 
 function lastAssistantText(agent: Agent): string {

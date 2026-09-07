@@ -17,3 +17,15 @@ Choosing subagent_type for the batch:
 Example: review source files for OWASP vulnerabilities by setting items to the file
 paths, subagent_type to "reviewer", and prompt_template to the review instruction.
 All items are processed in parallel.
+
+All spawned subagents share one `subagent_type`, one `prompt_template` and the
+same batch-level settings. WolfPack keeps its unlimited-concurrency contract:
+every item spawns and runs in parallel with no artificial concurrency cap.
+
+Batch-level `output_schema` / `output_token_hint` / `capability_mode` are
+forwarded to every spawned subagent (same semantics as the `Agent` tool):
+- `output_schema` — each item result that parses as a JSON object is surfaced
+  as a `[structured]` block; non-JSON results are marked `structured: invalid`.
+- `capability_mode` — runtime tool isolation (read-only / read-write /
+  execute / all) applied to every item; restricted modes strip MCP tools and
+  nested Agent / SendSubagentMessage / WolfPack tools.

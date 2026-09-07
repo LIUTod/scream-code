@@ -1114,6 +1114,9 @@ export class SessionEventHandler {
       contextTokens: event.contextTokens,
       usage: event.usage,
       resultSummary: event.resultSummary,
+      turns: event.turns,
+      durationMs: event.durationMs,
+      toolCallCount: event.toolCallCount,
     });
     streamingUI.removeToolComponentIfInactive(event.parentToolCallId);
   }

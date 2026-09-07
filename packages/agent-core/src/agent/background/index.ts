@@ -188,7 +188,7 @@ function notificationKey(origin: BackgroundTaskOrigin): string {
  * sessions that pre-date `agent_id` persistence keep the original
  * single-sentence body.
  */
-function buildBackgroundTaskNotificationBody(
+export function buildBackgroundTaskNotificationBody(
   info: BackgroundTaskInfo,
   isAgentTask: boolean,
 ): string {
@@ -199,6 +199,12 @@ function buildBackgroundTaskNotificationBody(
 
   if (!isAgentTask) return baseLine;
   if (info.status === 'completed') return baseLine;
+  // A user-initiated stop (killed) is a deliberate cancellation: mirror the
+  // reference implementation's auto-wake gate (`cancelled` / `explicitly_killed`
+  // never wake) by NOT suggesting resume for a cancelled subagent.
+  if (info.status === 'killed') {
+    return `${baseLine} The subagent was cancelled by the user. Do not resume or retry it automatically — wait for the user's next instruction.`;
+  }
   const agentId = info.agentId;
   if (agentId === undefined || agentId === info.taskId) return baseLine;
 

@@ -297,13 +297,16 @@ describe('AgentTool', () => {
       }),
     );
 
-    expect(host.spawn).toHaveBeenCalledWith('explore', {
-      parentToolCallId: 'call_agent',
-      prompt: 'Investigate',
-      description: 'Find cause',
-      runInBackground: false,
-      signal,
-    });
+    expect(host.spawn).toHaveBeenCalledWith(
+      'explore',
+      expect.objectContaining({
+        parentToolCallId: 'call_agent',
+        prompt: 'Investigate',
+        description: 'Find cause',
+        runInBackground: false,
+        signal: expect.any(AbortSignal),
+      }),
+    );
     expect(result.output).toContain('agent_id: agent-child');
     expect(result.output).toContain('actual_subagent_type: explore');
     expect(result.output).toContain('child result');
@@ -357,13 +360,16 @@ describe('AgentTool', () => {
     );
 
     expect(host.spawn).not.toHaveBeenCalled();
-    expect(host.resume).toHaveBeenCalledWith('agent-existing', {
-      parentToolCallId: 'call_agent',
-      prompt: 'Continue',
-      description: 'Continue work',
-      runInBackground: false,
-      signal,
-    });
+    expect(host.resume).toHaveBeenCalledWith(
+      'agent-existing',
+      expect.objectContaining({
+        parentToolCallId: 'call_agent',
+        prompt: 'Continue',
+        description: 'Continue work',
+        runInBackground: false,
+        signal: expect.any(AbortSignal),
+      }),
+    );
     expect(result.output).toContain('agent_id: agent-existing');
     expect(result.output).toContain('actual_subagent_type: explore');
     expect(result.output).toContain('resumed result');
@@ -453,13 +459,16 @@ describe('AgentTool', () => {
     );
 
     expect(host.spawn).not.toHaveBeenCalled();
-    expect(host.resume).toHaveBeenCalledWith('agent-existing', {
-      parentToolCallId: 'call_agent',
-      prompt: 'Continue',
-      description: 'Continue work',
-      runInBackground: false,
-      signal,
-    });
+    expect(host.resume).toHaveBeenCalledWith(
+      'agent-existing',
+      expect.objectContaining({
+        parentToolCallId: 'call_agent',
+        prompt: 'Continue',
+        description: 'Continue work',
+        runInBackground: false,
+        signal: expect.any(AbortSignal),
+      }),
+    );
     expect(result.output).toContain('actual_subagent_type: explore');
   });
 
@@ -865,7 +874,7 @@ describe('AgentTool', () => {
     expect(result.output).toContain('wait for the user');
   });
 
-  it('returns the spawned agent id when a foreground subagent times out', async () => {
+  it('hands a foreground subagent to the background manager when it times out', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     try {
       const host = mockSubagentHost({
@@ -886,7 +895,10 @@ describe('AgentTool', () => {
           }),
         ),
       });
-      const tool = new AgentTool(host);
+      const backgroundManager = {
+        registerAgentTask: vi.fn(() => 'task-99'),
+      };
+      const tool = new AgentTool(host, backgroundManager as never);
 
       const resultPromise = executeTool(tool,
         context({
@@ -898,11 +910,15 @@ describe('AgentTool', () => {
       await vi.advanceTimersByTimeAsync(30_000);
       const result = await resultPromise;
 
-      expect(result).toMatchObject({ isError: true });
+      // Foreground timeout degrades to a background handoff: the child is NOT
+      // aborted, its work survives under a task id, and the model gets a
+      // resumable agent reference instead of a hard failure.
+      expect(result).not.toMatchObject({ isError: true });
       expect(result.output).toContain('agent_id: agent-child');
       expect(result.output).toContain('actual_subagent_type: coder');
-      expect(result.output).toContain('status: failed');
-      expect(result.output).toContain('subagent error: Agent timed out after 30s.');
+      expect(result.output).toContain('status: backgrounded');
+      expect(result.output).toContain('task_id: task-99');
+      expect(backgroundManager.registerAgentTask).toHaveBeenCalledTimes(1);
     } finally {
       vi.useRealTimers();
     }

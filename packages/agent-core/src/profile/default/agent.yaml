@@ -40,6 +40,7 @@ tools:
   - ManagePlugin
   - WebSearch
   - Agent
+  - SendSubagentMessage
   - WolfPack
 
   - FetchURL

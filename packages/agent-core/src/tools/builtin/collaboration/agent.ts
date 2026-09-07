@@ -24,11 +24,14 @@ import { ToolAccesses } from '../../../loop/tool-access';
 import { isAbortError } from '../../../loop/errors';
 import type { ExecutableToolContext, ExecutableToolResult, ToolExecution } from '../../../loop/types';
 import type { ResolvedAgentProfile } from '../../../profile';
-import type { SessionSubagentHost, SubagentHandle } from '../../../session/subagent-host';
+import type {
+  SessionSubagentHost,
+  SubagentCompletion,
+  SubagentHandle,
+} from '../../../session/subagent-host';
 import {
-  createDeadlineAbortSignal,
   isUserCancellation,
-  type DeadlineAbortSignal,
+  linkAbortSignal,
 } from '../../../utils/abort';
 import type { BackgroundProcessManager } from '../../background/manager';
 import { toInputJsonSchema } from '../../support/input-schema';
@@ -219,7 +222,6 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
     signal,
     }: ExecutableToolContext,
   ): Promise<ExecutableToolResult> {
-    let foregroundDeadline: DeadlineAbortSignal | undefined;
     try {
       signal.throwIfAborted();
       const runInBackground = args.run_in_background === true;
@@ -266,17 +268,20 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
       }
       const backgroundController = runInBackground ? new AbortController() : undefined;
       const timeoutMs = args.timeout === undefined ? undefined : args.timeout * 1000;
-      foregroundDeadline =
-        !runInBackground && timeoutMs !== undefined
-          ? createDeadlineAbortSignal(signal, timeoutMs)
-          : undefined;
+      // Foreground child signal: user cancellation propagates through
+      // linkAbortSignal, but an explicit timeout only bounds this turn's wait —
+      // when it fires the still-running child is handed to the background task
+      // manager instead of being aborted, so completed work is never discarded
+      // (mirrors the reference implementation's foreground-budget auto-background).
+      const childController = new AbortController();
+      const unlinkChild = !runInBackground ? linkAbortSignal(signal, childController) : undefined;
 
       const options = {
         parentToolCallId: toolCallId,
         prompt: composeSubagentPrompt(args),
         description: args.description,
         runInBackground,
-        signal: backgroundController?.signal ?? foregroundDeadline?.signal ?? signal,
+        signal: backgroundController?.signal ?? childController.signal,
         outputSchema: args.output_schema,
         capabilityMode: args.capability_mode,
       };
@@ -343,6 +348,7 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
           `agent_id: ${handle.agentId}`,
           `actual_subagent_type: ${handle.profileName}`,
           'automatic_notification: true',
+          'cancel_semantics: Stopping this task (TaskStop) cancels it — its completion notification will not suggest resume. Only tasks that finish or fail on their own are recoverable via Agent(resume=...).',
           '',
           `description: ${args.description}`,
           '',
@@ -352,31 +358,26 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
         return { output: lines.join('\n') };
       }
 
+      // Foreground wait. With an explicit timeout the wait is bounded by a race:
+      // on timeout the still-running child is handed to the background task
+      // manager instead of being aborted (foreground-budget → auto-background,
+      // matching the reference implementation). Without a timeout (or when
+      // background dispatch is unavailable) we await completion directly.
       try {
-        const result = await handle.completion;
-        const lines = [
-          `agent_id: ${handle.agentId}`,
-          `actual_subagent_type: ${handle.profileName}`,
-          'status: completed',
-          '',
-          '[summary]',
-          result.result,
-        ];
-        // Structured output: when a schema was requested, try to parse the
-        // final answer as JSON and surface it as its own block. Parse failure
-        // is non-fatal — the raw text stays in [summary].
-        if (args.output_schema !== undefined) {
-          const structured = parseJsonObject(result.result);
-          if (structured !== undefined) {
-            lines.push('', '[structured]', JSON.stringify(structured));
-          }
+        const outcome = await this.awaitForegroundCompletion(
+          handle,
+          args.description,
+          timeoutMs,
+          childController,
+          unlinkChild,
+        );
+        if (outcome.kind === 'backgrounded') {
+          return { output: outcome.output };
         }
-        return { output: lines.join('\n') };
+        return { output: this.formatCompletion(handle, outcome.result, args.output_schema) };
       } catch (error) {
         let message: string;
-        if (foregroundDeadline?.timedOut() === true && args.timeout !== undefined) {
-          message = `Agent timed out after ${args.timeout}s.`;
-        } else if (isUserCancellation(signal.reason)) {
+        if (isUserCancellation(signal.reason)) {
           message =
             'The user manually interrupted this subagent (and any sibling agents launched alongside it). This was a deliberate user action, not a system error, a timeout, or a capacity/concurrency limit. Do not retry automatically or speculate about why it failed — wait for the user\'s next instruction.';
         } else if (isAbortError(error)) {
@@ -395,9 +396,7 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
       }
     } catch (error) {
       let message: string;
-      if (foregroundDeadline?.timedOut() === true && args.timeout !== undefined) {
-        message = `Agent timed out after ${args.timeout}s.`;
-      } else if (isUserCancellation(signal.reason)) {
+      if (isUserCancellation(signal.reason)) {
         message =
           'The user manually interrupted this subagent (and any sibling agents launched alongside it). This was a deliberate user action, not a system error, a timeout, or a capacity/concurrency limit. Do not retry automatically or speculate about why it failed — wait for the user\'s next instruction.';
       } else if (isAbortError(error)) {
@@ -406,9 +405,130 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
         message = error instanceof Error ? error.message : String(error);
       }
       return { output: `subagent error: ${message}`, isError: true };
-    } finally {
-      foregroundDeadline?.clear();
     }
+  }
+
+  /**
+   * Foreground completion wait with optional timeout.
+   *
+   * When `timeoutMs` is set and background dispatch is available, the wait is
+   * bounded by a race: if the child has not finished by the deadline it is
+   * handed to the background task manager (never aborted) and the caller
+   * receives a `backgrounded` outcome carrying the task id. This mirrors the
+   * reference implementation's foreground-budget → auto-background behaviour:
+   * a timeout degrades the wait, it does not destroy the subagent's work.
+   */
+  private async awaitForegroundCompletion(
+    handle: SubagentHandle,
+    description: string,
+    timeoutMs: number | undefined,
+    childController: AbortController,
+    unlinkChild: (() => void) | undefined,
+  ): Promise<
+    | { kind: 'completed'; result: SubagentCompletion }
+    | { kind: 'backgrounded'; output: string }
+  > {
+    if (timeoutMs === undefined || !this.allowBackground || this.backgroundManager === undefined) {
+      return { kind: 'completed', result: await handle.completion };
+    }
+
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const deadline: Promise<'timeout'> = new Promise((resolve) => {
+      timer = setTimeout(() => resolve('timeout'), timeoutMs);
+    });
+    try {
+      const outcome = await Promise.race([
+        handle.completion.then((result) => ({ kind: 'completed' as const, result })),
+        deadline.then(() => ({ kind: 'timeout' as const })),
+      ]);
+      if (outcome.kind === 'completed') return outcome;
+
+      // Timeout fired: the child is still running on childController.signal.
+      // Register it as a background task; a later user stop aborts it through
+      // the abort callback.
+      let taskId: string;
+      try {
+        taskId = this.backgroundManager.registerAgentTask(handle.completion, description, {
+          agentId: handle.agentId,
+          subagentType: handle.profileName,
+          abort: () => childController.abort(),
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        this.log?.warn('foreground→background handoff failed; child kept running', {
+          agentId: handle.agentId,
+          error,
+        });
+        // Registration failed: keep the parent→child link so the parent signal
+        // can still stop the child; do not orphan it.
+        return {
+          kind: 'backgrounded',
+          output: [
+            `agent_id: ${handle.agentId}`,
+            `actual_subagent_type: ${handle.profileName}`,
+            'status: backgrounded',
+            '',
+            `warning: timed out after ${timeoutMs}ms and could not register a background task: ${message}`,
+            '',
+            `resume_hint: The subagent is still running. To pick it up, call Agent(resume="${handle.agentId}", prompt="...").`,
+          ].join('\n'),
+        };
+      }
+      // Handoff succeeded: decouple the child from the parent signal so a later
+      // parent cancellation cannot kill the backgrounded task (matches the
+      // reference implementation's backgrounded lifecycle — only an explicit
+      // TaskStop of the background task aborts it from now on).
+      unlinkChild?.();
+      // Flip the child's lifecycle flag so cancelAll (parent-turn cancellation)
+      // skips it as well — otherwise a later user interruption would still
+      // abort the backgrounded child and mis-report it as "failed" instead of
+      // "cancelled".
+      this.subagentHost.markBackground?.(handle.agentId);
+      return {
+        kind: 'backgrounded',
+        output: [
+          `task_id: ${taskId}`,
+          'status: backgrounded',
+          `agent_id: ${handle.agentId}`,
+          `actual_subagent_type: ${handle.profileName}`,
+          'automatic_notification: true',
+          'cancel_semantics: Stopping this task (TaskStop) cancels it — its completion notification will not suggest resume. Only tasks that finish or fail on their own are recoverable via Agent(resume=...).',
+          '',
+          `description: ${description}`,
+          '',
+          `next_step: The subagent exceeded the foreground timeout (${timeoutMs}ms) and was moved to the background instead of being aborted. Its completion arrives automatically in a later turn — no polling needed. To peek at progress without blocking, call TaskOutput(task_id="${taskId}", block=false).`,
+          `resume_hint: To continue or recover this same subagent later, call Agent(resume="${handle.agentId}", prompt="..."). The parameter is agent_id ("${handle.agentId}"), NOT task_id ("${taskId}") or source_id from a later <notification>.`,
+        ].join('\n'),
+      };
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
+  }
+
+  /** Render the completed-subagent result text (summary + optional structured block). */
+  private formatCompletion(
+    handle: SubagentHandle,
+    result: SubagentCompletion,
+    outputSchema: string | undefined,
+  ): string {
+    const lines = [
+      `agent_id: ${handle.agentId}`,
+      `actual_subagent_type: ${handle.profileName}`,
+      'status: completed',
+      '',
+      '[summary]',
+      result.result,
+    ];
+    // Structured output: when a schema was requested, try to parse the final
+    // answer as JSON and surface it as its own block. Parse failure is
+    // non-fatal — the raw text stays in [summary].
+    if (outputSchema !== undefined) {
+      const structured = parseJsonObject(result.result);
+      if (structured !== undefined) {
+        lines.push('', '[structured]', JSON.stringify(structured));
+      }
+    }
+    return lines.join('\n');
   }
 }
 
@@ -456,7 +576,7 @@ function composeSubagentPrompt(args: AgentToolInput): string {
  * to parse. Returns undefined when the text is not parseable as a single JSON
  * object — callers treat that as "structured output unavailable".
  */
-function parseJsonObject(text: string): Record<string, unknown> | undefined {
+export function parseJsonObject(text: string): Record<string, unknown> | undefined {
   const fenced = text.match(/```json\s*([\s\S]*?)```/);
   const candidate = fenced ? fenced[1]!.trim() : text.trim();
   try {

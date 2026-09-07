@@ -259,6 +259,12 @@ export interface SubagentCompletedEvent {
   readonly resultSummary: string;
   readonly usage?: TokenUsage | undefined;
   readonly contextTokens?: number | undefined;
+  /** Number of child turns (initial turn + summary continuations). */
+  readonly turns?: number | undefined;
+  /** Wall-clock run duration in milliseconds. */
+  readonly durationMs?: number | undefined;
+  /** Total assistant tool calls across the child's history. */
+  readonly toolCallCount?: number | undefined;
 }
 
 export interface SubagentFailedEvent {

@@ -517,6 +517,10 @@ export class ToolCallComponent extends CachedContainer {
   private latestActivity: string | undefined;
   private subagentResultSummary: string | undefined;
   private subagentError: string | undefined;
+  /** Completion metadata from subagent.completed (turns/duration/tool calls). */
+  private subagentTurns: number | undefined;
+  private subagentDurationMs: number | undefined;
+  private subagentToolCallCount: number | undefined;
   private streamingProgressTimer: ReturnType<typeof setInterval> | undefined;
   private subagentElapsedTimer: ReturnType<typeof setInterval> | undefined;
   private disposed = false;
@@ -1060,6 +1064,9 @@ export class ToolCallComponent extends CachedContainer {
     contextTokens?: number | undefined;
     usage?: TokenUsage | undefined;
     resultSummary: string;
+    turns?: number | undefined;
+    durationMs?: number | undefined;
+    toolCallCount?: number | undefined;
   }): void {
     this.subagentPhase = 'done';
     this.subagentEndedAtMs ??= Date.now();
@@ -1067,6 +1074,9 @@ export class ToolCallComponent extends CachedContainer {
       this.subagentContextTokens = payload.contextTokens;
     }
     this.subagentUsage = payload.usage;
+    if (payload.turns !== undefined) this.subagentTurns = payload.turns;
+    if (payload.durationMs !== undefined) this.subagentDurationMs = payload.durationMs;
+    if (payload.toolCallCount !== undefined) this.subagentToolCallCount = payload.toolCallCount;
     this.subagentResultSummary =
       payload.resultSummary.length > 0 ? payload.resultSummary : undefined;
     if (this.subagentText.trim().length === 0 && this.subagentResultSummary !== undefined) {
@@ -1649,10 +1659,18 @@ export class ToolCallComponent extends CachedContainer {
 
   private formatSingleSubagentStatsText(): string {
     const parts = [
-      t('toolcall.tool_count', { count: this.subToolActivities.size }),
+      t('toolcall.tool_count', {
+        count: this.subagentToolCallCount ?? this.subToolActivities.size,
+      }),
     ];
-    const elapsed = this.getSubagentElapsedSeconds();
+    const elapsed =
+      this.subagentDurationMs !== undefined
+        ? Math.max(0, Math.floor(this.subagentDurationMs / 1000))
+        : this.getSubagentElapsedSeconds();
     if (elapsed !== undefined) parts.push(formatElapsed(elapsed));
+    if (this.subagentTurns !== undefined) {
+      parts.push(t('toolcall.turns', { count: this.subagentTurns }));
+    }
     const tokens =
       this.subagentContextTokens && this.subagentContextTokens > 0
         ? this.subagentContextTokens

@@ -103,7 +103,7 @@ When the user has toggled WolfPack mode on (`/wolfpack`), a second collaboration
 - The same prompt shape applies to many independent items (e.g. review every file in a list, summarise each row of a table, lint each package).
 - All items should use the **same `subagent_type`**.
 - Items have no inter-dependency.
-`WolfPack` spawns every item in parallel with no concurrency cap, then aggregates the per-item results. Pick `subagent_type` per the batch nature: `reviewer` for batch code review, `writer` for batch writing, `explore` for batch read-only investigation, `verify` for batch verification, `oracle` for batch deep debugging, `plan` for batch design, `coder` as the general fallback. The full profile list is included in the tool description.
+`WolfPack` spawns every item in parallel with no concurrency cap, then aggregates the per-item results. Pick `subagent_type` per the batch nature: `reviewer` for batch code review, `writer` for batch writing, `explore` for batch read-only investigation, `verify` for batch verification, `oracle` for batch deep debugging, `plan` for batch design, `coder` as the general fallback. The full profile list is included in the tool description. Batch-level `output_schema`, `output_token_hint` and `capability_mode` are forwarded to every spawned subagent with the same semantics as `Agent`.
 
 If the user has not enabled WolfPack mode, calling `WolfPack` returns an error — fall back to multiple `Agent` calls instead, or ask the user to enable `/wolfpack`.
 

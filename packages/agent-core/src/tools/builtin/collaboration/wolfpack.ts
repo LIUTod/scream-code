@@ -16,7 +16,7 @@ import type { ExecutableToolContext, ExecutableToolResult, ToolExecution } from 
 import type { SessionSubagentHost } from '../../../session/subagent-host';
 import type { ResolvedAgentProfile } from '../../../profile/types';
 import { toInputJsonSchema } from '../../support/input-schema';
-import { buildSubagentDescriptions } from './agent';
+import { buildSubagentDescriptions, parseJsonObject } from './agent';
 import WOLFPACK_DESCRIPTION from './wolfpack.md';
 
 // Unlimited subagent concurrency: spawn every item in parallel.
@@ -38,6 +38,27 @@ export const WolfPackToolInputSchema = z.object({
     .array(z.string().min(1))
     .min(1)
     .describe('Array of items to process. Each item gets its own subagent.'),
+  output_schema: z
+    .string()
+    .optional()
+    .describe(
+      'Optional JSON Schema (as a JSON string) describing the single JSON object each subagent should reply with. When provided, each item result that parses as a JSON object is surfaced as a [structured] block; parse failures are reported as structured: invalid alongside the raw text.',
+    ),
+  output_token_hint: z
+    .number()
+    .int()
+    .min(1)
+    .max(32768)
+    .optional()
+    .describe(
+      'Optional hint for the final-answer length of each subagent (keeps structured replies compact, e.g. 1024). Not an enforced cap.',
+    ),
+  capability_mode: z
+    .enum(['read-only', 'read-write', 'execute', 'all'])
+    .optional()
+    .describe(
+      'Runtime capability isolation applied to every spawned subagent: read-only (no writes/execution), read-write (no execution), execute (commands allowed, external side effects still gated), all (full, default). Restricted modes also strip MCP tools and nested Agent/SendSubagentMessage/WolfPack tools at runtime.',
+    ),
 });
 
 export type WolfPackToolInput = z.infer<typeof WolfPackToolInputSchema>;
@@ -116,13 +137,19 @@ export class WolfPackTool implements BuiltinTool<WolfPackToolInput> {
     const handlePromises = args.items.map(async (item) => {
       ctx.signal.throwIfAborted();
       try {
-        const prompt = template.replaceAll('{{item}}', () => item);
+        const renderedTemplate = template.replaceAll('{{item}}', () => item);
+        const prompt =
+          args.output_token_hint !== undefined
+            ? `${renderedTemplate}\n\nKeep your final answer within ${args.output_token_hint} tokens.`
+            : renderedTemplate;
         const handle = await this.subagentHost.spawn(profileName, {
           parentToolCallId: ctx.toolCallId,
           prompt,
           description: `${args.description}: ${item}`,
           runInBackground: false,
           signal: ctx.signal,
+          outputSchema: args.output_schema,
+          capabilityMode: args.capability_mode,
         });
         return { item, handle };
       } catch (error) {
@@ -152,9 +179,17 @@ export class WolfPackTool implements BuiltinTool<WolfPackToolInput> {
             this.timeoutMs,
             ctx.signal,
           );
+          const structured =
+            args.output_schema !== undefined ? parseJsonObject(completion.result) : undefined;
+          const result =
+            structured !== undefined
+              ? `${completion.result}\n\n[structured]\n${JSON.stringify(structured)}`
+              : args.output_schema !== undefined
+                ? `${completion.result}\n\nstructured: invalid (response was not a JSON object)`
+                : completion.result;
           return {
             item,
-            result: completion.result,
+            result,
             success: true,
             agentId: handle.agentId,
           };

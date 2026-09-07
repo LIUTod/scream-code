@@ -624,6 +624,7 @@ export const en: Record<string, string> = {
   'toolcall.running': 'Running',
   'toolcall.completed': 'Completed',
   'toolcall.tool_count': '{count} tools',
+  'toolcall.turns': '{count} turns',
   'toolcall.failed': 'Failed',
   'toolcall.bg_running': 'Background',
   'toolcall.truncation_notice': 'Tool call arguments truncated due to max_tokens — call not executed.',
