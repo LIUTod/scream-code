@@ -117,7 +117,7 @@ export const zh: Record<string, string> = {
   'footer.hit': 'HitR',
   'footer.tasks_running': '{count}个任务 运行中',
   'footer.agents_running': '{count}个代理 运行中',
-  'footer.subagents_working': '{count}个子代理 工作中',
+  'footer.subagents_working': '{count}个子Agent 工作中',
 
 
   'input.replay_blocked': '会话历史正在回放时无法发送输入。',

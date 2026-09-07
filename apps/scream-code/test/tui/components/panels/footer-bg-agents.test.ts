@@ -114,7 +114,7 @@ describe('FooterComponent — background task / agent badges', () => {
     const footer = makeFooter(baseState());
     footer.setBackgroundCounts({ bashTasks: 0, agentTasks: 0, foregroundSubagents: 2 });
     const out = strip(footer.render(160)[0]!);
-    expect(out).toMatch(/\[2个子代理 工作中\]/);
+    expect(out).toMatch(/\[2个子Agent 工作中\]/);
     expect(out).not.toMatch(/tasks? running/);
     expect(out).not.toMatch(/agents? running/);
   });
@@ -123,7 +123,7 @@ describe('FooterComponent — background task / agent badges', () => {
     const footer = makeFooter(baseState());
     footer.setBackgroundCounts({ bashTasks: 0, agentTasks: 0, foregroundSubagents: 0 });
     const out = strip(footer.render(160)[0]!);
-    expect(out).not.toMatch(/子代理/);
+    expect(out).not.toMatch(/子Agent/);
   });
 
   it('renders subagents badge alongside background agents (P1 coexistence)', () => {
@@ -132,6 +132,6 @@ describe('FooterComponent — background task / agent badges', () => {
     const out = strip(footer.render(160)[0]!);
     expect(out).toMatch(/\[1个任务 运行中\]/);
     expect(out).toMatch(/\[1个代理 运行中\]/);
-    expect(out).toMatch(/\[3个子代理 工作中\]/);
+    expect(out).toMatch(/\[3个子Agent 工作中\]/);
   });
 });
