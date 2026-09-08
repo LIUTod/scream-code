@@ -162,6 +162,7 @@ export function createProgram(
     .option('--lan', '开启局域网共享（同网设备凭网关密钥访问）', false)
     .option('--token <key>', '自定义网关访问密钥（保存后供 --lan 使用）')
     .option('--reset-password', '交互式重设网关访问密钥', false)
+    .option('--idle-minutes <minutes>', '无浏览器连接 N 分钟后自动退出（0=禁用，默认 15）', '15')
     .option(
       '--skills-dir <dir>',
       '从该目录加载技能（可多次指定）',
@@ -169,6 +170,7 @@ export function createProgram(
       [] as string[],
     )
     .action((subOpts: Record<string, unknown>) => {
+      const idleMinutes = Number(subOpts['idleMinutes'] ?? '15');
       onWeb({
         port: parseInt(subOpts['port'] as string, 10) || 3210,
         model: subOpts['model'] as string | undefined,
@@ -179,6 +181,7 @@ export function createProgram(
         lan: (subOpts['lan'] as boolean) ?? false,
         token: subOpts['token'] as string | undefined,
         resetPassword: (subOpts['resetPassword'] as boolean) ?? false,
+        idleMinutes: Number.isFinite(idleMinutes) && idleMinutes >= 0 ? idleMinutes : 15,
       });
     });
 

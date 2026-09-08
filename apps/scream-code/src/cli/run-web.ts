@@ -27,6 +27,8 @@ export interface WebOptions {
   readonly token?: string;
   /** Interactively replace the stored gateway access key. */
   readonly resetPassword: boolean;
+  /** Minutes without a browser connection before the server exits; 0 disables. Default 15. */
+  readonly idleMinutes: number;
 }
 
 function promptSecret(question: string): Promise<string | null> {
@@ -81,5 +83,6 @@ export async function runWeb(opts: WebOptions): Promise<void> {
     skillsDirs: opts.skillsDirs,
     lan: opts.lan,
     token,
+    idleMinutes: opts.idleMinutes,
   });
 }

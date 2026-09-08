@@ -870,6 +870,12 @@ class WebSession {
   private heartbeatTimer: NodeJS.Timeout | null = null;
   private unsubscribe: (() => void) | null = null;
   private busy = false;
+  /**
+   * In-flight turn count across all agents (main + subagents). Used by the
+   * idle-exit watchdog: a single boolean is not enough because a subagent's
+   * `turn.ended` must not clear the busy state of a still-running main turn.
+   */
+  private activeTurns = 0;
 
   /**
    * Live assistant message under construction. Mirrors the same state machine
@@ -932,6 +938,11 @@ class WebSession {
 
   get isBusy(): boolean {
     return this.busy;
+  }
+
+  /** True while any agent turn (main or subagent) is in flight. */
+  get isTurnActive(): boolean {
+    return this.activeTurns > 0;
   }
 
   getTitle(): string {
@@ -1081,6 +1092,7 @@ class WebSession {
 
       if (event.type === 'turn.started') {
         this.busy = true;
+        this.activeTurns += 1;
         this.liveTurnCount += 1;
         this.liveAssistant = {
           role: 'assistant',
@@ -1100,7 +1112,8 @@ class WebSession {
           },
         };
       } else if (event.type === 'turn.ended') {
-        this.busy = false;
+        this.activeTurns = Math.max(0, this.activeTurns - 1);
+        this.busy = this.activeTurns > 0;
         // Persist the complete assistant snapshot BEFORE turn.ended so the
         // journal replay sees finalized → turn.ended in order.
         const live = this.liveAssistant;
@@ -1311,6 +1324,7 @@ class WebSession {
         this.broadcast({ type: 'user_message', clientMessageId, text }, false);
         void this.session.prompt(text).catch((error: unknown) => {
           this.busy = false;
+          this.activeTurns = 0;
           this.sendError(ws, error, clientMessageId);
         });
         break;
@@ -1825,6 +1839,7 @@ class WebSession {
       await session.prompt(prompt);
     } catch (error) {
       this.busy = false;
+      this.activeTurns = 0;
       throw error;
     }
   }
@@ -2274,6 +2289,11 @@ export class SessionManager {
       .toSorted((a, b) => b.createdAt - a.createdAt);
   }
 
+  /** True when any session has an agent turn (main or subagent) in flight (used to defer idle exit). */
+  anyBusy(): boolean {
+    return Array.from(this.sessions.values()).some((s) => s.isTurnActive);
+  }
+
   async delete(sessionId: string): Promise<boolean> {
     const ws = this.sessions.get(sessionId);
     if (!ws) return false;
@@ -2565,6 +2585,8 @@ export async function startWebServerForSession(session: Session, opts: {
   readonly workDir: string;
   readonly yolo: boolean;
   readonly open: boolean;
+  /** Minutes without a browser connection before idle exit; 0 disables. Default 15. */
+  readonly idleMinutes?: number;
 }): Promise<WebServerHandle> {
   const permission = opts.yolo ? 'yolo' : 'manual';
   const webSession = new WebSession(session, {
@@ -2594,9 +2616,17 @@ export async function startWebServerForSession(session: Session, opts: {
     }
   }
 
+  const idleExit = startWebIdleExit({
+    idleMs: (opts.idleMinutes ?? WEB_IDLE_EXIT_DEFAULT_MINUTES) * 60_000,
+    busy: () => webSession.isBusy,
+    shutdown: () => close(),
+  });
+
   const httpServer: HttpServer = createServer(async (req: IncomingMessage, res) => {
     const url = req.url ?? '/';
     const method = req.method ?? 'GET';
+
+    idleExit.touch();
 
     if (await handleGoalRoute(req, res, url, (sessionId) => sessionId === webSession.sessionId ? webSession : undefined)) {
       return;
@@ -2695,28 +2725,43 @@ export async function startWebServerForSession(session: Session, opts: {
   });
 
   const wss = new WebSocketServer({ server: httpServer });
+  // ws forwards HTTP-server errors onto its own 'error' event. Without a
+  // listener that re-throws synchronously during `server.emit('error')`, which
+  // interrupts the listener chain before the promise-based listen handler
+  // below can reject — an EADDRINUSE would crash the process instead.
+  wss.on('error', () => {});
 
   wss.on('connection', (ws: WebSocket) => {
+    idleExit.noteConnection();
+    ws.once('close', () => {
+      idleExit.noteDisconnect();
+    });
     webSession.addConnection(ws);
   });
 
   try {
     await webSession.ready;
   } catch (error) {
+    idleExit.stop();
     wss.close();
     await webSession.close();
     throw error;
   }
-  await new Promise<void>((resolve, reject) => {
-    httpServer.once('error', (err: NodeJS.ErrnoException) => {
-      if (err.code === 'EADDRINUSE') {
-        reject(new Error(`端口 ${opts.port} 已被占用，请先关闭占用该端口的进程，或使用 --port <port> 指定其他端口。`));
-      } else {
-        reject(err);
-      }
+  try {
+    await new Promise<void>((resolve, reject) => {
+      httpServer.once('error', (err: NodeJS.ErrnoException) => {
+        if (err.code === 'EADDRINUSE') {
+          reject(new Error(`端口 ${opts.port} 已被占用，请先关闭占用该端口的进程，或使用 --port <port> 指定其他端口。`));
+        } else {
+          reject(err);
+        }
+      });
+      httpServer.listen(opts.port, '127.0.0.1', resolve);
     });
-    httpServer.listen(opts.port, '127.0.0.1', resolve);
-  });
+  } catch (error) {
+    idleExit.stop();
+    throw error;
+  }
 
   const address = httpServer.address() as AddressInfo;
   const url = `http://localhost:${address.port}`;
@@ -2727,7 +2772,11 @@ export async function startWebServerForSession(session: Session, opts: {
     exec(`${openCmd} ${url}`);
   }
 
+  let closed = false;
   const close = async (): Promise<void> => {
+    if (closed) return;
+    closed = true;
+    idleExit.stop();
     wss.close();
     await webSession.close();
     await new Promise<void>((resolve) => {
@@ -2738,11 +2787,81 @@ export async function startWebServerForSession(session: Session, opts: {
   return { url, close };
 }
 
+// ─── Idle exit watchdog ───────────────────────────────────────────────────
+// `scream web` must not linger as a headless process: once the last browser
+// disconnects and no HTTP activity arrives for the idle window, the server
+// shuts itself down through the same clean path as a manual stop.
+
+/** Minutes without a browser connection before `scream web` exits; 0 disables. */
+export const WEB_IDLE_EXIT_DEFAULT_MINUTES = 15;
+
+/**
+ * Watchdog shared by both web entry points. Detects "nobody is using the UI"
+ * as: zero WebSocket connections AND no HTTP request for `idleMs`, with an
+ * in-flight agent turn (`busy()`) deferring the exit so background work is
+ * never interrupted. The `shutdown` call is awaited before `exit` and must be
+ * idempotent (it can race with a manual SIGINT/SIGTERM stop).
+ */
+export function startWebIdleExit(opts: {
+  /** Idle window in ms; a non-positive value disables the watchdog. */
+  readonly idleMs: number;
+  /** True while an agent turn is in flight — exit is deferred. */
+  readonly busy: () => boolean;
+  /** Cleanup to run before exiting (awaited before `exit`). */
+  readonly shutdown: () => Promise<void> | void;
+  /** Process exit; tests intercept it. Defaults to `process.exit(0)`. */
+  readonly exit?: (code: number) => unknown;
+}): {
+  /** Record HTTP activity (resets the idle window). */
+  touch: () => void;
+  /** Record a WebSocket connection (also resets the idle window). */
+  noteConnection: () => void;
+  /** Record a WebSocket disconnect (starts the idle window). */
+  noteDisconnect: () => void;
+  /** Drop the watchdog (idempotent). */
+  stop: () => void;
+} {
+  const idleMs = opts.idleMs;
+  if (!(idleMs > 0)) {
+    return { touch: () => {}, noteConnection: () => {}, noteDisconnect: () => {}, stop: () => {} };
+  }
+  const exitFn = opts.exit ?? ((code: number) => process.exit(code));
+  let activeConnections = 0;
+  let lastActivityAt = Date.now();
+  // Keep the trigger within ~1 min for the 15 min default while still being
+  // fast enough for millisecond-scale tests.
+  const checkMs = Math.min(60_000, Math.max(100, idleMs / 2));
+  const timer = setInterval(() => {
+    if (activeConnections > 0) return; // a browser is attached
+    if (opts.busy()) return; // agent turn in flight — defer
+    if (Date.now() - lastActivityAt < idleMs) return;
+    void Promise.resolve(opts.shutdown()).finally(() => exitFn(0));
+  }, checkMs);
+  return {
+    touch: () => {
+      lastActivityAt = Date.now();
+    },
+    noteConnection: () => {
+      activeConnections += 1;
+      lastActivityAt = Date.now();
+    },
+    noteDisconnect: () => {
+      activeConnections = Math.max(0, activeConnections - 1);
+      lastActivityAt = Date.now();
+    },
+    stop: () => {
+      clearInterval(timer);
+    },
+  };
+}
+
 // ─── Standalone CLI entry: scream web ─────────────────────────────────────
 
 export interface WebServerOptions {
   readonly port: number;
   readonly workDir: string;
+  /** Minutes without a browser connection before idle exit; 0 disables. Default 15. */
+  readonly idleMinutes?: number;
   readonly model?: string;
   readonly yolo: boolean;
   readonly auto: boolean;
@@ -3193,9 +3312,17 @@ export async function runWebServer(opts: WebServerOptions): Promise<WebServerHan
     }
   }
 
+  const idleExit = startWebIdleExit({
+    idleMs: (opts.idleMinutes ?? WEB_IDLE_EXIT_DEFAULT_MINUTES) * 60_000,
+    busy: () => manager.anyBusy(),
+    shutdown: () => cleanup(),
+  });
+
   const httpServer: HttpServer = createServer(async (req: IncomingMessage, res) => {
     const url = req.url ?? '/';
     const method = req.method ?? 'GET';
+
+    idleExit.touch();
 
     // ── Gateway auth gate (LAN mode) ──────────────────────────────────────
     // Loopback clients are always trusted; non-local clients must present a
@@ -3569,8 +3696,15 @@ export async function runWebServer(opts: WebServerOptions): Promise<WebServerHan
 
   // ── WebSocket server ───────────────────────────────────────────────────
   const wss = new WebSocketServer({ server: httpServer });
+  // Same guard as startWebServerForSession: keep the HTTP-server 'error'
+  // listener chain intact on listen failures (e.g. EADDRINUSE).
+  wss.on('error', () => {});
 
   wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
+    idleExit.noteConnection();
+    ws.once('close', () => {
+      idleExit.noteDisconnect();
+    });
     if (gateway && !isLoopbackAddress(req.socket.remoteAddress) && !gateway.verifySession(req.headers.cookie)) {
       ws.close(1008, 'unauthorized');
       return;
@@ -3628,16 +3762,21 @@ export async function runWebServer(opts: WebServerOptions): Promise<WebServerHan
     ws.send(JSON.stringify({ type: 'server_empty' }));
   });
 
-  await new Promise<void>((resolve, reject) => {
-    httpServer.once('error', (err: NodeJS.ErrnoException) => {
-      if (err.code === 'EADDRINUSE') {
-        reject(new Error(`端口 ${opts.port} 已被占用，请先关闭占用该端口的进程，或使用 --port <port> 指定其他端口。`));
-      } else {
-        reject(err);
-      }
+  try {
+    await new Promise<void>((resolve, reject) => {
+      httpServer.once('error', (err: NodeJS.ErrnoException) => {
+        if (err.code === 'EADDRINUSE') {
+          reject(new Error(`端口 ${opts.port} 已被占用，请先关闭占用该端口的进程，或使用 --port <port> 指定其他端口。`));
+        } else {
+          reject(err);
+        }
+      });
+      httpServer.listen(opts.port, host, resolve);
     });
-    httpServer.listen(opts.port, host, resolve);
-  });
+  } catch (error) {
+    idleExit.stop();
+    throw error;
+  }
 
   const address = httpServer.address();
   const realPort = typeof address === 'object' && address !== null ? address.port : opts.port;
@@ -3654,6 +3793,7 @@ export async function runWebServer(opts: WebServerOptions): Promise<WebServerHan
   const cleanup = async (): Promise<void> => {
     if (cleaned) return;
     cleaned = true;
+    idleExit.stop();
     try {
       wss.close();
       await manager.closeAll();
@@ -3673,11 +3813,15 @@ export async function runWebServer(opts: WebServerOptions): Promise<WebServerHan
     void cleanup().finally(() => process.exit(0));
   });
 
+  const idleMinutes = opts.idleMinutes ?? WEB_IDLE_EXIT_DEFAULT_MINUTES;
   let banner =
     `\n  Scream Web UI ready: ${url}\n` +
     `  Working directory: ${workDir}\n` +
     `  Sessions: ${manager.list().length} (${manager.list().filter((s) => s.active).length} active)\n` +
-    `  Permission: ${opts.yolo ? 'yolo' : opts.auto ? 'auto' : 'manual'}\n`;
+    `  Permission: ${opts.yolo ? 'yolo' : opts.auto ? 'auto' : 'manual'}\n` +
+    (idleMinutes > 0
+      ? `  Idle exit: ${idleMinutes}m without a browser connection (--idle-minutes <n> to change, 0 = disable)\n`
+      : `  Idle exit: disabled (--idle-minutes 0)\n`);
 
   if (gateway) {
     const addrs = getLanAddresses();

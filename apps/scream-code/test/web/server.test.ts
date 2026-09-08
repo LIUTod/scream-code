@@ -12,9 +12,9 @@ import {
   type TodoItem,
 } from '@scream-code/scream-code-sdk';
 import { WebSocket } from 'ws';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { SessionManager, startWebServerForSession, type WebServerHandle } from '#/web/server';
+import { SessionManager, startWebIdleExit, startWebServerForSession, type WebServerHandle } from '#/web/server';
 
 interface Deferred<T> {
   readonly promise: Promise<T>;
@@ -563,4 +563,207 @@ describe('Web/core session ID restoration', () => {
     expect(harness.forkSession).toHaveBeenCalledWith({ id: 'core-id' });
     await manager.closeAll();
   });
+});
+
+describe('Web idle exit (watchdog unit)', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('exits after the idle window when nobody is connected', async () => {
+    vi.useFakeTimers();
+    const shutdown = vi.fn();
+    const exit = vi.fn();
+    const watch = startWebIdleExit({ idleMs: 1000, busy: () => false, shutdown, exit });
+    await vi.advanceTimersByTimeAsync(1100);
+    expect(shutdown).toHaveBeenCalledTimes(1);
+    expect(exit).toHaveBeenCalledWith(0);
+    watch.stop();
+  });
+
+  it('defers the exit while a browser connection is open, then exits after it disconnects', async () => {
+    vi.useFakeTimers();
+    const shutdown = vi.fn();
+    const exit = vi.fn();
+    const watch = startWebIdleExit({ idleMs: 1000, busy: () => false, shutdown, exit });
+    watch.noteConnection();
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(shutdown).not.toHaveBeenCalled();
+    watch.noteDisconnect();
+    await vi.advanceTimersByTimeAsync(1100);
+    expect(shutdown).toHaveBeenCalledTimes(1);
+    expect(exit).toHaveBeenCalledWith(0);
+    watch.stop();
+  });
+
+  it('defers the exit while an agent turn is in flight, then exits after it ends', async () => {
+    vi.useFakeTimers();
+    const shutdown = vi.fn();
+    const exit = vi.fn();
+    let busy = true;
+    const watch = startWebIdleExit({ idleMs: 1000, busy: () => busy, shutdown, exit });
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(shutdown).not.toHaveBeenCalled();
+    busy = false;
+    await vi.advanceTimersByTimeAsync(500);
+    expect(shutdown).toHaveBeenCalledTimes(1);
+    watch.stop();
+  });
+
+  it('resets the idle window on HTTP activity', async () => {
+    vi.useFakeTimers();
+    const shutdown = vi.fn();
+    const exit = vi.fn();
+    const watch = startWebIdleExit({ idleMs: 1000, busy: () => false, shutdown, exit });
+    await vi.advanceTimersByTimeAsync(600);
+    watch.touch();
+    await vi.advanceTimersByTimeAsync(600);
+    expect(shutdown).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(900);
+    expect(shutdown).toHaveBeenCalledTimes(1);
+    watch.stop();
+  });
+
+  it('is a no-op when idleMs is not positive', async () => {
+    vi.useFakeTimers();
+    const shutdown = vi.fn();
+    const exit = vi.fn();
+    const watch = startWebIdleExit({ idleMs: 0, busy: () => false, shutdown, exit });
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(shutdown).not.toHaveBeenCalled();
+    expect(exit).not.toHaveBeenCalled();
+    watch.touch();
+    watch.noteConnection();
+    watch.noteDisconnect();
+    watch.stop();
+  });
+});
+
+describe('Web idle exit (server integration)', () => {
+  let exitSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
+  });
+
+  afterEach(() => {
+    exitSpy.mockRestore();
+  });
+
+  async function waitForServerClosed(timeoutMs = 8000): Promise<void> {
+    // Poll the exit spy instead of fetching the server: any HTTP request would
+    // reset the idle window and keep the server alive forever.
+    await vi.waitFor(() => {
+      expect(exitSpy).toHaveBeenCalledWith(0);
+    }, { timeout: timeoutMs, interval: 50 });
+  }
+
+  it('shuts itself down when the browser never connects', async () => {
+    const control = makeFakeSession();
+    const handle = await startWebServerForSession(control.session, {
+      port: 0,
+      workDir: '/tmp/project',
+      yolo: false,
+      open: false,
+      idleMinutes: 0.006, // 360 ms
+    });
+    handles.push(handle);
+    await waitForServerClosed();
+  }, 10_000);
+
+  it('stays alive while a browser socket is connected', async () => {
+    const control = makeFakeSession();
+    const handle = await startWebServerForSession(control.session, {
+      port: 0,
+      workDir: '/tmp/project',
+      yolo: false,
+      open: false,
+      idleMinutes: 0.006,
+    });
+    handles.push(handle);
+    const { socket } = await openSocket(handle.url);
+    await new Promise((resolve) => setTimeout(resolve, 1200)); // > 3× idle window
+    expect(exitSpy).not.toHaveBeenCalled();
+    expect(socket.readyState).toBe(WebSocket.OPEN);
+    socket.close();
+  }, 10_000);
+
+  it('resets the idle window on HTTP activity', async () => {
+    const control = makeFakeSession();
+    const handle = await startWebServerForSession(control.session, {
+      port: 0,
+      workDir: '/tmp/project',
+      yolo: false,
+      open: false,
+      idleMinutes: 0.006,
+    });
+    handles.push(handle);
+    for (let i = 0; i < 5; i++) {
+      await fetch(`${handle.url}/`).catch(() => {});
+      await new Promise((resolve) => setTimeout(resolve, 250)); // every 250ms < 360ms window
+    }
+    expect(exitSpy).not.toHaveBeenCalled();
+  }, 10_000);
+
+  it('never exits when idle exit is disabled', async () => {
+    const control = makeFakeSession();
+    const handle = await startWebServerForSession(control.session, {
+      port: 0,
+      workDir: '/tmp/project',
+      yolo: false,
+      open: false,
+      idleMinutes: 0,
+    });
+    handles.push(handle);
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    expect(exitSpy).not.toHaveBeenCalled();
+    const response = await fetch(`${handle.url}/`).catch(() => null);
+    expect(response).not.toBeNull();
+  }, 10_000);
+
+  it('defers the exit while a subagent turn is nested under the main turn', async () => {
+    const control = makeFakeSession();
+    const handle = await startWebServerForSession(control.session, {
+      port: 0,
+      workDir: '/tmp/project',
+      yolo: false,
+      open: false,
+      idleMinutes: 0.006,
+    });
+    handles.push(handle);
+    // Main turn starts → subagent runs and finishes → main turn still in flight.
+    control.emit({ type: 'turn.started', sessionId: 'session-1', agentId: 'main' } as unknown as Event);
+    control.emit({ type: 'turn.started', sessionId: 'session-1', agentId: 'sub' } as unknown as Event);
+    control.emit({ type: 'turn.ended', sessionId: 'session-1', agentId: 'sub' } as unknown as Event);
+    await new Promise((resolve) => setTimeout(resolve, 1200)); // > 3× idle window
+    expect(exitSpy).not.toHaveBeenCalled();
+    control.emit({ type: 'turn.ended', sessionId: 'session-1', agentId: 'main' } as unknown as Event);
+    await vi.waitFor(() => {
+      expect(exitSpy).toHaveBeenCalledWith(0);
+    }, { timeout: 8000, interval: 50 });
+  }, 10_000);
+
+  it('stops the watchdog when the port is already taken', async () => {
+    const control = makeFakeSession();
+    const first = await startWebServerForSession(control.session, {
+      port: 0,
+      workDir: '/tmp/project',
+      yolo: false,
+      open: false,
+      idleMinutes: 0,
+    });
+    handles.push(first);
+    const takenPort = Number(new URL(first.url).port);
+    const control2 = makeFakeSession();
+    await expect(startWebServerForSession(control2.session, {
+      port: takenPort,
+      workDir: '/tmp/project',
+      yolo: false,
+      open: false,
+      idleMinutes: 0.006,
+    })).rejects.toThrow(/已被占用/);
+    // Wait past one watchdog check cycle: a leaked timer would crash on the
+    // TDZ bound `close` (uncaught exception fails the test runner).
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+  }, 10_000);
 });
