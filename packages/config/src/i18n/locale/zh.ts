@@ -776,6 +776,10 @@ export const zh: Record<string, string> = {
   'usage.context_window': '上下文窗口',
   'usage.subagent_title': '子 Agent 用量',
   'usage.panel_title': ' 用量 ',
+  'usage.session_total': '会话总计',
+  'usage.main_agent': '主 Agent',
+  'usage.sub_agent': '子 Agent',
+  'usage.model': '模型',
 
   // ─── Agent 组 ───────────────────
   'agentgroup.n_agent_done': '{total} 个 {name} agent 已完成',

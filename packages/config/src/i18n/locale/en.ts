@@ -775,6 +775,10 @@ export const en: Record<string, string> = {
   'usage.context_window': 'Context Window',
   'usage.subagent_title': 'Sub-Agent Usage',
   'usage.panel_title': ' Usage ',
+  'usage.session_total': 'Session Total',
+  'usage.main_agent': 'Main Agent',
+  'usage.sub_agent': 'Sub-Agent',
+  'usage.model': 'Model',
 
   // ─── Agent group ────────────────
   'agentgroup.n_agent_done': '{total} {name} agent(s) done',

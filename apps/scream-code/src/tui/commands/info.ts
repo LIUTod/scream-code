@@ -60,6 +60,7 @@ export async function showUsage(host: SlashCommandHost): Promise<void> {
     managedUsage: managedUsage?.usage,
     managedUsageError: managedUsage?.error,
     subagentUsage: host.state.appState.subagentUsage,
+    terminalWidth: host.state.terminal.columns,
   });
   dismissInfoPanel(host.state);
   const panel = new UsagePanelComponent(lines, host.state.theme.colors.primary);
