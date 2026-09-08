@@ -38,7 +38,7 @@ import type { ExecutableToolContext, ExecutableToolResult, ToolExecution } from 
 import { renderPrompt } from '../../../utils/render-prompt';
 import type { BackgroundProcessManager } from '../../background/manager';
 import { toInputJsonSchema } from '../../support/input-schema';
-import { literalRulePattern, matchesGlobRuleSubject } from '../../support/rule-match';
+import { commandApprovalRule, matchesCommandRule } from '../../support/command-rule';
 import { ToolResultBuilder } from '../../support/result-builder';
 import bashDescriptionTemplate from './bash.md';
 import { createBackgroundTask, drainCompletedBackgroundTasks } from './background-tasks';
@@ -391,8 +391,8 @@ export class BashTool implements BuiltinTool<BashInput> {
         description: args.description,
         language: 'bash',
       },
-      approvalRule: literalRulePattern(this.name, args.command),
-      matchesRule: (ruleArgs) => matchesGlobRuleSubject(ruleArgs, args.command),
+      approvalRule: commandApprovalRule(this.name, args.command),
+      matchesRule: (ruleArgs) => matchesCommandRule(ruleArgs, args.command),
       execute: (ctx) => this.execution(args, ctx),
     };
   }
