@@ -9,6 +9,8 @@ import { getLogDir } from '#/utils/paths';
 import { writeTextClipboard } from '#/utils/clipboard/clipboard-text';
 import { createRenderBatcher, type RenderBatchController } from './utils/render-batcher';
 
+import { SidebarContainer } from './components/sidebar/sidebar-container';
+import { SidebarManager } from './components/sidebar/sidebar-manager';
 import { ErrorBannerComponent } from './components/chrome/error-banner';
 import { FooterComponent } from './components/chrome/footer';
 import { GutterContainer } from './components/chrome/gutter-container';
@@ -49,6 +51,10 @@ export interface TUIState {
    * lifecycle-controller.buildLayout. Full-screen overlays (approval
    * preview, tasks browser) swap it temporarily and restore it on close. */
   layoutRoot: Component | undefined;
+  /** Sidebar panel registry/state (owned here so views and commands share it). */
+  sidebarManager: SidebarManager;
+  /** Renders the active sidebar panel inside the top-level HStack. */
+  sidebarContainer: SidebarContainer;
   transcriptContainer: Container;
   activityContainer: Container;
   statusBarContainer: Container;
@@ -119,7 +125,7 @@ export function createTUIState(options: ScreamTUIOptions): TUIState {
         const base64 = Buffer.from(text, 'utf8').toString('base64');
         if (base64.length > OSC52_MAX_TEXT_LENGTH) return false;
         try {
-          terminal.write(`\x1B]52;c;${base64}\u0007`);
+          terminal.write(`\u001B]52;c;${base64}\u0007`);
         } catch {
           // Terminal gone — nothing more we can do.
           return false;
@@ -206,10 +212,23 @@ export function createTUIState(options: ScreamTUIOptions): TUIState {
     ui.requestRender();
   });
 
+  // Sidebar panel state is created once and shared by the layout (buildLayout)
+  // and the commands/keybindings. The width store can be wired to config later;
+  // here it stays in-memory for the session.
+  const sidebarManager = new SidebarManager(() => ui.requestRender());
+  const sidebarContainer = new SidebarContainer(
+    sidebarManager,
+    () => ui.requestRender(),
+    theme.colors.primary,
+  );
+  editor.onToggleSidebar = () => sidebarManager.toggle();
+
   return {
     ui,
     terminal,
     layoutRoot: undefined,
+    sidebarManager,
+    sidebarContainer,
     transcriptContainer,
     activityContainer,
     statusBarContainer,

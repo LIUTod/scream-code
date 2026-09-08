@@ -1194,6 +1194,7 @@ export const zh: Record<string, string> = {
   'registry.wolfpack_desc': '切换群狼协作模式，自动批准+批量并发',
   'registry.sessions_desc': '浏览并恢复会话',
   'registry.goal_desc': '查看/管理自动目标',
+  'registry.sidebar_desc': '打开/关闭侧边面板（Ctrl+X 快速开关）',
   'registry.memory_desc': '浏览、搜索、注入记忆备忘录',
   'registry.knowledge_desc': '管理本地知识库（摄入/搜索/删除/统计）',
   'registry.new_desc': '在当前工作区开启新会话',

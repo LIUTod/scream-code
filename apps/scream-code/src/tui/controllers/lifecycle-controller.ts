@@ -1,10 +1,13 @@
 import type { Session, ScreamHarness } from '@scream-code/scream-code-sdk';
 import { t } from '@scream-code/config';
-import { Container, ScrollView, VStack, type Component } from '@liutod-scream/pi-tui';
+import { Container, HStack, ScrollView, VStack, type Component } from '@liutod-scream/pi-tui';
 import { GutterContainer } from '../components/chrome/gutter-container';
 import { isEmptySessionHintDismissed } from '../utils/ui-preferences';
 import { SESSION_TIPS, TIP_ROTATION_INTERVAL_MS } from '../constant/scream-tui';
 import { StatusBarPaneComponent } from '../components/panes/status-bar-pane';
+import { SIDEBAR_MIN_VIEWPORT_WIDTH } from '../components/sidebar/sidebar-panel';
+import { statusPanel } from '../components/sidebar/panels/status-panel';
+import { tasksPanel } from '../components/sidebar/panels/tasks-panel';
 import { CHROME_GUTTER } from '../constant/rendering';
 import type { AuthFlowController } from './auth-flow';
 import type { SessionEventHandler } from './session-event-handler';
@@ -288,8 +291,48 @@ export class LifecycleController {
         minSize: 1,
       },
     ]);
-    const layoutRoot = new VStack([
+    // Register the sidebar panels once (idempotent). The status panel is the
+    // first display-only panel; more (tasks/subagents/file-tree) plug in via
+    // the SidebarManager register() call using the same pattern.
+    {
+      const m = this.host.state.sidebarManager;
+      if (!m.allPanels.some((p) => p.id === 'status')) {
+        m.register(statusPanel);
+      }
+      if (!m.allPanels.some((p) => p.id === 'tasks')) {
+        m.register(tasksPanel);
+      }
+      m.setDataProvider(() => ({
+        planMode: this.host.state.appState.planMode,
+        backgroundTasks: [...this.host.sessionEventHandler.backgroundTasks.values()].map((bt) => ({
+          id: bt.taskId,
+          kind: bt.status,
+          label: bt.description,
+        })),
+      }));
+    }
+
+    // Wide-terminal sidebar: the output region becomes a horizontal split of
+    // the transcript ScrollView (left) and the sidebar (right). The sidebar is
+    // hidden below SIDEBAR_MIN_VIEWPORT_WIDTH columns and while closed, matching
+    // the existing todoPanel/statusBar width gates.
+    const sidebar = this.host.state.sidebarContainer;
+    const topRegion = new HStack([
       { component: transcriptScrollView, basis: 0, grow: 1, shrink: 1, minSize: 1 },
+      {
+        component: sidebar,
+        // Content-driven width: SidebarContainer renders at the active panel's
+        // width (or an empty body when closed), so open/close resizes the split
+        // without rebuilding the layout.
+        basis: 'auto',
+        grow: 0,
+        shrink: 0,
+        minSize: 0,
+        visible: (viewport) => viewport.width >= SIDEBAR_MIN_VIEWPORT_WIDTH,
+      },
+    ]);
+    const layoutRoot = new VStack([
+      { component: topRegion, basis: 0, grow: 1, shrink: 1, minSize: 1 },
       { component: dock, basis: 'auto', grow: 0, shrink: 1, minSize: 1 },
     ]);
     ui.setLayoutRoot(layoutRoot);

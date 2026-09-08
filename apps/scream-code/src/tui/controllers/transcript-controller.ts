@@ -51,7 +51,14 @@ export class TranscriptController {
   private readonly liveComponentToEntry = new Map<Component, TranscriptEntry>();
   private readonly pendingComponents = new Set<Component>();
 
-  private static readonly LIVE_LIMIT = 150;
+  /** Max live transcript children before the oldest are folded into the
+   *  committed single-line summary. Overridable via SCREAM_TRANSCRIPT_LIVE_LIMIT
+   *  (mirrors a commit-fold approach for bounding ultra-long sessions). */
+  private static readonly LIVE_LIMIT =
+    Number.isFinite(Number(process.env['SCREAM_TRANSCRIPT_LIVE_LIMIT'])) &&
+    Number(process.env['SCREAM_TRANSCRIPT_LIVE_LIMIT']) > 0
+      ? Math.floor(Number(process.env['SCREAM_TRANSCRIPT_LIVE_LIMIT']))
+      : 150;
 
   constructor(private readonly host: TranscriptControllerHost) {}
 

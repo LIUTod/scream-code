@@ -28,6 +28,14 @@ export const BUILTIN_SLASH_COMMANDS = [
     availability: 'always',
   },
   {
+    name: 'sidebar',
+    aliases: ['sb'],
+    description: 'registry.sidebar_desc',
+    argumentHint: '[toggle|next|prev|panel <id>|width <n>]',
+    priority: 215,
+    availability: 'always',
+  },
+  {
     name: 'goal',
     aliases: ['goaloff'],
     description: 'registry.goal_desc',

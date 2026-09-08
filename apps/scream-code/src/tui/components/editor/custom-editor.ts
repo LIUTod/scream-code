@@ -179,6 +179,7 @@ export class CustomEditor extends Editor {
   // returns false (no plan in the transcript) the keystroke falls through
   // to pi-tui's default ctrl+e binding (move cursor to end of line).
   public onTogglePlanExpand?: () => boolean;
+  public onToggleSidebar?: () => void;
   public onOpenExternalEditor?: () => void;
   public onCtrlS?: () => void;
   public onCtrlW?: () => void;
@@ -433,6 +434,11 @@ export class CustomEditor extends Editor {
     if (matchesKey(normalized, Key.ctrl('e'))) {
       if (this.onTogglePlanExpand?.() === true) return;
       // No plan to toggle — fall through to pi-tui's end-of-line.
+    }
+
+    if (matchesKey(normalized, Key.ctrl('x'))) {
+      this.onToggleSidebar?.();
+      return;
     }
 
     if (matchesKey(normalized, Key.ctrl('s'))) {

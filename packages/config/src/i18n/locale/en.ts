@@ -1193,6 +1193,7 @@ export const en: Record<string, string> = {
   'registry.wolfpack_desc': 'Toggle wolfpack mode, auto-approve + batch concurrency',
   'registry.sessions_desc': 'Browse and restore sessions',
   'registry.goal_desc': 'View/manage auto goals',
+  'registry.sidebar_desc': 'Open/close the sidebar panel (Ctrl+X to toggle)',
   'registry.memory_desc': 'Browse, search, inject memory memos',
   'registry.knowledge_desc': 'Manage local knowledge base (ingest/search/delete/stats)',
   'registry.new_desc': 'Start a new session in the current workspace',

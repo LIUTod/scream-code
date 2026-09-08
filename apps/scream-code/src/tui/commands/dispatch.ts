@@ -51,6 +51,7 @@ import {
   handleTitleCommand,
 } from './session';
 import { handleGoalCommand } from './goal';
+import { handleSidebarCommand } from './sidebar';
 import { handleRevokeCommand } from './revoke';
 import { handleCcCommand } from './cc';
 import { handleUpdateCommand } from './update';
@@ -321,6 +322,9 @@ async function handleBuiltInSlashCommand(
       return;
     case 'revoke':
       await handleRevokeCommand(host, args);
+      return;
+    case 'sidebar':
+      await handleSidebarCommand(host, args);
       return;
     case 'goal':
       await handleGoalCommand(host, args);
