@@ -19,7 +19,7 @@
 </p>
 
 <p align="center">
-  <img width="861" height="550" alt="Scream Code" src="https://github.com/user-attachments/assets/874cbda7-11aa-41de-821f-e9390f62a765" />
+  <img width="892" height="791" alt="企业微信20260909-163202@2x" src="https://github.com/user-attachments/assets/6d7df5d1-8851-4540-9793-c7ce690baead" />
 </p>
 
 ---
