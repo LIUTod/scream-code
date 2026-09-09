@@ -65,3 +65,7 @@ Use `SendSubagentMessage` to send a directed message to a subagent you own while
 When NOT to use Agent: skip delegation for trivial one-step work (e.g. reading a known file). Almost everything else is a candidate for delegation.
 
 Once a subagent is running, leave that scope to it: do not redo its searches or reads in parallel, and do not abandon it midway and finish the job manually. Both undo the context savings the delegation was meant to buy.
+
+## Foreground timeouts auto-background
+
+A `timeout` on a foreground `Agent` call bounds your wait, not the subagent's life. When the deadline fires while the child is still running, it is handed to the background task manager (status: backgrounded) instead of being aborted: the tool returns a `task_id`, its completion notification arrives automatically in a later turn (no polling), and you can peek with `TaskOutput(task_id=..., block=false)` or stop it with `TaskStop`. User cancellation still aborts immediately. A stopped (TaskStop) background task never suggests resume; only tasks that finish or fail on their own are recoverable via `Agent(resume=...)`.

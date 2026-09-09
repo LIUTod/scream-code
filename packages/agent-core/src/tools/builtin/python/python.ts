@@ -178,12 +178,15 @@ export class PythonTool implements BuiltinTool<PythonInput> {
     this.description =
       'Execute Python code in a persistent kernel. Variables, imports, and loaded data ' +
       'persist across calls (unlike Bash) — ideal for data analysis and multi-step ' +
-      'processing. Run shell commands with the Bash tool instead. In RLM mode the ' +
-      'kernel also provides `rlm(task, name="subagent")` to spawn a subagent ' +
-      '(returns a handle immediately) and `rlm_wait(handle, timeout)` to await its ' +
-      'final summary. Multi-line code (def/for/if) is fully supported. ' +
-      'Code runs under the current permission mode; mutating operations follow ' +
-      'the same approval rules as other tools.';
+      'processing. This tool is available only when RLM mode is enabled (/rlm); when ' +
+      'you can see it, prefer it over repeated Bash python3 invocations for any ' +
+      'workflow that keeps state across steps (load → transform → analyze → export). ' +
+      'Run shell commands with the Bash tool instead. The kernel also provides ' +
+      '`rlm(task, name="subagent")` to spawn a subagent (returns a handle ' +
+      'immediately) and `rlm_wait(handle, timeout)` to await its final summary — ' +
+      'use them to parallelize independent data sub-tasks inside the kernel. ' +
+      'Multi-line code (def/for/if) is fully supported. Code runs under the current ' +
+      'permission mode; mutating operations follow the same approval rules as other tools.';
   }
 
   dispose(): void {

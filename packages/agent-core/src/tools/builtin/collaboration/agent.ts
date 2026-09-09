@@ -86,7 +86,7 @@ export const AgentToolInputSchema = z.preprocess(
       .max(3600)
       .optional()
       .describe(
-        'Timeout in seconds for the agent task (min 30s, max 3600s / 1hr). When omitted, a foreground task runs until completion with no timeout. The agent is stopped if it exceeds this limit.',
+        'Timeout in seconds for a foreground agent task (min 30s, max 3600s / 1hr). When omitted, a foreground task runs until completion with no timeout. On timeout the still-running subagent is NOT aborted — it is handed to the background task manager and keeps running (status: backgrounded): its completion notification arrives automatically in a later turn, and you can peek with TaskOutput / stop it with TaskStop. Use a timeout to bound your waiting, not to kill the subagent.',
       ),
     // Optional structured fields. When provided, they are composed into the
     // required Target / Change / Acceptance format before being sent to the
