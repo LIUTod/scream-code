@@ -14,6 +14,8 @@ import { SubagentMessageBus, buildSubagentMessage, type SubagentMessageStatus } 
 import { filterToolsForCapability, type SubagentCapabilityMode } from './subagent-capability';
 import type { Session } from './index';
 import SUMMARY_CONTINUATION_PROMPT from './summary-continuation.md';
+import STRUCTURED_MESSAGE_DELIVERY_PROMPT from './structured-message-delivery.md';
+import { parseJsonObject } from '../tools/builtin/collaboration/agent';
 import { getFindingsFromStore } from '../tools/builtin/collaboration/report-finding';
 
 /**
@@ -364,6 +366,24 @@ export class SessionSubagentHost {
           await runChildTurnToCompletion(child, options.signal);
           result = lastAssistantText(child);
         }
+      } else if (this.bus!.activeCount(childId) > 0) {
+        // Structured request: summary expansion is skipped so a compact JSON
+        // answer is not padded with prose, but parent messages that arrived
+        // mid-run must still be delivered — an "accepted" message must not be
+        // silently dropped by the finally-clear while the parent already got
+        // the ack. One bounded delivery turn re-prompts the child to resend
+        // its JSON answer after reading the message block.
+        turns += 1;
+        options.signal.throwIfAborted();
+        const delivery = injectParentMessages(STRUCTURED_MESSAGE_DELIVERY_PROMPT);
+        child.turn.prompt([{ type: 'text', text: delivery }], origin);
+        await runChildTurnToCompletion(child, options.signal);
+        // The delivery turn's purpose is delivering the message, not rewriting
+        // the answer. If the child failed to resend a parseable JSON object
+        // (e.g. it replied in prose), keep the pre-drain structured result so
+        // the delivery never destroys the requested [structured] contract.
+        const steered = lastAssistantText(child);
+        result = parseJsonObject(steered) !== undefined ? steered : result;
       }
 
       const usage = child.usage.data().total;

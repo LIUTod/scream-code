@@ -174,4 +174,127 @@ describe('subagent collaboration integration', () => {
     (host as unknown as { activeChildren: Set<string> }).activeChildren = new Set(['agent-0']);
     expect(host.sendMessage('agent-0', 'queue', 'x').status).toBe('not_owned');
   });
+
+  it('delivers mid-run parent messages to a structured-output subagent via a bounded delivery turn', async () => {
+    const child = testAgent();
+    const parent = testAgent();
+    parent.configure();
+    child.configure();
+    parent.newEvents();
+    await parent.rpc.setPermission({ mode: 'yolo' });
+    await child.rpc.setPermission({ mode: 'yolo' });
+
+    const session = fakeSession(parent.agent, child.agent, {
+      'agent-0': { homedir: '/tmp/x', type: 'sub', parentAgentId: 'main' },
+    });
+    const bus = new SubagentMessageBus();
+    const host = new SessionSubagentHost(session, 'main', undefined, undefined, bus);
+
+    // Turn 1: a Bash tool call first — a real async boundary during which the
+    // parent message arrives mid-run — then the final JSON answer.
+    child.mockNextResponse({
+      type: 'function',
+      id: 'tc_bash',
+      name: 'Bash',
+      arguments: JSON.stringify({ command: 'sleep 0.1' }),
+    });
+    child.mockNextResponse({ type: 'text', text: '{"ok":true}' });
+    // Bounded delivery turn (structured message delivery): resend the JSON
+    // answer after reading the [parent_messages] block.
+    child.mockNextResponse({ type: 'text', text: '{"ok":true,"steered":true}' });
+
+    const spawnPromise = host.spawn('coder', {
+      parentToolCallId: 'call_1',
+      parentToolCallUuid: undefined,
+      prompt: 'original prompt',
+      description: 'child',
+      runInBackground: false,
+      signal,
+      outputSchema: '{"type":"object"}',
+    });
+    // Let the child start its first turn and block inside the Bash call.
+    const pollDeadline = Date.now() + 3000;
+    while (Date.now() < pollDeadline) {
+      const userCount = child.agent.context.history.filter(
+        (m: { role: string }) => m.role === 'user',
+      ).length;
+      if (userCount >= 1) break;
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    // Mid-run steer: arrives after the first-prompt injection (Bash is still
+    // executing inside the turn) but before the child finalizes. The structured
+    // branch must deliver it via the bounded delivery turn instead of silently
+    // dropping it at finally-clear.
+    const sent = host.sendMessage('agent-0', 'steer', 'reconsider the approach');
+    expect(sent.status).toBe('accepted');
+
+    const handle = await spawnPromise;
+    const completion = await handle.completion;
+
+    // The final structured answer reflects the steered instruction.
+    expect(completion.result).toContain('"steered":true');
+    // The delivery turn's prompt carried the [parent_messages] block.
+    const prompts = child.agent.context.history
+      .filter((m: { role: string }) => m.role === 'user')
+      .map((m: { content: unknown }) => m.content);
+    const deliveryPrompt = prompts
+      .map((p) => (Array.isArray(p) ? p.map((x: { text: string }) => x.text).join('\n') : String(p)))
+      .find((p: string) => p.includes('[parent_messages]'));
+    expect(deliveryPrompt).toBeDefined();
+    expect(deliveryPrompt).toContain('[directive] reconsider the approach');
+  });
+
+  it('keeps the pre-drain structured result when the delivery turn returns no JSON', async () => {
+    const child = testAgent();
+    const parent = testAgent();
+    parent.configure();
+    child.configure();
+    parent.newEvents();
+    await parent.rpc.setPermission({ mode: 'yolo' });
+    await child.rpc.setPermission({ mode: 'yolo' });
+
+    const session = fakeSession(parent.agent, child.agent, {
+      'agent-0': { homedir: '/tmp/x', type: 'sub', parentAgentId: 'main' },
+    });
+    const bus = new SubagentMessageBus();
+    const host = new SessionSubagentHost(session, 'main', undefined, undefined, bus);
+
+    // Turn 1: Bash async boundary, then the final JSON answer.
+    child.mockNextResponse({
+      type: 'function',
+      id: 'tc_bash',
+      name: 'Bash',
+      arguments: JSON.stringify({ command: 'sleep 0.1' }),
+    });
+    child.mockNextResponse({ type: 'text', text: '{"ok":true}' });
+    // Delivery turn replies in prose (not JSON): the pre-drain result must be
+    // preserved so the [structured] contract is not destroyed by delivery.
+    child.mockNextResponse({ type: 'text', text: 'Got it, will adjust.' });
+
+    const spawnPromise = host.spawn('coder', {
+      parentToolCallId: 'call_1',
+      parentToolCallUuid: undefined,
+      prompt: 'original prompt',
+      description: 'child',
+      runInBackground: false,
+      signal,
+      outputSchema: '{"type":"object"}',
+    });
+    const pollDeadline = Date.now() + 3000;
+    while (Date.now() < pollDeadline) {
+      const userCount = child.agent.context.history.filter(
+        (m: { role: string }) => m.role === 'user',
+      ).length;
+      if (userCount >= 1) break;
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    expect(host.sendMessage('agent-0', 'steer', 'reconsider the approach').status).toBe('accepted');
+
+    const handle = await spawnPromise;
+    const completion = await handle.completion;
+
+    // The structured answer from the first turn is kept, not the prose ack.
+    expect(completion.result).toContain('{"ok":true}');
+    expect(completion.result).not.toContain('will adjust');
+  });
 });
