@@ -108,6 +108,15 @@ describe('ToolManager circuit breaker', () => {
     expect(
       harness.plugins.get('clumsy')?.diagnostics.some((d) => /circuit tripped/.test(d.message)),
     ).toBe(true);
+    // The disable flag flips before the teardown sync pass lands, so wait for
+    // the (async) pluginSync invocation instead of asserting immediately —
+    // on slow CI runners the call can arrive a tick after `enabled === false`.
+    // waitFor only accepts boolean checks, hence the calls scan.
+    await waitFor(() =>
+      harness.pluginSync.mock.calls.some(
+        (call) => Array.isArray(call[0]) && call[0].includes('clumsy'),
+      ),
+    );
     expect(harness.pluginSync).toHaveBeenCalledWith(['clumsy']);
     // Teardown asked for; the tool leaves the loop only once the sync pass ran.
     harness.manager.unregisterToolsByOwner('clumsy');
