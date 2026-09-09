@@ -49,8 +49,9 @@ When Scream wants to modify files or run commands, an approval panel pops up —
 ### Features
 
 - **Goal Loop** — autonomous, goal-driven execution with an independent judge agent and token/time budget control.
+- **TUI Sidebar** — four live panels: workspace Git diff summary (green adds / red deletes), per-session token accounting (cache-hit / cache-miss / output), 8 sub-agent slots with real-time states (idle / working / outputting / messaging / reworking), and Goal status with judge state (awaiting / judging / adjudicated).
 - **Wolfpack** — unlimited parallel sub-agents (coder / explore / plan / verify / reviewer / oracle / writer / worker).
-- **Subagent Collaboration** — steer running sub-agents with directed parent→child messages, request structured JSON replies via `output_schema`, and sandbox each sub-agent with runtime capability modes (read-only / read-write / execute / full).
+- **Subagent Collaboration** — delegate to specialist sub-agents and stay in control while they run: send mid-task redirects or follow-up notes, request answers as structured JSON, and confine any sub-agent to a safe mode (read-only / edit-only / commands-allowed) so it never oversteps your limits.
 - **Persistent Memory** — structured pain-point memory with FTS5 full-text + tag + vector retrieval, shared across sessions.
 - **Local Knowledge Graph** — SAG-based visual knowledge base for multi-hop reasoning; import your own docs anytime.
 - **RLM Mode** — persistent Python workspace for long-running tasks, with unlimited recursive sub-agents.
