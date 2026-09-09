@@ -19,7 +19,7 @@
 </p>
 
 <p align="center">
-  <img width="892" height="791" alt="企业微信20260909-163202@2x" src="https://github.com/user-attachments/assets/6d7df5d1-8851-4540-9793-c7ce690baead" />
+  <img width="1007" height="890" alt="企业微信20260909-170226@2x" src="https://github.com/user-attachments/assets/a8c1beda-3e73-41d1-855e-7dd80a3cc0e9" />
 </p>
 
 ---
