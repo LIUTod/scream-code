@@ -18,6 +18,7 @@ import type {
   SessionMetaUpdatedEvent,
   SkillActivatedEvent,
   TodoUpdatedEvent,
+  GoalUpdatedEvent,
   SubagentCompletedEvent,
   SubagentFailedEvent,
   SubagentSpawnedEvent,
@@ -47,6 +48,7 @@ import {
   stringValue,
 } from '../utils/event-payload';
 import { formatBackgroundAgentTranscript } from '../utils/background-agent-status';
+import { SubagentSlots, type SubagentSlot } from '../utils/subagent-slots';
 import { formatBackgroundTaskTranscript } from '../utils/background-task-status';
 import { formatHookResultMarkdown, formatHookResultPlain } from '../utils/hook-result-format';
 import {
@@ -62,6 +64,11 @@ import { formatStepDebugTiming } from '#/utils/usage/debug-timing';
 import { nextTranscriptId } from '../utils/transcript-id';
 import { canTransitionTo } from '../streaming-phase';
 import { detectCompactionAnomaly } from '../utils/compaction-anomaly';
+
+/** Short preview slice for subagent activity detail (keeps deltas small). */
+function sliceLeading(text: string, max = 48): string {
+  return text.length > max ? `${text.slice(0, max)}…` : text;
+}
 import type { StreamingUIController } from './streaming-ui';
 import type { TasksBrowserController } from './tasks-browser';
 import type {
@@ -74,6 +81,7 @@ import type {
   ToolResultBlockData,
   TranscriptEntry,
 } from '../types';
+import { normalizeGoalStatus } from '../types';
 import type { TUIState } from '../tui-state';
 
 function addTokenUsage(a: TokenUsage, b: TokenUsage): TokenUsage {
@@ -83,6 +91,24 @@ function addTokenUsage(a: TokenUsage, b: TokenUsage): TokenUsage {
     inputCacheCreation: a.inputCacheCreation + b.inputCacheCreation,
     output: a.output + b.output,
   };
+}
+
+/** Subtract cumulative usage: current minus previous (component-wise, clamped
+ *  at zero). Used to avoid double-counting a resumed subagent's cumulative
+ *  usage (each completed event carries the running total, not the delta). */
+function subtractTokenUsage(current: TokenUsage, previous: TokenUsage): TokenUsage {
+  return {
+    inputOther: Math.max(0, current.inputOther - previous.inputOther),
+    inputCacheRead: Math.max(0, current.inputCacheRead - previous.inputCacheRead),
+    inputCacheCreation: Math.max(0, current.inputCacheCreation - previous.inputCacheCreation),
+    output: Math.max(0, current.output - previous.output),
+  };
+}
+
+function isZeroUsage(u: TokenUsage): boolean {
+  return (
+    u.inputOther === 0 && u.inputCacheRead === 0 && u.inputCacheCreation === 0 && u.output === 0
+  );
 }
 
 
@@ -133,6 +159,10 @@ export class SessionEventHandler {
    *  (spawned by the current turn's Agent tool), background agents persist. */
   private foregroundSubagentCount = 0;
   subagentInfo: Map<string, { parentToolCallId: string; name: string }> = new Map();
+  /** Sidebar subagent slot state machine (see utils/subagent-slots.ts). */
+  readonly subagentSlots = new SubagentSlots();
+  /** Tool callId of the in-flight UpdateGoal(complete) (judging), if any. */
+  private goalJudgeCallId: string | undefined;
   renderedSkillActivationIds: Set<string> = new Set();
   renderedMcpServerStatusKeys: Map<string, string> = new Map();
   mcpServerStatusSpinners: Map<string, MoonLoader> = new Map();
@@ -142,6 +172,7 @@ export class SessionEventHandler {
     this.backgroundTasks.clear();
     this.backgroundTaskTranscriptedTerminal.clear();
     this.subagentInfo.clear();
+    this.subagentSlots.reset();
     this.renderedSkillActivationIds.clear();
     this.renderedMcpServerStatusKeys.clear();
     this.stopAllMcpServerStatusSpinners();
@@ -150,7 +181,9 @@ export class SessionEventHandler {
     // prompted into a different session.
     this.pendingSkillCandidates = [];
     this.promptedSkillCandidates.clear();
-    this.host.setAppState({ subagentUsage: {} });
+    this.goalJudgeCallId = undefined;
+    this.subagentUsageSeen.clear();
+    this.host.setAppState({ subagentUsage: {}, goalJudge: 'awaiting' });
   }
 
   startSubscription(): void {
@@ -277,9 +310,46 @@ export class SessionEventHandler {
   // Private handlers
   // ---------------------------------------------------------------------------
 
+  /** Read-only snapshot of the sidebar subagent slots (8 default types +
+   *  extras in spawn order). Consumed by the sidebar data provider. */
+  getSubagentSlots(): readonly SubagentSlot[] {
+    return this.subagentSlots.getSlots();
+  }
+
+  /** Feed routed subagent activity into the slot state machine. */
+  private feedSubagentSlots(event: Event, agentId: string): void {
+    switch (event.type) {
+      case 'subagent.spawned':
+        this.subagentSlots.onSpawned(event.subagentId, event.subagentName, event.description);
+        break;
+      case 'subagent.started':
+        this.subagentSlots.onStarted(event.subagentId);
+        break;
+      case 'subagent.completed':
+      case 'subagent.failed':
+        this.subagentSlots.onTerminated(event.subagentId);
+        break;
+      case 'tool.call.started':
+        this.subagentSlots.onActivity(agentId, 'tool', `tool: ${event.name}`);
+        break;
+      case 'tool.call.delta':
+        break;
+      case 'tool.result':
+        this.subagentSlots.onActivity(agentId, 'toolResult', 'tool result');
+        break;
+      case 'assistant.delta':
+      case 'thinking.delta':
+        this.subagentSlots.onActivity(agentId, 'output', sliceLeading(event.delta ?? ''));
+        break;
+      default:
+        break;
+    }
+  }
+
   private routeSubagentEvent(event: Event): boolean {
     const subagentId = event.agentId;
     if (subagentId === MAIN_AGENT_ID) return false;
+    this.feedSubagentSlots(event, subagentId);
 
     const { streamingUI } = this.host;
     const info = this.subagentInfo.get(subagentId);
@@ -578,6 +648,27 @@ export class SessionEventHandler {
   private handleToolCall(event: ToolCallStartedEvent): void {
     const { streamingUI } = this.host;
     streamingUI.flushNow();
+    // Main-agent → subagent messaging (steer/queue): mark the target slot as
+    // "messaging" until the tool call completes (see handleToolResult).
+    if (event.name === 'SendSubagentMessage') {
+      const args = argsRecord(event.args);
+      const target = stringValue(args['agent_id']);
+      const operation = stringValue(args['operation']);
+      this.subagentSlots.onMessagingStart(
+        event.toolCallId,
+        target === undefined || target.length === 0 ? undefined : target,
+        operation === undefined || operation.length === 0 ? undefined : operation,
+      );
+    }
+    // Goal complete → internal grader runs while this tool call is in flight:
+    // mark the sidebar judge state as judging (裁判 裁定中).
+    if (
+      event.name === 'UpdateGoal' &&
+      stringValue(argsRecord(event.args)['status']) === 'complete'
+    ) {
+      this.goalJudgeCallId = event.toolCallId;
+      this.host.setAppState({ goalJudge: 'judging' });
+    }
     const { turnId, step } = streamingUI.getTurnContext();
     const toolCall: ToolCallBlockData = {
       id: event.toolCallId,
@@ -653,6 +744,17 @@ export class SessionEventHandler {
 
   private handleToolResult(event: ToolResultEvent): void {
     const { streamingUI } = this.host;
+    // Close the messaging window for SendSubagentMessage if this result
+    // belongs to one (no-op otherwise — the map lookup misses safely).
+    this.subagentSlots.onMessagingEnd(event.toolCallId);
+    // UpdateGoal(complete) result: grading finished. If the snapshot already
+    // reported complete the goal handler marked us adjudicated; otherwise the
+    // goal was resumed → back to awaiting.
+    if (event.toolCallId === this.goalJudgeCallId) {
+      this.goalJudgeCallId = undefined;
+      const goalStatus = this.host.state.appState.goal?.status;
+      this.host.setAppState({ goalJudge: goalStatus === 'complete' ? 'adjudicated' : 'awaiting' });
+    }
     streamingUI.flushNow();
     const resultData: ToolResultBlockData = {
       tool_call_id: event.toolCallId,
@@ -826,21 +928,38 @@ export class SessionEventHandler {
     });
   }
 
-  private handleGoalUpdated(event: { snapshot: { objective: string; status: string; turnsUsed?: number; wallClockMs?: number } | null }): void {
+  private handleGoalUpdated(event: GoalUpdatedEvent): void {
     const snapshot = event.snapshot;
     if (snapshot === null) {
       this.host.setAppState({ goal: null, goalActive: false });
-    } else {
-      this.host.setAppState({
-        goal: {
-          objective: snapshot.objective,
-          turnsUsed: snapshot.turnsUsed ?? 0,
-          wallClockMs: snapshot.wallClockMs ?? 0,
-          wallClockBaseAt: Date.now(),
-        },
-        goalActive: snapshot.status === 'active',
-      });
+      return;
     }
+    // A completed snapshot ends any in-flight adjudication (the internal
+    // grader runs BEFORE the tool result event, so this is the authoritative
+    // ordering).
+    if (snapshot.status === 'complete') {
+      this.goalJudgeCallId = undefined;
+      this.host.setAppState({ goalJudge: 'adjudicated' });
+    } else if (this.host.state.appState.goalJudge === 'adjudicated') {
+      // A resumed/replaced goal (active snapshot after completion) resets the
+      // judge row back to awaiting; 'judging' is preserved so the
+      // pause(verifying)-then-active/resume snapshots mid-grading don't clear it.
+      this.host.setAppState({ goalJudge: 'awaiting' });
+    }
+    this.host.setAppState({
+      goal: {
+        objective: snapshot.objective,
+        status: normalizeGoalStatus(snapshot.status),
+        turnsUsed: snapshot.turnsUsed ?? 0,
+        wallClockMs: snapshot.wallClockMs ?? 0,
+        wallClockBaseAt: Date.now(),
+        completionCriterion: snapshot.completionCriterion ?? null,
+        tokensUsed: snapshot.tokensUsed ?? 0,
+        inputTokens: snapshot.inputTokens ?? null,
+        outputTokens: snapshot.outputTokens ?? null,
+      },
+      goalActive: snapshot.status === 'active',
+    });
   }
 
   private handleTodoUpdated(event: TodoUpdatedEvent): void {
@@ -995,6 +1114,7 @@ export class SessionEventHandler {
   }
 
   private handleSubagentSpawned(event: SubagentSpawnedEvent): void {
+    this.subagentSlots.onSpawned(event.subagentId, event.subagentName, event.description);
     const { streamingUI } = this.host;
 
     // WolfPack spawns N subagents from a single tool call. To render each as
@@ -1066,6 +1186,7 @@ export class SessionEventHandler {
   }
 
   private handleSubagentStarted(event: SubagentStartedEvent): void {
+    this.subagentSlots.onStarted(event.subagentId);
     if (event.runInBackground) return;
     // For WolfPack subagents the ToolCallComponent is keyed by subagentId
     // (see handleSubagentSpawned). Route via subagentInfo to find the
@@ -1082,6 +1203,7 @@ export class SessionEventHandler {
   }
 
   private handleSubagentCompleted(event: SubagentCompletedEvent): void {
+    this.subagentSlots.onTerminated(event.subagentId);
     this.recordSubagentUsage(event.subagentId, undefined, event.usage);
     const { streamingUI } = this.host;
     const backgroundMeta = this.backgroundAgentMetadata.get(event.subagentId);
@@ -1122,6 +1244,7 @@ export class SessionEventHandler {
   }
 
   private handleSubagentFailed(event: SubagentFailedEvent): void {
+    this.subagentSlots.onTerminated(event.subagentId);
     this.recordSubagentUsage(event.subagentId, undefined, event.usage);
     const { streamingUI } = this.host;
     const backgroundMeta = this.backgroundAgentMetadata.get(event.subagentId);
@@ -1164,18 +1287,27 @@ export class SessionEventHandler {
     );
   }
 
+  /** Cumulative usage already recorded per subagent instance (completed
+   *  events carry the running total — we only add the delta since the last
+   *  completed/failed event, avoiding double-counting after resume). */
+  private readonly subagentUsageSeen = new Map<string, TokenUsage>();
+
   private recordSubagentUsage(
     subagentId: string,
     subagentName: string | undefined,
     usage: TokenUsage | undefined,
   ): void {
     if (usage === undefined) return;
+    const previous = this.subagentUsageSeen.get(subagentId);
+    const delta = previous === undefined ? usage : subtractTokenUsage(usage, previous);
+    this.subagentUsageSeen.set(subagentId, usage);
+    if (isZeroUsage(delta)) return;
     const info = this.subagentInfo.get(subagentId);
     const name = info?.name ?? subagentName ?? subagentId;
     const current = this.host.state.appState.subagentUsage[name];
     const next: SubagentUsageMap = {
       ...this.host.state.appState.subagentUsage,
-      [name]: current === undefined ? usage : addTokenUsage(current, usage),
+      [name]: current === undefined ? delta : addTokenUsage(current, delta),
     };
     this.host.setAppState({ subagentUsage: next });
   }

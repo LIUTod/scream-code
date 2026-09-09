@@ -22,15 +22,41 @@ export interface RecentSession {
 
 export type PlanModeState = 'off' | 'plan' | 'fusionplan';
 
-/** Lightweight goal info for the footer badge. */
+/** Goal snapshot status, kept in sync with agent-core's GoalStatus union
+ * (the wire type is plain string, hence the explicit union + normalizer). */
+export const GOAL_STATUSES = ['active', 'paused', 'blocked', 'complete'] as const;
+export type GoalStatus = (typeof GOAL_STATUSES)[number];
+
+/** Clamp an unknown wire status to a safe display value: anything outside the
+ *  four known states is rendered as paused (never as completed). */
+export function normalizeGoalStatus(status: string): GoalStatus {
+  return (GOAL_STATUSES as readonly string[]).includes(status) ? (status as GoalStatus) : 'paused';
+}
+
+/** Lightweight goal info for the footer badge + the sidebar Goal panel. */
 export interface GoalBadgeInfo {
   readonly objective: string;
+  readonly status: GoalStatus;
   readonly turnsUsed: number;
   readonly wallClockMs: number;
   /** Timestamp (ms) when the TUI last received a goal snapshot. Used to keep
    * the footer wall-clock timer ticking between sparse `goal.updated` events. */
   readonly wallClockBaseAt: number;
+  /** Completion criterion from the goal snapshot (sidebar "判据" display). */
+  readonly completionCriterion: string | null;
+  /** Cumulative tokens spent on this goal (goal snapshot `tokensUsed`). */
+  readonly tokensUsed: number;
+  /** Input tokens (incl. cache) since the goal started; null for goals
+   *  restored from legacy records without per-direction counts. */
+  readonly inputTokens: number | null;
+  /** Output tokens since the goal started (null = legacy record). */
+  readonly outputTokens: number | null;
 }
+
+/** Sidebar goal adjudication state, inferred TUI-side from the UpdateGoal tool
+ *  lifecycle: awaiting (no grading in flight) → judging (a `complete` tool
+ *  call is grading) → adjudicated (goal finished grading and was completed). */
+export type GoalJudgeState = 'awaiting' | 'judging' | 'adjudicated';
 
 export interface AppState {
   model: string;
@@ -70,6 +96,8 @@ export interface AppState {
   sessionTitle: string | null;
   goal: GoalBadgeInfo | null;
   goalActive: boolean;
+  /** Sidebar adjudication state (TUI-inferred from UpdateGoal tool calls). */
+  goalJudge: GoalJudgeState;
   goalContinuationCount: number;
   ccConnectActive: boolean;
   wolfpackMode: boolean;

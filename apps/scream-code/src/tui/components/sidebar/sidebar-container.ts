@@ -1,90 +1,105 @@
 import { Container, truncateToWidth, visibleWidth, type Component } from '@liutod-scream/pi-tui';
 import chalk from 'chalk';
 
+import type { ColorPalette } from '#/tui/theme/colors';
+
 import type { SidebarManager } from './sidebar-manager';
 import type { SidebarPanelContext } from './sidebar-panel';
 
 const SIDE_PADDING = 1; // space between the │ and the content on each side
 
 /**
- * Renders the active sidebar panel inside a full box border (┌─┐│└┘) with the
- * panel title embedded in the top frame, following plan-box's layout. The whole
- * frame is painted in the theme's accent color so the sidebar reads as part of
- * the active theme. The body is rebuilt when the active panel changes OR when
- * its runtime data changes, and the rendered width follows the SidebarManager
- * so `/sidebar width` and width persistence take effect.
+ * Renders the stacked sidebar: every visible registered panel gets its own
+ * full box frame (┌─┐│└┘) with the panel title embedded in the top frame, one
+ * below the other. Panels render live each frame (their body reads the
+ * current data snapshot), so time-based values (uptime, goal wall-clock)
+ * tick without rebuilding. The focused panel's title is bolded; focus is
+ * moved by the SidebarManager (`/sidebar next/prev`, Ctrl+X toggles).
+ * The whole frame is painted in the theme accent colour and the rendered
+ * width follows the SidebarManager so `/sidebar width` takes effect.
  */
 export class SidebarContainer extends Container {
   private readonly manager: SidebarManager;
   private readonly panelContext: SidebarPanelContext;
   private readonly accentHex: string;
-  private renderedPanelId: string | null = null;
-  private body: Component | undefined;
-  private lastDataKey: string = '';
+  /** Built panel bodies, keyed by panel id. Bodies render live so they are
+   * only rebuilt when the visible panel set changes. */
+  private readonly bodies = new Map<string, Component>();
+  private builtStackKey = '';
+  /** 1s heartbeat while the sidebar is open: keeps live values (uptime,
+   * goal wall-clock, gradient phase of busy agent slots) ticking without
+   * needing an event. Stopped when the sidebar closes. */
+  private readonly heartbeat: ReturnType<typeof setInterval> | undefined;
 
-  constructor(manager: SidebarManager, requestRender: () => void, accentHex: string) {
+  constructor(manager: SidebarManager, requestRender: () => void, colors: ColorPalette) {
     super();
     this.manager = manager;
-    this.accentHex = accentHex;
-    this.panelContext = { requestRender, getData: () => this.manager.getData() };
+    this.accentHex = colors.primary;
+    this.panelContext = { requestRender, getData: () => this.manager.getData(), colors };
+    this.heartbeat = setInterval(() => {
+      if (this.manager.isOpen) requestRender();
+    }, 1000);
+    // Never keep the process alive solely for the sidebar heartbeat.
+    this.heartbeat.unref();
   }
 
-  /** Rebuild the body from the current active panel (call on activate/close/refresh). */
+  /** Stop the heartbeat. Called by the TUI teardown (see scream-tui.ts). */
+  dispose(): void {
+    if (this.heartbeat !== undefined) clearInterval(this.heartbeat);
+  }
+
+  /** Re-sync built bodies with the current visible stack (call on register/
+   * unregister/activate changes; cheap idempotent check). */
   refresh(): void {
-    const panel = this.manager.isOpen ? this.manager.activePanel : undefined;
-    if (panel === undefined) {
-      this.clear();
-      this.body = undefined;
-      this.renderedPanelId = null;
-      this.lastDataKey = '';
-      return;
+    const key = this.manager.isOpen
+      ? this.manager.getStackPanels().map((panel) => panel.id).join('|')
+      : '';
+    if (key === this.builtStackKey) return;
+    const keep = new Set<string>();
+    if (this.manager.isOpen) {
+      for (const panel of this.manager.getStackPanels()) {
+        keep.add(panel.id);
+        if (!this.bodies.has(panel.id)) {
+          this.bodies.set(panel.id, panel.build(this.panelContext));
+        }
+      }
     }
-    this.renderedPanelId = panel.id;
+    for (const id of [...this.bodies.keys()]) {
+      if (!keep.has(id)) this.bodies.delete(id);
+    }
+    this.builtStackKey = key;
     this.clear();
-    this.body = panel.build(this.panelContext);
-    this.addChild(this.body);
-    this.lastDataKey = this.dataKey();
-  }
-
-  /** Cheap O(1) fingerprint of the runtime data a panel renders from. */
-  private dataKey(): string {
-    // Full snapshot: any rendered field (planMode, activeAgentCount, per-task
-    // kind/label) that changes must re-trigger a rebuild, even when the
-    // background-tasks count stays the same.
-    return JSON.stringify(this.manager.getData());
   }
 
   override render(_width: number): string[] {
-    const current = this.manager.isOpen ? this.manager.activePanel?.id ?? null : null;
-    // Rebuild on panel change OR data change (avoids a frozen snapshot while open).
-    if (current !== this.renderedPanelId || this.dataKey() !== this.lastDataKey) {
-      this.refresh();
-    }
-    const panel = this.manager.activePanel;
-    if (!this.manager.isOpen || panel === undefined || this.body === undefined) {
-      return [];
-    }
+    if (!this.manager.isOpen) return [];
+    this.refresh();
+    const panels = this.manager.getStackPanels();
+    if (panels.length === 0) return [];
+    // Leading blank line: the transcript's first component (Welcome) also
+    // starts with a blank line, so the sidebar's top border aligns with the
+    // welcome box instead of floating one row above it.
+    const lines: string[] = [''];
 
-    // Full box frame: "┌─ <title> ────┐" / "│ <content> │" / "└────┘"
-    // width = horzLen + 2 (left/right frame) ⇒ horzLen = width - 2
-    // content width = horzLen - 2 * SIDE_PADDING = width - 4
     const horzLen = Math.max(2, this.manager.currentWidth - 2);
     const contentWidth = Math.max(1, horzLen - 2 * SIDE_PADDING);
     const paint = (s: string): string => chalk.hex(this.accentHex)(s);
+    const activeId = this.manager.activePanel?.id ?? null;
 
-    const title = truncateToWidth(String(panel.title), horzLen);
-    const trailing = Math.max(0, horzLen - visibleWidth(title));
-    const top = paint('┌') + paint(title) + paint('─'.repeat(trailing)) + paint('┐');
-    const bottom = paint('└') + paint('─'.repeat(horzLen)) + paint('┘');
-
-    const content = this.body.render(contentWidth);
-    const lines: string[] = [top];
-    for (const raw of content) {
-      const row = truncateToWidth(raw, contentWidth);
-      const pad = Math.max(0, contentWidth - visibleWidth(row));
-      lines.push(paint('│') + ' ' + row + ' '.repeat(pad) + ' ' + paint('│'));
+    for (const panel of panels) {
+      const body = this.bodies.get(panel.id);
+      if (body === undefined) continue;
+      const title = truncateToWidth(String(panel.title), horzLen);
+      const titleText = panel.id === activeId ? chalk.bold(title) : title;
+      const trailing = Math.max(0, horzLen - visibleWidth(title));
+      lines.push(paint('┌') + paint(titleText) + paint('─'.repeat(trailing)) + paint('┐'));
+      for (const raw of body.render(contentWidth)) {
+        const row = truncateToWidth(raw, contentWidth);
+        const pad = Math.max(0, contentWidth - visibleWidth(row));
+        lines.push(paint('│') + ' ' + row + ' '.repeat(pad) + ' ' + paint('│'));
+      }
+      lines.push(paint('└') + paint('─'.repeat(horzLen)) + paint('┘'));
     }
-    lines.push(bottom);
     return lines;
   }
 }

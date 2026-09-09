@@ -114,6 +114,11 @@ describe('FooterComponent - active status animation', () => {
           turnsUsed: 3,
           wallClockMs: 5_000,
           wallClockBaseAt: now,
+          completionCriterion: null,
+          status: "active",
+          tokensUsed: 0,
+          inputTokens: null,
+          outputTokens: null,
         },
       }),
     );
@@ -139,6 +144,11 @@ describe('FooterComponent - active status animation', () => {
           turnsUsed: 1,
           wallClockMs: 0,
           wallClockBaseAt: Date.now(),
+          completionCriterion: null,
+          status: "active",
+          tokensUsed: 0,
+          inputTokens: null,
+          outputTokens: null,
         },
       }),
     );

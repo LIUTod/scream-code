@@ -674,7 +674,7 @@ export class TurnFlow {
             },
             afterStep: async ({ usage }) => {
               this.agent.usage.record(model, usage, 'turn');
-              await this.agent.goal.recordTokenUsage(ltodGrandTotal(usage));
+              await this.agent.goal.recordTokenUsage(ltodGrandTotal(usage), usage);
               await this.agent.fullCompaction.afterStep();
               deduper.endStep();
             },

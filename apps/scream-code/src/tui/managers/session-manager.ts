@@ -18,6 +18,7 @@ import { registerReverseRPCHandlers } from '../reverse-rpc/index';
 import type { ApprovalController } from '../reverse-rpc/approval/controller';
 import type { QuestionController } from '../reverse-rpc/question/controller';
 import type { AppState, PlanModeState, TUIStartupOptions } from '../types';
+import { normalizeGoalStatus } from '../types';
 import type { TUIState } from '../tui-state';
 
 /**
@@ -242,11 +243,17 @@ export class SessionManager {
       sessionTitle: session.summary?.title ?? null,
       goal: goal ? {
         objective: goal.objective,
+        status: normalizeGoalStatus(goal.status),
         turnsUsed: goal.turnsUsed ?? 0,
         wallClockMs: goal.wallClockMs ?? 0,
         wallClockBaseAt: Date.now(),
+        completionCriterion: goal.completionCriterion ?? null,
+        tokensUsed: goal.tokensUsed ?? 0,
+        inputTokens: goal.inputTokens ?? null,
+        outputTokens: goal.outputTokens ?? null,
       } : null,
       goalActive: goal?.status === 'active',
+      goalJudge: 'awaiting',
       goalContinuationCount: 0,
       // Clear any balance from a previous session/provider; the lookup
       // below commits the fresh value asynchronously.

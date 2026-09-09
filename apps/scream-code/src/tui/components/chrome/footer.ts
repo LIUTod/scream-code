@@ -13,14 +13,8 @@ import { t } from '@scream-code/config';
 
 import type { ColorPalette } from '#/tui/theme/colors';
 import type { AppState, GoalBadgeInfo } from '#/tui/types';
+import { GRADIENT_CYCLE_MS, lerpGradient } from '#/tui/utils/gradient';
 import { shimmerText, shimmerTextWithPalette } from '#/tui/utils/shimmer';
-import {
-  createGitStatusCache,
-  formatGitBadgeBase,
-  formatPullRequestBadge,
-  type GitStatus,
-  type GitStatusCache,
-} from '#/utils/git/git-status';
 import { safeUsageRatio } from '#/utils/usage/usage-format';
 
 // Toolbar tips — rotates every 10s. Most tips are short and pair up (two
@@ -226,33 +220,10 @@ function pickContextColor(usage: number, colors: ColorPalette): string {
 }
 
 // ── Gradient status line for footer line 2 ───────────────────────────
+// Shared with the sidebar agent slots (see utils/gradient.ts).
 
-// Keep active-status motion inside the product's cool/acid palette. Red and
-// pink read as error states in the terminal, so the spinner never crosses
-// those hues while the agent is working normally.
-const BRAND_COLORS = ['#79eb00', '#56D4DD', '#4ADE80', '#FACC15'];
-const GRADIENT_CYCLE_MS = 4000;
 const SPINNER_FRAMES = ['●', '◉', '◎', '◌', '○', '◌', '◎', '◉'];
 const SPINNER_TICK_MS = 60;
-
-function hexToRgb(hex: string): [number, number, number] {
-  const v = parseInt(hex.slice(1), 16);
-  return [(v >> 16) & 255, (v >> 8) & 255, v & 255];
-}
-
-function lerpGradient(t: number): string {
-  const count = BRAND_COLORS.length;
-  const segment = Math.min(t * count, count - 1);
-  const idx = Math.floor(segment);
-  const localT = segment - idx;
-  const nextIdx = (idx + 1) % count;
-  const [r0, g0, b0] = hexToRgb(BRAND_COLORS[idx]!);
-  const [r1, g1, b1] = hexToRgb(BRAND_COLORS[nextIdx]!);
-  const r = Math.round(r0 + (r1 - r0) * localT);
-  const g = Math.round(g0 + (g1 - g0) * localT);
-  const b = Math.round(b0 + (b1 - b0) * localT);
-  return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
-}
 
 function buildStatusLine(
   streamingPhase: AppState['streamingPhase'],
@@ -292,16 +263,6 @@ function buildStatusLine(
   return chalk.hex(gradientColor).bold(frame) + ' ' + label + ' ' + elapsedStr;
 }
 
-export function formatFooterGitBadge(status: GitStatus, colors: ColorPalette): string {
-  const base = chalk.hex(colors.status)(formatGitBadgeBase(status));
-  if (status.pullRequest === null) return base;
-
-  const pullRequest = chalk.hex(colors.primary)(
-    formatPullRequestBadge(status.pullRequest, { linkPullRequest: true }),
-  );
-  return `${base} ${pullRequest}`;
-}
-
 /**
  * Middle-truncate a (possibly ANSI-colored) string to `maxWidth` visible
  * columns, keeping a head and a tail fragment joined by `ellipsis`. The
@@ -338,9 +299,6 @@ export class FooterComponent implements Component {
   private state: AppState;
   private colors: ColorPalette;
   private readonly ui: TUI;
-  private readonly onGitStatusChange: () => void;
-  private gitCache: GitStatusCache;
-  private gitCacheWorkDir: string;
   private transientHint: string | null = null;
   private statusTimer: ReturnType<typeof setTimeout> | null = null;
   /**
@@ -359,23 +317,16 @@ export class FooterComponent implements Component {
   /** Foreground (non-background) subagents spawned by the current turn's
    *  Agent tool. Footer renders a separate badge; 0 hides it. */
   private foregroundSubagentCount = 0;
-  constructor(state: AppState, colors: ColorPalette, ui: TUI, onGitStatusChange: () => void = () => {}) {
+  constructor(state: AppState, colors: ColorPalette, ui: TUI) {
     this.state = state;
     this.colors = colors;
     this.ui = ui;
-    this.onGitStatusChange = onGitStatusChange;
-    this.gitCacheWorkDir = state.workDir;
-    this.gitCache = createGitStatusCache(state.workDir, { onChange: this.onGitStatusChange });
     this.#restartStatusTimer(state.streamingPhase, state.goalActive);
   }
 
   setState(state: AppState): void {
     const previousPhase = this.state?.streamingPhase;
     const previousGoalActive = this.state?.goalActive;
-    if (state.workDir !== this.gitCacheWorkDir) {
-      this.gitCacheWorkDir = state.workDir;
-      this.gitCache = createGitStatusCache(state.workDir, { onChange: this.onGitStatusChange });
-    }
     // A completed balance fetch (60s poll or model switch) flashes the
     // badge with a shimmer sweep, even when the value is unchanged; a null
     // (unsupported provider) still counts as a fetch completion. States
@@ -480,7 +431,7 @@ export class FooterComponent implements Component {
     const colors = this.colors;
     const state = this.state;
 
-    // ── Line 1: mode badges + model + [N task(s) running] + [N agent(s) running] + cwd + git + hints ──
+    // ── Line 1: mode badges + model + [N task(s) running] + [N agent(s) running] + cwd + hints ──
     // Permission mode is NOT rendered here — it lives in the editor's top
     // border (CustomEditor permissionMode badge), next to the input it
     // governs.
@@ -545,10 +496,8 @@ export class FooterComponent implements Component {
       );
     }
 
-    const git = this.gitCache.getStatus();
-    if (git !== null) {
-      left.push(formatFooterGitBadge(git, colors));
-    }
+    // Git status moved to the sidebar Git panel (working tree summary); the
+    // footer no longer renders a git badge.
 
     const leftLine = left.join('  ');
     const leftWidth = visibleWidth(leftLine);

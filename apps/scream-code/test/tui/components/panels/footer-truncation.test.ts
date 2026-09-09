@@ -49,9 +49,14 @@ function wideFooter(): FooterComponent {
       goalActive: true,
       goal: {
         objective: 'ship footer truncation',
+        status: 'active',
         turnsUsed: 7,
         wallClockMs: 3 * 60_000,
         wallClockBaseAt: Date.now(),
+        completionCriterion: null,
+        tokensUsed: 0,
+        inputTokens: null,
+        outputTokens: null,
       },
       model: 'scream-k2-5',
       availableModels: {

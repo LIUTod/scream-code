@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import chalk from 'chalk';
 
-import { FooterComponent, formatFooterGitBadge, buildWeightedTips } from '#/tui/components/chrome/footer';
+import { FooterComponent, buildWeightedTips } from '#/tui/components/chrome/footer';
 import { darkColors } from '#/tui/theme/colors';
 import type { AppState } from '#/tui/types';
 
@@ -167,39 +167,6 @@ describe('FooterComponent — context NaN resilience', () => {
     const footer = makeFooter(baseState({ planMode: 'fusionplan' }));
     const [line1] = footer.render(120);
     expect(strip(line1 ?? '')).toMatch(/融合计划/);
-  });
-
-  it('highlights the pull request badge separately from git status text', () => {
-    const previousLevel = chalk.level;
-    chalk.level = 3;
-    try {
-      const out = formatFooterGitBadge(
-        {
-          branch: 'feature/footer',
-          dirty: false,
-          ahead: 0,
-          behind: 0,
-          diffAdded: 0,
-          diffDeleted: 0,
-          pullRequest: {
-            number: 6,
-            url: 'https://github.com/acme/repo/pull/6',
-          },
-        },
-        darkColors,
-      );
-
-      const primaryIndex = out.indexOf(hexToSgr(darkColors.primary));
-      const statusIndex = out.indexOf(hexToSgr(darkColors.status));
-      const badgeIndex = out.indexOf('[PR#6]');
-      expect(statusIndex).toBeGreaterThanOrEqual(0);
-      expect(primaryIndex).toBeGreaterThanOrEqual(0);
-      expect(primaryIndex).toBeLessThan(badgeIndex);
-      expect(strip(out)).toContain('feature/footer ');
-      expect(strip(out)).toContain('[PR#6]');
-    } finally {
-      chalk.level = previousLevel;
-    }
   });
 
   it('colors context usage with textDim when below warning threshold', () => {

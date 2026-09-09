@@ -3,7 +3,6 @@ import {
   SIDEBAR_DEFAULT_WIDTH,
   type SidebarData,
   type SidebarPanel,
-  type SidebarPanelContext,
 } from './sidebar-panel';
 
 /**
@@ -27,15 +26,15 @@ export class SidebarManager {
   private activeId: string | null = null;
   private open = false;
   private width = SIDEBAR_DEFAULT_WIDTH;
-  private readonly ctx: SidebarPanelContext;
   private readonly widthStore: SidebarWidthStore | undefined;
   private dataProvider: (() => SidebarData) | undefined;
+  private readonly requestRender: () => void;
 
   constructor(
     requestRender: () => void,
     opts?: { widthStore?: SidebarWidthStore; dataProvider?: () => SidebarData },
   ) {
-    this.ctx = { requestRender, getData: () => this.getData() };
+    this.requestRender = requestRender;
     this.widthStore = opts?.widthStore;
     this.dataProvider = opts?.dataProvider;
     if (opts?.widthStore !== undefined) {
@@ -67,6 +66,7 @@ export class SidebarManager {
       this.open = false;
       panel?.onClose?.();
     }
+    this.requestRender();
   }
 
   get isOpen(): boolean {
@@ -89,6 +89,22 @@ export class SidebarManager {
     return this.panels;
   }
 
+  /**
+   * Panels that should render in the current stacked sidebar, in registration
+   * order, filtered by each panel's `visible(data)` predicate (panels without
+   * one are always visible).
+   */
+  getStackPanels(): readonly SidebarPanel[] {
+    const data = this.getData();
+    return this.panels.filter((panel) => panel.visible?.(data) ?? true);
+  }
+
+  /** True when `panel` would currently render in the stack. */
+  isStacked(panel: SidebarPanel): boolean {
+    const data = this.getData();
+    return panel.visible?.(data) ?? true;
+  }
+
   activate(id: string): boolean {
     const panel = this.byId.get(id);
     if (panel === undefined) return false;
@@ -97,17 +113,18 @@ export class SidebarManager {
     previous?.onClose?.();
     this.activeId = id;
     this.open = true;
-    panel.onOpen?.(this.ctx);
-    this.ctx.requestRender();
+    panel.onOpen?.();
+    this.requestRender();
     return true;
   }
 
   toggle(id?: string): void {
-    // No argument and nothing active: open the first registered panel so a bare
-    // `/sidebar` actually reveals the sidebar instead of no-oping.
+    // No argument and nothing active: open the first visible stack panel so a
+    // bare `/sidebar` actually reveals the sidebar instead of no-oping.
     if (id === undefined && this.activeId === null) {
-      if (this.panels.length === 0) return;
-      this.activate(this.panels[0]!.id);
+      const [first] = this.getStackPanels();
+      if (first === undefined) return;
+      this.activate(first.id);
       return;
     }
     const target = id ?? this.activeId;
@@ -125,7 +142,7 @@ export class SidebarManager {
     this.open = false;
     this.activeId = null;
     panel?.onClose?.();
-    this.ctx.requestRender();
+    this.requestRender();
   }
 
   next(): void {
@@ -137,26 +154,29 @@ export class SidebarManager {
   }
 
   private step(dir: 1 | -1): void {
-    if (this.panels.length === 0) return;
-    const idx = this.activeId === null ? -1 : this.panels.findIndex((p) => p.id === this.activeId);
+    const stack = this.getStackPanels();
+    if (stack.length === 0) return;
+    const idx = this.activeId === null ? -1 : stack.findIndex((p) => p.id === this.activeId);
+    // Focus only walks the visible stack so next/prev never lands on a
+    // hidden section (e.g. Goal while no goal is active).
     const nextIdx =
       idx === -1
         ? dir === 1
           ? 0
-          : this.panels.length - 1
-        : (idx + dir + this.panels.length) % this.panels.length;
-    this.activate(this.panels[nextIdx]!.id);
+          : stack.length - 1
+        : (idx + dir + stack.length) % stack.length;
+    this.activate(stack[nextIdx]!.id);
   }
 
   setWidth(cols: number): void {
     this.width = clampSidebarWidth(cols);
     this.widthStore?.save(this.width);
-    this.ctx.requestRender();
+    this.requestRender();
   }
 
   resetWidth(): void {
     this.width = SIDEBAR_DEFAULT_WIDTH;
     this.widthStore?.save(this.width);
-    this.ctx.requestRender();
+    this.requestRender();
   }
 }

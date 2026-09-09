@@ -89,9 +89,16 @@ describe('SidebarManager', () => {
   });
 
   it('getData proxies the dataProvider', () => {
-    const provider = () => ({ planMode: 'active' });
+    const provider = () => ({
+      git: {
+        workDir: '/home/acme/project',
+        diffAdded: 0,
+        diffDeleted: 0,
+        filesCount: 0,
+      },
+    });
     const m = new SidebarManager(() => {}, { dataProvider: provider });
-    expect(m.getData()).toEqual({ planMode: 'active' });
+    expect(m.getData().git?.workDir).toBe('/home/acme/project');
   });
 
   it('reads widthStore on construction and writes on setWidth', () => {
@@ -123,6 +130,27 @@ describe('SidebarManager', () => {
     expect(m.activePanel).toBeUndefined();
     expect(m.isOpen).toBe(false);
     expect(m.activate('a')).toBe(true);
+    expect(m.activePanel?.id).toBe('a');
+  });
+
+  it('getStackPanels filters by the visible predicate in registration order', () => {
+    const m = new SidebarManager(() => {});
+    m.register(panel('a'));
+    m.register({ ...panel('b'), visible: () => false });
+    m.register(panel('c'));
+    expect(m.getStackPanels().map((p) => p.id)).toEqual(['a', 'c']);
+    expect(m.isStacked({ ...panel('b'), visible: () => false })).toBe(false);
+  });
+
+  it('next/prev walk only the visible stack, skipping hidden panels', () => {
+    const m = new SidebarManager(() => {});
+    m.register(panel('a'));
+    m.register({ ...panel('b'), visible: () => false });
+    m.register(panel('c'));
+    m.activate('a');
+    m.next();
+    expect(m.activePanel?.id).toBe('c'); // b is hidden and skipped
+    m.next();
     expect(m.activePanel?.id).toBe('a');
   });
 });

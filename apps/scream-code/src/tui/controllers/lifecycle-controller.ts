@@ -1,13 +1,16 @@
-import type { Session, ScreamHarness } from '@scream-code/scream-code-sdk';
+import type { Session, ScreamHarness, TokenUsage } from '@scream-code/scream-code-sdk';
 import { t } from '@scream-code/config';
 import { Container, HStack, ScrollView, VStack, type Component } from '@liutod-scream/pi-tui';
 import { GutterContainer } from '../components/chrome/gutter-container';
 import { isEmptySessionHintDismissed } from '../utils/ui-preferences';
 import { SESSION_TIPS, TIP_ROTATION_INTERVAL_MS } from '../constant/scream-tui';
 import { StatusBarPaneComponent } from '../components/panes/status-bar-pane';
-import { SIDEBAR_MIN_VIEWPORT_WIDTH } from '../components/sidebar/sidebar-panel';
-import { statusPanel } from '../components/sidebar/panels/status-panel';
-import { tasksPanel } from '../components/sidebar/panels/tasks-panel';
+import { SIDEBAR_MIN_VIEWPORT_WIDTH, type SidebarData, type SidebarGitData, type SidebarGoalData, type SidebarSessionStats } from '../components/sidebar/sidebar-panel';
+import { gitPanel } from '../components/sidebar/panels/git-panel';
+import { sessionPanel } from '../components/sidebar/panels/session-panel';
+import { agentsPanel } from '../components/sidebar/panels/agents-panel';
+import { goalPanel } from '../components/sidebar/panels/goal-panel';
+import { createGitStatusCache, type GitStatusCache } from '#/utils/git/git-status';
 import { CHROME_GUTTER } from '../constant/rendering';
 import type { AuthFlowController } from './auth-flow';
 import type { SessionEventHandler } from './session-event-handler';
@@ -73,8 +76,32 @@ export class LifecycleController {
   /** The active status-bar loader (PulseWaveLoader or MoonLoader). Owned by
    * this controller; stopped before replacement to avoid leaking timers. */
   private statusBarLoader: { stop(): void } | undefined;
+  /** Sum all four token buckets into the session's total token consumption. */
+  private static sumTokens(usage: TokenUsage): number {
+    return usage.inputOther + usage.inputCacheRead + usage.inputCacheCreation + usage.output;
+  }
+
   private tipRotationTimer: ReturnType<typeof setInterval> | undefined;
   private currentTipIndex = Math.floor(Math.random() * SESSION_TIPS.length);
+  /** Sidebar-only git cache (the footer owns its own). Rebuilt when the
+   * workDir changes; `getStatus()` is TTL-cached so polling is cheap. */
+  private sidebarGitCache: GitStatusCache | undefined;
+  private sidebarGitCacheWorkDir = '';
+  /** Session start time for the sidebar uptime counter. Reset on session
+   * switch so a resumed old session doesn't show the TUI process age. */
+  private sidebarSessionStartedAt = Date.now();
+  private sidebarSessionId: string | undefined;
+  /** Memo for the session-stats aggregation: recomputed only when the
+   * transcript length, compaction count or usage object changes. */
+  private sidebarStatsMemo:
+    | {
+        length: number;
+        compactions: number;
+        usage: TokenUsage;
+        subagentUsage: AppState['subagentUsage'];
+        stats: SidebarSessionStats;
+      }
+    | undefined;
 
   private static readonly MEMORY_IDLE_MS = 15 * 60 * 1000; // 15 minutes
   private static readonly MEMORY_COUNTDOWN_MS = 15 * 1000; // 15 seconds
@@ -291,38 +318,38 @@ export class LifecycleController {
         minSize: 1,
       },
     ]);
-    // Register the sidebar panels once (idempotent). The status panel is the
-    // first display-only panel; more (tasks/subagents/file-tree) plug in via
-    // the SidebarManager register() call using the same pattern.
+    // Register the sidebar panels once (idempotent). The stacked sidebar
+    // renders all visible panels top-to-bottom: Git (working tree), Session
+    // (aggregated counters) and Goal (only in goal-driven sessions). Panels
+    // read their data from the provider below.
     {
       const m = this.host.state.sidebarManager;
-      if (!m.allPanels.some((p) => p.id === 'status')) {
-        m.register(statusPanel);
+      if (!m.allPanels.some((p) => p.id === 'git')) {
+        m.register(gitPanel);
       }
-      if (!m.allPanels.some((p) => p.id === 'tasks')) {
-        m.register(tasksPanel);
+      if (!m.allPanels.some((p) => p.id === 'session')) {
+        m.register(sessionPanel);
       }
-      m.setDataProvider(() => ({
-        planMode: this.host.state.appState.planMode,
-        backgroundTasks: [...this.host.sessionEventHandler.backgroundTasks.values()].map((bt) => ({
-          id: bt.taskId,
-          kind: bt.status,
-          label: bt.description,
-        })),
-      }));
+      if (!m.allPanels.some((p) => p.id === 'agents')) {
+        m.register(agentsPanel);
+      }
+      if (!m.allPanels.some((p) => p.id === 'goal')) {
+        m.register(goalPanel);
+      }
+      m.setDataProvider(() => this.buildSidebarData());
     }
 
     // Wide-terminal sidebar: the output region becomes a horizontal split of
     // the transcript ScrollView (left) and the sidebar (right). The sidebar is
     // hidden below SIDEBAR_MIN_VIEWPORT_WIDTH columns and while closed, matching
     // the existing todoPanel/statusBar width gates.
-    const sidebar = this.host.state.sidebarContainer;
+    const sidebar = this.host.state.sidebarPane;
     const topRegion = new HStack([
       { component: transcriptScrollView, basis: 0, grow: 1, shrink: 1, minSize: 1 },
       {
         component: sidebar,
-        // Content-driven width: SidebarContainer renders at the active panel's
-        // width (or an empty body when closed), so open/close resizes the split
+        // Content-driven width: SidebarContainer renders at the manager's
+        // width (or empty when closed), so open/close resizes the split
         // without rebuilding the layout.
         basis: 'auto',
         grow: 0,
@@ -339,6 +366,108 @@ export class LifecycleController {
     // Keep the root reachable so full-screen overlays (approval preview,
     // tasks browser) can swap the layout temporarily and restore it.
     this.host.state.layoutRoot = layoutRoot;
+  }
+
+  /** Build the sidebar data snapshot (git + session stats + goal) read by the
+   * stacked panels. Panels re-read this every frame via getData(), so the
+   * snapshot stays cheap: git is TTL-cached and stats are memoized. */
+  private buildSidebarData(): SidebarData {
+    const appState = this.host.state.appState;
+    return {
+      git: this.readSidebarGit(appState.workDir),
+      sessionStats: this.readSidebarSessionStats(appState),
+      agents: this.host.sessionEventHandler.getSubagentSlots(),
+      goal: this.readSidebarGoal(appState),
+    };
+  }
+
+  private readSidebarGit(workDir: string): SidebarGitData | undefined {
+    if (this.sidebarGitCache === undefined || this.sidebarGitCacheWorkDir !== workDir) {
+      this.sidebarGitCache = createGitStatusCache(workDir);
+      this.sidebarGitCacheWorkDir = workDir;
+    }
+    const status = this.sidebarGitCache.getStatus();
+    // null = workDir is not a git repo; the Git panel shows its empty state.
+    if (status === null) return undefined;
+    return {
+      workDir,
+      diffAdded: status.diffAdded,
+      diffDeleted: status.diffDeleted,
+      filesCount: status.files.length,
+    };
+  }
+
+  private readSidebarSessionStats(appState: AppState): SidebarSessionStats {
+    // Session switch: the uptime counter belongs to the current session.
+    if (this.sidebarSessionId !== appState.sessionId) {
+      this.sidebarSessionId = appState.sessionId;
+      this.sidebarSessionStartedAt = Date.now();
+    }
+    const entries = this.host.state.transcriptEntries;
+    const usage = appState.sessionUsage;
+    const subagentUsage = appState.subagentUsage;
+    const memo = this.sidebarStatsMemo;
+    // Entries are append-only and usage objects are replaced per update, so
+    // (length, compactions, usage refs) is a sound change detector.
+    if (
+      memo !== undefined &&
+      memo.length === entries.length &&
+      memo.compactions === appState.autoCompactionCount &&
+      memo.usage === usage &&
+      memo.subagentUsage === subagentUsage
+    ) {
+      return memo.stats;
+    }
+    let turns = 0;
+    let toolCalls = 0;
+    for (const entry of entries) {
+      if (entry.kind === 'user') turns += 1;
+      // Compression markers reuse kind 'tool_call' but carry compactionData;
+      // they are not real tool invocations.
+      if (entry.kind === 'tool_call' && entry.compactionData === undefined) toolCalls += 1;
+    }
+    // Subagent output is separate from the main agent's output; sum it in so
+    // the sidebar total matches what the user actually pays for.
+    let subagentOutput = 0;
+    for (const sub of Object.values(subagentUsage)) {
+      subagentOutput += sub.output;
+    }
+    const stats: SidebarSessionStats = {
+      turns,
+      toolCalls,
+      messages: entries.length,
+      compactions: appState.autoCompactionCount,
+      tokensTotal: LifecycleController.sumTokens(usage) + subagentOutput,
+      tokensInputCacheHit: usage.inputCacheRead,
+      tokensInputCacheMiss: usage.inputOther + usage.inputCacheCreation,
+      tokensOutput: usage.output + subagentOutput,
+      startedAt: this.sidebarSessionStartedAt,
+    };
+    this.sidebarStatsMemo = {
+      length: entries.length,
+      compactions: appState.autoCompactionCount,
+      usage,
+      subagentUsage,
+      stats,
+    };
+    return stats;
+  }
+
+  private readSidebarGoal(appState: AppState): SidebarGoalData | undefined {
+    if (appState.goal === null) return undefined;
+    return {
+      objective: appState.goal.objective,
+      status: appState.goal.status,
+      turnsUsed: appState.goal.turnsUsed,
+      wallClockMs: appState.goal.wallClockMs,
+      wallClockBaseAt: appState.goal.wallClockBaseAt,
+      continuationCount: appState.goalContinuationCount,
+      completionCriterion: appState.goal.completionCriterion,
+      tokensUsed: appState.goal.tokensUsed,
+      inputTokens: appState.goal.inputTokens,
+      outputTokens: appState.goal.outputTokens,
+      judge: appState.goalJudge,
+    };
   }
 
   mountFooter(): void {

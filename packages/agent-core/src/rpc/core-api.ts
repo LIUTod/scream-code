@@ -361,6 +361,8 @@ export interface GoalSnapshotData {
   readonly status: string;
   readonly turnsUsed: number;
   readonly tokensUsed: number;
+  readonly inputTokens?: number;
+  readonly outputTokens?: number;
   readonly wallClockMs: number;
   readonly budget: {
     readonly tokenBudget: number | null;

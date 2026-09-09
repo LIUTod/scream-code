@@ -141,6 +141,7 @@ function createInitialAppState(input: ScreamTUIStartupInput): AppState {
     sessionTitle: null,
     goal: null,
     goalActive: false,
+    goalJudge: 'awaiting',
     goalContinuationCount: 0,
     ccConnectActive: false,
     wolfpackMode: input.cliOptions.wolfpack === true,
@@ -437,6 +438,7 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
     this.lifecycleController.disposeTerminalTracking();
     this.inputController.dispose();
     this.state.footer.dispose();
+    this.state.sidebarContainer.dispose();
     await this.closeSession();
     await this.harness.close();
     this.sessionEventHandler.stopAllMcpServerStatusSpinners();

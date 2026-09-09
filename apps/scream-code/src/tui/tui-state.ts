@@ -55,6 +55,9 @@ export interface TUIState {
   sidebarManager: SidebarManager;
   /** Renders the active sidebar panel inside the top-level HStack. */
   sidebarContainer: SidebarContainer;
+  /** Gutter-wrapped sidebar used in buildLayout: same 1-column horizontal
+   * padding as the transcript region so both columns line up. */
+  sidebarPane: GutterContainer;
   transcriptContainer: Container;
   activityContainer: Container;
   statusBarContainer: Container;
@@ -208,9 +211,7 @@ export function createTUIState(options: ScreamTUIOptions): TUIState {
   editor.thinkingLevel = initialAppState.thinkingLevel;
   editor.permissionMode = initialAppState.permissionMode ?? 'manual';
   editor.toolPriority = initialAppState.like?.toolPriority;
-  const footer = new FooterComponent({ ...initialAppState }, theme.colors, ui, () => {
-    ui.requestRender();
-  });
+  const footer = new FooterComponent({ ...initialAppState }, theme.colors, ui);
 
   // Sidebar panel state is created once and shared by the layout (buildLayout)
   // and the commands/keybindings. The width store can be wired to config later;
@@ -219,8 +220,10 @@ export function createTUIState(options: ScreamTUIOptions): TUIState {
   const sidebarContainer = new SidebarContainer(
     sidebarManager,
     () => ui.requestRender(),
-    theme.colors.primary,
+    theme.colors,
   );
+  const sidebarPane = new GutterContainer(CHROME_GUTTER, CHROME_GUTTER);
+  sidebarPane.addChild(sidebarContainer);
   editor.onToggleSidebar = () => sidebarManager.toggle();
 
   return {
@@ -229,6 +232,7 @@ export function createTUIState(options: ScreamTUIOptions): TUIState {
     layoutRoot: undefined,
     sidebarManager,
     sidebarContainer,
+    sidebarPane,
     transcriptContainer,
     activityContainer,
     statusBarContainer,

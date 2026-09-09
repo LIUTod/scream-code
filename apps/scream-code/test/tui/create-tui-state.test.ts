@@ -40,6 +40,7 @@ function fakeInitialAppState(): AppState {
     sessionTitle: null,
     goal: null,
     goalActive: false,
+    goalJudge: 'awaiting',
     goalContinuationCount: 0,
     ccConnectActive: false,
     wolfpackMode: false,

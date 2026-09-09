@@ -113,6 +113,8 @@ export interface AgentRecordEvents {
   'goal.update': {
     status?: GoalStatus;
     tokensUsed?: number;
+    inputTokens?: number;
+    outputTokens?: number;
     turnsUsed?: number;
     wallClockMs?: number;
     budgetLimits?: GoalBudgetLimits;

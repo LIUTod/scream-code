@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import type { TokenUsage } from '@scream-code/ltod';
 
 import { ErrorCodes, ScreamError } from '#/errors';
 import type { Agent } from '..';
@@ -50,6 +51,11 @@ interface GoalState {
   status: GoalStatus;
   turnsUsed: number;
   tokensUsed: number;
+  /** Input tokens (incl. cache read/create) since the goal started. Absent
+   *  for goals restored from records written before this field existed. */
+  inputTokens?: number;
+  /** Output tokens since the goal started (same legacy caveat). */
+  outputTokens?: number;
   wallClockMs: number;
   wallClockResumedAt?: number;
   budgetLimits: GoalBudgetLimits;
@@ -102,6 +108,11 @@ export interface GoalSnapshot {
   readonly status: GoalStatus;
   readonly turnsUsed: number;
   readonly tokensUsed: number;
+  /** Input tokens (incl. cache read/create) since the goal started; absent
+   *  for goals restored from legacy records without per-direction counts. */
+  readonly inputTokens?: number;
+  /** Output tokens since the goal started (legacy caveat as above). */
+  readonly outputTokens?: number;
   readonly wallClockMs: number;
   readonly budget: GoalBudgetReport;
   readonly terminalReason?: string;
@@ -172,6 +183,8 @@ export class GoalMode {
       status: 'active',
       turnsUsed: 0,
       tokensUsed: 0,
+      inputTokens: 0,
+      outputTokens: 0,
       wallClockMs: 0,
       budgetLimits: {},
       notes: [],
@@ -192,6 +205,8 @@ export class GoalMode {
     }
     if (record.turnsUsed !== undefined) state.turnsUsed = record.turnsUsed;
     if (record.tokensUsed !== undefined) state.tokensUsed = record.tokensUsed;
+    if (record.inputTokens !== undefined) state.inputTokens = record.inputTokens;
+    if (record.outputTokens !== undefined) state.outputTokens = record.outputTokens;
     if (record.wallClockMs !== undefined) {
       state.wallClockMs = record.wallClockMs;
       state.wallClockResumedAt = undefined;
@@ -250,6 +265,8 @@ export class GoalMode {
       status: 'active',
       turnsUsed: 0,
       tokensUsed: 0,
+      inputTokens: 0,
+      outputTokens: 0,
       wallClockMs: 0,
       wallClockResumedAt: Date.now(),
       budgetLimits: {},
@@ -445,13 +462,21 @@ export class GoalMode {
 
   // --- Accounting & reporting ---
 
-  async recordTokenUsage(tokenDelta: number): Promise<GoalSnapshot | null> {
+  async recordTokenUsage(tokenDelta: number, usage?: TokenUsage): Promise<GoalSnapshot | null> {
     const state = this.state;
     if (state === undefined || state.status !== 'active') return null;
     const delta = Math.max(0, tokenDelta);
     state.tokensUsed += delta;
+    if (usage !== undefined && state.inputTokens !== undefined) {
+      state.inputTokens += usage.inputOther + usage.inputCacheRead + usage.inputCacheCreation;
+      state.outputTokens = (state.outputTokens ?? 0) + usage.output;
+    }
     this.persistState(state);
-    this.appendGoalUpdate({ tokensUsed: state.tokensUsed });
+    this.appendGoalUpdate({
+      tokensUsed: state.tokensUsed,
+      inputTokens: state.inputTokens,
+      outputTokens: state.outputTokens,
+    });
     return this.toSnapshot(state);
   }
 
@@ -557,6 +582,8 @@ export class GoalMode {
       status: state.status,
       turnsUsed: state.turnsUsed,
       tokensUsed: state.tokensUsed,
+      inputTokens: state.inputTokens,
+      outputTokens: state.outputTokens,
       wallClockMs: liveWallClockMs(state, Date.now()),
       budget: computeBudgetReport(state, Date.now()),
       terminalReason: state.terminalReason,

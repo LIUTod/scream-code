@@ -3,7 +3,10 @@ import { describe, expect, it } from 'vitest';
 
 import { SidebarContainer } from '#/tui/components/sidebar/sidebar-container';
 import { SidebarManager } from '#/tui/components/sidebar/sidebar-manager';
+import type { ColorPalette } from '#/tui/theme/colors';
 import type { SidebarPanel } from '#/tui/components/sidebar/sidebar-panel';
+
+const fakePalette = { primary: '#79eb00' } as unknown as ColorPalette;
 
 describe('SidebarContainer', () => {
   it('renders the body at the manager currentWidth, not the static panel width', () => {
@@ -22,7 +25,7 @@ describe('SidebarContainer', () => {
         }) as unknown as Component,
     };
     manager.register(panel);
-    const container = new SidebarContainer(manager, () => {}, '#888888');
+    const container = new SidebarContainer(manager, () => {}, fakePalette);
     manager.setWidth(45);
     manager.toggle('p');
     container.render(80);
@@ -39,21 +42,34 @@ describe('SidebarContainer', () => {
       build: () => ({ render: () => ['x'] }) as unknown as Component,
     };
     manager.register(panel);
-    const container = new SidebarContainer(manager, () => {}, '#888888');
+    const container = new SidebarContainer(manager, () => {}, fakePalette);
     expect(container.render(80)).toEqual([]);
     manager.toggle('p');
     const openLines = container.render(80);
-    expect(openLines.length).toBeGreaterThan(1); // title strip + bordered body
-    expect(openLines[0]).toContain('P');
+    expect(openLines.length).toBeGreaterThan(2); // leading blank + title strip + body
+    expect(openLines[0]).toBe(''); // leading blank aligns with the welcome box
+    expect(openLines[1]).toContain('P');
     manager.close();
     expect(container.render(80)).toEqual([]);
   });
 
-  it('rebuilds the body only when the runtime data key changes while open', () => {
-    let planMode = 'active';
+  it('builds each panel body once and never rebuilds on data changes (live render)', () => {
+    let turns = 1;
     let buildCount = 0;
     const manager = new SidebarManager(() => {}, {
-      dataProvider: () => ({ planMode }),
+      dataProvider: () => ({
+        sessionStats: {
+          turns,
+          toolCalls: 0,
+          messages: 0,
+          compactions: 0,
+          tokensTotal: 0,
+          tokensInputCacheHit: 0,
+          tokensInputCacheMiss: 0,
+          tokensOutput: 0,
+          startedAt: Date.now(),
+        },
+      }),
     });
     const panel: SidebarPanel = {
       id: 'p',
@@ -65,14 +81,52 @@ describe('SidebarContainer', () => {
       },
     };
     manager.register(panel);
-    const container = new SidebarContainer(manager, () => {}, '#888888');
+    const container = new SidebarContainer(manager, () => {}, fakePalette);
     manager.toggle('p');
     container.render(80);
     expect(buildCount).toBe(1);
     container.render(80);
-    expect(buildCount).toBe(1); // no planMode/backgroundTasks change → no rebuild
-    planMode = 'off';
+    expect(buildCount).toBe(1);
+    turns = 42; // data change does not rebuild; the body renders live
     container.render(80);
-    expect(buildCount).toBe(2); // data key changed → rebuild
+    expect(buildCount).toBe(1);
+  });
+
+  it('stack renders every visible panel section in registration order', () => {
+    const manager = new SidebarManager(() => {});
+    const make = (id: string, text: string): SidebarPanel => ({
+      id,
+      title: id.toUpperCase(),
+      width: 30,
+      build: () => ({ render: () => [text] }) as unknown as Component,
+    });
+    manager.register(make('a', 'body-a'));
+    manager.register(make('b', 'body-b'));
+    const container = new SidebarContainer(manager, () => {}, fakePalette);
+    manager.toggle('a');
+    const text = container.render(80).join('\n');
+    expect(text).toContain('body-a');
+    expect(text).toContain('body-b');
+    expect(text.indexOf('A') < text.lastIndexOf('B')).toBe(true); // A above B
+  });
+
+  it('skips panels hidden by the visible predicate', () => {
+    const manager = new SidebarManager(() => {}, {
+      dataProvider: () => ({ goal: undefined }),
+    });
+    const make = (id: string, visible?: (data: { goal?: unknown }) => boolean): SidebarPanel => ({
+      id,
+      title: id.toUpperCase(),
+      width: 30,
+      visible: visible as SidebarPanel['visible'],
+      build: () => ({ render: () => [id] }) as unknown as Component,
+    });
+    manager.register(make('git'));
+    manager.register(make('goal', (data) => data.goal !== undefined));
+    const container = new SidebarContainer(manager, () => {}, fakePalette);
+    manager.toggle('git');
+    const lines = container.render(80).join('\n');
+    expect(lines).toContain('git');
+    expect(lines).not.toContain('goal');
   });
 });
