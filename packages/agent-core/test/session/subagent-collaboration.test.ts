@@ -1,3 +1,7 @@
+import { existsSync, unlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import { describe, expect, it, vi } from 'vitest';
 
 import { testAgent } from '../agent/harness/agent';
@@ -8,6 +12,40 @@ import type { ResolvedAgentProfile } from '../../src/profile';
 import type { Session } from '../../src/session';
 
 const signal = new AbortController().signal;
+
+/**
+ * Deterministic async boundary: the gated Bash command starts, touches a
+ * marker file, then blocks until the test writes the release file. This makes
+ * "message arrives mid-run" independent of scheduling load (time-based windows
+ * flake under full-suite parallelism).
+ */
+function drainGate() {
+  const stamp = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const started = join(tmpdir(), `scream-drain-started-${stamp}`);
+  const go = `${started}.go`;
+  return {
+    command: `touch "${started}" && while [ ! -f "${go}" ]; do sleep 0.05; done`,
+    async waitForStart() {
+      const deadline = Date.now() + 15_000;
+      while (Date.now() < deadline) {
+        if (existsSync(started)) return;
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      throw new Error('drain gate: the gated Bash command never started');
+    },
+    release() {
+      writeFileSync(go, 'go');
+    },
+    cleanup() {
+      try {
+        unlinkSync(go);
+      } catch {}
+      try {
+        unlinkSync(started);
+      } catch {}
+    },
+  };
+}
 
 /** Minimal Session-shaped object mirroring the subagent-host test fixture. */
 function fakeSession(parent: Agent, child: Agent, metadataAgents: Session['metadata']['agents'] = {}) {
@@ -190,13 +228,14 @@ describe('subagent collaboration integration', () => {
     const bus = new SubagentMessageBus();
     const host = new SessionSubagentHost(session, 'main', undefined, undefined, bus);
 
-    // Turn 1: a Bash tool call first — a real async boundary during which the
-    // parent message arrives mid-run — then the final JSON answer.
+    // Turn 1: a gated Bash call — the child blocks inside it until we release,
+    // so the parent message deterministically arrives mid-run.
+    const gate = drainGate();
     child.mockNextResponse({
       type: 'function',
       id: 'tc_bash',
       name: 'Bash',
-      arguments: JSON.stringify({ command: 'sleep 0.1' }),
+      arguments: JSON.stringify({ command: gate.command }),
     });
     child.mockNextResponse({ type: 'text', text: '{"ok":true}' });
     // Bounded delivery turn (structured message delivery): resend the JSON
@@ -212,24 +251,18 @@ describe('subagent collaboration integration', () => {
       signal,
       outputSchema: '{"type":"object"}',
     });
-    // Let the child start its first turn and block inside the Bash call.
-    const pollDeadline = Date.now() + 3000;
-    while (Date.now() < pollDeadline) {
-      const userCount = child.agent.context.history.filter(
-        (m: { role: string }) => m.role === 'user',
-      ).length;
-      if (userCount >= 1) break;
-      await new Promise((resolve) => setTimeout(resolve, 5));
-    }
-    // Mid-run steer: arrives after the first-prompt injection (Bash is still
-    // executing inside the turn) but before the child finalizes. The structured
-    // branch must deliver it via the bounded delivery turn instead of silently
-    // dropping it at finally-clear.
+    // The child's first prompt is committed and the gated Bash is running.
+    await gate.waitForStart();
+    // Mid-run steer: arrives after the first-prompt injection (the child is
+    // blocked inside its turn) but before it finalizes. The structured branch
+    // must deliver it via the bounded delivery turn instead of dropping it.
     const sent = host.sendMessage('agent-0', 'steer', 'reconsider the approach');
     expect(sent.status).toBe('accepted');
+    gate.release();
 
     const handle = await spawnPromise;
     const completion = await handle.completion;
+    gate.cleanup();
 
     // The final structured answer reflects the steered instruction.
     expect(completion.result).toContain('"steered":true');
@@ -242,7 +275,7 @@ describe('subagent collaboration integration', () => {
       .find((p: string) => p.includes('[parent_messages]'));
     expect(deliveryPrompt).toBeDefined();
     expect(deliveryPrompt).toContain('[directive] reconsider the approach');
-  });
+  }, 15_000);
 
   it('keeps the pre-drain structured result when the delivery turn returns no JSON', async () => {
     const child = testAgent();
@@ -259,12 +292,13 @@ describe('subagent collaboration integration', () => {
     const bus = new SubagentMessageBus();
     const host = new SessionSubagentHost(session, 'main', undefined, undefined, bus);
 
-    // Turn 1: Bash async boundary, then the final JSON answer.
+    // Turn 1: a gated Bash call, then the final JSON answer.
+    const gate = drainGate();
     child.mockNextResponse({
       type: 'function',
       id: 'tc_bash',
       name: 'Bash',
-      arguments: JSON.stringify({ command: 'sleep 0.1' }),
+      arguments: JSON.stringify({ command: gate.command }),
     });
     child.mockNextResponse({ type: 'text', text: '{"ok":true}' });
     // Delivery turn replies in prose (not JSON): the pre-drain result must be
@@ -280,21 +314,16 @@ describe('subagent collaboration integration', () => {
       signal,
       outputSchema: '{"type":"object"}',
     });
-    const pollDeadline = Date.now() + 3000;
-    while (Date.now() < pollDeadline) {
-      const userCount = child.agent.context.history.filter(
-        (m: { role: string }) => m.role === 'user',
-      ).length;
-      if (userCount >= 1) break;
-      await new Promise((resolve) => setTimeout(resolve, 5));
-    }
+    await gate.waitForStart();
     expect(host.sendMessage('agent-0', 'steer', 'reconsider the approach').status).toBe('accepted');
+    gate.release();
 
     const handle = await spawnPromise;
     const completion = await handle.completion;
+    gate.cleanup();
 
     // The structured answer from the first turn is kept, not the prose ack.
     expect(completion.result).toContain('{"ok":true}');
     expect(completion.result).not.toContain('will adjust');
-  });
+  }, 15_000);
 });

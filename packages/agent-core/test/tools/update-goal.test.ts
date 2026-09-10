@@ -77,6 +77,7 @@ describe('UpdateGoal completion grading', () => {
     const result = await executeComplete(agent, async () => ({
       pass: false,
       reason: 'The regression test still fails.',
+      issues: [{ issue: 'The regression test still fails.', kind: 'evidence' }],
     }));
 
     expect(result).toEqual({

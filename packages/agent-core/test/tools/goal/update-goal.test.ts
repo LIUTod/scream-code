@@ -204,7 +204,11 @@ describe('UpdateGoalTool', () => {
   it('returns a failure message and resumes the goal when the grader rejects', async () => {
     mockedExecFile.mockImplementation((_file, _args, _opts, callback) => callback(null, { stdout: '', stderr: '' }));
     const { agent, grader } = makeAgent({
-      grade: { pass: false, reason: 'Missing error handling' },
+      grade: {
+        pass: false,
+        reason: 'Missing error handling',
+        issues: [{ issue: 'Missing error handling', kind: 'evidence' }],
+      },
     });
     const tool = new UpdateGoalTool(agent, grader);
 
