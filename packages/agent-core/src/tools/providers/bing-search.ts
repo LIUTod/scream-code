@@ -85,7 +85,9 @@ export class BingSearchProvider implements WebSearchProvider {
  * embed the word "challenge").
  */
 function isChallengeResponse(html: string): boolean {
-  if (html.includes('b_algo')) return false;
+  // Token-level match (a plain `includes('b_algo')` would be fooled by
+  // template fragments like `b_algoSlug` on a challenge page).
+  if (/\bclass="[^"]*\bb_algo\b[^"]*"/.test(html)) return false;
   return /one last step|captcha|verify (?:you are|it's) (?:a )?human|enable javascript|bm\.php/i.test(
     html,
   );
@@ -99,10 +101,14 @@ function isChallengeResponse(html: string): boolean {
  * varies) carries the snippet. Answer boxes and ad rows lack that shape and
  * are dropped by the h2 match.
  */
-const RESULT_BLOCK_RE =
-  /<li class="b_algo"[\s\S]*?(?=<li class="b_algo"|<li class="b_ans|<\/ol>|$)/g;
+const RESULT_BLOCK_START =
+  '(?=<li\\b[^>]*\\bclass="[^"]*\\bb_algo\\b[^"]*"|<li\\b[^>]*\\bclass="[^"]*\\bb_ans\\b|<\\/ol>|$)';
+const RESULT_BLOCK_RE = new RegExp(
+  `<li\\b[^>]*\\bclass="[^"]*\\bb_algo\\b[^"]*"[^>]*>[\\s\\S]*?${RESULT_BLOCK_START}`,
+  'g',
+);
 const RESULT_TITLE_RE = /<h2[^>]*>\s*<a\b[^>]*\bhref="([^"]+)"[^>]*>([\s\S]*?)<\/a>/;
-const RESULT_SNIPPET_RE = /<p class="b_(?:lineclamp|paractl)[^"]*"[^>]*>([\s\S]*?)<\/p>/;
+const RESULT_SNIPPET_RE = /<p\b[^>]*\bclass="b_(?:lineclamp|paractl)[^"]*"[^>]*>([\s\S]*?)<\/p>/;
 
 /** Strip markup and decode entities. Inline tags (Bing highlights query
  * terms in `<strong>`) are removed WITHOUT a space so punctuation stays
@@ -112,13 +118,19 @@ function decodeHtmlText(value: string): string {
     .replaceAll(/<br\s*\/?\s*>/gi, ' ')
     .replaceAll(/<\/(?:p|div|li|h\d)>/gi, ' ')
     .replaceAll(/<[^>]*>/g, '')
-    .replaceAll(/&#(\d+);/g, (_, code: string) => String.fromCodePoint(Number(code)))
-    .replaceAll(/&#x([0-9a-f]+);/gi, (_, code: string) => String.fromCodePoint(Number.parseInt(code, 16)))
-    .replaceAll(/&nbsp;/gi, ' ')
-    .replaceAll(/&amp;/gi, '&')
-    .replaceAll(/&lt;/gi, '<')
-    .replaceAll(/&gt;/gi, '>')
-    .replaceAll(/&quot;/gi, '"')
+    .replaceAll(/&#(\d+);/g, (_, code: string) => {
+      const cp = Number(code);
+      return cp >= 0 && cp <= 0x10ffff ? String.fromCodePoint(cp) : '';
+    })
+    .replaceAll(/&#x([0-9a-f]+);/gi, (_, code: string) => {
+      const cp = Number.parseInt(code, 16);
+      return cp >= 0 && cp <= 0x10ffff ? String.fromCodePoint(cp) : '';
+    })
+    .replaceAll('&nbsp;', ' ')
+    .replaceAll('&amp;', '&')
+    .replaceAll('&lt;', '<')
+    .replaceAll('&gt;', '>')
+    .replaceAll('&quot;', '"')
     .replaceAll(/&#39;|&apos;/gi, "'")
     .replaceAll(/\s+/g, ' ')
     .trim();
@@ -132,10 +144,10 @@ function decodeHtmlText(value: string): string {
  */
 function unwrapBingUrl(href: string): string | undefined {
   if (href === '') return undefined;
-  const decoded = href.replaceAll(/&amp;/gi, '&');
+  const decoded = href.replaceAll('&amp;', '&');
   const wrap = /[?&]u=a1([^&]+)/.exec(decoded);
   if (wrap?.[1] !== undefined) {
-    const base64 = wrap[1].replaceAll(/-/g, '+').replaceAll(/_/g, '/');
+    const base64 = wrap[1].replaceAll('-', '+').replaceAll('_', '/');
     const padded = base64 + '='.repeat((4 - (base64.length % 4)) % 4);
     try {
       const url = Buffer.from(padded, 'base64').toString('utf8');
@@ -145,6 +157,10 @@ function unwrapBingUrl(href: string): string | undefined {
     }
     return undefined;
   }
+  // A bing click-tracker we could not decode must be dropped, not surfaced:
+  // returning it would hand the model a redirect URL that re-hits Bing's
+  // anti-bot surface on the next fetch.
+  if (/^https?:\/\/[^/]*\.?bing\.com\/ck\//i.test(decoded)) return undefined;
   if (decoded.startsWith('//')) return `https:${decoded}`;
   if (decoded.startsWith('http://') || decoded.startsWith('https://')) return decoded;
   return undefined;

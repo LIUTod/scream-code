@@ -23,8 +23,8 @@ function bingHtmlResult(title: string, href: string, snippet?: string): string {
 function wrapUrl(target: string): string {
   const b64 = Buffer.from(target, 'utf8')
     .toString('base64')
-    .replaceAll(/\+/g, '-')
-    .replaceAll(/\//g, '_')
+    .replaceAll('+', '-')
+    .replaceAll('/', '_')
     .replace(/=+$/u, '');
   return `https://www.bing.com/ck/a?!&amp;&amp;p=abc123&u=a1${b64}&ntb=1`;
 }
@@ -114,5 +114,53 @@ describe('BingSearchProvider', () => {
     const p = new BingSearchProvider({ fetchImpl });
 
     await expect(p.search('test')).resolves.toEqual([]);
+  });
+  it('throws on non-2xx responses', async () => {
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(new Response('server error', { status: 500 }));
+    const p = new BingSearchProvider({ fetchImpl });
+    await expect(p.search('test')).rejects.toThrow(/HTTP 500/);
+  });
+
+  it('parses blocks and snippets whose attributes are in a different order', async () => {
+    const html = `<ol><li data-id class="b_algo extra-class"><h2><a href="${wrapUrl(
+      'https://example.com/shuffled',
+    )}">Shuffled</a></h2><p data-x class="b_lineclamp4 b_snippet">Order-agnostic snippet.</p></li></ol>`;
+    const results = parseBingResults(html);
+    expect(results).toHaveLength(1);
+    expect(results[0]?.url).toBe('https://example.com/shuffled');
+    expect(results[0]?.snippet).toBe('Order-agnostic snippet.');
+  });
+
+  it('drops click-tracker URLs it cannot decode instead of surfacing the redirector', () => {
+    const html = `<ol>${bingHtmlResult('Undecodable', 'https://www.bing.com/ck/a?!&&p=abc&ntb=1', 'x')}</ol>`;
+    expect(parseBingResults(html)).toEqual([]);
+  });
+
+  it('survives out-of-range numeric entities', () => {
+    const html = `<ol>${bingHtmlResult('Entity', wrapUrl('https://example.com/e'), 'A &#x110000; B')}</ol>`;
+    const results = parseBingResults(html);
+    expect(results).toHaveLength(1);
+    expect(results[0]?.snippet).toBe('A B');
+  });
+
+  it('maps <br> and block tags to spaces without fusing words', () => {
+    const html = `<ol>${bingHtmlResult('Breaks', wrapUrl('https://example.com/br'), 'line one<br>line two</p>')}</ol>`;
+    expect(parseBingResults(html)[0]?.snippet).toBe('line one line two');
+  });
+
+  it('clamps the requested count to a sane window', async () => {
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockImplementation(async () => new Response('<html></html>', { status: 200 }));
+    const p = new BingSearchProvider({ fetchImpl });
+    await p.search('test', { limit: 1 });
+    const [url1] = fetchImpl.mock.calls[0] as unknown as [string];
+    expect(url1).toContain('count=10');
+    fetchImpl.mockClear();
+    await p.search('test', { limit: 20 });
+    const [url2] = fetchImpl.mock.calls[0] as unknown as [string];
+    expect(url2).toContain('count=25');
   });
 });

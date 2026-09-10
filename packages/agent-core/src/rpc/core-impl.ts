@@ -1339,7 +1339,7 @@ async function createRuntimeConfig(input: {
   };
 }
 
-function buildWebSearcher(input: {
+export function buildWebSearcher(input: {
   readonly config: ScreamConfig;
 }): WebSearchProvider | undefined {
   const services = input.config.services;

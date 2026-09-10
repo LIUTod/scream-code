@@ -7,7 +7,12 @@
  * to "Search timed out".
  */
 
-export const SEARCH_HARD_TIMEOUT_MS = 60_000;
+/**
+ * Ceiling for a single provider request. HTML SERPs respond in <5s when
+ * healthy; 15s keeps a stalled TCP/TLS handshake from eating the whole
+ * fallback-chain budget. (Only the three search providers use this.)
+ */
+export const SEARCH_HARD_TIMEOUT_MS = 15_000;
 
 export function withHardTimeout(
   signal: AbortSignal | undefined,

@@ -249,16 +249,26 @@ describe('FallbackSearchProvider', () => {
     const fallback = new FallbackSearchProvider([p1, p2]);
     await fallback.search('query', { limit: 3, includeContent: true, toolCallId: 'c1' });
 
-    expect(p1.search).toHaveBeenCalledWith('query', {
-      limit: 3,
-      includeContent: true,
-      toolCallId: 'c1',
-    });
-    expect(p2.search).toHaveBeenCalledWith('query', {
-      limit: 3,
-      includeContent: true,
-      toolCallId: 'c1',
-    });
+    // The chain composes a budget-derived AbortSignal onto each attempt, so
+    // match on the forwarded fields (signal identity intentionally differs).
+    expect(p1.search).toHaveBeenCalledWith(
+      'query',
+      expect.objectContaining({
+        limit: 3,
+        includeContent: true,
+        toolCallId: 'c1',
+        signal: expect.anything(),
+      }),
+    );
+    expect(p2.search).toHaveBeenCalledWith(
+      'query',
+      expect.objectContaining({
+        limit: 3,
+        includeContent: true,
+        toolCallId: 'c1',
+        signal: expect.anything(),
+      }),
+    );
   });
 
   it('chains three providers correctly', async () => {
