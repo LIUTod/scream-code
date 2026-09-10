@@ -373,6 +373,17 @@ Edit the `RECOMMENDED` array in `apps/scream-code/src/tui/commands/mcp.ts`.
 
 All slash commands are declared in `src/tui/commands/registry.ts` and dispatched in `src/tui/commands/dispatch.ts`. Beyond the session-config-modelling helpers documented in `ScreamTUI`, these commands carry non-trivial state or backend integration:
 
+### Subagent Collaboration (`ContactParent`)
+
+Proactive child→parent communication: a running subagent can ask its parent for context (`info`), request a handoff (`handoff` — it describes the capability needed, never a named agent), or escalate a decision (`escalate`) — without blocking on a reply.
+
+- **Tool**: `packages/agent-core/src/tools/builtin/collaboration/contact-parent.ts` — `ContactParent` (≤4 accepted requests per child turn; same-key requests deduped within a turn). Mounted for every subagent (`type === 'sub'`) and gated on `agent.ownerHost`.
+- **Owner wiring**: `Session.instantiateAgent` sets `ownerHost = parentAgent?.subagentHost` (spawn and resume paths); the child keeps its own `subagentHost` for spawning grandchildren.
+- **Delivery**: notification-only — `SessionSubagentHost.submitChildRequest` steers a `child_request` notification into the parent (buffered while the parent is mid-turn / delivered at its next boundary). There is no mailbox to poll; the rate limits are the only backpressure.
+- **Parent protocol**: `system.md` "Child requests" section — reply via `SendSubagentMessage`; for handoffs the parent picks the specialist and routes with `Agent(...)`; when a child already finished, the `not_active` message instructs `Agent(resume=...)` so the decision is never dropped.
+- **Prompts**: every subagent profile carries the "stuck or unsure → contact the parent, don't guess" line; `contact-parent.md` carries the full usage contract.
+- **Permission**: the `collaboration-auto-approve` policy keeps `ContactParent` / `ReportFinding` / `SendSubagentMessage` out of the approval gate in every mode (coordination is conversation, not mutation).
+
 ### WolfPack Mode (`/wolfpack`)
 
 Batch parallel subagent orchestration. Toggles `wolfpackMode` in `AppState`. When active, the LLM can use the `WolfPack` tool to spawn parallel subagents via a template + items pattern with **no item cap** (all items run in parallel via `Promise.allSettled`), aggregated into a single result. Follows the PlanMode pattern end-to-end.
@@ -415,6 +426,25 @@ The goal system runs in an autonomous loop (`driveGoal()` in `packages/agent-cor
 - **GoalInjector**: `packages/agent-core/src/agent/injection/goal.ts` — injects notes into each continuation turn under `## Working Notes`. Also prompts the model to use WriteGoalNote when discovering facts or hitting dead ends.
 - **Lifecycle**: notes are cleared when the goal completes or is cancelled. Notes do not survive session resume (model re-accumulates them).
 - **TUI ordering**: `/goal` is 6th in the quick command list (priority 120, after rlm).
+
+#### Goal Verification Triage
+
+The completion grader returns `{pass, reason, issues}`; each issue carries `kind: 'evidence' | 'subjective'` (unclassified/legacy strings default to `subjective`, the conservative choice).
+
+- **Grader wiring**: `createGoalGrader` (`agent/tool/index.ts`) passes the structured `issues` through; both grader normalizers (`agent/tool/index.ts`, `update-goal.ts`) accept `issue` or `text` field names.
+- **Triage** (`packages/agent-core/src/tools/builtin/goal/update-goal.ts`): a FAIL with **no concrete issues** is invalid — the feedback asks for specifics and consumes no retry budget; an **all-subjective** FAIL parks the goal immediately (no automatic rework); **evidence** gaps retry up to `MAX_EVIDENCE_RETRIES` (3) per goal, then park.
+- **Parking**: `markBlocked` + `writeParkedReport` writes `<sessionDir>/unattended/<slug>-<ts>.md` (what was done / why it parked / what the human must decide). Counts clear when the goal passes.
+- **Arbitration**: the grading feedback prompt instructs the agent to spawn a `reviewer` subagent when it believes the evidence is complete, then retry once with the arbitration result attached.
+
+### Bot Mode (`/bot`)
+
+Unattended permission mode: reversible actions auto-approve; everything else is denied and parked for human review (fail-closed — when in doubt, stop).
+
+- **Entry**: `/bot` toggles; `/bot on|off` explicit. Web: the `bot` command is handled in `src/web/server.ts` `handleCommand` (frontend command list mirrors it).
+- **Policy**: `packages/agent-core/src/agent/permission/policies/bot-mode-permission.ts` — `BotModePermissionPolicy`, installed after user-configured deny rules (an explicit user deny always wins). Reversible allowlist → approve: reads/lookups, in-workspace `Write`/`Edit` (sensitive-file regex guard, `~` rejected, separator-boundary path check), read-only Bash (metacharacter exclusions block chaining/substitution/redirection/newlines; mutable git subcommands and `find`/`sort` are absent), plus goal and collaboration tools. Everything else → deny.
+- **Deny reasons**: policy deny reasons are propagated into the tool error (`permission/index.ts`), so the model can tell "parked for human review" from a permanent failure and does not retry blindly.
+- **Idle exit**: web sessions in bot mode keep the server alive (per-session `busy` + `anyBusy()`), so unattended goals can finish with no browser connected.
+- **Validation**: `PermissionMode` covers `bot` across agent-core (`permission/types.ts`, `config/schema.ts`, `config/toml.ts`, `errors/codes.ts`), node-sdk (`types.ts`, `session.ts` runtime guard), and the TUI selector.
 
 ### Loop Mode (`/loop`)
 

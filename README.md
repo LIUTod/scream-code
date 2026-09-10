@@ -48,10 +48,11 @@ When Scream wants to modify files or run commands, an approval panel pops up —
 
 ### Features
 
-- **Goal Loop** — autonomous, goal-driven execution with an independent judge agent and token/time budget control.
+- **Goal Loop** — autonomous, goal-driven execution with an independent judge agent. Rejections must name concrete gaps; evidence gaps self-repair for up to 3 rounds, subjective calls park for your decision (with a written report), and token/time budgets bound the loop.
 - **TUI Sidebar** — four live panels: workspace Git diff summary (green adds / red deletes), per-session token accounting (cache-hit / cache-miss / output), 8 sub-agent slots with real-time states (idle / working / outputting / messaging / reworking), and Goal status with judge state (awaiting / judging / adjudicated).
 - **Wolfpack** — unlimited parallel sub-agents (coder / explore / plan / verify / reviewer / oracle / writer / worker).
-- **Subagent Collaboration** — delegate to specialist sub-agents and stay in control while they run: send mid-task redirects or follow-up notes, request answers as structured JSON, and confine any sub-agent to a safe mode (read-only / edit-only / commands-allowed) so it never oversteps your limits.
+- **Subagent Collaboration** — delegate to specialist sub-agents and stay in control: they **ask the lead agent for guidance mid-task instead of guessing when blocked**, request a handoff when a different specialist fits, take mid-task redirects or follow-up notes, return structured JSON when asked, and can be confined to a safe mode (read-only / edit-only / commands-allowed) so they never overstep your limits.
+- **Bot Mode (`/bot`)** — unattended execution: reversible work (reads, in-workspace edits, read-only commands) runs freely, while irreversible actions (push / publish / delete / sensitive files / unclassified operations) are automatically denied and queued for your review — with the reason fed back to the model so it stops retrying.
 - **Persistent Memory** — structured pain-point memory with FTS5 full-text + tag + vector retrieval, shared across sessions.
 - **Local Knowledge Graph** — SAG-based visual knowledge base for multi-hop reasoning; import your own docs anytime.
 - **RLM Mode** — persistent Python workspace for long-running tasks, with unlimited recursive sub-agents.
@@ -64,7 +65,7 @@ When Scream wants to modify files or run commands, an approval panel pops up —
 
 ### Slash Commands
 
-Type `/` in the input to browse. All 47 commands:
+Type `/` in the input to browse. All 48 commands:
 
 <details>
 <summary>Full command reference (click to expand)</summary>
@@ -75,6 +76,7 @@ Type `/` in the input to browse. All 47 commands:
 | `/auto` | Toggle auto permission mode |
 | `/yes` (`/yolo`) | Toggle auto-approve mode |
 | `/ask` | Toggle read-only Q&A mode |
+| `/bot` | Unattended bot mode: reversible actions auto-approve, irreversible ones park for review |
 | `/goal [objective]` | View/manage auto goals |
 | `/wolfpack` (`/wp`) | Toggle wolfpack mode — auto-approve + batch concurrency |
 | `/rlm` | RLM mode: persistent Python workspace, unlimited recursive subagents |
