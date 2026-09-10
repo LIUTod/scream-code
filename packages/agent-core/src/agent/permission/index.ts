@@ -302,7 +302,13 @@ export class PermissionManager {
       case 'deny':
         return {
           block: true,
-          reason: result.message ?? this.formatPolicyDenyMessage(context.toolCall.name),
+          reason:
+            result.message ??
+            (typeof result.reason === 'object' &&
+            result.reason !== null &&
+            typeof (result.reason as { reason?: unknown }).reason === 'string'
+              ? `Tool "${context.toolCall.name}" was denied by permission policy: ${(result.reason as { reason: string }).reason}`
+              : this.formatPolicyDenyMessage(context.toolCall.name)),
         };
       case 'ask':
         return this.requestToolApproval(context, result, policyName);

@@ -21,7 +21,7 @@ export type PermissionRuleScope = 'turn-override' | 'session-runtime' | 'project
  *   - `ask`    — read-only Q&A: mutating tools (incl. Bash and MCP) are
  *     denied; only read/search/dialogue tools may run
  */
-export type PermissionMode = 'manual' | 'yolo' | 'auto' | 'ask';
+export type PermissionMode = 'manual' | 'yolo' | 'auto' | 'ask' | 'bot';
 
 /**
  * A single permission rule. `pattern` is the DSL form (`Read(/etc/**)`,

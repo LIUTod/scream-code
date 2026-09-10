@@ -3,6 +3,7 @@ import type { PermissionPolicy } from '../types';
 import { AskModeGuardDenyPermissionPolicy } from './ask-mode-guard-deny';
 import { AutoModeApprovePermissionPolicy } from './auto-mode-approve';
 import { AutoModeAskUserQuestionDenyPermissionPolicy } from './auto-mode-ask-user-question-deny';
+import { BotModePermissionPolicy } from './bot-mode-permission';
 import { DefaultToolApprovePermissionPolicy } from './default-tool-approve';
 import { ExitPlanModeReviewAskPermissionPolicy } from './exit-plan-mode-review-ask';
 import { FallbackAskPermissionPolicy } from './fallback-ask';
@@ -22,6 +23,7 @@ import {
   UserConfiguredAskPermissionPolicy,
   UserConfiguredDenyPermissionPolicy,
 } from './user-configured-rules';
+import { CollaborationAutoApprovePermissionPolicy } from './collaboration-auto-approve';
 import { YoloModeApprovePermissionPolicy } from './yolo-mode-approve';
 import { WolfPackModeApprovePermissionPolicy } from './wolfpack-mode-approve';
 
@@ -38,6 +40,13 @@ export function createPermissionDecisionPolicies(agent: Agent): readonly Permiss
     new AskModeGuardDenyPermissionPolicy(agent),
     // User-configured deny rule matches → deny.
     new UserConfiguredDenyPermissionPolicy(agent),
+    // bot mode (unattended): reversible allowlist auto-approves; everything
+    // else is denied and parked. Sits after user deny rules so an explicit
+    // user deny always wins.
+    new BotModePermissionPolicy(agent),
+    // Coordination tools (ContactParent/ReportFinding/SendSubagentMessage) are
+    // conversation, not mutation — never block them on an approval prompt.
+    new CollaborationAutoApprovePermissionPolicy(),
     // auto mode → approve (any auto-mode block must be a deny rule above this).
     new AutoModeApprovePermissionPolicy(agent),
     // Approve-for-session memorized rule matches → approve. Runs before user-configured ask rules so an in-session grant beats a still-matching ask rule on later calls.

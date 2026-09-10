@@ -651,6 +651,8 @@ describe('Permission policy chain', () => {
       'plan-mode-guard-deny',
       'ask-mode-guard-deny',
       'user-configured-deny',
+      'bot-mode-permission',
+      'collaboration-auto-approve',
       'auto-mode-approve',
       'session-approval-history',
       'user-configured-ask',
