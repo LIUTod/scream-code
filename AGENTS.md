@@ -882,11 +882,11 @@ Once a verification command passes, the model must deliver rather than run addit
 
 - the last assistant step had no content,
 - a tool failed in the current turn,
-- there are unverified touched files,
+- a verification command failed in the current turn,
 - a TodoList update is missing for an active goal, or
 - the turn produced meaningful work (file changes or a passed verification) but the final response is too brief or only acknowledges completion.
 
-The gate fires up to five times per turn for the hard checks; the brief-final-response check is allowed one remedial step. Empty or failed verification triggers a retry rather than allowing the model to claim completion.
+The gate fires up to three times per turn for the hard checks; the brief-final-response check is allowed one remedial step. Empty or failed verification triggers a retry rather than allowing the model to claim completion.
 
 Key files: `packages/agent-core/src/agent/turn/index.ts`, `packages/agent-core/src/agent/working-set.ts`, `packages/agent-core/src/profile/default/system.md`.
 

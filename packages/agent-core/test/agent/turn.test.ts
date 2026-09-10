@@ -444,6 +444,55 @@ describe('Agent turn flow', () => {
     expect(JSON.stringify(ctx.agent.context.data().history)).toContain('too brief');
     expect(JSON.stringify(ctx.agent.context.data().history)).toContain('convergence_gate');
   });
+  it('releases the convergence gate after the configured injection cap', async () => {
+    const jian = createFakeJian({
+      execWithEnv: vi.fn(async () => ({
+        stdin: { write: vi.fn(), end: vi.fn() } as unknown as Writable,
+        stdout: Readable.from(['Error: migration step failed.']),
+        stderr: Readable.from(['']),
+        pid: 42,
+        exitCode: 1,
+        wait: vi.fn().mockResolvedValue(1),
+        kill: vi.fn().mockResolvedValue(undefined),
+      })),
+      mkdir: vi.fn().mockResolvedValue(undefined),
+      writeText: vi.fn(async (_path: string, content: string) => content.length),
+    });
+    const ctx = testAgent({ jian });
+    ctx.configure({ tools: ['Bash'] });
+    await ctx.rpc.setPermission({ mode: 'yolo' });
+
+    const failingCall: ToolCall = {
+      type: 'function',
+      id: 'call_migrate_fail',
+      name: 'Bash',
+      arguments: JSON.stringify({ command: 'node migrate.mjs', timeout: 60 }),
+    };
+    // Step 1 runs a blocking command that fails; every following stop attempt
+    // is a content-only step, so only the tool-failure reason can fire.
+    ctx.mockNextResponse({ type: 'text', text: 'Running the migration script now.' }, failingCall);
+    // Tuned cap (maxConvergenceInjections = 3): the gate nudges three times,
+    // then releases the turn. Retuning the cap requires updating this script —
+    // the extra response below is the delivery step after the gate released.
+    const cap = 3;
+    for (let attempt = 0; attempt <= cap; attempt += 1) {
+      ctx.mockNextResponse({
+        type: 'text',
+        text:
+          'The migration still fails with an exit code of 1 and I am investigating ' +
+          `the error (attempt ${String(attempt + 1)}).`,
+      });
+    }
+
+    await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Run the migration' }] });
+    await ctx.untilTurnEnd();
+
+    const history = JSON.stringify(ctx.agent.context.data().history);
+    expect(history.match(/convergence_gate/g) ?? []).toHaveLength(cap);
+    // A capped turn plus one delivery response: asking for a further response
+    // would throw "Unexpected generate call".
+    expect(ctx.llmCalls).toHaveLength(cap + 2);
+  });
   it('does not block completion once a failed verification command passes on retry', async () => {
     const results = [
       { exitCode: 1, stdout: 'Traceback (most recent call last):' },

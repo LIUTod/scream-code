@@ -22,7 +22,7 @@ export const TURN_DEFAULTS = {
    * non-exploratory tool failure, failed verification). Bounded so a model
    * that can't converge ends the turn instead of looping forever.
    */
-  maxConvergenceInjections: 5,
+  maxConvergenceInjections: 3,
 
   /**
    * Final response length below which a reply counts as "trivial"

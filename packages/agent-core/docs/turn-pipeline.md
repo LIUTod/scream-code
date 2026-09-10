@@ -103,7 +103,7 @@ while (true)
 1. steerBuffer 有内容（含 interrupt）？           → continue:true（下一 step 处理）
 2. stopReason === 'max_tokens' 且未恢复过且是主 agent？
      → fullCompaction.begin('truncated')          → continue:true（每会话限 1 次）
-3. convergenceInjections < maxConvergenceInjections（turn/defaults.ts，=5）？
+3. convergenceInjections < maxConvergenceInjections（turn/defaults.ts，=3）？
    满足任一：
      a. 本 step 无任何内容/工具调用
      b. 有 active goal 但本轮没用 TodoList
@@ -118,7 +118,7 @@ while (true)
 ```
 
 **配套守卫**：
-- `maxConvergenceInjections = 5`、`minFinalResponseLength = 60`、`maxGoalTurns = 50` 集中定义在 **`turn/defaults.ts`**（`TURN_DEFAULTS`，带注释）
+- `maxConvergenceInjections = 3`、`minFinalResponseLength = 60`、`maxGoalTurns = 50` 集中定义在 **`turn/defaults.ts`**（`TURN_DEFAULTS`，带注释）
 - 探索性 Bash 判定 `isExploratoryBashCommand()`（which/ls/cat/git status/npx tsc 探测等，`turn/utils.ts`）——探索性失败不阻塞收敛
 - `lastToolFailure` 只在非探索性失败时置位，Bash 失败仅由**通过的验证**清除（`markAllVerified`）
 - 简短收尾判定 `lastAssistantMessageIsTrivial()`（<60 字符或匹配 `done|ok|完成|好了…` 正则，`turn/index.ts:1014-1028`；正则 `TRIVIAL_COMPLETION_RE` 在 `turn/utils.ts`）
@@ -155,7 +155,7 @@ goal 语义的常量与提示词在 **`turn/goal.ts`**（GOAL_*）。
 |---|---|---|---|
 | maxSteps | loop/run-turn.ts:107 | `loopControl.maxStepsPerTurn` | 抛 MaxStepsExceededError |
 | 连续拒绝熔断 | loop/run-turn.ts:136-149 | 连续 8 步全 rejected | stopReason=end_turn |
-| 收敛注入上限 | turn/defaults.ts（TURN_DEFAULTS） | 5 次 | 停止注入 convergence_gate |
+| 收敛注入上限 | turn/defaults.ts（TURN_DEFAULTS） | 3 次 | 停止注入 convergence_gate |
 | summary guard | turn/index.ts:716-735 | 每轮 1 次 | 要求结构化总结 |
 | max_tokens 恢复 | turn/index.ts:656-667 | 每会话 1 次 | 压缩后继续 |
 | 验证命令去重 | turn/index.ts:770-793 | WorkingSet 命中 | 合成结果跳过执行 |
