@@ -25,6 +25,7 @@ export const SLASH_COMMANDS: readonly SlashCommand[] = [
   { name: 'help', description: '显示可用命令', target: 'local' },
   { name: 'auto', description: '切换为 auto 权限模式', target: 'backend' },
   { name: 'yes', description: '切换为 yolo 权限模式', target: 'backend', aliases: ['yolo'] },
+  { name: 'bot', description: '切换为 Bot 无人值守模式', target: 'backend' },
   { name: 'plan', description: '切换计划模式', target: 'backend' },
   { name: 'fork', description: '复制当前会话为新分支', target: 'backend' },
   { name: 'title', description: '重命名当前会话', target: 'backend', aliases: ['rename'], acceptsInput: true },

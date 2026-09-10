@@ -1430,8 +1430,10 @@ class WebSession {
         return;
       }
       case 'auto':
-      case 'yes': {
-        const mode: PermissionMode = command === 'auto' ? 'auto' : 'yolo';
+      case 'yes':
+      case 'bot': {
+        const mode: PermissionMode =
+          command === 'auto' ? 'auto' : command === 'bot' ? 'bot' : 'yolo';
         try {
           await this.session.setPermission(mode);
           this.permission = mode;
@@ -2289,9 +2291,10 @@ export class SessionManager {
       .toSorted((a, b) => b.createdAt - a.createdAt);
   }
 
-  /** True when any session has an agent turn (main or subagent) in flight (used to defer idle exit). */
+  /** True when any session has an agent turn (main or subagent) in flight, or
+   * any session runs in unattended bot mode (defers idle exit). */
   anyBusy(): boolean {
-    return Array.from(this.sessions.values()).some((s) => s.isTurnActive);
+    return Array.from(this.sessions.values()).some((s) => s.isTurnActive || s.permission === 'bot');
   }
 
   async delete(sessionId: string): Promise<boolean> {
@@ -2618,7 +2621,9 @@ export async function startWebServerForSession(session: Session, opts: {
 
   const idleExit = startWebIdleExit({
     idleMs: (opts.idleMinutes ?? WEB_IDLE_EXIT_DEFAULT_MINUTES) * 60_000,
-    busy: () => webSession.isBusy,
+    // Bot mode is unattended by design: keep the server alive so scheduled
+    // goals can run and park decisions for later review, even with no browser.
+    busy: () => webSession.isBusy || webSession.permission === 'bot',
     shutdown: () => close(),
   });
 

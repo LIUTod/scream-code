@@ -925,6 +925,8 @@ export const en: Record<string, string> = {
   'permission.auto': 'Auto',
   'permission.auto_desc': 'Run fully without interaction. Tool operations are auto-approved; agent questions are skipped so it can decide on its own.',
   'permission.yolo_desc': 'Auto-approve tool operations and plan transitions. The agent will still explicitly ask when it needs your input.',
+  'permission.bot': 'Bot',
+  'permission.bot_desc': 'Unattended mode: reversible actions auto-approve; anything else is denied and parked for you to review.',
   'permission.ask_desc': 'Read-only Q&A mode: answer in conversation, never modify files, run commands, or call MCP tools.',
   'permission.select_title': 'Select permission mode',
 
@@ -1161,6 +1163,8 @@ export const en: Record<string, string> = {
   'config.plan_cleared': 'Plan cleared',
   'config.yolo_already_on': 'YES mode is already on',
   'config.yolo_already_off': 'YES mode is already off',
+  'config.bot_already_on': 'Bot mode is already on',
+  'config.bot_already_off': 'Bot mode is already off',
   'config.ask_already_on': 'ASK mode is already on',
   'config.ask_already_off': 'ASK mode is already off',
   'config.rlm_on': 'RLM mode enabled — persistent python kernel available',
@@ -1227,6 +1231,7 @@ export const en: Record<string, string> = {
   // ─── Registry ──────────────────
   'registry.auto_desc': 'Toggle auto permission mode',
   'registry.yolo_desc': 'Toggle auto-approve mode (yolo)',
+  'registry.bot_desc': 'Toggle unattended bot mode (bot)',
   'registry.ask_desc': 'Toggle read-only Q&A mode (ask)',
   'registry.rlm_desc': 'RLM mode: a persistent Python workspace for long-running tasks with unlimited recursive subagents (/rlm toggles)',
   'registry.rlm_max_depth_desc': 'Set RLM recursion depth limit (/rlm-max-depth N)',

@@ -21,6 +21,13 @@ export const BUILTIN_SLASH_COMMANDS = [
     availability: 'always',
   },
   {
+    name: 'bot',
+    aliases: ['bot'],
+    description: 'registry.bot_desc',
+    priority: 217,
+    availability: 'always',
+  },
+  {
     name: 'ask',
     aliases: ['ask'],
     description: 'registry.ask_desc',

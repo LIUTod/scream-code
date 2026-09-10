@@ -27,6 +27,7 @@ import { handleTraceCommand } from './trace';
 import {
   handleAskCommand,
   handleAutoCommand,
+  handleBotCommand,
   handleCompactCommand,
   handleEditorCommand,
   handleFusionPlanCommand,
@@ -80,6 +81,7 @@ export { handleSearchCommand } from './search';
 export { handleTraceCommand } from './trace';
 export {
   handleAutoCommand,
+  handleBotCommand,
   handleCompactCommand,
   handleEditorCommand,
   handleFusionPlanCommand,
@@ -298,6 +300,9 @@ async function handleBuiltInSlashCommand(
       return;
     case 'yes':
       await handleYoloCommand(host, args);
+      return;
+    case 'bot':
+      await handleBotCommand(host, args);
       return;
     case 'ask':
       await handleAskCommand(host, args);

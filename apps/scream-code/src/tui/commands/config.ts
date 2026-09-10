@@ -180,6 +180,46 @@ export async function handleYoloCommand(host: SlashCommandHost, args: string): P
   }
 }
 
+export async function handleBotCommand(host: SlashCommandHost, args: string): Promise<void> {
+  const session = host.session;
+  if (session === undefined) {
+    host.showError(getNoActiveSessionMessage());
+    return;
+  }
+
+  const subcmd = args.trim().toLowerCase();
+  const currentMode = host.state.appState.permissionMode;
+
+  if (subcmd === 'on') {
+    if (currentMode === 'bot') {
+      host.showNotice(t('config.bot_already_on'));
+      return;
+    }
+    await session.setPermission('bot');
+    host.setAppState({ permissionMode: 'bot' });
+    return;
+  }
+
+  if (subcmd === 'off') {
+    if (currentMode !== 'bot') {
+      host.showNotice(t('config.bot_already_off'));
+      return;
+    }
+    await session.setPermission('manual');
+    host.setAppState({ permissionMode: 'manual' });
+    return;
+  }
+
+  // toggle
+  if (currentMode === 'bot') {
+    await session.setPermission('manual');
+    host.setAppState({ permissionMode: 'manual' });
+  } else {
+    await session.setPermission('bot');
+    host.setAppState({ permissionMode: 'bot' });
+  }
+}
+
 export async function handleAskCommand(host: SlashCommandHost, args: string): Promise<void> {
   const session = host.session;
   if (session === undefined) {
