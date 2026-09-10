@@ -116,7 +116,7 @@ export const en: Record<string, string> = {
   'footer.hit': 'HitR',
   'footer.tasks_running': '{count} tasks running',
   'footer.agents_running': '{count} agents running',
-  'footer.subagents_working': '{count} subagents working',
+  'footer.subagents_working': 'subagents x{count} working',
 
   // ─── Sidebar panels ─────────────
   'sidebar.git': 'Git',
