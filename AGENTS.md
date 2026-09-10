@@ -174,6 +174,7 @@ Test the contract the system exposes — not the easiest internal detail to asse
 - Tests: `bunx vitest run` (package) or `bun run test` (workspace).
 - Build: `bun run build`.
 - Do not run raw `tsc` directly.
+- **Dist rebuild rule (runtime uses build output, not `src/`)**: after changing `packages/config` (i18n/locales), `packages/node-sdk` (e.g. permission-mode validation), or `packages/agent-core`, run `pnpm --filter @scream-code/<pkg> run build` so their `dist/` is fresh. `apps/scream-code` bundles workspace deps into its own `dist/` via tsdown — after any package-level change that the app consumes (including error-message text), also run `pnpm --filter scream-code run build`, otherwise the running TUI/web server keeps executing stale inline copies (symptom seen in practice: a fixed validation message still reports the old wording).
 
 ### Changesets
 
