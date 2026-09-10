@@ -416,7 +416,7 @@ function servicesToToml(services: ServicesConfig, rawServices: unknown): Record<
   // back over the raw clone — including keys first introduced by a
   // setConfig patch that have no raw counterpart yet.
   const out = cloneRecord(rawServices);
-  for (const key of ['duckduckgo', 'sogou', 'so360', 'baidu'] as const) {
+  for (const key of ['duckduckgo', 'bing', 'sogou', 'baidu', 'so360'] as const) {
     const toggle = services[key];
     // Guard the undefined case: a partial patch (all fields optional) must
     // never overwrite an existing on-disk value with undefined.
