@@ -15,6 +15,8 @@ export function buildGradingFeedbackPrompt(reason: string): string {
     `Reviewer feedback:\n${reason}`,
     '',
     'Address every issue listed above before calling UpdateGoal with complete again. Do not re-submit until all issues are resolved.',
+    '',
+    'If you are confident the evidence is already complete (diffs, test output, and artifacts all exist and cover the criteria), arbitrate: spawn a `reviewer` subagent with the goal criteria and that evidence, ask it to judge whether each criterion is genuinely satisfied, and act on its verdict. Then retry verification once with the arbitration result attached as a goal note.',
   ].join('\n');
 }
 

@@ -1,6 +1,8 @@
 import type { Agent } from '#/agent';
 import { execFile } from 'node:child_process';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { promisify } from 'node:util';
+import { dirname, join } from 'node:path';
 import { z } from 'zod';
 
 import type { GoalNote } from '../../../agent/goal';
@@ -27,6 +29,51 @@ export type GoalGraderFn = (
   criterion: string | undefined,
   output: string,
 ) => Promise<unknown>;
+
+/**
+ * How many times a goal may be sent back for evidence-gap fixes before the
+ * loop parks it for human review (unattended-safe retry bound). Subjective
+ * issues never consume this budget — they park immediately.
+ */
+export const MAX_EVIDENCE_RETRIES = 3;
+/** Per-objective count of evidence-gap verification retries. Cleared on PASS. */
+const evidenceRetryCounts = new Map<string, number>();
+
+
+/**
+ * Writes an unattended-mode parking report when a goal is blocked for a human
+ * decision (subjective-only verdicts or repeated evidence gaps). The report
+ * lands under `<sessionDir>/unattended/` so the user can review parked
+ * decisions on return. Never throws — reporting must not break the loop.
+ */
+function writeParkedReport(agent: Agent, objective: string, reason: string): void {
+  try {
+    const sessionDir = agent.homedir !== undefined ? dirname(dirname(agent.homedir)) : undefined;
+    if (sessionDir === undefined) return;
+    const reportDir = join(sessionDir, 'unattended');
+    mkdirSync(reportDir, { recursive: true });
+    const slug = objective.toLowerCase().replaceAll(/[^a-z0-9]+/g, '-').slice(0, 48) || 'goal';
+    const file = join(reportDir, `${slug}-${Date.now()}.md`);
+    writeFileSync(
+      file,
+      [
+        '# Unattended goal parked for human decision',
+        '',
+        '## Objective',
+        objective,
+        '',
+        '## Why it parked',
+        reason,
+        '',
+        '## What to do',
+        'Review the acceptance criteria and the parked reason, then adjust the goal and resume, or close it.',
+        '',
+      ].join('\n'),
+    );
+  } catch {
+    // reporting must never break the goal loop
+  }
+}
 
 export const UpdateGoalToolInputSchema = z
   .object({
@@ -216,6 +263,7 @@ export class UpdateGoalTool implements BuiltinTool<UpdateGoalToolInput> {
         // Called after markComplete resolves (whether null or a snapshot) so
         // the bucket is cleared as soon as the referee accepts the goal.
         graderEmissionGuard.resetGoal(goalState.objective);
+        evidenceRetryCounts.delete(goalState.objective);
         if (completed === null) {
           return toolError('Failed to mark verified goal complete', goal);
         }
@@ -232,6 +280,54 @@ export class UpdateGoalTool implements BuiltinTool<UpdateGoalToolInput> {
     // Deduplicate grader feedback before injection. If the referee repeats a
     // reason already seen for this goal, skip injecting it into context (the
     // agent already has the earlier feedback) and nudge it to address that.
+    //
+    // Evidence-based triage (unattended-safe loop control):
+    // 1. A FAIL with NO concrete issues is an invalid verdict — never consume
+    //    retry budget on it; ask for specific gaps instead.
+    // 2. A FAIL whose issues are ALL subjective needs a human decision —
+    //    park the goal as blocked instead of burning tokens on rework.
+    // 3. Evidence gaps (fixable by more work) retry at most
+    //    MAX_EVIDENCE_RETRIES times per goal, then park.
+    if (grade.issues.length === 0) {
+      const noGap =
+        'Verification failed but the reviewer listed no concrete issues. Restate which acceptance criteria are unmet, with evidence for each, then retry verification.';
+      const denoised = graderEmissionGuard.filter(noGap, goalState.objective);
+      if (denoised !== null) {
+        this.appendGradingFeedback(denoised);
+        return { output: `Verification failed without specific gaps. ${noGap}` };
+      }
+      return {
+        output:
+          'Previous verification feedback still applies; the reviewer again listed no concrete issues. Address the earlier feedback and retry.',
+      };
+    }
+    if (!grade.issues.some((i) => i.kind === 'evidence')) {
+      const subjectiveReasons = grade.issues.map((i) => `- ${i.text}`).join('\n');
+      const reason = `Needs a human decision — verification raised only subjective issues:\n${subjectiveReasons}`;
+      writeParkedReport(this.agent, goalState.objective, reason);
+      const parked = await goal.markBlocked({ reason }, 'model');
+      if (parked !== null) {
+        this.agent.context.appendSystemReminder(buildGoalBlockedReasonPrompt(parked), {
+          kind: 'system_trigger',
+          name: GOAL_BLOCKED_REMINDER_NAME,
+        });
+        return { output: `Goal parked for human decision: ${reason}`, stopTurn: true };
+      }
+    }
+    const evidenceCount = (evidenceRetryCounts.get(goalState.objective) ?? 0) + 1;
+    evidenceRetryCounts.set(goalState.objective, evidenceCount);
+    if (evidenceCount > MAX_EVIDENCE_RETRIES) {
+      const reason = `Repeated evidence gaps after ${MAX_EVIDENCE_RETRIES} verification retries — parking for human review.`;
+      const parked = await goal.markBlocked({ reason }, 'model');
+      if (parked !== null) {
+        writeParkedReport(this.agent, goalState.objective, reason);
+        this.agent.context.appendSystemReminder(buildGoalBlockedReasonPrompt(parked), {
+          kind: 'system_trigger',
+          name: GOAL_BLOCKED_REMINDER_NAME,
+        });
+        return { output: reason, stopTurn: true };
+      }
+    }
     const denoised = graderEmissionGuard.filter(grade.reason, goalState.objective);
     if (denoised !== null) {
       this.appendGradingFeedback(denoised);
@@ -251,11 +347,39 @@ export class UpdateGoalTool implements BuiltinTool<UpdateGoalToolInput> {
   }
 }
 
-function parseGrade(value: unknown): { readonly pass: boolean; readonly reason: string } | undefined {
+function parseGrade(
+  value: unknown,
+): { readonly pass: boolean; readonly reason: string; readonly issues: GraderIssue[] } | undefined {
   if (typeof value !== 'object' || value === null) return;
   const { pass, reason } = value as { readonly pass?: unknown; readonly reason?: unknown };
   if (typeof pass !== 'boolean' || typeof reason !== 'string' || reason.trim().length === 0) return;
-  return { pass, reason };
+  const issues = normalizeIssues((value as { issues?: unknown }).issues);
+  return { pass, reason, issues };
+}
+
+interface GraderIssue {
+  readonly text: string;
+  readonly kind: 'evidence' | 'subjective';
+}
+
+/** Legacy string issues default to "subjective" (conservative: park for human). */
+function normalizeIssues(raw: unknown): GraderIssue[] {
+  if (!Array.isArray(raw)) return [];
+  const out: GraderIssue[] = [];
+  for (const item of raw) {
+    if (typeof item === 'string' && item.trim().length > 0) {
+      out.push({ text: item, kind: 'subjective' });
+    } else if (typeof item === 'object' && item !== null) {
+      // The grader output may carry the message under `issue` (raw LLM JSON)
+      // or `text` (already-normalized form) — accept both.
+      const { issue, text: rawText, kind } = item as { issue?: unknown; text?: unknown; kind?: unknown };
+      const text = typeof issue === 'string' ? issue : typeof rawText === 'string' ? rawText : '';
+      if (text.trim().length > 0) {
+        out.push({ text, kind: kind === 'evidence' ? 'evidence' : 'subjective' });
+      }
+    }
+  }
+  return out;
 }
 
 async function resumeAfterGrading(goal: Agent['goal']): Promise<ExecutableToolResult | undefined> {
