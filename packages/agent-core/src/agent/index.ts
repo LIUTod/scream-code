@@ -91,6 +91,9 @@ export interface AgentOptions {
   readonly compactionStrategy?: CompactionStrategy;
   readonly modelProvider?: ModelProvider | undefined;
   readonly subagentHost?: SessionSubagentHost | undefined;
+  /** The host of the agent that spawned this one (subagents only) — used by
+   * ContactParent to reach its owner's inbox. Set by Session.instantiateAgent. */
+  readonly ownerHost?: SessionSubagentHost | undefined;
   readonly skills?: SkillRegistry;
   readonly mcp?: McpConnectionManager;
   readonly hookEngine?: HookEngine;
@@ -143,6 +146,8 @@ export class Agent {
   readonly rawGenerate: typeof generate;
   readonly modelProvider?: ModelProvider;
   readonly subagentHost?: SessionSubagentHost;
+  /** The spawning agent's host (subagents only); see OwnerHostOptions. */
+  readonly ownerHost?: SessionSubagentHost;
   readonly mcp?: McpConnectionManager;
   readonly hooks?: HookEngine;
   /** Process supervisor tracking this agent's LSP children (session-scoped). */
@@ -196,6 +201,7 @@ export class Agent {
     this.rawGenerate = options.generate ?? generate;
     this.modelProvider = options.modelProvider;
     this.subagentHost = options.subagentHost;
+    this.ownerHost = options.ownerHost;
     this.mcp = options.mcp;
     this.hooks = options.hookEngine;
     this.lspSupervisor = options.lspSupervisor;

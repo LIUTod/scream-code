@@ -16,6 +16,7 @@ export type SubagentCapabilityMode = 'read-only' | 'read-write' | 'execute' | 'a
 /** Read-only inspection tools (no workspace mutation, no command execution). */
 const READ_TOOLS = new Set([
   'AskUserQuestion',
+  'ContactParent',
   'FetchURL',
   'Glob',
   'Grep',

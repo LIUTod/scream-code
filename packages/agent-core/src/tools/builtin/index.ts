@@ -7,6 +7,7 @@ export * from '../cron/cron-delete';
 export * from '../cron/cron-list';
 export * from './collaboration/agent';
 export * from './collaboration/ask-user';
+export * from './collaboration/contact-parent';
 export * from './collaboration/report-finding';
 export * from './collaboration/send-subagent-message';
 export * from './goal/create-goal';

@@ -11,6 +11,7 @@ import {
 import { linkAbortSignal, userCancellationReason } from '../utils/abort';
 import { collectGitContext } from './git-context';
 import { SubagentMessageBus, buildSubagentMessage, type SubagentMessageStatus } from './subagent-messages';
+import { renderNotificationXml } from '../agent/context/notification-xml';
 import { filterToolsForCapability, type SubagentCapabilityMode } from './subagent-capability';
 import type { Session } from './index';
 import SUMMARY_CONTINUATION_PROMPT from './summary-continuation.md';
@@ -72,6 +73,12 @@ export class SessionSubagentHost {
   /** Per-child per-model usage already folded into the parent totals, so a
    * resumed child's aggregation only adds the delta. */
   private readonly aggregatedChildUsage = new WeakMap<Agent, Record<string, TokenUsage>>();
+  /** Per-turn budget (≤4 accepted) for child→parent collaboration requests. */
+  private readonly childRequestCounts = new Map<string, number>();
+  /** Dedupe keys seen within the current turn, per child. */
+  private readonly childRequestSeen = new Map<string, Set<string>>();
+  /** Agent → childId lookup for child→parent collaboration requests. */
+  private readonly childIdByAgent = new WeakMap<Agent, string>();
 
   constructor(
     private readonly session: Session,
@@ -127,6 +134,8 @@ export class SessionSubagentHost {
     ).finally(() => {
       unlinkAbortSignal();
       this.activeChildren.delete(id);
+      this.childRequestCounts.delete(id);
+      this.childRequestSeen.delete(id);
       this.bus!.clear(id);
     });
 
@@ -202,6 +211,8 @@ export class SessionSubagentHost {
     ).finally(() => {
       unlinkAbortSignal();
       this.activeChildren.delete(agentId);
+      this.childRequestCounts.delete(agentId);
+      this.childRequestSeen.delete(agentId);
       this.bus!.clear(agentId);
     });
 
@@ -271,6 +282,88 @@ export class SessionSubagentHost {
     return { status: out.status, reason: out.reason };
   }
 
+  /**
+   * Child→parent collaboration request (B-scheme). A subagent can proactively
+   * contact its owner mid-run: `info` (ask for context/clarification),
+   * `handoff` (ask to pass the work to another capability — described as a
+   * need, never a named agent), or `escalate` (bump to the human). The
+   * request lands in the parent's mailbox and the parent is woken via a
+   * `child_request` notification at its next turn boundary (buffered if it is
+   * mid-turn). Rate limits: ≤4 accepted requests per child turn, duplicate
+   * (type+needs+message-prefix) requests within a turn are deduped.
+   */
+  submitChildRequest(
+    fromAgent: Agent,
+    req: {
+      request_type: 'info' | 'handoff' | 'escalate';
+      message: string;
+      needs?: string;
+      payload?: { artifacts?: string[]; evidence?: string[]; missing?: string[] };
+    },
+  ): { status: SubagentMessageStatus; deduped?: boolean } {
+    const fromChildId = this.childIdByAgent.get(fromAgent);
+    if (fromChildId === undefined || !this.activeChildren.has(fromChildId)) {
+      return { status: 'not_active' };
+    }
+    const count = this.childRequestCounts.get(fromChildId) ?? 0;
+    if (count >= 4) return { status: 'saturated' };
+    const dedupeKey = `${req.request_type}|${req.needs ?? ''}|${req.message}`;
+    let seen = this.childRequestSeen.get(fromChildId);
+    if (seen === undefined) {
+      seen = new Set();
+      this.childRequestSeen.set(fromChildId, seen);
+    }
+    if (seen.has(dedupeKey)) return { status: 'accepted', deduped: true };
+    seen.add(dedupeKey);
+    this.childRequestCounts.set(fromChildId, count + 1);
+
+    const lines = [
+      `${req.request_type}: ${req.message}`,
+      req.needs !== undefined ? `needs: ${req.needs}` : undefined,
+      req.payload?.artifacts !== undefined && req.payload.artifacts.length > 0
+        ? `artifacts: [${req.payload.artifacts.join(', ')}]`
+        : undefined,
+      req.payload?.evidence !== undefined && req.payload.evidence.length > 0
+        ? `evidence: [${req.payload.evidence.join(', ')}]`
+        : undefined,
+      req.payload?.missing !== undefined && req.payload.missing.length > 0
+        ? `missing: [${req.payload.missing.join(', ')}]`
+        : undefined,
+    ].filter((l): l is string => l !== undefined);
+
+    // Delivery is notification-only: the full request text rides inside the
+    // steer notification, so the parent sees it at its next turn boundary
+    // without a bus mailbox that nothing ever polls (which would accumulate
+    // accepted-but-unread messages and saturate). Rate limits above are the
+    // only backpressure needed.
+    const parent = this.session.agents.get(this.ownerAgentId);
+    parent?.turn.steer(
+      [
+        {
+          type: 'text',
+          text: renderNotificationXml({
+            id: `child_request:${fromChildId}:${Date.now()}`,
+            category: 'task',
+            type: 'child_request',
+            source_kind: 'subagent',
+            source_id: fromChildId,
+            title: `Subagent ${req.request_type} request`,
+            severity: 'info',
+            body: lines.join('\n'),
+          }),
+        },
+      ],
+      { kind: 'system_trigger', name: 'child_request' },
+    );
+    return { status: 'accepted' };
+  }
+
+  /** Per-turn budget reset for child→parent collaboration requests. */
+  private resetChildRequestLimits(childId: string): void {
+    this.childRequestCounts.set(childId, 0);
+    this.childRequestSeen.set(childId, new Set());
+  }
+
   private resolveProfile(parent: Agent, profileName: string): ResolvedAgentProfile {
     const profile =
       DEFAULT_AGENT_PROFILES[parent.config.profileName ?? 'agent']?.subagents?.[profileName] ??
@@ -291,6 +384,7 @@ export class SessionSubagentHost {
   ): Promise<SubagentCompletion> {
     const startedAt = Date.now();
     let turns = 1;
+    this.childIdByAgent.set(child, childId);
     parent.emitEvent({
       type: 'subagent.spawned',
       subagentId: childId,
@@ -334,6 +428,7 @@ export class SessionSubagentHost {
           .join('\n\n');
         return `${prompt}\n\n[parent_messages]\n${messageBlock}`;
       };
+      this.resetChildRequestLimits(childId);
       childPrompt = injectParentMessages(childPrompt);
       const origin: PromptOrigin = options.origin ?? { kind: 'system_trigger', name: 'subagent' };
       child.turn.prompt([{ type: 'text', text: childPrompt }], origin);
@@ -361,6 +456,7 @@ export class SessionSubagentHost {
           remainingContinuations -= 1;
           turns += 1;
           options.signal.throwIfAborted();
+          this.resetChildRequestLimits(childId);
           const continuation = injectParentMessages(SUMMARY_CONTINUATION_PROMPT);
           child.turn.prompt([{ type: 'text', text: continuation }], origin);
           await runChildTurnToCompletion(child, options.signal);
@@ -375,6 +471,7 @@ export class SessionSubagentHost {
         // its JSON answer after reading the message block.
         turns += 1;
         options.signal.throwIfAborted();
+        this.resetChildRequestLimits(childId);
         const delivery = injectParentMessages(STRUCTURED_MESSAGE_DELIVERY_PROMPT);
         child.turn.prompt([{ type: 'text', text: delivery }], origin);
         await runChildTurnToCompletion(child, options.signal);

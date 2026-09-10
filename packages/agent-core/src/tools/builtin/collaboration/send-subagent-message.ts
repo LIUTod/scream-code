@@ -31,7 +31,8 @@ const STATUS_TO_TEXT: Record<string, string> = {
   accepted: 'Message accepted for delivery.',
   not_found: 'No such subagent.',
   not_owned: 'That subagent is not owned by the current agent; only the owning parent may message it.',
-  not_active: 'The subagent is no longer active; messages are not accepted.',
+  not_active:
+    'The subagent already finished; messages cannot reach it. Use Agent(resume=<agent id>, prompt=<your decision>) to continue it with your reply.',
   saturated: 'Message rejected: the target mailbox is at its in-flight limit.',
   deadline_elapsed: 'Message rejected: its delivery deadline elapsed before it could be sent.',
 };

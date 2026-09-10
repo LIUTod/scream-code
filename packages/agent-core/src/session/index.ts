@@ -563,6 +563,7 @@ export class Session {
       hookEngine: config.hookEngine ?? this.hookEngine,
       subagentHost:
         config.subagentHost ?? new SessionSubagentHost(this, id, this.backgroundTaskTimeoutMs(), this.options.subagentModelBindings),
+      ownerHost: type === 'sub' ? parentAgent?.subagentHost : undefined,
       mcp: this.mcp,
       permission: this.permissionOptions(parentAgentId, config.permission),
       log: this.log.createChild({ agentId: id }),

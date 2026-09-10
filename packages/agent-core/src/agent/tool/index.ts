@@ -78,6 +78,7 @@ const GRADER_SYSTEM_PROMPT = [
   '- Conformance: the work matches what was asked — no scope drift, no over-engineering, no cutting corners.',
   '- Substance: the output is real, finished, working work — not just a plan, outline, scaffold, stub, mock, or partial implementation, unless the objective specifically asks for those. Surface-level appearance without end-to-end correctness is FAIL.',
   'When FAIL, you MUST list specific issues with actionable fix directions. Do not accept plausible-sounding but unverified claims of completion.',
+  'Classify each issue with a kind: "evidence" when the gap is fixable by more work (a failing test, a missing artifact, an unmet criterion with a concrete fix), or "subjective" when the gap needs a human decision (style, taste, scope preference, trade-off judgment).',
   'Respond with JSON only.',
 ].join(' ');
 
@@ -112,9 +113,15 @@ function buildGraderPrompt(objective: string, criteria: string, output: string):
     '',
     'Evaluate each dimension independently against the acceptance criteria, then decide overall PASS/FAIL.',
     'When FAIL, list every specific issue with an actionable fix direction so the agent knows exactly what to address next.',
+    'Each issue must carry a kind: "evidence" (fixable by more work) or "subjective" (needs a human decision). A FAIL with no concrete, classified issues is invalid — do not emit one.',
     'Respond with JSON:',
-    '{"completeness":{"pass":true/false,"detail":"..."},"conformance":{"pass":true/false,"detail":"..."},"substance":{"pass":true/false,"detail":"..."},"issues":["issue 1: what to fix","issue 2: what to fix"],"pass":true/false,"reason":"overall summary"}',
+    '{"completeness":{"pass":true/false,"detail":"..."},"conformance":{"pass":true/false,"detail":"..."},"substance":{"pass":true/false,"detail":"..."},"issues":[{"issue":"what to fix","kind":"evidence|subjective"}],"pass":true/false,"reason":"overall summary"}',
   ].join('\n');
+}
+
+interface GraderIssue {
+  text: string;
+  kind: 'evidence' | 'subjective';
 }
 
 interface GraderResult {
@@ -122,12 +129,31 @@ interface GraderResult {
   reason: string;
   /** Formatted dimension breakdown + issues for display. Empty if no structured dims. */
   summary: string;
+  /** Classified issues (kind defaults to "evidence" for legacy string entries). */
+  issues: GraderIssue[];
+}
+
+function normalizeGraderIssues(raw: unknown): GraderIssue[] {
+  if (!Array.isArray(raw)) return [];
+  const out: GraderIssue[] = [];
+  for (const item of raw) {
+    if (typeof item === 'string' && item.trim().length > 0) {
+      out.push({ text: item, kind: 'subjective' });
+    } else if (typeof item === 'object' && item !== null) {
+      const { issue, text: rawText, kind } = item as { issue?: unknown; text?: unknown; kind?: unknown };
+      const text = typeof issue === 'string' ? issue : typeof rawText === 'string' ? rawText : '';
+      if (text.trim().length > 0) {
+        out.push({ text, kind: kind === 'evidence' ? 'evidence' : 'subjective' });
+      }
+    }
+  }
+  return out;
 }
 
 function parseGraderResponse(text: string): GraderResult {
   try {
     const match = text.match(/\{[\s\S]*\}/);
-    if (!match) return { pass: false, reason: 'No JSON found in grader response', summary: '' };
+    if (!match) return { pass: false, reason: 'No JSON found in grader response', summary: '', issues: [] };
     const parsed = JSON.parse(match[0]) as {
       pass?: unknown;
       reason?: unknown;
@@ -142,7 +168,14 @@ function parseGraderResponse(text: string): GraderResult {
 
     const dims = [parsed.completeness, parsed.conformance, parsed.substance];
     const hasDims = dims.some((d) => d !== undefined);
-    if (!hasDims) return { pass: overallPass, reason: overallReason, summary: '' };
+    if (!hasDims) {
+      return {
+        pass: overallPass,
+        reason: overallReason,
+        summary: '',
+        issues: normalizeGraderIssues(parsed.issues),
+      };
+    }
 
     const lines: string[] = [];
     const failedDims: string[] = [];
@@ -158,16 +191,14 @@ function parseGraderResponse(text: string): GraderResult {
       if (!ok) failedDims.push(`${name}: ${detail}`);
     }
 
-    // Extract issues list
-    const issues = Array.isArray(parsed.issues)
-      ? (parsed.issues as unknown[]).filter((i): i is string => typeof i === 'string')
-      : [];
+    // Extract issues list (legacy strings default to "evidence")
+    const issues = normalizeGraderIssues(parsed.issues);
 
     if (issues.length > 0) {
       lines.push('');
       lines.push('  Issues to fix:');
       for (const issue of issues) {
-        lines.push(`  - ${issue}`);
+        lines.push(`  - [${issue.kind}] ${issue.text}`);
       }
     }
 
@@ -176,11 +207,13 @@ function parseGraderResponse(text: string): GraderResult {
     // Build reason: failed dims + issues for the agent's system reminder
     const reasonParts: string[] = [overallReason];
     if (failedDims.length > 0) reasonParts.push(failedDims.join('\n'));
-    if (issues.length > 0) reasonParts.push(`Issues to fix:\n${issues.map((i) => `- ${i}`).join('\n')}`);
+    if (issues.length > 0) {
+      reasonParts.push(`Issues to fix:\n${issues.map((i) => `- [${i.kind}] ${i.text}`).join('\n')}`);
+    }
 
-    return { pass: overallPass, reason: reasonParts.join('\n'), summary };
+    return { pass: overallPass, reason: reasonParts.join('\n'), summary, issues };
   } catch {
-    return { pass: false, reason: 'Failed to parse grader response', summary: '' };
+    return { pass: false, reason: 'Failed to parse grader response', summary: '', issues: [] };
   }
 }
 
@@ -243,7 +276,7 @@ function createGoalGrader(agent: Agent): GoalGraderFn {
     const reason = result.summary
       ? `${result.reason}\n${result.summary}`
       : result.reason;
-    return { pass: result.pass, reason };
+    return { pass: result.pass, reason, issues: result.issues };
   };
 }
 
@@ -1082,6 +1115,12 @@ export class ToolManager {
             },
           ),
         canSpawn && new b.SendSubagentMessageTool(this.agent.subagentHost),
+        // Child→parent collaboration: every subagent can proactively contact
+        // its owner mid-run (info / handoff / escalate). The main agent has no
+        // parent, so the tool is mounted only for subagents.
+        this.agent.type === 'sub' &&
+          this.agent.ownerHost !== undefined &&
+          new b.ContactParentTool(this.agent.ownerHost, () => this.agent),
         canSpawn &&
           new b.WolfPackTool(
             this.agent.subagentHost,
