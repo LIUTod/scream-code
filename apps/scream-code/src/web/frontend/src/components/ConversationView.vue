@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import type { UseScreamWebClientReturn } from '../composables/useScreamWebClient';
-import { slashHelpText } from '../commands';
+import { useSlashCommands } from '../composables/useSlashCommands';
 import ApprovalCard from './ApprovalCard.vue';
 import Composer from './Composer.vue';
 import ConversationHeader from './ConversationHeader.vue';
@@ -71,48 +71,23 @@ function showInfo(mode: 'status' | 'usage') {
   infoVisible.value = true;
 }
 
-function openModelPicker() {
-  const opened = composerRef.value?.openModelPicker() ?? false;
-  if (!opened) {
-    appendSystemMessage(`当前模型：${status.value.model ?? 'unknown'}`);
-  }
+/** Delegate to the composer's picker; the shared dispatch prints the status
+ *  message when no picker could open. */
+function openModelPicker(): boolean {
+  return composerRef.value?.openModelPicker() ?? false;
 }
 
-function onCommand(name: string, args?: string) {
-  switch (name) {
-    case 'compact':
-      sendCommand('compact');
-      break;
-    case 'model':
-      openModelPicker();
-      break;
-    case 'clear':
-      clearMessages();
-      break;
-    case 'new':
-      emit('home');
-      break;
-    case 'help':
-      appendSystemMessage(slashHelpText());
-      break;
-    case 'auto':
-    case 'yes':
-    case 'plan':
-    case 'fork':
-    case 'title':
-    case 'btw':
-      sendCommand(name, args);
-      break;
-    case 'status':
-      showInfo('status');
-      break;
-    case 'usage':
-      showInfo('usage');
-      break;
-    default:
-      appendSystemMessage(`未知命令：/${name}`);
-  }
-}
+// Shared slash-command dispatch (see useSlashCommands). The chat view always
+// has an active session, so no ensureSession hook is needed here.
+const { onCommand } = useSlashCommands({
+  sendCommand,
+  clearMessages,
+  appendSystemMessage,
+  onNew: () => emit('home'),
+  openModelPicker,
+  showInfo,
+  currentModel: () => status.value.model,
+});
 
 function onRename(title: string) {
   sendCommand('title', title);

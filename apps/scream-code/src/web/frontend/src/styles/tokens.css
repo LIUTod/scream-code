@@ -60,7 +60,6 @@
   /* Layout chrome (prototype: 288px fixed sidebar) */
   --sidebar-width: 288px;
   --sidebar-width-collapsed: 64px;
-  --sidebar-width-collapsed: 64px;
   --rightbar-width: 360px;
   --content-max: 840px;
 }

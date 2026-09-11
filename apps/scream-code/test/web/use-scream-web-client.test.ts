@@ -42,7 +42,7 @@ class FakeWS {
 
   onopen: ((ev: unknown) => void) | null = null;
   onmessage: ((ev: { data: string }) => void) | null = null;
-  onclose: ((ev: { code: number }) => void) | null = null;
+  onclose: ((ev: { code: number; reason?: string }) => void) | null = null;
   onerror: ((ev: unknown) => void) | null = null;
 
   constructor(url: string) {
@@ -69,9 +69,9 @@ class FakeWS {
   fireMessage(msg: unknown): void {
     this.onmessage?.({ data: JSON.stringify(msg) });
   }
-  fireClose(code: number): void {
+  fireClose(code: number, reason = ''): void {
     this.readyState = FakeWS.CLOSED;
-    this.onclose?.({ code });
+    this.onclose?.({ code, reason });
   }
 }
 
@@ -492,5 +492,67 @@ describe('useScreamWebClient', () => {
     // Pre-fix, the rejected session's messages/errors haunted the idle view.
     expect(h.client.messages.value).toEqual([]);
     expect(h.client.error.value).toBeNull();
+  });
+
+  it('close 1008 toasts the rejection and refreshes the session list', async () => {
+    h = setupHarness();
+    const ws = await h.handshake();
+    const sessionListFetches = () =>
+      h.calls.filter((c) => c.url === `${API}/sessions` && c.method === 'GET').length;
+    const before = sessionListFetches();
+
+    ws.fireClose(1008, 'Session not found');
+
+    expect(h.client.connectionStatus.value).toBe('idle');
+    expect(toastTexts().some((t) => t.includes('会话不可用'))).toBe(true);
+    expect(sessionListFetches()).toBe(before + 1);
+  });
+
+  it('caps auto-reconnect after repeated failures and surfaces a terminal error', async () => {
+    h = setupHarness();
+    // No handshake: heartbeat never starts, isolating the reconnect scheduler.
+    expect(h.wsInstances.length).toBe(1);
+
+    for (let i = 0; i < 12; i++) {
+      const current = h.wsInstances.at(-1);
+      current.fireClose(1006); // abnormal closure → scheduleReconnect
+      await vi.advanceTimersByTimeAsync(60_000); // covers the 30s backoff cap
+    }
+
+    // 1 initial + MAX_RECONNECT_ATTEMPTS(8) retries; pre-fix the socket count
+    // grew with every loop iteration and the storm never stopped.
+    expect(h.wsInstances.length).toBe(9);
+    expect(h.client.connectionStatus.value).toBe('disconnected');
+    expect(h.client.error.value).toContain('上限');
+  });
+
+  it('reconnectNow re-arms the reconnect budget after the cap', async () => {
+    h = setupHarness();
+    for (let i = 0; i < 10; i++) {
+      h.wsInstances.at(-1).fireClose(1006);
+      await vi.advanceTimersByTimeAsync(60_000);
+    }
+    expect(h.wsInstances.length).toBe(9); // capped
+
+    h.client.reconnectNow();
+
+    expect(h.wsInstances.length).toBe(10);
+    expect(h.client.connectionStatus.value).toBe('connecting');
+    expect(h.client.error.value).toBeNull();
+  });
+
+  it('resync_required frame drops the journal cursor and re-fetches the snapshot', async () => {
+    h = setupHarness();
+    const ws = await h.handshake();
+    const snapshotFetches = () =>
+      h.calls.filter((c) => c.url.startsWith(`${API}/sessions/sess-1/snapshot`)).length;
+    const before = snapshotFetches(); // hello itself pulls one snapshot
+
+    ws.fireMessage({ type: 'resync_required' });
+    await flushPromises();
+
+    // Pre-fix the frame type had no registered handler and was silently
+    // dropped, leaving the UI stale after server-side drift detection.
+    expect(snapshotFetches()).toBe(before + 1);
   });
 });

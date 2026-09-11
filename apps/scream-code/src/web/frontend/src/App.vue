@@ -3,6 +3,7 @@ import { ref, onBeforeUnmount, onMounted, watch, provide } from 'vue';
 import WebShell from './components/WebShell.vue';
 import ImageLightbox from './components/ImageLightbox.vue';
 import Toast from './components/ui/Toast.vue';
+import { readStoredString, writeStoredString } from './utils/storage';
 import type { Theme } from './theme';
 
 const theme = ref<Theme>('system');
@@ -30,11 +31,8 @@ let themeTimer: number | null = null;
 function setTheme(t: Theme) {
   const prev = theme.value;
   theme.value = t;
-  try {
-    localStorage.setItem('scream-theme', t);
-  } catch {
-    // Storage can be unavailable in restricted/private browsing contexts.
-  }
+  // Storage can be unavailable in restricted/private browsing contexts.
+  writeStoredString('scream-theme', t);
   if (prev === t) return;
   const root = document.documentElement;
   const prefersReduced =
@@ -71,12 +69,9 @@ function setTheme(t: Theme) {
 provide('setTheme', setTheme);
 
 onMounted(() => {
-  try {
-    const saved = localStorage.getItem('scream-theme') as Theme | null;
-    if (saved === 'light' || saved === 'dark' || saved === 'system') theme.value = saved;
-  } catch {
-    // Fall back to the system theme when storage is unavailable.
-  }
+  // Fall back to the system theme when storage is unavailable.
+  const saved = readStoredString('scream-theme') as Theme | undefined;
+  if (saved === 'light' || saved === 'dark' || saved === 'system') theme.value = saved;
   applyTheme();
 });
 

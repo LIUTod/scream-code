@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
 import SvgIcon from './ui/SvgIcon.vue';
+import type { IconName } from './ui/SvgIcon.vue';
 
 withDefaults(
   defineProps<{
@@ -16,7 +17,7 @@ const emit = defineEmits<{
   (e: 'pick', text: string): void;
 }>();
 
-const SUGGESTIONS = [
+const SUGGESTIONS: { icon: IconName; title: string; prompt: string }[] = [
   { icon: 'edit', title: '帮我写一个函数', prompt: '帮我写一个函数' },
   { icon: 'clipboard', title: '解释这段代码', prompt: '解释这段代码' },
   { icon: 'activity', title: '调试这个问题', prompt: '调试这个问题' },

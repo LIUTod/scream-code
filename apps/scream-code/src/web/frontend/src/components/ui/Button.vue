@@ -85,7 +85,7 @@ withDefaults(
 
 .ui-btn--danger {
   background: var(--color-danger);
-  color: #fff;
+  color: var(--color-on-accent, #fff);
   border-color: var(--color-danger);
   box-shadow: var(--shadow-xs);
 }

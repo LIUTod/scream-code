@@ -22,6 +22,8 @@
     "test/web/session-stats-panel.test.ts",
     "test/web/settings-view.test.ts",
     "test/web/g5-finishing.test.ts",
-    "test/web/use-scream-web-client.test.ts"
+    "test/web/use-scream-web-client.test.ts",
+    "test/web/storage.test.ts",
+    "test/web/use-panel-resize.test.ts"
   ]
 }

@@ -1,21 +1,23 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useScreamWebClient } from '../composables/useScreamWebClient';
-import { slashHelpText } from '../commands';
+import { useSlashCommands } from '../composables/useSlashCommands';
+import { usePanelResize } from '../composables/usePanelResize';
 import type { WorkspaceMode } from './ModeSwitch.vue';
 import type { ShellView } from './Sidebar.vue';
 import {
   RIGHT_PANEL_MIN_WIDTH,
   SPLIT_PANEL_MIN_WIDTH,
-  clampPanelWidth,
   getDefaultRightPanelWidth,
   getRightPanelMaxWidth,
   getSidebarMaxWidth,
 } from '../utils/panelLayout';
 import { filePanel, openFileInPanel, setFilePanelOpen } from '../utils/fileTabState';
+import { readStoredString, writeStoredString } from '../utils/storage';
 import { useToast } from '../composables/useToast';
 import ConversationView from './ConversationView.vue';
 import FileViewer from './FileViewer.vue';
+import InfoPanel from './InfoPanel.vue';
 import SettingsView from './SettingsView.vue';
 import Sidebar from './Sidebar.vue';
 import SkillsView from './SkillsView.vue';
@@ -138,247 +140,96 @@ function onRenameSession(id: string, title: string) {
   void sendCommand('title', title);
 }
 
-function onCommand(name: string, args?: string) {
-  switch (name) {
-    case 'compact':
-    case 'auto':
-    case 'yes':
-    case 'plan':
-    case 'fork':
-    case 'title':
-    case 'btw':
-      if (!currentSessionId.value) {
-        void createSession().then(() => sendCommand(name, args));
-        return;
-      }
-      sendCommand(name, args);
-      break;
-    case 'clear':
-      client.clearMessages();
-      break;
-    case 'new':
-      onCreateSession();
-      break;
-    case 'help':
-      appendSystemMessage(slashHelpText());
-      break;
-    case 'model':
-      appendSystemMessage(`当前模型：${status.value.model ?? 'unknown'}`);
-      break;
-    case 'status':
-    case 'usage':
-      appendSystemMessage('请在对话页查看会话详情');
-      break;
-    default:
-      appendSystemMessage(`未知命令：/${name}`);
-  }
+/** /status & /usage from the home view open the same info dialog as the
+ *  conversation view (shared dispatch in useSlashCommands). */
+const infoVisible = ref(false);
+const infoMode = ref<'status' | 'usage'>('status');
+function showInfo(mode: 'status' | 'usage') {
+  void client.fetchSnapshot();
+  infoMode.value = mode;
+  infoVisible.value = true;
 }
+
+const { onCommand } = useSlashCommands({
+  sendCommand,
+  clearMessages: client.clearMessages,
+  appendSystemMessage,
+  // Home view: session commands need a session first; create one, then send.
+  ensureSession: async () => {
+    if (!currentSessionId.value) await createSession();
+  },
+  onNew: onCreateSession,
+  showInfo,
+  currentModel: () => status.value.model,
+});
 
 const SIDEBAR_STORAGE_KEY = 'scream-sidebar-collapsed';
-const sidebarCollapsed = ref(false);
-try {
-  sidebarCollapsed.value = localStorage.getItem(SIDEBAR_STORAGE_KEY) === '1';
-} catch {
-  /* ignore */
-}
+const sidebarCollapsed = ref(readStoredString(SIDEBAR_STORAGE_KEY) === '1');
 function toggleSidebarCollapse() {
   sidebarCollapsed.value = !sidebarCollapsed.value;
-  try { localStorage.setItem(SIDEBAR_STORAGE_KEY, sidebarCollapsed.value ? '1' : '0'); } catch { /* ignore */ }
+  writeStoredString(SIDEBAR_STORAGE_KEY, sidebarCollapsed.value ? '1' : '0');
 }
 
-/* ── Draggable sidebar width (180–480px, persisted, double-click resets) ─── */
-const SIDEBAR_WIDTH_KEY = 'scream-sidebar-width';
-const SIDEBAR_MIN = 180;
-const SIDEBAR_MAX = 480;
-const SIDEBAR_DEFAULT = 288;
-
-function readStoredSidebarWidth(): number {
-  try {
-    const raw = Number(localStorage.getItem(SIDEBAR_WIDTH_KEY));
-    if (Number.isFinite(raw) && raw >= SIDEBAR_MIN && raw <= SIDEBAR_MAX) return Math.round(raw);
-  } catch {
-    /* ignore */
-  }
-  return SIDEBAR_DEFAULT;
-}
-
-const sidebarWidth = ref(readStoredSidebarWidth());
-const resizing = ref(false);
-let resizePointerId: number | null = null;
-
-function persistSidebarWidth() {
-  try { localStorage.setItem(SIDEBAR_WIDTH_KEY, String(sidebarWidth.value)); } catch { /* ignore */ }
-}
-
-function onResizePointerDown(e: PointerEvent) {
-  if (sidebarCollapsed.value) return;
-  e.preventDefault();
-  resizing.value = true;
-  resizePointerId = e.pointerId;
-  // Capture keeps the drag alive when the pointer leaves the 12px strip.
-  // Synthetic events (tests/automation) carry an inactive pointerId — the
-  // move/up handlers still work, so a failed capture must not abort the drag.
-  try {
-    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-  } catch {
-    /* ignore */
-  }
-}
-
-function onResizePointerMove(e: PointerEvent) {
-  if (!resizing.value || e.pointerId !== resizePointerId) return;
-  // Interlock: an open right panel shrinks the sidebar's headroom so the chat
-  // column keeps its minimum width (420px desktop / 320px compact).
-  const max = getSidebarMaxWidth({
-    viewportWidth: viewportWidth.value,
-    rightPanelOpen: filePanel.panelOpen,
-    rightPanelWidth: effectiveRightPanelWidth.value,
-  });
-  sidebarWidth.value = Math.min(max, Math.max(SIDEBAR_MIN, Math.round(e.clientX)));
-}
-
-function onResizePointerUp(e: PointerEvent) {
-  if (!resizing.value || e.pointerId !== resizePointerId) return;
-  resizing.value = false;
-  resizePointerId = null;
-  persistSidebarWidth();
-}
-
-function resetSidebarWidth() {
-  sidebarWidth.value = SIDEBAR_DEFAULT;
-  persistSidebarWidth();
-}
-
-function onResizeKeydown(e: KeyboardEvent) {
-  const step = e.shiftKey ? 32 : 12;
-  // Keyboard resize respects the same sidebar↔right-panel interlock.
-  const interlockedMax = getSidebarMaxWidth({
-    viewportWidth: viewportWidth.value,
-    rightPanelOpen: filePanel.panelOpen,
-    rightPanelWidth: effectiveRightPanelWidth.value,
-  });
-  if (e.key === 'ArrowLeft') {
-    e.preventDefault();
-    sidebarWidth.value = Math.max(SIDEBAR_MIN, sidebarWidth.value - step);
-  } else if (e.key === 'ArrowRight') {
-    e.preventDefault();
-    sidebarWidth.value = Math.min(interlockedMax, sidebarWidth.value + step);
-  } else if (e.key === 'Home') {
-    e.preventDefault();
-    sidebarWidth.value = SIDEBAR_MIN;
-  } else if (e.key === 'End') {
-    e.preventDefault();
-    sidebarWidth.value = interlockedMax;
-  } else if (e.key === 'Enter') {
-    e.preventDefault();
-    resetSidebarWidth();
-  } else {
-    return;
-  }
-  persistSidebarWidth();
-}
-
-/* ── Right file panel: width clamp interlocked with sidebar and viewport ──── */
-const RIGHT_PANEL_WIDTH_KEY = 'scream-right-panel-width';
-
+/* ── Viewport width drives the split breakpoint and the clamp interlocks ──── */
 const viewportWidth = ref(window.innerWidth);
 const isSplitMode = computed(() => viewportWidth.value >= SPLIT_PANEL_MIN_WIDTH);
-
-function readStoredRightPanelWidth(): number | null {
-  try {
-    const raw = Number(localStorage.getItem(RIGHT_PANEL_WIDTH_KEY));
-    if (Number.isFinite(raw) && raw >= RIGHT_PANEL_MIN_WIDTH) return Math.round(raw);
-  } catch {
-    /* ignore */
-  }
-  return null;
-}
-
-const rightPanelWidth = ref(
-  readStoredRightPanelWidth() ?? getDefaultRightPanelWidth(window.innerWidth),
-);
-const rightResizing = ref(false);
-let rightResizePointerId: number | null = null;
-
-function clampRightPanel(width: number): number {
-  const max = getRightPanelMaxWidth({
-    viewportWidth: viewportWidth.value,
-    sidebarOpen: !sidebarCollapsed.value,
-    sidebarWidth: sidebarWidth.value,
-  });
-  return clampPanelWidth(width, RIGHT_PANEL_MIN_WIDTH, max);
-}
-
-function persistRightPanelWidth() {
-  try { localStorage.setItem(RIGHT_PANEL_WIDTH_KEY, String(rightPanelWidth.value)); } catch { /* ignore */ }
-}
-
-function onRightResizePointerDown(e: PointerEvent) {
-  e.preventDefault();
-  rightResizing.value = true;
-  rightResizePointerId = e.pointerId;
-  try {
-    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-  } catch {
-    /* ignore */
-  }
-}
-
-function onRightResizePointerMove(e: PointerEvent) {
-  if (!rightResizing.value || e.pointerId !== rightResizePointerId) return;
-  // The handle sits on the panel's LEFT edge: dragging left grows the panel.
-  rightPanelWidth.value = clampRightPanel(window.innerWidth - e.clientX);
-}
-
-function onRightResizePointerUp(e: PointerEvent) {
-  if (!rightResizing.value || e.pointerId !== rightResizePointerId) return;
-  rightResizing.value = false;
-  rightResizePointerId = null;
-  persistRightPanelWidth();
-}
-
-function resetRightPanelWidth() {
-  rightPanelWidth.value = clampRightPanel(getDefaultRightPanelWidth(viewportWidth.value));
-  persistRightPanelWidth();
-}
-
-function onRightResizeKeydown(e: KeyboardEvent) {
-  const step = e.shiftKey ? 32 : 12;
-  if (e.key === 'ArrowLeft') {
-    e.preventDefault();
-    rightPanelWidth.value = clampRightPanel(rightPanelWidth.value + step);
-  } else if (e.key === 'ArrowRight') {
-    e.preventDefault();
-    rightPanelWidth.value = clampRightPanel(rightPanelWidth.value - step);
-  } else if (e.key === 'Enter') {
-    e.preventDefault();
-    resetRightPanelWidth();
-  } else {
-    return;
-  }
-  persistRightPanelWidth();
-}
-
-function closeRightPanel() {
-  setFilePanelOpen(false);
-}
 
 function onWindowResize() {
   viewportWidth.value = window.innerWidth;
 }
 
+/* ── Draggable sidebar width (180–480px, persisted, double-click resets) ─── */
+const SIDEBAR_MIN = 180;
+const SIDEBAR_MAX = 480;
+const SIDEBAR_DEFAULT = 288;
+
+const sidebarResize = usePanelResize({
+  storageKey: 'scream-sidebar-width',
+  minWidth: SIDEBAR_MIN,
+  // Interlock: an open right panel shrinks the sidebar's headroom so the chat
+  // column keeps its minimum width (420px desktop / 320px compact).
+  maxWidth: () =>
+    getSidebarMaxWidth({
+      viewportWidth: viewportWidth.value,
+      rightPanelOpen: filePanel.panelOpen,
+      rightPanelWidth: effectiveRightPanelWidth.value,
+    }),
+  defaultWidth: SIDEBAR_DEFAULT,
+  side: 'left',
+  canDrag: () => !sidebarCollapsed.value,
+  acceptStoredWidth: (w) => w <= SIDEBAR_MAX,
+});
+const sidebarWidth = sidebarResize.width;
+const resizing = sidebarResize.resizing;
+
+/* ── Right file panel: width clamp interlocked with sidebar and viewport ──── */
+const rightPanelResize = usePanelResize({
+  storageKey: 'scream-right-panel-width',
+  minWidth: RIGHT_PANEL_MIN_WIDTH,
+  maxWidth: () =>
+    getRightPanelMaxWidth({
+      viewportWidth: viewportWidth.value,
+      sidebarOpen: !sidebarCollapsed.value,
+      sidebarWidth: sidebarWidth.value,
+    }),
+  defaultWidth: () => getDefaultRightPanelWidth(viewportWidth.value),
+  side: 'right',
+});
+const rightPanelWidth = rightPanelResize.width;
+const rightResizing = rightPanelResize.resizing;
+
+function closeRightPanel() {
+  setFilePanelOpen(false);
+}
+
 // Crossing the 960px breakpoint mid-drag unmounts the handle (v-if), so the
 // pointerup never fires — release the drag state when the mode flips.
 watch(isSplitMode, () => {
-  if (rightResizing.value) {
-    rightResizing.value = false;
-    rightResizePointerId = null;
-    persistRightPanelWidth();
-  }
+  if (rightResizing.value) rightPanelResize.release();
 });
 
 /** Effective panel width after the sidebar/viewport interlock. */
-const effectiveRightPanelWidth = computed(() => clampRightPanel(rightPanelWidth.value));
+const effectiveRightPanelWidth = rightPanelResize.effectiveWidth;
 
 const shellStyle = computed(() => ({
   '--sidebar-width': `${sidebarWidth.value}px`,
@@ -388,17 +239,10 @@ const shellStyle = computed(() => ({
 /** Workspace mode lives in the shell (and localStorage) rather than inside the
  *  home view, which unmounts when a conversation opens. */
 const MODE_STORAGE_KEY = 'scream-workspace-mode';
-function readStoredWorkspaceMode(): WorkspaceMode {
-  try {
-    return localStorage.getItem(MODE_STORAGE_KEY) === 'goal' ? 'goal' : 'chat';
-  } catch {
-    return 'chat';
-  }
-}
-const workspaceMode = ref<WorkspaceMode>(readStoredWorkspaceMode());
+const workspaceMode = ref<WorkspaceMode>(readStoredString(MODE_STORAGE_KEY) === 'goal' ? 'goal' : 'chat');
 function setWorkspaceMode(next: WorkspaceMode) {
   workspaceMode.value = next;
-  try { localStorage.setItem(MODE_STORAGE_KEY, next); } catch { /* ignore */ }
+  writeStoredString(MODE_STORAGE_KEY, next);
 }
 
 function onGlobalKeydown(e: KeyboardEvent) {
@@ -464,7 +308,7 @@ onBeforeUnmount(() => {
 
     <div
       v-if="!sidebarCollapsed"
-      class="sidebar-resize-handle"
+      class="panel-resize-handle panel-resize-handle--left"
       :class="{ resizing }"
       role="separator"
       aria-orientation="vertical"
@@ -474,12 +318,12 @@ onBeforeUnmount(() => {
       aria-valuemax="480"
       tabindex="0"
       title="拖拽调整宽度 · 双击复位"
-      @pointerdown="onResizePointerDown"
-      @pointermove="onResizePointerMove"
-      @pointerup="onResizePointerUp"
-      @pointercancel="onResizePointerUp"
-      @dblclick="resetSidebarWidth"
-      @keydown="onResizeKeydown"
+      @pointerdown="sidebarResize.onPointerDown"
+      @pointermove="sidebarResize.onPointerMove"
+      @pointerup="sidebarResize.onPointerUp"
+      @pointercancel="sidebarResize.onPointerUp"
+      @dblclick="sidebarResize.reset"
+      @keydown="sidebarResize.onKeydown"
     />
 
     <div v-if="mobileSidebarOpen" class="sidebar-backdrop" aria-hidden="true" @click="mobileSidebarOpen = false" />
@@ -557,7 +401,7 @@ onBeforeUnmount(() => {
     />
     <div
       v-if="filePanel.panelOpen && isSplitMode"
-      class="right-resize-handle"
+      class="panel-resize-handle panel-resize-handle--right"
       :class="{ resizing: rightResizing }"
       role="separator"
       aria-orientation="vertical"
@@ -565,12 +409,12 @@ onBeforeUnmount(() => {
       :aria-valuenow="effectiveRightPanelWidth"
       tabindex="0"
       title="拖拽调整宽度 · 双击复位"
-      @pointerdown="onRightResizePointerDown"
-      @pointermove="onRightResizePointerMove"
-      @pointerup="onRightResizePointerUp"
-      @pointercancel="onRightResizePointerUp"
-      @dblclick="resetRightPanelWidth"
-      @keydown="onRightResizeKeydown"
+      @pointerdown="rightPanelResize.onPointerDown"
+      @pointermove="rightPanelResize.onPointerMove"
+      @pointerup="rightPanelResize.onPointerUp"
+      @pointercancel="rightPanelResize.onPointerUp"
+      @dblclick="rightPanelResize.reset"
+      @keydown="rightPanelResize.onKeydown"
     />
     <aside
       v-if="filePanel.panelOpen"
@@ -588,6 +432,15 @@ onBeforeUnmount(() => {
         <FileViewer :client="client" />
       </div>
     </aside>
+
+    <InfoPanel
+      v-if="infoVisible"
+      :mode="infoMode"
+      :status="status"
+      :session-id="currentSessionId"
+      :work-dir="workDir"
+      @close="infoVisible = false"
+    />
   </div>
 </template>
 
@@ -626,18 +479,23 @@ onBeforeUnmount(() => {
   transition: none;
 }
 
-/* ── Sidebar resize handle: 12px hit area straddling the grid boundary ───── */
-.sidebar-resize-handle {
+/* ── Panel resize handles: 12px hit area straddling the panel edge ────────── */
+.panel-resize-handle {
   position: absolute;
   top: 0;
   bottom: 0;
-  left: calc(var(--sidebar-width) - 6px);
   width: 12px;
   cursor: col-resize;
   touch-action: none;
   z-index: calc(var(--z-dock) + 1);
 }
-.sidebar-resize-handle::after {
+.panel-resize-handle--left {
+  left: calc(var(--sidebar-width) - 6px);
+}
+.panel-resize-handle--right {
+  right: calc(var(--right-panel-width) - 6px);
+}
+.panel-resize-handle::after {
   content: '';
   position: absolute;
   top: 0;
@@ -648,51 +506,20 @@ onBeforeUnmount(() => {
   background: transparent;
   transition: background var(--dur-fast) var(--ease-out);
 }
-.sidebar-resize-handle:hover::after,
-.sidebar-resize-handle.resizing::after,
-.sidebar-resize-handle:focus-visible::after {
+.panel-resize-handle:hover::after,
+.panel-resize-handle.resizing::after,
+.panel-resize-handle:focus-visible::after {
   background: var(--color-accent-bd);
 }
-.sidebar-resize-handle:focus-visible {
+.panel-resize-handle:focus-visible {
   outline: none;
 }
 @media (prefers-reduced-motion: reduce) {
   .shell { transition: none; }
 }
-
-/* ── Right file panel: third grid column (split) or overlay drawer ───────── */
-.right-resize-handle {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  right: calc(var(--right-panel-width) - 6px);
-  width: 12px;
-  cursor: col-resize;
-  touch-action: none;
-  z-index: calc(var(--z-dock) + 1);
-}
-.right-resize-handle::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 5px;
-  width: 2px;
-  border-radius: var(--radius-full);
-  background: transparent;
-  transition: background var(--dur-fast) var(--ease-out);
-}
-.right-resize-handle:hover::after,
-.right-resize-handle.resizing::after,
-.right-resize-handle:focus-visible::after {
-  background: var(--color-accent-bd);
-}
-.right-resize-handle:focus-visible {
-  outline: none;
-}
 @media (max-width: 959px) {
   /* The handle is v-if-guarded to split mode; this guards against leftovers. */
-  .right-resize-handle { display: none; }
+  .panel-resize-handle--right { display: none; }
 }
 
 .right-panel {
@@ -743,7 +570,7 @@ onBeforeUnmount(() => {
   inset: 0;
   background: rgba(0, 0, 0, 0.42);
   z-index: calc(var(--z-overlay) - 1);
-  animation: right-backdrop-in var(--dur-slow) var(--ease-out);
+  animation: backdrop-in var(--dur-slow) var(--ease-out);
 }
 .right-panel.overlay {
   position: fixed;
@@ -753,14 +580,17 @@ onBeforeUnmount(() => {
   width: min(var(--right-panel-width), 92vw);
   z-index: var(--z-overlay);
   box-shadow: var(--shadow-xl);
-  animation: slide-in-right var(--dur-slower) var(--ease-spring);
+  --slide-from: 100%;
+  animation: slide-in var(--dur-slower) var(--ease-spring);
 }
-@keyframes right-backdrop-in {
+@keyframes backdrop-in {
   from { opacity: 0; }
   to { opacity: 1; }
 }
-@keyframes slide-in-right {
-  from { transform: translateX(100%); }
+/* Direction is a custom property so the right drawer and the mobile sidebar
+   share one keyframes definition. */
+@keyframes slide-in {
+  from { transform: translateX(var(--slide-from)); }
   to { transform: translateX(0); }
 }
 @media (max-width: 640px) {
@@ -851,7 +681,7 @@ onBeforeUnmount(() => {
   .shell {
     grid-template-columns: minmax(0, 1fr);
   }
-  .sidebar-resize-handle {
+  .panel-resize-handle--left {
     display: none;
   }
   .topbar {
@@ -876,15 +706,8 @@ onBeforeUnmount(() => {
   .sidebar-mobile :deep(.sidebar) {
     display: flex !important;
     box-shadow: var(--shadow-xl);
+    --slide-from: -100%;
     animation: slide-in var(--dur-slower) var(--ease-spring);
-  }
-  @keyframes backdrop-in {
-    from { opacity: 0; }
-    to { opacity: 1; }
-  }
-  @keyframes slide-in {
-    from { transform: translateX(-100%); }
-    to { transform: translateX(0); }
   }
 }
 </style>

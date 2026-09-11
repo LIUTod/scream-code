@@ -2,6 +2,7 @@
 import { computed, inject, onMounted, ref, watch } from 'vue';
 import type { Ref } from 'vue';
 import SvgIcon from './ui/SvgIcon.vue';
+import type { IconName } from './ui/SvgIcon.vue';
 import Button from './ui/Button.vue';
 import type {
   BackgroundTaskInfo,
@@ -42,7 +43,7 @@ function val<T>(r: unknown): T | undefined {
 
 /* ── Section rail ───────────────────────────────────────────────────────── */
 type SectionId = 'general' | 'models' | 'skills' | 'plugins' | 'mcp' | 'tasks';
-const SECTIONS: { id: SectionId; label: string; icon: string }[] = [
+const SECTIONS: { id: SectionId; label: string; icon: IconName }[] = [
   { id: 'general', label: '通用', icon: 'settings' },
   { id: 'models', label: '模型', icon: 'bot' },
   { id: 'skills', label: '技能', icon: 'sparkles' },
@@ -57,7 +58,7 @@ const client = computed(() => props.client);
 /* ── Theme (light / dark / system) ──────────────────────────────────────── */
 const theme = inject<Ref<string>>('theme', ref('system'));
 const setTheme = inject<(t: string) => void>('setTheme', () => {});
-const THEME_OPTIONS: { id: string; label: string; icon: string }[] = [
+const THEME_OPTIONS: { id: string; label: string; icon: IconName }[] = [
   { id: 'light', label: '浅色', icon: 'sun' },
   { id: 'dark', label: '深色', icon: 'moon' },
   { id: 'system', label: '跟随系统', icon: 'monitor' },
