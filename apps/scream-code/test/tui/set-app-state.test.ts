@@ -67,6 +67,16 @@ describe('setAppState sessionUsage reset semantics', () => {
       inputCacheCreation: 0,
     });
   });
+
+  it('clears sessionApiCalls on every session switch (it is never seeded)', () => {
+    const driver = makeDriver();
+    driver.setAppState({ sessionId: 'sess-a' });
+    driver.setAppState({ sessionApiCalls: 17 });
+
+    driver.setAppState({ sessionId: 'sess-b' });
+
+    expect(driver.state.appState.sessionApiCalls).toBe(0);
+  });
 });
 
 describe('setAppState streamingStartTime auto-stamp', () => {

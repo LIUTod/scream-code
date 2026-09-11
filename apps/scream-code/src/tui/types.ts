@@ -70,6 +70,10 @@ export interface AppState {
   maxContextTokens: number;
   /** Cumulative token usage for the current session (all turns summed). */
   sessionUsage: TokenUsage;
+  /** LLM requests in the current session: each completed step and each
+   * retried (failed) attempt counts once. In-process only: resets on session
+   * switch and app restart. */
+  sessionApiCalls: number;
   /** Current provider account balance (null = unknown / not applicable). */
   providerBalance: ProviderBalance | null;
   /** Monotonic timestamp of the last balance fetch (drives the flash). */

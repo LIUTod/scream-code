@@ -99,6 +99,7 @@ export class LifecycleController {
         compactions: number;
         usage: TokenUsage;
         subagentUsage: AppState['subagentUsage'];
+        apiCalls: number;
         stats: SidebarSessionStats;
       }
     | undefined;
@@ -408,13 +409,16 @@ export class LifecycleController {
     const subagentUsage = appState.subagentUsage;
     const memo = this.sidebarStatsMemo;
     // Entries are append-only and usage objects are replaced per update, so
-    // (length, compactions, usage refs) is a sound change detector.
+    // (length, compactions, usage refs, call count) is a sound change
+    // detector. The call count is explicit because a step can complete
+    // without carrying usage, which would leave every other input unchanged.
     if (
       memo !== undefined &&
       memo.length === entries.length &&
       memo.compactions === appState.autoCompactionCount &&
       memo.usage === usage &&
-      memo.subagentUsage === subagentUsage
+      memo.subagentUsage === subagentUsage &&
+      memo.apiCalls === appState.sessionApiCalls
     ) {
       return memo.stats;
     }
@@ -435,8 +439,8 @@ export class LifecycleController {
     const stats: SidebarSessionStats = {
       turns,
       toolCalls,
-      messages: entries.length,
       compactions: appState.autoCompactionCount,
+      apiCalls: appState.sessionApiCalls,
       tokensTotal: LifecycleController.sumTokens(usage) + subagentOutput,
       tokensInputCacheHit: usage.inputCacheRead,
       tokensInputCacheMiss: usage.inputOther + usage.inputCacheCreation,
@@ -448,6 +452,7 @@ export class LifecycleController {
       compactions: appState.autoCompactionCount,
       usage,
       subagentUsage,
+      apiCalls: appState.sessionApiCalls,
       stats,
     };
     return stats;

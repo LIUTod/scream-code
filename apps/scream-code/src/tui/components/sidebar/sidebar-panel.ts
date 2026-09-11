@@ -18,8 +18,11 @@ export interface SidebarGitData {
 export interface SidebarSessionStats {
   readonly turns: number;
   readonly toolCalls: number;
-  readonly messages: number;
   readonly compactions: number;
+  /** LLM requests this session: completed steps plus retried attempts.
+   * Counted in-process, so it restarts with the app or a session switch — the
+   * same lifetime as `startedAt`. */
+  readonly apiCalls: number;
   /** Cumulative token usage (all buckets summed) for this session. */
   readonly tokensTotal: number;
   /** Input tokens that were cache hits (cheap bucket). */

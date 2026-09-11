@@ -61,8 +61,8 @@ describe('SidebarContainer', () => {
         sessionStats: {
           turns,
           toolCalls: 0,
-          messages: 0,
           compactions: 0,
+          apiCalls: 0,
           tokensTotal: 0,
           tokensInputCacheHit: 0,
           tokensInputCacheMiss: 0,

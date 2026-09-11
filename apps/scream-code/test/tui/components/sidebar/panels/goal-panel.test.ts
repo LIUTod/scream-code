@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { getLocale, setLocale } from '@scream-code/config';
 
 import { goalPanel } from '#/tui/components/sidebar/panels/goal-panel';
+import { displayWidth } from '#/tui/utils/display-width';
 import type { ColorPalette } from '#/tui/theme/colors';
 import type { SidebarPanelContext } from '#/tui/components/sidebar/sidebar-panel';
 import type { SidebarData } from '#/tui/components/sidebar/sidebar-panel';
@@ -107,5 +108,24 @@ describe('GoalPanel', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('keeps the criterion row on the same value column as the metrics', () => {
+    const lines = goalPanel
+      .build(ctx({ ...baseGoal, status: 'active', completionCriterion: 'the reviewer approves' }))
+      .render(34);
+    const strip = (l: string) => l.replaceAll(/\u001B\[[0-9;]*m/g, '');
+    const bare = lines.map(strip);
+    const metricRow = bare.find((l) => l.startsWith('tokens'));
+    const criterionRow = bare.find((l) => l.startsWith('criterion'));
+    expect(metricRow).toBeDefined();
+    expect(criterionRow).toBeDefined();
+
+    // `criterion` (9 cols) is wider than every metric label, so it must widen
+    // the shared label column instead of hanging outside the grid: both value
+    // fields start at column 11 (9 label + 2 gap).
+    expect(metricRow!.slice(0, 11)).toBe('tokens     ');
+    expect(criterionRow!.startsWith('criterion  ')).toBe(true);
+    expect(bare.every((l) => displayWidth(l) <= 34)).toBe(true);
   });
 });

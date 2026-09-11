@@ -4,7 +4,7 @@ import { getLocale, t } from '@scream-code/config';
 
 import type { ColorPalette } from '#/tui/theme/colors';
 import type { GoalJudgeState, GoalStatus } from '#/tui/types';
-import { displayWidth, padLabel } from '#/tui/utils/display-width';
+import { alignMetricRows, METRIC_LABEL_GAP, padLabel } from '#/tui/utils/display-width';
 
 import type { SidebarPanel, SidebarPanelContext } from '../sidebar-panel';
 
@@ -83,16 +83,29 @@ class GoalPanelContent {
       [t('sidebar.goal_wall'), formatWallClock(wallMs)],
       [t('sidebar.goal_judge'), judgeText(goal.judge)],
     ];
-    // Align values on one column: pad labels to the widest label's width.
-    const maxCols = Math.max(...rows.map(([k]) => displayWidth(k)));
-    for (const [label, value] of rows) {
-      lines.push(dim(padLabel(label, maxCols)) + text(value));
+    // Same two-column table as the Session panel: shared label column,
+    // right-aligned values, fixed gap between the two. The criterion label
+    // joins the grid as an extra label — in English `criterion` is wider than
+    // every metric label, and a label outside the grid would push its value
+    // past the shared column and out of the frame.
+    const hasCriterion = goal.completionCriterion !== null;
+    const criterionLabel = t('sidebar.goal_criterion');
+    const extraLabels: readonly string[] = hasCriterion ? [criterionLabel] : [];
+    const probe = alignMetricRows(rows, { extraLabels });
+    const budget = Math.max(4, width - probe.labelCols - METRIC_LABEL_GAP);
+    const grid =
+      probe.valueCols <= budget
+        ? probe
+        : alignMetricRows(rows, { extraLabels, maxValueCols: budget });
+    for (const [label, value] of grid.rows) {
+      lines.push(dim(label) + text(value));
     }
 
-    if (goal.completionCriterion !== null) {
+    if (hasCriterion) {
+      // Free text stays left-aligned; only its label joins the column grid.
       lines.push(
-        dim(padLabel(t('sidebar.goal_criterion'), maxCols)) +
-          truncateToWidth(text(goal.completionCriterion), Math.max(4, width - maxCols)),
+        dim(padLabel(criterionLabel, grid.labelCols) + ' '.repeat(METRIC_LABEL_GAP)) +
+          truncateToWidth(text(goal.completionCriterion), budget),
       );
     }
     return lines;

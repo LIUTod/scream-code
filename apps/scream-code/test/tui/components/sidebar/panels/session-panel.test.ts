@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { getLocale, setLocale } from '@scream-code/config';
 
 import { sessionPanel } from '#/tui/components/sidebar/panels/session-panel';
+import { displayWidth } from '#/tui/utils/display-width';
 import type { ColorPalette } from '#/tui/theme/colors';
 import type { SidebarPanelContext } from '#/tui/components/sidebar/sidebar-panel';
 import type { SidebarData } from '#/tui/components/sidebar/sidebar-panel';
@@ -23,8 +24,8 @@ function ctx(sessionStats: SidebarData['sessionStats']): SidebarPanelContext {
 const baseStats = {
   turns: 12,
   toolCalls: 87,
-  messages: 1204,
   compactions: 2,
+  apiCalls: 317,
   tokensTotal: 227_594_582,
   tokensInputCacheHit: 224_079_377,
   tokensInputCacheMiss: 3_000_000,
@@ -43,24 +44,57 @@ describe('SessionPanel', () => {
     expect(lines[0]).toContain('no session data');
   });
 
-  it('renders the bucket rows with aligned value columns', () => {
+  it('clamps the value column so short values survive a narrow sidebar', () => {
+    const lines = sessionPanel.build(ctx(baseStats)).render(16);
+    const strip = (l: string) => l.replaceAll(/\u001B\[[0-9;]*m/g, '');
+    const bare = lines.map(strip);
+
+    // "Tool calls" (10) + gap (2) leaves 4 columns for values. The wide token
+    // rows are cut, but a short value must never be pushed out of the frame
+    // by its widest neighbour (right-aligned values used to vanish entirely).
+    expect(bare.every((l) => displayWidth(l) <= 16)).toBe(true);
+    expect(bare[5]).toMatch(/^Turns\s+12$/);
+    expect(bare[8]).toMatch(/^Compacts\s+2$/);
+  });
+
+  it('switches token values to compact units when the sidebar is narrow', () => {
+    const lines = sessionPanel.build(ctx(baseStats)).render(20);
+    const strip = (l: string) => l.replaceAll(/\u001B\[[0-9;]*m/g, '');
+    const bare = lines.map(strip);
+
+    // Compact instead of a cut-off "227,59".
+    expect(bare[0]).toMatch(/^Total\s+227\.6M$/);
+    expect(bare[1]).toMatch(/^Cached\s+224\.1M$/);
+    expect(bare[2]).toMatch(/^Uncached\s+3\.0M$/);
+    expect(bare[3]).toMatch(/^Output\s+515K$/);
+    // Nothing overflows the available columns and the grid stays aligned.
+    expect(bare.every((l) => displayWidth(l) <= 20)).toBe(true);
+    expect(new Set(bare.map((l) => displayWidth(l))).size).toBe(1);
+  });
+
+  it('renders one field per row on a shared two-column grid', () => {
     const lines = sessionPanel.build(ctx(baseStats)).render(46);
-    const text = lines.join('\n');
+    const strip = (l: string) => l.replaceAll(/\u001B\[[0-9;]*m/g, '');
+    const bare = lines.map(strip);
+    const text = bare.join('\n');
+
     expect(text).toContain('227,594,582');
     expect(text).toContain('224,079,377');
     expect(text).toContain('3,000,000');
     expect(text).toContain('515,205');
+    expect(text).toContain('317');
 
-    // Alignment: all values start on the same column (labels padded to the
-    // widest label, CJK-aware).
-    const strip = (l: string) => l.replaceAll(/\x1B\[[0-9;]*m/g, '');
-    const valueStartCols = lines
-      .slice(0, 5)
-      .map((l) => {
-        const bare = strip(l);
-        const match = /(\d[\d,]*|\d+[smh])/u.exec(bare)?.[1];
-        return match === undefined ? -1 : bare.indexOf(match);
-      });
-    expect(new Set(valueStartCols).size).toBe(1);
+    // Nine fields, one per row: the paired "turns · tools" lines are gone.
+    expect(bare).toHaveLength(9);
+    expect(bare[0]).toMatch(/^Total\s+227,594,582$/);
+    expect(bare[5]).toMatch(/^Turns\s+12$/);
+    expect(bare[6]).toMatch(/^Tool calls\s+87$/);
+    expect(bare[7]).toMatch(/^API calls\s+317$/);
+    expect(bare[8]).toMatch(/^Compacts\s+2$/);
+
+    // Fixed label column + right-aligned values => every row has exactly the
+    // same display width, so both edges line up (CJK-aware).
+    const widths = new Set(bare.map((l) => displayWidth(l)));
+    expect(widths.size).toBe(1);
   });
 });

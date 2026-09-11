@@ -17,6 +17,7 @@ function fakeInitialAppState(): AppState {
     providerBalance: null,
     balanceUpdatedAt: 0,
     sessionUsage: { inputOther: 0, output: 0, inputCacheRead: 0, inputCacheCreation: 0 },
+    sessionApiCalls: 0,
     maxContextTokens: 0,
     isCompacting: false,
     lastCompactionFinishedAt: undefined,

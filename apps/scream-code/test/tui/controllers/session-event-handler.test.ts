@@ -55,6 +55,7 @@ function createMockHost(): SessionEventHost {
       goalActive: false,
       sessionTitle: 'Test Session',
       subagentUsage: {},
+      sessionApiCalls: 0,
     },
     livePane: {
       mode: 'idle',
@@ -215,7 +216,33 @@ describe('SessionEventHandler', () => {
 
     expect(host.streamingUI.resetLiveText).toHaveBeenCalled();
     expect(host.streamingUI.resetToolUi).toHaveBeenCalled();
-    expect(host.setAppState).toHaveBeenCalledWith({ reconnectAttempt: 2 });
+    expect(host.setAppState).toHaveBeenCalledWith({ reconnectAttempt: 2, sessionApiCalls: 1 });
+  });
+
+  it('counts completed steps and retried attempts as API calls', () => {
+    const host = createMockHost();
+    const handler = new SessionEventHandler(host);
+
+    handler.handleEvent(
+      { ...baseEvent('turn.step.completed'), turnId: 1 } as unknown as Event,
+      vi.fn(),
+    );
+    handler.handleEvent(
+      {
+        ...baseEvent('turn.step.retrying'),
+        turnId: 1,
+        attempt: 1,
+        nextAttempt: 2,
+      } as unknown as Event,
+      vi.fn(),
+    );
+    handler.handleEvent(
+      { ...baseEvent('turn.step.completed'), turnId: 1 } as unknown as Event,
+      vi.fn(),
+    );
+
+    // Two successful steps plus the attempt that failed and was retried.
+    expect(host.state.appState.sessionApiCalls).toBe(3);
   });
 
   it('auto-drains queued messages into a boundary steer on step completed', () => {

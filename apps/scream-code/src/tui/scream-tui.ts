@@ -117,6 +117,7 @@ function createInitialAppState(input: ScreamTUIStartupInput): AppState {
     contextTokens: 0,
     maxContextTokens: 0,
     sessionUsage: { inputOther: 0, output: 0, inputCacheRead: 0, inputCacheCreation: 0 },
+    sessionApiCalls: 0,
     providerBalance: null,
     balanceUpdatedAt: 0,
     isCompacting: false,
@@ -676,6 +677,9 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
           inputCacheCreation: 0,
         };
       }
+      // Unlike sessionUsage, the call count is never seeded from disk — it
+      // only exists inside this process, so a session switch always clears it.
+      this.state.appState.sessionApiCalls = 0;
     }
     if (planModeChanged || sessionChanged) {
       this.updateEditorBorderHighlight();

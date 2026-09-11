@@ -494,12 +494,19 @@ export class SessionEventHandler {
     this.host.streamingUI.flushNow();
     this.maybeShowDebugTiming(event);
     this.drainQueuedMessagesIntoSteer();
-    if (event.usage !== undefined) {
-      const prev = this.host.state.appState.sessionUsage;
-      this.host.setAppState({
-        sessionUsage: prev === undefined ? event.usage : addTokenUsage(prev, event.usage),
-      });
-    }
+    // A completed step is one LLM request; the failed attempts are counted
+    // where they happen (handleStepRetrying). Both share 工作时长's in-process
+    // lifetime: reset on session switch and app restart, never persisted.
+    const prev = this.host.state.appState.sessionUsage;
+    const apiCalls = this.host.state.appState.sessionApiCalls + 1;
+    this.host.setAppState(
+      event.usage === undefined
+        ? { sessionApiCalls: apiCalls }
+        : {
+            sessionUsage: prev === undefined ? event.usage : addTokenUsage(prev, event.usage),
+            sessionApiCalls: apiCalls,
+          },
+    );
     if (event.finishReason !== 'max_tokens') return;
 
     const truncatedCount = this.host.streamingUI.markStepTruncated(
@@ -529,6 +536,8 @@ export class SessionEventHandler {
       reconnectDelayMs: event.delayMs,
       reconnectStatusCode: event.statusCode,
       reconnectErrorName: event.errorName,
+      // The failed attempt was a real request too, so 调用次数 counts it.
+      sessionApiCalls: this.host.state.appState.sessionApiCalls + 1,
     });
   }
 
