@@ -161,6 +161,13 @@ const McpServerCommonFields = {
   toolTimeoutMs: z.number().int().min(1).optional(),
   enabledTools: z.array(z.string()).optional(),
   disabledTools: z.array(z.string()).optional(),
+  /**
+   * Open-vocabulary capabilities this server provides (e.g. `["browser"]`).
+   * Semantics: absent = auto-detect via built-in fingerprints;
+   * `[]` = explicitly opted out of fingerprinting; non-empty = explicit
+   * declaration (highest priority). See `mcp/capabilities.ts`.
+   */
+  capabilities: z.array(z.string().min(1)).optional(),
 } as const;
 
 export const McpServerStdioConfigSchema = z.object({

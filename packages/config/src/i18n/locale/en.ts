@@ -1246,7 +1246,9 @@ export const en: Record<string, string> = {
 
   // ─── MCP ───────────────────────
   'mcp.desktop_desc': 'macOS desktop automation: screenshot/click/type/scroll/window management (Background delivery, no focus needed)',
-  'mcp.browser_desc': 'Browser automation: 46 tools, supports navigation/click/fill/screenshot/performance/memory debugging/extension management',
+  'mcp.browser_desc': 'Browser automation: navigation/click/fill/screenshot/console & network debugging/performance analysis',
+  'mcp.capability_browser': '🌐 browser automation',
+  'mcp.capability_memory': '🧠 decision memory',
 
   // ─── Knowledge web ─────────────
   'kw.title': 'Scream Knowledge Graph',

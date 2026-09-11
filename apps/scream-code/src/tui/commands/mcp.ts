@@ -40,6 +40,18 @@ interface McpRecommendation {
   env?: Record<string, string>;
   /** If set, the repo is cloned to ~/.scream-code/mcp/<name>/ before configuring. */
   gitUrl?: string;
+  /**
+   * Startup timeout written into mcp.json. When omitted the entry gets no
+   * field and falls back to the connection-manager default (60s) — the old
+   * blanket 300s was a Playwright-era leftover.
+   */
+  startupTimeoutMs?: number;
+  /**
+   * Capability labels persisted with the entry (e.g. `['browser']`) so the
+   * config layer — and with it guide injection and the panel — understands
+   * what the server is for without name hard-coding.
+   */
+  capabilities?: string[];
 }
 
 // Built per call — t() must be evaluated after any runtime /language switch,
@@ -51,7 +63,25 @@ function getRecommended(): McpRecommendation[] {
       displayName: 'Chrome DevTools',
       description: t('mcp.browser_desc'),
       command: 'npx',
-      args: ['-y', 'chrome-devtools-mcp@latest', '--no-usage-statistics'],
+      args: [
+        '-y',
+        'chrome-devtools-mcp@latest',
+        '--no-usage-statistics',
+        // Performance traces must not leak page URLs to Google's CrUX API —
+        // same privacy stance as --no-usage-statistics above.
+        '--no-performance-crux',
+        // Downscale + recompress screenshots: full-size PNGs dominate the
+        // context window (the official --screenshot-* flags exist for this).
+        '--screenshot-format=jpeg',
+        '--screenshot-quality=85',
+        '--screenshot-max-width=1600',
+      ],
+      env: { CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS: '1' },
+      // Plain npm package; Chrome itself only launches lazily on the first
+      // tool call. 180s covers a cold `npx` download on a slow link without
+      // the old "first launch downloads Chromium" (Playwright) rationale.
+      startupTimeoutMs: 180_000,
+      capabilities: ['browser'],
     },
     {
       name: 'scream-life',
@@ -63,6 +93,7 @@ function getRecommended(): McpRecommendation[] {
         SCREAM_LIFE_DB_PATH: '{INSTALL_DIR}/Data/scream-life.db',
       },
       gitUrl: 'https://github.com/LIUTod/scream-life.git',
+      capabilities: ['memory'],
     },
   ];
 }
@@ -76,6 +107,15 @@ function getStatusLabels(): Record<string, string> {
     failed: t('mcp.failed'),
     disabled: t('mcp.disabled'),
     'needs-auth': t('mcp.auth_required'),
+  };
+}
+
+// Built per call for the same reason as getRecommended(): t() must track a
+// runtime /language switch. Unknown capabilities fall back to their raw id.
+function getCapabilityLabels(): Record<string, string> {
+  return {
+    browser: t('mcp.capability_browser'),
+    memory: t('mcp.capability_memory'),
   };
 }
 
@@ -150,7 +190,7 @@ async function openMcpPanel(host: SlashCommandHost): Promise<void> {
 
 async function loadServers(
   host: SlashCommandHost,
-): Promise<readonly { name: string; status: string; toolCount: number; error?: string }[]> {
+): Promise<readonly { name: string; status: string; toolCount: number; error?: string; capabilities?: readonly string[] }[]> {
   if (!host.session) return [];
   try {
     return await host.session.listMcpServers();
@@ -167,7 +207,7 @@ function sanitizeDesc(s: string): string {
 }
 
 function buildRows(
-  servers: readonly { name: string; status: string; toolCount: number; error?: string }[],
+  servers: readonly { name: string; status: string; toolCount: number; error?: string; capabilities?: readonly string[] }[],
 ): McpRow[] {
   const rows: McpRow[] = [];
   // A server that's installed but in a failed state should still be
@@ -181,6 +221,8 @@ function buildRows(
     for (const s of servers) {
       const statusLabel = getStatusLabels()[s.status] ?? s.status;
       const toolInfo = s.status === 'connected' ? `${s.toolCount} tools` : '';
+      const capLabels = getCapabilityLabels();
+      const capInfo = (s.capabilities ?? []).map((c) => capLabels[c] ?? c).join('  ');
       const errorInfo = s.error ? ` — ${sanitizeDesc(s.error)}` : '';
       rows.push({
         kind: 'installed',
@@ -189,7 +231,7 @@ function buildRows(
         status: s.status,
         toolCount: s.toolCount,
         error: s.error,
-        description: [statusLabel, toolInfo, errorInfo].filter(Boolean).join('  '),
+        description: [statusLabel, toolInfo, capInfo, errorInfo].filter(Boolean).join('  '),
       });
     }
   } else {
@@ -313,12 +355,34 @@ async function installMcp(host: SlashCommandHost, rec: McpRecommendation): Promi
       }
     }
 
-    await writeMcpConfig(host, rec.name, rec.command, resolvedArgs, resolvedEnv);
-    const serverConfig: { transport: 'stdio'; command: string; args: string[]; env?: Record<string, string> } = {
+    await writeMcpConfig(host, {
+      name: rec.name,
+      command: rec.command,
+      args: resolvedArgs,
+      env: resolvedEnv,
+      startupTimeoutMs: rec.startupTimeoutMs,
+      capabilities: rec.capabilities,
+    });
+    // Invariant: what we persist to mcp.json and what we register at runtime
+    // must carry the same config, or injection behavior drifts on restart.
+    const serverConfig: {
+      transport: 'stdio';
+      command: string;
+      args: string[];
+      env?: Record<string, string>;
+      startupTimeoutMs?: number;
+      capabilities?: string[];
+    } = {
       transport: 'stdio',
       command: rec.command,
       args: resolvedArgs,
     };
+    if (rec.startupTimeoutMs !== undefined) {
+      serverConfig.startupTimeoutMs = rec.startupTimeoutMs;
+    }
+    if (rec.capabilities !== undefined) {
+      serverConfig.capabilities = rec.capabilities;
+    }
     if (resolvedEnv !== undefined && Object.keys(resolvedEnv).length > 0) {
       serverConfig.env = resolvedEnv;
     }
@@ -376,12 +440,18 @@ async function uninstallMcp(host: SlashCommandHost, name: string): Promise<void>
 
 // ─── mcp.json 读写 ───────────────────────────────────────────────────
 
+interface McpConfigEntry {
+  name: string;
+  command: string;
+  args: string[];
+  env?: Record<string, string>;
+  startupTimeoutMs?: number;
+  capabilities?: string[];
+}
+
 async function writeMcpConfig(
   host: SlashCommandHost,
-  name: string,
-  command: string,
-  args: string[],
-  env?: Record<string, string>,
+  entry: McpConfigEntry,
 ): Promise<void> {
   const homeDir = getDataDir();
   const configPath = join(homeDir, 'mcp.json');
@@ -394,11 +464,17 @@ async function writeMcpConfig(
 
   const servers: Record<string, unknown> =
     (data['mcpServers'] as Record<string, unknown>) ?? {};
-  const config: Record<string, unknown> = { transport: 'stdio', command, args, startupTimeoutMs: 300_000 };
-  if (env !== undefined && Object.keys(env).length > 0) {
-    config['env'] = env;
+  const config: Record<string, unknown> = { transport: 'stdio', command: entry.command, args: entry.args };
+  if (entry.startupTimeoutMs !== undefined) {
+    config['startupTimeoutMs'] = entry.startupTimeoutMs;
   }
-  servers[name] = config;
+  if (entry.capabilities !== undefined) {
+    config['capabilities'] = entry.capabilities;
+  }
+  if (entry.env !== undefined && Object.keys(entry.env).length > 0) {
+    config['env'] = entry.env;
+  }
+  servers[entry.name] = config;
   data['mcpServers'] = servers;
 
   await mkdir(dirname(configPath), { recursive: true });

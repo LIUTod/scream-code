@@ -1,7 +1,7 @@
 import type { Agent } from '..';
 import type { DynamicInjector } from './injector';
 import { GoalInjector } from './goal';
-import { McpBrowserSkillInjector } from './mcp-browser-skill';
+import { createMcpCapabilityGuideInjectors } from './mcp-capability-guides';
 import { PermissionModeInjector } from './permission-mode';
 import { PluginSessionStartInjector } from './plugin-session-start';
 import { PlanModeInjector } from './plan-mode';
@@ -16,7 +16,7 @@ export class InjectionManager {
   constructor(protected readonly agent: Agent) {
     this.injectors = [
       new PluginSessionStartInjector(agent),
-      new McpBrowserSkillInjector(agent),
+      ...createMcpCapabilityGuideInjectors(agent),
       new WolfPackModeInjector(agent),
       new PlanModeInjector(agent),
       new PermissionModeInjector(agent),

@@ -245,6 +245,8 @@ export interface McpServerInfo {
   readonly status: 'pending' | 'connected' | 'failed' | 'disabled' | 'needs-auth';
   readonly toolCount: number;
   readonly error?: string;
+  /** Optional at the wire boundary so older clients/servers coexist. */
+  readonly capabilities?: readonly string[];
 }
 
 export interface McpStartupMetrics {

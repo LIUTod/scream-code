@@ -82,6 +82,26 @@ describe('McpConnectionManager', () => {
     }
   }, 20000);
 
+  it('publishes resolved capabilities on every public entry (explicit > fingerprint > none)', async () => {
+    const cm = new McpConnectionManager();
+    try {
+      await cm.connectAll({
+        'chrome-devtools': stdioConfig(),
+        declared: { ...stdioConfig(), capabilities: ['web'] },
+        plain: stdioConfig(),
+      });
+      // Fingerprint hit (default name) even though nothing was declared.
+      expect(cm.get('chrome-devtools')?.capabilities).toEqual(['browser']);
+      // Explicit declaration wins and no fingerprint runs.
+      expect(cm.get('declared')?.capabilities).toEqual(['web']);
+      expect(cm.get('plain')?.capabilities).toEqual([]);
+      // list() flows through the same toPublicEntry chokepoint.
+      expect(cm.list().find((e) => e.name === 'chrome-devtools')?.capabilities).toEqual(['browser']);
+    } finally {
+      await cm.shutdown();
+    }
+  }, 20000);
+
   it('isolates failures: a bad server is marked failed without blocking the rest', async () => {
     const cm = new McpConnectionManager();
     try {

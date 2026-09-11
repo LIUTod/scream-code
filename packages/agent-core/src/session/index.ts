@@ -523,6 +523,7 @@ export class Session {
         status: entry.status,
         toolCount: entry.toolCount,
         error: entry.error,
+        capabilities: entry.capabilities,
       },
     }).catch(() => {});
   }

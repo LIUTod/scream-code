@@ -348,6 +348,8 @@ export interface McpServerStatusPayload {
   readonly status: 'pending' | 'connected' | 'failed' | 'disabled' | 'needs-auth';
   readonly toolCount: number;
   readonly error?: string | undefined;
+  /** Optional at the wire boundary so older clients/servers coexist. */
+  readonly capabilities?: readonly string[] | undefined;
 }
 
 export type AgentEvent =

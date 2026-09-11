@@ -165,3 +165,70 @@ describe('loadMcpServers', () => {
     }
   });
 });
+
+describe('loadMcpServers capabilities (config-layer semantics)', () => {
+  it('keeps legacy entries (no capabilities key) parsing exactly as before', async () => {
+    const home = makeTempDir();
+    const cwd = makeTempDir();
+    await writeJson(join(home, 'mcp.json'), {
+      mcpServers: { legacy: { transport: 'stdio', command: 'cmd', args: ['a'] } },
+    });
+    const servers = await loadMcpServers({ cwd, homeDir: home });
+    expect(servers['legacy']).toEqual({ transport: 'stdio', command: 'cmd', args: ['a'] });
+    expect('capabilities' in (servers['legacy'] ?? {})).toBe(false);
+  });
+
+  it('preserves explicit capabilities arrays, including the opt-out []', async () => {
+    const home = makeTempDir();
+    const cwd = makeTempDir();
+    await writeJson(join(home, 'mcp.json'), {
+      mcpServers: {
+        chrome: { transport: 'stdio', command: 'npx', args: ['-y', 'chrome-devtools-mcp@latest'], capabilities: ['browser'] },
+        off: { transport: 'stdio', command: 'x', capabilities: [] },
+      },
+    });
+    const servers = await loadMcpServers({ cwd, homeDir: home });
+    expect(servers['chrome']?.capabilities).toEqual(['browser']);
+    expect(servers['off']?.capabilities).toEqual([]);
+  });
+
+  it('strips unknown future keys so older binaries keep working (forward compat)', async () => {
+    const home = makeTempDir();
+    const cwd = makeTempDir();
+    await writeJson(join(home, 'mcp.json'), {
+      mcpServers: {
+        future: { transport: 'stdio', command: 'x', usageHints: ['preview'], someNewObj: { a: 1 } },
+      },
+    });
+    const servers = await loadMcpServers({ cwd, homeDir: home });
+    expect(servers['future']).toEqual({ transport: 'stdio', command: 'x' });
+  });
+
+  it('rejects a non-array capabilities value with CONFIG_INVALID', async () => {
+    const home = makeTempDir();
+    const cwd = makeTempDir();
+    await writeJson(join(home, 'mcp.json'), {
+      mcpServers: { bad: { transport: 'stdio', command: 'x', capabilities: 'browser' } },
+    });
+    await expect(loadMcpServers({ cwd, homeDir: home })).rejects.toMatchObject({
+      code: ErrorCodes.CONFIG_INVALID,
+    });
+  });
+
+  it('project-level entry fully replaces the user entry, capabilities included', async () => {
+    const home = makeTempDir();
+    const cwd = makeTempDir();
+    await writeJson(join(home, 'mcp.json'), {
+      mcpServers: { svc: { transport: 'stdio', command: 'user', capabilities: ['browser'] } },
+    });
+    await writeJson(join(cwd, '.scream-code', 'mcp.json'), {
+      mcpServers: { svc: { transport: 'stdio', command: 'proj' } },
+    });
+    const servers = await loadMcpServers({ cwd, homeDir: home });
+    // Whole-entry override: the project entry carries no declaration, so the
+    // merged config has none (fingerprinting downstream can still rescue
+    // known servers by name/args).
+    expect(servers['svc']).toEqual({ transport: 'stdio', command: 'proj' });
+    expect(servers['svc']?.capabilities).toBeUndefined();
+  });
+});

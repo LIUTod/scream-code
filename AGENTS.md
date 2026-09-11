@@ -342,10 +342,12 @@ ScreamCode has a built-in MCP client. Agents can call external tools (browser au
                                                       (launched via npx)
 ```
 
-- **Config**: `~/.scream-code/mcp.json` (user-global) and `<cwd>/.scream-code/mcp.json` (project-local). Project entries override user entries with the same key.
-- **Connection manager**: `packages/agent-core/src/mcp/connection-manager.ts` — `addServer` (runtime add + connect), `stopServer` (disconnect, keep entry), `removeServer` (disconnect + delete entry), `reconnect` (reconnect existing entry).
+- **Config**: `~/.scream-code/mcp.json` (user-global) and `<cwd>/.scream-code/mcp.json` (project-local). Project entries override user entries with the same key (whole-entry replacement, `capabilities` included — a project entry shadowing a user entry must redeclare capabilities; known servers are rescued by fingerprinting).
+- **Capabilities (config-layer semantics)**: entries may declare `capabilities: string[]` — an open-vocabulary, lowercase label of *what the server can do* (e.g. `["browser"]`), not what it is called. Resolution priority: explicit declaration > built-in fingerprints (`mcp/capabilities.ts`: default name or launch-package substring in args) > none; an explicit `[]` opts out of fingerprinting. Legacy configs keep working via fingerprints. The runtime `addServer` path bypasses schema validation, so capability resolution is defensive (dirty values degrade to fingerprints, never throw).
+- **Connection manager**: `packages/agent-core/src/mcp/connection-manager.ts` — `addServer` (runtime add + connect), `stopServer` (disconnect, keep entry), `removeServer` (disconnect + delete entry), `reconnect` (reconnect existing entry). `McpServerEntry.capabilities` is resolved at the single `toPublicEntry` chokepoint and flows through `list()`/`get()`/status events; `McpServerInfo` / `McpServerStatusPayload` carry it as **optional** on the wire for old-client compat.
+- **Capability-driven guide injection**: `agent/injection/mcp-capability-guides.ts` — `MCP_CAPABILITY_GUIDES` maps capability → usage guide (`browser` → Chrome DevTools guide; wire variant id `mcp_browser_skill` kept for stability). One injector instance per guide, so the base class's single-slot `injectedAt` lifecycle math holds per capability. Adding a server guide = a fingerprint pattern in `mcp/capabilities.ts` + a registry entry; never hard-code server names in consumers.
 - **RPC chain**: `core-api.ts` → `core-impl.ts` → `session/rpc.ts` → node-sdk → TUI.
-- **TUI panel**: `apps/scream-code/src/tui/commands/mcp.ts` — `/mcp` slash command with custom `McpPickerComponent`.
+- **TUI panel**: `apps/scream-code/src/tui/commands/mcp.ts` — `/mcp` slash command with custom `McpPickerComponent`; installed rows show capability labels (`mcp.capability_*` i18n keys; unknown ids fall back to the raw capability string).
 - **Footer**: MCP status is NOT shown in the footer status bar. Use `/mcp` to inspect.
 
 ### /mcp panel
@@ -355,7 +357,7 @@ ScreamCode has a built-in MCP client. Agents can call external tools (browser au
   ├─ Installed servers (status + tool count)
   ├─ Enter → install+start (recommended) / toggle enable/disable (installed)
   ├─ d → uninstall (removes from mcp.json + disconnects)
-  └─ Built-in recommendation: Playwright (browser automation)
+  └─ Built-in recommendations: Chrome DevTools (browser automation), ScreamLife (decision memory)
 ```
 
 ### Adding recommendations
@@ -364,7 +366,8 @@ Edit the `RECOMMENDED` array in `apps/scream-code/src/tui/commands/mcp.ts`.
 
 ### Timeouts
 
-- Playwright recommendation: `startupTimeoutMs: 300_000` (5 min — first launch downloads Chromium).
+- Each recommendation carries an optional per-entry `startupTimeoutMs` written to mcp.json; entries without it fall back to the global default (the old blanket 300s was a Playwright-era leftover).
+- Chrome DevTools recommendation: `startupTimeoutMs: 180_000` (cold `npx` download only — Chrome itself launches lazily on first tool call). Its args also pass `--no-performance-crux` (keeps trace URLs out of Google's CrUX API, matching `--no-usage-statistics`) and `--screenshot-format/quality/max-width` compression to shrink screenshot context; env sets `CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS=1`. See `getRecommended()`.
 - Global default: `DEFAULT_STARTUP_TIMEOUT_MS = 60_000`.
 
 ---

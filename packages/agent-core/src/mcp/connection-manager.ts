@@ -5,6 +5,7 @@ import type { Logger } from '#/logging/types';
 import type { Tool } from '@scream-code/ltod';
 
 import { abortable } from '../utils/abort';
+import { resolveServerCapabilities } from './capabilities';
 import { HttpMcpClient } from './client-http';
 import type { UnexpectedCloseReason } from './client-shared';
 import { StdioMcpClient } from './client-stdio';
@@ -19,6 +20,12 @@ export interface McpServerEntry {
   readonly status: McpServerStatus;
   readonly toolCount: number;
   readonly error?: string;
+  /**
+   * Effective capabilities (explicit declaration > built-in fingerprints).
+   * Resolved once per public view in {@link toPublicEntry} — the single
+   * chokepoint every entry leaves the manager through.
+   */
+  readonly capabilities: readonly string[];
 }
 
 interface InternalEntry {
@@ -457,6 +464,7 @@ function toPublicEntry(entry: InternalEntry): McpServerEntry {
         ? entry.enabledNames.size
         : 0,
     error: entry.error,
+    capabilities: resolveServerCapabilities(entry.name, entry.config),
   };
 }
 

@@ -1247,7 +1247,9 @@ export const zh: Record<string, string> = {
 
   // ─── MCP ───────────────────────
   'mcp.desktop_desc': 'macOS 桌面自动化：截图/点击/键入/滚动/窗口管理（Background delivery，无需聚焦）',
-  'mcp.browser_desc': '浏览器自动化：46 个工具，支持导航/点击/填表/截图/性能分析/内存调试/扩展管理',
+  'mcp.browser_desc': '浏览器自动化：导航/点击/填表/截图/控制台与网络调试/性能分析',
+  'mcp.capability_browser': '🌐 浏览器自动化',
+  'mcp.capability_memory': '🧠 决策记忆',
 
   // ─── Knowledge web ─────────────
   'kw.title': 'Scream 知识图谱',
