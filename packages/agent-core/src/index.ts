@@ -6,6 +6,12 @@ export * from './config';
 export * from './flags';
 export * from './session/export';
 export * from './errors';
+export {
+  appendSessionIndexEntry,
+  encodeWorkDirKey,
+  normalizeWorkDir,
+  sessionIndexPath,
+} from './session/store';
 export * from './plugin';
 export {
   flushDiagnosticLogs,

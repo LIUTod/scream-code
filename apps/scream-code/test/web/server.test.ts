@@ -11,6 +11,7 @@ import {
   type SessionStatus,
   type TodoItem,
 } from '@scream-code/scream-code-sdk';
+import { encodeWorkDirKey } from '@scream-code/agent-core';
 import { WebSocket } from 'ws';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -561,6 +562,107 @@ describe('Web/core session ID restoration', () => {
     expect(harness.createSession).not.toHaveBeenCalled();
     await manager.forkSession('web-id');
     expect(harness.forkSession).toHaveBeenCalledWith({ id: 'core-id' });
+    await manager.closeAll();
+  });
+
+  it('re-indexes a core session missing from the global index, then resumes it', async () => {
+    const homeDir = await mkdtemp(join(tmpdir(), 'scream-web-test-'));
+    tempDirs.push(homeDir);
+    const sessionsDir = join(homeDir, 'web-sessions');
+    await mkdir(sessionsDir, { recursive: true });
+    await writeFile(join(sessionsDir, 'web-orphan.meta.json'), JSON.stringify({
+      sessionId: 'web-orphan', coreSessionId: 'core-orphan', workDir: '/tmp/project',
+      title: 'Orphan', createdAt: 1, model: 'test-model', permission: 'manual',
+    }));
+    // The core session directory exists on disk, but the global index lost its
+    // entry (older builds never appended one) — the exact 1011 storm trigger.
+    const coreDir = join(homeDir, 'sessions', encodeWorkDirKey('/tmp/project'), 'core-orphan');
+    await mkdir(coreDir, { recursive: true });
+    await writeFile(join(coreDir, 'state.json'), '{}');
+
+    const resumed = makeFakeSession({ id: 'core-orphan' });
+    const harness = {
+      createSession: vi.fn(),
+      resumeSession: vi.fn(async () => {
+        if (harness.resumeSession.mock.calls.length === 1) {
+          throw new ScreamError(ErrorCodes.SESSION_NOT_FOUND, 'Session "core-orphan" was not found');
+        }
+        return resumed.session;
+      }),
+      forkSession: vi.fn(),
+    };
+    const manager = new SessionManager({
+      harness: harness as never, homeDir, workDir: '/tmp/project',
+      model: 'test-model', permission: 'manual', yolo: false,
+    });
+
+    await manager.init();
+    const active = await manager.activateSession('web-orphan');
+
+    expect(active?.sessionId).toBe('web-orphan');
+    expect(harness.resumeSession).toHaveBeenCalledTimes(2);
+    // Self-heal: the global index regained the entry.
+    const indexRaw = await readFile(join(homeDir, 'session_index.jsonl'), 'utf-8');
+    expect(indexRaw).toContain('"sessionId":"core-orphan"');
+    await manager.closeAll();
+  });
+
+  it('returns null (terminal 1008 path) when the core session directory is truly gone', async () => {
+    const homeDir = await mkdtemp(join(tmpdir(), 'scream-web-test-'));
+    tempDirs.push(homeDir);
+    const sessionsDir = join(homeDir, 'web-sessions');
+    await mkdir(sessionsDir, { recursive: true });
+    await writeFile(join(sessionsDir, 'web-gone.meta.json'), JSON.stringify({
+      sessionId: 'web-gone', coreSessionId: 'core-gone', workDir: '/tmp/project',
+      title: 'Gone', createdAt: 1, model: 'test-model', permission: 'manual',
+    }));
+
+    const harness = {
+      createSession: vi.fn(),
+      resumeSession: vi.fn(async () => {
+        throw new ScreamError(ErrorCodes.SESSION_NOT_FOUND, 'Session "core-gone" was not found');
+      }),
+      forkSession: vi.fn(),
+    };
+    const manager = new SessionManager({
+      harness: harness as never, homeDir, workDir: '/tmp/project',
+      model: 'test-model', permission: 'manual', yolo: false,
+    });
+
+    await manager.init();
+    // null → the WS layer closes 1008 (terminal) instead of 1011 (retry storm).
+    await expect(manager.activateSession('web-gone')).resolves.toBeNull();
+    // No point retrying a session whose directory does not exist.
+    expect(harness.resumeSession).toHaveBeenCalledTimes(1);
+    await manager.closeAll();
+  });
+
+  it('keeps non-not-found activation failures on the retryable (1011) path', async () => {
+    const homeDir = await mkdtemp(join(tmpdir(), 'scream-web-test-'));
+    tempDirs.push(homeDir);
+    const sessionsDir = join(homeDir, 'web-sessions');
+    await mkdir(sessionsDir, { recursive: true });
+    await writeFile(join(sessionsDir, 'web-boom.meta.json'), JSON.stringify({
+      sessionId: 'web-boom', coreSessionId: 'core-boom', workDir: '/tmp/project',
+      title: 'Boom', createdAt: 1, model: 'test-model', permission: 'manual',
+    }));
+
+    const harness = {
+      createSession: vi.fn(),
+      resumeSession: vi.fn(async () => {
+        throw new Error('provider init exploded');
+      }),
+      forkSession: vi.fn(),
+    };
+    const manager = new SessionManager({
+      harness: harness as never, homeDir, workDir: '/tmp/project',
+      model: 'test-model', permission: 'manual', yolo: false,
+    });
+
+    await manager.init();
+    // Transient failures must keep propagating so the WS layer answers 1011.
+    await expect(manager.activateSession('web-boom')).rejects.toThrow('provider init exploded');
+    expect(harness.resumeSession).toHaveBeenCalledTimes(1);
     await manager.closeAll();
   });
 });

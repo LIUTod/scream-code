@@ -1,4 +1,4 @@
-import { cp, mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { cp, mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative } from 'pathe';
 
 import { z } from 'zod';
@@ -36,6 +36,23 @@ export interface ForkSessionRecordInput {
 }
 
 export type SessionStoreOptions = Record<string, never>;
+
+let stateWriteCounter = 0;
+
+/**
+ * Atomic state.json write: plain writeFile truncates the target before the
+ * new bytes land, so a process killed mid-write leaves a 0-byte state.json
+ * and the next resume crashes on JSON.parse. Temp-file + rename makes the
+ * swap all-or-nothing.
+ */
+async function writeStateAtomically(statePath: string, content: string): Promise<void> {
+  // The counter guards against two concurrent writes landing in the same
+  // millisecond and racing on an identical tmp path (rename() would then
+  // fail with ENOENT on the second mover).
+  const tmpPath = `${statePath}.${process.pid}.${Date.now().toString(36)}.${(stateWriteCounter++).toString(36)}.tmp`;
+  await writeFile(tmpPath, content, 'utf-8');
+  await rename(tmpPath, statePath);
+}
 
 export class SessionStore {
   readonly sessionsDir: string;
@@ -136,7 +153,7 @@ export class SessionStore {
       title: normalized,
       isCustomTitle: true,
     };
-    await writeFile(statePath, `${JSON.stringify(next, null, 2)}\n`, 'utf-8');
+    await writeStateAtomically(statePath, `${JSON.stringify(next, null, 2)}\n`);
   }
 
   async delete(id: string): Promise<void> {
@@ -278,7 +295,7 @@ export class SessionStore {
       agents: rewriteAgentHomedirs(parsed['agents'], sourceDir, targetDir),
       custom: Object.assign({}, isRecord(parsed['custom']) ? parsed['custom'] : {}, input.metadata),
     };
-    await writeFile(statePath, `${JSON.stringify(next, null, 2)}\n`, 'utf-8');
+    await writeStateAtomically(statePath, `${JSON.stringify(next, null, 2)}\n`);
   }
 
   private async summaryFromDir(

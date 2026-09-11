@@ -408,8 +408,33 @@ export class Session {
   }
 
   async readMetadata() {
-    const text = await this.options.jian.readText(this.metadataPath);
-    this.metadata = JSON.parse(text);
+    // A process killed mid-writeMetadata leaves a truncated state.json, and
+    // sessions restored from older builds may lack one entirely. Either way
+    // resume must fall back to default metadata instead of failing the whole
+    // resume chain (the web layer surfaces that as an activation loop).
+    let text: string;
+    try {
+      text = await this.options.jian.readText(this.metadataPath);
+    } catch (error) {
+      // Only a MISSING state.json is safe to synthesize defaults for. A
+      // transient read failure (EPERM/EBUSY/...) must propagate: masking it
+      // would let a later writeMetadata persist the synthetic defaults over
+      // an intact file, silently destroying the real metadata.
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return this.metadata;
+      throw error;
+    }
+    try {
+      this.metadata = JSON.parse(text) as SessionMeta;
+    } catch {
+      this.metadata = {
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        title: 'New Session',
+        isCustomTitle: false,
+        agents: {},
+        custom: {},
+      };
+    }
     return this.metadata;
   }
 

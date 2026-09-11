@@ -37,6 +37,7 @@ import {
   type GoalSnapshotData,
   type TodoItem,
 } from '@scream-code/scream-code-sdk';
+import { appendSessionIndexEntry, encodeWorkDirKey } from '@scream-code/agent-core';
 import { setLocale } from '@scream-code/config';
 
 import { loadTuiConfig, saveTuiConfig, TuiConfigParseError, type TuiLikePreferences, TuiLikePreferencesSchema } from '#/tui/config';
@@ -235,6 +236,19 @@ const contentTypes: Record<string, string> = {
 /** Reads and parses a JSON request body (64 KiB cap). */
 function cloneSnapshot<T>(value: T): T {
   return structuredClone(value);
+}
+
+/**
+ * Duck-typed SESSION_NOT_FOUND check: covers both same-realm ScreamError
+ * instances and errors that crossed a serialization boundary carrying `code`.
+ */
+function isSessionNotFoundError(error: unknown): boolean {
+  if (isScreamError(error)) return error.code === ErrorCodes.SESSION_NOT_FOUND;
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    (error as { code?: unknown }).code === ErrorCodes.SESSION_NOT_FOUND
+  );
 }
 
 function errorMessage(error: unknown): string {
@@ -2204,7 +2218,26 @@ export class SessionManager {
     // Reactivate the exact persisted core session. Never create an empty core
     // session and present the web journal as if restoration succeeded.
     const meta = existing.getMetadata();
-    const session = await this.harness.resumeSession({ id: meta.coreSessionId ?? meta.sessionId });
+    const coreId = meta.coreSessionId ?? meta.sessionId;
+    let session: Session;
+    try {
+      session = await this.harness.resumeSession({ id: coreId });
+    } catch (error) {
+      if (!isSessionNotFoundError(error)) throw error;
+      // The web meta/journal is the listing source of truth, but core sessions
+      // resolve through the global session index — entries written by older
+      // builds (or lost to index rotation) leave an on-disk session
+      // unresumable. Re-index from the web metadata and retry once; only a
+      // truly missing session directory is terminal (→ 1008) instead of a
+      // retryable activation failure (→ 1011).
+      if (!(await this.reindexCoreSession(coreId, meta.workDir))) return null;
+      try {
+        session = await this.harness.resumeSession({ id: coreId });
+      } catch (retryError) {
+        if (isSessionNotFoundError(retryError)) return null;
+        throw retryError;
+      }
+    }
     const reactivated = new WebSession(session, {
       sessionId,
       workDir: meta.workDir,
@@ -2232,6 +2265,24 @@ export class SessionManager {
     await saveMetadata(this.homeDir, reactivated.getMetadata());
     log.info('web: session reactivated', { sessionId });
     return reactivated;
+  }
+
+  /**
+   * Self-heal for "meta exists but core session missing from the global
+   * index": re-append the index entry when the session directory is still on
+   * disk. Returns false when the directory is truly gone.
+   */
+  private async reindexCoreSession(coreId: string, workDir: string): Promise<boolean> {
+    const sessionDir = join(this.homeDir, 'sessions', encodeWorkDirKey(workDir), coreId);
+    if (!existsSync(sessionDir)) return false;
+    try {
+      await appendSessionIndexEntry(this.homeDir, { sessionId: coreId, sessionDir, workDir });
+      log.info('web: re-indexed core session from web metadata', { sessionId: coreId });
+      return true;
+    } catch (error) {
+      log.warn('web: core session reindex failed', { sessionId: coreId, error: errorMessage(error) });
+      return false;
+    }
   }
 
   get(sessionId: string): WebSession | undefined {
