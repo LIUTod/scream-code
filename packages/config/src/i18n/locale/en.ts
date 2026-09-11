@@ -115,9 +115,9 @@ export const en: Record<string, string> = {
   'footer.context': 'Context: {bar} ({tokens}/{maxTokens})',
   'footer.context_short': 'Context: {bar}',
   'footer.hit': 'HitR',
-  'footer.tasks_running': '{count} tasks running',
-  'footer.agents_running': '{count} agents running',
-  'footer.subagents_working': 'subagents x{count} working',
+  'footer.tasks_running': 'bg task x{count}',
+  'footer.agents_running': 'bg agent x{count}',
+  'footer.subagents_working': 'fg agent x{count}',
 
   // ─── Sidebar panels ─────────────
   'sidebar.git': 'Git',

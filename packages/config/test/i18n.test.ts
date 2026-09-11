@@ -96,7 +96,7 @@ describe('i18n t() interpolation', () => {
   it('converts number params to string', async () => {
     const { t, setLocale } = await loadI18n({ LANG: 'en_US.UTF-8' });
     setLocale('en');
-    expect(t('footer.tasks_running', { count: 5 })).toBe('5 tasks running');
+    expect(t('footer.tasks_running', { count: 5 })).toBe('bg task x5');
   });
 
   it('keeps the literal {var} when the param is not provided', async () => {

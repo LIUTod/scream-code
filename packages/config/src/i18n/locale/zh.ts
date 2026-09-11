@@ -115,9 +115,9 @@ export const zh: Record<string, string> = {
   'footer.context': '上下文: {bar} ({tokens}/{maxTokens})',
   'footer.context_short': '上下文: {bar}',
   'footer.hit': 'HitR',
-  'footer.tasks_running': '{count}个任务 运行中',
-  'footer.agents_running': '{count}个代理 运行中',
-  'footer.subagents_working': 'Agent x{count} 工作中',
+  'footer.tasks_running': '后台任务 x{count}',
+  'footer.agents_running': '后台Agent x{count}',
+  'footer.subagents_working': '前台Agent x{count}',
 
   // ─── 侧栏面板 ─────────────
   'sidebar.git': 'Git',
