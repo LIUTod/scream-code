@@ -22,6 +22,9 @@ vi.stubGlobal('matchMedia', (query: string) => ({
   removeListener: () => {},
   dispatchEvent: () => false,
 }));
+// jsdom has no Element.scrollTo/scrollIntoView (see message-list-rows.test.ts).
+Element.prototype.scrollTo = () => {};
+Element.prototype.scrollIntoView = () => {};
 
 /**
  * jsdom has no IntersectionObserver. MessageList builds one in onMounted and

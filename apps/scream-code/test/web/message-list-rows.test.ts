@@ -21,6 +21,12 @@ vi.stubGlobal('matchMedia', (query: string) => ({
   removeListener: () => {},
   dispatchEvent: () => false,
 }));
+// jsdom does not implement Element.scrollTo/scrollIntoView; MessageList's
+// tail-follow auto-scroll (busy=true path) calls el.scrollTo inside an rAF
+// callback and a late timer can land it after teardown → CI-visible
+// unhandled rejection.
+Element.prototype.scrollTo = () => {};
+Element.prototype.scrollIntoView = () => {};
 
 const DAY = 24 * 60 * 60 * 1000;
 const GAP = 5 * 60 * 1000;
