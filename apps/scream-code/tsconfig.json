@@ -16,6 +16,8 @@
     "test/web/image-lightbox.test.ts",
     "test/web/message-item-density.test.ts",
     "test/web/message-list-dividers.test.ts",
+    "test/web/message-list-rows.test.ts",
+    "test/web/message-window.test.ts",
     "test/web/message-list-scroll.test.ts",
     "test/web/file-tree.test.ts",
     "test/web/file-dir-cache.test.ts",
@@ -24,6 +26,7 @@
     "test/web/g5-finishing.test.ts",
     "test/web/use-scream-web-client.test.ts",
     "test/web/storage.test.ts",
-    "test/web/use-panel-resize.test.ts"
+    "test/web/use-panel-resize.test.ts",
+    "test/web/streaming-render-pin.test.ts"
   ]
 }

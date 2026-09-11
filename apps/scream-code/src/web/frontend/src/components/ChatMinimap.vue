@@ -16,6 +16,17 @@ const props = defineProps<{
   messages: ChatMessage[];
   /** The scroll/viewport container that holds the message rows. */
   host: HTMLElement | null;
+  /**
+   * Render-window revision of the parent list (its window start). The list is
+   * windowed, so which rows exist in the DOM changes without `messages`
+   * changing; bumping this re-syncs the viewport highlight.
+   */
+  revision?: number;
+  /**
+   * Ask the parent list to slide its render window over `id` so a DOM row
+   * exists before we try to scroll to it. Returns false when the id is unknown.
+   */
+  revealMessage?: (id: string) => boolean;
 }>();
 
 const hoverSeq = ref<number | null>(null);
@@ -94,12 +105,23 @@ function observe(): void {
     const el = host.querySelector(`[data-message-id="${CSS.escape(msg.id)}"]`);
     if (el) observer.observe(el);
   }
+  // Prune highlights for rows the window unmounted: removal does not
+  // reliably deliver a final non-intersecting entry across engines.
+  // (Re-runs on every window slide because `revision` feeds this watch.)
+  if (inView.value.size) {
+    const alive = new Set<string>();
+    for (const id of inView.value) {
+      if (host.querySelector(`[data-message-id="${CSS.escape(id)}"]`)) alive.add(id);
+    }
+    if (alive.size !== inView.value.size) inView.value = alive;
+  }
 }
 
 // Observe AFTER the DOM patch so newly added message rows are present; a plain
 // pre-flush watch would run before Vue renders the new message and the row
-// would never enter the observer.
-watch([() => props.messages.length, () => props.host, enabled], () => {
+// would never enter the observer. `revision` is the parent's window start: the
+// list is windowed, so the mounted rows can change without `messages` changing.
+watch([() => props.messages.length, () => props.host, () => props.revision, enabled], () => {
   nextTick(observe);
 });
 onMounted(() => observe());
@@ -108,9 +130,16 @@ onBeforeUnmount(() => observer?.disconnect());
 function scrollToMessage(id: string): void {
   const host = props.host;
   if (!host) return;
-  const el = host.querySelector(`[data-message-id="${CSS.escape(id)}"]`);
-  if (!el) return;
-  el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  // Segments map the full messages array, but only the windowed rows are in
+  // the DOM: slide the parent's window over the target first, then scroll once
+  // the row exists.
+  props.revealMessage?.(id);
+  const selector = `[data-message-id="${CSS.escape(id)}"]`;
+  const jump = () => {
+    host.querySelector(selector)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+  if (host.querySelector(selector)) jump();
+  else void nextTick(jump);
 }
 
 function tooltipOf(seg: Segment): string {

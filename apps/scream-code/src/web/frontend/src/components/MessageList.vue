@@ -5,6 +5,7 @@ import MessageItem from './MessageItem.vue';
 import EmptyState from './EmptyState.vue';
 import ChatMinimap from './ChatMinimap.vue';
 import { formatDayDivider, isSameLocalDay } from '../utils/timeFormat';
+import { captureScrollDistance, restoreScrollTop } from '../utils/scrollAnchor';
 import SvgIcon from './ui/SvgIcon.vue';
 
 const props = withDefaults(
@@ -87,6 +88,159 @@ function dayDividerBefore(index: number): string | null {
   return isSameLocalDay(prev.ts, cur.ts) ? null : formatDayDivider(cur.ts);
 }
 
+/** Per-message derived flags — mirrors the MessageItem prop surface. */
+interface MessageRowFlags {
+  streaming: boolean;
+  isLatestUser: boolean;
+  canFork: boolean;
+  showTimestamp: boolean;
+  idle: boolean;
+}
+
+/**
+ * Flattened render row: dividers are first-class rows so the template is a
+ * single v-for over `visibleRows`, with all per-index derivation done ONCE
+ * per messages change here instead of on every render inside the loop.
+ * The row model always builds from the FULL messages array — windowing (P3b)
+ * only slices `visibleRows` — so a divider at the window edge keeps its
+ * out-of-window previous-message context.
+ */
+type MessageListRow =
+  | { kind: 'day-divider'; key: string; dividerText: string; flags: MessageRowFlags }
+  | { kind: 'turn-divider'; key: string; dividerText: null; flags: MessageRowFlags }
+  | { kind: 'message'; key: string; message: ChatMessage; dividerText: null; flags: MessageRowFlags };
+
+/** Divider rows never read flags; one shared stable object keeps memo deps cheap. */
+const DIVIDER_FLAGS: MessageRowFlags = {
+  streaming: false,
+  isLatestUser: false,
+  canFork: false,
+  showTimestamp: false,
+  idle: true,
+};
+
+const rows = computed<MessageListRow[]>(() => {
+  const latestUser = latestUserId.value;
+  const lastId = lastMessageId.value;
+  const lastAsst = lastAssistantId.value;
+  const out: MessageListRow[] = [];
+  props.messages.forEach((message, index) => {
+    const dayText = dayDividerBefore(index);
+    if (dayText !== null) {
+      out.push({ kind: 'day-divider', key: `${message.id}-divider`, dividerText: dayText, flags: DIVIDER_FLAGS });
+    } else if (turnDividerBefore(index)) {
+      out.push({ kind: 'turn-divider', key: `${message.id}-divider`, dividerText: null, flags: DIVIDER_FLAGS });
+    }
+    out.push({
+      kind: 'message',
+      key: message.id,
+      message,
+      dividerText: null,
+      flags: {
+        streaming: props.busy && message.id === lastId && message.role === 'assistant',
+        isLatestUser: message.id === latestUser,
+        canFork: !props.busy && message.id === lastAsst,
+        showTimestamp: showTimestampFor(index),
+        idle: !props.busy,
+      },
+    });
+  });
+  return out;
+});
+
+/* ── Render window (P3b) ─────────────────────────────────────────────────
+ * `windowStart` is the index of the first rendered row in the FULL row model.
+ * A tail-aligned window holds WINDOW_SIZE rows (a 300-message conversation
+ * mounts 80 rows, not 300) and it is trimmed at the TOP only — the bottom is
+ * never cut — so the last row is always in the DOM and the existing
+ * "scroll to bottom / unread badge / streaming pin" semantics keep working
+ * untouched. Paging up lowers `windowStart` and the window grows upward,
+ * bounded by the row model: the user only ever pays DOM for the history they
+ * actually look at.
+ */
+const WINDOW_SIZE = 80;
+/** Rows revealed per sentinel trigger when paging up through loaded rows. */
+const PAGE = 40;
+/** Rows of breathing room kept ABOVE a row revealed from the minimap. */
+const REVEAL_LEAD = 8;
+
+/** Tail-aligned start for a row model of `total` rows. */
+function tailStart(total: number): number {
+  return Math.max(0, total - WINDOW_SIZE);
+}
+
+const windowStart = ref(tailStart(rows.value.length));
+
+/**
+ * The template iterates THIS, never `rows`. Slicing is a pure render cut: the
+ * row model (and therefore every day/turn divider, including the one at the
+ * window edge) is still computed from the FULL messages array.
+ */
+const visibleRows = computed<MessageListRow[]>(() => {
+  const total = rows.value.length;
+  const start = Math.min(Math.max(0, windowStart.value), total);
+  return rows.value.slice(start);
+});
+
+/**
+ * The top sentinel is the paging trigger for BOTH sources of older content:
+ * rows still above the window (pure slide) and an unloaded older page (REST).
+ */
+const showTopSentinel = computed(() => windowStart.value > 0 || props.olderAvailable);
+
+/** Row index holding `id` in the full row model, or -1. */
+function rowIndexOfMessage(id: string): number {
+  const list = rows.value;
+  for (let i = 0; i < list.length; i++) {
+    const r = list[i]!;
+    if (r.kind === 'message' && r.message.id === id) return i;
+  }
+  return -1;
+}
+
+/**
+ * Slide the render window so the row for `id` exists in the DOM. Returns false
+ * when the id is not in the row model at all. Used by the minimap, whose
+ * segments map the messages ARRAY (not the DOM) and can therefore point at a
+ * row that windowing has not rendered yet.
+ */
+function revealMessage(id: string): boolean {
+  const index = rowIndexOfMessage(id);
+  if (index < 0) return false;
+  if (index >= windowStart.value) return true; // already rendered
+  anchorWindowMove(() => {
+    windowStart.value = Math.max(0, index - REVEAL_LEAD);
+  });
+  return true;
+}
+
+/**
+ * Apply a window move while keeping the viewport pinned to the same content:
+ * capture the distance-to-content-end before Vue patches the DOM, restore it
+ * after. Equivalent to shifting `scrollTop` by the inserted height, which is
+ * exactly what a top-slide does.
+ */
+function anchorWindowMove(move: () => void): void {
+  const el = listRef.value;
+  if (!el) {
+    move();
+    return;
+  }
+  const distance = captureScrollDistance(el.scrollHeight, el.scrollTop);
+  move();
+  nextTick(() => {
+    const box = listRef.value;
+    if (box) box.scrollTop = restoreScrollTop(box.scrollHeight, distance);
+  });
+}
+
+/**
+ * Set by the prepend watcher (registered BEFORE the window watcher, so it runs
+ * first in the same flush) for the current flush: rows appeared above the
+ * window, so the window watcher must not tail-follow them.
+ */
+let preInsertHandled = false;
+
 /** Streaming content length - drives scroll pinning during deltas. */
 const streamLength = computed(() => {
   const last = props.messages.at(-1);
@@ -115,6 +269,9 @@ function prefersReducedMotion(): boolean {
 }
 
 function scrollToBottom(behavior: ScrollBehavior): void {
+  // "Go to bottom" always re-arms the tail window first, so the newest rows
+  // exist in the DOM before the scroll lands (P3b).
+  windowStart.value = tailStart(rows.value.length);
   // Wait for the DOM update, then scroll. rAF is more reliable than
   // nextTick for read-after-write scroll offsets.
   requestAnimationFrame(() => {
@@ -153,7 +310,21 @@ function restoreScrollPosition(): void {
   } catch {
     // Best-effort.
   }
-  if (saved) el.scrollTop = Number(saved);
+  if (!saved) return;
+  const top = Number(saved);
+  if (!(top > 0)) return;
+  // Windowed restore: the saved offset is absolute-top against the FULL list,
+  // but the tail window may not contain that far up — the browser would
+  // silently clamp to the bottom and the read position is lost. Expand the
+  // window upward so the position becomes reachable, then restore exactly.
+  if (top > el.scrollHeight - el.clientHeight && windowStart.value > 0) {
+    windowStart.value = 0;
+    nextTick(() => {
+      el.scrollTop = top;
+    });
+    return;
+  }
+  el.scrollTop = top;
 }
 
 /**
@@ -169,25 +340,74 @@ function restoreScrollPosition(): void {
 let justPrepended = false;
 
 watch(
-  () => [props.messages[0]?.id ?? null, props.messages.length] as const,
-  ([firstId, len], [prevFirstId, prevLen]) => {
+  () => [props.messages[0]?.id ?? null, props.messages.length, props.sessionId] as const,
+  ([firstId, len, sid], [prevFirstId, prevLen, prevSid]) => {
+    // Pre-insert test: the row model is rebuilt from `props.messages`, so a
+    // growth in length whose FIRST id also changed — WITHIN THE SAME SESSION —
+    // means rows appeared ABOVE (an older page was prepended). A plain append
+    // keeps the first id; a session switch changes sessionId and is excluded
+    // explicitly (a fresh conversation can otherwise look like a pre-insert).
     const prepended =
       len > 0 &&
       firstId !== null &&
       prevFirstId !== null &&
       firstId !== prevFirstId &&
-      len > (prevLen ?? 0);
+      len > (prevLen ?? 0) &&
+      sid === prevSid;
     justPrepended = prepended;
     if (!prepended) return;
+    // The window is NOT re-anchored here: `visibleRows` starts at
+    // `windowStart`, and a pre-insert pushes existing rows to higher indices,
+    // so everything previously rendered stays rendered and the freshly loaded
+    // rows appear ABOVE it. The user keeps their place; the sentinel simply
+    // moves off-screen until they scroll up again.
+    preInsertHandled = true;
     // Capture the pre-patch scrollHeight now (pre-order watcher, Vue has not
     // patched the DOM yet) and shift by the inserted height after the patch.
     const el = listRef.value;
     if (!el) return;
-    const before = el.scrollHeight;
+    const distance = captureScrollDistance(el.scrollHeight, el.scrollTop);
     nextTick(() => {
-      const delta = el.scrollHeight - before;
-      if (delta > 0) el.scrollTop += delta;
+      el.scrollTop = restoreScrollTop(el.scrollHeight, distance);
     });
+  },
+);
+
+/**
+ * Window maintenance on row-model growth. Registered AFTER the prepend
+ * watcher, so on a pre-insert flush the watcher above has already marked the
+ * flush via `preInsertHandled` (tail-following a history page the user pulled
+ * in would yank them to the bottom).
+ * - tail-aligned -> stay glued to the tail as new messages arrive;
+ * - start past the tail line (list shrank or was replaced) -> clamp to the tail;
+ * - scrolled up into history -> leave `windowStart` alone, so incoming
+ *   messages never move what the user is reading.
+ */
+watch(
+  () => rows.value.length,
+  (len, oldLen) => {
+    const prevLen = oldLen ?? 0;
+    if (preInsertHandled) {
+      preInsertHandled = false;
+      return;
+    }
+    // Tail-follow needs BOTH signals: the window glued to the tail AND the
+    // viewport near the bottom. Window alignment alone would let a new
+    // message slide the window while the user reads rows above it inside
+    // the current window — unmounting what they are looking at.
+    // showScrollButton is the existing "away from bottom by >80px" signal
+    // maintained by onScroll (same threshold as the unread-badge logic).
+    const wasTailAligned =
+      windowStart.value === tailStart(prevLen) && !showScrollButton.value;
+    if (wasTailAligned) {
+      windowStart.value = tailStart(len);
+    } else if (windowStart.value > tailStart(len)) {
+      // Shrink clamp (list trimmed/reset): anchor the viewport so a user who
+      // paged up is not yanked by the window snapping to the new tail.
+      anchorWindowMove(() => {
+        windowStart.value = tailStart(len);
+      });
+    }
   },
 );
 
@@ -218,6 +438,10 @@ watch(
     restoredForSession = '';
     unreadCount.value = 0;
     justPrepended = false;
+    // A new conversation always opens tail-aligned (P3b); rows for the new
+    // session may arrive with the same length as the old one, so the
+    // length-based watcher alone would not re-arm the window.
+    windowStart.value = tailStart(rows.value.length);
   },
 );
 
@@ -281,7 +505,23 @@ onMounted(() => {
     olderObserver = new IntersectionObserver(
       (entries) => {
         if (!entries[0]?.isIntersecting) return;
-        if (props.olderAvailable && !props.olderLoading && props.messages.length > 0) {
+        // ① Rows already in the row model but above the window: pure slide,
+        //    no network. Anchored so the view does not jump.
+        if (windowStart.value > 0) {
+          anchorWindowMove(() => {
+            windowStart.value = Math.max(0, windowStart.value - PAGE);
+          });
+        }
+        // ② Ask the server for an older page ONLY once the row model itself
+        //    is exhausted (window slid to 0). Fetching while ① still has
+        //    unseen rows above would prefetch pages the user never sees and
+        //    re-trigger the sentinel in a cascade.
+        if (
+          windowStart.value === 0 &&
+          props.olderAvailable &&
+          !props.olderLoading &&
+          props.messages.length > 0
+        ) {
           emit('load-older');
         }
       },
@@ -320,8 +560,11 @@ watch(topSentinelRef, (el) => {
       <button class="conn-retry" @click="emit('retry-connection')">立即重试</button>
     </div>
     <div ref="listRef" class="message-list">
-      <div v-if="olderAvailable" ref="topSentinelRef" class="load-older-row">
-        <button class="load-older-btn" :disabled="olderLoading" @click="emit('load-older')">
+      <!-- Top sentinel: doubles as the window slide trigger (P3b), so it is
+           rendered whenever rows exist above the window, not only when the
+           server has an older page. -->
+      <div v-if="showTopSentinel" ref="topSentinelRef" class="load-older-row">
+        <button v-if="olderAvailable" class="load-older-btn" :disabled="olderLoading" @click="emit('load-older')">
           {{ olderLoading ? '加载中…' : '加载更早消息' }}
         </button>
       </div>
@@ -333,19 +576,32 @@ watch(topSentinelRef, (el) => {
         :connected="connected"
         @pick="(t) => emit('pick', t)"
       />
-      <template v-for="(message, index) in messages" :key="message.id">
-        <div v-if="dayDividerBefore(index)" class="day-divider" role="separator">
-          <span>{{ dayDividerBefore(index) }}</span>
+      <!--
+        v-memo freezes a row's subtree when none of its deps change, so a
+        flush/parent re-render skips re-creating MessageItem vnodes (~N-1/N of
+        the list). Deps MUST stay in sync with everything the row renders:
+        every `row.*` field, every reactive scalar passed to MessageItem
+        (busy, sessionId, workDir — handlers/emit are stable references), and
+        ANY NEW derived prop added to a row must be appended here too.
+      -->
+      <template
+        v-for="row in visibleRows"
+        :key="row.key"
+        v-memo="[row.message, row.flags.streaming, row.flags.isLatestUser, row.flags.canFork, row.flags.showTimestamp, row.flags.idle, row.dividerText, busy, sessionId, workDir]"
+      >
+        <div v-if="row.kind === 'day-divider'" class="day-divider" role="separator">
+          <span>{{ row.dividerText }}</span>
         </div>
-        <div v-else-if="turnDividerBefore(index)" class="turn-divider" aria-hidden="true" />
+        <div v-else-if="row.kind === 'turn-divider'" class="turn-divider" aria-hidden="true" />
         <MessageItem
-          :message="message"
-          :is-latest-user="message.id === latestUserId"
-          :idle="!busy"
-          :streaming="busy && message.id === lastMessageId && message.role === 'assistant'"
+          v-else
+          :message="row.message"
+          :is-latest-user="row.flags.isLatestUser"
+          :idle="row.flags.idle"
+          :streaming="row.flags.streaming"
           :session-id="sessionId"
-          :can-fork="!busy && message.id === lastAssistantId"
-          :show-timestamp="showTimestampFor(index)"
+          :can-fork="row.flags.canFork"
+          :show-timestamp="row.flags.showTimestamp"
           :work-dir="workDir ?? undefined"
           @edit="(content) => emit('edit', content)"
           @retry="emit('retry-message')"
@@ -360,7 +616,12 @@ watch(topSentinelRef, (el) => {
         </div>
       </div>
     </div>
-    <ChatMinimap :messages="messages" :host="listRef" />
+    <ChatMinimap
+      :messages="messages"
+      :host="listRef"
+      :revision="windowStart"
+      :reveal-message="revealMessage"
+    />
     <Transition name="scroll-btn">
       <button
         v-if="showScrollButton"
@@ -449,11 +710,18 @@ watch(topSentinelRef, (el) => {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  /* D4：聊天滚动区隐藏滚动条（滚轮/触控可用；其余面板保留全局 4px 细轨） */
+  scrollbar-width: none;
   display: flex;
   flex-direction: column;
   padding: var(--space-3) 0 var(--space-2);
   overscroll-behavior: contain;
   background: var(--color-surface);
+}
+.message-list::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
 }
 
 /* Turn hairline: 1px, message-gutter left/right margins. */
