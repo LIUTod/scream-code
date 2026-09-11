@@ -328,6 +328,17 @@ html.theme-transition *::after {
   background: var(--color-text-muted);
 }
 
+/* Firefox-only scrollbar theming: scrollbar-color is inherited by every
+   element, and browsers that support the standard property (Chrome/Edge 121+,
+   Safari) would let it OVERRIDE the custom ::-webkit-scrollbar rail above.
+   Scope it strictly to engines without webkit pseudo support. */
+@supports not selector(::-webkit-scrollbar) {
+  html {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-line-strong) transparent;
+  }
+}
+
 /* Mobile safe area */
 @supports (padding-bottom: env(safe-area-inset-bottom)) {
   .composer-dock {

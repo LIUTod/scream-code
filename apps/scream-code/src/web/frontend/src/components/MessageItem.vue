@@ -238,7 +238,8 @@ async function copyContent() {
 .message.user { display:flex; justify-content:flex-end; padding-top:18px; animation:rise-in var(--dur-msg-user) var(--ease-out) both; }
 .message.assistant { animation:rise-in var(--dur-msg-assistant) var(--ease-out) both; }
 .user-wrap { max-width:85%; display:flex; flex-direction:column; align-items:flex-end; }
-.user-bubble { padding:8px 12px; border:1px solid var(--color-line-strong); border-radius:var(--radius-lg); background:var(--color-accent-soft); color:var(--color-text); line-height:1.65; white-space:pre-wrap; word-break:break-word; }
+.user-bubble { padding:8px 12px; border:1px solid var(--color-line); border-radius:var(--radius-lg); background:var(--color-user-bg, var(--color-hover)); color:var(--color-text); line-height:1.65; white-space:pre-wrap; word-break:break-word; max-height:240px; overflow-y:auto; scrollbar-width:none; }
+.user-bubble::-webkit-scrollbar { width: 0; height: 0; display: none; }
 .assistant-wrap { width:100%; }
 .assistant-brand { display:flex; align-items:center; gap:8px; margin-bottom:6px; min-height:14px; }
 .brand-model { font-size:11px; color:var(--color-text-faint); letter-spacing:0.01em; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -274,7 +275,7 @@ async function copyContent() {
 .head-name { font-size:11px; color:var(--color-text-faint); }
 .user-avatar { width:18px; height:18px; border-radius:var(--radius-full); background:var(--color-accent-soft); color:var(--color-text-muted); display:inline-flex; align-items:center; justify-content:center; flex-shrink:0; }
 .brand-time { margin-left:auto; font-size:10px; color:var(--color-text-faint); flex-shrink:0; }
-.at-link { display:inline; padding:0; border:0; background:none; font:inherit; color:inherit; text-decoration:underline; text-decoration-color:var(--color-accent-bd); text-underline-offset:2px; cursor:pointer; word-break:break-all; }
+.at-link { display:inline; padding:0; border:0; background:none; font:inherit; color:inherit; text-decoration:underline; text-decoration-color:var(--color-accent-bd); text-underline-offset:2px; cursor:pointer; word-break:break-all; transition:color var(--dur-fast) var(--ease-out), text-decoration-color var(--dur-fast) var(--ease-out); }
 .at-link:hover { color:var(--color-accent); text-decoration-color:var(--color-accent); }
 .written-files { display:flex; flex-wrap:wrap; gap:6px; }
 .written-file { display:inline-flex; align-items:center; gap:4px; padding:2px 8px; border:1px solid var(--color-line-strong); border-radius:var(--radius-full); background:var(--color-surface); color:var(--color-text-muted); font-family:var(--font-mono); font-size:var(--font-size-xs); cursor:pointer; transition:border-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out); }

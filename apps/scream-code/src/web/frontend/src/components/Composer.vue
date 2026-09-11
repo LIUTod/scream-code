@@ -4,6 +4,7 @@ import type { ChatMessage, ModelInfo, SessionStatus } from '../types';
 import { filterSlashCommands, resolveCommandName, type SlashCommand } from '../commands';
 import { useFileAtMention } from '../composables/useFileAtMention';
 import { deriveHistoryFromMessages, mergeInputHistory } from '../utils/inputHistory';
+import { MOD_KEY_LABEL } from '../utils/platform';
 import AtFileMenu from './AtFileMenu.vue';
 import ContextRing from './ContextRing.vue';
 import HistoryMenu from './HistoryMenu.vue';
@@ -480,7 +481,7 @@ const inputPlaceholder = computed(
   () =>
     props.placeholder ??
     (props.busy
-      ? '回合进行中：Enter/Ctrl+S 排队消息，随下一轮注入'
+      ? `回合进行中：Enter/${MOD_KEY_LABEL}+S 排队消息，随下一轮注入`
       : '输入消息，@ 提及，/ 触发指令'),
 );
 

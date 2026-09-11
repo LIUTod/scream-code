@@ -1,7 +1,5 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
-import SvgIcon from './ui/SvgIcon.vue';
-import type { IconName } from './ui/SvgIcon.vue';
 
 withDefaults(
   defineProps<{
@@ -16,12 +14,6 @@ withDefaults(
 const emit = defineEmits<{
   (e: 'pick', text: string): void;
 }>();
-
-const SUGGESTIONS: { icon: IconName; title: string; prompt: string }[] = [
-  { icon: 'edit', title: '帮我写一个函数', prompt: '帮我写一个函数' },
-  { icon: 'clipboard', title: '解释这段代码', prompt: '解释这段代码' },
-  { icon: 'activity', title: '调试这个问题', prompt: '调试这个问题' },
-];
 
 /** G5.5: recent prompts recorded by the client (localStorage key must match). */
 const RECENT_KEY = 'scream-recent-prompts';
@@ -53,18 +45,6 @@ function fmtContext(usage: number | null | undefined): string {
     </div>
     <h1 class="empty-title">Scream Web UI</h1>
     <p class="empty-subtitle">给 Scream 发消息，开始处理你的任务</p>
-
-    <div class="suggestions">
-      <button
-        v-for="s in SUGGESTIONS"
-        :key="s.title"
-        class="suggestion-card"
-        @click="emit('pick', s.prompt)"
-      >
-        <span class="suggestion-icon"><SvgIcon :name="s.icon" :size="22" /></span>
-        <span class="suggestion-title">{{ s.title }}</span>
-      </button>
-    </div>
 
     <div v-if="recentPrompts.length > 0" class="recent" aria-label="最近输入">
       <span class="recent-label">最近</span>
@@ -98,11 +78,6 @@ function fmtContext(usage: number | null | undefined): string {
         <span class="status-item">上下文 {{ fmtContext(contextUsage) }}</span>
       </template>
     </div>
-
-    <div class="empty-shortcuts" aria-hidden="true">
-      <span><kbd>⌘K</kbd> 搜索会话</span>
-      <span><kbd>⌘N</kbd> 新建会话</span>
-    </div>
   </div>
 </template>
 
@@ -122,8 +97,8 @@ function fmtContext(usage: number | null | undefined): string {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 72px;
-  height: 72px;
+  width: 56px;
+  height: 56px;
   background: var(--color-accent-soft);
   border: 1px solid var(--color-accent-bd);
   border-radius: var(--radius-xl);
@@ -132,14 +107,14 @@ function fmtContext(usage: number | null | undefined): string {
 }
 
 .logo-img {
-  width: 48px;
-  height: 48px;
+  width: 36px;
+  height: 36px;
   object-fit: contain;
 }
 
 .empty-title {
   margin: 0;
-  font-size: 28px;
+  font-size: 22px;
   font-weight: 700;
   letter-spacing: -0.01em;
   background: linear-gradient(120deg, var(--color-text) 30%, var(--color-accent) 100%);
@@ -152,52 +127,6 @@ function fmtContext(usage: number | null | undefined): string {
 .empty-subtitle {
   margin: 0;
   font-size: var(--font-size-base);
-}
-
-.suggestions {
-  display: flex;
-  gap: var(--space-3);
-  margin-top: var(--space-4);
-  flex-wrap: wrap;
-  justify-content: center;
-}
-
-.suggestion-card {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-5) var(--space-6);
-  min-width: 128px;
-  background: var(--color-surface);
-  border: 1px solid var(--color-line);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-xs);
-  cursor: pointer;
-  font-size: var(--font-size-sm);
-  font-weight: 500;
-  color: var(--color-text);
-  transition:
-    border-color var(--dur-base) var(--ease-out),
-    background var(--dur-base) var(--ease-out),
-    box-shadow var(--dur-base) var(--ease-out),
-    transform var(--dur-base) var(--ease-out);
-}
-.suggestion-card:hover {
-  border-color: var(--color-accent-bd, var(--color-accent));
-  background: var(--color-accent-soft, var(--color-hover));
-  box-shadow: var(--shadow-md), 0 0 16px var(--color-accent-glow);
-  transform: translateY(-2px);
-}
-.suggestion-card:active {
-  transform: translateY(0);
-  box-shadow: var(--shadow-xs);
-}
-.suggestion-icon {
-  font-size: var(--font-size-2xl);
-}
-.suggestion-title {
-  white-space: nowrap;
 }
 
 .empty-workdir {
@@ -296,35 +225,4 @@ function fmtContext(usage: number | null | undefined): string {
 .status-sep { opacity: 0.4; }
 .status-item { white-space: nowrap; }
 
-.empty-shortcuts {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-4);
-  color: var(--color-text-faint);
-  font-size: 11px;
-}
-.empty-shortcuts kbd {
-  display: inline-block;
-  padding: 1px 5px;
-  border: 1px solid var(--color-line);
-  border-bottom-width: 2px;
-  border-radius: var(--radius-xs);
-  background: var(--color-surface);
-  font-family: var(--font-mono);
-  font-size: 10px;
-  color: var(--color-text-muted);
-}
-
-@media (max-width: 640px) {
-  .suggestions {
-    flex-direction: column;
-    width: 100%;
-    max-width: 320px;
-  }
-  .suggestion-card {
-    flex-direction: row;
-    justify-content: flex-start;
-    min-width: 0;
-  }
-}
 </style>

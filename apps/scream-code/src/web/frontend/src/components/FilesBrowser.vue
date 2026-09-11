@@ -147,6 +147,7 @@ watch(
   color: var(--color-text-muted);
   cursor: pointer;
   flex-shrink: 0;
+  transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
 }
 .files-up:hover {
   background: var(--color-hover);
@@ -167,6 +168,7 @@ watch(
   cursor: pointer;
   padding: 2px 3px;
   border-radius: var(--radius-xs);
+  transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
 }
 .crumb:hover {
   background: var(--color-hover);
@@ -199,6 +201,7 @@ watch(
   color: var(--color-text);
   font-size: var(--font-size-sm);
   cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out);
   text-align: left;
   min-height: 32px;
 }

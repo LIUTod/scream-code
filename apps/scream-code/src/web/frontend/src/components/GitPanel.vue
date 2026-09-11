@@ -172,6 +172,7 @@ const syncLabel = computed(() => {
 .git-file-base {
   flex-shrink: 0;
   color: var(--color-text);
+  transition: color var(--dur-fast) var(--ease-out);
 }
 .git-file-stat {
   flex-shrink: 0;

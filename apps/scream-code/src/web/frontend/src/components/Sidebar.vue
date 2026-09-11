@@ -3,6 +3,7 @@ import { computed, nextTick, ref } from 'vue';
 import type { GitStatus, SessionListItem } from '../types';
 import { useSidebarState } from '../composables/useSidebarState';
 import { useFileTreeState } from '../composables/useFileTreeState';
+import { MOD_KEY_LABEL } from '../utils/platform';
 import FileTree from './FileTree.vue';
 import SvgIcon from './ui/SvgIcon.vue';
 import logoUrl from '../assets/logo-v2.svg';
@@ -219,7 +220,7 @@ function sessionTitle(s: SessionListItem): string {
           ref="searchRef"
           v-model="query"
           type="text"
-          placeholder="搜索会话… (⌘K)"
+          :placeholder="`搜索会话… (${MOD_KEY_LABEL}K)`"
           aria-label="搜索会话"
           spellcheck="false"
         />
