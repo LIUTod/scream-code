@@ -20,12 +20,19 @@ const activeServers = new Set<Server>();
 
 const activeTimers = new Set<ReturnType<typeof setInterval>>();
 
+/** Idle watchdog: closes all graph servers when no viewer kept them alive. */
+let idleTimer: ReturnType<typeof setTimeout> | null = null;
+
 function registerServer(server: Server): void {
   activeServers.add(server);
   server.on('close', () => { activeServers.delete(server); });
 }
 
 function closeAllServers(): void {
+  if (idleTimer !== null) {
+    clearTimeout(idleTimer);
+    idleTimer = null;
+  }
   for (const timer of activeTimers) {
     clearInterval(timer);
   }
@@ -1212,6 +1219,11 @@ export async function handleWeb(host: SlashCommandHost): Promise<void> {
     throw new Error(t('knowledge.empty_store'));
   }
 
+  // One graph viewer at a time: a re-open evicts previous servers (pages
+  // that are still attached drain naturally — their heartbeat connections
+  // stay usable until the tab closes).
+  closeAllServers();
+
   const server = createServer((req, res) => {
     if (req.url === '/api/graph') {
       void serveGraphJSON(store, res);
@@ -1247,6 +1259,13 @@ export async function handleWeb(host: SlashCommandHost): Promise<void> {
 
   const port = (server.address() as AddressInfo).port;
   const url = `http://127.0.0.1:${port}`;
+  // Idle watchdog: if the browser never attaches (openUrl silently fails or
+  // the user dismisses the page), don't hold the ephemeral port until process
+  // exit. unref keeps it from pinning the event loop (tests stay fast-exiting).
+  idleTimer = setTimeout(() => {
+    closeAllServers();
+  }, 10 * 60_000);
+  idleTimer.unref();
   openUrl(url);
   host.showStatus(t('knowledge.web_opened', { url }));
 }

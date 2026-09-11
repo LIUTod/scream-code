@@ -46,11 +46,12 @@ export function isPrunableEmptySession(
   // real content. The title check must mirror agent-core's isUntitled()
   // semantics, otherwise every brand-new empty session keeps its placeholder
   // title and is never pruned, leaving a growing pile of empty shells.
-  if (isUntitledTitle(summary.title)) return false;
+  if (hasRealTitle(summary.title)) return false;
   return now - summary.updatedAt > graceMs;
 }
 
-function isUntitledTitle(title: string | undefined): boolean {
+/** True when the title is a user-meaningful title (not missing / placeholder). */
+function hasRealTitle(title: string | undefined): boolean {
   return typeof title === 'string' && title.trim().length > 0 && title !== 'New Session';
 }
 import type { SessionEventHandler } from '../controllers/session-event-handler';

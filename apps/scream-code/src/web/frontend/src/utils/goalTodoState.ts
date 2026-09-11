@@ -77,6 +77,13 @@ export function buildUpdateGoalBody(request: UpdateGoalRequest): Record<string, 
   };
 }
 
+/**
+ * Journal frame gate. A seq *gap within the same epoch* is intentionally
+ * NOT treated as 'resync': after any disconnect the client re-baselines via
+ * `client_hello {lastSeq, epoch}` + a full snapshot fetch, and replayed
+ * frames legitimately jump seq. Only an epoch change means the stream was
+ * rebuilt server-side and local state must be re-synced.
+ */
 export function acceptJournalEvent(currentEpoch: number, currentSeq: number, event: JournalEvent): 'apply' | 'duplicate' | 'resync' {
   if (currentEpoch !== 0 && event.epoch !== currentEpoch) return 'resync';
   return event.seq <= currentSeq ? 'duplicate' : 'apply';

@@ -202,7 +202,7 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
   let snapshotRetryGoalGeneration: number | null = null;
   let pendingPromptAccepted = false;
   let disposed = false;
-  const sentMessageIds = new Map<string, { messageId: string; connectionGeneration: number }>();
+  const sentMessageIds = new Map<string, { messageId: string; connectionGeneration: number; queueText?: string }>();
   /** G5.4: prompts queued while offline; flushed after a successful hello. */
   const OFFLINE_KEY = 'scream-offline-prompt-queue';
   let offlineQueue: string[] = [];
@@ -231,7 +231,9 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
     const text = offlineQueue[0]!;
     const clientMessageId = `client_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     const localMessageId = generateId();
-    sentMessageIds.set(clientMessageId, { messageId: localMessageId, connectionGeneration });
+    // queueText marks this send as "the current head of the offline queue",
+    // so echo/error handling can advance (or evict) exactly that item.
+    sentMessageIds.set(clientMessageId, { messageId: localMessageId, connectionGeneration, queueText: text });
     promptGeneration++;
     pendingPromptAccepted = false;
     promptPending.value = true;
@@ -426,8 +428,11 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
     return `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   }
 
-  function startHeartbeat(ms: number): void {
+  function startHeartbeat(rawMs: number): void {
     stopHeartbeat();
+    // heartbeat_ms arrives from the server unvalidated: an absurd value
+    // (0 / NaN / hours) would hot-loop pings or starve the pong timeout.
+    const ms = Number.isFinite(rawMs) && rawMs >= 1000 && rawMs <= 120000 ? rawMs : 15000;
     lastPongAt = Date.now();
     heartbeatTimer = window.setInterval(() => {
       if (Date.now() - lastPongAt > HEARTBEAT_TIMEOUT_MS) {
@@ -511,9 +516,11 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
         liveGeneration++;
         if (msg.clientMessageId && sentMessageIds.has(msg.clientMessageId)) {
           pendingPromptAccepted = true;
-          // G5.4: the offline flush sent this; the server echoed it back, so
-          // drop the head item and try the next queued prompt.
-          flushQueueNext();
+          // G5.4: only an offline-flush send carries queueText — advance the
+          // queue for its echo. A plain send's echo must not shift the head.
+          // (Entry is intentionally kept: duplicate user_message frames from
+          // a lastSeq replay still dedupe against it.)
+          if (sentMessageIds.get(msg.clientMessageId)?.queueText !== undefined) flushQueueNext();
           break;
         }
         messages.value.push({
@@ -594,11 +601,15 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
             const local = messages.value.find((m) => m.id === pendingEntry.messageId);
             if (local) local.isError = true;
             showToast(`消息未发送：${msg.message}`, 'error');
-            // G5.4: if this was the head of the offline queue, drop it so a
-            // later reconnect does not re-send (and duplicate) the same text.
-            if (offlineQueue.length > 0) {
-              offlineQueue.shift();
-              persistQueue();
+            // G5.4: drop the queued item only when THIS rejected send came
+            // from the offline flush. A plain connected send must never
+            // evict an unrelated queue head that was never sent.
+            if (pendingEntry.queueText !== undefined) {
+              const idx = offlineQueue.indexOf(pendingEntry.queueText);
+              if (idx >= 0) {
+                offlineQueue.splice(idx, 1);
+                persistQueue();
+              }
             }
           }
         }
@@ -887,6 +898,13 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
         sessionActive.value = false;
         goal.value = null;
         todos.value = [];
+        // A rejected session's transcript must not haunt the idle view;
+        // offlineQueue survives on purpose — unsent prompts wait for the
+        // next session the user picks.
+        messages.value = [];
+        error.value = null;
+        promptPending.value = false;
+        sentMessageIds.clear();
         setConnectionStatus('idle');
         return;
       }

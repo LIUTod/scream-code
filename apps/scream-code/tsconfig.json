@@ -21,6 +21,7 @@
     "test/web/file-dir-cache.test.ts",
     "test/web/session-stats-panel.test.ts",
     "test/web/settings-view.test.ts",
-    "test/web/g5-finishing.test.ts"
+    "test/web/g5-finishing.test.ts",
+    "test/web/use-scream-web-client.test.ts"
   ]
 }

@@ -214,6 +214,19 @@ async function executeSlashCommand(host: SlashCommandHost, input: string): Promi
         host.showError(formatErrorMessage(error));
       }
       return;
+    case 'invalid':
+      // resolveSlashCommandInput's declared type can emit this variant
+      // (unknown command); surface it instead of falling through silently.
+      host.showError(`Invalid command: /${intent.commandName}`);
+      return;
+    default: {
+      // Compile-time exhaustiveness guard for any future intent kind:
+      // adding a variant without a case here fails tsc instead of
+      // silently swallowing the input at runtime.
+      const unhandled: never = intent;
+      host.showError(`Unhandled slash-command intent: ${String(unhandled)}`);
+      return;
+    }
   }
 }
 
