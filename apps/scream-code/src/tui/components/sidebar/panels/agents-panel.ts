@@ -27,6 +27,8 @@ function statusText(status: SubagentSlotStatus): string {
       return t('sidebar.agent_messaging');
     case 'reworking':
       return t('sidebar.agent_reworking');
+    case 'requesting':
+      return t('sidebar.agent_requesting');
   }
 }
 
@@ -77,7 +79,13 @@ class AgentsPanelContent {
       ? active('●')
       : chalk.hex(this.statusColor(slot.status))('●');
     const name = chalk.hex(this.colors.textStrong)(padLabel(slot.type, nameWidth));
-    const status = active ? active(statusText(slot.status)) : chalk.hex(this.colors.text)(statusText(slot.status));
+    // The help marker is a static warning word — deliberately kept off the brand
+    // gradient so it reads as an alert, not as one more busy working row.
+    const status = active
+      ? active(statusText(slot.status))
+      : slot.status === 'requesting'
+        ? chalk.hex(this.colors.warning)(statusText(slot.status))
+        : chalk.hex(this.colors.text)(statusText(slot.status));
     // Type + status + instance count only; no live output previews. The
     // status word starts on the SAME column as idle rows (2-space separator)
     // and the count sits two spaces after it, so busy rows never shift left.
@@ -93,6 +101,8 @@ class AgentsPanelContent {
       case 'messaging':
         return this.colors.accent;
       case 'reworking':
+        return this.colors.warning;
+      case 'requesting':
         return this.colors.warning;
       case 'idle':
         return this.colors.textDim;

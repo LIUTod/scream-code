@@ -3,9 +3,10 @@
  *
  * The sidebar shows a fixed row per default subagent type (coder/explore/
  * plan/verify/reviewer/oracle/worker/writer — mirroring the default profile),
- * each in one of five states: idle (resting), working (tool call in flight),
+ * each in one of six states: idle (resting), working (tool call in flight),
  * outputting (streaming assistant output), messaging (main agent sending a
- * steer/queue message) and reworking (resumed by the main agent). Types
+ * steer/queue message) and reworking (resumed by the main agent). Asking the
+ * parent for help adds a transient requesting overlay. Types
  * outside the default eight are appended in spawn order (capped at
  * {@link MAX_SUBAGENT_SLOTS}).
  *
@@ -14,7 +15,13 @@
  * calls) and never touches agent-core itself.
  */
 
-export type SubagentSlotStatus = 'idle' | 'working' | 'outputting' | 'messaging' | 'reworking';
+export type SubagentSlotStatus =
+  | 'idle'
+  | 'working'
+  | 'outputting'
+  | 'messaging'
+  | 'reworking'
+  | 'requesting';
 
 export interface SubagentSlot {
   readonly type: string;
@@ -47,6 +54,11 @@ export const DEFAULT_SUBAGENT_TYPES: readonly string[] = [
 /** Hard cap so an exotic custom-profile spawn storm cannot overflow the panel. */
 export const MAX_SUBAGENT_SLOTS = 16;
 
+/** How long a `requesting` overlay stays visible after a subagent asks the
+ *  parent for help. The request itself returns at once and the agent keeps
+ *  working, so this is a display window, not a blocked state. */
+export const REQUESTING_WINDOW_MS = 5000;
+
 interface Instance {
   readonly type: string;
   generation: number;
@@ -65,6 +77,10 @@ export class SubagentSlots {
    * the first open window; concurrent windows on the same type keep counting
    * and the slot only exits messaging when the last window closes. */
   private readonly messagingPrev = new Map<string, SubagentSlotStatus>();
+  /** Slot type → open `requesting` overlay. Keyed by type so several live
+   *  instances of one type share a single marker; the real activity state stays
+   *  untouched in the slot and shows back up once the overlay expires. */
+  private readonly requesting = new Map<string, { until: number; agentId: string }>();
   /** Count of open messaging windows per type (handles same-type siblings). */
   private readonly messagingCount = new Map<string, number>();
 
@@ -75,6 +91,7 @@ export class SubagentSlots {
     this.messagingByCall.clear();
     this.messagingPrev.clear();
     this.messagingCount.clear();
+    this.requesting.clear();
   }
 
   /**
@@ -121,6 +138,10 @@ export class SubagentSlots {
   onTerminated(agentId: string): void {
     const instance = this.instances.get(agentId);
     if (instance === undefined) return;
+    // A terminated agent can no longer be waiting on help — drop its overlay.
+    if (this.requesting.get(instance.type)?.agentId === agentId) {
+      this.requesting.delete(instance.type);
+    }
     const remaining = (this.runningByType.get(instance.type) ?? 1) - 1;
     if (remaining > 0) {
       this.runningByType.set(instance.type, remaining);
@@ -155,6 +176,19 @@ export class SubagentSlots {
     this.setState(instance.type, kind === 'tool' ? 'working' : 'outputting', agentId, detail);
   }
 
+  /** A subagent asked the parent for help. The request returns immediately and
+   *  the agent keeps working, so this only raises a transient overlay — the real
+   *  activity state stays in the slot and shows back up when it expires. While
+   *  `messaging` is on screen the overlay loses (see visibleSlot). */
+  onRequesting(agentId: string, at = Date.now()): void {
+    const instance = this.instances.get(agentId);
+    if (instance === undefined) return;
+    this.requesting.set(instance.type, { until: at + REQUESTING_WINDOW_MS, agentId });
+    const slot = this.ensureSlot(instance.type);
+    slot.agentId = agentId;
+    slot.lastActivityAt = at;
+  }
+
   /**
    * Main-side SendSubagentMessage tool call started: the target subagent's
    * slot shows messaging until the tool call returns.
@@ -164,6 +198,9 @@ export class SubagentSlots {
     const instance = this.instances.get(targetAgentId);
     if (instance === undefined) return;
     this.messagingByCall.set(toolCallId, targetAgentId);
+    // The parent is answering — a help request from this agent is served, so drop
+    // its marker here instead of letting it resurface once the chat window ends.
+    this.requesting.delete(instance.type);
     // Remember the slot's pre-chat status on the FIRST window; a second
     // concurrent window must not overwrite it with 'messaging'.
     const slot = this.ensureSlot(instance.type);
@@ -208,17 +245,36 @@ export class SubagentSlots {
    * All slots in fixed display order: the eight default types first (always
    * present, idle when never used), then extra types in spawn order.
    */
-  getSlots(): readonly SubagentSlot[] {
+  getSlots(at = Date.now()): readonly SubagentSlot[] {
+    this.dropExpiredOverlays(at);
     const ordered: SubagentSlot[] = [];
     for (const type of DEFAULT_SUBAGENT_TYPES) {
-      const slot = this.ensureSlot(type);
-      ordered.push({ ...slot, count: this.runningByType.get(type) ?? 0 });
+      ordered.push(this.visibleSlot(type));
     }
     for (const slot of this.slots.values()) {
       if (DEFAULT_SUBAGENT_TYPES.includes(slot.type)) continue;
-      ordered.push({ ...slot, count: this.runningByType.get(slot.type) ?? 0 });
+      ordered.push(this.visibleSlot(slot.type));
     }
     return ordered;
+  }
+
+  /** Display view of one slot: the real state with an unexpired `requesting`
+   *  overlay on top. Read-path only — it never mutates. Callers must run
+   *  {@link dropExpiredOverlays} first, and messaging clears the overlay in
+   *  {@link onMessagingStart}; the `messaging` guard only covers same-tick ordering. */
+  private visibleSlot(type: string): SubagentSlot {
+    const slot = this.ensureSlot(type);
+    const copy = { ...slot, count: this.runningByType.get(type) ?? 0 };
+    if (this.requesting.has(type) && copy.status !== 'messaging') {
+      copy.status = 'requesting';
+    }
+    return copy;
+  }
+
+  private dropExpiredOverlays(at: number): void {
+    for (const [type, overlay] of this.requesting) {
+      if (at >= overlay.until) this.requesting.delete(type);
+    }
   }
 
   private ensureSlot(type: string): SubagentSlot {

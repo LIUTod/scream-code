@@ -535,6 +535,44 @@ describe('SessionEventHandler', () => {
     expect(appendLiveOutput).toHaveBeenCalledTimes(1);
   });
 
+  it('marks the sidebar slot as requesting when a subagent contacts the parent', () => {
+    const host = createMockHost();
+    const handler = new SessionEventHandler(host);
+
+    handler.handleEvent(
+      {
+        type: 'subagent.spawned',
+        sessionId: 'ses-test',
+        agentId: 'agent-7',
+        subagentId: 'agent-7',
+        subagentName: 'coder',
+        description: 'do work',
+      } as unknown as Event,
+      vi.fn(),
+    );
+    const coderStatus = () =>
+      handler.getSubagentSlots().find((slot) => slot.type === 'coder')?.status;
+    expect(coderStatus()).toBe('working');
+
+    // Ordinary tool work keeps reading as working…
+    handler.handleEvent(
+      { ...baseEvent('tool.call.started'), agentId: 'agent-7', name: 'Read' } as unknown as Event,
+      vi.fn(),
+    );
+    expect(coderStatus()).toBe('working');
+
+    // …but asking the parent raises the transient help marker instead.
+    handler.handleEvent(
+      {
+        ...baseEvent('tool.call.started'),
+        agentId: 'agent-7',
+        name: 'ContactParent',
+      } as unknown as Event,
+      vi.fn(),
+    );
+    expect(coderStatus()).toBe('requesting');
+  });
+
   describe('skill_candidate', () => {
     function makeHandlerWithSession() {
       const host = createMockHost();

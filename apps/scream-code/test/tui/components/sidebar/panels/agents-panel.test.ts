@@ -90,7 +90,7 @@ describe('AgentsPanel', () => {
     const slots = new SubagentSlots();
     slots.onSpawned('agent-1', 'explore', 'a');
     slots.onSpawned('agent-2', 'explore', 'b');
-    const strip = (l: string) => l.replaceAll(/\x1B\[[0-9;]*m/g, '');
+    const strip = (l: string) => l.replaceAll(/\u001B\[[0-9;]*m/g, '');
     const lines = agentsPanel.build(ctx(slots.getSlots())).render(42);
     const idle = strip(lines[0]!); // coder idle
     const busy = strip(lines[1]!); // explore working ×2
@@ -105,7 +105,7 @@ describe('AgentsPanel', () => {
     slots.onSpawned('agent-1', 'coder', 'a');
     const content = agentsPanel.build(ctx(slots.getSlots()));
     const line1 = content.render(50).find((l) => l.includes('coder'))!;
-    expect(line1).toMatch(/\x1B\[38;2;\d+;\d+;\d+m/); // true-colour gradient
+    expect(line1).toMatch(/\u001B\[38;2;\d+;\d+;\d+m/); // true-colour gradient
 
     vi.useFakeTimers();
     try {
@@ -119,5 +119,17 @@ describe('AgentsPanel', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('shows the help marker as a static warning word while the name keeps its own colour', () => {
+    const slots = new SubagentSlots();
+    slots.onSpawned('agent-1', 'coder', 'a');
+    slots.onRequesting('agent-1');
+    const line = agentsPanel.build(ctx(slots.getSlots())).render(50).find((l) => l.includes('coder'))!;
+    expect(line).toContain('asking');
+    // palette.warning = #e0ae21 → the dot and the status word carry it…
+    expect(line).toContain('\u001B[38;2;224;174;33m');
+    // …while the type name stays on the strong text colour (no brand gradient).
+    expect(line).toContain('\u001B[38;2;255;255;255mcoder');
   });
 });

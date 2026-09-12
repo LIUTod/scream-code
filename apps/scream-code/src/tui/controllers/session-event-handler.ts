@@ -330,7 +330,10 @@ export class SessionEventHandler {
         this.subagentSlots.onTerminated(event.subagentId);
         break;
       case 'tool.call.started':
-        this.subagentSlots.onActivity(agentId, 'tool', `tool: ${event.name}`);
+        // Asking the parent for help is not ordinary tool work: raise the
+        // transient requesting marker instead (SubagentSlots.onRequesting).
+        if (event.name === 'ContactParent') this.subagentSlots.onRequesting(agentId);
+        else this.subagentSlots.onActivity(agentId, 'tool', `tool: ${event.name}`);
         break;
       case 'tool.call.delta':
         break;

@@ -142,6 +142,7 @@ export const en: Record<string, string> = {
   'sidebar.agent_outputting': 'outputting',
   'sidebar.agent_messaging': 'messaging',
   'sidebar.agent_reworking': 'reworking',
+  'sidebar.agent_requesting': 'asking',
   'sidebar.goal_idle': 'no goal',
   'sidebar.goal_active': 'active',
   'sidebar.goal_completed': 'completed',

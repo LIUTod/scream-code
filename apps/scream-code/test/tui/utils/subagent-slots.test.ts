@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { SubagentSlots } from '#/tui/utils/subagent-slots';
+import { REQUESTING_WINDOW_MS, SubagentSlots } from '#/tui/utils/subagent-slots';
 
 describe('SubagentSlots', () => {
   it('always exposes the 8 default types in fixed order, idle initially', () => {
@@ -123,7 +123,76 @@ describe('SubagentSlots', () => {
   it('reset clears all runtime state', () => {
     const slots = new SubagentSlots();
     slots.onSpawned('agent-6', 'coder', 'x');
+    slots.onRequesting('agent-6', 1000);
     slots.reset();
-    expect(slots.getSlots().every((s) => s.status === 'idle')).toBe(true);
+    expect(slots.getSlots(2000).every((s) => s.status === 'idle')).toBe(true);
+  });
+
+  it('requesting: asking the parent shows a timed overlay, then the real state shows through', () => {
+    const slots = new SubagentSlots();
+    slots.onSpawned('agent-11', 'coder', 'a');
+    const coderAt = (at: number) => slots.getSlots(at).find((s) => s.type === 'coder')?.status;
+    expect(coderAt(1000)).toBe('working');
+
+    slots.onRequesting('agent-11', 1000);
+    expect(coderAt(1000)).toBe('requesting');
+
+    // Activity keeps accumulating underneath the overlay…
+    slots.onActivity('agent-11', 'output', 'thinking');
+    expect(coderAt(1500)).toBe('requesting');
+    // …and re-appears the moment the window elapses.
+    expect(coderAt(1000 + REQUESTING_WINDOW_MS)).toBe('outputting');
+  });
+
+  it('requesting: messaging outranks the marker and clears it', () => {
+    const slots = new SubagentSlots();
+    slots.onSpawned('agent-12', 'oracle', 'a');
+    const oracleAt = (at: number) => slots.getSlots(at).find((s) => s.type === 'oracle')?.status;
+    slots.onRequesting('agent-12', 1000);
+    expect(oracleAt(1000)).toBe('requesting');
+    slots.onMessagingStart('call-9', 'agent-12', 'steer');
+    expect(oracleAt(1000)).toBe('messaging');
+    slots.onMessagingEnd('call-9');
+    expect(oracleAt(1000)).toBe('working');
+  });
+
+  it('requesting: termination drops the marker; unknown agents are no-ops', () => {
+    const slots = new SubagentSlots();
+    slots.onSpawned('agent-13', 'worker', 'a');
+    slots.onRequesting('agent-13', 1000);
+    slots.onTerminated('agent-13');
+    expect(slots.getSlots(1000).find((s) => s.type === 'worker')?.status).toBe('idle');
+    expect(() => slots.onRequesting('agent-missing')).not.toThrow();
+  });
+
+  it('requesting: being answered clears the marker even without an intervening render', () => {
+    const slots = new SubagentSlots();
+    slots.onSpawned('agent-14', 'oracle', 'a');
+    slots.onRequesting('agent-14', 1000);
+    slots.onMessagingStart('call-10', 'agent-14', 'steer');
+    slots.onMessagingEnd('call-10');
+    // No getSlots() in between: the marker must not resurface after the chat.
+    expect(slots.getSlots(1500).find((s) => s.type === 'oracle')?.status).toBe('working');
+  });
+
+  it('requesting: half-open window, survives the request result, one marker per type', () => {
+    const slots = new SubagentSlots();
+    slots.onSpawned('agent-15', 'coder', 'a');
+    const coderAt = (at: number) => slots.getSlots(at).find((s) => s.type === 'coder')?.status;
+    slots.onRequesting('agent-15', 1000);
+    const lastTick = 1000 + REQUESTING_WINDOW_MS - 1;
+    expect(coderAt(lastTick)).toBe('requesting');
+    // The request's own tool result must not cut the marker short…
+    slots.onActivity('agent-15', 'toolResult', 'Request accepted.');
+    expect(coderAt(lastTick)).toBe('requesting');
+    // …and expiry is exact: at `until` the real state is back.
+    expect(coderAt(1000 + REQUESTING_WINDOW_MS)).toBe('working');
+
+    // Live siblings of one type share a single marker and keep their ×N count.
+    slots.onSpawned('agent-16', 'coder', 'b');
+    slots.onRequesting('agent-16', 2000);
+    const row = slots.getSlots(2000).find((s) => s.type === 'coder');
+    expect(row?.status).toBe('requesting');
+    expect(row?.count).toBe(2);
   });
 });
