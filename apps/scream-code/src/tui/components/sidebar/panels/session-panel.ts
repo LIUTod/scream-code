@@ -2,9 +2,20 @@ import chalk from 'chalk';
 import { getLocale, t } from '@scream-code/config';
 
 import type { ColorPalette } from '#/tui/theme/colors';
-import { alignMetricRows, METRIC_LABEL_GAP } from '#/tui/utils/display-width';
+import {
+  displayWidth,
+  layoutSidebarGrid,
+  SIDEBAR_LABEL_COLS,
+  SIDEBAR_MARKER_COLS,
+  SIDEBAR_MIN_GAP,
+  type SidebarGridRow,
+} from '#/tui/utils/display-width';
 
-import type { SidebarPanel, SidebarPanelContext } from '../sidebar-panel';
+import {
+  SIDEBAR_STATIC_MARKER,
+  type SidebarPanel,
+  type SidebarPanelContext,
+} from '../sidebar-panel';
 
 function formatDuration(ms: number): string {
   const totalSeconds = Math.max(0, Math.floor(ms / 1000));
@@ -47,10 +58,13 @@ function formatCompact(n: number): string {
   return String(n);
 }
 
-/** True when a two-column grid fits `width` display columns. */
+/** True when the shared grid can show these values at full width: the label
+ *  column is fixed across panels, so only the value column decides the fit. */
 function gridFits(rows: ReadonlyArray<readonly [string, string]>, width: number): boolean {
-  const grid = alignMetricRows(rows);
-  return grid.labelCols + METRIC_LABEL_GAP + grid.valueCols <= width;
+  const valueCols = Math.max(0, ...rows.map(([, value]) => displayWidth(value)));
+  return (
+    SIDEBAR_MARKER_COLS + SIDEBAR_LABEL_COLS + SIDEBAR_MIN_GAP + valueCols <= width
+  );
 }
 
 // displayWidth/padLabel now live in utils/display-width.ts (shared with the
@@ -102,16 +116,12 @@ class SessionPanelContent {
     // Secondary counters used to be paired two-per-line ("轮次 25 · 工具 124")
     // and values were left-aligned, which is what made the block read ragged.
     const full = withTokens(false);
-    const rows = gridFits(full, width) ? full : withTokens(true);
-    // Clamp the value column to whatever is left after the label column: only
-    // a value that cannot fit on its own is cut, never the labels, and never
-    // a short value that only looked long because of its widest neighbour.
-    const probe = alignMetricRows(rows);
-    const budget = Math.max(1, width - probe.labelCols - METRIC_LABEL_GAP);
-    const grid =
-      probe.valueCols <= budget ? probe : alignMetricRows(rows, { maxValueCols: budget });
-    // One field per row: labels share a column, values share a right edge.
-    return grid.rows.map(([k, v]) => label(k) + value(v));
+    const rows: SidebarGridRow[] = (gridFits(full, width) ? full : withTokens(true)).map(
+      ([name, reading]) => ({ marker: SIDEBAR_STATIC_MARKER, label: name, value: reading }),
+    );
+    // Geometry comes from the shared sidebar grid: the same marker and label
+    // columns as every other panel, values right-aligned on the inner edge.
+    return layoutSidebarGrid(rows, width).map((cell) => `${label(cell.marker)}${label(cell.label)}${' '.repeat(cell.gap)}${value(cell.value ?? '')}`);
   }
 }
 

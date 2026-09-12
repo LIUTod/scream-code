@@ -4,9 +4,13 @@ import { getLocale, t } from '@scream-code/config';
 
 import type { ColorPalette } from '#/tui/theme/colors';
 import type { GoalJudgeState, GoalStatus } from '#/tui/types';
-import { alignMetricRows, METRIC_LABEL_GAP, padLabel } from '#/tui/utils/display-width';
+import { layoutSidebarGrid, type SidebarGridRow } from '#/tui/utils/display-width';
 
-import type { SidebarPanel, SidebarPanelContext } from '../sidebar-panel';
+import {
+  SIDEBAR_STATIC_MARKER,
+  type SidebarPanel,
+  type SidebarPanelContext,
+} from '../sidebar-panel';
 
 function formatWallClock(ms: number): string {
   const totalMinutes = Math.max(0, Math.floor(ms / 60_000));
@@ -67,46 +71,44 @@ class GoalPanelContent {
 
     const lines: string[] = [];
     lines.push(this.renderBadge(goal.status, goal.judge, dim));
-    lines.push(truncateToWidth(dim(goal.objective), width));
+    // Free text still pays the marker column, so the block's left edge reads the
+    // same as every other panel.
+    lines.push(truncateToWidth(dim(`${SIDEBAR_STATIC_MARKER} ${goal.objective}`), width));
 
-    const rows: Array<[string, string]> = [
-      [t('sidebar.goal_tokens'), formatCount(goal.tokensUsed)],
-      [
-        t('sidebar.goal_tokens_input'),
-        goal.inputTokens === null ? '—' : formatCount(goal.inputTokens),
-      ],
-      [
-        t('sidebar.goal_tokens_output'),
-        goal.outputTokens === null ? '—' : formatCount(goal.outputTokens),
-      ],
-      [t('sidebar.goal_turns'), String(goal.turnsUsed)],
-      [t('sidebar.goal_wall'), formatWallClock(wallMs)],
-      [t('sidebar.goal_judge'), judgeText(goal.judge)],
+    const rows: SidebarGridRow[] = [
+      { marker: SIDEBAR_STATIC_MARKER, label: t('sidebar.goal_tokens'), value: formatCount(goal.tokensUsed) },
+      {
+        marker: SIDEBAR_STATIC_MARKER,
+        label: t('sidebar.goal_tokens_input'),
+        value: goal.inputTokens === null ? '—' : formatCount(goal.inputTokens),
+      },
+      {
+        marker: SIDEBAR_STATIC_MARKER,
+        label: t('sidebar.goal_tokens_output'),
+        value: goal.outputTokens === null ? '—' : formatCount(goal.outputTokens),
+      },
+      { marker: SIDEBAR_STATIC_MARKER, label: t('sidebar.goal_turns'), value: String(goal.turnsUsed) },
+      { marker: SIDEBAR_STATIC_MARKER, label: t('sidebar.goal_wall'), value: formatWallClock(wallMs) },
+      { marker: SIDEBAR_STATIC_MARKER, label: t('sidebar.goal_judge'), value: judgeText(goal.judge) },
     ];
-    // Same two-column table as the Session panel: shared label column,
-    // right-aligned values, fixed gap between the two. The criterion label
-    // joins the grid as an extra label — in English `criterion` is wider than
-    // every metric label, and a label outside the grid would push its value
-    // past the shared column and out of the frame.
+    // Geometry comes from the shared sidebar grid (same marker + label columns as
+    // every other panel, values right-aligned on the inner edge). The criterion
+    // joins as a free-text row so its label stays inside the grid instead of
+    // pushing a value past the shared column.
     const hasCriterion = goal.completionCriterion !== null;
-    const criterionLabel = t('sidebar.goal_criterion');
-    const extraLabels: readonly string[] = hasCriterion ? [criterionLabel] : [];
-    const probe = alignMetricRows(rows, { extraLabels });
-    const budget = Math.max(4, width - probe.labelCols - METRIC_LABEL_GAP);
-    const grid =
-      probe.valueCols <= budget
-        ? probe
-        : alignMetricRows(rows, { extraLabels, maxValueCols: budget });
-    for (const [label, value] of grid.rows) {
-      lines.push(dim(label) + text(value));
-    }
-
-    if (hasCriterion) {
-      // Free text stays left-aligned; only its label joins the column grid.
-      lines.push(
-        dim(padLabel(criterionLabel, grid.labelCols) + ' '.repeat(METRIC_LABEL_GAP)) +
-          truncateToWidth(text(goal.completionCriterion), budget),
-      );
+    const gridRows: SidebarGridRow[] = hasCriterion
+      ? [
+          ...rows,
+          {
+            marker: SIDEBAR_STATIC_MARKER,
+            label: t('sidebar.goal_criterion'),
+            note: goal.completionCriterion ?? '',
+          },
+        ]
+      : rows;
+    for (const cell of layoutSidebarGrid(gridRows, width)) {
+      const reading = cell.value ?? cell.note ?? '';
+      lines.push(`${dim(`${cell.marker}${cell.label}`)}${' '.repeat(cell.gap)}${text(reading)}`);
     }
     return lines;
   }

@@ -25,9 +25,16 @@ function ctx(git: SidebarData['git']): SidebarPanelContext {
 }
 
 describe('GitPanel', () => {
-  const originalLocale = getLocale();
-  beforeAll(() => setLocale('en'));
-  afterAll(() => setLocale(originalLocale));
+  // Captured inside beforeAll: vitest reuses one worker across files, so a
+  // describe-time snapshot could inherit another file's locale.
+  let originalLocale: ReturnType<typeof getLocale> | undefined;
+  beforeAll(() => {
+    originalLocale = getLocale();
+    setLocale('en');
+  });
+  afterAll(() => {
+    if (originalLocale !== undefined) setLocale(originalLocale);
+  });
 
   it('shows the no-repo empty state when git data is missing', () => {
     const lines = gitPanel.build(ctx(undefined)).render(40);

@@ -34,9 +34,16 @@ const baseStats = {
 };
 
 describe('SessionPanel', () => {
-  const originalLocale = getLocale();
-  beforeAll(() => setLocale('en'));
-  afterAll(() => setLocale(originalLocale));
+  // Captured inside beforeAll: vitest reuses one worker across files, so a
+  // describe-time snapshot could inherit another file's locale.
+  let originalLocale: ReturnType<typeof getLocale> | undefined;
+  beforeAll(() => {
+    originalLocale = getLocale();
+    setLocale('en');
+  });
+  afterAll(() => {
+    if (originalLocale !== undefined) setLocale(originalLocale);
+  });
 
   it('shows the empty state when no session data is present', () => {
     const lines = sessionPanel.build(ctx(undefined)).render(40);
@@ -49,12 +56,12 @@ describe('SessionPanel', () => {
     const strip = (l: string) => l.replaceAll(/\u001B\[[0-9;]*m/g, '');
     const bare = lines.map(strip);
 
-    // "Tool calls" (10) + gap (2) leaves 4 columns for values. The wide token
-    // rows are cut, but a short value must never be pushed out of the frame
-    // by its widest neighbour (right-aligned values used to vanish entirely).
+    // Shared grid at an extreme width: the value column wins, so short readings
+    // always survive and it is the label that gives way (never a number pushed
+    // out of the frame by a wider neighbour).
     expect(bare.every((l) => displayWidth(l) <= 16)).toBe(true);
-    expect(bare[5]).toMatch(/^Turns\s+12$/);
-    expect(bare[8]).toMatch(/^Compacts\s+2$/);
+    expect(bare[5]!.replace(/^[●○]\s*/, '')).toMatch(/^Turns\s+12$/);
+    expect(bare[8]!.replace(/^[●○]\s*/, '')).toMatch(/^Comp\S*\s+2$/);
   });
 
   it('switches token values to compact units when the sidebar is narrow', () => {
@@ -63,10 +70,10 @@ describe('SessionPanel', () => {
     const bare = lines.map(strip);
 
     // Compact instead of a cut-off "227,59".
-    expect(bare[0]).toMatch(/^Total\s+227\.6M$/);
-    expect(bare[1]).toMatch(/^Cached\s+224\.1M$/);
-    expect(bare[2]).toMatch(/^Uncached\s+3\.0M$/);
-    expect(bare[3]).toMatch(/^Output\s+515K$/);
+    expect(bare[0]!.replace(/^[●○]\s*/, '')).toMatch(/^Total\s+227\.6M$/);
+    expect(bare[1]!.replace(/^[●○]\s*/, '')).toMatch(/^Cached\s+224\.1M$/);
+    expect(bare[2]!.replace(/^[●○]\s*/, '')).toMatch(/^Uncached\s+3\.0M$/);
+    expect(bare[3]!.replace(/^[●○]\s*/, '')).toMatch(/^Output\s+515K$/);
     // Nothing overflows the available columns and the grid stays aligned.
     expect(bare.every((l) => displayWidth(l) <= 20)).toBe(true);
     expect(new Set(bare.map((l) => displayWidth(l))).size).toBe(1);
@@ -86,11 +93,11 @@ describe('SessionPanel', () => {
 
     // Nine fields, one per row: the paired "turns · tools" lines are gone.
     expect(bare).toHaveLength(9);
-    expect(bare[0]).toMatch(/^Total\s+227,594,582$/);
-    expect(bare[5]).toMatch(/^Turns\s+12$/);
-    expect(bare[6]).toMatch(/^Tool calls\s+87$/);
-    expect(bare[7]).toMatch(/^API calls\s+317$/);
-    expect(bare[8]).toMatch(/^Compacts\s+2$/);
+    expect(bare[0]!.replace(/^[●○]\s*/, '')).toMatch(/^Total\s+227,594,582$/);
+    expect(bare[5]!.replace(/^[●○]\s*/, '')).toMatch(/^Turns\s+12$/);
+    expect(bare[6]!.replace(/^[●○]\s*/, '')).toMatch(/^Tool calls\s+87$/);
+    expect(bare[7]!.replace(/^[●○]\s*/, '')).toMatch(/^API calls\s+317$/);
+    expect(bare[8]!.replace(/^[●○]\s*/, '')).toMatch(/^Compacts\s+2$/);
 
     // Fixed label column + right-aligned values => every row has exactly the
     // same display width, so both edges line up (CJK-aware).

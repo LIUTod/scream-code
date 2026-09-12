@@ -143,6 +143,8 @@ export const zh: Record<string, string> = {
   'sidebar.agent_messaging': '交谈中',
   'sidebar.agent_reworking': '返工中',
   'sidebar.agent_requesting': '求助中',
+  'sidebar.hub': '网络 Hub',
+  'sidebar.hub_model': '模型',
   'sidebar.goal_idle': '空闲中',
   'sidebar.goal_active': '进行中',
   'sidebar.goal_completed': '已完成',

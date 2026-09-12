@@ -163,6 +163,15 @@ export class SessionEventHandler {
   readonly subagentSlots = new SubagentSlots();
   /** Tool callId of the in-flight UpdateGoal(complete) (judging), if any. */
   private goalJudgeCallId: string | undefined;
+  /** Rolling first-token latencies of real requests, feeding the sidebar Hub
+   *  provider row. In-process only, and dropped whenever the model changes —
+   *  a different provider is a different network path. */
+  private providerLatencySamples: number[] = [];
+  private providerLatencyModel: string | undefined;
+  private providerLatencyAt: number | undefined;
+  /** Enough samples to smooth one slow request, few enough that a recovered
+   *  endpoint reads as recovered again quickly. */
+  private readonly providerLatencyWindow = 3;
   renderedSkillActivationIds: Set<string> = new Set();
   renderedMcpServerStatusKeys: Map<string, string> = new Map();
   mcpServerStatusSpinners: Map<string, MoonLoader> = new Map();
@@ -182,6 +191,9 @@ export class SessionEventHandler {
     this.pendingSkillCandidates = [];
     this.promptedSkillCandidates.clear();
     this.goalJudgeCallId = undefined;
+    this.providerLatencySamples = [];
+    this.providerLatencyModel = undefined;
+    this.providerLatencyAt = undefined;
     this.subagentUsageSeen.clear();
     this.host.setAppState({ subagentUsage: {}, goalJudge: 'awaiting' });
   }
@@ -314,6 +326,44 @@ export class SessionEventHandler {
    *  extras in spawn order). Consumed by the sidebar data provider. */
   getSubagentSlots(): readonly SubagentSlot[] {
     return this.subagentSlots.getSlots();
+  }
+
+  /** Keep the last few first-token latencies, per provider. Steps without a
+   *  measured latency (no stream, cached turn) are ignored rather than counted
+   *  as a zero. */
+  private recordProviderLatency(event: TurnStepCompletedEvent): void {
+    const latency = event.llmFirstTokenLatencyMs;
+    if (latency === undefined) return;
+    const model = this.host.state.appState.model;
+    if (this.providerLatencyModel !== undefined && model !== this.providerLatencyModel) {
+      this.providerLatencySamples = [];
+    }
+    this.providerLatencyModel = model;
+    this.providerLatencySamples.push(latency);
+    if (this.providerLatencySamples.length > this.providerLatencyWindow) {
+      this.providerLatencySamples.shift();
+    }
+    this.providerLatencyAt = Date.now();
+  }
+
+  /** Sidebar Hub: average measured response time for the provider in use. The
+   *  caller owns tone and staleness — this stays a plain reading. */
+  getProviderLatency(): { ms: number | undefined; sampledAt: number | undefined } {
+    if (this.providerLatencySamples.length === 0) return { ms: undefined, sampledAt: undefined };
+    // A different provider is a different network path: drop the old readings
+    // here rather than waiting for the next completed step, or the model row
+    // would keep showing the previous endpoint's latency for minutes.
+    if (this.host.state.appState.model !== this.providerLatencyModel) {
+      this.providerLatencySamples = [];
+      this.providerLatencyModel = undefined;
+      this.providerLatencyAt = undefined;
+      return { ms: undefined, sampledAt: undefined };
+    }
+    const total = this.providerLatencySamples.reduce((sum, value) => sum + value, 0);
+    return {
+      ms: Math.round(total / this.providerLatencySamples.length),
+      sampledAt: this.providerLatencyAt,
+    };
   }
 
   /** Feed routed subagent activity into the slot state machine. */
@@ -496,6 +546,7 @@ export class SessionEventHandler {
   private handleStepCompleted(event: TurnStepCompletedEvent): void {
     this.host.streamingUI.flushNow();
     this.maybeShowDebugTiming(event);
+    this.recordProviderLatency(event);
     this.drainQueuedMessagesIntoSteer();
     // A completed step is one LLM request; the failed attempts are counted
     // where they happen (handleStepRetrying). Both share 工作时长's in-process

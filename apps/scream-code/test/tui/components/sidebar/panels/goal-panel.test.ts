@@ -38,9 +38,16 @@ const baseGoal = {
 };
 
 describe('GoalPanel', () => {
-  const originalLocale = getLocale();
-  beforeAll(() => setLocale('en'));
-  afterAll(() => setLocale(originalLocale));
+  // Captured inside beforeAll: vitest reuses one worker across files, so a
+  // describe-time snapshot could inherit another file's locale.
+  let originalLocale: ReturnType<typeof getLocale> | undefined;
+  beforeAll(() => {
+    originalLocale = getLocale();
+    setLocale('en');
+  });
+  afterAll(() => {
+    if (originalLocale !== undefined) setLocale(originalLocale);
+  });
 
   it('shows a resting placeholder when no goal snapshot exists', () => {
     const lines = goalPanel.build(ctx(undefined)).render(40);
@@ -116,16 +123,20 @@ describe('GoalPanel', () => {
       .render(34);
     const strip = (l: string) => l.replaceAll(/\u001B\[[0-9;]*m/g, '');
     const bare = lines.map(strip);
-    const metricRow = bare.find((l) => l.startsWith('tokens'));
-    const criterionRow = bare.find((l) => l.startsWith('criterion'));
+    const label = (line: string): string => line.replace(/^[●○]\s*/, '');
+    const metricRow = bare.find((l) => label(l).startsWith('tokens'));
+    const criterionRow = bare.find((l) => label(l).startsWith('criterion'));
     expect(metricRow).toBeDefined();
     expect(criterionRow).toBeDefined();
 
-    // `criterion` (9 cols) is wider than every metric label, so it must widen
-    // the shared label column instead of hanging outside the grid: both value
-    // fields start at column 11 (9 label + 2 gap).
-    expect(metricRow!.slice(0, 11)).toBe('tokens     ');
-    expect(criterionRow!.startsWith('criterion  ')).toBe(true);
+    // Shared grid contract: every row pays the marker column, and both readings
+    // end on the panel's inner edge — the free-text criterion is pulled left
+    // rather than truncated just to keep the column.
+    expect(metricRow!.startsWith('● tokens')).toBe(true);
+    expect(criterionRow!.startsWith('● criterion')).toBe(true);
+    expect(displayWidth(metricRow!)).toBe(34);
+    expect(displayWidth(criterionRow!)).toBe(34);
+    expect(criterionRow).toContain('the reviewer approves');
     expect(bare.every((l) => displayWidth(l) <= 34)).toBe(true);
   });
 });

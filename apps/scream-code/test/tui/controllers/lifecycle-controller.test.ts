@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { LifecycleController } from '#/tui/controllers/lifecycle-controller';
+import { SidebarManager } from '#/tui/components/sidebar/sidebar-manager';
+import type { SidebarHubData } from '#/tui/components/sidebar/sidebar-panel';
+import { HUB_MODEL_ROW_ID } from '#/tui/utils/hub-probe';
 import * as ccConnectStatus from '#/tui/utils/cc-connect-status';
 import type { LifecycleControllerHost } from '#/tui/controllers/lifecycle-controller';
 import type { ScreamHarness, Session } from '@scream-code/scream-code-sdk';
@@ -161,6 +164,99 @@ describe('LifecycleController', () => {
       expect(process.stdout.listenerCount('error')).toBe(beforeStdout);
       expect(process.stderr.listenerCount('error')).toBe(beforeStderr);
       expect(host.onEmergencyExit).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('sidebar hub probe gating', () => {
+    // The gate under test is one line in `readSidebarHub`, but it is the whole
+    // privacy promise of the Hub panel: no outbound traffic while the sidebar
+    // is off screen. Driving it through the private seam keeps the production
+    // API unchanged, and avoids `buildSidebarData` (which would shell out to
+    // git for the sibling panel).
+    interface ProbeSpy {
+      calls: number;
+      sampleIfStale(): void;
+      snapshot(): { samples: never[]; roundAt: undefined; stale: false; pending: false };
+    }
+
+    function makeController(): {
+      host: LifecycleControllerHost;
+      controller: LifecycleController;
+      manager: SidebarManager;
+      probe: ProbeSpy;
+    } {
+      const host = createMockHost();
+      const manager = new SidebarManager(() => {});
+      // `toggle()` refuses to open an empty sidebar, so the gate needs a panel
+      // on the stack — a stub, because this test is about visibility only.
+      manager.register({
+        id: 'stub',
+        title: 'Stub',
+        width: 30,
+        build: () => ({ invalidate: () => {}, render: () => [] }),
+      });
+      host.state.sidebarManager = manager;
+      setProviderLatency(host, { ms: 120, sampledAt: Date.now() });
+      const controller = new LifecycleController(host);
+      const probe: ProbeSpy = {
+        calls: 0,
+        sampleIfStale() {
+          probe.calls += 1;
+        },
+        snapshot: () => ({ samples: [], roundAt: undefined, stale: false, pending: false }),
+      };
+      (controller as unknown as { hubProbe: ProbeSpy }).hubProbe = probe;
+      return { host, controller, manager, probe };
+    }
+
+    function readHub(controller: LifecycleController): SidebarHubData {
+      return (controller as unknown as { readSidebarHub(): SidebarHubData }).readSidebarHub();
+    }
+
+    // `sessionEventHandler` is a read-only host field; the seam is the host's
+    // own contract, so reach it the way the runtime would.
+    function setProviderLatency(
+      host: LifecycleControllerHost,
+      value: { ms: number | undefined; sampledAt: number | undefined },
+    ): void {
+      (host as unknown as {
+        sessionEventHandler: { getProviderLatency(): typeof value };
+      }).sessionEventHandler = { getProviderLatency: () => value };
+    }
+
+    it('does not probe while the sidebar is closed', () => {
+      const { controller, manager, probe } = makeController();
+      manager.close();
+
+      const data = readHub(controller);
+
+      expect(probe.calls).toBe(0);
+      // The provider row is measured from real requests, so it survives a
+      // closed sidebar — that is not outbound traffic.
+      expect(data.samples.map((sample) => sample.id)).toEqual([HUB_MODEL_ROW_ID]);
+      // 120ms is over the 100ms line, so the measured row reads as amber.
+      expect(data.samples[0]).toMatchObject({ ms: 120, tone: 'warn' });
+    });
+
+    it('probes once per rebuild while visible, and stops again when closed', () => {
+      const { controller, manager, probe } = makeController();
+
+      manager.toggle();
+      readHub(controller);
+      readHub(controller);
+      expect(probe.calls).toBe(2);
+
+      manager.close();
+      readHub(controller);
+      expect(probe.calls).toBe(2);
+    });
+
+    it('keeps the measured row dim when nothing has been measured yet', () => {
+      const { host, controller, manager } = makeController();
+      setProviderLatency(host, { ms: undefined, sampledAt: undefined });
+      manager.close();
+
+      expect(readHub(controller).samples[0]).toMatchObject({ ms: undefined, tone: 'dim' });
     });
   });
 });

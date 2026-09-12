@@ -6,6 +6,7 @@ import { agentsPanel } from '#/tui/components/sidebar/panels/agents-panel';
 import type { ColorPalette } from '#/tui/theme/colors';
 import type { SidebarPanelContext } from '#/tui/components/sidebar/sidebar-panel';
 import { SubagentSlots } from '#/tui/utils/subagent-slots';
+import { displayWidth } from '#/tui/utils/display-width';
 
 const fakePalette = {
   primary: '#79eb00',
@@ -27,14 +28,15 @@ function ctx(agents: ReturnType<SubagentSlots['getSlots']>): SidebarPanelContext
 }
 
 describe('AgentsPanel', () => {
-  const originalLocale = getLocale();
+  let originalLocale: ReturnType<typeof getLocale> | undefined;
   const originalChalkLevel = chalk.level;
   beforeAll(() => {
+    originalLocale = getLocale();
     setLocale('en');
     chalk.level = 3; // non-TTY test env strips ANSI otherwise
   });
   afterAll(() => {
-    setLocale(originalLocale);
+    if (originalLocale !== undefined) setLocale(originalLocale);
     chalk.level = originalChalkLevel;
   });
 
@@ -94,8 +96,12 @@ describe('AgentsPanel', () => {
     const lines = agentsPanel.build(ctx(slots.getSlots())).render(42);
     const idle = strip(lines[0]!); // coder idle
     const busy = strip(lines[1]!); // explore working ×2
-    expect(idle.indexOf('idle')).toBe(busy.indexOf('working'));
+    // Shared grid contract: the status word (with its instance count) is
+    // right-aligned, so idle and busy rows end on the same inner edge and the
+    // count never pushes the status past it.
+    expect(displayWidth(idle)).toBe(displayWidth(busy));
     expect(busy.indexOf('working') < busy.indexOf('×2')).toBe(true);
+    expect(busy.trimEnd().endsWith('working  ×2')).toBe(true);
   });
 
   it('paints busy slots with a true-colour ANSI gradient and the colour changes over time', () => {

@@ -4,6 +4,7 @@ import { truncateToWidth } from '@liutod-scream/pi-tui';
 import { t } from '@scream-code/config';
 
 import type { ColorPalette } from '#/tui/theme/colors';
+import { SIDEBAR_MARKER_COLS } from '#/tui/utils/display-width';
 
 import type { SidebarPanel, SidebarPanelContext } from '../sidebar-panel';
 
@@ -21,20 +22,27 @@ class GitPanelContent {
   invalidate(): void {}
 
   render(width: number): string[] {
+    // Git stays narrative by choice (no label/value grid), but it still pays the
+    // shared marker column so its text starts on the same column as every other
+    // panel's labels instead of hugging the border.
+    const indent = ' '.repeat(SIDEBAR_MARKER_COLS);
     const git = this.ctx.getData().git;
     if (git === undefined) {
-      return [chalk.hex(this.colors.textDim)(t('sidebar.git_no_repo'))];
+      return [`${indent}${chalk.hex(this.colors.textDim)(t('sidebar.git_no_repo'))}`];
     }
     const dim = (s: string): string => chalk.hex(this.colors.textDim)(s);
-    const workDir = truncateToWidth(chalk.hex(this.colors.text)(basename(git.workDir)), width);
+    const workDir = truncateToWidth(
+      `${indent}${chalk.hex(this.colors.text)(basename(git.workDir))}`,
+      width,
+    );
 
     if (git.diffAdded === 0 && git.diffDeleted === 0 && git.filesCount === 0) {
-      return [workDir, dim(t('sidebar.git_clean'))];
+      return [workDir, dim(`${indent}${t('sidebar.git_clean')}`)];
     }
     const added = chalk.hex(this.colors.success)(`+${git.diffAdded}`);
     const deleted = chalk.hex(this.colors.error)(`−${git.diffDeleted}`);
     const count = dim(t('sidebar.git_files', { count: git.filesCount }));
-    const summary = truncateToWidth(`${added} ${deleted}  ${count}`, width);
+    const summary = truncateToWidth(`${indent}${added} ${deleted}  ${count}`, width);
     return [workDir, summary];
   }
 }

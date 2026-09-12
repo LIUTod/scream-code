@@ -5,11 +5,13 @@ import { GutterContainer } from '../components/chrome/gutter-container';
 import { isEmptySessionHintDismissed } from '../utils/ui-preferences';
 import { SESSION_TIPS, TIP_ROTATION_INTERVAL_MS } from '../constant/scream-tui';
 import { StatusBarPaneComponent } from '../components/panes/status-bar-pane';
-import { SIDEBAR_MIN_VIEWPORT_WIDTH, type SidebarData, type SidebarGitData, type SidebarGoalData, type SidebarSessionStats } from '../components/sidebar/sidebar-panel';
+import { SIDEBAR_MIN_VIEWPORT_WIDTH, type SidebarData, type SidebarGitData, type SidebarGoalData, type SidebarHubData, type SidebarSessionStats } from '../components/sidebar/sidebar-panel';
 import { gitPanel } from '../components/sidebar/panels/git-panel';
 import { sessionPanel } from '../components/sidebar/panels/session-panel';
 import { agentsPanel } from '../components/sidebar/panels/agents-panel';
 import { goalPanel } from '../components/sidebar/panels/goal-panel';
+import { hubPanel } from '../components/sidebar/panels/hub-panel';
+import { buildHubSamples, createHubProbe } from '../utils/hub-probe';
 import { createGitStatusCache, type GitStatusCache } from '#/utils/git/git-status';
 import { CHROME_GUTTER } from '../constant/rendering';
 import type { AuthFlowController } from './auth-flow';
@@ -86,6 +88,9 @@ export class LifecycleController {
   /** Sidebar-only git cache (the footer owns its own). Rebuilt when the
    * workDir changes; `getStatus()` is TTL-cached so polling is cheap. */
   private sidebarGitCache: GitStatusCache | undefined;
+  /** Sidebar Hub probe: read-through TTL, no timer — probing happens because a
+   *  frame asked, so a closed sidebar produces no traffic. */
+  private readonly hubProbe = createHubProbe();
   private sidebarGitCacheWorkDir = '';
   /** Session start time for the sidebar uptime counter. Reset on session
    * switch so a resumed old session doesn't show the TUI process age. */
@@ -337,6 +342,11 @@ export class LifecycleController {
       if (!m.allPanels.some((p) => p.id === 'goal')) {
         m.register(goalPanel);
       }
+      // Hub last on purpose: when a short terminal clips the sidebar, the
+      // sacrificial block is the network readout, not the live goal or agents.
+      if (!m.allPanels.some((p) => p.id === 'hub')) {
+        m.register(hubPanel);
+      }
       m.setDataProvider(() => this.buildSidebarData());
     }
 
@@ -378,7 +388,27 @@ export class LifecycleController {
       git: this.readSidebarGit(appState.workDir),
       sessionStats: this.readSidebarSessionStats(appState),
       agents: this.host.sessionEventHandler.getSubagentSlots(),
+      hub: this.readSidebarHub(),
       goal: this.readSidebarGoal(appState),
+    };
+  }
+
+  /**
+   * Hub block. Probe rounds are kicked off from the render path only (the
+   * sidebar container stops rendering while closed), and the round is always
+   * fire-and-forget — a dead endpoint can never hold up a frame. The model row
+   * is different: it reads the first-token latency of real requests, so it is
+   * measured rather than probed, and it goes stale on its own budget.
+   */
+  private readSidebarHub(): SidebarHubData {
+    // Probing is gated on the sidebar actually being on screen. The manager can
+    // also ask for the panel stack while closed (`/sidebar next`, a bare
+    // `/sidebar`), and that bookkeeping must not turn into outbound traffic.
+    if (this.host.state.sidebarManager?.isOpen === true) this.hubProbe.sampleIfStale();
+    const snapshot = this.hubProbe.snapshot();
+    return {
+      samples: buildHubSamples(snapshot, this.host.sessionEventHandler.getProviderLatency()),
+      pending: snapshot.pending,
     };
   }
 

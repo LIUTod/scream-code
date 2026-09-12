@@ -3,7 +3,13 @@ import { truncateToWidth } from '@liutod-scream/pi-tui';
 import { t } from '@scream-code/config';
 
 import type { ColorPalette } from '#/tui/theme/colors';
-import { displayWidth, padLabel } from '#/tui/utils/display-width';
+import {
+  layoutSidebarGrid,
+  padLabel,
+  SIDEBAR_MARKER_COLS,
+  type SidebarGridCells,
+  type SidebarGridRow,
+} from '#/tui/utils/display-width';
 import { lerpGradient } from '#/tui/utils/gradient';
 import type { SubagentSlot, SubagentSlotStatus } from '#/tui/utils/subagent-slots';
 
@@ -50,47 +56,61 @@ class AgentsPanelContent {
     // The provider always returns the fixed 8 default slots (+ extras), so
     // agents is never empty; no empty-state branch needed.
     if (agents === undefined || agents.length === 0) return [];
-    const lines: string[] = [];
-    const nameWidth = Math.max(...agents.map((a) => displayWidth(a.type)));
-    for (const [index, slot] of agents.entries()) {
-      lines.push(this.renderSlot(slot, index, nameWidth, width));
-    }
-    return lines;
+    // Geometry comes from the shared sidebar grid: same marker and label columns
+    // as the other panels, status word right-aligned on the inner edge. The
+    // instance count rides along with the status so the edge stays fixed.
+    const rows: SidebarGridRow[] = agents.map((slot) => ({
+      marker: slot.status === 'idle' ? '○' : '●',
+      label: slot.type,
+      value: statusText(slot.status) + (slot.count > 1 ? `  ×${slot.count}` : ''),
+    }));
+    return layoutSidebarGrid(rows, width).map((cell, index) =>
+      this.renderSlot(cell, agents[index]!, index, width),
+    );
   }
 
-  private renderSlot(slot: SubagentSlot, index: number, nameWidth: number, width: number): string {
+  private renderSlot(
+    cell: SidebarGridCells,
+    slot: SubagentSlot,
+    index: number,
+    width: number,
+  ): string {
     const dim = (s: string): string => chalk.hex(this.colors.textDim)(s);
-    if (slot.status === 'idle') {
-      const dot = dim('○');
-      const name = dim(padLabel(slot.type, nameWidth));
-      const status = dim(statusText('idle'));
-      return `${dot} ${name}  ${status}`;
-    }
+    const idle = slot.status === 'idle';
     // Busy slots pulse along the same brand gradient as the footer status
     // spinner, phase-shifted per slot so they never all sync up. The whole
     // active marker (dot + status word) is painted with the gradient so the
     // light effect is clearly visible, not just a single character.
-    const phase = ((Date.now() % AGENT_GRADIENT_CYCLE_MS) / AGENT_GRADIENT_CYCLE_MS + index * 0.125) % 1;
+    const phase =
+      ((Date.now() % AGENT_GRADIENT_CYCLE_MS) / AGENT_GRADIENT_CYCLE_MS + index * 0.125) % 1;
     const active =
       slot.status === 'working' || slot.status === 'outputting'
         ? chalk.hex(lerpGradient(phase)).bold
         : undefined;
-    const dot = active
-      ? active('●')
-      : chalk.hex(this.statusColor(slot.status))('●');
-    const name = chalk.hex(this.colors.textStrong)(padLabel(slot.type, nameWidth));
+    // Left-aligned marker: the glyph owns the left edge of the column so the
+    // type name still starts on the shared label column.
+    const marker = padLabel(
+      (active ?? chalk.hex(this.statusColor(slot.status)))(idle ? '○' : '●'),
+      SIDEBAR_MARKER_COLS,
+    );
+    const label = (idle ? dim : chalk.hex(this.colors.textStrong))(cell.label);
     // The help marker is a static warning word — deliberately kept off the brand
     // gradient so it reads as an alert, not as one more busy working row.
-    const status = active
-      ? active(statusText(slot.status))
-      : slot.status === 'requesting'
-        ? chalk.hex(this.colors.warning)(statusText(slot.status))
-        : chalk.hex(this.colors.text)(statusText(slot.status));
-    // Type + status + instance count only; no live output previews. The
-    // status word starts on the SAME column as idle rows (2-space separator)
-    // and the count sits two spaces after it, so busy rows never shift left.
-    const count = slot.count > 1 ? `  ${dim('×' + slot.count)}` : '';
-    return truncateToWidth(`${dot} ${name}  ${status}${count}`, width);
+    const paint =
+      active ??
+      (idle
+        ? dim
+        : slot.status === 'requesting'
+          ? chalk.hex(this.colors.warning)
+          : chalk.hex(this.colors.text));
+    // Type + status + instance count only; no live output previews. The count
+    // rides after the status inside the right-aligned value column, so rows
+    // with counts never push the status word out of the shared edge.
+    const count = slot.count > 1 ? dim(`  ×${slot.count}`) : '';
+    return truncateToWidth(
+      `${marker}${label}${' '.repeat(cell.gap)}${paint(statusText(slot.status))}${count}`,
+      width,
+    );
   }
 
   private statusColor(status: SubagentSlotStatus): string {

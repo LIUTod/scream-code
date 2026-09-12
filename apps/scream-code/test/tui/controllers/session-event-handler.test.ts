@@ -745,4 +745,86 @@ describe('SessionEventHandler', () => {
       expect(String(prompt.mock.calls[0]![0])).toContain('new-session-flow');
     });
   });
+
+  it('averages measured first-token latency for the sidebar Hub provider row', () => {
+    const host = createMockHost();
+    const handler = new SessionEventHandler(host);
+
+    expect(handler.getProviderLatency()).toEqual({ ms: undefined, sampledAt: undefined });
+
+    for (const latency of [100, 200, 300]) {
+      handler.handleEvent(
+        {
+          ...baseEvent('turn.step.completed'),
+          turnId: 1,
+          llmFirstTokenLatencyMs: latency,
+        } as unknown as Event,
+        vi.fn(),
+      );
+    }
+    expect(handler.getProviderLatency().ms).toBe(200);
+
+    // The window slides: the oldest reading drops out.
+    handler.handleEvent(
+      {
+        ...baseEvent('turn.step.completed'),
+        turnId: 1,
+        llmFirstTokenLatencyMs: 400,
+      } as unknown as Event,
+      vi.fn(),
+    );
+    expect(handler.getProviderLatency().ms).toBe(300);
+  });
+
+  it('separates provider latency by model and ignores unmeasured steps', () => {
+    const host = createMockHost();
+    const handler = new SessionEventHandler(host);
+    host.setAppState({ model: 'provider-a' });
+    for (const latency of [100, 200]) {
+      handler.handleEvent(
+        {
+          ...baseEvent('turn.step.completed'),
+          turnId: 1,
+          llmFirstTokenLatencyMs: latency,
+        } as unknown as Event,
+        vi.fn(),
+      );
+    }
+    expect(handler.getProviderLatency().ms).toBe(150);
+
+    // A different provider is a different network path: never average across it.
+    host.setAppState({ model: 'provider-b' });
+    handler.handleEvent(
+      {
+        ...baseEvent('turn.step.completed'),
+        turnId: 1,
+        llmFirstTokenLatencyMs: 900,
+      } as unknown as Event,
+      vi.fn(),
+    );
+    expect(handler.getProviderLatency().ms).toBe(900);
+
+    // A step that never reported a latency must not read as an instant reply.
+    handler.handleEvent(
+      { ...baseEvent('turn.step.completed'), turnId: 1 } as unknown as Event,
+      vi.fn(),
+    );
+    expect(handler.getProviderLatency().ms).toBe(900);
+  });
+
+  it('drops the provider latency the moment the model changes, without waiting for a step', () => {
+    const host = createMockHost();
+    const handler = new SessionEventHandler(host);
+    host.setAppState({ model: 'provider-a' });
+    handler.handleEvent(
+      { ...baseEvent('turn.step.completed'), turnId: 1, llmFirstTokenLatencyMs: 120 } as unknown as Event,
+      vi.fn(),
+    );
+    expect(handler.getProviderLatency().ms).toBe(120);
+
+    // A different provider is a different network path. The old reading must not
+    // stay on screen until the next completed step (or the stale budget elapses).
+    host.setAppState({ model: 'provider-b' });
+    expect(handler.getProviderLatency()).toEqual({ ms: undefined, sampledAt: undefined });
+  });
 });

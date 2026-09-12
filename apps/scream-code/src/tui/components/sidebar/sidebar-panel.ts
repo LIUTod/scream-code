@@ -3,6 +3,7 @@ import type { Component } from '@liutod-scream/pi-tui';
 import type { ColorPalette } from '#/tui/theme/colors';
 import type { GoalJudgeState, GoalStatus } from '#/tui/types';
 import type { SubagentSlot } from '#/tui/utils/subagent-slots';
+import type { HubSample } from '#/tui/utils/hub-probe';
 
 /** Summary working-tree snapshot for the sidebar Git panel (摘要式):
  * workdir name + added/deleted line counts + changed-file count. */
@@ -33,6 +34,18 @@ export interface SidebarSessionStats {
   readonly tokensOutput: number;
   /** Epoch ms when the current session started (reset on session switch). */
   readonly startedAt: number;
+}
+
+/**
+ * Network health block: the measured model-provider response time first, then
+ * probe round trips for a few well-known endpoints. Samples arrive already
+ * toned (ok / warn / down / dim) — the panel only maps tone onto the palette,
+ * which keeps it free of any timing or threshold logic of its own.
+ */
+export interface SidebarHubData {
+  readonly samples: readonly HubSample[];
+  /** A round is in flight (the very first one paints rows as pending). */
+  readonly pending: boolean;
 }
 
 export interface SidebarGoalData {
@@ -66,13 +79,14 @@ export interface SidebarData {
   readonly git?: SidebarGitData;
   readonly sessionStats?: SidebarSessionStats;
   readonly agents?: readonly SubagentSlot[];
+  readonly hub?: SidebarHubData;
   readonly goal?: SidebarGoalData;
 }
 
 export interface SidebarPanelContext {
   /** Request a re-render when a panel changes its own content/width. */
   readonly requestRender: () => void;
-  /** Snapshot of runtime data a panel may render (git/session/goal). */
+  /** Snapshot of runtime data a panel may render (git/session/agents/hub/goal). */
   readonly getData: () => SidebarData;
   /** Theme palette for content styling (labels/status letters). */
   readonly colors: ColorPalette;
@@ -111,6 +125,14 @@ export interface SidebarPanel {
 export const SIDEBAR_MIN_WIDTH = 24;
 export const SIDEBAR_MAX_WIDTH = 60;
 export const SIDEBAR_DEFAULT_WIDTH = 30;
+
+/**
+ * Row marker for panels that have no per-row status to signal (Session, Goal
+ * metrics, Hub). It exists so every panel's left edge carries the same amount
+ * of ink as the Agents panel's status dot; it is static and inherits the dim
+ * label colour — the animated, state-coloured dot stays unique to Agents.
+ */
+export const SIDEBAR_STATIC_MARKER = '●';
 
 /**
  * Terminal width below which the sidebar is hidden entirely (matches the
