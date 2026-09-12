@@ -212,7 +212,7 @@ describe('createHubProbe', () => {
     const probe = createHubProbe({ fetchImpl: recorder.fetch, now: clock.now });
     probe.sampleIfStale();
     await flush();
-    expect(sampleOf(probe.snapshot(), 'baidu')?.tone).toBe('ok');
+    expect(sampleOf(probe.snapshot(), 'tencent')?.tone).toBe('ok');
 
     clock.advance(HUB_PROBE_INTERVAL_MS * HUB_STALE_MULTIPLIER);
     const stale = probe.snapshot();
@@ -259,8 +259,8 @@ describe('createHubProbe', () => {
       'google',
       'x',
       'huggingface',
-      'aliyun',
-      'baidu',
+      'alibaba',
+      'tencent',
     ]);
     // Labels are what the sidebar shows: an ambiguous host gets an explicit one,
     // and nothing may outgrow the shared label column (which would truncate it).
@@ -293,7 +293,7 @@ describe('hub display helpers', () => {
     const probe = createHubProbe({
       endpoints: [
         { id: 'github', url: 'https://github.com/' },
-        { id: 'baidu', url: 'https://www.baidu.com/' },
+        { id: 'tencent', url: 'https://cloud.tencent.com/' },
       ],
       fetchImpl: recordingFetch({ clock }).fetch,
       now: clock.now,
@@ -302,7 +302,7 @@ describe('hub display helpers', () => {
     const snapshot = probe.snapshot();
 
     const rows = buildHubSamples(snapshot, { ms: 128, sampledAt: clock.now() }, clock.now());
-    expect(rows.map((row) => row.id)).toEqual([HUB_MODEL_ROW_ID, 'github', 'baidu']);
+    expect(rows.map((row) => row.id)).toEqual([HUB_MODEL_ROW_ID, 'github', 'tencent']);
     expect(rows[0]).toMatchObject({ ms: 128, tone: 'warn' });
   });
 

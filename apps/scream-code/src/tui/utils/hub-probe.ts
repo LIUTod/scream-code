@@ -15,11 +15,17 @@
  */
 
 /** A round is refreshed when the last one finished this long ago. */
-export const HUB_PROBE_INTERVAL_MS = 60_000;
+export const HUB_PROBE_INTERVAL_MS = 30_000;
 /** Per-request budget: long enough for a slow CDN, short enough to never hang. */
 export const HUB_PROBE_TIMEOUT_MS = 1_500;
-/** A site stays readable for this many consecutive failed rounds before `--`. */
-export const HUB_FAILURE_LIMIT = 3;
+/**
+ * Consecutive failed rounds before a site is declared unreachable (`--`, red).
+ * One miss is not an outage: a single round can time out on a slow-but-alive
+ * path, and calling that "not connected" would be its own lie. A missed round
+ * does dim the held reading immediately, so a stale number is never shown as if
+ * it were current — two misses in a row (~1 minute) then report it honestly.
+ */
+export const HUB_FAILURE_LIMIT = 2;
 /** Older than N intervals, the values are dimmed: the network may have changed. */
 export const HUB_STALE_MULTIPLIER = 2;
 /** At or below this round trip a reading reads as healthy (green). */
@@ -43,8 +49,8 @@ export const HUB_ENDPOINTS: readonly HubEndpoint[] = Object.freeze([
   { id: 'google', url: 'https://www.google.com/' },
   { id: 'x', url: 'https://x.com/', label: 'x (twitter)' },
   { id: 'huggingface', url: 'https://huggingface.co/' },
-  { id: 'aliyun', url: 'https://www.aliyun.com/' },
-  { id: 'baidu', url: 'https://www.baidu.com/' },
+  { id: 'alibaba', url: 'https://www.aliyun.com/', label: 'Alibaba' },
+  { id: 'tencent', url: 'https://cloud.tencent.com/', label: 'Tencent' },
 ]);
 
 /** Rendering tone: the panel maps these onto the theme palette. */

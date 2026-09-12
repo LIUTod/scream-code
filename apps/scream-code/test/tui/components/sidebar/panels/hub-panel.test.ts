@@ -102,7 +102,7 @@ describe('hub panel', () => {
     expect(model).toContain(AMBER);
     expect(google).toContain(AMBER);
     expect(x).toContain(RED);
-    const dimmed = render(hub([sample('baidu', 12, 'dim')]))[0]!;
+    const dimmed = render(hub([sample('tencent', 12, 'dim')]))[0]!;
     expect(dimmed).toContain(GREY);
   });
 
@@ -146,7 +146,7 @@ describe('hub panel', () => {
   });
 
   it('switches to seconds above a one-second round trip', () => {
-    const line = plain(render(hub([sample('baidu', 65_400, 'warn')]))[0]!);
+    const line = plain(render(hub([sample('tencent', 65_400, 'warn')]))[0]!);
     expect(line).toContain('65.4s');
     expect(line).not.toContain('65400');
   });

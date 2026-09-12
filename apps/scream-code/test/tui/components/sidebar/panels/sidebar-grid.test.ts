@@ -72,7 +72,7 @@ const data: SidebarData = {
     samples: [
       { id: HUB_MODEL_ROW_ID, ms: 128, tone: 'warn' },
       { id: 'github', ms: 32, tone: 'ok' },
-      { id: 'aliyun', ms: 18, tone: 'ok' },
+      { id: 'alibaba', label: 'Alibaba', ms: 18, tone: 'ok' },
     ] satisfies HubSample[],
     pending: false,
   },
