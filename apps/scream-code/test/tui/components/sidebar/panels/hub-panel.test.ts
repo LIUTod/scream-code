@@ -30,7 +30,7 @@ const RED = '38;2;248;81;73m';
 const GREY = '38;2;136;136;136m';
 
 function sample(id: string, ms: number | undefined, tone: HubSample['tone']): HubSample {
-  return { id, ms, tone };
+  return { id, label: id, ms, tone };
 }
 
 function hub(samples: readonly HubSample[], rest: Partial<SidebarHubData> = {}): SidebarData {
@@ -135,6 +135,14 @@ describe('hub panel', () => {
     } finally {
       setLocale('en');
     }
+  });
+
+  it('shows a configured endpoint label verbatim', () => {
+    const line = plain(
+      render(hub([{ id: 'x', label: 'x (twitter)', ms: 210, tone: 'warn' }]))[0]!,
+    );
+    expect(line).toContain('x (twitter)');
+    expect(line).toContain('210ms');
   });
 
   it('switches to seconds above a one-second round trip', () => {

@@ -47,7 +47,7 @@ class HubPanelContent {
 
     const rows: SidebarGridRow[] = hub.samples.map((sample) => ({
       marker: SIDEBAR_STATIC_MARKER,
-      label: this.labelOf(sample.id),
+      label: this.labelOf(sample),
       value: this.reading(sample, hub),
     }));
 
@@ -58,8 +58,10 @@ class HubPanelContent {
     });
   }
 
-  private labelOf(id: string): string {
-    return id === HUB_MODEL_ROW_ID ? t('sidebar.hub_model') : id;
+  private labelOf(sample: HubSample): string {
+    // Only the model row is a product term needing translation; endpoint rows
+    // show what they are configured to show (e.g. `x (twitter)`).
+    return sample.id === HUB_MODEL_ROW_ID ? t('sidebar.hub_model') : (sample.label ?? sample.id);
   }
 
   private reading(sample: HubSample, hub: { pending: boolean }): string {

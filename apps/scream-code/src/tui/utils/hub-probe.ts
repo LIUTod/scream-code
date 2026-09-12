@@ -32,13 +32,17 @@ export const HUB_MODEL_STALE_MS = 5 * 60_000;
 export interface HubEndpoint {
   readonly id: string;
   readonly url: string;
+  /** Display text; defaults to `id`. Use it when the host alone is ambiguous
+   *  (e.g. `x` is clearer to the reader as `x (twitter)`). */
+  readonly label?: string;
 }
 
 /** Default probe targets: the endpoints day-to-day development tends to need. */
 export const HUB_ENDPOINTS: readonly HubEndpoint[] = Object.freeze([
   { id: 'github', url: 'https://github.com/' },
   { id: 'google', url: 'https://www.google.com/' },
-  { id: 'x', url: 'https://x.com/' },
+  { id: 'x', url: 'https://x.com/', label: 'x (twitter)' },
+  { id: 'huggingface', url: 'https://huggingface.co/' },
   { id: 'aliyun', url: 'https://www.aliyun.com/' },
   { id: 'baidu', url: 'https://www.baidu.com/' },
 ]);
@@ -48,6 +52,9 @@ export type HubTone = 'ok' | 'warn' | 'down' | 'dim';
 
 export interface HubSample {
   readonly id: string;
+  /** Row label as configured (probe rows). Omitted for the model row, whose
+   *  label is a translated product term the panel resolves itself. */
+  readonly label?: string;
   /** Round trip of the last successful probe; undefined when never measured. */
   readonly ms: number | undefined;
   readonly tone: HubTone;
@@ -167,7 +174,12 @@ export function createHubProbe(options: HubProbeOptions = {}): HubProbe {
       const samples: HubSample[] = [];
       for (const endpoint of endpoints) {
         const site = sites.get(endpoint.id)!;
-        samples.push({ id: endpoint.id, ms: site.ms, tone: toneFor(site, stale) });
+        samples.push({
+          id: endpoint.id,
+          label: endpoint.label ?? endpoint.id,
+          ms: site.ms,
+          tone: toneFor(site, stale),
+        });
       }
       return { samples, roundAt, stale, pending: inFlight };
     },

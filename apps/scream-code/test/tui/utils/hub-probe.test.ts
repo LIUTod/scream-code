@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { displayWidth, SIDEBAR_LABEL_COLS } from '#/tui/utils/display-width';
 import {
   HUB_ENDPOINTS,
   HUB_FAILURE_LIMIT,
@@ -257,9 +258,16 @@ describe('createHubProbe', () => {
       'github',
       'google',
       'x',
+      'huggingface',
       'aliyun',
       'baidu',
     ]);
+    // Labels are what the sidebar shows: an ambiguous host gets an explicit one,
+    // and nothing may outgrow the shared label column (which would truncate it).
+    expect(HUB_ENDPOINTS.find((endpoint) => endpoint.id === 'x')?.label).toBe('x (twitter)');
+    for (const endpoint of HUB_ENDPOINTS) {
+      expect(displayWidth(endpoint.label ?? endpoint.id)).toBeLessThanOrEqual(SIDEBAR_LABEL_COLS);
+    }
 
     const clock = makeClock();
     const recorder = recordingFetch({ clock });
