@@ -1,13 +1,11 @@
 /**
- * Claude Code stream-json I/O adapter.
+ * Stream-json stdio adapter (cc-connect compat).
  *
- * Reads stdin in Claude Code stream-json dialect, processes messages through
- * the ScreamCode agent, and writes stdout in Claude Code dialect.  This lets
- * cc-connect (and any tool that speaks the Claude Code stdio protocol) use
- * ScreamCode as a drop-in agent backend.
- *
- * Protocol reference:
- *   https://docs.anthropic.com/en/docs/claude-code/stdio-stream-json
+ * Reads stdin as line-based stream-json messages, processes them through the
+ * ScreamCode agent, and writes stdout as stream-json events. This is the
+ * integration surface cc-connect drives when it spawns `scream stream-json`,
+ * and any tool that speaks the same stdio protocol can use ScreamCode as an
+ * agent backend through it.
  */
 
 import { createInterface } from "node:readline";
@@ -91,63 +89,63 @@ interface StdinContentBlock {
   };
 }
 
-interface ClaudeSystemEvent {
+interface StreamJsonSystemEvent {
   type: "system";
   subtype: "init";
   session_id: string;
 }
 
-interface ClaudeContentText {
+interface StreamJsonContentText {
   type: "text";
   text: string;
 }
 
-interface ClaudeContentThinking {
+interface StreamJsonContentThinking {
   type: "thinking";
   thinking: string;
 }
 
-interface ClaudeContentToolUse {
+interface StreamJsonContentToolUse {
   type: "tool_use";
   id: string;
   name: string;
   input: unknown;
 }
 
-interface ClaudeContentToolResult {
+interface StreamJsonContentToolResult {
   type: "tool_result";
   tool_use_id: string;
   content: string;
   is_error: boolean;
 }
 
-type ClaudeContentBlock =
-  | ClaudeContentText
-  | ClaudeContentThinking
-  | ClaudeContentToolUse
-  | ClaudeContentToolResult;
+type StreamJsonContentBlock =
+  | StreamJsonContentText
+  | StreamJsonContentThinking
+  | StreamJsonContentToolUse
+  | StreamJsonContentToolResult;
 
-interface ClaudeAssistantEvent {
+interface StreamJsonAssistantEvent {
   type: "assistant";
   message: {
     id: string;
     role: "assistant";
     model: string;
-    content: ClaudeContentBlock[];
+    content: StreamJsonContentBlock[];
   };
   session_id: string;
 }
 
-interface ClaudeUserEvent {
+interface StreamJsonUserEvent {
   type: "user";
   message: {
     role: "user";
-    content: ClaudeContentBlock[];
+    content: StreamJsonContentBlock[];
   };
   session_id: string;
 }
 
-interface ClaudeResultEvent {
+interface StreamJsonResultEvent {
   type: "result";
   subtype: "success" | "error";
   result: string;
@@ -158,7 +156,7 @@ interface ClaudeResultEvent {
   };
 }
 
-interface ClaudeControlRequestEvent {
+interface StreamJsonControlRequestEvent {
   type: "control_request";
   request_id: string;
   request: {
@@ -168,12 +166,12 @@ interface ClaudeControlRequestEvent {
   };
 }
 
-type ClaudeEvent =
-  | ClaudeSystemEvent
-  | ClaudeAssistantEvent
-  | ClaudeUserEvent
-  | ClaudeResultEvent
-  | ClaudeControlRequestEvent;
+type StreamJsonEvent =
+  | StreamJsonSystemEvent
+  | StreamJsonAssistantEvent
+  | StreamJsonUserEvent
+  | StreamJsonResultEvent
+  | StreamJsonControlRequestEvent;
 
 interface StreamJsonOptions {
   resume?: string;
@@ -198,12 +196,12 @@ interface TokenUsage {
 
 // ─── Writer ───────────────────────────────────────────────────────────────
 
-export class ClaudeStreamJsonWriter {
+export class StreamJsonWriter {
   private sessionId = "";
   private msgCounter = 0;
   private pendingText = "";
   private pendingThinking = "";
-  private pendingToolCalls: ClaudeContentToolUse[] = [];
+  private pendingToolCalls: StreamJsonContentToolUse[] = [];
   private currentModel = "";
   private tokenUsage: TokenUsage = { input: 0, output: 0 };
 
@@ -245,7 +243,7 @@ export class ClaudeStreamJsonWriter {
   /** Record a tool call start.  Flush buffered thinking first. */
   writeToolCall(toolCallId: string, name: string, args: unknown): void {
     this.flushThinking();
-    const tc: ClaudeContentToolUse = {
+    const tc: StreamJsonContentToolUse = {
       type: "tool_use",
       id: toolCallId,
       name,
@@ -307,7 +305,7 @@ export class ClaudeStreamJsonWriter {
   /** Flush accumulated assistant text and tool calls as one event. */
   flushAssistant(): void {
     this.flushThinking();
-    const blocks: ClaudeContentBlock[] = [];
+    const blocks: StreamJsonContentBlock[] = [];
     if (this.pendingText.length > 0) {
       blocks.push({ type: "text", text: this.pendingText });
     }
@@ -336,7 +334,7 @@ export class ClaudeStreamJsonWriter {
   ): void {
     this.flushThinking();
     this.flushAssistant();
-    const event: ClaudeResultEvent = {
+    const event: StreamJsonResultEvent = {
       type: "result",
       subtype,
       result: summary,
@@ -352,7 +350,7 @@ export class ClaudeStreamJsonWriter {
     this.tokenUsage = { input: 0, output: 0 };
   }
 
-  /** Emit a resume hint as a meta message (same format as Claude Code). */
+  /** Emit a resume hint as a stream-json meta message. */
   emitResumeHint(sessionId: string): void {
     this.writeJson({
       role: "meta",
@@ -393,7 +391,7 @@ export class ClaudeStreamJsonWriter {
     return `msg_${this.msgCounter.toString(36)}`;
   }
 
-  private writeAssistantEvent(blocks: ClaudeContentBlock[]): void {
+  private writeAssistantEvent(blocks: StreamJsonContentBlock[]): void {
     this.writeJson({
       type: "assistant",
       message: {
@@ -406,7 +404,7 @@ export class ClaudeStreamJsonWriter {
     });
   }
 
-  private writeJson(event: ClaudeEvent | Record<string, unknown>): void {
+  private writeJson(event: StreamJsonEvent | Record<string, unknown>): void {
     this.writeLine(JSON.stringify(event));
   }
 }
@@ -441,7 +439,7 @@ async function* readStdinMessages(): AsyncGenerator<StdinMessage> {
   }
 }
 
-/** Extract plain text from a Claude Code-style user message. */
+/** Extract plain text from a stream-json user message. */
 export function extractUserText(msg: StdinUserMessage): string {
   const content = msg.message.content;
   if (typeof content === "string") return content;
@@ -485,7 +483,7 @@ export function mapCcConnectMode(mode: string | undefined): MappedMode {
 
 /**
  * Install the stdout EPIPE guard and return the line writer handed to
- * {@link ClaudeStreamJsonWriter}.
+ * {@link StreamJsonWriter}.
  *
  * cc-connect closes our stdout when it kills/restarts the agent (idle
  * timeout, /restart, config change). Writing after that raises EPIPE as an
@@ -553,7 +551,7 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
   harness.setSubagentModelBindings(() => streamSubagentModels);
 
   const writeStdout = installStdoutEpipeGuard();
-  const writer = new ClaudeStreamJsonWriter(writeStdout);
+  const writer = new StreamJsonWriter(writeStdout);
 
   let session: Session | undefined;
   let currentSessionId: string | undefined;
@@ -898,7 +896,7 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
           return;
         }
 
-        // Translate ScreamCode events to Claude stream-json dialect.
+        // Translate ScreamCode events to the stream-json dialect.
         // Forward thinking, tool_use, and tool_result events so cc-connect
         // can display tool progress in chat platforms (Feishu/Telegram/etc.).
         const type = event.type;

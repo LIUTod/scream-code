@@ -116,7 +116,7 @@ function detectScreamPath(): string {
  * shell, so an unquoted path containing spaces would be split apart.
  */
 export function quoteShellPath(path: string): string {
-  return `"${path.replaceAll(/"/g, '\\"')}"`;
+  return `"${path.replaceAll('"', '\\"')}"`;
 }
 
 /** Parse every configured platform type from config.toml content. */
@@ -176,7 +176,7 @@ export function isVersionAtLeast(version: string | undefined, min: string): bool
  */
 export function tomlString(value: string): string {
   if (!value.includes("'")) return `'${value}'`;
-  return `"${value.replaceAll(/\\/g, "\\\\").replaceAll(/"/g, '\\"')}"`;
+  return `"${value.replaceAll('\\', "\\\\").replaceAll('"', '\\"')}"`;
 }
 
 function generateConfig(platform: PlatformDef): void {
@@ -212,6 +212,7 @@ export function buildConfigContent(platform: PlatformDef, screamCmd: string, cwd
     'name = "default"',
     '',
     '[projects.agent]',
+    // cc-connect's agent registry key for the stream-json adapter — required, do not change.
     'type = "claudecode"',
     '',
     '[projects.agent.options]',

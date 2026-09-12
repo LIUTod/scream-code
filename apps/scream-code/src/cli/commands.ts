@@ -94,11 +94,11 @@ export function createProgram(
 
   registerExportCommand(program);
 
-  // Hidden subcommand for cc-connect / Claude Code stream-json protocol.
+  // Hidden subcommand for the cc-connect stream-json protocol.
   // cc-connect spawns: scream stream-json --output-format stream-json --input-format stream-json
   //   --permission-prompt-tool stdio --replay-user-messages --verbose ...
-  // Flags are sourced from cc-connect's agent/claudecode/session.go (v1.3.2+).
-  // We register every flag cc-connect may pass so Commander doesn't reject them.
+  // Flag set mirrors cc-connect's agent invocation (v1.3.2+); keep it in sync
+  // so Commander never rejects a flag cc-connect may pass.
   // Flags we actually use: --input-format, --output-format, --resume, --model, --permission-mode,
   //   --append-system-prompt, --append-system-prompt-file, --system-prompt, --skills-dir,
   //   --allowedTools, --disallowedTools, --effort.

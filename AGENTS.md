@@ -649,7 +649,7 @@ Key files: `packages/agent-core/src/agent/compaction/{micro,full,strategy}.ts`,
 
 `run-stream-json` encodes the standard session event stream as a line-based JSON dialect (for external bridges/pipes); the channel bridge re-broadcasts events into IM channels.
 
-- **Dialect**: `apps/scream-code/src/cli/run-stream-json.ts` — `ClaudeStreamJsonWriter` (`emitSystem(sessionId)` / `emitResult(subtype, summary, usage?)` / `emitAssistant` / `emitToolDelta`; assistant events carry no usage; merged tool deltas have string input), `mapCcConnectMode` (default/acceptEdits/dontAsk→manual, plan→planMode, auto→auto, bypassPermissions/yolo→yolo, unset→auto), `extractUserText` (joined with `\n`)
+- **Dialect**: `apps/scream-code/src/cli/run-stream-json.ts` — `StreamJsonWriter` (`emitSystem(sessionId)` / `emitResult(subtype, summary, usage?)` / `emitAssistant` / `emitToolDelta`; assistant events carry no usage; merged tool deltas have string input), `mapCcConnectMode` (default/acceptEdits/dontAsk→manual, plan→planMode, auto→auto, bypassPermissions/yolo→yolo, unset→auto), `extractUserText` (joined with `\n`)
 - **EPIPE guard**: `installStdoutEpipeGuard()` factory — catches EPIPE on both the stdout `error` event and `write` throws → `process.exit(0)` (quiet exit, no crash); regression tests `test/cli/run-stream-json.test.ts` (31 cases)
 - **Bridge**: session events (assistant deltas / tool calls / status / approvals / questions) go out over the two read-only WebSockets `/api/events.mux` and `/api/events.host`; approvals and questions reply via `POST /api/respond` echoing the original `rpcId`
 

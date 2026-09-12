@@ -182,6 +182,7 @@ function generateConfig(cliPath: string, platformType: string): string {
     'name = "default"',
     '',
     '[projects.agent]',
+    // cc-connect's agent registry key for the stream-json adapter — required, do not change.
     'type = "claudecode"',
     '',
     '[projects.agent.options]',

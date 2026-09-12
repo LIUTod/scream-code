@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   buildStreamJsonRuntimePrompt,
-  ClaudeStreamJsonWriter,
+  StreamJsonWriter,
   extractUserText,
   installStdoutEpipeGuard,
   mapCcConnectMode,
@@ -49,7 +49,7 @@ describe('stream-json runtime system prompt', () => {
 
 function makeWriter() {
   const lines: unknown[] = [];
-  const writer = new ClaudeStreamJsonWriter((line: string) => {
+  const writer = new StreamJsonWriter((line: string) => {
     lines.push(JSON.parse(line));
   });
   return { writer, lines };
@@ -108,7 +108,7 @@ describe('extractUserText', () => {
   });
 });
 
-describe('ClaudeStreamJsonWriter', () => {
+describe('StreamJsonWriter', () => {
   it('emits a system init line, with the model only when supplied', () => {
     const { writer, lines } = makeWriter();
     writer.emitSystem('s1', 'm');
