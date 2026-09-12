@@ -573,6 +573,83 @@ describe('SessionEventHandler', () => {
     expect(coderStatus()).toBe('requesting');
   });
 
+  it('cuts into the transcript when a subagent asks the parent', () => {
+    const host = createMockHost();
+    const handler = new SessionEventHandler(host);
+    const appended = () =>
+      (host.appendTranscriptEntry as ReturnType<typeof vi.fn>).mock.calls.map((call) => call[0]);
+
+    // Spawn events are emitted by the parent agent, so they carry the main
+    // agentId and reach handleSubagentSpawned, which registers the name.
+    handler.handleEvent(
+      {
+        type: 'subagent.spawned',
+        sessionId: 'ses-test',
+        agentId: 'main',
+        subagentId: 'agent-7',
+        subagentName: 'coder',
+        description: 'do work',
+        parentToolCallId: 'call-agent-7',
+      } as unknown as Event,
+      vi.fn(),
+    );
+    handler.handleEvent(
+      {
+        ...baseEvent('tool.call.started'),
+        agentId: 'agent-7',
+        name: 'ContactParent',
+        args: { request_type: 'info', message: '目标终端宽度是否含侧栏展开态' },
+      } as unknown as Event,
+      vi.fn(),
+    );
+
+    expect(appended()).toHaveLength(1);
+    expect(appended()[0]).toMatchObject({
+      kind: 'status',
+      renderMode: 'notice',
+      // The turn stamp keeps the row attributable for /revoke, same as replay.
+      turnId: '1',
+      content: expect.stringContaining('coder'),
+      detail: expect.stringContaining('目标终端宽度是否含侧栏展开态'),
+      noticeMarkerColor: host.state.theme.colors.warning,
+    });
+
+    // Ordinary tool work stays out of the transcript.
+    handler.handleEvent(
+      { ...baseEvent('tool.call.started'), agentId: 'agent-7', name: 'Read', args: { path: 'x' } } as unknown as Event,
+      vi.fn(),
+    );
+    expect(appended()).toHaveLength(1);
+  });
+
+  it('labels an unnamed requester and never paints an empty notice', () => {
+    const host = createMockHost();
+    const handler = new SessionEventHandler(host);
+    const appended = () =>
+      (host.appendTranscriptEntry as ReturnType<typeof vi.fn>).mock.calls.map((call) => call[0]);
+
+    // A child the handler has never seen still reached the parent, so the
+    // notice must appear — just without a name to attribute.
+    handler.handleEvent(
+      {
+        ...baseEvent('tool.call.started'),
+        agentId: 'agent-9',
+        name: 'ContactParent',
+        args: { request_type: 'escalate', message: '需要人工决策' },
+      } as unknown as Event,
+      vi.fn(),
+    );
+    expect(appended()).toHaveLength(1);
+    expect(appended()[0]?.content).not.toContain('agent-9');
+
+    // A malformed call carries no request text: render nothing at all.
+    handler.handleEvent(
+      { ...baseEvent('tool.call.started'), agentId: 'agent-9', name: 'ContactParent' } as unknown as Event,
+      vi.fn(),
+    );
+    expect(appended()).toHaveLength(1);
+  });
+
   describe('skill_candidate', () => {
     function makeHandlerWithSession() {
       const host = createMockHost();

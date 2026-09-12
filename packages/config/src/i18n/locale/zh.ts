@@ -981,6 +981,15 @@ export const zh: Record<string, string> = {
   'transcript.tool_name': '工具 {name}：',
   'transcript.activated_skill': '已激活插件：{name}',
   'transcript.more_history': '↑ 还有 {count} 条历史消息',
+  'transcript.child_request': '{name} 向主 Agent 求助（{type}）',
+  'transcript.child_request_anon': '子代理向主 Agent 求助（{type}）',
+  'transcript.child_request_type_info': '补充信息',
+  'transcript.child_request_type_handoff': '转交工作',
+  'transcript.child_request_type_escalate': '上报决策',
+  'transcript.child_request_needs': '需要 {value}',
+  'transcript.child_request_artifacts': '产出 {value}',
+  'transcript.child_request_evidence': '证据 {value}',
+  'transcript.child_request_missing': '缺项 {value}',
 
   // ─── compaction ────────────────
   'compaction.done': '压缩完成',

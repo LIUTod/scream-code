@@ -206,7 +206,12 @@ export class TranscriptController {
           );
         }
         return entry.renderMode === 'notice'
-          ? new NoticeMessageComponent(entry.content, entry.detail, state.theme.colors)
+          ? new NoticeMessageComponent(
+              entry.content,
+              entry.detail,
+              state.theme.colors,
+              entry.noticeMarkerColor,
+            )
           : new StatusMessageComponent(entry.content, state.theme.colors, entry.color);
       }
       case 'status':
@@ -217,7 +222,12 @@ export class TranscriptController {
           );
         }
         return entry.renderMode === 'notice'
-          ? new NoticeMessageComponent(entry.content, entry.detail, state.theme.colors)
+          ? new NoticeMessageComponent(
+              entry.content,
+              entry.detail,
+              state.theme.colors,
+              entry.noticeMarkerColor,
+            )
           : new StatusMessageComponent(entry.content, state.theme.colors, entry.color);
       case 'cron': {
         if (entry.cronData === undefined) return null;

@@ -78,7 +78,12 @@ class CommittedMessageComponent implements Component {
       }
       case 'status': {
         if (entry.renderMode === 'notice') {
-          return new NoticeMessageComponent(entry.content, entry.detail, colors).render(width);
+          return new NoticeMessageComponent(
+            entry.content,
+            entry.detail,
+            colors,
+            entry.noticeMarkerColor,
+          ).render(width);
         }
         return new StatusMessageComponent(entry.content, colors, entry.color).render(width);
       }

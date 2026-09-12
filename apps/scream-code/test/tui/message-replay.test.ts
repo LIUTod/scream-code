@@ -9,6 +9,7 @@ import type {
   ToolCall,
 } from '@scream-code/scream-code-sdk';
 import { describe, expect, it, vi } from 'vitest';
+import { t } from '@scream-code/config';
 
 import { ScreamTUI, type ScreamTUIStartupInput, type TUIState } from '#/tui/scream-tui';
 import type { SessionEventHandler } from '#/tui/controllers/session-event-handler';
@@ -556,5 +557,63 @@ describe('ScreamTUI resume message replay', () => {
     expect(transcript).toContain('replay final approved plan');
     expect(transcript).not.toContain('Plan rejected by user.');
     expect(transcript).not.toContain('Plan mode: OFF');
+  });
+});
+
+
+describe('replayed internal injections', () => {
+  it('renders a replayed child→parent request as a notice, not as raw XML', async () => {
+    // Verbatim shape injected by submitChildRequest() in agent-core.
+    const notification = [
+      '<notification id="child_request:agent-7:1700000000000" category="task" type="child_request" source_kind="subagent" source_id="agent-7">',
+      'Title: Subagent info request',
+      'Severity: info',
+      'info: 目标终端宽度是否含侧栏展开态',
+      'needs: independent verification',
+      'artifacts: [src/a.ts, src/b.ts]',
+      '</notification>',
+    ].join('\n');
+
+    const driver = await replayIntoDriver([
+      message('user', [{ type: 'text', text: '继续侧栏的事' }]),
+      message('assistant', [{ type: 'text', text: '好' }]),
+      message('user', [{ type: 'text', text: notification }], {
+        origin: { kind: 'system_trigger', name: 'child_request' },
+      }),
+    ]);
+
+    const notice = driver.state.transcriptEntries.find(
+      (entry) => entry.kind === 'status' && entry.renderMode === 'notice',
+    );
+    expect(notice?.content).toBe(
+      t('transcript.child_request_anon', { type: t('transcript.child_request_type_info') }),
+    );
+    expect(notice?.detail).toContain('目标终端宽度是否含侧栏展开态');
+    expect(notice?.detail).toContain('src/a.ts');
+    // Replay carries the same interjection marker as the live path.
+    expect(notice?.noticeMarkerColor).toBe(driver.state.theme.colors.warning);
+    expect(driver.state.transcriptContainer.render(120).join('\n')).toContain('▸ ');
+    // An injection is not user speech: it must never surface as a user row.
+    expect(
+      driver.state.transcriptEntries
+        .filter((entry) => entry.kind === 'user')
+        .map((entry) => entry.content),
+    ).toEqual(['继续侧栏的事']);
+    expect(driver.state.transcriptContainer.render(120).join('\n')).not.toContain('<notification');
+  });
+
+  it('drops internal injections that carry no transcript meaning', async () => {
+    const driver = await replayIntoDriver([
+      message('user', [{ type: 'text', text: '真用户消息' }]),
+      message('user', [{ type: 'text', text: '<system-reminder>\n记得用 TodoList\n</system-reminder>' }], {
+        origin: { kind: 'system_trigger', name: 'todo_suggested' },
+      }),
+    ]);
+
+    expect(
+      driver.state.transcriptEntries
+        .filter((entry) => entry.kind === 'user')
+        .map((entry) => entry.content),
+    ).toEqual(['真用户消息']);
   });
 });

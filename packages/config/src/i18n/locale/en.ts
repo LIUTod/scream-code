@@ -981,6 +981,15 @@ export const en: Record<string, string> = {
   'transcript.tool_name': 'Tool {name}: ',
   'transcript.activated_skill': 'Activated plugin: {name}',
   'transcript.more_history': '↑ {count} more history message(s)',
+  'transcript.child_request': '{name} is asking the parent agent ({type})',
+  'transcript.child_request_anon': 'A subagent is asking the parent agent ({type})',
+  'transcript.child_request_type_info': 'info',
+  'transcript.child_request_type_handoff': 'handoff',
+  'transcript.child_request_type_escalate': 'escalate',
+  'transcript.child_request_needs': 'needs {value}',
+  'transcript.child_request_artifacts': 'artifacts {value}',
+  'transcript.child_request_evidence': 'evidence {value}',
+  'transcript.child_request_missing': 'missing {value}',
 
   // ─── compaction ────────────────
   'compaction.done': 'Compaction complete',

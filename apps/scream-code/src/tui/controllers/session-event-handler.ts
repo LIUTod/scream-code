@@ -48,6 +48,10 @@ import {
   stringValue,
 } from '../utils/event-payload';
 import { formatBackgroundAgentTranscript } from '../utils/background-agent-status';
+import {
+  childRequestFieldsFromArgs,
+  renderChildRequestNotice,
+} from '../utils/child-request-notice';
 import { SubagentSlots, type SubagentSlot } from '../utils/subagent-slots';
 import { formatBackgroundTaskTranscript } from '../utils/background-task-status';
 import { formatHookResultMarkdown, formatHookResultPlain } from '../utils/hook-result-format';
@@ -381,9 +385,14 @@ export class SessionEventHandler {
         break;
       case 'tool.call.started':
         // Asking the parent for help is not ordinary tool work: raise the
-        // transient requesting marker instead (SubagentSlots.onRequesting).
-        if (event.name === 'ContactParent') this.subagentSlots.onRequesting(agentId);
-        else this.subagentSlots.onActivity(agentId, 'tool', `tool: ${event.name}`);
+        // transient requesting marker (SubagentSlots.onRequesting) and cut into
+        // the main transcript, instead of logging it as tool activity.
+        if (event.name === 'ContactParent') {
+          this.subagentSlots.onRequesting(agentId);
+          this.appendChildRequestNotice(agentId, event.args);
+        } else {
+          this.subagentSlots.onActivity(agentId, 'tool', `tool: ${event.name}`);
+        }
         break;
       case 'tool.call.delta':
         break;
@@ -397,6 +406,27 @@ export class SessionEventHandler {
       default:
         break;
     }
+  }
+
+  /**
+   * Surface a child→parent collaboration request in the transcript the moment
+   * the subagent asks, so the human sees it without expanding the agent card.
+   * The request always targets the main agent (one subagent host per session),
+   * which is why a top-level transcript entry is the right home for it.
+   */
+  private appendChildRequestNotice(agentId: string, args: unknown): void {
+    const fields = childRequestFieldsFromArgs(argsRecord(args));
+    if (fields === null) return;
+    const notice = renderChildRequestNotice(fields, this.subagentInfo.get(agentId)?.name);
+    this.host.appendTranscriptEntry({
+      id: nextTranscriptId(),
+      kind: 'status',
+      turnId: this.host.streamingUI.getTurnContext().turnId,
+      renderMode: 'notice',
+      content: notice.title,
+      detail: notice.detail,
+      noticeMarkerColor: this.host.state.theme.colors.warning,
+    });
   }
 
   private routeSubagentEvent(event: Event): boolean {

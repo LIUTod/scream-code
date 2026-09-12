@@ -20,6 +20,10 @@ import type {
 } from '../types';
 import { formatErrorMessage, isTodoItemShape } from '../utils/event-payload';
 import { formatBackgroundAgentTranscript } from '../utils/background-agent-status';
+import {
+  childRequestFieldsFromNotification,
+  renderChildRequestNotice,
+} from '../utils/child-request-notice';
 import { formatBackgroundTaskTranscript } from '../utils/background-task-status';
 import {
   appStateFromResumeAgent,
@@ -250,6 +254,10 @@ export class SessionReplayRenderer {
       this.renderCronMissed(context, message.origin);
       return;
     }
+    if (message.origin?.kind === 'system_trigger') {
+      this.renderSystemTrigger(context, message);
+      return;
+    }
 
     this.flushAssistant(context);
     const skill = skillActivationFromOrigin(message.origin);
@@ -265,6 +273,27 @@ export class SessionReplayRenderer {
     this.host.appendTranscriptEntry(
       replayEntry(context, 'user', contentPartsToText(message.content), 'plain'),
     );
+  }
+
+  /**
+   * `system_trigger` messages are internal injections, not user speech: the
+   * live transcript never prints them and markdown export filters them out, so
+   * replay must not surface them as a user row either. The single exception is
+   * a child→parent collaboration request, which gets the same notice the live
+   * path shows. Replay has no spawn events, so the subagent's display name is
+   * gone and the name-less title variant keeps the notice honest.
+   */
+  private renderSystemTrigger(context: ReplayRenderContext, message: ContextMessage): void {
+    const origin: PromptOrigin | undefined = message.origin;
+    if (origin?.kind !== 'system_trigger' || origin.name !== 'child_request') return;
+    const fields = childRequestFieldsFromNotification(contentPartsToText(message.content));
+    if (fields === null) return;
+    const notice = renderChildRequestNotice(fields);
+    this.flushAssistant(context);
+    this.host.appendTranscriptEntry({
+      ...replayEntry(context, 'status', notice.title, 'notice', { detail: notice.detail }),
+      noticeMarkerColor: this.host.state.theme.colors.warning,
+    });
   }
 
   private renderToolCalls(context: ReplayRenderContext, toolCalls: readonly ToolCall[]): void {

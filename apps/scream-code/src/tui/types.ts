@@ -221,6 +221,11 @@ export interface TranscriptEntry {
   renderMode: 'markdown' | 'plain' | 'notice';
   content: string;
   color?: string;
+  /**
+   * Tint for the interjection marker (`▸ `) on a `notice` row. Absent means a
+   * plain notice — which is how every command-feedback row renders.
+   */
+  noticeMarkerColor?: string;
   detail?: string;
   toolCallData?: ToolCallBlockData;
   backgroundAgentStatus?: BackgroundAgentStatusData;
