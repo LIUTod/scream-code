@@ -72,7 +72,11 @@ describe('child→parent collaboration (ContactParent)', () => {
         request_type: 'handoff',
         message: 'I need this logic independently verified before I continue.',
         needs: 'independent verification',
-        payload: { artifacts: ['src/foo.ts'], evidence: ['test-output.txt'] },
+        payload: {
+          artifacts: ['src/foo.ts'],
+          evidence: ['test-output.txt'],
+          expecting: 'the exact lines to fix plus a test command to prove the fix',
+        },
       }),
     });
     child.mockNextResponse({
@@ -108,6 +112,62 @@ describe('child→parent collaboration (ContactParent)', () => {
     expect(JSON.stringify(parentInput)).toContain('handoff');
     expect(JSON.stringify(parentInput)).toContain('independent verification');
     expect(JSON.stringify(parentInput)).toContain('artifacts: [src/foo.ts]');
+    expect(JSON.stringify(parentInput)).toContain(
+      'expecting: the exact lines to fix plus a test command to prove the fix',
+    );
+  });
+
+  it('flattens multi-line needs and expecting onto single notification lines', async () => {
+    const child = testAgent({ type: 'sub', jian: stubJian() });
+    const parent = testAgent({ jian: stubJian() });
+    const session = fakeSession(parent.agent, child.agent);
+    const bus = new SubagentMessageBus();
+    const host = new SessionSubagentHost(session, 'main', undefined, undefined, bus);
+    (child.agent as unknown as { ownerHost?: SessionSubagentHost }).ownerHost = host;
+    parent.configure();
+    child.configure();
+    parent.newEvents();
+    await parent.rpc.setPermission({ mode: 'yolo' });
+    await child.rpc.setPermission({ mode: 'yolo' });
+    parent.mockNextResponse({ type: 'text', text: 'acknowledged.' });
+    parent.mockNextResponse({ type: 'text', text: 'acknowledged.' });
+    parent.mockNextResponse({ type: 'text', text: 'acknowledged.' });
+
+    child.mockNextResponse({
+      type: 'function',
+      id: 'tc_cp',
+      name: 'ContactParent',
+      arguments: JSON.stringify({
+        request_type: 'handoff',
+        message: 'needs an independent check',
+        needs: 'independent\nverification',
+        payload: { expecting: 'format:\n- one\n- two' },
+      }),
+    });
+    child.mockNextResponse({
+      type: 'text',
+      text: `{"done":true,"summary":"done ${'x'.repeat(220)}"}`,
+    });
+
+    const handle = await host.spawn('coder', {
+      parentToolCallId: 'call_1',
+      parentToolCallUuid: undefined,
+      prompt: 'original prompt',
+      description: 'child',
+      runInBackground: false,
+      signal: new AbortController().signal,
+    });
+    await handle.completion;
+
+    const parentGen = (parent as unknown as {
+      scriptedGenerate: { calls: unknown[]; lastInput: () => unknown };
+    }).scriptedGenerate;
+    const text = JSON.stringify(parentGen.lastInput());
+    // The notification body is line-oriented: free-text fields must be
+    // flattened, or the TUI parser would read the spill-over as message text.
+    expect(text).toContain('needs: independent verification');
+    expect(text).toContain('expecting: format: - one - two');
+    expect(text).not.toContain('independent\\nverification');
   });
 
   it('rate-limits child→parent requests to 4 per turn', async () => {

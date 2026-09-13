@@ -21,6 +21,7 @@ export interface ChildRequestFields {
   readonly requestType: ChildRequestKind;
   readonly message: string;
   readonly needs?: string | undefined;
+  readonly expecting?: string | undefined;
   readonly artifacts?: readonly string[] | undefined;
   readonly evidence?: readonly string[] | undefined;
   readonly missing?: readonly string[] | undefined;
@@ -107,6 +108,7 @@ export function childRequestFieldsFromArgs(args: Record<string, unknown>): Child
     requestType: kindOf(args['request_type']),
     message,
     needs: textOf(args['needs']),
+    expecting: textOf(payload['expecting']),
     artifacts: listOf('artifacts'),
     evidence: listOf('evidence'),
     missing: listOf('missing'),
@@ -150,6 +152,7 @@ export function childRequestFieldsFromNotification(text: string): ChildRequestFi
   const messageParts: string[] = [head !== null && head[2] !== undefined ? head[2] : first];
 
   let needs: string | undefined;
+  let expecting: string | undefined;
   const lists: Partial<Record<'artifacts' | 'evidence' | 'missing', readonly string[]>> = {};
   for (const line of body.slice(1)) {
     const separator = line.indexOf(': ');
@@ -168,6 +171,9 @@ export function childRequestFieldsFromNotification(text: string): ChildRequestFi
         : undefined;
     if (key === 'needs' && value.length > 0) {
       needs = value;
+    } else if (key === 'expecting' && value.length > 0) {
+      // `expecting` is free text from the kernel, same status as `needs`.
+      expecting = value;
     } else if (listKey !== undefined) {
       lists[listKey] = bracketedListOf(value);
     } else {
@@ -184,6 +190,7 @@ export function childRequestFieldsFromNotification(text: string): ChildRequestFi
     requestType,
     message,
     needs,
+    expecting,
     artifacts: lists['artifacts'],
     evidence: lists['evidence'],
     missing: lists['missing'],
@@ -204,6 +211,9 @@ export function renderChildRequestNotice(
   const parts: string[] = [previewText(fields.message)];
   if (fields.needs !== undefined) {
     parts.push(t('transcript.child_request_needs', { value: previewText(fields.needs) }));
+  }
+  if (fields.expecting !== undefined) {
+    parts.push(t('transcript.child_request_expecting', { value: previewText(fields.expecting) }));
   }
   for (const entry of [
     ['artifacts', fields.artifacts],

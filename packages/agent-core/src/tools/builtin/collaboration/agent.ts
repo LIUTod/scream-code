@@ -77,7 +77,7 @@ export const AgentToolInputSchema = z.preprocess(
       .boolean()
       .optional()
       .describe(
-        'If true, return immediately without waiting for completion. Prefer false unless the task can run independently and there is a clear benefit to not waiting.',
+        'If true, return immediately without waiting for completion. Foreground is the default. Consider background for long or complex work, for running several subagents in parallel, or when the task may need your input or steering while it runs (see the background notes in this tool description). You hold the full context of the work, so you decide whether foreground or background fits the task.',
       ),
     timeout: z
       .number()

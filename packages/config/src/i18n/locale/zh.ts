@@ -987,6 +987,7 @@ export const zh: Record<string, string> = {
   'transcript.child_request_type_handoff': '转交工作',
   'transcript.child_request_type_escalate': '上报决策',
   'transcript.child_request_needs': '需要 {value}',
+  'transcript.child_request_expecting': '期望 {value}',
   'transcript.child_request_artifacts': '产出 {value}',
   'transcript.child_request_evidence': '证据 {value}',
   'transcript.child_request_missing': '缺项 {value}',

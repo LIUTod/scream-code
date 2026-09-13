@@ -167,6 +167,71 @@ describe('subagent collaboration integration', () => {
     expect(foreign.status).toBe('not_found');
   });
 
+  it('deduplicates a retried parent message within the child turn', () => {
+    const child = testAgent();
+    const parent = testAgent();
+    parent.configure();
+    child.configure();
+
+    const session = fakeSession(parent.agent, child.agent, {
+      'agent-0': { homedir: '/tmp/x', type: 'sub', parentAgentId: 'main' },
+    });
+    const bus = new SubagentMessageBus();
+    const host = new SessionSubagentHost(session, 'main', undefined, undefined, bus);
+    (host as unknown as { activeChildren: Map<string, unknown> }).activeChildren = new Map([
+      ['agent-0', { controller: new AbortController(), runInBackground: false, structured: false }],
+    ]);
+    const resetTurn = (
+      host as unknown as { resetChildRequestLimits(id: string): void }
+    ).resetChildRequestLimits.bind(host);
+
+    const first = host.sendMessage('agent-0', 'steer', 'reconsider the approach');
+    expect(first.status).toBe('accepted');
+    expect(first.duplicate).not.toBe(true);
+
+    // A retry — the parent re-issuing the same directive — must not reach the
+    // child a second time.
+    const retry = host.sendMessage('agent-0', 'steer', 'reconsider the approach');
+    expect(retry.status).toBe('accepted');
+    expect(retry.duplicate).toBe(true);
+    expect(bus.activeCount('agent-0')).toBe(1);
+
+    // A different message is not a duplicate...
+    expect(host.sendMessage('agent-0', 'steer', 'different words').duplicate).not.toBe(true);
+    // ...and asking again in a later turn is a legitimate re-ask.
+    resetTurn('agent-0');
+    expect(host.sendMessage('agent-0', 'steer', 'reconsider the approach').duplicate).not.toBe(true);
+  });
+
+  it('does not poison the dedupe key when the mailbox refuses the send', () => {
+    const child = testAgent();
+    const parent = testAgent();
+    parent.configure();
+    child.configure();
+
+    const session = fakeSession(parent.agent, child.agent, {
+      'agent-0': { homedir: '/tmp/x', type: 'sub', parentAgentId: 'main' },
+    });
+    const bus = new SubagentMessageBus();
+    const host = new SessionSubagentHost(session, 'main', undefined, undefined, bus);
+    (host as unknown as { activeChildren: Map<string, unknown> }).activeChildren = new Map([
+      ['agent-0', { controller: new AbortController(), runInBackground: false, structured: false }],
+    ]);
+
+    // Fill the mailbox to its in-flight limit.
+    for (let index = 0; index < 4; index += 1) {
+      expect(host.sendMessage('agent-0', 'queue', `fill-${index}`).status).toBe('accepted');
+    }
+    const rejected = host.sendMessage('agent-0', 'queue', 'important thing');
+    expect(rejected.status).toBe('saturated');
+
+    // A retry of the REJECTED message must be attempted honestly — not
+    // swallowed as a duplicate of a message that never reached the mailbox.
+    const retry = host.sendMessage('agent-0', 'queue', 'important thing');
+    expect(retry.status).toBe('saturated');
+    expect(retry.duplicate).not.toBe(true);
+  });
+
   it('parent messages are injected into the child prompt at turn start', async () => {
     const child = testAgent();
     const parent = testAgent();

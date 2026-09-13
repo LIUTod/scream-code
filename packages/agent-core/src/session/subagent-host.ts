@@ -109,6 +109,13 @@ export class SessionSubagentHost {
   private readonly childRequestCounts = new Map<string, number>();
   /** Dedupe keys seen within the current turn, per child. */
   private readonly childRequestSeen = new Map<string, Set<string>>();
+  /**
+   * Parent→child message dedupe keys, per child, for the child's current turn.
+   * A retried send (the parent re-issuing the same directive after a tool
+   * hiccup) must not reach the child twice; asking again in a later turn is a
+   * legitimate re-ask, so the keys are cleared with the child request limits.
+   */
+  private readonly parentMessageSeen = new Map<string, Set<string>>();
   /** Agent → childId lookup for child→parent collaboration requests. */
   private readonly childIdByAgent = new WeakMap<Agent, string>();
 
@@ -169,6 +176,7 @@ export class SessionSubagentHost {
       this.activeChildren.delete(id);
       this.childRequestCounts.delete(id);
       this.childRequestSeen.delete(id);
+      this.parentMessageSeen.delete(id);
       // Undelivered mail is deliberately left in place: clearing it here would
       // destroy a message the parent was already told was accepted. It expires
       // on its own deadline, and a resume of this child polls it at turn start.
@@ -249,6 +257,7 @@ export class SessionSubagentHost {
       this.activeChildren.delete(agentId);
       this.childRequestCounts.delete(agentId);
       this.childRequestSeen.delete(agentId);
+      this.parentMessageSeen.delete(agentId);
       // Same rule as the spawn path: never destroy accepted-but-undelivered
       // mail. It expires by deadline, or a resume picks it up.
     });
@@ -313,6 +322,8 @@ export class SessionSubagentHost {
     /** How an accepted message reaches the child; absent when not accepted. */
     delivery?: 'mid-run' | 'queued';
     queueDepth?: number;
+    /** True when this exact message is already in flight for the child. */
+    duplicate?: boolean;
   } {
     const metadata = this.session.metadata.agents[toAgentId];
     if (metadata === undefined || metadata.type !== 'sub') return { status: 'not_found' };
@@ -324,6 +335,18 @@ export class SessionSubagentHost {
     const message = buildSubagentMessage(this.ownerAgentId, toAgentId, operation, text, overrides);
     const byteLimit = overrides?.byteLimit ?? DEFAULT_BYTE_LIMIT;
     if (subagentMessageBytes(text) > byteLimit) return { status: 'saturated', reason: 'bytes' };
+
+    // Idempotency: a retried send — the parent re-issuing the same directive
+    // after a tool hiccup, or concluding the first attempt did not land — must
+    // not reach the child twice. The key lives exactly as long as the child's
+    // current turn; asking again in a later turn is a legitimate re-ask.
+    let seen = this.parentMessageSeen.get(toAgentId);
+    if (seen === undefined) {
+      seen = new Set();
+      this.parentMessageSeen.set(toAgentId, seen);
+    }
+    const dedupeKey = `${operation}\n${text}`;
+    if (seen.has(dedupeKey)) return { status: 'accepted', duplicate: true };
 
     // A steer exists to redirect work that is already running, so when the child
     // has a live turn it is injected into that turn and joins at the child's
@@ -348,10 +371,16 @@ export class SessionSubagentHost {
         kind: 'system_trigger',
         name: 'parent_message',
       });
+      // Register the dedupe key only once the message actually landed. A send
+      // rejected below (mailbox full, deadline elapsed) must leave no key
+      // behind, or an honest retry would be swallowed as a duplicate of a
+      // message that never reached the child.
+      seen.add(dedupeKey);
       return { status: 'accepted', delivery: 'mid-run' };
     }
 
     const out = this.bus!.send(message);
+    if (out.status === 'accepted') seen.add(dedupeKey);
     return {
       status: out.status,
       reason: out.reason,
@@ -376,7 +405,12 @@ export class SessionSubagentHost {
       request_type: 'info' | 'handoff' | 'escalate';
       message: string;
       needs?: string;
-      payload?: { artifacts?: string[]; evidence?: string[]; missing?: string[] };
+      payload?: {
+        artifacts?: string[];
+        evidence?: string[];
+        missing?: string[];
+        expecting?: string;
+      };
     },
   ): { status: SubagentMessageStatus; deduped?: boolean } {
     const fromChildId = this.childIdByAgent.get(fromAgent);
@@ -395,9 +429,16 @@ export class SessionSubagentHost {
     seen.add(dedupeKey);
     this.childRequestCounts.set(fromChildId, count + 1);
 
+    // Free-text fields are flattened onto a single line: the notification body
+    // is line-oriented, and a multi-line value would spill into the message
+    // when the TUI parses the body back.
+    const flat = (value: string): string => value.replaceAll(/\s*\n\s*/g, ' ');
     const lines = [
       `${req.request_type}: ${req.message}`,
-      req.needs !== undefined ? `needs: ${req.needs}` : undefined,
+      req.needs !== undefined ? `needs: ${flat(req.needs)}` : undefined,
+      req.payload?.expecting !== undefined && req.payload.expecting.length > 0
+        ? `expecting: ${flat(req.payload.expecting)}`
+        : undefined,
       req.payload?.artifacts !== undefined && req.payload.artifacts.length > 0
         ? `artifacts: [${req.payload.artifacts.join(', ')}]`
         : undefined,
@@ -440,6 +481,7 @@ export class SessionSubagentHost {
   private resetChildRequestLimits(childId: string): void {
     this.childRequestCounts.set(childId, 0);
     this.childRequestSeen.set(childId, new Set());
+    this.parentMessageSeen.set(childId, new Set());
   }
 
   private resolveProfile(parent: Agent, profileName: string): ResolvedAgentProfile {

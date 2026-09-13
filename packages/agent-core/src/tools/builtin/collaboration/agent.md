@@ -60,7 +60,7 @@ Restricted modes also remove `Agent` and `SendSubagentMessage`, so a constrained
 
 ## Steering running subagents
 
-Use `SendSubagentMessage` to send a directed message to a subagent you own while it is still running: `steer` for a priority redirection, `queue` for context that applies next turn. The message is injected at the subagent's next turn boundary; only the owning parent may message a subagent.
+Use `SendSubagentMessage` to send a directed message to a subagent you own while it is still running: `steer` for a priority redirection, `queue` for context that applies next turn. A `steer` joins the subagent's running turn at its next step boundary; a `queue` message is delivered when the subagent starts its next turn. Only the owning parent may message a subagent.
 
 When NOT to use Agent: skip delegation for trivial one-step work (e.g. reading a known file). Almost everything else is a candidate for delegation.
 

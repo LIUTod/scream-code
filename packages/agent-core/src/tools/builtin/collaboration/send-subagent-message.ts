@@ -65,7 +65,11 @@ export class SendSubagentMessageTool implements BuiltinTool<SendSubagentMessageI
         );
         const reasonText =
           result.status === 'accepted'
-            ? ACCEPTED_TEXT[result.delivery ?? 'queued']
+            ? `${ACCEPTED_TEXT[result.delivery ?? 'queued']}${
+                result.duplicate === true
+                  ? ' Duplicate of a message already in flight — the subagent will see it once.'
+                  : ''
+              }`
             : result.reason === 'bytes'
               ? 'Message rejected: it exceeds the byte limit for a single message.'
               : STATUS_TO_TEXT[result.status] ?? result.status;

@@ -167,7 +167,7 @@ describe('AgentTool', () => {
     // no longer "agent registry"
     expect(subagentTypeDescription).not.toContain('registry');
     expect(subagentTypeDescription).toContain('agent type');
-    expect(properties['run_in_background']?.description).toContain('false');
+    expect(properties['run_in_background']?.description).toContain('Foreground is the default');
   });
 
   it('does not mention background-only timeout details in the timeout description', () => {

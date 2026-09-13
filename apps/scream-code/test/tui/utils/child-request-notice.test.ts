@@ -31,11 +31,13 @@ function kernelBody(fields: {
   requestType: string;
   message: string;
   needs?: string | undefined;
+  expecting?: string | undefined;
   artifacts?: readonly string[] | undefined;
 }): string[] {
   return [
     `${fields.requestType}: ${fields.message}`,
     fields.needs !== undefined ? `needs: ${fields.needs}` : undefined,
+    fields.expecting !== undefined ? `expecting: ${fields.expecting}` : undefined,
     fields.artifacts !== undefined && fields.artifacts.length > 0
       ? `artifacts: [${fields.artifacts.join(', ')}]`
       : undefined,
@@ -48,12 +50,18 @@ describe('childRequestFieldsFromArgs', () => {
       request_type: 'handoff',
       message: '需要独立验证这段逻辑',
       needs: 'independent verification',
-      payload: { artifacts: ['src/a.ts', 'src/b.ts'], evidence: [], missing: ['tests'] },
+      payload: {
+        artifacts: ['src/a.ts', 'src/b.ts'],
+        evidence: [],
+        missing: ['tests'],
+        expecting: '带行号和文件路径的结论',
+      },
     });
     expect(fields).toEqual({
       requestType: 'handoff',
       message: '需要独立验证这段逻辑',
       needs: 'independent verification',
+      expecting: '带行号和文件路径的结论',
       artifacts: ['src/a.ts', 'src/b.ts'],
       evidence: undefined,
       missing: ['tests'],
@@ -86,7 +94,7 @@ describe('childRequestFieldsFromNotification', () => {
       request_type: 'handoff',
       message: '需要独立验证这段逻辑',
       needs: 'independent verification',
-      payload: { artifacts: ['src/a.ts', 'src/b.ts'] },
+      payload: { artifacts: ['src/a.ts', 'src/b.ts'], expecting: '带测试命令的输出' },
     };
     const fromArgs = childRequestFieldsFromArgs(args);
     const fromNotification = childRequestFieldsFromNotification(
@@ -96,6 +104,7 @@ describe('childRequestFieldsFromNotification', () => {
           requestType: args.request_type,
           message: args.message,
           needs: args.needs,
+          expecting: args.payload.expecting,
           artifacts: args.payload.artifacts,
         }),
       ),
@@ -139,6 +148,19 @@ describe('childRequestFieldsFromNotification', () => {
   it('returns null when the request text is empty, same as the live path', () => {
     expect(childRequestFieldsFromNotification(kernelNotification('agent-7', ['info:    ']))).toBeNull();
   });
+
+  it('parses expecting and keeps unrecognised lines in the message', () => {
+    const fields = childRequestFieldsFromNotification(
+      kernelNotification('agent-7', [
+        'info: 问一句',
+        'expecting: 引用原文片段',
+        'unrecognised: 这一行留在正文',
+      ]),
+    );
+    expect(fields?.expecting).toBe('引用原文片段');
+    // ⑦: an unknown field must not vanish — it stays part of the request text.
+    expect(fields?.message).toContain('unrecognised: 这一行留在正文');
+  });
 });
 
 describe('renderChildRequestNotice', () => {
@@ -168,6 +190,18 @@ describe('renderChildRequestNotice', () => {
     const long = renderChildRequestNotice({ requestType: 'info', message: 'x'.repeat(8000) });
     expect(long.detail.endsWith('…')).toBe(true);
     expect(long.detail.length).toBeLessThanOrEqual(201);
+  });
+
+  it('shows what a good reply looks like in the detail line', () => {
+    const notice = renderChildRequestNotice({
+      requestType: 'handoff',
+      message: '需要复核',
+      needs: 'independent verification',
+      expecting: '引用行号的结论',
+    });
+    expect(notice.detail).toContain(
+      t('transcript.child_request_expecting', { value: '引用行号的结论' }),
+    );
   });
 
   it('joins needs and payload previews into the detail line', () => {

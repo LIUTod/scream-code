@@ -24,6 +24,11 @@ export const ContactParentInputSchema = z.object({
       artifacts: z.array(z.string()).max(20).optional().describe('Paths of finished work products.'),
       evidence: z.array(z.string()).max(20).optional().describe('Proof: test output, screenshots, diffs.'),
       missing: z.array(z.string()).max(20).optional().describe('What is unfinished or uncertain.'),
+      expecting: z
+        .string()
+        .max(500)
+        .optional()
+        .describe('What a good reply looks like — the shape, format, or acceptance criteria you want back.'),
     })
     .optional(),
 });

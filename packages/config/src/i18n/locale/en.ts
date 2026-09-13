@@ -987,6 +987,7 @@ export const en: Record<string, string> = {
   'transcript.child_request_type_handoff': 'handoff',
   'transcript.child_request_type_escalate': 'escalate',
   'transcript.child_request_needs': 'needs {value}',
+  'transcript.child_request_expecting': 'expecting {value}',
   'transcript.child_request_artifacts': 'artifacts {value}',
   'transcript.child_request_evidence': 'evidence {value}',
   'transcript.child_request_missing': 'missing {value}',

@@ -13,11 +13,13 @@ const CTX: ExecutableToolContext = {
 function stubHost(
   status: SubagentMessageStatus = 'accepted',
   delivery?: 'mid-run' | 'queued',
+  duplicate?: boolean,
 ): SessionSubagentHost {
   return {
     sendMessage: vi.fn((_to: string, _op: 'queue' | 'steer', _text: string) => ({
       status,
       delivery,
+      duplicate,
     })),
   } as unknown as SessionSubagentHost;
 }
@@ -73,6 +75,17 @@ describe('SendSubagentMessageTool', () => {
     });
     expect(queuedResult.output).toContain('queued');
     expect(queuedResult.output).toContain('next turn');
+  });
+
+  it('says when a message was a duplicate', async () => {
+    const host = stubHost('accepted', undefined, true);
+    const result = await runTool(host, {
+      agent_id: 'agent-123',
+      operation: 'steer',
+      message: 'again',
+    });
+    expect(result.isError).toBe(false);
+    expect(result.output).toContain('Duplicate of a message already in flight');
   });
 
   it('reports non-accepted statuses as errors with the human message', async () => {
