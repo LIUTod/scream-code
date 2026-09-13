@@ -145,10 +145,18 @@ describe('subagent collaboration integration', () => {
     const bus = new SubagentMessageBus();
     const host = new SessionSubagentHost(session, 'main', undefined, undefined, bus);
     // Simulate an active child in the host's tracking set.
-    (host as unknown as { activeChildren: Set<string> }).activeChildren = new Set(['agent-0']);
+    (host as unknown as { activeChildren: Map<string, unknown> }).activeChildren = new Map([
+      ['agent-0', { controller: new AbortController(), runInBackground: false, structured: false }],
+    ]);
 
+    const historyLength = child.agent.context.history.length;
     const ok = host.sendMessage('agent-0', 'steer', 'reconsider the approach');
     expect(ok.status).toBe('accepted');
+    // No live turn, so the message waits in the mailbox instead of the host
+    // launching one behind runChild's back.
+    expect(ok.delivery).toBe('queued');
+    expect(historyLength).toBe(child.agent.context.history.length);
+    expect(child.agent.turn.hasActiveTurn).toBe(false);
     const delivered = bus.poll('agent-0');
     expect(delivered).toHaveLength(1);
     expect(delivered[0]!.operation).toBe('steer');
@@ -173,9 +181,9 @@ describe('subagent collaboration integration', () => {
     const host = new SessionSubagentHost(session, 'main', undefined, undefined, bus);
 
     // Queue a steer message before the child starts its turn. Simulate an
-    // active child with the same shape spawn uses (controller + runInBackground).
+    // active child with the same shape spawn uses.
     (host as unknown as { activeChildren: Map<string, unknown> }).activeChildren = new Map([
-      ['agent-0', { controller: new AbortController(), runInBackground: false }],
+      ['agent-0', { controller: new AbortController(), runInBackground: false, structured: false }],
     ]);
     const sent = host.sendMessage('agent-0', 'steer', 'reconsider the approach');
     expect(sent.status).toBe('accepted');
@@ -213,7 +221,7 @@ describe('subagent collaboration integration', () => {
     expect(host.sendMessage('agent-0', 'queue', 'x').status).toBe('not_owned');
   });
 
-  it('delivers mid-run parent messages to a structured-output subagent via a bounded delivery turn', async () => {
+  it('routes structured-output children through the guarded delivery turn', async () => {
     const child = testAgent();
     const parent = testAgent();
     parent.configure();
@@ -238,8 +246,8 @@ describe('subagent collaboration integration', () => {
       arguments: JSON.stringify({ command: gate.command }),
     });
     child.mockNextResponse({ type: 'text', text: '{"ok":true}' });
-    // Bounded delivery turn (structured message delivery): resend the JSON
-    // answer after reading the [parent_messages] block.
+    // The guarded delivery turn: the JSON guard means the structured contract
+    // survives reading the [parent_messages] block.
     child.mockNextResponse({ type: 'text', text: '{"ok":true,"steered":true}' });
 
     const spawnPromise = host.spawn('coder', {
@@ -253,28 +261,240 @@ describe('subagent collaboration integration', () => {
     });
     // The child's first prompt is committed and the gated Bash is running.
     await gate.waitForStart();
-    // Mid-run steer: arrives after the first-prompt injection (the child is
-    // blocked inside its turn) but before it finalizes. The structured branch
-    // must deliver it via the bounded delivery turn instead of dropping it.
+    // Structured children keep the mailbox path: the mid-run fast path would
+    // hand them a raw block with no JSON guard.
     const sent = host.sendMessage('agent-0', 'steer', 'reconsider the approach');
     expect(sent.status).toBe('accepted');
+    expect(sent.delivery).toBe('queued');
     gate.release();
 
     const handle = await spawnPromise;
     const completion = await handle.completion;
     gate.cleanup();
 
-    // The final structured answer reflects the steered instruction.
+    // The delivery turn ran and the final structured answer reflects the steer.
     expect(completion.result).toContain('"steered":true');
-    // The delivery turn's prompt carried the [parent_messages] block.
-    const prompts = child.agent.context.history
-      .filter((m: { role: string }) => m.role === 'user')
-      .map((m: { content: unknown }) => m.content);
-    const deliveryPrompt = prompts
-      .map((p) => (Array.isArray(p) ? p.map((x: { text: string }) => x.text).join('\n') : String(p)))
-      .find((p: string) => p.includes('[parent_messages]'));
+    const history = child.agent.context.history as readonly { role: string; content: unknown }[];
+    const textOf = (content: unknown): string =>
+      Array.isArray(content)
+        ? content.map((x: { text?: string }) => x.text ?? '').join('\n')
+        : String(content);
+    const deliveryPrompt = history.find(
+      (m) => m.role === 'user' && textOf(m.content).includes('[parent_messages]'),
+    );
     expect(deliveryPrompt).toBeDefined();
-    expect(deliveryPrompt).toContain('[directive] reconsider the approach');
+    expect(textOf(deliveryPrompt!.content)).toContain('[directive] reconsider the approach');
+  }, 15_000);
+
+  it('falls back to the mailbox when the steer buffer is full', async () => {
+    const child = testAgent();
+    const parent = testAgent();
+    const signal = new AbortController().signal;
+    parent.configure();
+    child.configure();
+    parent.newEvents();
+    await parent.rpc.setPermission({ mode: 'yolo' });
+    await child.rpc.setPermission({ mode: 'yolo' });
+
+    const session = fakeSession(parent.agent, child.agent, {
+      'agent-0': { homedir: '/tmp/x', type: 'sub', parentAgentId: 'main' },
+    });
+    const bus = new SubagentMessageBus();
+    const host = new SessionSubagentHost(session, 'main', undefined, undefined, bus);
+
+    const gate = drainGate();
+    const longAnswer = `done. ${'x'.repeat(220)}`;
+    child.mockNextResponse({
+      type: 'function',
+      id: 'tc_bash',
+      name: 'Bash',
+      arguments: JSON.stringify({ command: gate.command }),
+    });
+    child.mockNextResponse({ type: 'text', text: longAnswer });
+    // The delivery turn that carries the mailbox fallback message.
+    child.mockNextResponse({ type: 'text', text: `done. acknowledged ${'x'.repeat(200)}` });
+
+    const spawnPromise = host.spawn('coder', {
+      parentToolCallId: 'call_1',
+      parentToolCallUuid: undefined,
+      prompt: 'original prompt',
+      description: 'child',
+      runInBackground: false,
+      signal,
+    });
+    await gate.waitForStart();
+    // Fill the steer buffer to the shared in-flight budget while the turn runs.
+    for (let index = 0; index < 4; index += 1) {
+      child.agent.turn.steer([{ type: 'text', text: `pre-${index}` }], {
+        kind: 'system_trigger',
+        name: 'parent_message',
+      });
+    }
+    // The fifth message cannot join the buffer; it keeps the mailbox contract
+    // instead of being dropped.
+    const sent = host.sendMessage('agent-0', 'steer', 'one more');
+    expect(sent.status).toBe('accepted');
+    expect(sent.delivery).toBe('queued');
+    expect(bus.activeCount('agent-0')).toBe(1);
+    gate.release();
+
+    const handle = await spawnPromise;
+    const completion = await handle.completion;
+    gate.cleanup();
+    expect(completion.result).toContain('done.');
+    // The overflow message arrived via the mailbox + delivery turn, not lost.
+    // It keeps its steer priority, so it renders as a directive.
+    const history = child.agent.context.history as readonly { role: string; content: unknown }[];
+    const textOf = (content: unknown): string =>
+      Array.isArray(content)
+        ? content.map((x: { text?: string }) => x.text ?? '').join('\n')
+        : String(content);
+    expect(
+      history.some((m) => m.role === 'user' && textOf(m.content).includes('[directive] one more')),
+    ).toBe(true);
+  }, 15_000);
+
+  it('re-flushes a steer that arrives while the Stop hook is awaiting', async () => {
+    const child = testAgent();
+    const parent = testAgent();
+    const signal = new AbortController().signal;
+    parent.configure();
+    child.configure();
+    parent.newEvents();
+    await parent.rpc.setPermission({ mode: 'yolo' });
+    await child.rpc.setPermission({ mode: 'yolo' });
+
+    // A Stop hook that blocks until the test releases it, opening the window
+    // between the initial steer flush and the turn ending. Without the
+    // re-flush, a steer landing in that window is discarded by end() even
+    // though the parent already received a "delivered" acknowledgement.
+    let hookEntered!: () => void;
+    let releaseHook!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      hookEntered = resolve;
+    });
+    const release = new Promise<void>((resolve) => {
+      releaseHook = resolve;
+    });
+    (child.agent as unknown as { hooks: unknown }).hooks = {
+      triggerBlock: async (block: string) => {
+        if (block === 'Stop') {
+          hookEntered();
+          await release;
+        }
+        return undefined;
+      },
+    };
+
+    const session = fakeSession(parent.agent, child.agent, {
+      'agent-0': { homedir: '/tmp/x', type: 'sub', parentAgentId: 'main' },
+    });
+    const bus = new SubagentMessageBus();
+    const host = new SessionSubagentHost(session, 'main', undefined, undefined, bus);
+
+    child.mockNextResponse({ type: 'text', text: `first answer ${'x'.repeat(220)}` });
+    child.mockNextResponse({ type: 'text', text: `second answer after steer ${'x'.repeat(220)}` });
+
+    const spawnPromise = host.spawn('coder', {
+      parentToolCallId: 'call_1',
+      parentToolCallUuid: undefined,
+      prompt: 'original prompt',
+      description: 'child',
+      runInBackground: false,
+      signal,
+    });
+
+    // The turn is inside the Stop hook: still active, but the initial flush
+    // has already happened.
+    await entered;
+    const sent = host.sendMessage('agent-0', 'steer', 'arrived during stop hook');
+    expect(sent.status).toBe('accepted');
+    expect(sent.delivery).toBe('mid-run');
+    releaseHook();
+
+    const handle = await spawnPromise;
+    const completion = await handle.completion;
+
+    const history = child.agent.context.history as readonly { role: string; content: unknown }[];
+    const textOf = (content: unknown): string =>
+      Array.isArray(content)
+        ? content.map((x: { text?: string }) => x.text ?? '').join('\n')
+        : String(content);
+    // The steered turn actually continued and delivered the message.
+    expect(
+      history.some(
+        (m) => m.role === 'user' && textOf(m.content).includes('[directive] arrived during stop hook'),
+      ),
+    ).toBe(true);
+    expect(completion.result).toContain('second answer after steer');
+  }, 15_000);
+
+  it('injects a mid-run steer into an ordinary running turn without aborting the tool', async () => {
+    const child = testAgent();
+    const parent = testAgent();
+    parent.configure();
+    child.configure();
+    parent.newEvents();
+    await parent.rpc.setPermission({ mode: 'yolo' });
+    await child.rpc.setPermission({ mode: 'yolo' });
+
+    const session = fakeSession(parent.agent, child.agent, {
+      'agent-0': { homedir: '/tmp/x', type: 'sub', parentAgentId: 'main' },
+    });
+    const bus = new SubagentMessageBus();
+    const host = new SessionSubagentHost(session, 'main', undefined, undefined, bus);
+
+    const gate = drainGate();
+    child.mockNextResponse({
+      type: 'function',
+      id: 'tc_bash',
+      name: 'Bash',
+      arguments: JSON.stringify({ command: gate.command }),
+    });
+    // Answer produced after the steer joins the turn (long enough that no
+    // summary-expansion turn follows).
+    child.mockNextResponse({ type: 'text', text: `finished, applying the steer. ${'x'.repeat(220)}` });
+
+    const spawnPromise = host.spawn('coder', {
+      parentToolCallId: 'call_1',
+      parentToolCallUuid: undefined,
+      prompt: 'original prompt',
+      description: 'child',
+      runInBackground: false,
+      signal,
+    });
+    await gate.waitForStart();
+    const sent = host.sendMessage('agent-0', 'steer', 'reconsider the approach');
+    expect(sent.status).toBe('accepted');
+    expect(sent.delivery).toBe('mid-run');
+    gate.release();
+
+    const handle = await spawnPromise;
+    const completion = await handle.completion;
+    gate.cleanup();
+
+    const history = child.agent.context.history as readonly { role: string; content: unknown }[];
+    const textOf = (content: unknown): string =>
+      Array.isArray(content)
+        ? content.map((x: { text?: string }) => x.text ?? '').join('\n')
+        : String(content);
+    // The in-flight tool ran to completion: its result is in the history and the
+    // steer was injected only after it — had the tool been aborted, the steer
+    // would have been injected instead of (before) the tool result.
+    const toolResultAt = history.findIndex((m) => m.role === 'tool');
+    expect(toolResultAt).toBeGreaterThan(-1);
+    // The steer block landed in the same turn, after the tool result and before
+    // the final answer.
+    const injectedAt = history.findIndex(
+      (m) => m.role === 'user' && textOf(m.content).includes('[parent_messages]'),
+    );
+    const answeredAt = history.findIndex(
+      (m) => m.role === 'assistant' && textOf(m.content).includes('finished, applying the steer'),
+    );
+    expect(injectedAt).toBeGreaterThan(toolResultAt);
+    expect(answeredAt).toBeGreaterThan(injectedAt);
+    expect(textOf(history[injectedAt]!.content)).toContain('[directive] reconsider the approach');
+    expect(completion.result).toContain('finished, applying the steer');
   }, 15_000);
 
   it('keeps the pre-drain structured result when the delivery turn returns no JSON', async () => {
@@ -315,7 +535,11 @@ describe('subagent collaboration integration', () => {
       outputSchema: '{"type":"object"}',
     });
     await gate.waitForStart();
-    expect(host.sendMessage('agent-0', 'steer', 'reconsider the approach').status).toBe('accepted');
+    // A queue message keeps the mailbox path even while the child is running, so
+    // this still exercises the structured delivery turn.
+    const sent = host.sendMessage('agent-0', 'queue', 'reconsider the approach');
+    expect(sent.status).toBe('accepted');
+    expect(sent.delivery).toBe('queued');
     gate.release();
 
     const handle = await spawnPromise;
@@ -326,4 +550,81 @@ describe('subagent collaboration integration', () => {
     expect(completion.result).toContain('{"ok":true}');
     expect(completion.result).not.toContain('will adjust');
   }, 15_000);
+
+  it('delivers a message queued after the summary-expansion turn spent its budget', async () => {
+    const child = testAgent();
+    const parent = testAgent();
+    const signal = new AbortController().signal;
+    parent.configure();
+    child.configure();
+    parent.newEvents();
+    await parent.rpc.setPermission({ mode: 'yolo' });
+    await child.rpc.setPermission({ mode: 'yolo' });
+
+    const session = fakeSession(parent.agent, child.agent, {
+      'agent-0': { homedir: '/tmp/x', type: 'sub', parentAgentId: 'main' },
+    });
+    const bus = new SubagentMessageBus();
+    const host = new SessionSubagentHost(session, 'main', undefined, undefined, bus);
+
+    const longSummary = 's'.repeat(240);
+    const firstGate = drainGate();
+    const expansionGate = drainGate();
+    child.mockNextResponse({
+      type: 'function',
+      id: 'tc_1',
+      name: 'Bash',
+      arguments: JSON.stringify({ command: firstGate.command }),
+    });
+    // A summary too short to pass on its own: the expansion turn runs and spends
+    // the summary budget.
+    child.mockNextResponse({ type: 'text', text: 'short.' });
+    child.mockNextResponse({
+      type: 'function',
+      id: 'tc_2',
+      name: 'Bash',
+      arguments: JSON.stringify({ command: expansionGate.command }),
+    });
+    child.mockNextResponse({ type: 'text', text: longSummary });
+    // Answer to the delivery turn that only the separate message budget allows.
+    child.mockNextResponse({ type: 'text', text: `${longSummary} acknowledged` });
+
+    const spawnPromise = host.spawn('coder', {
+      parentToolCallId: 'call_1',
+      parentToolCallUuid: undefined,
+      prompt: 'original prompt',
+      description: 'child',
+      runInBackground: false,
+      signal,
+    });
+
+    await firstGate.waitForStart();
+    firstGate.release();
+    // Wait until the child sits inside the expansion turn's gated Bash. That
+    // turn already polled the mailbox, so this message can only arrive through a
+    // further turn — the one the shared budget used to deny it.
+    await expansionGate.waitForStart();
+    const sent = host.sendMessage('agent-0', 'queue', 'late but important');
+    expect(sent.status).toBe('accepted');
+    expect(sent.delivery).toBe('queued');
+    expansionGate.release();
+
+    const handle = await spawnPromise;
+    const completion = await handle.completion;
+    firstGate.cleanup();
+    expansionGate.cleanup();
+
+    const history = child.agent.context.history as readonly { role: string; content: unknown }[];
+    const textOf = (content: unknown): string =>
+      Array.isArray(content)
+        ? content.map((x: { text?: string }) => x.text ?? '').join('\n')
+        : String(content);
+    const injected = history.find(
+      (m) => m.role === 'user' && textOf(m.content).includes('[parent_messages]'),
+    );
+    expect(injected).toBeDefined();
+    expect(textOf(injected!.content)).toContain('[message] late but important');
+    // The delivery turn really ran: the child answered after reading the message.
+    expect(completion.result).toContain('acknowledged');
+  }, 30_000);
 });

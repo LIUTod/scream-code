@@ -202,6 +202,15 @@ export class TurnFlow {
     return this.activeTurn !== null && this.activeTurn !== 'resuming';
   }
 
+  /**
+   * How many steers are waiting in the buffer. The subagent host uses this to
+   * apply the same in-flight budget to mid-run steers that the mailbox applies
+   * to queued messages, so neither channel is unbounded.
+   */
+  get steerQueueLength(): number {
+    return this.steerBuffer.length;
+  }
+
   waitForCurrentTurn(signal?: AbortSignal | undefined): Promise<TurnEndResult> {
     const active = this.activeTurn;
     if (active === null || active === 'resuming') {
@@ -792,6 +801,12 @@ export class TurnFlow {
                 );
                 return { continue: true };
               }
+              // A steer can arrive while the Stop hook was awaiting: the turn is
+              // still active, so a buffered steer here would be discarded by end()
+              // even though the sender already received a "delivered" ack. Flush
+              // once more; anything still buffered after this point races genuine
+              // teardown, same as steering the main agent mid-teardown.
+              if (this.flushSteerBuffer()) return { continue: true };
               return { continue: false };
             },
             prepareToolExecution: async (ctx) => {

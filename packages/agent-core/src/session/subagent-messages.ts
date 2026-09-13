@@ -2,9 +2,11 @@
  * Subagent message bus — the parent→child directed-message channel.
  *
  * Modeled on the directed-message semantics of the reference implementation
- * (send_subagent_message): the only legitimate sender is the parent agent,
- * messages are delivered at the child's next turn boundary, and a
- * high-priority "steer" operation is dequeued before plain "queue" messages.
+ * (send_subagent_message): the only legitimate sender is the parent agent, and
+ * a high-priority "steer" operation is dequeued before plain "queue" messages.
+ * A steer aimed at a child whose turn is running is injected into that turn by
+ * the host (it joins at the child's next step boundary); everything else waits
+ * in the mailbox for the child's next turn start.
  *
  * This is an in-memory, per-session structure: nothing here is persisted to
  * the session store, emitted over RPC, or survives a process restart. Child
@@ -54,12 +56,30 @@ interface Mailbox {
   queue: SubagentMessage[];
 }
 
-const DEFAULT_IN_FLIGHT_LIMIT = 1;
-const DEFAULT_BYTE_LIMIT = 16 * 1024;
+/**
+ * Undelivered messages a child may hold at once. More than one so a single
+ * message the child has not reached a boundary for cannot jam the channel.
+ */
+export const DEFAULT_IN_FLIGHT_LIMIT = 4;
+export const DEFAULT_BYTE_LIMIT = 16 * 1024;
+/**
+ * How long a queued message stays deliverable. A child turn routinely outlasts
+ * a minute (long tool calls, several steps), so the window has to cover a real
+ * turn rather than expire while the child is still working.
+ */
+export const SUBAGENT_MESSAGE_DEADLINE_MS = 300_000;
 
 /** UTF-8 byte length (TextEncoder is available in all supported runtimes). */
 function byteLength(text: string): number {
   return new TextEncoder().encode(text).length;
+}
+
+/**
+ * Byte length of a message body. Callers that deliver a message without going
+ * through `send` (the mid-run steer path) use this to apply the same limit.
+ */
+export function subagentMessageBytes(text: string): number {
+  return byteLength(text);
 }
 
 export class SubagentMessageBus {
@@ -67,9 +87,16 @@ export class SubagentMessageBus {
   private nextId = 0;
   private nextSeq = 0;
 
-  /** Number of undelivered messages currently addressed to `agentId`. */
+  /**
+   * Number of messages still deliverable for `agentId`. Expired ones are not
+   * counted: `poll` drops them, so counting them would make the host spend a
+   * delivery turn on a message that can never arrive.
+   */
   activeCount(agentId: string): number {
-    return this.mailboxes.get(agentId)?.queue.length ?? 0;
+    const queue = this.mailboxes.get(agentId)?.queue;
+    if (queue === undefined) return 0;
+    const now = Date.now();
+    return queue.reduce((count, m) => (m.deadline > now ? count + 1 : count), 0);
   }
 
   /**
@@ -115,11 +142,6 @@ export class SubagentMessageBus {
     queues.sort((a, b) => a.seq - b.seq);
     return [...steers, ...queues];
   }
-
-  /** Drop every message addressed to `agentId` (used when a child completes). */
-  clear(agentId: string): void {
-    this.mailboxes.delete(agentId);
-  }
 }
 
 /** Construct a message with the bus defaults applied. */
@@ -137,6 +159,6 @@ export function buildSubagentMessage(
     text,
     inFlightLimit: overrides?.inFlightLimit ?? DEFAULT_IN_FLIGHT_LIMIT,
     byteLimit: overrides?.byteLimit ?? DEFAULT_BYTE_LIMIT,
-    deadline: overrides?.deadline ?? Date.now() + 60_000,
+    deadline: overrides?.deadline ?? Date.now() + SUBAGENT_MESSAGE_DEADLINE_MS,
   };
 }

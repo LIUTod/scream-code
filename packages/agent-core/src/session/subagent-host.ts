@@ -10,7 +10,15 @@ import {
 } from '../profile';
 import { linkAbortSignal, userCancellationReason } from '../utils/abort';
 import { collectGitContext } from './git-context';
-import { SubagentMessageBus, buildSubagentMessage, type SubagentMessageStatus } from './subagent-messages';
+import {
+  DEFAULT_BYTE_LIMIT,
+  DEFAULT_IN_FLIGHT_LIMIT,
+  SubagentMessageBus,
+  buildSubagentMessage,
+  subagentMessageBytes,
+  type SubagentMessage,
+  type SubagentMessageStatus,
+} from './subagent-messages';
 import { renderNotificationXml } from '../agent/context/notification-xml';
 import { filterToolsForCapability, type SubagentCapabilityMode } from './subagent-capability';
 import type { Session } from './index';
@@ -26,9 +34,31 @@ import { getFindingsFromStore } from '../tools/builtin/collaboration/report-find
  */
 const SUMMARY_MIN_LENGTH = 200;
 const SUMMARY_CONTINUATION_ATTEMPTS = 1;
+/**
+ * Follow-up turns spent delivering queued parent messages, counted separately
+ * from the summary-expansion budget above. Sharing one counter meant a summary
+ * that was too short consumed the only delivery window, so a message queued a
+ * few milliseconds later was destroyed at run end while the parent still held
+ * an "accepted" acknowledgement.
+ */
+const MAX_PARENT_MESSAGE_DELIVERY_TURNS = 2;
 const HOOK_TEXT_PREVIEW_LENGTH = 500;
 const SUBAGENT_MAX_TOKENS_ERROR =
   'Subagent turn failed before completing its final summary: reason=max_tokens';
+
+/**
+ * Render parent messages as the block a child sees. Both delivery paths share
+ * this — the mid-run steer and the turn-start injection — so a message looks
+ * identical to the child however it arrives.
+ */
+function formatParentMessagesBlock(
+  messages: readonly Pick<SubagentMessage, 'operation' | 'text'>[],
+): string {
+  const body = messages
+    .map((m) => (m.operation === 'steer' ? `[directive] ${m.text}` : `[message] ${m.text}`))
+    .join('\n\n');
+  return `[parent_messages]\n${body}`;
+}
 
 type RunSubagentOptions = {
   readonly parentToolCallId: string;
@@ -59,6 +89,8 @@ export type SubagentCompletion = {
 type ActiveChild = {
   readonly controller: AbortController;
   runInBackground: boolean;
+  /** True when the current run must end in machine-parseable output. */
+  structured: boolean;
 };
 
 export type SubagentHandle = {
@@ -119,6 +151,7 @@ export class SessionSubagentHost {
     this.activeChildren.set(id, {
       controller,
       runInBackground: options.runInBackground,
+      structured: options.outputSchema !== undefined,
     });
 
     const completion = this.runChild(
@@ -136,7 +169,9 @@ export class SessionSubagentHost {
       this.activeChildren.delete(id);
       this.childRequestCounts.delete(id);
       this.childRequestSeen.delete(id);
-      this.bus!.clear(id);
+      // Undelivered mail is deliberately left in place: clearing it here would
+      // destroy a message the parent was already told was accepted. It expires
+      // on its own deadline, and a resume of this child polls it at turn start.
     });
 
     return {
@@ -179,6 +214,7 @@ export class SessionSubagentHost {
     this.activeChildren.set(agentId, {
       controller,
       runInBackground: options.runInBackground,
+      structured: options.outputSchema !== undefined,
     });
 
     const completion = this.runChild(
@@ -213,7 +249,8 @@ export class SessionSubagentHost {
       this.activeChildren.delete(agentId);
       this.childRequestCounts.delete(agentId);
       this.childRequestSeen.delete(agentId);
-      this.bus!.clear(agentId);
+      // Same rule as the spawn path: never destroy accepted-but-undelivered
+      // mail. It expires by deadline, or a resume picks it up.
     });
 
     return {
@@ -270,16 +307,57 @@ export class SessionSubagentHost {
     operation: 'queue' | 'steer',
     text: string,
     overrides?: { inFlightLimit?: number; byteLimit?: number; deadline?: number },
-  ): { status: SubagentMessageStatus; reason?: 'bytes' | 'queue' } {
+  ): {
+    status: SubagentMessageStatus;
+    reason?: 'bytes' | 'queue';
+    /** How an accepted message reaches the child; absent when not accepted. */
+    delivery?: 'mid-run' | 'queued';
+    queueDepth?: number;
+  } {
     const metadata = this.session.metadata.agents[toAgentId];
     if (metadata === undefined || metadata.type !== 'sub') return { status: 'not_found' };
     if (metadata.parentAgentId !== this.ownerAgentId) return { status: 'not_owned' };
     const child = this.session.agents.get(toAgentId);
-    if (child === undefined || !this.activeChildren.has(toAgentId)) return { status: 'not_active' };
-    const out = this.bus!.send(
-      buildSubagentMessage(this.ownerAgentId, toAgentId, operation, text, overrides),
-    );
-    return { status: out.status, reason: out.reason };
+    const record = this.activeChildren.get(toAgentId);
+    if (child === undefined || record === undefined) return { status: 'not_active' };
+
+    const message = buildSubagentMessage(this.ownerAgentId, toAgentId, operation, text, overrides);
+    const byteLimit = overrides?.byteLimit ?? DEFAULT_BYTE_LIMIT;
+    if (subagentMessageBytes(text) > byteLimit) return { status: 'saturated', reason: 'bytes' };
+
+    // A steer exists to redirect work that is already running, so when the child
+    // has a live turn it is injected into that turn and joins at the child's
+    // next step boundary (Turn.flushSteerBuffer). The origin is not `user`, so
+    // Turn.hasPendingSteer never aborts the tool call in flight. hasActiveTurn
+    // and steer() run back to back with no await between them, so the turn
+    // cannot end in between and steer() cannot launch one of its own.
+    //
+    // Two exceptions keep the guarantees intact:
+    // - Structured-output children keep the mailbox path: their bounded
+    //   delivery turn re-prompts with the JSON guard, so a steered answer
+    //   cannot decay into prose and break the contract.
+    // - A full steer buffer (same budget as the mailbox) falls back to the
+    //   mailbox, so neither channel is unbounded.
+    if (
+      operation === 'steer' &&
+      !record.structured &&
+      child.turn.hasActiveTurn &&
+      child.turn.steerQueueLength < DEFAULT_IN_FLIGHT_LIMIT
+    ) {
+      child.turn.steer([{ type: 'text', text: formatParentMessagesBlock([message]) }], {
+        kind: 'system_trigger',
+        name: 'parent_message',
+      });
+      return { status: 'accepted', delivery: 'mid-run' };
+    }
+
+    const out = this.bus!.send(message);
+    return {
+      status: out.status,
+      reason: out.reason,
+      delivery: out.status === 'accepted' ? 'queued' : undefined,
+      queueDepth: out.queueDepth,
+    };
   }
 
   /**
@@ -423,10 +501,7 @@ export class SessionSubagentHost {
       const injectParentMessages = (prompt: string): string => {
         const pending = this.bus!.poll(childId);
         if (pending.length === 0) return prompt;
-        const messageBlock = pending
-          .map((m) => (m.operation === 'steer' ? `[directive] ${m.text}` : `[message] ${m.text}`))
-          .join('\n\n');
-        return `${prompt}\n\n[parent_messages]\n${messageBlock}`;
+        return `${prompt}\n\n${formatParentMessagesBlock(pending)}`;
       };
       this.resetChildRequestLimits(childId);
       childPrompt = injectParentMessages(childPrompt);
@@ -444,16 +519,17 @@ export class SessionSubagentHost {
       // with prose would corrupt the parseable result.
       if (options.outputSchema === undefined) {
         let remainingContinuations = SUMMARY_CONTINUATION_ATTEMPTS;
-        // Keep going while the summary is short OR parent messages are still
-        // pending: a message that arrived mid-run must be delivered before the
-        // child finalizes (otherwise the finally-clear would drop it silently
-        // while the parent already received "accepted"). remainingContinuations
-        // bounds both conditions.
-        while (
-          remainingContinuations > 0 &&
-          (result.length < SUMMARY_MIN_LENGTH || this.bus!.activeCount(childId) > 0)
-        ) {
-          remainingContinuations -= 1;
+        let remainingDeliveryTurns = MAX_PARENT_MESSAGE_DELIVERY_TURNS;
+        // Two separate budgets: one for expanding a too-short summary, one for
+        // delivering parent messages that arrived mid-run. Sharing a single
+        // counter let a short summary spend the only delivery window, so a
+        // message queued milliseconds later never reached the child even though
+        // the parent had already been told it was accepted.
+        let needsExpansion = result.length < SUMMARY_MIN_LENGTH && remainingContinuations > 0;
+        let hasPending = this.bus!.activeCount(childId) > 0 && remainingDeliveryTurns > 0;
+        while (needsExpansion || hasPending) {
+          if (needsExpansion) remainingContinuations -= 1;
+          if (hasPending) remainingDeliveryTurns -= 1;
           turns += 1;
           options.signal.throwIfAborted();
           this.resetChildRequestLimits(childId);
@@ -461,14 +537,16 @@ export class SessionSubagentHost {
           child.turn.prompt([{ type: 'text', text: continuation }], origin);
           await runChildTurnToCompletion(child, options.signal);
           result = lastAssistantText(child);
+          needsExpansion = result.length < SUMMARY_MIN_LENGTH && remainingContinuations > 0;
+          hasPending = this.bus!.activeCount(childId) > 0 && remainingDeliveryTurns > 0;
         }
       } else if (this.bus!.activeCount(childId) > 0) {
         // Structured request: summary expansion is skipped so a compact JSON
-        // answer is not padded with prose, but parent messages that arrived
-        // mid-run must still be delivered — an "accepted" message must not be
-        // silently dropped by the finally-clear while the parent already got
-        // the ack. One bounded delivery turn re-prompts the child to resend
-        // its JSON answer after reading the message block.
+        // answer is not padded with prose, but a parent message that arrived
+        // while no turn was running still has to be delivered before the run
+        // ends — the parent was told it was accepted. One bounded delivery turn
+        // re-prompts the child to resend its JSON answer after reading the
+        // message block.
         turns += 1;
         options.signal.throwIfAborted();
         this.resetChildRequestLimits(childId);

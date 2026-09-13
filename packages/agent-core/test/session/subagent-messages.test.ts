@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   SubagentMessageBus,
   buildSubagentMessage,
@@ -55,6 +55,15 @@ describe('SubagentMessageBus', () => {
     expect(msg(bus, 'child-a', 'queue', 'y', { inFlightLimit: 1 }).status).toBe('saturated');
   });
 
+  it('lets four undelivered messages coexist under the default limit', () => {
+    const bus = new SubagentMessageBus();
+    for (let index = 0; index < 4; index += 1) {
+      expect(msg(bus, 'child-a', 'queue', `m${index}`).status).toBe('accepted');
+    }
+    // A single undelivered message must not jam the channel for a whole run.
+    expect(msg(bus, 'child-a', 'queue', 'm4').status).toBe('saturated');
+  });
+
   it('rejects oversized messages as saturated', () => {
     const bus = new SubagentMessageBus();
     expect(msg(bus, 'child-a', 'queue', 'x'.repeat(11), { byteLimit: 10 }).status).toBe(
@@ -70,11 +79,36 @@ describe('SubagentMessageBus', () => {
     expect(bus.activeCount('child-a')).toBe(0);
   });
 
-  it('polls nothing for an unknown or cleared agent', () => {
+  it('gives queued mail a deadline that outlasts a real child turn', () => {
+    // A child turn routinely runs for minutes (long tool calls, several steps).
+    // A deadline shorter than that silently eats messages the parent was told
+    // were accepted.
+    const message = buildSubagentMessage('main', 'child-a', 'queue', 'x');
+    expect(message.deadline - Date.now()).toBeGreaterThanOrEqual(120_000);
+  });
+
+  it('stops counting queued mail once its deadline passes', () => {
+    vi.useFakeTimers();
+    try {
+      const bus = new SubagentMessageBus();
+      expect(msg(bus, 'child-a', 'queue', 'x', { deadline: NOW + 1000 }).status).toBe('accepted');
+      expect(bus.activeCount('child-a')).toBe(1);
+      // No poll in between: the count alone has to stop offering dead mail, or
+      // the host spends a delivery turn on a message that can never arrive.
+      vi.setSystemTime(NOW + 1001);
+      expect(bus.activeCount('child-a')).toBe(0);
+      expect(bus.poll('child-a')).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('polls nothing for an unknown agent or one whose mail has expired', () => {
     const bus = new SubagentMessageBus();
     expect(bus.poll('nobody')).toEqual([]);
-    msg(bus, 'child-a', 'queue', 'x');
-    bus.clear('child-a');
+    // Expired mail is what bounds a mailbox now that runs no longer purge it:
+    // it is neither counted nor delivered.
+    msg(bus, 'child-a', 'queue', 'x', { deadline: NOW - 1000 });
     expect(bus.activeCount('child-a')).toBe(0);
     expect(bus.poll('child-a')).toEqual([]);
   });
@@ -106,7 +140,6 @@ describe('SubagentMessageBus', () => {
       }),
     );
     expect(rejected.status).toBe('saturated');
-    bus.clear('child-a');
   });
 
   it('drops expired messages at poll time instead of delivering them', () => {

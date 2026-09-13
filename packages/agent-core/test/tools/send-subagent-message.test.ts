@@ -10,9 +10,15 @@ const CTX: ExecutableToolContext = {
   signal: new AbortController().signal,
 };
 
-function stubHost(status: SubagentMessageStatus = 'accepted'): SessionSubagentHost {
+function stubHost(
+  status: SubagentMessageStatus = 'accepted',
+  delivery?: 'mid-run' | 'queued',
+): SessionSubagentHost {
   return {
-    sendMessage: vi.fn((_to: string, _op: 'queue' | 'steer', _text: string) => ({ status })),
+    sendMessage: vi.fn((_to: string, _op: 'queue' | 'steer', _text: string) => ({
+      status,
+      delivery,
+    })),
   } as unknown as SessionSubagentHost;
 }
 
@@ -47,6 +53,26 @@ describe('SendSubagentMessageTool', () => {
     expect(host.sendMessage).toHaveBeenCalledWith('agent-123', 'steer', 'reconsider the approach');
     expect(result.isError).toBe(false);
     expect(result.output).toContain('accepted');
+  });
+
+  it('says which path an accepted message took', async () => {
+    const midRun = stubHost('accepted', 'mid-run');
+    const midRunResult = await runTool(midRun, {
+      agent_id: 'agent-123',
+      operation: 'steer',
+      message: 'stop and regroup',
+    });
+    expect(midRunResult.output).toContain("running turn");
+    expect(midRunResult.output).toContain('next step boundary');
+
+    const queued = stubHost('accepted', 'queued');
+    const queuedResult = await runTool(queued, {
+      agent_id: 'agent-123',
+      operation: 'queue',
+      message: 'context for later',
+    });
+    expect(queuedResult.output).toContain('queued');
+    expect(queuedResult.output).toContain('next turn');
   });
 
   it('reports non-accepted statuses as errors with the human message', async () => {
