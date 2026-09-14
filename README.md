@@ -113,7 +113,7 @@ Type `/` in the input to browse. All 48 commands:
 | `/version` | Show version info |
 | **Extensions** | |
 | `/mcp` | Manage MCP servers |
-| `/skill` (`/skills`, `/plugin`) | Skill center |
+| `/plugin` (`/skills`, `/plugin`) | Skill center |
 | `/make-skill` | Distill the session into a Skill |
 | `/cc` | Control your cc daemon |
 | `/cc-connect` | cc-connect quick channel setup |
