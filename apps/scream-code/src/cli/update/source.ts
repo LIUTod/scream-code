@@ -32,7 +32,7 @@ export function detectInstallSource(
   const installDir = resolved.getInstallDir();
 
   // Source install is recognised when the install directory contains a .git
-  // directory — this matches the layout produced by install.sh / install.ps1.
+  // directory — the layout of a manual clone of the repository.
   if (resolved.existsSync(join(installDir, '.git'))) {
     return 'source';
   }
