@@ -2,8 +2,8 @@
  * `/model diy` — bind a model alias to each built-in subagent profile.
  *
  * Two-level picker:
- *   1. Profile list (coder / reviewer / writer / explore / oracle / plan / verify)
- *      showing each profile's current binding.
+ *   1. Profile list (one row per built-in subagent profile, in the shared slot
+ *      order) showing each profile's current binding.
  *   2. Model selector: "跟随主模型" (unbind) + every configured model alias.
  *
  * Bindings persist to `tui.toml` and update live AppState, so mid-session
@@ -19,6 +19,7 @@ import {
   type TuiConfig,
 } from '#/tui/config';
 import type { SlashCommandHost } from '#/tui/commands/dispatch';
+import { DEFAULT_SUBAGENT_TYPES } from '#/tui/utils/subagent-slots';
 import { t } from '@scream-code/config';
 
 const FOLLOW_MAIN = '__follow_main__';
@@ -29,16 +30,13 @@ function getSubagentProfiles(): readonly {
   readonly name: string;
   readonly description: string;
 }[] {
-  return [
-    { name: 'coder', description: t('subagent.desc_coder') },
-    { name: 'reviewer', description: t('subagent.desc_reviewer') },
-    { name: 'writer', description: t('subagent.desc_writer') },
-    { name: 'explore', description: t('subagent.desc_explore') },
-    { name: 'oracle', description: t('subagent.desc_oracle') },
-    { name: 'plan', description: t('subagent.desc_plan') },
-    { name: 'verify', description: t('subagent.desc_verify') },
-    { name: 'worker', description: t('subagent.desc_worker') },
-  ];
+  // Membership comes from the shared slot list so the picker and the sidebar
+  // panel can never disagree about which subagent types exist; only the
+  // binding state is picker-specific.
+  return DEFAULT_SUBAGENT_TYPES.map((name) => ({
+    name,
+    description: t(`subagent.desc_${name}`),
+  }));
 }
 
 export function showSubagentModelBinder(host: SlashCommandHost): void {
