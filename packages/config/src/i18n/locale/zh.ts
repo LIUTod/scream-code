@@ -1101,6 +1101,11 @@ export const zh: Record<string, string> = {
   'thinking.in_progress': '思考中...',
   'thinking.more_lines': '...（还有 {count} 行，按 ctrl+o 展开）',
 
+  // ─── tool bodies ───────────────
+  // Capped body of a glance-style tool card (Read/Grep/Glob) that is already
+  // expanded: there is nothing left to expand, so the hint carries no key.
+  'tool.more_lines': '...（还有 {count} 行）',
+
   // ─── shell-execution ───────────
   'shell.more_lines': '...（还有 {count} 行，按 ctrl+o 展开）',
 

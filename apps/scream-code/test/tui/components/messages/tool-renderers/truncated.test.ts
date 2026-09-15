@@ -71,4 +71,38 @@ describe('TruncatedOutputComponent', () => {
       component.render(80);
     }).not.toThrow();
   });
+
+  it('caps the body while expanded and keeps the head when asked', () => {
+    const output = Array.from({ length: 40 }, (_, i) => `row ${String(i + 1)}`).join('\n');
+
+    const component = new TruncatedOutputComponent(output, {
+      expanded: true,
+      capWhenExpanded: true,
+      keep: 'head',
+      isError: false,
+      colors: darkColors,
+      maxLines: 5,
+      hintFormatter: (remaining) => `hidden ${String(remaining)}`,
+    });
+
+    const lines = component.render(80).map(strip);
+    expect(lines).toHaveLength(6);
+    expect(lines[0]).toContain('row 1');
+    expect(lines[4]).toContain('row 5');
+    // The hidden count is announced below the kept head, not above it.
+    expect(lines.at(-1)).toContain('hidden 35');
+  });
+
+  it('leaves an expanded body uncapped unless the caller asks for a cap', () => {
+    const output = Array.from({ length: 40 }, (_, i) => `row ${String(i + 1)}`).join('\n');
+
+    const component = new TruncatedOutputComponent(output, {
+      expanded: true,
+      isError: false,
+      colors: darkColors,
+      maxLines: 5,
+    });
+
+    expect(component.render(80)).toHaveLength(40);
+  });
 });

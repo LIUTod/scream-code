@@ -4,7 +4,8 @@
  * Glob, Read). The numeric summary (line counts, exit codes, sizes)
  * lives in the header chip (see chip.ts), so most tools intentionally
  * render an empty body and only expose details when the global expand
- * toggle is on.
+ * toggle is on — capped at `TOOL_OUTPUT_PREVIEW_LINES`, so a large Read or
+ * Grep result can never flood the transcript even while expanded.
  *
  * Errors always fall through to the truncated renderer so the user sees
  * the actual error message, not a synthetic summary.
@@ -12,13 +13,15 @@
 
 import type { Component } from '@liutod-scream/pi-tui';
 import { Text, visibleWidth } from '@liutod-scream/pi-tui';
+import { t } from '@scream-code/config';
 import chalk from 'chalk';
 
+import { TOOL_OUTPUT_PREVIEW_LINES } from '#/tui/constant/rendering';
 import type { ColorPalette } from '#/tui/theme/colors';
 import type { ToolCallBlockData, ToolResultBlockData } from '#/tui/types';
 
 import { GlanceLinesComponent } from './glance-lines';
-import { renderTruncated } from './truncated';
+import { renderTruncated, TruncatedOutputComponent } from './truncated';
 import type { ResultRenderer } from './types';
 
 const GLANCE_SAMPLES = 3;
@@ -56,7 +59,21 @@ function withGlance(glance: GlanceFn | null): ResultRenderer {
       }
     }
     if (ctx.expanded && result.output.length > 0) {
-      out.push(new Text(chalk.dim(result.output), 4, 0));
+      // The chip plus the glance above already carry the summary; the expanded
+      // view adds the raw output. It is capped like every other tool body: Read
+      // hands back up to 100KB, and an uncapped body turned a single file read
+      // into hundreds of rows whenever the expand toggle was on.
+      out.push(
+        new TruncatedOutputComponent(result.output, {
+          expanded: true,
+          capWhenExpanded: true,
+          keep: 'head',
+          isError: false,
+          colors: ctx.colors,
+          maxLines: TOOL_OUTPUT_PREVIEW_LINES,
+          hintFormatter: (remaining) => t('tool.more_lines', { count: String(remaining) }),
+        }),
+      );
     }
     return out;
   };

@@ -43,14 +43,18 @@ function truncateTailBytes(text: string, maxBytes: number): string {
 /**
  * Component that renders tool output with wrap-aware line truncation.
  * Uses pi-tui's Text component to compute actual visual wrapped lines, then
- * caps at `maxLines`. When collapsed the TAIL is shown (newest output, where
- * command errors land) with an expand hint at the top; when expanded the full
- * output is shown with a collapse hint at the top. Handles long single-line
- * output (e.g. JSON blobs) that would otherwise wrap to dozens of visual rows.
+ * caps at `maxLines`. By default a collapsed body shows the TAIL (newest
+ * output, where command errors land) with a hint above it, while an expanded
+ * body shows everything. `capWhenExpanded` plus `keep` let glance-style bodies
+ * (Read/Grep/Glob) cap in both states and pick which end survives. Handles long
+ * single-line output (e.g. JSON blobs) that would otherwise wrap to dozens of
+ * visual rows.
  */
 export class TruncatedOutputComponent implements Component {
   private readonly textComponent: Text;
   private readonly expanded: boolean;
+  private readonly capWhenExpanded: boolean;
+  private readonly keep: 'head' | 'tail';
   private readonly maxLines: number;
   private readonly hintFormatter: ((remaining: number) => string) | undefined;
 
@@ -63,9 +67,16 @@ export class TruncatedOutputComponent implements Component {
       maxLines?: number;
       maxBytes?: number;
       hintFormatter?: (remaining: number) => string;
+      /** Cap the body even while expanded (glance-style bodies never grow). */
+      capWhenExpanded?: boolean;
+      /** Which end a capped preview keeps: the head for file-like bodies, the
+       *  tail for command output where the errors land last. */
+      keep?: 'head' | 'tail';
     },
   ) {
     this.expanded = options.expanded;
+    this.capWhenExpanded = options.capWhenExpanded ?? false;
+    this.keep = options.keep ?? 'tail';
     this.maxLines = options.maxLines ?? PREVIEW_LINES;
     this.hintFormatter = options.hintFormatter;
     const tint = options.isError ? chalk.hex(options.colors.error) : chalk.dim;
@@ -92,18 +103,16 @@ export class TruncatedOutputComponent implements Component {
   render(width: number): string[] {
     const contentLines = this.textComponent.render(width);
 
-    if (this.expanded || contentLines.length <= this.maxLines) {
+    // `expanded` normally means "the user asked for everything". Glance-style
+    // bodies cap in both states instead: their raw output can reach hundreds of
+    // rows, and a global expand toggle must not turn one file read into a
+    // full-screen dump.
+    const capped = !this.expanded || this.capWhenExpanded;
+    if (!capped || contentLines.length <= this.maxLines) {
       return contentLines;
     }
 
-    // Collapsed: show the TAIL (newest output, where errors land) and surface
-    // an expand hint at the TOP so the preview reads top-down without the
-    // hidden head pushing the useful lines out of view.
     const remaining = contentLines.length - this.maxLines;
-    // slice(-0) === slice(0) === whole array in JS; treat maxLines=0 as "no
-    // content shown, hint only" so a zero preview hides all output lines.
-    const tail =
-      this.maxLines <= 0 ? [] : contentLines.slice(-this.maxLines);
     const expandHint = this.hintFormatter
       ? this.hintFormatter(remaining)
       : t('shell.more_lines', { count: String(remaining) });
@@ -111,6 +120,18 @@ export class TruncatedOutputComponent implements Component {
     // content lines above, so the hint aligns with the output instead of
     // sitting at column 0.
     const hintLines = new Text(chalk.dim(expandHint), 2, 0).render(width);
+
+    if (this.keep === 'head') {
+      // File-like bodies read top-down, so the hidden part is announced below.
+      return [...contentLines.slice(0, Math.max(0, this.maxLines)), ...hintLines];
+    }
+
+    // Collapsed: show the TAIL (newest output, where errors land) and surface
+    // an expand hint at the TOP so the preview reads top-down without the
+    // hidden head pushing the useful lines out of view.
+    // slice(-0) === slice(0) === whole array in JS; treat maxLines=0 as "no
+    // content shown, hint only" so a zero preview hides all output lines.
+    const tail = this.maxLines <= 0 ? [] : contentLines.slice(-this.maxLines);
     return [...hintLines, ...tail];
   }
 }

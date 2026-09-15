@@ -29,7 +29,7 @@ import { ImageAttachmentStore, type ImageAttachment } from '../utils/image-attac
 import { truncateErrorMessage } from '../utils/event-payload';
 import { replaceTabs } from '../utils/sanitize';
 import { nextTranscriptId } from '../utils/transcript-id';
-import { disposeChildren, isExpandable, isPlanExpandable } from '../utils/component-capabilities';
+import { disposeChildren, isExpandable, isPlanExpandable, readExpanded } from '../utils/component-capabilities';
 import { isStreaming } from '../utils/app-state';
 import { CommittedTranscriptComponent } from '../components/transcript/committed-transcript';
 import { ReadGroupComponent, parseReadGroupOutput } from '../components/messages/read-group';
@@ -191,7 +191,6 @@ export class TranscriptController {
         // mount path is currently unreachable; kept for entries appended by other
         // producers.
         const thinking = new ThinkingComponent(entry.content, state.theme.colors, true);
-        if (state.toolOutputExpanded) thinking.setExpanded(true);
         return thinking;
       }
       case 'tool_call': {
@@ -209,7 +208,6 @@ export class TranscriptController {
             state.theme.markdownTheme,
             state.appState.workDir,
           );
-          if (state.toolOutputExpanded) tc.setExpanded(true);
           if (state.planExpanded) tc.setPlanExpanded(true);
           return tc;
         }
@@ -416,24 +414,31 @@ export class TranscriptController {
 
   toggleToolOutputExpansion(): void {
     const { state } = this.host;
-    state.toolOutputExpanded = !state.toolOutputExpanded;
     // Ctrl+O targets the newest expandable thing the user is looking at: an
     // activity block when the turn's process is the latest content, otherwise a
     // standalone card (Read/Agent/plan) that shows its own ctrl+o hint. Older
-    // components keep their state so a long history is never force-flipped.
+    // components keep their state so a long history is never force-flipped, and
+    // components that appear later mount collapsed: the press flips the target
+    // it finds. Reading the target's own state keeps a press from being spent
+    // re-applying what that target already shows.
     const children = state.transcriptContainer.children;
     for (let i = children.length - 1; i >= 0; i -= 1) {
       const child = children[i];
       if (child === undefined) continue;
       if (isExpandable(child)) {
+        state.toolOutputExpanded = !(readExpanded(child) ?? state.toolOutputExpanded);
         child.setExpanded(state.toolOutputExpanded);
-        break;
+        state.ui.requestRender();
+        return;
       }
       // Read/agent groups are the newest thing on screen and have no collapse
       // state of their own: stop instead of flipping a block that may already be
       // scrolled out of view.
       if (child instanceof ReadGroupComponent || child instanceof AgentGroupComponent) break;
     }
+    // Nothing expandable on screen: remember the intent for the next target that
+    // cannot report its own state.
+    state.toolOutputExpanded = !state.toolOutputExpanded;
     state.ui.requestRender();
   }
 

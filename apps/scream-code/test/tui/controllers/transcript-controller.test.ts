@@ -7,6 +7,7 @@ import {
   TranscriptController,
   type TranscriptControllerHost,
 } from '#/tui/controllers/transcript-controller';
+import { ActivityGroupComponent } from '#/tui/components/messages/activity-group';
 import { CompactionComponent } from '#/tui/components/dialogs/compaction';
 import { WelcomeComponent } from '#/tui/components/chrome/welcome';
 import {
@@ -22,6 +23,7 @@ import { BackgroundAgentStatusComponent } from '#/tui/components/messages/backgr
 import { CronMessageComponent } from '#/tui/components/messages/cron-message';
 import { ReadGroupComponent } from '#/tui/components/messages/read-group';
 import { ImageAttachmentStore } from '#/tui/utils/image-attachment-store';
+import { darkColors } from '#/tui/theme/colors';
 import type { TranscriptEntry, ToolCallBlockData } from '#/tui/types';
 
 import { createMockTUIState, makeMockStreamingUI } from '../fixtures/mock-host';
@@ -359,13 +361,34 @@ describe('TranscriptController misc surface', () => {
     expect(rendered(component)).toContain(`${t('tc.error_prefix')}boom`);
   });
 
-  it('toggleToolOutputExpansion flips the global preference only', () => {
+  it('toggleToolOutputExpansion flips the target it finds and remembers intent otherwise', () => {
     const { controller, state } = makeHost();
+    // Nothing expandable on screen: the press only records the intent.
     expect(state.toolOutputExpanded).toBe(false);
     controller.toggleToolOutputExpansion();
     expect(state.toolOutputExpanded).toBe(true);
     controller.toggleToolOutputExpansion();
     expect(state.toolOutputExpanded).toBe(false);
+
+    // With a target, the target's own state decides the next value.
+    const block = new ActivityGroupComponent(darkColors, undefined);
+    state.transcriptContainer.addChild(block);
+    controller.toggleToolOutputExpansion();
+    expect(block.isExpanded()).toBe(true);
+    expect(state.toolOutputExpanded).toBe(true);
+    controller.toggleToolOutputExpansion();
+    expect(block.isExpanded()).toBe(false);
+    expect(state.toolOutputExpanded).toBe(false);
+
+    // A block that mounted collapsed while the remembered state was already
+    // true still expands on the first press: a flag-only toggle would have
+    // spent that press re-applying the collapsed state.
+    state.toolOutputExpanded = true;
+    const fresh = new ActivityGroupComponent(darkColors, undefined);
+    state.transcriptContainer.addChild(fresh);
+    controller.toggleToolOutputExpansion();
+    expect(fresh.isExpanded()).toBe(true);
+    expect(block.isExpanded()).toBe(false);
   });
 
   it('togglePlanExpansion only flips when a plan-expandable child accepted it', () => {

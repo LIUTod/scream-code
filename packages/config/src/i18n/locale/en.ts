@@ -1101,6 +1101,11 @@ export const en: Record<string, string> = {
   'thinking.in_progress': 'Thinking...',
   'thinking.more_lines': '... ({count} more lines, ctrl+o to expand)',
 
+  // ─── tool bodies ───────────────
+  // Capped body of a glance-style tool card (Read/Grep/Glob) that is already
+  // expanded: there is nothing left to expand, so the hint carries no key.
+  'tool.more_lines': '... ({count} more lines)',
+
   // ─── shell-execution ───────────
   'shell.more_lines': '... ({count} more lines, ctrl+o to expand)',
 

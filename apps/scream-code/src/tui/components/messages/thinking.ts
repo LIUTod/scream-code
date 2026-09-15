@@ -114,6 +114,10 @@ export class ThinkingComponent implements Component {
     this.cachedLines = undefined;
   }
 
+  isExpanded(): boolean {
+    return this.expanded;
+  }
+
   render(width: number): string[] {
     // Live mode is intentionally not cached: the spinner frame changes every
     // 80 ms, and returning a stale cached array would freeze the animation.

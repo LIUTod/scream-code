@@ -626,6 +626,10 @@ export class ToolCallComponent extends CachedContainer {
     this.rebuildBody();
   }
 
+  isExpanded(): boolean {
+    return this.expanded;
+  }
+
   // Toggle the plan box's expanded state independently from tool-output
   // expansion. Returns true iff this card actually owns a plan preview
   // (ExitPlanMode), so the caller can decide whether to consume the keystroke.

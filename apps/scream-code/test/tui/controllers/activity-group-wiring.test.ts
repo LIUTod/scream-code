@@ -273,13 +273,58 @@ describe('activity block wiring', () => {
     expect(replayedHeader).toContain('工具执行完成');
   });
 
-  it('opens new blocks in the expansion state the user last chose', () => {
+  it('opens new blocks collapsed instead of inheriting the last Ctrl+O state', () => {
     const { state, controller } = createFixture();
     state.toolOutputExpanded = true;
 
     controller.onToolCallStart(makeToolCall('t1', 'Bash'));
 
-    expect(findGroup(state.transcriptContainer)?.isExpanded()).toBe(true);
+    // Expansion is per target: inheriting the toggle opened every later block
+    // (and every later Read card) without the user asking for it.
+    expect(findGroup(state.transcriptContainer)?.isExpanded()).toBe(false);
+  });
+
+  it('does not mount a fresh Read card in the last Ctrl+O state', () => {
+    const { state, controller } = createFixture();
+    state.toolOutputExpanded = true;
+
+    controller.onToolCallStart(makeToolCall('r1', 'Read'));
+    const output = Array.from(
+      { length: 200 },
+      (_, i) => `${String(i + 1)}\tconst n${String(i + 1)} = 1;`,
+    ).join('\n');
+    controller.onToolCallEnd('r1', { tool_call_id: 'r1', output });
+
+    const card = state.transcriptContainer.children.find(
+      (child): child is ToolCallComponent => child instanceof ToolCallComponent,
+    );
+    expect(card).toBeDefined();
+    // Collapsed: the header plus the summary glance. An inherited expansion
+    // would render the file body here.
+    expect(card?.render(80).length).toBeLessThan(10);
+  });
+
+  it('expands a block that mounted after the previous Ctrl+O press', () => {
+    const { state, controller, transcript } = createFixture();
+
+    controller.onToolCallStart(makeToolCall('t1', 'Bash'));
+    transcript.toggleToolOutputExpansion();
+    const first = findGroup(state.transcriptContainer);
+    expect(first?.isExpanded()).toBe(true);
+
+    // The turn settles and the next one opens a fresh block, which mounts
+    // collapsed even though the remembered state is still "expanded".
+    controller.endActivityGroup();
+    controller.onToolCallStart(makeToolCall('t2', 'Bash'));
+    const blocks = findGroups(state.transcriptContainer);
+    expect(blocks).toHaveLength(2);
+    expect(blocks[1]?.isExpanded()).toBe(false);
+
+    // The press flips what the user is looking at instead of re-applying the
+    // remembered state (which would have spent the keystroke invisibly).
+    transcript.toggleToolOutputExpansion();
+    expect(blocks[1]?.isExpanded()).toBe(true);
+    expect(blocks[0]?.isExpanded()).toBe(true);
   });
 
   it('endActivityGroup is a no-op without a block and settles one with content', () => {

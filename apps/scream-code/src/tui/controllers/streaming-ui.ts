@@ -441,7 +441,9 @@ export class StreamingUIController {
     if (existing !== undefined) return existing;
     const { state } = this.host;
     const group = new ActivityGroupComponent(state.theme.colors, state.ui);
-    group.setExpanded(state.toolOutputExpanded);
+    // Expansion is per target: a new block opens collapsed even when Ctrl+O was
+    // used moments ago, so the toggle never becomes a standing preference that
+    // opens every later block on its own.
     group.setRunning(state.appState.streamingPhase !== 'idle');
     this._activityGroup = group;
     this._turnThinkingHistory = '';
@@ -922,7 +924,6 @@ export class StreamingUIController {
     this.host.transcriptController.registerLiveComponent(tc, entry);
     this.host.transcriptController.markPending(tc);
 
-    if (state.toolOutputExpanded) tc.setExpanded(true);
     if (state.planExpanded) tc.setPlanExpanded(true);
 
     if (toolCall.name !== 'Agent') this._pendingAgentGroup = null;
@@ -1030,7 +1031,6 @@ export class StreamingUIController {
         state.appState.workDir,
       );
       completed.setPermissionMode(state.appState.permissionMode);
-      if (state.toolOutputExpanded) completed.setExpanded(true);
       if (state.planExpanded) completed.setPlanExpanded(true);
       const entry: TranscriptEntry = {
         id: nextTranscriptId(),
