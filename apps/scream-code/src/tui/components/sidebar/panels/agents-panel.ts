@@ -20,6 +20,11 @@ const AGENT_GRADIENT_CYCLE_MS = 2000;
 
 import type { SidebarPanel, SidebarPanelContext } from '../sidebar-panel';
 
+/** Display form of a slot type: 'coder' reads as 'Coder' in the panel. */
+function displayType(type: string): string {
+  return type.length === 0 ? type : type.charAt(0).toUpperCase() + type.slice(1);
+}
+
 /** Localized status word per slot state. */
 function statusText(status: SubagentSlotStatus): string {
   switch (status) {
@@ -61,7 +66,7 @@ class AgentsPanelContent {
     // instance count rides along with the status so the edge stays fixed.
     const rows: SidebarGridRow[] = agents.map((slot) => ({
       marker: slot.status === 'idle' ? '○' : '●',
-      label: slot.type,
+      label: displayType(slot.type),
       value: statusText(slot.status) + (slot.count > 1 ? `  ×${slot.count}` : ''),
     }));
     return layoutSidebarGrid(rows, width).map((cell, index) =>

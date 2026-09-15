@@ -350,7 +350,7 @@ export class SessionEventHandler {
     this.providerLatencyAt = Date.now();
   }
 
-  /** Sidebar Hub: average measured response time for the provider in use. The
+  /** Sidebar Hub: average measured first-token latency for the provider in use. The
    *  caller owns tone and staleness — this stays a plain reading. */
   getProviderLatency(): { ms: number | undefined; sampledAt: number | undefined } {
     if (this.providerLatencySamples.length === 0) return { ms: undefined, sampledAt: undefined };

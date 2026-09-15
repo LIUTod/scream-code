@@ -39,20 +39,17 @@ function formatCount(n: number): string {
 }
 
 /**
- * Compact token form for narrow sidebars: 2,267,680,102 → `22.7亿` (zh) or
- * `2.3B` (en). Used only when the thousands-separated form cannot fit, so a
- * narrow sidebar keeps every value readable instead of cutting digits.
+ * Compact token form for narrow sidebars: 2,267,680,102 → `2267.7M`. One unit
+ * ladder for every locale (K below a million, M above) so the value column
+ * stays comparable across languages: Chinese no longer switches to the
+ * ten-thousand / hundred-million units it used before.
+ * Used only when the thousands-separated form cannot fit, so a narrow sidebar
+ * keeps every value readable instead of cutting digits.
  */
 function formatCompact(n: number): string {
-  // The 999.5M / 999.5K (zh: 99.95M / 9.5K) floors keep a mantissa from
-  // rounding up into a four-digit "1000K" / "10000万" just below the next
-  // unit — that would widen the value column by 1-3 columns for one tick.
-  if (getLocale() === 'zh') {
-    if (n >= 99_950_000) return `${(n / 100_000_000).toFixed(1)}亿`;
-    if (n >= 9_500) return `${Math.round(n / 10_000)}万`;
-    return String(n);
-  }
-  if (n >= 999_500_000) return `${(n / 1_000_000_000).toFixed(1)}B`;
+  // The 999.5K floor keeps a mantissa from rounding up into a four-digit
+  // "1000K" just below the next unit — that would widen the value column by a
+  // column for a single tick.
   if (n >= 999_500) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${Math.round(n / 1_000)}K`;
   return String(n);

@@ -77,7 +77,8 @@ describe('hub panel', () => {
   it('renders one row per reading, provider first', () => {
     const lines = render(hub(rows)).map(plain);
     expect(lines).toHaveLength(4);
-    expect(lines[0]).toContain('model');
+    // The model row leads and shows the measured reading the row is named for.
+    expect(lines[0]).toContain('First token');
     expect(lines[0]).toContain('128ms');
     expect(lines[1]).toContain('github');
     expect(lines[1]).toContain('32ms');
@@ -139,9 +140,9 @@ describe('hub panel', () => {
 
   it('shows a configured endpoint label verbatim', () => {
     const line = plain(
-      render(hub([{ id: 'x', label: 'x (twitter)', ms: 210, tone: 'warn' }]))[0]!,
+      render(hub([{ id: 'x', label: 'X (Twitter)', ms: 210, tone: 'warn' }]))[0]!,
     );
-    expect(line).toContain('x (twitter)');
+    expect(line).toContain('X (Twitter)');
     expect(line).toContain('210ms');
   });
 
@@ -160,10 +161,10 @@ describe('hub panel', () => {
   });
 
   it('titles the panel in the active language, with no extra chrome', () => {
-    expect(hubPanel.title).toBe('Network Hub');
+    expect(hubPanel.title).toBe('Latency');
     setLocale('zh');
     try {
-      expect(hubPanel.title).toBe('网络 Hub');
+      expect(hubPanel.title).toBe('延迟');
     } finally {
       setLocale('en');
     }

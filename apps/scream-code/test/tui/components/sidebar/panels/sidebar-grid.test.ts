@@ -216,10 +216,10 @@ describe('cross-panel column consistency', () => {
       ['session', 'Total', '1,050'],
       ['session', 'Compacts', '2'],
       ['hub', 'github', '32ms'],
-      ['hub', 'model', '128ms'],
+      ['hub', 'First token', '128ms'],
       ['goal', 'tokens', '12,345'],
       ['goal', 'criterion', 'tests pass'],
-      ['agents', 'coder', '×2'],
+      ['agents', 'Coder', '×2'],
     ];
     for (const [panelId, label, reading] of probes) {
       // Compare from the label column onward: panels with a status glyph

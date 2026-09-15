@@ -45,10 +45,10 @@ export interface HubEndpoint {
 
 /** Default probe targets: the endpoints day-to-day development tends to need. */
 export const HUB_ENDPOINTS: readonly HubEndpoint[] = Object.freeze([
-  { id: 'github', url: 'https://github.com/' },
-  { id: 'google', url: 'https://www.google.com/' },
-  { id: 'x', url: 'https://x.com/', label: 'x (twitter)' },
-  { id: 'huggingface', url: 'https://huggingface.co/' },
+  { id: 'github', url: 'https://github.com/', label: 'Github' },
+  { id: 'google', url: 'https://www.google.com/', label: 'Google' },
+  { id: 'x', url: 'https://x.com/', label: 'X (Twitter)' },
+  { id: 'huggingface', url: 'https://huggingface.co/', label: 'Huggingface' },
   { id: 'alibaba', url: 'https://www.aliyun.com/', label: 'Alibaba' },
   { id: 'tencent', url: 'https://cloud.tencent.com/', label: 'Tencent' },
 ]);

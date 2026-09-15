@@ -79,6 +79,22 @@ describe('SessionPanel', () => {
     expect(new Set(bare.map((l) => displayWidth(l))).size).toBe(1);
   });
 
+  it('uses the same K/M ladder in every locale', () => {
+    setLocale('zh');
+    const strip = (l: string) => l.replaceAll(/\u001B\[[0-9;]*m/g, '');
+    try {
+      const bare = sessionPanel.build(ctx(baseStats)).render(20).map(strip);
+      const text = bare.join('\n');
+
+      // Same M/K values as the English panel, and no Chinese unit anywhere.
+      expect(text).toContain('227.6M');
+      expect(text).toContain('515K');
+      expect(text).not.toMatch(/[万亿]/);
+    } finally {
+      setLocale('en');
+    }
+  });
+
   it('renders one field per row on a shared two-column grid', () => {
     const lines = sessionPanel.build(ctx(baseStats)).render(46);
     const strip = (l: string) => l.replaceAll(/\u001B\[[0-9;]*m/g, '');

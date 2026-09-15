@@ -43,17 +43,17 @@ describe('AgentsPanel', () => {
   it('renders the fixed 8 idle slots, greyed out with the idle label', () => {
     const lines = agentsPanel.build(ctx(new SubagentSlots().getSlots())).render(50);
     expect(lines).toHaveLength(8);
-    expect(lines[0]).toContain('coder');
-    expect(lines[0]).toContain('idle');
-    expect(lines[7]).toContain('writer');
+    expect(lines[0]).toContain('Coder');
+    expect(lines[0]).toContain('Idle');
+    expect(lines[7]).toContain('Writer');
   });
 
   it('shows status per slot with no live output preview', () => {
     const slots = new SubagentSlots();
     slots.onSpawned('agent-1', 'coder', 'Review the sidebar change');
     const lines = agentsPanel.build(ctx(slots.getSlots())).render(50);
-    const coder = lines.find((l) => l.includes('coder'));
-    expect(coder).toContain('working');
+    const coder = lines.find((l) => l.includes('Coder'));
+    expect(coder).toContain('Working');
     // No output preview / description in the line.
     expect(coder).not.toContain('Review the sidebar change');
   });
@@ -61,16 +61,16 @@ describe('AgentsPanel', () => {
   it('shows the instance count only when more than one instance shares the slot', () => {
     const slots = new SubagentSlots();
     slots.onSpawned('agent-1', 'coder', 'a');
-    let line = agentsPanel.build(ctx(slots.getSlots())).render(50).find((l) => l.includes('coder'))!;
+    let line = agentsPanel.build(ctx(slots.getSlots())).render(50).find((l) => l.includes('Coder'))!;
     expect(line).not.toContain('×');
 
     slots.onSpawned('agent-2', 'coder', 'b');
     slots.onSpawned('agent-3', 'coder', 'c');
-    line = agentsPanel.build(ctx(slots.getSlots())).render(50).find((l) => l.includes('coder'))!;
+    line = agentsPanel.build(ctx(slots.getSlots())).render(50).find((l) => l.includes('Coder'))!;
     expect(line).toContain('×3');
 
     slots.onTerminated('agent-1');
-    line = agentsPanel.build(ctx(slots.getSlots())).render(50).find((l) => l.includes('coder'))!;
+    line = agentsPanel.build(ctx(slots.getSlots())).render(50).find((l) => l.includes('Coder'))!;
     expect(line).toContain('×2');
   });
 
@@ -82,10 +82,10 @@ describe('AgentsPanel', () => {
     const lines = agentsPanel.build(ctx(slots.getSlots())).render(42);
     expect(lines).toHaveLength(8);
     lines.forEach((l) => expect(l.trim().length).toBeGreaterThan(0)); // no blank rows
-    expect(lines[0]).toContain('coder');
-    expect(lines[1]).toContain('explore');
+    expect(lines[0]).toContain('Coder');
+    expect(lines[1]).toContain('Explore');
     expect(lines[1]).toContain('×3');
-    expect(lines[2]).toContain('plan');
+    expect(lines[2]).toContain('Plan');
   });
 
   it('keeps the status word on the same column for idle and busy rows', () => {
@@ -100,8 +100,8 @@ describe('AgentsPanel', () => {
     // right-aligned, so idle and busy rows end on the same inner edge and the
     // count never pushes the status past it.
     expect(displayWidth(idle)).toBe(displayWidth(busy));
-    expect(busy.indexOf('working') < busy.indexOf('×2')).toBe(true);
-    expect(busy.trimEnd().endsWith('working  ×2')).toBe(true);
+    expect(busy.indexOf('Working') < busy.indexOf('×2')).toBe(true);
+    expect(busy.trimEnd().endsWith('Working  ×2')).toBe(true);
   });
 
   it('paints busy slots with a true-colour ANSI gradient and the colour changes over time', () => {
@@ -110,16 +110,16 @@ describe('AgentsPanel', () => {
     const slots = new SubagentSlots();
     slots.onSpawned('agent-1', 'coder', 'a');
     const content = agentsPanel.build(ctx(slots.getSlots()));
-    const line1 = content.render(50).find((l) => l.includes('coder'))!;
+    const line1 = content.render(50).find((l) => l.includes('Coder'))!;
     expect(line1).toMatch(/\u001B\[38;2;\d+;\d+;\d+m/); // true-colour gradient
 
     vi.useFakeTimers();
     try {
       const t0 = Date.now();
       vi.setSystemTime(t0 + 0);
-      const first = content.render(50).find((l) => l.includes('coder'))!;
+      const first = content.render(50).find((l) => l.includes('Coder'))!;
       vi.setSystemTime(t0 + 1000);
-      const second = content.render(50).find((l) => l.includes('coder'))!;
+      const second = content.render(50).find((l) => l.includes('Coder'))!;
       // 1s advances half of the 2s cycle → a different gradient colour.
       expect(first).not.toBe(second);
     } finally {
@@ -131,11 +131,11 @@ describe('AgentsPanel', () => {
     const slots = new SubagentSlots();
     slots.onSpawned('agent-1', 'coder', 'a');
     slots.onRequesting('agent-1');
-    const line = agentsPanel.build(ctx(slots.getSlots())).render(50).find((l) => l.includes('coder'))!;
-    expect(line).toContain('asking');
+    const line = agentsPanel.build(ctx(slots.getSlots())).render(50).find((l) => l.includes('Coder'))!;
+    expect(line).toContain('Asking');
     // palette.warning = #e0ae21 → the dot and the status word carry it…
     expect(line).toContain('\u001B[38;2;224;174;33m');
     // …while the type name stays on the strong text colour (no brand gradient).
-    expect(line).toContain('\u001B[38;2;255;255;255mcoder');
+    expect(line).toContain('\u001B[38;2;255;255;255mCoder');
   });
 });

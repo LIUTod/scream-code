@@ -264,7 +264,7 @@ describe('createHubProbe', () => {
     ]);
     // Labels are what the sidebar shows: an ambiguous host gets an explicit one,
     // and nothing may outgrow the shared label column (which would truncate it).
-    expect(HUB_ENDPOINTS.find((endpoint) => endpoint.id === 'x')?.label).toBe('x (twitter)');
+    expect(HUB_ENDPOINTS.find((endpoint) => endpoint.id === 'x')?.label).toBe('X (Twitter)');
     for (const endpoint of HUB_ENDPOINTS) {
       expect(displayWidth(endpoint.label ?? endpoint.id)).toBeLessThanOrEqual(SIDEBAR_LABEL_COLS);
     }
