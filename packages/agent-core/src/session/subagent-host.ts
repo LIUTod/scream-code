@@ -713,6 +713,11 @@ export class SessionSubagentHost {
       const filtered = filterToolsForCapability(current, capabilityMode);
       child.tools.setActiveTools(filtered);
     }
+
+    // Record the effective mode on the child: anything that spawns on its
+    // behalf later (the RLM python bridge) must pass the same restriction down
+    // instead of handing the grandchild the full tool set.
+    child.setCapabilityMode(capabilityMode ?? 'all');
   }
 
   private resolveModelBinding(profileName: string): string | undefined {

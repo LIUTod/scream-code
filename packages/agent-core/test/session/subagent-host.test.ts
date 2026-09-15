@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { Agent } from '../../src/agent';
 import { AGENT_WIRE_PROTOCOL_VERSION } from '../../src/agent/records';
+import { createRlmHostHandlers } from '../../src/agent/tool';
 import type { ScreamConfig } from '../../src/config';
 import type { ResolvedAgentProfile } from '../../src/profile';
 import type { SDKSessionRPC } from '../../src/rpc';
@@ -514,6 +515,28 @@ describe('SessionSubagentHost', () => {
     // the profile is applied, so this only holds because useProfile rebuilds
     // again afterwards.
     expect(child.llmCalls[0]?.tools.map((tool) => tool.name)).toContain('Agent');
+  });
+
+  it('passes the caller capability mode down when the rlm bridge spawns', async () => {
+    const spawn = vi.fn(async () => ({
+      agentId: 'rlm-child',
+      completion: Promise.resolve({ result: 'done' }),
+    }));
+    const child = testAgent({
+      type: 'sub',
+      subagentHost: { spawn } as unknown as SessionSubagentHost,
+    });
+    child.agent.setCapabilityMode('execute');
+
+    const handlers = createRlmHostHandlers(child.agent);
+    await handlers['rlm.run']?.({ task: 'probe', name: 'probe' });
+
+    // Without the forward, a restricted agent could order an unrestricted
+    // grandchild through the python bridge, defeating the tool trim above.
+    expect(spawn).toHaveBeenCalledWith(
+      'coder',
+      expect.objectContaining({ capabilityMode: 'execute' }),
+    );
   });
 
   it('rejects unknown subagent types before creating a child agent', async () => {

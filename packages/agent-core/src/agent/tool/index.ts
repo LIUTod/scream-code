@@ -297,7 +297,7 @@ interface McpToolEntry {
  * (setRlmMaxDepth / /rlm-max-depth); it is `Infinity` by default — unlimited
  * recursion — and a positive integer when the user opts into a limit.
  */
-function createRlmHostHandlers(agent: Agent): HostRequestHandlers {
+export function createRlmHostHandlers(agent: Agent): HostRequestHandlers {
   const handles = new Map<
     string,
     {
@@ -330,6 +330,10 @@ function createRlmHostHandlers(agent: Agent): HostRequestHandlers {
         parentToolCallId: `rlm_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
         prompt: task,
         description: `rlm subagent: ${name}`,
+        // Inherit the caller's capability restriction: without this the bridge
+        // would hand the child a grandchild with the full tool set, which is
+        // exactly what NESTING_TOOLS filtering is meant to prevent.
+        capabilityMode: agent.getCapabilityMode(),
         runInBackground: false,
         signal: controller.signal,
       });

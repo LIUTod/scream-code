@@ -23,6 +23,7 @@ import type { PreparedSystemPromptContext, ResolvedAgentProfile } from '../profi
 import type { LspProcessSupervisor } from '../lsp/process-supervisor';
 import type { ModelProvider } from '../session/provider-manager';
 import type { SessionSubagentHost } from '../session/subagent-host';
+import type { SubagentCapabilityMode } from '../session/subagent-capability';
 import type { SkillRegistry } from '../skill';
 import {
   estimateTokens,
@@ -430,6 +431,22 @@ export class Agent {
       this.tools.setActiveTools([...current, 'python']);
     }
     this.records.logRecord({ type: 'rlm.enter' });
+  }
+
+  /** Capability mode this agent runs under; `all` for main agents and for
+   *  subagents the parent did not restrict. The RLM python bridge forwards it
+   *  when it spawns on this agent's behalf, so a restricted agent cannot end
+   *  up with an unrestricted grandchild. */
+  private capabilityMode: SubagentCapabilityMode = 'all';
+
+  /** Records the capability mode applied to this agent's tool set at spawn. */
+  setCapabilityMode(mode: SubagentCapabilityMode): void {
+    this.capabilityMode = mode;
+  }
+
+  /** Returns the capability mode applied to this agent's tool set. */
+  getCapabilityMode(): SubagentCapabilityMode {
+    return this.capabilityMode;
   }
 
   /** Restores RLM mode from a persisted record during replay. Does not log
