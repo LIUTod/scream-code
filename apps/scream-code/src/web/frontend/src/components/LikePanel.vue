@@ -86,7 +86,6 @@ async function confirm(): Promise<void> {
   color: var(--color-text-muted);
   font-size: var(--font-size-xs);
   cursor: pointer;
-  transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
 }
 .like-edit:hover { background: var(--color-hover); color: var(--color-accent); }
 /* The drawer turns into a `z-index: var(--z-overlay)` layer on mobile, so this

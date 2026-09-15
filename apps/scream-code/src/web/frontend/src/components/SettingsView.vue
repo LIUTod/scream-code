@@ -16,10 +16,11 @@ import type {
 /**
  * Settings center (G4).
  *
- * Split layout: a left rail of sections (通用 / 模型 / 技能 / 插件 / MCP /
- * 后台任务) and a right content pane. All data is real — the sections render
- * from the provided `client` harness refs and call its action methods. The
- * 通用 pane keeps the pre-existing theme + like-preference editors.
+ * Split layout: a left rail of sections (General / Models / Skills / Plugins /
+ * MCP / Background tasks) and a right content pane. All data is real — the
+ * sections render from the provided `client` harness refs and call its action
+ * methods. The General pane keeps the pre-existing theme + like-preference
+ * editors.
  */
 const props = withDefaults(
   defineProps<{
@@ -96,6 +97,16 @@ function cleanup(): LikePreferences {
 /* ── Models ─────────────────────────────────────────────────────────────── */
 const models = computed(() => val<ModelInfo[]>(client.value?.models) ?? []);
 const currentModel = computed(() => val<any>(client.value?.status)?.model ?? '');
+/** Model list load failure reason; the pane renders a retry row from it (L3: no silent failures). */
+const modelsError = computed<string>(() => val<string>(client.value?.modelsError) ?? '');
+/**
+ * With no active session a model switch has no target: keep the list readable,
+ * disable the action and state the reason.
+ */
+const hasSession = computed<boolean>(() => !!val<string>(client.value?.currentSessionId));
+function retryModels() {
+  void client.value?.fetchModels?.();
+}
 function onSwitchModel(alias: string) {
   void client.value?.switchModel?.(alias);
 }
@@ -229,7 +240,7 @@ function statusColor(status: string): string {
 
       <!-- Content pane -->
       <div class="pane">
-        <!-- 通用 -->
+        <!-- General -->
         <section v-if="activeSection === 'general'" class="pane-section">
           <h1 class="settings-title">通用设置</h1>
 
@@ -270,10 +281,17 @@ function statusColor(status: string): string {
           </div>
         </section>
 
-        <!-- 模型 -->
+        <!-- Models -->
         <section v-else-if="activeSection === 'models'" class="pane-section">
           <h1 class="settings-title">模型</h1>
-          <p v-if="models.length === 0" class="empty">没有可用的模型</p>
+          <!-- No active session: switching has no target, so show a notice bar
+               plus a disabled action instead of a dead button to guess at (L3). -->
+          <p v-if="!hasSession" class="notice-bar">打开一个会话后可在此切换模型</p>
+          <div v-if="modelsError" class="error-row" role="alert">
+            <span class="error-text">{{ modelsError }}</span>
+            <button class="row-action" @click="retryModels">重试</button>
+          </div>
+          <p v-else-if="models.length === 0" class="empty">没有可用的模型</p>
           <ul v-else class="list">
             <li
               v-for="m in models"
@@ -287,7 +305,7 @@ function statusColor(status: string): string {
               </div>
               <button
                 class="row-action"
-                :disabled="m.alias === currentModel"
+                :disabled="!hasSession || m.alias === currentModel"
                 @click="onSwitchModel(m.alias)"
               >
                 {{ m.alias === currentModel ? '使用中' : '切换' }}
@@ -296,7 +314,7 @@ function statusColor(status: string): string {
           </ul>
         </section>
 
-        <!-- 技能 -->
+        <!-- Skills -->
         <section v-else-if="activeSection === 'skills'" class="pane-section">
           <h1 class="settings-title">技能</h1>
           <p v-if="skills.length === 0" class="empty">当前会话没有可用技能</p>
@@ -322,7 +340,7 @@ function statusColor(status: string): string {
           </ul>
         </section>
 
-        <!-- 插件 -->
+        <!-- Plugins -->
         <section v-else-if="activeSection === 'plugins'" class="pane-section">
           <h1 class="settings-title">插件</h1>
 
@@ -382,7 +400,7 @@ function statusColor(status: string): string {
           </ul>
         </section>
 
-        <!-- 后台任务 -->
+        <!-- Background tasks -->
         <section v-else-if="activeSection === 'tasks'" class="pane-section">
           <h1 class="settings-title">后台任务</h1>
           <p v-if="taskMsg" class="hint">{{ taskMsg }}</p>
@@ -581,6 +599,36 @@ function statusColor(status: string): string {
   color: var(--color-text-faint);
   font-size: var(--font-size-sm);
   margin: 0;
+}
+/* Notice bar / error row: lightweight status strip at the top of a pane, reusing
+   the hairline border language. */
+.notice-bar {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-sunken);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+.error-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-danger);
+  border-radius: var(--radius-md);
+  background: var(--color-danger-soft, rgba(220, 60, 60, 0.12));
+  color: var(--color-danger);
+  font-size: var(--font-size-sm);
+}
+.error-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .list {
   list-style: none;

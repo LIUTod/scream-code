@@ -184,7 +184,6 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
   font-weight: 600;
   cursor: pointer;
   text-align: left;
-  transition: background var(--dur-fast) var(--ease-out);
 }
 .approval-minibar:hover { background: var(--color-hover); }
 .approval-minibar:active { background: var(--color-selected); }
@@ -248,7 +247,6 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
   border-radius: var(--radius-sm);
   font-size: var(--font-size-sm);
   line-height: 1.6;
-  transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
 }
 .icon-btn:hover {
   background: var(--color-hover);
@@ -312,7 +310,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
   padding: 0 var(--space-1);
   margin-right: var(--space-1);
 }
-/* 批准主按钮：渐变 + 光晕（安全关键操作，需被注意到） */
+/* Approve primary button: gradient + glow (a safety-critical action that has to be noticed) */
 .approval-buttons :deep(.ui-btn--primary) {
   background: var(--gradient-accent);
   color: var(--color-on-accent);
@@ -330,7 +328,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
   background: rgba(0, 0, 0, 0.15);
   border-color: transparent;
 }
-/* 拒绝按钮：danger 语义描边样式 */
+/* Reject button: danger semantics with an outlined style */
 .approval-buttons :deep(.ui-btn--danger) {
   background: transparent;
   color: var(--color-danger);

@@ -21,11 +21,17 @@ const props = withDefaults(defineProps<{
   /** Timestamp visibility follows grouping: only the last message of a run of
    *  consecutive assistant messages shows it. */
   showTimestamp?: boolean;
+  /** Model-badge visibility follows grouping too: one user turn is often split
+   *  into several consecutive assistant segments (one per tool round), and
+   *  MessageList passes true only for the FIRST segment of the run — or when the
+   *  model really changed. Observed in a real session: all 4 segments of one turn
+   *  printed the full 46-char alias, which read as repetitive noise. */
+  showModel?: boolean;
   /** Session context for on-demand thinking loading. */
   sessionId?: string;
   /** Session working dir — resolves relative written/mentioned file paths. */
   workDir?: string;
-}>(), { isLatestUser: false, idle: true, streaming: false, canFork: false, showTimestamp: true, sessionId: '', workDir: '' });
+}>(), { isLatestUser: false, idle: true, streaming: false, canFork: false, showTimestamp: true, showModel: true, sessionId: '', workDir: '' });
 const emit = defineEmits<{
   (e: 'edit', content: string): void;
   (e: 'retry'): void;
@@ -35,9 +41,24 @@ const copied = ref(false);
 let copyTimer: number | null = null;
 const isUser = computed(() => props.message.role === 'user');
 const isAssistant = computed(() => props.message.role === 'assistant');
+/** A running turn renders its work status on the brand row, inline with the "generating" badge. */
+const isRunningTurn = computed(() => props.message.turnStats?.status === 'running');
 const thinkingTools = computed(() => props.message.tools.filter((tool) => tool.name === 'thinking'));
 const realTools = computed(() => props.message.tools.filter((tool) => tool.name !== 'thinking'));
 const timestamp = computed(() => props.message.ts !== undefined ? formatMessageTime(props.message.ts) : '');
+
+/**
+ * Model badge label. An alias has the shape `provider/model-path` and can carry
+ * a long model name after the slash; printing the whole string on the meta row
+ * squeezes out the timestamp and status. Only the model name after `/` is kept —
+ * an abbreviation, not a truncation — and the full alias stays reachable through
+ * the hover title, so no information is lost.
+ */
+const modelLabel = computed(() => {
+  const raw = props.message.model ?? '';
+  const cut = raw.lastIndexOf('/');
+  return cut >= 0 && cut < raw.length - 1 ? raw.slice(cut + 1) : raw;
+});
 const canEdit = computed(() => isUser.value && props.isLatestUser && props.idle);
 
 /** Files this assistant turn actually wrote (settled write/edit tool calls
@@ -192,11 +213,15 @@ async function copyContent() {
 
     <div v-else class="assistant-wrap">
       <div
-        v-if="isAssistant && (message.model || streaming || (showTimestamp && timestamp))"
+        v-if="isAssistant && ((message.model && showModel) || streaming || isRunningTurn || (showTimestamp && timestamp))"
         class="assistant-brand"
       >
-        <span v-if="message.model" class="brand-model">{{ message.model }}</span>
+        <span v-if="message.model && showModel" class="brand-model" :title="message.model">{{ modelLabel }}</span>
         <span v-if="streaming" class="brand-streaming"><i aria-hidden="true" />生成中</span>
+        <!-- The running work status shares the row with the "generating" badge:
+             on its own line it reads as two unrelated states, and it wraps on
+             narrow viewports — it must stay on the same line as the icon. -->
+        <TurnStats v-if="isRunningTurn" :stats="message.turnStats!" inline />
         <time v-if="showTimestamp && timestamp" class="brand-time">{{ timestamp }}</time>
       </div>
       <div class="assistant-body">
@@ -207,7 +232,7 @@ async function copyContent() {
         <ToolGroup v-if="realTools.length && showTools" name="工具调用过程" :tools="realTools" :live="streaming" :work-dir="workDir" :session-id="sessionId" />
         <MarkdownRenderer v-if="message.content" class="assistant-content" :content="message.content" :streaming="streaming" />
         <span v-else-if="streaming" class="streaming-cursor" aria-label="正在生成" />
-        <TurnStats v-if="message.turnStats" :stats="message.turnStats" />
+        <TurnStats v-if="message.turnStats && message.turnStats.status !== 'running'" :stats="message.turnStats" />
         <div v-if="writtenFiles.length" class="written-files" role="group" aria-label="本回合写入的文件">
           <button
             v-for="wf in writtenFiles"
@@ -234,16 +259,18 @@ async function copyContent() {
 <style scoped>
 /* Gutter matches the composer dock (--space-5) so the text column, the bubble
    and the input card all share one left/right edge. */
-.message { width:100%; padding:14px var(--space-5); }
-.message.user { display:flex; justify-content:flex-end; padding-top:18px; animation:rise-in var(--dur-msg-user) var(--ease-out) both; }
+.message { width:100%; padding:var(--space-4) var(--space-5); }
+.message.user { display:flex; justify-content:flex-end; padding-top:var(--space-5); animation:rise-in var(--dur-msg-user) var(--ease-out) both; }
 .message.assistant { animation:rise-in var(--dur-msg-assistant) var(--ease-out) both; }
-.user-wrap { max-width:85%; display:flex; flex-direction:column; align-items:flex-end; }
-.user-bubble { padding:8px 12px; border:1px solid var(--color-line); border-radius:var(--radius-lg); background:var(--color-user-bg, var(--color-hover)); color:var(--color-text); line-height:1.65; white-space:pre-wrap; word-break:break-word; max-height:240px; overflow-y:auto; scrollbar-width:none; }
+.user-wrap { max-width:min(85%, 620px); display:flex; flex-direction:column; align-items:flex-end; }
+/* Short-form bubble text reads tighter than long-form body copy
+   (1.6 vs 1.75) — line height scales with expected line length. */
+.user-bubble { padding:var(--space-2) var(--space-3); border:1px solid var(--color-line); border-radius:var(--radius-lg); background:var(--color-user-bg, var(--color-hover)); color:var(--color-text); line-height:1.6; white-space:pre-wrap; word-break:break-word; max-height:240px; overflow-y:auto; scrollbar-width:none; }
 .user-bubble::-webkit-scrollbar { width: 0; height: 0; display: none; }
 .assistant-wrap { width:100%; }
-.assistant-brand { display:flex; align-items:center; gap:8px; margin-bottom:6px; min-height:14px; }
-.brand-model { font-size:11px; color:var(--color-text-faint); letter-spacing:0.01em; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.brand-streaming { display:inline-flex; align-items:center; gap:5px; font-size:11px; color:var(--color-text-muted); }
+.assistant-brand { display:flex; align-items:center; gap:var(--space-2); margin-bottom:var(--space-2); min-height:14px; }
+.brand-model { font-size:var(--font-size-xs); color:var(--color-text-faint); letter-spacing:0.01em; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.brand-streaming { display:inline-flex; align-items:center; gap:5px; font-size:var(--font-size-xs); color:var(--color-text-muted); }
 .brand-streaming i { width:5px; height:5px; border-radius:50%; background:var(--color-accent); box-shadow:0 0 6px var(--color-accent-glow); animation:breathe var(--dur-breathe) ease-in-out infinite; }
 .degraded-note {
   margin-bottom: var(--space-3);
@@ -265,27 +292,29 @@ async function copyContent() {
 .assistant-content { width:100%; }
 .message.error .assistant-body { color:var(--color-danger); }
 .streaming-cursor { width:8px; height:18px; border-radius:var(--radius-xs); background:var(--gradient-accent); animation:breathe var(--dur-breathe) ease-in-out infinite; }
-.message-meta { min-height:24px; display:flex; align-items:center; gap:4px; margin-top:2px; color:var(--color-text-faint); font-size:11px; }
-.meta-time { margin-left:auto; padding-left:var(--space-2); font-size:10px; color:var(--color-text-faint); flex-shrink:0; }
-.user-meta { justify-content:flex-end; margin:4px 2px 0; }
+/* Meta row: one notch below body text (xs vs base) so it recedes, but
+   stays legible enough to scan; hover keeps actions discoverable. */
+.message-meta { min-height:var(--space-6); display:flex; align-items:center; gap:var(--space-1); margin-top:var(--space-1); color:var(--color-text-faint); font-size:var(--font-size-xs); }
+.meta-time { margin-left:auto; padding-left:var(--space-2); font-size:var(--font-size-xs); color:var(--color-text-faint); flex-shrink:0; }
+.user-meta { justify-content:flex-end; margin:var(--space-1) 2px 0; }
 /* Role header rows: name + time sit above the content, mirroring the
    reference layout; the meta row below keeps only actions. */
-.user-head { display:flex; align-items:center; justify-content:flex-end; gap:6px; margin-bottom:6px; min-height:14px; }
+.user-head { display:flex; align-items:center; justify-content:flex-end; gap:var(--space-2); margin-bottom:var(--space-2); min-height:14px; }
 .user-head .meta-time { margin-left:0; padding-left:0; }
-.head-name { font-size:11px; color:var(--color-text-faint); }
+.head-name { font-size:var(--font-size-xs); color:var(--color-text-faint); }
 .user-avatar { width:18px; height:18px; border-radius:var(--radius-full); background:var(--color-accent-soft); color:var(--color-text-muted); display:inline-flex; align-items:center; justify-content:center; flex-shrink:0; }
-.brand-time { margin-left:auto; font-size:10px; color:var(--color-text-faint); flex-shrink:0; }
+.brand-time { margin-left:auto; font-size:var(--font-size-xs); color:var(--color-text-faint); flex-shrink:0; }
 .at-link { display:inline; padding:0; border:0; background:none; font:inherit; color:inherit; text-decoration:underline; text-decoration-color:var(--color-accent-bd); text-underline-offset:2px; cursor:pointer; word-break:break-all; transition:color var(--dur-fast) var(--ease-out), text-decoration-color var(--dur-fast) var(--ease-out); }
 .at-link:hover { color:var(--color-accent); text-decoration-color:var(--color-accent); }
-.written-files { display:flex; flex-wrap:wrap; gap:6px; }
-.written-file { display:inline-flex; align-items:center; gap:4px; padding:2px 8px; border:1px solid var(--color-line-strong); border-radius:var(--radius-full); background:var(--color-surface); color:var(--color-text-muted); font-family:var(--font-mono); font-size:var(--font-size-xs); cursor:pointer; transition:border-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out); }
+.written-files { display:flex; flex-wrap:wrap; gap:var(--space-2); }
+.written-file { display:inline-flex; align-items:center; gap:var(--space-1); padding:2px var(--space-2); border:1px solid var(--color-line-strong); border-radius:var(--radius-full); background:var(--color-surface); color:var(--color-text-muted); font-family:var(--font-mono); font-size:var(--font-size-xs); cursor:pointer; transition:border-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out); }
 .written-file:hover { border-color:var(--color-accent-bd); color:var(--color-text); background:var(--color-hover); }
 .written-file:active { background:var(--color-selected); }
 .written-file-name { max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.message-meta button { display:inline-flex; align-items:center; gap:4px; height:24px; border:0; border-radius:var(--radius-sm); padding:0 6px; background:transparent; color:var(--color-text-faint); font-size:11px; cursor:pointer; opacity:0; transition:opacity var(--dur-base) var(--ease-out), background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out); }
+.message-meta button { display:inline-flex; align-items:center; gap:var(--space-1); height:var(--space-6); border:0; border-radius:var(--radius-sm); padding:0 var(--space-2); background:transparent; color:var(--color-text-faint); font-size:var(--font-size-xs); cursor:pointer; opacity:0; transition:opacity var(--dur-base) var(--ease-out), background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out); }
 .message:hover .message-meta button,.message-meta button:focus-visible { opacity:1; }
 .message-meta button:hover { color:var(--color-accent); background:var(--color-hover); }
 .message-meta button:active { transform:scale(0.94); background:var(--color-selected); }
 @media (prefers-reduced-motion:reduce) { .message.user,.message.assistant { animation:none; } .assistant-brand i,.streaming-cursor { animation:none; } }
-@media (max-width:640px) { .message { padding:12px var(--space-4); } .user-wrap { max-width:92%; } .message-meta button { opacity:1; min-height:32px; } }
+@media (max-width:640px) { .message { padding:var(--space-3) var(--space-4); } .user-wrap { max-width:92%; } .message-meta button { opacity:1; min-height:32px; } }
 </style>

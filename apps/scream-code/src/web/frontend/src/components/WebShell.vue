@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, type Component } from 'vue';
 import { useScreamWebClient } from '../composables/useScreamWebClient';
 import { useSlashCommands } from '../composables/useSlashCommands';
 import { usePanelResize } from '../composables/usePanelResize';
@@ -7,22 +7,43 @@ import type { WorkspaceMode } from './ModeSwitch.vue';
 import type { ShellView } from './Sidebar.vue';
 import {
   RIGHT_PANEL_MIN_WIDTH,
+  SIDEBAR_COMPACT_MAX_WIDTH,
+  SIDEBAR_DEFAULT_WIDTH,
+  SIDEBAR_MAX_WIDTH,
+  SIDEBAR_MIN_WIDTH,
+  SIDEBAR_RAIL_WIDTH,
   SPLIT_PANEL_MIN_WIDTH,
   getDefaultRightPanelWidth,
   getRightPanelMaxWidth,
   getSidebarMaxWidth,
 } from '../utils/panelLayout';
-import { filePanel, openFileInPanel, setFilePanelOpen } from '../utils/fileTabState';
+import {
+  activeDockTab,
+  dockPanel,
+  openFileInPanel,
+  setDockOpen,
+} from '../utils/fileTabState';
+import type { SessionDockKind } from '../utils/dockTabTypes';
 import { readStoredString, writeStoredString } from '../utils/storage';
 import { useToast } from '../composables/useToast';
+import { closeSettingsModal } from '../composables/useSettingsModal';
+import { useWorkspacePreference } from '../composables/useWorkspacePreference';
 import ConversationView from './ConversationView.vue';
 import FileViewer from './FileViewer.vue';
+import GitPanel from './GitPanel.vue';
+import GoalPanel from './GoalPanel.vue';
+import NewSessionModal from './NewSessionModal.vue';
 import InfoPanel from './InfoPanel.vue';
+import LikePanel from './LikePanel.vue';
+import RunStatusPanel from './RunStatusPanel.vue';
+import SessionDetailView from './SessionDetailView.vue';
+import SettingsModal from './SettingsModal.vue';
 import SettingsView from './SettingsView.vue';
 import Sidebar from './Sidebar.vue';
 import SkillsView from './SkillsView.vue';
 import SvgIcon from './ui/SvgIcon.vue';
 import TabBar from './TabBar.vue';
+import TodoPanel from './TodoPanel.vue';
 import WorkspaceHome from './WorkspaceHome.vue';
 
 const client = useScreamWebClient();
@@ -74,13 +95,26 @@ function waitForConnected(timeoutMs = 8000): Promise<boolean> {
   });
 }
 
+/**
+ * Lazy session creation: "new chat" no longer POSTs /sessions immediately — a
+ * stray click would otherwise leave a zero-message session in the list. It just
+ * returns to the home hero; the session is really created when the first send /
+ * try-it actually lands.
+ *
+ * Why not "clear currentSessionId and keep the WS connected with no session": a
+ * WS connection without a sessionId is bound by the server to the first active
+ * session (the firstActive fallback in server.ts) and server_hello writes the old
+ * id back unconditionally; clearing the id alone silently re-binds when the tab
+ * returns to the foreground (visibilitychange → connect()), so the next send
+ * lands in the old session anyway. The existing binding is therefore left
+ * untouched — the "new" entry now opens a confirm dialog and creates the session
+ * right away, so no implicit pending-session flag is needed.
+ */
+
 function onNavigate(id: ShellView) {
   if (id === 'chat') {
-    if (currentSessionId.value) {
-      view.value = 'chat';
-    } else {
-      void onCreateSession();
-    }
+    // A bound session goes straight to chat; nothing to show (cold start) falls back home.
+    view.value = currentSessionId.value ? 'chat' : 'home';
   } else {
     view.value = id;
   }
@@ -89,28 +123,149 @@ function onNavigate(id: ShellView) {
 
 function onCreateSession() {
   mobileSidebarOpen.value = false;
-  view.value = 'chat';
-  void createSession();
+  // ⌘N would stack the new-session dialog on top of the settings modal: with two
+  // modals mounted one Escape is consumed by each handler and looks like a single
+  // keypress closing both. Close settings first — with only one modal mounted, Esc
+  // has an unambiguous owner.
+  closeSettingsModal();
+  // The entry point is the confirm dialog: pick workspace and model, then create.
+  // Returning home silently made the button feel dead to users.
+  newSessionOpen.value = true;
 }
+
+/** Session path once the dialog is confirmed: create the session (switch view as
+ * soon as REST succeeds, the connection catches up asynchronously) → switch model
+ * if needed → already in the chat view. */
+async function onNewSessionConfirm(payload: {
+  workDir: string | null;
+  model: string | null;
+}): Promise<void> {
+  newSessionOpen.value = false;
+  setPreferredWorkDir(payload.workDir);
+  const before = currentSessionId.value;
+  // The status model may not be backfilled yet (switchSession resets status), so it
+  // cannot gate "does this need a switch": switch whenever a model was picked and
+  // differs from the current one. switchModel is idempotent and skips the POST for
+  // the same model.
+  const pendingModel =
+    payload.model && payload.model !== status.value.model ? payload.model : null;
+  await createSession(payload.workDir ?? undefined, () => {
+    view.value = 'chat';
+  });
+  // On failure currentSessionId is unchanged (the error was toasted) — stay put.
+  if (!currentSessionId.value || currentSessionId.value === before) return;
+  if (pendingModel) void switchModel(pendingModel);
+  view.value = 'chat';
+}
+
+/* ── workspace popover data source ────────────────────────────────────────────
+ * "Recent" is derived from the session list (already createdAt-descending:
+ * de-duplicated, first 6 kept). A workspace the user picked explicitly becomes the
+ * workDir of the next createSession call. */
+const { preferredWorkDir, serverWorkDir, setPreferredWorkDir } = useWorkspacePreference();
+const newSessionOpen = ref(false);
+const recentWorkDirs = computed(() => {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const item of sessions.value) {
+    const dir = item.workDir;
+    if (!dir || seen.has(dir)) continue;
+    seen.add(dir);
+    out.push(dir);
+    if (out.length >= 6) break;
+  }
+  return out;
+});
+
+/* ── Skills center try-it to composer (L2 wiring) ─────────────────────────────
+ * Composer and ConversationView are conditionally rendered siblings: while the
+ * skills center is open the composer is not mounted, so navigate first, wait for
+ * the target view to mount, then call the insertDraft it forwards.
+ * Without a session the draft lands in the Composer embedded in WorkspaceHome
+ * (onWorkspaceSend consumes it later, which is when the session is really
+ * created); with a session the chat composer is used. false = delivery failed and
+ * the caller (SkillsView) falls back to the clipboard. */
+const conversationRef = ref<InstanceType<typeof ConversationView> | null>(null);
+const workspaceHomeRef = ref<InstanceType<typeof WorkspaceHome> | null>(null);
+
+async function onSkillDraft(snippet: string): Promise<boolean> {
+  mobileSidebarOpen.value = false;
+  const toHome = !currentSessionId.value;
+  view.value = toHome ? 'home' : 'chat';
+  // Let the WorkspaceHome / ConversationView Composer mount and restore its draft
+  // before injecting, so a session-switch draft readback cannot overwrite it.
+  await nextTick();
+  await nextTick();
+  const injected = toHome
+    ? (workspaceHomeRef.value?.insertDraft(snippet) ?? false)
+    : (conversationRef.value?.insertDraft(snippet, { activate: true }) ?? false);
+  if (injected) showToast(`已把 ${snippet.trim()} 放进输入框，补参数后回车`, 'success');
+  return injected;
+}
+
+/**
+ * Fallback that puts the text back into the home Composer: it clears its input
+ * right after emitting send, so without a restore the typed text would evaporate
+ * on the "creation failed / gave up while offline / duplicate send blocked by the
+ * guard" paths (L3).
+ */
+function restoreHomeInput(text: string) {
+  void nextTick(() => workspaceHomeRef.value?.insertDraft(text));
+}
+
+/**
+ * Home-send in-flight flag: only one "create session + first message" at a time.
+ *
+ * Without it a double click / second Enter creates one session each (two
+ * zero-message sessions) and the first message can land in the later one. The
+ * guard only covers the in-flight window: once it closes (sent, or restored after
+ * a failure) the normal path applies again.
+ */
+let workspaceSendInFlight = false;
 
 async function onWorkspaceSend(text: string, mode: WorkspaceMode) {
   mobileSidebarOpen.value = false;
-  if (!currentSessionId.value) await createSession();
-  const ready = await waitForConnected();
-  // Only switch away from the home view once the transport is confirmed, so an
-  // offline click keeps the input and the selected mode instead of dropping both.
-  if (!ready) return;
-  view.value = 'chat';
-  if (mode === 'goal') {
-    try {
-      await client.createGoal({ objective: text, budgets: [] });
-    } catch (error) {
-      appendSystemMessage(`Goal 创建失败：${errorMessageOf(error)}。已保留对话模式，可重新发送。`);
-      sendPrompt(text);
+  // The guard must win first: $emit dispatches synchronously, so one step later a
+  // second call would slip in.
+  if (workspaceSendInFlight) {
+    restoreHomeInput(text);
+    return;
+  }
+  workspaceSendInFlight = true;
+  try {
+    // The home composer is the landing entry for a new conversation: sending here
+    // always creates a session, whatever the current binding is. The binding is
+    // kept on purpose (see the firstActive note above), so creating only when
+    // "unbound" would pour "back to new chat → type → send" into the old session.
+    // On failure the binding is unchanged (createSession toasts) — hand the text
+    // back.
+    const boundId = currentSessionId.value;
+    await createSession(preferredWorkDir.value ?? undefined);
+    if (currentSessionId.value === boundId) {
+      restoreHomeInput(text);
       return;
     }
-  } else {
-    sendPrompt(text);
+    const ready = await waitForConnected();
+    // Only switch away from the home view once the transport is confirmed, so an
+    // offline click keeps the input and the selected mode instead of dropping both.
+    if (!ready) {
+      restoreHomeInput(text);
+      return;
+    }
+    view.value = 'chat';
+    if (mode === 'goal') {
+      try {
+        await client.createGoal({ objective: text, budgets: [] });
+      } catch (error) {
+        appendSystemMessage(`Goal 创建失败：${errorMessageOf(error)}。已保留对话模式，可重新发送。`);
+        sendPrompt(text);
+        return;
+      }
+    } else {
+      sendPrompt(text);
+    }
+  } finally {
+    workspaceSendInFlight = false;
   }
 }
 function errorMessageOf(error: unknown): string {
@@ -154,9 +309,10 @@ const { onCommand } = useSlashCommands({
   sendCommand,
   clearMessages: client.clearMessages,
   appendSystemMessage,
-  // Home view: session commands need a session first; create one, then send.
+  // Home view: session commands need a session first — always create one there,
+  // otherwise only when nothing is bound.
   ensureSession: async () => {
-    if (!currentSessionId.value) await createSession();
+    if (!currentSessionId.value) await createSession(preferredWorkDir.value ?? undefined);
   },
   onNew: onCreateSession,
   showInfo,
@@ -165,7 +321,25 @@ const { onCommand } = useSlashCommands({
 
 const SIDEBAR_STORAGE_KEY = 'scream-sidebar-collapsed';
 const sidebarCollapsed = ref(readStoredString(SIDEBAR_STORAGE_KEY) === '1');
+
+/* ── Narrow viewports (<1024px): matchMedia drives the rail, and a manual
+     expand shows the sidebar as an overlay above the canvas ──────────────── */
+const COMPACT_NAV_QUERY = `(max-width: ${SIDEBAR_COMPACT_MAX_WIDTH - 1}px)`;
+const compactQuery = globalThis.window?.matchMedia?.(COMPACT_NAV_QUERY);
+const isCompactNav = ref(compactQuery?.matches ?? false);
+function onCompactNavChange(e: MediaQueryListEvent) {
+  isCompactNav.value = e.matches;
+}
+
+/** Effective rail state: compact forces collapse; storage drives desktop. */
+const effectiveCollapsed = computed(() => isCompactNav.value || sidebarCollapsed.value);
+
 function toggleSidebarCollapse() {
+  if (isCompactNav.value) {
+    // Rail → overlay above the canvas; the grid track never widens here.
+    mobileSidebarOpen.value = !mobileSidebarOpen.value;
+    return;
+  }
   sidebarCollapsed.value = !sidebarCollapsed.value;
   writeStoredString(SIDEBAR_STORAGE_KEY, sidebarCollapsed.value ? '1' : '0');
 }
@@ -178,63 +352,133 @@ function onWindowResize() {
   viewportWidth.value = window.innerWidth;
 }
 
-/* ── Draggable sidebar width (180–480px, persisted, double-click resets) ─── */
-const SIDEBAR_MIN = 180;
-const SIDEBAR_MAX = 480;
-const SIDEBAR_DEFAULT = 288;
-
+/* ── Draggable sidebar width (264–420px, persisted, double-click resets) ─── */
 const sidebarResize = usePanelResize({
   storageKey: 'scream-sidebar-width',
-  minWidth: SIDEBAR_MIN,
-  // Interlock: an open right panel shrinks the sidebar's headroom so the chat
-  // column keeps its minimum width (420px desktop / 320px compact).
+  minWidth: SIDEBAR_MIN_WIDTH,
+  // Interlock: an open right dock shrinks the sidebar's headroom so the chat
+  // column keeps its minimum width (400px desktop / 320px compact).
   maxWidth: () =>
     getSidebarMaxWidth({
       viewportWidth: viewportWidth.value,
-      rightPanelOpen: filePanel.panelOpen,
+      rightPanelOpen: dockPanel.panelOpen,
       rightPanelWidth: effectiveRightPanelWidth.value,
     }),
-  defaultWidth: SIDEBAR_DEFAULT,
+  defaultWidth: SIDEBAR_DEFAULT_WIDTH,
   side: 'left',
-  canDrag: () => !sidebarCollapsed.value,
-  acceptStoredWidth: (w) => w <= SIDEBAR_MAX,
+  canDrag: () => !effectiveCollapsed.value,
+  acceptStoredWidth: (w) => w <= SIDEBAR_MAX_WIDTH,
 });
 const sidebarWidth = sidebarResize.width;
 const resizing = sidebarResize.resizing;
 
-/* ── Right file panel: width clamp interlocked with sidebar and viewport ──── */
+/* ── Right dock: width clamp interlocked with sidebar and viewport ───────── */
+const rightPanelMaxWidth = computed(() =>
+  getRightPanelMaxWidth({
+    viewportWidth: viewportWidth.value,
+    // The collapsed/compact rail still eats viewport.
+    sidebarOpen: !sidebarCollapsed.value,
+    sidebarWidth: effectiveCollapsed.value ? SIDEBAR_RAIL_WIDTH : sidebarWidth.value,
+  }),
+);
 const rightPanelResize = usePanelResize({
   storageKey: 'scream-right-panel-width',
   minWidth: RIGHT_PANEL_MIN_WIDTH,
-  maxWidth: () =>
-    getRightPanelMaxWidth({
-      viewportWidth: viewportWidth.value,
-      sidebarOpen: !sidebarCollapsed.value,
-      sidebarWidth: sidebarWidth.value,
-    }),
+  maxWidth: () => rightPanelMaxWidth.value,
   defaultWidth: () => getDefaultRightPanelWidth(viewportWidth.value),
   side: 'right',
 });
-const rightPanelWidth = rightPanelResize.width;
 const rightResizing = rightPanelResize.resizing;
-
-function closeRightPanel() {
-  setFilePanelOpen(false);
-}
-
-// Crossing the 960px breakpoint mid-drag unmounts the handle (v-if), so the
-// pointerup never fires — release the drag state when the mode flips.
-watch(isSplitMode, () => {
-  if (rightResizing.value) rightPanelResize.release();
-});
 
 /** Effective panel width after the sidebar/viewport interlock. */
 const effectiveRightPanelWidth = rightPanelResize.effectiveWidth;
 
+/** Full-viewport mode (dock chrome toggle); never persists. */
+const dockMaximized = ref(false);
+
+function collapseRightDock() {
+  setDockOpen(false);
+}
+
+// Crossing the split breakpoint mid-drag unmounts the handle (v-if), so the
+// pointerup never fires — release the drag state when the mode flips.
+watch(isSplitMode, () => {
+  if (rightResizing.value) rightPanelResize.release();
+});
+// Same for the rail interlock, plus: leaving the compact band closes any
+// overlay sidebar the user had opened from the rail.
+watch(effectiveCollapsed, () => {
+  if (effectiveCollapsed.value && resizing.value) sidebarResize.release();
+});
+watch(isCompactNav, (compact) => {
+  if (!compact) mobileSidebarOpen.value = false;
+});
+watch(() => dockPanel.panelOpen, (open) => {
+  if (!open) dockMaximized.value = false;
+});
+
 const shellStyle = computed(() => ({
+  // The two animatable grid tracks; the middle column stays minmax(0,1fr).
+  '--sidebar-track': `${effectiveCollapsed.value ? SIDEBAR_RAIL_WIDTH : sidebarWidth.value}px`,
+  // Sidebar.vue sizes itself from --sidebar-width; keep it in sync with the
+  // dragged track so the panel never detaches from its column.
   '--sidebar-width': `${sidebarWidth.value}px`,
-  '--right-panel-width': `${effectiveRightPanelWidth.value}px`,
+  '--dock-track': `${dockPanel.panelOpen && isSplitMode.value && !dockMaximized.value ? effectiveRightPanelWidth.value : 0}px`,
 }));
+
+/* ── Dock tab rendering (registry-bound) ─────────────────────────────────── */
+const dockPaneComponents: Record<SessionDockKind, Component> = {
+  detail: SessionDetailView,
+  run: RunStatusPanel,
+  git: GitPanel,
+  todo: TodoPanel,
+  goal: GoalPanel,
+  like: LikePanel,
+};
+
+const sessionTabs = computed(() => dockPanel.tabs.filter((t) => t.kind !== 'file'));
+const activeTabKind = computed(() => activeDockTab()?.kind ?? 'file');
+/** The file pane also covers the empty dock (FileViewer shows its hint). */
+const filePaneVisible = computed(() => activeTabKind.value === 'file');
+
+/** A diff picked from the standalone Git tab opens as a file tab; inside the
+ *  detail tab the same action keeps its inline preview (SessionDetailView). */
+function onDockGitDiff(file: { path: string; display: string }) {
+  openFileInPanel(file.path, { modeHint: 'diff', label: file.display });
+}
+
+const gitPaneListeners = { refresh: () => fetchGitStatus(), diff: onDockGitDiff };
+
+// Reactive reads inside a render function keep the panes in sync with the
+// client state, mirroring how ConversationView fed the retired drawer.
+function dockPaneProps(kind: SessionDockKind): Record<string, unknown> {
+  switch (kind) {
+    case 'detail': return { client };
+    case 'run': return { status: client.status.value, busy: client.isBusy.value, connectionStatus: client.connectionStatus.value };
+    case 'git': return { gitStatus: client.gitStatus.value };
+    case 'todo': return { todos: client.todos.value };
+    case 'like': return { like: client.like.value, updateLike: client.updateLike };
+    case 'goal': return {
+      goal: client.goal.value,
+      sessionId: client.sessionId.value,
+      connectionStatus: client.connectionStatus.value,
+      busy: client.isBusy.value,
+      archived: client.isArchived.value,
+      pending: client.goalRequestPending.value,
+      error: client.goalRequestError.value,
+      refineGoal: client.refineGoal,
+      createGoal: client.createGoal,
+      updateGoal: client.updateGoal,
+      pauseGoal: client.pauseGoal,
+      resumeGoal: client.resumeGoal,
+      cancelGoal: client.cancelGoal,
+    };
+  }
+}
+
+function dockPaneListeners(kind: SessionDockKind): Record<string, unknown> {
+  return kind === 'git' ? gitPaneListeners : {};
+}
 
 /** Workspace mode lives in the shell (and localStorage) rather than inside the
  *  home view, which unmounts when a conversation opens. */
@@ -248,9 +492,10 @@ function setWorkspaceMode(next: WorkspaceMode) {
 function onGlobalKeydown(e: KeyboardEvent) {
   if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
     e.preventDefault();
-    // ⌘K from the collapsed rail must first widen the sidebar, then focus.
-    if (sidebarCollapsed.value) toggleSidebarCollapse();
-    void nextTick(() => sidebarRef.value?.focusSearch());
+    // ⌘K from the collapsed rail must first widen the sidebar (or raise the
+    // compact overlay), then focus.
+    if (effectiveCollapsed.value && !mobileSidebarOpen.value) toggleSidebarCollapse();
+    void nextTick(() => sidebarRef.value?.focusSearch?.());
   } else if ((e.metaKey || e.ctrlKey) && e.key === 'n') {
     e.preventDefault();
     onCreateSession();
@@ -269,12 +514,14 @@ function onGlobalKeydown(e: KeyboardEvent) {
 onMounted(() => {
   window.addEventListener('keydown', onGlobalKeydown);
   window.addEventListener('resize', onWindowResize);
+  compactQuery?.addEventListener?.('change', onCompactNavChange);
   void fetchLike();
   void fetchGitStatus();
 });
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onGlobalKeydown);
   window.removeEventListener('resize', onWindowResize);
+  compactQuery?.removeEventListener?.('change', onCompactNavChange);
 });
 </script>
 
@@ -282,9 +529,10 @@ onBeforeUnmount(() => {
   <div
     class="shell"
     :class="{
-      'sidebar-collapsed': sidebarCollapsed,
+      'sidebar-collapsed': effectiveCollapsed,
       resizing: resizing || rightResizing,
-      'right-panel-open': filePanel.panelOpen && isSplitMode,
+      'right-panel-open': dockPanel.panelOpen && isSplitMode,
+      'dock-maximized': dockPanel.panelOpen && dockMaximized,
     }"
     :style="shellStyle"
   >
@@ -296,7 +544,7 @@ onBeforeUnmount(() => {
       :work-dir="workDir"
       :git-status="gitStatus"
       :refresh-git="fetchGitStatus"
-      :collapsed="sidebarCollapsed"
+      :collapsed="effectiveCollapsed"
       @navigate="onNavigate"
       @switch-session="onSwitchSession"
       @delete-session="deleteSession"
@@ -307,15 +555,15 @@ onBeforeUnmount(() => {
     />
 
     <div
-      v-if="!sidebarCollapsed"
+      v-if="!effectiveCollapsed"
       class="panel-resize-handle panel-resize-handle--left"
       :class="{ resizing }"
       role="separator"
       aria-orientation="vertical"
       aria-label="调整侧栏宽度"
       :aria-valuenow="sidebarWidth"
-      aria-valuemin="180"
-      aria-valuemax="480"
+      :aria-valuemin="SIDEBAR_MIN_WIDTH"
+      :aria-valuemax="SIDEBAR_MAX_WIDTH"
       tabindex="0"
       title="拖拽调整宽度 · 双击复位"
       @pointerdown="sidebarResize.onPointerDown"
@@ -366,22 +614,26 @@ onBeforeUnmount(() => {
       <div class="canvas-body">
         <WorkspaceHome
           v-if="view === 'home'"
+          ref="workspaceHomeRef"
           :models="models"
           :status="status"
           :busy="isBusy"
           :mode="workspaceMode"
+          :recent-work-dirs="recentWorkDirs"
           @update:mode="setWorkspaceMode"
           @send="onWorkspaceSend"
+          @abort="abort"
           @command="onCommand"
           @switch-model="switchModel"
           @switch-thinking="switchThinking"
         />
         <ConversationView
           v-else-if="view === 'chat'"
+          ref="conversationRef"
           :client="client"
           @home="view = 'home'"
         />
-        <SkillsView v-else-if="view === 'skills'" @create="onCreateSession" />
+        <SkillsView v-else-if="view === 'skills'" :inject-draft="onSkillDraft" @create="onCreateSession" />
         <SettingsView
           v-else-if="view === 'settings'"
           :like="like"
@@ -391,22 +643,24 @@ onBeforeUnmount(() => {
       </div>
     </main>
 
-    <!-- Right file panel: overlay drawer below the split breakpoint, third
+    <!-- Right dock: full-screen overlay below the split breakpoint, third
          grid column above it. Backdrop only exists in overlay mode. -->
     <div
-      v-if="filePanel.panelOpen && !isSplitMode"
+      v-if="dockPanel.panelOpen && !isSplitMode"
       class="right-panel-backdrop"
       aria-hidden="true"
-      @click="closeRightPanel"
+      @click="collapseRightDock"
     />
     <div
-      v-if="filePanel.panelOpen && isSplitMode"
+      v-if="dockPanel.panelOpen && isSplitMode && !dockMaximized"
       class="panel-resize-handle panel-resize-handle--right"
       :class="{ resizing: rightResizing }"
       role="separator"
       aria-orientation="vertical"
-      aria-label="调整文件面板宽度"
+      aria-label="调整右栏宽度"
       :aria-valuenow="effectiveRightPanelWidth"
+      :aria-valuemin="RIGHT_PANEL_MIN_WIDTH"
+      :aria-valuemax="rightPanelMaxWidth"
       tabindex="0"
       title="拖拽调整宽度 · 双击复位"
       @pointerdown="rightPanelResize.onPointerDown"
@@ -417,19 +671,39 @@ onBeforeUnmount(() => {
       @keydown="rightPanelResize.onKeydown"
     />
     <aside
-      v-if="filePanel.panelOpen"
+      v-if="dockPanel.panelOpen"
       class="right-panel"
-      :class="{ overlay: !isSplitMode }"
-      aria-label="文件面板"
+      :class="{ overlay: !isSplitMode, maximized: dockMaximized }"
+      aria-label="右栏"
     >
-      <div class="right-panel-head">
-        <TabBar />
-        <button class="right-panel-close" title="收起文件面板" aria-label="收起文件面板" @click="closeRightPanel">
-          <SvgIcon name="chevron-right" :size="16" />
-        </button>
-      </div>
+      <!-- The tab strip IS the dock header: file tabs plus the singleton
+           session tabs, with the window chrome at its right end. -->
+      <TabBar
+        :maximized="dockMaximized"
+        :show-maximize="isSplitMode"
+        @update:maximized="dockMaximized = $event"
+        @collapse="collapseRightDock"
+      />
       <div class="right-panel-body">
-        <FileViewer :client="client" />
+        <div v-show="filePaneVisible" class="dock-pane dock-pane--file">
+          <FileViewer :client="client" />
+        </div>
+        <!-- Session-level panes stay mounted once opened (v-show only): tab
+             switching must not tear down in-flight panel state. -->
+        <div
+          v-for="tab in sessionTabs"
+          :key="tab.id"
+          v-show="tab.id === dockPanel.activeTabId"
+          class="dock-pane"
+          :class="`dock-pane--${tab.kind}`"
+          :data-dock-tab="tab.kind"
+        >
+          <component
+            :is="dockPaneComponents[tab.kind]"
+            v-bind="dockPaneProps(tab.kind)"
+            v-on="dockPaneListeners(tab.kind)"
+          />
+        </div>
       </div>
     </aside>
 
@@ -441,6 +715,22 @@ onBeforeUnmount(() => {
       :work-dir="workDir"
       @close="infoVisible = false"
     />
+
+    <!-- Settings modal host: lives in the shell rather than App.vue — it shares the
+         view switch and the Sidebar entry, so as long as the shell is mounted that
+         entry can always open the modal instead of falling back to the full-page
+         settings view. It renders through Teleport, so the mount point does not
+         affect stacking. -->
+    <SettingsModal />
+    <NewSessionModal
+      :open="newSessionOpen"
+      :models="models"
+      :recent-work-dirs="recentWorkDirs"
+      :default-dir="serverWorkDir ?? ''"
+      :current-model="status.model ?? ''"
+      @close="newSessionOpen = false"
+      @confirm="onNewSessionConfirm"
+    />
   </div>
 </template>
 
@@ -448,7 +738,12 @@ onBeforeUnmount(() => {
 .shell {
   position: relative;
   display: grid;
-  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+  /* Formal three-column contract: left track (expanded width or the 56px
+     collapsed rail) | middle minmax(0,1fr), its 400px floor enforced by the
+     JS clamp interlock | right dock track. The dock keeps a 0px track while
+     closed, so show/hide stays one interpolable grid-template-columns
+     transition instead of a track-count jump. */
+  grid-template-columns: var(--sidebar-track, var(--sidebar-width)) minmax(0, 1fr) var(--dock-track, 0px);
   /* Collapsed rail morphs the grid track, not just the sidebar's own width,
      so the canvas breathes in step with the drawer. */
   transition: grid-template-columns var(--dur-slower) var(--ease-out);
@@ -457,17 +752,6 @@ onBeforeUnmount(() => {
   overflow: hidden;
   background: transparent;
   color: var(--color-text);
-}
-.shell.sidebar-collapsed {
-  grid-template-columns: var(--sidebar-width-collapsed) minmax(0, 1fr);
-}
-/* The `right-panel-open` class is only set in split mode (≥960px); below
-   that breakpoint the panel is a fixed overlay and the grid stays 2-col. */
-.shell.right-panel-open {
-  grid-template-columns: var(--sidebar-width) minmax(0, 1fr) var(--right-panel-width);
-}
-.shell.right-panel-open.sidebar-collapsed {
-  grid-template-columns: var(--sidebar-width-collapsed) minmax(0, 1fr) var(--right-panel-width);
 }
 /* While dragging, freeze every width transition so the handle tracks the
    pointer 1:1 instead of lagging behind it, and stop text selection. */
@@ -490,10 +774,10 @@ onBeforeUnmount(() => {
   z-index: calc(var(--z-dock) + 1);
 }
 .panel-resize-handle--left {
-  left: calc(var(--sidebar-width) - 6px);
+  left: calc(var(--sidebar-track, var(--sidebar-width)) - 6px);
 }
 .panel-resize-handle--right {
-  right: calc(var(--right-panel-width) - 6px);
+  right: calc(var(--dock-track, 0px) - 6px);
 }
 .panel-resize-handle::after {
   content: '';
@@ -504,7 +788,6 @@ onBeforeUnmount(() => {
   width: 2px;
   border-radius: var(--radius-full);
   background: transparent;
-  transition: background var(--dur-fast) var(--ease-out);
 }
 .panel-resize-handle:hover::after,
 .panel-resize-handle.resizing::after,
@@ -517,7 +800,7 @@ onBeforeUnmount(() => {
 @media (prefers-reduced-motion: reduce) {
   .shell { transition: none; }
 }
-@media (max-width: 959px) {
+@media (max-width: 767.98px) {
   /* The handle is v-if-guarded to split mode; this guards against leftovers. */
   .panel-resize-handle--right { display: none; }
 }
@@ -530,39 +813,44 @@ onBeforeUnmount(() => {
   border-left: 1px solid var(--color-line);
   background: var(--color-surface);
 }
-.right-panel-head {
-  display: flex;
-  align-items: center;
-  gap: var(--space-1);
-  padding: var(--space-1) var(--space-2);
-  border-bottom: 1px solid var(--color-line);
-  flex-shrink: 0;
-}
-.right-panel-close {
-  width: 28px;
-  height: 28px;
-  display: grid;
-  place-items: center;
-  border: none;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--color-text-muted);
-  cursor: pointer;
-  flex-shrink: 0;
-  padding: 0;
-  transition:
-    background var(--dur-fast) var(--ease-out),
-    color var(--dur-fast) var(--ease-out);
-}
-.right-panel-close:hover {
-  background: var(--color-hover);
-  color: var(--color-text);
-}
+/* The tab strip is the dock's header; panes are flat (no second frame). */
 .right-panel-body {
   flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
+}
+.dock-pane {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+/* Standalone session panels scroll inside their pane; spacing via tokens,
+   no borders — the dock body is the only container. */
+.dock-pane--run,
+.dock-pane--git,
+.dock-pane--todo,
+.dock-pane--goal,
+.dock-pane--like {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-3) var(--space-5);
+}
+/* The detail view owns its scroll container (stacked overview panels). */
+.dock-pane--detail {
+  overflow: hidden;
+}
+/* Full-viewport mode: the dock lifts out of the grid over the shell. */
+.right-panel.maximized {
+  position: fixed;
+  inset: 0;
+  width: auto;
+  z-index: var(--z-overlay);
+  border-left: none;
+  box-shadow: var(--shadow-xl);
 }
 
 .right-panel-backdrop {
@@ -572,12 +860,12 @@ onBeforeUnmount(() => {
   z-index: calc(var(--z-overlay) - 1);
   animation: backdrop-in var(--dur-slow) var(--ease-out);
 }
+/* Below the split breakpoint (<768px) the dock is a full-screen float —
+   a wide enough canvas leaves no room for a side-by-side column anyway. */
 .right-panel.overlay {
   position: fixed;
-  top: 0;
-  bottom: 0;
-  right: 0;
-  width: min(var(--right-panel-width), 92vw);
+  inset: 0;
+  width: 100vw;
   z-index: var(--z-overlay);
   box-shadow: var(--shadow-xl);
   --slide-from: 100%;
@@ -587,16 +875,11 @@ onBeforeUnmount(() => {
   from { opacity: 0; }
   to { opacity: 1; }
 }
-/* Direction is a custom property so the right drawer and the mobile sidebar
+/* Direction is a custom property so the right dock and the mobile sidebar
    share one keyframes definition. */
 @keyframes slide-in {
   from { transform: translateX(var(--slide-from)); }
   to { transform: translateX(0); }
-}
-@media (max-width: 640px) {
-  .right-panel.overlay {
-    width: 100vw;
-  }
 }
 @media (prefers-reduced-motion: reduce) {
   .right-panel.overlay,
@@ -673,41 +956,56 @@ onBeforeUnmount(() => {
   overflow: hidden;
 }
 
+/* Overlay sidebar: raised from the rail below 1024px (and by the topbar
+   hamburger below 640px), so its styles are band-independent now. */
 .sidebar-backdrop {
-  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.42);
+  z-index: calc(var(--z-overlay) - 1);
+  animation: backdrop-in var(--dur-slow) var(--ease-out);
+}
+.sidebar-mobile {
+  position: fixed;
+  inset: 0 auto 0 0;
+  z-index: var(--z-overlay);
+}
+.sidebar-mobile :deep(.sidebar) {
+  display: flex !important;
+  box-shadow: var(--shadow-xl);
+  --slide-from: -100%;
+  animation: slide-in var(--dur-slower) var(--ease-spring);
+}
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-backdrop,
+  .sidebar-mobile :deep(.sidebar) { animation: none; }
 }
 
 @media (max-width: 640px) {
+  /* Single-column phone layout: the sidebar leaves the grid entirely and the
+     dock can only exist as the full-screen overlay float. */
   .shell {
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: 0 minmax(0, 1fr) 0;
   }
   .panel-resize-handle--left {
     display: none;
   }
+  /* The mobile topbar is a fixed overlay: as a participating grid item it pushed
+     .canvas into a 0px track and blanked the whole page. */
   .topbar {
     display: flex;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 30;
+    background: var(--color-bg);
+  }
+  .canvas {
+    padding-top: 54px;
   }
   .mobile-menu {
     display: grid;
-  }
-  .sidebar-backdrop {
-    display: block;
-    position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.42);
-    z-index: calc(var(--z-overlay) - 1);
-    animation: backdrop-in var(--dur-slow) var(--ease-out);
-  }
-  .sidebar-mobile {
-    position: fixed;
-    inset: 0 auto 0 0;
-    z-index: var(--z-overlay);
-  }
-  .sidebar-mobile :deep(.sidebar) {
-    display: flex !important;
-    box-shadow: var(--shadow-xl);
-    --slide-from: -100%;
-    animation: slide-in var(--dur-slower) var(--ease-spring);
   }
 }
 </style>

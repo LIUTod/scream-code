@@ -259,7 +259,11 @@ function formatNoteTime(time: number): string {
     </div>
 
     <div class="panel-body">
-      <div v-if="!sessionId" class="empty-state">暂无会话，Goal 管理暂不可用。</div>
+      <div v-if="!sessionId" class="empty-state">
+        <SvgIcon name="target" :size="18" />
+        <span>暂无会话</span>
+        <small>选择或新建会话后即可配置目标。</small>
+      </div>
 
       <form v-else-if="!goal" class="goal-form" @submit.prevent="create">
       <label>
@@ -358,7 +362,20 @@ function formatNoteTime(time: number): string {
 .status-pill.is-paused { color: var(--color-warning); background: var(--color-warning-soft); }
 .status-pill.is-blocked { color: var(--color-danger); background: var(--color-danger-soft); }
 .status-pill.is-complete { color: var(--color-info); background: var(--color-info-soft); }
-.empty-state { padding: var(--space-3) var(--space-2); color: var(--color-text-faint); font-size: var(--font-size-xs); text-align: center; }
+.empty-state {
+  min-height: 72px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  color: var(--color-text-faint);
+  font-size: var(--font-size-xs);
+  text-align: center;
+}
+.empty-state svg { opacity: 0.75; }
+.empty-state span { color: var(--color-text-muted); font-weight: 650; }
+.empty-state small { max-width: 240px; font-size: 10px; line-height: 1.45; }
 .goal-form { display: grid; gap: var(--space-3); }
 .goal-form label { display: grid; gap: var(--space-1); min-width: 0; }
 .goal-form label > span, .budget-title { color: var(--color-text-muted); font-size: var(--font-size-xs); font-weight: 650; }

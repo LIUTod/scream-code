@@ -139,7 +139,6 @@ const progressText = computed(() => {
   cursor: pointer;
   user-select: none;
   background: var(--color-surface-raised);
-  transition: background var(--dur-fast) var(--ease-out);
 }
 .tool-header:hover { background: var(--color-hover); }
 .tool-header:active { background: var(--color-selected); }
@@ -186,7 +185,6 @@ const progressText = computed(() => {
   min-width: 0;
   direction: rtl;
   text-align: left;
-  transition: color var(--dur-fast) var(--ease-out);
 }
 .tool-filepath:hover {
   color: var(--color-accent);

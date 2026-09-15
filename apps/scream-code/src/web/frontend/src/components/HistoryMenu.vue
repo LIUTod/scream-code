@@ -74,9 +74,13 @@ onMounted(async () => {
   max-height: min(44vh, 360px);
   overflow: hidden;
   background: var(--color-surface-raised, var(--color-surface));
-  border: 1px solid var(--color-line-strong);
+  border: 0;
   border-radius: var(--radius-md);
-  box-shadow: var(--shadow-md, var(--shadow-xs));
+  /* Elevated surface: hairline stroke + darker scrollbar, no layout border. */
+  box-shadow: var(--shadow-elevation-prominent);
+  --shadow-stroke-color: var(--color-text-faint);
+  --scrollbar-thumb: var(--color-text-faint);
+  --scrollbar-thumb-hover: var(--color-text-muted);
 }
 .history-header {
   flex-shrink: 0;
@@ -120,7 +124,6 @@ onMounted(async () => {
   line-height: 1.45;
   text-align: left;
   cursor: pointer;
-  transition: background var(--dur-fast) var(--ease-out);
 }
 .history-item:hover,
 .history-item.selected {

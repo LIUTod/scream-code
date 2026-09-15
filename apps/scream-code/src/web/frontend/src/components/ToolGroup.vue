@@ -26,6 +26,27 @@ const summary = computed(() => {
   return `已完成 ${completedCount.value} 项`;
 });
 function toggle() { open.value = !open.value; }
+
+/**
+ * Pagination for the expanded state. Laying out the tool cards of a long task flat
+ * means dragging the whole DOM along: a real session had 97 tool calls in one turn,
+ * and even though the collapsed layer hides them with grid 0fr the cards are still
+ * all in the DOM, so the first paint swallows 97 cards. The first VISIBLE_LIMIT
+ * entries are therefore rendered by default and the rest go behind the "M more"
+ * entry point, rendered on demand:
+ *  - first N rather than last N: the entries are stable, so the already-rendered
+ *    part does not shift wholesale as the turn appends more;
+ *  - the failure summary is carried by the "contains failed calls" label and red
+ *    dot in the head, so it does not depend on every card being rendered;
+ *  - the entry point is only rendered while expanded (collapsed, a button inside a
+ *    0fr container is a ghost focus stop in the tab order that keyboard users fall
+ *    into) and carries aria-expanded so screen readers know there is collapsed
+ *    content.
+ */
+const VISIBLE_LIMIT = 20;
+const showAll = ref(false);
+const hiddenCount = computed(() => Math.max(0, props.tools.length - VISIBLE_LIMIT));
+const visibleTools = computed(() => (showAll.value ? props.tools : props.tools.slice(0, VISIBLE_LIMIT)));
 </script>
 
 <template>
@@ -43,13 +64,21 @@ function toggle() { open.value = !open.value; }
       <div class="process-inner">
         <component
           :is="isEditTool(tool.name) ? EditToolCard : GenericToolCard"
-          v-for="tool in props.tools"
+          v-for="tool in visibleTools"
           :key="tool.toolCallId"
           :tool="tool"
           :live="live"
           :work-dir="workDir"
           :session-id="sessionId"
         />
+        <div v-if="open && hiddenCount > 0" class="process-more">
+          <button
+            type="button"
+            class="process-more-btn"
+            :aria-expanded="showAll"
+            @click="showAll = !showAll"
+          >{{ showAll ? `收起，只看前 ${VISIBLE_LIMIT} 条` : `还有 ${hiddenCount} 条 · 显示全部` }}</button>
+        </div>
       </div>
     </div>
   </section>
@@ -147,9 +176,30 @@ function toggle() { open.value = !open.value; }
   padding-bottom: var(--space-2);
   border-top: 1px solid var(--color-line);
 }
+/* "M more" entry point: a dashed pill that reads as "the list was truncated" without competing with the cards. */
+.process-more { display: flex; justify-content: center; }
+.process-more-btn {
+  min-height: 28px;
+  padding: 0 var(--space-3);
+  border: 1px dashed var(--color-line-strong);
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+  transition:
+    border-color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+.process-more-btn:hover { border-color: var(--color-accent-bd); color: var(--color-text); background: var(--color-hover); }
+.process-more-btn:active { background: var(--color-selected); }
 @media (prefers-reduced-motion: reduce) {
   .tool-process { animation: none; }
   .process-dot.running { animation: none; }
+  /* Neither expand/collapse nor the "show all" bulk insert animates position (reduced-motion). */
+  .process-collapse { transition: none; }
+  .chevron { transition: none; }
 }
 @media (max-width: 640px) {
   .process-names { display: none; }

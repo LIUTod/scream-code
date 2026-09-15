@@ -23,9 +23,9 @@
   --radius-2xl: 20px;
   --radius-full: 999px;
 
-  /* Typography */
-  --font-ui: "Inter", -apple-system, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
-  --font-mono: "JetBrains Mono", "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+  /* Typography (variable fonts self-hosted via @fontsource-variable) */
+  --font-ui: "Inter Variable", -apple-system, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono Variable", "JetBrains Mono", "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
   --font-size-xs: 12px;
   --font-size-sm: 13px;
   --font-size-base: 14px;
@@ -57,9 +57,16 @@
   --dur-breathe: 2600ms;
   --shimmer-width: 200%;
 
-  /* Layout chrome (prototype: 288px fixed sidebar) */
+  /* Layout chrome (three-column shell: 288px sidebar, 56px collapsed rail) */
   --sidebar-width: 288px;
-  --sidebar-width-collapsed: 64px;
-  --rightbar-width: 360px;
+  /* Mirrors SIDEBAR_RAIL_WIDTH in utils/panelLayout.ts — keep in sync. */
+  --sidebar-width-collapsed: 56px;
   --content-max: 840px;
+
+  /* Scrollbar skin: an 8px hit area whose visible thumb stays a ~4px
+     capsule (transparent border + padding-box clip). Surfaces rebind
+     --scrollbar-thumb; quiet containers hide the thumb via the same var. */
+  --scrollbar-size: 8px;
+  --scrollbar-thumb: var(--color-line-strong);
+  --scrollbar-thumb-hover: var(--color-text-muted);
 }

@@ -128,7 +128,7 @@ describe('ConversationHeader stats toggle (regression)', () => {
   it('toggle button stops pointerdown so outside-click close cannot eat the toggle', async () => {
     const ConversationHeader = (await import('../../src/web/frontend/src/components/ConversationHeader.vue')).default;
     const wrapper = mount(ConversationHeader, {
-      props: { title: 't', busy: false, drawerOpen: false, statsOpen: true, turnTokens: null },
+      props: { title: 't', busy: false, statsOpen: true, turnTokens: null },
       global: { stubs: { SvgIcon: true } },
     });
     // With statsOpen already true, a plain click toggles it off. Without

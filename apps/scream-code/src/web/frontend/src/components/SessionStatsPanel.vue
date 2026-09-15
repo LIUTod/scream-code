@@ -281,7 +281,7 @@ const dims = computed<DimRow[]>(() => [
   background: var(--color-surface-sunken);
 }
 .stats-cell-label {
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   color: var(--color-text-faint);
 }
 .stats-cell-value {

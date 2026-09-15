@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { mount } from '@vue/test-utils';
 
 import MessageItem from '../../src/web/frontend/src/components/MessageItem.vue';
-import { filePanel } from '../../src/web/frontend/src/utils/fileTabState';
+import { dockPanel } from '../../src/web/frontend/src/utils/fileTabState';
 import type { ChatMessage } from '../../src/web/frontend/src/types';
 
 const WORK_DIR = '/Users/dev/project';
@@ -46,6 +46,46 @@ describe('MessageItem role headers', () => {
   });
 });
 
+describe('MessageItem model badge', () => {
+  it('a long alias shows the model name after `/`, keeping the full alias in title (abbreviated, not truncated)', () => {
+    const alias = 'custom-acme-labs-vision-preview/acme-labs-vision-preview';
+    const msg: ChatMessage = {
+      id: 'a-alias',
+      role: 'assistant',
+      content: 'done',
+      model: alias,
+      ts: 1_000,
+      tools: [],
+    };
+    const wrapper = mount(MessageItem, { props: { message: msg } });
+    const badge = wrapper.find('.brand-model');
+    expect(badge.text()).toBe('acme-labs-vision-preview');
+    expect(badge.attributes('title')).toBe(alias);
+  });
+
+  it('an alias without `/` renders as is', () => {
+    const msg: ChatMessage = { id: 'a-plain', role: 'assistant', content: 'x', model: 'test-model-x', ts: 1_000, tools: [] };
+    const wrapper = mount(MessageItem, { props: { message: msg } });
+    expect(wrapper.find('.brand-model').text()).toBe('test-model-x');
+  });
+
+  it('showModel=false renders neither the badge nor an empty row', () => {
+    const msg: ChatMessage = { id: 'a-run2', role: 'assistant', content: 'mid-run', model: 'provider/alias-a', tools: [] };
+    const wrapper = mount(MessageItem, { props: { message: msg, showModel: false } });
+    // No timestamp in the segment → the whole assistant-brand row must be absent
+    // (otherwise it leaves a 14px empty row behind).
+    expect(wrapper.find('.brand-model').exists()).toBe(false);
+    expect(wrapper.find('.assistant-brand').exists()).toBe(false);
+  });
+
+  it('showModel=false with a timestamp/still-generating keeps the brand row and only drops the badge', () => {
+    const msg: ChatMessage = { id: 'a-run3', role: 'assistant', content: 'mid-run', model: 'provider/alias-a', ts: 1_000, tools: [] };
+    const wrapper = mount(MessageItem, { props: { message: msg, showModel: false } });
+    expect(wrapper.find('.brand-model').exists()).toBe(false);
+    expect(wrapper.find('.assistant-brand time.brand-time').exists()).toBe(true);
+  });
+});
+
 describe('MessageItem turn written-files pills', () => {
   it('lists deduped successful writes as pills and hides pending/failed ones', () => {
     const wrapper = mount(MessageItem, {
@@ -57,14 +97,14 @@ describe('MessageItem turn written-files pills', () => {
   });
 
   it('opens the file panel at the resolved path on click', async () => {
-    filePanel.tabs = [];
-    filePanel.panelOpen = false;
+    dockPanel.tabs = [];
+    dockPanel.panelOpen = false;
     const wrapper = mount(MessageItem, {
       props: { message: assistantWithWrites(), workDir: WORK_DIR },
     });
     await wrapper.findAll('.written-file')[0]!.trigger('click');
-    expect(filePanel.panelOpen).toBe(true);
-    expect(filePanel.tabs.map((t) => t.filePath)).toEqual([`${WORK_DIR}/src/a.ts`]);
+    expect(dockPanel.panelOpen).toBe(true);
+    expect(dockPanel.tabs.flatMap((t) => (t.kind === "file" ? [t.filePath] : []))).toEqual([`${WORK_DIR}/src/a.ts`]);
   });
 
   it('renders nothing while the turn is still streaming', () => {
@@ -84,15 +124,15 @@ describe('MessageItem @ file-mention links', () => {
       ts: 2_000,
       tools: [],
     };
-    filePanel.tabs = [];
-    filePanel.panelOpen = false;
+    dockPanel.tabs = [];
+    dockPanel.panelOpen = false;
     const wrapper = mount(MessageItem, { props: { message: msg, workDir: WORK_DIR } });
     const links = wrapper.findAll('.at-link');
     expect(links.map((l) => l.text())).toEqual(['@src/a.ts', '@"my dir/note.md"']);
     expect(links[0]!.attributes('title')).toBe(`在文件面板中打开 ${WORK_DIR}/src/a.ts`);
 
     await links[1]!.trigger('click');
-    expect(filePanel.tabs.map((t) => t.filePath)).toEqual([`${WORK_DIR}/my dir/note.md`]);
+    expect(dockPanel.tabs.flatMap((t) => (t.kind === "file" ? [t.filePath] : []))).toEqual([`${WORK_DIR}/my dir/note.md`]);
   });
 
   it('keeps plain prose without @ untouched', () => {

@@ -53,6 +53,19 @@
   --shadow-md: 0 4px 12px rgba(17, 17, 17, 0.1);
   --shadow-lg: 0 8px 24px rgba(17, 17, 17, 0.12);
   --shadow-xl: 0 16px 48px rgba(17, 17, 17, 0.16);
+
+  /* Elevation trio: a 0.5px hairline stroke drawn INSIDE the shadow so the
+     component itself stays border:0 and layout-neutral, plus two whisper-soft
+     glows that do the actual lifting. Elevated surfaces (menus, popovers)
+     rebind --shadow-stroke-color one step darker than the page. */
+  --shadow-stroke-color: var(--color-line-strong);
+  --shadow-elevation-stroke: 0 0 0 0.5px var(--shadow-stroke-color);
+  --shadow-elevation-panel:
+    var(--shadow-elevation-stroke), 0 3px 8px 0 rgba(17, 17, 17, 0.03), 0 0 16px 0 rgba(17, 17, 17, 0.02);
+  --shadow-elevation-prominent:
+    var(--shadow-elevation-stroke), 0 3px 8px 0 rgba(17, 17, 17, 0.04), 0 0 20px 0 rgba(17, 17, 17, 0.05);
+  --shadow-elevation-soft:
+    var(--shadow-elevation-stroke), 0 4px 16px 0 rgba(17, 17, 17, 0.03), 0 0 24px 0 rgba(17, 17, 17, 0.03);
 }
 
 [data-theme="dark"] {
@@ -106,4 +119,15 @@
   --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
   --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5);
   --shadow-xl: 0 16px 48px rgba(0, 0, 0, 0.6);
+
+  /* Elevation trio (dark): same recipe, slightly stronger glows so the
+     lift reads against the dark ground. */
+  --shadow-stroke-color: var(--color-line-strong);
+  --shadow-elevation-stroke: 0 0 0 0.5px var(--shadow-stroke-color);
+  --shadow-elevation-panel:
+    var(--shadow-elevation-stroke), 0 3px 8px 0 rgba(0, 0, 0, 0.22), 0 0 16px 0 rgba(0, 0, 0, 0.16);
+  --shadow-elevation-prominent:
+    var(--shadow-elevation-stroke), 0 3px 8px 0 rgba(0, 0, 0, 0.26), 0 0 20px 0 rgba(0, 0, 0, 0.2);
+  --shadow-elevation-soft:
+    var(--shadow-elevation-stroke), 0 4px 16px 0 rgba(0, 0, 0, 0.22), 0 0 24px 0 rgba(0, 0, 0, 0.18);
 }

@@ -30,8 +30,8 @@ Element.prototype.scrollIntoView = () => {};
  * jsdom has no IntersectionObserver. MessageList builds one in onMounted and
  * points it at the top sentinel, so the fake records who observes what and the
  * tests fire the sentinel's callback by hand ("the sentinel entered the
- * viewport"). The chat minimap builds its own observers over message rows, so
- * the callback is resolved per target element instead of globally.
+ * viewport"). (The chat minimap used to build its own observers over message
+ * rows; it now maps scrollTop directly and observes nothing per row.)
  */
 const ioSubscribers: Array<{
   cb: (entries: Array<{ isIntersecting: boolean; target: Element }>) => void;
@@ -84,8 +84,14 @@ const T0 = new Date(2026, 8, 2, 9, 0).getTime();
 type Msg = { id: string; role: 'user' | 'assistant'; content: string; ts: number | undefined; tools: [] };
 
 // jsdom has no scrollIntoView (the minimap calls it after revealing a row) and
-// no CSS.escape (its row lookup). Both exist in every target browser.
-HTMLElement.prototype.scrollIntoView = function scrollIntoView(): void {};
+// no CSS.escape (its row lookup). Both exist in every target browser. The stub
+// records the row it was called on, which is how the minimap-click tests assert
+// "the jump landed on the message the clicked segment maps to".
+const jumpedTo: string[] = [];
+HTMLElement.prototype.scrollIntoView = function scrollIntoView(this: HTMLElement): void {
+  const id = this.dataset?.messageId;
+  if (id) jumpedTo.push(id);
+};
 vi.stubGlobal('CSS', { escape: (value: string) => value });
 
 function msg(id: string, role: 'user' | 'assistant' = 'assistant', ts?: number): Msg {
@@ -336,6 +342,10 @@ describe('MessageList render window', () => {
       return ctx.wrapper.findAll('.minimap-block');
     }
 
+    beforeEach(() => {
+      jumpedTo.length = 0;
+    });
+
     it('slides the window over a message that is not rendered, then scrolls to it', async () => {
       const ctx = mountList(build(200));
       expect(ctx.ids()).not.toContain('m0');
@@ -347,6 +357,10 @@ describe('MessageList render window', () => {
 
       expect(ctx.ids()[0]).toBe('m0');
       expect(ctx.ids()).toHaveLength(200);
+      // The jump lands on exactly the row the clicked block maps to (the old
+      // mechanism confirmed it through per-row IO highlighting; this pins the
+      // position directly).
+      expect(jumpedTo).toEqual(['m0']);
     });
 
     it('leaves the window alone when the target row is already rendered', async () => {
@@ -357,6 +371,26 @@ describe('MessageList render window', () => {
 
       expect(ctx.ids()[0]).toBe('m120');
       expect(ctx.ids()).toHaveLength(WINDOW_SIZE);
+      expect(jumpedTo).toEqual(['m150']);
+    });
+
+    it('exposes a continuous thumb instead of a per-row highlight state', async () => {
+      const ctx = mountList(build(200));
+      await settle(ctx.wrapper);
+
+      const thumb = ctx.wrapper.find('.minimap-thumb');
+      expect(thumb.exists()).toBe(true);
+      // However many rows the window holds, there is a single capsule: position
+      // feedback no longer steps as rows enter and leave.
+      expect(ctx.wrapper.findAll('.minimap-thumb')).toHaveLength(1);
+      expect(ctx.wrapper.find('.in-view').exists()).toBe(false);
+
+      // top updates continuously while scrolling (1000/(81*100) * 500 ≈ 61.7px,
+      // 81 = 80 rows + the top sentinel).
+      ctx.setTop(1000);
+      await ctx.scroll();
+      const top = parseFloat(thumb.attributes('style')?.match(/top: ([0-9.]+)px/)?.[1] ?? '');
+      expect(top).toBeCloseTo((1000 / 8100) * 500, 1);
     });
   });
 

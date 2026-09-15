@@ -14,21 +14,24 @@ vi.hoisted(() => {
 });
 
 import {
+  activeDockTab,
   activeFileTab,
-  closeFileTab,
-  filePanel,
+  closeDockTab,
+  dockPanel,
+  openDockTab,
   openFileInPanel,
   openFileTab,
   resolveInitialFileDisplayMode,
   saveFileViewerState,
-  selectFileTab,
-  setFilePanelOpen,
+  selectDockTab,
+  setDockOpen,
+  toggleDock,
 } from '../../src/web/frontend/src/utils/fileTabState';
 
 function reset(): void {
-  filePanel.tabs = [];
-  filePanel.activeTabId = null;
-  filePanel.panelOpen = false;
+  dockPanel.tabs = [];
+  dockPanel.activeTabId = null;
+  dockPanel.panelOpen = false;
 }
 
 beforeEach(() => {
@@ -41,7 +44,7 @@ beforeEach(() => {
 });
 
 describe('pure tab-list operations', () => {
-  it('opens a new tab with viewerRevision 0', () => {
+  it('opens a new file tab tagged kind=file with viewerRevision 0', () => {
     const tabs = openFileTab([], {
       fileName: 'main.ts',
       filePath: '/src/main.ts',
@@ -49,9 +52,10 @@ describe('pure tab-list operations', () => {
       sourceSessionId: null,
     });
     expect(tabs).toHaveLength(1);
-    expect(tabs[0].label).toBe('main.ts');
-    expect(tabs[0].viewerRevision).toBe(0);
-    expect(tabs[0].viewerState).toBeUndefined();
+    expect(tabs[0]!.kind).toBe('file');
+    expect(tabs[0]!.label).toBe('main.ts');
+    expect('viewerRevision' in tabs[0]! && tabs[0]!.viewerRevision).toBe(0);
+    expect('viewerState' in tabs[0]! && tabs[0]!.viewerState).toBeUndefined();
   });
 
   it('dedupes re-open without mode hint', () => {
@@ -63,9 +67,10 @@ describe('pure tab-list operations', () => {
   it('applies a diff mode hint with a revision bump', () => {
     const once = openFileTab([], { fileName: 'a.ts', filePath: '/a.ts', tabId: '/a.ts' });
     const hinted = openFileTab(once, { fileName: 'a.ts', filePath: '/a.ts', tabId: '/a.ts', modeHint: 'diff' });
-    expect(hinted[0].initialDisplayMode).toBe('diff');
-    expect(hinted[0].viewerRevision).toBe(1);
-    expect(hinted[0].viewerState?.displayMode).toBe('diff');
+    const tab = hinted[0]!;
+    expect(tab.kind === 'file' && tab.initialDisplayMode).toBe('diff');
+    expect(tab.kind === 'file' && tab.viewerRevision).toBe(1);
+    expect(tab.kind === 'file' && tab.viewerState?.displayMode).toBe('diff');
   });
 
   it('saveFileViewerState rejects a stale revision', () => {
@@ -73,7 +78,8 @@ describe('pure tab-list operations', () => {
     const stale = saveFileViewerState(tabs, '/a.ts', 7, { displayMode: 'source', wrapLines: true, scrollTop: 10, scrollLeft: 0 });
     expect(stale).toBe(tabs);
     const fresh = saveFileViewerState(tabs, '/a.ts', 0, { displayMode: 'source', wrapLines: true, scrollTop: 10, scrollLeft: 0 });
-    expect(fresh[0].viewerState?.wrapLines).toBe(true);
+    const tab = fresh[0]!;
+    expect(tab.kind === 'file' && tab.viewerState?.wrapLines).toBe(true);
   });
 
   it('resolveInitialFileDisplayMode prefers saved state, then hint, then source', () => {
@@ -83,36 +89,36 @@ describe('pure tab-list operations', () => {
   });
 });
 
-describe('file panel state machine', () => {
-  it('opens a file: adds tab, activates, expands panel', () => {
+describe('dock panel state machine (file tabs)', () => {
+  it('opens a file: adds tab, activates, expands dock', () => {
     openFileInPanel('/src/a.ts');
-    expect(filePanel.tabs).toHaveLength(1);
-    expect(filePanel.activeTabId).toBe('/src/a.ts');
-    expect(filePanel.panelOpen).toBe(true);
+    expect(dockPanel.tabs).toHaveLength(1);
+    expect(dockPanel.activeTabId).toBe('/src/a.ts');
+    expect(dockPanel.panelOpen).toBe(true);
   });
 
   it('opens multiple files and switches focus', () => {
     openFileInPanel('/src/a.ts');
     openFileInPanel('/src/b.ts');
-    selectFileTab('/src/a.ts');
-    expect(filePanel.activeTabId).toBe('/src/a.ts');
+    selectDockTab('/src/a.ts');
+    expect(dockPanel.activeTabId).toBe('/src/a.ts');
     expect(activeFileTab()?.filePath).toBe('/src/a.ts');
   });
 
   it('closing the active tab activates the neighbor', () => {
     openFileInPanel('/src/a.ts');
     openFileInPanel('/src/b.ts');
-    closeFileTab('/src/b.ts');
-    expect(filePanel.activeTabId).toBe('/src/a.ts');
-    expect(filePanel.panelOpen).toBe(true);
+    closeDockTab('/src/b.ts');
+    expect(dockPanel.activeTabId).toBe('/src/a.ts');
+    expect(dockPanel.panelOpen).toBe(true);
   });
 
-  it('closing the last tab collapses the panel', () => {
+  it('closing the last tab collapses the dock', () => {
     openFileInPanel('/src/a.ts');
-    closeFileTab('/src/a.ts');
-    expect(filePanel.tabs).toHaveLength(0);
-    expect(filePanel.activeTabId).toBeNull();
-    expect(filePanel.panelOpen).toBe(false);
+    closeDockTab('/src/a.ts');
+    expect(dockPanel.tabs).toHaveLength(0);
+    expect(dockPanel.activeTabId).toBeNull();
+    expect(dockPanel.panelOpen).toBe(false);
   });
 
   it('persists state across operations', () => {
@@ -124,10 +130,97 @@ describe('file panel state machine', () => {
     expect(parsed.panelOpen).toBe(true);
   });
 
-  it('setFilePanelOpen keeps an existing tab active when reopening', () => {
+  it('setDockOpen keeps an existing tab active when reopening', () => {
     openFileInPanel('/src/a.ts');
-    setFilePanelOpen(false);
-    setFilePanelOpen(true);
-    expect(filePanel.activeTabId).toBe('/src/a.ts');
+    setDockOpen(false);
+    setDockOpen(true);
+    expect(dockPanel.activeTabId).toBe('/src/a.ts');
+  });
+});
+
+describe('session-level dock tabs (singleton kinds)', () => {
+  it('opens a session tab and expands the dock', () => {
+    openDockTab('git');
+    expect(dockPanel.tabs).toHaveLength(1);
+    expect(dockPanel.tabs[0]!.kind).toBe('git');
+    expect(dockPanel.activeTabId).toBe('dock:git');
+    expect(dockPanel.panelOpen).toBe(true);
+  });
+
+  it('re-opening the same kind activates instead of creating a second tab', () => {
+    openDockTab('git');
+    openFileInPanel('/src/a.ts');
+    openDockTab('git');
+    expect(dockPanel.tabs).toHaveLength(2); // git + a.ts
+    expect(dockPanel.tabs.filter((t) => t.kind === 'git')).toHaveLength(1);
+    expect(dockPanel.activeTabId).toBe('dock:git');
+  });
+
+  it('mixes singleton session tabs with multi-instance file tabs', () => {
+    openFileInPanel('/src/a.ts');
+    openFileInPanel('/src/b.ts');
+    openDockTab('todo');
+    openDockTab('goal');
+    expect(dockPanel.tabs.map((t) => t.kind)).toEqual(['file', 'file', 'todo', 'goal']);
+    expect(activeDockTab()?.kind).toBe('goal');
+    // Switching back to a file tab still resolves through activeFileTab.
+    selectDockTab('/src/a.ts');
+    expect(activeFileTab()?.filePath).toBe('/src/a.ts');
+    expect(activeDockTab()?.kind).toBe('file');
+  });
+
+  it('closing a session tab leaves file tabs (and the dock) intact', () => {
+    openFileInPanel('/src/a.ts');
+    openDockTab('like');
+    closeDockTab('dock:like');
+    expect(dockPanel.tabs).toHaveLength(1);
+    expect(dockPanel.activeTabId).toBe('/src/a.ts');
+    expect(dockPanel.panelOpen).toBe(true);
+  });
+
+  it('closing the final session tab collapses the dock', () => {
+    openDockTab('run');
+    closeDockTab('dock:run');
+    expect(dockPanel.tabs).toHaveLength(0);
+    expect(dockPanel.panelOpen).toBe(false);
+  });
+
+  it('toggleDock flips visibility without touching the tab list', () => {
+    openDockTab('detail');
+    toggleDock();
+    expect(dockPanel.panelOpen).toBe(false);
+    expect(dockPanel.tabs).toHaveLength(1);
+    toggleDock();
+    expect(dockPanel.panelOpen).toBe(true);
+    expect(dockPanel.activeTabId).toBe('dock:detail');
+  });
+});
+
+describe('persisted-state repair', () => {
+  it('upgrades legacy kind-less tabs to file tabs and drops junk', () => {
+    localStorage.setItem(
+      'scream-file-tabs',
+      JSON.stringify({
+        tabs: [
+          { id: '/old/a.ts', label: 'a.ts', filePath: '/old/a.ts' }, // legacy, no kind
+          { id: 'ghost', label: 'x' }, // no kind / no filePath → junk
+          { id: 'dock:git', kind: 'git', label: 'Git' },
+        ],
+        activeTabId: 'dock:git',
+        panelOpen: true,
+      }),
+    );
+    // Re-import to run the normalisation path with the fixture in place.
+    vi.resetModules();
+    return import('../../src/web/frontend/src/utils/fileTabState').then((mod) => {
+      expect(mod.dockPanel.tabs.map((t) => t.kind)).toEqual(['file', 'git']);
+      expect(mod.dockPanel.activeTabId).toBe('dock:git');
+      expect(mod.dockPanel.panelOpen).toBe(true);
+      localStorage.removeItem('scream-file-tabs');
+      // Restore the pristine singleton for the tests that follow.
+      mod.dockPanel.tabs = [];
+      mod.dockPanel.activeTabId = null;
+      mod.dockPanel.panelOpen = false;
+    });
   });
 });

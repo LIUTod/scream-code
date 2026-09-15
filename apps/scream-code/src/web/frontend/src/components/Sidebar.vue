@@ -1,8 +1,11 @@
 <script setup lang="ts">
-import { computed, nextTick, ref } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
+import type { ComponentPublicInstance } from 'vue';
 import type { GitStatus, SessionListItem } from '../types';
-import { useSidebarState } from '../composables/useSidebarState';
+import { useSidebarState, GROUP_COLLAPSE_LIMIT } from '../composables/useSidebarState';
 import { useFileTreeState } from '../composables/useFileTreeState';
+import { tryOpenSettingsModal, useSettingsModal } from '../composables/useSettingsModal';
+import { relativeTimeLabel } from '../utils/relativeTime';
 import { MOD_KEY_LABEL } from '../utils/platform';
 import FileTree from './FileTree.vue';
 import SvgIcon from './ui/SvgIcon.vue';
@@ -21,7 +24,7 @@ const props = withDefaults(
     gitStatus?: GitStatus | null;
     /** Refreshes git status when the file tree's refresh button is hit. */
     refreshGit?: () => void;
-    /** Desktop rail mode: 288px full sidebar collapses to a 64px icon strip. */
+    /** Desktop rail mode: 288px full sidebar collapses to a 56px icon strip. */
     collapsed?: boolean;
     /** The mobile overlay is already a drawer; its toggle would only flip a
         desktop-only grid track, so the button is hidden there. */
@@ -45,6 +48,7 @@ const emit = defineEmits<{
   (e: 'toggle-collapse'): void;
   (e: 'open-file', path: string): void;
   (e: 'rename-session', id: string, title: string): void;
+  /** Export/fork moved to the chat header "more" menu — session-scoped actions belong to the conversation view. */
 }>();
 
 /* ── Search filter (⌘K focuses this box) ─────────────────────────────────── */
@@ -52,11 +56,21 @@ const searchRef = ref<HTMLInputElement | null>(null);
 // Query + collapsed spaces + active section live in module-level shared state:
 // WebShell mounts this component twice (desktop rail + mobile drawer) and both
 // copies must show the same list.
-const { query, collapsedSpaces, section, toggleSpace } = useSidebarState();
+const { query, collapsedSpaces, section, toggleSpace, toggleSpaceExpanded, isSpaceExpanded } =
+  useSidebarState();
 
 function focusSearch(): void {
   searchRef.value?.focus();
   searchRef.value?.select();
+}
+
+/* L3 settings modal: when a SettingsModal host is mounted the entry opens the
+  centred modal first; without a host (older wiring / test environment) tryOpen
+  returns false, so the emit navigate('settings') route keeps working as before. */
+const { open: settingsModalOpen } = useSettingsModal();
+function onSettingsNavClick(): void {
+  if (tryOpenSettingsModal()) return;
+  emit('navigate', 'settings');
 }
 
 defineExpose({ focusSearch });
@@ -95,22 +109,74 @@ const spaces = computed<SpaceGroup[]>(() => {
   });
 });
 
+/**
+ * A group shows only its first GROUP_COLLAPSE_LIMIT rows (with long session lists
+ * every screen would otherwise be the tail of one space). Search never collapses:
+ * the user is after one specific row, and hiding matches reads as "no hits".
+ */
+function visibleItems(group: SpaceGroup): SessionListItem[] {
+  if (query.value.trim() || isSpaceExpanded(group.key)) return group.items;
+  return group.items.length > GROUP_COLLAPSE_LIMIT
+    ? group.items.slice(0, GROUP_COLLAPSE_LIMIT)
+    : group.items;
+}
+
+function hiddenCount(group: SpaceGroup): number {
+  return Math.max(0, group.items.length - GROUP_COLLAPSE_LIMIT);
+}
+
 function onSessionClick(id: string): void {
   emit('switch-session', id);
 }
 
-function confirmDelete(id: string, title: string): void {
-  if (window.confirm(`删除会话「${title}」？此操作不可恢复。`)) {
-    emit('delete-session', id);
-  }
+/** The currently open session — the only row rename is offered for, matching the server-side guard. */
+function isCurrent(s: SessionListItem): boolean {
+  return s.sessionId === props.currentSessionId;
 }
+
+/* ── Row actions: pencil rename + delete confirm popover ──────────────────────
+ * A "⋯" overflow menu buried the delete entry; always-visible semantic icons
+ * replaced it, and an explicit confirmation is still wanted — so the trash can
+ * opens an inline confirm popover (cancel / confirm delete) instead of a
+ * second-level menu or an invisible state change. */
+const confirmDeleteId = ref<string | null>(null);
+
+function onDeleteClick(s: SessionListItem): void {
+  confirmDeleteId.value = confirmDeleteId.value === s.sessionId ? null : s.sessionId;
+}
+function closeDeleteConfirm(): void {
+  confirmDeleteId.value = null;
+}
+function confirmDeleteSession(id: string): void {
+  closeDeleteConfirm();
+  emit('delete-session', id);
+}
+
+// Any pointerdown outside closes the popover (document capture phase; the popover
+// itself is exempt via stopPropagation).
+function onDocPointerDown(ev: PointerEvent): void {
+  if (!confirmDeleteId.value) return;
+  const t = ev.target as HTMLElement | null;
+  if (t && typeof t.closest === 'function' && t.closest('.session-actions')) return;
+  closeDeleteConfirm();
+}
+onMounted(() => document.addEventListener('pointerdown', onDocPointerDown));
+onBeforeUnmount(() => document.removeEventListener('pointerdown', onDocPointerDown));
 
 function onOpenFile(path: string): void {
   emit('open-file', path);
 }
 
 /* ── Inline session rename (G5.2) ──────────────────────────────────────── */
+/** Only one row is in edit mode at a time; a function ref collects it explicitly
+    instead of the string-ref-into-array pitfall inside v-for, which used to throw
+    `.focus is not a function`. */
 const renameInputRef = ref<HTMLInputElement | null>(null);
+
+function setRenameRef(el: Element | ComponentPublicInstance | null): void {
+  renameInputRef.value = el as HTMLInputElement | null;
+}
+
 const renamingId = ref<string | null>(null);
 const renameDraft = ref('');
 
@@ -136,14 +202,9 @@ function commitRename(id: string): void {
   emit('rename-session', id, draft);
 }
 
+/** Relative-time wording lives in utils/relativeTime.ts (today HH:mm / yesterday / N days ago / M/D). */
 function relativeTime(ts: number): string {
-  if (!ts) return '';
-  const diff = Date.now() - ts;
-  if (diff < 60_000) return '刚刚';
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} 分钟前`;
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} 小时前`;
-  const d = new Date(ts);
-  return `${d.getMonth() + 1}/${d.getDate()}`;
+  return relativeTimeLabel(ts);
 }
 
 function sessionTitle(s: SessionListItem): string {
@@ -246,7 +307,7 @@ function sessionTitle(s: SessionListItem): string {
           </button>
           <div v-if="!collapsedSpaces.has(group.key)" class="space-sessions">
             <div
-              v-for="s in group.items"
+              v-for="s in visibleItems(group)"
               :key="s.sessionId"
               class="session-item-wrap"
             >
@@ -261,7 +322,7 @@ function sessionTitle(s: SessionListItem): string {
                 <span class="session-text">
                   <span v-if="renamingId === s.sessionId" class="session-rename">
                     <input
-                      ref="renameInputRef"
+                      :ref="setRenameRef"
                       v-model="renameDraft"
                       class="rename-input"
                       spellcheck="false"
@@ -276,24 +337,73 @@ function sessionTitle(s: SessionListItem): string {
                     <span class="session-title">{{ sessionTitle(s) }}</span>
                     <span class="session-meta">
                       <span>{{ relativeTime(s.createdAt) }}</span>
-                      <span class="meta-sep" aria-hidden="true">·</span>
-                      <span>{{ s.messageCount }} 条</span>
+                      <!-- messageCount = -1 means the server has not loaded the messages yet (an
+                           archived session is inactive):
+                           showing nothing beats inventing a zero. -->
+                      <template v-if="s.messageCount >= 0">
+                        <span class="meta-sep" aria-hidden="true">·</span>
+                        <span>{{ s.messageCount }} 条</span>
+                      </template>
                     </span>
                   </template>
                 </span>
-                <span
-                  class="session-delete"
-                  role="button"
-                  tabindex="0"
-                  :title="`删除会话 ${sessionTitle(s)}`"
-                  aria-label="删除会话"
-                  @click.stop="confirmDelete(s.sessionId, sessionTitle(s))"
-                  @keydown.enter.stop.prevent="confirmDelete(s.sessionId, sessionTitle(s))"
+              </button>
+              <!-- Row actions: always-visible pencil (rename) + trash can (opens the confirm popover).
+                   The old "⋯" menu buried delete; semantic icons show it directly. -->
+              <div class="session-actions">
+                <button
+                  type="button"
+                  class="session-act"
+                  :disabled="!isCurrent(s)"
+                  :title="isCurrent(s) ? '重命名会话' : '只有当前打开的会话能重命名'"
+                  :aria-label="`重命名会话：${sessionTitle(s)}`"
+                  @click.stop="startRename(s)"
+                >
+                  <SvgIcon name="edit" :size="14" />
+                </button>
+                <button
+                  type="button"
+                  class="session-act session-act--danger"
+                  :title="`删除会话：${sessionTitle(s)}`"
+                  :aria-label="`删除会话：${sessionTitle(s)}`"
+                  @click.stop="onDeleteClick(s)"
                 >
                   <SvgIcon name="trash" :size="14" />
-                </span>
-              </button>
+                </button>
+                <div
+                  v-if="confirmDeleteId === s.sessionId"
+                  class="delete-confirm"
+                  role="alertdialog"
+                  :aria-label="`确认删除：${sessionTitle(s)}`"
+                >
+                  <div class="delete-confirm-text">删除「{{ sessionTitle(s) }}」？不可恢复。</div>
+                  <div class="delete-confirm-actions">
+                    <button type="button" class="dc-btn" @click.stop="closeDeleteConfirm">取消</button>
+                    <button
+                      type="button"
+                      class="dc-btn dc-btn--danger"
+                      @click.stop="confirmDeleteSession(s.sessionId)"
+                    >
+                      确认删除
+                    </button>
+                  </div>
+                </div>
+              </div>
             </div>
+            <button
+              v-if="!query && hiddenCount(group) > 0"
+              class="space-more"
+              type="button"
+              :title="isSpaceExpanded(group.key) ? '收起，只留最近几条' : `展开这个空间的其余会话`"
+              @click="toggleSpaceExpanded(group.key)"
+            >
+              <SvgIcon name="chevron-down" :size="12" :class="{ 'is-up': isSpaceExpanded(group.key) }" />
+              <span>{{
+                isSpaceExpanded(group.key)
+                  ? '收起'
+                  : `显示更多 ${hiddenCount(group)} 条`
+              }}</span>
+            </button>
           </div>
         </template>
       </div>
@@ -315,9 +425,9 @@ function sessionTitle(s: SessionListItem): string {
       </button>
       <button
         class="foot-item"
-        :class="{ active: view === 'settings' }"
+        :class="{ active: view === 'settings' || settingsModalOpen }"
         :title="collapsed ? '设置' : undefined"
-        @click="emit('navigate', 'settings')"
+        @click="onSettingsNavClick"
       >
         <SvgIcon name="settings" :size="17" />
         <span v-if="!collapsed">设置</span>
@@ -344,7 +454,7 @@ function sessionTitle(s: SessionListItem): string {
   transition: width var(--dur-slower) var(--ease-out);
 }
 
-/* ── Collapsed rail (64px): icons only, tooltips carry the meaning ───────── */
+/* ── Collapsed rail (56px): icons only, tooltips carry the meaning ───────── */
 .sidebar.is-collapsed {
   width: var(--sidebar-width-collapsed);
   gap: var(--space-2);
@@ -421,6 +531,7 @@ function sessionTitle(s: SessionListItem): string {
 @media (prefers-reduced-motion: reduce) {
   .sidebar { transition: none; }
   .collapse-btn { transition: none; }
+  .session-act { transition: none; }
 }
 
 /* ── Brand (click = new chat home) ───────────────────────────────────────── */
@@ -433,7 +544,6 @@ function sessionTitle(s: SessionListItem): string {
   background: transparent;
   cursor: pointer;
   border-radius: var(--radius-md);
-  transition: background var(--dur-fast) var(--ease-out);
 }
 .sidebar-brand:hover {
   background: var(--color-hover);
@@ -450,9 +560,11 @@ function sessionTitle(s: SessionListItem): string {
 :root[data-theme='dark'] .brand-logo {
   filter: invert(1) grayscale(1);
 }
+/* 40px = 56px rail minus the 2×8px rail padding: the widest thing the rail
+   can hold without clipping. */
 .is-collapsed .brand-logo {
   height: auto;
-  width: 42px;
+  width: 40px;
 }
 
 /* ── New chat primary button ─────────────────────────────────────────────── */
@@ -567,20 +679,22 @@ function sessionTitle(s: SessionListItem): string {
 .space-group {
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: 2px;
 }
 .space-head {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  min-height: 32px;
+  min-height: 28px;
   padding: 0 var(--space-2);
   border: none;
   border-radius: var(--radius-md);
   background: transparent;
-  color: var(--color-text-muted);
-  font-size: var(--font-size-sm);
+  color: var(--color-text-faint);
+  font-size: 11px;
   font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
   cursor: pointer;
   text-align: left;
   transition:
@@ -599,17 +713,21 @@ function sessionTitle(s: SessionListItem): string {
   white-space: nowrap;
 }
 .space-count {
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--color-text-faint);
-  padding: 1px var(--space-2);
+  min-width: 16px;
+  padding: 0 5px;
   border-radius: var(--radius-full);
   background: var(--color-selected);
+  color: var(--color-text-faint);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 15px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
 }
 .space-sessions {
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: 2px;
   padding-left: var(--space-3);
 }
 .session-item {
@@ -617,7 +735,8 @@ function sessionTitle(s: SessionListItem): string {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  min-height: 54px;
+  min-width: 0;
+  min-height: 52px;
   padding: var(--space-2) var(--space-3);
   border: none;
   border-radius: var(--radius-md);
@@ -625,13 +744,24 @@ function sessionTitle(s: SessionListItem): string {
   color: var(--color-text);
   cursor: pointer;
   text-align: left;
-  transition: background var(--dur-fast) var(--ease-out);
 }
 .session-item:hover {
   background: var(--color-hover);
 }
 .session-item.active {
   background: var(--color-selected);
+}
+/* Active marker: a 2px brand-colour bar inset from the row's left edge —
+   quieter than bolding the title and monochrome-safe in both themes. */
+.session-item.active::before {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: 10px;
+  bottom: 10px;
+  width: 2px;
+  border-radius: var(--radius-full);
+  background: var(--color-accent);
 }
 /* Running indicator: the session's agent is mid-turn. */
 .session-run {
@@ -658,6 +788,7 @@ function sessionTitle(s: SessionListItem): string {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: var(--font-size-sm);
+  font-weight: 500;
   line-height: 1.35;
 }
 .session-meta {
@@ -666,31 +797,108 @@ function sessionTitle(s: SessionListItem): string {
   gap: 4px;
   font-size: 11px;
   line-height: 1.2;
+  letter-spacing: 0.03em;
   color: var(--color-text-faint);
+  font-variant-numeric: tabular-nums;
   flex-shrink: 0;
 }
 .meta-sep {
   opacity: 0.6;
 }
-.session-delete {
-  position: absolute;
-  right: var(--space-2);
-  top: 50%;
-  transform: translateY(-50%);
-  width: 30px;
-  height: 30px;
-  display: none;
+/* Row action group: always-visible pencil (rename) + trash can (confirm popover).
+   Semantic icons replaced the "⋯" menu that buried the delete entry.
+   It owns a fixed grid column (no longer absolutely positioned over the title);
+   position:relative anchors the confirm popover and z-index keeps it above the
+   rows below. */
+.session-actions {
+  position: relative;
+  display: flex;
+  gap: 2px;
+  padding-right: var(--space-2);
+  z-index: 2;
+}
+.session-act {
+  width: 24px;
+  height: 24px;
+  display: grid;
   place-items: center;
-  border-radius: var(--radius-md);
-  background: var(--color-surface-raised);
-  border: 1px solid var(--color-line);
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
   color: var(--color-text-muted);
   cursor: pointer;
+  opacity: 0.75;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+.session-act:hover:not(:disabled) {
+  opacity: 1;
+  color: var(--color-text);
+  background: var(--color-hover);
+}
+.session-act:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+/* Delete confirm popover: cancel / confirm delete shown directly, no implicit state. */
+.delete-confirm {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  width: 208px;
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  background: var(--color-surface-raised);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-elevation-prominent);
+  z-index: var(--z-popover, 60);
+}
+.delete-confirm-text {
+  font-size: var(--font-size-sm);
+  color: var(--color-text);
+}
+.delete-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+.dc-btn {
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+  background: var(--color-surface-sunken);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.dc-btn:hover {
+  color: var(--color-text);
+  background: var(--color-hover);
+}
+.dc-btn--danger {
+  color: #fff;
+  background: var(--color-danger);
+  border-color: var(--color-danger);
+}
+.dc-btn--danger:hover {
+  color: #fff;
+  filter: brightness(1.08);
 }
 
 /* Inline rename input (G5.2) */
+/* Row container: shrinkable title track (minmax(0,1fr)) + fixed column for the
+   action group. That group used to be absolutely positioned over the title, which
+   both covered it and pushed the row past the rail. With this two-column grid the
+   title ellipsizes on its own and the actions keep their own slot — any title
+   length stays overlap- and overflow-free. */
 .session-item-wrap {
   position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  min-width: 0;
 }
 .session-rename {
   display: block;
@@ -709,13 +917,37 @@ function sessionTitle(s: SessionListItem): string {
   outline: none;
   box-shadow: var(--glow-focus);
 }
-.session-item:hover .session-delete,
-.session-delete:focus-visible {
-  display: grid;
-}
-.session-delete:hover {
+.session-act--danger:hover:not(:disabled) {
   color: var(--color-danger);
-  border-color: var(--color-danger);
+}
+
+/* Collapse button: only appears for groups over 5 rows, styled as a subdued line of helper text. */
+.space-more {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  height: 26px;
+  margin-top: 2px;
+  padding: 0 var(--space-2);
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text-faint);
+  font-family: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  transition:
+    color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out);
+}
+.space-more:hover {
+  color: var(--color-text-muted);
+  background: var(--color-hover);
+}
+/* Expanded state rotates the arrow 180°: cheaper than shipping an up icon, and the swap stays instant. */
+.space-more .is-up {
+  transform: rotate(180deg);
 }
 .spaces-empty {
   padding: var(--space-3) var(--space-2);

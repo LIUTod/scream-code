@@ -89,9 +89,13 @@ function parentDir(entry: FileEntryLite): string {
   max-height: 320px;
   overflow: hidden;
   background: var(--color-surface-raised, var(--color-surface));
-  border: 1px solid var(--color-line-strong);
+  border: 0;
   border-radius: var(--radius-md);
-  box-shadow: var(--shadow-md, var(--shadow-xs));
+  /* Elevated surface: hairline stroke + darker scrollbar, no layout border. */
+  box-shadow: var(--shadow-elevation-prominent);
+  --shadow-stroke-color: var(--color-text-faint);
+  --scrollbar-thumb: var(--color-text-faint);
+  --scrollbar-thumb-hover: var(--color-text-muted);
 }
 .at-status {
   padding: var(--space-3);
@@ -119,7 +123,7 @@ function parentDir(entry: FileEntryLite): string {
   font-size: var(--font-size-sm);
   text-align: left;
   cursor: pointer;
-  transition: background var(--dur-fast) var(--ease-out);
+  cursor: pointer;
 }
 .at-item:hover,
 .at-item.selected {

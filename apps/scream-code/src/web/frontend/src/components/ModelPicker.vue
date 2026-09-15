@@ -1,21 +1,37 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import type { CSSProperties } from 'vue';
 import type { ModelInfo } from '../types';
+import { computePopoverStyle } from '../utils/popoverPosition';
 
 /**
  * Model + thinking-level picker (TUI `/model` selector parity).
  * Opens upward from the composer model pill; grouped by provider, searchable.
+ *
+ * Positioned like MenuPopover: Teleport to body + position:fixed, anchored on
+ * the trigger pill's viewport rect from below (in the composer it opens above
+ * the chip row). The popover used to be absolutely positioned inside the chip
+ * row, where .composer-chips' overflow-x:auto clipped it away entirely — the
+ * real reason the model chip "never opened". It closes on scroll / zoom (matching
+ * MenuPopover's existing behaviour), except for scrolls inside its own list,
+ * which would otherwise close the popover while paging through search results.
  */
-const props = defineProps<{
-  models: ModelInfo[];
-  currentModel?: string | undefined;
-  currentThinking?: string | undefined;
-}>();
+const props = withDefaults(
+  defineProps<{
+    models: ModelInfo[];
+    currentModel?: string | undefined;
+    currentThinking?: string | undefined;
+    /** External open state (v-model:open style); defaults to true for parents that mount-on-open with v-if. */
+    open?: boolean;
+  }>(),
+  { open: true },
+);
 
 const emit = defineEmits<{
   (e: 'apply-model', alias: string): void;
   (e: 'apply-thinking', level: string): void;
   (e: 'close'): void;
+  (e: 'update:open', value: boolean): void;
 }>();
 
 const DEFAULT_THINKING_LEVELS = ['off', 'low', 'medium', 'high'] as const;
@@ -31,10 +47,6 @@ const THINKING_LABELS: Record<string, string> = {
 
 const query = ref('');
 const searchRef = ref<HTMLInputElement | null>(null);
-
-onMounted(() => {
-  searchRef.value?.focus();
-});
 
 const filtered = computed(() => {
   const q = query.value.trim().toLowerCase();
@@ -76,18 +88,105 @@ function displayName(m: ModelInfo): string {
   return m.displayName ?? m.model;
 }
 
-const rootRef = ref<HTMLElement | null>(null);
+/* ── Open state and positioning ─────────────────────────────────────────── */
 
-function onDocMousedown(e: MouseEvent): void {
-  if (rootRef.value && !rootRef.value.contains(e.target as Node)) emit('close');
+/** In-place anchor: display:contents leaves no layout footprint; it is the popover's DOM slot in the chip row. */
+const anchorRef = ref<HTMLElement | null>(null);
+/** The popover body living in the Teleport. */
+const rootRef = ref<HTMLElement | null>(null);
+const panelStyle = ref<CSSProperties>({});
+
+/** Closing always goes through here: both the legacy `close` and `update:open(false)` channels are notified, so a parent may listen to either. */
+function requestClose(): void {
+  emit('close');
+  emit('update:open', false);
 }
 
-onMounted(() => document.addEventListener('mousedown', onDocMousedown, true));
-onBeforeUnmount(() => document.removeEventListener('mousedown', onDocMousedown, true));
+/** Places the popover from the trigger pill's rect: in the composer it sits below the viewport, so it opens upward (placement=top). */
+function measure(): void {
+  const anchor = anchorRef.value;
+  if (!anchor) return;
+  // The real anchor is the chip button: ModelPicker and it both live under
+  // .chip-slot, so it is recovered with closest; when the component is mounted on
+  // its own (detached from .chip-slot) fall back to the global .model-select.
+  const chip =
+    anchor.closest('.chip-slot')?.querySelector('.model-select') ??
+    document.querySelector('.model-select');
+  const rect = (chip ?? anchor).getBoundingClientRect();
+  const gap = 6;
+  const edge = 8;
+  // On a narrow viewport the 320px fixed width must not push past the screen edge (the shared operator clamps horizontally by maxWidth).
+  const style = computePopoverStyle(rect, {
+    placement: 'top',
+    align: 'right',
+    maxWidth: Math.min(320, window.innerWidth - edge * 2),
+    gap,
+    edge,
+  });
+  // Opens upward: the available height is the room between the anchor's top edge and the viewport top; keeps the old 60vh ceiling.
+  const room = Math.max(240, rect.top - gap - edge);
+  style.maxHeight = `min(60vh, ${room}px)`;
+  panelStyle.value = style;
+}
+
+function onDocMousedown(e: MouseEvent): void {
+  const target = e.target as Node | null;
+  // The trigger pill is not an outside click: otherwise mousedown closes first and
+  // click reopens, so the model pill could never be closed while it was open.
+  if (target instanceof Element && target.closest('.model-select')) return;
+  if (rootRef.value && !rootRef.value.contains(target)) requestClose();
+}
+
+/** An ancestor scroll container's scroll does not bubble, so it can only be caught on document; scrolls inside the popover are excluded. */
+function onViewportChange(event: Event): void {
+  const t = event.target;
+  if (t instanceof Node && rootRef.value?.contains(t)) return;
+  requestClose();
+}
+
+function addAnchoring(): void {
+  document.addEventListener('scroll', onViewportChange, true);
+  window.addEventListener('resize', onViewportChange);
+}
+
+function removeAnchoring(): void {
+  document.removeEventListener('scroll', onViewportChange, true);
+  window.removeEventListener('resize', onViewportChange);
+}
+
+onMounted(() => {
+  document.addEventListener('mousedown', onDocMousedown, true);
+  if (props.open) {
+    searchRef.value?.focus();
+    measure();
+    addAnchoring();
+  }
+});
+
+// When a parent drives the open prop (v-model:open style), false→true also has to re-measure and re-focus.
+watch(
+  () => props.open,
+  (open) => {
+    if (!open) {
+      removeAnchoring();
+      return;
+    }
+    addAnchoring();
+    void nextTick(() => {
+      measure();
+      searchRef.value?.focus();
+    });
+  },
+);
+
+onBeforeUnmount(() => {
+  document.removeEventListener('mousedown', onDocMousedown, true);
+  removeAnchoring();
+});
 
 function pick(alias: string) {
   if (alias !== props.currentModel) emit('apply-model', alias);
-  emit('close');
+  requestClose();
 }
 
 /** Keyboard navigation: search ↓ focuses the first row; ↑/↓ cycles row focus. */
@@ -124,62 +223,76 @@ function pickThinking(level: string) {
 </script>
 
 <template>
-  <div ref="rootRef" class="model-picker" role="dialog" aria-label="模型选择" @keydown.esc.stop="emit('close')">
-    <input
-      ref="searchRef"
-      v-model="query"
-      class="picker-search"
-      type="text"
-      placeholder="搜索模型…"
-      id="model-search-input"
-      name="model-search"
-      autocomplete="off"
-      spellcheck="false"
-      @keydown.arrow-down.prevent="focusFirstRow"
-    />
+  <!-- In-place anchor: keeps the popover's query slot in the chip row (existing contract); the real panel lives in the Teleport. -->
+  <span ref="anchorRef" class="model-picker model-picker--anchor">
+    <Teleport to="body">
+      <div
+        v-if="open"
+        ref="rootRef"
+        class="model-picker"
+        :style="panelStyle"
+        role="dialog"
+        aria-label="模型选择"
+        @keydown.esc.stop="requestClose()"
+      >
+        <input
+          ref="searchRef"
+          v-model="query"
+          class="picker-search"
+          type="text"
+          placeholder="搜索模型…"
+          id="model-search-input"
+          name="model-search"
+          autocomplete="off"
+          spellcheck="false"
+          @keydown.arrow-down.prevent="focusFirstRow"
+        />
 
-    <div ref="listRef" class="picker-list" @keydown="onListKeydown">
-      <div v-if="groups.length === 0" class="picker-empty">无匹配模型</div>
-      <div v-for="group in groups" :key="group.provider" class="picker-group">
-        <div class="picker-group-title">{{ group.provider }}</div>
-        <button
-          v-for="m in group.models"
-          :key="m.alias"
-          :class="['picker-row', { active: m.alias === currentModel }]"
-          @click="pick(m.alias)"
-        >
-          <span class="row-main">
-            <span class="row-name">{{ displayName(m) }}</span>
-            <span class="row-alias">{{ m.alias }}</span>
-          </span>
-          <span class="row-meta">{{ formatContext(m.maxContextSize) }}</span>
-          <span v-if="m.alias === currentModel" class="row-check">✓</span>
-        </button>
-      </div>
-    </div>
+        <div ref="listRef" class="picker-list" @keydown="onListKeydown">
+          <div v-if="groups.length === 0" class="picker-empty">无匹配模型</div>
+          <div v-for="group in groups" :key="group.provider" class="picker-group">
+            <div class="picker-group-title">{{ group.provider }}</div>
+            <button
+              v-for="m in group.models"
+              :key="m.alias"
+              :class="['picker-row', { active: m.alias === currentModel }]"
+              @click="pick(m.alias)"
+            >
+              <span class="row-main">
+                <span class="row-name">{{ displayName(m) }}</span>
+                <span class="row-alias">{{ m.alias }}</span>
+              </span>
+              <span class="row-meta">{{ formatContext(m.maxContextSize) }}</span>
+              <span v-if="m.alias === currentModel" class="row-check">✓</span>
+            </button>
+          </div>
+        </div>
 
-    <div class="picker-thinking">
-      <span class="thinking-label">思考强度</span>
-      <div class="thinking-options">
-        <button
-          v-for="level in thinkingLevels"
-          :key="level"
-          :class="['thinking-btn', { active: level === currentThinking }]"
-          @click="pickThinking(level)"
-        >
-          {{ thinkingLabel(level) }}
-        </button>
+        <div class="picker-thinking">
+          <span class="thinking-label">思考强度</span>
+          <div class="thinking-options">
+            <button
+              v-for="level in thinkingLevels"
+              :key="level"
+              :class="['thinking-btn', { active: level === currentThinking }]"
+              @click="pickThinking(level)"
+            >
+              {{ thinkingLabel(level) }}
+            </button>
+          </div>
+        </div>
       </div>
-    </div>
-  </div>
+    </Teleport>
+  </span>
 </template>
 
 <style scoped>
 .model-picker {
-  position: absolute;
-  bottom: 100%;
-  right: 0;
-  margin-bottom: var(--space-2);
+  /* The popover body is fixed onto body (the former absolute bottom:100%/right:0
+     was clipped away by .composer-chips' overflow-x:auto); top/bottom, right,
+     maxWidth and maxHeight are supplied as inline styles by the shared
+     positioning operator. */
+  position: fixed;
   z-index: var(--z-overlay);
   display: flex;
   flex-direction: column;
@@ -187,11 +300,23 @@ function pickThinking(level: string) {
   max-width: calc(100vw - var(--space-8));
   max-height: 60vh;
   background: var(--color-surface-raised);
-  border: 1px solid var(--color-line);
+  border: 0;
   border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-xl);
+  /* Elevated surface: hairline stroke + darker scrollbar, no layout border. */
+  box-shadow: var(--shadow-elevation-prominent);
+  --shadow-stroke-color: var(--color-text-faint);
+  --scrollbar-thumb: var(--color-text-faint);
+  --scrollbar-thumb-hover: var(--color-text-muted);
   overflow: hidden;
   animation: rise-in var(--dur-slower) var(--ease-spring);
+}
+
+/* The in-place anchor shares the .model-picker class name to keep the existing
+   query contract, but it must have zero box: display:contents takes no part in
+   layout and renders none of the visual declarations above. Declared after the
+   base rule so it overrides display:flex at equal specificity. */
+.model-picker--anchor {
+  display: contents;
 }
 
 .picker-search {
@@ -342,7 +467,11 @@ function pickThinking(level: string) {
 }
 
 @media (max-width: 640px) {
-  .model-picker {
+  /* Inline right + the left here pin both edges → the popover fills the row on
+     narrow screens; the inline maxHeight already clamps against the viewport, so
+     70vh is only a fallback matching the previous look (inline styles win; kept
+     as a readable record). */
+  .model-picker:not(.model-picker--anchor) {
     left: var(--space-2);
     right: var(--space-2);
     width: auto;

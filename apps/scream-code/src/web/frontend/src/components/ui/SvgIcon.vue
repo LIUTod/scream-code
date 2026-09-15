@@ -51,6 +51,11 @@ export type IconName =
   | 'x'
   | 'file'
   | 'user'
+  | 'expand'
+  | 'minimize'
+  | 'shield'
+  | 'queue'
+  | 'more'
   | 'bar-chart';
 
 withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 20 });
@@ -120,6 +125,11 @@ withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 20 });
     <template v-else-if="name === 'x'"><path d="M18 6 6 18M6 6l12 12" /></template>
     <template v-else-if="name === 'file'"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" /><path d="M14 2v6h6" /></template>
     <template v-else-if="name === 'user'"><circle cx="12" cy="8" r="3.5" /><path d="M5 20a7 7 0 0 1 14 0" /></template>
+    <template v-else-if="name === 'expand'"><path d="M9 4H4v5M15 4h5v5M9 20H4v-5M15 20h5v-5" /></template>
+    <template v-else-if="name === 'minimize'"><path d="M4 9h5V4M20 9h-5V4M4 15h5v5M20 15h-5v5" /></template>
+    <template v-else-if="name === 'shield'"><path d="M12 3 5 6v5.5c0 4.2 2.9 7.6 7 9.5 4.1-1.9 7-5.3 7-9.5V6Z" /><path d="M9.5 12.2 11.3 14l3.4-3.6" /></template>
+    <template v-else-if="name === 'queue'"><path d="M4 7h11M4 12h11M4 17h7" /><path d="M17.5 15.5 20 18l2.5-2.5M20 18v-6" /></template>
+    <template v-else-if="name === 'more'"><circle cx="5.5" cy="12" r="1.4" /><circle cx="12" cy="12" r="1.4" /><circle cx="18.5" cy="12" r="1.4" /></template>
     <template v-else-if="name === 'bar-chart'"><path d="M4 20V10M10 20V4M16 20v-7M21 20H3" /></template>
   </svg>
 </template>

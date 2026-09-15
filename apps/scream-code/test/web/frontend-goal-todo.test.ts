@@ -149,6 +149,18 @@ describe('Web session race guards', () => {
     expect(acceptJournalEvent(2, 8, journalEvent(9, 3))).toBe('resync');
     expect(acceptJournalEvent(0, 0, journalEvent(1, 3))).toBe('apply');
   });
+
+  it('flags same-epoch seq gaps instead of silently applying over them', () => {
+    // seq 4 → 9: 5-8 are skipped, and judging this as 'apply' would swallow the
+    // gap silently.
+    expect(acceptJournalEvent(2, 4, journalEvent(9, 2))).toBe('gap');
+    // An exact continuation is still 'apply'; with no baseline (currentSeq=0) it
+    // is not treated as a gap.
+    expect(acceptJournalEvent(2, 8, journalEvent(9, 2))).toBe('apply');
+    expect(acceptJournalEvent(2, 0, journalEvent(7, 2))).toBe('apply');
+    // The epoch check takes precedence over the gap check.
+    expect(acceptJournalEvent(2, 4, journalEvent(9, 3))).toBe('resync');
+  });
 });
 
 describe('Web Goal REST bodies', () => {

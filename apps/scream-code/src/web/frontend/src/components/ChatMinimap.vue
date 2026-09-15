@@ -1,15 +1,21 @@
 <!-- G5.1 ChatMinimap.
      A thin progress strip on the right edge of the message column. It derives
-     everything from the visible ChatMessage[] (seq/role/content) — there is no
-     dedicated endpoint, so no new backend surface is needed.
-     - Blocks are colored by role (user / assistant / tool), height proportional
-       to content length.
-     - Click a block -> scrollIntoView of the message row.
-     - The strip highlights the messages currently inside the viewport, via
-       IntersectionObserver against the host container (the chat stage).
-     - Shown only at >= 960px (window.matchMedia). -->
+     everything from the visible ChatMessage[] (seq/role/content) plus the live
+     metrics of the host scroll box — there is no dedicated endpoint, so no new
+     backend surface is needed.
+     Two layers, deliberately quiet under the continuous one:
+     - Density underlay: blocks colored by role (user / assistant / tool), height
+       proportional to content length. Decorative ("where is this conversation
+       dense"), and still clickable: click a block -> reveal + scrollIntoView.
+     - Position thumb: one capsule whose top/height map scrollTop/scrollHeight,
+       i.e. the same geometry a native scrollbar thumb uses. This replaces the
+       old IntersectionObserver per-row highlight, which stepped block by block
+       and read as a jump rather than as motion.
+     - The thumb wakes on scroll/hover and fades out after ~1s of stillness.
+     - Shown only when the content actually overflows, and only at >= 960px. -->
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import type { CSSProperties } from 'vue';
 import type { ChatMessage } from '../types';
 
 const props = defineProps<{
@@ -18,8 +24,8 @@ const props = defineProps<{
   host: HTMLElement | null;
   /**
    * Render-window revision of the parent list (its window start). The list is
-   * windowed, so which rows exist in the DOM changes without `messages`
-   * changing; bumping this re-syncs the viewport highlight.
+   * windowed, so the scrollable range changes when the window slides even
+   * though the viewport did not scroll; bumping this re-measures the mapping.
    */
   revision?: number;
   /**
@@ -32,17 +38,30 @@ const props = defineProps<{
 const hoverSeq = ref<number | null>(null);
 
 const MIN_WIDTH_QUERY = '(min-width: 960px)';
+const REDUCED_MOTION_QUERY = '(prefers-reduced-motion: reduce)';
 const hasMatchMedia = typeof window.matchMedia === 'function';
 const mql = hasMatchMedia ? window.matchMedia(MIN_WIDTH_QUERY) : null;
+const motionMql = hasMatchMedia ? window.matchMedia(REDUCED_MOTION_QUERY) : null;
 const enabled = ref(mql?.matches ?? false);
+/**
+ * Under reduced motion the thumb stays visible (it is only hidden until the
+ * first frame is ready). "Always visible" beats "instant switch": one less
+ * fade-out timer branch in JS, and no CSS override rules for a 0ms transition.
+ */
+const reducedMotion = ref(motionMql?.matches ?? false);
 
 function onMql(e: MediaQueryListEvent): void {
   enabled.value = e.matches;
 }
+function onMotionMql(e: MediaQueryListEvent): void {
+  reducedMotion.value = e.matches;
+}
 onMounted(() => mql?.addEventListener('change', onMql));
 onBeforeUnmount(() => mql?.removeEventListener('change', onMql));
+onMounted(() => motionMql?.addEventListener('change', onMotionMql));
+onBeforeUnmount(() => motionMql?.removeEventListener('change', onMotionMql));
 
-/* ── Segments ───────────────────────────────────────────────────────────── */
+/* ── Density underlay ───────────────────────────────────────────────────── */
 interface Segment {
   id: string;
   seq: number;
@@ -77,55 +96,209 @@ const segments = computed<Segment[]>(() => {
 
 const totalRatio = computed(() => segments.value.reduce((s, x) => s + x.ratio, 0) || 1);
 
-/* ── Viewport highlight via IntersectionObserver ────────────────────────── */
-const inView = ref<Set<string>>(new Set());
-let observer: IntersectionObserver | null = null;
+/* ── Continuous thumb ───────────────────────────────────────────────────── */
+interface Metrics {
+  scrollTop: number;
+  scrollHeight: number;
+  clientHeight: number;
+  /** Pixel height the thumb is mapped into (the strip's own box). */
+  trackHeight: number;
+}
 
-const hasIO = typeof window !== 'undefined' && typeof IntersectionObserver === 'function';
+const metrics = ref<Metrics>({ scrollTop: 0, scrollHeight: 0, clientHeight: 0, trackHeight: 0 });
+/** No thumb is drawn before the first frame measures real metrics: after a session switch a stale mapping would fling the pill to the wrong place and flicker. */
+const ready = ref(false);
+const hovering = ref(false);
+const quiet = ref(false);
+const trackRef = ref<HTMLElement | null>(null);
 
-function observe(): void {
-  observer?.disconnect();
+/** When the content fits on one screen the minimap has no position information to express, so it is not rendered at all. */
+const scrollable = computed(() => metrics.value.scrollHeight > metrics.value.clientHeight);
+
+const MIN_THUMB_PX = 24;
+
+/**
+ * Linear mapping: top = scrollTop/scrollHeight, height ∝ clientHeight/scrollHeight.
+ * When the 24px minimum visible height kicks in, top is clamped back inside the
+ * track so the pill stays flush at the bottom when scrolled to the end.
+ */
+const thumbStyle = computed<CSSProperties>(() => {
+  const { scrollTop, scrollHeight, clientHeight, trackHeight } = metrics.value;
+  if (!ready.value || !scrollable.value || trackHeight <= 0) return {};
+  const h = Math.max(MIN_THUMB_PX, (clientHeight / scrollHeight) * trackHeight);
+  const span = Math.max(trackHeight - h, 0);
+  const top = Math.min(Math.max((scrollTop / scrollHeight) * trackHeight, 0), span);
+  return { top: `${top}px`, height: `${h}px` };
+});
+
+/** Hover test: besides pointerenter, hovering a segment tooltip counts too — either one means hovered. */
+const hovered = computed(() => hovering.value || hoverSeq.value !== null);
+
+/** Fade test: never fade under reduced motion, or while the pointer rests on the minimap. */
+const isQuiet = computed(() => quiet.value && !hovered.value && !reducedMotion.value);
+
+/** How long the pill stays idle before fading. Much longer than the transition itself, so it stays visible between scrolls. */
+const QUIET_MS = 1000;
+let quietTimer: ReturnType<typeof setTimeout> | null = null;
+
+function wake(): void {
+  quiet.value = false;
+  if (reducedMotion.value) return;
+  if (quietTimer !== null) clearTimeout(quietTimer);
+  quietTimer = setTimeout(() => {
+    quietTimer = null;
+    quiet.value = true;
+  }, QUIET_MS);
+}
+
+function clearQuietTimer(): void {
+  if (quietTimer === null) return;
+  clearTimeout(quietTimer);
+  quietTimer = null;
+}
+
+let rafId: number | null = null;
+
+function measure(): void {
   const host = props.host;
-  if (!host || !enabled.value || !hasIO) return;
-  observer = new IntersectionObserver(
-    (entries) => {
-      const next = new Set(inView.value);
-      for (const e of entries) {
-        const id = (e.target as HTMLElement).dataset.messageId;
-        if (!id) continue;
-        if (e.isIntersecting) next.add(id);
-        else next.delete(id);
-      }
-      inView.value = next;
-    },
-    { root: host, threshold: 0 },
-  );
-  for (const msg of props.messages) {
-    if (!msg.id) continue;
-    const el = host.querySelector(`[data-message-id="${CSS.escape(msg.id)}"]`);
-    if (el) observer.observe(el);
+  if (!host) {
+    ready.value = false;
+    return;
   }
-  // Prune highlights for rows the window unmounted: removal does not
-  // reliably deliver a final non-intersecting entry across engines.
-  // (Re-runs on every window slide because `revision` feeds this watch.)
-  if (inView.value.size) {
-    const alive = new Set<string>();
-    for (const id of inView.value) {
-      if (host.querySelector(`[data-message-id="${CSS.escape(id)}"]`)) alive.add(id);
-    }
-    if (alive.size !== inView.value.size) inView.value = alive;
+  // The track's own height wins; when unmounted or unlaid-out (jsdom) fall back
+  // to the viewport height — the two are nearly equal in a real browser, and the
+  // fallback only exists so a measurement always has a definite mapping basis.
+  const track = trackRef.value?.clientHeight ?? 0;
+  metrics.value = {
+    scrollTop: host.scrollTop,
+    scrollHeight: host.scrollHeight,
+    clientHeight: host.clientHeight,
+    trackHeight: track || host.clientHeight,
+  };
+  ready.value = host.scrollHeight > 0;
+}
+
+/** rAF coalescing: several scroll/resize callbacks in one frame measure once, and rAF runs before the next frame paints. */
+function schedule(): void {
+  if (rafId !== null) return;
+  rafId = requestAnimationFrame(() => {
+    rafId = null;
+    measure();
+  });
+}
+
+function onScroll(): void {
+  wake();
+  schedule();
+}
+
+/** Entering the minimap: appear immediately and push the fade timer back; leaving grants the same 1s grace. */
+function onStripEnter(): void {
+  hovering.value = true;
+  wake();
+}
+
+function onStripLeave(): void {
+  hovering.value = false;
+  wake();
+}
+
+let resizeObserver: ResizeObserver | null = null;
+
+function bindSource(): void {
+  const host = props.host;
+  resizeObserver?.disconnect();
+  resizeObserver = null;
+  if (!host) return;
+  host.addEventListener('scroll', onScroll, { passive: true });
+  // Viewport/column size changes are only reported through ResizeObserver (no
+  // scroll event); taller content is covered by the messages/revision/totalRatio
+  // watchers below.
+  if (typeof ResizeObserver !== 'undefined') {
+    resizeObserver = new ResizeObserver(() => schedule());
+    resizeObserver.observe(host);
   }
 }
 
-// Observe AFTER the DOM patch so newly added message rows are present; a plain
-// pre-flush watch would run before Vue renders the new message and the row
-// would never enter the observer. `revision` is the parent's window start: the
-// list is windowed, so the mounted rows can change without `messages` changing.
-watch([() => props.messages.length, () => props.host, () => props.revision, enabled], () => {
-  nextTick(observe);
+function unbindSource(): void {
+  props.host?.removeEventListener('scroll', onScroll);
+  resizeObserver?.disconnect();
+  resizeObserver = null;
+}
+
+onMounted(() => {
+  if (enabled.value) {
+    bindSource();
+    wake();
+    schedule();
+  }
 });
-onMounted(() => observe());
-onBeforeUnmount(() => observer?.disconnect());
+onBeforeUnmount(() => {
+  unbindSource();
+  clearQuietTimer();
+  if (rafId !== null) {
+    cancelAnimationFrame(rafId);
+    rafId = null;
+  }
+});
+
+// A new scroll-source element (remount) or hiding on a narrow screen invalidates
+// the old mapping: unbind, rebind and re-measure.
+watch(
+  [() => props.host, enabled],
+  () => {
+    unbindSource();
+    ready.value = false;
+    nextTick(() => {
+      if (!enabled.value) return;
+      bindSource();
+      schedule();
+    });
+  },
+);
+
+/**
+ * Session switch vs. paging older messages: both replace the first message, but
+ * only a switch invalidates the old mapping completely (head and tail both
+ * change). When paging, scrollTop is anchored by the parent list and the
+ * geometry is continuous, so going through opacity:0 would be a visible flicker.
+ * The test is therefore "head and tail both changed", which is exactly what a
+ * switch looks like.
+ */
+const headTail = computed(() => `${props.messages[0]?.id ?? ''}|${props.messages.at(-1)?.id ?? ''}`);
+let lastHead = '';
+let lastTail = '';
+watch(
+  headTail,
+  (next) => {
+    const [head, tail] = next.split('|');
+    const switched = lastHead !== '' && head !== lastHead && tail !== lastTail;
+    lastHead = head ?? '';
+    lastTail = tail ?? '';
+    if (switched) ready.value = false; // stale mapping — re-enter from opacity 0
+    schedule();
+  },
+  { immediate: true },
+);
+
+// The strip itself only exists once scrollable turns true, so the first
+// measurement has to fall back to the viewport height; measure again after it
+// renders to get the real track height, so the mapping lines up exactly with the
+// visible 6px strip.
+watch(scrollable, (on) => {
+  if (on) nextTick(schedule);
+});
+
+/**
+ * Three sources of change in the scrollable range: a change in row count,
+ * windowed sliding (revision), and — while streaming — the same batch of messages
+ * growing (totalRatio changes, row count does not). Any of them triggers
+ * another measurement, all through the same rAF coalescing channel, so there is
+ * at most one DOM read per frame.
+ */
+watch([() => props.messages.length, () => props.revision, totalRatio, enabled], () => {
+  schedule();
+});
 
 function scrollToMessage(id: string): void {
   const host = props.host;
@@ -150,17 +323,20 @@ function tooltipOf(seg: Segment): string {
 
 <template>
   <div
-    v-if="enabled && segments.length > 0"
+    v-if="enabled && segments.length > 0 && scrollable"
     class="minimap"
+    :class="{ 'is-quiet': isQuiet, 'is-hovered': hovered }"
     role="navigation"
     aria-label="消息地图"
+    @pointerenter="onStripEnter"
+    @pointerleave="onStripLeave"
   >
-    <div class="minimap-track">
+    <div ref="trackRef" class="minimap-track">
       <button
         v-for="seg in segments"
         :key="seg.id"
         class="minimap-block"
-        :class="[`role-${seg.role}`, { 'in-view': inView.has(seg.id) }]"
+        :class="`role-${seg.role}`"
         :style="{
           top: `${(seg.offset / totalRatio) * 100}%`,
           height: `${Math.max((seg.ratio / totalRatio) * 100, 2)}%`,
@@ -173,6 +349,7 @@ function tooltipOf(seg: Segment): string {
       >
         <span v-if="hoverSeq === seg.seq" class="minimap-tooltip">{{ tooltipOf(seg) }}</span>
       </button>
+      <div class="minimap-thumb" :style="thumbStyle" :class="{ 'is-ready': ready }" aria-hidden="true" />
     </div>
   </div>
 </template>
@@ -192,6 +369,7 @@ function tooltipOf(seg: Segment): string {
   width: 100%;
   height: 100%;
 }
+/* Background texture: expresses density only and takes no part in position highlighting, so the contrast is kept near decorative level and only brightens on hover. */
 .minimap-block {
   position: absolute;
   left: 0;
@@ -201,17 +379,10 @@ function tooltipOf(seg: Segment): string {
   padding: 0;
   cursor: pointer;
   pointer-events: auto;
-  opacity: 0.45;
-  transition:
-    opacity var(--dur-fast) var(--ease-out),
-    box-shadow var(--dur-fast) var(--ease-out);
+  opacity: 0.18;
 }
-.minimap-block:hover,
-.minimap-block.in-view {
-  opacity: 1;
-}
-.minimap-block.in-view {
-  box-shadow: 0 0 0 1px var(--color-accent-bd);
+.minimap-block:hover {
+  opacity: 0.55;
 }
 .minimap-block.role-user {
   background: var(--color-accent);
@@ -221,6 +392,34 @@ function tooltipOf(seg: Segment): string {
 }
 .minimap-block.role-tool {
   background: var(--color-text-faint);
+}
+.minimap-thumb {
+  position: absolute;
+  left: 50%;
+  width: 3px;
+  margin-left: -1.5px;
+  border-radius: var(--radius-full);
+  background: var(--color-accent);
+  opacity: 0;
+  pointer-events: none;
+  /* Only opacity is transitioned: top is rewritten by rAF every frame, and a transition would leave the pill lagging behind the real scroll position. */
+  transition: opacity var(--dur-base) var(--ease-out);
+}
+.minimap-thumb.is-ready {
+  opacity: 0.6;
+}
+/* Fades out after ~1s idle; reappears on hover (is-hovered wins by being last in rule order). */
+.minimap.is-quiet .minimap-thumb.is-ready {
+  opacity: 0;
+}
+.minimap.is-hovered .minimap-thumb.is-ready {
+  opacity: 0.85;
+}
+/* Reduced motion: the thumb stays visible (JS never schedules the fade timer); only that entrance transition is dropped here. */
+@media (prefers-reduced-motion: reduce) {
+  .minimap-thumb {
+    transition: none;
+  }
 }
 .minimap-tooltip {
   position: absolute;

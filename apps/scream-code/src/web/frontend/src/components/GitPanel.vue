@@ -101,7 +101,10 @@ const syncLabel = computed(() => {
           {{ showAll ? '收起列表' : `显示全部 ${gitStatus.files?.length ?? 0} 个文件` }}
         </button>
         <pre v-if="gitStatus.diffStat" class="diff-body">{{ gitStatus.diffStat }}</pre>
-        <div v-else-if="!visibleFiles.length" class="diff-empty">工作区干净，没有变更。</div>
+        <div v-else-if="!visibleFiles.length" class="panel-empty">
+          <SvgIcon name="check" :size="18" />
+          <span>工作区干净，没有变更</span>
+        </div>
       </template>
       <div v-else class="diff-empty">读取 Git 状态失败，点右上角刷新重试。</div>
     </div>
@@ -131,15 +134,17 @@ const syncLabel = computed(() => {
   gap: var(--space-2);
   width: 100%;
   min-height: 28px;
-  padding: 0;
+  padding: 0 var(--space-1);
   border: none;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--color-text);
   font-size: var(--font-size-xs);
   cursor: pointer;
   text-align: left;
 }
-.git-file:hover { background: transparent; }
+/* Row hover swaps colour instantly — no color transition on interactive rows. */
+.git-file:hover { background: var(--color-hover); }
 /* Status as coloured type instead of 74 grey blocks — the letter is the
    information, the tint only has to flag the destructive/additive cases. */
 .git-file-status {
@@ -172,7 +177,6 @@ const syncLabel = computed(() => {
 .git-file-base {
   flex-shrink: 0;
   color: var(--color-text);
-  transition: color var(--dur-fast) var(--ease-out);
 }
 .git-file-stat {
   flex-shrink: 0;
@@ -206,6 +210,8 @@ const syncLabel = computed(() => {
   background: var(--color-surface-sunken);
   color: var(--color-text-muted);
 }
+/* Failure copy (as opposed to the clean-worktree empty state) stays a plain
+   left-aligned line so it reads as a notice, not a celebration. */
 .diff-empty { color: var(--color-text-faint); font-size: var(--font-size-xs); line-height: 1.5; }
 
 @media (max-width: 640px) {

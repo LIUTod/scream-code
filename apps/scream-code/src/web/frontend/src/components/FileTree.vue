@@ -310,7 +310,6 @@ function refresh(): void {
   font-size: var(--font-size-xs);
   cursor: pointer;
   text-align: left;
-  transition: background var(--dur-fast) var(--ease-out);
 }
 .tree-row:hover {
   background: var(--color-hover);

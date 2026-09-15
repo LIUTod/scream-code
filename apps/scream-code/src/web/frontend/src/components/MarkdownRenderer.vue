@@ -3,6 +3,7 @@ import { computed, h, defineComponent, ref, watch } from 'vue';
 import { marked, type Token } from 'marked';
 import CodeBlock from './CodeBlock.vue';
 import { openImageLightbox } from '../utils/imageLightbox';
+import { createBlockRenderCache } from '../utils/markdownBlockCache';
 
 // Enable GFM features (task lists, tables, strikethrough) and line breaks.
 marked.setOptions({ gfm: true, breaks: false });
@@ -13,6 +14,13 @@ marked.setOptions({ gfm: true, breaks: false });
  * Long finalized messages render a preview until the user expands them.
  * Streaming messages are exempt (rAF-coalesced already, and truncating
  * mid-stream would fight the fence-trim logic).
+ *
+ * Streaming renders also go through a block-level freeze cache
+ * (utils/markdownBlockCache): every chunk re-lexes the whole document, but
+ * unchanged prefix blocks reuse their vnode objects, and Vue's patch bails
+ * out on identical vnode references — only the tail blocks that changed pay
+ * the render/patch cost. CodeBlock vnodes are component vnodes and are never
+ * cached, so the streaming prop stays live.
  */
 const MAX_INLINE_MARKDOWN_CHARS = 40_000;
 const COLLAPSED_PREVIEW_CHARS = 6_000;
@@ -73,11 +81,16 @@ export default defineComponent({
       },
     );
 
+    // Per-instance block cache: streaming appends reuse vnode arrays for
+    // prefix blocks whose token content is unchanged. Invalidated wholesale
+    // on non-append edits and capped (see utils/markdownBlockCache).
+    const blockCache = createBlockRenderCache();
+
     const nodes = computed(() => {
       const source = guarded.value ? previewOf(renderContent.value) : renderContent.value;
       const safeContent = trimPartialClosingFences(source);
       const tokens = marked.lexer(safeContent);
-      return tokens.flatMap((token) => renderToken(token, props.streaming));
+      return blockCache.render(tokens, safeContent, (token) => renderToken(token, props.streaming));
     });
 
     const totalChars = computed(() => renderContent.value.length);
@@ -276,38 +289,70 @@ function renderInline(tokens: Token[]): (string | ReturnType<typeof h>)[] {
 </script>
 
 <style scoped>
-.markdown-body :deep(.md-p) { margin: 0.6em 0; }
-.markdown-body :deep(.md-h1), .markdown-body :deep(.md-h2), .markdown-body :deep(.md-h3) {
-  margin: 1em 0 0.5em; font-weight: 600;
+/* Block rhythm: blocks carry only a bottom margin (adjacent siblings have no
+   margin collapse to lean on), so any two blocks are separated by exactly one
+   paragraph space and same-level spacing stays uniform. */
+.markdown-body :deep(.md-p),
+.markdown-body :deep(.md-ul),
+.markdown-body :deep(.md-ol),
+.markdown-body :deep(.md-blockquote),
+.markdown-body :deep(.md-table-wrap) { margin: 0 0 var(--space-3); }
+/* Prose measure: 60-75 characters per line is the comfortable reading range
+   for body text; code blocks and tables stay full-width for wide content. */
+.markdown-body :deep(.md-p),
+.markdown-body :deep(.md-ul),
+.markdown-body :deep(.md-ol),
+.markdown-body :deep(.md-blockquote) { max-width: 70ch; }
+/* A trailing block hugs the meta row instead of adding a double gap. */
+.markdown-body :deep(.md-p:last-child),
+.markdown-body :deep(.md-ul:last-child),
+.markdown-body :deep(.md-ol:last-child),
+.markdown-body :deep(.md-blockquote:last-child),
+.markdown-body :deep(.md-table-wrap:last-child) { margin-bottom: 0; }
+/* Heading rhythm: clearly more space above than below binds a heading to the
+   content it introduces rather than the content it closes; a tight size
+   ladder (h1 > h2 > h3 > h4) keeps hierarchy visible without shouting. */
+.markdown-body :deep(.md-h1), .markdown-body :deep(.md-h2),
+.markdown-body :deep(.md-h3), .markdown-body :deep(.md-h4) {
+  margin: var(--space-5) 0 var(--space-2);
+  font-weight: 600;
+  line-height: 1.3;
 }
-.markdown-body :deep(.md-h1) { font-size: 1.5em; border-bottom: 1px solid var(--color-line); padding-bottom: 0.3em; }
+.markdown-body :deep(.md-h1:first-child), .markdown-body :deep(.md-h2:first-child),
+.markdown-body :deep(.md-h3:first-child), .markdown-body :deep(.md-h4:first-child) { margin-top: 0; }
+.markdown-body :deep(.md-h1) { font-size: 1.45em; border-bottom: 1px solid var(--color-line); padding-bottom: var(--space-2); }
 .markdown-body :deep(.md-h2) { font-size: 1.3em; }
 .markdown-body :deep(.md-h3) { font-size: 1.15em; }
-.markdown-body :deep(.md-ul), .markdown-body :deep(.md-ol) { margin: 0.6em 0; padding-left: 1.5em; }
+.markdown-body :deep(.md-h4) { font-size: 1em; }
+.markdown-body :deep(.md-ul), .markdown-body :deep(.md-ol) { padding-left: 1.5em; }
+/* Items sit closer to each other than blocks do, so a list reads as one
+   cohesive unit; first/last item flush with the list edge. */
 .markdown-body :deep(.md-li) { margin: 0.25em 0; }
+.markdown-body :deep(.md-li:first-child) { margin-top: 0; }
+.markdown-body :deep(.md-li:last-child) { margin-bottom: 0; }
 .markdown-body :deep(.md-task) { list-style: none; margin-left: -1.2em; }
 .markdown-body :deep(.md-checkbox) { margin-right: 6px; vertical-align: middle; accent-color: var(--color-accent); }
 .markdown-body :deep(.md-blockquote) {
-  margin: 0.6em 0; padding: var(--space-1) var(--space-4); border-left: 3px solid var(--color-accent);
+  padding: var(--space-2) var(--space-4); border-left: 3px solid var(--color-accent);
   border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
   background: var(--color-accent-soft);
   color: var(--color-text-muted);
 }
 .markdown-body :deep(.md-code) {
-  background: var(--color-surface-sunken); padding: 0.15em 0.35em; border-radius: var(--radius-xs);
+  background: var(--color-surface-sunken); padding: 1px 3px; border-radius: var(--radius-sm);
   border: 1px solid var(--color-line);
   font-family: var(--font-mono); font-size: 0.9em;
 }
 .markdown-body :deep(.md-a) { color: var(--color-info); text-decoration: none; transition: color var(--dur-fast) var(--ease-out); }
 .markdown-body :deep(.md-a:hover) { color: var(--color-accent); text-decoration: underline; }
-.markdown-body :deep(.md-hr) { border: none; border-top: 1px solid var(--color-line); margin: 1em 0; }
+.markdown-body :deep(.md-hr) { border: none; border-top: 1px solid var(--color-line); margin: var(--space-4) 0; }
 .markdown-body :deep(.md-strong) { font-weight: 600; }
 .markdown-body :deep(.md-em) { font-style: italic; }
 .markdown-body :deep(.md-del) { text-decoration: line-through; color: var(--color-text-muted); }
 .markdown-body :deep(.md-img-btn) { display: block; max-width: 100%; padding: 0; border: 0; background: none; cursor: zoom-in; }
 .markdown-body :deep(.md-img) { max-width: 100%; border-radius: var(--radius-md); }
-.markdown-body :deep(.md-table) { border-collapse: collapse; width: 100%; margin: 0.6em 0; font-size: 0.9em; }
-.markdown-body :deep(.md-th), .markdown-body :deep(.md-td) { border: 1px solid var(--color-line); padding: 6px 10px; text-align: left; }
+.markdown-body :deep(.md-table) { border-collapse: collapse; width: 100%; font-size: 0.9em; }
+.markdown-body :deep(.md-th), .markdown-body :deep(.md-td) { border: 1px solid var(--color-line); padding: var(--space-2) var(--space-3); text-align: left; }
 .markdown-body :deep(.md-th) { background: var(--color-surface-sunken); font-weight: 600; }
 .markdown-body :deep(.md-html) { margin: 0.6em 0; }
 .markdown-body :deep(.md-expand) {

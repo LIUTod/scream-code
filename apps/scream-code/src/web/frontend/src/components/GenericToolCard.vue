@@ -214,7 +214,6 @@ function zoomImage(): void {
   cursor: pointer;
   user-select: none;
   background: var(--color-surface-raised);
-  transition: background var(--dur-fast) var(--ease-out);
 }
 .tool-header:hover {
   background: var(--color-hover);

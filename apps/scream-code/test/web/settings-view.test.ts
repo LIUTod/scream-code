@@ -26,6 +26,8 @@ function fakeClient(overrides: Record<string, unknown> = {}) {
     { taskId: 't1', command: 'echo hi', description: 'Say hi', status: 'running' },
   ]);
   const status = ref({ model: 'm1' });
+  const currentSessionId = ref<string | null>('sess-1');
+  const modelsError = ref<string | null>(null);
   const actions: Record<string, ReturnType<typeof vi.fn>> = {
     fetchModels: vi.fn(async () => undefined),
     fetchConfig: vi.fn(async () => undefined),
@@ -44,7 +46,7 @@ function fakeClient(overrides: Record<string, unknown> = {}) {
     stopBackgroundTask: vi.fn(async () => true),
     fetchBackgroundTaskOutput: vi.fn(async () => undefined),
   };
-  const client = { models, skills, plugins, mcpServers, backgroundTasks, status, ...actions, ...overrides };
+  const client = { models, skills, plugins, mcpServers, backgroundTasks, status, currentSessionId, modelsError, ...actions, ...overrides };
   return { client, actions, models, skills, plugins, mcpServers, backgroundTasks };
 }
 
@@ -102,7 +104,7 @@ describe('SettingsView (G4)', () => {
     expect(text).toContain('Model One');
     expect(text).toContain('p1 · m1 · 1000');
     expect(text).toContain('Model Two');
-    // The active model shows 使用中, others 切换.
+    // The active model row shows the in-use label, the others show the switch label.
     const actions = wrapper.findAll('.list-row .row-action').map((n) => n.text());
     expect(actions).toContain('切换');
   });
@@ -164,5 +166,29 @@ describe('SettingsView (G4)', () => {
     const emitted = wrapper.emitted('update-like');
     expect(emitted).toBeTruthy();
     expect(emitted?.[0]?.[0]).toMatchObject({ nickname: 'Test Nickname' });
+  });
+
+  it('models pane: disables the switch action and shows a notice bar with no active session', async () => {
+    const { client } = fakeClient({ currentSessionId: ref<string | null>(null) });
+    const wrapper = mountView(client);
+    await wrapper.findAll('.rail-tab')[1]!.trigger('click');
+    await flushPromises();
+    expect(wrapper.find('.notice-bar').text()).toContain('打开一个会话后可在此切换模型');
+    const btn = wrapper.find('.list-row .row-action');
+    expect(btn.attributes('disabled')).toBeDefined();
+  });
+
+  it('models pane: a load failure renders a Retry row that refetches models (no silent failure)', async () => {
+    const { client, actions } = fakeClient({
+      modelsError: ref<string | null>('模型列表加载失败（HTTP 500）'),
+      models: ref([]),
+    });
+    const wrapper = mountView(client);
+    await wrapper.findAll('.rail-tab')[1]!.trigger('click');
+    await flushPromises();
+    expect(wrapper.find('.error-row').text()).toContain('HTTP 500');
+    await wrapper.find('.error-row .row-action').trigger('click');
+    // The initial mount already fetched once; clicking retry adds exactly one more call.
+    expect(actions.fetchModels).toHaveBeenCalledTimes(2);
   });
 });

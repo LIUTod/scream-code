@@ -114,7 +114,10 @@ watch(
           <span class="files-meta">{{ entry.type === 'dir' ? '目录' : fmtSize(entry.size) }}</span>
         </button>
       </li>
-      <li v-if="!loading && entries.length === 0" class="files-empty">空目录</li>
+      <li v-if="!loading && entries.length === 0" class="files-empty">
+        <SvgIcon name="folder" :size="18" />
+        <span>空目录</span>
+      </li>
     </ul>
   </div>
 </template>
@@ -147,7 +150,6 @@ watch(
   color: var(--color-text-muted);
   cursor: pointer;
   flex-shrink: 0;
-  transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
 }
 .files-up:hover {
   background: var(--color-hover);
@@ -168,7 +170,6 @@ watch(
   cursor: pointer;
   padding: 2px 3px;
   border-radius: var(--radius-xs);
-  transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
 }
 .crumb:hover {
   background: var(--color-hover);
@@ -201,7 +202,6 @@ watch(
   color: var(--color-text);
   font-size: var(--font-size-sm);
   cursor: pointer;
-  transition: background var(--dur-fast) var(--ease-out);
   text-align: left;
   min-height: 32px;
 }
@@ -220,11 +220,20 @@ watch(
   white-space: nowrap;
 }
 .files-meta {
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   color: var(--color-text-faint);
   flex-shrink: 0;
 }
-.files-empty,
+.files-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-4) var(--space-2);
+  color: var(--color-text-faint);
+  font-size: var(--font-size-xs);
+}
+.files-empty svg { opacity: 0.75; }
 .files-loading,
 .files-error {
   padding: var(--space-3) var(--space-2);

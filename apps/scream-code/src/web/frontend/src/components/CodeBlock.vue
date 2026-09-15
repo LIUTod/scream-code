@@ -1,7 +1,15 @@
 <script setup lang="ts">
-import { ref, watch, inject } from 'vue';
-import { createHighlighterCore } from 'shiki/core';
-import { createOnigurumaEngine } from 'shiki/engine/oniguruma';
+import { ref, computed, watch, inject, onMounted, onBeforeUnmount } from 'vue';
+import {
+  ensureHighlighter,
+  ensureLang,
+  isLangLoaded,
+  isViewportObserverAvailable,
+  observeCodeBlock,
+  plainPreHtml,
+  resolveLang,
+  tokenizeStreamBatch,
+} from '../utils/codeHighlight';
 
 const props = defineProps<{
   code: string;
@@ -16,76 +24,174 @@ const effectiveTheme = inject<import('vue').Ref<'light' | 'dark'>>(
 );
 
 const highlighted = ref('');
-/** Lightweight escaped rendering used while streaming (no shiki highlight). */
+/** 轻量转义纯文本：流式期间未激活视口或 grammar 未就绪时的兜底渲染。 */
 const plainHtml = ref('');
 const copied = ref(false);
 
-type Highlighter = Awaited<ReturnType<typeof createHighlighterCore>>;
+// —— 视口激活 ——
+// 有 IntersectionObserver 的环境：进入视口才激活高亮，激活后永久有效；
+// 没有的环境（如测试 jsdom）回退旧行为——立即一次性高亮。
+const ioAvailable = isViewportObserverAvailable();
+const active = ref(!ioAvailable);
+let cancelObserve: (() => void) | null = null;
+const rootEl = ref<HTMLElement | null>(null);
 
-let highlighter: Highlighter | null = null;
-const loadedLangs = new Set<string>();
-const loadingLangs = new Map<string, Promise<void>>();
+// —— 流式增量状态 ——
+// 每行缓存渲染好的 HTML；grammar 状态跨帧续算，每帧只 tokenize 新增完成行。
+const streamLines = ref<string[]>([]);
+/** 当前半行原文：模板里用文本插值渲染，天然转义（轻量路径）。 */
+const streamPartial = ref('');
+const streamShell = ref<{ theme: string; style: string } | null>(null);
+let grammarState: unknown = null;
+let streamLang = '';
+let streamTheme = '';
+/** 流式 DOM 当前已完整覆盖的源码：settle 时判断“能否认领现有 DOM”的基准。 */
+let lastStreamCode = '';
+/** 整段渲染去重：同参数只渲染一次，settle 同帧双 watch 触发时抑制重复。 */
+let lastRenderKey: string | null = null;
+let pendingRenderKey: string | null = null;
+/** 已发起加载但未就位的语言，避免流式每帧重复触发加载。 */
+const kickAttempted = new Set<string>();
 
-// Common aliases mapped to shiki language module names.
-const LANG_ALIASES: Record<string, string> = {
-  js: 'javascript', ts: 'typescript', py: 'python', sh: 'bash', shell: 'bash',
-  shscript: 'bash', 'shell-script': 'bash', yml: 'yaml', md: 'markdown',
-  rs: 'rust', rb: 'ruby', go: 'go', java: 'java', c: 'c', cpp: 'cpp',
-  'c++': 'cpp', cs: 'csharp', 'c#': 'csharp', kt: 'kotlin', kts: 'kotlin',
-  scala: 'scala', swift: 'swift', dart: 'dart', lua: 'lua', r: 'r',
-  sql: 'sql', toml: 'toml', ini: 'ini', xml: 'xml', svelte: 'svelte',
-  astro: 'astro', dockerfile: 'docker', makefile: 'make', graphql: 'graphql',
-  proto: 'protobuf', pl: 'perl', pm: 'perl',
-};
+// 每 32 行一个分组容器：新增行只追加到最后一个分组，已完行的 DOM 原封不动。
+const GROUP_SIZE = 32;
+const streamGroups = computed(() => {
+  const lines = streamLines.value;
+  const groups: Array<{ key: number; html: string }> = [];
+  for (let i = 0; i < lines.length; i += GROUP_SIZE) {
+    groups.push({ key: i, html: lines.slice(i, i + GROUP_SIZE).join('') });
+  }
+  return groups;
+});
 
-async function ensureHighlighter(): Promise<Highlighter> {
-  if (highlighter) return highlighter;
-  const [githubDark, githubLight] = await Promise.all([
-    import('shiki/themes/github-dark.mjs'),
-    import('shiki/themes/github-light.mjs'),
-  ]);
-  highlighter = await createHighlighterCore({
-    themes: [githubDark.default, githubLight.default],
-    langs: [],
-    engine: createOnigurumaEngine(() => import('shiki/wasm')),
-  });
-  return highlighter;
+function resetStreamState() {
+  streamLines.value = [];
+  streamPartial.value = '';
+  streamShell.value = null;
+  grammarState = null;
 }
 
-async function ensureLang(langName: string): Promise<boolean> {
-  if (loadedLangs.has(langName)) return true;
-  if (loadingLangs.has(langName)) {
-    await loadingLangs.get(langName);
-    return loadedLangs.has(langName);
+function kickLang(langName: string) {
+  if (kickAttempted.has(langName)) return;
+  kickAttempted.add(langName);
+  void ensureLang(langName).then((ok) => {
+    if (!ok || !props.streaming || langName !== streamLang) return;
+    // grammar 就绪后自动补高亮。
+    updateStreaming();
+  });
+}
+
+/**
+ * 让「流式增量状态」追上当前 props.code（流式帧与 settle 末帧共用）。
+ * 返回 true 仅当 streamShell 已经渲染出 props.code 的全部内容——此时 DOM 就是
+ * 最终形态，调用方（settle 路径）可以认领它，不必整段替换。
+ */
+function advanceStreamDom(): boolean {
+  const langName = resolveLang(props.lang?.toLowerCase() ?? 'text');
+  const theme = effectiveTheme.value === 'light' ? 'github-light' : 'github-dark';
+
+  if (langName !== streamLang || theme !== streamTheme) {
+    // 语言或主题变化：行缓存与 grammar 状态一并作废，从头增量。
+    resetStreamState();
+    streamLang = langName;
+    streamTheme = theme;
   }
 
-  const promise = (async () => {
-    try {
-      const h = await ensureHighlighter();
-      // Try to dynamically import the language grammar.
-      const mod = await import(`shiki/langs/${langName}.mjs`);
-      await h.loadLanguage(mod.default);
-      loadedLangs.add(langName);
-    } catch {
-      // Language not available in shiki - will fall back to plaintext.
-    }
-  })();
+  // 视口未激活或 grammar 未就绪：整段走轻量纯文本（含当前半行）。
+  if (!active.value || !ioAvailable || !isLangLoaded(langName)) {
+    plainHtml.value = plainPreHtml(props.code);
+    if (active.value && ioAvailable && !isLangLoaded(langName)) kickLang(langName);
+    return false;
+  }
 
-  loadingLangs.set(langName, promise);
-  await promise;
-  loadingLangs.delete(langName);
-  return loadedLangs.has(langName);
+  const text = props.code;
+  const nl = text.lastIndexOf('\n');
+  // 未闭合围栏只处理已完成行：最后一个换行之后的内容是当前半行。
+  const completedText = nl === -1 ? '' : text.slice(0, nl);
+  const partial = nl === -1 ? text : text.slice(nl + 1);
+  const completed = nl === -1 ? [] : completedText.split('\n');
+
+  // 流可能回卷（重试改写等），缓存行数多于新行数时整体作废重算。
+  if (completed.length < streamLines.value.length) resetStreamState();
+
+  const freshLines = completed.slice(streamLines.value.length);
+  if (freshLines.length > 0) {
+    const batch = tokenizeStreamBatch(freshLines.join('\n'), langName, theme, grammarState);
+    if (!batch) {
+      plainHtml.value = plainPreHtml(text);
+      return false;
+    }
+    grammarState = batch.grammarState;
+    if (!streamShell.value) {
+      streamShell.value = {
+        theme,
+        style: `background-color:${batch.bg};color:${batch.fg}`,
+      };
+    }
+    streamLines.value = streamLines.value.concat(batch.lines);
+  }
+  if (!streamShell.value) {
+    // 还没有任何已完成行（单行代码块）：没有可认领的流式 DOM。
+    plainHtml.value = plainPreHtml(text);
+    return false;
+  }
+  streamPartial.value = partial;
+  // 只有走到这里，DOM 才真正覆盖了这份代码——settle 的"是否已覆盖"判定基准。
+  lastStreamCode = text;
+  return true;
 }
 
-function resolveLang(rawLang: string): string {
-  const lower = rawLang.toLowerCase();
-  return LANG_ALIASES[lower] ?? lower;
+function updateStreaming() {
+  if (!props.streaming) return;
+  advanceStreamDom();
+}
+
+/**
+ * settle 认领：流式 DOM 已覆盖最终代码时保留它（不换 DOM、不重渲染）。
+ *
+ * 为什么需要这层判断：streaming.ts 的 turn.ended 先 flushNow() 发布末帧 delta，
+ * 同一个 tick 再置 busy=false —— code 与 streaming 会落在同一次 Vue flush 里。
+ * 此时 code 已经变过，旧逻辑（只有"代码未变"才保留）必然走整段 render() 并把
+ * streamShell 置空，把增量 DOM 全换成新节点：流式末尾闪一下。先把增量状态推进
+ * 到最终代码再判断覆盖，才能让这条真实时序也走"认领"分支。
+ * 非追加变化（重试改写、编辑）交回整段渲染，不往流式行缓存里塞任意内容。
+ */
+function claimStreamDom(): boolean {
+  if (!streamShell.value) return false;
+  if (props.code === lastStreamCode) return true;
+  if (!props.code.startsWith(lastStreamCode)) return false;
+  return advanceStreamDom();
+}
+
+/** 内容/流式状态变化后的统一出口：优先认领流式 DOM，失败才整段重渲染。 */
+function syncOrRender(): void {
+  if (props.streaming) {
+    updateStreaming();
+    return;
+  }
+  if (claimStreamDom()) return;
+  void render();
+}
+
+function onViewportActivate() {
+  active.value = true;
+  if (props.streaming) updateStreaming();
+  else void render();
 }
 
 async function render() {
-  const rawLang = props.lang?.toLowerCase() ?? 'text';
-  const langName = resolveLang(rawLang);
+  // 视口未激活的块先给纯文本兜底，进入视口后由 onViewportActivate 触发高亮。
+  if (!active.value) {
+    plainHtml.value = plainPreHtml(props.code);
+    return;
+  }
+  const langName = resolveLang(props.lang?.toLowerCase() ?? 'text');
   const theme = effectiveTheme.value === 'light' ? 'github-light' : 'github-dark';
+  const key = `${props.code}${langName}${theme}`;
+  // code 与 streaming 两个 watch 在 settle 同帧可能连续触发 render，
+  // 同参数整段渲染只执行一次，避免重复的全量 tokenize。
+  if (key === lastRenderKey || key === pendingRenderKey) return;
+  pendingRenderKey = key;
 
   try {
     const h = await ensureHighlighter();
@@ -93,15 +199,16 @@ async function render() {
     if (loaded) {
       highlighted.value = h.codeToHtml(props.code, { lang: langName, theme });
     } else {
-      highlighted.value = `<pre class="shiki-fallback"><code>${escapeHtml(props.code)}</code></pre>`;
+      highlighted.value = plainPreHtml(props.code);
     }
   } catch {
-    highlighted.value = `<pre class="shiki-fallback"><code>${escapeHtml(props.code)}</code></pre>`;
+    highlighted.value = plainPreHtml(props.code);
+  } finally {
+    pendingRenderKey = null;
+    lastRenderKey = key;
   }
-}
-
-function escapeHtml(s: string): string {
-  return s.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+  // 整段渲染接管视图：丢弃流式 DOM（此时 highlighted 已是最新，避免闪烁）。
+  streamShell.value = null;
 }
 
 function copy() {
@@ -111,38 +218,43 @@ function copy() {
   });
 }
 
+onMounted(() => {
+  if (!rootEl.value) return;
+  cancelObserve = observeCodeBlock(rootEl.value, onViewportActivate);
+});
+
+onBeforeUnmount(() => {
+  cancelObserve?.();
+});
+
 watch(
   () => [props.code, props.lang, effectiveTheme.value] as const,
-  ([code]) => {
-    if (props.streaming) {
-      // During streaming, skip shiki highlighting (expensive per chunk) and
-      // render a lightweight escaped plain-text fallback instead.
-      plainHtml.value = `<pre class="shiki-fallback"><code>${escapeHtml(code)}</code></pre>`;
-    } else {
-      void render();
-    }
-  },
+  () => syncOrRender(),
   { immediate: true },
 );
 
 watch(
   () => props.streaming,
   (streaming, wasStreaming) => {
-    if (wasStreaming && !streaming) {
-      // Fence just closed: do the real highlight once with the final code.
-      void render();
-    }
+    // 回合结束：流式 DOM 已覆盖最终代码时原样保留，不换 DOM 不重渲染。
+    if (wasStreaming && !streaming) syncOrRender();
   },
 );
 </script>
 
 <template>
-  <div class="code-block">
+  <div class="code-block" ref="rootEl">
     <div class="code-header">
       <span class="code-lang">{{ lang || 'text' }}</span>
       <button :class="['code-copy', { copied }]" @click="copy">{{ copied ? '已复制' : '复制' }}</button>
     </div>
-    <div class="code-content" v-html="props.streaming ? plainHtml : (highlighted || plainHtml)"></div>
+    <div class="code-content">
+      <!-- Streaming incremental DOM: grouped v-html keeps completed lines byte-identical
+           while the tail grows char by char; the whole element must stay on one line
+           so the <pre> gets no stray whitespace text nodes. -->
+      <pre v-if="streamShell" class="shiki" :class="streamShell.theme" :style="streamShell.style" tabindex="0"><code><span v-for="g in streamGroups" :key="g.key" class="shiki-group" v-html="g.html"></span><span v-if="streamPartial" class="line">{{ streamPartial }}</span></code></pre>
+      <div v-else v-html="props.streaming ? plainHtml : (highlighted || plainHtml)"></div>
+    </div>
   </div>
 </template>
 
@@ -179,7 +291,7 @@ watch(
   padding: 2px var(--space-2);
   cursor: pointer;
   font-size: var(--font-size-xs);
-  transition: color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
+  transition: transform var(--dur-fast) var(--ease-out);
 }
 .code-copy:hover {
   color: var(--color-text);
@@ -209,6 +321,8 @@ watch(
 .code-content :deep(.line) { display: block; }
 .code-content :deep(.line.add) { background: var(--color-success-soft); box-shadow: inset 2px 0 0 var(--color-success); }
 .code-content :deep(.line.del) { background: var(--color-danger-soft); box-shadow: inset 2px 0 0 var(--color-danger); }
+/* 行分组容器：视觉中性，只为圈住 32 行已完行的 DOM，增量追加时整块复用 */
+.code-content :deep(.shiki-group) { display: block; }
 .code-content :deep(.shiki-fallback) {
   margin: 0;
   padding: var(--space-3);

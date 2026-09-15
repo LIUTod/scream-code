@@ -1,8 +1,7 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, onUpdated, ref, watch } from 'vue';
 import type { ChatMessage } from '../types';
 import MessageItem from './MessageItem.vue';
-import EmptyState from './EmptyState.vue';
 import ChatMinimap from './ChatMinimap.vue';
 import { formatDayDivider, isSameLocalDay } from '../utils/timeFormat';
 import { captureScrollDistance, restoreScrollTop } from '../utils/scrollAnchor';
@@ -15,23 +14,18 @@ const props = withDefaults(
     workDir?: string | null;
     /** Current session id - used to persist/restore the scroll position. */
     sessionId?: string;
-    /** Current model label shown in the empty-state status bar. */
-    model?: string | null;
-    /** Context usage (0..1 or 0..100) shown in the empty-state status bar. */
-    contextUsage?: number | null;
-    /** Connection state shown in the empty-state status bar. */
+    /** Connection state: drives the connection-lost banner. */
     connected?: boolean;
     /** Older history exists beyond the loaded window (pagination sentinel). */
     olderAvailable?: boolean;
     /** True while the parent is fetching an older page. */
     olderLoading?: boolean;
   }>(),
-  { busy: false, workDir: null, sessionId: '', model: null, contextUsage: null, connected: false, olderAvailable: false, olderLoading: false },
+  { busy: false, workDir: null, sessionId: '', connected: false, olderAvailable: false, olderLoading: false },
 );
 
 const emit = defineEmits<{
   (e: 'edit', content: string): void;
-  (e: 'pick', text: string): void;
   (e: 'retry-connection'): void;
   (e: 'retry-message'): void;
   (e: 'load-older'): void;
@@ -69,6 +63,31 @@ function showTimestampFor(index: number): boolean {
 }
 
 /**
+ * Model badge collapsing. One user turn is often split into several consecutive
+ * assistant segments (one per tool round — four in a real session), so repeating
+ * the same model alias on each of them reads as noise. Only the first segment of a
+ * consecutive assistant run shows the badge; a real model change (or an
+ * interrupting user / system message) shows it again.
+ *
+ * Division of labour with showTimestampFor: the timestamp sits on the last segment
+ * of a run ("when did this end") while the badge sits on the first ("which model
+ * answered these segments") — the two never overlap.
+ * A segment without a model (old snapshot / minimal segment) returns false: there
+ * is no badge to show.
+ * The rule only reads the full `messages` array (same as the time-grouping rule
+ * above), so window slicing never changes the verdict — if the window starts
+ * mid-run that run's badge lies above the window and scrolling up (the window
+ * slides by pages) reveals it.
+ */
+function showModelFor(index: number): boolean {
+  const m = props.messages[index];
+  if (!m || m.role !== 'assistant' || !m.model) return false;
+  const prev = props.messages[index - 1];
+  if (!prev || prev.role !== 'assistant') return true;
+  return prev.model !== m.model;
+}
+
+/**
  * Stream dividers (render-only; scroll/unread/anchor behavior is untouched):
  * - a hairline before every user message except the first rendered row, so
  *   one question + one answer reads as one block;
@@ -94,6 +113,8 @@ interface MessageRowFlags {
   isLatestUser: boolean;
   canFork: boolean;
   showTimestamp: boolean;
+  /** Whether this segment shows the model badge (a run badges its first segment / a model change). */
+  showModel: boolean;
   idle: boolean;
 }
 
@@ -116,6 +137,7 @@ const DIVIDER_FLAGS: MessageRowFlags = {
   isLatestUser: false,
   canFork: false,
   showTimestamp: false,
+  showModel: false,
   idle: true,
 };
 
@@ -141,6 +163,7 @@ const rows = computed<MessageListRow[]>(() => {
         isLatestUser: message.id === latestUser,
         canFork: !props.busy && message.id === lastAsst,
         showTimestamp: showTimestampFor(index),
+        showModel: showModelFor(index),
         idle: !props.busy,
       },
     });
@@ -258,10 +281,17 @@ const showScrollButton = ref(false);
 /** Messages that arrived while the user was scrolled up (FAB badge). */
 const unreadCount = ref(0);
 
+/**
+ * Follow threshold (px): anything closer to the content bottom than this counts as
+ * "at the bottom". Deliberately tightened from 80 to 24px — the wider the sticky
+ * zone, the easier follow-scroll yanks a user who is merely near the bottom.
+ */
+const FOLLOW_THRESHOLD = 24;
+
 function isNearBottom(): boolean {
   const el = listRef.value;
   if (!el) return true;
-  return el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  return el.scrollHeight - el.scrollTop - el.clientHeight < FOLLOW_THRESHOLD;
 }
 
 function prefersReducedMotion(): boolean {
@@ -278,13 +308,165 @@ function scrollToBottom(behavior: ScrollBehavior): void {
     const el = listRef.value;
     if (!el) return;
     const finalBehavior: ScrollBehavior = prefersReducedMotion() ? 'auto' : behavior;
+    if (finalBehavior === 'smooth') beginSmoothScroll();
     el.scrollTo({ top: el.scrollHeight, behavior: finalBehavior });
   });
 }
 
+/* ── Inertia guard ────────────────────────────────────────────────────────────
+ * While a smooth follow scroll (scrollToBottom('smooth')) is in flight a wheel /
+ * touch input must freeze the animation and hand scrolling back to the reader —
+ * otherwise the browser layers user input on top of the follow animation and it
+ * feels like the page is fighting the hand. The flag clears on scrollend; a lost
+ * scrollend (interrupted animation) falls back to a timeout so the flag can never
+ * leak into "smooth scrolling permanently off".
+ */
+let smoothInFlight = false;
+let smoothEndHandler: (() => void) | null = null;
+let smoothEndTimer: ReturnType<typeof setTimeout> | null = null;
+
+function endSmoothScroll(): void {
+  const el = listRef.value;
+  if (smoothEndHandler && el) el.removeEventListener('scrollend', smoothEndHandler);
+  smoothEndHandler = null;
+  smoothInFlight = false;
+  if (smoothEndTimer !== null) {
+    clearTimeout(smoothEndTimer);
+    smoothEndTimer = null;
+  }
+}
+
+function beginSmoothScroll(): void {
+  const el = listRef.value;
+  if (!el) return;
+  endSmoothScroll(); // Re-entrancy: drop the previous listener/timer before arming a new one.
+  smoothInFlight = true;
+  smoothEndHandler = () => endSmoothScroll();
+  el.addEventListener('scrollend', smoothEndHandler);
+  smoothEndTimer = setTimeout(endSmoothScroll, 1500);
+}
+
+/**
+ * User input takes over: freeze an in-flight smooth animation where it is. Later
+ * scroll events go through the normal onScroll judgement.
+ */
+function onUserScrollInput(): void {
+  const el = listRef.value;
+  if (!smoothInFlight || !el) return;
+  // behavior:'auto' interrupts an in-flight smooth animation immediately (browser semantics).
+  el.scrollTo({ top: el.scrollTop, behavior: 'auto' });
+  endSmoothScroll();
+}
+
 let saveScrollRaf: number | null = null;
 
-/** Persist the current scroll offset (rAF-coalesced) for session switches/refresh. */
+/**
+ * ResizeObserver follow: height growth that never passes through the
+ * messages.length/streamLength watcher (image load, font load, thinking block
+ * expanding) still gets one scroll-to-bottom while the view follows (at the bottom
+ * or pinned), so the viewport does not stop half way. It fires only when
+ * scrollHeight grows and relies on the baseline / rAF coalescing / guards below to
+ * avoid yanking.
+ */
+let resizeObserver: ResizeObserver | null = null;
+/** Content height seen by the previous callback; the first observe callback calibrates the baseline. */
+let lastObservedHeight = 0;
+/** rAF coalescing flag for RO-triggered scrolls (one height jump must not fire several scrollToBottom calls). */
+let roScrollRaf: number | null = null;
+
+/** Row elements currently observed: added/removed incrementally so a re-render never rebuilds the set. */
+const observedResizeTargets = new Set<Element>();
+
+/**
+ * Aim the observers at the row elements inside the container (called after a DOM
+ * patch). ResizeObserver only fires when the *observed element's box* changes, and
+ * `.message-list` is a fixed-height flex:1; min-height:0 scroll box — growing
+ * content only changes scrollHeight while the container box never moves, so the old
+ * observe(scroll container) received nothing but the initial callback and the
+ * "image / font / thinking expansion" height blind spot was never actually covered.
+ * The row elements (MessageItem root / divider / skeleton / sentinels) are the ones
+ * that really resize.
+ * The row set changes with window sliding and message add/remove, so every patch
+ * re-aims the observers; only the difference is applied, so during steady state
+ * (streaming text inside a row) the observed set is unchanged → zero overhead.
+ */
+function syncResizeTargets(): void {
+  const ro = resizeObserver;
+  const el = listRef.value;
+  if (!ro || !el) return;
+  const current = new Set<Element>(Array.from(el.children));
+  for (const target of Array.from(observedResizeTargets)) {
+    if (current.has(target)) continue;
+    ro.unobserve(target);
+    observedResizeTargets.delete(target);
+  }
+  for (const target of current) {
+    if (observedResizeTargets.has(target)) continue;
+    ro.observe(target);
+    observedResizeTargets.add(target);
+  }
+}
+
+function onListResize(): void {
+  const el = listRef.value;
+  if (!el) return;
+  const height = el.scrollHeight;
+  const grew = height > lastObservedHeight;
+  lastObservedHeight = height;
+  if (!grew) return;
+  // No pulling to the bottom while a prepend is anchored: prepend / window sliding
+  // have their own viewport correction (a nextTick shift) and take precedence here.
+  // (Both flags are normally already consumed within the same flush; this is a
+  // defensive check.)
+  if (justPrepended || preInsertHandled) return;
+  if (!(forceScroll || isNearBottom())) return;
+  if (roScrollRaf !== null) return;
+  roScrollRaf = requestAnimationFrame(() => {
+    roScrollRaf = null;
+    scrollToBottom('auto');
+  });
+}
+
+/**
+ * Anchor key (v3): the server journal's seq is stable across refresh / reconnect /
+ * session switch, so the key is the `role:seq` pair (role disambiguates: a skeleton
+ * message and the user echo it answers can share one seq). A message without a seq
+ * only has the frontend random id — valid within this page session only — and
+ * degrades to `id:<random id>`, which never matches after a refresh; the caller then
+ * falls back to the bottom (a tail read position is already at the bottom, so the
+ * degradation is harmless; a history read position always has a seq).
+ */
+function anchorKeyOf(message: ChatMessage): string {
+  return message.seq !== undefined ? `${message.role}:${message.seq}` : `id:${message.id}`;
+}
+
+/** Find the current message by anchor key (shared by v2/v3 restore and save); null when absent. */
+function findMessageByKey(key: string): ChatMessage | null {
+  for (const message of props.messages) {
+    if (anchorKeyOf(message) === key) return message;
+  }
+  return null;
+}
+
+/**
+ * First message row below the viewport top (MessageItem roots carry data-message-id).
+ * Divider rows cannot anchor: their text changes with the date / run, whereas a
+ * message row is always locatable.
+ * With no layout (jsdom) every offsetTop is 0 and no anchor is found → null (nothing
+ * is written).
+ */
+function findAnchorRow(el: HTMLElement): { id: string; offsetTop: number } | null {
+  const rowEls = el.querySelectorAll<HTMLElement>('[data-message-id]');
+  for (const rowEl of rowEls) {
+    if (rowEl.offsetTop + rowEl.offsetHeight > el.scrollTop) {
+      const id = rowEl.dataset.messageId;
+      if (id) return { id, offsetTop: rowEl.offsetTop };
+    }
+  }
+  return null;
+}
+
+/** Persist the current scroll position (rAF-coalesced) for session switches/refresh. */
 function saveScrollPosition(): void {
   const el = listRef.value;
   const sid = props.sessionId;
@@ -293,38 +475,127 @@ function saveScrollPosition(): void {
   saveScrollRaf = requestAnimationFrame(() => {
     saveScrollRaf = null;
     try {
-      localStorage.setItem(`scream-scroll:${sid}`, String(el!.scrollTop));
+      // v3 anchor format: stable anchor key (seq) + offset of the row top from the
+      // viewport top. Restore slides the window to the anchor first and then locates
+      // the row, so the window never has to expand to the full list (hundreds of DOM
+      // rows) just to reach an absolute offset. v2 keyed on the frontend random id,
+      // which is entirely new after a refresh / reconnect → restore always missed.
+      const anchor = findAnchorRow(el);
+      if (!anchor) return;
+      const message = props.messages.find((m) => m.id === anchor.id);
+      const key = message ? anchorKeyOf(message) : `id:${anchor.id}`;
+      localStorage.setItem(`scream-scroll:${sid}`, `v3:${key}:${Math.round(anchor.offsetTop - el.scrollTop)}`);
     } catch {
       // Best-effort.
     }
   });
 }
 
-function restoreScrollPosition(): void {
+/**
+ * Restore outcome: restored = positioned; missing = no entry for this session;
+ * unusable = an entry exists but does not match anything.
+ */
+type ScrollRestoreResult = 'restored' | 'missing' | 'unusable';
+
+/** Whether this session has a saved read position (sync probe, deciding the async-restore branch). */
+function hasSavedScrollEntry(sid: string): boolean {
+  try {
+    return localStorage.getItem(`scream-scroll:${sid}`) !== null;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * First-paint tail alignment (a brand-new session with no saved entry): re-align the
+ * tail window and write straight to the bottom.
+ * Deliberately not reusing scrollToBottom(): that one waits on a rAF, so it lands
+ * after user scroll input arriving past the call (taking a viewport the user just
+ * took over back to the bottom). This runs from nextTick after the DOM patch of the
+ * same flush, so writing scrollTop directly is the final position.
+ */
+function alignViewportToTail(): void {
+  windowStart.value = tailStart(rows.value.length);
+  const box = listRef.value;
+  if (box) box.scrollTop = box.scrollHeight;
+}
+
+/**
+ * Pin the viewport back to an anchor row: slide the window so the row is in the DOM,
+ * then position by "row top - saved offset".
+ * If the row is not in the current messages (reveal failed) or never rendered, the
+ * result is unusable — never a silent stop at the window top; the caller falls back
+ * to the bottom.
+ */
+async function restoreToRow(messageId: string, offset: number): Promise<ScrollRestoreResult> {
+  if (!revealMessage(messageId)) return 'unusable';
+  await nextTick();
+  const box = listRef.value;
+  if (!box) return 'unusable';
+  const rowEl = Array.from(box.querySelectorAll<HTMLElement>('[data-message-id]')).find(
+    (n) => n.dataset.messageId === messageId,
+  );
+  if (!rowEl) return 'unusable';
+  box.scrollTop = rowEl.offsetTop - offset;
+  return 'restored';
+}
+
+/**
+ * Read and apply the saved read position. All three outcomes are returned
+ * explicitly: a mismatch must have a fallback (the bottom) — no "comment claims a
+ * fallback to the bottom while the code returns early".
+ */
+async function restoreScrollPosition(): Promise<ScrollRestoreResult> {
   const el = listRef.value;
   const sid = props.sessionId;
-  if (!el || !sid) return;
+  if (!el || !sid) return 'missing';
   let saved: string | null = null;
   try {
     saved = localStorage.getItem(`scream-scroll:${sid}`);
   } catch {
     // Best-effort.
   }
-  if (!saved) return;
+  if (!saved) return 'missing';
+  // v3: anchor key = stable identity (role:seq), reproducible across refresh / session switch.
+  if (saved.startsWith('v3:')) {
+    const body = saved.slice(3);
+    // The key itself may contain ':' (role:seq / id:msg_…), so the offset is always the last segment.
+    const sep = body.lastIndexOf(':');
+    if (sep <= 0) return 'unusable';
+    const key = body.slice(0, sep);
+    const offset = Number(body.slice(sep + 1));
+    if (!Number.isFinite(offset)) return 'unusable';
+    const target = findMessageByKey(key);
+    if (!target) return 'unusable';
+    return restoreToRow(target.id, offset);
+  }
+  // v2 (old format, frontend random id) is still read: the id stays valid for in-page session switches without a refresh.
+  if (saved.startsWith('v2:')) {
+    const parts = saved.split(':');
+    const messageId = parts[1];
+    const offset = Number(parts[2]);
+    if (!messageId || !Number.isFinite(offset)) return 'unusable';
+    if (!props.messages.some((m) => m.id === messageId)) return 'unusable';
+    return restoreToRow(messageId, offset);
+  }
+  // The oldest format (a plain absolute scrollTop number) keeps its original logic.
   const top = Number(saved);
-  if (!(top > 0)) return;
+  if (!Number.isFinite(top)) return 'unusable';
+  // A saved 0 means "parked at the top": respect it, move nothing and do not treat it as stale.
+  if (!(top > 0)) return 'restored';
   // Windowed restore: the saved offset is absolute-top against the FULL list,
   // but the tail window may not contain that far up — the browser would
   // silently clamp to the bottom and the read position is lost. Expand the
   // window upward so the position becomes reachable, then restore exactly.
   if (top > el.scrollHeight - el.clientHeight && windowStart.value > 0) {
     windowStart.value = 0;
-    nextTick(() => {
-      el.scrollTop = top;
-    });
-    return;
+    await nextTick();
+    const box = listRef.value;
+    if (box) box.scrollTop = top;
+    return 'restored';
   }
   el.scrollTop = top;
+  return 'restored';
 }
 
 /**
@@ -395,7 +666,7 @@ watch(
     // viewport near the bottom. Window alignment alone would let a new
     // message slide the window while the user reads rows above it inside
     // the current window — unmounting what they are looking at.
-    // showScrollButton is the existing "away from bottom by >80px" signal
+    // showScrollButton is the existing "away from bottom by >FOLLOW_THRESHOLD" signal
     // maintained by onScroll (same threshold as the unread-badge logic).
     const wasTailAligned =
       windowStart.value === tailStart(prevLen) && !showScrollButton.value;
@@ -414,7 +685,7 @@ watch(
 function onScroll(): void {
   const el = listRef.value;
   if (!el) return;
-  const awayFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight > 80;
+  const awayFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight > FOLLOW_THRESHOLD;
   showScrollButton.value = awayFromBottom;
   // Back at the bottom (however the user got there): the unread badge is done.
   if (!awayFromBottom) unreadCount.value = 0;
@@ -457,7 +728,24 @@ watch(
       // First load for this session: restore the saved scroll position.
       if (len > 0 && restoredForSession !== props.sessionId) {
         restoredForSession = props.sessionId;
-        requestAnimationFrame(() => requestAnimationFrame(restoreScrollPosition));
+        // Empty → non-empty means first paint (refresh / session switch): no entry or
+        // a mismatching entry both align to the bottom, never a silent stop at the
+        // window top. Appending inside a session (oldLen > 0) keeps the old
+        // semantics: try the saved position once, never pull the user away.
+        const firstPaint = (oldLen ?? 0) === 0;
+        if (firstPaint && !hasSavedScrollEntry(props.sessionId)) {
+          // Brand-new session (nothing ever stored locally): no target to restore, so
+          // align to the tail. Sync decision + same-flush landing — an async restore
+          // chain would land after the user's next scroll input and take the viewport
+          // back to the bottom.
+          void nextTick(alignViewportToTail);
+          return;
+        }
+        requestAnimationFrame(() => requestAnimationFrame(async () => {
+          const result = await restoreScrollPosition();
+          if (result === 'restored') return;
+          if (firstPaint || result === 'unusable') alignViewportToTail();
+        }));
         return;
       }
       // Older-page history load: neither unread nor follow-bottom.
@@ -499,6 +787,9 @@ const showSkeleton = computed(() => {
 
 onMounted(() => {
   listRef.value?.addEventListener('scroll', onScroll, { passive: true });
+  // Inertia guard: while a smooth follow scroll is in flight user scroll input takes over (passive, so the input itself is not blocked).
+  listRef.value?.addEventListener('wheel', onUserScrollInput, { passive: true });
+  listRef.value?.addEventListener('touchstart', onUserScrollInput, { passive: true });
   // Auto-load older history: the sentinel sits above the first message, so it
   // is only visible when the user has scrolled to the top of the window.
   if (typeof IntersectionObserver !== 'undefined') {
@@ -529,14 +820,43 @@ onMounted(() => {
     );
     if (topSentinelRef.value) olderObserver.observe(topSentinelRef.value);
   }
-  // Refresh recovery: restore the saved scroll position once rendered.
-  requestAnimationFrame(() => requestAnimationFrame(restoreScrollPosition));
+  // Height-growth blind spot (image / font / thinking expansion never reaches the
+  // message watcher): one scroll-to-bottom while content grows and the view follows.
+  // The pre-observe baseline keeps the first callback (initial size report) inert.
+  if (typeof ResizeObserver !== 'undefined') {
+    lastObservedHeight = listRef.value?.scrollHeight ?? 0;
+    resizeObserver = new ResizeObserver(onListResize);
+    syncResizeTargets();
+  }
+  // The row set changes with window sliding / message add-remove: re-aim the observers after every DOM patch.
+  // onUpdated instead of watch(visibleRows, …, {flush:'post'}) — the latter queues an
+  // extra job with the same id and disturbs the existing registration order (the
+  // prepend watcher must run before the rows-length watcher, or the top history page
+  // loses its viewport anchoring).
+  onUpdated(() => syncResizeTargets());
+  // Refresh recovery: restore the saved scroll position once rendered. An entry that
+  // exists but does not match (message ids replaced, target row no longer in the
+  // window) must fall back to the bottom — otherwise opening a session stops at the
+  // window top with a silently lost read position.
+  requestAnimationFrame(() => requestAnimationFrame(async () => {
+    if ((await restoreScrollPosition()) === 'unusable') alignViewportToTail();
+  }));
 });
 
 onUnmounted(() => {
   listRef.value?.removeEventListener('scroll', onScroll);
+  listRef.value?.removeEventListener('wheel', onUserScrollInput);
+  listRef.value?.removeEventListener('touchstart', onUserScrollInput);
   olderObserver?.disconnect();
   olderObserver = null;
+  resizeObserver?.disconnect();
+  resizeObserver = null;
+  observedResizeTargets.clear();
+  if (roScrollRaf !== null) {
+    cancelAnimationFrame(roScrollRaf);
+    roScrollRaf = null;
+  }
+  endSmoothScroll();
   if (saveScrollRaf !== null) {
     cancelAnimationFrame(saveScrollRaf);
     saveScrollRaf = null;
@@ -568,14 +888,10 @@ watch(topSentinelRef, (el) => {
           {{ olderLoading ? '加载中…' : '加载更早消息' }}
         </button>
       </div>
-      <EmptyState
-        v-if="messages.length === 0"
-        :work-dir="workDir"
-        :model="model"
-        :context-usage="contextUsage"
-        :connected="connected"
-        @pick="(t) => emit('pick', t)"
-      />
+      <!-- An empty journal no longer renders a guide hero: with lazy session creation
+           an empty session only exists in the transient "send in flight" state (user
+           message queued, reply pending), and the skeleton below says "starting" well
+           enough — keep this blank. -->
       <!--
         v-memo freezes a row's subtree when none of its deps change, so a
         flush/parent re-render skips re-creating MessageItem vnodes (~N-1/N of
@@ -587,7 +903,7 @@ watch(topSentinelRef, (el) => {
       <template
         v-for="row in visibleRows"
         :key="row.key"
-        v-memo="[row.message, row.flags.streaming, row.flags.isLatestUser, row.flags.canFork, row.flags.showTimestamp, row.flags.idle, row.dividerText, busy, sessionId, workDir]"
+        v-memo="[row.message, row.flags.streaming, row.flags.isLatestUser, row.flags.canFork, row.flags.showTimestamp, row.flags.showModel, row.flags.idle, row.dividerText, busy, sessionId, workDir]"
       >
         <div v-if="row.kind === 'day-divider'" class="day-divider" role="separator">
           <span>{{ row.dividerText }}</span>
@@ -602,6 +918,7 @@ watch(topSentinelRef, (el) => {
           :session-id="sessionId"
           :can-fork="row.flags.canFork"
           :show-timestamp="row.flags.showTimestamp"
+          :show-model="row.flags.showModel"
           :work-dir="workDir ?? undefined"
           @edit="(content) => emit('edit', content)"
           @retry="emit('retry-message')"
@@ -710,7 +1027,8 @@ watch(topSentinelRef, (el) => {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  /* D4：聊天滚动区隐藏滚动条（滚轮/触控可用；其余面板保留全局 4px 细轨） */
+  /* D4: the chat scroll area hides its scrollbar (wheel / touch still work; other
+     panels keep the global 4px hairline track). */
   scrollbar-width: none;
   display: flex;
   flex-direction: column;

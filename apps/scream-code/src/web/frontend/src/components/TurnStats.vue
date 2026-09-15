@@ -2,7 +2,7 @@
 import { onBeforeUnmount, ref, watch } from 'vue';
 import type { TurnStats } from '../types';
 
-const props = defineProps<{ stats: TurnStats }>();
+const props = defineProps<{ stats: TurnStats; inline?: boolean }>();
 
 const elapsed = ref<number | null>(null);
 let timer: ReturnType<typeof setInterval> | null = null;
@@ -49,7 +49,7 @@ function fmtTokens(n: number | null | undefined): string {
 </script>
 
 <template>
-  <div class="turn-stats" :class="`is-${stats.status}`" aria-live="polite">
+  <div class="turn-stats" :class="[`is-${stats.status}`, { 'is-inline': inline }]" aria-live="polite">
     <template v-if="stats.status === 'running'">
       <span class="badge-gradient">正在思考</span>
       <span v-if="elapsed !== null" class="clock">{{ fmtMs(elapsed) }}</span>
@@ -82,13 +82,22 @@ function fmtTokens(n: number | null | undefined): string {
 .turn-stats {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
+  /* The status row never wraps: on a narrow viewport "thinking / 32.7s" split
+     over two lines reads as two unrelated states. The row may still be truncated
+     by the parent's ellipsis where needed. */
+  flex-wrap: nowrap;
+  white-space: nowrap;
   gap: 6px;
   margin-top: var(--space-2);
   font-family: var(--font-mono);
   font-size: var(--font-size-xs);
   color: var(--color-text-muted);
   user-select: none;
+}
+
+/* Shape when rendered inline with the "generating" badge: no row of its own, top margin dropped. */
+.turn-stats.is-inline {
+  margin-top: 0;
 }
 
 /* Gradient shimmer badge (accent-coloured, no external brand palette) */

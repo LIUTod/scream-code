@@ -102,16 +102,19 @@ html.theme-transition *::after {
 }
 
 /* ─── Drawer modules: one card per module, flat inside ──────────────────────
-   Rule that keeps the column readable without falling back into 框中框:
+   Rule that keeps the column readable without falling back to nested boxes:
    • the module card is the ONLY bordered layer;
-   • its header is a 2-row block (icon chip + 标题 / 提示) closed by a hairline;
+   • its header is a 2-row block (icon chip + title / hint) closed by a hairline;
    • everything inside the body is flat rows, grids and type scale — no nested
      borders, except real form fields. */
 .panel-section {
   overflow: hidden;
-  border: 1px solid var(--color-line);
+  /* Hairline stroke is drawn inside the elevation shadow so the card stays
+     border:0 and layout-neutral; inner dividers keep real 1px --color-line. */
+  border: 0;
   border-radius: var(--radius-lg);
   background: var(--color-surface);
+  box-shadow: var(--shadow-elevation-panel);
 }
 .panel-section .panel-head,
 .panel-section .section-heading {
@@ -130,7 +133,6 @@ html.theme-transition *::after {
 }
 .panel-section button.panel-head {
   cursor: pointer;
-  transition: background var(--dur-fast) var(--ease-out);
 }
 .panel-section button.panel-head:hover { background: var(--color-hover); }
 .panel-section button.panel-head:hover + .panel-body { background: transparent; }
@@ -141,6 +143,7 @@ html.theme-transition *::after {
   height: 22px;
   display: grid;
   place-items: center;
+  flex-shrink: 0;
   border-radius: var(--radius-sm);
   background: var(--color-surface-sunken);
   /* The glyph must not carry the same weight as the title, otherwise a column
@@ -243,12 +246,14 @@ html.theme-transition *::after {
 .panel-section .kv-row > dt {
   color: var(--color-text-faint);
   font-size: var(--font-size-xs);
+  font-weight: 600;
   overflow-wrap: anywhere;
 }
 .panel-section .kv-row > dd {
   margin: 0;
   color: var(--color-text);
   font-size: var(--font-size-xs);
+  font-weight: 500;
   line-height: 1.55;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
@@ -275,8 +280,23 @@ html.theme-transition *::after {
   height: 100%;
   border-radius: var(--radius-full);
   background: var(--color-accent);
-  transition: width var(--dur-slow) var(--ease-out);
+  transition: width var(--dur-base) var(--ease-out);
 }
+/* Quiet empty state: centred glyph + one faint line, deliberately receding
+   behind real content. */
+.panel-section .panel-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  padding: var(--space-4) var(--space-2);
+  color: var(--color-text-faint);
+  font-size: var(--font-size-xs);
+  line-height: 1.5;
+  text-align: center;
+}
+.panel-section .panel-empty > svg { opacity: 0.75; }
 .panel-section .head-dot {
   width: 7px;
   height: 7px;
@@ -304,38 +324,73 @@ html.theme-transition *::after {
   color: var(--color-text-faint);
   cursor: pointer;
   flex-shrink: 0;
-  transition:
-    color var(--dur-fast) var(--ease-out),
-    background var(--dur-fast) var(--ease-out),
-    transform var(--dur-fast) var(--ease-out);
+  transition: transform var(--dur-fast) var(--ease-out);
 }
 .panel-section .icon-btn:hover { color: var(--color-accent); background: var(--color-hover); }
 .panel-section .icon-btn:not(:disabled):active { transform: scale(0.9); }
 
-/* Scrollbar: thin so it never competes with the content it scrolls. */
+/* Scrollbar skin: capsule thumb over a transparent rail.
+   WebKit rules live ONLY here: as soon as a non-`auto` scrollbar-width takes
+   effect (Firefox, or Chromium/Safari honouring the standard property), the
+   engine drops every ::-webkit-scrollbar rule — so the standard-property
+   path is strictly inside the @supports block below. Never declare both. */
 ::-webkit-scrollbar {
-  width: 4px;
-  height: 4px;
+  width: var(--scrollbar-size);
+  height: var(--scrollbar-size);
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--color-line-strong);
-  border-radius: 2px;
+  border-radius: var(--radius-full);
+  background: var(--scrollbar-thumb);
+  /* Transparent border + padding-box clip: visible thumb shrinks to
+     ~4px while keeping the full 8px hit area. */
+  border: 2px solid transparent;
+  background-clip: padding-box;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--color-text-muted);
+  background-color: var(--scrollbar-thumb-hover);
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
-/* Firefox-only scrollbar theming: scrollbar-color is inherited by every
-   element, and browsers that support the standard property (Chrome/Edge 121+,
-   Safari) would let it OVERRIDE the custom ::-webkit-scrollbar rail above.
-   Scope it strictly to engines without webkit pseudo support. */
+/* Quiet bars: the sidebar hides its thumb until the pointer enters, but
+   keeps a stable gutter so rows never reflow when the bar appears. */
+.sidebar .spaces {
+  scrollbar-gutter: stable;
+}
+.sidebar:not(:hover) .spaces {
+  --scrollbar-thumb: transparent;
+  --scrollbar-thumb-hover: transparent;
+}
+
+/* Standard-property path (Firefox today): inherited scrollbar-color would
+   otherwise override the custom webkit rail in engines that support both. */
 @supports not selector(::-webkit-scrollbar) {
   html {
     scrollbar-width: thin;
-    scrollbar-color: var(--color-line-strong) transparent;
+    scrollbar-color: var(--scrollbar-thumb) transparent;
+  }
+}
+
+/* Continuous corners: superellipse smoothing where supported (Chromium 117+);
+   every other engine keeps the plain --radius-* values. Zero cost, subtle.
+
+   corner-shape is not an inherited property: declaring it on :root has no effect on any
+   descendant (observed in practice in the browser: :root computes to superellipse(1.5),
+   while .panel-section still has the initial superellipse(1)). To actually affect the
+   corners it must be declared on the element itself — here *, *::before, *::after puts it
+   explicitly on every box: no border-radius value changes and it takes no part in layout,
+   it only shapes how the corners are drawn (boxes without rounded corners look identical
+   anyway). Scoped styles inside components belong to this same document and are covered by
+   this rule as well, so no per-component rule needs to be added. */
+@supports (corner-shape: superellipse(1.5)) {
+  *,
+  *::before,
+  *::after {
+    corner-shape: superellipse(1.5);
   }
 }
 

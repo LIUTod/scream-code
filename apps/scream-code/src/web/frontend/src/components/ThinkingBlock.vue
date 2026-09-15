@@ -89,7 +89,7 @@ function closePanel() {
       <span class="teaser-open">{{ isTruncated ? '查看全文' : '展开' }}</span>
     </button>
 
-    <div v-else class="thinking-stream">
+    <div v-else class="thinking-stream" data-state="running">
       <div class="stream-header">
         <span class="stream-icon">💭</span>
         <span class="stream-title">思考中…</span>
@@ -127,6 +127,9 @@ function closePanel() {
   .stream-icon {
     animation: none;
   }
+  .thinking-stream[data-state='running'] .stream-header::after {
+    animation: none;
+  }
 }
 
 /* Collapsed teaser */
@@ -143,7 +146,6 @@ function closePanel() {
   color: var(--color-text-faint);
   font-size: var(--font-size-sm);
   text-align: left;
-  transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
 }
 .thinking-teaser:hover {
   background: var(--color-hover);
@@ -180,6 +182,8 @@ function closePanel() {
   overflow: hidden;
 }
 .stream-header {
+  position: relative;
+  overflow: hidden;
   display: flex;
   align-items: center;
   gap: var(--space-2);
@@ -187,6 +191,23 @@ function closePanel() {
   font-size: var(--font-size-xs);
   color: var(--color-text-muted);
   background: var(--color-surface-raised);
+}
+/* Streaming: a restrained gradient band sweeps the header row from the left (one
+   2.6s cycle, blank window at the end); it only plays in the streaming state
+   (data-state=running) and disappears when the turn ends — state is expressed
+   through semantic attributes. */
+.thinking-stream[data-state='running'] .stream-header::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(100deg, transparent 20%, var(--color-hover) 50%, transparent 80%);
+  transform: translateX(-100%);
+  animation: thinking-sweep 2.6s var(--ease-in-out) infinite;
+  pointer-events: none;
+}
+@keyframes thinking-sweep {
+  0% { transform: translateX(-100%); }
+  90%, 100% { transform: translateX(100%); }
 }
 .stream-icon {
   animation: breathe var(--dur-breathe) ease-in-out infinite;
@@ -256,7 +277,6 @@ function closePanel() {
   font-size: var(--font-size-base);
   padding: var(--space-1) var(--space-2);
   border-radius: var(--radius-sm);
-  transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
 }
 .panel-close:hover {
   background: var(--color-hover);

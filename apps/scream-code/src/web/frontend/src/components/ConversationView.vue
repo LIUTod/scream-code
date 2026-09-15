@@ -2,12 +2,12 @@
 import { computed, ref } from 'vue';
 import type { UseScreamWebClientReturn } from '../composables/useScreamWebClient';
 import { useSlashCommands } from '../composables/useSlashCommands';
+import { openDockTab } from '../utils/fileTabState';
 import ApprovalCard from './ApprovalCard.vue';
 import Composer from './Composer.vue';
 import ConversationHeader from './ConversationHeader.vue';
 import InfoPanel from './InfoPanel.vue';
 import MessageList from './MessageList.vue';
-import SessionDrawer from './SessionDrawer.vue';
 import SessionStatsPanel from './SessionStatsPanel.vue';
 
 const props = defineProps<{ client: UseScreamWebClientReturn }>();
@@ -33,10 +33,14 @@ const {
   fetchSnapshot,
   switchModel,
   switchThinking,
+  switchPermission,
+  goal,
+  pauseGoal,
+  resumeGoal,
+  cancelGoal,
 } = props.client;
 
 const composerRef = ref<InstanceType<typeof Composer> | null>(null);
-const drawerOpen = ref(false);
 const statsOpen = ref(false);
 const infoVisible = ref(false);
 const infoMode = ref<'status' | 'usage'>('status');
@@ -61,8 +65,54 @@ const currentTitle = computed(() => {
   return stored ?? null;
 });
 
+/**
+ * Turn count for the top-bar stats pill: take the last message carrying a
+ * server-side turn number, falling back to the loaded user message count. Both
+ * sources are real data (turnStats.turn in the journal / the messages themselves),
+ * never an estimate.
+ */
+const turnCount = computed(() => {
+  for (let i = messages.value.length - 1; i >= 0; i -= 1) {
+    const turn = messages.value[i]?.turnStats?.turn;
+    if (turn) return turn;
+  }
+  return messages.value.filter((m) => m.role === 'user').length;
+});
+
+/**
+ * The top bar is not shown in the empty-session transient: with lazy session
+ * creation an empty journal only exists for the instant "send in flight" (the
+ * message has not echoed back yet), when rename/export/clear all have nothing to
+ * act on. The workbench home view has no top bar to begin with.
+ */
+const isEmptyConversation = computed(() => messages.value.length === 0 && !isBusy.value);
+
 function onEditResend(content: string) {
   composerRef.value?.insertText(content);
+}
+
+/**
+ * Landing point for "try it" in the skills centre: push the text into the input.
+ * When the host (WebShell) gets false it falls back to the clipboard rather than
+ * failing silently.
+ */
+function insertDraft(content: string, options?: { activate?: boolean }): boolean {
+  if (!composerRef.value) return false;
+  composerRef.value.insertDraft(content, options);
+  return true;
+}
+
+defineExpose({ insertDraft });
+
+/** Cancel an in-flight goal: same confirmation bar as GoalPanel's "cancel". */
+async function onCancelGoal(): Promise<void> {
+  if (!window.confirm('取消目标会让它进入已结束态，确定继续？')) return;
+  await cancelGoal();
+}
+
+/** Edit goal: the right-dock Goal panel already carries the full form (budget / completion criteria / AI optimisation); do not rebuild it here. */
+function onEditGoal(): void {
+  openDockTab('goal');
 }
 
 function showInfo(mode: 'status' | 'usage') {
@@ -120,16 +170,17 @@ function onFork(): void {
 <template>
   <div class="conversation">
     <ConversationHeader
+      v-if="!isEmptyConversation"
       :title="currentTitle"
       :busy="isBusy"
-      :drawer-open="drawerOpen"
       :stats-open="statsOpen"
       :turn-tokens="turnTokens"
+      :turn-count="turnCount"
       @home="emit('home')"
       @rename="onRename"
       @export="sessionId && exportSession(sessionId)"
+      @fork="onFork"
       @clear="clearMessages"
-      @toggle-drawer="drawerOpen = !drawerOpen"
       @toggle-stats="statsOpen = !statsOpen"
     />
 
@@ -151,13 +202,10 @@ function onFork(): void {
           :busy="isBusy"
           :work-dir="workDir"
           :session-id="sessionId ?? ''"
-          :model="status.model ?? null"
-          :context-usage="status.contextUsage ?? null"
           :connected="connectionStatus === 'connected'"
           :older-available="props.client.olderAvailable.value"
           :older-loading="loadingOlder"
           @edit="onEditResend"
-          @pick="sendPrompt"
           @retry-connection="props.client.reconnectNow()"
           @retry-message="retryLastUser"
           @load-older="onLoadOlder"
@@ -173,22 +221,21 @@ function onFork(): void {
             :models="models"
             :work-dir="workDir || ''"
             :messages="messages"
+            :connection-status="connectionStatus"
+            :goal="goal"
             @send="sendPrompt"
             @abort="abort"
             @command="onCommand"
             @switch-model="switchModel"
             @switch-thinking="switchThinking"
+            @switch-permission="switchPermission"
+            @goal-pause="pauseGoal"
+            @goal-resume="resumeGoal"
+            @goal-cancel="onCancelGoal"
+            @goal-edit="onEditGoal"
           />
         </div>
       </div>
-      <Transition name="drawer">
-        <SessionDrawer
-          v-if="drawerOpen"
-          :client="props.client"
-          @refresh-git="props.client.fetchGitStatus()"
-          @close="drawerOpen = false"
-        />
-      </Transition>
     </div>
 
     <InfoPanel
@@ -269,14 +316,6 @@ function onFork(): void {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
-}
-.drawer-enter-active,
-.drawer-leave-active {
-  transition: opacity var(--dur-base) var(--ease-out);
-}
-.drawer-enter-from,
-.drawer-leave-to {
-  opacity: 0;
 }
 @media (max-width: 640px) {
   .composer-dock {

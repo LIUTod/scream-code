@@ -5,7 +5,7 @@
 import { computed, reactive, ref, watch } from 'vue';
 import {
   activeFileTab,
-  filePanel,
+  dockPanel,
   resolveInitialFileDisplayMode,
   saveFileViewerState,
   type FileTab,
@@ -211,7 +211,7 @@ function setMode(mode: FileViewerDisplayMode): void {
     scrollTop: t.viewerState?.scrollTop ?? 0,
     scrollLeft: t.viewerState?.scrollLeft ?? 0,
   };
-  filePanel.tabs = saveFileViewerState(filePanel.tabs, t.id, t.viewerRevision ?? 0, state);
+  dockPanel.tabs = saveFileViewerState(dockPanel.tabs, t.id, t.viewerRevision ?? 0, state);
 }
 
 /** Manual refresh re-loads the current mode's content (no backend watch push). */

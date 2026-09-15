@@ -33,8 +33,8 @@ const GAP = 5 * 60 * 1000;
 // 2026-09-02 09:00 local.
 const T0 = new Date(2026, 8, 2, 9, 0).getTime();
 
-function msg(id: string, role: 'user' | 'assistant', ts?: number) {
-  return { id, role, content: 'x', ts, tools: [] };
+function msg(id: string, role: 'user' | 'assistant', ts?: number, model?: string) {
+  return { id, role, content: 'x', ts, tools: [], ...(model === undefined ? {} : { model }) };
 }
 
 interface ExtractedFlags {
@@ -42,6 +42,7 @@ interface ExtractedFlags {
   isLatestUser: boolean;
   canFork: boolean;
   showTimestamp: boolean;
+  showModel: boolean;
   idle: boolean;
 }
 
@@ -76,6 +77,7 @@ function extractRows(wrapper: VueWrapper): ExtractedRow[] {
           isLatestUser: Boolean(p.isLatestUser),
           canFork: Boolean(p.canFork),
           showTimestamp: Boolean(p.showTimestamp),
+          showModel: Boolean(p.showModel),
           idle: Boolean(p.idle),
         },
       });
@@ -227,6 +229,91 @@ describe('MessageList row model', () => {
       const busyRows = extractRows(busyWrapper);
       for (const r of messageRows(busyRows)) expect(r.flags.idle).toBe(false);
       expect(flagsById(busyRows, 'a2').canFork).toBe(false);
+    });
+  });
+
+  describe('model-badge throttling (showModel flag)', () => {
+    // Reported by users: one turn arrives as four consecutive assistant segments,
+    // each laying out the full 46-character alias again ("the model alias repeats
+    // 4 times, it looks messy").
+    const ALIAS = 'custom-acme-labs-vision-preview/acme-labs-vision-preview';
+
+    it('four consecutive segments of the same model show the badge on the first segment only (4 → 1)', () => {
+      const wrapper = mount(MessageList, {
+        props: {
+          messages: [
+            msg('a1', 'assistant', T0, ALIAS),
+            msg('a2', 'assistant', T0 + 60_000, ALIAS),
+            msg('a3', 'assistant', T0 + 120_000, ALIAS),
+            msg('a4', 'assistant', T0 + 180_000, ALIAS),
+          ],
+          sessionId: 's-model',
+        },
+      });
+      const rows = extractRows(wrapper);
+      expect(flagsById(rows, 'a1').showModel).toBe(true);
+      expect(flagsById(rows, 'a2').showModel).toBe(false);
+      expect(flagsById(rows, 'a3').showModel).toBe(false);
+      expect(flagsById(rows, 'a4').showModel).toBe(false);
+
+      // The same assertion at the DOM level: exactly one badge on the page, in
+      // short form with the full name kept in title.
+      const badges = wrapper.findAll('.brand-model');
+      expect(badges.length).toBe(1);
+      expect(badges[0]!.text()).toBe('acme-labs-vision-preview');
+      expect(badges[0]!.attributes('title')).toBe(ALIAS);
+    });
+
+    it('shows the badge again on the segment where the model actually changes', () => {
+      const wrapper = mount(MessageList, {
+        props: {
+          messages: [
+            msg('a1', 'assistant', T0, 'provider/alias-a'),
+            msg('a2', 'assistant', T0 + 60_000, 'provider/alias-a'),
+            msg('a3', 'assistant', T0 + 120_000, 'provider/alias-b'),
+            msg('a4', 'assistant', T0 + 180_000, 'provider/alias-b'),
+          ],
+          sessionId: 's-model',
+        },
+      });
+      const rows = extractRows(wrapper);
+      expect([flagsById(rows, 'a1').showModel, flagsById(rows, 'a2').showModel]).toEqual([true, false]);
+      expect([flagsById(rows, 'a3').showModel, flagsById(rows, 'a4').showModel]).toEqual([true, false]);
+      expect(wrapper.findAll('.brand-model').map((n) => n.text())).toEqual(['alias-a', 'alias-b']);
+    });
+
+    it('a user message interrupts the run, so the following assistant segment shows the badge again', () => {
+      const wrapper = mount(MessageList, {
+        props: {
+          messages: [
+            msg('a1', 'assistant', T0, 'provider/alias-a'),
+            msg('u1', 'user', T0 + 30_000),
+            msg('a2', 'assistant', T0 + 60_000, 'provider/alias-a'),
+          ],
+          sessionId: 's-model',
+        },
+      });
+      const rows = extractRows(wrapper);
+      expect(flagsById(rows, 'a1').showModel).toBe(true);
+      expect(flagsById(rows, 'a2').showModel).toBe(true);
+    });
+
+    it('a segment with no model info does not affect the decision (it carries the last known model forward)', () => {
+      const wrapper = mount(MessageList, {
+        props: {
+          messages: [
+            msg('a1', 'assistant', T0, 'provider/alias-a'),
+            msg('a2', 'assistant', T0 + 60_000),
+          ],
+          sessionId: 's-model',
+        },
+      });
+      const rows = extractRows(wrapper);
+      // a2 carries no model of its own, so any badge text can only come from a1 —
+      // shown on the first segment and not repeated on a2.
+      expect(flagsById(rows, 'a1').showModel).toBe(true);
+      expect(flagsById(rows, 'a2').showModel).toBe(false);
+      expect(wrapper.findAll('.brand-model').length).toBe(1);
     });
   });
 
