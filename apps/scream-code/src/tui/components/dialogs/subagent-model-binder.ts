@@ -2,8 +2,9 @@
  * `/model diy` — bind a model alias to each built-in subagent profile.
  *
  * Two-level picker:
- *   1. Profile list (one row per built-in subagent profile, in the shared slot
- *      order) showing each profile's current binding.
+ *   1. Profile list (one row per built-in subagent profile, in the picker's own
+ *      stable order, with membership taken from the shared slot list) showing
+ *      each profile's current binding.
  *   2. Model selector: "跟随主模型" (unbind) + every configured model alias.
  *
  * Bindings persist to `tui.toml` and update live AppState, so mid-session
@@ -26,14 +27,32 @@ const FOLLOW_MAIN = '__follow_main__';
 
 let applying = false;
 
-function getSubagentProfiles(): readonly {
+/**
+ * Row order for the picker: the order users have always seen here, which is not
+ * the sidebar slot order. Membership is still taken from the shared slot list,
+ * and any type this order does not mention is appended, so the picker can never
+ * drop a profile the rest of the UI knows about.
+ */
+const PICKER_ORDER: readonly string[] = [
+  'coder',
+  'reviewer',
+  'writer',
+  'explore',
+  'oracle',
+  'plan',
+  'verify',
+  'worker',
+];
+
+export function getSubagentProfiles(): readonly {
   readonly name: string;
   readonly description: string;
 }[] {
-  // Membership comes from the shared slot list so the picker and the sidebar
-  // panel can never disagree about which subagent types exist; only the
-  // binding state is picker-specific.
-  return DEFAULT_SUBAGENT_TYPES.map((name) => ({
+  const ordered = [
+    ...PICKER_ORDER.filter((name) => DEFAULT_SUBAGENT_TYPES.includes(name)),
+    ...DEFAULT_SUBAGENT_TYPES.filter((name) => !PICKER_ORDER.includes(name)),
+  ];
+  return ordered.map((name) => ({
     name,
     description: t(`subagent.desc_${name}`),
   }));
