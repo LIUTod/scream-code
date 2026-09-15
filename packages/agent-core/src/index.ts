@@ -10,6 +10,8 @@ export {
   appendSessionIndexEntry,
   encodeWorkDirKey,
   normalizeWorkDir,
+  readSessionIndex,
+  removeSessionIndexEntry,
   sessionIndexPath,
 } from './session/store';
 export * from './plugin';

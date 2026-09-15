@@ -1,17 +1,19 @@
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import {
   ErrorCodes,
   ScreamError,
+  type ContextMessage,
   type Event,
   type GoalSnapshotData,
   type Session,
   type SessionStatus,
   type TodoItem,
 } from '@scream-code/scream-code-sdk';
-import { encodeWorkDirKey } from '@scream-code/agent-core';
+import { appendSessionIndexEntry, encodeWorkDirKey, normalizeWorkDir } from '@scream-code/agent-core';
 import { WebSocket } from 'ws';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -106,6 +108,7 @@ function makeFakeSession(options: {
   initialTodos?: readonly TodoItem[];
   getGoal?: () => Promise<{ goal: GoalSnapshotData | null }>;
   getTodos?: () => Promise<readonly TodoItem[]>;
+  getContext?: () => Promise<{ history: readonly ContextMessage[]; tokenCount: number }>;
   promptError?: Error;
   pauseGate?: Promise<void>;
 } = {}): FakeSessionControl {
@@ -186,6 +189,9 @@ function makeFakeSession(options: {
     getStatus: vi.fn(async () => STATUS),
     getGoal: options.getGoal ?? vi.fn(async () => ({ goal: structuredClone(currentGoal) })),
     getTodos: options.getTodos ?? vi.fn(async () => structuredClone(currentTodos)),
+    // The activation/fork paths seed history from the core context; an empty history
+    // by default means no seeding (existing suites keep their wording).
+    getContext: options.getContext ?? vi.fn(async () => ({ history: [], tokenCount: 0 })),
     generateText: vi.fn(async () => 'Refined objective'),
     createGoal,
     updateGoalStatus,
@@ -667,6 +673,225 @@ describe('Web/core session ID restoration', () => {
   });
 });
 
+/**
+ * The "core index restoration" branch of the session list: an entry that exists in
+ * the index, whose directory exists, and whose workDir matches must be collected.
+ * An index entry's sessionDir can only be <home>/sessions/<wdKey>/<id> (the
+ * agent-core layout) and its workDir can only be the normalizeWorkDir value - both
+ * wordings have to agree with agent-core, otherwise this restoration is dead code.
+ */
+describe('Session list: core index restoration', () => {
+  it('collects index entries under the core sessions root with a normalized workDir', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'scream-web-test-'));
+    tempDirs.push(root);
+    const homeDir = join(root, 'home');
+    // Repo root + subdirectory: when the server starts from a subdirectory,
+    // this.workDir is that subdirectory, while the workDir agent-core writes into the
+    // index is the repo root found by walking up to package.json.
+    const repo = join(root, 'repo');
+    const subDir = join(repo, 'sub');
+    await mkdir(subDir, { recursive: true });
+    await writeFile(join(repo, 'package.json'), '{}');
+    expect(normalizeWorkDir(subDir)).toBe(repo);
+
+    const bucket = join(homeDir, 'sessions', encodeWorkDirKey(subDir));
+    const coreDir = join(bucket, 'session_idx1');
+    await mkdir(coreDir, { recursive: true });
+    await writeFile(join(coreDir, 'state.json'), JSON.stringify({ title: '从索引恢复', createdAt: 1_700_000_000_000 }));
+    await appendSessionIndexEntry(homeDir, { sessionId: 'session_idx1', sessionDir: coreDir, workDir: repo });
+    // The second entry uses an id without the session_ prefix: the directory
+    // fallback scan only accepts that prefix, so only the index path can recover it.
+    // Asserting both entries together is what makes "is the index path really
+    // collecting" bite: with only the session_ entry, the scan fallback would list
+    // the dropped entry again and the case would go mute.
+    const legacyDir = join(bucket, 'legacy-from-index');
+    await mkdir(legacyDir, { recursive: true });
+    await writeFile(join(legacyDir, 'state.json'), JSON.stringify({ title: '索引独有' }));
+    await appendSessionIndexEntry(homeDir, { sessionId: 'legacy-from-index', sessionDir: legacyDir, workDir: repo });
+
+    const manager = new SessionManager({
+      harness: { createSession: vi.fn(), resumeSession: vi.fn(), forkSession: vi.fn() } as never,
+      homeDir,
+      workDir: subDir,
+      model: 'test-model',
+      permission: 'manual',
+      yolo: false,
+    });
+    await manager.init();
+
+    const items = manager.list();
+    // Assert first that the index path really collects: an entry without the session_
+    // prefix can only be recovered through the index.
+    expect(items.some((s) => s.sessionId === 'legacy-from-index')).toBe(true);
+    const listed = items.find((s) => s.sessionId === 'session_idx1');
+    expect(listed).toBeDefined();
+    expect(listed?.title).toBe('从索引恢复');
+    // workDir comes from the normalized index value (the agent-core wording), not from
+    // the raw startup subdirectory.
+    expect(listed?.workDir).toBe(repo);
+    await manager.closeAll();
+  });
+});
+
+/**
+ * Delete must move **the session's own** core directory to trash: the workspace a
+ * session is bound to need not be the server process directory, and the core session
+ * id need not equal the web sessionId. Locating it wrongly leaves the directory in
+ * the sessions tree while the index and in-memory entries are already removed - the
+ * user believes it is deleted, and the next start lists it again from disk.
+ */
+describe('Delete: move the session\'s own core directory to trash', () => {
+  it('trashes the core dir derived from the session workDir + core id, and drops its index entry', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'scream-web-test-'));
+    tempDirs.push(root);
+    const homeDir = join(root, 'home');
+    const serverBase = join(root, 'server-base');
+    const otherWorkspace = join(root, 'ws-alpha');
+    await mkdir(serverBase, { recursive: true });
+    await mkdir(otherWorkspace, { recursive: true });
+
+    const coreId = 'session_del1';
+    const coreDir = join(homeDir, 'sessions', encodeWorkDirKey(otherWorkspace), coreId);
+    await mkdir(coreDir, { recursive: true });
+    await writeFile(join(coreDir, 'state.json'), JSON.stringify({ title: '别的 workspace 的会话' }));
+    await appendSessionIndexEntry(homeDir, {
+      sessionId: coreId,
+      sessionDir: coreDir,
+      workDir: normalizeWorkDir(otherWorkspace),
+    });
+    const webSessionsDir = join(homeDir, 'web-sessions');
+    await mkdir(webSessionsDir, { recursive: true });
+    await writeFile(join(webSessionsDir, 'web-del1.meta.json'), JSON.stringify({
+      sessionId: 'web-del1', coreSessionId: coreId, workDir: otherWorkspace,
+      title: '别的 workspace 的会话', createdAt: 1, model: 'test-model', permission: 'manual',
+    }));
+
+    const manager = new SessionManager({
+      harness: { createSession: vi.fn(), resumeSession: vi.fn(), forkSession: vi.fn() } as never,
+      homeDir,
+      // The server process directory differs from the target session workspace - the
+      // old implementation is where the path was assembled wrongly.
+      workDir: serverBase,
+      model: 'test-model',
+      permission: 'manual',
+      yolo: false,
+    });
+    await manager.init();
+    expect(manager.list().map((s) => s.sessionId)).toEqual(['web-del1']);
+
+    await expect(manager.delete('web-del1')).resolves.toBe(true);
+
+    // The directory really left the sessions tree (otherwise a disk scan would list it
+    // again after a restart).
+    expect(existsSync(coreDir)).toBe(false);
+    const trashed = await readdir(join(homeDir, 'trash')).catch(() => [] as string[]);
+    expect(trashed.some((name) => name.startsWith(`${coreId}-`))).toBe(true);
+    // The index is pruned by core session id: an index entry's sessionId is the core
+    // id, so pruning with the web id would be a no-op.
+    const indexRaw = await readFile(join(homeDir, 'session_index.jsonl'), 'utf-8').catch(() => '');
+    expect(indexRaw).not.toContain(coreId);
+    await manager.closeAll();
+  });
+
+  it('keeps the core dir and its index entry when the trash move fails (no silent data loss)', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'scream-web-test-'));
+    tempDirs.push(root);
+    const homeDir = join(root, 'home');
+    const serverBase = join(root, 'server-base');
+    const otherWorkspace = join(root, 'ws-beta');
+    await mkdir(serverBase, { recursive: true });
+    await mkdir(otherWorkspace, { recursive: true });
+
+    const coreId = 'session_del2';
+    const coreDir = join(homeDir, 'sessions', encodeWorkDirKey(otherWorkspace), coreId);
+    await mkdir(coreDir, { recursive: true });
+    await writeFile(join(coreDir, 'state.json'), JSON.stringify({ title: '搬不动' }));
+    await appendSessionIndexEntry(homeDir, {
+      sessionId: coreId,
+      sessionDir: coreDir,
+      workDir: normalizeWorkDir(otherWorkspace),
+    });
+    // The trash location is occupied by a regular file -> mkdir(recursive) throws
+    // EEXIST, simulating a "move failed" outcome.
+    await writeFile(join(homeDir, 'trash'), 'not a directory');
+    const webSessionsDir = join(homeDir, 'web-sessions');
+    await mkdir(webSessionsDir, { recursive: true });
+    await writeFile(join(webSessionsDir, 'web-del2.meta.json'), JSON.stringify({
+      sessionId: 'web-del2', coreSessionId: coreId, workDir: otherWorkspace,
+      title: '搬不动', createdAt: 1, model: 'test-model', permission: 'manual',
+    }));
+
+    const manager = new SessionManager({
+      harness: { createSession: vi.fn(), resumeSession: vi.fn(), forkSession: vi.fn() } as never,
+      homeDir, workDir: serverBase, model: 'test-model', permission: 'manual', yolo: false,
+    });
+    await manager.init();
+    // UI semantics unchanged: the session still disappears from the list (otherwise
+    // clicking delete would appear to do nothing).
+    await expect(manager.delete('web-del2')).resolves.toBe(true);
+    expect(manager.list()).toEqual([]);
+    // But the data must not "pretend to be deleted": the directory stays as it is and
+    // the index entry stays too, so the next start still sees it.
+    expect(existsSync(coreDir)).toBe(true);
+    const indexRaw = await readFile(join(homeDir, 'session_index.jsonl'), 'utf-8');
+    expect(indexRaw).toContain(coreId);
+    await manager.closeAll();
+  });
+});
+
+/**
+ * fork seeding: when a source session only has history because activation seeded it
+ * from the core transcript (its journal holds no messages), the copied journal is an
+ * empty shell - the forked session has to be seeded from its own core wire the same
+ * way, otherwise the fork looks like a blank page.
+ */
+describe('Fork: seed history from the forked core transcript', () => {
+  it('shows the source conversation in the fork even when the journal held no messages', async () => {
+    const homeDir = await mkdtemp(join(tmpdir(), 'scream-web-test-'));
+    tempDirs.push(homeDir);
+    const sessionsDir = join(homeDir, 'web-sessions');
+    await mkdir(sessionsDir, { recursive: true });
+    await writeFile(join(sessionsDir, 'web-seed.meta.json'), JSON.stringify({
+      sessionId: 'web-seed', coreSessionId: 'core-seed', workDir: '/tmp/project',
+      title: 'Seed', createdAt: 1, model: 'test-model', permission: 'manual',
+    }));
+
+    const history: readonly ContextMessage[] = [
+      { role: 'user', content: [{ type: 'text', text: '源历史提问' }], toolCalls: [] },
+      { role: 'assistant', content: [{ type: 'text', text: '源历史回答' }], toolCalls: [] },
+    ];
+    const source = makeFakeSession({ id: 'core-seed', getContext: async () => ({ history, tokenCount: 2 }) });
+    // The forked core session carries the same wire (a fork copies the agent state).
+    const forked = makeFakeSession({ id: 'core-fork', getContext: async () => ({ history, tokenCount: 2 }) });
+    const harness = {
+      createSession: vi.fn(),
+      resumeSession: vi.fn(async () => source.session),
+      forkSession: vi.fn(async () => forked.session),
+    };
+    const manager = new SessionManager({
+      harness: harness as never, homeDir, workDir: '/tmp/project',
+      model: 'test-model', permission: 'manual', yolo: false,
+    });
+
+    await manager.init();
+    const active = await manager.activateSession('web-seed');
+    expect(active).not.toBeNull();
+    // The source session itself shows history through seeding: its durable journal has
+    // no message entries, so whatever the fork copied is necessarily empty - seeding is
+    // the forked session's only source.
+    expect(manager.get('web-seed')?.getSnapshot().messages.map((m) => m.content))
+      .toEqual(['源历史提问', '源历史回答']);
+
+    const result = await manager.forkSession('web-seed');
+    expect(result).not.toBeNull();
+    expect(harness.forkSession).toHaveBeenCalledWith({ id: 'core-seed' });
+    const forkedView = manager.get(result!.sessionId);
+    expect(forkedView?.getSnapshot().messages.map((m) => m.content))
+      .toEqual(['源历史提问', '源历史回答']);
+    await manager.closeAll();
+  });
+});
+
 describe('Web idle exit (watchdog unit)', () => {
   afterEach(() => {
     vi.useRealTimers();
@@ -867,5 +1092,54 @@ describe('Web idle exit (server integration)', () => {
     // Wait past one watchdog check cycle: a leaked timer would crash on the
     // TDZ bound `close` (uncaught exception fails the test runner).
     await new Promise((resolve) => setTimeout(resolve, 1500));
+  }, 10_000);
+});
+
+describe('Web transcript ownership (multi-agent merge regression)', () => {
+  it('a subagent turn, text and tool events never merge into the main agent message', async () => {
+    // Original incident: on a single session the main agent and 3 subagents ran
+    // concurrently and all four event streams shared one liveAssistant, so the text was
+    // split into two blocks alternating per chunk, the tool list merged into 97 entries
+    // and the model badge spanned 4 rows. The fix: transcript events only accept
+    // agentId=main and are bucketed by turnId.
+    const control = makeFakeSession();
+    const handle = await start(control);
+    const emit = (event: Record<string, unknown>): void => control.emit(event as unknown as Event);
+
+    emit({ type: 'turn.started', sessionId: 'session-1', agentId: 'main', turnId: 1 });
+    emit({ type: 'assistant.delta', sessionId: 'session-1', agentId: 'main', turnId: 1, delta: '主代理A' });
+    emit({ type: 'turn.started', sessionId: 'session-1', agentId: 'agent-0', turnId: 2 });
+    emit({ type: 'assistant.delta', sessionId: 'session-1', agentId: 'agent-0', turnId: 2, delta: '子代理B' });
+    emit({
+      type: 'tool.call.started',
+      sessionId: 'session-1',
+      agentId: 'agent-0',
+      turnId: 2,
+      toolCallId: 'sub-tool',
+      name: 'FetchURL',
+      args: {},
+    });
+    emit({
+      type: 'tool.result',
+      sessionId: 'session-1',
+      agentId: 'agent-0',
+      turnId: 2,
+      toolCallId: 'sub-tool',
+      output: '子代理工具输出',
+    });
+    emit({ type: 'turn.ended', sessionId: 'session-1', agentId: 'agent-0', turnId: 2 });
+    emit({ type: 'assistant.delta', sessionId: 'session-1', agentId: 'main', turnId: 1, delta: '主代理A2' });
+    emit({ type: 'turn.ended', sessionId: 'session-1', agentId: 'main', turnId: 1 });
+
+    const snapshot = await jsonRequest(handle.url, '/api/v1/sessions/session-1/snapshot');
+    expect(snapshot.response.status).toBe(200);
+    const messages = (snapshot.body as {
+      messages: Array<{ role: string; content: string; tools: unknown[] }>;
+    }).messages;
+    const assistant = messages.filter((message) => message.role === 'assistant');
+    expect(assistant).toHaveLength(1);
+    expect(assistant[0]!.content).toBe('主代理A主代理A2');
+    expect(assistant[0]!.tools).toHaveLength(0);
+    expect(JSON.stringify(messages)).not.toContain('子代理');
   }, 10_000);
 });

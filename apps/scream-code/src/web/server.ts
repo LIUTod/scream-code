@@ -18,7 +18,8 @@
 import { createServer, type Server as HttpServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { readFile, writeFile, access, mkdir, readdir, unlink, stat, realpath, rename } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { appendJournalLineSerialized } from './journal-writer.js';
+import { constants, existsSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { exec, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -36,11 +37,19 @@ import {
   type PermissionMode,
   type GoalSnapshotData,
   type TodoItem,
+  type ContextMessage,
 } from '@scream-code/scream-code-sdk';
-import { appendSessionIndexEntry, encodeWorkDirKey } from '@scream-code/agent-core';
+import {
+  appendSessionIndexEntry,
+  encodeWorkDirKey,
+  normalizeWorkDir,
+  readSessionIndex,
+  removeSessionIndexEntry,
+} from '@scream-code/agent-core';
 import { setLocale } from '@scream-code/config';
 
 import { loadTuiConfig, saveTuiConfig, TuiConfigParseError, type TuiLikePreferences, TuiLikePreferencesSchema } from '#/tui/config';
+import { isInternalMessage } from '#/tui/utils/export-markdown';
 import { buildRoleAdditionalText } from '#/tui/commands/like';
 import { getDataDir } from '#/utils/paths';
 import { createScreamCodeHostIdentity } from '#/cli/version';
@@ -510,11 +519,14 @@ async function ensureSessionsDir(homeDir: string): Promise<void> {
 }
 
 async function appendJournalLine(homeDir: string, sessionId: string, line: string): Promise<void> {
-  try {
-    await writeFile(getJournalPath(homeDir, sessionId), line + '\n', { flag: 'a' });
-  } catch (error) {
+  // Written through the serialization gate: a large payload (a finalized body
+  // can reach hundreds of thousands of chars) racing small entries through
+  // writeFile(flag:'a') interleaves at the byte level, producing malformed
+  // lines that swallow the whole history (see the note at the top of
+  // journal-writer.ts).
+  await appendJournalLineSerialized(getJournalPath(homeDir, sessionId), line, (error) => {
     log.warn('web: failed to persist journal line', { sessionId, error: String(error) });
-  }
+  });
 }
 
 let metaWriteSeq = 0;
@@ -543,23 +555,94 @@ async function loadMetadata(homeDir: string, sessionId: string): Promise<Session
   }
 }
 
-async function loadJournal(homeDir: string, sessionId: string): Promise<PersistedEntry[]> {
+interface LoadedJournal {
+  entries: PersistedEntry[];
+  /**
+   * Unparseable line count. > 0 means this journal cannot be trusted
+   * (byte-interleaving damage, see journal-writer.ts).
+   */
+  corrupt: number;
+}
+
+async function loadJournal(homeDir: string, sessionId: string): Promise<LoadedJournal> {
   try {
     const data = await readFile(getJournalPath(homeDir, sessionId), 'utf-8');
     const lines = data.split('\n').filter((l) => l.trim().length > 0);
-    const results: PersistedEntry[] = [];
+    const entries: PersistedEntry[] = [];
+    let corrupt = 0;
     for (const line of lines) {
       try {
-        results.push(JSON.parse(line) as PersistedEntry);
+        entries.push(JSON.parse(line) as PersistedEntry);
       } catch {
-        // Skip corrupt lines instead of dropping entire session history.
+        // One corrupt line: skip it and keep parsing the rest, but count it —
+        // the caller uses that tally to mark the whole journal untrustworthy
+        // and rebuild messages from the core transcript (see doActivateSession).
+        corrupt += 1;
         log.warn('web: skipping corrupt journal line', { sessionId });
       }
     }
-    return results;
+    return { entries, corrupt };
   } catch {
-    return [];
+    return { entries: [], corrupt: 0 };
   }
+}
+
+/**
+ * Event families that mutate the main transcript: only the main agent's
+ * (`agentId === 'main'`) events of these kinds may be applied, journaled and
+ * broadcast. Subagents and background tasks each emit their own turn.started
+ * plus hundreds of text/tool events — mixing them into the main transcript
+ * produces a body where two streams alternate block by block, blows the tool
+ * list up to 97 entries and the model badge to 4 lines (reproduced from a real
+ * session). Subagent presence is carried by subagent.* events instead, never by
+ * the transcript.
+ */
+const MAIN_TRANSCRIPT_EVENTS = new Set<string>([
+  'turn.started',
+  'turn.ended',
+  'assistant.delta',
+  'thinking.delta',
+  'tool.call.started',
+  'tool.result',
+]);
+
+/**
+ * Whether a journal entry already carries a message (if so it needs no seeding
+ * from core history).
+ */
+function isMessageBearingEntry(entry: PersistedEntry): boolean {
+  if ('type' in entry && (entry as { type: string }).type === 'user_message') return true;
+  // The payload is the core Event ∪ WebJournalEvent union; only the type string
+  // is inspected here. The concrete literals live in WebJournalEvent (kept in
+  // sync with the buildMessages() cases).
+  const payload = (entry as JournalEntry).payload as { type: string };
+  return payload.type === 'web.message.finalized' || payload.type === 'turn.started';
+}
+
+/**
+ * Core context history → web ChatMessage seed.
+ *
+ * Only "real user input + assistant bodies" are carried over: core tool records
+ * and the web-side ToolMessage are different shapes, so a forced mapping would
+ * invent fake cards. Messages with a non-user origin (injections, system
+ * triggers, background-task notices, skill-activation envelopes, compaction
+ * summaries) are protocol content meant for the model and must not be rendered
+ * as user turns.
+ */
+function contextHistoryToChatMessages(history: readonly ContextMessage[]): ChatMessage[] {
+  const out: ChatMessage[] = [];
+  for (const message of history) {
+    if (message.role !== 'user' && message.role !== 'assistant') continue;
+    if (isInternalMessage(message)) continue;
+    if (message.origin !== undefined && message.origin.kind !== 'user') continue;
+    const text = message.content
+      .map((part) => (part.type === 'text' ? part.text : ''))
+      .join('')
+      .trim();
+    if (text.length === 0) continue;
+    out.push({ role: message.role, content: text, tools: [] });
+  }
+  return out;
 }
 
 async function listPersistedSessions(homeDir: string): Promise<SessionMetadata[]> {
@@ -771,10 +854,11 @@ const MAX_INLINE_DIFF_BYTES = 512 * 1024;
  * Single-file patch. `repoPath` is **repository-root relative** — the same base
  * `git status` reports, so the UI can hand it straight back.
  *
- * Two cases used to return an empty patch and look like "点了没反应":
- * nested files (the old code re-prefixed workdir-relative paths with `../..`,
- * resolving them outside the repo) and untracked files (`git diff` has nothing
- * to say about them). The second case now gets a synthesised added-file patch.
+ * Two cases used to return an empty patch, which read as "clicking did
+ * nothing": nested files (the old code re-prefixed workdir-relative paths with
+ * `../..`, resolving them outside the repo) and untracked files (`git diff` has
+ * nothing to say about them). The second case now gets a synthesised added-file
+ * patch.
  */
 async function getGitFileDiff(workDir: string, repoPath: string): Promise<{ path: string; patch: string } | null> {
   const rel = normalizeNumstatPath(repoPath);
@@ -897,7 +981,28 @@ class WebSession {
    * snapshot (`web.message.finalized`) — the only source that survives a
    * server restart (deltas are volatile by design).
    */
-  private liveAssistant: ChatMessage | null = null;
+  /**
+   * In-flight main-agent turn messages, keyed by `turnId`.
+   * A single pointer (the old liveAssistant) merged several streams into one
+   * message when an interrupted turn overlapped a freshly started one, or when
+   * subagents ran concurrently, producing interleaved garbage — hence one slot
+   * per turn.
+   */
+  private readonly liveAssistants = new Map<number, ChatMessage>();
+
+  /**
+   * In-flight message of one turn; without a turnId it falls back to the most
+   * recently started one (older-frame compatibility).
+   */
+  private liveFor(turnId?: number): ChatMessage | null {
+    if (typeof turnId === 'number') {
+      const hit = this.liveAssistants.get(turnId);
+      if (hit) return hit;
+    }
+    let latest: ChatMessage | null = null;
+    for (const message of this.liveAssistants.values()) latest = message;
+    return latest;
+  }
   private liveTurnCount = 0;
   /** pendingMsgId awaiting compaction completion/cancellation event. */
   private pendingCompactionMsgId: string | null = null;
@@ -1036,6 +1141,66 @@ class WebSession {
     }
   }
 
+  /**
+   * Core wire history seed: filled in once by the activation path when the
+   * journal holds no message records.
+   */
+  private readonly seededMessages: ChatMessage[] = [];
+
+  /**
+   * Mark the journal untrustworthy (byte-interleaving damage, see
+   * journal-writer.ts).
+   *
+   * The loaded journal entries and any legacy userMessages are dropped so the
+   * message list is presented from the core transcript seed instead; state
+   * snapshots (goal/todo, …) were already cached by loadFromPersisted and are
+   * unaffected. nextSeq does not roll back: live entries keep appending and
+   * rendering as usual after activation, so new messages are untouched (a seq
+   * gap on the client takes the existing gap → snapshot refetch path).
+   */
+  markDamaged(reason: string): void {
+    const droppedEntries = this.journal.length;
+    const droppedUsers = this.userMessages.length;
+    this.journal.length = 0;
+    this.userMessages.length = 0;
+    log.warn('web: session journal damaged; messages rebuilt from core transcript', {
+      sessionId: this.sessionId,
+      reason,
+      droppedEntries,
+      droppedUsers,
+    });
+  }
+
+  /**
+   * Whether the current message list holds at least one assistant message with
+   * a body. Used to decide how far journal remnants can be trusted: user
+   * messages are persisted separately (they always carry text), while the
+   * byte-interleaving damage only ever ate assistant bodies — so only the
+   * assistant side is inspected.
+   */
+  hasAnyAssistantContent(): boolean {
+    return this.buildMessages().some(
+      (message) => message.role === 'assistant' && message.content.trim().length > 0,
+    );
+  }
+
+  /**
+   * Seed messages from the core session history. An older session's web
+   * journal may hold nothing but state entries (or predate durable snapshots),
+   * which leaves the chat area empty after a resume while the wire history is
+   * intact. The seed occupies seq 1..N and lifts nextSeq past it, keeping seq
+   * monotonic with live events and consistent with the getMessagesOlder cursor.
+   */
+  seedHistory(messages: ChatMessage[]): void {
+    if (messages.length === 0 || this.seededMessages.length > 0) return;
+    let seq = 1;
+    for (const message of messages) {
+      this.seededMessages.push({ ...message, seq });
+      seq += 1;
+    }
+    if (seq - 1 >= this.nextSeq) this.nextSeq = seq;
+  }
+
   async updateTitle(): Promise<void> {
     if (this.customTitle) return;
     const msgs = this.buildMessages();
@@ -1103,12 +1268,23 @@ class WebSession {
       // Goal/Todo state belongs to the interactive main agent. Other event
       // families retain their existing subagent visibility.
       if ((event.type === 'goal.updated' || event.type === 'todo.updated') && event.agentId !== 'main') return;
+      // The main transcript only consumes main-agent turn events. Subagents and
+      // background tasks emit their own turn.started plus hundreds of text/tool
+      // events; they used to share one liveAssistant with main, so several
+      // streams appended into a single content and produced a body where two
+      // streams alternated block by block, with 4 subagents pushing the tool
+      // list to 97 entries and the model badge to 4 lines (reviewed from a real
+      // session). Subagent presence is carried by subagent.* events.
+      if (MAIN_TRANSCRIPT_EVENTS.has(event.type) && event.agentId !== 'main') return;
 
       if (event.type === 'turn.started') {
         this.busy = true;
         this.activeTurns += 1;
         this.liveTurnCount += 1;
-        this.liveAssistant = {
+        // Keyed by turnId: one session can have an interrupted turn and a new
+        // one in flight at the same time, and mis-keying replays the "several
+        // streams write one message" incident.
+        this.liveAssistants.set(event.turnId, {
           role: 'assistant',
           content: '',
           tools: [],
@@ -1124,13 +1300,13 @@ class WebSession {
             tokens: null,
             tokensPerSec: null,
           },
-        };
+        });
       } else if (event.type === 'turn.ended') {
         this.activeTurns = Math.max(0, this.activeTurns - 1);
         this.busy = this.activeTurns > 0;
         // Persist the complete assistant snapshot BEFORE turn.ended so the
         // journal replay sees finalized → turn.ended in order.
-        const live = this.liveAssistant;
+        const live = this.liveFor(event.turnId);
         if (event.reason === 'failed' && live) live.isError = true;
         if (live) {
           const base = live.turnStats ?? {
@@ -1145,27 +1321,27 @@ class WebSession {
           live.turnStats = { ...base, status: 'done' } as NonNullable<ChatMessage['turnStats']>;
           this.appendDurableSilent({ type: 'web.message.finalized', message: live });
         }
-        this.liveAssistant = null;
+        this.liveAssistants.delete(event.turnId);
         // Update title after each exchange.
         this.trackPending(this.updateTitle());
       } else if (event.type === 'assistant.delta') {
-        const live = this.liveAssistant;
+        const live = this.liveFor(event.turnId);
         if (live) live.content += event.delta;
       } else if (event.type === 'thinking.delta') {
-        const live = this.liveAssistant;
+        const live = this.liveFor(event.turnId);
         if (live) {
           const t = live.tools.find((x) => x.name === 'thinking');
           if (t) t.output = (t.output ?? '') + event.delta;
           else live.tools.push({ toolCallId: 'thinking', name: 'thinking', args: {}, output: event.delta });
         }
       } else if (event.type === 'tool.call.started') {
-        const live = this.liveAssistant;
+        const live = this.liveFor(event.turnId);
         if (live) {
           live.tools.push({ toolCallId: event.toolCallId, name: event.name, args: event.args });
           if (live.turnStats) live.turnStats.step += 1;
         }
       } else if (event.type === 'tool.result') {
-        const live = this.liveAssistant;
+        const live = this.liveFor(event.turnId);
         if (live) {
           const tool = live.tools.find((t) => t.toolCallId === event.toolCallId);
           if (tool) {
@@ -1651,7 +1827,12 @@ class WebSession {
       workDir: this.workDir,
       title: this.title,
       createdAt: this.createdAt,
-      messageCount: this.buildMessages().length,
+      // Messages of an archived (inactive) session are not loaded into memory,
+      // so buildMessages() is always 0 — reporting 0 would make the sidebar show
+      // "0 items" and contradict the real history (reported as inconsistent
+      // message counts). Report -1 when unknown; the UI hides the counter and
+      // the real value returns once the session is activated.
+      messageCount: this.isActive ? this.buildMessages().length : -1,
       active: this.isActive,
     };
   }
@@ -1883,7 +2064,7 @@ class WebSession {
   }
 
   private buildMessages(): ChatMessage[] {
-    const messages: ChatMessage[] = [];
+    const messages: ChatMessage[] = [...this.seededMessages];
     let currentAssistant: ChatMessage | null = null;
     let userIndex = 0;
     let turnCount = 0;
@@ -2112,6 +2293,49 @@ async function handleGoalRoute(
   return true;
 }
 
+// ─── Create-session workDir validation ────────────────────────────────────
+
+/**
+ * Validate the optional workDir argument of session creation; undefined means
+ * "reuse the server process directory".
+ *
+ * Trade-off: web is a local tool and the browser shares the CLI's trust level,
+ * so no directory allowlist is introduced; but only an explicitly provided
+ * absolute path is accepted — relative paths and `..` segments are rejected
+ * (resolving them away instead of rejecting would amount to permitting
+ * traversal), and the target must exist, be a directory and be readable and
+ * writable. An invalid directory fails loudly with a 4xx at the moment the
+ * session is created, rather than letting the agent wander into some
+ * unexpected location later.
+ */
+export async function validateSessionWorkDir(raw: unknown): Promise<string | undefined> {
+  if (raw === undefined || raw === null) return undefined;
+  if (typeof raw !== 'string') {
+    throw new HttpError(400, 'workDir 必须是字符串', 'request.invalid');
+  }
+  const value = raw.trim();
+  if (!value) return undefined;
+  if (!isAbsolute(value)) {
+    throw new HttpError(400, `workDir 必须是绝对路径：${value}`, 'request.invalid');
+  }
+  if (value.split(/[\\/]+/).includes('..')) {
+    throw new HttpError(400, `workDir 不允许包含 ".." 遍历段：${value}`, 'request.invalid');
+  }
+  const st = await stat(value).catch(() => null);
+  if (!st) {
+    throw new HttpError(404, `目录不存在：${value}`, 'request.invalid');
+  }
+  if (!st.isDirectory()) {
+    throw new HttpError(400, `不是目录：${value}`, 'request.invalid');
+  }
+  try {
+    await access(value, constants.R_OK | constants.W_OK);
+  } catch {
+    throw new HttpError(403, `目录不可读写：${value}`, 'request.invalid');
+  }
+  return value;
+}
+
 // ─── SessionManager ───────────────────────────────────────────────────────
 
 export class SessionManager {
@@ -2146,7 +2370,7 @@ export class SessionManager {
     // Load persisted sessions as archived (read-only) WebSessions.
     const metas = await listPersistedSessions(this.homeDir);
     for (const meta of metas) {
-      const entries = await loadJournal(this.homeDir, meta.sessionId);
+      const { entries } = await loadJournal(this.homeDir, meta.sessionId);
       const ws = new WebSession(null, {
         sessionId: meta.sessionId,
         coreSessionId: meta.coreSessionId ?? meta.sessionId,
@@ -2160,12 +2384,161 @@ export class SessionManager {
       ws.loadFromPersisted(entries);
       this.sessions.set(meta.sessionId, ws);
     }
+
+    // Top up from the agent-core global index: sessions outside the web-side
+    // "in-memory map + flat mirror" (history from before a restart, sessions
+    // that older versions only wrote into the core directory) still show up in
+    // the list and activate on demand through doActivateSession's resume path.
+    // An incident in the field: when the list only reflected the in-memory map,
+    // a single DELETE or a restart made all history "disappear" (the data was
+    // still on disk) and users believed it had been destroyed.
+    try {
+      // The second argument must be the **core session root**
+      // <home>/sessions (agent-core layout <home>/sessions/<wdKey>/<id>):
+      // readSessionIndex filters every entry with
+      // isPathInside(sessionsDir, entry.sessionDir). This once passed
+      // getSessionsDir() — the web-side flat mirror root
+      // (<home>/web-sessions/), which has no parent/child relation to the core
+      // directory → relative paths resolved to "../sessions/wd_x/xxx", every
+      // entry was dropped as out of bounds, and the whole index restore became
+      // dead code (only the directory scan below still caught anything).
+      const index = await readSessionIndex(this.homeDir, join(this.homeDir, 'sessions'));
+      // Indexed workDir values are already normalized by normalizeWorkDir
+      // (agent-core normalizes the workspace to the nearest package.json/.git
+      // root before writing the index), while this.workDir comes straight from
+      // the launch argument, so the two differ literally when the server is
+      // started from a repository subdirectory. A plain !== comparison would
+      // drop every session of this workspace, hence both sides go through
+      // normalizeWorkDir.
+      const managerWorkDir = normalizeWorkDir(this.workDir);
+      for (const entry of index.values()) {
+        // Per-entry isolation: one bad record (state.json failing repeatedly, a
+        // directory removed concurrently, …) must not abort the whole scan and
+        // swallow the sessions queued behind it.
+        try {
+          if (normalizeWorkDir(entry.workDir) !== managerWorkDir) continue;
+          if (this.sessions.has(entry.sessionId)) continue;
+          if (!existsSync(entry.sessionDir)) continue;
+          let title = '未命名会话';
+          let createdAt = Date.now();
+          try {
+            const raw = await readFile(join(entry.sessionDir, 'state.json'), 'utf8');
+            const state = JSON.parse(raw) as { title?: string; createdAt?: string | number };
+            if (typeof state.title === 'string' && state.title) title = state.title;
+            if (state.createdAt) {
+              const t = typeof state.createdAt === 'number' ? state.createdAt : Date.parse(state.createdAt);
+              if (Number.isFinite(t)) createdAt = t;
+            }
+          } catch {
+            // state.json missing/corrupt: carry on with the default metadata; a
+            // visible list entry beats a lost session.
+          }
+          const session = new WebSession(null, {
+            sessionId: entry.sessionId,
+            coreSessionId: entry.sessionId,
+            workDir: entry.workDir,
+            permission: this.permission,
+            yolo: this.yolo,
+            homeDir: this.homeDir,
+            createdAt,
+            title,
+          });
+          this.sessions.set(entry.sessionId, session);
+        } catch (error) {
+          log.warn('web: skipping unreadable session index entry', {
+            sessionId: entry.sessionId,
+            sessionDir: entry.sessionDir,
+            error: errorMessage(error),
+          });
+        }
+      }
+    } catch (error) {
+      // Index unreadable: keep the existing behavior (list only what the memory
+      // map / flat mirror holds) but leave a trace — with everything silent,
+      // "my history sessions are gone" cannot be diagnosed at all.
+      log.warn('web: session index unreadable; falling back to web mirror + directory scan', {
+        homeDir: this.homeDir,
+        error: errorMessage(error),
+      });
+    }
+
+    // Scan the core session directory once more, to catch sessions whose
+    // directory is on disk but missing from the index (the index is an
+    // append-only jsonl and older versions could fail to log entries). Observed
+    // while recovering a real session set: all 5 surviving directories were
+    // absent from the index.
+    // Note: core sessions live in homeDir/sessions/<wdKey>/<id> (agent-core
+    // layout), not in getSessionsDir() — that is the web-side flat mirror root
+    // (web-sessions/).
+    const wdKey = encodeWorkDirKey(this.workDir);
+    const wdDir = join(this.homeDir, 'sessions', wdKey);
+    try {
+      if (existsSync(wdDir)) {
+        for (const name of await readdir(wdDir)) {
+          if (!name.startsWith('session_')) continue;
+          if (this.sessions.has(name)) continue;
+          // Per-entry isolation (same as the index branch): one broken session
+          // directory must not abort the whole recovery pass.
+          try {
+            const sessionDir = join(wdDir, name);
+            let title = '未命名会话';
+            let createdAt = Date.now();
+            try {
+              const raw = await readFile(join(sessionDir, 'state.json'), 'utf8');
+              const state = JSON.parse(raw) as { title?: string; createdAt?: string | number };
+              if (typeof state.title === 'string' && state.title) title = state.title;
+              if (state.createdAt) {
+                const t = typeof state.createdAt === 'number' ? state.createdAt : Date.parse(state.createdAt);
+                if (Number.isFinite(t)) createdAt = t;
+              }
+            } catch {
+              // state.json missing/corrupt: keep the default metadata.
+            }
+            const session = new WebSession(null, {
+              sessionId: name,
+              coreSessionId: name,
+              workDir: this.workDir,
+              permission: this.permission,
+              yolo: this.yolo,
+              homeDir: this.homeDir,
+              createdAt,
+              title,
+            });
+            this.sessions.set(name, session);
+          } catch (error) {
+            log.warn('web: skipping unreadable core session directory', {
+              wdKey,
+              sessionId: name,
+              error: errorMessage(error),
+            });
+          }
+        }
+      }
+    } catch (error) {
+      // Directory unreadable (permissions/removed): a silent fallback once made
+      // "sessions suddenly disappeared" impossible to diagnose — leave a trace.
+      log.warn('web: core session bucket scan failed', {
+        wdKey,
+        dir: wdDir,
+        error: errorMessage(error),
+      });
+    }
     log.info('web: loaded persisted sessions', { count: this.sessions.size });
   }
 
-  async createSession(): Promise<WebSession> {
+  /** Server process directory: the default workspace when session creation omits workDir. */
+  get defaultWorkDir(): string {
+    return this.workDir;
+  }
+
+  /**
+   * Create a session; an omitted workDir reuses the server process directory
+   * and is passed to the harness as-is.
+   */
+  async createSession(workDir?: string): Promise<WebSession> {
+    const dir = workDir ?? this.workDir;
     const session = await this.harness.createSession({
-      workDir: this.workDir,
+      workDir: dir,
       model: this.model,
       permission: this.permission,
     });
@@ -2173,7 +2546,7 @@ export class SessionManager {
     const createdAt = Date.now();
     const webSession = new WebSession(session, {
       sessionId,
-      workDir: this.workDir,
+      workDir: dir,
       permission: this.permission,
       yolo: this.yolo,
       homeDir: this.homeDir,
@@ -2188,7 +2561,7 @@ export class SessionManager {
     }
     await saveMetadata(this.homeDir, webSession.getMetadata());
     this.sessions.set(sessionId, webSession);
-    log.info('web: session created', { sessionId, workDir: this.workDir });
+    log.info('web: session created', { sessionId, workDir: dir });
     return webSession;
   }
 
@@ -2250,8 +2623,36 @@ export class SessionManager {
       onFork: (id) => this.forkSession(id),
     });
     // Reload persisted journal into the reactivated session.
-    const entries = await loadJournal(this.homeDir, sessionId);
+    const { entries, corrupt } = await loadJournal(this.homeDir, sessionId);
     reactivated.loadFromPersisted(entries);
+    // When the journal is damaged (byte-interleaving damage, see
+    // journal-writer.ts) the lines that still parse are often empty shells —
+    // the line carrying the body was skipped, so the UI shows entries with no
+    // text. The remnants are dropped (and messages rebuilt from the core
+    // transcript) only when the journal is damaged *and* not one parsed message
+    // carries a body; any surviving body keeps the remnants untouched — never a
+    // lossy replacement (showing less is acceptable, replacing the user's only
+    // remaining history is not).
+    const journalHasContent = reactivated.hasAnyAssistantContent();
+    if (corrupt > 0 && !journalHasContent) {
+      reactivated.markDamaged(`journal has ${corrupt} corrupt lines and no parsed message carries a body`);
+    }
+    // An older session's web journal may hold no message records at all (it
+    // predates durable snapshots, or nothing but state entries are left) — the
+    // chat area would then be empty after a resume while the core wire history
+    // is intact. Seed once from the resumed session context to bring the
+    // history back into view.
+    if (!entries.some(isMessageBearingEntry) || (corrupt > 0 && !journalHasContent)) {
+      try {
+        const context = await session.getContext();
+        reactivated.seedHistory(contextHistoryToChatMessages(context.history));
+      } catch (error) {
+        log.warn('web: seeding history from core transcript failed', {
+          sessionId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
     try {
       await reactivated.ready;
     } catch (error) {
@@ -2304,7 +2705,11 @@ export class SessionManager {
       const title = `${source.getTitle()} (fork)`;
       const webSession = new WebSession(session, {
         sessionId: newId,
-        workDir: this.workDir,
+        // A fork copies the source session's state, so the workspace has to
+        // follow the source as well — with several workDirs in play, falling
+        // back to the server process directory would file the fork under
+        // another project group.
+        workDir: source.getMetadata().workDir,
         permission: source.getMetadata().permission,
         yolo: this.yolo,
         homeDir: this.homeDir,
@@ -2320,6 +2725,23 @@ export class SessionManager {
         await writeFile(getJournalPath(this.homeDir, newId), lines);
       }
       webSession.loadFromPersisted(entries);
+      // If the source session itself only showed its history because the
+      // activation path seeded it from core history (its journal holds nothing
+      // but state entries), the copied journal is still an empty shell — the
+      // fork would look almost blank while its core wire history is complete.
+      // Seed once, exactly like the activation path.
+      if (!entries.some(isMessageBearingEntry)) {
+        try {
+          const context = await session.getContext();
+          webSession.seedHistory(contextHistoryToChatMessages(context.history));
+        } catch (error) {
+          log.warn('web: seeding forked history from core transcript failed', {
+            sourceId,
+            newId,
+            error: errorMessage(error),
+          });
+        }
+      }
       try {
         await webSession.ready;
       } catch (error) {
@@ -2351,8 +2773,67 @@ export class SessionManager {
   async delete(sessionId: string): Promise<boolean> {
     const ws = this.sessions.get(sessionId);
     if (!ws) return false;
+    // Take the session's own identity first: with multiple workspaces in play,
+    // the server process directory this.workDir is not the session's workspace
+    // (the workspace chip picks the main path), and the core session id differs
+    // from the web sessionId for forked or migrated sessions.
+    const workDir = ws.workDir;
+    const coreId = ws.getCoreSessionId();
     await ws.delete();
     this.sessions.delete(sessionId);
+
+    // Data never goes through rm: the core session directory is moved into
+    // homeDir/trash/ (timestamped to avoid name clashes) and can be recovered
+    // by hand during the grace period; the index entry is removed in step. An
+    // incident in the field: a mis-clicked delete used to wipe the session
+    // directory for good — deletion has to be reversible.
+    // The directory must be derived from "this session's own workDir + core
+    // session id": the old code used this.workDir + the web sessionId, which
+    // for sessions bound to another workspace — or where coreSessionId !==
+    // sessionId — always pointed at a non-existent path → the directory stayed
+    // in the sessions tree while the index and in-memory entries were already
+    // removed, so the next server start in that workspace listed it again
+    // ("deleted but it came back") and users believed the data was gone.
+    const coreDir = join(this.homeDir, 'sessions', encodeWorkDirKey(workDir), coreId);
+    let moved = true;
+    try {
+      if (existsSync(coreDir)) {
+        const trashRoot = join(this.homeDir, 'trash');
+        await mkdir(trashRoot, { recursive: true });
+        await rename(coreDir, join(trashRoot, `${coreId}-${Date.now()}`));
+      } else {
+        // Directory not on disk: the session never reached the core directory,
+        // or a previous delete already moved it away. No data is lost, but the
+        // path has to be reported — a workDir/id mix-up regression shows up in
+        // exactly this shape.
+        log.warn('web: core session directory not found on delete', {
+          sessionId,
+          coreId,
+          workDir,
+          coreDir,
+        });
+      }
+    } catch (error) {
+      // Move failed (permissions, cross-device, …): do not continue silently.
+      // The data is still in the sessions tree, so dropping the index entry here
+      // would only make the user believe it was deleted; keep the entry so the
+      // session is still listed on the next start and can be deleted again. The
+      // return contract is unchanged (true = removed from the web list) and the
+      // frontend semantics stay the same.
+      moved = false;
+      log.warn('web: moving session directory to trash failed; index entry kept', {
+        sessionId,
+        coreId,
+        coreDir,
+        error: errorMessage(error),
+      });
+    }
+    // The index is keyed by **core session id** (the agent-core write path);
+    // removing by web sessionId is a no-op whenever the two differ and would
+    // leave a ghost entry → use coreId here.
+    if (moved) {
+      await removeSessionIndexEntry(this.homeDir, coreId);
+    }
     return true;
   }
 
@@ -2728,6 +3209,12 @@ export async function startWebServerForSession(session: Session, opts: {
       return;
     }
 
+    // Server default workspace (same shape as multi-session mode, for the home workspace chip)
+    if (url === `${API_PREFIX}/workdir` && method === 'GET') {
+      sendJson(res, 200, { workDir: opts.workDir });
+      return;
+    }
+
     // Git status for the status bar
     if (url === `${API_PREFIX}/git/status` && method === 'GET') {
       const gs = await getGitStatus(opts.workDir);
@@ -2757,7 +3244,15 @@ export async function startWebServerForSession(session: Session, opts: {
     if (url === '/' || url === '/index.html') {
       try {
         const html = await readFile(join(publicDir, 'index.html'), 'utf-8');
-        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+        // The index page must be revalidated on every request: without cache
+        // headers Chrome applies heuristic freshness and serves the previous
+        // bundle after a reload — the number one "my change did not take
+        // effect" illusion, hit repeatedly in practice. Real assets are
+        // content-hashed, see below.
+        res.writeHead(200, {
+          'Content-Type': 'text/html; charset=utf-8',
+          'Cache-Control': 'no-store',
+        });
         res.end(html);
       } catch {
         res.writeHead(500, { 'Content-Type': 'text/plain' });
@@ -2772,7 +3267,14 @@ export async function startWebServerForSession(session: Session, opts: {
       const ext = filePath.split('.').pop() ?? '';
       const contentType = contentTypes[ext] ?? 'application/octet-stream';
       const data = await readFile(filePath);
-      res.writeHead(200, { 'Content-Type': contentType });
+      // /assets/ holds Vite content-hashed output: a new build means new file
+      // names, so it can be cached long-term; the remaining static files
+      // (icons, …) keep the defaults so non-hashed assets are never pinned.
+      const headers: Record<string, string> = { 'Content-Type': contentType };
+      if (safeUrl.startsWith('/assets/')) {
+        headers['Cache-Control'] = 'public, max-age=31536000, immutable';
+      }
+      res.writeHead(200, headers);
       res.end(data);
     } catch {
       res.writeHead(404, { 'Content-Type': 'text/plain' });
@@ -3413,15 +3915,24 @@ export async function runWebServer(opts: WebServerOptions): Promise<WebServerHan
       return;
     }
 
-    // Create session
+    // Server default workspace: the fallback shown by the home workspace chip
+    // before an explicit pick.
+    if (url === `${API_PREFIX}/workdir` && method === 'GET') {
+      sendJson(res, 200, { workDir: manager.defaultWorkDir });
+      return;
+    }
+
+    // Create session (optional body `{ workDir }`: an invalid directory is
+    // rejected with a 4xx in the validation layer and never reaches the harness)
     if (url === `${API_PREFIX}/sessions` && method === 'POST') {
       try {
-        const ws = await manager.createSession();
+        const body = await readJsonBody(req);
+        const dir = await validateSessionWorkDir(body['workDir']);
+        const ws = await manager.createSession(dir);
         res.writeHead(201, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(ws.getListItem()));
       } catch (error) {
-        res.writeHead(500, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ code: 500, message: String(error) }));
+        sendHttpError(res, error);
       }
       return;
     }
@@ -3727,7 +4238,15 @@ export async function runWebServer(opts: WebServerOptions): Promise<WebServerHan
     if (url === '/' || url === '/index.html') {
       try {
         const html = await readFile(join(publicDir, 'index.html'), 'utf-8');
-        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+        // The index page must be revalidated on every request: without cache
+        // headers Chrome applies heuristic freshness and serves the previous
+        // bundle after a reload — the number one "my change did not take
+        // effect" illusion, hit repeatedly in practice. Real assets are
+        // content-hashed, see below.
+        res.writeHead(200, {
+          'Content-Type': 'text/html; charset=utf-8',
+          'Cache-Control': 'no-store',
+        });
         res.end(html);
       } catch {
         res.writeHead(500, { 'Content-Type': 'text/plain' });
@@ -3742,7 +4261,14 @@ export async function runWebServer(opts: WebServerOptions): Promise<WebServerHan
       const ext = filePath.split('.').pop() ?? '';
       const contentType = contentTypes[ext] ?? 'application/octet-stream';
       const data = await readFile(filePath);
-      res.writeHead(200, { 'Content-Type': contentType });
+      // /assets/ holds Vite content-hashed output: a new build means new file
+      // names, so it can be cached long-term; the remaining static files
+      // (icons, …) keep the defaults so non-hashed assets are never pinned.
+      const headers: Record<string, string> = { 'Content-Type': contentType };
+      if (safeUrl.startsWith('/assets/')) {
+        headers['Cache-Control'] = 'public, max-age=31536000, immutable';
+      }
+      res.writeHead(200, headers);
       res.end(data);
     } catch {
       res.writeHead(404, { 'Content-Type': 'text/plain' });

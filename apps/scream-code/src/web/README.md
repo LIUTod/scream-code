@@ -1,70 +1,74 @@
-# Scream Web UI — 架构与接口暴露清单
+# Scream Web UI — architecture and exposed-interface inventory
 
-> 本文件是 `scream web`（`apps/scream-code/src/web`）的架构与接口窗口。它描述三层架构、REST/WS 双通道的全部对外接口、数据模型、前端 client 能力，以及新增能力时的接线路径。
-> 用途：让后续开发者（含 AI 代理）在**不读源码全文**的情况下，快速知道"这个 web 后端暴露了哪些能力、前端怎么调、要加新能力怎么接"。
-
----
-
-## 1. 架构总览
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│  浏览器前端  (Vue 3,  src/web/frontend/)                         │
-│  ├─ useScreamWebClient.ts   —— 唯一状态中枢（模块级单例）          │
-│  │   · WS 连接/心跳/断线重连                                     │
-│  │   · REST 调用封装（session/资源/全局）                          │
-│  └─ components/*   —— 视图与面板                                  │
-└───────────────┬─────────────────────────────────────────────────┘
-                │  WS(事件流)  +  REST(状态/审批/配置/资源)
-┌───────────────▼─────────────────────────────────────────────────┐
-│  后端  (src/web/server.ts)                                      │
-│  ├─ runWebServer()   —— 多会话服务器入口                          │
-│  ├─ SessionManager   —— 多会话表 + 会话生命周期 + 通用转发           │
-│  │   . switchModel / switchThinking（模型/思考切换）                │
-│  │   . getLiveSession() guard + 分组转发（status/usage/…/插件/MCP） │
-│  ├─ WebSession       —— 单会话封装（journal/连接/审批/Goal）         │
-│  │   . requireLiveSession() —— 公开访问器，转发 RPC                │
-│  └─ REST handlers     —— handleGoalRoute / handleSessionControl   │
-│                          / handleResourceRoutes / handleGlobal... │
-└───────────────┬─────────────────────────────────────────────────┘
-                │  通过 ScreamHarness（零侵入）
-┌───────────────▼─────────────────────────────────────────────────┐
-│  node-sdk (@scream-code/scream-code-sdk)                        │
-│  ├─ ScreamHarness  —— 全局能力（config/flags/preflight/会话生命周期）│
-│  └─ Session        —— 单会话能力（prompt/模型/技能/插件/MCP/任务/Goal）│
-└─────────────────────────────────────────────────────────────────┘
-```
-
-**关键设计原则**
-- **WS / REST 双通道**：WS 只传事件流 + 命令（`prompt`/`command`/`abort`/审批）；REST 负责状态查询、变更、配置、资源管理，天然幂等、可审计、可测试。
-- **零侵入**：web 是 `agent-core`（经 node-sdk）的第三个消费者，与 TUI、stream-json 并列。`packages/agent-core` 与 `packages/node-sdk` 不被 web 侧改动。
-- **单例 client**：前端所有状态与动作都从 `useScreamWebClient()` 取，组件只读 computed/actions。
+> This file is the architecture and interface window of `scream web`
+> (`apps/scream-code/src/web`). It describes the three layers, every external
+> interface of the REST/WS dual channel, the data model, the frontend client
+> surface, and the wiring path for adding new capabilities.
+> Purpose: let later developers (AI agents included) learn **without reading the
+> sources end to end** which capabilities this web backend exposes, how the
+> frontend calls them, and how to wire a new capability in.
 
 ---
 
-## 2. REST 端点清单
+## 1. Architecture overview
 
-基准前缀：`/api/v1`。所有 `:id` 均需 URL 解码；session 作用域端点对归档（只读）会话返回 `409`，不会静默新建。
+```
+Browser frontend  (Vue 3, src/web/frontend/)
+  ├─ useScreamWebClient.ts — the only state hub (module-level singleton)
+  │    · WS connect / heartbeat / reconnect
+  │    · REST call wrappers (session / resources / global)
+  └─ components/* — views and panels
+      │
+      │  WS (event stream) + REST (state / approvals / config / resources)
+      ▼
+Backend  (src/web/server.ts)
+  ├─ runWebServer() — multi-session server entry point
+  ├─ SessionManager — session table + session lifecycle + generic forwarding
+  │    · switchModel / switchThinking (model / thinking-level switches)
+  │    · getLiveSession() guard + grouped forwarding (status/usage/…/plugins/MCP)
+  ├─ WebSession — single-session wrapper (journal / connections / approvals / Goal)
+  │    · requireLiveSession() — public accessor, forwards RPC
+  └─ REST handlers — handleGoalRoute / handleSessionControlRoutes /
+                     handleResourceRoutes / handleGlobalRoutes
+      │
+      │  through ScreamHarness (zero intrusion)
+      ▼
+node-sdk (@scream-code/scream-code-sdk)
+  ├─ ScreamHarness — global capabilities (config/flags/preflight/session lifecycle)
+  └─ Session — per-session capabilities (prompt/model/skills/plugins/MCP/tasks/Goal)
+```
 
-### A. 会话查询类（GET，session 作用域）
+**Key design principles**
 
-| 端点 | 说明 | 返回 |
+- **WS / REST dual channel**: WS carries the event stream plus commands (`prompt` / `command` / `abort` / approvals) only; REST owns state queries, mutations, configuration and resource management, which are naturally idempotent, auditable and testable.
+- **Zero intrusion**: web is the third consumer of `agent-core` (through node-sdk), alongside the TUI and stream-json. `packages/agent-core` and `packages/node-sdk` are never touched from the web side.
+- **Singleton client**: the frontend reads all state and actions from `useScreamWebClient()`; components only consume computed values and actions.
+
+---
+
+## 2. REST endpoint inventory
+
+Base prefix: `/api/v1`. Every `:id` must be URL-decoded; session-scoped endpoints answer `409` for archived (read-only) sessions and never silently create an empty shell.
+
+### A. Session queries (GET, session scope)
+
+| Endpoint | Description | Returns |
 |---|---|---|
-| `GET /sessions/:id/status` | 会话状态（模型/思考/权限/计划/wolfpack/rlm/上下文/usage） | `SessionStatus` |
-| `GET /sessions/:id/usage` | Token 用量 | `SessionUsage` |
-| `GET /sessions/:id/context` | 会话上下文（历史 + token 数） | `AgentContextData` |
-| `GET /sessions/:id/plan` | 当前计划模式方案 | `SessionPlan` |
-| `GET /sessions/:id/skills` | 技能列表 | `SkillSummary[]` |
-| `GET /sessions/:id/plugins` | 插件列表 | `PluginSummary[]` |
-| `GET /sessions/:id/plugins/:pid` | 单个插件详情 | `PluginInfo` |
-| `GET /sessions/:id/mcp` | MCP 服务列表 | `McpServerInfo[]` |
-| `GET /sessions/:id/mcp/startup-metrics` | MCP 启动耗时 | `McpStartupMetrics` |
-| `GET /sessions/:id/tasks?activeOnly&limit` | 后台任务列表 | `BackgroundTaskInfo[]` |
-| `GET /sessions/:id/tasks/:taskId/output?tail` | 任务输出尾部 | `{ output }` |
+| `GET /sessions/:id/status` | Session state (model / thinking / permission / plan / wolfpack / rlm / context / usage) | `SessionStatus` |
+| `GET /sessions/:id/usage` | Token usage | `SessionUsage` |
+| `GET /sessions/:id/context` | Session context (history + token counts) | `AgentContextData` |
+| `GET /sessions/:id/plan` | Current plan-mode plan | `SessionPlan` |
+| `GET /sessions/:id/skills` | Skill list | `SkillSummary[]` |
+| `GET /sessions/:id/plugins` | Plugin list | `PluginSummary[]` |
+| `GET /sessions/:id/plugins/:pid` | Single plugin details | `PluginInfo` |
+| `GET /sessions/:id/mcp` | MCP server list | `McpServerInfo[]` |
+| `GET /sessions/:id/mcp/startup-metrics` | MCP startup timings | `McpStartupMetrics` |
+| `GET /sessions/:id/tasks?activeOnly&limit` | Background task list | `BackgroundTaskInfo[]` |
+| `GET /sessions/:id/tasks/:taskId/output?tail` | Task output tail | `{ output }` |
 
-### B. 会话控制类（POST，session 作用域）
+### B. Session control (POST, session scope)
 
-| 端点 | 请求体 | 底层方法 |
+| Endpoint | Request body | Underlying method |
 |---|---|---|
 | `POST /sessions/:id/permission` | `{ mode: yolo\|manual\|auto\|ask }` | `setPermission` |
 | `POST /sessions/:id/plan` | `{ enabled, strategy? }` | `setPlanMode` |
@@ -74,16 +78,16 @@
 | `POST /sessions/:id/undo` | `{ count? }` | `undoHistory` |
 | `POST /sessions/:id/compact` | `{ instruction? }` | `compact` |
 
-### C. 技能类（session 作用域）
+### C. Skills (session scope)
 
-| 端点 | 请求体 | 底层方法 |
+| Endpoint | Request body | Underlying method |
 |---|---|---|
 | `POST /sessions/:id/skills/:name/activate` | `{ args? }` | `activateSkill` |
 | `DELETE /sessions/:id/skills/:name` | — | `removeSkill` |
 
-### D. 插件类（session 作用域）
+### D. Plugins (session scope)
 
-| 端点 | 请求体 | 底层方法 |
+| Endpoint | Request body | Underlying method |
 |---|---|---|
 | `POST /sessions/:id/plugins/install` | `{ source }` | `installPlugin` |
 | `POST /sessions/:id/plugins/:pid/enable` | `{ enabled }` | `setPluginEnabled` |
@@ -94,24 +98,24 @@
 | `POST /sessions/:id/plugins/reload` | — | `reloadPlugins` |
 | `DELETE /sessions/:id/plugins/:pid` | — | `removePlugin` |
 
-### E. MCP 类（session 作用域）
+### E. MCP (session scope)
 
-| 端点 | 请求体 | 底层方法 |
+| Endpoint | Request body | Underlying method |
 |---|---|---|
 | `POST /sessions/:id/mcp/add` | `{ name, config }` | `addMcpServer` |
 | `POST /sessions/:id/mcp/:name/reconnect` | — | `reconnectMcpServer` |
 | `POST /sessions/:id/mcp/:name/stop` | — | `stopMcpServer` |
 | `DELETE /sessions/:id/mcp/:name` | — | `removeMcpServer` |
 
-### F. 后台任务类（session 作用域）
+### F. Background tasks (session scope)
 
-| 端点 | 请求体 | 底层方法 |
+| Endpoint | Request body | Underlying method |
 |---|---|---|
 | `POST /sessions/:id/tasks/:taskId/stop` | `{ reason? }` | `stopBackgroundTask` |
 
-### G. 全局类（harness 作用域，无需 session）
+### G. Global (harness scope, no session needed)
 
-| 端点 | 方法 | 请求体 | 底层方法 |
+| Endpoint | Method | Request body | Underlying method |
 |---|---|---|---|
 | `/config` | GET | — | `getConfig` |
 | `/config` | POST | `{ patch }` | `setConfig` |
@@ -119,115 +123,140 @@
 | `/experimental-flags` | GET | — | `getExperimentalFlags` |
 | `/preflight` | GET | — | `preflight` |
 
-### 会话本身（原有的核心端点）
+### The sessions themselves (the original core endpoints)
 
-| 端点 | 方法 | 说明 |
+| Endpoint | Method | Description |
 |---|---|---|
-| `/sessions` | GET/POST | 列表 / 新建 |
-| `/sessions/:id/activate` | POST | 激活归档会话 |
-| `/sessions/:id/export` | GET | 导出 Markdown |
-| `/sessions/:id` | DELETE | 删除 |
-| `/sessions/:id/snapshot?tail` | GET | 全量快照（断线恢复） |
-| `/sessions/:id/messages?before&tail` | GET | 更早历史分页 |
-| `/sessions/:id/messages?seq&tool` | GET | 取完整 thinking 文本 |
-| `/sessions/:id/model` | POST | 切换模型（含上下文上限守卫） |
-| `/sessions/:id/thinking` | POST | 切换思考强度 |
-| `/sessions/:id/goal` | POST/PATCH | 创建 / 更新 Goal |
-| `/sessions/:id/goal/refine` | POST | 精炼 Goal 目标 |
-| `/sessions/:id/goal/pause\|resume\|cancel` | POST | Goal 生命周期 |
-| `/git/status` | GET | Git 状态 |
-| `/git/diff?path` | GET | 单文件 diff |
-| `/like` | GET/PUT | 用户偏好（共享 TUI） |
-| `/models` | GET | 可用模型列表 |
+| `/sessions` | GET/POST | List / create (POST accepts an optional `{ workDir }` body: absolute path, no `..`, must exist and be readable/writable, otherwise 4xx + message; omitted → the server process directory) |
+| `/workdir` | GET | Server default workspace `{ workDir }` (fallback shown by the home workspace chip before an explicit pick) |
+| `/sessions/:id/activate` | POST | Activate an archived session |
+| `/sessions/:id/export` | GET | Export as Markdown |
+| `/sessions/:id` | DELETE | Delete |
+| `/sessions/:id/snapshot?tail` | GET | Full snapshot (reconnect recovery) |
+| `/sessions/:id/messages?before&tail` | GET | Older history pagination |
+| `/sessions/:id/messages?seq&tool` | GET | Full thinking text for one entry |
+| `/sessions/:id/model` | POST | Switch model (with a context-limit guard) |
+| `/sessions/:id/thinking` | POST | Switch thinking effort |
+| `/sessions/:id/goal` | POST/PATCH | Create / update a Goal |
+| `/sessions/:id/goal/refine` | POST | Refine a Goal objective |
+| `/sessions/:id/goal/pause\|resume\|cancel` | POST | Goal lifecycle |
+| `/git/status` | GET | Git status |
+| `/git/diff?path` | GET | Single-file diff |
+| `/like` | GET/PUT | User preferences (shared with the TUI) |
+| `/models` | GET | Available models |
 
 ---
 
-## 3. WS 事件与命令清单
+## 3. WS events and commands
 
-### 事件（服务端 → 客户端，经 `event` 信封 + `seq/epoch`）
+### Events (server → client, through the `event` envelope + `seq/epoch`)
 
-核心事件（经 `useScreamWebClient.handleMessage` 分发）：`server_hello`、`event`（含 `assistant.delta`/`thinking.delta`/`tool.call.started`/`tool.result`/`turn.started`/`turn.ended`/`goal.updated`/`todo.updated`/`status`/`agent.status.updated`）、`approval_request`、`approval_resolved`、`user_message`、`command_result`、`resync_required`、`server_empty`、`pong`、`error`。
+Core events (dispatched by `useScreamWebClient.handleMessage`): `server_hello`, `event` (including `assistant.delta` / `thinking.delta` / `tool.call.started` / `tool.result` / `turn.started` / `turn.ended` / `goal.updated` / `todo.updated` / `status` / `agent.status.updated`), `approval_request`, `approval_resolved`, `user_message`, `command_result`, `resync_required`, `server_empty`, `pong`, `error`.
 
-### 命令（客户端 → 服务端）
+### Commands (client → server)
 
-| 类型 | 说明 |
+| Type | Description |
 |---|---|
-| `prompt` | 发送用户消息（`{ text, clientMessageId }`） |
-| `command` | 斜杠命令（`{ command, args?, pendingMsgId? }`） |
-| `abort` | 停止当前回合 |
-| `approval_response` | 审批答复（`{ id, decision, feedback?, scope? }`） |
-| `ping` / `pong` | 心跳 |
+| `prompt` | Send a user message (`{ text, clientMessageId }`) |
+| `command` | Slash command (`{ command, args?, pendingMsgId? }`) |
+| `abort` | Stop the current turn |
+| `approval_response` | Approval answer (`{ id, decision, feedback?, scope? }`) |
+| `ping` / `pong` | Heartbeat |
 
-### 前端斜杠命令面（`frontend/src/commands.ts`）
+### Frontend slash-command surface (`frontend/src/commands.ts`)
 
-`compact / model / clear / new / help / auto / yes(=yolo) / plan / fork / title(=rename) / status / usage / btw`。
-其中 `btw` 特判为"回合进行中也可发"，其余命令在会话忙时拒绝。
+`compact / model / clear / new / help / auto / yes(=yolo) / plan / fork / title(=rename) / status / usage / btw`.
+`btw` is special-cased as "sendable while a turn is running"; the other commands are rejected while the session is busy.
 
 ---
 
-## 4. 数据模型
+## 4. Data model
 
-前端自持精简类型（`frontend/src/types.ts`，**不 import node-sdk/agent-core**，本地镜像）：
+The frontend keeps its own trimmed types (`frontend/src/types.ts`, **imports neither node-sdk nor agent-core** — local mirrors):
 
-| 类型 | 说明 |
+| Type | Description |
 |---|---|
-| `ChatMessage` / `ToolMessage` / `TurnStats` | 消息与工具调用、回合统计 |
-| `SessionStatus` / `SessionUsage` / `TokenUsage` | 会话状态与用量 |
-| `GoalSnapshot` / `TodoItem` / `GoalBudgetInput` | Goal/Todo |
+| `ChatMessage` / `ToolMessage` / `TurnStats` | Messages, tool calls and per-turn stats |
+| `SessionStatus` / `SessionUsage` / `TokenUsage` | Session state and usage |
+| `GoalSnapshot` / `TodoItem` / `GoalBudgetInput` | Goal / Todo |
 | `GitStatus` / `GitFileChange` | Git |
-| `ModelInfo` / `ModelsResponse` | 模型 |
-| `SessionListItem` / `SessionSnapshot` | 会话列表/快照 |
-| `LikePreferences` | 用户偏好 |
-| `ApprovalRequest` | 审批 |
-| **新增（本次暴露）** `AgentContextData` / `SessionPlan` / `PlanInfo` / `SkillSummary` / `PluginSummary` / `PluginInfo` / `ReloadSummary` / `McpServerInfo` / `McpStartupMetrics` / `BackgroundTaskInfo` / `ExperimentalFlagMap` / `ScreamConfig` / `ScreamConfigPatch` | 资源与全局 |
+| `ModelInfo` / `ModelsResponse` | Models |
+| `SessionListItem` / `SessionSnapshot` | Session list / snapshot |
+| `LikePreferences` | User preferences |
+| `ApprovalRequest` | Approvals |
+| **Exposed by this layer** `AgentContextData` / `SessionPlan` / `PlanInfo` / `SkillSummary` / `PluginSummary` / `PluginInfo` / `ReloadSummary` / `McpServerInfo` / `McpStartupMetrics` / `BackgroundTaskInfo` / `ExperimentalFlagMap` / `ScreamConfig` / `ScreamConfigPatch` | Resources and global state |
 
-这些类型是 `backend` 对应 RPC 返回结构的**镜像**（字段对齐 agent-core），改后端返回结构时需同步更新这里。
-
----
-
-## 5. 前端 client 接口
-
-`useScreamWebClient()`（单例）对外暴露方法分三类：
-
-- **会话**：`sendPrompt / sendCommand / abort / clearMessages / appendSystemMessage / resolveApproval / switchModel / switchThinking / createSession / switchSession / deleteSession / exportSession / fetchSnapshot / loadOlderMessages / reconnectNow / fetchSessions / fetchGitStatus / fetchModels / fetchLike / updateLike`。
-- **Goal/Todo**：`refineGoal / createGoal / updateGoal / pauseGoal / resumeGoal / cancelGoal`。
-- **本次新增**：
-  - 会话状态：`fetchSessionStatus / fetchSessionUsage / fetchSessionContext / fetchSessionPlan / sessionPlan / clearPlan`；开关：`switchPermission / switchPlanMode / switchWolfpack / switchRlm / undoHistory / compact`。
-  - 技能：`skills / fetchSkills / activateSkill / removeSkill`。
-  - 插件：`plugins / pluginInfo / fetchPlugins / fetchPluginInfo / installPlugin / setPluginEnabled / setPluginMcpServerEnabled / removePlugin / reloadPlugins / activatePlugin / deactivatePlugin / injectPlugin`。
-  - MCP：`mcpServers / mcpStartupMetrics / fetchMcpServers / fetchMcpStartupMetrics / addMcpServer / reconnectMcpServer / stopMcpServer / removeMcpServer`。
-  - 后台任务：`backgroundTasks / backgroundTaskOutput / fetchBackgroundTasks / fetchBackgroundTaskOutput / stopBackgroundTask`。
-  - 全局：`config / fetchConfig / setConfig / removeProvider / experimentalFlags / fetchExperimentalFlags / preflightOk / preflight`。
-
-以上为**本次"暴露接口"范围**：多数新方法尚无 UI 面板消费（本阶段目标是暴露接口，不是做面板）。
+These types are **mirrors** of the corresponding backend RPC return structures (field-aligned with agent-core); changing a backend return structure means updating them here as well.
 
 ---
 
-## 6. 接线说明（新增能力如何加）
+## 5. Frontend client interface
 
-要新增一个基础层能力到 web，按四条链路走，通常是**后端 → 前端**顺序：
+`useScreamWebClient()` (singleton) exposes methods in three groups:
 
-1. **后端访问器**：`WebSession` 提供 `requireLiveSession(): Session`（已存在），返回底层核心 Session（归档抛 `409`）。
-2. **SessionManager 转发**：在 `SessionManager` 加薄转发方法（现有 `switchModel/switchThinking` 为先例；本次新增了 status/usage/…/插件/MCP/任务/全局各组），内部 `this.getLiveSession(id)` 后调底层方法。
-3. **REST handler**：在 `handleSessionControlRoutes` / `handleResourceRoutes` / `handleGlobalRoutes` 之一加路由（返回 `false` 即未匹配，交给下一个 handler），统一 `try/catch → sendHttpError`。
-4. **前端 client**：在 `useScreamWebClient.ts` 加对应方法（查询 best-effort、变更带 toast），并在 `UseScreamWebClientReturn` 接口 + return 对象中暴露；`types.ts` 同步镜像返回类型。
-
-**约定**
-- 查询类（GET）失败静默（best-effort），变更类（POST/DELETE）失败弹 toast。
-- session 作用域端点必须先经 `getLiveSession` 判活（404/409），绝不静默建空壳。
-- 全局类（config/flags/preflight）不依赖 session，走 `SessionManager` 的 harness 转发。
-- 新增端点需在 README 第 2 节同步登记。
+- **Session**: `sendPrompt / sendCommand / abort / clearMessages / appendSystemMessage / resolveApproval / switchModel / switchThinking / createSession(workDir?) / switchSession / deleteSession / exportSession / fetchSnapshot / loadOlderMessages / reconnectNow / fetchSessions / fetchGitStatus / fetchModels / fetchLike / updateLike`. The `workDir` passed to `createSession` travels with the POST; when creation fails the toast prefers the server message (an invalid directory, for example).
+- **Goal/Todo**: `refineGoal / createGoal / updateGoal / pauseGoal / resumeGoal / cancelGoal`.
+- **Additional exposed surface** (the goal of this layer was to expose the API, not to build panels, so most of these methods have no UI panel consuming them yet):
+  - Session state: `fetchSessionStatus / fetchSessionUsage / fetchSessionContext / fetchSessionPlan / sessionPlan / clearPlan`; toggles: `switchPermission / switchPlanMode / switchWolfpack / switchRlm / undoHistory / compact`.
+  - Skills: `skills / fetchSkills / activateSkill / removeSkill`.
+  - Plugins: `plugins / pluginInfo / fetchPlugins / fetchPluginInfo / installPlugin / setPluginEnabled / setPluginMcpServerEnabled / removePlugin / reloadPlugins / activatePlugin / deactivatePlugin / injectPlugin`.
+  - MCP: `mcpServers / mcpStartupMetrics / fetchMcpServers / fetchMcpStartupMetrics / addMcpServer / reconnectMcpServer / stopMcpServer / removeMcpServer`.
+  - Background tasks: `backgroundTasks / backgroundTaskOutput / fetchBackgroundTasks / fetchBackgroundTaskOutput / stopBackgroundTask`.
+  - Global: `config / fetchConfig / setConfig / removeProvider / experimentalFlags / fetchExperimentalFlags / preflightOk / preflight`.
 
 ---
 
-## 附：后端模块职责速览
+## 6. Wiring notes (how to add a capability)
 
-| 模块 | 位置 | 职责 |
+To add a base-layer capability to web, follow four links, normally in the order **backend → frontend**:
+
+1. **Backend accessor**: `WebSession` provides `requireLiveSession(): Session` (already present) and returns the underlying core Session (archived sessions throw `409`).
+2. **SessionManager forwarding**: add a thin forwarding method on `SessionManager` (`switchModel`/`switchThinking` are the existing precedent; this layer added the status/usage/…/plugins/MCP/tasks/global groups), which calls `this.getLiveSession(id)` and then the underlying method.
+3. **REST handler**: add the route to one of `handleSessionControlRoutes` / `handleResourceRoutes` / `handleGlobalRoutes` (returning `false` means "not matched", so the next handler runs), with a uniform `try/catch → sendHttpError`.
+4. **Frontend client**: add the corresponding method in `useScreamWebClient.ts` (best-effort for queries, toast on failure for mutations) and expose it on the `UseScreamWebClientReturn` interface and the return object; mirror the return type in `types.ts`.
+
+**Conventions**
+
+- Query endpoints (GET) fail silently (best-effort); mutating endpoints (POST/DELETE) raise a toast.
+- Session-scoped endpoints must go through `getLiveSession` first (404/409) and must never silently create an empty shell.
+- Global endpoints (config/flags/preflight) do not depend on a session and go through `SessionManager`'s harness forwarding.
+- New endpoints must be registered in section 2 of this README at the same time.
+
+---
+
+## 7. Frontend frame-handling discipline
+
+The hard rules for WS frame handling (rooted in a production incident: the dispatcher never registered a `resync_required` handler, which left the UI permanently stale with no error reported at all):
+
+1. **Frame handlers must register in the registry, and unknown frames must fail loud.** Each domain module self-registers through `onWsMessage(s, type, fn)` at assembly time; `dispatch.ts` logs `console.error` and counts unregistered types — never swallow a frame silently, and never throw either (the WS loop has to stay alive).
+2. **Journal events must pass `acceptJournalEvent`, and silent seq gaps are refused.** seq must continue at `seq+1`; a gap within the same epoch counts as a hole — log it loud and trigger the snapshot refetch that `resync_required` also performs, escalating the log level after more than 3 consecutive gaps. An epoch change still goes through the resync reset path.
+3. **Reconnect snapshots are swapped atomically.** A snapshot must be fetched in full, pass the `canApplySnapshot` generation check and then replace `messages` and the other state in one shot via `applySnapshot`; any "clear the old snapshot first and leave an empty state if applying fails" shape is forbidden.
+4. **Component motion convention**: animations hang off semantic state (state-driven, never imperatively triggered) and honour `prefers-reduced-motion`.
+
+---
+
+## 7.1 Composer and overlay conventions (L2)
+
+- **Composer single primary button**: `Send` / `Stop` collapse into one `.composer-primary` whose shape is driven by `data-action="send|stop"` (idle → send, busy → stop; while busy, Stop is one keystroke away no matter what the input holds — queueing lives on the keyboard: Enter queues, ⌘S injects immediately). Icon, `title` and `aria-label` all come from the same `PRIMARY_META`; a second submit button must never appear.
+- **Placeholder state machine**: `placeholderKey` (offline / queue / busy / plan / no-workspace / idle) is resolved in one place in `Composer.vue` and written to the input's `data-placeholder-state`; a `placeholder` passed by the host only overrides the idle state.
+- **Chip row**: visibility, wording and `disabled` reasons for `.composer-chip[data-chip=…]` (mention / slash / workspace / model / thinking / permission / context / queue) all come from the `chips` computed in `Composer.vue`. In the home variant the workspace chip opens `WorkspacePicker.vue` (path input + recent list + quick entry into subdirectories) and the chosen value goes into the module-level preference `useWorkspacePreference` (localStorage key `scream-workspace-preference`) as the `workDir` of the next `createSession`; the chat variant only displays the session-bound directory read-only (the workspace is fixed at creation and cannot be changed mid-session). The effort chip appears only when the current model carries `thinkingLevels` metadata; anything that cannot be clicked is `disabled` with the reason in `title`, so no silent path remains.
+- **Takeover area**: an in-flight Goal is rendered by `GoalBar.vue` (one in-flow row above the input, non-modal); the edit action switches the right rail to the Goal tab and reuses `GoalPanel` instead of building a second Goal form.
+- **Overlay menus**: all components share `MenuPopover.vue` (the `MenuEntry`/`MenuGroup` shapes from `utils/menus.ts`), teleported to body with fixed positioning, closing on outside click / Esc / scroll, plus a module-level mutex registry — only one menu is on screen at a time. The model/effort/permission menus inside the composer add one more layer of mutual exclusion through the single-valued `openMenu`.
+- **Top bar convergence**: `ConversationHeader` keeps only back / title (rename) / stats capsule (turns · tokens, opening `SessionStatsPanel`) / a "more" overlay / open right rail; export, clear and the file panel move into the overlay. An empty session (`messages=0` and not running) renders no top bar at all, and the empty-state guidance belongs to `MessageList`.
+- **Sidebar session rows**: a row's "more" offers rename / fork / export / delete; fork is available for the current session only (the server-side fork hangs off the active WS session, and the web side has no channel for forking an arbitrary session by id). Time formatting always goes through `utils/relativeTime.ts`; groups longer than `GROUP_COLLAPSE_LIMIT` (5) collapse by default, and search results never collapse. Expansion state lives in `useSidebarState` (shared by the desktop rail and the mobile drawer).
+- **Cross-view draft delivery**: `Composer` exposes `insertDraft(text, { activate })`, `ConversationView` forwards it and `WebShell` injects it into `SkillsView` as `injectDraft`; only when delivery fails does `SkillsView` fall back to the clipboard plus written instructions. Injected content carries a 5s window, and draft restoration on session switch consumes it once.
+- **Settings modal host**: `<SettingsModal />` is mounted inside `WebShell` (same domain as the view switch) rather than being owned by `App.vue`; the open/closed state is still the module-level `useSettingsModal` singleton and the sidebar entry behaves the same.
+
+---
+
+## Appendix: backend module responsibilities
+
+| Module | Location | Responsibility |
 |---|---|---|
-| `runWebServer` | server.ts | 多会话 HTTP+WS 入口；组装 handler 链；网关认证 |
-| `startWebServerForSession` | server.ts | 单会话模式入口（`scream web` 绑定指定会话） |
-| `SessionManager` | server.ts | 多会话表、创建/激活/归档/fork/删除、模型/思考切换、通用转发 |
-| `WebSession` | server.ts | 单会话封装：journal 事件、连接、审批、Goal/Todo、断线恢复 |
-| `useScreamWebClient` | frontend | 前端唯一状态中枢：WS 事件 + REST 调用 + 并发防护 |
-| `files.ts` | server.ts 同层 | 文件只读浏览（workdir 收敛 + symlink 逃逸防护） |
-| `auth.ts` | server.ts 同层 | LAN 网关认证（Bearer / cookie，timingSafeEqual） |
+| `runWebServer` | server.ts | Multi-session HTTP + WS entry; assembles the handler chain; gateway authentication |
+| `startWebServerForSession` | server.ts | Single-session mode entry (`scream web` bound to one session) |
+| `SessionManager` | server.ts | Session table, create/activate/archive/fork/delete, model/thinking switches, generic forwarding |
+| `WebSession` | server.ts | Single-session wrapper: journal events, connections, approvals, Goal/Todo, reconnect recovery |
+| `useScreamWebClient` | frontend | The frontend's only state hub: WS events + REST calls + concurrency guards |
+| `files.ts` | alongside server.ts | Read-only file browsing (workdir confinement + symlink escape protection) |
+| `auth.ts` | alongside server.ts | LAN gateway authentication (Bearer / cookie, timingSafeEqual) |
