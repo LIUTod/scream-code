@@ -1,11 +1,10 @@
 /**
  * Streaming-speed gauge for the live thinking indicator.
  *
- * Ported from oh-my-pi `packages/coding-agent/src/modes/components/assistant-message.ts:120-178`.
- * scream-code adaptation: the provider does not report cumulative token counts
- * during streaming (only character deltas), so instantaneous tok/s is estimated
- * from delta length via {@link CHARS_PER_TOKEN_ESTIMATE}. The badge is a progress
- * indicator, not a precise meter.
+ * The provider does not report cumulative token counts during streaming (only
+ * character deltas), so instantaneous tok/s is estimated from the delta text
+ * via {@link estimateTokens}. The badge is a progress indicator, not a precise
+ * meter.
  */
 
 /** Rolling window (ms) over which streaming-rate observations are averaged. */
@@ -14,13 +13,10 @@ export const SPEED_WINDOW_MS = 3000;
  *  displayed tok/s is NOT clamped — it keeps rising past this value; only the
  *  color gauge saturates here. */
 export const SPEED_MAX = 200;
-/**
- * Chars-per-token estimate for converting character deltas to an approximate
- * token count. 2.5 is a middle ground between English (~4 chars/token) and
- * Chinese (~1 char/token). Pure Chinese underestimates ~2.5x, pure English
- * overestimates ~1.6x — acceptable for a progress indicator.
- */
-export const CHARS_PER_TOKEN_ESTIMATE = 2.5;
+/** First codepoint of the CJK ranges (radicals and above): one token per char. */
+const CJK_START = 0x2e80;
+/** Latin/digit/punctuation average, matching the ~4 chars/token rule of thumb. */
+const LATIN_CHARS_PER_TOKEN = 4;
 
 interface SpeedObservation {
   readonly time: number;
@@ -124,8 +120,36 @@ export function lerpHex(from: string, to: string, t: number): string {
  * Estimate token count from a character delta. At least 1 to avoid zero-rate
  * observations when a tiny delta arrives.
  */
-export function estimateTokens(delta: string): number {
-  return Math.max(1, Math.round(delta.length / CHARS_PER_TOKEN_ESTIMATE));
+export function estimateTokens(text: string): number {
+  let cjk = 0;
+  let latin = 0;
+  for (const char of text) {
+    if ((char.codePointAt(0) ?? 0) >= CJK_START) cjk += 1;
+    else latin += 1;
+  }
+  return Math.max(1, Math.round(cjk + latin / LATIN_CHARS_PER_TOKEN));
+}
+
+/**
+ * Number of leading characters of `text` that fit into a token budget, using
+ * the same script-aware basis as {@link estimateTokens}. Smooth-rendering paces
+ * by a token budget, so converting it back to characters has to use this
+ * estimator instead of a single chars-per-token constant.
+ */
+export function charsForTokenBudget(text: string, tokenBudget: number): number {
+  let cjk = 0;
+  let latin = 0;
+  let chars = 0;
+  for (const char of text) {
+    const isCjk = (char.codePointAt(0) ?? 0) >= CJK_START;
+    const nextCjk = cjk + (isCjk ? 1 : 0);
+    const nextLatin = latin + (isCjk ? 0 : 1);
+    if (nextCjk + nextLatin / LATIN_CHARS_PER_TOKEN > tokenBudget) break;
+    cjk = nextCjk;
+    latin = nextLatin;
+    chars += 1;
+  }
+  return chars;
 }
 
 /**

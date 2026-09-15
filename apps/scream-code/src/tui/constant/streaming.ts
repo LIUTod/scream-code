@@ -36,18 +36,15 @@ export const SMOOTH_FRAME_MS = 50;
 export const MIN_CHARS_PER_FRAME = 1;
 
 // Ceiling chars per frame: with the arrival rate clamped to SPEED_MAX (200
-// tok/s), the largest reachable budget is ceil(200 * 0.05 * 2.5) = 25 chars
-// per frame (~500 chars/s). One oversized network burst is thus spread over
+// tok/s) the frame budget is 10 tokens, which the Latin estimate turns into
+// ~40 characters — this ceiling is what actually bounds a network burst
+// (~500 chars/s). One oversized burst is thus spread over
 // frames instead of rendered at once.
 export const MAX_CHARS_PER_FRAME = 25;
 
 // Assumed arrival rate used until the first speed sample lands, so the very
 // first (often large) block is paced sensibly instead of crawling at MIN=1.
 export const DEFAULT_ARRIVAL_TOK_PER_SEC = 50;
-
-// Average chars per token used to convert the measured token/s arrival rate
-// into a per-frame char budget (EN ~4 chars/token, CJK ~1, mixed ~2.5).
-export const CHARS_PER_TOKEN = 2.5;
 
 // Bounds pathological provider error bodies (e.g. a proxy 502 whose body is a
 // full HTML page) rendered inline in the transcript so they can't flood the

@@ -139,15 +139,15 @@ describe('smooth streaming (token pacing)', () => {
       (text: string) => updates.push(text);
 
     // No speed samples yet → budget uses the default assumed rate (50 tok/s →
-    // ceil(50 * 0.05 * 2.5) = 7 chars/frame), so the first block flows instead
-    // of crawling at MIN=1.
-    controller.appendAssistantDelta('abcdefghij');
+    // 50 * 0.05 = 2.5 tokens/frame ≈ 10 Latin chars at 4 chars/token), so the
+    // first block flows instead of crawling at MIN=1.
+    controller.appendAssistantDelta('abcdefghijklmnopqrst');
     for (let i = 0; i < 10; i++) {
       (controller as unknown as { flush: () => void }).flush();
     }
 
-    expect(updates[0]).toBe('abcdefg');
-    expect(updates.at(-1)).toBe('abcdefghij'); // fully shown → frame stops
+    expect(updates[0]).toBe('abcdefghij');
+    expect(updates.at(-1)).toBe('abcdefghijklmnopqrst'); // fully shown → frame stops
     expect(controller.hasPending()).toBe(false);
   });
 
@@ -181,13 +181,14 @@ describe('smooth streaming (token pacing)', () => {
       (text: string) => updates.push(text);
 
     // Simulate a fast model: budget scales to the arrival rate
-    // (80 tok/s → ceil(80 * 0.05 * 2.5) = 10 chars/frame), not MIN=1.
+    // (80 tok/s → 80 * 0.05 = 4 tokens/frame ≈ 16 Latin chars at 4
+    // chars/token), not MIN=1.
     // Seed with the real clock so the windowed getSpeed() (called with a real
     // performance.now()) keeps this observation in-window.
     getSharedSpeedTracker().observe(80, 1000, performance.now());
     controller.appendAssistantDelta('x'.repeat(50));
     (controller as unknown as { flush: () => void }).flush();
 
-    expect(updates[0]).toBe('x'.repeat(10));
+    expect(updates[0]).toBe('x'.repeat(16));
   });
 });

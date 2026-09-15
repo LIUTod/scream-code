@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  CHARS_PER_TOKEN_ESTIMATE,
+  charsForTokenBudget,
   easeSpeedRatio,
   estimateTokens,
   getSharedSpeedTracker,
@@ -121,14 +121,37 @@ describe('lerpHex', () => {
   });
 });
 
-describe('estimateTokens', () => {
-  it('estimates tokens from character count via CHARS_PER_TOKEN_ESTIMATE', () => {
-    const chars = Math.round(CHARS_PER_TOKEN_ESTIMATE * 10);
-    expect(estimateTokens('x'.repeat(chars))).toBe(10);
+describe('charsForTokenBudget', () => {
+  it('counts CJK characters one token each', () => {
+    expect(charsForTokenBudget('中文字符', 2)).toBe(2);
   });
 
-  it('returns at least 1 token for any non-empty delta', () => {
-    expect(estimateTokens('a')).toBe(1);
+  it('counts about four Latin characters per token', () => {
+    expect(charsForTokenBudget('abcdefgh', 2)).toBe(8);
+  });
+
+  it('stops before the budget is exceeded on mixed text', () => {
+    // 2 CJK tokens + 4 Latin tokens worth of characters fit a budget of 3.
+    expect(charsForTokenBudget('中文abcdefgh', 3)).toBe(6);
+  });
+
+  it('returns zero for a zero budget', () => {
+    expect(charsForTokenBudget('中文', 0)).toBe(0);
+  });
+});
+
+describe('estimateTokens', () => {
+  it('counts CJK codepoints as about one token each', () => {
+    expect(estimateTokens('中'.repeat(40))).toBe(40);
+    expect(estimateTokens('推理：检查失败的断言')).toBe(10);
+  });
+
+  it('counts Latin text as about a quarter token per character', () => {
+    expect(estimateTokens('x'.repeat(40))).toBe(10);
+  });
+
+  it('mixes scripts in one sample', () => {
+    expect(estimateTokens('中文abc')).toBe(3);
   });
 
   it('returns 1 for an empty delta (max(1, 0) = 1)', () => {
