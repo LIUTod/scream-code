@@ -369,7 +369,7 @@ interface SessionStatus {
 | diff 工具链是否整条死掉 | `buildEditDiff → computeDiff/diffStats` 有活跃调用方（EditToolCard）✓ |
 
 **清理后复验**：`typecheck` + `web:typecheck` 均 0 错误；全量 `vitest run` **1307 passed / 4 skipped**；`pnpm build` 通过；冒烟 index/sessions/diff=200、越界=403；`dist/public` 3.5M / assets 10。
-**发布链**：`prepublishOnly → scripts/verify-publish.mjs` 会**重新跑完整 build** 并断言版本注入、保留 `dist/public`，所以本地 dist 陈旧不影响发布产物；`files: ["dist","icon.ico"]` → 源码与 300KB 的 `apps/scream-code/logo-v2.svg` 原件不进包（真正进包的是 `dist/public/assets/logo-v2-*.svg` 135KB 优化版）。
+**发布链**：`prepublishOnly → scripts/verify-publish.mjs` 会**重新跑完整 build** 并断言版本注入、保留 `dist/public`，所以本地 dist 陈旧不影响发布产物；`files: ["dist"]` → 源码与 300KB 的 `apps/scream-code/logo-v2.svg` 原件不进包（真正进包的是 `dist/public/assets/logo-v2-*.svg` 135KB 优化版；Web favicon 走 `src/web/frontend/public/icon.ico` → `dist/public/icon.ico`，与包根同名文件无关）。
 
 ### 追加：品牌改为 logo-v2 文字标
 
