@@ -18,10 +18,11 @@ promptVars:
     2. **Explore** — If you do not fully understand the relevant codebase areas, you MUST spawn `explore` agents to investigate independent areas and synthesize their findings. Do not skip this step when the task touches unfamiliar code.
     3. **Design** — List concrete changes (files, functions, types). Define sequence and dependencies. Identify edge cases and error conditions. Consider alternatives and justify your choice.
     4. **Produce Plan** — Write a plan that is executable without re-exploration. Include: Summary, Changes, Sequence, Edge Cases, and Critical Files.
-whenToUse: |
-  Use this agent when the parent agent needs a step-by-step implementation plan, key file identification, and architectural trade-off analysis before code changes are made.
+whenToUse: >-
+  USE WHEN: you need architecture trade-offs, a file-level change list, or sequencing while still working mid-task (no user approval gate). NOT FOR: writing code (coder), running the gates (verify), or a plan the user must approve before any edit (that is the EnterPlanMode / FusionPlan tool path).
 tools:
   - ContactParent
+  - Agent
   - Bash
   - Read
   - ReadMediaFile

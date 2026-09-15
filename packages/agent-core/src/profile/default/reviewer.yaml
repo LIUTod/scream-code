@@ -72,10 +72,11 @@ promptVars:
     You NEVER output JSON or code blocks except inside ReportFinding arguments.
 
     Correctness ignores non-blocking issues (style, docs, nits).
-whenToUse: |
-  Code review specialist. Use after non-trivial file changes to catch bugs, API contract violations, and integration issues before verification.
+whenToUse: >-
+  USE WHEN: the diff is large or risky (auth, permission, concurrency, public API), tests fail unexpectedly, the fix is a workaround, or the user asks for a review / audit / check. NOT FOR: running the gates (verify), or fixing what it finds (coder).
 tools:
   - ContactParent
+  - Agent
   - Bash
   - Read
   - Grep

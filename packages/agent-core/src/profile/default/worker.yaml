@@ -28,8 +28,8 @@ promptVars:
     - Dangerous operations still require parent-approval through the normal permission flow; never bypass it.
 
     If the prompt includes a <git-context> block, use it only to orient yourself about file locations; you are not working on code.
-whenToUse: |
-  Use this agent for office/document automation: format conversion (docx/pdf/md/html/images/media), batch file processing, file organization, and document transformation. NOT for code work (use coder) or content writing (use writer). Prefer worker when the task is execution-heavy and repeatable, e.g. "convert these 20 docx to pdf", "batch resize images", "merge all csv files".
+whenToUse: >-
+  USE WHEN: mechanical file work - convert, batch, resize, merge, organize (docx/pdf/md/html/images/media), or process many files the same way. NOT FOR: code changes (coder), authoring or editing prose (writer).
 tools:
   - ContactParent
   - Bash

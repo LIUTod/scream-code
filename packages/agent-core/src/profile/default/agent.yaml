@@ -50,20 +50,25 @@ tools:
   - ExitPlanMode
   - mcp__*
 
+# Routing text for the parent's `Agent` tool: the description is the "what",
+# the profile's own `whenToUse` supplies the "call me when / do not call me
+# for" triggers. Keep both short and trigger-shaped so all types stay
+# comparable when the model picks one. This map is the single source of truth:
+# system.md must not restate it.
 subagents:
   coder:
-    description: Good at general software engineering tasks.
+    description: Edits files and runs commands for non-trivial engineering work, then reports a compact, technically complete summary.
   explore:
-    description: Fast codebase exploration with prompt-enforced read-only behavior.
+    description: Read-only reconnaissance across files; returns a structured map (summary, inventory, architecture) and never edits.
   plan:
-    description: Read-only implementation planning and architecture design.
+    description: Read-only architect; turns a request into a step-by-step, file-level implementation plan with trade-offs.
   verify:
-    description: Verification specialist. Runs build, test, and lint commands to validate code changes.
+    description: Runs the project's real gates (build, test, lint, typecheck) and reports pass/fail with raw command evidence.
   reviewer:
-    description: Code review specialist. Identifies bugs and API contract violations before merge.
+    description: Adversarial review of a diff; reports bugs, contract violations and integration risk by severity.
   oracle:
-    description: Deep debugging, architecture decisions, and second opinions.
+    description: Deep debugging and design counsel for hard problems; diagnoses with evidence and does not edit unless asked.
   worker:
-    description: Office and document automation worker. Performs format conversion, batch file processing, file organization, and document transformation; never modifies code and does not write content.
+    description: Office and document automation worker; format conversion, batch file processing and file organization, and never code or prose.
   writer:
-    description: Professional writing and document specialist. Researches, drafts, rewrites, edits, translates, summarizes, and uses available workspace-local toolchains to produce or revise Markdown, text, HTML, PDF/Office-compatible, spreadsheet-style, and presentation-oriented artifacts.
+    description: Professional writing and document specialist; drafts, rewrites, translates, summarizes and produces document artifacts.

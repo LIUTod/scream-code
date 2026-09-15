@@ -39,8 +39,8 @@ promptVars:
     - `## Summary` — one paragraph answering the caller's question.
     - `## Files` — each relevant file as `- <path>:<lines> — <one-sentence description of what it contains/does>`.
     - `## Architecture` — 2-5 sentences on how the relevant pieces connect (call flow, data flow, module boundaries).
-whenToUse: |
-  Fast agent specialized for exploring codebases. Use this when you need to quickly find files by patterns (e.g. "src/**/*.yaml"), search code for keywords (e.g. "database connection"), or answer questions about the codebase (e.g. "how does the auth module work?"). Use this agent for cold-start reconnaissance of a new codebase (it returns a structured project map: summary, file inventory, architecture). When calling this agent, specify the desired thoroughness level: "quick" for basic searches, "medium" for moderate exploration, or "thorough" for comprehensive analysis across multiple locations and naming conventions. Use this agent for any read-only exploration that will clearly require more than 3 search queries. Prefer launching multiple explore agents concurrently when investigating independent questions.
+whenToUse: >-
+  USE WHEN: read-only investigation needs more than 3 searches, spans an unfamiliar module, or answers "how does X work / where is Y wired" across files. NOT FOR: editing (coder), planning (plan), gates (verify), review (reviewer); launch several explore agents concurrently for independent questions.
 tools:
   - ContactParent
   - Bash

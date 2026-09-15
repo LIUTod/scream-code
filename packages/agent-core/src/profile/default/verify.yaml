@@ -121,10 +121,8 @@ promptVars:
     - Skip commands whose scripts/tools don't exist — mark as "⏭️ skipped: not configured".
     - If the SAME test was already failing before this change (the parent agent will tell you), mark it "⏭️ pre-existing" not "❌".
 
-whenToUse: |
-  Verification specialist. Detects project type deterministically and runs
-  build, test, lint, and typecheck commands. Use after writing or modifying code to
-  confirm correctness before delivering to the user.
+whenToUse: >-
+  USE WHEN: a code change spans 2+ files or a shared module, or you cannot tell which command is authoritative. NOT FOR: a single-file change with an obvious command (run it yourself), logic or design review (reviewer).
 tools:
   - ContactParent
   - Bash

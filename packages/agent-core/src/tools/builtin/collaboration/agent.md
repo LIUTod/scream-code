@@ -1,14 +1,6 @@
-Launch a subagent to handle a focused task. Prefer this tool over doing the work yourself when the task matches one of the specialists below.
+Launch a subagent to handle a focused task. Prefer this tool over doing the work yourself when the task matches one of the specialists listed below.
 
-Specialist subagents:
-- `coder` — concrete coding, editing, refactoring
-- `explore` — read-only codebase investigation
-- `plan` — implementation planning and architecture
-- `verify` — build/test/lint checks
-- `reviewer` — code review
-- `oracle` — deep debugging and second opinions
-- `worker` — office and document automation
-- `writer` — reports and documentation
+Specialist subagents are listed at the end of this description under "Available agent types" — that list is generated from the active profiles and carries each specialist's own USE WHEN / NOT FOR triggers. Read it before choosing a `subagent_type`; never assume a type exists.
 
 ## Required prompt structure
 

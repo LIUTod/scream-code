@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { DEFAULT_AGENT_PROFILES, loadAgentProfilesFromSources } from '../../src/profile';
+import { buildSubagentDescriptions } from '../../src/tools/builtin/collaboration/agent';
 
 const promptContext = {
   osEnv: {
@@ -61,6 +62,39 @@ describe('default agent profiles', () => {
     expect(prompt).toContain('CLEAN FAILURES');
     expect(prompt).toContain('Do not read or modify code files');
     expect(prompt).not.toContain('codebase exploration specialist');
+  });
+
+  it('keeps one routing contract per specialist: a description plus USE WHEN / NOT FOR triggers', () => {
+    const names = ['coder', 'explore', 'plan', 'verify', 'reviewer', 'oracle', 'worker', 'writer'];
+    for (const name of names) {
+      const profile = DEFAULT_AGENT_PROFILES[name];
+      expect(profile, `missing profile: ${name}`).toBeDefined();
+      expect((profile?.description ?? '').length, `${name} description`).toBeGreaterThan(20);
+      // The parent chooses a type from these two lines in the Agent tool
+      // description; a specialist without triggers is dead weight.
+      expect(profile?.whenToUse, `${name} whenToUse`).toContain('USE WHEN:');
+      expect(profile?.whenToUse, `${name} whenToUse`).toContain('NOT FOR:');
+    }
+  });
+
+  it('keeps the specialist roster single-sourced in the Agent tool description', () => {
+    const names = ['coder', 'explore', 'plan', 'verify', 'reviewer', 'oracle', 'worker', 'writer'];
+    const agent = DEFAULT_AGENT_PROFILES['agent'];
+
+    // The generated roster is the surface the parent actually picks from, so
+    // assert on it directly — an empty `subagents:` map must fail here.
+    const roster = buildSubagentDescriptions(agent?.subagents ?? {});
+    const entries = roster.split('\n').filter((line) => line.startsWith('- '));
+    expect(entries).toHaveLength(names.length);
+    for (const name of names) {
+      expect(roster, `roster line for ${name}`).toContain(`- ${name}:`);
+    }
+
+    // The system prompt may only point at that list: a hand-written bullet
+    // roster drifts from agent.yaml the moment one side changes.
+    const prompt = agent?.systemPrompt(promptContext) ?? '';
+    expect(prompt).toContain('Available agent types');
+    expect(prompt).not.toMatch(/^- `(coder|explore|plan|verify|reviewer|oracle|worker|writer)` — /m);
   });
 
   it('fails loudly when an embedded system prompt source is missing', () => {

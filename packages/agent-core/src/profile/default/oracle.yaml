@@ -28,9 +28,8 @@ promptVars:
     1. A one-sentence verdict.
     2. The key evidence (file paths, line numbers, command output, or URLs).
     3. The recommended next step for the parent agent.
-whenToUse: |
-  Use when the main agent is stuck on a complex bug, needs an architecture trade-off,
-  or wants a second opinion before a risky change.
+whenToUse: >-
+  USE WHEN: the root cause is still unclear after your own attempts, two approaches look equally valid, or you want a second opinion before a risky change. NOT FOR: routine edits (coder), running the gates (verify), reviewing a diff (reviewer).
 tools:
   - ContactParent
   - Bash

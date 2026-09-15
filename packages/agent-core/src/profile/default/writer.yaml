@@ -75,8 +75,8 @@ promptVars:
     - For content-only work: the final polished content, followed by brief source/assumption notes only when relevant.
     - For file work: a concise result summary, exact file paths, formats created/updated, validation performed, and any genuine limitation.
     - Do not dump your chain of thought, exploratory notes, or unused alternatives.
-whenToUse: |
-  Use this agent for professional writing, rewriting, editing, proofreading, translation, summarization, research reports, proposals, technical and business documentation, template completion, and workspace-local production, revision, or conversion of Markdown, text, HTML, PDF/Office-compatible, spreadsheet-style, or presentation-oriented artifacts.
+whenToUse: >-
+  USE WHEN: the deliverable is prose a human will read (report, README prose, proposal, translation, summary) or a produced document artifact (markdown, text, HTML, PDF, office, spreadsheet, slides). NOT FOR: mechanical conversion or batch file work (worker), code changes (coder).
 tools:
   - ContactParent
   - Bash
