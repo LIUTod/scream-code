@@ -48,6 +48,46 @@ describe('computeDiffLines', () => {
     const kinds = lines.map((l) => l.kind);
     expect(kinds).toEqual(['context', 'delete', 'context']);
   });
+
+  it('degrades to a coarse diff for edits too large to table', () => {
+    // 1,200 x 1,200 lines = 1.44M table cells, far past the cap. Half the new
+    // file is byte-identical to the old one, so a tabled diff would report
+    // context lines; the coarse fallback reports none.
+    const shared = Array.from({ length: 600 }, (_, i) => `shared ${String(i)}`);
+    const oldText = [
+      ...shared,
+      ...Array.from({ length: 600 }, (_, i) => `old ${String(i)}`),
+    ].join('\n');
+    const newText = [
+      ...shared,
+      ...Array.from({ length: 600 }, (_, i) => `new ${String(i)}`),
+    ].join('\n');
+
+    const lines = computeDiffLines(oldText, newText);
+
+    expect(lines).toHaveLength(2_400);
+    expect(lines.some((line) => line.kind === 'context')).toBe(false);
+    expect(lines.slice(0, 1_200).every((line) => line.kind === 'delete')).toBe(true);
+    expect(lines.slice(1_200).every((line) => line.kind === 'add')).toBe(true);
+    // Line numbers stay 1-based and in order on both sides.
+    expect(lines[0]?.lineNum).toBe(1);
+    expect(lines[1_200]?.lineNum).toBe(1);
+  });
+
+  it('keeps the tabled diff for edits that fit under the cap', () => {
+    const oldText = Array.from({ length: 200 }, (_, i) => `line ${String(i)}`).join('\n');
+    const newText = Array.from({ length: 200 }, (_, i) =>
+      i === 5 ? 'changed' : `line ${String(i)}`,
+    ).join('\n');
+
+    const kinds = computeDiffLines(oldText, newText).map((line) => line.kind);
+
+    // 200 x 200 cells is well under the cap, so untouched lines still pair up
+    // instead of every line being reported as removed and re-added.
+    expect(kinds.filter((kind) => kind === 'context')).toHaveLength(199);
+    expect(kinds).toContain('delete');
+    expect(kinds).toContain('add');
+  });
 });
 
 describe('renderDiffLines', () => {
@@ -83,15 +123,15 @@ describe('renderDiffLines', () => {
     expect(stripAnsi(rawAdd)).toContain('bar');
     // Inverse escape (chalk.inverse emits \x1b[7m) should be present in the raw output
     // — that is the intra-line highlight marker
-    expect(rawDelete).toContain('\x1B[7m');
-    expect(rawAdd).toContain('\x1B[7m');
+    expect(rawDelete).toContain('\u001B[7m');
+    expect(rawAdd).toContain('\u001B[7m');
   });
 
   it('keeps whole-line coloring for multi-line delete/add blocks', () => {
     const output = renderDiffLines('old line 1\nold line 2', 'new line 1\nnew line 2', 'test.ts', COLORS, false, 1, 1);
     const raw = output.join('\n');
     // No inverse highlight — multi-line blocks stay as whole-line green/red
-    expect(raw).not.toContain('\x1B[7m');
+    expect(raw).not.toContain('\u001B[7m');
   });
 
   it('visualizes leading tabs as -> in multi-line diff blocks', () => {

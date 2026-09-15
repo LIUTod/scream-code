@@ -13,6 +13,15 @@ import { highlightLines, langFromPath } from './code-highlight';
 
 export type DiffLineKind = 'context' | 'add' | 'delete';
 
+/**
+ * Upper bound on the diff table size ((m+1)*(n+1) cells). `computeDiffLines`
+ * runs on every header rebuild while tool args are still streaming, and a
+ * single edit may legitimately carry thousands of lines per side (whole-file
+ * rewrites), so the quadratic path is capped: above this the diff degrades to
+ * a coarse one instead of allocating hundreds of millions of cells mid-frame.
+ */
+const MAX_DIFF_CELLS = 250_000;
+
 interface DiffStyles {
   add: (s: string) => string;
   del: (s: string) => string;
@@ -204,39 +213,58 @@ export function computeDiffLines(
   const m = oldLines.length;
   const n = newLines.length;
 
-  const dp: number[][] = Array.from({ length: m + 1 }, () =>
-    Array.from({ length: n + 1 }, () => 0),
-  );
-  for (let i = 1; i <= m; i++) {
-    for (let j = 1; j <= n; j++) {
-      if (oldLines[i - 1] === newLines[j - 1]) {
-        dp[i]![j] = dp[i - 1]![j - 1]! + 1;
-      } else {
-        dp[i]![j] = Math.max(dp[i - 1]![j]!, dp[i]![j - 1]!);
+  let result: DiffLine[];
+  if (m * n > MAX_DIFF_CELLS) {
+    // Coarse fallback: everything removed, everything added. The change count
+    // stays honest, only the pairing is lost, and the caller's own maxLines /
+    // context filtering keeps the rendering bounded.
+    result = [
+      ...oldLines.map((code, idx) => ({
+        kind: 'delete' as const,
+        lineNum: oldStart + idx,
+        code,
+      })),
+      ...newLines.map((code, idx) => ({
+        kind: 'add' as const,
+        lineNum: newStart + idx,
+        code,
+      })),
+    ];
+  } else {
+    const dp: number[][] = Array.from({ length: m + 1 }, () =>
+      Array.from({ length: n + 1 }, () => 0),
+    );
+    for (let i = 1; i <= m; i++) {
+      for (let j = 1; j <= n; j++) {
+        if (oldLines[i - 1] === newLines[j - 1]) {
+          dp[i]![j] = dp[i - 1]![j - 1]! + 1;
+        } else {
+          dp[i]![j] = Math.max(dp[i - 1]![j]!, dp[i]![j - 1]!);
+        }
       }
     }
-  }
 
-  const reversed: DiffLine[] = [];
-  let i = m;
-  let j = n;
-  while (i > 0 || j > 0) {
-    if (i > 0 && j > 0 && oldLines[i - 1] === newLines[j - 1]) {
-      reversed.push({ kind: 'context', lineNum: newStart + j - 1, code: newLines[j - 1]! });
-      i--;
-      j--;
-    } else if (j > 0 && (i === 0 || dp[i]![j - 1]! >= dp[i - 1]![j]!)) {
-      reversed.push({ kind: 'add', lineNum: newStart + j - 1, code: newLines[j - 1]! });
-      j--;
-    } else {
-      reversed.push({ kind: 'delete', lineNum: oldStart + i - 1, code: oldLines[i - 1]! });
-      i--;
+    const reversed: DiffLine[] = [];
+    let i = m;
+    let j = n;
+    while (i > 0 || j > 0) {
+      if (i > 0 && j > 0 && oldLines[i - 1] === newLines[j - 1]) {
+        reversed.push({ kind: 'context', lineNum: newStart + j - 1, code: newLines[j - 1]! });
+        i--;
+        j--;
+      } else if (j > 0 && (i === 0 || dp[i]![j - 1]! >= dp[i - 1]![j]!)) {
+        reversed.push({ kind: 'add', lineNum: newStart + j - 1, code: newLines[j - 1]! });
+        j--;
+      } else {
+        reversed.push({ kind: 'delete', lineNum: oldStart + i - 1, code: oldLines[i - 1]! });
+        i--;
+      }
     }
-  }
 
-  const result: DiffLine[] = [];
-  for (let k = reversed.length - 1; k >= 0; k--) {
-    result.push(reversed[k]!);
+    result = [];
+    for (let k = reversed.length - 1; k >= 0; k--) {
+      result.push(reversed[k]!);
+    }
   }
 
   // While the text is still streaming, suppress trailing delete lines.
