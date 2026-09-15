@@ -55,8 +55,6 @@ const THINKING_BODY_PREFIX = '     ';
 const THROTTLE_MS = 200;
 /** Rates below this are noise: the live badge stays hidden until tokens flow. */
 const MIN_RATE = 0.05;
-/** Smallest usable reasoning-summary budget in the collapsed row. */
-const MIN_SUMMARY_CELLS = 8;
 const SEPARATOR = ' · ';
 /** The card renders a two-cell status marker the row prefix accounts for. */
 const CARD_MARKERS = ['■', '✗', '▸', '●', '○', '⊙', '◐'];
@@ -508,10 +506,11 @@ export class ActivityGroupComponent extends Container {
       excerptBudget -= 1;
     }
     if (excerptBudget <= 0) return;
-    const tokens = chalk.dim(t('activitygroup.tokens', { tok: this.formatTokens(this.thinkingTokens()) }));
+    // Label row only: the block header already carries the token estimate, so
+    // repeating it here printed the same number twice in one block.
     this.bodyContainer.addChild(
       new Text(
-        `${BRANCH_LAST} ${chalk.dim('·')} ${chalk.hex(colors.roleThinking)(t('activitygroup.thinking_label'))}${chalk.dim(SEPARATOR)}${tokens}`,
+        `${BRANCH_LAST} ${chalk.dim('·')} ${chalk.hex(colors.roleThinking)(t('activitygroup.thinking_label'))}`,
         0,
         0,
       ),
@@ -618,28 +617,21 @@ export class ActivityGroupComponent extends Container {
   /**
    * Collapsed reasoning row: the first reasoning line clipped to whatever space
    * the row can still hold at this width, so a narrow terminal cannot wrap the
-   * block into a fourth row. The token tail is dropped when it would not fit.
+   * block into a fourth row. The token estimate lives in the block header only.
    */
   private thinkingRow(width: number): string {
     const first = this.thinkingLines()[0] ?? '';
     const label = t('activitygroup.thinking_summary', { summary: '' });
-    const tail = t('activitygroup.tokens', { tok: this.formatTokens(this.thinkingTokens()) });
     const glue = visibleWidth(SEPARATOR);
     const bareFixed = BRANCH_WIDTH + glue + visibleWidth(label);
-    const withTailFixed = bareFixed + glue + visibleWidth(tail);
-    const withTail = width - withTailFixed >= MIN_SUMMARY_CELLS;
     const cells = Math.max(
       1,
-      Math.min(
-        ACTIVITY_GROUP_THINKING_SUMMARY_CELLS,
-        width - (withTail ? withTailFixed : bareFixed),
-      ),
+      Math.min(ACTIVITY_GROUP_THINKING_SUMMARY_CELLS, width - bareFixed),
     );
     const summary = chalk.hex(this.colors.roleThinking)(
       t('activitygroup.thinking_summary', { summary: truncateToWidth(first, cells, '…') }),
     );
-    const tailText = withTail ? `${chalk.dim(SEPARATOR)}${chalk.dim(tail)}` : '';
-    return `${BRANCH_LAST} ${chalk.dim('·')} ${summary}${tailText}`;
+    return `${BRANCH_LAST} ${chalk.dim('·')} ${summary}`;
   }
 
   /**

@@ -85,7 +85,9 @@ describe('ActivityGroupComponent', () => {
     expect(lines[1]).not.toContain('Bash');
     expect(lines[2]?.startsWith('  └─')).toBe(true);
     expect(lines[2]).toContain('思考：first reasoning line');
-    expect(lines[2]).toContain('tok');
+    // The token estimate belongs to the header row only: the reasoning row used
+    // to repeat the same number right below it.
+    expect(lines[2]).not.toContain('tok');
   });
 
   it('drops the reasoning row when nothing was reasoned about', () => {
