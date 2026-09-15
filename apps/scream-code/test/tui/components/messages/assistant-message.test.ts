@@ -22,8 +22,7 @@ function bulletRgb(line: string): string | null {
   return m ? `${m[1]};${m[2]};${m[3]}` : null;
 }
 
-describe('AssistantMessageComponent', () => {
-  it('defines the shared status bullet as a stable non-emoji glyph', () => {
+describe('AssistantMessageComponent', () => {  it('defines the shared status bullet as a stable non-emoji glyph', () => {
     expect(STATUS_BULLET).toBe('■ ');
     expect(visibleWidth(STATUS_BULLET)).toBe(2);
   });
@@ -234,5 +233,59 @@ describe('AssistantMessageComponent.appendToLastLine', () => {
     component.appendToLastLine(' 12s');
     const rendered = component.render(60).join('\n');
     expect(rendered).toContain('12s');
+  });
+});
+
+describe('fenced code panel', () => {
+  const source = ['before', '', '```ts', 'const a = 1;', '```', '', 'after'].join('\n');
+
+  function renderCodePanel(width = 60): string[] {
+    const component = new AssistantMessageComponent(createMarkdownTheme(darkColors), darkColors);
+    component.updateContent(source);
+    return component.render(width);
+  }
+
+  it('drops the decorative fence rows', () => {
+    const lines = renderCodePanel().map(strip);
+
+    expect(lines.some((line) => line.includes('```'))).toBe(false);
+    expect(lines.some((line) => line.includes('const a = 1;'))).toBe(true);
+  });
+
+  it('labels the language on the first code row and pads the panel', () => {
+    const codeRow = renderCodePanel().map(strip).find((line) => line.includes('const a = 1;')) ?? '';
+
+    expect(codeRow).toContain('ts');
+    // Padded out to the content width so the block reads as one surface.
+    expect(visibleWidth(codeRow)).toBeLessThanOrEqual(60);
+    expect(visibleWidth(codeRow)).toBeGreaterThanOrEqual(50);
+  });
+
+  it('keeps the panel inside the viewport when the label cannot fit', () => {
+    const theme = createMarkdownTheme(darkColors);
+    const line =
+      theme.codeBlockLine?.('const a = 1;', { index: 0, total: 1, lang: 'typescript', width: 8 }) ?? '';
+
+    expect(visibleWidth(line)).toBeLessThanOrEqual(8);
+    expect(strip(line)).not.toContain('typescript');
+  });
+
+  it('clamps an overlong code line instead of letting it wrap', () => {
+    const theme = createMarkdownTheme(darkColors);
+    const line = theme.codeBlockLine?.('x'.repeat(200), { index: 1, total: 2, width: 40 }) ?? '';
+
+    expect(visibleWidth(line)).toBe(40);
+  });
+
+  it('paints the palette surface and omits the fence hook', () => {
+    const theme = createMarkdownTheme(darkColors);
+    const line =
+      theme.codeBlockLine?.('const a = 1;', { index: 0, total: 1, lang: 'ts', width: 40 }) ?? '';
+
+    // Compared against chalk's own output so the assertion holds at any color level.
+    expect(line).toContain(chalk.bgHex(darkColors.mdCodeBlockBg)(' '));
+    expect(strip(line)).toContain('const a = 1;');
+    expect(strip(line)).toContain('ts');
+    expect(theme.codeBlockBorder('```')).toBeNull();
   });
 });
