@@ -25,9 +25,17 @@ export function createExtensionsModule(ctx: ClientContext): ExtensionsModule {
     if (!id) return;
     try {
       const res = await fetch(`${API_BASE}/sessions/${id}/skills`);
-      if (!res.ok) return;
+      if (!res.ok) {
+        // Silent-failure sweep: the skills center must distinguish "genuinely no skills"
+        // from "failed to load".
+        s.skillsError.value = `技能列表加载失败（HTTP ${res.status}）`;
+        return;
+      }
       s.skills.value = (await res.json()) as SkillSummary[];
-    } catch { /* best-effort */ }
+      s.skillsError.value = null;
+    } catch (error) {
+      s.skillsError.value = `技能列表加载失败：${error instanceof Error ? error.message : String(error)}`;
+    }
   }
 
   async function activateSkill(name: string, args?: string): Promise<boolean> {

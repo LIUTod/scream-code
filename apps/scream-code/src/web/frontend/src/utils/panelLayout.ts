@@ -1,25 +1,35 @@
 /**
- * Panel layout arithmetic for the three-column shell — ported from the
- * reference implementation's panel-layout module (pure functions, no
+ * Panel layout arithmetic for the three-column shell (pure functions, no
  * framework dependency, unit-tested in isolation).
  *
- * Guarantees: the chat column keeps a minimum width (420px desktop /
- * 320px compact) no matter how the sidebar and right panel are resized.
+ * Column contract:
+ *   left rail/panel 264–420 (default 288, collapsed track 56) | middle
+ *   minmax(0,1fr) with a 400px floor | right dock 300–70vw (first open 45vw).
+ *
+ * Guarantees: the chat column keeps its minimum width (400px desktop /
+ * 320px compact) no matter how the sidebar and the right dock are resized.
  */
 
 export const MOBILE_MAX_WIDTH = 640;
-/** Below this viewport width the right panel becomes an overlay drawer. */
-export const SPLIT_PANEL_MIN_WIDTH = 960;
+/** At or below this viewport width the sidebar auto-collapses to the rail and
+ *  only re-opens as an overlay above the chat column (matchMedia-driven). */
+export const SIDEBAR_COMPACT_MAX_WIDTH = 1024;
+/** Below this viewport width the right dock becomes a full-screen overlay
+ *  instead of owning a grid track. */
+export const SPLIT_PANEL_MIN_WIDTH = 768;
 
-export const SIDEBAR_MIN_WIDTH = 180;
-export const SIDEBAR_MAX_WIDTH = 480;
+export const SIDEBAR_MIN_WIDTH = 264;
+export const SIDEBAR_MAX_WIDTH = 420;
+export const SIDEBAR_DEFAULT_WIDTH = 288;
+/** Collapsed rail width — mirrors --sidebar-width-collapsed in tokens.css. */
+export const SIDEBAR_RAIL_WIDTH = 56;
 
-export const RIGHT_PANEL_FALLBACK_WIDTH = 560;
 export const RIGHT_PANEL_MIN_WIDTH = 300;
-export const RIGHT_PANEL_MAX_WIDTH = 1200;
+/** The dock never claims more than this share of the viewport. */
+export const RIGHT_PANEL_MAX_VIEWPORT_RATIO = 0.7;
 
 const COMPACT_CHAT_MIN_WIDTH = 320;
-const DESKTOP_CHAT_MIN_WIDTH = 420;
+const DESKTOP_CHAT_MIN_WIDTH = 400;
 
 export function clampPanelWidth(width: number, minWidth: number, maxWidth: number): number {
   const finiteWidth = Number.isFinite(width) ? width : minWidth;
@@ -27,9 +37,14 @@ export function clampPanelWidth(width: number, minWidth: number, maxWidth: numbe
   return Math.round(Math.max(minWidth, Math.min(effectiveMax, finiteWidth)));
 }
 
-/** First-open default: 42% of the viewport, clamped to a sensible band. */
+/** First-open default: 45% of the viewport, floored at the dock minimum and
+ *  capped at the 70vw ceiling. */
 export function getDefaultRightPanelWidth(viewportWidth: number): number {
-  return clampPanelWidth(viewportWidth * 0.42, 360, 640);
+  return clampPanelWidth(
+    viewportWidth * 0.45,
+    RIGHT_PANEL_MIN_WIDTH,
+    Math.round(viewportWidth * RIGHT_PANEL_MAX_VIEWPORT_RATIO),
+  );
 }
 
 export function getSidebarMaxWidth(options: {
@@ -52,11 +67,13 @@ export function getRightPanelMaxWidth(options: {
   sidebarWidth: number;
 }): number {
   const { viewportWidth, sidebarOpen, sidebarWidth } = options;
-  if (viewportWidth < SPLIT_PANEL_MIN_WIDTH) return RIGHT_PANEL_MAX_WIDTH;
+  const ratioCap = Math.round(viewportWidth * RIGHT_PANEL_MAX_VIEWPORT_RATIO);
+  // Overlay mode: the dock is free up to its own 70vw ceiling.
+  if (viewportWidth < SPLIT_PANEL_MIN_WIDTH) return ratioCap;
 
   const visibleSidebarWidth = sidebarOpen ? sidebarWidth : 0;
   return Math.min(
-    RIGHT_PANEL_MAX_WIDTH,
+    ratioCap,
     viewportWidth - DESKTOP_CHAT_MIN_WIDTH - visibleSidebarWidth,
   );
 }

@@ -18,7 +18,9 @@ function showToast(
   const id = `toast_${++counter}`;
   toasts.value = [...toasts.value, { id, type, message }];
   if (duration > 0) {
-    window.setTimeout(() => removeToast(id), duration);
+    // Global setTimeout rather than window.*: lets node-only check projects (the apps
+    // tsconfig) compile this chain too — useSlashCommands → useToast.
+    setTimeout(() => removeToast(id), duration);
   }
 }
 

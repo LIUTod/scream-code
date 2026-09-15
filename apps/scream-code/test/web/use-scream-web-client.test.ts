@@ -556,3 +556,127 @@ describe('useScreamWebClient', () => {
     expect(snapshotFetches()).toBe(before + 1);
   });
 });
+
+// ── Frame dispatch registry & journal seq gap discipline ──────────────────
+// A structural defence against the "unregistered frame goes silently stale"
+// incident: an unknown frame fails loud without breaking dispatch, and a seq jump
+// fails loud and triggers the same snapshot backfill as resync_required.
+
+describe('useScreamWebClient frame dispatch discipline', () => {
+  let h: Harness | null = null;
+  let consoleError: ReturnType<typeof vi.spyOn>;
+  let consoleWarn: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    localStorage.clear();
+    toasts.value = [];
+    consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    try {
+      h?.wrapper.unmount();
+    } catch {
+      // already unmounted by the test itself
+    }
+    h = null;
+    consoleError.mockRestore();
+    consoleWarn.mockRestore();
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  it('routes registered frame types to their domain handler', async () => {
+    h = setupHarness();
+    const ws = await h.handshake();
+
+    ws.fireMessage({ type: 'approval_request', id: 'ap-1', toolName: 'Bash', action: 'run ls', display: {} });
+    expect(h.client.pendingApprovals.value).toHaveLength(1);
+    expect(consoleError).not.toHaveBeenCalled();
+  });
+
+  it('unknown frame type fails loud and does not break the dispatch loop', async () => {
+    h = setupHarness();
+    const ws = await h.handshake();
+
+    ws.fireMessage({ type: 'mystery_frame', foo: 1 });
+    expect(consoleError).toHaveBeenCalledTimes(1);
+    expect(String(consoleError.mock.calls[0][0])).toContain('mystery_frame');
+
+    // Later known frames are still dispatched normally (the WS loop survives; an unknown frame must not break it).
+    ws.fireMessage({ type: 'event', epoch: 10, seq: 5, payload: { type: 'turn.started' } });
+    expect(h.client.messages.value.some((m) => m.role === 'assistant')).toBe(true);
+    // The counter keeps incrementing, with no behaviour change beyond repeating the log.
+    ws.fireMessage({ type: 'mystery_frame', foo: 2 });
+    expect(consoleError).toHaveBeenCalledTimes(2);
+  });
+
+  it('seq gap warns, triggers snapshot backfill and still applies the live frame', async () => {
+    h = setupHarness();
+    const ws = await h.handshake(); // the snapshot anchors seq=4 / epoch=10
+    const snapshotFetches = () =>
+      h.calls.filter((c) => c.url.startsWith(`${API}/sessions/sess-1/snapshot`)).length;
+    const before = snapshotFetches();
+
+    ws.fireMessage({ type: 'event', epoch: 10, seq: 6, payload: { type: 'turn.started' } });
+    await settle();
+
+    // An isolated gap (the legitimate case of a reconnect replay skipping volatile events)
+    // warns without raising an error.
+    expect(consoleWarn).toHaveBeenCalledTimes(1);
+    expect(String(consoleWarn.mock.calls[0][0])).toContain('缺口');
+    expect(consoleError).not.toHaveBeenCalled();
+    expect(snapshotFetches()).toBe(before + 1); // the same recovery path as resync_required
+    // The current frame is still applied: the live tail is not frozen.
+    expect(h.client.messages.value.some((m) => m.role === 'assistant')).toBe(true);
+
+    // A following frame: no new warning, no new snapshot fetch, the gap counter reset.
+    ws.fireMessage({ type: 'event', epoch: 10, seq: 7, payload: { type: 'turn.ended' } });
+    await settle();
+    expect(consoleWarn).toHaveBeenCalledTimes(1);
+    expect(snapshotFetches()).toBe(before + 1);
+  });
+
+  it('escalates the log after 3 consecutive seq gaps', async () => {
+    h = setupHarness();
+    const ws = await h.handshake(); // seq=4
+
+    ws.fireMessage({ type: 'event', epoch: 10, seq: 6, payload: { type: 'error', error: null } });
+    ws.fireMessage({ type: 'event', epoch: 10, seq: 8, payload: { type: 'error', error: null } });
+    expect(consoleWarn).toHaveBeenCalledTimes(2);
+    expect(String(consoleWarn.mock.calls[1][0])).not.toContain('超过阈值');
+    expect(consoleError).not.toHaveBeenCalled();
+
+    ws.fireMessage({ type: 'event', epoch: 10, seq: 10, payload: { type: 'error', error: null } });
+    expect(consoleError).toHaveBeenCalledTimes(1);
+    expect(String(consoleError.mock.calls[0][0])).toContain('超过阈值');
+  });
+
+  it('epoch change resets the gap counter via the resync path', async () => {
+    h = setupHarness();
+    const ws = await h.handshake(); // seq=4 / epoch=10
+
+    // Two consecutive gaps leave the counter at 2 (both at warn level).
+    ws.fireMessage({ type: 'event', epoch: 10, seq: 6, payload: { type: 'error', error: null } });
+    ws.fireMessage({ type: 'event', epoch: 10, seq: 8, payload: { type: 'error', error: null } });
+    expect(consoleWarn).toHaveBeenCalledTimes(2);
+    expect(consoleError).not.toHaveBeenCalled();
+
+    // Epoch change -> resync: the frame is dropped, the snapshot re-fetched, the counter reset.
+    Object.assign(h.state.snapshot, { epoch: 11, seq: 7 });
+    ws.fireMessage({ type: 'event', epoch: 11, seq: 9, payload: { type: 'turn.started' } });
+    await settle();
+    // The resync itself records no gap (the epoch check comes first); the two earlier gaps were both warn level.
+    expect(consoleError).not.toHaveBeenCalled();
+    expect(consoleWarn).toHaveBeenCalledTimes(2);
+
+    // Inside the new epoch, seq=8 against s.seq=9 is stale and dropped without recording a
+    // gap: proof that the counter was reset.
+    ws.fireMessage({ type: 'event', epoch: 11, seq: 8, payload: { type: 'turn.ended' } });
+    await settle();
+    expect(consoleWarn).toHaveBeenCalledTimes(2);
+    expect(consoleError).not.toHaveBeenCalled();
+  });
+});

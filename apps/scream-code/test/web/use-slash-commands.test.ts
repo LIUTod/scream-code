@@ -1,9 +1,15 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   useSlashCommands,
   type SlashCommandHandlers,
 } from '../../src/web/frontend/src/composables/useSlashCommands';
+import { setSlashSkills } from '../../src/web/frontend/src/commands';
+import { useToast } from '../../src/web/frontend/src/composables/useToast';
+import {
+  registerActiveWebClient,
+  unregisterActiveWebClient,
+} from '../../src/web/frontend/src/composables/webClient/activeClient';
 
 function makeHandlers(overrides: Partial<SlashCommandHandlers> = {}) {
   const sendCommand = vi.fn();
@@ -20,6 +26,14 @@ function makeHandlers(overrides: Partial<SlashCommandHandlers> = {}) {
   return { handlers, sendCommand, clearMessages, appendSystemMessage, onNew };
 }
 
+// The toast state is a module-level singleton: clear it per test to avoid
+// cross-test bleed.
+afterEach(() => {
+  const { toasts, removeToast } = useToast();
+  [...toasts.value].forEach((t) => removeToast(t.id));
+  setSlashSkills([]);
+});
+
 describe('useSlashCommands', () => {
   it('forwards session commands with args (title)', async () => {
     const h = makeHandlers();
@@ -31,10 +45,20 @@ describe('useSlashCommands', () => {
   it('forwards every session command verbatim', async () => {
     const h = makeHandlers();
     const { onCommand } = useSlashCommands(h.handlers);
-    for (const name of ['compact', 'auto', 'yes', 'plan', 'fork', 'btw']) {
+    for (const name of ['compact', 'auto', 'yes', 'bot', 'plan', 'fork', 'btw']) {
       await onCommand(name);
       expect(h.sendCommand).toHaveBeenCalledWith(name, undefined);
     }
+  });
+
+  it('/bot ensures a session before forwarding (the server handleCommand has a bot branch)', async () => {
+    const ensureSession = vi.fn(async () => undefined);
+    const h = makeHandlers({ ensureSession });
+    const { onCommand } = useSlashCommands(h.handlers);
+    await onCommand('bot');
+    expect(ensureSession).toHaveBeenCalledOnce();
+    expect(h.sendCommand).toHaveBeenCalledWith('bot', undefined);
+    expect(useToast().toasts.value.some((t) => t.message.includes('未知命令'))).toBe(false);
   });
 
   it('awaits ensureSession before sending when no session exists', async () => {
@@ -134,10 +158,43 @@ describe('useSlashCommands', () => {
     expect(h.appendSystemMessage).toHaveBeenCalledWith('请在对话页查看会话详情');
   });
 
-  it('unknown commands are reported', async () => {
+  it('raises a toast for an unknown command instead of only printing a system message row', async () => {
     const h = makeHandlers();
     const { onCommand } = useSlashCommands(h.handlers);
     await onCommand('frobnicate');
-    expect(h.appendSystemMessage).toHaveBeenCalledWith('未知命令：/frobnicate');
+    expect(h.appendSystemMessage).not.toHaveBeenCalled();
+    const toast = useToast().toasts.value.find((t) => t.message.includes('未知命令'));
+    expect(toast?.message).toBe('未知命令：/frobnicate');
+    expect(toast?.type).toBe('error');
+  });
+
+  it('a name matching an injected skill goes through skill activation (onSkill hook + toast feedback)', async () => {
+    setSlashSkills([{ name: 'web-clone', description: '复刻网站', source: 'user' }]);
+    const onSkill = vi.fn(async () => true);
+    const ensureSession = vi.fn(async () => undefined);
+    const h = makeHandlers({ onSkill, ensureSession });
+    const { onCommand } = useSlashCommands(h.handlers);
+    await onCommand('web-clone', '某个网站');
+    expect(ensureSession).toHaveBeenCalledOnce();
+    expect(onSkill).toHaveBeenCalledWith('web-clone', '某个网站');
+    expect(h.sendCommand).not.toHaveBeenCalled();
+    expect(useToast().toasts.value.some((t) => t.message.includes('技能已激活：/web-clone'))).toBe(true);
+  });
+
+  it('without an onSkill hook it falls back to the active client registry; a failure raises an error toast', async () => {
+    setSlashSkills([{ name: 'push', description: '门', source: 'extra' }]);
+    const activateSkill = vi.fn(async () => false);
+    const fake = { activateSkill } as never;
+    registerActiveWebClient(fake);
+    const h = makeHandlers();
+    const { onCommand } = useSlashCommands(h.handlers);
+    await onCommand('push');
+    expect(activateSkill).toHaveBeenCalledWith('push', undefined);
+    expect(
+      useToast()
+        .toasts.value.some((t) => t.message.includes('技能激活失败：/push') && t.type === 'error'),
+    ).toBe(true);
+    unregisterActiveWebClient(fake);
+    setSlashSkills([]);
   });
 });

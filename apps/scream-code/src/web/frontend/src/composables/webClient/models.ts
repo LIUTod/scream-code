@@ -17,11 +17,18 @@ export function createModelsModule(ctx: ClientContext): ModelsModule {
   async function fetchModels(): Promise<void> {
     try {
       const res = await fetch(`${API_BASE}/models`);
-      if (!res.ok) return;
+      if (!res.ok) {
+        // Silent-failure sweep: a load failure must be visible to the settings page with a
+        // Retry, instead of the model list quietly sitting in the empty state.
+        s.modelsError.value = `模型列表加载失败（HTTP ${res.status}）`;
+        return;
+      }
       const data: ModelsResponse = await res.json();
       s.models.value = data.models;
-    } catch {
-      // Best-effort — model picker stays hidden when unavailable.
+      s.modelsError.value = null;
+    } catch (error) {
+      s.modelsError.value = `模型列表加载失败：${error instanceof Error ? error.message : String(error)}`;
+      // Model picker stays hidden when unavailable — the state is exposed to consumers.
     }
   }
 
@@ -55,7 +62,12 @@ export function createModelsModule(ctx: ClientContext): ModelsModule {
   /** POST a session mutation and apply the returned status / surface errors. */
   async function postSessionSwitch(path: string, body: Record<string, unknown>, okMessage: string): Promise<void> {
     const targetSessionId = s.sessionId.value;
-    if (!targetSessionId) return;
+    if (!targetSessionId) {
+      // Silent-failure sweep: this used to return early when no session was open, so the
+      // user clicked to switch and got no feedback whatsoever.
+      showToast('请先打开一个会话', 'warning');
+      return;
+    }
     const targetSessionGeneration = s.sessionGeneration;
     const targetConnectionGeneration = s.connectionGeneration;
     const requestGeneration = ++s.sessionMutationGeneration;
@@ -79,7 +91,11 @@ export function createModelsModule(ctx: ClientContext): ModelsModule {
       if (data.status) {
         s.status.value = { ...s.status.value, ...data.status };
       }
-      ctx.appendSystemMessage(okMessage);
+      // Switch-type feedback is transient state and must not be pinned to the end of the
+      // transcript as a system message (previously the streaming reply grew above the notice,
+      // visually "always pinned to the bottom of the output"). The audit line is kept in the
+      // server journal; the front end uses a toast to express "it is in effect".
+      showToast(okMessage, 'success');
     } catch (error) {
       if (
         s.sessionId.value !== targetSessionId ||
@@ -92,6 +108,9 @@ export function createModelsModule(ctx: ClientContext): ModelsModule {
   }
 
   async function switchModel(alias: string): Promise<void> {
+    // The idempotent early return is intentional: when the alias already matches the current
+    // model, send no request and show no toast (a duplicate POST would only return the same
+    // status while needlessly bumping sessionMutationGeneration).
     if (alias === s.status.value.model) return;
     await postSessionSwitch('model', { model: alias }, `已切换模型：${alias}`);
   }

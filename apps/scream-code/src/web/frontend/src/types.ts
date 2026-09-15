@@ -179,6 +179,7 @@ export interface SessionListItem {
   workDir: string;
   title: string;
   createdAt: number;
+  /** 消息条数；-1 = 服务端尚未加载（归档会话未激活），前端应隐藏计数。 */
   messageCount: number;
   active: boolean;
 }

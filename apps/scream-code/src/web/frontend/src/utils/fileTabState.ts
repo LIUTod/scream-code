@@ -1,6 +1,13 @@
 import { reactive } from 'vue';
+import {
+  dockTabType,
+  isRegisteredDockTabKind,
+  sessionDockTabId,
+  type DockTabKind,
+  type SessionDockKind,
+} from './dockTabTypes';
 
-/* ── Types (mirrors the reference Tab/FileViewerState shapes) ────────────── */
+/* ── Types ────────────────────────────────────────────────────────────────── */
 
 export type FileViewerDisplayMode = 'source' | 'preview' | 'diff';
 
@@ -11,8 +18,10 @@ export interface FileViewerState {
   scrollLeft: number;
 }
 
+/** A multi-instance file tab: one per opened path. */
 export interface FileTab {
   id: string;
+  kind: 'file';
   label: string;
   filePath: string;
   sourceSessionId?: string | null;
@@ -21,6 +30,15 @@ export interface FileTab {
   viewerRevision?: number;
 }
 
+/** A session-level dock tab (git / todo / goal / run / detail / like). */
+export interface SessionDockTab {
+  id: string;
+  kind: SessionDockKind;
+  label: string;
+}
+
+export type DockTab = FileTab | SessionDockTab;
+
 export function resolveInitialFileDisplayMode(
   initialState?: FileViewerState,
   initialDisplayMode?: FileViewerDisplayMode,
@@ -28,7 +46,9 @@ export function resolveInitialFileDisplayMode(
   return initialState?.displayMode ?? initialDisplayMode ?? 'source';
 }
 
-/* ── Pure tab-list operations (ported 1:1) ───────────────────────────────── */
+export const tabKind = (tab: DockTab): DockTabKind => tab.kind;
+
+/* ── Pure tab-list operations ─────────────────────────────────────────────── */
 
 interface OpenFileTabInput {
   fileName: string;
@@ -38,11 +58,12 @@ interface OpenFileTabInput {
   tabId: string;
 }
 
-export function openFileTab(tabs: FileTab[], input: OpenFileTabInput): FileTab[] {
+export function openFileTab(tabs: DockTab[], input: OpenFileTabInput): DockTab[] {
   const existing = tabs.find((tab) => tab.id === input.tabId);
   if (!existing) {
     return [...tabs, {
       id: input.tabId,
+      kind: 'file',
       label: input.fileName,
       filePath: input.filePath,
       sourceSessionId: input.sourceSessionId,
@@ -57,6 +78,8 @@ export function openFileTab(tabs: FileTab[], input: OpenFileTabInput): FileTab[]
     }];
   }
 
+  if (existing.kind !== 'file') return tabs;
+
   const sourceChanged = Boolean(
     input.sourceSessionId && existing.sourceSessionId !== input.sourceSessionId,
   );
@@ -64,7 +87,7 @@ export function openFileTab(tabs: FileTab[], input: OpenFileTabInput): FileTab[]
   if (sourceUnchanged && !input.modeHint) return tabs;
 
   return tabs.map((tab) => {
-    if (tab.id !== input.tabId) return tab;
+    if (tab.id !== input.tabId || tab.kind !== 'file') return tab;
     const next: FileTab = { ...tab };
     if (sourceChanged) next.sourceSessionId = input.sourceSessionId;
     if (input.modeHint) {
@@ -83,17 +106,26 @@ export function openFileTab(tabs: FileTab[], input: OpenFileTabInput): FileTab[]
   });
 }
 
+/** Add (or reuse) a singleton session-level tab. Keeps insertion order. */
+export function openSessionTab(tabs: DockTab[], kind: SessionDockKind): DockTab[] {
+  const id = sessionDockTabId(kind);
+  if (tabs.some((tab) => tab.id === id)) return tabs;
+  return [...tabs, { id, kind, label: dockTabType(kind).label }];
+}
+
 export function saveFileViewerState(
-  tabs: FileTab[],
+  tabs: DockTab[],
   tabId: string,
   viewerRevision: number,
   viewerState: FileViewerState,
-): FileTab[] {
-  const index = tabs.findIndex((tab) => tab.id === tabId);
-  if (index === -1 || (tabs[index].viewerRevision ?? 0) !== viewerRevision) return tabs;
+): DockTab[] {
+  const index = tabs.findIndex((tab) => tab.id === tabId && tab.kind === 'file');
+  if (index === -1) return tabs;
+  const current = tabs[index] as FileTab;
+  if ((current.viewerRevision ?? 0) !== viewerRevision) return tabs;
 
   const next = [...tabs];
-  next[index] = { ...next[index], viewerState };
+  next[index] = { ...current, viewerState };
   return next;
 }
 
@@ -101,22 +133,22 @@ export function saveFileViewerState(
 
 const STORAGE_KEY = 'scream-file-tabs';
 
-interface FilePanelState {
-  tabs: FileTab[];
+interface DockPanelState {
+  tabs: DockTab[];
   activeTabId: string | null;
   panelOpen: boolean;
 }
 
-function loadPersisted(): Partial<FilePanelState> {
+function loadPersisted(): Partial<DockPanelState> {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? (JSON.parse(raw) as Partial<FilePanelState>) : {};
+    return raw ? (JSON.parse(raw) as Partial<DockPanelState>) : {};
   } catch {
     return {};
   }
 }
 
-function persist(state: FilePanelState): void {
+function persist(state: DockPanelState): void {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   } catch {
@@ -124,16 +156,35 @@ function persist(state: FilePanelState): void {
   }
 }
 
+/** Repair a persisted entry: legacy rows predate `kind` and are files;
+ *  session rows must carry a registered kind. Drops anything malformed. */
+function normalizeTab(raw: Partial<DockTab> & Record<string, unknown>): DockTab | null {
+  if (typeof raw.id !== 'string' || typeof raw.label !== 'string') return null;
+  if (raw.kind === undefined) {
+    return typeof raw.filePath === 'string'
+      ? ({ ...raw, kind: 'file' } as unknown as FileTab)
+      : null;
+  }
+  if (!isRegisteredDockTabKind(raw.kind)) return null;
+  if (raw.kind === 'file') {
+    if (typeof raw.filePath !== 'string') return null;
+    return raw as unknown as FileTab;
+  }
+  return { id: raw.id, kind: raw.kind, label: raw.label };
+}
+
 const persisted = loadPersisted();
-const persistedTabs = Array.isArray(persisted.tabs) ? persisted.tabs : [];
+const persistedTabs = (Array.isArray(persisted.tabs) ? persisted.tabs : [])
+  .map((tab) => normalizeTab(tab as never))
+  .filter((tab): tab is DockTab => tab !== null);
 const persistedActive = typeof persisted.activeTabId === 'string' ? persisted.activeTabId : null;
 
-/** Single source of truth for the right file panel; any component may import. */
-export const filePanel = reactive<FilePanelState>({
+/** Single source of truth for the right dock; any component may import. */
+export const dockPanel = reactive<DockPanelState>({
   tabs: persistedTabs,
-  // Persisted activeTabId may reference a tab dropped by an older version's
-  // format; fall back to the last tab so the panel never renders empty state
-  // with content available.
+  // A persisted activeTabId may reference a tab dropped by an older format;
+  // fall back to the last tab so the dock never renders empty while content
+  // is available.
   activeTabId: persistedTabs.some((tab) => tab.id === persistedActive)
     ? persistedActive
     : (persistedTabs.at(-1)?.id ?? null),
@@ -141,66 +192,81 @@ export const filePanel = reactive<FilePanelState>({
 });
 
 function syncActive(): void {
-  if (filePanel.tabs.length === 0) {
-    filePanel.activeTabId = null;
+  if (dockPanel.tabs.length === 0) {
+    dockPanel.activeTabId = null;
     return;
   }
-  if (!filePanel.tabs.some((tab) => tab.id === filePanel.activeTabId)) {
-    filePanel.activeTabId = filePanel.tabs.at(-1)?.id ?? null;
+  if (!dockPanel.tabs.some((tab) => tab.id === dockPanel.activeTabId)) {
+    dockPanel.activeTabId = dockPanel.tabs.at(-1)?.id ?? null;
   }
 }
 
-/** Open (or focus) a file tab; expands the panel. Returns the tab id. */
+/** Open (or focus) a file tab; expands the dock. Returns the tab id. */
 export function openFileInPanel(
   filePath: string,
   options: { modeHint?: 'diff'; sessionId?: string | null; label?: string } = {},
 ): string {
   const fileName = filePath.split('/').pop() || filePath;
   const tabId = filePath;
-  filePanel.tabs = openFileTab(filePanel.tabs, {
+  dockPanel.tabs = openFileTab(dockPanel.tabs, {
     fileName: options.label ?? fileName,
     filePath,
     modeHint: options.modeHint,
     sourceSessionId: options.sessionId ?? null,
     tabId,
   });
-  filePanel.activeTabId = tabId;
-  filePanel.panelOpen = true;
-  persist(filePanel);
+  dockPanel.activeTabId = tabId;
+  dockPanel.panelOpen = true;
+  persist(dockPanel);
   return tabId;
 }
 
-export function selectFileTab(tabId: string): void {
-  if (!filePanel.tabs.some((tab) => tab.id === tabId)) return;
-  filePanel.activeTabId = tabId;
-  persist(filePanel);
+/** Open (or activate) the singleton tab of a session-level kind. */
+export function openDockTab(kind: SessionDockKind): string {
+  const id = sessionDockTabId(kind);
+  dockPanel.tabs = openSessionTab(dockPanel.tabs, kind);
+  dockPanel.activeTabId = id;
+  dockPanel.panelOpen = true;
+  persist(dockPanel);
+  return id;
 }
 
-/** Close a tab, activate a neighbor, and collapse the panel when empty. */
-export function closeFileTab(tabId: string): void {
-  const index = filePanel.tabs.findIndex((tab) => tab.id === tabId);
+export function selectDockTab(tabId: string): void {
+  if (!dockPanel.tabs.some((tab) => tab.id === tabId)) return;
+  dockPanel.activeTabId = tabId;
+  persist(dockPanel);
+}
+
+/** Close a tab, activate a neighbor, and collapse the dock when empty. */
+export function closeDockTab(tabId: string): void {
+  const index = dockPanel.tabs.findIndex((tab) => tab.id === tabId);
   if (index === -1) return;
-  filePanel.tabs = filePanel.tabs.filter((tab) => tab.id !== tabId);
-  if (filePanel.activeTabId === tabId) {
-    const neighbor = filePanel.tabs[index] ?? filePanel.tabs[index - 1] ?? null;
-    filePanel.activeTabId = neighbor ? neighbor.id : null;
+  dockPanel.tabs = dockPanel.tabs.filter((tab) => tab.id !== tabId);
+  if (dockPanel.activeTabId === tabId) {
+    const neighbor = dockPanel.tabs[index] ?? dockPanel.tabs[index - 1] ?? null;
+    dockPanel.activeTabId = neighbor ? neighbor.id : null;
   }
-  if (filePanel.tabs.length === 0) {
-    filePanel.panelOpen = false;
-    filePanel.activeTabId = null;
+  if (dockPanel.tabs.length === 0) {
+    dockPanel.panelOpen = false;
+    dockPanel.activeTabId = null;
   }
-  persist(filePanel);
+  persist(dockPanel);
 }
 
-export function setFilePanelOpen(open: boolean): void {
-  filePanel.panelOpen = open;
+export function setDockOpen(open: boolean): void {
+  dockPanel.panelOpen = open;
   if (open) syncActive();
-  persist(filePanel);
+  persist(dockPanel);
 }
 
-export function toggleFilePanel(): void {
-  setFilePanelOpen(!filePanel.panelOpen);
+export function toggleDock(): void {
+  setDockOpen(!dockPanel.panelOpen);
 }
 
-export const activeFileTab = (): FileTab | undefined =>
-  filePanel.tabs.find((tab) => tab.id === filePanel.activeTabId);
+export const activeDockTab = (): DockTab | undefined =>
+  dockPanel.tabs.find((tab) => tab.id === dockPanel.activeTabId);
+
+export const activeFileTab = (): FileTab | undefined => {
+  const tab = activeDockTab();
+  return tab && tab.kind === 'file' ? tab : undefined;
+};

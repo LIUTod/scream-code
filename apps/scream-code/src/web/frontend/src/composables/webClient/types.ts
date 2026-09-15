@@ -51,6 +51,8 @@ export interface UseScreamWebClientReturn {
   currentSessionId: Ref<string | null>;
   gitStatus: Ref<GitStatus | null>;
   models: Ref<ModelInfo[]>;
+  /** Model list load failure reason (null = no error). */
+  modelsError: Ref<string | null>;
   like: Ref<LikePreferences>;
   fetchLike: () => Promise<void>;
   updateLike: (prefs: LikePreferences) => Promise<boolean>;
@@ -72,7 +74,8 @@ export interface UseScreamWebClientReturn {
   pauseGoal: () => Promise<boolean>;
   resumeGoal: () => Promise<boolean>;
   cancelGoal: () => Promise<boolean>;
-  createSession: () => Promise<void>;
+  /** Omitting workDir = server process directory; an illegal directory comes back as a 4xx from the server and the client toasts the reason verbatim. */
+  createSession: (workDir?: string, onCreated?: (id: string) => void) => Promise<void>;
   switchSession: (sessionId: string) => Promise<void>;
   deleteSession: (sessionId: string) => Promise<void>;
   exportSession: (sessionId: string) => Promise<void>;
@@ -91,6 +94,8 @@ export interface UseScreamWebClientReturn {
   undoHistory: (count?: number) => Promise<boolean>;
   compact: (instruction?: string) => Promise<boolean>;
   skills: Ref<SkillSummary[]>;
+  /** Skill list load failure reason (null = no error); the skills center renders a Retry row from it. */
+  skillsError: Ref<string | null>;
   fetchSkills: () => Promise<void>;
   activateSkill: (name: string, args?: string) => Promise<boolean>;
   removeSkill: (name: string) => Promise<boolean>;

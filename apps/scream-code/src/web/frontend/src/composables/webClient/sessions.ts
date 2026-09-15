@@ -5,7 +5,10 @@ import { API_BASE, type ClientContext } from './state';
 export interface SessionsModule {
   fetchSessions(): Promise<void>;
   fetchGitStatus(): Promise<void>;
-  createSession(): Promise<void>;
+  /** onCreated aligns with the implementation / facade (types.ts): it fires synchronously
+   *  once the REST create succeeds but before the WS is connected, so callers can switch
+   *  the view first and wait for the connection afterwards. */
+  createSession(workDir?: string, onCreated?: (id: string) => void): Promise<void>;
   switchSession(sessionId: string): Promise<void>;
   deleteSession(sessionId: string): Promise<void>;
   exportSession(sessionId: string): Promise<void>;
@@ -54,15 +57,35 @@ export function createSessionsModule(ctx: ClientContext): SessionsModule {
     }
   }
 
-  async function createSession(): Promise<void> {
+  /** Creates a session; omitting workDir = use the server process directory (matches the old behavior).
+   *  onCreated fires synchronously once the REST create succeeds and before the WS is connected —
+   *  it is used to "switch the view first and connect asynchronously afterwards", removing the wait
+   *  on the home page after a session is created. */
+  async function createSession(workDir?: string, onCreated?: (id: string) => void): Promise<void> {
     try {
-      const res = await fetch(`${API_BASE}/sessions`, { method: 'POST' });
+      const res = await fetch(`${API_BASE}/sessions`, {
+        method: 'POST',
+        ...(workDir
+          ? {
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ workDir }),
+            }
+          : {}),
+      });
       if (!res.ok) {
-        showToast(`新建会话失败（HTTP ${res.status}）`, 'error');
+        // Server-side validation (e.g. an illegal directory) carries a human-readable
+        // message: prefer it, fall back to the HTTP status.
+        const detail = await res.json().catch(() => null);
+        const message =
+          detail && typeof (detail as { message?: unknown }).message === 'string'
+            ? (detail as { message: string }).message
+            : '';
+        showToast(`新建会话失败：${message || `HTTP ${res.status}`}`, 'error');
         return;
       }
       const item: SessionListItem = await res.json();
       s.sessions.value = [item, ...s.sessions.value];
+      onCreated?.(item.sessionId);
       await switchSession(item.sessionId);
     } catch (error) {
       showToast(`新建会话失败：${error instanceof Error ? error.message : String(error)}`, 'error');
@@ -77,6 +100,11 @@ export function createSessionsModule(ctx: ClientContext): SessionsModule {
     ctx.resetGoalRequestState();
     s.seq = 0;
     s.epoch = 0;
+    // journalGapCount means a "consecutive" gap count: it must reset across sessions. Otherwise
+    // the count accumulated by the previous session would push the new session's first two
+    // legitimate jumps (reconnect replays skip volatile events) straight onto the ≥3 error
+    // escalation line, falsely reporting "the stream may be permanently corrupted".
+    s.journalGapCount = 0;
     s.messages.value = [];
     s.pendingApprovals.value = [];
     s.status.value = { busy: false };
@@ -134,6 +162,8 @@ export function createSessionsModule(ctx: ClientContext): SessionsModule {
           s.sessionActive.value = false;
           s.seq = 0;
           s.epoch = 0;
+          // Same as above: the whole session context is destroyed, so the gap count resets with it.
+          s.journalGapCount = 0;
           s.messages.value = [];
           s.pendingApprovals.value = [];
           s.status.value = { busy: false };

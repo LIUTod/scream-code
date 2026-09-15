@@ -106,9 +106,41 @@ export function createControlModule(ctx: ClientContext): ControlModule {
   }
 
   async function switchPermission(mode: string): Promise<boolean> {
+    // Optimistic update: the chip flips to the new value immediately and then waits for the
+    // network — the permission entry must "give feedback the moment it is clicked". The
+    // authoritative value is reconciled afterwards by the status frame / fetchSessionStatus;
+    // on server failure postSessionAction has already toasted and the local value is rolled
+    // back below, so we never stay on an illusion.
+    //
+    // Generation guard (mirrors postSessionSwitch in models.ts): rolling back is a dangerous
+    // action that writes status.permission unconditionally — when two modes are clicked in
+    // quick succession, the earlier request may come back late and its rollback would
+    // overwrite the value the later request already confirmed; after a session switch /
+    // reconnect it would even write the previous session's permission into the new one. The
+    // rollback must first confirm "the world has not changed", otherwise it is better to skip
+    // the write (the authoritative value is reconciled by the following status frame /
+    // snapshot). A permission-specific generation is used here rather than the shared
+    // sessionMutationGeneration: the latter is advanced by unrelated requests such as model /
+    // thinking switches, which would silently downgrade a failure that should be rolled back
+    // into "staying on the optimistic value".
+    const targetSessionId = s.sessionId.value;
+    const targetSessionGeneration = s.sessionGeneration;
+    const targetConnectionGeneration = s.connectionGeneration;
+    const requestGeneration = ++s.permissionMutationGeneration;
+    const prev = s.status.value.permission;
+    s.status.value = { ...s.status.value, permission: mode };
     const ok = await postSessionAction('permission', { mode });
-    if (ok) await fetchSessionStatus();
-    return ok;
+    if (!ok) {
+      const stale =
+        s.sessionId.value !== targetSessionId ||
+        s.sessionGeneration !== targetSessionGeneration ||
+        s.connectionGeneration !== targetConnectionGeneration ||
+        s.permissionMutationGeneration !== requestGeneration;
+      if (!stale) s.status.value = { ...s.status.value, permission: prev };
+      return false;
+    }
+    await fetchSessionStatus();
+    return true;
   }
 
   async function switchPlanMode(enabled: boolean, strategy?: 'normal' | 'fusion'): Promise<boolean> {

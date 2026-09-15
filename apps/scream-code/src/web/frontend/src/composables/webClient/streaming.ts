@@ -224,13 +224,46 @@ export function createStreamingModule(ctx: ClientContext): StreamingModule {
     if (decision === 'resync') {
       s.epoch = msg.epoch;
       s.seq = 0;
+      s.journalGapCount = 0;
       void ctx.fetchSnapshot();
       return;
     }
     if (decision === 'duplicate') return;
+    if (decision === 'gap') {
+      // seq jump: silently swallowing the missing frames would drift the UI away from the
+      // journal forever. Fail loud, log, and take the recovery path equivalent to
+      // resync_required (refetch the snapshot to fill in the missing state); the current frame
+      // is still applied so the live tail never freezes. Applying a snapshot is an atomic
+      // replace, so a late-arriving snapshot recalibrates any locally-ahead state back to the
+      // server's authoritative value.
+      //
+      // Log level: the server's syncConnection replay skips volatile events, so sporadic jumps
+      // after a reconnect are legitimate (verified during review) — the first two use warn, and
+      // only ≥3 consecutive ones escalate to error (the stream may be permanently corrupted).
+      s.journalGapCount++;
+      const escalating = s.journalGapCount >= 3;
+      const log = escalating ? console.error : console.warn;
+      log(
+        `[webClient] journal seq 缺口：epoch ${s.epoch} 内从 ${s.seq} 跳到 ${msg.seq}` +
+          `（连续第 ${s.journalGapCount} 次${escalating ? '，超过阈值，流可能已持续损坏' : ''}），` +
+          '已触发快照补拉。',
+        msg,
+      );
+    } else {
+      // Consecutive continuation frame: the gap count resets.
+      s.journalGapCount = 0;
+    }
     s.seq = msg.seq;
     s.epoch = msg.epoch;
+    // liveGeneration must advance before this frame's refetch: fetchSnapshot() synchronously
+    // captures the target generation (snapshots.ts), and canApplySnapshot requires
+    // liveGeneration to be equal before and after. The old order was "fetchSnapshot() first,
+    // then ++" — the refetch was invalidated by its own frame, so the returned snapshot could
+    // never apply and immediate recovery degraded into a 250ms retry chain. Advancing first
+    // means "this frame's snapshot targets the already-advanced generation", so it no longer
+    // vetoes itself (later new frames still veto old snapshots as usual).
     s.liveGeneration++;
+    if (decision === 'gap') void ctx.fetchSnapshot();
     onEvent(msg.payload);
   });
 

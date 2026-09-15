@@ -4,7 +4,7 @@ import { generateId } from './state';
 /** G5.4: prompts queued while offline; flushed after a successful hello. */
 const OFFLINE_KEY = 'scream-offline-prompt-queue';
 
-/** G5.5: keep the last few user prompts for the empty-state shortcut chips. */
+/** G5.5: keep the last few user prompts for the home quick-start chips. */
 const RECENT_KEY = 'scream-recent-prompts';
 
 export interface QueueModule {

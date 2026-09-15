@@ -72,10 +72,14 @@ export interface ClientSharedState {
   isArchived: ComputedRef<boolean>;
   gitStatus: Ref<GitStatus | null>;
   models: Ref<ModelInfo[]>;
+  /** Model list load failure reason (null = no error); the settings page renders a Retry row from it. */
+  modelsError: Ref<string | null>;
   like: Ref<LikePreferences>;
   // Session-control / resource / global state mirrors (server.ts exposure).
   sessionPlan: Ref<SessionPlan | null>;
   skills: Ref<SkillSummary[]>;
+  /** Skill list load failure reason (null = no error); the skills center renders a Retry row from it. */
+  skillsError: Ref<string | null>;
   plugins: Ref<PluginSummary[]>;
   pluginInfo: Ref<PluginInfo | null>;
   mcpServers: Ref<McpServerInfo[]>;
@@ -103,6 +107,9 @@ export interface ClientSharedState {
   liveGeneration: number;
   sessionMutationGeneration: number;
   goalMutationGeneration: number;
+  /** Permission-switch-specific generation: used before an optimistic rollback to confirm that
+   *  no newer permission switch happened (see the generation guard in control.ts switchPermission). */
+  permissionMutationGeneration: number;
   goalAwaitingMutation: { generation: number } | null;
   goalRequestInFlight: boolean;
   snapshotRetryGoalGeneration: number | null;
@@ -124,6 +131,11 @@ export interface ClientSharedState {
 
   // ── WS dispatch registry ──────────────────────────────────────────────
   wsHandlers: Map<string, WsHandler>;
+  /** Unknown-frame fail-loud counter: incremented by dispatch on an unregistered type, surfacing
+   *  the "missing registration → silently stale" problem instead of letting it pass unnoticed. */
+  wsUnknownFrames: number;
+  /** Consecutive journal seq gap count: resets once gaps recover; consecutive excess escalates the log level. */
+  journalGapCount: number;
 }
 
 export function createClientSharedState(): ClientSharedState {
@@ -148,10 +160,12 @@ export function createClientSharedState(): ClientSharedState {
   const isArchived = computed(() => sessionId.value !== null && !sessionActive.value);
   const gitStatus = ref<GitStatus | null>(null);
   const models = ref<ModelInfo[]>([]);
+  const modelsError = ref<string | null>(null);
   const like = ref<LikePreferences>({});
   // Session-control / resource / global state mirrors (server.ts exposure).
   const sessionPlan = ref<SessionPlan | null>(null);
   const skills = ref<SkillSummary[]>([]);
+  const skillsError = ref<string | null>(null);
   const plugins = ref<PluginSummary[]>([]);
   const pluginInfo = ref<PluginInfo | null>(null);
   const mcpServers = ref<McpServerInfo[]>([]);
@@ -183,9 +197,11 @@ export function createClientSharedState(): ClientSharedState {
     isArchived,
     gitStatus,
     models,
+    modelsError,
     like,
     sessionPlan,
     skills,
+    skillsError,
     plugins,
     pluginInfo,
     mcpServers,
@@ -210,6 +226,7 @@ export function createClientSharedState(): ClientSharedState {
     liveGeneration: 0,
     sessionMutationGeneration: 0,
     goalMutationGeneration: 0,
+    permissionMutationGeneration: 0,
     goalAwaitingMutation: null,
     goalRequestInFlight: false,
     snapshotRetryGoalGeneration: null,
@@ -225,6 +242,8 @@ export function createClientSharedState(): ClientSharedState {
     pendingThinkingDelta: '',
     pendingToolProgress: new Map<string, string>(),
     wsHandlers: new Map<string, WsHandler>(),
+    wsUnknownFrames: 0,
+    journalGapCount: 0,
   };
 }
 

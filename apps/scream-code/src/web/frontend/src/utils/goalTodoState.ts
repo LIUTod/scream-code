@@ -78,15 +78,26 @@ export function buildUpdateGoalBody(request: UpdateGoalRequest): Record<string, 
 }
 
 /**
- * Journal frame gate. A seq *gap within the same epoch* is intentionally
- * NOT treated as 'resync': after any disconnect the client re-baselines via
- * `client_hello {lastSeq, epoch}` + a full snapshot fetch, and replayed
- * frames legitimately jump seq. Only an epoch change means the stream was
- * rebuilt server-side and local state must be re-synced.
+ * Journal frame gate. Decisions:
+ * - 'resync': the epoch changed (or this is the first reconciliation from a non-zero start);
+ *   the server has rebuilt the event stream, so the local cursor must be dropped and the
+ *   snapshot refetched;
+ * - 'duplicate': seq went backwards / repeated (replay dedupe);
+ * - 'gap': seq jumped within the same epoch (event.seq > currentSeq + 1). A gap is not
+ *   applied directly: silently swallowing the missing frames would drift the UI away from
+ *   the journal forever (the same class of stale incident as a missing resync_required
+ *   registration). Note that server replay skips volatile events (see server.ts
+ *   syncConnection), so the first non-volatile frame after a reconnect legitimately looks
+ *   like a gap; the gap recovery strategy therefore belongs to the caller: log fail-loud
+ *   and trigger a snapshot refetch, while still applying the current frame so the live tail
+ *   never freezes;
+ * - 'apply': seq continues exactly (or there is no local baseline yet, currentSeq === 0).
  */
-export function acceptJournalEvent(currentEpoch: number, currentSeq: number, event: JournalEvent): 'apply' | 'duplicate' | 'resync' {
+export function acceptJournalEvent(currentEpoch: number, currentSeq: number, event: JournalEvent): 'apply' | 'duplicate' | 'resync' | 'gap' {
   if (currentEpoch !== 0 && event.epoch !== currentEpoch) return 'resync';
-  return event.seq <= currentSeq ? 'duplicate' : 'apply';
+  if (event.seq <= currentSeq) return 'duplicate';
+  if (currentSeq !== 0 && event.seq > currentSeq + 1) return 'gap';
+  return 'apply';
 }
 
 export function applyGoalTodoEvent(

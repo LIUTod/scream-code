@@ -1,6 +1,8 @@
 /**
  * Message timestamp for the meta row — mirrors the reference formatting:
- * today → `HH:MM`; past days → `M月D日 HH:MM`; past years → `YYYY年M月D日 HH:MM`.
+ * today → `HH:MM`; past days → localized month/day with CJK unit characters (as emitted by the
+ * templates below) + `HH:MM`; past years → localized year/month/day with the same unit
+ * characters + `HH:MM`.
  * A time-only label for a message from yesterday would read as today, so
  * cross-day entries carry their date.
  */
@@ -30,8 +32,8 @@ export function isSameLocalDay(a: number, b: number): boolean {
 }
 
 /**
- * Day-divider label for the message stream: `9月2日` inside the current
- * year, `2025年12月31日` once the year differs from `now`.
+ * Day-divider label for the message stream: month/day with CJK unit characters inside the
+ * current year, full year/month/day with the same unit characters once the year differs from `now`.
  */
 export function formatDayDivider(ts: number, now: number = Date.now()): string {
   const d = new Date(ts);

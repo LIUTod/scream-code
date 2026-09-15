@@ -77,7 +77,7 @@ export function createSnapshotsModule(ctx: ClientContext): SnapshotsModule {
     s.pendingToolProgress.clear();
     // Preserve local-only messages (command results, system notices) that are
     // not in the server journal. Without this, applySnapshot's full replace
-    // would drop them - the "闪一下" bug.
+    // would drop them - the "flicker" bug.
     const localMsgs = s.messages.value.filter((m) => m.local);
     const pendingClientId = s.sentMessageIds.keys().next().value;
     const pendingEntry = pendingClientId ? s.sentMessageIds.get(pendingClientId) : undefined;

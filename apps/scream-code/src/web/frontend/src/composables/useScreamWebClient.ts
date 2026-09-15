@@ -1,4 +1,6 @@
-import { onBeforeUnmount } from 'vue';
+import { onBeforeUnmount, watch } from 'vue';
+import { setSlashSkills } from '../commands';
+import { registerActiveWebClient, unregisterActiveWebClient } from './webClient/activeClient';
 import { createClientContext, type ConnectionStatus } from './webClient/state';
 import type { UseScreamWebClientReturn } from './webClient/types';
 import { createQueueModule } from './webClient/queue';
@@ -82,7 +84,12 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
     }
   });
 
-  return {
+  // L3 three-source merge: the slash menu's skill candidates mirror client.skills.
+  // Switching sessions clears skills (sessions.ts), so the menu degrades along with it
+  // instead of keeping the previous session's skills around.
+  watch(s.skills, (v) => setSlashSkills(v), { immediate: true });
+
+  const client: UseScreamWebClientReturn = {
     connectionStatus: s.connectionStatus,
     messages: s.messages,
     pendingApprovals: s.pendingApprovals,
@@ -100,6 +107,7 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
     currentSessionId: s.currentSessionId,
     gitStatus: s.gitStatus,
     models: s.models,
+    modelsError: s.modelsError,
     like: s.like,
     fetchLike: models.fetchLike,
     updateLike: models.updateLike,
@@ -143,6 +151,7 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
     undoHistory: control.undoHistory,
     compact: control.compact,
     skills: s.skills,
+    skillsError: s.skillsError,
     fetchSkills: extensions.fetchSkills,
     activateSkill: extensions.activateSkill,
     removeSkill: extensions.removeSkill,
@@ -180,4 +189,15 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
     preflightOk: s.preflightOk,
     preflight: config.preflight,
   };
+
+  // L3 registry: gives surface objects that cannot receive props injection (the skills
+  // center entry, the settings modal) a channel to the most recently created client;
+  // unregistered as soon as the host unmounts.
+  registerActiveWebClient(client);
+  onBeforeUnmount(() => {
+    unregisterActiveWebClient(client);
+    setSlashSkills([]);
+  });
+
+  return client;
 }
