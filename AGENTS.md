@@ -569,7 +569,7 @@ Manages installed plugins and browses installable plugin packages; `/extension` 
 
 ### Tool Card Rendering (Bash / Grep)
 
-- **Bash**: `src/tui/components/messages/shell-execution.ts` — collapsed card always shows the command (`highlightLines(command,'bash',colors)` syntax highlight + dim `$ ` prefix), collapsed limit `SHELL_COMMAND_COLLAPSED_LINES=3` lines, ctrl+o expands to see the full command
+- **Bash**: `src/tui/components/messages/shell-execution.ts` — collapsed card always shows the command (`highlightLines(command,'bash',colors)` syntax highlight + dim `$ ` prefix), collapsed limit `SHELL_COMMAND_COLLAPSED_LINES=3` lines, ctrl+o (block expansion) reveals the full command; grouped rows show only the recap (`see the Activity Block section`)
 - **Grep**: `tool-renderers/glance-lines.ts` `GlanceLinesComponent` — `truncateToWidth(line, width, '…')` hard-truncates without wrapping; `tool-renderers/summary.ts` `grepGlance` — structured `display.search_results`, `GLANCE_SAMPLES=3` samples, `path:line` column alignment, dim directory + default-color filename, amber line number, `+N more`
 
 ### Streaming Token Pacing
@@ -577,8 +577,23 @@ Manages installed plugins and browses installable plugin packages; `/extension` 
 Decouples "arrival" from "display" — a shown-length cursor on the draft gains budget each frame by the measured arrival rate: fast models stay smooth, slow models don't freeze, bursts spread over several frames.
 
 - **Controller**: `src/tui/controllers/streaming-ui.ts` `flush()`/`advanceAssistantShown()`/`finalizeAssistantStream` (forces a full flush at the end)
-- **Constants**: `src/tui/constant/streaming.ts` — `SMOOTH_FRAME_MS=50`, `MIN_CHARS_PER_FRAME=1`, `MAX_CHARS_PER_FRAME=25`, `DEFAULT_ARRIVAL_TOK_PER_SEC=50`, `CHARS_PER_TOKEN=2.5`; thinking/tool still flush at `STREAMING_UI_FLUSH_MS=50`
-- **Speed**: `src/tui/utils/speed-tracker.ts` — `SPEED_WINDOW_MS=3000`, `SPEED_MAX=200`, `getSharedSpeedTracker()`; observation point `streaming-ui.ts:151-162`
+- **Constants**: `src/tui/constant/streaming.ts` — `SMOOTH_FRAME_MS=50`, `MIN_CHARS_PER_FRAME=1`, `MAX_CHARS_PER_FRAME=25`, `DEFAULT_ARRIVAL_TOK_PER_SEC=50`; thinking/tool still flush at `STREAMING_UI_FLUSH_MS=50`
+- **Char budget**: the frame budget is a token budget (`measured tok/s × SMOOTH_FRAME_MS`) converted back to characters by `charsForTokenBudget()` in `src/tui/utils/speed-tracker.ts`, so Chinese and Latin pacing both follow the measured rate; `MAX_CHARS_PER_FRAME=25` bounds a burst
+- **Speed**: `src/tui/utils/speed-tracker.ts` — `SPEED_WINDOW_MS=3000`, `SPEED_MAX=200`, `estimateTokens()` (CJK ≈ 1 token/char, Latin ≈ 4 chars/token), `getSharedSpeedTracker()`; observation point `streaming-ui.ts:151-162`
+
+### Activity Block (per-turn reasoning + tool calls)
+
+One turn's reasoning and its ordinary tool cards (everything except `Read`, `Agent`, `AskUserQuestion`, `ExitPlanMode`, `ReadMediaFile`) collapse into a single block: three rows while collapsed (header with step/tool counts, token estimate and live `toks/s`; latest tool row; reasoning summary) and a tree while expanded (per-tool result preview `ACTIVITY_GROUP_TOOL_EXPANDED_LINES=15`, whole-block ceiling `ACTIVITY_GROUP_EXPANDED_LINES=60` with a `N more tools` row for the rest, reasoning excerpt `ACTIVITY_GROUP_THINKING_EXCERPT_LINES=10`).
+
+- **Component**: `src/tui/components/messages/activity-group.ts` — borrows the real `ToolCallComponent`s (never mounts them), 200ms throttle, rebuilds rows on width/invalidate changes, spins only while the turn is streaming
+- **Sealing**: a block is created lazily by its first reasoning/tool content and sealed as soon as visible assistant text appears, so each stretch of work stays next to the answer it produced
+- **Wiring**: `streaming-ui.ts` (`ensureActivityGroup` / `endActivityGroup` / `registerActivityGroupEntry`), turn boundaries from `session-event-handler.ts`, `session-replay.ts`, `transcript-controller.ts` (`clearAndRedraw`), `scream-tui.ts` (`beginSessionRequest`, `failSessionRequest`)
+- **Row labels**: grouped rows recap the action (`verb name · short arguments · chip`) — Bash keeps its last unquoted command segment, path tools keep `…/last/two`, pattern tools keep the pattern; the card itself stays unchanged
+- **Ctrl+O**: flips the newest expandable child (block or standalone card); it stops at a Read/agent group instead of flipping an older block
+
+### Fenced Code Panels
+
+Fenced code renders as a theme-aware background panel instead of ```` ``` ```` border rows: `codeBlockBorder: () => null`, `codeBlockIndent: ' '`, and `codeBlockLine` in `theme/pi-tui-theme.ts` (palette colour `mdCodeBlockBg`), backed by the optional `codeBlockLine` hook in `@liutod-scream/pi-tui` ≥ 0.85.2.
 
 ### Cache Hit Rate Footer & Usage Accounting
 
