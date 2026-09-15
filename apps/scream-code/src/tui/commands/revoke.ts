@@ -1,6 +1,7 @@
 import type { Component } from '@liutod-scream/pi-tui';
 
 import { t } from '@scream-code/config';
+import { CompactionComponent } from '../components/dialogs/compaction';
 import { WelcomeComponent } from '../components/chrome/welcome';
 import { AgentGroupComponent } from '../components/messages/agent-group';
 import { ActivityGroupComponent } from '../components/messages/activity-group';
@@ -8,6 +9,7 @@ import { AssistantMessageComponent } from '../components/messages/assistant-mess
 import { BackgroundAgentStatusComponent } from '../components/messages/background-agent-status';
 import { ReadGroupComponent } from '../components/messages/read-group';
 import { SkillActivationComponent } from '../components/messages/skill-activation';
+import { StatusMessageComponent } from '../components/messages/status-message';
 import { ThinkingComponent } from '../components/messages/thinking';
 import { isBusy } from '../utils/app-state';
 import { ToolCallComponent } from '../components/messages/tool-call';
@@ -15,7 +17,6 @@ import { UserMessageComponent } from '../components/messages/user-message';
 import { getNoActiveSessionMessage } from '../constant/scream-tui';
 import type { TranscriptEntry } from '../types';
 import { formatErrorMessage } from '../utils/event-payload';
-import { getTranscriptComponentEntry } from '../utils/transcript-component-metadata';
 import type { SlashCommandHost } from './dispatch';
 
 // ── Revoke command ────────────────────────────────────────────────────────
@@ -164,23 +165,14 @@ function removeRevokeContextComponents(
 }
 
 function isRevokeAnchorComponent(child: Component): boolean {
-  // Use the transcript entry metadata path first — it covers both
-  // UserMessageComponent and SkillActivationComponent reliably.
-  const entry = getTranscriptComponentEntry(child);
-  if (entry !== undefined) {
-    return isRevokeAnchorEntry(entry);
-  }
-  // Fallback: SkillActivationComponent without entry metadata is still
-  // an anchor (it was triggered by the user typing /skillname).
+  // Turn boundaries: user messages and user-triggered skill activations (the
+  // latter originate from user slash commands).
   return child instanceof UserMessageComponent || child instanceof SkillActivationComponent;
 }
 
 function isRevokeContextComponent(child: Component): boolean {
-  const entry = getTranscriptComponentEntry(child);
-  if (entry !== undefined) {
-    return isRevokeContextEntry(entry);
-  }
-
+  // Component types whose transcript entries are dropped by isRevokeContextEntry.
+  // Cron notices are intentionally absent: their entries are preserved.
   return (
     child instanceof UserMessageComponent ||
     child instanceof AssistantMessageComponent ||
@@ -190,7 +182,9 @@ function isRevokeContextComponent(child: Component): boolean {
     child instanceof AgentGroupComponent ||
     child instanceof ReadGroupComponent ||
     child instanceof SkillActivationComponent ||
-    child instanceof BackgroundAgentStatusComponent
+    child instanceof BackgroundAgentStatusComponent ||
+    child instanceof StatusMessageComponent ||
+    child instanceof CompactionComponent
   );
 }
 
