@@ -623,6 +623,20 @@ export class Agent {
     });
     this.config.update({ profileName: profile.name, systemPrompt, activeTools: profile.tools });
     this.tools.setActiveTools(profile.tools);
+    // Rebuild the builtin registry AFTER the profile name is on the config and
+    // the active names are set. Which collaboration tools exist is
+    // profile-dependent — canSpawn reads the `spawns` whitelist of
+    // `config.profileName` — and setActiveTools only records names, so a tool
+    // the profile lists but the registry never constructed would be dropped by
+    // loopToolsFor. A spawned child triggers a rebuild before its profile is
+    // applied, which left plan/reviewer children without their `Agent` tool for
+    // the whole run; this second pass fixes that for every profile-gated tool
+    // (Agent / SendSubagentMessage / WolfPack). Same provider guard as
+    // ConfigState.update: agents without a usable provider (tests, migrated
+    // sessions) must not blow up while building tools.
+    if (this.config.hasProvider) {
+      this.tools.initializeBuiltinTools();
+    }
   }
 
   async resume(): Promise<{ warning?: string }> {

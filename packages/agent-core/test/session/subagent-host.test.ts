@@ -481,6 +481,41 @@ describe('SessionSubagentHost', () => {
     ]);
   });
 
+  it('mounts the Agent tool for a spawns-whitelisted child on its first run', async () => {
+    const parent = testAgent();
+    parent.configure();
+    parent.newEvents();
+
+    // `fakeSession.createAgent` bypasses `Session.instantiateAgent`, which is
+    // what normally hands every child its own subagent host, so the spawned
+    // child needs one here: canSpawn requires a host and (for sub agents) a
+    // non-empty `spawns` whitelist.
+    const child = testAgent({
+      type: 'sub',
+      subagentHost: { spawn: vi.fn() } as unknown as SessionSubagentHost,
+    });
+    child.mockNextResponse({ type: 'text', text: 'Planned the refactor end to end, listed every file and function to change, ordered the steps by dependency, and called out the edge cases and the verification gate for each stage. No code was modified while producing this plan.' });
+    const session = fakeSession(parent.agent, child.agent);
+    const host = new SessionSubagentHost(session, 'main');
+
+    const handle = await host.spawn('plan', {
+      parentToolCallId: 'call_agent',
+      prompt: 'Plan the refactor',
+      description: 'Plan refactor',
+      runInBackground: false,
+      signal,
+    });
+
+    await handle.completion;
+    expect(child.agent.config.profileName).toBe('plan');
+    // `plan` declares `spawns: [explore]`, so its child must be able to spawn
+    // explore: AgentTool is gated by canSpawn, which reads the `spawns`
+    // whitelist off config.profileName. Spawning rebuilds the registry before
+    // the profile is applied, so this only holds because useProfile rebuilds
+    // again afterwards.
+    expect(child.llmCalls[0]?.tools.map((tool) => tool.name)).toContain('Agent');
+  });
+
   it('rejects unknown subagent types before creating a child agent', async () => {
     const parent = testAgent();
     parent.configure();
