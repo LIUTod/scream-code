@@ -173,6 +173,7 @@ export function makeMockStreamingUI(
     resetToolUi: vi.fn(),
     resetToolCallState: vi.fn(),
     discardPending: vi.fn(),
+    endActivityGroup: vi.fn(),
     disposeActiveCompactionBlock: vi.fn(),
     flushNow: vi.fn(),
     finalizeLiveTextBuffers: vi.fn(),

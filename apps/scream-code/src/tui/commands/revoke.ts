@@ -3,6 +3,7 @@ import type { Component } from '@liutod-scream/pi-tui';
 import { t } from '@scream-code/config';
 import { WelcomeComponent } from '../components/chrome/welcome';
 import { AgentGroupComponent } from '../components/messages/agent-group';
+import { ActivityGroupComponent } from '../components/messages/activity-group';
 import { AssistantMessageComponent } from '../components/messages/assistant-message';
 import { BackgroundAgentStatusComponent } from '../components/messages/background-agent-status';
 import { ReadGroupComponent } from '../components/messages/read-group';
@@ -185,6 +186,7 @@ function isRevokeContextComponent(child: Component): boolean {
     child instanceof AssistantMessageComponent ||
     child instanceof ThinkingComponent ||
     child instanceof ToolCallComponent ||
+    child instanceof ActivityGroupComponent ||
     child instanceof AgentGroupComponent ||
     child instanceof ReadGroupComponent ||
     child instanceof SkillActivationComponent ||

@@ -29,10 +29,11 @@ import { ImageAttachmentStore, type ImageAttachment } from '../utils/image-attac
 import { truncateErrorMessage } from '../utils/event-payload';
 import { replaceTabs } from '../utils/sanitize';
 import { nextTranscriptId } from '../utils/transcript-id';
-import { disposeChildren, isPlanExpandable } from '../utils/component-capabilities';
+import { disposeChildren, isExpandable, isPlanExpandable } from '../utils/component-capabilities';
 import { isStreaming } from '../utils/app-state';
 import { CommittedTranscriptComponent } from '../components/transcript/committed-transcript';
 import { ReadGroupComponent, parseReadGroupOutput } from '../components/messages/read-group';
+import { AgentGroupComponent } from '../components/messages/agent-group';
 
 export interface TranscriptControllerHost {
   readonly state: TUIState;
@@ -72,6 +73,15 @@ export class TranscriptController {
 
   registerLiveComponent(component: Component, entry: TranscriptEntry): void {
     this.liveComponentToEntry.set(component, entry);
+  }
+
+  /**
+   * Drops the entry mapping of a component that will never be folded into the
+   * committed history (it is not a container child), so the map cannot retain
+   * components — and the text they hold — for the life of the session.
+   */
+  releaseLiveComponent(component: Component): void {
+    this.liveComponentToEntry.delete(component);
   }
 
   markPending(component: Component): void {
@@ -176,6 +186,10 @@ export class TranscriptController {
         return component;
       }
       case 'thinking': {
+        // Note: live sessions and session replay both route reasoning through the
+        // activity block (see streaming-ui onThinkingUpdate), so this standalone
+        // mount path is currently unreachable; kept for entries appended by other
+        // producers.
         const thinking = new ThinkingComponent(entry.content, state.theme.colors, true);
         if (state.toolOutputExpanded) thinking.setExpanded(true);
         return thinking;
@@ -327,6 +341,7 @@ export class TranscriptController {
   clearAndRedraw(): void {
     const { state, streamingUI, imageStore } = this.host;
     streamingUI.discardPending();
+    streamingUI.endActivityGroup();
     state.transcriptEntries = [];
     streamingUI.disposeActiveCompactionBlock();
     streamingUI.resetLiveText();
@@ -401,11 +416,24 @@ export class TranscriptController {
 
   toggleToolOutputExpansion(): void {
     const { state } = this.host;
-    // Flip the global preference only; existing transcript entries keep their
-    // current expansion state (matches upstream pi: setExpanded is applied
-    // when a tool component is created, not retroactively). This keeps a
-    // long history from being force-expanded/collapsed all at once.
     state.toolOutputExpanded = !state.toolOutputExpanded;
+    // Ctrl+O targets the newest expandable thing the user is looking at: an
+    // activity block when the turn's process is the latest content, otherwise a
+    // standalone card (Read/Agent/plan) that shows its own ctrl+o hint. Older
+    // components keep their state so a long history is never force-flipped.
+    const children = state.transcriptContainer.children;
+    for (let i = children.length - 1; i >= 0; i -= 1) {
+      const child = children[i];
+      if (child === undefined) continue;
+      if (isExpandable(child)) {
+        child.setExpanded(state.toolOutputExpanded);
+        break;
+      }
+      // Read/agent groups are the newest thing on screen and have no collapse
+      // state of their own: stop instead of flipping a block that may already be
+      // scrolled out of view.
+      if (child instanceof ReadGroupComponent || child instanceof AgentGroupComponent) break;
+    }
     state.ui.requestRender();
   }
 

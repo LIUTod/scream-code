@@ -329,6 +329,9 @@ export class SessionReplayRenderer {
   }
 
   private advanceTurn(context: ReplayRenderContext): void {
+    // A replayed turn boundary: settle the previous turn's activity block so
+    // restored history shows one block per turn instead of one merged block.
+    this.host.streamingUI.endActivityGroup();
     context.turnIndex += 1;
     context.stepIndex = 0;
     context.currentTurnId = `replay:${String(context.turnIndex)}`;

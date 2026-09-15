@@ -102,7 +102,7 @@ export const en: Record<string, string> = {
   'footer.model': '/model: Switch model',
   'footer.ctrl_s': 'ctrl+s: Interrupt',
   'footer.compact': '/compact: Compress context',
-  'footer.ctrl_o': 'ctrl+o: Expand tool output',
+  'footer.ctrl_o': 'ctrl+o: Expand/collapse the latest detail',
   'footer.tasks': '/tasks: Background tasks',
   'footer.shift_enter': 'shift+enter: New line',
   'footer.init': '/init: Generate AGENTS.md',
@@ -1081,6 +1081,21 @@ export const en: Record<string, string> = {
   'cronmsg.coalesced': '{count} coalesced fire(s)',
   'cronmsg.missed': '{count} missed',
   'cronmsg.final_delivery': 'Final delivery',
+
+  // ─── activity-group ────────────
+  'activitygroup.running': 'Tool calling',
+  'activitygroup.done': 'Tool calls finished',
+  'activitygroup.steps': '{count} steps',
+  'activitygroup.tools': '{count} tools',
+  'activitygroup.tokens': '≈{tok} tok',
+  'activitygroup.rate': ' · {rate} toks/s',
+  'activitygroup.hint_expand': '  (ctrl+o to expand)',
+  'activitygroup.hint_collapse': '  (ctrl+o to collapse)',
+  'activitygroup.tools_hidden': '… {count} more tools',
+  'activitygroup.thinking_label': 'thinking',
+  'activitygroup.thinking_summary': 'thinking: {summary}',
+  'activitygroup.thinking_more': '... ({count} more lines)',
+  'activitygroup.thinking_earlier': '... ({count} earlier lines)',
 
   // ─── thinking ──────────────────
   'thinking.in_progress': 'Thinking...',

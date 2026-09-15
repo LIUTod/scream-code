@@ -901,6 +901,11 @@ export class ToolCallComponent extends CachedContainer {
     return this.toolCall;
   }
 
+  // Readonly view for group access to the result text (missing until it lands).
+  get resultView(): Readonly<ToolResultBlockData> | undefined {
+    return this.result;
+  }
+
   /** Notifies the listener when internal state changes, if a group is attached. */
   private notifySnapshotChange(): void {
     this.onSnapshotChange?.();

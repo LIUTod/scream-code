@@ -26,6 +26,23 @@ export const TOOL_OUTPUT_PREVIEW_LINES = 15;
 // result from hanging the renderer.
 export const MAX_SHELL_OUTPUT_BYTES = 128 * 1024;
 
+// Activity group: a turn's reasoning plus its tool calls collapsed into a
+// single block. The collapsed height is three rows by construction (header,
+// latest activity, reasoning summary); the expanded tree previews this many
+// result lines per tool and this many reasoning lines.
+export const ACTIVITY_GROUP_TOOL_PREVIEW_LINES = 3;
+// Result lines previewed per tool once the group is expanded. Kept at the
+// standalone card's collapsed budget so grouping never hides more output than
+// the card showed on its own.
+export const ACTIVITY_GROUP_TOOL_EXPANDED_LINES = 15;
+// Block-level ceiling for the expanded tree. A turn with dozens of tools would
+// otherwise expand to hundreds of rows; the tools that do not fit are summarised
+// in a single "N more tools" row.
+export const ACTIVITY_GROUP_EXPANDED_LINES = 60;
+export const ACTIVITY_GROUP_THINKING_EXCERPT_LINES = 10;
+// Cells of reasoning summary kept in the collapsed row, clipped with an ellipsis.
+export const ACTIVITY_GROUP_THINKING_SUMMARY_CELLS = 42;
+
 // Animation frames are shared by update loaders and live thinking.
 export const BRAILLE_SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 export const BRAILLE_SPINNER_INTERVAL_MS = 80;

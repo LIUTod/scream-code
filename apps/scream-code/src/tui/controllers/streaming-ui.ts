@@ -3,13 +3,13 @@ import type { Session } from '@scream-code/scream-code-sdk';
 import { t } from '@scream-code/config';
 
 import { AgentGroupComponent } from '../components/messages/agent-group';
+import { ActivityGroupComponent } from '../components/messages/activity-group';
 import { AssistantMessageComponent } from '../components/messages/assistant-message';
 import { CompactionComponent } from '../components/dialogs/compaction';
 import { ReadGroupComponent, parseReadGroupOutput } from '../components/messages/read-group';
 import { ThinkingComponent } from '../components/messages/thinking';
 import { ToolCallComponent } from '../components/messages/tool-call';
 import {
-  CHARS_PER_TOKEN,
   DEFAULT_ARRIVAL_TOK_PER_SEC,
   MAX_CHARS_PER_FRAME,
   MIN_CHARS_PER_FRAME,
@@ -18,7 +18,7 @@ import {
 } from '../constant/streaming';
 import { hasDispose } from '../utils/component-capabilities';
 import { appendStreamingArgsPreview, parseStreamingArgs } from '../utils/event-payload';
-import { estimateTokens, getSharedSpeedTracker } from '../utils/speed-tracker';
+import { charsForTokenBudget, estimateTokens, getSharedSpeedTracker } from '../utils/speed-tracker';
 import { notifyTerminalOnce } from '../utils/terminal-notification';
 import { nextTranscriptId } from '../utils/transcript-id';
 import { isTurnElapsedEnabled } from '../utils/ui-preferences';
@@ -101,6 +101,33 @@ export class StreamingUIController {
     solo?: ToolCallComponent;
     group?: ReadGroupComponent;
   } | null = null;
+  private _activityGroup: ActivityGroupComponent | undefined;
+  /** Guards the single `registerLiveComponent` call for the turn's block. */
+  private _activityGroupRegistered = false;
+  /** Block that borrowed a card, so late results refresh their own block. */
+  private readonly _groupByToolCard = new WeakMap<ToolCallComponent, ActivityGroupComponent>();
+  /** Reasoning of the turn's earlier steps, kept when a step's draft resets. */
+  private _turnThinkingHistory = '';
+  private _lastThinkingText = '';
+
+  /**
+   * Tools that keep their own transcript card instead of joining the turn's
+   * activity block:
+   * - `Read` / `Agent` are owned by the read/agent group machinery (and by
+   *   `/revoke`, which walks those groups);
+   * - `AskUserQuestion` returns early above and mounts its finished card;
+   * - `ExitPlanMode` owns the plan box, which Ctrl+E expands by walking the
+   *   transcript container's direct children.
+   */
+  private static readonly STANDALONE_TOOL_NAMES: ReadonlySet<string> = new Set([
+    'Read',
+    'Agent',
+    'AskUserQuestion',
+    'ExitPlanMode',
+    // Media cards render images / media placeholders that the block's row model
+    // cannot show, so they keep their own card.
+    'ReadMediaFile',
+  ]);
 
   constructor(private readonly host: StreamingUIHost) {}
 
@@ -382,6 +409,7 @@ export class StreamingUIController {
 
   /** Tears down replay-specific state after session history has been rendered. */
   cleanupAfterReplay(completedToolCallIds: Set<string>): void {
+    this.endActivityGroup();
     this._activeToolCalls.clear();
     for (const toolCallId of completedToolCallIds) {
       this._pendingToolComponents.delete(toolCallId);
@@ -394,6 +422,84 @@ export class StreamingUIController {
     this._streamingToolCallArguments.clear();
     this.pendingToolCallFlushIds.clear();
     this.host.state.ui.requestRender();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Activity group — one block per turn
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Returns the turn's block, creating it on demand: a block only ever starts
+   * where work starts (reasoning or a tool call), which keeps it positioned
+   * right after whatever the assistant last said.
+   *
+   * Live turns spin, replayed turns (history) do not — the streaming phase is
+   * the discriminator, so a second block inside the same live turn still spins.
+   */
+  private ensureActivityGroup(): ActivityGroupComponent {
+    const existing = this._activityGroup;
+    if (existing !== undefined) return existing;
+    const { state } = this.host;
+    const group = new ActivityGroupComponent(state.theme.colors, state.ui);
+    group.setExpanded(state.toolOutputExpanded);
+    group.setRunning(state.appState.streamingPhase !== 'idle');
+    this._activityGroup = group;
+    this._turnThinkingHistory = '';
+    state.transcriptContainer.addChild(group);
+    state.ui.requestRender();
+    return group;
+  }
+
+  /**
+   * Seals the current block as soon as the assistant starts writing visible
+   * text, so every stretch of work stays next to the answer it produced instead
+   * of the whole turn's process piling up above the prose.
+   */
+  private sealActivityGroupOnText(text: string): void {
+    if (this._activityGroup === undefined) return;
+    if (text.trim().length === 0) return;
+    this.endActivityGroup();
+  }
+
+  /**
+   * Registers the block against the first entry it owns, so history folding can
+   * later sweep the whole block as one entry. Marked pending so a growing block
+   * is never folded mid-turn.
+   */
+  private registerActivityGroupEntry(group: ActivityGroupComponent, entry: TranscriptEntry): void {
+    if (this._activityGroupRegistered) return;
+    this._activityGroupRegistered = true;
+    this.host.transcriptController.registerLiveComponent(group, entry);
+    this.host.transcriptController.markPending(group);
+  }
+
+  /**
+   * Settles the block: stops the spinner, drops one that never got content, and
+   * releases the reference so the next turn opens a fresh one. Blocks with
+   * content stay mounted (replayed history keeps its blocks).
+   */
+  endActivityGroup(): void {
+    const group = this._activityGroup;
+    this._activityGroup = undefined;
+    this._activityGroupRegistered = false;
+    this._turnThinkingHistory = '';
+    this._lastThinkingText = '';
+    if (group === undefined) return;
+    group.setRunning(false);
+    if (group.isEmpty()) {
+      this.host.transcriptController.unmarkPending(group);
+      this.host.state.transcriptContainer.removeChild(group);
+      group.dispose();
+      return;
+    }
+    this.host.transcriptController.unmarkPending(group);
+    group.dispose();
+  }
+
+  /** Reasoning text of the whole turn: earlier steps plus the current draft. */
+  private activityThinkingText(draft: string): string {
+    if (this._turnThinkingHistory.length === 0) return draft;
+    return `${this._turnThinkingHistory}\n${draft}`;
   }
 
   // ---------------------------------------------------------------------------
@@ -517,14 +623,16 @@ export class StreamingUIController {
     }
     const measured = getSharedSpeedTracker().getSpeed();
     // Until the first speed sample lands, pace by an assumed arrival rate so
-    // the first (often large) block flows instead of crawling at MIN=1.
+    // the first (often large) block flows instead of crawling at MIN=1. The
+    // budget is a token budget converted back to characters with the same
+    // script-aware estimator the speed badge uses, so pacing matches the
+    // measured arrival rate for both Chinese and Latin output.
     const tokPerSec = measured > 0 ? measured : DEFAULT_ARRIVAL_TOK_PER_SEC;
+    const pending = draft.slice(this._shownAssistantLength);
+    const requested = charsForTokenBudget(pending, tokPerSec * (SMOOTH_FRAME_MS / 1000));
     const budget = Math.min(
       MAX_CHARS_PER_FRAME,
-      Math.max(
-        MIN_CHARS_PER_FRAME,
-        Math.ceil(tokPerSec * (SMOOTH_FRAME_MS / 1000) * CHARS_PER_TOKEN),
-      ),
+      Math.max(MIN_CHARS_PER_FRAME, requested),
     );
     this._shownAssistantLength = Math.min(
       draft.length,
@@ -616,6 +724,7 @@ export class StreamingUIController {
     const completedTurnKey =
       this._currentTurnId ?? `local:${String(turnStartTime)}`;
     this.finalizeLiveTextBuffers();
+    this.endActivityGroup();
     this.resetToolCallState();
     this._currentTurnId = undefined;
 
@@ -703,6 +812,9 @@ export class StreamingUIController {
       block.component.updateContent(fullText);
       this.host.state.ui.requestRender();
     }
+    // Upstream layout: visible answer text seals the activity block, so the
+    // next round of work opens a fresh block right below it.
+    this.sealActivityGroupOnText(fullText);
   }
 
   onStreamingTextEnd(): void {
@@ -724,7 +836,7 @@ export class StreamingUIController {
         fullText,
         state.theme.colors,
         true,
-        'live',
+        'finalized',
         state.ui,
       );
       const entry: TranscriptEntry = {
@@ -739,24 +851,44 @@ export class StreamingUIController {
       this.host.pushTranscriptEntry(entry);
       this.host.transcriptController.registerLiveComponent(component, entry);
       this.host.transcriptController.markPending(component);
-      if (state.toolOutputExpanded) component.setExpanded(true);
-      state.transcriptContainer.addChild(component);
+      // The activity block owns the visible reasoning; the thinking component
+      // stays unmounted as a state container so the entry, pending and dispose
+      // plumbing keep working unchanged.
+      const group = this.ensureActivityGroup();
+      this.registerActivityGroupEntry(group, entry);
+      this._lastThinkingText = fullText;
+      group.setThinking(this.activityThinkingText(fullText), true);
     } else {
       this._activeThinkingComponent.setText(fullText);
       if (this._thinkingEntry !== undefined) {
         this._thinkingEntry.content = fullText;
       }
+      this._lastThinkingText = fullText;
+      // A block may have been sealed by earlier answer text (or never opened):
+      // reasoning that arrives now must stay visible, so it opens its own block.
+      this.ensureActivityGroup().setThinking(this.activityThinkingText(fullText), true);
     }
     state.ui.requestRender();
   }
 
   onThinkingEnd(): void {
     if (this._activeThinkingComponent === undefined) return;
-    this._activeThinkingComponent.finalize();
-    this.host.transcriptController.unmarkPending(this._activeThinkingComponent);
+    const component = this._activeThinkingComponent;
+    component.finalize();
+    this.host.transcriptController.unmarkPending(component);
     this.host.transcriptController.commit();
+    // The component is never mounted, so folding can never sweep it: drop its
+    // entry mapping now instead of retaining it (and the text it holds) forever.
+    this.host.transcriptController.releaseLiveComponent(component);
     this._activeThinkingComponent = undefined;
     this._thinkingEntry = undefined;
+    // Keep this step's reasoning for the block: the next step starts a fresh
+    // draft, and the block must show the whole turn's reasoning.
+    if (this._lastThinkingText.trim().length > 0) {
+      this._turnThinkingHistory = this.activityThinkingText(this._lastThinkingText);
+    }
+    this._lastThinkingText = '';
+    this._activityGroup?.endThinking();
     this.host.state.ui.requestRender();
   }
 
@@ -799,8 +931,16 @@ export class StreamingUIController {
     let handled = this.tryAttachAgentToolCall(toolCall, tc);
     if (!handled) handled = this.tryAttachReadToolCall(toolCall, tc);
     if (!handled) {
-      state.transcriptContainer.addChild(tc);
-      state.ui.requestRender();
+      if (StreamingUIController.STANDALONE_TOOL_NAMES.has(toolCall.name)) {
+        state.transcriptContainer.addChild(tc);
+        state.ui.requestRender();
+      } else {
+        const group = this.ensureActivityGroup();
+        this.registerActivityGroupEntry(group, entry);
+        this._groupByToolCard.set(tc, group);
+        group.attachTool(tc, toolCall.step ?? this._currentStep);
+        state.ui.requestRender();
+      }
     }
 
     if (toolCall.name === 'ExitPlanMode' && typeof toolCall.args['plan'] !== 'string') {
@@ -859,6 +999,16 @@ export class StreamingUIController {
     if (tc) {
       tc.setResult(result);
       tc.dispose();
+      // A grouped card drops its snapshot listener on dispose, so refresh the
+      // block that owns it — the active turn's block may already have settled,
+      // and a late result must still repaint its own row.
+      const owner = this._groupByToolCard.get(tc) ?? this._activityGroup;
+      owner?.notifyToolChanged();
+      if (owner !== undefined && this._groupByToolCard.has(tc)) {
+        // Borrowed cards are never container children, so folding never reaches
+        // them: release their entry mapping to keep the map from growing.
+        this.host.transcriptController.releaseLiveComponent(tc);
+      }
       this.host.transcriptController.unmarkPending(tc);
       this._pendingToolComponents.delete(toolCallId);
       const entry = this.host.state.transcriptEntries.find((e) => e.toolCallData?.id === toolCallId);

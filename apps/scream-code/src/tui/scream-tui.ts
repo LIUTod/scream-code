@@ -515,6 +515,9 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
   beginSessionRequest(): void {
     this.streamingUI.markTurnStarted();
     this.streamingUI.setTurnId(undefined);
+    // Close a block left open by a request that never reached turn end (send
+    // failure, abort) so it cannot swallow the next turn's activity.
+    this.streamingUI.endActivityGroup();
     this.streamingUI.resetLiveText();
     this.streamingUI.resetToolUi();
     this.streamingUI.resetToolCallState();
@@ -530,6 +533,9 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
 
   failSessionRequest(message: string): void {
     this.setAppState({ streamingPhase: 'idle' });
+    // A request that dies before its turn ends must still settle the activity
+    // block, otherwise its spinner keeps repainting forever.
+    this.streamingUI.endActivityGroup();
     this.resetLivePane();
     this.showError(message);
   }

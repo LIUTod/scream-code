@@ -414,6 +414,7 @@ describe('TranscriptController misc surface', () => {
     controller.clearAndRedraw();
 
     expect(streamingUI['discardPending']).toHaveBeenCalled();
+    expect(streamingUI['endActivityGroup']).toHaveBeenCalled();
     expect(streamingUI['disposeActiveCompactionBlock']).toHaveBeenCalled();
     expect(streamingUI['resetLiveText']).toHaveBeenCalled();
     expect(streamingUI['resetToolUi']).toHaveBeenCalled();

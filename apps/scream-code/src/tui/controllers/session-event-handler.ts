@@ -516,6 +516,10 @@ export class SessionEventHandler {
     void _event;
     this.host.streamingUI.resetToolUi();
     this.host.streamingUI.setStep(0);
+    // Turn boundary: settle any block the previous turn left open. The new
+    // turn's block is created lazily by its first reasoning / tool content, so
+    // a block always starts where work starts — right after the last answer.
+    this.host.streamingUI.endActivityGroup();
     this.host.patchLivePane({
       pendingApproval: null,
       pendingQuestion: null,
@@ -906,6 +910,8 @@ export class SessionEventHandler {
     this.host.streamingUI.flushNow();
     this.host.streamingUI.resetToolUi();
     this.host.streamingUI.finalizeLiveTextBuffers();
+    // Settle the block: an error may be the last event of the turn.
+    this.host.streamingUI.endActivityGroup();
     this.host.showError(`[${event.code}] ${event.message}`);
   }
 

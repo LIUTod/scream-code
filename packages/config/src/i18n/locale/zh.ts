@@ -102,7 +102,7 @@ export const zh: Record<string, string> = {
   'footer.model': '/model: 切换模型',
   'footer.ctrl_s': 'ctrl+s: 中途干预',
   'footer.compact': '/compact: 压缩上下文',
-  'footer.ctrl_o': 'ctrl+o: 展开工具输出',
+  'footer.ctrl_o': 'ctrl+o: 展开/收起最新详情',
   'footer.tasks': '/tasks: 后台任务',
   'footer.shift_enter': 'shift+enter: 换行',
   'footer.init': '/init: 生成 AGENTS.md',
@@ -1081,6 +1081,21 @@ export const zh: Record<string, string> = {
   'cronmsg.coalesced': '{count} 次合并触发',
   'cronmsg.missed': '{count} 次错过',
   'cronmsg.final_delivery': '最终投递',
+
+  // ─── activity-group ────────────
+  'activitygroup.running': '工具执行中',
+  'activitygroup.done': '工具执行完成',
+  'activitygroup.steps': '{count} 步',
+  'activitygroup.tools': '{count} 个工具',
+  'activitygroup.tokens': '≈{tok} tok',
+  'activitygroup.rate': ' · {rate} toks/s',
+  'activitygroup.hint_expand': '  (ctrl+o 展开)',
+  'activitygroup.hint_collapse': '  (ctrl+o 收起)',
+  'activitygroup.tools_hidden': '… 还有 {count} 个工具',
+  'activitygroup.thinking_label': '思考',
+  'activitygroup.thinking_summary': '思考：{summary}',
+  'activitygroup.thinking_more': '...（还有 {count} 行）',
+  'activitygroup.thinking_earlier': '...（前面还有 {count} 行）',
 
   // ─── thinking ──────────────────
   'thinking.in_progress': '思考中...',

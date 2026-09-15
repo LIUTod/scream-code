@@ -16,6 +16,7 @@ function createMockHost(): SessionEventHost {
     setTurnId: vi.fn(),
     resetLiveText: vi.fn(),
     resetToolUi: vi.fn(),
+    endActivityGroup: vi.fn(),
     flushNow: vi.fn(),
     finalizeLiveTextBuffers: vi.fn(),
     finalizeAssistantStream: vi.fn(),
