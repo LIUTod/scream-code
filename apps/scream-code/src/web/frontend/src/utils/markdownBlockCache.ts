@@ -36,7 +36,9 @@ export function blockKeyOf(token: Token): string {
 /** djb2 over the raw text — cheap, position-independent content hash. */
 function djb2(s: string): number {
   let h = 5381;
-  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.codePointAt(i)) | 0;
+  // codePointAt returns undefined only past the end of the string, which the
+  // loop bound already excludes; coalesce to keep it strict-safe.
+  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + (s.codePointAt(i) ?? 0)) | 0;
   return h >>> 0;
 }
 
