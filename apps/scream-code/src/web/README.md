@@ -254,7 +254,7 @@ The hard rules for WS frame handling (rooted in a production incident: the dispa
 | Module | Location | Responsibility |
 |---|---|---|
 | `runWebServer` | server.ts | Multi-session HTTP + WS entry; assembles the handler chain; gateway authentication |
-| `startWebServerForSession` | server.ts | Single-session mode entry (`scream web` bound to one session) |
+| `startWebServerForSession` | server.ts | Single-session HTTP + WS server; today only the web test-suite fixture uses it (production serves sessions through `runWebServer`) |
 | `SessionManager` | server.ts | Session table, create/activate/archive/fork/delete, model/thinking switches, generic forwarding |
 | `WebSession` | server.ts | Single-session wrapper: journal events, connections, approvals, Goal/Todo, reconnect recovery |
 | `useScreamWebClient` | frontend | The frontend's only state hub: WS events + REST calls + concurrency guards |

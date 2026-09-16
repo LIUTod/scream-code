@@ -3115,6 +3115,152 @@ export interface WebServerHandle {
   readonly close: () => Promise<void>;
 }
 
+// ─── Routes shared by both web server modes ────────────────────────────────
+// Single-session mode (startWebServerForSession, used by the web test-suite
+// fixture) and multi-session mode (runWebServer, the `scream web` production
+// entry) serve the same session-data endpoints and the same static tail;
+// only the session resolver and the git/file scope differ. One copy here
+// removes the change-one-miss-the-other duplication the two createServer
+// callbacks used to carry.
+
+/**
+ * Session-backed data routes: snapshot, message history / thinking entries,
+ * git status and single-file diff, plus the read-only file gate. Returns true
+ * when the request was handled (including the not-found arms).
+ */
+async function handleSessionDataRoutes(
+  req: IncomingMessage,
+  res: ServerResponse,
+  url: string,
+  method: string,
+  resolveSession: (sessionId: string) => WebSession | undefined,
+  workDir: string,
+  fileGate: FileGate,
+): Promise<boolean> {
+  // Snapshot
+  const snapshotMatch = new RegExp(`^${API_PREFIX}/sessions/([^/]+)/snapshot(\\?|$)`).exec(url);
+  if (snapshotMatch && method === 'GET') {
+    const ws = resolveSession(decodeURIComponent(snapshotMatch[1]!));
+    if (!ws) {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ code: 404, message: 'Session not found' }));
+      return true;
+    }
+    try {
+      await ws.ready;
+      const query = new URLSearchParams(url.split('?')[1] ?? '');
+      const tail = Number(query.get('tail') ?? '');
+      sendJson(res, 200, Number.isFinite(tail) && tail > 0 ? ws.getSnapshot({ tail }) : ws.getSnapshot());
+    } catch (error) {
+      sendHttpError(res, error);
+    }
+    return true;
+  }
+
+  // Older message history page (before = seq cursor), or full thinking entry (seq + tool)
+  const olderMatch = new RegExp(`^${API_PREFIX}/sessions/([^/?]+)/messages(\\?|$)`).exec(url);
+  if (olderMatch && method === 'GET') {
+    const ws = resolveSession(decodeURIComponent(olderMatch[1]!));
+    if (!ws) {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ code: 404, message: 'Session not found' }));
+      return true;
+    }
+    try {
+      await ws.ready;
+      const query = new URLSearchParams(url.split('?')[1] ?? '');
+      const seq = Number(query.get('seq') ?? '0');
+      const tool = query.get('tool') ?? '';
+      if (Number.isFinite(seq) && seq > 0 && tool) {
+        sendJson(res, 200, { output: ws.getThinkingEntry(seq, tool) });
+        return true;
+      }
+      const before = Number(query.get('before') ?? '0');
+      const tail = Number(query.get('tail') ?? '50');
+      const page = Number.isFinite(before) && before > 0 ? ws.getMessagesOlder(before, Number.isFinite(tail) && tail > 0 ? tail : 50) : { messages: [], hasMore: false };
+      sendJson(res, 200, page);
+    } catch (error) {
+      sendHttpError(res, error);
+    }
+    return true;
+  }
+
+  // Git status for the status bar
+  if (url === `${API_PREFIX}/git/status` && method === 'GET') {
+    const gs = await getGitStatus(workDir);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(gs));
+    return true;
+  }
+
+  // Single-file git diff
+  if (url.startsWith(`${API_PREFIX}/git/diff?`) && method === 'GET') {
+    const relPath = new URLSearchParams(url.split('?')[1] ?? '').get('path') ?? '';
+    try {
+      const result = await getGitFileDiff(workDir, relPath);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ path: relPath, patch: result?.patch ?? '' }));
+    } catch (error) {
+      sendHttpError(res, error);
+    }
+    return true;
+  }
+
+  // File gate (read-only browsing of session workdirs)
+  if (await handleFilesRoutes(req, res, url, method, API_PREFIX, fileGate)) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * SPA shell (`no-store`, so a reload never serves a stale bundle), content-
+ * hashed `/assets/` with long-term caching, and the terminal 404. Always ends
+ * the request, so it must be the last handler in the chain.
+ */
+async function handleStaticRoutes(res: ServerResponse, url: string, publicDir: string): Promise<void> {
+  if (url === '/' || url === '/index.html') {
+    try {
+      const html = await readFile(join(publicDir, 'index.html'), 'utf-8');
+      // The index page must be revalidated on every request: without cache
+      // headers Chrome applies heuristic freshness and serves the previous
+      // bundle after a reload — the number one "my change did not take
+      // effect" illusion, hit repeatedly in practice. Real assets are
+      // content-hashed, see below.
+      res.writeHead(200, {
+        'Content-Type': 'text/html; charset=utf-8',
+        'Cache-Control': 'no-store',
+      });
+      res.end(html);
+    } catch {
+      res.writeHead(500, { 'Content-Type': 'text/plain' });
+      res.end('Failed to load web UI. Did you run pnpm web:build?');
+    }
+    return;
+  }
+
+  const safeUrl = url.replaceAll(/\?.*$/g, '').replaceAll(/\.{2,}/g, '');
+  try {
+    const filePath = join(publicDir, safeUrl);
+    const ext = filePath.split('.').pop() ?? '';
+    const contentType = contentTypes[ext] ?? 'application/octet-stream';
+    const data = await readFile(filePath);
+    // /assets/ holds Vite content-hashed output: a new build means new file
+    // names, so it can be cached long-term; the remaining static files
+    // (icons, …) keep the defaults so non-hashed assets are never pinned.
+    const headers: Record<string, string> = { 'Content-Type': contentType };
+    if (safeUrl.startsWith('/assets/')) {
+      headers['Cache-Control'] = 'public, max-age=31536000, immutable';
+    }
+    res.writeHead(200, headers);
+    res.end(data);
+  } catch {
+    res.writeHead(404, { 'Content-Type': 'text/plain' });
+    res.end('Not found');
+  }
+}
+
 export async function startWebServerForSession(session: Session, opts: {
   readonly port: number;
   readonly workDir: string;
@@ -3169,43 +3315,17 @@ export async function startWebServerForSession(session: Session, opts: {
       return;
     }
 
-    const snapshotMatch = new RegExp(`^${API_PREFIX}/sessions/([^/]+)/snapshot(\\?|$)`).exec(url);
-    if (snapshotMatch && method === 'GET') {
-      const sid = snapshotMatch[1]!;
-      if (sid !== webSession.sessionId) {
-        res.writeHead(404, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ code: 404, message: 'Session not found' }));
-        return;
-      }
-      try {
-        await webSession.ready;
-        const query = new URLSearchParams(url.split('?')[1] ?? '');
-        const tail = Number(query.get('tail') ?? '');
-        sendJson(res, 200, Number.isFinite(tail) && tail > 0 ? webSession.getSnapshot({ tail }) : webSession.getSnapshot());
-      } catch (error) {
-        sendHttpError(res, error);
-      }
-      return;
-    }
-
-    // Older message history page (before = seq cursor) + full thinking entry (seq + tool)
-    if (url.startsWith(`${API_PREFIX}/sessions/${webSession.sessionId}/messages?`) && method === 'GET') {
-      try {
-        await webSession.ready;
-        const query = new URLSearchParams(url.split('?')[1] ?? '');
-        const seq = Number(query.get('seq') ?? '0');
-        const tool = query.get('tool') ?? '';
-        if (Number.isFinite(seq) && seq > 0 && tool) {
-          sendJson(res, 200, { output: webSession.getThinkingEntry(seq, tool) });
-          return;
-        }
-        const before = Number(query.get('before') ?? '0');
-        const tail = Number(query.get('tail') ?? '50');
-        const page = Number.isFinite(before) && before > 0 ? webSession.getMessagesOlder(before, Number.isFinite(tail) && tail > 0 ? tail : 50) : { messages: [], hasMore: false };
-        sendJson(res, 200, page);
-      } catch (error) {
-        sendHttpError(res, error);
-      }
+    if (
+      await handleSessionDataRoutes(
+        req,
+        res,
+        url,
+        method,
+        (sessionId) => (sessionId === webSession.sessionId ? webSession : undefined),
+        opts.workDir,
+        new FileGate(() => [opts.workDir]),
+      )
+    ) {
       return;
     }
 
@@ -3215,71 +3335,7 @@ export async function startWebServerForSession(session: Session, opts: {
       return;
     }
 
-    // Git status for the status bar
-    if (url === `${API_PREFIX}/git/status` && method === 'GET') {
-      const gs = await getGitStatus(opts.workDir);
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(gs));
-      return;
-    }
-
-    // Single-file git diff
-    if (url.startsWith(`${API_PREFIX}/git/diff?`) && method === 'GET') {
-      const relPath = new URLSearchParams(url.split('?')[1] ?? '').get('path') ?? '';
-      try {
-        const result = await getGitFileDiff(opts.workDir, relPath);
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ path: relPath, patch: result?.patch ?? '' }));
-      } catch (error) {
-        sendHttpError(res, error);
-      }
-      return;
-    }
-
-    // File gate (read-only browsing of this session's workdir)
-    if (await handleFilesRoutes(req, res, url, method, API_PREFIX, new FileGate(() => [opts.workDir]))) {
-      return;
-    }
-
-    if (url === '/' || url === '/index.html') {
-      try {
-        const html = await readFile(join(publicDir, 'index.html'), 'utf-8');
-        // The index page must be revalidated on every request: without cache
-        // headers Chrome applies heuristic freshness and serves the previous
-        // bundle after a reload — the number one "my change did not take
-        // effect" illusion, hit repeatedly in practice. Real assets are
-        // content-hashed, see below.
-        res.writeHead(200, {
-          'Content-Type': 'text/html; charset=utf-8',
-          'Cache-Control': 'no-store',
-        });
-        res.end(html);
-      } catch {
-        res.writeHead(500, { 'Content-Type': 'text/plain' });
-        res.end('Failed to load web UI. Did you run pnpm web:build?');
-      }
-      return;
-    }
-
-    const safeUrl = url.replaceAll(/\?.*$/g, '').replaceAll(/\.{2,}/g, '');
-    try {
-      const filePath = join(publicDir, safeUrl);
-      const ext = filePath.split('.').pop() ?? '';
-      const contentType = contentTypes[ext] ?? 'application/octet-stream';
-      const data = await readFile(filePath);
-      // /assets/ holds Vite content-hashed output: a new build means new file
-      // names, so it can be cached long-term; the remaining static files
-      // (icons, …) keep the defaults so non-hashed assets are never pinned.
-      const headers: Record<string, string> = { 'Content-Type': contentType };
-      if (safeUrl.startsWith('/assets/')) {
-        headers['Cache-Control'] = 'public, max-age=31536000, immutable';
-      }
-      res.writeHead(200, headers);
-      res.end(data);
-    } catch {
-      res.writeHead(404, { 'Content-Type': 'text/plain' });
-      res.end('Not found');
-    }
+    await handleStaticRoutes(res, url, publicDir);
   });
 
   const wss = new WebSocketServer({ server: httpServer });
@@ -3956,86 +4012,19 @@ export async function runWebServer(opts: WebServerOptions): Promise<WebServerHan
       return;
     }
 
-    // Snapshot
-    const snapshotMatch = new RegExp(`^${API_PREFIX}/sessions/([^/]+)/snapshot(\\?|$)`).exec(url);
-    if (snapshotMatch && method === 'GET') {
-      const sessionId = decodeURIComponent(snapshotMatch[1]!);
-      const ws = manager.get(sessionId);
-      if (!ws) {
-        res.writeHead(404, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ code: 404, message: 'Session not found' }));
-        return;
-      }
-      try {
-        await ws.ready;
-        const query = new URLSearchParams(url.split('?')[1] ?? '');
-        const tail = Number(query.get('tail') ?? '');
-        sendJson(res, 200, Number.isFinite(tail) && tail > 0 ? ws.getSnapshot({ tail }) : ws.getSnapshot());
-      } catch (error) {
-        sendHttpError(res, error);
-      }
+    if (
+      await handleSessionDataRoutes(
+        req,
+        res,
+        url,
+        method,
+        (sessionId) => manager.get(sessionId),
+        workDir,
+        new FileGate(() => manager.list().map((s) => s.workDir)),
+      )
+    ) {
       return;
     }
-
-    // Older message history page (before = seq cursor), or full thinking entry (seq + tool)
-    const olderMatch = /^\/api\/v1\/sessions\/([^/?]+)\/messages(\?|$)/.exec(url);
-    if (olderMatch && method === 'GET') {
-      const sessionId = decodeURIComponent(olderMatch[1]!);
-      const ws = manager.get(sessionId);
-      if (!ws) {
-        res.writeHead(404, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ code: 404, message: 'Session not found' }));
-        return;
-      }
-      try {
-        await ws.ready;
-        const query = new URLSearchParams(url.split('?')[1] ?? '');
-        const seq = Number(query.get('seq') ?? '0');
-        const tool = query.get('tool') ?? '';
-        if (Number.isFinite(seq) && seq > 0 && tool) {
-          sendJson(res, 200, { output: ws.getThinkingEntry(seq, tool) });
-          return;
-        }
-        const before = Number(query.get('before') ?? '0');
-        const tail = Number(query.get('tail') ?? '50');
-        const page = Number.isFinite(before) && before > 0 ? ws.getMessagesOlder(before, Number.isFinite(tail) && tail > 0 ? tail : 50) : { messages: [], hasMore: false };
-        sendJson(res, 200, page);
-      } catch (error) {
-        sendHttpError(res, error);
-      }
-      return;
-    }
-
-    // Git status for the status bar
-    if (url === `${API_PREFIX}/git/status` && method === 'GET') {
-      const gs = await getGitStatus(workDir);
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(gs));
-      return;
-    }
-
-    // Single-file git diff
-    if (url.startsWith(`${API_PREFIX}/git/diff?`) && method === 'GET') {
-      const relPath = new URLSearchParams(url.split('?')[1] ?? '').get('path') ?? '';
-      try {
-        const result = await getGitFileDiff(workDir, relPath);
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ path: relPath, patch: result?.patch ?? '' }));
-      } catch (error) {
-        sendHttpError(res, error);
-      }
-      return;
-    }
-
-  // ── File gate (read-only browsing of session workdirs) ───────────────────
-
-  function makeFileGate(): FileGate {
-    return new FileGate(() => manager.list().map((s) => s.workDir));
-  }
-
-  if (await handleFilesRoutes(req, res, url, method, API_PREFIX, makeFileGate())) {
-    return;
-  }
 
     // Like preferences (shared with the TUI via tui.toml + user-prefs.md)
     if (url === `${API_PREFIX}/like` && method === 'GET') {
@@ -4235,45 +4224,7 @@ export async function runWebServer(opts: WebServerOptions): Promise<WebServerHan
 
     // ── Static assets ─────────────────────────────────────────────────────
 
-    if (url === '/' || url === '/index.html') {
-      try {
-        const html = await readFile(join(publicDir, 'index.html'), 'utf-8');
-        // The index page must be revalidated on every request: without cache
-        // headers Chrome applies heuristic freshness and serves the previous
-        // bundle after a reload — the number one "my change did not take
-        // effect" illusion, hit repeatedly in practice. Real assets are
-        // content-hashed, see below.
-        res.writeHead(200, {
-          'Content-Type': 'text/html; charset=utf-8',
-          'Cache-Control': 'no-store',
-        });
-        res.end(html);
-      } catch {
-        res.writeHead(500, { 'Content-Type': 'text/plain' });
-        res.end('Failed to load web UI. Did you run pnpm web:build?');
-      }
-      return;
-    }
-
-    const safeUrl = url.replaceAll(/\?.*$/g, '').replaceAll(/\.{2,}/g, '');
-    try {
-      const filePath = join(publicDir, safeUrl);
-      const ext = filePath.split('.').pop() ?? '';
-      const contentType = contentTypes[ext] ?? 'application/octet-stream';
-      const data = await readFile(filePath);
-      // /assets/ holds Vite content-hashed output: a new build means new file
-      // names, so it can be cached long-term; the remaining static files
-      // (icons, …) keep the defaults so non-hashed assets are never pinned.
-      const headers: Record<string, string> = { 'Content-Type': contentType };
-      if (safeUrl.startsWith('/assets/')) {
-        headers['Cache-Control'] = 'public, max-age=31536000, immutable';
-      }
-      res.writeHead(200, headers);
-      res.end(data);
-    } catch {
-      res.writeHead(404, { 'Content-Type': 'text/plain' });
-      res.end('Not found');
-    }
+    await handleStaticRoutes(res, url, publicDir);
   });
 
   // ── WebSocket server ───────────────────────────────────────────────────
