@@ -109,7 +109,7 @@ export const darkColors: ColorPalette = {
   mdLink: '#56B6C2',
   mdCodeBlock: '#9CDCFE',
   mdCodeBlockBorder: '#5C6370',
-  mdCodeBlockBg: '#1e232b',
+  mdCodeBlockBg: '#16191f',
   mdQuote: '#7F848E',
 
   // Surface
@@ -153,7 +153,7 @@ export const lightColors: ColorPalette = {
   mdLink: '#007A8A',
   mdCodeBlock: '#1565C0',
   mdCodeBlockBorder: '#848484',
-  mdCodeBlockBg: '#f2f4f8',
+  mdCodeBlockBg: '#f7f9fb',
   mdQuote: '#616161',
 
   // Surface

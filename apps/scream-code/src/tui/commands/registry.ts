@@ -161,6 +161,20 @@ export const BUILTIN_SLASH_COMMANDS = [
     availability: 'always',
   },
   {
+    name: 'blockrows',
+    aliases: ['rows'],
+    description: 'registry.blockrows_desc',
+    priority: 179,
+    availability: 'always',
+  },
+  {
+    name: 'codebg',
+    aliases: ['codeblock'],
+    description: 'registry.codebg_desc',
+    priority: 180,
+    availability: 'always',
+  },
+  {
     name: 'like',
     aliases: [],
     description: 'registry.like_desc',

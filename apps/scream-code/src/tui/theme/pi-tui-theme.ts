@@ -11,6 +11,7 @@ import chalk from 'chalk';
 import { highlight, supportsLanguage, type Theme } from 'cli-highlight';
 
 import type { ColorPalette } from './colors';
+import { isCodeBlockPanelEnabled } from '#/tui/utils/ui-preferences';
 
 // pi-tui's renderer emits literal "### " / "#### " / ... markers for h3-h6
 // headings (h1/h2 are rendered without the `#` prefix). The prefix arrives
@@ -98,8 +99,6 @@ export function createMarkdownTheme(colors: ColorPalette): MarkdownTheme {
     codeBlockBorder: () => null,
     codeBlockIndent: ' ',
     codeBlockLine: (line, { index, lang, width }) => {
-      const panel = chalk.bgHex(colors.mdCodeBlockBg);
-      const labelPaint = chalk.bgHex(colors.mdCodeBlockBg).hex(colors.mdCodeBlock);
       // Clamp first: a line wider than the panel would be wrapped by the library,
       // and the wrapped remainder loses the panel gutter and background fill.
       const content =
@@ -112,8 +111,15 @@ export function createMarkdownTheme(colors: ColorPalette): MarkdownTheme {
       const showLabel = labelCells > 0 && 1 + contentCells + labelCells + 1 <= width;
       const filler = showLabel ? Math.max(0, width - contentCells - labelCells - 2) : 0;
       const padCells = showLabel ? 1 : Math.max(0, width - contentCells - 1);
+      // `/codebg` off drops the fill but keeps the row layout, so the gutter and
+      // the right-aligned label stay where they are.
+      const panelled = isCodeBlockPanelEnabled();
+      const paint = panelled ? chalk.bgHex(colors.mdCodeBlockBg) : (text: string): string => text;
+      const labelPaint = panelled
+        ? chalk.bgHex(colors.mdCodeBlockBg).hex(colors.mdCodeBlock)
+        : chalk.hex(colors.mdCodeBlock);
       const label = showLabel ? chalk.italic(labelPaint(rawLabel)) : '';
-      return `${panel(' ')}${panel(content)}${panel(' '.repeat(filler))}${label}${panel(' '.repeat(padCells))}`;
+      return `${paint(' ')}${paint(content)}${paint(' '.repeat(filler))}${label}${paint(' '.repeat(padCells))}`;
     },
     quote: (text) => chalk.hex(colors.mdQuote)(text),
     quoteBorder: (text) => chalk.hex(colors.mdQuote)(text),

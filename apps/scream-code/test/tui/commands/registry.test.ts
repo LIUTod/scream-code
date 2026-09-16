@@ -42,6 +42,10 @@ describe('built-in slash command registry', () => {
     expect(findBuiltInSlashCommand('skills')?.name).toBe('plugin');
     expect(findBuiltInSlashCommand('plugin')?.name).toBe('plugin');
     expect(findBuiltInSlashCommand('plugins')?.name).toBe('plugin');
+    expect(findBuiltInSlashCommand('blockrows')?.name).toBe('blockrows');
+    expect(findBuiltInSlashCommand('rows')?.name).toBe('blockrows');
+    expect(findBuiltInSlashCommand('codebg')?.name).toBe('codebg');
+    expect(findBuiltInSlashCommand('codeblock')?.name).toBe('codebg');
     expect(findBuiltInSlashCommand('unknown')).toBeUndefined();
   });
 
