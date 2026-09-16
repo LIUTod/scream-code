@@ -234,6 +234,12 @@ class LocalProcess implements JianProcess {
   }
 }
 
+// Guards two writeTextAtomic calls in the same process landing in the same
+// millisecond and racing on an identical tmp path (rename() would then fail
+// with ENOENT on the second mover). Same rationale as the session store's
+// state-write counter.
+let atomicWriteCounter = 0;
+
 /**
  * A JIAN implementation that directly interacts with the local filesystem.
  *
@@ -242,12 +248,6 @@ class LocalProcess implements JianProcess {
  * coexist with independent cwds (e.g. when switching contexts via
  * `runWithJian`) without cross-polluting each other's relative-path resolution.
  */
-// Guards two writeTextAtomic calls in the same process landing in the same
-// millisecond and racing on an identical tmp path (rename() would then fail
-// with ENOENT on the second mover). Same rationale as the session store's
-// state-write counter.
-let atomicWriteCounter = 0;
-
 export class LocalJian implements Jian {
   readonly name: string = 'local';
   readonly osEnv: Environment;

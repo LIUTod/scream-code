@@ -89,6 +89,12 @@ export interface Jian {
    * rename swap is all-or-nothing: after a crash the reader sees either the
    * old content or the new content, never a partial one. The temp file is
    * created next to the target so the rename never crosses filesystems.
+   *
+   * A failed write or rename may leave the uniquely named temp file behind;
+   * it is inert and safe to ignore or clean up. Because the swap replaces
+   * the target inode, a rewritten file's permissions follow the process
+   * umask (the same trade-off the session store's atomic state swap makes),
+   * and a symlink at the target is replaced rather than written through.
    */
   writeTextAtomic(path: string, data: string, options?: { encoding?: BufferEncoding }): Promise<number>;
   /** Create a directory at `path`. */
