@@ -1,7 +1,9 @@
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'pathe';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+import type { Jian } from '@scream-code/jian';
 
 import { testJian } from '../fixtures/test-jian';
 import { Session } from '../../src/session';
@@ -20,10 +22,10 @@ async function makeTempDir(): Promise<string> {
   return dir;
 }
 
-function makeSession(homedir: string): Session {
+function makeSession(homedir: string, jian: Jian = testJian.withCwd(homedir)): Session {
   return new Session({
     id: 'test-meta',
-    jian: testJian.withCwd(homedir),
+    jian,
     homedir,
     rpc: {} as never,
   });
@@ -80,18 +82,26 @@ describe('Session.readMetadata resilience', () => {
     expect(meta.isCustomTitle).toBe(true);
   });
 
-  it('writeMetadata persists a parseable state.json without tmp residue', async () => {
+  it('writeMetadata goes through the atomic write path', async () => {
     const homedir = await makeTempDir();
-    const session = makeSession(homedir);
+    const jian = testJian.withCwd(homedir);
+    // Contract guard: reverting writeMetadata to plain writeText trips both
+    // spy assertions below, pinning the regression the atomic write exists
+    // for — a truncated state.json silently resets the session to default
+    // metadata and loses the whole agent topology.
+    const atomicSpy = vi.spyOn(jian, 'writeTextAtomic');
+    const plainSpy = vi.spyOn(jian, 'writeText');
+    const session = makeSession(homedir, jian);
     await session.writeMetadata();
 
-    // The atomic write must leave exactly one file: a complete state.json.
-    // A tmp+rename swap guarantees a crash mid-write cannot truncate it, and
-    // a successful rename must not leave the tmp file behind.
+    expect(atomicSpy).toHaveBeenCalledTimes(1);
+    expect(plainSpy).not.toHaveBeenCalled();
+
+    // The swap must leave exactly one file: a complete state.json, with no
+    // tmp residue behind.
     const text = await readFile(join(homedir, 'state.json'), 'utf-8');
     const parsed = JSON.parse(text) as { title?: string };
     expect(parsed.title).toBe('New Session');
-
     const entries = await readdir(homedir);
     expect(entries.filter((entry) => entry.endsWith('.tmp'))).toEqual([]);
   });
