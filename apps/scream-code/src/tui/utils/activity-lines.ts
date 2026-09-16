@@ -45,7 +45,7 @@ export const ACTIVITY_LINE_SETTINGS: readonly ActivityLineSetting[] = [
   {
     key: 'activityCollapsedLines',
     label: 'blockrows.item_collapsed',
-    values: [2, 5, 8],
+    values: [3, 5, 8],
     fallback: ACTIVITY_GROUP_COLLAPSED_LINES,
   },
   {

@@ -772,7 +772,10 @@ export class ActivityGroupComponent extends Container {
     // text. The summary takes the rest of the row — the block is the main view of
     // a turn now, so the row is bounded by the terminal, not by a fixed slice.
     const used = visibleWidth(isLast ? BRANCH_LAST : BRANCH_FIRST) + visibleWidth(label);
-    const cells = Math.max(1, width - used);
+    // One cell of breathing room on the right: flush against the edge, a
+    // truncated summary reads as bleeding out of the frame, and the ellipsis
+    // glyph of several fonts adds to that on real terminals.
+    const cells = Math.max(1, width - used - 1);
     const summary = chalk.hex(this.colors.roleThinking)(
       t('activitygroup.thinking_summary', { summary: truncateToWidth(first, cells, '…') }),
     );
