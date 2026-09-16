@@ -113,7 +113,7 @@ export const darkColors: ColorPalette = {
   mdCodeBlockBorder: '#5C6370',
   mdCodeBlockBg: '#16191f',
   mdQuote: '#7F848E',
-  mdHeading: '#E5C07B',
+  mdHeading: '#FFC35C',
 
   // Surface
   border: dark.gray700,
