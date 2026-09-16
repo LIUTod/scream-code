@@ -89,10 +89,13 @@ export function createMarkdownTheme(colors: ColorPalette): MarkdownTheme {
   const border = chalk.hex(colors.border);
   const codeTheme = createMarkdownCodeHighlightTheme(colors);
   return {
-    heading: (text) => chalk.bold.hex(colors.text)(stripHash(text)),
+    // Signature heading color — gives long replies a visible structure.
+    heading: (text) => chalk.bold.hex(colors.mdHeading)(stripHash(text)),
     link: (text) => chalk.hex(colors.mdLink)(text),
     linkUrl: (text) => muted(text),
-    code: (text) => chalk.hex(colors.primary)(text),
+    // Inline code keeps the brand green family but desaturated, so it does
+    // not shout the way the raw accent does inside running prose.
+    code: (text) => chalk.hex(colors.mdCodeInline)(text),
     codeBlock: (text) => chalk.hex(colors.mdCodeBlock)(text),
     // Fenced code renders as a background panel: the decorative top and bottom
     // fence rows are dropped and every line is styled by `codeBlockLine`.
