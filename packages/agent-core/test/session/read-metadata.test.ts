@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'pathe';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -78,5 +78,21 @@ describe('Session.readMetadata resilience', () => {
 
     expect(meta.title).toBe('Test Session');
     expect(meta.isCustomTitle).toBe(true);
+  });
+
+  it('writeMetadata persists a parseable state.json without tmp residue', async () => {
+    const homedir = await makeTempDir();
+    const session = makeSession(homedir);
+    await session.writeMetadata();
+
+    // The atomic write must leave exactly one file: a complete state.json.
+    // A tmp+rename swap guarantees a crash mid-write cannot truncate it, and
+    // a successful rename must not leave the tmp file behind.
+    const text = await readFile(join(homedir, 'state.json'), 'utf-8');
+    const parsed = JSON.parse(text) as { title?: string };
+    expect(parsed.title).toBe('New Session');
+
+    const entries = await readdir(homedir);
+    expect(entries.filter((entry) => entry.endsWith('.tmp'))).toEqual([]);
   });
 });

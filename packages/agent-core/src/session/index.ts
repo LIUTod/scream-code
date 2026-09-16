@@ -395,7 +395,10 @@ export class Session {
     const text = JSON.stringify(this.metadata, null, 2);
     const write = async () => {
       await this.options.jian.mkdir(this.options.homedir, { parents: true, existOk: true });
-      await this.options.jian.writeText(this.metadataPath, text);
+      // Atomic swap: a process killed mid-write must not leave a truncated
+      // state.json behind — resume() would fall back to synthetic default
+      // metadata and lose the whole agent topology (see readMetadata).
+      await this.options.jian.writeTextAtomic(this.metadataPath, text);
     };
     // Recover from a rejected link: without the rejection arm, one failed
     // write would latch the chain and silently stop all future metadata

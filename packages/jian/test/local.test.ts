@@ -97,6 +97,32 @@ describe('LocalJian', () => {
     });
   });
 
+  describe('writeTextAtomic', () => {
+    it('writes content that reads back intact', async () => {
+      const filePath = join(tempDir, 'atomic.txt');
+      await jian.writeTextAtomic(filePath, 'hello world');
+      await expect(jian.readText(filePath)).resolves.toBe('hello world');
+    });
+
+    it('replaces an existing file without leaving a tmp file behind', async () => {
+      const filePath = join(tempDir, 'atomic-replace.txt');
+      await jian.writeText(filePath, 'old content');
+      await jian.writeTextAtomic(filePath, 'new content');
+      await expect(jian.readText(filePath)).resolves.toBe('new content');
+      const leftovers: string[] = [];
+      for await (const entry of jian.iterdir(tempDir)) {
+        if (entry.endsWith('.tmp')) leftovers.push(entry);
+      }
+      expect(leftovers).toEqual([]);
+    });
+
+    it('honours the encoding option', async () => {
+      const filePath = join(tempDir, 'atomic-encoding.txt');
+      await jian.writeTextAtomic(filePath, 'héllo', { encoding: 'utf-8' });
+      await expect(jian.readText(filePath)).resolves.toBe('héllo');
+    });
+  });
+
   describe('iterdir path normalization', () => {
     it('should produce normalized paths even when the argument has a trailing separator', async () => {
       // Regression: previously, iterdir manually concatenated `resolved + sep

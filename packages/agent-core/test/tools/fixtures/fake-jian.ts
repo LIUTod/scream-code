@@ -53,6 +53,7 @@ export function createFakeJian(overrides?: Partial<Jian>): Jian {
     readLines: () => notImplemented('readLines'),
     writeBytes: () => notImplemented('writeBytes'),
     writeText: () => notImplemented('writeText'),
+    writeTextAtomic: () => notImplemented('writeTextAtomic'),
     mkdir: () => notImplemented('mkdir'),
     exec: () => notImplemented('exec'),
     execWithEnv: () => notImplemented('execWithEnv'),

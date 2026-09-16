@@ -980,6 +980,7 @@ function createResumeNoSideEffectJian(initialCwd: string): Jian {
     readLines: () => fail('readLines'),
     writeBytes: () => fail('writeBytes'),
     writeText: () => fail('writeText'),
+    writeTextAtomic: () => fail('writeTextAtomic'),
     mkdir: () => fail('mkdir'),
     exec: () => fail('exec'),
     execWithEnv: () => fail('execWithEnv'),

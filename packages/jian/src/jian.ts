@@ -80,6 +80,17 @@ export interface Jian {
     data: string,
     options?: { mode?: 'w' | 'a'; encoding?: BufferEncoding },
   ): Promise<number>;
+  /**
+   * Write text to `path` atomically (temp file + rename), returning the
+   * number of characters written.
+   *
+   * Plain `writeText` truncates the target before the new bytes land, so a
+   * process killed mid-write leaves a truncated file behind. The temp-file +
+   * rename swap is all-or-nothing: after a crash the reader sees either the
+   * old content or the new content, never a partial one. The temp file is
+   * created next to the target so the rename never crosses filesystems.
+   */
+  writeTextAtomic(path: string, data: string, options?: { encoding?: BufferEncoding }): Promise<number>;
   /** Create a directory at `path`. */
   mkdir(path: string, options?: { parents?: boolean; existOk?: boolean }): Promise<void>;
 
