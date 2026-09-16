@@ -3140,7 +3140,19 @@ async function handleSessionDataRoutes(
   // Snapshot
   const snapshotMatch = new RegExp(`^${API_PREFIX}/sessions/([^/]+)/snapshot(\\?|$)`).exec(url);
   if (snapshotMatch && method === 'GET') {
-    const ws = resolveSession(decodeURIComponent(snapshotMatch[1]!));
+    let sessionId: string;
+    try {
+      sessionId = decodeURIComponent(snapshotMatch[1]!);
+    } catch {
+      // Malformed percent-encoding makes decodeURIComponent throw URIError;
+      // the id can never match a live session, so answer as unknown instead
+      // of letting the exception escape as an unhandled rejection (which
+      // would crash the process).
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ code: 404, message: 'Session not found' }));
+      return true;
+    }
+    const ws = resolveSession(sessionId);
     if (!ws) {
       res.writeHead(404, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ code: 404, message: 'Session not found' }));
@@ -3160,7 +3172,16 @@ async function handleSessionDataRoutes(
   // Older message history page (before = seq cursor), or full thinking entry (seq + tool)
   const olderMatch = new RegExp(`^${API_PREFIX}/sessions/([^/?]+)/messages(\\?|$)`).exec(url);
   if (olderMatch && method === 'GET') {
-    const ws = resolveSession(decodeURIComponent(olderMatch[1]!));
+    let sessionId: string;
+    try {
+      sessionId = decodeURIComponent(olderMatch[1]!);
+    } catch {
+      // Same malformed-encoding guard as the snapshot arm above.
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ code: 404, message: 'Session not found' }));
+      return true;
+    }
+    const ws = resolveSession(sessionId);
     if (!ws) {
       res.writeHead(404, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ code: 404, message: 'Session not found' }));
