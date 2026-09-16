@@ -28,16 +28,17 @@ const HEADING_HASH_PREFIX = /^((?:\u001B\[[0-9;]*m)*)#{1,6}[ \t]+/;
  * its DEFAULT_THEME.
  */
 /**
- * Markdown code-block highlight theme: green-dominant mapping (keyword,
- * function, built_in → primary; strings → success; numbers → warning;
- * comments → textDim). Kept distinct from the shared preview theme in
- * code-highlight-theme.ts on purpose — markdown code blocks use the green
+ * Markdown code-block highlight theme: the fluorescent brand green is the
+ * only green (keyword, function, built_in, diff additions); strings take the
+ * heading amber; numbers → warning; comments → textDim. Kept distinct from
+ * the shared preview theme in code-highlight-theme.ts on purpose.
  * primary hue, while file-preview panels use the classic blue/red/yellow
  * scheme mapped to the same palette. Both follow the active theme.
  */
 function createMarkdownCodeHighlightTheme(colors: ColorPalette): Theme {
   const keyword = chalk.hex(colors.primary);
-  const str = chalk.hex(colors.success);
+  // Strings share the heading amber so the brand green stays the only green.
+  const str = chalk.hex(colors.mdHeading);
   const comment = chalk.hex(colors.textDim);
   const num = chalk.hex(colors.warning);
   const fn = chalk.hex(colors.primary);
@@ -77,7 +78,7 @@ function createMarkdownCodeHighlightTheme(colors: ColorPalette): Theme {
     formula: text,
     link: chalk.hex(colors.mdLink),
     quote: chalk.hex(colors.mdQuote),
-    addition: chalk.hex(colors.diffAdded),
+    addition: keyword,
     deletion: chalk.hex(colors.diffRemoved),
     default: text,
   };
@@ -93,9 +94,8 @@ export function createMarkdownTheme(colors: ColorPalette): MarkdownTheme {
     heading: (text) => chalk.bold.hex(colors.mdHeading)(stripHash(text)),
     link: (text) => chalk.hex(colors.mdLink)(text),
     linkUrl: (text) => muted(text),
-    // Inline code keeps the brand green family but desaturated, so it does
-    // not shout the way the raw accent does inside running prose.
-    code: (text) => chalk.hex(colors.mdCodeInline)(text),
+    // Inline code is the brand accent itself; the palette keeps it the only green.
+    code: (text) => chalk.hex(colors.primary)(text),
     codeBlock: (text) => chalk.hex(colors.mdCodeBlock)(text),
     // Fenced code renders as a background panel: the decorative top and bottom
     // fence rows are dropped and every line is styled by `codeBlockLine`.

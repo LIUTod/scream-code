@@ -65,10 +65,8 @@ export interface ColorPalette {
   /** Panel background behind fenced code blocks (dark/light aware surface). */
   mdCodeBlockBg: string;
   mdQuote: string;
-  /** Markdown headings — the signature color that gives replies a structure. */
+  /** Markdown headings — the amber signature color that gives replies a structure. */
   mdHeading: string;
-  /** Inline code — a desaturated member of the brand green family. */
-  mdCodeInline: string;
 
   border: string;
   borderFocus: string;
@@ -115,8 +113,7 @@ export const darkColors: ColorPalette = {
   mdCodeBlockBorder: '#5C6370',
   mdCodeBlockBg: '#16191f',
   mdQuote: '#7F848E',
-  mdHeading: dark.yellowGreenLight,
-  mdCodeInline: '#a8d56a',
+  mdHeading: '#E5C07B',
 
   // Surface
   border: dark.gray700,
@@ -161,8 +158,7 @@ export const lightColors: ColorPalette = {
   mdCodeBlockBorder: '#848484',
   mdCodeBlockBg: '#f7f9fb',
   mdQuote: '#616161',
-  mdHeading: light.yellowGreen700,
-  mdCodeInline: light.yellowGreen700,
+  mdHeading: '#8F6400',
 
   // Surface
   border: light.gray500,
