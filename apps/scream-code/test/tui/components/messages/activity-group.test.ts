@@ -41,11 +41,6 @@ function render(group: ActivityGroupComponent, width = WIDTH): string[] {
   return group.render(width).map(strip);
 }
 
-/** The token field of the block header, so two headers can be compared. */
-function tokenField(header: string | undefined): string {
-  return header?.split('·').find((part) => part.includes('tok'))?.trim() ?? '';
-}
-
 function nonEmpty(lines: string[]): string[] {
   return lines.filter((line) => line.trim().length > 0);
 }
@@ -140,14 +135,14 @@ describe('ActivityGroupComponent', () => {
     expect(lines[1]).toContain('…');
   });
 
-  it('does not count a background task notice towards the block tokens', () => {
+  it('keeps a background task notice out of the header stats', () => {
     const group = new ActivityGroupComponent(darkColors, undefined);
     group.attachTool(makeTool('t1', 'Bash', { command: 'ls -la' }), 1);
-    const before = tokenField(nonEmpty(render(group))[0]);
+    const before = nonEmpty(render(group))[0];
 
     group.attachNotice({ phase: 'completed', headline: '后台任务已完成', detail: 'bash-1' });
 
-    expect(tokenField(nonEmpty(render(group))[0])).toBe(before);
+    expect(nonEmpty(render(group))[0]).toBe(before);
   });
 
   it('pairs the newest tool with the reasoning run that led to it', () => {
@@ -293,33 +288,6 @@ describe('ActivityGroupComponent', () => {
     // Settled: back to the dash, the numbers would be stale.
     group.endThinking();
     expect(nonEmpty(render(group))[0]).toContain('- toks/s');
-  });
-
-  it('sizes the header estimate by reasoning plus every tool result', () => {
-    const tokenValue = (header: string): number => {
-      const match = /≈([\d.]+)(K?) tok/.exec(header);
-      if (match === null) return -1;
-      const value = Number.parseFloat(match[1] ?? '0');
-      return match[2] === 'K' ? value * 1000 : value;
-    };
-    const bare = new ActivityGroupComponent(darkColors, undefined);
-    bare.attachTool(makeTool('t1', 'Bash', { command: 'ls' }, 2), 1);
-    const busy = new ActivityGroupComponent(darkColors, undefined);
-    busy.attachTool(makeTool('t1', 'Bash', { command: 'ls' }, 400), 1);
-
-    const bareTokens = tokenValue(nonEmpty(render(bare))[0] ?? '');
-    const busyTokens = tokenValue(nonEmpty(render(busy))[0] ?? '');
-
-    expect(bareTokens).toBeGreaterThan(0);
-    expect(busyTokens).toBeGreaterThan(bareTokens);
-  });
-
-  it('counts Chinese reasoning at roughly one token per character', () => {
-    const group = new ActivityGroupComponent(darkColors, undefined);
-    group.appendThinking('推'.repeat(2000), false);
-
-    // 2000 CJK chars ≈ 2.0K tokens; the old chars/2.5 heuristic reported 800.
-    expect(nonEmpty(render(group))[0]).toContain('≈2.0K tok');
   });
 
   it('borrows each card once and toggles expansiveness', () => {
@@ -583,5 +551,45 @@ describe('ActivityGroupComponent', () => {
     group.invalidate();
     group.render(WIDTH);
     expect(spy.mock.calls.length).toBeGreaterThan(callsAfterCachedRenders);
+  });
+});
+
+describe('header diff stat', () => {
+  function editTool(id: string, oldString: string, newString: string, isError = false): ToolCallComponent {
+    return new ToolCallComponent(
+      { id, name: 'Edit', args: { file_path: '/workspace/a.ts', old_string: oldString, new_string: newString } },
+      { tool_call_id: id, output: isError ? 'error' : 'ok', is_error: isError },
+      darkColors,
+    );
+  }
+
+  it('sums successful Edit and Write calls, skipping failures and read-only tools', () => {
+    const group = new ActivityGroupComponent(darkColors, undefined);
+    group.attachTool(editTool('e1', 'a\nb', 'a\nb\nc'), 1); // +1 -0
+    group.attachTool(
+      new ToolCallComponent(
+        { id: 'w1', name: 'Write', args: { file_path: '/workspace/b.ts', content: 'x\ny\nz' } },
+        { tool_call_id: 'w1', output: 'ok', is_error: false },
+        darkColors,
+      ),
+      2,
+    ); // +3
+    group.attachTool(editTool('e2', 'p', 'q', true), 3); // failed: ignored
+    group.attachTool(makeTool('r1', 'Read', { file_path: '/workspace/a.ts' }), 4); // read-only
+
+    const header = nonEmpty(render(group))[0] ?? '';
+    expect(header).toContain('+4');
+    expect(header).toContain('-0');
+    expect(header).toContain('实速');
+  });
+
+  it('omits the diff segment for a read-only group', () => {
+    const group = new ActivityGroupComponent(darkColors, undefined);
+    group.attachTool(makeTool('t1', 'Bash', { command: 'ls' }), 1);
+    group.attachTool(makeTool('t2', 'Read', { file_path: '/workspace/a.ts' }), 2);
+
+    const header = nonEmpty(render(group))[0] ?? '';
+    expect(header).not.toMatch(/\+\d/);
+    expect(header).not.toMatch(/-\d/);
   });
 });

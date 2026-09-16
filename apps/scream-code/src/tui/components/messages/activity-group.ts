@@ -39,7 +39,6 @@ import { STATUS_BULLET } from '#/tui/constant/symbols';
 import type { ColorPalette } from '#/tui/theme/colors';
 import {
   easeSpeedRatio,
-  estimateTokens,
   getSharedSpeedTracker,
   lerpHex,
   SPEED_MAX,
@@ -95,11 +94,6 @@ interface ToolRow {
   readonly done: boolean;
   readonly failed: boolean;
   readonly aborted: boolean;
-}
-
-/** Token count for a text block; empty text is zero, unlike the rate estimator. */
-function countTokens(text: string): number {
-  return text.trim().length === 0 ? 0 : estimateTokens(text);
 }
 
 /** Non-empty, trimmed lines of one reasoning run. */
@@ -274,13 +268,6 @@ export class ActivityGroupComponent extends Container {
   private spinnerFrame = 0;
   private lastSpinnerTickAt = 0;
   private renderedWidth: number | undefined;
-  /** Token estimates per borrowed card, keyed by the result text they counted. */
-  private readonly toolTokenCache = new WeakMap<
-    ToolCallComponent,
-    { output: string; tokens: number }
-  >();
-  /** Token estimates per reasoning run, keyed by the segment they counted. */
-  private readonly thinkingTokenCache = new WeakMap<BlockSegment, { text: string; tokens: number }>();
   /** Reasoning text already shown when a notice interrupted the newest run. */
   private interruptedThinking: { text: string; length: number } | undefined;
 
@@ -480,6 +467,26 @@ export class ActivityGroupComponent extends Container {
   // Header
   // ---------------------------------------------------------------------------
 
+  /**
+   * Aggregate diff of the group's finished, successful file mutations
+   * (Edit/Write), shown in the header. Read-only tools contribute nothing;
+   * failed attempts changed nothing, so only successful calls count.
+   */
+  private diffTotals(): { added: number; removed: number } | undefined {
+    let added = 0;
+    let removed = 0;
+    let seen = false;
+    for (const segment of this.segments) {
+      if (segment.kind !== 'tool') continue;
+      const contribution = segment.tc.diffContribution();
+      if (contribution === undefined) continue;
+      seen = true;
+      added += contribution.added;
+      removed += contribution.removed;
+    }
+    return seen ? { added, removed } : undefined;
+  }
+
   private buildHeader(width: number): string {
     const colors = this.colors;
     const frame = BRAILLE_SPINNER_FRAMES[this.spinnerFrame] ?? BRAILLE_SPINNER_FRAMES[0];
@@ -492,8 +499,19 @@ export class ActivityGroupComponent extends Container {
     const toolCount = this.toolCount();
     if (this.steps.size > 0) parts.push(t('activitygroup.steps', { count: String(this.steps.size) }));
     if (toolCount > 0) parts.push(t('activitygroup.tools', { count: String(toolCount) }));
-    parts.push(t('activitygroup.tokens', { tok: this.formatTokens(this.blockTokens()) }));
     const stats = chalk.dim(SEPARATOR + parts.join(SEPARATOR));
+
+    // Aggregate diff of the group's successful file mutations (Edit/Write).
+    // Failed attempts changed nothing and count zero; a read-only group omits
+    // the segment entirely.
+    const diff = this.diffTotals();
+    const diffPart = diff
+      ? SEPARATOR +
+        t('activitygroup.diff', {
+          added: chalk.hex(colors.diffAdded)(`+${diff.added}`),
+          removed: chalk.hex(colors.diffRemoved)(`-${diff.removed}`),
+        })
+      : '';
 
     // The rate slot is always present: a dash keeps the header width stable and
     // tells the user the meter is idle rather than missing.
@@ -511,7 +529,7 @@ export class ActivityGroupComponent extends Container {
     // Drop the optional tail on narrow terminals instead of letting the header
     // wrap into a second row: the collapsed block must stay three rows tall.
     const head = `${marker}${chalk.hex(colors.primary).bold(label)}${stats}`;
-    const withRate = `${head}${rate}`;
+    const withRate = `${head}${diffPart}${rate}`;
     const full = `${withRate}${hint}`;
     if (visibleWidth(full) <= width) return full;
     if (visibleWidth(withRate) <= width) return withRate;
@@ -759,50 +777,6 @@ export class ActivityGroupComponent extends Container {
       t('activitygroup.thinking_summary', { summary: truncateToWidth(first, cells, '…') }),
     );
     return new Text(`${isLast ? BRANCH_LAST : BRANCH_FIRST}${summary}`, 0, 0);
-  }
-
-  /**
-   * Token estimate for the whole block: the reasoning text plus every result the
-   * block owns, i.e. how much material this stretch of work moved through.
-   */
-  private blockTokens(): number {
-    let tokens = 0;
-    for (const segment of this.segments) {
-      // Notices carry no payload: they describe work, they are not work output.
-      if (segment.kind === 'tool') tokens += this.toolTokens(segment.tc);
-      else if (segment.kind === 'thinking') tokens += this.thinkingTokens(segment);
-    }
-    return tokens;
-  }
-
-  /** Result tokens of one card, counted once per distinct result text. */
-  private toolTokens(tc: ToolCallComponent): number {
-    const output = tc.resultView?.output ?? '';
-    const cached = this.toolTokenCache.get(tc);
-    if (cached !== undefined && cached.output === output) return cached.tokens;
-    const tokens = countTokens(output);
-    this.toolTokenCache.set(tc, { output, tokens });
-    return tokens;
-  }
-
-  /**
-   * Token estimate for the block's reasoning. Character-based and script-aware
-   * (CJK ≈ one token per char, Latin ≈ a quarter), using the same estimator as
-   * the streaming speed gauge so both numbers agree. Empty reasoning counts as
-   * zero: the estimator's floor of one token is for per-delta rates.
-   */
-  private thinkingTokens(segment: Extract<BlockSegment, { kind: 'thinking' }>): number {
-    const cached = this.thinkingTokenCache.get(segment);
-    if (cached !== undefined && cached.text === segment.text) return cached.tokens;
-    const tokens = countTokens(segment.text);
-    this.thinkingTokenCache.set(segment, { text: segment.text, tokens });
-    return tokens;
-  }
-
-  private formatTokens(tokens: number): string {
-    if (tokens < 1000) return String(tokens);
-    if (tokens < 1_000_000) return `${(tokens / 1000).toFixed(1)}K`;
-    return `${(tokens / 1_000_000).toFixed(1)}M`;
   }
 
   // ---------------------------------------------------------------------------

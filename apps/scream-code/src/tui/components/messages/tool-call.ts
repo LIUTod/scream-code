@@ -29,7 +29,7 @@ import { decodeMcpToolName } from '#/tui/utils/mcp-tool-name';
 import { PlanBoxComponent } from './plan-box';
 import { ShellExecutionComponent, shellExecutionResultRenderer } from './shell-execution';
 import { WrappedLine } from './wrapped-line';
-import { pickChip } from './tool-renderers/chip';
+import { computeEditStats, computeWriteStats, pickChip } from './tool-renderers/chip';
 import { pickResultRenderer } from './tool-renderers/registry';
 
 const MAX_ARG_LENGTH = 60;
@@ -646,6 +646,27 @@ export class ToolCallComponent extends CachedContainer {
     this.rebuildBody();
     // Final results affect group summaries, especially failed/done counts.
     this.notifySnapshotChange();
+  }
+
+  /**
+   * File-mutation diff of this call (Edit additions/deletions, Write
+   * additions), for the group-level diff stat in the activity block header.
+   * Undefined for non-mutating tools, unfinished calls, and failed calls: a
+   * failure changed nothing, so it must not count towards the group total.
+   */
+  diffContribution(): { added: number; removed: number } | undefined {
+    if (this.result === undefined || this.result.is_error) return undefined;
+    if (this.toolCall.name === 'Edit') {
+      const stats = computeEditStats(this.toolCall.args);
+      if (stats.added === 0 && stats.removed === 0) return undefined;
+      return stats;
+    }
+    if (this.toolCall.name === 'Write') {
+      const stats = computeWriteStats(this.toolCall.args);
+      if (stats.lines === 0) return undefined;
+      return { added: stats.lines, removed: 0 };
+    }
+    return undefined;
   }
 
   updateToolCall(toolCall: ToolCallBlockData): void {
