@@ -7,7 +7,6 @@ import { AgentGroupComponent } from '../components/messages/agent-group';
 import { ActivityGroupComponent } from '../components/messages/activity-group';
 import { AssistantMessageComponent } from '../components/messages/assistant-message';
 import { BackgroundAgentStatusComponent } from '../components/messages/background-agent-status';
-import { ReadGroupComponent } from '../components/messages/read-group';
 import { SkillActivationComponent } from '../components/messages/skill-activation';
 import { StatusMessageComponent } from '../components/messages/status-message';
 import { ThinkingComponent } from '../components/messages/thinking';
@@ -180,7 +179,6 @@ function isRevokeContextComponent(child: Component): boolean {
     child instanceof ToolCallComponent ||
     child instanceof ActivityGroupComponent ||
     child instanceof AgentGroupComponent ||
-    child instanceof ReadGroupComponent ||
     child instanceof SkillActivationComponent ||
     child instanceof BackgroundAgentStatusComponent ||
     child instanceof StatusMessageComponent ||

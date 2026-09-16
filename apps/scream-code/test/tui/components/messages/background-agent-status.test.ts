@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
 import { BackgroundAgentStatusComponent } from '#/tui/components/messages/background-agent-status';
-import { STATUS_BULLET } from '#/tui/constant/symbols';
 import { darkColors } from '#/tui/theme/colors';
 
 function strip(text: string): string {
@@ -9,7 +8,7 @@ function strip(text: string): string {
 }
 
 describe('BackgroundAgentStatusComponent', () => {
-  it('renders started/completed with the shared bullet and failed with a red x marker', () => {
+  it('renders started with the running glyph and finished phases with the status marks', () => {
     const started = new BackgroundAgentStatusComponent(
       {
         phase: 'started',
@@ -44,10 +43,10 @@ describe('BackgroundAgentStatusComponent', () => {
     expect(failedLines[0]).toBe('');
 
     expect(startedLines[1]).toBe(
-      `${STATUS_BULLET}explore agent started in background (Explore project structure)`,
+      `⠋ explore agent started in background (Explore project structure)`,
     );
     expect(completedLines[1]).toBe(
-      `${STATUS_BULLET}explore agent completed in background (Explore project structure)`,
+      `✓ explore agent completed in background (Explore project structure)`,
     );
     expect(failedLines[1]).toBe(
       '✗ explore agent failed in background (Explore project structure · boom)',

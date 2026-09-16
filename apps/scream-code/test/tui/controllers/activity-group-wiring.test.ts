@@ -2,9 +2,10 @@ import { Container, Text } from '@liutod-scream/pi-tui';
 import { describe, expect, it, vi } from 'vitest';
 
 import { ActivityGroupComponent } from '#/tui/components/messages/activity-group';
-import { ReadGroupComponent } from '#/tui/components/messages/read-group';
+import { AgentGroupComponent } from '#/tui/components/messages/agent-group';
 import { ThinkingComponent } from '#/tui/components/messages/thinking';
 import { ToolCallComponent } from '#/tui/components/messages/tool-call';
+import { UserMessageComponent } from '#/tui/components/messages/user-message';
 import { StreamingUIController } from '#/tui/controllers/streaming-ui';
 import type { StreamingUIHost } from '#/tui/controllers/streaming-ui';
 import { TranscriptController } from '#/tui/controllers/transcript-controller';
@@ -83,19 +84,24 @@ describe('activity block wiring', () => {
     );
   });
 
-  it('keeps Read, media and plan-review cards standalone', () => {
+  it('routes Read into the block and keeps media and plan-review cards standalone', () => {
     const { state, controller } = createFixture();
 
     controller.onToolCallStart(makeToolCall('r1', 'Read'));
-    controller.onToolCallStart(makeToolCall('m1', 'ReadMediaFile'));
-    expect(state.transcriptContainer.children.some((c) => c instanceof ToolCallComponent)).toBe(true);
-    expect(findGroup(state.transcriptContainer)).toBeUndefined();
+    // Read is a step of the turn's block now, not a card of its own.
+    expect(findGroup(state.transcriptContainer)).toBeDefined();
+    expect(
+      state.transcriptContainer.children.some((c) => c instanceof ToolCallComponent),
+    ).toBe(false);
 
+    controller.onToolCallStart(makeToolCall('m1', 'ReadMediaFile'));
     controller.onToolCallStart(makeToolCall('p1', 'ExitPlanMode'));
-    expect(findGroup(state.transcriptContainer)).toBeUndefined();
+
     expect(
       state.transcriptContainer.children.filter((c) => c instanceof ToolCallComponent),
-    ).toHaveLength(3);
+    ).toHaveLength(2);
+    // Both kinds coexist in call order: block first, standalone cards after.
+    expect(state.transcriptContainer.children[0]).toBeInstanceOf(ActivityGroupComponent);
   });
 
   it('releases the live-component mapping of hidden pieces', () => {
@@ -135,17 +141,23 @@ describe('activity block wiring', () => {
     expect(second?.render(90).join('\n')).toContain('second reasoning');
   });
 
-  it('does not flip an older block when the newest child cannot collapse', () => {
+  it('stops flipping at the previous turn and skips components without a collapse state', () => {
     const { state, transcript } = createFixture();
-    const older = new ActivityGroupComponent(darkColors, undefined);
-    const readGroup = new ReadGroupComponent(darkColors, undefined);
-    state.transcriptContainer.addChild(older);
-    state.transcriptContainer.addChild(readGroup);
+    const earlier = new ActivityGroupComponent(darkColors, undefined);
+    const agentGroup = new AgentGroupComponent(darkColors, undefined);
+    state.transcriptContainer.addChild(earlier);
+    state.transcriptContainer.addChild(agentGroup);
+    state.transcriptContainer.addChild(new UserMessageComponent('next prompt', darkColors));
+    const current = new ActivityGroupComponent(darkColors, undefined);
+    state.transcriptContainer.addChild(current);
 
     transcript.toggleToolOutputExpansion();
 
     expect(state.toolOutputExpanded).toBe(true);
-    expect(older.isExpanded()).toBe(false);
+    expect(current.isExpanded()).toBe(true);
+    // The agent group has no collapse state of its own and the earlier turn is
+    // above the boundary, so neither follows the press.
+    expect(earlier.isExpanded()).toBe(false);
   });
 
   it('moves reasoning into the block and leaves the thinking component unmounted', () => {
@@ -273,38 +285,30 @@ describe('activity block wiring', () => {
     expect(replayedHeader).toContain('工具执行完成');
   });
 
-  it('opens new blocks collapsed instead of inheriting the last Ctrl+O state', () => {
+  it('opens new blocks in the mode Ctrl+O last set', () => {
     const { state, controller } = createFixture();
     state.toolOutputExpanded = true;
 
     controller.onToolCallStart(makeToolCall('t1', 'Bash'));
 
-    // Expansion is per target: inheriting the toggle opened every later block
-    // (and every later Read card) without the user asking for it.
-    expect(findGroup(state.transcriptContainer)?.isExpanded()).toBe(false);
+    // The mode is sticky: a block that appears after the press matches the ones
+    // the press already expanded instead of leaving the transcript inconsistent.
+    expect(findGroup(state.transcriptContainer)?.isExpanded()).toBe(true);
   });
 
-  it('does not mount a fresh Read card in the last Ctrl+O state', () => {
+  it('mounts a standalone card in the mode Ctrl+O last set', () => {
     const { state, controller } = createFixture();
     state.toolOutputExpanded = true;
 
-    controller.onToolCallStart(makeToolCall('r1', 'Read'));
-    const output = Array.from(
-      { length: 200 },
-      (_, i) => `${String(i + 1)}\tconst n${String(i + 1)} = 1;`,
-    ).join('\n');
-    controller.onToolCallEnd('r1', { tool_call_id: 'r1', output });
+    controller.onToolCallStart(makeToolCall('m1', 'ReadMediaFile'));
 
     const card = state.transcriptContainer.children.find(
       (child): child is ToolCallComponent => child instanceof ToolCallComponent,
     );
-    expect(card).toBeDefined();
-    // Collapsed: the header plus the summary glance. An inherited expansion
-    // would render the file body here.
-    expect(card?.render(80).length).toBeLessThan(10);
+    expect(card?.isExpanded()).toBe(true);
   });
 
-  it('expands a block that mounted after the previous Ctrl+O press', () => {
+  it('keeps later blocks in the same mode as the previous Ctrl+O press', () => {
     const { state, controller, transcript } = createFixture();
 
     controller.onToolCallStart(makeToolCall('t1', 'Bash'));
@@ -312,19 +316,18 @@ describe('activity block wiring', () => {
     const first = findGroup(state.transcriptContainer);
     expect(first?.isExpanded()).toBe(true);
 
-    // The turn settles and the next one opens a fresh block, which mounts
-    // collapsed even though the remembered state is still "expanded".
+    // The turn settles and the next block opens, matching the block above it.
     controller.endActivityGroup();
     controller.onToolCallStart(makeToolCall('t2', 'Bash'));
     const blocks = findGroups(state.transcriptContainer);
     expect(blocks).toHaveLength(2);
-    expect(blocks[1]?.isExpanded()).toBe(false);
-
-    // The press flips what the user is looking at instead of re-applying the
-    // remembered state (which would have spent the keystroke invisibly).
-    transcript.toggleToolOutputExpansion();
     expect(blocks[1]?.isExpanded()).toBe(true);
-    expect(blocks[0]?.isExpanded()).toBe(true);
+
+    // One press closes the whole current turn at once: nothing is left open.
+    transcript.toggleToolOutputExpansion();
+    expect(blocks[0]?.isExpanded()).toBe(false);
+    expect(blocks[1]?.isExpanded()).toBe(false);
+    expect(state.toolOutputExpanded).toBe(false);
   });
 
   it('endActivityGroup is a no-op without a block and settles one with content', () => {
@@ -343,7 +346,7 @@ describe('activity block wiring', () => {
     expect((groups[0] as ActivityGroupComponent).render(90).join('\n')).toContain('工具执行完成');
   });
 
-  it('Ctrl+O expands the newest block retroactively', () => {
+  it('Ctrl+O flips every block of the current turn', () => {
     const { state, transcript } = createFixture();
     const older = new ActivityGroupComponent(darkColors, undefined);
     const newer = new ActivityGroupComponent(darkColors, undefined);
@@ -354,11 +357,12 @@ describe('activity block wiring', () => {
 
     expect(state.toolOutputExpanded).toBe(true);
     expect(newer.isExpanded()).toBe(true);
-    expect(older.isExpanded()).toBe(false);
+    expect(older.isExpanded()).toBe(true);
 
     transcript.toggleToolOutputExpansion();
     expect(state.toolOutputExpanded).toBe(false);
     expect(newer.isExpanded()).toBe(false);
+    expect(older.isExpanded()).toBe(false);
   });
 
   it('folds a settled block into history without eating panels or pending blocks', () => {

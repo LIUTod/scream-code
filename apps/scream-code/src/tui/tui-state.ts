@@ -79,6 +79,11 @@ export interface TUIState {
   terminalState: TerminalState;
   activitySpinner: { instance: MoonLoader } | null;
   pulseWave: PulseWaveLoader | null;
+  /**
+   * Ctrl+O mode for tool output: the press applies it to the current turn and
+   * components that mount later inherit it, so the transcript stays in one
+   * consistent state. Reset when the transcript is cleared.
+   */
   toolOutputExpanded: boolean;
   planExpanded: boolean;
   sessions: SessionRow[];

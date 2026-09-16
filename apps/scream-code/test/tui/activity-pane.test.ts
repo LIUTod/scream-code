@@ -92,6 +92,29 @@ describe('updateActivityPane terminal progress', () => {
     expect(setProgress).toHaveBeenLastCalledWith(false);
   });
 
+  it('shows the status-bar pulse wave while reasoning streams', () => {
+    vi.useFakeTimers();
+    try {
+      const { driver, state } = makeDriverWithTerminalProgress();
+      state.appState.streamingPhase = 'thinking';
+
+      driver.updateActivityPane();
+
+      // The wave is the only "work is happening" cue left once the reasoning rows
+      // are folded into the activity block.
+      const bar = state.statusBarContainer.children;
+      expect(bar).toHaveLength(1);
+      expect(bar[0]?.render(80).join('')).toContain('■');
+      // The pane below the transcript stays empty: one indicator, not two.
+      expect(state.activityContainer.children).toHaveLength(0);
+
+      state.appState.streamingPhase = 'idle';
+      driver.updateActivityPane();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('keeps terminal progress active without showing a thinking spinner', () => {
     vi.useFakeTimers();
     try {

@@ -29,11 +29,9 @@ import { ImageAttachmentStore, type ImageAttachment } from '../utils/image-attac
 import { truncateErrorMessage } from '../utils/event-payload';
 import { replaceTabs } from '../utils/sanitize';
 import { nextTranscriptId } from '../utils/transcript-id';
-import { disposeChildren, isExpandable, isPlanExpandable, readExpanded } from '../utils/component-capabilities';
+import { disposeChildren, isExpandable, isPlanExpandable } from '../utils/component-capabilities';
 import { isStreaming } from '../utils/app-state';
 import { CommittedTranscriptComponent } from '../components/transcript/committed-transcript';
-import { ReadGroupComponent, parseReadGroupOutput } from '../components/messages/read-group';
-import { AgentGroupComponent } from '../components/messages/agent-group';
 
 export interface TranscriptControllerHost {
   readonly state: TUIState;
@@ -193,12 +191,11 @@ export class TranscriptController {
         const thinking = new ThinkingComponent(entry.content, state.theme.colors, true);
         return thinking;
       }
-      case 'tool_call': {
-        if (entry.toolCallData?.name === 'ReadGroup' && entry.toolCallData.result !== undefined) {
-          const rgc = new ReadGroupComponent(state.theme.colors, state.ui);
-          rgc.setResults(parseReadGroupOutput(entry.toolCallData.result.output));
-          return rgc;
-        }
+      // `tool_result` is the same thing as far as rendering goes: both carry a
+      // finished tool card. The caller that appends such an entry mounts its own
+      // component today, but routing it here must not silently drop the row.
+      case 'tool_call':
+      case 'tool_result': {
         if (entry.toolCallData) {
           const tc = new ToolCallComponent(
             entry.toolCallData,
@@ -257,7 +254,18 @@ export class TranscriptController {
     const component = this.createComponent(entry);
     if (component) {
       this.liveComponentToEntry.set(component, entry);
-      this.host.state.transcriptContainer.addChild(component);
+      // A background task notice belongs to the work that spawned it: while the
+      // turn's block is still open it becomes one of its steps. The component
+      // then stays unmounted (like a borrowed tool card) and remains the entry's
+      // live counterpart for revoke, folding and disposal.
+      const status = entry.backgroundAgentStatus;
+      if (status !== undefined && this.host.streamingUI.attachNotice(status)) {
+        // The block owns the row: the component is never mounted anywhere, so
+        // drop its bookkeeping instead of retaining an unreachable twin.
+        this.releaseLiveComponent(component);
+      } else {
+        this.host.state.transcriptContainer.addChild(component);
+      }
       this.host.state.ui.requestRender();
     }
     return component ?? null;
@@ -349,6 +357,8 @@ export class TranscriptController {
     this.committedComponent = undefined;
     this.liveComponentToEntry.clear();
     this.pendingComponents.clear();
+    // The expand mode is per session: a fresh transcript starts collapsed.
+    state.toolOutputExpanded = false;
     // Dispose live components before clearing the container so their timers
     // (AssistantMessageComponent fade, ToolCallComponent streaming/elapsed
     // timers) don't keep firing requestRender for ~1.2s into the next session.
@@ -414,31 +424,31 @@ export class TranscriptController {
 
   toggleToolOutputExpansion(): void {
     const { state } = this.host;
-    // Ctrl+O targets the newest expandable thing the user is looking at: an
-    // activity block when the turn's process is the latest content, otherwise a
-    // standalone card (Read/Agent/plan) that shows its own ctrl+o hint. Older
-    // components keep their state so a long history is never force-flipped, and
-    // components that appear later mount collapsed: the press flips the target
-    // it finds. Reading the target's own state keeps a press from being spent
-    // re-applying what that target already shows.
+    // Ctrl+O is a mode, not a per-card flip: the press sets every expandable
+    // piece of the current turn and the new state is remembered, so components
+    // that mount later come up in the same mode and the transcript can never end
+    // up half expanded. Work from earlier prompts keeps whatever it was showing.
+    const next = !state.toolOutputExpanded;
     const children = state.transcriptContainer.children;
     for (let i = children.length - 1; i >= 0; i -= 1) {
       const child = children[i];
       if (child === undefined) continue;
-      if (isExpandable(child)) {
-        state.toolOutputExpanded = !(readExpanded(child) ?? state.toolOutputExpanded);
-        child.setExpanded(state.toolOutputExpanded);
-        state.ui.requestRender();
-        return;
+      // Rows that open a turn (a user message — including a mid-turn steer — a
+      // skill activation, a cron notice) and folded history end the scan:
+      // everything above them belongs to earlier work and keeps its own state.
+      // Components without a collapse state (the agent group) simply do not match
+      // isExpandable.
+      if (
+        child instanceof UserMessageComponent ||
+        child instanceof SkillActivationComponent ||
+        child instanceof CronMessageComponent ||
+        child instanceof CommittedTranscriptComponent
+      ) {
+        break;
       }
-      // Read/agent groups are the newest thing on screen and have no collapse
-      // state of their own: stop instead of flipping a block that may already be
-      // scrolled out of view.
-      if (child instanceof ReadGroupComponent || child instanceof AgentGroupComponent) break;
+      if (isExpandable(child)) child.setExpanded(next);
     }
-    // Nothing expandable on screen: remember the intent for the next target that
-    // cannot report its own state.
-    state.toolOutputExpanded = !state.toolOutputExpanded;
+    state.toolOutputExpanded = next;
     state.ui.requestRender();
   }
 

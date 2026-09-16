@@ -680,13 +680,10 @@ export const zh: Record<string, string> = {
   'toolcall.question_label': '问',
 
   // ─── read-group ───────────────
-  'readgroup.reading': '正在读取 {count} 个文件…',
-  'readgroup.read': '已读取 {count} 个文件',
   'readgroup.failed_suffix': ' · 失败',
   'readgroup.lines_suffix': ' · {count} 行',
-  'readgroup.failed_count': ' · {count} 失败',
-  'readgroup.reading_suffix': ' · 读取中…',
   'readgroup.conflict_suffix': '冲突',
+  'readgroup.more_files': '… 还有 {count} 个文件',
 
   // ─── handler ──────────────────
   'handler.oauth_page_opened': '已在浏览器中打开 {serverName} 的授权页面',
@@ -1091,9 +1088,9 @@ export const zh: Record<string, string> = {
   'activitygroup.rate': ' · {rate} toks/s',
   'activitygroup.hint_expand': '  (ctrl+o 展开)',
   'activitygroup.hint_collapse': '  (ctrl+o 收起)',
-  'activitygroup.tools_hidden': '… 还有 {count} 个工具',
-  'activitygroup.thinking_label': '思考',
-  'activitygroup.thinking_summary': '思考：{summary}',
+  'activitygroup.segments_hidden': '… 还有 {count} 步',
+  'activitygroup.thinking_label': 'Thinking',
+  'activitygroup.thinking_summary': 'Thinking: {summary}',
   'activitygroup.thinking_more': '...（还有 {count} 行）',
   'activitygroup.thinking_earlier': '...（前面还有 {count} 行）',
 

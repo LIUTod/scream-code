@@ -680,13 +680,10 @@ export const en: Record<string, string> = {
   'toolcall.question_label': 'Q',
 
   // ─── read-group ───────────────
-  'readgroup.reading': 'Reading {count} files…',
-  'readgroup.read': 'Read {count} files',
   'readgroup.failed_suffix': ' · failed',
   'readgroup.lines_suffix': ' · {count} lines',
-  'readgroup.failed_count': ' · {count} failed',
-  'readgroup.reading_suffix': ' · reading…',
   'readgroup.conflict_suffix': 'conflict',
+  'readgroup.more_files': '… {count} more files',
 
   // ─── handler ──────────────────
   'handler.oauth_page_opened': 'Opened authorization page for {serverName} in browser',
@@ -1091,9 +1088,9 @@ export const en: Record<string, string> = {
   'activitygroup.rate': ' · {rate} toks/s',
   'activitygroup.hint_expand': '  (ctrl+o to expand)',
   'activitygroup.hint_collapse': '  (ctrl+o to collapse)',
-  'activitygroup.tools_hidden': '… {count} more tools',
-  'activitygroup.thinking_label': 'thinking',
-  'activitygroup.thinking_summary': 'thinking: {summary}',
+  'activitygroup.segments_hidden': '… {count} more steps',
+  'activitygroup.thinking_label': 'Thinking',
+  'activitygroup.thinking_summary': 'Thinking: {summary}',
   'activitygroup.thinking_more': '... ({count} more lines)',
   'activitygroup.thinking_earlier': '... ({count} earlier lines)',
 

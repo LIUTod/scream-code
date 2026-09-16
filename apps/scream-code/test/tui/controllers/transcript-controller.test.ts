@@ -21,7 +21,7 @@ import { AssistantMessageComponent } from '#/tui/components/messages/assistant-m
 import { SkillActivationComponent } from '#/tui/components/messages/skill-activation';
 import { BackgroundAgentStatusComponent } from '#/tui/components/messages/background-agent-status';
 import { CronMessageComponent } from '#/tui/components/messages/cron-message';
-import { ReadGroupComponent } from '#/tui/components/messages/read-group';
+
 import { ImageAttachmentStore } from '#/tui/utils/image-attachment-store';
 import { darkColors } from '#/tui/theme/colors';
 import type { TranscriptEntry, ToolCallBlockData } from '#/tui/types';
@@ -143,17 +143,6 @@ describe('TranscriptController.createComponent (via appendEntry)', () => {
     // Every appended entry lands in transcriptEntries AND the container.
     expect(state.transcriptEntries.length).toBe(cases.length);
     expect(state.transcriptContainer.children.length).toBe(cases.length);
-  });
-
-  it('routes ReadGroup tool calls to ReadGroupComponent when a result exists', () => {
-    const { controller } = makeHost();
-    const component = controller.appendEntry(
-      entry({
-        kind: 'tool_call',
-        toolCallData: toolCallData({ name: 'ReadGroup', result: { tool_call_id: 'tc', output: '/a\n---\nok' } }),
-      }),
-    );
-    expect(component).toBeInstanceOf(ReadGroupComponent);
   });
 
   it('returns null (and appends no component) for welcome, keyless cron and unknown kinds', () => {
@@ -361,34 +350,94 @@ describe('TranscriptController misc surface', () => {
     expect(rendered(component)).toContain(`${t('tc.error_prefix')}boom`);
   });
 
-  it('toggleToolOutputExpansion flips the target it finds and remembers intent otherwise', () => {
+  it('renders a tool_result entry as the tool card it carries', () => {
+    const { controller } = makeHost();
+
+    // Its producer mounts the card itself today, but an entry routed through
+    // appendEntry must not silently vanish.
+    const component = controller.appendEntry(
+      entry({
+        kind: 'tool_result',
+        renderMode: 'plain',
+        content: 'AskUserQuestion',
+        toolCallData: toolCallData({ name: 'AskUserQuestion' }),
+      }),
+    );
+
+    expect(component).toBeInstanceOf(ToolCallComponent);
+  });
+
+  it('files a background task notice into the open block instead of the transcript', () => {
+    const { controller, host, state } = makeHost();
+    (host.streamingUI as unknown as { attachNotice: () => boolean }).attachNotice = () => true;
+
+    controller.appendEntry(
+      entry({
+        kind: 'status',
+        content: 'bg',
+        turnId: 't-1',
+        backgroundAgentStatus: { phase: 'started', headline: '后台任务已启动', detail: 'bash-1' },
+      }),
+    );
+
+    // The block owns the row, so nothing is mounted next to it.
+    expect(state.transcriptContainer.children).toHaveLength(0);
+  });
+
+  it('mounts a background task notice on its own when no block is open', () => {
     const { controller, state } = makeHost();
-    // Nothing expandable on screen: the press only records the intent.
+
+    controller.appendEntry(
+      entry({
+        kind: 'status',
+        content: 'bg',
+        turnId: 't-1',
+        backgroundAgentStatus: { phase: 'completed', headline: '后台任务已完成' },
+      }),
+    );
+
+    expect(state.transcriptContainer.children).toHaveLength(1);
+    expect(state.transcriptContainer.children[0]).toBeInstanceOf(BackgroundAgentStatusComponent);
+  });
+
+  it('toggleToolOutputExpansion applies one mode to every block of the turn', () => {
+    const { controller, state } = makeHost();
+    // Nothing expandable on screen: the press records the mode for what mounts next.
     expect(state.toolOutputExpanded).toBe(false);
     controller.toggleToolOutputExpansion();
     expect(state.toolOutputExpanded).toBe(true);
     controller.toggleToolOutputExpansion();
     expect(state.toolOutputExpanded).toBe(false);
 
-    // With a target, the target's own state decides the next value.
     const block = new ActivityGroupComponent(darkColors, undefined);
     state.transcriptContainer.addChild(block);
     controller.toggleToolOutputExpansion();
     expect(block.isExpanded()).toBe(true);
     expect(state.toolOutputExpanded).toBe(true);
-    controller.toggleToolOutputExpansion();
-    expect(block.isExpanded()).toBe(false);
-    expect(state.toolOutputExpanded).toBe(false);
 
-    // A block that mounted collapsed while the remembered state was already
-    // true still expands on the first press: a flag-only toggle would have
-    // spent that press re-applying the collapsed state.
-    state.toolOutputExpanded = true;
+    // A block that appears while the turn is open follows the same press, and
+    // the next press closes everything: the transcript never ends up half open.
     const fresh = new ActivityGroupComponent(darkColors, undefined);
     state.transcriptContainer.addChild(fresh);
     controller.toggleToolOutputExpansion();
-    expect(fresh.isExpanded()).toBe(true);
     expect(block.isExpanded()).toBe(false);
+    expect(fresh.isExpanded()).toBe(false);
+    expect(state.toolOutputExpanded).toBe(false);
+  });
+
+  it('toggleToolOutputExpansion stops at the previous turn', () => {
+    const { controller, state } = makeHost();
+    const earlier = new ActivityGroupComponent(darkColors, undefined);
+    state.transcriptContainer.addChild(earlier);
+    state.transcriptContainer.addChild(new UserMessageComponent('next prompt', darkColors));
+    const current = new ActivityGroupComponent(darkColors, undefined);
+    state.transcriptContainer.addChild(current);
+
+    controller.toggleToolOutputExpansion();
+
+    expect(current.isExpanded()).toBe(true);
+    // Work from an earlier prompt keeps whatever it was showing.
+    expect(earlier.isExpanded()).toBe(false);
   });
 
   it('togglePlanExpansion only flips when a plan-expandable child accepted it', () => {

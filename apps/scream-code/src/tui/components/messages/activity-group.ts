@@ -1,7 +1,12 @@
 /**
  * ActivityGroupComponent compacts one turn's reasoning and tool calls into a
- * single block: three rows while collapsed (header, latest activity, reasoning
- * summary) and a tree with per-tool result previews while expanded.
+ * single block: a header plus the newest steps of the timeline while collapsed,
+ * and the whole timeline — reasoning runs and tool calls interleaved in the
+ * order they happened — with per-tool result previews while expanded.
+ *
+ * Rows follow the work rather than the tool type: each reasoning run stays next
+ * to the tools it produced, so the block reads as a timeline instead of one
+ * merged reasoning summary appended below every tool call.
  *
  * Design (mirrors AgentGroupComponent):
  * - Borrowed ToolCallComponents keep all of their state; the group never mounts
@@ -15,20 +20,21 @@
  *   row used to show, sourced from the shared speed tracker.
  */
 
-import type { TUI } from '@liutod-scream/pi-tui';
+import type { Component, TUI } from '@liutod-scream/pi-tui';
 import { Container, Spacer, Text, truncateToWidth, visibleWidth } from '@liutod-scream/pi-tui';
 import { t } from '@scream-code/config';
 import chalk from 'chalk';
 
 import {
   ACTIVITY_GROUP_EXPANDED_LINES,
-  ACTIVITY_GROUP_THINKING_EXCERPT_LINES,
-  ACTIVITY_GROUP_THINKING_SUMMARY_CELLS,
-  ACTIVITY_GROUP_TOOL_EXPANDED_LINES,
   ACTIVITY_GROUP_TOOL_PREVIEW_LINES,
   BRAILLE_SPINNER_FRAMES,
   BRAILLE_SPINNER_INTERVAL_MS,
 } from '#/tui/constant/rendering';
+import { renderBackgroundStatus } from './background-agent-status';
+import { getActivityLines } from '#/tui/utils/activity-lines';
+
+import type { BackgroundAgentStatusData } from '#/tui/types';
 import { STATUS_BULLET } from '#/tui/constant/symbols';
 import type { ColorPalette } from '#/tui/theme/colors';
 import {
@@ -52,6 +58,8 @@ const BRANCH_LAST = '  └─ ';
 const BRANCH_PIPE = '  │  ';
 const TREE_PIPE_ROW = '  │';
 const THINKING_BODY_PREFIX = '     ';
+/** Cells of a background task notice bullet (`⠋ ` / `✓ ` / `✗ `). */
+const NOTICE_BULLET_WIDTH = 2;
 const THROTTLE_MS = 200;
 /** Rates below this are noise: the live badge stays hidden until tokens flow. */
 const MIN_RATE = 0.05;
@@ -62,9 +70,23 @@ const CARD_MARKER_AT_START_RE = new RegExp(`^(?:\\u001b\\[[0-9;]*m)*(?:${CARD_MA
 const CARD_MARKER_CHAR_RE = new RegExp(`^(?:\\u001b\\[[0-9;]*m)*(${CARD_MARKERS.join('|')}) `);
 const CARD_INDENT_RE = /^(\u001B\[[0-9;]*m)*( {2})/;
 
-interface BorrowedTool {
-  readonly tc: ToolCallComponent;
-  readonly step: number | undefined;
+/**
+ * One step of the block's timeline: either a reasoning run (kept as the text it
+ * streamed) or a borrowed tool card. The array order is the order the work
+ * happened in, which is what the block renders.
+ */
+type BlockSegment =
+  | { readonly kind: 'thinking'; text: string; live: boolean }
+  | { readonly kind: 'tool'; readonly tc: ToolCallComponent; readonly step: number | undefined }
+  // Background task lifecycle rows (started / completed / failed). They are part
+  // of the work a turn produced, so they take a step of the same timeline
+  // instead of sitting in the transcript as messages of their own.
+  | { readonly kind: 'notice'; readonly data: BackgroundAgentStatusData };
+
+/** Segment render rows plus how many block rows they consume. */
+interface SegmentRows {
+  readonly components: Component[];
+  readonly cost: number;
 }
 
 interface ToolRow {
@@ -78,6 +100,14 @@ interface ToolRow {
 /** Token count for a text block; empty text is zero, unlike the rate estimator. */
 function countTokens(text: string): number {
   return text.trim().length === 0 ? 0 : estimateTokens(text);
+}
+
+/** Non-empty, trimmed lines of one reasoning run. */
+function thinkingLines(text: string): string[] {
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
 }
 
 /**
@@ -233,10 +263,8 @@ function condenseRowLabel(
 }
 
 export class ActivityGroupComponent extends Container {
-  private readonly tools: BorrowedTool[] = [];
+  private readonly segments: BlockSegment[] = [];
   private readonly steps = new Set<number>();
-  private thinkingText = '';
-  private thinkingLive = false;
   private running = true;
   private expanded = false;
   private readonly headerText: Text;
@@ -251,7 +279,10 @@ export class ActivityGroupComponent extends Container {
     ToolCallComponent,
     { output: string; tokens: number }
   >();
-  private thinkingTokenCache: { text: string; tokens: number } | undefined;
+  /** Token estimates per reasoning run, keyed by the segment they counted. */
+  private readonly thinkingTokenCache = new WeakMap<BlockSegment, { text: string; tokens: number }>();
+  /** Reasoning text already shown when a notice interrupted the newest run. */
+  private interruptedThinking: { text: string; length: number } | undefined;
 
   constructor(
     private readonly colors: ColorPalette,
@@ -268,7 +299,9 @@ export class ActivityGroupComponent extends Container {
 
   /** True when the group owns neither reasoning nor tool calls. */
   isEmpty(): boolean {
-    return this.tools.length === 0 && this.thinkingText.trim().length === 0;
+    return this.segments.every(
+      (segment) => segment.kind === 'thinking' && segment.text.trim().length === 0,
+    );
   }
 
   isExpanded(): boolean {
@@ -280,8 +313,8 @@ export class ActivityGroupComponent extends Container {
    * card is a no-op.
    */
   attachTool(tc: ToolCallComponent, step: number | undefined): void {
-    if (this.tools.some((entry) => entry.tc === tc)) return;
-    this.tools.push({ tc, step });
+    if (this.segments.some((segment) => segment.kind === 'tool' && segment.tc === tc)) return;
+    this.segments.push({ kind: 'tool', tc, step });
     if (step !== undefined) this.steps.add(step);
     tc.setExpanded(this.expanded);
     tc.setSnapshotListener(() => {
@@ -290,21 +323,63 @@ export class ActivityGroupComponent extends Container {
     this.flushNow();
   }
 
-  /** Updates the reasoning text; `live` drives the streaming rate in the header. */
-  setThinking(text: string, live: boolean): void {
-    if (text === this.thinkingText && live === this.thinkingLive) return;
-    const structureChanged = text.length === 0 !== (this.thinkingText.length === 0);
-    this.thinkingText = text;
-    this.thinkingLive = live;
-    // Reasoning appearing or disappearing changes the row count, so it must not
-    // wait for the next throttled tick; growing text can.
-    if (structureChanged) this.flushNow();
-    else this.scheduleFlush();
+  /** Adds a background task notice as the newest step of the timeline. */
+  attachNotice(data: BackgroundAgentStatusData): void {
+    const last = this.segments.at(-1);
+    if (last !== undefined && last.kind === 'thinking' && last.live) {
+      // The notice splits the running reasoning in two: close the part that has
+      // streamed and remember where it stopped, so the continuation keeps only
+      // what is new instead of repeating the whole run.
+      last.live = false;
+      this.interruptedThinking = { text: last.text, length: last.text.length };
+    }
+    this.segments.push({ kind: 'notice', data });
+    this.flushNow();
+  }
+
+  /**
+   * Appends to the reasoning run streaming right now, opening a new step of the
+   * timeline when the last step is a tool call or a reasoning run that already
+   * ended. `live` drives the streaming rate in the header.
+   */
+  appendThinking(text: string, live: boolean): void {
+    // The run text is cumulative and a notice may have split the run in two: for
+    // as long as the prefix that already streamed is still there, only the new
+    // part belongs to this row. The offset survives every flush of the run and is
+    // dropped in `endThinking`/`setRunning(false)`.
+    const interrupted = this.interruptedThinking;
+    const split = interrupted !== undefined && text.startsWith(interrupted.text);
+    if (interrupted !== undefined && !split) this.interruptedThinking = undefined;
+    const body = split && interrupted !== undefined ? text.slice(interrupted.length) : text;
+
+    const last = this.segments.at(-1);
+    if (
+      last !== undefined &&
+      last.kind === 'thinking' &&
+      (last.live || last.text.trim().length === 0)
+    ) {
+      if (last.text === body && last.live === live) return;
+      const structureChanged = body.length === 0 !== (last.text.length === 0);
+      last.text = body;
+      last.live = live;
+      // Reasoning appearing or disappearing changes the row count, so it must not
+      // wait for the next throttled tick; growing text can.
+      if (structureChanged) this.flushNow();
+      else this.scheduleFlush();
+      return;
+    }
+    // An empty draft must not materialise a row of its own.
+    if (body.trim().length === 0) return;
+    this.segments.push({ kind: 'thinking', text: body, live });
+    this.flushNow();
   }
 
   endThinking(): void {
-    if (!this.thinkingLive) return;
-    this.thinkingLive = false;
+    // The run is over: a later draft is a new one and must not be shortened.
+    this.interruptedThinking = undefined;
+    const last = this.segments.at(-1);
+    if (last === undefined || last.kind !== 'thinking' || !last.live) return;
+    last.live = false;
     this.flushNow();
   }
 
@@ -313,7 +388,15 @@ export class ActivityGroupComponent extends Container {
     if (this.running === running) return;
     this.running = running;
     if (running) this.startSpinner();
-    else this.stopSpinner();
+    else {
+      this.stopSpinner();
+      // A settled block must not claim live reasoning: the rate slot and the
+      // "earlier lines" wording both key off the newest run's live flag. The
+      // split offset goes with it — any later draft is a new run.
+      this.interruptedThinking = undefined;
+      const last = this.segments.at(-1);
+      if (last !== undefined && last.kind === 'thinking') last.live = false;
+    }
     this.flushNow();
   }
 
@@ -322,7 +405,9 @@ export class ActivityGroupComponent extends Container {
     this.expanded = expanded;
     // Borrowed cards render their own previews: expanding the block must deepen
     // them too, otherwise grouping would hide output the card used to show.
-    for (const entry of this.tools) entry.tc.setExpanded(expanded);
+    for (const segment of this.segments) {
+      if (segment.kind === 'tool') segment.tc.setExpanded(expanded);
+    }
     this.flushNow();
   }
 
@@ -355,7 +440,9 @@ export class ActivityGroupComponent extends Container {
    */
   override invalidate(): void {
     this.renderedWidth = undefined;
-    for (const entry of this.tools) entry.tc.invalidate();
+    for (const segment of this.segments) {
+      if (segment.kind === 'tool') segment.tc.invalidate();
+    }
     super.invalidate();
   }
 
@@ -402,14 +489,15 @@ export class ActivityGroupComponent extends Container {
     const label = this.running ? t('activitygroup.running') : t('activitygroup.done');
 
     const parts: string[] = [];
+    const toolCount = this.toolCount();
     if (this.steps.size > 0) parts.push(t('activitygroup.steps', { count: String(this.steps.size) }));
-    if (this.tools.length > 0) parts.push(t('activitygroup.tools', { count: String(this.tools.length) }));
+    if (toolCount > 0) parts.push(t('activitygroup.tools', { count: String(toolCount) }));
     parts.push(t('activitygroup.tokens', { tok: this.formatTokens(this.blockTokens()) }));
     const stats = chalk.dim(SEPARATOR + parts.join(SEPARATOR));
 
     // The rate slot is always present: a dash keeps the header width stable and
     // tells the user the meter is idle rather than missing.
-    const speed = this.thinkingLive ? getSharedSpeedTracker().getSpeed() : 0;
+    const speed = this.liveThinking() ? getSharedSpeedTracker().getSpeed() : 0;
     const rate =
       speed > MIN_RATE
         ? chalk.hex(
@@ -435,127 +523,170 @@ export class ActivityGroupComponent extends Container {
     return chalk.hex(colors.primary).bold(truncateToWidth(label, Math.max(1, width - 2), '…'));
   }
 
-  /** Collapsed state: at most three rows, matching the documented preview. */
+  /**
+   * Collapsed state: the newest steps of the timeline, kept in chronological
+   * order so the block still reads top-down. Reasoning runs and tool calls share
+   * the same row budget — by default the newest step plus the reasoning run that
+   * led to it.
+   */
   private buildCollapsedRows(width: number): void {
-    const hasThinking = this.thinkingText.trim().length > 0;
-    const latest = this.tools.at(-1);
-    if (latest !== undefined) {
-      const prefix = hasThinking ? BRANCH_PIPE : BRANCH_LAST;
-      const row = this.toolRow(latest.tc, width, ACTIVITY_GROUP_TOOL_PREVIEW_LINES);
-      this.bodyContainer.addChild(
-        new Text(`${prefix}${this.statusGlyph(row)} ${row.header}`, 0, 0),
-      );
+    const budget = Math.max(1, getActivityLines().collapsed - 1);
+    const shown = this.segments.slice(Math.max(0, this.segments.length - budget));
+    shown.forEach((segment, index) => {
+      const isLast = index === shown.length - 1;
+      if (segment.kind === 'tool') {
+        const row = this.toolRow(segment.tc, width, ACTIVITY_GROUP_TOOL_PREVIEW_LINES);
+        this.bodyContainer.addChild(
+          new Text(
+            `${isLast ? BRANCH_LAST : BRANCH_FIRST}${this.statusGlyph(row)} ${row.header}`,
+            0,
+            0,
+          ),
+        );
+        return;
+      }
+      if (segment.kind === 'notice') {
+        this.bodyContainer.addChild(this.noticeRow(segment.data, width, isLast));
+        return;
+      }
+      this.bodyContainer.addChild(this.thinkingSummaryRow(segment, width, isLast));
+    });
+  }
+
+  /**
+   * Expanded state: the whole timeline in order. Rows are budgeted for the block
+   * as a whole, so a turn with dozens of steps cannot expand into hundreds of
+   * rows; whatever does not fit is summarised in one row at the end.
+   */
+  private buildExpandedRows(width: number): void {
+    this.bodyContainer.addChild(new Text(TREE_PIPE_ROW, 0, 0));
+    let used = 1;
+    let hidden = 0;
+    for (let index = 0; index < this.segments.length; index += 1) {
+      const segment = this.segments[index] as BlockSegment;
+      const isLastStep = index === this.segments.length - 1;
+      const rows = this.segmentRows(segment, width, isLastStep);
+      // The first step always renders so a single oversized step cannot leave the
+      // block expanded-but-empty. Hiding anything costs one more row for the hint,
+      // which the last step does not need because nothing can follow it.
+      const budget = ACTIVITY_GROUP_EXPANDED_LINES - (isLastStep ? 0 : 1);
+      if (index > 0 && used + rows.cost > budget) {
+        hidden = this.segments.length - index;
+        break;
+      }
+      for (const component of rows.components) this.bodyContainer.addChild(component);
+      used += rows.cost;
     }
-    if (hasThinking) {
-      this.bodyContainer.addChild(new Text(this.thinkingRow(width), 0, 0));
+    if (hidden > 0) {
+      const summary = t('activitygroup.segments_hidden', { count: String(hidden) });
+      this.bodyContainer.addChild(new Text(`${BRANCH_PIPE}${chalk.dim(summary)}`, 0, 0));
     }
   }
 
-  /** Expanded state: one branch per tool plus a reasoning excerpt. */
-  private buildExpandedRows(width: number): void {
-    const colors = this.colors;
-    const hasThinking = this.thinkingText.trim().length > 0;
-    this.bodyContainer.addChild(new Text(TREE_PIPE_ROW, 0, 0));
-
-    // Rows are budgeted for the whole block: a turn with dozens of tools must
-    // not expand to hundreds of rows. Tools beyond the budget collapse into one
-    // summary row, and the reasoning excerpt gets whatever is left.
-    const toolRows = this.tools.map((entry) => ({
-      row: this.toolRow(entry.tc, width, ACTIVITY_GROUP_TOOL_EXPANDED_LINES),
-    }));
-    let used = 1;
-    let hiddenTools = 0;
-    let shownTools = 0;
-    toolRows.forEach(({ row }, index) => {
-      const cost = 1 + row.body.length;
-      if (shownTools > 0 && used + cost > ACTIVITY_GROUP_EXPANDED_LINES) {
-        hiddenTools += 1;
-        return;
-      }
-      const isLast =
-        index === this.tools.length - 1 && !hasThinking && hiddenTools === 0;
-      this.bodyContainer.addChild(
+  /** Renders one step of the timeline: its branch row plus its own body rows. */
+  private segmentRows(segment: BlockSegment, width: number, isLast: boolean): SegmentRows {
+    if (segment.kind === 'tool') {
+      const row = this.toolRow(segment.tc, width, getActivityLines().expandedTool);
+      const components: Component[] = [
         new Text(`${isLast ? BRANCH_LAST : BRANCH_FIRST}${this.statusGlyph(row)} ${row.header}`, 0, 0),
-      );
+      ];
       const continuation = isLast ? THINKING_BODY_PREFIX : BRANCH_PIPE;
       for (const line of row.body) {
-        this.bodyContainer.addChild(new Text(`${continuation}${line}`, 0, 0));
+        components.push(new Text(`${continuation}${line}`, 0, 0));
       }
-      used += cost;
-      shownTools += 1;
-    });
-    if (hiddenTools > 0) {
-      const prefix = hasThinking ? BRANCH_FIRST : BRANCH_LAST;
-      const summary = t('activitygroup.tools_hidden', { count: String(hiddenTools) });
-      this.bodyContainer.addChild(new Text(`${prefix}${chalk.dim(summary)}`, 0, 0));
-      used += 1;
+      return { components, cost: 1 + row.body.length };
     }
+    if (segment.kind === 'notice') {
+      return { components: [this.noticeRow(segment.data, width, isLast)], cost: 1 };
+    }
+    return this.thinkingSegmentRows(segment, width, isLast);
+  }
 
-    if (!hasThinking) return;
-    // The excerpt takes whatever the tool rows left over, capped by its own limit.
-    // The "N more lines" hint row is part of the body too, so reserve it whenever
-    // lines will be hidden.
-    const thinkingLines = this.thinkingLines();
-    let excerptBudget = Math.min(
-      ACTIVITY_GROUP_THINKING_EXCERPT_LINES,
-      Math.max(0, ACTIVITY_GROUP_EXPANDED_LINES - used - 1),
+  /** One background task notice, kept to a single row. */
+  private noticeRow(
+    data: BackgroundAgentStatusData,
+    width: number,
+    isLast: boolean,
+  ): Text {
+    const prefix = isLast ? BRANCH_LAST : BRANCH_FIRST;
+    // Cells already spent: the branch and the bullet (glyph plus its trailing
+    // space, exactly like the standalone notice row composes them).
+    const view = renderBackgroundStatus(
+      data,
+      this.colors,
+      Math.max(1, width - visibleWidth(prefix) - NOTICE_BULLET_WIDTH),
     );
-    // Only when the block budget is what limits the excerpt does the hint row
-    // need its own slot; with room to spare the excerpt keeps its full limit.
-    if (excerptBudget < ACTIVITY_GROUP_THINKING_EXCERPT_LINES && thinkingLines.length > excerptBudget) {
-      excerptBudget -= 1;
-    }
-    if (excerptBudget <= 0) return;
-    // Label row only: the block header already carries the token estimate, so
-    // repeating it here printed the same number twice in one block.
-    this.bodyContainer.addChild(
+    return new Text(`${prefix}${view.bullet}${view.text}`, 0, 0);
+  }
+
+  /**
+   * One reasoning run: a label row plus as many of its lines as its own budget
+   * allows. Lines keep their order; the oldest end of a live run (or the newest
+   * end of a finished one) is dropped until the budget fits.
+   */
+  private thinkingSegmentRows(
+    segment: Extract<BlockSegment, { kind: 'thinking' }>,
+    width: number,
+    isLast: boolean,
+  ): SegmentRows {
+    const colors = this.colors;
+    const lines = thinkingLines(segment.text);
+    if (lines.length === 0) return { components: [], cost: 0 };
+    const continuation = isLast ? THINKING_BODY_PREFIX : BRANCH_PIPE;
+    const components: Component[] = [
       new Text(
-        `${BRANCH_LAST} ${chalk.dim('·')} ${chalk.hex(colors.roleThinking)(t('activitygroup.thinking_label'))}`,
+        `${isLast ? BRANCH_LAST : BRANCH_FIRST}${chalk.hex(colors.roleThinking)(t('activitygroup.thinking_label'))}`,
         0,
         0,
       ),
-    );
-
-    // The excerpt is capped by RENDERED lines: a long unbroken paragraph wraps
-    // into many rows, and the budget must hold regardless of the source shape.
-    // Rows keep chronological order; the oldest (live) or newest (settled) end
-    // is dropped until the budget fits.
-    const lines = thinkingLines;
-    const inner = Math.max(1, width - visibleWidth(THINKING_BODY_PREFIX));
+    ];
+    let cost = 1;
+    // Capped by RENDERED lines: a long unbroken paragraph wraps into many rows,
+    // and the budget must hold regardless of the source shape.
+    const budget = getActivityLines().expandedThinking;
+    const inner = Math.max(1, width - visibleWidth(continuation));
     const height = (line: string): number =>
-      new WrappedLine(THINKING_BODY_PREFIX, THINKING_BODY_PREFIX, line).render(inner).length;
-    const candidates = this.thinkingLive
-      ? lines.slice(-ACTIVITY_GROUP_THINKING_EXCERPT_LINES)
-      : lines.slice(0, ACTIVITY_GROUP_THINKING_EXCERPT_LINES);
-    let selected = candidates;
-    while (
-      selected.length > 1 &&
-      selected.reduce((sum, line) => sum + height(line), 0) > excerptBudget
-    ) {
-      selected = this.thinkingLive ? selected.slice(1) : selected.slice(0, -1);
+      new WrappedLine(continuation, continuation, line).render(inner).length;
+    let selected = segment.live ? lines.slice(-budget) : lines.slice(0, budget);
+    while (selected.length > 1 && selected.reduce((sum, line) => sum + height(line), 0) > budget) {
+      selected = segment.live ? selected.slice(1) : selected.slice(0, -1);
     }
     const first = selected[0];
-    if (selected.length === 1 && first !== undefined && height(first) > excerptBudget) {
+    if (selected.length === 1 && first !== undefined && height(first) > budget) {
       // One unbroken paragraph: clip its text so the wrapped height stays inside
       // the row budget instead of relying on line-level trimming.
-      selected = [truncateToWidth(first, inner * excerptBudget, '…')];
+      selected = [truncateToWidth(first, inner * budget, '…')];
     }
     for (const line of selected) {
-      const row = new WrappedLine(
-        THINKING_BODY_PREFIX,
-        THINKING_BODY_PREFIX,
-        chalk.hex(colors.roleThinking)(line),
+      components.push(
+        new WrappedLine(continuation, continuation, chalk.hex(colors.roleThinking)(line)),
       );
-      this.bodyContainer.addChild(row);
-      used += height(line);
+      cost += height(line);
     }
-    const hidden = lines.length - selected.length;
-    if (hidden > 0) {
-      const hint = this.thinkingLive
-        ? t('activitygroup.thinking_earlier', { count: String(hidden) })
-        : t('activitygroup.thinking_more', { count: String(hidden) });
-      this.bodyContainer.addChild(new Text(`${THINKING_BODY_PREFIX}${chalk.dim(hint)}`, 0, 0));
+    const hiddenLines = lines.length - selected.length;
+    if (hiddenLines > 0) {
+      const hint = segment.live
+        ? t('activitygroup.thinking_earlier', { count: String(hiddenLines) })
+        : t('activitygroup.thinking_more', { count: String(hiddenLines) });
+      components.push(new Text(`${continuation}${chalk.dim(hint)}`, 0, 0));
+      cost += 1;
     }
+    return { components, cost };
+  }
+
+  /** Number of tool calls on the timeline. */
+  private toolCount(): number {
+    let count = 0;
+    for (const segment of this.segments) {
+      if (segment.kind === 'tool') count += 1;
+    }
+    return count;
+  }
+
+  /** True while the newest step of the timeline is a reasoning run still streaming. */
+  private liveThinking(): boolean {
+    const last = this.segments.at(-1);
+    return last !== undefined && last.kind === 'thinking' && last.live;
   }
 
   // ---------------------------------------------------------------------------
@@ -607,31 +738,27 @@ export class ActivityGroupComponent extends Container {
     return chalk.hex(this.colors.success)('✓');
   }
 
-  private thinkingLines(): string[] {
-    return this.thinkingText
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter((line) => line.length > 0);
-  }
-
   /**
-   * Collapsed reasoning row: the first reasoning line clipped to whatever space
-   * the row can still hold at this width, so a narrow terminal cannot wrap the
-   * block into a fourth row. The token estimate lives in the block header only.
+   * Collapsed reasoning row: the run's first line clipped to whatever space the
+   * row can still hold at this width, so a narrow terminal cannot wrap the block
+   * past its height. The token estimate lives in the block header only.
    */
-  private thinkingRow(width: number): string {
-    const first = this.thinkingLines()[0] ?? '';
+  private thinkingSummaryRow(
+    segment: Extract<BlockSegment, { kind: 'thinking' }>,
+    width: number,
+    isLast: boolean,
+  ): Text {
+    const first = thinkingLines(segment.text)[0] ?? '';
     const label = t('activitygroup.thinking_summary', { summary: '' });
-    const glue = visibleWidth(SEPARATOR);
-    const bareFixed = BRANCH_WIDTH + glue + visibleWidth(label);
-    const cells = Math.max(
-      1,
-      Math.min(ACTIVITY_GROUP_THINKING_SUMMARY_CELLS, width - bareFixed),
-    );
+    // A reasoning row carries no glyph: the branch is the only thing before the
+    // text. The summary takes the rest of the row — the block is the main view of
+    // a turn now, so the row is bounded by the terminal, not by a fixed slice.
+    const used = visibleWidth(isLast ? BRANCH_LAST : BRANCH_FIRST) + visibleWidth(label);
+    const cells = Math.max(1, width - used);
     const summary = chalk.hex(this.colors.roleThinking)(
       t('activitygroup.thinking_summary', { summary: truncateToWidth(first, cells, '…') }),
     );
-    return `${BRANCH_LAST} ${chalk.dim('·')} ${summary}`;
+    return new Text(`${isLast ? BRANCH_LAST : BRANCH_FIRST}${summary}`, 0, 0);
   }
 
   /**
@@ -639,8 +766,12 @@ export class ActivityGroupComponent extends Container {
    * block owns, i.e. how much material this stretch of work moved through.
    */
   private blockTokens(): number {
-    let tokens = this.thinkingTokens();
-    for (const entry of this.tools) tokens += this.toolTokens(entry.tc);
+    let tokens = 0;
+    for (const segment of this.segments) {
+      // Notices carry no payload: they describe work, they are not work output.
+      if (segment.kind === 'tool') tokens += this.toolTokens(segment.tc);
+      else if (segment.kind === 'thinking') tokens += this.thinkingTokens(segment);
+    }
     return tokens;
   }
 
@@ -660,11 +791,11 @@ export class ActivityGroupComponent extends Container {
    * the streaming speed gauge so both numbers agree. Empty reasoning counts as
    * zero: the estimator's floor of one token is for per-delta rates.
    */
-  private thinkingTokens(): number {
-    const cached = this.thinkingTokenCache;
-    if (cached !== undefined && cached.text === this.thinkingText) return cached.tokens;
-    const tokens = countTokens(this.thinkingText);
-    this.thinkingTokenCache = { text: this.thinkingText, tokens };
+  private thinkingTokens(segment: Extract<BlockSegment, { kind: 'thinking' }>): number {
+    const cached = this.thinkingTokenCache.get(segment);
+    if (cached !== undefined && cached.text === segment.text) return cached.tokens;
+    const tokens = countTokens(segment.text);
+    this.thinkingTokenCache.set(segment, { text: segment.text, tokens });
     return tokens;
   }
 
@@ -692,7 +823,10 @@ export class ActivityGroupComponent extends Container {
         // While collapsed a running tool row mirrors the header frame; at most
         // two rows, so refreshing the body here stays cheap. Expanded groups
         // keep static glyphs (the rows carry content, not progress).
-        if (!this.expanded && this.tools.some((entry) => entry.tc.resultView === undefined)) {
+        if (
+          !this.expanded &&
+          this.segments.some((segment) => segment.kind === 'tool' && segment.tc.resultView === undefined)
+        ) {
           this.rebuild(width);
         } else {
           this.headerText.setText(this.buildHeader(width));

@@ -5,8 +5,8 @@
 
 import { isAbsolute, relative, sep } from 'node:path';
 
-import { Text, Spacer, truncateToWidth, visibleWidth } from '@liutod-scream/pi-tui';
-import type { Component, MarkdownTheme, TUI } from '@liutod-scream/pi-tui';
+import { Text, Spacer, truncateToWidth } from '@liutod-scream/pi-tui';
+import type { MarkdownTheme, TUI } from '@liutod-scream/pi-tui';
 import chalk from 'chalk';
 import { t } from '@scream-code/config';
 
@@ -29,7 +29,7 @@ import { decodeMcpToolName } from '#/tui/utils/mcp-tool-name';
 import { PlanBoxComponent } from './plan-box';
 import { ShellExecutionComponent, shellExecutionResultRenderer } from './shell-execution';
 import { WrappedLine } from './wrapped-line';
-import { countNonEmptyLines, pickChip } from './tool-renderers/chip';
+import { pickChip } from './tool-renderers/chip';
 import { pickResultRenderer } from './tool-renderers/registry';
 
 const MAX_ARG_LENGTH = 60;
@@ -88,19 +88,6 @@ export interface ToolCallSubagentSnapshot {
   readonly isError: boolean;
   readonly errorText: string | undefined;
   readonly latestActivity: string | undefined;
-}
-
-/**
- * Immutable Read tool state snapshot. `ReadGroupComponent` reads one-time
- * views via `ToolCallComponent.getReadSnapshot()` and sums lines for the group
- * header. `lines` is 0 while pending or failed, and the non-empty result line
- * count when done, matching the single-card chip.
- */
-export interface ToolCallReadSnapshot {
-  readonly toolCallId: string;
-  readonly filePath: string | undefined;
-  readonly phase: 'pending' | 'done' | 'failed';
-  readonly lines: number;
 }
 
 function backgroundFailureMessage(
@@ -556,12 +543,12 @@ export class ToolCallComponent extends CachedContainer {
   private static readonly WRITE_STREAM_TAIL_RAW_CHARS = 4096;
 
   /**
-   * Registered by a group container (`AgentGroupComponent` or
-   * `ReadGroupComponent`) when this component is borrowed as a hidden state
-   * container. Any state change (subagent meta, phase, sub-tool, result, etc.)
-   * triggers a throttled group re-render. `undefined` means no group is
-   * subscribed and standalone rendering is unaffected. A ToolCallComponent can
-   * only belong to one group at a time, so one listener slot is enough.
+   * Registered by a group container (`AgentGroupComponent`, the activity block)
+   * when this component is borrowed as a hidden state container. Any state
+   * change (subagent meta, phase, sub-tool, result, etc.) triggers a throttled
+   * group re-render. `undefined` means no group is subscribed and standalone
+   * rendering is unaffected. A ToolCallComponent can only belong to one group at
+   * a time, so one listener slot is enough.
    */
   private onSnapshotChange: (() => void) | undefined;
 
@@ -810,10 +797,10 @@ export class ToolCallComponent extends CachedContainer {
   }
 
   /**
-   * Lets group containers (AgentGroup or ReadGroup) subscribe to this card's
-   * state changes. Registration immediately calls back so the group receives
-   * the current snapshot without separately calling getSubagentSnapshot or
-   * getReadSnapshot. Pass `undefined` to unsubscribe.
+   * Lets group containers (the agent group, the activity block) subscribe to
+   * this card's state changes. Registration immediately calls back so the group
+   * receives the current state without separately calling
+   * getSubagentSnapshot. Pass `undefined` to unsubscribe.
    */
   setSnapshotListener(cb: (() => void) | undefined): void {
     this.onSnapshotChange = cb;
@@ -870,33 +857,6 @@ export class ToolCallComponent extends CachedContainer {
       isError: derivedPhase === 'failed',
       errorText,
       latestActivity,
-    };
-  }
-
-  /**
-   * Used by `ReadGroupComponent` to sum line counts across same-step Read
-   * cards. `lines` matches the single-card chip
-   * (`pluralize(countNonEmptyLines(...), 'line')`) so group and card counts do
-   * not drift.
-   */
-  getReadSnapshot(): ToolCallReadSnapshot {
-    const args = this.toolCall.args;
-    const filePathRaw = args['file_path'] ?? args['path'];
-    const filePath =
-      typeof filePathRaw === 'string'
-        ? makeWorkspaceRelativePath(filePathRaw, this.workspaceDir)
-        : undefined;
-    if (this.result === undefined) {
-      return { toolCallId: this.toolCall.id, filePath, phase: 'pending', lines: 0 };
-    }
-    if (this.result.is_error === true) {
-      return { toolCallId: this.toolCall.id, filePath, phase: 'failed', lines: 0 };
-    }
-    return {
-      toolCallId: this.toolCall.id,
-      filePath,
-      phase: 'done',
-      lines: countNonEmptyLines(this.result.output),
     };
   }
 

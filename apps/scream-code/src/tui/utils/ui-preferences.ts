@@ -18,7 +18,24 @@ export interface UiPreferences {
   turnElapsedEnabled?: boolean;
   /** Whether user messages render with a highlight background block (/hl). */
   userMessageHighlightEnabled?: boolean;
+  /** Whether fenced code blocks render as a background panel (/codebg). */
+  codeBlockPanelEnabled?: boolean;
+  /** Rows of a collapsed activity block, header included (/blockrows). */
+  activityCollapsedLines?: number;
+  /** Body rows one tool row may show while the block is expanded. */
+  activityExpandedToolLines?: number;
+  /** Rows one reasoning run may show while the block is expanded. */
+  activityExpandedThinkingLines?: number;
 }
+
+/** The activity row budgets, as stored (callers clamp and default them). */
+export interface StoredActivityLines {
+  activityCollapsedLines?: number;
+  activityExpandedToolLines?: number;
+  activityExpandedThinkingLines?: number;
+}
+
+export type ActivityLineKey = keyof StoredActivityLines;
 
 const EMPTY: UiPreferences = {};
 
@@ -76,6 +93,47 @@ export function toggleTurnElapsed(): boolean {
   const enabled = prefs.turnElapsedEnabled !== false;
   prefs.turnElapsedEnabled = !enabled;
   writeUiPreferences(prefs);
+  return !enabled;
+}
+
+/** Row budgets of the activity block as stored, without clamping (see
+ *  `utils/activity-lines.ts`, which owns the ranges and defaults). */
+export function readActivityLinePrefs(): StoredActivityLines {
+  const prefs = readUiPreferences();
+  return {
+    activityCollapsedLines: prefs.activityCollapsedLines,
+    activityExpandedToolLines: prefs.activityExpandedToolLines,
+    activityExpandedThinkingLines: prefs.activityExpandedThinkingLines,
+  };
+}
+
+/** Persist one activity row budget. Persisted immediately. */
+export function writeActivityLinePref(key: ActivityLineKey, value: number): void {
+  const prefs = readUiPreferences();
+  prefs[key] = value;
+  writeUiPreferences(prefs);
+}
+
+/**
+ * Whether fenced code blocks render as a background panel (default on).
+ *
+ * Cached: the markdown renderer asks once per code line, and reading the file
+ * each time would hit the disk on every frame. `/codebg` updates the cache.
+ */
+let codeBlockPanelCache: boolean | undefined;
+
+export function isCodeBlockPanelEnabled(): boolean {
+  codeBlockPanelCache ??= readUiPreferences().codeBlockPanelEnabled !== false;
+  return codeBlockPanelCache;
+}
+
+/** Toggle the code-block panel via /codebg. Returns the new state. */
+export function toggleCodeBlockPanel(): boolean {
+  const prefs = readUiPreferences();
+  const enabled = prefs.codeBlockPanelEnabled !== false;
+  prefs.codeBlockPanelEnabled = !enabled;
+  writeUiPreferences(prefs);
+  codeBlockPanelCache = !enabled;
   return !enabled;
 }
 

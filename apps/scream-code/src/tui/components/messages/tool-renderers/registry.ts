@@ -11,6 +11,7 @@
  */
 
 import { readMediaSummary } from './media';
+import { readGroupListSummary } from './read-group-list';
 import { shellExecutionResultRenderer } from '../shell-execution';
 import {
   editSummary,
@@ -29,6 +30,8 @@ export function pickResultRenderer(toolName: string): ResultRenderer {
   switch (toolName) {
     case 'Read':
       return readSummary;
+    case 'ReadGroup':
+      return readGroupListSummary;
     case 'ReadMediaFile':
       return readMediaSummary;
     case 'Grep':

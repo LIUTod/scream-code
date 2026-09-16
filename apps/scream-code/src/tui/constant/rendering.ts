@@ -31,6 +31,11 @@ export const MAX_SHELL_OUTPUT_BYTES = 128 * 1024;
 // latest activity, reasoning summary); the expanded tree previews this many
 // result lines per tool and this many reasoning lines.
 export const ACTIVITY_GROUP_TOOL_PREVIEW_LINES = 3;
+// Total rows of a collapsed block, header included: the header plus this many
+// minus one steps of the timeline (reasoning runs and tool calls share the
+// budget, newest kept). Three keeps the block as short as it has always been
+// while still showing the newest step plus the reasoning run before it.
+export const ACTIVITY_GROUP_COLLAPSED_LINES = 3;
 // Result lines previewed per tool once the group is expanded. Kept at the
 // standalone card's collapsed budget so grouping never hides more output than
 // the card showed on its own.
@@ -39,9 +44,9 @@ export const ACTIVITY_GROUP_TOOL_EXPANDED_LINES = 15;
 // otherwise expand to hundreds of rows; the tools that do not fit are summarised
 // in a single "N more tools" row.
 export const ACTIVITY_GROUP_EXPANDED_LINES = 60;
+// Defaults for the three budgets `/blockrows` can override at runtime; the block
+// reads them through `utils/activity-lines.ts`, never directly.
 export const ACTIVITY_GROUP_THINKING_EXCERPT_LINES = 10;
-// Cells of reasoning summary kept in the collapsed row, clipped with an ellipsis.
-export const ACTIVITY_GROUP_THINKING_SUMMARY_CELLS = 42;
 
 // Animation frames are shared by update loaders and live thinking.
 export const BRAILLE_SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];

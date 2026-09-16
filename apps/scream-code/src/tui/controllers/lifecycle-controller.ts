@@ -1,6 +1,6 @@
 import type { Session, ScreamHarness, TokenUsage } from '@scream-code/scream-code-sdk';
 import { t } from '@scream-code/config';
-import { Container, HStack, ScrollView, VStack, type Component } from '@liutod-scream/pi-tui';
+import { Container, HStack, ScrollView, VStack } from '@liutod-scream/pi-tui';
 import { GutterContainer } from '../components/chrome/gutter-container';
 import { isEmptySessionHintDismissed } from '../utils/ui-preferences';
 import { SESSION_TIPS, TIP_ROTATION_INTERVAL_MS } from '../constant/scream-tui';
@@ -28,9 +28,8 @@ import { isDeadTerminalError } from '../utils/dead-terminal';
 import { isStreaming } from '../utils/app-state';
 import { installTerminalFocusTracking } from '../utils/terminal-focus';
 import { installTerminalThemeTracking } from '../utils/terminal-theme';
-import { MoonLoader } from '../components/chrome/moon-loader';
 import { PulseWaveLoader } from '../components/chrome/pulse-wave-loader';
-import { ActivityPaneComponent, type ActivityPaneMode } from '../components/panes/activity-pane';
+import { type ActivityPaneMode } from '../components/panes/activity-pane';
 import chalk from 'chalk';
 
 type EffectiveActivityPaneMode = ActivityPaneMode | 'idle';
@@ -616,9 +615,12 @@ export class LifecycleController {
       case 'waiting':
       case 'composing':
       case 'tool':
-        // All working phases show the same pulse wave. PulseWaveLoader
-        // renders reliably under layout-root swaps (an approval dialog
-        // replaces the root and restores it); the MoonLoader animation did
+      case 'thinking':
+        // Every working phase shows the same pulse wave, reasoning included: the
+        // reasoning rows now live inside the activity block, and a folded block
+        // is too quiet to tell at a glance that work is still going on.
+        // PulseWaveLoader renders reliably under layout-root swaps (an approval
+        // dialog replaces the root and restores it); the MoonLoader animation did
         // not survive that restore, so a single wave is used everywhere.
         {
           const loader = new PulseWaveLoader(state.ui, state.theme.colors.primary);
@@ -631,11 +633,6 @@ export class LifecycleController {
             }),
           );
         }
-        break;
-      case 'thinking':
-        // Thinking indicator lives in the output-area thinking block
-        // (spinner + "thinking..." + toks/s); showing it again here would
-        // duplicate. Leave the status bar empty during thinking.
         break;
       case 'idle':
       case 'hidden':

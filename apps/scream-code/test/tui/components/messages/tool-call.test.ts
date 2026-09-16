@@ -602,7 +602,6 @@ describe('ToolCallComponent', () => {
     const out = strip(component.render(100).join('\n'));
     expect(out).toContain('已使用 Read (apps/scream-code/src/main.ts)');
     expect(out).not.toContain('/tmp/proj-a/apps');
-    expect(component.getReadSnapshot().filePath).toBe('apps/scream-code/src/main.ts');
   });
 
   it('keeps Read paths outside the active workspace absolute', () => {
@@ -621,7 +620,6 @@ describe('ToolCallComponent', () => {
 
     const out = strip(component.render(100).join('\n'));
     expect(out).toContain('正在使用 Read (/tmp/proj-ab/src/main.ts)');
-    expect(component.getReadSnapshot().filePath).toBe('/tmp/proj-ab/src/main.ts');
   });
 
   it('does not append a chip while a tool is still running', () => {

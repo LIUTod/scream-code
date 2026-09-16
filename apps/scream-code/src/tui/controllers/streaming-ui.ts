@@ -6,7 +6,6 @@ import { AgentGroupComponent } from '../components/messages/agent-group';
 import { ActivityGroupComponent } from '../components/messages/activity-group';
 import { AssistantMessageComponent } from '../components/messages/assistant-message';
 import { CompactionComponent } from '../components/dialogs/compaction';
-import { ReadGroupComponent, parseReadGroupOutput } from '../components/messages/read-group';
 import { ThinkingComponent } from '../components/messages/thinking';
 import { ToolCallComponent } from '../components/messages/tool-call';
 import {
@@ -26,6 +25,7 @@ import type { TodoItem } from '../components/chrome/todo-panel';
 import type { TranscriptController } from './transcript-controller';
 import type {
   AppState,
+  BackgroundAgentStatusData,
   LivePaneState,
   QueuedMessage,
   ToolCallBlockData,
@@ -88,39 +88,31 @@ export class StreamingUIController {
     { name?: string; argumentsText: string; startedAtMs: number }
   >();
   private _pendingToolComponents = new Map<string, ToolCallComponent>();
-  private _pendingReadGroupComponents = new Map<string, ReadGroupComponent>();
   private _pendingAgentGroup: {
     readonly turnId: string | undefined;
     readonly step: number;
     solo?: ToolCallComponent;
     group?: AgentGroupComponent;
   } | null = null;
-  private _pendingReadGroup: {
-    readonly turnId: string | undefined;
-    readonly step: number;
-    solo?: ToolCallComponent;
-    group?: ReadGroupComponent;
-  } | null = null;
   private _activityGroup: ActivityGroupComponent | undefined;
   /** Guards the single `registerLiveComponent` call for the turn's block. */
   private _activityGroupRegistered = false;
   /** Block that borrowed a card, so late results refresh their own block. */
   private readonly _groupByToolCard = new WeakMap<ToolCallComponent, ActivityGroupComponent>();
-  /** Reasoning of the turn's earlier steps, kept when a step's draft resets. */
-  private _turnThinkingHistory = '';
-  private _lastThinkingText = '';
 
   /**
    * Tools that keep their own transcript card instead of joining the turn's
    * activity block:
-   * - `Read` / `Agent` are owned by the read/agent group machinery (and by
-   *   `/revoke`, which walks those groups);
+   * - `Agent` is owned by the agent group machinery (and by `/revoke`, which
+   *   walks those groups);
    * - `AskUserQuestion` returns early above and mounts its finished card;
    * - `ExitPlanMode` owns the plan box, which Ctrl+E expands by walking the
    *   transcript container's direct children.
+   *
+   * Every other tool is a row inside the block, so a turn reads as one
+   * timeline instead of a mix of cards and groups.
    */
   private static readonly STANDALONE_TOOL_NAMES: ReadonlySet<string> = new Set([
-    'Read',
     'Agent',
     'AskUserQuestion',
     'ExitPlanMode',
@@ -238,10 +230,6 @@ export class StreamingUIController {
 
   hasPendingAgentGroup(): boolean {
     return this._pendingAgentGroup !== null;
-  }
-
-  hasPendingReadGroup(): boolean {
-    return this._pendingReadGroup !== null;
   }
 
   removeToolComponentIfInactive(toolCallId: string): void {
@@ -415,8 +403,6 @@ export class StreamingUIController {
       this._pendingToolComponents.delete(toolCallId);
     }
     this._pendingAgentGroup = null;
-    this._pendingReadGroup = null;
-    this._pendingReadGroupComponents.clear();
     this._currentTurnId = undefined;
     this._currentStep = 0;
     this._streamingToolCallArguments.clear();
@@ -441,12 +427,11 @@ export class StreamingUIController {
     if (existing !== undefined) return existing;
     const { state } = this.host;
     const group = new ActivityGroupComponent(state.theme.colors, state.ui);
-    // Expansion is per target: a new block opens collapsed even when Ctrl+O was
-    // used moments ago, so the toggle never becomes a standing preference that
-    // opens every later block on its own.
+    // A new block comes up in the mode Ctrl+O last set, so expanding the
+    // transcript once keeps the rest of the turn consistent with it.
     group.setRunning(state.appState.streamingPhase !== 'idle');
+    group.setExpanded(state.toolOutputExpanded);
     this._activityGroup = group;
-    this._turnThinkingHistory = '';
     state.transcriptContainer.addChild(group);
     state.ui.requestRender();
     return group;
@@ -480,12 +465,23 @@ export class StreamingUIController {
    * releases the reference so the next turn opens a fresh one. Blocks with
    * content stay mounted (replayed history keeps its blocks).
    */
+  /**
+   * Files a background task notice (started / completed / failed) as a step of
+   * the turn that spawned it. Returns false when no block is open — a background
+   * task that outlives its turn keeps its own row instead of reopening a settled
+   * block — so the caller can fall back to mounting it on its own.
+   */
+  attachNotice(data: BackgroundAgentStatusData): boolean {
+    const group = this._activityGroup;
+    if (group === undefined) return false;
+    group.attachNotice(data);
+    return true;
+  }
+
   endActivityGroup(): void {
     const group = this._activityGroup;
     this._activityGroup = undefined;
     this._activityGroupRegistered = false;
-    this._turnThinkingHistory = '';
-    this._lastThinkingText = '';
     if (group === undefined) return;
     group.setRunning(false);
     if (group.isEmpty()) {
@@ -496,12 +492,6 @@ export class StreamingUIController {
     }
     this.host.transcriptController.unmarkPending(group);
     group.dispose();
-  }
-
-  /** Reasoning text of the whole turn: earlier steps plus the current draft. */
-  private activityThinkingText(draft: string): string {
-    if (this._turnThinkingHistory.length === 0) return draft;
-    return `${this._turnThinkingHistory}\n${draft}`;
   }
 
   // ---------------------------------------------------------------------------
@@ -700,7 +690,6 @@ export class StreamingUIController {
     this._streamingToolCallArguments.clear();
     this.disposeAndClearPendingToolComponents();
     this._pendingAgentGroup = null;
-    this._pendingReadGroup = null;
   }
 
   resetToolCallState(): void {
@@ -785,7 +774,6 @@ export class StreamingUIController {
   onStreamingTextStart(): void {
     const { state } = this.host;
     this._pendingAgentGroup = null;
-    this._pendingReadGroup = null;
     const entry = {
       id: nextTranscriptId(),
       kind: 'assistant' as const,
@@ -833,7 +821,6 @@ export class StreamingUIController {
     const { state } = this.host;
     if (this._activeThinkingComponent === undefined) {
       this._pendingAgentGroup = null;
-      this._pendingReadGroup = null;
       const component = new ThinkingComponent(
         fullText,
         state.theme.colors,
@@ -858,17 +845,15 @@ export class StreamingUIController {
       // plumbing keep working unchanged.
       const group = this.ensureActivityGroup();
       this.registerActivityGroupEntry(group, entry);
-      this._lastThinkingText = fullText;
-      group.setThinking(this.activityThinkingText(fullText), true);
+      group.appendThinking(fullText, true);
     } else {
       this._activeThinkingComponent.setText(fullText);
       if (this._thinkingEntry !== undefined) {
         this._thinkingEntry.content = fullText;
       }
-      this._lastThinkingText = fullText;
       // A block may have been sealed by earlier answer text (or never opened):
       // reasoning that arrives now must stay visible, so it opens its own block.
-      this.ensureActivityGroup().setThinking(this.activityThinkingText(fullText), true);
+      this.ensureActivityGroup().appendThinking(fullText, true);
     }
     state.ui.requestRender();
   }
@@ -884,22 +869,14 @@ export class StreamingUIController {
     this.host.transcriptController.releaseLiveComponent(component);
     this._activeThinkingComponent = undefined;
     this._thinkingEntry = undefined;
-    // Keep this step's reasoning for the block: the next step starts a fresh
-    // draft, and the block must show the whole turn's reasoning.
-    if (this._lastThinkingText.trim().length > 0) {
-      this._turnThinkingHistory = this.activityThinkingText(this._lastThinkingText);
-    }
-    this._lastThinkingText = '';
+    // The block keeps this run where it happened; the next run opens its own row,
+    // so the timeline stays in the order the work was produced.
     this._activityGroup?.endThinking();
     this.host.state.ui.requestRender();
   }
 
   onToolCallStart(toolCall: ToolCallBlockData): void {
     if (toolCall.name === 'AskUserQuestion') return;
-    if (toolCall.name === 'ReadGroup') {
-      this.startReadGroupToolCall(toolCall);
-      return;
-    }
 
     const { state } = this.host;
     const tc = new ToolCallComponent(
@@ -927,12 +904,11 @@ export class StreamingUIController {
     if (state.planExpanded) tc.setPlanExpanded(true);
 
     if (toolCall.name !== 'Agent') this._pendingAgentGroup = null;
-    if (toolCall.name !== 'Read') this._pendingReadGroup = null;
 
-    let handled = this.tryAttachAgentToolCall(toolCall, tc);
-    if (!handled) handled = this.tryAttachReadToolCall(toolCall, tc);
+    const handled = this.tryAttachAgentToolCall(toolCall, tc);
     if (!handled) {
       if (StreamingUIController.STANDALONE_TOOL_NAMES.has(toolCall.name)) {
+        tc.setExpanded(state.toolOutputExpanded);
         state.transcriptContainer.addChild(tc);
         state.ui.requestRender();
       } else {
@@ -957,43 +933,8 @@ export class StreamingUIController {
     }
   }
 
-  private startReadGroupToolCall(toolCall: ToolCallBlockData): void {
-    const { state, transcriptController } = this.host;
-    const rgc = new ReadGroupComponent(state.theme.colors, state.ui);
-    const entry: TranscriptEntry = {
-      id: nextTranscriptId(),
-      kind: 'tool_call',
-      turnId: toolCall.turnId ?? this._currentTurnId,
-      renderMode: 'plain',
-      content: toolCall.name,
-      toolCallData: toolCall,
-    };
-    this._pendingReadGroupComponents.set(toolCall.id, rgc);
-    this._pendingReadGroup = null;
-    this._pendingAgentGroup = null;
-    this.host.pushTranscriptEntry(entry);
-    transcriptController.registerLiveComponent(rgc, entry);
-    transcriptController.markPending(rgc);
-    state.transcriptContainer.addChild(rgc);
-    state.ui.requestRender();
-  }
-
   onToolCallEnd(toolCallId: string, result: ToolResultBlockData): void {
     const { state } = this.host;
-
-    const rgc = this._pendingReadGroupComponents.get(toolCallId);
-    if (rgc !== undefined) {
-      rgc.setResults(parseReadGroupOutput(result.output));
-      this.host.transcriptController.unmarkPending(rgc);
-      this._pendingReadGroupComponents.delete(toolCallId);
-      const entry = this.host.state.transcriptEntries.find((e) => e.toolCallData?.id === toolCallId);
-      if (entry?.toolCallData !== undefined) {
-        entry.toolCallData.result = result;
-      }
-      this.host.transcriptController.commit();
-      state.ui.requestRender();
-      return;
-    }
 
     const matchedCall = this._activeToolCalls.get(toolCallId);
     const tc = this._pendingToolComponents.get(toolCallId);
@@ -1031,6 +972,7 @@ export class StreamingUIController {
         state.appState.workDir,
       );
       completed.setPermissionMode(state.appState.permissionMode);
+      completed.setExpanded(state.toolOutputExpanded);
       if (state.planExpanded) completed.setPlanExpanded(true);
       const entry: TranscriptEntry = {
         id: nextTranscriptId(),
@@ -1161,6 +1103,7 @@ export class StreamingUIController {
     const cur = this._pendingAgentGroup;
     if (cur === null) {
       this._pendingAgentGroup = { step, turnId, solo: tc };
+      tc.setExpanded(state.toolOutputExpanded);
       state.transcriptContainer.addChild(tc);
       state.ui.requestRender();
       return true;
@@ -1188,68 +1131,6 @@ export class StreamingUIController {
   private upgradeSoloAgentToGroup(solo: ToolCallComponent): AgentGroupComponent {
     const { state, transcriptController } = this.host;
     const group = new AgentGroupComponent(state.theme.colors, state.ui);
-    const children = state.transcriptContainer.children;
-    const idx = children.indexOf(solo);
-    if (idx >= 0) {
-      children[idx] = group;
-      state.transcriptContainer.invalidate();
-    } else {
-      state.transcriptContainer.addChild(group);
-    }
-    group.attach(solo.toolCallView.id, solo);
-    const entry = transcriptController.findEntryForComponent(solo);
-    if (entry !== undefined) {
-      transcriptController.registerLiveComponent(group, entry);
-      transcriptController.unmarkPending(solo);
-    }
-    return group;
-  }
-
-  private tryAttachReadToolCall(toolCall: ToolCallBlockData, tc: ToolCallComponent): boolean {
-    const { state } = this.host;
-    if (toolCall.name !== 'Read') {
-      this._pendingReadGroup = null;
-      return false;
-    }
-
-    const step = toolCall.step ?? this._currentStep;
-    const turnId = toolCall.turnId ?? this._currentTurnId;
-    const pending = this._pendingReadGroup;
-
-    if (pending !== null && (pending.step !== step || pending.turnId !== turnId)) {
-      this._pendingReadGroup = null;
-    }
-
-    const cur = this._pendingReadGroup;
-    if (cur === null) {
-      this._pendingReadGroup = { step, turnId, solo: tc };
-      state.transcriptContainer.addChild(tc);
-      state.ui.requestRender();
-      return true;
-    }
-
-    if (cur.group !== undefined) {
-      cur.group.attach(toolCall.id, tc);
-      return true;
-    }
-
-    const solo = cur.solo;
-    if (solo === undefined) {
-      this._pendingReadGroup = { step, turnId, solo: tc };
-      state.transcriptContainer.addChild(tc);
-      state.ui.requestRender();
-      return true;
-    }
-    const group = this.upgradeSoloReadToGroup(solo);
-    group.attach(toolCall.id, tc);
-    this._pendingReadGroup = { step, turnId, group };
-    state.ui.requestRender();
-    return true;
-  }
-
-  private upgradeSoloReadToGroup(solo: ToolCallComponent): ReadGroupComponent {
-    const { state, transcriptController } = this.host;
-    const group = new ReadGroupComponent(state.theme.colors, state.ui);
     const children = state.transcriptContainer.children;
     const idx = children.indexOf(solo);
     if (idx >= 0) {

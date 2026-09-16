@@ -15,7 +15,7 @@ import { ScreamTUI, type ScreamTUIStartupInput, type TUIState } from '#/tui/scre
 import type { SessionEventHandler } from '#/tui/controllers/session-event-handler';
 import type { StreamingUIController } from '#/tui/controllers/streaming-ui';
 import { AgentGroupComponent } from '#/tui/components/messages/agent-group';
-import { ReadGroupComponent } from '#/tui/components/messages/read-group';
+import { ActivityGroupComponent } from '#/tui/components/messages/activity-group';
 
 vi.mock('#/tui/utils/open-url', () => ({ openUrl: vi.fn() }));
 
@@ -258,7 +258,7 @@ describe('ScreamTUI resume message replay', () => {
     expect(driver.streamingUI.getToolComponent('call_agent_2')).toBeUndefined();
   });
 
-  it('groups replayed Read calls from one assistant message using live grouping', async () => {
+  it('folds replayed Read calls into the turn activity block', async () => {
     const replay: AgentReplayRecord[] = [
       message('user', [{ type: 'text', text: 'read files' }]),
       message('assistant', [], {
@@ -276,13 +276,19 @@ describe('ScreamTUI resume message replay', () => {
     ];
 
     const driver = await replayIntoDriver(replay);
-    const group = driver.state.transcriptContainer.children.find(
-      (child) => child instanceof ReadGroupComponent,
+    const blocks = driver.state.transcriptContainer.children.filter(
+      (child) => child instanceof ActivityGroupComponent,
     );
 
-    expect(group).toBeInstanceOf(ReadGroupComponent);
-    expect((group as ReadGroupComponent).size()).toBe(2);
-    expect(driver.streamingUI.hasPendingReadGroup()).toBe(false);
+    expect(blocks).toHaveLength(1);
+    // Both reads are rows of the same block, in the order they were called.
+    const rows = (blocks[0] as ActivityGroupComponent)
+      .render(100)
+      .map((line) => line.replaceAll(/\u001B\[[0-9;]*m/g, ''))
+      .join('\n');
+    expect(rows).toContain('a.ts');
+    expect(rows).toContain('b.ts');
+    expect(rows.indexOf('a.ts')).toBeLessThan(rows.indexOf('b.ts'));
     expect(driver.streamingUI.getToolComponent('call_read_1')).toBeUndefined();
     expect(driver.streamingUI.getToolComponent('call_read_2')).toBeUndefined();
   });

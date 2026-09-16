@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { t } from '@scream-code/config';
 import { visibleWidth } from '@liutod-scream/pi-tui';
 import { ActivityGroupComponent } from '#/tui/components/messages/activity-group';
 import { ToolCallComponent } from '#/tui/components/messages/tool-call';
@@ -40,6 +41,11 @@ function render(group: ActivityGroupComponent, width = WIDTH): string[] {
   return group.render(width).map(strip);
 }
 
+/** The token field of the block header, so two headers can be compared. */
+function tokenField(header: string | undefined): string {
+  return header?.split('·').find((part) => part.includes('tok'))?.trim() ?? '';
+}
+
 function nonEmpty(lines: string[]): string[] {
   return lines.filter((line) => line.trim().length > 0);
 }
@@ -62,7 +68,7 @@ describe('ActivityGroupComponent', () => {
 
   it('collapses reasoning plus tool calls into exactly three rows', () => {
     const group = makeGroup();
-    group.setThinking(THINKING, false);
+    group.appendThinking(THINKING, false);
 
     const lines = nonEmpty(render(group));
 
@@ -73,21 +79,113 @@ describe('ActivityGroupComponent', () => {
     expect(lines[0]).toContain('ctrl+o');
   });
 
-  it('shows the latest tool and the reasoning summary in the collapsed rows', () => {
+  it('shows the two newest steps of the timeline in the collapsed rows', () => {
     const group = makeGroup();
-    group.setThinking(THINKING, false);
+    group.appendThinking(THINKING, false);
 
     const lines = nonEmpty(render(group));
 
-    expect(lines[1]?.startsWith('  │  ')).toBe(true);
+    // Timeline is [Bash, Edit, reasoning]: the newest two steps are the second
+    // tool and the reasoning run that followed it.
+    expect(lines[1]?.startsWith('  ├─')).toBe(true);
     expect(lines[1]).toContain('✓');
     expect(lines[1]).toContain('Edit');
     expect(lines[1]).not.toContain('Bash');
     expect(lines[2]?.startsWith('  └─')).toBe(true);
-    expect(lines[2]).toContain('思考：first reasoning line');
+    expect(lines[2]).toContain(t('activitygroup.thinking_summary', { summary: 'first reasoning line' }));
     // The token estimate belongs to the header row only: the reasoning row used
     // to repeat the same number right below it.
     expect(lines[2]).not.toContain('tok');
+  });
+
+  it('keeps a background task notice on the timeline as a normal step', () => {
+    const group = new ActivityGroupComponent(darkColors, undefined);
+    group.appendThinking('先起一个后台任务', false);
+    group.attachNotice({ phase: 'started', headline: '后台任务已启动', detail: 'bash-1' });
+    group.attachTool(makeTool('t1', 'Bash', { command: 'npm test' }), 1);
+
+    const lines = nonEmpty(render(group));
+
+    expect(lines).toHaveLength(3);
+    expect(lines[1]?.startsWith('  ├─')).toBe(true);
+    expect(lines[1]).toContain('后台任务已启动');
+    expect(lines[2]?.startsWith('  └─')).toBe(true);
+    expect(lines[2]).toContain('Bash');
+  });
+
+  it('marks a background task notice with the same glyphs as a tool row', () => {
+    const group = new ActivityGroupComponent(darkColors, undefined);
+    group.attachNotice({ phase: 'started', headline: '后台任务已启动', detail: 'bash-1' });
+    group.attachNotice({ phase: 'completed', headline: '后台任务已完成', detail: 'bash-1' });
+    group.attachNotice({ phase: 'failed', headline: '后台任务失败', detail: 'bash-2' });
+    group.setExpanded(true);
+
+    const body = render(group).map(strip).join('\n');
+
+    // Running shows the spinner glyph a pending tool row uses, done and failed
+    // show the marks a finished tool row uses.
+    expect(body).toContain('⠋ 后台任务已启动');
+    expect(body).toContain('✓ 后台任务已完成');
+    expect(body).toContain('✗ 后台任务失败');
+  });
+
+  it('spends the whole row width on the collapsed reasoning summary', () => {
+    const group = new ActivityGroupComponent(darkColors, undefined);
+    group.appendThinking('一二三四五六七八九十'.repeat(20), false);
+
+    const lines = nonEmpty(render(group, 100));
+
+    // Bounded by the terminal, not by the fixed 42-cell slice this row used to keep.
+    expect(visibleWidth(lines[1] ?? '')).toBeGreaterThan(80);
+    expect(lines[1]).toContain('…');
+  });
+
+  it('does not count a background task notice towards the block tokens', () => {
+    const group = new ActivityGroupComponent(darkColors, undefined);
+    group.attachTool(makeTool('t1', 'Bash', { command: 'ls -la' }), 1);
+    const before = tokenField(nonEmpty(render(group))[0]);
+
+    group.attachNotice({ phase: 'completed', headline: '后台任务已完成', detail: 'bash-1' });
+
+    expect(tokenField(nonEmpty(render(group))[0])).toBe(before);
+  });
+
+  it('pairs the newest tool with the reasoning run that led to it', () => {
+    const group = new ActivityGroupComponent(darkColors, undefined);
+    group.appendThinking(THINKING, false);
+    group.attachTool(makeTool('t1', 'Bash', { command: 'ls -la' }), 1);
+    group.appendThinking('second run reasoning', false);
+    group.attachTool(makeTool('t2', 'Edit', { file_path: '/workspace/a.ts' }), 2);
+
+    const lines = nonEmpty(render(group));
+
+    expect(lines).toHaveLength(3);
+    // Chronological within the row budget: reasoning above the tool it produced.
+    expect(lines[1]?.startsWith('  ├─')).toBe(true);
+    expect(lines[1]).toContain(t('activitygroup.thinking_summary', { summary: 'second run reasoning' }));
+    expect(lines[2]?.startsWith('  └─')).toBe(true);
+    expect(lines[2]).toContain('Edit');
+    expect(lines[2]).not.toContain('Bash');
+  });
+
+  it('opens a new reasoning row for each run instead of merging them', () => {
+    const group = new ActivityGroupComponent(darkColors, undefined);
+    group.appendThinking('first run', false);
+    group.attachTool(makeTool('t1', 'Bash', { command: 'ls -la' }), 1);
+    group.appendThinking('second run', false);
+    group.setExpanded(true);
+
+    const lines = nonEmpty(render(group));
+    const labels = lines.filter((line) => line.includes(t('activitygroup.thinking_label')));
+
+    expect(labels).toHaveLength(2);
+    // Order on screen is the order the work happened in.
+    expect(lines.findIndex((line) => line.includes('first run'))).toBeLessThan(
+      lines.findIndex((line) => line.includes('Bash')),
+    );
+    expect(lines.findIndex((line) => line.includes('Bash'))).toBeLessThan(
+      lines.findIndex((line) => line.includes('second run')),
+    );
   });
 
   it('drops the reasoning row when nothing was reasoned about', () => {
@@ -95,19 +193,22 @@ describe('ActivityGroupComponent', () => {
 
     const lines = nonEmpty(render(group));
 
-    expect(lines).toHaveLength(2);
-    expect(lines[1]?.startsWith('  └─')).toBe(true);
-    expect(lines[1]).toContain('Edit');
+    // No reasoning run: the row budget goes to the newest tool calls instead.
+    expect(lines).toHaveLength(3);
+    expect(lines[1]?.startsWith('  ├─')).toBe(true);
+    expect(lines[1]).toContain('Bash');
+    expect(lines[2]?.startsWith('  └─')).toBe(true);
+    expect(lines[2]).toContain('Edit');
   });
 
   it('renders reasoning only turns without a tool row', () => {
     const group = new ActivityGroupComponent(darkColors, undefined);
-    group.setThinking(THINKING, false);
+    group.appendThinking(THINKING, false);
 
     const lines = nonEmpty(render(group));
 
     expect(lines).toHaveLength(2);
-    expect(lines[1]).toContain('思考：first reasoning line');
+    expect(lines[1]).toContain(t('activitygroup.thinking_summary', { summary: 'first reasoning line' }));
   });
 
   it('renders nothing while it owns neither reasoning nor tool calls', () => {
@@ -118,7 +219,7 @@ describe('ActivityGroupComponent', () => {
 
   it('expands into a tree with per-tool previews and a reasoning excerpt', () => {
     const group = makeGroup();
-    group.setThinking(THINKING, false);
+    group.appendThinking(THINKING, false);
     group.setExpanded(true);
 
     const lines = nonEmpty(render(group));
@@ -139,7 +240,7 @@ describe('ActivityGroupComponent', () => {
 
   it('caps the reasoning excerpt and points at the hidden lines', () => {
     const group = makeGroup();
-    group.setThinking(LONG_THINKING, false);
+    group.appendThinking(LONG_THINKING, false);
     group.setExpanded(true);
 
     const lines = render(group);
@@ -152,7 +253,7 @@ describe('ActivityGroupComponent', () => {
 
   it('previews the newest reasoning lines while streaming', () => {
     const group = makeGroup();
-    group.setThinking(LONG_THINKING, true);
+    group.appendThinking(LONG_THINKING, true);
     group.setExpanded(true);
 
     const lines = render(group);
@@ -184,7 +285,7 @@ describe('ActivityGroupComponent', () => {
     expect(nonEmpty(render(group))[0]).toContain('- toks/s');
 
     getSharedSpeedTracker().observe(80, 1000, performance.now());
-    group.setThinking(THINKING, true);
+    group.appendThinking(THINKING, true);
     const streaming = nonEmpty(render(group))[0] ?? '';
     expect(streaming).toContain('toks/s');
     expect(streaming).not.toContain('- toks/s');
@@ -215,7 +316,7 @@ describe('ActivityGroupComponent', () => {
 
   it('counts Chinese reasoning at roughly one token per character', () => {
     const group = new ActivityGroupComponent(darkColors, undefined);
-    group.setThinking('推'.repeat(2000), false);
+    group.appendThinking('推'.repeat(2000), false);
 
     // 2000 CJK chars ≈ 2.0K tokens; the old chars/2.5 heuristic reported 800.
     expect(nonEmpty(render(group))[0]).toContain('≈2.0K tok');
@@ -228,7 +329,9 @@ describe('ActivityGroupComponent', () => {
     group.attachTool(first, 1);
     group.attachTool(makeTool('t2', 'Edit', { file_path: '/workspace/b.ts' }), 1);
 
-    expect(nonEmpty(render(group))).toHaveLength(2);
+    // The duplicate borrow is a no-op, so the block holds two steps: header plus
+    // both tool rows inside the collapsed row budget.
+    expect(nonEmpty(render(group))).toHaveLength(3);
     expect(group.isExpanded()).toBe(false);
 
     group.setExpanded(true);
@@ -236,12 +339,12 @@ describe('ActivityGroupComponent', () => {
     expect(render(group).some((line) => line.startsWith('  ├─'))).toBe(true);
 
     group.setExpanded(false);
-    expect(nonEmpty(render(group))).toHaveLength(2);
+    expect(nonEmpty(render(group))).toHaveLength(3);
   });
 
   it('rebuilds its rows after an external invalidate', () => {
     const group = makeGroup();
-    group.setThinking(THINKING, false);
+    group.appendThinking(THINKING, false);
     const before = render(group);
 
     group.invalidate();
@@ -316,9 +419,42 @@ describe('ActivityGroupComponent', () => {
     expect(nonEmpty(lines).some((line) => line.includes('printf done'))).toBe(true);
   });
 
+  it('keeps a notice row inside the terminal width instead of wrapping', () => {
+    const group = new ActivityGroupComponent(darkColors, undefined);
+    group.attachNotice({
+      phase: 'completed',
+      headline: '后台任务已完成',
+      detail: 'a-really-long-command-line --with --many --arguments '.repeat(4),
+    });
+
+    for (const width of [40, 72]) {
+      const lines = nonEmpty(render(group, width));
+      expect(lines).toHaveLength(2);
+      for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
+    }
+  });
+
+  it('does not repeat reasoning when a notice splits the run', () => {
+    const group = new ActivityGroupComponent(darkColors, undefined);
+    group.appendThinking('第一段推理', true);
+    group.attachNotice({ phase: 'started', headline: '后台任务已启动' });
+    // The run text is cumulative and keeps growing after the notice: everything
+    // already shown must stay out of the continuation row on every flush, not
+    // just the first one.
+    group.appendThinking('第一段推理\n第二段推理', true);
+    group.appendThinking('第一段推理\n第二段推理\n第三段推理', true);
+    group.setExpanded(true);
+
+    const body = render(group).map(strip).join('\n');
+
+    expect(body.match(/第一段推理/g)).toHaveLength(1);
+    expect(body).toContain('第二段推理');
+    expect(body).toContain('第三段推理');
+  });
+
   it('never lets a row overflow the viewport', () => {
     const group = makeGroup();
-    group.setThinking(LONG_THINKING, true);
+    group.appendThinking(LONG_THINKING, true);
     group.setExpanded(true);
 
     for (const line of render(group, 60)) {
@@ -331,7 +467,7 @@ describe('ActivityGroupComponent', () => {
 
   it('stays three rows tall on a narrow terminal instead of wrapping', () => {
     const group = makeGroup();
-    group.setThinking('a very long reasoning summary that would never fit in a narrow window', false);
+    group.appendThinking('a very long reasoning summary that would never fit in a narrow window', false);
 
     for (const width of [48, 60, 72]) {
       const lines = nonEmpty(render(group, width));
@@ -360,7 +496,7 @@ describe('ActivityGroupComponent', () => {
     for (let i = 0; i < 8; i += 1) {
       group.attachTool(makeTool(`t${String(i)}`, 'Bash', { command: `ls ${String(i)}` }, 40), i + 1);
     }
-    group.setThinking(LONG_THINKING, false);
+    group.appendThinking(LONG_THINKING, false);
     group.setExpanded(true);
 
     const lines = nonEmpty(render(group, 100));
@@ -370,14 +506,15 @@ describe('ActivityGroupComponent', () => {
 
     const summary = lines.find((line) => line.includes('还有'));
     expect(summary).toBeDefined();
-    expect(summary).toContain('5'); // 8 tools, 3 fit the budget, 5 summarised
+    // Nine steps (8 tools plus the reasoning run): 3 fit the budget, 6 summarised.
+    expect(summary).toContain('6');
     // The summarised row closes the tree, so the last shown tool keeps a branch.
     expect(lines.some((line) => line.startsWith('  ├─'))).toBe(true);
   });
 
   it('caps the excerpt by rendered lines for a wrapped paragraph', () => {
     const group = new ActivityGroupComponent(darkColors, undefined);
-    group.setThinking('word '.repeat(400).trim(), false);
+    group.appendThinking('word '.repeat(400).trim(), false);
     group.setExpanded(true);
 
     const lines = render(group, 60);
@@ -390,7 +527,7 @@ describe('ActivityGroupComponent', () => {
 
   it('stays three rows tall on a very narrow terminal', () => {
     const group = makeGroup();
-    group.setThinking('reasoning that cannot possibly fit', false);
+    group.appendThinking('reasoning that cannot possibly fit', false);
 
     for (const width of [30, 40, 48]) {
       const lines = nonEmpty(render(group, width));
@@ -401,7 +538,7 @@ describe('ActivityGroupComponent', () => {
 
   it('drops the statistics before overflowing on an extreme width', () => {
     const group = makeGroup();
-    group.setThinking('reasoning', false);
+    group.appendThinking('reasoning', false);
 
     const header = nonEmpty(render(group, 12))[0] ?? '';
     expect(visibleWidth(header)).toBeLessThanOrEqual(12);

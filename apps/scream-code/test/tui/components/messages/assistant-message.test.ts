@@ -7,6 +7,7 @@ import { AssistantMessageComponent } from '#/tui/components/messages/assistant-m
 import { STATUS_BULLET } from '#/tui/constant/symbols';
 import { darkColors } from '#/tui/theme/colors';
 import { createMarkdownTheme } from '#/tui/theme/pi-tui-theme';
+import { toggleCodeBlockPanel } from '#/tui/utils/ui-preferences';
 import { FADE_MS } from '#/tui/utils/streaming-fade';
 
 import { captureProcessWrite } from '../../../helpers/process';
@@ -275,6 +276,29 @@ describe('fenced code panel', () => {
     const line = theme.codeBlockLine?.('x'.repeat(200), { index: 1, total: 2, width: 40 }) ?? '';
 
     expect(visibleWidth(line)).toBe(40);
+  });
+
+  it('drops the panel fill when /codebg turns it off, keeping the row layout', () => {
+    const args = { index: 0, total: 1, lang: 'ts', width: 40 };
+    const previousLevel = chalk.level;
+    // Escapes only exist above level 0, and this test is about the escapes.
+    chalk.level = 3;
+    try {
+      const on = createMarkdownTheme(darkColors).codeBlockLine?.('const a = 1;', args) ?? '';
+
+      expect(toggleCodeBlockPanel()).toBe(false);
+      const off = createMarkdownTheme(darkColors).codeBlockLine?.('const a = 1;', args) ?? '';
+
+      // Same text and same columns, minus the per-cell background fill.
+      expect(strip(off)).toBe(strip(on));
+      expect(visibleWidth(off)).toBe(visibleWidth(on));
+      expect(on).toContain('\u001B[48;');
+      expect(off).not.toContain('\u001B[48;');
+
+      expect(toggleCodeBlockPanel()).toBe(true);
+    } finally {
+      chalk.level = previousLevel;
+    }
   });
 
   it('paints the palette surface and omits the fence hook', () => {

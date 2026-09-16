@@ -12,6 +12,7 @@ import { computeDiffLines } from '#/tui/components/media/diff-preview';
 import type { ToolCallBlockData, ToolResultBlockData } from '#/tui/types';
 
 import { readMediaChip } from './media';
+import { parseReadGroupOutput } from './read-group-list';
 import { strArg } from './types';
 
 export type ChipProvider = (toolCall: ToolCallBlockData, result: ToolResultBlockData) => string;
@@ -85,6 +86,22 @@ const writeChip: ChipProvider = (toolCall) => formatWriteChip(computeWriteStats(
 const readChip: ChipProvider = (_toolCall, result) =>
   pluralize(countNonEmptyLines(result.output), 'line');
 
+const readGroupChip: ChipProvider = (_toolCall, result) => {
+  const entries = parseReadGroupOutput(result.output);
+  if (entries.length === 0) return '';
+  const failed = entries.filter((entry) => entry.failed).length;
+  const files = pluralize(entries.length, 'file');
+  if (failed === entries.length) return `${files} · failed`;
+  const lines = entries.reduce(
+    (sum, entry) => (entry.failed ? sum : sum + entry.lines),
+    0,
+  );
+  const parts = [files];
+  if (lines > 0) parts.push(pluralize(lines, 'line'));
+  if (failed > 0) parts.push(`${String(failed)} failed`);
+  return parts.join(' · ');
+};
+
 const grepChip: ChipProvider = (_toolCall, result) => {
   const matches = countNonEmptyLines(result.output);
   if (matches === 0) return 'no matches';
@@ -114,6 +131,7 @@ const REGISTRY: Record<string, ChipProvider> = {
   Edit: editChip,
   Write: writeChip,
   Read: readChip,
+  ReadGroup: readGroupChip,
   ReadMediaFile: readMediaChip,
   Grep: grepChip,
   Glob: globChip,

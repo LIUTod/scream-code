@@ -5,6 +5,9 @@ export const STATUS_BULLET = '■ ';
 // assumes the marker occupies the leading cells.
 export const USER_MESSAGE_BULLET = '■ ';
 export const FAILURE_MARK = '✗ ';
+// Same shape as FAILURE_MARK: the success counterpart, carrying its own trailing
+// space for rows that compose `branch + mark + text`.
+export const DONE_MARK = '✓ ';
 
 // U+25B8 small right triangle — marks an interjection row: a subagent cutting
 // into the main transcript to speak up. The square stays reserved for user and

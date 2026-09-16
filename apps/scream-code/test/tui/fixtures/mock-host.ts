@@ -195,6 +195,8 @@ export function makeMockStreamingUI(
     getActiveToolCall: vi.fn((): undefined => undefined),
     onToolCallStart: vi.fn(),
     hasActiveTurn: vi.fn((): boolean => false),
+    // Default: no block is open, so a notice keeps its own transcript row.
+    attachNotice: vi.fn((): boolean => false),
     ...overrides,
   };
   return streamingUI as unknown as StreamingUIController;
