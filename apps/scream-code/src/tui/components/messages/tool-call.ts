@@ -653,9 +653,24 @@ export class ToolCallComponent extends CachedContainer {
    * additions), for the group-level diff stat in the activity block header.
    * Undefined for non-mutating tools, unfinished calls, and failed calls: a
    * failure changed nothing, so it must not count towards the group total.
+   *
+   * The mutation tools report their exact numbers (`display.file_diff`) computed
+   * from the real before/after contents. Groups replayed from a resumed session
+   * carry no such payload (the transcript keeps message text, not the UI
+   * payload), so they fall back to deriving the numbers from the arguments — a
+   * fallback that cannot know how many lines a Write replaced, so it reports
+   * `removed: undefined` ("unknown") instead of claiming zero.
    */
-  diffContribution(): { added: number; removed: number } | undefined {
+  diffContribution(): { added: number; removed: number | undefined } | undefined {
     if (this.result === undefined || this.result.is_error) return undefined;
+    const reported = this.result.display;
+    if (reported?.kind === 'file_diff') {
+      // A mutation that changed nothing (identical or empty content) reports
+      // zeroes: the argument fallback skips those, so this path must too,
+      // otherwise the header grows a "+0 -0" segment for a no-op.
+      if (reported.added === 0 && reported.removed === 0) return undefined;
+      return { added: reported.added, removed: reported.removed };
+    }
     if (this.toolCall.name === 'Edit') {
       const stats = computeEditStats(this.toolCall.args);
       if (stats.added === 0 && stats.removed === 0) return undefined;
@@ -664,7 +679,7 @@ export class ToolCallComponent extends CachedContainer {
     if (this.toolCall.name === 'Write') {
       const stats = computeWriteStats(this.toolCall.args);
       if (stats.lines === 0) return undefined;
-      return { added: stats.lines, removed: 0 };
+      return { added: stats.lines, removed: undefined };
     }
     return undefined;
   }

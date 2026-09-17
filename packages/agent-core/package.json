@@ -52,6 +52,7 @@
     "@scream-code/memory": "workspace:*",
     "ajv": "^8.18.0",
     "ajv-formats": "^3.0.1",
+    "diff": "^9.0.0",
     "fast-xml-parser": "^5.10.1",
     "fflate": "^0.8.3",
     "js-yaml": "^4.1.1",

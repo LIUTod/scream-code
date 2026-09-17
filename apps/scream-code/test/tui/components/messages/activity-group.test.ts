@@ -573,13 +573,16 @@ describe('header diff stat', () => {
         darkColors,
       ),
       2,
-    ); // +3
+    ); // +3, deletions unknown (record predates the tools reporting their own diff)
     group.attachTool(editTool('e2', 'p', 'q', true), 3); // failed: ignored
     group.attachTool(makeTool('r1', 'Read', { file_path: '/workspace/a.ts' }), 4); // read-only
 
     const header = nonEmpty(render(group))[0] ?? '';
+    // Additions always add up. The Write cannot report how many lines it
+    // replaced, so the group claims no deletion figure at all — rendering a
+    // "-0" here would state a deletion count that was never measured.
     expect(header).toContain('+4');
-    expect(header).toContain('-0');
+    expect(header).not.toContain('+4 -');
     expect(header).toContain('实速');
   });
 

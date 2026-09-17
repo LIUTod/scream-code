@@ -471,10 +471,14 @@ export class ActivityGroupComponent extends Container {
    * Aggregate diff of the group's finished, successful file mutations
    * (Edit/Write), shown in the header. Read-only tools contribute nothing;
    * failed attempts changed nothing, so only successful calls count.
+   * `removed` stays undefined when any contributor could not report its
+   * deletions (replayed records carry no display payload): summing a partial
+   * number would claim a deletion count the group never measured.
    */
-  private diffTotals(): { added: number; removed: number } | undefined {
+  private diffTotals(): { added: number; removed: number | undefined } | undefined {
     let added = 0;
     let removed = 0;
+    let removedKnown = true;
     let seen = false;
     for (const segment of this.segments) {
       if (segment.kind !== 'tool') continue;
@@ -482,9 +486,11 @@ export class ActivityGroupComponent extends Container {
       if (contribution === undefined) continue;
       seen = true;
       added += contribution.added;
-      removed += contribution.removed;
+      if (contribution.removed === undefined) removedKnown = false;
+      else removed += contribution.removed;
     }
-    return seen ? { added, removed } : undefined;
+    if (!seen) return undefined;
+    return { added, removed: removedKnown ? removed : undefined };
   }
 
   private buildHeader(width: number): string {
@@ -507,10 +513,14 @@ export class ActivityGroupComponent extends Container {
     const diff = this.diffTotals();
     const diffPart = diff
       ? SEPARATOR +
-        t('activitygroup.diff', {
-          added: chalk.hex(colors.diffAdded)(`+${diff.added}`),
-          removed: chalk.hex(colors.diffRemoved)(`-${diff.removed}`),
-        })
+        (diff.removed === undefined
+          ? t('activitygroup.diffAddedOnly', {
+              added: chalk.hex(colors.diffAdded)(`+${diff.added}`),
+            })
+          : t('activitygroup.diff', {
+              added: chalk.hex(colors.diffAdded)(`+${diff.added}`),
+              removed: chalk.hex(colors.diffRemoved)(`-${diff.removed}`),
+            }))
       : '';
 
     // The rate slot is always present: a dash keeps the header width stable and

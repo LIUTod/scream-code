@@ -13,7 +13,9 @@ import type { BuiltinTool } from '../../../agent/tool';
 import { ToolAccesses } from '../../../loop/tool-access';
 import type { ExecutableToolResult, ToolExecution } from '../../../loop/types';
 import type { LspRegistry } from '../../../lsp/registry';
+import type { ToolResultDisplay } from '../../display';
 import { resolvePathAccessPath } from '../../policies/path-access';
+import { countLines, fileDiffSummary } from '../../support/file-diff';
 import { toInputJsonSchema } from '../../support/input-schema';
 import { literalRulePattern, matchesPathRuleSubject } from '../../support/rule-match';
 import { scanCache } from '../../support/scan-cache';
@@ -26,6 +28,25 @@ import WRITE_DESCRIPTION from './write.md';
 const S_IFMT = 0o170000;
 /** File-type bits of a directory. */
 const S_IFDIR = 0o040000;
+
+/**
+ * Size ceiling (bytes, from `stat`) for reading the pre-write text that feeds
+ * the `file_diff` display. Mirrors the guard inside `fileDiffSummary`: past it
+ * the diff is skipped anyway, so the file is never read only to be discarded.
+ */
+const MAX_DIFF_SOURCE_BYTES = 1_000_000;
+
+/**
+ * Pre-write state of the write target, collected solely to build the
+ * `file_diff` display. `missing` means this call creates the file;
+ * `unavailable` means the state could not be established (oversized,
+ * unreadable, or a failing stat) and the display is omitted rather than
+ * guessed.
+ */
+type ExistingText =
+  | { readonly kind: 'missing' }
+  | { readonly kind: 'text'; readonly text: string }
+  | { readonly kind: 'unavailable' };
 
 export const WriteInputSchema = z.object({
   path: z
@@ -112,6 +133,14 @@ export class WriteTool implements BuiltinTool<WriteInput> {
 
     try {
       const mode = args.mode ?? 'overwrite';
+      // Best-effort pre-write read for the `file_diff` display. It must never
+      // affect write semantics: every read failure is folded into `unavailable`
+      // so the write proceeds untouched.
+      const existing = await this.readExistingText(safePath);
+      const display: ToolResultDisplay | undefined =
+        mode === 'append'
+          ? this.appendFileDiffDisplay(args.content, existing)
+          : this.overwriteFileDiffDisplay(args.content, existing);
       if (mode === 'append') {
         await this.jian.writeText(safePath, args.content, { mode: 'a' });
       } else {
@@ -128,7 +157,8 @@ export class WriteTool implements BuiltinTool<WriteInput> {
       // TUI doesn't double-collapse the content preview + result output.
       const output = `${mode === 'append' ? 'Appended' : 'Wrote'} ${String(bytesWritten)} bytes to ${args.path}`;
       const message = notice.length > 0 ? notice : undefined;
-      return hasErrors ? { isError: true, output, message } : { output, message };
+      if (hasErrors) return { isError: true, output, message };
+      return display === undefined ? { output, message } : { output, message, display };
     } catch (error) {
       const code = (error as { code?: unknown } | null)?.code;
       if (code === 'ENOENT') {
@@ -141,6 +171,71 @@ export class WriteTool implements BuiltinTool<WriteInput> {
         isError: true,
         output: error instanceof Error ? error.message : String(error),
       };
+    }
+  }
+
+  /**
+   * Compute the `file_diff` line counts for an append.
+   *
+   * Appending concatenates bytes, so a file that does not end with a newline has
+   * its last line rewritten by the first appended line — counting only the new
+   * content (`+N -0`) would hide that rewritten line. Diffing the real pre-write
+   * text against that text plus the new content is exact; a target that does not
+   * exist yet can only gain lines.
+   */
+  private appendFileDiffDisplay(
+    content: string,
+    existing: ExistingText,
+  ): ToolResultDisplay | undefined {
+    if (existing.kind === 'unavailable') return undefined;
+    const before = existing.kind === 'missing' ? '' : existing.text;
+    const summary = fileDiffSummary(before, before + content);
+    if (summary === undefined) return undefined;
+    return { kind: 'file_diff', added: summary.added, removed: summary.removed };
+  }
+
+  /**
+   * Compute the `file_diff` line counts for an overwrite.
+   *
+   * A file that does not exist yet can only gain lines, so the argument-derived
+   * count is exact there. Otherwise the previous text is diffed against the
+   * new text, which is the only way to see the removed lines an overwrite
+   * destroys. Returns `undefined` (no display) when the previous text is
+   * unknown or too large to diff.
+   */
+  private overwriteFileDiffDisplay(
+    content: string,
+    existing: ExistingText,
+  ): ToolResultDisplay | undefined {
+    if (existing.kind === 'missing') {
+      return { kind: 'file_diff', added: countLines(content), removed: 0 };
+    }
+    if (existing.kind === 'unavailable') return undefined;
+    const summary = fileDiffSummary(existing.text, content);
+    if (summary === undefined) return undefined;
+    return { kind: 'file_diff', added: summary.added, removed: summary.removed };
+  }
+
+  /**
+   * Best-effort read of the text this call is about to overwrite, for the
+   * `file_diff` display only.
+   *
+   * The `stat` size check runs first so an oversized file is never pulled into
+   * memory just to be diffed. A failing `stat` for any reason other than
+   * `ENOENT` is inconclusive, so the read is still attempted.
+   */
+  private async readExistingText(safePath: string): Promise<ExistingText> {
+    try {
+      const info = await this.jian.stat(safePath);
+      if (info.stSize > MAX_DIFF_SOURCE_BYTES) return { kind: 'unavailable' };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException | null)?.code === 'ENOENT') return { kind: 'missing' };
+    }
+    try {
+      return { kind: 'text', text: await this.jian.readText(safePath) };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException | null)?.code === 'ENOENT') return { kind: 'missing' };
+      return { kind: 'unavailable' };
     }
   }
 

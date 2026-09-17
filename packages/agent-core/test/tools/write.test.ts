@@ -1,8 +1,14 @@
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import type { LspDiagnostic } from '../../src/lsp/client';
 import type { LspRegistry } from '../../src/lsp/registry';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { type WriteInput, WriteInputSchema, WriteTool } from '../../src/tools/builtin/file/write';
+import { fileDiffSummary } from '../../src/tools/support/file-diff';
+import { testJian } from '../fixtures/test-jian';
 import { createFakeJian, PERMISSIVE_WORKSPACE, toolContentString } from './fixtures/fake-jian';
 import { executeTool } from './fixtures/execute-tool';
 
@@ -486,5 +492,205 @@ describe('WriteTool', () => {
     expect(result.output).not.toContain('[LSP]');
     expect(result.message).toContain('[LSP]');
     expect(result.message).toContain('Unused variable');
+  });
+});
+
+describe('WriteTool file_diff display', () => {
+  // The overwrite cases run against real files on disk (LocalJian) so the
+  // removed-line count is checked against the file's true previous contents —
+  // the number the argument-derived UI heuristic cannot see.
+  let dir: string;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'scream-write-diff-'));
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('reports a created file as pure additions', async () => {
+    const path = join(dir, 'created.txt');
+    const content = 'one\ntwo\nthree\n';
+    const tool = new WriteTool(testJian, PERMISSIVE_WORKSPACE);
+
+    const result = await executeTool(tool, context({ path, content }));
+
+    expect(result.isError).toBeFalsy();
+    if (result.isError === true) throw new Error('expected success result');
+    expect(await readFile(path, 'utf8')).toBe(content);
+    expect(result.display).toEqual({ kind: 'file_diff', added: 3, removed: 0 });
+  });
+
+  it('reports an append as pure additions of the appended text', async () => {
+    const path = join(dir, 'appended.txt');
+    await writeFile(path, 'first\n', 'utf8');
+    const tool = new WriteTool(testJian, PERMISSIVE_WORKSPACE);
+
+    const result = await executeTool(
+      tool,
+      context({ path, content: 'second\nthird\n', mode: 'append' }),
+    );
+
+    expect(result.isError).toBeFalsy();
+    if (result.isError === true) throw new Error('expected success result');
+    expect(await readFile(path, 'utf8')).toBe('first\nsecond\nthird\n');
+    expect(result.display).toEqual({ kind: 'file_diff', added: 2, removed: 0 });
+  });
+
+  it('reports an append that rewrites an unterminated last line', async () => {
+    // Appending concatenates bytes: the old last line is rewritten by the first
+    // appended line, so the honest counts are "+2 -1" — reporting "+2 -0" would
+    // hide a line the append actually changed.
+    const path = join(dir, 'unterminated.txt');
+    await writeFile(path, 'first', 'utf8');
+    const tool = new WriteTool(testJian, PERMISSIVE_WORKSPACE);
+
+    const result = await executeTool(
+      tool,
+      context({ path, content: 'second\nthird\n', mode: 'append' }),
+    );
+
+    expect(result.isError).toBeFalsy();
+    if (result.isError === true) throw new Error('expected success result');
+    expect(await readFile(path, 'utf8')).toBe('firstsecond\nthird\n');
+    expect(result.display).toEqual({ kind: 'file_diff', added: 2, removed: 1 });
+  });
+
+  it('reports an append to a nonexistent file as pure additions', async () => {
+    const path = join(dir, 'appended-new.txt');
+    const tool = new WriteTool(testJian, PERMISSIVE_WORKSPACE);
+
+    const result = await executeTool(
+      tool,
+      context({ path, content: 'only line\n', mode: 'append' }),
+    );
+
+    expect(result.isError).toBeFalsy();
+    if (result.isError === true) throw new Error('expected success result');
+    expect(await readFile(path, 'utf8')).toBe('only line\n');
+    expect(result.display).toEqual({ kind: 'file_diff', added: 1, removed: 0 });
+  });
+
+  it('diffs an overwrite against the real previous contents', async () => {
+    const path = join(dir, 'rewritten.txt');
+    const before = 'one\ntwo\nthree\nfour\n';
+    const content = 'one\nTWO\nthree\n';
+    await writeFile(path, before, 'utf8');
+    const tool = new WriteTool(testJian, PERMISSIVE_WORKSPACE);
+
+    const result = await executeTool(tool, context({ path, content }));
+
+    expect(result.isError).toBeFalsy();
+    if (result.isError === true) throw new Error('expected success result');
+    const after = await readFile(path, 'utf8');
+    expect(after).toBe(content);
+    expect(fileDiffSummary(before, after)).toEqual({ added: 1, removed: 2 });
+    expect(result.display).toEqual({ kind: 'file_diff', added: 1, removed: 2 });
+  });
+
+  it('reports an empty overwrite of a non-empty file as pure removals', async () => {
+    const path = join(dir, 'emptied.txt');
+    const before = 'one\ntwo\n';
+    await writeFile(path, before, 'utf8');
+    const tool = new WriteTool(testJian, PERMISSIVE_WORKSPACE);
+
+    const result = await executeTool(tool, context({ path, content: '' }));
+
+    expect(result.isError).toBeFalsy();
+    if (result.isError === true) throw new Error('expected success result');
+    const after = await readFile(path, 'utf8');
+    expect(after).toBe('');
+    expect(fileDiffSummary(before, after)).toEqual({ added: 0, removed: 2 });
+    expect(result.display).toEqual({ kind: 'file_diff', added: 0, removed: 2 });
+  });
+
+  it('omits the display when the line diff exceeds its budget', async () => {
+    // Rewriting a file with content that shares no lines with the old one is
+    // jsdiff's worst case (minutes without a budget). The tool must give up and
+    // report no counts at all instead of blocking, leaving the UI on its
+    // argument-derived fallback; the write itself is unaffected.
+    const before = Array.from({ length: 24_000 }, (_, i) => `{"k${String(i)}":${String(i)}}`).join('\n');
+    const after = Array.from({ length: 24_000 }, (_, i) => `{"x${String(i)}":${String(i * 7)}}`).join('\n');
+    const path = join(dir, 'adversarial.json');
+    await writeFile(path, before, 'utf8');
+    const tool = new WriteTool(testJian, PERMISSIVE_WORKSPACE);
+
+    const started = Date.now();
+    const result = await executeTool(tool, context({ path, content: after }));
+    const elapsed = Date.now() - started;
+
+    expect(result.isError).toBeFalsy();
+    expect(Object.keys(result)).not.toContain('display');
+    expect(elapsed).toBeLessThan(5_000);
+    expect(await readFile(path, 'utf8')).toBe(after);
+  }, 30_000);
+
+  it('omits the display when the previous contents cannot be read', async () => {
+    // FakeJian without readText: the pre-write state is unknown, so the tool
+    // must not guess. The write itself still happens.
+    const writeText = vi.fn().mockResolvedValue(4);
+    const tool = new WriteTool(
+      createFakeJian({ writeText, stat: DIR_STAT }),
+      PERMISSIVE_WORKSPACE,
+    );
+
+    const result = await executeTool(tool, context({ path: '/tmp/unknown.txt', content: 'data' }));
+
+    expect(result.isError).toBeFalsy();
+    expect(Object.keys(result)).not.toContain('display');
+    expect(writeText).toHaveBeenCalledWith('/tmp/unknown.txt', 'data');
+  });
+
+  it('skips the diff without reading when the target is oversized', async () => {
+    // The target is a 1 MB+ regular file; its parent is a directory.
+    const stat = vi.fn().mockImplementation((path: string) =>
+      Promise.resolve(
+        path === '/tmp/huge.txt'
+          ? { stMode: 0o100644, stSize: 1_000_001 }
+          : { stMode: 0o040755 },
+      ),
+    );
+    const readText = vi.fn().mockResolvedValue('never used');
+    const writeText = vi.fn().mockResolvedValue(4);
+    const tool = new WriteTool(createFakeJian({ stat, readText, writeText }), PERMISSIVE_WORKSPACE);
+
+    const result = await executeTool(tool, context({ path: '/tmp/huge.txt', content: 'data' }));
+
+    expect(result.isError).toBeFalsy();
+    expect(readText).not.toHaveBeenCalled();
+    expect(Object.keys(result)).not.toContain('display');
+    expect(writeText).toHaveBeenCalledWith('/tmp/huge.txt', 'data');
+  });
+
+  it('omits the display when the write fails', async () => {
+    const tool = new WriteTool(
+      createFakeJian({
+        stat: DIR_STAT,
+        readText: vi.fn().mockResolvedValue('previous contents'),
+        writeText: vi.fn().mockRejectedValue(new Error('disk full')),
+      }),
+      PERMISSIVE_WORKSPACE,
+    );
+
+    const result = await executeTool(tool, context({ path: '/some/file.txt', content: 'data' }));
+
+    expect(result).toMatchObject({ isError: true });
+    expect(Object.keys(result)).not.toContain('display');
+  });
+
+  it('omits the display when the content is rejected before any write', async () => {
+    const readText = vi.fn().mockResolvedValue('previous contents');
+    const writeText = vi.fn().mockResolvedValue(0);
+    const tool = new WriteTool(createFakeJian({ stat: DIR_STAT, readText, writeText }), PERMISSIVE_WORKSPACE);
+
+    const result = await executeTool(
+      tool,
+      context({ path: '/tmp/conflict.ts', content: '<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> branch' }),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(Object.keys(result)).not.toContain('display');
+    expect(readText).not.toHaveBeenCalled();
   });
 });

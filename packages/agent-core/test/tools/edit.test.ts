@@ -1,3 +1,7 @@
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import type { LspDiagnostic } from '../../src/lsp/client';
 import type { LspRegistry } from '../../src/lsp/registry';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -5,6 +9,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { type EditInput, EditInputSchema, EditTool } from '../../src/tools/builtin/file/edit';
 import { computeAnchor, toModelTextView } from '../../src/tools/builtin/file/line-endings';
 import { resetNoopLoop } from '../../src/tools/builtin/file/noop-loop-guard';
+import { fileDiffSummary } from '../../src/tools/support/file-diff';
+import { testJian } from '../fixtures/test-jian';
 import { createFakeJian, PERMISSIVE_WORKSPACE } from './fixtures/fake-jian';
 import { executeTool } from './fixtures/execute-tool';
 
@@ -886,5 +892,130 @@ describe('EditTool noop-loop-guard', () => {
     expect(asError(r2).stopTurn).toBeUndefined();
     expect(r2.output).not.toContain('Warning: attempt');
     resetNoopLoop('/tmp/noop-c.txt');
+  });
+});
+
+describe('EditTool file_diff display', () => {
+  // These tests run against real files on disk (LocalJian) so the reported
+  // counts are checked against the true before/after contents rather than
+  // against the tool's own bookkeeping.
+  let dir: string;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'scream-edit-diff-'));
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('reports one added and one removed line for a single-line replacement', async () => {
+    const path = join(dir, 'single.ts');
+    const before = 'const a = 1;\nconst b = 2;\nconst c = 3;\n';
+    await writeFile(path, before, 'utf8');
+    const tool = new EditTool(testJian, PERMISSIVE_WORKSPACE);
+
+    const result = await executeTool(
+      tool,
+      context({ path, old_string: 'const b = 2;', new_string: 'const b = 20;' }),
+    );
+
+    expect(result.isError).toBeFalsy();
+    if (result.isError === true) throw new Error('expected success result');
+    const after = await readFile(path, 'utf8');
+    expect(after).toBe('const a = 1;\nconst b = 20;\nconst c = 3;\n');
+    expect(fileDiffSummary(before, after)).toEqual({ added: 1, removed: 1 });
+    expect(result.display).toEqual({ kind: 'file_diff', added: 1, removed: 1 });
+  });
+
+  it('counts every occurrence for replace_all instead of a single replacement', async () => {
+    const path = join(dir, 'replace-all.ts');
+    // Three occurrences of OLD, so a single-occurrence count would report 1/1.
+    const before = 'const a = OLD;\nconst b = OLD;\nconst c = OLD;\n';
+    await writeFile(path, before, 'utf8');
+    const tool = new EditTool(testJian, PERMISSIVE_WORKSPACE);
+
+    const result = await executeTool(
+      tool,
+      context({ path, old_string: 'OLD', new_string: 'NEW', replace_all: true }),
+    );
+
+    expect(result.isError).toBeFalsy();
+    if (result.isError === true) throw new Error('expected success result');
+    const after = await readFile(path, 'utf8');
+    expect(after).toBe('const a = NEW;\nconst b = NEW;\nconst c = NEW;\n');
+    expect(fileDiffSummary(before, after)).toEqual({ added: 3, removed: 3 });
+    expect(result.display).toEqual({ kind: 'file_diff', added: 3, removed: 3 });
+  });
+
+  it('diffs the text actually written for a CRLF file', async () => {
+    const path = join(dir, 'crlf.txt');
+    const before = 'alpha\r\nbravo\r\ncharlie\r\n';
+    await writeFile(path, before, 'utf8');
+    const tool = new EditTool(testJian, PERMISSIVE_WORKSPACE);
+
+    const result = await executeTool(
+      tool,
+      context({ path, old_string: 'bravo', new_string: 'bravo\nbravo2' }),
+    );
+
+    expect(result.isError).toBeFalsy();
+    if (result.isError === true) throw new Error('expected success result');
+    const after = await readFile(path, 'utf8');
+    expect(after).toBe('alpha\r\nbravo\r\nbravo2\r\ncharlie\r\n');
+    expect(fileDiffSummary(before, after)).toEqual({ added: 1, removed: 0 });
+    expect(result.display).toEqual({ kind: 'file_diff', added: 1, removed: 0 });
+  });
+
+  it('reports the whole-file delta when the edit rewrites many lines', async () => {
+    const path = join(dir, 'bulk.ts');
+    const before = 'one\ntwo\nthree\nfour\nfive\n';
+    await writeFile(path, before, 'utf8');
+    const tool = new EditTool(testJian, PERMISSIVE_WORKSPACE);
+
+    const result = await executeTool(
+      tool,
+      context({ path, old_string: 'two\nthree\nfour', new_string: 'TWO' }),
+    );
+
+    expect(result.isError).toBeFalsy();
+    if (result.isError === true) throw new Error('expected success result');
+    const after = await readFile(path, 'utf8');
+    expect(after).toBe('one\nTWO\nfive\n');
+    expect(fileDiffSummary(before, after)).toEqual({ added: 1, removed: 3 });
+    expect(result.display).toEqual({ kind: 'file_diff', added: 1, removed: 3 });
+  });
+
+  it('omits the display when the edit fails', async () => {
+    const path = join(dir, 'untouched.txt');
+    await writeFile(path, 'alpha beta\n', 'utf8');
+    const tool = new EditTool(testJian, PERMISSIVE_WORKSPACE);
+
+    const result = await executeTool(
+      tool,
+      context({ path, old_string: 'not in the file', new_string: 'x' }),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(Object.keys(result)).not.toContain('display');
+    expect(await readFile(path, 'utf8')).toBe('alpha beta\n');
+  });
+
+  it('omits the display when the file is too large to diff', async () => {
+    // A file past the size guard still edits; only the display is dropped and
+    // the UI falls back to its argument-derived counts.
+    const path = join(dir, 'huge.txt');
+    const before = `${'x'.repeat(1_000_001)}\nUNIQUE-MARKER\n`;
+    await writeFile(path, before, 'utf8');
+    const tool = new EditTool(testJian, PERMISSIVE_WORKSPACE);
+
+    const result = await executeTool(
+      tool,
+      context({ path, old_string: 'UNIQUE-MARKER', new_string: 'REPLACED' }),
+    );
+
+    expect(result.isError).toBeFalsy();
+    expect(Object.keys(result)).not.toContain('display');
+    expect(await readFile(path, 'utf8')).not.toBe(before);
   });
 });

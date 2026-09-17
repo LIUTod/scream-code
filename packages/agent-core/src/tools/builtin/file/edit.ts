@@ -15,7 +15,9 @@ import type { BuiltinTool } from '../../../agent/tool';
 import { ToolAccesses } from '../../../loop/tool-access';
 import type { ExecutableToolResult, ToolExecution } from '../../../loop/types';
 import type { LspRegistry } from '../../../lsp/registry';
+import type { ToolResultDisplay } from '../../display';
 import { resolvePathAccessPath } from '../../policies/path-access';
+import { fileDiffSummary } from '../../support/file-diff';
 import { toInputJsonSchema } from '../../support/input-schema';
 import { literalRulePattern, matchesPathRuleSubject } from '../../support/rule-match';
 import { scanCache } from '../../support/scan-cache';
@@ -69,6 +71,31 @@ function replaceOnceLiteral(content: string, oldString: string, newString: strin
   const index = content.indexOf(oldString);
   if (index === -1) return content;
   return content.slice(0, index) + newString + content.slice(index + oldString.length);
+}
+
+/**
+ * Attach the exact `+added / -removed` line counts to a successful result so
+ * the UI can total them per activity group.
+ *
+ * The counts come from the real pre-edit and post-edit text, so a
+ * `replace_all` edit reports the whole-file delta instead of one occurrence's
+ * worth. Error results carry no display: nothing was applied, or the failure
+ * path never established the post-edit text.
+ */
+function withFileDiffDisplay(
+  result: ExecutableToolResult,
+  before: string,
+  after: string,
+): ExecutableToolResult {
+  if (result.isError === true) return result;
+  const summary = fileDiffSummary(before, after);
+  if (summary === undefined) return result;
+  const display: ToolResultDisplay = {
+    kind: 'file_diff',
+    added: summary.added,
+    removed: summary.removed,
+  };
+  return { ...result, display };
 }
 
 export class EditTool implements BuiltinTool<EditInput> {
@@ -254,17 +281,20 @@ export class EditTool implements BuiltinTool<EditInput> {
         }
 
         const newContent = replaceOnceLiteral(content, args.old_string, args.new_string);
-        await this.jian.writeText(
-          safePath,
-          materializeModelText(newContent, modelView.lineEndingStyle),
-        );
+        // The text actually written to disk, in the file's own line-ending
+        // style — the diff below is measured against this, not the model view.
+        const writtenText = materializeModelText(newContent, modelView.lineEndingStyle);
+        await this.jian.writeText(safePath, writtenText);
         scanCache.clear();
         const { notice, hasErrors } = await this.appendDiagnostics(safePath);
         // Diagnostics go to `message` (UI side channel) so Edit's result stays
         // a single line and the TUI doesn't double-collapse.
         const output = `Replaced 1 occurrence in ${args.path}`;
         const message = notice.length > 0 ? notice : undefined;
-        return hasErrors ? { isError: true, output, message } : { output, message };
+        const result: ExecutableToolResult = hasErrors
+          ? { isError: true, output, message }
+          : { output, message };
+        return withFileDiffDisplay(result, raw, writtenText);
       }
 
       const parts = content.split(args.old_string);
@@ -281,17 +311,20 @@ export class EditTool implements BuiltinTool<EditInput> {
       }
 
       const newContent = parts.join(args.new_string);
-      await this.jian.writeText(
-        safePath,
-        materializeModelText(newContent, modelView.lineEndingStyle),
-      );
+      // Diff the whole file around the write: `replace_all` reports the real
+      // delta for every occurrence, not one occurrence multiplied out.
+      const writtenText = materializeModelText(newContent, modelView.lineEndingStyle);
+      await this.jian.writeText(safePath, writtenText);
       scanCache.clear();
       const { notice, hasErrors } = await this.appendDiagnostics(safePath);
       // Diagnostics go to `message` (UI side channel) so Edit's result stays
       // a single line and the TUI doesn't double-collapse.
       const output = `Replaced ${String(replacementCount)} occurrences in ${args.path}`;
       const message = notice.length > 0 ? notice : undefined;
-      return hasErrors ? { isError: true, output, message } : { output, message };
+      const result: ExecutableToolResult = hasErrors
+        ? { isError: true, output, message }
+        : { output, message };
+      return withFileDiffDisplay(result, raw, writtenText);
     } catch (error) {
       const code = (error as { code?: unknown } | null)?.code;
       if (code === 'EISDIR') {

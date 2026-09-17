@@ -1085,6 +1085,7 @@ export const zh: Record<string, string> = {
   'activitygroup.steps': '{count} 步',
   'activitygroup.tools': '{count} 个工具',
   'activitygroup.diff': '{added} {removed}',
+  'activitygroup.diffAddedOnly': '{added}',
   'activitygroup.rate': ' · 实速 {rate} toks/s',
   'activitygroup.hint_expand': '  (ctrl+o 展开)',
   'activitygroup.hint_collapse': '  (ctrl+o 收起)',

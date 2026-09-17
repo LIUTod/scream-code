@@ -209,6 +209,9 @@ importers:
       ajv-formats:
         specifier: ^3.0.1
         version: 3.0.1(ajv@8.20.0)
+      diff:
+        specifier: ^9.0.0
+        version: 9.0.0
       fast-xml-parser:
         specifier: ^5.10.1
         version: 5.10.1

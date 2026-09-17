@@ -1085,6 +1085,7 @@ export const en: Record<string, string> = {
   'activitygroup.steps': '{count} steps',
   'activitygroup.tools': '{count} tools',
   'activitygroup.diff': '{added} {removed}',
+  'activitygroup.diffAddedOnly': '{added}',
   'activitygroup.rate': ' · live {rate} toks/s',
   'activitygroup.hint_expand': '  (ctrl+o to expand)',
   'activitygroup.hint_collapse': '  (ctrl+o to collapse)',

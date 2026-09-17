@@ -115,6 +115,16 @@ export const ToolResultDisplaySchema = z.discriminatedUnion('kind', [
     hunks: z.number().optional(),
   }),
   z.object({
+    // Exact line-count summary produced by the file-mutating tools (Edit /
+    // Write) for the UI's per-group change totals. Distinct from the `diff`
+    // variant above, which carries the before/after text for a diff preview:
+    // this one carries counts only, so file contents never reach the session
+    // log.
+    kind: z.literal('file_diff'),
+    added: z.number().int().nonnegative(),
+    removed: z.number().int().nonnegative(),
+  }),
+  z.object({
     kind: z.literal('search_results'),
     query: z.string(),
     matches: z.array(z.object({ file: z.string(), line: z.number(), text: z.string() })),
