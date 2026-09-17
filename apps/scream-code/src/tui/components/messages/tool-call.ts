@@ -1384,8 +1384,11 @@ export class ToolCallComponent extends CachedContainer {
     if (provider === undefined) return '';
     const text = provider(this.toolCall, result);
     if (text.length === 0) return '';
-    const tone = result.is_error ? chalk.hex(this.colors.error) : chalk.dim;
-    return tone(` · ${text}`);
+    // Chips are factual counts ("+1 -8", "12 lines", "3 matches"). They stay
+    // neutral (dim) regardless of outcome: failure is already expressed by the
+    // red marker and the error body, and tinting the count reads as if the
+    // change itself was destructive.
+    return chalk.dim(` · ${text}`);
   }
 
   private rebuildContent(): void {
