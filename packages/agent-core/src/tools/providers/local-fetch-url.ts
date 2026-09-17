@@ -355,7 +355,7 @@ export class LocalFetchURLProvider implements UrlFetcher {
    * `confident` distinguishes detection strength: a convertible Content-Type
    * means conversion failure is a real error (corrupt document), while an
    * extension-only guess (e.g. an HTML viewer page at a .pdf URL) falls back
-   * to the normal text extraction path instead of erroring (omp's behavior).
+   * to the normal text extraction path instead of erroring.
    */
   private async fetchDocument(
     response: Response,

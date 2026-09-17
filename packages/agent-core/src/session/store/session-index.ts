@@ -1,10 +1,31 @@
-import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'pathe';
 
 export interface SessionIndexEntry {
   readonly sessionId: string;
   readonly sessionDir: string;
   readonly workDir: string;
+}
+
+/**
+ * Process-local cache for the parsed session index. `readSessionIndex` is
+ * called on every session lookup and every `listAll`, and the file grows with
+ * the number of sessions, so re-reading and re-parsing the whole file per
+ * call is pure waste. The cache is validated by the file's mtime and size, so
+ * writes from other processes (which bump the mtime) are always picked up;
+ * our own writes invalidate explicitly.
+ */
+interface SessionIndexCache {
+  homeDir: string;
+  mtimeMs: number;
+  size: number;
+  map: Map<string, SessionIndexEntry>;
+}
+
+let sessionIndexCache: SessionIndexCache | undefined;
+
+function invalidateSessionIndexCache(): void {
+  sessionIndexCache = undefined;
 }
 
 export function sessionIndexPath(homeDir: string): string {
@@ -18,16 +39,37 @@ export async function appendSessionIndexEntry(
   const indexPath = sessionIndexPath(homeDir);
   await mkdir(dirname(indexPath), { recursive: true, mode: 0o700 });
   await appendFile(indexPath, `${JSON.stringify(entry)}\n`, 'utf-8');
+  invalidateSessionIndexCache();
 }
 
 export async function readSessionIndex(
   homeDir: string,
   sessionsDir: string,
 ): Promise<Map<string, SessionIndexEntry>> {
+  const indexPath = sessionIndexPath(homeDir);
+  let stats;
+  try {
+    stats = await stat(indexPath);
+  } catch {
+    sessionIndexCache = undefined;
+    return new Map();
+  }
+
+  const cached = sessionIndexCache;
+  if (
+    cached !== undefined &&
+    cached.homeDir === homeDir &&
+    cached.mtimeMs === stats.mtimeMs &&
+    cached.size === stats.size
+  ) {
+    return cached.map;
+  }
+
   let raw: string;
   try {
-    raw = await readFile(sessionIndexPath(homeDir), 'utf-8');
+    raw = await readFile(indexPath, 'utf-8');
   } catch {
+    sessionIndexCache = undefined;
     return new Map();
   }
 
@@ -48,6 +90,7 @@ export async function readSessionIndex(
       workDir: resolve(entry.workDir),
     });
   }
+  sessionIndexCache = { homeDir, mtimeMs: stats.mtimeMs, size: stats.size, map: result };
   return result;
 }
 
@@ -75,6 +118,7 @@ export async function removeSessionIndexEntry(homeDir: string, sessionId: string
   } else {
     await writeFile(indexPath, kept.join('\n') + '\n', 'utf-8');
   }
+  invalidateSessionIndexCache();
 }
 
 function parseIndexLine(line: string): SessionIndexEntry | undefined {

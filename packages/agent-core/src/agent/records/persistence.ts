@@ -1,5 +1,6 @@
 import { createReadStream } from 'node:fs';
 import { mkdir, open, rename, stat } from 'node:fs/promises';
+import type { FileHandle } from 'node:fs/promises';
 import { dirname } from 'pathe';
 
 import { syncDir } from '../../utils/fs';
@@ -447,7 +448,6 @@ export class FileSystemAgentRecordPersistence implements AgentRecordPersistence 
         )
       : batch;
 
-    const content = writable.map((e) => JSON.stringify(e) + '\n').join('');
     const directory = dirname(this.filePath);
     await mkdir(directory, { recursive: true });
 
@@ -460,9 +460,7 @@ export class FileSystemAgentRecordPersistence implements AgentRecordPersistence 
       const tmpPath = `${this.filePath}.${process.pid}.${this.rewriteSeq++}.tmp`;
       const tmp = await open(tmpPath, 'w');
       try {
-        if (content.length > 0) {
-          await tmp.writeFile(content, 'utf8');
-        }
+        await writeChunked(tmp, writable);
         await tmp.sync();
       } finally {
         await tmp.close();
@@ -475,9 +473,7 @@ export class FileSystemAgentRecordPersistence implements AgentRecordPersistence 
 
     const fh = await open(this.filePath, 'a');
     try {
-      if (content.length > 0) {
-        await fh.writeFile(content, 'utf8');
-      }
+      await writeChunked(fh, writable);
       await fh.sync();
     } finally {
       await fh.close();
@@ -487,6 +483,32 @@ export class FileSystemAgentRecordPersistence implements AgentRecordPersistence 
       await syncDir(directory);
       this.directorySynced = true;
     }
+  }
+}
+
+/**
+ * Serialize records to wire lines and write them in bounded chunks. Joining
+ * an entire batch into one string spikes memory to the full batch size (a
+ * single burst can be many megabytes); chunked writes on the same handle
+ * keep peak allocation at `MAX_WRITE_CHUNK_CHARS` while preserving the
+ * durability contract exactly — one fsync per batch, ordered lines.
+ */
+const MAX_WRITE_CHUNK_CHARS = 1_000_000;
+
+async function writeChunked(
+  handle: FileHandle,
+  records: readonly AgentRecord[],
+): Promise<void> {
+  let chunk = '';
+  for (const record of records) {
+    chunk += JSON.stringify(record) + '\n';
+    if (chunk.length >= MAX_WRITE_CHUNK_CHARS) {
+      await handle.write(chunk, null, 'utf8');
+      chunk = '';
+    }
+  }
+  if (chunk.length > 0) {
+    await handle.write(chunk, null, 'utf8');
   }
 }
 

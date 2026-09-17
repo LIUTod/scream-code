@@ -55,7 +55,7 @@ export class DuckDuckGoSearchProvider implements WebSearchProvider {
     const limit = options?.limit ?? 5;
 
     const form = new URLSearchParams({ q: query, kl: 'us-en' });
-    // Match the real browser form submission (omp's template).
+    // Match the real browser form submission template.
     form.set('b', '');
 
     const response = await this.fetchImpl(DUCKDUCKGO_HTML_URL, {
@@ -111,16 +111,16 @@ const RESULT_SNIPPET_RE =
 /** Strip inline tags (DDG wraps query terms in `<b>`) and decode entities. */
 function decodeHtmlText(value: string): string {
   return value
-    .replace(/<[^>]*>/g, ' ')
-    .replace(/&#(\d+);/g, (_, code: string) => String.fromCharCode(Number(code)))
-    .replace(/&#x([0-9a-f]+);/gi, (_, code: string) => String.fromCharCode(Number.parseInt(code, 16)))
-    .replace(/&nbsp;/gi, ' ')
-    .replace(/&amp;/gi, '&')
-    .replace(/&lt;/gi, '<')
-    .replace(/&gt;/gi, '>')
-    .replace(/&quot;/gi, '"')
-    .replace(/&#39;|&apos;/gi, "'")
-    .replace(/\s+/g, ' ')
+    .replaceAll(/<[^>]*>/g, ' ')
+    .replaceAll(/&#(\d+);/g, (_, code: string) => String.fromCodePoint(Number(code)))
+    .replaceAll(/&#x([0-9a-f]+);/gi, (_, code: string) => String.fromCodePoint(Number.parseInt(code, 16)))
+    .replaceAll(/&nbsp;/gi, ' ')
+    .replaceAll(/&amp;/gi, '&')
+    .replaceAll(/&lt;/gi, '<')
+    .replaceAll(/&gt;/gi, '>')
+    .replaceAll(/&quot;/gi, '"')
+    .replaceAll(/&#39;|&apos;/gi, "'")
+    .replaceAll(/\s+/g, ' ')
     .trim();
 }
 
@@ -131,7 +131,7 @@ function decodeHtmlText(value: string): string {
  */
 function unwrapResultUrl(href: string): string | undefined {
   if (href === '') return undefined;
-  const decoded = href.replace(/&amp;/gi, '&');
+  const decoded = href.replaceAll(/&amp;/gi, '&');
   const wrapMatch = decoded.match(/[?&]uddg=([^&]+)/);
   if (wrapMatch?.[1] !== undefined) {
     try {

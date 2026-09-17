@@ -167,10 +167,10 @@ function rejectDangerousCommand(
 // Anti-patterns: shell commands that should be replaced by built-in tools.
 // Bash interceptor rules — recoverable redirection to built-in tools.
 //
-// Aligned with omp's `bash-interceptor.ts` + `DEFAULT_BASH_INTERCEPTOR_RULES`:
+// Design notes:
 //   - Only the leading token is matched (`^\s*(cmd)\s+`), so `ls; cat foo` or
-//     `ls | grep foo` pass through. omp deliberately keeps the match narrow
-//     and lets prompt guidance handle compound commands; we do the same.
+//     `ls | grep foo` pass through. The match stays narrow on purpose and
+//     prompt guidance handles compound commands.
 //   - A rule only fires when its suggested tool is in `availableTools`, so a
 //     disabled tool never produces a "use Read instead" dead end.
 //   - The returned message keeps the original command, so the caller can

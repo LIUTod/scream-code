@@ -624,12 +624,39 @@ export class BackgroundProcessManager {
     const outputSessionDir = this.outputSessionDirFor(taskId);
     if (outputSessionDir !== undefined) {
       await entry?.outputWriteQueue;
-      const persisted = await readTaskOutput(outputSessionDir, taskId);
-      if (persisted.length > 0) {
-        if (tail !== undefined && tail < persisted.length) {
-          return persisted.slice(-tail);
+      if (tail !== undefined && tail > 0) {
+        // Bounded window read: a task's output.log can grow unbounded, so
+        // paging a tail must not load the whole file. UTF-8 needs at most 4
+        // bytes per code point (+3 slack for a window that starts mid-
+        // sequence), so this window is guaranteed to cover the last `tail`
+        // code units and the decoded result matches the previous whole-file
+        // slice(-tail) semantics exactly.
+        const size = await taskOutputSizeBytes(outputSessionDir, taskId);
+        if (size > 0) {
+          const windowBytes = Math.min(size, tail * 4 + 7);
+          const start = size - windowBytes;
+          let persisted = await readTaskOutputBytes(outputSessionDir, taskId, start, windowBytes);
+          if (persisted.length > 0) {
+            if (start > 0) {
+              // A window that starts mid-sequence decodes its broken leading
+              // bytes as replacement characters (one per broken run; a
+              // 3-byte slack can strand at most 3). Strip the run so the
+              // result matches the previous whole-file slice exactly.
+              let lead = 0;
+              while (lead < persisted.length && persisted.codePointAt(lead) === 0xfffd && lead < 3) {
+                lead += 1;
+              }
+              if (lead > 0) persisted = persisted.slice(lead);
+            }
+            return tail < persisted.length ? persisted.slice(-tail) : persisted;
+          }
+          return this.getOutput(taskId, tail);
         }
-        return persisted;
+      } else {
+        const persisted = await readTaskOutput(outputSessionDir, taskId);
+        if (persisted.length > 0) {
+          return tail !== undefined && tail < persisted.length ? persisted.slice(-tail) : persisted;
+        }
       }
     }
     return this.getOutput(taskId, tail);

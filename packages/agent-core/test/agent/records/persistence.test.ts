@@ -78,6 +78,66 @@ describe('FileSystemAgentRecordPersistence', () => {
     ]);
   });
 
+  it('writes a multi-megabyte batch byte-exactly via chunked writes', async () => {
+    const wirePath = await makeWirePath();
+    const persistence = new FileSystemAgentRecordPersistence(wirePath);
+
+    const records: AgentRecord[] = [];
+    // ~4.5MB total: crosses the 1MB write-chunk boundary several times.
+    for (let i = 0; i < 30; i++) {
+      records.push({
+        type: 'turn.prompt',
+        input: [{ type: 'text', text: 'x'.repeat(150_000) + `-${i}` }],
+        origin: { kind: 'user' },
+      });
+    }
+    for (const record of records) persistence.append(record);
+    await persistence.close();
+
+    const raw = await readFile(wirePath, 'utf8');
+    const lines = raw.split('\n').filter((line) => line.length > 0);
+    expect(lines).toHaveLength(records.length);
+    // Byte-exact round trip: every serialized line parses back to the record.
+    for (let i = 0; i < records.length; i++) {
+      expect(JSON.parse(lines[i]!)).toEqual(records[i]);
+    }
+    // And the concatenation is exactly what a whole-batch join would produce.
+    expect(raw).toBe(records.map((record) => JSON.stringify(record) + '\n').join(''));
+  }, 20_000);
+
+  it('rewrites a large surviving tail byte-exactly when clearing', async () => {
+    const wirePath = await makeWirePath();
+    const persistence = new FileSystemAgentRecordPersistence(wirePath);
+
+    persistence.append({
+      type: 'turn.prompt',
+      input: [{ type: 'text', text: 'y'.repeat(1_500_000) }],
+      origin: { kind: 'user' },
+    });
+    await persistence.close();
+
+    // The rewrite (temp file + rename) path goes through the chunked writer.
+    const second = new FileSystemAgentRecordPersistence(wirePath);
+    second.rewrite([
+      {
+        type: 'turn.prompt',
+        input: [{ type: 'text', text: 'z'.repeat(1_200_000) }],
+        origin: { kind: 'user' },
+      },
+    ]);
+    second.append({
+      type: 'turn.prompt',
+      input: [{ type: 'text', text: 'after clear' }],
+      origin: { kind: 'user' },
+    });
+    await second.close();
+
+    const lines = await readLines(wirePath);
+    expect(lines).toHaveLength(2);
+    expect(JSON.parse(lines[0]!)['input'][0]['text']).toBe('z'.repeat(1_200_000));
+    expect(JSON.parse(lines[1]!)['input'][0]['text']).toBe('after clear');
+  }, 20_000);
+
   it('returns appended metadata records from read() output', async () => {
     const wirePath = await makeWirePath();
     const persistence = new FileSystemAgentRecordPersistence(wirePath);

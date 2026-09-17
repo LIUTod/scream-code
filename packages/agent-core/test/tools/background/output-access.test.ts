@@ -138,4 +138,29 @@ describe('BackgroundProcessManager — readOutput / getOutputPath', () => {
     expect(tail.length).toBeLessThanOrEqual(5);
     expect(tail).toBe('ddddd');
   });
+
+  it('readOutput tail stays exact on multi-megabyte logs with multibyte content', async () => {
+    const taskId = manager.register(immediateProcess(0, 'seed\n'), 'echo', 'demo');
+    await manager.wait(taskId);
+    await manager.flushOutput(taskId);
+
+    // ~3MB mixed ASCII/CJK payload: exercises the bounded byte window and
+    // guarantees a multibyte sequence straddles the window start at least
+    // once across the tail sizes below.
+    const unit = '中文字符与ascii interleaved 0123456789 ';
+    let big = '';
+    while (big.length < 3_000_000) big += unit;
+    await appendTaskOutput(sessionDir, taskId, big);
+    await manager.flushOutput(taskId);
+
+    const full = await manager.readOutput(taskId);
+    expect(full.length).toBeGreaterThan(3_000_000);
+    expect(full).not.toContain('\uFFFD');
+
+    for (const tail of [1, 7, 64, 1000, 50_000]) {
+      const windowed = await manager.readOutput(taskId, tail);
+      expect(windowed).toBe(full.slice(-tail));
+      expect(windowed).not.toContain('\uFFFD');
+    }
+  }, 20_000);
 });
