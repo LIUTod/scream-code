@@ -449,4 +449,98 @@ describe('snapshot parse-skipping (read fast path)', () => {
 
     expect(await readTypes(wirePath)).toEqual(['metadata', 'turn.prompt']);
   });
+
+  it('preserves the exact text of a multi-chunk record', async () => {
+    // Types alone would still match if cross-chunk assembly dropped or
+    // duplicated bytes and the result happened to stay parseable — compare the
+    // decoded payload itself.
+    const text = `${'H'.repeat(1024 * 1024)}-MID-${'T'.repeat(1024 * 1024)}`;
+    const wirePath = await makeWirePath();
+    await writeFile(
+      wirePath,
+      `${JSON.stringify(METADATA)}\n${JSON.stringify({
+        type: 'turn.prompt',
+        input: [{ type: 'text', text }],
+        origin: { kind: 'user' },
+      })}\n`,
+      'utf8',
+    );
+
+    let seen: string | undefined;
+    const persistence = new FileSystemAgentRecordPersistence(wirePath);
+    for await (const record of persistence.read()) {
+      if (record.type !== 'turn.prompt') continue;
+      const part = (record as Extract<AgentRecord, { type: 'turn.prompt' }>).input[0] as
+        | { text?: string }
+        | undefined;
+      seen = part?.text;
+    }
+    expect(seen).toBe(text);
+    expect(seen).toHaveLength(text.length);
+  });
+
+  it('skips a truncated folded-shaped line that predates the snapshot', async () => {
+    // Exactly a folded prefix and shorter than the longest one (32 vs 35
+    // bytes), so the skip is decided when the line ends rather than mid-line.
+    // If it were kept, the malformed JSON would abort the whole resume.
+    const shortFolded = '{"type":"micro_compaction.apply"';
+    const wirePath = await makeWirePath();
+    await writeFile(
+      wirePath,
+      `${[JSON.stringify(METADATA), shortFolded, JSON.stringify(snapshotRecord())].join('\n')}\n`,
+      'utf8',
+    );
+
+    expect(await readTypes(wirePath)).toEqual(['metadata', 'context.snapshot']);
+  });
+
+  it('reports the physical line number of a corrupted line', async () => {
+    const wirePath = await makeWirePath();
+    await writeFile(
+      wirePath,
+      `${[
+        JSON.stringify(METADATA),
+        JSON.stringify({ type: 'turn.prompt', input: [], origin: { kind: 'user' } }),
+        '{oops}',
+        JSON.stringify(snapshotRecord()),
+      ].join('\n')}\n`,
+      'utf8',
+    );
+
+    const persistence = new FileSystemAgentRecordPersistence(wirePath);
+    await expect(
+      (async () => {
+        for await (const record of persistence.read()) void record;
+      })(),
+    ).rejects.toThrow(/corrupted line 3/);
+  });
+
+  it('applies the same parse-skip for the in-memory persistence', async () => {
+    const typesOf = async (records: readonly AgentRecord[]): Promise<string[]> => {
+      const types: string[] = [];
+      for await (const record of new InMemoryAgentRecordPersistence(records).read()) {
+        types.push(record.type);
+      }
+      return types;
+    };
+
+    // Folded records predating the snapshot are dropped, later ones are kept.
+    expect(
+      await typesOf([
+        METADATA,
+        foldedMessage('old question'),
+        snapshotRecord(),
+        foldedMessage('new question'),
+      ] as AgentRecord[]),
+    ).toEqual(['metadata', 'context.snapshot', 'context.append_message']);
+
+    // Version mismatch skips nothing: the migration rewrite must see it all.
+    expect(
+      await typesOf([
+        { ...METADATA, protocol_version: '1.0' },
+        foldedMessage('old question'),
+        snapshotRecord(),
+      ] as AgentRecord[]),
+    ).toEqual(['metadata', 'context.append_message', 'context.snapshot']);
+  });
 });

@@ -217,6 +217,14 @@ export class AgentRecords {
     let hasMetadata = false;
     let shouldRewrite = false;
     let warning: string | undefined;
+    // Records are restored as they stream in. The buffer below is only kept for
+    // the two paths that must see the whole stream again — a migration rewrite
+    // (`rewrite` re-serializes every record) and a wire file NEWER than this
+    // build (the parse-skip filter is disabled there, so the snapshot
+    // fast-path still has to skip folded records by index). Buffering every
+    // record unconditionally is what made resume allocate O(wire) and abort
+    // with a heap OOM on multi-gigabyte logs.
+    let buffered = false;
     const replayedRecords: AgentRecord[] = [];
     for await (const record of this.persistence.read()) {
       if (!hasMetadata) {
@@ -233,6 +241,7 @@ export class AgentRecords {
           migrations = resolveWireMigrations(readVersion);
           shouldRewrite = readVersion !== AGENT_WIRE_PROTOCOL_VERSION;
         }
+        buffered = shouldRewrite || warning !== undefined;
       }
       let migratedRecord = migrateWireRecord(
         record as WireMigrationRecord,
@@ -244,41 +253,50 @@ export class AgentRecords {
           protocol_version: AGENT_WIRE_PROTOCOL_VERSION,
         };
       }
-      replayedRecords.push(migratedRecord);
-    }
-
-    // Snapshot fast-path: when a `context.snapshot` record exists, restore it and
-    // skip every context-content record that predates it. Those appends/compactions
-    // were already folded into the snapshot, so re-applying them is redundant work
-    // that dominates resume time on long sessions (hundreds of thousands of records
-    // collapsing into a handful of live messages). Metadata and other subsystem
-    // records are still applied in order, both before and after the snapshot.
-    let snapshotIndex = -1;
-    for (let i = replayedRecords.length - 1; i >= 0; i--) {
-      if (replayedRecords[i]?.type === 'context.snapshot') {
-        snapshotIndex = i;
-        break;
-      }
-    }
-    // Captured from the last folded apply_compaction record when a snapshot
-    // fast-path skips it: the live extraction step runs after the compaction
-    // record hits the wire, so a crash in that window loses the memos. The
-    // skipped record is not replayed, so recover from the remembered summary
-    // at the snapshot point (idempotent - skips already-stored memos).
-    let foldedCompactionSummary: string | undefined;
-    for (let i = 0; i < replayedRecords.length; i++) {
-      const record = replayedRecords[i];
-      if (!record) continue;
-      if (i < snapshotIndex && isSnapshotFoldedContextRecord(record.type)) {
-        if (record.type === 'context.apply_compaction') {
-          foldedCompactionSummary = record.summary;
-        }
+      if (buffered) {
+        replayedRecords.push(migratedRecord);
         continue;
       }
-      this.restore(record);
-      if (record.type === 'context.snapshot' && foldedCompactionSummary !== undefined) {
-        void recoverMemosFromCompactionSummary(this.agent, foldedCompactionSummary);
-        foldedCompactionSummary = undefined;
+      // Same-version wire: `persistence.read()` already skipped every folded
+      // record that predates the last snapshot, so applying the rest in file
+      // order is exactly what the buffered fast-path below does by index.
+      this.restore(migratedRecord);
+    }
+
+    if (buffered) {
+      // Snapshot fast-path: when a `context.snapshot` record exists, restore it and
+      // skip every context-content record that predates it. Those appends/compactions
+      // were already folded into the snapshot, so re-applying them is redundant work
+      // that dominates resume time on long sessions (hundreds of thousands of records
+      // collapsing into a handful of live messages). Metadata and other subsystem
+      // records are still applied in order, both before and after the snapshot.
+      let snapshotIndex = -1;
+      for (let i = replayedRecords.length - 1; i >= 0; i--) {
+        if (replayedRecords[i]?.type === 'context.snapshot') {
+          snapshotIndex = i;
+          break;
+        }
+      }
+      // Captured from the last folded apply_compaction record when a snapshot
+      // fast-path skips it: the live extraction step runs after the compaction
+      // record hits the wire, so a crash in that window loses the memos. The
+      // skipped record is not replayed, so recover from the remembered summary
+      // at the snapshot point (idempotent - skips already-stored memos).
+      let foldedCompactionSummary: string | undefined;
+      for (let i = 0; i < replayedRecords.length; i++) {
+        const record = replayedRecords[i];
+        if (!record) continue;
+        if (i < snapshotIndex && isSnapshotFoldedContextRecord(record.type)) {
+          if (record.type === 'context.apply_compaction') {
+            foldedCompactionSummary = record.summary;
+          }
+          continue;
+        }
+        this.restore(record);
+        if (record.type === 'context.snapshot' && foldedCompactionSummary !== undefined) {
+          void recoverMemosFromCompactionSummary(this.agent, foldedCompactionSummary);
+          foldedCompactionSummary = undefined;
+        }
       }
     }
 

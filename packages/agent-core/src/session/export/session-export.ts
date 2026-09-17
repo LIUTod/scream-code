@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises';
+import { stat } from 'node:fs/promises';
 import { resolve } from 'pathe';
 
 import { ErrorCodes, ScreamError } from '#/errors';
@@ -40,9 +40,11 @@ export async function exportSessionDirectory(input: {
     input.globalLogPath ??
     (input.homeDir === undefined ? undefined : resolveGlobalLogPath(input.homeDir));
   if (input.request.includeGlobalLog === true && globalPath !== undefined) {
-    const data = await readOptionalFile(globalPath);
-    if (data !== undefined) {
-      extras.push({ data, target: GLOBAL_LOG_REL });
+    // Streamed into the archive instead of read here: the global log grows for
+    // as long as the CLI is installed, and buffering it would hold the whole
+    // file (plus a deflate copy) in memory.
+    if (await pathIsFile(globalPath)) {
+      extras.push({ source: globalPath, target: GLOBAL_LOG_REL });
       bundledGlobal = true;
     }
   }
@@ -79,10 +81,10 @@ export async function exportSessionDirectory(input: {
   };
 }
 
-async function readOptionalFile(path: string): Promise<Buffer | undefined> {
+async function pathIsFile(path: string): Promise<boolean> {
   try {
-    return await readFile(path);
+    return (await stat(path)).isFile();
   } catch {
-    return undefined;
+    return false;
   }
 }

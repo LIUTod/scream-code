@@ -144,6 +144,14 @@ export type AgentRecordOf<K extends keyof AgentRecordEvents> = Extract<
  * backing store (filesystem today, in-memory for tests, SQLite/remote later)
  * means implementing this interface — agent code never touches the store
  * implementation directly.
+ *
+ * `read()` yields the records to replay, in file order. On a wire whose protocol
+ * version matches the current one it must also drop the folded context records
+ * that predate the last `context.snapshot` (the snapshot already carries their
+ * state); `AgentRecords.replay` applies everything it is handed, and only
+ * buffers the stream itself for wires that need a migration rewrite or that are
+ * newer than this build. Streamed implementations must not materialize the whole
+ * wire: a long-lived session's log can reach several gigabytes.
  */
 export interface AgentRecordPersistence {
   read(): AsyncIterable<AgentRecord>;

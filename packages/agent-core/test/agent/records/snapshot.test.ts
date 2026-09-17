@@ -285,7 +285,7 @@ describe('file-backed resume with parse-skipping', () => {
     return join(await mkdtemp(join(tmpdir(), 'wire-skip-test-')), 'wire.jsonl');
   }
 
-  it('restores identical context state from file (skip path) and memory (full parse)', async () => {
+  it('restores identical context state from file and memory', async () => {
     const { FileSystemAgentRecordPersistence } = await import(
       '../../../src/agent/records/persistence'
     );
@@ -303,7 +303,7 @@ describe('file-backed resume with parse-skipping', () => {
     });
     await fromFile.agent.records.replay();
 
-    // Resume in memory: full parse, no skipping.
+    // Resume in memory: same snapshot parse-skip rule, different persistence.
     const fromMemory = replayWire(buildLiveWire());
     await fromMemory.agent.records.replay();
 

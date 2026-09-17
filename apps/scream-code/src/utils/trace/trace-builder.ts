@@ -11,7 +11,7 @@
  * skipped defensively.
  */
 
-import { readFileSync } from 'node:fs';
+import { closeSync, openSync, readSync } from 'node:fs';
 
 import type { TraceCell } from './trace-types';
 
@@ -73,11 +73,6 @@ export interface BuildTraceInput {
  * Throws when the file is missing or contains no usable records.
  */
 export function buildTraceCells({ wirePath }: BuildTraceInput): TraceCell[] {
-  const rows = readWireRows(wirePath);
-  if (rows.length === 0) {
-    throw new Error(`no wire records in ${wirePath}`);
-  }
-
   const cells: TraceCell[] = [];
   let lastTime: number | undefined;
   let nextIndex = 1;
@@ -104,6 +99,14 @@ export function buildTraceCells({ wirePath }: BuildTraceInput): TraceCell[] {
       startedAt: time,
       ...fields,
     };
+    // Cap detail payloads as the cell is built: a long session's thinking
+    // blocks and tool results are multi-MB strings, and deferring the cap to an
+    // end-of-build pass keeps every one of them alive at once.
+    cell.text = truncateDetail(cell.text, MAX_TEXT) ?? '';
+    if (cell.thinkingDetail) cell.thinkingDetail = truncateDetail(cell.thinkingDetail);
+    if (cell.outputDetail) cell.outputDetail = truncateDetail(cell.outputDetail);
+    if (cell.inputDetail) cell.inputDetail = truncateDetail(cell.inputDetail);
+    if (cell.result) cell.result = truncateDetail(cell.result);
     cells.push(cell);
     lastCell = cell;
     return cell;
@@ -309,7 +312,7 @@ export function buildTraceCells({ wirePath }: BuildTraceInput): TraceCell[] {
     }
   };
 
-  for (const { seq, time, record } of rows) {
+  const consumeRow = ({ seq, time, record }: WireRow): void => {
     const type = asString(record['type']);
     switch (type) {
       case 'context.append_loop_event': {
@@ -432,6 +435,12 @@ export function buildTraceCells({ wirePath }: BuildTraceInput): TraceCell[] {
       default:
         break;
     }
+  };
+
+  // Single pass: rows are handed to `consumeRow` as they are parsed, so a
+  // multi-GB log is never held in memory as a parsed-record array.
+  if (forEachWireRow(wirePath, consumeRow) === 0) {
+    throw new Error(`no wire records in ${wirePath}`);
   }
 
   // Flush an unfinished final step and any trailing system-context changes.
@@ -445,12 +454,14 @@ export function buildTraceCells({ wirePath }: BuildTraceInput): TraceCell[] {
  * Long sessions produce tens of thousands of cells with multi-MB detail
  * payloads, which previously bloated the trace HTML (up to ~60MB) and froze
  * the browser. Two mitigations, applied at build time:
- *  1. Truncate per-cell detail text (thinking/output/input/result) to a cap.
+ *  1. Truncate per-cell detail text (thinking/output/input/result) to a cap —
+ *     done in `pushCell`, so the raw payload never outlives the cell.
  *  2. Beyond a cell-count cap, collapse the oldest cells into per-turn
  *     summary rows so the document stays bounded while early turns remain
  *     visible in the ledger.
  */
 const MAX_DETAIL = 4000;
+const MAX_TEXT = 240;
 const MAX_CELLS = 4000;
 
 function truncateDetail(value: string | undefined, max = MAX_DETAIL): string | undefined {
@@ -459,13 +470,6 @@ function truncateDetail(value: string | undefined, max = MAX_DETAIL): string | u
 }
 
 function capTraceSize(cells: TraceCell[]): TraceCell[] {
-  for (const cell of cells) {
-    cell.text = truncateDetail(cell.text, 240) ?? '';
-    if (cell.thinkingDetail) cell.thinkingDetail = truncateDetail(cell.thinkingDetail);
-    if (cell.outputDetail) cell.outputDetail = truncateDetail(cell.outputDetail);
-    if (cell.inputDetail) cell.inputDetail = truncateDetail(cell.inputDetail);
-    if (cell.result) cell.result = truncateDetail(cell.result);
-  }
   if (cells.length <= MAX_CELLS) return cells;
 
   const keep = cells.slice(-MAX_CELLS);
@@ -499,23 +503,83 @@ interface WireRow {
   record: Record<string, unknown>;
 }
 
-function readWireRows(wirePath: string): WireRow[] {
-  const content = readFileSync(wirePath, 'utf8');
-  const rows: WireRow[] = [];
+/** Bytes read per `readSync` call while scanning a wire log. */
+const WIRE_READ_CHUNK_BYTES = 1024 * 1024;
+
+/**
+ * Stream a wire log row by row without materializing the file.
+ *
+ * The log is append-only and line-delimited, but a long-lived session can grow
+ * it to gigabytes, so the content is never held as a single string: fixed-size
+ * chunks are read into one reusable buffer and split on "\n" (0x0A) at byte
+ * level. Only the currently open line is carried across reads (as a small
+ * copied buffer, because the chunk buffer is reused), and each parsed row is
+ * handed to `onRow` and then dropped — neither the decoded file nor a
+ * parsed-record array lives beyond the line being processed.
+ *
+ * Returns the number of parsed rows. Throws when the file cannot be opened;
+ * callers rely on that to tell a missing session log apart from an empty one.
+ */
+function forEachWireRow(wirePath: string, onRow: (row: WireRow) => void): number {
   let seq = 0;
-  for (const line of content.split('\n')) {
-    if (!line.trim()) continue;
+  let parsedRows = 0;
+
+  const pushLine = (line: string): void => {
+    if (!line.trim()) return;
     seq += 1;
+    // Only parsing is guarded: a malformed line is skipped, while a failure
+    // inside the row consumer must propagate instead of being mistaken for one.
+    let parsed: unknown;
     try {
-      const parsed: unknown = JSON.parse(line);
-      const rec = asRecord(parsed);
-      if (!rec) continue;
-      const time = asNumber(rec['time']);
-      rows.push({ seq, time, record: rec });
+      parsed = JSON.parse(line);
     } catch {
       // Skip malformed lines; the wire log is append-only and a torn tail
       // write must not break the trace.
+      return;
     }
+    const rec = asRecord(parsed);
+    if (!rec) return;
+    onRow({ seq, time: asNumber(rec['time']), record: rec });
+    parsedRows += 1;
+  };
+
+  const fd = openSync(wirePath, 'r');
+  try {
+    const chunk = Buffer.allocUnsafe(WIRE_READ_CHUNK_BYTES);
+    // Buffers accumulated for the current unterminated line.
+    let openChunks: Buffer[] = [];
+    for (;;) {
+      const bytesRead = readSync(fd, chunk, 0, chunk.length, null);
+      if (bytesRead <= 0) break;
+      const window = bytesRead === chunk.length ? chunk : chunk.subarray(0, bytesRead);
+      let searchFrom = 0;
+      for (;;) {
+        const newlineIndex = window.indexOf(0x0a, searchFrom);
+        if (newlineIndex === -1) break;
+        const tail = window.subarray(searchFrom, newlineIndex);
+        // Decoding a complete line keeps multi-byte characters intact even
+        // when they straddle a chunk boundary.
+        pushLine(
+          openChunks.length === 0
+            ? tail.toString('utf8')
+            : Buffer.concat([...openChunks, tail]).toString('utf8'),
+        );
+        openChunks = [];
+        searchFrom = newlineIndex + 1;
+      }
+      if (searchFrom < window.length) {
+        // Copy: the chunk buffer is overwritten by the next read.
+        openChunks.push(Buffer.from(window.subarray(searchFrom)));
+      }
+    }
+    // A final line without a trailing newline is a row too; a file ending with
+    // a newline leaves nothing pending, matching the previous parser.
+    if (openChunks.length > 0) {
+      pushLine(Buffer.concat(openChunks).toString('utf8'));
+    }
+  } finally {
+    closeSync(fd);
   }
-  return rows;
+
+  return parsedRows;
 }

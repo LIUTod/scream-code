@@ -6,7 +6,16 @@
   filesystem is the default implementation)
 - Resume replay: `replay()` restores in-memory state from the wire (snapshot
   fast-path: when a `context.snapshot` record exists, skip the folded
-  context-content records that predate it)
+  context-content records that predate it). Records stream straight into
+  `restore()`: neither the file nor the record list is held in memory, because
+  a wire can legitimately reach several GB on a long-lived session. Only the
+  two paths that must see the whole stream twice buffer it — a migration
+  rewrite (`shouldRewrite` re-serializes every record) and a wire file newer
+  than this build (its parse-skip filter is disabled).
+- The snapshot parse-skip lives in `read()`: EVERY persistence implementation
+  must drop folded records that predate the last snapshot on a same-version
+  wire, because `replay()` applies whatever it is handed. `InMemory` and
+  `FileSystem` readers share that rule.
 - Version migration: `migrateWireRecord` + `WireMigration`; migrate records
   one-by-one when the wire protocol version bumps
 - Blob references: large content is offloaded to blobs via `BlobStore.offload`
