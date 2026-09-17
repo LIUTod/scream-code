@@ -83,8 +83,8 @@ importers:
         specifier: ^5.3.0
         version: 5.3.0
       '@liutod-scream/pi-tui':
-        specifier: ^0.85.2
-        version: 0.85.2
+        specifier: ^0.85.3
+        version: 0.85.3
       '@mariozechner/clipboard':
         specifier: ^0.3.2
         version: 0.3.9
@@ -975,6 +975,10 @@ packages:
 
   '@liutod-scream/pi-tui@0.85.2':
     resolution: {integrity: sha512-WxEXjf8rnGw8wjvF8L5eniE+6+iTqKO61J4mnF60L3RmdDNrP9LJ53WrDOUbdxhSXaNlwwQ0QccgLkV8Bpl3CQ==}
+    engines: {node: '>=22.19.0'}
+
+  '@liutod-scream/pi-tui@0.85.3':
+    resolution: {integrity: sha512-H7P5365IwbCwgKZOtklaj4sqAa//lBNbSIv3L75A7YUYg0Qm95otYmgOsv5geL8FEuqYdXruuwWqIoxSclTJgQ==}
     engines: {node: '>=22.19.0'}
 
   '@loaderkit/resolve@1.0.6':
@@ -4954,6 +4958,11 @@ snapshots:
       '@jridgewell/sourcemap-codec': 1.5.5
 
   '@liutod-scream/pi-tui@0.85.2':
+    dependencies:
+      get-east-asian-width: 1.6.0
+      marked: 18.0.5
+
+  '@liutod-scream/pi-tui@0.85.3':
     dependencies:
       get-east-asian-width: 1.6.0
       marked: 18.0.5
