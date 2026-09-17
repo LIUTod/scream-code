@@ -72,7 +72,15 @@ export interface AgentRecordEvents {
     provider: string;
     model: string;
     modelAlias: string;
-    systemPrompt: string;
+    /**
+     * Rendered system prompt for this request. Omitted (with
+     * `systemPromptReused: true`) when it is byte-identical to the previous
+     * header in the same wire, so a long-lived session does not store the
+     * same 50KB prompt once per request. Readers that need the prompt for any
+     * given request carry the last seen value forward.
+     */
+    systemPrompt?: string;
+    systemPromptReused?: boolean;
     activeTools: readonly string[];
     messagesCount: number;
     estimatedInputTokens: number;
@@ -175,4 +183,8 @@ export interface AgentRecordPersistence {
   rewrite(records: readonly AgentRecord[]): void;
   flush(): Promise<void>;
   close(): Promise<void>;
+  /** True when the last full read() skipped enough folded history that a physical compaction is worthwhile. */
+  shouldCompactOnResume?(): boolean;
+  /** Physically drop folded history from the wire (best effort). */
+  compact?(): Promise<void>;
 }

@@ -318,6 +318,14 @@ export class AgentRecords {
     if (shouldRewrite) {
       this.persistence.rewrite(replayedRecords);
       await this.persistence.flush();
+    } else if (
+      this.persistence.shouldCompactOnResume?.() === true &&
+      this.persistence.compact !== undefined
+    ) {
+      // Same-version resume: read() only skipped the folded history in
+      // memory while the bytes stay on disk forever, so a long-lived session
+      // grows without bound. Past the watermark, reclaim them physically.
+      await this.persistence.compact();
     }
     if (this.agent.blobStore !== undefined) {
       for (const msg of this.agent.context.history) {

@@ -1,5 +1,5 @@
 import { createReadStream } from 'node:fs';
-import { mkdir, open, rename, stat } from 'node:fs/promises';
+import { mkdir, open, rename, rm, stat } from 'node:fs/promises';
 import type { FileHandle } from 'node:fs/promises';
 import { dirname } from 'pathe';
 
@@ -21,6 +21,12 @@ export const SNAPSHOT_FOLDED_CONTEXT_TYPES: ReadonlySet<string> = new Set([
   'context.apply_compaction',
   'micro_compaction.apply',
   'full_compaction.complete',
+  // Request headers are pure diagnostics: restore never consumes them and the
+  // replay window never surfaces them. They are also the largest per-request
+  // record (a full system prompt per request), so folding them — and thus
+  // letting resume-time compaction reclaim them physically — is what keeps a
+  // long-lived wire bounded on disk.
+  'request.header',
 ]);
 
 /**
@@ -101,6 +107,8 @@ async function fileSize(path: string): Promise<number | undefined> {
 export interface FileSystemAgentRecordPersistenceOptions {
   readonly onError?: ((error: unknown) => void) | undefined;
   readonly blobStore?: BlobStore | undefined;
+  /** Folded-history watermark for shouldCompactOnResume(); defaults to WIRE_COMPACT_SKIPPED_BYTES. */
+  readonly compactThresholdBytes?: number | undefined;
 }
 
 export interface InMemoryAgentRecordPersistenceOptions {
@@ -169,6 +177,10 @@ export class FileSystemAgentRecordPersistence implements AgentRecordPersistence 
   private directorySynced = false;
   private rewriteSeq = 0;
   private flushPromise: Promise<void> | undefined;
+  /** Set while `compact()` runs; writes queue up instead of draining. */
+  private compacting = false;
+  /** Folded-history bytes skipped by the most recent full read(). */
+  private droppedBytes = 0;
   private error: unknown;
 
   constructor(
@@ -277,6 +289,8 @@ export class FileSystemAgentRecordPersistence implements AgentRecordPersistence 
     let headerSeen = false;
     let skipFoldedBeforeSnapshot = false;
     let lineNumber = 0;
+    let lineBytes = 0;
+    let skippedBytes = 0;
 
     // `head` is a single buffer reused for every line, so a retained line is
     // always a copy of the head bytes followed by chunk views.
@@ -302,6 +316,7 @@ export class FileSystemAgentRecordPersistence implements AgentRecordPersistence 
             chunk.copy(head, headLength, searchFrom, searchFrom + take);
             headLength += take;
             searchFrom += take;
+            lineBytes += take;
             if (headLength === SNAPSHOT_FOLDED_MAX_PREFIX_BYTES) {
               decided = true;
               retaining = keepLine(lineNumber + 1);
@@ -311,8 +326,12 @@ export class FileSystemAgentRecordPersistence implements AgentRecordPersistence 
           if (retaining && end > searchFrom) {
             openChunks.push(chunk.subarray(searchFrom, end));
           }
-          if (newlineIndex === -1) break;
+          if (newlineIndex === -1) {
+            lineBytes += end - searchFrom;
+            break;
+          }
 
+          lineBytes += newlineIndex + 1 - searchFrom;
           lineNumber++;
           if (!decided) {
             // The line ended before the longest fold prefix was complete, so it
@@ -337,10 +356,12 @@ export class FileSystemAgentRecordPersistence implements AgentRecordPersistence 
             const record = parseRecordLine(lineText, lineNumber, this.filePath, false);
             if (record !== undefined) yield record;
           }
+          if (!retaining) skippedBytes += lineBytes;
           openChunks = [];
           headLength = 0;
           decided = false;
           retaining = false;
+          lineBytes = 0;
           searchFrom = newlineIndex + 1;
         }
       }
@@ -364,6 +385,71 @@ export class FileSystemAgentRecordPersistence implements AgentRecordPersistence 
       }
       const record = parseRecordLine(lineData.toString('utf8'), lineNumber, this.filePath, true);
       if (record !== undefined) yield record;
+    } else if (!retaining) {
+      skippedBytes += lineBytes;
+    }
+    // Exposed via droppedBytesOnLastRead() so the resume path can decide
+    // whether the folded history is worth physically reclaiming.
+    this.droppedBytes = skippedBytes;
+  }
+
+  /** Folded-history bytes skipped by the most recent full read(). */
+  droppedBytesOnLastRead(): number {
+    return this.droppedBytes;
+  }
+
+  /** Whether the last read() skipped enough folded history to be worth reclaiming on disk. */
+  shouldCompactOnResume(): boolean {
+    return this.droppedBytes >= (this.options.compactThresholdBytes ?? WIRE_COMPACT_SKIPPED_BYTES);
+  }
+
+  /**
+   * Physically drop every record that predates the last `context.snapshot`
+   * (exactly the lines `read()` skips). Byte-preserving: retained lines are
+   * copied verbatim, so unknown records, CRLF framing and blob references
+   * survive untouched. Writes a temp file, fsyncs it, then atomically renames
+   * it over the wire. While it runs, appends queue up instead of draining
+   * (see compacting) and are flushed right after the swap.
+   */
+  async compact(): Promise<void> {
+    await this.flush();
+    this.compacting = true;
+    const tmpPath = `${this.filePath}.${process.pid}.${this.rewriteSeq++}.compact.tmp`;
+    let swapped = false;
+    try {
+      const size = await fileSize(this.filePath);
+      if (size === undefined || size === 0) return;
+      const lastSnapshotLineNumber = await this.scanLastSnapshotLine(size);
+      if (lastSnapshotLineNumber === undefined) return;
+      const directory = dirname(this.filePath);
+      const tmp = await open(tmpPath, 'w');
+      let written = 0;
+      try {
+        written = await copyRetainingLines(this.filePath, tmp, size, lastSnapshotLineNumber);
+        await tmp.sync();
+      } finally {
+        await tmp.close();
+      }
+      if (written === size) {
+        // Nothing was folded: skip the swap (and remove the temp file).
+        this.droppedBytes = 0;
+        return;
+      }
+      const sizeNow = await fileSize(this.filePath);
+      if (sizeNow !== size) {
+        // The wire changed while we were copying (a concurrent writer). Keep
+        // the original file and drop the temp copy rather than lose bytes.
+        return;
+      }
+      await rename(tmpPath, this.filePath);
+      swapped = true;
+      await syncDir(directory);
+      this.directorySynced = true;
+      this.droppedBytes = 0;
+    } finally {
+      if (!swapped) await rm(tmpPath, { force: true }).catch(() => {});
+      this.compacting = false;
+      if (this.shouldClear || this.pendingRecords.length > 0) this.scheduleFlush();
     }
   }
 
@@ -382,6 +468,12 @@ export class FileSystemAgentRecordPersistence implements AgentRecordPersistence 
 
   async flush(): Promise<void> {
     this.throwIfError();
+    // A compaction swap in flight makes writes queue up (see compact());
+    // flush() is the durability barrier, so wait it out instead of returning
+    // while records are still pending.
+    while (this.compacting) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
     while (
       this.flushPromise !== undefined ||
       this.shouldClear ||
@@ -403,6 +495,11 @@ export class FileSystemAgentRecordPersistence implements AgentRecordPersistence 
   }
 
   private ensureFlush(): Promise<void> {
+    // While compacting, new appends queue up in pendingRecords instead of
+    // draining: a batch opened against the pre-rename file would write to the
+    // inode that is about to be replaced. compact() re-schedules the flush
+    // once the swap is done.
+    if (this.compacting) return Promise.resolve();
     if (this.flushPromise !== undefined) return this.flushPromise;
 
     const promise = this.drainPendingRecords()
@@ -432,7 +529,9 @@ export class FileSystemAgentRecordPersistence implements AgentRecordPersistence 
   }
 
   private async drainPendingRecords(): Promise<void> {
-    while (this.shouldClear || this.pendingRecords.length > 0) {
+    // Belt-and-braces against the compaction swap: batches opened while the
+    // temp file is being renamed must not target the pre-swap inode.
+    while (!this.compacting && (this.shouldClear || this.pendingRecords.length > 0)) {
       await this.drainBatch();
     }
   }
@@ -493,7 +592,111 @@ export class FileSystemAgentRecordPersistence implements AgentRecordPersistence 
  * keep peak allocation at `MAX_WRITE_CHUNK_CHARS` while preserving the
  * durability contract exactly — one fsync per batch, ordered lines.
  */
+/** Same-version resume compacts the wire once this much folded history accumulated on disk. */
+export const WIRE_COMPACT_SKIPPED_BYTES = 8 * 1024 * 1024;
+
 const MAX_WRITE_CHUNK_CHARS = 1_000_000;
+
+/**
+ * Byte-preserving filter pass for compact(): copies every line that
+ * streamRecords() would retain (same fold decision, same unterminated-tail
+ * tolerance) into `out`, returning the number of bytes written. Kept in the
+ * same shape as streamRecords() on purpose — the two must agree on which
+ * lines survive; change both together.
+ */
+async function copyRetainingLines(
+  filePath: string,
+  out: FileHandle,
+  size: number,
+  lastSnapshotLineNumber: number,
+): Promise<number> {
+  const head = Buffer.allocUnsafe(SNAPSHOT_FOLDED_MAX_PREFIX_BYTES);
+  let headLength = 0;
+  let openChunks: Buffer[] = [];
+  let decided = false;
+  let retaining = false;
+  let headerSeen = false;
+  let skipFoldedBeforeSnapshot = false;
+  let lineNumber = 0;
+  let written = 0;
+
+  const keepLine = (currentLine: number): boolean =>
+    !(
+      skipFoldedBeforeSnapshot &&
+      currentLine < lastSnapshotLineNumber &&
+      headStartsWithAnyPrefix(head, headLength, SNAPSHOT_FOLDED_LINE_PREFIX_BYTES)
+    );
+
+  const writeRetainedLine = async (): Promise<void> => {
+    const data = openChunks.length === 1 ? openChunks[0]! : Buffer.concat(openChunks);
+    if (data.length > 0) {
+      await out.write(data);
+      written += data.length;
+    }
+  };
+
+  const stream = createReadStream(filePath, { end: size - 1 });
+  for await (const chunk of stream as AsyncIterable<Buffer>) {
+    let searchFrom = 0;
+    for (;;) {
+      const newlineIndex = chunk.indexOf(0x0a, searchFrom);
+      const end = newlineIndex === -1 ? chunk.length : newlineIndex;
+      if (!decided && end > searchFrom) {
+        const take = Math.min(SNAPSHOT_FOLDED_MAX_PREFIX_BYTES - headLength, end - searchFrom);
+        chunk.copy(head, headLength, searchFrom, searchFrom + take);
+        headLength += take;
+        searchFrom += take;
+        if (headLength === SNAPSHOT_FOLDED_MAX_PREFIX_BYTES) {
+          decided = true;
+          retaining = keepLine(lineNumber + 1);
+          if (retaining) openChunks.push(Buffer.from(head));
+        }
+      }
+      if (retaining && end > searchFrom) {
+        openChunks.push(chunk.subarray(searchFrom, end));
+      }
+      if (newlineIndex === -1) break;
+
+      lineNumber++;
+      if (!decided) {
+        decided = true;
+        retaining = keepLine(lineNumber);
+        if (retaining && headLength > 0) openChunks.push(Buffer.from(head.subarray(0, headLength)));
+      }
+      if (retaining) {
+        openChunks.push(chunk.subarray(newlineIndex, newlineIndex + 1));
+        if (!headerSeen) {
+          headerSeen = true;
+          let lineData = openChunks.length === 1 ? openChunks[0]! : Buffer.concat(openChunks);
+          if (lineData.length > 0 && lineData.at(-1) === 0x0a) {
+            lineData = lineData.subarray(0, lineData.length - 1);
+          }
+          if (lineData.length > 0 && lineData.at(-1) === 0x0d) {
+            lineData = lineData.subarray(0, lineData.length - 1);
+          }
+          skipFoldedBeforeSnapshot = readSkipFoldedFlag(lineData.toString('utf8'));
+        }
+        await writeRetainedLine();
+      }
+      openChunks = [];
+      headLength = 0;
+      decided = false;
+      retaining = false;
+      searchFrom = newlineIndex + 1;
+    }
+  }
+  // Unterminated trailing line (a crashed mid-flush write is tolerated by
+  // read(); keep it byte-for-byte here as well).
+  if (!decided && headLength > 0) {
+    decided = true;
+    retaining = keepLine(lineNumber + 1);
+    if (retaining) openChunks.push(Buffer.from(head.subarray(0, headLength)));
+  }
+  if (retaining && openChunks.length > 0) {
+    await writeRetainedLine();
+  }
+  return written;
+}
 
 async function writeChunked(
   handle: FileHandle,

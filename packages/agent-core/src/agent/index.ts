@@ -185,6 +185,8 @@ export class Agent {
   readonly services: AgentServices;
 
   private lastLlmConfigLogSignature?: string;
+  /** Last rendered system prompt written to a request.header record. */
+  private lastRequestHeaderSystemPrompt?: string;
   private readonly sharedEmbeddingEngine: EmbeddingEngine;
   private readonly resolveRuntimeSystemPrompt: (basePrompt: string) => string;
 
@@ -600,13 +602,18 @@ export class Agent {
     }
     // Per-request snapshot in the wire log so the request can be rebuilt
     // later (provider identity, model, rendered system prompt, active tools,
-    // message count).
+    // message count). The rendered system prompt is the single largest field
+    // (~50KB) and is almost always byte-identical to the previous request, so
+    // it is stored only when it changed — otherwise a long-lived session
+    // accumulates one full copy of the prompt per request.
+    const systemPromptReused = systemPrompt === this.lastRequestHeaderSystemPrompt;
+    this.lastRequestHeaderSystemPrompt = systemPrompt;
     this.records.logRecord({
       type: 'request.header',
       provider: provider.name,
       model: provider.modelName,
       modelAlias: this.config.modelAlias ?? '',
-      systemPrompt,
+      ...(systemPromptReused ? { systemPromptReused: true } : { systemPrompt }),
       activeTools: tools.map((t) => t.name),
       messagesCount: history.length,
       estimatedInputTokens: requestMetadata.estimatedInputTokens ?? 0,

@@ -465,7 +465,7 @@ describe('plan allows safe tool flow', () => {
       [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "<plan-mode-reminder>" } ], "toolCalls": [], "origin": { "kind": "injection", "variant": "plan_mode" } }, "time": "<time>" }
       [wire] context.append_loop_event   { "event": { "type": "step.begin", "uuid": "<uuid-7>", "turnId": "0", "step": 2 }, "time": "<time>" }
       [emit] turn.step.started           { "turnId": 0, "step": 2, "stepId": "<uuid-7>" }
-      [wire] request.header              { "provider": "scream", "model": "mock-model", "modelAlias": "mock-model", "systemPrompt": "You are a deterministic test agent.", "activeTools": [ "Bash" ], "messagesCount": 6, "estimatedInputTokens": "<tokens>", "time": "<time>" }
+      [wire] request.header              { "provider": "scream", "model": "mock-model", "modelAlias": "mock-model", "systemPromptReused": true, "activeTools": [ "Bash" ], "messagesCount": 6, "estimatedInputTokens": "<tokens>", "time": "<time>" }
       [emit] assistant.delta             { "turnId": 0, "delta": "The safe command printed plan-safe." }
       [wire] context.append_loop_event   { "event": { "type": "block.start", "uuid": "<uuid-8>", "turnId": "0", "step": 2, "stepUuid": "<uuid-7>", "index": 0, "blockType": "text" }, "time": "<time>" }
       [wire] context.append_loop_event   { "event": { "type": "content.part", "uuid": "<uuid-9>", "turnId": "0", "step": 2, "stepUuid": "<uuid-7>", "part": { "type": "text", "text": "The safe command printed plan-safe." } }, "time": "<time>" }
@@ -529,7 +529,7 @@ describe('plan mode Bash ordinary permission behavior', () => {
       [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "<plan-mode-reminder>" } ], "toolCalls": [], "origin": { "kind": "injection", "variant": "plan_mode" } }, "time": "<time>" }
       [wire] context.append_loop_event   { "event": { "type": "step.begin", "uuid": "<uuid-7>", "turnId": "0", "step": 2 }, "time": "<time>" }
       [emit] turn.step.started           { "turnId": 0, "step": 2, "stepId": "<uuid-7>" }
-      [wire] request.header              { "provider": "scream", "model": "mock-model", "modelAlias": "mock-model", "systemPrompt": "You are a deterministic test agent.", "activeTools": [ "Bash" ], "messagesCount": 6, "estimatedInputTokens": "<tokens>", "time": "<time>" }
+      [wire] request.header              { "provider": "scream", "model": "mock-model", "modelAlias": "mock-model", "systemPromptReused": true, "activeTools": [ "Bash" ], "messagesCount": 6, "estimatedInputTokens": "<tokens>", "time": "<time>" }
       [emit] assistant.delta             { "turnId": 0, "delta": "The command completed." }
       [wire] context.append_loop_event   { "event": { "type": "block.start", "uuid": "<uuid-8>", "turnId": "0", "step": 2, "stepUuid": "<uuid-7>", "index": 0, "blockType": "text" }, "time": "<time>" }
       [wire] context.append_loop_event   { "event": { "type": "content.part", "uuid": "<uuid-9>", "turnId": "0", "step": 2, "stepUuid": "<uuid-7>", "part": { "type": "text", "text": "The command completed." } }, "time": "<time>" }

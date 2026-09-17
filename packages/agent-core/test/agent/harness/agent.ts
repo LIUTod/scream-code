@@ -905,6 +905,10 @@ export class AgentTestContext {
       },
       flush: () => persistence.flush(),
       close: () => persistence.close(),
+      // Pass the optional resume-compaction hooks through so tests exercise
+      // the same resume behavior production gets from the raw persistence.
+      shouldCompactOnResume: () => persistence.shouldCompactOnResume?.() ?? false,
+      compact: () => persistence.compact?.() ?? Promise.resolve(),
     };
   }
 

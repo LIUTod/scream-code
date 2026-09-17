@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import type { ResolvedAgentProfile } from '../../src/profile';
 import { createCommandJian, testAgent } from './harness/agent';
 import { DEFAULT_TEST_SYSTEM_PROMPT } from './harness/snapshots';
+import type { WireSnapshotEntry } from './harness/snapshots';
 
 describe('Agent config', () => {
   it('exposes provider, system prompt, thinking level, and model capability updates', async () => {
@@ -170,7 +171,7 @@ describe('Agent config', () => {
       [wire] context.append_message              { "message": { "role": "user", "content": [ { "type": "text", "text": "<system-reminder>\\nThis task spans multiple steps. Use TodoList to track the remaining work and current phase.\\n</system-reminder>" } ], "toolCalls": [], "origin": { "kind": "system_trigger", "name": "todo_suggested" } }, "time": "<time>" }
       [wire] context.append_loop_event           { "event": { "type": "step.begin", "uuid": "<uuid-7>", "turnId": "0", "step": 2 }, "time": "<time>" }
       [emit] turn.step.started                   { "turnId": 0, "step": 2, "stepId": "<uuid-7>" }
-      [wire] request.header                      { "provider": "scream", "model": "mock-model", "modelAlias": "changed-model", "systemPrompt": "You are a deterministic test agent.", "activeTools": [ "Bash" ], "messagesCount": 4, "estimatedInputTokens": "<tokens>", "time": "<time>" }
+      [wire] request.header                      { "provider": "scream", "model": "mock-model", "modelAlias": "changed-model", "systemPromptReused": true, "activeTools": [ "Bash" ], "messagesCount": 4, "estimatedInputTokens": "<tokens>", "time": "<time>" }
       [emit] assistant.delta                     { "turnId": 0, "delta": "Still using the original turn config." }
       [wire] context.append_loop_event           { "event": { "type": "block.start", "uuid": "<uuid-8>", "turnId": "0", "step": 2, "stepUuid": "<uuid-7>", "index": 0, "blockType": "text" }, "time": "<time>" }
       [wire] context.append_loop_event           { "event": { "type": "content.part", "uuid": "<uuid-9>", "turnId": "0", "step": 2, "stepUuid": "<uuid-7>", "part": { "type": "text", "text": "Still using the original turn config." } }, "time": "<time>" }
@@ -219,6 +220,49 @@ describe('Agent config', () => {
         user: text "Start a fresh turn"
         user: text "<system-reminder>\\n## 当前会话状态\\n\\n### 最近操作\\n\\n- ✅ Bash — printf original-result\\n\\n</system-reminder>"
     `);
+    await ctx.expectResumeMatches();
+  });
+
+  it('stores the system prompt again after it changes between turns', async () => {
+    const ctx = testAgent();
+    ctx.configure();
+
+    const headersOf = (dump: readonly unknown[]): Array<Record<string, unknown>> =>
+      dump
+        .filter(
+          (entry): entry is WireSnapshotEntry =>
+            typeof entry === 'object' &&
+            entry !== null &&
+            (entry as { type?: unknown }).type === '[wire]' &&
+            (entry as { event?: unknown }).event === 'request.header',
+        )
+        .map((entry) => entry.args as Record<string, unknown>);
+
+    ctx.mockNextResponse({ type: 'text', text: 'First reply.' });
+    await ctx.rpc.prompt({ input: [{ type: 'text', text: 'First turn' }] });
+    const firstHeaders = headersOf(await ctx.untilTurnEnd());
+    expect(firstHeaders).toHaveLength(1);
+    expect(typeof firstHeaders[0]?.['systemPrompt']).toBe('string');
+    expect(firstHeaders[0]?.['systemPromptReused']).toBeUndefined();
+
+    // The updated prompt takes effect on the next turn and must be stored in
+    // full again (the previous header no longer matches).
+    ctx.agent.config.update({ systemPrompt: 'Turn two prompt.' });
+    ctx.mockNextResponse({ type: 'text', text: 'Second reply.' });
+    await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Second turn' }] });
+    const secondHeaders = headersOf(await ctx.untilTurnEnd());
+    expect(secondHeaders).toHaveLength(1);
+    expect(secondHeaders[0]?.['systemPrompt']).toBe('Turn two prompt.');
+    expect(secondHeaders[0]?.['systemPromptReused']).toBeUndefined();
+
+    // Unchanged on the following turn: omitted again.
+    ctx.mockNextResponse({ type: 'text', text: 'Third reply.' });
+    await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Third turn' }] });
+    const thirdHeaders = headersOf(await ctx.untilTurnEnd());
+    expect(thirdHeaders).toHaveLength(1);
+    expect(thirdHeaders[0]?.['systemPromptReused']).toBe(true);
+    expect(thirdHeaders[0]?.['systemPrompt']).toBeUndefined();
+
     await ctx.expectResumeMatches();
   });
 });

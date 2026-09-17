@@ -484,6 +484,87 @@ describe('snapshot parse-skipping (read fast path)', () => {
     }
   });
 
+  it('compact() drops folded lines byte-identically while keeping the rest intact', async () => {
+    const fixture = [
+      METADATA,
+      foldedMessage('old question'), // folded into the snapshot below
+      { type: 'context.apply_compaction', keep: [] }, // also folded
+      snapshotRecord(),
+      foldedMessage('new question'), // after the snapshot — retained
+      { type: 'turn.prompt', input: [{ type: 'text', text: 'next' }], origin: { kind: 'user' } },
+    ];
+    const wirePath = await writeFixture(fixture);
+    const persistence = new FileSystemAgentRecordPersistence(wirePath);
+
+    const before = await readFile(wirePath, 'utf8');
+    const typesBefore = await readTypes(wirePath);
+    expect(persistence.droppedBytesOnLastRead()).toBe(0); // fresh instance: no read yet
+    for await (const _record of persistence.read()) {
+      // consume to populate the fold statistics
+    }
+    expect(persistence.droppedBytesOnLastRead()).toBeGreaterThan(0);
+    expect(persistence.droppedBytesOnLastRead()).toBeLessThan(Buffer.byteLength(before, 'utf8'));
+    expect(persistence.shouldCompactOnResume()).toBe(false); // tiny fixture, below watermark
+
+    await persistence.compact();
+
+    const after = await readFile(wirePath, 'utf8');
+    expect(Buffer.byteLength(after, 'utf8')).toBeLessThan(Buffer.byteLength(before, 'utf8'));
+    // Retained lines are copied verbatim, including their JSON framing.
+    expect(after.split('\n').filter((l) => l.length > 0)).toEqual([
+      JSON.stringify(METADATA),
+      JSON.stringify(snapshotRecord()),
+      JSON.stringify(foldedMessage('new question')),
+      JSON.stringify(fixture[5]),
+    ]);
+    // Semantics are unchanged: the same record types come back.
+    expect(await readTypes(wirePath)).toEqual(typesBefore);
+
+    // Idempotent: nothing left to fold, so the file is untouched.
+    await persistence.compact();
+    expect(await readFile(wirePath, 'utf8')).toBe(after);
+  });
+
+  it('compact() leaves a wire without a snapshot untouched', async () => {
+    const fixture = [METADATA, foldedMessage('q1'), { type: 'context.apply_compaction', keep: [] }];
+    const wirePath = await writeFixture(fixture);
+    const before = await readFile(wirePath, 'utf8');
+    const persistence = new FileSystemAgentRecordPersistence(wirePath);
+    for await (const _record of persistence.read()) {
+      // consume
+    }
+    expect(persistence.droppedBytesOnLastRead()).toBe(0);
+
+    await persistence.compact();
+    expect(await readFile(wirePath, 'utf8')).toBe(before);
+  });
+
+  it('compact() appends queued writes left during the swap', async () => {
+    const fixture = [
+      METADATA,
+      foldedMessage('old question'),
+      snapshotRecord(),
+      foldedMessage('new question'),
+    ];
+    const wirePath = await writeFixture(fixture);
+    const persistence = new FileSystemAgentRecordPersistence(wirePath);
+    for await (const _record of persistence.read()) {
+      // consume
+    }
+
+    const lateRecord = {
+      type: 'turn.prompt' as const,
+      input: [{ type: 'text' as const, text: 'queued during compact' }],
+      origin: { kind: 'user' as const },
+    };
+    await persistence.compact();
+    persistence.append(lateRecord);
+    await persistence.flush();
+
+    const lines = (await readFile(wirePath, 'utf8')).split('\n').filter((l) => l.length > 0);
+    expect(JSON.parse(lines.at(-1)!)).toEqual(lateRecord);
+  });
+
   it('tolerates CRLF line endings and unterminated trailing lines', async () => {
     const first = { type: 'turn.prompt', input: [{ type: 'text', text: 'crlf line' }], origin: { kind: 'user' } };
     // Trailing partial record without a newline: tolerated as allowTruncated.
