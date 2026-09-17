@@ -639,6 +639,20 @@ export class TurnFlow {
           // messages (interrupt: false) also join only at the boundary.
           hasPendingSteer: () =>
             this.steerBuffer.some((steer) => steer.origin.kind === 'user' && steer.interrupt !== false),
+          // Crash-recovery drafts: throttled snapshots of the in-flight
+          // stream, written straight to the wire (never into the model
+          // context). A turn that dies mid-stream leaves its partial output
+          // on disk; restore surfaces it as an honestly-marked partial
+          // message instead of an empty reply.
+          onStreamingDraft: (text, think) => {
+            this.agent.records.logRecord({
+              type: 'context.stream_draft',
+              turnId: String(turnId),
+              text,
+              think,
+              time: Date.now(),
+            });
+          },
           hooks: {
             beforeStep: async ({ signal: stepSignal, stepNumber }) => {
               this.flushSteerBuffer();

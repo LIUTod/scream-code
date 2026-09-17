@@ -203,6 +203,27 @@ export class SessionReplayRenderer {
         return;
       case 'config_updated':
         return;
+      case 'stream_draft_partial': {
+        // The turn died before the stream drained: show what was generated
+        // with an honest "may be missing" marker instead of an empty reply.
+        this.flushAssistant(context);
+        const draftText = record.text.trim();
+        if (draftText.length > 0) {
+          collectReplayMessageContent(context.assistant, [
+            { type: 'text', text: draftText },
+          ]);
+        }
+        this.flushAssistant(context);
+        this.host.appendTranscriptEntry(
+          replayEntry(
+            context,
+            'status',
+            t('replay.streamDraftPartial'),
+            'notice',
+          ),
+        );
+        return;
+      }
     }
   }
 

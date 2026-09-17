@@ -64,9 +64,11 @@ export interface RunTurnInput {
    * Poll for queued user steering while a tool batch is in flight. When it
    * flips true, the batch's tools are interrupted (user-cancellation abort)
    * so the steered message reaches the model at the next step instead of
-   * waiting out a long-running command (omp's executeToolCalls pattern).
+   * waiting out a long-running command while tool calls settle.
    */
   readonly hasPendingSteer?: (() => boolean) | undefined;
+  /** Crash-recovery draft sink (see ExecuteLoopStepDeps.onStreamingDraft). */
+  readonly onStreamingDraft?: ((text: string, think: string) => void) | undefined;
 }
 
 export async function runTurn(input: RunTurnInput): Promise<TurnResult> {
@@ -125,6 +127,7 @@ export async function runTurn(input: RunTurnInput): Promise<TurnResult> {
         recordUsage: recordStepUsage,
         hasPendingSteer: input.hasPendingSteer,
         mediaProjection,
+        onStreamingDraft: input.onStreamingDraft,
       });
       activeStep = undefined;
 

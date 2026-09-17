@@ -15,6 +15,12 @@ import type { BackgroundTaskInfo } from '#/tools/builtin';
 
 export type AgentReplayRecord =
   | { type: 'message'; message: ContextMessage }
+  /**
+   * Surviving draft of a stream that never drained (process crash/kill mid
+   * turn). Rendered as an honestly-marked partial assistant message; never
+   * part of the model context.
+   */
+  | { type: 'stream_draft_partial'; turnId: string; text: string; think: string }
   | { type: 'plan_updated'; enabled: boolean; strategy?: 'normal' | 'fusion' }
   | { type: 'config_updated'; config: AgentConfigUpdateData }
   | { type: 'permission_updated'; mode: PermissionMode }

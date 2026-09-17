@@ -723,6 +723,8 @@ export const en: Record<string, string> = {
   // ─── replay ───────────────────
   'replay.history_unavailable': 'Session history is unavailable.',
   'replay.history_failed': 'Failed to replay session history: {message}',
+  'replay.streamDraftPartial':
+    'Response incomplete: the process exited while this reply was still streaming, so the tail may be missing.',
   'replay.skill_activated': 'Skill activated: {skillName}',
   'replay.yes_mode_on': 'YES mode: ON',
   'replay.yes_mode_on_detail': 'All operations will be auto-approved. Use with caution.',

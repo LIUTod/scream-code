@@ -119,6 +119,15 @@ function restoreAgentRecord(agent: Agent, input: AgentRecord): void {
     case 'context.append_message':
       agent.context.appendMessage(input.message);
       return;
+    case 'context.stream_draft':
+      // A draft the turn never cleared means the process died before the
+      // stream drained: surface what it had generated as an honestly-marked
+      // partial message in the replay window (UI only, never model context).
+      agent.replayBuilder.replacePartialDraft(input.turnId, {
+        text: input.text,
+        think: input.think,
+      });
+      return;
     case 'context.append_loop_event':
       agent.context.appendLoopEvent(input.event);
       return;

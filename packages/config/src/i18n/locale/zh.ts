@@ -723,6 +723,7 @@ export const zh: Record<string, string> = {
   // ─── replay ───────────────────
   'replay.history_unavailable': '此会话的历史记录不可用。',
   'replay.history_failed': '回放会话历史失败： {message}',
+  'replay.streamDraftPartial': '回复不完整：进程在回复流式输出期间退出，结尾内容可能缺失。',
   'replay.skill_activated': '已激活技能： {skillName}',
   'replay.yes_mode_on': 'YES 模式：开启',
   'replay.yes_mode_on_detail': '所有操作将自动批准。请谨慎使用。',

@@ -98,6 +98,22 @@ export interface AgentRecordEvents {
     snapshot: ContextMemoryJSONSnapshot;
     compactedHistory: readonly CompactedHistory[];
   };
+  /**
+   * Throttled full snapshot of the assistant's in-flight stream (text and
+   * thinking so far) for the current turn. Written DURING streaming so a
+   * crashed or killed process still shows what was generated before it died:
+   * the real `context.append_message` parts only land after the provider
+   * stream drains (see agent/turn/ltod-llm.ts), so without this record an
+   * interrupted stream leaves nothing on the wire. An empty `text`+`think`
+   * record clears the draft once real parts start landing. Never part of the
+   * model context: restore only surfaces it to the replay window as an
+   * honestly-marked partial assistant message.
+   */
+  'context.stream_draft': {
+    turnId: string;
+    text: string;
+    think: string;
+  };
 
   'wolfpack.enter': {};
   'wolfpack.exit': {};

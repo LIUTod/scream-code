@@ -45,6 +45,12 @@ export interface ExecuteLoopStepDeps {
     (usage: TokenUsage) => RecordStepUsageResult | void | Promise<RecordStepUsageResult | void>;
   readonly hasPendingSteer?: (() => boolean) | undefined;
   readonly mediaProjection?: MediaProjectionState | undefined;
+  /**
+   * Crash-recovery draft sink: receives throttled full snapshots of the
+   * in-flight stream (and an empty pair to clear once real parts land).
+   * Implementations write a `context.stream_draft` wire record directly.
+   */
+  readonly onStreamingDraft?: ((text: string, think: string) => void) | undefined;
 }
 
 export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<{
@@ -133,6 +139,7 @@ export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<{
       turnId,
       currentStep,
       stepUuid,
+      onStreamingDraft: deps.onStreamingDraft ?? (() => {}),
     }),
   };
 
@@ -329,21 +336,96 @@ function stepEndProviderDiagnostics(
   };
 }
 
-function createChatStreamingCallbacks(deps: {
+/**
+ * Accumulates the in-flight stream for the crash-recovery draft and flushes
+ * it through `onDraft` at most once per 1.5s or 4k new characters, so a fast
+ * stream does not write the wire on every delta while a slow stream still
+ * checkpoints promptly. Failures in the sink never break the stream.
+ */
+export class StreamDraftTracker {
+  private text = '';
+  private think = '';
+  private charsSinceFlush = 0;
+  private lastFlushAt = Date.now();
+  private wireHasDraft = false;
+
+  constructor(private readonly onDraft: (text: string, think: string) => void) {}
+
+  onText(delta: string): void {
+    this.text += delta;
+    this.charsSinceFlush += delta.length;
+    this.maybeFlush();
+  }
+
+  onThink(delta: string): void {
+    this.think += delta;
+    this.charsSinceFlush += delta.length;
+    this.maybeFlush();
+  }
+
+  /**
+   * Real content parts are landing: drop the draft (persisted as empty) — but
+   * only if the wire actually carries one. A stream that finished before any
+   * draft flush (fast mock streams, short replies) must not pollute the wire
+   * with an empty clear record.
+   */
+  clear(): void {
+    if (!this.wireHasDraft) return;
+    this.text = '';
+    this.think = '';
+    this.charsSinceFlush = 0;
+    this.flush();
+  }
+
+  private maybeFlush(): void {
+    if (Date.now() - this.lastFlushAt < DRAFT_FLUSH_INTERVAL_MS && this.charsSinceFlush < DRAFT_FLUSH_MIN_CHARS) {
+      return;
+    }
+    this.flush();
+  }
+
+  private flush(): void {
+    this.lastFlushAt = Date.now();
+    this.charsSinceFlush = 0;
+    try {
+      this.onDraft(this.text, this.think);
+      this.wireHasDraft = this.text.length > 0 || this.think.length > 0;
+    } catch {
+      // Drafting is best-effort; never break the stream over it.
+    }
+  }
+}
+
+const DRAFT_FLUSH_INTERVAL_MS = 1_500;
+const DRAFT_FLUSH_MIN_CHARS = 4_096;
+
+// Exported for tests: the streaming-callback wiring (draft clear semantics).
+export function createChatStreamingCallbacks(deps: {
   readonly dispatchEvent: LoopEventDispatcher;
   readonly turnId: string;
   readonly currentStep: number;
   readonly stepUuid: string;
+  /**
+   * Throttled full snapshot of the in-flight stream so a process that dies
+   * mid-turn still leaves the generated text on the wire. Cleared (empty
+   * strings) right before the first real content part lands, because parts
+   * only dispatch after the provider stream drains (ltod-llm.ts) and the
+   * persisted record must never contradict what restore replays.
+   */
+  readonly onStreamingDraft: (text: string, think: string) => void;
 }): ChatStreamingCallbacks {
-  const { dispatchEvent, turnId, currentStep, stepUuid } = deps;
+  const { dispatchEvent, turnId, currentStep, stepUuid, onStreamingDraft } = deps;
   let textIndex = 0;
   let thinkIndex = 0;
+  const draftTracker = new StreamDraftTracker(onStreamingDraft);
 
   return {
     onTextDelta: (delta) => {
+      draftTracker.onText(delta);
       dispatchEvent({ type: 'text.delta', delta });
     },
     onThinkDelta: (delta) => {
+      draftTracker.onThink(delta);
       dispatchEvent({ type: 'thinking.delta', delta });
     },
     onToolCallDelta: (delta) => {
@@ -356,6 +438,9 @@ function createChatStreamingCallbacks(deps: {
     },
     onTextPart: async (part) => {
       const index = textIndex++;
+      // First real part is landing: drop the draft so a restore never shows
+      // both the partial draft and the persisted message.
+      draftTracker.clear();
       await dispatchEvent({
         type: 'block.start',
         uuid: randomUUID(),
@@ -385,6 +470,12 @@ function createChatStreamingCallbacks(deps: {
     },
     onThinkPart: async (part) => {
       const index = thinkIndex++;
+      // Mirror onTextPart: the think draft (if any) must leave the wire once
+      // its real part lands. Without this, a long-thinking tool step leaves
+      // a stale draft that a later short text step cannot clear (its own
+      // tracker never flushed), and a completed turn would restore with a
+      // false "reply incomplete" marker.
+      draftTracker.clear();
       await dispatchEvent({
         type: 'block.start',
         uuid: randomUUID(),
