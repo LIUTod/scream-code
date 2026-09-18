@@ -293,6 +293,73 @@ describe('ScreamTUI resume message replay', () => {
     expect(driver.streamingUI.getToolComponent('call_read_2')).toBeUndefined();
   });
 
+  it('keeps an orphan approval in the turn it was answered in', async () => {
+    const driver = await replayIntoDriver([
+      message('user', [{ type: 'text', text: 'first' }]),
+      {
+        type: 'approval_result',
+        record: {
+          turnId: 0,
+          toolCallId: 'call_orphan',
+          toolName: 'Bash',
+          action: 'run ls',
+          result: { decision: 'approved' },
+        },
+      },
+      message('user', [{ type: 'text', text: 'second' }]),
+      message('assistant', [], {
+        toolCalls: [toolCall('call_bash_2', 'Bash', { command: 'ls' })],
+      }),
+      message('tool', [{ type: 'text', text: 'ok' }], { toolCallId: 'call_bash_2' }),
+    ]);
+
+    const stripAnsi = (line: string): string => line.replaceAll(/\u001B\[[0-9;]*m/g, '');
+    const blocks = driver.state.transcriptContainer.children.filter(
+      (child) => child instanceof ActivityGroupComponent,
+    );
+
+    // The later turn's block must not adopt an outcome from before it.
+    expect(blocks).toHaveLength(1);
+    const blockRows = (blocks[0] as ActivityGroupComponent).render(120).map(stripAnsi).join('\n');
+    expect(blockRows).not.toContain('已批准');
+    const transcript = driver.state.transcriptContainer.render(120).map(stripAnsi).join('\n');
+    expect(transcript).toContain('已批准: run ls');
+  });
+
+  it('lands a replayed approval inside the block that owns the call', async () => {
+    const driver = await replayIntoDriver([
+      message('user', [{ type: 'text', text: 'write a file' }]),
+      message('assistant', [], {
+        toolCalls: [toolCall('call_write_1', 'Write', { file_path: '/tmp/proj-a/a.py' })],
+      }),
+      {
+        type: 'approval_result',
+        record: {
+          turnId: 0,
+          toolCallId: 'call_write_1',
+          toolName: 'Write',
+          action: 'Writing /tmp/proj-a/a.py',
+          result: { decision: 'approved', scope: 'session' },
+        },
+      },
+      message('tool', [{ type: 'text', text: 'ok' }], { toolCallId: 'call_write_1' }),
+    ]);
+
+    const blocks = driver.state.transcriptContainer.children.filter(
+      (child) => child instanceof ActivityGroupComponent,
+    );
+
+    expect(blocks).toHaveLength(1);
+    const rows = (blocks[0] as ActivityGroupComponent)
+      .render(120)
+      .map((line) => line.replaceAll(/\u001B\[[0-9;]*m/g, ''))
+      .join('\n');
+    // The approval is a step of the block, not a message of its own: it carries
+    // the timeline branch rather than the standalone notice indent.
+    expect(rows).toContain('└─ 已批准（当前会话） · Writing /tmp/proj-a/a.py');
+    expect(driver.state.transcriptEntries.filter((item) => item.renderMode === 'notice')).toHaveLength(0);
+  });
+
   it('hydrates todo and background snapshot state from resumed main agent', async () => {
     const driver = await replayIntoDriver([], {
       toolStore: {

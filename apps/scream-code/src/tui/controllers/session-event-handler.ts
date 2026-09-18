@@ -579,6 +579,9 @@ export class SessionEventHandler {
 
   private handleStepCompleted(event: TurnStepCompletedEvent): void {
     this.host.streamingUI.flushNow();
+    // A finished step is the last chance for an approval whose call never joined
+    // a block (a subagent's call): it keeps its own row from here on.
+    this.host.streamingUI.flushPendingApprovals();
     this.maybeShowDebugTiming(event);
     this.recordProviderLatency(event);
     this.drainQueuedMessagesIntoSteer();

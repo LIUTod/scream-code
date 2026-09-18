@@ -35,6 +35,7 @@ import { renderBackgroundStatus } from './background-agent-status';
 import { getActivityLines } from '#/tui/utils/activity-lines';
 
 import type { BackgroundAgentStatusData } from '#/tui/types';
+import type { ApprovalNoticeTone } from '#/tui/utils/approval-notice';
 import { STATUS_BULLET } from '#/tui/constant/symbols';
 import type { ColorPalette } from '#/tui/theme/colors';
 import {
@@ -76,11 +77,26 @@ const CARD_INDENT_RE = /^(\u001B\[[0-9;]*m)*( {2})/;
  */
 type BlockSegment =
   | { readonly kind: 'thinking'; text: string; live: boolean }
-  | { readonly kind: 'tool'; readonly tc: ToolCallComponent; readonly step: number | undefined }
+  | {
+      readonly kind: 'tool';
+      readonly tc: ToolCallComponent;
+      readonly step: number | undefined;
+      /** The call's id, so an approval can be filed under the call it allowed. */
+      readonly callId: string | undefined;
+    }
   // Background task lifecycle rows (started / completed / failed). They are part
   // of the work a turn produced, so they take a step of the same timeline
   // instead of sitting in the transcript as messages of their own.
-  | { readonly kind: 'notice'; readonly data: BackgroundAgentStatusData };
+  | { readonly kind: 'notice'; readonly data: BackgroundAgentStatusData }
+  // Approval outcomes (approved / rejected / cancelled) for the same reason: the
+  // approval belongs to the call that asked for it, and a step of the block is
+  // bounded by the block's row budget instead of piling up one row per approval.
+  | {
+      readonly kind: 'approval';
+      readonly label: string;
+      readonly detail: string;
+      readonly tone: ApprovalNoticeTone;
+    };
 
 /** Segment render rows plus how many block rows they consume. */
 interface SegmentRows {
@@ -284,7 +300,7 @@ export class ActivityGroupComponent extends Container {
     this.startSpinner();
   }
 
-  /** True when the group owns neither reasoning nor tool calls. */
+  /** True when the group owns neither reasoning nor tool calls nor approvals. */
   isEmpty(): boolean {
     return this.segments.every(
       (segment) => segment.kind === 'thinking' && segment.text.trim().length === 0,
@@ -297,11 +313,12 @@ export class ActivityGroupComponent extends Container {
 
   /**
    * Borrows a tool card as a hidden state container. Re-attaching the same
-   * card is a no-op.
+   * card is a no-op. `callId` is what later lets an approval be filed under the
+   * call it allowed.
    */
-  attachTool(tc: ToolCallComponent, step: number | undefined): void {
+  attachTool(tc: ToolCallComponent, step: number | undefined, callId?: string): void {
     if (this.segments.some((segment) => segment.kind === 'tool' && segment.tc === tc)) return;
-    this.segments.push({ kind: 'tool', tc, step });
+    this.segments.push({ kind: 'tool', tc, step, callId });
     if (step !== undefined) this.steps.add(step);
     tc.setExpanded(this.expanded);
     tc.setSnapshotListener(() => {
@@ -312,16 +329,42 @@ export class ActivityGroupComponent extends Container {
 
   /** Adds a background task notice as the newest step of the timeline. */
   attachNotice(data: BackgroundAgentStatusData): void {
-    const last = this.segments.at(-1);
-    if (last !== undefined && last.kind === 'thinking' && last.live) {
-      // The notice splits the running reasoning in two: close the part that has
-      // streamed and remember where it stopped, so the continuation keeps only
-      // what is new instead of repeating the whole run.
-      last.live = false;
-      this.interruptedThinking = { text: last.text, length: last.text.length };
-    }
+    this.splitLiveThinking();
     this.segments.push({ kind: 'notice', data });
     this.flushNow();
+  }
+
+  /**
+   * Adds an approval outcome as the step directly under the call it allowed, so
+   * a run of approved calls reads as call/approval pairs. Returns false when
+   * that call has no row here — a subagent's call, a card that stays standalone
+   * — leaving the caller to decide where the outcome goes.
+   */
+  attachApproval(
+    callId: string,
+    label: string,
+    detail: string,
+    tone: ApprovalNoticeTone,
+  ): boolean {
+    const index = this.segments.findIndex(
+      (segment) => segment.kind === 'tool' && segment.callId === callId,
+    );
+    if (index < 0) return false;
+    this.segments.splice(index + 1, 0, { kind: 'approval', label, detail, tone });
+    this.flushNow();
+    return true;
+  }
+
+  /**
+   * A step landing mid-reasoning splits the run in two: the part that already
+   * streamed is closed and its length remembered, so the continuation keeps only
+   * what is new instead of repeating the whole run.
+   */
+  private splitLiveThinking(): void {
+    const last = this.segments.at(-1);
+    if (last === undefined || last.kind !== 'thinking' || !last.live) return;
+    last.live = false;
+    this.interruptedThinking = { text: last.text, length: last.text.length };
   }
 
   /**
@@ -577,6 +620,10 @@ export class ActivityGroupComponent extends Container {
         this.bodyContainer.addChild(this.noticeRow(segment.data, width, isLast));
         return;
       }
+      if (segment.kind === 'approval') {
+        this.bodyContainer.addChild(this.approvalRow(segment, width, isLast));
+        return;
+      }
       this.bodyContainer.addChild(this.thinkingSummaryRow(segment, width, isLast));
     });
   }
@@ -627,6 +674,9 @@ export class ActivityGroupComponent extends Container {
     if (segment.kind === 'notice') {
       return { components: [this.noticeRow(segment.data, width, isLast)], cost: 1 };
     }
+    if (segment.kind === 'approval') {
+      return { components: [this.approvalRow(segment, width, isLast)], cost: 1 };
+    }
     return this.thinkingSegmentRows(segment, width, isLast);
   }
 
@@ -645,6 +695,26 @@ export class ActivityGroupComponent extends Container {
       Math.max(1, width - visibleWidth(prefix) - NOTICE_BULLET_WIDTH),
     );
     return new Text(`${prefix}${view.bullet}${view.text}`, 0, 0);
+  }
+
+  /**
+   * One approval outcome, kept to a single row. Approvals read as a quiet note
+   * next to the work they allowed — dim, unlike a rejection, which keeps the
+   * error tone so a denied call is never mistaken for an allowed one.
+   */
+  private approvalRow(
+    segment: Extract<BlockSegment, { kind: 'approval' }>,
+    width: number,
+    isLast: boolean,
+  ): Text {
+    const prefix = isLast ? BRANCH_LAST : BRANCH_FIRST;
+    const tone = segment.tone === 'rejected' ? this.colors.error : this.colors.textDim;
+    const plain = `${segment.label}${SEPARATOR}${segment.detail}`;
+    return new Text(
+      `${prefix}${chalk.hex(tone)(truncateToWidth(plain, Math.max(1, width - visibleWidth(prefix)), '…'))}`,
+      0,
+      0,
+    );
   }
 
   /**

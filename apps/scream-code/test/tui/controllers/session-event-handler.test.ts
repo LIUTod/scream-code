@@ -18,6 +18,7 @@ function createMockHost(): SessionEventHost {
     resetToolUi: vi.fn(),
     endActivityGroup: vi.fn(),
     flushNow: vi.fn(),
+    flushPendingApprovals: vi.fn(),
     finalizeLiveTextBuffers: vi.fn(),
     finalizeAssistantStream: vi.fn(),
     finalizeTurn: vi.fn(),
@@ -218,6 +219,20 @@ describe('SessionEventHandler', () => {
     expect(host.streamingUI.resetLiveText).toHaveBeenCalled();
     expect(host.streamingUI.resetToolUi).toHaveBeenCalled();
     expect(host.setAppState).toHaveBeenCalledWith({ reconnectAttempt: 2, sessionApiCalls: 1 });
+  });
+
+  it('settles approvals still waiting for a row when the step completes', () => {
+    const host = createMockHost();
+    const handler = new SessionEventHandler(host);
+
+    handler.handleEvent(
+      { ...baseEvent('turn.step.completed'), turnId: 1 } as unknown as Event,
+      vi.fn(),
+    );
+
+    // The end of a step is the last chance for an outcome whose call never
+    // joined a block: it keeps its own row from here on.
+    expect(host.streamingUI.flushPendingApprovals).toHaveBeenCalledTimes(1);
   });
 
   it('counts completed steps and retried attempts as API calls', () => {

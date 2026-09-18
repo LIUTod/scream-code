@@ -28,8 +28,8 @@ import type { TUIState } from '../tui-state';
 import { ImageAttachmentStore, type ImageAttachment } from '../utils/image-attachment-store';
 import { truncateErrorMessage } from '../utils/event-payload';
 import { replaceTabs } from '../utils/sanitize';
-import { nextTranscriptId } from '../utils/transcript-id';
 import { disposeChildren, isExpandable, isPlanExpandable } from '../utils/component-capabilities';
+import { buildApprovalNotice } from '../utils/approval-notice';
 import { isStreaming } from '../utils/app-state';
 import { CommittedTranscriptComponent } from '../components/transcript/committed-transcript';
 
@@ -295,28 +295,28 @@ export class TranscriptController {
 
   appendApprovalEntry(request: ApprovalRequest, response: ApprovalResponse): void {
     if (request.toolName === 'ExitPlanMode' || request.display.kind === 'plan_review') return;
-    const parts: string[] = [];
-    switch (response.decision) {
-      case 'approved':
-        parts.push(response.scope === 'session' ? t('tc.approved_session') : t('tc.approved'));
-        break;
-      case 'rejected':
-        parts.push(t('tc.rejected'));
-        break;
-      case 'cancelled':
-        parts.push(t('tc.cancelled'));
-        break;
-    }
-    parts.push(`: ${request.action}`);
-    if (response.feedback !== undefined && response.feedback.length > 0) {
-      parts.push(` — "${response.feedback}"`);
-    }
-    this.appendEntry({
-      id: nextTranscriptId(),
-      kind: 'status',
-      renderMode: 'notice',
-      content: parts.join(''),
+    const notice = buildApprovalNotice({
+      decision: response.decision,
+      scope: response.scope,
+      action: request.action,
+      feedback: response.feedback,
+      labels: {
+        approved: t('tc.approved'),
+        approvedSession: t('tc.approved_session'),
+        rejected: t('tc.rejected'),
+        cancelled: t('tc.cancelled'),
+      },
     });
+    // An approval belongs to the call it allowed, so it is filed with the work
+    // rather than mounted as a message of its own: the block that owns the call
+    // takes the row as a step (bounded by its own row budget), and streaming-ui
+    // falls back to a notice row when no block ever claims it.
+    this.host.streamingUI.recordApproval(
+      request.toolCallId,
+      notice.label,
+      notice.detail,
+      notice.tone,
+    );
   }
 
   renderWelcome(): void {
@@ -348,6 +348,9 @@ export class TranscriptController {
     const { state, streamingUI, imageStore } = this.host;
     streamingUI.discardPending();
     streamingUI.endActivityGroup();
+    // Settle anything the discarded transcript still owned *before* the entry
+    // list is replaced, so a flush cannot leave a row behind in the new session.
+    streamingUI.flushPendingApprovals();
     state.transcriptEntries = [];
     streamingUI.disposeActiveCompactionBlock();
     streamingUI.resetLiveText();

@@ -19,6 +19,7 @@ import type {
   TranscriptEntry,
 } from '../types';
 import { formatErrorMessage, isTodoItemShape } from '../utils/event-payload';
+import { buildApprovalNotice } from '../utils/approval-notice';
 import { formatBackgroundAgentTranscript } from '../utils/background-agent-status';
 import {
   childRequestFieldsFromNotification,
@@ -353,6 +354,9 @@ export class SessionReplayRenderer {
     // A replayed turn boundary: settle the previous turn's activity block so
     // restored history shows one block per turn instead of one merged block.
     this.host.streamingUI.endActivityGroup();
+    // An approval whose call never opened a block belongs to the turn it was
+    // answered in: it is mounted here instead of waiting for a later block.
+    this.host.streamingUI.flushPendingApprovals();
     context.turnIndex += 1;
     context.stepIndex = 0;
     context.currentTurnId = `replay:${String(context.turnIndex)}`;
@@ -480,23 +484,26 @@ export class SessionReplayRenderer {
     }
 
     const { result } = record;
-    const parts: string[] = [];
-    switch (result.decision) {
-      case 'approved':
-        parts.push(result.scope === 'session' ? t('replay.approved_session') : t('replay.approved'));
-        break;
-      case 'rejected':
-        parts.push(t('replay.rejected'));
-        break;
-      case 'cancelled':
-        parts.push(t('replay.cancelled'));
-        break;
-    }
-    parts.push(`: ${record.action}`);
-    if (result.feedback !== undefined && result.feedback.length > 0) {
-      parts.push(` — "${result.feedback}"`);
-    }
-    this.host.appendTranscriptEntry(replayEntry(context, 'status', parts.join(''), 'notice'));
+    const notice = buildApprovalNotice({
+      decision: result.decision,
+      scope: result.scope,
+      action: record.action,
+      feedback: result.feedback,
+      labels: {
+        approved: t('replay.approved'),
+        approvedSession: t('replay.approved_session'),
+        rejected: t('replay.rejected'),
+        cancelled: t('replay.cancelled'),
+      },
+    });
+    // Same landing as live: the replayed approval joins the block under the call
+    // it allowed, and only keeps its own row when no block ever claims it.
+    this.host.streamingUI.recordApproval(
+      record.toolCallId,
+      notice.label,
+      notice.detail,
+      notice.tone,
+    );
   }
 
   private renderPlanReviewResult(

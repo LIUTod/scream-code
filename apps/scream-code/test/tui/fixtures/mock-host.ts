@@ -197,6 +197,8 @@ export function makeMockStreamingUI(
     hasActiveTurn: vi.fn((): boolean => false),
     // Default: no block is open, so a notice keeps its own transcript row.
     attachNotice: vi.fn((): boolean => false),
+    recordApproval: vi.fn(),
+    flushPendingApprovals: vi.fn(),
     ...overrides,
   };
   return streamingUI as unknown as StreamingUIController;

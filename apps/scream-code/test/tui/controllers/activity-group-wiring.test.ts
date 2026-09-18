@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { ActivityGroupComponent } from '#/tui/components/messages/activity-group';
 import { AgentGroupComponent } from '#/tui/components/messages/agent-group';
+import { NoticeMessageComponent } from '#/tui/components/messages/status-message';
 import { ThinkingComponent } from '#/tui/components/messages/thinking';
 import { ToolCallComponent } from '#/tui/components/messages/tool-call';
 import { UserMessageComponent } from '#/tui/components/messages/user-message';
@@ -33,6 +34,13 @@ function findGroup(container: Container): ActivityGroupComponent | undefined {
 function findGroups(container: Container): ActivityGroupComponent[] {
   return container.children.filter(
     (child): child is ActivityGroupComponent => child instanceof ActivityGroupComponent,
+  );
+}
+
+/** Approval outcomes that were mounted as their own notice row. */
+function notices(state: TUIState): NoticeMessageComponent[] {
+  return state.transcriptContainer.children.filter(
+    (child): child is NoticeMessageComponent => child instanceof NoticeMessageComponent,
   );
 }
 
@@ -387,5 +395,132 @@ describe('activity block wiring', () => {
     expect(state.transcriptContainer.children).toContain(pendingBlock);
     expect(state.transcriptContainer.children).toContain(panel);
     expect(transcript.getCommittedCount()).toBeGreaterThan(0);
+  });
+
+  it('holds an outcome until its own call becomes a row, then files it underneath', () => {
+    const { state, controller } = createFixture();
+    controller.setTurnId('turn-1');
+
+    // The prompt is answered before its tool call is dispatched, so at this
+    // point there is not even a block to file the row into.
+    controller.recordApproval('w1', '已批准', 'Writing /tmp/cut/vad.py', 'approved');
+    expect(findGroup(state.transcriptContainer)).toBeUndefined();
+    expect(notices(state)).toHaveLength(0);
+
+    controller.onToolCallStart(makeToolCall('w1', 'Write'));
+
+    const rows = findGroup(state.transcriptContainer)?.render(90).join('\n') ?? '';
+    // The outcome lands under the call it allowed — the order a replayed block
+    // shows too.
+    expect(rows).toContain('已批准 · Writing /tmp/cut/vad.py');
+    expect(rows.indexOf('已批准')).toBeGreaterThan(rows.indexOf('Write'));
+    expect(notices(state)).toHaveLength(0);
+  });
+
+  it('mounts an outcome answered between turns as its own notice', () => {
+    const { state, controller } = createFixture();
+
+    // A background agent can ask while no turn is running: no block will ever
+    // open for that call, so the outcome keeps the row it always had.
+    controller.recordApproval('bg-1', '已批准', 'Writing /tmp/cut/vad.py', 'approved');
+
+    const mounted = notices(state);
+    expect(mounted).toHaveLength(1);
+    expect(mounted[0]?.render(90).join('\n')).toContain('已批准: Writing /tmp/cut/vad.py');
+  });
+
+  it('files an outcome under the row of the call it allowed', () => {
+    const { state, controller } = createFixture();
+    controller.onToolCallStart(makeToolCall('bash-1', 'Bash'));
+
+    controller.recordApproval('bash-1', '已拒绝', 'Bash rm -rf /tmp/cut', 'rejected');
+
+    const rows = findGroup(state.transcriptContainer)?.render(90).join('\n') ?? '';
+    expect(rows).toContain('已拒绝 · Bash rm -rf /tmp/cut');
+    expect(rows.indexOf('已拒绝')).toBeGreaterThan(rows.indexOf('Bash'));
+    expect(notices(state)).toHaveLength(0);
+  });
+
+  it('never hangs an outcome under a call that is not its own', () => {
+    const { state, controller } = createFixture();
+    controller.setTurnId('turn-1');
+    controller.onToolCallStart(makeToolCall('main-1', 'Write'));
+
+    // A subagent's call: its row lives in the Agent card, so the outcome must
+    // not be filed under the parent's call of the same turn.
+    controller.recordApproval('sub-1', '已批准', 'Writing /tmp/cut/vad.py', 'approved');
+
+    const rows = findGroup(state.transcriptContainer)?.render(90).join('\n') ?? '';
+    expect(rows).not.toContain('已批准');
+    expect(notices(state)).toHaveLength(0);
+
+    // The end of the step settles it as the row it always had.
+    controller.flushPendingApprovals();
+    const mounted = notices(state);
+    expect(mounted).toHaveLength(1);
+    expect(mounted[0]?.render(90).join('\n')).toContain('已批准: Writing /tmp/cut/vad.py');
+  });
+
+  it('settles an outcome as a notice when its call stays standalone', () => {
+    const { state, controller } = createFixture();
+    controller.setTurnId('turn-1');
+    controller.recordApproval('m1', '已批准', 'Reading /tmp/cut/frame.png', 'approved');
+
+    controller.onToolCallStart(makeToolCall('m1', 'ReadMediaFile'));
+    expect(notices(state)).toHaveLength(0);
+
+    controller.flushPendingApprovals();
+
+    const mounted = notices(state);
+    expect(mounted).toHaveLength(1);
+    expect(mounted[0]?.render(90).join('\n')).toContain('已批准: Reading /tmp/cut/frame.png');
+  });
+
+  it('settles an outcome whose call never produced a row when the boundary passes', () => {
+    const { state, controller } = createFixture();
+    controller.setTurnId('turn-1');
+    controller.recordApproval('never-1', '已取消', 'Bash du -sh /tmp', 'cancelled');
+    expect(notices(state)).toHaveLength(0);
+
+    // An interrupted step, a retry or a session switch: the decision was the
+    // user's either way, so it surfaces as a notice instead of being dropped.
+    controller.resetToolUi();
+
+    const mounted = notices(state);
+    expect(mounted).toHaveLength(1);
+    expect(mounted[0]?.render(90).join('\n')).toContain('已取消: Bash du -sh /tmp');
+  });
+
+  it('files a run of approvals from one step without letting any escape the block', () => {
+    const { state, controller, transcript } = createFixture();
+    controller.setTurnId('turn-1');
+
+    // Three writes in one step, the shape a long file-editing task produces:
+    // each prompt is answered before its own call is dispatched.
+    controller.recordApproval('w1', '已批准', 'Writing a.py', 'approved');
+    controller.onToolCallStart(makeToolCall('w1', 'Write'));
+    controller.recordApproval('w2', '已批准', 'Writing b.py', 'approved');
+    controller.onToolCallStart(makeToolCall('w2', 'Write'));
+    controller.recordApproval('w3', '已拒绝', 'Writing c.py', 'rejected');
+    controller.onToolCallStart(makeToolCall('w3', 'Write'));
+
+    const group = findGroup(state.transcriptContainer);
+    expect(group).toBeDefined();
+    // Every outcome is a step of the block: nothing became a row of its own and
+    // the collapsed height stays at the block's budget.
+    expect(notices(state)).toHaveLength(0);
+    const collapsed = (group?.render(90) ?? []).filter((line) => line.trim().length > 0);
+    expect(collapsed).toHaveLength(3);
+
+    transcript.toggleToolOutputExpansion();
+    const expanded =
+      group
+        ?.render(90)
+        .map((line) => line.replaceAll(/\u001B\[[0-9;]*m/g, ''))
+        .join('\n') ?? '';
+    for (const detail of ['Writing a.py', 'Writing b.py', 'Writing c.py']) {
+      expect(expanded).toContain(detail);
+    }
+    expect(expanded).toContain('已拒绝 · Writing c.py');
   });
 });

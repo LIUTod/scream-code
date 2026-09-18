@@ -263,17 +263,19 @@ describe('TranscriptController.appendApprovalEntry', () => {
     ({ decision: 'approved', ...overrides }) as ApprovalResponse;
 
   it('short-circuits ExitPlanMode and plan_review requests', () => {
-    const { controller, state } = makeHost();
+    const { controller, host, state } = makeHost();
     controller.appendApprovalEntry(request({ toolName: 'ExitPlanMode' }), response());
     controller.appendApprovalEntry(
       request({ display: { kind: 'plan_review' } as never }),
       response(),
     );
     expect(state.transcriptEntries.length).toBe(0);
+    expect(host.streamingUI.recordApproval).not.toHaveBeenCalled();
   });
 
-  it('formats decision, scope and action into a notice entry', () => {
-    const { controller, state } = makeHost();
+  it('files decision, scope and action with the work that asked for it', () => {
+    const { controller, host, state } = makeHost();
+    const recordApproval = vi.mocked(host.streamingUI.recordApproval);
     controller.appendApprovalEntry(request(), response({ decision: 'approved' }));
     controller.appendApprovalEntry(
       request({ toolName: 'Write' }),
@@ -282,20 +284,28 @@ describe('TranscriptController.appendApprovalEntry', () => {
     controller.appendApprovalEntry(request(), response({ decision: 'rejected' }));
     controller.appendApprovalEntry(request(), response({ decision: 'cancelled' }));
 
-    const texts = state.transcriptEntries.map((e) => e.content);
-    expect(texts[0]).toBe(`${t('tc.approved')}: run ls`);
-    expect(texts[1]).toBe(`${t('tc.approved_session')}: run ls`);
-    expect(texts[2]).toBe(`${t('tc.rejected')}: run ls`);
-    expect(texts[3]).toBe(`${t('tc.cancelled')}: run ls`);
-    expect(state.transcriptEntries.every((e) => e.kind === 'status' && e.renderMode === 'notice')).toBe(true);
+    expect(recordApproval.mock.calls).toEqual([
+      ['tc-1', t('tc.approved'), 'run ls', 'approved'],
+      ['tc-1', t('tc.approved_session'), 'run ls', 'approved_session'],
+      ['tc-1', t('tc.rejected'), 'run ls', 'rejected'],
+      ['tc-1', t('tc.cancelled'), 'run ls', 'cancelled'],
+    ]);
+    // No row of its own: streaming-ui decides where the outcome lands.
+    expect(state.transcriptEntries).toHaveLength(0);
   });
 
   it('appends quoted feedback when present (and ignores empty feedback)', () => {
-    const { controller, state } = makeHost();
+    const { controller, host } = makeHost();
+    const recordApproval = vi.mocked(host.streamingUI.recordApproval);
     controller.appendApprovalEntry(request(), response({ feedback: 'be careful' }));
     controller.appendApprovalEntry(request(), response({ feedback: '' }));
-    expect(state.transcriptEntries[0]!.content).toBe(`${t('tc.approved')}: run ls — "be careful"`);
-    expect(state.transcriptEntries[1]!.content).toBe(`${t('tc.approved')}: run ls`);
+    expect(recordApproval.mock.calls[0]).toEqual([
+      'tc-1',
+      t('tc.approved'),
+      'run ls — "be careful"',
+      'approved',
+    ]);
+    expect(recordApproval.mock.calls[1]).toEqual(['tc-1', t('tc.approved'), 'run ls', 'approved']);
   });
 });
 

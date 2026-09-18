@@ -16,6 +16,7 @@ import {
   STREAMING_UI_FLUSH_MS,
 } from '../constant/streaming';
 import { hasDispose } from '../utils/component-capabilities';
+import type { ApprovalNoticeTone } from '../utils/approval-notice';
 import { appendStreamingArgsPreview, parseStreamingArgs } from '../utils/event-payload';
 import { charsForTokenBudget, estimateTokens, getSharedSpeedTracker } from '../utils/speed-tracker';
 import { notifyTerminalOnce } from '../utils/terminal-notification';
@@ -48,6 +49,13 @@ export interface StreamingUIHost {
   pushTranscriptEntry(entry: TranscriptEntry): void;
   onTurnCompleted(): void;
   readonly transcriptController: TranscriptController;
+}
+
+/** An approval outcome waiting for the block that will own its row. */
+interface ParkedApproval {
+  readonly label: string;
+  readonly detail: string;
+  readonly tone: ApprovalNoticeTone;
 }
 
 export class StreamingUIController {
@@ -95,6 +103,11 @@ export class StreamingUIController {
     group?: AgentGroupComponent;
   } | null = null;
   private _activityGroup: ActivityGroupComponent | undefined;
+  /**
+   * Approval outcomes answered before their tool call was dispatched, waiting
+   * for the call's row to appear (see `recordApproval`). Keyed by call id.
+   */
+  private _pendingApprovals = new Map<string, ParkedApproval>();
   /** Guards the single `registerLiveComponent` call for the turn's block. */
   private _activityGroupRegistered = false;
   /** Block that borrowed a card, so late results refresh their own block. */
@@ -398,6 +411,8 @@ export class StreamingUIController {
   /** Tears down replay-specific state after session history has been rendered. */
   cleanupAfterReplay(completedToolCallIds: Set<string>): void {
     this.endActivityGroup();
+    // Replayed approvals whose call never opened a block keep their own row.
+    this.flushPendingApprovals();
     this._activeToolCalls.clear();
     for (const toolCallId of completedToolCallIds) {
       this._pendingToolComponents.delete(toolCallId);
@@ -476,6 +491,69 @@ export class StreamingUIController {
     if (group === undefined) return false;
     group.attachNotice(data);
     return true;
+  }
+
+  /**
+   * Files an approval outcome with the call it allowed.
+   *
+   * The prompt is answered before its tool call is dispatched, so the row it
+   * belongs under usually does not exist yet: while a turn is running the
+   * outcome waits here for its own call to appear, and is filed under it the
+   * moment it does. Two cases keep the row they always had instead — an outcome
+   * answered between turns (a background agent's call, where no block will ever
+   * open), and one whose call's row is not in the block that is open now (a
+   * subagent's call, a card that stays standalone, a block that already
+   * settled), which is mounted when the step settles.
+   */
+  recordApproval(
+    callId: string,
+    label: string,
+    detail: string,
+    tone: ApprovalNoticeTone,
+  ): void {
+    const group = this._activityGroup;
+    if (group !== undefined && group.attachApproval(callId, label, detail, tone)) return;
+    if (!this.hasActiveTurn()) {
+      this.mountApprovalNotices([{ label, detail, tone }]);
+      return;
+    }
+    this._pendingApprovals.set(callId, { label, detail, tone });
+  }
+
+  /** Files the outcome waiting for this call, now that its row exists. */
+  private adoptPendingApproval(group: ActivityGroupComponent, callId: string): void {
+    const pending = this._pendingApprovals.get(callId);
+    if (pending === undefined) return;
+    this._pendingApprovals.delete(callId);
+    // The row is there, so filing cannot fail — but an outcome is never worth
+    // dropping silently, so a failure falls back to the row it used to get.
+    if (!group.attachApproval(callId, pending.label, pending.detail, pending.tone)) {
+      this.mountApprovalNotices([pending]);
+    }
+  }
+
+  /**
+   * Mounts outcomes as their own notice row — the row an approval used to get
+   * straight away, and the fallback for anything no block ever claims.
+   */
+  private mountApprovalNotices(approvals: readonly ParkedApproval[]): void {
+    for (const approval of approvals) {
+      this.host.transcriptController.appendEntry({
+        id: nextTranscriptId(),
+        kind: 'status',
+        renderMode: 'notice',
+        content: `${approval.label}: ${approval.detail}`,
+      });
+    }
+    this.host.state.ui.requestRender();
+  }
+
+  /** Settles anything still waiting: mounted as notices, in the order answered. */
+  flushPendingApprovals(): void {
+    if (this._pendingApprovals.size === 0) return;
+    const parked = [...this._pendingApprovals.values()];
+    this._pendingApprovals.clear();
+    this.mountApprovalNotices(parked);
   }
 
   endActivityGroup(): void {
@@ -690,6 +768,11 @@ export class StreamingUIController {
     this._streamingToolCallArguments.clear();
     this.disposeAndClearPendingToolComponents();
     this._pendingAgentGroup = null;
+    // A reset belongs to a boundary (step start, retry, interrupt, turn end, a
+    // session switch): an outcome whose call never produced a row would wait
+    // forever, so it is settled here as a notice instead of being dropped — the
+    // decision was the user's either way.
+    this.flushPendingApprovals();
   }
 
   resetToolCallState(): void {
@@ -908,6 +991,9 @@ export class StreamingUIController {
     const handled = this.tryAttachAgentToolCall(toolCall, tc);
     if (!handled) {
       if (StreamingUIController.STANDALONE_TOOL_NAMES.has(toolCall.name)) {
+        // A card outside the block never adopts an outcome: this call's own
+        // outcome waits for the step to settle, so an outcome belonging to some
+        // other call is not dragged out of its place here.
         tc.setExpanded(state.toolOutputExpanded);
         state.transcriptContainer.addChild(tc);
         state.ui.requestRender();
@@ -915,7 +1001,10 @@ export class StreamingUIController {
         const group = this.ensureActivityGroup();
         this.registerActivityGroupEntry(group, entry);
         this._groupByToolCard.set(tc, group);
-        group.attachTool(tc, toolCall.step ?? this._currentStep);
+        group.attachTool(tc, toolCall.step ?? this._currentStep, toolCall.id);
+        // The outcome waited for its own call: it goes under this row, which is
+        // also the order a replayed block shows.
+        this.adoptPendingApproval(group, toolCall.id);
         state.ui.requestRender();
       }
     }

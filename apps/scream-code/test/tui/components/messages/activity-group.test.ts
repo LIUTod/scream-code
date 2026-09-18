@@ -1,10 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import chalk from 'chalk';
 
 import { t } from '@scream-code/config';
 import { visibleWidth } from '@liutod-scream/pi-tui';
 import { ActivityGroupComponent } from '#/tui/components/messages/activity-group';
 import { ToolCallComponent } from '#/tui/components/messages/tool-call';
 import {
+  ACTIVITY_GROUP_COLLAPSED_LINES,
   ACTIVITY_GROUP_EXPANDED_LINES,
   ACTIVITY_GROUP_THINKING_EXCERPT_LINES,
   ACTIVITY_GROUP_TOOL_EXPANDED_LINES,
@@ -594,5 +596,141 @@ describe('header diff stat', () => {
     const header = nonEmpty(render(group))[0] ?? '';
     expect(header).not.toMatch(/\+\d/);
     expect(header).not.toMatch(/-\d/);
+  });
+
+  it('files an outcome directly under the call it allowed', () => {
+    const group = new ActivityGroupComponent(darkColors, undefined);
+    group.attachTool(makeTool('t1', 'Write', { file_path: '/tmp/cut/trim4.py' }), 1, 't1');
+
+    expect(
+      group.attachApproval('t1', '已批准（当前会话）', 'Writing /tmp/cut/trim4.py', 'approved_session'),
+    ).toBe(true);
+
+    const lines = nonEmpty(render(group));
+
+    expect(lines).toHaveLength(3);
+    expect(lines[2]?.startsWith('  └─')).toBe(true);
+    expect(lines[2]).toContain('已批准（当前会话） · Writing /tmp/cut/trim4.py');
+  });
+
+  it('refuses an outcome whose call has no row in this block', () => {
+    const group = new ActivityGroupComponent(darkColors, undefined);
+    group.attachTool(makeTool('t1', 'Write', { file_path: '/tmp/cut/a.py' }), 1, 't1');
+
+    // A subagent's call is not a row here: the caller must place it elsewhere
+    // instead of hanging it under an unrelated call.
+    expect(group.attachApproval('sub-1', '已批准', 'Writing /tmp/cut/b.py', 'approved')).toBe(false);
+    expect(nonEmpty(render(group))).toHaveLength(2);
+  });
+
+  it('files a burst of approvals as call/approval pairs', () => {
+    const group = new ActivityGroupComponent(darkColors, undefined);
+    // Cards can exist before the first prompt is answered, so the outcomes come
+    // in a second wave: each one must still land under its own call.
+    group.attachTool(makeTool('t1', 'Write', { file_path: '/tmp/cut/a.py' }), 1, 't1');
+    group.attachTool(makeTool('t2', 'Edit', { file_path: '/tmp/cut/b.py' }), 1, 't2');
+    group.attachApproval('t1', '已批准', 'Writing /tmp/cut/a.py', 'approved');
+    group.attachApproval('t2', '已拒绝', 'Writing /tmp/cut/b.py', 'rejected');
+    group.setExpanded(true);
+
+    const lines = render(group).map(strip);
+    const rowOf = (needle: string): number => lines.findIndex((line) => line.includes(needle));
+
+    // call a, its outcome, call b, its outcome — each pair adjacent and in order.
+    const aCall = rowOf('已使用 Write');
+    const aOutcome = rowOf('已批准 ·');
+    const bCall = rowOf('已使用 Edit');
+    const bOutcome = rowOf('已拒绝 ·');
+    expect(aCall).toBeGreaterThanOrEqual(0);
+    expect(aOutcome).toBeGreaterThan(aCall);
+    expect(bCall).toBeGreaterThan(aOutcome);
+    expect(bOutcome).toBeGreaterThan(bCall);
+  });
+
+  it('bounds a long run of approvals to the collapsed row budget', () => {
+    const group = new ActivityGroupComponent(darkColors, undefined);
+    for (let index = 0; index < 12; index += 1) {
+      group.attachTool(
+        makeTool(`t${index}`, 'Write', { file_path: `/tmp/cut/f${index}.py` }),
+        index + 1,
+        `t${index}`,
+      );
+      group.attachApproval(`t${index}`, '已批准', `Writing /tmp/cut/f${index}.py`, 'approved');
+    }
+
+    const lines = nonEmpty(render(group));
+
+    // The same twelve approvals used to cost the transcript 24 rows (a blank
+    // spacer plus a bright line each); as steps of the block they cannot grow
+    // past its own budget, and the newest pair is what stays on screen.
+    expect(lines).toHaveLength(ACTIVITY_GROUP_COLLAPSED_LINES);
+    expect(lines[1]).toContain('f11.py');
+    expect(lines[2]).toContain('已批准 · Writing /tmp/cut/f11.py');
+  });
+
+  it('shows every approval once the block is expanded', () => {
+    const group = new ActivityGroupComponent(darkColors, undefined);
+    for (const name of ['a.py', 'b.py', 'c.py']) {
+      const id = `t-${name}`;
+      group.attachTool(makeTool(id, 'Write', { file_path: name }), 1, id);
+      group.attachApproval(id, '已批准', `Writing ${name}`, 'approved');
+    }
+    group.setExpanded(true);
+
+    const body = render(group).map(strip).join('\n');
+
+    for (const name of ['a.py', 'b.py', 'c.py']) {
+      expect(body).toContain(`已批准 · Writing ${name}`);
+    }
+  });
+
+  it('tones a rejection as an error and keeps an approval quiet', () => {
+    const originalLevel = chalk.level;
+    chalk.level = 3; // a non-TTY test env strips ANSI otherwise
+    try {
+      const group = new ActivityGroupComponent(darkColors, undefined);
+      group.attachTool(makeTool('t-ok', 'Write', { file_path: 'a.py' }), 1, 't-ok');
+      group.attachTool(makeTool('t-deny', 'Write', { file_path: 'b.py' }), 1, 't-deny');
+      group.attachApproval('t-ok', '已批准', 'Writing a.py', 'approved');
+      group.attachApproval('t-deny', '已拒绝', 'Writing b.py', 'rejected');
+      group.setExpanded(true);
+
+      const body = group.render(WIDTH).join('\n');
+
+      expect(body).toContain(chalk.hex(darkColors.error)('已拒绝 · Writing b.py'));
+      expect(body).toContain(chalk.hex(darkColors.textDim)('已批准 · Writing a.py'));
+    } finally {
+      chalk.level = originalLevel;
+    }
+  });
+
+  it('clips an approval row to one line instead of wrapping it', () => {
+    const group = new ActivityGroupComponent(darkColors, undefined);
+    group.attachTool(makeTool('t-long', 'Write', { file_path: 'a.py' }), 1, 't-long');
+    group.attachApproval('t-long', '已批准', `Writing ${'/very/long/path'.repeat(8)}.py`, 'approved');
+
+    for (const width of [40, 72]) {
+      const lines = nonEmpty(render(group, width));
+      // Header, the call's row, the outcome's row — none of them may wrap.
+      expect(lines).toHaveLength(3);
+      for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
+    }
+  });
+
+  it('leaves a live reasoning run intact when an outcome lands under an earlier call', () => {
+    const group = new ActivityGroupComponent(darkColors, undefined);
+    group.attachTool(makeTool('t1', 'Write', { file_path: 'a.py' }), 1, 't1');
+    group.appendThinking('第一段推理', true);
+
+    group.attachApproval('t1', '已批准', 'Writing a.py', 'approved');
+    group.appendThinking('第一段推理\n第二段推理', true);
+    group.setExpanded(true);
+
+    // The outcome slots in above the run: the reasoning still streams as one
+    // block, so the continuation shows only what is new.
+    const body = render(group).map(strip).join('\n');
+
+    expect(body.match(/第一段推理/g)).toHaveLength(1);
+    expect(body).toContain('第二段推理');
   });
 });
