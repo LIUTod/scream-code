@@ -133,6 +133,7 @@ function createInitialAppState(input: ScreamTUIStartupInput): AppState {
     isSwitchingSession: false,
     streamingPhase: 'idle',
     streamingStartTime: 0,
+    pendingUserAction: null,
     theme: input.tuiConfig.theme,
     version: input.version,
     hasNewVersion: false,
@@ -728,14 +729,32 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
   patchLivePane(patch: Partial<LivePaneState>): void {
     if (!hasPatchChanges(this.state.livePane, patch)) return;
     Object.assign(this.state.livePane, patch);
+    this.syncPendingUserAction();
     this.lifecycleController.updateActivityPane();
     this.state.ui.requestRender();
   }
 
   resetLivePane(): void {
     this.state.livePane = { ...INITIAL_LIVE_PANE };
+    this.syncPendingUserAction();
     this.lifecycleController.updateActivityPane();
     this.state.ui.requestRender();
+  }
+
+  /**
+   * Mirror the live pane's pending panels onto `AppState.pendingUserAction` so
+   * the footer status block can report "等待批准/等待回答" instead of claiming a
+   * running phase while a panel is blocked on the user. Every mutation of
+   * `livePane` goes through patchLivePane/resetLivePane, so this stays the
+   * single writer of that field.
+   */
+  private syncPendingUserAction(): void {
+    const { pendingApproval, pendingQuestion } = this.state.livePane;
+    const next: AppState['pendingUserAction'] =
+      pendingApproval !== null ? 'approval' : pendingQuestion !== null ? 'question' : null;
+    if (next !== this.state.appState.pendingUserAction) {
+      this.setAppState({ pendingUserAction: next });
+    }
   }
 
   // =========================================================================

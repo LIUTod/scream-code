@@ -540,3 +540,72 @@ describe('TranscriptController misc surface', () => {
 });
 
 // (no trailing helpers — mocks live in ../fixtures/mock-host)
+
+describe('TranscriptController — live notice animation lifecycle', () => {
+  const sleep = (ms: number): Promise<void> =>
+    new Promise((resolve) => {
+      setTimeout(resolve, ms);
+    });
+
+  /** Timers under a loaded test run can slip well past their 80 ms beat, so poll
+   *  for the change instead of sampling once at a fixed moment. */
+  async function waitFor(predicate: () => boolean, timeoutMs = 1500): Promise<boolean> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (predicate()) return true;
+      await sleep(20);
+    }
+    return predicate();
+  }
+
+  function countRenders(state: ReturnType<typeof createMockTUIState>): ReturnType<typeof vi.fn> {
+    return state.ui.requestRender as ReturnType<typeof vi.fn>;
+  }
+
+  function noticeEntry(phase: 'started' | 'completed', trackingId: string): TranscriptEntry {
+    return entry({
+      kind: 'status',
+      backgroundAgentStatus: { phase, headline: `task ${phase}`, detail: 'CI', trackingId },
+    });
+  }
+
+  it('stops the ticker of a started notice once the task reports a terminal state', async () => {
+    const { controller, state } = makeHost();
+    const component = controller.appendEntry(noticeEntry('started', 'bash-1'));
+
+    expect(component).toBeInstanceOf(BackgroundAgentStatusComponent);
+    const render = countRenders(state);
+    expect(await waitFor(() => render.mock.calls.length > 0)).toBe(true);
+
+    controller.appendEntry(noticeEntry('completed', 'bash-1'));
+
+    const settled = render.mock.calls.length;
+    await sleep(400);
+    expect(render.mock.calls.length).toBe(settled);
+  });
+
+  it('never leaves a ticking twin behind when the activity block claims the notice', async () => {
+    const { controller, host, state } = makeHost();
+    const mockStreaming = host.streamingUI as unknown as { attachNotice: ReturnType<typeof vi.fn> };
+    mockStreaming.attachNotice.mockReturnValueOnce(true);
+
+    const component = controller.appendEntry(noticeEntry('started', 'bash-block'));
+
+    expect(component).toBeInstanceOf(BackgroundAgentStatusComponent);
+    const render = countRenders(state);
+    const before = render.mock.calls.length;
+    await sleep(400);
+    expect(render.mock.calls.length).toBe(before);
+  });
+
+  it('disposes a live notice card when the fold moves it into committed history', () => {
+    const { controller, state } = makeHost();
+    const component = controller.appendEntry(noticeEntry('started', 'bash-commit'));
+    const dispose = vi.spyOn(component as BackgroundAgentStatusComponent, 'dispose');
+
+    seedLive(controller, state, 154);
+    controller.commit();
+
+    expect(dispose).toHaveBeenCalled();
+  });
+});

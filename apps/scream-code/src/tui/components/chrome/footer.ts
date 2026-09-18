@@ -228,9 +228,29 @@ const SPINNER_TICK_MS = 60;
 function buildStatusLine(
   streamingPhase: AppState['streamingPhase'],
   streamingStartTime: number,
+  statusFlags: {
+    readonly isCompacting: boolean;
+    readonly pendingUserAction: AppState['pendingUserAction'];
+    readonly reconnectAttempt: number;
+    readonly reconnectMaxAttempts: number | undefined;
+  },
 ): string {
+  // States where nothing is actually progressing on the model side. They
+  // outrank the phase table below because the phase alone cannot express them:
+  // a compaction runs as `waiting`, a retry keeps the last phase of the failed
+  // attempt, and an approval/question panel blocks the turn without any event.
+  // None of them shows an elapsed time — a growing clock would claim progress.
+  if (statusFlags.pendingUserAction === 'approval') return t('status.awaiting_approval');
+  if (statusFlags.pendingUserAction === 'question') return t('status.awaiting_answer');
+  if (statusFlags.isCompacting) return t('status.compacting');
   if (streamingPhase === 'idle') {
     return t('status.idle');
+  }
+  if (statusFlags.reconnectAttempt > 0) {
+    return t('status.reconnecting_short', {
+      attempt: String(statusFlags.reconnectAttempt),
+      max: String(statusFlags.reconnectMaxAttempts ?? 0),
+    });
   }
 
   // Retry detail ("reconnecting N/M · reason · retry in Xs") is rendered in
@@ -510,6 +530,12 @@ export class FooterComponent implements Component {
       const statusLine = buildStatusLine(
         state.streamingPhase,
         state.streamingStartTime,
+        {
+          isCompacting: state.isCompacting === true,
+          pendingUserAction: state.pendingUserAction ?? null,
+          reconnectAttempt: state.reconnectAttempt ?? 0,
+          reconnectMaxAttempts: state.reconnectMaxAttempts,
+        },
       );
       const ccDot = state.ccConnectActive
         ? chalk.hex(colors.success)('●')

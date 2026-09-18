@@ -28,7 +28,7 @@ import type { TUIState } from '../tui-state';
 import { ImageAttachmentStore, type ImageAttachment } from '../utils/image-attachment-store';
 import { truncateErrorMessage } from '../utils/event-payload';
 import { replaceTabs } from '../utils/sanitize';
-import { disposeChildren, isExpandable, isPlanExpandable } from '../utils/component-capabilities';
+import { disposeChildren, hasDispose, isExpandable, isPlanExpandable } from '../utils/component-capabilities';
 import { buildApprovalNotice } from '../utils/approval-notice';
 import { isStreaming } from '../utils/app-state';
 import { CommittedTranscriptComponent } from '../components/transcript/committed-transcript';
@@ -48,6 +48,9 @@ export class TranscriptController {
   private welcomeComponent: WelcomeComponent | undefined;
   private committedComponent: CommittedTranscriptComponent | undefined;
   private readonly liveComponentToEntry = new Map<Component, TranscriptEntry>();
+  /** Live `started` notice cards by task id, so the terminal notice can stop the
+   *  ticker of the card that is still claiming the task is running. */
+  private readonly liveNoticesByTrackingId = new Map<string, BackgroundAgentStatusComponent>();
   private readonly pendingComponents = new Set<Component>();
 
   /** Max live transcript children before the oldest are folded into the
@@ -80,6 +83,30 @@ export class TranscriptController {
    */
   releaseLiveComponent(component: Component): void {
     this.liveComponentToEntry.delete(component);
+  }
+
+  /**
+   * Stop everything a component owns once it leaves the live area. Committed
+   * views re-render from the entry data, so disposing cannot lose content, but
+   * skipping it would let an animation timer outlive the row it belonged to.
+   */
+  private dropLiveComponent(component: Component): void {
+    for (const [trackingId, tracked] of this.liveNoticesByTrackingId) {
+      if (tracked === component) this.liveNoticesByTrackingId.delete(trackingId);
+    }
+    if (hasDispose(component)) component.dispose();
+  }
+
+  /**
+   * Stops the ticker of the card that announced `trackingId`. Called when the
+   * task reaches a terminal state: that card is history now, and a glyph that
+   * keeps rotating would claim the task is still running.
+   */
+  private settleLiveNotice(trackingId: string): void {
+    const tracked = this.liveNoticesByTrackingId.get(trackingId);
+    if (tracked === undefined) return;
+    this.liveNoticesByTrackingId.delete(trackingId);
+    tracked.settle();
   }
 
   markPending(component: Component): void {
@@ -131,6 +158,8 @@ export class TranscriptController {
         this.committedComponent.appendEntry(entry, state.theme.colors);
         container.removeChild(component);
         this.liveComponentToEntry.delete(component);
+        // Unmounted for good: release the timer it was running.
+        this.dropLiveComponent(component);
       }
 
       this.committedComponent.setCount(this.committedComponent.getCount() + toCommit.length);
@@ -212,6 +241,7 @@ export class TranscriptController {
           return new BackgroundAgentStatusComponent(
             entry.backgroundAgentStatus,
             state.theme.colors,
+            state.ui,
           );
         }
         return entry.renderMode === 'notice'
@@ -228,6 +258,7 @@ export class TranscriptController {
           return new BackgroundAgentStatusComponent(
             entry.backgroundAgentStatus,
             state.theme.colors,
+            state.ui,
           );
         }
         return entry.renderMode === 'notice'
@@ -259,10 +290,22 @@ export class TranscriptController {
       // then stays unmounted (like a borrowed tool card) and remains the entry's
       // live counterpart for revoke, folding and disposal.
       const status = entry.backgroundAgentStatus;
+      if (status !== undefined && component instanceof BackgroundAgentStatusComponent) {
+        const trackingId = status.trackingId;
+        if (trackingId !== undefined) {
+          if (status.phase === 'started') {
+            this.liveNoticesByTrackingId.set(trackingId, component);
+          } else {
+            this.settleLiveNotice(trackingId);
+          }
+        }
+      }
       if (status !== undefined && this.host.streamingUI.attachNotice(status)) {
         // The block owns the row: the component is never mounted anywhere, so
-        // drop its bookkeeping instead of retaining an unreachable twin.
+        // drop its bookkeeping and its timer instead of retaining an unreachable
+        // twin that keeps repainting in the background.
         this.releaseLiveComponent(component);
+        this.dropLiveComponent(component);
       } else {
         this.host.state.transcriptContainer.addChild(component);
       }

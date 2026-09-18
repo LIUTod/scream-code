@@ -632,6 +632,27 @@ export class SessionEventHandler {
     });
   }
 
+  /**
+   * A retried attempt that produces output again is no longer reconnecting:
+   * drop the retry label as soon as it streams a delta or emits a tool call, so
+   * neither the footer status block nor the status bar keeps claiming
+   * "重连中 N/M" for the rest of the step. The fields are only ever set by
+   * handleStepRetrying, so this is the single clearing point besides
+   * step/turn boundaries.
+   */
+  private clearReconnectState(): void {
+    // `> 0` (not `=== 0`) so a state fixture without the field — and any future
+    // partial AppState — skips the write instead of clearing a non-retry.
+    if (!(this.host.state.appState.reconnectAttempt > 0)) return;
+    this.host.setAppState({
+      reconnectAttempt: 0,
+      reconnectMaxAttempts: undefined,
+      reconnectDelayMs: undefined,
+      reconnectStatusCode: undefined,
+      reconnectErrorName: undefined,
+    });
+  }
+
   private maybeShowDebugTiming(event: TurnStepCompletedEvent): void {
     if (process.env['SCREAM_CODE_DEBUG'] !== '1') return;
     const text = formatStepDebugTiming(event);
@@ -701,6 +722,7 @@ export class SessionEventHandler {
 
   private handleThinkingDelta(event: ThinkingDeltaEvent): void {
     const { state, streamingUI } = this.host;
+    this.clearReconnectState();
     streamingUI.appendThinkingDelta(event.delta);
     if (canTransitionTo(state.appState.streamingPhase, 'thinking')) {
       this.host.setAppState({ streamingPhase: 'thinking' });
@@ -710,6 +732,7 @@ export class SessionEventHandler {
 
   private handleAssistantDelta(event: AssistantDeltaEvent): void {
     const { state, streamingUI } = this.host;
+    this.clearReconnectState();
     if (streamingUI.hasThinkingDraft()) {
       streamingUI.flushThinkingToTranscript();
     }
@@ -747,6 +770,7 @@ export class SessionEventHandler {
 
   private handleToolCall(event: ToolCallStartedEvent): void {
     const { streamingUI } = this.host;
+    this.clearReconnectState();
     streamingUI.flushNow();
     // Main-agent → subagent messaging (steer/queue): mark the target slot as
     // "messaging" until the tool call completes (see handleToolResult).
@@ -792,6 +816,9 @@ export class SessionEventHandler {
   private handleToolCallDelta(event: ToolCallDeltaEvent): void {
     if (event.toolCallId.length === 0) return;
     const { state, streamingUI } = this.host;
+    // A retried attempt can resume by streaming tool-call arguments without any
+    // text or thinking delta, so this entry point must drop the retry label too.
+    this.clearReconnectState();
     streamingUI.accumulateToolCallDelta(event.toolCallId, event.name, event.argumentsPart);
 
     this.host.patchLivePane({
@@ -865,7 +892,14 @@ export class SessionEventHandler {
       message: event.message,
     };
     streamingUI.completeToolResult(event.toolCallId, resultData);
-    if (canTransitionTo(this.host.state.appState.streamingPhase, 'waiting')) {
+    // Stay in "执行中" while siblings of the same parallel batch are still
+    // running: core schedules the whole batch concurrently and dispatches the
+    // results in provider order, so the first result can land before the other
+    // tools have finished.
+    if (
+      !streamingUI.hasPendingToolCalls() &&
+      canTransitionTo(this.host.state.appState.streamingPhase, 'waiting')
+    ) {
       this.host.setAppState({ streamingPhase: 'waiting' });
     }
   }
@@ -910,12 +944,36 @@ export class SessionEventHandler {
   }
 
   private handleSessionError(event: ErrorEvent): void {
+    // A refused prompt can emit `error` alone: core answers a second prompt
+    // with `turn.agent_busy` while a turn is already active
+    // (packages/agent-core/src/agent/turn/index.ts:124-135) and never emits
+    // `turn.ended`, while the TUI already marked the request as running in
+    // beginSessionRequest(). Error events carry no top-level turnId (ErrorEvent
+    // is ScreamErrorPayload + type), so this event cannot set the turn marker
+    // below — an unset marker here means no turn has produced an event yet.
+    const hadActiveTurn = this.host.streamingUI.hasActiveTurn();
     this.host.streamingUI.flushNow();
     this.host.streamingUI.resetToolUi();
     this.host.streamingUI.finalizeLiveTextBuffers();
     // Settle the block: an error may be the last event of the turn.
     this.host.streamingUI.endActivityGroup();
     this.host.showError(`[${event.code}] ${event.message}`);
+    // Only `turn.agent_busy` means "no turn will ever run for this request".
+    // Other codes can land between prompt() and turn.started — a window where
+    // hasActiveTurn() is false although a real turn is on its way — so
+    // collapsing on them would flash idle and briefly re-open idle-only gates
+    // (slash commands, input queueing, Ctrl-C-to-exit, transcript folding).
+    if (
+      event.code === 'turn.agent_busy' &&
+      !hadActiveTurn &&
+      this.host.state.appState.streamingPhase !== 'idle'
+    ) {
+      // Nothing is running, so collapse the phase: otherwise the footer keeps
+      // reporting work forever and `isBusy` blocks /model, /new, /compact and
+      // friends for the rest of the session.
+      this.host.setAppState({ streamingPhase: 'idle' });
+      this.host.resetLivePane();
+    }
   }
 
   private handleSessionWarning(event: WarningEvent): void {

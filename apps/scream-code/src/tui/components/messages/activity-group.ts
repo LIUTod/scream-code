@@ -36,7 +36,7 @@ import { getActivityLines } from '#/tui/utils/activity-lines';
 
 import type { BackgroundAgentStatusData } from '#/tui/types';
 import type { ApprovalNoticeTone } from '#/tui/utils/approval-notice';
-import { STATUS_BULLET } from '#/tui/constant/symbols';
+import { DONE_MARK, STATUS_BULLET } from '#/tui/constant/symbols';
 import type { ColorPalette } from '#/tui/theme/colors';
 import {
   easeSpeedRatio,
@@ -693,6 +693,7 @@ export class ActivityGroupComponent extends Container {
       data,
       this.colors,
       Math.max(1, width - visibleWidth(prefix) - NOTICE_BULLET_WIDTH),
+      this.spinnerFrame,
     );
     return new Text(`${prefix}${view.bullet}${view.text}`, 0, 0);
   }
@@ -733,7 +734,7 @@ export class ActivityGroupComponent extends Container {
     const continuation = isLast ? THINKING_BODY_PREFIX : BRANCH_PIPE;
     const components: Component[] = [
       new Text(
-        `${isLast ? BRANCH_LAST : BRANCH_FIRST}${chalk.hex(colors.roleThinking)(t('activitygroup.thinking_label'))}`,
+        `${isLast ? BRANCH_LAST : BRANCH_FIRST}${this.thinkingGlyph(segment)}${chalk.hex(colors.roleThinking)(t('activitygroup.thinking_label'))}`,
         0,
         0,
       ),
@@ -825,6 +826,17 @@ export class ActivityGroupComponent extends Container {
     };
   }
 
+  /** Mirrors a tool row's status prefix so reasoning and tool rows line up: a
+   *  live run spins with the block frame, a finished run takes the success mark
+   *  (`DONE_MARK` carries its own trailing space, so the column stays 2 cells). */
+  private thinkingGlyph(segment: Extract<BlockSegment, { kind: 'thinking' }>): string {
+    if (segment.live) {
+      const frame = BRAILLE_SPINNER_FRAMES[this.spinnerFrame] ?? BRAILLE_SPINNER_FRAMES[0];
+      return `${chalk.hex(this.colors.roleThinking)(frame)} `;
+    }
+    return chalk.hex(this.colors.success)(DONE_MARK);
+  }
+
   /** Mirrors the card's own status: running spins, failed/aborted stay visible. */
   private statusGlyph(row: ToolRow): string {
     if (row.aborted) return chalk.hex(this.colors.error)('⊙');
@@ -848,10 +860,12 @@ export class ActivityGroupComponent extends Container {
   ): Text {
     const first = thinkingLines(segment.text)[0] ?? '';
     const label = t('activitygroup.thinking_summary', { summary: '' });
-    // A reasoning row carries no glyph: the branch is the only thing before the
-    // text. The summary takes the rest of the row — the block is the main view of
-    // a turn now, so the row is bounded by the terminal, not by a fixed slice.
-    const used = visibleWidth(isLast ? BRANCH_LAST : BRANCH_FIRST) + visibleWidth(label);
+    const prefix = isLast ? BRANCH_LAST : BRANCH_FIRST;
+    // The row carries the same status glyph as a tool row — spinning while the
+    // run is live, `✓` once it ends — so the summary gets whatever is left after
+    // prefix + glyph + label. The block is the main view of a turn now, so the
+    // row is bounded by the terminal, not by a fixed slice.
+    const used = visibleWidth(prefix) + visibleWidth(this.thinkingGlyph(segment)) + visibleWidth(label);
     // One cell of breathing room on the right: flush against the edge, a
     // truncated summary reads as bleeding out of the frame, and the ellipsis
     // glyph of several fonts adds to that on real terminals.
@@ -859,12 +873,29 @@ export class ActivityGroupComponent extends Container {
     const summary = chalk.hex(this.colors.roleThinking)(
       t('activitygroup.thinking_summary', { summary: truncateToWidth(first, cells, '…') }),
     );
-    return new Text(`${isLast ? BRANCH_LAST : BRANCH_FIRST}${summary}`, 0, 0);
+    return new Text(`${prefix}${this.thinkingGlyph(segment)}${summary}`, 0, 0);
   }
 
   // ---------------------------------------------------------------------------
   // Spinner (same drift-free + paint-backpressure chain as the thinking row)
   // ---------------------------------------------------------------------------
+
+  /**
+   * True while at least one visible row carries a live animation. Reasoning rows
+   * spin too now, and a background task that is still running keeps its glyph
+   * moving, so this can no longer be "collapsed with a pending tool": the only
+   * question is whether repainting the body on this tick would show anything new.
+   * Finished rows stay static by design.
+   */
+  private needsRowAnimation(): boolean {
+    if (!this.running) return false;
+    for (const segment of this.segments) {
+      if (segment.kind === 'thinking' && segment.live) return true;
+      if (segment.kind === 'notice' && segment.data.phase === 'started') return true;
+      if (segment.kind === 'tool' && segment.tc.resultView === undefined) return true;
+    }
+    return false;
+  }
 
   private scheduleSpinnerTick(delayMs: number): void {
     if (this.ui === undefined) return;
@@ -877,13 +908,10 @@ export class ActivityGroupComponent extends Container {
         this.spinnerFrame = (this.spinnerFrame + steps) % BRAILLE_SPINNER_FRAMES.length;
         this.lastSpinnerTickAt += steps * BRAILLE_SPINNER_INTERVAL_MS;
         const width = this.renderedWidth ?? 80;
-        // While collapsed a running tool row mirrors the header frame; at most
-        // two rows, so refreshing the body here stays cheap. Expanded groups
-        // keep static glyphs (the rows carry content, not progress).
-        if (
-          !this.expanded &&
-          this.segments.some((segment) => segment.kind === 'tool' && segment.tc.resultView === undefined)
-        ) {
+        // A live row must follow the frame in both modes: the header alone used
+        // to spin while collapsed, which left expanded groups (and every
+        // reasoning row) showing a frozen glyph.
+        if (this.needsRowAnimation()) {
           this.rebuild(width);
         } else {
           this.headerText.setText(this.buildHeader(width));

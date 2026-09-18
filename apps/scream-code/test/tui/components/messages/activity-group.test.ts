@@ -734,3 +734,141 @@ describe('header diff stat', () => {
     expect(body).toContain('第二段推理');
   });
 });
+
+describe('ActivityGroupComponent — unified status prefixes', () => {
+  const sleep = (ms: number): Promise<void> =>
+    new Promise((resolve) => {
+      setTimeout(resolve, ms);
+    });
+
+  /** Timers under a loaded test run can slip well past their 80 ms beat, so poll
+   *  for the change instead of sampling once at a fixed moment. */
+  async function waitFor(predicate: () => boolean, timeoutMs = 1500): Promise<boolean> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (predicate()) return true;
+      await sleep(20);
+    }
+    return predicate();
+  }
+
+  function runningTool(id: string, name: string, args: Record<string, unknown>): ToolCallComponent {
+    return new ToolCallComponent({ id, name, args }, undefined, darkColors);
+  }
+
+  it('gives a reasoning row the same prefix a tool row has: spinner while live, ✓ once done', () => {
+    const rowsOf = (group: ActivityGroupComponent): string[] =>
+      nonEmpty(render(group)).map((line) => line.trimEnd());
+
+    const live = new ActivityGroupComponent(darkColors, undefined);
+    live.appendThinking(THINKING, true);
+    expect(rowsOf(live)[1]).toMatch(/^ {2}└─ [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] Thinking: first reasoning line$/);
+
+    const done = new ActivityGroupComponent(darkColors, undefined);
+    done.appendThinking(THINKING, false);
+    expect(rowsOf(done)[1]).toBe('  └─ ✓ Thinking: first reasoning line');
+  });
+
+  it('draws expanded reasoning and notice rows with the prefix too', () => {
+    const rowsOf = (group: ActivityGroupComponent): string[] =>
+      nonEmpty(render(group)).map((line) => line.trimEnd());
+
+    const solo = new ActivityGroupComponent(darkColors, undefined);
+    solo.appendThinking(THINKING, true);
+    solo.setExpanded(true);
+    expect(rowsOf(solo)).toContain('  └─ ⠋ Thinking');
+
+    // Attaching a notice closes the live reasoning run (pre-existing behaviour),
+    // so that row takes the success mark while the notice itself spins.
+    const mixed = new ActivityGroupComponent(darkColors, undefined);
+    mixed.appendThinking(THINKING, true);
+    mixed.attachNotice({ phase: 'started', headline: '后台任务已启动', detail: 'bash-1' });
+    mixed.setExpanded(true);
+    const rows = rowsOf(mixed);
+    expect(rows).toContain('  ├─ ✓ Thinking');
+    expect(rows).toContain('  └─ ⠋ 后台任务已启动 (bash-1)');
+  });
+
+  it('keeps a finished notice on the success mark', () => {
+    const group = new ActivityGroupComponent(darkColors, undefined);
+    group.attachNotice({ phase: 'completed', headline: '后台任务已完成', detail: 'bash-1' });
+
+    expect(nonEmpty(render(group))[1]?.trimEnd()).toBe('  └─ ✓ 后台任务已完成 (bash-1)');
+  });
+
+  it('animates expanded rows as well (regression: expanded groups kept static glyphs)', async () => {
+    let renders = 0;
+    const group = new ActivityGroupComponent(darkColors, {
+      requestRender: () => {
+        renders += 1;
+      },
+    } as never);
+    group.appendThinking(THINKING, true);
+    group.attachTool(runningTool('t1', 'Bash', { command: 'sleep 1' }), 1);
+    group.setExpanded(true);
+    group.setRunning(true);
+
+    const thinkingRow = (): string | undefined => render(group).find((line) => line.includes('Thinking'));
+    const before = thinkingRow();
+
+    await waitFor(() => thinkingRow() !== before);
+
+    expect(renders).toBeGreaterThan(0);
+    expect(thinkingRow()).not.toBe(before);
+  });
+
+  it('animates a running background-task row in expanded mode', async () => {
+    let renders = 0;
+    const group = new ActivityGroupComponent(darkColors, {
+      requestRender: () => {
+        renders += 1;
+      },
+    } as never);
+    group.attachNotice({ phase: 'started', headline: '后台任务已启动', detail: 'bash-1' });
+    group.setExpanded(true);
+    group.setRunning(true);
+
+    const noticeRow = (): string | undefined =>
+      nonEmpty(render(group))
+        .map((line) => line.trimEnd())
+        .find((line) => line.includes('后台任务已启动'));
+
+    const before = noticeRow();
+    await waitFor(() => noticeRow() !== before);
+
+    expect(renders).toBeGreaterThan(0);
+    expect(noticeRow()).not.toBe(before);
+  });
+
+  it('stays static once the block is finished', async () => {
+    let renders = 0;
+    const group = new ActivityGroupComponent(darkColors, {
+      requestRender: () => {
+        renders += 1;
+      },
+    } as never);
+    group.appendThinking(THINKING, false);
+    group.setRunning(false);
+
+    const before = render(group);
+    // Setup itself may request a render; what matters is that no tick follows.
+    const settled = renders;
+    await sleep(400);
+
+    expect(renders).toBe(settled);
+    expect(render(group)).toEqual(before);
+  });
+
+  it('keeps every row inside the terminal width after the reasoning prefix was added', () => {
+    for (const width of [60, 80, 100]) {
+      const group = new ActivityGroupComponent(darkColors, undefined);
+      group.appendThinking('一二三四五六七八九十'.repeat(20), true);
+      group.attachTool(runningTool('t1', 'Bash', { command: 'x'.repeat(200) }), 1);
+      group.setExpanded(true);
+
+      for (const line of render(group, width)) {
+        expect(visibleWidth(line)).toBeLessThanOrEqual(width);
+      }
+    }
+  });
+});

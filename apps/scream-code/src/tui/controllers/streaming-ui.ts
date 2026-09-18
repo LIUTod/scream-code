@@ -388,6 +388,20 @@ export class StreamingUIController {
     return matchedCall;
   }
 
+  /** True while a tool call of the step being handled has no result yet. A
+   *  parallel batch dispatches its results in provider order, so this is what
+   *  keeps the footer in "执行中" until the whole batch settles instead of
+   *  flipping to "等待中" on the first result. Entries from an earlier step or
+   *  turn are ignored: nothing can settle them any more, and counting them
+   *  would pin the footer in "执行中" for the rest of the turn. */
+  hasPendingToolCalls(): boolean {
+    for (const call of this._activeToolCalls.values()) {
+      if (call.turnId !== this._currentTurnId || call.step !== this._currentStep) continue;
+      if (call.result === undefined) return true;
+    }
+    return false;
+  }
+
   /** Marks in-flight tool calls as truncated when a step hits max_tokens.
    *  Returns the count of tool calls that were truncated. */
   markStepTruncated(turnId: string, step: number): number {

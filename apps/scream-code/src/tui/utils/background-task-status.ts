@@ -102,5 +102,6 @@ export function formatBackgroundTaskTranscript(
     phase: phaseFromStatus(info.status),
     headline: headlineFor(info),
     detail: detailFor(info),
+    trackingId: info.taskId,
   };
 }

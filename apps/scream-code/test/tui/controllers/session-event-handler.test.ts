@@ -38,6 +38,8 @@ function createMockHost(): SessionEventHost {
     getActiveToolCall: vi.fn().mockReturnValue(undefined),
     onToolCallStart: vi.fn(),
     hasActiveTurn: vi.fn().mockReturnValue(false),
+    hasPendingToolCalls: vi.fn().mockReturnValue(false),
+    accumulateToolCallDelta: vi.fn(),
   } as unknown as StreamingUIController;
 
   const tasksBrowserController = {
@@ -919,5 +921,200 @@ describe('SessionEventHandler', () => {
     // stay on screen until the next completed step (or the stale budget elapses).
     host.setAppState({ model: 'provider-b' });
     expect(handler.getProviderLatency()).toEqual({ ms: undefined, sampledAt: undefined });
+  });
+});
+
+describe('SessionEventHandler — phase convergence', () => {
+  /** Mirrors the wire shape: ErrorEvent = ScreamErrorPayload + type, i.e. no
+   *  top-level turnId (packages/agent-core/src/rpc/events.ts:86-88). */
+  function errorEvent(code = 'turn.agent_busy') {
+    return {
+      ...baseEvent('error'),
+      code,
+      message: 'Cannot launch a new turn while another turn is active',
+    } as unknown as Event;
+  }
+
+  it('collapses a phase that no turn ever claimed (prompt refused before turn.started)', () => {
+    const host = createMockHost();
+    const handler = new SessionEventHandler(host);
+    // beginSessionRequest() optimistically marks the request as running.
+    host.state.appState.streamingPhase = 'waiting';
+    // No turn is live: the prompt was refused (turn.agent_busy) without a
+    // turn.started, so no turn.ended will ever arrive to settle it.
+    vi.mocked(host.streamingUI.hasActiveTurn).mockReturnValue(false);
+
+    handler.handleEvent(errorEvent(), vi.fn());
+
+    expect(host.setAppState).toHaveBeenCalledWith({ streamingPhase: 'idle' });
+    expect(host.resetLivePane).toHaveBeenCalled();
+    expect(host.showError).toHaveBeenCalledWith(
+      '[turn.agent_busy] Cannot launch a new turn while another turn is active',
+    );
+  });
+
+  it('leaves the phase alone when a live turn is refused as busy', () => {
+    const host = createMockHost();
+    const handler = new SessionEventHandler(host);
+    host.state.appState.streamingPhase = 'tool';
+    // A turn is live, so a busy refusal belongs to someone else's turn.
+    vi.mocked(host.streamingUI.hasActiveTurn).mockReturnValue(true);
+
+    handler.handleEvent(errorEvent('turn.agent_busy'), vi.fn());
+
+    expect(host.setAppState).not.toHaveBeenCalledWith({ streamingPhase: 'idle' });
+    expect(host.resetLivePane).not.toHaveBeenCalled();
+  });
+
+  it('does not collapse on other error codes — a turn may still be starting', () => {
+    const host = createMockHost();
+    const handler = new SessionEventHandler(host);
+    host.state.appState.streamingPhase = 'waiting';
+    // beginSessionRequest() clears the turn marker, so between prompt() and
+    // turn.started the marker is unset even though a real turn is on its way.
+    vi.mocked(host.streamingUI.hasActiveTurn).mockReturnValue(false);
+
+    handler.handleEvent(errorEvent('records_write_failed'), vi.fn());
+
+    expect(host.setAppState).not.toHaveBeenCalledWith({ streamingPhase: 'idle' });
+    expect(host.resetLivePane).not.toHaveBeenCalled();
+  });
+
+  it('reads a turn marker that the error event itself cannot have set', () => {
+    const host = createMockHost();
+    const handler = new SessionEventHandler(host);
+    host.state.appState.streamingPhase = 'thinking';
+
+    handler.handleEvent(errorEvent('turn.failed'), vi.fn());
+
+    // The premise of the convergence branch: an error carries no turnId, so it
+    // never touches the marker (handleEvent only calls setTurnId for events
+    // that carry one). If that ever changes, a live turn could be collapsed.
+    expect(host.streamingUI.setTurnId).not.toHaveBeenCalled();
+  });
+
+  it('does not rewrite an already-idle phase', () => {
+    const host = createMockHost();
+    const handler = new SessionEventHandler(host);
+    host.state.appState.streamingPhase = 'idle';
+
+    handler.handleEvent(errorEvent(), vi.fn());
+
+    expect(host.setAppState).not.toHaveBeenCalled();
+    expect(host.resetLivePane).not.toHaveBeenCalled();
+  });
+});
+
+describe('SessionEventHandler — parallel tool batch', () => {
+  function toolResultEvent(toolCallId: string) {
+    return {
+      ...baseEvent('tool.result'),
+      turnId: 1,
+      toolCallId,
+      output: 'ok',
+      isError: false,
+    } as unknown as Event;
+  }
+
+  it('stays in "tool" while siblings of the same batch are still running', () => {
+    const host = createMockHost();
+    const handler = new SessionEventHandler(host);
+    host.state.appState.streamingPhase = 'tool';
+    vi.mocked(host.streamingUI.hasPendingToolCalls).mockReturnValue(true);
+
+    handler.handleEvent(toolResultEvent('call_a'), vi.fn());
+
+    expect(host.setAppState).not.toHaveBeenCalledWith({ streamingPhase: 'waiting' });
+  });
+
+  it('falls back to "waiting" once the last tool of the batch has a result', () => {
+    const host = createMockHost();
+    const handler = new SessionEventHandler(host);
+    host.state.appState.streamingPhase = 'tool';
+    vi.mocked(host.streamingUI.hasPendingToolCalls).mockReturnValue(false);
+
+    handler.handleEvent(toolResultEvent('call_b'), vi.fn());
+
+    expect(host.setAppState).toHaveBeenCalledWith({ streamingPhase: 'waiting' });
+  });
+});
+
+describe('SessionEventHandler — retry label clearing', () => {
+  function retryingEvent() {
+    return {
+      ...baseEvent('turn.step.retrying'),
+      turnId: 1,
+      attempt: 1,
+      nextAttempt: 2,
+      maxAttempts: 10,
+      delayMs: 20_000,
+      statusCode: 429,
+    } as unknown as Event;
+  }
+
+  it('drops the retry label as soon as the retried attempt streams again', () => {
+    const host = createMockHost();
+    const handler = new SessionEventHandler(host);
+
+    handler.handleEvent(retryingEvent(), vi.fn());
+    expect(host.state.appState.reconnectAttempt).toBe(2);
+    expect(host.state.appState.reconnectStatusCode).toBe(429);
+
+    handler.handleEvent(
+      {
+        ...baseEvent('assistant.delta'),
+        turnId: 1,
+        delta: { type: 'text', text: 'hello' },
+      } as unknown as Event,
+      vi.fn(),
+    );
+
+    // The step is producing output again: neither the footer status block nor
+    // the status bar may keep claiming "重连中" for the rest of the step.
+    expect(host.state.appState.reconnectAttempt).toBe(0);
+    expect(host.state.appState.reconnectStatusCode).toBeUndefined();
+    expect(host.state.appState.reconnectDelayMs).toBeUndefined();
+  });
+
+  it('does not write the retry fields when no retry is in flight', () => {
+    const host = createMockHost();
+    const handler = new SessionEventHandler(host);
+
+    handler.handleEvent(
+      {
+        ...baseEvent('assistant.delta'),
+        turnId: 1,
+        delta: { type: 'text', text: 'hello' },
+      } as unknown as Event,
+      vi.fn(),
+    );
+
+    expect(host.setAppState).not.toHaveBeenCalledWith(
+      expect.objectContaining({ reconnectAttempt: 0 }),
+    );
+  });
+
+  it('also drops the label when the resumed attempt streams tool arguments', () => {
+    const host = createMockHost();
+    const handler = new SessionEventHandler(host);
+
+    handler.handleEvent(retryingEvent(), vi.fn());
+    expect(host.state.appState.reconnectAttempt).toBe(2);
+
+    // A retried attempt can resume straight into tool-call arguments, with no
+    // text or thinking delta in between.
+    handler.handleEvent(
+      {
+        ...baseEvent('tool.call.delta'),
+        turnId: 1,
+        toolCallId: 'call_1',
+        name: 'Bash',
+        argumentsPart: '{"command"',
+      } as unknown as Event,
+      vi.fn(),
+    );
+
+    expect(host.state.appState.reconnectAttempt).toBe(0);
+    expect(host.state.appState.reconnectStatusCode).toBeUndefined();
   });
 });

@@ -38,5 +38,6 @@ export function formatBackgroundAgentTranscript(
     phase,
     headline,
     detail: detailParts.length > 0 ? detailParts.join(' · ') : undefined,
+    trackingId: meta.agentId,
   };
 }

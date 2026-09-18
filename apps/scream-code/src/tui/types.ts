@@ -85,6 +85,13 @@ export interface AppState {
   isSwitchingSession: boolean;
   streamingPhase: 'idle' | 'waiting' | 'thinking' | 'composing' | 'tool';
   streamingStartTime: number;
+  /**
+   * Non-null while an interactive panel is blocked on the user (an approval
+   * request or a question). Mirrors `livePane.pendingApproval` /
+   * `pendingQuestion` (written by `patchLivePane`/`resetLivePane`) so the
+   * footer status block can separate "waiting on a human" from "working".
+   */
+  pendingUserAction: 'approval' | 'question' | null;
   theme: Theme;
   version: string;
   hasNewVersion: boolean;
@@ -186,6 +193,12 @@ export interface BackgroundAgentStatusData {
   readonly phase: BackgroundAgentStatusPhase;
   readonly headline: string;
   readonly detail?: string;
+  /**
+   * Id of the task or subagent this notice is about (`bash-…` / `agent-…`).
+   * Lets the view stop the ticker of the `started` card once the terminal
+   * notice for the same task arrives. Absent on replayed history.
+   */
+  readonly trackingId?: string;
 }
 
 export interface CompactionTranscriptData {

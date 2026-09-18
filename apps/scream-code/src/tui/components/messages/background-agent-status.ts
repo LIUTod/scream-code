@@ -1,8 +1,8 @@
-import type { Component } from '@liutod-scream/pi-tui';
+import type { Component, TUI } from '@liutod-scream/pi-tui';
 import { Text, truncateToWidth, visibleWidth } from '@liutod-scream/pi-tui';
 import chalk from 'chalk';
 
-import { BRAILLE_SPINNER_FRAMES, MESSAGE_INDENT } from '#/tui/constant/rendering';
+import { BRAILLE_SPINNER_FRAMES, BRAILLE_SPINNER_INTERVAL_MS, MESSAGE_INDENT } from '#/tui/constant/rendering';
 import { DONE_MARK, FAILURE_MARK } from '#/tui/constant/symbols';
 import type { ColorPalette } from '#/tui/theme/colors';
 import type { BackgroundAgentStatusData } from '#/tui/types';
@@ -26,6 +26,12 @@ export function renderBackgroundStatus(
    * card, which is allowed to wrap like every other message.
    */
   maxCells?: number,
+  /**
+   * Frame of `BRAILLE_SPINNER_FRAMES` to draw for a notice that is still running.
+   * The activity block passes its own frame so the row matches the header it sits
+   * under; the standalone card advances its own.
+   */
+  frameIndex = 0,
 ): BackgroundStatusView {
   const tone =
     data.phase === 'started'
@@ -39,9 +45,11 @@ export function renderBackgroundStatus(
       ? chalk.hex(colors.success)(DONE_MARK)
       : data.phase === 'failed'
         ? chalk.hex(colors.error)(FAILURE_MARK)
-        : // Running, like any tool row: the same spinner glyph, one step behind the
-          // block header's animated one.
-          chalk.hex(colors.textDim)(`${BRAILLE_SPINNER_FRAMES[0] ?? '⠋'} `);
+        : // Running, like any tool row: the same spinner glyph, drawn at the
+          // caller's frame instead of a frozen first frame.
+          chalk.hex(colors.textDim)(
+            `${BRAILLE_SPINNER_FRAMES[frameIndex] ?? BRAILLE_SPINNER_FRAMES[0] ?? '⠋'} `,
+          );
 
   const hasDetail = data.detail !== undefined && data.detail.length > 0;
   const plain = hasDetail ? `${data.headline} (${data.detail ?? ''})` : data.headline;
@@ -57,18 +65,23 @@ export function renderBackgroundStatus(
 }
 
 export class BackgroundAgentStatusComponent implements Component {
-  private readonly bullet: string;
   private readonly textComponent: Text;
   private cachedWidth: number | undefined;
   private cachedLines: string[] | undefined;
+  private spinnerFrame = 0;
+  private spinnerTimer: ReturnType<typeof setTimeout> | undefined;
+  private lastSpinnerTickAt = 0;
+  /** Only a notice that is still running animates; a finished one is static. */
+  private live: boolean;
 
   constructor(
     private readonly data: BackgroundAgentStatusData,
     private readonly colors: ColorPalette,
+    private readonly ui?: TUI,
   ) {
-    const view = renderBackgroundStatus(data, colors);
-    this.bullet = view.bullet;
-    this.textComponent = new Text(view.text, 0, 0);
+    this.textComponent = new Text(renderBackgroundStatus(data, colors).text, 0, 0);
+    this.live = data.phase === 'started' && ui !== undefined;
+    if (this.live) this.startSpinner();
   }
 
   invalidate(): void {
@@ -76,20 +89,75 @@ export class BackgroundAgentStatusComponent implements Component {
     this.cachedLines = undefined;
   }
 
+  dispose(): void {
+    this.stopSpinner();
+  }
+
+  /**
+   * The task this card announced is over: stop the ticker and fall back to the
+   * first frame, then let the cache answer again. Without the reset a settled
+   * card would keep whatever frame it froze on, which reads as a stuck spinner.
+   */
+  settle(): void {
+    this.stopSpinner();
+    this.live = false;
+    if (this.spinnerFrame === 0) return;
+    this.spinnerFrame = 0;
+    this.invalidate();
+  }
+
   render(width: number): string[] {
-    if (this.cachedLines !== undefined && this.cachedWidth === width) {
+    // A live notice is never served from cache: its glyph advances every
+    // BRAILLE_SPINNER_INTERVAL_MS and a stale array would freeze the animation.
+    if (!this.live && this.cachedLines !== undefined && this.cachedWidth === width) {
       return this.cachedLines;
     }
 
+    const view = renderBackgroundStatus(this.data, this.colors, undefined, this.spinnerFrame);
     const contentWidth = Math.max(1, width - MESSAGE_INDENT.length);
     const contentLines = this.textComponent.render(contentWidth);
     const lines = [
       '',
-      ...contentLines.map((line, index) => (index === 0 ? this.bullet : MESSAGE_INDENT) + line),
+      ...contentLines.map((line, index) => (index === 0 ? view.bullet : MESSAGE_INDENT) + line),
     ];
 
     this.cachedWidth = width;
     this.cachedLines = lines;
     return lines;
+  }
+
+  private startSpinner(): void {
+    if (this.spinnerTimer !== undefined) return;
+    this.lastSpinnerTickAt = performance.now();
+    this.scheduleSpinnerTick(BRAILLE_SPINNER_INTERVAL_MS);
+  }
+
+  private stopSpinner(): void {
+    if (this.spinnerTimer === undefined) return;
+    clearTimeout(this.spinnerTimer);
+    this.spinnerTimer = undefined;
+  }
+
+  private scheduleSpinnerTick(delayMs: number): void {
+    if (this.ui === undefined) return;
+    const timer = setTimeout(() => {
+      if (this.spinnerTimer !== timer) return;
+      const startedAt = performance.now();
+      const elapsed = startedAt - this.lastSpinnerTickAt;
+      if (elapsed >= BRAILLE_SPINNER_INTERVAL_MS) {
+        const steps = Math.floor(elapsed / BRAILLE_SPINNER_INTERVAL_MS);
+        this.spinnerFrame = (this.spinnerFrame + steps) % BRAILLE_SPINNER_FRAMES.length;
+        this.lastSpinnerTickAt += steps * BRAILLE_SPINNER_INTERVAL_MS;
+        this.invalidate();
+        this.ui?.requestRender();
+      }
+      const frameCostMs = performance.now() - startedAt;
+      if (this.spinnerTimer !== timer) return;
+      // Same cadence as the activity block: keep the 80 ms beat, but give up the
+      // frame instead of piling up timers when a repaint is slower than the beat.
+      const cadenceDelayMs = Math.max(0, BRAILLE_SPINNER_INTERVAL_MS - frameCostMs);
+      this.scheduleSpinnerTick(Math.max(cadenceDelayMs, frameCostMs * 9));
+    }, delayMs);
+    this.spinnerTimer = timer;
   }
 }
