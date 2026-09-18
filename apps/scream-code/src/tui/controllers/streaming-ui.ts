@@ -525,6 +525,20 @@ export class StreamingUIController {
     detail: string,
     tone: ApprovalNoticeTone,
   ): void {
+    // The call's own row can live in a block that is no longer the open one: a
+    // plan card settles the block it interrupts, and a subagent's call never
+    // joins the open block at all. File the outcome under the row it belongs to
+    // whenever that row is still mounted — a settled block is history, not a
+    // reason to move the outcome somewhere else.
+    const card = this._pendingToolComponents.get(callId);
+    const owner = card === undefined ? undefined : this._groupByToolCard.get(card);
+    if (
+      owner !== undefined &&
+      this.host.state.transcriptContainer.children.includes(owner) &&
+      owner.attachApproval(callId, label, detail, tone)
+    ) {
+      return;
+    }
     const group = this._activityGroup;
     if (group !== undefined && group.attachApproval(callId, label, detail, tone)) return;
     if (!this.hasActiveTurn()) {
@@ -1005,6 +1019,12 @@ export class StreamingUIController {
     const handled = this.tryAttachAgentToolCall(toolCall, tc);
     if (!handled) {
       if (StreamingUIController.STANDALONE_TOOL_NAMES.has(toolCall.name)) {
+        // A plan is a message in its own right, so it ends the stretch of work
+        // that led to it: without this seal the block stays open *above* the plan
+        // and everything that follows keeps writing rows where nobody looks while
+        // reading the plan. Every revision seals again, which is what keeps the
+        // running block below the newest plan.
+        if (toolCall.name === 'ExitPlanMode') this.endActivityGroup();
         // A card outside the block never adopts an outcome: this call's own
         // outcome waits for the step to settle, so an outcome belonging to some
         // other call is not dragged out of its place here.

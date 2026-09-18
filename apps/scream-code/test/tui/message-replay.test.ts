@@ -16,6 +16,7 @@ import type { SessionEventHandler } from '#/tui/controllers/session-event-handle
 import type { StreamingUIController } from '#/tui/controllers/streaming-ui';
 import { AgentGroupComponent } from '#/tui/components/messages/agent-group';
 import { ActivityGroupComponent } from '#/tui/components/messages/activity-group';
+import { ToolCallComponent } from '#/tui/components/messages/tool-call';
 
 vi.mock('#/tui/utils/open-url', () => ({ openUrl: vi.fn() }));
 
@@ -630,6 +631,38 @@ describe('ScreamTUI resume message replay', () => {
     expect(transcript).toContain('replay final approved plan');
     expect(transcript).not.toContain('Plan rejected by user.');
     expect(transcript).not.toContain('Plan mode: OFF');
+  });
+
+  it('replays a plan between two sealed blocks, matching the live shape', async () => {
+    const driver = await replayIntoDriver([
+      message('assistant', [], { toolCalls: [toolCall('call_read', 'Read', { file_path: 'a.ts' })] }),
+      message('tool', [{ type: 'text', text: 'ok' }], { toolCallId: 'call_read' }),
+      message('assistant', [], {
+        toolCalls: [toolCall('call_exit', 'ExitPlanMode', { plan: 'Step one\nStep two' })],
+      }),
+      message('tool', [{ type: 'text', text: 'Exited plan mode.' }], { toolCallId: 'call_exit' }),
+      message('assistant', [], { toolCalls: [toolCall('call_bash', 'Bash', { command: 'ls' })] }),
+      message('tool', [{ type: 'text', text: 'file list' }], { toolCallId: 'call_bash' }),
+    ]);
+
+    const children = driver.state.transcriptContainer.children;
+    const shape = children
+      .map((child) =>
+        child instanceof ActivityGroupComponent
+          ? 'block'
+          : child instanceof ToolCallComponent
+            ? 'card'
+            : 'other',
+      )
+      // Replay mounts its own scaffolding at the top of the transcript; only the
+      // block/card order matters here.
+      .filter((kind) => kind !== 'other');
+
+    // The plan seals the block that led to it, and the work after it starts a
+    // block of its own below the card — same shape the live session builds.
+    expect(shape).toEqual(['block', 'card', 'block']);
+    const rendered = children.map((child) => child.render(120).join('\n')).join('\n');
+    expect(rendered).toContain('Step one');
   });
 });
 

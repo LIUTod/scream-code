@@ -1965,7 +1965,7 @@ export class ToolCallComponent extends CachedContainer {
   }
 
   private computePlanBoxMaxContentLines(): number | undefined {
-    const rows = this.ui?.terminal.rows;
+    const rows = this.ui?.terminal?.rows;
     if (rows === undefined || !Number.isFinite(rows) || rows <= 0) return undefined;
     return Math.max(8, Math.floor(rows * 0.6) - 4);
   }

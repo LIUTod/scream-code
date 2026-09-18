@@ -17,8 +17,13 @@ import type { ToolCallBlockData, TranscriptEntry } from '#/tui/types';
 
 import { createMockTUIState } from '../fixtures/mock-host';
 
-function makeToolCall(id: string, name: string, step = 1): ToolCallBlockData {
-  return { id, name, args: {}, turnId: 'turn-1', step };
+function makeToolCall(
+  id: string,
+  name: string,
+  step = 1,
+  args: Record<string, unknown> = {},
+): ToolCallBlockData {
+  return { id, name, args, turnId: 'turn-1', step };
 }
 
 function makeEntry(id: string): TranscriptEntry {
@@ -522,5 +527,114 @@ describe('activity block wiring', () => {
       expect(expanded).toContain(detail);
     }
     expect(expanded).toContain('已拒绝 · Writing c.py');
+  });
+});
+
+describe('activity block wiring — plan cards seal the running block', () => {
+  function childIndex(state: TUIState, child: unknown): number {
+    return state.transcriptContainer.children.indexOf(child as never);
+  }
+
+  function renderAll(state: TUIState): string {
+    return state.transcriptContainer.children
+      .map((child) => child.render(100).join('\n'))
+      .join('\n')
+      .replaceAll(/\u001B\[[0-9;]*m/g, '');
+  }
+
+  it('seals the block that led to the plan and starts the next block below it', () => {
+    const { state, controller } = createFixture();
+
+    controller.onToolCallStart(makeToolCall('r1', 'Read'));
+    const firstBlock = findGroup(state.transcriptContainer);
+    expect(firstBlock).toBeDefined();
+
+    controller.onToolCallStart(makeToolCall('p1', 'ExitPlanMode'));
+    const planCard = state.transcriptContainer.children.find(
+      (child): child is ToolCallComponent => child instanceof ToolCallComponent,
+    );
+    expect(planCard).toBeDefined();
+    // Sealing keeps the block as history: it is not removed or replaced.
+    expect(findGroups(state.transcriptContainer)).toHaveLength(1);
+
+    controller.onToolCallStart(makeToolCall('b1', 'Bash', 2));
+
+    const groups = findGroups(state.transcriptContainer);
+    expect(groups).toHaveLength(2);
+    expect(groups[0]).toBe(firstBlock);
+    expect(childIndex(state, groups[1])).toBeGreaterThan(childIndex(state, planCard));
+    // The sealed block keeps its own row and does not swallow the new one.
+    expect(groups[0]?.render(90).join('\n')).not.toContain('Bash');
+    expect(groups[1]?.render(90).join('\n')).toContain('Bash');
+  });
+
+  it('seals again for every plan revision and never spawns an empty block between them', () => {
+    const { state, controller } = createFixture();
+    const plan = (id: string, text: string): ToolCallBlockData => ({
+      id,
+      name: 'ExitPlanMode',
+      args: { plan: text },
+      turnId: 'turn-1',
+      step: 1,
+    });
+
+    controller.onToolCallStart(makeToolCall('r1', 'Read'));
+    controller.onToolCallStart(plan('p1', 'first revision'));
+    controller.onToolCallStart(plan('p2', 'second revision'));
+    controller.onToolCallStart(makeToolCall('b1', 'Bash', 2));
+
+    const shape = state.transcriptContainer.children.map((child) =>
+      child instanceof ActivityGroupComponent
+        ? 'block'
+        : child instanceof ToolCallComponent
+          ? 'card'
+          : 'other',
+    );
+    // Both revisions are kept, and no empty block appears between them.
+    expect(shape).toEqual(['block', 'card', 'card', 'block']);
+
+    const rendered = renderAll(state);
+    expect(rendered).toContain('first revision');
+    expect(rendered).toContain('second revision');
+  });
+
+  it('keeps the block open for the other standalone cards', () => {
+    const { state, controller } = createFixture();
+
+    controller.onToolCallStart(makeToolCall('r1', 'Read'));
+    const block = findGroup(state.transcriptContainer);
+
+    controller.onToolCallStart(makeToolCall('m1', 'ReadMediaFile'));
+    controller.onToolCallStart(makeToolCall('t1', 'Bash', 2));
+
+    const groups = findGroups(state.transcriptContainer);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]).toBe(block);
+    expect(groups[0]?.render(90).join('\n')).toContain('Bash');
+  });
+
+  it('files an approval under its own row even when a plan sealed that block', () => {
+    const { state, controller } = createFixture();
+
+    controller.onToolCallStart(makeToolCall('b1', 'Bash', 1, { command: 'ls' }));
+    const sealed = findGroup(state.transcriptContainer);
+    controller.onToolCallStart(makeToolCall('p1', 'ExitPlanMode', 1, { plan: 'plan' }));
+
+    controller.recordApproval('b1', 'Approved', 'Bash · ls', 'approved');
+
+    // The outcome belongs under the call it allowed, wherever that row lives —
+    // sealing the block must not push it to the bottom of the transcript.
+    expect(sealed?.render(100).join('\n')).toContain('Approved · Bash · ls');
+    expect(state.transcriptContainer.children).toHaveLength(2);
+  });
+
+  it('leaves nothing behind when the plan is the first event of the turn', () => {
+    const { state, controller } = createFixture();
+
+    controller.onToolCallStart(makeToolCall('p1', 'ExitPlanMode', 1, { plan: 'plan' }));
+
+    // Sealing is a no-op when no block was open: no empty block is mounted.
+    expect(state.transcriptContainer.children.filter((child) => child instanceof ActivityGroupComponent)).toHaveLength(0);
+    expect(state.transcriptContainer.children.filter((child) => child instanceof ToolCallComponent)).toHaveLength(1);
   });
 });
