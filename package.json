@@ -1,6 +1,6 @@
 {
   "name": "scream-code-monorepo",
-  "version": "0.16.5",
+  "version": "0.16.6",
   "private": true,
   "license": "MIT",
   "type": "module",
