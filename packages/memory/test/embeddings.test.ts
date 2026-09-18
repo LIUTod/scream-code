@@ -10,13 +10,15 @@
  * - 引擎按 cacheDir 全局缓存复用。
  * fastembed 与 HuggingFace 网络一律打桩，不碰真模型/真网络。
  */
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   buildEmbeddingText,
+  classifyEmbeddingFailure,
+  probeLocalEmbeddingSupport,
   clearEmbeddingModelCache,
   createFastEmbedEngine,
   EMBEDDING_MODEL_NAME,
@@ -283,18 +285,91 @@ describe('cosineSimilarity', () => {
 });
 
 describe('clearEmbeddingModelCache', () => {
-  it('只删除 fast-bge-small-zh-v1.5 子目录，保留兄弟文件；目录不存在时静默', () => {
+  it('删除模型子目录与同名暂存包，保留兄弟文件；目录不存在时静默', () => {
     const dir = freshCacheDir();
     const modelDir = join(dir, FE_MODEL_ID);
     mkdirSync(modelDir, { recursive: true });
     writeFileSync(join(modelDir, 'model_optimized.onnx'), 'junk');
+    // 中断/被拦截的下载留下的暂存包：fastembed 只要看到它就跳过下载，
+    // 所以清理必须连它一起删，否则每次重试都在解同一个坏包。
+    writeFileSync(join(dir, `${FE_MODEL_ID}.tar.gz`), 'not a gzip stream');
     writeFileSync(join(dir, 'keep-me.txt'), 'x');
 
     clearEmbeddingModelCache(dir);
     expect(existsSync(modelDir)).toBe(false);
+    expect(existsSync(join(dir, `${FE_MODEL_ID}.tar.gz`))).toBe(false);
     expect(existsSync(join(dir, 'keep-me.txt'))).toBe(true);
 
-    // 幂等：再删一次（目录已不存在）不抛错
+    // 幂等：再删一次（目标已不存在）不抛错
     clearEmbeddingModelCache(dir);
+  });
+
+  it.skipIf(process.getuid?.() === 0 || process.platform === 'win32')(
+    '删除失败时不抛出，且条目保留（Windows 文件被占用 / 目录只读）',
+    () => {
+    const dir = freshCacheDir();
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, `${FE_MODEL_ID}.tar.gz`), 'x');
+    // 只读目录让 rmSync 以 EACCES/EPERM 失败；契约是"清理失败也不能抛"，
+    // 否则它会盖掉调用方真正要展示的下载错误。root 会绕过权限，故跳过。
+    chmodSync(dir, 0o500);
+    try {
+      expect(() => clearEmbeddingModelCache(dir)).not.toThrow();
+      expect(existsSync(join(dir, `${FE_MODEL_ID}.tar.gz`))).toBe(true);
+    } finally {
+      chmodSync(dir, 0o700);
+    }
+  });
+
+});
+
+describe('classifyEmbeddingFailure', () => {
+  it('按四种真实错误文本分类（平台缺二进制 / 缓存包损坏 / 网络 / 未知）', () => {
+    // 这两条是本机实测抓到的原文：
+    // - 冷进程伪造 linux/arm64 导入 fastembed → MODULE_NOT_FOUND
+    // - 暂存包写入非 gzip 内容 → tar 解包报错
+    const table: Array<[string | undefined, string]> = [
+      ["Cannot find module '@anush008/tokenizers-linux-arm64-gnu'", 'platform'],
+      ['Cannot find module \'@anush008/tokenizers-win32-arm64-msvc\'', 'platform'],
+      ['Failed to load native binding', 'platform'],
+      ['Unsupported OS: aix', 'platform'],
+      // 已装包但加载不了的原生绑定（musl 装 glibc 包、老 glibc、错架构）
+      [
+        'Error: dlopen(/x/node_modules/onnxruntime-node/bin/napi-v3/linux/x64/onnxruntime_binding.node, 1): Error loading shared library libstdc++.so.6: No such file or directory',
+        'platform',
+      ],
+      [
+        "/lib64/ld-linux-x86-64.so.2: version `GLIBC_2.28' not found (required by /x/binding.node)",
+        'platform',
+      ],
+      ['... is not a valid Win32 application', 'platform'],
+      ['invalid ELF header', 'platform'],
+      ['Unsupported architecture on Linux: ia32', 'platform'],
+      ['Unsupported architecture on Windows: arm64', 'platform'],
+      ['TAR_BAD_ARCHIVE: Unrecognized archive format', 'archive'],
+      ['zlib: incorrect header check', 'archive'],
+      ['unexpected end of file', 'archive'],
+      ['fetch failed', 'network'],
+      ['connect ETIMEDOUT 142.250.0.1:443', 'network'],
+      ['HTTP 503', 'network'],
+      ['embedding engine not initialized', 'other'],
+      ['ENOENT: no such file or directory, open /x/y', 'other'],
+      [undefined, 'other'],
+    ];
+
+    for (const [message, expected] of table) {
+      expect(classifyEmbeddingFailure(message), message).toBe(expected);
+    }
+  });
+});
+
+describe('probeLocalEmbeddingSupport', () => {
+  it('本平台可加载时返回 supported:true（成功面）', async () => {
+    // 与失败面分开：这里 fastembed 的 mock 可以正常导入，
+    // 用来钉住"只有导入失败才判不支持"，避免实现恒返回 false 也蒙混过关。
+    const result = await probeLocalEmbeddingSupport();
+
+    expect(result.supported).toBe(true);
+    expect(result.error).toBeUndefined();
   });
 });

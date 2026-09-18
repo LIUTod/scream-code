@@ -14,7 +14,8 @@ import { t } from '@scream-code/config';
 
 import type { SlashCommandHost } from './dispatch';
 import { handleWeb } from './knowledge-web';
-import { getKnowledgeStore, getEmbeddingStatus, startManualEmbeddingDownload, isEmbeddingModelCached, type EmbeddingStatus } from './knowledge-store';
+import { getKnowledgeStore, getEmbeddingStatus, startManualEmbeddingDownload, hasEmbeddingModelCache, type EmbeddingStatus } from './knowledge-store';
+import { embeddingFailureDetail } from './embedding-failure-hint';
 import { TextInputDialogComponent } from '../components/dialogs/text-input-dialog';
 import { ChoicePickerComponent, type ChoiceOption } from '../components/dialogs/choice-picker';
 import { KnowledgeResultViewer } from '../components/dialogs/knowledge-result-viewer';
@@ -202,15 +203,15 @@ async function ensureEmbeddingReadyInteractive(host: SlashCommandHost): Promise<
   const engine = store.getEmbeddingEngine();
   if (engine !== undefined && engine.available) return true;
 
-  if (!isEmbeddingModelCached()) {
+  if (!hasEmbeddingModelCache()) {
     host.showError(t('knowledge.model_missing'));
     return false;
   }
   const spinner = host.showProgressSpinner(t('knowledge.loading_model'));
-  const { ok, error } = await startManualEmbeddingDownload();
+  const { ok, error, failureKind } = await startManualEmbeddingDownload();
   spinner.stop({ ok, label: ok ? t('kw.embedding_ready') : t('kw.embedding_failed') });
   if (!ok) {
-    const detail = [t('knowledge.download_model_retry_hint'), error].filter(Boolean).join('\n');
+    const detail = embeddingFailureDetail(failureKind, error);
     host.showNotice(t('knowledge.model_load_failed'), detail);
     return false;
   }
@@ -492,19 +493,20 @@ async function handleReembed(host: SlashCommandHost): Promise<void> {
 }
 
 async function handleDownloadModel(host: SlashCommandHost): Promise<void> {
-  // Ensure the store and shared embedding engine are initialized before
-  // attempting a manual download. The menu can be opened without any other
-  // handler having triggered getKnowledgeStore().
-  await getKnowledgeStore();
-
   const spinner = host.showProgressSpinner(t('kw.embedding_downloading'));
   try {
-    const { ok, alreadyReady, error } = await startManualEmbeddingDownload();
+    // Ensure the store and shared embedding engine are initialized before
+    // attempting a manual download — inside the try, so an init failure reaches
+    // the user through the same notice as a failed download instead of escaping
+    // as a raw command error with no spinner at all.
+    await getKnowledgeStore();
+
+    const { ok, alreadyReady, error, failureKind } = await startManualEmbeddingDownload();
     spinner.stop({ ok, label: ok ? t('kw.embedding_ready') : t('kw.embedding_failed') });
     if (ok) {
       host.showStatus(alreadyReady ? t('kw.embedding_already_installed') : t('kw.embedding_ready'));
     } else {
-      const detail = [t('knowledge.download_model_retry_hint'), error].filter(Boolean).join('\n');
+      const detail = embeddingFailureDetail(failureKind, error);
       host.showNotice(t('kw.embedding_failed'), detail);
     }
   } catch (error: unknown) {

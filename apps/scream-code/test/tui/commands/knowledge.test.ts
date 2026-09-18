@@ -27,7 +27,7 @@ const knowledgeStore = vi.hoisted(() => ({
   getKnowledgeStore: vi.fn(),
   getEmbeddingStatus: vi.fn<() => string>(() => 'ready'),
   startManualEmbeddingDownload: vi.fn(async () => ({ ok: true })),
-  isEmbeddingModelCached: vi.fn(() => true),
+  hasEmbeddingModelCache: vi.fn(() => true),
 }));
 vi.mock('#/tui/commands/knowledge-store', () => knowledgeStore);
 
@@ -178,8 +178,8 @@ beforeEach(async () => {
   vi.mocked(knowledgeStore.getEmbeddingStatus).mockReturnValue('ready' as never);
   vi.mocked(knowledgeStore.startManualEmbeddingDownload).mockReset();
   vi.mocked(knowledgeStore.startManualEmbeddingDownload).mockResolvedValue({ ok: true });
-  vi.mocked(knowledgeStore.isEmbeddingModelCached).mockReset();
-  vi.mocked(knowledgeStore.isEmbeddingModelCached).mockReturnValue(true);
+  vi.mocked(knowledgeStore.hasEmbeddingModelCache).mockReset();
+  vi.mocked(knowledgeStore.hasEmbeddingModelCache).mockReturnValue(true);
 
   vi.mocked(knowledgePkg.ingestDirectory).mockReset();
   vi.mocked(knowledgePkg.ingestFile).mockReset();
@@ -231,6 +231,40 @@ describe('handleKnowledgeCommand — 菜单', () => {
     expect(picker2['hint']).toBe(
       t('knowledge.menu_hint') + ' · ' + t('kw.embedding_failed') + t('kw.embedding_data_intact'),
     );
+  });
+});
+
+// ─── 1b. 下载向量模型：失败分型 + store 初始化失败路径 ─────────────
+
+describe('handleKnowledgeCommand — 下载向量模型', () => {
+  it('平台无原生绑定 → 通知给平台提示，而不是"建议科学上网"', async () => {
+    const { host, spinner } = makeHost();
+    vi.mocked(knowledgeStore.startManualEmbeddingDownload).mockResolvedValue({
+      ok: false,
+      error: "Cannot find module '@anush008/tokenizers-linux-arm64-gnu'",
+      failureKind: 'platform',
+    } as never);
+
+    await openMenu(host);
+    await selectMenuAction('download-model');
+
+    expect(spinner.stop).toHaveBeenCalledWith({ ok: false, label: t('kw.embedding_failed') });
+    expect(host.showNotice).toHaveBeenCalledWith(
+      t('kw.embedding_failed'),
+      `${t('knowledge.embedding_platform_hint')}\nCannot find module '@anush008/tokenizers-linux-arm64-gnu'`,
+    );
+  });
+
+  it('store 初始化失败 → 停进度条并报操作失败，而不是裸奔的原始错误', async () => {
+    const { host, spinner } = makeHost();
+    vi.mocked(knowledgeStore.getKnowledgeStore).mockRejectedValue(new Error('SQLITE_CANTOPEN'));
+
+    await openMenu(host);
+    await selectMenuAction('download-model');
+
+    expect(spinner.stop).toHaveBeenCalledWith({ ok: false, label: t('kw.embedding_failed') });
+    expect(host.showError).toHaveBeenCalledWith(t('knowledge.op_failed', { msg: 'SQLITE_CANTOPEN' }));
+    expect(host.showNotice).not.toHaveBeenCalled();
   });
 });
 
@@ -459,7 +493,7 @@ describe('handleKnowledgeCommand — embedding 就绪门闸', () => {
     const { host } = makeHost();
     await driveIngestToGate(host, dir);
 
-    expect(knowledgeStore.isEmbeddingModelCached).not.toHaveBeenCalled();
+    expect(knowledgeStore.hasEmbeddingModelCache).not.toHaveBeenCalled();
     expect(knowledgeStore.startManualEmbeddingDownload).not.toHaveBeenCalled();
     expect(knowledgePkg.ingestDirectory).toHaveBeenCalledTimes(1);
     expect(host.showError).not.toHaveBeenCalled();
@@ -469,7 +503,7 @@ describe('handleKnowledgeCommand — embedding 就绪门闸', () => {
     vi.mocked(knowledgeStore.getKnowledgeStore).mockResolvedValue(
       makeStore({ getEmbeddingEngine: vi.fn(() => ({ available: false })) }) as never,
     );
-    vi.mocked(knowledgeStore.isEmbeddingModelCached).mockReturnValue(false);
+    vi.mocked(knowledgeStore.hasEmbeddingModelCache).mockReturnValue(false);
     const dir = await mkdtemp(join(tmpRoot, 'gate-nocache-'));
     const { host } = makeHost();
     await driveIngestToGate(host, dir);
@@ -485,7 +519,11 @@ describe('handleKnowledgeCommand — embedding 就绪门闸', () => {
     vi.mocked(knowledgeStore.getKnowledgeStore).mockResolvedValue(
       makeStore({ getEmbeddingEngine: vi.fn(() => engineNotReady) }) as never,
     );
-    knowledgeStore.startManualEmbeddingDownload.mockResolvedValueOnce({ ok: false, error: 'HTTP 503' } as never);
+    knowledgeStore.startManualEmbeddingDownload.mockResolvedValueOnce({
+      ok: false,
+      error: 'HTTP 503',
+      failureKind: 'network',
+    } as never);
     const dir = await mkdtemp(join(tmpRoot, 'gate-load-'));
 
     const { host } = makeHost();
@@ -493,7 +531,7 @@ describe('handleKnowledgeCommand — embedding 就绪门闸', () => {
 
     expect(host.showNotice).toHaveBeenCalledWith(
       t('knowledge.model_load_failed'),
-      `${t('knowledge.download_model_retry_hint')}\nHTTP 503`,
+      `${t('knowledge.embedding_network_hint')}\nHTTP 503`,
     );
     expect(knowledgePkg.ingestDirectory).not.toHaveBeenCalled();
 

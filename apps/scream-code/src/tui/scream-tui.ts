@@ -11,7 +11,13 @@ import type {
 } from '@scream-code/scream-code-sdk';
 import { OnboardingCardComponent } from './components/dialogs/onboarding-card';
 import { EmbeddingSetupCardComponent } from './components/dialogs/embedding-setup-card';
-import { getKnowledgeStore, isEmbeddingModelCached, startManualEmbeddingDownload } from './commands/knowledge-store';
+import {
+  getKnowledgeStore,
+  hasEmbeddingModelCache,
+  startManualEmbeddingDownload,
+  type EmbeddingFailureKind,
+} from './commands/knowledge-store';
+import { embeddingFailureDetail } from './commands/embedding-failure-hint';
 import { ScreamHarness } from '@scream-code/scream-code-sdk';
 import { t, setLocale } from '@scream-code/config';
 import type { CLIOptions } from '#/cli/options';
@@ -869,7 +875,7 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
     if (this.state.startupState === 'picker') return;
     try {
       await getKnowledgeStore();
-      if (isEmbeddingModelCached()) {
+      if (hasEmbeddingModelCache()) {
         void startManualEmbeddingDownload().catch(() => {
           // Warm-up is best-effort; the ingest/search gates surface errors
           // with full context when the user actually needs the model.
@@ -888,8 +894,9 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
           const spinner = this.showProgressSpinner(t('kw.embedding_downloading'));
           let ok = false;
           let error: string | undefined;
+          let failureKind: EmbeddingFailureKind | undefined;
           try {
-            ({ ok, error } = await startManualEmbeddingDownload());
+            ({ ok, error, failureKind } = await startManualEmbeddingDownload());
           } catch (error: unknown) {
             error = error instanceof Error ? error.message : String(error);
           }
@@ -897,9 +904,7 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
           if (ok) {
             this.showStatus(t('kw.embedding_ready'));
           } else {
-            const detail = [t('knowledge.download_model_retry_hint'), error]
-              .filter(Boolean)
-              .join('\n');
+            const detail = embeddingFailureDetail(failureKind, error);
             this.showNotice(t('kw.embedding_failed'), detail);
           }
         })();

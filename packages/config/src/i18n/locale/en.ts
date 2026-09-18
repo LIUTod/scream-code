@@ -229,7 +229,7 @@ export const en: Record<string, string> = {
   'knowledge.search_fail': 'Search failed',
   'knowledge.search_result': 'Search Results',
   'knowledge.no_hits': 'Query "{query}" matched no chunks',
-  'knowledge.vector_degraded': 'Vector model not ready, using keyword search mode. If download failed, try enabling a proxy and restart.',
+  'knowledge.vector_degraded': 'Vector model not ready, using keyword search mode. You can retry the download from the /knowledge menu.',
   'knowledge.query_label': 'Query',
   'knowledge.no_title': '(untitled)',
   'knowledge.source_label': 'Source',
@@ -264,7 +264,14 @@ export const en: Record<string, string> = {
   'knowledge.download_model': 'Download vector model',
   'knowledge.download_model_desc': 'Manually download the bge-small-zh-v1.5 model (~95 MB) to enable semantic search',
   'knowledge.download_model_installed': ' (installed)',
-  'knowledge.download_model_retry_hint': 'Return to the menu and select Download vector model to retry. A proxy is recommended.',
+  'knowledge.embedding_platform_hint':
+    'No local model binary on this platform; keyword search still works',
+  'knowledge.embedding_cache_corrupt_hint':
+    'Corrupt model cache; cleared and retried, still failing — try again later',
+  'knowledge.embedding_network_hint':
+    'Return to the menu and retry the download; a proxy helps when the network is restricted.',
+  'knowledge.embedding_unknown_hint':
+    'Please retry; if it keeps failing, send us the error line below.',
   'knowledge.menu_title': 'SAG Knowledge Base',
   'knowledge.menu_hint': 'Select an action (Esc to exit)',
   'knowledge.op_failed': 'Operation failed: {msg}',
@@ -1396,7 +1403,7 @@ export const en: Record<string, string> = {
   // ─── Knowledge Web (in-browser) ────
   'kw.lang_toggle': '中文',
   'kw.embedding_downloading': 'Vector model downloading…',
-  'kw.embedding_failed': 'Vector model load failed. Return to the menu and select Download to retry.',
+  'kw.embedding_failed': 'Vector model load failed',
   'kw.embedding_ready': 'Vector model ready',
   'kw.embedding_not_downloaded': 'Vector model not downloaded (select Download vector model)',
   'kw.embedding_data_intact': ' — your knowledge data is still there; download the model to use it again',

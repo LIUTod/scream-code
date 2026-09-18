@@ -198,14 +198,84 @@ async function loadEmbedder(cacheDir?: string): Promise<FastembedModel | null> {
 }
 
 /**
- * Remove any previously downloaded model files for the fixed BGESmallZH model.
- * Called before a manual re-download so that a corrupted/partial cache does not
- * cause fastembed to fail repeatedly.
+ * Cache entry names fastembed uses for the fixed BGESmallZH model: it extracts
+ * into `<cacheDir>/<name>/` from the staged archive `<cacheDir>/<name>.tar.gz`.
+ */
+const BGESMALLZH_CACHE_NAME = 'fast-bge-small-zh-v1.5';
+
+/** Why a local embedding load failed, as far as the message can tell. */
+export type EmbeddingFailureKind = 'platform' | 'archive' | 'network' | 'other';
+
+// The shapes these failures arrive in, verified against the real errors:
+//   platform → "Cannot find module '@anush008/tokenizers-linux-arm64-gnu'"
+//              (the native tokenizer binding loads when fastembed is imported,
+//              so an unsupported platform/arch/libc fails before any I/O)
+//              …or the binding *is* installed but cannot be loaded: musl hosts
+//              loading a glibc build, an older glibc than the prebuilt needs, a
+//              wrong-architecture binary — all dlopen failures with these texts.
+//   archive  → "TAR_BAD_ARCHIVE: Unrecognized archive format" from a staged
+//              archive that is truncated or an HTML error page
+//   network  → transport errors, and an HTTP status when the downloader reports
+//              one instead of throwing a code (heuristic, but a status never
+//              shows up in a cache-path problem)
+const PLATFORM_FAILURE =
+  /@anush008\/tokenizers|Failed to load native binding|Unsupported (?:OS|platform|architecture)|ERR_DLOPEN_FAILED|invalid ELF header|Exec format error|is not a valid Win32 application|GLIBC_\d+[^"\n]*not found|Error loading shared library|cannot open shared object file/iu;
+const ARCHIVE_FAILURE = /\bTAR_[A-Z_]+|incorrect header check|unexpected end of file|invalid tar|zlib/iu;
+const NETWORK_FAILURE =
+  /\b(?:ENOTFOUND|EAI_AGAIN|ETIMEDOUT|ECONNRESET|ECONNREFUSED|EHOSTUNREACH|socket hang up|fetch failed)\b|network error|HTTP \d{3}/iu;
+
+/**
+ * Classify a load failure so callers can say something true about it: the four
+ * causes need four different answers (unsupported platform, corrupt cache,
+ * network, unknown), and they used to be reported as one network problem.
+ */
+export function classifyEmbeddingFailure(message: string | undefined): EmbeddingFailureKind {
+  if (message === undefined) return 'other';
+  if (PLATFORM_FAILURE.test(message)) return 'platform';
+  if (ARCHIVE_FAILURE.test(message)) return 'archive';
+  if (NETWORK_FAILURE.test(message)) return 'network';
+  return 'other';
+}
+
+/**
+ * Loads only the module entry point — no model download — so callers can tell
+ * "this machine cannot run the local model at all" apart from "the download
+ * failed". fastembed imports its native tokenizer binding at module scope, which
+ * is exactly the step a platform without a published binary cannot pass.
+ */
+export async function probeLocalEmbeddingSupport(): Promise<{ supported: boolean; error?: string }> {
+  try {
+    await import('fastembed');
+    return { supported: true };
+  } catch (error: unknown) {
+    return { supported: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+/**
+ * Remove every trace of a previous BGESmallZH download: the extracted model
+ * directory *and* the staged archive it came from.
+ *
+ * The archive has to go with it. fastembed skips the download whenever
+ * `<cacheDir>/<name>.tar.gz` exists, and it only deletes that file after a
+ * *successful* extract — its download error paths (response error, file stream
+ * error) reject and leave whatever was written behind. So an archive sitting
+ * next to a failed attempt is usually a partial leftover, and keeping it makes
+ * every retry extract the same junk locally: no network traffic, a few
+ * milliseconds, the same failure forever.
+ *
+ * Never throws: a file locked by another process (on Windows a mapped ONNX file
+ * stays locked) must not replace the download error the caller is reporting.
  */
 export function clearEmbeddingModelCache(cacheDir: string): void {
-  const modelDir = join(cacheDir, 'fast-bge-small-zh-v1.5');
-  if (existsSync(modelDir)) {
-    rmSync(modelDir, { recursive: true, force: true });
+  for (const name of [BGESMALLZH_CACHE_NAME, `${BGESMALLZH_CACHE_NAME}.tar.gz`]) {
+    const target = join(cacheDir, name);
+    if (!existsSync(target)) continue;
+    try {
+      rmSync(target, { recursive: true, force: true });
+    } catch {
+      // The next attempt retries the wipe; the caller keeps its own error.
+    }
   }
 }
 
