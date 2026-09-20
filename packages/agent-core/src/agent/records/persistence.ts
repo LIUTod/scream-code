@@ -9,7 +9,9 @@ import { AGENT_WIRE_PROTOCOL_VERSION } from './migration';
 import { type AgentRecord, type AgentRecordPersistence } from './types';
 
 /**
- * Record types whose state is fully captured by a `context.snapshot` record.
+ * Record types whose state is fully captured by — or has become unobservable
+ * behind — a `context.snapshot` record, so a copy of them that predates the
+ * last snapshot can be dropped without changing what a resume restores.
  * Canonical definition — records/index.ts imports it for the restore
  * fast-path. It also drives the parse-skipping fast path in `read()` below:
  * serialized lines of these types that predate the last snapshot are never
@@ -27,6 +29,18 @@ export const SNAPSHOT_FOLDED_CONTEXT_TYPES: ReadonlySet<string> = new Set([
   // letting resume-time compaction reclaim them physically — is what keeps a
   // long-lived wire bounded on disk.
   'request.header',
+  // NOTE: 'context.stream_draft' is deliberately NOT folded here. Folding a
+  // type drops every line of it that predates the last snapshot, but a turn's
+  // LAST draft can legitimately predate the last snapshot while still being the
+  // "incomplete reply" the replay window exists to surface (an aborted stream
+  // whose draft was never cleared, followed by a compaction). Dropping it would
+  // silently change what resume shows. Drafts are reclaimed by the dedicated
+  // per-turnId retention rule instead (keepLine / read() below), which keeps
+  // that last draft and drops only the intermediate ones — those are provably
+  // unobservable because restore replaces a turn's draft in place.
+  // Measurements (this repo's own wires): per-turn retention reclaims ~99.99%
+  // of the draft bytes; folding the whole type on top of it reclaims a further
+  // ~2 KB total, at the cost of the partial marker above.
 ]);
 
 /**
@@ -63,6 +77,49 @@ const SNAPSHOT_FOLDED_MAX_PREFIX_BYTES = SNAPSHOT_FOLDED_LINE_PREFIX_BYTES.reduc
   (longest, prefix) => Math.max(longest, prefix.length),
   0,
 );
+
+/**
+ * Every `context.stream_draft` line starts with this byte-exact prefix; the
+ * turnId value follows immediately. Drafts are throttled UI state (several per
+ * turn), so compaction keeps only the LAST draft per turnId — the earlier ones
+ * are overwritten in place by `replayBuilder.replacePartialDraft()` on resume
+ * and are therefore unobservable.
+ */
+const DRAFT_LINE_PREFIX = '{"type":"context.stream_draft","turnId":"';
+const DRAFT_LINE_PREFIX_BYTES = Buffer.from(DRAFT_LINE_PREFIX, 'utf8');
+/** TurnIds are generated ids (≤36 chars); scan a bounded window past the prefix. */
+const DRAFT_TURNID_MAX_CHARS = 72;
+/** Head bytes needed to classify a draft line (prefix + turnId + closing quote). */
+const DRAFT_HEAD_SCAN_BYTES = DRAFT_LINE_PREFIX_BYTES.length + DRAFT_TURNID_MAX_CHARS;
+/** Head buffer size for both streaming passes: classify folds AND draft turnIds. */
+const WIRE_HEAD_BYTES = Math.max(SNAPSHOT_FOLDED_MAX_PREFIX_BYTES, DRAFT_HEAD_SCAN_BYTES);
+
+/**
+ * Extract the turnId from a `context.stream_draft` line head.
+ *
+ * - `undefined`: the head does not start with the draft prefix (not a draft).
+ * - `null`: it IS a draft but the turnId cannot be classified within the
+ *   bounded head (empty id, escape sequence, or over-long id) — the line is
+ *   kept: never drop a line whose identity is uncertain.
+ * - a string: the turnId.
+ */
+function draftTurnIdFromHead(head: Buffer, headLength: number): string | null | undefined {
+  if (!headStartsWithPrefix(head, headLength, DRAFT_LINE_PREFIX_BYTES)) return undefined;
+  const from = DRAFT_LINE_PREFIX_BYTES.length;
+  for (let i = from; i < headLength; i++) {
+    const byte = head[i];
+    if (byte === 0x22) {
+      // Closing quote of the turnId value.
+      if (i === from) return null;
+      const raw = head.toString('utf8', from, i);
+      // Escaped quotes/backslashes would make the naive scan unreliable.
+      return raw.includes('\\') ? null : raw;
+    }
+  }
+  // Head exhausted without the closing quote: only possible while the line is
+  // still streaming (more bytes coming), or the id overflows the scan window.
+  return headLength >= WIRE_HEAD_BYTES ? null : undefined;
+}
 
 /** Bytes-level prefix test for a line head that may be shorter than the prefix. */
 function headStartsWithPrefix(head: Buffer, headLength: number, prefix: Buffer): boolean {
@@ -148,8 +205,22 @@ export class InMemoryAgentRecordPersistence implements AgentRecordPersistence {
         break;
       }
     }
+    // Mirror the file-backed reader's draft retention: only the LAST draft per
+    // turnId survives (restore replaces drafts per turnId in place, so earlier
+    // drafts are unobservable) — regardless of whether the wire has a snapshot.
+    const draftLastIndex = new Map<string, number>();
     for (let i = 0; i < this.records.length; i++) {
       const record = this.records[i]!;
+      if (record.type === 'context.stream_draft') draftLastIndex.set(record.turnId, i);
+    }
+    for (let i = 0; i < this.records.length; i++) {
+      const record = this.records[i]!;
+      if (
+        record.type === 'context.stream_draft' &&
+        draftLastIndex.get(record.turnId) !== i
+      ) {
+        continue;
+      }
       if (i < lastSnapshotIndex && SNAPSHOT_FOLDED_CONTEXT_TYPES.has(record.type)) {
         continue;
       }
@@ -222,8 +293,10 @@ export class FileSystemAgentRecordPersistence implements AgentRecordPersistence 
 
     const lastSnapshotLineNumber = await this.scanLastSnapshotLine(size);
     if (lastSnapshotLineNumber === undefined) return; // removed while reading
+    const draftLastLines = await this.scanDraftLastLines(size);
+    if (draftLastLines === undefined) return; // removed while reading
 
-    yield* this.streamRecords(size, lastSnapshotLineNumber);
+    yield* this.streamRecords(size, lastSnapshotLineNumber, draftLastLines);
   }
 
   /**
@@ -269,6 +342,72 @@ export class FileSystemAgentRecordPersistence implements AgentRecordPersistence 
   }
 
   /**
+   * Byte-level pass that maps every stream-draft turnId to the line number of
+   * its LAST draft. Together with the fold set this lets both read() and
+   * compact() reclaim a turn's earlier drafts: restore replaces drafts per
+   * turnId in place (ReplayBuilder.replacePartialDraft), so intermediate drafts
+   * are unobservable. Returns `undefined` when the file does not exist.
+   */
+  private async scanDraftLastLines(size: number): Promise<Map<string, number> | undefined> {
+    const head = Buffer.allocUnsafe(DRAFT_HEAD_SCAN_BYTES);
+    let headLength = 0;
+    let lineNumber = 0;
+    // Bytes of the line currently being scanned (views, no copy). Reset at each
+    // newline, so at most one line is ever held: that is what lets us validate
+    // the unterminated tail below without buffering the whole file.
+    let openLine: Buffer[] = [];
+    const lastLines = new Map<string, number>();
+    const stream = createReadStream(this.filePath, { end: size - 1 });
+    try {
+      for await (const chunk of stream as AsyncIterable<Buffer>) {
+        let searchFrom = 0;
+        for (;;) {
+          const newlineIndex = chunk.indexOf(0x0a, searchFrom);
+          const end = newlineIndex === -1 ? chunk.length : newlineIndex;
+          if (headLength < head.length && end > searchFrom) {
+            const take = Math.min(head.length - headLength, end - searchFrom);
+            chunk.copy(head, headLength, searchFrom, searchFrom + take);
+            headLength += take;
+          }
+          if (end > searchFrom) openLine.push(chunk.subarray(searchFrom, end));
+          if (newlineIndex === -1) break;
+          lineNumber++;
+          const turnId = draftTurnIdFromHead(head, headLength);
+          if (typeof turnId === 'string') lastLines.set(turnId, lineNumber);
+          headLength = 0;
+          openLine = [];
+          searchFrom = newlineIndex + 1;
+        }
+      }
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === 'ENOENT') return undefined;
+      throw error;
+    }
+    // An unterminated trailing line (no final newline) is classified by
+    // streamRecords()/copyRetainingLines() as line `lineNumber + 1`, so it has to
+    // be considered here too — otherwise a wire whose last line is a draft would
+    // treat the PREVIOUS draft of that turn as the last one. But the tail may be
+    // a torn write (crash mid-flush): registering a torn line would shadow the
+    // last COMPLETE draft of that turn and drop it, losing exactly the state
+    // this rule exists to keep. So only a tail that parses as a draft counts.
+    if (openLine.length > 0) {
+      const tail = Buffer.concat(openLine).toString('utf8');
+      try {
+        const parsed = JSON.parse(tail) as { type?: unknown; turnId?: unknown };
+        if (parsed.type === 'context.stream_draft' && typeof parsed.turnId === 'string') {
+          lastLines.set(parsed.turnId, lineNumber + 1);
+        }
+      } catch {
+        // Torn tail: leave it unregistered. The earlier complete draft of that
+        // turn becomes the "last" one and survives; the torn bytes yield no
+        // record either way (parseRecordLine returns undefined for them).
+      }
+    }
+    return lastLines;
+  }
+
+  /**
    * Streaming replay pass. Folded records predating the last snapshot are
    * dropped WITHOUT being decoded — the restore fast-path discards them anyway
    * (records/index.ts snapshot branch), so the yielded stream is identical to a
@@ -279,8 +418,9 @@ export class FileSystemAgentRecordPersistence implements AgentRecordPersistence 
   private async *streamRecords(
     size: number,
     lastSnapshotLineNumber: number,
+    draftLastLines: ReadonlyMap<string, number>,
   ): AsyncIterable<AgentRecord> {
-    const head = Buffer.allocUnsafe(SNAPSHOT_FOLDED_MAX_PREFIX_BYTES);
+    const head = Buffer.allocUnsafe(WIRE_HEAD_BYTES);
     let headLength = 0;
     // Buffers accumulated for the currently open line, in file order.
     let openChunks: Buffer[] = [];
@@ -297,12 +437,31 @@ export class FileSystemAgentRecordPersistence implements AgentRecordPersistence 
     const retainedLine = (): Buffer =>
       openChunks.length === 1 ? openChunks[0]! : Buffer.concat(openChunks);
 
-    const keepLine = (currentLine: number): boolean =>
-      !(
-        skipFoldedBeforeSnapshot &&
+    const keepLine = (currentLine: number): boolean => {
+      // Earlier drafts of a turn are unobservable on resume: restore replaces
+      // drafts per turnId in place (ReplayBuilder.replacePartialDraft), so only
+      // the LAST draft per turnId matters. This applies regardless of whether
+      // the wire has a snapshot — snapshot-less wires are the dominant shape.
+      // A draft whose turnId cannot be classified (null) is always kept.
+      // Nothing is skipped until the header has confirmed a same-version wire:
+      // migration must see every record, including drafts. This also keeps the
+      // file path aligned with InMemoryAgentRecordPersistence.read(), which
+      // yields the raw records verbatim on a version mismatch.
+      if (!skipFoldedBeforeSnapshot) return true;
+      if (headStartsWithPrefix(head, headLength, DRAFT_LINE_PREFIX_BYTES)) {
+        const turnId = draftTurnIdFromHead(head, headLength);
+        if (turnId !== null && turnId !== undefined && draftLastLines.get(turnId) !== currentLine) {
+          return false;
+        }
+      }
+      if (
         currentLine < lastSnapshotLineNumber &&
         headStartsWithAnyPrefix(head, headLength, SNAPSHOT_FOLDED_LINE_PREFIX_BYTES)
-      );
+      ) {
+        return false;
+      }
+      return true;
+    };
 
     const stream = createReadStream(this.filePath, { end: size - 1 });
     try {
@@ -312,12 +471,12 @@ export class FileSystemAgentRecordPersistence implements AgentRecordPersistence 
           const newlineIndex = chunk.indexOf(0x0a, searchFrom);
           const end = newlineIndex === -1 ? chunk.length : newlineIndex;
           if (!decided && end > searchFrom) {
-            const take = Math.min(SNAPSHOT_FOLDED_MAX_PREFIX_BYTES - headLength, end - searchFrom);
+            const take = Math.min(WIRE_HEAD_BYTES - headLength, end - searchFrom);
             chunk.copy(head, headLength, searchFrom, searchFrom + take);
             headLength += take;
             searchFrom += take;
             lineBytes += take;
-            if (headLength === SNAPSHOT_FOLDED_MAX_PREFIX_BYTES) {
+            if (headLength === WIRE_HEAD_BYTES) {
               decided = true;
               retaining = keepLine(lineNumber + 1);
               if (retaining) openChunks.push(Buffer.from(head));
@@ -421,11 +580,19 @@ export class FileSystemAgentRecordPersistence implements AgentRecordPersistence 
       if (size === undefined || size === 0) return;
       const lastSnapshotLineNumber = await this.scanLastSnapshotLine(size);
       if (lastSnapshotLineNumber === undefined) return;
+      const draftLastLines = await this.scanDraftLastLines(size);
+      if (draftLastLines === undefined) return;
       const directory = dirname(this.filePath);
       const tmp = await open(tmpPath, 'w');
       let written = 0;
       try {
-        written = await copyRetainingLines(this.filePath, tmp, size, lastSnapshotLineNumber);
+        written = await copyRetainingLines(
+          this.filePath,
+          tmp,
+          size,
+          lastSnapshotLineNumber,
+          draftLastLines,
+        );
         await tmp.sync();
       } finally {
         await tmp.close();
@@ -599,18 +766,19 @@ const MAX_WRITE_CHUNK_CHARS = 1_000_000;
 
 /**
  * Byte-preserving filter pass for compact(): copies every line that
- * streamRecords() would retain (same fold decision, same unterminated-tail
- * tolerance) into `out`, returning the number of bytes written. Kept in the
- * same shape as streamRecords() on purpose — the two must agree on which
- * lines survive; change both together.
+ * streamRecords() would retain (same fold decision, same per-turn draft
+ * retention, same unterminated-tail tolerance) into `out`, returning the
+ * number of bytes written. Kept in the same shape as streamRecords() on
+ * purpose — the two must agree on which lines survive; change both together.
  */
 async function copyRetainingLines(
   filePath: string,
   out: FileHandle,
   size: number,
   lastSnapshotLineNumber: number,
+  draftLastLines: ReadonlyMap<string, number>,
 ): Promise<number> {
-  const head = Buffer.allocUnsafe(SNAPSHOT_FOLDED_MAX_PREFIX_BYTES);
+  const head = Buffer.allocUnsafe(WIRE_HEAD_BYTES);
   let headLength = 0;
   let openChunks: Buffer[] = [];
   let decided = false;
@@ -620,12 +788,27 @@ async function copyRetainingLines(
   let lineNumber = 0;
   let written = 0;
 
-  const keepLine = (currentLine: number): boolean =>
-    !(
-      skipFoldedBeforeSnapshot &&
+  const keepLine = (currentLine: number): boolean => {
+    // Must mirror streamRecords(): nothing is skipped before the header has
+    // confirmed a same-version wire (migration sees every record), and beyond
+    // that only the last draft per turnId survives — earlier drafts of a turn
+    // are unobservable on resume (restore replaces drafts per turnId in place).
+    // Unclassifiable drafts (null) are kept.
+    if (!skipFoldedBeforeSnapshot) return true;
+    if (headStartsWithPrefix(head, headLength, DRAFT_LINE_PREFIX_BYTES)) {
+      const turnId = draftTurnIdFromHead(head, headLength);
+      if (turnId !== null && turnId !== undefined && draftLastLines.get(turnId) !== currentLine) {
+        return false;
+      }
+    }
+    if (
       currentLine < lastSnapshotLineNumber &&
       headStartsWithAnyPrefix(head, headLength, SNAPSHOT_FOLDED_LINE_PREFIX_BYTES)
-    );
+    ) {
+      return false;
+    }
+    return true;
+  };
 
   const writeRetainedLine = async (): Promise<void> => {
     const data = openChunks.length === 1 ? openChunks[0]! : Buffer.concat(openChunks);
@@ -642,11 +825,11 @@ async function copyRetainingLines(
       const newlineIndex = chunk.indexOf(0x0a, searchFrom);
       const end = newlineIndex === -1 ? chunk.length : newlineIndex;
       if (!decided && end > searchFrom) {
-        const take = Math.min(SNAPSHOT_FOLDED_MAX_PREFIX_BYTES - headLength, end - searchFrom);
+        const take = Math.min(WIRE_HEAD_BYTES - headLength, end - searchFrom);
         chunk.copy(head, headLength, searchFrom, searchFrom + take);
         headLength += take;
         searchFrom += take;
-        if (headLength === SNAPSHOT_FOLDED_MAX_PREFIX_BYTES) {
+        if (headLength === WIRE_HEAD_BYTES) {
           decided = true;
           retaining = keepLine(lineNumber + 1);
           if (retaining) openChunks.push(Buffer.from(head));
