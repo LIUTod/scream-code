@@ -213,3 +213,41 @@ describe('FileMentionProvider — @ prefix detection + git-backed suggestions', 
     expect(result).toBeNull();
   });
 });
+
+describe('FileMentionProvider — slash-command ranking', () => {
+  const commands = [
+    { value: 'skill:deep-research', label: 'deep-research', description: 'Multi-agent deep research' },
+    { value: 'skill:research-idea', label: 'research-idea', description: 'Refine a raw idea' },
+    { value: 'model', label: 'model', description: 'Select the active model' },
+  ];
+
+  async function suggestionsFor(provider: FileMentionProvider, prefix: string) {
+    const line = `/${prefix}`;
+    return provider.getSuggestions([line], 0, line.length, { signal: ctrl() });
+  }
+
+  it('ranks a skill by its bare name, not the "skill:" prefix', async () => {
+    const provider = new FileMentionProvider(commands, '/repo', NO_FD, stubGitCache([]));
+    const result = await suggestionsFor(provider, 'idea');
+    expect(result).not.toBeNull();
+    const values = (result?.items ?? []).map((item) => item.value);
+    // "research-idea" is the only entry whose BARE name matches "idea" in order;
+    // "deep-research" only matches when the scorer sees the "skill:" prefix.
+    expect(values[0]).toBe('skill:research-idea');
+    expect(values).not.toContain('skill:deep-research');
+  });
+
+  it('keeps ordinary slash commands matching', async () => {
+    const provider = new FileMentionProvider(commands, '/repo', NO_FD, stubGitCache([]));
+    const result = await suggestionsFor(provider, 'mod');
+    const values = (result?.items ?? []).map((item) => item.value);
+    expect(values).toContain('model');
+  });
+
+  it('keeps explicit "skill:" queries working (no double stripping)', async () => {
+    const provider = new FileMentionProvider(commands, '/repo', NO_FD, stubGitCache([]));
+    const result = await suggestionsFor(provider, 'skill:research');
+    const values = (result?.items ?? []).map((item) => item.value);
+    expect(values).toContain('skill:research-idea');
+  });
+});

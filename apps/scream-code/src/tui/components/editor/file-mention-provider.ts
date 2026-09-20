@@ -106,10 +106,11 @@ export class FileMentionProvider implements AutocompleteProvider {
       !textBeforeCursor.includes(' ')
     ) {
       const query = textBeforeCursor.slice(1);
-      const filtered = fuzzyFilter(this.slashCommandItems, query, (item) => item.value).slice(
-        0,
-        MAX_SUGGESTIONS_WHEN_QUERY,
-      );
+      const filtered = fuzzyFilter(this.slashCommandItems, query, (item) =>
+        !query.startsWith('skill:') && item.value.startsWith('skill:')
+          ? item.value.slice('skill:'.length)
+          : item.value,
+      ).slice(0, MAX_SUGGESTIONS_WHEN_QUERY);
       if (filtered.length === 0) return null;
       return { items: filtered, prefix: textBeforeCursor };
     }
