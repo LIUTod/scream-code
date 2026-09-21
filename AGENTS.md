@@ -532,7 +532,7 @@ Renders the user message with the roleUser theme background block; `/hl` toggles
 
 - **Entry**: `/hl` (alias: `highlight`) — `src/tui/commands/hl.ts` `toggleUserMessageHighlight` + `requestRender`
 - **Rendering**: `src/tui/components/messages/user-message.ts` — `<system-reminder>` prefixes are never highlighted; when enabled the whole row gets a `bgHex(roleUserBg)` background + contrast text (images go inside the block), when disabled only roleUser-colored text + ■ prefix; the cache is keyed by the toggle state
-- **Config**: `ui-preferences.ts` `userMessageHighlightEnabled` (default on); theme keys `roleUser`/`roleUserBg` (dark `#f7e308` / light `#bd5302`)
+- **Config**: `ui-preferences.ts` `userMessageHighlightEnabled` (default off; `/hl` turns it on); theme keys `roleUser`/`roleUserBg` (dark `#f7e308` / light `#bd5302`)
 
 ### Turn Elapsed Marker (`/snaptimer`)
 

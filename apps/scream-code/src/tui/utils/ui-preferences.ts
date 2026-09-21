@@ -154,16 +154,25 @@ export function toggleCodeBlockPanel(): boolean {
   return !enabled;
 }
 
-/** Whether user messages render with a highlight background block (default on). */
+/**
+ * Whether user messages render with a highlight background block.
+ *
+ * Default **off**: a fresh install (or one that never touched `/hl`) renders
+ * user messages plain. Only an explicit `true` from a previous `/hl` turns the
+ * block on, so an existing choice is honoured either way.
+ */
 export function isUserMessageHighlightEnabled(): boolean {
-  return readUiPreferences().userMessageHighlightEnabled !== false;
+  return readUiPreferences().userMessageHighlightEnabled === true;
 }
 
 /** Toggle the user-message highlight block via /hl. Returns the new state:
- *  true = highlighted, false = default (no background). Persisted immediately. */
+ *  true = highlighted, false = default (no background). Persisted immediately.
+ *  Reads the same default as `isUserMessageHighlightEnabled`, so the first
+ *  `/hl` on a fresh install turns the block on rather than writing `false`.
+ */
 export function toggleUserMessageHighlight(): boolean {
   const prefs = readUiPreferences();
-  const enabled = prefs.userMessageHighlightEnabled !== false;
+  const enabled = prefs.userMessageHighlightEnabled === true;
   prefs.userMessageHighlightEnabled = !enabled;
   writeUiPreferences(prefs);
   return !enabled;
