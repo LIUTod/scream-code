@@ -65,7 +65,7 @@ When Scream wants to modify files or run commands, an approval panel pops up —
 
 ### Slash Commands
 
-Type `/` in the input to browse. All 48 commands:
+Type `/` in the input to browse. All 54 commands:
 
 <details>
 <summary>Full command reference (click to expand)</summary>
@@ -114,6 +114,7 @@ Type `/` in the input to browse. All 48 commands:
 | **Extensions** | |
 | `/mcp` | Manage MCP servers |
 | `/plugin` (`/skills`, `/plugin`) | Skill center |
+| `/extension` | Code extensions: activate or deactivate a plugin entry point |
 | `/make-skill` | Distill the session into a Skill |
 | `/cc` | Control your cc daemon |
 | `/cc-connect` | cc-connect quick channel setup |
@@ -121,8 +122,13 @@ Type `/` in the input to browse. All 48 commands:
 | `/search` | Search the conversation (Esc to close) |
 | `/trace` | View the session working trajectory |
 | `/hl` (`/highlight`) | Toggle user-message highlight block |
+| `/blockrows` | Adjust activity block rows (collapsed height, tool-result rows, reasoning rows) |
+| `/codebg` | Toggle the background panel behind code blocks |
+| `/mermaid` | Choose how ```mermaid blocks render: drawn with box-drawing frames · the same drawing framed in ASCII (for terminals that render box glyphs two cells wide) · left as source |
 | `/snaptimer` (`/timer`) | Toggle per-turn elapsed timer |
+| `/sidebar` | Open/close the sidebar panel (`Ctrl+X`) |
 | `/tasks` (`/task`) | Browse background tasks |
+| `/cron` | View and manage scheduled tasks — list, create (pick a time + a task), delete |
 | `/like` | Set your preferences |
 | `/help` (`/h`) | Show commands and shortcuts |
 | `/exit` (`/quit`, `/q`) | Exit application |
