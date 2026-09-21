@@ -11,9 +11,9 @@ describe('globalPrefixForScream', () => {
   it('resolves the prefix from a user-global install path', () => {
     process.argv = [
       'node',
-      '/Users/tod/.npm-global/lib/node_modules/scream-code/dist/main.mjs',
+      '/Users/someone/.npm-global/lib/node_modules/scream-code/dist/main.mjs',
     ];
-    expect(globalPrefixForScream()).toBe('/Users/tod/.npm-global');
+    expect(globalPrefixForScream()).toBe('/Users/someone/.npm-global');
   });
 
   it('resolves the prefix from a system-global install path', () => {
@@ -25,7 +25,7 @@ describe('globalPrefixForScream', () => {
   });
 
   it('returns undefined for an unrecognized layout', () => {
-    process.argv = ['node', '/Users/tod/dev/scream-code/dist/main.mjs'];
+    process.argv = ['node', '/Users/someone/dev/scream-code/dist/main.mjs'];
     expect(globalPrefixForScream()).toBeUndefined();
   });
 
@@ -45,19 +45,19 @@ describe('installLatestArgs', () => {
   it('includes --prefix when the global prefix is resolvable', () => {
     process.argv = [
       'node',
-      '/Users/tod/.npm-global/lib/node_modules/scream-code/dist/main.mjs',
+      '/Users/someone/.npm-global/lib/node_modules/scream-code/dist/main.mjs',
     ];
     expect(installLatestArgs()).toEqual([
       'install',
       '-g',
       'scream-code@latest',
       '--prefix',
-      '/Users/tod/.npm-global',
+      '/Users/someone/.npm-global',
     ]);
   });
 
   it('omits --prefix for an unrecognized layout', () => {
-    process.argv = ['node', '/Users/tod/dev/scream-code/dist/main.mjs'];
+    process.argv = ['node', '/Users/someone/dev/scream-code/dist/main.mjs'];
     expect(installLatestArgs()).toEqual(['install', '-g', 'scream-code@latest']);
   });
 });

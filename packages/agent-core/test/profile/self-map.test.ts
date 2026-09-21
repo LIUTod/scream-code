@@ -106,14 +106,14 @@ describe('buildSelfMap', () => {
 
   it('handles Windows-style paths without breaking backtick pairing', () => {
     const map = buildSelfMap({
-      homeDir: 'C:\\Users\\tod\\.scream-code',
-      userHomeDir: 'C:\\Users\\tod',
+      homeDir: 'C:\\Users\\someone\\.scream-code',
+      userHomeDir: 'C:\\Users\\someone',
       cwd: 'C:\\work\\project',
     });
 
     // pathe normalizes Windows backslashes to forward slashes — the map
     // output stays valid on Windows (Node accepts forward-slash paths).
-    expect(map).toContain('C:/Users/tod/.scream-code/config.toml');
+    expect(map).toContain('C:/Users/someone/.scream-code/config.toml');
     expect(map).toContain('C:/work/project/.scream-code/mcp.json');
     const ticks = (map.match(/`/g) ?? []).length;
     expect(ticks % 2).toBe(0);

@@ -4,8 +4,8 @@ import path from 'node:path';
  * The npm global prefix the running Scream Code was installed into, derived
  * from the entry script path. Example:
  *
- *   /Users/tod/.npm-global/lib/node_modules/scream-code/dist/main.mjs
- *   → prefix /Users/tod/.npm-global
+ *   /Users/someone/.npm-global/lib/node_modules/scream-code/dist/main.mjs
+ *   → prefix /Users/someone/.npm-global
  *
  * `npm install -g` without `--prefix` uses the user's configured npm prefix,
  * which may point at a root-owned directory (e.g. /usr/local) and fail with

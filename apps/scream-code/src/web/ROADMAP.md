@@ -1,7 +1,7 @@
 # Scream Web UI 产品化迭代路线图
 
 > 状态：MVP 已上线（commit `615a3a0`）。本路线图把 `/web` 从"能跑"逐步迭代到可交付给普通用户使用的生产级产品。
-> 参考来源：`/Users/tod/Downloads/kimi-code-main`（kap-server + kimi-web）。
+> 设计参考：同类产品 CLI 的本地快照（仅作交互与架构对照，未直接引用其代码）。
 
 ## 1. 现状
 
@@ -21,7 +21,7 @@
 - 无 REST：所有交互挤在 WS 里，审批无法幂等和审计。
 - 无会话持久化：server 重启 = 任务归零。
 
-## 2. 从 kimi 借鉴的核心原则
+## 2. 从参考实现借鉴的核心原则
 
 1. **WS/REST 双通道**：WS 只传事件/流式 delta；REST 负责状态变更、审批、上传、配置。
 2. **seq + epoch + journal 做断线恢复**：服务端为每个 session 维护 append-only event journal；客户端保存 `lastSeq` 和 `epoch`；重连时增量 replay，超范围回退 snapshot。
@@ -76,7 +76,7 @@
 
 ### Phase 2：体验升级（前端框架 + 渲染 + 历史） ✅ 已完成
 
-**目标**：普通用户愿意用，视觉和交互接近 kimi / ChatGPT。
+**目标**：普通用户愿意用，视觉和交互达到主流商业助手的水平。
 
 **关键改动**（已实现）：
 
@@ -350,7 +350,7 @@ interface SessionStatus {
 | **P2** | 折叠按钮 `aria-expanded` 写死 `"false"` | 模板硬编码 | 改绑 `!collapsed`，实测展开态返回 `true` |
 | **P2** | 移动端抽屉实例也渲染折叠按钮，点击会翻动桌面端专属 grid 轨道并写 localStorage | 组件复用未区分场景 | 新增 `showCollapseToggle`（默认 true），移动端传 false |
 | **P3** | `suspended` 工具被 `aggregateStatus` 归为 ok → 挂起调用显示绿点 + "已完成 N 项" | 聚合函数未覆盖该分支 | 加 `suspended` 优先级 + 橙色点 + "含挂起等待" |
-| 卫生 | 源码注释里出现外部项目名 3 处（其中 2 处是我这几轮写的） | `grep 参考实现` | 全部改为中性描述，代码内已 0 命中（`ROADMAP.md` 作为规划文档仍保留该词，如需一并清可说） |
+| 卫生 | 源码注释里出现外部项目名 3 处（其中 2 处是我这几轮写的） | `grep 参考实现` | 全部改为中性描述，代码内已 0 命中；本文件内的署名随后一并清理，全仓 0 命中 |
 
 **发布门禁实测**：`pnpm typecheck` 0 错误 · `pnpm web:typecheck` 0 错误 · 全量 `vitest run` **1307 passed / 4 skipped（146 文件）** · `pnpm build` 通过 · `dist/public` 3.5M / assets 10 个（清理脚本生效，无陈旧 hash）· 冒烟：index/sessions/git-status 200、`git/diff` 正常、越界 403。
 **注意**：仓库**无 lint 脚本**（`package.json` 未配置），代码风格仅靠 typecheck 兜底。

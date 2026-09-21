@@ -23,7 +23,7 @@ function makeAgent(id: string, description: string, activity: string): ToolCallC
 }
 
 const WOLFPACK_DESC =
-  '并行整理明朝奇闻趣事: /Users/tod/Desktop/明朝奇闻-宫廷秘闻 ::\n宫廷秘闻（皇帝后宫、朝堂内幕、皇家怪事）';
+  '并行整理明朝奇闻趣事: /Users/someone/Desktop/明朝奇闻-宫廷秘闻 ::\n宫廷秘闻（皇帝后宫、朝堂内幕、皇家怪事）';
 const LONG_ACTIVITY =
   "4. Search the web for at least 8 real, documented Ming Dynasty anecdotes about " +
   "imperial palace secrets (emperors' harem, court)";
