@@ -10,16 +10,17 @@
  * collapsed into a single delivery with `coalescedCount`). Tasks do
  * NOT carry over into a brand-new session.
  *
- * The tool itself is pure validation + bookkeeping; the firing /
- * coalesce / jitter logic lives in `CronScheduler` (one layer below)
- * and `CronManager` (one layer up). This file only knows how to:
+ * The tool is a shell around the rules: every gate it applies lives in
+ * `./schedule` (`validateCronSchedule` / `scheduleCronTask`), shared with the
+ * `/cron` command path so both enforce exactly the same ones. The firing /
+ * coalesce / jitter logic lives in `CronScheduler` (one layer below) and
+ * `CronManager` (one layer up). This file only knows how to:
  *
- *   1. validate the request (killswitch, cron parse, 5-year window,
- *      session cap, byte-length cap);
- *   2. add it to the manager (which writes through to disk on success);
+ *   1. validate the request via `validateCronSchedule`;
+ *   2. add it to the manager via `scheduleCronTask` (which mirrors every
+ *      store mutation to disk);
  *   3. report back the post-jitter `nextFireAt` and a human-readable
- *      schedule for the model's benefit;
- *   4. mirror every store mutation to disk via the manager.
+ *      schedule for the model's benefit.
  */
 
 import { z } from 'zod';
@@ -29,51 +30,18 @@ import type { CronManager } from '../../agent/cron';
 import type { ToolExecution } from '../../loop/types';
 import { toInputJsonSchema } from '../support/input-schema';
 import { literalRulePattern } from '../support/rule-match';
-import {
-  computeNextCronRun,
-  cronToHuman,
-  hasFireWithinYears,
-  parseCronExpression,
-  type ParsedCronExpression,
-} from './cron-expr';
-import {
-  jitteredNextCronRunMs,
-  oneShotJitteredNextCronRunMs,
-} from './jitter';
+import { cronToHuman } from './cron-expr';
+import { MAX_PROMPT_BYTES, scheduleCronTask, validateCronSchedule } from './schedule';
 import CRON_CREATE_DESCRIPTION from './cron-create.md';
 
 // ── Constants ────────────────────────────────────────────────────────
 
 /**
- * Session-level cap on the number of live cron tasks. Exported so tests
- * can pre-fill the store without re-deriving the magic number.
+ * Session-level cap on the number of live cron tasks. The rule itself lives in
+ * `./schedule`; re-exported here because callers (tests included) import it
+ * from this module.
  */
-export const MAX_CRON_JOBS_PER_SESSION = 50;
-
-/**
- * Hard ceiling on `prompt` byte length (UTF-8). The zod `.max(...)`
- * upstream is in code units, which underflows multi-byte input
- * (`'汉'.length === 1` even though it is 3 bytes); we re-check using
- * `Buffer.byteLength` so the budget reflects the actual on-the-wire
- * size the model will eventually see.
- */
-const MAX_PROMPT_BYTES = 8 * 1024;
-
-/**
- * Maximum forward distance allowed for a one-shot (`recurring: false`)
- * cron's first fire. The canonical footgun is following the tool docs
- * and pinning today's day/month for a "remind me at X today"
- * reminder — if submission lands seconds past the target minute,
- * `computeNextCronRun` rolls the match to next year (~365 days),
- * which is still inside the 5-year `hasFireWithinYears` window, and
- * the user gets a year-late notification instead of an error. 350
- * days is tight enough to catch the rollover (365 ± epsilon) while
- * still leaving room for legitimate "schedule for late this year"
- * pinning from early-year submissions. A user who genuinely wants a
- * one-shot 11+ months out is better served by a natural-language
- * date in the prompt body than by stretching the cron field semantics.
- */
-const ONE_SHOT_MAX_FUTURE_MS = 350 * 24 * 60 * 60 * 1000;
+export { MAX_CRON_JOBS_PER_SESSION } from './schedule';
 
 // ── Input schema ─────────────────────────────────────────────────────
 
@@ -121,119 +89,34 @@ export class CronCreateTool implements BuiltinTool<CronCreateInput> {
   constructor(private readonly manager: CronManager) {}
 
   resolveExecution(args: CronCreateInput): ToolExecution {
-    // 1. Global killswitch — checked first so a flipped env stops all
-    //    further work, including the cron parse which can throw on
-    //    legitimately-malformed input.
-    if (process.env['SCREAM_DISABLE_CRON'] === '1') {
+    // The schema declares `recurring` with `.default(true)`, but the args
+    // validator is AJV without `useDefaults`, so an omitted field really does
+    // arrive as `undefined`. Resolve it once, here at the boundary, so the
+    // gates, the approval literal, the reported output and the stored task all
+    // see the boolean the schema promises.
+    //
+    // Deliberate tightening of the pre-extraction behaviour: that code fed
+    // `undefined` straight through, so an omitted flag was labelled "one-shot",
+    // dropped the key from the approval literal, ran the one-shot rollover
+    // guard and printed `recurring: undefined` to the model — while storing a
+    // task that repeats. A repeating request could therefore be refused as a
+    // mis-scheduled one-shot.
+    const input = { ...args, recurring: args.recurring !== false };
+    // Killswitch, parse, 5-year window, session cap, byte budget and the
+    // one-shot rollover guard all run in `validateCronSchedule`; the same
+    // function backs the `/cron` command, so neither path can drift.
+    const accepted = validateCronSchedule(this.manager, input);
+    if (!accepted.ok) {
       return {
         isError: true,
-        output: 'Cron scheduling is disabled (SCREAM_DISABLE_CRON=1).',
+        output: accepted.error,
       };
-    }
-
-    // 2. Normalize whitespace BEFORE parsing so `parsed.raw` (which
-    //    `cronToHuman` falls back to for non-template shapes) is the
-    //    single-line form. Otherwise tabs/newlines from the raw input
-    //    leak into the rendered `humanSchedule:` row and break the
-    //    one-key-per-line tool output format. Parse errors still report
-    //    against canonical field positions; only whitespace is
-    //    degraded, not semantics.
-    const normalizedCron = args.cron.trim().split(/\s+/).join(' ');
-
-    // 3. Parse the cron expression. Any parse failure is a user error
-    //    rather than an internal one, so we surface the message
-    //    verbatim — the parser is already careful to name the
-    //    offending field.
-    let parsed: ParsedCronExpression;
-    try {
-      parsed = parseCronExpression(normalizedCron);
-    } catch (error) {
-      return {
-        isError: true,
-        output: `Invalid cron expression: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      };
-    }
-
-    // 4. Reject "legal but never fires within 5 years" — the same
-    //    bound the scheduler uses internally to refuse to spin.
-    //    `0 0 31 2 *` is the canonical example. The exact `nowMs` does
-    //    not matter for this judgment (it only changes the search
-    //    window by < 5 years), so we read it here at prepare time and
-    //    re-read inside `execute()` for the actual schedule anchor.
-    const nowAtPrepare = this.manager.clocks.wallNow();
-    if (!hasFireWithinYears(parsed, 5, nowAtPrepare)) {
-      return {
-        isError: true,
-        output: `Cron expression ${JSON.stringify(
-          normalizedCron,
-        )} has no fire within 5 years; refusing to schedule.`,
-      };
-    }
-
-    // 5. Session-level cap — preliminary check. We re-check inside
-    //    `execute()` because manual-approval mode can delay execution
-    //    long enough for parallel CronCreate calls to all pass this
-    //    gate and then collectively breach the cap on insert.
-    if (this.manager.store.list().length >= MAX_CRON_JOBS_PER_SESSION) {
-      return {
-        isError: true,
-        output: `Cron job cap reached (max ${String(
-          MAX_CRON_JOBS_PER_SESSION,
-        )} per session).`,
-      };
-    }
-
-    // 6. Byte-length cap. zod's `.max()` counts code units, which is
-    //    not the budget we actually want for a multi-byte prompt; the
-    //    Buffer.byteLength check makes the 8 KiB intent literal.
-    const byteLen = Buffer.byteLength(args.prompt, 'utf8');
-    if (byteLen > MAX_PROMPT_BYTES) {
-      return {
-        isError: true,
-        output: `Prompt exceeds ${String(
-          MAX_PROMPT_BYTES,
-        )} bytes (got ${String(byteLen)}).`,
-      };
-    }
-
-    // `recurring` is defaulted to true upstream; we re-derive the
-    // boolean (rather than trusting the post-default arg) to match the
-    // canonical "recurring iff not explicitly false" convention used
-    // everywhere else in the cron stack.
-    const recurring =  args.recurring;
-
-    // 7. One-shot "rolled to next year" guard. The tool docs recommend
-    //    pinning today's dom/month for "remind me at X today"; if
-    //    submission lands seconds past the target minute,
-    //    `computeNextCronRun` returns next year's match, the 5-year
-    //    window above accepts it, and the user's reminder fires a
-    //    year late. Reject when the first ideal fire is more than
-    //    ~one year out — for a 5-field cron this can only mean the
-    //    pinned date already passed this year. Recurring tasks are
-    //    unaffected; they re-fire as expected.
-    if (!recurring) {
-      const firstFire = computeNextCronRun(parsed, nowAtPrepare);
-      if (
-        firstFire !== null &&
-        firstFire - nowAtPrepare > ONE_SHOT_MAX_FUTURE_MS
-      ) {
-        return {
-          isError: true,
-          output: `One-shot cron ${JSON.stringify(
-            normalizedCron,
-          )} would not fire until ${new Date(
-            firstFire,
-          ).toISOString()} (more than a year out). If you meant "today" or a near date, the pinned day/month has already passed this year — pick a future date or use wildcards.`,
-        };
-      }
     }
 
     return {
-      description: recurring
-        ? `Scheduling cron ${normalizedCron}`
-        : `Scheduling one-shot ${normalizedCron}`,
+      description: accepted.recurring
+        ? `Scheduling cron ${accepted.normalizedCron}`
+        : `Scheduling one-shot ${accepted.normalizedCron}`,
       // Scope `session` approval to this exact payload. Without the
       // payload in the rule, a single approved CronCreate would
       // authorize any future scheduled prompt for the rest of the
@@ -243,64 +126,35 @@ export class CronCreateTool implements BuiltinTool<CronCreateInput> {
       approvalRule: literalRulePattern(
         this.name,
         JSON.stringify({
-          cron: normalizedCron,
-          prompt: args.prompt,
-          recurring,
+          cron: accepted.normalizedCron,
+          prompt: input.prompt,
+          recurring: accepted.recurring,
         }),
       ),
       execute: async () => {
-        // Anchor the schedule to the moment of execution, not the
-        // moment of preparation. Manual-approval mode can leave
-        // resolveExecution() and execute() minutes apart; inserting
-        // with a stale `nowMs` would let the scheduler treat a fresh
-        // one-shot as already overdue and fire it on the next tick
-        // with a phantom `coalescedCount > 1`.
-        const nowMs = this.manager.clocks.wallNow();
-
-        // Re-check the session cap against the live store size so two
-        // concurrently-prepared CronCreate calls cannot collectively
-        // breach it after both passed the prepare-time check.
-        if (this.manager.store.list().length >= MAX_CRON_JOBS_PER_SESSION) {
+        // Cap re-check against the live store, insert, and the post-jitter
+        // next-fire anchor all live in `scheduleCronTask`; it reads the clock
+        // itself so an approval delay cannot backdate the schedule.
+        const created = scheduleCronTask(this.manager, accepted, input);
+        if (!created.ok) {
           return {
             isError: true,
-            output: `Cron job cap reached (max ${String(
-              MAX_CRON_JOBS_PER_SESSION,
-            )} per session).`,
+            output: created.error,
           };
         }
 
-        const task = this.manager.addTask({
-          cron: normalizedCron,
-          prompt: args.prompt,
-          recurring,
-        });
-
-        // Post-jitter next-fire for the response. `computeNextCronRun`
-        // returns `null` if there's no fire in the 5-year window (we
-        // already rejected that above, but be defensive — the jitter
-        // helper would then have nothing to shift).
-        const ideal = computeNextCronRun(parsed, nowMs);
-        const nextFireAt =
-          ideal === null
-            ? null
-            : recurring
-              ? jitteredNextCronRunMs(task, parsed, ideal)
-              : oneShotJitteredNextCronRunMs(task, ideal);
-
-        const humanSchedule = cronToHuman(parsed);
-
         const output: CronCreateOutput = {
-          id: task.id,
-          cron: normalizedCron,
-          humanSchedule,
-          recurring,
-          nextFireAt,
+          id: created.task.id,
+          cron: created.normalizedCron,
+          humanSchedule: cronToHuman(accepted.parsed),
+          recurring: created.recurring,
+          nextFireAt: created.nextFireAt,
         };
 
         return {
           output: formatOutput(output),
           isError: false,
-          message: `Scheduled cron ${task.id}`,
+          message: `Scheduled cron ${created.task.id}`,
         };
       },
     };

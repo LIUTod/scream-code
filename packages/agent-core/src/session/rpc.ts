@@ -6,6 +6,8 @@ import type {
   CancelPayload,
   CancelPlanPayload,
   EmptyPayload,
+  CreateCronTaskPayload,
+  RemoveCronTasksPayload,
   EnterPlanPayload,
   SetPlanStrategyPayload,
   GetBackgroundOutputPathPayload,
@@ -264,6 +266,18 @@ export class SessionAPIImpl implements PromisableMethods<SessionAPI> {
 
   getBackground({ agentId, ...payload }: AgentScopedPayload<GetBackgroundPayload>) {
     return this.getAgent(agentId).getBackground(payload);
+  }
+
+  listCronTasks({ agentId, ...payload }: AgentScopedPayload<EmptyPayload>) {
+    return this.getAgent(agentId).listCronTasks(payload);
+  }
+
+  createCronTask({ agentId, ...payload }: AgentScopedPayload<CreateCronTaskPayload>) {
+    return this.getAgent(agentId).createCronTask(payload);
+  }
+
+  removeCronTasks({ agentId, ...payload }: AgentScopedPayload<RemoveCronTasksPayload>) {
+    return this.getAgent(agentId).removeCronTasks(payload);
   }
 
   extractMemoriesOnExit({ agentId, ...payload }: AgentScopedPayload<EmptyPayload>) {

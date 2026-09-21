@@ -253,6 +253,31 @@ export interface McpStartupMetrics {
   readonly durationMs: number;
 }
 
+export interface CronTaskInfo {
+  readonly id: string;
+  /** Verbatim 5-field expression, exactly as stored. */
+  readonly cron: string;
+  readonly prompt: string;
+  readonly createdAt: number;
+  /** `true` unless the task was explicitly created with `recurring: false`. */
+  readonly recurring: boolean;
+  /** Mirrors `CronManager.isStale`: recurring and past the 7-day cutoff. */
+  readonly stale: boolean;
+  readonly lastFiredAt?: number | undefined;
+  /** Post-jitter next fire, or `null` when nothing fires within 5 years. */
+  readonly nextFireAt: number | null;
+}
+
+export interface CreateCronTaskPayload {
+  readonly cron: string;
+  readonly prompt: string;
+  readonly recurring?: boolean | undefined;
+}
+
+export interface RemoveCronTasksPayload {
+  readonly ids: readonly string[];
+}
+
 export interface ReconnectMcpServerPayload {
   readonly name: string;
 }
@@ -417,6 +442,10 @@ export interface AgentAPI {
   getUsage: (payload: EmptyPayload) => UsageStatus;
   getTools: (payload: EmptyPayload) => readonly ToolInfo[];
   getBackground: (payload: GetBackgroundPayload) => readonly BackgroundTaskInfo[];
+  listCronTasks: (payload: EmptyPayload) => readonly CronTaskInfo[];
+  createCronTask: (payload: CreateCronTaskPayload) => CronTaskInfo;
+  /** Returns the ids that were actually present, matching `CronManager.removeTasks`. */
+  removeCronTasks: (payload: RemoveCronTasksPayload) => readonly string[];
   extractMemoriesOnExit: (payload: EmptyPayload) => Promise<number>;
   sideQuestion: (payload: SideQuestionPayload) => Promise<SideQuestionResult>;
   generateText: (payload: GenerateTextPayload) => Promise<GenerateTextResult>;

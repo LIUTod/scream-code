@@ -5,7 +5,7 @@ import { basename, dirname, join } from 'pathe';
 import { ErrorCodes, ScreamError, makeErrorPayload } from '#/errors';
 import { log } from '#/logging/logger';
 import type { Logger } from '#/logging/types';
-import type { AgentAPI, AgentEvent, ScreamConfig, SDKAgentRPC, UsageStatus } from '#/rpc';
+import type { AgentAPI, AgentEvent, CronTaskInfo, ScreamConfig, SDKAgentRPC, UsageStatus } from '#/rpc';
 import {
   generate,
   isRetryableGenerateError,
@@ -69,6 +69,8 @@ import { UsageRecorder } from './usage';
 import { resolveCompletionBudget } from '../utils/completion-budget';
 import type { Jian } from '@scream-code/jian';
 import type { ToolServices } from '../tools/support/services';
+import { scheduleCronTask, validateCronSchedule } from '../tools/cron/schedule';
+import type { CronTask } from '../tools/cron/types';
 
 export type { AgentRecord, AgentRecordPersistence } from './records';
 export { REPLAY_TURN_LIMIT } from './replay';
@@ -673,6 +675,40 @@ export class Agent {
     return result;
   }
 
+  /**
+   * The cron manager is null for sub agents (see the field initializer), so
+   * every cron entry point funnels through here — same shape as the
+   * `skills === null` guard in `activateSkill`.
+   */
+  private requireCron(): CronManager {
+    if (this.cron === null) {
+      throw new ScreamError(
+        ErrorCodes.CRON_UNAVAILABLE,
+        'Cron scheduling is not available for this agent',
+      );
+    }
+    return this.cron;
+  }
+
+  /** Shape one stored task for the wire; `nextFireAt` is re-queried unless given. */
+  private cronTaskInfo(
+    manager: CronManager,
+    task: CronTask,
+    nextFireAt?: number | null,
+  ): CronTaskInfo {
+    return {
+      id: task.id,
+      cron: task.cron,
+      prompt: task.prompt,
+      createdAt: task.createdAt,
+      recurring: task.recurring !== false,
+      stale: manager.isStale(task),
+      lastFiredAt: task.lastFiredAt,
+      nextFireAt:
+        nextFireAt === undefined ? manager.getNextFireForTask(task.id) : nextFireAt,
+    };
+  }
+
   get rpcMethods(): PromisableMethods<AgentAPI> {
     return {
       prompt: (payload) => {
@@ -767,6 +803,26 @@ export class Agent {
       getUsage: () => this.usage.data(),
       getTools: () => this.tools.data(),
       getBackground: (payload) => this.background.list(payload.activeOnly ?? false, payload.limit),
+      listCronTasks: () => {
+        const manager = this.requireCron();
+        return manager.store.list().map((task) => this.cronTaskInfo(manager, task));
+      },
+      createCronTask: (payload) => {
+        // Same gates as the model-facing CronCreate tool (see
+        // tools/cron/schedule.ts); a rejection surfaces the tool's exact
+        // sentence as the error message.
+        const manager = this.requireCron();
+        const accepted = validateCronSchedule(manager, payload);
+        if (!accepted.ok) {
+          throw new ScreamError(ErrorCodes.CRON_INVALID, accepted.error);
+        }
+        const created = scheduleCronTask(manager, accepted, payload);
+        if (!created.ok) {
+          throw new ScreamError(ErrorCodes.CRON_INVALID, created.error);
+        }
+        return this.cronTaskInfo(manager, created.task, created.nextFireAt);
+      },
+      removeCronTasks: (payload) => this.requireCron().removeTasks(payload.ids),
       extractMemoriesOnExit: async () => {
         return this.extractMemoriesOnExit();
       },

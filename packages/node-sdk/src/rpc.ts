@@ -145,6 +145,16 @@ export interface SetGoalBudgetRpcInput extends SessionIdRpcInput {
   readonly unit: 'turns' | 'tokens' | 'milliseconds' | 'seconds' | 'minutes' | 'hours';
 }
 
+export interface CreateCronTaskRpcInput extends SessionIdRpcInput {
+  readonly cron: string;
+  readonly prompt: string;
+  readonly recurring?: boolean | undefined;
+}
+
+export interface RemoveCronTasksRpcInput extends SessionIdRpcInput {
+  readonly ids: readonly string[];
+}
+
 export interface ReconnectMcpServerRpcInput extends SessionIdRpcInput {
   readonly name: string;
 }
@@ -399,6 +409,34 @@ export class SDKRpcClient {
     return rpc.getTodos({
       sessionId: input.sessionId,
       agentId: this.interactiveAgentId,
+    });
+  }
+
+  async listCronTasks(input: SessionIdRpcInput): Promise<readonly import('@scream-code/agent-core').CronTaskInfo[]> {
+    const rpc = await this.getRpc();
+    return rpc.listCronTasks({
+      sessionId: input.sessionId,
+      agentId: this.interactiveAgentId,
+    });
+  }
+
+  async createCronTask(input: CreateCronTaskRpcInput): Promise<import('@scream-code/agent-core').CronTaskInfo> {
+    const rpc = await this.getRpc();
+    return rpc.createCronTask({
+      sessionId: input.sessionId,
+      agentId: this.interactiveAgentId,
+      cron: input.cron,
+      prompt: input.prompt,
+      recurring: input.recurring,
+    });
+  }
+
+  async removeCronTasks(input: RemoveCronTasksRpcInput): Promise<readonly string[]> {
+    const rpc = await this.getRpc();
+    return rpc.removeCronTasks({
+      sessionId: input.sessionId,
+      agentId: this.interactiveAgentId,
+      ids: input.ids,
     });
   }
 

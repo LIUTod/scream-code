@@ -1,10 +1,11 @@
 import { ErrorCodes, ScreamError, type AgentContextData, type ScreamErrorCode } from '@scream-code/agent-core';
 import { type ApprovalHandler, type Event, type QuestionHandler } from '#/events';
 import type { PluginExtensionSummary } from '@scream-code/agent-core';
-import type { SDKRpcClient } from '#/rpc';
+import type { CreateCronTaskRpcInput, SDKRpcClient } from '#/rpc';
 import type {
   BackgroundTaskInfo,
   CompactOptions,
+  CronTaskInfo,
   GetGoalResult,
   GoalSnapshotData,
   TodoItem,
@@ -538,6 +539,21 @@ export class Session {
   async getTodos(): Promise<readonly TodoItem[]> {
     this.ensureOpen();
     return this.rpc.getTodos({ sessionId: this.id });
+  }
+
+  async listCronTasks(): Promise<readonly CronTaskInfo[]> {
+    this.ensureOpen();
+    return this.rpc.listCronTasks({ sessionId: this.id });
+  }
+
+  async createCronTask(input: Omit<CreateCronTaskRpcInput, 'sessionId'>): Promise<CronTaskInfo> {
+    this.ensureOpen();
+    return this.rpc.createCronTask({ sessionId: this.id, ...input });
+  }
+
+  async removeCronTasks(ids: readonly string[]): Promise<readonly string[]> {
+    this.ensureOpen();
+    return this.rpc.removeCronTasks({ sessionId: this.id, ids });
   }
 
   async setGoalBudget(value: number, unit: 'turns' | 'tokens' | 'milliseconds' | 'seconds' | 'minutes' | 'hours'): Promise<GoalSnapshotData> {

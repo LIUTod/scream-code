@@ -65,6 +65,8 @@ import type {
   CreateSessionPayload,
   DeleteSessionPayload,
   EmptyPayload,
+  CreateCronTaskPayload,
+  RemoveCronTasksPayload,
   ExportSessionPayload,
   ExportSessionResult,
   ForkSessionPayload,
@@ -805,6 +807,18 @@ export class ScreamCore implements PromisableMethods<CoreAPI> {
 
   getBackground({ sessionId, ...payload }: SessionAgentPayload<GetBackgroundPayload>) {
     return this.sessionApi(sessionId).getBackground(payload);
+  }
+
+  listCronTasks({ sessionId, ...payload }: SessionAgentPayload<EmptyPayload>) {
+    return this.sessionApi(sessionId).listCronTasks(payload);
+  }
+
+  createCronTask({ sessionId, ...payload }: SessionAgentPayload<CreateCronTaskPayload>) {
+    return this.sessionApi(sessionId).createCronTask(payload);
+  }
+
+  removeCronTasks({ sessionId, ...payload }: SessionAgentPayload<RemoveCronTasksPayload>) {
+    return this.sessionApi(sessionId).removeCronTasks(payload);
   }
 
   extractMemoriesOnExit({ sessionId, ...payload }: SessionAgentPayload<EmptyPayload>) {

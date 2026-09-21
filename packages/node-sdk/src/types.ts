@@ -19,6 +19,7 @@ export type {
   BackgroundTaskKind,
   BackgroundTaskStatus,
   ContextMessage,
+  CronTaskInfo,
   ExportSessionManifest,
   ScreamConfig,
   ScreamConfigPatch,

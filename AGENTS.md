@@ -628,6 +628,20 @@ reply read worse than before it existed.
   the npm port has neither wrapping nor width-aware layout (measured: `<br/>` has
   no effect and long labels are truncated) — it would mean writing a layout engine
 
+### Scheduled Tasks (`/cron`)
+
+Scheduled tasks were a model-only capability for a long time: `CronCreate` / `CronList` / `CronDelete` are registered for the agent and the scheduler plus on-disk store behind them are complete, but there was **no user-facing surface at all** — a task became visible only as the message it injected when it fired, and neither the list, the next fire time nor a delete path existed for the user. `/cron` closes that gap.
+
+- **Entry**: `/cron` (alias: `crontab`) — `src/tui/commands/cron.ts` `handleCronCommand`. Bare `/cron` or `list` opens the picker panel (`ChoicePickerComponent`); `add` jumps straight to the wizard; `rm <id>` deletes without a panel. Rows show the expression as the label and `schedule · next fire · once/repeating · expired · prompt preview` as the description, `d` deletes behind a confirm panel, and an empty list renders one create row so the panel is never a dead end
+- **Create wizard**: schedule presets → type the task → once/repeating. Presets are `*/5 * * * *`, hourly, daily 09:00, daily 18:00, weekdays 09:00, plus a raw-expression step. Nothing is validated in the TUI: the core's message is shown verbatim, so there is one wording for one rule
+- **RPC chain**: `rpc/core-api.ts` (`AgentAPI`: `listCronTasks` / `createCronTask` / `removeCronTasks` + the `CronTaskInfo` DTO) → `agent/index.ts` `rpcMethods` (implemented where the manager lives, beside the `requireCron` guard) → `session/rpc.ts` and `rpc/core-impl.ts` forwarders → node-sdk `rpc.ts` + `session.ts` → TUI. The methods are **agent-scoped, not session-scoped**: `Agent.cron` is `null` for sub agents, which throws `cron.unavailable` (mirrors the `skills === null` guard in `activateSkill`)
+- **One set of rules**: `tools/cron/schedule.ts` holds every create gate (`validateCronSchedule` for killswitch / parse / 5-year window / session cap / byte budget / one-shot rollover, `scheduleCronTask` for the re-check plus insert), and both callers go through it — `CronCreateTool` maps a failure onto `{isError, output}`, the RPC path throws `cron.invalid` carrying the same string. `test/tools/cron/schedule.test.ts` asserts the two paths reject with the *identical* sentence; that assertion is what keeps the model's rules and the user's rules from drifting apart
+- **No approval gate on the command path**: the wizard and the delete confirmation are the user's own consent. The tool's literal approval rule stays as-is for model-initiated creates
+- **Store is untouched**: `<sessionDir>/agents/main/cron/<8hex>.json`, reloaded on resume. The panel persists nothing of its own
+- **Tests**: `packages/agent-core/test/tools/cron/schedule.test.ts` (gates + the two-path coupling), `packages/node-sdk/test/session-cron.test.ts` (full chain, create → list → remove plus the verbatim rejection), `apps/scream-code/test/tui/commands/cron.test.ts` (panel, confirm, wizard, guards)
+
+
+
 ### Plugin Center (`/plugin`) & Code Extensions (`/extension`)
 
 Manages installed plugins and browses installable plugin packages; `/extension` manages code plugins (dynamic-import runtime). `/skill` is the hidden compat alias of `/plugin` (routeable but not shown in completion/help).
@@ -998,12 +1012,14 @@ Key files: `packages/agent-core/src/agent/turn/index.ts`, `packages/agent-core/s
 
 ### Cron / Scheduled Tasks
 
-The agent has an experimental cron subsystem for scheduling recurring tasks (periodic memory extraction, system health checks, etc.).
+Session-scoped scheduled tasks: the agent can schedule a prompt to be re-injected into the current session, once or on a cron cadence. `CronCreate` / `CronList` / `CronDelete` are in the default profile — there is no opt-in flag.
 
-- **Registry**: `packages/agent-core/src/tools/cron/` — cron expression parser (`cron-expr.ts`), scheduler (`scheduler.ts`), persistence (`persist.ts`, `session-store.ts`), and tool definitions (`cron-create.ts`, `cron-list.ts`, `cron-delete.ts`).
-- **Manager**: `packages/agent-core/src/agent/cron/manager.ts` — polls for due jobs, fires them via the agent turn loop, persists results.
+- **Registry**: `packages/agent-core/src/tools/cron/` — cron expression parser (`cron-expr.ts`), the create rules shared by every caller (`schedule.ts`), scheduler (`scheduler.ts`), persistence (`persist.ts`, `session-store.ts`), and tool definitions (`cron-create.ts`, `cron-list.ts`, `cron-delete.ts`).
+- **Manager**: `packages/agent-core/src/agent/cron/manager.ts` — polls for due jobs, fires them via the agent turn loop, persists results. `Agent.cron` is `null` for sub agents, which is why the RPC methods are agent-scoped.
 - **Jitter**: `packages/agent-core/src/tools/cron/jitter.ts` — adds random jitter to cron schedules to avoid thundering herds.
-- **Feature flag**: cron is experimental and not enabled by default. Toggle via scream config.
+- **Lifetime**: tasks belong to the session that created them (`<sessionDir>/agents/main/cron/<8hex>.json`) and are reloaded on resume; they do not carry over into a new session, and recurring ones expire after 7 days.
+- **Killswitch**: `SCREAM_DISABLE_CRON=1` refuses new tasks.
+- **User surface**: `/cron` — see "Scheduled Tasks (`/cron`)" above. It shares `schedule.ts` with the tool path, so the two can never disagree about what is schedulable.
 
 Key files: `packages/agent-core/src/tools/cron/`, `packages/agent-core/src/agent/cron/`.
 

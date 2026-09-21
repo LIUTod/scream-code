@@ -69,6 +69,9 @@ export const ErrorCodes = {
   MCP_STARTUP_FAILED: 'mcp.startup_failed',
   MCP_TOOL_NAME_COLLISION: 'mcp.tool_name_collision',
 
+  CRON_UNAVAILABLE: 'cron.unavailable',
+  CRON_INVALID: 'cron.invalid',
+
   PLUGIN_NOT_FOUND: 'plugin.not_found',
   PLUGIN_LOAD_FAILED: 'plugin.load_failed',
 
@@ -412,6 +415,19 @@ export const SCREAM_ERROR_INFO = {
     retryable: false,
     public: true,
     action: 'Rename one of the colliding MCP tools or servers so their qualified names are unique.',
+  },
+
+  'cron.unavailable': {
+    title: 'Cron scheduling unavailable',
+    retryable: false,
+    public: true,
+    action: 'Cron tasks belong to the main agent; run the command against an interactive session.',
+  },
+  'cron.invalid': {
+    title: 'Invalid cron schedule',
+    retryable: false,
+    public: true,
+    action: 'Fix the cron expression or prompt named in the message and try again.',
   },
 
   'plugin.not_found': {

@@ -182,6 +182,13 @@ export const BUILTIN_SLASH_COMMANDS = [
     availability: 'always',
   },
   {
+    name: 'cron',
+    aliases: ['crontab'],
+    description: 'registry.cron_desc',
+    priority: 182,
+    availability: 'always',
+  },
+  {
     name: 'like',
     aliases: [],
     description: 'registry.like_desc',
