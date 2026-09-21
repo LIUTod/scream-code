@@ -8,7 +8,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import { t } from '@scream-code/config';
-import type { Component, MarkdownTheme } from '@liutod-scream/pi-tui';
+import type { Component, MarkdownOptions, MarkdownTheme } from '@liutod-scream/pi-tui';
 import { Markdown, visibleWidth } from '@liutod-scream/pi-tui';
 import chalk from 'chalk';
 
@@ -42,12 +42,14 @@ export class PlanBoxComponent implements Component {
     private readonly borderHex: string,
     private readonly planPath?: string,
     opts?: PlanBoxOptions,
+    /** When given, a ```mermaid block inside the plan is drawn as a picture. */
+    markdownOptions?: MarkdownOptions,
   ) {
     // Build the Markdown instance once — pi-tui's Markdown caches its own
     // parse + wrap output keyed on (text, width), so reusing the same
     // instance means repeated render() calls from the parent Container
     // hit the cache instead of re-parsing on every frame.
-    this.markdown = new Markdown(plan.trim(), 0, 0, markdownTheme);
+    this.markdown = new Markdown(plan.trim(), 0, 0, markdownTheme, undefined, markdownOptions);
     this.maxContentLines = opts?.maxContentLines;
     this.expanded = opts?.expanded ?? false;
     this.status = opts?.status;

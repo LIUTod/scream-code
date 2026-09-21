@@ -543,6 +543,91 @@ Stamps a light-gray elapsed-time marker (e.g. ` 23m 42s`) at the end of the assi
 - **Config**: `ui-preferences.ts` `turnElapsedEnabled` (default on), persisted in `<dataDir>/ui-preferences.json`
 
 
+### Mermaid Diagram Rendering (`/mermaid`)
+
+A ```mermaid fence in an assistant reply is drawn as box art in the terminal's own
+columns. Rendering is presentation-only: whenever a frame cannot be drawn
+faithfully the original fence is handed back, so the feature can never make a
+reply read worse than before it existed.
+
+- **Entry**: `/mermaid` (alias: `diagram`) — `src/tui/commands/mermaid.ts`. A bare
+  `/mermaid` opens a three-choice picker (`on` / `ascii` / `off`) built on the
+  shared `ChoicePickerComponent`; `/mermaid on|ascii|off` skips the panel.
+  `ascii` is the escape hatch for terminals that render box-drawing glyphs two
+  cells wide, which would otherwise skew every frame
+- **Hook**: the existing `MarkdownOptions.transform` entry point in the TUI
+  package — no renderer change was needed, and none was left behind.
+  `src/tui/utils/mermaid-diagram.ts` `createMermaidTransformer` replaces
+  top-level `code` tokens only; the shared options factory for all three surfaces
+  is `src/tui/utils/diagram-markdown-options.ts` (assistant reply, plan box,
+  side-chat answer)
+- **Direction is chosen by measurement, not by the model**: `draw()` renders both
+  directions (about 0.5 ms each, cached per source) and picks on the numbers —
+  switch when the original does not fit and the other way does (a seven-block
+  chain measures 148 columns left-to-right and 26 top-down), or when both fit and
+  the other way saves at least `MIN_ROWS_SAVED_BY_SWITCH` rows, because vertical
+  space is what a terminal runs out of. A switch is announced in a localized
+  note, so the reader knows the layout is not the one the model wrote. Only when
+  both directions overflow does the block fall back to being a code block
+- **Geometry rules** (each one measured, see
+  `test/tui/utils/mermaid-diagram.test.ts`): rows are quoted as inline-code spans
+  with trailing blanks dropped first, because CommonMark strips one space from
+  each end of a span when *both* ends are spaces and that would shift a frame a
+  column; rows are joined with hard breaks; a frame is never scaled or wrapped —
+  wrapping folds it in half
+- **Never rewrite text it cannot draw from**: the document is rebuilt from token
+  `raw`, which the lexer does not preserve for CRLF input, so the transform
+  compares its own rebuild against the input and abandons the whole pass when
+  they differ. Missing a diagram is acceptable; changing a reply's line endings
+  on the way is not
+- **Notes are translatable**: every reason shown under an undrawn block goes
+  through `t('mermaid.note.*')`, so a Chinese UI never sees an English
+  diagnostic. The one exception is the drawing library's own incompleteness
+  warning, which has no translation to offer
+- **Streaming**: drawing always waits for the reply to finish — measured, a
+  half-written frame changes shape about ten times per reply. `assistant-message.ts`
+  `setStreaming`, driven by `streaming-ui.ts` `onStreamingTextUpdate` /
+  `onStreamingTextEnd`, is what holds it back; thinking blocks are never drawn.
+  `resetLiveText` also settles the block it abandons: an aborted request or a
+  retried step leaves that message on screen with no further updates, and a
+  component still claiming it is mid-stream would never draw
+- **The note is static**: a live-width variant (measure the transcript width at
+  render time, re-sync on measurement, quote the number) was built and then
+  removed — the model cannot observe the terminal either way, and a runtime number
+  could lag a request or contradict itself on a narrow window. Layout guidance
+  instead uses a rule needing no window knowledge: horizontal by default, **never
+  more than five blocks side by side** (frame width is set by what sits next to
+  each other — about 12 columns per block, so five lands near 60), `TD` when a
+  chain would run too wide, a four-rung ladder when it will not fit, and never
+  cutting content. `terminal-diagram-prompt.ts` exports a plain function returning
+  that static text
+- **Telling the model**: the note is appended through the runtime system prompt
+  (`setRuntimeSystemPrompt`), TUI only — other surfaces do not draw and must not
+  claim it. Written **trigger-first**: an earlier draft listed only the format
+  rules plus a six-node cap, and the model read that as permission to explain
+  less, trimming diagrams to comply and asking the user whether to redraw one.
+  `terminal-diagram-prompt.test.ts` asserts both halves: that the claims are true
+  against the real renderer, and that the note contains no node quota and says
+  splitting — not cutting — is the answer to size. Synced from
+  `session-manager.ts` `setSession` and on every `/mermaid` change; withdrawn when
+  the mode is `off`
+- **Config**: `ui-preferences.ts` `mermaidDisplay` — one of `on` / `ascii` /
+  `off`, default `on`, persisted in `<dataDir>/ui-preferences.json`. One field,
+  not a mode plus a charset flag: the two were collapsed because every real
+  combination a user could reach was one of these three
+- **Known limit**: box-drawing glyphs are East-Asian-Ambiguous, so a terminal
+  that renders them double-width skews every frame — that is what
+  `/mermaid ascii` is for, and it needs a real-terminal check, not a test
+- **Rejected after measuring**: PNG rendering (what the upstream Rust
+  implementation actually ships — SVG scaled to a pixel budget from the terminal's
+  column budget, so it has no width problem at all). Quality is fine (verified:
+  Chinese labels render, 23% non-background pixels) but the cost is a native
+  rasterizer per platform, bundled fonts, a subprocess with real timeouts, and a
+  protocol surface limited to kitty/iTerm2/Ghostty/WezTerm. The character path
+  stays. Also rejected: replicating that implementation's label wrapping, since
+  the npm port has neither wrapping nor width-aware layout (measured: `<br/>` has
+  no effect and long labels are truncated) — it would mean writing a layout engine
+
 ### Plugin Center (`/plugin`) & Code Extensions (`/extension`)
 
 Manages installed plugins and browses installable plugin packages; `/extension` manages code plugins (dynamic-import runtime). `/skill` is the hidden compat alias of `/plugin` (routeable but not shown in completion/help).

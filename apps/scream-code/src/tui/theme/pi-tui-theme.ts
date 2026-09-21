@@ -12,6 +12,7 @@ import { highlight, supportsLanguage, type Theme } from 'cli-highlight';
 
 import type { ColorPalette } from './colors';
 import { isCodeBlockPanelEnabled } from '#/tui/utils/ui-preferences';
+import type { DiagramTheme } from '#/tui/utils/mermaid-diagram';
 
 // pi-tui's renderer emits literal "### " / "#### " / ... markers for h3-h6
 // headings (h1/h2 are rendered without the `#` prefix). The prefix arrives
@@ -150,6 +151,54 @@ export function createMarkdownTheme(colors: ColorPalette): MarkdownTheme {
         return code.split('\n');
       }
     },
+  };
+}
+
+/**
+ * Colour for a drawn diagram. The renderer emits semantic runs and no colour at
+ * all, so the frame is what keeps the picture readable at a glance: outlines and
+ * connectors stay quiet so the structure recedes, while node names take the
+ * heading colour — the words inside boxes are the content of a diagram, and
+ * they should read as prominently as a heading does.
+ *
+ * `none` is blank filler and is left unpainted — it carries no glyph, and
+ * trailing filler has already been dropped before a row is quoted.
+ */
+export function createDiagramTheme(colors: ColorPalette): DiagramTheme {
+  // Resolved on first use, not at construction: a diagram is rare, and every
+  // assistant message would otherwise build painters it never calls.
+  type Painter = (text: string) => string;
+  let painters:
+    | { frame: Painter; label: Painter; title: Painter; edgeLabel: Painter; note: Painter }
+    | undefined;
+  const paint = () => {
+    painters ??= {
+      frame: chalk.hex(colors.border),
+      label: chalk.hex(colors.mdHeading),
+      title: chalk.hex(colors.mdHeading).bold,
+      edgeLabel: chalk.hex(colors.textDim),
+      note: chalk.hex(colors.textMuted),
+    };
+    return painters;
+  };
+  return {
+    style: (cls, text) => {
+      const p = paint();
+      switch (cls) {
+        case 'border':
+        case 'edge':
+          return p.frame(text);
+        case 'text':
+          return p.label(text);
+        case 'title':
+          return p.title(text);
+        case 'edgeLabel':
+          return p.edgeLabel(text);
+        case 'none':
+          return text;
+      }
+    },
+    note: (text) => paint().note(text),
   };
 }
 

@@ -1,11 +1,11 @@
 import { t } from '@scream-code/config';
 import type { SessionSummary } from '@scream-code/scream-code-sdk';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   SessionManager,
   type SessionManagerHost,
 } from '#/tui/managers/session-manager';
+
 import { getLlmNotSetMessage, MAIN_AGENT_ID } from '#/tui/constant/scream-tui';
 import { refreshProviderBalance } from '../../../src/tui/api-balance.js';
 import type { AppState } from '#/tui/types';

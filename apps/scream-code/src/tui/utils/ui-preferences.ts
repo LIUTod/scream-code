@@ -11,6 +11,21 @@ import { dirname, join } from 'node:path';
 import { SCREAM_CODE_UI_PREFERENCES_FILE_NAME } from '#/constant/app';
 import { getDataDir } from '#/utils/paths';
 
+/**
+ * How Mermaid blocks are drawn in the transcript (`/mermaid`).
+ *
+ * - `on`    — draw with box-drawing glyphs. Default.
+ * - `ascii` — draw with an ASCII frame, for terminals that render box-drawing
+ *             glyphs double-width, which would skew every frame.
+ * - `off`   — never draw; the block stays a code block.
+ *
+ * Drawing always waits for the reply to finish: a frame redrawn every few
+ * tokens reads as flicker, so there is nothing to choose there.
+ */
+export type MermaidDisplay = 'on' | 'ascii' | 'off';
+
+export const MERMAID_DISPLAYS: readonly MermaidDisplay[] = ['on', 'ascii', 'off'];
+
 export interface UiPreferences {
   /** User pressed Ctrl+B to permanently hide the empty-session provider hint. */
   emptySessionHintDismissed?: boolean;
@@ -20,6 +35,8 @@ export interface UiPreferences {
   userMessageHighlightEnabled?: boolean;
   /** Whether fenced code blocks render as a background panel (/codebg). */
   codeBlockPanelEnabled?: boolean;
+  /** How Mermaid blocks are drawn (/mermaid). Default `on`. */
+  mermaidDisplay?: MermaidDisplay;
   /** Rows of a collapsed activity block, header included (/blockrows). */
   activityCollapsedLines?: number;
   /** Body rows one tool row may show while the block is expanded. */
@@ -150,4 +167,37 @@ export function toggleUserMessageHighlight(): boolean {
   prefs.userMessageHighlightEnabled = !enabled;
   writeUiPreferences(prefs);
   return !enabled;
+}
+
+/**
+ * The Mermaid drawing mode (`/mermaid`). Cached because the markdown renderer
+ * asks once per block per frame; `/mermaid` updates the cache.
+ */
+let mermaidDisplayCache: MermaidDisplay | undefined;
+
+export function getMermaidDisplay(): MermaidDisplay {
+  // Cache first: this is the first thing the markdown transform asks, once per
+  // block per frame, and a synchronous read here would hit disk on every render.
+  if (mermaidDisplayCache !== undefined) return mermaidDisplayCache;
+  const stored = readUiPreferences().mermaidDisplay;
+  mermaidDisplayCache = MERMAID_DISPLAYS.includes(stored as MermaidDisplay) ? stored! : 'on';
+  return mermaidDisplayCache;
+}
+
+/** Whether diagrams are drawn at all — `on` and `ascii` both draw. */
+export function isMermaidDrawing(): boolean {
+  return getMermaidDisplay() !== 'off';
+}
+
+/** Whether frames use the ASCII alphabet instead of box-drawing glyphs. */
+export function useMermaidAsciiFrames(): boolean {
+  return getMermaidDisplay() === 'ascii';
+}
+
+/** Set the Mermaid drawing mode via /mermaid. Persisted immediately. */
+export function setMermaidDisplay(value: MermaidDisplay): void {
+  const prefs = readUiPreferences();
+  prefs.mermaidDisplay = value;
+  writeUiPreferences(prefs);
+  mermaidDisplayCache = value;
 }

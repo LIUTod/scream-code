@@ -223,6 +223,28 @@ describe('smooth streaming (token pacing)', () => {
     expect(updates.at(-1)).toBe('hello world'); // rest flushed on end
   });
 
+  it('resetLiveText settles the block it abandons, so drawing is not stranded', () => {
+    // An aborted request or a retried step leaves this message on screen with no
+    // further updates. Anything that waits for the reply to finish — drawing a
+    // diagram — would never run if the block kept claiming it was mid-stream.
+    const controller = new StreamingUIController(createMockHost());
+    const block = {
+      entry: {},
+      component: {
+        streaming: true,
+        setStreaming(value: boolean): void {
+          this.streaming = value;
+        },
+      },
+    };
+    (controller as unknown as { _streamingBlock: unknown })._streamingBlock = block;
+
+    controller.resetLiveText();
+
+    expect(block.component.streaming).toBe(false);
+    expect((controller as unknown as { _streamingBlock: unknown })._streamingBlock).toBeNull();
+  });
+
   it('resetLiveText clears the shown cursor and pending state', () => {
     const controller = new StreamingUIController(createMockHost());
     controller.appendAssistantDelta('xyz');

@@ -67,6 +67,7 @@ import { handleSnapTimerCommand } from './snaptimer';
 import { handleHighlightCommand } from './hl';
 import { handleBlockRowsCommand } from './blockrows';
 import { handleCodeBgCommand } from './codebg';
+import { handleMermaidCommand } from './mermaid';
 import { handleLikeCommand } from './like';
 import { handleKnowledgeCommand } from './knowledge';
 import { runEvalCommand } from './eval';
@@ -278,6 +279,9 @@ async function handleBuiltInSlashCommand(
       return;
     case 'codebg':
       await handleCodeBgCommand(host, args);
+      return;
+    case 'mermaid':
+      await handleMermaidCommand(host, args);
       return;
     case 'mcp':
       await handleMcpCommand(host, args);

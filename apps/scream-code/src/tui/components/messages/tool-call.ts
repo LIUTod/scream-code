@@ -27,6 +27,7 @@ import { appendStreamingArgsPreview } from '#/tui/utils/event-payload';
 import { decodeMcpToolName } from '#/tui/utils/mcp-tool-name';
 
 import { PlanBoxComponent } from './plan-box';
+import { diagramMarkdownOptions } from '#/tui/utils/diagram-markdown-options';
 import { ShellExecutionComponent, shellExecutionResultRenderer } from './shell-execution';
 import { WrappedLine } from './wrapped-line';
 import { computeEditStats, computeWriteStats, pickChip } from './tool-renderers/chip';
@@ -1957,7 +1958,7 @@ export class ToolCallComponent extends CachedContainer {
           maxContentLines: this.computePlanBoxMaxContentLines(),
           expanded: this.planExpanded,
           status: this.resolvePlanBoxStatus(),
-        }),
+        }, diagramMarkdownOptions(this.colors)),
       );
     } else {
       this.addChild(new Text(chalk.dim(plan), 2, 0));

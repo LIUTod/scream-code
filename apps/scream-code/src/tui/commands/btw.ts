@@ -19,6 +19,7 @@ import chalk from 'chalk';
 
 import { t } from '@scream-code/config';
 import type { ColorPalette } from '../theme/colors';
+import { diagramMarkdownOptions } from '../utils/diagram-markdown-options';
 import type { SlashCommandHost } from './dispatch';
 import { type Disposable } from '../utils/component-capabilities';
 
@@ -68,7 +69,14 @@ class BtwOverlayComponent extends Container implements Focusable, Disposable {
     if (this.disposed) return;
     this.answer = text;
     this.status = 'done';
-    this.markdown = new Markdown(text.trim(), 0, 0, this.markdownTheme);
+    this.markdown = new Markdown(
+        text.trim(),
+        0,
+        0,
+        this.markdownTheme,
+        undefined,
+        diagramMarkdownOptions(this.colors),
+      );
     this.stopSpinner();
     this.requestRender();
   }

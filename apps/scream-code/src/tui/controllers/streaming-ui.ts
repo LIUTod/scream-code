@@ -783,6 +783,11 @@ export class StreamingUIController {
     // Clear the timer after the draft/shown reset so hasPending() no longer
     // sees un-shown text and the idle check can drop a stale continuation frame.
     this.clearFlushTimerIfIdle();
+    // The abandoned block stays on screen, so it has to stop claiming it is
+    // still receiving text. Work that waits for the reply to finish — drawing a
+    // diagram — would otherwise never happen for a message left behind by an
+    // aborted request or a retried step.
+    this._streamingBlock?.component.setStreaming(false);
     this._streamingBlock = null;
     this._thinkingDraft = '';
     this.lastDeltaAt = undefined;
@@ -910,6 +915,9 @@ export class StreamingUIController {
     const block = this._streamingBlock;
     if (block !== null) {
       block.entry.content = fullText;
+      // Set before the content lands: the markdown transform reads this flag on
+      // every render to decide whether a diagram may be drawn yet.
+      block.component.setStreaming(true);
       block.component.updateContent(fullText);
       this.host.state.ui.requestRender();
     }
@@ -922,6 +930,9 @@ export class StreamingUIController {
     const block = this._streamingBlock;
     this._streamingBlock = null;
     if (block !== null) {
+      // The reply is complete: a diagram the default mode held back is drawn by
+      // this transition rather than by a content change.
+      block.component.setStreaming(false);
       this.host.transcriptController.unmarkPending(block.component);
       this.host.transcriptController.commit();
     }

@@ -175,6 +175,13 @@ export const BUILTIN_SLASH_COMMANDS = [
     availability: 'always',
   },
   {
+    name: 'mermaid',
+    aliases: ['diagram'],
+    description: 'registry.mermaid_desc',
+    priority: 181,
+    availability: 'always',
+  },
+  {
     name: 'like',
     aliases: [],
     description: 'registry.like_desc',

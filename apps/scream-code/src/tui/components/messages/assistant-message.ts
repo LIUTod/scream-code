@@ -5,13 +5,14 @@
  * to align after the bullet.
  */
 
-import type { Component, MarkdownTheme, TUI } from '@liutod-scream/pi-tui';
+import type { Component, MarkdownOptions, MarkdownTheme, TUI } from '@liutod-scream/pi-tui';
 import { Container, Markdown, truncateToWidth, visibleWidth } from '@liutod-scream/pi-tui';
 import chalk from 'chalk';
 
 import { MESSAGE_INDENT } from '#/tui/constant/rendering';
 import { STATUS_BULLET } from '#/tui/constant/symbols';
 import type { ColorPalette } from '#/tui/theme/colors';
+import { diagramMarkdownOptions } from '#/tui/utils/diagram-markdown-options';
 import { isRenderCacheEnabled } from '#/tui/utils/render-cache';
 import {
   FADE_MS,
@@ -33,6 +34,8 @@ export class AssistantMessageComponent implements Component {
   private cachedWidth: number | undefined;
   private cachedLines: string[] | undefined;
   private markdownChild: Markdown | undefined;
+  private streaming = false;
+  private readonly markdownOptions: MarkdownOptions;
   private readonly ui: TUI | undefined;
   private fadeStartMs: number | undefined;
   private fadeTimer: ReturnType<typeof setInterval> | undefined;
@@ -50,6 +53,19 @@ export class AssistantMessageComponent implements Component {
     this.showBullet = showBullet;
     this.ui = ui;
     this.contentContainer = new Container();
+    this.markdownOptions = diagramMarkdownOptions(colors, 'assistant', () => this.streaming);
+  }
+
+
+  /**
+   * Tell the component whether its reply is still arriving. Drawing a diagram
+   * mid-stream means redrawing a frame that is only part-written, which is why
+   * the default mode waits for the reply to finish.
+   */
+  setStreaming(streaming: boolean): void {
+    if (this.streaming === streaming) return;
+    this.streaming = streaming;
+    this.invalidate();
   }
 
   setShowBullet(show: boolean): void {
@@ -79,7 +95,14 @@ export class AssistantMessageComponent implements Component {
     if (this.markdownChild !== undefined) {
       this.markdownChild.setText(trimmedText);
     } else if (trimmedText.length > 0) {
-      this.markdownChild = new Markdown(trimmedText, 0, 0, this.markdownTheme);
+      this.markdownChild = new Markdown(
+        trimmedText,
+        0,
+        0,
+        this.markdownTheme,
+        undefined,
+        this.markdownOptions,
+      );
       this.contentContainer.addChild(this.markdownChild);
       this.startFade();
     }
@@ -139,8 +162,8 @@ export class AssistantMessageComponent implements Component {
       let li = rendered.length - 1;
       while (li >= 0 && rendered[li] !== undefined && rendered[li]!.trim().length === 0) li--;
       if (li >= 0) {
-        const line = rendered[li]!.replace(/[ \t]+(\x1B\[[0-9;]*m)*$/, (match) => {
-          const codes = match.match(/\x1B\[[0-9;]*m/g);
+        const line = rendered[li]!.replace(/[ \t]+(\u001B\[[0-9;]*m)*$/, (match) => {
+          const codes = match.match(/\u001B\[[0-9;]*m/g);
           return codes !== null ? codes.join('') : '';
         });
         rendered[li] = line + chalk.hex('#999999')(this.suffixText);

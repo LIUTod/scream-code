@@ -11,6 +11,7 @@ import { getLlmNotSetMessage, MAIN_AGENT_ID, getNoActiveSessionMessage } from '.
 import { formatErrorMessage } from '../utils/event-payload';
 import { isBusy } from '../utils/app-state';
 import { sessionRowsForPicker } from '../utils/session-picker-rows';
+import { syncDiagramCapabilityPrompt } from '../utils/terminal-diagram-prompt';
 import { refreshProviderBalance } from '../api-balance';
 import { createApprovalRequestHandler } from '../reverse-rpc/approval/handler';
 import { createQuestionAskHandler } from '../reverse-rpc/question/handler';
@@ -97,7 +98,9 @@ export interface SessionManagerHost {
  * Encapsulates all session lifecycle operations:
  * create / resume / switch / close / sync state / reset runtime.
  */
+
 export class SessionManager {
+
   constructor(private readonly host: SessionManagerHost) {}
 
   // ---------------------------------------------------------------------------
@@ -218,7 +221,13 @@ export class SessionManager {
     await previous?.close({ extractMemories: false });
     this.host.session = session;
     this.registerSessionHandlers(session);
+    // The runtime prompt is per-session state, so every time this surface takes
+    // a session it has to restate what this terminal can draw — otherwise a
+    // switched-to session would either lose the statement or keep one that no
+    // longer matches the current `/mermaid` choice.
+    await syncDiagramCapabilityPrompt(session);
   }
+
 
   async syncRuntimeState(session: Session = this.requireSession()): Promise<void> {
     const status = await session.getStatus();
