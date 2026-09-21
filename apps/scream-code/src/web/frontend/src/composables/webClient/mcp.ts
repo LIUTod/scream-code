@@ -1,5 +1,11 @@
 import type { BackgroundTaskInfo, McpServerInfo, McpStartupMetrics } from '../../types';
-import { API_BASE, type ClientContext } from './state';
+import {
+  API_BASE,
+  captureSessionRequest,
+  isCurrentSessionRequest,
+  type ClientContext,
+  type SessionRequestToken,
+} from './state';
 
 export interface McpModule {
   fetchMcpServers(): Promise<void>;
@@ -16,22 +22,33 @@ export interface McpModule {
 export function createMcpModule(ctx: ClientContext): McpModule {
   const { s } = ctx;
 
+  let serversRequest = 0;
+  let metricsRequest = 0;
+  let tasksRequest = 0;
+  let taskOutputRequest = 0;
+
+  function current(token: SessionRequestToken | null): token is SessionRequestToken {
+    return token !== null && isCurrentSessionRequest(s, token);
+  }
+
   async function fetchMcpServers(): Promise<void> {
-    const id = s.sessionId.value;
-    if (!id) return;
+    const token = captureSessionRequest(s);
+    if (!token) return;
+    const request = ++serversRequest;
     try {
-      const res = await fetch(`${API_BASE}/sessions/${id}/mcp`);
-      if (!res.ok) return;
+      const res = await fetch(`${API_BASE}/sessions/${token.sessionId}/mcp`);
+      if (!current(token) || request !== serversRequest || !res.ok) return;
       s.mcpServers.value = (await res.json()) as McpServerInfo[];
     } catch { /* best-effort */ }
   }
 
   async function fetchMcpStartupMetrics(): Promise<void> {
-    const id = s.sessionId.value;
-    if (!id) return;
+    const token = captureSessionRequest(s);
+    if (!token) return;
+    const request = ++metricsRequest;
     try {
-      const res = await fetch(`${API_BASE}/sessions/${id}/mcp/startup-metrics`);
-      if (!res.ok) return;
+      const res = await fetch(`${API_BASE}/sessions/${token.sessionId}/mcp/startup-metrics`);
+      if (!current(token) || request !== metricsRequest || !res.ok) return;
       s.mcpStartupMetrics.value = (await res.json()) as McpStartupMetrics;
     } catch { /* best-effort */ }
   }
@@ -49,11 +66,11 @@ export function createMcpModule(ctx: ClientContext): McpModule {
   }
 
   async function removeMcpServer(name: string): Promise<boolean> {
-    const id = s.sessionId.value;
-    if (!id) return false;
+    const token = captureSessionRequest(s);
+    if (!token) return false;
     try {
-      const res = await fetch(`${API_BASE}/sessions/${id}/mcp/${encodeURIComponent(name)}`, { method: 'DELETE' });
-      if (!res.ok) return false;
+      const res = await fetch(`${API_BASE}/sessions/${token.sessionId}/mcp/${encodeURIComponent(name)}`, { method: 'DELETE' });
+      if (!current(token) || !res.ok) return false;
       s.mcpServers.value = s.mcpServers.value.filter((m) => m.name !== name);
       return true;
     } catch {
@@ -62,26 +79,28 @@ export function createMcpModule(ctx: ClientContext): McpModule {
   }
 
   async function fetchBackgroundTasks(activeOnly?: boolean, limit?: number): Promise<void> {
-    const id = s.sessionId.value;
-    if (!id) return;
+    const token = captureSessionRequest(s);
+    if (!token) return;
+    const request = ++tasksRequest;
     try {
       const q = new URLSearchParams();
       if (activeOnly !== undefined) q.set('activeOnly', String(activeOnly));
       if (limit !== undefined) q.set('limit', String(limit));
       const qs = q.toString();
-      const res = await fetch(`${API_BASE}/sessions/${id}/tasks${qs ? `?${qs}` : ''}`);
-      if (!res.ok) return;
+      const res = await fetch(`${API_BASE}/sessions/${token.sessionId}/tasks${qs ? `?${qs}` : ''}`);
+      if (!current(token) || request !== tasksRequest || !res.ok) return;
       s.backgroundTasks.value = (await res.json()) as BackgroundTaskInfo[];
     } catch { /* best-effort */ }
   }
 
   async function fetchBackgroundTaskOutput(taskId: string, tail?: number): Promise<void> {
-    const id = s.sessionId.value;
-    if (!id) return;
+    const token = captureSessionRequest(s);
+    if (!token) return;
+    const request = ++taskOutputRequest;
     try {
       const qs = tail !== undefined ? `?tail=${tail}` : '';
-      const res = await fetch(`${API_BASE}/sessions/${id}/tasks/${encodeURIComponent(taskId)}/output${qs}`);
-      if (!res.ok) return;
+      const res = await fetch(`${API_BASE}/sessions/${token.sessionId}/tasks/${encodeURIComponent(taskId)}/output${qs}`);
+      if (!current(token) || request !== taskOutputRequest || !res.ok) return;
       const data = (await res.json()) as { output: string };
       s.backgroundTaskOutput.value = data.output;
     } catch { /* best-effort */ }

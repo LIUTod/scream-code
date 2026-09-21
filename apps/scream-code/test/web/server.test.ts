@@ -367,6 +367,289 @@ describe('Web Goal/Todo state', () => {
   });
 });
 
+describe('Web undo projection', () => {
+  it('rejects a concurrent undo while the first core mutation is still in flight', async () => {
+    const contextMessage = (role: ContextMessage['role'], text: string): ContextMessage => ({
+      role,
+      content: [{ type: 'text', text }],
+      toolCalls: [],
+      ...(role === 'user' ? { origin: { kind: 'user' } as const } : {}),
+    });
+    let contextHistory: ContextMessage[] = [
+      contextMessage('user', 'first'),
+      contextMessage('assistant', 'answer one'),
+      contextMessage('user', 'second'),
+      contextMessage('assistant', 'answer two'),
+    ];
+    const undoStarted = deferred<void>();
+    const releaseUndo = deferred<void>();
+    const control = makeFakeSession({
+      getContext: vi.fn(async () => ({ history: contextHistory, tokenCount: contextHistory.length })),
+    });
+    const undoHistory = vi.fn(async (count: number) => {
+      undoStarted.resolve();
+      await releaseUndo.promise;
+      if (count > 0) contextHistory = contextHistory.slice(0, 2);
+    });
+    (control.session as unknown as { undoHistory: typeof undoHistory }).undoHistory = undoHistory;
+
+    const handle = await start(control);
+    const first = jsonRequest(handle.url, '/api/v1/sessions/session-1/undo', {
+      method: 'POST',
+      body: JSON.stringify({ count: 1 }),
+    });
+    await undoStarted.promise;
+
+    const second = await jsonRequest(handle.url, '/api/v1/sessions/session-1/undo', {
+      method: 'POST',
+      body: JSON.stringify({ count: 1 }),
+    });
+    expect(second.response.status).toBe(409);
+    expect(second.body).toMatchObject({ message: 'Undo already in progress' });
+    expect(undoHistory).toHaveBeenCalledTimes(1);
+
+    releaseUndo.resolve();
+    expect((await first).response.status).toBe(200);
+  });
+
+  it('writes a durable undo marker and removes the same turn from snapshots', async () => {
+    const contextMessage = (role: ContextMessage['role'], text: string): ContextMessage => ({
+      role,
+      content: [{ type: 'text', text }],
+      toolCalls: [],
+      ...(role === 'user' ? { origin: { kind: 'user' } as const } : {}),
+    });
+    let contextHistory: ContextMessage[] = [
+      contextMessage('user', 'first'),
+      contextMessage('assistant', 'answer one'),
+      contextMessage('user', 'second'),
+      contextMessage('assistant', 'answer two'),
+    ];
+    const control = makeFakeSession({
+      getContext: vi.fn(async () => ({ history: contextHistory, tokenCount: 4 })),
+    });
+    const undoHistory = vi.fn(async (count: number) => {
+      let remaining = count;
+      for (let i = contextHistory.length - 1; i >= 0 && remaining > 0; i -= 1) {
+        if (contextHistory[i]?.role !== 'user') continue;
+        contextHistory = contextHistory.slice(0, i);
+        remaining -= 1;
+      }
+    });
+    (control.session as unknown as { undoHistory: typeof undoHistory }).undoHistory = undoHistory;
+
+    const handle = await start(control);
+    const { socket } = await openSocket(handle.url);
+    socket.send(JSON.stringify({ type: 'client_hello', lastSeq: 0, epoch: 0 }));
+
+    const emitTurn = (turnId: number, body: string): void => {
+      control.emit({ type: 'turn.started', turnId, origin: 'web', sessionId: control.session.id, agentId: 'main' } as unknown as Event);
+      control.emit({ type: 'assistant.delta', turnId, delta: body, sessionId: control.session.id, agentId: 'main' } as unknown as Event);
+      control.emit({ type: 'turn.ended', turnId, reason: 'done', sessionId: control.session.id, agentId: 'main' } as unknown as Event);
+    };
+    const sendPrompt = async (text: string, turnId: number): Promise<void> => {
+      socket.send(JSON.stringify({ type: 'prompt', text }));
+      await vi.waitFor(() => expect(control.prompt).toHaveBeenLastCalledWith(text));
+      emitTurn(turnId, text === 'first' ? 'answer one' : 'answer two');
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    };
+    await sendPrompt('first', 1);
+    await sendPrompt('second', 2);
+
+    const before = await jsonRequest(handle.url, '/api/v1/sessions/session-1/snapshot');
+    type SnapshotMessage = { role: 'user' | 'assistant'; content: string };
+    expect((before.body as { messages: SnapshotMessage[] }).messages.filter((m) => m.role === 'user')).toHaveLength(2);
+
+    const markerPromise = nextMessage(socket);
+    const undo = await jsonRequest(handle.url, '/api/v1/sessions/session-1/undo', {
+      method: 'POST',
+      body: JSON.stringify({ count: 1 }),
+    });
+    expect(undo.response.status).toBe(200);
+    expect(undoHistory).toHaveBeenCalledWith(1);
+
+    const after = await jsonRequest(handle.url, '/api/v1/sessions/session-1/snapshot');
+    const afterMessages = (after.body as { messages: SnapshotMessage[] }).messages;
+    expect(afterMessages.filter((m) => m.role === 'user').map((m) => m.content)).toEqual(['first']);
+    expect(afterMessages.filter((m) => m.role === 'assistant').map((m) => m.content)).toEqual(['answer one']);
+
+    // The marker is sent to every subscribed tab, allowing other clients to
+    // converge without guessing which local rows the core removed.
+    const marker = await markerPromise;
+    expect(marker).toMatchObject({ payload: { type: 'web.history.undone', count: 1 } });
+    socket.close();
+  });
+
+  it('removes a user-triggered skill turn without deleting the previous user turn', async () => {
+    const userOrigin = { kind: 'user' } as const;
+    const skillOrigin = {
+      kind: 'skill_activation',
+      activationId: 'activation-1',
+      skillName: 'review',
+      trigger: 'user-slash',
+    } as const;
+    let contextHistory: ContextMessage[] = [
+      { role: 'user', content: [{ type: 'text', text: 'ordinary prompt' }], toolCalls: [], origin: userOrigin },
+      { role: 'assistant', content: [{ type: 'text', text: 'ordinary answer' }], toolCalls: [] },
+      { role: 'user', content: [{ type: 'text', text: 'review skill prompt' }], toolCalls: [], origin: skillOrigin },
+      { role: 'assistant', content: [{ type: 'text', text: 'skill answer' }], toolCalls: [] },
+    ];
+    const control = makeFakeSession({
+      getContext: vi.fn(async () => ({ history: contextHistory, tokenCount: 4 })),
+    });
+    const undoHistory = vi.fn(async (count: number) => {
+      let remaining = count;
+      for (let i = contextHistory.length - 1; i >= 0 && remaining > 0; i -= 1) {
+        const message = contextHistory[i];
+        if (message?.origin?.kind === 'injection') continue;
+        if (message?.origin?.kind === 'compaction_summary') break;
+        contextHistory.splice(i, 1);
+        if (
+          message?.role === 'user' &&
+          (message.origin === undefined || message.origin.kind === 'user' ||
+            (message.origin.kind === 'skill_activation' && message.origin.trigger === 'user-slash'))
+        ) {
+          remaining -= 1;
+        }
+      }
+    });
+    (control.session as unknown as { undoHistory: typeof undoHistory }).undoHistory = undoHistory;
+
+    const handle = await start(control);
+    const { socket } = await openSocket(handle.url);
+    socket.send(JSON.stringify({ type: 'client_hello', lastSeq: 0, epoch: 0 }));
+
+    const emitTurn = (turnId: number, origin: unknown, body: string): void => {
+      control.emit({
+        type: 'turn.started',
+        turnId,
+        origin,
+        sessionId: control.session.id,
+        agentId: 'main',
+      } as unknown as Event);
+      control.emit({
+        type: 'assistant.delta',
+        turnId,
+        delta: body,
+        sessionId: control.session.id,
+        agentId: 'main',
+      } as unknown as Event);
+      control.emit({
+        type: 'turn.ended',
+        turnId,
+        reason: 'completed',
+        sessionId: control.session.id,
+        agentId: 'main',
+      } as unknown as Event);
+    };
+    socket.send(JSON.stringify({ type: 'prompt', text: 'ordinary prompt' }));
+    await vi.waitFor(() => expect(control.prompt).toHaveBeenCalledWith('ordinary prompt'));
+    emitTurn(1, userOrigin, 'ordinary answer');
+    // Skill activation is REST-backed and has no persisted Web user row.
+    emitTurn(2, skillOrigin, 'skill answer');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const before = await jsonRequest(handle.url, '/api/v1/sessions/session-1/snapshot');
+    const beforeMessages = (before.body as { messages: Array<{ role: string; content: string }> }).messages;
+    expect(beforeMessages.map((message) => message.content)).toEqual([
+      'ordinary prompt',
+      'ordinary answer',
+      'skill answer',
+    ]);
+
+    const undo = await jsonRequest(handle.url, '/api/v1/sessions/session-1/undo', {
+      method: 'POST',
+      body: JSON.stringify({ count: 1 }),
+    });
+    expect(undo.response.status).toBe(200);
+
+    const after = await jsonRequest(handle.url, '/api/v1/sessions/session-1/snapshot');
+    const afterMessages = (after.body as { messages: Array<{ role: string; content: string }> }).messages;
+    expect(afterMessages.map((message) => message.content)).toEqual([
+      'ordinary prompt',
+      'ordinary answer',
+    ]);
+    socket.close();
+  });
+
+  it('projects a seeded skill turn correctly when the web journal has no message entries', async () => {
+    const homeDir = await mkdtemp(join(tmpdir(), 'scream-web-undo-seed-'));
+    tempDirs.push(homeDir);
+    const sessionsDir = join(homeDir, 'web-sessions');
+    await mkdir(sessionsDir, { recursive: true });
+    await writeFile(join(sessionsDir, 'web-seed-skill.meta.json'), JSON.stringify({
+      sessionId: 'web-seed-skill',
+      coreSessionId: 'core-seed-skill',
+      workDir: '/tmp/project',
+      title: 'Seed skill',
+      createdAt: 1,
+      model: 'test-model',
+      permission: 'manual',
+    }));
+
+    const skillOrigin = {
+      kind: 'skill_activation',
+      activationId: 'activation-seed',
+      skillName: 'review',
+      trigger: 'user-slash',
+    } as const;
+    let contextHistory: ContextMessage[] = [
+      { role: 'user', content: [{ type: 'text', text: 'ordinary prompt' }], toolCalls: [], origin: { kind: 'user' } },
+      { role: 'assistant', content: [{ type: 'text', text: 'ordinary answer' }], toolCalls: [] },
+      { role: 'user', content: [{ type: 'text', text: 'review skill prompt' }], toolCalls: [], origin: skillOrigin },
+      { role: 'assistant', content: [{ type: 'text', text: 'skill tool preamble' }], toolCalls: [{ id: 'tool-seed', name: 'read', arguments: '{}' }] },
+      { role: 'assistant', content: [{ type: 'text', text: 'skill answer' }], toolCalls: [] },
+    ];
+    const control = makeFakeSession({
+      id: 'core-seed-skill',
+      getContext: vi.fn(async () => ({ history: contextHistory, tokenCount: 4 })),
+    });
+    const undoHistory = vi.fn(async (count: number) => {
+      let remaining = count;
+      for (let i = contextHistory.length - 1; i >= 0 && remaining > 0; i -= 1) {
+        const message = contextHistory[i];
+        if (message?.role !== 'user') {
+          contextHistory.splice(i, 1);
+          continue;
+        }
+        contextHistory.splice(i, 1);
+        if (message.origin?.kind === 'skill_activation' && message.origin.trigger === 'user-slash') remaining -= 1;
+        else if (message.origin === undefined || message.origin.kind === 'user') remaining -= 1;
+      }
+    });
+    (control.session as unknown as { undoHistory: typeof undoHistory }).undoHistory = undoHistory;
+    const harness = {
+      createSession: vi.fn(),
+      resumeSession: vi.fn(async () => control.session),
+      forkSession: vi.fn(),
+    };
+    const manager = new SessionManager({
+      harness: harness as never,
+      homeDir,
+      workDir: '/tmp/project',
+      model: 'test-model',
+      permission: 'manual',
+      yolo: false,
+    });
+    await manager.init();
+    const active = await manager.activateSession('web-seed-skill');
+    expect(active).not.toBeNull();
+    expect(active?.getSnapshot().messages.map((message) => message.content)).toEqual([
+      'ordinary prompt',
+      'ordinary answer',
+      'skill tool preamble',
+      'skill answer',
+    ]);
+
+    await active!.undoHistory(1);
+    expect(active!.getSnapshot().messages.map((message) => message.content)).toEqual([
+      'ordinary prompt',
+      'ordinary answer',
+    ]);
+    await manager.closeAll();
+  });
+});
+
 describe('Goal REST operations', () => {
   it('validates input, maps replace conflicts, and delegates create/update/lifecycle operations', async () => {
     const control = makeFakeSession();

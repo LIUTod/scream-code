@@ -837,6 +837,9 @@ export class Agent {
       getRlmEnabled: () => {
         return this.rlmEnabled;
       },
+      getRlmMaxDepth: () => {
+        return this.rlmMaxDepth;
+      },
     };
   }
 

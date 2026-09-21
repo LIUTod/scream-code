@@ -45,8 +45,9 @@ withDefaults(
     filter var(--dur-fast) var(--ease-out);
 }
 .ui-btn:focus-visible {
-  outline: none;
-  box-shadow: var(--glow-focus);
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 2px;
+  box-shadow: none;
 }
 .ui-btn:not(:disabled):active {
   transform: scale(0.97);
@@ -85,7 +86,7 @@ withDefaults(
 
 .ui-btn--danger {
   background: var(--color-danger);
-  color: var(--color-on-accent, #fff);
+  color: var(--color-on-danger);
   border-color: var(--color-danger);
   box-shadow: var(--shadow-xs);
 }

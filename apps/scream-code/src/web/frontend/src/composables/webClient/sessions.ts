@@ -1,6 +1,6 @@
 import type { GitStatus, SessionListItem } from '../../types';
 import { isCurrentSessionRequest } from '../../utils/goalTodoState';
-import { API_BASE, type ClientContext } from './state';
+import { API_BASE, captureSessionRequest, isCurrentSessionRequest as isCurrentRestRequest, type ClientContext } from './state';
 
 export interface SessionsModule {
   fetchSessions(): Promise<void>;
@@ -47,8 +47,15 @@ export function createSessionsModule(ctx: ClientContext): SessionsModule {
   }
 
   async function fetchGitStatus(): Promise<void> {
+    const token = captureSessionRequest(s);
     try {
-      const res = await fetch(`${API_BASE}/git/status`);
+      // Git belongs to the selected session's workspace. Keep the query
+      // optional for the idle/home state so older single-session servers and
+      // bookmarked API calls retain their launch-directory fallback.
+      const id = token?.sessionId ?? s.currentSessionId.value;
+      const query = id ? `?sessionId=${encodeURIComponent(id)}` : '';
+      const res = await fetch(`${API_BASE}/git/status${query}`);
+      if (token && !isCurrentRestRequest(s, token)) return;
       if (!res.ok) return;
       const gs: GitStatus = await res.json();
       s.gitStatus.value = gs.isRepo ? gs : null;
@@ -108,16 +115,20 @@ export function createSessionsModule(ctx: ClientContext): SessionsModule {
     s.messages.value = [];
     s.pendingApprovals.value = [];
     s.status.value = { busy: false };
+    s.gitStatus.value = null;
+    s.workDir.value = null;
     s.goal.value = null;
     s.todos.value = [];
     s.sessionPlan.value = null;
     s.skills.value = [];
+    s.skillsError.value = null;
     s.plugins.value = [];
     s.pluginInfo.value = null;
     s.mcpServers.value = [];
     s.mcpStartupMetrics.value = null;
     s.backgroundTasks.value = [];
     s.backgroundTaskOutput.value = '';
+    s.subagents.value = [];
     s.sessionActive.value = false;
     s.promptPending.value = false;
     s.pendingPromptAccepted = false;
@@ -167,16 +178,20 @@ export function createSessionsModule(ctx: ClientContext): SessionsModule {
           s.messages.value = [];
           s.pendingApprovals.value = [];
           s.status.value = { busy: false };
+          s.gitStatus.value = null;
+          s.workDir.value = null;
           s.goal.value = null;
           s.todos.value = [];
           s.sessionPlan.value = null;
           s.skills.value = [];
+          s.skillsError.value = null;
           s.plugins.value = [];
           s.pluginInfo.value = null;
           s.mcpServers.value = [];
           s.mcpStartupMetrics.value = null;
           s.backgroundTasks.value = [];
           s.backgroundTaskOutput.value = '';
+          s.subagents.value = [];
           s.promptPending.value = false;
           s.pendingPromptAccepted = false;
           s.sentMessageIds.clear();
@@ -214,6 +229,7 @@ export function createSessionsModule(ctx: ClientContext): SessionsModule {
   }
 
   ctx.fetchSessions = fetchSessions;
+  ctx.switchSession = switchSession;
   ctx.fetchGitStatus = fetchGitStatus;
   ctx.activateSession = activateSession;
 

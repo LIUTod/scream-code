@@ -429,6 +429,8 @@ export interface AgentAPI {
   setGoalBudget: (payload: SetGoalBudgetPayload) => GoalSnapshotData;
   getWolfpackMode: (payload: EmptyPayload) => boolean;
   getRlmEnabled: (payload: EmptyPayload) => boolean;
+  /** Maximum RLM recursion depth; Infinity means unlimited. */
+  getRlmMaxDepth: (payload: EmptyPayload) => number;
 }
 
 type AgentAPIWithId = WithAgentId<AgentAPI>;

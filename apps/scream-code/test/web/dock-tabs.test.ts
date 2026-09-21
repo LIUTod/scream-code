@@ -27,6 +27,7 @@ vi.mock('../../src/web/frontend/src/composables/useScreamWebClient', async () =>
     isArchived: ref(false),
     goal: ref(null),
     todos: ref([]),
+    subagents: ref([]),
     goalRequestPending: ref(false),
     goalRequestError: ref(null),
     olderAvailable: ref(false),
@@ -46,6 +47,15 @@ vi.mock('../../src/web/frontend/src/composables/useScreamWebClient', async () =>
     fetchSessions: vi.fn(async () => undefined),
     fetchSessionUsage: vi.fn(async () => undefined),
     fetchSessionContext: vi.fn(async () => undefined),
+    fetchSessionStatus: vi.fn(async () => undefined),
+    fetchSessionPlan: vi.fn(async () => undefined),
+    sessionPlan: ref(null),
+    switchPlanMode: vi.fn(async () => true),
+    switchWolfpack: vi.fn(async () => true),
+    switchRlm: vi.fn(async () => true),
+    clearPlan: vi.fn(async () => true),
+    undoHistory: vi.fn(async () => true),
+    compact: vi.fn(async () => true),
     reconnectNow: vi.fn(),
     resolveApproval: vi.fn(),
     loadOlderMessages: vi.fn(async () => undefined),
@@ -174,6 +184,26 @@ afterEach(() => {
 });
 
 describe('dock tab registry (mount / keep-alive)', () => {
+  it('registers and mounts the session-controls dock pane', async () => {
+    wrapper = mountShell();
+    openDockTab('control');
+    await flushPromises();
+    const pane = wrapper.find('.dock-pane--control');
+    expect(pane.exists()).toBe(true);
+    expect(pane.find('.session-controls').exists()).toBe(true);
+    expect(wrapper.find('.tab-button[data-kind="control"] .tab-label').text()).toBe('会话控制');
+  });
+
+  it('registers and mounts the collaboration-agents dock pane', async () => {
+    wrapper = mountShell();
+    openDockTab('agents');
+    await flushPromises();
+    const pane = wrapper.find('.dock-pane--agents');
+    expect(pane.exists()).toBe(true);
+    expect(pane.find('.subagents-panel').exists()).toBe(true);
+    expect(wrapper.find('.tab-button[data-kind="agents"] .tab-label').text()).toBe('协作代理');
+  });
+
   it('mounts a pane when a session tab opens and keeps it mounted while hidden', async () => {
     wrapper = mountShell();
     expect(wrapper.find('.right-panel').exists()).toBe(false);
@@ -287,6 +317,59 @@ describe('session-level tab singleton', () => {
     expect(wrapper.findAll('.tab-button[data-kind="file"]')).toHaveLength(2);
     expect(wrapper.findAll('.tab-button[data-kind="git"]')).toHaveLength(1);
   });
+
+  it('connects the active file tab to the shared file tabpanel', async () => {
+    wrapper = mountShell();
+    openFileInPanel('/src/a.ts');
+    await flushPromises();
+
+    const fileTab = wrapper.find('.tab-button[data-kind="file"]');
+    const filePane = wrapper.find('.dock-pane--file');
+    expect(fileTab.attributes('aria-controls')).toBe(filePane.attributes('id'));
+    expect(filePane.attributes('id')).toBe('dock-panel-file-pane');
+    expect(filePane.attributes('aria-labelledby')).toBe(fileTab.attributes('id'));
+
+    // A second file instance still points at the same mounted pane when it is
+    // selected; the tab strip must not manufacture an id from the file path.
+    openFileInPanel('/src/b.ts');
+    await flushPromises();
+    const activeFileTab = wrapper.find('.tab-button[data-kind="file"].active');
+    expect(activeFileTab.attributes('aria-controls')).toBe('dock-panel-file-pane');
+    expect(wrapper.find('.dock-pane--file').attributes('aria-labelledby')).toBe(activeFileTab.attributes('id'));
+  });
+
+  it('does not expose a synthetic tab label when a persisted dock has no tabs', async () => {
+    wrapper = mountShell();
+    setDockOpen(true);
+    await flushPromises();
+    const filePane = wrapper.find('.dock-pane--file');
+    expect(filePane.exists()).toBe(true);
+    expect(filePane.attributes('aria-labelledby')).toBeUndefined();
+  });
+
+  it('exposes keyboard-operable tab semantics without nesting the close control', async () => {
+    wrapper = mountShell();
+    openDockTab('git');
+    openDockTab('todo');
+    await flushPromises();
+
+    const tabs = wrapper.findAll('.tab-button');
+    expect(tabs[0]!.attributes('role')).toBe('tab');
+    expect(tabs[0]!.element.parentElement?.getAttribute('role')).toBe('presentation');
+    expect(tabs[0]!.attributes('tabindex')).toBe('-1');
+    expect(tabs[1]!.attributes('tabindex')).toBe('0');
+    expect(tabs[1]!.find('button').exists()).toBe(false);
+
+    await tabs[0]!.trigger('keydown', { key: 'ArrowRight' });
+    await flushPromises();
+    expect(dockPanel.activeTabId).toBe('dock:todo');
+    expect(document.activeElement?.id).toBe(tabs[1]!.attributes('id'));
+
+    const pane = wrapper.find('.dock-pane--todo');
+    expect(tabs[1]!.attributes('aria-controls')).toBe(pane.attributes('id'));
+    expect(pane.attributes('role')).toBe('tabpanel');
+    expect(pane.attributes('aria-labelledby')).toBe(tabs[1]!.attributes('id'));
+  });
 });
 
 describe('right dock collapse / expand', () => {
@@ -344,6 +427,8 @@ describe('responsive: <768px overlay float', () => {
     await flushPromises();
     expect(wrapper.find('.right-panel').classes()).toContain('overlay');
     expect(wrapper.find('.right-panel-backdrop').exists()).toBe(true);
+    expect(wrapper.find('.right-panel').attributes('role')).toBe('dialog');
+    expect(wrapper.find('.right-panel').attributes('aria-modal')).toBe('true');
     expect(wrapper.find('.panel-resize-handle--right').exists()).toBe(false);
     // The maximise control is pointless on an already full-screen float;
     // the collapse control stays.
@@ -372,6 +457,8 @@ describe('responsive: <1024px auto rail', () => {
     await wrapper.find('.stub-rail-toggle').trigger('click');
     expect(wrapper.find('.sidebar-mobile').exists()).toBe(true);
     expect(wrapper.find('.sidebar-backdrop').exists()).toBe(true);
+    expect(wrapper.find('.sidebar-mobile').attributes('role')).toBe('dialog');
+    expect(wrapper.find('.sidebar-mobile').attributes('aria-modal')).toBe('true');
     // The grid track never widens in the compact band.
     expect(wrapper.find('.shell').attributes('style')).toContain('--sidebar-track: 56px');
   });

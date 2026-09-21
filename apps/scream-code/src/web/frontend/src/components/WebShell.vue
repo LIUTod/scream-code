@@ -23,7 +23,7 @@ import {
   openFileInPanel,
   setDockOpen,
 } from '../utils/fileTabState';
-import type { SessionDockKind } from '../utils/dockTabTypes';
+import { dockPanelDomId, dockTabDomId, type SessionDockKind } from '../utils/dockTabTypes';
 import { readStoredString, writeStoredString } from '../utils/storage';
 import { useToast } from '../composables/useToast';
 import { closeSettingsModal } from '../composables/useSettingsModal';
@@ -37,6 +37,8 @@ import InfoPanel from './InfoPanel.vue';
 import LikePanel from './LikePanel.vue';
 import RunStatusPanel from './RunStatusPanel.vue';
 import SessionDetailView from './SessionDetailView.vue';
+import SessionControlsPanel from './SessionControlsPanel.vue';
+import SubagentPanel from './SubagentPanel.vue';
 import SettingsModal from './SettingsModal.vue';
 import SettingsView from './SettingsView.vue';
 import Sidebar from './Sidebar.vue';
@@ -75,25 +77,16 @@ const view = ref<ShellView>('home');
 const mobileSidebarOpen = ref(false);
 const sidebarRef = ref<InstanceType<typeof Sidebar> | null>(null);
 
-/**
- * WS `connected` is reached asynchronously after createSession →
- * switchSession → connect(); sending before that drops the prompt.
- */
-function waitForConnected(timeoutMs = 8000): Promise<boolean> {
-  if (connectionStatus.value === 'connected') return Promise.resolve(true);
-  return new Promise((resolve) => {
-    const started = Date.now();
-    const timer = window.setInterval(() => {
-      if (connectionStatus.value === 'connected') {
-        window.clearInterval(timer);
-        resolve(true);
-      } else if (Date.now() - started > timeoutMs) {
-        window.clearInterval(timer);
-        resolve(false);
-      }
-    }, 80);
+/** WS `connected` is reached asynchronously after createSession → switchSession.
+ * Keep a synchronous fallback for embedders compiled against the pre-waiter
+ * client facade (and for lightweight component test doubles). */
+const waitForConnected =
+  client.waitForConnected ??
+  ((timeoutMs = 0): Promise<boolean> => {
+    void timeoutMs;
+    return Promise.resolve(connectionStatus.value === 'connected');
   });
-}
+const isConnectionReady = () => connectionStatus.value === 'connected';
 
 /**
  * Lazy session creation: "new chat" no longer POSTs /sessions immediately — a
@@ -313,6 +306,20 @@ const { onCommand } = useSlashCommands({
   // otherwise only when nothing is bound.
   ensureSession: async () => {
     if (!currentSessionId.value) await createSession(preferredWorkDir.value ?? undefined);
+    // REST controls and WS slash commands are both dispatched immediately
+    // after this hook.  A newly-created session has a short connecting window;
+    // report failure to the shared dispatcher instead of letting the command
+    // fall into the client's "not connected" drop path.
+    const targetSessionId = currentSessionId.value;
+    if (!targetSessionId) return false;
+    if (connectionStatus.value !== 'connected') {
+      const ready = await waitForConnected();
+      if (!ready || currentSessionId.value !== targetSessionId || !isConnectionReady()) {
+        showToast('会话连接尚未就绪，请稍后重试。', 'warning');
+        return false;
+      }
+    }
+    return currentSessionId.value === targetSessionId && isConnectionReady();
   },
   onNew: onCreateSession,
   showInfo,
@@ -429,6 +436,8 @@ const shellStyle = computed(() => ({
 /* ── Dock tab rendering (registry-bound) ─────────────────────────────────── */
 const dockPaneComponents: Record<SessionDockKind, Component> = {
   detail: SessionDetailView,
+  control: SessionControlsPanel,
+  agents: SubagentPanel,
   run: RunStatusPanel,
   git: GitPanel,
   todo: TodoPanel,
@@ -438,6 +447,15 @@ const dockPaneComponents: Record<SessionDockKind, Component> = {
 
 const sessionTabs = computed(() => dockPanel.tabs.filter((t) => t.kind !== 'file'));
 const activeTabKind = computed(() => activeDockTab()?.kind ?? 'file');
+const activeTabDomId = computed(() => {
+  const tab = activeDockTab();
+  // A persisted panel can briefly be open with an empty/invalid tab list
+  // (for example after a storage migration).  Do not point a tabpanel at a
+  // synthetic, non-existent tab id; assistive tech should see no label until
+  // a real tab is available.
+  return tab ? dockTabDomId(tab.id) : undefined;
+});
+const filePanelDomId = dockPanelDomId('file-pane');
 /** The file pane also covers the empty dock (FileViewer shows its hint). */
 const filePaneVisible = computed(() => activeTabKind.value === 'file');
 
@@ -454,6 +472,8 @@ const gitPaneListeners = { refresh: () => fetchGitStatus(), diff: onDockGitDiff 
 function dockPaneProps(kind: SessionDockKind): Record<string, unknown> {
   switch (kind) {
     case 'detail': return { client };
+    case 'control': return { client };
+    case 'agents': return { subagents: client.subagents.value };
     case 'run': return { status: client.status.value, busy: client.isBusy.value, connectionStatus: client.connectionStatus.value };
     case 'git': return { gitStatus: client.gitStatus.value };
     case 'todo': return { todos: client.todos.value };
@@ -575,7 +595,13 @@ onBeforeUnmount(() => {
     />
 
     <div v-if="mobileSidebarOpen" class="sidebar-backdrop" aria-hidden="true" @click="mobileSidebarOpen = false" />
-    <div v-if="mobileSidebarOpen" class="sidebar-mobile">
+    <div
+      v-if="mobileSidebarOpen"
+      class="sidebar-mobile"
+      role="dialog"
+      aria-modal="true"
+      aria-label="导航菜单"
+    >
       <Sidebar
         :view="view"
         :sessions="sessions"
@@ -674,6 +700,8 @@ onBeforeUnmount(() => {
       v-if="dockPanel.panelOpen"
       class="right-panel"
       :class="{ overlay: !isSplitMode, maximized: dockMaximized }"
+      :role="!isSplitMode ? 'dialog' : undefined"
+      :aria-modal="!isSplitMode ? 'true' : undefined"
       aria-label="右栏"
     >
       <!-- The tab strip IS the dock header: file tabs plus the singleton
@@ -685,7 +713,14 @@ onBeforeUnmount(() => {
         @collapse="collapseRightDock"
       />
       <div class="right-panel-body">
-        <div v-show="filePaneVisible" class="dock-pane dock-pane--file">
+        <div
+          v-show="filePaneVisible"
+          :id="filePanelDomId"
+          class="dock-pane dock-pane--file"
+          role="tabpanel"
+          :aria-labelledby="filePaneVisible ? activeTabDomId : undefined"
+          tabindex="0"
+        >
           <FileViewer :client="client" />
         </div>
         <!-- Session-level panes stay mounted once opened (v-show only): tab
@@ -697,6 +732,10 @@ onBeforeUnmount(() => {
           class="dock-pane"
           :class="`dock-pane--${tab.kind}`"
           :data-dock-tab="tab.kind"
+          :id="dockPanelDomId(tab.id)"
+          role="tabpanel"
+          :aria-labelledby="dockTabDomId(tab.id)"
+          tabindex="0"
         >
           <component
             :is="dockPaneComponents[tab.kind]"
@@ -750,7 +789,7 @@ onBeforeUnmount(() => {
   height: 100vh;
   height: 100dvh;
   overflow: hidden;
-  background: transparent;
+  background: var(--color-bg);
   color: var(--color-text);
 }
 /* While dragging, freeze every width transition so the handle tracks the
@@ -830,6 +869,7 @@ onBeforeUnmount(() => {
 /* Standalone session panels scroll inside their pane; spacing via tokens,
    no borders — the dock body is the only container. */
 .dock-pane--run,
+.dock-pane--agents,
 .dock-pane--git,
 .dock-pane--todo,
 .dock-pane--goal,
@@ -856,7 +896,7 @@ onBeforeUnmount(() => {
 .right-panel-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.42);
+  background: var(--color-scrim);
   z-index: calc(var(--z-overlay) - 1);
   animation: backdrop-in var(--dur-slow) var(--ease-out);
 }
@@ -887,10 +927,15 @@ onBeforeUnmount(() => {
 }
 
 .canvas {
+  /* On phone widths Sidebar is display:none. Pin the canvas to the middle
+     track rather than relying on grid auto-placement, which would otherwise
+     assign it to the zero-width first track. */
+  grid-column: 2;
   display: flex;
   flex-direction: column;
   min-width: 0;
   min-height: 0;
+  background: var(--color-canvas);
 }
 
 /* ── Top bar: mobile only (desktop chrome lives in the sidebar) ─────────── */
@@ -961,7 +1006,7 @@ onBeforeUnmount(() => {
 .sidebar-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.42);
+  background: var(--color-scrim);
   z-index: calc(var(--z-overlay) - 1);
   animation: backdrop-in var(--dur-slow) var(--ease-out);
 }
@@ -999,10 +1044,12 @@ onBeforeUnmount(() => {
     left: 0;
     right: 0;
     z-index: 30;
-    background: var(--color-bg);
+    min-height: calc(var(--topbar-height) + env(safe-area-inset-top));
+    padding-top: calc(var(--space-2) + env(safe-area-inset-top));
+    background: var(--color-canvas);
   }
   .canvas {
-    padding-top: 54px;
+    padding-top: calc(var(--topbar-height) + env(safe-area-inset-top));
   }
   .mobile-menu {
     display: grid;

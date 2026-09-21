@@ -25,6 +25,7 @@ function fakeClient(overrides: Record<string, unknown> = {}) {
   const backgroundTasks = ref([
     { taskId: 't1', command: 'echo hi', description: 'Say hi', status: 'running' },
   ]);
+  const backgroundTaskOutput = ref('');
   const status = ref({ model: 'm1' });
   const currentSessionId = ref<string | null>('sess-1');
   const modelsError = ref<string | null>(null);
@@ -44,9 +45,11 @@ function fakeClient(overrides: Record<string, unknown> = {}) {
     stopMcpServer: vi.fn(async () => true),
     removeMcpServer: vi.fn(async () => true),
     stopBackgroundTask: vi.fn(async () => true),
-    fetchBackgroundTaskOutput: vi.fn(async () => undefined),
+    fetchBackgroundTaskOutput: vi.fn(async () => {
+      backgroundTaskOutput.value = 'hello from task';
+    }),
   };
-  const client = { models, skills, plugins, mcpServers, backgroundTasks, status, currentSessionId, modelsError, ...actions, ...overrides };
+  const client = { models, skills, plugins, mcpServers, backgroundTasks, backgroundTaskOutput, status, currentSessionId, modelsError, ...actions, ...overrides };
   return { client, actions, models, skills, plugins, mcpServers, backgroundTasks };
 }
 
@@ -152,6 +155,19 @@ describe('SettingsView (G4)', () => {
     expect(wrapper.text()).toContain('echo hi');
     expect(wrapper.text()).toContain('running');
     expect(wrapper.text()).toContain('停止');
+  });
+
+  it('renders the selected task output after fetching it', async () => {
+    const { client, actions } = fakeClient();
+    const wrapper = mountView(client);
+    await wrapper.findAll('.rail-tab')[5].trigger('click');
+    await flushPromises();
+    const output = wrapper.findAll('.row-action').find((button) => button.text() === '输出');
+    expect(output).toBeTruthy();
+    await output!.trigger('click');
+    await flushPromises();
+    expect(actions.fetchBackgroundTaskOutput).toHaveBeenCalledWith('t1', 200);
+    expect(wrapper.find('.task-output').text()).toContain('hello from task');
   });
 
   it('emits update-like when saving preferences', async () => {

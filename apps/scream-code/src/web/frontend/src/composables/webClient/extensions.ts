@@ -1,5 +1,11 @@
 import type { PluginInfo, PluginSummary, ReloadSummary, SkillSummary } from '../../types';
-import { API_BASE, type ClientContext } from './state';
+import {
+  API_BASE,
+  captureSessionRequest,
+  isCurrentSessionRequest,
+  type ClientContext,
+  type SessionRequestToken,
+} from './state';
 
 export interface ExtensionsModule {
   fetchSkills(): Promise<void>;
@@ -20,11 +26,25 @@ export interface ExtensionsModule {
 export function createExtensionsModule(ctx: ClientContext): ExtensionsModule {
   const { s } = ctx;
 
+  // Separate request counters prevent an older response from a repeated
+  // refresh (or an install/reload follow-up) from replacing newer data in the
+  // same session.  Session/connection generations below protect cross-session
+  // responses; these counters protect ordering within one session.
+  let skillsRequest = 0;
+  let pluginsRequest = 0;
+  let pluginInfoRequest = 0;
+
+  function current(token: SessionRequestToken | null): token is SessionRequestToken {
+    return token !== null && isCurrentSessionRequest(s, token);
+  }
+
   async function fetchSkills(): Promise<void> {
-    const id = s.sessionId.value;
-    if (!id) return;
+    const token = captureSessionRequest(s);
+    if (!token) return;
+    const request = ++skillsRequest;
     try {
-      const res = await fetch(`${API_BASE}/sessions/${id}/skills`);
+      const res = await fetch(`${API_BASE}/sessions/${token.sessionId}/skills`);
+      if (!current(token) || request !== skillsRequest) return;
       if (!res.ok) {
         // Silent-failure sweep: the skills center must distinguish "genuinely no skills"
         // from "failed to load".
@@ -34,6 +54,7 @@ export function createExtensionsModule(ctx: ClientContext): ExtensionsModule {
       s.skills.value = (await res.json()) as SkillSummary[];
       s.skillsError.value = null;
     } catch (error) {
+      if (!current(token) || request !== skillsRequest) return;
       s.skillsError.value = `技能列表加载失败：${error instanceof Error ? error.message : String(error)}`;
     }
   }
@@ -43,11 +64,12 @@ export function createExtensionsModule(ctx: ClientContext): ExtensionsModule {
   }
 
   async function removeSkill(name: string): Promise<boolean> {
-    const id = s.sessionId.value;
-    if (!id) return false;
+    const token = captureSessionRequest(s);
+    if (!token) return false;
+    ++skillsRequest;
     try {
-      const res = await fetch(`${API_BASE}/sessions/${id}/skills/${encodeURIComponent(name)}`, { method: 'DELETE' });
-      if (!res.ok) return false;
+      const res = await fetch(`${API_BASE}/sessions/${token.sessionId}/skills/${encodeURIComponent(name)}`, { method: 'DELETE' });
+      if (!current(token) || !res.ok) return false;
       s.skills.value = s.skills.value.filter((s) => s.name !== name);
       return true;
     } catch {
@@ -56,38 +78,41 @@ export function createExtensionsModule(ctx: ClientContext): ExtensionsModule {
   }
 
   async function fetchPlugins(): Promise<void> {
-    const id = s.sessionId.value;
-    if (!id) return;
+    const token = captureSessionRequest(s);
+    if (!token) return;
+    const request = ++pluginsRequest;
     try {
-      const res = await fetch(`${API_BASE}/sessions/${id}/plugins`);
-      if (!res.ok) return;
+      const res = await fetch(`${API_BASE}/sessions/${token.sessionId}/plugins`);
+      if (!current(token) || request !== pluginsRequest || !res.ok) return;
       s.plugins.value = (await res.json()) as PluginSummary[];
     } catch { /* best-effort */ }
   }
 
   async function fetchPluginInfo(pid: string): Promise<void> {
-    const id = s.sessionId.value;
-    if (!id) return;
+    const token = captureSessionRequest(s);
+    if (!token) return;
+    const request = ++pluginInfoRequest;
     try {
-      const res = await fetch(`${API_BASE}/sessions/${id}/plugins/${encodeURIComponent(pid)}`);
-      if (!res.ok) return;
+      const res = await fetch(`${API_BASE}/sessions/${token.sessionId}/plugins/${encodeURIComponent(pid)}`);
+      if (!current(token) || request !== pluginInfoRequest || !res.ok) return;
       s.pluginInfo.value = (await res.json()) as PluginInfo;
     } catch { /* best-effort */ }
   }
 
   async function installPlugin(source: string): Promise<PluginSummary | null> {
-    const id = s.sessionId.value;
-    if (!id) return null;
+    const token = captureSessionRequest(s);
+    if (!token) return null;
+    ++pluginsRequest;
     try {
-      const res = await fetch(`${API_BASE}/sessions/${id}/plugins/install`, {
+      const res = await fetch(`${API_BASE}/sessions/${token.sessionId}/plugins/install`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ source }),
       });
-      if (!res.ok) return null;
+      if (!current(token) || !res.ok) return null;
       const plugin = (await res.json()) as PluginSummary;
       await fetchPlugins();
-      return plugin;
+      return current(token) ? plugin : null;
     } catch {
       return null;
     }
@@ -102,11 +127,12 @@ export function createExtensionsModule(ctx: ClientContext): ExtensionsModule {
   }
 
   async function removePlugin(pid: string): Promise<boolean> {
-    const id = s.sessionId.value;
-    if (!id) return false;
+    const token = captureSessionRequest(s);
+    if (!token) return false;
+    ++pluginsRequest;
     try {
-      const res = await fetch(`${API_BASE}/sessions/${id}/plugins/${encodeURIComponent(pid)}`, { method: 'DELETE' });
-      if (!res.ok) return false;
+      const res = await fetch(`${API_BASE}/sessions/${token.sessionId}/plugins/${encodeURIComponent(pid)}`, { method: 'DELETE' });
+      if (!current(token) || !res.ok) return false;
       s.plugins.value = s.plugins.value.filter((p) => p.id !== pid);
       return true;
     } catch {
@@ -115,14 +141,15 @@ export function createExtensionsModule(ctx: ClientContext): ExtensionsModule {
   }
 
   async function reloadPlugins(): Promise<ReloadSummary | null> {
-    const id = s.sessionId.value;
-    if (!id) return null;
+    const token = captureSessionRequest(s);
+    if (!token) return null;
+    ++pluginsRequest;
     try {
-      const res = await fetch(`${API_BASE}/sessions/${id}/plugins/reload`, { method: 'POST' });
-      if (!res.ok) return null;
+      const res = await fetch(`${API_BASE}/sessions/${token.sessionId}/plugins/reload`, { method: 'POST' });
+      if (!current(token) || !res.ok) return null;
       const summary = (await res.json()) as ReloadSummary;
       await fetchPlugins();
-      return summary;
+      return current(token) ? summary : null;
     } catch {
       return null;
     }

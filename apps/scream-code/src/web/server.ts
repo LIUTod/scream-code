@@ -63,7 +63,10 @@ import { toString as qrToString } from 'qrcode';
 // ─── Types ────────────────────────────────────────────────────────────────
 
 /** Server-owned journal event kinds (not part of the core event union). */
-type WebJournalEvent = { type: 'web.message.finalized'; message: ChatMessage };
+type WebJournalEvent =
+  | { type: 'web.message.finalized'; message: ChatMessage }
+  /** Durable tombstone that makes a core context undo visible in the web journal. */
+  | { type: 'web.history.undone'; count: number; beforeSeq: number };
 
 interface JournalEntry {
   readonly seq: number;
@@ -83,6 +86,8 @@ interface ChatMessage {  role: 'user' | 'assistant';
   content: string;
   clientMessageId?: string;
   tools: ToolMessage[];
+  /** Core prompt kind used to project `/revoke` without confusing skill turns with user rows. */
+  undoAnchor?: 'user' | 'skill' | 'other';
   isError?: boolean;
   /** Real wall-clock time of the turn start (ms epoch). Persisted via finalized snapshots. */
   ts?: number;
@@ -518,15 +523,28 @@ async function ensureSessionsDir(homeDir: string): Promise<void> {
   }
 }
 
-async function appendJournalLine(homeDir: string, sessionId: string, line: string): Promise<void> {
+async function appendJournalLine(
+  homeDir: string,
+  sessionId: string,
+  line: string,
+  throwOnError = false,
+): Promise<void> {
   // Written through the serialization gate: a large payload (a finalized body
   // can reach hundreds of thousands of chars) racing small entries through
   // writeFile(flag:'a') interleaves at the byte level, producing malformed
   // lines that swallow the whole history (see the note at the top of
   // journal-writer.ts).
+  let writeError: unknown;
   await appendJournalLineSerialized(getJournalPath(homeDir, sessionId), line, (error) => {
+    writeError = error;
     log.warn('web: failed to persist journal line', { sessionId, error: String(error) });
   });
+  // Most journal writes are deliberately best-effort: a transient disk error
+  // must not tear down an otherwise live turn.  Undo is different: its
+  // projection marker is the only durable record that prevents removed turns
+  // from reappearing after a restart, so its caller can opt into surfacing the
+  // write failure before acknowledging the REST request.
+  if (throwOnError && writeError !== undefined) throw writeError;
 }
 
 let metaWriteSeq = 0;
@@ -631,16 +649,33 @@ function isMessageBearingEntry(entry: PersistedEntry): boolean {
  */
 function contextHistoryToChatMessages(history: readonly ContextMessage[]): ChatMessage[] {
   const out: ChatMessage[] = [];
+  let pendingAnchor: 'user' | 'skill' | 'other' = 'other';
   for (const message of history) {
     if (message.role !== 'user' && message.role !== 'assistant') continue;
     if (isInternalMessage(message)) continue;
-    if (message.origin !== undefined && message.origin.kind !== 'user') continue;
+    const anchor = classifyUndoAnchor(message.origin);
+    if (message.role === 'user') {
+      pendingAnchor = anchor;
+      // Skill activation prompts are model context, not a visible Web user
+      // bubble; retain their anchor on the following assistant block.
+      if (anchor === 'skill' || anchor === 'other') continue;
+    }
     const text = message.content
       .map((part) => (part.type === 'text' ? part.text : ''))
       .join('')
       .trim();
     if (text.length === 0) continue;
-    out.push({ role: message.role, content: text, tools: [] });
+    out.push({
+      role: message.role,
+      content: text,
+      tools: [],
+      undoAnchor: message.role === 'assistant' ? pendingAnchor : anchor,
+    });
+    // Keep the anchor active across every assistant/tool message in the same
+    // turn.  A single core turn may contain several assistant messages (for
+    // example a tool-call message followed by the final answer); resetting
+    // after the first one would leave the rest of a skill turn untagged and
+    // make `/revoke` remove only its final fragment.
   }
   return out;
 }
@@ -677,6 +712,87 @@ function deriveTitle(messages: ChatMessage[]): string {
   if (!firstUser) return 'New Session';
   const text = firstUser.content.trim();
   return text.length > 40 ? text.slice(0, 40) + '...' : text;
+}
+
+/**
+ * Remove complete user-turn blocks from a rendered transcript.  The core
+ * context owns the authoritative undo operation; the web journal is append
+ * only, so a durable undo marker asks this projection to hide the same turns
+ * when snapshots are rebuilt (including after a restart).
+ *
+ * `beforeSeq` is an inclusive cursor captured before the core mutation. It
+ * also covers a user message that reserved the next sequence but never
+ * emitted a turn event.
+ */
+function removeLastTurnsBefore(
+  messages: ChatMessage[],
+  count: number,
+  beforeSeq: number,
+): void {
+  if (count <= 0 || messages.length === 0) return;
+  const firstFutureIndex = messages.findIndex(
+    (message) => typeof message.seq === 'number' && message.seq > beforeSeq,
+  );
+  const prefixLength = firstFutureIndex === -1 ? messages.length : firstFutureIndex;
+  const prefix = messages.slice(0, prefixLength);
+  const tail = messages.slice(prefixLength);
+  let remaining = count;
+  while (remaining > 0) {
+    let anchor = -1;
+    for (let i = prefix.length - 1; i >= 0; i -= 1) {
+      const message = prefix[i];
+      // A user-triggered skill turn has no visible user row in the Web
+      // transcript, but it is still a core undo anchor.  The turn metadata
+      // lets us remove that assistant block alone instead of reaching back
+      // and deleting the previous ordinary prompt.
+      if (message?.role === 'assistant' && message.undoAnchor === 'skill') {
+        // A skill turn has no visible user row.  Walk over the complete
+        // contiguous assistant block so multi-message turns (tool-call +
+        // final response) are removed as one undo unit.
+        anchor = i;
+        while (anchor > 0) {
+          const previous = prefix[anchor - 1];
+          if (previous?.role !== 'assistant' || previous.undoAnchor !== 'skill') break;
+          anchor -= 1;
+        }
+        break;
+      }
+      if (message?.role === 'user') {
+        anchor = i;
+        break;
+      }
+    }
+    if (anchor < 0) break;
+    prefix.splice(anchor);
+    remaining -= 1;
+  }
+  messages.splice(0, messages.length, ...prefix, ...tail);
+}
+
+function classifyUndoAnchor(origin: unknown): 'user' | 'skill' | 'other' {
+  if (origin === undefined || origin === null) return 'user';
+  if (typeof origin !== 'object') return 'other';
+  const kind = (origin as { kind?: unknown }).kind;
+  if (kind === 'user') return 'user';
+  if (kind === 'skill_activation' && (origin as { trigger?: unknown }).trigger === 'user-slash') return 'skill';
+  return 'other';
+}
+
+/** Match the core `/undo` anchor rule without importing agent-core internals. */
+function countUndoAnchors(history: readonly ContextMessage[]): number {
+  let count = 0;
+  for (const message of history) {
+    if (message.role !== 'user') continue;
+    const origin = message.origin;
+    if (
+      origin === undefined ||
+      origin.kind === 'user' ||
+      (origin.kind === 'skill_activation' && origin.trigger === 'user-slash')
+    ) {
+      count += 1;
+    }
+  }
+  return count;
 }
 
 // ─── Git status ───────────────────────────────────────────────────────────
@@ -968,6 +1084,8 @@ class WebSession {
   private heartbeatTimer: NodeJS.Timeout | null = null;
   private unsubscribe: (() => void) | null = null;
   private busy = false;
+  /** Prevent two concurrent REST `/undo` calls from mutating core history together. */
+  private undoInFlight = false;
   /**
    * In-flight turn count across all agents (main + subagents). Used by the
    * idle-exit watchdog: a single boolean is not enough because a subagent's
@@ -1089,10 +1207,10 @@ class WebSession {
 
   // ── Persistence ────────────────────────────────────────────────────────
 
-  private async persistEntry(entry: JournalEntry): Promise<void> {
+  private async persistEntry(entry: JournalEntry, throwOnError = false): Promise<void> {
     if (!this.homeDir) return;
     const line = JSON.stringify({ type: 'journal', ...entry });
-    await appendJournalLine(this.homeDir, this.sessionId, line);
+    await appendJournalLine(this.homeDir, this.sessionId, line, throwOnError);
   }
 
   private async persistUserMessage(text: string, beforeSeq: number, clientMessageId?: string): Promise<void> {
@@ -1146,6 +1264,9 @@ class WebSession {
    * journal holds no message records.
    */
   private readonly seededMessages: ChatMessage[] = [];
+  /** Undo markers already reflected by a core-history seed must not be applied twice. */
+  private readonly seedCoveredUndoMarkers = new Set<number>();
+  private historySeeded = false;
 
   /**
    * Mark the journal untrustworthy (byte-interleaving damage, see
@@ -1192,7 +1313,14 @@ class WebSession {
    * monotonic with live events and consistent with the getMessagesOlder cursor.
    */
   seedHistory(messages: ChatMessage[]): void {
-    if (messages.length === 0 || this.seededMessages.length > 0) return;
+    if (this.historySeeded) return;
+    this.historySeeded = true;
+    for (const entry of this.journal) {
+      if ((entry.payload as unknown as { type?: string }).type === 'web.history.undone') {
+        this.seedCoveredUndoMarkers.add(entry.seq);
+      }
+    }
+    if (messages.length === 0) return;
     let seq = 1;
     for (const message of messages) {
       this.seededMessages.push({ ...message, seq });
@@ -1250,7 +1378,10 @@ class WebSession {
    * clients. Used for server-owned reconstruction material (finalized
    * assistant snapshots) that clients never consume as live events.
    */
-  private appendDurableSilent(payload: Record<string, unknown>): JournalEntry {
+  private appendDurableSilent(
+    payload: Record<string, unknown>,
+    throwOnPersistenceError = false,
+  ): { entry: JournalEntry; persisted: Promise<void> } {
     const entry: JournalEntry = {
       seq: this.nextSeq++,
       epoch: this.epoch,
@@ -1258,8 +1389,9 @@ class WebSession {
       payload: payload as unknown as Event,
     };
     this.journal.push(entry);
-    this.trackPending(this.persistEntry(entry));
-    return entry;
+    const persisted = this.persistEntry(entry, throwOnPersistenceError);
+    this.trackPending(persisted);
+    return { entry, persisted };
   }
 
   private subscribeEvents(): void {
@@ -1584,8 +1716,8 @@ class WebSession {
   // ── Slash commands ───────────────────────────────────────────────────────
 
   private async handleCommand(ws: WebSocket, command: string, args?: string, pendingMsgId?: string): Promise<void> {
-    const ok = (message: string): void => {
-      this.broadcast({ type: 'command_result', command, ok: true, message, pendingMsgId }, false);
+    const ok = (message: string, extra?: { sessionId?: string }): void => {
+      this.broadcast({ type: 'command_result', command, ok: true, message, pendingMsgId, ...extra }, false);
     };
     const fail = (message: string): void => {
       this.broadcast({ type: 'command_result', command, ok: false, message, pendingMsgId }, false);
@@ -1620,10 +1752,11 @@ class WebSession {
         return;
       }
       case 'auto':
+      case 'ask':
       case 'yes':
       case 'bot': {
         const mode: PermissionMode =
-          command === 'auto' ? 'auto' : command === 'bot' ? 'bot' : 'yolo';
+          command === 'auto' ? 'auto' : command === 'ask' ? 'ask' : command === 'bot' ? 'bot' : 'yolo';
         try {
           await this.session.setPermission(mode);
           this.permission = mode;
@@ -1667,7 +1800,7 @@ class WebSession {
             fail('Fork 失败：无法复制当前会话。');
             return;
           }
-          ok(`会话已 fork，新会话 ID：${result.sessionId}`);
+          ok(`会话已 fork，新会话 ID：${result.sessionId}`, { sessionId: result.sessionId });
         } catch (error) {
           fail(`Fork 失败：${errMsg(error)}`);
         }
@@ -1792,6 +1925,7 @@ class WebSession {
         planMode: false,
         wolfpackMode: false,
         rlmEnabled: false,
+        rlmMaxDepth: null,
         contextTokens: 0,
         maxContextTokens: 0,
         contextUsage: 0,
@@ -2003,6 +2137,79 @@ class WebSession {
     return this.session;
   }
 
+  /**
+   * Undo user turns in the core session and append a durable web projection
+   * marker.  The core RPC deliberately has no UI knowledge, so without the
+   * marker the old append-only web journal would resurrect the removed turns
+   * on the next snapshot or after a restart.
+   */
+  async undoHistory(count: number): Promise<void> {
+    if (!Number.isSafeInteger(count) || count < 1) {
+      throw new HttpError(400, 'Undo count must be a positive integer.');
+    }
+    if (this.busy) {
+      throw new HttpError(409, 'Session is busy', ErrorCodes.TURN_AGENT_BUSY);
+    }
+    const session = this.requireLiveSession();
+    if (this.undoInFlight) {
+      throw new HttpError(409, 'Undo already in progress');
+    }
+    // Set the guard before the first await. JavaScript runs this synchronous
+    // prefix atomically, so a second POST cannot pass the check while the
+    // first request is reading/mutating core history or flushing its marker.
+    this.undoInFlight = true;
+    try {
+      // User messages reserve `nextSeq` before their first turn event is
+      // journaled. Capture the inclusive cursor so an immediately failed or
+      // interrupted prompt is still covered by the undo marker.
+      const beforeSeq = this.nextSeq;
+
+      // Count anchors before and after the core mutation so a request larger
+      // than the available history (or one stopped at a compaction boundary)
+      // does not over-truncate the web projection.
+      let beforeAnchors: number | null = null;
+      try {
+        beforeAnchors = countUndoAnchors((await session.getContext()).history);
+      } catch (error) {
+        log.warn('web: failed to read context before undo', { sessionId: this.sessionId, error: String(error) });
+      }
+
+      await session.undoHistory(count);
+
+      let removed = count;
+      if (beforeAnchors !== null) {
+        try {
+          const afterAnchors = countUndoAnchors((await session.getContext()).history);
+          removed = Math.max(0, beforeAnchors - afterAnchors);
+        } catch (error) {
+          log.warn('web: failed to read context after undo', { sessionId: this.sessionId, error: String(error) });
+        }
+      }
+
+      if (removed <= 0) {
+        await this.refreshStatus();
+        this.broadcastStatus();
+        return;
+      }
+
+      const { entry, persisted } = this.appendDurableSilent({
+        type: 'web.history.undone',
+        count: removed,
+        beforeSeq,
+      }, true);
+      // Do not acknowledge the REST mutation until the tombstone is queued and
+      // the append has completed. Without this await, a process crash between a
+      // 200 response and the fire-and-forget write resurrects the undone turns.
+      await persisted;
+      this.broadcast({ type: 'event', seq: entry.seq, epoch: entry.epoch, payload: entry.payload }, false);
+      this.trackPending(this.updateTitle());
+      await this.refreshStatus();
+      this.broadcastStatus();
+    } finally {
+      this.undoInFlight = false;
+    }
+  }
+
   private requireGoalSession(allowBusy = false): Session {
     if (!this.session) {
       throw new HttpError(409, 'Session is archived (read-only)', ErrorCodes.SESSION_CLOSED);
@@ -2090,6 +2297,7 @@ class WebSession {
             role: 'assistant',
             content: '',
             tools: [],
+            undoAnchor: classifyUndoAnchor(event.origin),
             seq: entry.seq,
             model: this.cachedStatus?.model,
             turnStats: {
@@ -2149,6 +2357,9 @@ class WebSession {
           const lastSkeletonSeq = messages.length > 0 && messages.at(-1)?.role === 'assistant'
             ? messages.at(-1)!.seq
             : entry.seq;
+          if (finalized.undoAnchor === undefined && messages.at(-1)?.role === 'assistant') {
+            finalized.undoAnchor = messages.at(-1)!.undoAnchor;
+          }
           finalized.seq = lastSkeletonSeq;
           if (messages.length > 0 && messages.at(-1)?.role === 'assistant') {
             messages[messages.length - 1] = finalized;
@@ -2157,6 +2368,23 @@ class WebSession {
           }
           currentAssistant = null;
           turnFinalized = true;
+          break;
+        }
+        case 'web.history.undone': {
+          // Core context has already removed the turns.  Apply the durable
+          // projection marker while rebuilding the web transcript so the
+          // REST caller, other tabs, and a later server restart all converge
+          // on the same visible history.
+          // If this journal predates durable message snapshots, activation
+          // seeds the *post-undo* core context into `seededMessages`.  In that
+          // case applying the marker again would remove one extra turn; the
+          // seed is already authoritative.  Journals with their own message
+          // entries still need the marker projection.
+          if (!this.seedCoveredUndoMarkers.has(entry.seq)) {
+            removeLastTurnsBefore(messages, event.count, event.beforeSeq);
+          }
+          currentAssistant = null;
+          turnFinalized = false;
           break;
         }
         case 'turn.ended':
@@ -2178,7 +2406,7 @@ class WebSession {
 
     for (let i = userIndex; i < this.userMessages.length; i++) {
       const item = this.userMessages[i];
-      if (item !== undefined) messages.push(item.msg);
+      if (item !== undefined) messages.push({ ...item.msg, seq: item.beforeSeq });
     }
 
     return messages;
@@ -2990,7 +3218,9 @@ export class SessionManager {
   }
 
   async undoHistory(sessionId: string, count: number): Promise<void> {
-    await this.getLiveSession(sessionId).undoHistory(count);
+    const ws = this.sessions.get(sessionId);
+    if (!ws) throw new HttpError(404, 'Session not found', ErrorCodes.SESSION_NOT_FOUND);
+    await ws.undoHistory(count);
   }
 
   async compact(sessionId: string, instruction?: string): Promise<void> {
@@ -3206,19 +3436,38 @@ async function handleSessionDataRoutes(
     return true;
   }
 
-  // Git status for the status bar
-  if (url === `${API_PREFIX}/git/status` && method === 'GET') {
-    const gs = await getGitStatus(workDir);
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify(gs));
-    return true;
-  }
+  // Git status for the status bar. Git is exposed as a legacy global route,
+  // but the selected session may point at a different workspace from the
+  // server's launch directory. New clients pass `sessionId`; keep the
+  // launch-directory fallback so older clients continue to work.
+  const gitPath = url.split('?')[0];
+  const isGitStatusRoute = gitPath === `${API_PREFIX}/git/status` && method === 'GET';
+  const isGitDiffRoute = gitPath === `${API_PREFIX}/git/diff` && method === 'GET';
+  if (isGitStatusRoute || isGitDiffRoute) {
+    const gitQuery = new URLSearchParams(url.split('?')[1] ?? '');
+    const requestedGitSessionId = gitQuery.get('sessionId');
+    let gitWorkDir = workDir;
+    if (requestedGitSessionId !== null) {
+      const gitSession = resolveSession(requestedGitSessionId);
+      if (!gitSession) {
+        sendJson(res, 404, { code: ErrorCodes.SESSION_NOT_FOUND, message: 'Session not found' });
+        return true;
+      }
+      gitWorkDir = gitSession.workDir;
+    }
 
-  // Single-file git diff
-  if (url.startsWith(`${API_PREFIX}/git/diff?`) && method === 'GET') {
-    const relPath = new URLSearchParams(url.split('?')[1] ?? '').get('path') ?? '';
+    // Git status for the status bar
+    if (isGitStatusRoute) {
+      const gs = await getGitStatus(gitWorkDir);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(gs));
+      return true;
+    }
+
+    // Single-file git diff
+    const relPath = gitQuery.get('path') ?? '';
     try {
-      const result = await getGitFileDiff(workDir, relPath);
+      const result = await getGitFileDiff(gitWorkDir, relPath);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ path: relPath, patch: result?.patch ?? '' }));
     } catch (error) {
@@ -3347,6 +3596,27 @@ export async function startWebServerForSession(session: Session, opts: {
         new FileGate(() => [opts.workDir]),
       )
     ) {
+      return;
+    }
+
+    // Keep the single-session test/embedding server aligned with the
+    // multi-session control surface.  The production server routes this
+    // through handleSessionControlRoutes; this small adapter is needed here
+    // because there is no SessionManager resolver in this mode.
+    const undoMatch = new RegExp(`^${API_PREFIX}/sessions/([^/]+)/undo$`).exec(url);
+    if (undoMatch && method === 'POST') {
+      try {
+        if (decodeURIComponent(undoMatch[1]!) !== webSession.sessionId) {
+          sendJson(res, 404, { code: ErrorCodes.SESSION_NOT_FOUND, message: 'Session not found' });
+        } else {
+          const body = await readJsonBody(req);
+          const count = typeof body['count'] === 'number' ? Number(body['count']) : 1;
+          await webSession.undoHistory(count);
+          sendJson(res, 200, { ok: true });
+        }
+      } catch (error) {
+        sendHttpError(res, error);
+      }
       return;
     }
 
@@ -3628,6 +3898,11 @@ async function handleResourceRoutes(
   method: string,
   manager: SessionManager,
 ): Promise<boolean> {
+  // Route matching is path-only. Query parameters are parsed by each handler
+  // below, so they must not make an otherwise valid resource route miss its
+  // anchored regular expression.
+  const routePath = url.split('?')[0] ?? url;
+
   // Skills
   const skillsMatch = new RegExp(`^${API_PREFIX}/sessions/([^/]+)/skills$`).exec(url);
   if (skillsMatch && method === 'GET') {
@@ -3791,7 +4066,7 @@ async function handleResourceRoutes(
   }
 
   // Background tasks
-  const tasksMatch = new RegExp(`^${API_PREFIX}/sessions/([^/]+)/tasks$`).exec(url);
+  const tasksMatch = new RegExp(`^${API_PREFIX}/sessions/([^/]+)/tasks$`).exec(routePath);
   if (tasksMatch && method === 'GET') {
     try {
       const query = new URLSearchParams(url.split('?')[1] ?? '');
@@ -3801,7 +4076,7 @@ async function handleResourceRoutes(
     } catch (error) { sendHttpError(res, error); }
     return true;
   }
-  const taskOutputMatch = new RegExp(`^${API_PREFIX}/sessions/([^/]+)/tasks/([^/]+)/output$`).exec(url);
+  const taskOutputMatch = new RegExp(`^${API_PREFIX}/sessions/([^/]+)/tasks/([^/]+)/output$`).exec(routePath);
   if (taskOutputMatch && method === 'GET') {
     try {
       const query = new URLSearchParams(url.split('?')[1] ?? '');
@@ -3810,7 +4085,7 @@ async function handleResourceRoutes(
     } catch (error) { sendHttpError(res, error); }
     return true;
   }
-  const taskStopMatch = new RegExp(`^${API_PREFIX}/sessions/([^/]+)/tasks/([^/]+)/stop$`).exec(url);
+  const taskStopMatch = new RegExp(`^${API_PREFIX}/sessions/([^/]+)/tasks/([^/]+)/stop$`).exec(routePath);
   if (taskStopMatch && method === 'POST') {
     try {
       const body = await readJsonBody(req);

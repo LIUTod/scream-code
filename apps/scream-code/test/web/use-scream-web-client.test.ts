@@ -138,7 +138,7 @@ function setupHarness() {
     if (url.startsWith(`${API}/sessions/sess-1/snapshot`)) return okJson(state.snapshot);
     if (url === `${API}/sessions` && method === 'GET') return okJson([{ sessionId: 'sess-1' }]);
     if (url === `${API}/models`) return okJson({ models: [] });
-    if (url === `${API}/git/status`) return okJson({ isRepo: false });
+    if (url.startsWith(`${API}/git/status`)) return okJson({ isRepo: false });
     // Anything unexpected: a swallowed 404, never the real network.
     return okJson({ message: 'not stubbed' }, 404);
   };
@@ -238,13 +238,37 @@ describe('useScreamWebClient', () => {
     // the two boot fetches (sessions + models) fired by the factory itself.
     expect(h.fetchCallsFor('/snapshot').length).toBe(1);
     expect(h.fetchCallsFor('/snapshot')[0].url).toContain('snapshot?tail=100');
-    expect(h.fetchCallsFor(`${API}/git/status`).length).toBe(1);
+    expect(h.fetchCallsFor(`${API}/git/status?sessionId=sess-1`).length).toBe(1);
     expect(h.fetchCallsFor(`${API}/models`).length).toBe(1);
     expect(h.calls.filter((c) => c.url === `${API}/sessions`).length).toBe(2); // boot + hello
 
     // The snapshot response is applied wholesale (supersedes hello's workDir).
     expect(h.client.workDir.value).toBe('/wd-snap');
     expect(h.client.messages.value.map((m) => m.content)).toContain('snap-msg');
+  });
+
+  it('waitForConnected resolves when a session handoff finishes and times out offline', async () => {
+    h = setupHarness();
+    // A freshly created client starts in the connecting state.  The waiter is
+    // intentionally independent of the socket object: the handshake callback
+    // is what makes a command safe to dispatch.
+    h.client.sessionId.value = 'sess-1';
+    const ready = h.client.waitForConnected(500);
+    h.client.connectionStatus.value = 'connected';
+    vi.advanceTimersByTime(50);
+    await expect(ready).resolves.toBe(true);
+
+    h.client.connectionStatus.value = 'connecting';
+    const timedOut = h.client.waitForConnected(100);
+    vi.advanceTimersByTime(100);
+    await expect(timedOut).resolves.toBe(false);
+
+    // If a second click changes the selected session while a command is
+    // waiting, do not send that command into the newer conversation.
+    const switched = h.client.waitForConnected(500);
+    h.client.sessionId.value = 'sess-2';
+    vi.advanceTimersByTime(50);
+    await expect(switched).resolves.toBe(false);
   });
 
   it('sendPrompt while idle shows a toast and neither sends nor queues', async () => {
@@ -281,6 +305,46 @@ describe('useScreamWebClient', () => {
     // Busy guard: a second send while the first is in flight is dropped.
     h.client.sendPrompt('ignored');
     expect(h.promptsSent(ws)).toHaveLength(1);
+  });
+
+  it('opens a successful local fork result in its returned session without switching passive clients', async () => {
+    h = setupHarness();
+    const ws = await h.handshake();
+
+    // Fork results are broadcast to every tab on the source session. A result
+    // without this client's pending command must remain informational only.
+    ws.fireMessage({
+      type: 'command_result',
+      command: 'fork',
+      ok: true,
+      message: '会话已 fork，新会话 ID：sess-passive',
+      sessionId: 'sess-passive',
+    });
+    expect(h.client.currentSessionId.value).toBe('sess-1');
+    expect(h.wsInstances).toHaveLength(1);
+
+    h.client.sendCommand('fork');
+    const forkFrame = ws.sent.find((frame) => frame.type === 'command' && frame.command === 'fork');
+    expect(forkFrame).toMatchObject({ type: 'command', command: 'fork' });
+    if (typeof forkFrame?.pendingMsgId !== 'string') {
+      throw new TypeError('fork command must carry a pending message ID');
+    }
+
+    ws.fireMessage({
+      type: 'command_result',
+      command: 'fork',
+      ok: true,
+      message: '会话已 fork，新会话 ID：sess-fork',
+      pendingMsgId: forkFrame.pendingMsgId,
+      sessionId: 'sess-fork',
+    });
+    await settle();
+
+    expect(ws.closeCalls).toBe(1);
+    expect(h.client.currentSessionId.value).toBe('sess-fork');
+    expect(h.client.sessionId.value).toBe('sess-fork');
+    expect(h.wsInstances).toHaveLength(2);
+    expect(h.wsInstances[1]?.url).toContain('sessionId=sess-fork');
   });
 
   it('sendPrompt while disconnected queues the text, persists it and starts a reconnect', async () => {
@@ -352,6 +416,63 @@ describe('useScreamWebClient', () => {
     expect(h.client.messages.value.some((m) => m.role === 'assistant')).toBe(false);
     // …but the authoritative snapshot re-anchored the state.
     expect(h.client.workDir.value).toBe('/wd-resync');
+  });
+
+  it('projects durable subagent lifecycle events and clears them on a session switch', async () => {
+    h = setupHarness();
+    const ws = await h.handshake();
+
+    ws.fireMessage({
+      type: 'event',
+      epoch: 10,
+      seq: 5,
+      payload: {
+        type: 'subagent.spawned',
+        subagentId: 'child-1',
+        subagentName: 'explore',
+        parentToolCallId: 'call-1',
+        description: 'Trace the request path',
+        runInBackground: true,
+      },
+    });
+    ws.fireMessage({
+      type: 'event',
+      epoch: 10,
+      seq: 6,
+      payload: {
+        type: 'subagent.started',
+        subagentId: 'child-1',
+        parentToolCallId: 'call-1',
+        runInBackground: true,
+      },
+    });
+    ws.fireMessage({
+      type: 'event',
+      epoch: 10,
+      seq: 7,
+      payload: {
+        type: 'subagent.completed',
+        subagentId: 'child-1',
+        parentToolCallId: 'call-1',
+        resultSummary: 'Located the relevant module.',
+        turns: 2,
+        durationMs: 1_200,
+      },
+    });
+
+    expect(h.client.subagents.value).toEqual([expect.objectContaining({
+      subagentId: 'child-1',
+      name: 'explore',
+      description: 'Trace the request path',
+      runInBackground: true,
+      state: 'completed',
+      resultSummary: 'Located the relevant module.',
+      turns: 2,
+      durationMs: 1_200,
+    })]);
+
+    await h.client.switchSession('sess-2');
+    expect(h.client.subagents.value).toEqual([]);
   });
 
   it('close code 1008 clears the session to idle without reconnecting', async () => {

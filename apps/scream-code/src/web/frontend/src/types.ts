@@ -86,15 +86,39 @@ export interface SessionStatus {
   busy: boolean;
   model?: string;
   thinkingLevel?: string;
-  permission?: 'manual' | 'auto' | 'yolo' | string;
+  permission?: 'manual' | 'auto' | 'yolo' | 'bot' | 'ask' | string;
   planMode?: boolean;
+  planStrategy?: 'normal' | 'fusion';
   wolfpackMode?: boolean;
   rlmEnabled?: boolean;
+  /** RLM recursion cap; null means unlimited. */
+  rlmMaxDepth?: number | null;
   contextTokens?: number;
   maxContextTokens?: number;
   /** Context usage fraction (0..1) or percent (0..100). */
   contextUsage?: number;
   usage?: SessionUsage;
+}
+
+/** A child agent's lifecycle projection. The server journals lifecycle events,
+ * so this is rebuilt during normal WebSocket replay as well as live execution. */
+export type SubagentActivityState = 'spawning' | 'running' | 'completed' | 'failed';
+
+export interface SubagentActivity {
+  subagentId: string;
+  name: string;
+  parentToolCallId: string;
+  description?: string;
+  runInBackground: boolean;
+  state: SubagentActivityState;
+  updatedAt: number;
+  resultSummary?: string;
+  error?: string;
+  usage?: TokenUsage;
+  contextTokens?: number;
+  turns?: number;
+  durationMs?: number;
+  toolCallCount?: number;
 }
 
 export type GoalStatus = 'active' | 'paused' | 'blocked' | 'complete';
@@ -251,7 +275,7 @@ export type WsMessage =
   | { type: 'approval_request'; id: string; toolName: string; action?: string; display?: unknown }
   | { type: 'approval_resolved'; id: string }
   | { type: 'user_message'; clientMessageId?: string; text: string }
-  | { type: 'command_result'; command: string; ok: boolean; message: string; pendingMsgId?: string }
+  | { type: 'command_result'; command: string; ok: boolean; message: string; pendingMsgId?: string; sessionId?: string }
   | { type: 'status'; status: SessionStatus }
   | { type: 'resync_required'; reason: string }
   | { type: 'pong' }

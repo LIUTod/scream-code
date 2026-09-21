@@ -1,5 +1,6 @@
 import type { ChatMessage, SessionStatus, SessionUsage } from '../../types';
 import { acceptJournalEvent, applyGoalTodoEvent } from '../../utils/goalTodoState';
+import { applySubagentActivityEvent } from '../../utils/subagentActivity';
 import { clearToolStarts, recordToolStart, takeToolStart } from '../../utils/toolTiming';
 import { useThrottledFlush } from '../useThrottledFlush';
 import { eventErrorMessage, generateId, onWsMessage, type ClientContext } from './state';
@@ -52,6 +53,8 @@ export function createStreamingModule(ctx: ClientContext): StreamingModule {
   const streamFlush = useThrottledFlush(flushStreaming);
 
   function onEvent(payload: { type: string; [key: string]: unknown }): void {
+    const subagents = applySubagentActivityEvent(s.subagents.value, payload);
+    if (subagents !== s.subagents.value) s.subagents.value = subagents;
     const goalTodoState = applyGoalTodoEvent({ goal: s.goal.value, todos: s.todos.value }, payload);
     s.goal.value = goalTodoState.goal;
     s.todos.value = goalTodoState.todos;
@@ -177,6 +180,7 @@ export function createStreamingModule(ctx: ClientContext): StreamingModule {
         if (payload.contextTokens !== undefined) patch.contextTokens = payload.contextTokens as number;
         if (payload.maxContextTokens !== undefined) patch.maxContextTokens = payload.maxContextTokens as number;
         if (payload.contextUsage !== undefined) patch.contextUsage = payload.contextUsage as number;
+        if (payload.rlmMaxDepth !== undefined) patch.rlmMaxDepth = payload.rlmMaxDepth as number | null;
         s.status.value = { ...s.status.value, ...patch };
         break;
       }
@@ -204,6 +208,13 @@ export function createStreamingModule(ctx: ClientContext): StreamingModule {
         s.status.value = { ...s.status.value, ...patch };
         break;
       }
+      case 'web.history.undone':
+        // Undo is a server-owned projection marker.  The core context has
+        // already changed, so a fresh snapshot is the authoritative way for
+        // every open tab (including tabs that did not issue /revoke) to drop
+        // the removed turn without duplicating transcript surgery here.
+        void ctx.fetchSnapshot();
+        break;
       case 'error': {
         s.error.value = eventErrorMessage(payload.error, 'Unknown error');
         break;

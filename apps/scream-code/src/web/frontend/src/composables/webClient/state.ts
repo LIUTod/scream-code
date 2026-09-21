@@ -17,6 +17,7 @@ import type {
   SessionStatus,
   SkillSummary,
   BackgroundTaskInfo,
+  SubagentActivity,
   TodoItem,
   WsMessage,
 } from '../../types';
@@ -33,6 +34,39 @@ export const MAX_RECONNECT_ATTEMPTS = 8;
 export { HEARTBEAT_TIMEOUT_MS };
 
 export type WsHandler = (msg: WsMessage) => void;
+
+/**
+ * Identity captured by a session-scoped REST request.  A request may finish
+ * after the user switched sessions or after the websocket was replaced; in
+ * either case its response belongs to an obsolete view and must not mutate
+ * the current session's state.
+ */
+export interface SessionRequestToken {
+  sessionId: string;
+  sessionGeneration: number;
+  connectionGeneration: number;
+}
+
+export function captureSessionRequest(s: Pick<ClientSharedState, 'sessionId' | 'sessionGeneration' | 'connectionGeneration'>): SessionRequestToken | null {
+  const sessionId = s.sessionId.value;
+  if (!sessionId) return null;
+  return {
+    sessionId,
+    sessionGeneration: s.sessionGeneration,
+    connectionGeneration: s.connectionGeneration,
+  };
+}
+
+export function isCurrentSessionRequest(
+  s: Pick<ClientSharedState, 'sessionId' | 'sessionGeneration' | 'connectionGeneration'>,
+  token: SessionRequestToken,
+): boolean {
+  return (
+    s.sessionId.value === token.sessionId &&
+    s.sessionGeneration === token.sessionGeneration &&
+    s.connectionGeneration === token.connectionGeneration
+  );
+}
 
 /** Register a WS-frame handler for one message type. Domains register their
  *  handlers during module assembly; dispatch looks them up by frame type. */
@@ -86,6 +120,8 @@ export interface ClientSharedState {
   mcpStartupMetrics: Ref<McpStartupMetrics | null>;
   backgroundTasks: Ref<BackgroundTaskInfo[]>;
   backgroundTaskOutput: Ref<string>;
+  /** Durable lifecycle projection for foreground and background child agents. */
+  subagents: Ref<SubagentActivity[]>;
   config: Ref<ScreamConfig | null>;
   experimentalFlags: Ref<ExperimentalFlagMap | null>;
   preflightOk: Ref<boolean>;
@@ -172,6 +208,7 @@ export function createClientSharedState(): ClientSharedState {
   const mcpStartupMetrics = ref<McpStartupMetrics | null>(null);
   const backgroundTasks = ref<BackgroundTaskInfo[]>([]);
   const backgroundTaskOutput = ref('');
+  const subagents = ref<SubagentActivity[]>([]);
   const config = ref<ScreamConfig | null>(null);
   const experimentalFlags = ref<ExperimentalFlagMap | null>(null);
   const preflightOk = ref(false);
@@ -208,6 +245,7 @@ export function createClientSharedState(): ClientSharedState {
     mcpStartupMetrics,
     backgroundTasks,
     backgroundTaskOutput,
+    subagents,
     config,
     experimentalFlags,
     preflightOk,
@@ -256,10 +294,15 @@ export interface ClientContext {
   s: ClientSharedState;
   showToast: ReturnType<typeof useToast>['showToast'];
   connect(): void;
+  /** Resolve once the current session's websocket is ready for commands. */
+  waitForConnected(timeoutMs?: number): Promise<boolean>;
   send(obj: Record<string, unknown>): void;
   stopHeartbeat(): void;
   setConnectionStatus(status: ConnectionStatus): void;
   fetchSessions(): Promise<void>;
+  switchSession(sessionId: string): Promise<void>;
+  /** Reload all session-scoped REST projections after a session/connection handoff. */
+  refreshSessionResources?(): Promise<void>;
   fetchGitStatus(): Promise<void>;
   fetchModels(): Promise<void>;
   fetchSnapshot(goalGeneration?: number): Promise<void>;

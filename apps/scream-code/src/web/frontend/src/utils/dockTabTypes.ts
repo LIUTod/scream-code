@@ -8,7 +8,7 @@ import type { IconName } from '../components/ui/SvgIcon.vue';
  * activates the existing tab instead of creating a new one.
  */
 
-export type SessionDockKind = 'detail' | 'run' | 'git' | 'todo' | 'goal' | 'like';
+export type SessionDockKind = 'detail' | 'control' | 'agents' | 'run' | 'git' | 'todo' | 'goal' | 'like';
 export type DockTabKind = 'file' | SessionDockKind;
 
 export interface DockTabType {
@@ -41,6 +41,8 @@ export function isRegisteredDockTabKind(kind: unknown): kind is DockTabKind {
 
 registerDockTabType({ kind: 'file', label: '文件', icon: 'file', singleton: false });
 registerDockTabType({ kind: 'detail', label: '会话详情', icon: 'layers', singleton: true });
+registerDockTabType({ kind: 'control', label: '会话控制', icon: 'wrench', singleton: true });
+registerDockTabType({ kind: 'agents', label: '协作代理', icon: 'bot', singleton: true });
 registerDockTabType({ kind: 'run', label: '运行状态', icon: 'activity', singleton: true });
 registerDockTabType({ kind: 'git', label: 'Git', icon: 'git-branch', singleton: true });
 registerDockTabType({ kind: 'todo', label: 'Todo', icon: 'clipboard', singleton: true });
@@ -50,4 +52,13 @@ registerDockTabType({ kind: 'like', label: '偏好', icon: 'user', singleton: tr
 /** Stable id for a session-level dock tab — one per kind, per design. */
 export function sessionDockTabId(kind: SessionDockKind): string {
   return `dock:${kind}`;
+}
+
+/** Stable DOM ids used to connect a tab to its tabpanel for assistive tech. */
+export function dockTabDomId(tabId: string): string {
+  return `dock-tab-${encodeURIComponent(tabId)}`;
+}
+
+export function dockPanelDomId(tabId: string): string {
+  return `dock-panel-${encodeURIComponent(tabId)}`;
 }

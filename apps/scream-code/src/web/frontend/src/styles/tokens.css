@@ -32,10 +32,22 @@
   --font-size-lg: 16px;
   --font-size-xl: 18px;
   --font-size-2xl: 22px;
+  --line-height-tight: 1.25;
+  --line-height-normal: 1.5;
+  --line-height-reading: 1.65;
+
+  /* Reusable interaction geometry. Component-level padding may vary, but
+     controls and mobile hit areas should never drift below these baselines. */
+  --control-h-xs: 28px;
+  --control-h-sm: 32px;
+  --control-h-md: 38px;
+  --hit-target-mobile: 44px;
+  --layout-gutter: var(--space-4);
 
   /* Z-index scale */
   --z-base: 0;
   --z-dock: 20;
+  --z-popover: 60;
   --z-overlay: 50;
   --z-modal: 100;
   --z-toast: 200;
@@ -62,6 +74,7 @@
   /* Mirrors SIDEBAR_RAIL_WIDTH in utils/panelLayout.ts — keep in sync. */
   --sidebar-width-collapsed: 56px;
   --content-max: 840px;
+  --topbar-height: 54px;
 
   /* Scrollbar skin: an 8px hit area whose visible thumb stays a ~4px
      capsule (transparent border + padding-box clip). Surfaces rebind

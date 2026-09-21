@@ -117,7 +117,10 @@ async function loadDiff(): Promise<void> {
   if (!t || diffCache.has(t.filePath)) return;
   try {
     for (const cand of diffPathCandidates(t.filePath)) {
-      const res = await fetch(`${API}/git/diff?path=${encodeURIComponent(cand)}`);
+      const sessionId = props.client?.currentSessionId.value ?? props.client?.sessionId.value;
+      const query = new URLSearchParams({ path: cand });
+      if (sessionId) query.set('sessionId', sessionId);
+      const res = await fetch(`${API}/git/diff?${query.toString()}`);
       if (!res.ok) {
         diffCache.set(t.filePath, { status: 'error', message: await errorMessageOf(res) });
         return;

@@ -40,6 +40,22 @@ const {
   cancelGoal,
 } = props.client;
 
+/**
+ * A session switch closes the old socket and establishes the new one on the
+ * next task.  Slash commands (including REST-backed skill activation and
+ * `/revoke`) must wait for that handshake or they are rejected as offline.
+ */
+async function ensureSessionReady(): Promise<boolean> {
+  const targetSessionId = props.client.sessionId.value;
+  if (!targetSessionId) return false;
+  if (props.client.connectionStatus.value === 'idle') return false;
+  // The fallback keeps this view compatible with older host integrations that
+  // provide the pre-waiter client shape while still avoiding a dropped command
+  // whenever the current transport already reports connected.
+  const ready = await (props.client.waitForConnected?.() ?? Promise.resolve(props.client.connectionStatus.value === 'connected'));
+  return ready && props.client.sessionId.value === targetSessionId && props.client.connectionStatus.value === 'connected';
+}
+
 const composerRef = ref<InstanceType<typeof Composer> | null>(null);
 const statsOpen = ref(false);
 const infoVisible = ref(false);
@@ -133,6 +149,7 @@ const { onCommand } = useSlashCommands({
   sendCommand,
   clearMessages,
   appendSystemMessage,
+  ensureSession: ensureSessionReady,
   onNew: () => emit('home'),
   openModelPicker,
   showInfo,
@@ -159,11 +176,6 @@ async function onLoadOlder(): Promise<void> {
 function onFork(): void {
   if (isBusy.value) return;
   sendCommand('fork');
-  // The fork result arrives as a system message; refresh the sidebar list so
-  // the new session shows up without a manual reload.
-  setTimeout(() => {
-    void props.client.fetchSessions();
-  }, 1200);
 }
 </script>
 
@@ -181,6 +193,8 @@ function onFork(): void {
       @export="sessionId && exportSession(sessionId)"
       @fork="onFork"
       @clear="clearMessages"
+      @controls="openDockTab('control')"
+      @agents="openDockTab('agents')"
       @toggle-stats="statsOpen = !statsOpen"
     />
 

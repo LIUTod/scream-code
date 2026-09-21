@@ -49,6 +49,27 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
   const config = createConfigModule(ctx);
   const connection = createConnectionModule(ctx);
 
+  // A session switch replaces every session-scoped projection, not only the
+  // transcript snapshot. Keep this fan-out in one place so the hello frame
+  // and future reconnect paths cannot accidentally leave skills/plugins/MCP
+  // or control state from the previous session on screen. Each domain method
+  // captures the current session + connection generation and ignores stale
+  // responses independently.
+  ctx.refreshSessionResources = async () => {
+    if (!s.sessionId.value) return;
+    await Promise.all([
+      control.fetchSessionStatus(),
+      control.fetchSessionUsage(),
+      control.fetchSessionContext(),
+      control.fetchSessionPlan(),
+      extensions.fetchSkills(),
+      extensions.fetchPlugins(),
+      mcp.fetchMcpServers(),
+      mcp.fetchMcpStartupMetrics(),
+      mcp.fetchBackgroundTasks(),
+    ]);
+  };
+
   // Initial connection.
   connection.connect();
   void sessions.fetchSessions();
@@ -91,6 +112,7 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
 
   const client: UseScreamWebClientReturn = {
     connectionStatus: s.connectionStatus,
+    waitForConnected: connection.waitForConnected,
     messages: s.messages,
     pendingApprovals: s.pendingApprovals,
     status: s.status,
@@ -177,6 +199,7 @@ export function useScreamWebClient(): UseScreamWebClientReturn {
     removeMcpServer: mcp.removeMcpServer,
     backgroundTasks: s.backgroundTasks,
     backgroundTaskOutput: s.backgroundTaskOutput,
+    subagents: s.subagents,
     fetchBackgroundTasks: mcp.fetchBackgroundTasks,
     fetchBackgroundTaskOutput: mcp.fetchBackgroundTaskOutput,
     stopBackgroundTask: mcp.stopBackgroundTask,

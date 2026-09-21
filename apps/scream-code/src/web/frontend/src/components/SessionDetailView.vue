@@ -2,7 +2,7 @@
      diff, todo, preferences, goal). Content is rendered flat inside the dock;
      this component owns only the scroll container. -->
 <script setup lang="ts">
-import { nextTick, ref } from 'vue';
+import { nextTick, ref, watch } from 'vue';
 import type { UseScreamWebClientReturn } from '../composables/useScreamWebClient';
 import { parseUnifiedDiff, type DiffLine } from '../utils/diff';
 import DiffLines from './DiffLines.vue';
@@ -25,18 +25,25 @@ interface DiffPreview {
 }
 const gitDiff = ref<DiffPreview | null>(null);
 const diffRef = ref<HTMLElement | null>(null);
+let diffRequestGeneration = 0;
 
 async function openDiff(file: { path: string; display: string; adds?: number; dels?: number }): Promise<void> {
+  const requestGeneration = ++diffRequestGeneration;
+  const targetSessionId = props.client.currentSessionId.value ?? props.client.sessionId.value;
   gitDiff.value = { ...file, lines: [], loading: true };
   try {
-    const res = await fetch(`/api/v1/git/diff?path=${encodeURIComponent(file.path)}`);
+    const query = new URLSearchParams({ path: file.path });
+    if (targetSessionId) query.set('sessionId', targetSessionId);
+    const res = await fetch(`/api/v1/git/diff?${query.toString()}`);
     const data = (await res.json()) as { patch: string };
+    if (requestGeneration !== diffRequestGeneration || targetSessionId !== (props.client.currentSessionId.value ?? props.client.sessionId.value)) return;
     const lines = parseUnifiedDiff(data.patch ?? '');
     // Untracked rows have no numstat entry, so fall back to counting the
     // synthesised added-file patch.
     const adds = file.adds ?? (file.dels === undefined ? lines.filter((l) => l.type === 'add').length : undefined);
     gitDiff.value = { ...file, adds, lines, loading: false };
   } catch {
+    if (requestGeneration !== diffRequestGeneration) return;
     gitDiff.value = { ...file, lines: [], loading: false };
   }
   // The card lands below a 500px+ file list; without this the click looks dead.
@@ -44,6 +51,16 @@ async function openDiff(file: { path: string; display: string; adds?: number; de
   const reduced = globalThis.window?.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true;
   diffRef.value?.scrollIntoView({ block: 'start', behavior: reduced ? 'auto' : 'smooth' });
 }
+
+// The detail tab remains mounted with v-show while the user switches sessions.
+// Never let a late diff response from the previous workspace remain visible.
+watch(
+  () => props.client.currentSessionId.value ?? props.client.sessionId.value,
+  () => {
+    diffRequestGeneration++;
+    gitDiff.value = null;
+  },
+);
 
 const {
   connectionStatus,

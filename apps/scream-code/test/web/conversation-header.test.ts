@@ -80,7 +80,14 @@ describe('ConversationHeader more popover', () => {
     expect(menuEntries()).toHaveLength(0);
     await realPress(wrapper.find('.more-btn').element);
     const labels = menuEntries().map((e) => e.textContent?.trim());
-    expect(labels).toEqual(['导出 Markdown', '分叉会话', '清空本地消息', expect.stringContaining('文件面板')]);
+    expect(labels).toEqual([
+      '会话控制',
+      '协作代理',
+      '导出 Markdown',
+      '分叉会话',
+      '清空本地消息',
+      expect.stringContaining('文件面板'),
+    ]);
     expect(wrapper.find('.more-btn').attributes('aria-expanded')).toBe('true');
     await realPress(wrapper.find('.more-btn').element);
     expect(menuEntries()).toHaveLength(0);
@@ -90,7 +97,7 @@ describe('ConversationHeader more popover', () => {
   it('export and clear each emit, and the popover closes right after picking', async () => {
     const wrapper = mountHeader();
     await realPress(wrapper.find('.more-btn').element);
-    const exportEntry = menuEntries()[0]!;
+    const exportEntry = menuEntries().find((entry) => entry.textContent?.includes('导出 Markdown'))!;
     // The press phase must not dismiss the popover (the old implementation closed it on
     // this beat, so the click never landed on the entry).
     await pressDown(exportEntry);
@@ -100,7 +107,7 @@ describe('ConversationHeader more popover', () => {
     expect(menuEntries()).toHaveLength(0);
 
     await realPress(wrapper.find('.more-btn').element);
-    await realPress(menuEntries()[2]!);
+    await realPress(menuEntries().find((entry) => entry.textContent?.includes('清空本地消息'))!);
     expect(wrapper.emitted('clear')).toHaveLength(1);
   });
 

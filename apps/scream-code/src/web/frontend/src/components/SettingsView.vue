@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, inject, onMounted, ref, watch } from 'vue';
+import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { Ref } from 'vue';
 import SvgIcon from './ui/SvgIcon.vue';
 import type { IconName } from './ui/SvgIcon.vue';
@@ -179,25 +179,68 @@ const tasks = computed(() => val<BackgroundTaskInfo[]>(client.value?.backgroundT
 const taskOutput = ref('');
 const taskBusy = ref(false);
 const taskMsg = ref('');
+const selectedTaskId = ref<string | null>(null);
+const taskOutputLoading = ref(false);
+let taskOutputRequest = 0;
+let taskPollTimer: number | null = null;
+const selectedTask = computed(() =>
+  selectedTaskId.value ? tasks.value.find((task) => task.taskId === selectedTaskId.value) ?? null : null,
+);
+const hasActiveTasks = computed(() =>
+  tasks.value.some((task) => task.status === 'running' || task.status === 'awaiting_approval'),
+);
+
+async function refreshTasks(): Promise<void> {
+  await client.value?.fetchBackgroundTasks?.();
+}
+
+function stopTaskPolling(): void {
+  if (taskPollTimer === null) return;
+  window.clearInterval(taskPollTimer);
+  taskPollTimer = null;
+}
+
+function syncTaskPolling(): void {
+  if (activeSection.value !== 'tasks' || !hasActiveTasks.value) {
+    stopTaskPolling();
+    return;
+  }
+  if (taskPollTimer !== null) return;
+  taskPollTimer = window.setInterval(() => {
+    void refreshTasks();
+    if (selectedTask.value) void onShowOutput(selectedTask.value.taskId, false);
+  }, 3000);
+}
+
 async function onStopTask(taskId: string) {
+  const task = tasks.value.find((item) => item.taskId === taskId);
+  if (!window.confirm(`停止后台任务「${task?.command ?? taskId}」？`)) return;
   taskBusy.value = true;
   taskMsg.value = '';
   try {
     const ok = await client.value?.stopBackgroundTask?.(taskId);
     taskMsg.value = ok ? '已停止' : '取消失败';
-    await client.value?.fetchBackgroundTasks?.();
+    await refreshTasks();
+    if (selectedTaskId.value === taskId) await onShowOutput(taskId, false);
   } finally {
     taskBusy.value = false;
   }
 }
-async function onShowOutput(taskId: string) {
-  taskBusy.value = true;
+async function onShowOutput(taskId: string, select = true) {
+  if (select) {
+    selectedTaskId.value = taskId;
+    taskOutput.value = '';
+  }
+  const request = ++taskOutputRequest;
+  taskOutputLoading.value = true;
   taskMsg.value = '';
   try {
     await client.value?.fetchBackgroundTaskOutput?.(taskId, 200);
-    taskOutput.value = val<string>(client.value?.backgroundTaskOutput) ?? '';
+    if (request === taskOutputRequest && selectedTaskId.value === taskId) {
+      taskOutput.value = val<string>(client.value?.backgroundTaskOutput) ?? '';
+    }
   } finally {
-    taskBusy.value = false;
+    if (request === taskOutputRequest) taskOutputLoading.value = false;
   }
 }
 
@@ -211,6 +254,15 @@ onMounted(() => {
   void c?.fetchMcpServers?.();
   void c?.fetchBackgroundTasks?.();
 });
+
+onBeforeUnmount(() => {
+  stopTaskPolling();
+});
+
+watch([activeSection, hasActiveTasks], ([section]) => {
+  if (section === 'tasks') void refreshTasks();
+  syncTaskPolling();
+}, { immediate: true });
 
 function statusColor(status: string): string {
   if (status === 'connected' || status === 'completed') return 'ok';
@@ -402,7 +454,12 @@ function statusColor(status: string): string {
 
         <!-- Background tasks -->
         <section v-else-if="activeSection === 'tasks'" class="pane-section">
-          <h1 class="settings-title">后台任务</h1>
+          <div class="task-title-row">
+            <h1 class="settings-title">后台任务</h1>
+            <button class="icon-refresh" title="刷新后台任务" aria-label="刷新后台任务" @click="refreshTasks">
+              <SvgIcon name="refresh" :size="16" />
+            </button>
+          </div>
           <p v-if="taskMsg" class="hint">{{ taskMsg }}</p>
           <p v-if="tasks.length === 0" class="empty">没有后台任务</p>
           <ul v-else class="list">
@@ -425,6 +482,29 @@ function statusColor(status: string): string {
               </div>
             </li>
           </ul>
+          <section v-if="selectedTask" class="task-inspector" aria-label="任务输出">
+            <header class="task-inspector-head">
+              <div>
+                <span class="task-inspector-label">输出</span>
+                <strong :title="selectedTask.command">{{ selectedTask.command }}</strong>
+              </div>
+              <div class="task-inspector-actions">
+                <button title="刷新输出" aria-label="刷新输出" :disabled="taskOutputLoading" @click="onShowOutput(selectedTask.taskId, false)">
+                  <SvgIcon name="refresh" :size="14" />
+                </button>
+                <button title="关闭输出" aria-label="关闭输出" @click="selectedTaskId = null">
+                  <SvgIcon name="x" :size="14" />
+                </button>
+              </div>
+            </header>
+            <pre v-if="taskOutput" class="task-output">{{ taskOutput }}</pre>
+            <p v-else class="task-output-empty">{{ taskOutputLoading ? '正在读取输出…' : '暂时没有输出' }}</p>
+            <footer class="task-meta">
+              <span>PID {{ selectedTask.pid }}</span>
+              <span v-if="selectedTask.exitCode !== null">退出码 {{ selectedTask.exitCode }}</span>
+              <span v-else>{{ selectedTask.status }}</span>
+            </footer>
+          </section>
         </section>
       </div>
     </div>
@@ -492,6 +572,31 @@ function statusColor(status: string): string {
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
+}
+.task-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+.icon-refresh,
+.task-inspector-actions button {
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  background: transparent;
+  cursor: pointer;
+}
+.icon-refresh {
+  width: 30px;
+  height: 30px;
+}
+.icon-refresh:hover,
+.task-inspector-actions button:hover:not(:disabled) {
+  color: var(--color-text);
+  background: var(--color-hover);
 }
 .settings-title {
   font-size: var(--font-size-xl);
@@ -732,6 +837,71 @@ function statusColor(status: string): string {
 .status-pill.muted {
   background: var(--color-selected);
   color: var(--color-text-muted);
+}
+.task-inspector {
+  overflow: hidden;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-sunken);
+}
+.task-inspector-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-line);
+  background: var(--color-surface);
+}
+.task-inspector-head > div:first-child {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+.task-inspector-label {
+  color: var(--color-text-faint);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+.task-inspector-head strong {
+  overflow: hidden;
+  color: var(--color-text);
+  font: 550 var(--font-size-xs) var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.task-inspector-actions { display: flex; flex-shrink: 0; gap: 2px; }
+.task-inspector-actions button { width: 26px; height: 26px; }
+.task-output {
+  max-height: 320px;
+  min-height: 132px;
+  margin: 0;
+  overflow: auto;
+  padding: var(--space-3);
+  color: var(--color-text);
+  font: 12px/1.55 var(--font-mono);
+  tab-size: 2;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.task-output-empty {
+  min-height: 132px;
+  display: grid;
+  margin: 0;
+  padding: var(--space-3);
+  place-items: center;
+  color: var(--color-text-faint);
+  font-size: var(--font-size-sm);
+}
+.task-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-top: 1px solid var(--color-line);
+  color: var(--color-text-faint);
+  font: 500 var(--font-size-xs) var(--font-mono);
 }
 @media (max-width: 760px) {
   .settings-layout {

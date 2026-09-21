@@ -356,7 +356,7 @@ function refresh(): void {
   background: var(--color-success-soft, rgba(60, 200, 120, 0.16));
   color: var(--color-success);
 }
-.row-git.g-? {
+.row-git.g-\? {
   background: var(--color-selected);
   color: var(--color-text-muted);
 }

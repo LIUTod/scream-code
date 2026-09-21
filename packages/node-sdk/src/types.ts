@@ -162,6 +162,8 @@ export interface SessionStatus {
   readonly planStrategy?: 'normal' | 'fusion';
   readonly wolfpackMode: boolean;
   readonly rlmEnabled: boolean;
+  /** RLM recursion cap; null means unlimited (the core uses Infinity). */
+  readonly rlmMaxDepth?: number | null;
   readonly contextTokens: number;
   readonly maxContextTokens: number;
   readonly contextUsage: number;

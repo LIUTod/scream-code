@@ -878,12 +878,12 @@ function sessionTitle(s: SessionListItem): string {
   background: var(--color-hover);
 }
 .dc-btn--danger {
-  color: #fff;
+  color: var(--color-on-danger);
   background: var(--color-danger);
   border-color: var(--color-danger);
 }
 .dc-btn--danger:hover {
-  color: #fff;
+  color: var(--color-on-danger);
   filter: brightness(1.08);
 }
 

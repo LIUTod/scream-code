@@ -22,6 +22,7 @@ import type {
   UpdateGoalRequest,
   BackgroundTaskInfo,
   ExperimentalFlagMap,
+  SubagentActivity,
 } from '../../types';
 import type { ConnectionStatus } from './state';
 
@@ -30,6 +31,8 @@ import type { ConnectionStatus } from './state';
  *  must never change this shape. */
 export interface UseScreamWebClientReturn {
   connectionStatus: Ref<ConnectionStatus>;
+  /** Wait until the selected session's websocket handshake is complete. */
+  waitForConnected: (timeoutMs?: number) => Promise<boolean>;
   messages: Ref<ChatMessage[]>;
   /** Older history exists beyond the loaded window. */
   olderAvailable: Ref<boolean>;
@@ -121,6 +124,7 @@ export interface UseScreamWebClientReturn {
   removeMcpServer: (name: string) => Promise<boolean>;
   backgroundTasks: Ref<BackgroundTaskInfo[]>;
   backgroundTaskOutput: Ref<string>;
+  subagents: Ref<SubagentActivity[]>;
   fetchBackgroundTasks: (activeOnly?: boolean, limit?: number) => Promise<void>;
   fetchBackgroundTaskOutput: (taskId: string, tail?: number) => Promise<void>;
   stopBackgroundTask: (taskId: string, reason?: string) => Promise<boolean>;

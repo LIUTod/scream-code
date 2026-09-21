@@ -5,7 +5,7 @@
 <script setup lang="ts">
 import { nextTick, ref, watch } from 'vue';
 import { closeDockTab, dockPanel, selectDockTab } from '../utils/fileTabState';
-import { dockTabType } from '../utils/dockTabTypes';
+import { dockPanelDomId, dockTabDomId, dockTabType } from '../utils/dockTabTypes';
 import SvgIcon from './ui/SvgIcon.vue';
 
 withDefaults(
@@ -43,33 +43,85 @@ function onAuxClick(e: MouseEvent, id: string): void {
   if (e.button !== 1) return;
   e.preventDefault();
   e.stopPropagation();
+  closeAndRefocus(id);
+}
+
+function focusTab(id: string | null): void {
+  if (!id) return;
+  void nextTick(() => document.getElementById(dockTabDomId(id))?.focus());
+}
+
+function selectAndFocus(id: string): void {
+  selectDockTab(id);
+  focusTab(id);
+}
+
+function closeAndRefocus(id: string): void {
+  const wasActive = dockPanel.activeTabId === id;
   closeDockTab(id);
+  if (wasActive) focusTab(dockPanel.activeTabId);
+}
+
+function panelIdForTab(tab: { id: string; kind: string }): string {
+  // All file instances share one mounted pane; session panes each stay
+  // mounted so their ids can remain one-to-one with their tabs.
+  return dockPanelDomId(tab.kind === 'file' ? 'file-pane' : tab.id);
+}
+
+function onTabKeydown(event: KeyboardEvent, id: string): void {
+  const tabs = dockPanel.tabs;
+  const index = tabs.findIndex((tab) => tab.id === id);
+  if (index < 0) return;
+  if (event.key === 'Enter' || event.key === ' ') {
+    event.preventDefault();
+    selectAndFocus(id);
+    return;
+  }
+  let nextIndex = -1;
+  if (event.key === 'ArrowRight') nextIndex = (index + 1) % tabs.length;
+  else if (event.key === 'ArrowLeft') nextIndex = (index - 1 + tabs.length) % tabs.length;
+  else if (event.key === 'Home') nextIndex = 0;
+  else if (event.key === 'End') nextIndex = tabs.length - 1;
+  if (nextIndex < 0) return;
+  event.preventDefault();
+  const target = tabs[nextIndex];
+  if (target) selectAndFocus(target.id);
 }
 </script>
 
 <template>
   <div ref="barRef" class="tab-bar">
-    <div class="dock-tabs" role="tablist" aria-label="右栏标签">
+    <div class="dock-tabs" role="tablist" aria-label="右栏标签" aria-orientation="horizontal">
       <div
         v-for="t in dockPanel.tabs"
         :key="t.id"
-        class="tab-button"
+        class="tab-entry"
+        role="presentation"
         :class="{ active: t.id === dockPanel.activeTabId }"
-        role="tab"
-        :aria-selected="t.id === dockPanel.activeTabId"
-        :title="t.kind === 'file' ? t.filePath : t.label"
-        :data-kind="t.kind"
-        @click="selectDockTab(t.id)"
-        @mousedown="(e) => { if (e.button === 1) e.preventDefault(); }"
         @auxclick="(e) => onAuxClick(e, t.id)"
       >
-        <SvgIcon :name="dockTabType(t.kind).icon" :size="13" class="tab-icon" />
-        <span class="tab-label">{{ t.label }}</span>
+        <button
+          :id="dockTabDomId(t.id)"
+          class="tab-button"
+          :class="{ active: t.id === dockPanel.activeTabId }"
+          role="tab"
+          :aria-selected="t.id === dockPanel.activeTabId"
+          :aria-controls="panelIdForTab(t)"
+          :tabindex="t.id === dockPanel.activeTabId ? 0 : -1"
+          :title="t.kind === 'file' ? t.filePath : t.label"
+          :data-kind="t.kind"
+          @click="selectAndFocus(t.id)"
+          @keydown="onTabKeydown($event, t.id)"
+          @mousedown="(e) => { if (e.button === 1) e.preventDefault(); }"
+        >
+          <SvgIcon :name="dockTabType(t.kind).icon" :size="13" class="tab-icon" />
+          <span class="tab-label">{{ t.label }}</span>
+        </button>
         <button
           class="tab-close"
           :title="`关闭 ${t.label}`"
           :aria-label="`关闭 ${t.label}`"
-          @click.stop="closeDockTab(t.id)"
+          @click.stop="closeAndRefocus(t.id)"
         >
           <SvgIcon name="x" :size="11" />
         </button>
@@ -127,20 +179,27 @@ function onAuxClick(e: MouseEvent, id: string): void {
   border-radius: var(--radius-full);
 }
 
+.tab-entry {
+  display: flex;
+  align-items: center;
+  border-right: 1px solid var(--color-line);
+  max-width: 180px;
+  flex-shrink: 0;
+}
 .tab-button {
   display: flex;
   align-items: center;
   gap: var(--space-1);
+  min-width: 0;
+  flex: 1;
   padding-left: var(--space-3);
   padding-right: var(--space-1);
-  border-right: 1px solid var(--color-line);
+  border: none;
   background: transparent;
   color: var(--color-text-muted);
   cursor: pointer;
   font-size: var(--font-size-xs);
   white-space: nowrap;
-  max-width: 180px;
-  flex-shrink: 0;
   user-select: none;
   box-shadow: inset 0 -2px 0 transparent;
   transition:
@@ -148,7 +207,7 @@ function onAuxClick(e: MouseEvent, id: string): void {
     color var(--dur-fast) var(--ease-out),
     box-shadow var(--dur-fast) var(--ease-out);
 }
-.tab-button:hover {
+.tab-entry:hover {
   background: var(--color-hover);
   color: var(--color-text);
 }

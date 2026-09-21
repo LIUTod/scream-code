@@ -630,13 +630,14 @@ const PERMISSION_LABELS: Record<string, string> = {
   ask: '询问',
 };
 
-/** The four modes a Web session can actually land in today (ask only exists core-side and keeps a fallback label). */
-const PERMISSION_MODES = ['manual', 'auto', 'yolo', 'bot'] as const;
+/** Keep the picker aligned with the core/TUI permission selector. */
+const PERMISSION_MODES = ['manual', 'auto', 'yolo', 'bot', 'ask'] as const;
 const PERMISSION_HINTS: Record<string, string> = {
   manual: '每次工具调用都要你确认',
   auto: '安全操作自动放行，敏感操作仍要确认',
   yolo: '全部自动放行，不再打断',
   bot: '无人值守模式：批量接管确认',
+  ask: '遇到需要决定的操作时询问你',
 };
 
 const permissionLabel = computed(
@@ -966,7 +967,7 @@ defineExpose({ insertText, insertDraft, openModelPicker });
           title="插入 @ 提及文件"
           @click="insertToken('@')"
         >
-          <SvgIcon name="at" :size="14" /><span>提及</span>
+          <SvgIcon name="at" :size="14" /><span class="chip-text">提及</span>
         </button>
         <button
           class="composer-chip"
@@ -974,7 +975,7 @@ defineExpose({ insertText, insertDraft, openModelPicker });
           :title="variant === 'home' ? '插入 / 触发技能' : '插入 / 触发指令'"
           @click="insertToken('/')"
         >
-          <SvgIcon name="command" :size="14" /><span>{{ variant === 'home' ? '技能' : '指令' }}</span>
+          <SvgIcon name="command" :size="14" /><span class="chip-text">{{ variant === 'home' ? '技能' : '指令' }}</span>
         </button>
 
         <!-- Workspace chip: in home it opens the picker popover; in chat it shows the session's directory read-only. -->
@@ -1362,6 +1363,40 @@ defineExpose({ insertText, insertDraft, openModelPicker });
     min-width: 40px;
   }
   .composer-primary .primary-label {
+    display: none;
+  }
+}
+
+/* The capsule row is intentionally horizontally scrollable on phones, but at
+   very narrow widths the secondary context readout should not consume the
+   last few pixels and leave a chip label half-clipped behind the send button.
+   The value remains available in the title on wider phones and in the header
+   status, so hiding this duplicate readout below 400px is a safe compression. */
+@media (max-width: 400px) {
+  .composer-chip[data-chip='context'] {
+    display: none;
+  }
+
+  /* Keep the two session-independent labels from pushing chat's permission
+     chip off a 390px viewport. Their full names remain in the button titles. */
+  .composer-chip[data-chip='workspace'] .chip-text,
+  .composer-chip[data-chip='model'] .chip-text {
+    display: none;
+  }
+}
+
+/* At 360px and below keep the workspace/model controls as icon affordances.
+   Their full labels remain available through the existing title/accessible
+   name, while the compact controls leave enough room for a complete row. */
+@media (max-width: 360px) {
+  .composer-chips {
+    gap: 2px;
+  }
+  .composer-chips .composer-chip {
+    gap: 2px;
+    padding-inline: var(--space-1);
+  }
+  .composer-chip[data-chip='permission'] .chip-text {
     display: none;
   }
 }

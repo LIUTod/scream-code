@@ -256,6 +256,7 @@ describe('Composer chip row (data-driven visibility)', () => {
     const entries = menuEntries();
     const labels = entries.map((e) => e.textContent?.trim()).join('|');
     expect(labels).toContain('手动');
+    expect(labels).toContain('询问');
     expect(labels).toContain('YOLO');
     expect(labels).toContain('无人值守');
     await realPress(entries[0]!);
@@ -299,6 +300,15 @@ describe('Composer chip row (data-driven visibility)', () => {
     const model = wrapper.find('[data-chip="model"]');
     expect(model.text()).toContain('通用智能体');
     expect(model.attributes('disabled')).toBeUndefined();
+  });
+
+  it('uses the compact text hook on mention and slash chips so narrow phones can hide labels without clipping', () => {
+    const home = mountComposer({ variant: 'home', status: undefined, sessionId: null });
+    expect(home.find('[data-chip="slash"] .chip-text').text()).toBe('技能');
+
+    const chat = mountComposer();
+    expect(chat.find('[data-chip="mention"] .chip-text').text()).toBe('提及');
+    expect(chat.find('[data-chip="slash"] .chip-text').text()).toBe('指令');
   });
 
   it('chips in the same row are mutually exclusive: opening thinking dismisses permission', async () => {

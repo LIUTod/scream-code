@@ -11,6 +11,33 @@ import {
   unregisterActiveWebClient,
 } from '../../src/web/frontend/src/composables/webClient/activeClient';
 
+let registeredControlClient: object | null = null;
+
+function registerControlClient(overrides: Record<string, unknown> = {}) {
+  const client = {
+    sessionId: { value: 'session-1' },
+    status: {
+      value: {
+        busy: false,
+        wolfpackMode: false,
+        rlmEnabled: false,
+        planMode: false,
+        planStrategy: 'normal',
+      },
+    },
+    isBusy: { value: false },
+    switchWolfpack: vi.fn(async () => true),
+    switchRlm: vi.fn(async () => true),
+    switchPlanMode: vi.fn(async () => true),
+    undoHistory: vi.fn(async () => true),
+    fetchSnapshot: vi.fn(async () => undefined),
+    ...overrides,
+  };
+  registeredControlClient = client;
+  registerActiveWebClient(client as never);
+  return client;
+}
+
 function makeHandlers(overrides: Partial<SlashCommandHandlers> = {}) {
   const sendCommand = vi.fn();
   const clearMessages = vi.fn();
@@ -32,6 +59,10 @@ afterEach(() => {
   const { toasts, removeToast } = useToast();
   [...toasts.value].forEach((t) => removeToast(t.id));
   setSlashSkills([]);
+  if (registeredControlClient !== null) {
+    unregisterActiveWebClient(registeredControlClient as never);
+    registeredControlClient = null;
+  }
 });
 
 describe('useSlashCommands', () => {
@@ -45,7 +76,7 @@ describe('useSlashCommands', () => {
   it('forwards every session command verbatim', async () => {
     const h = makeHandlers();
     const { onCommand } = useSlashCommands(h.handlers);
-    for (const name of ['compact', 'auto', 'yes', 'bot', 'plan', 'fork', 'btw']) {
+    for (const name of ['compact', 'auto', 'ask', 'yes', 'bot', 'plan', 'fork', 'btw']) {
       await onCommand(name);
       expect(h.sendCommand).toHaveBeenCalledWith(name, undefined);
     }
@@ -196,5 +227,70 @@ describe('useSlashCommands', () => {
     ).toBe(true);
     unregisterActiveWebClient(fake);
     setSlashSkills([]);
+  });
+
+  it('executes /wolfpack with TUI-compatible toggle and explicit arguments', async () => {
+    const client = registerControlClient();
+    const h = makeHandlers();
+    const { onCommand } = useSlashCommands(h.handlers);
+
+    await onCommand('wolfpack');
+    expect(client.switchWolfpack).toHaveBeenCalledWith(true);
+
+    (client.status as { value: { wolfpackMode: boolean } }).value.wolfpackMode = true;
+    await onCommand('wolfpack', 'off');
+    expect(client.switchWolfpack).toHaveBeenLastCalledWith(false);
+  });
+
+  it('executes /rlm and preserves the current mode when setting /rlm-max-depth', async () => {
+    const client = registerControlClient();
+    const h = makeHandlers();
+    const { onCommand } = useSlashCommands(h.handlers);
+
+    await onCommand('rlm', 'on');
+    expect(client.switchRlm).toHaveBeenCalledWith(true);
+
+    (client.status as { value: { rlmEnabled: boolean } }).value.rlmEnabled = true;
+    await onCommand('rlm-max-depth', '3');
+    expect(client.switchRlm).toHaveBeenCalledWith(true, 3);
+  });
+
+  it('rejects invalid RLM depth and explains a query without sending a mutation', async () => {
+    const client = registerControlClient();
+    const h = makeHandlers();
+    const { onCommand } = useSlashCommands(h.handlers);
+
+    await onCommand('rlm-max-depth', '-1');
+    await onCommand('rlm-max-depth');
+    expect(client.switchRlm).not.toHaveBeenCalled();
+    expect(h.appendSystemMessage).toHaveBeenCalledWith(expect.stringContaining('/rlm-max-depth <N>'));
+  });
+
+  it('maps /fusionplan toggle semantics to the fusion REST strategy', async () => {
+    const client = registerControlClient();
+    const h = makeHandlers();
+    const { onCommand } = useSlashCommands(h.handlers);
+
+    await onCommand('fusionplan');
+    expect(client.switchPlanMode).toHaveBeenCalledWith(true, 'fusion');
+
+    (client.status as { value: { planMode: boolean; planStrategy: string } }).value.planMode = true;
+    (client.status as { value: { planMode: boolean; planStrategy: string } }).value.planStrategy = 'fusion';
+    await onCommand('fusionplan');
+    expect(client.switchPlanMode).toHaveBeenLastCalledWith(false, undefined);
+  });
+
+  it('executes /revoke with a validated turn count and refreshes the transcript', async () => {
+    const client = registerControlClient();
+    const h = makeHandlers();
+    const { onCommand } = useSlashCommands(h.handlers);
+
+    await onCommand('revoke', '2');
+    expect(client.undoHistory).toHaveBeenCalledWith(2);
+    expect(client.fetchSnapshot).toHaveBeenCalledOnce();
+
+    (client.isBusy as { value: boolean }).value = true;
+    await onCommand('revoke', '1');
+    expect(client.undoHistory).toHaveBeenCalledTimes(1);
   });
 });

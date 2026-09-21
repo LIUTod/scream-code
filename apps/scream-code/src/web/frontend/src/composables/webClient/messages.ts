@@ -165,6 +165,7 @@ export function createMessagesModule(ctx: ClientContext): MessagesModule {
     const pendingIdx = msg.pendingMsgId
       ? s.messages.value.findIndex((m) => m.id === msg.pendingMsgId)
       : -1;
+    const requestedLocally = pendingIdx >= 0;
     if (pendingIdx >= 0) {
       const existing = s.messages.value[pendingIdx];
       s.messages.value[pendingIdx] = {
@@ -187,6 +188,12 @@ export function createMessagesModule(ctx: ClientContext): MessagesModule {
     // fork/title change the session list - refresh the sidebar.
     if (msg.command === 'fork' || msg.command === 'title') {
       void ctx.fetchSessions();
+    }
+    // A fork is an explicit branch-navigation command in the TUI. The server
+    // returns the durable Web session id so the browser can land on the copy,
+    // rather than leaving the user in the source conversation with a toast.
+    if (msg.ok && msg.command === 'fork' && msg.sessionId && requestedLocally) {
+      void ctx.switchSession(msg.sessionId);
     }
     // compact changes message history - refresh snapshot to get the
     // compacted messages. Local messages (command results etc.) are

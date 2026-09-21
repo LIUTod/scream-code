@@ -15,6 +15,28 @@ afterEach(async () => {
 });
 
 describe('Session plan, compact, usage, and resume APIs', () => {
+  it('round-trips the RLM recursion cap through session status', async () => {
+    const homeDir = await makeTempDir(tempDirs, 'scream-sdk-rlm-depth-home-');
+    const workDir = await makeTempDir(tempDirs, 'scream-sdk-rlm-depth-work-');
+    await writeTestConfig(homeDir);
+    const harness = new ScreamHarness({ homeDir, identity: TEST_IDENTITY });
+
+    try {
+      const session = await harness.createSession({ id: 'ses_rlm_depth_runtime', workDir });
+
+      await expect(session.getStatus()).resolves.toMatchObject({ rlmMaxDepth: null });
+      await session.setRlmMaxDepth(7);
+      await expect(session.getStatus()).resolves.toMatchObject({ rlmMaxDepth: 7 });
+
+      // Core uses zero to restore the unlimited (Infinity) setting; the SDK
+      // exposes that safely as null so JSON consumers never see Infinity.
+      await session.setRlmMaxDepth(0);
+      await expect(session.getStatus()).resolves.toMatchObject({ rlmMaxDepth: null });
+    } finally {
+      await harness.close();
+    }
+  });
+
   it('sets plan mode through manualEnterPlan and clears the active plan file', async () => {
     const homeDir = await makeTempDir(tempDirs, 'scream-sdk-plan-home-');
     const workDir = await makeTempDir(tempDirs, 'scream-sdk-plan-work-');

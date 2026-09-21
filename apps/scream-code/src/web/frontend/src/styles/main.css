@@ -8,6 +8,7 @@ html, body {
   height: 100%;
   font-family: var(--font-ui);
   font-size: var(--font-size-base);
+  line-height: var(--line-height-normal);
   background: var(--color-bg);
   color: var(--color-text);
 }
@@ -28,7 +29,10 @@ body::before {
   z-index: 1;
 }
 
-button {
+button,
+input,
+textarea,
+select {
   font-family: inherit;
 }
 
@@ -42,9 +46,9 @@ button:disabled,
 
 /* Keyboard focus ring: quiet neutral halo */
 :focus-visible {
-  outline: 2px solid var(--color-accent-bd);
+  outline: 2px solid var(--color-focus-ring);
   outline-offset: 2px;
-  box-shadow: var(--glow-focus);
+  box-shadow: none;
   border-radius: var(--radius-xs);
 }
 
@@ -90,10 +94,13 @@ button:disabled,
 }
 
 /* Smooth theme switching (class toggled briefly by App.vue) */
-html.theme-transition,
-html.theme-transition *,
-html.theme-transition *::before,
-html.theme-transition *::after {
+html.theme-transition .shell,
+html.theme-transition .sidebar,
+html.theme-transition .canvas,
+html.theme-transition .right-panel,
+html.theme-transition .panel-section,
+html.theme-transition .dialog-panel,
+html.theme-transition .menu-popover {
   transition:
     background-color var(--dur-slow) var(--ease-in-out),
     color var(--dur-slow) var(--ease-in-out),
@@ -361,9 +368,11 @@ html.theme-transition *::after {
 .sidebar .spaces {
   scrollbar-gutter: stable;
 }
-.sidebar:not(:hover) .spaces {
-  --scrollbar-thumb: transparent;
-  --scrollbar-thumb-hover: transparent;
+@media (hover: hover) and (pointer: fine) {
+  .sidebar:not(:hover) .spaces {
+    --scrollbar-thumb: transparent;
+    --scrollbar-thumb-hover: transparent;
+  }
 }
 
 /* Standard-property path (Firefox today): inherited scrollbar-color would
@@ -387,9 +396,7 @@ html.theme-transition *::after {
    anyway). Scoped styles inside components belong to this same document and are covered by
    this rule as well, so no per-component rule needs to be added. */
 @supports (corner-shape: superellipse(1.5)) {
-  *,
-  *::before,
-  *::after {
+  :where(.panel-section, .menu-popover, .dialog-panel, button, input, textarea) {
     corner-shape: superellipse(1.5);
   }
 }

@@ -10,6 +10,7 @@ import {
 
 export interface ConnectionModule {
   connect(): void;
+  waitForConnected(timeoutMs?: number): Promise<boolean>;
   send(obj: Record<string, unknown>): void;
   reconnectNow(): void;
   stopHeartbeat(): void;
@@ -31,6 +32,44 @@ export function createConnectionModule(ctx: ClientContext): ConnectionModule {
 
   function setConnectionStatus(status: ConnectionStatus): void {
     s.connectionStatus.value = status;
+  }
+
+  /**
+   * Wait for the current websocket handshake before dispatching a command.
+   *
+   * Session switches intentionally replace the socket asynchronously.  The
+   * slash-command surface is shared by the home and conversation views, so a
+   * command typed in that handoff window must wait instead of being silently
+   * dropped by `sendCommand` / REST controls.  The idle/disposed checks make a
+   * waiter resolve promptly when the selected session disappears.
+   */
+  function waitForConnected(timeoutMs = 8000): Promise<boolean> {
+    if (s.connectionStatus.value === 'connected') return Promise.resolve(true);
+    if (s.connectionStatus.value === 'idle' || s.disposed) return Promise.resolve(false);
+    // A second session switch while this command is waiting must cancel the
+    // dispatch rather than send the command into the newly selected chat.
+    const targetSessionId = s.sessionId.value;
+    if (!targetSessionId) return Promise.resolve(false);
+    const timeout = Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 8000;
+    return new Promise((resolve) => {
+      const started = Date.now();
+      const timer = window.setInterval(() => {
+        if (s.sessionId.value !== targetSessionId) {
+          window.clearInterval(timer);
+          resolve(false);
+        } else if (s.connectionStatus.value === 'connected') {
+          window.clearInterval(timer);
+          resolve(true);
+        } else if (
+          s.connectionStatus.value === 'idle' ||
+          s.disposed ||
+          Date.now() - started >= timeout
+        ) {
+          window.clearInterval(timer);
+          resolve(false);
+        }
+      }, 50);
+    });
   }
 
   function send(obj: Record<string, unknown>): void {
@@ -123,6 +162,20 @@ export function createConnectionModule(ctx: ClientContext): ConnectionModule {
         s.sessionActive.value = false;
         s.goal.value = null;
         s.todos.value = [];
+        s.subagents.value = [];
+        s.sessionPlan.value = null;
+        s.skills.value = [];
+        s.skillsError.value = null;
+        s.plugins.value = [];
+        s.pluginInfo.value = null;
+        s.mcpServers.value = [];
+        s.mcpStartupMetrics.value = null;
+        s.backgroundTasks.value = [];
+        s.backgroundTaskOutput.value = '';
+        s.pendingApprovals.value = [];
+        s.status.value = { busy: false };
+        s.gitStatus.value = null;
+        s.workDir.value = null;
         // A rejected session's transcript must not haunt the idle view;
         // offlineQueue survives on purpose — unsent prompts wait for the
         // next session the user picks.
@@ -178,18 +231,37 @@ export function createConnectionModule(ctx: ClientContext): ConnectionModule {
     // queue was already emptied. Each item is only removed after the
     // server echoes it back via user_message; a rejection re-queues it.
     ctx.flushQueue();
+    // Snapshot carries the authoritative journal/status baseline. Start the
+    // remaining session projections only after it settles so a slower snapshot
+    // cannot overwrite a newer REST status/plan response (or vice versa).
+    // `server_hello` handlers can outlive a subsequent session switch while
+    // their snapshot/activation promises settle. Capture this particular
+    // connection identity so its finally callback never starts a resource
+    // refresh for whichever session happened to become current later.
+    const helloSessionGeneration = s.sessionGeneration;
+    const helloConnectionGeneration = s.connectionGeneration;
+    const isHelloCurrent = () =>
+      s.sessionId.value === hello.sessionId &&
+      s.currentSessionId.value === hello.sessionId &&
+      s.sessionGeneration === helloSessionGeneration &&
+      s.connectionGeneration === helloConnectionGeneration;
+    const refreshSessionData = () => {
+      if (!isHelloCurrent()) return;
+      void ctx.fetchSnapshot().finally(() => {
+        if (isHelloCurrent()) void ctx.refreshSessionResources?.();
+      });
+      void ctx.fetchSessions();
+      void ctx.fetchGitStatus();
+    };
     // Only activate archived sessions; skip if already active to avoid extra reconnect.
     if (!hello.active) {
       void ctx.activateSession(hello.sessionId).then((active) => {
+        if (!isHelloCurrent()) return;
         if (active && s.sessionId.value === hello.sessionId) s.sessionActive.value = true;
-        void ctx.fetchSnapshot();
-        void ctx.fetchSessions();
-        void ctx.fetchGitStatus();
+        refreshSessionData();
       });
     } else {
-      void ctx.fetchSnapshot();
-      void ctx.fetchSessions();
-      void ctx.fetchGitStatus();
+      refreshSessionData();
     }
   });
 
@@ -203,9 +275,10 @@ export function createConnectionModule(ctx: ClientContext): ConnectionModule {
   });
 
   ctx.connect = connect;
+  ctx.waitForConnected = waitForConnected;
   ctx.send = send;
   ctx.stopHeartbeat = stopHeartbeat;
   ctx.setConnectionStatus = setConnectionStatus;
 
-  return { connect, send, reconnectNow, stopHeartbeat };
+  return { connect, waitForConnected, send, reconnectNow, stopHeartbeat };
 }

@@ -24,6 +24,8 @@ const emit = defineEmits<{
   (e: 'export'): void;
   (e: 'fork'): void;
   (e: 'clear'): void;
+  (e: 'controls'): void;
+  (e: 'agents'): void;
   (e: 'toggle-stats'): void;
 }>();
 
@@ -50,6 +52,18 @@ const moreOpen = ref(false);
 
 const moreGroups = computed(() =>
   singleGroup([
+    {
+      key: 'controls',
+      label: '会话控制',
+      icon: 'wrench',
+      title: '打开会话控制面板',
+    },
+    {
+      key: 'agents',
+      label: '协作代理',
+      icon: 'bot',
+      title: '查看子代理执行状态',
+    },
     {
       key: 'export',
       label: '导出 Markdown',
@@ -85,7 +99,9 @@ const moreGroups = computed(() =>
 
 function onMoreSelect(key: string): void {
   moreOpen.value = false;
-  if (key === 'export') emit('export');
+  if (key === 'controls') emit('controls');
+  else if (key === 'agents') emit('agents');
+  else if (key === 'export') emit('export');
   else if (key === 'fork') emit('fork');
   else if (key === 'clear') emit('clear');
   else if (key === 'files') toggleDock();

@@ -314,6 +314,10 @@ export class SessionAPIImpl implements PromisableMethods<SessionAPI> {
     return this.getAgent(agentId).getRlmEnabled({});
   }
 
+  getRlmMaxDepth({ agentId }: AgentScopedPayload<EmptyPayload>) {
+    return this.getAgent(agentId).getRlmMaxDepth({});
+  }
+
   private getAgent(agentId: string): PromisableMethods<AgentAPI> {
     const agent = this.session.agents.get(agentId);
     if (agent === undefined) {
