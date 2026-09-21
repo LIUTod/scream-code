@@ -586,8 +586,8 @@ export class SessionEventHandler {
     this.recordProviderLatency(event);
     this.drainQueuedMessagesIntoSteer();
     // A completed step is one LLM request; the failed attempts are counted
-    // where they happen (handleStepRetrying). Both share 工作时长's in-process
-    // lifetime: reset on session switch and app restart, never persisted.
+    // where they happen (handleStepRetrying). Both live in-process only: reset
+    // on session switch and app restart, never persisted.
     const prev = this.host.state.appState.sessionUsage;
     const apiCalls = this.host.state.appState.sessionApiCalls + 1;
     this.host.setAppState(

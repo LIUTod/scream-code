@@ -139,7 +139,6 @@ export const zh: Record<string, string> = {
   'sidebar.tools': '工具调用',
   'sidebar.calls': '调用次数',
   'sidebar.compacts': '压缩次数',
-  'sidebar.uptime': '工作时长',
   'sidebar.agents': 'Agent',
   'sidebar.agent_idle': '休息中',
   'sidebar.agent_working': '工作中',

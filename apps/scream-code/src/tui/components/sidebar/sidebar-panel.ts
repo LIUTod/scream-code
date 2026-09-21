@@ -15,14 +15,13 @@ export interface SidebarGitData {
 }
 
 /** Aggregated counters for the current session (computed from the transcript
- * and app state; time-based values derive from `startedAt` in render). */
+ * and app state). */
 export interface SidebarSessionStats {
   readonly turns: number;
   readonly toolCalls: number;
   readonly compactions: number;
   /** LLM requests this session: completed steps plus retried attempts.
-   * Counted in-process, so it restarts with the app or a session switch — the
-   * same lifetime as `startedAt`. */
+   * Counted in-process, so it restarts with the app or a session switch. */
   readonly apiCalls: number;
   /** Cumulative token usage (all buckets summed) for this session. */
   readonly tokensTotal: number;
@@ -32,8 +31,6 @@ export interface SidebarSessionStats {
   readonly tokensInputCacheMiss: number;
   /** Sum of output tokens for this session (main agent + all subagents). */
   readonly tokensOutput: number;
-  /** Epoch ms when the current session started (reset on session switch). */
-  readonly startedAt: number;
 }
 
 /**

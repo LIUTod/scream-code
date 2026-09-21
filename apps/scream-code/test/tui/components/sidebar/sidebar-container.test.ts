@@ -67,7 +67,6 @@ describe('SidebarContainer', () => {
           tokensInputCacheHit: 0,
           tokensInputCacheMiss: 0,
           tokensOutput: 0,
-          startedAt: Date.now(),
         },
       }),
     });

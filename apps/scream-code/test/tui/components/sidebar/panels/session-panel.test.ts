@@ -30,7 +30,6 @@ const baseStats = {
   tokensInputCacheHit: 224_079_377,
   tokensInputCacheMiss: 3_000_000,
   tokensOutput: 515_205,
-  startedAt: Date.now() - 60_000,
 };
 
 describe('SessionPanel', () => {
@@ -60,8 +59,8 @@ describe('SessionPanel', () => {
     // always survive and it is the label that gives way (never a number pushed
     // out of the frame by a wider neighbour).
     expect(bare.every((l) => displayWidth(l) <= 16)).toBe(true);
-    expect(bare[5]!.replace(/^[●○]\s*/, '')).toMatch(/^Turns\s+12$/);
-    expect(bare[8]!.replace(/^[●○]\s*/, '')).toMatch(/^Comp\S*\s+2$/);
+    expect(bare[4]!.replace(/^[●○]\s*/, '')).toMatch(/^Turns\s+12$/);
+    expect(bare[7]!.replace(/^[●○]\s*/, '')).toMatch(/^Comp\S*\s+2$/);
   });
 
   it('switches token values to compact units when the sidebar is narrow', () => {
@@ -90,6 +89,8 @@ describe('SessionPanel', () => {
       expect(text).toContain('227.6M');
       expect(text).toContain('515K');
       expect(text).not.toMatch(/[万亿]/);
+      // The wall-clock duration row is gone in this locale too.
+      expect(text).not.toContain('工作时长');
     } finally {
       setLocale('en');
     }
@@ -107,13 +108,15 @@ describe('SessionPanel', () => {
     expect(text).toContain('515,205');
     expect(text).toContain('317');
 
-    // Nine fields, one per row: the paired "turns · tools" lines are gone.
-    expect(bare).toHaveLength(9);
+    // Eight fields, one per row: the paired "turns · tools" lines are gone.
+    expect(bare).toHaveLength(8);
     expect(bare[0]!.replace(/^[●○]\s*/, '')).toMatch(/^Total\s+227,594,582$/);
-    expect(bare[5]!.replace(/^[●○]\s*/, '')).toMatch(/^Turns\s+12$/);
-    expect(bare[6]!.replace(/^[●○]\s*/, '')).toMatch(/^Tool calls\s+87$/);
-    expect(bare[7]!.replace(/^[●○]\s*/, '')).toMatch(/^API calls\s+317$/);
-    expect(bare[8]!.replace(/^[●○]\s*/, '')).toMatch(/^Compacts\s+2$/);
+    expect(bare[4]!.replace(/^[●○]\s*/, '')).toMatch(/^Turns\s+12$/);
+    expect(bare[5]!.replace(/^[●○]\s*/, '')).toMatch(/^Tool calls\s+87$/);
+    expect(bare[6]!.replace(/^[●○]\s*/, '')).toMatch(/^API calls\s+317$/);
+    expect(bare[7]!.replace(/^[●○]\s*/, '')).toMatch(/^Compacts\s+2$/);
+    // The wall-clock duration row is gone for good.
+    expect(text).not.toContain('Duration');
 
     // Fixed label column + right-aligned values => every row has exactly the
     // same display width, so both edges line up (CJK-aware).

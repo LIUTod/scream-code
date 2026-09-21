@@ -55,7 +55,6 @@ const data: SidebarData = {
     tokensInputCacheHit: 100,
     tokensInputCacheMiss: 900,
     tokensOutput: 50,
-    startedAt: Date.now() - 60_000,
   },
   agents: [
     {
@@ -146,7 +145,6 @@ describe('sidebar grid layout', () => {
       'criterion',
       'reviewer',
       '总Token',
-      '工作时长',
       '压缩次数',
       '会话轮次',
       '调用次数',

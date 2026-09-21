@@ -139,7 +139,6 @@ export const en: Record<string, string> = {
   'sidebar.tools': 'Tool calls',
   'sidebar.calls': 'API calls',
   'sidebar.compacts': 'Compacts',
-  'sidebar.uptime': 'Duration',
   'sidebar.agents': 'Agents',
   'sidebar.agent_idle': 'Idle',
   'sidebar.agent_working': 'Working',

@@ -91,10 +91,6 @@ export class LifecycleController {
    *  frame asked, so a closed sidebar produces no traffic. */
   private readonly hubProbe = createHubProbe();
   private sidebarGitCacheWorkDir = '';
-  /** Session start time for the sidebar uptime counter. Reset on session
-   * switch so a resumed old session doesn't show the TUI process age. */
-  private sidebarSessionStartedAt = Date.now();
-  private sidebarSessionId: string | undefined;
   /** Memo for the session-stats aggregation: recomputed only when the
    * transcript length, compaction count or usage object changes. */
   private sidebarStatsMemo:
@@ -428,11 +424,6 @@ export class LifecycleController {
   }
 
   private readSidebarSessionStats(appState: AppState): SidebarSessionStats {
-    // Session switch: the uptime counter belongs to the current session.
-    if (this.sidebarSessionId !== appState.sessionId) {
-      this.sidebarSessionId = appState.sessionId;
-      this.sidebarSessionStartedAt = Date.now();
-    }
     const entries = this.host.state.transcriptEntries;
     const usage = appState.sessionUsage;
     const subagentUsage = appState.subagentUsage;
@@ -474,7 +465,6 @@ export class LifecycleController {
       tokensInputCacheHit: usage.inputCacheRead,
       tokensInputCacheMiss: usage.inputOther + usage.inputCacheCreation,
       tokensOutput: usage.output + subagentOutput,
-      startedAt: this.sidebarSessionStartedAt,
     };
     this.sidebarStatsMemo = {
       length: entries.length,

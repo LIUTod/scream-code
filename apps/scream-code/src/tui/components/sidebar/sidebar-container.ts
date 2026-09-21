@@ -12,7 +12,7 @@ const SIDE_PADDING = 1; // space between the │ and the content on each side
  * Renders the stacked sidebar: every visible registered panel gets its own
  * full box frame (┌─┐│└┘) with the panel title embedded in the top frame, one
  * below the other. Panels render live each frame (their body reads the
- * current data snapshot), so time-based values (uptime, goal wall-clock)
+ * current data snapshot), so time-based values (goal wall-clock)
  * tick without rebuilding. The focused panel's title is bolded; focus is
  * moved by the SidebarManager (`/sidebar next/prev`, Ctrl+X toggles).
  * The whole frame is painted in the theme accent colour and the rendered
@@ -26,9 +26,10 @@ export class SidebarContainer extends Container {
    * only rebuilt when the visible panel set changes. */
   private readonly bodies = new Map<string, Component>();
   private builtStackKey = '';
-  /** 1s heartbeat while the sidebar is open: keeps live values (uptime,
-   * goal wall-clock, gradient phase of busy agent slots) ticking without
-   * needing an event. Stopped when the sidebar closes. */
+  /** 1s heartbeat for the whole container lifetime: keeps live values (goal
+   * wall-clock, gradient phase of busy agent slots) ticking while the sidebar
+   * is open — the tick is a no-op when it is closed, and only `dispose()`
+   * (TUI teardown) clears the interval. */
   private readonly heartbeat: ReturnType<typeof setInterval> | undefined;
 
   constructor(manager: SidebarManager, requestRender: () => void, colors: ColorPalette) {

@@ -1,5 +1,5 @@
 import chalk from 'chalk';
-import { getLocale, t } from '@scream-code/config';
+import { t } from '@scream-code/config';
 
 import type { ColorPalette } from '#/tui/theme/colors';
 import {
@@ -16,22 +16,6 @@ import {
   type SidebarPanel,
   type SidebarPanelContext,
 } from '../sidebar-panel';
-
-function formatDuration(ms: number): string {
-  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
-  const zh = getLocale() === 'zh';
-  if (zh) {
-    if (totalSeconds < 60) return `${totalSeconds}秒`;
-    const hours = Math.floor(totalSeconds / 3600);
-    const minutes = Math.floor((totalSeconds % 3600) / 60);
-    return hours > 0 ? `${hours}小时${minutes}分` : `${minutes}分钟`;
-  }
-  if (totalSeconds < 60) return `${totalSeconds}s`;
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  if (hours > 0) return `${hours}h ${minutes}m`;
-  return `${minutes}m`;
-}
 
 /** 1,234 → "1,234" via the platform locale grouping. */
 function formatCount(n: number): string {
@@ -70,8 +54,8 @@ function gridFits(rows: ReadonlyArray<readonly [string, string]>, width: number)
 /**
  * Session summary, live-rendered each frame as a strict two-column table:
  * one field per row, labels sharing a left column, values sharing a right
- * edge. Uptime derives from `startedAt` so it ticks between data updates;
- * every other value comes from the snapshot in getData().
+ * edge. Every value comes from the snapshot in getData(); nothing here is
+ * derived from wall-clock time.
  */
 class SessionPanelContent {
   constructor(
@@ -88,7 +72,6 @@ class SessionPanelContent {
     }
     const label = (s: string): string => chalk.hex(this.colors.textDim)(s);
     const value = (s: string): string => chalk.hex(this.colors.text)(s);
-    const now = Date.now();
 
     const tokenRows: ReadonlyArray<readonly [string, number]> = [
       [t('sidebar.tokens'), stats.tokensTotal],
@@ -97,7 +80,6 @@ class SessionPanelContent {
       [t('sidebar.tokens_output'), stats.tokensOutput],
     ];
     const countRows: Array<[string, string]> = [
-      [t('sidebar.uptime'), formatDuration(now - stats.startedAt)],
       [t('sidebar.turns'), formatCount(stats.turns)],
       [t('sidebar.tools'), formatCount(stats.toolCalls)],
       [t('sidebar.calls'), formatCount(stats.apiCalls)],
