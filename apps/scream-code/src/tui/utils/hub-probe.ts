@@ -28,10 +28,18 @@ export const HUB_PROBE_TIMEOUT_MS = 1_500;
 export const HUB_FAILURE_LIMIT = 2;
 /** Older than N intervals, the values are dimmed: the network may have changed. */
 export const HUB_STALE_MULTIPLIER = 2;
-/** At or below this round trip a reading reads as healthy (green). */
+/** At or below this round trip a *probe* reading reads as healthy (green). */
 export const HUB_GOOD_MS = 100;
 /** Row id for the model provider, whose latency is measured, never probed. */
 export const HUB_MODEL_ROW_ID = 'model';
+/**
+ * The provider row is judged on its own ladder. A first token is a model round
+ * trip, not a HEAD request to a CDN: the probe bar above would paint every
+ * perfectly healthy answer amber, so at or below this the row is green.
+ */
+export const HUB_MODEL_GOOD_MS = 5_000;
+/** Above this the provider row reads as a problem (red), not merely slow. */
+export const HUB_MODEL_SLOW_MS = 15_000;
 /** A measured provider reading older than this is dimmed: nothing was asked lately. */
 export const HUB_MODEL_STALE_MS = 5 * 60_000;
 
@@ -206,8 +214,9 @@ function toneFor(site: SiteState, stale: boolean): HubTone {
 /**
  * Merge the measured provider reading with the probe samples into Hub rows.
  * The provider row always leads (it answers "is the model I'm using reachable"),
- * and it staleness-checks against its own budget: a long idle stretch means
- * nothing was asked, not that the network died.
+ * it staleness-checks against its own budget: a long idle stretch means nothing
+ * was asked, not that the network died — and it is coloured on its own ladder
+ * (see {@link hubModelTone}), not on the probe bar.
  */
 export function buildHubSamples(
   snapshot: HubSnapshot,
@@ -218,15 +227,30 @@ export function buildHubSamples(
   const modelRow: HubSample = {
     id: HUB_MODEL_ROW_ID,
     ms: provider.ms,
-    tone: hubLatencyTone(provider.ms, ageMs >= HUB_MODEL_STALE_MS),
+    tone: hubModelTone(provider.ms, ageMs >= HUB_MODEL_STALE_MS),
   };
   return [modelRow, ...snapshot.samples];
 }
 
-/** Shared tone rule for every Hub row (probe sites and the measured provider). */
+/** Tone rule for the probed endpoint rows: green ≤{@link HUB_GOOD_MS}, amber above. */
 export function hubLatencyTone(ms: number | undefined, stale = false): HubTone {
   if (ms === undefined || stale) return 'dim';
   return ms <= HUB_GOOD_MS ? 'ok' : 'warn';
+}
+
+/**
+ * Tone rule for the measured provider row (model first token), deliberately
+ * separate from the probe ladder: a first token and a HEAD request are not
+ * comparable, and one shared bar would call every healthy answer slow. Green
+ * ≤{@link HUB_MODEL_GOOD_MS}, amber up to {@link HUB_MODEL_SLOW_MS}, red past
+ * it — that long is worth flagging, not merely dimming. `undefined` (nothing
+ * measured yet, or a provider just switched) and a stale reading stay dim:
+ * neither is an outage.
+ */
+export function hubModelTone(ms: number | undefined, stale = false): HubTone {
+  if (ms === undefined || stale) return 'dim';
+  if (ms <= HUB_MODEL_GOOD_MS) return 'ok';
+  return ms <= HUB_MODEL_SLOW_MS ? 'warn' : 'down';
 }
 
 /**

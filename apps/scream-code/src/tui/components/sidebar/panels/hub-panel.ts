@@ -29,9 +29,11 @@ const EMPTY_MARK = '--';
  *
  * Values share one right edge through the same two-column engine the Session
  * panel uses, so rows never jitter as numbers change width, and only the value
- * carries colour (green ≤100ms, amber above it, red when a site stopped
- * answering). The panel is a pure view: probing happens in the data provider,
- * which is what keeps a slow endpoint from ever touching a frame.
+ * carries colour. Two ladders, because two different things are timed: probe
+ * rows are green ≤100ms, amber above it, red once a site stopped answering,
+ * while the measured provider row (model first token) is green ≤5s, amber up to
+ * 15s and red past that. The panel is a pure view: probing happens in the data
+ * provider, which is what keeps a slow endpoint from ever touching a frame.
  */
 class HubPanelContent {
   constructor(

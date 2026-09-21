@@ -69,7 +69,8 @@ const data: SidebarData = {
   ],
   hub: {
     samples: [
-      { id: HUB_MODEL_ROW_ID, ms: 128, tone: 'warn' },
+      // 128ms is a healthy first token: the measured row has its own ladder.
+      { id: HUB_MODEL_ROW_ID, ms: 128, tone: 'ok' },
       { id: 'github', ms: 32, tone: 'ok' },
       { id: 'alibaba', label: 'Alibaba', ms: 18, tone: 'ok' },
     ] satisfies HubSample[],

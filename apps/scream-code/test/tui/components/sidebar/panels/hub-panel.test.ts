@@ -50,7 +50,7 @@ function plain(line: string): string {
 }
 
 const rows = [
-  sample(HUB_MODEL_ROW_ID, 128, 'warn'),
+  sample(HUB_MODEL_ROW_ID, 128, 'ok'),
   sample('github', 32, 'ok'),
   sample('google', 940, 'warn'),
   sample('x', undefined, 'down'),
@@ -100,7 +100,8 @@ describe('hub panel', () => {
   it('maps tone onto the palette: green, amber, red, dim', () => {
     const [model, github, google, x] = render(hub(rows));
     expect(github).toContain(GREEN);
-    expect(model).toContain(AMBER);
+    // 128ms is a healthy first token: the measured row has its own ladder.
+    expect(model).toContain(GREEN);
     expect(google).toContain(AMBER);
     expect(x).toContain(RED);
     const dimmed = render(hub([sample('tencent', 12, 'dim')]))[0]!;

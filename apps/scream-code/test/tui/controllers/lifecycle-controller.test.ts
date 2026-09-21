@@ -234,8 +234,9 @@ describe('LifecycleController', () => {
       // The provider row is measured from real requests, so it survives a
       // closed sidebar — that is not outbound traffic.
       expect(data.samples.map((sample) => sample.id)).toEqual([HUB_MODEL_ROW_ID]);
-      // 120ms is over the 100ms line, so the measured row reads as amber.
-      expect(data.samples[0]).toMatchObject({ ms: 120, tone: 'warn' });
+      // 120ms is over the probe line but a healthy first token: the measured row
+      // is judged on its own ladder, so it reads green.
+      expect(data.samples[0]).toMatchObject({ ms: 120, tone: 'ok' });
     });
 
     it('probes once per rebuild while visible, and stops again when closed', () => {

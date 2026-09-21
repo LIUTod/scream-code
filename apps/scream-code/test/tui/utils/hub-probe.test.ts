@@ -5,7 +5,9 @@ import {
   HUB_ENDPOINTS,
   HUB_FAILURE_LIMIT,
   HUB_GOOD_MS,
+  HUB_MODEL_GOOD_MS,
   HUB_MODEL_ROW_ID,
+  HUB_MODEL_SLOW_MS,
   HUB_MODEL_STALE_MS,
   HUB_PROBE_INTERVAL_MS,
   HUB_STALE_MULTIPLIER,
@@ -13,6 +15,7 @@ import {
   createHubProbe,
   formatHubLatency,
   hubLatencyTone,
+  hubModelTone,
   type ProbeFetch,
   type ProbeRequestInit,
 } from '#/tui/utils/hub-probe';
@@ -303,7 +306,9 @@ describe('hub display helpers', () => {
 
     const rows = buildHubSamples(snapshot, { ms: 128, sampledAt: clock.now() }, clock.now());
     expect(rows.map((row) => row.id)).toEqual([HUB_MODEL_ROW_ID, 'github', 'tencent']);
-    expect(rows[0]).toMatchObject({ ms: 128, tone: 'warn' });
+    // 128ms is slow for a HEAD probe but a healthy first token: the provider row
+    // is judged on its own ladder and must not inherit the probe bar.
+    expect(rows[0]).toMatchObject({ ms: 128, tone: 'ok' });
   });
 
   it('stales the provider row on its own budget, independent of the probes', () => {
@@ -332,6 +337,27 @@ describe('hub display helpers', () => {
     expect(hubLatencyTone(HUB_GOOD_MS + 1)).toBe('warn');
     expect(hubLatencyTone(HUB_GOOD_MS, true)).toBe('dim');
     expect(hubLatencyTone(undefined)).toBe('dim');
+  });
+
+  it('judges the provider row on its own ladder, not the probe bar', () => {
+    // The same reading lands on different tones: a first token is a model round
+    // trip, a probe is a HEAD request, so 128ms is amber for one and green here.
+    expect(hubLatencyTone(128)).toBe('warn');
+    expect(hubModelTone(128)).toBe('ok');
+    expect(hubModelTone(HUB_MODEL_GOOD_MS)).toBe('ok');
+    expect(hubModelTone(HUB_MODEL_GOOD_MS + 1)).toBe('warn');
+    expect(hubModelTone(HUB_MODEL_SLOW_MS)).toBe('warn');
+    expect(hubModelTone(HUB_MODEL_SLOW_MS + 1)).toBe('down');
+    // Nothing measured yet (or a provider just switched) is not an outage, and
+    // a reading too old to trust is dimmed rather than painted red.
+    expect(hubModelTone(undefined)).toBe('dim');
+    expect(hubModelTone(128, true)).toBe('dim');
+    expect(hubModelTone(HUB_MODEL_SLOW_MS + 1, true)).toBe('dim');
+
+    // …and the ladder reaches the rendered row through buildHubSamples.
+    const base = 1_000_000;
+    const slow = buildHubSamples(emptySnapshot(), { ms: 16_000, sampledAt: base }, base)[0];
+    expect(slow).toMatchObject({ ms: 16_000, tone: 'down' });
   });
 });
 
