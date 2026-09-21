@@ -597,7 +597,7 @@ describe('Web undo projection', () => {
       { role: 'user', content: [{ type: 'text', text: 'ordinary prompt' }], toolCalls: [], origin: { kind: 'user' } },
       { role: 'assistant', content: [{ type: 'text', text: 'ordinary answer' }], toolCalls: [] },
       { role: 'user', content: [{ type: 'text', text: 'review skill prompt' }], toolCalls: [], origin: skillOrigin },
-      { role: 'assistant', content: [{ type: 'text', text: 'skill tool preamble' }], toolCalls: [{ id: 'tool-seed', name: 'read', arguments: '{}' }] },
+      { role: 'assistant', content: [{ type: 'text', text: 'skill tool preamble' }], toolCalls: [{ type: 'function', id: 'tool-seed', name: 'read', arguments: '{}' }] },
       { role: 'assistant', content: [{ type: 'text', text: 'skill answer' }], toolCalls: [] },
     ];
     const control = makeFakeSession({
