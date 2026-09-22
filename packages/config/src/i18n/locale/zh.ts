@@ -788,7 +788,7 @@ export const zh: Record<string, string> = {
   'subagent.desc_reviewer': '代码审查，发现 bug 和 API 契约违反',
   'subagent.desc_writer': '内容生产与研究报告',
   'subagent.desc_explore': '快速代码库探索（只读）',
-  'subagent.desc_oracle': '深度调试与架构决策',
+  'subagent.desc_oracle': '既有代码的系统尺度审查（架构/技术债/可维护性/冗余）',
   'subagent.desc_plan': '实现规划与架构设计（只读）',
   'subagent.desc_verify': '运行构建/测试/lint 验证改动',
   'subagent.desc_worker': '办公自动化：格式转换、批量处理、文件整理',

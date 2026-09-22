@@ -21,6 +21,7 @@ import {
 } from '#/tui/config';
 import type { SlashCommandHost } from '#/tui/commands/dispatch';
 import { DEFAULT_SUBAGENT_TYPES } from '#/tui/utils/subagent-slots';
+import { localizedSubagentDesc } from '#/tui/utils/subagent-display';
 import { t } from '@scream-code/config';
 
 const FOLLOW_MAIN = '__follow_main__';
@@ -54,7 +55,7 @@ export function getSubagentProfiles(): readonly {
   ];
   return ordered.map((name) => ({
     name,
-    description: t(`subagent.desc_${name}`),
+    description: localizedSubagentDesc(name),
   }));
 }
 

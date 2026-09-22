@@ -63,6 +63,7 @@ export type {
   FlagSurface,
 } from '@scream-code/agent-core';
 export type { GoalSnapshotData, TodoItem, TodoStatus } from '@scream-code/agent-core';
+export { subagentRoster } from '@scream-code/agent-core';
 
 export * from '#/events';
 export type * from '#/types';

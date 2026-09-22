@@ -60,6 +60,7 @@ export type {
 } from './session/provider-manager';
 export { fetchProviderBalance } from './session/provider-balance';
 export { isSupportedBalanceProvider } from './session/provider-balance';
+export { subagentRoster } from './profile/roster';
 export type { ProviderBalance } from './session/provider-balance';
 
 // ─── Wire records (for in-monorepo consumers like apps/vis) ────────────────

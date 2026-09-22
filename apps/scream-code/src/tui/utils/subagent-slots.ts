@@ -12,8 +12,12 @@
  *
  * This is a pure TUI-side aggregator: it consumes agent-core wire events
  * (subagent lifecycle + routed activity + main-side SendSubagentMessage tool
- * calls) and never touches agent-core itself.
+ * calls) and never calls into agent-core at runtime. The one exception is the
+ * static subagent roster, which is derived from the bundled profiles so the
+ * slot list cannot drift from the profile list.
  */
+
+import { subagentRoster } from '@scream-code/scream-code-sdk';
 
 export type SubagentSlotStatus =
   | 'idle'
@@ -39,17 +43,17 @@ export interface SubagentSlot {
   lastActivityAt: number;
 }
 
-/** Default subagent types, in the fixed display order of the slots. */
-export const DEFAULT_SUBAGENT_TYPES: readonly string[] = [
-  'coder',
-  'explore',
-  'plan',
-  'verify',
-  'reviewer',
-  'oracle',
-  'worker',
-  'writer',
-];
+/**
+ * Default subagent types, in the fixed display order of the slots.
+ *
+ * Membership derives from `agent.yaml`'s `subagents:` map (via
+ * `subagentRoster`), and so does the order — the map's key order is the
+ * sidebar display order. A profile registered there appears here with no
+ * extra bookkeeping.
+ */
+export const DEFAULT_SUBAGENT_TYPES: readonly string[] = Object.freeze(
+  subagentRoster().map((entry) => entry.name),
+);
 
 /** Hard cap so an exotic custom-profile spawn storm cannot overflow the panel. */
 export const MAX_SUBAGENT_SLOTS = 16;

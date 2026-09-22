@@ -793,7 +793,7 @@ export const en: Record<string, string> = {
   'subagent.desc_reviewer': 'Code review, bug & API contract violations',
   'subagent.desc_writer': 'Content production & research reports',
   'subagent.desc_explore': 'Quick codebase exploration (read-only)',
-  'subagent.desc_oracle': 'Deep debugging & architecture decisions',
+  'subagent.desc_oracle': 'Large-scope review of existing code (architecture, debt, maintainability, dead weight)',
   'subagent.desc_plan': 'Implementation planning & architecture design (read-only)',
   'subagent.desc_verify': 'Run build/test/lint to verify changes',
   'subagent.desc_worker': 'Office automation: format conversion, batch processing, file organization',
