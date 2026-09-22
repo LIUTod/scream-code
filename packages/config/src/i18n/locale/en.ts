@@ -797,6 +797,7 @@ export const en: Record<string, string> = {
   'subagent.desc_plan': 'Implementation planning & architecture design (read-only)',
   'subagent.desc_verify': 'Run build/test/lint to verify changes',
   'subagent.desc_worker': 'Office automation: format conversion, batch processing, file organization',
+  'subagent.desc_designer': 'Visual design: UI/UX/TUI direction, specs & polish',
   'subagent.follow_main': 'Follow main model',
   'subagent.follow_main_desc': 'Use the main agent\'s current model (default)',
   'subagent.title': 'Subagent Model Binding',

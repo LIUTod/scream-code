@@ -792,6 +792,7 @@ export const zh: Record<string, string> = {
   'subagent.desc_plan': '实现规划与架构设计（只读）',
   'subagent.desc_verify': '运行构建/测试/lint 验证改动',
   'subagent.desc_worker': '办公自动化：格式转换、批量处理、文件整理',
+  'subagent.desc_designer': '视觉层设计：UI/UX/TUI 方向、规格、落地与审计',
   'subagent.follow_main': '跟随主模型',
   'subagent.follow_main_desc': '使用主代理当前模型（默认）',
   'subagent.title': '子代理模型绑定',

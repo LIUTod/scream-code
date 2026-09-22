@@ -66,7 +66,7 @@ describe('default agent profiles', () => {
   });
 
   it('keeps one routing contract per specialist: a description plus USE WHEN / NOT FOR triggers', () => {
-    const names = ['coder', 'explore', 'plan', 'verify', 'reviewer', 'oracle', 'worker', 'writer'];
+    const names = ['coder', 'explore', 'plan', 'verify', 'reviewer', 'oracle', 'worker', 'writer', 'designer'];
     for (const name of names) {
       const profile = DEFAULT_AGENT_PROFILES[name];
       expect(profile, `missing profile: ${name}`).toBeDefined();
@@ -79,7 +79,7 @@ describe('default agent profiles', () => {
   });
 
   it('keeps the specialist roster single-sourced in the Agent tool description', () => {
-    const names = ['coder', 'explore', 'plan', 'verify', 'reviewer', 'oracle', 'worker', 'writer'];
+    const names = ['coder', 'explore', 'plan', 'verify', 'reviewer', 'oracle', 'worker', 'writer', 'designer'];
     const agent = DEFAULT_AGENT_PROFILES['agent'];
 
     // The generated roster is the surface the parent actually picks from, so
@@ -95,7 +95,7 @@ describe('default agent profiles', () => {
     // roster drifts from agent.yaml the moment one side changes.
     const prompt = agent?.systemPrompt(promptContext) ?? '';
     expect(prompt).toContain('Available agent types');
-    expect(prompt).not.toMatch(/^- `(coder|explore|plan|verify|reviewer|oracle|worker|writer)` — /m);
+    expect(prompt).not.toMatch(/^- `(coder|explore|plan|verify|reviewer|oracle|worker|writer|designer)` — /m);
   });
 
   it('exposes the bundled subagents through the derived roster', () => {
@@ -107,6 +107,7 @@ describe('default agent profiles', () => {
     // second list cannot drift from it.
     expect(names).toEqual(Object.keys(DEFAULT_AGENT_PROFILES['agent']?.subagents ?? {}));
     expect(names).toContain('oracle');
+    expect(names).toContain('designer');
     for (const entry of roster) {
       expect(entry.description.length, `empty description for ${entry.name}`).toBeGreaterThan(0);
     }
@@ -171,6 +172,69 @@ describe('default agent profiles', () => {
     // and its orientation line must pair oracle with reviewer as two scales.
     expect(prompt).toContain('You need a large-scope review of code that already exists');
     expect(prompt).toContain('`oracle` reviews existing code at system scale');
+  });
+
+  it('gives designer one fused job: own the visual layer end to end', () => {
+    const designer = DEFAULT_AGENT_PROFILES['designer'];
+    const prompt = designer?.systemPrompt(promptContext) ?? '';
+
+    // A producer with its own spawns — specs are written into the codebase.
+    expect(designer?.tools).toEqual(
+      expect.arrayContaining(['Write', 'Edit', 'ReadMediaFile', 'Agent', 'LSP', 'KnowledgeLookup']),
+    );
+    expect(designer?.spawns).toEqual(['explore']);
+
+    // One job at three entry points, not three jobs.
+    expect(prompt).toContain('One job, three entry points');
+    for (const entry of ['Direction', 'Spec & Apply', 'Audit']) {
+      expect(prompt, `entry ${entry}`).toContain(entry);
+    }
+
+    // The method vocabulary must survive verbatim.
+    expect(prompt).toContain('Pick the track first');
+    expect(prompt).toContain('Fit before diversity');
+    expect(prompt).toContain('Vague-word firewall');
+    expect(prompt).toContain('Code-grade specs');
+    expect(prompt).toContain('Meta-check');
+    for (const dial of ['Energy', 'Finish', 'Density', 'Weight', 'Playfulness']) {
+      expect(prompt, `dial ${dial}`).toContain(dial);
+    }
+
+    // TUI is a first-class medium, not an afterthought.
+    expect(prompt).toContain('Terminal (TUI)');
+    expect(prompt).toContain('Width budget');
+    expect(prompt).toContain('CJK double-width');
+
+    // Collaboration contract — the same preamble every specialist carries.
+    expect(prompt).toContain('[parent_messages]');
+    expect(prompt).toContain('ContactParent');
+    expect(prompt).toContain('restricted capability mode');
+
+    // Boundaries keep the seam with coder / verify / reviewer / oracle.
+    expect(prompt).toContain('You own the visual layer only');
+    expect(prompt).toContain('You do not run gates');
+    expect(prompt).toContain('You do not review diffs for correctness');
+    // A producer, not a spec-only advisor: the prompt must say the specs get
+    // written into the codebase.
+    expect(prompt).toContain('you produce design specs AND write them into styles');
+    // Structured close the parent can parse, same spirit as oracle's block.
+    for (const field of ['Verdict:', 'Confidence:', 'Spec:', 'Files:']) {
+      expect(prompt, `output field ${field}`).toContain(field);
+    }
+
+    // Routing contract: USE WHEN / NOT FOR plus the roster description.
+    expect(designer?.whenToUse).toContain('USE WHEN:');
+    expect(designer?.whenToUse).toContain('NOT FOR:');
+    for (const sibling of ['coder', 'plan', 'writer', 'worker', 'verify', 'reviewer', 'oracle']) {
+      expect(designer?.whenToUse, `NOT FOR sibling ${sibling}`).toContain(sibling);
+    }
+    const description = DEFAULT_AGENT_PROFILES['agent']?.subagents?.['designer']?.description ?? '';
+    expect(description).toContain('Visual-layer');
+    expect(description).toContain('UI/UX/TUI');
+
+    // The lead agent's condition->delegate table must route visual work here.
+    expect(prompt).toContain('The deliverable is visual quality');
+    expect(prompt).toContain('`designer` owns the visual layer');
   });
 
   it('fails loudly when an embedded system prompt source is missing', () => {

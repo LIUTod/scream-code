@@ -72,3 +72,5 @@ subagents:
     description: Office and document automation worker; format conversion, batch file processing and file organization, and never code or prose.
   writer:
     description: Professional writing and document specialist; drafts, rewrites, translates, summarizes and produces document artifacts.
+  designer:
+    description: 'Visual-layer specialist: UI/UX/TUI design direction, code-grade specs, screen polish, and design audits.'
