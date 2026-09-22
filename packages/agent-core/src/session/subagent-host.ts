@@ -25,7 +25,14 @@ import type { Session } from './index';
 import SUMMARY_CONTINUATION_PROMPT from './summary-continuation.md';
 import STRUCTURED_MESSAGE_DELIVERY_PROMPT from './structured-message-delivery.md';
 import { parseJsonObject } from '../tools/builtin/collaboration/agent';
-import { getFindingsFromStore } from '../tools/builtin/collaboration/report-finding';
+import {
+  formatArchFindingsBlock,
+  getArchFindingsFromStore,
+} from '../tools/builtin/collaboration/report-arch-finding';
+import {
+  formatFindingsBlock,
+  getFindingsFromStore,
+} from '../tools/builtin/collaboration/report-finding';
 
 /**
  * A subagent summary shorter than this many characters triggers one
@@ -629,21 +636,16 @@ export class SessionSubagentHost {
       }
       this.aggregatedChildUsage.set(child, childByModel);
 
-      // Aggregate structured findings produced by reviewer subagents so the
-      // parent agent can act on them without re-parsing free-text summaries.
-      let findingsBlock = '';
-      if (profileName === 'reviewer') {
-        const findings = getFindingsFromStore(child.tools.toolStore);
-        if (findings.length > 0) {
-          const lines = findings.map(
-            (f) =>
-              `- [${f.priority}] ${f.title} (${f.file_path}:${f.line_start}${
-                f.line_end === f.line_start ? '' : `-${f.line_end}`
-              }) confidence=${(f.confidence * 100).toFixed(0)}%`,
-          );
-          findingsBlock = `\n\n[review_findings]\n${lines.join('\n')}`;
-        }
-      }
+      // Aggregate structured findings so the parent agent can act on them
+      // without re-parsing free-text summaries. Both blocks carry the problem
+      // text: a title and a line number alone do not tell the parent why the
+      // finding is a problem. No profile gate — a finding only reaches a store
+      // when a tool that writes it ran, and each tool is mounted only for the
+      // profiles that declare it.
+      const findingsBlock = [
+        formatFindingsBlock(getFindingsFromStore(child.tools.toolStore)),
+        formatArchFindingsBlock(getArchFindingsFromStore(child.tools.toolStore)),
+      ].join('');
 
       const durationMs = Date.now() - startedAt;
       const toolCallCount = countAssistantToolCalls(child);

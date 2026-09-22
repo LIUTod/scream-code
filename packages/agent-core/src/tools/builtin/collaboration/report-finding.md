@@ -1,22 +1,10 @@
-Report a code review finding. Use this tool for each issue found during a review. Call it once per finding, then call yield when done.
+Report a code review finding. Use this tool for each issue found during a review. Call it once for each issue.
 
 Use this tool only when acting as a reviewer agent. Do not use it when writing or editing code.
 
-Each finding must be evidence-backed and anchored to the patch under review.
+Each finding must be evidence-backed, anchored to the patch under review, and must satisfy every reporting criterion in your review procedure.
 
-Priority levels:
-- P0: Blocks release/operations; universal (no input assumptions). Example: data corruption, auth bypass.
-- P1: High; fix next cycle. Example: race condition under load.
-- P2: Medium; fix eventually. Example: edge case mishandling.
-- P3: Info; nice to have. Example: suboptimal but correct.
-
-Criteria before reporting:
-- Provable impact: show specific affected code paths, no speculation.
-- Actionable: discrete fix, not vague "consider improving X".
-- Unintentional: clearly not a deliberate design choice.
-- Introduced in patch: do not flag pre-existing bugs unless asked.
-- No unstated assumptions: bug does not rely on assumptions about codebase or author intent.
-- Proportionate rigor: fix does not demand rigor absent elsewhere in codebase.
+Priority: P0 blocks release/operations · P1 fix next cycle · P2 fix eventually · P3 nice to have.
 
 Example:
 ```json

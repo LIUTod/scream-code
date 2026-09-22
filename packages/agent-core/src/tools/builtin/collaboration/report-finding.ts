@@ -50,9 +50,9 @@ export type ReportFindingInput = z.infer<typeof ReportFindingInputSchema>;
 function renderFinding(finding: ReviewFinding): string {
   const location =
     finding.line_start === finding.line_end
-      ? `${finding.file_path}:${finding.line_start}`
-      : `${finding.file_path}:${finding.line_start}-${finding.line_end}`;
-  return `[${finding.priority}] ${finding.title}\n${location}\nConfidence: ${(finding.confidence * 100).toFixed(0)}%\n${finding.body}`;
+      ? `${finding.file_path.split('\n').join(' ')}:${finding.line_start}`
+      : `${finding.file_path.split('\n').join(' ')}:${finding.line_start}-${finding.line_end}`;
+  return `[${finding.priority}] ${finding.title.split('\n').join(' ')}\n${location}\nConfidence: ${(finding.confidence * 100).toFixed(0)}%\n${finding.body}`;
 }
 
 export class ReportFindingTool implements BuiltinTool<ReportFindingInput> {
@@ -63,7 +63,8 @@ export class ReportFindingTool implements BuiltinTool<ReportFindingInput> {
   constructor(private readonly store: ToolStore) {}
 
   resolveExecution(args: ReportFindingInput): ToolExecution {
-    const description = `Recording ${args.priority} finding: ${args.title}`;
+    // The description lands on a TUI activity row, so the title stays one line.
+    const description = `Recording ${args.priority} finding: ${args.title.split('\n').join(' ')}`;
     return {
       description,
       approvalRule: this.name,
@@ -108,7 +109,23 @@ export function getFindingsFromStore(store: ToolStore): readonly ReviewFinding[]
   return findings ?? [];
 }
 
-/** Helper used by tests and by the parent agent to clear findings. */
-export function clearFindingsInStore(store: ToolStore): void {
-  store.set(FINDINGS_STORE_KEY, []);
+/**
+ * Render findings as the `[review_findings]` block appended to the child's
+ * result. Body is included on its own line: a title and a line number alone
+ * do not tell the parent why the finding is a bug.
+ *
+ * Title and path are collapsed to one line; body continuation lines are
+ * indented to the same column as the first. The schema asks for one paragraph
+ * but does not enforce it, and an unindented newline would let a field's own
+ * text land at bullet level and read as an extra finding.
+ */
+export function formatFindingsBlock(findings: readonly ReviewFinding[]): string {
+  if (findings.length === 0) return '';
+  const lines = findings.map(
+    (f) =>
+      `- [${f.priority}] ${f.title.split('\n').join(' ')} (${f.file_path.split('\n').join(' ')}:${f.line_start}${
+        f.line_end === f.line_start ? '' : `-${f.line_end}`
+      }) confidence=${(f.confidence * 100).toFixed(0)}%\n  ${f.body.split('\n').join('\n  ')}`,
+  );
+  return `\n\n[review_findings]\n${lines.join('\n')}`;
 }
