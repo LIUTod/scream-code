@@ -84,11 +84,12 @@ export function serializeToolResultOutput(output: unknown): string {
 
 export function isTodoItemShape(
   value: unknown,
-): value is { title: string; status: 'pending' | 'in_progress' | 'done' } {
+): value is { title: string; status: 'pending' | 'in_progress' | 'done' | 'blocked'; blocker?: string } {
   if (typeof value !== 'object' || value === null) return false;
-  const rec = value as { title?: unknown; status?: unknown };
+  const rec = value as { title?: unknown; status?: unknown; blocker?: unknown };
   if (typeof rec.title !== 'string' || rec.title.length === 0) return false;
-  return rec.status === 'pending' || rec.status === 'in_progress' || rec.status === 'done';
+  if (rec.blocker !== undefined && typeof rec.blocker !== 'string') return false;
+  return rec.status === 'pending' || rec.status === 'in_progress' || rec.status === 'done' || rec.status === 'blocked';
 }
 
 export function formatErrorMessage(error: unknown): string {

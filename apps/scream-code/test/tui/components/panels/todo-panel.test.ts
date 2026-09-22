@@ -18,6 +18,28 @@ describe('TodoPanelComponent', () => {
     expect(panel.isEmpty()).toBe(true);
   });
 
+  it('collapses an all-done snapshot and reopens for new unfinished work', () => {
+    const panel = new TodoPanelComponent(darkColors);
+    const todos: TodoItem[] = [{ title: 'Verified change', status: 'done' }];
+    panel.setTodos(todos);
+    expect(panel.render(80)).toEqual([]);
+    expect(panel.isEmpty()).toBe(true);
+    expect(panel.getTodos()).toEqual(todos);
+    panel.setTodos([{ title: 'New work', status: 'pending' }]);
+    expect(panel.isEmpty()).toBe(false);
+    expect(strip(panel.render(80).join('\n'))).toContain('New work');
+  });
+
+  it('keeps blocked work visible with sanitized blocker text', () => {
+    const panel = new TodoPanelComponent(darkColors);
+    panel.setTodos([{ title: 'Verify\tmodel', status: 'blocked', blocker: 'Model\tfile missing' }]);
+    expect(panel.isEmpty()).toBe(false);
+    const output = strip(panel.render(80).join('\n'));
+    expect(output).toMatch(/Verify +model/);
+    expect(output).toMatch(/Model +file missing/);
+    expect(output).not.toContain('\t');
+  });
+
   it('renders a Todo header + one row per entry', () => {
     const panel = new TodoPanelComponent(darkColors);
     panel.setTodos([

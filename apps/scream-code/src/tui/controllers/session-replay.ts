@@ -109,7 +109,7 @@ export class SessionReplayRenderer {
 
     const todos = rawTodos
       .filter((todo): todo is TodoItem => isTodoItemShape(todo))
-      .map((todo) => ({ title: todo.title, status: todo.status }));
+      .map((todo) => ({ title: todo.title, status: todo.status, blocker: todo.blocker }));
     if (todos.length > 0 && todos.every((todo) => todo.status === 'done')) {
       this.host.streamingUI.setTodoList([]);
       return;

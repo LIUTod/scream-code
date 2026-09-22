@@ -367,6 +367,7 @@ describe('ScreamTUI resume message replay', () => {
         todo: [
           { title: 'Review resume snapshot', status: 'done' },
           { title: 'Render replay transcript', status: 'in_progress' },
+          { title: 'External check', status: 'blocked', blocker: 'Waiting for test data' },
           { title: '', status: 'pending' },
         ],
       },
@@ -379,6 +380,7 @@ describe('ScreamTUI resume message replay', () => {
     expect(driver.state.todoPanel.getTodos()).toEqual([
       { title: 'Review resume snapshot', status: 'done' },
       { title: 'Render replay transcript', status: 'in_progress' },
+      { title: 'External check', status: 'blocked', blocker: 'Waiting for test data' },
     ]);
     expect(driver.sessionEventHandler.backgroundTasks.has('agent-bg1')).toBe(true);
     expect(driver.sessionEventHandler.backgroundTasks.has('bash-bg1')).toBe(true);

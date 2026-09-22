@@ -39,6 +39,7 @@ function cloneTodos(todos: readonly TodoItem[]): TodoItem[] {
     title: todo.title,
     status: todo.status,
     phase: todo.phase,
+    blocker: todo.blocker,
   }));
 }
 

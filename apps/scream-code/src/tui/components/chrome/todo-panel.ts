@@ -3,10 +3,9 @@
  *
  * Mounted as a dedicated `Container` slot between the activity pane
  * (spinners / thinking stream) and the queue / editor block. The host
- * calls {@link setTodos} whenever the LLM invokes the `TodoList`
- * tool; state survives across turns so the list stays visible until
- * explicitly cleared (`todos: []`), a new session starts, or `/clear`
- * is issued.
+ * calls {@link setTodos} for core todo snapshots. All-done snapshots
+ * collapse immediately. Unfinished or blocked items stay visible until
+ * updated or explicitly cleared, including during session restore.
  */
 
 import type { Component } from '@liutod-scream/pi-tui';
@@ -15,6 +14,7 @@ import { t } from '@scream-code/config';
 import chalk from 'chalk';
 
 import type { ColorPalette } from '#/tui/theme/colors';
+import { replaceTabs } from '../../utils/sanitize';
 
 export type TodoStatus = 'pending' | 'in_progress' | 'done' | 'blocked';
 
@@ -107,7 +107,7 @@ export class TodoPanelComponent implements Component {
   }
 
   setTodos(todos: readonly TodoItem[]): void {
-    this.todos = todos.map((t) => ({ title: t.title, status: t.status }));
+    this.todos = todos.map((t) => ({ title: t.title, status: t.status, blocker: t.blocker }));
   }
 
   getTodos(): readonly TodoItem[] {
@@ -119,7 +119,7 @@ export class TodoPanelComponent implements Component {
   }
 
   isEmpty(): boolean {
-    return this.todos.length === 0;
+    return this.todos.every((todo) => todo.status === 'done');
   }
 
   setColors(colors: ColorPalette): void {
@@ -129,7 +129,7 @@ export class TodoPanelComponent implements Component {
   invalidate(): void {}
 
   render(width: number): string[] {
-    if (this.todos.length === 0) return [];
+    if (this.isEmpty()) return [];
     const c = this.colors;
     const { rows, hidden } = selectVisibleTodos(this.todos);
     const lines: string[] = [
@@ -143,7 +143,7 @@ export class TodoPanelComponent implements Component {
       lines.push(chalk.hex(c.textDim)(t('todo.more_items', { count: hidden })));
     }
 
-    return lines.map((line) => truncateToWidth(line, width));
+    return lines.map((line) => truncateToWidth(replaceTabs(line), width));
   }
 }
 

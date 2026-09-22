@@ -22,8 +22,6 @@ import {
 } from '../../loop/index';
 import type { AgentEvent, TurnEndedEvent } from '../../rpc';
 
-/** Cap on how long the first turn waits for MCP servers to finish loading. */
-const MCP_WAIT_TIMEOUT_MS = 10_000;
 import {
   GOAL_BUDGET_STEER_ORIGIN,
   GOAL_BUDGET_STEER_PROMPT,
@@ -50,6 +48,10 @@ import { looksLikeVerificationCommand } from '../working-set';
 import { ToolCallDeduplicator } from './tool-dedup';
 import { TURN_DEFAULTS } from './defaults';
 import { isBudgetNearExhaustion } from '../goal';
+import TODO_COMPLETION_REMINDER from './todo-completion.md';
+
+/** Cap on how long the first turn waits for MCP servers to finish loading. */
+const MCP_WAIT_TIMEOUT_MS = 10_000;
 
 interface ActiveTurn {
   controller: AbortController;
@@ -191,6 +193,8 @@ export class TurnFlow {
     // turnWorker's microtask resumed.
     this.agent.usage.endTurn();
     this.abortTurn(cancelReason);
+    // Also cancel a pending handoff after runOneTurn released activeTurn.
+    this.rootTurnId = undefined;
     this.agent.subagentHost?.cancelAll(cancelReason);
   }
 
@@ -301,6 +305,13 @@ export class TurnFlow {
     } finally {
       if (ownsActiveTurn()) {
         this.activeTurn = null;
+      }
+      // A notification can be accepted after the final stop check but before
+      // teardown releases the worker. Continue it without stealing a newer
+      // turn or restarting a turn the user cancelled.
+      if (this.rootTurnId === turnId && this.activeTurn === null && !signal.aborted) {
+        const next = this.steerBuffer.shift();
+        if (next !== undefined) this.launch(next.input, next.origin);
       }
     }
   }
@@ -594,6 +605,7 @@ export class TurnFlow {
 
   private async runTurn(turnId: number, signal: AbortSignal): Promise<LoopTurnStopReason> {
     let stopHookContinuationUsed = false;
+    let todoCompletionReminderInjected = false;
     const deduper = new ToolCallDeduplicator();
     // Freeze the enabled-tool filter for this turn: a mid-turn setActiveTools
     // applies to the NEXT turn by design (turn config stability), while the
@@ -777,6 +789,23 @@ export class TurnFlow {
                   return { continue: true };
                 }
               }
+              // Reconcile stale statuses once, without fabricating completion
+              // or keeping the parent busy while a background task is running.
+              if (
+                !todoCompletionReminderInjected &&
+                this.agent.tools.loopToolsFor(turnToolFilter).some((tool) => tool.name === 'TodoList') &&
+                this.agent.background.list(true).length === 0
+              ) {
+                const todos = this.agent.tools.getTodos();
+                if (todos.some((todo) => todo.status === 'pending' || todo.status === 'in_progress')) {
+                  todoCompletionReminderInjected = true;
+                  this.agent.context.appendSystemReminder(
+                    TODO_COMPLETION_REMINDER + '\n\nCurrent todo snapshot:\n' + JSON.stringify(todos),
+                    { kind: 'system_trigger', name: 'todo_completion' },
+                  );
+                  return { continue: true };
+                }
+              }
               // Summary guard: when the turn produced actual work (file changes,
               // verification runs, etc.) but the model's final response is too
               // brief or just an empty acknowledgment, give it one chance to
@@ -815,11 +844,9 @@ export class TurnFlow {
                 );
                 return { continue: true };
               }
-              // A steer can arrive while the Stop hook was awaiting: the turn is
-              // still active, so a buffered steer here would be discarded by end()
-              // even though the sender already received a "delivered" ack. Flush
-              // once more; anything still buffered after this point races genuine
-              // teardown, same as steering the main agent mid-teardown.
+              // A steer can arrive while the Stop hook awaits. Keep it in this
+              // turn when possible; turnWorker resumes notifications accepted
+              // later during teardown.
               if (this.flushSteerBuffer()) return { continue: true };
               return { continue: false };
             },
