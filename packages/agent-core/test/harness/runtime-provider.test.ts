@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { ScreamConfig } from '../../src/config';
 import { ErrorCodes, ScreamError } from '../../src/errors';
-import { ProviderManager } from '../../src/session/provider-manager';
+import { ProviderManager, type ResolvedRuntimeProvider } from '../../src/session/provider-manager';
 import { resolveThinkingLevel } from '../../src/agent/config/thinking';
 
 // Thin wrapper that adapts the legacy `resolveRuntimeProvider(input)` shape to
@@ -13,7 +13,7 @@ function resolveRuntimeProvider(input: {
   readonly model?: string;
   readonly screamRequestHeaders?: Record<string, string>;
   readonly promptCacheKey?: string;
-}): ReturnType<ProviderManager['resolveProviderConfig']> {
+}): ResolvedRuntimeProvider {
   const manager = new ProviderManager({
     config: input.config,
     screamRequestHeaders: input.screamRequestHeaders,
@@ -454,6 +454,97 @@ describe('resolveRuntimeProvider Scream request headers', () => {
     });
     expect('defaultHeaders' in resolved.provider).toBe(false);
     expect('generationKwargs' in resolved.provider).toBe(false);
+  });
+});
+
+describe.each(['openai', 'openai_responses'] as const)('OpenCode Go %s request headers', (type) => {
+  const config: ScreamConfig = {
+    defaultModel: 'go-model',
+    providers: {
+      go: { type, apiKey: 'test-key', baseUrl: 'https://opencode.ai/zen/go/v1' },
+    },
+    models: {
+      'go-model': { provider: 'go', model: 'go-model', maxContextSize: 128000 },
+    },
+  };
+
+  it('uses a stable conversation ID and the client user agent across provider resolutions', () => {
+    const manager = new ProviderManager({
+      config,
+      screamRequestHeaders: TEST_SCREAM_HEADERS,
+      promptCacheKey: 'session-one',
+    });
+    for (let i = 0; i < 2; i++) {
+      expect(manager.resolveProviderConfig('go-model').provider).toMatchObject({
+        defaultHeaders: {
+          'User-Agent': TEST_SCREAM_HEADERS['User-Agent'],
+          'x-opencode-session': 'session-one',
+        },
+      });
+    }
+
+    const other = resolveRuntimeProvider({
+      config,
+      screamRequestHeaders: TEST_SCREAM_HEADERS,
+      promptCacheKey: 'session-two',
+    });
+    expect('defaultHeaders' in other.provider && other.provider.defaultHeaders).toEqual({
+      'User-Agent': TEST_SCREAM_HEADERS['User-Agent'],
+      'x-opencode-session': 'session-two',
+    });
+  });
+
+  it.each(['https://opencode.ai/zen/go', 'https://opencode.ai/zen/go/'])('supports the Go endpoint %s', (baseUrl) => {
+    const resolved = resolveRuntimeProvider({
+      config: { ...config, providers: { go: { type, apiKey: 'test-key', baseUrl } } },
+      screamRequestHeaders: TEST_SCREAM_HEADERS,
+      promptCacheKey: 'session-one',
+    });
+    expect('defaultHeaders' in resolved.provider && resolved.provider.defaultHeaders).toEqual({
+      'User-Agent': TEST_SCREAM_HEADERS['User-Agent'],
+      'x-opencode-session': 'session-one',
+    });
+  });
+
+  it('uses the resolved environment base URL and preserves explicit custom headers', () => {
+    const resolved = resolveRuntimeProvider({
+      config: {
+        ...config,
+        providers: {
+          go: {
+            type,
+            apiKey: 'test-key',
+            env: { OPENAI_BASE_URL: ' https://opencode.ai/zen/go/v1 ' },
+            customHeaders: { 'User-Agent': 'Custom/1', 'X-Custom': 'value' },
+          },
+        },
+      },
+      screamRequestHeaders: TEST_SCREAM_HEADERS,
+      promptCacheKey: 'session-one',
+    });
+    expect('defaultHeaders' in resolved.provider && resolved.provider.defaultHeaders).toEqual({
+      'User-Agent': 'Custom/1',
+      'x-opencode-session': 'session-one',
+      'X-Custom': 'value',
+    });
+  });
+
+  it.each([
+    undefined,
+    'not-a-url',
+    'http://opencode.ai/zen/go/v1',
+    'https://opencode.ai.example/zen/go/v1',
+    'https://opencode.ai@other.example/zen/go/v1',
+    'https://opencode.ai/zen/gopher/v1',
+    'https://opencode.ai/zen/v1',
+    'https://api.openai.com/v1',
+  ])('does not inject Go headers for %s', (baseUrl) => {
+    const resolved = resolveRuntimeProvider({
+      config: { ...config, providers: { go: { type, apiKey: 'test-key', baseUrl } } },
+      screamRequestHeaders: TEST_SCREAM_HEADERS,
+      promptCacheKey: 'session-one',
+    });
+    expect('defaultHeaders' in resolved.provider).toBe(false);
   });
 });
 

@@ -229,16 +229,20 @@ function toLtodProviderConfig(
         ...(adaptiveThinking !== undefined ? { adaptiveThinking } : {}),
         ...defaultHeadersField(provider.customHeaders),
       };
-    case 'openai':
+    case 'openai': {
+      const baseUrl = providerValue(provider.baseUrl, provider.env, 'OPENAI_BASE_URL');
       return {
         type: 'openai',
         model,
-        baseUrl: providerValue(provider.baseUrl, provider.env, 'OPENAI_BASE_URL'),
+        baseUrl,
         apiKey: providerApiKey(provider),
         reasoningKey,
         ...(forceThinking !== undefined ? { forceThinking } : {}),
-        ...defaultHeadersField(provider.customHeaders),
+        ...defaultHeadersField(
+          openCodeGoHeaders(baseUrl, promptCacheKey, screamRequestHeaders, provider.customHeaders),
+        ),
       };
+    }
     case 'scream':
       return {
         type: 'scream',
@@ -256,14 +260,18 @@ function toLtodProviderConfig(
         apiKey: providerApiKey(provider),
         baseUrl: providerValue(provider.baseUrl, provider.env, 'GOOGLE_GENAI_BASE_URL'),
       };
-    case 'openai_responses':
+    case 'openai_responses': {
+      const baseUrl = providerValue(provider.baseUrl, provider.env, 'OPENAI_BASE_URL');
       return {
         type: 'openai_responses',
         model,
-        baseUrl: providerValue(provider.baseUrl, provider.env, 'OPENAI_BASE_URL'),
+        baseUrl,
         apiKey: providerApiKey(provider),
-        ...defaultHeadersField(provider.customHeaders),
+        ...defaultHeadersField(
+          openCodeGoHeaders(baseUrl, promptCacheKey, screamRequestHeaders, provider.customHeaders),
+        ),
       };
+    }
     case 'vertexai': {
       const useServiceAccount = hasVertexAIServiceEnv(provider);
       return {
@@ -283,6 +291,32 @@ function toLtodProviderConfig(
       );
     }
   }
+}
+
+function openCodeGoHeaders(
+  baseUrl: string | undefined,
+  sessionId: string | undefined,
+  screamRequestHeaders: Record<string, string> | undefined,
+  customHeaders: Record<string, string> | undefined,
+): Record<string, string> | undefined {
+  if (baseUrl === undefined) return customHeaders;
+  try {
+    const url = new URL(baseUrl);
+    if (
+      url.protocol !== 'https:' ||
+      url.hostname !== 'opencode.ai' ||
+      (url.pathname !== '/zen/go' && !url.pathname.startsWith('/zen/go/'))
+    ) return customHeaders;
+  } catch {
+    return customHeaders;
+  }
+
+  // The host supplies the persisted conversation ID as promptCacheKey.
+  const headers: Record<string, string> = {};
+  const userAgent = screamRequestHeaders?.['User-Agent'];
+  if (userAgent !== undefined) headers['User-Agent'] = userAgent;
+  if (sessionId !== undefined) headers['x-opencode-session'] = sessionId;
+  return { ...headers, ...customHeaders };
 }
 
 // Returns a fresh `defaultHeaders` field for a ltod provider config so
