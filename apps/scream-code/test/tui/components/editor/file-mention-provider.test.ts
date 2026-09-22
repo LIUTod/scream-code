@@ -250,4 +250,19 @@ describe('FileMentionProvider — slash-command ranking', () => {
     const values = (result?.items ?? []).map((item) => item.value);
     expect(values).toContain('skill:research-idea');
   });
+
+  it('does not truncate the command list — the menu scrolls through all of it', async () => {
+    // Regression: the slash branch used to slice(0, 50), which hid the last
+    // builtins and every skill appended at the tail. The menu scrolls, so no
+    // cap belongs here.
+    const many = Array.from({ length: 60 }, (_, i) => ({
+      value: `cmd-${String(i).padStart(2, '0')}`,
+      label: `cmd-${String(i).padStart(2, '0')}`,
+      description: `Command ${i}`,
+    }));
+    const provider = new FileMentionProvider(many, '/repo', NO_FD, stubGitCache([]));
+    const result = await suggestionsFor(provider, '');
+    expect(result?.items.length).toBe(60);
+    expect(result?.items.at(-1)?.value).toBe('cmd-59');
+  });
 });
