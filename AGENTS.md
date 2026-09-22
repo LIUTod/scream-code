@@ -961,6 +961,10 @@ The bundled `worker` profile is the office/document automation specialist, disti
 
 Key files: `packages/agent-core/src/profile/default/worker.yaml`, `packages/agent-core/src/profile/default/agent.yaml`, `packages/agent-core/src/profile/default/system.md`.
 
+The bundled `oracle` profile is the large-scope reviewer of code that already exists — the system-scale counterpart of the diff-scoped `reviewer`. It answers four questions: is the architecture reasonable, is there tech debt (how are the hard parts handled), will long-term changes stay hard to maintain, is there useless or redundant code. A symptom or ugly area the caller points at is a scoped pass over the same four questions, not a fifth category. Each issue goes through `ReportArchFinding` with a mandatory concrete `fix` and one of seven replacement tags (`dead` / `dup` / `wrong-layer` / `over-build` / `under-build` / `debt` / `portable`); findings aggregate to the parent through the `[arch_findings]` block, which carries `problem` and `fix` alongside the title and location. It lists findings and does not apply them unless the caller explicitly asks. `ReportArchFinding` is deliberately separate from `ReportFinding`: review findings are anchored to a patch, while codebase findings are often module- or repo-level and cannot honour required line ranges without forcing the model to invent them.
+
+Key files: `packages/agent-core/src/profile/default/oracle.yaml`, `packages/agent-core/src/tools/builtin/collaboration/report-arch-finding.ts`, `packages/agent-core/src/tools/builtin/collaboration/report-arch-finding.md`, `packages/agent-core/src/profile/roster.ts`.
+
 ### Self Assets Map & InspectOwnAssets
 
 The base system prompt carries a **Self Assets** section that tells the main agent where its own persistent configuration and data live, and what it must never touch. The accompanying `InspectOwnAssets` tool lets the agent actually inspect those assets — read-only, no write path.
