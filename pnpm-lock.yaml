@@ -19,8 +19,8 @@ importers:
   .:
     dependencies:
       '@liutod-scream/pi-tui':
-        specifier: ^0.86.0
-        version: 0.86.0
+        specifier: ^0.87.0
+        version: 0.87.0
     devDependencies:
       '@arethetypeswrong/cli':
         specifier: 0.18.3
@@ -83,8 +83,8 @@ importers:
         specifier: ^5.3.0
         version: 5.3.0
       '@liutod-scream/pi-tui':
-        specifier: ^0.86.0
-        version: 0.86.0
+        specifier: ^0.87.0
+        version: 0.87.0
       '@mariozechner/clipboard':
         specifier: ^0.3.2
         version: 0.3.9
@@ -976,8 +976,8 @@ packages:
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
 
-  '@liutod-scream/pi-tui@0.86.0':
-    resolution: {integrity: sha512-uIGqFG1PokblWtp2pI2XhlATUxiQaJfDQlVTddaDNu5wCcIN5MBMvfNFf2nYSc+ruZOH1pwzK+7ptZmW0tgXpw==}
+  '@liutod-scream/pi-tui@0.87.0':
+    resolution: {integrity: sha512-gaIAeKSalRZJHRS58fIFb6SuTY41AbuDXwIg/i+qhDfJLQwcWWVe3BbR8AmQGEvEDBV+FklbmN+PyPGGjPnrQQ==}
     engines: {node: '>=22.19.0'}
 
   '@loaderkit/resolve@1.0.6':
@@ -3087,8 +3087,8 @@ packages:
     engines: {node: '>= 18'}
     hasBin: true
 
-  marked@18.0.5:
-    resolution: {integrity: sha512-S6GcvALHg6K4ohtu4E7x0a1AqhAjp6cV8KhLSyN9qVapnzJkusVBxZRcIU9AeYsbe6P1hKDusSbEOzGyyuce6w==}
+  marked@18.0.11:
+    resolution: {integrity: sha512-HnslJfsZkRPBDJRHvVtAaWlZHEpSu7u8LgQuJCELjRKuWR+hpq4A7sLq3p8HaI9ypVoXDXxV34CsQJEe1+J5Aw==}
     engines: {node: '>= 20'}
     hasBin: true
 
@@ -4960,10 +4960,10 @@ snapshots:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
 
-  '@liutod-scream/pi-tui@0.86.0':
+  '@liutod-scream/pi-tui@0.87.0':
     dependencies:
       get-east-asian-width: 1.6.0
-      marked: 18.0.5
+      marked: 18.0.11
 
   '@loaderkit/resolve@1.0.6':
     dependencies:
@@ -7083,7 +7083,7 @@ snapshots:
 
   marked@15.0.12: {}
 
-  marked@18.0.5: {}
+  marked@18.0.11: {}
 
   marked@9.1.6: {}
 
