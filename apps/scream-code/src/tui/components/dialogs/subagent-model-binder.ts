@@ -43,6 +43,7 @@ const PICKER_ORDER: readonly string[] = [
   'plan',
   'verify',
   'worker',
+  'designer',
 ];
 
 export function getSubagentProfiles(): readonly {

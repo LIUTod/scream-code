@@ -44,8 +44,8 @@ function statusText(status: SubagentSlotStatus): string {
 }
 
 /**
- * Fixed 8-slot subagent panel: one row per default subagent type (plus any
- * custom types appended in spawn order). Live-rendered each frame from the
+ * Fixed default-slot subagent panel: one row per default subagent type (plus
+ * any custom types appended in spawn order). Live-rendered each frame from the
  * current snapshot; idle slots stay greyed out.
  */
 class AgentsPanelContent {
@@ -58,7 +58,7 @@ class AgentsPanelContent {
 
   render(width: number): string[] {
     const agents = this.ctx.getData().agents;
-    // The provider always returns the fixed 8 default slots (+ extras), so
+    // The provider always returns the default slots (+ extras), so
     // agents is never empty; no empty-state branch needed.
     if (agents === undefined || agents.length === 0) return [];
     // Geometry comes from the shared sidebar grid: same marker and label columns
@@ -83,11 +83,13 @@ class AgentsPanelContent {
     const dim = (s: string): string => chalk.hex(this.colors.textDim)(s);
     const idle = slot.status === 'idle';
     // Busy slots pulse along the same brand gradient as the footer status
-    // spinner, phase-shifted per slot so they never all sync up. The whole
+    // spinner, phase-shifted per slot so they never all sync up. The step is
+    // the golden-ratio fraction: it spreads any slot count without wrapping a
+    // later row back onto an earlier row's phase. The whole
     // active marker (dot + status word) is painted with the gradient so the
     // light effect is clearly visible, not just a single character.
     const phase =
-      ((Date.now() % AGENT_GRADIENT_CYCLE_MS) / AGENT_GRADIENT_CYCLE_MS + index * 0.125) % 1;
+      ((Date.now() % AGENT_GRADIENT_CYCLE_MS) / AGENT_GRADIENT_CYCLE_MS + index * 0.6180339887498949) % 1;
     const active =
       slot.status === 'working' || slot.status === 'outputting'
         ? chalk.hex(lerpGradient(phase)).bold

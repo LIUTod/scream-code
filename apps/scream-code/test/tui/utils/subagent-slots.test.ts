@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { REQUESTING_WINDOW_MS, SubagentSlots } from '#/tui/utils/subagent-slots';
 
 describe('SubagentSlots', () => {
-  it('always exposes the 8 default types in fixed order, idle initially', () => {
+  it('always exposes the 9 default types in fixed order, idle initially', () => {
     const slots = new SubagentSlots();
     const types = slots.getSlots().map((s) => s.type);
     expect(types).toEqual([
@@ -15,6 +15,7 @@ describe('SubagentSlots', () => {
       'oracle',
       'worker',
       'writer',
+      'designer',
     ]);
     expect(slots.getSlots().every((s) => s.status === 'idle')).toBe(true);
   });
@@ -105,13 +106,13 @@ describe('SubagentSlots', () => {
     expect(slots.getSlots().find((s) => s.type === 'worker')?.status).toBe('outputting');
   });
 
-  it('custom types are appended after the 8 defaults, capped at MAX_SUBAGENT_SLOTS', () => {
+  it('custom types are appended after the 9 defaults, capped at MAX_SUBAGENT_SLOTS', () => {
     const slots = new SubagentSlots();
     slots.onSpawned('agent-5', 'gaffer', 'Light the set');
     const types = slots.getSlots().map((s) => s.type);
-    expect(types.slice(0, 9)).toContain('gaffer');
-    expect(types.length).toBe(9);
-    expect(types[8]).toBe('gaffer');
+    expect(types.slice(0, 10)).toContain('gaffer');
+    expect(types.length).toBe(10);
+    expect(types[9]).toBe('gaffer');
 
     // Spawn past the cap: the 17th distinct type must not appear (detached).
     for (let i = 0; i < 9; i += 1) {

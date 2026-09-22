@@ -1,13 +1,12 @@
 /**
  * Subagent slot state machine for the sidebar Agents panel.
  *
- * The sidebar shows a fixed row per default subagent type (coder/explore/
- * plan/verify/reviewer/oracle/worker/writer — mirroring the default profile),
- * each in one of six states: idle (resting), working (tool call in flight),
- * outputting (streaming assistant output), messaging (main agent sending a
- * steer/queue message) and reworking (resumed by the main agent). Asking the
- * parent for help adds a transient requesting overlay. Types
- * outside the default eight are appended in spawn order (capped at
+ * The sidebar shows a fixed row per default subagent type (mirroring the
+ * default profile roster), each in one of six states: idle (resting), working
+ * (tool call in flight), outputting (streaming assistant output), messaging
+ * (main agent sending a steer/queue message) and reworking (resumed by the
+ * main agent). Asking the parent for help adds a transient requesting overlay.
+ * Types outside the default roster are appended in spawn order (capped at
  * {@link MAX_SUBAGENT_SLOTS}).
  *
  * This is a pure TUI-side aggregator: it consumes agent-core wire events
@@ -246,7 +245,7 @@ export class SubagentSlots {
   }
 
   /**
-   * All slots in fixed display order: the eight default types first (always
+   * All slots in fixed display order: the default types first (always
    * present, idle when never used), then extra types in spawn order.
    */
   getSlots(at = Date.now()): readonly SubagentSlot[] {
@@ -284,7 +283,7 @@ export class SubagentSlots {
   private ensureSlot(type: string): SubagentSlot {
     let slot = this.slots.get(type);
     if (slot === undefined) {
-      // Cap: never grow beyond MAX_SUBAGENT_SLOTS (defaults occupy 8).
+      // Cap: never grow beyond MAX_SUBAGENT_SLOTS (defaults occupy one slot each).
       if (this.slots.size >= MAX_SUBAGENT_SLOTS) {
         // Reuse the least-recently-active extra slot? No — keep it simple and
         // deterministic: treat it as a no-op by returning a detached slot.

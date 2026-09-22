@@ -5,7 +5,7 @@ import { getLocale, setLocale } from '@scream-code/config';
 import { agentsPanel } from '#/tui/components/sidebar/panels/agents-panel';
 import type { ColorPalette } from '#/tui/theme/colors';
 import type { SidebarPanelContext } from '#/tui/components/sidebar/sidebar-panel';
-import { SubagentSlots } from '#/tui/utils/subagent-slots';
+import { DEFAULT_SUBAGENT_TYPES, SubagentSlots } from '#/tui/utils/subagent-slots';
 import { displayWidth } from '#/tui/utils/display-width';
 
 const fakePalette = {
@@ -40,12 +40,14 @@ describe('AgentsPanel', () => {
     chalk.level = originalChalkLevel;
   });
 
-  it('renders the fixed 8 idle slots, greyed out with the idle label', () => {
+  it('renders the 9 default idle slots, greyed out with the idle label', () => {
     const lines = agentsPanel.build(ctx(new SubagentSlots().getSlots())).render(50);
-    expect(lines).toHaveLength(8);
+    expect(lines).toHaveLength(9);
     expect(lines[0]).toContain('Coder');
     expect(lines[0]).toContain('Idle');
     expect(lines[7]).toContain('Writer');
+    expect(lines[8]).toContain('Designer');
+    expect(lines[8]).toContain('Idle');
   });
 
   it('shows status per slot with no live output preview', () => {
@@ -74,18 +76,45 @@ describe('AgentsPanel', () => {
     expect(line).toContain('×2');
   });
 
-  it('renders all 8 slots as one continuous column with no gaps', () => {
+  it('renders all 9 slots as one continuous column with no gaps', () => {
     const slots = new SubagentSlots();
     slots.onSpawned('agent-1', 'explore', 'a');
     slots.onSpawned('agent-2', 'explore', 'b');
     slots.onSpawned('agent-3', 'explore', 'c');
     const lines = agentsPanel.build(ctx(slots.getSlots())).render(42);
-    expect(lines).toHaveLength(8);
+    expect(lines).toHaveLength(9);
     lines.forEach((l) => expect(l.trim().length).toBeGreaterThan(0)); // no blank rows
     expect(lines[0]).toContain('Coder');
     expect(lines[1]).toContain('Explore');
     expect(lines[1]).toContain('×3');
     expect(lines[2]).toContain('Plan');
+  });
+
+  it('keeps every busy row on its own gradient phase, first row included', () => {
+    // A fixed 8-slot phase step wrapped row 9 back onto row 1's phase
+    // (8 × 0.125 = 1.0 → % 1 = 0), pulsing in sync with Coder. Freeze the clock
+    // so the check is deterministic: the gradient clamps to its last colour for
+    // the final quarter of the cycle, and an arbitrary wall-clock instant could
+    // legitimately quantize two distinct phases to the same RGB there.
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(0);
+      const slots = new SubagentSlots();
+      for (const [i, type] of DEFAULT_SUBAGENT_TYPES.entries()) {
+        slots.onSpawned(`agent-${i}`, type, 'task');
+      }
+      const lines = agentsPanel.build(ctx(slots.getSlots())).render(50);
+      expect(lines).toHaveLength(DEFAULT_SUBAGENT_TYPES.length);
+      const colourOf = (l: string) => /\u001B\[38;2;(\d+;\d+;\d+)m/.exec(l)?.[1];
+      const colours = lines.map((l) => colourOf(l));
+      // Every row is busy and paints a true-colour gradient…
+      for (const c of colours) expect(c).toBeDefined();
+      // …and the wrap-around regression stays fixed: the last row must not
+      // share the first row's phase.
+      expect(colours.at(-1)).not.toBe(colours[0]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('keeps the status word on the same column for idle and busy rows', () => {

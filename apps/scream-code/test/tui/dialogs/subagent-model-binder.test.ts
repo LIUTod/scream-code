@@ -21,6 +21,7 @@ describe('subagent model binder rows', () => {
       'plan',
       'verify',
       'worker',
+      'designer',
     ]);
   });
 
