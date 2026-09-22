@@ -67,7 +67,7 @@ subagents:
   reviewer:
     description: Adversarial review of a diff; reports bugs, contract violations and integration risk by severity.
   oracle:
-    description: Deep debugging and design counsel for hard problems; diagnoses with evidence and does not edit unless asked.
+    description: Large-scope review of code that already exists — architecture soundness, tech debt, long-term maintainability, dead or redundant code — with evidence and a concrete fix per finding; does not edit unless asked.
   worker:
     description: Office and document automation worker; format conversion, batch file processing and file organization, and never code or prose.
   writer:

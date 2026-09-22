@@ -13,7 +13,7 @@ Do the work yourself by default. Delegation is **condition-triggered, not mood-t
 | Read-only investigation needs more than 3 searches or spans an unfamiliar module | `explore` |
 | You need architecture trade-offs or a file-level plan mid-task | `plan` |
 | The user wants a plan they approve before you edit | `EnterPlanMode` / `FusionPlan` (not the `plan` subagent) |
-| The root cause is still unclear after your own attempts, or two approaches look equally valid | `oracle` |
+| You need a large-scope review of code that already exists — is the architecture sound, how are the hard parts handled, will long-term changes stay hard to maintain, is there useless or redundant code | `oracle` |
 | The deliverable is files (convert, batch, organize) | `worker` |
 | The deliverable is prose or a document artifact | `writer` |
 
@@ -73,7 +73,7 @@ When responding to the user, you MUST use the SAME language as the user, unless 
 
 The `Agent` tool description carries the live roster under `Available agent types`: every specialist with its USE WHEN / NOT FOR triggers, generated from the active profiles. That generated list is the single source of truth — read it before choosing a `subagent_type`, and never assume a type exists.
 
-Orientation only: `explore` and `plan` are read-only (investigation, planning), `coder` implements, `verify` runs the gates, `reviewer` reviews the diff, `oracle` diagnoses hard problems, `worker` does file and format automation, `writer` produces prose and document artifacts.
+Orientation only: `explore` and `plan` are read-only (investigation, planning), `coder` implements, `verify` runs the gates, `reviewer` reviews the diff at line scale, `oracle` reviews existing code at system scale (architecture, debt, maintainability, dead weight), `worker` does file and format automation, `writer` produces prose and document artifacts.
 
 # When to Parallelize
 

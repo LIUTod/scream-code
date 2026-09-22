@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { DEFAULT_AGENT_PROFILES, loadAgentProfilesFromSources } from '../../src/profile';
+import { subagentRoster } from '../../src/profile/roster';
 import { buildSubagentDescriptions } from '../../src/tools/builtin/collaboration/agent';
 
 const promptContext = {
@@ -95,6 +96,81 @@ describe('default agent profiles', () => {
     const prompt = agent?.systemPrompt(promptContext) ?? '';
     expect(prompt).toContain('Available agent types');
     expect(prompt).not.toMatch(/^- `(coder|explore|plan|verify|reviewer|oracle|worker|writer)` — /m);
+  });
+
+  it('exposes the bundled subagents through the derived roster', () => {
+    const roster = subagentRoster();
+    const names = roster.map((entry) => entry.name);
+
+    // Membership and order follow agent.yaml's `subagents:` map exactly — the
+    // sidebar and the /model diy binder both read this, so a hand-written
+    // second list cannot drift from it.
+    expect(names).toEqual(Object.keys(DEFAULT_AGENT_PROFILES['agent']?.subagents ?? {}));
+    expect(names).toContain('oracle');
+    for (const entry of roster) {
+      expect(entry.description.length, `empty description for ${entry.name}`).toBeGreaterThan(0);
+    }
+  });
+
+  it('gives oracle one fused job: a large-scope review of what is wrong with existing code', () => {
+    const oracle = DEFAULT_AGENT_PROFILES['oracle'];
+    const prompt = oracle?.systemPrompt(promptContext) ?? '';
+
+    expect(oracle?.tools).toEqual(expect.arrayContaining(['ReportArchFinding', 'Agent', 'Grep', 'LSP']));
+    expect(oracle?.tools).not.toContain('ReportFinding');
+    expect(oracle?.spawns).toEqual(['explore']);
+
+    // One job at two scales, not two jobs. The old split (a root-cause job and
+    // an audit job) must not come back — the caller's four questions are one
+    // review, and this is the larger-scope counterpart of a patch review.
+    expect(prompt).toContain('You are a reviewer at the larger scale');
+    expect(prompt).toContain('same review at different scales');
+    expect(prompt).not.toContain('Job A');
+    expect(prompt).not.toContain('Job B');
+    expect(prompt).not.toContain('structural audit');
+    expect(prompt).not.toContain('second opinion');
+    // The pre-fusion triggers must stay gone: those were the second job. (The
+    // generic "find the root cause" advice in system.md's coding guidance is
+    // the lead agent's, not a routing trigger — only the triggers are banned.)
+    expect(prompt).not.toContain('two approaches look equally valid');
+    expect(prompt).not.toContain('the root cause is still unclear');
+    expect(oracle?.whenToUse).not.toContain('root cause');
+
+    // The caller's four questions must survive verbatim.
+    expect(prompt).toContain('Is the architecture reasonable?');
+    expect(prompt).toContain('Is there tech debt?');
+    expect(prompt).toContain('Will long-term changes stay hard to maintain?');
+    expect(prompt).toContain('Is there useless, invalid, or redundant code?');
+
+    // A reported symptom or ugly area is scoped review, not a fifth category.
+    expect(prompt).toContain('not a fifth category');
+    expect(prompt).toContain('ReportArchFinding');
+    expect(prompt).toContain('Verdict:');
+    // Quantified outcome — the count of deletions/inlines and the lines they
+    // recover, so the parent can weigh a cleanup against the churn of doing it.
+    expect(prompt).toContain('Net:');
+
+    // The tag vocabulary must survive verbatim — a reword breaks the tool schema.
+    for (const tag of ['dead', 'dup', 'wrong-layer', 'over-build', 'under-build', 'debt', 'portable']) {
+      expect(prompt, `tag ${tag}`).toContain(tag);
+    }
+    expect(oracle?.whenToUse).toContain('large-scope review of code that already exists');
+    expect(oracle?.whenToUse).toContain('same activity at line scale');
+    expect(oracle?.whenToUse).toContain('NOT FOR:');
+
+    // The parent's first look is agent.yaml's `subagents:` description. It must
+    // name the job, not the old "deep debugging" role.
+    const description = DEFAULT_AGENT_PROFILES['agent']?.subagents?.['oracle']?.description ?? '';
+    expect(description).toContain('Large-scope review of code that already exists');
+    expect(description).toContain('architecture soundness');
+    expect(description).toContain('tech debt');
+    expect(description).toContain('long-term maintainability');
+    expect(description).not.toContain('Deep debugging');
+
+    // The lead agent's condition->delegate table must route the job here too,
+    // and its orientation line must pair oracle with reviewer as two scales.
+    expect(prompt).toContain('You need a large-scope review of code that already exists');
+    expect(prompt).toContain('`oracle` reviews existing code at system scale');
   });
 
   it('fails loudly when an embedded system prompt source is missing', () => {
