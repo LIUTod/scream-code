@@ -26,8 +26,8 @@ function makeStore(initial: readonly TodoItem[] = []): {
   let todos = [...initial];
   return {
     store: {
-      get: ((key: 'todo' | 'findings') => (key === 'todo' ? todos : undefined)) as import('../../src/tools/store').ToolStore['get'],
-      set: ((key: 'todo' | 'findings', value: unknown) => {
+      get: ((key: 'todo' | 'findings' | 'archFindings') => (key === 'todo' ? todos : undefined)) as import('../../src/tools/store').ToolStore['get'],
+      set: ((key: 'todo' | 'findings' | 'archFindings', value: unknown) => {
         if (key === 'todo') {
           todos = [...(value as TodoItem[])];
         }
