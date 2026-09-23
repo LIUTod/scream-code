@@ -80,6 +80,8 @@ export async function multiSearchWithTrace(
   options: KnowledgeSearchOptions = {},
 ): Promise<{ results: KnowledgeSearchResult[]; trace: KnowledgeSearchTrace }> {
   const topK = Math.min(options.topK ?? DEFAULT_TOP_K, MAX_TOP_K);
+  const skipLlm = options.skipLlm === true;
+  const skipRerank = skipLlm || options.skipRerank === true;
   const steps: KnowledgeSearchTraceStep[] = [];
   const onStep: KnowledgeSearchStepCallback = (step) => steps.push(step);
   const rerankedEventTitles: string[] = [];
@@ -117,12 +119,13 @@ export async function multiSearchWithTrace(
   }
   const queryVec = queryEmbeddings[0]!;
 
-  // 2. Entity recall
+  // 2. Entity recall — skipLlm keeps the local vector half and drops only the
+  // LLM extraction call, so the fast path never leaves this machine.
   const recalledEntities = await timed(
     onStep,
     'entityRecall',
-    'LLM 抽 query 实体 + 名字精确匹配 + 向量召回。',
-    () => recallEntities(store, llm, query, queryVec),
+    skipLlm ? '本地向量实体召回（skipLlm，不调 LLM）。' : 'LLM 抽 query 实体 + 名字精确匹配 + 向量召回。',
+    () => recallEntities(store, llm, query, queryVec, !skipLlm),
     (entities) => ({ count: entities.length }),
   );
 
@@ -236,11 +239,11 @@ export async function multiSearchWithTrace(
 
   // 6. LLM rerank
   let rankedIds: string[];
-  if (options.skipRerank === true) {
+  if (skipRerank) {
     rankedIds = topCandidates.map((c) => c.id);
     onStep({
       step: 'rerank',
-      detail: '跳过 LLM rerank（skipRerank=true），直接用 coarse rank 顺序。',
+      detail: '跳过 LLM rerank（skipRerank/skipLlm），直接用 coarse rank 顺序。',
       durationMs: 0,
       payload: { count: rankedIds.length },
     });
@@ -353,13 +356,16 @@ async function recallEntities(
   llm: LlmCaller,
   query: string,
   queryVec: Float32Array,
+  useLlm: boolean,
 ): Promise<Array<{ id: string }>> {
   const out = new Map<string, { id: string }>();
-  const queryEntities = await extractQueryEntities(llm, query);
-  for (const { name } of queryEntities) {
-    const matches = await store.findEntitiesByName(name);
-    for (const entity of matches) {
-      out.set(entity.id, { id: entity.id });
+  if (useLlm) {
+    const queryEntities = await extractQueryEntities(llm, query);
+    for (const { name } of queryEntities) {
+      const matches = await store.findEntitiesByName(name);
+      for (const entity of matches) {
+        out.set(entity.id, { id: entity.id });
+      }
     }
   }
   const vectorMatches = await store.findEntitiesByVector(queryVec, {
@@ -378,10 +384,10 @@ async function ftsFallback(
   query: string,
   topK: number,
 ): Promise<KnowledgeSearchResult[]> {
-  const chunks = await store.ftsSearchChunks(query, topK * 2);
+  const hits = await store.ftsSearchChunks(query, topK * 2);
   const results: KnowledgeSearchResult[] = [];
-  for (const chunk of chunks) {
-    const result = await store.buildSearchResult(chunk.id, 0);
+  for (const { chunk, score } of hits) {
+    const result = await store.buildSearchResult(chunk.id, score);
     if (result !== undefined) results.push(result);
     if (results.length >= topK) break;
   }

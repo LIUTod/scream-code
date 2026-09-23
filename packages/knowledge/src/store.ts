@@ -38,19 +38,31 @@ function normalizeName(name: string): string {
   return name.trim().toLowerCase().replaceAll(/\s+/g, ' ');
 }
 
-function vectorToJson(vec: Float32Array | null): string | null {
+/** Serialize a vector as a raw Float32 BLOB — half the text of JSON, no parse on scan. */
+function vectorToBlob(vec: Float32Array | null): Buffer | null {
   if (vec === null) return null;
-  return JSON.stringify(Array.from(vec));
+  return Buffer.from(vec.buffer, vec.byteOffset, vec.byteLength);
 }
 
-function jsonToVector(json: string | null): Float32Array | null {
-  if (json === null) return null;
-  try {
-    const arr = JSON.parse(json) as number[];
-    return new Float32Array(arr);
-  } catch {
-    return null;
+/**
+ * Decode a stored vector: Float32 BLOB, or legacy JSON text. Both formats are
+ * accepted forever so a half-migrated (or not-yet-migrated) library stays
+ * correct — the migration only shrinks storage, it is not a correctness gate.
+ */
+function blobToVector(value: unknown): Float32Array | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'string') {
+    try {
+      const arr = JSON.parse(value) as number[];
+      return new Float32Array(arr);
+    } catch {
+      return null;
+    }
   }
+  if (!(value instanceof Uint8Array)) return null;
+  if (value.byteLength % 4 !== 0) return null; // torn write: treat as absent
+  const copy = value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength);
+  return new Float32Array(copy);
 }
 
 function isEntityType(value: string): boolean {
@@ -91,6 +103,7 @@ export class KnowledgeStore {
     this.db.exec('PRAGMA busy_timeout = 5000;');
     this.createSchema();
     this.migrateFtsTokenization();
+    this.migrateVectorsToBlob();
     this.initialized = true;
   }
 
@@ -135,6 +148,49 @@ export class KnowledgeStore {
       insEntity.run(e.rowid, toFtsText(e.name), toFtsText(e.description ?? ''));
     }
     this.db.exec('PRAGMA user_version = 1');
+  }
+
+  /**
+   * One-time migration (user_version 2): rewrite legacy JSON vector text to
+   * raw Float32 BLOBs. Reads accept both formats forever, so a half-migrated
+   * or failed run stays correct — this only shrinks storage and removes
+   * JSON.parse from the O(n) scan paths. typeof() = 'text' makes the pass
+   * idempotent: converted rows come back as 'blob' and are skipped.
+   */
+  private migrateVectorsToBlob(): void {
+    if (this.db === undefined) return;
+    const version = this.db.prepare('PRAGMA user_version').get() as { user_version: number };
+    if (version.user_version >= 2) return;
+    const columns = [
+      { table: 'knowledge_chunks', column: 'embedding_json' },
+      { table: 'knowledge_events', column: 'title_embedding_json' },
+      { table: 'knowledge_events', column: 'content_embedding_json' },
+      { table: 'knowledge_entities', column: 'embedding_json' },
+      { table: 'knowledge_event_entities', column: 'embedding_json' },
+    ] as const;
+    this.db.exec('BEGIN');
+    try {
+      for (const { table, column } of columns) {
+        const rows = this.db
+          .prepare(
+            `SELECT id AS pk, ${column} AS v FROM ${table}
+             WHERE ${column} IS NOT NULL AND typeof(${column}) = 'text'`,
+          )
+          .all() as Array<{ pk: string; v: string }>;
+        if (rows.length === 0) continue;
+        const update = this.db.prepare(`UPDATE ${table} SET ${column} = ? WHERE id = ?`);
+        for (const row of rows) {
+          const vec = blobToVector(row.v);
+          if (vec === null) continue; // malformed legacy value: leave untouched
+          update.run(vectorToBlob(vec), row.pk);
+        }
+      }
+      this.db.exec('PRAGMA user_version = 2');
+      this.db.exec('COMMIT');
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
   }
 
   close(): void {
@@ -240,7 +296,7 @@ export class KnowledgeStore {
         heading TEXT,
         content TEXT NOT NULL,
         raw_content TEXT,
-        embedding_json TEXT,
+        embedding_json BLOB,
         created_at INTEGER NOT NULL
       );
 
@@ -258,8 +314,8 @@ export class KnowledgeStore {
         content TEXT NOT NULL,
         category TEXT,
         keywords TEXT,
-        title_embedding_json TEXT,
-        content_embedding_json TEXT,
+        title_embedding_json BLOB,
+        content_embedding_json BLOB,
         created_at INTEGER NOT NULL
       );
 
@@ -274,7 +330,7 @@ export class KnowledgeStore {
         name TEXT NOT NULL,
         normalized_name TEXT NOT NULL,
         description TEXT,
-        embedding_json TEXT,
+        embedding_json BLOB,
         created_at INTEGER NOT NULL,
         UNIQUE(source_id, type, normalized_name)
       );
@@ -288,7 +344,7 @@ export class KnowledgeStore {
         entity_id TEXT NOT NULL REFERENCES knowledge_entities(id) ON DELETE CASCADE,
         weight REAL DEFAULT 1.0,
         description TEXT,
-        embedding_json TEXT,
+        embedding_json BLOB,
         UNIQUE(event_id, entity_id)
       );
 
@@ -512,7 +568,7 @@ export class KnowledgeStore {
     if (this.db === undefined) throw new Error('knowledge store not initialized');
     const id = generateId('chk');
     const createdAt = Date.now();
-    const embeddingJson = vectorToJson(params.embedding);
+    const embeddingBlob = vectorToBlob(params.embedding);
     this.db
       .prepare(
         `INSERT INTO knowledge_chunks
@@ -527,7 +583,7 @@ export class KnowledgeStore {
         params.heading,
         params.content,
         params.rawContent,
-        embeddingJson,
+        embeddingBlob,
         createdAt,
       );
     // FTS5 external-content table — insert into it manually.
@@ -576,10 +632,10 @@ export class KnowledgeStore {
     if (this.db === undefined) return [];
     const rows = this.db
       .prepare('SELECT id, embedding_json FROM knowledge_chunks WHERE embedding_json IS NOT NULL')
-      .all() as Array<{ id: string; embedding_json: string }>;
+      .all() as Array<{ id: string; embedding_json: string | Uint8Array }>;
     const out: Array<{ id: string; embedding: Float32Array }> = [];
     for (const row of rows) {
-      const vec = jsonToVector(row.embedding_json);
+      const vec = blobToVector(row.embedding_json);
       if (vec !== null) out.push({ id: row.id, embedding: vec });
     }
     return out;
@@ -621,8 +677,8 @@ export class KnowledgeStore {
         params.content,
         params.category,
         JSON.stringify(params.keywords),
-        vectorToJson(params.titleEmbedding),
-        vectorToJson(params.contentEmbedding),
+        vectorToBlob(params.titleEmbedding),
+        vectorToBlob(params.contentEmbedding),
         createdAt,
       );
     this.db
@@ -679,10 +735,10 @@ export class KnowledgeStore {
       .prepare(
         'SELECT id, title_embedding_json FROM knowledge_events WHERE title_embedding_json IS NOT NULL',
       )
-      .all() as Array<{ id: string; title_embedding_json: string }>;
+      .all() as Array<{ id: string; title_embedding_json: string | Uint8Array | Uint8Array }>;
     const scored: Array<{ id: string; score: number }> = [];
     for (const row of rows) {
-      const vec = jsonToVector(row.title_embedding_json);
+      const vec = blobToVector(row.title_embedding_json);
       if (vec === null) continue;
       const score = this.embeddingEngine?.cosineSimilarity(queryVec, vec) ?? 0;
       if (score >= threshold) scored.push({ id: row.id, score });
@@ -731,8 +787,8 @@ export class KnowledgeStore {
       if (params.embedding !== null && existing['embedding_json'] === null) {
         this.db
           .prepare('UPDATE knowledge_entities SET embedding_json = ? WHERE id = ?')
-          .run(vectorToJson(params.embedding), existingId);
-        existing['embedding_json'] = vectorToJson(params.embedding);
+          .run(vectorToBlob(params.embedding), existingId);
+        existing['embedding_json'] = vectorToBlob(params.embedding);
       }
       if (descriptionChanged) {
         // Refresh the FTS row so the new description is searchable.
@@ -772,7 +828,7 @@ export class KnowledgeStore {
         params.name,
         normalizedName,
         params.description,
-        vectorToJson(params.embedding),
+        vectorToBlob(params.embedding),
         createdAt,
       );
     this.db
@@ -821,10 +877,10 @@ export class KnowledgeStore {
     const threshold = options.threshold ?? 0;
     const rows = this.db
       .prepare('SELECT id, embedding_json FROM knowledge_entities WHERE embedding_json IS NOT NULL')
-      .all() as Array<{ id: string; embedding_json: string }>;
+      .all() as Array<{ id: string; embedding_json: string | Uint8Array }>;
     const scored: Array<{ id: string; score: number }> = [];
     for (const row of rows) {
-      const vec = jsonToVector(row.embedding_json);
+      const vec = blobToVector(row.embedding_json);
       if (vec === null) continue;
       const score = this.embeddingEngine?.cosineSimilarity(queryVec, vec) ?? 0;
       if (score >= threshold) scored.push({ id: row.id, score });
@@ -864,7 +920,7 @@ export class KnowledgeStore {
         params.entityId,
         params.weight ?? 1.0,
         params.description,
-        vectorToJson(params.embedding),
+        vectorToBlob(params.embedding),
       );
     return {
       id,
@@ -960,20 +1016,29 @@ export class KnowledgeStore {
 
   // ── FTS5 search ────────────────────────────────────────────────────
 
-  async ftsSearchChunks(query: string, limit: number = 50): Promise<KnowledgeChunk[]> {
+  /** FTS hits ranked by bm25 relevance — score = -bm25 (larger is better). */
+  async ftsSearchChunks(
+    query: string,
+    limit: number = 50,
+  ): Promise<Array<{ chunk: KnowledgeChunk; score: number }>> {
     await this.init();
     if (this.db === undefined) return [];
     const ftsQuery = buildFtsQuery(query);
     if (ftsQuery === undefined) return [];
     const rows = this.db
       .prepare(
-        `SELECT c.* FROM knowledge_chunks c
+        `SELECT c.*, bm25(knowledge_chunks_fts) AS bm
+         FROM knowledge_chunks c
          JOIN knowledge_chunks_fts f ON c.rowid = f.rowid
          WHERE f.knowledge_chunks_fts MATCH ?
+         ORDER BY bm ASC
          LIMIT ?`,
       )
       .all(ftsQuery, limit) as Array<Record<string, unknown>>;
-    return rows.map(rowToChunk);
+    return rows.map((row) => ({
+      chunk: rowToChunk(row),
+      score: -Number(row['bm'] ?? 0),
+    }));
   }
 
   // ── Vector search ──────────────────────────────────────────────────
@@ -988,10 +1053,10 @@ export class KnowledgeStore {
     const threshold = options.threshold ?? 0;
     const rows = this.db
       .prepare('SELECT id, embedding_json FROM knowledge_chunks WHERE embedding_json IS NOT NULL')
-      .all() as Array<{ id: string; embedding_json: string }>;
+      .all() as Array<{ id: string; embedding_json: string | Uint8Array }>;
     const scored: Array<{ id: string; score: number }> = [];
     for (const row of rows) {
-      const vec = jsonToVector(row.embedding_json);
+      const vec = blobToVector(row.embedding_json);
       if (vec === null) continue;
       const score = this.embeddingEngine?.cosineSimilarity(queryVec, vec) ?? 0;
       if (score >= threshold) scored.push({ id: row.id, score });
@@ -1078,27 +1143,27 @@ export class KnowledgeStore {
     try {
       const updChunk = this.db.prepare('UPDATE knowledge_chunks SET embedding_json = ? WHERE id = ?');
       for (let i = 0; i < chunkRows.length; i++) {
-        updChunk.run(vectorToJson(chunkVecs[i] ?? null), chunkRows[i]!.id);
+        updChunk.run(vectorToBlob(chunkVecs[i] ?? null), chunkRows[i]!.id);
       }
       const updEvent = this.db.prepare(
         'UPDATE knowledge_events SET title_embedding_json = ?, content_embedding_json = ? WHERE id = ?',
       );
       for (let i = 0; i < eventRows.length; i++) {
         updEvent.run(
-          vectorToJson(eventTitleVecs[i] ?? null),
-          vectorToJson(eventContentVecs[i] ?? null),
+          vectorToBlob(eventTitleVecs[i] ?? null),
+          vectorToBlob(eventContentVecs[i] ?? null),
           eventRows[i]!.id,
         );
       }
       const updEntity = this.db.prepare('UPDATE knowledge_entities SET embedding_json = ? WHERE id = ?');
       for (let i = 0; i < entityRows.length; i++) {
-        updEntity.run(vectorToJson(entityVecs[i] ?? null), entityRows[i]!.id);
+        updEntity.run(vectorToBlob(entityVecs[i] ?? null), entityRows[i]!.id);
       }
       const updRelation = this.db.prepare(
         'UPDATE knowledge_event_entities SET embedding_json = ? WHERE id = ?',
       );
       for (let i = 0; i < relationRows.length; i++) {
-        updRelation.run(vectorToJson(relationVecs[i] ?? null), relationRows[i]!.id);
+        updRelation.run(vectorToBlob(relationVecs[i] ?? null), relationRows[i]!.id);
       }
       await this.setMeta(EMBEDDING_MODEL_META_KEY, engine.modelName);
       this.commitTransaction();
@@ -1249,7 +1314,7 @@ function rowToChunk(row: Record<string, unknown>): KnowledgeChunk {
     heading: asNullableString(row['heading']),
     content: asString(row['content']),
     rawContent: asNullableString(row['raw_content']),
-    embedding: jsonToVector(asNullableString(row['embedding_json'])),
+    embedding: blobToVector(row['embedding_json']),
     createdAt: Number(row['created_at']),
   };
 }
@@ -1273,8 +1338,8 @@ function rowToEvent(row: Record<string, unknown>): KnowledgeEvent {
     content: asString(row['content']),
     category: asNullableString(row['category']),
     keywords,
-    titleEmbedding: jsonToVector(asNullableString(row['title_embedding_json'])),
-    contentEmbedding: jsonToVector(asNullableString(row['content_embedding_json'])),
+    titleEmbedding: blobToVector(row['title_embedding_json']),
+    contentEmbedding: blobToVector(row['content_embedding_json']),
     createdAt: Number(row['created_at']),
   };
 }
@@ -1287,7 +1352,7 @@ function rowToEntity(row: Record<string, unknown>): KnowledgeEntity {
     name: asString(row['name']),
     normalizedName: asString(row['normalized_name']),
     description: asNullableString(row['description']),
-    embedding: jsonToVector(asNullableString(row['embedding_json'])),
+    embedding: blobToVector(row['embedding_json']),
     createdAt: Number(row['created_at']),
   };
 }

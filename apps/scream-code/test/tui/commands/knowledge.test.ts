@@ -205,12 +205,13 @@ describe('handleKnowledgeCommand — 菜单', () => {
     expect(dialogs.pickers).toHaveLength(1);
     expect(host.mountEditorReplacement).toHaveBeenCalledTimes(1);
     const picker = dialogs.pickers[0]!;
-    expect(picker['options']).toHaveLength(8);
+    expect(picker['options']).toHaveLength(9);
     expect((picker['options'] as Array<{ value: string }>).map((o) => o.value)).toEqual([
       'download-model',
       'ingest',
       'list',
       'search',
+      'search-deep',
       'delete',
       'reembed',
       'stats',
@@ -670,5 +671,54 @@ describe('handleKnowledgeCommand — 菜单循环', () => {
     await flush();
     expect(host.restoreEditor).toHaveBeenCalled();
     expect(dialogs.pickers).toHaveLength(2); // 取消即退出循环
+  });
+});
+
+// ─── search：默认 fast / 深度菜单项 / 耗时标签 ────────────────────────────
+
+describe('handleKnowledgeCommand — search', () => {
+  it('默认搜索传 skipLlm:true 且完成标签含耗时；深度搜索传 skipLlm:false', async () => {
+    const store = makeStore();
+    vi.mocked(knowledgeStore.getKnowledgeStore).mockResolvedValue(store as never);
+    knowledgePkg.multiSearch.mockResolvedValue([
+      {
+        chunkId: 'c1',
+        documentId: 'd1',
+        sourceId: 's1',
+        sourceName: 'doc.md',
+        heading: 'Rust',
+        content: 'Rust body',
+        score: 0.9,
+        eventId: 'e1',
+        eventTitle: 'Rust event',
+      },
+    ] as never);
+
+    const { host, spinner } = makeHost();
+    await openMenu(host);
+    await selectMenuAction('search');
+    lastInput().onDone({ kind: 'ok', value: 'rust query' });
+    await flush();
+
+    expect(knowledgePkg.multiSearch).toHaveBeenCalledWith(store, expect.anything(), 'rust query', {
+      topK: 5,
+      skipLlm: true,
+    });
+    const stopArgs = vi.mocked(spinner.stop).mock.calls.at(-1)![0] as { ok: boolean; label: string };
+    expect(stopArgs.ok).toBe(true);
+    expect(stopArgs.label).toContain(t('knowledge.search_done'));
+    expect(stopArgs.label).toMatch(/· \d+ms$/);
+    expect(dialogs.viewers.at(-1)!['onClose']).toBeTypeOf('function');
+
+    // 深度搜索菜单项 → skipLlm:false
+    await selectMenuAction('search-deep');
+    lastInput().onDone({ kind: 'ok', value: 'rust query' });
+    await flush();
+    expect(knowledgePkg.multiSearch).toHaveBeenLastCalledWith(
+      store,
+      expect.anything(),
+      'rust query',
+      { topK: 5, skipLlm: false },
+    );
   });
 });

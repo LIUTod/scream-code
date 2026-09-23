@@ -192,7 +192,8 @@ describe('KnowledgeStore', () => {
       });
       const found = await store.ftsSearchChunks('rust', 10);
       expect(found).toHaveLength(1);
-      expect(found[0]!.heading).toBe('Rust');
+      expect(found[0]!.chunk.heading).toBe('Rust');
+      expect(found[0]!.score).toBeGreaterThan(0);
     });
   });
 

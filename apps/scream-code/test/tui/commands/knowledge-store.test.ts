@@ -22,12 +22,43 @@ const storeImpl = vi.hoisted(() => ({
   setEmbeddingEngine: vi.fn(),
 }));
 
-vi.mock('@scream-code/knowledge', () => ({
-  KnowledgeStore: class {
+vi.mock('@scream-code/knowledge', async () => {
+  const { createFastEmbedEngine } = await import('@scream-code/memory');
+  class KnowledgeStore {
+    private engine: ReturnType<typeof createFastEmbedEngine> | undefined;
     init = storeImpl.init;
-    setEmbeddingEngine = storeImpl.setEmbeddingEngine;
-  },
-}));
+    setEmbeddingEngine = (engine: ReturnType<typeof createFastEmbedEngine>): void => {
+      this.engine = engine;
+      storeImpl.setEmbeddingEngine(engine);
+    };
+    getEmbeddingEngine = (): ReturnType<typeof createFastEmbedEngine> | undefined => this.engine;
+  }
+  // Minimal mirror of the real shared provider: memoized per homeDir, engine
+  // wired after init, entry dropped on failure so the next caller retries.
+  const entries = new Map<string, { store: KnowledgeStore; ready: Promise<void> }>();
+  function entryFor(homeDir: string): { store: KnowledgeStore; ready: Promise<void> } {
+    const existing = entries.get(homeDir);
+    if (existing !== undefined) return existing;
+    const store = new KnowledgeStore();
+    const ready = (async () => {
+      try {
+        await store.init();
+        store.setEmbeddingEngine(createFastEmbedEngine(join(homeDir, 'cache', 'fastembed')));
+      } catch (error) {
+        entries.delete(homeDir);
+        throw error;
+      }
+    })();
+    const entry = { store, ready };
+    entries.set(homeDir, entry);
+    return entry;
+  }
+  return {
+    KnowledgeStore,
+    sharedKnowledgeStore: (homeDir: string) => entryFor(homeDir).store,
+    sharedKnowledgeStoreReady: (homeDir: string) => entryFor(homeDir).ready,
+  };
+});
 
 interface FakeEngine {
   available: boolean;

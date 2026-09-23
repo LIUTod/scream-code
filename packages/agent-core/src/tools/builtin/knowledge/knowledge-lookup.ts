@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { hasEmbeddingModelCache } from '@scream-code/memory';
+
 import type { Agent } from '#/agent';
 import type { BuiltinTool } from '../../../agent/tool';
 import type { ToolExecution } from '../../../loop/types';
@@ -22,6 +24,12 @@ export const KnowledgeLookupInputSchema = z.object({
     .max(MAX_TOP_K)
     .optional()
     .describe(`Maximum number of chunks to return (default ${DEFAULT_TOP_K}, max ${MAX_TOP_K}).`),
+  deep: z
+    .boolean()
+    .optional()
+    .describe(
+      'Omitted/false = fast local ranking (no LLM calls, much faster). true = LLM entity recall + rerank — use when fast results look weak or off-topic.',
+    ),
 });
 
 export type KnowledgeLookupInput = z.infer<typeof KnowledgeLookupInputSchema>;
@@ -38,7 +46,8 @@ export class KnowledgeLookupTool implements BuiltinTool<KnowledgeLookupInput> {
     'Use when the user asks about a concept, definition, or background topic that may be in the library, OR when the user explicitly asks to "查知识库" / "search the knowledge base". ' +
     'Returns ranked chunks with source document and section heading. ' +
     'Do NOT use for personal task experience (use MemoryLookup) or current code (use Read/Grep). ' +
-    'Prefer this over web search when the topic is likely covered by ingested docs — local sources are faster and more relevant.';
+    'Prefer this over web search when the topic is likely covered by ingested docs — local sources are faster and more relevant. ' +
+    'The default fast path makes no LLM calls; pass deep=true only when the fast results look weak.';
   readonly parameters: Record<string, unknown> = toInputJsonSchema(KnowledgeLookupInputSchema);
 
   constructor(private readonly agent: Agent) {}
@@ -62,8 +71,22 @@ export class KnowledgeLookupTool implements BuiltinTool<KnowledgeLookupInput> {
         if (stats.chunks === 0) {
           return {
             isError: false,
-            output: '知识库为空，请先用 /knowledge 摄入文档后再使用 KnowledgeLookup。',
+            output:
+              'Knowledge base is empty — ingest documents via /knowledge first, then use KnowledgeLookup.',
           };
+        }
+
+        // Load the cached model (local files only) before searching. The cache
+        // guard keeps this from ever triggering a surprise download mid-query;
+        // without the model the pipeline degrades to keyword search below.
+        const engine = store.getEmbeddingEngine();
+        if (
+          engine !== undefined &&
+          !engine.available &&
+          this.agent.embeddingCacheDir !== undefined &&
+          hasEmbeddingModelCache(this.agent.embeddingCacheDir)
+        ) {
+          await engine.ensureReady();
         }
 
         const topK = Math.min(args.top_k ?? DEFAULT_TOP_K, MAX_TOP_K);
@@ -73,7 +96,10 @@ export class KnowledgeLookupTool implements BuiltinTool<KnowledgeLookupInput> {
           },
         };
         const { multiSearchWithTrace } = await import('@scream-code/knowledge');
-        const { results, trace } = await multiSearchWithTrace(store, llm, query, { topK });
+        const { results, trace } = await multiSearchWithTrace(store, llm, query, {
+          topK,
+          skipLlm: args.deep !== true,
+        });
 
         if (results.length === 0) {
           return {
@@ -82,8 +108,14 @@ export class KnowledgeLookupTool implements BuiltinTool<KnowledgeLookupInput> {
           };
         }
 
+        const degraded = store.getEmbeddingEngine()?.available !== true;
         const lines = [
           `Found ${results.length} relevant knowledge chunk${results.length === 1 ? '' : 's'} for query "${query}":`,
+          ...(degraded
+            ? [
+                '⚠ Vector model not loaded — run /knowledge → download model for semantic search. Ranking below is keyword-based.',
+              ]
+            : []),
           '',
         ];
 

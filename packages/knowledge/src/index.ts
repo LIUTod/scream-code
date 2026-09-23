@@ -22,6 +22,7 @@ export type {
 export type { EmbeddingEngine } from './types.js';
 
 export { KnowledgeStore } from './store.js';
+export { sharedKnowledgeStore, sharedKnowledgeStoreReady } from './shared-store.js';
 export { chunkMarkdown, chunkText, splitLargeSection, stripMarkdown, estimateTokens } from './chunking.js';
 export {
   ENTITY_TYPES,

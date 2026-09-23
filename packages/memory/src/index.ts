@@ -12,4 +12,4 @@ export {
   type ConsolidationPlan,
 } from './consolidator.js';
 export { DreamTracker, type DreamState } from './dream.js';
-export { EMBEDDING_MODEL_NAME, buildEmbeddingText, createFastEmbedEngine, clearEmbeddingModelCache, classifyEmbeddingFailure, probeLocalEmbeddingSupport, type EmbeddingEngine, type EmbeddingFailureKind } from './embeddings.js';
+export { EMBEDDING_MODEL_NAME, buildEmbeddingText, createFastEmbedEngine, clearEmbeddingModelCache, hasEmbeddingModelCache, classifyEmbeddingFailure, probeLocalEmbeddingSupport, type EmbeddingEngine, type EmbeddingFailureKind } from './embeddings.js';

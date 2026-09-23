@@ -847,38 +847,57 @@ to search the knowledge base.
   `knowledge_chunks` (with embedding) → `knowledge_events` (LLM-fused event per
   chunk, with title + content embeddings) → `knowledge_entities` (with embedding)
   → `knowledge_event_entities` (bipartite edges with relation embeddings). Vectors
-  are stored as JSON text and ranked via JS cosine similarity (same pattern as
-  memory). FTS5 indexes chunks/events/entities for keyword fallback.
+  are stored as raw Float32 BLOBs — legacy JSON text is migrated once at
+  `user_version` 2 while `blobToVector` keeps accepting both formats forever
+  (a half-migrated library stays correct) — and ranked via JS cosine similarity
+  (same pattern as memory). FTS5 indexes chunks/events/entities for keyword
+  fallback, scored by bm25 (`score = -bm25`, larger is better).
 - **Ingest** (`/knowledge` → ingest): markdown file → heading_strict chunking →
   embed chunks → LLM extract 1 fused event + N entities per chunk → embed event
   title/content + entity names + relation text → store. All writes run in a
   single SQLite transaction; a mid-ingest failure rolls back every partial row.
   Re-ingesting the same file path errors out (deduped via `knowledge_sources.file_path`).
 - **Search** (`KnowledgeLookup` tool and `/knowledge` → search): multi-hop
-  retrieval — vectorize query → LLM extract query entities → recall entities by
-  name + vector → seed events (entity-linked + title-vector matched) → BFS expand
-  1 hop via event-entity edges → coarse rank by content embedding → LLM rerank →
-  return deduped chunks with scores and provenance. Falls back to direct chunk
-  vector search when no seed events match, and to FTS5 when embeddings are unavailable.
+  retrieval in two gears. Fast (default for the tool unless `deep=true`, and
+  for the TUI search): vectorize query → local entity-vector recall → seed
+  events (entity-linked + title-vector matched) → BFS expand 1 hop via
+  event-entity edges → coarse rank by content embedding → return deduped
+  chunks with scores and provenance — **zero LLM calls** (`skipLlm`). Deep
+  (TUI `deep search` menu item, or `KnowledgeLookup({deep:true})`): adds LLM
+  query-entity extraction before seeding and an LLM rerank after coarse
+  ranking — more precise, pays two network round-trips. Both gears fall back
+  to direct chunk vector search when no seed events match, and to FTS5
+  (bm25-scored) when embeddings are unavailable.
 - **Tool**: `KnowledgeLookup` in `packages/agent-core/src/tools/builtin/knowledge/knowledge-lookup.ts`
-  — registered only on the main agent. Searches the store via `multiSearch` and
-  returns markdown-formatted ranked chunks.
+  — registered only on the main agent. Searches via `multiSearchWithTrace`
+  (fast path by default, `deep=true` for the LLM gears), warms the embedding
+  model from the local cache only when it is already on disk (never a surprise
+  mid-query download), and prepends an actionable hint when the vector model
+  is unavailable. Returns markdown-formatted ranked chunks plus the trace.
 - **TUI command**: `/knowledge` (`apps/scream-code/src/tui/commands/knowledge.ts`)
-  — interactive menu: ingest / list / search / delete / stats. Uses its own
-  `KnowledgeStore` instance (separate from the agent's) but operates on the same
-  `knowledge.db`; SQLite WAL mode makes concurrent reads safe during ingest.
-- **Agent integration**: `Agent.knowledgeStore` is auto-created in the Agent
-  constructor for main agents (same pattern as `memoStore`), with
-  `knowledgeStoreReady` awaited during session create/resume. LLM access for
-  extraction/rerank/entity-recall goes through `Agent.generateText(systemPrompt, userPrompt)`
-  — a new method that calls the configured LLM with a custom system prompt and
-  single user message, bypassing conversation history and tools.
+  — interactive menu: download model / ingest / list / search / deep search /
+  delete / re-embed / stats / web graph. Store access goes through
+  `sharedKnowledgeStore(getDataDir())` — the same process-wide handle and
+  embedding engine the agent uses (see below); the search spinner label shows
+  elapsed milliseconds.
+- **Agent integration**: `Agent.knowledgeStore` comes from
+  `sharedKnowledgeStore(screamHomeDir)` (`packages/knowledge/src/shared-store.ts`)
+  — one process-wide store + embedding engine per homeDir, shared with the TUI
+  command; `knowledgeStoreReady` awaits that shared build during session
+  create/resume and logs init failures instead of throwing. Embedding status
+  shown in the TUI menu is derived from live facts (download in flight /
+  `engine.available` / last manual failure), not a mirrored flag. LLM access
+  for extraction/rerank/entity-recall goes through `Agent.generateText(systemPrompt, userPrompt)`
+  — a method that calls the configured LLM with a custom system prompt and
+  single user message, bypassing conversation history and tools; only the deep
+  search gear calls it, the fast path never does.
 
-Key files: `packages/knowledge/src/store.ts`, `packages/knowledge/src/ingest.ts`,
-`packages/knowledge/src/search.ts`, `packages/knowledge/src/extractor.ts`,
-`packages/knowledge/src/chunking.ts`,
+Key files: `packages/knowledge/src/store.ts`, `packages/knowledge/src/shared-store.ts`,
+`packages/knowledge/src/ingest.ts`, `packages/knowledge/src/search.ts`,
+`packages/knowledge/src/extractor.ts`, `packages/knowledge/src/chunking.ts`,
 `packages/agent-core/src/tools/builtin/knowledge/knowledge-lookup.ts`,
-`apps/scream-code/src/tui/commands/knowledge.ts`.
+`apps/scream-code/src/tui/commands/knowledge.ts` (plus `knowledge-store.ts`
+and `knowledge-web.ts` / `knowledge-web-template.ts`).
 
 #### Session Memory
 

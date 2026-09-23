@@ -1,11 +1,11 @@
-import { existsSync, mkdirSync } from 'node:fs';
+import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { KnowledgeStore } from '@scream-code/knowledge';
+import { KnowledgeStore, sharedKnowledgeStore, sharedKnowledgeStoreReady } from '@scream-code/knowledge';
 import {
   classifyEmbeddingFailure,
   clearEmbeddingModelCache,
-  createFastEmbedEngine,
+  hasEmbeddingModelCache as hasModelCache,
   probeLocalEmbeddingSupport,
   type EmbeddingEngine,
   type EmbeddingFailureKind,
@@ -19,16 +19,14 @@ export type { EmbeddingFailureKind };
 
 let knowledgeStorePromise: Promise<KnowledgeStore> | undefined;
 let embeddingEngineInstance: EmbeddingEngine | undefined;
-let embeddingStatus: EmbeddingStatus = 'idle';
+/** Whether the last manual download attempt failed (drives the 'failed' status). */
+let lastManualFailed = false;
 
 function getEmbeddingCacheDir(): string {
   const dir = join(getDataDir(), 'cache', 'fastembed');
   mkdirSync(dir, { recursive: true });
   return dir;
 }
-
-/** Subdirectory fastembed uses for the BGESmallZH model inside the cache dir. */
-const EMBEDDING_MODEL_DIR = 'fast-bge-small-zh-v1.5';
 
 /**
  * Any usable cache: the model directory with its weights present.
@@ -37,39 +35,46 @@ const EMBEDDING_MODEL_DIR = 'fast-bge-small-zh-v1.5';
  * the Hub while loading — so callers must not treat it as "no model here".
  * Flagging it as missing would block the very path that repairs it, and
  * fastembed itself skips downloading whenever the model directory exists.
+ * The existence check itself lives in @scream-code/memory next to the cache
+ * layout it inspects.
  */
 export function hasEmbeddingModelCache(): boolean {
-  const modelDir = join(getEmbeddingCacheDir(), EMBEDDING_MODEL_DIR);
-  return existsSync(modelDir) && existsSync(join(modelDir, 'model_optimized.onnx'));
+  return hasModelCache(getEmbeddingCacheDir());
 }
 
 /**
- * The store and its embedding engine are built together and published only once
- * both exist. Publishing the store first meant a single transient failure (a
- * locked knowledge.db, a full disk, a denied directory) left a store with no
- * engine that no later call could repair: every download then failed instantly
- * with "embedding engine not initialized" for the rest of the process.
- *
- * Concurrent callers share one build, and a failed build clears the slot so the
- * next caller retries from scratch.
+ * Get the singleton KnowledgeStore, initializing it on first access.
+ * Delegates to the shared per-homeDir provider in @scream-code/knowledge so
+ * this process keeps ONE store handle and ONE engine instance no matter how
+ * many hosts (TUI command, agent session) ask for it. Concurrent callers share
+ * one build, and a failed build clears the slot so the next caller retries.
  */
 export function getKnowledgeStore(): Promise<KnowledgeStore> {
-  knowledgeStorePromise ??= (async () => {
-    const store = new KnowledgeStore(getDataDir());
-    await store.init();
-    const engine = createFastEmbedEngine(getEmbeddingCacheDir());
-    store.setEmbeddingEngine(engine);
-    embeddingEngineInstance = engine;
-    return store;
-  })().catch((error: unknown) => {
-    knowledgeStorePromise = undefined;
-    throw error;
-  });
+  knowledgeStorePromise ??= sharedKnowledgeStoreReady(getDataDir())
+    .then(() => {
+      const store = sharedKnowledgeStore(getDataDir());
+      embeddingEngineInstance = store.getEmbeddingEngine();
+      return store;
+    })
+    .catch((error: unknown) => {
+      knowledgeStorePromise = undefined;
+      throw error;
+    });
   return knowledgeStorePromise;
 }
 
+/**
+ * Derived from live facts instead of a mirrored flag: a download in flight,
+ * the engine's own availability, and whether the last manual attempt failed.
+ * Engine construction failures are reported separately via
+ * getEmbeddingFailureKind and are intentionally not collapsed into 'failed'
+ * — a missing download is not the only reason the model might not be ready.
+ */
 export function getEmbeddingStatus(): EmbeddingStatus {
-  return embeddingStatus;
+  if (downloadPromise !== undefined) return 'downloading';
+  if (embeddingEngineInstance?.available === true) return 'ready';
+  if (lastManualFailed) return 'failed';
+  return 'idle';
 }
 
 export interface EmbeddingDownloadResult {
@@ -82,8 +87,8 @@ export interface EmbeddingDownloadResult {
 
 /**
  * Manually trigger the embedding model download/load.
- * Only mutates embeddingStatus; the actual download is delegated to
- * EmbeddingEngine.ensureReady() and saves the model to the shared cache dir.
+ * Only mutates the inputs behind the derived status; the actual download is
+ * delegated to EmbeddingEngine.ensureReady() and saves the model to the shared cache dir.
  * Concurrent calls join the in-flight download and share its result instead
  * of failing — the startup warm-up and a user-initiated download must never
  * race into a spurious "download already in progress" error.
@@ -95,14 +100,12 @@ export async function startManualEmbeddingDownload(): Promise<EmbeddingDownloadR
 
   // If the model is already loaded in this process, nothing to do.
   if (embeddingEngineInstance.available) {
-    embeddingStatus = 'ready';
     return { ok: true, alreadyReady: true };
   }
 
   // Join an in-flight download rather than rejecting concurrent callers.
   if (downloadPromise !== undefined) return downloadPromise;
 
-  embeddingStatus = 'downloading';
   downloadPromise = performDownload().finally(() => {
     downloadPromise = undefined;
   });
@@ -122,7 +125,7 @@ async function performDownload(): Promise<EmbeddingDownloadResult> {
     // download exists to retry, and with a cache that has nothing to do with it.
     const support = await probeLocalEmbeddingSupport();
     if (!support.supported) {
-      embeddingStatus = 'failed';
+      lastManualFailed = true;
       // The import failed, so this machine cannot load the local model at all —
       // which is the platform case for every shape the native loader emits. An
       // unrecognised message keeps its own hint (retry / report) rather than
@@ -146,12 +149,12 @@ async function performDownload(): Promise<EmbeddingDownloadResult> {
       }
     }
 
-    embeddingStatus = ok ? 'ready' : 'failed';
+    lastManualFailed = !ok;
     return ok ? { ok } : failureResult(error);
   } catch (error: unknown) {
     // Never let an unexpected failure (disk, fs permission) escape as an
     // unhandled rejection — surface it as a failed download instead.
-    embeddingStatus = 'failed';
+    lastManualFailed = true;
     return failureResult(error instanceof Error ? error.message : String(error));
   }
 }

@@ -129,6 +129,8 @@ export interface KnowledgeSearchOptions {
   topK?: number;
   /** Skip the LLM rerank step (coarse rank only). */
   skipRerank?: boolean;
+  /** Skip ALL LLM calls during retrieval (entity extraction + rerank). Implies skipRerank. */
+  skipLlm?: boolean;
 }
 
 /** One step in the multi-hop retrieval trace. */

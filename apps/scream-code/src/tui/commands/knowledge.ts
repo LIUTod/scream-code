@@ -251,7 +251,7 @@ async function handleList(host: SlashCommandHost): Promise<void> {
   await promise;
 }
 
-async function handleSearch(host: SlashCommandHost): Promise<void> {
+async function handleSearch(host: SlashCommandHost, opts?: { skipLlm?: boolean }): Promise<void> {
   const query = await promptTextInput(host, t('knowledge.search'), {
     subtitle: t('knowledge.search_desc'),
     placeholder: t('knowledge.search_placeholder'),
@@ -262,14 +262,15 @@ async function handleSearch(host: SlashCommandHost): Promise<void> {
   const store = await getKnowledgeStore();
   const llm = makeLlmCaller(host);
   const spinner = host.showProgressSpinner(t('knowledge.searching'));
+  const startedAt = Date.now();
   let results;
   try {
-    results = await multiSearch(store, llm, query, { topK: 5 });
+    results = await multiSearch(store, llm, query, { topK: 5, skipLlm: opts?.skipLlm ?? true });
   } catch (error) {
     spinner.stop({ ok: false, label: t('knowledge.search_fail') });
     throw error;
   }
-  spinner.stop({ ok: true, label: t('knowledge.search_done') });
+  spinner.stop({ ok: true, label: `${t('knowledge.search_done')} · ${Date.now() - startedAt}ms` });
 
   const engine = store.getEmbeddingEngine();
   const degraded = engine === undefined || !engine.available;
@@ -582,6 +583,11 @@ export async function handleKnowledgeCommand(
         description: t('knowledge.search_effect'),
       },
       {
+        value: 'search-deep',
+        label: '🧠 ' + t('knowledge.search_deep'),
+        description: t('knowledge.search_deep_desc'),
+      },
+      {
         value: 'delete',
         label: '🗑️ ' + t('knowledge.delete'),
         description: t('knowledge.delete_desc'),
@@ -617,6 +623,7 @@ export async function handleKnowledgeCommand(
             else if (value === 'ingest') await handleIngest(host);
             else if (value === 'list') await handleList(host);
             else if (value === 'search') await handleSearch(host);
+            else if (value === 'search-deep') await handleSearch(host, { skipLlm: false });
             else if (value === 'delete') await handleDelete(host);
             else if (value === 'reembed') await handleReembed(host);
             else if (value === 'stats') await handleStats(host);

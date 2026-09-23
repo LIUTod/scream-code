@@ -42,7 +42,7 @@ import { GoalMode } from './goal';
 import { HookEngine } from '../session/hooks';
 import { InjectionManager } from './injection/manager';
 import { DreamTracker, EXIT_EXTRACTION_SYSTEM_PROMPT, MemoryMemoStore, buildExitExtractionPrompt, createFastEmbedEngine, parseMemoryMemos, type EmbeddingEngine } from '@scream-code/memory';
-import { KnowledgeStore } from '@scream-code/knowledge';
+import { KnowledgeStore, sharedKnowledgeStore, sharedKnowledgeStoreReady } from '@scream-code/knowledge';
 import { PermissionManager, type PermissionManagerOptions } from './permission';
 import { PlanMode } from './plan';
 import { DEFAULT_SECRET_PATTERNS, SecretObfuscator } from './secrets';
@@ -143,6 +143,8 @@ export class Agent {
   readonly screamConfig?: ScreamConfig;
   readonly homedir?: string;
   readonly screamHomeDir?: string;
+  /** Cache dir of the shared embedding engine (undefined when no scream home). */
+  readonly embeddingCacheDir: string | undefined;
   readonly rpc?: Partial<SDKAgentRPC>;
   readonly toolServices?: ToolServices;
   readonly pluginSessionStarts: readonly EnabledPluginSessionStart[];
@@ -214,6 +216,7 @@ export class Agent {
     const embedCacheDir = options.screamHomeDir !== undefined
       ? join(options.screamHomeDir, 'cache', 'fastembed')
       : undefined;
+    this.embeddingCacheDir = embedCacheDir;
     this.sharedEmbeddingEngine = createFastEmbedEngine(embedCacheDir);
     this.log = options.log ?? log;
 
@@ -269,9 +272,16 @@ export class Agent {
     // Knowledge store is main-agent-only — subagents don't need retrieval access.
     this.knowledgeStore =
       screamHomeDir !== undefined && this.type === 'main'
-        ? new KnowledgeStore(screamHomeDir)
+        ? sharedKnowledgeStore(screamHomeDir)
         : undefined;
-    this.knowledgeStoreReady = this.initKnowledgeStore(this.knowledgeStore);
+    this.knowledgeStoreReady =
+      this.knowledgeStore !== undefined && screamHomeDir !== undefined
+        ? sharedKnowledgeStoreReady(screamHomeDir).catch((error: unknown) => {
+            // Keep the old contract: init failures are logged, never thrown
+            // into session creation.
+            this.log.error('knowledge store init failed', error);
+          })
+        : Promise.resolve();
     this.sessionMemory = new SessionMemory(this);
     this.workingSet = new WorkingSet();
     this.dreamTracker = new DreamTracker(screamHomeDir ?? '');
@@ -471,21 +481,6 @@ export class Agent {
     }
   }
 
-  private initKnowledgeStore(store: KnowledgeStore | undefined): Promise<void> {
-    if (store === undefined) return Promise.resolve();
-    return (async () => {
-      try {
-        await store.init();
-      } catch (error: unknown) {
-        this.log.error('knowledge store init failed', error);
-      }
-      try {
-        store.setEmbeddingEngine(this.sharedEmbeddingEngine);
-      } catch (error: unknown) {
-        this.log.warn('knowledge embedding engine init failed', error);
-      }
-    })();
-  }
   get generate(): typeof generate {
     return async (provider, systemPrompt, tools, history, callbacks, options) => {
       if (options?.auth !== undefined) {

@@ -280,6 +280,17 @@ export function clearEmbeddingModelCache(cacheDir: string): void {
 }
 
 /**
+ * True when the extracted model weights are already on disk. Loading then
+ * never downloads (fastembed skips the fetch whenever the model dir exists),
+ * so callers can safely trigger a local load without risking a surprise
+ * mid-query download.
+ */
+export function hasEmbeddingModelCache(cacheDir: string): boolean {
+  const modelDir = join(cacheDir, BGESMALLZH_CACHE_NAME);
+  return existsSync(modelDir) && existsSync(join(modelDir, 'model_optimized.onnx'));
+}
+
+/**
  * Small config/tokenizer files that fastembed expects alongside model.onnx.
  * If these are missing (e.g. GCS download partially failed), fastembed throws.
  * We download them from HuggingFace so the model can load — this covers the

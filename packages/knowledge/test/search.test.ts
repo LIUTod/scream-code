@@ -264,6 +264,7 @@ describe('multiSearchWithTrace', () => {
     );
 
     expect(results.map((result) => result.chunkId)).toEqual([chunk.id]);
+    expect(results[0]!.score).toBeGreaterThan(0);
     expect(trace.fallbackReason).toBe(
       'no seed events and direct chunk vector search returned no results; used FTS5 keyword fallback',
     );
@@ -465,5 +466,38 @@ describe('multiSearchWithTrace', () => {
     expect(typeof stepByName.get('bfsExpand')?.durationMs).toBe('number');
     expect(stepByName.has('coarseRank')).toBe(true);
     expect(typeof stepByName.get('coarseRank')?.durationMs).toBe('number');
+  });
+
+  it('skipLlm makes zero LLM calls while the deep path still calls the LLM', async () => {
+    const llm = makeStubLlm();
+    const generate = vi.spyOn(llm, 'generate');
+    const content = [
+      '## Rust Language',
+      'Rust is a systems programming language focused on safety.',
+      '',
+      '## Python Language',
+      'Python is a scripting language popular for data science.',
+      '',
+      '## Go Language',
+      'Go is a statically typed compiled language at Google.',
+    ].join('\n');
+    await ingestContent(store, llm, { name: 'languages.md', content });
+    generate.mockClear();
+
+    // Fast path: local embed/graph/coarse-rank only — no llm.generate at all.
+    const fast = await multiSearchWithTrace(store, llm, 'Rust systems language', {
+      topK: 1,
+      skipLlm: true,
+    });
+    expect(fast.results.length).toBeGreaterThan(0);
+    expect(generate).not.toHaveBeenCalled();
+    const stepNames = fast.trace.steps.map((s) => s.step);
+    expect(stepNames).toContain('entityRecall');
+    expect(stepNames).toContain('rerank');
+    expect(stepNames).toContain('queryEmbedding');
+
+    // Deep path (library default): LLM entity extraction and/or rerank fire.
+    const deep = await multiSearchWithTrace(store, llm, 'Rust systems language', { topK: 1 });
+    expect(generate).toHaveBeenCalled();
   });
 });

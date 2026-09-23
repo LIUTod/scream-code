@@ -32,7 +32,7 @@ async function embedOrNulls(
   return vectors;
 }
 
-/** LLM concurrency for extraction — kept low to avoid rate-limit bursts. */
+/** LLM concurrency for extraction — callers and comments below refer to this constant. */
 const LLM_CONCURRENCY = 20;
 const SUPPORTED_EXTENSIONS = new Set(['.md', '.markdown', '.txt']);
 
@@ -114,7 +114,7 @@ async function ensureEmbeddingModelMatches(
  * 1. Dedupe by file_path — if a source already exists for this file, error.
  * 2. Read file → chunkMarkdown (heading_strict).
  * 3. Embed chunks ("{heading}\n{content}") → store knowledge_chunks.
- * 4. For each chunk (concurrency 3): LLM extract 1 event + N entities.
+ * 4. For each chunk (concurrency LLM_CONCURRENCY): LLM extract 1 event + N entities.
  * 5. Embed event title + content ("{title}\n\n{content}") → store knowledge_events.
  * 6. Upsert entities (dedupe by source_id+type+normalizedName) + embed entity name → store.
  * 7. For each (event, entity) pair: embed relation (entity.description || "{eventTitle} {entityName}") → store knowledge_event_entities.
@@ -192,175 +192,12 @@ export async function ingestFile(
       content,
     });
 
-    // 4. Embed chunks and store.
-    onProgress?.({
-      stage: 'embedding-chunks',
-      chunkIndex: 0,
-      totalChunks: sections.length,
-      message: `嵌入 chunks: 0/${sections.length}`,
-    });
-    const chunkEmbeddings = await embedOrNulls(
-      engine,
-      sections.map((s) => (s.heading !== null ? `${s.heading}\n${s.content}` : s.content)),
-      skipEmbed,
+    const { chunks, events, uniqueEntities } = await ingestSections(
+      store,
+      llm,
+      { source, document, sections, engine, skipEmbed },
+      onProgress,
     );
-
-    const chunks = [];
-    for (let i = 0; i < sections.length; i++) {
-      const section = sections[i]!;
-      const embedding = chunkEmbeddings[i] ?? null;
-      const chunk = await store.insertChunk({
-        sourceId: source.id,
-        documentId: document.id,
-        rank: section.rank,
-        heading: section.heading,
-        content: section.content,
-        rawContent: section.rawContent,
-        embedding,
-      });
-      chunks.push(chunk);
-      onProgress?.({
-        stage: 'embedding-chunks',
-        chunkIndex: i + 1,
-        totalChunks: sections.length,
-        message: `嵌入 chunks: ${i + 1}/${sections.length}`,
-      });
-    }
-
-    // 5. LLM extract events (concurrency 3).
-    onProgress?.({
-      stage: 'extracting',
-      chunkIndex: 0,
-      totalChunks: sections.length,
-      message: `抽取事件: 0/${sections.length}`,
-    });
-    const extractedEvents = await mapWithConcurrency(
-      sections,
-      LLM_CONCURRENCY,
-      (section) => extractEventFromChunk(llm, section),
-      (completed, total) => {
-        onProgress?.({
-          stage: 'extracting',
-          chunkIndex: completed,
-          totalChunks: total,
-          message: `抽取事件: ${completed}/${total}`,
-        });
-      },
-    );
-
-    // 6. Embed event title + content, store events.
-    onProgress?.({
-      stage: 'embedding-events',
-      chunkIndex: 0,
-      totalChunks: sections.length,
-      message: `嵌入 events: 0/${sections.length}`,
-    });
-    const titleTexts = extractedEvents.map((e) => e.title);
-    const contentTexts = extractedEvents.map((e) => `${e.title}\n\n${e.content}`);
-    const [titleEmbeddings, contentEmbeddings] = await Promise.all([
-      embedOrNulls(engine, titleTexts, skipEmbed),
-      embedOrNulls(engine, contentTexts, skipEmbed),
-    ]);
-
-    const events: KnowledgeEvent[] = [];
-    for (let i = 0; i < extractedEvents.length; i++) {
-      const extracted = extractedEvents[i]!;
-      const chunk = chunks[i]!;
-      const event = await store.insertEvent({
-        sourceId: source.id,
-        documentId: document.id,
-        chunkId: chunk.id,
-        rank: i,
-        title: extracted.title,
-        summary: extracted.summary.length > 0 ? extracted.summary : null,
-        content: extracted.content,
-        category: extracted.category.length > 0 ? extracted.category : null,
-        keywords: extracted.keywords,
-        titleEmbedding: titleEmbeddings[i] ?? null,
-        contentEmbedding: contentEmbeddings[i] ?? null,
-      });
-      events.push(event);
-      onProgress?.({
-        stage: 'embedding-events',
-        chunkIndex: i + 1,
-        totalChunks: sections.length,
-        message: `嵌入 events: ${i + 1}/${sections.length}`,
-      });
-    }
-
-    // 7. Upsert entities + embed entity names.
-    onProgress?.({ stage: 'embedding-entities', message: '嵌入 entities...' });
-    const entityMap = new Map<string, { type: string; name: string; description: string }>();
-    for (const extracted of extractedEvents) {
-      for (const entity of extracted.entities) {
-        const key = `${entity.type}|${entity.name.toLowerCase()}`;
-        if (!entityMap.has(key)) {
-          entityMap.set(key, entity);
-        }
-      }
-    }
-    const uniqueEntities = Array.from(entityMap.values());
-    const entityEmbeddings =
-      uniqueEntities.length > 0
-        ? await embedOrNulls(engine, uniqueEntities.map((e) => e.name), skipEmbed)
-        : [];
-
-    const entityIdByEntityKey = new Map<string, string>();
-    for (let i = 0; i < uniqueEntities.length; i++) {
-      const entity = uniqueEntities[i]!;
-      const embedding = entityEmbeddings[i] ?? null;
-      const stored = await store.upsertEntity({
-        sourceId: source.id,
-        type: entity.type,
-        name: entity.name,
-        description: entity.description.length > 0 ? entity.description : null,
-        embedding,
-      });
-      entityIdByEntityKey.set(`${entity.type}|${entity.name.toLowerCase()}`, stored.id);
-    }
-
-    // 8. Embed relation per (event, entity) pair and store edges.
-    onProgress?.({ stage: 'embedding-relations', message: '嵌入关系...' });
-    const relationPairs: Array<{ eventIndex: number; entity: { type: string; name: string; description: string } }> = [];
-    for (let i = 0; i < extractedEvents.length; i++) {
-      const extracted = extractedEvents[i]!;
-      for (const entity of extracted.entities) {
-        relationPairs.push({ eventIndex: i, entity });
-      }
-    }
-    const relationTexts = relationPairs.map(({ eventIndex, entity }) => {
-      const event = events[eventIndex]!;
-      return entity.description.length > 0
-        ? entity.description
-        : `${event.title} ${entity.name}`;
-    });
-    const relationEmbeddings =
-      relationPairs.length > 0 ? await embedOrNulls(engine, relationTexts, skipEmbed) : [];
-
-    for (let i = 0; i < relationPairs.length; i++) {
-      const pair = relationPairs[i]!;
-      const event = events[pair.eventIndex]!;
-      const entityKey = `${pair.entity.type}|${pair.entity.name.toLowerCase()}`;
-      const entityId = entityIdByEntityKey.get(entityKey);
-      if (entityId === undefined) continue;
-      const embedding = relationEmbeddings?.[i] ?? null;
-      await store.insertEventEntity({
-        eventId: event.id,
-        entityId,
-        weight: 1.0,
-        description: pair.entity.description.length > 0 ? pair.entity.description : null,
-        embedding,
-      });
-    }
-
-    // 9. Update document status.
-    await store.updateDocumentStatus(document.id, 'completed', chunks.length);
-    store.commitTransaction();
-
-    onProgress?.({
-      stage: 'completed',
-      message: `摄入完成：${chunks.length} chunks, ${events.length} events, ${uniqueEntities.length} entities`,
-    });
 
     return {
       documentId: document.id,
@@ -377,6 +214,201 @@ export async function ingestFile(
     }
     throw error;
   }
+}
+
+/**
+ * Shared steps 4-9 of both ingest paths: embed + store chunks, extract events
+ * via LLM, embed + store events, upsert entities, store relations, commit the
+ * caller-opened transaction, and emit the completed progress. The file and
+ * content pipelines were identical here modulo formatting — one body keeps
+ * them from drifting apart again (content had already diverged: it dropped
+ * the per-chunk embedding variable and the entity-embedding temp). The caller
+ * owns beginTransaction and the catch/rollback.
+ */
+async function ingestSections(
+  store: KnowledgeStore,
+  llm: LlmCaller,
+  args: {
+    source: Awaited<ReturnType<KnowledgeStore['createSource']>>;
+    document: Awaited<ReturnType<KnowledgeStore['createDocument']>>;
+    sections: ChunkSection[];
+    engine: EmbeddingEngine | undefined;
+    skipEmbed: boolean;
+  },
+  onProgress?: IngestProgressCallback,
+) {
+  const { source, document, sections, engine, skipEmbed } = args;
+  onProgress?.({
+    stage: 'embedding-chunks',
+    chunkIndex: 0,
+    totalChunks: sections.length,
+    message: `嵌入 chunks: 0/${sections.length}`,
+  });
+  const chunkEmbeddings = await embedOrNulls(
+    engine,
+    sections.map((s) => (s.heading !== null ? `${s.heading}\n${s.content}` : s.content)),
+    skipEmbed,
+  );
+
+  const chunks = [];
+  for (let i = 0; i < sections.length; i++) {
+    const section = sections[i]!;
+    const embedding = chunkEmbeddings[i] ?? null;
+    const chunk = await store.insertChunk({
+      sourceId: source.id,
+      documentId: document.id,
+      rank: section.rank,
+      heading: section.heading,
+      content: section.content,
+      rawContent: section.rawContent,
+      embedding,
+    });
+    chunks.push(chunk);
+    onProgress?.({
+      stage: 'embedding-chunks',
+      chunkIndex: i + 1,
+      totalChunks: sections.length,
+      message: `嵌入 chunks: ${i + 1}/${sections.length}`,
+    });
+  }
+
+  onProgress?.({
+    stage: 'extracting',
+    chunkIndex: 0,
+    totalChunks: sections.length,
+    message: `抽取事件: 0/${sections.length}`,
+  });
+  const extractedEvents = await mapWithConcurrency(
+    sections,
+    LLM_CONCURRENCY,
+    (section) => extractEventFromChunk(llm, section),
+    (completed, total) => {
+      onProgress?.({
+        stage: 'extracting',
+        chunkIndex: completed,
+        totalChunks: total,
+        message: `抽取事件: ${completed}/${total}`,
+      });
+    },
+  );
+
+  onProgress?.({
+    stage: 'embedding-events',
+    chunkIndex: 0,
+    totalChunks: sections.length,
+    message: `嵌入 events: 0/${sections.length}`,
+  });
+  const titleTexts = extractedEvents.map((e) => e.title);
+  const contentTexts = extractedEvents.map((e) => `${e.title}\n\n${e.content}`);
+  const [titleEmbeddings, contentEmbeddings] = await Promise.all([
+    embedOrNulls(engine, titleTexts, skipEmbed),
+    embedOrNulls(engine, contentTexts, skipEmbed),
+  ]);
+
+  const events: KnowledgeEvent[] = [];
+  for (let i = 0; i < extractedEvents.length; i++) {
+    const extracted = extractedEvents[i]!;
+    const chunk = chunks[i]!;
+    const event = await store.insertEvent({
+      sourceId: source.id,
+      documentId: document.id,
+      chunkId: chunk.id,
+      rank: i,
+      title: extracted.title,
+      summary: extracted.summary.length > 0 ? extracted.summary : null,
+      content: extracted.content,
+      category: extracted.category.length > 0 ? extracted.category : null,
+      keywords: extracted.keywords,
+      titleEmbedding: titleEmbeddings[i] ?? null,
+      contentEmbedding: contentEmbeddings[i] ?? null,
+    });
+    events.push(event);
+    onProgress?.({
+      stage: 'embedding-events',
+      chunkIndex: i + 1,
+      totalChunks: sections.length,
+      message: `嵌入 events: ${i + 1}/${sections.length}`,
+    });
+  }
+
+  onProgress?.({ stage: 'embedding-entities', message: '嵌入 entities...' });
+  const entityMap = new Map<string, { type: string; name: string; description: string }>();
+  for (const extracted of extractedEvents) {
+    for (const entity of extracted.entities) {
+      const key = `${entity.type}|${entity.name.toLowerCase()}`;
+      if (!entityMap.has(key)) {
+        entityMap.set(key, entity);
+      }
+    }
+  }
+  const uniqueEntities = Array.from(entityMap.values());
+  const entityEmbeddings =
+    uniqueEntities.length > 0
+      ? await embedOrNulls(
+          engine,
+          uniqueEntities.map((e) => e.name),
+          skipEmbed,
+        )
+      : [];
+
+  const entityIdByEntityKey = new Map<string, string>();
+  for (let i = 0; i < uniqueEntities.length; i++) {
+    const entity = uniqueEntities[i]!;
+    const embedding = entityEmbeddings[i] ?? null;
+    const stored = await store.upsertEntity({
+      sourceId: source.id,
+      type: entity.type,
+      name: entity.name,
+      description: entity.description.length > 0 ? entity.description : null,
+      embedding,
+    });
+    entityIdByEntityKey.set(`${entity.type}|${entity.name.toLowerCase()}`, stored.id);
+  }
+
+  onProgress?.({ stage: 'embedding-relations', message: '嵌入关系...' });
+  const relationPairs: Array<{
+    eventIndex: number;
+    entity: { type: string; name: string; description: string };
+  }> = [];
+  for (let i = 0; i < extractedEvents.length; i++) {
+    const extracted = extractedEvents[i]!;
+    for (const entity of extracted.entities) {
+      relationPairs.push({ eventIndex: i, entity });
+    }
+  }
+  const relationTexts = relationPairs.map(({ eventIndex, entity }) => {
+    const event = events[eventIndex]!;
+    return entity.description.length > 0
+      ? entity.description
+      : `${event.title} ${entity.name}`;
+  });
+  const relationEmbeddings =
+    relationPairs.length > 0 ? await embedOrNulls(engine, relationTexts, skipEmbed) : [];
+
+  for (let i = 0; i < relationPairs.length; i++) {
+    const pair = relationPairs[i]!;
+    const event = events[pair.eventIndex]!;
+    const entityKey = `${pair.entity.type}|${pair.entity.name.toLowerCase()}`;
+    const entityId = entityIdByEntityKey.get(entityKey);
+    if (entityId === undefined) continue;
+    const embedding = relationEmbeddings?.[i] ?? null;
+    await store.insertEventEntity({
+      eventId: event.id,
+      entityId,
+      weight: 1.0,
+      description: pair.entity.description.length > 0 ? pair.entity.description : null,
+      embedding,
+    });
+  }
+
+  await store.updateDocumentStatus(document.id, 'completed', chunks.length);
+  store.commitTransaction();
+
+  onProgress?.({
+    stage: 'completed',
+    message: `摄入完成：${chunks.length} chunks, ${events.length} events, ${uniqueEntities.length} entities`,
+  });
+  return { chunks, events, uniqueEntities };
 }
 
 /** Ingest content from a string (rather than a file path). Used for tests. */
@@ -418,118 +450,12 @@ export async function ingestContent(
       content: params.content,
     });
 
-    onProgress?.({ stage: 'embedding-chunks', chunkIndex: 0, totalChunks: sections.length, message: `嵌入 chunks: 0/${sections.length}` });
-    const chunkEmbeddings = await embedOrNulls(
-      engine,
-      sections.map((s) => (s.heading !== null ? `${s.heading}\n${s.content}` : s.content)),
-      skipEmbed,
+    const { chunks, events, uniqueEntities } = await ingestSections(
+      store,
+      llm,
+      { source, document, sections, engine, skipEmbed },
+      onProgress,
     );
-    const chunks = [];
-    for (let i = 0; i < sections.length; i++) {
-      const section = sections[i]!;
-      const chunk = await store.insertChunk({
-        sourceId: source.id,
-        documentId: document.id,
-        rank: section.rank,
-        heading: section.heading,
-        content: section.content,
-        rawContent: section.rawContent,
-        embedding: chunkEmbeddings[i] ?? null,
-      });
-      chunks.push(chunk);
-      onProgress?.({ stage: 'embedding-chunks', chunkIndex: i + 1, totalChunks: sections.length, message: `嵌入 chunks: ${i + 1}/${sections.length}` });
-    }
-
-    onProgress?.({ stage: 'extracting', chunkIndex: 0, totalChunks: sections.length, message: `抽取事件: 0/${sections.length}` });
-    const extractedEvents = await mapWithConcurrency(
-      sections,
-      LLM_CONCURRENCY,
-      (section) => extractEventFromChunk(llm, section),
-      (completed, total) => {
-        onProgress?.({ stage: 'extracting', chunkIndex: completed, totalChunks: total, message: `抽取事件: ${completed}/${total}` });
-      },
-    );
-
-    onProgress?.({ stage: 'embedding-events', chunkIndex: 0, totalChunks: sections.length, message: `嵌入 events: 0/${sections.length}` });
-    const [titleEmbeddings, contentEmbeddings] = await Promise.all([
-      embedOrNulls(engine, extractedEvents.map((e) => e.title), skipEmbed),
-      embedOrNulls(engine, extractedEvents.map((e) => `${e.title}\n\n${e.content}`), skipEmbed),
-    ]);
-    const events: KnowledgeEvent[] = [];
-    for (let i = 0; i < extractedEvents.length; i++) {
-      const extracted = extractedEvents[i]!;
-      const chunk = chunks[i]!;
-      const event = await store.insertEvent({
-        sourceId: source.id,
-        documentId: document.id,
-        chunkId: chunk.id,
-        rank: i,
-        title: extracted.title,
-        summary: extracted.summary.length > 0 ? extracted.summary : null,
-        content: extracted.content,
-        category: extracted.category.length > 0 ? extracted.category : null,
-        keywords: extracted.keywords,
-        titleEmbedding: titleEmbeddings[i] ?? null,
-        contentEmbedding: contentEmbeddings[i] ?? null,
-      });
-      events.push(event);
-      onProgress?.({ stage: 'embedding-events', chunkIndex: i + 1, totalChunks: sections.length, message: `嵌入 events: ${i + 1}/${sections.length}` });
-    }
-
-    onProgress?.({ stage: 'embedding-entities', message: '嵌入 entities...' });
-    const entityMap = new Map<string, { type: string; name: string; description: string }>();
-    for (const extracted of extractedEvents) {
-      for (const entity of extracted.entities) {
-        const key = `${entity.type}|${entity.name.toLowerCase()}`;
-        if (!entityMap.has(key)) entityMap.set(key, entity);
-      }
-    }
-    const uniqueEntities = Array.from(entityMap.values());
-    const entityEmbeddings = uniqueEntities.length > 0 ? await embedOrNulls(engine, uniqueEntities.map((e) => e.name), skipEmbed) : [];
-    const entityIdByEntityKey = new Map<string, string>();
-    for (let i = 0; i < uniqueEntities.length; i++) {
-      const entity = uniqueEntities[i]!;
-      const stored = await store.upsertEntity({
-        sourceId: source.id,
-        type: entity.type,
-        name: entity.name,
-        description: entity.description.length > 0 ? entity.description : null,
-        embedding: entityEmbeddings?.[i] ?? null,
-      });
-      entityIdByEntityKey.set(`${entity.type}|${entity.name.toLowerCase()}`, stored.id);
-    }
-
-    onProgress?.({ stage: 'embedding-relations', message: '嵌入关系...' });
-    const relationPairs: Array<{ eventIndex: number; entity: { type: string; name: string; description: string } }> = [];
-    for (let i = 0; i < extractedEvents.length; i++) {
-      for (const entity of extractedEvents[i]!.entities) {
-        relationPairs.push({ eventIndex: i, entity });
-      }
-    }
-    const relationTexts = relationPairs.map(({ eventIndex, entity }) => {
-      const event = events[eventIndex]!;
-      return entity.description.length > 0 ? entity.description : `${event.title} ${entity.name}`;
-    });
-    const relationEmbeddings = relationPairs.length > 0 ? await embedOrNulls(engine, relationTexts, skipEmbed) : [];
-    for (let i = 0; i < relationPairs.length; i++) {
-      const pair = relationPairs[i]!;
-      const event = events[pair.eventIndex]!;
-      const entityKey = `${pair.entity.type}|${pair.entity.name.toLowerCase()}`;
-      const entityId = entityIdByEntityKey.get(entityKey);
-      if (entityId === undefined) continue;
-      await store.insertEventEntity({
-        eventId: event.id,
-        entityId,
-        weight: 1.0,
-        description: pair.entity.description.length > 0 ? pair.entity.description : null,
-        embedding: relationEmbeddings?.[i] ?? null,
-      });
-    }
-
-    await store.updateDocumentStatus(document.id, 'completed', chunks.length);
-    store.commitTransaction();
-
-    onProgress?.({ stage: 'completed', message: `摄入完成：${chunks.length} chunks, ${events.length} events, ${uniqueEntities.length} entities` });
 
     return {
       documentId: document.id,
