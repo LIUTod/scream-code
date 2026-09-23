@@ -116,10 +116,14 @@ export function convertOpenAIError(error: unknown): ChatProviderError {
   if (error instanceof OpenAIConnectionError) {
     return new APIConnectionError(error.message);
   }
-  // APIError with a status code => status error
-  if (error instanceof OpenAIAPIError && typeof error.status === 'number') {
-    const reqId = error.requestID ?? null;
-    return normalizeAPIStatusError(error.status, error.message, reqId);
+  if (error instanceof OpenAIAPIError) {
+    // SSE errors arrive over HTTP 200 without an SDK status. Only recover
+    // the gateway's explicit status prefix; a real HTTP status takes priority.
+    const streamStatus = /^Streaming response failed:\s*\[([45]\d{2})\]/.exec(error.message)?.[1];
+    const status = error.status ?? (streamStatus === undefined ? undefined : Number(streamStatus));
+    if (status !== undefined) {
+      return normalizeAPIStatusError(status, error.message, error.requestID ?? null);
+    }
   }
   // Base APIError with no status and no body => transport-layer failure.
   // When the error has a body (e.g. SSE error events from the server),
