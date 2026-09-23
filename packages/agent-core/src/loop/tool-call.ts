@@ -244,24 +244,66 @@ export async function runToolCallBatch(
       // for remaining tools and settle them with synthetic abort results.
       // This avoids running preflight, resolveExecution, hooks, and
       // dispatching tool.call events for tools that will never execute.
-      if (effectiveStep.signal.aborted) {
-        await dispatchToolCall(step, call, call.args);
-        pendingResults.push(
-          Promise.resolve(makeErrorToolResult(call, call.args, abortedToolOutput(call.toolName, effectiveStep.signal))),
-        );
-        continue;
-      }
-
-      const prepared = await prepareToolCall(effectiveStep, call);
-      pendingResults.push(scheduler.add(prepared.task));
-
-      if (prepared.stopBatchAfterThis === true) {
-        stopTurn = true;
-        for (const skippedCall of calls.slice(index + 1)) {
-          const skippedTask = await prepareSkippedToolCall(step, skippedCall);
-          pendingResults.push(scheduler.add(skippedTask));
+      try {
+        if (effectiveStep.signal.aborted) {
+          await dispatchToolCall(step, call, call.args);
+          pendingResults.push(
+            Promise.resolve(makeErrorToolResult(call, call.args, abortedToolOutput(call.toolName, effectiveStep.signal))),
+          );
+          continue;
         }
-        break;
+
+        const prepared = await prepareToolCall(effectiveStep, call);
+        pendingResults.push(
+          scheduler
+            .add(prepared.task)
+            .catch((error) => makeErrorToolResult(call, call.args, errorMessage(error))),
+        );
+
+        if (prepared.stopBatchAfterThis === true) {
+          stopTurn = true;
+          for (const skippedCall of calls.slice(index + 1)) {
+            try {
+              const skippedTask = await prepareSkippedToolCall(step, skippedCall);
+              pendingResults.push(
+                scheduler
+                  .add(skippedTask)
+                  .catch((error) => makeErrorToolResult(skippedCall, skippedCall.args, errorMessage(error))),
+              );
+            } catch (error) {
+              // prepareSkippedToolCall dispatches tool.call; a wire append
+              // failure still needs its pairing below.
+              step.log?.warn('skipped tool.call dispatch failed, synthesizing error result', {
+                toolCallId: skippedCall.toolCall.id,
+                toolName: skippedCall.toolName,
+                error,
+              });
+              pendingResults.push(
+                Promise.resolve(
+                  makeErrorToolResult(skippedCall, skippedCall.args, `Tool preparation failed: ${errorMessage(error)}`),
+                ),
+              );
+            }
+          }
+          break;
+        }
+      } catch (error) {
+        // dispatchToolCall / preparation can throw once execution has started
+        // (their wire append rejects). Push a synthetic error result so this
+        // call still gets exactly one tool.result instead of stranding its
+        // row forever, and keep draining the rest of the batch — the finally
+        // block only settles spawned tasks, it never re-dispatches lost
+        // results.
+        step.log?.warn('tool call preparation failed, synthesizing error result', {
+          toolCallId: call.toolCall.id,
+          toolName: call.toolName,
+          error,
+        });
+        pendingResults.push(
+          Promise.resolve(
+            makeErrorToolResult(call, call.args, `Tool preparation failed: ${errorMessage(error)}`),
+          ),
+        );
       }
     }
 
@@ -269,14 +311,44 @@ export async function runToolCallBatch(
     // provider order. Await all tasks so each recorded `tool.call` gets a
     // paired `tool.result`; the caller checks abort before writing `step.end`.
     for (const pendingResult of pendingResults) {
-      const result = await finalizePendingToolResult(effectiveStep, await pendingResult);
+      let raw: PendingToolResult;
+      try {
+        raw = await pendingResult;
+      } catch (error) {
+        // Push sites already convert rejections into results; this is the
+        // double net. Without the call identity we cannot synthesize a
+        // pairing here, so log and keep draining the remaining results.
+        step.log?.warn('tool task rejected before producing a result', { error });
+        continue;
+      }
+      let result: PendingToolResult;
+      try {
+        result = await finalizePendingToolResult(effectiveStep, raw);
+      } catch (error) {
+        // Defensive net: finalize only normalizes/hooks the result (hook
+        // failures are caught inside it); if anything still throws here,
+        // deliver the raw result instead of stranding this pairing.
+        step.log?.warn('tool result finalize failed, dispatching raw result', { error });
+        result = raw;
+      }
       if (result.stopTurn === true) stopTurn = true;
-      await step.dispatchEvent({
-        type: 'tool.result',
-        parentUuid: result.toolCall.id,
-        toolCallId: result.toolCall.id,
-        result: result.result,
-      });
+      try {
+        await step.dispatchEvent({
+          type: 'tool.result',
+          parentUuid: result.toolCall.id,
+          toolCallId: result.toolCall.id,
+          result: result.result,
+        });
+      } catch (error) {
+        // A wire append failure must not abort the remaining pairings: the
+        // finally block only settles spawned tasks — it never re-dispatches
+        // lost results. Warn and keep the loop draining so every later call
+        // still reaches its pair and the turn itself survives.
+        step.log?.warn('tool.result dispatch failed', {
+          toolCallId: result.toolCall.id,
+          error,
+        });
+      }
     }
   } finally {
     if (steerPoll !== undefined) clearInterval(steerPoll);

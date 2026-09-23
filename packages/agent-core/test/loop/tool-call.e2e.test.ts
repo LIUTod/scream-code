@@ -714,6 +714,112 @@ describe('runTurn — tool-call behaviour', () => {
     expect(results[1]?.result.isError).toBe(true);
     expect(expectTextOutput(results[1]?.result.output)).toContain('aborted');
   });
+
+  it('keeps later pairings alive when one tool.result wire append fails', async () => {
+    const { sink } = await runTurn({
+      tools: [new EchoTool()],
+      contextOptions: {
+        appendError: (record) =>
+          record.type === 'tool.result' && record.toolCallId === 'tc-1' ? new Error('disk full') : undefined,
+      },
+      responses: [
+        makeToolUseResponse([
+          makeToolCall('echo', { text: 'first' }, 'tc-1'),
+          makeToolCall('echo', { text: 'second' }, 'tc-2'),
+        ]),
+        makeEndTurnResponse('done'),
+      ],
+    });
+
+    // tc-1's append rejected, so its live event never reached the sink
+    // (record runs before emit). The invariant under test is anti-cascade:
+    // the failure must not strand tc-2's pairing or kill the turn.
+    const resultIds = sink.byType('tool.result').map((e) => e.toolCallId);
+    expect(resultIds).toEqual(['tc-2']);
+    // The turn still reached its final model response (runTurn resolved).
+    expect(sink.byType('tool.call').map((e) => e.toolCallId)).toEqual(['tc-1', 'tc-2']);
+  });
+
+  it('synthesizes a pairing when tool.call dispatch throws mid-batch', async () => {
+    const { sink } = await runTurn({
+      tools: [new EchoTool()],
+      contextOptions: {
+        appendError: (record) =>
+          record.type === 'tool.call' && record.toolCallId === 'tc-1' ? new Error('disk full') : undefined,
+      },
+      responses: [
+        makeToolUseResponse([
+          makeToolCall('echo', { text: 'first' }, 'tc-1'),
+          makeToolCall('echo', { text: 'second' }, 'tc-2'),
+        ]),
+        makeEndTurnResponse('done'),
+      ],
+    });
+
+    // tc-1's tool.call append rejected (its live start never reached the
+    // sink), but the pairing contract still holds: preparation failure
+    // synthesizes exactly one tool.result for it, and tc-2 runs untouched.
+    const resultIds = sink.byType('tool.result').map((e) => e.toolCallId);
+    expect(resultIds).toEqual(['tc-1', 'tc-2']);
+    const first = sink.byType('tool.result')[0];
+    expect(first?.result.isError).toBe(true);
+    expect(expectTextOutput(first?.result.output)).toContain('Tool preparation failed');
+    expect(sink.byType('tool.call').map((e) => e.toolCallId)).toEqual(['tc-2']);
+  });
+
+  it('settles a call whose abort-path tool.call dispatch fails', async () => {
+    const controller = new AbortController();
+    let hookGateResolve: (() => void) | undefined;
+    const hookGate = new Promise<void>((resolve) => {
+      hookGateResolve = resolve;
+    });
+    let hookStartedResolve: (() => void) | undefined;
+    const hookStarted = new Promise<void>((resolve) => {
+      hookStartedResolve = resolve;
+    });
+
+    const turnPromise = runTurn({
+      tools: [new EchoTool()],
+      signal: controller.signal,
+      contextOptions: {
+        appendError: (record) =>
+          record.type === 'tool.call' && record.toolCallId === 'tc-2' ? new Error('disk full') : undefined,
+      },
+      hooks: {
+        prepareToolExecution: async () => {
+          hookStartedResolve?.();
+          await hookGate;
+          return undefined;
+        },
+      },
+      responses: [
+        makeToolUseResponse([
+          makeToolCall('echo', { text: 'first' }, 'tc-1'),
+          makeToolCall('echo', { text: 'second' }, 'tc-2'),
+        ]),
+        makeEndTurnResponse('done'),
+      ],
+    });
+
+    // Gate tc-1's preparation, abort mid-batch, then release: tc-2 enters the
+    // abort path, whose tool.call dispatch is NOT wrapped by prepareToolCall —
+    // the batch-level guard is the only thing standing between a failed wire
+    // append and an orphaned pairing.
+    await hookStarted;
+    controller.abort();
+    hookGateResolve?.();
+
+    const { sink } = await turnPromise;
+
+    const resultIds = sink.byType('tool.result').map((e) => e.toolCallId);
+    expect(resultIds).toEqual(['tc-1', 'tc-2']);
+    const tc2 = sink.byType('tool.result').find((e) => e.toolCallId === 'tc-2');
+    expect(tc2?.result.isError).toBe(true);
+    expect(expectTextOutput(tc2?.result.output)).toContain('Tool preparation failed');
+    // tc-2's own tool.call never reached the live sink (append rejected
+    // before emit) — the pairing is what must survive.
+    expect(sink.byType('tool.call').map((e) => e.toolCallId)).toEqual(['tc-1']);
+  });
 });
 
 interface PathLockedInput {

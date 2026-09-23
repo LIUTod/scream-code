@@ -19,6 +19,11 @@ export type AppendCall =
 
 export interface RecordingContextOptions {
   readonly messages?: Message[] | undefined;
+  /**
+   * Wire-failure injection: return an error to throw INSTEAD of recording the
+   * matching record (appendTranscriptRecord rejects, live emit never runs).
+   */
+  readonly appendError?: ((record: LoopRecordedEvent) => Error | undefined) | undefined;
 }
 
 /**
@@ -30,9 +35,11 @@ export class RecordingContext {
   readonly buildMessagesCalls: number[] = [];
 
   private _messages: Message[];
+  private readonly opts: RecordingContextOptions;
 
   constructor(opts: RecordingContextOptions = {}) {
     this._messages = opts.messages ?? [];
+    this.opts = opts;
   }
 
   readonly buildMessages: LoopMessageBuilder = () => {
@@ -45,6 +52,8 @@ export class RecordingContext {
   }
 
   readonly appendTranscriptRecord = async (record: LoopRecordedEvent): Promise<void> => {
+    const injected = this.opts.appendError?.(record);
+    if (injected !== undefined) throw injected;
     switch (record.type) {
       case 'step.begin': {
         this.calls.push({ kind: 'appendStepBegin', input: record });
