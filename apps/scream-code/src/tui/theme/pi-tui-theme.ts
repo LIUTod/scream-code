@@ -6,7 +6,7 @@
  */
 
 import type { MarkdownTheme, EditorTheme } from '@liutod-scream/pi-tui';
-import { visibleWidth, truncateToWidth } from '@liutod-scream/pi-tui';
+import { visibleWidth, wrapTextWithAnsi } from '@liutod-scream/pi-tui';
 import chalk from 'chalk';
 import { highlight, supportsLanguage, type Theme } from 'cli-highlight';
 
@@ -103,18 +103,23 @@ export function createMarkdownTheme(colors: ColorPalette): MarkdownTheme {
     codeBlockBorder: () => null,
     codeBlockIndent: ' ',
     codeBlockLine: (line, { index, lang, width }) => {
-      // Clamp first: a line wider than the panel would be wrapped by the library,
-      // and the wrapped remainder loses the panel gutter and background fill.
-      const content =
-        visibleWidth(line) > width - 1 ? truncateToWidth(line, Math.max(1, width - 1), '…') : line;
-      const contentCells = visibleWidth(content);
+      // The library wraps whatever this hook returns, and a continuation row
+      // would lose the gutter/background — so the panel must stay one visual
+      // row per returned line. Overlong source lines are wrapped HERE into
+      // full panel rows joined by "\n": the outer wrap pass splits on the
+      // newline and each row already fits, so nothing is truncated and every
+      // folded row keeps the panel chrome.
+      const gutter = 1;
       const rawLabel = index === 0 && lang !== undefined && lang.length > 0 ? ` ${lang}` : '';
       const labelCells = visibleWidth(rawLabel);
-      // Only show the label when it leaves at least one cell of trailing padding,
-      // otherwise the row would exceed the panel width and wrap.
-      const showLabel = labelCells > 0 && 1 + contentCells + labelCells + 1 <= width;
-      const filler = showLabel ? Math.max(0, width - contentCells - labelCells - 2) : 0;
-      const padCells = showLabel ? 1 : Math.max(0, width - contentCells - 1);
+      // Label only stays when it leaves the gutter, one content cell, and a
+      // trailing cell — otherwise drop it and give the whole row to code.
+      const labelFits = labelCells > 0 && 1 + 1 + labelCells + 1 <= width;
+      const activeLabelCells = labelFits ? labelCells : 0;
+      // First source line with a visible label reserves its columns on every
+      // folded row of that line so row 0 always has room for the label.
+      const contentMax = Math.max(1, width - gutter - (activeLabelCells > 0 ? activeLabelCells + 1 : 0));
+      const rows = wrapTextWithAnsi(line, contentMax);
       // `/codebg` off drops the fill but keeps the row layout, so the gutter and
       // the right-aligned label stay where they are.
       const panelled = isCodeBlockPanelEnabled();
@@ -122,8 +127,16 @@ export function createMarkdownTheme(colors: ColorPalette): MarkdownTheme {
       const labelPaint = panelled
         ? chalk.bgHex(colors.mdCodeBlockBg).hex(colors.mdCodeBlock)
         : chalk.hex(colors.mdCodeBlock);
-      const label = showLabel ? chalk.italic(labelPaint(rawLabel)) : '';
-      return `${paint(' ')}${paint(content)}${paint(' '.repeat(filler))}${label}${paint(' '.repeat(padCells))}`;
+      return rows
+        .map((row, rowIndex) => {
+          const contentCells = visibleWidth(row);
+          const showLabel = rowIndex === 0 && labelFits;
+          const filler = showLabel ? Math.max(0, width - contentCells - activeLabelCells - 2) : 0;
+          const padCells = showLabel ? 1 : Math.max(0, width - contentCells - 1);
+          const label = showLabel ? chalk.italic(labelPaint(rawLabel)) : '';
+          return `${paint(' ')}${paint(row)}${paint(' '.repeat(filler))}${label}${paint(' '.repeat(padCells))}`;
+        })
+        .join('\n');
     },
     quote: (text) => chalk.hex(colors.mdQuote)(text),
     quoteBorder: (text) => chalk.hex(colors.mdQuote)(text),

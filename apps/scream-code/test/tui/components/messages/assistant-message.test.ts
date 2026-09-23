@@ -262,20 +262,54 @@ describe('fenced code panel', () => {
     expect(visibleWidth(codeRow)).toBeGreaterThanOrEqual(50);
   });
 
-  it('keeps the panel inside the viewport when the label cannot fit', () => {
+  it('keeps every panel row inside the viewport when the label cannot fit', () => {
     const theme = createMarkdownTheme(darkColors);
     const line =
       theme.codeBlockLine?.('const a = 1;', { index: 0, total: 1, lang: 'typescript', width: 8 }) ?? '';
+    const rows = line.split('\n');
 
-    expect(visibleWidth(line)).toBeLessThanOrEqual(8);
+    for (const row of rows) {
+      expect(visibleWidth(row)).toBeLessThanOrEqual(8);
+    }
     expect(strip(line)).not.toContain('typescript');
+    // Content survives the fold instead of being clipped away.
+    expect(strip(line).replaceAll(/\s/g, '')).toBe('consta=1;');
   });
 
-  it('clamps an overlong code line instead of letting it wrap', () => {
+  it('folds an overlong code line into full panel rows without truncating', () => {
     const theme = createMarkdownTheme(darkColors);
     const line = theme.codeBlockLine?.('x'.repeat(200), { index: 1, total: 2, width: 40 }) ?? '';
+    const rows = line.split('\n');
 
-    expect(visibleWidth(line)).toBe(40);
+    expect(rows.length).toBeGreaterThan(1);
+    for (const row of rows) {
+      expect(visibleWidth(row)).toBe(40);
+      expect(strip(row)).not.toContain('…');
+    }
+    expect(strip(line).replaceAll(/\s/g, '')).toBe('x'.repeat(200));
+  });
+
+  it('shows the full long line in the transcript with no ellipsis', () => {
+    const comment = '/** Skip ALL LLM calls during retrieval (entity extraction + rerank). Implies skipRerank. */';
+    const component = new AssistantMessageComponent(createMarkdownTheme(darkColors), darkColors);
+    component.updateContent(['```ts', comment, 'skipLlm?: boolean;', '```'].join('\n'));
+
+    const lines = component.render(60).map(strip);
+
+    expect(lines.some((line) => line.includes('…'))).toBe(false);
+    for (const line of lines) {
+      expect(visibleWidth(line)).toBeLessThanOrEqual(60);
+    }
+    // Folded rows join back to the full source. Drop the bullet and the
+    // right-aligned "ts" chip glued on by the whitespace-only normalize —
+    // the chip is chrome, not source text.
+    const normalized = lines
+      .join('')
+      .replaceAll(/\s/g, '')
+      .replace('■', '')
+      .replace('ts', '');
+    expect(normalized).toContain(comment.replaceAll(/\s/g, ''));
+    expect(normalized).toContain('skipLlm?:boolean;');
   });
 
   it('drops the panel fill when /codebg turns it off, keeping the row layout', () => {
