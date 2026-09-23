@@ -274,7 +274,13 @@ export class EditorKeyboardController {
     if (media === null) return;
     const meta = parseImageMeta(media.bytes);
     if (meta === null) return;
-    const attachment = this.imageStore.addImage(media.bytes, meta.mime, meta.width, meta.height);
+    const attachment = this.imageStore.addImage(
+      media.bytes,
+      meta.mime,
+      meta.width,
+      meta.height,
+      path,
+    );
     this.host.state.editor.insertTextAtCursor?.(`${attachment.placeholder} `);
     this.host.state.ui.requestRender();
   }

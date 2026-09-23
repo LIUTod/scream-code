@@ -15,12 +15,18 @@
  *     noise between two media parts.
  */
 
+import { randomUUID } from 'node:crypto';
+import { writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import type { PromptPart } from '@scream-code/scream-code-sdk';
 
-import type {
-  ImageAttachment,
-  ImageAttachmentStore,
-  VideoAttachment,
+import {
+  TEMP_ATTACHMENT_PREFIX,
+  type ImageAttachment,
+  type ImageAttachmentStore,
+  type VideoAttachment,
 } from './image-attachment-store';
 
 const PLACEHOLDER_REGEX = /\[(image|video) #(\d+) (?:(\(\d+×\d+\))|([^\]]+))\]/g;
@@ -39,10 +45,22 @@ export interface ExtractionResult {
   videoAttachmentIds: number[];
 }
 
+export interface ExtractMediaOptions {
+  /**
+   * How image attachments are delivered:
+   * - `inline` (default): `image_url` data parts for vision models.
+   * - `path`: `<image path="…">` tags so text-only models can still
+   *   operate on the file (batch pack/move) without multimodal input.
+   */
+  imageMode?: 'inline' | 'path';
+}
+
 export function extractMediaAttachments(
   text: string,
   store: ImageAttachmentStore,
+  options: ExtractMediaOptions = {},
 ): ExtractionResult {
+  const imageMode = options.imageMode ?? 'inline';
   const parts: PromptPart[] = [];
   const imageAttachmentIds: number[] = [];
   const videoAttachmentIds: number[] = [];
@@ -65,6 +83,14 @@ export function extractMediaAttachments(
       const mediaText = tagTextForVideo(attachment);
       pushText(parts, mediaText);
       videoAttachmentIds.push(id);
+    } else if (imageMode === 'path') {
+      try {
+        pushText(parts, formatMediaTag('image', ensureImagePath(attachment)));
+      } catch {
+        // Disk write failed — fall back to inline bytes so the send still works.
+        parts.push(imagePartForAttachment(attachment));
+      }
+      imageAttachmentIds.push(id);
     } else {
       parts.push(imagePartForAttachment(attachment));
       imageAttachmentIds.push(id);
@@ -107,6 +133,19 @@ function imagePartForAttachment(att: ImageAttachment): PromptPart {
     type: 'image_url',
     imageUrl: { url: `data:${att.mime};base64,${base64}` },
   };
+}
+
+/** Persist bytes to a temp file when path delivery needs a disk path. */
+function ensureImagePath(att: ImageAttachment): string {
+  if (att.sourcePath !== undefined && att.sourcePath.length > 0) return att.sourcePath;
+  const ext =
+    att.mime === 'image/jpeg'
+      ? 'jpg'
+      : (att.mime.split('/')[1]?.replace('+xml', '').replace('+json', '') ?? 'png');
+  const path = join(tmpdir(), `${TEMP_ATTACHMENT_PREFIX}${randomUUID()}.${ext}`);
+  writeFileSync(path, att.bytes); // may throw — callers fall back to inline delivery
+  att.sourcePath = path;
+  return path;
 }
 
 function tagTextForVideo(att: VideoAttachment): string {

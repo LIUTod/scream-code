@@ -206,6 +206,49 @@ describe('CustomEditor paste marker expansion', () => {
     editor.handleInput('x');
     expect(editor.getText()).toContain('x');
   });
+
+  it('treats a complete empty bracketed paste as an image paste', () => {
+    const editor = makeEditor();
+    const onPasteImage = vi.fn(async () => true);
+    editor.onPasteImage = onPasteImage;
+
+    editor.handleInput(`${PASTE_START}${PASTE_END}`);
+
+    expect(onPasteImage).toHaveBeenCalledTimes(1);
+    expect(editor.getText()).toBe('');
+  });
+
+  it('does not treat whitespace-only bracketed paste as an image paste', () => {
+    const editor = makeEditor();
+    const onPasteImage = vi.fn(async () => true);
+    editor.onPasteImage = onPasteImage;
+
+    editor.handleInput(`${PASTE_START} \n ${PASTE_END}`);
+
+    expect(onPasteImage).not.toHaveBeenCalled();
+  });
+
+  it('does not fire image paste for incomplete bracketed paste', () => {
+    const editor = makeEditor();
+    const onPasteImage = vi.fn(async () => true);
+    editor.onPasteImage = onPasteImage;
+
+    editor.handleInput(PASTE_START);
+
+    expect(onPasteImage).not.toHaveBeenCalled();
+    // Incomplete paste must not leak the start marker into the buffer.
+    expect(editor.getText()).not.toContain(PASTE_START);
+  });
+
+  it('does not fire image paste when markers do not span the whole input', () => {
+    const editor = makeEditor();
+    const onPasteImage = vi.fn(async () => true);
+    editor.onPasteImage = onPasteImage;
+
+    editor.handleInput(`pre${PASTE_START}${PASTE_END}`);
+
+    expect(onPasteImage).not.toHaveBeenCalled();
+  });
 });
 
 

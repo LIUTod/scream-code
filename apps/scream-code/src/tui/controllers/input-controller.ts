@@ -188,7 +188,10 @@ export class InputController {
   }
 
   private dispatchUserInput(text: string, session: Session): void {
-    const extraction = extractMediaAttachments(text, this.host.imageStore);
+    const canInlineImages = this.supportsCurrentModelCapability('image_in');
+    const extraction = extractMediaAttachments(text, this.host.imageStore, {
+      imageMode: canInlineImages ? 'inline' : 'path',
+    });
     if (!this.validateMediaCapabilities(extraction)) {
       return;
     }
@@ -430,13 +433,8 @@ export class InputController {
     extraction: ReturnType<typeof extractMediaAttachments>,
   ): boolean {
     if (!extraction.hasMedia) return true;
-    if (
-      extraction.imageAttachmentIds.length > 0 &&
-      !this.supportsCurrentModelCapability('image_in')
-    ) {
-      this.host.showError(t('error.image_not_supported'));
-      return false;
-    }
+    // No image_in pre-send gate: text-only models still receive path tags
+    // so they can batch-process image files (pack/move) without vision.
     if (
       extraction.videoAttachmentIds.length > 0 &&
       !this.supportsCurrentModelCapability('video_in')

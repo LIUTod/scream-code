@@ -101,4 +101,32 @@ describe('extractMediaAttachments', () => {
     expect(r.videoAttachmentIds).toEqual([1]);
     expect(r.parts).toEqual([{ type: 'text', text: '<video path="/tmp/sample.mp4"></video>' }]);
   });
+
+  it('expands image placeholders to path tags when imageMode is path', () => {
+    const store = new ImageAttachmentStore();
+    store.addImage(new Uint8Array([1, 2, 3]), 'image/png', 1, 1, '/tmp/mock.png');
+    const r = extractMediaAttachments('Pack [image #1 (1×1)] please', store, {
+      imageMode: 'path',
+    });
+
+    expect(r.hasMedia).toBe(true);
+    expect(r.imageAttachmentIds).toEqual([1]);
+    // pushText coalesces adjacent text into a single part.
+    expect(r.parts).toEqual([
+      { type: 'text', text: 'Pack <image path="/tmp/mock.png"></image> please' },
+    ]);
+  });
+
+  it('materializes a temp file for path mode when sourcePath is missing', () => {
+    const store = new ImageAttachmentStore();
+    const att = store.addImage(new Uint8Array([9, 9, 9]), 'image/png', 2, 2);
+    const r = extractMediaAttachments(att.placeholder, store, { imageMode: 'path' });
+
+    expect(r.hasMedia).toBe(true);
+    const tag = r.parts
+      .map((part) => (part.type === 'text' ? part.text : ''))
+      .join('');
+    expect(tag).toMatch(/<image path=".+\.png">/);
+    expect(att.sourcePath).toBeTruthy();
+  });
 });

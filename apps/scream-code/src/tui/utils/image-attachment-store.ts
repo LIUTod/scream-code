@@ -14,6 +14,9 @@
  * attachments across sessions — coding-agent doesn't either, and
  * `--resume` wouldn't know how to materialize the files anyway.
  */
+import { unlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 export interface ImageAttachment {
   readonly id: number;
@@ -24,6 +27,12 @@ export interface ImageAttachment {
   readonly height: number;
   /** Rendered placeholder string, e.g. `[image #1 (640×480)]`. */
   readonly placeholder: string;
+  /**
+   * On-disk path when known (file paste) or materialized for non-vision
+   * delivery. Used for `<image path="…">` tags so text-only models can
+   * still operate on the file (zip/move) without multimodal input.
+   */
+  sourcePath?: string;
 }
 
 export interface VideoAttachment {
@@ -39,11 +48,20 @@ export interface VideoAttachment {
 
 export type MediaAttachment = ImageAttachment | VideoAttachment;
 
+/** Temp-file basename prefix used by path-mode image materialization. */
+export const TEMP_ATTACHMENT_PREFIX = 'scream-attachment-';
+
 export class ImageAttachmentStore {
   private nextId = 1;
   private readonly byId = new Map<number, MediaAttachment>();
 
-  addImage(bytes: Uint8Array, mime: string, width: number, height: number): ImageAttachment {
+  addImage(
+    bytes: Uint8Array,
+    mime: string,
+    width: number,
+    height: number,
+    sourcePath?: string,
+  ): ImageAttachment {
     const id = this.nextId;
     this.nextId += 1;
     const attachment: ImageAttachment = {
@@ -54,6 +72,7 @@ export class ImageAttachmentStore {
       width,
       height,
       placeholder: formatPlaceholder(id, width, height),
+      ...(sourcePath !== undefined && sourcePath.length > 0 ? { sourcePath } : {}),
     };
     this.byId.set(id, attachment);
     return attachment;
@@ -84,6 +103,18 @@ export class ImageAttachmentStore {
   }
 
   clear(): void {
+    const tempBase = join(tmpdir(), TEMP_ATTACHMENT_PREFIX);
+    for (const attachment of this.byId.values()) {
+      if (attachment.kind !== 'image') continue;
+      const path = attachment.sourcePath;
+      if (path !== undefined && path.startsWith(tempBase)) {
+        try {
+          unlinkSync(path);
+        } catch {
+          // best-effort cleanup — session teardown must not fail
+        }
+      }
+    }
     this.byId.clear();
     this.nextId = 1;
   }

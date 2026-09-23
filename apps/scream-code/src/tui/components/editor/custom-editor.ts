@@ -89,6 +89,22 @@ function extractBracketedImagePastePaths(data: string): string[] | undefined {
   return paths;
 }
 
+/**
+ * True only when bracketed-paste markers span the entire input and the
+ * body is strictly empty — Cmd+V with an image-only clipboard (macOS
+ * wraps nothing). Whitespace-only pastes and coalesced keystrokes around
+ * the marker pair are not image pastes.
+ */
+function isCompleteEmptyBracketedPaste(data: string): boolean {
+  if (!data.includes(BRACKET_PASTE_START)) return false;
+  const startIndex = data.indexOf(BRACKET_PASTE_START);
+  const endIndex = data.indexOf(BRACKET_PASTE_END, startIndex + BRACKET_PASTE_START.length);
+  if (endIndex === -1) return false;
+  if (startIndex !== 0 || endIndex + BRACKET_PASTE_END.length !== data.length) return false;
+  const body = data.slice(startIndex + BRACKET_PASTE_START.length, endIndex);
+  return body.length === 0;
+}
+
 // Kitty keyboard protocol CSI-u sequence: ESC [ keycode ; modifier[:eventType] u.
 // We intentionally match only the simple two-field form — enough to rewrite
 // `ctrl+<LETTER>` with caps_lock into `ctrl+<letter>` without caps_lock.
@@ -371,6 +387,19 @@ export class CustomEditor extends Editor {
       if (!normalized.includes(BRACKET_PASTE_END)) {
         this.consumingPaste = true;
       }
+      return;
+    }
+
+    // Empty bracketed paste (e.g. Cmd+V with an image-only clipboard on
+    // macOS): markers must span the entire input and the body must be
+    // strictly empty — whitespace-only pastes are legitimate text. A
+    // failed image read is a no-op (nothing to insert).
+    if (
+      this.onPasteImage !== undefined &&
+      isCompleteEmptyBracketedPaste(normalized)
+    ) {
+      const handler = this.onPasteImage;
+      void handler();
       return;
     }
 

@@ -280,16 +280,29 @@ describe('InputController.sendNormalUserInput + media capabilities', () => {
     ]);
   });
 
-  it('blocks image media when the model lacks image_in', () => {
+  it('sends image path tags when the model lacks image_in', () => {
     const session = makeMockSession();
     const { controller, host, extras } = makeController({ session });
-    const attachment = extras.imageStore.addImage(new Uint8Array([1, 2]), 'image/png', 640, 480);
+    const attachment = extras.imageStore.addImage(
+      new Uint8Array([1, 2]),
+      'image/png',
+      640,
+      480,
+      '/tmp/mock.png',
+    );
     (host.state.appState as unknown as Record<string, unknown>)['availableModels'] = {
       'gpt-test': { capabilities: ['text'] },
     };
     void controller.sendNormalUserInput(`look ${attachment.placeholder}`);
-    expect(host.showError).toHaveBeenCalledWith(t('error.image_not_supported'));
-    expect(session.prompt).not.toHaveBeenCalled();
+    // No pre-send image_in gate: text-only models receive path tags for
+    // batch file work instead of being blocked.
+    expect(host.showError).not.toHaveBeenCalledWith(t('error.image_not_supported'));
+    expect(session.prompt).toHaveBeenCalledTimes(1);
+    const arg = vi.mocked(session.prompt).mock.calls[0]![0];
+    expect(Array.isArray(arg)).toBe(true);
+    const textPart = (arg as Array<{ type: string; text?: string }>).find((p) => p.type === 'text');
+    expect(textPart?.text).toContain('<image path=');
+    expect(textPart?.text).toContain('/tmp/mock.png');
   });
 
   it('blocks video media when the model lacks video_in', () => {
@@ -314,6 +327,35 @@ describe('InputController.sendNormalUserInput + media capabilities', () => {
     expect(Array.isArray(arg)).toBe(true); // extraction.parts, not the raw string
     const entry = vi.mocked(extras.appendTranscriptEntry).mock.calls[0]![0] as TranscriptEntry;
     expect(entry.imageAttachmentIds).toEqual([attachment.id]);
+    // Default-open (undefined caps) delivers inline vision parts, not path tags.
+    const imagePart = (arg as Array<{ type: string }>).find((p) => p.type === 'image_url');
+    expect(imagePart).toBeDefined();
+  });
+
+  it('inlines image_url parts when the model has image_in', () => {
+    const session = makeMockSession();
+    const { controller, host, extras } = makeController({ session });
+    const attachment = extras.imageStore.addImage(
+      new Uint8Array([1, 2, 3, 4]),
+      'image/png',
+      640,
+      480,
+      '/tmp/mock.png',
+    );
+    (host.state.appState as unknown as Record<string, unknown>)['availableModels'] = {
+      'gpt-test': { capabilities: ['image_in'] },
+    };
+    void controller.sendNormalUserInput(`see ${attachment.placeholder}`);
+    expect(session.prompt).toHaveBeenCalledTimes(1);
+    const arg = vi.mocked(session.prompt).mock.calls[0]![0];
+    expect(Array.isArray(arg)).toBe(true);
+    const imagePart = (arg as Array<{ type: string }>).find((p) => p.type === 'image_url');
+    expect(imagePart).toBeDefined();
+    const textOnly = (arg as Array<{ type: string; text?: string }>).every(
+      (p) => p.type !== 'text' || !String(p.text ?? '').includes('<image path='),
+    );
+    expect(textOnly).toBe(true);
+    expect(host.showError).not.toHaveBeenCalledWith(t('error.image_not_supported'));
   });
 
   it('sendQueuedMessage re-points the interactive agent before sending', () => {
