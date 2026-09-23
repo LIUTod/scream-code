@@ -382,6 +382,11 @@ export class StreamingUIController {
     const matchedCall = this._activeToolCalls.get(toolCallId);
     if (matchedCall !== undefined) {
       this.onToolCallEnd(toolCallId, result);
+    } else if (this._pendingToolComponents.has(toolCallId)) {
+      // The tracking entry can already be gone (a turn/step reset raced the
+      // result), but a component still awaiting its result must be settled —
+      // otherwise its row stays on the spinner for the block's lifetime.
+      this.onToolCallEnd(toolCallId, result);
     }
     this._activeToolCalls.delete(toolCallId);
     this._streamingToolCallArguments.delete(toolCallId);

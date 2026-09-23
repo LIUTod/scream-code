@@ -258,22 +258,44 @@ describe('activity block wiring', () => {
     expect(rendered).toContain('second step reasoning');
   });
 
-  it('repaints a settled block when a late result lands', () => {
+  it('settles the tool row with the block when no result event ever lands', () => {
     const { state, controller } = createFixture();
     controller.setTurnId('turn-1');
     controller.onToolCallStart(makeToolCall('t1', 'Bash'));
     controller.endActivityGroup();
 
     const group = findGroup(state.transcriptContainer);
-    // Render at the final width first: a later render at the SAME width only
-    // shows the result if the late result actually triggered a repaint.
-    expect(group?.render(80).join('\n')).not.toContain('✓');
+    // The header claims completion, so the row must settle with the block even
+    // though no result event was ever delivered (the reset-raced-the-result
+    // case that used to leave the glyph spinning forever).
+    const settled = group?.render(80).join('\n') ?? '';
+    expect(settled).toContain('✓');
 
-    controller.onToolCallEnd('t1', { tool_call_id: 't1', output: 'done', is_error: false });
+    // A late real result still lands and overwrites the block-level settle.
+    controller.onToolCallEnd('t1', { tool_call_id: 't1', output: 'boom', is_error: true });
+    const overwritten = group?.render(80).join('\n') ?? '';
+    expect(overwritten).toContain('✗');
+    expect(overwritten).not.toContain('✓');
+    expect(overwritten).not.toContain('工具执行中');
+  });
 
+  it('settles a result whose tracking entry was reset before it landed', () => {
+    const { state, controller } = createFixture();
+    // Keep the block LIVE (running=true) so the settled-render layer cannot
+    // satisfy this test — only completeToolResult's else-if branch can write
+    // the result and flip the row to ✓.
+    state.appState.streamingPhase = 'thinking';
+    controller.setTurnId('turn-1');
+    controller.onToolCallStart(makeToolCall('t1', 'Bash'));
+    // Turn/step resets clear the tracking map but leave the mounted component.
+    controller.removeActiveToolCall('t1');
+
+    controller.completeToolResult('t1', { tool_call_id: 't1', output: 'done', is_error: false });
+
+    const group = findGroup(state.transcriptContainer);
     const rendered = group?.render(80).join('\n') ?? '';
     expect(rendered).toContain('✓');
-    expect(rendered).not.toContain('工具执行中');
+    expect(rendered).not.toContain(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/);
   });
 
   it('spins only while the turn is live, not for replayed history', () => {

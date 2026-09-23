@@ -606,7 +606,7 @@ export class ActivityGroupComponent extends Container {
     shown.forEach((segment, index) => {
       const isLast = index === shown.length - 1;
       if (segment.kind === 'tool') {
-        const row = this.toolRow(segment.tc, width, ACTIVITY_GROUP_TOOL_PREVIEW_LINES);
+        const row = this.toolRow(segment.tc, width, ACTIVITY_GROUP_TOOL_PREVIEW_LINES, !this.running);
         this.bodyContainer.addChild(
           new Text(
             `${isLast ? BRANCH_LAST : BRANCH_FIRST}${this.statusGlyph(row)} ${row.header}`,
@@ -661,7 +661,7 @@ export class ActivityGroupComponent extends Container {
   /** Renders one step of the timeline: its branch row plus its own body rows. */
   private segmentRows(segment: BlockSegment, width: number, isLast: boolean): SegmentRows {
     if (segment.kind === 'tool') {
-      const row = this.toolRow(segment.tc, width, getActivityLines().expandedTool);
+      const row = this.toolRow(segment.tc, width, getActivityLines().expandedTool, !this.running);
       const components: Component[] = [
         new Text(`${isLast ? BRANCH_LAST : BRANCH_FIRST}${this.statusGlyph(row)} ${row.header}`, 0, 0),
       ];
@@ -798,7 +798,7 @@ export class ActivityGroupComponent extends Container {
    * result preview. The card's own status marker is captured (not just dropped)
    * so the row can mirror running / failed / aborted states.
    */
-  private toolRow(tc: ToolCallComponent, width: number, maxLines: number): ToolRow {
+  private toolRow(tc: ToolCallComponent, width: number, maxLines: number, settled = false): ToolRow {
     const inner = Math.max(1, width - BRANCH_WIDTH - STATUS_WIDTH);
     const rendered = tc.render(inner);
     const rawHeader = rendered[1] ?? '';
@@ -820,7 +820,12 @@ export class ActivityGroupComponent extends Container {
         Math.max(1, width - BRANCH_WIDTH - STATUS_WIDTH),
       ),
       body,
-      done: result !== undefined,
+      // A settled block's header already claims the work finished, so a row
+      // still missing its result event (a reset raced the result, or the event
+      // was lost) must settle with the block instead of spinning forever.
+      // Live blocks keep the honest running state for parallel batches; a late
+      // real result still lands via onToolCallEnd and overwrites success/✗.
+      done: result !== undefined || settled,
       failed: result?.is_error === true || cardMarkerChar(rawHeader) === '✗',
       aborted: cardMarkerChar(rawHeader) === '⊙',
     };
