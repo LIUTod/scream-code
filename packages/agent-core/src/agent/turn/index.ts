@@ -82,6 +82,7 @@ export class TurnFlow {
   private readonly currentStepByTurn = new Map<number, number>();
   private currentStep = 0;
   private todoSeenThisTurn = false;
+  private todoReconcileInjected = false;
   private convergenceInjections = 0;
   private currentStepHadContent = false;
   private lastToolFailure: { toolName: string; isExploratory: boolean } | null = null;
@@ -99,7 +100,32 @@ export class TurnFlow {
       input,
       origin,
     });
+    // Resume window: finishResume() will clear steerBuffer, so buffering here
+    // would silently drop the message. Emit agent_busy so TUI can recover.
+    if (this.activeTurn === 'resuming') {
+      this.emitAgentBusy();
+      return null;
+    }
+    // A second prompt while a real turn is active (TUI queue drain racing a
+    // background steer launch) must join this turn as a steer — never
+    // agent_busy. Same as default steer: inject at next step boundary /
+    // after approval without aborting a pending tool approval.
+    if (this.activeTurn) {
+      this.steerBuffer.push({ input, origin });
+      return null;
+    }
     return this.launch(input, origin);
+  }
+
+  private emitAgentBusy(): void {
+    this.agent.emitEvent({
+      type: 'error',
+      ...makeErrorPayload(
+        'turn.agent_busy',
+        `Cannot launch a new turn while another turn (ID ${this.turnId}) is active`,
+        { details: { turnId: this.turnId } },
+      ),
+    });
   }
 
   // Returns the new turnId, or null if the input was buffered as a steer
@@ -123,14 +149,7 @@ export class TurnFlow {
 
   private launch(input: readonly ContentPart[], origin: PromptOrigin): number | null {
     if (this.activeTurn) {
-      this.agent.emitEvent({
-        type: 'error',
-        ...makeErrorPayload(
-          'turn.agent_busy',
-          `Cannot launch a new turn while another turn (ID ${this.turnId}) is active`,
-          { details: { turnId: this.turnId } },
-        ),
-      });
+      this.emitAgentBusy();
       return null;
     }
 
@@ -429,6 +448,7 @@ export class TurnFlow {
     standalone: boolean,
   ): Promise<TurnEndResult> {
     this.todoSeenThisTurn = false;
+    this.todoReconcileInjected = false;
     this.convergenceInjections = 0;
     this.currentStepHadContent = false;
     this.lastToolFailure = null;
@@ -444,6 +464,10 @@ export class TurnFlow {
     this.agent.injection.resetForTurn();
     this.agent.usage.beginTurn();
     this.agent.emitEvent({ type: 'turn.started', turnId, origin });
+    // Leftover steers from the previous turn are older than this prompt —
+    // append them first so chronological order is [leftovers…, primary]
+    // (newest instruction last for recency weighting).
+    if (this.steerBuffer.length > 0) this.flushSteerBuffer();
     this.agent.context.appendUserMessage(input, origin);
 
     let ended: TurnEndedEvent;
@@ -797,23 +821,26 @@ export class TurnFlow {
                 return { continue: true };
               }
 
-              // Stop hooks get one continuation; otherwise a hook that always blocks would loop forever.
-              if (stopHookContinuationUsed) return { continue: false };
-              const stopBlock = await this.agent.hooks?.triggerBlock('Stop', {
-                signal,
-                inputData: { stopHookActive: stopHookContinuationUsed },
-              });
-              signal.throwIfAborted();
-              if (stopBlock !== undefined) {
-                stopHookContinuationUsed = true;
-                this.agent.context.appendUserMessage(
-                  [{ type: 'text', text: stopBlock.reason }],
-                  {
-                    kind: 'system_trigger',
-                    name: 'stop_hook',
-                  },
-                );
-                return { continue: true };
+              // Stop hooks get one continuation; otherwise a hook that always
+              // blocks would loop forever. Gate only the hook — flush and
+              // todo reconcile must still run on the post-hook stop path.
+              if (!stopHookContinuationUsed) {
+                const stopBlock = await this.agent.hooks?.triggerBlock('Stop', {
+                  signal,
+                  inputData: { stopHookActive: stopHookContinuationUsed },
+                });
+                signal.throwIfAborted();
+                if (stopBlock !== undefined) {
+                  stopHookContinuationUsed = true;
+                  this.agent.context.appendUserMessage(
+                    [{ type: 'text', text: stopBlock.reason }],
+                    {
+                      kind: 'system_trigger',
+                      name: 'stop_hook',
+                    },
+                  );
+                  return { continue: true };
+                }
               }
               // A steer can arrive while the Stop hook was awaiting: the turn is
               // still active, so a buffered steer here would be discarded by end()
@@ -821,6 +848,26 @@ export class TurnFlow {
               // once more; anything still buffered after this point races genuine
               // teardown, same as steering the main agent mid-teardown.
               if (this.flushSteerBuffer()) return { continue: true };
+              // One bounded continuation so the model can reconcile todo statuses
+              // before the final answer. Never auto-marks work complete. Skipped
+              // while background tasks run (their steers will re-enter) or on
+              // max_tokens (a separate continuation path already exists).
+              if (
+                !this.todoReconcileInjected &&
+                stopReason !== 'max_tokens' &&
+                this.agent.background.list().length === 0
+              ) {
+                const todos = this.agent.tools.getTodos();
+                const unfinished = todos.some((todo) => todo.status !== 'done');
+                if (unfinished && todos.length > 0) {
+                  this.todoReconcileInjected = true;
+                  this.agent.context.appendSystemReminder(
+                    'Before ending the turn, reconcile the TodoList with reality: mark only work that is actually finished as done, leave unfinished items pending or in_progress, and keep blockers accurate. Do not mark incomplete work as done. Prefer updating TodoList only on this continuation.',
+                    { kind: 'system_trigger', name: 'todo_reconcile' },
+                  );
+                  return { continue: true };
+                }
+              }
               return { continue: false };
             },
             prepareToolExecution: async (ctx) => {

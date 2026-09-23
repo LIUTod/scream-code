@@ -1324,51 +1324,121 @@ describe('Agent turn flow', () => {
     await ctx.expectResumeMatches();
   });
 
-  it('rejects a non-steer prompt while a turn is active', async () => {
-    const ctx = testAgent({ jian: createCommandJian('should-not-run') });
+  it('buffers a second prompt while a turn is active instead of agent_busy', async () => {
+    const ctx = testAgent({ jian: createCommandJian('approved') });
     ctx.configure({ tools: ['Bash'] });
 
     ctx.mockNextResponse({ type: 'text', text: 'I will wait for approval.' }, bashCall());
     await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Start the active turn' }] });
 
-    expect(await ctx.untilApprovalRequest()).toMatchInlineSnapshot(`
-      [wire] turn.prompt                 { "input": [ { "type": "text", "text": "Start the active turn" } ], "origin": { "kind": "user" }, "time": "<time>" }
-      [emit] turn.started                { "turnId": 0, "origin": { "kind": "user" } }
-      [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "Start the active turn" } ], "toolCalls": [], "origin": { "kind": "user" } }, "time": "<time>" }
-      [wire] context.append_loop_event   { "event": { "type": "step.begin", "uuid": "<uuid-1>", "turnId": "0", "step": 1 }, "time": "<time>" }
-      [emit] turn.step.started           { "turnId": 0, "step": 1, "stepId": "<uuid-1>" }
-      [wire] request.header              { "provider": "scream", "model": "mock-model", "modelAlias": "mock-model", "systemPrompt": "You are a deterministic test agent.", "activeTools": [ "Bash" ], "messagesCount": 1, "estimatedInputTokens": "<tokens>", "time": "<time>" }
-      [emit] assistant.delta             { "turnId": 0, "delta": "I will wait for approval." }
-      [emit] tool.call.delta             { "turnId": 0, "toolCallId": "call_bash", "name": "Bash", "argumentsPart": "{\\"command\\":\\"printf should-not-run\\",\\"timeout\\":60}" }
-      [wire] context.append_loop_event   { "event": { "type": "block.start", "uuid": "<uuid-2>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "index": 0, "blockType": "text" }, "time": "<time>" }
-      [wire] context.append_loop_event   { "event": { "type": "content.part", "uuid": "<uuid-3>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "part": { "type": "text", "text": "I will wait for approval." } }, "time": "<time>" }
-      [wire] context.append_loop_event   { "event": { "type": "block.end", "uuid": "<uuid-4>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "index": 0, "blockType": "text" }, "time": "<time>" }
-      [emit] requestApproval             { "turnId": 0, "toolCallId": "call_bash", "toolName": "Bash", "action": "Running: printf should-not-run", "display": { "kind": "command", "command": "printf should-not-run", "cwd": "<cwd>", "language": "bash" } }
-    `);
+    // Single take: untilApprovalRequest would consume the pending request.
+    const approval = await ctx.takeApprovalRequest();
     expect(ctx.lastLlmInput()).toMatchInlineSnapshot(`
       system: <system-prompt>
       tools: Bash
       messages:
         user: text "Start the active turn"
     `);
-    await ctx.rpc.prompt({ input: [{ type: 'text', text: 'This should not start a new turn' }] });
 
-    expect(ctx.newEvents()).toMatchInlineSnapshot(`
-      [wire] turn.prompt   { "input": [ { "type": "text", "text": "This should not start a new turn" } ], "origin": { "kind": "user" }, "time": "<time>" }
-      [emit] error         { "code": "turn.agent_busy", "message": "Cannot launch a new turn while another turn (ID 0) is active", "details": { "turnId": 0 }, "retryable": true }
-    `);
-    await ctx.rpc.cancel({ turnId: 0 });
-    expect(await ctx.untilTurnEnd()).toMatchInlineSnapshot(`
-      [wire] turn.cancel                 { "turnId": 0, "time": "<time>" }
-      [wire] context.append_loop_event   { "event": { "type": "block.start", "uuid": "<uuid-5>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "index": 0, "blockType": "tool-call" }, "time": "<time>" }
-      [wire] context.append_loop_event   { "event": { "type": "tool.call", "uuid": "call_bash", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "toolCallId": "call_bash", "name": "Bash", "args": { "command": "printf should-not-run", "timeout": 60 }, "description": "Running: printf should-not-run", "display": { "kind": "command", "command": "printf should-not-run", "cwd": "<cwd>", "language": "bash" } }, "time": "<time>" }
-      [emit] tool.call.started           { "turnId": 0, "toolCallId": "call_bash", "name": "Bash", "args": { "command": "printf should-not-run", "timeout": 60 }, "description": "Running: printf should-not-run", "display": { "kind": "command", "command": "printf should-not-run", "cwd": "<cwd>", "language": "bash" } }
-      [wire] context.append_loop_event   { "event": { "type": "block.end", "uuid": "<uuid-6>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "index": 0, "blockType": "tool-call" }, "time": "<time>" }
-      [wire] context.append_loop_event   { "event": { "type": "tool.result", "parentUuid": "call_bash", "toolCallId": "call_bash", "result": { "output": "The user manually interrupted \\"Bash\\" (and anything else running at the same time). This was a deliberate user action, not a system error, timeout, or capacity limit. Do not retry automatically or guess at the cause — wait for the user's next instruction.", "isError": true } }, "time": "<time>" }
-      [emit] tool.result                 { "turnId": 0, "toolCallId": "call_bash", "output": "The user manually interrupted \\"Bash\\" (and anything else running at the same time). This was a deliberate user action, not a system error, timeout, or capacity limit. Do not retry automatically or guess at the cause — wait for the user's next instruction.", "isError": true }
-      [emit] turn.step.interrupted       { "turnId": 0, "step": 1, "reason": "aborted" }
-      [emit] turn.ended                  { "turnId": 0, "reason": "cancelled" }
-    `);
+    // Queue-drain / background-steer race: a prompt while busy must join as
+    // a steer, never emit turn.agent_busy (which drops the message).
+    await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Queued while busy' }] });
+    const busyEvents = JSON.stringify(ctx.newEvents());
+    expect(busyEvents).toContain('Queued while busy');
+    expect(busyEvents).not.toContain('agent_busy');
+
+    ctx.mockNextResponse({ type: 'text', text: 'Approved, saw the queued prompt.' });
+    approval.respond({ decision: 'approved', selectedLabel: 'approve' });
+
+    const events = JSON.stringify(await ctx.untilTurnEnd());
+    expect(events).toContain('Queued while busy');
+    expect(events).not.toContain('agent_busy');
+    // Approval completed (not aborted by the interrupting steer).
+    expect(events).toContain('"output":"approved"');
+    expect(events).not.toContain('manually interrupted');
+    expect(ctx.llmCalls).toHaveLength(2);
+    // Second generate input must include the buffered prompt (not agent_busy).
+    expect(JSON.stringify(ctx.llmCalls.at(-1)?.history ?? [])).toContain('Queued while busy');
+    expect(JSON.stringify(ctx.llmCalls.at(-1)?.history ?? [])).not.toContain('agent_busy');
+    await ctx.expectResumeMatches();
+  });
+
+  it('buffers the second prompt in the steer queue without agent_busy', async () => {
+    const ctx = testAgent({ jian: createCommandJian('approved') });
+    ctx.configure({ tools: ['Bash'] });
+
+    ctx.mockNextResponse({ type: 'text', text: 'Waiting for approval.' }, bashCall());
+    await ctx.rpc.prompt({ input: [{ type: 'text', text: 'First prompt' }] });
+    const approval = await ctx.takeApprovalRequest();
+    expect(ctx.agent.turn.steerQueueLength).toBe(0);
+
+    await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Second prompt while busy' }] });
+    expect(ctx.agent.turn.steerQueueLength).toBe(1);
+    expect(JSON.stringify(ctx.newEvents())).not.toContain('agent_busy');
+
+    // Deliver the buffered prompt via approval continuation, then end.
+    ctx.mockNextResponse({ type: 'text', text: 'Done with approval.' });
+    approval.respond({ decision: 'approved', selectedLabel: 'approve' });
+    const events = JSON.stringify(await ctx.untilTurnEnd());
+    expect(events).toContain('Second prompt while busy');
+    expect(events).not.toContain('agent_busy');
+    expect(events).toContain('"output":"approved"');
+    expect(ctx.agent.turn.steerQueueLength).toBe(0);
+    expect(ctx.llmCalls).toHaveLength(2);
+    await ctx.expectResumeMatches();
+  });
+
+  it('injects a single todo reconcile continuation when todos are unfinished', async () => {
+    const ctx = testAgent({ jian: createCommandJian('ignored') });
+    ctx.configure({ tools: [] });
+    ctx.agent.tools.updateStore('todo', [
+      { title: 'Ship the feature', status: 'in_progress' },
+      { title: 'Write the docs', status: 'pending' },
+    ]);
+
+    ctx.mockNextResponse({ type: 'text', text: 'All finished, bye.' });
+    ctx.mockNextResponse({ type: 'text', text: 'Todos reconciled.' });
+    await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Do the work' }] });
+
+    const events = JSON.stringify(await ctx.untilTurnEnd());
+    expect(events).toContain('todo_reconcile');
+    expect(events).toContain('Do not mark incomplete work as done');
+    expect(ctx.llmCalls).toHaveLength(2);
+    // Continuation input carries the reconcile reminder; response text is on the wire.
+    expect(JSON.stringify(ctx.llmCalls.at(-1)?.history ?? [])).toContain(
+      'Before ending the turn, reconcile the TodoList',
+    );
+    expect(events).toContain('Todos reconciled.');
+    await ctx.expectResumeMatches();
+  });
+
+  it('does not inject todo reconcile when all todos are done', async () => {
+    const ctx = testAgent({ jian: createCommandJian('ignored') });
+    ctx.configure({ tools: [] });
+    ctx.agent.tools.updateStore('todo', [
+      { title: 'Ship the feature', status: 'done' },
+    ]);
+
+    ctx.mockNextResponse({ type: 'text', text: 'Nothing left.' });
+    await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Check todos' }] });
+
+    const events = JSON.stringify(await ctx.untilTurnEnd());
+    expect(events).not.toContain('todo_reconcile');
+    expect(ctx.llmCalls).toHaveLength(1);
+    await ctx.expectResumeMatches();
+  });
+
+  it('does not inject todo reconcile when todos list is empty', async () => {
+    const ctx = testAgent({ jian: createCommandJian('ignored') });
+    ctx.configure({ tools: [] });
+    ctx.agent.tools.updateStore('todo', []);
+
+    ctx.mockNextResponse({ type: 'text', text: 'no todos' });
+    await ctx.rpc.prompt({ input: [{ type: 'text', text: 'hello' }] });
+
+    const events = JSON.stringify(await ctx.untilTurnEnd());
+    expect(events).not.toContain('todo_reconcile');
+    expect(ctx.llmCalls).toHaveLength(1);
     await ctx.expectResumeMatches();
   });
 });
