@@ -42,6 +42,7 @@ import { MoonLoader } from '../components/chrome/moon-loader';
 import { StatusMessageComponent } from '../components/messages/status-message';
 import { MAIN_AGENT_ID } from '../constant/scream-tui';
 import {
+  appendSessionHeaderHint,
   argsRecord,
   formatErrorMessage,
   serializeToolResultOutput,
@@ -957,7 +958,10 @@ export class SessionEventHandler {
     this.host.streamingUI.finalizeLiveTextBuffers();
     // Settle the block: an error may be the last event of the turn.
     this.host.streamingUI.endActivityGroup();
-    this.host.showError(`[${event.code}] ${event.message}`);
+    const shown = appendSessionHeaderHint(`[${event.code}] ${event.message}`, (name) =>
+      t('error.session_header_hint', { name }),
+    );
+    this.host.showError(shown);
     // Only `turn.agent_busy` means "no turn will ever run for this request".
     // Other codes can land between prompt() and turn.started — a window where
     // hasActiveTurn() is false although a real turn is on its way — so

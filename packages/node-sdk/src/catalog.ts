@@ -111,6 +111,37 @@ export interface ApplyCatalogProviderOptions {
   /** @deprecated Use thinkingLevel instead. */
   readonly thinking?: boolean;
   readonly thinkingLevel?: import('@scream-code/ltod').ThinkingEffort;
+  /** Explicit session-header name; overrides the catalog stamp when set. */
+  readonly sessionHeader?: string;
+}
+
+/**
+ * Catalog stamp: models.dev entries whose gateway requires a stable
+ * per-conversation session header. Applied only while materializing the
+ * provider into config — never during request dispatch (so the hot path
+ * stays free of hostnames). Keys are catalog provider ids and exact
+ * models.dev `api` base URLs.
+ */
+const CATALOG_SESSION_HEADER_BY_ID: Readonly<Record<string, string>> = {
+  opencode: 'x-opencode-session',
+  'opencode-go': 'x-opencode-session',
+};
+
+const CATALOG_SESSION_HEADER_BY_BASE_URL: Readonly<Record<string, string>> = {
+  'https://opencode.ai/zen/v1': 'x-opencode-session',
+  'https://opencode.ai/zen/go/v1': 'x-opencode-session',
+};
+
+/** Resolves the session-header name to stamp for a catalog/DIY apply, if any. */
+export function resolveCatalogSessionHeader(
+  providerId: string,
+  baseUrl: string | undefined,
+): string | undefined {
+  const byId = CATALOG_SESSION_HEADER_BY_ID[providerId];
+  if (byId !== undefined) return byId;
+  if (baseUrl === undefined) return undefined;
+  const normalized = baseUrl.replace(/\/+$/, '');
+  return CATALOG_SESSION_HEADER_BY_BASE_URL[normalized];
 }
 
 /**
@@ -143,10 +174,13 @@ export function applyCatalogProvider(
   config: ScreamConfig,
   options: ApplyCatalogProviderOptions,
 ): { defaultModel: string } {
+  const sessionHeader =
+    options.sessionHeader ?? resolveCatalogSessionHeader(options.providerId, options.baseUrl);
   config.providers[options.providerId] = {
     type: options.wire,
     baseUrl: options.baseUrl,
     apiKey: options.apiKey,
+    ...(sessionHeader !== undefined ? { sessionHeader } : {}),
   };
 
   const models = config.models ?? {};

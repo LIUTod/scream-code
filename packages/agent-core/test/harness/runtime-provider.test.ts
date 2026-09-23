@@ -712,3 +712,187 @@ describe('resolveThinkingLevel', () => {
     expect(resolveThinkingLevel(undefined, {})).toBe('high');
   });
 });
+
+
+describe('sessionHeader injection', () => {
+  function openaiConfig(extra: Record<string, unknown> = {}): ScreamConfig {
+    return {
+      defaultModel: 'gpt-alias',
+      providers: {
+        openai: {
+          type: 'openai',
+          apiKey: 'sk-openai',
+          baseUrl: 'https://gateway.example/v1',
+          ...extra,
+        },
+      },
+      models: {
+        'gpt-alias': {
+          provider: 'openai',
+          model: 'gpt-runtime',
+          maxContextSize: 200000,
+        },
+      },
+    };
+  }
+
+  it('injects the session id under the configured header name', () => {
+    const resolved = resolveRuntimeProvider({
+      config: openaiConfig({ sessionHeader: 'x-test-session' }),
+      promptCacheKey: 'session-abc',
+    });
+
+    expect(resolved.provider).toMatchObject({
+      defaultHeaders: { 'x-test-session': 'session-abc' },
+    });
+  });
+
+  it('injects on openai_responses', () => {
+    const resolved = resolveRuntimeProvider({
+      config: {
+        defaultModel: 'resp-alias',
+        providers: {
+          openai_responses: {
+            type: 'openai_responses',
+            apiKey: 'sk-resp',
+            sessionHeader: 'x-test-session',
+          },
+        },
+        models: {
+          'resp-alias': {
+            provider: 'openai_responses',
+            model: 'gpt-runtime',
+            maxContextSize: 200000,
+          },
+        },
+      },
+      promptCacheKey: 'session-abc',
+    });
+
+    expect(resolved.provider).toMatchObject({
+      defaultHeaders: { 'x-test-session': 'session-abc' },
+    });
+  });
+
+  it('injects on anthropic', () => {
+    const resolved = resolveRuntimeProvider({
+      config: {
+        defaultModel: 'ant-alias',
+        providers: {
+          anthropic: {
+            type: 'anthropic',
+            apiKey: 'sk-ant',
+            sessionHeader: 'x-test-session',
+          },
+        },
+        models: {
+          'ant-alias': {
+            provider: 'anthropic',
+            model: 'ant-runtime',
+            maxContextSize: 200000,
+          },
+        },
+      },
+      promptCacheKey: 'session-abc',
+    });
+
+    expect(resolved.provider).toMatchObject({
+      defaultHeaders: { 'x-test-session': 'session-abc' },
+    });
+  });
+
+  it('does not add defaultHeaders when sessionHeader is unset', () => {
+    const resolved = resolveRuntimeProvider({
+      config: openaiConfig(),
+      promptCacheKey: 'session-abc',
+      screamRequestHeaders: TEST_SCREAM_HEADERS,
+    });
+
+    expect('defaultHeaders' in resolved.provider).toBe(false);
+  });
+
+  it('uses the live prompt cache key as the header value', () => {
+    const first = resolveRuntimeProvider({
+      config: openaiConfig({ sessionHeader: 'x-test-session' }),
+      promptCacheKey: 'session-one',
+    });
+    const second = resolveRuntimeProvider({
+      config: openaiConfig({ sessionHeader: 'x-test-session' }),
+      promptCacheKey: 'session-two',
+    });
+
+    const headerOf = (resolved: ReturnType<typeof resolveRuntimeProvider>): string | undefined =>
+      (resolved.provider as { defaultHeaders?: Record<string, string> }).defaultHeaders?.[
+        'x-test-session'
+      ];
+
+    expect(headerOf(first)).toBe('session-one');
+    expect(headerOf(second)).toBe('session-two');
+  });
+
+  it('lets customHeaders override the session header and User-Agent', () => {
+    const resolved = resolveRuntimeProvider({
+      config: openaiConfig({
+        sessionHeader: 'x-test-session',
+        customHeaders: {
+          'x-test-session': 'caller-value',
+          'User-Agent': 'Custom/1',
+        },
+      }),
+      promptCacheKey: 'session-abc',
+      screamRequestHeaders: TEST_SCREAM_HEADERS,
+    });
+
+    expect(resolved.provider).toMatchObject({
+      defaultHeaders: {
+        'x-test-session': 'caller-value',
+        'User-Agent': 'Custom/1',
+      },
+    });
+  });
+
+  it('does not inject an empty header when the session id is missing', () => {
+    const resolved = resolveRuntimeProvider({
+      config: openaiConfig({ sessionHeader: 'x-test-session' }),
+      screamRequestHeaders: TEST_SCREAM_HEADERS,
+    });
+
+    expect('defaultHeaders' in resolved.provider).toBe(false);
+  });
+
+  it('attaches the product User-Agent only when the session header is enabled', () => {
+    const withHeader = resolveRuntimeProvider({
+      config: openaiConfig({ sessionHeader: 'x-test-session' }),
+      promptCacheKey: 'session-abc',
+      screamRequestHeaders: TEST_SCREAM_HEADERS,
+    });
+    expect(withHeader.provider).toMatchObject({
+      defaultHeaders: {
+        'x-test-session': 'session-abc',
+        'User-Agent': 'scream-code-cli/0.0.0-test',
+      },
+    });
+
+    const withoutHeaderName = resolveRuntimeProvider({
+      config: openaiConfig(),
+      promptCacheKey: 'session-abc',
+      screamRequestHeaders: TEST_SCREAM_HEADERS,
+    });
+    expect('defaultHeaders' in withoutHeaderName.provider).toBe(false);
+  });
+
+  it('omits User-Agent when screamRequestHeaders are absent', () => {
+    const resolved = resolveRuntimeProvider({
+      config: openaiConfig({ sessionHeader: 'x-test-session' }),
+      promptCacheKey: 'session-abc',
+    });
+
+    expect(resolved.provider).toMatchObject({
+      defaultHeaders: { 'x-test-session': 'session-abc' },
+    });
+    const headers = (resolved.provider as { defaultHeaders?: Record<string, string> })
+      .defaultHeaders;
+    expect(headers).toBeDefined();
+    expect(headers && 'User-Agent' in headers).toBe(false);
+  });
+});

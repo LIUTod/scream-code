@@ -59,6 +59,7 @@ type = "scream"
 base_url = "https://api.scream.com/coding/v1"
 api_key = "sk-file"
 custom_headers = { "X-Test" = "1" }
+session_header = "x-test-session"
 
 [providers."managed:scream-code".env]
 GOOGLE_CLOUD_PROJECT = "project-1"
@@ -131,6 +132,7 @@ describe('harness config TOML loader', () => {
       apiKey: 'sk-file',
       env: { GOOGLE_CLOUD_PROJECT: 'project-1' },
       customHeaders: { 'X-Test': '1' },
+      sessionHeader: 'x-test-session',
     });
     expect(config.models?.['scream-code/scream-for-coding']).toMatchObject({
       provider: 'managed:scream-code',
@@ -210,6 +212,7 @@ describe('harness config TOML loader', () => {
     expect(text).not.toContain('[[permission.allow]]');
     expect(text).toContain('max_steps_per_turn = 7');
     expect(text).toContain('GOOGLE_CLOUD_PROJECT = "project-1"');
+    expect(text).toContain('session_header = "x-test-session"');
     expect(text).toContain('theme = "dark"');
     expect(text).toContain('claim_stale_after_ms = 15000');
     expect(text).toContain('[[hooks]]');
@@ -520,5 +523,41 @@ describe('config value env override helpers', () => {
         parseEnv: parseBooleanEnv,
       }),
     ).toBe(false);
+  });
+});
+
+
+describe('sessionHeader schema', () => {
+  it('accepts a valid HTTP header name', () => {
+    const parsed = ScreamConfigSchema.parse({
+      providers: {
+        gw: { type: 'openai', apiKey: 'k', sessionHeader: 'x-test-session' },
+      },
+    });
+    expect(parsed.providers['gw']?.sessionHeader).toBe('x-test-session');
+  });
+
+  it('rejects invalid header names', () => {
+    expect(() =>
+      ScreamConfigSchema.parse({
+        providers: {
+          gw: { type: 'openai', apiKey: 'k', sessionHeader: 'bad header' },
+        },
+      }),
+    ).toThrow();
+    expect(() =>
+      ScreamConfigSchema.parse({
+        providers: {
+          gw: { type: 'openai', apiKey: 'k', sessionHeader: '' },
+        },
+      }),
+    ).toThrow();
+    expect(() =>
+      ScreamConfigSchema.parse({
+        providers: {
+          gw: { type: 'openai', apiKey: 'k', sessionHeader: 'x\r\ninjected' },
+        },
+      }),
+    ).toThrow();
   });
 });

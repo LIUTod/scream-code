@@ -7,6 +7,7 @@ import {
   catalogProviderModels,
   CatalogFetchError,
   fetchCatalog,
+  resolveCatalogSessionHeader,
   type CatalogModel,
 } from '../src/catalog';
 
@@ -145,5 +146,88 @@ describe('applyCatalogProvider', () => {
 
     expect(config.models?.['anthropic/stale']).toBeUndefined();
     expect(config.models?.['other/keep']).toBeDefined();
+  });
+});
+
+
+describe('sessionHeader stamp', () => {
+  it('stamps the session header for a known catalog provider id', () => {
+    const config = { providers: {} } as ScreamConfig;
+    applyCatalogProvider(config, {
+      providerId: 'opencode-go',
+      wire: 'openai',
+      // No base URL: the id alone must be enough to stamp.
+      apiKey: 'sk',
+      models: [model],
+      selectedModelId: 'm1',
+    });
+
+    expect(config.providers['opencode-go']).toMatchObject({
+      type: 'openai',
+      sessionHeader: 'x-opencode-session',
+    });
+  });
+
+  it('stamps by exact base URL for a DIY provider id', () => {
+    const config = { providers: {} } as ScreamConfig;
+    applyCatalogProvider(config, {
+      providerId: 'custom-gateway',
+      wire: 'openai',
+      baseUrl: 'https://opencode.ai/zen/v1',
+      apiKey: 'sk',
+      models: [model],
+      selectedModelId: 'm1',
+    });
+
+    expect(config.providers['custom-gateway']).toMatchObject({
+      sessionHeader: 'x-opencode-session',
+    });
+
+    const trailing = { providers: {} } as ScreamConfig;
+    applyCatalogProvider(trailing, {
+      providerId: 'custom-gateway',
+      wire: 'openai',
+      baseUrl: 'https://opencode.ai/zen/v1/',
+      apiKey: 'sk',
+      models: [model],
+      selectedModelId: 'm1',
+    });
+
+    expect(trailing.providers['custom-gateway']).toMatchObject({
+      sessionHeader: 'x-opencode-session',
+    });
+  });
+
+  it('does not stamp unknown ids or unrelated base URLs', () => {
+    const config = { providers: {} } as ScreamConfig;
+    applyCatalogProvider(config, {
+      providerId: 'other-gateway',
+      wire: 'anthropic',
+      baseUrl: 'https://example.com',
+      apiKey: 'sk',
+      models: [model],
+      selectedModelId: 'm1',
+    });
+
+    expect('sessionHeader' in (config.providers['other-gateway'] ?? {})).toBe(false);
+    expect(resolveCatalogSessionHeader('other-gateway', 'https://example.com')).toBeUndefined();
+    expect(resolveCatalogSessionHeader('custom-x', 'https://example.com/v1')).toBeUndefined();
+  });
+
+  it('prefers an explicit sessionHeader option over the stamp', () => {
+    const config = { providers: {} } as ScreamConfig;
+    applyCatalogProvider(config, {
+      providerId: 'opencode',
+      wire: 'openai',
+      baseUrl: 'https://opencode.ai/zen/v1',
+      apiKey: 'sk',
+      models: [model],
+      selectedModelId: 'm1',
+      sessionHeader: 'x-custom-session',
+    });
+
+    expect(config.providers['opencode']).toMatchObject({
+      sessionHeader: 'x-custom-session',
+    });
   });
 });

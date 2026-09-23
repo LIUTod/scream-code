@@ -6,6 +6,7 @@ import {
   STREAMING_ARGS_PREVIEW_MAX_CHARS,
 } from '#/tui/constant/streaming';
 import {
+  appendSessionHeaderHint,
   appendStreamingArgsPreview,
   parseStreamingArgs,
   truncateErrorMessage,
@@ -65,5 +66,48 @@ describe('truncateErrorMessage', () => {
 
   it('returns empty string for an all-blank message', () => {
     expect(truncateErrorMessage('\n  \n\t\n')).toBe('');
+  });
+});
+
+
+describe('appendSessionHeaderHint', () => {
+  const hint = (name: string): string => `Set session_header = "${name}" under this provider.`;
+
+  it('appends the captured header name from a missing-header error', () => {
+    const message =
+      '[provider.api_error] 400 Error from provider: Request is missing x-sample-session and cannot be routed efficiently.';
+    const out = appendSessionHeaderHint(message, hint);
+    expect(out).toContain(message);
+    expect(out).toContain('Set session_header = "x-sample-session"');
+  });
+
+  it('matches case-insensitive missing-header wording', () => {
+    const out = appendSessionHeaderHint('400 MISSING X-Session-Id header required', hint);
+    expect(out).toContain('session_header = "X-Session-Id"');
+  });
+
+  it('matches a session-named header followed by the word header', () => {
+    const out = appendSessionHeaderHint('400 missing conversation-session header', hint);
+    expect(out).toContain('session_header = "conversation-session"');
+  });
+
+  it('leaves unrelated messages unchanged', () => {
+    const message = '[provider.api_error] 401 invalid api key';
+    expect(appendSessionHeaderHint(message, hint)).toBe(message);
+  });
+
+  it('does not invent a name when the header token is absent', () => {
+    const message = '400 Request is missing required headers';
+    expect(appendSessionHeaderHint(message, hint)).toBe(message);
+  });
+
+  it('does not hint on non-session header wording', () => {
+    expect(appendSessionHeaderHint('400 missing required header', hint)).toBe(
+      '400 missing required header',
+    );
+    expect(appendSessionHeaderHint('401 missing authorization header', hint)).toBe(
+      '401 missing authorization header',
+    );
+    expect(appendSessionHeaderHint('400 missing a header', hint)).toBe('400 missing a header');
   });
 });

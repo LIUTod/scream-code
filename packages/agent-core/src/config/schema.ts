@@ -23,6 +23,13 @@ export type OAuthRef = z.infer<typeof OAuthRefSchema>;
 
 const StringRecordSchema = z.record(z.string(), z.string());
 
+/** HTTP header name (RFC 7230 token) — rejects spaces, CR/LF, and empties. */
+const HeaderNameSchema = z
+  .string()
+  .min(1)
+  .max(128)
+  .regex(/^[A-Za-z0-9!#$%&'*+.^_`|~-]+$/, 'must be an HTTP header name');
+
 export const ProviderConfigSchema = z.object({
   type: ProviderTypeSchema,
   apiKey: z.string().optional(),
@@ -31,6 +38,13 @@ export const ProviderConfigSchema = z.object({
   oauth: OAuthRefSchema.optional(),
   env: StringRecordSchema.optional(),
   customHeaders: StringRecordSchema.optional(),
+  /**
+   * Optional request header that receives the stable per-conversation session
+   * id at dispatch time. Unset providers never send an extra header (and do
+   * not change the default User-Agent). When set, the product's own
+   * User-Agent is attached alongside unless `customHeaders` overrides it.
+   */
+  sessionHeader: HeaderNameSchema.optional(),
 });
 
 export type ProviderConfig = z.infer<typeof ProviderConfigSchema>;

@@ -100,6 +100,8 @@ export const en: Record<string, string> = {
   'error.load_failed': 'Load failed: {msg}',
   'error.internal': 'Internal error',
   'error.no_session': 'No active session.',
+  'error.session_header_hint':
+    'Set session_header = "{name}" under this provider in config.toml to supply the required session id.',
 
   // ─── Footer hints ─────────────
   'footer.shift_tab': 'shift+tab: Plan mode',

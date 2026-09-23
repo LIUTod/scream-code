@@ -97,6 +97,28 @@ export function formatErrorMessage(error: unknown): string {
 }
 
 /**
+ * When a gateway rejects a request for a missing session header, the error
+ * text names the header. Echo an actionable config line so the user does not
+ * have to look up the field name. Returns the input unchanged when the
+ * message does not match the generic "missing … header" shape.
+ */
+export function appendSessionHeaderHint(
+  message: string,
+  hintText: (headerName: string) => string,
+): string {
+  // Prefer an "x-…" token (gateways often omit the word "header"), else a
+  // name that clearly looks session-related followed by "header". Generic
+  // "missing required/authorization header" must not produce a hint.
+  const match =
+    /missing\s+(?:(x-[A-Za-z0-9-]+)|([A-Za-z0-9-]*session[A-Za-z0-9-]*)\s+header\b)/i.exec(
+      message,
+    );
+  const name = match?.[1] ?? match?.[2];
+  if (name === undefined) return message;
+  return `${message}\n${hintText(name)}`;
+}
+
+/**
  * Cap an error message body for inline transcript display. Drops blank lines,
  * keeps the first `maxLines` non-blank lines, and appends a `… (N more lines)`
  * hint when truncated. Full text is preserved in the persisted session — this

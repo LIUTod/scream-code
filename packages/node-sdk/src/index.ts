@@ -16,6 +16,7 @@ export {
   inferWireType,
   loadBuiltInCatalog,
   loadCatalogCache,
+  resolveCatalogSessionHeader,
   saveCatalogCache,
 } from '#/catalog';
 export type {

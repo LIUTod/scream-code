@@ -100,6 +100,8 @@ export const zh: Record<string, string> = {
   'error.load_failed': '加载失败: {msg}',
   'error.internal': '内部错误',
   'error.no_session': '没有活跃的会话。',
+  'error.session_header_hint':
+    '请在 config.toml 对应服务商下设置 session_header = "{name}"，以提供网关要求的会话标识。',
 
   // ─── 底部提示 ─────────────────
   'footer.shift_tab': 'shift+tab: 计划模式',
