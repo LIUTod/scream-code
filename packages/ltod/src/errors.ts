@@ -196,7 +196,62 @@ export function isRetryableGenerateError(error: unknown): boolean {
       (error.statusCode >= 500 && error.statusCode < 600)
     );
   }
+  if (error instanceof ChatProviderError) {
+    // Status-less provider failures (typed stream error events, gateway
+    // wording without an HTTP status) fall through to a conservative
+    // message policy: never quota/billing; retry only clearly transient
+    // upstream/transport wording. Unknown text stays non-retryable.
+    return isRetryableProviderMessage(error.message);
+  }
   return false;
+}
+
+/** Account/limit exhaustion — retrying only burns the budget. */
+const NON_RETRYABLE_PROVIDER_MESSAGE_PATTERNS = [
+  /insufficient_quota/i,
+  /out of budget/i,
+  /\bbilling\b/i,
+  /usage limit/i,
+  /available balance/i,
+  /connection limit/i,
+] as const;
+
+/**
+ * Clearly transient upstream or transport failures when no HTTP status
+ * exists. Bracketed 5xx only — bare mid-sentence numbers stay out so we do
+ * not invent retryability from unrelated digits (status recovery remains the
+ * anchored `Streaming response failed:` prefix path).
+ */
+const RETRYABLE_PROVIDER_MESSAGE_PATTERNS = [
+  /\b(?:429|408)\b/,
+  /\[5\d{2}\]/,
+  /overloaded/i,
+  /high demand/i,
+  /rate.?limit/i,
+  /too many requests/i,
+  /service.?unavailable/i,
+  /server.?error/i,
+  /internal.?error/i,
+  /network error/i,
+  /connection (?:error|refused|reset|lost|closed|terminated)/i,
+  /timeout|timed? out|terminated/i,
+  /stream ended|ended without/i,
+  /you can retry your request/i,
+  /try your request again/i,
+  /please retry your request/i,
+] as const;
+
+/**
+ * Classify a status-less provider error message. Quota/billing-style wording
+ * is never retryable; only conservative transient patterns are. Used for
+ * plain `ChatProviderError`s (typed stream events, gateway wording without
+ * an HTTP status). Exported for adapters and tests.
+ */
+export function isRetryableProviderMessage(message: string): boolean {
+  if (NON_RETRYABLE_PROVIDER_MESSAGE_PATTERNS.some((pattern) => pattern.test(message))) {
+    return false;
+  }
+  return RETRYABLE_PROVIDER_MESSAGE_PATTERNS.some((pattern) => pattern.test(message));
 }
 
 const CONTEXT_OVERFLOW_MESSAGE_PATTERNS = [

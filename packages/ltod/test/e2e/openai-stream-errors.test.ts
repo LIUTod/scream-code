@@ -74,17 +74,23 @@ describe.each([
   });
 
   it.each([
-    'Internal server error [500]',
-    'Details: Streaming response failed: [500] Upstream failure',
-    'Streaming response failed: [200] Unexpected success',
-    'Streaming response failed: [5000] Invalid status',
-    'Streaming response failed: [500',
-    'Connection limit exceeded',
-  ])('does not infer a status from unrelated or malformed messages: %s', async (message) => {
-    const error = await requestError(message);
+    // No HTTP status is invented; retryability may still follow the
+    // conservative message policy for clearly transient bracketed 5xx text.
+    { message: 'Internal server error [500]', retryable: true },
+    { message: 'Details: Streaming response failed: [500] Upstream failure', retryable: true },
+    { message: 'Streaming response failed: [200] Unexpected success', retryable: false },
+    { message: 'Streaming response failed: [5000] Invalid status', retryable: false },
+    { message: 'Streaming response failed: [500', retryable: false },
+    { message: 'Connection limit exceeded', retryable: false },
+    { message: 'insufficient_quota: key budget exceeded', retryable: false },
+  ])(
+    'does not infer a status from unrelated or malformed messages: $message',
+    async ({ message, retryable }) => {
+      const error = await requestError(message);
 
-    expect(error).toBeInstanceOf(ChatProviderError);
-    expect(error).not.toBeInstanceOf(APIStatusError);
-    expect(isRetryableGenerateError(error)).toBe(false);
-  });
+      expect(error).toBeInstanceOf(ChatProviderError);
+      expect(error).not.toBeInstanceOf(APIStatusError);
+      expect(isRetryableGenerateError(error)).toBe(retryable);
+    },
+  );
 });

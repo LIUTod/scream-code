@@ -70,6 +70,7 @@ export {
   isRecoverableRequestStructureError,
   isRequestTooLargeError,
   isRetryableGenerateError,
+  isRetryableProviderMessage,
 } from './errors';
 
 // Rate limit classification

@@ -149,6 +149,61 @@ describe('isRetryableGenerateError', () => {
     expect(isRetryableGenerateError(quota)).toBe(true);
     expect(isRetryableGenerateError(unknown)).toBe(true);
   });
+
+  it('classifies status-less ChatProviderError messages conservatively', () => {
+    // Typed Responses stream events / gateway wording without an HTTP status.
+    expect(
+      isRetryableGenerateError(
+        new ChatProviderError('OpenAI Responses stream error: overloaded, try again'),
+      ),
+    ).toBe(true);
+    expect(
+      isRetryableGenerateError(
+        new ChatProviderError('OpenAI Responses response.failed: server_error: [503] blown'),
+      ),
+    ).toBe(true);
+    expect(
+      isRetryableGenerateError(
+        new ChatProviderError('OpenAI Responses stream error: rate_limit_exceeded: too many requests'),
+      ),
+    ).toBe(true);
+    expect(
+      isRetryableGenerateError(
+        new ChatProviderError('Error: Streaming response failed: [500] engine hiccup'),
+      ),
+    ).toBe(true);
+
+    // Quota / billing exhaustion never retries — even when the text also
+    // contains transient-looking words (denylist wins over retry patterns).
+    expect(
+      isRetryableGenerateError(new ChatProviderError('insufficient_quota: key budget exceeded')),
+    ).toBe(false);
+    expect(isRetryableGenerateError(new ChatProviderError('You are out of budget'))).toBe(false);
+    expect(isRetryableGenerateError(new ChatProviderError('billing hold on account'))).toBe(false);
+    expect(isRetryableGenerateError(new ChatProviderError('Connection limit exceeded'))).toBe(false);
+    expect(
+      isRetryableGenerateError(
+        new ChatProviderError('insufficient_quota: rate limit exceeded, try later'),
+      ),
+    ).toBe(false);
+    expect(
+      isRetryableGenerateError(
+        new ChatProviderError('usage limit reached while server was overloaded'),
+      ),
+    ).toBe(false);
+
+    // Unknown or malformed wording stays non-retryable.
+    expect(isRetryableGenerateError(new ChatProviderError('something completely unrelated'))).toBe(
+      false,
+    );
+    expect(
+      isRetryableGenerateError(new ChatProviderError('Streaming response failed: [500')),
+    ).toBe(false);
+    expect(
+      isRetryableGenerateError(new ChatProviderError('Streaming response failed: [5000] bad')),
+    ).toBe(false);
+    expect(isRetryableGenerateError(new Error('boom'))).toBe(false);
+  });
 });
 
 describe('error hierarchy instanceof checks', () => {

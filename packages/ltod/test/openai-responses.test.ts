@@ -1,4 +1,8 @@
-import { APIContextOverflowError, ChatProviderError } from '#/errors';
+import {
+  APIContextOverflowError,
+  ChatProviderError,
+  isRetryableGenerateError,
+} from '#/errors';
 import { generate } from '#/generate';
 import type { ContentPart, Message, StreamedMessagePart, ToolCall } from '#/message';
 import {
@@ -1615,6 +1619,9 @@ describe('OpenAIResponsesChatProvider', () => {
       expect(parts).toEqual([{ type: 'text', text: 'partial' }]);
       expect(caughtError).toBeInstanceOf(ChatProviderError);
       expect(caughtError?.message).toMatch(/server_error.*upstream failed/);
+      // Status-less typed Responses error: message policy still sees a clear
+      // transient server failure and marks it retryable.
+      expect(isRetryableGenerateError(caughtError)).toBe(true);
     });
 
     it('throws on response.failed events with response error details', async () => {
