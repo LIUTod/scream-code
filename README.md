@@ -19,7 +19,7 @@
 </p>
 
 <p align="center">
-  <img width="2880" height="2880" alt="894e3ae6-953d-4810-97d1-3a16accadc81_副本" src="https://github.com/user-attachments/assets/77f599db-41ce-4bc6-ae1b-dcbbbc182aea" />
+  <img width="2880" height="2880" alt="scream" src="https://github.com/user-attachments/assets/7268e848-b1b8-4540-9627-d21c94332229" />
 </p>
 
 ---
