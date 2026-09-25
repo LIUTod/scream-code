@@ -237,7 +237,7 @@ let draftTimer: ReturnType<typeof setTimeout> | undefined;
 
 watch(text, () => {
   autoResize();
-  // Any input change closes the history menu (reference behavior): typing
+  // Any input change closes the history menu: typing
   // after ↑ must never let a later Enter overwrite the just-typed text with
   // a history entry.
   historyMenuOpen.value = false;

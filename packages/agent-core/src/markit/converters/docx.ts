@@ -1,4 +1,4 @@
-// Adapted from markit-ai (MIT). See ../NOTICE.
+// Adapted under the MIT License. See ../NOTICE.
 import * as path from "node:path";
 import * as fs from "node:fs/promises";
 import mammoth from "mammoth";

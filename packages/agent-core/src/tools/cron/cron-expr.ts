@@ -1,8 +1,8 @@
 /**
  * 5-field cron expression parsing and "next fire time" computation, in
- * local time. Self-contained — no external cron library is used because
- * upstream `claude-code` mirrors the same semantics and we need exact
- * lock-step behaviour with their implementation.
+ * local time. Self-contained — no external cron library is used because the
+ * scheduler needs exact, lock-step control over the field semantics rather
+ * than whatever a dependency happens to implement.
  *
  * Two flavours of correctness we care about:
  *

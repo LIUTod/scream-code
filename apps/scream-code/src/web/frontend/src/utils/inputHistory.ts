@@ -5,9 +5,9 @@ export const INPUT_HISTORY_LIMIT = 50;
 
 /**
  * Derive input history from the session journal: user message texts, newest
- * first, deduped, capped. Mirrors the reference behavior — history recall
- * works from real sent prompts regardless of which browser sent them.
- * Local-only messages (command results, system notices) are excluded.
+ * first, deduped, capped. History recall works from real sent prompts
+ * regardless of which browser sent them. Local-only messages (command
+ * results, system notices) are excluded.
  */
 export function deriveHistoryFromMessages(messages: ChatMessage[], limit = INPUT_HISTORY_LIMIT): string[] {
   const seen = new Set<string>();

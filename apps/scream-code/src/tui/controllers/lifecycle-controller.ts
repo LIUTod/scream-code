@@ -277,7 +277,7 @@ export class LifecycleController {
   buildLayout(): void {
     const { ui } = this.host.state;
     ui.clear();
-    // Official pi-tui layout (mirrors coding-agent interactive-mode):
+    // Layout contract:
     //   - ScrollView wraps the output regions (transcript/activity/queue),
     //     so scrolling only moves the output, not the chrome.
     //   - A fixed VStack dock holds todo + banners + editor + footer,

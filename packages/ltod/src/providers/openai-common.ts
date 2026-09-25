@@ -257,7 +257,7 @@ export function extractUsage(usage: unknown): TokenUsage | null {
     // OpenRouter-compatible providers report the cache-write count separately
     // (`prompt_tokens_details.cache_write_tokens`); it is already included in
     // prompt_tokens, so pull it out of `other` into inputCacheCreation to keep
-    // the three input buckets disjoint (mirrors the reference harness mapping).
+    // the three input buckets disjoint.
     if (details !== undefined && typeof details['cache_write_tokens'] === 'number') {
       created = details['cache_write_tokens'];
       other = Math.max(0, other - created);

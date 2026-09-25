@@ -199,9 +199,9 @@ export function buildBackgroundTaskNotificationBody(
 
   if (!isAgentTask) return baseLine;
   if (info.status === 'completed') return baseLine;
-  // A user-initiated stop (killed) is a deliberate cancellation: mirror the
-  // reference implementation's auto-wake gate (`cancelled` / `explicitly_killed`
-  // never wake) by NOT suggesting resume for a cancelled subagent.
+  // A user-initiated stop (killed) is a deliberate cancellation: never suggest
+  // resuming a cancelled subagent, so this notification cannot restart work the
+  // user explicitly ended. Failures and losses keep the recovery hint.
   if (info.status === 'killed') {
     return `${baseLine} The subagent was cancelled by the user. Do not resume or retry it automatically — wait for the user's next instruction.`;
   }

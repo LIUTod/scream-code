@@ -1,4 +1,4 @@
-// Adapted from oh-my-pi's utils/markit-cache.ts (MIT). Filesystem cache for
+// Adapted under the MIT License. Filesystem cache for
 // document → markdown conversions: one JSON entry per source digest, FIFO
 // eviction by mtime against a coarse size cap.
 

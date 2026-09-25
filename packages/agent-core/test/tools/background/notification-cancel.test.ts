@@ -5,9 +5,9 @@ import type { BackgroundTaskInfo } from '../../../src/tools/background/manager';
 
 /**
  * P1b: a user-stopped (killed) background subagent is a deliberate
- * cancellation — mirroring the reference implementation's auto-wake gate, its
- * completion notification must NOT suggest resuming it. Tasks that fail or get
- * lost on their own keep the recovery hint.
+ * cancellation — its completion notification must NOT suggest resuming it,
+ * because that would restart work the user explicitly ended. Tasks that fail or
+ * get lost on their own keep the recovery hint.
  */
 
 function info(overrides: Partial<BackgroundTaskInfo>): BackgroundTaskInfo {

@@ -1,7 +1,7 @@
-// @ts-nocheck -- vendored from oh-my-pi (production-verified upstream). Strict-mode
-// fixes intentionally not ported: hand-editing 200 sites would diverge the engine
-// from upstream behavior. See ./NOTICE (pdf/) or ../NOTICE (converters/).
-// Adapted from markit-ai (MIT). See ../../NOTICE.
+// @ts-nocheck -- vendored converter, not written against strict mode. Strict-mode
+// fixes intentionally not applied: hand-editing 200 sites would change the
+// engine's behaviour.
+// Adapted under the MIT License. See ../../NOTICE.
 
 /**
  * PDF to Markdown converter.

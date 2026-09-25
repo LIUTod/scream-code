@@ -37,7 +37,7 @@ export class UserMessageComponent implements Component {
     this.applyTextColor(this.isSystemReminder ? colors.roleUser : contrastTextHex(colors.roleUserBg));
     // Box applies background to all lines INCLUDING top/bottom padding (paddingY=1),
     // so the entire message block — leading pad, content, trailing pad — gets the
-    // background color and fills the terminal width. Mirrors pi's user-message.
+    // background color and fills the terminal width.
     this.box = new Box(0, 1, (content: string) => chalk.bgHex(this.bgColor)(content));
     this.spacerComponent = new Spacer(1);
     this.imageThumbnails = images?.map((img) => new ImageThumbnail(img, colors)) ?? [];

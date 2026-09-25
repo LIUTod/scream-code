@@ -1,6 +1,5 @@
 /**
- * WorkspaceEdit application — ported from oh-my-pi
- * `packages/coding-agent/src/lsp/edits.ts:25-267`.
+ * WorkspaceEdit application.
  *
  * Applies LSP rename refactors to files on disk via Jian I/O. MVP scope:
  * only `changes` (legacy map) and `documentChanges` entries of type

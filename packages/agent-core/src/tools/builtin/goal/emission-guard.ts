@@ -7,11 +7,10 @@
  * context on every submission. This wastes context budget and can trap the
  * agent in a loop where it keeps retrying without new information.
  *
- * Inspired by oh-my-pi's `advisor/emission-guard.ts`, but adapted for
- * scream-code's grader model: the grader is called once per `complete`
- * submission (not continuously), so per-round limiting is unnecessary. The
- * guard focuses on normalization, content-free filtering, and exact-text
- * deduplication keyed by goal objective.
+ * Scope is set by this codebase's grader model: the grader is called once per
+ * `complete` submission (not continuously), so per-round limiting is
+ * unnecessary. The guard focuses on normalization, content-free filtering,
+ * and exact-text deduplication keyed by goal objective.
  */
 
 /** Short phrases that carry no actionable feedback. */

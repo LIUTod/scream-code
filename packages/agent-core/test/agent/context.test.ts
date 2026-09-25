@@ -788,7 +788,7 @@ describe('Agent context closeAbandonedToolExchange', () => {
   });
 });
 
-describe('project tool exchange repair (port of upstream)', () => {
+describe('project tool exchange repair', () => {
   const userMsg = (text: string): ContextMessage => ({
     role: 'user',
     content: [{ type: 'text', text }],

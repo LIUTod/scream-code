@@ -161,7 +161,7 @@ describe('CustomEditor paste marker expansion', () => {
     expect(editor.getText()).toContain(longText);
   });
 
-  it('undo restores marker text; pastes map behavior follows upstream', () => {
+  it('undo restores marker text; paste map semantics preserved', () => {
     const editor = makeEditor();
     const longText = 'line\n'.repeat(15).trimEnd();
     simulateLargePaste(editor, longText);
@@ -171,7 +171,7 @@ describe('CustomEditor paste marker expansion', () => {
     simulateLargePaste(editor, 'anything');
     expect(editor.getText()).toContain(longText);
 
-    // Undo restores the marker text (upstream 0.84 undoes at text level).
+    // Undo restores the marker text (undo operates at the text level).
     (editor as any).undo();
     expect(editor.getText()).toMatch(/\[paste #1/);
   });

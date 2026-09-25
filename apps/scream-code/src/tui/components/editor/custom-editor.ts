@@ -50,9 +50,9 @@ function normalizePastedImagePath(path: string): string {
  * space/quote separated, all with image extensions), return them. Returns
  * `undefined` when the paste is mixed text + paths or contains non-image
  * content — in that case the caller should fall through to normal text
- * paste. Mirrors oh-my-pi's approach so pasting a Finder-copied image
- * file becomes a multimodal image attachment instead of a text path the
- * agent would have to Read manually.
+ * paste. Handled at the paste layer so a Finder-copied image becomes a
+ * multimodal image attachment instead of a text path the agent would have
+ * to Read manually.
  */
 function extractBracketedImagePastePaths(data: string): string[] | undefined {
   if (!data.includes(BRACKET_PASTE_START)) return undefined;

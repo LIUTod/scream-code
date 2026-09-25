@@ -108,8 +108,8 @@ export class InputController {
     );
     state.editor.setAutocompleteProvider(provider);
 
-    // Ghost-text argument hints (setArgumentHints) were a scream-fork editor
-    // API; upstream pi-tui 0.84 removed it. Argument hints now surface via
+    // Ghost-text argument hints (setArgumentHints) were an editor API that was
+    // removed from the terminal-ui dependency. Argument hints now surface via
     // the autocomplete dropdown (AutocompleteItem.argumentHint) instead.
     state.editor.onFirstInput = () => {
       this.host.stopWelcomeBreathing();

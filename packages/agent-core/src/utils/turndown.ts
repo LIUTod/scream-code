@@ -10,8 +10,9 @@ type TurndownListParent = {
 };
 
 /**
- * Build a Turndown instance configured for GFM with the fixes omp relies on:
- * `~~strikethrough~~`, unescaped heading periods, and single-space list markers.
+ * Build a Turndown instance configured for GFM with the fixes this codebase
+ * needs: `~~strikethrough~~`, unescaped heading periods, and single-space list
+ * markers.
  *
  * Shared by the web scrapers (HTML → markdown) and the markit document engine
  * (`src/markit`). The rule set must stay identical across both call sites.

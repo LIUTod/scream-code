@@ -1,7 +1,7 @@
-// Adapted from oh-my-pi's utils/markit.ts (MIT). Lazy entry point for the
-// markit document engine: keeps mammoth/mupdf off the startup import graph,
-// installs a quiet stdout hook for the mupdf WASM module, and routes every
-// conversion through the filesystem cache.
+// Adapted under the MIT License. Lazy entry point for
+// the markit document engine: keeps mammoth/mupdf off the startup import
+// graph, installs a quiet stdout hook for the mupdf WASM module, and routes
+// every conversion through the filesystem cache.
 
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';

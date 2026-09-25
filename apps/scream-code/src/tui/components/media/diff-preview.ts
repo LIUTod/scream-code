@@ -133,7 +133,6 @@ function renderDiffCode(
  * words with `chalk.inverse()`. Only the first removed/added part has its
  * leading whitespace stripped, so indentation isn't highlighted.
  *
- * Ported from oh-my-pi `packages/coding-agent/src/modes/components/diff.ts:55-95`.
  * Returns the two lines with inline inverse highlighting applied; caller wraps
  * them in the usual add/del gutter + line color.
  */

@@ -926,7 +926,7 @@ export class StreamingUIController {
       block.component.updateContent(fullText);
       this.host.state.ui.requestRender();
     }
-    // Upstream layout: visible answer text seals the activity block, so the
+    // Layout rule: visible answer text seals the activity block, so the
     // next round of work opens a fresh block right below it.
     this.sealActivityGroupOnText(fullText);
   }

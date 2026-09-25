@@ -1,15 +1,14 @@
 /**
  * Render trace cells into a self-contained interactive HTML document.
  *
- * Visual design and interaction follow the reference trajectory page
- * (DeepSeek harness ui-trajectory):
+ * Layout:
  * - 32px toolbar (title, stats, Turns collapse toggle, search filter)
  * - a 40px timeline strip: three lanes (Input / Model / Tools), one span per
  *   record positioned by sequence with kind colors, turn boundary ticks
  * - a fixed two-column ledger (122px event column + content), 30px rows
  * - a right-hand details drawer (overview grid + monospace payload blocks)
  * Clicking a timeline span or a row selects it; hovering a span highlights
- * the row. Dark palette and type styles follow the reference theme. No
+ * the row. The dark palette and type styles are self-contained. No
  * external dependencies — fully offline.
  */
 
@@ -43,7 +42,7 @@ const SPAN_COLORS: Record<TraceCell['kind'], string> = {
   tool: '#DD8629',
 };
 
-// Timeline lane per kind (mirrors the reference: Input / Model / Tools).
+// Timeline lane per kind (Input / Model / Tools).
 const KIND_LANE: Record<TraceCell['kind'], number> = {
   user: 0,
   context: 1,

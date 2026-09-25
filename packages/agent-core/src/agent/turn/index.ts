@@ -529,8 +529,8 @@ export class TurnFlow {
     // results — a network drop mid-batch would leave an assistant tool_calls
     // message with no matching tool results, and the next request would be
     // rejected by the provider. Close any abandoned exchange now by
-    // synthesizing error results (mirrors upstream handling). Guarded so this
-    // repair can never turn a finished turn into a crash.
+    // synthesizing error results. Guarded so this repair can never turn a
+    // finished turn into a crash.
     try {
       this.agent.context.closeAbandonedToolExchange(abandonedToolResultOutput(ended));
     } catch (error) {

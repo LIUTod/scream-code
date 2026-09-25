@@ -1,4 +1,4 @@
-// Adapted from markit-ai (MIT). See ./NOTICE.
+// Adapted under the MIT License. See ./NOTICE.
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { DocxConverter } from "./converters/docx";
@@ -9,11 +9,11 @@ import { XlsxConverter } from "./converters/xlsx";
 import type { ConversionResult, Converter, MarkitOptions, StreamInfo } from "./types";
 
 /**
- * In-house document → markdown engine (replaces the `markit-ai` package).
+ * In-house document → markdown engine.
  *
- * Only the document converters omp routes are registered (pdf, docx, pptx,
- * xlsx, epub). The first converter whose `accepts()` returns true and whose
- * `convert()` succeeds wins.
+ * Only the document converters this codebase needs are registered (pdf, docx,
+ * pptx, xlsx, epub). The first converter whose `accepts()` returns true and
+ * whose `convert()` succeeds wins.
  */
 export class Markit {
 	readonly #converters: readonly Converter[];

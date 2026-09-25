@@ -219,7 +219,7 @@ export class ReadTool implements BuiltinTool<ReadInput> {
   // Attempt suffix-match recovery on ENOENT. Glob **/<basename> under the
   // workspace root; on a unique hit, re-run the full read pipeline against
   // the matched path with a notice prepended. Returns null to fall through
-  // to the normal does-not-exist error. Mirrors omp findUniqueSuffixMatch.
+  // to the normal does-not-exist error.
   private async trySuffixMatchRead(
     args: ReadInput,
   ): Promise<ExecutableToolResult | null> {

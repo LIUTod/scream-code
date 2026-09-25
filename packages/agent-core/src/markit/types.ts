@@ -1,4 +1,4 @@
-// Adapted from markit-ai (MIT). See ./NOTICE.
+// Adapted under the MIT License. See ./NOTICE.
 
 export interface StreamInfo {
 	mimetype?: string;

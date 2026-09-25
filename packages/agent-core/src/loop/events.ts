@@ -82,8 +82,7 @@ export interface LoopToolResultEvent {
 /**
  * Marks the start of a content block in the step's output stream. The
  * per-block-type index (thinking/text/tool-call each count from 0) plus the
- * event order reconstructs the full block sequence of a step, matching the
- * trajectory structure of the reference implementation.
+ * event order reconstructs the full block sequence of a step.
  */
 export interface LoopBlockStartEvent {
   readonly type: 'block.start';

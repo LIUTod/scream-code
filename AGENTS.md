@@ -618,15 +618,15 @@ reply read worse than before it existed.
 - **Known limit**: box-drawing glyphs are East-Asian-Ambiguous, so a terminal
   that renders them double-width skews every frame — that is what
   `/mermaid ascii` is for, and it needs a real-terminal check, not a test
-- **Rejected after measuring**: PNG rendering (what the upstream Rust
-  implementation actually ships — SVG scaled to a pixel budget from the terminal's
-  column budget, so it has no width problem at all). Quality is fine (verified:
-  Chinese labels render, 23% non-background pixels) but the cost is a native
-  rasterizer per platform, bundled fonts, a subprocess with real timeouts, and a
-  protocol surface limited to kitty/iTerm2/Ghostty/WezTerm. The character path
-  stays. Also rejected: replicating that implementation's label wrapping, since
-  the npm port has neither wrapping nor width-aware layout (measured: `<br/>` has
-  no effect and long labels are truncated) — it would mean writing a layout engine
+- **Rejected after measuring**: PNG rendering (SVG scaled to a pixel budget from
+  the terminal's column budget, so it has no width problem at all). Quality is
+  fine (verified: Chinese labels render, 23% non-background pixels) but the cost
+  is a native rasterizer per platform, bundled fonts, a subprocess with real
+  timeouts, and a protocol surface limited to kitty/iTerm2/Ghostty/WezTerm. The
+  character path stays. Also rejected: label wrapping, since the drawing library
+  the TUI uses has neither wrapping nor width-aware layout
+  (measured: `<br/>` has no effect and long labels are truncated) — it would mean
+  writing a layout engine
 
 ### Scheduled Tasks (`/cron`)
 

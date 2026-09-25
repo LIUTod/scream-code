@@ -1,12 +1,11 @@
 /**
  * Subagent message bus — the parent→child directed-message channel.
  *
- * Modeled on the directed-message semantics of the reference implementation
- * (send_subagent_message): the only legitimate sender is the parent agent, and
- * a high-priority "steer" operation is dequeued before plain "queue" messages.
- * A steer aimed at a child whose turn is running is injected into that turn by
- * the host (it joins at the child's next step boundary); everything else waits
- * in the mailbox for the child's next turn start.
+ * Directed-message semantics: the only legitimate sender is the parent agent,
+ * and a high-priority "steer" operation is dequeued before plain "queue"
+ * messages. A steer aimed at a child whose turn is running is injected into
+ * that turn by the host (it joins at the child's next step boundary);
+ * everything else waits in the mailbox for the child's next turn start.
  *
  * This is an in-memory, per-session structure: nothing here is persisted to
  * the session store, emitted over RPC, or survives a process restart. Child

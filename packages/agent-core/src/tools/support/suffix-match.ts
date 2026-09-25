@@ -1,7 +1,7 @@
 // Path resilience helpers - suffix-match recovery and multi-path partitioning.
-// Ported from omp read.ts:585-646 and path-utils.ts:897-922, adapted for
-// scream-code's jian interface (async generator glob instead of native NAPI,
-// jian.stat instead of Bun.file().stat()).
+// Written against the jian interface: glob is an async generator rather than a
+// native binding, and existence checks go through jian.stat instead of a
+// runtime-specific file handle.
 
 import type { Jian } from '@scream-code/jian';
 
@@ -11,7 +11,7 @@ import { resolvePathAccessPath } from '../policies/path-access';
 const SUFFIX_MATCH_TIMEOUT_MS = 5000;
 
 // Escape glob metacharacters using character-class [x] escaping because
-// jian's glob layer treats backslash as a literal. Mirrors omp read.ts:600.
+// jian's glob layer treats backslash as a literal.
 export function escapeGlobMetachars(value: string): string {
   return value.replaceAll(/[*?[{]/g, '[$&]');
 }
@@ -23,13 +23,13 @@ export interface SuffixMatchResult {
 
 // Per-execute memoize. Map.get returning undefined means not probed yet;
 // returning null means probed and confirmed miss. Not reused across executes
-// to avoid stale paths. Mirrors omp read.ts:807, 899-909.
+// to avoid stale paths.
 export type SuffixMatchCache = Map<string, SuffixMatchResult | null>;
 
 // Glob with pattern "**/" + escaped basename under searchRoot and return
 // the unique match. Returns null on zero matches, multiple matches
 // (ambiguous), or timeout (5s). A missing searchRoot yields nothing from
-// jian.glob and also resolves to null. Mirrors omp read.ts:609-646.
+// jian.glob and also resolves to null.
 export async function findUniqueSuffixMatch(
   rawPath: string,
   searchRoot: string,
@@ -84,7 +84,7 @@ export async function findUniqueSuffixMatch(
 }
 
 // Build the notice prepended to a read result when a path was recovered
-// via suffix match. Mirrors omp read.ts:658-663.
+// via suffix match.
 export function suffixResolutionNotice(from: string, to: string): string {
   return `[Path '${from}' not found; resolved to '${to}' via suffix match]`;
 }
@@ -103,7 +103,6 @@ function isFileNotFoundErrorLike(error: unknown): boolean {
 // Batch-stat paths and split into valid / missing. Only ENOENT / ENOTDIR are
 // swallowed - other stat errors (permissions, IO) propagate. Paths are raw
 // user input; each is resolved via resolvePathAccessPath before stat.
-// Mirrors omp path-utils.ts:897-922.
 export async function partitionExistingPaths(
   paths: string[],
   jian: Jian,

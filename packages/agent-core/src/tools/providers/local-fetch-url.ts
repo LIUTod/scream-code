@@ -67,7 +67,7 @@ function resolveDocumentExtension(
   return undefined;
 }
 
-/** Hard ceiling for one markit conversion (omp uses 20s; allow slow hosts). */
+/** Hard ceiling for one markit conversion — generous enough for slow hosts. */
 const CONVERSION_TIMEOUT_MS = 30_000;
 
 export interface LocalFetchURLProviderOptions {

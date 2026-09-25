@@ -29,7 +29,7 @@ describe('renderTraceHtml', () => {
     expect(html).toContain('sess-1');
     expect(html).toContain('id="data"');
     expect(html).toContain('"text":"hello"');
-    // dsh-style skeleton: toolbar + timeline + fixed two-column table + drawer.
+    // Self-contained skeleton: toolbar + timeline + fixed two-column table + drawer.
     expect(html).toContain('class="toolbar"');
     expect(html).toContain('id="timeline-track"');
     expect(html).toContain('id="turns"');

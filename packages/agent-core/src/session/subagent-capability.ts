@@ -1,10 +1,9 @@
 /**
  * Subagent capability modes and their tool-set policy.
  *
- * Modeled on the reference implementation's capability modes (read-only /
- * read-write / execute / all): a mode is enforced at the tool level, not just
- * by prompting. `all` keeps the profile's full tool set; stricter modes strip
- * it down to the tools the mode permits.
+ * Capability modes (read-only / read-write / execute / all): a mode is
+ * enforced at the tool level, not just by prompting. `all` keeps the profile's
+ * full tool set; stricter modes strip it down to the tools the mode permits.
  *
  * Tool classification is by name, matching the BuiltinTool `name` constants.
  * Unknown tool names are kept (a future tool should fail open rather than

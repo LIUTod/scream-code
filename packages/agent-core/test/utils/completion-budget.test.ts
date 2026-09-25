@@ -57,8 +57,8 @@ describe('computeCompletionBudgetCap', () => {
       capability: makeCapability(maxCtx),
     });
     // max_tokens is an output-only limit, not the full context window.
-    // Capped at 64K (aligned with oh-my-pi's OUTPUT_CAP_WHEN_UNKNOWN) to
-    // prevent the context-window value from being used as max_tokens.
+    // Capped at 64K to prevent the context-window value from being used
+    // as max_tokens.
     expect(cap).toBe(64_000);
   });
 

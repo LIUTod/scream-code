@@ -271,8 +271,7 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
       // Foreground child signal: user cancellation propagates through
       // linkAbortSignal, but an explicit timeout only bounds this turn's wait —
       // when it fires the still-running child is handed to the background task
-      // manager instead of being aborted, so completed work is never discarded
-      // (mirrors the reference implementation's foreground-budget auto-background).
+      // manager instead of being aborted, so completed work is never discarded.
       const childController = new AbortController();
       const unlinkChild = !runInBackground ? linkAbortSignal(signal, childController) : undefined;
 
@@ -360,9 +359,8 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
 
       // Foreground wait. With an explicit timeout the wait is bounded by a race:
       // on timeout the still-running child is handed to the background task
-      // manager instead of being aborted (foreground-budget → auto-background,
-      // matching the reference implementation). Without a timeout (or when
-      // background dispatch is unavailable) we await completion directly.
+      // manager instead of being aborted. Without a timeout (or when background
+      // dispatch is unavailable) we await completion directly.
       try {
         const outcome = await this.awaitForegroundCompletion(
           handle,
@@ -414,9 +412,8 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
    * When `timeoutMs` is set and background dispatch is available, the wait is
    * bounded by a race: if the child has not finished by the deadline it is
    * handed to the background task manager (never aborted) and the caller
-   * receives a `backgrounded` outcome carrying the task id. This mirrors the
-   * reference implementation's foreground-budget → auto-background behaviour:
-   * a timeout degrades the wait, it does not destroy the subagent's work.
+   * receives a `backgrounded` outcome carrying the task id. A timeout degrades
+   * the wait; it does not destroy the subagent's work.
    */
   private async awaitForegroundCompletion(
     handle: SubagentHandle,
@@ -475,9 +472,8 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
         };
       }
       // Handoff succeeded: decouple the child from the parent signal so a later
-      // parent cancellation cannot kill the backgrounded task (matches the
-      // reference implementation's backgrounded lifecycle — only an explicit
-      // TaskStop of the background task aborts it from now on).
+      // parent cancellation cannot kill the backgrounded task — only an explicit
+      // TaskStop of the background task aborts it from now on.
       unlinkChild?.();
       // Flip the child's lifecycle flag so cancelAll (parent-turn cancellation)
       // skips it as well — otherwise a later user interruption would still

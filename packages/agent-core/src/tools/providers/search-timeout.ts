@@ -1,5 +1,5 @@
 /**
- * Hard timeout for outbound web-search requests (omp pattern).
+ * Hard timeout for outbound web-search requests.
  *
  * A stalled TCP/TLS connection can keep an undici fetch pending for minutes;
  * composing the caller's signal with a fixed ceiling guarantees the request

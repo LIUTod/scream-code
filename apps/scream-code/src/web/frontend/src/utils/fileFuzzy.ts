@@ -1,7 +1,7 @@
 /**
  * Pure helpers for the composer's @ file autocomplete.
  *
- * Behavior contract (mirrors the reference web client):
+ * Behavior contract:
  * - @ triggers at line start or after whitespace (emails never trigger);
  * - entries are ranked with the scoreEntry ladder (exact / prefix / substring
  *   / path-substring / subsequence, directories +10);

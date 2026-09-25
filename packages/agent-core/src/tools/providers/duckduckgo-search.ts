@@ -6,7 +6,7 @@
  * parses the static results page. Two earlier approaches were dropped:
  *   - Instant Answer API (`api.duckduckgo.com`): only returns content for
  *     Wikipedia/Wolfram-Alpha-style topics — empty for the vast majority of
- *     agent queries (omp #3799).
+ *     agent queries.
  *   - Lite endpoint (`lite.duckduckgo.com`) with a bare request: high
  *     bot-detection rate without a browser User-Agent.
  *

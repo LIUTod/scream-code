@@ -1,10 +1,9 @@
 /**
  * Trace cell model for the `/trace` command.
  *
- * The cell shape mirrors the reference trajectory record model (DeepSeek
- * harness, ui-trajectory) — a closed set of kinds plus per-cell facts (index,
- * summary, token counts, duration, details) — adapted to this codebase:
- * no React dependency, no dsh-internal types.
+ * A closed set of cell kinds plus per-cell facts (index, summary, token counts,
+ * duration, details). Self-contained: no UI-framework dependency and no types
+ * from outside this codebase.
  */
 
 export type TraceCellKind = 'system' | 'user' | 'context' | 'compacted' | 'message' | 'tool';

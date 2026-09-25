@@ -180,9 +180,9 @@ export class ReadGroupTool implements BuiltinTool<ReadGroupInput> {
   ): Promise<ExecutableToolResult> {
     const paths = items.map((i) => i.path);
 
-    // Multi-path: batch-stat probe and skip missing entries (aligned with
-    // omp partitionExistingPaths). Single-path keeps strict ENOENT semantics
-    // so the Read tool's own suffix-match recovery can fire.
+    // Multi-path: batch-stat probe and skip missing entries. Single-path
+    // keeps strict ENOENT semantics so the Read tool's own suffix-match
+    // recovery can fire.
     let missingPaths: string[] = [];
     if (paths.length > 1) {
       const probePaths = items

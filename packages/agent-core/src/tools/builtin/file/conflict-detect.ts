@@ -5,7 +5,7 @@
  * and, when found, appends a notice to the read result so the model does not
  * silently edit a file with unresolved conflicts.
  *
- * Marker shape is strict (ported from oh-my-pi `conflict-detect.ts:171-176`):
+ * Marker shape is strict:
  * prefix alone, or prefix + single space + label. Lines that merely start
  * with `<` or `=` never match. Only fully-closed blocks (opener + separator
  * + closer all present in the scanned window) are reported — an open block

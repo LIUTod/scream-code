@@ -3,9 +3,8 @@
  * epub are all ZIP containers). Read-only: stored + deflate entries via
  * fflate, which is pure JS and works on every platform.
  *
- * omp frames ZIP manually over node:zlib (their utils/zip.ts also covers tar
- * via Bun.Archive); the converters only ever need `unzip`/`unzipText`, so a
- * fflate-backed equivalent keeps the surface tiny.
+ * The converters only ever need `unzip`/`unzipText`, so a small fflate-backed
+ * reader is enough; no tar support is required here.
  */
 import { unzipSync } from 'fflate';
 

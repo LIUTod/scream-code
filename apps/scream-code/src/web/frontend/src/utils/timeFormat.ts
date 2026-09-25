@@ -1,5 +1,5 @@
 /**
- * Message timestamp for the meta row — mirrors the reference formatting:
+ * Message timestamp for the meta row:
  * today → `HH:MM`; past days → localized month/day with CJK unit characters (as emitted by the
  * templates below) + `HH:MM`; past years → localized year/month/day with the same unit
  * characters + `HH:MM`.

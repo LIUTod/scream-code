@@ -11,8 +11,8 @@
  * Scope is per-`ScreamTUI` instance. Reloads (`/new`, `/clear`,
  * session switch) call `clear()` so ids restart from 1 and stale
  * prompt attachments are dropped. We intentionally do NOT persist
- * attachments across sessions — coding-agent doesn't either, and
- * `--resume` wouldn't know how to materialize the files anyway.
+ * attachments across sessions, and `--resume` wouldn't know how to
+ * materialize the files anyway.
  */
 import { unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';

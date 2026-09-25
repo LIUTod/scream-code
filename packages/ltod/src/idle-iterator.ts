@@ -3,15 +3,15 @@ import { APITimeoutError } from './errors';
 /**
  * Idle-stream watchdog.
  *
- * Ported from oh-my-pi `packages/ai/src/utils/idle-iterator.ts:154-382`.
  * Reasoning models (deepseek-reasoner, mimo thinking) can sit silent for
  * 30s+ between tokens; without a watchdog the stream hangs forever and the
  * user thinks the agent died. This wraps any async iterable with a per-item
  * idle deadline, turning a stalled stream into a retryable `APITimeoutError`.
  *
- * Simplified from the upstream version: no `armPreResponseTimeout`, no
- * `iterateWithTerminalGrace`, no per-provider env-var aliases. The core
- * racer-reuse and single-timer-self-rearm design is preserved verbatim.
+ * Deliberately narrow: no pre-response arming, no terminal grace iteration and
+ * no per-provider env-var aliases. The core design — reuse one racer promise
+ * across iterations (re-minted every 1024 races to bound retention) and
+ * self-rearm a single timer per item — is all this needs.
  */
 
 const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 60_000;
