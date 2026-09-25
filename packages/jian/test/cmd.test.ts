@@ -62,7 +62,7 @@ describe.skipIf(process.platform !== 'win32')('LocalJian cmd.exe', () => {
   });
 
   afterEach(async () => {
-    await rm(tmpDir, { recursive: true, force: true });
+    await rm(tmpDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 25 });
   });
 
   it('should run a simple command', async () => {

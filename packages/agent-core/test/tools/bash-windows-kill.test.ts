@@ -182,7 +182,7 @@ describe.skipIf(process.platform === 'win32')(
     afterEach(async () => {
       killQuietly(grandchild);
       vi.unstubAllEnvs();
-      await rm(dir, { recursive: true, force: true });
+      await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 25 });
     });
 
     it('stops the whole tree through taskkill /F /T and reports the task killed', async () => {
@@ -226,7 +226,7 @@ describe.skipIf(process.platform !== 'win32')(
         await expect(exitsWithin(grandchild as number, 5_000)).resolves.toBe(true);
       } finally {
         killQuietly(grandchild);
-        await rm(dir, { recursive: true, force: true });
+        await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 25 });
       }
     }, 30_000);
   },

@@ -32,7 +32,7 @@ afterEach(() => {
     } catch {
       // Directory may already be gone.
     }
-    rmSync(dir, { recursive: true, force: true });
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 25 });
   }
 });
 

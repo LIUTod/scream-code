@@ -49,7 +49,7 @@ describe('module-level proxy functions', () => {
       expect(collected).toEqual(['alpha\n', 'bravo\n', 'charlie']);
       expect(collected.join('')).toBe('alpha\nbravo\ncharlie');
     } finally {
-      await rm(dir, { recursive: true, force: true });
+      await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 25 });
     }
   });
 
@@ -63,7 +63,7 @@ describe('module-level proxy functions', () => {
       const contents = await readText(filePath, { encoding: 'latin1' });
       expect(contents).toBe('hello-latin1');
     } finally {
-      await rm(dir, { recursive: true, force: true });
+      await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 25 });
     }
   });
 

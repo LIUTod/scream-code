@@ -144,7 +144,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 async function removeTempDir(dir: string): Promise<void> {
   for (let attempt = 0; attempt < 10; attempt += 1) {
     try {
-      await rm(dir, { recursive: true, force: true });
+      await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 25 });
       return;
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
@@ -155,5 +155,5 @@ async function removeTempDir(dir: string): Promise<void> {
     }
   }
 
-  await rm(dir, { recursive: true, force: true });
+  await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 25 });
 }

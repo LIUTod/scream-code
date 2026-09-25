@@ -162,9 +162,19 @@ function collectHits(): RoleUserHit[] {
 
 const hits = collectHits();
 
-/** All `.ts` files the guard actually read, for the self-check below. */
+/**
+ * All `.ts` files the guard actually read, for the self-check below.
+ *
+ * `globSync` yields host-native separators, so the entries are normalised to
+ * `/` before they are compared against the repo-relative constants above — the
+ * same normalisation `collectHits()` applies. Without it a Windows walk returns
+ * `packages\agent-core\src\…` and the self-check fails against a guard that is
+ * in fact scanning exactly the right files.
+ */
 const scannedFiles = SCAN_ROOTS.flatMap((root) =>
-  globSync('**/*.ts', { cwd: join(REPO_ROOT, root) }).map((file) => `${root}/${file}`),
+  globSync('**/*.ts', { cwd: join(REPO_ROOT, root) }).map(
+    (file) => `${root}/${file.split('\\').join('/')}`,
+  ),
 );
 
 const allowedKey = (site: { file: string; code: string }) => `${site.file}\u0000${site.code}`;

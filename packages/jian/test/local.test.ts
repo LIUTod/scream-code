@@ -33,7 +33,7 @@ describe('LocalJian', () => {
   });
 
   afterEach(async () => {
-    await rm(tempDir, { recursive: true, force: true });
+    await rm(tempDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 25 });
   });
 
   describe('pathClass, gethome, getcwd', () => {
@@ -714,8 +714,8 @@ describe('LocalJian instance isolation', () => {
       expect(outA.toString('utf-8')).toBe(tmpA);
       expect(outB.toString('utf-8')).toBe(tmpB);
     } finally {
-      await rm(tmpA, { recursive: true, force: true });
-      await rm(tmpB, { recursive: true, force: true });
+      await rm(tmpA, { recursive: true, force: true, maxRetries: 10, retryDelay: 25 });
+      await rm(tmpB, { recursive: true, force: true, maxRetries: 10, retryDelay: 25 });
     }
   });
 });
@@ -773,26 +773,34 @@ describe('LocalProcess.kill safety', () => {
       const jian = await LocalJian.create();
       const tmp = await realpath(await mkdtemp(join(tmpdir(), 'jian-killtree-')));
       try {
-        const pidFile = join(tmp, 'grandchild.pid').replaceAll('\\', '\\\\');
+        const pidPath = join(tmp, 'grandchild.pid');
         // Parent: spawns a child that spawns a grandchild (long-running).
         // The grandchild writes its own pid to a file so the test can
         // later check if it's still alive.
+        //
+        // The pidfile path travels through two levels of JavaScript source: the
+        // script below is handed to `node -e`, and it hands a second script to
+        // its own `node -e`. A template literal unescapes once per level, so a
+        // Windows path (`C:\…`) interpolated directly arrives one level short
+        // and the inner script dies with `SyntaxError` on what were the path
+        // separators — the pidfile is then never written and this test fails on
+        // its own fixture. `JSON.stringify` at each level keeps it intact.
+        const childCode = [
+          'const { spawn } = require("node:child_process");',
+          'const { writeFileSync } = require("node:fs");',
+          'const g = spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)"]);',
+          `writeFileSync(${JSON.stringify(pidPath)}, String(g.pid));`,
+          'setInterval(() => {}, 1000);',
+        ].join('');
         const code = `
           const { spawn } = require('node:child_process');
-          const child = spawn(process.execPath, ['-e', \`
-            const { spawn } = require('node:child_process');
-            const { writeFileSync } = require('node:fs');
-            const g = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)']);
-            writeFileSync('${pidFile}', String(g.pid));
-            setInterval(() => {}, 1000);
-          \`], { stdio: 'inherit' });
+          const child = spawn(process.execPath, ['-e', ${JSON.stringify(childCode)}], { stdio: 'inherit' });
           setInterval(() => {}, 1000);
         `;
         const proc = await jian.exec('node', '-e', code);
 
         // Wait for grandchild pid to be written.
         const { stat, readFile } = await import('node:fs/promises');
-        const pidPath = join(tmp, 'grandchild.pid');
         const start = Date.now();
         while (Date.now() - start < 5000) {
           try {
@@ -825,7 +833,7 @@ describe('LocalProcess.kill safety', () => {
 
         expect(reaped).toBe(true);
       } finally {
-        await rm(tmp, { recursive: true, force: true });
+        await rm(tmp, { recursive: true, force: true, maxRetries: 10, retryDelay: 25 });
       }
     },
     15_000,
@@ -886,7 +894,7 @@ describe('LocalProcess.kill safety', () => {
 
         expect(reaped).toBe(true);
       } finally {
-        await rm(tmp, { recursive: true, force: true });
+        await rm(tmp, { recursive: true, force: true, maxRetries: 10, retryDelay: 25 });
       }
     },
     15_000,
@@ -933,7 +941,7 @@ describe('LocalJian optional root sandbox', () => {
     await mkdir(sandboxDir);
   });
   afterEach(async () => {
-    await rm(tempDir, { recursive: true, force: true });
+    await rm(tempDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 25 });
   });
 
   it('rejects file operations outside the configured root', async () => {

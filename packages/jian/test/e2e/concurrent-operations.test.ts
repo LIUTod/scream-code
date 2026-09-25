@@ -22,7 +22,7 @@ describe('e2e: concurrent operations', () => {
 
   afterEach(async () => {
     process.chdir(originalCwd);
-    await rm(tempDir, { recursive: true, force: true });
+    await rm(tempDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 25 });
   });
 
   describe('concurrent reads and writes on different files', () => {

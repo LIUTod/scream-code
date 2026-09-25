@@ -85,7 +85,7 @@ describe.skipIf(process.platform === 'win32')('LocalJian shell operations', () =
   });
 
   afterEach(async () => {
-    await rm(tmpDir, { recursive: true, force: true });
+    await rm(tmpDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 25 });
   });
 
   // NOTE: These tests mirror Python test_local_jian_sh.py one-for-one.

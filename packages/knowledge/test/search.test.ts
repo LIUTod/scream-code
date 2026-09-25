@@ -129,7 +129,7 @@ describe('multiSearch (integration with stubs)', () => {
 
   afterEach(async () => {
     store.close();
-    await rm(tmpDir, { recursive: true, force: true });
+    await rm(tmpDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 25 });
   });
 
   it('returns empty results on empty knowledge base', async () => {
@@ -213,7 +213,7 @@ describe('multiSearchWithTrace', () => {
   afterEach(async () => {
     vi.restoreAllMocks();
     store.close();
-    await rm(tmpDir, { recursive: true, force: true });
+    await rm(tmpDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 25 });
   });
 
   it('records steps for each retrieval phase on a hit', async () => {

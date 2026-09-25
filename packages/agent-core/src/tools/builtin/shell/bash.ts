@@ -176,8 +176,19 @@ function renderBashDescription(shellName: string, isPowerShell: boolean): string
   });
 }
 
+/**
+ * The description with its background-mode paragraph replaced by a refusal.
+ *
+ * The replacements below match literal template text, and the first one anchors
+ * on a blank line (`\n\n`). A checkout whose line endings are CRLF — which is
+ * what Windows runners get from Git by default — renders that blank line as
+ * `\r\n\r\n`, so the anchor never matches and the background paragraph survives
+ * into a tool that cannot run background commands. Normalise the line endings
+ * first: the result must not depend on how the template file was checked out.
+ */
 function withoutBackgroundDescription(description: string): string {
   return description
+    .replaceAll('\r\n', '\n')
     .replace(
       /\n\nIf `run_in_background=true`,[\s\S]*?point them to the `\/tasks` command, which opens an interactive panel; it has no subcommands\./,
       '\n\nBackground execution is disabled for this agent. Do not set `run_in_background=true`.',

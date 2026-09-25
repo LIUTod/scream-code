@@ -13,6 +13,11 @@
  *
  * `windowsSpawnPlan` is asserted directly rather than through a stubbed
  * `child_process`, so the exact argv is pinned without an emulated `cmd.exe`.
+ *
+ * The two end-to-end execution tests below do spawn, and they stand a Windows
+ * tool in with a POSIX shell script — which no Windows host can run — so they
+ * skip on Windows itself; the argv they exercise is asserted above on every
+ * host.
  */
 
 import { chmod, mkdtemp, rm, writeFile, mkdir } from 'node:fs/promises';
@@ -103,7 +108,7 @@ describe('windowsSpawnPlan', () => {
 
   afterEach(async () => {
     vi.unstubAllEnvs();
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 25 });
   });
 
   function env(overrides: Record<string, string> = {}): Record<string, string> {
@@ -281,10 +286,15 @@ describe('LocalJian Windows execution', () => {
 
   afterEach(async () => {
     vi.unstubAllEnvs();
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 25 });
   });
 
-  it('runs the executable a bare name resolves to', async () => {
+  // `writeExecutable` stands a Windows tool in with a POSIX shell script, which
+  // only a POSIX host can launch — Windows refuses a text file however it is
+  // named, so the assertion would be about the stub, not the resolution. The
+  // resolution itself is pinned by the `windowsSpawnPlan` tests above, which run
+  // on every host.
+  it.skipIf(process.platform === 'win32')('runs the executable a bare name resolves to', async () => {
     await writeExecutable(join(dir, 'npm.EXE'), 'resolved-exe');
     vi.stubEnv('PATH', dir);
     vi.stubEnv('PATHEXT', DEFAULT_PATHEXT);
@@ -297,7 +307,11 @@ describe('LocalJian Windows execution', () => {
     expect(output.trim()).toBe('resolved-exe');
   });
 
-  it('routes a .CMD shim through cmd.exe', async () => {
+  // Premise: this host has no `cmd.exe`, so the route to `ComSpec` is only
+  // observable as a spawn failure naming it. On Windows that interpreter exists
+  // and the spawn succeeds — the rejection asserted below cannot happen — so the
+  // routing is pinned by the `windowsSpawnPlan` tests above instead.
+  it.skipIf(process.platform === 'win32')('routes a .CMD shim through cmd.exe', async () => {
     await writeExecutable(join(dir, 'npm.CMD'), 'resolved-cmd');
     vi.stubEnv('PATH', dir);
     vi.stubEnv('PATHEXT', DEFAULT_PATHEXT);

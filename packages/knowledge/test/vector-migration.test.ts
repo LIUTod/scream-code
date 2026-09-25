@@ -58,7 +58,7 @@ describe('vector storage migration', () => {
   });
 
   afterEach(async () => {
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 25 });
   });
 
   it('rewrites legacy JSON vectors to BLOBs (user_version 2) and search still matches', async () => {

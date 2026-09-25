@@ -32,7 +32,7 @@ describe('MemoryMemoStore', () => {
   });
 
   afterEach(async () => {
-    await rm(tmpDir, { recursive: true, force: true });
+    await rm(tmpDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 25 });
   });
 
   describe('append / get', () => {
@@ -257,7 +257,7 @@ describe('migrateLegacyStores', () => {
   });
 
   afterEach(async () => {
-    await rm(tmpDir, { recursive: true, force: true });
+    await rm(tmpDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 25 });
   });
 
   it('migrates per-session entries to the global store and deletes legacy files', async () => {

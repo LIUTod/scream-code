@@ -17,7 +17,7 @@ describe('KnowledgeStore', () => {
 
   afterEach(async () => {
     store.close();
-    await rm(tmpDir, { recursive: true, force: true });
+    await rm(tmpDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 25 });
   });
 
   describe('sources', () => {

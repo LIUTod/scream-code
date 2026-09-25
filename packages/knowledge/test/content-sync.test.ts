@@ -75,8 +75,8 @@ describe('content fingerprint sync (same-path update)', () => {
 
   afterEach(async () => {
     store.close();
-    await rm(tmpDir, { recursive: true, force: true });
-    await rm(docDir, { recursive: true, force: true });
+    await rm(tmpDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 25 });
+    await rm(docDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 25 });
   });
 
   it('first ingest creates; identical content skips without recomputing', async () => {

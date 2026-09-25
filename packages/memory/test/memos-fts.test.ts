@@ -31,7 +31,7 @@ describe('SQLite-backed MemoryMemoStore FTS', () => {
   });
 
   afterEach(async () => {
-    await rm(tmpDir, { recursive: true, force: true });
+    await rm(tmpDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 25 });
   });
 
   it('indexes mixed CJK and ASCII so English words are searchable', async () => {

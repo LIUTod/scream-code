@@ -81,7 +81,7 @@ afterEach(() => {
 });
 
 afterAll(() => {
-  rmSync(testRoot, { recursive: true, force: true });
+  rmSync(testRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 25 });
 });
 
 // ─── buildEmbeddingText ────────────────────────────────────────────
