@@ -6,9 +6,9 @@
   "type": "module",
   "scripts": {
     "build": "pnpm -r run build",
-    "build:packages": "pnpm -r --filter './packages/*' run build",
+    "build:packages": "pnpm -r --filter \"@scream-code/*\" run build",
     "dev:cli": "pnpm -C apps/scream-code run dev",
-    "typecheck": "pnpm run build:packages && pnpm -r --filter './packages/*' run typecheck && pnpm --filter scream-code run typecheck",
+    "typecheck": "pnpm run build:packages && pnpm -r --filter \"@scream-code/*\" run typecheck && pnpm --filter scream-code run typecheck",
     "lint": "oxlint --type-aware",
     "lint:fix": "pnpm run lint --fix",
     "lint:pkg": "pnpm -r --filter '!scream-code-monorepo' exec publint && pnpm -r --filter './packages/*' exec attw --pack . --profile node16 --ignore-rules cjs-resolves-to-esm internal-resolution-error",
