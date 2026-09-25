@@ -690,11 +690,37 @@ export class TurnFlow {
                   { kind: 'system_trigger', name: 'todo_required' },
                 );
               }
-              if (stepNumber === 2 && !this.todoSeenThisTurn) {
+              // Only a turn that reached step 3 is genuinely multi-step: steps 1
+              // and 2 each had to produce a tool call for step 3 to exist. A
+              // short two-step task finishes before this fires and is never
+              // nudged toward a todo list it does not need.
+              if (stepNumber === 3 && !this.todoSeenThisTurn) {
                 this.agent.context.appendSystemReminder(
                   'This task spans multiple steps. Use TodoList to track the remaining work and current phase.',
                   { kind: 'system_trigger', name: 'todo_suggested' },
                 );
+              }
+
+              // Pre-answer todo reconcile: keep the model's own list honest *before* it
+              // writes its final answer. This used to run in the stop gate, which appended
+              // a whole extra round (thinking + TodoList) after the answer had already been
+              // streamed — visible churn with no user value. Injecting it here folds the
+              // update into the work the turn is already doing.
+              //
+              // Guarded on `todoSeenThisTurn` so a stale list left over from an earlier turn
+              // never produces a nudge, and bounded to one injection per turn.
+              if (!this.todoReconcileInjected && this.todoSeenThisTurn) {
+                const todos = this.agent.tools.getTodos();
+                if (todos.some((todo) => todo.status !== 'done')) {
+                  this.todoReconcileInjected = true;
+                  this.agent.context.appendSystemReminder(
+                    'Before you write your final answer this turn, reconcile the TodoList with reality: ' +
+                      'mark only work that is actually finished as done, leave unfinished items pending or ' +
+                      'in_progress, and keep blockers accurate. Do not mark incomplete work as done. ' +
+                      'Fold this into the work you are already doing rather than spending a separate round on it.',
+                    { kind: 'system_trigger', name: 'todo_reconcile' },
+                  );
+                }
               }
 
               if (stepNumber === 1 || this.agent.fullCompaction.shouldInjectSessionSummary()) {
@@ -727,6 +753,30 @@ export class TurnFlow {
             },
             // oxlint-disable-next-line no-loop-func -- stop hook continuation state is scoped to this turn.
             shouldContinueAfterStop: async ({ signal, stopReason }) => {
+              // Continuation categories for the stop gate. Every
+              // `return { continue: true }` below carries an `// allow: <category>`
+              // tag on the line directly above it; `test/agent/turn-stop-gate.test.ts`
+              // reads this source and fails if a tag is missing or unknown.
+              //   correction     — the work itself is wrong or unfinished: a
+              //                    required tool failed, verification failed, the
+              //                    step produced nothing, or the response was
+              //                    truncated by the output limit.
+              //   external-input — something outside the model is waiting: a
+              //                    buffered steer, or a Stop hook blocking the stop.
+              //   quality-floor  — the final response is too short to be
+              //                    deliverable (summary guard).
+              //
+              // NO FOURTH CATEGORY — internal state maintenance (checklist
+              // bookkeeping, goal-progress accounting, how tidy the summary reads)
+              // must never continue a turn. This gate runs only after the final
+              // answer has already streamed to the user, so such a continuation
+              // shows up as a whole extra block (thinking + tool calls) after the
+              // answer: user-visible noise that pushes the answer up, for tokens
+              // spent on nothing. Those reminders belong in `beforeStep`, i.e.
+              // before the answer.
+              //
+              // See the 「续轮输出纪律」 section of `docs/turn-pipeline.md`.
+              // allow: external-input
               if (this.flushSteerBuffer()) return { continue: true };
               signal.throwIfAborted();
 
@@ -750,15 +800,19 @@ export class TurnFlow {
                   source: 'auto',
                   instruction: 'The previous response was truncated by the output limit. Compact the context and continue.',
                 });
+                // allow: correction
                 return { continue: true };
               }
 
               // Convergence gate: prevent the turn from ending on an empty step,
-              // a missing TodoList update for an active goal, a blocking (non-exploratory)
-              // tool failure, or a failed verification command. We no longer force
-              // verification just because files were touched — the agent decides whether
-              // a verification pass is appropriate based on the user's intent and the
-              // system prompt guidance.
+              // a blocking (non-exploratory) tool failure, or a failed
+              // verification command. We no longer force verification just
+              // because files were touched — the agent decides whether a
+              // verification pass is appropriate based on the user's intent and
+              // the system prompt guidance. Checklist upkeep never continues the
+              // turn either: it is handled before the answer (the step-1 goal
+              // reminder and the pre-answer reconcile nudge), so the model is
+              // never sent back to the list after its answer was written.
               const latestVerification = this.agent.workingSet.getLatestVerificationForTurn(this.currentTurnId);
               const hasPassedVerificationThisTurn = latestVerification?.passed === true;
 
@@ -771,12 +825,6 @@ export class TurnFlow {
                   );
                 }
 
-                const goal = this.agent.goal.getGoal().goal;
-                if (goal?.status === 'active' && !this.todoSeenThisTurn) {
-                  reasons.push(
-                    'An active goal exists but no TodoList update was made this turn. Update TodoList and continue.',
-                  );
-                }
                 if (this.lastToolFailure?.isExploratory === false && !hasPassedVerificationThisTurn) {
                   reasons.push(
                     `A required tool (${this.lastToolFailure.toolName}) failed this turn. ` +
@@ -798,6 +846,7 @@ export class TurnFlow {
                       '\n\nDo not report completion until the above is resolved.',
                     { kind: 'system_trigger', name: 'convergence_gate' },
                   );
+                  // allow: correction
                   return { continue: true };
                 }
               }
@@ -818,12 +867,13 @@ export class TurnFlow {
                     'remaining work or blockers.',
                   { kind: 'system_trigger', name: 'convergence_gate' },
                 );
+                // allow: quality-floor
                 return { continue: true };
               }
 
               // Stop hooks get one continuation; otherwise a hook that always
-              // blocks would loop forever. Gate only the hook — flush and
-              // todo reconcile must still run on the post-hook stop path.
+              // blocks would loop forever. Gate only the hook — the final
+              // steer flush below must still run on the post-hook stop path.
               if (!stopHookContinuationUsed) {
                 const stopBlock = await this.agent.hooks?.triggerBlock('Stop', {
                   signal,
@@ -839,6 +889,7 @@ export class TurnFlow {
                       name: 'stop_hook',
                     },
                   );
+                  // allow: external-input
                   return { continue: true };
                 }
               }
@@ -847,27 +898,8 @@ export class TurnFlow {
               // even though the sender already received a "delivered" ack. Flush
               // once more; anything still buffered after this point races genuine
               // teardown, same as steering the main agent mid-teardown.
+              // allow: external-input
               if (this.flushSteerBuffer()) return { continue: true };
-              // One bounded continuation so the model can reconcile todo statuses
-              // before the final answer. Never auto-marks work complete. Skipped
-              // while background tasks run (their steers will re-enter) or on
-              // max_tokens (a separate continuation path already exists).
-              if (
-                !this.todoReconcileInjected &&
-                stopReason !== 'max_tokens' &&
-                this.agent.background.list().length === 0
-              ) {
-                const todos = this.agent.tools.getTodos();
-                const unfinished = todos.some((todo) => todo.status !== 'done');
-                if (unfinished && todos.length > 0) {
-                  this.todoReconcileInjected = true;
-                  this.agent.context.appendSystemReminder(
-                    'Before ending the turn, reconcile the TodoList with reality: mark only work that is actually finished as done, leave unfinished items pending or in_progress, and keep blockers accurate. Do not mark incomplete work as done. Prefer updating TodoList only on this continuation.',
-                    { kind: 'system_trigger', name: 'todo_reconcile' },
-                  );
-                  return { continue: true };
-                }
-              }
               return { continue: false };
             },
             prepareToolExecution: async (ctx) => {
@@ -1002,7 +1034,12 @@ export class TurnFlow {
                 }
               }
 
-              if (ctx.toolCall.name === 'TodoList') {
+              // "This turn touched the list" means a TodoList write actually
+              // landed. A permission-denied or failed call writes nothing, so it
+              // must not count as touched — otherwise a stale list left over
+              // from an earlier turn would earn a pre-answer reconcile nudge on
+              // the strength of a call that never ran.
+              if (ctx.toolCall.name === 'TodoList' && isError !== true) {
                 this.todoSeenThisTurn = true;
               }
 

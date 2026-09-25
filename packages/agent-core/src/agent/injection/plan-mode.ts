@@ -1,3 +1,4 @@
+import { isUserAuthoredMessage } from '../context/identity';
 import type { PlanFilePath } from '../plan';
 import { DynamicInjector } from './injector';
 
@@ -61,6 +62,16 @@ export class PlanModeInjector extends DynamicInjector {
     return reminder;
   }
 
+  /**
+   * Picks the reminder variant for the current injection point.
+   *
+   * A user-authored message resets the cadence to the full reminder. The test
+   * is `isUserAuthoredMessage`, never the role: system reminders, injected
+   * context, scheduled notifications and hook results all land in history as
+   * user-role messages (`ContextMemory.appendSystemReminder`), so matching on
+   * the role alone would let any injection on any step re-trigger the full
+   * reminder and make `PLAN_MODE_FULL_REFRESH_TURNS` unreachable.
+   */
   protected getVariant(): PlanModeVariant | null {
     if (this.injectedAt === null) return 'full';
     const history = this.agent.context.history;
@@ -72,7 +83,7 @@ export class PlanModeInjector extends DynamicInjector {
         assistantTurnsSince += 1;
         continue;
       }
-      if (msg.role === 'user') {
+      if (isUserAuthoredMessage(msg)) {
         return 'full';
       }
     }

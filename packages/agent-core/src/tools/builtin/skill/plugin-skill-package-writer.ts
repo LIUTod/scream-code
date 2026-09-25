@@ -5,6 +5,8 @@ import type { Jian } from '@scream-code/jian';
 import { ErrorCodes, ScreamError } from '#/errors';
 import { PluginManager } from '#/plugin/manager';
 
+import { isSafeRelativePath } from '#/utils/path-safety';
+
 import { sanitizeSkillName, type SkillPackage } from './skill-package-writer';
 
 export interface WritePluginSkillPackageOptions {
@@ -26,13 +28,6 @@ export interface WritePluginSkillPackageResult {
 }
 
 const MANIFEST_FILE = 'scream.plugin.json';
-
-function isSafeRelativePath(filePath: string): boolean {
-  const normalized = normalize(filePath);
-  if (normalized.startsWith('..')) return false;
-  if (normalize('/' + normalized).startsWith('..')) return false;
-  return !normalized.startsWith('/');
-}
 
 export async function writePluginSkillPackage(
   options: WritePluginSkillPackageOptions,

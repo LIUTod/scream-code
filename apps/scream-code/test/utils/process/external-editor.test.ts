@@ -33,6 +33,12 @@ function shellPath(cmd: string): string {
   return match[1]!;
 }
 
+function cmdPath(commandLine: string): string {
+  const match = commandLine.match(/"([^"]+)"{1,2}$/);
+  if (!match) throw new Error(`Could not parse temp path from: ${commandLine}`);
+  return match[1]!;
+}
+
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.clearAllMocks();
@@ -75,5 +81,42 @@ describe('external-editor helpers', () => {
     });
 
     await expect(editInExternalEditor('seed', 'false')).resolves.toBeUndefined();
+  });
+
+  it('runs the editor through cmd.exe on Windows, without POSIX quoting', async () => {
+    vi.stubEnv('ComSpec', 'C:\\Windows\\System32\\cmd.exe');
+    mocks.spawn.mockImplementation((_cmd: string, args: string[]) => {
+      const child = new EventEmitter();
+      void writeFile(cmdPath(args[3]!), 'edited on windows', 'utf8').then(() => {
+        child.emit('exit', 0);
+      });
+      return child as never;
+    });
+
+    await expect(editInExternalEditor('seed', 'code --wait', 'win32')).resolves.toBe(
+      'edited on windows',
+    );
+
+    const call = mocks.spawn.mock.calls[0]!;
+    expect(call[0]).toBe('C:\\Windows\\System32\\cmd.exe');
+    expect(call[0]).not.toBe('/bin/sh');
+    expect(call[1]!.slice(0, 3)).toEqual(['/d', '/s', '/c']);
+    expect(call[2]).toEqual({ stdio: 'inherit', windowsVerbatimArguments: true });
+    // cmd.exe only strips the outer quotes; the single quotes of the POSIX
+    // branch are ordinary characters there and must not appear.
+    expect(call[1]![3]).toMatch(/^"code --wait "/);
+    expect(call[1]![3]).not.toContain("'");
+  });
+
+  it('falls back to bare cmd.exe when ComSpec is unset or empty', async () => {
+    vi.stubEnv('ComSpec', '');
+    mocks.spawn.mockImplementation(() => {
+      const child = new EventEmitter();
+      queueMicrotask(() => child.emit('exit', 1));
+      return child as never;
+    });
+
+    await expect(editInExternalEditor('seed', 'vim', 'win32')).resolves.toBeUndefined();
+    expect(mocks.spawn.mock.calls[0]![0]).toBe('cmd.exe');
   });
 });

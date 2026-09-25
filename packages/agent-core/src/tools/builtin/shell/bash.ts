@@ -1,13 +1,27 @@
 /**
  * BashTool — execute shell commands.
  *
- * Invokes bash (POSIX) according to an injected `Environment`. On Windows
- * the shell is Git Bash; the path is resolved by `detectEnvironment`.
+ * Invokes whichever shell an injected `Environment` selected, in that shell's
+ * own dialect:
+ *
+ *   - POSIX (`bash` / `sh`, including Git Bash on Windows) — `-c` with a
+ *     POSIX-quoted `cd … && …` script. Windows Git Bash additionally gets its
+ *     cwd converted to a `/c/…` path and its `>nul` redirects rewritten.
+ *   - PowerShell (`pwsh` / `powershell`, the Windows fallback when no Git Bash
+ *     is installed) — the interpreter's own `-NoProfile -NonInteractive
+ *     -Command` switches, the working directory set with `Set-Location
+ *     -LiteralPath`, the path left in its native `C:\…` form, its own
+ *     self-protection preamble (the bash shims are a parse error here), and no
+ *     bash syntax anywhere.
+ *
+ * The switches come from `Environment.shellArgs`; the dialect from
+ * `Environment.shellName`. Neither is re-derived here, so a host whose probe
+ * picked a fallback shell is actually driven with that shell.
  *
  * Dependencies injected via constructor:
  *   - `Jian`        — shell execution abstraction (exec / execWithEnv)
  *   - `cwd`         — default working directory for commands
- *   - `Environment` — cross-platform probe (shellName / shellPath)
+ *   - `Environment` — cross-platform probe (shellName / shellPath / shellArgs)
  *   - `BackgroundProcessManager?` — optional: required iff run_in_background=true
  *
  * Execution goes through Jian, never directly via node:child_process.
@@ -30,7 +44,7 @@ import { join } from 'node:path';
 import type { Readable } from 'node:stream';
 import { StringDecoder } from 'node:string_decoder';
 
-import type { Jian, JianProcess } from '@scream-code/jian';
+import type { Environment, Jian, JianProcess } from '@scream-code/jian';
 import { z } from 'zod';
 
 import type { BuiltinTool } from '../../../agent/tool';
@@ -52,6 +66,29 @@ const SIGTERM_GRACE_MS = 5_000;
 /** After the process exits, how long to keep draining stdout/stderr before
  * declaring completion (grandchildren may hold the pipe open). */
 const STREAM_GRACE_MS = 500;
+
+/** The syntax dialect a probed shell speaks — see `shellKindOf`. */
+type ShellKind = 'posix' | 'powershell';
+
+/**
+ * Which dialect `env` selected. `shellName` is the probe's answer to "which
+ * interpreter is this", so it decides the dialect; `osKind` does not, because
+ * Windows carries either dialect depending on whether Git Bash was found.
+ */
+function shellKindOf(env: Environment): ShellKind {
+  return env.shellName === 'pwsh' || env.shellName === 'powershell' ? 'powershell' : 'posix';
+}
+
+/**
+ * Non-interactive script switches, used only when the `Environment` pins a
+ * shell path without args. Mirrors what `detectEnvironment` puts in
+ * `Environment.shellArgs`, so a hand-built environment behaves like a probed
+ * one: `-c` for bash/sh, and no profile / no prompt for PowerShell.
+ */
+const DEFAULT_SHELL_ARGS: Record<ShellKind, readonly string[]> = {
+  posix: ['-c'],
+  powershell: ['-NoProfile', '-NonInteractive', '-Command'],
+};
 
 export const BashInputSchema = z
   .object({
@@ -131,8 +168,12 @@ function normalizeTimeoutMs(timeout: number | undefined, isBackground: boolean):
   return Math.min(value, timeoutCapS(isBackground)) * MS_PER_SECOND;
 }
 
-function renderBashDescription(shellName: string): string {
-  return renderPrompt(bashDescriptionTemplate, { ...SHELL_TIMEOUT_VARS, SHELL_NAME: shellName });
+function renderBashDescription(shellName: string, isPowerShell: boolean): string {
+  return renderPrompt(bashDescriptionTemplate, {
+    ...SHELL_TIMEOUT_VARS,
+    SHELL_NAME: shellName,
+    SHELL_IS_POWERSHELL: isPowerShell,
+  });
 }
 
 function withoutBackgroundDescription(description: string): string {
@@ -279,14 +320,6 @@ function validateCommand(command: string, isWindows: boolean): ExecutableToolRes
       );
     }
 
-    // taskkill /IM node.exe (kill by image name)
-    if (/\btaskkill\b.*\/IM\s+node/i.test(cmd)) {
-      return rejectDangerousCommand(
-        'taskkill /IM node.exe',
-        "Use 'taskkill /PID <pid>' with a specific PID instead of killing by image name.",
-      );
-    }
-
     // wmic process where name='node.exe' delete
     if (/\bwmic\s+process\s+.*where\s+.*name.*=.*node/i.test(cmd) && /\bdelete\b/i.test(cmd)) {
       return rejectDangerousCommand(
@@ -295,12 +328,97 @@ function validateCommand(command: string, isWindows: boolean): ExecutableToolRes
       );
     }
 
-    // PowerShell Stop-Process -Name node
-    if (/\bstop-process\b.*-Name\s+node/i.test(cmd)) {
-      return rejectDangerousCommand(
-        'Stop-Process -Name node',
-        "Use 'Stop-Process -Id <pid>' with a specific PID instead.",
-      );
+    // `;` / `|` / `&` / newline separated statements — the unit every rule
+    // below judges, so a pid read on one pipeline stage cannot condemn the
+    // next.
+    const segments = cmd.split(/[;&|\n]/);
+
+    // Killing by process or image name, refused for *every* name — the strength
+    // the POSIX branch gets from its unconditional `pkill` / `killall`
+    // refusal, and for the same reason: the name does not have to name the host
+    // to reach it, since `nod*` and `node*` match it. The self-protection
+    // preamble refuses these at runtime too; this layer also catches a spelling
+    // that never reaches the shadows (a `cmd /c` wrapper, a nested
+    // interpreter).
+    //
+    // `-Name` is never positional on `Stop-Process` — the documented parameter
+    // sets bind position 0 to `-Id` and `-InputObject` — and `-N`, `-Na` and
+    // `-Nam` are the abbreviations PowerShell binds to it.
+    for (const segment of segments) {
+      if (/\bstop-process\b/i.test(segment) && /-(?:N|Na|Nam|Name)(?::|\s|$)/i.test(segment)) {
+        return rejectDangerousCommand(
+          'Stop-Process by name',
+          "Use 'Stop-Process -Id <pid>' with a specific PID instead of killing by process name.",
+        );
+      }
+      // `Stop-Process -InputObject <expr>` hands the cmdlet a process object, so
+      // the entry above sees no pid and the object reaches the real cmdlet
+      // through the shadow's `$args`. `-InputObject` is positional in its
+      // parameter set, so the operand cannot be recognised as a victim by any
+      // static check — the form itself is refused, on the same reasoning as the
+      // by-name spellings above. The runtime shadow refuses it too.
+      if (
+        /\bstop-process\b/i.test(segment) &&
+        /-(?:I|In|Inp|Inpu|Input|InputO|InputOb|InputObj|InputObje|InputObjec|InputObject)(?::|\s|$)/i.test(
+          segment,
+        )
+      ) {
+        return rejectDangerousCommand(
+          'Stop-Process -InputObject',
+          "Use 'Stop-Process -Id <pid>' with a specific PID instead of passing a process object.",
+        );
+      }
+      if (/\b(taskkill|tskill)\b/i.test(segment) && /[/-]IM(?::|\s|$)/i.test(segment)) {
+        return rejectDangerousCommand(
+          'taskkill by image name',
+          "Use 'taskkill /PID <pid>' with a specific PID instead of killing by image name.",
+        );
+      }
+    }
+
+    // `Get-Process -Name nod* | Stop-Process` kills by name one statement
+    // upstream of the cmdlet, so the shadow sees a pipeline of process objects
+    // and no name at all. Selection and kill are separate `|` segments, hence
+    // the look-ahead — and hence the requirement that a `Stop-Process` actually
+    // follows, so a plain `Get-Process -Name node | Format-Table` stays
+    // runnable.
+    for (let index = 0; index < segments.length; index += 1) {
+      const segment = segments[index]!;
+      if (
+        /\bget-process\b/i.test(segment) &&
+        /-(?:N|Na|Nam|Name)(?::|\s|$)/i.test(segment) &&
+        segments.slice(index + 1).some((later) => /\bstop-process\b/i.test(later))
+      ) {
+        return rejectDangerousCommand(
+          'Get-Process by name piped into Stop-Process',
+          "Use 'Stop-Process -Id <pid>' with a specific PID instead of killing by process name.",
+        );
+      }
+    }
+
+    // A kill that reaches this run through a spelling the runtime shadows
+    // cannot see: the module-qualified cmdlet name, the `.exe` image, or the
+    // .NET process API. Those are the whole surface this layer adds. Every
+    // *plain* spelling — `Stop-Process -Id $env:SCREAM_PID`, `kill $PID`,
+    // `taskkill /F /PID %SCREAM_PID%` — is refused by the guards the
+    // self-protection preamble installs, so rejecting it here as well bought
+    // nothing and cost false positives on ordinary commands that merely
+    // *mention* a pid (`git commit -m "kill $PID"`, a doc string spelling
+    // `taskkill /PID $PID is blocked`).
+    //
+    // A segment needs both halves: the bypass spelling *and* an operand naming
+    // this run. So `[System.Diagnostics.Process]::Start('notepad')` and a
+    // filter that reads `$PID` on an earlier pipeline stage both stay runnable.
+    const bypassesShadow =
+      /taskkill\.exe|Microsoft\.PowerShell\.Management\\Stop-Process|\[(?:System\.)?Diagnostics\.Process\]/i;
+    const selfPidOperand = /%SCREAM_PID%|\$env:SCREAM_PID|\$\{PID\}|\$PID\b/i;
+    for (const segment of segments) {
+      if (bypassesShadow.test(segment) && selfPidOperand.test(segment)) {
+        return rejectDangerousCommand(
+          'kill targeting this run through a shadow-bypassing command',
+          "Use a specific pid that is not this run's own — never $PID or $env:SCREAM_PID (%SCREAM_PID%).",
+        );
+      }
     }
   } else {
     // ps + grep node/scream + xargs kill pipeline (POSIX)
@@ -327,8 +445,8 @@ function validateCommand(command: string, isWindows: boolean): ExecutableToolRes
   return null;
 }
 
-function buildSelfProtectionPreamble(isWindows: boolean): string {
-  if (isWindows) {
+function buildSelfProtectionPreamble(isWindowsBash: boolean): string {
+  if (isWindowsBash) {
     // Windows Git Bash: shadow taskkill, tskill, kill, pkill
     return (
       `_SCREAM_CHECK(){ for _a in "$@";do [ "$_a" = "$SCREAM_PID" ]&&{ ` +
@@ -351,12 +469,122 @@ function buildSelfProtectionPreamble(isWindows: boolean): string {
   );
 }
 
+/**
+ * The PowerShell self-protection preamble — the dialect's counterpart of
+ * {@link buildSelfProtectionPreamble}, which PowerShell cannot run (a bash
+ * function definition is a parse error there).
+ *
+ * `SCREAM_PID` names the process that started this shell and is inherited
+ * through the Jian environment allowlist; `$PID` is the shell itself. Killing
+ * either — by pid, by process name (`Stop-Process -Name nod*` reaches the host
+ * through a wildcard no pid comparison can catch), or by handing the cmdlet the
+ * process object itself — detaches the tool from the command it is running, so
+ * the three commands that can do it are shadowed:
+ *
+ *   - `Stop-Process`, the cmdlet;
+ *   - `kill` — its built-in alias. An alias outranks a function in PowerShell's
+ *     resolution order, so the alias is repointed instead of redefined;
+ *   - `taskkill`, an executable, which a function of the same name does shadow
+ *     (a function outranks an application).
+ *
+ * The real commands stay reachable by their module-qualified and `.exe` names,
+ * which no shadow can capture.
+ *
+ * Each shadow is a *simple* function on purpose: only then does PowerShell
+ * collect an unbound `-Id 1234` into `$args`, and `@args` splats those
+ * parameters back onto the real command, so every case except the guarded pid
+ * and the refused by-name, `-InputObject` and process-object forms — including
+ * `-WhatIf`, `-Force` and pipeline input — behaves as before. A refusal
+ * `throw`s rather than `exit`s: it is an ordinary terminating error, so the
+ * message lands on stderr and the shell exits non-zero, exactly as the bash
+ * shims behave.
+ *
+ * Written for Windows PowerShell 5.1 and PowerShell 7 alike: one line of
+ * `;`-separated statements, no `&&`, no ternary, no null-coalescing, no class
+ * syntax — 5.1 parses none of those.
+ */
+function buildPowerShellSelfProtectionPreamble(): string {
+  return [
+    // `$PID` is this shell, `SCREAM_PID` the process that started it. Both are
+    // compared as strings so a numeric `-Id` and a string operand match alike,
+    // and each operand is flattened (`@($id)`), so the comma form
+    // `-Id $env:SCREAM_PID,5` is checked element by element instead of as one
+    // string that matches nothing.
+    'function _ScreamGuardPid([object[]] $Ids) { $guarded = @([string] $PID, [string] $env:SCREAM_PID);' +
+      ' foreach ($id in $Ids) { foreach ($one in @($id)) {' +
+      ' if ($null -eq $one) { continue };' +
+      ' if ($guarded -contains ([string] $one)) {' +
+      ' throw "Scream Code self-protection: refusing to kill itself (pid $one). Use a specific non-Scream PID."' +
+      ' } } } }',
+    // A by-name kill carries no pid to compare, so every by-name form is
+    // refused outright. That is the strength the POSIX branch gets from its
+    // unconditional `pkill` / `killall` refusal, and it is what closes
+    // `Stop-Process -Name nod*` / `taskkill /IM nod*`, which the pid guard
+    // above cannot see.
+    //
+    // Each argument is tested as its own token. `-Name` is never positional on
+    // `Stop-Process` — the documented parameter sets bind position 0 to `-Id`
+    // and `-InputObject` — so a by-name call always spells the switch out, and
+    // PowerShell binds the unambiguous abbreviations `-N`, `-Na` and `-Nam` to
+    // it too. A *simple* function — which this shadow is — binds none of its
+    // arguments, so they arrive in `$args` exactly as typed: `-Name`, `-Nam`,
+    // `-Name:nod*` and `-Name nod*` all stay recognisable here.
+    'function _ScreamGuardByName([object[]] $Arguments) { foreach ($one in $Arguments) { $text = [string] $one;' +
+      ' if ($text -match \'^-(N|Na|Nam|Name)(:|$)\') {' +
+      ' throw "Scream Code self-protection: refusing to kill by process name ($text). Use a specific non-Scream PID." }' +
+      // `/IM` is `taskkill`'s by-image switch; `/FI "IMAGENAME eq …"` is the
+      // filter spelling of the same selection.
+      ' if ($text -match \'^[/-]IM(:|$)\' -or $text -match \'IMAGENAME\') {' +
+      ' throw "Scream Code self-protection: refusing to kill by image name ($text). Use a specific non-Scream PID." } } }',
+    // `-InputObject` names its victim with a process *object*: the shadow's
+    // `$args` receives it live, `$input` stays empty, and `@args` splats it onto
+    // the real cmdlet — so the pid guard above never sees the victim.
+    // `Stop-Process -InputObject (Get-Process -Id $PID)` is exactly that kill,
+    // and `-InputObject` is positional in its parameter set, so a bare process
+    // object in `$args` reaches the same place. Both halves are refused.
+    //
+    // Refusing the switch instead of expanding it and guarding the pids it names
+    // is deliberate: the operand is an arbitrary expression that PowerShell has
+    // already evaluated by the time it reaches `$args`, abbreviations included,
+    // so a guard that re-derived its targets would be a second implementation of
+    // PowerShell's own binder — and would miss the next spelling. This is the
+    // policy of the by-name refusal above: the form is refused, and the
+    // module-qualified cmdlet stays reachable.
+    'function _ScreamGuardInputObject([object[]] $Arguments) { foreach ($one in $Arguments) { $text = [string] $one;' +
+      ' if ($text -match \'^-(I|In|Inp|Inpu|Input|InputO|InputOb|InputObj|InputObje|InputObjec|InputObject)(:|$)\') {' +
+      ' throw "Scream Code self-protection: refusing to kill via -InputObject, whose operand cannot be inspected. Use a specific non-Scream PID." }' +
+      ' if ($one -is [System.Diagnostics.Process]) {' +
+      ' throw "Scream Code self-protection: refusing to kill a process object, whose target cannot be inspected. Use a specific non-Scream PID." } } }',
+    // `$args` holds every argument (a simple function binds none of them) and
+    // `@args` splats them onto the real cmdlet; pipeline input is guarded too,
+    // because `Get-Process -Id $PID | Stop-Process` names its victim the same
+    // way `-Id` does.
+    'function Stop-Process { _ScreamGuardPid $args; _ScreamGuardByName $args; _ScreamGuardInputObject $args;' +
+      ' $incoming = @($input | Where-Object { $null -ne $_ });' +
+      ' if ($incoming.Count -gt 0) { _ScreamGuardPid ($incoming | ForEach-Object { $_.Id });' +
+      ' Microsoft.PowerShell.Management\\Stop-Process -InputObject $incoming @args }' +
+      ' else { Microsoft.PowerShell.Management\\Stop-Process @args } }',
+    'function taskkill { _ScreamGuardPid $args; _ScreamGuardByName $args; taskkill.exe @args }',
+    // `kill` is an alias for `Stop-Process` in every PowerShell edition, and an
+    // alias outranks a function — repointing it keeps that identity while
+    // routing it through the guard.
+    'Set-Alias -Name kill -Value Stop-Process -Force',
+  ].join('; ');
+}
+
 export class BashTool implements BuiltinTool<BashInput> {
   readonly name = 'Bash' as const;
   readonly description: string;
   readonly parameters: Record<string, unknown> = toInputJsonSchema(BashInputSchema);
 
+  /** Windows Git Bash — a POSIX shell running on Windows. */
   private readonly isWindowsBash: boolean;
+
+  /** This host is Windows. Independent of which dialect its shell speaks. */
+  private readonly isWindows: boolean;
+
+  /** The dialect the probed shell speaks. */
+  private readonly shellKind: ShellKind;
 
   private readonly allowBackground: boolean;
 
@@ -371,10 +599,15 @@ export class BashTool implements BuiltinTool<BashInput> {
       availableTools?: Set<string> | undefined;
     },
   ) {
-    this.isWindowsBash = this.jian.osEnv.osKind === 'Windows';
+    this.isWindows = this.jian.osEnv.osKind === 'Windows';
+    this.shellKind = shellKindOf(this.jian.osEnv);
+    this.isWindowsBash = this.isWindows && this.shellKind === 'posix';
     this.allowBackground = options?.allowBackground ?? this.backgroundManager !== undefined;
     this.availableTools = options?.availableTools ?? new Set();
-    const rendered = renderBashDescription(this.jian.osEnv.shellName);
+    const rendered = renderBashDescription(
+      this.jian.osEnv.shellName,
+      this.shellKind === 'powershell',
+    );
     this.description = this.allowBackground ? rendered : withoutBackgroundDescription(rendered);
   }
 
@@ -398,12 +631,14 @@ export class BashTool implements BuiltinTool<BashInput> {
   }
 
   private spawn(effectiveCwd: string, command: string): Promise<JianProcess> {
-    const shellCwd = this.isWindowsBash ? windowsPathToPosixPath(effectiveCwd) : effectiveCwd;
-    const preamble = buildSelfProtectionPreamble(this.isWindowsBash);
+    // The interpreter's own non-interactive switches come from the probed
+    // environment (`-c` for bash/sh; `-NoProfile -NonInteractive -Command` for
+    // PowerShell). The fallback covers a caller that supplied only a shell
+    // path — see `Environment.shellArgs`.
     const shellArgs = [
       this.jian.osEnv.shellPath,
-      '-c',
-      `cd ${shellQuote(shellCwd)} && ${preamble}\n${command}`,
+      ...(this.jian.osEnv.shellArgs ?? DEFAULT_SHELL_ARGS[this.shellKind]),
+      this.scriptFor(effectiveCwd, command),
     ];
 
     const noninteractiveEnv: Record<string, string> = {
@@ -426,6 +661,18 @@ export class BashTool implements BuiltinTool<BashInput> {
     return this.jian.execWithEnv(shellArgs, mergedEnv);
   }
 
+  /** The script body handed to the selected interpreter — one dialect each. */
+  private scriptFor(effectiveCwd: string, command: string): string {
+    if (this.shellKind === 'powershell') {
+      return buildPowerShellScript(effectiveCwd, command);
+    }
+    return buildPosixScript(
+      this.isWindowsBash ? windowsPathToPosixPath(effectiveCwd) : effectiveCwd,
+      buildSelfProtectionPreamble(this.isWindowsBash),
+      command,
+    );
+  }
+
   private async execution(args: BashInput, ctx: ExecutableToolContext): Promise<ExecutableToolResult> {
     const { signal, onUpdate } = ctx;
     // Drain completed background tasks from previous timeout-detached commands.
@@ -443,7 +690,9 @@ export class BashTool implements BuiltinTool<BashInput> {
       return { isError: true, output: bgPrefix + 'Command cannot be empty.' };
     }
 
-    const validationError = validateCommand(args.command, this.isWindowsBash);
+    // Self-protection patterns are OS-level, not dialect-level: `taskkill`,
+    // `Stop-Process` and friends are reachable from PowerShell too.
+    const validationError = validateCommand(args.command, this.isWindows);
     if (validationError !== null) return validationError;
 
     const interception = checkBashInterception(args.command, this.availableTools);
@@ -660,7 +909,10 @@ export class BashTool implements BuiltinTool<BashInput> {
         return builder.ok('Command executed successfully.');
       }
       const outputText = builder.toString();
-      const hint = looksLikeCommandNotFound(command, outputText) ? `\\n${commandNotFoundHint()}` : '';
+      // A real newline, not an escaped one: the hint is appended to the failure
+      // line, and `\n` written as two characters would render literally in the
+      // tool result.
+      const hint = looksLikeCommandNotFound(command, outputText) ? `\n${commandNotFoundHint()}` : '';
       return builder.error(`Command failed with exit code: ${String(exitCode)}.${hint}`, {
         brief: `Failed with exit code: ${String(exitCode)}`,
       });
@@ -818,6 +1070,48 @@ async function readStreamIntoBuilder(
 
 function shellQuote(s: string): string {
   return `'${s.replaceAll("'", "'\\''")}'`;
+}
+
+/**
+ * PowerShell's literal string — single quotes, with an embedded quote doubled.
+ * `$`, backticks and `\` are literal inside it, so a Windows path needs no
+ * further escaping.
+ */
+function powershellQuote(s: string): string {
+  return `'${s.replaceAll("'", "''")}'`;
+}
+
+/**
+ * The POSIX script body: set the working directory, install the
+ * self-protection shims, then run the command. `cd … && …` keeps a missing
+ * directory from running the command somewhere else.
+ */
+function buildPosixScript(shellCwd: string, preamble: string, command: string): string {
+  return `cd ${shellQuote(shellCwd)} && ${preamble}\n${command}`;
+}
+
+/**
+ * The PowerShell script body.
+ *
+ * No POSIX cwd conversion and no bash syntax at all: the cwd is passed in its
+ * native `C:\…` form, and the working directory is set with the cmdlet
+ * (`Set-Location -LiteralPath`) instead of bash's `cd` builtin — the
+ * `-LiteralPath` switch keeps `[` and `]` in a path from being read as
+ * wildcards. `-ErrorAction Stop` turns a missing directory into a terminating
+ * error, so the command never runs from the process default directory; that is
+ * the fail-fast behaviour the POSIX branch gets from `cd … && …`. A `;`
+ * separates the statements rather than `&&`, which only exists from PowerShell
+ * 7 and would be a parse error on the Windows PowerShell 5.1 the fallback must
+ * also serve.
+ *
+ * The self-protection preamble sits between the two, so the command always runs
+ * with the guards in place.
+ */
+function buildPowerShellScript(effectiveCwd: string, command: string): string {
+  return (
+    `Set-Location -LiteralPath ${powershellQuote(effectiveCwd)} -ErrorAction Stop; ` +
+    `${buildPowerShellSelfProtectionPreamble()}; ${command}`
+  );
 }
 
 function windowsPathToPosixPath(path: string): string {

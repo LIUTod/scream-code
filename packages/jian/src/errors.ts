@@ -29,9 +29,9 @@ export class JianFileExistsError extends JianError {
 }
 
 /**
- * Thrown by `detectEnvironment` on Windows when no Git Bash install can be
- * located. Carries the list of paths that were probed so callers can include
- * them in install hints.
+ * Thrown by `detectEnvironment` on Windows when neither Git Bash nor
+ * PowerShell can be located. Carries the list of paths that were probed so
+ * callers can include them in install hints.
  */
 export class JianShellNotFoundError extends JianError {
   constructor(message: string) {

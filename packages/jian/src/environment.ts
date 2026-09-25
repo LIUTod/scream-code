@@ -6,10 +6,12 @@
  * identically on any host OS. `detectEnvironmentFromNode()` bundles the
  * Node defaults for production callers.
  *
- * On Windows the probe expects Git Bash (the canonical POSIX shell that
- * ships with Git for Windows). If it cannot be located the function
- * throws `JianShellNotFoundError`; the SDK layer can wrap that into a
- * user-facing install hint. Set `SCREAM_SHELL_PATH` to override.
+ * On Windows the probe prefers Git Bash (the canonical POSIX shell that ships
+ * with Git for Windows) and falls back to PowerShell when Git Bash is absent,
+ * so a Windows host without Git Bash still has a working execution channel.
+ * `JianShellNotFoundError` is raised only when neither can be located; the SDK
+ * layer can wrap that into a user-facing install hint. Set `SCREAM_SHELL_PATH`
+ * to override the Git Bash lookup.
  */
 
 import { constants as fsConstants } from 'node:fs';
@@ -22,7 +24,7 @@ import { JianShellNotFoundError } from './errors';
 // falls back to the raw `process.platform` string for unknown ones (e.g.
 // 'freebsd'). Typed as `string` so the union isn't inhabited-by-string.
 export type OsKind = string;
-export type ShellName = 'bash' | 'sh';
+export type ShellName = 'bash' | 'sh' | 'pwsh' | 'powershell';
 
 export interface Environment {
   readonly osKind: OsKind;
@@ -30,6 +32,14 @@ export interface Environment {
   readonly osVersion: string;
   readonly shellName: ShellName;
   readonly shellPath: string;
+  /**
+   * Arguments that put `shellPath` into non-interactive script mode, to be
+   * spread before the script text — `['-c']` for bash/sh, `['-NoProfile',
+   * '-NonInteractive', '-Command']` for PowerShell. Optional because a caller
+   * may carry only a shell path, in which case the consumer falls back to its
+   * own default.
+   */
+  readonly shellArgs?: readonly string[] | undefined;
 }
 
 export interface EnvironmentDeps {
@@ -62,8 +72,7 @@ export async function detectEnvironment(deps: EnvironmentDeps): Promise<Environm
   const osVersion = deps.release;
 
   if (deps.platform === 'win32') {
-    const shellPath = await locateWindowsGitBash(deps);
-    return { osKind, osArch, osVersion, shellName: 'bash', shellPath };
+    return detectWindowsShell(deps, { osKind, osArch, osVersion });
   }
 
   const candidates: readonly string[] = ['/bin/bash', '/usr/bin/bash', '/usr/local/bin/bash'];
@@ -75,14 +84,57 @@ export async function detectEnvironment(deps: EnvironmentDeps): Promise<Environm
     }
   }
   if (found !== undefined) {
-    return { osKind, osArch, osVersion, shellName: 'bash', shellPath: found };
+    return { osKind, osArch, osVersion, shellName: 'bash', shellPath: found, shellArgs: ['-c'] };
   }
-  return { osKind, osArch, osVersion, shellName: 'sh', shellPath: '/bin/sh' };
+  return { osKind, osArch, osVersion, shellName: 'sh', shellPath: '/bin/sh', shellArgs: ['-c'] };
 }
 
-async function locateWindowsGitBash(deps: EnvironmentDeps): Promise<string> {
+/**
+ * Windows shell selection: Git Bash first, PowerShell second, error last.
+ *
+ * Git Bash is preferred because the agent's command layer is POSIX-shaped
+ * (single-quoted `-c` scripts, POSIX cwd conversion), so a Windows host with
+ * Git for Windows behaves exactly like macOS / Linux. A host without it used to
+ * have no execution channel at all; falling back to PowerShell at least keeps
+ * the process-execution path available. `pwsh` (PowerShell 7+) wins over
+ * `powershell.exe` (Windows PowerShell 5.1): it is the supported line and the
+ * one accepting `-NoProfile -NonInteractive` unchanged.
+ *
+ * `checked` is shared with the Git Bash lookup so the "nothing found" error can
+ * list every location that was probed.
+ */
+async function detectWindowsShell(
+  deps: EnvironmentDeps,
+  base: { osKind: OsKind; osArch: string; osVersion: string },
+): Promise<Environment> {
   const checked: string[] = [];
 
+  const gitBash = await locateWindowsGitBash(deps, checked);
+  if (gitBash !== undefined) {
+    return { ...base, shellName: 'bash', shellPath: gitBash, shellArgs: ['-c'] };
+  }
+
+  const powerShell = await locateWindowsPowerShell(deps, checked);
+  if (powerShell !== undefined) {
+    return {
+      ...base,
+      shellName: powerShell.name,
+      shellPath: powerShell.path,
+      // Fixed invocation: no profile, no interactive prompts — an agent-driven
+      // shell must never block on a prompt or inherit user dotfiles.
+      shellArgs: ['-NoProfile', '-NonInteractive', '-Command'],
+    };
+  }
+
+  throw new JianShellNotFoundError(
+    `Neither Git Bash nor PowerShell was found on this Windows host. Install Git for Windows from https://gitforwindows.org/ (or set SCREAM_SHELL_PATH to a bash.exe), or install PowerShell. Checked: ${checked.join(', ')}.`,
+  );
+}
+
+async function locateWindowsGitBash(
+  deps: EnvironmentDeps,
+  checked: string[],
+): Promise<string | undefined> {
   const override = deps.env['SCREAM_SHELL_PATH']?.trim();
   if (override !== undefined && override.length > 0) {
     checked.push(override);
@@ -144,9 +196,47 @@ async function locateWindowsGitBash(deps: EnvironmentDeps): Promise<string> {
     }
   }
 
-  throw new JianShellNotFoundError(
-    `Git Bash was not found on this Windows host. Install Git for Windows from https://gitforwindows.org/ or set SCREAM_SHELL_PATH to a bash.exe. Checked: ${checked.join(', ')}.`,
-  );
+  return undefined;
+}
+
+/** Locate a PowerShell to run scripts with when Git Bash is unavailable. */
+async function locateWindowsPowerShell(
+  deps: EnvironmentDeps,
+  checked: string[],
+): Promise<{ name: 'pwsh' | 'powershell'; path: string } | undefined> {
+  const onPath: readonly { readonly name: 'pwsh' | 'powershell'; readonly exe: string }[] = [
+    { name: 'pwsh', exe: 'pwsh.exe' },
+    { name: 'powershell', exe: 'powershell.exe' },
+  ];
+  for (const candidate of onPath) {
+    const found = await deps.findExecutable(candidate.exe);
+    if (found !== undefined) {
+      checked.push(found);
+      return { name: candidate.name, path: found };
+    }
+  }
+
+  // Well-known install locations: a PowerShell 7 install does not always put
+  // `pwsh.exe` on PATH, and Windows PowerShell ships under System32.
+  const installs: { readonly name: 'pwsh' | 'powershell'; readonly path: string }[] = [];
+  const programFiles = deps.env['ProgramFiles']?.trim();
+  if (programFiles !== undefined && programFiles.length > 0) {
+    installs.push({ name: 'pwsh', path: `${programFiles}\\PowerShell\\7\\pwsh.exe` });
+  }
+  const systemRoot = deps.env['SystemRoot']?.trim() ?? deps.env['windir']?.trim();
+  if (systemRoot !== undefined && systemRoot.length > 0) {
+    installs.push({
+      name: 'powershell',
+      path: `${systemRoot}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`,
+    });
+  }
+  for (const candidate of installs) {
+    checked.push(candidate.path);
+    if (await deps.isFile(candidate.path)) {
+      return candidate;
+    }
+  }
+  return undefined;
 }
 
 // Most Git for Windows installs put `git.exe` in `<root>\cmd\git.exe`,

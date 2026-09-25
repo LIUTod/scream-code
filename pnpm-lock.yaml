@@ -100,9 +100,6 @@ importers:
       diff:
         specifier: ^9.0.0
         version: 9.0.0
-      fastembed:
-        specifier: ^2.1.0
-        version: 2.1.0
       grok-mermaid:
         specifier: ^0.2.3
         version: 0.2.3
@@ -143,6 +140,9 @@ importers:
       '@scream-code/evals':
         specifier: workspace:^
         version: link:../../packages/evals
+      '@scream-code/jian':
+        specifier: workspace:^
+        version: link:../../packages/jian
       '@scream-code/knowledge':
         specifier: workspace:*
         version: link:../../packages/knowledge
@@ -182,6 +182,10 @@ importers:
       vue-tsc:
         specifier: ^3.3.11
         version: 3.3.11(typescript@6.0.2)
+    optionalDependencies:
+      fastembed:
+        specifier: ^2.1.0
+        version: 2.1.0
 
   packages/agent-core:
     dependencies:
@@ -363,12 +367,13 @@ importers:
 
   packages/memory:
     dependencies:
-      fastembed:
-        specifier: ^2.1.0
-        version: 2.1.0
       pathe:
         specifier: ^2.0.3
         version: 2.0.3
+    optionalDependencies:
+      fastembed:
+        specifier: ^2.1.0
+        version: 2.1.0
 
   packages/node-sdk:
     dependencies:
@@ -2431,6 +2436,7 @@ packages:
 
   fastembed@2.1.0:
     resolution: {integrity: sha512-oQkpcRHBppJ3+a3w9dU0uytSY0N1cnEa/iVMc8AXEd+tvT529GekOEFhNviJy89R3lvQXF6cdIMTXHj1Gi00xQ==}
+    deprecated: fastembed@v2 is deprecated. Please update to fastembed@v3.
 
   fastq@1.20.1:
     resolution: {integrity: sha512-GGToxJ/w1x32s/D2EKND7kTil4n8OVk/9mycTc4VDza13lOvpUZTGX3mFSCtV9ksdGBVzvsyAVLM6mHFThxXxw==}
@@ -4474,6 +4480,7 @@ snapshots:
       '@anush008/tokenizers-darwin-universal': 0.0.0
       '@anush008/tokenizers-linux-x64-gnu': 0.0.0
       '@anush008/tokenizers-win32-x64-msvc': 0.0.0
+    optional: true
 
   '@arethetypeswrong/cli@0.18.3':
     dependencies:
@@ -4919,7 +4926,8 @@ snapshots:
     dependencies:
       hono: 4.12.23
 
-  '@huggingface/blake3-jit@0.0.2': {}
+  '@huggingface/blake3-jit@0.0.2':
+    optional: true
 
   '@huggingface/hub@2.13.1':
     dependencies:
@@ -4927,13 +4935,16 @@ snapshots:
       '@huggingface/xetchunk-wasm': 0.0.6
     optionalDependencies:
       cli-progress: 3.12.0
+    optional: true
 
-  '@huggingface/tasks@0.21.11': {}
+  '@huggingface/tasks@0.21.11':
+    optional: true
 
   '@huggingface/xetchunk-wasm@0.0.6':
     dependencies:
       '@huggingface/blake3-jit': 0.0.2
       gearhash-jit: 1.0.2
+    optional: true
 
   '@inquirer/external-editor@1.0.3(@types/node@22.19.19)':
     dependencies:
@@ -5780,7 +5791,8 @@ snapshots:
 
   boolbase@1.0.0: {}
 
-  boolean@3.2.0: {}
+  boolean@3.2.0:
+    optional: true
 
   brace-expansion@5.0.6:
     dependencies:
@@ -5846,7 +5858,8 @@ snapshots:
 
   chardet@2.1.1: {}
 
-  chownr@2.0.0: {}
+  chownr@2.0.0:
+    optional: true
 
   chownr@3.0.0: {}
 
@@ -6033,7 +6046,8 @@ snapshots:
   detect-libc@2.1.2:
     optional: true
 
-  detect-node@2.1.0: {}
+  detect-node@2.1.0:
+    optional: true
 
   devlop@1.1.0:
     dependencies:
@@ -6199,7 +6213,8 @@ snapshots:
       is-date-object: 1.1.0
       is-symbol: 1.1.1
 
-  es6-error@4.1.1: {}
+  es6-error@4.1.1:
+    optional: true
 
   esbuild@0.25.12:
     optionalDependencies:
@@ -6263,7 +6278,8 @@ snapshots:
 
   escape-html@1.0.3: {}
 
-  escape-string-regexp@4.0.0: {}
+  escape-string-regexp@4.0.0:
+    optional: true
 
   esprima@4.0.1: {}
 
@@ -6362,6 +6378,7 @@ snapshots:
       onnxruntime-node: 1.21.0
       progress: 2.0.3
       tar: 6.2.1
+    optional: true
 
   fastq@1.20.1:
     dependencies:
@@ -6443,6 +6460,7 @@ snapshots:
   fs-minipass@2.1.0:
     dependencies:
       minipass: 3.3.6
+    optional: true
 
   fsevents@2.3.3:
     optional: true
@@ -6476,7 +6494,8 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  gearhash-jit@1.0.2: {}
+  gearhash-jit@1.0.2:
+    optional: true
 
   generator-function@2.0.1: {}
 
@@ -6530,6 +6549,7 @@ snapshots:
       roarr: 2.15.4
       semver: 7.8.1
       serialize-error: 7.0.1
+    optional: true
 
   globalthis@1.0.4:
     dependencies:
@@ -6907,7 +6927,8 @@ snapshots:
 
   json-schema-typed@8.0.2: {}
 
-  json-stringify-safe@5.0.1: {}
+  json-stringify-safe@5.0.1:
+    optional: true
 
   jsonfile@4.0.0:
     optionalDependencies:
@@ -7090,6 +7111,7 @@ snapshots:
   matcher@3.0.0:
     dependencies:
       escape-string-regexp: 4.0.0
+    optional: true
 
   math-intrinsics@1.1.0: {}
 
@@ -7158,8 +7180,10 @@ snapshots:
   minipass@3.3.6:
     dependencies:
       yallist: 4.0.0
+    optional: true
 
-  minipass@5.0.0: {}
+  minipass@5.0.0:
+    optional: true
 
   minipass@7.1.3: {}
 
@@ -7167,12 +7191,14 @@ snapshots:
     dependencies:
       minipass: 3.3.6
       yallist: 4.0.0
+    optional: true
 
   minizlib@3.1.0:
     dependencies:
       minipass: 7.1.3
 
-  mkdirp@1.0.4: {}
+  mkdirp@1.0.4:
+    optional: true
 
   mri@1.2.0: {}
 
@@ -7264,13 +7290,15 @@ snapshots:
       regex: 6.1.0
       regex-recursion: 6.0.2
 
-  onnxruntime-common@1.21.0: {}
+  onnxruntime-common@1.21.0:
+    optional: true
 
   onnxruntime-node@1.21.0:
     dependencies:
       global-agent: 3.0.0
       onnxruntime-common: 1.21.0
       tar: 7.5.15
+    optional: true
 
   open@10.2.0:
     dependencies:
@@ -7422,7 +7450,8 @@ snapshots:
 
   process-nextick-args@2.0.1: {}
 
-  progress@2.0.3: {}
+  progress@2.0.3:
+    optional: true
 
   proper-lockfile@4.1.2:
     dependencies:
@@ -7590,6 +7619,7 @@ snapshots:
       json-stringify-safe: 5.0.1
       semver-compare: 1.0.0
       sprintf-js: 1.1.3
+    optional: true
 
   rolldown-plugin-dts@0.25.2(rolldown@1.0.3)(typescript@6.0.2):
     dependencies:
@@ -7712,7 +7742,8 @@ snapshots:
     dependencies:
       xmlchars: 2.2.0
 
-  semver-compare@1.0.0: {}
+  semver-compare@1.0.0:
+    optional: true
 
   semver@7.7.4: {}
 
@@ -7737,6 +7768,7 @@ snapshots:
   serialize-error@7.0.1:
     dependencies:
       type-fest: 0.13.1
+    optional: true
 
   serve-static@2.2.1:
     dependencies:
@@ -7894,7 +7926,8 @@ snapshots:
 
   sprintf-js@1.0.3: {}
 
-  sprintf-js@1.1.3: {}
+  sprintf-js@1.1.3:
+    optional: true
 
   stackback@0.0.2: {}
 
@@ -8002,6 +8035,7 @@ snapshots:
       minizlib: 2.1.2
       mkdirp: 1.0.4
       yallist: 4.0.0
+    optional: true
 
   tar@7.5.15:
     dependencies:
@@ -8105,7 +8139,8 @@ snapshots:
     dependencies:
       '@mixmark-io/domino': 2.2.0
 
-  type-fest@0.13.1: {}
+  type-fest@0.13.1:
+    optional: true
 
   type-is@2.1.0:
     dependencies:
@@ -8407,7 +8442,8 @@ snapshots:
 
   y18n@5.0.8: {}
 
-  yallist@4.0.0: {}
+  yallist@4.0.0:
+    optional: true
 
   yallist@5.0.0: {}
 

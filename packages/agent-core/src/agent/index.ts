@@ -16,6 +16,7 @@ import {
 
 import type { EnabledPluginSessionStart } from '#/plugin';
 
+import { resolveScreamHome } from '../config/path';
 import { computeDelayMs, retryBackoffDelays } from '../loop/retry';
 
 import type { McpConnectionManager } from '../mcp';
@@ -284,7 +285,10 @@ export class Agent {
         : Promise.resolve();
     this.sessionMemory = new SessionMemory(this);
     this.workingSet = new WorkingSet();
-    this.dreamTracker = new DreamTracker(screamHomeDir ?? '');
+    // Resolve through the authoritative home resolver rather than falling back
+    // to '' — an empty home would put the state file in the current working
+    // directory, i.e. in whatever project the session happens to run in.
+    this.dreamTracker = new DreamTracker(resolveScreamHome(screamHomeDir));
     this.replayBuilder = new ReplayBuilder(this);
     this.services = {
       records: this.records,

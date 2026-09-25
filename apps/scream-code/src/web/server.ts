@@ -31,6 +31,7 @@ import {
   log,
   ErrorCodes,
   isScreamError,
+  isRealUserPrompt,
   type Session,
   type Event,
   type SessionStatus,
@@ -769,30 +770,30 @@ function removeLastTurnsBefore(
   messages.splice(0, messages.length, ...prefix, ...tail);
 }
 
-function classifyUndoAnchor(origin: unknown): 'user' | 'skill' | 'other' {
-  if (origin === undefined || origin === null) return 'user';
-  if (typeof origin !== 'object') return 'other';
-  const kind = (origin as { kind?: unknown }).kind;
-  if (kind === 'user') return 'user';
-  if (kind === 'skill_activation' && (origin as { trigger?: unknown }).trigger === 'user-slash') return 'skill';
-  return 'other';
+/**
+ * The Web projection's anchor kind for one prompt origin.
+ *
+ * "Does this origin start a turn the user could `/undo`?" is the core rule, and
+ * it now comes from `isRealUserPrompt` — public surface through the SDK, so this
+ * projection no longer needs a copy of it. A copy is exactly what drifts from
+ * the core and makes `/undo N` delete a different number of rows than the
+ * history it mirrors. What is left here is the rendering split the core has no
+ * opinion about: a user-typed skill turn carries no visible user row in the Web
+ * transcript, so it is tagged `skill` and `/undo` removes that assistant block on
+ * its own.
+ *
+ * Both callers ask about a *user* prompt, which is what an anchor is: the seed
+ * path classifies each history message and only reads the answer for the user
+ * ones, and a `turn.started` origin is the origin of the turn's prompt.
+ */
+function classifyUndoAnchor(origin: ContextMessage['origin']): 'user' | 'skill' | 'other' {
+  if (!isRealUserPrompt({ role: 'user', content: [], toolCalls: [], origin })) return 'other';
+  return origin?.kind === 'skill_activation' ? 'skill' : 'user';
 }
 
-/** Match the core `/undo` anchor rule without importing agent-core internals. */
+/** The core `/undo` anchor rule, applied to the whole history. */
 function countUndoAnchors(history: readonly ContextMessage[]): number {
-  let count = 0;
-  for (const message of history) {
-    if (message.role !== 'user') continue;
-    const origin = message.origin;
-    if (
-      origin === undefined ||
-      origin.kind === 'user' ||
-      (origin.kind === 'skill_activation' && origin.trigger === 'user-slash')
-    ) {
-      count += 1;
-    }
-  }
-  return count;
+  return history.filter(isRealUserPrompt).length;
 }
 
 // ─── Git status ───────────────────────────────────────────────────────────

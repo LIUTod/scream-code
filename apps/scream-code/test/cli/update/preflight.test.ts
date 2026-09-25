@@ -1,6 +1,7 @@
 import type * as ChildProcess from 'node:child_process';
 import { EventEmitter } from 'node:events';
 
+import type * as JianModule from '@scream-code/jian';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { readUpdateCache } from '#/cli/update/cache';
@@ -10,13 +11,31 @@ import type * as PromptModule from '#/cli/update/prompt';
 import { refreshUpdateCache } from '#/cli/update/refresh';
 import type * as RefreshModule from '#/cli/update/refresh';
 import { emptyUpdateCache, type UpdateCache } from '#/cli/update/types';
+import type * as NpmModule from '#/utils/exec/npm';
 
 const mocks = vi.hoisted(() => ({
   readUpdateCache: vi.fn(),
   promptForInstallConfirmation: vi.fn(),
   refreshUpdateCache: vi.fn(),
   spawn: vi.fn(),
+  killProcessTree: vi.fn(async () => {}),
+  /** Forces the platform `npmLaunchPlan` is built for, so the win32 teardown branch is reachable on any host. */
+  planPlatform: undefined as NodeJS.Platform | undefined,
 }));
+
+vi.mock('@scream-code/jian', async (importOriginal) => ({
+  ...(await importOriginal<typeof JianModule>()),
+  killProcessTree: mocks.killProcessTree,
+}));
+
+vi.mock('../../../src/utils/exec/npm', async (importOriginal) => {
+  const actual = await importOriginal<typeof NpmModule>();
+  return {
+    ...actual,
+    npmLaunchPlan: (args: readonly string[], platform: NodeJS.Platform = process.platform) =>
+      actual.npmLaunchPlan(args, mocks.planPlatform ?? platform),
+  };
+});
 
 vi.mock('../../../src/cli/update/cache', () => ({
   readUpdateCache: mocks.readUpdateCache,
@@ -84,8 +103,28 @@ function mockSpawnExit(code: number, signal: NodeJS.Signals | null = null): void
   });
 }
 
+/**
+ * A spawn that never exits, so only the timeout teardown can settle the install.
+ * `pid` and `kill` are what the POSIX branch calls; the win32 branch goes
+ * through `killProcessTree` instead.
+ */
+function mockSpawnThatHangs(pid: number): { kill: ReturnType<typeof vi.fn> } {
+  const kill = vi.fn();
+  mocks.spawn.mockImplementation(() => {
+    const child = new EventEmitter() as EventEmitter & { pid: number; kill: typeof kill };
+    child.pid = pid;
+    child.kill = kill;
+    return child;
+  });
+  return { kill };
+}
+
 describe('runUpdatePreflight', () => {
-  afterEach(() => { vi.clearAllMocks(); });
+  afterEach(() => {
+    vi.useRealTimers();
+    mocks.planPlatform = undefined;
+    vi.clearAllMocks();
+  });
 
   it('continues on first launch with empty cache after refreshing latest version', async () => {
     mocks.refreshUpdateCache.mockResolvedValue(emptyUpdateCache());
@@ -144,5 +183,46 @@ describe('runUpdatePreflight', () => {
     await expect(runUpdatePreflight('0.4.0', options)).resolves.toBe('continue');
     expect(stderr.join('')).toContain('警告：更新失败');
     expect(stdout.join('')).not.toContain('已更新至');
+  });
+
+  it('kills the whole tree when a Windows install times out', async () => {
+    vi.useFakeTimers();
+    mocks.planPlatform = 'win32';
+    mocks.refreshUpdateCache.mockResolvedValue(cacheWith('0.5.0'));
+    mocks.promptForInstallConfirmation.mockResolvedValue(true);
+    const { kill } = mockSpawnThatHangs(4321);
+    const { stderr, options } = captureOutput();
+
+    const preflight = runUpdatePreflight('0.4.0', options);
+    await vi.advanceTimersByTimeAsync(300_000);
+
+    await expect(preflight).resolves.toBe('continue');
+    // The direct child is `cmd.exe` (`npmLaunchPlan`), so signalling it would
+    // stop the wrapper and leave `npm` / `node` running; the tree is walked with
+    // `taskkill /F /T /PID` instead. The failure is reported after the teardown.
+    expect(mocks.killProcessTree).toHaveBeenCalledWith(4321, {
+      signal: 'SIGTERM',
+      platform: 'win32',
+    });
+    expect(kill).not.toHaveBeenCalled();
+    expect(stderr.join('')).toContain('npm install 超时');
+  });
+
+  it('keeps signalling the bare npm child when a POSIX install times out', async () => {
+    vi.useFakeTimers();
+    mocks.refreshUpdateCache.mockResolvedValue(cacheWith('0.5.0'));
+    mocks.promptForInstallConfirmation.mockResolvedValue(true);
+    const { kill } = mockSpawnThatHangs(4321);
+    const { stderr, options } = captureOutput();
+
+    const preflight = runUpdatePreflight('0.4.0', options);
+    await vi.advanceTimersByTimeAsync(300_000);
+
+    await expect(preflight).resolves.toBe('continue');
+    // POSIX spawns `npm` itself, with no wrapper in between, so the child is
+    // signalled exactly as it was before the Windows branch was added.
+    expect(kill).toHaveBeenCalledWith('SIGTERM');
+    expect(mocks.killProcessTree).not.toHaveBeenCalled();
+    expect(stderr.join('')).toContain('npm install 超时');
   });
 });

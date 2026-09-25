@@ -35,7 +35,7 @@ export type {
   SessionAttachInput,
   SessionLogHandle,
 } from './logging/types';
-export { USER_PROMPT_ORIGIN } from './agent/context';
+export { isRealUserPrompt, USER_PROMPT_ORIGIN } from './agent/context';
 export type {
   AgentContextData,
   ContextMessage,

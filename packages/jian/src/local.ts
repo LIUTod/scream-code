@@ -16,12 +16,14 @@ import {
 } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, normalize } from 'pathe';
+import { join as joinNativePath } from 'node:path';
 import type { Readable, Writable } from 'node:stream';
 
 import { detectEnvironmentFromNode, type Environment } from './environment';
 import { JianFileExistsError, JianPathOutsideRootError, JianExecError } from './errors';
 import { BufferedReadable, decodeTextWithErrors, globPatternToRegex } from './internal';
 import type { Jian } from './jian';
+import { detachedForProcessTree, isWindowsPlatform, killProcessTree } from './platform';
 import type { JianProcess } from './process';
 import type { StatResult } from './types';
 
@@ -76,18 +78,20 @@ const ALLOWED_INHERITED_ENV_KEYS: readonly string[] = [
 ];
 
 
-const isWindows: boolean = process.platform === 'win32';
-
 /**
  * True if `candidate` is `base` itself or a descendant of `base`, compared on
  * path-component boundaries. Both paths must already be normalized. This is a
  * lexical check only; it does not resolve symlinks.
+ *
+ * `platform` decides whether the comparison folds case: Windows paths are
+ * case-insensitive, POSIX paths are not.
  */
-function isWithinDirectory(candidate: string, base: string): boolean {
+function isWithinDirectory(candidate: string, base: string, platform: string): boolean {
   const normalizedCandidate = normalize(candidate);
   const normalizedBase = normalize(base);
-  const comparableCandidate = isWindows ? normalizedCandidate.toLowerCase() : normalizedCandidate;
-  const comparableBase = isWindows ? normalizedBase.toLowerCase() : normalizedBase;
+  const windows = isWindowsPlatform(platform);
+  const comparableCandidate = windows ? normalizedCandidate.toLowerCase() : normalizedCandidate;
+  const comparableBase = windows ? normalizedBase.toLowerCase() : normalizedBase;
   if (comparableCandidate === comparableBase) return true;
   const prefix = comparableBase.endsWith('/') ? comparableBase : `${comparableBase}/`;
   return comparableCandidate.startsWith(prefix);
@@ -130,6 +134,184 @@ function cycleKey(s: { dev: number; ino: number }): string | null {
 // a discarded reference leaves the child orphaned (reparented to init).
 // Callers must explicitly kill() or wait() before dropping the reference.
 
+const DEFAULT_PATHEXT: readonly string[] = ['.COM', '.EXE', '.BAT', '.CMD'];
+
+/** Extensions Windows can only run through `cmd.exe`, never by direct exec. */
+const CMD_SCRIPT_EXTENSIONS: readonly string[] = ['.bat', '.cmd'];
+
+/** How one command reaches the OS. @internal for tests — see {@link windowsSpawnPlan}. */
+export interface SpawnPlan {
+  readonly command: string;
+  readonly args: readonly string[];
+  /** Only ever true for the `cmd.exe` launch below; see `buildCmdCommandLine`. */
+  readonly windowsVerbatimArguments: boolean;
+}
+
+/**
+ * Windows spawn plan for `command`.
+ *
+ * Windows does not resolve a bare name to a runnable file the way POSIX does: a
+ * shell walks `PATH` + `PATHEXT` and lands on `npm.cmd`, while Node's `spawn`
+ * does not, which is why `spawn('npm')` fails on a host where `npm.cmd` works
+ * in every terminal. This reproduces that resolution and then launches the
+ * result the way the OS requires:
+ *
+ *   - anything runnable as-is (`.exe` / `.com` / extensionless) → spawned directly.
+ *   - `.cmd` / `.bat` → through `cmd.exe /d /s /c`. A batch file is a script for
+ *     `cmd`, so there is no direct-exec route — Node refuses to spawn one
+ *     anyway (it rejects `.bat`/`.cmd` without `shell: true`). Handing a fully
+ *     quoted command line to `cmd.exe` keeps argument parsing under our
+ *     control, which is exactly why `shell: true` is not used: that would let
+ *     Node re-tokenize the whole line for us, including the parts we build.
+ *
+ * The command line is built by {@link quoteCmdToken}, so a command or argument
+ * that cannot be quoted for a batch file (an embedded `"` or line break)
+ * rejects the call instead of being passed through — see there for why no
+ * escaping exists.
+ *
+ * @internal for tests
+ */
+export async function windowsSpawnPlan(
+  command: string,
+  args: readonly string[],
+  env: Record<string, string>,
+): Promise<SpawnPlan> {
+  const resolved = await resolveWindowsExecutable(
+    command,
+    env['PATH'],
+    pathextExtensions(env['PATHEXT']),
+  );
+  if (!isCmdScript(resolved)) {
+    return { command: resolved, args, windowsVerbatimArguments: false };
+  }
+  const comspec = env['ComSpec'] ?? env['COMSPEC'] ?? 'cmd.exe';
+  return {
+    command: comspec,
+    args: ['/d', '/s', '/c', buildCmdCommandLine(resolved, args)],
+    windowsVerbatimArguments: true,
+  };
+}
+
+/** `PATHEXT` entries verbatim (Windows compares extensions case-insensitively); its own default when unset/empty. */
+function pathextExtensions(pathext: string | undefined): readonly string[] {
+  const entries = (pathext ?? '')
+    .split(';')
+    .map((extension) => extension.trim())
+    .filter((extension) => extension.length > 0);
+  return entries.length > 0 ? entries : DEFAULT_PATHEXT;
+}
+
+function isCmdScript(path: string): boolean {
+  const lower = path.toLowerCase();
+  return CMD_SCRIPT_EXTENSIONS.some((extension) => lower.endsWith(extension));
+}
+
+/**
+ * Find the runnable file `command` names, trying the literal name first and then
+ * every `PATHEXT` suffix in order (the order a shell uses). A name containing a
+ * separator is a path rather than a `PATH` lookup, but Windows still appends
+ * `PATHEXT` candidates to it, so the candidate list is the same.
+ *
+ * Throws a readable `JianExecError` naming the command and every name that was
+ * tried, because the bare `ENOENT` a raw `spawn` produces names neither the
+ * suffixes nor the search roots.
+ */
+async function resolveWindowsExecutable(
+  command: string,
+  pathEnv: string | undefined,
+  extensions: readonly string[],
+): Promise<string> {
+  const isPath = /[\\/]/.test(command);
+  const searchDirs = isPath ? [''] : pathDirectories(pathEnv);
+  const names = [command, ...extensions.map((extension) => `${command}${extension}`)];
+  for (const dir of searchDirs) {
+    for (const name of names) {
+      // Joined with the *host* separator, not a hard-coded `\`: the separator
+      // that makes the candidate a real path is the one this process's
+      // filesystem understands, which is `\` on Windows and `/` in an
+      // emulated-Windows test on another host.
+      const candidate = joinNativePath(dir, name);
+      if (await fileExists(candidate)) return candidate;
+    }
+  }
+  const roots = isPath ? 'the path given in the command' : `PATH (${pathEnv ?? ''})`;
+  throw new JianExecError(
+    `Command not found: ${command}. Searched ${roots} for ${names.join(', ')}.`,
+    command,
+    'ENOENT',
+  );
+}
+
+function pathDirectories(pathEnv: string | undefined): readonly string[] {
+  return (pathEnv ?? '')
+    .split(';')
+    .map((dir) => dir.trim())
+    .filter((dir) => dir.length > 0);
+}
+
+async function fileExists(path: string): Promise<boolean> {
+  try {
+    return (await stat(path)).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Quote one token for a `cmd.exe /s /c` command line.
+ *
+ * Batch files are interpreted by `cmd`, so anything reaching a `.cmd` shim is
+ * subject to cmd metacharacters. Wrapping a token that carries whitespace or a
+ * metacharacter in double quotes keeps `&` / `|` / `<` / `>` from starting a
+ * second command — which is the entire job of this helper, because `shell: true`
+ * is deliberately not used and nothing else would quote these tokens.
+ *
+ * A token containing `"` is refused, not escaped. `\` is not an escape
+ * character in `cmd`; `"` *toggles* the quoting state, so a `\"` closes the
+ * quoted region early and leaves the rest of the token outside it — an `&` that
+ * follows then reaches `cmd` as a real command separator and the remainder runs
+ * as a second command at the caller's privilege. There is no quoted form of a
+ * `"` that survives a batch shim, so the only safe answer is to fail closed.
+ * CR/LF are refused for the same reason: they end the line `cmd.exe /c` parses,
+ * turning the rest into further commands.
+ *
+ * `%VAR%` is expanded by `cmd` *inside* the quotes. That is inherent to invoking
+ * a batch file and cannot be escaped away; not masking it is the honest form,
+ * and the alternative would be refusing to run `npm`, `pnpm` and every other
+ * shim shipped as a `.cmd`.
+ *
+ * An empty token is quoted too: it is still one argument slot, and collapsing it
+ * to nothing would shift every argument that follows (`install -g ''` would
+ * become `install -g`).
+ */
+function quoteCmdToken(token: string): string {
+  if (/["\r\n]/.test(token)) {
+    throw new JianExecError(
+      `Cannot quote ${JSON.stringify(token)} for a batch file: cmd.exe has no escape character — a ` +
+        'double quote toggles its quoting state instead of being escaped, so the rest of the token would ' +
+        'fall outside the quotes and split into further commands. A double quote or a line break cannot ' +
+        'be passed through a .cmd/.bat argument list.',
+      token,
+    );
+  }
+  if (token === '') return '""';
+  return /[\s&|<>^()]/.test(token) ? `"${token}"` : token;
+}
+
+/**
+ * The `cmd.exe /s /c` command line for a batch shim: `cmd.exe /s` strips exactly
+ * one outer quote pair, then takes the rest verbatim, so the whole line is
+ * wrapped and every token inside it is quoted by {@link quoteCmdToken}.
+ *
+ * Exported because a caller outside this package has to build the same line for
+ * the same reason — the CLI's `npm` launch plan spawns `npm.cmd` through
+ * `cmd.exe` on Windows, and a second copy of the quoting rules is exactly the
+ * kind of drift that lets one call site become injectable while the other is
+ * fixed. It throws a `JianExecError` for a token no batch file can carry.
+ */
+export function buildCmdCommandLine(command: string, args: readonly string[]): string {
+  return `"${[command, ...args].map(quoteCmdToken).join(' ')}"`;
+}
 
 class LocalProcess implements JianProcess {
   readonly stdin: Writable;
@@ -138,15 +320,17 @@ class LocalProcess implements JianProcess {
   readonly pid: number;
 
   private readonly _child: ChildProcess;
+  private readonly _platform: string;
   private _exitCode: number | null = null;
   private readonly _exitPromise: Promise<number>;
 
-  constructor(child: ChildProcess) {
+  constructor(child: ChildProcess, platform: string) {
     if (child.stdin === null || child.stdout === null || child.stderr === null) {
       throw new Error('Process must be created with stdin/stdout/stderr pipes.');
     }
 
     this._child = child;
+    this._platform = platform;
     this.stdin = child.stdin;
     this.stdout = new BufferedReadable(child.stdout);
     this.stderr = new BufferedReadable(child.stderr);
@@ -171,66 +355,26 @@ class LocalProcess implements JianProcess {
     return this._exitPromise;
   }
 
-  kill(signal?: NodeJS.Signals): Promise<void> {
-    // Reject if the process never actually started (spawn failed).
-    // pid <= 0 indicates ChildProcess.pid was undefined, which happens
-    // when spawn() fails to find/execute the command. Calling
-    // process.kill(-1, ...) on POSIX would signal the entire process
-    // group, potentially killing unrelated processes.
-    if (this.pid <= 0) {
-      return Promise.resolve();
-    }
-
-    // On Windows, `ChildProcess.kill()` only signals the shell parent, leaving
-    // grandchildren alive. Use `taskkill /T` so the caller's graceful and force
-    // kill phases apply to the whole process tree.
-    if (isWindows) {
-      const useForce = signal === 'SIGKILL';
-      const taskkillArgs = useForce
-        ? ['/T', '/F', '/PID', String(this.pid)]
-        : ['/T', '/PID', String(this.pid)];
-      return new Promise<void>((resolve, reject) => {
-        const killer = spawn('taskkill', taskkillArgs, {
-          stdio: 'ignore',
-          windowsHide: true,
-        });
-        killer.once('error', (err) => {
-          reject(new Error(`taskkill failed to start: ${err.message}`));
-        });
-        killer.once('close', (code) => {
-          if (code === 0) resolve();
-          else reject(new Error(`taskkill exited with code ${code ?? 'null'}`));
-        });
-        killer.unref();
-      });
-    }
-
-    // On POSIX, `detached:true` makes the child a process-group leader
-    // (pgid === pid). A plain `ChildProcess.kill()` still only signals the
-    // direct child, so a shell like `bash -c 'sleep 100 & sleep 100'` leaves
-    // grandchildren orphaned. `process.kill(-pid, signal)` signals the group
-    // (negative pid = process-group id under POSIX kill(2)).
+  async kill(signal?: NodeJS.Signals): Promise<void> {
+    const deliver: NodeJS.Signals = signal ?? 'SIGTERM';
+    // The whole tree has to go, not just this child: grandchildren survive a
+    // plain `ChildProcess.kill()` on both platforms. `killProcessTree` is the
+    // one place that knows the mechanism per platform — `taskkill /T` on
+    // Windows, the process group on POSIX (which is why the child is spawned
+    // `detached` there; see `detachedForProcessTree`).
     try {
-      process.kill(-this.pid, signal ?? 'SIGTERM');
+      await killProcessTree(this.pid, { signal: deliver, platform: this._platform });
     } catch (error) {
-      const err = error as NodeJS.ErrnoException;
-      // ESRCH = group already gone (child exited + reaped between
-      // `wait()` racing spawn + this call). Treat as successful kill.
-      if (err.code === 'ESRCH') return Promise.resolve();
-      // EPERM is typically a misconfiguration (e.g. non-detached
-      // spawn earlier in the file); fall back to direct `.kill()` so
-      // we at least signal the direct child instead of throwing.
-      if (err.code === 'EPERM') {
-        try {
-          this._child.kill(signal ?? 'SIGTERM');
-        } catch {
-          /* best effort */
-        }
-        return Promise.resolve();
+      // EPERM means the group is not ours to signal. Fall back to the direct
+      // child so the caller still gets best-effort teardown instead of a hard
+      // failure.
+      if ((error as NodeJS.ErrnoException).code !== 'EPERM') throw error;
+      try {
+        this._child.kill(deliver);
+      } catch {
+        /* best effort */
       }
-      throw error;
     }
-    return Promise.resolve();
   }
 }
 
@@ -253,6 +397,14 @@ export class LocalJian implements Jian {
   readonly osEnv: Environment;
   private _cwd: string;
   private readonly _rootDir: string | undefined;
+  /**
+   * Spawn / kill / path-case dialect for this instance, derived from the probed
+   * environment: `osKind` is `'Windows'` exactly when the probe saw win32.
+   * Injected rather than read from `process.platform` so tests can drive the
+   * Windows dialect from any host — same shape as `environment.ts`, which takes
+   * an injected platform probe.
+   */
+  private readonly _platform: 'win32' | 'posix';
 
   private constructor(osEnv: Environment, cwd?: string, rootDir?: string) {
     // After construction we never touch `process.cwd()` / `process.chdir()`
@@ -267,6 +419,7 @@ export class LocalJian implements Jian {
     // workspace) can supply `rootDir` or use `withCwd`, which narrows the
     // boundary to the new cwd.
     this._rootDir = rootDir === undefined ? undefined : normalize(rootDir);
+    this._platform = osEnv.osKind === 'Windows' ? 'win32' : 'posix';
     this.osEnv = osEnv;
   }
 
@@ -301,7 +454,7 @@ export class LocalJian implements Jian {
 
   private _assertWithinRoot(resolvedPath: string): void {
     if (this._rootDir === undefined) return;
-    if (isWithinDirectory(resolvedPath, this._rootDir)) return;
+    if (isWithinDirectory(resolvedPath, this._rootDir, this._platform)) return;
     throw new JianPathOutsideRootError(
       `Path outside allowed root directory: ${resolvedPath}`,
       resolvedPath,
@@ -312,7 +465,7 @@ export class LocalJian implements Jian {
   /** Resolve path for sandboxed operations — lexical check + realpath. */
   private async _resolveSandboxedPath(path: string): Promise<string> {
     const lexical = isAbsolute(path) ? normalize(path) : join(this._cwd, path);
-    if (!isWithinDirectory(lexical, this._rootDir!)) {
+    if (!isWithinDirectory(lexical, this._rootDir!, this._platform)) {
       throw new JianPathOutsideRootError(
         `Path outside allowed root directory: ${lexical}`,
         lexical,
@@ -321,7 +474,7 @@ export class LocalJian implements Jian {
     }
     const realPath = await fsRealpath(lexical);
     const realRoot = await fsRealpath(this._rootDir!);
-    if (!isWithinDirectory(realPath, realRoot)) {
+    if (!isWithinDirectory(realPath, realRoot, this._platform)) {
       throw new JianPathOutsideRootError(
         `Path outside allowed root directory (via symlink): ${lexical}`,
         lexical,
@@ -332,7 +485,7 @@ export class LocalJian implements Jian {
   }
 
   pathClass(): 'posix' | 'win32' {
-    return isWindows ? 'win32' : 'posix';
+    return this._platform;
   }
 
   normpath(path: string): string {
@@ -414,7 +567,7 @@ export class LocalJian implements Jian {
       stSize: s.size,
       stAtime: s.atimeMs / 1000,
       stMtime: s.mtimeMs / 1000,
-      stCtime: isWindows ? s.birthtimeMs / 1000 : s.ctimeMs / 1000,
+      stCtime: isWindowsPlatform(this._platform) ? s.birthtimeMs / 1000 : s.ctimeMs / 1000,
     };
   }
 
@@ -538,7 +691,7 @@ export class LocalJian implements Jian {
       for (const entry of entries) {
         // Use join to avoid "//entry" when basePath is a filesystem root.
         const fullPath = join(basePath, entry);
-        if (this._rootDir && !isWithinDirectory(fullPath, this._rootDir)) continue;
+        if (this._rootDir && !isWithinDirectory(fullPath, this._rootDir, this._platform)) continue;
         let entryStat;
         try {
           entryStat = await stat(fullPath);
@@ -581,7 +734,7 @@ export class LocalJian implements Jian {
 
         // Use join to avoid "//entry" when basePath is a filesystem root.
         const fullPath = join(basePath, entry);
-        if (this._rootDir && !isWithinDirectory(fullPath, this._rootDir)) continue;
+        if (this._rootDir && !isWithinDirectory(fullPath, this._rootDir, this._platform)) continue;
         if (remainingParts.length === 0) {
           if (await this._isWithinPhysicalRoots(fullPath, physicalAllowedRoots)) {
             yield fullPath;
@@ -616,7 +769,9 @@ export class LocalJian implements Jian {
     if (physicalAllowedRoots === undefined) return true;
     try {
       const physicalPath = normalize(await fsRealpath(path));
-      return physicalAllowedRoots.some((root) => isWithinDirectory(physicalPath, root));
+      return physicalAllowedRoots.some((root) =>
+        isWithinDirectory(physicalPath, root, this._platform),
+      );
     } catch {
       return false;
     }
@@ -776,26 +931,37 @@ export class LocalJian implements Jian {
         'LocalJian.execWithEnv(): at least one argument (the command to run) is required.',
       );
     }
-    const restArgs = args.slice(1);
-    const child = spawn(command, restArgs, {
+    const childEnv = buildSafeEnv(env);
+    // Windows resolves `npm` to `npm.cmd` and needs `cmd.exe` for the batch
+    // shims; every other platform spawns the name as given.
+    const plan = isWindowsPlatform(this._platform)
+      ? await windowsSpawnPlan(command, args.slice(1), childEnv)
+      : { command, args: args.slice(1), windowsVerbatimArguments: false };
+    const child = spawn(plan.command, plan.args, {
       cwd: this._cwd,
       stdio: ['pipe', 'pipe', 'pipe'],
-      detached: !isWindows,
-      env: buildSafeEnv(env),
+      // A process group is what makes the tree killable as a tree; see
+      // `detachedForProcessTree`.
+      detached: detachedForProcessTree(this._platform),
+      env: childEnv,
+      windowsVerbatimArguments: plan.windowsVerbatimArguments,
+      // Windows-only no-op elsewhere: never flash a console window for a
+      // command the user did not ask to see.
+      windowsHide: true,
     });
     try {
       await waitForSpawn(child);
     } catch (error: unknown) {
       if (error instanceof Error) {
         throw new JianExecError(
-          `Failed to spawn ${command}: ${error.message}`,
-          command,
+          `Failed to spawn ${plan.command}: ${error.message}`,
+          plan.command,
           (error as NodeJS.ErrnoException).code,
         );
       }
       throw error;
     }
-    return new LocalProcess(child);
+    return new LocalProcess(child, this._platform);
   }
 }
 

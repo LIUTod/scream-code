@@ -9,7 +9,7 @@ import type {
 } from '@scream-code/scream-code-sdk';
 
 import { t } from '@scream-code/config';
-import { REPLAY_TURN_LIMIT } from '@scream-code/scream-code-sdk';
+import { isRealUserPrompt, REPLAY_TURN_LIMIT } from '@scream-code/scream-code-sdk';
 
 import type {
   AppState,
@@ -126,7 +126,7 @@ export function limitReplayRecordsByTurn(
 ): readonly AgentReplayRecord[] {
   if (maxTurns <= 0) return [];
   const turnStarts = records.flatMap((record, index) =>
-    isReplayUserTurnRecord(record) ? [index] : [],
+    record.type === 'message' && isRealUserPrompt(record.message) ? [index] : [],
   );
   if (turnStarts.length <= maxTurns) return records;
   return records.slice(turnStarts[turnStarts.length - maxTurns]);
@@ -240,27 +240,6 @@ export function formatHookResultMessageForTranscript(
   }
 
   return results.map(({ event, body }) => formatHookResultBlock(event, body, blocked)).join('\n\n');
-}
-
-function isReplayUserTurnRecord(record: AgentReplayRecord): boolean {
-  if (record.type !== 'message') return false;
-  const { message } = record;
-  if (message.role !== 'user') return false;
-  switch (message.origin?.kind) {
-    case undefined:
-    case 'user':
-      return true;
-    case 'skill_activation':
-      return message.origin.trigger === 'user-slash';
-    case 'background_task':
-    case 'compaction_summary':
-    case 'cron_job':
-    case 'cron_missed':
-    case 'hook_result':
-    case 'injection':
-    case 'system_trigger':
-      return false;
-  }
 }
 
 function parseReplayToolArguments(value: string | null): Record<string, unknown> {

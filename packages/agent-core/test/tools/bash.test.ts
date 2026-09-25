@@ -1033,6 +1033,11 @@ describe('BashTool command-not-found hint', () => {
     expect(result).toMatchObject({ isError: true });
     expect(result.output).toContain('command not found');
     expect(result.output).toContain('command binary was not found');
+    // The hint is joined to the exit-code line by a real newline: the template
+    // used to spell the escape twice, which rendered the two characters `\n`
+    // into the tool result instead of breaking the line.
+    expect(result.output).toContain('\nHint:');
+    expect(result.output).not.toContain('\\n');
   });
 
   it('does not add toolchain-specific hint for tsc command-not-found', async () => {

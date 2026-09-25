@@ -17,11 +17,15 @@ import {
   readSessionIndex,
   removeSessionIndexEntry,
   sessionIndexPath,
+  type SessionIndexEntry,
 } from '../../src/session/store/session-index';
 
 describe('session index cache', () => {
   let homeDir: string;
   let sessionsDir: string;
+
+  /** Homes created per case below, so the index cache is never shared. */
+  const extraHomes: string[] = [];
 
   beforeEach(() => {
     homeDir = mkdtempSync(join(tmpdir(), 'session-index-'));
@@ -30,7 +34,23 @@ describe('session index cache', () => {
 
   afterEach(() => {
     rmSync(homeDir, { recursive: true, force: true });
+    for (const home of extraHomes.splice(0)) {
+      rmSync(home, { recursive: true, force: true });
+    }
   });
+
+  /**
+   * Write an index holding exactly `entries`. The read cache is keyed by the
+   * file's mtime and size rather than by the `sessionsDir` it was read with, so
+   * a case that needs a different sessions root gets a home of its own.
+   */
+  function writeIndex(home: string, entries: readonly SessionIndexEntry[]): void {
+    writeFileSync(
+      sessionIndexPath(home),
+      entries.map((entry) => `${JSON.stringify(entry)}\n`).join(''),
+      'utf-8',
+    );
+  }
 
   it('returns entries and serves repeat reads from cache', async () => {
     await appendSessionIndexEntry(homeDir, {
@@ -116,5 +136,52 @@ describe('session index cache', () => {
   it('returns an empty map when the index does not exist', async () => {
     const map = await readSessionIndex(homeDir, sessionsDir);
     expect(map.size).toBe(0);
+  });
+
+  it('keeps a POSIX session dir inside the sessions root, and drops what only looks like one', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'session-index-root-'));
+    extraHomes.push(home);
+    const root = join(home, 'sessions');
+    writeIndex(home, [
+      { sessionId: 'session_ok', sessionDir: join(root, 'session_ok'), workDir: '/tmp/work-ok' },
+      // `..` must not be followed out of the root, even when the result is named
+      // after the session id.
+      {
+        sessionId: 'session_escape',
+        sessionDir: join(root, '..', 'session_escape'),
+        workDir: '/tmp/work-escape',
+      },
+      // A shared prefix is not containment: `sessions-look` is a sibling of the
+      // root, which a string comparison would accept.
+      {
+        sessionId: 'session_look',
+        sessionDir: `${root}-look/session_look`,
+        workDir: '/tmp/work-look',
+      },
+      // The root itself is not a session dir, even where its basename names one.
+      { sessionId: 'sessions', sessionDir: root, workDir: '/tmp/work-root' },
+    ]);
+
+    const map = await readSessionIndex(home, root);
+
+    expect([...map.keys()]).toEqual(['session_ok']);
+  });
+
+  it('classifies a Windows-shaped session dir on any host', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'session-index-root-'));
+    extraHomes.push(home);
+    const root = 'C:\\Users\\me\\.scream\\sessions';
+    writeIndex(home, [
+      { sessionId: 'session_win_ok', sessionDir: `${root}\\session_win_ok`, workDir: 'C:\\work' },
+      {
+        sessionId: 'session_win_out',
+        sessionDir: 'C:\\Users\\me\\.scream\\session_win_out',
+        workDir: 'C:\\work',
+      },
+    ]);
+
+    const map = await readSessionIndex(home, root);
+
+    expect([...map.keys()]).toEqual(['session_win_ok']);
   });
 });

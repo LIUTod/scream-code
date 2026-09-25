@@ -1,20 +1,16 @@
+import type { TodoItem } from '../../todo';
 import type { ContextMessage } from '../context/types';
 import { DynamicInjector } from './injector';
 
 const TODO_LIST_TOOL_NAME = 'TodoList';
 const TODO_STORE_KEY = 'todo';
 const TODO_LIST_REMINDER_VARIANT = 'todo_list_reminder';
-const TODO_LIST_REMINDER_TURNS_SINCE_WRITE = 10;
-const TODO_LIST_REMINDER_TURNS_BETWEEN_REMINDERS = 10;
+const TODO_LIST_REMINDER_TURNS_SINCE_WRITE = 20;
+const TODO_LIST_REMINDER_TURNS_BETWEEN_REMINDERS = 20;
 
 interface TodoListReminderTurnCounts {
   readonly turnsSinceLastWrite: number;
   readonly turnsSinceLastReminder: number;
-}
-
-interface TodoItem {
-  readonly title: string;
-  readonly status: 'pending' | 'in_progress' | 'done';
 }
 
 /**
@@ -23,14 +19,21 @@ interface TodoItem {
  *
  * Fires when:
  *   - TodoList tool is active
- *   - >= 10 turns since the last todo write
- *   - >= 10 turns since the last reminder
+ *   - the list is non-empty and still has at least one unfinished item
+ *     (nothing to maintain means nothing to say)
+ *   - >= 20 turns since the last todo write
+ *   - >= 20 turns since the last reminder
  */
 export class TodoListReminderInjector extends DynamicInjector {
   protected override readonly injectionVariant = TODO_LIST_REMINDER_VARIANT;
 
   protected override getInjection(): string | undefined {
     if (!this.isTodoListActive()) return undefined;
+
+    // Nothing to maintain, nothing to say: an empty list (vacuously "all done")
+    // or one whose items are all done leaves no work the model could reconcile.
+    const todos = this.currentTodos();
+    if (todos.every((todo) => todo.status === 'done')) return undefined;
 
     const counts = getTodoListReminderTurnCounts(this.agent.context.history);
     if (
@@ -40,7 +43,7 @@ export class TodoListReminderInjector extends DynamicInjector {
       return undefined;
     }
 
-    return renderTodoListReminder(this.currentTodos());
+    return renderTodoListReminder(todos);
   }
 
   private isTodoListActive(): boolean {
@@ -140,5 +143,7 @@ function isTodoItem(value: unknown): value is TodoItem {
 }
 
 function isTodoStatus(value: unknown): value is TodoItem['status'] {
-  return value === 'pending' || value === 'in_progress' || value === 'done';
+  return (
+    value === 'pending' || value === 'in_progress' || value === 'done' || value === 'blocked'
+  );
 }

@@ -4,6 +4,7 @@ import type { Agent } from '..';
 import type { ExecutableToolResult, LoopRecordedEvent } from '../../loop';
 import { estimateTokens, estimateTokensForMessages } from '../../utils/tokens';
 import type { CompactionResult } from '../compaction';
+import { isRealUserPrompt } from './identity';
 import { messageFingerprint, stablePrefixLength } from './prefix-fingerprint';
 import { project } from './projector';
 import {
@@ -14,6 +15,11 @@ import {
 } from './types';
 
 export * from './types';
+
+// The "who authored this message" predicates. Defined in the leaf `./identity`
+// module so `./projector` can use them without a circular import back here;
+// re-exported so `../context` stays their public path.
+export { isRealUserPrompt, isUserAuthoredMessage } from './identity';
 
 const TOOL_ERROR_STATUS = '<system>ERROR: Tool execution failed.</system>';
 const TOOL_EMPTY_STATUS = '<system>Tool output is empty.</system>';
@@ -740,19 +746,4 @@ function truncateContentParts(parts: readonly ContentPart[]): ContentPart[] {
 
 function isEmptyOutputText(output: string): boolean {
   return output.length === 0 || output.trim() === TOOL_OUTPUT_EMPTY_TEXT;
-}
-
-/**
- * Determines whether a context message counts as a "user prompt" for undo
- * anchoring.  Regular user messages and user-triggered skill activations
- * both count; injections, system reminders, and model-triggered skills don't.
- */
-export function isRealUserPrompt(message: ContextMessage): boolean {
-  if (message.role !== 'user') return false;
-  const origin = message.origin;
-  if (origin === undefined || origin.kind === 'user') return true;
-  if (origin.kind === 'skill_activation') {
-    return origin.trigger === 'user-slash';
-  }
-  return false;
 }

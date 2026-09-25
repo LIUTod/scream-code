@@ -7,8 +7,9 @@
  *   - POSIX path probing prefers /bin/bash, falls back to /usr/bin/bash,
  *     /usr/local/bin/bash, then /bin/sh (with shellName 'sh').
  *   - Windows resolves Git Bash via `SCREAM_SHELL_PATH`, `git.exe` on PATH,
- *     or well-known install locations; throws `JianShellNotFoundError`
- *     if none are present.
+ *     or well-known install locations; when Git Bash is absent it falls back
+ *     to PowerShell (`pwsh.exe` before `powershell.exe`); throws
+ *     `JianShellNotFoundError` only when neither shell exists.
  *   - `osArch` / `osVersion` are populated from the Node OS APIs.
  *
  * All tests expect `detectEnvironment()` to be a pure function of
@@ -101,6 +102,7 @@ describe('detectEnvironment', () => {
     );
     expect(env.shellName satisfies ShellName).toBe('bash');
     expect(env.shellPath).toBe('/bin/bash');
+    expect(env.shellArgs).toEqual(['-c']);
   });
 
   it('falls back to /usr/bin/bash when /bin/bash is missing', async () => {
@@ -178,7 +180,7 @@ describe('detectEnvironment', () => {
     expect(env.shellPath).toBe('C:\\Users\\me\\AppData\\Local\\Programs\\Git\\bin\\bash.exe');
   });
 
-  it('throws JianShellNotFoundError when no Git Bash candidate is found', async () => {
+  it('throws JianShellNotFoundError when neither Git Bash nor PowerShell exists', async () => {
     const error = await detectEnvironment(
       stubDeps({
         platform: 'win32',
@@ -209,6 +211,92 @@ describe('detectEnvironment', () => {
     );
     expect(error.message).toContain('D:\\custom\\bash.exe');
     expect(error.message).toContain('C:\\Program Files\\Git\\bin\\bash.exe');
+  });
+
+  // ── Windows PowerShell fallback ────────────────────────────────────
+  //
+  // A Windows host without Git for Windows used to have no execution channel
+  // at all. It now falls back to PowerShell, and only a host with neither shell
+  // raises: pwsh (PowerShell 7) is preferred over powershell.exe (5.1).
+
+  it('falls back to pwsh when Git Bash is absent and pwsh is on PATH', async () => {
+    const env = await detectEnvironment(
+      stubDeps({
+        platform: 'win32',
+        executables: { 'pwsh.exe': 'C:\\Tools\\PowerShell\\7\\pwsh.exe' },
+        existingPaths: [],
+      }),
+    );
+    expect(env.shellName satisfies ShellName).toBe('pwsh');
+    expect(env.shellPath).toBe('C:\\Tools\\PowerShell\\7\\pwsh.exe');
+    expect(env.shellArgs).toEqual(['-NoProfile', '-NonInteractive', '-Command']);
+  });
+
+  it('prefers pwsh over powershell.exe when both are on PATH', async () => {
+    const env = await detectEnvironment(
+      stubDeps({
+        platform: 'win32',
+        executables: {
+          'powershell.exe': 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',
+          'pwsh.exe': 'C:\\Tools\\PowerShell\\7\\pwsh.exe',
+        },
+        existingPaths: [],
+      }),
+    );
+    expect(env.shellName).toBe('pwsh');
+    expect(env.shellPath).toBe('C:\\Tools\\PowerShell\\7\\pwsh.exe');
+  });
+
+  it('falls back to powershell.exe when Git Bash and pwsh are absent', async () => {
+    const env = await detectEnvironment(
+      stubDeps({
+        platform: 'win32',
+        executables: {
+          'powershell.exe': 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',
+        },
+        existingPaths: [],
+      }),
+    );
+    expect(env.shellName satisfies ShellName).toBe('powershell');
+    expect(env.shellPath).toBe('C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe');
+    expect(env.shellArgs).toEqual(['-NoProfile', '-NonInteractive', '-Command']);
+  });
+
+  it('finds pwsh in %ProgramFiles% when it is not on PATH', async () => {
+    const env = await detectEnvironment(
+      stubDeps({
+        platform: 'win32',
+        env: { ProgramFiles: 'C:\\Program Files' },
+        existingPaths: ['C:\\Program Files\\PowerShell\\7\\pwsh.exe'],
+      }),
+    );
+    expect(env.shellName).toBe('pwsh');
+    expect(env.shellPath).toBe('C:\\Program Files\\PowerShell\\7\\pwsh.exe');
+  });
+
+  it('finds Windows PowerShell under %SystemRoot% when it is not on PATH', async () => {
+    const env = await detectEnvironment(
+      stubDeps({
+        platform: 'win32',
+        env: { SystemRoot: 'C:\\Windows' },
+        existingPaths: ['C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe'],
+      }),
+    );
+    expect(env.shellName).toBe('powershell');
+    expect(env.shellPath).toBe('C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe');
+  });
+
+  it('prefers Git Bash over PowerShell when both are available', async () => {
+    const env = await detectEnvironment(
+      stubDeps({
+        platform: 'win32',
+        executables: { 'pwsh.exe': 'C:\\Tools\\PowerShell\\7\\pwsh.exe' },
+        existingPaths: ['C:\\Program Files\\Git\\bin\\bash.exe'],
+      }),
+    );
+    expect(env.shellName).toBe('bash');
+    expect(env.shellPath).toBe('C:\\Program Files\\Git\\bin\\bash.exe');
+    expect(env.shellArgs).toEqual(['-c']);
   });
 
   // ── arch / version passthrough ─────────────────────────────────────

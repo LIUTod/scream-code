@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdir, mkdtemp, rm, readFile, writeFile, stat } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, readFile, readdir, writeFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -32,6 +32,31 @@ describe('DreamTracker', () => {
       },
     });
     expect(new Date(parsed.state.lastDreamAt).getTime()).toBeGreaterThan(0);
+  });
+
+  it('leaves no temp file behind after a successful write', async () => {
+    const tracker = new DreamTracker(tmpDir);
+    await tracker.init();
+    await tracker.recordDream();
+
+    // The write goes through a temp file + rename, so the directory holds the
+    // state file and nothing else once it returns.
+    expect(await readdir(tmpDir)).toEqual(['dream-lock.json']);
+  });
+
+  it('keeps the previous state file when the atomic swap fails, without throwing', async () => {
+    // A directory at the lock path makes the rename fail after the temp file
+    // has been written — the case the cleanup path exists for.
+    const lockPath = join(tmpDir, 'dream-lock.json');
+    await mkdir(lockPath);
+
+    const tracker = new DreamTracker(tmpDir);
+    await tracker.init();
+    // Non-critical persistence: a failed write must not reach the caller.
+    await expect(tracker.recordDream()).resolves.toBeUndefined();
+
+    expect(await readdir(tmpDir)).toEqual(['dream-lock.json']);
+    expect((await stat(lockPath)).isDirectory()).toBe(true);
   });
 
   it('loads persisted state across tracker restarts', async () => {

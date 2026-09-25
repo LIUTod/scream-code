@@ -34,7 +34,9 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "fastembed": "^2.1.0",
     "pathe": "^2.0.3"
+  },
+  "optionalDependencies": {
+    "fastembed": "^2.1.0"
   }
 }

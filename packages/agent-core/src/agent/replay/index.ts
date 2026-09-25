@@ -1,5 +1,6 @@
 import type { Agent } from '..';
 import type { AgentReplayRecord } from '../..';
+import { isRealUserPrompt } from '../context/identity';
 
 /**
  * Maximum number of user turns retained in the replay log. The sole consumer
@@ -11,24 +12,6 @@ import type { AgentReplayRecord } from '../..';
  * payload for long sessions. Keep in sync with the TUI's REPLAY_TURN_LIMIT.
  */
 export const REPLAY_TURN_LIMIT = 10;
-
-/** Mirrors the TUI's isReplayUserTurnRecord predicate (message-replay.ts):
- * a replay record starts a user turn when it is a user-role message from the
- * user (or a user-slash skill activation). */
-function isUserTurnStartRecord(record: AgentReplayRecord): boolean {
-  if (record.type !== 'message') return false;
-  const { message } = record;
-  if (message.role !== 'user') return false;
-  switch (message.origin?.kind) {
-    case undefined:
-    case 'user':
-      return true;
-    case 'skill_activation':
-      return message.origin.trigger === 'user-slash';
-    default:
-      return false;
-  }
-}
 
 export class ReplayBuilder {
   protected readonly records: AgentReplayRecord[] = [];
@@ -42,7 +25,10 @@ export class ReplayBuilder {
   push(record: AgentReplayRecord): void {
     if (!this.agent.records.restoring) return;
     this.records.push(record);
-    if (!isUserTurnStartRecord(record)) return;
+    // A record starts a user turn when its message is a real user prompt — the
+    // same bar `context/identity.ts` defines for every other caller, and the
+    // same predicate the TUI trims its replay window with. One rule, one place.
+    if (record.type !== 'message' || !isRealUserPrompt(record.message)) return;
     this.userTurnStarts.push(this.records.length - 1);
     if (this.userTurnStarts.length <= REPLAY_TURN_LIMIT) return;
     // Drop everything before the oldest retained turn start, keeping exactly

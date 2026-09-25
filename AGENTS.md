@@ -124,7 +124,7 @@ All text rendered in the TUI must be sanitized. Raw content — file contents, e
 
 **Rules:**
 
-- **Tabs → spaces** via `replaceTabs()` (from `@earendil-works/pi-tui` or local render-utils).
+- **Tabs → spaces** via `replaceTabs()` (from local TUI render utils).
 - **Truncate** lines with `truncateToWidth()` / `ui.truncate()`. Reuse existing `TRUNCATE_LENGTHS` constants; do not invent ad-hoc numbers.
 - **Shorten paths** with `shortenPath()` (replaces home with `~`).
 - **Apply to every render path**, not just the happy path:
@@ -476,14 +476,14 @@ One-click cc-connect daemon life cycle management (cross-platform).
 
 Manual and auto update via npm. Silent background version check runs at startup.
 
-- **Version source**: `src/cli/update/cdn.ts` — `fetchLatestVersionFromNpm()` runs `npm view scream-code version` (with `shell: process.platform === 'win32'` so npm.cmd resolves on Windows). Validates semver before returning.
+- **Version source**: `src/cli/update/cdn.ts` — `fetchLatestVersionFromNpm()` runs `npm view scream-code version` through the shared launch plan (`npmLaunchPlan()` in `src/utils/exec/npm.ts`): POSIX spawns the bare `npm`, while Windows hands `cmd.exe /d /s /c` one fully quoted `npm.cmd …` command line with `windowsVerbatimArguments: true`, because Node refuses to spawn a `.cmd` batch file at all (EINVAL — CreateProcess cannot run one argument-safely). `shell: true` is deliberately **not** used: it makes Node concatenate and re-tokenize the command line itself, and it triggers DEP0190 whenever args are passed alongside it. Validates semver before returning.
 - **Cache**: `src/cli/update/cache.ts` — reads/writes `~/.scream-code/updates/latest.json` with `source: 'npm'` and a Zod schema.
 - **Compare**: `src/cli/update/select.ts` — `semver.gt(latest, current)`.
 - **Refresh**: `src/cli/update/refresh.ts` — `refreshUpdateCache()` calls `fetchLatestVersionFromNpm()`, writes the cache on success, propagates errors so a transient npm blip leaves the existing cache intact.
 - **TUI startup**: `checkForUpdates()` in `scream-tui.ts` calls `refreshUpdateCache()` then `readUpdateCache()` + `selectUpdateTarget()`.
 - **Welcome panel**: shows "New version available (x.y.z)" when `hasNewVersion` is true.
-- **Preflight**: `src/cli/update/preflight.ts` — `runUpdatePreflight()` prompts interactively (or prints the manual command when non-TTY) and runs `npm install -g scream-code@latest` via `spawn` with `shell: process.platform === 'win32'` and `stdio: 'inherit'`. Single step, no git/pnpm.
-- **Manual trigger**: `/update` in `src/tui/commands/update.ts` — `npm install -g scream-code@latest` via `spawn` with `shell: process.platform === 'win32'`, 5-minute timeout, network-error detection with Chinese user-facing messages.
+- **Preflight**: `src/cli/update/preflight.ts` — `runUpdatePreflight()` prompts interactively (or prints the manual command when non-TTY) and runs `npm install -g scream-code@latest` via `spawn(plan.command, [...plan.args], { stdio: 'inherit', windowsVerbatimArguments: plan.windowsVerbatimArguments })`, with `plan = npmLaunchPlan(installLatestArgs())`. Single step, no git/pnpm. Its 5-minute expiry reaps the whole process tree with `killProcessTree` (`packages/jian`) for the same reason `/update` does, and reports the timeout only after that teardown.
+- **Manual trigger**: `/update` in `src/tui/commands/update.ts` — `npm install -g scream-code@latest` through the same `npmLaunchPlan()`, 5-minute timeout, network-error detection with Chinese user-facing messages. Expiry reaps the whole process tree with `killProcessTree` (`packages/jian`), because on Windows the direct child is the `cmd.exe` wrapper and signalling it alone leaves the `npm` / `node` beneath it running.
 
 ### /revoke
 
@@ -930,7 +930,12 @@ without a `projectDir` are still considered so existing data is not lost. Merged
 records inherit the union of the original tags.
 
 - **Tracker**: `packages/memory/src/dream.ts` — `DreamTracker`, persisted to
-  `<screamHomeDir>/dream-lock.json` (default `~/.scream-code/dream-lock.json`).
+  `<screamHomeDir>/dream-lock.json` through a temp-file + rename swap (a failed
+  write keeps the previous state and is retried on the next session).
+  `Agent` resolves the home with `resolveScreamHome(screamHomeDir)`
+  (`packages/agent-core/src/config/path.ts`) before constructing it, so
+  `SCREAM_CODE_HOME` moves the file and an omitted home directory still lands
+  under `~/.scream-code` instead of the process working directory.
 - **Store**: `packages/memory/src/store.ts` — `MemoryMemoStore`, persisted to
   `<screamHomeDir>/memory/entries.jsonl`.
 - **Consolidator**: `packages/memory/src/consolidator.ts` —
@@ -1025,13 +1030,13 @@ Once a verification command passes, the model must deliver rather than run addit
 
 `WorkingSet` also records recent successful verification commands with their full output and turn ID. When a Bash verification command is requested again within 60 seconds and no unverified file has been touched since the prior run, `TurnFlow.prepareToolExecution()` returns the cached result without re-executing the shell. The model should not request the same verification command repeatedly, and should not substitute a different command to satisfy the same verification urge.
 
-`TurnFlow` injects a `convergence_gate` system reminder when the model tries to stop while:
+`TurnFlow` continues a turn after the model stops only for one of three tagged categories. Every `return { continue: true }` in `shouldContinueAfterStop` carries an `// allow: <category>` tag on the line above it, and `packages/agent-core/test/agent/turn-stop-gate.test.ts` reads the source to enforce the tag and the allowed set:
 
-- the last assistant step had no content,
-- a tool failed in the current turn,
-- a verification command failed in the current turn,
-- a TodoList update is missing for an active goal, or
-- the turn produced meaningful work (file changes or a passed verification) but the final response is too brief or only acknowledges completion.
+- `correction` — a required tool failed, a verification command failed, the step produced no content, or the response was truncated by the output limit.
+- `external-input` — a buffered steer is waiting, or the Stop hook blocked the stop.
+- `quality-floor` — the turn produced meaningful work (file changes or a passed verification) but the final response is too brief or only acknowledges completion.
+
+Internal state maintenance — TodoList bookkeeping, goal progress, summary polish — is deliberately **not** a category. The stop gate runs only after the final answer has already streamed to the user, so such a continuation shows up as a whole extra block after the answer: user-visible noise that pushes the answer up and burns tokens. Those reminders are injected before the answer in `beforeStep` instead (the step-1 goal reminder and the pre-answer reconcile nudge); see 「续轮输出纪律」 in `packages/agent-core/docs/turn-pipeline.md`.
 
 The gate fires up to three times per turn for the hard checks; the brief-final-response check is allowed one remedial step. Empty or failed verification triggers a retry rather than allowing the model to claim completion.
 

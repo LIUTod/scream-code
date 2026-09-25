@@ -81,3 +81,29 @@ jobs:
       - name: Typecheck
         run: pnpm run typecheck
 
+  platform-tests:
+    name: Platform tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - macos-latest
+          - windows-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - name: Typecheck
+        run: pnpm run typecheck
+      - name: Test platform-sensitive packages
+        run: pnpm exec vitest run packages/agent-core packages/jian packages/memory
+

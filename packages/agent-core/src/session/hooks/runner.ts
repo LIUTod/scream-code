@@ -1,5 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 
+import { detachedForProcessTree, isWindowsPlatform, killProcessTree } from '@scream-code/jian';
 import { z } from 'zod';
 
 import type { HookResult } from './types';
@@ -49,7 +50,10 @@ export async function runHook(
       shell: true,
       cwd: options.cwd,
       stdio: 'pipe',
-      detached: process.platform !== 'win32',
+      // POSIX: lead a process group so the whole tree can be signalled at once
+      // when the hook times out. Windows has no process groups — the tree is
+      // torn down with `taskkill /T` instead; see `killProcess`.
+      detached: detachedForProcessTree(process.platform),
     });
   } catch (error) {
     return allowResult({ stderr: errorMessage(error) });
@@ -197,26 +201,47 @@ function allowResult(input: {
   };
 }
 
+/**
+ * Tear down the hook's whole process tree, not just the shell it was spawned as.
+ * A hook command that starts children of its own (`sh -c 'foo & bar'`) would
+ * otherwise keep running past the timeout — and past the session that started
+ * it.
+ *
+ * POSIX keeps the two-phase signal (SIGTERM, then SIGKILL after a short grace)
+ * because the shell leads its own process group. Windows has no POSIX signals:
+ * `killProcessTree` force-kills the tree in one step, since a "graceful" phase
+ * there would only post `WM_CLOSE`, which console processes ignore — it would
+ * report success while the tree kept running.
+ */
 function killProcess(child: ChildProcessWithoutNullStreams): void {
-  tryKillProcess(child, 'SIGTERM');
+  const pid = child.pid;
+  if (pid === undefined) {
+    // The spawn never produced a process; signal the handle directly.
+    try {
+      child.kill();
+    } catch {}
+    return;
+  }
+
+  // A hook must not outlive its timeout, so a refused group signal falls back to
+  // the direct child instead of giving up.
+  const killTree = (signal: NodeJS.Signals): void => {
+    void killProcessTree(pid, { signal }).catch(() => {
+      try {
+        child.kill(signal);
+      } catch {}
+    });
+  };
+
+  if (isWindowsPlatform(process.platform)) {
+    killTree('SIGKILL');
+    return;
+  }
+  killTree('SIGTERM');
   const killTimer = setTimeout(() => {
-    tryKillProcess(child, 'SIGKILL');
+    killTree('SIGKILL');
   }, KILL_GRACE_MS);
   killTimer.unref();
-}
-
-function tryKillProcess(child: ChildProcessWithoutNullStreams, signal: NodeJS.Signals): void {
-  try {
-    if (process.platform !== 'win32' && child.pid !== undefined) {
-      process.kill(-child.pid, signal);
-    } else {
-      child.kill(signal);
-    }
-  } catch {
-    try {
-      child.kill(signal);
-    } catch {}
-  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

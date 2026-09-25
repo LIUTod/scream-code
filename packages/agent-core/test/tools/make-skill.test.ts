@@ -150,6 +150,38 @@ describe('writeSkillPackage', () => {
       }),
     ).rejects.toThrow(ScreamError);
   });
+
+  it('rejects supporting files given as absolute paths, whatever the host platform', async () => {
+    const tmp = await mkdtemp(join(tmpdir(), 'make-skill-test-'));
+    const jian = await makeJian(tmp);
+
+    const absolutePaths = [
+      '/etc/passwd',
+      String.raw`C:\outside\f.txt`,
+      'C:/outside/f.txt',
+      String.raw`\\server\share\f.txt`,
+    ];
+
+    // A distinct skill name per case: the first attempt creates the skill
+    // directory, so reusing one name would fail on "already exists" instead.
+    for (const [index, path] of absolutePaths.entries()) {
+      await expect(
+        writeSkillPackage({
+          jian,
+          package: {
+            name: `absolute-path-skill-${index}`,
+            description: 'Bad.',
+            content:
+              `---\nname: absolute-path-skill-${index}\ndescription: Bad.\ntype: inline\n---\n\n# Bad\n`,
+            files: [{ path, content: 'should not write' }],
+          },
+          scope: 'user',
+          userHomeDir: tmp,
+          workDir: tmp,
+        }),
+      ).rejects.toThrow(/Unsafe supporting file path/);
+    }
+  });
 });
 
 describe('MakeSkillPlanTool', () => {
@@ -429,5 +461,24 @@ describe('writePluginSkillPackage', () => {
     const manager = new PluginManager({ screamHomeDir: tmp });
     await manager.load();
     expect(manager.get('fallback-skill')?.skillCount).toBe(1);
+  });
+
+  it('rejects supporting files that declare their own root', async () => {
+    const tmp = await mkdtemp(join(tmpdir(), 'make-skill-test-'));
+    const jian = await makeJian(tmp);
+
+    await expect(
+      writePluginSkillPackage({
+        jian,
+        screamHomeDir: tmp,
+        package: {
+          name: 'plugin-absolute-path',
+          description: 'Bad.',
+          content:
+            '---\nname: plugin-absolute-path\ndescription: Bad.\ntype: inline\n---\n\n# Bad\n',
+          files: [{ path: String.raw`C:\outside\f.txt`, content: 'should not write' }],
+        },
+      }),
+    ).rejects.toThrow(/Unsafe supporting file path/);
   });
 });

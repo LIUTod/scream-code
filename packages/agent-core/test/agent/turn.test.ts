@@ -19,6 +19,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { HookEngine } from '../../src/session/hooks';
 import type { AgentOptions } from '../../src/agent';
 import type { Logger, LogPayload } from '../../src/logging';
+import type { TodoStatus } from '../../src/todo';
 import {
   estimateTokens,
   estimateTokensForMessages,
@@ -1298,18 +1299,17 @@ describe('Agent turn flow', () => {
       [wire] usage.record                        { "model": "mock-model", "usage": { "inputOther": 7, "output": 22, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
       [emit] agent.status.updated                { "model": "mock-model", "thinkingLevel": "off", "contextTokens": 29, "maxContextTokens": 1000000, "contextUsage": 0.000029, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "permission": "manual", "usage": { "byModel": { "mock-model": { "inputOther": 7, "output": 22, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 7, "output": 22, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 7, "output": 22, "inputCacheRead": 0, "inputCacheCreation": 0 }, "turnTotal": { "inputOther": 7, "output": 22, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
       [wire] context.append_message              { "message": { "role": "user", "content": [ { "type": "text", "text": "Also mention the steer." } ], "toolCalls": [], "origin": { "kind": "user" } }, "time": "<time>" }
-      [wire] context.append_message              { "message": { "role": "user", "content": [ { "type": "text", "text": "<system-reminder>\\nThis task spans multiple steps. Use TodoList to track the remaining work and current phase.\\n</system-reminder>" } ], "toolCalls": [], "origin": { "kind": "system_trigger", "name": "todo_suggested" } }, "time": "<time>" }
       [wire] context.append_loop_event           { "event": { "type": "step.begin", "uuid": "<uuid-7>", "turnId": "0", "step": 2 }, "time": "<time>" }
       [emit] turn.step.started                   { "turnId": 0, "step": 2, "stepId": "<uuid-7>" }
-      [wire] request.header                      { "provider": "scream", "model": "mock-model", "modelAlias": "mock-model", "systemPromptReused": true, "activeTools": [ "Bash" ], "messagesCount": 5, "estimatedInputTokens": "<tokens>", "time": "<time>" }
+      [wire] request.header                      { "provider": "scream", "model": "mock-model", "modelAlias": "mock-model", "systemPromptReused": true, "activeTools": [ "Bash" ], "messagesCount": 4, "estimatedInputTokens": "<tokens>", "time": "<time>" }
       [emit] assistant.delta                     { "turnId": 0, "delta": "Approved, and I saw the steer." }
       [wire] context.append_loop_event           { "event": { "type": "block.start", "uuid": "<uuid-8>", "turnId": "0", "step": 2, "stepUuid": "<uuid-7>", "index": 0, "blockType": "text" }, "time": "<time>" }
       [wire] context.append_loop_event           { "event": { "type": "content.part", "uuid": "<uuid-9>", "turnId": "0", "step": 2, "stepUuid": "<uuid-7>", "part": { "type": "text", "text": "Approved, and I saw the steer." } }, "time": "<time>" }
       [wire] context.append_loop_event           { "event": { "type": "block.end", "uuid": "<uuid-10>", "turnId": "0", "step": 2, "stepUuid": "<uuid-7>", "index": 0, "blockType": "text" }, "time": "<time>" }
-      [wire] context.append_loop_event           { "event": { "type": "step.end", "uuid": "<uuid-7>", "turnId": "0", "step": 2, "usage": { "inputOther": 72, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }, "time": "<time>" }
-      [emit] turn.step.completed                 { "turnId": 0, "step": 2, "stepId": "<uuid-7>", "usage": { "inputOther": 72, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }
-      [wire] usage.record                        { "model": "mock-model", "usage": { "inputOther": 72, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
-      [emit] agent.status.updated                { "model": "mock-model", "thinkingLevel": "off", "contextTokens": 83, "maxContextTokens": 1000000, "contextUsage": 0.000083, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "permission": "manual", "usage": { "byModel": { "mock-model": { "inputOther": 79, "output": 33, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 79, "output": 33, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 79, "output": 33, "inputCacheRead": 0, "inputCacheCreation": 0 }, "turnTotal": { "inputOther": 79, "output": 33, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
+      [wire] context.append_loop_event           { "event": { "type": "step.end", "uuid": "<uuid-7>", "turnId": "0", "step": 2, "usage": { "inputOther": 39, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }, "time": "<time>" }
+      [emit] turn.step.completed                 { "turnId": 0, "step": 2, "stepId": "<uuid-7>", "usage": { "inputOther": 39, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }
+      [wire] usage.record                        { "model": "mock-model", "usage": { "inputOther": 39, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
+      [emit] agent.status.updated                { "model": "mock-model", "thinkingLevel": "off", "contextTokens": 50, "maxContextTokens": 1000000, "contextUsage": 0.00005, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "permission": "manual", "usage": { "byModel": { "mock-model": { "inputOther": 46, "output": 33, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 46, "output": 33, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 46, "output": 33, "inputCacheRead": 0, "inputCacheCreation": 0 }, "turnTotal": { "inputOther": 46, "output": 33, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
       [emit] turn.ended                          { "turnId": 0, "reason": "completed" }
     `);
     expect(ctx.lastLlmInput()).toMatchInlineSnapshot(`
@@ -1318,7 +1318,6 @@ describe('Agent turn flow', () => {
         assistant: text "I will ask first."  calls call_bash:Bash { "command": "printf approved", "timeout": 60 }
         tool[call_bash]: text "approved"
         user: text "Also mention the steer."
-        user: text "<system-reminder>\\nThis task spans multiple steps. Use TodoList to track the remaining work and current phase.\\n</system-reminder>"
     `);
     expect(ctx.llmCalls).toHaveLength(2);
     await ctx.expectResumeMatches();
@@ -1388,57 +1387,244 @@ describe('Agent turn flow', () => {
     await ctx.expectResumeMatches();
   });
 
-  it('injects a single todo reconcile continuation when todos are unfinished', async () => {
+  it('injects the todo reconcile reminder before the final answer, with no extra round', async () => {
     const ctx = testAgent({ jian: createCommandJian('ignored') });
-    ctx.configure({ tools: [] });
-    ctx.agent.tools.updateStore('todo', [
-      { title: 'Ship the feature', status: 'in_progress' },
-      { title: 'Write the docs', status: 'pending' },
-    ]);
+    ctx.configure({ tools: ['TodoList'] });
 
-    ctx.mockNextResponse({ type: 'text', text: 'All finished, bye.' });
-    ctx.mockNextResponse({ type: 'text', text: 'Todos reconciled.' });
+    // Step 1 writes a plan that is still unfinished; step 2 is the final answer.
+    ctx.mockNextResponse(
+      { type: 'text', text: 'Planning the work.' },
+      todoListCall('call_todo', [{ title: 'Ship the feature', status: 'in_progress' }]),
+    );
+    ctx.mockNextResponse({
+      type: 'text',
+      text: 'Shipped the feature; the docs item is still open and stays tracked for the next turn.',
+    });
     await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Do the work' }] });
 
     const events = JSON.stringify(await ctx.untilTurnEnd());
-    expect(events).toContain('todo_reconcile');
-    expect(events).toContain('Do not mark incomplete work as done');
+    // Exactly two rounds: the tool step and the final answer. The reconcile
+    // used to be a third round appended *after* the answer had been streamed.
     expect(ctx.llmCalls).toHaveLength(2);
-    // Continuation input carries the reconcile reminder; response text is on the wire.
-    expect(JSON.stringify(ctx.llmCalls.at(-1)?.history ?? [])).toContain(
-      'Before ending the turn, reconcile the TodoList',
-    );
-    expect(events).toContain('Todos reconciled.');
+    const finalAnswerInput = JSON.stringify(ctx.llmCalls.at(-1)?.history ?? []);
+    expect(finalAnswerInput).toContain('Before you write your final answer');
+    expect(finalAnswerInput).toContain('Do not mark incomplete work as done');
+
+    expect(events).toContain('todo_reconcile');
+    expect(events).not.toContain('Before ending the turn, reconcile');
+    // The reminder precedes the answer text on the wire, never follows it.
+    const reminderIndex = events.indexOf('Before you write your final answer');
+    const answerIndex = events.indexOf('Shipped the feature; the docs item');
+    expect(reminderIndex).toBeGreaterThanOrEqual(0);
+    expect(answerIndex).toBeGreaterThanOrEqual(0);
+    expect(reminderIndex).toBeLessThan(answerIndex);
     await ctx.expectResumeMatches();
   });
 
-  it('does not inject todo reconcile when all todos are done', async () => {
+  it('does not inject the todo reconcile reminder when every todo is done', async () => {
     const ctx = testAgent({ jian: createCommandJian('ignored') });
-    ctx.configure({ tools: [] });
+    ctx.configure({ tools: ['TodoList'] });
+
+    ctx.mockNextResponse(
+      { type: 'text', text: 'Closing out the work.' },
+      todoListCall('call_todo', [{ title: 'Ship the feature', status: 'done' }]),
+    );
+    ctx.mockNextResponse({
+      type: 'text',
+      text: 'The feature is shipped and the todo list is fully closed out.',
+    });
+    await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Finish the work' }] });
+
+    const events = JSON.stringify(await ctx.untilTurnEnd());
+    expect(ctx.llmCalls).toHaveLength(2);
+    const allInputs = JSON.stringify(ctx.llmCalls.map((call) => call.history));
+    expect(allInputs).not.toContain('Before you write your final answer');
+
+    expect(events).not.toContain('todo_reconcile');
+    expect(events).toContain('The feature is shipped');
+    await ctx.expectResumeMatches();
+  });
+
+  it('does not inject the todo reconcile reminder when the todos list is empty', async () => {
+    const ctx = testAgent({ jian: createCommandJian('ignored') });
+    ctx.configure({ tools: ['TodoList'] });
+
+    ctx.mockNextResponse(
+      { type: 'text', text: 'Clearing the list.' },
+      todoListCall('call_todo', []),
+    );
+    ctx.mockNextResponse({
+      type: 'text',
+      text: 'Cleared the todo list; nothing is being tracked for this task.',
+    });
+    await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Clear the list' }] });
+
+    const events = JSON.stringify(await ctx.untilTurnEnd());
+    expect(ctx.llmCalls).toHaveLength(2);
+    const allInputs = JSON.stringify(ctx.llmCalls.map((call) => call.history));
+    expect(allInputs).not.toContain('Before you write your final answer');
+
+    expect(events).not.toContain('todo_reconcile');
+    await ctx.expectResumeMatches();
+  });
+
+  it('does not inject the todo reconcile reminder when the turn never touched the list', async () => {
+    const ctx = testAgent({ jian: createCommandJian('ok') });
+    ctx.configure({ tools: ['Bash', 'TodoList'] });
+    // Leftover list from an earlier turn: non-empty and still unfinished, but
+    // this turn never opened it — a stale list must not earn a nudge.
     ctx.agent.tools.updateStore('todo', [
-      { title: 'Ship the feature', status: 'done' },
+      { title: 'Left over from an earlier turn', status: 'pending' },
     ]);
 
-    ctx.mockNextResponse({ type: 'text', text: 'Nothing left.' });
-    await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Check todos' }] });
+    ctx.mockNextResponse({ type: 'text', text: 'Running one command.' }, bashCall());
+    await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Run one command' }] });
+    const approval = await ctx.takeApprovalRequest();
+    ctx.mockNextResponse({
+      type: 'text',
+      text: 'Ran the one command; the leftover list belongs to an earlier turn.',
+    });
+    approval.respond({ decision: 'approved', selectedLabel: 'approve' });
 
     const events = JSON.stringify(await ctx.untilTurnEnd());
+    expect(ctx.llmCalls).toHaveLength(2);
+    const allInputs = JSON.stringify(ctx.llmCalls.map((call) => call.history));
+    expect(allInputs).not.toContain('Before you write your final answer');
     expect(events).not.toContain('todo_reconcile');
-    expect(ctx.llmCalls).toHaveLength(1);
     await ctx.expectResumeMatches();
   });
 
-  it('does not inject todo reconcile when todos list is empty', async () => {
-    const ctx = testAgent({ jian: createCommandJian('ignored') });
-    ctx.configure({ tools: [] });
-    ctx.agent.tools.updateStore('todo', []);
+  it('does not treat a denied TodoList call as having touched the list', async () => {
+    const ctx = testAgent({
+      jian: createCommandJian('ignored'),
+      permission: {
+        initialRules: [{ decision: 'deny', scope: 'user', pattern: 'TodoList' }],
+      },
+    });
+    ctx.configure({ tools: ['TodoList'] });
+    // Stale, unfinished list left over from an earlier turn: only a TodoList
+    // write that actually landed this turn may earn the pre-answer nudge.
+    ctx.agent.tools.updateStore('todo', [
+      { title: 'Left over from an earlier turn', status: 'pending' },
+    ]);
 
-    ctx.mockNextResponse({ type: 'text', text: 'no todos' });
-    await ctx.rpc.prompt({ input: [{ type: 'text', text: 'hello' }] });
+    ctx.mockNextResponse(
+      { type: 'text', text: 'Updating the list.' },
+      todoListCall('call_todo', [{ title: 'Ship the feature', status: 'in_progress' }]),
+    );
+    ctx.mockNextResponse({
+      type: 'text',
+      text: 'The list update was denied, so the stored list is unchanged.',
+    });
+    await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Update the todo list' }] });
 
     const events = JSON.stringify(await ctx.untilTurnEnd());
+    expect(events).toContain('was denied by permission rule');
+    // A denied call wrote nothing, so the turn did not touch the list: no
+    // reconcile nudge and no extra round.
+    expect(ctx.llmCalls).toHaveLength(2);
+    const allInputs = JSON.stringify(ctx.llmCalls.map((call) => call.history));
+    expect(allInputs).not.toContain('Before you write your final answer');
     expect(events).not.toContain('todo_reconcile');
-    expect(ctx.llmCalls).toHaveLength(1);
+    await ctx.expectResumeMatches();
+  });
+
+  it('keeps the multi-step TodoList suggestion when every TodoList call was denied', async () => {
+    const ctx = testAgent({
+      jian: createCommandJian('ignored'),
+      permission: {
+        initialRules: [{ decision: 'deny', scope: 'user', pattern: 'TodoList' }],
+      },
+    });
+    ctx.configure({ tools: ['TodoList'] });
+
+    // Two denied calls get the turn to step 3 without ever writing the list.
+    // Denied calls are not "touched the list", so the step-3 suggestion — the
+    // one reminder a turn that never wrote a list still needs — must fire.
+    ctx.mockNextResponse(
+      { type: 'text', text: 'Updating the list.' },
+      todoListCall('call_a', [{ title: 'Ship the feature', status: 'in_progress' }]),
+    );
+    ctx.mockNextResponse(
+      { type: 'text', text: 'Trying the update once more.' },
+      todoListCall('call_b', [{ title: 'Write the docs', status: 'pending' }]),
+    );
+    ctx.mockNextResponse({
+      type: 'text',
+      text: 'Both list updates were denied, so I answer with the list untouched.',
+    });
+    await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Update the todo list twice' }] });
+
+    const events = JSON.stringify(await ctx.untilTurnEnd());
+    expect(ctx.llmCalls).toHaveLength(3);
+    expect(JSON.stringify(ctx.llmCalls[2]?.history ?? [])).toContain('This task spans multiple steps');
+    expect(events).toContain('todo_suggested');
+    await ctx.expectResumeMatches();
+  });
+
+  it('suggests TodoList only from the third step of a genuinely multi-step turn', async () => {
+    const ctx = testAgent({ jian: createCommandJian('ok') });
+    ctx.configure({ tools: ['Bash'] });
+
+    // Steps 1 and 2 each issue a tool call; step 3 is the final answer.
+    ctx.mockNextResponse(
+      { type: 'text', text: 'First command.' },
+      bashCallWithId('call_a', 'printf a'),
+    );
+    ctx.mockNextResponse(
+      { type: 'text', text: 'Second command.' },
+      bashCallWithId('call_b', 'printf b'),
+    );
+    ctx.mockNextResponse({
+      type: 'text',
+      text: 'Ran both commands and can now answer the user completely.',
+    });
+    await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Run two commands, then answer' }] });
+
+    const firstApproval = await ctx.takeApprovalRequest();
+    firstApproval.respond({ decision: 'approved', selectedLabel: 'approve' });
+    const secondApproval = await ctx.takeApprovalRequest();
+    secondApproval.respond({ decision: 'approved', selectedLabel: 'approve' });
+
+    const events = JSON.stringify(await ctx.untilTurnEnd());
+    expect(ctx.llmCalls).toHaveLength(3);
+    const step2Input = JSON.stringify(ctx.llmCalls[1]?.history ?? []);
+    const step3Input = JSON.stringify(ctx.llmCalls[2]?.history ?? []);
+    expect(step2Input).not.toContain('This task spans multiple steps');
+    expect(step3Input).toContain('This task spans multiple steps');
+    expect(events).toContain('todo_suggested');
+    await ctx.expectResumeMatches();
+  });
+
+  it('does not continue an active-goal turn that answered without a TodoList update', async () => {
+    const ctx = testAgent({ jian: createCommandJian('ok') });
+    ctx.configure({ tools: ['TodoList'] });
+    await ctx.agent.goal.createGoal({ objective: 'Ship the goal' });
+
+    // Turn 1 answers immediately without touching TodoList. The removed
+    // convergence reason replied to that with "An active goal exists but no
+    // TodoList update was made this turn" and continued — one extra round after
+    // the answer had already been streamed.
+    ctx.mockNextResponse({ type: 'text', text: 'Answered without touching the todo list.' });
+    // Turn 2 (goal continuation) pauses the goal so the driver stops.
+    ctx.mockNextResponse(
+      { type: 'text', text: 'Pausing the goal.' },
+      updateGoalCall('call_goal', 'paused'),
+    );
+
+    await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Work the goal' }] });
+    const goalTurn = JSON.stringify(await ctx.untilTurnEnd());
+
+    expect(goalTurn).not.toContain('no TodoList update was made');
+    expect(goalTurn).toContain('Answered without touching the todo list.');
+    // Exactly one step: the answer step, with nothing appended after it.
+    expect(goalTurn.split('turn.step.started')).toHaveLength(2);
+
+    // The driver then opens a fresh goal turn, which pauses the goal.
+    await vi.waitFor(() => {
+      expect(ctx.agent.goal.getGoal().goal?.status).toBe('paused');
+    });
+    expect(ctx.llmCalls).toHaveLength(2);
     await ctx.expectResumeMatches();
   });
 });
@@ -1453,6 +1639,27 @@ function bashCallWithId(id: string, command: string): ToolCall {
     id,
     name: 'Bash',
     arguments: JSON.stringify({ command, timeout: 60 }),
+  };
+}
+
+function todoListCall(
+  id: string,
+  todos: readonly { title: string; status: TodoStatus }[],
+): ToolCall {
+  return {
+    type: 'function',
+    id,
+    name: 'TodoList',
+    arguments: JSON.stringify({ todos }),
+  };
+}
+
+function updateGoalCall(id: string, status: 'active' | 'complete' | 'paused' | 'blocked'): ToolCall {
+  return {
+    type: 'function',
+    id,
+    name: 'UpdateGoal',
+    arguments: JSON.stringify({ status }),
   };
 }
 

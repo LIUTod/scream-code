@@ -18,9 +18,14 @@
 export const TURN_DEFAULTS = {
   /**
    * Convergence gate: max times the turn injects a `<system-reminder>` to
-   * force continuation (empty step, missing TodoList for an active goal,
-   * non-exploratory tool failure, failed verification). Bounded so a model
-   * that can't converge ends the turn instead of looping forever.
+   * force continuation (empty step, non-exploratory tool failure, failed
+   * verification) — all `correction`-category reasons in the stop gate's
+   * three-category scheme (`correction` / `external-input` / `quality-floor`;
+   * see 「续轮输出纪律」 in `docs/turn-pipeline.md`). Bounded so a model that
+   * can't converge ends the turn instead of looping forever. Internal state
+   * upkeep (checklist bookkeeping, goal progress, summary polish) is never a
+   * reason: those reminders run before the answer, never as a post-answer
+   * continuation.
    */
   maxConvergenceInjections: 3,
 

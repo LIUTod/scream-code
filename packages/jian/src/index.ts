@@ -17,6 +17,17 @@ export {
   JianExecError,
 } from './errors';
 export { LocalJian } from './local';
+// The `cmd.exe /s /c` quoting for a batch shim, for callers that have to build
+// the same line themselves (see `packages/jian/src/local.ts`): the CLI's `npm`
+// launch plan spawns `npm.cmd` through `cmd.exe` on Windows and reuses this
+// instead of carrying a second copy of the rules.
+export { buildCmdCommandLine } from './local';
+export {
+  detachedForProcessTree,
+  isWindowsPlatform,
+  killProcessTree,
+  type KillProcessTreeOptions,
+} from './platform';
 export {
   chdir,
   exec,

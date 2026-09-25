@@ -248,7 +248,10 @@ function resolveEntrySource(source: string, location: MarketplaceLocation): stri
 
 function resolveLocalPath(input: string, workDir?: string): string {
   if (input === '~') return homedir();
-  if (input.startsWith('~/')) return join(homedir(), input.slice(2));
+  // `~/` on a POSIX host, `~\` on Windows — both name the home directory.
+  // Resolved rather than passed through, because this is the location the
+  // loader is about to read from.
+  if (input.startsWith('~/') || input.startsWith('~\\')) return join(homedir(), input.slice(2));
   return isAbsolute(input) ? input : resolve(workDir ?? process.cwd(), input);
 }
 

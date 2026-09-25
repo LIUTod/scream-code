@@ -15,7 +15,7 @@
 import { createHash } from 'node:crypto';
 import { createWriteStream, existsSync } from 'node:fs';
 import { chmod, copyFile, mkdir, mkdtemp, readFile, rename, rm, stat } from 'node:fs/promises';
-import { homedir, tmpdir } from 'node:os';
+import { tmpdir } from 'node:os';
 import { basename, join } from 'pathe';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -23,6 +23,7 @@ import { pipeline } from 'node:stream/promises';
 import { extract as extractTar } from 'tar';
 import { type Entry, fromBuffer as yauzlFromBuffer } from 'yauzl';
 
+import { resolveScreamHome } from '../../config/path';
 import { abortable } from '../../utils/abort';
 
 const RG_VERSION = '15.0.0';
@@ -71,7 +72,7 @@ export interface EnsureRgPathOptions {
  */
 export async function ensureRgPath(options: EnsureRgPathOptions = {}): Promise<RgResolution> {
   options.signal?.throwIfAborted();
-  const resolution = resolveRgPath(options.shareDir ?? getShareDir(), options.signal);
+  const resolution = resolveRgPath(options.shareDir ?? resolveScreamHome(), options.signal);
   return options.signal === undefined ? resolution : abortable(resolution, options.signal);
 }
 
@@ -94,11 +95,11 @@ export async function findExistingRg(shareDir: string): Promise<RgResolution | u
   const systemRg = await whichRg();
   if (systemRg !== undefined) return { path: systemRg, source: 'system-path' };
   const vendorPath = getVendorRgPath(binName);
-  if (vendorPath !== undefined && (await isExecutableFile(vendorPath))) {
+  if (vendorPath !== undefined && (await fileExists(vendorPath))) {
     return { path: vendorPath, source: 'vendor' };
   }
   const cachePath = join(shareDir, 'bin', binName);
-  if (await isExecutableFile(cachePath)) {
+  if (await fileExists(cachePath)) {
     return { path: cachePath, source: 'share-bin-cached' };
   }
   return undefined;
@@ -124,12 +125,6 @@ function rgBinaryName(): string {
   return process.platform === 'win32' ? 'rg.exe' : 'rg';
 }
 
-function getShareDir(): string {
-  const override = process.env['SCREAM_CODE_HOME'];
-  if (override !== undefined && override !== '') return override;
-  return join(homedir(), '.scream-code');
-}
-
 function getVendorRgPath(_binName: string): string | undefined {
   return undefined;
 }
@@ -151,7 +146,7 @@ async function whichRg(): Promise<string | undefined> {
   return undefined;
 }
 
-async function isExecutableFile(p: string): Promise<boolean> {
+async function fileExists(p: string): Promise<boolean> {
   try {
     const st = await stat(p);
     return st.isFile();
@@ -160,38 +155,190 @@ async function isExecutableFile(p: string): Promise<boolean> {
   }
 }
 
-/** @internal for tests — rust-style `<arch>-<vendor>-<os>` target triple. */
-export function detectTarget(): string | undefined {
-  const arch = process.arch === 'x64' ? 'x86_64' : process.arch === 'arm64' ? 'aarch64' : undefined;
-  if (arch === undefined) return undefined;
+/** Rust target-triple arch component, for the Node arches ripgrep ships binaries for. */
+const TARGET_ARCH: Record<string, string | undefined> = {
+  x64: 'x86_64',
+  arm64: 'aarch64',
+};
 
-  if (process.platform === 'darwin') return `${arch}-apple-darwin`;
-  if (process.platform === 'linux') {
-    return arch === 'x86_64' ? 'x86_64-unknown-linux-musl' : 'aarch64-unknown-linux-gnu';
+/** Node arch → the arch component musl uses in its dynamic loader file name. */
+const LINUX_LOADER_ARCH: Record<string, string | undefined> = {
+  x64: 'x86_64',
+  arm64: 'aarch64',
+};
+
+export type LinuxLibc = 'glibc' | 'musl';
+
+export interface LibcProbe {
+  readonly arch: string;
+  readonly isFile: (path: string) => Promise<boolean>;
+  readonly glibcVersionRuntime: () => string | undefined;
+}
+
+export interface RgTargetProbe {
+  readonly platform: string;
+  readonly arch: string;
+  readonly detectLinuxLibc: () => Promise<LinuxLibc>;
+}
+
+/**
+ * Decide whether the Linux host is musl- or glibc-based.
+ *
+ * The libc is probed, never inferred from the arch: a glibc-linked binary
+ * cannot exec on a musl host, so guessing wrong hands the user a broken `rg`.
+ * Three positive signals, each cheap, then a documented default:
+ *
+ *   1. `/etc/alpine-release` — Alpine states its own libc here, and the marker
+ *      wins over the probes below because Alpine also ships a glibc-compat
+ *      shim that would otherwise make the next signal claim "glibc".
+ *   2. Node's diagnostic report `header.glibcVersionRuntime` — populated only
+ *      when the *running* binary bound to glibc, so it is strong evidence for
+ *      distros that carry no marker file.
+ *   3. The musl dynamic loader `/lib/ld-musl-<arch>.so.1` — covers non-Alpine
+ *      musl distros and musl container images.
+ *   4. Default `glibc`: the Linux baseline. A wrong guess here only changes the
+ *      outcome on aarch64 Linux, where it selects the glibc build.
+ */
+export async function detectLinuxLibc(probe: Partial<LibcProbe> = {}): Promise<LinuxLibc> {
+  const isFile = probe.isFile ?? fileExists;
+  if (await isFile('/etc/alpine-release')) return 'musl';
+
+  const glibcVersion = (probe.glibcVersionRuntime ?? nodeGlibcVersionRuntime)();
+  if (glibcVersion !== undefined && glibcVersion.length > 0) return 'glibc';
+
+  const loaderArch = LINUX_LOADER_ARCH[probe.arch ?? process.arch];
+  if (loaderArch !== undefined && (await isFile(`/lib/ld-musl-${loaderArch}.so.1`))) {
+    return 'musl';
   }
-  if (process.platform === 'win32') return `${arch}-pc-windows-msvc`;
-  return undefined;
+  return 'glibc';
+}
+
+function nodeGlibcVersionRuntime(): string | undefined {
+  try {
+    const report = process.report.getReport() as unknown;
+    const header = (report as { header?: unknown }).header;
+    const version = (header as { glibcVersionRuntime?: unknown } | undefined)?.glibcVersionRuntime;
+    return typeof version === 'string' ? version : undefined;
+  } catch {
+    // `getReport()` is unavailable under `--report-...` restrictions and can
+    // throw on some embedded runtimes — treat that as "no glibc signal".
+    return undefined;
+  }
+}
+
+type RgTargetDecision =
+  | { readonly kind: 'target'; readonly target: string }
+  | { readonly kind: 'unavailable'; readonly reason: string };
+
+/**
+ * The single decision tree behind {@link detectTarget} and
+ * {@link resolveRgArchive}: one place that knows which host maps to which
+ * upstream release, so the "which target" and "why is there none" answers
+ * cannot drift apart.
+ *
+ * Linux is the only platform whose libc matters, and upstream publishes exactly
+ * one Linux build per arch:
+ *   - x86_64: the static musl build only. Static musl runs unchanged on glibc
+ *     hosts, so both libcs resolve to the same archive and no probe is needed.
+ *   - aarch64: the glibc build only, so musl (e.g. Alpine) has no build at all.
+ */
+async function decideTarget(probe: Partial<RgTargetProbe>): Promise<RgTargetDecision> {
+  const nodeArch = probe.arch ?? process.arch;
+  const arch = TARGET_ARCH[nodeArch];
+  if (arch === undefined) {
+    return { kind: 'unavailable', reason: `unsupported architecture '${nodeArch}'` };
+  }
+
+  const platform = probe.platform ?? process.platform;
+  if (platform === 'darwin') return { kind: 'target', target: `${arch}-apple-darwin` };
+  if (platform === 'win32') return { kind: 'target', target: `${arch}-pc-windows-msvc` };
+  if (platform !== 'linux') {
+    return { kind: 'unavailable', reason: `unsupported platform '${platform}'` };
+  }
+
+  if (arch === 'x86_64') return { kind: 'target', target: 'x86_64-unknown-linux-musl' };
+
+  // The injected arch has to reach the default probe: the loader it looks for
+  // is `/lib/ld-musl-<arch>.so.1`, so probing with the host's arch instead
+  // would answer a question about a different machine (and make the injected
+  // arch a seam that only half applies).
+  const libc = await (probe.detectLinuxLibc !== undefined
+    ? probe.detectLinuxLibc()
+    : detectLinuxLibc({ arch: nodeArch }));
+  if (libc === 'glibc') return { kind: 'target', target: 'aarch64-unknown-linux-gnu' };
+  return {
+    kind: 'unavailable',
+    reason:
+      `no upstream ripgrep ${RG_VERSION} release exists for aarch64 Linux with musl ` +
+      '(Alpine ARM64); upstream publishes glibc only for aarch64',
+  };
+}
+
+/** @internal for tests — rust-style `<arch>-<vendor>-<os>` target triple. */
+export async function detectTarget(
+  probe: Partial<RgTargetProbe> = {},
+): Promise<string | undefined> {
+  const decision = await decideTarget(probe);
+  return decision.kind === 'target' ? decision.target : undefined;
+}
+
+interface RgArchive {
+  readonly target: string;
+  readonly name: string;
+  readonly url: string;
+  readonly sha256: string;
+  readonly isWindows: boolean;
+}
+
+/**
+ * Build the download plan for one target triple, or throw when that archive is
+ * not pinned in {@link RG_ARCHIVE_SHA256}. Kept separate from
+ * {@link resolveRgArchive} so the pin gate is directly testable without
+ * inventing a reachable-but-unpinned host.
+ *
+ * @internal for tests
+ */
+export function pinnedRgArchive(target: string): RgArchive {
+  const isWindows = target.includes('windows');
+  const name = `ripgrep-${RG_VERSION}-${target}.${isWindows ? 'zip' : 'tar.gz'}`;
+  const sha256 = RG_ARCHIVE_SHA256[name];
+  if (sha256 === undefined) {
+    throw new Error(
+      `No pinned SHA-256 is configured for ripgrep archive ${name}, so it will not be ` +
+        'downloaded. Install ripgrep with your package manager and re-run.',
+    );
+  }
+  return { target, name, url: `${RG_BASE_URL}/${name}`, sha256, isWindows };
+}
+
+/**
+ * Resolve the release archive to bootstrap — the only download gate.
+ *
+ * Throws (never falls back to a different target) when the host has no
+ * supported build or when the resulting archive is not in
+ * {@link RG_ARCHIVE_SHA256}: downloading bytes we cannot verify against a
+ * pinned digest is worse than telling the user to install ripgrep themselves.
+ * Callers turn the thrown message into user-facing text with
+ * {@link rgUnavailableMessage}.
+ *
+ * @internal for tests
+ */
+export async function resolveRgArchive(probe: Partial<RgTargetProbe> = {}): Promise<RgArchive> {
+  const decision = await decideTarget(probe);
+  if (decision.kind === 'unavailable') {
+    throw new Error(
+      `No automatic ripgrep bootstrap is available on this host: ${decision.reason}. ` +
+        'Install ripgrep with your package manager and re-run.',
+    );
+  }
+  return pinnedRgArchive(decision.target);
 }
 
 async function downloadAndInstallRg(shareDir: string): Promise<string> {
-  const target = detectTarget();
-  if (target === undefined) {
-    throw new Error(
-      `Unsupported platform/arch for ripgrep download: ${process.platform}/${process.arch}`,
-    );
-  }
-
   // Windows ripgrep releases ship as `.zip`; macOS / Linux as `.tar.gz`.
   // The extraction branch inside the try block handles the format-specific
   // unpack; the fetch + download-to-tmp pipeline is identical.
-  const isWindows = target.includes('windows');
-  const archiveExt = isWindows ? 'zip' : 'tar.gz';
-  const archiveName = `ripgrep-${RG_VERSION}-${target}.${archiveExt}`;
-  const expectedSha256 = RG_ARCHIVE_SHA256[archiveName];
-  if (expectedSha256 === undefined) {
-    throw new Error(`No pinned SHA-256 is configured for ripgrep archive ${archiveName}`);
-  }
-  const url = `${RG_BASE_URL}/${archiveName}`;
+  const { name: archiveName, target, url, sha256: expectedSha256, isWindows } = await resolveRgArchive();
 
   const binDir = join(shareDir, 'bin');
   await mkdir(binDir, { recursive: true });
@@ -354,7 +501,7 @@ export async function extractRgFromZip(archivePath: string, destination: string)
 export function rgUnavailableMessage(cause: unknown): string {
   const detail =
     cause instanceof Error ? cause.message : typeof cause === 'string' ? cause : 'unknown error';
-  const shareBin = join(getShareDir(), 'bin', rgBinaryName());
+  const shareBin = join(resolveScreamHome(), 'bin', rgBinaryName());
   return (
     `ripgrep (rg) is not available and the automatic bootstrap failed.\n` +
     `\n` +

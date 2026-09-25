@@ -1,4 +1,7 @@
-import { spawn } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
+
+import { killProcessTree } from '@scream-code/jian';
+import { npmLaunchPlan } from '#/utils/exec/npm';
 
 import { globalPrefixForScream, installLatestArgs } from './prefix';
 import { promptForInstallConfirmation, type InstallPromptOptions } from './prompt';
@@ -19,16 +22,6 @@ export interface RunUpdatePreflightOptions {
 }
 
 const INSTALL_TIMEOUT_MS = 300_000;
-
-/**
- * Resolve the npm executable name for the current platform.
- *
- * On Windows, `npm` is `npm.cmd` — a batch file Node can spawn directly
- * without `shell: true` (which would trigger DEP0190 when args are passed).
- */
-function npmExecutable(): string {
-  return process.platform === 'win32' ? 'npm.cmd' : 'npm';
-}
 
 function formatErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -65,12 +58,46 @@ async function promptInstall(
   return promptForInstallConfirmation(options);
 }
 
+/**
+ * Reap an install that hit its timeout.
+ *
+ * On Windows the direct child is `cmd.exe` (see `npmLaunchPlan`), so signalling
+ * it stops the wrapper and leaves the `npm` / `node` beneath it running — there
+ * is no process group on Windows to signal instead. `killProcessTree` makes up
+ * for that with `taskkill /F /T /PID`, which walks the tree. POSIX has no
+ * wrapper in between, so the child itself is signalled exactly as before.
+ *
+ * Never rejects: the step has already failed with a timeout and the caller is
+ * told so, and a reaper that could not run must not turn that into a different
+ * error.
+ */
+async function reapTimedOutInstall(child: ChildProcess, platform: NodeJS.Platform): Promise<void> {
+  if (platform !== 'win32') {
+    child.kill('SIGTERM');
+    return;
+  }
+  try {
+    // `pid ?? 0` covers a spawn that never produced a process; a non-positive
+    // pid is a no-op inside `killProcessTree`.
+    await killProcessTree(child.pid ?? 0, { signal: 'SIGTERM', platform });
+  } catch {
+    /* the tree may already be gone; the timeout report is what matters */
+  }
+}
+
 async function installUpdate(): Promise<void> {
   return new Promise<void>((resolve, reject) => {
-    const child = spawn(npmExecutable(), installLatestArgs(), { stdio: 'inherit' });
+    const npm = npmLaunchPlan(installLatestArgs());
+    const child = spawn(npm.command, [...npm.args], {
+      stdio: 'inherit',
+      windowsVerbatimArguments: npm.windowsVerbatimArguments,
+    });
     const timer = setTimeout(() => {
-      child.kill('SIGTERM');
-      reject(new Error('npm install 超时'));
+      // The timeout is reported only after the teardown: a timeout that fired
+      // while the install it describes is still running would be a lie.
+      void reapTimedOutInstall(child, npm.platform).then(() => {
+        reject(new Error('npm install 超时'));
+      });
     }, INSTALL_TIMEOUT_MS);
     child.once('error', (err) => {
       clearTimeout(timer);

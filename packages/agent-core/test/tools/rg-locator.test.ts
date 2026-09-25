@@ -6,6 +6,13 @@
  *   - Resolves from `<shareDir>/bin/rg` when that binary exists
  *   - Prefers system PATH over share-dir cache when both are available
  *   - `rgUnavailableMessage` surfaces the underlying cause + install hints
+ *
+ * Platform pins (injected probes, no ambient `process` state):
+ *   - `detectTarget` / `resolveRgArchive` host → upstream release matrix,
+ *     including the Linux libc probe that decides aarch64
+ *   - `detectLinuxLibc` signal order (Alpine marker → diagnostic report →
+ *     musl loader → glibc default)
+ *   - the pin gate: an archive with no pinned SHA-256 is never downloaded
  */
 
 import { createHash } from 'node:crypto';
@@ -19,12 +26,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ZipFile } from 'yazl';
 
 import {
+  detectLinuxLibc,
   detectTarget,
   ensureRgPath,
   extractRgFromZip,
   findExistingRg,
+  pinnedRgArchive,
+  resolveRgArchive,
   rgUnavailableMessage,
   verifyArchiveChecksum,
+  type LinuxLibc,
 } from '../../src/tools/support/rg-locator';
 
 // Download-branch tests mock `tar.extract` so the archive layout is
@@ -79,46 +90,211 @@ describe('findExistingRg', () => {
   });
 });
 
+// Every host decision comes from injected probes, so this suite answers the
+// same way on any CI runner: no `process.platform` / `process.arch` patching.
 describe('detectTarget', () => {
-  let savedArch: string;
-  let savedPlatform: string;
-  beforeEach(() => {
-    savedArch = process.arch;
-    savedPlatform = process.platform;
+  it('darwin arm64 → aarch64-apple-darwin', async () => {
+    await expect(detectTarget({ platform: 'darwin', arch: 'arm64' })).resolves.toBe(
+      'aarch64-apple-darwin',
+    );
   });
-  afterEach(() => {
-    Object.defineProperty(process, 'arch', { value: savedArch });
-    Object.defineProperty(process, 'platform', { value: savedPlatform });
+  it('darwin x64 → x86_64-apple-darwin', async () => {
+    await expect(detectTarget({ platform: 'darwin', arch: 'x64' })).resolves.toBe(
+      'x86_64-apple-darwin',
+    );
+  });
+  it('win32 x64 → x86_64-pc-windows-msvc', async () => {
+    await expect(detectTarget({ platform: 'win32', arch: 'x64' })).resolves.toBe(
+      'x86_64-pc-windows-msvc',
+    );
+  });
+  it('win32 arm64 → aarch64-pc-windows-msvc', async () => {
+    await expect(detectTarget({ platform: 'win32', arch: 'arm64' })).resolves.toBe(
+      'aarch64-pc-windows-msvc',
+    );
+  });
+  it('linux x64 on glibc → x86_64-unknown-linux-musl, without probing the libc', async () => {
+    // Upstream ships exactly one Linux x64 build (static musl, which runs
+    // unchanged on glibc), so the libc cannot change the answer here — and the
+    // probe must not even run, since it costs a diagnostic report.
+    const detectLinuxLibc = vi.fn(
+      (): Promise<LinuxLibc> => Promise.reject(new Error('libc probe must not run')),
+    );
+    await expect(
+      detectTarget({ platform: 'linux', arch: 'x64', detectLinuxLibc }),
+    ).resolves.toBe('x86_64-unknown-linux-musl');
+    expect(detectLinuxLibc).not.toHaveBeenCalled();
+  });
+  it('linux x64 on musl → x86_64-unknown-linux-musl (the same static build)', async () => {
+    await expect(
+      detectTarget({ platform: 'linux', arch: 'x64', detectLinuxLibc: async () => 'musl' }),
+    ).resolves.toBe('x86_64-unknown-linux-musl');
+  });
+  it('linux arm64 on glibc → aarch64-unknown-linux-gnu', async () => {
+    await expect(
+      detectTarget({ platform: 'linux', arch: 'arm64', detectLinuxLibc: async () => 'glibc' }),
+    ).resolves.toBe('aarch64-unknown-linux-gnu');
+  });
+  it('linux arm64 on musl → undefined (upstream ships no musl aarch64 build)', async () => {
+    await expect(
+      detectTarget({ platform: 'linux', arch: 'arm64', detectLinuxLibc: async () => 'musl' }),
+    ).resolves.toBeUndefined();
+  });
+  it('probes the musl loader for the injected arch, not the host arch', async () => {
+    // Both ambient inputs are pinned so this means the same thing on an x64 and
+    // an arm64 runner: a diagnostic report with no glibc signal, and a host arch
+    // whose musl loader is *not* the one the fake filesystem has. With
+    // `arch: 'arm64'` the probe must look for `ld-musl-aarch64.so.1`; reading
+    // the host arch instead would answer for a different machine and report
+    // this one as glibc.
+    const archDescriptor = Object.getOwnPropertyDescriptor(process, 'arch')!;
+    const report = vi.spyOn(process.report, 'getReport').mockReturnValue({ header: {} } as never);
+    Object.defineProperty(process, 'arch', { ...archDescriptor, value: 'x64' });
+    vi.resetModules();
+    vi.doMock('node:fs/promises', async () => {
+      const actual = await vi.importActual<typeof FsPromises>('node:fs/promises');
+      return {
+        ...actual,
+        stat: async (path: string) => {
+          if (path === '/lib/ld-musl-aarch64.so.1') return { isFile: () => true };
+          throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+        },
+      };
+    });
+
+    try {
+      const { detectTarget: isolatedDetectTarget } =
+        await import('../../src/tools/support/rg-locator');
+      await expect(
+        isolatedDetectTarget({ platform: 'linux', arch: 'arm64' }),
+      ).resolves.toBeUndefined();
+    } finally {
+      Object.defineProperty(process, 'arch', archDescriptor);
+      report.mockRestore();
+      vi.doUnmock('node:fs/promises');
+      vi.resetModules();
+    }
   });
 
-  function setPlatform(arch: string, platform: string): void {
-    Object.defineProperty(process, 'arch', { value: arch });
-    Object.defineProperty(process, 'platform', { value: platform });
-  }
+  it('unsupported arch → undefined', async () => {
+    await expect(detectTarget({ platform: 'linux', arch: 'mips' })).resolves.toBeUndefined();
+  });
+  it('unsupported platform → undefined', async () => {
+    await expect(detectTarget({ platform: 'freebsd', arch: 'arm64' })).resolves.toBeUndefined();
+  });
+});
 
-  it('darwin arm64 → aarch64-apple-darwin', () => {
-    setPlatform('arm64', 'darwin');
-    expect(detectTarget()).toBe('aarch64-apple-darwin');
+describe('detectLinuxLibc', () => {
+  const noFile = async (): Promise<boolean> => false;
+
+  it('reports musl from the Alpine marker, which outranks a reported glibc runtime', async () => {
+    // Alpine ships a glibc-compat shim, so the marker has to win over the
+    // "running binary is glibc-linked" signal.
+    await expect(
+      detectLinuxLibc({
+        arch: 'arm64',
+        isFile: async (path) => path === '/etc/alpine-release',
+        glibcVersionRuntime: () => '2.31',
+      }),
+    ).resolves.toBe('musl');
   });
-  it('darwin x64 → x86_64-apple-darwin', () => {
-    setPlatform('x64', 'darwin');
-    expect(detectTarget()).toBe('x86_64-apple-darwin');
+
+  it('reports glibc from the diagnostic report when no marker file exists', async () => {
+    await expect(
+      detectLinuxLibc({ arch: 'arm64', isFile: noFile, glibcVersionRuntime: () => '2.31' }),
+    ).resolves.toBe('glibc');
   });
-  it('linux x64 → x86_64-unknown-linux-musl', () => {
-    setPlatform('x64', 'linux');
-    expect(detectTarget()).toBe('x86_64-unknown-linux-musl');
+
+  it('reports musl from the musl loader on a non-Alpine host', async () => {
+    await expect(
+      detectLinuxLibc({
+        arch: 'arm64',
+        isFile: async (path) => path === '/lib/ld-musl-aarch64.so.1',
+        glibcVersionRuntime: () => undefined,
+      }),
+    ).resolves.toBe('musl');
   });
-  it('linux arm64 → aarch64-unknown-linux-gnu', () => {
-    setPlatform('arm64', 'linux');
-    expect(detectTarget()).toBe('aarch64-unknown-linux-gnu');
+
+  it('defaults to glibc when no signal is present', async () => {
+    await expect(
+      detectLinuxLibc({ arch: 'arm64', isFile: noFile, glibcVersionRuntime: () => undefined }),
+    ).resolves.toBe('glibc');
   });
-  it('win32 x64 → x86_64-pc-windows-msvc', () => {
-    setPlatform('x64', 'win32');
-    expect(detectTarget()).toBe('x86_64-pc-windows-msvc');
+
+  it('treats an empty report value as "no glibc signal"', async () => {
+    await expect(
+      detectLinuxLibc({
+        arch: 'x64',
+        isFile: async (path) => path === '/lib/ld-musl-x86_64.so.1',
+        glibcVersionRuntime: () => '',
+      }),
+    ).resolves.toBe('musl');
   });
-  it('unsupported arch → undefined', () => {
-    setPlatform('mips', 'linux');
-    expect(detectTarget()).toBeUndefined();
+});
+
+describe('resolveRgArchive', () => {
+  it('glibc x64 → the pinned static musl archive over HTTPS', async () => {
+    const archive = await resolveRgArchive({
+      platform: 'linux',
+      arch: 'x64',
+      detectLinuxLibc: async () => 'glibc',
+    });
+    expect(archive.target).toBe('x86_64-unknown-linux-musl');
+    expect(archive.name).toBe('ripgrep-15.0.0-x86_64-unknown-linux-musl.tar.gz');
+    expect(new URL(archive.url).protocol).toBe('https:');
+    expect(archive.sha256).toMatch(/^[0-9a-f]{64}$/);
+    expect(archive.isWindows).toBe(false);
+  });
+
+  it('musl arm64 → rejects with an install hint instead of a target that cannot run', async () => {
+    const error = await resolveRgArchive({
+      platform: 'linux',
+      arch: 'arm64',
+      detectLinuxLibc: async () => 'musl',
+    }).then(
+      () => {
+        throw new Error('expected rejection');
+      },
+      (error: unknown) => error,
+    );
+    expect(error).toBeInstanceOf(Error);
+    const message = rgUnavailableMessage(error);
+    expect(message).toContain('musl');
+    expect(message).toContain('brew install ripgrep');
+  });
+
+  it('windows x64 → the pinned .zip plan', async () => {
+    const archive = await resolveRgArchive({ platform: 'win32', arch: 'x64' });
+    expect(archive.name).toBe('ripgrep-15.0.0-x86_64-pc-windows-msvc.zip');
+    expect(archive.isWindows).toBe(true);
+  });
+
+  it('refuses an archive that has no pinned SHA-256', () => {
+    // Not reachable through `detectTarget` today (every target it can emit is
+    // pinned) — this is the gate that keeps a future target from shipping an
+    // unverified download.
+    expect(() => pinnedRgArchive('x86_64-unknown-linux-gnu')).toThrow(/No pinned SHA-256/);
+  });
+
+  it('has a pinned archive for every target the host decision can produce', async () => {
+    // Guards the other direction: adding a `decideTarget` branch without a
+    // matching pin would make bootstrap fail at runtime instead of here.
+    const combos: Array<Partial<Parameters<typeof resolveRgArchive>[0]>> = [
+      { platform: 'darwin', arch: 'arm64' },
+      { platform: 'darwin', arch: 'x64' },
+      { platform: 'win32', arch: 'x64' },
+      { platform: 'win32', arch: 'arm64' },
+      { platform: 'linux', arch: 'x64' },
+      { platform: 'linux', arch: 'arm64', detectLinuxLibc: async () => 'glibc' },
+    ];
+
+    for (const combo of combos) {
+      const archive = await resolveRgArchive(combo);
+      expect(archive.name).toBe(
+        `ripgrep-15.0.0-${archive.target}.${archive.isWindows ? 'zip' : 'tar.gz'}`,
+      );
+      expect(archive.sha256).toHaveLength(64);
+    }
   });
 });
 

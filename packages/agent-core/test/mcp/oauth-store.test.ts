@@ -1,12 +1,12 @@
 import { mkdtemp, rm, stat } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'pathe';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import type { OAuthTokens } from '@modelcontextprotocol/sdk/shared/auth.js';
 import { McpOAuthClientProvider, McpOAuthService } from '../../src/mcp/oauth';
-import { JsonFileStore, sanitizeStoreKey } from '../../src/mcp/oauth/store';
+import { JsonFileStore, defaultMcpCredentialsDir, sanitizeStoreKey } from '../../src/mcp/oauth/store';
 
 describe('sanitizeStoreKey', () => {
   it('strips path traversal segments', () => {
@@ -63,6 +63,29 @@ describe('JsonFileStore', () => {
     store.remove('keep.json');
     expect(store.read('keep.json')).toBeUndefined();
     store.remove('keep.json'); // no throw
+  });
+});
+
+describe('defaultMcpCredentialsDir', () => {
+  const savedHome = process.env['SCREAM_CODE_HOME'];
+
+  afterEach(() => {
+    if (savedHome === undefined) delete process.env['SCREAM_CODE_HOME'];
+    else process.env['SCREAM_CODE_HOME'] = savedHome;
+  });
+
+  it('follows SCREAM_CODE_HOME like every other home-relative path', () => {
+    process.env['SCREAM_CODE_HOME'] = join(tmpdir(), 'scream-home-from-env');
+
+    expect(defaultMcpCredentialsDir()).toBe(
+      join(tmpdir(), 'scream-home-from-env', 'credentials', 'mcp'),
+    );
+  });
+
+  it('falls back to the built-in home directory when the env var is unset', () => {
+    delete process.env['SCREAM_CODE_HOME'];
+
+    expect(defaultMcpCredentialsDir()).toBe(join(homedir(), '.scream-code', 'credentials', 'mcp'));
   });
 });
 

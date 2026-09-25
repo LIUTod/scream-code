@@ -1,4 +1,4 @@
-import { mkdir, readdir, readFile, rmdir, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, rename, rmdir, rm, stat, unlink, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'pathe';
 
 export interface DreamState {
@@ -16,6 +16,38 @@ interface DreamLockFile {
 const LOCK_FILE = 'dream-lock.json';
 const MIN_HOURS_BETWEEN_DREAMS = 24;
 const MIN_SESSIONS_BETWEEN_DREAMS = 5;
+
+// Keeps two writes in the same process from racing on an identical temp path
+// (the second rename would then fail with ENOENT). The pid separates processes.
+let atomicWriteSequence = 0;
+
+/**
+ * Write `data` to `path` through a temp file + rename, so a crash mid-write
+ * leaves the previous state on disk instead of a truncated file. The temp file
+ * sits next to the target, which keeps the rename inside one filesystem.
+ *
+ * The swap replaces the target inode rather than writing through it: a
+ * rewritten file's permissions follow the process umask, and a symlink at the
+ * target is replaced by a regular file. That is the same trade-off every other
+ * state-file swap in this repository makes.
+ *
+ * Implemented here rather than imported because this package declares `pathe`
+ * as its only dependency: the atomic-write helpers in `@scream-code/jian` and
+ * `@scream-code/agent-core` are not reachable from it, and pulling either
+ * package in for ten lines would widen the dependency graph.
+ */
+async function writeFileAtomic(path: string, data: string): Promise<void> {
+  const tmpPath = `${path}.${process.pid.toString(36)}.${(atomicWriteSequence++).toString(36)}.tmp`;
+  try {
+    await writeFile(tmpPath, data, 'utf8');
+    await rename(tmpPath, path);
+  } catch (error) {
+    await unlink(tmpPath).catch(() => {
+      // The temp file was never created, or is already gone.
+    });
+    throw error;
+  }
+}
 
 /**
  * Tracks dream consolidation state and decides when to suggest running
@@ -99,7 +131,7 @@ export class DreamTracker {
     const data: DreamLockFile = { version: 1, state: this.state };
     try {
       await mkdir(dirname(this.lockPath), { recursive: true });
-      await writeFile(this.lockPath, JSON.stringify(data, null, 2), 'utf8');
+      await writeFileAtomic(this.lockPath, JSON.stringify(data, null, 2));
     } catch {
       // Non-critical — will try again next time
     }

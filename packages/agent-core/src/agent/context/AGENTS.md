@@ -11,6 +11,12 @@
   compaction, used for the replay fast-path)
 - Cleanup: `dropVacuousOpenMessages` (drop assistant messages that carry only
   thinking content or nothing when a turn is interrupted)
+- Authorship: `identity.ts` holds the only predicates that answer "did the user
+  speak?" — `isRealUserPrompt` (a turn the user could undo: direct user message
+  or user-triggered skill activation) and `isUserAuthoredMessage` (the user's
+  own words: `origin.kind === 'user'` only). Every injection lands in history
+  as a user-role message, so no call site may compare the role itself; the
+  guard is `test/agent/context-identity-guard.test.ts`
 
 ## Dependencies
 - Depends on: `Agent` (hub; reaches records/background/replayBuilder/injection)

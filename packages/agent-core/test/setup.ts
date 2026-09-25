@@ -26,5 +26,10 @@ beforeEach(() => {
 });
 
 afterAll(async () => {
-  await rm(isolatedHome, { recursive: true, force: true });
+  // State files land in this home while the suite runs — the dream tracker
+  // writes `<home>/dream-lock.json` on the first turn of every agent, and does
+  // it fire-and-forget, so one can still be in flight here. Its atomic
+  // temp-file + rename makes the directory non-empty again mid-removal, which
+  // fails the walk with ENOTEMPTY; retrying re-walks it.
+  await rm(isolatedHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 25 });
 });

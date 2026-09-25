@@ -737,6 +737,9 @@ export class AgentTestContext {
       providerManager: this.options.providerManager,
       initialConfig: this.screamConfig,
       providerManagerOverrides: this.options.providerManagerOverrides,
+      // Static permission rules are part of the agent's initial state, so the
+      // replayed agent must start from the same rules or its snapshot differs.
+      permission: this.options.permission,
       generate: failOnResumeGenerate,
       compactionStrategy: this.options.compactionStrategy,
       persistence: new InMemoryAgentRecordPersistence(

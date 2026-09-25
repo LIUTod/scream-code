@@ -23,16 +23,24 @@ If `run_in_background=true`, the command will be started as a background task an
 - Never run commands that require superuser privileges unless explicitly instructed to do so.
 
 **Guidelines for efficiency:**
+{%- if SHELL_IS_POWERSHELL %}
+- Chain with `;` to run commands sequentially. `&&` / `||` only exist from PowerShell 7 and are a parse error on Windows PowerShell 5.1, so do not use them; write `; if ($?) { … }` when the next step must run only if the previous one succeeded.
+- Filter and transform with pipelines (`Get-ChildItem | Where-Object …`); redirect with `>` / `>>`.
+- Quote paths containing spaces with single quotes, e.g. `Set-Location 'C:\Program Files'`.
+- Read environment variables as `$env:NAME` (`$env:NAME = 'value'`), never `$NAME`.
+- Compose multi-step logic in a single call with `if` / `foreach` / `while` and `try` / `catch`.
+{%- else %}
 - For multiple related commands, use `&&` to chain them in a single call, e.g. `cd /path && ls -la`
 - Use `;` to run commands sequentially regardless of success/failure
 - Use `||` for conditional execution (run second command only if first fails)
 - Use pipe operations (`|`) and redirections (`>`, `>>`) to chain input and output between commands
 - Always quote file paths containing spaces with double quotes (e.g., cd "/path with spaces/")
 - Compose multi-step logic in a single call with `if` / `case` / `for` / `while` control flows.
+{%- endif %}
 - Prefer `run_in_background=true` for long-running builds, tests, watchers, or servers when you need the conversation to continue before the command finishes.
 
 **Commands available:**
-The following common command categories are usually available. Availability still depends on the host, so when in doubt run `which <command>` first to confirm a command exists before relying on it.
+The following common command categories are usually available. Availability still depends on the host, so when in doubt {% if SHELL_IS_POWERSHELL %}confirm a command exists with `Get-Command <name> -ErrorAction SilentlyContinue` before relying on it — several names below are cmdlet aliases (`ls` → `Get-ChildItem`, `rm` → `Remove-Item`), and POSIX-only entries such as `uname`, `chmod` and `kill` may be absent.{% else %}run `which <command>` first to confirm a command exists before relying on it.{% endif %}
 - Navigation and inspection: `ls`, `pwd`, `cd`, `stat`, `file`, `du`, `df`, `tree`
 - File and directory management: `cp`, `mv`, `rm`, `mkdir`, `touch`, `ln`, `chmod`, `chown`
 - Text and data processing: `wc`, `sort`, `uniq`, `cut`, `tr`, `diff`, `xargs`

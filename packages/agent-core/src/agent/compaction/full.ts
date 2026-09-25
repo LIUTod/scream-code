@@ -27,6 +27,7 @@ import {
   estimateTokensForMessages,
   estimateTokensForTools,
 } from '../../utils/tokens';
+import { isUserAuthoredMessage } from '../context/identity';
 import { project } from '../context/projector';
 import compactionInstructionTemplate from './compaction-instruction.md';
 import compactionUpdateInstructionTemplate from './compaction-update-instruction.md';
@@ -937,13 +938,13 @@ export class FullCompaction {
     });
   }
 
-  /** Build a low-confidence fallback memo from the most recent real user
-   *  message in the compacted history (origin.kind === 'user'), so an ongoing
+  /** Build a low-confidence fallback memo from the most recent user-authored
+   *  message in the compacted history (`isUserAuthoredMessage`), so an ongoing
    *  task is not lost when the summary omits the memory-memo section. */
   private buildFallbackMemo(messages: readonly ContextMessage[]): MemoryMemo | undefined {
     for (let i = messages.length - 1; i >= 0; i--) {
       const msg = messages[i];
-      if (msg === undefined || msg.role !== 'user' || msg.origin?.kind !== 'user') continue;
+      if (msg === undefined || !isUserAuthoredMessage(msg)) continue;
       const text = msg.content
         .filter((p): p is { type: 'text'; text: string } => p.type === 'text')
         .map((p) => p.text)

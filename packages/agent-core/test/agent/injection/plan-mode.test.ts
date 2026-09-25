@@ -29,10 +29,15 @@ function planAgent(stub: PlanModeStub): Agent {
   } as unknown as Agent;
 }
 
-function history(agent: Agent): Array<{ role: string; content?: ReadonlyArray<{ text?: string }> }> {
+function history(agent: Agent): Array<{
+  role: string;
+  content?: ReadonlyArray<{ text?: string }>;
+  origin?: { kind: string; variant?: string; name?: string };
+}> {
   return agent.context.history as unknown as Array<{
     role: string;
     content?: ReadonlyArray<{ text?: string }>;
+    origin?: { kind: string; variant?: string; name?: string };
   }>;
 }
 
@@ -140,11 +145,44 @@ describe('PlanModeInjector cadence', () => {
     const injector = new PlanModeInjector(agent);
 
     await injector.inject();
-    history(agent).push({ role: 'user', content: [{ text: 'next task' }] });
+    history(agent).push({
+      role: 'user',
+      content: [{ text: 'next task' }],
+      origin: { kind: 'user' },
+    });
     await injector.inject();
 
     const text = lastReminder(agent);
     expect(text).toContain('Plan mode is active');
     expect(text).not.toContain('Plan mode still active');
+  });
+
+  it('does not treat injected reminders as the user speaking again', async () => {
+    const agent = planAgent({ isActive: true, planFilePath: '/tmp/plan.md' });
+    const injector = new PlanModeInjector(agent);
+
+    await injector.inject();
+    // Injections share the `user` role with real prompts, but only a real
+    // prompt may reset the cadence — otherwise every step's injection would
+    // re-emit the full reminder and the refresh threshold would never hold.
+    history(agent).push(
+      { role: 'assistant' },
+      {
+        role: 'user',
+        content: [{ text: '<system-reminder>\ncompacted context\n</system-reminder>' }],
+        origin: { kind: 'injection', variant: 'session_memory' },
+      },
+      { role: 'assistant' },
+      {
+        role: 'user',
+        content: [{ text: '<system-reminder>\nkeep going\n</system-reminder>' }],
+        origin: { kind: 'system_trigger', name: 'convergence_gate' },
+      },
+    );
+    await injector.inject();
+
+    const text = lastReminder(agent);
+    expect(text).toContain('Plan mode still active');
+    expect(text).not.toContain('Plan mode is active');
   });
 });

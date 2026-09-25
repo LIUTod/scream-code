@@ -1,5 +1,7 @@
 import { appendFile, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
-import { basename, dirname, isAbsolute, join, relative, resolve } from 'pathe';
+import { basename, dirname, isAbsolute, join, resolve } from 'pathe';
+
+import { isPathInside } from '#/utils/path-safety';
 
 export interface SessionIndexEntry {
   readonly sessionId: string;
@@ -82,7 +84,11 @@ export async function readSessionIndex(
     const sessionDir = resolve(entry.sessionDir);
     if (!isAbsolute(entry.sessionDir)) continue;
     if (!isAbsolute(entry.workDir)) continue;
-    if (!isPathInside(sessionsDir, sessionDir)) continue;
+    // `isPathInside` (the shared cross-platform classifier) counts the directory
+    // itself as inside it, so the equality is named here: an entry whose
+    // sessionDir *is* the sessions root names no session, which is how this
+    // guard behaved before it was folded into the shared helper.
+    if (sessionDir === sessionsDir || !isPathInside(sessionsDir, sessionDir)) continue;
     if (basename(sessionDir) !== entry.sessionId) continue;
     result.set(entry.sessionId, {
       sessionId: entry.sessionId,
@@ -141,9 +147,4 @@ function parseIndexLine(line: string): SessionIndexEntry | undefined {
   } catch {
     return undefined;
   }
-}
-
-function isPathInside(parent: string, child: string): boolean {
-  const rel = relative(resolve(parent), resolve(child));
-  return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel);
 }

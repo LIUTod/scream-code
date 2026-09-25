@@ -1,9 +1,10 @@
 import type { Message } from '@scream-code/ltod';
 import { describe, expect, it } from 'vitest';
 
+import { isRealUserPrompt, isUserAuthoredMessage } from '../../src/agent/context';
 import { renderNotificationXml } from '../../src/agent/context/notification-xml';
 import { project } from '../../src/agent/context/projector';
-import type { ContextMessage } from '../../src/agent/context/types';
+import type { ContextMessage, PromptOrigin } from '../../src/agent/context/types';
 import { estimateTokensForMessages } from '../../src/utils/tokens';
 import { testAgent } from './harness/agent';
 
@@ -630,6 +631,101 @@ describe('Agent context notification projection', () => {
     expect(textOf(messages[0]!)).toBe('First real prompt\n\nSecond real prompt');
     expect(textOf(messages[1]!)).toBe('No origin prompt');
     expect(textOf(messages[2]!)).toBe('Third real prompt');
+  });
+});
+
+describe('Agent context user identity', () => {
+  /**
+   * Every `PromptOrigin` kind. The `Record` type makes a kind added to
+   * `context/types.ts` a compile error here, so this table cannot silently stop
+   * covering the union it classifies.
+   */
+  const ORIGIN_KINDS: Record<PromptOrigin['kind'], true> = {
+    user: true,
+    skill_activation: true,
+    injection: true,
+    compaction_summary: true,
+    system_trigger: true,
+    background_task: true,
+    cron_job: true,
+    cron_missed: true,
+    hook_result: true,
+  };
+
+  /** One representative origin per kind, plus the no-origin case. */
+  const ORIGINS: readonly (ContextMessage['origin'] | undefined)[] = [
+    undefined,
+    { kind: 'user' },
+    { kind: 'skill_activation', activationId: 'a1', skillName: 'demo', trigger: 'user-slash' },
+    { kind: 'skill_activation', activationId: 'a2', skillName: 'demo', trigger: 'model-tool' },
+    { kind: 'skill_activation', activationId: 'a3', skillName: 'demo', trigger: 'nested-skill' },
+    { kind: 'injection', variant: 'plan_mode' },
+    { kind: 'compaction_summary' },
+    { kind: 'system_trigger', name: 'host' },
+    { kind: 'background_task', taskId: 'task-1', status: 'completed', notificationId: 'n1' },
+    {
+      kind: 'cron_job',
+      jobId: 'job-1',
+      cron: '*/5 * * * *',
+      recurring: true,
+      coalescedCount: 1,
+      stale: false,
+    },
+    { kind: 'cron_missed', count: 1 },
+    { kind: 'hook_result', event: 'UserPromptSubmit' },
+  ];
+
+  const label = (origin: ContextMessage['origin'] | undefined): string =>
+    origin === undefined ? 'no origin' : `${origin.kind}${JSON.stringify(origin)}`;
+
+  it('classifies every origin kind (a new kind must be added to ORIGINS)', () => {
+    const covered = new Set(ORIGINS.filter((origin) => origin !== undefined).map((o) => o.kind));
+    expect(
+      [...covered].toSorted(),
+      'ORIGINS must carry one representative per PromptOrigin kind — an unlisted kind ' +
+        'would be classified by neither predicate test below.',
+    ).toEqual(Object.keys(ORIGIN_KINDS).toSorted());
+  });
+
+  it('never calls a non-user role a user prompt, whatever its origin', () => {
+    for (const origin of ORIGINS) {
+      const assistant: ContextMessage = { role: 'assistant', content: [], toolCalls: [], origin };
+      expect(isRealUserPrompt(assistant), `assistant message, ${label(origin)}`).toBe(false);
+      expect(isUserAuthoredMessage(assistant), `assistant message, ${label(origin)}`).toBe(false);
+    }
+  });
+
+  it('counts only direct user messages as user-authored', () => {
+    const authored = ORIGINS.filter((origin) =>
+      isUserAuthoredMessage({ role: 'user', content: [], toolCalls: [], origin }),
+    );
+    expect(
+      authored.map(label),
+      'a message is user-authored only with `origin.kind === \'user\'`: injections, ' +
+        'reminders, notifications, hook results and rendered skill prompts are not the ' +
+        "user's own words, and a synthesized message carries no origin to claim.",
+    ).toEqual([label({ kind: 'user' })]);
+  });
+
+  it('counts a user turn the user can undo as a real user prompt', () => {
+    const real = ORIGINS.filter((origin) =>
+      isRealUserPrompt({ role: 'user', content: [], toolCalls: [], origin }),
+    );
+    expect(
+      real.map(label),
+      'undo anchoring follows the user action: a direct user message (with or without an ' +
+        'origin) and a user-triggered skill activation anchor a turn; injections, system ' +
+        'reminders, notifications, hook results and model-triggered skills do not.',
+    ).toEqual([
+      label(undefined),
+      label({ kind: 'user' }),
+      label({
+        kind: 'skill_activation',
+        activationId: 'a1',
+        skillName: 'demo',
+        trigger: 'user-slash',
+      }),
+    ]);
   });
 });
 

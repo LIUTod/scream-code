@@ -5,29 +5,21 @@
  * Network-error detection with user-friendly Chinese prompts.
  */
 
-import { spawn } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 
 import { t } from '@scream-code/config';
+import { killProcessTree } from '@scream-code/jian';
 import { installLatestArgs } from '#/cli/update/prefix';
 import { readUpdateCache } from '#/cli/update/cache';
 import { refreshUpdateCache } from '#/cli/update/refresh';
 import { selectUpdateTarget } from '#/cli/update/select';
+import { npmLaunchPlan, type NpmLaunchPlan } from '#/utils/exec/npm';
 import { isBusy } from '../utils/app-state';
 
 import type { SlashCommandHost } from './dispatch';
 
 // Per-step timeout (ms). The default Node.js spawn timeout is infinite.
 const INSTALL_TIMEOUT_MS = 300_000;
-
-/**
- * Resolve the npm executable name for the current platform.
- *
- * On Windows, `npm` is `npm.cmd` — a batch file Node can spawn directly
- * without `shell: true` (which would trigger DEP0190 when args are passed).
- */
-function npmExecutable(): string {
-  return process.platform === 'win32' ? 'npm.cmd' : 'npm';
-}
 
 const NETWORK_ERROR_PATTERNS = [
   /ETIMEDOUT/i,
@@ -56,30 +48,71 @@ interface StepResult {
   message: string;
 }
 
-async function runInstallStep(
-  cmd: string,
-  args: string[],
+/**
+ * Reap an install step whose timeout expired.
+ *
+ * On Windows the direct child is `cmd.exe` (see `npmLaunchPlan`), so signalling
+ * it stops the wrapper and leaves the `npm` / `node` beneath it running — there
+ * is no process group on Windows to signal instead. `killProcessTree` makes up
+ * for that with `taskkill /F /T /PID`, which walks the tree. POSIX has no
+ * wrapper in between, so the child itself is signalled exactly as before.
+ *
+ * Never rejects: the step has already failed with a timeout and the caller is
+ * told so, and a reaper that could not run must not turn that into a different
+ * error.
+ */
+async function reapTimedOutStep(child: ChildProcess, platform: NodeJS.Platform): Promise<void> {
+  if (platform !== 'win32') {
+    child.kill('SIGTERM');
+    return;
+  }
+  try {
+    // `pid ?? 0` covers a spawn that never produced a process; a non-positive
+    // pid is a no-op inside `killProcessTree`.
+    await killProcessTree(child.pid ?? 0, { signal: 'SIGTERM', platform });
+  } catch {
+    /* the tree may already be gone; the timeout report is what matters */
+  }
+}
+
+/**
+ * Run one install step. `launch` comes from `npmLaunchPlan`, so a Windows host
+ * gets the `cmd.exe` command line its `.cmd` shim needs; `spawn` receives the
+ * matching `windowsVerbatimArguments` flag because the line is already quoted.
+ * `launch` also carries the platform, which is what the timeout teardown
+ * branches on.
+ */
+export async function runInstallStep(
+  launch: NpmLaunchPlan,
   cwd: string | undefined,
   label: string,
   timeoutMs: number = INSTALL_TIMEOUT_MS,
 ): Promise<StepResult> {
   return new Promise<StepResult>((resolve) => {
-    const child = spawn(cmd, args, { cwd, stdio: 'pipe' });
+    const child = spawn(launch.command, [...launch.args], {
+      cwd,
+      stdio: 'pipe',
+      windowsVerbatimArguments: launch.windowsVerbatimArguments,
+    });
     let stderr = '';
     let settled = false;
     child.stderr?.on('data', (d: Buffer) => { stderr += d.toString(); });
 
     const timer = setTimeout(() => {
-      if (!settled) {
-        settled = true;
-        child.kill('SIGTERM');
+      if (settled) return;
+      settled = true;
+      // The timeout result lands only after the teardown, so it never reports a
+      // timeout while the install it describes is still running. Marking the
+      // step settled up front keeps the exit that the kill triggers from
+      // producing a second result.
+      void reapTimedOutStep(child, launch.platform).then(() => {
         resolve({
           ok: false,
           message:
             `${label}${t('update.timeout')}\n` +
             t('update.network_hint'),
         });
-      }
+      });
     }, timeoutMs);
 
     const finalize = (result: StepResult): void => {
@@ -149,8 +182,7 @@ export async function handleUpdateCommand(host: SlashCommandHost): Promise<void>
 
   host.showStatus(t('update.npm_install'));
   const result = await runInstallStep(
-    npmExecutable(),
-    installLatestArgs(),
+    npmLaunchPlan(installLatestArgs()),
     undefined,
     t('update.install_label'),
   );

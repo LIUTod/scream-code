@@ -1,4 +1,7 @@
-import { basename, join, normalize, sep } from 'node:path';
+import { basename, normalize } from 'pathe';
+
+import { isPathInside } from '#/utils/path-safety';
+
 import type { Agent } from '../..';
 import type { PermissionPolicy, PermissionPolicyContext, PermissionPolicyResult } from '../types';
 
@@ -74,14 +77,13 @@ export class BotModePermissionPolicy implements PermissionPolicy {
     // approximate, so a "looks workspace-relative" path cannot land outside.
     if (rawPath.startsWith('~')) return false;
     const cwd = this.agent.config?.cwd ?? '.';
-    const resolved = rawPath.startsWith('/') ? rawPath : join(cwd, rawPath);
-    const norm = normalize(resolved);
-    const normCwd = normalize(cwd);
-    // Separator boundary: `/work-evil` must not pass as inside `/work`.
-    if (norm !== normCwd && !norm.startsWith(normCwd.endsWith(sep) ? normCwd : normCwd + sep)) {
-      return false;
-    }
-    if (BotModePermissionPolicy.SENSITIVE_WRITE.test(basename(norm))) return false;
+    // Absolute, drive-qualified (`C:\...`) and UNC paths are judged as
+    // written; anything else is resolved against the workspace, on component
+    // boundaries so `/work-evil` cannot pass as inside `/work`.
+    if (!isPathInside(cwd, rawPath)) return false;
+    // The final component decides the sensitive-file call, and appending the
+    // workspace in front of a relative path never changes it.
+    if (BotModePermissionPolicy.SENSITIVE_WRITE.test(basename(normalize(rawPath)))) return false;
     return true;
   }
 

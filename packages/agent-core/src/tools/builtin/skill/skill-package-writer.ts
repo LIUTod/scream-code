@@ -5,6 +5,7 @@ import type { Jian } from '@scream-code/jian';
 import { ErrorCodes, ScreamError } from '#/errors';
 import { z } from 'zod';
 import { resolveSkillInstallPaths } from '#/skill/install-paths';
+import { isSafeRelativePath } from '#/utils/path-safety';
 
 export interface SkillPackageFile {
   /** Relative path inside the skill directory (e.g. `script.sh`). */
@@ -62,14 +63,6 @@ async function pathExists(jian: Jian, path: string): Promise<boolean> {
   } catch {
     return false;
   }
-}
-
-function isSafeRelativePath(path: string): boolean {
-  const normalized = normalize(path);
-  if (normalized.startsWith('..')) return false;
-  if (normalized.startsWith('/')) return false;
-  if (normalized === '' || normalized === '.') return false;
-  return true;
 }
 
 export interface WriteSkillPackageOptions {

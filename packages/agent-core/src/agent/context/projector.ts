@@ -1,5 +1,6 @@
 import type { ContentPart, Message, TextPart } from '@scream-code/ltod';
 
+import { isUserAuthoredMessage } from './identity';
 import type { ContextMessage } from './types';
 
 /** Synthetic error text used when a tool result is missing and must be
@@ -109,11 +110,10 @@ function makeSyntheticToolResult(toolCallId: string): Message {
 }
 
 /**
- * Drops a trailing open tool exchange from a projected message list: when the
- * last assistant message carries tool calls whose results never arrived and
- * nothing follows, truncate from that batch so the compacted history does not
- * carry an unterminated exchange (which would be rejected or, if synthesized,
- * pollute the compaction prompt).
+ * Merges runs of adjacent user-authored messages into one, so the provider
+ * never receives consecutive user-role messages. Only the user's own words
+ * merge: an injection, a rendered skill prompt or a scheduled notification
+ * keeps its own boundary even when it sits next to a real prompt.
  */
 function mergeAdjacentUserMessages(
   history: readonly ContextMessage[],
@@ -123,9 +123,9 @@ function mergeAdjacentUserMessages(
   for (const message of history) {
     const previous = out.at(-1);
     if (
-      canMergeUserMessage(message) &&
+      isUserAuthoredMessage(message) &&
       previous !== undefined &&
-      canMergeUserMessage(previous)
+      isUserAuthoredMessage(previous)
     ) {
       out[out.length - 1] = mergeTwoUserMessages(previous, message);
       continue;
@@ -133,10 +133,6 @@ function mergeAdjacentUserMessages(
     out.push(message);
   }
   return out.map(stripContextMetadata);
-}
-
-function canMergeUserMessage(message: ContextMessage): boolean {
-  return message.role === 'user' && message.origin?.kind === 'user';
 }
 
 function mergeTwoUserMessages(a: ContextMessage, b: ContextMessage): ContextMessage {

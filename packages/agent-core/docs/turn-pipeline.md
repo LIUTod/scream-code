@@ -3,7 +3,7 @@
 > 目的：让一次 turn（用户消息 → 回复完成）的完整链路、每个决策点、每道守卫"一眼可读"。
 > 阅读对象：任何需要修改 turn 行为的开发者。改前先读这里，改后同步更新这里。
 >
-> 行号基于当前 main（`packages/agent-core`，`turn/index.ts` 1029 行）。**这份文档是唯一权威的 turn 行为地图——若代码与文档冲突，以代码为准但请更新本文档。**
+> 行号基于当前 main（`packages/agent-core`，`turn/index.ts` 1182 行）。**这份文档是唯一权威的 turn 行为地图——若代码与文档冲突，以代码为准但请更新本文档。**
 
 ## 1. 总览
 
@@ -12,7 +12,7 @@
 ```
 宿主层（有状态，agent/turn/）
   turn/index.ts      TurnFlow 类 —— 编排：入口、账本、goal 驱动、step 循环宿主 hooks
-                     （1029 行，核心职责见 §4）
+                     （1182 行，核心职责见 §4）
   turn/ltod-llm.ts   LtodLLM —— 把 ltod generate() 桥接成 loop 的 LLM 接口
   turn/tool-dedup.ts ToolCallDeduplicator —— 同 step 重复工具调用去重
   turn/utils.ts      纯函数（mapLoopEvent、isExploratoryBashCommand、summarizeTurnError 等）
@@ -34,31 +34,31 @@
 用户输入
   │
   ▼
-TurnFlow.prompt() / steer()            [turn/index.ts:92-118]
+TurnFlow.prompt() / steer()            [turn/index.ts:96-148]
   │  records.logRecord('turn.prompt'/'turn.steer')
   │  steer 且有活动 turn → 进 steerBuffer，返回 null（缓冲）
   ▼
-launch()                               [turn/index.ts:120-152]
+launch()                               [turn/index.ts:150-285]
   │  有活动 turn → error(turn.agent_busy)
   │  首次 turn → dreamTracker.init()
   │  allocateTurnId() + AbortController + turnWorker(...)
   ▼
-turnWorker()                           [turn/index.ts:247-285]
+turnWorker()                           [turn/index.ts:287-325]
   │  goal 状态 active → driveGoal()（goal 语义，§5）
   │  否则 → runOneTurn(standalone=true)
   ▼
-runOneTurn()                           [turn/index.ts:402-509]
+runOneTurn()                           [turn/index.ts:443-565]
   │  重置 turn 状态（convergence/todo/lastToolFailure/step 计数…）
   │  fullCompaction.resetForTurn() + injection.resetForTurn()
   │  usage.beginTurn() + 发 turn.started
   │  context.appendUserMessage(input, origin)
-  ├─ applyUserPromptHook()             [turn/index.ts:511-561]
+  ├─ applyUserPromptHook()             [turn/index.ts:567-617]
   │    UserPromptSubmit hook 可阻断（返回 completed）或追加消息
-  ├─ runTurn()                         [turn/index.ts:563-955，§3]
+  ├─ runTurn()                         [turn/index.ts:619-1108，§3]
   │    step 循环
   ├─ 异常 → 映射 cancelled / failed（sessionMemory.recordError + StopFailure hook）
   ▼
-收尾                                [turn/index.ts:477-509]
+收尾                                [turn/index.ts:534-565]
   │  context.closeAbandonedToolExchange()   // 防悬挂 toolCalls 导致下个请求被拒
   │  usage.endTurn() + 发 turn.ended（与 activeTurn 释放同帧）
   │  错误时补发 error 事件
@@ -68,7 +68,7 @@ runOneTurn()                           [turn/index.ts:402-509]
 
 ## 3. step 循环（runTurn + 宿主 hooks）
 
-`runTurn`（`loop/run-turn.ts:72-184`）是**单层 while(true)**：
+`runTurn`（`loop/run-turn.ts:74-187`）是**单层 while(true)**：
 
 ```
 while (true)
@@ -76,56 +76,74 @@ while (true)
   ├─ maxSteps 检查（loopControl.maxStepsPerTurn）
   ├─ executeLoopStep()（loop/turn-step.ts）
   │     beforeStep hook → chatWithRetry → usage 记录 → deriveStepStopReason → 工具批
-  ├─ 连续 8 步全 rejected 熔断（run-turn.ts:136-149）
+  ├─ 连续 8 步全 rejected 熔断（run-turn.ts:140-149）
   ├─ stopReason === 'tool_use' → continue
   ├─ 否则调宿主 hooks.shouldContinueAfterStop()
   │     true → continue；false/undefined → break
   └─ 异常：abort → turn.interrupted；max_steps/error → 抛出（宿主 catch）
 ```
 
-宿主在 `runTurn({ hooks })` 里注入 7 个 hook（`turn/index.ts:593-931`），按调用顺序：
+宿主在 `runTurn({ hooks })` 里注入 7 个 hook（`turn/index.ts:680-1084`），按调用顺序：
 
 | # | Hook | 时机 | 宿主行为 |
 |---|------|------|---------|
-| 1 | `beforeStep` | step 开始前 | flushSteerBuffer → fullCompaction.beforeStep → goal TodoList 提醒（step1）→ TodoList 建议（step2）→ session summary / dream 建议（step1）→ **injection.inject()（9 类 injector）** → deduper.beginStep |
+| 1 | `beforeStep` | step 开始前 | flushSteerBuffer → fullCompaction.beforeStep → goal TodoList 提醒（step1）→ TodoList 建议（step3）→ todo 对账提醒（本回合写过清单且仍有未完成项时，每回合一次）→ session summary / dream 建议（step1）→ **injection.inject()（9 类 injector）** → deduper.beginStep |
 | 2 | `afterStep` | step 结束后 | usage.record → goal.recordTokenUsage → fullCompaction.afterStep → deduper.endStep |
 | 3 | `prepareToolExecution` | 工具执行前 | **同 step 去重**（syntheticResult 直接返回）；**验证命令硬跳过**（WorkingSet 缓存命中返回合成结果） |
 | 4 | `authorizeToolExecution` | 权限检查 | `permission.beforeToolCall(ctx)` |
 | 5 | `onToolCallRejected` | preflight 拒绝 | 喂给 deduper 的 repeat breaker（3/5/8 提醒） |
-| 6 | `finalizeToolResult` | 工具结果落库前 | dedup finalize → sessionMemory.recordToolExecution → recordWorkingSetPaths → 验证命令记录/全部标记 verified → verify-agent `[verification_status]` 解析 → TodoList 标记 → lastToolFailure 状态更新 |
+| 6 | `finalizeToolResult` | 工具结果落库前 | dedup finalize → sessionMemory.recordToolExecution → recordWorkingSetPaths → 验证命令记录/全部标记 verified → verify-agent `[verification_status]` 解析 → TodoList 成功标记 → lastToolFailure 状态更新 |
 | 7 | `shouldContinueAfterStop` | 非 tool_use 停下后 | **决策树见 §4** |
 
 ## 4. shouldContinueAfterStop 决策树（收敛控制）
 
-宿主在 `turn/index.ts:642-756` 按顺序判断，返回 `{ continue }`：
+宿主在 `turn/index.ts:755-904` 按顺序判断，返回 `{ continue }`。**每个 `continue:true` 的上一行都带 `// allow: <category>` 标记**，类别只有三类（`[correction]` / `[external-input]` / `[quality-floor]`，完整约束见下节「续轮输出纪律」）：
 
 ```
-1. steerBuffer 有内容（含 interrupt）？           → continue:true（下一 step 处理）
+1. steerBuffer 有内容（含 interrupt）？           → continue:true [external-input]（下一 step 处理）
 2. stopReason === 'max_tokens' 且未恢复过且是主 agent？
-     → fullCompaction.begin('truncated')          → continue:true（每会话限 1 次）
+     → fullCompaction.begin('truncated')          → continue:true [correction]（每会话限 1 次）
 3. convergenceInjections < maxConvergenceInjections（turn/defaults.ts，=3）？
    满足任一：
      a. 本 step 无任何内容/工具调用
-     b. 有 active goal 但本轮没用 TodoList
-     c. 非探索性工具失败 且 本轮无通过的验证
-     d. 验证失败且未注入过
-     → appendSystemReminder(convergence_gate)     → continue:true（注入计数 +1）
+     b. 非探索性工具失败 且 本轮无通过的验证
+     c. 验证失败且未注入过
+     → appendSystemReminder(convergence_gate)     → continue:true [correction]（注入计数 +1）
 4. summary guard：本轮有实际工作（改文件/验证）但收尾回复过短/纯客套？
-     → appendSystemReminder(要求完整总结)         → continue:true（每轮限 1 次）
+     → appendSystemReminder(要求完整总结)         → continue:true [quality-floor]（每轮限 1 次）
 5. Stop hook：hooks.triggerBlock('Stop') 返回阻断？
-     → appendUserMessage(stopBlock.reason)        → continue:true（每轮限 1 次）
-6. 默认                                          → continue:false
+     → appendUserMessage(stopBlock.reason)        → continue:true [external-input]（每轮限 1 次）
+6. Stop hook await 期间又到了 steer？              → continue:true [external-input]（冲刷一次）
+7. 默认                                          → continue:false
 ```
 
 **配套守卫**：
 - `maxConvergenceInjections = 3`、`minFinalResponseLength = 60`、`maxGoalTurns = 50` 集中定义在 **`turn/defaults.ts`**（`TURN_DEFAULTS`，带注释）
 - 探索性 Bash 判定 `isExploratoryBashCommand()`（which/ls/cat/git status/npx tsc 探测等，`turn/utils.ts`）——探索性失败不阻塞收敛
 - `lastToolFailure` 只在非探索性失败时置位，Bash 失败仅由**通过的验证**清除（`markAllVerified`）
-- 简短收尾判定 `lastAssistantMessageIsTrivial()`（<60 字符或匹配 `done|ok|完成|好了…` 正则，`turn/index.ts:1014-1028`；正则 `TRIVIAL_COMPLETION_RE` 在 `turn/utils.ts`）
+- 简短收尾判定 `lastAssistantMessageIsTrivial()`（<60 字符或匹配 `done|ok|完成|好了…` 正则，`turn/index.ts:1167-1181`；正则 `TRIVIAL_COMPLETION_RE` 在 `turn/utils.ts`）
+
+### 续轮输出纪律
+
+停止门（`shouldContinueAfterStop`）执行时，**最终回答已经流给用户了**。所以每一次 `continue:true` 买回来的都是一整轮新输出（思考 + 工具调用），它会接在用户刚读完的回答下面。续轮只允许三类理由，每处 `return { continue: true }` 必须在**紧邻的上一行**带 `// allow: <category>` 标记：
+
+| 类别 | 含义 | 站点（`turn/index.ts`） |
+|---|---|---|
+| `correction` | 纠错：必需工具失败、验证失败、本 step 无产出、输出被 `max_tokens` 截断 | `804`（截断恢复）、`850`（收敛 gate） |
+| `external-input` | 外部输入：冲刷 steer 缓冲、Stop hook 主动要求继续 | `780`、`893`、`902` |
+| `quality-floor` | 质量兜底：最终回答过短（summary guard） | `871` |
+
+规则：
+
+1. **禁止第四类：内部状态维护**（TodoList 记账、目标进展、摘要观感）。停止门只在最终回答已经流给用户之后才执行，所以任何"维护内部状态"的续轮都表现为"回答之后又冒出一个新块"——用户可见的噪音，白烧 token 还把已回答的内容顶上去。这类提醒必须放在 `beforeStep`（回答之前）。
+2. **续轮不得在最终回答之后追加可见内容**；状态维护一律前置到 `beforeStep`。现有的回答前对账提醒见 §3 hook 表的 `todo_reconcile`（step 1 的 goal `todo_required` 提醒同理）。
+3. **类别集合恰好是这三类**：新增类别必须同时改 `test/agent/turn-stop-gate.test.ts`，属有意动作。该测试直接读 `src/agent/turn/index.ts` 的源码做形态校验——每个 `continue:true` 是否带合法标记、类别是否越界、函数体内是否出现清单相关字样、以及已删除的两句理由是否回归。空口注释会腐烂，所以用测试钉住。
+
+**为什么"回答之后冒出的可见块"只可能来自续轮本身**：`system_trigger` 类系统提醒在 TUI 侧本就不渲染。会话重放 `apps/scream-code/src/tui/controllers/session-replay.ts` 的 `renderSystemTrigger()` 只处理子 agent 协作请求（`child_request`），其余一律直接返回；`apps/scream-code/src/tui/utils/message-replay.ts` 复用 agent-core 的 `isRealUserPrompt()`（`src/agent/context/identity.ts`），对 `system_trigger` 同样返回 `false`；markdown 导出同理由 `INTERNAL_ORIGINS` 过滤。既然提醒文本本身不上屏，那"回答之后多出来的折叠块"就不是提醒，而是续轮新 step 的真实输出。
 
 ## 5. Goal 驱动（driveGoal）
 
-当存在 active goal 时，`turnWorker` 走 `driveGoal`（turn/index.ts:291-370）——把 goal 拆成**连续多个普通 turn**：
+当存在 active goal 时，`turnWorker` 走 `driveGoal`（turn/index.ts:331-410）——把 goal 拆成**连续多个普通 turn**：
 
 ```
 while (true)
@@ -153,17 +171,19 @@ goal 语义的常量与提示词在 **`turn/goal.ts`**（GOAL_*）。
 
 | 守卫 | 位置 | 触发 | 后果 |
 |---|---|---|---|
-| maxSteps | loop/run-turn.ts:107 | `loopControl.maxStepsPerTurn` | 抛 MaxStepsExceededError |
-| 连续拒绝熔断 | loop/run-turn.ts:136-149 | 连续 8 步全 rejected | stopReason=end_turn |
+| maxSteps | loop/run-turn.ts:109-110 | `loopControl.maxStepsPerTurn` | 抛 MaxStepsExceededError |
+| 连续拒绝熔断 | loop/run-turn.ts:140-149 | 连续 8 步全 rejected | stopReason=end_turn |
 | 收敛注入上限 | turn/defaults.ts（TURN_DEFAULTS） | 3 次 | 停止注入 convergence_gate |
-| summary guard | turn/index.ts:716-735 | 每轮 1 次 | 要求结构化总结 |
-| max_tokens 恢复 | turn/index.ts:656-667 | 每会话 1 次 | 压缩后继续 |
-| 验证命令去重 | turn/index.ts:770-793 | WorkingSet 命中 | 合成结果跳过执行 |
+| summary guard | turn/index.ts:853-872 | 每轮 1 次 | 要求结构化总结 |
+| max_tokens 恢复 | turn/index.ts:793-805 | 每会话 1 次 | 压缩后继续 |
+| 验证命令去重 | turn/index.ts:913-941 | WorkingSet 命中 | 合成结果跳过执行 |
 | 工具去重 | turn/tool-dedup.ts | 同 step 同工具同参数 | 合成结果 |
 | goal turn 上限 | turn/defaults.ts（TURN_DEFAULTS） | 默认 50 无预算轮 | markBlocked |
 | steer 轮询中断 | loop/tool-call.ts | 150ms 轮询 | 中断工具批 |
-| 悬挂 toolCalls 修复 | turn/index.ts:487-492 | turn 结束 | 合成错误结果 |
-| overflow 恢复 | turn/index.ts:935-942 | CONTEXT_OVERFLOW | 压缩后重试（每 turn 1 次） |
+| todo 对账提醒 | turn/index.ts:712-724 | 本轮成功写过清单且仍有未完成项，每回合 1 次 | 回答前注入 todo_reconcile |
+| 悬挂 toolCalls 修复 | turn/index.ts:534-539 | turn 结束 | 合成错误结果 |
+| overflow 恢复 | turn/index.ts:1088-1095 | CONTEXT_OVERFLOW | 压缩后重试（每 turn 1 次） |
+| 续轮类别标记 | test/agent/turn-stop-gate.test.ts | 源码形态扫描 | 缺标记/类别越界/清单字样回归即失败 |
 | fullCompaction 熔断 | agent/compaction/full.ts | 连续 3 次失败 | 本 turn 停用自动压缩 |
 
 ## 8. TurnFlow 关键状态字段
@@ -176,7 +196,8 @@ goal 语义的常量与提示词在 **`turn/goal.ts`**（GOAL_*）。
 | `convergenceInjections` | 收敛注入次数（上限 TURN_DEFAULTS.maxConvergenceInjections） |
 | `currentStepHadContent` | 本 step 是否产生内容/工具调用 |
 | `lastToolFailure` | 最近的非探索性工具失败（收敛 gate 用） |
-| `todoSeenThisTurn` | 本轮是否调用过 TodoList |
+| `todoSeenThisTurn` | 本轮是否**成功**调用过 TodoList（被权限拒绝或执行失败不算，`turn/index.ts:1037-1044`） |
+| `todoReconcileInjected` | 本轮是否已注入 todo 对账提醒（每回合一次） |
 | `summaryGuardInjected` | 收尾总结提醒是否已注入 |
 | `turnStartWorkingSetPathCount` | turn 开始时 working-set 路径数（判断"是否有实际工作"） |
 | `maxTokensRecoveryAttempted` | max_tokens 恢复是否已用（每会话 1 次） |
@@ -213,3 +234,4 @@ loop/types.ts              契约
 5. 涉及新阈值 → 写进 `turn/defaults.ts`（带"为什么"注释），不要散落魔法数
 6. 改完跑全量测试：`vitest run --no-cache`（agent-core 包内 `bunx vitest run`）
 7. 同步更新本文档
+8. 动 `shouldContinueAfterStop` 的续轮理由 → 带 `// allow: <category>` 标记，类别不超三类（见「续轮输出纪律」），并跑 `test/agent/turn-stop-gate.test.ts`

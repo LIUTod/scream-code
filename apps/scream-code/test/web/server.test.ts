@@ -367,6 +367,52 @@ describe('Web Goal/Todo state', () => {
   });
 });
 
+/** Concatenated text parts of a context message — its body as the projection sees it. */
+function textOfMessage(message: ContextMessage): string {
+  return message.content.map((part) => (part.type === 'text' ? part.text : '')).join('');
+}
+
+/**
+ * A stand-in for the core `undo` walk, used by the anchor truth table below.
+ *
+ * It mirrors `ContextMemory.undo`: walk the history backward, leave injection
+ * messages in place while the walk passes them, stop at a compaction summary,
+ * and count a removed turn whenever `isAnchor` says the removed message was one.
+ * `isAnchor` comes from the case being tested, never from the predicate the
+ * projection is checked against — the table has to state the rule on its own.
+ */
+function undoLikeCore(
+  history: readonly ContextMessage[],
+  count: number,
+  isAnchor: (message: ContextMessage) => boolean,
+): ContextMessage[] {
+  const next = [...history];
+  let removedAnchors = 0;
+  for (let i = next.length - 1; i >= 0; i -= 1) {
+    const message = next[i]!;
+    if (message.origin?.kind === 'injection') continue;
+    if (message.origin?.kind === 'compaction_summary') break;
+    next.splice(i, 1);
+    if (isAnchor(message)) {
+      removedAnchors += 1;
+      if (removedAnchors >= count) break;
+    }
+  }
+  // An injection left adjacent to another injection, or leading the history
+  // after the turns around it went away, is dropped with them.
+  for (let i = next.length - 1; i >= 0; i -= 1) {
+    if (next[i]?.origin?.kind !== 'injection') continue;
+    if (
+      i === 0 ||
+      next[i - 1]?.origin?.kind === 'injection' ||
+      next[i + 1]?.origin?.kind === 'injection'
+    ) {
+      next.splice(i, 1);
+    }
+  }
+  return next;
+}
+
 describe('Web undo projection', () => {
   it('rejects a concurrent undo while the first core mutation is still in flight', async () => {
     const contextMessage = (role: ContextMessage['role'], text: string): ContextMessage => ({
@@ -647,6 +693,183 @@ describe('Web undo projection', () => {
       'ordinary answer',
     ]);
     await manager.closeAll();
+  });
+
+  it('classifies every prompt origin the way the core anchor rule does', async () => {
+    // The projection used to carry its own copy of the `/undo` anchor rule: one
+    // function to classify a message for rendering, another to count the anchors
+    // behind the durable marker. Both now run on the SDK's `isRealUserPrompt`,
+    // and this table is what has to hold across that swap — which rows the
+    // transcript shows (a user row only for a `user` anchor) and how far
+    // `/undo 2` reaches back: a `skill` anchor takes the skill block alone, every
+    // other non-user origin is invisible to the walk (which therefore reaches
+    // past it into the ordinary turn before), and a compaction boundary stops the
+    // walk where it stands.
+    const withUserRow = [
+      'ordinary prompt',
+      'ordinary answer',
+      'case text',
+      'case answer',
+      'second prompt',
+      'second answer',
+    ];
+    const withoutUserRow = [
+      'ordinary prompt',
+      'ordinary answer',
+      'case answer',
+      'second prompt',
+      'second answer',
+    ];
+    const firstTurnOnly = ['ordinary prompt', 'ordinary answer'];
+
+    const cases: ReadonlyArray<{
+      readonly label: string;
+      readonly origin: ContextMessage['origin'];
+      readonly anchor: 'user' | 'skill' | 'other';
+      readonly before: readonly string[];
+      readonly after: readonly string[];
+    }> = [
+      { label: 'no origin', origin: undefined, anchor: 'user', before: withUserRow, after: firstTurnOnly },
+      { label: 'user', origin: { kind: 'user' }, anchor: 'user', before: withUserRow, after: firstTurnOnly },
+      {
+        label: 'skill_activation (user-slash)',
+        origin: { kind: 'skill_activation', activationId: 'a1', skillName: 'demo', trigger: 'user-slash' },
+        anchor: 'skill',
+        before: withoutUserRow,
+        after: firstTurnOnly,
+      },
+      {
+        label: 'skill_activation (model-tool)',
+        origin: { kind: 'skill_activation', activationId: 'a2', skillName: 'demo', trigger: 'model-tool' },
+        anchor: 'other',
+        before: withoutUserRow,
+        after: [],
+      },
+      {
+        label: 'skill_activation (nested-skill)',
+        origin: { kind: 'skill_activation', activationId: 'a3', skillName: 'demo', trigger: 'nested-skill' },
+        anchor: 'other',
+        before: withoutUserRow,
+        after: [],
+      },
+      {
+        label: 'injection',
+        origin: { kind: 'injection', variant: 'goal' },
+        anchor: 'other',
+        before: withoutUserRow,
+        after: [],
+      },
+      {
+        label: 'system_trigger',
+        origin: { kind: 'system_trigger', name: 'tick' },
+        anchor: 'other',
+        before: withoutUserRow,
+        after: [],
+      },
+      {
+        label: 'background_task',
+        origin: { kind: 'background_task', taskId: 't1', status: 'completed', notificationId: 'n1' },
+        anchor: 'other',
+        before: withoutUserRow,
+        after: [],
+      },
+      {
+        label: 'cron_job',
+        origin: { kind: 'cron_job', jobId: 'j1', cron: '*/5 * * * *', recurring: true, coalescedCount: 1, stale: false },
+        anchor: 'other',
+        before: withoutUserRow,
+        after: [],
+      },
+      { label: 'cron_missed', origin: { kind: 'cron_missed', count: 1 }, anchor: 'other', before: withoutUserRow, after: [] },
+      { label: 'hook_result', origin: { kind: 'hook_result', event: 'UserPromptSubmit' }, anchor: 'other', before: withoutUserRow, after: [] },
+      {
+        label: 'compaction_summary',
+        origin: { kind: 'compaction_summary' },
+        anchor: 'other',
+        before: withoutUserRow,
+        // The walk stops at the boundary, so it never reaches the ordinary turn
+        // before it: that turn survives while the later one does not.
+        after: ['ordinary prompt', 'ordinary answer', 'case answer'],
+      },
+    ];
+
+    for (const [index, testCase] of cases.entries()) {
+      const sessionId = `web-anchor-${index}`;
+      const coreSessionId = `core-anchor-${index}`;
+      const homeDir = await mkdtemp(join(tmpdir(), 'scream-web-undo-anchors-'));
+      tempDirs.push(homeDir);
+      const sessionsDir = join(homeDir, 'web-sessions');
+      await mkdir(sessionsDir, { recursive: true });
+      await writeFile(
+        join(sessionsDir, `${sessionId}.meta.json`),
+        JSON.stringify({
+          sessionId,
+          coreSessionId,
+          workDir: '/tmp/project',
+          title: 'Anchor table',
+          createdAt: 1,
+          model: 'test-model',
+          permission: 'manual',
+        }),
+      );
+
+      let contextHistory: ContextMessage[] = [
+        { role: 'user', content: [{ type: 'text', text: 'ordinary prompt' }], toolCalls: [], origin: { kind: 'user' } },
+        { role: 'assistant', content: [{ type: 'text', text: 'ordinary answer' }], toolCalls: [] },
+        { role: 'user', content: [{ type: 'text', text: 'case text' }], toolCalls: [], origin: testCase.origin },
+        { role: 'assistant', content: [{ type: 'text', text: 'case answer' }], toolCalls: [] },
+        { role: 'user', content: [{ type: 'text', text: 'second prompt' }], toolCalls: [], origin: { kind: 'user' } },
+        { role: 'assistant', content: [{ type: 'text', text: 'second answer' }], toolCalls: [] },
+      ];
+      const control = makeFakeSession({
+        id: coreSessionId,
+        getContext: vi.fn(async () => ({ history: contextHistory, tokenCount: contextHistory.length })),
+      });
+      const undoHistory = vi.fn(async (count: number) => {
+        // The ordinary turns are anchors; the case turn is one only where the
+        // table says so — stated from the table, not from the predicate the
+        // projection runs the same history through.
+        contextHistory = undoLikeCore(
+          contextHistory,
+          count,
+          (message) =>
+            message.role === 'user' &&
+            (textOfMessage(message) !== 'case text' || testCase.anchor !== 'other'),
+        );
+      });
+      (control.session as unknown as { undoHistory: typeof undoHistory }).undoHistory = undoHistory;
+
+      const manager = new SessionManager({
+        harness: {
+          createSession: vi.fn(),
+          resumeSession: vi.fn(async () => control.session),
+          forkSession: vi.fn(),
+        } as never,
+        homeDir,
+        workDir: '/tmp/project',
+        model: 'test-model',
+        permission: 'manual',
+        yolo: false,
+      });
+      await manager.init();
+      const active = await manager.activateSession(sessionId);
+      expect(active, testCase.label).not.toBeNull();
+
+      const visible = (): string[] =>
+        active!.getSnapshot().messages.map((message) => message.content);
+
+      // Rendering: the anchor decides whether the case turn has a user row at
+      // all, and a `skill` turn keeps only its assistant block.
+      expect(visible(), `${testCase.label} (seeded)`).toEqual(testCase.before);
+
+      await active!.undoHistory(2);
+
+      // Undo: the projection follows the marker's count over the history the
+      // core walk left behind, so an origin the walk cannot see (or one that
+      // stops it) shows up here as how far back the trim reaches.
+      expect(visible(), `${testCase.label} (undone)`).toEqual(testCase.after);
+      await manager.closeAll();
+    }
   });
 });
 

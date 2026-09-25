@@ -24,15 +24,22 @@ import {
   unlinkSync,
   writeSync,
 } from 'node:fs';
-import { homedir } from 'node:os';
 import { basename, join } from 'pathe';
+
+import { resolveScreamHome } from '../../config/path';
 
 export function mcpCredentialsDir(screamHomeDir: string): string {
   return join(screamHomeDir, 'credentials', 'mcp');
 }
 
+/**
+ * Fallback location for the credential store, used when the caller did not
+ * pass a `screamHomeDir`. Resolved through the same home resolver as every
+ * other caller, so `SCREAM_CODE_HOME` moves this store too instead of leaving
+ * it under the built-in `~/.scream-code` default.
+ */
 export function defaultMcpCredentialsDir(): string {
-  return mcpCredentialsDir(join(homedir(), '.scream-code'));
+  return mcpCredentialsDir(resolveScreamHome());
 }
 
 export function sanitizeStoreKey(name: string): string {
