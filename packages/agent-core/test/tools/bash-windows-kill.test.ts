@@ -13,9 +13,9 @@
  *     reaps the tree `/T` names, so both the argv contract and the reaping are
  *     real. The host is not Windows, so Windows' own `taskkill` binary is not
  *     what runs here — only a Windows host can exercise that.
- *   - `real taskkill` (Windows host only, i.e. the windows-latest CI leg): the
- *     same scenario with the real Git Bash and the real `taskkill`, asserting
- *     the grandchild is gone after `stop()`.
+ *   - `real taskkill` (Windows host only, run by hand — no CI leg covers it):
+ *     the same scenario with the real Git Bash and the real `taskkill`,
+ *     asserting the grandchild is gone after `stop()`.
  */
 
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
