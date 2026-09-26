@@ -10,6 +10,10 @@ import type { PermissionPolicy, PermissionPolicyContext, PermissionPolicyResult 
  * unattended in bot mode): reads, in-workspace edits, lookups, planning,
  * coordination requests. Everything outside this allowlist is denied in bot
  * mode (fail-closed) — no ask prompt can reach a human who is not there.
+ *
+ * This list is intentionally separate from `#/tools/tool-catalog`: bot mode
+ * answers "what is reversible unattended", not "what is read-only /
+ * executable", so the two classifications must not be merged.
  */
 const REVERSIBLE_TOOLS = new Set([
   'Read',

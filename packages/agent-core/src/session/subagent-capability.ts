@@ -5,63 +5,29 @@
  * enforced at the tool level, not just by prompting. `all` keeps the profile's
  * full tool set; stricter modes strip it down to the tools the mode permits.
  *
- * Tool classification is by name, matching the BuiltinTool `name` constants.
+ * Tool classification is by name; the sets live in `#/tools/tool-catalog`
+ * (shared with the permission policies) so a new tool is classified once.
  * Unknown tool names are kept (a future tool should fail open rather than
  * being silently stripped from a read-only child).
  */
 
+import {
+  CORE_TOOLS,
+  EXECUTE_TOOLS,
+  NESTING_TOOLS,
+  READ_TOOLS,
+  WRITE_TOOLS,
+} from '#/tools/tool-catalog';
+
 export type SubagentCapabilityMode = 'read-only' | 'read-write' | 'execute' | 'all';
 
-/** Read-only inspection tools (no workspace mutation, no command execution). */
-const READ_TOOLS = new Set([
-  'AskUserQuestion',
-  'ContactParent',
-  'FetchURL',
-  'Glob',
-  'Grep',
-  'KnowledgeLookup',
-  'LSP',
-  'MemoryLookup',
-  'Read',
-  'ReadGroup',
-  'ReadMediaFile',
-  'ReportFinding',
-  'Skill',
-  'TodoList',
-  'WebSearch',
-]);
-
-/** Tools that mutate the workspace (files, memory, plans, skills). */
-const WRITE_TOOLS = new Set([
-  'Edit',
-  'InspectOwnAssets',
-  'MakeSkillApply',
-  'MakeSkillPlan',
-  'ManagePlugin',
-  'MemoryEdit',
-  'MemoryWrite',
-  'Write',
-]);
-
-/** Tools that execute commands. */
-const EXECUTE_TOOLS = new Set(['Bash', 'python']);
-
-/** Nesting/coordination tools — only `all` mode keeps them. A restricted
- *  child must not be able to spawn an unrestricted grandchild (that would
- *  bypass the tool filtering entirely). WolfPack is batch-spawn sugar over
- *  the same subagent host, so it is filtered too. */
-const NESTING_TOOLS = new Set(['Agent', 'SendSubagentMessage', 'WolfPack']);
-
-/** Goal/session-management tools, always available regardless of mode. */
-const CORE_TOOLS = new Set([
-  'CreateGoal',
-  'GetGoal',
-  'SetGoalBudget',
-  'UpdateGoal',
-  'WriteGoalNote',
-  'EnterPlanMode',
-  'ExitPlanMode',
-]);
+const KNOWN_TOOL_SETS: readonly ReadonlySet<string>[] = [
+  READ_TOOLS,
+  WRITE_TOOLS,
+  EXECUTE_TOOLS,
+  NESTING_TOOLS,
+  CORE_TOOLS,
+];
 
 /**
  * Filter an active tool-name list down to what `mode` permits. `all` returns
@@ -87,9 +53,7 @@ export function filterToolsForCapability(
   });
 }
 
-const KNOWN_TOOL_SETS: ReadonlySet<string>[] = [READ_TOOLS, WRITE_TOOLS, EXECUTE_TOOLS, NESTING_TOOLS, CORE_TOOLS];
-
-function union(...sets: ReadonlySet<string>[]): Set<string> {
+function union(...sets: readonly ReadonlySet<string>[]): Set<string> {
   const out = new Set<string>();
   for (const s of sets) for (const v of s) out.add(v);
   return out;

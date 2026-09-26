@@ -1,36 +1,12 @@
-import type { PermissionPolicy, PermissionPolicyContext, PermissionPolicyResult } from '../types';
+import { DEFAULT_AUTO_APPROVE_TOOLS } from '#/tools/tool-catalog';
 
-const DEFAULT_APPROVE_TOOLS: Record<string, true> = {
-  Read: true,
-  Grep: true,
-  Glob: true,
-  ReadMediaFile: true,
-  InspectOwnAssets: true,
-  SetTodoList: true,
-  TodoList: true,
-  TaskList: true,
-  TaskOutput: true,
-  CronList: true,
-  WebSearch: true,
-  FetchURL: true,
-  Agent: true,
-  AskUserQuestion: true,
-  Skill: true,
-  WolfPack: true,
-  CreateGoal: true,
-  UpdateGoal: true,
-  GetGoal: true,
-  SetGoalBudget: true,
-  WriteGoalNote: true,
-  MakeSkillPlan: true,
-  MakeSkillApply: true,
-};
+import type { PermissionPolicy, PermissionPolicyContext, PermissionPolicyResult } from '../types';
 
 export class DefaultToolApprovePermissionPolicy implements PermissionPolicy {
   readonly name = 'default-tool-approve';
 
   evaluate(context: PermissionPolicyContext): PermissionPolicyResult | undefined {
-    if (!DEFAULT_APPROVE_TOOLS[context.toolCall.name]) return;
+    if (!DEFAULT_AUTO_APPROVE_TOOLS.has(context.toolCall.name)) return;
     return {
       kind: 'approve',
     };
