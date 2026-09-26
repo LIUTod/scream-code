@@ -1,18 +1,20 @@
 import {
-  APIContextOverflowError,
   grandTotal as ltodGrandTotal,
   type ContentPart,
 } from '@scream-code/ltod';
 
 import type { Agent } from '..';
 import {
-  ErrorCodes,
   type ScreamErrorPayload,
   isScreamError,
   makeErrorPayload,
   toScreamErrorPayload,
 } from '#/errors';
-import { isAbortError, isMaxStepsExceededError } from '../../loop/errors';
+import {
+  isAbortError,
+  isContextOverflowError,
+  isMaxStepsExceededError,
+} from '../../loop/errors';
 import {
   createLoopEventDispatcher,
   runTurn,
@@ -1086,10 +1088,7 @@ export class TurnFlow {
 
         return result.stopReason;
       } catch (error) {
-        if (
-          error instanceof APIContextOverflowError ||
-          (isScreamError(error) && error.code === ErrorCodes.CONTEXT_OVERFLOW)
-        ) {
+        if (isContextOverflowError(error)) {
           await this.agent.fullCompaction.handleOverflowError(signal, error);
           continue; // Retry with compacted context
         }

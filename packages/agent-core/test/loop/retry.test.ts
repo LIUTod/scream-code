@@ -7,6 +7,8 @@ import {
 } from '@scream-code/ltod';
 import { describe, expect, it } from 'vitest';
 
+import { ErrorCodes, ScreamError } from '#/errors';
+import type { LoopEventDispatcher } from '#/loop/events';
 import type { LLM, LLMChatParams, LLMChatResponse } from '#/loop/llm';
 import { chatWithRetry, QUOTA_RETRY_ATTEMPTS } from '#/loop/retry';
 
@@ -164,4 +166,37 @@ describe('chatWithRetry: status-code coverage', () => {
       expect(calls).toBe(1);
     },
   );
+});
+
+describe('chatWithRetry: context overflow', () => {
+  it('does NOT retry a ScreamError-wrapped CONTEXT_OVERFLOW (fail fast for compaction)', async () => {
+    // Non-ltod provider adapters wrap the overflow as ScreamError. Retrying
+    // burns the whole budget on a request only compaction can fix, so the
+    // wrapped shape must fail fast exactly like the ltod error class does —
+    // the turn-level handler then sees it on attempt 1 and compacts.
+    let calls = 0;
+    let retryingEvents = 0;
+    const dispatchEvent: LoopEventDispatcher = async (event) => {
+      if (event.type === 'step.retrying') retryingEvents += 1;
+    };
+    const llm: LLM = {
+      systemPrompt: '',
+      modelName: 'mock',
+      isRetryableError: () => true, // even a "retryable" verdict must lose to overflow
+      async chat(_params: LLMChatParams): Promise<LLMChatResponse> {
+        calls += 1;
+        throw new ScreamError(
+          ErrorCodes.CONTEXT_OVERFLOW,
+          'prompt is too long: 1000 tokens > 500 maximum',
+        );
+      },
+    };
+
+    await expect(
+      chatWithRetry({ ...makeInput(llm, new AbortController().signal), dispatchEvent }),
+    ).rejects.toMatchObject({ code: ErrorCodes.CONTEXT_OVERFLOW });
+
+    expect(calls).toBe(1);
+    expect(retryingEvents).toBe(0);
+  });
 });

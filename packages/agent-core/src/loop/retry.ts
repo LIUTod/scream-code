@@ -1,6 +1,5 @@
 import { sleep } from '@antfu/utils';
 import {
-  APIContextOverflowError,
   APIProviderRateLimitError,
   calculateRateLimitBackoffMs,
 } from '@scream-code/ltod';
@@ -9,7 +8,7 @@ import type { Logger } from '#/logging/types';
 
 import { abortable } from '../utils/abort';
 import type { LoopEventDispatcher } from './events';
-import { isAbortError } from './errors';
+import { isAbortError, isContextOverflowError } from './errors';
 import type { LLM, LLMChatParams, LLMChatResponse } from './llm';
 
 // Default retry budget per step: 10 attempts (9 retries). With the
@@ -67,11 +66,10 @@ export async function chatWithRetry(input: ChatWithRetryInput): Promise<LLMChatR
     } catch (error) {
       // Overflow errors can't be fixed by retrying — they need compaction.
       // Fail fast so the turn-level handler can trigger emergency compaction
-      // without wasting retry attempts on the same overflow.
-      // NOTE: only instanceof APIContextOverflowError is checked here.
-      // If a provider wraps the overflow as ScreamError(CONTEXT_OVERFLOW),
-      // it will be retried. This is an edge case for non-ltod provider adapters.
-      if (error instanceof APIContextOverflowError) {
+      // without wasting retry attempts on the same overflow. Both shapes are
+      // recognized: the ltod error class and the ScreamError(CONTEXT_OVERFLOW)
+      // wrap some non-ltod provider adapters produce.
+      if (isContextOverflowError(error)) {
         logRequestFailure(input, error, attempt, maxAttempts);
         throw error;
       }
