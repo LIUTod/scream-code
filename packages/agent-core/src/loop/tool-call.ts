@@ -77,14 +77,16 @@ export interface ToolCallStepContext {
   readonly currentStep: number;
   readonly stepUuid: string;
   readonly hasPendingSteer?: (() => boolean) | undefined;
+  /**
+   * Per-step ordinal for executed tool-call blocks. Lives on the context
+   * instead of a module-level Map keyed by stepUuid: the base and effective
+   * step objects share one sequence by reference, and the counter's lifetime
+   * is bounded by the step (the Map leaked one entry per step forever).
+   */
+  readonly toolCallBlockIndex: { value: number };
 }
 
 type PreflightedToolCall = RunnableToolCall | RejectedToolCall;
-
-// Per-step counter for executed tool-call block indices, keyed by stepUuid
-// (the base step and its effective variant share the same uuid, so batch
-// calls that pass either object share one monotonic sequence).
-const executedToolCallBlockIndex = new Map<string, number>();
 
 interface RunnableToolCall {
   readonly kind: 'runnable';
@@ -987,10 +989,10 @@ async function dispatchToolCall(
   const { toolCall, toolName } = call;
   // Mark the executed tool-call block so the step's block sequence
   // (thinking/text/tool-call) is preserved in the trajectory. The index is
-  // a per-type ordinal (tool-call counts from 0 across the step), keyed by
-  // stepUuid so base/effective step objects share one sequence.
-  const index = executedToolCallBlockIndex.get(step.stepUuid) ?? 0;
-  executedToolCallBlockIndex.set(step.stepUuid, index + 1);
+  // a per-type ordinal (tool-call counts from 0 across the step). The
+  // counter is shared by reference between the base and effective step
+  // objects, so batch calls that pass either object form one sequence.
+  const index = step.toolCallBlockIndex.value++;
   await step.dispatchEvent({
     type: 'block.start',
     uuid: randomUUID(),

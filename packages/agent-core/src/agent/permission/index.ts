@@ -195,6 +195,10 @@ export class PermissionManager {
     let response: ApprovalResponse;
     if (this.agent.rpc?.requestApproval) {
       const approvalId = `approval-${String(++this.nextApprovalId)}`;
+      // Captured outside `try` so `finally` can clear it once the race
+      // settles: without clearTimeout a resolved approval leaves its
+      // rejection timer alive for nothing (one leaked timer per approval).
+      let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
       try {
         const customPromise = new Promise<ApprovalResponse>((resolve, reject) => {
           this.pendingApprovals.set(approvalId, {
@@ -223,7 +227,7 @@ export class PermissionManager {
           }
         });
         const timeoutPromise = new Promise<never>((_, reject) => {
-          setTimeout(() => {
+          timeoutHandle = setTimeout(() => {
             reject(new Error(`Approval request timed out after ${String(APPROVAL_TIMEOUT_MS)}ms`));
           }, APPROVAL_TIMEOUT_MS);
         });
@@ -235,6 +239,7 @@ export class PermissionManager {
           ? Promise.reject(error)
           : this.permissionPolicyResolutionToPrepare(resolved, context, policyName));
       } finally {
+        if (timeoutHandle !== undefined) clearTimeout(timeoutHandle);
         this.pendingApprovals.delete(approvalId);
       }
     } else {

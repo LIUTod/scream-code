@@ -112,6 +112,7 @@ export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<{
     currentStep,
     stepUuid,
     hasPendingSteer: deps.hasPendingSteer,
+    toolCallBlockIndex: { value: 0 },
   };
 
   await dispatchEvent({

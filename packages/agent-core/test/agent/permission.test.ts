@@ -3270,6 +3270,44 @@ function bashCall(): ToolCall {
   };
 }
 
+describe('Approval timeout timer', () => {
+  it('clears the rejection timer once the approval response arrives first', async () => {
+    vi.useFakeTimers();
+    const clearSpy = vi.spyOn(globalThis, 'clearTimeout');
+    try {
+      const { manager } = makePermissionManager(async () => ({ decision: 'approved' }));
+
+      await expect(
+        manager.beforeToolCall(hookContext({ id: 'call_timeout_clear' })),
+      ).resolves.toBeUndefined();
+
+      // The race settled via the response; the 5-minute rejection timer must
+      // not linger (it used to leak one live timer per approval).
+      expect(clearSpy).toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+      clearSpy.mockRestore();
+    }
+  });
+
+  it('surfaces the timeout message when no response ever arrives', async () => {
+    vi.useFakeTimers();
+    try {
+      const { manager, requestApproval } = makePermissionManager(
+        () => new Promise<ApprovalResponse>(() => {}),
+      );
+
+      const pending = manager.beforeToolCall(hookContext({ id: 'call_timeout_fire' }));
+      const assertion = expect(pending).rejects.toThrow('Approval request timed out after 300000ms');
+      await vi.advanceTimersByTimeAsync(300_000);
+      await assertion;
+      expect(requestApproval).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 function makePermissionManager(
   handleApproval: (request: unknown) => Promise<ApprovalResponse>,
   options: {
