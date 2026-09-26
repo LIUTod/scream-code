@@ -1,6 +1,7 @@
-import { appendFile, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, readFile, stat } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, resolve } from 'pathe';
 
+import { atomicWrite } from '#/utils/fs';
 import { isPathInside } from '#/utils/path-safety';
 
 export interface SessionIndexEntry {
@@ -119,11 +120,10 @@ export async function removeSessionIndexEntry(homeDir: string, sessionId: string
     kept.push(line);
   }
 
-  if (kept.length === 0) {
-    await writeFile(indexPath, '', 'utf-8');
-  } else {
-    await writeFile(indexPath, kept.join('\n') + '\n', 'utf-8');
-  }
+  // Atomic rewrite: plain writeFile truncates before the new bytes land, so a
+  // crash mid-write leaves a torn (or empty) index. atomicWrite swaps via
+  // tmp+fsync+rename, the same durability bar as state.json writes.
+  await atomicWrite(indexPath, kept.length === 0 ? '' : `${kept.join('\n')}\n`);
   invalidateSessionIndexCache();
 }
 

@@ -22,6 +22,7 @@ export const ErrorCodes = {
   SESSION_FORK_ACTIVE_TURN: 'session.fork_active_turn',
   SESSION_EXPORT_NOT_FOUND: 'session.export_not_found',
   SESSION_EXPORT_MISSING_VERSION: 'session.export_missing_version',
+  SESSION_DELETE_FAILED: 'session.delete_failed',
   SESSION_CLOSED: 'session.closed',
   SESSION_PERMISSION_MODE_INVALID: 'session.permission_mode_invalid',
   SESSION_THINKING_EMPTY: 'session.thinking_empty',
@@ -171,6 +172,12 @@ export const SCREAM_ERROR_INFO = {
     retryable: false,
     public: true,
     action: 'Provide a version when exporting the session.',
+  },
+  'session.delete_failed': {
+    title: 'Failed to delete session',
+    retryable: true,
+    public: true,
+    action: 'Close programs holding files in the session directory (editors, dev servers) and retry.',
   },
   'session.closed': {
     title: 'Session is closed',

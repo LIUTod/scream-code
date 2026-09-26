@@ -6,7 +6,7 @@
  * own writes and writes made by other processes (validated via mtime+size).
  */
 
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { utimes } from 'node:fs/promises';
 import { join } from 'pathe';
@@ -183,5 +183,27 @@ describe('session index cache', () => {
     const map = await readSessionIndex(home, root);
 
     expect([...map.keys()]).toEqual(['session_win_ok']);
+  });
+
+  it('rewrites removals atomically: no tmp residue and remaining entries stay parseable', async () => {
+    await appendSessionIndexEntry(homeDir, {
+      sessionId: 'session_alpha',
+      sessionDir: join(sessionsDir, 'session_alpha'),
+      workDir: '/tmp/work-a',
+    });
+    await appendSessionIndexEntry(homeDir, {
+      sessionId: 'session_beta',
+      sessionDir: join(sessionsDir, 'session_beta'),
+      workDir: '/tmp/work-b',
+    });
+
+    await removeSessionIndexEntry(homeDir, 'session_alpha');
+
+    // The rewrite goes through atomicWrite (tmp+fsync+rename), so no *.tmp
+    // file may outlive a successful removal.
+    const residue = readdirSync(homeDir).filter((name) => name.includes('.tmp.'));
+    expect(residue).toEqual([]);
+    const map = await readSessionIndex(homeDir, sessionsDir);
+    expect([...map.keys()]).toEqual(['session_beta']);
   });
 });

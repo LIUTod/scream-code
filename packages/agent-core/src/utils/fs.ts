@@ -14,10 +14,11 @@
  * dirent inside the file fsync, so a separate directory fsync is a
  * no-op (and EISDIR-fails on `open(dir, 'r')`).
  */
+import { sleep } from '@antfu/utils';
 import { randomBytes } from 'node:crypto';
 import { closeSync, fsyncSync, openSync } from 'node:fs';
 import * as nodeFs from 'node:fs';
-import { open, rename, unlink } from 'node:fs/promises';
+import { open, rename, rm, unlink } from 'node:fs/promises';
 import { dirname } from 'pathe';
 
 /**
@@ -182,6 +183,53 @@ export async function atomicWrite(
       } catch {
         /* ignore — file may not exist if open itself failed */
       }
+    }
+  }
+}
+
+/**
+ * Error codes that indicate a *transient* removal failure: another handle
+ * holds the file or a parent directory right now (Windows keeps files
+ * exclusively locked by editors, indexers, dev servers and virus scanners;
+ * POSIX sees the same from racing deletions). Retrying with a short backoff
+ * turns the common "lock released within a second" case into a success while
+ * a genuinely stuck path still surfaces as an error after the budget.
+ */
+const RM_RETRY_CODES = new Set(['EBUSY', 'EPERM', 'ENOTEMPTY', 'EMFILE', 'EACCES']);
+const RM_RETRY_BACKOFF_MS: readonly number[] = [50, 150, 400, 1000];
+
+/**
+ * rm -rf with bounded retries on transient OS locks. Throws the last error
+ * when every attempt fails, and never retries codes outside the transient
+ * set. `rmOverride` is a fault-injection seam (same convention as
+ * `atomicWrite`'s `_syncOverride`); production callers must never supply it.
+ */
+export async function rmWithRetry(
+  target: string,
+  opts: {
+    attempts?: number;
+    backoffMs?: readonly number[];
+    rmOverride?: typeof rm;
+  } = {},
+): Promise<void> {
+  const rmImpl = opts.rmOverride ?? rm;
+  // The attempt budget derives from the schedule actually in use: a custom
+  // backoffMs shorter than the default must not silently stretch into the
+  // default schedule, and a custom attempts must not be capped by the
+  // default schedule's length.
+  const backoff = opts.backoffMs ?? RM_RETRY_BACKOFF_MS;
+  const attempts = opts.attempts ?? backoff.length + 1;
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      await rmImpl(target, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      const backoffMs = backoff[attempt - 1];
+      if (attempt >= attempts || backoffMs === undefined || code === undefined || !RM_RETRY_CODES.has(code)) {
+        throw error;
+      }
+      await sleep(backoffMs);
     }
   }
 }

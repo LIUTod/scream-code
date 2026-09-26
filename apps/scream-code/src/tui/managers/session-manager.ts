@@ -205,7 +205,10 @@ export class SessionManager {
       for (const summary of summaries) {
         if (summary.id === currentSessionId) continue;
         if (isPrunableEmptySession(summary, now)) {
-          await this.host.harness.deleteSession(summary.id);
+          // Per-item best-effort janitor: one locked session must not abort
+          // the sweep for the rest (explicit user deletes still fail loudly
+          // in the dialog paths).
+          await this.host.harness.deleteSession(summary.id).catch(() => {});
         }
       }
     } catch (error) {

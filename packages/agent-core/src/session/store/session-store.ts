@@ -1,4 +1,4 @@
-import { cp, mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { cp, mkdir, readdir, readFile, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative } from 'pathe';
 
 import { z } from 'zod';
@@ -11,6 +11,7 @@ import {
   removeSessionIndexEntry,
 } from '#/session/store/session-index';
 import { encodeWorkDirKey, normalizeWorkDir } from '#/session/store/workdir-key';
+import { atomicWrite, rmWithRetry } from '#/utils/fs';
 import type { JsonObject, ListSessionsPayload, SessionSummary } from '#/rpc/core-api';
 
 const SessionSummaryStateSchema = z.object({
@@ -37,23 +38,6 @@ export interface ForkSessionRecordInput {
 
 export type SessionStoreOptions = Record<string, never>;
 
-let stateWriteCounter = 0;
-
-/**
- * Atomic state.json write: plain writeFile truncates the target before the
- * new bytes land, so a process killed mid-write leaves a 0-byte state.json
- * and the next resume crashes on JSON.parse. Temp-file + rename makes the
- * swap all-or-nothing.
- */
-async function writeStateAtomically(statePath: string, content: string): Promise<void> {
-  // The counter guards against two concurrent writes landing in the same
-  // millisecond and racing on an identical tmp path (rename() would then
-  // fail with ENOENT on the second mover).
-  const tmpPath = `${statePath}.${process.pid}.${Date.now().toString(36)}.${(stateWriteCounter++).toString(36)}.tmp`;
-  await writeFile(tmpPath, content, 'utf-8');
-  await rename(tmpPath, statePath);
-}
-
 export class SessionStore {
   readonly sessionsDir: string;
 
@@ -79,7 +63,7 @@ export class SessionStore {
       await this.delete(input.id);
     } else if (await isDirectory(dir)) {
       // Directory exists but no index entry — orphaned from partial delete.
-      await rm(dir, { recursive: true, force: true });
+      await rmWithRetry(dir);
     }
 
     await mkdir(dir, { recursive: true, mode: 0o700 });
@@ -120,7 +104,7 @@ export class SessionStore {
       });
       return summary;
     } catch (error) {
-      await rm(targetDir, { recursive: true, force: true }).catch(() => {});
+      await rmWithRetry(targetDir).catch(() => {});
       throw error;
     }
   }
@@ -153,16 +137,30 @@ export class SessionStore {
       title: normalized,
       isCustomTitle: true,
     };
-    await writeStateAtomically(statePath, `${JSON.stringify(next, null, 2)}\n`);
+    await atomicWrite(statePath, `${JSON.stringify(next, null, 2)}\n`);
   }
 
   async delete(id: string): Promise<void> {
     assertSafeSessionId(id);
     const entry = await this.findSessionEntry(id);
     if (entry !== undefined) {
-      await rm(entry.sessionDir, { recursive: true, force: true }).catch(() => {});
+      // Deletion must not lie: a locked directory (Windows EBUSY…) surfaces
+      // as SESSION_DELETE_FAILED instead of silently leaving the session
+      // listed. The index entry is removed only after the directory is gone;
+      // if the index rewrite itself fails the stale entry is harmless —
+      // listAll() and findExistingSessionEntry() skip entries whose
+      // directory no longer exists.
+      try {
+        await rmWithRetry(entry.sessionDir);
+      } catch (error) {
+        throw new ScreamError(
+          ErrorCodes.SESSION_DELETE_FAILED,
+          `Session "${id}" could not be deleted`,
+          { cause: error },
+        );
+      }
+      await removeSessionIndexEntry(this.homeDir, id).catch(() => {});
     }
-    await removeSessionIndexEntry(this.homeDir, id).catch(() => {});
   }
 
   async list(options: ListSessionsPayload = {}): Promise<readonly SessionSummary[]> {
@@ -295,7 +293,7 @@ export class SessionStore {
       agents: rewriteAgentHomedirs(parsed['agents'], sourceDir, targetDir),
       custom: Object.assign({}, isRecord(parsed['custom']) ? parsed['custom'] : {}, input.metadata),
     };
-    await writeStateAtomically(statePath, `${JSON.stringify(next, null, 2)}\n`);
+    await atomicWrite(statePath, `${JSON.stringify(next, null, 2)}\n`);
   }
 
   private async summaryFromDir(
