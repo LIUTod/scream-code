@@ -72,7 +72,7 @@ Rules:
 
 ## Code Quality & Style
 
-- **Lint warning budget**: the oxlint warning count is locked to `scripts/lint-baseline.json` and enforced by `scripts/lint-ratchet.mjs` in CI — only down, never up. `import/no-cycle`, `import/no-self-import`, and `no-console` inside `apps/scream-code/src/tui/` are hard errors.
+- **Lint warning budget**: the oxlint warning count is locked to `scripts/lint-baseline.json` and enforced by `scripts/lint-ratchet.mjs` in CI — only down, never up. `import/no-cycle`, `import/no-self-import`, and `no-console` inside `apps/scream-code/src/tui/` are hard errors (the cycle check stays disabled in test files, pre-existing).
 
 ### TypeScript
 

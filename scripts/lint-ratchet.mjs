@@ -10,14 +10,27 @@
  */
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 const BASELINE_PATH = new URL('./lint-baseline.json', import.meta.url);
 const { warnings: baseline } = JSON.parse(readFileSync(BASELINE_PATH, 'utf8'));
 
+// Anchor the scan to the repo root: run from a subdirectory, oxlint would
+// only see that subtree, report a misleadingly low count, and let the
+// budget check pass without linting the repository.
+const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url));
 const result = spawnSync('pnpm', ['exec', 'oxlint', '--type-aware'], {
   encoding: 'utf8',
   env: process.env,
+  cwd: REPO_ROOT,
 });
+
+if (result.error !== undefined && result.error !== null) {
+  console.error(
+    `lint-ratchet: failed to launch pnpm (${result.error.code ?? result.error.message}); failing safe.`,
+  );
+  process.exit(1);
+}
 
 const output = `${result.stdout ?? ''}${result.stderr ?? ''}`;
 process.stdout.write(output);
