@@ -63,6 +63,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build:packages
       - run: pnpm run lint
+      - run: pnpm run lint:boundary
       - run: pnpm run sherif
 
   typecheck:
