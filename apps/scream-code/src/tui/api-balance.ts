@@ -14,7 +14,7 @@ import {
   isSupportedBalanceProvider,
   readConfigFile,
   type ProviderBalance,
-} from '@scream-code/agent-core';
+} from '@scream-code/scream-code-sdk';
 import { getDataDir } from '../utils/paths';
 
 const BALANCE_CACHE_MS = 60_000;

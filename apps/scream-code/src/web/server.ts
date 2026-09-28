@@ -32,6 +32,11 @@ import {
   ErrorCodes,
   isScreamError,
   isRealUserPrompt,
+  appendSessionIndexEntry,
+  encodeWorkDirKey,
+  normalizeWorkDir,
+  readSessionIndex,
+  removeSessionIndexEntry,
   type Session,
   type Event,
   type SessionStatus,
@@ -40,13 +45,6 @@ import {
   type TodoItem,
   type ContextMessage,
 } from '@scream-code/scream-code-sdk';
-import {
-  appendSessionIndexEntry,
-  encodeWorkDirKey,
-  normalizeWorkDir,
-  readSessionIndex,
-  removeSessionIndexEntry,
-} from '@scream-code/agent-core';
 import { setLocale } from '@scream-code/config';
 
 import { loadTuiConfig, saveTuiConfig, TuiConfigParseError, type TuiLikePreferences, TuiLikePreferencesSchema } from '#/tui/config';

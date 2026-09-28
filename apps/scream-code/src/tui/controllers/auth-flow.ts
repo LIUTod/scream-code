@@ -1,6 +1,5 @@
-import type { ScreamHarness, Session, ThinkingEffort } from '@scream-code/scream-code-sdk';
+import type { ScreamConfig, ScreamHarness, Session, ThinkingEffort } from '@scream-code/scream-code-sdk';
 import { DEFAULT_CATALOG_URL, fetchCatalog, resolveScreamHome, saveCatalogCache } from '@scream-code/scream-code-sdk';
-import type { ScreamConfig } from '@scream-code/agent-core';
 import type { SkillListSession } from '../commands';
 
 import type { SessionEventHandler } from './session-event-handler';

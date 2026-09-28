@@ -6,6 +6,9 @@ import { join } from 'node:path';
 import {
   ErrorCodes,
   ScreamError,
+  appendSessionIndexEntry,
+  encodeWorkDirKey,
+  normalizeWorkDir,
   type ContextMessage,
   type Event,
   type GoalSnapshotData,
@@ -13,7 +16,6 @@ import {
   type SessionStatus,
   type TodoItem,
 } from '@scream-code/scream-code-sdk';
-import { appendSessionIndexEntry, encodeWorkDirKey, normalizeWorkDir } from '@scream-code/agent-core';
 import { WebSocket } from 'ws';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 

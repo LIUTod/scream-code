@@ -68,5 +68,22 @@ export type {
 export type { GoalSnapshotData, TodoItem, TodoStatus } from '@scream-code/agent-core';
 export { subagentRoster } from '@scream-code/agent-core';
 
+// App-facing surface for the balance probe, config access, and web-layer
+// session-index admin. AGENTS.md requires app code to reach core only
+// through this package.
+export {
+  fetchProviderBalance,
+  isSupportedBalanceProvider,
+  readConfigFile,
+} from '@scream-code/agent-core';
+export type { ProviderBalance, ScreamConfig } from '@scream-code/agent-core';
+export {
+  appendSessionIndexEntry,
+  encodeWorkDirKey,
+  normalizeWorkDir,
+  readSessionIndex,
+  removeSessionIndexEntry,
+} from '@scream-code/agent-core';
+
 export * from '#/events';
 export type * from '#/types';
