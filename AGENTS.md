@@ -47,7 +47,7 @@
 
 ### Cross-package Import Rules
 
-- `apps/scream-code` must use core capabilities **only through `@scream-code/scream-code-sdk`**. Never import `@scream-code/agent-core` directly in app code.
+- `apps/scream-code` must use core capabilities **only through `@scream-code/scream-code-sdk`**. Never import `@scream-code/agent-core` directly in app code (enforced in CI by `scripts/check-import-boundary.mjs`).
 - `packages/agent-core` must not depend on `apps/scream-code`.
 - Prefer package-local imports. When crossing packages, import from the package's public `index.ts` or documented subpaths.
 - For Node built-ins, prefer namespace imports: `import * as fs from 'node:fs/promises'`, `import * as path from 'node:path'`.
@@ -71,6 +71,8 @@ Rules:
 ---
 
 ## Code Quality & Style
+
+- **Lint warning budget**: the oxlint warning count is locked to `scripts/lint-baseline.json` and enforced by `scripts/lint-ratchet.mjs` in CI — only down, never up. `import/no-cycle`, `import/no-self-import`, and `no-console` inside `apps/scream-code/src/tui/` are hard errors.
 
 ### TypeScript
 

@@ -16,8 +16,8 @@
     "typescript/no-misused-promises": "warn",
     "typescript/return-await": "warn",
     "typescript/only-throw-error": "warn",
-    "import/no-cycle": "warn",
-    "import/no-self-import": "warn",
+    "import/no-cycle": "error",
+    "import/no-self-import": "error",
     "import/no-unassigned-import": "off",
     "unicorn/prefer-node-protocol": "warn",
     "unicorn/no-useless-undefined": "off",
@@ -88,6 +88,12 @@
   },
   "overrides": [
     {
+      "files": ["scripts/**/*.mjs"],
+      "rules": {
+        "eslint/no-console": "off"
+      }
+    },
+    {
       "files": ["**/examples/**/*.ts", "**/examples/**/*.tsx"],
       "rules": {
         "eslint/no-console": "off"
@@ -128,6 +134,12 @@
         "eslint/no-inner-declarations": "off",
         "import/no-duplicates": "off",
         "import/first": "off"
+      }
+    },
+    {
+      "files": ["apps/scream-code/src/tui/**/*.ts"],
+      "rules": {
+        "eslint/no-console": "error"
       }
     },
     {
