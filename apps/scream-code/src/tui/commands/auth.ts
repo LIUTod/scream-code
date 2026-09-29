@@ -1,3 +1,6 @@
+import { chmod, readFile, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+
 import { t } from '@scream-code/config';
 import {
   applyCatalogProvider,
@@ -15,7 +18,7 @@ import {
 } from '@scream-code/scream-code-sdk';
 
 import { BUILT_IN_CATALOG_JSON } from '../../built-in-catalog';
-import type { ChoiceOption } from '../components/dialogs/choice-picker';
+import { ChoicePickerComponent, type ChoiceOption } from '../components/dialogs/choice-picker';
 
 import { resolveConnectCatalogRequest } from '../utils/connect-catalog';
 import { formatErrorMessage } from '../utils/event-payload';
@@ -38,8 +41,12 @@ import type { SlashCommandHost } from './dispatch';
 // ---------------------------------------------------------------------------
 
 export async function handleConnectCommand(host: SlashCommandHost, args: string): Promise<void> {
-  const { url, diy } = resolveConnectCatalogRequest(args);
+  const { url, diy, image } = resolveConnectCatalogRequest(args);
 
+  if (image) {
+    await handleImageConfig(host);
+    return;
+  }
   if (diy) {
     await handleDiyConfig(host);
     return;
@@ -279,4 +286,290 @@ async function handleDiyConfig(host: SlashCommandHost): Promise<void> {
 
   await host.authFlow.refreshConfigAfterLogin();
   host.showStatus(t('auth.connected', { name: `${providerId} · ${modelId} (${wire})` }));
+}
+
+// ── /config image — image-generation API setup ─────────────────────────
+
+interface ImageProviderPreset {
+  readonly id: string;
+  /** Literal label (for future named stations). */
+  readonly label?: string;
+  /** i18n key resolved at prompt time (language can change between runs). */
+  readonly labelKey?: string;
+  /** Prefilled base URL; empty means the user must type one. */
+  readonly baseUrl: string;
+  readonly model: string;
+}
+
+/**
+ * Service presets for the image wizard: quick entries for services whose
+ * image API follows the OpenAI-compatible contract this tool speaks, plus
+ * the free-form custom entry. Non-compatible shapes stay out until they get
+ * dedicated adapters — a preset that cannot actually generate is a bug.
+ */
+const IMAGE_PROVIDER_PRESETS: readonly ImageProviderPreset[] = [
+  {
+    id: 'openai',
+    labelKey: 'image.provider_openai',
+    baseUrl: 'https://api.openai.com/v1',
+    model: 'gpt-image-2',
+  },
+  {
+    id: 'volcengine',
+    labelKey: 'image.provider_volcengine',
+    baseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
+    model: 'doubao-seedream-4-5-251128',
+  },
+  {
+    id: 'openai-compatible',
+    labelKey: 'image.provider_generic',
+    baseUrl: '',
+    model: 'gpt-image-2',
+  },
+];
+
+interface ImageConfigFile {
+  provider: string;
+  base_url: string;
+  api_key: string;
+  model: string;
+  size: string;
+  /** Optional image-edit base; empty/absent = same as base_url. */
+  edit_base_url?: string;
+  /** Optional image-edit model; empty/absent = same as model. */
+  edit_model?: string;
+}
+
+function getImageConfigPath(): string {
+  return join(resolveScreamHome(), 'image-config.json');
+}
+
+/** Best-effort read of an existing image config (never throws, never exposes the key). */
+async function readExistingImageConfig(): Promise<
+  { provider: string; model: string; baseUrl: string } | undefined
+> {
+  try {
+    const text = await readFile(getImageConfigPath(), 'utf8');
+    const parsed = JSON.parse(text) as Record<string, unknown>;
+    const baseUrl = typeof parsed['base_url'] === 'string' ? parsed['base_url'].trim() : '';
+    const model = typeof parsed['model'] === 'string' ? parsed['model'].trim() : '';
+    const apiKey = typeof parsed['api_key'] === 'string' ? parsed['api_key'].trim() : '';
+    // Same predicate the tool's loadConfig applies: a config that the tool
+    // would reject must not be advertised as "already configured" here.
+    const usable =
+      baseUrl.length > 0 &&
+      !baseUrl.includes('replace-with') &&
+      model.length > 0 &&
+      apiKey.length > 0 &&
+      !apiKey.includes('replace-with') &&
+      !(apiKey.startsWith('<') && apiKey.endsWith('>'));
+    if (usable) {
+      return {
+        provider: typeof parsed['provider'] === 'string' ? parsed['provider'] : 'openai-compatible',
+        model,
+        baseUrl,
+      };
+    }
+  } catch {
+    // Missing or malformed file — treat as unconfigured.
+  }
+  return undefined;
+}
+
+/**
+ * Normalize the URL exactly as the user typed it: trim whitespace and
+ * trailing slashes only (a trailing slash would double up against the
+ * endpoint path). No path is ever appended — what you type is what runs.
+ */
+function normalizeImageUrl(raw: string): string {
+  return raw.trim().replace(/\/+$/, '');
+}
+
+function imagePresetLabel(preset: ImageProviderPreset): string {
+  if (preset.label !== undefined) return preset.label;
+  if (preset.labelKey !== undefined) return t(preset.labelKey);
+  return preset.id;
+}
+
+function promptImageProviderPreset(host: SlashCommandHost, hint?: string): Promise<string | undefined> {
+  return new Promise((resolve) => {
+    const options: ChoiceOption[] = IMAGE_PROVIDER_PRESETS.map((preset) => ({
+      value: preset.id,
+      label: imagePresetLabel(preset),
+      description: preset.baseUrl.length > 0 ? preset.baseUrl : undefined,
+    }));
+    const picker = new ChoicePickerComponent({
+      title: t('image.provider_title'),
+      hint: hint ?? t('image.provider_hint'),
+      options,
+      colors: host.state.theme.colors,
+      onSelect: (value) => {
+        host.restoreEditor();
+        resolve(value);
+      },
+      onCancel: () => {
+        host.restoreEditor();
+        resolve(undefined);
+      },
+    });
+    host.mountEditorReplacement(picker);
+  });
+}
+
+/**
+ * GET {base}/models to verify connectivity and model availability.
+ * Never blocks saving: the wizard reports the result on the spinner
+ * label and continues either way.
+ */
+async function runImageDiagnose(host: SlashCommandHost, config: ImageConfigFile): Promise<void> {
+  const controller = new AbortController();
+  let timedOut = false;
+  const timeoutId = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, 2_000);
+  const cancel = (): void => {
+    controller.abort();
+  };
+  host.cancelInFlight = cancel;
+  const spinner = host.showProgressSpinner(t('image.checking'));
+  try {
+    const response = await fetch(`${config.base_url}/models`, {
+      headers: { Authorization: `Bearer ${config.api_key}` },
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      spinner.stop({ ok: false, label: `${t('image.check_failed')} (HTTP ${response.status})` });
+      return;
+    }
+    const body = (await response.json()) as { data?: Array<{ id?: string }> };
+    const ids = Array.isArray(body.data) ? body.data.map((m) => m.id) : [];
+    if (ids.length > 0 && !ids.includes(config.model)) {
+      spinner.stop({ ok: false, label: t('image.check_model_missing') });
+      return;
+    }
+    spinner.stop({ ok: true, label: t('image.check_ok') });
+  } catch (error) {
+    if (controller.signal.aborted) {
+      spinner.stop({ ok: false, label: timedOut ? `${t('image.check_failed')} (timeout)` : 'Cancelled.' });
+      return;
+    }
+    spinner.stop({ ok: false, label: `${t('image.check_failed')} (${formatErrorMessage(error)})` });
+  } finally {
+    clearTimeout(timeoutId);
+    if (host.cancelInFlight === cancel) host.cancelInFlight = undefined;
+  }
+}
+
+async function handleImageConfig(host: SlashCommandHost): Promise<void> {
+  // Surface the current configuration first so the user knows a re-run
+  // will overwrite it (status line + the first dialog's hint line).
+  const existing = await readExistingImageConfig();
+  let entryHint = t('image.provider_hint');
+  if (existing !== undefined) {
+    const preset = IMAGE_PROVIDER_PRESETS.find((p) => p.id === existing.provider);
+    const providerLabel = preset !== undefined ? imagePresetLabel(preset) : existing.provider;
+    entryHint = t('image.already_configured', {
+      model: existing.model,
+      provider: providerLabel,
+      url: existing.baseUrl,
+    });
+    host.showStatus(entryHint);
+  }
+
+  // Step 1 — service preset
+  const presetId = await promptImageProviderPreset(host, entryHint);
+  if (presetId === undefined) return;
+  const preset = IMAGE_PROVIDER_PRESETS.find((p) => p.id === presetId);
+  if (preset === undefined) return;
+
+  // Step 2 — base URL: quick presets carry their canonical URL and skip
+  // this prompt entirely; only the custom entry asks for a URL.
+  let baseUrl = '';
+  if (preset.baseUrl.length > 0) {
+    baseUrl = normalizeImageUrl(preset.baseUrl);
+  } else {
+    const urlInput = await promptTextInput(host, t('image.input_url'), {
+      subtitle: t('image.url_hint'),
+    });
+    if (urlInput === undefined) return;
+    baseUrl = normalizeImageUrl(urlInput);
+    if (baseUrl.length === 0) {
+      host.showError(t('image.error_empty_url'));
+      return;
+    }
+  }
+
+  // Step 3 — API key (masked; written to the local config file only, never
+  // returned to the model context).
+  const apiKey = await promptTextInput(host, t('image.input_key'), {
+    subtitle: t('image.key_hint'),
+    masked: true,
+  });
+  if (apiKey === undefined) return;
+  const trimmedKey = apiKey.trim();
+  if (trimmedKey.length === 0) {
+    host.showError(t('image.error_empty_key'));
+    return;
+  }
+
+  // Step 4 — model id (empty keeps the preset default)
+  const modelInput = await promptTextInput(host, t('image.input_model'), {
+    subtitle: t('image.model_hint'),
+    placeholder: preset.model,
+    allowEmpty: true,
+  });
+  if (modelInput === undefined) return;
+  const model = modelInput.trim().length > 0 ? modelInput.trim() : preset.model;
+
+  // Optional image-edit overrides — only asked for the custom entry, and
+  // both accept Enter to keep the text-to-image values. Services that split
+  // the two channels (different base path or an edit-specific model) fill
+  // them here; the OpenAI-contract presets never need them.
+  let editBaseUrl: string | undefined;
+  let editModel: string | undefined;
+  if (preset.baseUrl.length === 0) {
+    const editUrlInput = await promptTextInput(host, t('image.input_edit_url'), {
+      subtitle: t('image.edit_url_hint'),
+      allowEmpty: true,
+    });
+    if (editUrlInput === undefined) return;
+    if (editUrlInput.trim().length > 0) {
+      const normalizedEdit = normalizeImageUrl(editUrlInput);
+      if (normalizedEdit.length > 0) editBaseUrl = normalizedEdit;
+    }
+
+    const editModelInput = await promptTextInput(host, t('image.input_edit_model'), {
+      subtitle: t('image.edit_model_hint'),
+      placeholder: model,
+      allowEmpty: true,
+    });
+    if (editModelInput === undefined) return;
+    if (editModelInput.trim().length > 0) editModel = editModelInput.trim();
+  }
+
+  const config: ImageConfigFile = {
+    provider: preset.id,
+    base_url: baseUrl,
+    api_key: trimmedKey,
+    model,
+    size: 'auto',
+    ...(editBaseUrl !== undefined ? { edit_base_url: editBaseUrl } : {}),
+    ...(editModel !== undefined ? { edit_model: editModel } : {}),
+  };
+  try {
+    // Create with 0600 so the key never passes through a world-readable
+    // window; chmod keeps pre-existing files at 0600 as well.
+    await writeFile(getImageConfigPath(), `${JSON.stringify(config, null, 2)}\n`, {
+      encoding: 'utf8',
+      mode: 0o600,
+    });
+    await chmod(getImageConfigPath(), 0o600);
+  } catch (error) {
+    host.showError(formatErrorMessage(error));
+    return;
+  }
+
+  await runImageDiagnose(host, config);
+  host.showStatus(t('image.configured', { provider: imagePresetLabel(preset), model }));
 }

@@ -30,6 +30,9 @@ tools:
   - MemoryConsolidateApply
   - MemoryWrite
   - KnowledgeLookup
+  # Image generation. Like ManagePlugin, registered for main agents only —
+  # subagents inherit the name but never receive the tool.
+  - ImageGenerate
   - InspectOwnAssets
   - Skill
   - MakeSkillPlan

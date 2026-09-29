@@ -21,6 +21,7 @@ export * from './memory/memory-edit';
 export * from './memory/memory-lookup';
 export * from './memory/memory-write';
 export * from './knowledge/knowledge-lookup';
+export * from './image/image-generate';
 export * from './lsp-tool';
 
 export * from './collaboration/skill-tool';

@@ -186,7 +186,7 @@ export function promptWireType(host: SlashCommandHost): Promise<string | undefin
 export function promptTextInput(
   host: SlashCommandHost,
   title: string,
-  opts?: { subtitle?: string; masked?: boolean; placeholder?: string },
+  opts?: { subtitle?: string; masked?: boolean; placeholder?: string; allowEmpty?: boolean },
 ): Promise<string | undefined> {
   return new Promise((resolve) => {
     const dialog = new TextInputDialogComponent(
@@ -199,6 +199,7 @@ export function promptTextInput(
         subtitle: opts?.subtitle,
         masked: opts?.masked,
         placeholder: opts?.placeholder,
+        allowEmpty: opts?.allowEmpty,
         colors: host.state.theme.colors,
       },
     );

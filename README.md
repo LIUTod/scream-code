@@ -42,7 +42,7 @@ scream --auto     # auto permission mode
 scream -y         # auto-approve mode
 ```
 
-On first launch Scream walks you through model setup (`/config`). 130+ providers built in — or point it at any OpenAI-compatible endpoint with `/config diy`. Switch models anytime with `/model`, no restart needed — or use `/model diy` to give each sub-agent its own model, letting every model do what it does best.
+On first launch Scream walks you through model setup (`/config`). 130+ providers built in — or point it at any OpenAI-compatible endpoint with `/config diy`. Switch models anytime with `/model`, no restart needed — or use `/model diy` to give each sub-agent its own model, letting every model do what it does best. Generate or edit images the same way: run `/config image` once, then just ask for a picture (the `/image` skill).
 
 When Scream wants to modify files or run commands, an approval panel pops up — pick a number, press Enter.
 
@@ -102,6 +102,7 @@ Type `/` in the input to browse. All 54 commands:
 | **Models & configuration** | |
 | `/model [alias]` | Switch LLM model |
 | `/config` | Browse and configure models |
+| `/config image` | Configure image generation (provider, URL, key, model) |
 | `/logout` (`/disconnect`) | Remove configured models |
 | `/language` (`/lang`) | Switch interface language |
 | `/theme` | Set terminal UI theme |
@@ -116,6 +117,7 @@ Type `/` in the input to browse. All 54 commands:
 | `/plugin` (`/skills`, `/plugin`) | Skill center |
 | `/extension` | Code extensions: activate or deactivate a plugin entry point |
 | `/make-skill` | Distill the session into a Skill |
+| `/image` | Draw or edit an image (image skill; set up once with `/config image`) |
 | `/cc` | Control your cc daemon |
 | `/cc-connect` | cc-connect quick channel setup |
 | **Tools** | |

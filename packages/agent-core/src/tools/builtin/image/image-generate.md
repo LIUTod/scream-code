@@ -1,0 +1,10 @@
+Generate or edit an image through the locally configured image API (OpenAI-compatible) and save the result as a PNG file. Returns the absolute path of the saved image.
+
+- `mode=new`: text-to-image generation from `prompt`.
+- `mode=edit`: rewrites the image(s) listed in `imagePaths` (at least one required).
+- `mode=continue`: edits the last image produced in the session; extra `imagePaths` are fed in as additional references.
+- `session` groups turns into one visual thread; omit it to start or join the default thread.
+- `size` defaults to the configured value (usually `auto`).
+- Input image paths go through the same path policy as Read before any request: sensitive files (credentials, SSH keys, env files) are rejected outright, and relative paths may not escape the workspace. Rejections happen before approval and before any bytes leave the machine.
+- The API configuration lives only in a local file on this machine. When the tool reports that image generation is not configured, tell the user to run `/config image` and retry after they finish — never ask for, repeat, or log an API key in the conversation.
+- Call this only after the prompt has been refined for image generation (subject, composition, style, lighting, aspect ratio).

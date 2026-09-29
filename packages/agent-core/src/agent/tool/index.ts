@@ -1098,6 +1098,11 @@ export class ToolManager {
         this.agent.type === 'main' && this.agent.memoStore && new b.MemoryConsolidateApplyTool(this.agent),
         this.agent.type === 'main' && this.agent.memoStore && new b.MemoryWriteTool(this.agent),
         this.agent.type === 'main' && this.agent.knowledgeStore && new b.KnowledgeLookupTool(this.agent),
+        // Image generation is main-agent-only: it spends API quota and the
+        // /config image wizard only exists in the main conversation.
+        this.agent.type === 'main' &&
+          this.agent.screamHomeDir !== undefined &&
+          new b.ImageGenerateTool(cwd, this.agent.screamHomeDir, jian, workspace),
         // Inspecting own assets is a main-agent concern.
         this.agent.type === 'main' && new b.InspectOwnAssetsTool(this.agent),
         this.agent.skills?.registry.listInvocableSkills().length &&

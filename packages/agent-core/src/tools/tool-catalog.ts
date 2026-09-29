@@ -32,6 +32,7 @@ export const READ_TOOLS: ReadonlySet<string> = new Set([
 /** Tools that mutate the workspace (files, memory, plans, skills). */
 export const WRITE_TOOLS: ReadonlySet<string> = new Set([
   'Edit',
+  'ImageGenerate',
   'InspectOwnAssets',
   'MakeSkillApply',
   'MakeSkillPlan',

@@ -41,7 +41,7 @@ scream --auto     # 自动权限模式
 scream -y         # 自动批准模式
 ```
 
-首次启动会自动进入模型配置向导（`/config`）。内置 130+ 模型商，或用 `/config diy` 指向任意 OpenAI 兼容端点。配置后用 `/model` 随时切换，无需重启，亦或者通过 `/model diy` 为子Agent 配置不同的模型，让模型去做最擅长的工作。
+首次启动会自动进入模型配置向导（`/config`）。内置 130+ 模型商，或用 `/config diy` 指向任意 OpenAI 兼容端点。配置后用 `/model` 随时切换，无需重启，亦或者通过 `/model diy` 为子Agent 配置不同的模型，让模型去做最擅长的工作。生图同理：先跑一次 `/config image` 配置生图服务，之后直接说「画一张」即可（`/image` 技能）。
 
 当它要修改文件或执行命令时，会弹出审批面板：按数字键选择，回车确认。
 
@@ -98,6 +98,7 @@ scream -y         # 自动批准模式
 | **模型与配置** | |
 | `/model [别名]` | 切换 LLM 模型 |
 | `/config` | 浏览并配置模型（远程拉取最新模型商目录） |
+| `/config image` | 配置生图（服务商 / URL / 密钥 / 模型，首次配置） |
 | `/logout`（`/disconnect`） | 删除已配置的模型 |
 | `/language`（`/lang`） | 切换界面语言 |
 | `/theme` | 设置终端 UI 主题 |
@@ -112,6 +113,7 @@ scream -y         # 自动批准模式
 | `/skill`（`/skills`、`/plugin`） | 技能中心，管理 Skill 技能，含激活、安装、卸载等 |
 | `/extension` | 代码扩展：激活或停用插件入口 |
 | `/make-skill` | 从当前会话沉淀工作流为 Skill |
+| `/image` | 画图 / 改图（image 技能；先用 `/config image` 完成一次配置） |
 | `/cc` | 操控你的 cc（启动/关闭/重启） |
 | `/cc-connect` | cc-connect 快速通道配置 |
 | **工具** | |

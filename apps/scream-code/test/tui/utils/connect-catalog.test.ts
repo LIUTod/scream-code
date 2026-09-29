@@ -12,17 +12,23 @@ import { builtInCatalogDefine } from '../../../scripts/built-in-catalog.mjs';
 
 describe('resolveConnectCatalogRequest', () => {
   it('returns default URL with diy=false for empty or unknown args', () => {
-    expect(resolveConnectCatalogRequest('')).toEqual({ url: DEFAULT_CATALOG_URL, diy: false });
-    expect(resolveConnectCatalogRequest('refresh')).toEqual({ url: DEFAULT_CATALOG_URL, diy: false });
-    expect(resolveConnectCatalogRequest('  refresh  ')).toEqual({ url: DEFAULT_CATALOG_URL, diy: false });
-    expect(resolveConnectCatalogRequest('--refresh')).toEqual({ url: DEFAULT_CATALOG_URL, diy: false });
-    expect(resolveConnectCatalogRequest('ignored text')).toEqual({ url: DEFAULT_CATALOG_URL, diy: false });
+    expect(resolveConnectCatalogRequest('')).toEqual({ url: DEFAULT_CATALOG_URL, diy: false, image: false });
+    expect(resolveConnectCatalogRequest('refresh')).toEqual({ url: DEFAULT_CATALOG_URL, diy: false, image: false });
+    expect(resolveConnectCatalogRequest('  refresh  ')).toEqual({ url: DEFAULT_CATALOG_URL, diy: false, image: false });
+    expect(resolveConnectCatalogRequest('--refresh')).toEqual({ url: DEFAULT_CATALOG_URL, diy: false, image: false });
+    expect(resolveConnectCatalogRequest('ignored text')).toEqual({ url: DEFAULT_CATALOG_URL, diy: false, image: false });
   });
 
   it('returns diy=true for /config diy (case-insensitive)', () => {
-    expect(resolveConnectCatalogRequest('diy')).toEqual({ url: DEFAULT_CATALOG_URL, diy: true });
-    expect(resolveConnectCatalogRequest('DIY')).toEqual({ url: DEFAULT_CATALOG_URL, diy: true });
-    expect(resolveConnectCatalogRequest('  diy  ')).toEqual({ url: DEFAULT_CATALOG_URL, diy: true });
+    expect(resolveConnectCatalogRequest('diy')).toEqual({ url: DEFAULT_CATALOG_URL, diy: true, image: false });
+    expect(resolveConnectCatalogRequest('DIY')).toEqual({ url: DEFAULT_CATALOG_URL, diy: true, image: false });
+    expect(resolveConnectCatalogRequest('  diy  ')).toEqual({ url: DEFAULT_CATALOG_URL, diy: true, image: false });
+  });
+
+  it('returns image=true for /config image (case-insensitive)', () => {
+    expect(resolveConnectCatalogRequest('image')).toEqual({ url: DEFAULT_CATALOG_URL, diy: false, image: true });
+    expect(resolveConnectCatalogRequest('IMAGE')).toEqual({ url: DEFAULT_CATALOG_URL, diy: false, image: true });
+    expect(resolveConnectCatalogRequest('  image  ')).toEqual({ url: DEFAULT_CATALOG_URL, diy: false, image: true });
   });
 });
 

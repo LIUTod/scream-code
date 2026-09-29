@@ -29,6 +29,14 @@ describe('default agent profiles', () => {
     expect(prompt).toContain('memos.sqlite');
     expect(prompt).toContain('knowledge.db');
     expect(prompt).toContain('/workspace');
+    // Permanent image-generation note: capability awareness stated as a
+    // suggestion, with judgment left to the model (no state injection;
+    // the tool error path handles the unconfigured case).
+    expect(prompt).toContain('Image generation capability');
+    expect(prompt).toContain('ImageGenerate');
+    expect(prompt).toContain('/config image');
+    expect(prompt).toContain('the suggested path is that skill');
+    expect(prompt).toContain('use your judgment');
   });
 
   it('bundles the writer as a full document-production specialist', () => {
