@@ -30,6 +30,23 @@ describe('ToolCallComponent', () => {
     vi.useRealTimers();
   });
 
+  it('wraps URLs in live progress lines as clickable links', () => {
+    // Progress lines are rendered before a result exists; a URL there used to be
+    // plain text even though the same tool output becomes a link afterwards.
+    const component = new ToolCallComponent(
+      { id: 'call_fetch', name: 'FetchURL', args: { url: 'https://example.com/a' } },
+      undefined,
+      darkColors,
+    );
+    component.appendProgress('fetching https://example.com/a。done');
+
+    const line = component.render(200).find((entry) => entry.includes('fetching')) ?? '';
+
+    expect(line).toContain(`${ESC}]8;;https://example.com/a${BEL}`);
+    // The full-width full stop belongs to the prose, not to the link.
+    expect(strip(line)).toContain('fetching https://example.com/a。done');
+  });
+
   it('uses the shared non-emoji tool status bullet', () => {
     const component = new ToolCallComponent(
       {

@@ -4,6 +4,7 @@ import { t } from '@scream-code/config';
 import chalk from 'chalk';
 
 import type { ColorPalette } from '#/tui/theme/colors';
+import { wrapUrlsAsHyperlinks } from '#/utils/terminal-hyperlink';
 
 import type { ResultRenderer } from './types';
 import { PREVIEW_LINES } from './types';
@@ -92,7 +93,13 @@ export class TruncatedOutputComponent implements Component {
     // Tint per-line so each line carries its own ANSI reset. Without this the
     // trailing padding Text.render appends inherits the fg color, and terminals
     // that paint colored spaces show a solid color block instead of text.
-    const tinted = truncated.split('\n').map((line) => tint(line)).join('\n');
+    // URLs are wrapped in OSC 8 first so tool output (PaperSearch, WebSearch,
+    // FetchURL) exposes clickable links; the escapes are zero-width, so the
+    // visible text, tint and wrapping are unchanged.
+    const tinted = truncated
+      .split('\n')
+      .map((line) => tint(wrapUrlsAsHyperlinks(line)))
+      .join('\n');
     this.textComponent = new Text(tinted, 2, 0);
   }
 

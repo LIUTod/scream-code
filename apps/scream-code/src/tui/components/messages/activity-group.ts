@@ -58,6 +58,12 @@ const BRANCH_LAST = '  └─ ';
 const BRANCH_PIPE = '  │  ';
 const TREE_PIPE_ROW = '  │';
 const THINKING_BODY_PREFIX = '     ';
+/**
+ * Extra indent for reasoning rows. Tool bodies carry their own three-cell
+ * line-number gutter (`   1  /**`), so reasoning text needs the same offset to
+ * land in one column with them instead of three cells to their left.
+ */
+const THINKING_TEXT_INDENT = '   ';
 /** Cells of a background task notice bullet (`⠋ ` / `✓ ` / `✗ `). */
 const NOTICE_BULLET_WIDTH = 2;
 const THROTTLE_MS = 200;
@@ -743,9 +749,10 @@ export class ActivityGroupComponent extends Container {
     // Capped by RENDERED lines: a long unbroken paragraph wraps into many rows,
     // and the budget must hold regardless of the source shape.
     const budget = getActivityLines().expandedThinking;
-    const inner = Math.max(1, width - visibleWidth(continuation));
+    const textPrefix = `${continuation}${THINKING_TEXT_INDENT}`;
+    const inner = Math.max(1, width - visibleWidth(textPrefix));
     const height = (line: string): number =>
-      new WrappedLine(continuation, continuation, line).render(inner).length;
+      new WrappedLine(textPrefix, textPrefix, line).render(inner).length;
     let selected = segment.live ? lines.slice(-budget) : lines.slice(0, budget);
     while (selected.length > 1 && selected.reduce((sum, line) => sum + height(line), 0) > budget) {
       selected = segment.live ? selected.slice(1) : selected.slice(0, -1);
@@ -758,7 +765,7 @@ export class ActivityGroupComponent extends Container {
     }
     for (const line of selected) {
       components.push(
-        new WrappedLine(continuation, continuation, chalk.hex(colors.roleThinking)(line)),
+        new WrappedLine(textPrefix, textPrefix, chalk.hex(colors.roleThinking)(line)),
       );
       cost += height(line);
     }
@@ -767,7 +774,7 @@ export class ActivityGroupComponent extends Container {
       const hint = segment.live
         ? t('activitygroup.thinking_earlier', { count: String(hiddenLines) })
         : t('activitygroup.thinking_more', { count: String(hiddenLines) });
-      components.push(new Text(`${continuation}${chalk.dim(hint)}`, 0, 0));
+      components.push(new Text(`${textPrefix}${chalk.dim(hint)}`, 0, 0));
       cost += 1;
     }
     return { components, cost };

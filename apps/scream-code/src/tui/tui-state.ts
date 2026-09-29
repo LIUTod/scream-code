@@ -24,6 +24,7 @@ import { CHROME_GUTTER } from './constant/rendering';
 import type { TasksBrowserState } from './controllers/tasks-browser';
 import { createScreamTUIThemeBundle, type ScreamTUIThemeBundle } from './theme/bundle';
 import { createTerminalState, type TerminalState } from './utils/terminal-state';
+import { openUrl } from './utils/open-url';
 import type { GitLsFilesCache } from '#/utils/git/git-ls-files';
 import { createGitLsFilesCache } from '#/utils/git/git-ls-files';
 import { detectFdPath } from '#/utils/process/fd-detect';
@@ -114,6 +115,16 @@ export function createTUIState(options: ScreamTUIOptions): TUIState {
 
   const terminal = new ProcessTerminal();
   const ui = new TuiAltScreen(terminal, undefined, undefined, {
+    // The alt-screen owns the mouse (mouseEnabled defaults to true), so a click
+    // never reaches the terminal and its own link handling cannot fire. Without
+    // this callback an underlined URL is inert: the vendor finds the link under
+    // a clean primary-button click — a single click, since SGR mouse reports
+    // carry no Cmd/Super bit — and hands it to us here.
+    openUrl: (url) => {
+      // Only hand the OS handler schemes we are willing to launch: web/file
+      // links come from our own renderers, mailto from Markdown links.
+      if (/^(?:https?|file|mailto):/i.test(url)) openUrl(url);
+    },
     // Copy selected text into the system clipboard. Platform commands
     // (pbcopy / powershell / wl-copy / xclip / xsel) are tried first because
     // they have a verifiable success path; when none is available (bare

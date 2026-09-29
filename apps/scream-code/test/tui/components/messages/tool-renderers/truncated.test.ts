@@ -7,6 +7,11 @@ function strip(text: string): string {
   return text.replaceAll(/\[[0-9;]*m/g, '');
 }
 
+/** Visible text, with OSC 8 hyperlink wrappers removed as well. */
+function stripOsc8(text: string): string {
+  return text.replaceAll(/\u001B\]8;;[^\u0007]*\u0007/g, '');
+}
+
 describe('TruncatedOutputComponent', () => {
   it('renders small output unchanged', () => {
     const component = new TruncatedOutputComponent('hello\nworld', {
@@ -104,5 +109,35 @@ describe('TruncatedOutputComponent', () => {
     });
 
     expect(component.render(80)).toHaveLength(40);
+  });
+
+  it('wraps URLs in the body as clickable OSC 8 hyperlinks', () => {
+    // Tool output (PaperSearch, WebSearch, FetchURL) delivers its links as bare
+    // URLs; without this the user can only copy them out of the terminal.
+    const output = ['Title: Memory Layers for Long-Horizon Agents', 'URL: https://arxiv.org/abs/2405.00001'].join('\n');
+
+    const component = new TruncatedOutputComponent(output, {
+      expanded: true,
+      isError: false,
+      colors: darkColors,
+    });
+    const [titleLine = '', urlLine = ''] = component.render(80);
+
+    expect(urlLine).toContain('\u001B]8;;https://arxiv.org/abs/2405.00001\u0007');
+    // The visible text is unchanged — only zero-width escapes were added.
+    expect(stripOsc8(urlLine)).toContain('URL: https://arxiv.org/abs/2405.00001');
+    expect(titleLine).not.toContain(']8;;');
+  });
+
+  it('keeps punctuation that follows a URL outside the hyperlink', () => {
+    const component = new TruncatedOutputComponent('see https://example.com/x).', {
+      expanded: true,
+      isError: false,
+      colors: darkColors,
+    });
+    const [line = ''] = component.render(80);
+
+    expect(line).toContain('\u001B]8;;https://example.com/x\u0007');
+    expect(stripOsc8(line)).toContain('see https://example.com/x).');
   });
 });

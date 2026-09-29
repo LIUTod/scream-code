@@ -49,6 +49,11 @@ function nonEmpty(lines: string[]): string[] {
 
 const THINKING = ['first reasoning line', 'second reasoning line', 'third reasoning line'].join('\n');
 const LONG_THINKING = Array.from({ length: 14 }, (_, i) => `reasoning line ${i + 1}`).join('\n');
+/**
+ * Row prefix (5 cells) plus the same three-cell gutter that file/diff tool
+ * bodies reserve for their line numbers — reasoning rows line up with them.
+ */
+const REASONING_ROW_PREFIX = '        ';
 
 function makeGroup(): ActivityGroupComponent {
   const group = new ActivityGroupComponent(darkColors, undefined);
@@ -61,6 +66,30 @@ describe('ActivityGroupComponent', () => {
   afterEach(() => {
     vi.useRealTimers();
     resetSharedSpeedTracker();
+  });
+
+  it('lines reasoning text up with a file body content column', () => {
+    const group = new ActivityGroupComponent(darkColors, undefined);
+    group.attachTool(
+      new ToolCallComponent(
+        { id: 't1', name: 'Write', args: { file_path: '/w/a.ts' } },
+        { tool_call_id: 't1', output: ['   1  /**', '   2  * helpers'].join('\n'), is_error: false },
+        darkColors,
+      ),
+      1,
+    );
+    group.appendThinking(THINKING, false);
+    group.setExpanded(true);
+
+    const lines = render(group);
+    const fileBody = lines.find((line) => line.includes('1  /**')) ?? '';
+    const reasoning = lines.find((line) => line.includes('first reasoning line')) ?? '';
+
+    // File bodies reserve a three-cell line-number gutter inside the row, so the
+    // reasoning text has to sit three cells further right than the row prefix.
+    const fileColumn = fileBody.indexOf('1  /**');
+    expect(reasoning.indexOf('first reasoning line')).toBe(fileColumn);
+    expect(fileColumn).toBeGreaterThan(0);
   });
 
   it('collapses reasoning plus tool calls into exactly three rows', () => {
@@ -241,7 +270,7 @@ describe('ActivityGroupComponent', () => {
     group.setExpanded(true);
 
     const lines = render(group);
-    const excerpt = lines.filter((line) => line.startsWith('     reasoning line'));
+    const excerpt = lines.filter((line) => line.startsWith(`${REASONING_ROW_PREFIX}reasoning line`));
 
     expect(excerpt.length).toBe(ACTIVITY_GROUP_THINKING_EXCERPT_LINES);
     expect(excerpt[0]).toContain('reasoning line 1');
@@ -254,7 +283,7 @@ describe('ActivityGroupComponent', () => {
     group.setExpanded(true);
 
     const lines = render(group);
-    const excerpt = lines.filter((line) => line.startsWith('     reasoning line'));
+    const excerpt = lines.filter((line) => line.startsWith(`${REASONING_ROW_PREFIX}reasoning line`));
 
     expect(excerpt.length).toBe(ACTIVITY_GROUP_THINKING_EXCERPT_LINES);
     expect(excerpt.at(-1)).toContain('reasoning line 14');

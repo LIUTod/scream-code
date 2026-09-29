@@ -25,6 +25,7 @@ import type { ToolCallBlockData, ToolResultBlockData } from '#/tui/types';
 import type { PermissionMode, TokenUsage, ToolResultDisplay } from '@scream-code/scream-code-sdk';
 import { appendStreamingArgsPreview } from '#/tui/utils/event-payload';
 import { decodeMcpToolName } from '#/tui/utils/mcp-tool-name';
+import { hasHttpUrl, wrapUrlsAsHyperlinks } from '#/utils/terminal-hyperlink';
 
 import { PlanBoxComponent } from './plan-box';
 import { diagramMarkdownOptions } from '#/tui/utils/diagram-markdown-options';
@@ -39,7 +40,6 @@ const MAX_SINGLE_SUBAGENT_TOOL_ROWS = 4;
 const APPROVED_PLAN_MARKER = '## Approved Plan:';
 const STREAMING_PROGRESS_INTERVAL_MS = 1000;
 const SUBAGENT_ELAPSED_INTERVAL_MS = 1000;
-const PROGRESS_URL_RE = /https?:\/\/\S+/g;
 const MAX_PROGRESS_LINE_CHARS = 10_000;
 const MAX_LIVE_OUTPUT_CHARS = 50_000;
 
@@ -1438,14 +1438,11 @@ export class ToolCallComponent extends CachedContainer {
         this.addChild(new Text('', 2, 0));
         continue;
       }
-      PROGRESS_URL_RE.lastIndex = 0;
-      const styled = PROGRESS_URL_RE.test(raw)
-        ? raw.replace(PROGRESS_URL_RE, (url) => {
-          const visible = chalk.hex(this.colors.warning).underline(url);
-          return `\u001B]8;;${url}\u001B\\${visible}\u001B]8;;\u001B\\`;
-        })
+      // URLs become Cmd-clickable hyperlinks (see wrapUrlsAsHyperlinks); lines
+      // without one keep the dim tone.
+      const styled = hasHttpUrl(raw)
+        ? wrapUrlsAsHyperlinks(raw, (url) => chalk.hex(this.colors.warning).underline(url))
         : chalk.dim(raw);
-      PROGRESS_URL_RE.lastIndex = 0;
       this.addChild(new Text(styled, 2, 0));
     }
   }

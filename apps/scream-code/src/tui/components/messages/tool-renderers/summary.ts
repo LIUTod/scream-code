@@ -19,6 +19,7 @@ import chalk from 'chalk';
 import { TOOL_OUTPUT_PREVIEW_LINES } from '#/tui/constant/rendering';
 import type { ColorPalette } from '#/tui/theme/colors';
 import type { ToolCallBlockData, ToolResultBlockData } from '#/tui/types';
+import { toTerminalHyperlink } from '#/utils/terminal-hyperlink';
 
 import { GlanceLinesComponent } from './glance-lines';
 import { renderTruncated, TruncatedOutputComponent } from './truncated';
@@ -315,7 +316,10 @@ const webSearchGlance: GlanceFn = (_toolCall, result, colors) => {
   const dim = chalk.dim;
   const lines = entries.slice(0, GLANCE_SAMPLES).map((e) => {
     const title = e.title.length > 0 ? titleColor(truncateText(e.title)) : '';
-    const url = e.url.length > 0 ? dim(truncateText(e.url)) : '';
+    // The glance shows a truncated URL, but the link must target the real one:
+    // the visible text stays exactly as before, only the OSC 8 wrapper is added
+    // so a click on the collapsed card opens the page.
+    const url = e.url.length > 0 ? toTerminalHyperlink(dim(truncateText(e.url)), e.url) : '';
     return [title, url].filter((s) => s.length > 0).join(dim(' — '));
   });
   const remaining = entries.length - GLANCE_SAMPLES;
