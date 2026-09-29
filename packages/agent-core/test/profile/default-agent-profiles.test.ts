@@ -37,6 +37,12 @@ describe('default agent profiles', () => {
     expect(prompt).toContain('/config image');
     expect(prompt).toContain('the suggested path is that skill');
     expect(prompt).toContain('use your judgment');
+    // Trigger words must include the everyday phrasings users actually use.
+    // No bare "生成": too broad (e.g. generating a report is not an image).
+    for (const trigger of ['做图', '做海报', '生图', '生成图片', '图生图', '改图']) {
+      expect(prompt).toContain(trigger);
+    }
+    expect(prompt).not.toContain('/ 生成 /');
   });
 
   it('bundles the writer as a full document-production specialist', () => {

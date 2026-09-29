@@ -7,9 +7,12 @@
  * it is read here, sent as the Authorization header, and never echoed into
  * results, session state, or errors.
  *
- * Request shapes follow the de-facto OpenAI-compatible contract:
- * - `POST {base}/images/generations` (JSON) for text-to-image
- * - `POST {base}/images/edits` (multipart) for image-to-image
+ * Request shapes follow the de-facto OpenAI-compatible contract, with the
+ * endpoint URLs taken from the config exactly as written (nothing appended):
+ * - text-to-image: the configured full URL (JSON)
+ * - image-to-image: the configured edit URL, or the derived sibling
+ *   `/images/edits` when the main URL ends in `/images/generations`
+ *   (multipart)
  *
  * Streaming is attempted first (`stream: true` + SSE) because long
  * synchronous generations commonly time out behind gateways; when the
@@ -44,7 +47,12 @@ export const ImageGenerateInputSchema = z.object({
     .string()
     .optional()
     .describe('Visual thread name. Omit to start/join the default thread.'),
-  size: z.string().optional().describe('Requested size (defaults to the configured value).'),
+  size: z
+    .string()
+    .optional()
+    .describe(
+      'Requested size for the model, e.g. "1024x1024" or "1536x1024". Pick one from the user\'s aspect-ratio need; omit to use the configured default.',
+    ),
 });
 
 export type ImageGenerateInput = z.infer<typeof ImageGenerateInputSchema>;
@@ -77,14 +85,19 @@ async function checkUploadPath(
 
 interface ImageConfigFile {
   readonly provider: string;
-  readonly base_url: string;
+  /** Full text-to-image endpoint URL, used exactly as configured. */
+  readonly url: string;
   readonly api_key: string;
   readonly model: string;
   readonly size: string;
-  /** Optional image-edit base; empty/absent = same as base_url. */
-  readonly edit_base_url?: string;
+  /** Optional full image-edit endpoint; absent = derived from `url`. */
+  readonly edit_url?: string;
   /** Optional image-edit model; empty/absent = same as model. */
   readonly edit_model?: string;
+  /** Legacy (pre-full-URL builds): base URL, read as url + generations path. */
+  readonly base_url?: string;
+  /** Legacy (pre-full-URL builds): edit base URL. */
+  readonly edit_base_url?: string;
 }
 
 interface ImageSessionTurn {
@@ -123,38 +136,62 @@ function isPlaceholder(value: string): boolean {
 }
 
 /**
- * Trim only — the configured base URL is used exactly as written. No path
- * is ever appended (`/v1` auto-completion would break gateways mounted
- * elsewhere); trailing slashes would double up against the endpoint path.
+ * Trim only — the configured URL is used exactly as written, no path is
+ * ever appended. Trailing slashes are stripped so the URL cannot double up
+ * against anything downstream.
  */
-function normalizeBaseUrl(raw: string): string {
+function normalizeUrl(raw: string): string {
   return raw.trim().replace(/\/+$/, '');
+}
+
+/** The one documented derivation: the OpenAI-family sibling edit endpoint. */
+const GENERATIONS_SUFFIX = '/images/generations';
+const EDITS_SUFFIX = '/images/edits';
+
+function deriveEditUrl(url: string): string | undefined {
+  return url.endsWith(GENERATIONS_SUFFIX)
+    ? `${url.slice(0, -GENERATIONS_SUFFIX.length)}${EDITS_SUFFIX}`
+    : undefined;
 }
 
 async function loadConfig(screamHomeDir: string): Promise<ImageConfigFile | undefined> {
   try {
     const text = await readFile(join(screamHomeDir, 'image-config.json'), 'utf8');
     const parsed = JSON.parse(text) as Partial<ImageConfigFile>;
+    // Legacy alias: configs written by pre-full-URL builds stored a base URL
+    // (e.g. "https://host/v1"); compose the classic endpoint so an existing
+    // setup keeps working after the upgrade. Re-running the wizard migrates
+    // the file to the full-URL format.
+    const legacyUrl =
+      typeof parsed.base_url === 'string' && !isPlaceholder(parsed.base_url)
+        ? `${normalizeUrl(parsed.base_url)}${GENERATIONS_SUFFIX}`
+        : '';
+    const urlRaw =
+      typeof parsed.url === 'string' && !isPlaceholder(parsed.url) ? parsed.url : legacyUrl;
     if (
-      typeof parsed.base_url !== 'string' ||
+      urlRaw.length === 0 ||
       typeof parsed.api_key !== 'string' ||
       typeof parsed.model !== 'string' ||
-      isPlaceholder(parsed.base_url) ||
       isPlaceholder(parsed.api_key)
     ) {
       return undefined;
     }
-    const editBaseRaw = typeof parsed.edit_base_url === 'string' ? parsed.edit_base_url : '';
+    const legacyEdit =
+      typeof parsed.edit_base_url === 'string' && !isPlaceholder(parsed.edit_base_url)
+        ? `${normalizeUrl(parsed.edit_base_url)}${EDITS_SUFFIX}`
+        : '';
+    const editUrlRaw =
+      typeof parsed.edit_url === 'string' && !isPlaceholder(parsed.edit_url)
+        ? parsed.edit_url
+        : legacyEdit;
     const editModelRaw = typeof parsed.edit_model === 'string' ? parsed.edit_model : '';
     return {
       provider: typeof parsed.provider === 'string' ? parsed.provider : 'openai-compatible',
-      base_url: normalizeBaseUrl(parsed.base_url),
+      url: normalizeUrl(urlRaw),
       api_key: parsed.api_key,
       model: parsed.model,
       size: typeof parsed.size === 'string' && parsed.size.length > 0 ? parsed.size : 'auto',
-      ...(editBaseRaw.length > 0 && !isPlaceholder(editBaseRaw)
-        ? { edit_base_url: normalizeBaseUrl(editBaseRaw) }
-        : {}),
+      ...(editUrlRaw.length > 0 ? { edit_url: normalizeUrl(editUrlRaw) } : {}),
       ...(editModelRaw.trim().length > 0 ? { edit_model: editModelRaw.trim() } : {}),
     };
   } catch {
@@ -231,6 +268,31 @@ function streamUnsupported(error: unknown): boolean {
     message.includes('unexpected')
   );
 }
+
+/**
+ * True when a failure is plausibly about the `size` field — either the value
+ * was rejected or the field itself was demanded. Triggers one retry with the
+ * other size mode (see the size fallback in execute).
+ */
+function sizeUnsupported(error: unknown): boolean {
+  if (!(error instanceof ApiError)) return false;
+  const message = error.message.toLowerCase();
+  if (!message.includes('size')) return false;
+  return (
+    message.includes('support') ||
+    message.includes('unknown parameter') ||
+    message.includes('invalid') ||
+    message.includes('required') ||
+    message.includes('must')
+  );
+}
+
+/** Fallback size used when a service insists on an explicit value. */
+const FALLBACK_SIZE = '1024x1024';
+
+/** Structured guidance when no image-edit endpoint can be resolved. */
+const EDIT_URL_REQUIRED =
+  'Image editing needs the edit endpoint: set an edit URL via /config image, or configure a URL ending in /images/generations so the sibling /images/edits URL can be derived.';
 
 async function readErrorBody(response: Response): Promise<string> {
   try {
@@ -363,8 +425,8 @@ interface RequestPlan {
 }
 
 function buildJsonPlan(
-  config: ImageConfigFile,
-  endpoint: string,
+  apiKey: string,
+  url: string,
   payload: Record<string, unknown>,
   stream: boolean,
 ): RequestPlan {
@@ -374,9 +436,9 @@ function buildJsonPlan(
     body['partial_images'] = 1;
   }
   return {
-    url: `${config.base_url}${endpoint}`,
+    url,
     headers: {
-      Authorization: `Bearer ${config.api_key}`,
+      Authorization: `Bearer ${apiKey}`,
       'Content-Type': 'application/json',
       Accept: stream ? 'text/event-stream' : 'application/json',
     },
@@ -385,8 +447,8 @@ function buildJsonPlan(
 }
 
 function buildMultipartPlan(
-  config: ImageConfigFile,
-  endpoint: string,
+  apiKey: string,
+  url: string,
   fields: Record<string, string>,
   stream: boolean,
 ): RequestPlan {
@@ -399,9 +461,9 @@ function buildMultipartPlan(
     form.append('partial_images', '1');
   }
   return {
-    url: `${config.base_url}${endpoint}`,
+    url,
     headers: {
-      Authorization: `Bearer ${config.api_key}`,
+      Authorization: `Bearer ${apiKey}`,
       Accept: stream ? 'text/event-stream' : 'application/json',
     },
     body: form,
@@ -421,7 +483,6 @@ async function attachMultipartFiles(body: FormData, imagePaths: string[]): Promi
 }
 
 async function requestImage(
-  config: ImageConfigFile,
   plan: (stream: boolean) => RequestPlan,
   files: string[] | undefined,
   external?: AbortSignal,
@@ -586,43 +647,73 @@ export class ImageGenerateTool implements BuiltinTool<ImageGenerateInput> {
           return { isError: true, output: message };
         }
         const size = args.size !== undefined && args.size.length > 0 ? args.size : config.size;
-        // Image-edit channel overrides: some services split text-to-image
-        // and image-to-image into a different base URL or an edit-specific
-        // model. Both fall back to the text-to-image values when unset.
-        const editBase =
-          config.edit_base_url !== undefined && config.edit_base_url.length > 0
-            ? config.edit_base_url
-            : config.base_url;
+        const explicitSize = size !== 'auto' ? size : undefined;
+        // Image-edit channel: full URL and model overrides, both optional.
+        // The only derivation is the documented OpenAI-family sibling path.
         const editModel =
           config.edit_model !== undefined && config.edit_model.trim().length > 0
             ? config.edit_model.trim()
             : config.model;
-        // Minimal common field set: `n`, `output_format`, and an explicit
-        // `auto` size are rejected by some otherwise-compatible gateways.
-        const jsonFields: Record<string, unknown> = { model: config.model, prompt: args.prompt };
-        const formFields: Record<string, string> = { model: editModel, prompt: args.prompt };
-        if (size !== 'auto') {
-          jsonFields['size'] = size;
-          formFields['size'] = size;
+        const editUrl =
+          config.edit_url !== undefined && config.edit_url.length > 0
+            ? config.edit_url
+            : deriveEditUrl(config.url);
+        if (args.mode !== 'new' && editUrl === undefined) {
+          return { isError: true, output: EDIT_URL_REQUIRED };
         }
 
-        let payload: unknown;
-        try {
+        // Minimal common field set: `n`, `output_format`, and an explicit
+        // `auto` size are rejected by some otherwise-compatible gateways.
+        const buildFields = (
+          withSize: string | undefined,
+        ): { json: Record<string, unknown>; form: Record<string, string> } => {
+          const json: Record<string, unknown> = { model: config.model, prompt: args.prompt };
+          const form: Record<string, string> = { model: editModel, prompt: args.prompt };
+          if (withSize !== undefined) {
+            json['size'] = withSize;
+            form['size'] = withSize;
+          }
+          return { json, form };
+        };
+
+        const dispatch = async (withSize: string | undefined): Promise<unknown> => {
+          const fields = buildFields(withSize);
           if (args.mode === 'new') {
-            payload = await requestImage(
-              config,
-              (stream) => buildJsonPlan(config, '/images/generations', jsonFields, stream),
+            return requestImage(
+              (stream) => buildJsonPlan(config.api_key, config.url, fields.json, stream),
               undefined,
               context.signal,
             );
-          } else {
-            const editConfig: ImageConfigFile = { ...config, base_url: editBase, model: editModel };
-            payload = await requestImage(
-              editConfig,
-              (stream) => buildMultipartPlan(editConfig, '/images/edits', formFields, stream),
-              inputImages,
-              context.signal,
-            );
+          }
+          if (editUrl === undefined) {
+            // Unreachable: guarded before dispatch; kept for type narrowing.
+            throw new ApiError(EDIT_URL_REQUIRED);
+          }
+          return requestImage(
+            (stream) => buildMultipartPlan(config.api_key, editUrl, fields.form, stream),
+            inputImages,
+            context.signal,
+          );
+        };
+
+        let payload: unknown;
+        let sizeNote = '';
+        try {
+          try {
+            payload = await dispatch(explicitSize);
+          } catch (error) {
+            // Some services reject an explicit size (unknown/invalid value)
+            // while others insist on receiving one (missing/required).
+            // Retry exactly once with the other size mode before giving up,
+            // and surface the downgrade in the result so the caller can
+            // explain a different-than-requested aspect ratio.
+            if (!sizeUnsupported(error)) throw error;
+            const retrySize = explicitSize === undefined ? FALLBACK_SIZE : undefined;
+            payload = await dispatch(retrySize);
+            sizeNote =
+              retrySize === undefined
+                ? ' [size fallback: requested size unsupported, used the service default]'
+                : ` [size fallback: used ${FALLBACK_SIZE}]`;
           }
         } catch (error) {
           if (context.signal.aborted) {
@@ -682,7 +773,7 @@ export class ImageGenerateTool implements BuiltinTool<ImageGenerateInput> {
           isError: false,
           output:
             `Image saved: ${absolute} ` +
-            `(session=${session.session}, turn=${turnNumber}, mode=${args.mode}, model=${config.model}, ${elapsed}ms)`,
+            `(session=${session.session}, turn=${turnNumber}, mode=${args.mode}, model=${config.model}, ${elapsed}ms)${sizeNote}`,
         };
       },
     };

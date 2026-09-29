@@ -38,7 +38,7 @@ async function writeConfig(overrides: Record<string, string> = {}): Promise<void
     join(home, 'image-config.json'),
     JSON.stringify({
       provider: 'openai-compatible',
-      base_url: 'https://gateway.example/v1',
+      url: 'https://gateway.example/v1/images/generations',
       api_key: API_KEY,
       model: 'gpt-image-2',
       size: 'auto',
@@ -316,14 +316,34 @@ describe('new mode', () => {
     expect(sessionFile.mode & 0o777).toBe(0o600);
   });
 
-  it('uses a bare host base URL exactly as configured, without appending /v1', async () => {
-    await writeConfig({ base_url: 'https://relay.example.com' });
+  it('reads legacy base_url configs by composing the generations endpoint', async () => {
+    await writeFile(
+      join(home, 'image-config.json'),
+      JSON.stringify({
+        provider: 'openai-compatible',
+        base_url: 'https://legacy.example/v1',
+        api_key: API_KEY,
+        model: 'gpt-image-2',
+        size: 'auto',
+      }),
+      'utf8',
+    );
+    const calls = stubFetch([jsonResponse({ data: [{ b64_json: PNG_B64 }] })]);
+
+    const result = await run({ mode: 'new', prompt: 'legacy probe', session: 'legacy' });
+
+    expect(result.isError).toBeFalsy();
+    expect(callAt(calls, 0).url).toBe('https://legacy.example/v1/images/generations');
+  });
+
+  it('sends the configured full URL exactly, without appending any path', async () => {
+    await writeConfig({ url: 'https://relay.example.com/api/v2/gen-image' });
     const calls = stubFetch([jsonResponse({ data: [{ b64_json: PNG_B64 }] })]);
 
     const result = await run({ mode: 'new', prompt: 'verbatim url', session: 'verbatim' });
 
     expect(result.isError).toBeFalsy();
-    expect(callAt(calls, 0).url).toBe('https://relay.example.com/images/generations');
+    expect(callAt(calls, 0).url).toBe('https://relay.example.com/api/v2/gen-image');
   });
 
   it('downloads the image when the response carries a URL', async () => {
@@ -396,6 +416,42 @@ describe('edit / continue modes', () => {
     expect(captured?.get('image')).toBeTruthy();
   });
 
+  it('retries without size when the service rejects an explicit size', async () => {
+    await writeConfig();
+    const calls = stubFetch([
+      jsonResponse({ error: { message: "Invalid value: '1024x1536' is not supported for size" } }, 400),
+      jsonResponse({ data: [{ b64_json: PNG_B64 }] }),
+    ]);
+
+    const result = await run({ mode: 'new', prompt: 'size probe', size: '1024x1536', session: 'size-a' });
+
+    expect(result.isError).toBeFalsy();
+    expect(calls).toHaveLength(2);
+    const firstBody = JSON.parse(bodyText(callAt(calls, 0))) as Record<string, unknown>;
+    const secondBody = JSON.parse(bodyText(callAt(calls, 1))) as Record<string, unknown>;
+    expect(firstBody['size']).toBe('1024x1536');
+    expect(secondBody['size']).toBeUndefined();
+    // The downgrade must be visible in the result, not silent.
+    expect(outputText(result)).toContain('size fallback');
+    expect(outputText(result)).toContain('service default');
+  });
+
+  it('retries with the fallback size when the service requires an explicit size', async () => {
+    await writeConfig();
+    const calls = stubFetch([
+      jsonResponse({ error: { message: 'size is required' } }, 400),
+      jsonResponse({ data: [{ b64_json: PNG_B64 }] }),
+    ]);
+
+    const result = await run({ mode: 'new', prompt: 'required probe', session: 'size-b' });
+
+    expect(result.isError).toBeFalsy();
+    expect(calls).toHaveLength(2);
+    expect(JSON.parse(bodyText(callAt(calls, 0)))['size']).toBeUndefined();
+    expect(JSON.parse(bodyText(callAt(calls, 1)))['size']).toBe('1024x1024');
+    expect(outputText(result)).toContain('size fallback: used 1024x1024');
+  });
+
   it('fails clearly when continue has no session history', async () => {
     await writeConfig();
     const result = await run({ mode: 'continue', prompt: 'anything' });
@@ -403,8 +459,8 @@ describe('edit / continue modes', () => {
     expect(outputText(result)).toContain('mode=new first');
   });
 
-  it('routes edits to the edit_base_url and edit_model overrides when set', async () => {
-    await writeConfig({ edit_base_url: 'https://edit.example/v1', edit_model: 'qwen-image-edit' });
+  it('routes edits to the edit_url override when set, using it verbatim', async () => {
+    await writeConfig({ edit_url: 'https://edit.example/v1/images/edits', edit_model: 'qwen-image-edit' });
     const inputImage = join(work, 'ref.png');
     await writeFile(inputImage, PNG_BYTES);
 
@@ -428,8 +484,33 @@ describe('edit / continue modes', () => {
     expect(captured?.get('model')).toBe('qwen-image-edit');
   });
 
-  it('keeps new mode on the main base URL and model even with edit overrides set', async () => {
-    await writeConfig({ edit_base_url: 'https://edit.example/v1', edit_model: 'qwen-image-edit' });
+  it('derives the sibling edits endpoint when edit_url is absent', async () => {
+    await writeConfig();
+    const inputImage = join(work, 'ref.png');
+    await writeFile(inputImage, PNG_BYTES);
+    const calls = stubFetch([jsonResponse({ data: [{ b64_json: PNG_B64 }] })]);
+
+    const result = await run({ mode: 'edit', prompt: 'derive probe', imagePaths: [inputImage], session: 'derive' });
+
+    expect(result.isError).toBeFalsy();
+    expect(callAt(calls, 0).url).toBe('https://gateway.example/v1/images/edits');
+  });
+
+  it('asks for an edit URL when the main URL has no derivable sibling', async () => {
+    await writeConfig({ url: 'https://gateway.example/v1/generate-image' });
+    const inputImage = join(work, 'ref.png');
+    await writeFile(inputImage, PNG_BYTES);
+    const calls = stubFetch([jsonResponse({ data: [{ b64_json: PNG_B64 }] })]);
+
+    const result = await run({ mode: 'edit', prompt: 'no derive', imagePaths: [inputImage], session: 'nod' });
+
+    expect(result.isError).toBe(true);
+    expect(outputText(result)).toContain('edit endpoint');
+    expect(calls).toHaveLength(0);
+  });
+
+  it('keeps new mode on the main URL and model even with edit overrides set', async () => {
+    await writeConfig({ edit_url: 'https://edit.example/v1/images/edits', edit_model: 'qwen-image-edit' });
     const calls = stubFetch([jsonResponse({ data: [{ b64_json: PNG_B64 }] })]);
 
     const result = await run({ mode: 'new', prompt: 'main channel', session: 'override-new' });

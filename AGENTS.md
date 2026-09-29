@@ -633,22 +633,26 @@ reply read worse than before it existed.
 ### Image Generation (`/image`, `/config image`)
 
 Draw or edit an image through one built-in skill and one tool. Unlike `/dream`,
-the skill is model-invocable: an intent (画一张 / 生图 / 改图 / 图生图) reaches it,
-and `profile/default/system.md` carries a permanent "Image generation capability"
-note that introduces the feature as a suggestion — the model keeps judgment
-(ambiguous requests may still use the built-in diagram rendering).
+the skill is model-invocable: an intent (做图 / 做海报 / 生图 / 生成图片 /
+图生图 / 改图) reaches it, and `profile/default/system.md` carries a permanent
+"Image generation capability" note that introduces the feature as a suggestion —
+the model keeps judgment (ambiguous requests may still use the built-in diagram
+rendering).
 
 - **Config**: `/config image` is a hidden `/config` argument (never listed in
   autocomplete), implemented by `handleImageConfig` in
   `apps/scream-code/src/tui/commands/auth.ts`. Flow: provider preset picker
-  (OpenAI official / Volcengine Ark / custom OpenAI-compatible URL) → masked
-  API-key dialog (the value never enters the model context) → model → optional
-  image-edit URL/model overrides (custom entry only; Enter keeps the
-  text-to-image values). Writes `<screamHome>/image-config.json` (0600) and
-  probes `GET {base}/models` non-blocking. Re-running while configured shows
-  the current model/provider/URL first (status line + first-dialog hint) so an
-  overwrite never happens by surprise. URLs are stored and used verbatim —
-  no `/v1` auto-completion.
+  (OpenAI official / Volcengine Ark / custom entry) → masked API-key dialog
+  (the value never enters the model context) → model → optional image-edit
+  URL/model overrides (custom entry only; Enter keeps defaults). The wizard
+  stores FULL endpoint URLs (`url`, optional `edit_url`) and requests use them
+  verbatim — nothing is appended or completed. When `edit_url` is absent and
+  the main URL ends in `/images/generations`, the tool derives the sibling
+  `/images/edits` endpoint; otherwise an edit request asks for `edit_url`.
+  Writes `<screamHome>/image-config.json` (0600) and probes model listing
+  non-blocking. Re-running while configured shows the current model/provider/URL
+  first (status line + first-dialog hint) so an overwrite never happens by
+  surprise.
 - **Skill**: `packages/agent-core/src/skill/builtin/image.{md,ts}` — trigger
   words, five-element prompt refinement, mode selection (new / edit /
   continue), unconfigured → guide `/config image` then continue the original
@@ -657,15 +661,16 @@ note that introduces the feature as a suggestion — the model keeps judgment
   `ImageGenerate`, main-agent-only (mounted in `agent/tool/index.ts`,
   whitelisted in `profile/default/agent.yaml`, cataloged in `WRITE_TOOLS`,
   never auto-approved). Stream-first SSE with sync fallback when the gateway
-  rejects `stream`/`partial_images`, unified response extraction
+  rejects `stream`/`partial_images`; `size` has a one-shot retry that flips
+  the size mode (explicit ↔ omitted, omitted-rejected → `1024x1024`) so strict
+  services still produce an image. Unified response extraction
   (b64_json/url/nested), session state in `<screamHome>/image-sessions/`
   (0600, name-sanitized against traversal), output to
   `outputs/image/<session>/turn-NNN.png`. Input paths pass
   `resolvePathAccessPath` (Read's policy: sensitive files rejected before
   approval and before any bytes leave the machine); the turn's abort signal
   cancels in-flight requests and a pre-write check prevents post-cancel side
-  effects. One configured `edit_base_url`/`edit_model` pair routes image-to-image
-  to a different channel; text-to-image always uses the main base/model.
+  effects.
 - **Routing note**: config state is deliberately NOT injected per prompt
   render — the tool's unconfigured error is the authoritative answer (static
   rule + runtime enforcement).
