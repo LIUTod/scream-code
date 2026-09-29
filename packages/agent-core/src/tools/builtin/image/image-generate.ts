@@ -190,7 +190,7 @@ async function loadConfig(screamHomeDir: string): Promise<ImageConfigFile | unde
       url: normalizeUrl(urlRaw),
       api_key: parsed.api_key,
       model: parsed.model,
-      size: typeof parsed.size === 'string' && parsed.size.length > 0 ? parsed.size : 'auto',
+      size: typeof parsed.size === 'string' && parsed.size.trim().length > 0 ? parsed.size.trim() : 'auto',
       ...(editUrlRaw.length > 0 ? { edit_url: normalizeUrl(editUrlRaw) } : {}),
       ...(editModelRaw.trim().length > 0 ? { edit_model: editModelRaw.trim() } : {}),
     };
@@ -334,21 +334,37 @@ async function assertOk(response: Response): Promise<void> {
   throw new ApiError(`HTTP ${response.status}${detail.length > 0 ? `: ${detail}` : ''}`, response.status);
 }
 
+/**
+ * True for a wire string that actually carries data. Gateways routinely emit
+ * empty placeholders — `{"b64_json":"","url":"https://…/x.png"}` — next to the
+ * field holding the real image, so presence alone must never win: an empty
+ * `b64_json` that outranks a populated `url` yields a zero-byte "success".
+ */
+function isUsableWireString(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+/** First usable image field of one object, base64 before URL. */
+function pickImageField(record: Record<string, unknown>): { b64?: string; url?: string } | undefined {
+  if (isUsableWireString(record['b64_json'])) return { b64: record['b64_json'] };
+  if (isUsableWireString(record['url'])) return { url: record['url'] };
+  return undefined;
+}
+
 /** Pull the first image payload out of a parsed JSON body (three shapes). */
 export function extractImagePayload(body: unknown): { b64?: string; url?: string } | undefined {
   if (typeof body !== 'object' || body === null) return undefined;
   const record = body as Record<string, unknown>;
 
-  if (typeof record['b64_json'] === 'string') return { b64: record['b64_json'] };
-  if (typeof record['url'] === 'string') return { url: record['url'] };
+  const direct = pickImageField(record);
+  if (direct !== undefined) return direct;
 
   const data = record['data'];
   if (Array.isArray(data)) {
     for (const entry of data) {
       if (typeof entry !== 'object' || entry === null) continue;
-      const item = entry as Record<string, unknown>;
-      if (typeof item['b64_json'] === 'string') return { b64: item['b64_json'] };
-      if (typeof item['url'] === 'string') return { url: item['url'] };
+      const found = pickImageField(entry as Record<string, unknown>);
+      if (found !== undefined) return found;
     }
   }
   return undefined;
@@ -515,6 +531,43 @@ async function requestImage(
   }
 }
 
+/** `data:image/png;base64,…` wrappers some gateways prepend to the payload. */
+const DATA_URL_PREFIX = /^data:image\/[a-z0-9.+-]+;base64,/i;
+
+/** Magic numbers of the formats an OpenAI-compatible image API can return. */
+function looksLikeImage(bytes: Uint8Array): boolean {
+  const matchesAt = (offset: number, signature: readonly number[]): boolean =>
+    signature.every((byte, index) => bytes[offset + index] === byte);
+  return (
+    matchesAt(0, [0x89, 0x50, 0x4e, 0x47]) || // PNG
+    matchesAt(0, [0xff, 0xd8, 0xff]) || // JPEG
+    matchesAt(0, [0x47, 0x49, 0x46, 0x38]) || // GIF
+    matchesAt(0, [0x42, 0x4d]) || // BMP
+    matchesAt(0, [0x49, 0x49, 0x2a, 0x00]) || // TIFF (LE)
+    matchesAt(0, [0x4d, 0x4d, 0x00, 0x2a]) || // TIFF (BE)
+    (matchesAt(0, [0x52, 0x49, 0x46, 0x46]) && matchesAt(8, [0x57, 0x45, 0x42, 0x50])) || // WebP
+    (bytes.length > 12 && matchesAt(4, [0x66, 0x74, 0x79, 0x70])) // AVIF / HEIF (ftyp)
+  );
+}
+
+/**
+ * Last gate before anything reaches the disk: an empty or non-image payload
+ * must fail loudly instead of being written as a `.png` and reported as a
+ * successful generation.
+ */
+function assertImageBytes(bytes: Uint8Array, origin: string): Uint8Array {
+  if (bytes.length === 0) {
+    throw new ApiError(`The image API returned no image data (empty ${origin}).`);
+  }
+  if (!looksLikeImage(bytes)) {
+    const head = Buffer.from(bytes.slice(0, 8)).toString('hex');
+    throw new ApiError(
+      `The ${origin} is not an image (first bytes: ${head}); check the endpoint URL and model in /config image.`,
+    );
+  }
+  return bytes;
+}
+
 async function payloadToBytes(payload: unknown, external?: AbortSignal): Promise<Uint8Array> {
   const nested =
     typeof payload === 'object' && payload !== null && 'result' in payload
@@ -522,7 +575,10 @@ async function payloadToBytes(payload: unknown, external?: AbortSignal): Promise
       : undefined;
   const found = extractImagePayload(payload) ?? nested;
   if (found?.b64 !== undefined) {
-    return Uint8Array.from(Buffer.from(found.b64, 'base64'));
+    // Some gateways wrap the payload in a data URL; strip the prefix before
+    // decoding so it cannot corrupt the image.
+    const encoded = found.b64.replace(DATA_URL_PREFIX, '');
+    return assertImageBytes(Uint8Array.from(Buffer.from(encoded, 'base64')), 'b64_json payload');
   }
   if (found?.url !== undefined) {
     const controller = new AbortController();
@@ -539,7 +595,8 @@ async function payloadToBytes(payload: unknown, external?: AbortSignal): Promise
     try {
       const response = await fetch(found.url, { signal: controller.signal });
       if (!response.ok) throw new ApiError(`Image download failed: HTTP ${response.status}`, response.status);
-      return new Uint8Array(await response.arrayBuffer());
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      return assertImageBytes(bytes, `image download from ${found.url}`);
     } finally {
       clearTimeout(timeoutId);
       external?.removeEventListener('abort', onExternalAbort);
@@ -646,7 +703,7 @@ export class ImageGenerateTool implements BuiltinTool<ImageGenerateInput> {
           const message = error instanceof Error ? error.message : String(error);
           return { isError: true, output: message };
         }
-        const size = args.size !== undefined && args.size.length > 0 ? args.size : config.size;
+        const size = args.size !== undefined && args.size.trim().length > 0 ? args.size.trim() : config.size;
         const explicitSize = size !== 'auto' ? size : undefined;
         // Image-edit channel: full URL and model overrides, both optional.
         // The only derivation is the documented OpenAI-family sibling path.

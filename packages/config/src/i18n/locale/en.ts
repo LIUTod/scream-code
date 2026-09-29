@@ -456,7 +456,7 @@ export const en: Record<string, string> = {
   'image.error_empty_url': 'Image API URL cannot be empty.',
   'image.error_empty_key': 'Image API key cannot be empty.',
   'image.input_model': 'Enter image model ID',
-  'image.model_hint': 'Press Enter to keep the default gpt-image-2',
+  'image.model_hint': 'Press Enter to keep the default model (the ID shown in the field)',
   'image.input_edit_url': 'Enter the full image-edit URL (optional)',
   'image.edit_url_hint': 'When empty: if the main URL ends in /images/generations, the sibling /images/edits endpoint is used automatically',
   'image.input_edit_model': 'Enter image-edit model ID (optional)',

@@ -127,6 +127,23 @@ describe('extractImagePayload', () => {
     expect(extractImagePayload({ data: [{ revised_prompt: 'no image' }] })).toBeUndefined();
     expect(extractImagePayload('garbage')).toBeUndefined();
   });
+
+  it('skips empty placeholder fields instead of returning them', () => {
+    // Relay gateways send `{"b64_json":"","url":"…"}`; the empty placeholder
+    // must never outrank the field that actually holds the image.
+    expect(extractImagePayload({ b64_json: '', url: 'https://cdn.example/x.png' })).toEqual({
+      url: 'https://cdn.example/x.png',
+    });
+    expect(
+      extractImagePayload({ data: [{ b64_json: '', revised_prompt: '', url: 'https://cdn.example/x.png' }] }),
+    ).toEqual({ url: 'https://cdn.example/x.png' });
+    expect(extractImagePayload({ b64_json: '   ', data: [{ b64_json: 'AAA' }] })).toEqual({ b64: 'AAA' });
+    expect(extractImagePayload({ b64_json: '', url: '' })).toBeUndefined();
+  });
+
+  it('keeps b64 ahead of url when both carry data', () => {
+    expect(extractImagePayload({ b64_json: 'AAA', url: 'https://cdn.example/x.png' })).toEqual({ b64: 'AAA' });
+  });
 });
 
 describe('config gating', () => {
@@ -359,6 +376,73 @@ describe('new mode', () => {
     expect(callAt(calls, 1).url).toBe('https://cdn.example/pic.png');
     const saved = await readFile(join(work, 'outputs', 'image', 'url', 'turn-001.png'));
     expect(Buffer.compare(saved, PNG_BYTES)).toBe(0);
+  });
+
+  it('uses the URL when the gateway fills b64_json with an empty placeholder', async () => {
+    // Real relay shape: `{"b64_json":"","revised_prompt":"","url":"…"}`. Taking
+    // the empty placeholder wrote a zero-byte PNG and still reported success.
+    await writeConfig();
+    const calls = stubFetch([
+      jsonResponse({ created: 1, data: [{ b64_json: '', revised_prompt: '', url: 'https://cdn.example/real.png' }] }),
+      new Response(PNG_BYTES, { status: 200, headers: { 'content-type': 'image/png' } }),
+    ]);
+
+    const result = await run({ mode: 'new', prompt: 'placeholder probe', session: 'placeholder' });
+
+    expect(result.isError).toBeFalsy();
+    expect(callAt(calls, 1).url).toBe('https://cdn.example/real.png');
+    const saved = await readFile(join(work, 'outputs', 'image', 'placeholder', 'turn-001.png'));
+    expect(Buffer.compare(saved, PNG_BYTES)).toBe(0);
+    expect(saved.length).toBeGreaterThan(0);
+  });
+
+  it('fails loudly instead of writing a zero-byte file when every payload field is empty', async () => {
+    await writeConfig();
+    stubFetch([jsonResponse({ created: 1, data: [{ b64_json: '', revised_prompt: '', url: '' }] })]);
+
+    const result = await run({ mode: 'new', prompt: 'empty probe', session: 'empty' });
+
+    expect(result.isError).toBe(true);
+    expect(outputText(result)).toContain('no image data');
+    await expect(stat(join(work, 'outputs', 'image', 'empty', 'turn-001.png'))).rejects.toThrow();
+    await expect(stat(join(home, 'image-sessions', 'empty.json'))).rejects.toThrow();
+  });
+
+  it('treats an empty placeholder SSE event as carrying no image', async () => {
+    await writeConfig();
+    const sse =
+      `data: {"type":"image_generation.partial_image","b64_json":"${PNG_B64}"}\n\n` +
+      `data: {"type":"image_generation.completed","result":{"b64_json":""}}\n\n`;
+    stubFetch([new Response(sse, { status: 200, headers: { 'content-type': 'text/event-stream' } })]);
+
+    const result = await run({ mode: 'new', prompt: 'sse placeholder probe', session: 'sse-placeholder' });
+
+    expect(result.isError).toBeFalsy();
+    const saved = await readFile(join(work, 'outputs', 'image', 'sse-placeholder', 'turn-001.png'));
+    expect(Buffer.compare(saved, PNG_BYTES)).toBe(0);
+  });
+
+  it('strips a data-URL prefix instead of decoding it into the PNG', async () => {
+    await writeConfig();
+    stubFetch([jsonResponse({ data: [{ b64_json: `data:image/png;base64,${PNG_B64}` }] })]);
+
+    const result = await run({ mode: 'new', prompt: 'data url probe', session: 'data-url' });
+
+    expect(result.isError).toBeFalsy();
+    const saved = await readFile(join(work, 'outputs', 'image', 'data-url', 'turn-001.png'));
+    expect(Buffer.compare(saved, PNG_BYTES)).toBe(0);
+  });
+
+  it('rejects a payload that is not an image instead of saving garbage', async () => {
+    await writeConfig();
+    const html = Buffer.from('<html><body>gateway error</body></html>', 'utf8').toString('base64');
+    stubFetch([jsonResponse({ data: [{ b64_json: html }] })]);
+
+    const result = await run({ mode: 'new', prompt: 'garbage probe', session: 'garbage' });
+
+    expect(result.isError).toBe(true);
+    expect(outputText(result)).toContain('is not an image');
+    await expect(stat(join(work, 'outputs', 'image', 'garbage', 'turn-001.png'))).rejects.toThrow();
   });
 });
 

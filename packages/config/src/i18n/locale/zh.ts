@@ -452,7 +452,7 @@ export const zh: Record<string, string> = {
   'image.error_empty_url': '生图 API 地址不能为空。',
   'image.error_empty_key': '生图 API 密钥不能为空。',
   'image.input_model': '输入生图模型 ID',
-  'image.model_hint': '回车使用默认 gpt-image-2',
+  'image.model_hint': '回车使用默认模型（见输入框提示的模型 ID）',
   'image.input_edit_url': '输入图生图 API 完整地址（可选）',
   'image.edit_url_hint': '留空时：若主地址以 /images/generations 结尾，自动改用同路径 /images/edits',
   'image.input_edit_model': '输入图生图模型 ID（可选）',
