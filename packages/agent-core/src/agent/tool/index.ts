@@ -1146,6 +1146,7 @@ export class ToolManager {
         this.agent.type === 'main' && canSpawn && new b.FusionPlanTool(this.agent),
 
         toolServices?.webSearcher && new b.WebSearchTool(toolServices.webSearcher),
+        toolServices?.paperSearcher && new b.PaperSearchTool(toolServices.paperSearcher),
         toolServices?.urlFetcher && new b.FetchURLTool(toolServices.urlFetcher),
         this.lspRegistry && new LspTool(this.agent, workspace, this.lspRegistry),
       ]

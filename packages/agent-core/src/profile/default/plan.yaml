@@ -29,6 +29,7 @@ tools:
   - Glob
   - Grep
   - WebSearch
+  - PaperSearch
   - MemoryLookup
   - MemoryConsolidatePlan
   - MemoryConsolidateApply

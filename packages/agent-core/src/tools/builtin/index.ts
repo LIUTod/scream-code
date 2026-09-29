@@ -44,4 +44,5 @@ export * from './shell/bash';
 export * from './state/inspect-own-assets';
 export * from './state/todo-list';
 export * from './web/fetch-url';
+export * from './web/paper-search';
 export * from './web/web-search';

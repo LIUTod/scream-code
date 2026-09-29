@@ -283,6 +283,7 @@ Choose the retrieval path by what you already know — do not default to repeate
 | A symbol's approximate name (class, function) but not its location | `LSP` with `operation: 'symbols'` and `query` |
 | A concrete file and the symbol position in it | `LSP` `references`/`definition`, then `Read` |
 | Open-world knowledge, current events, external docs | `WebSearch` |
+| Academic literature, papers, prior work, state of the art | `PaperSearch` |
 
 When exploring a new codebase, prefer one structured reconnaissance pass (see the `explore` subagent) over many scattered single-file reads.
 

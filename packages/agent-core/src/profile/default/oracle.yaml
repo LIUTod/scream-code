@@ -111,6 +111,7 @@ tools:
   - Write
   - Edit
   - WebSearch
+  - PaperSearch
   - FetchURL
   - MemoryLookup
   - MemoryConsolidatePlan

@@ -42,6 +42,7 @@ tools:
   # model-visible tool set.
   - ManagePlugin
   - WebSearch
+  - PaperSearch
   - Agent
   - SendSubagentMessage
   - WolfPack

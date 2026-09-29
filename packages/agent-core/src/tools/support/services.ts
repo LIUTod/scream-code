@@ -1,11 +1,17 @@
 import type { ExtensionRuntime } from '../../plugin/runtime/extension';
 import type { PluginManager } from '../../plugin/manager';
 import type { PluginSyncReport } from '../../plugin/types';
-import type { UrlFetcher, WebSearchProvider } from '../builtin';
+import type { PaperSearchProvider, UrlFetcher, WebSearchProvider } from '../builtin';
 
 export interface ToolServices {
   readonly urlFetcher?: UrlFetcher;
   readonly webSearcher?: WebSearchProvider;
+  /**
+   * Literature search (arXiv, OpenAlex, Crossref, Europe PMC). Optional like
+   * the other web services: a host that supplies none simply never registers
+   * the `PaperSearch` tool.
+   */
+  readonly paperSearcher?: PaperSearchProvider;
   /**
    * The process-wide plugin table. Tools that install plugins must use this
    * shared instance rather than constructing their own, otherwise two writers

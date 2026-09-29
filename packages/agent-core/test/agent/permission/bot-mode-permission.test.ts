@@ -26,7 +26,7 @@ describe('BotModePermissionPolicy', () => {
   });
 
   it('approves read-only tools in bot mode', () => {
-    for (const tool of ['Read', 'Grep', 'Glob', 'WebSearch', 'TodoList', 'ContactParent', 'Agent', 'UpdateGoal']) {
+    for (const tool of ['Read', 'Grep', 'Glob', 'WebSearch', 'PaperSearch', 'TodoList', 'ContactParent', 'Agent', 'UpdateGoal']) {
       expect(botPolicy().evaluate(ctx(tool))?.kind).toBe('approve');
     }
   });

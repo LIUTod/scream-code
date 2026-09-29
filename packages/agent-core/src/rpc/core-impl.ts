@@ -20,6 +20,11 @@ import { DuckDuckGoSearchProvider } from '#/tools/providers/duckduckgo-search';
 import { BingSearchProvider } from '#/tools/providers/bing-search';
 import { BaiduSearchProvider, So360SearchProvider, SogouSearchProvider } from '#/tools/providers/domestic-search';
 import { FallbackSearchProvider } from '#/tools/providers/fallback-search';
+import { ArxivPaperSource } from '#/tools/providers/paper/arxiv';
+import { CrossrefPaperSource } from '#/tools/providers/paper/crossref';
+import { EuropePmcPaperSource } from '#/tools/providers/paper/europepmc';
+import { PaperFanoutProvider } from '#/tools/providers/paper/fanout';
+import { OpenAlexPaperSource } from '#/tools/providers/paper/openalex';
 import type { PromisableMethods } from '#/utils/types';
 import { getCoreVersion } from '#/version';
 import { resolveThinkingLevel } from '../agent/config/thinking';
@@ -125,7 +130,7 @@ import type { ResumedAgentState, ResumeSessionResult } from './resumed';
 import type { SDKRPC } from './sdk-api';
 import { proxyWithExtraPayload } from './types';
 import { JianShellNotFoundError, LocalJian, type Environment, type Jian } from '@scream-code/jian';
-import type { WebSearchProvider } from '../tools/builtin';
+import type { PaperSearchProvider, WebSearchProvider } from '../tools/builtin';
 import type { ToolServices } from '../tools/support/services';
 
 type AgentScopedPayload<T> = T & { readonly agentId: string };
@@ -1354,7 +1359,23 @@ async function createRuntimeConfig(input: {
   return {
     urlFetcher: new LocalFetchURLProvider({ cache: fetchCache }),
     webSearcher: buildWebSearcher(input),
+    paperSearcher: buildPaperSearcher(),
   };
+}
+
+/**
+ * Literature search. The four sources are complementary rather than redundant
+ * (preprints, published record, cross-discipline catalogue, life sciences), so
+ * they run in parallel and merge; a source that is rate-limited or blocked
+ * degrades the answer instead of erasing it.
+ */
+export function buildPaperSearcher(): PaperSearchProvider {
+  return new PaperFanoutProvider([
+    new ArxivPaperSource(),
+    new OpenAlexPaperSource(),
+    new CrossrefPaperSource(),
+    new EuropePmcPaperSource(),
+  ]);
 }
 
 export function buildWebSearcher(input: {

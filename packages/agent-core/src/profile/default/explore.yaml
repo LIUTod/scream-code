@@ -50,6 +50,7 @@ tools:
   - Grep
   - LSP
   - WebSearch
+  - PaperSearch
   - MemoryLookup
   - MemoryConsolidatePlan
   - MemoryConsolidateApply

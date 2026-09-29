@@ -22,6 +22,7 @@ const REVERSIBLE_TOOLS = new Set([
   'Glob',
   'Grep',
   'WebSearch',
+  'PaperSearch',
   'FetchURL',
   'MemoryLookup',
   'MemoryWrite',

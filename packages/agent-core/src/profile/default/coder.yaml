@@ -20,6 +20,7 @@ tools:
   - Edit
   - LSP
   - WebSearch
+  - PaperSearch
   - FetchURL
   - MemoryLookup
   - MemoryConsolidatePlan

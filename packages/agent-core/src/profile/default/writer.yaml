@@ -87,6 +87,7 @@ tools:
   - Write
   - Edit
   - WebSearch
+  - PaperSearch
   - FetchURL
   - MemoryLookup
   - KnowledgeLookup
