@@ -56,6 +56,7 @@ When Scream wants to modify files or run commands, an approval panel pops up —
 - **Persistent Memory** — structured pain-point memory with FTS5 full-text + tag + vector retrieval, shared across sessions.
 - **Local Knowledge Graph** — SAG-based visual knowledge base for multi-hop reasoning; import your own docs anytime.
 - **RLM Mode** — persistent Python workspace for long-running tasks, with unlimited recursive sub-agents.
+- **Script Mode** — on by default: the model can run JavaScript in a sandbox that calls the other tools for it, so batch work (dozens of files/pages, filter-then-report) finishes in one round trip — only the script's summary enters the conversation; `/script` toggles it.
 - **Session Trace** — `/trace` exports any session as a self-contained, offline interactive HTML timeline.
 - **Context Search** — `/search` (Ctrl+Shift+F) full-screen keyword search over the conversation.
 - **High Cache Hit Rate** — per-session HitR in the status bar, tuned across compatible protocols to maximize cache hits without compromising quality.
@@ -65,7 +66,7 @@ When Scream wants to modify files or run commands, an approval panel pops up —
 
 ### Slash Commands
 
-Type `/` in the input to browse. All 54 commands:
+Type `/` in the input to browse. All 55 commands:
 
 <details>
 <summary>Full command reference (click to expand)</summary>
@@ -81,6 +82,7 @@ Type `/` in the input to browse. All 54 commands:
 | `/wolfpack` (`/wp`) | Toggle wolfpack mode — auto-approve + batch concurrency |
 | `/rlm` | RLM mode: persistent Python workspace, unlimited recursive subagents |
 | `/rlm-max-depth [N]` | Set RLM recursion depth limit |
+| `/script` | Script mode: run JavaScript in a sandbox that batches tool calls (on by default) |
 | `/plan` | Toggle plan mode |
 | `/fusionplan` (`/fp`) | Fusion plan mode (multi-agent parallel planning) |
 | `/btw` | Quick question without interrupting the conversation |

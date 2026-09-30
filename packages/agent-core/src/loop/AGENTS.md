@@ -20,6 +20,15 @@
 ## Boundaries
 - Does NOT: maintain session state (that is context/records); it only drives
   what this turn does
+- **Nested tool calls** (script sandbox): `executeNestedToolCall` re-enters the
+  single-call pipeline (preflight → prepare/authorize hooks → approval →
+  execute → finalize) with a `nested: true` step. Nested calls must stay out of:
+  model-visible events (`dispatchToolCall` returns early), block ordinals, and
+  the same-step dedup ledger (`ToolExecutionHookContext.nested` → the turn
+  hooks skip it) — registering a nested call in the ledger deadlocks the parent
+  when the model issued an identical call. `ExecutableToolContext.runNestedToolCall`
+  exposes the runner; the re-entrancy guard filters the caller out of the tool
+  list
 - **Retry discipline**: every provider call must go through `chatWithRetry`
   (main loop) or `generateWithRetry` (auxiliary) — never call `generate` raw
   (that loses retry/cancellation)

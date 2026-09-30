@@ -417,6 +417,18 @@ Persistent-python runtime: a long-lived `python3 -u -i` kernel where state (vari
 - **Records**: `rlm.enter` / `rlm.exit` for session replay recovery.
 - **Footer badge**: `RLM` in bright yellow when active.
 
+### Script Execution Mode (`/script`)
+
+Sandboxed JavaScript that batches tool calls: the model writes one script, the script calls the other tools from inside a QuickJS sandbox, and **only the script's own output reaches the conversation** — the nested calls never do. Built for batch work, chained steps that need no decision in between, and filtering/aggregating before reporting.
+
+- **Entry**: `/script` toggles on/off with no args; `/script on|off` explicit. **Enabled by default** — `RunScript` is listed in `profile/default/agent.yaml` under the main agent's `tools`; the toggle state is per session and survives resume through the regular `tools.set_active_tools` record (no dedicated enter/exit record).
+- **Sandbox**: the `@earendil-works/pi-codemode` package (QuickJS compiled to wasm, one worker per execution) — this repo owns no VM code. The prelude exposes `tools.<Name>()` (auto-awaited, resolves to the tool's text), `text()`/`console.*`, `store()`/`load()`, `image()`, `exit()` and `// @options:` (`max_output_tokens`, `timeout_ms`).
+- **Tool**: `packages/agent-core/src/tools/builtin/script/script.ts` — `ScriptTool`. Its description is rebuilt per step against the offered tool set (full TS-style declarations ≤12,000 chars, else names + one-liners) and carries objective "When to use / When not to use" guidance so the model decides on its own — there is no hard system-prompt instruction.
+- **Nested pipeline**: `executeNestedToolCall` (`loop/tool-call.ts`) re-enters the single-call pipeline (preflight → prepare/authorize hooks → **approval** → execute → finalize) with a `nested: true` step; nested calls emit no model-visible events, consume no block ordinals and stay out of the same-step dedup ledger.
+- **Record**: each nested call appears as `nestedCalls` on the parent's `tool.result` event (UI/persistence side channel; the model sees only `output`). Recording caps (256 calls / 8 KiB per-arg / 32 KiB total) only degrade the record — calls always run.
+- **Store**: `store()`/`load()` persist via the tool store key `scriptStore` (successful runs only).
+- **Permission**: `RunScript` is an execute tool (`tools/tool-catalog.ts`) — approval applies like Bash, and every nested call asks again.
+
 ### Goal System (`/goal`, `/goaloff`)
 
 Persistent goal injection that survives turns and session resumes.
@@ -813,6 +825,23 @@ Stage 3: Block (safety net) → blocks the turn until compaction completes, trig
 Key files: `packages/agent-core/src/agent/compaction/{micro,full,strategy}.ts`,
 `packages/agent-core/src/loop/retry.ts`.
 
+### Context Projection & Edits
+
+Raw history and "what the model sees" are two different things: every LLM-bound read path funnels through `ContextMemory.applyMessageEdits`, so a persisted edit never rewrites the raw record.
+
+- **Message identity**: `ContextMessage.id` (`m<n>`) is assigned on first insert (`appendMessage` / `pushHistory` / compaction summary) and restored verbatim; legacy wires synthesize ids deterministically (history order, then the deferred queue). Ids are the address space of edits — never reuse or renumber them.
+- **Edit record**: `context.edit_message { targetId, replacement|null }` (`null` = removed from the projection, an array = replaced content). Live writes validate strictly (target must exist and be editable); replay tolerates dangling targets (no-op). Later edits override earlier ones; the token gauge adjusts by the delta against the message's *current* projection.
+- **Projection order**: micro-compaction window → `applyMessageEdits` → `project()`; applied in `messagesForLLM`, the `messages` getter, `tokenCountWithPending` and the compaction summarizer input. UI/export/trace/resume keep reading raw history.
+- **Compaction**: the cut is projection-aware (`computeCompactCount` skips removed messages for both tokens and counts; `tokensBefore/tokensAfter` measured on the projected tail); `CompactionResult.firstKeptMessageId` re-anchors `applyCompaction` by identity (old records fall back to `compactedCount`).
+- **Snapshot folding**: `context.edit_message` is a folded context type — `toJSONSnapshot` carries `messageEdits`, so file-level reclamation cannot lose edits.
+
+- **Producer status**: the edit mechanics are groundwork — nothing writes
+  `context.edit_message` automatically yet (replay and internal callers only);
+  future context policies/rules attach here.
+
+Key files: `packages/agent-core/src/agent/context/index.ts`,
+`packages/agent-core/src/agent/records/{persistence,types}.ts`.
+
 ### Stream-JSON Adapter & Channel Bridge
 
 `run-stream-json` encodes the standard session event stream as a line-based JSON dialect (for external bridges/pipes); the channel bridge re-broadcasts events into IM channels.
@@ -1043,6 +1072,18 @@ Key files: `packages/agent-core/src/profile/default/oracle.yaml`, `packages/agen
 The bundled `designer` profile owns the visual layer: how a product looks and feels across web/app UI and terminal UI (TUI). It is a producer, not an advisor — it derives a visual direction, writes code-grade design specs (tokens, component states, motion parameters) and applies them to styles, themes, and presentational code. One job, three entry points: Direction (new surface or redesign), Spec & Apply (write the specs into the codebase), Audit (report only unless asked to fix). Its method: pick the utility vs brand-experience track first, derive the register from evidence across five dials (Energy / Finish / Density / Weight / Playfulness), translate vague words (premium, elegant, 高级感…) into observable values instead of accepting them as justification, keep specs code-grade, reject the generated look (gradient heroes, glassmorphism, placeholder art) with a "would someone believe AI made this" meta-check, and match hero ambition to what the product earns. The TUI section carries the terminal vocabulary: width budgets, CJK double-width handling, SGR colour discipline, block hierarchy, density, and state legibility. Boundaries: it never touches behaviour/logic (coder), never runs gates (verify), never reviews diffs for correctness (reviewer) or architecture (oracle); it may spawn `explore` to map unfamiliar UI code.
 
 Key files: `packages/agent-core/src/profile/default/designer.yaml`, `packages/agent-core/src/profile/default/agent.yaml`, `packages/agent-core/src/profile/roster.ts`.
+
+### Script Execution Mode (RunScript) & Nested Tool Calls
+
+The main agent ships with `RunScript` **enabled by default**: one JavaScript program per call, executed in a QuickJS sandbox (`@earendil-works/pi-codemode`) whose only capability is calling the other tools. The nested calls never enter the transcript — only the script's own output does, which is what makes batch work (30 files, 20 pages, filter-then-report) one round trip instead of thirty.
+
+- **Activation**: registered for all agents, listed only in the main agent's `profile/default/agent.yaml` tools; `/script` toggles per session (state replays via `tools.set_active_tools`; `RunScript` is an execute tool → approval like Bash).
+- **Description**: `decorateScriptOffering` (`agent/tool/index.ts`) rebuilds it per step against the offered set — 12,000-char budget, full declarations or names + one-liners (measured ≈950 tokens/request at the default tool count). It copies the class instance via `Object.create(prototype)`; spreading the instance would drop `resolveExecution`.
+- **Nested pipeline**: `executeNestedToolCall` + `ExecutableToolContext.runNestedToolCall` with a `nested: true` step — same validation/approval/finalize, **no** events, block ordinals or dedup ledger (a nested call in the ledger deadlocks the parent when the model issued the same call in the same step). Re-entrancy guard filters the caller out of the tool list; ids are `<callerId>/<n>`.
+- **Results**: nested results resolve to the tool's text and failures reject (scripts can try/catch — mirrored from the reference runner). Output over budget keeps half the budget per side and spills the full text to a temp file; `nestedCalls` rides the parent's `tool.result` event (record caps degrade the record, never the call).
+- **Store**: `store()`/`load()` land in the tool store key `scriptStore`, committed only when the script succeeds.
+- **Packaging**: `neverBundle`d in `apps/scream-code/tsdown.config.ts` (worker + wasm resolve from the package dir, like mupdf) and declared as a dependency in both `packages/agent-core` and `apps/scream-code` (pnpm strict resolution).
+- **Tests**: `test/tools/script.test.ts` (isolation, approval incl. denial, dedup regression, record degradation, store persistence, toggle + resume), `test/tools/script-sandbox.test.ts` (package smoke).
 
 ### Self Assets Map & InspectOwnAssets
 

@@ -8,6 +8,14 @@
   - `registerMcpServer(...)` — MCP server integration
   - built-in tools live in `tools/builtin/` and register after definition
 - Tool dispatch: execute tool calls (`runTool`), write results back to context
+- **Script tool decoration**: `decorateScriptOffering` rebuilds the
+  `RunScript` description against the offered tool set of each step (full
+  TS-style declarations ≤12,000 chars, else names + one-liners). It copies the
+  class instance via `Object.create(prototype)` + `assign` — spreading the
+  instance (`{...tool}`) would drop prototype methods such as
+  `resolveExecution` and break the tool. RunScript is enabled by default for
+  the main agent (`profile/default/agent.yaml`); `/script` toggles it through
+  the regular `tools.set_active_tools` record
 - Argument validation: tool definitions carry schemas, validated on call
 
 ## Dependencies

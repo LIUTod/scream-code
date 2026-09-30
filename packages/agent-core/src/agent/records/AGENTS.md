@@ -37,6 +37,10 @@
 - Snapshot mechanism (`context.snapshot`): written after compaction; replay
   skips folded records before it. When adding record types keep backward
   compatibility — unknown types are silently ignored
+- Folded context types (`SNAPSHOT_FOLDED_CONTEXT_TYPES`): a type joins the set
+  only when the snapshot payload fully carries its state — `context.edit_message`
+  qualifies because `toJSONSnapshot` writes `messageEdits`, so file-level
+  reclamation can never lose an edit
 
 ## Extension points
 - Swap the backing store = implement `AgentRecordPersistence` (InMemory and

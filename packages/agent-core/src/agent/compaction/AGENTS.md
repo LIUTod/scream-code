@@ -9,7 +9,14 @@
 - Trigger strategy: `compaction/strategy.ts` (threshold + circuit breaker +
   watermarks + per-turn limit)
 - Token basis: `tokensBefore/tokensAfter` = system prompt + tool schemas +
-  messages (full-request basis, consistent with the measured anchors)
+  messages (full-request basis, consistent with the measured anchors), measured
+  on the **projection**: removed-by-edit messages contribute nothing and the
+  kept tail is estimated after `applyMessageEdits`
+- Cut point: `computeCompactCount` receives `isRemoved` and skips removed
+  messages (tokens AND counts), so a tail of edited-out noise cannot make the
+  cut keep less than the projection budget requires; `CompactionResult`
+  carries `firstKeptMessageId`, and `applyCompaction` re-anchors the cut by
+  identity (old records fall back to `compactedCount`)
 - After a successful compaction, scan the summary for a skill-candidate
   marker; emit `skill_candidate` so the UI can offer to save the reusable
   process (separate, isolated step after memory-memo extraction)
