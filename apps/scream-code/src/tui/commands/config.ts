@@ -291,6 +291,29 @@ export async function handleRlmCommand(host: SlashCommandHost, args: string): Pr
   }
 }
 
+/** /script [on|off] — toggle the script execution mode (sandboxed batch tool). */
+export async function handleScriptCommand(host: SlashCommandHost, args: string): Promise<void> {
+  const session = host.session;
+  if (session === undefined) {
+    host.showError(getNoActiveSessionMessage());
+    return;
+  }
+  const subcmd = args.trim().toLowerCase();
+  if (subcmd !== '' && subcmd !== 'on' && subcmd !== 'off') {
+    host.showError('Usage: /script [on|off]');
+    return;
+  }
+  // Bare `/script` toggles; the server owns the state and reports the result.
+  const requested = subcmd === '' ? undefined : subcmd === 'on';
+  try {
+    const enabled = await session.setScriptEnabled(requested);
+    host.showNotice(t(enabled ? 'config.script_on' : 'config.script_off'));
+  } catch (error) {
+    const msg = formatErrorMessage(error);
+    host.showError(`Failed to set script mode: ${msg}`);
+  }
+}
+
 /** /rlm-max-depth [N] — query or set the maximum RLM recursion depth.
  * N=0 or no limit means unlimited (the default). */
 export async function handleRlmMaxDepthCommand(host: SlashCommandHost, args: string): Promise<void> {

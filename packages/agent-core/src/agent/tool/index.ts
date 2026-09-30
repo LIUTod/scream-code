@@ -959,7 +959,7 @@ export class ToolManager {
     );
     // Mutation goal tools are only offered to the model while a goal exists.
     const hideGoalMutationTools = this.agent.goal.getGoal().goal === null;
-    return uniq([...filter.names, ...mcpNames])
+    const tools = uniq([...filter.names, ...mcpNames])
       .toSorted((a, b) => a.localeCompare(b))
       .filter(
         (name) =>
@@ -972,6 +972,32 @@ export class ToolManager {
           this.builtinTools.get(name),
       )
       .filter((tool) => !!tool);
+    return this.decorateScriptOffering(tools);
+  }
+
+  /**
+   * The script sandbox advertises exactly the tools a script may call, so its
+   * description is rebuilt against this step's offered set (the class-level
+   * description is the empty-set fallback). Matches the built-in instance by
+   * identity on purpose: a user tool that happens to reuse the name must not
+   * be re-decorated or lose its own description.
+   */
+  private decorateScriptOffering(
+    tools: readonly ExecutableTool[],
+  ): readonly ExecutableTool[] {
+    const scriptTool = this.builtinTools.get(b.SCRIPT_TOOL_NAME);
+    if (scriptTool === undefined || !tools.includes(scriptTool)) {
+      return tools;
+    }
+    const callable = tools.filter((tool) => tool !== scriptTool);
+    // Keep the prototype (class methods like `resolveExecution` live there) and
+    // override only the description field.
+    const decorated = Object.assign(
+      Object.create(Object.getPrototypeOf(scriptTool) as object) as ExecutableTool,
+      scriptTool,
+      { description: b.buildScriptToolDescription(callable) },
+    );
+    return tools.map((tool) => (tool === scriptTool ? decorated : tool));
   }
 
   *toolInfos(): Iterable<ToolInfo> {
@@ -1071,6 +1097,11 @@ export class ToolManager {
         // defines rlm()/rlm_wait() — the handler body checks subagentHost at
         // call time (never at construction), so rlm() never NameErrors.
         new b.PythonTool(cwd, { hostHandlers: createRlmHostHandlers(this.agent) }),
+        // Script execution mode: model-written JS runs in a QuickJS sandbox
+        // that calls the step's tools through the regular pipeline. Enabled by
+        // default for the main agent (profile/default/agent.yaml); /script
+        // toggles it per session via the regular active-tools record.
+        new b.ScriptTool(this.toolStore),
         (modelCapabilities.image_in || modelCapabilities.video_in) &&
           new b.ReadMediaFileTool(jian, workspace, modelCapabilities, videoUploader),
         new b.EnterPlanModeTool(this.agent),

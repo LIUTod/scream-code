@@ -44,7 +44,7 @@ export const WRITE_TOOLS: ReadonlySet<string> = new Set([
 ]);
 
 /** Tools that execute commands. */
-export const EXECUTE_TOOLS: ReadonlySet<string> = new Set(['Bash', 'python']);
+export const EXECUTE_TOOLS: ReadonlySet<string> = new Set(['Bash', 'python', 'RunScript']);
 
 /** Nesting/coordination tools — only `all` mode keeps them. A restricted
  *  child must not be able to spawn an unrestricted grandchild (that would

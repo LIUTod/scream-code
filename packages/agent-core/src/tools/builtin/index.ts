@@ -40,6 +40,7 @@ export * from './planning/exit-plan-mode';
 export * from './planning/fusion-plan';
 export * from './plugin/manage-plugin';
 export * from './python/python';
+export * from './script/script';
 export * from './shell/bash';
 export * from './state/inspect-own-assets';
 export * from './state/todo-list';

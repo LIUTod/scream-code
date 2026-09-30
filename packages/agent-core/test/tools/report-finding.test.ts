@@ -21,10 +21,10 @@ function stubStore(initial?: ReviewFinding[]): ToolStore & { data: Map<string, u
   if (initial !== undefined) data.set('findings', initial);
   return {
     data,
-    get(key: 'todo' | 'findings' | 'archFindings') {
+    get(key: 'todo' | 'findings' | 'archFindings' | 'scriptStore') {
       return data.get(key) as never;
     },
-    set(key: 'todo' | 'findings' | 'archFindings', value: never) {
+    set(key: 'todo' | 'findings' | 'archFindings' | 'scriptStore', value: never) {
       data.set(key, value);
     },
   };

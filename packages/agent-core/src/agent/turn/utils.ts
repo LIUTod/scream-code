@@ -96,6 +96,10 @@ export function mapLoopEvent(event: LoopEvent, turnId: number): AgentEvent | und
         // TUI can render it separately instead of it being folded into the
         // collapsed result output.
         message: event.result.message,
+        // Nested calls an orchestrating tool (script sandbox) made while it
+        // ran; UI side channel, persisted with the event.
+        nestedCalls:
+          event.result.isError === true ? undefined : event.result.nestedCalls,
       };
     case 'turn.interrupted':
       if (event.activeStep === undefined) return undefined;

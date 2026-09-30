@@ -3,6 +3,7 @@ import type { FinishReason, TokenUsage } from '@scream-code/ltod';
 import type { PromptOrigin } from '../agent/context';
 import type { GoalChange, GoalSnapshot } from '../agent/goal';
 import type { ScreamErrorPayload } from '../errors';
+import type { NestedToolCallRecord } from '../loop/types';
 import type { PermissionMode } from '../agent/permission';
 import type { SkillSource } from '../skill';
 import type { TodoItem } from '../todo';
@@ -218,6 +219,11 @@ export interface ToolResultEvent {
   readonly output: unknown;
   readonly isError?: boolean | undefined;
   readonly synthetic?: boolean | undefined;
+  /**
+   * Nested tool calls made by an orchestrating tool (script sandbox) while it
+   * ran. UI/persistence side channel; the model only sees `output`.
+   */
+  readonly nestedCalls?: readonly NestedToolCallRecord[] | undefined;
   /**
    * Structured result payload for TUI renderers. When present, renderers
    * consume this instead of parsing the text `output`. The model still sees

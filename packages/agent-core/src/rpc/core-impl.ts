@@ -102,6 +102,7 @@ import type {
   SessionSummary,
   SetActiveToolsPayload,
   SetRlmEnabledPayload,
+  SetScriptEnabledPayload,
   SetRlmMaxDepthPayload,
   SetScreamConfigPayload,
   SetModelPayload,
@@ -750,6 +751,10 @@ export class ScreamCore implements PromisableMethods<CoreAPI> {
 
   setRlmEnabled({ sessionId, ...payload }: SessionAgentPayload<SetRlmEnabledPayload>) {
     return this.sessionApi(sessionId).setRlmEnabled(payload);
+  }
+
+  setScriptEnabled({ sessionId, ...payload }: SessionAgentPayload<SetScriptEnabledPayload>) {
+    return this.sessionApi(sessionId).setScriptEnabled(payload);
   }
 
   setRlmMaxDepth({ sessionId, ...payload }: SessionAgentPayload<SetRlmMaxDepthPayload>) {

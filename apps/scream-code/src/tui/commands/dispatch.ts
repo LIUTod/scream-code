@@ -37,6 +37,7 @@ import {
   handleThemeCommand,
   handleYoloCommand,
   handleRlmCommand,
+  handleScriptCommand,
   handleRlmMaxDepthCommand,
   showModelPicker,
   showPermissionPicker,
@@ -338,6 +339,9 @@ async function handleBuiltInSlashCommand(
       return;
     case 'rlm':
       await handleRlmCommand(host, args);
+      return;
+    case 'script':
+      await handleScriptCommand(host, args);
       return;
     case 'rlm-max-depth':
       await handleRlmMaxDepthCommand(host, args);

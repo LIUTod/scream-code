@@ -27,6 +27,7 @@ import type {
   SessionAPI,
   SetActiveToolsPayload,
   SetRlmEnabledPayload,
+  SetScriptEnabledPayload,
   SetRlmMaxDepthPayload,
   SetModelPayload,
   SetPermissionPayload,
@@ -204,6 +205,10 @@ export class SessionAPIImpl implements PromisableMethods<SessionAPI> {
 
   setRlmEnabled({ agentId, ...payload }: AgentScopedPayload<SetRlmEnabledPayload>) {
     return this.getAgent(agentId).setRlmEnabled(payload);
+  }
+
+  setScriptEnabled({ agentId, ...payload }: AgentScopedPayload<SetScriptEnabledPayload>) {
+    return this.getAgent(agentId).setScriptEnabled(payload);
   }
 
   setRlmMaxDepth({ agentId, ...payload }: AgentScopedPayload<SetRlmMaxDepthPayload>) {

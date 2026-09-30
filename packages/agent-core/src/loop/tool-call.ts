@@ -38,6 +38,7 @@ import type {
   ToolCall,
   PrepareToolExecutionResult,
   ExecutableToolResult,
+  NestedToolCallRequest,
   RunnableToolExecution,
   ToolExecution,
 } from './types';
@@ -67,6 +68,12 @@ function abortedToolOutput(toolName: string, signal: AbortSignal): string {
 }
 
 export interface ToolCallStepContext {
+  /**
+   * True while running a tool call issued by another tool (script sandbox).
+   * Nested calls reuse the pipeline but never touch model-visible bookkeeping:
+   * no block ordinals, no `tool.call`/`tool.result` events, no dedup ledger.
+   */
+  readonly nested?: boolean | undefined;
   readonly tools?: readonly ExecutableTool[] | undefined;
   readonly hooks?: LoopHooks | undefined;
   readonly log?: Logger | undefined;
@@ -535,6 +542,7 @@ async function prepareToolCall(
         toolName: call.toolName,
         args: call.args,
         rawArguments: call.toolCall.arguments,
+        nested: step.nested === true,
       });
     } catch {
       reminder = null;
@@ -656,6 +664,7 @@ async function runPrepareToolExecutionHook(
       stepNumber: currentStep,
       signal,
       llm,
+      nested: step.nested === true,
     });
   } catch (error) {
     // If the turn is cancelled while an abort-aware hook is awaited, report the
@@ -709,6 +718,7 @@ async function runAuthorizeToolExecutionHook(
       stepNumber: currentStep,
       signal,
       llm,
+      nested: step.nested === true,
     });
   } catch (error) {
     if (isAbortError(error) || signal.aborted) {
@@ -790,6 +800,7 @@ async function finalizePendingToolResult(
       stepNumber: currentStep,
       signal,
       llm,
+      nested: step.nested === true,
     });
     const effectiveResult = coerceToolResult(
       finalizedResult ?? pendingResult.result,
@@ -838,6 +849,12 @@ async function executeTool(
     toolCallId: toolCall.id,
     metadata,
     signal,
+    // Nested tool calls (script sandbox) re-enter this same pipeline with the
+    // model-visible recording suppressed; see `executeNestedToolCall`.
+    runNestedToolCall: {
+      tools: (step.tools ?? []).filter((tool) => tool.name !== toolName),
+      run: (request) => executeNestedToolCall(step, toolName, request),
+    },
     onUpdate: (update) => {
       if (signal.aborted) return;
       dispatchEvent({
@@ -943,7 +960,12 @@ function normalizeToolResult(r: ExecutableToolResult): ExecutableToolResult {
       output = textJoined.length > 0 ? textJoined : TOOL_OUTPUT_EMPTY;
     }
   }
-  return r.isError === true ? { output, isError: true } : { output };
+  // `nestedCalls` is a UI/persistence side channel produced by orchestrating
+  // tools (script sandbox). It must survive normalization so the tool.result
+  // event carries it, but it never reaches the provider: only `output` does.
+  const nestedCalls = r.isError === true ? undefined : r.nestedCalls;
+  const nested = nestedCalls !== undefined ? { nestedCalls } : {};
+  return r.isError === true ? { output, isError: true, ...nested } : { output, ...nested };
 }
 
 function makeToolResult(
@@ -987,6 +1009,12 @@ async function dispatchToolCall(
   displayFields?: ToolCallDisplayFields | undefined,
 ): Promise<void> {
   const { toolCall, toolName } = call;
+  // Nested calls (script sandbox) never surface as model-visible blocks: the
+  // orchestrating tool's own result is the only transcript entry for the
+  // batch, and the step's block ordinals belong to model-issued calls.
+  if (step.nested === true) {
+    return;
+  }
   // Mark the executed tool-call block so the step's block sequence
   // (thinking/text/tool-call) is preserved in the trajectory. The index is
   // a per-type ordinal (tool-call counts from 0 across the step). The
@@ -1023,4 +1051,46 @@ async function dispatchToolCall(
     index,
     blockType: 'tool-call',
   });
+}
+
+/**
+ * Run a tool call issued by *another tool* (the script sandbox) through the
+ * same pipeline as model-issued calls: preflight validation → prepare and
+ * authorize hooks (host hooks + approval) → `resolveExecution` → execution
+ * with grace timeout → finalize/normalize.
+ *
+ * Only the model-visible recording is suppressed: no `block.start` /
+ * `tool.call` / `tool.result` events are dispatched, so the orchestrating
+ * tool's own result stays the single transcript entry for the whole batch.
+ * Everything else — argument validation, hooks, approval, aborts and the
+ * grace timeout — behaves exactly like a direct call.
+ */
+async function executeNestedToolCall(
+  step: ToolCallStepContext,
+  parentToolName: string,
+  request: NestedToolCallRequest,
+): Promise<ExecutableToolResult> {
+  // Re-entrancy guard: a nested call must never reach the orchestrating tool
+  // again (unbounded script-in-script recursion).
+  const tools = (step.tools ?? []).filter((tool) => tool.name !== parentToolName);
+  const toolCall: ToolCall = {
+    type: 'function',
+    id: request.callId,
+    name: request.name,
+    arguments: JSON.stringify(request.args ?? {}),
+  };
+  const nestedStep: ToolCallStepContext = {
+    ...step,
+    tools,
+    nested: true,
+    // Model-visible events (and the block-index sequence they feed) belong to
+    // the parent call; nested progress surfaces through the parent result.
+    dispatchEvent: async () => {},
+  };
+  const call = preflightToolCall(tools, toolCall);
+  const prepared = await prepareToolCall(nestedStep, call);
+  const started = await prepared.task.start();
+  const raw = await started.result;
+  const finalized = await finalizePendingToolResult(nestedStep, raw);
+  return finalized.result;
 }

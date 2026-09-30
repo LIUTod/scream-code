@@ -70,6 +70,13 @@ export const BUILTIN_SLASH_COMMANDS = [
     availability: 'always',
   },
   {
+    name: 'script',
+    aliases: ['script'],
+    description: 'registry.script_desc',
+    priority: 214,
+    availability: 'always',
+  },
+  {
     name: 'rlm-max-depth',
     aliases: [],
     description: 'registry.rlm_max_depth_desc',

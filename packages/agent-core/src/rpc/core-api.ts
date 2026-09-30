@@ -194,6 +194,10 @@ export interface SetActiveToolsPayload {
 export interface SetRlmEnabledPayload {
   readonly enabled: boolean;
 }
+export interface SetScriptEnabledPayload {
+  /** Target state; omitted toggles the mode. */
+  readonly enabled?: boolean | undefined;
+}
 export interface SetRlmMaxDepthPayload {
   readonly maxDepth: number;
 }
@@ -428,6 +432,7 @@ export interface AgentAPI {
   unregisterTool: (payload: UnregisterToolPayload) => void;
   setActiveTools: (payload: SetActiveToolsPayload) => void;
   setRlmEnabled: (payload: SetRlmEnabledPayload) => void;
+  setScriptEnabled: (payload: SetScriptEnabledPayload) => boolean;
   setRlmMaxDepth: (payload: SetRlmMaxDepthPayload) => void;
   stopBackground: (payload: StopBackgroundPayload) => void;
   clearContext: (payload: EmptyPayload) => void;

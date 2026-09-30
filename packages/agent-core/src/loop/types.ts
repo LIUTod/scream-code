@@ -92,6 +92,13 @@ export interface ExecutableToolSuccessResult {
    */
   readonly display?: ToolResultDisplay | undefined;
   /**
+   * Calls this tool made *through the loop pipeline* while it ran (the script
+   * sandbox executing `tools.<name>()`). Persisted with the `tool.result`
+   * event so the UI can render a summary and resume keeps it; never shown to
+   * the model — only `output` reaches the provider.
+   */
+  readonly nestedCalls?: readonly NestedToolCallRecord[] | undefined;
+  /**
    * Hint that this result is uneventful and unlikely to be referenced
    * again (e.g. "no matches found", empty output). When set on a tool
    * result entering the context, the corresponding ContextMessage is
@@ -127,6 +134,45 @@ export interface ToolUpdate {
 }
 
 /**
+ * One nested tool call made by an orchestrating tool (script sandbox).
+ * Mirrors the reference implementation's record: calls over the recording
+ * caps still run; only the record degrades (`incomplete`, args omitted).
+ */
+export interface NestedToolCallRecord {
+  /** Call id (`<parentToolCallId>/<n>`), unique within the parent result. */
+  readonly callId: string;
+  readonly name: string;
+  /** Single-line argument preview, omitted once the argument byte budget is
+   *  exhausted (see `incomplete`). */
+  readonly argsPreview?: string | undefined;
+  status: 'ok' | 'error';
+  durationMs: number;
+  /** Set when the arguments were dropped from the record for size reasons. */
+  readonly incomplete?: boolean | undefined;
+}
+
+/** Request accepted by {@link NestedToolRunner.run}. */
+export interface NestedToolCallRequest {
+  readonly name: string;
+  readonly args: unknown;
+  readonly callId: string;
+}
+
+/**
+ * Runs tool calls issued by *another tool* through the full loop pipeline
+ * (preflight validation, prepare/authorize hooks — including approval — and
+ * result normalization) without recording model-visible call/result events:
+ * the orchestrating tool's own result is the only transcript entry for the
+ * whole batch.
+ */
+export interface NestedToolRunner {
+  /** Tools callable from the nested caller: the current step's offered set
+   *  minus the orchestrating tool itself. */
+  readonly tools: readonly ExecutableTool[];
+  run(request: NestedToolCallRequest): Promise<ExecutableToolResult>;
+}
+
+/**
  * Per-call context passed to tool implementations.
  */
 export interface ExecutableToolContext {
@@ -135,6 +181,12 @@ export interface ExecutableToolContext {
   readonly metadata?: unknown;
   readonly signal: AbortSignal;
   readonly onUpdate?: ((update: ToolUpdate) => void) | undefined;
+  /**
+   * Present when the loop supports nested tool calls. Tools that orchestrate
+   * other tools (script sandbox) use it instead of invoking tools directly,
+   * so every nested call keeps validation, hooks and approval guarantees.
+   */
+  readonly runNestedToolCall?: NestedToolRunner | undefined;
 }
 
 export interface RunnableToolExecution {
@@ -169,6 +221,15 @@ export interface ToolExecutionHookContext extends LoopStepHookContext {
   readonly toolCall: ToolCall;
   readonly tool?: ExecutableTool | undefined;
   readonly args: unknown;
+  /**
+   * True when the call was issued by another tool (script sandbox) rather
+   * than by the model. Hooks that keep per-step bookkeeping — the same-step
+   * dedup ledger in particular — must skip nested calls: they share the
+   * parent's step but are not part of the model's call batch, and registering
+   * them can deadlock the parent (its own result would wait on a nested
+   * duplicate of itself).
+   */
+  readonly nested?: boolean | undefined;
 }
 
 export interface ResolvedToolExecutionHookContext extends ToolExecutionHookContext {
@@ -264,6 +325,9 @@ export interface LoopHooks {
         readonly toolName: string;
         readonly args: unknown;
         readonly rawArguments: string | null;
+        /** True for calls issued by another tool (script sandbox); such calls
+         *  must stay out of per-step bookkeeping such as the dedup ledger. */
+        readonly nested?: boolean | undefined;
       }) => string | null | void | Promise<string | null | void>)
     | undefined;
   authorizeToolExecution?: AuthorizeToolExecutionHook | undefined;

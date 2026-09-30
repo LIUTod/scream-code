@@ -653,6 +653,15 @@ export class SDKRpcClient {
     });
   }
 
+  async setScriptEnabled(input: SessionIdRpcInput & { enabled?: boolean }): Promise<boolean> {
+    const rpc = await this.getRpc();
+    return rpc.setScriptEnabled({
+      sessionId: input.sessionId,
+      agentId: this.interactiveAgentId,
+      enabled: input.enabled,
+    });
+  }
+
   async setRlmMaxDepth(input: SessionIdRpcInput & { maxDepth: number }): Promise<void> {
     const rpc = await this.getRpc();
     return rpc.setRlmMaxDepth({

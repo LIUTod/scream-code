@@ -45,7 +45,9 @@ export default defineConfig({
   deps: {
     alwaysBundle: [/^@scream-./],
     // mupdf must resolve its mupdf-wasm.wasm sibling from its own package
-    // directory at runtime; bundling the JS breaks that lookup.
-    neverBundle: ['fastembed', 'mupdf'],
+    // directory at runtime; bundling the JS breaks that lookup. The script
+    // sandbox has the same constraint: it spawns a worker file (and loads a
+    // wasm module) resolved relative to its own package directory.
+    neverBundle: ['fastembed', 'mupdf', '@earendil-works/pi-codemode'],
   },
 });

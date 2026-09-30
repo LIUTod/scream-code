@@ -433,6 +433,34 @@ export class Agent {
   }
 
   /**
+   * Enables or disables the script execution mode (`undefined` toggles) and
+   * returns the resulting state. On enable, the `RunScript` tool joins the
+   * active tools; on disable it is removed.
+   *
+   * The main agent's profile enables `RunScript` by default, so the agent-level
+   * default (not in the active list) only applies to callers that build their
+   * own tool list. No dedicated enter/exit record is needed (unlike RLM): the
+   * tool list itself is replayed from `tools.set_active_tools`, so resume
+   * restores the state automatically.
+   */
+  private setScriptEnabled(enabled?: boolean): boolean {
+    const current = this.tools.getActiveTools();
+    const next = enabled ?? !current.includes('RunScript');
+    if (next) {
+      if (!current.includes('RunScript')) {
+        this.tools.setActiveTools([...current, 'RunScript']);
+      }
+    } else {
+      const withoutScript = current.filter((name) => name !== 'RunScript');
+      if (withoutScript.length !== current.length) {
+        this.tools.setActiveTools(withoutScript);
+      }
+    }
+    this.emitStatusUpdated();
+    return next;
+  }
+
+  /**
    * Lets a subagent inherit RLM mode from its parent at spawn time: mounts
    * the python tool (so the child can keep recursing) and records rlm.enter,
    * mirroring setRlmEnabled(true). The rlm.enter record keeps enter/exit
@@ -775,6 +803,7 @@ export class Agent {
       setRlmEnabled: (payload) => {
         this.setRlmEnabled(payload.enabled);
       },
+      setScriptEnabled: (payload) => this.setScriptEnabled(payload.enabled),
       setRlmMaxDepth: (payload) => {
         this.setRlmMaxDepth(payload.maxDepth);
       },

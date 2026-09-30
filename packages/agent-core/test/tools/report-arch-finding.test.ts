@@ -20,10 +20,10 @@ function stubStore(initial?: ArchFinding[]): ToolStore {
   const data = new Map<string, unknown>();
   if (initial !== undefined) data.set('archFindings', initial);
   return {
-    get(key: 'todo' | 'findings' | 'archFindings') {
+    get(key: 'todo' | 'findings' | 'archFindings' | 'scriptStore') {
       return data.get(key) as never;
     },
-    set(key: 'todo' | 'findings' | 'archFindings', value: never) {
+    set(key: 'todo' | 'findings' | 'archFindings' | 'scriptStore', value: never) {
       data.set(key, value);
     },
   };

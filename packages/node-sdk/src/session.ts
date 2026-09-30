@@ -318,6 +318,21 @@ export class Session {
     });
   }
 
+  /**
+   * Enables or disables the `/script` execution mode (no argument toggles)
+   * and resolves to the resulting state. When enabled, the `RunScript` tool
+   * (QuickJS sandbox that batches tool calls) joins the active tools; when
+   * disabled it is removed. The main agent starts with it enabled
+   * (`profile/default/agent.yaml`).
+   */
+  async setScriptEnabled(enabled?: boolean): Promise<boolean> {
+    this.ensureOpen();
+    return this.rpc.setScriptEnabled({
+      sessionId: this.id,
+      enabled,
+    });
+  }
+
   /** Sets the maximum RLM recursion depth (default 1). Depth 1 means the root
    * kernel may spawn rlm() children but they cannot spawn grandchildren. */
   async setRlmMaxDepth(maxDepth: number): Promise<void> {

@@ -905,6 +905,12 @@ export class TurnFlow {
               return { continue: false };
             },
             prepareToolExecution: async (ctx) => {
+              // Nested calls (script sandbox) are not part of the model's call
+              // batch: they must not join the same-step dedup ledger — doing so
+              // deadlocks the parent when the model issued an identical call in
+              // the same step — and the verification-skip shortcut is reserved
+              // for model-issued commands.
+              if (ctx.nested === true) return undefined;
               const cached = deduper.checkSameStep(
                 ctx.toolCall.id,
                 ctx.toolCall.name,
@@ -951,18 +957,26 @@ export class TurnFlow {
             // into the repeat breaker so the same invalid call re-issued
             // across steps fires the 3/5/8 reminders; the returned reminder
             // is appended to the rejection output the model sees.
-            onToolCallRejected: async ({ toolCallId, toolName, args, rawArguments }) =>
-              deduper.registerSkipped(toolCallId, toolName, args, rawArguments),
+            onToolCallRejected: async ({ toolCallId, toolName, args, rawArguments, nested }) =>
+              nested === true
+                ? undefined
+                : deduper.registerSkipped(toolCallId, toolName, args, rawArguments),
             finalizeToolResult: async (ctx) => {
               // Resolve dedup BEFORE firing the PostToolUse hook so same-step
               // dups (whose ctx.result is the dedup placeholder) report the
               // original's real outcome, not an empty success.
-              const finalResult = await deduper.finalizeResult(
-                ctx.toolCall.id,
-                ctx.toolCall.name,
-                ctx.args,
-                ctx.result,
-              );
+              //
+              // Nested calls (script sandbox) never entered the dedup ledger,
+              // so their result passes through untouched.
+              const finalResult =
+                ctx.nested === true
+                  ? ctx.result
+                  : await deduper.finalizeResult(
+                      ctx.toolCall.id,
+                      ctx.toolCall.name,
+                      ctx.args,
+                      ctx.result,
+                    );
               const { isError, output } = finalResult;
 
               // Record in session memory for post-compaction context injection

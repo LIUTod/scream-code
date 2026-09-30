@@ -12,6 +12,11 @@ tools:
   - Grep
   - Glob
   - Bash
+  # Script execution mode (enabled by default): runs model-written JavaScript
+  # in a QuickJS sandbox and calls the tools above from inside the script.
+  # Toggle per session with /script. Main agent only — subagent profiles keep
+  # their own restricted tool lists.
+  - RunScript
   - LSP
   - TaskList
   - TaskOutput
