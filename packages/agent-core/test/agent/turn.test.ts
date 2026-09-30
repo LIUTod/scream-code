@@ -116,7 +116,7 @@ describe('Agent turn flow', () => {
     expect(await ctx.untilTurnEnd()).toMatchInlineSnapshot(`
       [wire] turn.prompt                 { "input": [ { "type": "text", "text": "Trigger generate failure" } ], "origin": { "kind": "user" }, "time": "<time>" }
       [emit] turn.started                { "turnId": 0, "origin": { "kind": "user" } }
-      [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "Trigger generate failure" } ], "toolCalls": [], "origin": { "kind": "user" } }, "time": "<time>" }
+      [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "Trigger generate failure" } ], "toolCalls": [], "origin": { "kind": "user" }, "id": "m0" }, "time": "<time>" }
       [wire] context.append_loop_event   { "event": { "type": "step.begin", "uuid": "<uuid-1>", "turnId": "0", "step": 1 }, "time": "<time>" }
       [emit] turn.step.started           { "turnId": 0, "step": 1, "stepId": "<uuid-1>" }
       [wire] request.header              { "provider": "scream", "model": "mock-model", "modelAlias": "mock-model", "systemPrompt": "You are a deterministic test agent.", "activeTools": [], "messagesCount": 1, "estimatedInputTokens": "<tokens>", "time": "<time>" }
@@ -138,7 +138,7 @@ describe('Agent turn flow', () => {
       [wire] metadata                 { "protocol_version": "1.4", "created_at": "<time>" }
       [wire] turn.prompt              { "input": [ { "type": "text", "text": "Hello without login" } ], "origin": { "kind": "user" }, "time": "<time>" }
       [emit] turn.started             { "turnId": 0, "origin": { "kind": "user" } }
-      [wire] context.append_message   { "message": { "role": "user", "content": [ { "type": "text", "text": "Hello without login" } ], "toolCalls": [], "origin": { "kind": "user" } }, "time": "<time>" }
+      [wire] context.append_message   { "message": { "role": "user", "content": [ { "type": "text", "text": "Hello without login" } ], "toolCalls": [], "origin": { "kind": "user" }, "id": "m0" }, "time": "<time>" }
       [emit] turn.ended               { "turnId": 0, "reason": "failed", "error": { "code": "model.not_configured", "message": "No model configured. Run \`scream config\` or use \`/model\` to set a default model.", "name": "ScreamError", "details": { "turnId": 0 }, "retryable": false } }
     `);
     expect(ctx.newEvents()).toMatchInlineSnapshot(
@@ -194,18 +194,21 @@ describe('Agent turn flow', () => {
     );
     expect(ctx.agent.context.data().history).toEqual([
       {
+        id: 'm0',
         role: 'user',
         content: [{ type: 'text', text: 'hooked input' }],
         toolCalls: [],
         origin: { kind: 'user' },
       },
       {
+        id: 'm1',
         role: 'user',
         content: [{ type: 'text', text: hookResult }],
         toolCalls: [],
         origin: { kind: 'hook_result', event: 'UserPromptSubmit' },
       },
       {
+        id: 'm2',
         role: 'assistant',
         content: [{ type: 'text', text: 'model saw original prompt only' }],
         toolCalls: [],
@@ -252,12 +255,14 @@ describe('Agent turn flow', () => {
     );
     expect(ctx.agent.context.data().history).toEqual([
       {
+        id: 'm0',
         role: 'user',
         content: [{ type: 'text', text: 'hooked input' }],
         toolCalls: [],
         origin: { kind: 'user' },
       },
       {
+        id: 'm1',
         role: 'user',
         content: [
           {
@@ -269,6 +274,7 @@ describe('Agent turn flow', () => {
         origin: { kind: 'hook_result', event: 'UserPromptSubmit' },
       },
       {
+        id: 'm2',
         role: 'assistant',
         content: [{ type: 'text', text: 'model saw original prompt only' }],
         toolCalls: [],
@@ -304,12 +310,14 @@ describe('Agent turn flow', () => {
     );
     expect(ctx.agent.context.data().history).toEqual([
       {
+        id: 'm0',
         role: 'user',
         content: [{ type: 'text', text: 'bad words here' }],
         toolCalls: [],
         origin: { kind: 'user' },
       },
       {
+        id: 'm1',
         role: 'assistant',
         content: [{ type: 'text', text: hookResult }],
         toolCalls: [],
@@ -361,6 +369,7 @@ describe('Agent turn flow', () => {
     );
     expect(ctx.agent.context.data().history).toEqual([
       {
+        id: 'm0',
         role: 'user',
         content: [{ type: 'text', text: 'hook will sleep' }],
         toolCalls: [],
@@ -386,6 +395,7 @@ describe('Agent turn flow', () => {
 
     expect(ctx.llmCalls).toHaveLength(2);
     const stopHookMessage = {
+      id: 'm2',
       role: 'user',
       content: [
         {
@@ -1204,7 +1214,7 @@ describe('Agent turn flow', () => {
     expect(await ctx.untilApprovalRequest()).toMatchInlineSnapshot(`
       [wire] turn.prompt                 { "input": [ { "type": "text", "text": "Run a command" } ], "origin": { "kind": "user" }, "time": "<time>" }
       [emit] turn.started                { "turnId": 0, "origin": { "kind": "user" } }
-      [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "Run a command" } ], "toolCalls": [], "origin": { "kind": "user" } }, "time": "<time>" }
+      [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "Run a command" } ], "toolCalls": [], "origin": { "kind": "user" }, "id": "m0" }, "time": "<time>" }
       [wire] context.append_loop_event   { "event": { "type": "step.begin", "uuid": "<uuid-1>", "turnId": "0", "step": 1 }, "time": "<time>" }
       [emit] turn.step.started           { "turnId": 0, "step": 1, "stepId": "<uuid-1>" }
       [wire] request.header              { "provider": "scream", "model": "mock-model", "modelAlias": "mock-model", "systemPrompt": "You are a deterministic test agent.", "activeTools": [ "Bash" ], "messagesCount": 1, "estimatedInputTokens": "<tokens>", "time": "<time>" }
@@ -1256,7 +1266,7 @@ describe('Agent turn flow', () => {
     expect(approval.events).toMatchInlineSnapshot(`
       [wire] turn.prompt                 { "input": [ { "type": "text", "text": "Run Bash, then listen" } ], "origin": { "kind": "user" }, "time": "<time>" }
       [emit] turn.started                { "turnId": 0, "origin": { "kind": "user" } }
-      [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "Run Bash, then listen" } ], "toolCalls": [], "origin": { "kind": "user" } }, "time": "<time>" }
+      [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "Run Bash, then listen" } ], "toolCalls": [], "origin": { "kind": "user" }, "id": "m0" }, "time": "<time>" }
       [wire] context.append_loop_event   { "event": { "type": "step.begin", "uuid": "<uuid-1>", "turnId": "0", "step": 1 }, "time": "<time>" }
       [emit] turn.step.started           { "turnId": 0, "step": 1, "stepId": "<uuid-1>" }
       [wire] request.header              { "provider": "scream", "model": "mock-model", "modelAlias": "mock-model", "systemPrompt": "You are a deterministic test agent.", "activeTools": [ "Bash" ], "messagesCount": 1, "estimatedInputTokens": "<tokens>", "time": "<time>" }
@@ -1298,7 +1308,7 @@ describe('Agent turn flow', () => {
       [emit] turn.step.completed                 { "turnId": 0, "step": 1, "stepId": "<uuid-1>", "usage": { "inputOther": 7, "output": 22, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "tool_use" }
       [wire] usage.record                        { "model": "mock-model", "usage": { "inputOther": 7, "output": 22, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
       [emit] agent.status.updated                { "model": "mock-model", "thinkingLevel": "off", "contextTokens": 29, "maxContextTokens": 1000000, "contextUsage": 0.000029, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "permission": "manual", "usage": { "byModel": { "mock-model": { "inputOther": 7, "output": 22, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 7, "output": 22, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 7, "output": 22, "inputCacheRead": 0, "inputCacheCreation": 0 }, "turnTotal": { "inputOther": 7, "output": 22, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
-      [wire] context.append_message              { "message": { "role": "user", "content": [ { "type": "text", "text": "Also mention the steer." } ], "toolCalls": [], "origin": { "kind": "user" } }, "time": "<time>" }
+      [wire] context.append_message              { "message": { "role": "user", "content": [ { "type": "text", "text": "Also mention the steer." } ], "toolCalls": [], "origin": { "kind": "user" }, "id": "m3" }, "time": "<time>" }
       [wire] context.append_loop_event           { "event": { "type": "step.begin", "uuid": "<uuid-7>", "turnId": "0", "step": 2 }, "time": "<time>" }
       [emit] turn.step.started                   { "turnId": 0, "step": 2, "stepId": "<uuid-7>" }
       [wire] request.header                      { "provider": "scream", "model": "mock-model", "modelAlias": "mock-model", "systemPromptReused": true, "activeTools": [ "Bash" ], "messagesCount": 4, "estimatedInputTokens": "<tokens>", "time": "<time>" }

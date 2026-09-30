@@ -21,6 +21,10 @@ export const SNAPSHOT_FOLDED_CONTEXT_TYPES: ReadonlySet<string> = new Set([
   'context.append_message',
   'context.append_loop_event',
   'context.apply_compaction',
+  // Projection edits are folded like the messages they target: the snapshot
+  // payload carries `messageEdits`, so an edit record predating the snapshot
+  // is fully represented by it.
+  'context.edit_message',
   'micro_compaction.apply',
   'full_compaction.complete',
   // Request headers are pure diagnostics: restore never consumes them and the

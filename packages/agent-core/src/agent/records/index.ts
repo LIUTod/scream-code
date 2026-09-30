@@ -28,9 +28,9 @@ export type { BlobStoreOptions } from './blobref';
 /**
  * Record types whose state is fully captured by a `context.snapshot` record.
  * When a snapshot exists, every one of these that predates it is skipped during
- * replay because the snapshot already holds the folded context memory. Note
- * `micro_compaction.apply` is written with an `as never` cast (it is not part of
- * the AgentRecord union), so it is matched here by its literal type string.
+ * replay because the snapshot already holds the folded context memory —
+ * including `context.edit_message`, whose edits ride inside the snapshot
+ * payload (`messageEdits`).
  *
  * `full_compaction.complete` is included because its only lasting effect is
  * pushing onto `compactedHistory` — a debug trail rendered from the pre-fold
@@ -146,6 +146,12 @@ function restoreAgentRecord(agent: Agent, input: AgentRecord): void {
       // is idempotent (skips already-stored memos), so an interrupted
       // attempt simply runs again on the next resume.
       void recoverMemosFromCompactionSummary(agent, input.summary);
+      return;
+    case 'context.edit_message':
+      // Projection edit: drops or replaces the target in every future provider
+      // request. Replay tolerates a dangling target (no-op) — the message may
+      // have been compacted away before this record replays.
+      agent.context.applyMessageEdit(input.targetId, input.replacement);
       return;
     case 'context.snapshot':
       agent.context.restoreJSONSnapshot(input.snapshot);

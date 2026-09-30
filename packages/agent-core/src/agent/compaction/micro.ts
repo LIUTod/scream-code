@@ -234,7 +234,7 @@ export class MicroCompaction {
     this.agent.records.logRecord({
       type: 'micro_compaction.apply',
       cutoff,
-    } as Record<string, unknown> as never);
+    });
     this.cutoff = cutoff;
   }
 

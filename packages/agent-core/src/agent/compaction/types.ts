@@ -1,6 +1,10 @@
 export interface CompactionResult {
   summary: string;
   compactedCount: number;
+  /** Stable id of the first message kept verbatim by this compaction. Lets a
+   *  later `applyCompaction` re-anchor the cut by identity instead of a raw
+   *  index (falls back to `compactedCount` when absent, e.g. old records). */
+  firstKeptMessageId?: string;
   tokensBefore: number;
   tokensAfter: number;
   /** True when this compaction merged into an existing summary (iterative

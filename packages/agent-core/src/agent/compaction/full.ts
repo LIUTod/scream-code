@@ -306,7 +306,15 @@ export class FullCompaction {
     if (this.agent.records.restoring) {
       return;
     }
-    const compactedCount = this.strategy.computeCompactCount(this.agent.context.history, data.source);
+    const compactedCount = this.strategy.computeCompactCount(
+      this.agent.context.history,
+      data.source,
+      {
+        // Messages the projection edits away must not inflate the preserved
+        // tail: the model never sees them, so the cut may reach further back.
+        isRemoved: (message) => this.agent.context.isMessageRemovedByEdit(message),
+      },
+    );
     if (compactedCount === 0) {
       // Auto path must degrade gracefully: with no safe split prefix (e.g. one
       // giant unsplittable message), throwing here would hard-fail every
@@ -568,7 +576,9 @@ export class FullCompaction {
     const systemPromptTokens = estimateTokens(this.agent.getRuntimeSystemPrompt());
     const toolTokens = estimateTokensForTools(this.agent.tools.loopTools);
     const tokensBefore =
-      systemPromptTokens + toolTokens + estimateTokensForMessages(originalHistory);
+      systemPromptTokens +
+      toolTokens +
+      estimateTokensForMessages(this.agent.context.applyMessageEdits(originalHistory));
     const model = this.agent.config.model;
     // Detect a prior compaction summary at the head of history. If present,
     // use the iterative-update instruction so the LLM merges new content into
@@ -597,7 +607,11 @@ export class FullCompaction {
         // second half / merged message) is honored verbatim; the caller is
         // responsible for passing the exact messages to summarize.
         const messages = [
-          ...project(this.agent.microCompaction.compact(messagesToCompact)),
+          ...project(
+            this.agent.context.applyMessageEdits(
+              this.agent.microCompaction.compact(messagesToCompact),
+            ),
+          ),
           {
             role: 'user',
             content: [
@@ -668,7 +682,9 @@ export class FullCompaction {
             // smallest split too large for the model.
             this.agent.log.warn('compaction overflow at minimum split, falling back to re-summarize', {
               compactedCount,
-              tokensBefore: estimateTokensForMessages(messagesToCompact),
+              tokensBefore: estimateTokensForMessages(
+                this.agent.context.applyMessageEdits(messagesToCompact),
+              ),
             });
             const result = await summarizeWithFallback(messagesToCompact, summarizeOnce);
             summary = result.summary;
@@ -706,6 +722,10 @@ export class FullCompaction {
       }
 
       const recent = originalHistory.slice(compactedCount);
+      // The gauge must reflect what the model will actually see after
+      // compaction, i.e. the *projected* tail (edits applied), not the raw
+      // slice which may still contain messages the projection drops.
+      const projectedRecent = this.agent.context.applyMessageEdits(recent);
       const messagesToCompactForOps = originalHistory.slice(0, compactedCount);
       const fileOps = createFileOps();
       // Merge the previous compaction's file lists first so file context
@@ -733,7 +753,7 @@ export class FullCompaction {
       const skillCandidateSummary = summary;
       const processedSummary = this.postProcessSummary(summary, fileOps, toolCallHistory, compactedCount);
       const tokensAfter =
-        systemPromptTokens + toolTokens + estimateTokens(processedSummary) + estimateTokensForMessages(recent);
+        systemPromptTokens + toolTokens + estimateTokens(processedSummary) + estimateTokensForMessages(projectedRecent);
 
       const fileLists = computeFileLists(fileOps);
       // Cap persisted lists so repeated compactions cannot grow them without
@@ -743,6 +763,7 @@ export class FullCompaction {
       const MAX_PERSISTED_FILES = 100;
       const readFiles = fileLists.readFiles.slice(0, MAX_PERSISTED_FILES);
       const modifiedFiles = fileLists.modifiedFiles.slice(0, MAX_PERSISTED_FILES);
+      const firstKeptMessageId = originalHistory[compactedCount]?.id;
       const result: CompactionResult = {
         summary: processedSummary,
         compactedCount,
@@ -754,6 +775,9 @@ export class FullCompaction {
         ...(readFiles.length > 0 ? { readFiles } : {}),
         ...(modifiedFiles.length > 0 ? { modifiedFiles } : {}),
         ...(isUpdate ? { isUpdate: true } : {}),
+        // Lets a later applyCompaction re-anchor the cut by identity even if
+        // the history shifted while this (async) compaction was running.
+        ...(firstKeptMessageId !== undefined ? { firstKeptMessageId } : {}),
       };
       this.markCompleted();
       this.agent.emitEvent({ type: 'compaction.completed', result });

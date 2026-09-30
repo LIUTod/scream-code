@@ -88,12 +88,29 @@ export interface AgentRecordEvents {
 
   'full_compaction.cancel': {};
   'full_compaction.complete': {};
+  /**
+   * Micro-compaction cutoff advance. Not restored on replay (the cutoff is a
+   * live-derived value recomputed by `detect()`), but registered here so the
+   * record is type-checked on write instead of needing an `as never` cast.
+   */
+  'micro_compaction.apply': { cutoff: number };
 
   'context.append_message': { message: ContextMessage };
   'context.append_loop_event': { event: LoopRecordedEvent };
   'context.clear': {};
   'context.undo': { count: number };
   'context.apply_compaction': CompactionResult;
+  /**
+   * Persisted projection edit (see `ContextMemory.applyMessageEdit`): removes
+   * (`replacement: null`) or replaces the history message with the given
+   * stable `id` in the *projection* (provider request) while leaving the raw
+   * history untouched. Written with strict validation; replay tolerates a
+   * dangling target (no-op) so newer wires stay forward-compatible.
+   */
+  'context.edit_message': {
+    targetId: string;
+    replacement: readonly ContentPart[] | null;
+  };
   /**
    * Point-in-time snapshot of the folded context memory, written right after a
    * successful full compaction. On resume the replayer restores this snapshot

@@ -43,10 +43,27 @@ export const DEFAULT_COMPACTION_CONFIG: CompactionConfig = {
   turnGrowthMultiplier: 2.5, // maxOutput + 1.5x avg tool result growth
 };
 
+/**
+ * Projection-aware knobs for cut-point computation. Lives in the strategy so
+ * the compaction layer never has to know how edits are stored — it only sees
+ * which messages the projection removes.
+ */
+export interface CompactCountOptions {
+  /** Messages the projection drops entirely (e.g. persisted `context.edit_message`
+   *  edits with `replacement: null`). They contribute no tokens and do not
+   *  count toward the preserved-tail guarantees, because the model never sees
+   *  them. */
+  readonly isRemoved?: ((message: Message) => boolean) | undefined;
+}
+
 export interface CompactionStrategy {
   shouldCompact(usedSize: number): boolean;
   shouldBlock(usedSize: number): boolean;
-  computeCompactCount(messages: readonly Message[], source: CompactionSource): number;
+  computeCompactCount(
+    messages: readonly Message[],
+    source: CompactionSource,
+    options?: CompactCountOptions,
+  ): number;
   reduceCompactOnOverflow(messages: readonly Message[]): number;
   /** Estimate worst-case token growth for one turn step. */
   estimateTurnGrowth(maxOutputTokens: number): number;
@@ -88,7 +105,11 @@ export class DefaultCompactionStrategy implements CompactionStrategy {
     return reservedSize > 0 && reservedSize < this.maxSize && usedSize + reservedSize >= this.maxSize;
   }
 
-  computeCompactCount(messages: readonly Message[], source: CompactionSource): number {
+  computeCompactCount(
+    messages: readonly Message[],
+    source: CompactionSource,
+    options?: CompactCountOptions,
+  ): number {
     // Return value: N messages to be compacted (0 means no compaction possible)
     // LLM Input: messages.slice(0, N) + [user:instruction]
     // Preserved recent messages: messages.slice(N)
@@ -115,6 +136,7 @@ export class DefaultCompactionStrategy implements CompactionStrategy {
     // 7. N should be as small as possible
 
     let recentMessages = 1;
+    let keptMessages = 0;
     let recentUserMessages = 0;
     let recentSize = 0;
     let bestN: number | undefined;
@@ -123,16 +145,23 @@ export class DefaultCompactionStrategy implements CompactionStrategy {
       const splitIndex = messages.length - recentMessages - 1;
       const m2 = messages[messages.length - recentMessages]!;
 
-      if (m2.role === 'user') {
-        recentUserMessages++;
+      // Messages the projection removes contribute nothing — neither tokens
+      // nor message/user counts — because the model never sees them; a tail
+      // with edited-out noise must not compact later than the projected
+      // context actually requires.
+      if (options?.isRemoved?.(m2) !== true) {
+        keptMessages++;
+        if (m2.role === 'user') {
+          recentUserMessages++;
+        }
+        recentSize += estimateTokensForMessage(m2);
       }
-      recentSize += estimateTokensForMessage(m2);
 
       if (canSplitAfter(messages, splitIndex)) {
         bestN = splitIndex + 1;
       }
 
-      const reachesMax = recentMessages >= this.config.maxRecentMessages
+      const reachesMax = keptMessages >= this.config.maxRecentMessages
         || recentUserMessages >= this.config.maxRecentUserMessages
         || recentSize >= this.config.maxRecentTokens
         || recentSize >= this.maxSize * this.config.maxRecentSizeRatio;

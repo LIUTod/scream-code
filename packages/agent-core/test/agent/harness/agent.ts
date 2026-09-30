@@ -80,6 +80,9 @@ interface ResumeStateSnapshot {
     readonly systemPrompt: string;
   };
   readonly context: ReturnType<Agent['context']['data']>;
+  /** Full projection (what the model would see): resume must reproduce it
+   *  byte-for-byte, including persisted `context.edit_message` edits. */
+  readonly messages: Agent['context']['messages'];
   readonly fullCompaction: Agent['fullCompaction']['compactedHistory'];
   readonly permission: ReturnType<Agent['permission']['data']>;
   readonly tools: ReturnType<Agent['tools']['data']>;
@@ -999,6 +1002,7 @@ function resumeStateSnapshot(agent: Agent): ResumeStateSnapshot {
     background: agent.background.list(false),
     config: configStateSnapshot(agent),
     context: resumeContextSnapshot(agent),
+    messages: [...agent.context.messages],
     fullCompaction: agent.fullCompaction.compactedHistory,
     permission: agent.permission.data(),
     tools: agent.tools.data(),

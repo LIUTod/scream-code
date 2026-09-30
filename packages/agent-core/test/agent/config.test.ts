@@ -123,7 +123,7 @@ describe('Agent config', () => {
     expect(await ctx.untilApproval(true)).toMatchInlineSnapshot(`
       [wire] turn.prompt                 { "input": [ { "type": "text", "text": "Run Bash before config changes" } ], "origin": { "kind": "user" }, "time": "<time>" }
       [emit] turn.started                { "turnId": 0, "origin": { "kind": "user" } }
-      [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "Run Bash before config changes" } ], "toolCalls": [], "origin": { "kind": "user" } }, "time": "<time>" }
+      [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "Run Bash before config changes" } ], "toolCalls": [], "origin": { "kind": "user" }, "id": "m0" }, "time": "<time>" }
       [wire] context.append_loop_event   { "event": { "type": "step.begin", "uuid": "<uuid-1>", "turnId": "0", "step": 1 }, "time": "<time>" }
       [emit] turn.step.started           { "turnId": 0, "step": 1, "stepId": "<uuid-1>" }
       [wire] request.header              { "provider": "scream", "model": "mock-model", "modelAlias": "mock-model", "systemPrompt": "You are a deterministic test agent.", "activeTools": [ "Bash" ], "messagesCount": 1, "estimatedInputTokens": "<tokens>", "time": "<time>" }
@@ -194,8 +194,8 @@ describe('Agent config', () => {
     expect(await ctx.untilTurnEnd()).toMatchInlineSnapshot(`
       [wire] turn.prompt                 { "input": [ { "type": "text", "text": "Start a fresh turn" } ], "origin": { "kind": "user" }, "time": "<time>" }
       [emit] turn.started                { "turnId": 1, "origin": { "kind": "user" } }
-      [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "Start a fresh turn" } ], "toolCalls": [], "origin": { "kind": "user" } }, "time": "<time>" }
-      [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "<system-reminder>\\n## 当前会话状态\\n\\n### 最近操作\\n\\n- ✅ Bash — printf original-result\\n\\n</system-reminder>" } ], "toolCalls": [], "origin": { "kind": "injection", "variant": "session_memory" } }, "time": "<time>" }
+      [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "Start a fresh turn" } ], "toolCalls": [], "origin": { "kind": "user" }, "id": "m4" }, "time": "<time>" }
+      [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "<system-reminder>\\n## 当前会话状态\\n\\n### 最近操作\\n\\n- ✅ Bash — printf original-result\\n\\n</system-reminder>" } ], "toolCalls": [], "origin": { "kind": "injection", "variant": "session_memory" }, "id": "m5" }, "time": "<time>" }
       [wire] context.append_loop_event   { "event": { "type": "step.begin", "uuid": "<uuid-11>", "turnId": "1", "step": 1 }, "time": "<time>" }
       [emit] turn.step.started           { "turnId": 1, "step": 1, "stepId": "<uuid-11>" }
       [wire] request.header              { "provider": "scream", "model": "changed-model", "modelAlias": "changed-model", "systemPrompt": "Changed system prompt.", "activeTools": [], "messagesCount": 6, "estimatedInputTokens": "<tokens>", "time": "<time>" }

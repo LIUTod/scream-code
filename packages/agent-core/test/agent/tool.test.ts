@@ -288,8 +288,8 @@ describe('Agent tools', () => {
       [emit] tool.list.updated           { "reason": "user.registered", "toolName": "Lookup" }
       [wire] turn.prompt                 { "input": [ { "type": "text", "text": "Look up moon" } ], "origin": { "kind": "user" }, "time": "<time>" }
       [emit] turn.started                { "turnId": 0, "origin": { "kind": "user" } }
-      [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "Look up moon" } ], "toolCalls": [], "origin": { "kind": "user" } }, "time": "<time>" }
-      [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "<auto-mode-enter-reminder>" } ], "toolCalls": [], "origin": { "kind": "injection", "variant": "permission_mode" } }, "time": "<time>" }
+      [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "Look up moon" } ], "toolCalls": [], "origin": { "kind": "user" }, "id": "m0" }, "time": "<time>" }
+      [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "<auto-mode-enter-reminder>" } ], "toolCalls": [], "origin": { "kind": "injection", "variant": "permission_mode" }, "id": "m1" }, "time": "<time>" }
       [wire] context.append_loop_event   { "event": { "type": "step.begin", "uuid": "<uuid-1>", "turnId": "0", "step": 1 }, "time": "<time>" }
       [emit] turn.step.started           { "turnId": 0, "step": 1, "stepId": "<uuid-1>" }
       [wire] request.header              { "provider": "scream", "model": "mock-model", "modelAlias": "mock-model", "systemPrompt": "You are a deterministic test agent.", "activeTools": [ "Lookup" ], "messagesCount": 2, "estimatedInputTokens": "<tokens>", "time": "<time>" }
@@ -349,8 +349,8 @@ describe('Agent tools', () => {
       [emit] tool.list.updated            { "reason": "user.unregistered", "toolName": "Lookup" }
       [wire] turn.prompt                  { "input": [ { "type": "text", "text": "Can you still use Lookup?" } ], "origin": { "kind": "user" }, "time": "<time>" }
       [emit] turn.started                 { "turnId": 1, "origin": { "kind": "user" } }
-      [wire] context.append_message       { "message": { "role": "user", "content": [ { "type": "text", "text": "Can you still use Lookup?" } ], "toolCalls": [], "origin": { "kind": "user" } }, "time": "<time>" }
-      [wire] context.append_message       { "message": { "role": "user", "content": [ { "type": "text", "text": "<system-reminder>\\n## 当前会话状态\\n\\n### 最近操作\\n\\n- ✅ Lookup — moon\\n\\n</system-reminder>" } ], "toolCalls": [], "origin": { "kind": "injection", "variant": "session_memory" } }, "time": "<time>" }
+      [wire] context.append_message       { "message": { "role": "user", "content": [ { "type": "text", "text": "Can you still use Lookup?" } ], "toolCalls": [], "origin": { "kind": "user" }, "id": "m5" }, "time": "<time>" }
+      [wire] context.append_message       { "message": { "role": "user", "content": [ { "type": "text", "text": "<system-reminder>\\n## 当前会话状态\\n\\n### 最近操作\\n\\n- ✅ Lookup — moon\\n\\n</system-reminder>" } ], "toolCalls": [], "origin": { "kind": "injection", "variant": "session_memory" }, "id": "m6" }, "time": "<time>" }
       [wire] context.append_loop_event    { "event": { "type": "step.begin", "uuid": "<uuid-11>", "turnId": "1", "step": 1 }, "time": "<time>" }
       [emit] turn.step.started            { "turnId": 1, "step": 1, "stepId": "<uuid-11>" }
       [wire] request.header               { "provider": "scream", "model": "mock-model", "modelAlias": "mock-model", "systemPromptReused": true, "activeTools": [], "messagesCount": 7, "estimatedInputTokens": "<tokens>", "time": "<time>" }

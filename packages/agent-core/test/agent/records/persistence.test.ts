@@ -428,6 +428,24 @@ describe('snapshot parse-skipping (read fast path)', () => {
     ]);
   });
 
+  it('skips edit records folded into the snapshot payload', async () => {
+    const wirePath = await writeFixture([
+      METADATA,
+      foldedMessage('old question'), // folded into the snapshot below
+      // Folded as well: the snapshot payload carries `messageEdits`, so the
+      // fast path may drop the record — replay restores the edit from there.
+      { type: 'context.edit_message', targetId: 'm0', replacement: null },
+      snapshotRecord(),
+      { type: 'context.edit_message', targetId: 'm1', replacement: null }, // after the snapshot — NOT skipped
+    ]);
+
+    expect(await readTypes(wirePath)).toEqual([
+      'metadata',
+      'context.snapshot',
+      'context.edit_message',
+    ]);
+  });
+
   it('still parses everything when the wire version differs (migration path)', async () => {
     const wirePath = await writeFixture([
       { ...METADATA, protocol_version: Number(AGENT_WIRE_PROTOCOL_VERSION) - 1 },

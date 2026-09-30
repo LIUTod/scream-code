@@ -50,6 +50,8 @@ export interface ContextMemorySnapshot {
   readonly openSteps: ReadonlyMap<string, ContextMessage>;
   readonly pendingToolResultIds: ReadonlySet<string>;
   readonly deferredMessages: readonly ContextMessage[];
+  /** Projection edits keyed by message id (`null` = removed). */
+  readonly messageEdits?: ReadonlyMap<string, readonly ContentPart[] | null> | undefined;
 }
 
 /**
@@ -68,6 +70,11 @@ export interface ContextMemoryJSONSnapshot {
   readonly openSteps: readonly (readonly [string, number])[];
   readonly pendingToolResultIds: readonly string[];
   readonly deferredMessages: readonly ContextMessage[];
+  /** Persisted projection edits, keyed by message id (`null` = removed).
+   *  Optional: snapshots written before the feature restore with none. */
+  readonly messageEdits?:
+    | readonly (readonly [string, readonly ContentPart[] | null])[]
+    | undefined;
 }
 
 export class ContextMemory {
@@ -77,6 +84,17 @@ export class ContextMemory {
   private openSteps: Map<string, ContextMessage> = new Map();
   private pendingToolResultIds = new Set<string>();
   private deferredMessages: ContextMessage[] = [];
+
+  /**
+   * Persisted projection edits keyed by message id: `null` removes the
+   * message from the projection, an array replaces its content. The raw
+   * history is never modified — every LLM-bound read path funnels through
+   * {@link applyMessageEdits}.
+   */
+  private _messageEdits = new Map<string, readonly ContentPart[] | null>();
+  /** Counter behind {@link assignMessageId}. Never reset: ids must stay
+   *  unique for the whole session lifetime, including across clear/undo. */
+  private _nextMessageId = 0;
 
   /**
    * Per-message fingerprints captured from the last message list handed to
@@ -101,6 +119,7 @@ export class ContextMemory {
       openSteps: new Map(this.openSteps),
       pendingToolResultIds: new Set(this.pendingToolResultIds),
       deferredMessages: [...this.deferredMessages],
+      messageEdits: new Map(this._messageEdits),
     };
   }
 
@@ -111,6 +130,9 @@ export class ContextMemory {
     this.openSteps = new Map(snapshot.openSteps);
     this.pendingToolResultIds = new Set(snapshot.pendingToolResultIds);
     this.deferredMessages = [...snapshot.deferredMessages];
+    this._messageEdits = new Map(snapshot.messageEdits ?? []);
+    for (const message of this._history) this.assignMessageId(message);
+    for (const message of this.deferredMessages) this.assignMessageId(message);
   }
 
   /**
@@ -129,6 +151,11 @@ export class ContextMemory {
       ),
       pendingToolResultIds: [...this.pendingToolResultIds],
       deferredMessages: [...this.deferredMessages],
+      // Attach only when present so wires without edits stay byte-identical
+      // to what earlier builds wrote.
+      ...(this._messageEdits.size > 0
+        ? { messageEdits: [...this._messageEdits.entries()] }
+        : {}),
     };
   }
 
@@ -151,6 +178,11 @@ export class ContextMemory {
     this.openSteps = openSteps;
     this.pendingToolResultIds = new Set(snapshot.pendingToolResultIds);
     this.deferredMessages = [...snapshot.deferredMessages];
+    this._messageEdits = new Map(snapshot.messageEdits ?? []);
+    // Legacy wires predate message ids: synthesize them deterministically in
+    // history order so persisted edits (and future ones) keep resolving.
+    for (const message of this._history) this.assignMessageId(message);
+    for (const message of this.deferredMessages) this.assignMessageId(message);
   }
 
   appendUserMessage(
@@ -183,6 +215,7 @@ export class ContextMemory {
     this.openSteps.clear();
     this.pendingToolResultIds.clear();
     this.deferredMessages = [];
+    this._messageEdits.clear();
     this.lastSentFingerprints = [];
     this.agent.injection.onContextClear();
     // History was emptied; the micro-compaction cutoff line refers to the
@@ -284,15 +317,21 @@ export class ContextMemory {
       type: 'context.apply_compaction',
       ...summary,
     });
-    this._history = [
-      {
-        role: 'assistant',
-        content: [{ type: 'text', text: summary.summary }],
-        toolCalls: [],
-        origin: { kind: 'compaction_summary' },
-      },
-      ...this._history.slice(summary.compactedCount),
-    ];
+    const summaryMessage: ContextMessage = {
+      role: 'assistant',
+      content: [{ type: 'text', text: summary.summary }],
+      toolCalls: [],
+      origin: { kind: 'compaction_summary' },
+    };
+    this.assignMessageId(summaryMessage);
+    // Re-anchor the cut by identity when the record carries it (new records);
+    // old records keep the raw-index semantics via `compactedCount`.
+    let cut = summary.compactedCount;
+    if (summary.firstKeptMessageId !== undefined) {
+      const byId = this._history.findIndex((m) => m.id === summary.firstKeptMessageId);
+      if (byId >= 0) cut = byId;
+    }
+    this._history = [summaryMessage, ...this._history.slice(cut)];
     // Prune open-step mappings by reference instead of clearing them all:
     // a step that is still in flight lives at the history tail and survives
     // the compaction slice, so its tool.call/content.part events must keep
@@ -307,7 +346,7 @@ export class ContextMemory {
     this.flushDeferredMessagesIfToolExchangeClosed();
     this._tokenCount = summary.tokensAfter;
     this.tokenCountCoveredMessageCount = this._history.length;
-    this.agent.injection.onContextCompacted(summary.compactedCount);
+    this.agent.injection.onContextCompacted(cut);
     this.agent.emitStatusUpdated();
     this.agent.microCompaction.reset();
 
@@ -325,6 +364,121 @@ export class ContextMemory {
     }
   }
 
+  // -------------------------------------------------------------------------
+  // Projection edits
+  // -------------------------------------------------------------------------
+
+  /**
+   * Apply persisted projection edits to a message list: messages edited to
+   * `null` are dropped; messages with a replacement get a *copy* carrying the
+   * new content (a fresh object keeps the token-estimate WeakMap from
+   * returning the stale count). Messages without an edit — and every message
+   * when no edits exist — pass through unchanged.
+   *
+   * Only what the model sees is affected: the raw history (UI, export, trace,
+   * resume) keeps the original content.
+   */
+  applyMessageEdits(messages: readonly ContextMessage[]): readonly ContextMessage[] {
+    if (this._messageEdits.size === 0) return messages;
+    const result: ContextMessage[] = [];
+    for (const message of messages) {
+      const id = message.id;
+      const edit = id === undefined ? undefined : this._messageEdits.get(id);
+      if (edit === undefined) {
+        result.push(message);
+      } else if (edit !== null) {
+        result.push({ ...message, content: [...edit] });
+      }
+    }
+    return result;
+  }
+
+  /** Whether a persisted edit removes this message from the projection. */
+  isMessageRemovedByEdit(message: Message): boolean {
+    const id = (message as { id?: string }).id;
+    return id !== undefined && this._messageEdits.get(id) === null;
+  }
+
+  /**
+   * Persist a projection edit for the message with `targetId`:
+   * `replacement: null` removes the message from every future provider
+   * request; an array replaces its content. The edit is recorded, so it
+   * replays on resume and survives restarts; the raw history message is never
+   * rewritten.
+   *
+   * Live writes validate strictly (the target must exist and be editable).
+   * During replay the same method runs for records read from the wire and
+   * silently skips targets that no longer exist (e.g. the message was
+   * compacted away before the edit replayed) — a newer wire must never fail
+   * to load.
+   */
+  applyMessageEdit(targetId: string, replacement: readonly ContentPart[] | null): void {
+    const index = this._history.findIndex((message) => message.id === targetId);
+    const message =
+      index === -1
+        ? this.deferredMessages.find((candidate) => candidate.id === targetId)
+        : this._history[index]!;
+    if (message === undefined) {
+      if (this.agent.records.restoring) return;
+      throw new Error(`context.edit_message: no message with id '${targetId}'`);
+    }
+    if (message.role === 'system' || message.origin?.kind === 'compaction_summary') {
+      if (this.agent.records.restoring) return;
+      throw new Error(`context.edit_message: message '${targetId}' is not editable`);
+    }
+    const previousEdit = this._messageEdits.get(targetId);
+    const normalized =
+      replacement === null ? null : replacement.map((part) => ({ ...part }));
+    this._messageEdits.set(targetId, normalized);
+    this.agent.records.logRecord({
+      type: 'context.edit_message',
+      targetId,
+      replacement: normalized,
+    });
+    // Keep the API-anchored gauge honest when the edit lands inside the
+    // measured prefix: adjust by the estimated delta. The baseline is the
+    // *current* projection of the target — a second edit replaces the first
+    // one's effect instead of stacking on top of it. Deferred targets are not
+    // in the measured prefix (and not in the projection yet), so only history
+    // targets adjust the gauge; content after the covered count is
+    // re-projected through `applyMessageEdits` on every read.
+    if (index !== -1 && index < this.tokenCountCoveredMessageCount) {
+      const before =
+        previousEdit === undefined
+          ? estimateTokensForMessages([message])
+          : previousEdit === null
+            ? 0
+            : estimateTokensForMessages([{ ...message, content: [...previousEdit] }]);
+      const after =
+        normalized === null
+          ? 0
+          : estimateTokensForMessages([{ ...message, content: normalized }]);
+      this._tokenCount = Math.max(0, this._tokenCount + after - before);
+    }
+    this.agent.emitStatusUpdated();
+  }
+
+  /**
+   * Assign a stable id the first time a message enters the history (or when
+   * it is restored from the wire). Mutates the message in place — object
+   * identity is load-bearing: open steps, deferred messages and the history
+   * array all reference the same object. Messages that already carry an id
+   * only advance the counter past it.
+   */
+  private assignMessageId(message: ContextMessage): void {
+    const existing = message.id;
+    if (existing !== undefined) {
+      const match = /^m(\d+)$/.exec(existing);
+      if (match !== null) {
+        const n = Number(match[1]);
+        if (n >= this._nextMessageId) this._nextMessageId = n + 1;
+      }
+      return;
+    }
+    (message as { id?: string }).id = `m${this._nextMessageId}`;
+    this._nextMessageId += 1;
+  }
+
   data(): AgentContextData {
     return {
       history: this.history,
@@ -338,7 +492,10 @@ export class ContextMemory {
 
   get tokenCountWithPending(): number {
     const pendingMessages = this._history.slice(this.tokenCountCoveredMessageCount);
-    return this._tokenCount + estimateTokensForMessages(project(pendingMessages));
+    return (
+      this._tokenCount +
+      estimateTokensForMessages(project(this.applyMessageEdits(pendingMessages)))
+    );
   }
 
   get history(): readonly ContextMessage[] {
@@ -360,7 +517,7 @@ export class ContextMemory {
     // prefer {@link messagesForLLM} which adds prefix-stability
     // observability on top of this getter.
     this.agent.microCompaction.detect();
-    return project(this.agent.microCompaction.compact(this.history));
+    return project(this.applyMessageEdits(this.agent.microCompaction.compact(this.history)));
   }
 
   /**
@@ -386,9 +543,12 @@ export class ContextMemory {
     // boundary; mirroring it here keeps this path behavior-identical to
     // the `messages` getter when called directly (e.g. tests).
     this.agent.microCompaction.detect();
-    const messages = project(this.agent.microCompaction.compact(this.history), {
-      synthesizeMissing: true,
-    });
+    const messages = project(
+      this.applyMessageEdits(this.agent.microCompaction.compact(this.history)),
+      {
+        synthesizeMissing: true,
+      },
+    );
     this.observePrefixStability(messages);
     return messages;
   }
@@ -502,6 +662,9 @@ export class ContextMemory {
   }
 
   appendMessage(message: ContextMessage): void {
+    // Assign the id before logging so the persisted record carries it; replay
+    // then reuses the same id instead of deriving a fresh one.
+    this.assignMessageId(message);
     this.agent.records.logRecord({
       type: 'context.append_message',
       message,
@@ -554,6 +717,9 @@ export class ContextMemory {
   }
 
   private pushHistory(...messages: ContextMessage[]): void {
+    for (const message of messages) {
+      this.assignMessageId(message);
+    }
     this._history.push(...messages);
     for (const message of messages) {
       if (message.origin?.kind === 'background_task') {

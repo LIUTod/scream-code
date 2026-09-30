@@ -76,6 +76,15 @@ export type PromptOrigin =
   | HookResultOrigin;
 
 export type ContextMessage = Message & {
+  /**
+   * Stable identity of this message within the session wire (`m<n>`).
+   * Assigned once — when the message first enters the history, or when it is
+   * restored from the wire — and never reused, so persisted projection edits
+   * (`context.edit_message`) keep pointing at the same message across
+   * resume/replay. Readonly by type; `ContextMemory` assigns it in place on
+   * first insert to preserve object identity with open steps.
+   */
+  readonly id?: string;
   readonly origin?: PromptOrigin | undefined;
   readonly isError?: boolean;
   /**

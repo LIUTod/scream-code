@@ -13,7 +13,7 @@ it('runs a text-only agent turn from prompt to completion', async () => {
   expect(await ctx.untilTurnEnd()).toMatchInlineSnapshot(`
     [wire] turn.prompt                 { "input": [ { "type": "text", "text": "Hello" } ], "origin": { "kind": "user" }, "time": "<time>" }
     [emit] turn.started                { "turnId": 0, "origin": { "kind": "user" } }
-    [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "Hello" } ], "toolCalls": [], "origin": { "kind": "user" } }, "time": "<time>" }
+    [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "Hello" } ], "toolCalls": [], "origin": { "kind": "user" }, "id": "m0" }, "time": "<time>" }
     [wire] context.append_loop_event   { "event": { "type": "step.begin", "uuid": "<uuid-1>", "turnId": "0", "step": 1 }, "time": "<time>" }
     [emit] turn.step.started           { "turnId": 0, "step": 1, "stepId": "<uuid-1>" }
     [wire] request.header              { "provider": "scream", "model": "mock-model", "modelAlias": "mock-model", "systemPrompt": "You are a deterministic test agent.", "activeTools": [], "messagesCount": 1, "estimatedInputTokens": "<tokens>", "time": "<time>" }
@@ -95,7 +95,7 @@ it('runs an agent turn through builtin tool approval and execution', async () =>
   expect(await ctx.untilApproval(true)).toMatchInlineSnapshot(`
     [wire] turn.prompt                 { "input": [ { "type": "text", "text": "Run a command that prints lookup-result" } ], "origin": { "kind": "user" }, "time": "<time>" }
     [emit] turn.started                { "turnId": 0, "origin": { "kind": "user" } }
-    [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "Run a command that prints lookup-result" } ], "toolCalls": [], "origin": { "kind": "user" } }, "time": "<time>" }
+    [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "Run a command that prints lookup-result" } ], "toolCalls": [], "origin": { "kind": "user" }, "id": "m0" }, "time": "<time>" }
     [wire] context.append_loop_event   { "event": { "type": "step.begin", "uuid": "<uuid-1>", "turnId": "0", "step": 1 }, "time": "<time>" }
     [emit] turn.step.started           { "turnId": 0, "step": 1, "stepId": "<uuid-1>" }
     [wire] request.header              { "provider": "scream", "model": "mock-model", "modelAlias": "mock-model", "systemPrompt": "You are a deterministic test agent.", "activeTools": [ "Bash" ], "messagesCount": 1, "estimatedInputTokens": "<tokens>", "time": "<time>" }
