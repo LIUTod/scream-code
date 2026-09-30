@@ -59,11 +59,12 @@ const BRANCH_PIPE = '  │  ';
 const TREE_PIPE_ROW = '  │';
 const THINKING_BODY_PREFIX = '     ';
 /**
- * Extra indent for reasoning rows. Tool bodies carry their own three-cell
- * line-number gutter (`   1  /**`), so reasoning text needs the same offset to
- * land in one column with them instead of three cells to their left.
+ * Extra indent shared by every body row of a block. File and diff bodies
+ * reserve three cells for their line-number gutter (`   1  /**`), so tool
+ * bodies, reasoning rows and hints all start at that same content column
+ * instead of sitting three cells to its left.
  */
-const THINKING_TEXT_INDENT = '   ';
+const BODY_TEXT_INDENT = '   ';
 /** Cells of a background task notice bullet (`⠋ ` / `✓ ` / `✗ `). */
 const NOTICE_BULLET_WIDTH = 2;
 const THROTTLE_MS = 200;
@@ -660,7 +661,7 @@ export class ActivityGroupComponent extends Container {
     }
     if (hidden > 0) {
       const summary = t('activitygroup.segments_hidden', { count: String(hidden) });
-      this.bodyContainer.addChild(new Text(`${BRANCH_PIPE}${chalk.dim(summary)}`, 0, 0));
+      this.bodyContainer.addChild(new Text(`${BRANCH_PIPE}${BODY_TEXT_INDENT}${chalk.dim(summary)}`, 0, 0));
     }
   }
 
@@ -673,7 +674,7 @@ export class ActivityGroupComponent extends Container {
       ];
       const continuation = isLast ? THINKING_BODY_PREFIX : BRANCH_PIPE;
       for (const line of row.body) {
-        components.push(new Text(`${continuation}${line}`, 0, 0));
+        components.push(new Text(`${continuation}${BODY_TEXT_INDENT}${line}`, 0, 0));
       }
       return { components, cost: 1 + row.body.length };
     }
@@ -749,7 +750,7 @@ export class ActivityGroupComponent extends Container {
     // Capped by RENDERED lines: a long unbroken paragraph wraps into many rows,
     // and the budget must hold regardless of the source shape.
     const budget = getActivityLines().expandedThinking;
-    const textPrefix = `${continuation}${THINKING_TEXT_INDENT}`;
+    const textPrefix = `${continuation}${BODY_TEXT_INDENT}`;
     const inner = Math.max(1, width - visibleWidth(textPrefix));
     const height = (line: string): number =>
       new WrappedLine(textPrefix, textPrefix, line).render(inner).length;

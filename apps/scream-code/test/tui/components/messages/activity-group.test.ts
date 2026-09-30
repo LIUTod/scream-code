@@ -68,7 +68,7 @@ describe('ActivityGroupComponent', () => {
     resetSharedSpeedTracker();
   });
 
-  it('lines reasoning text up with a file body content column', () => {
+  it('starts every body row at the same content column', () => {
     const group = new ActivityGroupComponent(darkColors, undefined);
     group.attachTool(
       new ToolCallComponent(
@@ -78,18 +78,29 @@ describe('ActivityGroupComponent', () => {
       ),
       1,
     );
+    group.attachTool(
+      new ToolCallComponent(
+        { id: 't2', name: 'Bash', args: { command: 'ls' } },
+        { tool_call_id: 't2', output: 'src  test', is_error: false },
+        darkColors,
+      ),
+      2,
+    );
     group.appendThinking(THINKING, false);
     group.setExpanded(true);
 
     const lines = render(group);
-    const fileBody = lines.find((line) => line.includes('1  /**')) ?? '';
+    const bashBody = lines.find((line) => line.includes('src  test')) ?? '';
     const reasoning = lines.find((line) => line.includes('first reasoning line')) ?? '';
+    const fileBody = lines.find((line) => line.includes('1  /**')) ?? '';
 
-    // File bodies reserve a three-cell line-number gutter inside the row, so the
-    // reasoning text has to sit three cells further right than the row prefix.
-    const fileColumn = fileBody.indexOf('1  /**');
-    expect(reasoning.indexOf('first reasoning line')).toBe(fileColumn);
-    expect(fileColumn).toBeGreaterThan(0);
+    // Rule: tool bodies, reasoning rows and hints share one content column. A
+    // file body carries its three-cell line-number gutter inside its own text,
+    // so its numbers sit three cells right of that column rather than defining
+    // a column of their own.
+    const bodyColumn = bashBody.indexOf('src  test');
+    expect(reasoning.indexOf('first reasoning line')).toBe(bodyColumn);
+    expect(fileBody.indexOf('1  /**')).toBe(bodyColumn + 3);
   });
 
   it('collapses reasoning plus tool calls into exactly three rows', () => {
