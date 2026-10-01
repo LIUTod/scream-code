@@ -878,7 +878,7 @@ After an approval is rejected, the model receives explicit guidance: which actio
 
 ### Anti-Drift Prompt Guidance
 
-The system prompt carries an "anti-drift" discipline section (context management / verification / anti-drift) that keeps the LLM from diverging from the original request in long sessions — paired with the Verification Protocol's convergence gate below as a second line of defense.
+The system prompt carries an "anti-drift" discipline section (context management / verification / anti-drift) that keeps the LLM from diverging from the original request in long sessions — paired with the Verification Protocol's convergence gate below as a second line of defense. The CONTRACT also carries a cost-discipline clause: be economical by default — among paths that reach the same verified result, take the cheaper one — never at the cost of the deliverable.
 
 ### Memory System
 

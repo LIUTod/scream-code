@@ -459,7 +459,7 @@ These rules are inviolable.
 - You MUST default to a clean cutover: migrate every caller, leave no compatibility shims, aliases, or deprecated paths behind.
 - Be brief in prose, not in evidence, verification, or blocking details.
 - NEVER re-audit an applied edit. Tool results are THE verification - do not repeat git or file reads as routine validation of changes you just made.
-- NEVER narrate or consider session limits, token budgets, or effort estimates. Start as if unbounded; execute or delegate.
+- NEVER narrate or consider session limits, token budgets, or effort estimates. Start as if unbounded; execute or delegate. Be economical by default, never at the cost of the deliverable: when two paths reach the same verified result, take the cheaper one — no duplicate reads, no second agent for what one command already proved.
 
 ## Completeness
 
