@@ -68,7 +68,7 @@ describe('default agent profiles', () => {
 
     expect(worker?.description).toContain('Office');
     expect(worker?.tools).toEqual(
-      expect.arrayContaining(['Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep', 'KnowledgeLookup']),
+      expect.arrayContaining(['Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep']),
     );
     expect(prompt).toContain('OUTPUT ISOLATION');
     expect(prompt).toContain('SAMPLE BEFORE BATCH');
@@ -184,8 +184,10 @@ describe('default agent profiles', () => {
 
     // The lead agent's condition->delegate table must route the job here too,
     // and its orientation line must pair oracle with reviewer as two scales.
-    expect(prompt).toContain('You need a large-scope review of code that already exists');
-    expect(prompt).toContain('`oracle` reviews existing code at system scale');
+    // The table lives in the lead prompt only — subagents carry their own role.
+    const leadPrompt = DEFAULT_AGENT_PROFILES['agent']?.systemPrompt(promptContext) ?? '';
+    expect(leadPrompt).toContain('You need a large-scope review of code that already exists');
+    expect(leadPrompt).toContain('`oracle` reviews existing code at system scale');
   });
 
   it('gives designer one fused job: own the visual layer end to end', () => {
@@ -194,7 +196,7 @@ describe('default agent profiles', () => {
 
     // A producer with its own spawns — specs are written into the codebase.
     expect(designer?.tools).toEqual(
-      expect.arrayContaining(['Write', 'Edit', 'ReadMediaFile', 'Agent', 'LSP', 'KnowledgeLookup']),
+      expect.arrayContaining(['Write', 'Edit', 'ReadMediaFile', 'Agent', 'LSP']),
     );
     expect(designer?.spawns).toEqual(['explore']);
 
@@ -247,8 +249,10 @@ describe('default agent profiles', () => {
     expect(description).toContain('UI/UX/TUI');
 
     // The lead agent's condition->delegate table must route visual work here.
-    expect(prompt).toContain('The deliverable is visual quality');
-    expect(prompt).toContain('`designer` owns the visual layer');
+    // The table lives in the lead prompt only — subagents carry their own role.
+    const leadPrompt = DEFAULT_AGENT_PROFILES['agent']?.systemPrompt(promptContext) ?? '';
+    expect(leadPrompt).toContain('The deliverable is visual quality');
+    expect(leadPrompt).toContain('`designer` owns the visual layer');
   });
 
   it('fails loudly when an embedded system prompt source is missing', () => {
