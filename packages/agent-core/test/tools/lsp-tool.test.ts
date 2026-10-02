@@ -29,11 +29,15 @@ function makeRegistry(client: LspClient | undefined, languageId = 'typescript'):
   } as unknown as LspRegistry;
 }
 
-function makeAgent(overrides?: { readText?: (path: string) => Promise<string> }): Agent {
+function makeAgent(overrides?: {
+  readText?: (path: string) => Promise<string>;
+  capabilityMode?: 'all' | 'read-only' | 'read-write' | 'execute';
+}): Agent {
   return {
     jian: createFakeJian({
       readText: overrides?.readText ?? vi.fn().mockResolvedValue('const x = 1;'),
     }),
+    getCapabilityMode: () => overrides?.capabilityMode ?? 'all',
   } as unknown as Agent;
 }
 
@@ -59,6 +63,25 @@ describe('LspTool', () => {
 
     expect(result.isError).toBe(true);
     expect(result.output).toContain('No language server configured');
+  });
+
+  it('refuses rename with apply in read-only capability mode, but previewing stays available', async () => {
+    const tool = new LspTool(
+      makeAgent({ capabilityMode: 'read-only' }),
+      PERMISSIVE_WORKSPACE,
+      makeRegistry(makeLspClient()),
+    );
+    const rename = {
+      path: '/tmp/a.ts',
+      operation: 'rename' as const,
+      line: 1,
+      character: 0,
+      new_name: 'renamed',
+    };
+
+    await expect(tool.resolveExecution({ ...rename, apply: true })).rejects.toThrow(/read-only capability mode/);
+    // The guard blocks the write only — previewing the rename still resolves.
+    await expect(tool.resolveExecution({ ...rename, apply: false })).resolves.toBeDefined();
   });
 
   it('opens the file and returns references', async () => {

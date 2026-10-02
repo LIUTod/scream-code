@@ -49,7 +49,7 @@ export const LspInputSchema = z.object({
     .string()
     .optional()
     .describe(
-      "For 'rename': the new symbol name. Required for rename. The rename is applied to disk unless `apply` is false.",
+      "For 'rename': the new symbol name. Required for rename. The rename is applied to disk only when `apply` is true.",
     ),
   apply: z
     .boolean()
@@ -88,6 +88,11 @@ export class LspTool implements BuiltinTool<LspInput> {
 
   async resolveExecution(args: LspInput): Promise<ToolExecution> {
     const isWrite = args.operation === 'rename' && args.apply === true;
+    if (isWrite && this.agent.getCapabilityMode() === 'read-only') {
+      throw new Error(
+        'LSP `rename` with `apply: true` writes files, which read-only capability mode forbids. Call rename without `apply` to preview the edit instead.',
+      );
+    }
     const path = await resolvePathAccessPath(args.path ?? this.workspace.workspaceDir, {
       jian: this.agent.jian,
       workspace: this.workspace,
