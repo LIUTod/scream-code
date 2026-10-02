@@ -51,7 +51,4 @@ tools:
   - LSP
   - WebSearch
   - PaperSearch
-  - MemoryLookup
-  - MemoryConsolidatePlan
-  - MemoryConsolidateApply
   - FetchURL

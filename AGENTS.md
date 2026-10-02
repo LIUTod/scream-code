@@ -1028,16 +1028,17 @@ Key files: `packages/memory/src/{dream,consolidator}.ts`,
 `packages/agent-core/src/tools/builtin/memory/memory-consolidate.ts`,
 `packages/agent-core/src/skill/builtin/dream.md`.
 
-### LSP Integration (read-only)
+### LSP Integration (read-only except rename)
 
-The agent can query language servers for read-only code intelligence via the `LSP` tool. This is useful before refactors, renames, or when diagnosing type errors.
+The agent can query language servers for code intelligence via the `LSP` tool. This is useful before refactors, renames, or when diagnosing type errors. Every operation is read-only except `rename` with `apply: true`, which writes to disk.
 
 - **Operations**:
   - `references` — find all usages of a symbol.
   - `definition` — jump to where a symbol is defined.
   - `diagnostics` — get type errors and warnings for a file.
+  - `rename` — rename a symbol across all references; writes files only with `apply: true`.
 - **Input**: `path` (required), `operation` (required), plus `line`/`character` for references/definition. `line` is 1-based; `character` is 0-based.
-- **Behavior**: the tool opens the file in the language server, executes the request, and returns a formatted markdown list. It does not modify files.
+- **Behavior**: the tool opens the file in the language server, executes the request, and returns a formatted markdown list. It modifies files only for `rename` with `apply: true`; read-only capability mode refuses that write and keeps the preview form available.
 - **Supported languages**: TypeScript/JavaScript (`typescript-language-server`), Python (`pyright-langserver`), Rust (`rust-analyzer`), Go (`gopls`). Unsupported file types return a friendly error.
 - **Registration**: `ToolManager.initializeBuiltinTools()` constructs an `LspRegistry` and registers `LspTool` for the main agent.
 
@@ -1072,6 +1073,8 @@ Key files: `packages/agent-core/src/profile/default/oracle.yaml`, `packages/agen
 The bundled `designer` profile owns the visual layer: how a product looks and feels across web/app UI and terminal UI (TUI). It is a producer, not an advisor — it derives a visual direction, writes code-grade design specs (tokens, component states, motion parameters) and applies them to styles, themes, and presentational code. One job, three entry points: Direction (new surface or redesign), Spec & Apply (write the specs into the codebase), Audit (report only unless asked to fix). Its method: pick the utility vs brand-experience track first, derive the register from evidence across five dials (Energy / Finish / Density / Weight / Playfulness), translate vague words (premium, elegant, 高级感…) into observable values instead of accepting them as justification, keep specs code-grade, reject the generated look (gradient heroes, glassmorphism, placeholder art) with a "would someone believe AI made this" meta-check, and match hero ambition to what the product earns. The TUI section carries the terminal vocabulary: width budgets, CJK double-width handling, SGR colour discipline, block hierarchy, density, and state legibility. Boundaries: it never touches behaviour/logic (coder), never runs gates (verify), never reviews diffs for correctness (reviewer) or architecture (oracle); it may spawn `explore` to map unfamiliar UI code.
 
 Key files: `packages/agent-core/src/profile/default/designer.yaml`, `packages/agent-core/src/profile/default/agent.yaml`, `packages/agent-core/src/profile/roster.ts`.
+
+**Per-agent prompt gating.** Subagent prompts are the main prompt minus the sections the child cannot act on: `resolve.ts` computes two template booleans — `CAN_SPAWN` (root profile, or a non-empty `spawns`) and `IS_MAIN` — and `system.md` gates the lead-only sections (delegation preamble + condition→delegate table, the `ReadGroup` line, WolfPack, the send-half of Subagent Collaboration, the verify/reviewer spawn instructions, Fusion Plan, Memory Memos and Knowledge Library incl. search priority) on `IS_MAIN`, while the spawn-capable sections (Available Subagents, When to Parallelize, the `Agent` usage paragraph, child requests) follow `CAN_SPAWN`. The spawning subagents (plan/reviewer/oracle/designer) also carry `SendSubagentMessage`. The main agent renders identically; a non-spawning child drops ≈11k characters per request. `test/profile/prompt-tool-consistency.test.ts` guards the related drift: every profile tool name must exist in the tool registry, every prompt may only name tools its agent can call (the reviewed allowances are documented in that test), and every tool named by a runtime injection source must be enabled for the main agent.
 
 ### Script Execution Mode (RunScript) & Nested Tool Calls
 

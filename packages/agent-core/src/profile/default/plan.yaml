@@ -23,6 +23,7 @@ whenToUse: >-
 tools:
   - ContactParent
   - Agent
+  - SendSubagentMessage
   - Bash
   - Read
   - ReadMediaFile
@@ -30,7 +31,4 @@ tools:
   - Grep
   - WebSearch
   - PaperSearch
-  - MemoryLookup
-  - MemoryConsolidatePlan
-  - MemoryConsolidateApply
   - FetchURL

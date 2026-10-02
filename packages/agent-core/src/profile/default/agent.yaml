@@ -7,6 +7,7 @@ promptVars:
 
 tools:
   - Read
+  - ReadGroup
   - Write
   - Edit
   - Grep
@@ -28,23 +29,25 @@ tools:
   - GetGoal
   - SetGoalBudget
   - UpdateGoal
+  - WriteGoalNote
   - ReadMediaFile
   - TodoList
   - MemoryLookup
   - MemoryConsolidatePlan
   - MemoryConsolidateApply
   - MemoryWrite
+  - MemoryEdit
   - KnowledgeLookup
-  # Image generation. Like ManagePlugin, registered for main agents only —
-  # subagents inherit the name but never receive the tool.
+  # Image generation. Registered for main agents only: the name must be listed
+  # here for the main agent, and a subagent profile listing it receives nothing.
   - ImageGenerate
   - InspectOwnAssets
   - Skill
   - MakeSkillPlan
   - MakeSkillApply
-  # Main-agent capability management. Subagent profiles inherit this list, but
-  # the tool is only registered for main agents, so it never reaches their
-  # model-visible tool set.
+  # Main-agent capability management. Registered for main agents only: profile
+  # `tools:` lists replace rather than inherit, and this tool is never
+  # constructed for subagents, so the name reaches only the main agent.
   - ManagePlugin
   - WebSearch
   - PaperSearch

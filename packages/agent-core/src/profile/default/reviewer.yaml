@@ -77,6 +77,7 @@ whenToUse: >-
 tools:
   - ContactParent
   - Agent
+  - SendSubagentMessage
   - Bash
   - Read
   - Grep
@@ -85,7 +86,4 @@ tools:
   - WebSearch
   - PaperSearch
   - ReportFinding
-  - MemoryLookup
-  - MemoryConsolidatePlan
-  - MemoryConsolidateApply
   - mcp__*

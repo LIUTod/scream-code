@@ -14,6 +14,8 @@ import type {
 interface MergedAgentProfile {
   readonly name: string;
   readonly description?: string | undefined;
+  /** True when the profile does not extend another profile (the main agent). */
+  readonly root: boolean;
   readonly systemPromptTemplate: string;
   readonly promptVars: Record<string, string>;
   readonly tools: string[];
@@ -97,6 +99,7 @@ function resolveMergedProfile(
   const merged: MergedAgentProfile = {
     name: profile.name,
     description: profile.description,
+    root: profile.extends === undefined,
     systemPromptTemplate: profile.systemPromptTemplate ?? parent?.systemPromptTemplate ?? '',
     promptVars: {
       ...parent?.promptVars,
@@ -130,7 +133,14 @@ function toResolvedProfile(merged: MergedAgentProfile): ResolvedAgentProfile {
  */
 function createSystemPromptRenderer(merged: MergedAgentProfile): SystemPromptRenderer {
   return (context: SystemPromptContext): string => {
-    const vars = buildTemplateVars(context, merged.promptVars);
+    const vars: Record<string, unknown> = {
+      ...buildTemplateVars(context, merged.promptVars),
+      // Mirror the runtime canSpawn gate (agent/tool/index.ts): the root
+      // (main) profile can always spawn; an inheriting profile only when it
+      // declares `spawns`. IS_MAIN additionally gates main-only sections.
+      CAN_SPAWN: merged.root || (merged.spawns?.length ?? 0) > 0,
+      IS_MAIN: merged.root,
+    };
     try {
       return renderPrompt(merged.systemPromptTemplate, vars);
     } catch (error) {

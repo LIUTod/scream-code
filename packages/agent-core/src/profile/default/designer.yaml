@@ -76,6 +76,7 @@ whenToUse: >-
 tools:
   - ContactParent
   - Agent
+  - SendSubagentMessage
   - Bash
   - Read
   - ReadMediaFile
@@ -87,8 +88,4 @@ tools:
   - WebSearch
   - PaperSearch
   - FetchURL
-  - MemoryLookup
-  - KnowledgeLookup
-  - MemoryConsolidatePlan
-  - MemoryConsolidateApply
   - mcp__*

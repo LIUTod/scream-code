@@ -89,8 +89,4 @@ tools:
   - WebSearch
   - PaperSearch
   - FetchURL
-  - MemoryLookup
-  - KnowledgeLookup
-  - MemoryConsolidatePlan
-  - MemoryConsolidateApply
   - mcp__*
