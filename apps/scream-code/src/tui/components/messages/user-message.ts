@@ -62,8 +62,10 @@ export class UserMessageComponent implements Component {
   }
 
   render(width: number): string[] {
-    // /hl toggle is read live; the cache is keyed by toggle state so a change
-    // invalidates on the next render without an external transcript rebuild.
+    // /hl toggle state is read live (the underlying preference read is cached
+    // at O(1) by utils/ui-preferences, no per-frame disk IO); the cache here is
+    // keyed by that state, so a change invalidates on the next render without
+    // an external transcript rebuild.
     const highlightEnabled = isUserMessageHighlightEnabled();
     if (
       this.cachedLines !== undefined &&

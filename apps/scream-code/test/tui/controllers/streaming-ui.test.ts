@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import {
+  MAX_CHARS_PER_FRAME,
+  SMOOTH_CATCHUP_MAX_PER_FRAME,
+  SMOOTH_CATCHUP_THRESHOLD,
+} from '#/tui/constant/streaming';
 import { StreamingUIController } from '#/tui/controllers/streaming-ui';
 import type { StreamingUIHost } from '#/tui/controllers/streaming-ui';
 import { getSharedSpeedTracker, resetSharedSpeedTracker } from '#/tui/utils/speed-tracker';
@@ -186,6 +191,11 @@ describe('StreamingUIController', () => {
   });
 });
 
+/** Runs one smooth-streaming frame: `flush` is private, tests drive it directly. */
+function flushFrame(controller: StreamingUIController): void {
+  (controller as unknown as { flush: () => void }).flush();
+}
+
 describe('smooth streaming (token pacing)', () => {
   afterEach(() => {
     resetSharedSpeedTracker();
@@ -271,5 +281,65 @@ describe('smooth streaming (token pacing)', () => {
     (controller as unknown as { flush: () => void }).flush();
 
     expect(updates[0]).toBe('x'.repeat(16));
+  });
+
+  it('catches up on fast arrival instead of lagging until finalize', () => {
+    const controller = new StreamingUIController(createMockHost());
+    const shownLengths: number[] = [];
+    (controller as unknown as { onStreamingTextUpdate: (text: string) => void }).onStreamingTextUpdate =
+      (text: string) => shownLengths.push(text.length);
+
+    // >500 chars/s: 75 chars arrive on every 50ms frame (1500 chars/s), far
+    // past what the base budget (MAX_CHARS_PER_FRAME per SMOOTH_FRAME_MS) can
+    // absorb.
+    const frameChars = 75;
+    const arrivalFrames = 40;
+    const total = frameChars * arrivalFrames;
+
+    for (let i = 0; i < arrivalFrames; i++) {
+      controller.appendAssistantDelta('x'.repeat(frameChars));
+      flushFrame(controller);
+    }
+
+    // The lag converges to ≈8 frames of arrival (≈400ms) instead of growing
+    // with the stream: without catch-up this backlog would be
+    // total - MAX_CHARS_PER_FRAME * arrivalFrames = 2000 chars.
+    const backlogAtArrivalEnd = total - shownLengths.at(-1)!;
+    expect(backlogAtArrivalEnd).toBeLessThanOrEqual(8 * frameChars);
+    // The remaining tail is larger than any single frame may drain, so it can
+    // only finish by continuing to advance frame by frame.
+    expect(backlogAtArrivalEnd).toBeGreaterThan(SMOOTH_CATCHUP_MAX_PER_FRAME);
+
+    // Arrival stops; the continuation frames drain the tail — finalize is
+    // never needed to complete the display.
+    let drainFrames = 0;
+    while (shownLengths.at(-1)! < total && drainFrames < 120) {
+      flushFrame(controller);
+      drainFrames += 1;
+    }
+    expect(shownLengths.at(-1)).toBe(total);
+
+    // No frame dumps the whole remainder in one jump.
+    const deltas = shownLengths.map((length, i) => length - (i === 0 ? 0 : shownLengths[i - 1]!));
+    expect(Math.max(...deltas)).toBeLessThanOrEqual(SMOOTH_CATCHUP_MAX_PER_FRAME);
+  });
+
+  it('keeps the base pacing while the backlog stays below the catch-up threshold', () => {
+    const controller = new StreamingUIController(createMockHost());
+    const shownLengths: number[] = [];
+    (controller as unknown as { onStreamingTextUpdate: (text: string) => void }).onStreamingTextUpdate =
+      (text: string) => shownLengths.push(text.length);
+
+    // Just under the trigger: below the threshold the old pacing must hold.
+    const total = SMOOTH_CATCHUP_THRESHOLD - 10;
+    controller.appendAssistantDelta('y'.repeat(total));
+    for (let i = 0; i < 40; i++) {
+      flushFrame(controller);
+    }
+
+    expect(shownLengths.at(-1)).toBe(total);
+    const deltas = shownLengths.map((length, i) => length - (i === 0 ? 0 : shownLengths[i - 1]!));
+    // Catch-up never applied: every frame stays within the base ceiling.
+    expect(Math.max(...deltas)).toBeLessThanOrEqual(MAX_CHARS_PER_FRAME);
   });
 });

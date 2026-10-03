@@ -35,12 +35,26 @@ export const SMOOTH_FRAME_MS = 50;
 // is slow or the rate window is empty (never freeze mid-stream).
 export const MIN_CHARS_PER_FRAME = 1;
 
-// Ceiling chars per frame: with the arrival rate clamped to SPEED_MAX (200
-// tok/s) the frame budget is 10 tokens, which the Latin estimate turns into
-// ~40 characters — this ceiling is what actually bounds a network burst
-// (~500 chars/s). One oversized burst is thus spread over
-// frames instead of rendered at once.
+// Base ceiling chars per frame while the display is keeping up: 25 chars at
+// the 50ms cadence ≈ 500 chars/s. An oversized burst is spread across frames
+// instead of rendered at once; a stream faster than that would otherwise stay
+// behind for its whole duration and land in one jump at finalize.
 export const MAX_CHARS_PER_FRAME = 25;
+
+// Backlog (chars arrived but not yet shown) past which catch-up pacing kicks
+// in. Below the threshold the base budget above is unchanged; a stream faster
+// than ~500 chars/s crosses it and is caught up with instead of accumulating
+// until finalize.
+export const SMOOTH_CATCHUP_THRESHOLD = 250;
+
+// Catch-up budget = ceil(backlog / DIVISOR) chars per frame. Growing the
+// budget with the backlog converges the display to a bounded lag of ≈DIVISOR
+// frames (8 × 50ms ≈ 400ms) instead of an unbounded one.
+export const SMOOTH_CATCHUP_DIVISOR = 8;
+
+// Hard ceiling of the catch-up budget, so even a huge backlog drains as a
+// fast frame-by-frame animation rather than one full-text dump.
+export const SMOOTH_CATCHUP_MAX_PER_FRAME = 300;
 
 // Assumed arrival rate used until the first speed sample lands, so the very
 // first (often large) block is paced sensibly instead of crawling at MIN=1.

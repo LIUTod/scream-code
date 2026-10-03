@@ -160,9 +160,16 @@ export function toggleCodeBlockPanel(): boolean {
  * Default **off**: a fresh install (or one that never touched `/hl`) renders
  * user messages plain. Only an explicit `true` from a previous `/hl` turns the
  * block on, so an existing choice is honoured either way.
+ *
+ * Cached: `UserMessageComponent.render` asks once per component per frame, and
+ * reading the file each time would hit the disk on every frame. `/hl` updates
+ * the cache.
  */
+let userMessageHighlightCache: boolean | undefined;
+
 export function isUserMessageHighlightEnabled(): boolean {
-  return readUiPreferences().userMessageHighlightEnabled === true;
+  userMessageHighlightCache ??= readUiPreferences().userMessageHighlightEnabled === true;
+  return userMessageHighlightCache;
 }
 
 /** Toggle the user-message highlight block via /hl. Returns the new state:
@@ -175,6 +182,7 @@ export function toggleUserMessageHighlight(): boolean {
   const enabled = prefs.userMessageHighlightEnabled === true;
   prefs.userMessageHighlightEnabled = !enabled;
   writeUiPreferences(prefs);
+  userMessageHighlightCache = !enabled;
   return !enabled;
 }
 

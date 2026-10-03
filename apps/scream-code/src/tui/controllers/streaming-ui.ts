@@ -12,6 +12,9 @@ import {
   DEFAULT_ARRIVAL_TOK_PER_SEC,
   MAX_CHARS_PER_FRAME,
   MIN_CHARS_PER_FRAME,
+  SMOOTH_CATCHUP_DIVISOR,
+  SMOOTH_CATCHUP_MAX_PER_FRAME,
+  SMOOTH_CATCHUP_THRESHOLD,
   SMOOTH_FRAME_MS,
   STREAMING_UI_FLUSH_MS,
 } from '../constant/streaming';
@@ -715,9 +718,12 @@ export class StreamingUIController {
 
   /**
    * Advance the smooth-render cursor by this frame's character budget.
-   * Budget clamps to the measured arrival rate (fast models keep up, slow
-   * models never fall behind) with a floor so the stream never freezes and a
-   * ceiling so one oversized burst is spread across frames.
+   * The base budget clamps to the measured arrival rate (slow models never
+   * fall behind) with a floor so the stream never freezes and a ceiling so one
+   * oversized burst is spread across frames. Once the backlog passes
+   * SMOOTH_CATCHUP_THRESHOLD, a catch-up budget (backlog / DIVISOR, capped at
+   * MAX_PER_FRAME) raises it so a fast stream converges to a bounded lag
+   * instead of accumulating until finalize.
    */
   private advanceAssistantShown(): number {
     const draft = this._assistantDraft;
@@ -733,10 +739,24 @@ export class StreamingUIController {
     const tokPerSec = measured > 0 ? measured : DEFAULT_ARRIVAL_TOK_PER_SEC;
     const pending = draft.slice(this._shownAssistantLength);
     const requested = charsForTokenBudget(pending, tokPerSec * (SMOOTH_FRAME_MS / 1000));
-    const budget = Math.min(
+    let budget = Math.min(
       MAX_CHARS_PER_FRAME,
       Math.max(MIN_CHARS_PER_FRAME, requested),
     );
+    // Backlog catch-up: arrival faster than the base ceiling (~500 chars/s)
+    // would otherwise keep falling behind and land in one jump at finalize.
+    // Past the threshold the budget grows with the backlog, so the lag stays
+    // bounded (≈DIVISOR frames) and even the drain stays frame-by-frame.
+    const backlog = draft.length - this._shownAssistantLength;
+    if (backlog > SMOOTH_CATCHUP_THRESHOLD) {
+      budget = Math.max(
+        budget,
+        Math.min(
+          Math.ceil(backlog / SMOOTH_CATCHUP_DIVISOR),
+          SMOOTH_CATCHUP_MAX_PER_FRAME,
+        ),
+      );
+    }
     this._shownAssistantLength = Math.min(
       draft.length,
       this._shownAssistantLength + budget,
