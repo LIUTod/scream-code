@@ -31,6 +31,7 @@ const mocks = vi.hoisted(() => {
     screamHarnessConstructor: vi.fn(),
     harnessEnsureConfigFile: vi.fn(),
     harnessPreflight: vi.fn(),
+    harnessListSessions: vi.fn(async () => []),
     harnessGetConfig: vi.fn(async () => ({
       providers: {},
       defaultModel: 'k2',
@@ -64,6 +65,7 @@ vi.mock('@scream-code/scream-code-sdk', async (importOriginal) => {
       };
       ensureConfigFile = mocks.harnessEnsureConfigFile;
       preflight = mocks.harnessPreflight;
+      listSessions = mocks.harnessListSessions;
       getConfig = mocks.harnessGetConfig;
       close = mocks.harnessClose;
 
@@ -188,7 +190,16 @@ describe('runShell', () => {
     expect(execSync).toHaveBeenCalledWith('stty -ixon', { stdio: 'ignore' });
     expect(mocks.refreshUpdateCache).toHaveBeenCalledOnce();
     expect(mocks.runLoadingAnimation).toHaveBeenCalledOnce();
-    expect(mocks.runLoadingAnimation.mock.calls[0]!).toHaveLength(1);
+    // The parsed config is handed to the splash so it does not re-read tui.toml.
+    expect(mocks.runLoadingAnimation).toHaveBeenCalledWith(
+      'dark',
+      expect.objectContaining({ theme: 'dark' }),
+    );
+    // The session listing is prefetched before the splash blocks startup.
+    expect(mocks.harnessListSessions).toHaveBeenCalledWith({ workDir: process.cwd() });
+    expect(mocks.harnessListSessions.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.runLoadingAnimation.mock.invocationCallOrder[0]!,
+    );
     expect(mocks.screamTuiConstructor).toHaveBeenCalledTimes(1);
 
     const [, harness, startupInput] = mocks.screamTuiConstructor.mock.calls[0]!;
@@ -204,6 +215,7 @@ describe('runShell', () => {
       workDir: process.cwd(),
       resolvedTheme: 'dark',
       updatePrefetched: true,
+      sessionsPrefetch: expect.any(Promise),
     });
     expect(mocks.tuiStart).toHaveBeenCalledOnce();
   });

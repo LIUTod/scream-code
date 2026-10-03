@@ -1,3 +1,5 @@
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { t } from '@scream-code/config';
 import type { SessionSummary } from '@scream-code/scream-code-sdk';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -144,6 +146,29 @@ describe('SessionManager.init — startup decision tree', () => {
     ).rejects.toThrow(t('session.wrong_dir', { sessionId: 'ses-x', workDir: '/other/dir' }));
   });
 
+  it('--session from a nested directory still resumes its own project session', async () => {
+    // The store normalizes to the nearest .git/package.json root; a raw nested
+    // cwd must compare equal through normalization, not report wrong_dir.
+    const nestedRoot = join('/tmp/scream-test', 'nested-root-session');
+    mkdirSync(nestedRoot, { recursive: true });
+    writeFileSync(join(nestedRoot, 'package.json'), '{}');
+    const nestedDir = join(nestedRoot, 'child');
+    const resumed = makeMockSession({ id: 'ses-a' });
+    const harness = makeMockHarness({
+      listSessions: vi.fn(async () => [summary({ id: 'ses-a', title: 'Existing', workDir: nestedRoot })]),
+    });
+    harness.resumeSession.mockResolvedValue(resumed);
+    const { manager } = makeHost({ harness });
+
+    const result = await manager.init({
+      startup: { sessionFlag: 'ses-a', continueLast: false, yolo: false, auto: false, plan: false, wolfpack: false },
+      workDir: nestedDir,
+    });
+
+    expect(harness.resumeSession).toHaveBeenCalledWith({ id: 'ses-a' });
+    expect(result.session).toBe(resumed);
+  });
+
   it('--session resume: resumes, applies --model, subscribes and replays', async () => {
     const harness = makeMockHarness({
       listSessions: vi.fn(async (input: any) =>
@@ -195,9 +220,12 @@ describe('SessionManager.init — startup decision tree', () => {
 
   it('plain startup creates a session, applies wolfpack, prunes empties and subscribes', async () => {
     const created = makeMockSession({ id: 'ses-new' });
-    const harness = makeMockHarness({
-      createSession: vi.fn(async () => created),
-      listSessions: vi.fn(async () => [
+    const listSessions = vi.fn(async (input: { workDir?: string; sessionId?: string } = {}) => {
+      if (input.sessionId !== undefined) {
+        // the live re-check reads the candidate back by id
+        return [summary({ id: 'ses-junk', title: 'New Session', updatedAt: Date.now() - 6 * 60_000 })];
+      }
+      return [
         // prunable: placeholder title, no prompt, untouched for > 5 min
         summary({ id: 'ses-junk', title: 'New Session', updatedAt: Date.now() - 6 * 60_000 }),
         // keep: real title (mirrors agent-core isUntitled() semantics)
@@ -206,7 +234,11 @@ describe('SessionManager.init — startup decision tree', () => {
         summary({ id: 'ses-new', title: 'New Session', updatedAt: 0 }),
         // keep: has lastPrompt
         summary({ id: 'ses-used', title: 'New Session', lastPrompt: 'hi', updatedAt: 0 }),
-      ]),
+      ];
+    });
+    const harness = makeMockHarness({
+      createSession: vi.fn(async () => created),
+      listSessions,
     });
     const { manager, sessionEventHandler } = makeHost({ harness });
 
@@ -239,7 +271,241 @@ describe('SessionManager.init — startup decision tree', () => {
   });
 });
 
+describe('SessionManager.init — prefetched session listing (prune candidates only)', () => {
+  /** The fixture types `harness.listSessions` loosely; call it through the
+   * shape production uses so the prefetch is a real promise with that type. */
+  function prefetchWorkDir(harness: MockHarness, workDir: string): Promise<readonly SessionSummary[]> {
+    return (harness.listSessions as (options: { workDir: string }) => Promise<readonly SessionSummary[]>)({
+      workDir,
+    });
+  }
 
+  const WORK_DIR = '/tmp/scream-test';
+  const plainStartup = { continueLast: false, yolo: false, auto: false, plan: false, wolfpack: false };
+  const staleJunk = () =>
+    summary({ id: 'ses-junk', title: 'New Session', updatedAt: Date.now() - 6 * 60_000 });
+
+  it('default startup enumerates the prefetch and re-checks each candidate live', async () => {
+    const created = makeMockSession({ id: 'ses-new' });
+    const listSessions = vi.fn(async (input: { workDir?: string; sessionId?: string } = {}) =>
+      input.sessionId === undefined
+        ? [staleJunk(), summary({ id: 'ses-new', title: 'New Session', updatedAt: 0 })]
+        : [staleJunk()]);
+    const harness = makeMockHarness({ createSession: vi.fn(async () => created), listSessions });
+    const { manager } = makeHost({ harness });
+    const prefetch = prefetchWorkDir(harness, WORK_DIR); // call 1: the snapshot itself
+
+    const result = await manager.init({ startup: plainStartup, workDir: WORK_DIR, sessionsPrefetch: prefetch });
+
+    expect(result.session).toBe(created);
+    // call 2: the live re-check of the one candidate (the current session is
+    // skipped by id before any listing); the re-check still looks prunable.
+    expect(listSessions).toHaveBeenCalledTimes(2);
+    expect(listSessions).toHaveBeenLastCalledWith({ sessionId: 'ses-junk', workDir: WORK_DIR });
+    expect(harness.deleteSession).toHaveBeenCalledTimes(1);
+    expect(harness.deleteSession).toHaveBeenCalledWith('ses-junk');
+  });
+
+  it.each([
+    ['a user prompt landed', { lastPrompt: 'hello' }],
+    ['the session was renamed', { title: 'Real Work' }],
+    ['the session was touched again', { updatedAt: Date.now() - 1_000 }],
+  ])('keeps a stale-looking candidate when %s during the splash', async (_label, freshPatch) => {
+    const created = makeMockSession({ id: 'ses-new' });
+    const listSessions = vi.fn(async (input: { workDir?: string; sessionId?: string } = {}) =>
+      input.sessionId === undefined
+        ? [staleJunk()]
+        : [{ ...staleJunk(), ...freshPatch }]);
+    const harness = makeMockHarness({ createSession: vi.fn(async () => created), listSessions });
+    const { manager } = makeHost({ harness });
+    const prefetch = prefetchWorkDir(harness, WORK_DIR);
+
+    await manager.init({ startup: plainStartup, workDir: WORK_DIR, sessionsPrefetch: prefetch });
+
+    expect(listSessions).toHaveBeenLastCalledWith({ sessionId: 'ses-junk', workDir: WORK_DIR });
+    expect(harness.deleteSession).not.toHaveBeenCalled();
+  });
+
+  it('keeps a candidate that no longer exists at re-check time (no delete, no error)', async () => {
+    const created = makeMockSession({ id: 'ses-new' });
+    const listSessions = vi.fn(async (input: { workDir?: string; sessionId?: string } = {}) =>
+      input.sessionId === undefined ? [staleJunk()] : []);
+    const harness = makeMockHarness({ createSession: vi.fn(async () => created), listSessions });
+    const { manager, host } = makeHost({ harness });
+    const prefetch = prefetchWorkDir(harness, WORK_DIR);
+
+    await expect(
+      manager.init({ startup: plainStartup, workDir: WORK_DIR, sessionsPrefetch: prefetch }),
+    ).resolves.toBeDefined();
+
+    expect(harness.deleteSession).not.toHaveBeenCalled();
+    expect(host.showStatus).not.toHaveBeenCalledWith(expect.stringContaining('Session cleanup skipped'));
+  });
+
+  it('keeps a candidate whose re-check resolves to another workDir', async () => {
+    const created = makeMockSession({ id: 'ses-new' });
+    // An id query falls back to a global lookup; a same-id shell from another
+    // workDir must never be deleted by this sweep.
+    const listSessions = vi.fn(async (input: { workDir?: string; sessionId?: string } = {}) =>
+      input.sessionId === undefined
+        ? [staleJunk()]
+        : [{ ...staleJunk(), workDir: '/tmp/other-dir' }]);
+    const harness = makeMockHarness({ createSession: vi.fn(async () => created), listSessions });
+    const { manager } = makeHost({ harness });
+    const prefetch = prefetchWorkDir(harness, WORK_DIR);
+
+    await manager.init({ startup: plainStartup, workDir: WORK_DIR, sessionsPrefetch: prefetch });
+
+    expect(harness.deleteSession).not.toHaveBeenCalled();
+  });
+
+  it('keeps the sweep working when launched from a nested directory', async () => {
+    // Store summaries carry the normalized project root; a raw nested cwd must
+    // still match its own bucket instead of skipping every candidate.
+    const nestedRoot = join(WORK_DIR, 'nested-root');
+    mkdirSync(nestedRoot, { recursive: true });
+    writeFileSync(join(nestedRoot, 'package.json'), '{}');
+    const nestedDir = join(nestedRoot, 'child');
+
+    const created = makeMockSession({ id: 'ses-new' });
+    const junk = () =>
+      summary({ id: 'ses-junk', title: 'New Session', workDir: nestedRoot, updatedAt: Date.now() - 6 * 60_000 });
+    const listSessions = vi.fn(async (input: { workDir?: string; sessionId?: string } = {}) =>
+      input.sessionId === undefined ? [junk()] : [junk()]);
+    const harness = makeMockHarness({ createSession: vi.fn(async () => created), listSessions });
+    const { manager } = makeHost({ harness });
+    const prefetch = prefetchWorkDir(harness, nestedDir);
+
+    await manager.init({ startup: plainStartup, workDir: nestedDir, sessionsPrefetch: prefetch });
+
+    expect(harness.deleteSession).toHaveBeenCalledWith('ses-junk');
+  });
+
+  it('continue-last decides from a live listing, never the snapshot', async () => {
+    const resumed = makeMockSession({ id: 'ses-newer' });
+    // Call 1 is the snapshot the shell prefetched; call 2 is the live scan the
+    // resume decision must use.
+    const listSessions = vi.fn(async () => [] as SessionSummary[]);
+    listSessions.mockResolvedValueOnce([summary({ id: 'ses-old', title: 'Old' })]);
+    listSessions.mockResolvedValueOnce([
+      summary({ id: 'ses-newer', title: 'Newer' }),
+      summary({ id: 'ses-old', title: 'Old' }),
+    ]);
+    const harness = makeMockHarness({ listSessions });
+    harness.resumeSession.mockResolvedValue(resumed);
+    const { manager } = makeHost({ harness });
+    const prefetch = prefetchWorkDir(harness, WORK_DIR);
+
+    const result = await manager.init({
+      startup: { continueLast: true, yolo: false, auto: false, plan: false, wolfpack: false },
+      workDir: WORK_DIR,
+      sessionsPrefetch: prefetch,
+    });
+
+    expect(harness.resumeSession).toHaveBeenCalledWith({ id: 'ses-newer' });
+    expect(result.shouldReplay).toBe(true);
+    expect(listSessions).toHaveBeenCalledTimes(2);
+  });
+
+  it('--session decides from a live id lookup, never the snapshot', async () => {
+    const resumed = makeMockSession({ id: 'ses-r' });
+    const listSessions = vi.fn(async (input: { workDir?: string; sessionId?: string } = {}) =>
+      input.sessionId === undefined ? [summary({ id: 'ses-r', title: 'Target' })] : [summary({ id: 'ses-r', title: 'Target' })]);
+    const harness = makeMockHarness({ listSessions });
+    harness.resumeSession.mockResolvedValue(resumed);
+    const { manager } = makeHost({ harness });
+    const prefetch = prefetchWorkDir(harness, WORK_DIR);
+
+    const result = await manager.init({
+      startup: { sessionFlag: 'ses-r', continueLast: false, yolo: false, auto: false, plan: false, wolfpack: false },
+      workDir: WORK_DIR,
+      sessionsPrefetch: prefetch,
+    });
+
+    expect(result.session).toBe(resumed);
+    expect(listSessions).toHaveBeenLastCalledWith({ sessionId: 'ses-r', workDir: WORK_DIR });
+  });
+
+  it('--session rejects a session that vanished during the splash even though the snapshot still has it', async () => {
+    const resumed = makeMockSession({ id: 'ses-r' });
+    // The snapshot (call 1) still lists the session; the live id lookup (call
+    // 2) reports it gone — the resume decision must follow the live answer.
+    const listSessions = vi.fn(async (input: { workDir?: string; sessionId?: string } = {}) =>
+      input.sessionId === undefined ? [summary({ id: 'ses-r', title: 'Target' })] : []);
+    const harness = makeMockHarness({ listSessions });
+    harness.resumeSession.mockResolvedValue(resumed);
+    const { manager } = makeHost({ harness });
+    const prefetch = prefetchWorkDir(harness, WORK_DIR);
+
+    await expect(
+      manager.init({
+        startup: { sessionFlag: 'ses-r', continueLast: false, yolo: false, auto: false, plan: false, wolfpack: false },
+        workDir: WORK_DIR,
+        sessionsPrefetch: prefetch,
+      }),
+    ).rejects.toThrow(t('session.not_found', { sessionId: 'ses-r' }));
+    expect(harness.resumeSession).not.toHaveBeenCalled();
+    expect(listSessions).toHaveBeenLastCalledWith({ sessionId: 'ses-r', workDir: WORK_DIR });
+  });
+
+  it('--session in another workdir still reports wrong_dir from the live lookup', async () => {
+    const listSessions = vi.fn(async (input: { workDir?: string; sessionId?: string } = {}) =>
+      input.sessionId === 'ses-x' ? [summary({ id: 'ses-x', workDir: '/other/dir' })] : []);
+    const harness = makeMockHarness({ listSessions });
+    const { manager } = makeHost({ harness });
+    const prefetch = prefetchWorkDir(harness, WORK_DIR);
+
+    await expect(
+      manager.init({
+        startup: { sessionFlag: 'ses-x', continueLast: false, yolo: false, auto: false, plan: false, wolfpack: false },
+        workDir: WORK_DIR,
+        sessionsPrefetch: prefetch,
+      }),
+    ).rejects.toThrow(t('session.wrong_dir', { sessionId: 'ses-x', workDir: '/other/dir' }));
+    expect(listSessions).toHaveBeenLastCalledWith({ sessionId: 'ses-x', workDir: WORK_DIR });
+  });
+
+  it('a failed prefetch is reported by the prune without blocking startup', async () => {
+    const created = makeMockSession({ id: 'ses-new' });
+    const harness = makeMockHarness({
+      createSession: vi.fn(async () => created),
+      listSessions: vi.fn(async () => { throw new Error('disk gone'); }),
+    });
+    const { manager, host } = makeHost({ harness });
+    const prefetch = prefetchWorkDir(harness, WORK_DIR);
+    prefetch.catch(() => {}); // mirrors the shell's no-op guard against unhandledRejection
+
+    await expect(
+      manager.init({ startup: plainStartup, workDir: WORK_DIR, sessionsPrefetch: prefetch }),
+    ).resolves.toBeDefined();
+    expect(host.showStatus).toHaveBeenCalledWith(expect.stringContaining('Session cleanup skipped'));
+    // the failed enumeration is not silently retried
+    expect(harness.listSessions).toHaveBeenCalledTimes(1);
+  });
+
+  it('a failed prefetch does not affect the continue-last resume decision', async () => {
+    const resumed = makeMockSession({ id: 'ses-live' });
+    const listSessions = vi.fn(async (input: { workDir?: string; sessionId?: string } = {}) =>
+      input.sessionId === undefined ? [summary({ id: 'ses-live', title: 'Live' })] : []);
+    listSessions.mockRejectedValueOnce(new Error('disk gone')); // the prefetch itself
+    const harness = makeMockHarness({ listSessions });
+    harness.resumeSession.mockResolvedValue(resumed);
+    const { manager, host } = makeHost({ harness });
+    const prefetch = prefetchWorkDir(harness, WORK_DIR);
+    prefetch.catch(() => {});
+
+    const result = await manager.init({
+      startup: { continueLast: true, yolo: false, auto: false, plan: false, wolfpack: false },
+      workDir: WORK_DIR,
+      sessionsPrefetch: prefetch,
+    });
+
+    expect(result.session).toBe(resumed);
+    expect(harness.resumeSession).toHaveBeenCalledWith({ id: 'ses-live' });
+    // Only the sweep is degraded, and it says so.
+    expect(host.showStatus).toHaveBeenCalledWith(expect.stringContaining('Session cleanup skipped'));
+  });
+});
 describe('SessionManager.resumeSession — guards (cc-connect contract)', () => {
   it('same session id is a no-op switch', async () => {
     const { manager, host, harness } = makeHost({ appState: { sessionId: 'ses-mine' } });

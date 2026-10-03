@@ -188,6 +188,22 @@ describe("ScreamTUI startup", () => {
     expect(driver.state.appState.sessionId).toBe("ses-latest");
   });
 
+  it("forwards the prefetched session listing into SessionManager.init", async () => {
+    const harness = makeHarness();
+    const prefetch = Promise.resolve([]);
+    const driver = makeDriver(harness, {
+      ...makeStartupInput(),
+      sessionsPrefetch: prefetch,
+    }) as unknown as StartupDriver & {
+      sessionManager: { init: (options: Record<string, unknown>) => Promise<unknown> };
+    };
+    const initSpy = vi.spyOn(driver.sessionManager, "init");
+
+    await expect(driver.init()).resolves.toBe(false);
+
+    expect(initSpy).toHaveBeenCalledWith(expect.objectContaining({ sessionsPrefetch: prefetch }));
+  });
+
   it("passes the CLI model override when creating a fresh startup session", async () => {
     const harness = makeHarness();
     const driver = makeDriver(harness, makeStartupInput({ model: "scream-code/k2.5" }));

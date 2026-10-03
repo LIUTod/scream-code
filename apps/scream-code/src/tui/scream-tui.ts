@@ -80,7 +80,7 @@ import { hasPatchChanges } from './utils/object-patch';
 import { setProcessTitle } from './utils/proctitle';
 import type { SessionRow } from './components/dialogs/session-picker';
 import { detectTmuxKeyboardWarning } from './utils/tmux-keyboard';
-import { SessionManager } from './managers/session-manager';
+import { SessionManager, type SessionsPrefetch } from './managers/session-manager';
 import { DialogManager } from './managers/dialog-manager';
 import { refreshProviderBalance, supportsBalance } from './api-balance';
 
@@ -103,6 +103,10 @@ export interface ScreamTUIStartupInput {
    * splash screen, so checkForUpdates() should skip the network refresh and
    * just read the cache. */
   readonly updatePrefetched?: boolean;
+  /** Session listing started by the shell during the loading splash; it only
+   * enumerates candidates for the empty-session sweep (each deletion is
+   * re-checked against a live listing), and resume decisions never read it. */
+  readonly sessionsPrefetch?: SessionsPrefetch;
 }
 
 function createInitialAppState(input: ScreamTUIStartupInput): AppState {
@@ -180,6 +184,7 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
   /** Interval handle for the periodic provider-balance refresh. */
   private balancePollTimer: NodeJS.Timeout | undefined;
   private readonly updatePrefetched: boolean;
+  private readonly sessionsPrefetch: SessionsPrefetch | undefined;
   readonly sessionManager: SessionManager;
   readonly dialogManager: DialogManager;
   readonly streamingUI: StreamingUIController;
@@ -222,6 +227,7 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
     this.options = tuiOptions;
     this.startupNotice = startupInput.startupNotice;
     this.updatePrefetched = startupInput.updatePrefetched === true;
+    this.sessionsPrefetch = startupInput.sessionsPrefetch;
     this.state = createTUIState(tuiOptions);
 
     // Inject a live getter for `/model diy` bindings. Read at every subagent
@@ -415,6 +421,7 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
       const { shouldReplay } = await this.sessionManager.init({
         startup: this.options.startup,
         workDir: this.state.appState.workDir,
+        sessionsPrefetch: this.sessionsPrefetch,
       });
       return shouldReplay;
     } catch (error) {

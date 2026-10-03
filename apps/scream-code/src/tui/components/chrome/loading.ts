@@ -1,6 +1,6 @@
 import process from "node:process";
 import { t } from '@scream-code/config';
-import { loadTuiConfig, saveTuiConfig } from '#/tui/config';
+import { loadTuiConfig, saveTuiConfig, type TuiConfig } from '#/tui/config';
 import type { ResolvedTheme } from "#/tui/theme/colors";
 
 const { stdout, stdin } = process;
@@ -176,7 +176,8 @@ function supportsAnsi(): boolean {
 }
 
 export async function runLoadingAnimation(
-  theme: ResolvedTheme = 'dark',
+  theme: ResolvedTheme,
+  tuiConfig: TuiConfig,
 ): Promise<void> {
   const ansi = supportsAnsi()
 
@@ -191,13 +192,11 @@ export async function runLoadingAnimation(
     return
   }
 
-  // Read the persisted auto-start toggle. Ctrl+E during the animation flips it
-  // for FUTURE launches only; this launch keeps the value it booted with.
-  let autoStart = false
-  try {
-    const cfg = await loadTuiConfig()
-    autoStart = cfg.autoStart
-  } catch { /* fall back to default */ }
+  // The shell already read tui.toml and hands the parsed config in — reuse its
+  // auto-start value instead of reading the file a second time here. Ctrl+E
+  // during the animation flips the persisted toggle for FUTURE launches only;
+  // this launch keeps the value it booted with.
+  let autoStart = tuiConfig.autoStart
   const autoStartAtBoot = autoStart
   let toggled = false // whether Ctrl+E was pressed this launch
 

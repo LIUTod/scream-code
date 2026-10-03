@@ -1,6 +1,7 @@
 import { execSync } from 'node:child_process';
 
 import { ScreamHarness, log, resolveScreamHome } from '@scream-code/scream-code-sdk';
+import type { SessionSummary } from '@scream-code/scream-code-sdk';
 import { setLocale } from '@scream-code/config';
 
 import { CLI_UI_MODE } from '#/constant/app';
@@ -53,6 +54,15 @@ export async function runShell(
   // Preflight validates the host environment (e.g. Git Bash on Windows)
   await harness.preflight();
 
+  // Scan the workDir session list once while the splash animation runs. The
+  // TUI's SessionManager uses it only to enumerate candidates for the
+  // empty-session sweep — every candidate is re-checked against a live listing
+  // before deletion, and resume decisions always re-scan. The no-op catch is
+  // attached immediately so a rejection can never surface as an
+  // unhandledRejection before the TUI consumes the promise.
+  const sessionsPrefetch: Promise<readonly SessionSummary[]> = harness.listSessions({ workDir });
+  void sessionsPrefetch.catch(() => {});
+
   // Fire the update-cache refresh detached in the background. The loading
   // splash no longer waits on it — a slow npm registry won't delay startup.
   // The result lands in the cache for the next launch or `/update` to pick up.
@@ -60,7 +70,7 @@ export async function runShell(
     log.warn('update cache refresh failed', { error });
   });
 
-  await runLoadingAnimation(resolvedTheme);
+  await runLoadingAnimation(resolvedTheme, tuiConfig);
 
   const tui = new ScreamTUI(harness, {
     cliOptions: opts,
@@ -70,6 +80,7 @@ export async function runShell(
     startupNotice: configWarning,
     resolvedTheme,
     updatePrefetched: true,
+    sessionsPrefetch,
   });
 
   tui.onExit = async (exitCode = 0) => {

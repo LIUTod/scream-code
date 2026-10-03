@@ -6,6 +6,7 @@ import type {
   Session,
   SessionSummary,
 } from '@scream-code/scream-code-sdk';
+import { normalizeWorkDir } from '@scream-code/scream-code-sdk';
 import { t } from '@scream-code/config';
 import { getLlmNotSetMessage, MAIN_AGENT_ID, getNoActiveSessionMessage } from '../constant/scream-tui';
 import { formatErrorMessage } from '../utils/event-payload';
@@ -21,6 +22,14 @@ import type { QuestionController } from '../reverse-rpc/question/controller';
 import type { AppState, PlanModeState, TUIStartupOptions } from '../types';
 import { normalizeGoalStatus } from '../types';
 import type { TUIState } from '../tui-state';
+
+/**
+ * WorkDir-scoped session listing prefetched by the CLI while the loading
+ * splash runs. It only supplies candidate ids for the empty-session sweep:
+ * every candidate is re-checked against a live listing before deletion, and
+ * resume decisions never read this snapshot.
+ */
+export type SessionsPrefetch = Promise<readonly SessionSummary[]>;
 
 /**
  * How recently a session must have been touched for the empty-session pruner
@@ -109,8 +118,13 @@ export class SessionManager {
   async init(options: {
     startup: TUIStartupOptions;
     workDir: string;
+    /** Session listing prefetched by the shell during the loading splash.
+     * Used only as the empty-session prune's candidate enumeration; the
+     * deletion decision is made on a live re-check, and resume decisions
+     * never read this snapshot. */
+    sessionsPrefetch?: SessionsPrefetch | undefined;
   }): Promise<{ session: Session; shouldReplay: boolean }> {
-    const { startup, workDir } = options;
+    const { startup, workDir, sessionsPrefetch } = options;
     let session: Session | undefined;
     let shouldReplayHistory = false;
     const isResumeStartup = startup.sessionFlag !== undefined || startup.continueLast;
@@ -128,15 +142,14 @@ export class SessionManager {
       }
 
       if (startup.sessionFlag !== undefined) {
-        const sessions = await this.host.harness.listSessions({
-          sessionId: startup.sessionFlag,
-          workDir,
-        });
-        const target = sessions[0];
+        const target = await this.findSessionById(startup.sessionFlag, workDir);
         if (target === undefined) {
           throw new Error(t('session.not_found', { sessionId: startup.sessionFlag }));
         }
-        if (target.workDir !== workDir) {
+        // Indexed workDir values are stored normalized (nearest .git/
+        // package.json root); normalize both sides so a nested cwd still
+        // matches its own project instead of reporting a false wrong_dir.
+        if (normalizeWorkDir(target.workDir) !== normalizeWorkDir(workDir)) {
           throw new Error(
             t('session.wrong_dir', { sessionId: startup.sessionFlag, workDir: target.workDir }),
           );
@@ -181,7 +194,7 @@ export class SessionManager {
     // Prune empty sessions (never had a user prompt, never renamed) so the
     // session list does not accumulate one-off empty shells from repeated
     // startups. Best-effort — cleanup failures never block startup.
-    await this.pruneEmptySessions(workDir, session.id);
+    await this.pruneEmptySessions(workDir, session.id, sessionsPrefetch);
     // Subscribe to session events for the newly initialized session. This is
     // required for the initial createSession path; resume/switch paths call
     // startSubscription in their own flows.
@@ -195,25 +208,61 @@ export class SessionManager {
    * one-off empty session shells. The session about to be used is skipped, as
    * are archived sessions, any session that produced a prompt or a title, and
    * any session touched within the grace window (protects a fresh empty
-   * session being used from another terminal). Best-effort: cleanup failures
-   * never block startup.
+   * session being used from another terminal). The prefetched listing, when
+   * present, only enumerates candidates: the snapshot can lag the splash
+   * duration, so every candidate is re-checked against a live id lookup and is
+   * deleted only if it still looks prunable right now (a session that woke up
+   * meanwhile — prompt, rename, new activity — stays). Best-effort: cleanup
+   * failures never block startup.
    */
-  private async pruneEmptySessions(workDir: string, currentSessionId: string): Promise<void> {
+  private async pruneEmptySessions(
+    workDir: string,
+    currentSessionId: string,
+    prefetch?: SessionsPrefetch,
+  ): Promise<void> {
     try {
       const now = Date.now();
-      const summaries = await this.host.harness.listSessions({ workDir });
-      for (const summary of summaries) {
+      // Store summaries carry the normalized root; a raw nested cwd must
+      // still match its own bucket (see normalizeWorkDir).
+      const normalizedWorkDir = normalizeWorkDir(workDir);
+      const candidates = prefetch === undefined
+        ? await this.host.harness.listSessions({ workDir })
+        : await prefetch;
+      for (const summary of candidates) {
         if (summary.id === currentSessionId) continue;
-        if (isPrunableEmptySession(summary, now)) {
-          // Per-item best-effort janitor: one locked session must not abort
-          // the sweep for the rest (explicit user deletes still fail loudly
-          // in the dialog paths).
-          await this.host.harness.deleteSession(summary.id).catch(() => {});
-        }
+        if (!isPrunableEmptySession(summary, now)) continue;
+        // Live re-check: the snapshot may be stale by the whole splash
+        // duration, so the deletion decision is made on fresh state only.
+        const fresh = await this.host.harness.listSessions({ sessionId: summary.id, workDir });
+        const latest = fresh[0];
+        if (latest === undefined) continue;
+        // An id query falls back to a global lookup; a hit from another
+        // workDir must never be deleted by this sweep (compared normalized:
+        // the summary carries the normalized root, the sweep gets a raw cwd).
+        if (normalizeWorkDir(latest.workDir) !== normalizedWorkDir) continue;
+        if (!isPrunableEmptySession(latest, Date.now())) continue;
+        // Per-item best-effort janitor: one locked session must not abort
+        // the sweep for the rest (explicit user deletes still fail loudly
+        // in the dialog paths).
+        await this.host.harness.deleteSession(summary.id).catch(() => {});
       }
     } catch (error) {
       this.host.showStatus(`Session cleanup skipped: ${String(error)}`);
     }
+  }
+
+  /**
+   * Resolve the `--session <id>` target from a live listing (resume decisions
+   * never read the prefetched snapshot). The id-filtered form is the only call
+   * that can tell "no such session" apart from "session lives in another
+   * workDir".
+   */
+  private async findSessionById(
+    sessionId: string,
+    workDir: string,
+  ): Promise<SessionSummary | undefined> {
+    const sessions = await this.host.harness.listSessions({ sessionId, workDir });
+    return sessions[0];
   }
 
   // ---------------------------------------------------------------------------
