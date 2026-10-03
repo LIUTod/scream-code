@@ -584,10 +584,22 @@ export class LocalJian implements Jian {
   async *glob(
     path: string,
     pattern: string,
-    options?: { caseSensitive?: boolean; allowedRoots?: readonly string[] },
+    options?: {
+      caseSensitive?: boolean;
+      allowedRoots?: readonly string[];
+      exclude?: readonly string[];
+    },
   ): AsyncGenerator<string> {
     const resolved = this._resolvePath(path);
     const caseSensitive = options?.caseSensitive ?? true;
+    // `exclude` is opt-in: an omitted or empty list prunes nothing, so the
+    // default walk is byte-for-byte the walk it was before the option
+    // existed. Materialized once per call (a Set built per directory would
+    // defeat the purpose of pruning a hot directory like `node_modules`).
+    const excludedEntries =
+      options?.exclude === undefined || options.exclude.length === 0
+        ? undefined
+        : new Set(options.exclude);
     const physicalAllowedRoots = options?.allowedRoots === undefined
       ? undefined
       : await Promise.all(options.allowedRoots.map((root) => this.realpath(root, { allowMissing: true })));
@@ -615,6 +627,7 @@ export class LocalJian implements Jian {
       caseSensitive,
       initVisited,
       physicalAllowedRoots,
+      excludedEntries,
     );
   }
 
@@ -638,12 +651,22 @@ export class LocalJian implements Jian {
   // causes the call sites to skip visited tracking for that descent
   // — cycle safety is lost on those filesystems, but normal walking
   // works.
+  //
+  // `exclude` is a set of entry *basenames* (never paths) the walk must
+  // neither descend into nor yield. Matching is exact and case-sensitive
+  // against the directory-entry name — the option exists to skip
+  // well-known heavy trees (`node_modules`, `.git`) cheaply, not to
+  // implement a second pattern language. The walk root itself is never
+  // tested against it, so an explicitly addressed root is always walked:
+  // `glob(root + '/node_modules', '**/*.js', { exclude: ['node_modules'] })`
+  // still returns matches. `undefined` (the default) prunes nothing.
   private async *_globWalk(
     basePath: string,
     patternParts: string[],
     caseSensitive: boolean,
     visited: Set<string>,
     physicalAllowedRoots: readonly string[] | undefined,
+    exclude: ReadonlySet<string> | undefined,
   ): AsyncGenerator<string> {
     if (!(await this._isWithinPhysicalRoots(basePath, physicalAllowedRoots))) return;
     if (patternParts.length === 0) {
@@ -675,6 +698,7 @@ export class LocalJian implements Jian {
           caseSensitive,
           visited,
           physicalAllowedRoots,
+          exclude,
         );
       } else {
         // Pattern ends with `**`: yield basePath itself (zero-dir match).
@@ -689,6 +713,10 @@ export class LocalJian implements Jian {
       }
 
       for (const entry of entries) {
+        // Prune before `join`/`stat`: the point of the option is to avoid
+        // paying a stat — and a whole recursive descent — for entries the
+        // caller asked to skip.
+        if (exclude?.has(entry) === true) continue;
         // Use join to avoid "//entry" when basePath is a filesystem root.
         const fullPath = join(basePath, entry);
         if (this._rootDir && !isWithinDirectory(fullPath, this._rootDir, this._platform)) continue;
@@ -707,6 +735,7 @@ export class LocalJian implements Jian {
             caseSensitive,
             key !== null ? new Set([...visited, key]) : visited,
             physicalAllowedRoots,
+            exclude,
           );
         } else if (
           remainingParts.length === 0 &&
@@ -728,6 +757,13 @@ export class LocalJian implements Jian {
       }
 
       for (const entry of entries) {
+        // An excluded basename is skipped even when it matches the pattern:
+        // the caller asked for the entry to be invisible to this walk, and
+        // the tool layer keeps a name out of `exclude` when the pattern
+        // addresses it explicitly.
+        if (exclude?.has(entry) === true) {
+          continue;
+        }
         if (!regex.test(entry)) {
           continue;
         }
@@ -755,6 +791,7 @@ export class LocalJian implements Jian {
               caseSensitive,
               key !== null ? new Set([...visited, key]) : visited,
               physicalAllowedRoots,
+              exclude,
             );
           }
         }

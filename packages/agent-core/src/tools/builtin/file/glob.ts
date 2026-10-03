@@ -18,6 +18,12 @@
  *   - Patterns using brace expansion (`{a,b,c}`) are rejected up-front
  *     because the underlying `_globWalk` treats `{` / `}` as literals,
  *     so such patterns would silently match zero files.
+ *   - `.git` and `node_modules` entries are pruned by default
+ *     (`DEFAULT_GLOB_EXCLUDES`), so a recursive walk does not stat its
+ *     way through VCS and dependency trees. A pattern that names one of
+ *     them as its own `/`-separated segment (e.g. one starting with
+ *     `node_modules/`) keeps that directory in the walk: explicit
+ *     queries still resolve.
  *   - `path` is validated by `resolvePathAccess` in strict mode. Explicit
  *     paths must be absolute and within the workspace roots.
  *   - match count is capped at `MAX_MATCHES`; a separate `YIELD_SAFETY_CAP`
@@ -65,6 +71,31 @@ export const GlobInputSchema = z.object({
 export type GlobInput = z.Infer<typeof GlobInputSchema>;
 
 export const MAX_MATCHES = 1000;
+
+/**
+ * Directory basenames the Glob tool prunes by default — see
+ * `globExcludesForPattern`. Kept as one exported list so the default and
+ * the explicit-pattern guard can never drift apart, and so tests assert
+ * against the same source of truth the tool uses.
+ */
+export const DEFAULT_GLOB_EXCLUDES: readonly string[] = ['.git', 'node_modules'];
+
+/**
+ * The basename exclusions to hand jian for `pattern`: the defaults, minus
+ * any name the pattern addresses explicitly.
+ *
+ * "Explicit" means the name appears as its own `/`-separated segment
+ * (`node_modules/react/src/main.js`, `src/node_modules/*.js`). Such a
+ * pattern is a deliberate query into a normally-pruned tree, so the walk
+ * must be allowed in — the point of pruning is to skip trees nobody
+ * asked for, not to make them unreachable. A name that only appears
+ * inside a wildcard segment (`*node_modules*`) still counts as
+ * unaddressed and stays pruned.
+ */
+export function globExcludesForPattern(pattern: string): readonly string[] {
+  const segments = pattern.split('/');
+  return DEFAULT_GLOB_EXCLUDES.filter((name) => !segments.includes(name));
+}
 
 const GLOB_DESCRIPTION = renderPrompt(globDescriptionTemplate, {
   MAX_MATCHES,
@@ -254,9 +285,15 @@ export class GlobTool implements BuiltinTool<GlobInput> {
       let yielded = 0;
       let truncated = false;
 
+      // Derived from the pattern alone, so the scan cache key above
+      // (root + pattern + include_dirs) stays a faithful key for the
+      // result: the same pattern always resolves to the same exclusions.
+      const exclude = globExcludesForPattern(args.pattern);
+
       outer: for (const root of searchRoots) {
         for await (const filePath of this.jian.glob(root, args.pattern, {
           allowedRoots: [root],
+          exclude,
         })) {
           yielded++;
           if (signal && yielded % 128 === 0) {

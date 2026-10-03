@@ -101,7 +101,11 @@ export function iterdir(path: string): AsyncGenerator<string> {
 export function glob(
   path: string,
   pattern: string,
-  options?: { caseSensitive?: boolean; allowedRoots?: readonly string[] },
+  options?: {
+    caseSensitive?: boolean;
+    allowedRoots?: readonly string[];
+    exclude?: readonly string[];
+  },
 ): AsyncGenerator<string> {
   return getCurrentJian().glob(path, pattern, options);
 }

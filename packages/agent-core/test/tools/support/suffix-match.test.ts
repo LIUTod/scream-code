@@ -82,6 +82,24 @@ describe('findUniqueSuffixMatch', () => {
     await findUniqueSuffixMatch('foo.ts', '/workspace', jian, cache);
     expect(globFn).toHaveBeenCalledTimes(1);
   });
+
+  it('passes no pruning exclusions — it resolves a path the caller named', async () => {
+    // Suffix match recovers a path the caller already spelled out, so it
+    // must keep `.git` / `node_modules` reachable: pruning here would turn
+    // a resolvable explicit path into "not found". Unlike the Glob tool,
+    // which enumerates a tree and therefore prunes by default.
+    const globFn = vi.fn(async function* (): AsyncGenerator<string> {
+      yield '/workspace/node_modules/pkg/index.js';
+    });
+    const jian = createFakeJian({ glob: globFn });
+
+    const result = await findUniqueSuffixMatch('pkg/index.js', '/workspace', jian);
+
+    expect(result!.absolutePath).toBe('/workspace/node_modules/pkg/index.js');
+    expect(globFn).toHaveBeenCalledWith('/workspace', '**/pkg/index.js', {
+      allowedRoots: ['/workspace'],
+    });
+  });
 });
 
 describe('suffixResolutionNotice', () => {

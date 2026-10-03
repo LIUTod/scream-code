@@ -10,6 +10,10 @@ Rejected patterns (no literal anchor — nothing bounds the result set):
 - Anything that starts with `**/` (e.g. `**/*.md`, `**/main/*.py`). The leading `**/` has no literal anchor in front of it. Anchor it with a top-level subdirectory like `src/**/*.md`.
 - `*.{ts,tsx}` — brace expansion is not supported. Issue two calls: `*.ts` and `*.tsx`.
 
+Default pruning:
+- `.git` and `node_modules` directories are skipped by default, so recursive patterns stay fast and do not drag VCS or dependency trees into the results.
+- Naming one of them as its own path segment (e.g. `node_modules/react/src/**/*.js`) re-enables the walk into that name — explicit queries still resolve.
+
 Large-directory warning — avoid recursing into dependency/build output even with an anchor:
 - `node_modules/**/*.js`, `.venv/**/*.py`, `__pycache__/**`, `target/**` all match technically but
   typically produce thousands of results that truncate at the {{ MAX_MATCHES }}-match cap and waste the caller context.

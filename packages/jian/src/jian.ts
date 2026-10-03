@@ -43,11 +43,25 @@ export interface Jian {
   stat(path: string, options?: { followSymlinks?: boolean }): Promise<StatResult>;
   /** Yield entry names in the directory at `path`. */
   iterdir(path: string): AsyncGenerator<string>;
-  /** Yield paths matching `pattern` under `path`. */
+  /**
+   * Yield paths matching `pattern` under `path`.
+   *
+   * `exclude` is a list of entry *basenames* to prune: an entry whose
+   * readdir name is in the list is neither descended into nor yielded
+   * (exact, case-sensitive match). It exists so callers can skip
+   * well-known heavy trees — `.git`, `node_modules` — without paying a
+   * `stat` per entry. Omitted (or empty) prunes nothing, and the walk
+   * root itself is never tested, so an explicitly addressed root is
+   * always walked.
+   */
   glob(
     path: string,
     pattern: string,
-    options?: { caseSensitive?: boolean; allowedRoots?: readonly string[] },
+    options?: {
+      caseSensitive?: boolean;
+      allowedRoots?: readonly string[];
+      exclude?: readonly string[];
+    },
   ): AsyncGenerator<string>;
 
   // ── File operations (async) ─────────────────────────────────────────

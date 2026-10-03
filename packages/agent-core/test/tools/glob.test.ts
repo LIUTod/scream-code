@@ -1,8 +1,20 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { mkdtemp, mkdir, realpath, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
-import { type GlobInput, GlobInputSchema, GlobTool, MAX_MATCHES } from '../../src/tools/builtin/file/glob';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import {
+  DEFAULT_GLOB_EXCLUDES,
+  type GlobInput,
+  GlobInputSchema,
+  GlobTool,
+  MAX_MATCHES,
+  globExcludesForPattern,
+} from '../../src/tools/builtin/file/glob';
 import { scanCache } from '../../src/tools/support/scan-cache';
 import type { WorkspaceConfig } from '../../src/tools/support/workspace';
+import { testJian } from '../fixtures/test-jian';
 import { createFakeJian } from './fixtures/fake-jian';
 import { executeTool } from './fixtures/execute-tool';
 
@@ -82,6 +94,7 @@ describe('GlobTool', () => {
     expect(result.output).toBe('src/new.ts\nsrc/old.ts');
     expect(glob).toHaveBeenCalledWith('/workspace', 'src/**/*.ts', {
       allowedRoots: ['/workspace'],
+      exclude: DEFAULT_GLOB_EXCLUDES,
     });
   });
 
@@ -101,6 +114,7 @@ describe('GlobTool', () => {
     expect(result.output).toBe('src/old.ts');
     expect(glob).toHaveBeenCalledWith('C:/WORKSPACE', 'src/**/*.ts', {
       allowedRoots: ['C:/WORKSPACE'],
+      exclude: DEFAULT_GLOB_EXCLUDES,
     });
   });
 
@@ -150,8 +164,36 @@ describe('GlobTool', () => {
     expect(glob).toHaveBeenCalledTimes(1);
     expect(glob).toHaveBeenCalledWith('/workspace', '*.ts', {
       allowedRoots: ['/workspace'],
+      exclude: DEFAULT_GLOB_EXCLUDES,
     });
     expect(result.output).toBe('a.ts\nshared.ts');
+  });
+
+  it('prunes .git and node_modules by default', async () => {
+    const glob = vi.fn().mockReturnValue(asyncPaths([]));
+    const tool = new GlobTool(createFakeJian({ glob }), workspace);
+
+    await executeTool(tool, context({ pattern: 'src/**/*.ts' }));
+
+    // The default list is pinned literally here on purpose: what the tool
+    // prunes is a product decision, so changing it must be a deliberate
+    // edit to this expectation as well as to DEFAULT_GLOB_EXCLUDES.
+    expect(glob).toHaveBeenCalledWith('/workspace', 'src/**/*.ts', {
+      allowedRoots: ['/workspace'],
+      exclude: ['.git', 'node_modules'],
+    });
+  });
+
+  it('keeps a pruned name in the walk when the pattern names it explicitly', async () => {
+    const glob = vi.fn().mockReturnValue(asyncPaths([]));
+    const tool = new GlobTool(createFakeJian({ glob }), workspace);
+
+    await executeTool(tool, context({ pattern: 'node_modules/react/src/**/*.js' }));
+
+    expect(glob).toHaveBeenCalledWith('/workspace', 'node_modules/react/src/**/*.js', {
+      allowedRoots: ['/workspace'],
+      exclude: ['.git'],
+    });
   });
 
   it('can search an additional directory when path is explicit', async () => {
@@ -167,6 +209,7 @@ describe('GlobTool', () => {
     expect(glob).toHaveBeenCalledTimes(1);
     expect(glob).toHaveBeenCalledWith('/extra', 'pkg/**/*.ts', {
       allowedRoots: ['/extra'],
+      exclude: DEFAULT_GLOB_EXCLUDES,
     });
   });
 
@@ -228,6 +271,7 @@ describe('GlobTool', () => {
       expect(result.output).toContain('utils.py');
       expect(glob).toHaveBeenCalledWith('/skills', '*.py', {
         allowedRoots: ['/skills'],
+        exclude: DEFAULT_GLOB_EXCLUDES,
       });
     });
 
@@ -538,6 +582,7 @@ describe('GlobTool', () => {
     expect(result.isError).toBeFalsy();
     expect(glob).toHaveBeenCalledWith('/workspace/relative/path', '*.py', {
       allowedRoots: ['/workspace/relative/path'],
+      exclude: DEFAULT_GLOB_EXCLUDES,
     });
   });
 
@@ -560,6 +605,7 @@ describe('GlobTool', () => {
     expect(result.output).not.toContain('not an absolute path');
     expect(glob).toHaveBeenCalledWith('/home/test', '*.py', {
       allowedRoots: ['/home/test'],
+      exclude: DEFAULT_GLOB_EXCLUDES,
     });
   });
 
@@ -581,6 +627,7 @@ describe('GlobTool', () => {
     expect(result.isError).toBeFalsy();
     expect(glob).toHaveBeenCalledWith('/parent/workdir-sneaky', '*.py', {
       allowedRoots: ['/parent/workdir-sneaky'],
+      exclude: DEFAULT_GLOB_EXCLUDES,
     });
   });
 
@@ -628,5 +675,82 @@ describe('GlobTool', () => {
 
     expect(tool.description).toContain('C:\\Users\\foo');
     expect(tool.description).toContain('/c/Users/foo');
+  });
+});
+
+/**
+ * End-to-end coverage against a real filesystem, driven through a real
+ * `LocalJian`. The mocked tests above pin the *call* the tool makes;
+ * these pin what the walk actually does when `.git` and `node_modules`
+ * exist on disk — including that an explicit query still gets in.
+ */
+describe('GlobTool against a real filesystem', () => {
+  let root: string;
+
+  beforeAll(async () => {
+    root = await realpath(await mkdtemp(join(tmpdir(), 'glob-tool-')));
+    await mkdir(join(root, 'src', 'deep'), { recursive: true });
+    // Both live under `src` so a single `src/...` pattern has to walk
+    // past them — a pattern anchored elsewhere would never reach either.
+    await mkdir(join(root, 'src', 'node_modules', 'pkg'), { recursive: true });
+    await mkdir(join(root, 'src', '.git', 'objects'), { recursive: true });
+    await writeFile(join(root, 'src', 'deep', 'kept.txt'), 'kept');
+    await writeFile(join(root, 'src', 'node_modules', 'pkg', 'dep.txt'), 'dep');
+    await writeFile(join(root, 'src', '.git', 'objects', 'pack.txt'), 'pack');
+  });
+
+  afterAll(async () => {
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 25 });
+  });
+
+  function realTool(): GlobTool {
+    return new GlobTool(testJian, { workspaceDir: root, additionalDirs: [] });
+  }
+
+  it('leaves both .git and node_modules out of a recursive result', async () => {
+    const result = await executeTool(realTool(), context({ pattern: 'src/**/*.txt' }));
+
+    expect(result.isError).toBeFalsy();
+    expect(result.output).toBe('src/deep/kept.txt');
+  });
+
+  it('resolves a pattern that addresses node_modules explicitly', async () => {
+    const result = await executeTool(
+      realTool(),
+      context({ pattern: 'src/node_modules/**/*.txt' }),
+    );
+
+    expect(result.isError).toBeFalsy();
+    // The named directory is walked; the unnamed default (.git) still is not.
+    expect(result.output).toBe('src/node_modules/pkg/dep.txt');
+    expect(result.output).not.toContain('.git');
+  });
+});
+
+describe('globExcludesForPattern', () => {
+  it('returns the full default list for a pattern with no explicit segment', () => {
+    expect(globExcludesForPattern('src/**/*.ts')).toEqual(DEFAULT_GLOB_EXCLUDES);
+    expect(globExcludesForPattern('*.ts')).toEqual(DEFAULT_GLOB_EXCLUDES);
+  });
+
+  it('drops a name the pattern addresses as its own path segment', () => {
+    expect(globExcludesForPattern('node_modules/react/src/**/*.js')).toEqual(['.git']);
+    expect(globExcludesForPattern('src/node_modules/*.js')).toEqual(['.git']);
+    expect(globExcludesForPattern('.git/config')).toEqual(['node_modules']);
+  });
+
+  it('drops every name the pattern addresses explicitly', () => {
+    expect(globExcludesForPattern('.git/*/node_modules/*.js')).toEqual([]);
+  });
+
+  it('keeps a name that only appears inside a wildcard segment', () => {
+    // `*node_modules*` is not a query for a specific tree, so the walk
+    // stays pruned; otherwise the guard would hand anyone a wildcard
+    // bypass of the default.
+    expect(globExcludesForPattern('*node_modules*')).toEqual(DEFAULT_GLOB_EXCLUDES);
+  });
+
+  it('does not treat a longer segment containing a name as that name', () => {
+    expect(globExcludesForPattern('node_modules_backup/*.js')).toEqual(DEFAULT_GLOB_EXCLUDES);
   });
 });

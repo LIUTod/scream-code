@@ -411,6 +411,95 @@ describe('LocalJian', () => {
     });
   });
 
+  // ── Default pruning (`exclude` option) ──────────────────────────────
+  //
+  // `exclude` is a basename list the walk must neither descend into nor
+  // yield — the hook the Glob tool uses to skip `.git` / `node_modules`
+  // without paying a stat on every entry underneath them.
+  describe('glob exclude option', () => {
+    async function buildPrunableTree(): Promise<void> {
+      await jian.mkdir(join(tempDir, 'src', 'deep'), { parents: true });
+      await jian.mkdir(join(tempDir, 'node_modules', 'pkg', 'nested'), { parents: true });
+      await jian.mkdir(join(tempDir, '.git', 'objects'), { parents: true });
+      await jian.writeText(join(tempDir, 'root.txt'), '');
+      await jian.writeText(join(tempDir, 'src', 'deep', 'kept.txt'), '');
+      await jian.writeText(join(tempDir, 'node_modules', 'pkg', 'nested', 'dep.txt'), '');
+      await jian.writeText(join(tempDir, '.git', 'objects', 'pack.txt'), '');
+    }
+
+    async function collect(pattern: string, exclude?: readonly string[]): Promise<Set<string>> {
+      const matches: string[] = [];
+      for await (const m of jian.glob(tempDir, pattern, exclude === undefined ? undefined : { exclude })) {
+        matches.push(m);
+      }
+      return new Set(matches.map((p) => p.split(/[/\\]/).pop()!));
+    }
+
+    it('prunes excluded basenames at every depth of the ** walk', async () => {
+      await buildPrunableTree();
+
+      const names = await collect('**/*.txt', ['node_modules', '.git']);
+
+      expect(names).toEqual(new Set(['root.txt', 'kept.txt']));
+    });
+
+    it('walks the same tree unchanged when exclude is omitted', async () => {
+      await buildPrunableTree();
+
+      const names = await collect('**/*.txt');
+
+      expect(names).toEqual(new Set(['root.txt', 'kept.txt', 'dep.txt', 'pack.txt']));
+    });
+
+    it('treats an empty exclude list as no pruning', async () => {
+      await buildPrunableTree();
+
+      const names = await collect('**/*.txt', []);
+
+      expect(names).toEqual(new Set(['root.txt', 'kept.txt', 'dep.txt', 'pack.txt']));
+    });
+
+    it('prunes explicit matches in the final-segment branch too', async () => {
+      await buildPrunableTree();
+
+      // `*` matches every direct child, directories included. The two
+      // excluded names must be absent even though the pattern matches
+      // them — pruning is by basename, not by pattern.
+      const names = await collect('*', ['node_modules', '.git']);
+
+      expect(names.has('node_modules')).toBe(false);
+      expect(names.has('.git')).toBe(false);
+      expect(names.has('src')).toBe(true);
+      expect(names.has('root.txt')).toBe(true);
+    });
+
+    it('still walks a root that itself matches an excluded basename', async () => {
+      await buildPrunableTree();
+
+      // The option never applies to the base the caller addressed: an
+      // explicit root must stay reachable, or `exclude` would turn an
+      // explicit path into a dead end.
+      const matches: string[] = [];
+      for await (const m of jian.glob(join(tempDir, 'node_modules'), '**/*.txt', {
+        exclude: ['node_modules'],
+      })) {
+        matches.push(m);
+      }
+
+      expect(matches).toHaveLength(1);
+      expect(matches[0]!.endsWith('dep.txt')).toBe(true);
+    });
+
+    it('matches basenames exactly — no case folding, no pattern syntax', async () => {
+      await jian.mkdir(join(tempDir, 'Node_Modules'), { parents: true });
+      await jian.writeText(join(tempDir, 'Node_Modules', 'kept.txt'), '');
+
+      const names = await collect('**/*.txt', ['node_modules']);
+
+      expect(names).toEqual(new Set(['kept.txt']));
+    });
+  });
+
   // ── Symlink cycle safety ────────────────────────────────────────────
   //
   // These tests use real filesystem symlinks. Note: macOS/Linux apply
