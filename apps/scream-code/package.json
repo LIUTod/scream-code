@@ -40,6 +40,7 @@
   },
   "scripts": {
     "build": "tsdown && pnpm exec vite build src/web/frontend && node scripts/copy-web-assets.mjs",
+    "build:cli": "tsdown",
     "dev": "node scripts/dev.mjs",
     "dev:cli-only": "tsx --import ../../build/register-raw-text-loader.mjs ./src/main.ts",
     "dev:prod": "node dist/main.mjs",
@@ -52,7 +53,8 @@
     "e2e": "pnpm -w run build:packages && SCREAM_E2E=1 vitest run test/e2e",
     "e2e:real": "pnpm -w run build:packages && SCREAM_E2E_REAL=1 vitest run test/e2e/real-llm-smoke.e2e.test.ts",
     "prepublishOnly": "node scripts/verify-publish.mjs",
-    "smoke": "node dist/main.mjs --version"
+    "smoke": "node dist/main.mjs --version",
+    "bench:startup": "node scripts/startup-bench.mjs"
   },
   "dependencies": {
     "@earendil-works/pi-codemode": "0.99.1",

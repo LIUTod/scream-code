@@ -740,8 +740,8 @@ Manages installed plugins and browses installable plugin packages; `/extension` 
 Decouples "arrival" from "display" — a shown-length cursor on the draft gains budget each frame by the measured arrival rate: fast models stay smooth, slow models don't freeze, bursts spread over several frames.
 
 - **Controller**: `src/tui/controllers/streaming-ui.ts` `flush()`/`advanceAssistantShown()`/`finalizeAssistantStream` (forces a full flush at the end)
-- **Constants**: `src/tui/constant/streaming.ts` — `SMOOTH_FRAME_MS=50`, `MIN_CHARS_PER_FRAME=1`, `MAX_CHARS_PER_FRAME=25`, `DEFAULT_ARRIVAL_TOK_PER_SEC=50`; thinking/tool still flush at `STREAMING_UI_FLUSH_MS=50`
-- **Char budget**: the frame budget is a token budget (`measured tok/s × SMOOTH_FRAME_MS`) converted back to characters by `charsForTokenBudget()` in `src/tui/utils/speed-tracker.ts`, so Chinese and Latin pacing both follow the measured rate; `MAX_CHARS_PER_FRAME=25` bounds a burst
+- **Constants**: `src/tui/constant/streaming.ts` — `SMOOTH_FRAME_MS=50`, `MIN_CHARS_PER_FRAME=1`, `MAX_CHARS_PER_FRAME=25`, `DEFAULT_ARRIVAL_TOK_PER_SEC=50`, plus catch-up constants `SMOOTH_CATCHUP_THRESHOLD=250`, `SMOOTH_CATCHUP_DIVISOR=8`, `SMOOTH_CATCHUP_MAX_PER_FRAME=300`; thinking/tool still flush at `STREAMING_UI_FLUSH_MS=50`
+- **Char budget**: the frame budget is a token budget (`measured tok/s × SMOOTH_FRAME_MS`) converted back to characters by `charsForTokenBudget()` in `src/tui/utils/speed-tracker.ts`, so Chinese and Latin pacing both follow the measured rate; `MAX_CHARS_PER_FRAME=25` bounds a burst while the display is keeping up — once the pending backlog exceeds `SMOOTH_CATCHUP_THRESHOLD=250` characters the frame budget grows to `ceil(backlog / SMOOTH_CATCHUP_DIVISOR)`, capped at `SMOOTH_CATCHUP_MAX_PER_FRAME=300`, so a provider faster than ~500 chars/s converges within ~8 frames instead of accumulating backlog until `finalizeAssistantStream`
 - **Speed**: `src/tui/utils/speed-tracker.ts` — `SPEED_WINDOW_MS=3000`, `SPEED_MAX=200`, `estimateTokens()` (CJK ≈ 1 token/char, Latin ≈ 4 chars/token), `getSharedSpeedTracker()`; observation point `streaming-ui.ts:151-162`
 
 ### Activity Block (per-turn reasoning + tool calls)
@@ -771,7 +771,7 @@ Footer persistently shows the cache hit rate and token usage (session accumulati
 
 On startup, prunes working-directory empty sessions that never received a user message and were never named (best-effort, does not block startup).
 
-- **Location**: `src/tui/managers/session-manager.ts` — `PRUNE_EMPTY_SESSION_GRACE_MS = 5*60*1000` grace window; `isPrunableEmptySession` (keeps archived / already-prompted / placeholder-title / within-grace sessions); `isUntitledTitle` treats 'New Session' as unnamed; skips the session about to be used
+- **Location**: `src/tui/managers/session-manager.ts` — `PRUNE_EMPTY_SESSION_GRACE_MS = 5*60*1000` grace window; `isPrunableEmptySession` (keeps archived / already-prompted / placeholder-title / within-grace sessions); `hasRealTitle` treats 'New Session' as unnamed; skips the session about to be used; every delete decision re-verifies the candidate with a live per-session read (the startup prefetch snapshot only enumerates candidates for the sweep)
 
 ### Model Refresh & Switch Confirmation
 
