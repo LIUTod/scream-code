@@ -913,14 +913,16 @@ export class OpenAIResponsesChatProvider implements ChatProvider {
   }
 
   async generate(
-    systemPrompt: string,
+    systemPrompt: string | string[],
     tools: Tool[],
     history: Message[],
     options?: GenerateOptions,
   ): Promise<StreamedMessage> {
+    const systemText =
+      typeof systemPrompt === 'string' ? systemPrompt : systemPrompt.join('\n\n');
     const input: unknown[] = [];
-    if (systemPrompt) {
-      const sysItem: Record<string, unknown> = { role: 'system', content: systemPrompt };
+    if (systemText) {
+      const sysItem: Record<string, unknown> = { role: 'system', content: systemText };
       if (usesOpenAIResponsesDeveloperRole(this._model)) {
         sysItem['role'] = 'developer';
       }

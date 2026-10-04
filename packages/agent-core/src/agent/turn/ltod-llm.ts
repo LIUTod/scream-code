@@ -57,6 +57,13 @@ export interface LtodLLMConfig {
   readonly provider: ChatProvider;
   readonly modelName: string;
   readonly systemPrompt: string;
+  /**
+   * The same system prompt in provider request form (split static/dynamic
+   * blocks when the runtime prompt carries the split marker; see
+   * profile/system-prompt-parts.ts). Takes precedence over `systemPrompt`
+   * for the request when present.
+   */
+  readonly systemPromptBlocks?: string | string[] | undefined;
   readonly capability?: ModelCapability | undefined;
   /**
    * Optional override for the ltod `generate()` entry point. Lets the
@@ -78,6 +85,7 @@ export class LtodLLM implements LLM {
   readonly capability?: ModelCapability | undefined;
 
   private readonly provider: ChatProvider;
+  private readonly systemPromptBlocks: string | string[] | undefined;
   private readonly generate: GenerateFn;
   private readonly completionBudgetConfig: CompletionBudgetConfig | undefined;
   private readonly obfuscator: SecretObfuscator | undefined;
@@ -86,6 +94,7 @@ export class LtodLLM implements LLM {
     this.provider = config.provider;
     this.modelName = config.modelName;
     this.systemPrompt = config.systemPrompt;
+    this.systemPromptBlocks = config.systemPromptBlocks;
     this.capability = config.capability;
     this.generate = config.generate ?? ltodGenerate;
     this.completionBudgetConfig = config.completionBudgetConfig;
@@ -127,10 +136,14 @@ export class LtodLLM implements LLM {
         ? obfuscateMessages(this.obfuscator, params.messages)
         : params.messages;
 
+    // Guard against an empty blocks array: `??` alone would forward `[]`
+    // and send a request with no system prompt at all.
+    const blocks = this.systemPromptBlocks;
+    const requestSystem = blocks === undefined || blocks.length === 0 ? this.systemPrompt : blocks;
     const runGenerate = (messages: Message[]) =>
       this.generate(
         effectiveProvider,
-        this.systemPrompt,
+        requestSystem,
         [...params.tools],
         messages,
         callbacks,

@@ -782,7 +782,7 @@ export class GoogleGenAIChatProvider implements ChatProvider {
   }
 
   async generate(
-    systemPrompt: string,
+    systemPrompt: string | string[],
     tools: Tool[],
     history: Message[],
     options?: GenerateOptions,
@@ -795,9 +795,12 @@ export class GoogleGenAIChatProvider implements ChatProvider {
 
     const contents = messagesToGoogleGenAIContents(history);
 
+    const systemText =
+      typeof systemPrompt === 'string' ? systemPrompt : systemPrompt.join('\n\n');
+
     const config: Record<string, unknown> = {
       ...this._generationKwargs,
-      system_instruction: systemPrompt,
+      system_instruction: systemText,
       ...(tools.length > 0 ? { tools: tools.map((t) => toolToGoogleGenAI(t)) } : {}),
     };
 

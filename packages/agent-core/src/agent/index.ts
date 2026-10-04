@@ -20,6 +20,7 @@ import { resolveScreamHome } from '../config/path';
 import { computeDelayMs, retryBackoffDelays } from '../loop/retry';
 
 import type { McpConnectionManager } from '../mcp';
+import { systemPromptForRequest } from '../profile';
 import type { PreparedSystemPromptContext, ResolvedAgentProfile } from '../profile';
 import type { LspProcessSupervisor } from '../lsp/process-supervisor';
 import type { ModelProvider } from '../session/provider-manager';
@@ -368,6 +369,14 @@ export class Agent {
     return this.resolveRuntimeSystemPrompt(this.config.systemPrompt);
   }
 
+  /** The system prompt in provider request form: `[static, dynamic]` blocks
+   *  when the runtime prompt carries the split marker, else the plain string.
+   *  All request paths (main loop, compaction) must use this form so their
+   *  requests share the provider-side prefix cache. */
+  getRuntimeSystemPromptBlocks(): string | string[] {
+    return systemPromptForRequest(this.getRuntimeSystemPrompt());
+  }
+
   setRlmDepth(depth: number): void {
     this.rlmDepth = Math.max(0, depth);
   }
@@ -572,10 +581,12 @@ export class Agent {
     const completionBudgetConfig = resolveCompletionBudget({
       reservedContextSize: loopControl?.reservedContextSize,
     });
+    const systemPrompt = this.resolveRuntimeSystemPrompt(this.config.systemPrompt);
     return new LtodLLM({
       provider,
       modelName: model,
-      systemPrompt: this.resolveRuntimeSystemPrompt(this.config.systemPrompt),
+      systemPrompt,
+      systemPromptBlocks: systemPromptForRequest(systemPrompt),
       capability: this.config.modelCapabilities,
       generate: this.generate,
       completionBudgetConfig,
@@ -598,22 +609,27 @@ export class Agent {
 
   private logLlmRequest(
     provider: ChatProvider,
-    systemPrompt: string,
+    systemPrompt: string | string[],
     tools: readonly Tool[],
     history: readonly Message[],
     options: Parameters<typeof generate>[5],
   ): void {
     const context = buildLlmRequestContext(options);
+    // Wire logging and token estimation work on the full text; block
+    // boundaries are a request-shaping detail the stored header does not need
+    // (see profile/system-prompt-parts.ts).
+    const systemPromptText =
+      typeof systemPrompt === 'string' ? systemPrompt : systemPrompt.join('\n\n');
     const configMetadata = buildLlmConfigMetadata(
       provider,
       this.config.modelAlias,
-      systemPrompt,
+      systemPromptText,
       tools,
     );
     this.logLlmConfigIfChanged(
       context,
       configMetadata,
-      buildLlmConfigSignature(configMetadata, systemPrompt, tools),
+      buildLlmConfigSignature(configMetadata, systemPromptText, tools),
     );
 
     let partialMessageCount = 0;
@@ -622,7 +638,7 @@ export class Agent {
     }
     const requestMetadata: LlmRequestMetadata = {
       estimatedInputTokens:
-        estimateTokens(systemPrompt) +
+        estimateTokens(systemPromptText) +
         estimateTokensForMessages(history) +
         estimateTokensForTools(tools),
     };
@@ -635,14 +651,14 @@ export class Agent {
     // (~50KB) and is almost always byte-identical to the previous request, so
     // it is stored only when it changed — otherwise a long-lived session
     // accumulates one full copy of the prompt per request.
-    const systemPromptReused = systemPrompt === this.lastRequestHeaderSystemPrompt;
-    this.lastRequestHeaderSystemPrompt = systemPrompt;
+    const systemPromptReused = systemPromptText === this.lastRequestHeaderSystemPrompt;
+    this.lastRequestHeaderSystemPrompt = systemPromptText;
     this.records.logRecord({
       type: 'request.header',
       provider: provider.name,
       model: provider.modelName,
       modelAlias: this.config.modelAlias ?? '',
-      ...(systemPromptReused ? { systemPromptReused: true } : { systemPrompt }),
+      ...(systemPromptReused ? { systemPromptReused: true } : { systemPrompt: systemPromptText }),
       activeTools: tools.map((t) => t.name),
       messagesCount: history.length,
       estimatedInputTokens: requestMetadata.estimatedInputTokens ?? 0,

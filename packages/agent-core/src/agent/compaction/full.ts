@@ -628,13 +628,14 @@ export class FullCompaction {
           // 'off', which always-thinking models reject with HTTP 400 — exactly
           // the failure the main request path avoids via withThinking.
           this.agent.config.provider.withThinking(this.agent.config.thinkingLevel),
-          // Reuse the agent's real system prompt so the compaction request
-          // shares the exact prefix of the last routed request — the KV cache
-          // hits instead of paying full price for the whole history. The
-          // compaction instruction (a tail user message) already forbids tool
-          // calls, so the tool descriptions in the main system prompt don't
-          // cause the model to call anything.
-          this.agent.getRuntimeSystemPrompt(),
+          // Reuse the agent's real system prompt — in the same request form
+          // (split blocks) as the main loop — so the compaction request
+          // shares the exact prefix of the last routed request — the KV
+          // cache hits instead of paying full price for the whole history.
+          // The compaction instruction (a tail user message) already forbids
+          // tool calls, so the tool descriptions in the main system prompt
+          // don't cause the model to call anything.
+          this.agent.getRuntimeSystemPromptBlocks(),
           // Same tool set (sorted by name) the main loop sends — tools are
           // part of the cache prefix for prefix-caching backends, so an empty
           // or reordered list would break the prefix right after the system

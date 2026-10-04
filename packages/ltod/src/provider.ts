@@ -147,12 +147,15 @@ export interface ChatProvider {
    * Send a conversation to the LLM and return a streamed response.
    *
    * @param systemPrompt - System-level instruction prepended to the request.
+   *   A `string[]` carries the prompt pre-split into blocks (static/dynamic);
+   *   providers that support multiple system blocks use the boundaries,
+   *   others join them with a blank line.
    * @param tools - Tool definitions the model may invoke.
    * @param history - The conversation history (user, assistant, tool messages).
    * @param options - Optional per-call settings such as an {@link AbortSignal}.
    */
   generate(
-    systemPrompt: string,
+    systemPrompt: string | string[],
     tools: Tool[],
     history: Message[],
     options?: GenerateOptions,

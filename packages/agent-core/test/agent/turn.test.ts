@@ -27,6 +27,7 @@ import {
 } from '../../src/utils/tokens';
 import { createFakeJian } from '../tools/fixtures/fake-jian';
 import { createCommandJian, testAgent, type TestAgentOptions } from './harness/agent';
+import { systemPromptText } from './harness/snapshots';
 import { executeTool } from '../tools/fixtures/execute-tool';
 
 type GenerateFn = NonNullable<AgentOptions['generate']>;
@@ -899,7 +900,7 @@ describe('Agent turn flow', () => {
     const input = ctx.llmCalls[0];
     expect(input?.tools.length).toBeGreaterThan(0);
     const expectedTokens =
-      estimateTokens(input!.systemPrompt) +
+      estimateTokens(systemPromptText(input!.systemPrompt)) +
       estimateTokensForMessages(input!.history) +
       estimateTokensForTools(input!.tools);
     const requestPayload = entries.find((entry) => entry.message === 'llm request')?.payload as
@@ -1302,8 +1303,8 @@ describe('Agent turn flow', () => {
       [emit] tool.call.started                   { "turnId": 0, "toolCallId": "call_bash", "name": "Bash", "args": { "command": "printf approved", "timeout": 60 }, "description": "Running: printf approved", "display": { "kind": "command", "command": "printf approved", "cwd": "<cwd>", "language": "bash" } }
       [wire] context.append_loop_event           { "event": { "type": "block.end", "uuid": "<uuid-6>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "index": 0, "blockType": "tool-call" }, "time": "<time>" }
       [emit] tool.progress                       { "turnId": 0, "toolCallId": "call_bash", "update": { "kind": "stdout", "text": "approved" } }
-      [wire] context.append_loop_event           { "event": { "type": "tool.result", "parentUuid": "call_bash", "toolCallId": "call_bash", "result": { "output": "approved" } }, "time": "<time>" }
-      [emit] tool.result                         { "turnId": 0, "toolCallId": "call_bash", "output": "approved" }
+      [wire] context.append_loop_event           { "event": { "type": "tool.result", "parentUuid": "call_bash", "toolCallId": "call_bash", "result": { "output": "approved", "message": "Command executed successfully." } }, "time": "<time>" }
+      [emit] tool.result                         { "turnId": 0, "toolCallId": "call_bash", "output": "approved", "message": "Command executed successfully." }
       [wire] context.append_loop_event           { "event": { "type": "step.end", "uuid": "<uuid-1>", "turnId": "0", "step": 1, "usage": { "inputOther": 7, "output": 22, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "tool_use" }, "time": "<time>" }
       [emit] turn.step.completed                 { "turnId": 0, "step": 1, "stepId": "<uuid-1>", "usage": { "inputOther": 7, "output": 22, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "tool_use" }
       [wire] usage.record                        { "model": "mock-model", "usage": { "inputOther": 7, "output": 22, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }

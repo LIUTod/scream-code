@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { DEFAULT_AGENT_PROFILES, loadAgentProfilesFromSources } from '../../src/profile';
+import {
+  DEFAULT_AGENT_PROFILES,
+  loadAgentProfilesFromSources,
+  SYSTEM_PROMPT_SPLIT_MARKER,
+} from '../../src/profile';
 import { subagentRoster } from '../../src/profile/roster';
 import { buildSubagentDescriptions } from '../../src/tools/builtin/collaboration/agent';
 
@@ -43,6 +47,20 @@ describe('default agent profiles', () => {
       expect(prompt).toContain(trigger);
     }
     expect(prompt).not.toContain('/ 生成 /');
+  });
+
+  it('renders the static/dynamic request split (marker once; dynamic section after)', () => {
+    const prompt = DEFAULT_AGENT_PROFILES['agent']?.systemPrompt(promptContext) ?? '';
+    const parts = prompt.split(SYSTEM_PROMPT_SPLIT_MARKER);
+    expect(parts).toHaveLength(2);
+    const [staticPart = '', dynamicPart = ''] = parts;
+    // Static head carries the contract/persona sections; the dynamic tail
+    // carries environment, skills, self-asset map, and role additions.
+    expect(staticPart).toContain('Anti-Drift Reminders');
+    expect(staticPart).not.toContain('Available skills');
+    expect(dynamicPart).toContain('Working Environment');
+    expect(dynamicPart).toContain('Available skills');
+    expect(dynamicPart).toContain('Self Assets');
   });
 
   it('bundles the writer as a full document-production specialist', () => {

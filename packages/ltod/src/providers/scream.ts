@@ -436,7 +436,7 @@ export class ScreamChatProvider implements ChatProvider {
   }
 
   async generate(
-    systemPrompt: string,
+    systemPrompt: string | string[],
     tools: Tool[],
     history: Message[],
     options?: GenerateOptions,
@@ -445,9 +445,11 @@ export class ScreamChatProvider implements ChatProvider {
       history,
       OPENAI_CHAT_TOOL_CALL_ID_POLICY,
     );
+    const systemText =
+      typeof systemPrompt === 'string' ? systemPrompt : systemPrompt.join('\n\n');
     const messages: OpenAIMessage[] = [];
-    if (systemPrompt) {
-      messages.push({ role: 'system', content: systemPrompt });
+    if (systemText) {
+      messages.push({ role: 'system', content: systemText });
     }
     for (const msg of normalizedHistory) {
       messages.push(convertMessage(msg));

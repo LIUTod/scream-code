@@ -14,7 +14,7 @@ import { TEST_IDENTITY } from './test-identity';
 
 const fakeProviderState = vi.hoisted(() => ({
   calls: [] as Array<{
-    readonly systemPrompt: string;
+    readonly systemPrompt: string | string[];
     readonly history: unknown;
   }>,
   providerConfigs: [] as unknown[],
@@ -31,7 +31,7 @@ vi.mock('@scream-code/ltod', async (importOriginal) => {
         name: 'fake',
         modelName: 'fake-model',
         thinkingEffort: null,
-        async generate(systemPrompt: string, _tools: unknown, history: unknown) {
+        async generate(systemPrompt: string | string[], _tools: unknown, history: unknown) {
           fakeProviderState.calls.push({ systemPrompt, history });
           return {
             id: 'fake-response',
@@ -57,6 +57,12 @@ vi.mock('@scream-code/ltod', async (importOriginal) => {
 });
 
 const { ScreamHarness } = await import('#/index');
+
+/** The request form may be a single string or pre-split blocks ([static, dynamic]). */
+function systemPromptText(systemPrompt: string | string[] | undefined): string {
+  if (systemPrompt === undefined) return '';
+  return typeof systemPrompt === 'string' ? systemPrompt : systemPrompt.join('\n\n');
+}
 
 const tempDirs: string[] = [];
 
@@ -210,8 +216,12 @@ describe('Session.prompt events', () => {
           reason: 'completed',
         }),
       );
-      expect(fakeProviderState.calls[0]?.systemPrompt).toContain('You are Scream Code');
-      expect(fakeProviderState.calls[0]?.systemPrompt).toContain('Available skills');
+      expect(systemPromptText(fakeProviderState.calls[0]?.systemPrompt)).toContain(
+        'You are Scream Code',
+      );
+      expect(systemPromptText(fakeProviderState.calls[0]?.systemPrompt)).toContain(
+        'Available skills',
+      );
       expect(fakeProviderState.providerConfigs[0]).toMatchObject({
         type: 'scream',
         defaultHeaders: expect.objectContaining({

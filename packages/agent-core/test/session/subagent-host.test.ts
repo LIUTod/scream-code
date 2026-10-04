@@ -22,6 +22,7 @@ function zeroUsage() {
 }
 import { abortError, userCancellationReason } from '../../src/utils/abort';
 import { testAgent, type AgentTestContext } from '../agent/harness/agent';
+import { systemPromptText } from '../agent/harness/snapshots';
 import { createFakeJian } from '../tools/fixtures/fake-jian';
 
 // Git context collection is exercised in git-context.test.ts; here it is
@@ -425,7 +426,17 @@ describe('SessionSubagentHost', () => {
     expect(child.agent.permission.mode).toBe('yolo');
     expect(child.agent.permission.rules).toEqual([]);
     expect(child.agent.permission.data().rules).toEqual(parent.agent.permission.rules);
-    expect(child.llmCalls[0]?.systemPrompt).toContain('codebase exploration specialist');
+    // End-to-end: a real rendered profile prompt must reach the provider in
+    // request form — [static, dynamic] — with role text in the dynamic block.
+    const subagentSystem = child.llmCalls[0]?.systemPrompt;
+    expect(Array.isArray(subagentSystem)).toBe(true);
+    expect(subagentSystem).toEqual([
+      expect.stringContaining('You are Scream Code'),
+      expect.stringContaining('codebase exploration specialist'),
+    ]);
+    expect(systemPromptText(child.llmCalls[0]?.systemPrompt)).toContain(
+      'codebase exploration specialist',
+    );
     expect(child.llmCalls[0]?.tools.map((tool) => tool.name).toSorted()).toEqual([
       'Bash',
       'Glob',
@@ -464,7 +475,9 @@ describe('SessionSubagentHost', () => {
         'Implemented the requested fix in the target module, updated all affected call sites, and confirmed the change compiles cleanly and passes the existing test suite. No unrelated code paths were touched while making this change.',
     });
     expect(child.agent.config.profileName).toBe('coder');
-    expect(child.llmCalls[0]?.systemPrompt).toContain('You are now running as a subagent.');
+    expect(systemPromptText(child.llmCalls[0]?.systemPrompt)).toContain(
+      'You are now running as a subagent.',
+    );
     expect(child.llmCalls[0]?.tools.map((tool) => tool.name).toSorted()).toEqual([
       'Bash',
       'Edit',

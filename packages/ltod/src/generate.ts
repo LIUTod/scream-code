@@ -80,7 +80,10 @@ export interface GenerateCallbacks {
  * unified form; the generate loop never sees a separate done event.
  *
  * @param provider - The chat provider to generate from.
- * @param systemPrompt - System-level instruction prepended to the request.
+ * @param systemPrompt - System-level instruction prepended to the request. A
+ *   `string[]` carries the prompt pre-split into blocks (static/dynamic);
+ *   providers that support multiple system blocks use the boundaries, others
+ *   join them with a blank line.
  * @param tools - Tool definitions the model may invoke.
  * @param history - The conversation history sent as context.
  * @param callbacks - Optional streaming callbacks.
@@ -93,7 +96,7 @@ export interface GenerateCallbacks {
  */
 export async function generate(
   provider: ChatProvider,
-  systemPrompt: string,
+  systemPrompt: string | string[],
   tools: Tool[],
   history: Message[],
   callbacks?: GenerateCallbacks,

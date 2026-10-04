@@ -921,21 +921,29 @@ export class AnthropicChatProvider implements ChatProvider {
   }
 
   async generate(
-    systemPrompt: string,
+    systemPrompt: string | string[],
     tools: Tool[],
     history: Message[],
     options?: GenerateOptions,
   ): Promise<StreamedMessage> {
-    // Build system param
-    const system: TextBlockParam[] | undefined = systemPrompt
-      ? [
-          {
-            type: 'text',
-            text: systemPrompt,
-            cache_control: CACHE_CONTROL,
-          } as TextBlockParam,
-        ]
-      : undefined;
+    // Build system param. A `string[]` carries the prompt pre-split into
+    // blocks (static/dynamic): the cache breakpoint sits on the first
+    // (static) block — its bytes are stable across sessions of the same
+    // role, so later blocks and the tools/messages segments re-pay only
+    // from the first changed byte on.
+    const systemBlocks = (
+      typeof systemPrompt === 'string' ? [systemPrompt] : systemPrompt
+    ).filter((text) => text.length > 0);
+    const system: TextBlockParam[] | undefined =
+      systemBlocks.length === 0
+        ? undefined
+        : systemBlocks.map(
+            (text, index): TextBlockParam => ({
+              type: 'text',
+              text,
+              ...(index === 0 ? { cache_control: CACHE_CONTROL } : {}),
+            }),
+          );
 
     // Convert messages, merging consecutive tool-result-only user messages
     // into a single user message (Anthropic parallel-tool-use spec).

@@ -22,7 +22,7 @@ export interface WireSnapshotEntry {
 export type EventSnapshotEntry = WireSnapshotEntry | RpcSnapshotEntry;
 
 export interface GenerateCall {
-  readonly systemPrompt: string;
+  readonly systemPrompt: string | string[];
   readonly tools: Array<Pick<LLMTool, 'name' | 'description' | 'parameters'>>;
   readonly history: Message[];
 }
@@ -141,7 +141,7 @@ expect.addSnapshotSerializer({
 function formatGenerateInput(input: GenerateCall, previous: GenerateCall | undefined): string {
   const lines: string[] = [];
 
-  if (previous === undefined || previous.systemPrompt !== input.systemPrompt) {
+  if (previous === undefined || !isSameSystemPrompt(previous.systemPrompt, input.systemPrompt)) {
     lines.push(`system: ${formatSystemPrompt(input.systemPrompt)}`);
   }
 
@@ -171,9 +171,25 @@ function indentLines(text: string): string {
     .join('\n');
 }
 
-function formatSystemPrompt(systemPrompt: string): string {
-  if (systemPrompt === DEFAULT_TEST_SYSTEM_PROMPT) return '<system-prompt>';
-  return JSON.stringify(systemPrompt);
+function formatSystemPrompt(systemPrompt: string | string[]): string {
+  const text = typeof systemPrompt === 'string' ? systemPrompt : systemPrompt.join('\n\n');
+  if (text === DEFAULT_TEST_SYSTEM_PROMPT) return '<system-prompt>';
+  return JSON.stringify(text);
+}
+
+/** Value comparison: request-form prompts may arrive as fresh arrays per call. */
+function isSameSystemPrompt(
+  left: string | string[],
+  right: string | string[],
+): boolean {
+  if (typeof left === 'string' || typeof right === 'string') return left === right;
+  return left.length === right.length && left.every((part, index) => part === right[index]);
+}
+
+/** The request form may be a single string or pre-split blocks ([static, dynamic]). */
+export function systemPromptText(systemPrompt: string | string[] | undefined): string {
+  if (systemPrompt === undefined) return '';
+  return typeof systemPrompt === 'string' ? systemPrompt : systemPrompt.join('\n\n');
 }
 
 function formatToolNames(tools: GenerateCall['tools']): string {

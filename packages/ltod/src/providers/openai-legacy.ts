@@ -422,14 +422,16 @@ export class OpenAILegacyChatProvider implements ChatProvider {
   }
 
   async generate(
-    systemPrompt: string,
+    systemPrompt: string | string[],
     tools: Tool[],
     history: Message[],
     options?: GenerateOptions,
   ): Promise<StreamedMessage> {
+    const systemText =
+      typeof systemPrompt === 'string' ? systemPrompt : systemPrompt.join('\n\n');
     const messages: OpenAIMessage[] = [];
-    if (systemPrompt) {
-      messages.push({ role: 'system', content: systemPrompt });
+    if (systemText) {
+      messages.push({ role: 'system', content: systemText });
     }
     const normalizedHistory = normalizeToolCallIdsForProvider(history, OPENAI_CHAT_TOOL_CALL_ID_POLICY);
     for (const msg of normalizedHistory) {

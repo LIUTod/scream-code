@@ -60,7 +60,7 @@ function getGenerationState(provider: AnthropicChatProvider): AnthropicGeneratio
 /** Capture the request body sent to Anthropic by mocking the client (non-stream mode). */
 async function captureRequestBody(
   provider: AnthropicChatProvider,
-  systemPrompt: string,
+  systemPrompt: string | string[],
   tools: Tool[],
   history: Message[],
 ): Promise<Record<string, unknown>> {
@@ -2009,6 +2009,47 @@ describe('AnthropicChatProvider', () => {
         { role: 'user', content: [{ type: 'text', text: 'hi' }], toolCalls: [] },
       ];
       const body = await captureRequestBody(provider, '', [], history);
+      expect(body['system']).toBeUndefined();
+    });
+  });
+
+  describe('generate with split system blocks', () => {
+    it('sends one block per part with the cache breakpoint on the first (static) block', async () => {
+      const provider = createProvider();
+      const history: Message[] = [
+        { role: 'user', content: [{ type: 'text', text: 'hi' }], toolCalls: [] },
+      ];
+      const body = await captureRequestBody(
+        provider,
+        ['static block', 'dynamic block'],
+        [],
+        history,
+      );
+
+      expect(body['system']).toEqual([
+        { type: 'text', text: 'static block', cache_control: { type: 'ephemeral' } },
+        { type: 'text', text: 'dynamic block' },
+      ]);
+    });
+
+    it('drops empty blocks and keeps the breakpoint on the first remaining block', async () => {
+      const provider = createProvider();
+      const history: Message[] = [
+        { role: 'user', content: [{ type: 'text', text: 'hi' }], toolCalls: [] },
+      ];
+      const body = await captureRequestBody(provider, ['', 'dynamic block'], [], history);
+
+      expect(body['system']).toEqual([
+        { type: 'text', text: 'dynamic block', cache_control: { type: 'ephemeral' } },
+      ]);
+    });
+
+    it('omits the system array when every block is empty', async () => {
+      const provider = createProvider();
+      const history: Message[] = [
+        { role: 'user', content: [{ type: 'text', text: 'hi' }], toolCalls: [] },
+      ];
+      const body = await captureRequestBody(provider, ['', ''], [], history);
       expect(body['system']).toBeUndefined();
     });
   });
