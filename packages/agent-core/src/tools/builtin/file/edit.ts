@@ -12,6 +12,7 @@ import type { Jian } from '@scream-code/jian';
 import { z } from 'zod';
 
 import type { BuiltinTool } from '../../../agent/tool';
+import type { WorkingSet } from '../../../agent/working-set';
 import { ToolAccesses } from '../../../loop/tool-access';
 import type { ExecutableToolResult, ToolExecution } from '../../../loop/types';
 import type { LspRegistry } from '../../../lsp/registry';
@@ -98,6 +99,18 @@ function withFileDiffDisplay(
   return { ...result, display };
 }
 
+/**
+ * Join the edit result's base line, an optional stale-read warning, and the
+ * language-server notice into the final (model-visible) output. Sections are
+ * blank-line separated; empty sections are omitted.
+ */
+function assembleEditOutput(base: string, warning: string | undefined, notice: string): string {
+  const sections = [base];
+  if (warning !== undefined) sections.push(warning);
+  if (notice.length > 0) sections.push(`Edit applied; the language server reports:\n${notice}`);
+  return sections.join('\n\n');
+}
+
 export class EditTool implements BuiltinTool<EditInput> {
   readonly name = 'Edit' as const;
   readonly description = EDIT_DESCRIPTION;
@@ -107,6 +120,7 @@ export class EditTool implements BuiltinTool<EditInput> {
     private readonly jian: Jian,
     private readonly workspace: WorkspaceConfig,
     private readonly lspRegistry?: LspRegistry,
+    private readonly workingSet?: WorkingSet,
   ) {}
 
   async resolveExecution(args: EditInput): Promise<ToolExecution> {
@@ -286,11 +300,17 @@ export class EditTool implements BuiltinTool<EditInput> {
         const writtenText = materializeModelText(newContent, modelView.lineEndingStyle);
         await this.jian.writeText(safePath, writtenText);
         scanCache.clear();
-        const { notice, hasErrors } = await this.appendDiagnostics(safePath);
-        // Diagnostics go to `message` (UI side channel) so Edit's result stays
-        // a single line and the TUI doesn't double-collapse.
-        const output = `Replaced 1 occurrence in ${args.path}`;
-        const message = notice.length > 0 ? notice : undefined;
+        const { notice, hint, hasErrors } = await this.appendDiagnostics(safePath);
+        // Diagnostics are appended to the (model-visible) output so the model
+        // can self-correct in the same turn; the install hint travels on the
+        // `message` side channel for the UI. `hasErrors` keeps isError so the
+        // fix-then-re-verify gate still picks the edit up.
+        const output = assembleEditOutput(
+          `Replaced 1 occurrence in ${args.path}`,
+          this.staleReadWarning(args, safePath),
+          notice,
+        );
+        const message = hint.length > 0 ? hint : undefined;
         const result: ExecutableToolResult = hasErrors
           ? { isError: true, output, message }
           : { output, message };
@@ -316,11 +336,17 @@ export class EditTool implements BuiltinTool<EditInput> {
       const writtenText = materializeModelText(newContent, modelView.lineEndingStyle);
       await this.jian.writeText(safePath, writtenText);
       scanCache.clear();
-      const { notice, hasErrors } = await this.appendDiagnostics(safePath);
-      // Diagnostics go to `message` (UI side channel) so Edit's result stays
-      // a single line and the TUI doesn't double-collapse.
-      const output = `Replaced ${String(replacementCount)} occurrences in ${args.path}`;
-      const message = notice.length > 0 ? notice : undefined;
+      const { notice, hint, hasErrors } = await this.appendDiagnostics(safePath);
+      // Diagnostics are appended to the (model-visible) output so the model
+      // can self-correct in the same turn; the install hint travels on the
+      // `message` side channel for the UI. `hasErrors` keeps isError so the
+      // fix-then-re-verify gate still picks the edit up.
+      const output = assembleEditOutput(
+        `Replaced ${String(replacementCount)} occurrences in ${args.path}`,
+        this.staleReadWarning(args, safePath),
+        notice,
+      );
+      const message = hint.length > 0 ? hint : undefined;
       const result: ExecutableToolResult = hasErrors
         ? { isError: true, output, message }
         : { output, message };
@@ -337,19 +363,38 @@ export class EditTool implements BuiltinTool<EditInput> {
     }
   }
 
+  /**
+   * Warn (model-visible) when this edit targets a file that was not read in
+   * the recent history and no content anchor was supplied: the model may be
+   * working from stale memory (e.g. after compaction). The warning never
+   * blocks the edit.
+   */
+  private staleReadWarning(args: EditInput, safePath: string): string | undefined {
+    if (args.anchor !== undefined) return undefined;
+    if (this.workingSet === undefined) return undefined;
+    if (this.workingSet.lastReadTurn(args.path) !== undefined) return undefined;
+    if (this.workingSet.lastReadTurn(safePath) !== undefined) return undefined;
+    return (
+      `Note: no recent read of ${args.path} was found in this session; if you ` +
+      `are editing from memory, consider reading it with the Read tool first.`
+    );
+  }
+
   private async appendDiagnostics(
     safePath: string,
-  ): Promise<{ notice: string; hasErrors: boolean }> {
+  ): Promise<{ notice: string; hint: string; hasErrors: boolean }> {
     const result = await fetchDiagnostics(
       this.lspRegistry,
       this.jian,
       safePath,
       this.workspace.workspaceDir,
     );
-    const notice = formatDiagnosticsNotice(result);
-    const hint = formatDiagnosticsHint(result);
+    // Diagnostics are model-facing (appended to the tool output); the install
+    // hint is user-facing and travels on the `message` side channel so it
+    // does not burn model tokens on every edit.
     return {
-      notice: [notice, hint].filter((s) => s.length > 0).join(''),
+      notice: formatDiagnosticsNotice(result),
+      hint: formatDiagnosticsHint(result),
       hasErrors: result.hasErrors,
     };
   }

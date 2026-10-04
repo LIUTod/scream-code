@@ -6,6 +6,7 @@ import type { LspDiagnostic } from '../../src/lsp/client';
 import type { LspRegistry } from '../../src/lsp/registry';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { WorkingSet } from '../../src/agent/working-set';
 import { type EditInput, EditInputSchema, EditTool } from '../../src/tools/builtin/file/edit';
 import { computeAnchor, toModelTextView } from '../../src/tools/builtin/file/line-endings';
 import { resetNoopLoop } from '../../src/tools/builtin/file/noop-loop-guard';
@@ -728,9 +729,9 @@ describe('EditTool', () => {
 
     expect(result.isError).toBe(true);
     expect(result.output).toContain('Replaced 1 occurrence');
-    expect(result.output).not.toContain('[LSP]');
-    expect(result.message).toContain('[LSP]');
-    expect(result.message).toContain('Type error');
+    expect(result.output).toContain('[LSP]');
+    expect(result.output).toContain('Type error');
+    expect(result.message).toBeUndefined();
   });
 
   it('does not mark isError when LSP reports only warnings', async () => {
@@ -771,9 +772,9 @@ describe('EditTool', () => {
     );
 
     expect(result.isError).toBeFalsy();
-    expect(result.output).not.toContain('[LSP]');
-    expect(result.message).toContain('[LSP]');
-    expect(result.message).toContain('Unused variable');
+    expect(result.output).toContain('[LSP]');
+    expect(result.output).toContain('Unused variable');
+    expect(result.message).toBeUndefined();
   });
 });
 
@@ -1017,5 +1018,92 @@ describe('EditTool file_diff display', () => {
     expect(result.isError).toBeFalsy();
     expect(Object.keys(result)).not.toContain('display');
     expect(await readFile(path, 'utf8')).not.toBe(before);
+  });
+});
+
+describe('EditTool stale-read warning', () => {
+  it('warns when the target was not read recently and no anchor is passed', async () => {
+    const content = 'const x = 1;\n';
+    const tool = new EditTool(
+      createFakeJian({
+        readText: vi.fn().mockResolvedValue(content),
+        writeText: vi.fn().mockResolvedValue(0),
+      }),
+      PERMISSIVE_WORKSPACE,
+      undefined,
+      new WorkingSet(),
+    );
+
+    const result = await executeTool(
+      tool,
+      context({ path: '/tmp/stale.ts', old_string: '1', new_string: '2' }),
+    );
+
+    expect(result.isError).toBeFalsy();
+    expect(result.output).toContain('no recent read of /tmp/stale.ts was found in this session');
+  });
+
+  it('does not warn when the file was recently read', async () => {
+    const content = 'const x = 1;\n';
+    const workingSet = new WorkingSet();
+    workingSet.markRead('/tmp/fresh.ts', 1);
+    const tool = new EditTool(
+      createFakeJian({
+        readText: vi.fn().mockResolvedValue(content),
+        writeText: vi.fn().mockResolvedValue(0),
+      }),
+      PERMISSIVE_WORKSPACE,
+      undefined,
+      workingSet,
+    );
+
+    const result = await executeTool(
+      tool,
+      context({ path: '/tmp/fresh.ts', old_string: '1', new_string: '2' }),
+    );
+
+    expect(result.isError).toBeFalsy();
+    expect(result.output).not.toContain('no recent read');
+  });
+
+  it('does not warn when an anchor is supplied (proof of a fresh read)', async () => {
+    const content = 'const x = 1;\n';
+    const anchor = computeAnchor(toModelTextView(content).text);
+    const tool = new EditTool(
+      createFakeJian({
+        readText: vi.fn().mockResolvedValue(content),
+        writeText: vi.fn().mockResolvedValue(0),
+      }),
+      PERMISSIVE_WORKSPACE,
+      undefined,
+      new WorkingSet(),
+    );
+
+    const result = await executeTool(
+      tool,
+      context({ path: '/tmp/anchor.ts', old_string: '1', new_string: '2', anchor }),
+    );
+
+    expect(result.isError).toBeFalsy();
+    expect(result.output).not.toContain('no recent read');
+  });
+
+  it('stays silent when no working set is wired (standalone construction)', async () => {
+    const content = 'const x = 1;\n';
+    const tool = new EditTool(
+      createFakeJian({
+        readText: vi.fn().mockResolvedValue(content),
+        writeText: vi.fn().mockResolvedValue(0),
+      }),
+      PERMISSIVE_WORKSPACE,
+    );
+
+    const result = await executeTool(
+      tool,
+      context({ path: '/tmp/standalone.ts', old_string: '1', new_string: '2' }),
+    );
+
+    expect(result.isError).toBeFalsy();
+    expect(result.output).not.toContain('no recent read');
   });
 });

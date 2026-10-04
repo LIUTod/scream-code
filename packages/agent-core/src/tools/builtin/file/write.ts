@@ -151,12 +151,17 @@ export class WriteTool implements BuiltinTool<WriteInput> {
       // length would only equal the byte count for pure ASCII content, so it
       // is not used here.
       const bytesWritten = Buffer.byteLength(args.content, 'utf8');
-      const { notice, hasErrors } = await this.appendDiagnostics(safePath);
-      // Diagnostics go to `message` (side channel for the UI) instead of
-      // contaminating `output`, so Write's result stays a single line and the
-      // TUI doesn't double-collapse the content preview + result output.
-      const output = `${mode === 'append' ? 'Appended' : 'Wrote'} ${String(bytesWritten)} bytes to ${args.path}`;
-      const message = notice.length > 0 ? notice : undefined;
+      const { notice, hint, hasErrors } = await this.appendDiagnostics(safePath);
+      // Diagnostics are appended to the (model-visible) output so the model
+      // can self-correct in the same turn; the install hint travels on the
+      // `message` side channel for the UI. `hasErrors` keeps isError so the
+      // fix-then-re-verify gate still picks the write up.
+      const base = `${mode === 'append' ? 'Appended' : 'Wrote'} ${String(bytesWritten)} bytes to ${args.path}`;
+      const output =
+        notice.length > 0
+          ? `${base}\n\nWrite applied; the language server reports:\n${notice}`
+          : base;
+      const message = hint.length > 0 ? hint : undefined;
       if (hasErrors) return { isError: true, output, message };
       return display === undefined ? { output, message } : { output, message, display };
     } catch (error) {
@@ -268,17 +273,19 @@ export class WriteTool implements BuiltinTool<WriteInput> {
 
   private async appendDiagnostics(
     safePath: string,
-  ): Promise<{ notice: string; hasErrors: boolean }> {
+  ): Promise<{ notice: string; hint: string; hasErrors: boolean }> {
     const result = await fetchDiagnostics(
       this.lspRegistry,
       this.jian,
       safePath,
       this.workspace.workspaceDir,
     );
-    const notice = formatDiagnosticsNotice(result);
-    const hint = formatDiagnosticsHint(result);
+    // Diagnostics are model-facing (appended to the tool output); the install
+    // hint is user-facing and travels on the `message` side channel so it
+    // does not burn model tokens on every write.
     return {
-      notice: [notice, hint].filter((s) => s.length > 0).join(''),
+      notice: formatDiagnosticsNotice(result),
+      hint: formatDiagnosticsHint(result),
       hasErrors: result.hasErrors,
     };
   }

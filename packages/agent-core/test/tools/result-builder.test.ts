@@ -26,8 +26,9 @@ describe('ToolResultBuilder', () => {
     expect(result.output).toContain('Hello[...truncated]');
     expect(result.output).toContain('Output is truncated');
     expect(result.output.endsWith('Output is truncated to fit in the message.')).toBe(true);
-    expect(result.message).toContain('Operation completed.');
-    expect(result.message).toContain('Output is truncated');
+    // The brief is folded into the output above; the side channel stays
+    // empty so the UI does not render the same line twice.
+    expect(result.message).toBeUndefined();
     expect(result.truncated).toBe(true);
   });
 
@@ -38,7 +39,8 @@ describe('ToolResultBuilder', () => {
 
     const result = await builder.ok();
     expect(result.output).toContain('[...truncated]');
-    expect(result.message).toContain('Output is truncated');
+    expect(result.output).toContain('Output is truncated');
+    expect(result.message).toBeUndefined();
   });
 
   it('respects both per-line and per-buffer limits at once', async () => {
@@ -51,7 +53,8 @@ describe('ToolResultBuilder', () => {
 
     const result = await builder.ok();
     expect(result.output).toContain('[...truncated]');
-    expect(result.message).toContain('Output is truncated');
+    expect(result.output).toContain('Output is truncated');
+    expect(result.message).toBeUndefined();
   });
 
   it('tracks nChars as the buffer grows', async () => {
@@ -90,7 +93,8 @@ describe('ToolResultBuilder', () => {
 
     const result = await builder.ok();
     expect(result.output).toContain('Hello\n[...truncated]');
-    expect(result.message).toContain('Output is truncated');
+    expect(result.output).toContain('Output is truncated');
+    expect(result.message).toBeUndefined();
   });
 
   it('keeps unterminated trailing text in output', async () => {
@@ -117,7 +121,7 @@ describe('ToolResultBuilder', () => {
 
     expect(result.output).toContain('Some output');
     expect(result.output).toContain('Something went wrong');
-    expect(result.message).toBe('Something went wrong');
+    expect(result.message).toBeUndefined();
     expect(result.brief).toBe('Error occurred');
   });
 
@@ -136,8 +140,8 @@ describe('ToolResultBuilder', () => {
     const result = await builder.error('Command failed', { brief: 'Failed' });
 
     expect(result.output).toContain('[...truncated]');
-    expect(result.message).toContain('Command failed');
-    expect(result.message).toContain('Output is truncated');
+    expect(result.output).toContain('Command failed');
+    expect(result.message).toBeUndefined();
     expect(result.brief).toBe('Failed');
   });
 
@@ -149,7 +153,7 @@ describe('ToolResultBuilder', () => {
 
     expect(result.output).toContain('[...truncated]');
     expect(result.output).toContain('Output is truncated');
-    expect(result.message).toContain('Output is truncated');
+    expect(result.message).toBeUndefined();
   });
 
   it('keeps normal success messages out of non-empty output', async () => {

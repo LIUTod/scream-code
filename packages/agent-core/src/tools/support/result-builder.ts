@@ -41,7 +41,9 @@ export type ExecutableToolResultBuilderResult = (
   | ExecutableToolErrorResult
 ) & {
   readonly output: string;
-  readonly message: string;
+  // Optional: the brief is only present when it is NOT already folded into
+  // the output (see message handling in `ok`/`error`).
+  readonly message?: string | undefined;
   readonly truncated: boolean;
   readonly brief?: string;
 };
@@ -242,7 +244,10 @@ export class ToolResultBuilder {
             ? `${output}${finalMessage}`
             : `${output}\n${finalMessage}`
         : output,
-      message: finalMessage,
+      // The UI renders both `output` and `message`; when the brief is already
+      // folded into the output, leave the side channel empty so the same
+      // line is not shown twice.
+      message: shouldAppendMessage ? undefined : finalMessage,
       truncated: this.truncationHappened,
       brief: options.brief,
     };
@@ -273,7 +278,8 @@ export class ToolResultBuilder {
             : output.endsWith('\n')
               ? `${output}${finalMessage}`
               : `${output}\n${finalMessage}`,
-      message: finalMessage,
+      // `finalMessage` is always folded into the output above; do not repeat
+      // it on the side channel — the UI renders both and would show it twice.
       truncated: this.truncationHappened,
       brief: options.brief,
     };

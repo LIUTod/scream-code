@@ -323,11 +323,11 @@ describe('BashTool', () => {
 
     expect(result).toMatchObject({
       isError: true,
-      message: 'Command failed with exit code: 2.',
       brief: 'Failed with exit code: 2',
     });
     expect(result.output).toContain('boom\n');
     expect(result.output).toContain('Command failed with exit code: 2.');
+    expect((result as { message?: string }).message).toBeUndefined();
   });
 
   it('returns both stdout and stderr when a command succeeds', async () => {
@@ -369,11 +369,11 @@ describe('BashTool', () => {
 
     expect(result).toMatchObject({
       isError: true,
-      message: 'Command failed with exit code: 2.',
       brief: 'Failed with exit code: 2',
     });
     expect(result.output).toContain('partial\nboom\n');
     expect(result.output).toContain('Command failed with exit code: 2.');
+    expect((result as { message?: string }).message).toBeUndefined();
   });
 
   it('preserves foreground stdout and stderr arrival order', async () => {
@@ -684,7 +684,7 @@ describe('BashTool', () => {
 
     expect(result.output).toContain('[...truncated]');
     expect(result.output).toContain('Output is truncated');
-    expect((result as { message?: string }).message).toContain('Output is truncated');
+    expect((result as { message?: string }).message).toBeUndefined();
   });
 
   it('marks the truncated output buffer with a "[...truncated]" sentinel at the cut point', async () => {

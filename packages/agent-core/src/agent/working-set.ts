@@ -214,9 +214,19 @@ export class WorkingSet {
   }
 
 
+  /**
+   * Key normalization for working-set entries: `\` → `/` for cross-platform
+   * keys, and leading `./` segments stripped so `./src/a.ts` and `src/a.ts`
+   * refer to the same entry (Read and Edit may spell the same path
+   * differently).
+   */
+  private normalizePath(path: string): string {
+    return path.replaceAll('\\', '/').replace(/^(\.\/)+/, '');
+  }
+
   touch(path: string, turn: number): void {
     if (path.length === 0) return;
-    const normalized = path.replaceAll('\\', '/');
+    const normalized = this.normalizePath(path);
     const existing = this.entries.get(normalized);
     this.entries.set(normalized, {
       path: normalized,
@@ -228,7 +238,7 @@ export class WorkingSet {
 
   markRead(path: string, turn: number): void {
     if (path.length === 0) return;
-    const normalized = path.replaceAll('\\', '/');
+    const normalized = this.normalizePath(path);
     const existing = this.entries.get(normalized);
     if (existing !== undefined) {
       this.entries.set(normalized, { ...existing, lastTurn: turn, lastReadTurn: turn });
@@ -268,7 +278,7 @@ export class WorkingSet {
    * if the path has never been read. Used by EditTool to warn about stale edits.
    */
   lastReadTurn(path: string): number | undefined {
-    const normalized = path.replaceAll('\\', '/');
+    const normalized = this.normalizePath(path);
     return this.entries.get(normalized)?.lastReadTurn;
   }
 

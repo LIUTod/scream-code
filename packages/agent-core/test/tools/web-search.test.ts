@@ -151,7 +151,7 @@ describe('WebSearchTool', () => {
     expect(content).toContain('[...truncated]');
     expect(content).toContain('Output is truncated');
     expect(content.length).toBeLessThan(60_000);
-    expect((result as { message?: string }).message).toContain('Output is truncated');
+    expect((result as { message?: string }).message).toBeUndefined();
   });
 
   it('returns error when provider throws', async () => {

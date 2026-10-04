@@ -1595,9 +1595,9 @@ describe('GrepTool', () => {
       context({ pattern: 'match', output_mode: 'content', head_limit: 0 }),
     );
 
+    expect(result.output).toContain('Output is truncated');
     const message = (result as { message?: unknown }).message;
-    expect(typeof message).toBe('string');
-    expect(message).toContain('Output is truncated');
+    expect(message).toBeUndefined();
   });
 
   it('matches a pattern spanning a newline when multiline is set', async () => {
