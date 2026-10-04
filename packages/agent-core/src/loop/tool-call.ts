@@ -960,12 +960,23 @@ function normalizeToolResult(r: ExecutableToolResult): ExecutableToolResult {
       output = textJoined.length > 0 ? textJoined : TOOL_OUTPUT_EMPTY;
     }
   }
-  // `nestedCalls` is a UI/persistence side channel produced by orchestrating
-  // tools (script sandbox). It must survive normalization so the tool.result
-  // event carries it, but it never reaches the provider: only `output` does.
+  // `nestedCalls`, `message`, `display`, and `useless` are UI/persistence
+  // side channels produced by tools (script sandbox, LSP diagnostics, file
+  // diffs, search results, micro-compaction hints). They must survive
+  // normalization so the tool.result event (and the UI/RPC layers reading
+  // it) carries them; the provider only ever sees `output`. `stopTurn` stays
+  // stripped on purpose (see ExecutableToolErrorResult) — the loop consumes
+  // it before this boundary.
   const nestedCalls = r.isError === true ? undefined : r.nestedCalls;
   const nested = nestedCalls !== undefined ? { nestedCalls } : {};
-  return r.isError === true ? { output, isError: true, ...nested } : { output, ...nested };
+  const messagePart = r.message !== undefined ? { message: r.message } : {};
+  if (r.isError === true) {
+    return { output, isError: true, ...nested, ...messagePart };
+  }
+  const useless = r.useless;
+  const uselessPart = useless !== undefined ? { useless } : {};
+  const displayPart = r.display !== undefined ? { display: r.display } : {};
+  return { output, ...nested, ...messagePart, ...uselessPart, ...displayPart };
 }
 
 function makeToolResult(
