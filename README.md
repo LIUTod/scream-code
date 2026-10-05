@@ -66,7 +66,7 @@ When Scream wants to modify files or run commands, an approval panel pops up —
 
 ### Slash Commands
 
-Type `/` in the input to browse. All 56 commands:
+Type `/` in the input to browse. All 55 commands:
 
 <details>
 <summary>Full command reference (click to expand)</summary>
@@ -105,8 +105,7 @@ Type `/` in the input to browse. All 56 commands:
 | `/model [alias]` | Switch LLM model |
 | `/config` | Browse and configure models |
 | `/config image` | Configure image generation (provider, URL, key, model) |
-| `/login` (`/signin`) | Sign in to a provider with OAuth (browser or device-code flow); credentials are stored per provider |
-| `/logout` (`/disconnect`) | Remove configured models and any stored OAuth credential |
+| `/logout` (`/disconnect`) | Remove configured models |
 | `/language` (`/lang`) | Switch interface language |
 | `/theme` | Set terminal UI theme |
 | `/permission` | Select permission mode |

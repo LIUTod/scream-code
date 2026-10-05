@@ -134,15 +134,6 @@ const OPENAI_RESPONSES_CAPABILITY_CATALOG: readonly CapabilityCatalogEntry[] = [
   },
 ];
 
-const OPENAI_CODEX_CAPABILITY_CATALOG: readonly CapabilityCatalogEntry[] = [
-  {
-    // Codex-family models reason and call tools; they take no images.
-    matches: (name) => name.includes('codex'),
-    capability: OPENAI_REASONING_CAPABILITY,
-  },
-  ...OPENAI_RESPONSES_CAPABILITY_CATALOG,
-];
-
 const ANTHROPIC_CAPABILITY_CATALOG: readonly CapabilityCatalogEntry[] = [
   {
     matches: (name) => hasPrefix(name, CLAUDE_3_PREFIXES),
@@ -187,11 +178,6 @@ export function getOpenAIResponsesModelCapability(modelName: string): ModelCapab
   return capabilityFromCatalog(modelName, OPENAI_RESPONSES_CAPABILITY_CATALOG);
 }
 
-/** Capabilities for models served through the subscription backend. */
-export function getOpenAICodexModelCapability(modelName: string): ModelCapability {
-  return capabilityFromCatalog(modelName, OPENAI_CODEX_CAPABILITY_CATALOG);
-}
-
 export function getAnthropicModelCapability(modelName: string): ModelCapability {
   return capabilityFromCatalog(modelName, ANTHROPIC_CAPABILITY_CATALOG);
 }
@@ -205,30 +191,6 @@ export function getGoogleGenAIModelCapability(modelName: string): ModelCapabilit
     return GEMINI_THINKING_MULTIMODAL_TOOL_CAPABILITY;
   }
   return GEMINI_MULTIMODAL_TOOL_CAPABILITY;
-}
-
-/**
- * Capabilities for models served through Cloud Code Assist. The hosted
- * catalogue is broader than the public Gemini one (preview Gemini 3 ids and
- * Claude ids), so it is matched by family rather than by the catalogued
- * prefixes used for the public `generateContent` API.
- */
-export function getGoogleCloudCodeModelCapability(modelName: string): ModelCapability {
-  const normalized = normalizeModelName(modelName);
-  if (normalized.startsWith('claude-')) {
-    return ANTHROPIC_THINKING_VISION_TOOL_CAPABILITY;
-  }
-  if (!normalized.startsWith('gemini-')) return UNKNOWN_CAPABILITY;
-  if (normalized.startsWith('gemini-3') || normalized.includes('thinking')) {
-    return GEMINI_THINKING_MULTIMODAL_TOOL_CAPABILITY;
-  }
-  if (normalized.startsWith('gemini-2.5-')) {
-    return GEMINI_THINKING_MULTIMODAL_TOOL_CAPABILITY;
-  }
-  if (normalized.startsWith('gemini-2.0') || normalized.startsWith('gemini-1.5')) {
-    return GEMINI_MULTIMODAL_TOOL_CAPABILITY;
-  }
-  return UNKNOWN_CAPABILITY;
 }
 
 export function usesOpenAIResponsesDeveloperRole(modelName: string): boolean {

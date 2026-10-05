@@ -1,23 +1,6 @@
 export { ScreamHarness } from '#/scream-harness';
 export { Session } from '#/session';
 export { ScreamAuthFacade } from '#/auth';
-export {
-  findOAuthProvider,
-  listLoginProviders,
-  OAUTH_PROVIDERS,
-  OAuthLoginService,
-} from '#/auth-oauth/index';
-export type {
-  AuthEvent,
-  AuthInteraction,
-  AuthPrompt,
-  LoginOptions,
-  LoginProviderInfo,
-  OAuthCredential,
-  OAuthProviderModule,
-  OAuthRequestAuth,
-  ProviderAuthInteraction,
-} from '#/auth-oauth/index';
 export type { ThinkingEffort } from '@scream-code/ltod';
 export { isOrphanedToolCallError } from '@scream-code/ltod';
 

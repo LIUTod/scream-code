@@ -101,18 +101,6 @@ const ALLOWED_ROLE_USER_SITES: readonly {
     reason:
       'Provider wire conversion (`isToolResultOnly`): `tool_result` blocks are only legal inside a user-role message, so the transport role is the only question on this path.',
   },
-  {
-    file: 'packages/ltod/src/providers/google-cloud-code.ts',
-    code: "if (last?.role === 'user' && last.parts.some((part) => part.functionResponse !== undefined)) {",
-    reason:
-      'Provider wire conversion: reads back the transport slot it just appended, because every tool result of a turn must share one user-role content. The slot, not authorship, is the whole question.',
-  },
-  {
-    file: 'packages/ltod/src/providers/google-cloud-code.ts',
-    code: "if (message.role !== 'user') continue;",
-    reason:
-      'Provider wire conversion (`firstUserText`): takes the first user-role turn to derive the opaque session id the backend groups a conversation by. Any content in that slot serves equally.',
-  },
 ];
 
 interface RoleUserHit {

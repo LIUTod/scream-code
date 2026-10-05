@@ -546,36 +546,15 @@ export class OpenAILegacyChatProvider implements ChatProvider {
     return resolveAuthBackedClient(
       { cachedClient: this._client, clientFactory: this._clientFactory },
       auth,
-      (a) => this._buildClient(this._resolveApiKey(a), a),
+      (a) =>
+        this._buildClient(requireProviderApiKey('OpenAILegacyChatProvider', a, this._apiKey), a),
     );
-  }
-
-  /**
-   * Resolve the API key for a single request.
-   *
-   * Header-only auth (e.g. a bearer token supplied via `auth.headers`) may
-   * carry no key of its own; the SDK refuses to construct with an empty key,
-   * so substitute an inert placeholder and let the `Authorization` header in
-   * `defaultHeaders` perform the actual authentication. When no headers are
-   * present the regular required-key rule applies.
-   */
-  private _resolveApiKey(auth: ProviderRequestAuth | undefined): string {
-    const hasHeaders = auth?.headers !== undefined && Object.keys(auth.headers).length > 0;
-    if (hasHeaders) {
-      // Treat an empty per-request key as absent, then fall back to the
-      // constructor key. When neither exists, return the inert placeholder —
-      // the `Authorization` header carries the real credential.
-      const requested = auth?.apiKey;
-      const apiKey = requested !== undefined && requested.length > 0 ? requested : this._apiKey;
-      return apiKey ?? 'oauth-bearer';
-    }
-    return requireProviderApiKey('OpenAILegacyChatProvider', auth, this._apiKey);
   }
 
   private _buildClient(apiKey: string, auth?: ProviderRequestAuth): OpenAI {
     const clientOpts: Record<string, unknown> = {
       apiKey,
-      baseURL: auth?.baseUrl ?? this._baseUrl,
+      baseURL: this._baseUrl,
       // Retry is owned by the engine's step-retry layer (abortable, observable,
       // single budget). The SDK's built-in retries sleep on a backoff that
       // never observes the request AbortSignal, so disable them.

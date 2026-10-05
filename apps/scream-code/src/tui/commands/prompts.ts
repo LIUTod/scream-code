@@ -53,29 +53,6 @@ export function promptApiKey(host: SlashCommandHost, platformName: string): Prom
   });
 }
 
-export function promptLoginProviderSelection(
-  host: SlashCommandHost,
-  options: readonly ChoiceOption[],
-): Promise<string | undefined> {
-  return new Promise((resolve) => {
-    const picker = new ChoicePickerComponent({
-      title: t('login.selector_title'),
-      options,
-      colors: host.state.theme.colors,
-      searchable: true,
-      onSelect: (value: string) => {
-        host.restoreEditor();
-        resolve(value);
-      },
-      onCancel: () => {
-        host.restoreEditor();
-        resolve(undefined);
-      },
-    });
-    host.mountEditorReplacement(picker);
-  });
-}
-
 export function promptCatalogProviderSelection(host: SlashCommandHost, catalog: Catalog): Promise<string | undefined> {
   return new Promise((resolve) => {
     const options: ChoiceOption[] = Object.entries(catalog)
@@ -162,8 +139,6 @@ function getWireTypeOptions(): ChoiceOption[] {
     { value: 'openai_responses', label: t('prompts.wire_openai_responses'), description: t('prompts.wire_openai_responses_desc') },
     { value: 'anthropic', label: t('prompts.wire_anthropic'), description: t('prompts.wire_anthropic_desc') },
     { value: 'google-genai', label: t('prompts.wire_google_genai'), description: t('prompts.wire_google_genai_desc') },
-    { value: 'google-cloud-code', label: t('prompts.wire_google_cloud_code'), description: t('prompts.wire_google_cloud_code_desc') },
-    { value: 'openai-codex', label: t('prompts.wire_openai_codex'), description: t('prompts.wire_openai_codex_desc') },
   ];
 }
 function getThinkingOptions(): ChoiceOption[] {

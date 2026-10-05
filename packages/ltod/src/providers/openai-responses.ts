@@ -498,7 +498,7 @@ function convertMessage(
   return result;
 }
 
-export function convertTool(tool: Tool): ResponseToolParam {
+function convertTool(tool: Tool): ResponseToolParam {
   return {
     type: 'function',
     name: tool.name,
@@ -506,45 +506,6 @@ export function convertTool(tool: Tool): ResponseToolParam {
     parameters: tool.parameters,
     strict: false,
   };
-}
-
-/**
- * Build the Responses wire `input` array from a system prompt and history.
- *
- * Shared by adapters that speak the same wire but carry the system prompt in a
- * different slot: the workspace/subscription backend takes it as the top-level
- * `instructions` string, so its caller passes `includeSystemPrompt: false`.
- */
-export function buildResponsesInput(params: {
-  systemPrompt: string | string[];
-  history: Message[];
-  model: string;
-  toolMessageConversion: ToolMessageConversion;
-  includeSystemPrompt?: boolean;
-}): unknown[] {
-  const input: unknown[] = [];
-  if (params.includeSystemPrompt !== false) {
-    const systemText =
-      typeof params.systemPrompt === 'string'
-        ? params.systemPrompt
-        : params.systemPrompt.join('\n\n');
-    if (systemText) {
-      const sysItem: Record<string, unknown> = { role: 'system', content: systemText };
-      if (usesOpenAIResponsesDeveloperRole(params.model)) {
-        sysItem['role'] = 'developer';
-      }
-      input.push(sysItem);
-    }
-  }
-
-  const normalizedHistory = normalizeToolCallIdsForProvider(
-    params.history,
-    OPENAI_RESPONSES_TOOL_CALL_ID_POLICY,
-  );
-  for (const msg of normalizedHistory) {
-    input.push(...convertMessage(msg, params.model, params.toolMessageConversion));
-  }
-  return input;
 }
 export class OpenAIResponsesStreamedMessage implements StreamedMessage {
   private _id: string | null = null;
@@ -957,12 +918,21 @@ export class OpenAIResponsesChatProvider implements ChatProvider {
     history: Message[],
     options?: GenerateOptions,
   ): Promise<StreamedMessage> {
-    const input = buildResponsesInput({
-      systemPrompt,
-      history,
-      model: this._model,
-      toolMessageConversion: this._toolMessageConversion,
-    });
+    const systemText =
+      typeof systemPrompt === 'string' ? systemPrompt : systemPrompt.join('\n\n');
+    const input: unknown[] = [];
+    if (systemText) {
+      const sysItem: Record<string, unknown> = { role: 'system', content: systemText };
+      if (usesOpenAIResponsesDeveloperRole(this._model)) {
+        sysItem['role'] = 'developer';
+      }
+      input.push(sysItem);
+    }
+
+    const normalizedHistory = normalizeToolCallIdsForProvider(history, OPENAI_RESPONSES_TOOL_CALL_ID_POLICY);
+    for (const msg of normalizedHistory) {
+      input.push(...convertMessage(msg, this._model, this._toolMessageConversion));
+    }
 
     const kwargs: Record<string, unknown> = { ...this._generationKwargs };
     const reasoningEffort = kwargs['reasoning_effort'] as string | undefined;
@@ -1044,36 +1014,15 @@ export class OpenAIResponsesChatProvider implements ChatProvider {
     return resolveAuthBackedClient(
       { cachedClient: this._client, clientFactory: this._clientFactory },
       auth,
-      (a) => this._buildClient(this._resolveApiKey(a), a),
+      (a) =>
+        this._buildClient(requireProviderApiKey('OpenAIResponsesChatProvider', a, this._apiKey), a),
     );
-  }
-
-  /**
-   * Resolve the API key for a single request.
-   *
-   * Header-only auth (e.g. a bearer token supplied via `auth.headers`) may
-   * carry no key of its own; the SDK refuses to construct with an empty key,
-   * so substitute an inert placeholder and let the `Authorization` header in
-   * `defaultHeaders` perform the actual authentication. When no headers are
-   * present the regular required-key rule applies.
-   */
-  private _resolveApiKey(auth: ProviderRequestAuth | undefined): string {
-    const hasHeaders = auth?.headers !== undefined && Object.keys(auth.headers).length > 0;
-    if (hasHeaders) {
-      // Treat an empty per-request key as absent, then fall back to the
-      // constructor key. When neither exists, return the inert placeholder —
-      // the `Authorization` header carries the real credential.
-      const requested = auth?.apiKey;
-      const apiKey = requested !== undefined && requested.length > 0 ? requested : this._apiKey;
-      return apiKey ?? 'oauth-bearer';
-    }
-    return requireProviderApiKey('OpenAIResponsesChatProvider', auth, this._apiKey);
   }
 
   private _buildClient(apiKey: string, auth?: ProviderRequestAuth): OpenAI {
     const clientOpts: Record<string, unknown> = {
       apiKey,
-      baseURL: auth?.baseUrl ?? this._baseUrl,
+      baseURL: this._baseUrl,
       // Retry is owned by the engine's step-retry layer (abortable, observable,
       // single budget). The SDK's built-in retries sleep on a backoff that
       // never observes the request AbortSignal, so disable them.

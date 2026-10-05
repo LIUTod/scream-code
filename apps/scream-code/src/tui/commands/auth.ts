@@ -5,6 +5,7 @@ import { t } from '@scream-code/config';
 import {
   applyCatalogProvider,
   catalogBaseUrl,
+  catalogModelToAlias,
   catalogProviderModels,
   fetchCatalog,
   inferWireType,
@@ -140,14 +141,7 @@ export async function handleConnectCommand(host: SlashCommandHost, args: string)
 
 export async function handleLogoutCommand(host: SlashCommandHost): Promise<void> {
   const config = await host.harness.getConfig();
-  const configuredIds = Object.keys(config.providers ?? {});
-  // OAuth credentials can outlive a removed provider entry; keep them
-  // visible here so /logout clears the stored token as well.
-  const credentialIds = host.harness.auth
-    .listOAuthProviders()
-    .filter((provider) => host.harness.auth.hasOAuthCredential(provider.id))
-    .map((provider) => provider.id);
-  const providerIds = [...new Set([...configuredIds, ...credentialIds])].toSorted();
+  const providerIds = Object.keys(config.providers ?? {}).toSorted();
 
   if (providerIds.length === 0) {
     host.showStatus(t('auth.no_providers'));
@@ -157,16 +151,10 @@ export async function handleLogoutCommand(host: SlashCommandHost): Promise<void>
   const options: ChoiceOption[] = [];
   for (const id of providerIds) {
     const baseUrl = config.providers[id]?.baseUrl;
-    const hasCredential = host.harness.auth.hasOAuthCredential(id);
     options.push({
       value: id,
       label: id,
-      description:
-        typeof baseUrl === 'string' && baseUrl.length > 0
-          ? baseUrl
-          : hasCredential
-            ? t('auth.oauth_credential')
-            : undefined,
+      description: typeof baseUrl === 'string' && baseUrl.length > 0 ? baseUrl : undefined,
     });
   }
 
@@ -176,21 +164,7 @@ export async function handleLogoutCommand(host: SlashCommandHost): Promise<void>
   const target = await promptLogoutProviderSelection(host, options, currentProvider);
   if (target === undefined) return;
 
-  // Clear the stored OAuth credential first (also for providers that were
-  // removed from the config but left a token behind), then drop the config
-  // entry when one exists.
-  //
-  // Provider keys come from config.toml and may not be usable as credential ids
-  // (e.g. `/config diy` writes `custom-GPT-4.1`). The credential lookup already
-  // treats those as "no credential"; gating the delete on it keeps /logout from
-  // failing before it can remove the config entry.
-  if (host.harness.auth.hasOAuthCredential(target)) {
-    host.harness.auth.logoutOAuthProvider(target);
-  }
-  const hadEntry = config.providers[target] !== undefined;
-  if (hadEntry) {
-    await host.harness.removeProvider(target);
-  }
+  await host.harness.removeProvider(target);
 
   if (target === currentProvider) {
     await host.authFlow.refreshConfigAfterLogout();
@@ -202,12 +176,7 @@ export async function handleLogoutCommand(host: SlashCommandHost): Promise<void>
       availableProviders: updated.providers ?? {},
     });
   }
-  // Report what was actually removed: a credential that outlived its config
-  // entry (the branch that made this command able to find it) has no provider
-  // entry to delete, so the status must not claim one was.
-  host.showStatus(
-    hadEntry ? t('auth.deleted', { name: target }) : t('auth.credential_removed', { name: target }),
-  );
+  host.showStatus(t('auth.deleted', { name: target }));
 }
 
 // ── /config diy — manual provider setup ────────────────────────────────
@@ -299,7 +268,7 @@ async function handleDiyConfig(host: SlashCommandHost): Promise<void> {
   const freshConfig = await host.harness.getConfig();
   applyCatalogProvider(freshConfig, {
     providerId,
-    wire: wire as 'openai' | 'openai_responses' | 'anthropic' | 'google-genai' | 'google-cloud-code' | 'openai-codex',
+    wire: wire as 'openai' | 'openai_responses' | 'anthropic' | 'google-genai',
     baseUrl,
     apiKey,
     models: [catalogModel],

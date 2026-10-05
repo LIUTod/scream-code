@@ -113,24 +113,6 @@ interface AnthropicGenerationKwargs {
 }
 
 const INTERLEAVED_THINKING_BETA = 'interleaved-thinking-2025-05-14';
-/**
- * OAuth (subscription) access tokens are only accepted on the Messages API
- * together with the Claude Code request shape: the two betas below plus the
- * `claude-cli` client identity headers. They are opt-in per request, so they
- * are attached only when the request authenticates with such a token.
- */
-const OAUTH_BETA_FEATURES = ['claude-code-20250219', 'oauth-2025-04-20'];
-
-/**
- * Identity block a subscription (OAuth) request must open with. The
- * subscription endpoint only serves a recognized CLI session, and a request
- * without this block can be refused outright, so it is prepended ahead of the
- * caller's system prompt.
- */
-const CLAUDE_CODE_IDENTITY_INSTRUCTION =
-  "You are Claude Code, Anthropic's official CLI for Claude.";
-const OAUTH_CLIENT_VERSION = '2.1.280';
-const OAUTH_TOKEN_MARKER = 'sk-ant-oat';
 const FAMILY_VERSION_RE = /(?:opus|sonnet|haiku)[.-](\d+)[.-](\d{1,2})(?!\d)/;
 const OPUS_VERSION_RE = /opus[.-](\d+)[.-](\d{1,2})(?!\d)/;
 const ADAPTIVE_MIN_VERSION = { major: 4, minor: 6 } as const;
@@ -859,41 +841,6 @@ class AnthropicStreamedMessage implements StreamedMessage {
     }
   }
 }
-/**
- * Whether a request authenticates with an Anthropic subscription (OAuth)
- * access token. Mirrors the client-building precedence: a request-scoped
- * bearer header first, then the request key, then the configured key.
- */
-function usesOAuthAccessToken(
-  auth: ProviderRequestAuth | undefined,
-  fallbackApiKey: string | undefined,
-): boolean {
-  const authorization = auth?.headers?.['Authorization'];
-  if (authorization !== undefined && authorization.startsWith('Bearer ')) {
-    return authorization.includes(OAUTH_TOKEN_MARKER);
-  }
-  return (auth?.apiKey ?? fallbackApiKey ?? '').includes(OAUTH_TOKEN_MARKER);
-}
-
-/**
- * Whether the subscription identity block is left out for this model. The
- * 3.5 Haiku family is exempt from the instruction. Revision metadata does not
- * reach the request layer, so the model id is the signal: a 3.5 Haiku id
- * (`claude-3-5-haiku…`, `claude-haiku-3-5…`) approximates that family and
- * revision, while the 4.x Haiku ids stay inside the requirement.
- */
-function omitsClaudeCodeInstruction(model: string): boolean {
-  return /claude-(?:3[-.]5-haiku|haiku-3[-.]5)/.test(model.toLowerCase());
-}
-
-/** Claude Code client identity headers required alongside an OAuth token. */
-function oauthIdentityHeaders(): Record<string, string> {
-  return {
-    'user-agent': `claude-cli/${OAUTH_CLIENT_VERSION}`,
-    'x-app': 'cli',
-  };
-}
-
 export class AnthropicChatProvider implements ChatProvider {
   readonly name: string = 'anthropic';
 
@@ -984,30 +931,17 @@ export class AnthropicChatProvider implements ChatProvider {
     // (static) block — its bytes are stable across sessions of the same
     // role, so later blocks and the tools/messages segments re-pay only
     // from the first changed byte on.
-    //
-    // A subscription (OAuth) request opens with the Claude Code identity block
-    // ahead of the caller's prompt. The breakpoint stays on the caller's first
-    // block rather than moving onto the identity block: a breakpoint caps the
-    // cached prefix, so anchoring it on the (short, constant) identity block
-    // would push the prompt out of the cache. The identity bytes sit inside the
-    // cached prefix all the same, and the request keeps its four breakpoints.
-    const oauthRequest = usesOAuthAccessToken(options?.auth, this._apiKey);
-    const injectIdentity = oauthRequest && !omitsClaudeCodeInstruction(this._model);
-    const promptBlocks = (
+    const systemBlocks = (
       typeof systemPrompt === 'string' ? [systemPrompt] : systemPrompt
     ).filter((text) => text.length > 0);
-    const systemTexts = injectIdentity
-      ? [CLAUDE_CODE_IDENTITY_INSTRUCTION, ...promptBlocks]
-      : promptBlocks;
-    const cacheBreakpointIndex = injectIdentity && promptBlocks.length > 0 ? 1 : 0;
     const system: TextBlockParam[] | undefined =
-      systemTexts.length === 0
+      systemBlocks.length === 0
         ? undefined
-        : systemTexts.map(
+        : systemBlocks.map(
             (text, index): TextBlockParam => ({
               type: 'text',
               text,
-              ...(index === cacheBreakpointIndex ? { cache_control: CACHE_CONTROL } : {}),
+              ...(index === 0 ? { cache_control: CACHE_CONTROL } : {}),
             }),
           );
 
@@ -1055,11 +989,8 @@ export class AnthropicChatProvider implements ChatProvider {
       kwargs['output_config'] = this._generationKwargs.output_config;
     }
 
-    // Build beta headers. Subscription (OAuth) tokens additionally require the
-    // Claude Code betas; the configured feature list is appended after them.
-    const betas = oauthRequest
-      ? [...new Set([...OAUTH_BETA_FEATURES, ...(this._generationKwargs.betaFeatures ?? [])])]
-      : (this._generationKwargs.betaFeatures ?? []);
+    // Build beta headers
+    const betas = this._generationKwargs.betaFeatures ?? [];
     const extraHeaders: Record<string, string> = {};
     if (betas.length > 0) {
       extraHeaders['anthropic-beta'] = betas.join(',');
@@ -1135,47 +1066,8 @@ export class AnthropicChatProvider implements ChatProvider {
     return resolveAuthBackedClient(
       { cachedClient: this._client, clientFactory: this._clientFactory },
       auth,
-      (a) => this._buildClientFromAuth(a),
+      (a) => this._buildClient(requireProviderApiKey('AnthropicChatProvider', a, this._apiKey)),
     );
-  }
-
-  /**
-   * Build the SDK client for a single request from request-scoped auth.
-   *
-   * OAuth access tokens must authenticate via `Authorization: Bearer` and must
-   * not be sent as `x-api-key`. A request-scoped bearer header, or a key
-   * carrying the OAuth access-token prefix (directly configured token),
-   * therefore switches the client to `authToken` mode; every other case keeps
-   * the regular API-key client.
-   */
-  private _buildClientFromAuth(a?: ProviderRequestAuth): Anthropic {
-    const authorization = a?.headers?.['Authorization'];
-    if (authorization !== undefined && authorization.startsWith('Bearer ')) {
-      return this._buildBearerClient(authorization.slice('Bearer '.length), a?.baseUrl);
-    }
-    const apiKey = requireProviderApiKey('AnthropicChatProvider', a, this._apiKey);
-    if (apiKey.startsWith('sk-ant-oat')) {
-      return this._buildBearerClient(apiKey, a?.baseUrl);
-    }
-    return this._buildClient(apiKey);
-  }
-
-  private _buildBearerClient(token: string, baseUrlOverride?: string): Anthropic {
-    // A subscription token is only accepted with the Claude Code identity
-    // headers; bearer tokens from other providers keep the configured headers.
-    const oauth = token.includes(OAUTH_TOKEN_MARKER);
-    return new Anthropic({
-      authToken: token,
-      baseURL: baseUrlOverride ?? this._baseUrl,
-      defaultHeaders: oauth
-        ? { ...this._defaultHeaders, ...oauthIdentityHeaders() }
-        : this._defaultHeaders,
-      // Retry is owned by the engine's step-retry layer (abortable, observable
-      // via turn.step.retrying, single budget). The SDK's built-in retries
-      // sleep on a backoff that never observes the request AbortSignal and
-      // would double-count the retry budget, so disable them.
-      maxRetries: 0,
-    });
   }
 
   private _buildClient(apiKey: string): Anthropic {
