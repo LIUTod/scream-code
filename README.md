@@ -103,7 +103,7 @@ Type `/` in the input to browse. All 55 commands:
 | `/knowledge` (`/know`) `[query]` | Manage local knowledge base |
 | **Models & configuration** | |
 | `/model [alias]` | Switch LLM model |
-| `/config` | Browse and configure models |
+| `/config` (`/login`) | Browse and configure models |
 | `/config image` | Configure image generation (provider, URL, key, model) |
 | `/logout` (`/disconnect`) | Remove configured models |
 | `/language` (`/lang`) | Switch interface language |

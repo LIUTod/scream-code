@@ -47,6 +47,8 @@ describe('built-in slash command registry', () => {
     expect(findBuiltInSlashCommand('script')?.name).toBe('script');
     expect(findBuiltInSlashCommand('codebg')?.name).toBe('codebg');
     expect(findBuiltInSlashCommand('codeblock')?.name).toBe('codebg');
+    expect(findBuiltInSlashCommand('config')?.aliases).toContain('login');
+    expect(findBuiltInSlashCommand('login')?.name).toBe('config');
     expect(findBuiltInSlashCommand('unknown')).toBeUndefined();
   });
 

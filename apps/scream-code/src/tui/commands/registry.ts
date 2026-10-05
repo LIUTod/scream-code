@@ -232,7 +232,7 @@ export const BUILTIN_SLASH_COMMANDS = [
   },
   {
     name: 'config',
-    aliases: [],
+    aliases: ['login'],
     description: 'registry.config_desc',
     priority: 199,
   },
