@@ -368,6 +368,12 @@ export const BUILTIN_SLASH_COMMANDS = [
     availability: 'always',
   },
   {
+    name: 'login',
+    aliases: ['signin'],
+    description: 'registry.login_desc',
+    priority: 179,
+  },
+  {
     name: 'logout',
     aliases: ['disconnect'],
     description: 'registry.logout_desc',

@@ -22,6 +22,7 @@ import type { AppState, LoginProgressSpinnerHandle, PlanModeState, QueuedMessage
 import type { TUIState } from '../tui-state';
 
 import { handleConnectCommand, handleLogoutCommand } from './auth';
+import { handleLoginCommand } from './login';
 import { handleSearchCommand } from './search';
 import { handleTraceCommand } from './trace';
 import {
@@ -266,6 +267,9 @@ async function handleBuiltInSlashCommand(
       host.tasksBrowserController.show().catch((error: unknown) => {
         host.showError(t('dispatch.tasks_browser_failed', { error: formatErrorMessage(error) }));
       });
+      return;
+    case 'login':
+      await handleLoginCommand(host, args);
       return;
     case 'btw':
       await handleBtwCommand(host, args);

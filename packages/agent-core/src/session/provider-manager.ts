@@ -5,7 +5,26 @@ import type { ScreamConfig, ModelAlias, OAuthRef, ProviderConfig } from '../conf
 import { ErrorCodes, isScreamError, ScreamError } from '../errors';
 
 export interface BearerTokenProvider {
-  getAccessToken(options?: { readonly force?: boolean }): Promise<string>;
+  getAccessToken(options?: BearerTokenRequestOptions): Promise<string>;
+  /**
+   * Optional richer form: full request auth derived from the same credential
+   * (bearer headers, provider base URL). When present the runtime prefers it
+   * over `getAccessToken`, letting OAuth sessions carry provider-specific
+   * request shaping (bearer headers, base URL overrides) without per-provider
+   * plumbing.
+   */
+  getRequestAuth?(options?: BearerTokenRequestOptions): Promise<ProviderRequestAuth>;
+}
+
+export interface BearerTokenRequestOptions {
+  /** The request that asked for this token was rejected; refresh it. */
+  readonly force?: boolean;
+  /**
+   * Access token that request was rejected with. A forced refresh is skipped
+   * when the stored credential no longer holds it (another request already
+   * rotated it), so a recoverable 401 is not turned into a second rotation.
+   */
+  readonly rejectedAccess?: string;
 }
 
 export type OAuthTokenProviderResolver = (
@@ -127,10 +146,14 @@ export class ProviderManager implements ModelProvider {
     const providerConfig = this.config.providers[providerName];
     if (providerConfig?.oauth === undefined) return undefined;
 
-    if (providerApiKey(providerConfig) !== undefined) {
+    if (nonEmptyString(providerConfig.apiKey) !== undefined) {
       // oauth + apiKey on the same provider makes request auth ambiguous:
       // provider construction would prefer apiKey while runtime auth resolves
       // OAuth. Reject it so misconfiguration surfaces at model resolution.
+      //
+      // Only a literal `apiKey` field is reported: that is the field /login
+      // clears and the one this message tells the user to remove. A key
+      // inherited from the entry's `env` table is not part of this conflict.
       throw new ScreamError(
         ErrorCodes.CONFIG_INVALID,
         `Provider "${providerName}" has both apiKey and oauth set in config.toml — they are mutually exclusive. Remove one.`,
@@ -152,22 +175,28 @@ export class ProviderManager implements ModelProvider {
     }
 
     const log = options?.log;
-    const fetchAuth = async (force: boolean): Promise<ProviderRequestAuth> => {
-      let apiKey: string;
+    const fetchAuth = async (request?: BearerTokenRequestOptions): Promise<ProviderRequestAuth> => {
       try {
-        apiKey = await tokenProvider.getAccessToken(force ? { force: true } : undefined);
+        if (tokenProvider.getRequestAuth !== undefined) {
+          const auth = await tokenProvider.getRequestAuth(request);
+          const hasApiKey = (auth.apiKey ?? '').trim().length > 0;
+          const hasHeaders = auth.headers !== undefined && Object.keys(auth.headers).length > 0;
+          if (!hasApiKey && !hasHeaders && auth.baseUrl === undefined) throw loginRequired();
+          return auth;
+        }
+        const apiKey = await tokenProvider.getAccessToken(request);
+        if (apiKey.trim().length === 0) throw loginRequired();
+        return { apiKey };
       } catch (error) {
         if (!isScreamError(error) || error.code !== ErrorCodes.AUTH_LOGIN_REQUIRED) {
           log?.warn('oauth token fetch failed', { providerName, error });
         }
         throw loginRequired(error);
       }
-      if (apiKey.trim().length === 0) throw loginRequired();
-      return { apiKey };
     };
 
     return async (request) => {
-      let auth = await fetchAuth(false);
+      let auth = await fetchAuth();
       for (let refreshed = false; ; refreshed = true) {
         try {
           return await request(auth);
@@ -183,7 +212,9 @@ export class ProviderManager implements ModelProvider {
               },
             );
           }
-          auth = await fetchAuth(true);
+          // Hand the forced refresh the token this request was rejected with:
+          // if the store already rotated past it, no second rotation happens.
+          auth = await fetchAuth({ force: true, rejectedAccess: rejectedAccessToken(auth) });
         }
       }
     };
@@ -288,6 +319,26 @@ function toLtodProviderConfig(
         apiKey: providerApiKey(provider),
         baseUrl: providerValue(provider.baseUrl, provider.env, 'GOOGLE_GENAI_BASE_URL'),
       };
+    case 'google-cloud-code':
+      return {
+        type: 'google-cloud-code',
+        model,
+        // Structured Cloud Code Assist credentials travel on the api-key
+        // channel as JSON; the sign-in writes them per request, so the
+        // configured value is only a fallback for hand-written entries.
+        apiKey: providerApiKey(provider),
+        baseUrl: providerValue(provider.baseUrl, provider.env, 'GOOGLE_CLOUD_CODE_BASE_URL'),
+      };
+    case 'openai-codex':
+      return {
+        type: 'openai-codex',
+        model,
+        // Structured Codex credentials ({ token, accountId }) travel on the
+        // api-key channel as JSON; the sign-in writes them per request, so the
+        // configured value is only a fallback for hand-written entries.
+        apiKey: providerApiKey(provider),
+        baseUrl: providerValue(provider.baseUrl, provider.env, 'OPENAI_CODEX_BASE_URL'),
+      };
     case 'openai_responses':
       return {
         type: 'openai_responses',
@@ -348,6 +399,10 @@ function providerApiKey(provider: ProviderConfig): string | undefined {
       return providerValue(provider.apiKey, provider.env, 'SCREAM_API_KEY');
     case 'google-genai':
       return providerValue(provider.apiKey, provider.env, 'GOOGLE_API_KEY');
+    case 'google-cloud-code':
+      return providerValue(provider.apiKey, provider.env, 'GOOGLE_CLOUD_CODE_API_KEY');
+    case 'openai-codex':
+      return providerValue(provider.apiKey, provider.env, 'OPENAI_CODEX_API_KEY');
     case 'vertexai':
       return (
         nonEmptyString(provider.apiKey) ??
@@ -366,6 +421,62 @@ function providerApiKey(provider: ProviderConfig): string | undefined {
 
 function hasVertexAIServiceEnv(provider: ProviderConfig): boolean {
   return vertexAIProject(provider) !== undefined && vertexAILocation(provider) !== undefined;
+}
+
+/**
+ * The access token a failed request authenticated with, so a forced refresh can
+ * tell "this token was rejected" apart from "another request already rotated
+ * it". Read from the same two places request auth carries a bearer credential:
+ * the request key, then a bearer authorization header.
+ */
+function rejectedAccessToken(auth: ProviderRequestAuth): string | undefined {
+  const apiKey = nonEmptyString(auth.apiKey);
+  if (apiKey !== undefined) return structuredCredentialToken(apiKey) ?? apiKey;
+  for (const [name, value] of Object.entries(auth.headers ?? {})) {
+    if (name.toLowerCase() !== 'authorization') continue;
+    if (!value.startsWith('Bearer ')) return undefined;
+    return nonEmptyString(value.slice('Bearer '.length));
+  }
+  return undefined;
+}
+
+/**
+ * Access token carried inside a structured credential. Several providers send
+ * their request key as JSON (`{"token":…,"accountId":…}`), because the request
+ * layer needs more than a bare token. The value the store compares against its
+ * own `access` is the token inside, so it has to be unwrapped here: handing
+ * over the whole JSON blob would never match the stored bare token and every
+ * forced refresh after a 401 would be skipped, replaying the rejected token.
+ *
+ * The lookup chains the spellings in the order the aliasing request-layer
+ * parsers read them (`token`, then `access_token`, then `access`): when a
+ * hand-written credential carries several spellings with different values, the
+ * guard must compare the token that is actually sent, or it can never match. A
+ * parser without an alias chain reads the primary spelling only, so a
+ * credential written in another spelling cannot match the stored token either
+ * way.
+ *
+ * Anything that is not a JSON object with a non-empty string token field is
+ * left to the caller (plain keys, non-JSON blobs).
+ */
+function structuredCredentialToken(apiKey: string): string | undefined {
+  if (!apiKey.startsWith('{')) return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(apiKey);
+  } catch {
+    return undefined;
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined;
+  const record = parsed as Record<string, unknown>;
+  for (const field of ['token', 'access_token', 'access']) {
+    const value = record[field];
+    if (typeof value === 'string') {
+      const token = nonEmptyString(value);
+      if (token !== undefined) return token;
+    }
+  }
+  return undefined;
 }
 
 function vertexAIProject(provider: ProviderConfig): string | undefined {

@@ -8,6 +8,8 @@ export const ProviderTypeSchema = z.enum([
   'openai',
   'scream',
   'google-genai',
+  'google-cloud-code',
+  'openai-codex',
   'openai_responses',
   'vertexai',
 ]);

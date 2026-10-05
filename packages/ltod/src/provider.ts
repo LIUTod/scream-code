@@ -90,6 +90,15 @@ export interface ProviderRequestAuth {
   apiKey?: string;
   /** Request-scoped headers. These override constructor-level default headers. */
   headers?: Record<string, string>;
+  /**
+   * Request-scoped base URL. By default this request targets the given endpoint
+   * instead of the constructor-configured base URL — e.g. an OAuth runtime
+   * session supplying a provider-specific gateway address. A wire may order the
+   * two the other way (protecting an explicitly configured base URL from the
+   * default a sign-in reports); that wire's own documentation is authoritative
+   * for the request it makes.
+   */
+  baseUrl?: string;
 }
 
 export interface GenerateOptions {

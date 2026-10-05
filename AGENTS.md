@@ -31,7 +31,7 @@
 | `agent-core` | `packages/agent-core/` | Agent runtime: turn loop, session, tools, MCP client, compaction, memory, goal/wolfpack |
 | `ltod` | `packages/ltod/` | Multi-provider LLM client with streaming support |
 | `jian` | `packages/jian/` | Execution environment abstractions (filesystem, process, sandbox) |
-| `node-sdk` | `packages/node-sdk/` | Node.js SDK (`ScreamHarness`, `Session`) consumed by the app |
+| `node-sdk` | `packages/node-sdk/` | Node.js SDK (`ScreamHarness`, `Session`) consumed by the app; OAuth provider sign-in lives in `src/auth-oauth/` |
 | `memory` | `packages/memory/` | Cross-session memory store and scoring |
 | `config`      | `packages/config/`      | Platform configuration, identity, model aliases |
 | `migration-legacy` | `packages/migration-legacy/` | Legacy data migration — **deprecated, do not expand** |
@@ -642,6 +642,17 @@ reply read worse than before it existed.
   the TUI uses has neither wrapping nor width-aware layout
   (measured: `<br/>` has no effect and long labels are truncated) — it would mean
   writing a layout engine
+
+### Auth: Login / Logout (OAuth provider sign-in)
+
+Provider sign-in is one slash command over a per-provider OAuth subsystem.
+
+- **Entry**: `/login` (alias `signin`) — `src/tui/commands/login.ts` `handleLoginCommand`. `/login <provider-id-or-name>` skips the picker. Flow: provider picker (`promptLoginProviderSelection`, ✓ marker for stored credentials) → login panel (`components/dialogs/login-dialog.ts`, replaces the editor) → per-provider flow (browser authorize with loopback callback + manual-paste fallback, or RFC 8628 device code) → credential persisted → provider entry written (`oauth` ref, api key cleared, `baseUrl` from the provider's `toAuth`) → `authFlow.refreshConfigAfterLogin()`.
+- **Mechanics** (`packages/node-sdk/src/auth-oauth/`): `pkce` (S256), `callback-server` (fixed-port loopback listener with claim/settle race guards + `waitForCallbackOrManualInput`), `device-code` (poll schedule with slow_down backoff), `store` (per-provider `<screamHome>/oauth/<id>.json`, 0600, atomic write, serialized read-modify-write), `refresh` (freshness margin + lock-scoped double-check; forced refresh after a 401).
+- **Providers**: one module per provider under `auth-oauth/providers/`, exported as `OAuthProviderModule` (`login`/`refresh`/`toAuth` + selector metadata incl. `providerConfigType`), registered in `registry.ts` (selector order). UI is injected via `ProviderAuthInteraction` (prompt/notify + abort signal) so flows run under the TUI, tests, or any host; the browser pages come from `oauth-page.ts`.
+- **Runtime auth chain**: `provider-manager.resolveAuth` → facade `resolveOAuthTokenProvider` → `getRequestAuth` (preferred; falls back to `getAccessToken`) → `provider.generate(..., { auth })`. Bearer tokens ride `apiKey` for OpenAI-style providers (their SDK sends `Authorization: Bearer`); Anthropic uses the `Authorization` header (authToken mode, `sk-ant-oat` prefix as fallback signal); `baseUrl`/`headers` overrides apply per request (ltod `ProviderRequestAuth`).
+- **Logout**: `/logout` clears the stored OAuth credential (`auth.logoutOAuthProvider`) before removing the provider entry; credential-only leftovers appear in the picker via the registry scan.
+- **Testing without accounts**: flows are covered with mocked `fetch` + mocked interaction, and request-auth shapes are unit-tested; real sign-in per provider is user-verified (unverified providers carry a note in their module header).
 
 ### Image Generation (`/image`, `/config image`)
 

@@ -1,6 +1,11 @@
 import type { ChatProvider } from '../provider';
 import { AnthropicChatProvider, type AnthropicOptions } from './anthropic';
+import {
+  GoogleCloudCodeChatProvider,
+  type GoogleCloudCodeOptions,
+} from './google-cloud-code';
 import { GoogleGenAIChatProvider, type GoogleGenAIOptions } from './google-genai';
+import { OpenAICodexChatProvider, type OpenAICodexOptions } from './openai-codex';
 import { ScreamChatProvider, type ScreamOptions } from './scream';
 import { OpenAILegacyChatProvider, type OpenAILegacyOptions } from './openai-legacy';
 import { OpenAIResponsesChatProvider, type OpenAIResponsesOptions } from './openai-responses';
@@ -10,6 +15,8 @@ export type ProviderConfig =
   | ({ type: 'openai' } & OpenAILegacyOptions)
   | ({ type: 'scream' } & ScreamOptions)
   | ({ type: 'google-genai' } & GoogleGenAIOptions)
+  | ({ type: 'google-cloud-code' } & GoogleCloudCodeOptions)
+  | ({ type: 'openai-codex' } & OpenAICodexOptions)
   | ({ type: 'openai_responses' } & OpenAIResponsesOptions)
   | ({ type: 'vertexai' } & GoogleGenAIOptions);
 
@@ -36,6 +43,10 @@ export function createProvider<const T extends ProviderConfig>(
       return new ScreamChatProvider(providerConfig);
     case 'google-genai':
       return new GoogleGenAIChatProvider(providerConfig);
+    case 'google-cloud-code':
+      return new GoogleCloudCodeChatProvider(providerConfig);
+    case 'openai-codex':
+      return new OpenAICodexChatProvider(providerConfig);
     case 'openai_responses':
       return new OpenAIResponsesChatProvider(providerConfig);
     case 'vertexai':

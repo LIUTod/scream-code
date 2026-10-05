@@ -8,6 +8,8 @@ export default defineConfig({
     './src/providers/openai-responses.ts',
     './src/providers/anthropic.ts',
     './src/providers/google-genai.ts',
+    './src/providers/google-cloud-code.ts',
+    './src/providers/openai-codex.ts',
     './src/providers/openai-common.ts',
   ],
   format: ['esm'],
