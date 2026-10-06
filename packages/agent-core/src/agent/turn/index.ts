@@ -69,6 +69,21 @@ interface BufferedSteer {
   readonly interrupt?: boolean | undefined;
 }
 
+/**
+ * Whether a buffered steer interrupts an in-flight tool batch — interactive
+ * user steers do, and so does any steer carrying an explicit `interrupt: true`
+ * (the parent host's interject); background/cron/hook steers (no flag) and
+ * auto-drained queue messages (`interrupt: false`) only join at the next step
+ * boundary.
+ *
+ * Single source of truth for the lane: `hasPendingSteer` (does one exist?) and
+ * `pendingSteerKind` (whose is it?) must classify identically, or a new
+ * interrupt lane would interrupt without being attributed.
+ */
+function isInterruptingSteer(steer: BufferedSteer): boolean {
+  return steer.interrupt === true || (steer.origin.kind === 'user' && steer.interrupt !== false);
+}
+
 export interface TurnEndResult {
   readonly event: TurnEndedEvent;
   readonly stopReason?: LoopTurnStopReason;
@@ -658,13 +673,30 @@ export class TurnFlow {
           log: this.agent.log,
           maxSteps: loopControl?.maxStepsPerTurn,
           maxRetryAttempts: loopControl?.maxRetriesPerStep,
-          // Only interactive user steers interrupt an in-flight tool batch.
-          // Background/cron/hook steers keep the old behavior — they wait
-          // for the step boundary so a background completion never kills
-          // the user's running command mid-flight. Auto-drained queue
-          // messages (interrupt: false) also join only at the boundary.
-          hasPendingSteer: () =>
-            this.steerBuffer.some((steer) => steer.origin.kind === 'user' && steer.interrupt !== false),
+          // Interactive user steers interrupt an in-flight tool batch, and so
+          // does any steer carrying an explicit `interrupt: true` (the parent
+          // host's interject, whose origin is `system_trigger`). Background/
+          // cron/hook steers (no interrupt flag) keep the old behavior — they
+          // wait for the step boundary so a background completion never kills
+          // the user's running command mid-flight. Auto-drained queue messages
+          // (interrupt: false) also join only at the boundary. (Lane test:
+          // `isInterruptingSteer`.)
+          hasPendingSteer: () => this.steerBuffer.some(isInterruptingSteer),
+          // Attribution for the interrupt above: the batch names it in the
+          // aborted tools' output so the model knows who cut the batch short.
+          // A user interrupt outranks a parent interject when both are queued —
+          // the human's stop is never reported as a correction — and any other
+          // interrupting steer keeps the historical user wording.
+          pendingSteerKind: () => {
+            const interrupting = this.steerBuffer.filter(isInterruptingSteer);
+            if (interrupting.some((steer) => steer.origin.kind === 'user')) return 'user';
+            return interrupting.some(
+              (steer) =>
+                steer.origin.kind === 'system_trigger' && steer.origin.name === 'parent_interject',
+            )
+              ? 'parent-interject'
+              : 'user';
+          },
           // Crash-recovery drafts: throttled snapshots of the in-flight
           // stream, written straight to the wire (never into the model
           // context). A turn that dies mid-stream leaves its partial output

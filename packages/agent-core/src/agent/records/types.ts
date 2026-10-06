@@ -112,6 +112,22 @@ export interface AgentRecordEvents {
     replacement: readonly ContentPart[] | null;
   };
   /**
+   * Prefix-stability observation: the fingerprint-verified prefix of the
+   * LLM-bound message list changed between two builds, and `breakIndex` is the
+   * first message index whose provider-visible bytes differ (the tail from
+   * there must be re-cached). Pure diagnostics — written only on a break (the
+   * intact-prefix path stays debug-only), never restored on replay and never
+   * surfaced in the replay window; `logRecord` stamps `time`. Writers are the
+   * cache-breaking events (full compaction, projection edits, micro-compaction
+   * truncation), not steady-state appends.
+   */
+  'context.prefix_break': {
+    breakIndex: number;
+    prevMessageCount: number;
+    currentMessageCount: number;
+    appendedSinceLast: number;
+  };
+  /**
    * Point-in-time snapshot of the folded context memory, written right after a
    * successful full compaction. On resume the replayer restores this snapshot
    * and skips every context-content record that predates it, instead of

@@ -21,6 +21,9 @@
 - Snapshots: `toJSONSnapshot`/`restoreJSONSnapshot` (persisted after
   compaction, used for the replay fast-path; the payload carries
   `messageEdits`)
+- `context.prefix_break` (`observePrefixStability`) is diagnostic only: it
+  records a cache-prefix break on the wire for auditability, is never replayed
+  into state and never enters a provider request
 - Cleanup: `dropVacuousOpenMessages` (drop assistant messages that carry only
   thinking content or nothing when a turn is interrupted)
 - Authorship: `identity.ts` holds the only predicates that answer "did the user

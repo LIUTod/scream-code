@@ -50,9 +50,11 @@ By default a subagent gets its profile's full tool set. Pass `capability_mode` t
 
 Restricted modes also remove `Agent` and `SendSubagentMessage`, so a constrained subagent cannot spawn an unconstrained grandchild to bypass the filter.
 
+Resume clamps the contract — it can only tighten, never widen. A resumed agent keeps the tool set it was spawned with (its profile is not rebuilt), so a wider `capability_mode` than the one it already carries is ignored, and a stored restriction is re-applied on the resumed instance. To hand a subagent more tools, spawn a fresh one.
+
 ## Steering running subagents
 
-Use `SendSubagentMessage` to send a directed message to a subagent you own while it is still running: `steer` for a priority redirection, `queue` for context that applies next turn. A `steer` joins the subagent's running turn at its next step boundary; a `queue` message is delivered when the subagent starts its next turn. Only the owning parent may message a subagent.
+Use `SendSubagentMessage` to send a directed message to a subagent you own while it is still running: `steer` for a priority redirection, `queue` for context that applies next turn. A `steer` joins the subagent's running turn at its next step boundary; a `queue` message is delivered when the subagent starts its next turn. When the correction cannot wait for a checkpoint, use `interject`: it interrupts the tools running at that moment (side-effecting commands included, and pending approvals are withdrawn) so the message lands at the very next step. Only the owning parent may message a subagent.
 
 When NOT to use Agent: skip delegation for trivial one-step work (e.g. reading a known file). Almost everything else is a candidate for delegation.
 

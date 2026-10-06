@@ -34,6 +34,12 @@
   (that loses retry/cancellation)
 - Interrupt handling: `runOneTurn` end calls `closeAbandonedToolExchange` +
   `dropVacuousOpenMessages` (drops thinking-only empty messages)
+- Mid-batch steer interruption: `runToolCallBatch` polls the caller's
+  `hasPendingSteer` (every `STEER_POLL_INTERVAL_MS`) and, on true, aborts the
+  in-flight tools through a merged signal. The caller owns the lane: `Turn`
+  trips it for user steers and for an explicit `interrupt: true` (the parent
+  host's interject), never for background/cron steers or `interrupt: false`
+  queue drains
 - `turn.ended` emits after cleanup (RPC snapshot stays consistent with replay)
 
 ## Extension points

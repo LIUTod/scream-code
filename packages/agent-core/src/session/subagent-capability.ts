@@ -58,3 +58,44 @@ function union(...sets: readonly ReadonlySet<string>[]): Set<string> {
   for (const s of sets) for (const v of s) out.add(v);
   return out;
 }
+
+/** Strictness order: earlier = narrower (fewer tools permitted). */
+const CAPABILITY_ORDER: readonly SubagentCapabilityMode[] = [
+  'read-only',
+  'read-write',
+  'execute',
+  'all',
+];
+
+/**
+ * The narrower of two capability modes (`read-only` < `read-write` < `execute`
+ * < `all`). Resume uses this to clamp: a resumed agent keeps the tool set it
+ * already has (its profile is not rebuilt), so its contract may be re-applied
+ * or tightened, never widened.
+ */
+export function narrowerCapability(
+  a: SubagentCapabilityMode,
+  b: SubagentCapabilityMode,
+): SubagentCapabilityMode {
+  return CAPABILITY_ORDER.indexOf(a) <= CAPABILITY_ORDER.indexOf(b) ? a : b;
+}
+
+/**
+ * Infer the strictest capability mode that already permits `activeTools` — the
+ * first mode whose `filterToolsForCapability` pass removes nothing, else `all`.
+ *
+ * Used when resuming a session recorded before `AgentMeta.capabilityMode`
+ * existed: filtering is pure subtraction, so a tool set that survives
+ * `read-only` unchanged is evidence the agent was never granted more than
+ * that. The inference can only be too *narrow* (a set that happens to contain
+ * only allowed tools), which is the safe direction for a capability clamp.
+ */
+export function inferCapabilityFromTools(
+  activeTools: readonly string[],
+): SubagentCapabilityMode {
+  for (const mode of CAPABILITY_ORDER) {
+    if (mode === 'all') break;
+    if (filterToolsForCapability(activeTools, mode).length === activeTools.length) return mode;
+  }
+  return 'all';
+}

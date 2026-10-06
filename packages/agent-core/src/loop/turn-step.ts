@@ -44,6 +44,12 @@ export interface ExecuteLoopStepDeps {
   readonly recordUsage:
     (usage: TokenUsage) => RecordStepUsageResult | void | Promise<RecordStepUsageResult | void>;
   readonly hasPendingSteer?: (() => boolean) | undefined;
+  /**
+   * Attribution for the pending steer (see RunTurnInput.pendingSteerKind):
+   * `'parent-interject'` makes an interrupted tool report the parent-agent
+   * wording instead of the user-cancellation one.
+   */
+  readonly pendingSteerKind?: (() => 'user' | 'parent-interject') | undefined;
   readonly mediaProjection?: MediaProjectionState | undefined;
   /**
    * Crash-recovery draft sink: receives throttled full snapshots of the
@@ -112,6 +118,7 @@ export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<{
     currentStep,
     stepUuid,
     hasPendingSteer: deps.hasPendingSteer,
+    pendingSteerKind: deps.pendingSteerKind,
     toolCallBlockIndex: { value: 0 },
   };
 

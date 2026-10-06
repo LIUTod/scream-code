@@ -136,7 +136,7 @@ describe('Agent turn flow', () => {
     await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Hello without login' }] });
 
     expect(await ctx.untilTurnEnd()).toMatchInlineSnapshot(`
-      [wire] metadata                 { "protocol_version": "1.4", "created_at": "<time>" }
+      [wire] metadata                 { "protocol_version": "1.5", "created_at": "<time>" }
       [wire] turn.prompt              { "input": [ { "type": "text", "text": "Hello without login" } ], "origin": { "kind": "user" }, "time": "<time>" }
       [emit] turn.started             { "turnId": 0, "origin": { "kind": "user" } }
       [wire] context.append_message   { "message": { "role": "user", "content": [ { "type": "text", "text": "Hello without login" } ], "toolCalls": [], "origin": { "kind": "user" }, "id": "m0" }, "time": "<time>" }
@@ -1725,6 +1725,68 @@ describe('steer interrupt lanes', () => {
     // The tool ran normally (approval answered), then the queued message joined.
     expect(lastHistory).toContain('approved');
     expect(lastHistory).toContain('Queued follow-up.');
+    await ctx.expectResumeMatches();
+  });
+
+  it('an interrupt: true steer from a non-user origin aborts the pending approval', async () => {
+    const ctx = testAgent({ jian: createCommandJian('approved') });
+    ctx.configure({ tools: ['Bash'] });
+
+    ctx.mockNextResponse({ type: 'text', text: 'I will ask first.' }, bashCallWithId('call_bash', 'printf approved'));
+    ctx.mockNextResponse({ type: 'text', text: 'Saw the interjection.' });
+    await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Run Bash, then listen' }] });
+    await ctx.takeApprovalRequest();
+    ctx.lastLlmInput(); // consume step 1 input
+
+    // The parent host's interject: a system_trigger origin carrying an
+    // explicit interrupt: true. It must ride the same interrupt lane as a
+    // user steer — the origin is not `user`, so the interrupt flag alone
+    // decides.
+    ctx.agent.turn.steer(
+      [{ type: 'text', text: 'Abort and do X instead.' }],
+      { kind: 'system_trigger', name: 'parent_interject' },
+      { interrupt: true },
+    );
+
+    await ctx.untilTurnEnd();
+    expect(ctx.llmCalls).toHaveLength(2);
+    const lastHistory = JSON.stringify(ctx.llmCalls.at(-1)?.history);
+    expect(lastHistory).toContain('Abort and do X instead.');
+    // The approval was never answered: the batch was interrupted instead, and
+    // the attribution names the parent agent — never the user, who said
+    // nothing here. (Interject must not tell the model to "wait for the user".)
+    expect(lastHistory).toContain('The parent agent interrupted');
+    expect(lastHistory).toContain('[parent_messages]');
+    expect(lastHistory).not.toContain('manually interrupted');
+    expect(lastHistory).not.toContain('"text":"approved"');
+    await ctx.expectResumeMatches();
+  });
+
+  it('a non-user steer without an interrupt flag keeps the boundary-only lane', async () => {
+    const ctx = testAgent({ jian: createCommandJian('approved') });
+    ctx.configure({ tools: ['Bash'] });
+
+    ctx.mockNextResponse({ type: 'text', text: 'I will ask first.' }, bashCallWithId('call_bash', 'printf approved'));
+    ctx.mockNextResponse({ type: 'text', text: 'Approved, and I saw the note.' });
+    await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Run Bash, then listen' }] });
+    const approval = await ctx.takeApprovalRequest();
+    ctx.lastLlmInput(); // consume step 1 input
+
+    // Background/cron-style steer: no interrupt flag, so it must NOT abort the
+    // pending approval — the pre-interject behavior has to survive.
+    ctx.agent.turn.steer(
+      [{ type: 'text', text: 'Background note.' }],
+      { kind: 'system_trigger', name: 'background_completion' },
+    );
+    await sleep(300); // poll fires, but this lane does not interrupt
+
+    approval.respond({ decision: 'approved', selectedLabel: 'approve' });
+    await ctx.untilTurnEnd();
+
+    expect(ctx.llmCalls).toHaveLength(2);
+    const lastHistory = JSON.stringify(ctx.llmCalls.at(-1)?.history);
+    expect(lastHistory).toContain('approved');
+    expect(lastHistory).toContain('Background note.');
     await ctx.expectResumeMatches();
   });
 });

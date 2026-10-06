@@ -122,7 +122,7 @@ export const AgentToolInputSchema = z.preprocess(
       .enum(['read-only', 'read-write', 'execute', 'all'])
       .optional()
       .describe(
-        'Runtime capability contract for the subagent. read-only: may inspect but not modify the workspace. read-write: may read and edit files but not run arbitrary commands. execute: may additionally run commands. all: full tool access (default). Restricted modes strip the child tool set at runtime (including MCP and spawning tools) — the constraint is enforced, not just prompted. The parent remains the final gate.',
+        'Runtime capability contract for the subagent. read-only: may inspect but not modify the workspace. read-write: may read and edit files but not run arbitrary commands. execute: may additionally run commands. all: full tool access (default). Restricted modes strip the child tool set at runtime (including MCP and spawning tools) — the constraint is enforced, not just prompted. The parent remains the final gate. On resume the contract can only tighten: a resumed agent keeps the tool set it already has, so a mode wider than the one it was spawned with is ignored — spawn a fresh subagent for a wider contract.',
       ),
   }),
 );

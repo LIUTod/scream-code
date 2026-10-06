@@ -25,6 +25,11 @@
 
 ## Boundaries
 - Does NOT: implement tool logic (that is each tool module / plugin's job)
+- RLM bridge boundary: `createRlmHostHandlers`'s `rlm.run` always spawns the
+  `coder` profile — the profile `spawns` whitelist constrains the `Agent` tool,
+  not this power mode. It forwards the caller's `capabilityMode`, so a
+  restricted agent's `rlm()` grandchild stays restricted; tighten by adding a
+  `spawns` check in the handler if that contract ever changes
 - `registerUserTool` has two execution paths: an in-process `execute` closure
   (code plugins; a throw becomes an isError result), or the host-callback path
   when no closure was given (hosts without `rpc.toolCall` get an error result,

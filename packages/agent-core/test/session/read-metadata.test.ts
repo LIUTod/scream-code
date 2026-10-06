@@ -106,3 +106,61 @@ describe('Session.readMetadata resilience', () => {
     expect(entries.filter((entry) => entry.endsWith('.tmp'))).toEqual([]);
   });
 });
+
+describe('Session.markAgentCapability', () => {
+  function registerChild(session: Session, homedir: string): void {
+    // A real spawn registers the child record first; the capability write then
+    // targets that entry.
+    session.metadata.agents['agent-0'] = {
+      homedir: join(homedir, 'agents/agent-0'),
+      type: 'sub',
+      parentAgentId: 'main',
+    };
+  }
+
+  async function readCapability(homedir: string): Promise<string | undefined> {
+    const text = await readFile(join(homedir, 'state.json'), 'utf-8');
+    const parsed = JSON.parse(text) as {
+      agents?: Record<string, { capabilityMode?: string }>;
+    };
+    return parsed.agents?.['agent-0']?.capabilityMode;
+  }
+
+  it("persists the first contract ('all' included) and skips same-value rewrites", async () => {
+    const homedir = await makeTempDir();
+    const session = makeSession(homedir);
+    registerChild(session, homedir);
+    const writeSpy = vi.spyOn(session, 'writeMetadata');
+
+    // 'all' is a real contract, not an absent one: the FIRST write must reach
+    // the disk. (Reverting the no-op test to `(meta.capabilityMode ?? 'all')
+    // === mode` makes this call a silent no-op, so writeSpy stays at 0 and the
+    // assertions below go red.)
+    session.markAgentCapability('agent-0', 'all');
+    await writeSpy.mock.results[0]?.value;
+    expect(writeSpy).toHaveBeenCalledTimes(1);
+    expect(await readCapability(homedir)).toBe('all');
+
+    // Same id, same value: the record already carries the contract, so nothing
+    // is rewritten.
+    session.markAgentCapability('agent-0', 'all');
+    expect(writeSpy).toHaveBeenCalledTimes(1);
+
+    // Tightening writes through.
+    session.markAgentCapability('agent-0', 'read-only');
+    await writeSpy.mock.results[1]?.value;
+    expect(writeSpy).toHaveBeenCalledTimes(2);
+    expect(await readCapability(homedir)).toBe('read-only');
+  });
+
+  it('ignores an unknown agent id', async () => {
+    const homedir = await makeTempDir();
+    const session = makeSession(homedir);
+    const writeSpy = vi.spyOn(session, 'writeMetadata');
+
+    session.markAgentCapability('agent-404', 'read-only');
+
+    expect(writeSpy).not.toHaveBeenCalled();
+    expect(session.metadata.agents['agent-404']).toBeUndefined();
+  });
+});

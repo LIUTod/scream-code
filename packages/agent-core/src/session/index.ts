@@ -40,6 +40,7 @@ import {
   type SkillSummary,
 } from '../skill';
 import { SessionSubagentHost } from './subagent-host';
+import type { SubagentCapabilityMode } from './subagent-capability';
 import type { ToolServices } from '../tools/support/services';
 import type { LspProcessSupervisor } from '../lsp/process-supervisor';
 
@@ -77,6 +78,15 @@ export interface AgentMeta {
   readonly homedir: string;
   readonly type: AgentType;
   readonly parentAgentId: string | null;
+  /**
+   * Runtime capability contract this subagent was spawned (or last resumed)
+   * with. Persisted so a restriction survives a process restart: an agent's
+   * live mode is in-memory only, so without this a resumed read-only child
+   * would silently default to `all` and hand its grandchildren the full tool
+   * set through the RLM bridge. Optional for backward compatibility — a
+   * session recorded before this field existed reads as `all`.
+   */
+  readonly capabilityMode?: SubagentCapabilityMode;
 }
 
 export interface SessionMeta {
@@ -408,6 +418,24 @@ export class Session {
       () => write(),
     );
     return this.writeMetadataPromise;
+  }
+
+  /**
+   * Record a subagent's runtime capability contract in session metadata so it
+   * survives a process restart (see AgentMeta.capabilityMode). Every spawned
+   * child records a mode from its very first write — `all` included, since it
+   * is a real contract, not an absent one. A missing field therefore means
+   * exactly one thing: a session written before this field existed, which
+   * resume resolves by inferring the contract from the live tool set.
+   */
+  markAgentCapability(agentId: string, mode: SubagentCapabilityMode): void {
+    const meta = this.metadata.agents[agentId];
+    if (meta === undefined) return;
+    if (meta.capabilityMode === mode) return;
+    this.metadata.agents[agentId] = { ...meta, capabilityMode: mode };
+    this.writeMetadata().catch((error: unknown) => {
+      this.log.error('failed to write session metadata after a capability change', error);
+    });
   }
 
   async readMetadata() {

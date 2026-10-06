@@ -1,13 +1,15 @@
 /**
  * SendSubagentMessageTool — parent→child directed-message tool.
  *
- * The parent agent uses this to steer or queue a message to one of its own
- * subagents. A steer aimed at a child whose turn is running is injected into
- * that turn and joins at the child's next step boundary; every other message
- * waits in the session-level SubagentMessageBus (FIFO within an operation
- * class; steer precedes queue) and is injected into the child's prompt at its
- * next turn start. A child can never send to itself, and a message addressed to
- * a child owned by a different parent is refused as not_owned.
+ * The parent agent uses this to steer, interject into, or queue a message to
+ * one of its own subagents. A steer aimed at a child whose turn is running is
+ * injected into that turn and joins at the child's next step boundary; an
+ * interject does the same but also interrupts the tool batch in flight; every
+ * other message waits in the session-level SubagentMessageBus (FIFO within an
+ * operation class; steer precedes queue) and is injected into the child's
+ * prompt at its next turn start. A child can never send to itself, and a
+ * message addressed to a child owned by a different parent is refused as
+ * not_owned.
  */
 
 import { z } from 'zod';
@@ -21,8 +23,10 @@ import DESCRIPTION from './send-subagent-message.md';
 export const SendSubagentMessageInputSchema = z.object({
   agent_id: z.string().min(1).describe('Agent id of the target subagent, as returned by Agent.'),
   operation: z
-    .enum(['queue', 'steer'])
-    .describe('queue: delivered when the subagent starts its next turn, after any steer messages. steer: delivered into the subagent\'s running turn at its next step boundary, or first in the mailbox if no turn is running.'),
+    .enum(['queue', 'steer', 'interject'])
+    .describe(
+      "queue: delivered when the subagent starts its next turn, after any steer messages. steer: delivered into the subagent's running turn at its next step boundary, or first in the mailbox if no turn is running. interject: like steer, but also interrupts the tool call the subagent has in flight right now — use it to correct a subagent stuck in a long wait; it falls back to the mailbox when no turn is running.",
+    ),
   message: z.string().min(1).max(16_384).describe('Message to deliver to the subagent.'),
 });
 
@@ -41,6 +45,8 @@ const STATUS_TO_TEXT: Record<string, string> = {
 const ACCEPTED_TEXT = {
   'mid-run':
     "Message accepted and delivered into the subagent's running turn; it joins at the subagent's next step boundary.",
+  interjected:
+    "Message accepted and interjected: the subagent's in-flight tool batch was interrupted so the message takes effect immediately.",
   queued:
     'Message accepted and queued; it is delivered when the subagent starts its next turn.',
 } as const;

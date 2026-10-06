@@ -37,6 +37,10 @@
 - Snapshot mechanism (`context.snapshot`): written after compaction; replay
   skips folded records before it. When adding record types keep backward
   compatibility — unknown types are silently ignored
+- Diagnostic-only record types (`context.prefix_break`): written for the wire,
+  never for state — `restoreAgentRecord` carries an explicit no-op case for
+  each, because relying on the switch fall-through would make "nothing happens"
+  indistinguishable from "nobody handled this type"
 - Folded context types (`SNAPSHOT_FOLDED_CONTEXT_TYPES`): a type joins the set
   only when the snapshot payload fully carries its state — `context.edit_message`
   qualifies because `toJSONSnapshot` writes `messageEdits`, so file-level

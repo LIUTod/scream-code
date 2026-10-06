@@ -14,6 +14,11 @@
  * The marker below lives in `system.md` between the two sections; it survives
  * rendering verbatim as an HTML comment, so the split is a plain string
  * operation on the rendered prompt.
+ *
+ * Subagents render their own profile's prompt (independent system prompt +
+ * tool whitelist), so each subagent's prefix is a separate string that never
+ * shares the parent's bytes — verbatim forking of the parent prefix does not
+ * apply in this architecture.
  */
 
 export const SYSTEM_PROMPT_SPLIT_MARKER = '\n\n<!--scream:system-dynamic-->\n\n';

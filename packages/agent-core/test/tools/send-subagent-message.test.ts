@@ -12,11 +12,11 @@ const CTX: ExecutableToolContext = {
 
 function stubHost(
   status: SubagentMessageStatus = 'accepted',
-  delivery?: 'mid-run' | 'queued',
+  delivery?: 'mid-run' | 'queued' | 'interjected',
   duplicate?: boolean,
 ): SessionSubagentHost {
   return {
-    sendMessage: vi.fn((_to: string, _op: 'queue' | 'steer', _text: string) => ({
+    sendMessage: vi.fn((_to: string, _op: 'queue' | 'steer' | 'interject', _text: string) => ({
       status,
       delivery,
       duplicate,
@@ -26,7 +26,7 @@ function stubHost(
 
 function runTool(
   host: SessionSubagentHost,
-  args: { agent_id: string; operation: 'queue' | 'steer'; message: string },
+  args: { agent_id: string; operation: 'queue' | 'steer' | 'interject'; message: string },
 ): Promise<{ isError: boolean; output: string }> {
   const tool = new SendSubagentMessageTool(host);
   const exec = tool.resolveExecution(args);
@@ -86,6 +86,34 @@ describe('SendSubagentMessageTool', () => {
     });
     expect(result.isError).toBe(false);
     expect(result.output).toContain('Duplicate of a message already in flight');
+  });
+
+  it('reports an interjected message as immediately effective', async () => {
+    const host = stubHost('accepted', 'interjected');
+    const result = await runTool(host, {
+      agent_id: 'agent-123',
+      operation: 'interject',
+      message: 'abort the wait, do X instead',
+    });
+    expect(host.sendMessage).toHaveBeenCalledWith(
+      'agent-123',
+      'interject',
+      'abort the wait, do X instead',
+    );
+    expect(result.isError).toBe(false);
+    expect(result.output).toContain('interjected');
+    expect(result.output).toContain('interrupted');
+  });
+
+  it('advertises interject in the operation schema', () => {
+    const tool = new SendSubagentMessageTool(stubHost());
+    const operation = (
+      tool.parameters as {
+        properties?: { operation?: { enum?: string[]; description?: string } };
+      }
+    ).properties?.operation;
+    expect(operation?.enum).toEqual(['queue', 'steer', 'interject']);
+    expect(operation?.description).toContain('interject');
   });
 
   it('reports non-accepted statuses as errors with the human message', async () => {

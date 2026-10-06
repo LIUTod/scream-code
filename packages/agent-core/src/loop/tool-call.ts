@@ -25,7 +25,7 @@ import {
 import { randomUUID } from 'node:crypto';
 import { PathSecurityError } from '../tools/policies/path-access';
 
-import { isUserCancellation, userCancellationReason } from '../utils/abort';
+import { isParentInterject, isUserCancellation, parentInterjectReason, userCancellationReason } from '../utils/abort';
 import { errorMessage, isAbortError } from './errors';
 import type { LoopEventDispatcher, LoopToolCallEvent } from './events';
 import type { LLM, LLMChatResponse } from './llm';
@@ -55,14 +55,19 @@ const UNEXECUTED_TOOL_CALL_OUTPUT =
 const validators = new WeakMap<ExecutableTool, ToolArgsValidator>();
 
 /**
- * Output for an aborted tool call. When the abort carries a user-cancellation
- * reason (the user pressed stop), say so explicitly so the model treats it as a
- * deliberate interruption instead of a system fault to theorise about or retry.
- * Any other abort keeps the neutral wording.
+ * Output for an aborted tool call. The abort's reason decides the attribution:
+ * a user cancellation (the user pressed stop) says so explicitly, and a parent
+ * interject says it was a deliberate redirection to be picked up from the
+ * `[parent_messages]` directive that follows — in both cases so the model
+ * treats it as intentional instead of a system fault to theorise about or
+ * retry. Any other abort keeps the neutral wording.
  */
 function abortedToolOutput(toolName: string, signal: AbortSignal): string {
   if (isUserCancellation(signal.reason)) {
     return `The user manually interrupted "${toolName}" (and anything else running at the same time). This was a deliberate user action, not a system error, timeout, or capacity limit. Do not retry automatically or guess at the cause — wait for the user's next instruction.`;
+  }
+  if (isParentInterject(signal.reason)) {
+    return `The parent agent interrupted "${toolName}" (and anything else running at the same time) with an interjection. This was a deliberate redirection, not a system error, timeout, or capacity limit. Read the [parent_messages] directive that follows and follow it — do not retry this call or wait for the user.`;
   }
   return `Tool "${toolName}" was aborted`;
 }
@@ -84,6 +89,14 @@ export interface ToolCallStepContext {
   readonly currentStep: number;
   readonly stepUuid: string;
   readonly hasPendingSteer?: (() => boolean) | undefined;
+  /**
+   * Attribution for the steer `hasPendingSteer` reports: which lane the
+   * interrupting steer belongs to. The batch builds the abort reason from it,
+   * so an interrupted tool tells the model *who* cut it short — the user's
+   * stop or a parent agent's interject. Absent or `'user'` keeps the
+   * user-cancellation wording (the pre-existing behavior).
+   */
+  readonly pendingSteerKind?: (() => 'user' | 'parent-interject') | undefined;
   /**
    * Per-step ordinal for executed tool-call blocks. Lives on the context
    * instead of a module-level Map keyed by stepUuid: the base and effective
@@ -214,12 +227,14 @@ export async function runToolCallBatch(
   const pendingResults: Array<Promise<PendingToolResult>> = [];
   let stopTurn = false;
 
-  // Mid-batch steer interruption: while tools run, poll for a queued user
-  // message and interrupt the batch when one arrives — the message then
+  // Mid-batch steer interruption: while tools run, poll for a queued
+  // interrupting steer — an interactive user message, or a parent agent's
+  // interject — and interrupt the batch when one arrives; the message then
   // reaches the model at the next step instead of waiting out a long
   // command. The steer controller merges into every tool's signal, so the
   // entire downstream path (prepare checks, execute, grace race) treats it
-  // exactly like a user cancellation.
+  // exactly like a user cancellation, and the abort reason records which lane
+  // fired so the interrupted tools can name it (`pendingSteerKind`).
   const steerController =
     step.hasPendingSteer !== undefined ? new AbortController() : undefined;
   const effectiveStep: ToolCallStepContext =
@@ -228,7 +243,11 @@ export async function runToolCallBatch(
       : { ...step, signal: AbortSignal.any([step.signal, steerController.signal]) };
   const abortOnSteer = (): void => {
     if (step.hasPendingSteer?.() === true && steerController !== undefined && !steerController.signal.aborted) {
-      steerController.abort(userCancellationReason());
+      steerController.abort(
+        step.pendingSteerKind?.() === 'parent-interject'
+          ? parentInterjectReason()
+          : userCancellationReason(),
+      );
     }
   };
   abortOnSteer(); // Covers a steer queued between the model response and batch start.

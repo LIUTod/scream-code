@@ -20,7 +20,12 @@ import {
   type SubagentMessageStatus,
 } from './subagent-messages';
 import { renderNotificationXml } from '../agent/context/notification-xml';
-import { filterToolsForCapability, type SubagentCapabilityMode } from './subagent-capability';
+import {
+  filterToolsForCapability,
+  inferCapabilityFromTools,
+  narrowerCapability,
+  type SubagentCapabilityMode,
+} from './subagent-capability';
 import type { Session } from './index';
 import SUMMARY_CONTINUATION_PROMPT from './summary-continuation.md';
 import STRUCTURED_MESSAGE_DELIVERY_PROMPT from './structured-message-delivery.md';
@@ -56,13 +61,15 @@ const SUBAGENT_MAX_TOKENS_ERROR =
 /**
  * Render parent messages as the block a child sees. Both delivery paths share
  * this — the mid-run steer and the turn-start injection — so a message looks
- * identical to the child however it arrives.
+ * identical to the child however it arrives. Anything that is not a plain
+ * `queue` message renders as a `[directive]` (steer, and the interject that
+ * degrades to a mailbox steer).
  */
 function formatParentMessagesBlock(
   messages: readonly Pick<SubagentMessage, 'operation' | 'text'>[],
 ): string {
   const body = messages
-    .map((m) => (m.operation === 'steer' ? `[directive] ${m.text}` : `[message] ${m.text}`))
+    .map((m) => (m.operation === 'queue' ? `[message] ${m.text}` : `[directive] ${m.text}`))
     .join('\n\n');
   return `[parent_messages]\n${body}`;
 }
@@ -177,7 +184,7 @@ export class SessionSubagentHost {
         ...options,
         signal: controller.signal,
       },
-      () => this.configureChild(parent, agent, profile, options.capabilityMode),
+      () => this.configureChild(parent, agent, profile, id, options.capabilityMode),
     ).finally(() => {
       unlinkAbortSignal();
       this.activeChildren.delete(id);
@@ -249,14 +256,37 @@ export class SessionSubagentHost {
         const modelAlias = this.resolveValidModelAlias(parent, binding);
         const thinkingLevel = this.resolveThinkingLevel(parent, binding, parent.config.thinkingLevel);
         child.config.update({ modelAlias, thinkingLevel });
-        // Re-apply the capability trim: resume bypasses configureChild, so
-        // without this a stale capability_mode would be silently dropped
-        // while the composed prompt still claims a (stricter) constraint.
-        if (options.capabilityMode !== undefined && options.capabilityMode !== 'all') {
+        // Resume may only TIGHTEN the capability contract, never widen it. A
+        // resumed agent keeps the tool set it already has (the profile is not
+        // rebuilt), so a wider reported/persisted mode would open a gap where
+        // the contract claims more than the tools actually grant — and the RLM
+        // bridge forwards that claim to grandchildren, handing them more than
+        // the child ever had. To get a wider contract, spawn a fresh child.
+        const persisted = metadata.capabilityMode;
+        // Pre-upgrade sessions carry no stored contract; the live tool set is
+        // the only surviving evidence of the original trim, so infer the
+        // strictest mode those tools already satisfy.
+        const baseline = persisted ?? inferCapabilityFromTools(child.tools.getActiveTools());
+        const requested = options.capabilityMode;
+        const effective = requested === undefined ? baseline : narrowerCapability(requested, baseline);
+        // Re-apply the capability trim: without this a stale capability_mode
+        // would be silently dropped while the composed prompt still claims a
+        // (stricter) constraint.
+        if (effective !== 'all') {
           child.tools.setActiveTools(
-            filterToolsForCapability(child.tools.getActiveTools(), options.capabilityMode),
+            filterToolsForCapability(child.tools.getActiveTools(), effective),
           );
         }
+        // Unconditional, mirroring configureChild: the RLM bridge reads
+        // getCapabilityMode() when it spawns grandchildren, so a resumed
+        // read-only child must not regress to the in-memory 'all' default.
+        child.setCapabilityMode(effective);
+        // Persist what this resume settled on. Three cases differ from the
+        // stored record: a metadata-restored value re-writes nothing (no-op),
+        // an inferred value for a pre-upgrade session is written back so the
+        // next resume no longer depends on inference, and a tighter explicit
+        // request updates the stored contract for the next resume.
+        this.session.markAgentCapability(agentId, effective);
         return Promise.resolve();
       },
     ).finally(() => {
@@ -317,17 +347,21 @@ export class SessionSubagentHost {
    * verified against the session metadata before anything is enqueued; a
    * message addressed to a foreign or unknown agent is refused as
    * `not_owned`/`not_found`.
+   *
+   * `steer` redirects a running child without disturbing its in-flight tools;
+   * `interject` does the same but additionally interrupts the tool batch in
+   * flight, so a child stuck in a long wait reads the correction immediately.
    */
   sendMessage(
     toAgentId: string,
-    operation: 'queue' | 'steer',
+    operation: 'queue' | 'steer' | 'interject',
     text: string,
     overrides?: { inFlightLimit?: number; byteLimit?: number; deadline?: number },
   ): {
     status: SubagentMessageStatus;
     reason?: 'bytes' | 'queue';
     /** How an accepted message reaches the child; absent when not accepted. */
-    delivery?: 'mid-run' | 'queued';
+    delivery?: 'mid-run' | 'queued' | 'interjected';
     queueDepth?: number;
     /** True when this exact message is already in flight for the child. */
     duplicate?: boolean;
@@ -339,7 +373,16 @@ export class SessionSubagentHost {
     const record = this.activeChildren.get(toAgentId);
     if (child === undefined || record === undefined) return { status: 'not_active' };
 
-    const message = buildSubagentMessage(this.ownerAgentId, toAgentId, operation, text, overrides);
+    // The bus has no interrupt concept: an interject that has to wait keeps
+    // plain steer semantics — steer priority in the mailbox, `[directive]`
+    // rendering — so it is stored under the steer operation.
+    const message = buildSubagentMessage(
+      this.ownerAgentId,
+      toAgentId,
+      operation === 'queue' ? 'queue' : 'steer',
+      text,
+      overrides,
+    );
     const byteLimit = overrides?.byteLimit ?? DEFAULT_BYTE_LIMIT;
     if (subagentMessageBytes(text) > byteLimit) return { status: 'saturated', reason: 'bytes' };
 
@@ -358,32 +401,48 @@ export class SessionSubagentHost {
     // A steer exists to redirect work that is already running, so when the child
     // has a live turn it is injected into that turn and joins at the child's
     // next step boundary (Turn.flushSteerBuffer). The origin is not `user`, so
-    // Turn.hasPendingSteer never aborts the tool call in flight. hasActiveTurn
+    // Turn.hasPendingSteer leaves the tool call in flight alone. hasActiveTurn
     // and steer() run back to back with no await between them, so the turn
     // cannot end in between and steer() cannot launch one of its own.
+    //
+    // An interject is the same steer with `interrupt: true`: Turn's
+    // hasPendingSteer predicate treats an explicit interrupt as pending, so the
+    // mid-batch poll cuts the tool batch short and the message reaches the model
+    // immediately instead of after a long wait.
     //
     // Two exceptions keep the guarantees intact:
     // - Structured-output children keep the mailbox path: their bounded
     //   delivery turn re-prompts with the JSON guard, so a steered answer
-    //   cannot decay into prose and break the contract.
+    //   cannot decay into prose and break the contract. An interject is
+    //   deliberately conservative here too (first release): a structured
+    //   child stuck in a tool call is still stopped with TaskStop, never by
+    //   interrupting the batch that produces its machine-readable answer.
     // - A full steer buffer (same budget as the mailbox) falls back to the
     //   mailbox, so neither channel is unbounded.
+    const wantsMidRunSteer = operation === 'steer' || operation === 'interject';
     if (
-      operation === 'steer' &&
+      wantsMidRunSteer &&
       !record.structured &&
       child.turn.hasActiveTurn &&
       child.turn.steerQueueLength < DEFAULT_IN_FLIGHT_LIMIT
     ) {
-      child.turn.steer([{ type: 'text', text: formatParentMessagesBlock([message]) }], {
-        kind: 'system_trigger',
-        name: 'parent_message',
-      });
+      child.turn.steer(
+        [{ type: 'text', text: formatParentMessagesBlock([message]) }],
+        {
+          kind: 'system_trigger',
+          name: operation === 'interject' ? 'parent_interject' : 'parent_message',
+        },
+        operation === 'interject' ? { interrupt: true } : undefined,
+      );
       // Register the dedupe key only once the message actually landed. A send
       // rejected below (mailbox full, deadline elapsed) must leave no key
       // behind, or an honest retry would be swallowed as a duplicate of a
       // message that never reached the child.
       seen.add(dedupeKey);
-      return { status: 'accepted', delivery: 'mid-run' };
+      return {
+        status: 'accepted',
+        delivery: operation === 'interject' ? 'interjected' : 'mid-run',
+      };
     }
 
     const out = this.bus!.send(message);
@@ -679,6 +738,7 @@ export class SessionSubagentHost {
     parent: Agent,
     child: Agent,
     profile: ResolvedAgentProfile,
+    childId: string,
     capabilityMode?: SubagentCapabilityMode,
   ): Promise<void> {
     // A subagent uses the model bound to its profile via /model diy when one
@@ -720,6 +780,9 @@ export class SessionSubagentHost {
     // behalf later (the RLM python bridge) must pass the same restriction down
     // instead of handing the grandchild the full tool set.
     child.setCapabilityMode(capabilityMode ?? 'all');
+    // Persist the same contract in session metadata, so a resume after a
+    // process restart re-applies it instead of silently falling back to 'all'.
+    this.session.markAgentCapability(childId, capabilityMode ?? 'all');
   }
 
   private resolveModelBinding(profileName: string): string | undefined {

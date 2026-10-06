@@ -1,3 +1,4 @@
+import { existsSync, unlinkSync, writeFileSync } from 'node:fs';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'pathe';
@@ -14,7 +15,9 @@ import type { ResolvedAgentProfile } from '../../src/profile';
 import type { SDKSessionRPC } from '../../src/rpc';
 import { Session } from '../../src/session';
 import { collectGitContext } from '../../src/session/git-context';
+import type { SubagentCapabilityMode } from '../../src/session/subagent-capability';
 import { SessionSubagentHost } from '../../src/session/subagent-host';
+import { SubagentMessageBus } from '../../src/session/subagent-messages';
 
 /** TokenUsage with all fields zero (data().total is undefined pre-record). */
 function zeroUsage() {
@@ -174,6 +177,82 @@ describe('SessionSubagentHost', () => {
     expect(childAgent.getRlmEnabled()).toBe(false);
     expect(childAgent.getRlmDepth()).toBe(1);
     expect(childAgent.tools.getActiveTools()).not.toContain('python');
+  });
+
+  it('keeps an RLM grandchild under the read-only parent capability mode', async () => {
+    const parent = testAgent();
+    parent.configure();
+    parent.newEvents();
+
+    // Placeholder host: the child's real host is wired below, after the child
+    // exists (the host needs the child agent as its owner).
+    const child = testAgent({
+      type: 'sub',
+      subagentHost: { spawn: vi.fn() } as unknown as SessionSubagentHost,
+    });
+    // The child's own turn and the grandchild's rlm() turn both draw from the
+    // same scripted generate function (a spawned child inherits the parent's
+    // `rawGenerate`).
+    child.mockNextResponse({ type: 'text', text: LONG_RESUME_SUMMARY });
+    child.mockNextResponse({ type: 'text', text: LONG_RESUME_SUMMARY });
+
+    const parentSession = fakeSession(parent.agent, child.agent);
+    const parentHost = new SessionSubagentHost(parentSession, 'main');
+    const spawned = await parentHost.spawn('coder', {
+      parentToolCallId: 'call_spawn',
+      prompt: 'Inspect only, do not modify',
+      description: 'read-only child',
+      runInBackground: false,
+      signal,
+      capabilityMode: 'read-only',
+    });
+    await spawned.completion;
+    expect(
+      (child.agent as unknown as { getCapabilityMode(): string }).getCapabilityMode(),
+    ).toBe('read-only');
+
+    // The child's own host, as Session.instantiateAgent would give it: rlm()
+    // spawns its grandchild through this one.
+    const grandchild = testAgent({
+      type: 'sub',
+      subagentHost: { spawn: vi.fn() } as unknown as SessionSubagentHost,
+    });
+    const grandchildMetadata: Session['metadata']['agents'] = {};
+    const childAgents = new Map<string, Agent>([['agent-0', child.agent]]);
+    const childSession = {
+      agents: childAgents,
+      metadata: { agents: grandchildMetadata },
+      writeMetadata: vi.fn(async () => {}),
+      markAgentCapability: vi.fn(),
+      createAgent: vi.fn(async (_config: unknown, _profile: unknown, parentAgentId?: string) => {
+        childAgents.set('agent-1', grandchild.agent);
+        grandchildMetadata['agent-1'] = {
+          homedir: '/tmp/scream-session/agents/agent-1',
+          type: 'sub',
+          parentAgentId: parentAgentId ?? null,
+        };
+        return { id: 'agent-1', agent: grandchild.agent };
+      }),
+    } as unknown as Session;
+    Object.assign(child.agent, {
+      subagentHost: new SessionSubagentHost(childSession, 'agent-0'),
+    });
+
+    const handlers = createRlmHostHandlers(child.agent);
+    const run = await handlers['rlm.run']?.({ task: 'probe the repository', name: 'probe' });
+    expect(run).toMatchObject({ id: 'agent-1' });
+    await grandchild.untilTurnEnd();
+
+    // The restriction survives the whole chain: spawn → child → rlm()
+    // grandchild, instead of the grandchild regressing to the 'all' default.
+    const grandchildAgent = grandchild.agent as unknown as {
+      getCapabilityMode(): string;
+      tools: { getActiveTools(): string[] };
+    };
+    expect(grandchildAgent.getCapabilityMode()).toBe('read-only');
+    expect(grandchildAgent.tools.getActiveTools()).toContain('Read');
+    expect(grandchildAgent.tools.getActiveTools()).not.toContain('Write');
+    expect(grandchildAgent.tools.getActiveTools()).not.toContain('Bash');
   });
 
   it('ignores blocking results from subagent lifecycle hooks', async () => {
@@ -1209,6 +1288,484 @@ describe('Session resume permission parent chain', () => {
   });
 });
 
+const LONG_RESUME_SUMMARY =
+  'Resumed the subagent from its earlier context, carried the task through to completion, and reported a detailed technical summary so the parent agent can continue without repeating any prior work. '.repeat(
+    2,
+  );
+
+describe('SessionSubagentHost capability persistence', () => {
+  function capabilityOf(agent: Agent): string {
+    return (agent as unknown as { getCapabilityMode(): string }).getCapabilityMode();
+  }
+
+  function activeToolsOf(agent: Agent): readonly string[] {
+    return (agent as unknown as { tools: { getActiveTools(): readonly string[] } }).tools.getActiveTools();
+  }
+
+  it('re-applies the spawn capability mode when a child is resumed', async () => {
+    const parent = testAgent();
+    parent.configure();
+    parent.agent.permission.setMode('yolo');
+
+    const child = testAgent();
+    child.configure({ tools: ['Read', 'Write', 'Bash'] });
+    child.mockNextResponse({ type: 'text', text: LONG_RESUME_SUMMARY });
+    child.mockNextResponse({ type: 'text', text: LONG_RESUME_SUMMARY });
+
+    const session = fakeSession(parent.agent, child.agent);
+    const host = new SessionSubagentHost(session, 'main');
+
+    const spawned = await host.spawn('coder', {
+      parentToolCallId: 'call_spawn',
+      prompt: 'Inspect only, do not modify',
+      description: 'read-only child',
+      runInBackground: false,
+      signal,
+      capabilityMode: 'read-only',
+    });
+    await spawned.completion;
+    expect(capabilityOf(child.agent)).toBe('read-only');
+    // The spawn recorded the contract, which is what makes the mode survive
+    // the resume below (and a process restart in the next test).
+    expect(session.metadata.agents['agent-0']?.capabilityMode).toBe('read-only');
+
+    const resumed = await host.resume('agent-0', {
+      parentToolCallId: 'call_resume',
+      prompt: 'Continue',
+      description: 'Continue the read-only task',
+      runInBackground: false,
+      signal,
+    });
+    await resumed.completion;
+
+    expect(capabilityOf(child.agent)).toBe('read-only');
+    expect(activeToolsOf(child.agent)).not.toContain('Write');
+  });
+
+  it('restores the persisted capability mode after a process restart', async () => {
+    const parent = testAgent();
+    parent.configure();
+    parent.agent.permission.setMode('yolo');
+
+    // Fresh process: the agent instance comes back from replay with the
+    // in-memory default ('all'); only the metadata remembers the restriction.
+    const child = testAgent();
+    child.configure({ tools: ['Read', 'Write', 'Bash'] });
+    child.mockNextResponse({ type: 'text', text: LONG_RESUME_SUMMARY });
+    expect(capabilityOf(child.agent)).toBe('all');
+
+    const session = fakeSession(parent.agent, child.agent, {
+      'agent-0': {
+        homedir: '/tmp/scream-session/agents/agent-0',
+        type: 'sub',
+        parentAgentId: 'main',
+        capabilityMode: 'read-only',
+      },
+    });
+    const host = new SessionSubagentHost(session, 'main');
+
+    const resumed = await host.resume('agent-0', {
+      parentToolCallId: 'call_resume',
+      prompt: 'Continue',
+      description: 'Continue the read-only task',
+      runInBackground: false,
+      signal,
+    });
+    await resumed.completion;
+
+    expect(capabilityOf(child.agent)).toBe('read-only');
+    expect(activeToolsOf(child.agent)).not.toContain('Write');
+    expect(activeToolsOf(child.agent)).not.toContain('Bash');
+  });
+
+  it('clamps a widening resume request to the persisted (narrower) mode', async () => {
+    const parent = testAgent();
+    parent.configure();
+    parent.agent.permission.setMode('yolo');
+
+    const child = testAgent();
+    child.configure({ tools: ['Read', 'Write', 'Bash'] });
+    child.mockNextResponse({ type: 'text', text: LONG_RESUME_SUMMARY });
+    child.mockNextResponse({ type: 'text', text: LONG_RESUME_SUMMARY });
+
+    const session = fakeSession(parent.agent, child.agent);
+    const host = new SessionSubagentHost(session, 'main');
+
+    const spawned = await host.spawn('coder', {
+      parentToolCallId: 'call_spawn',
+      prompt: 'Inspect only, do not modify',
+      description: 'read-only child',
+      runInBackground: false,
+      signal,
+      capabilityMode: 'read-only',
+    });
+    await spawned.completion;
+    expect(capabilityOf(child.agent)).toBe('read-only');
+
+    // Resume asks for the full contract. The child's tool set was trimmed at
+    // spawn and resume never rebuilds the profile, so honoring 'all' here would
+    // report/record a contract wider than the tools actually grant — and the
+    // RLM bridge forwards that claim to grandchildren. The request is clamped
+    // instead: tightening is allowed, widening needs a fresh spawn.
+    const resumed = await host.resume('agent-0', {
+      parentToolCallId: 'call_resume',
+      prompt: 'Continue with full access',
+      description: 'Continue',
+      runInBackground: false,
+      signal,
+      capabilityMode: 'all',
+    });
+    await resumed.completion;
+
+    expect(capabilityOf(child.agent)).toBe('read-only');
+    expect(session.metadata.agents['agent-0']?.capabilityMode).toBe('read-only');
+    expect(activeToolsOf(child.agent)).not.toContain('Write');
+  });
+
+  it('tightens a resume request that is narrower than the persisted mode', async () => {
+    const parent = testAgent();
+    parent.configure();
+    parent.agent.permission.setMode('yolo');
+
+    const child = testAgent();
+    child.configure({ tools: ['Read', 'Write', 'Bash'] });
+    child.mockNextResponse({ type: 'text', text: LONG_RESUME_SUMMARY });
+
+    const session = fakeSession(parent.agent, child.agent, {
+      'agent-0': {
+        homedir: '/tmp/scream-session/agents/agent-0',
+        type: 'sub',
+        parentAgentId: 'main',
+        capabilityMode: 'execute',
+      },
+    });
+    const host = new SessionSubagentHost(session, 'main');
+
+    const resumed = await host.resume('agent-0', {
+      parentToolCallId: 'call_resume',
+      prompt: 'Now inspect only',
+      description: 'Tighten to read-only',
+      runInBackground: false,
+      signal,
+      capabilityMode: 'read-only',
+    });
+    await resumed.completion;
+
+    expect(capabilityOf(child.agent)).toBe('read-only');
+    expect(session.metadata.agents['agent-0']?.capabilityMode).toBe('read-only');
+    expect(activeToolsOf(child.agent)).not.toContain('Write');
+    expect(activeToolsOf(child.agent)).not.toContain('Bash');
+  });
+
+  it('infers the contract from the tool set when a pre-upgrade session has none', async () => {
+    const parent = testAgent();
+    parent.configure();
+    parent.agent.permission.setMode('yolo');
+
+    const child = testAgent();
+    child.configure({ tools: ['Read', 'Write', 'Bash'] });
+    child.mockNextResponse({ type: 'text', text: LONG_RESUME_SUMMARY });
+    child.mockNextResponse({ type: 'text', text: LONG_RESUME_SUMMARY });
+
+    const session = fakeSession(parent.agent, child.agent);
+    const host = new SessionSubagentHost(session, 'main');
+
+    const spawned = await host.spawn('coder', {
+      parentToolCallId: 'call_spawn',
+      prompt: 'Inspect only, do not modify',
+      description: 'read-only child',
+      runInBackground: false,
+      signal,
+      capabilityMode: 'read-only',
+    });
+    await spawned.completion;
+
+    // Simulate a session recorded before AgentMeta.capabilityMode existed: the
+    // field is gone, so the live (already trimmed) tool set is the only
+    // surviving evidence of the original contract.
+    const meta = session.metadata.agents['agent-0'] as { capabilityMode?: string };
+    delete meta.capabilityMode;
+
+    const resumed = await host.resume('agent-0', {
+      parentToolCallId: 'call_resume',
+      prompt: 'Continue',
+      description: 'Continue the read-only task',
+      runInBackground: false,
+      signal,
+    });
+    await resumed.completion;
+
+    // Filtering is pure subtraction: a tool set that survives `read-only`
+    // unchanged proves the agent was never granted more than that.
+    expect(capabilityOf(child.agent)).toBe('read-only');
+    // The inferred contract is written back, so the next resume no longer
+    // depends on inference.
+    expect(session.metadata.agents['agent-0']?.capabilityMode).toBe('read-only');
+  });
+
+  it('records an explicit capability contract from the very first spawn', async () => {
+    const parent = testAgent();
+    parent.configure();
+    parent.agent.permission.setMode('yolo');
+
+    const child = testAgent();
+    child.mockNextResponse({ type: 'text', text: LONG_RESUME_SUMMARY });
+
+    const session = fakeSession(parent.agent, child.agent);
+    const host = new SessionSubagentHost(session, 'main');
+
+    const spawned = await host.spawn('coder', {
+      parentToolCallId: 'call_spawn',
+      prompt: 'Plain spawn',
+      description: 'unrestricted child',
+      runInBackground: false,
+      signal,
+    });
+    await spawned.completion;
+
+    // 'all' is a real contract, not an absent one: recording it on the first
+    // write is what keeps "no field" meaning exactly "written before the field
+    // existed" — the signal the legacy-inference path above depends on.
+    expect(session.metadata.agents['agent-0']?.capabilityMode).toBe('all');
+    expect(capabilityOf(child.agent)).toBe('all');
+  });
+});
+
+describe('SessionSubagentHost interject', () => {
+  function childTextOf(content: unknown): string {
+    return Array.isArray(content)
+      ? content.map((part: { text?: string }) => part.text ?? '').join('\n')
+      : String(content);
+  }
+
+  function historyHasDiff(child: AgentTestContext, needle: string): boolean {
+    return child.agent.context.history.some(
+      (m) => m.role === 'user' && childTextOf(m.content).includes(needle),
+    );
+  }
+
+  it('interrupts the in-flight tool batch of a running child', async () => {
+    const parent = testAgent();
+    const child = testAgent();
+    parent.configure();
+    child.configure();
+    parent.newEvents();
+
+    const session = fakeSession(parent.agent, child.agent, {
+      'agent-0': {
+        homedir: '/tmp/scream-session/agents/agent-0',
+        type: 'sub',
+        parentAgentId: 'main',
+      },
+    });
+    const bus = new SubagentMessageBus();
+    const host = new SessionSubagentHost(session, 'main', undefined, undefined, bus);
+
+    // The child parks in an approval request: a tool batch is in flight and
+    // nothing was approved, so the interject either interrupts the batch or
+    // waits for an approval that never comes. (No yolo here, on purpose.) The
+    // command is exploratory so the interrupted tool does not trigger the
+    // turn's convergence continuation once the model has answered.
+    const probeCall: ToolCall = {
+      type: 'function',
+      id: 'call_bash',
+      name: 'Bash',
+      arguments: JSON.stringify({ command: 'ls -la /nonexistent-scream-interject-probe', timeout: 60 }),
+    };
+    child.mockNextResponse({ type: 'text', text: 'Let me look first.' }, probeCall);
+    child.mockNextResponse({
+      type: 'text',
+      text: `Aborted the wait and switched plan. ${'x'.repeat(220)}`,
+    });
+
+    const steerSpy = vi.spyOn(child.agent.turn, 'steer');
+    const spawnPromise = host.spawn('coder', {
+      parentToolCallId: 'call_1',
+      prompt: 'original prompt',
+      description: 'child',
+      runInBackground: false,
+      signal,
+    });
+    await child.untilApprovalRequest();
+
+    const sent = host.sendMessage('agent-0', 'interject', 'abort the wait and do X instead');
+    expect(sent.status).toBe('accepted');
+    expect(sent.delivery).toBe('interjected');
+    // The parent's interject rides the turn's interrupt lane: explicit
+    // `interrupt: true` under a distinct origin name.
+    expect(steerSpy).toHaveBeenCalledWith(
+      expect.any(Array),
+      { kind: 'system_trigger', name: 'parent_interject' },
+      { interrupt: true },
+    );
+
+    const handle = await spawnPromise;
+    const completion = await handle.completion;
+
+    // The batch was cut short rather than waited out, and the interrupted tool
+    // names the parent's interjection — never the user, who did not speak.
+    const history = JSON.stringify(child.agent.context.history);
+    expect(history).toContain('The parent agent interrupted');
+    expect(history).toContain('[directive] abort the wait and do X instead');
+    expect(history).not.toContain('manually interrupted');
+    expect(completion.result).toContain('Aborted the wait');
+  }, 15_000);
+
+  it('queues an interject in the mailbox when no turn is live', async () => {
+    let releaseStart!: () => void;
+    let startEntered!: () => void;
+    const startGate = new Promise<void>((resolve) => {
+      releaseStart = resolve;
+    });
+    const entered = new Promise<void>((resolve) => {
+      startEntered = resolve;
+    });
+    const trigger = vi.fn(async (event: string) => {
+      if (event === 'SubagentStart') {
+        startEntered();
+        await startGate;
+      }
+      return [];
+    });
+    const parent = testAgent({
+      hookEngine: {
+        trigger,
+        fireAndForgetTrigger: vi.fn(() => Promise.resolve([])),
+      } as unknown as NonNullable<Agent['hooks']>,
+    });
+    parent.configure();
+    parent.newEvents();
+
+    const child = testAgent();
+    child.mockNextResponse({
+      type: 'text',
+      text: `Read the queued note and continued. ${'x'.repeat(220)}`,
+    });
+    const session = fakeSession(parent.agent, child.agent, {
+      'agent-0': {
+        homedir: '/tmp/scream-session/agents/agent-0',
+        type: 'sub',
+        parentAgentId: 'main',
+      },
+    });
+    const bus = new SubagentMessageBus();
+    const host = new SessionSubagentHost(session, 'main', undefined, undefined, bus);
+
+    const spawnPromise = host.spawn('coder', {
+      parentToolCallId: 'call_1',
+      prompt: 'original prompt',
+      description: 'child',
+      runInBackground: false,
+      signal,
+    });
+    // The child is registered but its first turn has not started yet: an
+    // interject has nothing to interrupt, so it keeps steer semantics and
+    // waits in the mailbox for the turn start.
+    await entered;
+    expect(child.agent.turn.hasActiveTurn).toBe(false);
+
+    const sent = host.sendMessage('agent-0', 'interject', 'wait for my details first');
+    expect(sent.status).toBe('accepted');
+    expect(sent.delivery).toBe('queued');
+    expect(bus.activeCount('agent-0')).toBe(1);
+
+    releaseStart();
+    const handle = await spawnPromise;
+    await handle.completion;
+
+    expect(JSON.stringify(child.llmCalls[0]?.history)).toContain(
+      '[directive] wait for my details first',
+    );
+  });
+
+  it('degrades an interject for a structured child to the mailbox', async () => {
+    const parent = testAgent();
+    const child = testAgent();
+    parent.configure();
+    child.configure();
+    parent.newEvents();
+    await child.rpc.setPermission({ mode: 'yolo' });
+
+    const session = fakeSession(parent.agent, child.agent, {
+      'agent-0': {
+        homedir: '/tmp/scream-session/agents/agent-0',
+        type: 'sub',
+        parentAgentId: 'main',
+      },
+    });
+    const bus = new SubagentMessageBus();
+    const host = new SessionSubagentHost(session, 'main', undefined, undefined, bus);
+
+    const gate = drainGate();
+    child.mockNextResponse({
+      type: 'function',
+      id: 'tc_bash',
+      name: 'Bash',
+      arguments: JSON.stringify({ command: gate.command, timeout: 60 }),
+    });
+    child.mockNextResponse({ type: 'text', text: '{"ok":true}' });
+    // The bounded delivery turn's JSON reply.
+    child.mockNextResponse({ type: 'text', text: '{"ok":false,"reconsidered":true}' });
+
+    const steerSpy = vi.spyOn(child.agent.turn, 'steer');
+    const spawnPromise = host.spawn('coder', {
+      parentToolCallId: 'call_1',
+      prompt: 'original prompt',
+      description: 'child',
+      runInBackground: false,
+      signal,
+      outputSchema: '{"type":"object"}',
+    });
+    await gate.waitForStart();
+
+    const sent = host.sendMessage('agent-0', 'interject', 'reconsider the approach');
+    expect(sent.status).toBe('accepted');
+    expect(sent.delivery).toBe('queued');
+    // Conservative first-release rule: the interrupt never fires for a child
+    // whose final answer must stay machine-parseable.
+    expect(steerSpy).not.toHaveBeenCalled();
+
+    gate.release();
+    const handle = await spawnPromise;
+    const completion = await handle.completion;
+    gate.cleanup();
+
+    // The message still arrived: the delivery turn re-prompted under the JSON
+    // guard, so the structured contract survived the interjection.
+    expect(historyHasDiff(child, '[directive] reconsider the approach')).toBe(true);
+    expect(completion.result).toContain('reconsidered');
+  }, 15_000);
+
+  it('reports not_active when the child already finished', async () => {
+    const parent = testAgent();
+    parent.configure();
+    parent.newEvents();
+
+    const child = testAgent();
+    child.mockNextResponse({ type: 'text', text: `Done. ${'x'.repeat(220)}` });
+    const session = fakeSession(parent.agent, child.agent, {
+      'agent-0': {
+        homedir: '/tmp/scream-session/agents/agent-0',
+        type: 'sub',
+        parentAgentId: 'main',
+      },
+    });
+    const host = new SessionSubagentHost(session, 'main');
+
+    const handle = await host.spawn('coder', {
+      parentToolCallId: 'call_1',
+      prompt: 'original prompt',
+      description: 'child',
+      runInBackground: false,
+      signal,
+    });
+    await handle.completion;
+
+    const sent = host.sendMessage('agent-0', 'interject', 'too late');
+    expect(sent.status).toBe('not_active');
+  });
+});
+
 describe('Session.createAgent', () => {
   it('uses the Jian current directory when the session cwd is omitted', async () => {
     const workDir = '/remote/project';
@@ -1437,6 +1994,13 @@ function fakeSession(
       custom: {},
     },
     writeMetadata: vi.fn(async () => {}),
+    // Persist the contract the way Session.markAgentCapability does, so a
+    // resume in the same test can read it back from metadata.
+    markAgentCapability: vi.fn((agentId: string, mode: SubagentCapabilityMode) => {
+      const meta = metadataAgents[agentId];
+      if (meta === undefined) return;
+      metadataAgents[agentId] = { ...meta, capabilityMode: mode };
+    }),
     createAgent: vi.fn(
       async (
         config: Parameters<Session['createAgent']>[0],
@@ -1541,6 +2105,40 @@ function bashCall(): ToolCall {
     id: 'call_bash',
     name: 'Bash',
       arguments: '{"command":"printf should-not-run","timeout":60}',
+  };
+}
+
+/**
+ * Deterministic async boundary: the gated Bash command starts, touches a
+ * marker file, then blocks until the test writes the release file. This makes
+ * "message arrives mid-run" independent of scheduling load (time-based windows
+ * flake under full-suite parallelism).
+ */
+function drainGate() {
+  const stamp = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const started = join(tmpdir(), `scream-drain-started-${stamp}`);
+  const go = `${started}.go`;
+  return {
+    command: `touch "${started}" && while [ ! -f "${go}" ]; do sleep 0.05; done`,
+    async waitForStart() {
+      const deadline = Date.now() + 15_000;
+      while (Date.now() < deadline) {
+        if (existsSync(started)) return;
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      throw new Error('drain gate: the gated Bash command never started');
+    },
+    release() {
+      writeFileSync(go, 'go');
+    },
+    cleanup() {
+      try {
+        unlinkSync(go);
+      } catch {}
+      try {
+        unlinkSync(started);
+      } catch {}
+    },
   };
 }
 

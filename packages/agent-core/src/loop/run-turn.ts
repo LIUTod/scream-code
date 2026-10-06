@@ -67,6 +67,12 @@ export interface RunTurnInput {
    * waiting out a long-running command while tool calls settle.
    */
   readonly hasPendingSteer?: (() => boolean) | undefined;
+  /**
+   * Which lane the pending steer belongs to, so the abort carries the right
+   * attribution (`'parent-interject'` → the parent-agent wording; absent or
+   * `'user'` → the user-cancellation wording).
+   */
+  readonly pendingSteerKind?: (() => 'user' | 'parent-interject') | undefined;
   /** Crash-recovery draft sink (see ExecuteLoopStepDeps.onStreamingDraft). */
   readonly onStreamingDraft?: ((text: string, think: string) => void) | undefined;
 }
@@ -126,6 +132,7 @@ export async function runTurn(input: RunTurnInput): Promise<TurnResult> {
         maxRetryAttempts,
         recordUsage: recordStepUsage,
         hasPendingSteer: input.hasPendingSteer,
+        pendingSteerKind: input.pendingSteerKind,
         mediaProjection,
         onStreamingDraft: input.onStreamingDraft,
       });

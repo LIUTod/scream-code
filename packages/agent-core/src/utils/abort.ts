@@ -32,6 +32,37 @@ export function isUserCancellation(value: unknown): value is UserCancellationErr
   return value instanceof UserCancellationError;
 }
 
+/**
+ * Marks an abort raised because the *parent agent* interjected a directive into
+ * this running subagent (`SendSubagentMessage(operation: "interject")`). Like
+ * the user-cancellation reason it travels as the AbortSignal's `reason`, so a
+ * tool cut short by the interject reports that a deliberate redirection — not a
+ * failure — interrupted it, and points at the `[parent_messages]` block that
+ * follows instead of telling the model to wait for a user who never spoke.
+ *
+ * Deliberately NOT a subclass of `UserCancellationError`: that class means "the
+ * human pressed stop", and every `isUserCancellation` consumer (status wording,
+ * cancellation paths) must keep treating a parent interject as a non-user
+ * abort. `name` stays 'AbortError' so `isAbortError()` and
+ * `AbortSignal.throwIfAborted()` keep treating it as an abort.
+ */
+export class ParentInterjectError extends Error {
+  readonly parentInterject = true;
+
+  constructor() {
+    super('Aborted by a parent agent interjection');
+    this.name = 'AbortError';
+  }
+}
+
+export function parentInterjectReason(): ParentInterjectError {
+  return new ParentInterjectError();
+}
+
+export function isParentInterject(value: unknown): value is ParentInterjectError {
+  return value instanceof ParentInterjectError;
+}
+
 export function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
   signal.throwIfAborted();
   return new Promise<T>((resolve, reject) => {

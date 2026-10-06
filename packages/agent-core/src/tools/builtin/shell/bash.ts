@@ -50,6 +50,7 @@ import { z } from 'zod';
 import type { BuiltinTool } from '../../../agent/tool';
 import type { ExecutableToolContext, ExecutableToolResult, ToolExecution } from '../../../loop/types';
 import { renderPrompt } from '../../../utils/render-prompt';
+import { isParentInterject } from '../../../utils/abort';
 import type { BackgroundProcessManager } from '../../background/manager';
 import { toInputJsonSchema } from '../../support/input-schema';
 import { commandApprovalRule, matchesCommandRule } from '../../support/command-rule';
@@ -66,6 +67,21 @@ const SIGTERM_GRACE_MS = 5_000;
 /** After the process exits, how long to keep draining stdout/stderr before
  * declaring completion (grandchildren may hold the pipe open). */
 const STREAM_GRACE_MS = 500;
+
+/**
+ * Who fired the abort that settled an interrupted Bash call.
+ *
+ * Bash settles its own abort result (the batch loop never sees this tool throw),
+ * so the signal's reason is the only evidence of attribution available here.
+ * The loop builds that reason (`loop/tool-call.ts`): a parent agent's interject
+ * arrives as a `ParentInterjectError`, anything else — a user stop, a turn
+ * deadline, a host cancel — keeps the historical user wording. Reporting a
+ * parent's interject as "the user" would send the child looking for a stop
+ * instruction that never existed.
+ */
+function interruptedBy(signal: AbortSignal): 'user' | 'the parent agent' {
+  return isParentInterject(signal.reason) ? 'the parent agent' : 'user';
+}
 
 /** The syntax dialect a probed shell speaks — see `shellKindOf`. */
 type ShellKind = 'posix' | 'powershell';
@@ -695,7 +711,14 @@ export class BashTool implements BuiltinTool<BashInput> {
       : '';
 
     if (signal.aborted) {
-      return { isError: true, output: bgPrefix + 'Aborted before command started' };
+      return {
+        isError: true,
+        output:
+          bgPrefix +
+          (isParentInterject(signal.reason)
+            ? 'Interrupted by the parent agent before the command started'
+            : 'Aborted before command started'),
+      };
     }
     if (args.command.length === 0) {
       return { isError: true, output: bgPrefix + 'Command cannot be empty.' };
@@ -908,7 +931,8 @@ export class BashTool implements BuiltinTool<BashInput> {
       const { exitCode } = raceResult;
 
       if (aborted) {
-        return builder.error('Interrupted by user', { brief: 'Interrupted by user' });
+        const attribution = `Interrupted by ${interruptedBy(signal)}`;
+        return builder.error(attribution, { brief: attribution });
       }
 
       const isError = exitCode !== 0;

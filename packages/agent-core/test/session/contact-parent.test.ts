@@ -26,6 +26,7 @@ function fakeSession(parent: Agent, child: Agent) {
       custom: {},
     },
     writeMetadata: vi.fn(async () => {}),
+    markAgentCapability: vi.fn(),
     createAgent: vi.fn(
       async (config: Parameters<Session['createAgent']>[0], profile?: ResolvedAgentProfile) => {
         if (profile !== undefined) child.useProfile(profile);

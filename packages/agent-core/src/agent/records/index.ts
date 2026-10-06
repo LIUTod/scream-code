@@ -153,6 +153,13 @@ function restoreAgentRecord(agent: Agent, input: AgentRecord): void {
       // have been compacted away before this record replays.
       agent.context.applyMessageEdit(input.targetId, input.replacement);
       return;
+    case 'context.prefix_break':
+      // Diagnostic only. The record exists so a cache-break event outlives the
+      // debug log (someone reading the wire can reconstruct the history), but
+      // no in-memory state depends on it: the observer rebuilds its baseline
+      // from the next truncated `messagesForLLM()` build. Restore must stay a
+      // no-op here — the explicit case documents that on purpose.
+      return;
     case 'context.snapshot':
       agent.context.restoreJSONSnapshot(input.snapshot);
       agent.fullCompaction.restoreCompactedHistory(input.compactedHistory);

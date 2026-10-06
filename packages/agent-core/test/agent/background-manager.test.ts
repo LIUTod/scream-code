@@ -211,6 +211,35 @@ describe('BackgroundManager — RPC event emission', () => {
     expect((content as Array<{ text: string }>)[0]!.text).toContain('final subagent summary');
   });
 
+  it('delivers a task notification to its owning agent, not the root (owner chain)', async () => {
+    // A background child spawned by a subagent registers in THAT subagent's
+    // manager (the Agent tool is built with its own agent's `background`), so a
+    // grandchild's completion surfaces in its direct owner's turn — the owner
+    // chain, one level at a time — and never jumps to the root agent's turn.
+    const root = makeAgent();
+    const child = makeAgent();
+    try {
+      const taskId = child.background.registerAgentTask(
+        Promise.resolve({ result: 'grandchild summary' }),
+        'grandchild task',
+        { agentId: 'agent-1' },
+      );
+      await child.background.waitForTerminal(taskId);
+
+      await vi.waitFor(() => {
+        expect(child.turn.steer).toHaveBeenCalledTimes(1);
+      });
+      expect(root.turn.steer).not.toHaveBeenCalled();
+
+      const [content, origin] = vi.mocked(child.turn.steer).mock.calls[0]!;
+      expect(origin).toMatchObject({ kind: 'background_task', taskId, status: 'completed' });
+      expect((content as Array<{ text: string }>)[0]!.text).toContain('grandchild summary');
+    } finally {
+      child.background._reset();
+      root.background._reset();
+    }
+  });
+
   it('steers completed bash task notifications into the turn flow', async () => {
     const taskId = agent.background.register(immediateProcess(0), 'echo ok', 'shell task');
 

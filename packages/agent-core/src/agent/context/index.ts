@@ -595,6 +595,20 @@ export class ContextMemory {
       appendedSinceLast: appended,
       breakIndex: stable,
     });
+    // Persist the break as a wire record so it outlives the debug log (and the
+    // log's rotation): cache-break history stays auditable straight off the
+    // wire. Only this path writes: the hit path above stays debug-only, keeping
+    // steady-state appends off the wire. `logRecord` stamps `time`; the type is
+    // pure observation — nothing consumes it on the way back (restore ignores
+    // it, and the trace builder skips record types it does not render), so it
+    // is never reconstructed into UI or model state.
+    this.agent.records.logRecord({
+      type: 'context.prefix_break',
+      breakIndex: stable,
+      prevMessageCount: prev.length,
+      currentMessageCount: messages.length,
+      appendedSinceLast: appended,
+    });
   }
 
   appendLoopEvent(event: LoopRecordedEvent): void {

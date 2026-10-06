@@ -78,6 +78,17 @@ export class BackgroundManager extends BackgroundProcessManager {
     }
   }
 
+  /**
+   * Steer a terminal task notification into the owning agent's turn.
+   *
+   * Notifications follow the owner chain: a BackgroundManager belongs to
+   * exactly one agent, and the Agent tool registers a background child in the
+   * manager of the agent that spawned it (AgentTool is built with that agent's
+   * `background`). A grandchild spawned in background by a subagent therefore
+   * notifies its direct owner — the child — which surfaces it in its own turn;
+   * it never skips a level up to the root. TaskList/TaskOutput/TaskStop see the
+   * same boundary, each scoped to the manager's own agent.
+   */
   private async notifyBackgroundTask(info: BackgroundTaskInfo): Promise<void> {
     const context = await this.buildBackgroundTaskNotificationContext(info);
     if (context === undefined) return;

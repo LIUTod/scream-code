@@ -326,6 +326,13 @@ export function createRlmHostHandlers(agent: Agent): HostRequestHandlers {
       const task = String(payload['task'] ?? '');
       const name = String(payload['name'] ?? 'subagent').slice(0, 64);
       const controller = new AbortController();
+      // Boundary: the profile `spawns` whitelist constrains the Agent tool
+      // only. RLM is an independent power mode — explicitly turned on by the
+      // user — so it constrains capability (capabilityMode is forwarded below,
+      // keeping a restricted agent's rlm() child restricted) but not the
+      // derived profile type: rlm() always spawns `coder`. To tighten this
+      // later, a `spawns` check would go right here; by design, today it does
+      // not.
       const handle = await host.spawn('coder', {
         parentToolCallId: `rlm_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
         prompt: task,

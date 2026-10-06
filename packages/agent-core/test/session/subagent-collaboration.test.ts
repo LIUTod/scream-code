@@ -64,6 +64,11 @@ function fakeSession(parent: Agent, child: Agent, metadataAgents: Session['metad
       custom: {},
     },
     writeMetadata: vi.fn(async () => {}),
+    markAgentCapability: vi.fn((agentId: string, mode: string) => {
+      const meta = metadataAgents[agentId];
+      if (meta === undefined) return;
+      metadataAgents[agentId] = { ...meta, capabilityMode: mode as never };
+    }),
     createAgent: vi.fn(
       async (
         config: Parameters<Session['createAgent']>[0],
