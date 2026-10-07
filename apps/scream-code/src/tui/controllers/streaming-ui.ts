@@ -23,6 +23,7 @@ import type { ApprovalNoticeTone } from '../utils/approval-notice';
 import { appendStreamingArgsPreview, parseStreamingArgs } from '../utils/event-payload';
 import { charsForTokenBudget, estimateTokens, getSharedSpeedTracker } from '../utils/speed-tracker';
 import { notifyTerminalOnce } from '../utils/terminal-notification';
+import { boundEntryForUi } from '../utils/transcript-bound';
 import { nextTranscriptId } from '../utils/transcript-id';
 import { isTurnElapsedEnabled } from '../utils/ui-preferences';
 import type { TodoItem } from '../components/chrome/todo-panel';
@@ -1114,7 +1115,17 @@ export class StreamingUIController {
       this._pendingToolComponents.delete(toolCallId);
       const entry = this.host.state.transcriptEntries.find((e) => e.toolCallData?.id === toolCallId);
       if (entry?.toolCallData !== undefined) {
-        entry.toolCallData.result = result;
+        // The card's entry was pushed before the call finished, so this result
+        // lands on a row already in the transcript — a second way into the
+        // entry. Run it through the same helper the ingress uses (one
+        // definition of the preview budget) and swap in only the result: the
+        // entry keeps its identity, so component mappings and fold bookkeeping
+        // stay valid.
+        const bounded = boundEntryForUi({
+          ...entry,
+          toolCallData: { ...entry.toolCallData, result },
+        });
+        entry.toolCallData.result = bounded.toolCallData?.result ?? result;
       }
       this.host.transcriptController.commit();
       state.ui.requestRender();

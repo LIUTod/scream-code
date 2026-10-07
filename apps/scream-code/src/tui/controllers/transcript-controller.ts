@@ -311,14 +311,32 @@ export class TranscriptController {
     }
   }
 
-  appendEntry(entry: TranscriptEntry): Component | null {
-    // Ingest-time UI bound: a tool-group entry's `result.output` can be huge
-    // (model-side bounding only shapes what the model sees), so the transcript
-    // keeps a head+tail preview. The same bounded entry feeds the component and
-    // the live→committed fold, so history never regains the elided middle.
+  /**
+   * The transcript's single bounded ingress: every entry reaches
+   * `state.transcriptEntries` through here — `appendEntry` for rows that mount
+   * their own component, and `ScreamTUI.pushTranscriptEntry` for the live
+   * streaming rows that already own one. One place applies the UI preview
+   * bound (`boundEntryForUi`) and the entry-count cap, so no producer can grow
+   * the array without bound, whichever path it comes in on.
+   *
+   * Returns the entry as stored: a bounded copy when the bound rewrote it,
+   * otherwise the very entry handed in — identity matters to callers that keep
+   * mutating a live draft (assistant text, thinking) after pushing it.
+   */
+  ingestEntry(entry: TranscriptEntry): TranscriptEntry {
     const boundedEntry = boundEntryForUi(entry);
     this.host.state.transcriptEntries.push(boundedEntry);
     this.enforceEntryCap();
+    return boundedEntry;
+  }
+
+  appendEntry(entry: TranscriptEntry): Component | null {
+    // Ingest through the shared bounded ingress: a tool-group entry's
+    // `result.output` can be huge (model-side bounding only shapes what the
+    // model sees), so the transcript keeps a head+tail preview. The same
+    // bounded entry feeds the component and the live→committed fold, so
+    // history never regains the elided middle.
+    const boundedEntry = this.ingestEntry(entry);
     const component = this.createComponent(boundedEntry);
     if (component) {
       this.liveComponentToEntry.set(component, boundedEntry);

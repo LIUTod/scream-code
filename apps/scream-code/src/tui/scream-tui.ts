@@ -596,7 +596,11 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
   }
 
   pushTranscriptEntry(entry: TranscriptEntry): void {
-    this.state.transcriptEntries.push(entry);
+    // Live streaming rows (tool cards, thinking, compaction blocks) own their
+    // components already, but they still land through the same bounded ingress
+    // as appendEntry: the UI preview bound and the entry cap are applied in one
+    // place, so this path cannot bypass either.
+    this.transcriptController.ingestEntry(entry);
   }
 
   setExternalEditorRunning(running: boolean): void {
