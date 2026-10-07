@@ -617,6 +617,14 @@ export class BashTool implements BuiltinTool<BashInput> {
 
   private readonly availableTools: Set<string>;
 
+  /**
+   * Session this tool belongs to (the owning agent's session id). A command
+   * that times out is parked in the module-level pending registry under this
+   * key, so closing one session sweeps only its own parked commands instead of
+   * executing every other session's running work.
+   */
+  private readonly ownerId: string | undefined;
+
   constructor(
     private readonly jian: Jian,
     private readonly cwd: string,
@@ -624,6 +632,7 @@ export class BashTool implements BuiltinTool<BashInput> {
     options?: {
       allowBackground?: boolean | undefined;
       availableTools?: Set<string> | undefined;
+      ownerId?: string | undefined;
     },
   ) {
     this.isWindows = this.jian.osEnv.osKind === 'Windows';
@@ -631,6 +640,7 @@ export class BashTool implements BuiltinTool<BashInput> {
     this.isWindowsBash = this.isWindows && this.shellKind === 'posix';
     this.allowBackground = options?.allowBackground ?? this.backgroundManager !== undefined;
     this.availableTools = options?.availableTools ?? new Set();
+    this.ownerId = options?.ownerId;
     const rendered = renderBashDescription(
       this.jian.osEnv.shellName,
       this.shellKind === 'powershell',
@@ -900,7 +910,7 @@ export class BashTool implements BuiltinTool<BashInput> {
         const taskId = createBackgroundTask(
           command,
           completionPromise.then(({ exitCode }) => ({ exitCode, output: builder.toString() })),
-          { kill: killProc, pid: proc.pid },
+          { kill: killProc, pid: proc.pid, ownerId: this.ownerId },
         );
         // Surface a completion notification through the tool.progress custom
         // channel once the backgrounded command exits, so the user is not

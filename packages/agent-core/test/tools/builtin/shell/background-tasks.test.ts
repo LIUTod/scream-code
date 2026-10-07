@@ -59,18 +59,53 @@ describe('createBackgroundTask capacity eviction', () => {
 });
 
 describe('stopAllPendingBackgroundTasks', () => {
-  it('kills every pending task and clears the registry', () => {
+  it('clears every owner when called without one (process exit)', () => {
     const kills = [vi.fn(async () => {}), vi.fn(async () => {}), vi.fn(async () => {})];
+    const owners: Array<string | undefined> = ['session-a', 'session-b', undefined];
     for (const [i, kill] of kills.entries()) {
-      createBackgroundTask(`cmd-${String(i)}`, neverCompletes(), { kill, pid: 2000 + i });
+      createBackgroundTask(`cmd-${String(i)}`, neverCompletes(), {
+        kill,
+        pid: 2000 + i,
+        ownerId: owners[i],
+      });
     }
     expect(getPendingBackgroundCount()).toBe(3);
 
     stopAllPendingBackgroundTasks();
 
+    // Nothing may outlive the process: the unscoped sweep is the exit path, so
+    // it ignores ownership (including tasks parked with no owner at all).
     for (const kill of kills) expect(kill).toHaveBeenCalledTimes(1);
     expect(getPendingBackgroundCount()).toBe(0);
     expect(drainCompletedBackgroundTasks()).toEqual([]);
+  });
+
+  it('sweeps only the named owner and leaves other sessions parked', () => {
+    const ownKill = vi.fn(async () => {});
+    const foreignKill = vi.fn(async () => {});
+    const unownedKill = vi.fn(async () => {});
+    createBackgroundTask('own-build', neverCompletes(), {
+      kill: ownKill,
+      pid: 3001,
+      ownerId: 'session-a',
+    });
+    createBackgroundTask('foreign-build', neverCompletes(), {
+      kill: foreignKill,
+      pid: 3002,
+      ownerId: 'session-b',
+    });
+    createBackgroundTask('no-session', neverCompletes(), { kill: unownedKill, pid: 3003 });
+
+    stopAllPendingBackgroundTasks('session-a');
+
+    // The registry is shared by every session in the process, so closing one
+    // session must not execute another session's parked command...
+    expect(ownKill).toHaveBeenCalledTimes(1);
+    expect(foreignKill).not.toHaveBeenCalled();
+    // ...nor a command parked by a caller that had no session to be swept by
+    // (only the unscoped exit sweep above reaches that one).
+    expect(unownedKill).not.toHaveBeenCalled();
+    expect(getPendingBackgroundCount()).toBe(2);
   });
 });
 

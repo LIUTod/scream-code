@@ -98,6 +98,12 @@ export interface AgentOptions {
   /** Stable id of this agent inside its session ('main' for the root agent).
    *  Set by `Session.instantiateAgent`; defaults to 'main'. */
   readonly agentId?: string;
+  /** Id of the session that owns this agent (set by `Session.instantiateAgent`
+   *  from `Session.options.id`; undefined for an agent built outside a
+   *  session). Tools whose state outlives their agent — the shell tool's parked
+   *  background commands live in a process-wide registry — stamp it so a
+   *  session's teardown reclaims only its own. */
+  readonly sessionId?: string | undefined;
   readonly rpc?: Partial<SDKAgentRPC>;
   readonly persistence?: AgentRecordPersistence;
   readonly type?: AgentType;
@@ -154,6 +160,9 @@ export class Agent {
   /** Stable id of this agent inside its session ('main' for the root agent);
    *  status events carry it so consumers can tell main from subagents. */
   readonly agentId: string;
+  /** Session that owns this agent; undefined outside a session (see
+   *  {@link AgentOptions.sessionId}). */
+  readonly sessionId: string | undefined;
   readonly jian: Jian;
   readonly screamConfig?: ScreamConfig;
   readonly homedir?: string;
@@ -213,6 +222,7 @@ export class Agent {
     // ── Group 1: external dependencies (injected via AgentOptions) ────────────
     this.type = options.type ?? 'main';
     this.agentId = options.agentId ?? 'main';
+    this.sessionId = options.sessionId;
     this.jian = options.jian;
     this.screamConfig = options.config;
     this.homedir = options.homedir;

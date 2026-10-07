@@ -3,6 +3,14 @@ import { randomUUID } from 'node:crypto';
 interface PendingBackgroundTask {
   readonly command: string;
   readonly startedAt: number;
+  /**
+   * Session that parked this command — every agent's Bash tool stamps its
+   * session id (see `Session.instantiateAgent`). Teardown sweeps by this key so
+   * closing one session cannot kill another session's parked commands; a task
+   * with no owner (a caller outside any session, or a session created without
+   * an id) is reached only by the unscoped process-wide sweep.
+   */
+  readonly ownerId?: string;
   /** Resolves when the process exits with { exitCode, output }. */
   readonly completion: Promise<{ exitCode: number; output: string }>;
   /** Set when the completion promise resolves. */
@@ -34,6 +42,8 @@ export function createBackgroundTask(
   handles: {
     readonly kill: () => Promise<void>;
     readonly pid?: number;
+    /** Owning session, so a later teardown can sweep just this owner's tasks. */
+    readonly ownerId?: string | undefined;
   },
 ): string {
   const id = randomUUID().slice(0, 8);
@@ -43,6 +53,7 @@ export function createBackgroundTask(
     completion,
     kill: handles.kill,
     pid: handles.pid,
+    ownerId: handles.ownerId,
   };
 
   // Evict oldest if at capacity — kill it first, otherwise the process
@@ -99,14 +110,21 @@ export function drainCompletedBackgroundTasks(): Array<{
 }
 
 /**
- * Kill every pending background task and clear the registry. Intended for
- * session teardown / process exit; not wired up by this module itself.
+ * Kill pending background tasks and clear them from the registry.
+ *
+ * With an `ownerId`, only that owner's tasks are killed: a session's teardown
+ * must not execute another session's parked commands, since several sessions
+ * (and every subagent within them) share this module-level registry. Without
+ * an owner, every task is killed regardless of owner — the process-wide exit
+ * path, and the fallback for sessions that carry no id to stamp on their
+ * agents.
  */
-export function stopAllPendingBackgroundTasks(): void {
-  for (const task of pendingTasks.values()) {
+export function stopAllPendingBackgroundTasks(ownerId?: string): void {
+  for (const [id, task] of pendingTasks) {
+    if (ownerId !== undefined && task.ownerId !== ownerId) continue;
     void task.kill();
+    pendingTasks.delete(id);
   }
-  pendingTasks.clear();
 }
 
 export function getPendingBackgroundCount(): number {

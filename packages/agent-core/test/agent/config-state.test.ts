@@ -104,6 +104,10 @@ it('uses session id as a provider prompt cache hint without storing it on Agent'
         prompt_cache_key: 'session-test',
       },
     });
-    expect('sessionId' in ctx.agent).toBe(false);
+    // The prompt-cache hint is provider-level state and must not become agent
+    // identity: an agent only carries a session id that Session.instantiateAgent
+    // stamps on it (tools whose state outlives the agent — the shell tool's
+    // parked commands — sweep by it), never this hint.
+    expect(ctx.agent.sessionId).toBeUndefined();
   });
 });

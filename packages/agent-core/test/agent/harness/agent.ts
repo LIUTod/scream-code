@@ -193,6 +193,7 @@ export class AgentTestContext {
       subagentHost: options.subagentHost,
       type: options.type,
       agentId: options.agentId,
+      sessionId: options.sessionId,
       permission: options.permission,
       hookEngine: options.hookEngine,
       log: options.log,

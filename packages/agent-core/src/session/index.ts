@@ -188,11 +188,16 @@ export class Session {
    */
   private registerDisposables(): void {
     this.disposables.add('background-pending', async () => {
-      // Sweep the shell tool's module-level pending-task map unconditionally
-      // (timed-out commands parked in the background): it outlived sessions
-      // before this registry existed. Then keep the established
-      // keepAliveOnExit-gated stop of per-agent background processes.
-      stopAllPendingBackgroundTasks();
+      // Sweep the shell tool's module-level pending-task map (timed-out
+      // commands parked in the background) for THIS session only: the map is
+      // process-wide while several sessions (and all their subagents) share it,
+      // so an unscoped sweep here would execute another session's parked
+      // commands. Every agent of this session stamps its id on what it parks
+      // (see AgentOptions.sessionId); a session without an id falls back to the
+      // unscoped sweep, which is also the process-exit path. Then keep the
+      // established keepAliveOnExit-gated stop of per-agent background
+      // processes.
+      stopAllPendingBackgroundTasks(this.options.id);
       await this.stopBackgroundTasksOnExit();
     });
     this.disposables.add('cron', async () => {
@@ -675,6 +680,7 @@ export class Session {
       ...config,
       agentId: id,
       type,
+      sessionId: this.options.id,
       jian: this.options.jian.withCwd(cwd),
       toolServices: this.options.toolServices,
       config: this.options.config,

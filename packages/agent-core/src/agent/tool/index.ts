@@ -1152,6 +1152,10 @@ export class ToolManager {
         new b.BashTool(jian, cwd, background, {
           allowBackground,
           availableTools: this.enabledTools,
+          // Owns the pending-command registry the same way sessions close it:
+          // a timed-out command parked by this agent is swept when its session
+          // closes, never when another session does.
+          ownerId: this.agent.sessionId,
         }),
         // /rlm mode: persistent python kernel. Registered but NOT enabled by
         // default — activated only when the /rlm command adds 'python' to the
