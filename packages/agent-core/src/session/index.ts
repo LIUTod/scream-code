@@ -41,7 +41,13 @@ import {
 } from '../skill';
 import { SessionSubagentHost } from './subagent-host';
 import type { SubagentCapabilityMode } from './subagent-capability';
+import { SessionDisposables } from './dispose-registry';
+import { SubagentMessageBus } from './subagent-messages';
 import type { ToolServices } from '../tools/support/services';
+// Cross-layer value import (orchestration → tool layer): the pending-task map
+// is module-level state owned by the shell tool and has no ToolContext at
+// session teardown; `stopAllPendingBackgroundTasks` is its public sweep entry.
+import { stopAllPendingBackgroundTasks } from '../tools/builtin/shell/background-tasks';
 import type { LspProcessSupervisor } from '../lsp/process-supervisor';
 
 export interface SessionOptions {
@@ -112,6 +118,10 @@ export class Session {
   readonly hookEngine: HookEngine;
   /** Core-wide supervisor tracking this session's LSP children. */
   readonly lspSupervisor: LspProcessSupervisor | undefined;
+  /** Close-out checklist that drives `close()` (see `SessionDisposables`). */
+  readonly disposables = new SessionDisposables();
+  /** Session-level parent→child message bus shared by every subagent host. */
+  readonly subagentMessages = new SubagentMessageBus();
   private agentIdCounter = 0;
   private readonly skillsReady: Promise<void>;
   private readonly mcpReady: Promise<void>;
@@ -162,6 +172,57 @@ export class Session {
       });
     this.mcpReady = this.loadMcpServers().catch((error: unknown) => {
       this.emitInitialMcpLoadError(error);
+    });
+    this.registerDisposables();
+  }
+
+  /**
+   * The session's close-out checklist. Every resource `close()` tears down
+   * registers here at construction — `disposables.names()` is the inspectable
+   * list, frozen by test/session/close-resources.test.ts so a step cannot be
+   * silently forgotten again.
+   *
+   * Registration order is the checklist order; `disposeAll()` releases in
+   * reverse (last registered first released), so `message-bus` is released
+   * first and `background-pending` last.
+   */
+  private registerDisposables(): void {
+    this.disposables.add('background-pending', async () => {
+      // Sweep the shell tool's module-level pending-task map unconditionally
+      // (timed-out commands parked in the background): it outlived sessions
+      // before this registry existed. Then keep the established
+      // keepAliveOnExit-gated stop of per-agent background processes.
+      stopAllPendingBackgroundTasks();
+      await this.stopBackgroundTasksOnExit();
+    });
+    this.disposables.add('cron', async () => {
+      await Promise.allSettled(
+        Array.from(this.agents.values(), async (agent) => agent.cron?.stop()),
+      );
+    });
+    this.disposables.add('rlm', () => {
+      // Dispose any persistent python kernel started by /rlm so no orphaned
+      // process survives the session.
+      for (const agent of this.agents.values()) {
+        agent.disposeRlm?.();
+      }
+    });
+    this.disposables.add('lsp', async () => {
+      // Stop every LSP server this session started (graceful shutdown
+      // protocol + SIGTERM/SIGKILL escalation). All cleanups start together;
+      // the first rejection fails this step and is aggregated by disposeAll().
+      await Promise.all(
+        Array.from(this.agents.values(), (agent) => agent.tools.disposeLsp()),
+      );
+    });
+    this.disposables.add('mcp', async () => {
+      await this.mcp.shutdown();
+    });
+    this.disposables.add('log', async () => {
+      await this.logHandle?.close();
+    });
+    this.disposables.add('message-bus', () => {
+      this.subagentMessages.clear();
     });
   }
   async createMain() {
@@ -241,6 +302,11 @@ export class Session {
         });
       }
     }
+    // Teardown is registry-driven (see registerDisposables): every step runs
+    // even when one fails, and the collected failures surface as one
+    // AggregateError — the way the old `finally` rethrew the first LSP/MCP
+    // rejection instead of hiding it.
+    let disposeError: AggregateError | null = null;
     try {
       // Cancel any in-flight turn so the session can be resumed or have its
       // model switched without inheriting a stuck/partial tool exchange.
@@ -249,38 +315,14 @@ export class Session {
           agent.turn.cancel();
         }
       }
-      await Promise.allSettled(
-        Array.from(this.agents.values(), async (agent) => agent.cron?.stop()),
-      );
-      // Dispose any persistent python kernel started by /rlm so no orphaned
-      // process survives the session.
-      for (const agent of this.agents.values()) {
-        agent.disposeRlm?.();
-      }
-      await this.stopBackgroundTasksOnExit();
-      await this.flushMetadata();
-      await this.triggerSessionEnd('exit');
     } finally {
-      try {
-        // Stop every LSP server this session started (graceful shutdown
-        // protocol + SIGTERM/SIGKILL escalation) alongside the MCP shutdown.
-        // allSettled keeps both cleanups running even if one fails; the first
-        // rejection is then rethrown so close() still surfaces failures the
-        // way the pre-LSP code did with a bare `await mcp.shutdown()`.
-        const results = await Promise.allSettled([
-          ...Array.from(this.agents.values(), (agent) => agent.tools.disposeLsp()),
-          this.mcp.shutdown(),
-        ]);
-        const failed = results.find(
-          (result): result is PromiseRejectedResult => result.status === 'rejected',
-        );
-        if (failed !== undefined) {
-          throw failed.reason;
-        }
-      } finally {
-        await this.logHandle?.close();
-      }
+      disposeError = await this.disposables.disposeAll();
     }
+    // Persist after teardown so wire records emitted while disposing (e.g.
+    // `rlm.exit`) reach disk before close() returns.
+    await this.flushMetadata();
+    await this.triggerSessionEnd('exit');
+    if (disposeError !== null) throw disposeError;
   }
 
   private async stopBackgroundTasksOnExit(): Promise<void> {
@@ -620,7 +662,14 @@ export class Session {
       modelProvider: this.options.providerManager,
       hookEngine: config.hookEngine ?? this.hookEngine,
       subagentHost:
-        config.subagentHost ?? new SessionSubagentHost(this, id, this.backgroundTaskTimeoutMs(), this.options.subagentModelBindings),
+        config.subagentHost ??
+        new SessionSubagentHost(
+          this,
+          id,
+          this.backgroundTaskTimeoutMs(),
+          this.options.subagentModelBindings,
+          this.subagentMessages,
+        ),
       ownerHost: type === 'sub' ? parentAgent?.subagentHost : undefined,
       mcp: this.mcp,
       permission: this.permissionOptions(parentAgentId, config.permission),

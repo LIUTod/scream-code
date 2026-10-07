@@ -124,6 +124,15 @@ export class SubagentMessageBus {
   }
 
   /**
+   * Drop every queued message in every mailbox (session teardown). Id and seq
+   * counters stay monotonic so identifiers issued before the clear are never
+   * reissued.
+   */
+  clear(): void {
+    this.mailboxes.clear();
+  }
+
+  /**
    * Deliver all pending, unexpired messages for `agentId`. Steer messages are
    * always dequeued before queue messages; within an operation class, arrival
    * order is preserved via the monotonically increasing `seq` (this is a stable
