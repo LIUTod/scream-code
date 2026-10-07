@@ -2,11 +2,51 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdir, mkdtemp, rm, writeFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { DatabaseSync } from 'node:sqlite';
 
 import { MemoryMemoStore } from '../src/store.js';
 import { createMemoryMemo } from '../src/models.js';
 import { buildExitExtractionPrompt, parseMemoryMemos } from '../src/extractor.js';
 import type { MemoryMemo } from '../src/models.js';
+
+/** Must match READ_BATCH_SIZE in src/store.ts (pinned here so the paging probe stays discriminative). */
+const PAGE_SIZE = 500;
+
+interface RecordedSqlCall {
+  sql: string;
+  args: unknown[];
+  rowCount: number;
+}
+
+/**
+ * Record every `prepare(...).all(...)` issued by the store's db handle.
+ * Used to prove read() pages with bounded LIMIT/OFFSET batches: a revert to
+ * full-materialization (`stmt.all()` with no LIMIT) turns the assertions red.
+ */
+function spyOnSelects(store: MemoryMemoStore): {
+  calls: RecordedSqlCall[];
+  restore: () => void;
+} {
+  const calls: RecordedSqlCall[] = [];
+  const db = (store as unknown as { db: DatabaseSync }).db;
+  const origPrepare = db.prepare.bind(db);
+  db.prepare = ((sql: string) => {
+    const stmt = origPrepare(sql);
+    const origAll = stmt.all.bind(stmt) as (...args: unknown[]) => unknown[];
+    stmt.all = ((...args: unknown[]) => {
+      const rows = origAll(...args);
+      calls.push({ sql, args, rowCount: rows.length });
+      return rows;
+    }) as typeof stmt.all;
+    return stmt;
+  }) as typeof db.prepare;
+  return {
+    calls,
+    restore: () => {
+      db.prepare = origPrepare;
+    },
+  };
+}
 
 function makeMemo(overrides: Partial<MemoryMemo> = {}): MemoryMemo {
   return createMemoryMemo({
@@ -167,6 +207,156 @@ describe('MemoryMemoStore', () => {
       }
       expect(entries.length).toBe(2);
     });
+
+    it('yields nothing for an empty store', async () => {
+      const entries: MemoryMemo[] = [];
+      for await (const memo of store.read()) {
+        entries.push(memo);
+      }
+      expect(entries).toEqual([]);
+    });
+
+    it('reads a 5050-row store back byte-for-byte across batch boundaries', async () => {
+      // 5050 = 10 full pages of 500 + one partial page of 50.
+      const written: MemoryMemo[] = [];
+      for (let i = 0; i < 5050; i++) {
+        const memo = makeMemo({
+          id: `memo-bulk-${i}`,
+          sourceSessionId: `sess-${i}`,
+          sourceSessionTitle: `会话 ${i} · title-'x'`,
+          userNeed: `需要 ${i}\n第二行\t制表 "引号" '单引号' \\反斜杠 🚀`,
+          approach: `方案 ${i} — mixed ASCII/CJK`,
+          outcome: i % 2 === 0 ? '完成' : '部分完成',
+          whatFailed: `失败面 ${i} ${'f'.repeat(i % 17)}`,
+          whatWorked: `成功面 ${i} ${'w'.repeat(i % 23)}`,
+          recordedAt: 1_700_000_000_000 + i,
+          projectDir: i % 3 === 0 ? '' : '/workspace/proj',
+          tags: [`tag-${i % 7}`, '共通'],
+        });
+        await store.append(memo);
+        written.push(memo);
+      }
+
+      const seen: MemoryMemo[] = [];
+      for await (const memo of store.read()) {
+        seen.push(memo);
+      }
+      expect(seen.length).toBe(5050);
+      // Byte-for-byte field equality against what was written (order:
+      // recorded_at DESC with unique timestamps → exact reverse of insertion).
+      for (let i = 0; i < written.length; i++) {
+        const expected = written[written.length - 1 - i]!;
+        expect(seen[i]).toEqual(expected);
+      }
+    }, 60_000);
+
+    it('pages exactly when the row count divides the batch size evenly', async () => {
+      // 1000 rows = exactly 2 pages of 500.
+      for (let i = 0; i < 1000; i++) {
+        await store.append(makeMemo({ id: `memo-exact-${i}`, recordedAt: 1000 + i }));
+      }
+      const spy = spyOnSelects(store);
+      try {
+        const seen: MemoryMemo[] = [];
+        for await (const memo of store.read()) {
+          seen.push(memo);
+        }
+        expect(seen.length).toBe(1000);
+        expect(seen.map((m) => m.id)).toEqual(
+          Array.from({ length: 1000 }, (_, k) => `memo-exact-${999 - k}`),
+        );
+
+        const pageCalls = spy.calls.filter((c) => c.sql.includes('FROM memos') && c.sql.includes('LIMIT'));
+        // 2 full pages + 1 terminating empty page probe.
+        expect(pageCalls.length).toBe(3);
+        for (const call of pageCalls) {
+          expect(call.sql).toContain('ORDER BY recorded_at DESC, rowid DESC');
+          expect(call.args[0]).toBe(PAGE_SIZE);
+        }
+        expect(pageCalls.map((c) => c.args[1])).toEqual([0, 500, 1000]);
+      } finally {
+        spy.restore();
+      }
+    }, 30_000);
+
+    it('pages with a short final batch when the row count does not divide evenly', async () => {
+      // 1250 rows = 2 full pages of 500 + one short page of 250.
+      for (let i = 0; i < 1250; i++) {
+        await store.append(makeMemo({ id: `memo-uneven-${i}`, recordedAt: 2000 + i }));
+      }
+      const spy = spyOnSelects(store);
+      try {
+        const seen: MemoryMemo[] = [];
+        for await (const memo of store.read()) {
+          seen.push(memo);
+        }
+        expect(seen.length).toBe(1250);
+        expect(seen.map((m) => m.id)).toEqual(
+          Array.from({ length: 1250 }, (_, k) => `memo-uneven-${1249 - k}`),
+        );
+
+        const pageCalls = spy.calls.filter((c) => c.sql.includes('FROM memos') && c.sql.includes('LIMIT'));
+        expect(pageCalls.length).toBe(3);
+        expect(pageCalls.map((c) => c.args[1])).toEqual([0, 500, 1000]);
+        expect(pageCalls.map((c) => c.rowCount)).toEqual([500, 500, 250]);
+      } finally {
+        spy.restore();
+      }
+    }, 30_000);
+
+    it('breaks recorded_at ties by rowid DESC so page boundaries are stable', async () => {
+      // Same timestamp for every row: order must still be total (newest insert
+      // first) or LIMIT/OFFSET pages would skip/repeat rows.
+      for (let i = 0; i < 5; i++) {
+        await store.append(makeMemo({ id: `memo-tie-${i}`, recordedAt: 42 }));
+      }
+      const seen: MemoryMemo[] = [];
+      for await (const memo of store.read()) {
+        seen.push(memo);
+      }
+      expect(seen.map((m) => m.id)).toEqual([
+        'memo-tie-4',
+        'memo-tie-3',
+        'memo-tie-2',
+        'memo-tie-1',
+        'memo-tie-0',
+      ]);
+    });
+
+    it('revert-red: a non-paged read() fails the SQL batch probe', async () => {
+      // Guards against silently reintroducing stmt.all() full materialization:
+      // the probe asserts LIMIT paging + bounded batch args + query count.
+      for (let i = 0; i < 600; i++) {
+        await store.append(makeMemo({ id: `memo-probe-${i}`, recordedAt: 3000 + i }));
+      }
+      const spy = spyOnSelects(store);
+      try {
+        const seen: MemoryMemo[] = [];
+        for await (const memo of store.read()) {
+          seen.push(memo);
+        }
+        expect(seen.length).toBe(600);
+
+        const memoSelects = spy.calls.filter((c) => c.sql.includes('FROM memos'));
+        // Pagination must actually happen: more than one bounded SELECT,
+        // never a single unbounded materialization.
+        expect(memoSelects.length).toBeGreaterThan(1);
+        for (const call of memoSelects) {
+          expect(call.sql).toMatch(/LIMIT \? OFFSET \?/);
+          expect(call.sql).toContain('ORDER BY recorded_at DESC, rowid DESC');
+          // args: (limit, offset) — limit pinned to PAGE_SIZE, offset advances.
+          expect(call.args[0]).toBe(PAGE_SIZE);
+          expect(call.args[1]).toBeTypeOf('number');
+          expect(call.rowCount).toBeLessThanOrEqual(PAGE_SIZE);
+        }
+        const offsets = memoSelects.map((c) => c.args[1] as number);
+        expect(offsets).toEqual(
+          Array.from({ length: memoSelects.length }, (_, k) => k * PAGE_SIZE),
+        );
+      } finally {
+        spy.restore();
+      }
+    }, 30_000);
   });
 
   describe('search', () => {

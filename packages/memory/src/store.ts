@@ -10,6 +10,8 @@ import { buildEmbeddingText, EMBEDDING_MODEL_NAME, type EmbeddingEngine } from '
 const FILE_NAME = 'entries.jsonl';
 const MIGRATION_MARKER = '.migrated';
 const SQLITE_MIGRATION_MARKER = '.migrated-to-sqlite';
+/** Page size for read() row batches — bounds peak memory on large stores. */
+const READ_BATCH_SIZE = 500;
 
 export interface MemoryMemoStoreLogger {
   debug?: (message: string, ...args: unknown[]) => void;
@@ -98,22 +100,33 @@ export class MemoryMemoStore {
     await this.init();
     if (this.db === undefined) return;
     const projectDir = options?.projectDir;
+    // NOTE: `project_dir = ''` includes legacy memos from before per-project
+    // filtering was introduced. This is intentional — project queries always
+    // include global/legacy entries alongside the requested project.
+    //
+    // Rows are fetched in bounded LIMIT/OFFSET batches (same shape as listAll)
+    // so peak memory stays flat on large stores instead of materializing every
+    // row up front. `rowid DESC` breaks recorded_at ties to keep page
+    // boundaries stable — without a total order, OFFSET paging can skip or
+    // repeat rows when timestamps collide.
     const stmt =
       projectDir === undefined
-        ? this.db.prepare('SELECT * FROM memos ORDER BY recorded_at DESC')
+        ? this.db.prepare(
+            'SELECT * FROM memos ORDER BY recorded_at DESC, rowid DESC LIMIT ? OFFSET ?',
+          )
         : this.db.prepare(
-          // NOTE: `project_dir = ''` includes legacy memos from before per-project
-          // filtering was introduced. This is intentional — project queries always
-          // include global/legacy entries alongside the requested project.
-            "SELECT * FROM memos WHERE project_dir = ? OR project_dir = '' ORDER BY recorded_at DESC",
+            "SELECT * FROM memos WHERE project_dir = ? OR project_dir = '' ORDER BY recorded_at DESC, rowid DESC LIMIT ? OFFSET ?",
           );
-    // NOTE: stmt.all() materializes the entire result set. For large stores
-    // this loads all rows into memory. Use paginated list() for bounded reads.
-    const rows = (
-      projectDir === undefined ? stmt.all() : stmt.all(projectDir)
-    ) as Array<Record<string, unknown>>;
-    for (const row of rows) {
-      yield rowToMemo(row);
+    for (let offset = 0; ; offset += READ_BATCH_SIZE) {
+      const rows = (
+        projectDir === undefined
+          ? stmt.all(READ_BATCH_SIZE, offset)
+          : stmt.all(projectDir, READ_BATCH_SIZE, offset)
+      ) as Array<Record<string, unknown>>;
+      for (const row of rows) {
+        yield rowToMemo(row);
+      }
+      if (rows.length < READ_BATCH_SIZE) return;
     }
   }
 
