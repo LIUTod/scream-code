@@ -55,9 +55,12 @@ import {
 } from '../utils/child-request-notice';
 import { SubagentSlots, type SubagentSlot } from '../utils/subagent-slots';
 import {
+  buildAgentRows,
   createSubagentInstanceInfo,
+  MAX_RECENT_SUBAGENT_INSTANCES,
   withSubagentInstanceEnded,
   type SubagentInstanceInfo,
+  type SubagentInstanceRow,
 } from '../utils/subagent-instances';
 import { formatBackgroundTaskTranscript } from '../utils/background-task-status';
 import { formatHookResultMarkdown, formatHookResultPlain } from '../utils/hook-result-format';
@@ -193,6 +196,14 @@ export class SessionEventHandler {
    * spawning tool call leaves the active set as soon as it returns.
    */
   private readonly subagentInstances = new Map<string, SubagentInstanceInfo>();
+  /**
+   * Archive ring behind {@link getRecentSubagentInstances}: the last derived
+   * Agents-view row of every closed instance, oldest first, capped at
+   * {@link MAX_RECENT_SUBAGENT_INSTANCES}. Closing an instance releases its
+   * registry record, so this is what keeps recently-ended agents visible in the
+   * /tasks Agents view instead of letting the registry grow for the session.
+   */
+  private readonly recentSubagentInstances: SubagentInstanceRow[] = [];
   /** Tool callId of the in-flight UpdateGoal(complete) (judging), if any. */
   private goalJudgeCallId: string | undefined;
   /** Rolling first-token latencies of real requests, feeding the sidebar Hub
@@ -215,6 +226,7 @@ export class SessionEventHandler {
     this.subagentInfo.clear();
     this.subagentSlots.reset();
     this.subagentInstances.clear();
+    this.recentSubagentInstances.length = 0;
     this.renderedSkillActivationIds.clear();
     this.renderedMcpServerStatusKeys.clear();
     this.stopAllMcpServerStatusSpinners();
@@ -367,6 +379,13 @@ export class SessionEventHandler {
     return this.subagentInstances;
   }
 
+  /** Read-only snapshot of the archive ring: the last derived Agents-view row
+   *  of each closed instance, oldest first, bounded to
+   *  {@link MAX_RECENT_SUBAGENT_INSTANCES}. */
+  getRecentSubagentInstances(): readonly SubagentInstanceRow[] {
+    return this.recentSubagentInstances;
+  }
+
   /** Remember (or refresh, on resume) one spawned instance. The spawning tool
    *  call is resolved here, while it is still in flight. */
   private rememberSubagentInstance(event: SubagentSpawnedEvent, fallbackParentAgentId?: string): void {
@@ -384,11 +403,35 @@ export class SessionEventHandler {
     );
   }
 
-  /** Close an instance record on subagent.completed / subagent.failed. */
+  /**
+   * Close an instance record on subagent.completed / subagent.failed: archive
+   * its last display row in the ring, then release the registry record — the
+   * registry is reset per session, not kept per spawned agent.
+   *
+   * The archived row is derived by the very builder the view uses (over the
+   * registry snapshot that still contains this instance and its terminal
+   * outcome), so it is field-identical to what the view rendered while the
+   * record was live; the deletion below is what makes that derivation the last
+   * chance to produce it.
+   */
   private closeSubagentInstance(agentId: string, outcome: 'completed' | 'failed'): void {
     const info = this.subagentInstances.get(agentId);
     if (info === undefined) return;
-    this.subagentInstances.set(agentId, withSubagentInstanceEnded(info, outcome));
+    const ended = withSubagentInstanceEnded(info, outcome);
+    const snapshot = new Map<string, SubagentInstanceInfo>([
+      ...this.subagentInstances,
+      [agentId, ended],
+    ]);
+    const row = buildAgentRows(this.subagentSlots.getSlots(), snapshot).find(
+      (candidate) => candidate.key === ended.type,
+    );
+    if (row !== undefined) {
+      this.recentSubagentInstances.push(row);
+      if (this.recentSubagentInstances.length > MAX_RECENT_SUBAGENT_INSTANCES) {
+        this.recentSubagentInstances.shift();
+      }
+    }
+    this.subagentInstances.delete(agentId);
   }
 
   /** Keep the last few first-token latencies, per provider. Steps without a

@@ -352,4 +352,72 @@ describe('buildAgentRows', () => {
     expect(rows[0]!.live).toBe(false);
     expect(rows[0]!.lastActivityAt).toBe(7000);
   });
+
+  it('serves a type the live snapshot no longer covers from the archive, verbatim', () => {
+    // A closed instance leaves the live registry; its last derived row is what
+    // the view must keep showing inside the ring window.
+    const archivedRow = buildAgentRows(
+      [],
+      registry(
+        withSubagentInstanceEnded(
+          instance({
+            agentId: 'agent-17',
+            type: 'cartographer',
+            description: 'map the parser',
+            parentToolName: 'Agent',
+            parentToolDescription: 'map the parser',
+            spawnedAt: 1000,
+          }),
+          'completed',
+          2000,
+        ),
+      ),
+    )[0]!;
+
+    const rows = buildAgentRows(
+      [slot({ status: 'working', agentId: 'agent-1', count: 1, lastActivityAt: 500 })],
+      registry(instance({ agentId: 'agent-1', spawnedAt: 400 })),
+      [archivedRow],
+    );
+
+    expect(rows.map((row) => row.type)).toEqual(['coder', 'cartographer']);
+    expect(rows[1]).toEqual(archivedRow);
+  });
+
+  it('keeps the newest archived row per type and never shadows a live type', () => {
+    const earlier = buildAgentRows(
+      [],
+      registry(
+        withSubagentInstanceEnded(
+          instance({ agentId: 'agent-17', type: 'cartographer', spawnedAt: 1000 }),
+          'completed',
+          1500,
+        ),
+      ),
+    )[0]!;
+    const later = buildAgentRows(
+      [],
+      registry(
+        withSubagentInstanceEnded(
+          instance({ agentId: 'agent-18', type: 'cartographer', spawnedAt: 3000 }),
+          'failed',
+          4000,
+        ),
+      ),
+    )[0]!;
+    const archivedCoder = buildAgentRows(
+      [],
+      registry(withSubagentInstanceEnded(instance({ spawnedAt: 500 }), 'completed', 600)),
+    )[0]!;
+
+    const rows = buildAgentRows(
+      [slot({ status: 'working', agentId: 'agent-1', count: 1, lastActivityAt: 700 })],
+      registry(instance({ agentId: 'agent-1', spawnedAt: 650 })),
+      [earlier, later, archivedCoder],
+    );
+
+    expect(rows.map((row) => row.type)).toEqual(['coder', 'cartographer']);
+    expect(rows[0]!.live).toBe(true);
+    expect(rows[1]).toEqual(later);
+  });
 });

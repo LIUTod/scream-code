@@ -57,6 +57,13 @@ export const DEFAULT_SUBAGENT_TYPES: readonly string[] = Object.freeze(
 /** Hard cap so an exotic custom-profile spawn storm cannot overflow the panel. */
 export const MAX_SUBAGENT_SLOTS = 16;
 
+/** Terminated instances kept only so a resume is still recognizable as 返工中
+ *  (see {@link SubagentSlots.onSpawned}). Bounded FIFO: a long session must not
+ *  accumulate one record per spawned agentId, so an agent resumed after more
+ *  than this many terminations simply reads as a fresh run. Id-level records
+ *  are a few bytes each, so the window is generous. */
+export const ENDED_INSTANCE_WINDOW = 200;
+
 /** How long a `requesting` overlay stays visible after a subagent asks the
  *  parent for help. The request itself returns at once and the agent keeps
  *  working, so this is a display window, not a blocked state. */
@@ -69,7 +76,14 @@ interface Instance {
 
 export class SubagentSlots {
   private readonly slots = new Map<string, SubagentSlot>();
+  /** Live per-agentId records. Released on termination (a session must not keep
+   *  one entry per spawned agent forever); resume detection falls back to
+   *  {@link endedInstances}. */
   private readonly instances = new Map<string, Instance>();
+  /** Terminated records, oldest first — the only reason a per-agentId record
+   *  outlives its run is that a resume of it should still show 返工中. Capped by
+   *  {@link ENDED_INSTANCE_WINDOW}. */
+  private readonly endedInstances = new Map<string, Instance>();
   /** Live instance count per type: a slot only returns to idle when the LAST
    * instance of that type terminates (WolfPack spawns several coders at once
    * and they share one visual slot). */
@@ -90,6 +104,7 @@ export class SubagentSlots {
   reset(): void {
     this.slots.clear();
     this.instances.clear();
+    this.endedInstances.clear();
     this.runningByType.clear();
     this.messagingByCall.clear();
     this.messagingPrev.clear();
@@ -111,6 +126,22 @@ export class SubagentSlots {
       this.runningByType.set(instance.type, (this.runningByType.get(instance.type) ?? 0) + 1);
       this.setState(
         instance.type,
+        'reworking',
+        agentId,
+        description === undefined ? undefined : `resume: ${description}`,
+      );
+      return;
+    }
+    // Not live, but a terminated record may still be in the window: the same
+    // agentId being spawned again is a resume (返工中), and the record moves
+    // back into the live map.
+    const ended = this.endedInstances.get(agentId);
+    if (ended !== undefined) {
+      this.endedInstances.delete(agentId);
+      this.instances.set(agentId, { type: ended.type, generation: ended.generation + 1 });
+      this.runningByType.set(ended.type, (this.runningByType.get(ended.type) ?? 0) + 1);
+      this.setState(
+        ended.type,
         'reworking',
         agentId,
         description === undefined ? undefined : `resume: ${description}`,
@@ -145,6 +176,10 @@ export class SubagentSlots {
     if (this.requesting.get(instance.type)?.agentId === agentId) {
       this.requesting.delete(instance.type);
     }
+    // Release the live record — it must not accumulate per spawned agent for
+    // the life of the session — and keep it only in the bounded resume window.
+    this.instances.delete(agentId);
+    this.rememberEnded(agentId, instance);
     const remaining = (this.runningByType.get(instance.type) ?? 1) - 1;
     if (remaining > 0) {
       this.runningByType.set(instance.type, remaining);
@@ -155,6 +190,18 @@ export class SubagentSlots {
     }
     this.runningByType.delete(instance.type);
     this.setState(instance.type, 'idle', undefined, undefined);
+  }
+
+  /** Move a terminated record into the resume window, FIFO-capped: the oldest
+   *  record drops out so the window cannot grow with the session. */
+  private rememberEnded(agentId: string, instance: Instance): void {
+    this.endedInstances.delete(agentId);
+    this.endedInstances.set(agentId, instance);
+    while (this.endedInstances.size > ENDED_INSTANCE_WINDOW) {
+      const oldest = this.endedInstances.keys().next().value;
+      if (oldest === undefined) break;
+      this.endedInstances.delete(oldest);
+    }
   }
 
   /**

@@ -149,6 +149,22 @@ export interface AgentRow {
   readonly chainTruncated: boolean;
 }
 
+/**
+ * FIFO cap of the archived-rows ring the /tasks Agents view reads
+ * (`SessionEventHandler.getRecentSubagentInstances`): a closed instance keeps
+ * its last derived row for this many closures, then drops off. This bounds both
+ * the retained row objects and the per-refresh row rebuild.
+ */
+export const MAX_RECENT_SUBAGENT_INSTANCES = 50;
+
+/**
+ * An archived Agents-view row: the row the view derived for an instance at the
+ * moment it closed, kept after the live registry record was released so ended
+ * agents stay visible inside the ring window. Field-identical to {@link AgentRow}
+ * by construction — it is produced by the same derivation.
+ */
+export type SubagentInstanceRow = AgentRow;
+
 /** Walk `parentAgentId` upwards, collecting parent types (nearest first). */
 export function buildAncestorChain(
   instance: SubagentInstanceInfo,
@@ -223,10 +239,17 @@ function resolveSource(
  * counts every recorded instance of the type and has no `instanceId`; its
  * source and ancestors use the same derivation as slot-backed rows. Live rows
  * sort first (most recent activity on top), then ended ones by their end time.
+ *
+ * `recent` is the archive ring (newest last): rows derived when an instance
+ * closed. A type the live snapshot no longer covers keeps its archived row, so
+ * splitting the registry into live + ring does not change what the view shows
+ * for anything inside the ring window. Called without `recent` (as before the
+ * ring existed) the output depends on `slots` + `instances` alone.
  */
 export function buildAgentRows(
   slots: readonly SubagentSlot[],
   instances: ReadonlyMap<string, SubagentInstanceInfo>,
+  recent: readonly SubagentInstanceRow[] = [],
 ): AgentRow[] {
   interface TypeAggregate {
     latest: SubagentInstanceInfo;
@@ -304,6 +327,18 @@ export function buildAgentRows(
       },
       sortAt: activityAt,
     });
+  }
+
+  // Archived rows (the ring): a type whose live records were all released keeps
+  // the row derived when its last instance closed. Later ring entries are newer,
+  // so they win for the same type; a type the live snapshot still covers is
+  // never duplicated from the archive.
+  const coveredTypes = new Set(rows.map((entry) => entry.row.key));
+  const archivedByType = new Map<string, SubagentInstanceRow>();
+  for (const row of recent) archivedByType.set(row.key, row);
+  for (const row of archivedByType.values()) {
+    if (coveredTypes.has(row.key)) continue;
+    rows.push({ row, sortAt: row.lastActivityAt });
   }
 
   rows.sort((a, b) => {

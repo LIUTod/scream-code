@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { REQUESTING_WINDOW_MS, SubagentSlots } from '#/tui/utils/subagent-slots';
+import { ENDED_INSTANCE_WINDOW, REQUESTING_WINDOW_MS, SubagentSlots } from '#/tui/utils/subagent-slots';
 
 describe('SubagentSlots', () => {
   it('always exposes the 9 default types in fixed order, idle initially', () => {
@@ -127,6 +127,49 @@ describe('SubagentSlots', () => {
     slots.onRequesting('agent-6', 1000);
     slots.reset();
     expect(slots.getSlots(2000).every((s) => s.status === 'idle')).toBe(true);
+  });
+
+  it('releases per-agentId state on termination across 1000 runs', () => {
+    const slots = new SubagentSlots();
+    for (let i = 0; i < 1000; i += 1) {
+      slots.onSpawned(`agent-${i}`, 'coder', `run ${i}`);
+      slots.onTerminated(`agent-${i}`);
+    }
+
+    // No per-spawned-agent record survives a run: the live map is empty (only
+    // the bounded resume window may hold anything)…
+    const internals = slots as unknown as {
+      instances: Map<string, unknown>;
+      endedInstances: Map<string, unknown>;
+    };
+    expect(internals.instances.size).toBe(0);
+    expect(internals.endedInstances.size).toBe(ENDED_INSTANCE_WINDOW);
+    // …and every slot is back to resting.
+    expect(
+      slots.getSlots().every((slot) => slot.status === 'idle' && slot.count === 0),
+    ).toBe(true);
+  });
+
+  it('keeps a recent termination readable as 返工中 and a window-evicted one as a fresh run', () => {
+    const slots = new SubagentSlots();
+    // The oldest termination drops out once the window overflows.
+    slots.onSpawned('agent-old', 'coder', 'first');
+    slots.onTerminated('agent-old');
+    for (let i = 0; i < ENDED_INSTANCE_WINDOW; i += 1) {
+      slots.onSpawned(`agent-${i}`, 'gaffer', `run ${i}`);
+      slots.onTerminated(`agent-${i}`);
+    }
+
+    const coder = () => slots.getSlots().find((s) => s.type === 'coder');
+    slots.onSpawned('agent-old', 'coder', 'again');
+    expect(coder()?.status).toBe('working');
+    expect(coder()?.detail).toBe('again');
+    expect(coder()?.count).toBe(1);
+
+    const gaffer = () => slots.getSlots().find((s) => s.type === 'gaffer');
+    slots.onSpawned(`agent-${ENDED_INSTANCE_WINDOW - 1}`, 'gaffer', 'redo');
+    expect(gaffer()?.status).toBe('reworking');
+    expect(gaffer()?.detail).toContain('resume');
   });
 
   it('requesting: asking the parent shows a timed overlay, then the real state shows through', () => {

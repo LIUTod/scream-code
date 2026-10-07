@@ -78,7 +78,7 @@ import { formatErrorMessage } from './utils/event-payload';
 import { ImageAttachmentStore } from './utils/image-attachment-store';
 import { hasPatchChanges } from './utils/object-patch';
 import { setProcessTitle } from './utils/proctitle';
-import type { SubagentInstanceInfo } from './utils/subagent-instances';
+import type { SubagentInstanceInfo, SubagentInstanceRow } from './utils/subagent-instances';
 import type { SubagentSlot } from './utils/subagent-slots';
 import type { SessionRow } from './components/dialogs/session-picker';
 import { detectTmuxKeyboardWarning } from './utils/tmux-keyboard';
@@ -630,6 +630,12 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
    *  keyed by agentId — source of the /tasks browser's Agents view. */
   get subagentInstances(): ReadonlyMap<string, SubagentInstanceInfo> {
     return this.sessionEventHandler.getSubagentInstances();
+  }
+
+  /** Archive ring for the Agents view: closed instances' last derived rows
+   *  (oldest first), the bounded home of agents the live map has released. */
+  get recentSubagentInstances(): readonly SubagentInstanceRow[] {
+    return this.sessionEventHandler.getRecentSubagentInstances();
   }
 
   getCurrentSessionId(): string {

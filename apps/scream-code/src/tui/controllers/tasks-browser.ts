@@ -7,7 +7,7 @@ import { TasksBrowserApp, type TasksFilter } from '../components/dialogs/tasks-b
 import type { ColorPalette } from '../theme';
 import type { CustomEditor } from '../components/editor/custom-editor';
 import type { SubagentSlot } from '../utils/subagent-slots';
-import { buildAgentRows, type AgentRow, type SubagentInstanceInfo } from '../utils/subagent-instances';
+import { buildAgentRows, type AgentRow, type SubagentInstanceInfo, type SubagentInstanceRow } from '../utils/subagent-instances';
 
 export interface TasksBrowserHost {
   readonly state: {
@@ -23,6 +23,9 @@ export interface TasksBrowserHost {
   readonly subagentSlots: readonly SubagentSlot[];
   /** Per-instance subagent provenance (spawn parent, outcome), keyed by agentId. */
   readonly subagentInstances: ReadonlyMap<string, SubagentInstanceInfo>;
+  /** Archive ring behind the live registry: closed instances' last derived
+   *  rows, oldest first. */
+  readonly recentSubagentInstances: readonly SubagentInstanceRow[];
   readonly session: Session | undefined;
   showError(msg: string): void;
   setTasksBrowser(value: TasksBrowserState | undefined): void;
@@ -248,10 +251,15 @@ export class TasksBrowserController {
   }
 
   /** Agents view rows: the live slot state machine (authoritative status)
-   *  enriched with the per-instance provenance registry. Rebuilt on every
-   *  refresh/repaint — both sources are in-memory snapshots. */
+   *  enriched with the per-instance provenance registry, plus the archive ring
+   *  for agents whose registry record has already been released. Rebuilt on
+   *  every refresh/repaint — all three sources are in-memory snapshots. */
   private snapshotAgentRows(): readonly AgentRow[] {
-    return buildAgentRows(this.host.subagentSlots, this.host.subagentInstances);
+    return buildAgentRows(
+      this.host.subagentSlots,
+      this.host.subagentInstances,
+      this.host.recentSubagentInstances,
+    );
   }
 
   private buildCallbacks(): {

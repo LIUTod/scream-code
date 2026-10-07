@@ -10,6 +10,12 @@ import type { StreamingUIController } from '#/tui/controllers/streaming-ui';
 import type { TasksBrowserController } from '#/tui/controllers/tasks-browser';
 import type { TUIState } from '#/tui/tui-state';
 import type { TranscriptEntry } from '#/tui/types';
+import {
+  buildAgentRows,
+  createSubagentInstanceInfo,
+  MAX_RECENT_SUBAGENT_INSTANCES,
+  withSubagentInstanceEnded,
+} from '#/tui/utils/subagent-instances';
 
 function createMockHost(): SessionEventHost {
   const streamingUI = {
@@ -1217,7 +1223,7 @@ describe('SessionEventHandler — main-agent RLM status filtering', () => {
     expect(handler.subagentInfo.get('sub-1')?.parentToolCallId).toBe('sub-1');
   });
 
-  it('closes the instance with its terminal outcome on completed / failed', () => {
+  it('archives the terminal outcome and releases the record on completed / failed', () => {
     const host = createMockHost();
     const handler = new SessionEventHandler(host);
     const spawn = (id: string): void => {
@@ -1244,8 +1250,14 @@ describe('SessionEventHandler — main-agent RLM status filtering', () => {
       } as unknown as Event,
       vi.fn(),
     );
-    expect(handler.getSubagentInstances().get('sub-ok')?.outcome).toBe('completed');
-    expect(handler.getSubagentInstances().get('sub-ok')?.endedAt).toEqual(expect.any(Number));
+    // The record leaves the live registry on close; its outcome is archived in
+    // the row the Agents view keeps rendering.
+    expect(handler.getSubagentInstances().has('sub-ok')).toBe(false);
+    expect(handler.getRecentSubagentInstances().at(-1)).toMatchObject({
+      type: 'coder',
+      status: 'completed',
+      live: false,
+    });
 
     spawn('sub-bad');
     handler.handleEvent(
@@ -1257,16 +1269,20 @@ describe('SessionEventHandler — main-agent RLM status filtering', () => {
       } as unknown as Event,
       vi.fn(),
     );
-    expect(handler.getSubagentInstances().get('sub-bad')?.outcome).toBe('failed');
+    expect(handler.getSubagentInstances().has('sub-bad')).toBe(false);
+    expect(handler.getRecentSubagentInstances().at(-1)).toMatchObject({
+      type: 'coder',
+      status: 'failed',
+      live: false,
+    });
   });
 
-  it('reopens the same record on a resume without losing its start time', () => {
+  it('archives the finished run and registers the resumed one as a fresh live record', () => {
     const host = createMockHost();
     const handler = new SessionEventHandler(host);
-    // Fake just `Date` (restored below) so the two spawns land on
-    // distinguishable timestamps: with the real clock both happen in the same
-    // millisecond, and "kept the original start time" passes even when the
-    // resume re-stamps `Date.now()`.
+    // Fake just `Date` (restored below) so the two runs land on distinguishable
+    // timestamps: with the real clock both happen in the same millisecond and a
+    // re-stamped start time would be invisible.
     vi.useFakeTimers({ toFake: ['Date'] });
     try {
       const spawn = (): void => {
@@ -1285,8 +1301,9 @@ describe('SessionEventHandler — main-agent RLM status filtering', () => {
 
       vi.setSystemTime(1_000);
       spawn();
-      const spawnedAt = handler.getSubagentInstances().get('sub-1')?.spawnedAt;
-      expect(spawnedAt).toBe(1_000);
+      expect(handler.getSubagentInstances().get('sub-1')?.spawnedAt).toBe(1_000);
+
+      vi.setSystemTime(2_000);
       handler.handleEvent(
         {
           ...baseEvent('subagent.completed'),
@@ -1296,15 +1313,21 @@ describe('SessionEventHandler — main-agent RLM status filtering', () => {
         } as unknown as Event,
         vi.fn(),
       );
-      expect(handler.getSubagentInstances().get('sub-1')?.endedAt).toBeDefined();
+      // The finished run leaves the live registry and lives on as the archived
+      // row the Agents view still renders.
+      expect(handler.getSubagentInstances().has('sub-1')).toBe(false);
+      expect(handler.getRecentSubagentInstances().at(-1)).toMatchObject({
+        type: 'coder',
+        status: 'completed',
+      });
 
       // Second spawn of the same agentId = the main agent resumed it. The
-      // clock has moved on, so a re-stamped start time would be visible here.
+      // resumed run is a new live cycle, so its start time is stamped anew —
+      // the clock has moved on, and a stale start time would be visible here.
       vi.setSystemTime(61_000);
       spawn();
       const resumed = handler.getSubagentInstances().get('sub-1');
-      expect(resumed?.spawnedAt).toBe(spawnedAt);
-      expect(resumed?.spawnedAt).toBe(1_000);
+      expect(resumed?.spawnedAt).toBe(61_000);
       expect(resumed?.endedAt).toBeUndefined();
       expect(resumed?.outcome).toBeUndefined();
     } finally {
@@ -1350,5 +1373,101 @@ describe('SessionEventHandler — main-agent RLM status filtering', () => {
 
     handler.resetRuntimeState();
     expect(handler.getSubagentInstances().size).toBe(0);
+  });
+
+  it('bounds the archive ring FIFO and empties both registries across 1000 terminations', () => {
+    const host = createMockHost();
+    const handler = new SessionEventHandler(host);
+    const emit = (id: string, type: string, at?: string): void => {
+      handler.handleEvent(
+        {
+          ...baseEvent(type),
+          subagentId: id,
+          subagentName: 'coder',
+          parentToolCallId: `tc-${id}`,
+          parentAgentId: 'main',
+          description: at === undefined ? undefined : `task ${at}`,
+          runInBackground: false,
+          resultSummary: 'done',
+        } as unknown as Event,
+        vi.fn(),
+      );
+    };
+
+    for (let i = 0; i < 1000; i += 1) {
+      emit(`agent-${i}`, 'subagent.spawned', String(i));
+      emit(`agent-${i}`, 'subagent.completed');
+    }
+
+    // Nothing survives its run in the live registry…
+    expect(handler.getSubagentInstances().size).toBe(0);
+    // …the archive keeps exactly the newest closures (FIFO: the oldest drops
+    // off), so neither the retained rows nor the per-refresh rebuild grows…
+    const ring = handler.getRecentSubagentInstances();
+    expect(ring).toHaveLength(MAX_RECENT_SUBAGENT_INSTANCES);
+    expect(ring[0]!.description).toBe(`task ${1000 - MAX_RECENT_SUBAGENT_INSTANCES}`);
+    expect(ring.at(-1)!.description).toBe('task 999');
+    expect(ring.every((row) => row.status === 'completed' && !row.live)).toBe(true);
+    // …and the slot machine is back to resting.
+    expect(handler.getSubagentSlots().filter((s) => s.count > 0 || s.status !== 'idle')).toEqual([]);
+  });
+
+  it('archives rows field-identical to the view derivation (20 samples)', () => {
+    const host = createMockHost();
+    const handler = new SessionEventHandler(host);
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      const type = 'coder';
+      for (let i = 0; i < 20; i += 1) {
+        const id = `agent-${i}`;
+        const description = `task ${i}`;
+        const spawnedAt = 10_000 + i * 100;
+        const endedAt = spawnedAt + 50;
+        const spawnEvent = {
+          type: 'subagent.spawned' as const,
+          subagentId: id,
+          subagentName: type,
+          parentToolCallId: `tc-${i}`,
+          parentAgentId: 'main',
+          description,
+          runInBackground: false,
+        };
+
+        vi.setSystemTime(spawnedAt);
+        handler.handleEvent({ ...baseEvent('subagent.spawned'), ...spawnEvent } as unknown as Event, vi.fn());
+        vi.setSystemTime(endedAt);
+        handler.handleEvent(
+          {
+            ...baseEvent('subagent.completed'),
+            subagentId: id,
+            parentToolCallId: `tc-${i}`,
+            resultSummary: 'done',
+          } as unknown as Event,
+          vi.fn(),
+        );
+
+        // The row the view derives for the closed instance, computed from the
+        // same inputs the handler had at close time (registry snapshot still
+        // holding the terminal outcome + the post-termination slot state).
+        const expected = buildAgentRows(
+          handler.getSubagentSlots(),
+          new Map([
+            [
+              id,
+              withSubagentInstanceEnded(
+                createSubagentInstanceInfo(spawnEvent, undefined, spawnedAt),
+                'completed',
+                endedAt,
+              ),
+            ],
+          ]),
+        ).find((row) => row.key === type);
+
+        expect(expected).toBeDefined();
+        expect(handler.getRecentSubagentInstances().at(-1)).toEqual(expected);
+      }
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
