@@ -104,29 +104,55 @@ export class MemoryMemoStore {
     // filtering was introduced. This is intentional — project queries always
     // include global/legacy entries alongside the requested project.
     //
-    // Rows are fetched in bounded LIMIT/OFFSET batches (same shape as listAll)
-    // so peak memory stays flat on large stores instead of materializing every
-    // row up front. `rowid DESC` breaks recorded_at ties to keep page
-    // boundaries stable — without a total order, OFFSET paging can skip or
-    // repeat rows when timestamps collide.
-    const stmt =
+    // Rows are fetched in bounded batches with a keyset (seek) cursor instead
+    // of LIMIT/OFFSET, so peak memory stays flat on large stores *and* the
+    // iteration is a stable snapshot under concurrent writes: every page
+    // resumes from the exact (recorded_at, rowid) of the previous page's last
+    // row, so an append landing above the cursor mid-iteration cannot push an
+    // already-yielded row into the next page (duplicate), and a delete cannot
+    // pull one past the window (skip). (recorded_at DESC, rowid DESC) is a
+    // total order, so on a quiescent store the yielded sequence — and its
+    // tie-breaking — is identical to the previous OFFSET paging.
+    const firstPage =
       projectDir === undefined
         ? this.db.prepare(
-            'SELECT * FROM memos ORDER BY recorded_at DESC, rowid DESC LIMIT ? OFFSET ?',
+            'SELECT rowid AS row_id, * FROM memos ORDER BY recorded_at DESC, rowid DESC LIMIT ?',
           )
         : this.db.prepare(
-            "SELECT * FROM memos WHERE project_dir = ? OR project_dir = '' ORDER BY recorded_at DESC, rowid DESC LIMIT ? OFFSET ?",
+            "SELECT rowid AS row_id, * FROM memos WHERE project_dir = ? OR project_dir = '' ORDER BY recorded_at DESC, rowid DESC LIMIT ?",
           );
-    for (let offset = 0; ; offset += READ_BATCH_SIZE) {
-      const rows = (
-        projectDir === undefined
-          ? stmt.all(READ_BATCH_SIZE, offset)
-          : stmt.all(projectDir, READ_BATCH_SIZE, offset)
-      ) as Array<Record<string, unknown>>;
+    // `?1` is the cursor timestamp (bound once per comparison), `?2` its rowid
+    // tiebreaker and `?3` the page size.
+    const nextPage =
+      projectDir === undefined
+        ? this.db.prepare(
+            'SELECT rowid AS row_id, * FROM memos WHERE recorded_at < ?1 OR (recorded_at = ?1 AND rowid < ?2) ORDER BY recorded_at DESC, rowid DESC LIMIT ?3',
+          )
+        : this.db.prepare(
+            "SELECT rowid AS row_id, * FROM memos WHERE (project_dir = ?1 OR project_dir = '') AND (recorded_at < ?2 OR (recorded_at = ?2 AND rowid < ?3)) ORDER BY recorded_at DESC, rowid DESC LIMIT ?4",
+          );
+    let cursor: { recordedAt: number; rowId: number } | undefined;
+    for (;;) {
+      let rows: Array<Record<string, unknown>>;
+      if (cursor === undefined) {
+        rows = (
+          projectDir === undefined
+            ? firstPage.all(READ_BATCH_SIZE)
+            : firstPage.all(projectDir, READ_BATCH_SIZE)
+        ) as Array<Record<string, unknown>>;
+      } else {
+        rows = (
+          projectDir === undefined
+            ? nextPage.all(cursor.recordedAt, cursor.rowId, READ_BATCH_SIZE)
+            : nextPage.all(projectDir, cursor.recordedAt, cursor.rowId, READ_BATCH_SIZE)
+        ) as Array<Record<string, unknown>>;
+      }
       for (const row of rows) {
         yield rowToMemo(row);
       }
       if (rows.length < READ_BATCH_SIZE) return;
+      const lastRow = rows.at(-1)!;
+      cursor = { recordedAt: Number(lastRow['recorded_at']), rowId: Number(lastRow['row_id']) };
     }
   }
 

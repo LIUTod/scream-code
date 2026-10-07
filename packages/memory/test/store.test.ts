@@ -16,12 +16,15 @@ interface RecordedSqlCall {
   sql: string;
   args: unknown[];
   rowCount: number;
+  /** Last row of the batch — the keyset cursor the next page must resume from. */
+  lastRow: Record<string, unknown> | undefined;
 }
 
 /**
  * Record every `prepare(...).all(...)` issued by the store's db handle.
- * Used to prove read() pages with bounded LIMIT/OFFSET batches: a revert to
- * full-materialization (`stmt.all()` with no LIMIT) turns the assertions red.
+ * Used to prove read() pages with a bounded keyset cursor: a revert to
+ * full-materialization (`stmt.all()` with no LIMIT) or to LIMIT/OFFSET paging
+ * turns the assertions red.
  */
 function spyOnSelects(store: MemoryMemoStore): {
   calls: RecordedSqlCall[];
@@ -35,7 +38,12 @@ function spyOnSelects(store: MemoryMemoStore): {
     const origAll = stmt.all.bind(stmt) as (...args: unknown[]) => unknown[];
     stmt.all = ((...args: unknown[]) => {
       const rows = origAll(...args);
-      calls.push({ sql, args, rowCount: rows.length });
+      calls.push({
+        sql,
+        args,
+        rowCount: rows.length,
+        lastRow: rows.at(-1) as Record<string, unknown> | undefined,
+      });
       return rows;
     }) as typeof stmt.all;
     return stmt;
@@ -47,6 +55,14 @@ function spyOnSelects(store: MemoryMemoStore): {
     },
   };
 }
+
+/** read()'s paging SELECTs — the only memo SELECTs that carry a LIMIT. */
+function memoPageCalls(spy: { calls: RecordedSqlCall[] }): RecordedSqlCall[] {
+  return spy.calls.filter((c) => c.sql.includes('FROM memos') && c.sql.includes('LIMIT'));
+}
+
+/** The keyset predicate every page after the first must carry. */
+const KEYSET_PREDICATE = 'recorded_at < ?1 OR (recorded_at = ?1 AND rowid < ?2)';
 
 function makeMemo(overrides: Partial<MemoryMemo> = {}): MemoryMemo {
   return createMemoryMemo({
@@ -266,14 +282,27 @@ describe('MemoryMemoStore', () => {
           Array.from({ length: 1000 }, (_, k) => `memo-exact-${999 - k}`),
         );
 
-        const pageCalls = spy.calls.filter((c) => c.sql.includes('FROM memos') && c.sql.includes('LIMIT'));
+        const pageCalls = memoPageCalls(spy);
         // 2 full pages + 1 terminating empty page probe.
         expect(pageCalls.length).toBe(3);
         for (const call of pageCalls) {
           expect(call.sql).toContain('ORDER BY recorded_at DESC, rowid DESC');
-          expect(call.args[0]).toBe(PAGE_SIZE);
+          expect(call.sql).not.toContain('OFFSET');
         }
-        expect(pageCalls.map((c) => c.args[1])).toEqual([0, 500, 1000]);
+        // Page 1 has no cursor; every later page seeks from the previous page's
+        // last row and is bounded by PAGE_SIZE.
+        expect(pageCalls[0]!.sql).not.toContain('recorded_at <');
+        expect(pageCalls[0]!.args).toEqual([PAGE_SIZE]);
+        for (let k = 1; k < pageCalls.length; k++) {
+          const call = pageCalls[k]!;
+          expect(call.sql).toContain(KEYSET_PREDICATE);
+          const previousLastRow = pageCalls[k - 1]!.lastRow!;
+          expect(call.args).toEqual([
+            previousLastRow['recorded_at'],
+            previousLastRow['row_id'],
+            PAGE_SIZE,
+          ]);
+        }
       } finally {
         spy.restore();
       }
@@ -295,10 +324,18 @@ describe('MemoryMemoStore', () => {
           Array.from({ length: 1250 }, (_, k) => `memo-uneven-${1249 - k}`),
         );
 
-        const pageCalls = spy.calls.filter((c) => c.sql.includes('FROM memos') && c.sql.includes('LIMIT'));
+        const pageCalls = memoPageCalls(spy);
         expect(pageCalls.length).toBe(3);
-        expect(pageCalls.map((c) => c.args[1])).toEqual([0, 500, 1000]);
         expect(pageCalls.map((c) => c.rowCount)).toEqual([500, 500, 250]);
+        expect(pageCalls[0]!.args).toEqual([PAGE_SIZE]);
+        for (let k = 1; k < pageCalls.length; k++) {
+          const previousLastRow = pageCalls[k - 1]!.lastRow!;
+          expect(pageCalls[k]!.args).toEqual([
+            previousLastRow['recorded_at'],
+            previousLastRow['row_id'],
+            PAGE_SIZE,
+          ]);
+        }
       } finally {
         spy.restore();
       }
@@ -306,7 +343,8 @@ describe('MemoryMemoStore', () => {
 
     it('breaks recorded_at ties by rowid DESC so page boundaries are stable', async () => {
       // Same timestamp for every row: order must still be total (newest insert
-      // first) or LIMIT/OFFSET pages would skip/repeat rows.
+      // first), so the keyset cursor is a strict seek and pages cannot skip or
+      // repeat rows.
       for (let i = 0; i < 5; i++) {
         await store.append(makeMemo({ id: `memo-tie-${i}`, recordedAt: 42 }));
       }
@@ -324,8 +362,9 @@ describe('MemoryMemoStore', () => {
     });
 
     it('revert-red: a non-paged read() fails the SQL batch probe', async () => {
-      // Guards against silently reintroducing stmt.all() full materialization:
-      // the probe asserts LIMIT paging + bounded batch args + query count.
+      // Guards against silently reintroducing stmt.all() full materialization
+      // or LIMIT/OFFSET paging: the probe asserts one bounded keyset seek per
+      // page, each resuming from the previous page's last row.
       for (let i = 0; i < 600; i++) {
         await store.append(makeMemo({ id: `memo-probe-${i}`, recordedAt: 3000 + i }));
       }
@@ -337,25 +376,80 @@ describe('MemoryMemoStore', () => {
         }
         expect(seen.length).toBe(600);
 
-        const memoSelects = spy.calls.filter((c) => c.sql.includes('FROM memos'));
-        // Pagination must actually happen: more than one bounded SELECT,
-        // never a single unbounded materialization.
-        expect(memoSelects.length).toBeGreaterThan(1);
-        for (const call of memoSelects) {
-          expect(call.sql).toMatch(/LIMIT \? OFFSET \?/);
+        const pageCalls = memoPageCalls(spy);
+        // Pagination must actually happen: 500 + 100, never a single
+        // unbounded materialization and never an OFFSET-shifted window.
+        expect(pageCalls.length).toBe(2);
+        for (const call of pageCalls) {
           expect(call.sql).toContain('ORDER BY recorded_at DESC, rowid DESC');
-          // args: (limit, offset) — limit pinned to PAGE_SIZE, offset advances.
-          expect(call.args[0]).toBe(PAGE_SIZE);
-          expect(call.args[1]).toBeTypeOf('number');
+          expect(call.sql).not.toContain('OFFSET');
           expect(call.rowCount).toBeLessThanOrEqual(PAGE_SIZE);
         }
-        const offsets = memoSelects.map((c) => c.args[1] as number);
-        expect(offsets).toEqual(
-          Array.from({ length: memoSelects.length }, (_, k) => k * PAGE_SIZE),
-        );
+        expect(pageCalls[0]!.rowCount).toBe(PAGE_SIZE);
+        expect(pageCalls[0]!.args).toEqual([PAGE_SIZE]);
+        const second = pageCalls[1]!;
+        expect(second.sql).toContain(KEYSET_PREDICATE);
+        expect(second.args).toEqual([
+          pageCalls[0]!.lastRow!['recorded_at'],
+          pageCalls[0]!.lastRow!['row_id'],
+          PAGE_SIZE,
+        ]);
+        expect(second.rowCount).toBe(100);
       } finally {
         spy.restore();
       }
+    }, 30_000);
+
+    it('keeps the snapshot stable when an append lands between two pages', async () => {
+      const total = 1000;
+      for (let i = 0; i < total; i++) {
+        await store.append(makeMemo({ id: `memo-snap-${i}`, recordedAt: 1000 + i }));
+      }
+      const injected = makeMemo({ id: 'memo-snap-injected', recordedAt: 1_000_000 });
+
+      const seen: string[] = [];
+      for await (const memo of store.read()) {
+        seen.push(memo.id);
+        // Page boundary: the generator has yielded the last row of a full page
+        // and is parked before its next query, so this append — a newer
+        // recorded_at, i.e. a row above the cursor — lands exactly between
+        // page 1 and page 2. Under OFFSET paging it would shift the window
+        // down and repeat this page's last row on the next one.
+        if (seen.length === PAGE_SIZE) await store.append(injected);
+      }
+
+      // No row was yielded twice...
+      expect(new Set(seen).size).toBe(seen.length);
+      // ...and the snapshot still holds every row that existed when it began,
+      // in order — the append neither duplicated nor displaced anything.
+      expect(seen).toEqual(Array.from({ length: total }, (_, k) => `memo-snap-${total - 1 - k}`));
+
+      // The appended memo sorts above the cursor, so the snapshot simply does
+      // not include it — comparing against the final store proves nothing else
+      // went missing.
+      const finalIds: string[] = [];
+      for await (const memo of store.read()) finalIds.push(memo.id);
+      expect(finalIds.length).toBe(total + 1);
+      expect(new Set(finalIds)).toEqual(new Set([...seen, injected.id]));
+    }, 30_000);
+
+    it('keeps the snapshot stable when a delete lands between two pages', async () => {
+      const total = 1000;
+      for (let i = 0; i < total; i++) {
+        await store.append(makeMemo({ id: `memo-gone-${i}`, recordedAt: 1000 + i }));
+      }
+
+      const seen: string[] = [];
+      for await (const memo of store.read()) {
+        seen.push(memo.id);
+        // Delete the newest row — already yielded — at the page boundary.
+        // Under OFFSET paging the window would shift up and pull one
+        // not-yet-yielded row past it; a keyset cursor is unaffected.
+        if (seen.length === PAGE_SIZE) await store.delete(`memo-gone-${total - 1}`);
+      }
+
+      expect(new Set(seen).size).toBe(total);
+      expect(seen).toEqual(Array.from({ length: total }, (_, k) => `memo-gone-${total - 1 - k}`));
     }, 30_000);
   });
 
