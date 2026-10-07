@@ -30,6 +30,12 @@ export type SuffixMatchCache = Map<string, SuffixMatchResult | null>;
 // the unique match. Returns null on zero matches, multiple matches
 // (ambiguous), or timeout (5s). A missing searchRoot yields nothing from
 // jian.glob and also resolves to null.
+//
+// The walk is cancelled when this call stops waiting for it: on timeout the
+// AbortController fires before the race resolves, so the traversal neither
+// outlives the call nor keeps stat-ing the tree in the background — a bare
+// `break`/`return` cannot close a generator the caller is no longer pulling
+// from.
 export async function findUniqueSuffixMatch(
   rawPath: string,
   searchRoot: string,
@@ -37,7 +43,7 @@ export async function findUniqueSuffixMatch(
   cache?: SuffixMatchCache,
 ): Promise<SuffixMatchResult | null> {
   const normalized = rawPath
-    .replaceAll(/\\/g, '/')
+    .replaceAll('\\', '/')
     .replace(/^\.\//, '')
     .replace(/\/+$/, '');
   if (!normalized) return null;
@@ -49,16 +55,30 @@ export async function findUniqueSuffixMatch(
 
   const pattern = `**/${escapeGlobMetachars(normalized)}`;
   const matches: string[] = [];
+  const controller = new AbortController();
   let timer: NodeJS.Timeout | undefined;
   try {
     const globPromise = (async () => {
-      for await (const filePath of jian.glob(searchRoot, pattern, { allowedRoots: [searchRoot] })) {
+      for await (const filePath of jian.glob(searchRoot, pattern, {
+        allowedRoots: [searchRoot],
+        signal: controller.signal,
+      })) {
         matches.push(filePath);
         if (matches.length > 1) break;
       }
     })();
+    // When the timeout wins the race this promise keeps running until the
+    // aborted walk reaches its next checkpoint. Attach a handler so a backend
+    // that reports cancellation by *throwing* cannot surface as an unhandled
+    // rejection after this function has returned.
+    globPromise.catch(() => {});
     const timeoutPromise = new Promise<void>((resolve) => {
-      timer = setTimeout(resolve, SUFFIX_MATCH_TIMEOUT_MS);
+      timer = setTimeout(() => {
+        // Abort first, resolve second: by the time the race settles the walk
+        // is already condemned, and its next checkpoint ends it.
+        controller.abort();
+        resolve();
+      }, SUFFIX_MATCH_TIMEOUT_MS);
       timer.unref?.();
     });
     await Promise.race([globPromise, timeoutPromise]);

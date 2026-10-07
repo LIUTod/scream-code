@@ -140,6 +140,14 @@ function createSystemPromptRenderer(merged: MergedAgentProfile): SystemPromptRen
       // declares `spawns`. IS_MAIN additionally gates main-only sections.
       CAN_SPAWN: merged.root || (merged.spawns?.length ?? 0) > 0,
       IS_MAIN: merged.root,
+      // Tool-existence gate for the file-mutation pair: the guidance blocks in
+      // system.md are written as a `Read` -> `Write`/`Edit` protocol, so a
+      // profile that owns neither tool must not be told to use them
+      // (read-only specialists: explore, verify, plan, reviewer). Both names
+      // are required — hiding guidance is the safe direction, instructing a
+      // tool an agent cannot call is not. Complemented by the guard in
+      // test/profile/prompt-tool-consistency.test.ts.
+      HAS_WRITE_EDIT: merged.tools.includes('Write') && merged.tools.includes('Edit'),
     };
     try {
       return renderPrompt(merged.systemPromptTemplate, vars);

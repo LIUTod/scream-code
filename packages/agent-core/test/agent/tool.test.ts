@@ -351,6 +351,7 @@ describe('Agent tools', () => {
       [emit] turn.started                 { "turnId": 1, "origin": { "kind": "user" } }
       [wire] context.append_message       { "message": { "role": "user", "content": [ { "type": "text", "text": "Can you still use Lookup?" } ], "toolCalls": [], "origin": { "kind": "user" }, "id": "m5" }, "time": "<time>" }
       [wire] context.append_message       { "message": { "role": "user", "content": [ { "type": "text", "text": "<system-reminder>\\n## 当前会话状态\\n\\n### 最近操作\\n\\n- ✅ Lookup — moon\\n\\n</system-reminder>" } ], "toolCalls": [], "origin": { "kind": "injection", "variant": "session_memory" }, "id": "m6" }, "time": "<time>" }
+      [wire] context.prefix_break         { "breakIndex": 0, "prevMessageCount": 4, "currentMessageCount": 7, "appendedSinceLast": 3, "time": "<time>" }
       [wire] context.append_loop_event    { "event": { "type": "step.begin", "uuid": "<uuid-11>", "turnId": "1", "step": 1 }, "time": "<time>" }
       [emit] turn.step.started            { "turnId": 1, "step": 1, "stepId": "<uuid-11>" }
       [wire] request.header               { "provider": "scream", "model": "mock-model", "modelAlias": "mock-model", "systemPromptReused": true, "activeTools": [], "messagesCount": 7, "estimatedInputTokens": "<tokens>", "time": "<time>" }

@@ -21,6 +21,7 @@ function registerControlClient(overrides: Record<string, unknown> = {}) {
         busy: false,
         wolfpackMode: false,
         rlmEnabled: false,
+        rlmMaxDepth: null,
         planMode: false,
         planStrategy: 'normal',
       },
@@ -255,15 +256,51 @@ describe('useSlashCommands', () => {
     expect(client.switchRlm).toHaveBeenCalledWith(true, 3);
   });
 
-  it('rejects invalid RLM depth and explains a query without sending a mutation', async () => {
+  it('reports the current RLM depth for a bare /rlm-max-depth query', async () => {
+    const client = registerControlClient();
+    const h = makeHandlers();
+    const { onCommand } = useSlashCommands(h.handlers);
+    const status = client.status as unknown as { value: { rlmMaxDepth?: number | null } };
+
+    status.value.rlmMaxDepth = 3;
+    await onCommand('rlm-max-depth');
+    expect(h.appendSystemMessage).toHaveBeenLastCalledWith('RLM 最大深度：3。');
+
+    status.value.rlmMaxDepth = null;
+    await onCommand('rlm-max-depth');
+    expect(h.appendSystemMessage).toHaveBeenLastCalledWith('RLM 最大深度：无限（默认）。');
+
+    // A status that has not synced the field yet also reads as unlimited.
+    delete status.value.rlmMaxDepth;
+    await onCommand('rlm-max-depth');
+    expect(h.appendSystemMessage).toHaveBeenLastCalledWith('RLM 最大深度：无限（默认）。');
+
+    // The query form never mutates the RLM state.
+    expect(client.switchRlm).not.toHaveBeenCalled();
+  });
+
+  it('keeps the session guard for a bare /rlm-max-depth without a client', async () => {
+    const h = makeHandlers();
+    const { onCommand } = useSlashCommands(h.handlers);
+
+    await onCommand('rlm-max-depth');
+
+    expect(h.appendSystemMessage).not.toHaveBeenCalled();
+    const guard = useToast().toasts.value.find((t) => t.message.includes('请先创建或打开一个会话'));
+    expect(guard?.type).toBe('warning');
+  });
+
+  it('rejects an invalid RLM depth without sending a mutation', async () => {
     const client = registerControlClient();
     const h = makeHandlers();
     const { onCommand } = useSlashCommands(h.handlers);
 
     await onCommand('rlm-max-depth', '-1');
-    await onCommand('rlm-max-depth');
+
     expect(client.switchRlm).not.toHaveBeenCalled();
-    expect(h.appendSystemMessage).toHaveBeenCalledWith(expect.stringContaining('/rlm-max-depth <N>'));
+    expect(
+      useToast().toasts.value.some((t) => t.message.includes('RLM 深度需为 0 或非负整数')),
+    ).toBe(true);
   });
 
   it('maps /fusionplan toggle semantics to the fusion REST strategy', async () => {

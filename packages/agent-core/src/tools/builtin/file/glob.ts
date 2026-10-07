@@ -294,6 +294,11 @@ export class GlobTool implements BuiltinTool<GlobInput> {
         for await (const filePath of this.jian.glob(root, args.pattern, {
           allowedRoots: [root],
           exclude,
+          // Forwarded so an ESC/steer reaches the walker itself: the walk
+          // checks per directory entry, which is what stops a pattern with
+          // few or no matches (the `yielded % 128` heartbeat below never
+          // fires for those, since it only counts yielded matches).
+          signal,
         })) {
           yielded++;
           if (signal && yielded % 128 === 0) {
@@ -326,6 +331,15 @@ export class GlobTool implements BuiltinTool<GlobInput> {
           entries.push({ path: filePath, mtime });
         }
       }
+
+      // The walker stops *gracefully* on abort (it returns instead of
+      // throwing), so the enumeration above can end because the caller
+      // cancelled it. A cancelled search must not be reported — or cached —
+      // as a completed one: "No matches found" would be a false negative, and
+      // the scan cache would keep serving it until the next file write.
+      // Re-check the signal so the abort surfaces as AbortError, exactly as
+      // the heartbeat check above and the catch block below expect.
+      signal?.throwIfAborted();
 
       entries.sort((a, b) => b.mtime - a.mtime);
 

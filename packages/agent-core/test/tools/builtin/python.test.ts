@@ -1,3 +1,7 @@
+import { stat } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import type { ExecutableToolContext } from '#/loop/types';
@@ -41,6 +45,29 @@ describe('PythonTool (persistent kernel)', () => {
     expect(r1.isError).toBeFalsy();
     const r2 = await runTool(tool, { code: 'print(math.sqrt(16))' });
     expect(String(r2.output)).toContain('4.0');
+  }, 20_000);
+
+  it.skipIf(process.platform === 'win32')('writes the state snapshot with 0600 permissions', async () => {
+    // `hostHandlers` enables the RLM bridge, which is also what schedules
+    // `_snapshot()`; the snapshot lands as the kernel accepts the next line.
+    const snapshotPath = join(
+      tmpdir(),
+      `scream-python-snap-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.pkl`,
+    );
+    const tool2 = new PythonTool(process.cwd(), { hostHandlers: {}, snapshotPath });
+    try {
+      const r1 = await runTool(tool2, { code: 'snap_probe = 41' });
+      expect(r1.isError).toBeFalsy();
+      // The second call proves the first call's `_snapshot()` has finished.
+      const r2 = await runTool(tool2, { code: 'print(snap_probe)' });
+      const r2Text = typeof r2.output === 'string' ? r2.output : JSON.stringify(r2.output);
+      expect(r2Text).toContain('41');
+
+      const info = await stat(snapshotPath);
+      expect(info.mode & 0o777).toBe(0o600);
+    } finally {
+      tool2.dispose();
+    }
   }, 20_000);
 
   it('returns tracebacks as error output', async () => {

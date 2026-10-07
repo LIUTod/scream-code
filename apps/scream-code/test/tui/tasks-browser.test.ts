@@ -8,10 +8,16 @@ import {
   type TasksFilter,
 } from '@/tui/components/dialogs/tasks-browser';
 import { darkColors } from '@/tui/theme/colors';
+import type { AgentRow } from '@/tui/utils/subagent-instances';
 
 const ANSI_SGR = /\[[0-9;]*m/g;
 function strip(text: string): string {
   return text.replaceAll(ANSI_SGR, '');
+}
+
+/** Detail-pane row: the component left-pads labels to 14 columns. */
+function detailRow(label: string, value: string): string {
+  return `${label.padEnd(14)}${value}`;
 }
 
 /** Minimal Terminal stub — only `rows` is read by the component. */
@@ -58,6 +64,7 @@ function task(overrides: Partial<BackgroundTaskInfo> = {}): BackgroundTaskInfo {
 function makeProps(overrides: Partial<TasksBrowserProps> = {}): TasksBrowserProps {
   return {
     tasks: [],
+    agents: [],
     filter: 'all',
     selectedTaskId: undefined,
     tailOutput: undefined,
@@ -73,6 +80,24 @@ function makeProps(overrides: Partial<TasksBrowserProps> = {}): TasksBrowserProp
     onStopIgnored: vi.fn(),
     ...overrides,
   } as TasksBrowserProps;
+}
+
+function agentRow(overrides: Partial<AgentRow> = {}): AgentRow {
+  return {
+    key: 'coder',
+    type: 'coder',
+    status: 'working',
+    live: true,
+    count: 1,
+    detail: 'tool: Bash',
+    lastActivityAt: Date.now() - 5_000,
+    description: 'fix the parser',
+    instanceId: 'agent-1',
+    source: { kind: 'tool', name: 'WolfPack', description: 'parallel fix' },
+    ancestors: [],
+    chainTruncated: false,
+    ...overrides,
+  };
 }
 
 function makeApp(
@@ -438,12 +463,158 @@ describe('TasksBrowserApp — setProps', () => {
 
   it('switches the filter via setProps without throwing', () => {
     const tasks = [task({ status: 'completed' })];
-    const filters: TasksFilter[] = ['all', 'active', 'all'];
+    const filters: TasksFilter[] = ['all', 'active', 'agents', 'all'];
     const app = makeApp({ tasks });
     for (const filter of filters) {
       expect(() => {
         app.setProps(makeProps({ tasks, filter }));
       }).not.toThrow();
     }
+  });
+});
+
+describe('TasksBrowserApp — agents view', () => {
+  it('renders the Agents pane, the agent detail and the no-output note', () => {
+    const out = strip(
+      makeApp({
+        agents: [agentRow({ ancestors: ['researcher'], chainTruncated: false })],
+        filter: 'agents',
+      })
+        .render(120)
+        .join('\n'),
+    );
+    expect(out).toContain('filter=AGENTS');
+    expect(out).toContain('子代理 [1]');
+    expect(out).toContain('coder');
+    expect(out).toContain('工作中');
+    expect(out).toContain('tool: Bash');
+    expect(out).toContain('代理详情');
+    expect(out).toContain(detailRow('类型：', 'coder'));
+    expect(out).toContain(detailRow('来源：', 'WolfPack · parallel fix'));
+    expect(out).toContain(detailRow('父链：', '主代理 → researcher → coder'));
+    expect(out).toContain(detailRow('描述：', 'fix the parser'));
+    expect(out).toContain(detailRow('最新活动：', 'tool: Bash'));
+    expect(out).toContain(detailRow('实例：', 'agent-1'));
+    expect(out).toContain('子代理输出显示在对话卡片中');
+  });
+
+  it('names each attribution kind and keeps an unresolvable source honest', () => {
+    const rows = [
+      agentRow({ key: 'coder', type: 'coder', source: { kind: 'agent', name: 'researcher', description: 'survey' } }),
+      agentRow({ key: 'verify', type: 'verify', source: { kind: 'rlm', name: undefined, description: undefined } }),
+      agentRow({ key: 'writer', type: 'writer', source: { kind: 'main', name: undefined, description: undefined } }),
+      agentRow({ key: 'oracle', type: 'oracle', source: { kind: 'unknown', name: undefined, description: undefined } }),
+    ];
+    const app = makeApp({ agents: rows, filter: 'agents' });
+    const frames: string[] = [];
+    for (let i = 0; i < rows.length; i++) {
+      if (i > 0) app.handleInput('j');
+      frames.push(strip(app.render(120).join('\n')));
+    }
+    expect(frames[0]).toContain(detailRow('来源：', '由 researcher 派生 · survey'));
+    expect(frames[1]).toContain(detailRow('来源：', 'RLM 派生'));
+    expect(frames[2]).toContain(detailRow('来源：', '主代理直接派生'));
+    expect(frames[3]).toContain(detailRow('来源：', '独立（无父线索）'));
+  });
+
+  it('shows terminal outcomes and the live/ended header split', () => {
+    const out = strip(
+      makeApp({
+        agents: [
+          agentRow(),
+          agentRow({ key: 'verify', type: 'verify', status: 'failed', live: false, instanceId: undefined }),
+        ],
+        filter: 'agents',
+      })
+        .render(120)
+        .join('\n'),
+    );
+    expect(out).toContain('1 运行中');
+    expect(out).toContain('1 已结束');
+    expect(out).toContain('已失败');
+  });
+
+  it('shows an empty state when no subagent ran in this session', () => {
+    const out = strip(makeApp({ agents: [], filter: 'agents' }).render(120).join('\n'));
+    expect(out).toContain('子代理 [0]');
+    expect(out).toContain('本会话无活动子代理。');
+    expect(out).toContain('0 子代理');
+  });
+
+  it('moves the agent selection locally without touching the task selection', () => {
+    const onSelect = vi.fn();
+    const app = makeApp({
+      agents: [
+        agentRow({ key: 'coder', type: 'coder' }),
+        agentRow({ key: 'verify', type: 'verify', status: 'outputting' }),
+      ],
+      filter: 'agents',
+      onSelect,
+    });
+    app.handleInput('j');
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(strip(app.render(120).join('\n'))).toContain(detailRow('类型：', 'verify'));
+    app.handleInput('k');
+    expect(strip(app.render(120).join('\n'))).toContain(detailRow('类型：', 'coder'));
+  });
+
+  it('keeps the same agent selected across prop refreshes by slot key', () => {
+    const app = makeApp({
+      agents: [agentRow({ key: 'coder' }), agentRow({ key: 'verify', type: 'verify' })],
+      filter: 'agents',
+    });
+    app.handleInput('j');
+    expect(strip(app.render(120).join('\n'))).toContain(detailRow('类型：', 'verify'));
+    // Rows re-sort on refresh: the same key must stay selected.
+    app.setProps(
+      makeProps({
+        agents: [agentRow({ key: 'verify', type: 'verify' }), agentRow({ key: 'coder' })],
+        filter: 'agents',
+      }),
+    );
+    expect(strip(app.render(120).join('\n'))).toContain(detailRow('类型：', 'verify'));
+  });
+
+  it('keeps stop, output-open and confirm keys inert in the agents view', () => {
+    const onOpenOutput = vi.fn();
+    const onStopConfirmed = vi.fn();
+    const onStopIgnored = vi.fn();
+    const app = makeApp({
+      agents: [agentRow()],
+      filter: 'agents',
+      onOpenOutput,
+      onStopConfirmed,
+      onStopIgnored,
+    });
+    app.handleInput('o');
+    app.handleInput('\r');
+    app.handleInput('s');
+    app.handleInput('y');
+    expect(onOpenOutput).not.toHaveBeenCalled();
+    expect(onStopConfirmed).not.toHaveBeenCalled();
+    expect(onStopIgnored).not.toHaveBeenCalled();
+    expect(strip(app.render(120).join('\n'))).not.toContain('停止 coder?');
+  });
+
+  it('drops task-only key hints from the footer and keeps Tab/R/Esc wired', () => {
+    const onToggleFilter = vi.fn();
+    const onRefresh = vi.fn();
+    const onCancel = vi.fn();
+    const app = makeApp({
+      agents: [agentRow()],
+      filter: 'agents',
+      onToggleFilter,
+      onRefresh,
+      onCancel,
+    });
+    const out = strip(app.render(120).join('\n'));
+    expect(out).not.toContain('Enter/O');
+    expect(out).toContain('刷新');
+    app.handleInput('\t');
+    app.handleInput('r');
+    app.handleInput('q');
+    expect(onToggleFilter).toHaveBeenCalledTimes(1);
+    expect(onRefresh).toHaveBeenCalledTimes(1);
+    expect(onCancel).toHaveBeenCalledTimes(1);
   });
 });

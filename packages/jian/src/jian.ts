@@ -53,6 +53,16 @@ export interface Jian {
    * `stat` per entry. Omitted (or empty) prunes nothing, and the walk
    * root itself is never tested, so an explicitly addressed root is
    * always walked.
+   *
+   * `signal` cooperatively cancels the walk: it is polled once per directory
+   * and once per directory entry, and an aborted walk ends by returning like
+   * an exhausted one — the consumer's `for await` finishes, no exception is
+   * thrown. Omitted → unchanged behaviour, so callers that never abandon a
+   * walk can ignore it.
+   *
+   * A single walk enters each *physical* directory at most twice (see
+   * `MAX_PHYSICAL_REVISITS` in `local.ts`); a symlink farm therefore costs
+   * O(physical tree) rather than O(number of alias paths).
    */
   glob(
     path: string,
@@ -61,6 +71,7 @@ export interface Jian {
       caseSensitive?: boolean;
       allowedRoots?: readonly string[];
       exclude?: readonly string[];
+      signal?: AbortSignal;
     },
   ): AsyncGenerator<string>;
 
@@ -81,7 +92,10 @@ export interface Jian {
     path: string,
     options?: { encoding?: BufferEncoding; errors?: 'strict' | 'replace' | 'ignore' },
   ): Promise<string>;
-  /** Yield lines from the file at `path` one by one. */
+  /**
+   * Yield lines from the file at `path` one by one, applying the same `errors`
+   * and leading-BOM handling as `readText`.
+   */
   readLines(
     path: string,
     options?: { encoding?: BufferEncoding; errors?: 'strict' | 'replace' | 'ignore' },

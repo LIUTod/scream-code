@@ -3,7 +3,7 @@ markit-ai (https://github.com/Michaelliv/markit), used under the MIT License.
 
   Copyright (c) 2026 Michael Liv
 
-Only the converters for the document formats omp supports are ported (pdf,
+Only the converters for the document formats this codebase needs are ported (pdf,
 docx, pptx, xlsx, epub); the CLI, plugin/provider, and unused converters
 (html, image, audio, plain-text, rss, github, wikipedia, csv, json, yaml,
 ipynb, iwork, zip, xml) were dropped. Legacy binary `.doc`/`.ppt`/`.xls` and

@@ -105,6 +105,7 @@ export function glob(
     caseSensitive?: boolean;
     allowedRoots?: readonly string[];
     exclude?: readonly string[];
+    signal?: AbortSignal;
   },
 ): AsyncGenerator<string> {
   return getCurrentJian().glob(path, pattern, options);

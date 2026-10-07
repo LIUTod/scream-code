@@ -5,6 +5,7 @@ import {
   messageFingerprint,
   serializeMessage,
   stablePrefixLength,
+  toolDeclarationsFingerprint,
 } from '../../src/agent/context/prefix-fingerprint';
 
 function user(text: string): Message {
@@ -22,6 +23,14 @@ function toolResult(toolCallId: string, text: string): Message {
     toolCalls: [],
     toolCallId,
   };
+}
+
+function tool(
+  name: string,
+  description = `${name} description`,
+  parameters?: unknown,
+): { name: string; description: string; parameters: unknown } {
+  return { name, description, parameters: parameters ?? { type: 'object', properties: {} } };
 }
 
 describe('prefix-fingerprint', () => {
@@ -98,6 +107,66 @@ describe('prefix-fingerprint', () => {
       // Same roles/ids but the tool result content mutated -> prefix breaks at index 1.
       const current = [user('q'), markerResult];
       expect(stablePrefixLength(prev, current)).toBe(1);
+    });
+  });
+
+  describe('toolDeclarationsFingerprint', () => {
+    it('is stable across calls and ignores key insertion order (schema included)', () => {
+      const first = toolDeclarationsFingerprint([
+        tool('Read', 'read a file', {
+          type: 'object',
+          properties: { path: { type: 'string' }, limit: { type: 'number' } },
+          required: ['path'],
+        }),
+      ]);
+      // Same values, keys inserted in another order at both levels — a schema
+      // assembled by a different code path must not look like a change.
+      const second = toolDeclarationsFingerprint([
+        tool('Read', 'read a file', {
+          required: ['path'],
+          properties: { limit: { type: 'number' }, path: { type: 'string' } },
+          type: 'object',
+        }),
+      ]);
+
+      const build = () => toolDeclarationsFingerprint([tool('Read', 'read a file')]);
+      expect(second).toBe(first);
+      expect(build()).toBe(build());
+    });
+
+    it('changes when the offered tool set changes (MCP reconnect, /script, profile switch)', () => {
+      const base = toolDeclarationsFingerprint([tool('Bash'), tool('Read')]);
+      // A tool appears (MCP server reconnect) or disappears (/script off).
+      expect(toolDeclarationsFingerprint([tool('Bash'), tool('Read'), tool('Write')])).not.toBe(base);
+      expect(toolDeclarationsFingerprint([tool('Bash')])).not.toBe(base);
+    });
+
+    it('changes when a declaration is reordered (order is provider-visible)', () => {
+      // The loop sends name-sorted tools, so a reorder is a real byte change,
+      // not presentation: the hash must not normalize it away.
+      expect(toolDeclarationsFingerprint([tool('Read'), tool('Bash')])).not.toBe(
+        toolDeclarationsFingerprint([tool('Bash'), tool('Read')]),
+      );
+    });
+
+    it('changes when a description or parameter schema changes (RunScript re-describes per step)', () => {
+      const base = toolDeclarationsFingerprint([tool('RunScript', 'calls: Read, Bash')]);
+      expect(toolDeclarationsFingerprint([tool('RunScript', 'calls: Read, Bash, Write')])).not.toBe(base);
+      expect(
+        toolDeclarationsFingerprint([
+          tool('Read', 'read a file', { type: 'object', required: ['path'] }),
+        ]),
+      ).not.toBe(
+        toolDeclarationsFingerprint([
+          tool('Read', 'read a file', { type: 'object', required: ['path', 'limit'] }),
+        ]),
+      );
+    });
+
+    it('distinguishes an empty table from a populated one', () => {
+      expect(toolDeclarationsFingerprint([])).not.toBe(
+        toolDeclarationsFingerprint([tool('Read')]),
+      );
     });
   });
 });

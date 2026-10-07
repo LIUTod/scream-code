@@ -18,6 +18,7 @@ import {
 import {
   createLoopEventDispatcher,
   runTurn,
+  type ExecutableTool,
   type LoopEvent,
   type LoopRecordedEvent,
   type LoopTurnStopReason,
@@ -640,6 +641,17 @@ export class TurnFlow {
     // applies to the NEXT turn by design (turn config stability), while the
     // registration maps stay live for mid-turn plugin tools.
     const turnToolFilter = this.agent.tools.snapshotEnabledTools();
+    // Holder for the offered table of the step currently being built,
+    // republished by the `buildTools` callback below. Prefix-stability
+    // observation fingerprints the request prefix, so it must see the table
+    // this step advertises — reading the live enabled-name set instead would
+    // report a break for a mid-turn setActiveTools that the frozen filter
+    // (correctly) held back until the next turn. The loop resolves the tool
+    // table before building the messages of the same step
+    // (loop/turn-step.ts), so what `buildMessages` reads is what goes out.
+    const stepTools: { current: readonly ExecutableTool[] | undefined } = {
+      current: undefined,
+    };
     // Wait for MCP initial load, but bound it: a slow or hung server must
     // never stall the first turn indefinitely. Each server already isolates
     // its own startup timeout, so here we only cap the aggregate wait — on
@@ -660,8 +672,9 @@ export class TurnFlow {
           // Use messagesForLLM (not the bare `messages` getter) so each
           // LLM-bound build is fingerprinted for prefix-stability / prompt
           // cache observation. The returned messages are identical; this
-          // only adds observability.
-          buildMessages: () => this.agent.context.messagesForLLM(),
+          // only adds observability. `stepTools` is passed along so the
+          // fingerprint covers the tool declaration table of this step too.
+          buildMessages: () => this.agent.context.messagesForLLM(stepTools.current),
           dispatchEvent: this.buildDispatchEvent(turnId),
           tools: this.agent.tools.loopTools,
           // Per-step rebuild (buildTools wins over the snapshot above): a
@@ -669,7 +682,7 @@ export class TurnFlow {
           // must be dispatchable on the very next step of THIS turn. The
           // enabled-name filter is frozen at turn start, so a mid-turn
           // setActiveTools still waits for the next turn by design.
-          buildTools: () => this.agent.tools.loopToolsFor(turnToolFilter),
+          buildTools: () => (stepTools.current = this.agent.tools.loopToolsFor(turnToolFilter)),
           log: this.agent.log,
           maxSteps: loopControl?.maxStepsPerTurn,
           maxRetryAttempts: loopControl?.maxRetriesPerStep,

@@ -54,6 +54,11 @@ import {
   renderChildRequestNotice,
 } from '../utils/child-request-notice';
 import { SubagentSlots, type SubagentSlot } from '../utils/subagent-slots';
+import {
+  createSubagentInstanceInfo,
+  withSubagentInstanceEnded,
+  type SubagentInstanceInfo,
+} from '../utils/subagent-instances';
 import { formatBackgroundTaskTranscript } from '../utils/background-task-status';
 import { formatHookResultMarkdown, formatHookResultPlain } from '../utils/hook-result-format';
 import {
@@ -180,6 +185,14 @@ export class SessionEventHandler {
   subagentInfo: Map<string, { parentToolCallId: string; name: string }> = new Map();
   /** Sidebar subagent slot state machine (see utils/subagent-slots.ts). */
   readonly subagentSlots = new SubagentSlots();
+  /**
+   * Per-instance provenance registry (see utils/subagent-instances.ts), read
+   * by the /tasks browser's Agents view. Captured at spawn because the two
+   * clues stop being available later: `subagentInfo.parentToolCallId` is
+   * rewritten to a WolfPack routing id for WolfPack children, and the
+   * spawning tool call leaves the active set as soon as it returns.
+   */
+  private readonly subagentInstances = new Map<string, SubagentInstanceInfo>();
   /** Tool callId of the in-flight UpdateGoal(complete) (judging), if any. */
   private goalJudgeCallId: string | undefined;
   /** Rolling first-token latencies of real requests, feeding the sidebar Hub
@@ -201,6 +214,7 @@ export class SessionEventHandler {
     this.backgroundTaskTranscriptedTerminal.clear();
     this.subagentInfo.clear();
     this.subagentSlots.reset();
+    this.subagentInstances.clear();
     this.renderedSkillActivationIds.clear();
     this.renderedMcpServerStatusKeys.clear();
     this.stopAllMcpServerStatusSpinners();
@@ -347,6 +361,36 @@ export class SessionEventHandler {
     return this.subagentSlots.getSlots();
   }
 
+  /** Read-only snapshot of the per-instance provenance registry (Agents view
+   *  of the /tasks browser). Keyed by subagent agentId. */
+  getSubagentInstances(): ReadonlyMap<string, SubagentInstanceInfo> {
+    return this.subagentInstances;
+  }
+
+  /** Remember (or refresh, on resume) one spawned instance. The spawning tool
+   *  call is resolved here, while it is still in flight. */
+  private rememberSubagentInstance(event: SubagentSpawnedEvent, fallbackParentAgentId?: string): void {
+    const previous = this.subagentInstances.get(event.subagentId);
+    const parentToolCall = this.host.streamingUI.getActiveToolCall(event.parentToolCallId);
+    this.subagentInstances.set(
+      event.subagentId,
+      createSubagentInstanceInfo(
+        // Routed (nested) spawns may come from older emitters without
+        // parentAgentId — the routed owner id is the same fact.
+        { ...event, parentAgentId: event.parentAgentId ?? fallbackParentAgentId },
+        parentToolCall,
+        previous?.spawnedAt,
+      ),
+    );
+  }
+
+  /** Close an instance record on subagent.completed / subagent.failed. */
+  private closeSubagentInstance(agentId: string, outcome: 'completed' | 'failed'): void {
+    const info = this.subagentInstances.get(agentId);
+    if (info === undefined) return;
+    this.subagentInstances.set(agentId, withSubagentInstanceEnded(info, outcome));
+  }
+
   /** Keep the last few first-token latencies, per provider. Steps without a
    *  measured latency (no stream, cached turn) are ignored rather than counted
    *  as a zero. */
@@ -390,6 +434,8 @@ export class SessionEventHandler {
     switch (event.type) {
       case 'subagent.spawned':
         this.subagentSlots.onSpawned(event.subagentId, event.subagentName, event.description);
+        // Routed spawn: the emitting agent (the routed owner) is the parent.
+        this.rememberSubagentInstance(event, agentId);
         break;
       case 'subagent.started':
         this.subagentSlots.onStarted(event.subagentId);
@@ -397,6 +443,10 @@ export class SessionEventHandler {
       case 'subagent.completed':
       case 'subagent.failed':
         this.subagentSlots.onTerminated(event.subagentId);
+        this.closeSubagentInstance(
+          event.subagentId,
+          event.type === 'subagent.failed' ? 'failed' : 'completed',
+        );
         break;
       case 'tool.call.started':
         // Asking the parent for help is not ordinary tool work: raise the
@@ -1303,6 +1353,7 @@ export class SessionEventHandler {
 
   private handleSubagentSpawned(event: SubagentSpawnedEvent): void {
     this.subagentSlots.onSpawned(event.subagentId, event.subagentName, event.description);
+    this.rememberSubagentInstance(event);
     const { streamingUI } = this.host;
 
     // WolfPack spawns N subagents from a single tool call. To render each as
@@ -1392,6 +1443,7 @@ export class SessionEventHandler {
 
   private handleSubagentCompleted(event: SubagentCompletedEvent): void {
     this.subagentSlots.onTerminated(event.subagentId);
+    this.closeSubagentInstance(event.subagentId, 'completed');
     this.recordSubagentUsage(event.subagentId, undefined, event.usage);
     const { streamingUI } = this.host;
     const backgroundMeta = this.backgroundAgentMetadata.get(event.subagentId);
@@ -1433,6 +1485,7 @@ export class SessionEventHandler {
 
   private handleSubagentFailed(event: SubagentFailedEvent): void {
     this.subagentSlots.onTerminated(event.subagentId);
+    this.closeSubagentInstance(event.subagentId, 'failed');
     this.recordSubagentUsage(event.subagentId, undefined, event.usage);
     const { streamingUI } = this.host;
     const backgroundMeta = this.backgroundAgentMetadata.get(event.subagentId);

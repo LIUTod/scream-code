@@ -3,7 +3,7 @@ import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { DEFAULT_AGENT_PROFILES } from '../../src/profile';
+import { DEFAULT_AGENT_PROFILES, resolveAgentProfiles } from '../../src/profile';
 
 /**
  * Prompt ↔ tool consistency guard.
@@ -25,6 +25,14 @@ import { DEFAULT_AGENT_PROFILES } from '../../src/profile';
  * When a check fails, fix the drift: enable the tool for that profile, gate
  * the section on `IS_MAIN` / `CAN_SPAWN` in `system.md`, or add the name to
  * an allowance below with a one-line reason.
+ *
+ * Sections that *instruct* a tool call carry a condition instead of an
+ * allowance. `resolve.ts` derives the tool-existence variables from the
+ * profile's own `tools:` list — `IS_MAIN`, `CAN_SPAWN`, and `HAS_WRITE_EDIT`
+ * (the profile declares both `Write` and `Edit`, the pair the file-mutation
+ * guidance is written around). Wrap any new instruction in the matching one;
+ * the last two checks below pin both directions (never mention what the role
+ * cannot call, never strip the guidance from a role that can).
  */
 
 const PACKAGE_ROOT = join(import.meta.dirname, '..', '..');
@@ -57,8 +65,10 @@ const MAIN_PROMPT_ALLOWANCES = new Map<string, string>([
 const SUBAGENT_PROMPT_ALLOWANCES = new Map<string, string>([
   ['Agent', 'the word appears in prose ("AI Agent assistant") and in anti-hallucination guards'],
   ['Skill', 'the skills section carries an explicit fallback to reading the skill file'],
-  ['Edit', 'tool-mapping table row (shell pattern -> builtin tool), a routing hint'],
-  ['Write', 'tool-mapping table row (shell pattern -> builtin tool), a routing hint'],
+  // "Write the code in a modular and maintainable way" / "Write a plan that is
+  // executable ..." — the English verb, not a tool reference. Every actual
+  // tool mention is gated on HAS_WRITE_EDIT and covered by the check below.
+  ['Write', 'prose verb in the coding/planning guidance, not an instruction to call a tool'],
   ['LSP', 'tool-mapping table row (symbol navigation), a routing hint'],
   ['ImageGenerate', 'self-assets section: which main-only builtin manages image config'],
   ['KnowledgeLookup', 'self-assets section: which main-only builtin reads the knowledge base'],
@@ -177,5 +187,71 @@ describe('prompt ↔ tool consistency', () => {
     }
 
     expect(missing).toEqual([]);
+  });
+
+  /**
+   * Tool-existence conditioning, negative direction: a role that cannot call
+   * `Write` / `Edit` must not be handed file-mutation instructions. The
+   * rendered prompt is the surface the subagent reads, so a leftover
+   * "use `Write`" paragraph is a broken instruction, not a cosmetic issue.
+   * Only code-spanned names count — the bare verb ("Write the code in a
+   * modular way") is prose.
+   */
+  it('never instructs a profile without Write/Edit to use them', () => {
+    const issues: string[] = [];
+    for (const [profileName, profile] of Object.entries(DEFAULT_AGENT_PROFILES)) {
+      const enabled = new Set(profile?.tools ?? []);
+      if (enabled.has('Write') && enabled.has('Edit')) continue;
+      const prompt = profile?.systemPrompt(promptContext) ?? '';
+      const mentioned = [...prompt.matchAll(/`(Write|Edit)`/g)].map((match) => match[1]);
+      if (mentioned.length > 0) {
+        issues.push(`${profileName}: ${[...new Set(mentioned)].join(', ')}`);
+      }
+    }
+
+    expect(issues).toEqual([]);
+  });
+
+  /**
+   * Tool-existence conditioning, positive direction: the gate must not be
+   * stuck off. A `HAS_WRITE_EDIT` typo (or a condition wired to the wrong
+   * variable) would silently strip these paragraphs from the *main* prompt —
+   * the byte-stable prefix the provider cache depends on.
+   */
+  it('keeps the Write/Edit guidance for profiles that own the pair', () => {
+    for (const [profileName, profile] of Object.entries(DEFAULT_AGENT_PROFILES)) {
+      const enabled = new Set(profile?.tools ?? []);
+      const ownsPair = enabled.has('Write') && enabled.has('Edit');
+      const prompt = profile?.systemPrompt(promptContext) ?? '';
+      // The mapping rows, the tool-implementation bullets, and the Read->Edit
+      // anchor protocol are the three gated paragraphs.
+      expect(prompt.includes('| `echo ... > file` or heredocs to create files | `Write` |'), profileName).toBe(
+        ownsPair,
+      );
+      expect(prompt.includes('- Use `Write` to create or overwrite source files.'), profileName).toBe(
+        ownsPair,
+      );
+      expect(prompt.includes('prefer `Read` before `Edit`'), profileName).toBe(ownsPair);
+    }
+  });
+
+  /**
+   * The variables are derived from the profile's own tool list at resolve
+   * time, so `extends` inheritance and partial tool sets behave predictably:
+   * both names are required, and a child that adds the pair turns the section
+   * back on without re-declaring the template.
+   */
+  it('derives HAS_WRITE_EDIT from the resolved profile tool list', () => {
+    const template = 'role:{% if HAS_WRITE_EDIT %}mutating{% else %}read-only{% endif %}';
+    const profiles = resolveAgentProfiles([
+      { name: 'root', tools: ['Read'], systemPromptTemplate: template },
+      { name: 'full', extends: 'root', tools: ['Read', 'Write', 'Edit'] },
+      { name: 'write-only', extends: 'root', tools: ['Read', 'Write'] },
+    ]);
+
+    expect(profiles['root']?.systemPrompt(promptContext)).toBe('role:read-only');
+    expect(profiles['full']?.systemPrompt(promptContext)).toBe('role:mutating');
+    // Half the pair is not the pair: the guidance assumes both tools exist.
+    expect(profiles['write-only']?.systemPrompt(promptContext)).toBe('role:read-only');
   });
 });

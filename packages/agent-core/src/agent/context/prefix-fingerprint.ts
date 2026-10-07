@@ -16,6 +16,10 @@
  * signatures), and tool calls. Context-internal metadata (origin, useless,
  * partial) is intentionally excluded because `project()` already strips it
  * before it reaches the provider.
+ *
+ * The request also carries the tool declaration table, which providers place
+ * *before* the messages — its own fingerprint lives in
+ * {@link toolDeclarationsFingerprint}.
  */
 
 import type { ContentPart, Message, ToolCall } from '@scream-code/ltod';
@@ -82,6 +86,54 @@ export function serializeMessage(message: Message): string {
 /** Per-message fingerprint. Equal fingerprints => equal provider bytes. */
 export function messageFingerprint(message: Message): string {
   return hashString(serializeMessage(message));
+}
+
+/**
+ * Provider-visible shape of one tool declaration.
+ *
+ * Structural on purpose: the request layer hands over live `ExecutableTool`
+ * instances, whose execute closures, host references and runtime metadata
+ * never reach the provider. Only the three fields the provider adapters
+ * serialize are read.
+ */
+export interface ToolDeclaration {
+  readonly name: string;
+  readonly description?: string | undefined;
+  readonly parameters?: unknown;
+}
+
+/**
+ * Fingerprint of the tool declaration table attached to a request.
+ *
+ * The provider prefix is `[system][tool declarations][messages]`, so a table
+ * change — an MCP server reconnecting, `/script` or the python toggle, a
+ * profile switch — invalidates every cached message behind it even though the
+ * message bytes are untouched. Without this hash such a change is invisible to
+ * the message-level prefix comparison.
+ *
+ * Two stability rules:
+ * - **Declaration order is preserved, not normalized.** Order is part of the
+ *   provider-visible bytes, so a reorder must register as a change. The
+ *   request layer sends `loopTools`, which is name-sorted (`tool/AGENTS.md`).
+ * - **Fields inside a declaration are key-sorted** by {@link stableJson}
+ *   (nested parameter schemas included), so the same table assembled by a
+ *   different code path — or a schema object built with a different key
+ *   insertion order — hashes identically.
+ */
+export function toolDeclarationsFingerprint(tools: readonly ToolDeclaration[]): string {
+  // \u0004 continues the separator sequence the message serializer uses
+  // (\u0000-\u0003), so two concatenated declarations cannot alias.
+  return hashString(
+    tools
+      .map((tool) =>
+        stableJson({
+          name: tool.name,
+          description: tool.description ?? null,
+          parameters: tool.parameters ?? null,
+        }),
+      )
+      .join('\u0004'),
+  );
 }
 
 /**

@@ -23,7 +23,14 @@
   `messageEdits`)
 - `context.prefix_break` (`observePrefixStability`) is diagnostic only: it
   records a cache-prefix break on the wire for auditability, is never replayed
-  into state and never enters a provider request
+  into state and never enters a provider request. It fingerprints the whole
+  request prefix — the tool declaration table (`toolDeclarationsFingerprint`)
+  *and* the messages — because a rebuilt table (MCP reconnect, `/script`
+  toggle, profile switch) invalidates every cached message behind it while
+  leaving those bytes unchanged. `messagesForLLM(tools)` takes the table the
+  request will advertise (the turn loop passes the per-step table it builds
+  against its frozen enabled-name filter); with no argument it falls back to
+  the live `tools.loopTools`
 - Cleanup: `dropVacuousOpenMessages` (drop assistant messages that carry only
   thinking content or nothing when a turn is interrupted)
 - Authorship: `identity.ts` holds the only predicates that answer "did the user

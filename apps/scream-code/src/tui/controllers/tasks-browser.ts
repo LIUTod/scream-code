@@ -6,6 +6,8 @@ import { TaskOutputViewer } from '../components/dialogs/task-output-viewer';
 import { TasksBrowserApp, type TasksFilter } from '../components/dialogs/tasks-browser';
 import type { ColorPalette } from '../theme';
 import type { CustomEditor } from '../components/editor/custom-editor';
+import type { SubagentSlot } from '../utils/subagent-slots';
+import { buildAgentRows, type AgentRow, type SubagentInstanceInfo } from '../utils/subagent-instances';
 
 export interface TasksBrowserHost {
   readonly state: {
@@ -17,6 +19,10 @@ export interface TasksBrowserHost {
     readonly editor: CustomEditor;
   };
   readonly backgroundTasks: ReadonlyMap<string, BackgroundTaskInfo>;
+  /** Sidebar slot snapshot — the live per-type subagent state machine. */
+  readonly subagentSlots: readonly SubagentSlot[];
+  /** Per-instance subagent provenance (spawn parent, outcome), keyed by agentId. */
+  readonly subagentInstances: ReadonlyMap<string, SubagentInstanceInfo>;
   readonly session: Session | undefined;
   showError(msg: string): void;
   setTasksBrowser(value: TasksBrowserState | undefined): void;
@@ -74,6 +80,7 @@ export class TasksBrowserController {
     const component = new TasksBrowserApp(
       {
         tasks,
+        agents: this.snapshotAgentRows(),
         filter,
         selectedTaskId,
         tailOutput: undefined,
@@ -225,6 +232,7 @@ export class TasksBrowserController {
     if (browser === undefined) return;
     browser.component.setProps({
       tasks,
+      agents: this.snapshotAgentRows(),
       filter: browser.filter,
       selectedTaskId: browser.selectedTaskId,
       tailOutput: browser.tailOutput,
@@ -234,6 +242,13 @@ export class TasksBrowserController {
       ...this.buildCallbacks(),
     });
     this.host.state.ui.requestRender();
+  }
+
+  /** Agents view rows: the live slot state machine (authoritative status)
+   *  enriched with the per-instance provenance registry. Rebuilt on every
+   *  refresh/repaint — both sources are in-memory snapshots. */
+  private snapshotAgentRows(): readonly AgentRow[] {
+    return buildAgentRows(this.host.subagentSlots, this.host.subagentInstances);
   }
 
   private buildCallbacks(): {
@@ -286,7 +301,9 @@ export class TasksBrowserController {
   private handleToggleFilter(): void {
     const browser = this.host.state.tasksBrowser;
     if (browser === undefined) return;
-    browser.filter = browser.filter === 'all' ? 'active' : 'all';
+    // Three-stop cycle: tasks (all) → tasks (active) → agents → tasks (all).
+    browser.filter =
+      browser.filter === 'all' ? 'active' : browser.filter === 'active' ? 'agents' : 'all';
     this.repaint();
   }
 

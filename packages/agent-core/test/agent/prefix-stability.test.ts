@@ -16,7 +16,10 @@
  *   volatile content (clock, ids) — which must stay in the dynamic block;
  * - T5: a sub-profile agent (subagent-shaped prompt, prefix independent from
  *   its parent's) keeps the same T1/T2 invariants across its own multi-turn
- *   history.
+ *   history;
+ * - T6: the tool declaration table is part of the observed prefix — a rebuilt
+ *   table (MCP reconnect, /script toggle, profile switch) breaks it at message
+ *   index 0 and is wire-recorded even though every message byte is unchanged.
  */
 import { describe, expect, it } from 'vitest';
 
@@ -247,6 +250,75 @@ describe('prefix stability matrix', () => {
       // Every request path (main loop, compaction) shares this split form.
       expect(systemPromptForRequest(rendered)).toEqual([staticPart, dynamicPart]);
     }
+  });
+
+  it('T6: a tool-declaration change breaks the prefix and is wire-recorded', () => {
+    const { records, onEvent } = collectRecords();
+    const ctx = testAgent({ onEvent });
+    ctx.configure({ tools: ['Read', 'Write'] });
+    ctx.appendExchange(1, 'first question', 'first answer', 20);
+    ctx.appendExchange(2, 'second question', 'second answer', 40);
+
+    const batch1 = ctx.agent.context.messagesForLLM();
+    expect(batch1).toHaveLength(4);
+    // First build of the session: no baseline, no break to report.
+    expect(prefixBreaks(records)).toHaveLength(0);
+
+    // Steady state with a fixed tool table: appends stay off the wire. The tool
+    // fingerprint must not turn an append-only turn into a break.
+    ctx.appendExchange(3, 'third question', 'third answer', 60);
+    const batch2 = ctx.agent.context.messagesForLLM();
+    expect(stablePrefixLength(batch1.map(messageFingerprint), batch2)).toBe(batch1.length);
+    expect(prefixBreaks(records)).toHaveLength(0);
+
+    // The offered table changes (`/script` toggle, MCP server reconnect): the
+    // message bytes are identical to the previous build, so the message-level
+    // comparison calls this a full cache hit — the provider prefix is dead.
+    ctx.agent.tools.setActiveTools(['Read', 'Write', 'Bash']);
+    const batch3 = ctx.agent.context.messagesForLLM();
+    expect(JSON.stringify(batch3)).toBe(JSON.stringify(batch2));
+    expect(stablePrefixLength(batch2.map(messageFingerprint), batch3)).toBe(batch2.length);
+
+    const breaks = prefixBreaks(records);
+    expect(breaks).toHaveLength(1);
+    const brk = breaks[0]!;
+    expect(brk.breakIndex).toBe(0);
+    expect(brk.prevMessageCount).toBe(batch2.length);
+    expect(brk.currentMessageCount).toBe(batch3.length);
+    expect(brk.appendedSinceLast).toBe(0);
+    expect(typeof brk.time).toBe('number');
+
+    // One logical table change -> exactly one record: a rebuild that sends the
+    // already-changed table must not re-report it.
+    ctx.agent.context.messagesForLLM();
+    expect(prefixBreaks(records)).toHaveLength(1);
+
+    // Restoring the table is a change too — the comparison is between table
+    // states, not "has it ever changed".
+    ctx.agent.tools.setActiveTools(['Read', 'Write']);
+    ctx.agent.context.messagesForLLM();
+    expect(prefixBreaks(records)).toHaveLength(2);
+
+    // Profile switch (the subagent path): the child's tool list replaces the
+    // active set, so the declaration table moves again.
+    ctx.agent.useProfile(DEFAULT_AGENT_PROFILES['explore']!);
+    ctx.agent.context.messagesForLLM();
+    expect(prefixBreaks(records)).toHaveLength(3);
+    expect(prefixBreaks(records)[2]!.breakIndex).toBe(0);
+
+    // Explicit-table form — the shape the turn loop uses. The observer follows
+    // the table it is handed, not the live set: a mid-turn `setActiveTools`
+    // that the turn's frozen filter holds back for the next turn must not
+    // register, because the request (and therefore the cache prefix) did not
+    // change. Passing the live table afterwards reports the real move.
+    const frozenTable = ctx.agent.tools.loopToolsFor(ctx.agent.tools.snapshotEnabledTools());
+    ctx.agent.context.messagesForLLM(frozenTable);
+    expect(prefixBreaks(records)).toHaveLength(3);
+    ctx.agent.tools.setActiveTools(['Bash']);
+    ctx.agent.context.messagesForLLM(frozenTable);
+    expect(prefixBreaks(records)).toHaveLength(3);
+    ctx.agent.context.messagesForLLM(ctx.agent.tools.loopTools);
+    expect(prefixBreaks(records)).toHaveLength(4);
   });
 
   it('T5: a sub-profile agent keeps its own append-only prefix across turns', async () => {

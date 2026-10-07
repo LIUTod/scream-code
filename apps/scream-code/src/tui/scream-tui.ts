@@ -78,6 +78,8 @@ import { formatErrorMessage } from './utils/event-payload';
 import { ImageAttachmentStore } from './utils/image-attachment-store';
 import { hasPatchChanges } from './utils/object-patch';
 import { setProcessTitle } from './utils/proctitle';
+import type { SubagentInstanceInfo } from './utils/subagent-instances';
+import type { SubagentSlot } from './utils/subagent-slots';
 import type { SessionRow } from './components/dialogs/session-picker';
 import { detectTmuxKeyboardWarning } from './utils/tmux-keyboard';
 import { SessionManager, type SessionsPrefetch } from './managers/session-manager';
@@ -616,6 +618,18 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
 
   get backgroundTasks(): ReadonlyMap<string, BackgroundTaskInfo> {
     return this.sessionEventHandler.backgroundTasks;
+  }
+
+  /** Live per-type subagent slots (sidebar state machine) — source of the
+   *  /tasks browser's Agents view. */
+  get subagentSlots(): readonly SubagentSlot[] {
+    return this.sessionEventHandler.getSubagentSlots();
+  }
+
+  /** Per-instance subagent provenance (spawn parent / outcome / description),
+   *  keyed by agentId — source of the /tasks browser's Agents view. */
+  get subagentInstances(): ReadonlyMap<string, SubagentInstanceInfo> {
+    return this.sessionEventHandler.getSubagentInstances();
   }
 
   getCurrentSessionId(): string {

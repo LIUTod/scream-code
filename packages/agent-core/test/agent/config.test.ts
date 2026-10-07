@@ -196,6 +196,7 @@ describe('Agent config', () => {
       [emit] turn.started                { "turnId": 1, "origin": { "kind": "user" } }
       [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "Start a fresh turn" } ], "toolCalls": [], "origin": { "kind": "user" }, "id": "m4" }, "time": "<time>" }
       [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "<system-reminder>\\n## 当前会话状态\\n\\n### 最近操作\\n\\n- ✅ Bash — printf original-result\\n\\n</system-reminder>" } ], "toolCalls": [], "origin": { "kind": "injection", "variant": "session_memory" }, "id": "m5" }, "time": "<time>" }
+      [wire] context.prefix_break        { "breakIndex": 0, "prevMessageCount": 3, "currentMessageCount": 6, "appendedSinceLast": 3, "time": "<time>" }
       [wire] context.append_loop_event   { "event": { "type": "step.begin", "uuid": "<uuid-11>", "turnId": "1", "step": 1 }, "time": "<time>" }
       [emit] turn.step.started           { "turnId": 1, "step": 1, "stepId": "<uuid-11>" }
       [wire] request.header              { "provider": "scream", "model": "changed-model", "modelAlias": "changed-model", "systemPrompt": "Changed system prompt.", "activeTools": [], "messagesCount": 6, "estimatedInputTokens": "<tokens>", "time": "<time>" }

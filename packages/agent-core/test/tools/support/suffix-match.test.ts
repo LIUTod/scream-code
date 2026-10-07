@@ -7,6 +7,7 @@ import {
   partitionExistingPaths,
   suffixResolutionNotice,
 } from '../../../src/tools/support/suffix-match';
+import type { SuffixMatchCache } from '../../../src/tools/support/suffix-match';
 import { createFakeJian } from '../fixtures/fake-jian';
 
 const REGULAR_FILE_STAT = {
@@ -98,7 +99,121 @@ describe('findUniqueSuffixMatch', () => {
     expect(result!.absolutePath).toBe('/workspace/node_modules/pkg/index.js');
     expect(globFn).toHaveBeenCalledWith('/workspace', '**/pkg/index.js', {
       allowedRoots: ['/workspace'],
+      // The walk is cancellable: callers that stop waiting for it can stop
+      // the traversal too.
+      signal: expect.any(AbortSignal),
     });
+  });
+});
+
+describe('findUniqueSuffixMatch cancellation', () => {
+  interface ObservedWalk {
+    /** The signal the walker was handed — the seam under test. */
+    signal?: AbortSignal;
+    /** True when the walker woke up *because* the signal aborted. */
+    aborted: boolean;
+    /** True when the walker ran to its `finally` instead of being abandoned. */
+    finalized: boolean;
+  }
+
+  /**
+   * A walk that yields `paths` and then runs until its signal aborts. Models
+   * the real situation: a `**` scan of a large tree that this call stopped
+   * waiting for after 5s.
+   */
+  function cancellableJian(paths: readonly string[], observed: ObservedWalk): Jian {
+    return createFakeJian({
+      glob: async function* (
+        _path: string,
+        _pattern: string,
+        options?: { signal?: AbortSignal },
+      ): AsyncGenerator<string> {
+        observed.signal = options?.signal;
+        try {
+          for (const p of paths) yield p;
+          await new Promise<void>((resolve) => {
+            if (options?.signal?.aborted === true) {
+              resolve();
+              return;
+            }
+            options?.signal?.addEventListener('abort', () => { resolve(); }, { once: true });
+          });
+          observed.aborted = true;
+        } finally {
+          observed.finalized = true;
+        }
+      },
+    });
+  }
+
+  async function flushMicrotasks(): Promise<void> {
+    for (let i = 0; i < 4; i++) await Promise.resolve();
+  }
+
+  it('aborts the underlying walk when the 5s timeout wins', async () => {
+    vi.useFakeTimers();
+    try {
+      const observed: ObservedWalk = { aborted: false, finalized: false };
+      const jian = cancellableJian(['/workspace/src/foo.ts'], observed);
+      const cache: SuffixMatchCache = new Map();
+
+      const promise = findUniqueSuffixMatch('src/foo.ts', '/workspace', jian, cache);
+      // The 5s deadline (SUFFIX_MATCH_TIMEOUT_MS).
+      await vi.advanceTimersByTimeAsync(5000);
+      const result = await promise;
+      await flushMicrotasks();
+
+      // Timeout semantics are unchanged: the single match found before the
+      // deadline is still returned...
+      expect(result!.absolutePath).toBe('/workspace/src/foo.ts');
+      expect(cache.get('src/foo.ts')).toEqual(result);
+      // ...but the walk that produced it is cancelled, not left running
+      // against the tree after this call returned.
+      expect(observed.signal?.aborted).toBe(true);
+      expect(observed.aborted).toBe(true);
+      expect(observed.finalized).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('cancels the walk and records a miss when the timeout fires with no match', async () => {
+    vi.useFakeTimers();
+    try {
+      const observed: ObservedWalk = { aborted: false, finalized: false };
+      const jian = cancellableJian([], observed);
+      const cache: SuffixMatchCache = new Map();
+
+      const promise = findUniqueSuffixMatch('missing.ts', '/workspace', jian, cache);
+      await vi.advanceTimersByTimeAsync(5000);
+      await expect(promise).resolves.toBeNull();
+      await flushMicrotasks();
+
+      expect(observed.signal?.aborted).toBe(true);
+      expect(observed.finalized).toBe(true);
+      expect(cache.get('missing.ts')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('leaves a walk that finished on its own uncancelled', async () => {
+    let seenSignal: AbortSignal | undefined;
+    const jian = createFakeJian({
+      glob: async function* (
+        _path: string,
+        _pattern: string,
+        options?: { signal?: AbortSignal },
+      ): AsyncGenerator<string> {
+        seenSignal = options?.signal;
+        yield '/workspace/foo.ts';
+      },
+    });
+
+    const result = await findUniqueSuffixMatch('foo.ts', '/workspace', jian);
+
+    expect(result!.absolutePath).toBe('/workspace/foo.ts');
+    expect(seenSignal?.aborted).toBe(false);
   });
 });
 

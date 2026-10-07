@@ -157,7 +157,14 @@ export function useSlashCommands(handlers: SlashCommandHandlers) {
   async function dispatchRlmMaxDepth(args?: string): Promise<void> {
     const value = args?.trim() ?? '';
     if (value.length === 0) {
-      handlers.appendSystemMessage('RLM 最大深度：请输入 /rlm-max-depth <N> 设置（0 = 无限）。');
+      // Query form: report the value synced from the session status, matching
+      // the TUI query and the documented `[N]` form (null/absent = unlimited).
+      const queryClient = await ensureSessionClient();
+      if (!queryClient) return;
+      const current = queryClient.status.value.rlmMaxDepth ?? null;
+      handlers.appendSystemMessage(
+        current === null ? 'RLM 最大深度：无限（默认）。' : `RLM 最大深度：${current}。`,
+      );
       return;
     }
     const depth = parseRlmMaxDepth(value);

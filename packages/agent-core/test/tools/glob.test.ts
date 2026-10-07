@@ -95,6 +95,7 @@ describe('GlobTool', () => {
     expect(glob).toHaveBeenCalledWith('/workspace', 'src/**/*.ts', {
       allowedRoots: ['/workspace'],
       exclude: DEFAULT_GLOB_EXCLUDES,
+      signal,
     });
   });
 
@@ -115,6 +116,7 @@ describe('GlobTool', () => {
     expect(glob).toHaveBeenCalledWith('C:/WORKSPACE', 'src/**/*.ts', {
       allowedRoots: ['C:/WORKSPACE'],
       exclude: DEFAULT_GLOB_EXCLUDES,
+      signal,
     });
   });
 
@@ -165,6 +167,7 @@ describe('GlobTool', () => {
     expect(glob).toHaveBeenCalledWith('/workspace', '*.ts', {
       allowedRoots: ['/workspace'],
       exclude: DEFAULT_GLOB_EXCLUDES,
+      signal,
     });
     expect(result.output).toBe('a.ts\nshared.ts');
   });
@@ -181,6 +184,7 @@ describe('GlobTool', () => {
     expect(glob).toHaveBeenCalledWith('/workspace', 'src/**/*.ts', {
       allowedRoots: ['/workspace'],
       exclude: ['.git', 'node_modules'],
+      signal,
     });
   });
 
@@ -193,6 +197,7 @@ describe('GlobTool', () => {
     expect(glob).toHaveBeenCalledWith('/workspace', 'node_modules/react/src/**/*.js', {
       allowedRoots: ['/workspace'],
       exclude: ['.git'],
+      signal,
     });
   });
 
@@ -210,6 +215,7 @@ describe('GlobTool', () => {
     expect(glob).toHaveBeenCalledWith('/extra', 'pkg/**/*.ts', {
       allowedRoots: ['/extra'],
       exclude: DEFAULT_GLOB_EXCLUDES,
+      signal,
     });
   });
 
@@ -272,6 +278,7 @@ describe('GlobTool', () => {
       expect(glob).toHaveBeenCalledWith('/skills', '*.py', {
         allowedRoots: ['/skills'],
         exclude: DEFAULT_GLOB_EXCLUDES,
+        signal,
       });
     });
 
@@ -583,6 +590,7 @@ describe('GlobTool', () => {
     expect(glob).toHaveBeenCalledWith('/workspace/relative/path', '*.py', {
       allowedRoots: ['/workspace/relative/path'],
       exclude: DEFAULT_GLOB_EXCLUDES,
+      signal,
     });
   });
 
@@ -606,6 +614,7 @@ describe('GlobTool', () => {
     expect(glob).toHaveBeenCalledWith('/home/test', '*.py', {
       allowedRoots: ['/home/test'],
       exclude: DEFAULT_GLOB_EXCLUDES,
+      signal,
     });
   });
 
@@ -628,6 +637,7 @@ describe('GlobTool', () => {
     expect(glob).toHaveBeenCalledWith('/parent/workdir-sneaky', '*.py', {
       allowedRoots: ['/parent/workdir-sneaky'],
       exclude: DEFAULT_GLOB_EXCLUDES,
+      signal,
     });
   });
 
@@ -663,6 +673,65 @@ describe('GlobTool', () => {
         signal: controller.signal,
       }),
     ).rejects.toThrow();
+  });
+
+  it('stops a cancelled zero-match scan instead of reporting "No matches found"', async () => {
+    // The 128-yield heartbeat above cannot fire for a pattern with no matches
+    // — it only counts yielded paths. A zero-match scan is therefore only
+    // interruptible if the walker itself gets the signal, which is what the
+    // forwarded `signal` arms. The fake below models a faithful walker: it
+    // polls the signal per entry and returns when it fires.
+    const controller = new AbortController();
+    let seenSignal: AbortSignal | undefined;
+    let entriesVisited = 0;
+    let walkFinished = false;
+    const glob = vi.fn(
+      // eslint-disable-next-line require-yield -- a zero-match scan yields nothing by definition
+      async function* (
+        _path: string,
+        _pattern: string,
+        options?: { signal?: AbortSignal },
+      ): AsyncGenerator<string> {
+        seenSignal = options?.signal;
+        // Zero matches; a long walk that only ends on abort (or after a
+        // bounded number of entries, so the un-fixed code cannot hang).
+        while (options?.signal?.aborted !== true && entriesVisited < 500) {
+          entriesVisited++;
+          await new Promise((resolve) => {
+            setTimeout(resolve, 1);
+          });
+        }
+        walkFinished = true;
+      },
+    );
+    const tool = new GlobTool(
+      createFakeJian({ glob, stat: vi.fn().mockResolvedValue(stat(1)) }),
+      workspace,
+    );
+
+    const abortTimer = setTimeout(() => {
+      controller.abort();
+    }, 10);
+    try {
+      // AbortError is re-thrown (not swallowed into "No matches found") so the
+      // runtime can route it to abortedToolOutput — and an aborted scan is
+      // never written to the scan cache.
+      await expect(
+        executeTool(tool, {
+          ...context({ pattern: '*.xyz', path: '/workspace' }),
+          signal: controller.signal,
+        }),
+      ).rejects.toThrow();
+    } finally {
+      clearTimeout(abortTimer);
+    }
+
+    expect(seenSignal).toBe(controller.signal);
+    expect(walkFinished).toBe(true);
+    // The walk stopped when the caller aborted (around 10 entries), instead of
+    // running the whole 500-entry stand-in.
+    expect(entriesVisited).toBeLessThan(100);
+    expect(scanCache.get('/workspace', '*.xyz', true)).toBeUndefined();
   });
 
   it('mentions Windows path forms in the description on win32 backends', () => {

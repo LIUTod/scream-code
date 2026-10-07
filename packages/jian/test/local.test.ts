@@ -264,6 +264,228 @@ describe('LocalJian', () => {
     });
   });
 
+  describe('readLines streaming decode (Python compat)', () => {
+    // The same invalid-byte shape as the readText cases: valid UTF-8 "中", a
+    // standalone 0xff, valid UTF-8 "文". Streaming must apply the same `errors`
+    // semantics as the whole-file read instead of silently replacing.
+    const invalidBytes = Buffer.concat([
+      Buffer.from([0xe4, 0xb8, 0xad]), // 中
+      Buffer.from([0xff]),
+      Buffer.from([0xe6, 0x96, 0x87]), // 文
+    ]);
+
+    async function collectLines(
+      filePath: string,
+      options?: { encoding?: BufferEncoding; errors?: 'strict' | 'replace' | 'ignore' },
+    ): Promise<string[]> {
+      const lines: string[] = [];
+      for await (const line of jian.readLines(filePath, options)) {
+        lines.push(line);
+      }
+      return lines;
+    }
+
+    it('throws on invalid utf-8 with errors="strict" (default)', async () => {
+      const filePath = join(tempDir, 'lines-invalid.txt');
+      await jian.writeBytes(filePath, invalidBytes);
+
+      await expect(collectLines(filePath, { errors: 'strict' })).rejects.toThrow();
+      await expect(collectLines(filePath)).rejects.toThrow();
+    });
+
+    it('returns U+FFFD replacement characters with errors="replace"', async () => {
+      const filePath = join(tempDir, 'lines-replace.txt');
+      await jian.writeBytes(filePath, invalidBytes);
+
+      expect((await collectLines(filePath, { errors: 'replace' })).join('')).toBe('中\uFFFD文');
+    });
+
+    it('removes a leading BOM, matching the whole-file read', async () => {
+      const filePath = join(tempDir, 'lines-bom.txt');
+      await jian.writeText(filePath, '\uFEFFfirst\nsecond\n');
+
+      expect(await collectLines(filePath)).toEqual(['first\n', 'second\n']);
+      await expect(jian.readText(filePath)).resolves.toBe('first\nsecond\n');
+    });
+
+    it('decodes a multi-byte character split across the 64 KiB chunk boundary', async () => {
+      const filePath = join(tempDir, 'lines-split-chunk.txt');
+      // The euro sign straddles the boundary: its first byte is the last byte
+      // of the first 64 KiB read, the other two open the second chunk.
+      const content = `${'a'.repeat(64 * 1024 - 1)}€tail\nsecond\n`;
+      await jian.writeText(filePath, content);
+
+      const lines = await collectLines(filePath);
+      expect(lines.join('')).toBe(content);
+      expect(lines[0]).toContain('€');
+    });
+
+    it('drops invalid bytes with errors="ignore", matching the whole-file read', async () => {
+      const filePath = join(tempDir, 'lines-ignore.txt');
+      await jian.writeBytes(filePath, invalidBytes);
+
+      const joined = (await collectLines(filePath, { errors: 'ignore' })).join('');
+      expect(joined).toBe('中文');
+      expect(joined).toBe(await jian.readText(filePath, { errors: 'ignore' }));
+    });
+
+    it('preserves valid U+FFFD characters with errors="ignore", matching the whole-file read', async () => {
+      const filePath = join(tempDir, 'lines-ignore-valid-replacement.txt');
+      const data = Buffer.concat([
+        Buffer.from('A\uFFFDB', 'utf-8'),
+        Buffer.from([0xff]),
+        Buffer.from('C', 'utf-8'),
+      ]);
+      await jian.writeBytes(filePath, data);
+
+      const joined = (await collectLines(filePath, { errors: 'ignore' })).join('');
+      expect(joined).toBe('A\uFFFDBC');
+      expect(joined).toBe(await jian.readText(filePath, { errors: 'ignore' }));
+    });
+
+    it('drops invalid bytes per line under errors="ignore" without leaking across lines', async () => {
+      const filePath = join(tempDir, 'lines-ignore-multiline.txt');
+      // An invalid byte on line 1 and a truncated "中" (2 of its 3 bytes) just
+      // before the line-2 LF: the streamed decode must drop exactly what the
+      // whole-file decode drops, character for character.
+      const data = Buffer.concat([
+        Buffer.from('中', 'utf-8'),
+        Buffer.from([0xff]),
+        Buffer.from('\n', 'utf-8'),
+        Buffer.from([0xe4, 0xb8]),
+        Buffer.from('\n', 'utf-8'),
+        Buffer.from('文', 'utf-8'),
+      ]);
+      await jian.writeBytes(filePath, data);
+
+      const joined = (await collectLines(filePath, { errors: 'ignore' })).join('');
+      expect(joined).toBe('中\n\n文');
+      expect(joined).toBe(await jian.readText(filePath, { errors: 'ignore' }));
+    });
+
+    it('keeps the leading-BOM behaviour identical to readText under errors="ignore"', async () => {
+      const filePath = join(tempDir, 'lines-ignore-bom.txt');
+      const data = Buffer.concat([
+        Buffer.from([0xef, 0xbb, 0xbf]),
+        Buffer.from('first\nsecond\n', 'utf-8'),
+      ]);
+      await jian.writeBytes(filePath, data);
+
+      // readText's byte-level `ignore` decoder keeps the file-head BOM (only
+      // the TextDecoder modes strip it), so the streaming read must keep it
+      // too instead of diverging by one character.
+      expect(await jian.readText(filePath, { errors: 'ignore' })).toBe('\uFEFFfirst\nsecond\n');
+      expect((await collectLines(filePath, { errors: 'ignore' })).join('')).toBe(
+        '\uFEFFfirst\nsecond\n',
+      );
+      // strict/replace still strip the BOM at the file head only.
+      expect((await collectLines(filePath)).join('')).toBe('first\nsecond\n');
+      expect((await collectLines(filePath, { errors: 'replace' })).join('')).toBe('first\nsecond\n');
+    });
+
+    it('treats a mid-file BOM as data in every errors mode, matching readText', async () => {
+      const filePath = join(tempDir, 'lines-mid-bom.txt');
+      const data = Buffer.concat([
+        Buffer.from('A', 'utf-8'),
+        Buffer.from([0xef, 0xbb, 0xbf]),
+        Buffer.from('B\nC\n', 'utf-8'),
+      ]);
+      await jian.writeBytes(filePath, data);
+
+      for (const errors of ['strict', 'replace', 'ignore'] as const) {
+        expect((await collectLines(filePath, { errors })).join('')).toBe(
+          await jian.readText(filePath, { errors }),
+        );
+      }
+      // Only a BOM at the very head is a signature; this one is content.
+      expect((await collectLines(filePath)).join('')).toBe('A\uFEFFB\nC\n');
+    });
+
+    it('drops invalid bytes across the 64 KiB chunk boundary under errors="ignore"', async () => {
+      const filePath = join(tempDir, 'lines-ignore-split-chunk.txt');
+      // "中" straddles the first 64 KiB read (its first two bytes end that
+      // chunk) with an invalid byte behind it, so the line's raw bytes must be
+      // held until the terminator instead of being decoded chunk by chunk.
+      const head = 'a'.repeat(64 * 1024 - 2);
+      const data = Buffer.concat([
+        Buffer.from(head, 'utf-8'),
+        Buffer.from([0xe4, 0xb8]),
+        Buffer.from([0xad, 0xff]),
+        Buffer.from('\n', 'utf-8'),
+        Buffer.from('tail\n', 'utf-8'),
+      ]);
+      await jian.writeBytes(filePath, data);
+
+      const joined = (await collectLines(filePath, { errors: 'ignore' })).join('');
+      expect(joined).toBe(`${head}中\ntail\n`);
+      expect(joined).toBe(await jian.readText(filePath, { errors: 'ignore' }));
+      expect(joined).not.toContain('\uFFFD');
+    });
+
+    it('round-trips UTF-16LE text through writeText/readLines in every errors mode', async () => {
+      const filePath = join(tempDir, 'lines-utf16le-roundtrip.txt');
+      const content = 'alpha\nβeta\n日本語\n';
+      await jian.writeText(filePath, content, { encoding: 'utf16le' });
+
+      expect((await collectLines(filePath, { encoding: 'utf16le' })).join('')).toBe(content);
+      expect(
+        (await collectLines(filePath, { encoding: 'utf16le', errors: 'replace' })).join(''),
+      ).toBe(content);
+      expect(
+        (await collectLines(filePath, { encoding: 'utf16le', errors: 'ignore' })).join(''),
+      ).toBe(content);
+      expect(await jian.readText(filePath, { encoding: 'utf16le' })).toBe(content);
+    });
+
+    it('streams UTF-16LE lines past the 64 KiB read and drops lone surrogates under errors="ignore"', async () => {
+      const filePath = join(tempDir, 'lines-utf16le-ignore.txt');
+      const first = `第一行\n${'x'.repeat(70 * 1024)}\n第二行\n`;
+      // A lone low surrogate in the middle and a lone high surrogate at EOF:
+      // both are invalid single code units that the whole-file `ignore` read
+      // drops, so the streamed read must drop them as well.
+      const content = `${first}A\uDC00B\n尾\uD800`;
+      await jian.writeBytes(filePath, Buffer.from(content, 'utf16le'));
+
+      const lines = await collectLines(filePath, { encoding: 'utf16le', errors: 'ignore' });
+      expect(lines.join('')).toBe(`${first}AB\n尾`);
+      expect(lines.join('')).toBe(
+        await jian.readText(filePath, { encoding: 'utf16le', errors: 'ignore' }),
+      );
+    });
+
+    it('keeps the UTF-16LE BOM handling identical to readText', async () => {
+      const filePath = join(tempDir, 'lines-utf16le-bom.txt');
+      const data = Buffer.concat([
+        Buffer.from([0xff, 0xfe]),
+        Buffer.from('first\nsecond\n', 'utf16le'),
+      ]);
+      await jian.writeBytes(filePath, data);
+
+      expect((await collectLines(filePath, { encoding: 'utf16le' })).join('')).toBe(
+        'first\nsecond\n',
+      );
+      const ignored = (await collectLines(filePath, { encoding: 'utf16le', errors: 'ignore' })).join(
+        '',
+      );
+      expect(ignored).toBe('\uFEFFfirst\nsecond\n');
+      expect(ignored).toBe(
+        await jian.readText(filePath, { encoding: 'utf16le', errors: 'ignore' }),
+      );
+    });
+
+    it('rejects with the same error code as readText under errors="strict"', async () => {
+      const filePath = join(tempDir, 'lines-strict-code.txt');
+      await jian.writeBytes(filePath, invalidBytes);
+
+      const lineError = await collectLines(filePath).catch((error: unknown) => error);
+      const textError = await jian.readText(filePath).catch((error: unknown) => error);
+      expect(lineError).toBeInstanceOf(Error);
+      expect(textError).toBeInstanceOf(Error);
+      expect((lineError as { code?: string }).code).toBe('ERR_ENCODING_INVALID_ENCODED_DATA');
+      expect((lineError as { code?: string }).code).toBe((textError as { code?: string }).code);
+    });
+  });
+
   describe('LF preservation', () => {
     it('should not convert LF to CRLF', async () => {
       const filePath = join(tempDir, 'lf.txt');

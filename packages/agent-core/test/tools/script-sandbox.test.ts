@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { CodemodeSandbox } from '@earendil-works/pi-codemode';
+import { CodemodeSandbox, MAX_OUTPUT_CHARS } from '@earendil-works/pi-codemode';
 
 describe('script sandbox (package integration)', () => {
   it('runs a script that calls an injected tool and returns its text output', async () => {
@@ -70,4 +70,31 @@ describe('script sandbox (package integration)', () => {
       await sandbox.close();
     }
   });
+
+  it('fails a script whose output exceeds the package output limit, even when the script swallows the error', async () => {
+    const sandbox = new CodemodeSandbox({ tools: [] });
+    const chunkChars = 100_000;
+    const chunks = Math.ceil(MAX_OUTPUT_CHARS / chunkChars) + 5;
+    try {
+      // The limit exists so one script cannot grow host memory without bound;
+      // it must fail the run even when the throw is caught inside the script.
+      const result = await sandbox.execute(
+        [
+          'try {',
+          `  for (let i = 0; i < ${chunks}; i++) text("x".repeat(${chunkChars}));`,
+          '} catch (error) {',
+          '  text("swallowed");',
+          '}',
+          'text("after");',
+        ].join('\n'),
+      );
+
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error('expected the script to fail');
+      expect(result.error.kind).toBe('script');
+      expect(result.error.message).toContain('exceeded the limit');
+    } finally {
+      await sandbox.close();
+    }
+  }, 30_000);
 });

@@ -5,7 +5,12 @@ import type { ExecutableToolResult, LoopRecordedEvent } from '../../loop';
 import { estimateTokens, estimateTokensForMessages } from '../../utils/tokens';
 import type { CompactionResult } from '../compaction';
 import { isRealUserPrompt } from './identity';
-import { messageFingerprint, stablePrefixLength } from './prefix-fingerprint';
+import {
+  messageFingerprint,
+  stablePrefixLength,
+  toolDeclarationsFingerprint,
+  type ToolDeclaration,
+} from './prefix-fingerprint';
 import { project } from './projector';
 import {
   USER_PROMPT_ORIGIN,
@@ -108,6 +113,15 @@ export class ContextMemory {
    * cache-break signal rather than a reset.
    */
   private lastSentFingerprints: string[] = [];
+
+  /**
+   * Tool declaration fingerprint of the last request
+   * ({@link toolDeclarationsFingerprint}), the half of the provider prefix
+   * that sits *before* the messages. `undefined` until the first LLM-bound
+   * build — no baseline, nothing to compare. Reset together with
+   * {@link lastSentFingerprints} on {@link clear}.
+   */
+  private lastSentToolsFingerprint: string | undefined = undefined;
 
   constructor(protected readonly agent: Agent) {}
 
@@ -217,6 +231,7 @@ export class ContextMemory {
     this.deferredMessages = [];
     this._messageEdits.clear();
     this.lastSentFingerprints = [];
+    this.lastSentToolsFingerprint = undefined;
     this.agent.injection.onContextClear();
     // History was emptied; the micro-compaction cutoff line refers to the
     // pre-clear layout and would elide tool results in the new session's
@@ -528,9 +543,17 @@ export class ContextMemory {
    * runs the same detect + compact + project pipeline, then fingerprints
    * the result and logs how much of the prefix survived since the last
    * call. A stable prefix length equal to the previous message count means
-   * the provider prompt cache should hit; a smaller value means an early
-   * message mutated (compaction summary, micro-compaction truncation, or a
-   * projection repair) and the cache broke from that index.
+   * the provider prompt cache should hit; a smaller value means the bytes
+   * ahead of that index changed — an early message mutated (compaction
+   * summary, micro-compaction truncation, a projection repair), or the tool
+   * declaration table that precedes every message was rebuilt.
+   *
+   * `tools` is the declaration table this request will advertise. A caller
+   * that builds the request hands over the exact table it is about to send
+   * (the turn loop does, so a mid-turn `setActiveTools` that the turn's
+   * frozen filter correctly ignores does not register as a false break).
+   * When omitted the live offered table is used, which is what a direct
+   * caller inspects.
    *
    * Unlike the read-only `messages` getter, this path closes any trailing
    * in-flight tool call by synthesizing an error result (synthesizeMissing):
@@ -538,7 +561,7 @@ export class ContextMemory {
    * tool_calls message with no matching tool result (e.g. after a network
    * drop mid-batch).
    */
-  messagesForLLM(): Message[] {
+  messagesForLLM(tools?: readonly ToolDeclaration[]): Message[] {
     // detect() is also run by fullCompaction.beforeStep at the step
     // boundary; mirroring it here keeps this path behavior-identical to
     // the `messages` getter when called directly (e.g. tests).
@@ -549,7 +572,7 @@ export class ContextMemory {
         synthesizeMissing: true,
       },
     );
-    this.observePrefixStability(messages);
+    this.observePrefixStability(messages, tools);
     return messages;
   }
 
@@ -559,13 +582,29 @@ export class ContextMemory {
    * message content is mutated, only the fingerprint baseline used by the
    * next call's comparison.
    */
-  private observePrefixStability(messages: readonly Message[]): void {
+  private observePrefixStability(
+    messages: readonly Message[],
+    tools?: readonly ToolDeclaration[],
+  ): void {
     const prev = this.lastSentFingerprints;
-    const stable = stablePrefixLength(prev, messages);
+    const prevTools = this.lastSentToolsFingerprint;
+    // The declaration table of this request: the caller-supplied one wins
+    // (the turn loop passes the table it is about to send, built against its
+    // frozen enabled-name filter), otherwise the live offered table — the
+    // same source `loopTools` hands a caller that builds its own request.
+    const toolsFingerprint = toolDeclarationsFingerprint(tools ?? this.agent.tools.loopTools);
+    // Tool declarations precede the messages in the provider prefix, so a
+    // changed table (MCP reconnect, /script or python toggle, profile switch)
+    // leaves nothing behind it reusable: the message prefix survives 0
+    // messages no matter how well the messages themselves match. Comparing
+    // messages alone would report such a request as a cache hit.
+    const toolDeclarationsChanged = prevTools !== undefined && prevTools !== toolsFingerprint;
+    const stable = toolDeclarationsChanged ? 0 : stablePrefixLength(prev, messages);
     // Capture this call's fingerprints for the next comparison. Computed
     // unconditionally so the baseline always reflects the latest sent
     // bytes, even when nothing is logged.
     this.lastSentFingerprints = messages.map(messageFingerprint);
+    this.lastSentToolsFingerprint = toolsFingerprint;
 
     // First call in a session has no baseline; nothing to compare.
     if (prev.length === 0) return;
@@ -594,6 +633,9 @@ export class ContextMemory {
       currentMessageCount: messages.length,
       appendedSinceLast: appended,
       breakIndex: stable,
+      // Debug-only reason field: the wire record stays reason-free for
+      // compatibility, the log is free-form.
+      toolDeclarationsChanged,
     });
     // Persist the break as a wire record so it outlives the debug log (and the
     // log's rotation): cache-break history stays auditable straight off the
@@ -602,6 +644,13 @@ export class ContextMemory {
     // pure observation — nothing consumes it on the way back (restore ignores
     // it, and the trace builder skips record types it does not render), so it
     // is never reconstructed into UI or model state.
+    //
+    // The record carries no reason field on purpose (the payload stays
+    // wire-compatible). A tool-declaration-only change is recognizable by
+    // shape — `breakIndex: 0` with `appendedSinceLast === 0` and equal message
+    // counts; when the table moves in the same build as an append, the record
+    // cannot separate the two causes and the debug line above is the
+    // authority.
     this.agent.records.logRecord({
       type: 'context.prefix_break',
       breakIndex: stable,

@@ -21,7 +21,14 @@ import type { Readable, Writable } from 'node:stream';
 
 import { detectEnvironmentFromNode, type Environment } from './environment';
 import { JianFileExistsError, JianPathOutsideRootError, JianExecError } from './errors';
-import { BufferedReadable, decodeTextWithErrors, globPatternToRegex } from './internal';
+import {
+  BufferedReadable,
+  decodeTextWithErrors,
+  decodeUtf16LeIgnore,
+  decodeUtf8Ignore,
+  globPatternToRegex,
+  utfTextDecoderLabel,
+} from './internal';
 import type { Jian } from './jian';
 import { detachedForProcessTree, isWindowsPlatform, killProcessTree } from './platform';
 import type { JianProcess } from './process';
@@ -130,6 +137,55 @@ function cycleKey(s: { dev: number; ino: number }): string | null {
   if (s.ino === 0) return null;
   return `${String(s.dev)}:${String(s.ino)}`;
 }
+
+/**
+ * How many times one *physical* directory (same `dev:ino` key `cycleKey`
+ * produces) may be entered during a single `glob` traversal.
+ *
+ * 2 = the directory's own place in the tree (the canonical descent) plus one
+ * legitimate symlink alias pointing at the same target — the alias-following
+ * behaviour the existing symlink tests pin (T-C2 / T-C6 in
+ * `test/local.test.ts`). The 3rd and every later entry is skipped.
+ *
+ * Why a global bound on top of the path-local cycle set: path-local
+ * detection only stops a directory from appearing twice *on one descent
+ * path*. A symlink farm — pnpm's `node_modules/.pnpm`, where packages alias
+ * each other in a dense graph — still admits an exponential number of
+ * distinct alias paths to the same physical directories, each of which is
+ * re-`readdir`-ed and re-`stat`-ed. That is what turns one `**` walk into
+ * hours of CPU and tens of thousands of stats per second. With this bound
+ * the work is O(MAX_PHYSICAL_REVISITS × physical tree): a physical directory
+ * is traversed at most this many times, however many paths spell it.
+ *
+ * Trees with no revisit are untouched: the first entry of every directory is
+ * always allowed, so a plain walk behaves exactly as it did before.
+ */
+const MAX_PHYSICAL_REVISITS = 2;
+
+/**
+ * Whether a cooperative-cancellation checkpoint should stop the walk.
+ *
+ * Wrapped in a helper rather than inlined as `signal?.aborted === true` so
+ * control-flow narrowing cannot pin `aborted` to `false` after the first
+ * checkpoint in a function body: the flag flips asynchronously, and every
+ * later checkpoint must still be able to observe `true`.
+ */
+function isAborted(signal: AbortSignal | undefined): boolean {
+  return signal?.aborted === true;
+}
+
+/**
+ * Record one entry of the physical directory `key` for the current traversal.
+ * Returns false when that directory has already been entered
+ * `MAX_PHYSICAL_REVISITS` times, i.e. when this descent must be skipped.
+ */
+function enterPhysical(key: string, entries: Map<string, number>): boolean {
+  const entered = entries.get(key) ?? 0;
+  if (entered >= MAX_PHYSICAL_REVISITS) return false;
+  entries.set(key, entered + 1);
+  return true;
+}
+
 // NOTE: LocalProcess has no auto-kill on dispose. On POSIX with detached:true,
 // a discarded reference leaves the child orphaned (reparented to init).
 // Callers must explicitly kill() or wait() before dropping the reference.
@@ -588,8 +644,19 @@ export class LocalJian implements Jian {
       caseSensitive?: boolean;
       allowedRoots?: readonly string[];
       exclude?: readonly string[];
+      /**
+       * Cooperative cancellation. Checked once per directory and once per
+       * directory entry while walking; an aborted walk returns like an
+       * exhausted one (no exception reaches the consumer). Omitted →
+       * unchanged behaviour.
+       */
+      signal?: AbortSignal;
     },
   ): AsyncGenerator<string> {
+    const signal = options?.signal;
+    // Aborted before the first step: return without touching the filesystem
+    // at all. Later steps are covered by the checkpoints in `_globWalk`.
+    if (isAborted(signal)) return;
     const resolved = this._resolvePath(path);
     const caseSensitive = options?.caseSensitive ?? true;
     // `exclude` is opt-in: an omitted or empty list prunes nothing, so the
@@ -614,10 +681,16 @@ export class LocalJian implements Jian {
     // loop root). `stat` failure here is tolerated: `_globWalk` will
     // hit the same error via readdir and return empty.
     const initVisited = new Set<string>();
+    // Per-traversal entry counter keyed by physical directory identity — see
+    // MAX_PHYSICAL_REVISITS. The walk root counts as its own first entry.
+    const physicalEntries = new Map<string, number>();
     try {
       const rootStat = await stat(resolved);
       const rootKey = cycleKey(rootStat);
-      if (rootKey !== null) initVisited.add(rootKey);
+      if (rootKey !== null) {
+        initVisited.add(rootKey);
+        physicalEntries.set(rootKey, 1);
+      }
     } catch {
       // base does not exist / not accessible — walker handles via its own catch
     }
@@ -628,6 +701,8 @@ export class LocalJian implements Jian {
       initVisited,
       physicalAllowedRoots,
       excludedEntries,
+      signal,
+      physicalEntries,
     );
   }
 
@@ -660,6 +735,20 @@ export class LocalJian implements Jian {
   // tested against it, so an explicitly addressed root is always walked:
   // `glob(root + '/node_modules', '**/*.js', { exclude: ['node_modules'] })`
   // still returns matches. `undefined` (the default) prunes nothing.
+  //
+  // Revisit bound: the `visited` set above is path-local, which does not
+  // keep a symlink farm bounded — see MAX_PHYSICAL_REVISITS. `physicalEntries`
+  // is the per-traversal entry counter for the very same `dev:ino` key: a
+  // directory whose key has been entered that many times already is skipped
+  // before any of its own entries is read. Only *descents* count towards it;
+  // the same-directory `**` re-evaluation above and plain match yields do
+  // not consume budget.
+  //
+  // Cancellation: `signal` is checked once per directory and once per
+  // directory entry, in both cases *before* the step that would cost a
+  // `readdir`, a `stat` or a whole descent. An aborted walk returns like an
+  // exhausted one, so the consumer's `for await` simply ends — no exception
+  // is surfaced.
   private async *_globWalk(
     basePath: string,
     patternParts: string[],
@@ -667,7 +756,10 @@ export class LocalJian implements Jian {
     visited: Set<string>,
     physicalAllowedRoots: readonly string[] | undefined,
     exclude: ReadonlySet<string> | undefined,
+    signal: AbortSignal | undefined,
+    physicalEntries: Map<string, number>,
   ): AsyncGenerator<string> {
+    if (isAborted(signal)) return;
     if (!(await this._isWithinPhysicalRoots(basePath, physicalAllowedRoots))) return;
     if (patternParts.length === 0) {
       return;
@@ -699,12 +791,17 @@ export class LocalJian implements Jian {
           visited,
           physicalAllowedRoots,
           exclude,
+          signal,
+          physicalEntries,
         );
       } else {
         // Pattern ends with `**`: yield basePath itself (zero-dir match).
         yield basePath;
       }
 
+      // Directory-granularity checkpoint: a frame that resumes after an
+      // aborted descent must not pay for reading its own directory.
+      if (isAborted(signal)) return;
       let entries: string[];
       try {
         entries = await readdir(basePath);
@@ -713,6 +810,11 @@ export class LocalJian implements Jian {
       }
 
       for (const entry of entries) {
+        // Cancellation checkpoint, entry granularity — this is the check
+        // that bounds an abandoned walk: when the signal fires, at most one
+        // entry per directory level is still in flight, and the unwind
+        // re-checks here on every level on its way out.
+        if (isAborted(signal)) return;
         // Prune before `join`/`stat`: the point of the option is to avoid
         // paying a stat — and a whole recursive descent — for entries the
         // caller asked to skip.
@@ -729,6 +831,7 @@ export class LocalJian implements Jian {
         if (entryStat.isDirectory()) {
           const key = cycleKey(entryStat);
           if (key !== null && visited.has(key)) continue;
+          if (key !== null && !enterPhysical(key, physicalEntries)) continue;
           yield* this._globWalk(
             fullPath,
             patternParts,
@@ -736,6 +839,8 @@ export class LocalJian implements Jian {
             key !== null ? new Set([...visited, key]) : visited,
             physicalAllowedRoots,
             exclude,
+            signal,
+            physicalEntries,
           );
         } else if (
           remainingParts.length === 0 &&
@@ -749,6 +854,8 @@ export class LocalJian implements Jian {
     } else {
       const regex = globPatternToRegex(currentPattern ?? '', caseSensitive);
 
+      // Directory-granularity checkpoint — mirrors the `**` branch above.
+      if (isAborted(signal)) return;
       let entries: string[];
       try {
         entries = await readdir(basePath);
@@ -757,6 +864,9 @@ export class LocalJian implements Jian {
       }
 
       for (const entry of entries) {
+        // Cancellation checkpoint, entry granularity — mirrors the `**`
+        // branch above.
+        if (isAborted(signal)) return;
         // An excluded basename is skipped even when it matches the pattern:
         // the caller asked for the entry to be invisible to this walk, and
         // the tool layer keeps a name out of `exclude` when the pattern
@@ -785,6 +895,7 @@ export class LocalJian implements Jian {
           if (entryStat.isDirectory()) {
             const key = cycleKey(entryStat);
             if (key !== null && visited.has(key)) continue;
+            if (key !== null && !enterPhysical(key, physicalEntries)) continue;
             yield* this._globWalk(
               fullPath,
               remainingParts,
@@ -792,6 +903,8 @@ export class LocalJian implements Jian {
               key !== null ? new Set([...visited, key]) : visited,
               physicalAllowedRoots,
               exclude,
+              signal,
+              physicalEntries,
             );
           }
         }
@@ -846,6 +959,15 @@ export class LocalJian implements Jian {
   ): AsyncGenerator<string> {
     const resolved = this._resolvePath(path);
     const encoding = options?.encoding ?? 'utf-8';
+    const errors = options?.errors ?? 'strict';
+    const webLabel = utfTextDecoderLabel(encoding);
+    if (webLabel !== undefined) {
+      yield* this._readLinesWithTextDecoder(resolved, webLabel, errors);
+      return;
+    }
+    // Non-UTF encodings (hex/base64/latin1/...) are lossless byte↔character
+    // mappings that TextDecoder does not cover, so `errors` has no effect and
+    // Node's stream decoder reads them exactly.
     const stream = createReadStream(resolved, { encoding, highWaterMark: 64 * 1024 });
     let remainder = '';
     try {
@@ -862,6 +984,120 @@ export class LocalJian implements Jian {
     if (remainder !== '') {
       yield remainder;
     }
+  }
+
+  /**
+   * Streaming read of a UTF-family file. `strict` / `replace` go through a
+   * `TextDecoder`: its state survives chunk boundaries, so a multi-byte
+   * character split at a chunk boundary decodes correctly, a leading BOM is
+   * removed exactly as the whole-file `readText` removes it, and `fatal`
+   * rejects invalid input exactly as decoding the whole file under
+   * `errors: 'strict'` does.
+   *
+   * `ignore` cannot use a `TextDecoder`: non-fatal decoding *replaces*
+   * invalid input with U+FFFD, while `ignore` must drop it (and keep U+FFFD
+   * characters the file already contains). That mode buffers raw bytes and
+   * decodes line by line with the same byte-level decoders the whole-file
+   * `readText` uses, so the two reads agree character for character.
+   */
+  private async *_readLinesWithTextDecoder(
+    resolved: string,
+    webLabel: string,
+    errors: 'strict' | 'replace' | 'ignore',
+  ): AsyncGenerator<string> {
+    if (errors === 'ignore') {
+      yield* this._readLinesIgnoreBytes(resolved, webLabel);
+      return;
+    }
+    const decoder = new TextDecoder(webLabel, { fatal: errors === 'strict' });
+    const stream = createReadStream(resolved, { highWaterMark: 64 * 1024 });
+    let remainder = '';
+    const splitChunk = (text: string): string[] => {
+      const lines = (remainder + text).split('\n');
+      remainder = lines.pop() ?? '';
+      return lines;
+    };
+    try {
+      for await (const chunk of stream) {
+        for (const line of splitChunk(decoder.decode(chunk, { stream: true }))) {
+          yield line + '\n';
+        }
+      }
+      // Flush whatever the decoder still holds; a trailing incomplete sequence
+      // rejects here under 'strict', just like the whole-file decode.
+      for (const line of splitChunk(decoder.decode())) {
+        yield line + '\n';
+      }
+    } finally {
+      stream.destroy();
+    }
+    if (remainder !== '') {
+      yield remainder;
+    }
+  }
+
+  /**
+   * `errors: 'ignore'` streaming read for UTF-8 / UTF-16LE.
+   *
+   * Raw bytes are buffered until a line terminator — `0x0a` for UTF-8, the
+   * UTF-16LE code unit `U+000A` (`0a 00` at an even offset) for UTF-16LE —
+   * and the completed line is decoded with `decodeUtf8Ignore` /
+   * `decodeUtf16LeIgnore`. Splitting on those bytes can never cut a valid
+   * sequence: neither encoding contains a line-feed byte inside a multi-byte
+   * character or a surrogate pair, and decoding a line in isolation drops
+   * exactly the bytes the whole-file decode drops. Memory is bounded by the
+   * longest single line, like the `TextDecoder` path.
+   */
+  private async *_readLinesIgnoreBytes(resolved: string, webLabel: string): AsyncGenerator<string> {
+    const utf16Le = webLabel === 'utf-16le';
+    const decodeLine = utf16Le ? decodeUtf16LeIgnore : decodeUtf8Ignore;
+    const stream = createReadStream(resolved, { highWaterMark: 64 * 1024 });
+    /** Raw byte runs of the line currently being assembled, in order. */
+    let pending: Buffer[] = [];
+    /** UTF-16LE only: the odd byte a chunk ended on, rejoined with the next
+     *  chunk so the line-feed scan only ever steps over whole code units. */
+    let carry: Buffer | undefined;
+
+    const concatPending = (tail: Buffer | undefined): Buffer =>
+      tail === undefined || tail.length === 0
+        ? Buffer.concat(pending)
+        : Buffer.concat([...pending, tail]);
+    const findLineBreak = (data: Buffer, from: number): number => {
+      if (!utf16Le) return data.indexOf(0x0a, from);
+      // Code-unit aligned scan: a 0x0a on an odd offset is the high byte of a
+      // code unit, never the LF code unit's first byte.
+      for (let i = from; i + 1 < data.length; i += 2) {
+        if (data[i] === 0x0a && data[i + 1] === 0x00) return i;
+      }
+      return -1;
+    };
+
+    try {
+      for await (const chunk of stream) {
+        let data: Buffer =
+          carry === undefined ? (chunk as Buffer) : Buffer.concat([carry, chunk as Buffer]);
+        carry = undefined;
+        if (utf16Le && data.length % 2 === 1) {
+          carry = data.subarray(data.length - 1);
+          data = data.subarray(0, data.length - 1);
+        }
+        let start = 0;
+        for (;;) {
+          const at = findLineBreak(data, start);
+          if (at === -1) break;
+          const end = at + (utf16Le ? 2 : 1);
+          yield decodeLine(concatPending(data.subarray(start, end)));
+          pending = [];
+          start = end;
+        }
+        if (start < data.length) pending.push(data.subarray(start));
+      }
+    } finally {
+      stream.destroy();
+    }
+
+    const tail = concatPending(carry);
+    if (tail.length > 0) yield decodeLine(tail);
   }
 
   async writeBytes(path: string, data: Buffer): Promise<number> {

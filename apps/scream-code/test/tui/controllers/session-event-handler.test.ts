@@ -1178,4 +1178,177 @@ describe('SessionEventHandler — main-agent RLM status filtering', () => {
     expect(host.state.appState.rlmEnabled).toBe(true);
     expect(host.state.appState.rlmMaxDepth).toBeNull();
   });
+
+  it('registers a spawned instance with the spawning call resolved at spawn time', () => {
+    const host = createMockHost();
+    (host.streamingUI.getActiveToolCall as ReturnType<typeof vi.fn>).mockReturnValue({
+      id: 'wolfpack-1',
+      name: 'WolfPack',
+      args: { description: 'parallel fix' },
+    });
+    const handler = new SessionEventHandler(host);
+
+    handler.handleEvent(
+      {
+        ...baseEvent('subagent.spawned'),
+        subagentId: 'sub-1',
+        subagentName: 'coder',
+        parentToolCallId: 'wolfpack-1',
+        parentAgentId: 'main',
+        description: 'fix the parser',
+        runInBackground: false,
+      } as unknown as Event,
+      vi.fn(),
+    );
+
+    const info = handler.getSubagentInstances().get('sub-1');
+    expect(info).toMatchObject({
+      agentId: 'sub-1',
+      type: 'coder',
+      description: 'fix the parser',
+      parentAgentId: 'main',
+      parentToolCallId: 'wolfpack-1',
+      parentToolName: 'WolfPack',
+      parentToolDescription: 'parallel fix',
+    });
+    expect(info?.endedAt).toBeUndefined();
+    // WolfPack children render under a synthesized routing id; the registry
+    // keeps the REAL spawning call so the /tasks browser can name the source.
+    expect(handler.subagentInfo.get('sub-1')?.parentToolCallId).toBe('sub-1');
+  });
+
+  it('closes the instance with its terminal outcome on completed / failed', () => {
+    const host = createMockHost();
+    const handler = new SessionEventHandler(host);
+    const spawn = (id: string): void => {
+      handler.handleEvent(
+        {
+          ...baseEvent('subagent.spawned'),
+          subagentId: id,
+          subagentName: 'coder',
+          parentToolCallId: `tc-${id}`,
+          parentAgentId: 'main',
+          runInBackground: false,
+        } as unknown as Event,
+        vi.fn(),
+      );
+    };
+
+    spawn('sub-ok');
+    handler.handleEvent(
+      {
+        ...baseEvent('subagent.completed'),
+        subagentId: 'sub-ok',
+        parentToolCallId: 'tc-sub-ok',
+        resultSummary: 'done',
+      } as unknown as Event,
+      vi.fn(),
+    );
+    expect(handler.getSubagentInstances().get('sub-ok')?.outcome).toBe('completed');
+    expect(handler.getSubagentInstances().get('sub-ok')?.endedAt).toEqual(expect.any(Number));
+
+    spawn('sub-bad');
+    handler.handleEvent(
+      {
+        ...baseEvent('subagent.failed'),
+        subagentId: 'sub-bad',
+        parentToolCallId: 'tc-sub-bad',
+        error: 'boom',
+      } as unknown as Event,
+      vi.fn(),
+    );
+    expect(handler.getSubagentInstances().get('sub-bad')?.outcome).toBe('failed');
+  });
+
+  it('reopens the same record on a resume without losing its start time', () => {
+    const host = createMockHost();
+    const handler = new SessionEventHandler(host);
+    // Fake just `Date` (restored below) so the two spawns land on
+    // distinguishable timestamps: with the real clock both happen in the same
+    // millisecond, and "kept the original start time" passes even when the
+    // resume re-stamps `Date.now()`.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      const spawn = (): void => {
+        handler.handleEvent(
+          {
+            ...baseEvent('subagent.spawned'),
+            subagentId: 'sub-1',
+            subagentName: 'coder',
+            parentToolCallId: 'tc-1',
+            parentAgentId: 'main',
+            runInBackground: false,
+          } as unknown as Event,
+          vi.fn(),
+        );
+      };
+
+      vi.setSystemTime(1_000);
+      spawn();
+      const spawnedAt = handler.getSubagentInstances().get('sub-1')?.spawnedAt;
+      expect(spawnedAt).toBe(1_000);
+      handler.handleEvent(
+        {
+          ...baseEvent('subagent.completed'),
+          subagentId: 'sub-1',
+          parentToolCallId: 'tc-1',
+          resultSummary: 'first pass',
+        } as unknown as Event,
+        vi.fn(),
+      );
+      expect(handler.getSubagentInstances().get('sub-1')?.endedAt).toBeDefined();
+
+      // Second spawn of the same agentId = the main agent resumed it. The
+      // clock has moved on, so a re-stamped start time would be visible here.
+      vi.setSystemTime(61_000);
+      spawn();
+      const resumed = handler.getSubagentInstances().get('sub-1');
+      expect(resumed?.spawnedAt).toBe(spawnedAt);
+      expect(resumed?.spawnedAt).toBe(1_000);
+      expect(resumed?.endedAt).toBeUndefined();
+      expect(resumed?.outcome).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('attributes a routed (nested) spawn to the emitting agent', () => {
+    const host = createMockHost();
+    const handler = new SessionEventHandler(host);
+
+    // A subagent spawned a grandchild: the event is routed (agentId = parent),
+    // and an older emitter may omit the explicit parentAgentId.
+    handler.handleEvent(
+      {
+        type: 'subagent.spawned',
+        sessionId: 'ses-test',
+        agentId: 'agent-7',
+        subagentId: 'agent-8',
+        subagentName: 'coder',
+        parentToolCallId: 'nested-1',
+      } as unknown as Event,
+      vi.fn(),
+    );
+
+    expect(handler.getSubagentInstances().get('agent-8')?.parentAgentId).toBe('agent-7');
+  });
+
+  it('drops the instance registry when the runtime state resets', () => {
+    const host = createMockHost();
+    const handler = new SessionEventHandler(host);
+    handler.handleEvent(
+      {
+        ...baseEvent('subagent.spawned'),
+        subagentId: 'sub-1',
+        subagentName: 'coder',
+        parentToolCallId: 'tc-1',
+        runInBackground: false,
+      } as unknown as Event,
+      vi.fn(),
+    );
+    expect(handler.getSubagentInstances().size).toBe(1);
+
+    handler.resetRuntimeState();
+    expect(handler.getSubagentInstances().size).toBe(0);
+  });
 });

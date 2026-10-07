@@ -228,7 +228,9 @@ def _snapshot(path=_SNAP):
         _warn("state exceeds the " + str(_SNAP_LIMIT) + "-byte snapshot limit; it stays in the running kernel but will not survive a restart")
         return 0
     try:
-        with open(path, "wb") as f:
+        # 0o600 keeps the snapshot private on POSIX; Windows ignores the mode.
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "wb") as f:
             f.write(data)
         return len(saved)
     except Exception:

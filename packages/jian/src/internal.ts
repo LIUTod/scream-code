@@ -4,7 +4,14 @@ function isUtf8Continuation(byte: number): boolean {
   return byte >= 0x80 && byte <= 0xbf;
 }
 
-function decodeUtf8Ignore(data: Buffer): string {
+/**
+ * Byte-level UTF-8 decode for `errors: 'ignore'`: drop every byte that is not
+ * part of a valid sequence, while keeping U+FFFD characters the file already
+ * contains. Shared with the streaming `readLines` path so both read a file the
+ * same way, character for character.
+ * @internal
+ */
+export function decodeUtf8Ignore(data: Buffer): string {
   let output = '';
   let i = 0;
 
@@ -81,7 +88,13 @@ function decodeUtf8Ignore(data: Buffer): string {
   return output;
 }
 
-function decodeUtf16LeIgnore(data: Buffer): string {
+/**
+ * Byte-level UTF-16LE decode for `errors: 'ignore'`: drop unpaired surrogates
+ * (and a trailing odd byte), keeping every other code unit. Shared with the
+ * streaming `readLines` path.
+ * @internal
+ */
+export function decodeUtf16LeIgnore(data: Buffer): string {
   let output = '';
   let i = 0;
 
@@ -132,29 +145,45 @@ function decodeUtf16LeIgnore(data: Buffer): string {
  * byte-to-character mappings so `errors` has no effect.
  * @internal
  */
+/**
+ * Map Node's BufferEncoding names to Web TextDecoder labels where the two
+ * diverge; `undefined` for the lossless non-UTF encodings that only
+ * `Buffer.toString` covers.
+ * @internal
+ */
+export function utfTextDecoderLabel(encoding: BufferEncoding): string | undefined {
+  // eslint-disable-next-line typescript-eslint/switch-exhaustiveness-check
+  switch (encoding) {
+    case 'utf-8':
+    case 'utf8':
+      return 'utf-8';
+    case 'utf16le':
+    case 'ucs2':
+    case 'ucs-2':
+      return 'utf-16le';
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * Decode a Buffer into a string with Python-compatible `errors` handling.
+ *
+ * - `'strict'` (default): throw on invalid sequences (via TextDecoder `fatal: true`)
+ * - `'replace'`: substitute each invalid sequence with U+FFFD (TextDecoder default)
+ * - `'ignore'`: drop invalid input sequences while preserving valid U+FFFD characters
+ *
+ * Falls back to `Buffer.toString(encoding)` for encodings TextDecoder does not
+ * support (e.g. `hex`, `base64`, `binary`, `latin1`) — those are lossless
+ * byte-to-character mappings so `errors` has no effect.
+ * @internal
+ */
 export function decodeTextWithErrors(
   data: Buffer,
   encoding: BufferEncoding,
   errors: 'strict' | 'replace' | 'ignore' = 'strict',
 ): string {
-  // Map Node's BufferEncoding names to Web TextDecoder labels where the two
-  // diverge. Only UTF-family encodings participate in the strict/replace/
-  // ignore dance; the others are lossless and use Buffer.toString directly.
-  let webLabel: string | undefined;
-  // eslint-disable-next-line typescript-eslint/switch-exhaustiveness-check
-  switch (encoding) {
-    case 'utf-8':
-    case 'utf8':
-      webLabel = 'utf-8';
-      break;
-    case 'utf16le':
-    case 'ucs2':
-    case 'ucs-2':
-      webLabel = 'utf-16le';
-      break;
-    default:
-      webLabel = undefined;
-  }
+  const webLabel = utfTextDecoderLabel(encoding);
 
   if (webLabel === undefined) {
     // Non-UTF encodings (hex/base64/latin1/binary/ascii) are lossless byte↔

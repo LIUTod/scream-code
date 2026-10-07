@@ -815,6 +815,27 @@ export const en: Record<string, string> = {
   'taskbrowser.timed_out': 'Timed out: ',
   'taskbrowser.yes': 'Yes',
   'taskbrowser.awaiting_label': 'Awaiting: ',
+  // ─── Task browser: Agents view ─────────────
+  'taskbrowser.agents': 'agents',
+  'taskbrowser.agents_title': 'Agents',
+  'taskbrowser.agents_live': 'live',
+  'taskbrowser.agents_ended': 'ended',
+  'taskbrowser.agents_completed': 'completed',
+  'taskbrowser.agents_failed': 'failed',
+  'taskbrowser.agents_empty': 'No active subagents in this session.',
+  'taskbrowser.agents_no_output':
+    'Subagents stream into their transcript card — no live output here.',
+  'taskbrowser.agent_detail': 'Agent Detail',
+  'taskbrowser.agent_type': 'Type: ',
+  'taskbrowser.agent_source': 'Source: ',
+  'taskbrowser.agent_chain': 'Chain: ',
+  'taskbrowser.agent_activity': 'Activity: ',
+  'taskbrowser.agent_instance': 'Instance: ',
+  'taskbrowser.agent_main': 'main',
+  'taskbrowser.agent_source_rlm': 'RLM-derived',
+  'taskbrowser.agent_source_main': 'spawned by main agent',
+  'taskbrowser.agent_source_via': 'via {name}',
+  'taskbrowser.agent_source_unknown': 'standalone (no parent info)',
 
   // ─── Subagent model binder ──────
   'subagent.desc_coder': 'General software engineering',

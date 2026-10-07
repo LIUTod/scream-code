@@ -112,14 +112,22 @@ export interface AgentRecordEvents {
     replacement: readonly ContentPart[] | null;
   };
   /**
-   * Prefix-stability observation: the fingerprint-verified prefix of the
-   * LLM-bound message list changed between two builds, and `breakIndex` is the
-   * first message index whose provider-visible bytes differ (the tail from
-   * there must be re-cached). Pure diagnostics — written only on a break (the
+   * Prefix-stability observation: the fingerprint-verified request prefix
+   * changed between two LLM-bound builds, and `breakIndex` is the first
+   * message index whose provider-visible bytes differ (the tail from there
+   * must be re-cached). The prefix that is compared is
+   * `[tool declarations][messages]` — the tool table precedes every message
+   * in a provider request, so a rebuilt table (MCP reconnect, `/script` or
+   * python toggle, profile switch) breaks the cache at index 0 even when the
+   * message bytes are identical; a table-only change is recognizable as
+   * `breakIndex: 0` with `appendedSinceLast: 0` (the record carries no reason
+   * field, so a table move that coincides with an append is indistinguishable
+   * from a message break here — the debug log of `observePrefixStability`
+   * names the cause). Pure diagnostics — written only on a break (the
    * intact-prefix path stays debug-only), never restored on replay and never
    * surfaced in the replay window; `logRecord` stamps `time`. Writers are the
    * cache-breaking events (full compaction, projection edits, micro-compaction
-   * truncation), not steady-state appends.
+   * truncation, tool-table rebuild), not steady-state appends.
    */
   'context.prefix_break': {
     breakIndex: number;

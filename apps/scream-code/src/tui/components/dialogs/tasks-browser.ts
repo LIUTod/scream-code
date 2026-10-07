@@ -28,14 +28,17 @@ import chalk from 'chalk';
 import type { ColorPalette } from '@/tui/theme/colors';
 import { printableChar } from '@/tui/utils/printable-key';
 import { sanitizeShellOutput } from '@/tui/utils/sanitize';
+import type { AgentRow, AgentRowStatus, AgentSource } from '@/tui/utils/subagent-instances';
 import { t } from '@scream-code/config';
 
 const ELLIPSIS = '…';
 
-export type TasksFilter = 'all' | 'active';
+export type TasksFilter = 'all' | 'active' | 'agents';
 
 export interface TasksBrowserProps {
   readonly tasks: readonly BackgroundTaskInfo[];
+  /** Subagent rows shown by the `agents` filter (see utils/subagent-instances). */
+  readonly agents: readonly AgentRow[];
   readonly filter: TasksFilter;
   readonly selectedTaskId: string | undefined;
   readonly tailOutput: string | undefined;
@@ -96,6 +99,90 @@ function isTerminal(status: BackgroundTaskStatus): boolean {
   );
 }
 
+/** Width of the agent-name column in the Agents list (leaves room for the
+ *  status word, the instance count and an activity hint on narrow panes). */
+const AGENT_NAME_COLS = 12;
+
+/** Localized word per agent row status: the six live slot states plus the two
+ *  terminal outcomes the instance registry can report. */
+function agentStatusText(status: AgentRowStatus): string {
+  switch (status) {
+    case 'idle':
+      return t('sidebar.agent_idle');
+    case 'working':
+      return t('sidebar.agent_working');
+    case 'outputting':
+      return t('sidebar.agent_outputting');
+    case 'messaging':
+      return t('sidebar.agent_messaging');
+    case 'reworking':
+      return t('sidebar.agent_reworking');
+    case 'requesting':
+      return t('sidebar.agent_requesting');
+    case 'completed':
+      return t('taskbrowser.agents_completed');
+    case 'failed':
+      return t('taskbrowser.agents_failed');
+  }
+}
+
+function agentStatusColor(colors: ColorPalette, status: AgentRowStatus): string {
+  switch (status) {
+    case 'working':
+    case 'outputting':
+      return colors.success;
+    case 'messaging':
+      return colors.accent;
+    case 'reworking':
+    case 'requesting':
+      return colors.warning;
+    case 'completed':
+      return colors.textMuted;
+    case 'failed':
+      return colors.error;
+    case 'idle':
+      return colors.textDim;
+  }
+}
+
+/** "Who triggered this agent" line. Each kind names its own evidence, and a
+ *  missing clue is voiced as unknown instead of guessed. */
+function formatAgentSource(source: AgentSource): string {
+  switch (source.kind) {
+    case 'tool': {
+      if (source.name === undefined) return t('taskbrowser.agent_source_unknown');
+      return source.description === undefined
+        ? source.name
+        : `${source.name} · ${source.description}`;
+    }
+    case 'agent': {
+      const via =
+        source.name === undefined
+          ? t('taskbrowser.agent_source_unknown')
+          : t('taskbrowser.agent_source_via', { name: source.name });
+      return source.description === undefined ? via : `${via} · ${source.description}`;
+    }
+    case 'rlm': {
+      const rlm = t('taskbrowser.agent_source_rlm');
+      return source.name === undefined
+        ? rlm
+        : `${rlm} · ${t('taskbrowser.agent_source_via', { name: source.name })}`;
+    }
+    case 'main':
+      return t('taskbrowser.agent_source_main');
+    case 'unknown':
+      return t('taskbrowser.agent_source_unknown');
+  }
+}
+
+/** Full spawn chain, root first: `main → researcher → coder`, `…` when the
+ *  walk stopped early (missing link / cycle / depth cap). */
+function formatAgentChain(agent: AgentRow): string {
+  const parents = [...agent.ancestors].toReversed();
+  const parts = [t('taskbrowser.agent_main'), ...parents, agent.type];
+  return `${parts.join(' → ')}${agent.chainTruncated ? ' → …' : ''}`;
+}
+
 function formatRelativeTime(ts: number | null | undefined): string {
   if (ts === null || ts === undefined || !Number.isFinite(ts) || ts <= 0) return '';
   const diffSec = Math.floor(Math.max(0, Date.now() - ts) / 1000);
@@ -130,8 +217,31 @@ function visibleTasks(
   tasks: readonly BackgroundTaskInfo[],
   filter: TasksFilter,
 ): BackgroundTaskInfo[] {
-  if (filter === 'all') return [...tasks];
-  return tasks.filter((t) => !isTerminal(t.status));
+  if (filter === 'active') return tasks.filter((t) => !isTerminal(t.status));
+  return [...tasks];
+}
+
+/**
+ * Keep `selectedIndex` inside the window `scrollOffset … scrollOffset+rows-1`,
+ * clamped to the list bounds. Shared by the task list and the agent list.
+ */
+function clampListScroll(
+  selectedIndex: number,
+  scrollOffset: number,
+  total: number,
+  visibleRows: number,
+): number {
+  if (visibleRows <= 0) return 0;
+  let next = scrollOffset;
+  if (selectedIndex < next) {
+    next = selectedIndex;
+  } else if (selectedIndex >= next + visibleRows) {
+    next = selectedIndex - visibleRows + 1;
+  }
+  const maxScroll = Math.max(0, total - visibleRows);
+  if (next < 0) next = 0;
+  if (next > maxScroll) next = maxScroll;
+  return next;
 }
 
 function compareTasks(a: BackgroundTaskInfo, b: BackgroundTaskInfo): number {
@@ -180,6 +290,12 @@ export class TasksBrowserApp extends Container implements Focusable {
   private sortedVisible: BackgroundTaskInfo[];
   private selectedIndex = 0;
   private listScroll = 0;
+  /** Agents view selection — component-local: agent rows are read-only, so
+   *  nothing needs to travel back to the controller. `selectedAgentKey` is the
+   *  anchor: rows re-sort as statuses change, the index must not decide. */
+  private agentIndex = 0;
+  private agentScroll = 0;
+  private selectedAgentKey: string | undefined = undefined;
   private pendingStopTaskId: string | undefined = undefined;
   private pendingStopTimer: NodeJS.Timeout | undefined = undefined;
 
@@ -195,6 +311,7 @@ export class TasksBrowserApp extends Container implements Focusable {
     this.props = next;
     this.sortedVisible = visibleTasks(next.tasks, next.filter).toSorted(compareTasks);
     this.syncSelectionFromProps();
+    this.syncAgentSelectionFromProps();
     if (this.pendingStopTaskId !== undefined) {
       const task = next.tasks.find((t) => t.taskId === this.pendingStopTaskId);
       if (task === undefined || isTerminal(task.status)) this.clearPendingStop();
@@ -220,6 +337,36 @@ export class TasksBrowserApp extends Container implements Focusable {
     }
   }
 
+  /** Keep the agents selection pinned to the same slot type across refreshes
+   *  (rows re-sort as statuses change); fall back to clamping. */
+  private syncAgentSelectionFromProps(): void {
+    const agents = this.props.agents;
+    if (agents.length === 0) {
+      this.agentIndex = 0;
+      this.agentScroll = 0;
+      this.selectedAgentKey = undefined;
+      return;
+    }
+    if (this.selectedAgentKey !== undefined) {
+      const byKey = agents.findIndex((agent) => agent.key === this.selectedAgentKey);
+      if (byKey !== -1) {
+        this.agentIndex = byKey;
+        return;
+      }
+    }
+    if (this.agentIndex >= agents.length) this.agentIndex = agents.length - 1;
+    this.selectedAgentKey = agents[this.agentIndex]?.key;
+  }
+
+  /** Move the agents cursor (rows are read-only: no controller round-trip). */
+  private selectAgent(index: number): void {
+    const agents = this.props.agents;
+    if (agents.length === 0) return;
+    this.agentIndex = Math.min(agents.length - 1, Math.max(0, index));
+    this.selectedAgentKey = agents[this.agentIndex]?.key;
+    this.invalidate();
+  }
+
   private clearPendingStop(): void {
     this.pendingStopTaskId = undefined;
     if (this.pendingStopTimer !== undefined) {
@@ -235,6 +382,7 @@ export class TasksBrowserApp extends Container implements Focusable {
 
   handleInput(data: string): void {
     const k = printableChar(data);
+    const agentsMode = this.props.filter === 'agents';
 
     if (this.pendingStopTaskId !== undefined) {
       if (k === 'y' || k === 'Y') {
@@ -254,6 +402,10 @@ export class TasksBrowserApp extends Container implements Focusable {
       return;
     }
     if (matchesKey(data, Key.up) || k === 'k') {
+      if (agentsMode) {
+        this.selectAgent(this.agentIndex - 1);
+        return;
+      }
       if (this.sortedVisible.length === 0) return;
       this.selectedIndex = Math.max(0, this.selectedIndex - 1);
       this.emitSelect();
@@ -261,6 +413,10 @@ export class TasksBrowserApp extends Container implements Focusable {
       return;
     }
     if (matchesKey(data, Key.down) || k === 'j') {
+      if (agentsMode) {
+        this.selectAgent(this.agentIndex + 1);
+        return;
+      }
       if (this.sortedVisible.length === 0) return;
       this.selectedIndex = Math.min(this.sortedVisible.length - 1, this.selectedIndex + 1);
       this.emitSelect();
@@ -275,6 +431,8 @@ export class TasksBrowserApp extends Container implements Focusable {
       this.props.onRefresh();
       return;
     }
+    // The agents view is read-only: nothing to stop, no output stream to open.
+    if (agentsMode) return;
     if (k === 's' || k === 'S') {
       const task = this.sortedVisible[this.selectedIndex];
       if (task === undefined) return;
@@ -333,25 +491,45 @@ export class TasksBrowserApp extends Container implements Focusable {
   private renderHeader(width: number): string {
     const colors = this.props.colors;
     const title = chalk.hex(colors.primary).bold(' TASK BROWSER ');
-    const filterText = chalk.hex(colors.textMuted)(
-      ` filter=${this.props.filter === 'all' ? 'ALL' : 'ACTIVE'} `,
-    );
-    const counts = countByStatus(this.props.tasks);
-    const countSegments: string[] = [];
-    if (counts.running > 0)
-      countSegments.push(chalk.hex(colors.success)(` ${String(counts.running)} ${t('taskbrowser.running')} `));
-    if (counts.awaiting > 0)
-      countSegments.push(chalk.hex(colors.warning)(` ${String(counts.awaiting)} ${t('taskbrowser.awaiting')} `));
-    if (counts.completed > 0)
-      countSegments.push(chalk.hex(colors.textDim)(` ${String(counts.completed)} ${t('taskbrowser.completed')} `));
-    if (counts.terminalFailed > 0)
-      countSegments.push(
-        chalk.hex(colors.error)(` ${String(counts.terminalFailed)} ${t('taskbrowser.interrupted')} `),
-      );
-    const totals = chalk.hex(colors.textMuted)(` ${String(this.props.tasks.length)} ${t('taskbrowser.total')} `);
+    const filterLabel =
+      this.props.filter === 'all' ? 'ALL' : this.props.filter === 'active' ? 'ACTIVE' : 'AGENTS';
+    const filterText = chalk.hex(colors.textMuted)(` filter=${filterLabel} `);
 
-    const composed = title + filterText + countSegments.join('') + totals;
-    return fitExactly(composed, width);
+    const segments: string[] = [];
+    if (this.props.filter === 'agents') {
+      const live = this.props.agents.filter((agent) => agent.live).length;
+      const ended = this.props.agents.length - live;
+      if (live > 0) {
+        segments.push(chalk.hex(colors.success)(` ${String(live)} ${t('taskbrowser.agents_live')} `));
+      }
+      if (ended > 0) {
+        segments.push(chalk.hex(colors.textDim)(` ${String(ended)} ${t('taskbrowser.agents_ended')} `));
+      }
+      if (this.props.agents.length === 0) {
+        segments.push(chalk.hex(colors.textMuted)(` 0 ${t('taskbrowser.agents')} `));
+      }
+    } else {
+      const counts = countByStatus(this.props.tasks);
+      if (counts.running > 0)
+        segments.push(chalk.hex(colors.success)(` ${String(counts.running)} ${t('taskbrowser.running')} `));
+      if (counts.awaiting > 0)
+        segments.push(chalk.hex(colors.warning)(` ${String(counts.awaiting)} ${t('taskbrowser.awaiting')} `));
+      if (counts.completed > 0)
+        segments.push(chalk.hex(colors.textDim)(` ${String(counts.completed)} ${t('taskbrowser.completed')} `));
+      if (counts.terminalFailed > 0)
+        segments.push(
+          chalk.hex(colors.error)(` ${String(counts.terminalFailed)} ${t('taskbrowser.interrupted')} `),
+        );
+      segments.push(
+        chalk.hex(colors.textMuted)(` ${String(this.props.tasks.length)} ${t('taskbrowser.total')} `),
+      );
+      const liveAgents = this.props.agents.filter((agent) => agent.live).length;
+      if (liveAgents > 0) {
+        segments.push(chalk.hex(colors.success)(` ${String(liveAgents)} ${t('taskbrowser.agents')} `));
+      }
+    }
+
+    return fitExactly(title + filterText + segments.join(''), width);
   }
 
   private renderFooter(width: number): string {
@@ -367,14 +545,22 @@ export class TasksBrowserApp extends Container implements Focusable {
       return fitExactly(line, width);
     }
 
-    const parts = [
-      ` ${key('↑↓')} ${dim(t('taskbrowser.select'))}`,
-      `${key('Enter/O')} ${dim(t('taskbrowser.output'))}`,
-      `${key('S')} ${dim(t('taskbrowser.stop_action'))}`,
-      `${key('R')} ${dim(t('taskbrowser.refresh'))}`,
-      `${key('Tab')} ${dim(t('taskbrowser.filter'))}`,
-      `${key('Q/Esc')} ${dim(t('taskbrowser.exit'))} `,
-    ];
+    const parts =
+      this.props.filter === 'agents'
+        ? [
+            ` ${key('↑↓')} ${dim(t('taskbrowser.select'))}`,
+            `${key('Tab')} ${dim(t('taskbrowser.filter'))}`,
+            `${key('R')} ${dim(t('taskbrowser.refresh'))}`,
+            `${key('Q/Esc')} ${dim(t('taskbrowser.exit'))} `,
+          ]
+        : [
+            ` ${key('↑↓')} ${dim(t('taskbrowser.select'))}`,
+            `${key('Enter/O')} ${dim(t('taskbrowser.output'))}`,
+            `${key('S')} ${dim(t('taskbrowser.stop_action'))}`,
+            `${key('R')} ${dim(t('taskbrowser.refresh'))}`,
+            `${key('Tab')} ${dim(t('taskbrowser.filter'))}`,
+            `${key('Q/Esc')} ${dim(t('taskbrowser.exit'))} `,
+          ];
     const left = parts.join('  ');
     const flash = this.props.flashMessage;
     if (flash !== undefined && flash.length > 0) {
@@ -436,6 +622,8 @@ export class TasksBrowserApp extends Container implements Focusable {
   // ── left: task list frame ────────────────────────────────────────────
 
   private renderListFrame(width: number, height: number): string[] {
+    if (this.props.filter === 'agents') return this.renderAgentsFrame(width, height);
+
     const title = `Tasks [${this.props.filter}]`;
     const innerHeight = Math.max(0, height - 2);
 
@@ -462,6 +650,67 @@ export class TasksBrowserApp extends Container implements Focusable {
     while (lines.length < innerHeight) lines.push('');
 
     return this.renderFrame(title, lines, width, height);
+  }
+
+  /** Left pane, `agents` filter: one row per subagent type with history (live
+   *  ones first), including types whose slot the cap pushed out and that only
+   *  the instance registry knows; read-only — the detail pane carries the full
+   *  provenance. */
+  private renderAgentsFrame(width: number, height: number): string[] {
+    const colors = this.props.colors;
+    const agents = this.props.agents;
+    const innerHeight = Math.max(0, height - 2);
+    const title = `${t('taskbrowser.agents_title')} [${String(agents.length)}]`;
+
+    if (agents.length === 0) {
+      const lines: string[] = [chalk.hex(colors.textMuted)(t('taskbrowser.agents_empty'))];
+      while (lines.length < innerHeight) lines.push('');
+      return this.renderFrame(title, lines, width, height);
+    }
+
+    this.agentScroll = clampListScroll(
+      this.agentIndex,
+      this.agentScroll,
+      agents.length,
+      innerHeight,
+    );
+    const start = this.agentScroll;
+    const window = agents.slice(start, start + innerHeight);
+
+    const innerWidth = width - 2;
+    const lines: string[] = [];
+    for (const [vi, agent] of window.entries()) {
+      const index = start + vi;
+      lines.push(this.renderAgentRow(agent, index === this.agentIndex, innerWidth));
+    }
+    while (lines.length < innerHeight) lines.push('');
+
+    return this.renderFrame(title, lines, width, height);
+  }
+
+  private renderAgentRow(agent: AgentRow, selected: boolean, innerWidth: number): string {
+    const colors = this.props.colors;
+    const pointer = selected ? '> ' : '  ';
+    const pointerStyled = chalk.hex(selected ? colors.primary : colors.textDim)(pointer);
+    const marker = chalk.hex(agentStatusColor(colors, agent.status))(
+      agent.status === 'idle' ? '○' : '●',
+    );
+    const nameCell = chalk.hex(selected ? colors.primary : colors.textStrong)(
+      padToWidth(truncateToWidth(agent.type, AGENT_NAME_COLS, ELLIPSIS), AGENT_NAME_COLS),
+    );
+    const statusWord = chalk.hex(agentStatusColor(colors, agent.status))(
+      agentStatusText(agent.status),
+    );
+    const count = agent.count > 1 ? chalk.hex(colors.textMuted)(` ×${String(agent.count)}`) : '';
+
+    const head = `${pointerStyled}${marker} ${nameCell} ${statusWord}${count}`;
+    const budget = innerWidth - visibleWidth(head) - 1;
+    if (budget < 6) return fitExactly(head, innerWidth);
+
+    const hint = singleLine(agent.detail ?? agent.description ?? '');
+    if (hint.length === 0) return fitExactly(head, innerWidth);
+    const trimmed = truncateToWidth(hint, budget, ELLIPSIS);
+    return fitExactly(`${head} ${chalk.hex(colors.textDim)(trimmed)}`, innerWidth);
   }
 
   private renderListRow(task: BackgroundTaskInfo, selected: boolean, innerWidth: number): string {
@@ -492,18 +741,12 @@ export class TasksBrowserApp extends Container implements Focusable {
   }
 
   private adjustScroll(visibleRows: number): void {
-    if (visibleRows <= 0) {
-      this.listScroll = 0;
-      return;
-    }
-    if (this.selectedIndex < this.listScroll) {
-      this.listScroll = this.selectedIndex;
-    } else if (this.selectedIndex >= this.listScroll + visibleRows) {
-      this.listScroll = this.selectedIndex - visibleRows + 1;
-    }
-    const maxScroll = Math.max(0, this.sortedVisible.length - visibleRows);
-    if (this.listScroll < 0) this.listScroll = 0;
-    if (this.listScroll > maxScroll) this.listScroll = maxScroll;
+    this.listScroll = clampListScroll(
+      this.selectedIndex,
+      this.listScroll,
+      this.sortedVisible.length,
+      visibleRows,
+    );
   }
 
   // ── right: detail + preview stack ────────────────────────────────────
@@ -520,6 +763,7 @@ export class TasksBrowserApp extends Container implements Focusable {
   }
 
   private renderDetailFrame(width: number, height: number): string[] {
+    if (this.props.filter === 'agents') return this.renderAgentDetailFrame(width, height);
     const colors = this.props.colors;
     const innerHeight = Math.max(0, height - 2);
     const task = this.sortedVisible[this.selectedIndex];
@@ -568,9 +812,59 @@ export class TasksBrowserApp extends Container implements Focusable {
     return this.renderFrame(t('taskbrowser.detail'), lines, width, height);
   }
 
+  /** Right-top pane, `agents` filter: provenance of the selected agent —
+   *  type, live status, spawn description, trigger source, parent chain,
+   *  latest activity and the current instance id. */
+  private renderAgentDetailFrame(width: number, height: number): string[] {
+    const colors = this.props.colors;
+    const innerHeight = Math.max(0, height - 2);
+    const agent = this.props.agents[this.agentIndex];
+    if (agent === undefined) {
+      const empty = chalk.hex(colors.textMuted)(t('taskbrowser.agents_empty'));
+      const lines: string[] = [empty];
+      while (lines.length < innerHeight) lines.push('');
+      return this.renderFrame(t('taskbrowser.agent_detail'), lines, width, height);
+    }
+
+    const label = (text: string): string => chalk.hex(colors.textMuted)(text.padEnd(14));
+    const value = (text: string): string => chalk.hex(colors.text)(text);
+
+    const countSuffix = agent.count > 1 ? chalk.hex(colors.textMuted)(` ×${String(agent.count)}`) : '';
+    const lines: string[] = [
+      `${label(t('taskbrowser.agent_type'))}${value(agent.type)}`,
+      `${label(t('taskbrowser.status'))}${chalk.hex(agentStatusColor(colors, agent.status))(agentStatusText(agent.status))}${countSuffix}`,
+      `${label(t('taskbrowser.agent_source'))}${value(singleLine(formatAgentSource(agent.source)))}`,
+      `${label(t('taskbrowser.agent_chain'))}${chalk.hex(colors.textMuted)(formatAgentChain(agent))}`,
+    ];
+    if (agent.description !== undefined && agent.description.length > 0) {
+      lines.push(`${label(t('taskbrowser.description'))}${value(singleLine(agent.description))}`);
+    }
+    if (agent.detail !== undefined && agent.detail.length > 0) {
+      lines.push(`${label(t('taskbrowser.agent_activity'))}${value(singleLine(agent.detail))}`);
+    }
+    const when = formatRelativeTime(agent.lastActivityAt);
+    if (when.length > 0) {
+      lines.push(`${label(t('taskbrowser.time'))}${chalk.hex(colors.textMuted)(when)}`);
+    }
+    if (agent.instanceId !== undefined) {
+      lines.push(`${label(t('taskbrowser.agent_instance'))}${chalk.hex(colors.textMuted)(agent.instanceId)}`);
+    }
+
+    while (lines.length < innerHeight) lines.push('');
+    return this.renderFrame(t('taskbrowser.agent_detail'), lines, width, height);
+  }
+
   private renderPreviewFrame(width: number, height: number): string[] {
     const colors = this.props.colors;
     const innerHeight = Math.max(0, height - 2);
+
+    if (this.props.filter === 'agents') {
+      const note = chalk.hex(colors.textMuted)(t('taskbrowser.agents_no_output'));
+      const lines: string[] = [note];
+      while (lines.length < innerHeight) lines.push('');
+      return this.renderFrame('Preview Output', lines, width, height);
+    }
+
     const task = this.sortedVisible[this.selectedIndex];
     if (task === undefined) {
       const lines: string[] = [chalk.hex(colors.textMuted)('No task selected.')];
