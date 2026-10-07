@@ -34,6 +34,36 @@ import { isStreaming } from '../utils/app-state';
 import { boundEntryForUi } from '../utils/transcript-bound';
 import { CommittedTranscriptComponent } from '../components/transcript/committed-transcript';
 
+/**
+ * Entry-count backstop for `state.transcriptEntries`. Beyond this many stored
+ * entries the oldest are folded into one aggregate stub, so the ingest path
+ * can never grow the array without bound — even if a caller floods it.
+ */
+export const MAX_TRANSCRIPT_ENTRIES = 500;
+
+/** Id of the aggregate stub that stands in for the folded oldest entries. */
+const COLLAPSE_STUB_ID = 'transcript-collapse-stub';
+
+/** The stub's rendered text — also how a later fold reads its count back. */
+const COLLAPSE_STUB_PATTERN = /^…\((\d+) earlier entries collapsed\)$/;
+
+function makeCollapseStub(count: number): TranscriptEntry {
+  // System-style status row: the placeholder is metadata about the fold, not
+  // speech, so it rides the plain status line (textDim).
+  return {
+    id: COLLAPSE_STUB_ID,
+    kind: 'status',
+    renderMode: 'plain',
+    content: `…(${String(count)} earlier entries collapsed)`,
+  };
+}
+
+/** Entries an existing stub already stands in for (0 when it is not one). */
+function stubCount(entry: TranscriptEntry | undefined): number {
+  if (entry === undefined || entry.id !== COLLAPSE_STUB_ID) return 0;
+  return Number(COLLAPSE_STUB_PATTERN.exec(entry.content)?.[1] ?? 0);
+}
+
 export interface TranscriptControllerHost {
   readonly state: TUIState;
   readonly imageStore: ImageAttachmentStore;
@@ -288,6 +318,7 @@ export class TranscriptController {
     // the live→committed fold, so history never regains the elided middle.
     const boundedEntry = boundEntryForUi(entry);
     this.host.state.transcriptEntries.push(boundedEntry);
+    this.enforceEntryCap();
     const component = this.createComponent(boundedEntry);
     if (component) {
       this.liveComponentToEntry.set(component, boundedEntry);
@@ -318,6 +349,24 @@ export class TranscriptController {
       this.host.state.ui.requestRender();
     }
     return component ?? null;
+  }
+
+  /**
+   * Keeps `state.transcriptEntries` within {@link MAX_TRANSCRIPT_ENTRIES} by
+   * folding the oldest rows into one aggregate stub. A stub already at the head
+   * keeps that slot and accumulates the count, so the array stays bounded no
+   * matter how long the session runs.
+   */
+  private enforceEntryCap(): void {
+    const entries = this.host.state.transcriptEntries;
+    if (entries.length <= MAX_TRANSCRIPT_ENTRIES) return;
+    const head = entries[0];
+    const isStub = head !== undefined && head.id === COLLAPSE_STUB_ID;
+    // One entry more than the overflow: that slot becomes the stub's, so the
+    // array — stub included — lands back within the cap after the unshift.
+    const dropped = entries.splice(0, entries.length - MAX_TRANSCRIPT_ENTRIES + 1);
+    const folded = dropped.length - (isStub ? 1 : 0);
+    entries.unshift(makeCollapseStub(stubCount(head) + folded));
   }
 
   /** Append a suffix to the given turn's final assistant message last line.

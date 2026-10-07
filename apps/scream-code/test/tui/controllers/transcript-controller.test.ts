@@ -4,6 +4,7 @@ import { t } from '@scream-code/config';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  MAX_TRANSCRIPT_ENTRIES,
   TranscriptController,
   type TranscriptControllerHost,
 } from '#/tui/controllers/transcript-controller';
@@ -650,5 +651,58 @@ describe('TranscriptController ingest bounding (transcript-bound)', () => {
     expect(controller.findEntryForComponent(component!)).toBe(stored);
     expect(stored.toolCallData!.result!.output).not.toBe(entryToAppend.toolCallData!.result!.output);
     expect(stored.toolCallData!.result!.output).toContain('lines elided');
+  });
+});
+
+describe('TranscriptController entry-count cap (collapse stub)', () => {
+  const STUB_PATTERN = /^…\((\d+) earlier entries collapsed\)$/;
+
+  function appendMany(controller: TranscriptController, count: number, from = 0): void {
+    for (let i = from; i < from + count; i++) {
+      controller.appendEntry(entry({ kind: 'status', content: `row-${String(i)}` }));
+    }
+  }
+
+  /** Reads the head stub back the way a renderer would: from its content. */
+  function readStub(entries: TranscriptEntry[]): number {
+    const match = STUB_PATTERN.exec(entries[0]?.content ?? '');
+    expect(match).not.toBeNull();
+    return Number(match![1]);
+  }
+
+  it('caps a 5000-entry flood at the limit and counts every folded entry', () => {
+    const { controller, state } = makeHost();
+
+    appendMany(controller, 5_000);
+
+    const entries = state.transcriptEntries;
+    expect(entries.length).toBeLessThanOrEqual(MAX_TRANSCRIPT_ENTRIES + 1);
+    // Folded + kept accounts for all 5000 appends — nothing double-counted.
+    expect(readStub(entries)).toBe(5_000 - (entries.length - 1));
+    // The newest rows survive and the oldest are gone.
+    expect(entries.at(-1)!.content).toBe('row-4999');
+    expect(entries.some((e) => e.content === 'row-0')).toBe(false);
+  });
+
+  it('folds into the same stub as later entries arrive', () => {
+    const { controller, state } = makeHost();
+    appendMany(controller, MAX_TRANSCRIPT_ENTRIES + 3);
+    const before = readStub(state.transcriptEntries);
+
+    appendMany(controller, 2, 5_000);
+
+    expect(state.transcriptEntries.length).toBeLessThanOrEqual(MAX_TRANSCRIPT_ENTRIES + 1);
+    const after = readStub(state.transcriptEntries);
+    expect(after).toBeGreaterThan(before);
+    expect(after).toBe(MAX_TRANSCRIPT_ENTRIES + 5 - (state.transcriptEntries.length - 1));
+  });
+
+  it('adds no stub while the transcript stays within the cap', () => {
+    const { controller, state } = makeHost();
+
+    appendMany(controller, MAX_TRANSCRIPT_ENTRIES);
+
+    expect(state.transcriptEntries).toHaveLength(MAX_TRANSCRIPT_ENTRIES);
+    expect(state.transcriptEntries.some((e) => STUB_PATTERN.test(e.content))).toBe(false);
   });
 });
