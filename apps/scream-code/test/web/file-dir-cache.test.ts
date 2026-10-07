@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { _clearDirCacheForTests, fetchDirEntries, invalidateDirEntry } from '../../src/web/frontend/src/utils/fileDirCache';
+import { _clearDirCacheForTests, _dirCacheSizeForTests, fetchDirEntries, invalidateDirEntry } from '../../src/web/frontend/src/utils/fileDirCache';
 
 function stubFetch(impl: (url: string) => Promise<unknown>) {
   const mock = vi.fn(async (url: string) => {
@@ -55,5 +55,50 @@ describe('fileDirCache (G3.2 regression)', () => {
     await fetchDirEntries('/c');
     await fetchDirEntries('/c');
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('drops an expired entry instead of serving it from cache', async () => {
+    vi.useFakeTimers();
+    try {
+      stubFetch(async () => ({
+        path: '/exp',
+        entries: [{ name: 'a.ts', path: '/exp/a.ts', type: 'file', size: 0, mtime: 0 }],
+      }));
+      await fetchDirEntries('/exp');
+      expect(_dirCacheSizeForTests()).toBe(1);
+
+      // Past the TTL the stale record must be dropped, not merely ignored: a
+      // failed re-read must not leave it (or a client would serve it forever).
+      vi.setSystemTime(Date.now() + 30_001);
+      stubFetch(async () => {
+        throw new Error('offline');
+      });
+      expect(await fetchDirEntries('/exp')).toBeNull();
+      expect(_dirCacheSizeForTests()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('evicts the oldest listing past the 200-entry capacity cap', async () => {
+    stubFetch(async (url) => {
+      const path = decodeURIComponent(url.split('path=')[1] ?? '');
+      return { path, entries: [{ name: 'x', path: `${path}/x`, type: 'file', size: 0, mtime: 0 }] };
+    });
+    for (let i = 0; i < 205; i++) {
+      await fetchDirEntries(`/dir-${i}`);
+    }
+    expect(_dirCacheSizeForTests()).toBe(200);
+
+    // FIFO: /dir-0..4 were dropped, /dir-204 is still cached. A probe stub
+    // proves it — only the evicted path goes back to the network.
+    const probe = stubFetch(async (url) => {
+      const path = decodeURIComponent(url.split('path=')[1] ?? '');
+      return { path, entries: [] };
+    });
+    await fetchDirEntries('/dir-204');
+    expect(probe).not.toHaveBeenCalled();
+    await fetchDirEntries('/dir-0');
+    expect(probe).toHaveBeenCalledTimes(1);
   });
 });

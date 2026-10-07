@@ -62,6 +62,16 @@ import { toString as qrToString } from 'qrcode';
 
 // ─── Types ────────────────────────────────────────────────────────────────
 
+/**
+ * In-memory FIFO caps per web session. The on-disk journal stays complete;
+ * these bounds only stop a long-lived session from growing without limit in
+ * RAM. Dropped rows are tallied so the elision stays observable (see
+ * `getMemoryBounds`) — the same `[…N … elided…]` accounting the transcript
+ * uses, without re-deriving it from a cursor gap.
+ */
+const MAX_JOURNAL_ENTRIES = 200;
+const MAX_SESSION_MESSAGES = 200;
+
 /** Server-owned journal event kinds (not part of the core event union). */
 type WebJournalEvent =
   | { type: 'web.message.finalized'; message: ChatMessage }
@@ -1054,6 +1064,10 @@ class WebSession {
   private readonly connections = new Map<WebSocket, ConnectionState>();
   private readonly journal: JournalEntry[] = [];
   private readonly userMessages: Array<{ msg: ChatMessage; beforeSeq: number }> = [];
+  /** Aggregate count of journal entries dropped by the FIFO cap. */
+  private droppedJournalCount = 0;
+  /** Aggregate count of message rows dropped by the FIFO cap. */
+  private droppedMessageCount = 0;
   private nextSeq = 1;
   private epoch = 1;
   private cachedStatus: SessionStatus | null = null;
@@ -1215,6 +1229,7 @@ class WebSession {
 
   private async persistUserMessage(text: string, beforeSeq: number, clientMessageId?: string): Promise<void> {
     this.userMessages.push({ msg: { role: 'user', content: text, clientMessageId, tools: [] }, beforeSeq });
+    this.trimMessages();
     if (!this.homeDir) return;
     const line = JSON.stringify({ type: 'user_message', text, beforeSeq, clientMessageId } satisfies PersistedUserMessage);
     await appendJournalLine(this.homeDir, this.sessionId, line);
@@ -1241,9 +1256,11 @@ class WebSession {
           msg: { role: 'user', content: um.text, clientMessageId: um.clientMessageId, tools: [] },
           beforeSeq: um.beforeSeq,
         });
+        this.trimMessages();
       } else {
         const je = entry as JournalEntry;
         this.journal.push(je);
+        this.trimJournal();
         this.nextSeq = Math.max(this.nextSeq, je.seq + 1);
         if (this.session === null && je.payload.agentId === 'main' && je.payload.type === 'goal.updated') {
           this.cachedGoal = cloneSnapshot(je.payload.snapshot);
@@ -1324,6 +1341,7 @@ class WebSession {
     let seq = 1;
     for (const message of messages) {
       this.seededMessages.push({ ...message, seq });
+      this.trimMessages();
       seq += 1;
     }
     if (seq - 1 >= this.nextSeq) this.nextSeq = seq;
@@ -1355,6 +1373,54 @@ class WebSession {
 
   // ── Event journal ──────────────────────────────────────────────────────
 
+  /** FIFO-cap `journal` to `MAX_JOURNAL_ENTRIES`, tallying elided rows. */
+  private trimJournal(): void {
+    while (this.journal.length > MAX_JOURNAL_ENTRIES) {
+      this.journal.shift();
+      this.droppedJournalCount += 1;
+    }
+  }
+
+  /**
+   * FIFO-cap message stores to `MAX_SESSION_MESSAGES`, tallying elided rows.
+   *
+   * Drop order follows the rendered order (`buildMessages` puts the seeded
+   * core-history rows at the head, live user rows after them), so the eviction
+   * is genuinely oldest-first and the visible tail of the conversation is what
+   * survives.
+   */
+  private trimMessages(): void {
+    while (this.userMessages.length + this.seededMessages.length > MAX_SESSION_MESSAGES) {
+      if (this.seededMessages.length > 0) this.seededMessages.shift();
+      else if (this.userMessages.length > 0) this.userMessages.shift();
+      else break;
+      this.droppedMessageCount += 1;
+    }
+  }
+
+  /**
+   * Observable surface of the in-memory FIFO caps: current occupancy, the
+   * limits, and the aggregate elided-row tallies (`[…N … elided…]` accounting,
+   * shared with the transcript).
+   */
+  getMemoryBounds(): {
+    journal: number;
+    journalLimit: number;
+    journalElided: number;
+    messages: number;
+    messageLimit: number;
+    messagesElided: number;
+  } {
+    return {
+      journal: this.journal.length,
+      journalLimit: MAX_JOURNAL_ENTRIES,
+      journalElided: this.droppedJournalCount,
+      messages: this.userMessages.length + this.seededMessages.length,
+      messageLimit: MAX_SESSION_MESSAGES,
+      messagesElided: this.droppedMessageCount,
+    };
+  }
+
   private appendEvent(event: Event): JournalEntry {
     const payload = event.type === 'goal.updated' || event.type === 'todo.updated'
       ? cloneSnapshot(event)
@@ -1366,6 +1432,7 @@ class WebSession {
       payload,
     };
     this.journal.push(entry);
+    this.trimJournal();
     // Persist durable events only.
     if (!entry.volatile) {
       this.trackPending(this.persistEntry(entry));
@@ -1389,6 +1456,7 @@ class WebSession {
       payload: payload as unknown as Event,
     };
     this.journal.push(entry);
+    this.trimJournal();
     const persisted = this.persistEntry(entry, throwOnPersistenceError);
     this.trackPending(persisted);
     return { entry, persisted };

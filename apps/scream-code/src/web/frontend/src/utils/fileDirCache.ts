@@ -8,6 +8,8 @@
  */
 const API = '/api/v1/files';
 const DIR_TTL_MS = 30_000;
+/** Hard cap on cached listings; the oldest entries are evicted FIFO. */
+const DIR_CACHE_MAX = 200;
 
 export interface ServerFileEntry {
   /** Basename only. */
@@ -36,7 +38,12 @@ const inFlight = new Map<string, Promise<ServerFileEntry[] | null>>();
  */
 export async function fetchDirEntries(abs: string): Promise<ServerFileEntry[] | null> {
   const cached = dirCache.get(abs);
-  if (cached && Date.now() - cached.at < DIR_TTL_MS) return cached.entries;
+  if (cached) {
+    if (Date.now() - cached.at < DIR_TTL_MS) return cached.entries;
+    // Expired entries are dropped immediately so a stale listing cannot
+    // linger in the map between TTL checks (capacity + freshness).
+    dirCache.delete(abs);
+  }
 
   const pending = inFlight.get(abs);
   if (pending) return pending;
@@ -46,7 +53,15 @@ export async function fetchDirEntries(abs: string): Promise<ServerFileEntry[] | 
       const res = await fetch(`${API}/list?path=${encodeURIComponent(abs)}`);
       if (!res.ok) return null;
       const data = (await res.json()) as { entries: ServerFileEntry[] };
-      if (data.entries) dirCache.set(abs, { entries: data.entries, at: Date.now() });
+      if (data.entries) {
+        dirCache.set(abs, { entries: data.entries, at: Date.now() });
+        // FIFO capacity cap: Map iteration order is insertion order.
+        while (dirCache.size > DIR_CACHE_MAX) {
+          const oldest = dirCache.keys().next().value;
+          if (oldest === undefined) break;
+          dirCache.delete(oldest);
+        }
+      }
       return data.entries ?? null;
     } catch {
       return null;
@@ -70,4 +85,9 @@ export function invalidateDirEntry(abs: string): void {
 export function _clearDirCacheForTests(): void {
   dirCache.clear();
   inFlight.clear();
+}
+
+/** Test helper: current cached-listing occupancy (eviction assertions). */
+export function _dirCacheSizeForTests(): number {
+  return dirCache.size;
 }

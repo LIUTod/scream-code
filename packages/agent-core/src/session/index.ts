@@ -480,6 +480,30 @@ export class Session {
     });
   }
 
+  /**
+   * Drop a finished subagent's live instance so its context/tools no longer
+   * pin memory on the session map. Metadata and wire records stay so a later
+   * `ensureAgent` (subagent resume) can re-hydrate the same conversation.
+   * Never drops the main agent.
+   */
+  removeAgent(id: string): void {
+    if (id === 'main') return;
+    this.agents.delete(id);
+  }
+
+  /**
+   * Return the live instance for `id`, re-hydrating from persisted records
+   * when `removeAgent` dropped it after a finished run. No-op for agents that
+   * are still resident.
+   */
+  async ensureAgent(id: string): Promise<Agent> {
+    const existing = this.agents.get(id);
+    if (existing !== undefined) return existing;
+    const agent = this.ensureResumeAgentInstantiated(id, this.metadata.agents);
+    await agent.resume();
+    return agent;
+  }
+
   async readMetadata() {
     // A process killed mid-writeMetadata leaves a truncated state.json, and
     // sessions restored from older builds may lack one entirely. Either way

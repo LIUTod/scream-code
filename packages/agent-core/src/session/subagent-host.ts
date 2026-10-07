@@ -195,9 +195,15 @@ export class SessionSubagentHost {
       this.childRequestCounts.delete(id);
       this.childRequestSeen.delete(id);
       this.parentMessageSeen.delete(id);
-      // Undelivered mail is deliberately left in place: clearing it here would
-      // destroy a message the parent was already told was accepted. It expires
-      // on its own deadline, and a resume of this child polls it at turn start.
+      // Terminal eviction: drop the mailbox slot and the live Agent reference
+      // so a finished child cannot pin message queues or context/tool state.
+      // Undelivered mail is destroyed with the mailbox (the run is over); a
+      // later resume re-hydrates the agent from its records via ensureAgent.
+      this.bus?.dropMailbox(id);
+      this.session.removeAgent?.(id);
+      // Direct Map delete (the accessor is optional on session shims) so a
+      // finished child cannot pin the live instance either way.
+      if (id !== 'main') this.session.agents.delete(id);
     });
 
     return {
@@ -216,7 +222,12 @@ export class SessionSubagentHost {
       throw new Error(`Parent agent "${this.ownerAgentId}" was not found`);
     }
 
-    const child = this.session.agents.get(agentId);
+    // A finished child is evicted from Session.agents (see the run finally);
+    // ensureAgent re-hydrates it from persisted records when needed.
+    let child = this.session.agents.get(agentId);
+    if (child === undefined && typeof this.session.ensureAgent === 'function') {
+      child = await this.session.ensureAgent(agentId).catch(() => undefined);
+    }
     if (child === undefined) {
       throw new Error(`Agent instance "${agentId}" was not found`);
     }
@@ -304,8 +315,12 @@ export class SessionSubagentHost {
       this.childRequestCounts.delete(agentId);
       this.childRequestSeen.delete(agentId);
       this.parentMessageSeen.delete(agentId);
-      // Same rule as the spawn path: never destroy accepted-but-undelivered
-      // mail. It expires by deadline, or a resume picks it up.
+      // Same terminal eviction as the spawn path: mailbox slot + live Agent
+      // reference are dropped together. A later resume goes through
+      // session.ensureAgent, which re-hydrates from persisted records.
+      this.bus?.dropMailbox(agentId);
+      this.session.removeAgent?.(agentId);
+      if (agentId !== 'main') this.session.agents.delete(agentId);
     });
 
     return {

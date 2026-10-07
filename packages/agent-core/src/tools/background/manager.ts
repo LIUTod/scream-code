@@ -13,6 +13,7 @@
  */
 
 import { randomBytes } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 
 import type { JianProcess } from '@scream-code/jian';
 
@@ -144,6 +145,22 @@ interface ManagedProcess {
 }
 
 /**
+ * Slim terminal record kept after `finalizeTerminal` evicts the live
+ * `ManagedProcess`. Deliberately drops `proc` / the chunk array so a finished
+ * task cannot pin process streams — the on-disk `output.log` remains the
+ * authoritative full log. `outputText` is a last-known tail copy used only
+ * when the manager was never attached to a session dir (detached managers).
+ */
+interface RetiredTask {
+  readonly info: BackgroundTaskInfo;
+  readonly outputText: string;
+  /** Total UTF-8 bytes observed, including chunks dropped from the live ring. */
+  outputSizeBytes: number;
+  readonly outputSessionDir: string | undefined;
+  readonly outputWriteQueue: Promise<void>;
+}
+
+/**
  * Maximum bytes of combined output kept in the in-memory ring buffer per
  * task. When exceeded, the oldest chunks are dropped.
  *
@@ -155,6 +172,14 @@ interface ManagedProcess {
  * disk log via `getOutputSizeBytes` / `readOutputBytesFromDisk`.
  */
 const MAX_OUTPUT_BYTES = 1024 * 1024; // 1 MiB
+
+/**
+ * How many terminal tasks stay addressable after eviction from `processes`.
+ * The full output is on disk (`output.log`); the ring only keeps the metadata
+ * needed to answer `getTask` / `getOutput` / `readOutput` for recently
+ * finished tasks, FIFO-overflowing so long sessions stay bounded.
+ */
+const RETIRED_TASK_LIMIT = 20;
 
 const SIGTERM_GRACE_MS = 5_000;
 const EXIT_SETTLE_GRACE_MS = 10;
@@ -222,6 +247,12 @@ function emptyOutputSnapshot(): BackgroundTaskOutputSnapshot {
 export class BackgroundProcessManager {
   private readonly processes = new Map<string, ManagedProcess>();
   private reservedTaskSlots = 0;
+  /**
+   * Terminal tasks evicted from `processes`, bounded to
+   * `RETIRED_TASK_LIMIT` (FIFO). They stay addressable for `getTask` /
+   * output reads (disk-backed) so a just-finished task is still visible.
+   */
+  private readonly retiredTasks = new Map<string, RetiredTask>();
   /**
    * Ghosts: tasks loaded from disk during reconcile that have no live
    * JianProcess. They appear in `list()` / `getTask()` with status
@@ -454,12 +485,14 @@ export class BackgroundProcessManager {
     return taskId;
   }
 
-  /** Get info about a specific task. Falls back to reconcile ghosts. */
+  /** Get info about a specific task. Falls back to retired, then reconcile ghosts. */
   getTask(taskId: string): BackgroundTaskInfo | undefined {
     const entry = this.processes.get(taskId);
     if (entry !== undefined) {
       return this.toInfo(entry);
     }
+    const retired = this.retiredTasks.get(taskId);
+    if (retired !== undefined) return retired.info;
     return this.ghosts.get(taskId);
   }
 
@@ -496,6 +529,10 @@ export class BackgroundProcessManager {
       if (limit !== undefined && result.length >= limit) return result;
     }
     if (!activeOnly) {
+      for (const retired of this.retiredTasks.values()) {
+        result.push(retired.info);
+        if (limit !== undefined && result.length >= limit) return result;
+      }
       for (const ghost of this.ghosts.values()) {
         result.push(ghost);
         if (limit !== undefined && result.length >= limit) return result;
@@ -515,8 +552,12 @@ export class BackgroundProcessManager {
    */
   async flushOutput(taskId: string): Promise<void> {
     const entry = this.processes.get(taskId);
-    if (entry === undefined) return;
-    await entry.outputWriteQueue;
+    if (entry !== undefined) {
+      await entry.outputWriteQueue;
+      return;
+    }
+    const retired = this.retiredTasks.get(taskId);
+    if (retired !== undefined) await retired.outputWriteQueue;
   }
 
   /**
@@ -594,28 +635,49 @@ export class BackgroundProcessManager {
     }
 
     const entry = this.processes.get(taskId);
-    if (entry === undefined) return emptyOutputSnapshot();
+    const retired = entry === undefined ? this.retiredTasks.get(taskId) : undefined;
+    const availableText =
+      entry !== undefined ? entry.outputChunks.join('') : (retired?.outputText ?? '');
+    const outputSizeBytes = entry !== undefined ? entry.outputSizeBytes : (retired?.outputSizeBytes ?? 0);
+    if (entry === undefined && retired === undefined) return emptyOutputSnapshot();
 
-    const available = Buffer.from(entry.outputChunks.join(''), 'utf-8');
-    const previewBytes = Math.min(previewLimit, available.byteLength, entry.outputSizeBytes);
+    const available = Buffer.from(availableText, 'utf-8');
+    const previewBytes = Math.min(previewLimit, available.byteLength, outputSizeBytes);
     const previewOffset = available.byteLength - previewBytes;
     return {
-      outputSizeBytes: entry.outputSizeBytes,
+      outputSizeBytes,
       previewBytes,
-      truncated: entry.outputSizeBytes > previewBytes,
+      truncated: outputSizeBytes > previewBytes,
       fullOutputAvailable: false,
       preview: available.subarray(previewOffset).toString('utf-8'),
     };
   }
 
-  /** Get the combined output of a task (tail of the ring buffer). */
+  /** Get the combined output of a task (live ring buffer, else the disk log). */
   getOutput(taskId: string, tail?: number): string {
     const entry = this.processes.get(taskId);
-    if (!entry) return '';
-    const full = entry.outputChunks.join('');
-    if (tail !== undefined && tail < full.length) {
-      return full.slice(-tail);
+    if (entry) {
+      const full = entry.outputChunks.join('');
+      if (tail !== undefined && tail < full.length) {
+        return full.slice(-tail);
+      }
+      return full;
     }
+    // Retired tasks have their chunk array dropped at finalize. The disk log
+    // is the authoritative full output (same file `readOutputBytesFromDisk`
+    // reads); the retained tail copy covers detached managers with no disk.
+    const retired = this.retiredTasks.get(taskId);
+    if (retired === undefined) return '';
+    let full = retired.outputText;
+    if (retired.outputSessionDir !== undefined) {
+      try {
+        const persisted = readFileSync(taskOutputFile(retired.outputSessionDir, taskId), 'utf-8');
+        if (persisted.length > 0) full = persisted;
+      } catch {
+        /* fall back to the retained tail */
+      }
+    }
+    if (tail !== undefined && tail < full.length) return full.slice(-tail);
     return full;
   }
 
@@ -669,10 +731,13 @@ export class BackgroundProcessManager {
     return taskOutputFile(outputSessionDir, taskId);
   }
 
-  /** Stop a running task. SIGTERM → 5s grace → SIGKILL. */
+  /** Stop a running task. SIGTERM → 5s grace → SIGKILL. Active-only: a
+   *  retired/ghost task is a pure no-op read of its terminal info. */
   async stop(taskId: string, reason?: string): Promise<BackgroundTaskInfo | undefined> {
     const entry = this.processes.get(taskId);
-    if (!entry) return undefined;
+    if (!entry) {
+      return this.retiredTasks.get(taskId)?.info ?? this.ghosts.get(taskId);
+    }
     // Normalize at this shared boundary: every public stop path (the TaskStop
     // tool, SDK/RPC) funnels through here, so a blank or whitespace-only
     // reason must never be recorded as an empty stopReason.
@@ -753,7 +818,9 @@ export class BackgroundProcessManager {
    */
   async wait(taskId: string, timeoutMs = 30_000): Promise<BackgroundTaskInfo | undefined> {
     const entry = this.processes.get(taskId);
-    if (!entry) return undefined;
+    if (!entry) {
+      return this.retiredTasks.get(taskId)?.info;
+    }
     if (TERMINAL_STATUSES.has(entry.status)) {
       await entry.persistWriteQueue;
       return this.toInfo(entry);
@@ -989,8 +1056,19 @@ export class BackgroundProcessManager {
   /** Reset internal state (for testing). */
   _reset(): void {
     this.processes.clear();
+    this.retiredTasks.clear();
     this.ghosts.clear();
     this.sessionDir = undefined;
+  }
+
+  /** Live (non-terminal) task occupancy. */
+  get liveTaskCount(): number {
+    return this.processes.size;
+  }
+
+  /** Retired-ring occupancy (≤ `RETIRED_TASK_LIMIT`). */
+  get retiredTaskCount(): number {
+    return this.retiredTasks.size;
   }
 
   // ── persistence + reconcile ────────────────────────────────────────
@@ -1067,9 +1145,10 @@ export class BackgroundProcessManager {
     return result;
   }
 
-  /** Drop a persisted task from disk and ghost map. */
+  /** Drop a persisted task from disk and ghost/retired maps. */
   async forgetTask(taskId: string): Promise<void> {
     this.ghosts.delete(taskId);
+    this.retiredTasks.delete(taskId);
     if (this.sessionDir !== undefined) {
       await removeTask(this.sessionDir, taskId);
     }
@@ -1110,13 +1189,24 @@ export class BackgroundProcessManager {
 
   private appendOutput(entry: ManagedProcess, chunk: string): void {
     entry.outputSizeBytes += Buffer.byteLength(chunk, 'utf-8');
-    entry.outputChunks.push(chunk);
-    // Enforce output cap: drop oldest chunks when over budget.
-    let total = entry.outputChunks.reduce((s, c) => s + c.length, 0);
-    while (total > MAX_OUTPUT_BYTES && entry.outputChunks.length > 1) {
-      const removed = entry.outputChunks.shift();
-      if (removed === undefined) break;
-      total -= removed.length;
+    // Late stdout after finalize: the live entry is already retired, so extend
+    // the retained tail copy instead of growing a dead chunk array.
+    const retired = this.retiredTasks.get(entry.taskId);
+    if (retired !== undefined) {
+      this.retiredTasks.set(entry.taskId, {
+        ...retired,
+        outputText: retired.outputText + chunk,
+        outputSizeBytes: entry.outputSizeBytes,
+      });
+    } else {
+      entry.outputChunks.push(chunk);
+      // Enforce output cap: drop oldest chunks when over budget.
+      let total = entry.outputChunks.reduce((s, c) => s + c.length, 0);
+      while (total > MAX_OUTPUT_BYTES && entry.outputChunks.length > 1) {
+        const removed = entry.outputChunks.shift();
+        if (removed === undefined) break;
+        total -= removed.length;
+      }
     }
 
     const outputSessionDir = entry.outputSessionDir;
@@ -1129,6 +1219,8 @@ export class BackgroundProcessManager {
   private outputSessionDirFor(taskId: string): string | undefined {
     const entry = this.processes.get(taskId);
     if (entry !== undefined) return entry.outputSessionDir;
+    const retired = this.retiredTasks.get(taskId);
+    if (retired !== undefined) return retired.outputSessionDir;
     if (this.ghosts.has(taskId)) return this.sessionDir;
     return undefined;
   }
@@ -1141,11 +1233,22 @@ export class BackgroundProcessManager {
         await this.persistLive(entry);
         this.fireTerminalCallbacks(entry);
         this.resolveWaiters(entry);
+        this.syncRetired(entry);
       }
       return;
     }
     const status = entry.stopRequested ? 'killed' : exitCode === 0 ? 'completed' : 'failed';
     await this.finalizeTerminal(entry, status, exitCode);
+  }
+
+  /** Refresh the retired-ring snapshot after a post-terminal field update. */
+  private syncRetired(entry: ManagedProcess): void {
+    const retired = this.retiredTasks.get(entry.taskId);
+    if (retired === undefined) return;
+    this.retiredTasks.set(entry.taskId, {
+      ...retired,
+      info: this.toInfo(entry),
+    });
   }
 
   private observedExitCompletions(): Promise<void>[] {
@@ -1200,6 +1303,30 @@ export class BackgroundProcessManager {
     await this.persistLive(entry);
     this.fireTerminalCallbacks(entry);
     this.resolveWaiters(entry);
+    // Disk is the authority once the ring is dropped: drain pending output.log
+    // appends before the retired record is published, so a retired getOutput /
+    // readOutput can never observe a gap. Deliberately AFTER the terminal
+    // notification so subscriber latency stays off the disk-write path.
+    await entry.outputWriteQueue;
+    // Terminal eviction: drop the ≤1 MiB output ring and the live process
+    // handle, keep a slim retired record (metadata + disk-log coordinates)
+    // in a bounded FIFO ring. `stopAll`/`stop` only ever see `processes`,
+    // so they act on active tasks alone from here on.
+    const outputText = entry.outputChunks.join('');
+    entry.outputChunks.length = 0;
+    this.retiredTasks.set(entry.taskId, {
+      info: this.toInfo(entry),
+      outputText,
+      outputSizeBytes: entry.outputSizeBytes,
+      outputSessionDir: entry.outputSessionDir,
+      outputWriteQueue: entry.outputWriteQueue,
+    });
+    while (this.retiredTasks.size > RETIRED_TASK_LIMIT) {
+      const oldest = this.retiredTasks.keys().next().value;
+      if (oldest === undefined) break;
+      this.retiredTasks.delete(oldest);
+    }
+    this.processes.delete(entry.taskId);
     return true;
   }
 }

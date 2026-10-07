@@ -6,13 +6,14 @@
  */
 
 import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'pathe';
 import { Readable } from 'node:stream';
 import type { Writable } from 'node:stream';
 
 import type { JianProcess } from '@scream-code/jian';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { BackgroundProcessManager } from '../../../src/tools/background/manager';
 
@@ -754,5 +755,73 @@ describe('BackgroundProcessManager — registration semantics', () => {
     expect(after?.status).toBe('completed');
     // No stopReason should be recorded on a noop stop.
     expect(after?.stopReason).toBeUndefined();
+  });
+});
+
+describe('BackgroundProcessManager — terminal eviction', () => {
+  let sessionDir: string;
+  let manager: BackgroundProcessManager;
+
+  beforeEach(() => {
+    sessionDir = mkdtempSync(join(tmpdir(), 'bpm-evict-'));
+    manager = new BackgroundProcessManager();
+    manager.attachSessionDir(sessionDir);
+  });
+
+  afterEach(() => {
+    manager._reset();
+    rmSync(sessionDir, { recursive: true, force: true });
+  });
+
+  it('evicts 50 terminal tasks from processes and bounds the retired ring', async () => {
+    for (let i = 0; i < 50; i++) {
+      const body = `terminal-output-${i}`;
+      const taskId = manager.register(immediateProcess(0, `${body}\n`), 'echo', `task ${i}`);
+      await manager.wait(taskId);
+      await manager.flushOutput(taskId);
+    }
+
+    // Live map is empty: nothing terminal stays in `processes`.
+    expect(manager.liveTaskCount).toBe(0);
+    // Retired ring is bounded (N=20, FIFO drop-oldest).
+    expect(manager.retiredTaskCount).toBeLessThanOrEqual(20);
+    expect(manager.retiredTaskCount).toBe(20);
+
+    // Newest retired id is still addressable and its full text is on disk.
+    const listed = manager.list(false);
+    expect(listed.length).toBeGreaterThanOrEqual(20);
+    const newest = listed.find((info) => info.command === 'echo' && info.description === 'task 49');
+    expect(newest).toBeDefined();
+    const full = await manager.readOutput(newest!.taskId);
+    expect(full).toContain('terminal-output-49');
+    // Sync getOutput reads the same authoritative disk log for retired ids.
+    expect(manager.getOutput(newest!.taskId)).toContain('terminal-output-49');
+    // ... and it really is the disk log, not a leftover in-memory copy: the
+    // snapshot only reports `fullOutputAvailable` for an existing output.log.
+    const snapshot = await manager.getOutputSnapshot(newest!.taskId, 4096);
+    expect(snapshot.fullOutputAvailable).toBe(true);
+    expect(snapshot.outputPath).toContain('output.log');
+    expect(snapshot.preview).toContain('terminal-output-49');
+
+    // Oldest of the 50 is gone from the ring (FIFO overflow).
+    const oldest = manager.list(false).find((info) => info.description === 'task 0');
+    expect(oldest).toBeUndefined();
+  });
+
+  it('stopAll only acts on active tasks after eviction', async () => {
+    const finished = manager.register(immediateProcess(0, 'done\n'), 'echo', 'finished');
+    await manager.wait(finished);
+    await manager.flushOutput(finished);
+
+    const { proc } = pendingProcess();
+    const running = manager.register(proc, 'sleep', 'still going');
+
+    expect(manager.liveTaskCount).toBe(1);
+    const stopped = await manager.stopAll('shutdown');
+    expect(stopped.map((info) => info.taskId)).toEqual([running]);
+    expect(manager.liveTaskCount).toBe(0);
+    // Finished task stays readable via the retired ring, untouched by stopAll.
+    expect(manager.getTask(finished)?.status).toBe('completed');
+    expect(manager.getOutput(finished)).toContain('done');
   });
 });

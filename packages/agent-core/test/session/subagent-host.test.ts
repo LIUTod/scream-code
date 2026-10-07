@@ -224,6 +224,13 @@ describe('SessionSubagentHost', () => {
       metadata: { agents: grandchildMetadata },
       writeMetadata: vi.fn(async () => {}),
       markAgentCapability: vi.fn(),
+      removeAgent: vi.fn((id: string) => {
+        if (id !== 'main') childAgents.delete(id);
+      }),
+      ensureAgent: vi.fn(async (id: string) => {
+        if (!childAgents.has(id)) childAgents.set(id, grandchild.agent);
+        return childAgents.get(id)!;
+      }),
       createAgent: vi.fn(async (_config: unknown, _profile: unknown, parentAgentId?: string) => {
         childAgents.set('agent-1', grandchild.agent);
         grandchildMetadata['agent-1'] = {
@@ -529,6 +536,40 @@ describe('SessionSubagentHost', () => {
         content: [{ type: 'text', text: 'Find the cause' }],
       },
     ]);
+  });
+
+  it('evicts the child from Session.agents and drops its mailbox at terminal', async () => {
+    const parent = testAgent();
+    parent.configure();
+    await parent.rpc.setPermission({ mode: 'yolo' });
+
+    const child = testAgent({
+      type: 'sub',
+      permission: { parent: parent.agent.permission },
+    });
+    const summary =
+      'Finished the child task completely and returned a detailed enough technical summary for the parent agent to continue confidently without repeating the work already done. '.repeat(
+        2,
+      );
+    child.mockNextResponse({ type: 'text', text: summary });
+    const session = fakeSession(parent.agent, child.agent);
+    const bus = new SubagentMessageBus();
+    const host = new SessionSubagentHost(session, 'main', undefined, undefined, bus);
+
+    const handle = await host.spawn('explore', {
+      parentToolCallId: 'call_agent',
+      prompt: 'Investigate',
+      description: 'Investigate',
+      runInBackground: false,
+      signal,
+    });
+    // Spawn registers the live child; the terminal finally must clear both.
+    expect(session.agents.has(handle.agentId)).toBe(true);
+    await handle.completion;
+
+    expect(session.agents.has(handle.agentId)).toBe(false);
+    expect(session.agents.size).toBe(1); // only 'main' remains
+    expect(bus.mailboxCount).toBe(0);
   });
 
   it('falls back to bundled subagent profiles when the parent profile is missing', async () => {
@@ -1609,7 +1650,10 @@ describe('SessionSubagentHost interject', () => {
     expect(history).toContain('[directive] abort the wait and do X instead');
     expect(history).not.toContain('manually interrupted');
     expect(completion.result).toContain('Aborted the wait');
-  }, 15_000);
+    // Integration turn on the shared mocked harness: ~6s idle, but full-suite
+    // parallelism inflates it several times over (see vitest.config.ts, whose
+    // 60s ceiling exists for exactly this reason).
+  }, 60_000);
 
   it('queues an interject in the mailbox when no turn is live', async () => {
     let releaseStart!: () => void;
@@ -1734,7 +1778,10 @@ describe('SessionSubagentHost interject', () => {
     // guard, so the structured contract survived the interjection.
     expect(historyHasDiff(child, '[directive] reconsider the approach')).toBe(true);
     expect(completion.result).toContain('reconsidered');
-  }, 15_000);
+    // Same integration-turn budget as the interject test above: the 60s ceiling
+    // is the project default (vitest.config.ts), the ~6s idle cost inflates
+    // under full-suite parallelism.
+  }, 60_000);
 
   it('reports not_active when the child already finished', async () => {
     const parent = testAgent();
@@ -2000,6 +2047,16 @@ function fakeSession(
       const meta = metadataAgents[agentId];
       if (meta === undefined) return;
       metadataAgents[agentId] = { ...meta, capabilityMode: mode };
+    }),
+    // Terminal eviction helpers (mirror Session.removeAgent / ensureAgent):
+    // drop the live instance after a finished run; re-attach it on resume so
+    // sequential resumes in one test keep the same child object.
+    removeAgent: vi.fn((id: string) => {
+      if (id !== 'main') agents.delete(id);
+    }),
+    ensureAgent: vi.fn(async (id: string) => {
+      if (!agents.has(id)) agents.set(id, child);
+      return agents.get(id)!;
     }),
     createAgent: vi.fn(
       async (

@@ -66,7 +66,10 @@ describe('Session.init', () => {
 
     await session.generateAgentsMd();
 
-    expect(session.agents.size).toBe(2);
+    // Terminal eviction: the finished init subagent is dropped from the live
+    // map so a one-shot generateAgentsMd cannot pin its Agent for the rest of
+    // the session. Metadata/events still record the spawn.
+    expect(session.agents.size).toBe(1);
     expect(session.agents.get('main')).toBe(mainAgent);
     expect(events).toContainEqual(
       expect.objectContaining({

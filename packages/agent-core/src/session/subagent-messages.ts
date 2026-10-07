@@ -133,17 +133,35 @@ export class SubagentMessageBus {
   }
 
   /**
+   * Drop one agent's mailbox outright (subagent terminal). Complements
+   * `clear()` (session teardown): this releases a single slot once the child
+   * will never poll again, so an empty Map entry cannot outlive its run.
+   */
+  dropMailbox(agentId: string): void {
+    this.mailboxes.delete(agentId);
+  }
+
+  /** Live mailbox entries (diagnostics / eviction assertions). */
+  get mailboxCount(): number {
+    return this.mailboxes.size;
+  }
+
+  /**
    * Deliver all pending, unexpired messages for `agentId`. Steer messages are
    * always dequeued before queue messages; within an operation class, arrival
    * order is preserved via the monotonically increasing `seq` (this is a stable
    * two-pass collection, not a sort). Messages past their deadline are dropped.
+   *
+   * The mailbox entry is removed once its queue is emptied: a polled-out (or
+   * fully expired) mailbox must not pin a Map slot until `dropMailbox`.
    */
   poll(agentId: string): SubagentMessage[] {
     const mailbox = this.mailboxes.get(agentId);
-    if (mailbox === undefined || mailbox.queue.length === 0) return [];
+    if (mailbox === undefined) return [];
     const now = Date.now();
     const live = mailbox.queue.filter((m) => m.deadline > now);
-    mailbox.queue = [];
+    // Queue is consumed either way (delivered or expired past deadline).
+    this.mailboxes.delete(agentId);
     const steers = live.filter((m) => m.operation === 'steer');
     const queues = live.filter((m) => m.operation === 'queue');
     steers.sort((a, b) => a.seq - b.seq);

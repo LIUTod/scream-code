@@ -213,3 +213,92 @@ describe('web message persistence (finalized snapshots)', () => {
     await manager.closeAll();
   });
 });
+
+describe('web journal / message FIFO caps', () => {
+  it('truncates the journal past 200 entries and counts the elided rows', async () => {
+    const homeDir = await mkdtemp(join(tmpdir(), 'scream-web-cap-'));
+    tempDirs.push(homeDir);
+    const sessionsDir = join(homeDir, 'web-sessions');
+    await mkdir(sessionsDir, { recursive: true });
+    await writeFile(
+      join(sessionsDir, 'web-cap.meta.json'),
+      JSON.stringify({
+        sessionId: 'web-cap',
+        coreSessionId: 'web-cap',
+        workDir: '/tmp/project',
+        title: 'Cap',
+        createdAt: 1,
+        model: 'test-model',
+        permission: 'manual',
+      }),
+    );
+    const control = makeFakeSession('web-cap');
+    const manager = await newManager(homeDir, control);
+    const live = await manager.activateSession('web-cap');
+    expect(live).not.toBeNull();
+
+    // 250 journaled events (each turn.* / custom payload hits appendEvent).
+    for (let i = 0; i < 250; i++) {
+      control.emit({
+        type: 'session.meta.updated',
+        turnId: 0,
+        sessionId: 'web-cap',
+        agentId: 'main',
+        meta: { tick: i },
+      } as unknown as Event);
+    }
+
+    const bounds = live!.getMemoryBounds();
+    expect(bounds.journal).toBeLessThanOrEqual(200);
+    expect(bounds.journalLimit).toBe(200);
+    // FIFO: 250 in, 200 kept → 50 elided and tallied.
+    expect(bounds.journalElided).toBeGreaterThanOrEqual(50);
+    expect(bounds.messages).toBeLessThanOrEqual(200);
+    expect(bounds.messagesElided).toBe(0);
+    await manager.closeAll();
+  });
+
+  it('truncates message stores past 200 rows and counts the elided rows', async () => {
+    const homeDir = await mkdtemp(join(tmpdir(), 'scream-web-msgcap-'));
+    tempDirs.push(homeDir);
+    const sessionsDir = join(homeDir, 'web-sessions');
+    await mkdir(sessionsDir, { recursive: true });
+    await writeFile(
+      join(sessionsDir, 'web-msgcap.meta.json'),
+      JSON.stringify({
+        sessionId: 'web-msgcap',
+        coreSessionId: 'web-msgcap',
+        workDir: '/tmp/project',
+        title: 'MsgCap',
+        createdAt: 1,
+        model: 'test-model',
+        permission: 'manual',
+      }),
+    );
+    const control = makeFakeSession('web-msgcap');
+    const manager = await newManager(homeDir, control);
+    const live = await manager.activateSession('web-msgcap');
+    expect(live).not.toBeNull();
+
+    // 250 seeded message rows → message store FIFO-caps at 200 with a tally.
+    live!.seedHistory(
+      Array.from({ length: 250 }, (_, i) => ({
+        role: 'user' as const,
+        content: `user-${i}`,
+        tools: [],
+      })),
+    );
+
+    const bounds = live!.getMemoryBounds();
+    expect(bounds.messages).toBeLessThanOrEqual(200);
+    expect(bounds.messageLimit).toBe(200);
+    expect(bounds.messagesElided).toBeGreaterThanOrEqual(50);
+    // FIFO means the oldest rows go: the surviving window is the newest 200
+    // (user-0..user-49 dropped), so the visible tail of the chat survives.
+    const { messages } = live!.getMessagesOlder(Number.MAX_SAFE_INTEGER, 200);
+    expect(messages).toHaveLength(200);
+    expect(messages[0]?.content).toBe('user-50');
+    expect(messages.at(-1)?.content).toBe('user-249');
+    await manager.closeAll();
+  });
+});

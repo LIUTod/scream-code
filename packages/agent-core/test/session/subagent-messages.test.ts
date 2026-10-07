@@ -163,4 +163,42 @@ describe('SubagentMessageBus', () => {
       Array.from({ length: 15 }, (_, i) => `m${i}`),
     );
   });
+
+  it('drops the mailbox entry once poll empties the queue', () => {
+    const bus = new SubagentMessageBus();
+    msg(bus, 'child-a', 'queue', 'only', { inFlightLimit: 10 });
+    expect(bus.mailboxCount).toBe(1);
+    expect(bus.poll('child-a')).toHaveLength(1);
+    // Terminal cleanup: an emptied mailbox must not pin a Map slot.
+    expect(bus.mailboxCount).toBe(0);
+    expect(bus.activeCount('child-a')).toBe(0);
+  });
+
+  it('drops the mailbox entry when poll finds only expired mail', () => {
+    vi.useFakeTimers();
+    try {
+      const bus = new SubagentMessageBus();
+      // Accepted with a deadline that has already passed by poll time —
+      // send() itself rejects already-expired mail, so age it after enqueue.
+      msg(bus, 'child-a', 'queue', 'stale', { deadline: NOW + 1000 });
+      expect(bus.mailboxCount).toBe(1);
+      vi.setSystemTime(NOW + 1001);
+      expect(bus.poll('child-a')).toEqual([]);
+      expect(bus.mailboxCount).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('dropMailbox releases one agent slot without touching siblings', () => {
+    const bus = new SubagentMessageBus();
+    msg(bus, 'child-a', 'queue', 'for-a', { inFlightLimit: 10 });
+    msg(bus, 'child-b', 'queue', 'for-b', { inFlightLimit: 10 });
+    expect(bus.mailboxCount).toBe(2);
+    bus.dropMailbox('child-a');
+    expect(bus.mailboxCount).toBe(1);
+    expect(bus.poll('child-a')).toEqual([]);
+    expect(bus.poll('child-b').map((m) => m.text)).toEqual(['for-b']);
+    expect(bus.mailboxCount).toBe(0);
+  });
 });
