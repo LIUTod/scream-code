@@ -1,13 +1,19 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { LifecycleController } from '#/tui/controllers/lifecycle-controller';
+import {
+  MAX_TRANSCRIPT_ENTRIES,
+  TranscriptController,
+  type TranscriptControllerHost,
+} from '#/tui/controllers/transcript-controller';
 import { SidebarManager } from '#/tui/components/sidebar/sidebar-manager';
-import type { SidebarHubData } from '#/tui/components/sidebar/sidebar-panel';
+import type { SidebarHubData, SidebarSessionStats } from '#/tui/components/sidebar/sidebar-panel';
 import { HUB_MODEL_ROW_ID } from '#/tui/utils/hub-probe';
+import { ImageAttachmentStore } from '#/tui/utils/image-attachment-store';
 import * as ccConnectStatus from '#/tui/utils/cc-connect-status';
 import type { LifecycleControllerHost } from '#/tui/controllers/lifecycle-controller';
 import type { ScreamHarness, Session } from '@scream-code/scream-code-sdk';
-import type { AppState, ScreamTUIOptions } from '#/tui/types';
+import type { AppState, ScreamTUIOptions, TranscriptEntry } from '#/tui/types';
 import type { TUIState } from '#/tui/tui-state';
 import type { ResolvedTheme } from '#/tui/theme/colors';
 import type { Theme } from '#/tui/theme/index';
@@ -16,9 +22,14 @@ import type { SessionEventHandler } from '#/tui/controllers/session-event-handle
 import type { SessionReplayRenderer } from '#/tui/controllers/session-replay';
 import type { SessionManager } from '#/tui/managers/session-manager';
 
-function createMockHost(): LifecycleControllerHost {
+import { createMockTUIState, makeMockStreamingUI } from '../fixtures/mock-host';
+
+function createMockHost(overrides: {
+  state?: TUIState;
+  transcriptController?: TranscriptController;
+} = {}): LifecycleControllerHost {
   const host: LifecycleControllerHost = {
-    state: { appState: {} as AppState } as TUIState,
+    state: overrides.state ?? ({ appState: {} as AppState } as TUIState),
     options: {} as ScreamTUIOptions,
     harness: {} as ScreamHarness,
     session: undefined,
@@ -42,6 +53,9 @@ function createMockHost(): LifecycleControllerHost {
     sessionManager: {} as SessionManager,
     sessionEventHandler: {} as SessionEventHandler,
     sessionReplay: {} as SessionReplayRenderer,
+    transcriptController:
+      overrides.transcriptController ??
+      ({ getIngestCount: () => 0 } as unknown as TranscriptController),
     onEmergencyExit: vi.fn((exitCode?: number) => {
       throw new Error(`emergency-exit-${exitCode ?? 129}`);
     }) as unknown as LifecycleControllerHost['onEmergencyExit'],
@@ -258,6 +272,79 @@ describe('LifecycleController', () => {
       manager.close();
 
       expect(readHub(controller).samples[0]).toMatchObject({ ms: undefined, tone: 'dim' });
+    });
+  });
+
+  describe('sidebar session stats memo', () => {
+    /**
+     * The memo keys on the transcript ingress counter, so the harness drives a
+     * real TranscriptController — including the real cap fold the counter has
+     * to survive — rather than stubbing the count.
+     */
+    function makeStatsHarness(): {
+      state: TUIState;
+      transcript: TranscriptController;
+      readStats: () => SidebarSessionStats;
+    } {
+      const state = createMockTUIState({
+        appState: {
+          sessionUsage: { inputOther: 10, inputCacheRead: 0, inputCacheCreation: 0, output: 5 },
+          subagentUsage: {},
+        },
+      });
+      const transcript = new TranscriptController({
+        state,
+        imageStore: new ImageAttachmentStore(),
+        streamingUI: makeMockStreamingUI(),
+        showStatus: vi.fn(),
+        batchUpdate: (fn: () => void): void => {
+          fn();
+        },
+        forceUpdateStatusBar: vi.fn(),
+      } as unknown as TranscriptControllerHost);
+      const host = createMockHost({ state, transcriptController: transcript });
+      const controller = new LifecycleController(host);
+      // Private seam: buildSidebarData would also shell out to git for the
+      // sibling panel, and this test is about the stats memo alone.
+      const readStats = (): SidebarSessionStats =>
+        (
+          controller as unknown as {
+            readSidebarSessionStats(appState: AppState): SidebarSessionStats;
+          }
+        ).readSidebarSessionStats(state.appState);
+      return { state, transcript, readStats };
+    }
+
+    it('recomputes after a capped fold that leaves the entry count unchanged', () => {
+      const { state, transcript, readStats } = makeStatsHarness();
+      const userEntry = (i: number): TranscriptEntry => ({
+        id: `u-${String(i)}`,
+        kind: 'user',
+        renderMode: 'plain',
+        content: `need ${String(i)}`,
+      });
+      for (let i = 0; i < MAX_TRANSCRIPT_ENTRIES; i += 1) transcript.ingestEntry(userEntry(i));
+      const lengthBefore = state.transcriptEntries.length;
+      const countBefore = transcript.getIngestCount();
+      const before = readStats();
+      expect(before.turns).toBe(MAX_TRANSCRIPT_ENTRIES);
+
+      // One more ingest trips the cap: the fold makes room for the stub by
+      // dropping the two oldest rows, so the array lands back on the same
+      // length with a different composition. A length-only memo key would
+      // serve `before` again here.
+      transcript.ingestEntry({
+        id: 'a-1',
+        kind: 'assistant',
+        renderMode: 'plain',
+        content: 'done',
+      });
+      expect(state.transcriptEntries.length).toBe(lengthBefore);
+      expect(transcript.getIngestCount()).toBeGreaterThan(countBefore);
+
+      const after = readStats();
+      expect(after.turns).toBe(MAX_TRANSCRIPT_ENTRIES - 2);
+      expect(after.turns).not.toBe(before.turns);
     });
   });
 });

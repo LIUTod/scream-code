@@ -705,4 +705,22 @@ describe('TranscriptController entry-count cap (collapse stub)', () => {
     expect(state.transcriptEntries).toHaveLength(MAX_TRANSCRIPT_ENTRIES);
     expect(state.transcriptEntries.some((e) => STUB_PATTERN.test(e.content))).toBe(false);
   });
+
+  it('moves the monotonic ingest counter on every ingest and on each fold', () => {
+    const { controller, state } = makeHost();
+    expect(controller.getIngestCount()).toBe(0);
+
+    appendMany(controller, MAX_TRANSCRIPT_ENTRIES);
+    const atCap = controller.getIngestCount();
+    expect(atCap).toBe(MAX_TRANSCRIPT_ENTRIES);
+    const lengthAtCap = state.transcriptEntries.length;
+
+    // Tripping the cap folds the oldest rows into the stub: the array lands
+    // back on the same length, so only the counter can tell a memoized
+    // aggregate that the composition changed. The append moves it once for
+    // the ingest and once for the fold it triggered.
+    controller.appendEntry(entry({ kind: 'status', content: 'row-over' }));
+    expect(state.transcriptEntries.length).toBe(lengthAtCap);
+    expect(controller.getIngestCount()).toBe(atCap + 2);
+  });
 });

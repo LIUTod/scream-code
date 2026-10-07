@@ -84,6 +84,12 @@ export class TranscriptController {
   private readonly liveNoticesByTrackingId = new Map<string, BackgroundAgentStatusComponent>();
   private readonly pendingComponents = new Set<Component>();
 
+  /** Monotonic count of composition changes to `state.transcriptEntries`:
+   *  +1 per ingest and +1 per cap fold. Aggregates that memoize over the entry
+   *  list key on this — the fold holds the array length at the cap while
+   *  replacing the oldest rows, so a length-only key can go stale. */
+  private ingestCount = 0;
+
   /** Max live transcript children before the oldest are folded into the
    *  committed single-line summary. Overridable via SCREAM_TRANSCRIPT_LIVE_LIMIT
    *  (mirrors a commit-fold approach for bounding ultra-long sessions). */
@@ -325,9 +331,21 @@ export class TranscriptController {
    */
   ingestEntry(entry: TranscriptEntry): TranscriptEntry {
     const boundedEntry = boundEntryForUi(entry);
+    this.ingestCount += 1;
     this.host.state.transcriptEntries.push(boundedEntry);
     this.enforceEntryCap();
     return boundedEntry;
+  }
+
+  /**
+   * Monotonic count of transcript composition changes: one per ingest, plus
+   * one per cap fold. Consumers that memoize aggregates over
+   * `state.transcriptEntries` (the sidebar session stats) key on this instead
+   * of `length` alone, because a fold lands the array back on the same length
+   * while replacing its oldest rows.
+   */
+  getIngestCount(): number {
+    return this.ingestCount;
   }
 
   appendEntry(entry: TranscriptEntry): Component | null {
@@ -385,6 +403,9 @@ export class TranscriptController {
     const dropped = entries.splice(0, entries.length - MAX_TRANSCRIPT_ENTRIES + 1);
     const folded = dropped.length - (isStub ? 1 : 0);
     entries.unshift(makeCollapseStub(stubCount(head) + folded));
+    // The fold changes the composition without netting a length change (the
+    // array lands back on the cap), so it must move the counter too.
+    this.ingestCount += 1;
   }
 
   /** Append a suffix to the given turn's final assistant message last line.

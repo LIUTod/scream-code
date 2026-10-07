@@ -17,6 +17,7 @@ import { CHROME_GUTTER } from '../constant/rendering';
 import type { AuthFlowController } from './auth-flow';
 import type { SessionEventHandler } from './session-event-handler';
 import type { SessionReplayRenderer } from './session-replay';
+import type { TranscriptController } from './transcript-controller';
 import type { SessionManager } from '../managers/session-manager';
 import { createScreamTUIThemeBundle } from '../theme/bundle';
 import type { ResolvedTheme } from '../theme/colors';
@@ -59,6 +60,7 @@ export interface LifecycleControllerHost {
   readonly sessionManager: SessionManager;
   readonly sessionEventHandler: SessionEventHandler;
   readonly sessionReplay: SessionReplayRenderer;
+  readonly transcriptController: TranscriptController;
 
   onEmergencyExit(exitCode?: number): never;
 }
@@ -92,9 +94,11 @@ export class LifecycleController {
   private readonly hubProbe = createHubProbe();
   private sidebarGitCacheWorkDir = '';
   /** Memo for the session-stats aggregation: recomputed only when the
-   * transcript length, compaction count or usage object changes. */
+   * transcript's ingest counter/length, compaction count or usage object
+   * changes. */
   private sidebarStatsMemo:
     | {
+        ingestCount: number;
         length: number;
         compactions: number;
         usage: TokenUsage;
@@ -425,15 +429,21 @@ export class LifecycleController {
 
   private readSidebarSessionStats(appState: AppState): SidebarSessionStats {
     const entries = this.host.state.transcriptEntries;
+    const ingestCount = this.host.transcriptController.getIngestCount();
     const usage = appState.sessionUsage;
     const subagentUsage = appState.subagentUsage;
     const memo = this.sidebarStatsMemo;
-    // Entries are append-only and usage objects are replaced per update, so
-    // (length, compactions, usage refs, call count) is a sound change
-    // detector. The call count is explicit because a step can complete
-    // without carrying usage, which would leave every other input unchanged.
+    // The entry list is not append-only: once the transcript hits its entry cap
+    // the oldest rows are folded into one aggregate stub, which lands the array
+    // back on the same length with a different composition. The monotonic
+    // ingest counter catches that; length and the usage object refs (replaced
+    // per update) stay in the key to cover mutations outside the ingress —
+    // replay splices and the per-session reset. The call count is explicit
+    // because a step can complete without carrying usage, which would leave
+    // every other input unchanged.
     if (
       memo !== undefined &&
+      memo.ingestCount === ingestCount &&
       memo.length === entries.length &&
       memo.compactions === appState.autoCompactionCount &&
       memo.usage === usage &&
@@ -467,6 +477,7 @@ export class LifecycleController {
       tokensOutput: usage.output + subagentOutput,
     };
     this.sidebarStatsMemo = {
+      ingestCount,
       length: entries.length,
       compactions: appState.autoCompactionCount,
       usage,
