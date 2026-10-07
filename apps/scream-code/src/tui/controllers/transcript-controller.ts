@@ -31,6 +31,7 @@ import { replaceTabs } from '../utils/sanitize';
 import { disposeChildren, hasDispose, isExpandable, isPlanExpandable } from '../utils/component-capabilities';
 import { buildApprovalNotice } from '../utils/approval-notice';
 import { isStreaming } from '../utils/app-state';
+import { boundEntryForUi } from '../utils/transcript-bound';
 import { CommittedTranscriptComponent } from '../components/transcript/committed-transcript';
 
 export interface TranscriptControllerHost {
@@ -281,15 +282,20 @@ export class TranscriptController {
   }
 
   appendEntry(entry: TranscriptEntry): Component | null {
-    this.host.state.transcriptEntries.push(entry);
-    const component = this.createComponent(entry);
+    // Ingest-time UI bound: a tool-group entry's `result.output` can be huge
+    // (model-side bounding only shapes what the model sees), so the transcript
+    // keeps a head+tail preview. The same bounded entry feeds the component and
+    // the live→committed fold, so history never regains the elided middle.
+    const boundedEntry = boundEntryForUi(entry);
+    this.host.state.transcriptEntries.push(boundedEntry);
+    const component = this.createComponent(boundedEntry);
     if (component) {
-      this.liveComponentToEntry.set(component, entry);
+      this.liveComponentToEntry.set(component, boundedEntry);
       // A background task notice belongs to the work that spawned it: while the
       // turn's block is still open it becomes one of its steps. The component
       // then stays unmounted (like a borrowed tool card) and remains the entry's
       // live counterpart for revoke, folding and disposal.
-      const status = entry.backgroundAgentStatus;
+      const status = boundedEntry.backgroundAgentStatus;
       if (status !== undefined && component instanceof BackgroundAgentStatusComponent) {
         const trackingId = status.trackingId;
         if (trackingId !== undefined) {

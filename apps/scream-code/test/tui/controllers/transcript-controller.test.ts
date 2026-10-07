@@ -609,3 +609,46 @@ describe('TranscriptController — live notice animation lifecycle', () => {
     expect(dispose).toHaveBeenCalled();
   });
 });
+
+describe('TranscriptController ingest bounding (transcript-bound)', () => {
+  it('stores a bounded tool output — the full middle never reaches transcriptEntries', () => {
+    const { controller, state } = makeHost();
+    const middleSentinel = 'middle-sentinel-line-12345';
+    const lines = Array.from({ length: 10_000 }, (_, i) =>
+      i === 5_000 ? middleSentinel : `payload-line-${String(i)}`,
+    );
+    const entryToAppend = entry({
+      kind: 'tool_call',
+      toolCallData: toolCallData({
+        result: { tool_call_id: 'tc-1', output: lines.join('\n'), is_error: false },
+      }),
+    });
+
+    controller.appendEntry(entryToAppend);
+
+    const stored = state.transcriptEntries[0]!;
+    const output = stored.toolCallData!.result!.output;
+    expect(output).not.toContain(middleSentinel);
+    expect(output.length).toBeLessThanOrEqual(8_000 + 64); // budget + marker slack
+    expect(output).toContain('payload-line-0');
+    expect(output).toContain('payload-line-9999');
+  });
+
+  it('creates the live component and entry mapping from the same bounded entry', () => {
+    const { controller, state } = makeHost();
+    const lines = Array.from({ length: 500 }, (_, i) => `row-${String(i)}`);
+    const entryToAppend = entry({
+      kind: 'tool_call',
+      toolCallData: toolCallData({
+        result: { tool_call_id: 'tc-1', output: lines.join('\n'), is_error: false },
+      }),
+    });
+
+    const component = controller.appendEntry(entryToAppend);
+
+    const stored = state.transcriptEntries[0]!;
+    expect(controller.findEntryForComponent(component!)).toBe(stored);
+    expect(stored.toolCallData!.result!.output).not.toBe(entryToAppend.toolCallData!.result!.output);
+    expect(stored.toolCallData!.result!.output).toContain('lines elided');
+  });
+});
