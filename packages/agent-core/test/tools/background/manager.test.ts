@@ -932,4 +932,21 @@ describe('BackgroundProcessManager — terminal eviction', () => {
       appendSpy.mockRestore();
     }
   });
+
+  // A5(P3): a terminal task is evicted from `processes` into the retired
+  // ring, and `waitForTerminal` must resolve it exactly like the `getTask`
+  // it documents itself as matching.
+  it('waitForTerminal resolves a retired task to its terminal info', async () => {
+    const taskId = manager.register(immediateProcess(0, 'done\n'), 'echo done', 'retired wait');
+
+    await vi.waitFor(() => {
+      expect(manager.liveTaskCount).toBe(0);
+    });
+
+    const terminal = await manager.waitForTerminal(taskId);
+
+    expect(terminal).toEqual(manager.getTask(taskId));
+    expect(terminal?.status).toBe('completed');
+    expect(terminal?.exitCode).toBe(0);
+  });
 });

@@ -1044,13 +1044,15 @@ export class BackgroundProcessManager {
    * already terminal, resolves synchronously on the next microtask.
    * Intended for integration code that wants to `await` a specific
    * task's exit without installing a full `onTerminal` subscriber.
-   * Returns `undefined` for unknown ids (matching `getTask`). Ghost
-   * (reconciled-lost) entries are considered terminal from the
-   * manager's perspective.
+   * Returns `undefined` for unknown ids (matching `getTask`). Retired
+   * (evicted-but-recently-finished) and ghost (reconciled-lost) entries
+   * are already terminal, so they resolve to their info instead.
    */
   async waitForTerminal(taskId: string): Promise<BackgroundTaskInfo | undefined> {
     const entry = this.processes.get(taskId);
-    if (entry === undefined) return this.ghosts.get(taskId);
+    if (entry === undefined) {
+      return this.retiredTasks.get(taskId)?.info ?? this.ghosts.get(taskId);
+    }
     if (TERMINAL_STATUSES.has(entry.status)) {
       await entry.persistWriteQueue;
       return this.toInfo(entry);
