@@ -893,6 +893,7 @@ export class BashTool implements BuiltinTool<BashInput> {
         const taskId = createBackgroundTask(
           command,
           completionPromise.then(({ exitCode }) => ({ exitCode, output: builder.toString() })),
+          { kill: killProc, pid: proc.pid },
         );
         // Surface a completion notification through the tool.progress custom
         // channel once the backgrounded command exits, so the user is not

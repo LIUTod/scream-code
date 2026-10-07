@@ -7,6 +7,10 @@ interface PendingBackgroundTask {
   readonly completion: Promise<{ exitCode: number; output: string }>;
   /** Set when the completion promise resolves. */
   result?: { exitCode: number; output: string };
+  /** Terminates the still-running process (eviction / sweep). Fire-and-forget. */
+  readonly kill: () => Promise<void>;
+  /** Process id when known; for diagnostics only. */
+  readonly pid?: number;
 }
 
 /**
@@ -27,14 +31,29 @@ const MAX_PENDING = 10;
 export function createBackgroundTask(
   command: string,
   completion: Promise<{ exitCode: number; output: string }>,
+  handles: {
+    readonly kill: () => Promise<void>;
+    readonly pid?: number;
+  },
 ): string {
   const id = randomUUID().slice(0, 8);
-  const task: PendingBackgroundTask = { command, startedAt: Date.now(), completion };
+  const task: PendingBackgroundTask = {
+    command,
+    startedAt: Date.now(),
+    completion,
+    kill: handles.kill,
+    pid: handles.pid,
+  };
 
-  // Evict oldest if at capacity.
+  // Evict oldest if at capacity — kill it first, otherwise the process
+  // loses its only kill handle and runs unbounded.
   if (pendingTasks.size >= MAX_PENDING) {
     const oldest = pendingTasks.keys().next().value;
-    if (oldest !== undefined) pendingTasks.delete(oldest);
+    if (oldest !== undefined) {
+      const evicted = pendingTasks.get(oldest);
+      pendingTasks.delete(oldest);
+      if (evicted !== undefined) void evicted.kill();
+    }
   }
 
   pendingTasks.set(id, task);
@@ -77,6 +96,17 @@ export function drainCompletedBackgroundTasks(): Array<{
     }
   }
   return completed;
+}
+
+/**
+ * Kill every pending background task and clear the registry. Intended for
+ * session teardown / process exit; not wired up by this module itself.
+ */
+export function stopAllPendingBackgroundTasks(): void {
+  for (const task of pendingTasks.values()) {
+    void task.kill();
+  }
+  pendingTasks.clear();
 }
 
 export function getPendingBackgroundCount(): number {
