@@ -107,15 +107,19 @@ vi.mock('../../../src/tui/components/dialogs/question-dialog.js', () => ({
 }));
 
 // sqlite-backed memo store must not touch disk in unit tests.
-vi.mock('@scream-code/memory', () => ({
-  MemoryMemoStore: class {
+vi.mock('@scream-code/memory', () => {
+  class MemoryMemoStore {
     init = vi.fn(async (): Promise<void> => {});
     list = vi.fn(async () => ({ memos: [], total: 0 }));
     constructor(_dir: string) {
       caps.stores.push(this);
     }
-  },
-}));
+  }
+  return {
+    MemoryMemoStore,
+    sharedMemoStore: (dir: string) => new MemoryMemoStore(dir),
+  };
+});
 
 // ---------------------------------------------------------------------------
 // Host

@@ -235,78 +235,84 @@ export class MemoryMemoStore {
    */
   static async migrateLegacyStores(screamHomeDir: string): Promise<void> {
     const target = new MemoryMemoStore(screamHomeDir);
-    const markerPath = join(screamHomeDir, 'memory', MIGRATION_MARKER);
-
     try {
-      await stat(markerPath);
-      return; // already migrated
-    } catch {
-      // continue with migration
-    }
+      const markerPath = join(screamHomeDir, 'memory', MIGRATION_MARKER);
 
-    const sessionsDir = join(screamHomeDir, 'sessions');
-    let sessionEntries: string[];
-    try {
-      sessionEntries = await readdir(sessionsDir, { withFileTypes: true })
-        .then((entries) => entries.filter((e) => e.isDirectory()).map((e) => e.name));
-    } catch {
-      await writeFile(markerPath, '', 'utf8').catch(() => {});
-      return;
-    }
-
-    const migratedIds = new Set<string>();
-    for await (const memo of target.read()) {
-      migratedIds.add(memo.id);
-    }
-
-    let migratedCount = 0;
-    const legacyPaths: string[] = [];
-    for (const sessionKey of sessionEntries) {
-      const legacyPath = join(sessionsDir, sessionKey, 'memory', FILE_NAME);
-      let stream: import('node:fs').ReadStream;
       try {
-        stream = createReadStream(legacyPath, { encoding: 'utf8' });
+        await stat(markerPath);
+        return; // already migrated
       } catch {
-        // Sync error (invalid path) — skip this file.
+        // continue with migration
       }
 
-      // Swallow async ENOENT errors when the legacy file does not exist.
-      stream!.on('error', () => {});
-
-      let line = '';
+      const sessionsDir = join(screamHomeDir, 'sessions');
+      let sessionEntries: string[];
       try {
-        for await (const chunk of stream!) {
-          line += chunk;
-          let newlineIndex = line.indexOf('\n');
-          while (newlineIndex !== -1) {
-            const rawLine = line.slice(0, newlineIndex).replace(/\r$/, '');
-            line = line.slice(newlineIndex + 1);
-            newlineIndex = line.indexOf('\n');
+        sessionEntries = await readdir(sessionsDir, { withFileTypes: true })
+          .then((entries) => entries.filter((e) => e.isDirectory()).map((e) => e.name));
+      } catch {
+        await writeFile(markerPath, '', 'utf8').catch(() => {});
+        return;
+      }
 
-            const memo = target.parseLine(rawLine, 0);
-            if (memo === undefined || migratedIds.has(memo.id)) continue;
-            await target.append(memo);
-            migratedIds.add(memo.id);
-            migratedCount++;
-          }
+      const migratedIds = new Set<string>();
+      for await (const memo of target.read()) {
+        migratedIds.add(memo.id);
+      }
+
+      let migratedCount = 0;
+      const legacyPaths: string[] = [];
+      for (const sessionKey of sessionEntries) {
+        const legacyPath = join(sessionsDir, sessionKey, 'memory', FILE_NAME);
+        let stream: import('node:fs').ReadStream;
+        try {
+          stream = createReadStream(legacyPath, { encoding: 'utf8' });
+        } catch {
+          // Sync error (invalid path) — skip this file.
         }
-      } catch {
-        continue;
+
+        // Swallow async ENOENT errors when the legacy file does not exist.
+        stream!.on('error', () => {});
+
+        let line = '';
+        try {
+          for await (const chunk of stream!) {
+            line += chunk;
+            let newlineIndex = line.indexOf('\n');
+            while (newlineIndex !== -1) {
+              const rawLine = line.slice(0, newlineIndex).replace(/\r$/, '');
+              line = line.slice(newlineIndex + 1);
+              newlineIndex = line.indexOf('\n');
+
+              const memo = target.parseLine(rawLine, 0);
+              if (memo === undefined || migratedIds.has(memo.id)) continue;
+              await target.append(memo);
+              migratedIds.add(memo.id);
+              migratedCount++;
+            }
+          }
+        } catch {
+          continue;
+        }
+
+        // Track the file for deletion only if we successfully read its stream.
+        // We delete regardless of whether any new entries were migrated; the
+        // global store is now the source of truth.
+        legacyPaths.push(legacyPath);
       }
 
-      // Track the file for deletion only if we successfully read its stream.
-      // We delete regardless of whether any new entries were migrated; the
-      // global store is now the source of truth.
-      legacyPaths.push(legacyPath);
-    }
+      // Delete legacy per-session memory files and empty memory directories.
+      for (const legacyPath of legacyPaths) {
+        await unlink(legacyPath).catch(() => {});
+        await rmdir(dirname(legacyPath)).catch(() => {});
+      }
 
-    // Delete legacy per-session memory files and empty memory directories.
-    for (const legacyPath of legacyPaths) {
-      await unlink(legacyPath).catch(() => {});
-      await rmdir(dirname(legacyPath)).catch(() => {});
+      await writeFile(markerPath, `${migratedCount}\n`, 'utf8').catch(() => {});
+    } finally {
+      // The migration store is a throwaway handle: release it on every path,
+      // including the early returns and the catch/swallow branches above.
+      target.close();
     }
-
-    await writeFile(markerPath, `${migratedCount}\n`, 'utf8').catch(() => {});
   }
 
   /** @internal */
@@ -1087,4 +1093,40 @@ function buildFtsQuery(search: string): string | undefined {
   const tokens = ftsText.split(/\s+/).filter((t) => t.length > 0);
   if (tokens.length === 0) return undefined;
   return tokens.map((t) => `"${t.replaceAll('"', '""')}"`).join(' AND ');
+}
+
+// ── Process-level shared store ─────────────────────────────────────────────
+// One MemoryMemoStore per home directory instead of one per Agent/TUI caller:
+// a long-lived session used to accumulate one open memos.sqlite handle per
+// construction, because nothing in production ever called close().
+
+const sharedStores = new Map<string, MemoryMemoStore>();
+
+function entryFor(projectDir: string, log?: MemoryMemoStoreLogger): MemoryMemoStore {
+  const existing = sharedStores.get(projectDir);
+  if (existing !== undefined) return existing;
+  const store = new MemoryMemoStore(projectDir, log);
+  sharedStores.set(projectDir, store);
+  return store;
+}
+
+/**
+ * Shared MemoryMemoStore for a home directory. The map key is the raw
+ * projectDir string so every caller passing the same path gets the same
+ * handle. `init()` is idempotent and stays the caller's job to await.
+ */
+export function sharedMemoStore(projectDir: string, log?: MemoryMemoStoreLogger): MemoryMemoStore {
+  return entryFor(projectDir, log);
+}
+
+/**
+ * Drop a home directory's shared store and close its handle. Intended for
+ * tests and process shutdown — after this, the next `sharedMemoStore` call
+ * builds a fresh instance.
+ */
+export function closeSharedMemoStore(projectDir: string): void {
+  const store = sharedStores.get(projectDir);
+  if (store === undefined) return;
+  sharedStores.delete(projectDir);
+  store.close();
 }

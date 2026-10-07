@@ -44,7 +44,7 @@ import { USER_PROMPT_ORIGIN } from './context/types';
 import { GoalMode } from './goal';
 import { HookEngine } from '../session/hooks';
 import { InjectionManager } from './injection/manager';
-import { DreamTracker, EXIT_EXTRACTION_SYSTEM_PROMPT, MemoryMemoStore, buildExitExtractionPrompt, createFastEmbedEngine, parseMemoryMemos, type EmbeddingEngine } from '@scream-code/memory';
+import { DreamTracker, EXIT_EXTRACTION_SYSTEM_PROMPT, MemoryMemoStore, buildExitExtractionPrompt, createFastEmbedEngine, parseMemoryMemos, sharedMemoStore, type EmbeddingEngine } from '@scream-code/memory';
 import { KnowledgeStore, sharedKnowledgeStore, sharedKnowledgeStoreReady } from '@scream-code/knowledge';
 import { PermissionManager, type PermissionManagerOptions } from './permission';
 import { PlanMode } from './plan';
@@ -282,7 +282,7 @@ export class Agent {
     // Use a global memory store shared across all sessions/workDirs.
     const screamHomeDir = options.screamHomeDir;
     this.memoStore = screamHomeDir
-      ? new MemoryMemoStore(screamHomeDir, this.log)
+      ? sharedMemoStore(screamHomeDir, this.log)
       : undefined;
     this.memoStoreReady = this.initMemoStore(screamHomeDir);
     // Knowledge store is main-agent-only — subagents don't need retrieval access.
@@ -355,7 +355,9 @@ export class Agent {
         this.log.error('memory legacy migration failed', error);
       }
       try {
-        this.memoStore!.setEmbeddingEngine(this.sharedEmbeddingEngine);
+        if (!this.memoStore!.getEmbeddingEngine()) {
+          this.memoStore!.setEmbeddingEngine(this.sharedEmbeddingEngine);
+        }
       } catch (error: unknown) {
         this.log.warn('embedding engine init failed; falling back to keyword search', error);
       }
