@@ -179,7 +179,7 @@ export class SessionSubagentHost {
       structured: options.outputSchema !== undefined,
     });
 
-    const completion = this.runChild(
+    const run = this.runChild(
       parent,
       id,
       agent,
@@ -189,22 +189,13 @@ export class SessionSubagentHost {
         signal: controller.signal,
       },
       () => this.configureChild(parent, agent, profile, id, options.capabilityMode),
-    ).finally(() => {
-      unlinkAbortSignal();
-      this.activeChildren.delete(id);
-      this.childRequestCounts.delete(id);
-      this.childRequestSeen.delete(id);
-      this.parentMessageSeen.delete(id);
-      // Terminal eviction: drop the mailbox slot and the live Agent reference
-      // so a finished child cannot pin message queues or context/tool state.
-      // Undelivered mail is destroyed with the mailbox (the run is over); a
-      // later resume re-hydrates the agent from its records via ensureAgent.
-      this.bus?.dropMailbox(id);
-      this.session.removeAgent?.(id);
-      // Direct Map delete (the accessor is optional on session shims) so a
-      // finished child cannot pin the live instance either way.
-      if (id !== 'main') this.session.agents.delete(id);
-    });
+    );
+    const completion = this.withChildTerminalRelease(
+      parent,
+      agent,
+      { childId: id, unlinkAbortSignal },
+      run,
+    );
 
     return {
       agentId: id,
@@ -254,7 +245,7 @@ export class SessionSubagentHost {
       structured: options.outputSchema !== undefined,
     });
 
-    const completion = this.runChild(
+    const run = this.runChild(
       parent,
       agentId,
       child,
@@ -309,19 +300,13 @@ export class SessionSubagentHost {
         this.session.markAgentCapability(agentId, effective);
         return Promise.resolve();
       },
-    ).finally(() => {
-      unlinkAbortSignal();
-      this.activeChildren.delete(agentId);
-      this.childRequestCounts.delete(agentId);
-      this.childRequestSeen.delete(agentId);
-      this.parentMessageSeen.delete(agentId);
-      // Same terminal eviction as the spawn path: mailbox slot + live Agent
-      // reference are dropped together. A later resume goes through
-      // session.ensureAgent, which re-hydrates from persisted records.
-      this.bus?.dropMailbox(agentId);
-      this.session.removeAgent?.(agentId);
-      if (agentId !== 'main') this.session.agents.delete(agentId);
-    });
+    );
+    const completion = this.withChildTerminalRelease(
+      parent,
+      child,
+      { childId: agentId, unlinkAbortSignal },
+      run,
+    );
 
     return {
       agentId,
@@ -364,6 +349,85 @@ export class SessionSubagentHost {
       return undefined;
     }
     return this.session.agents.get(agentId)?.config.profileName;
+  }
+
+  /**
+   * Chain a child run's terminal step: release the child's own resources, then
+   * evict it (bookkeeping, mailbox slot, live Agent reference).
+   *
+   * Both halves have to happen here rather than in `Session.close()`: the child
+   * leaves `session.agents` in this step, so a teardown that walks that map can
+   * no longer reach its LSP servers or its RLM kernel. `run` is awaited inside
+   * the `try` so a run that threw (failure, stop) releases exactly like a
+   * completed one, and the release finishes before the caller's `completion`
+   * settles — awaiting the run also awaits its process teardown.
+   */
+  private async withChildTerminalRelease<T>(
+    parent: Agent,
+    child: Agent,
+    terminal: { readonly childId: string; readonly unlinkAbortSignal: () => void },
+    run: Promise<T>,
+  ): Promise<T> {
+    try {
+      const result = await run;
+      return result;
+    } finally {
+      terminal.unlinkAbortSignal();
+      await this.releaseChildResources(parent, child);
+      this.activeChildren.delete(terminal.childId);
+      this.childRequestCounts.delete(terminal.childId);
+      this.childRequestSeen.delete(terminal.childId);
+      this.parentMessageSeen.delete(terminal.childId);
+      // Terminal eviction: drop the mailbox slot and the live Agent reference
+      // so a finished child cannot pin message queues or context/tool state.
+      // Undelivered mail is destroyed with the mailbox (the run is over); a
+      // later resume re-hydrates the agent from its records via ensureAgent.
+      this.bus?.dropMailbox(terminal.childId);
+      this.session.removeAgent?.(terminal.childId);
+      // Direct Map delete (the accessor is optional on session shims) so a
+      // finished child cannot pin the live instance either way.
+      if (terminal.childId !== 'main') this.session.agents.delete(terminal.childId);
+    }
+  }
+
+  /**
+   * Stop the resources a finished child owns itself. `Session.close()` is the
+   * only other place that calls `disposeLsp()` / disposes an RLM kernel, and it
+   * iterates `session.agents` — but the terminal `finally` evicts every child
+   * from that map in the same turn, so between the two the child's tsserver and
+   * its python kernel become unreachable while still running: one leaked
+   * process set per subagent run, not per session. Called from the run
+   * `finally`, so all exit paths (completion, failure, stop) release.
+   *
+   * Ownership is per agent, never inherited by reference: each agent's own
+   * `ToolManager.initializeBuiltinTools` constructs its `LspRegistry` and its
+   * `PythonTool` (own kernel process, own rlm() handle table), so disposing the
+   * child's instances cannot reach the parent's. The python tool is
+   * additionally guarded by a reference check against the parent's instance, so
+   * a kernel that ever became inherited-by-reference instead of child-owned
+   * would survive here rather than be killed by mistake.
+   *
+   * The kernel is torn down directly instead of through `Agent.disposeRlm()`:
+   * disposeRlm records `rlm.exit` and drops `python` from the tool set, which
+   * would make a later resume replay this child as RLM-disabled even though the
+   * parent it inherited the mode from is still running RLM. Killing the kernel
+   * leaves no orphan process while keeping the child's mode on its records.
+   */
+  private async releaseChildResources(parent: Agent, child: Agent): Promise<void> {
+    try {
+      await child.tools.disposeLsp();
+    } catch (error) {
+      // Reported, never rethrown: throwing from the `finally` would replace the
+      // run's own result (or its rejection) with this teardown error.
+      parent.log.warn('Failed to dispose subagent lsp servers', { error: String(error) });
+    }
+    const python = child.tools.getBuiltinTool('python') as { dispose?: () => void } | undefined;
+    if (python === undefined || python === parent.tools.getBuiltinTool('python')) return;
+    try {
+      python.dispose?.();
+    } catch (error) {
+      parent.log.warn('Failed to dispose subagent rlm kernel', { error: String(error) });
+    }
   }
 
   /**

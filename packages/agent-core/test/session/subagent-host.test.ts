@@ -572,6 +572,119 @@ describe('SessionSubagentHost', () => {
     expect(bus.mailboxCount).toBe(0);
   });
 
+  it('stops the finished subagent lsp servers without disarming the parent', async () => {
+    const parent = testAgent();
+    parent.configure();
+    const parentDispose = vi.spyOn(parent.agent.tools, 'disposeLsp');
+
+    const child = testAgent({ type: 'sub' });
+    const childDispose = vi.spyOn(child.agent.tools, 'disposeLsp');
+    child.mockNextResponse({
+      type: 'text',
+      text: 'Stopped the child task at its terminal state and reported a detailed enough summary for the parent agent to continue without repeating the work. '.repeat(
+        2,
+      ),
+    });
+    const session = fakeSession(parent.agent, child.agent);
+    const host = new SessionSubagentHost(session, 'main');
+
+    const handle = await host.spawn('explore', {
+      parentToolCallId: 'call_agent',
+      prompt: 'Investigate',
+      description: 'Investigate',
+      runInBackground: false,
+      signal,
+    });
+    await handle.completion;
+
+    // The child is evicted from Session.agents at terminal, so Session.close()
+    // can never reach it again — the run itself has to stop the LSP servers it
+    // started or every subagent leaks a tsserver.
+    expect(childDispose).toHaveBeenCalledTimes(1);
+    // ...and that teardown must stay child-scoped: the main agent's LSP tool
+    // keeps working, which is why Session.close() is not the only remover but
+    // the parent's own registry must survive untouched.
+    expect(parentDispose).not.toHaveBeenCalled();
+    expect(parent.agent.tools.getBuiltinTool('LSP')).toBeDefined();
+  });
+
+  it('stops the subagent lsp servers when the run is stopped', async () => {
+    const parent = testAgent();
+    parent.configure();
+
+    const controller = new AbortController();
+    const child = testAgent();
+    const childDispose = vi.spyOn(child.agent.tools, 'disposeLsp');
+    child.mockNextResponse({ type: 'text', text: 'I will run Bash.' }, bashCall());
+    const session = fakeSession(parent.agent, child.agent);
+    const host = new SessionSubagentHost(session, 'main');
+
+    const handle = await host.spawn('explore', {
+      parentToolCallId: 'call_agent',
+      prompt: 'Keep working',
+      description: 'Long task',
+      runInBackground: false,
+      signal: controller.signal,
+    });
+
+    await child.untilApprovalRequest();
+    controller.abort();
+
+    // The stop path matters most: a cancelled run returns early through the
+    // catch arm, and the release lives in `finally` precisely so it still runs.
+    await expect(handle.completion).rejects.toThrow('Aborted');
+    expect(childDispose).toHaveBeenCalledTimes(1);
+  });
+
+  it('stops the subagent own rlm kernel but leaves the parent kernel running', async () => {
+    const parent = testAgent();
+    parent.configure();
+    // Enable RLM on the parent (as /rlm does) so the child inherits the mode.
+    (parent.agent as unknown as { inheritRlm(): void }).inheritRlm();
+
+    const child = testAgent();
+    // A configured child owns real builtin tools, python included — the
+    // instance it would spawn its kernel from.
+    child.configure();
+    const parentPython = parent.agent.tools.getBuiltinTool('python');
+    const childPython = child.agent.tools.getBuiltinTool('python');
+    expect(parentPython).toBeDefined();
+    expect(childPython).toBeDefined();
+    const parentKernelDispose = vi.spyOn(
+      parentPython as unknown as { dispose(): void },
+      'dispose',
+    );
+    const childKernelDispose = vi.spyOn(childPython as unknown as { dispose(): void }, 'dispose');
+
+    child.mockNextResponse({
+      type: 'text',
+      text: 'Finished the rlm child task and reported a detailed enough summary for the parent agent to continue without repeating the work already done. '.repeat(
+        2,
+      ),
+    });
+    const session = fakeSession(parent.agent, child.agent);
+    const host = new SessionSubagentHost(session, 'main');
+
+    const handle = await host.spawn('coder', {
+      parentToolCallId: 'call_agent',
+      prompt: 'Crunch numbers',
+      description: 'Crunch numbers',
+      runInBackground: false,
+      signal,
+    });
+    await handle.completion;
+
+    // The child's kernel is its own process and becomes unreachable at
+    // terminal (eviction), so the run has to kill it...
+    expect(childKernelDispose).toHaveBeenCalledTimes(1);
+    // ...while the kernel the parent is running must survive: RLM mode is what
+    // a subagent inherits, never the parent's live kernel.
+    expect(parentKernelDispose).not.toHaveBeenCalled();
+    // The child's inherited mode stays on its records: a later resume must
+    // still come back RLM-enabled instead of replaying an exit it never hit.
+    expect((child.agent as unknown as { getRlmEnabled(): boolean }).getRlmEnabled()).toBe(true);
+  });
+
   it('falls back to bundled subagent profiles when the parent profile is missing', async () => {
     const parent = testAgent();
     parent.configure();
