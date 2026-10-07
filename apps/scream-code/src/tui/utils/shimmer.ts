@@ -88,18 +88,15 @@ function tierFor(intensity: number): Tier {
 
 // ── Public API ──────────────────────────────────────────────────────────
 
-const shimmerDefaultCache = new WeakMap<ColorPalette, ShimmerPalette>();
-
 function defaultPalette(colors: ColorPalette): ShimmerPalette {
-  // Always rebuild — Object.assign(theme.colors, ...) in applyTheme mutates
-  // the same object in place, so a stale cache would return outdated values.
-  const p: ShimmerPalette = {
+  // No cache: Object.assign(theme.colors, ...) in applyTheme mutates the
+  // same palette object in place, so a memo would return stale values. The
+  // three hex→ANSI conversions are cheap next to the per-frame render.
+  return {
     low: colors.textDim,
     mid: colors.textMuted,
     high: colors.primary,
   };
-  shimmerDefaultCache.set(colors, p);
-  return p;
 }
 
 /**

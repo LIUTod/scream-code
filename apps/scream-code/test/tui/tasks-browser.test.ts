@@ -618,3 +618,40 @@ describe('TasksBrowserApp — agents view', () => {
     expect(onCancel).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('TasksBrowserApp — close() clears the pending-stop timer', () => {
+  it('close() disarms the confirm timer and exits confirm mode', () => {
+    vi.useFakeTimers();
+    const clearTimeoutSpy = vi.spyOn(globalThis, 'clearTimeout');
+    try {
+      const onStopConfirmed = vi.fn();
+      const app = makeApp({
+        tasks: [task({ taskId: 'bash-aaaaaaaa', status: 'running' })],
+        selectedTaskId: 'bash-aaaaaaaa',
+        onStopConfirmed,
+      });
+      app.handleInput('s');
+      expect(strip(app.render(120).join('\n'))).toContain('停止 bash-aaaaaaaa?');
+
+      app.close();
+
+      // clearPendingStop must clearTimeout the pendingStopTimer.
+      expect(clearTimeoutSpy).toHaveBeenCalled();
+      // Confirm mode is gone: a follow-up 'y' must not fire onStopConfirmed.
+      app.handleInput('y');
+      expect(onStopConfirmed).not.toHaveBeenCalled();
+      expect(strip(app.render(120).join('\n'))).not.toContain('停止 bash-aaaaaaaa?');
+    } finally {
+      vi.restoreAllMocks();
+      vi.useRealTimers();
+    }
+  });
+
+  it('close() is safe when no confirm is pending', () => {
+    const app = makeApp({
+      tasks: [task({ taskId: 'bash-aaaaaaaa', status: 'running' })],
+      selectedTaskId: 'bash-aaaaaaaa',
+    });
+    expect(() => app.close()).not.toThrow();
+  });
+});

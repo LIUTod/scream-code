@@ -98,3 +98,38 @@ describe('runHook process runner', () => {
     expect(result.stdout?.trim()).toBe('WriteFile');
   });
 });
+
+describe('runHook output cap', () => {
+  it('caps huge stdout at a head+tail of ~32KB with a truncation marker', async () => {
+    const runHook = await importRunHook();
+    // 200 KB of output — far above the 32 KB cap.
+    const cmd = 'node -e "process.stdout.write(\'x\'.repeat(200 * 1024))"';
+    const result = await runHook(cmd, { tool_name: 'Shell' }, { timeout: 10 });
+
+    expect(result.action).toBe('allow');
+    const stdout = result.stdout ?? '';
+    // head (24 KiB) + tail (8 KiB) + marker overhead — bounded well under 200 KB.
+    expect(stdout.length).toBeLessThanOrEqual(32 * 1024 + 128);
+    expect(stdout).toContain('[...truncated]');
+    // The head still holds the start and the tail still holds the end.
+    expect(stdout.startsWith('x')).toBe(true);
+    expect(stdout.endsWith('x')).toBe(true);
+  });
+
+  it('caps huge stderr the same way', async () => {
+    const runHook = await importRunHook();
+    const cmd = 'node -e "process.stderr.write(\'y\'.repeat(200 * 1024))"';
+    const result = await runHook(cmd, { tool_name: 'Shell' }, { timeout: 10 });
+
+    const stderr = result.stderr ?? '';
+    expect(stderr.length).toBeLessThanOrEqual(32 * 1024 + 128);
+    expect(stderr).toContain('[...truncated]');
+  });
+
+  it('round-trips small outputs byte-for-byte (no marker)', async () => {
+    const runHook = await importRunHook();
+    const result = await runHook('echo small-output', { tool_name: 'Shell' }, { timeout: 5 });
+    expect(result.stdout).toBe('small-output\n');
+    expect(result.stdout).not.toContain('[...truncated]');
+  });
+});

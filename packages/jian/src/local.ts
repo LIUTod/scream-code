@@ -7,6 +7,7 @@ import {
   lstat,
   mkdir,
   open,
+  opendir,
   readdir,
   readFile,
   rename,
@@ -627,13 +628,42 @@ export class LocalJian implements Jian {
     };
   }
 
-  async *iterdir(path: string): AsyncGenerator<string> {
+  async *iterdir(
+    path: string,
+    options?: {
+      /**
+       * Cooperative cancellation. Checked once per entry; an aborted walk
+       * ends by returning like an exhausted one (no exception reaches the
+       * consumer). Omitted → unchanged behaviour.
+       */
+      signal?: AbortSignal;
+      /**
+       * Upper bound on the number of entries yielded. The walk stops once
+       * the limit is reached. Omitted → unbounded.
+       */
+      maxEntries?: number;
+    },
+  ): AsyncGenerator<string> {
+    const signal = options?.signal;
+    const maxEntries = options?.maxEntries;
+    if (isAborted(signal)) return;
     const resolved = this._resolvePath(path);
-    const entries = await readdir(resolved);
-    for (const entry of entries) {
-      // Use join so root paths like "/" or "C:\\" don't produce "//entry"
-      // or "C:\\\\entry" — join normalizes trailing separators correctly.
-      yield join(resolved, entry);
+    // opendir streams entries instead of materializing the whole directory,
+    // so a huge directory (or an abandoned walk) never allocates the full
+    // listing. close() runs even on early return.
+    const dir = await opendir(resolved);
+    try {
+      let yielded = 0;
+      for await (const entry of dir) {
+        if (isAborted(signal)) return;
+        if (maxEntries !== undefined && yielded >= maxEntries) return;
+        // Use join so root paths like "/" or "C:\\" don't produce "//entry"
+        // or "C:\\\\entry" — join normalizes trailing separators correctly.
+        yield join(resolved, entry.name);
+        yielded += 1;
+      }
+    } finally {
+      await dir.close().catch(() => {});
     }
   }
 
@@ -955,14 +985,24 @@ export class LocalJian implements Jian {
 
   async *readLines(
     path: string,
-    options?: { encoding?: BufferEncoding; errors?: 'strict' | 'replace' | 'ignore' },
+    options?: {
+      encoding?: BufferEncoding;
+      errors?: 'strict' | 'replace' | 'ignore';
+      /**
+       * Cooperative cancellation. Checked once per chunk/line; an aborted
+       * read ends by returning like an exhausted one (no exception reaches
+       * the consumer). Omitted → unchanged behaviour.
+       */
+      signal?: AbortSignal;
+    },
   ): AsyncGenerator<string> {
     const resolved = this._resolvePath(path);
     const encoding = options?.encoding ?? 'utf-8';
     const errors = options?.errors ?? 'strict';
+    const signal = options?.signal;
     const webLabel = utfTextDecoderLabel(encoding);
     if (webLabel !== undefined) {
-      yield* this._readLinesWithTextDecoder(resolved, webLabel, errors);
+      yield* this._readLinesWithTextDecoder(resolved, webLabel, errors, signal);
       return;
     }
     // Non-UTF encodings (hex/base64/latin1/...) are lossless byte↔character
@@ -972,9 +1012,11 @@ export class LocalJian implements Jian {
     let remainder = '';
     try {
       for await (const chunk of stream) {
+        if (isAborted(signal)) return;
         const lines = (remainder + (chunk as string)).split('\n');
         remainder = lines.pop() ?? '';
         for (const line of lines) {
+          if (isAborted(signal)) return;
           yield line + '\n';
         }
       }
@@ -1004,9 +1046,10 @@ export class LocalJian implements Jian {
     resolved: string,
     webLabel: string,
     errors: 'strict' | 'replace' | 'ignore',
+    signal: AbortSignal | undefined,
   ): AsyncGenerator<string> {
     if (errors === 'ignore') {
-      yield* this._readLinesIgnoreBytes(resolved, webLabel);
+      yield* this._readLinesIgnoreBytes(resolved, webLabel, signal);
       return;
     }
     const decoder = new TextDecoder(webLabel, { fatal: errors === 'strict' });
@@ -1019,13 +1062,16 @@ export class LocalJian implements Jian {
     };
     try {
       for await (const chunk of stream) {
+        if (isAborted(signal)) return;
         for (const line of splitChunk(decoder.decode(chunk, { stream: true }))) {
+          if (isAborted(signal)) return;
           yield line + '\n';
         }
       }
       // Flush whatever the decoder still holds; a trailing incomplete sequence
       // rejects here under 'strict', just like the whole-file decode.
       for (const line of splitChunk(decoder.decode())) {
+        if (isAborted(signal)) return;
         yield line + '\n';
       }
     } finally {
@@ -1048,7 +1094,11 @@ export class LocalJian implements Jian {
    * exactly the bytes the whole-file decode drops. Memory is bounded by the
    * longest single line, like the `TextDecoder` path.
    */
-  private async *_readLinesIgnoreBytes(resolved: string, webLabel: string): AsyncGenerator<string> {
+  private async *_readLinesIgnoreBytes(
+    resolved: string,
+    webLabel: string,
+    signal: AbortSignal | undefined,
+  ): AsyncGenerator<string> {
     const utf16Le = webLabel === 'utf-16le';
     const decodeLine = utf16Le ? decodeUtf16LeIgnore : decodeUtf8Ignore;
     const stream = createReadStream(resolved, { highWaterMark: 64 * 1024 });
@@ -1074,6 +1124,7 @@ export class LocalJian implements Jian {
 
     try {
       for await (const chunk of stream) {
+        if (isAborted(signal)) return;
         let data: Buffer =
           carry === undefined ? (chunk as Buffer) : Buffer.concat([carry, chunk as Buffer]);
         carry = undefined;
@@ -1085,6 +1136,7 @@ export class LocalJian implements Jian {
         for (;;) {
           const at = findLineBreak(data, start);
           if (at === -1) break;
+          if (isAborted(signal)) return;
           const end = at + (utf16Le ? 2 : 1);
           yield decodeLine(concatPending(data.subarray(start, end)));
           pending = [];

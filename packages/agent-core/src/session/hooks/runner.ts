@@ -3,6 +3,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { detachedForProcessTree, isWindowsPlatform, killProcessTree } from '@scream-code/jian';
 import { z } from 'zod';
 
+import { ToolResultBuilder } from '../../tools/support/result-builder';
 import type { HookResult } from './types';
 
 export interface RunHookOptions {
@@ -13,6 +14,25 @@ export interface RunHookOptions {
 
 const DEFAULT_TIMEOUT_SECONDS = 30;
 const KILL_GRACE_MS = 100;
+/**
+ * Hook stdout/stderr come from an external process and must not accumulate
+ * without bound. Head+tail retention of 32 KiB keeps a complete prefix and a
+ * useful trailing slice for debugging while capping the string that reaches
+ * HookResult. Outputs below the cap round-trip byte-for-byte, so structured
+ * JSON parsing is unaffected.
+ */
+const HOOK_STREAM_MAX_CHARS = 24 * 1024;
+const HOOK_STREAM_TAIL_CHARS = 8 * 1024;
+
+function createHookStreamBuffer(): ToolResultBuilder {
+  return new ToolResultBuilder({
+    maxChars: HOOK_STREAM_MAX_CHARS,
+    maxTailChars: HOOK_STREAM_TAIL_CHARS,
+    // Long single-line JSON is the normal shape of hook output — only the
+    // total size may be bounded, not the line length.
+    maxLineLength: null,
+  });
+}
 const OptionalStringSchema = z.preprocess(
   (value) => {
     if (value === undefined || value === null) return undefined;
@@ -60,8 +80,8 @@ export async function runHook(
   }
 
   return new Promise<HookResult>((resolve) => {
-    let stdout = '';
-    let stderr = '';
+    const stdoutBuf = createHookStreamBuffer();
+    const stderrBuf = createHookStreamBuffer();
     let settled = false;
     const timeoutMs = timeoutSeconds(options.timeout) * 1000;
 
@@ -79,12 +99,14 @@ export async function runHook(
 
     const timeout = setTimeout(() => {
       killProcess(child);
-      settle(allowResult({ stdout, stderr, timedOut: true }));
+      settle(
+        allowResult({ stdout: stdoutBuf.toString(), stderr: stderrBuf.toString(), timedOut: true }),
+      );
     }, timeoutMs);
 
     const onAbort = (): void => {
       killProcess(child);
-      settle(allowResult({ stdout, stderr }));
+      settle(allowResult({ stdout: stdoutBuf.toString(), stderr: stderrBuf.toString() }));
     };
 
     options.signal?.addEventListener('abort', onAbort, { once: true });
@@ -96,16 +118,17 @@ export async function runHook(
     child.stdout.setEncoding('utf8');
     child.stderr.setEncoding('utf8');
     child.stdout.on('data', (chunk: string) => {
-      stdout += chunk;
+      stdoutBuf.write(chunk);
     });
     child.stderr.on('data', (chunk: string) => {
-      stderr += chunk;
+      stderrBuf.write(chunk);
     });
     child.on('error', (error) => {
-      settle(allowResult({ stdout, stderr: stderr + errorMessage(error) }));
+      stderrBuf.write(errorMessage(error));
+      settle(allowResult({ stdout: stdoutBuf.toString(), stderr: stderrBuf.toString() }));
     });
     child.on('close', (code) => {
-      settle(resultFromExitCode(code ?? 0, stdout, stderr));
+      settle(resultFromExitCode(code ?? 0, stdoutBuf.toString(), stderrBuf.toString()));
     });
 
     child.stdin.on('error', () => {});

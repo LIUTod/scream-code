@@ -127,6 +127,9 @@ export class TasksBrowserController {
     if (browser.viewer !== undefined) this.closeOutputViewer();
     if (browser.pollTimer !== undefined) clearInterval(browser.pollTimer);
     if (browser.flashTimer !== undefined) clearTimeout(browser.flashTimer);
+    // Component-local timers (pending-stop confirm) must not outlive the
+    // browser — the component is swapped out right after this.
+    browser.component.close();
 
     state.ui.setLayoutRoot(browser.savedLayoutRoot);
     this.host.setTasksBrowser(undefined);

@@ -1975,3 +1975,51 @@ describe('GrepTool', () => {
     expect(exec).not.toHaveBeenCalled();
   });
 });
+
+describe('SIGTERM grace timer cleanup', () => {
+  it('clears and unrefs the grace timer once both sides settle', async () => {
+    const unrefSpy = vi.fn();
+    const realSetTimeout = globalThis.setTimeout.bind(globalThis);
+    vi.spyOn(globalThis, 'setTimeout').mockImplementation(((
+      fn: () => void,
+      ms?: number,
+    ) => {
+      const handle = realSetTimeout(fn, ms);
+      if (ms === 5_000 && typeof handle === 'object' && handle !== null && 'unref' in handle) {
+        const rawUnref = handle.unref.bind(handle);
+        handle.unref = () => {
+          unrefSpy();
+          return rawUnref();
+        };
+      }
+      return handle;
+    }) as unknown as typeof setTimeout);
+    const clearTimeoutSpy = vi.spyOn(globalThis, 'clearTimeout');
+
+    try {
+      const controller = new AbortController();
+      const proc = processThatExitsOnKill('/workspace/src/a.ts\n');
+      const exec = vi.fn(async () => {
+        controller.abort();
+        return proc;
+      });
+      const tool = new GrepTool(createFakeJian({ exec }), workspace);
+
+      const result = await executeTool(tool, context({ pattern: 'hit' }, controller.signal));
+      expect(result).toEqual({ isError: true, output: 'Grep aborted' });
+
+      await vi.waitFor(() => {
+        expect(clearTimeoutSpy).toHaveBeenCalled();
+      });
+
+      const setTimeoutCalls = vi.mocked(globalThis.setTimeout).mock.calls;
+      const graceIndex = setTimeoutCalls.findIndex((call) => call[1] === 5_000);
+      expect(graceIndex).toBeGreaterThanOrEqual(0);
+      const graceHandle = vi.mocked(globalThis.setTimeout).mock.results[graceIndex]!.value;
+      expect(unrefSpy).toHaveBeenCalled();
+      expect(clearTimeoutSpy).toHaveBeenCalledWith(graceHandle);
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+});

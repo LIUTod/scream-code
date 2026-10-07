@@ -1116,3 +1116,66 @@ describe('BashTool command-not-found hint', () => {
     expect(result.output).not.toContain('Ensure pnpm is installed');
   });
 });
+
+describe('SIGTERM grace timer cleanup', () => {
+  it('clears and unrefs the grace timer once both sides settle', async () => {
+    const unrefSpy = vi.fn();
+    const realSetTimeout = globalThis.setTimeout.bind(globalThis);
+    // Passthrough spy that wraps only the grace timer's unref so the
+    // assertion can observe it, while clearTimeout still receives the real
+    // Timeout handle (identity is preserved).
+    vi.spyOn(globalThis, 'setTimeout').mockImplementation(((
+      fn: () => void,
+      ms?: number,
+    ) => {
+      const handle = realSetTimeout(fn, ms);
+      if (ms === 5_000 && typeof handle === 'object' && handle !== null && 'unref' in handle) {
+        const rawUnref = handle.unref.bind(handle);
+        handle.unref = () => {
+          unrefSpy();
+          return rawUnref();
+        };
+      }
+      return handle;
+    }) as unknown as typeof setTimeout);
+    const clearTimeoutSpy = vi.spyOn(globalThis, 'clearTimeout');
+
+    try {
+      let resolveWait: (code: number) => void = () => {};
+      const waitPromise = new Promise<number>((resolve) => {
+        resolveWait = resolve;
+      });
+      const proc = processWithOutput({
+        wait: async () => waitPromise,
+        kill: async () => {
+          resolveWait(143);
+        },
+      });
+      const execWithEnv = vi.fn().mockResolvedValue(proc);
+      const controller = new AbortController();
+      const tool = new BashTool(createFakeJian({ execWithEnv, osEnv: posixEnv }), '/workspace');
+
+      const running = executeTool(tool, context({ command: 'sleep 10' }, controller.signal));
+      await vi.waitFor(() => {
+        expect(proc.stdin.end).toHaveBeenCalled();
+      });
+      controller.abort();
+      const result = await running;
+      expect(result).toMatchObject({ isError: true });
+
+      // killProc is fire-and-forget; wait for its cleanup to land.
+      await vi.waitFor(() => {
+        expect(clearTimeoutSpy).toHaveBeenCalled();
+      });
+
+      const setTimeoutCalls = vi.mocked(globalThis.setTimeout).mock.calls;
+      const graceIndex = setTimeoutCalls.findIndex((call) => call[1] === 5_000);
+      expect(graceIndex).toBeGreaterThanOrEqual(0);
+      const graceHandle = vi.mocked(globalThis.setTimeout).mock.results[graceIndex]!.value;
+      expect(unrefSpy).toHaveBeenCalled();
+      expect(clearTimeoutSpy).toHaveBeenCalledWith(graceHandle);
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+});

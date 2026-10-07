@@ -18,6 +18,9 @@ import {
 import { getDataDir } from '../utils/paths';
 
 const BALANCE_CACHE_MS = 60_000;
+/** Upper bound on cached providers — bounds the map when users hop between
+ *  many provider/model combinations in one session. */
+const BALANCE_CACHE_MAX_ENTRIES = 32;
 
 interface CachedBalance {
   balance: ProviderBalance | null;
@@ -27,6 +30,13 @@ interface CachedBalance {
 const cache = new Map<string, CachedBalance>();
 /** Monotonic id so an out-of-order lookup can never overwrite a newer one. */
 let latestRequestId = 0;
+
+/** Drop entries whose TTL has elapsed so the map never holds dead weight. */
+function pruneExpiredBalances(now: number): void {
+  for (const [key, entry] of cache) {
+    if (now - entry.at >= BALANCE_CACHE_MS) cache.delete(key);
+  }
+}
 
 function resolveApiKey(providerName: string): string | undefined {
   const config = readConfigFile(join(getDataDir(), 'config.toml'));
@@ -83,11 +93,25 @@ export async function getProviderBalanceForModel(
 ): Promise<ProviderBalance | null> {
   const providerName = model.split('/')[0] ?? '';
   if (providerName.length === 0) return null;
+  const now = Date.now();
   const cached = cache.get(providerName);
-  if (cached !== undefined && Date.now() - cached.at < BALANCE_CACHE_MS) {
-    return cached.balance;
+  if (cached !== undefined) {
+    if (now - cached.at < BALANCE_CACHE_MS) {
+      return cached.balance;
+    }
+    // Expired — drop the entry immediately instead of leaving it to linger
+    // until overwritten.
+    cache.delete(providerName);
   }
   const balance = await loadBalance(providerName);
+  pruneExpiredBalances(Date.now());
+  // Map iteration order is insertion order: the oldest inserted key is
+  // evicted first until the new entry fits under the cap.
+  while (cache.size >= BALANCE_CACHE_MAX_ENTRIES) {
+    const oldest = cache.keys().next();
+    if (oldest.done === true) break;
+    cache.delete(oldest.value);
+  }
   cache.set(providerName, { balance, at: Date.now() });
   return balance;
 }

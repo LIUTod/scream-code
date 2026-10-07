@@ -375,6 +375,15 @@ export class TasksBrowserApp extends Container implements Focusable {
     }
   }
 
+  /**
+   * Component-local teardown, called by the controller's close() before the
+   * component is swapped out: the pending-stop confirm timer must not
+   * outlive the browser.
+   */
+  close(): void {
+    this.clearPendingStop();
+  }
+
   private emitSelect(): void {
     const task = this.sortedVisible[this.selectedIndex];
     if (task) this.props.onSelect(task.taskId);

@@ -165,3 +165,51 @@ describe('FooterComponent - active status animation', () => {
     footer.dispose();
   });
 });
+
+describe('FooterComponent - balance flash timer cleanup', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  function makeFooter(state: AppState) {
+    const requestRender = vi.fn();
+    const ui = { requestRender } as unknown as TUI;
+    const footer = new FooterComponent(state, darkColors, ui);
+    return { footer, requestRender };
+  }
+
+  it('clears the balanceFlashTimer on dispose', () => {
+    vi.useFakeTimers();
+    const clearTimeoutSpy = vi.spyOn(globalThis, 'clearTimeout');
+    const { footer, requestRender } = makeFooter(baseState());
+
+    // A fresh balanceUpdatedAt triggers the flash and arms the timer chain.
+    footer.setState(baseState({ balanceUpdatedAt: 1_000 }));
+    requestRender.mockClear();
+
+    footer.dispose();
+
+    // The dispose path must have disarmed the pending tick.
+    expect(clearTimeoutSpy).toHaveBeenCalled();
+    // No tick may fire after dispose — without the fix the 50ms chain
+    // keeps calling requestRender until BALANCE_FLASH_MS elapses.
+    vi.advanceTimersByTime(2_000);
+    expect(requestRender).not.toHaveBeenCalled();
+  });
+
+  it('stops flashing after dispose even mid-animation', () => {
+    vi.useFakeTimers();
+    const { footer, requestRender } = makeFooter(baseState());
+
+    footer.setState(baseState({ balanceUpdatedAt: 2_000 }));
+    // Let the flash run a few ticks first.
+    vi.advanceTimersByTime(200);
+    expect(requestRender).toHaveBeenCalled();
+
+    footer.dispose();
+    requestRender.mockClear();
+    vi.advanceTimersByTime(2_000);
+    expect(requestRender).not.toHaveBeenCalled();
+  });
+});

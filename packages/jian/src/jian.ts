@@ -41,8 +41,19 @@ export interface Jian {
   realpath(path: string, options?: { allowMissing?: boolean }): Promise<string>;
   /** Return stat metadata for `path`. */
   stat(path: string, options?: { followSymlinks?: boolean }): Promise<StatResult>;
-  /** Yield entry names in the directory at `path`. */
-  iterdir(path: string): AsyncGenerator<string>;
+  /** Yield paths of the entries in the directory at `path`. */
+  iterdir(
+    path: string,
+    options?: {
+      /**
+       * Cooperative cancellation. Checked once per entry; an aborted walk
+       * ends like an exhausted one (no exception). Omitted → unchanged.
+       */
+      signal?: AbortSignal;
+      /** Upper bound on entries yielded; the walk stops at the limit. */
+      maxEntries?: number;
+    },
+  ): AsyncGenerator<string>;
   /**
    * Yield paths matching `pattern` under `path`.
    *
@@ -98,7 +109,15 @@ export interface Jian {
    */
   readLines(
     path: string,
-    options?: { encoding?: BufferEncoding; errors?: 'strict' | 'replace' | 'ignore' },
+    options?: {
+      encoding?: BufferEncoding;
+      errors?: 'strict' | 'replace' | 'ignore';
+      /**
+       * Cooperative cancellation. Checked once per chunk/line; an aborted
+       * read ends like an exhausted one (no exception). Omitted → unchanged.
+       */
+      signal?: AbortSignal;
+    },
   ): AsyncGenerator<string>;
   /** Write raw bytes to `path`, returning the number of bytes written. */
   writeBytes(path: string, data: Buffer): Promise<number>;

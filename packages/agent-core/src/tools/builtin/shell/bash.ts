@@ -787,14 +787,21 @@ export class BashTool implements BuiltinTool<BashInput> {
         .wait()
         .then(() => true)
         .catch(() => true);
+      // The grace timer exists only for the window where the process ignores
+      // SIGTERM. Once the race settles it must be disarmed — an orphaned
+      // timeout keeps the event loop alive and later resolves a promise
+      // nobody observes. unref() covers the window before settle as well.
+      let graceTimer: ReturnType<typeof setTimeout> | undefined;
       const raced = await Promise.race([
         exited,
         new Promise<false>((resolve) => {
-          setTimeout(() => {
+          graceTimer = setTimeout(() => {
             resolve(false);
           }, SIGTERM_GRACE_MS);
+          graceTimer.unref?.();
         }),
       ]);
+      if (graceTimer !== undefined) clearTimeout(graceTimer);
       if (!raced && proc.exitCode === null) {
         try {
           await proc.kill('SIGKILL');

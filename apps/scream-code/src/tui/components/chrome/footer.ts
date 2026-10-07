@@ -409,6 +409,10 @@ export class FooterComponent implements Component {
   /** Stop the active-status timer. Idempotent and safe during disposal. */
   dispose(): void {
     this.#stopStatusTimer();
+    if (this.balanceFlashTimer !== undefined) {
+      clearTimeout(this.balanceFlashTimer);
+      this.balanceFlashTimer = undefined;
+    }
   }
 
   // ── Active status animation ─────────────────────────────────────────

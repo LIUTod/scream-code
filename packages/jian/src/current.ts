@@ -62,7 +62,11 @@ export function writeText(
 
 export function readLines(
   path: string,
-  options?: { encoding?: BufferEncoding; errors?: 'strict' | 'replace' | 'ignore' },
+  options?: {
+    encoding?: BufferEncoding;
+    errors?: 'strict' | 'replace' | 'ignore';
+    signal?: AbortSignal;
+  },
 ): AsyncGenerator<string> {
   return getCurrentJian().readLines(path, options);
 }
@@ -94,8 +98,11 @@ export function mkdir(
   return getCurrentJian().mkdir(path, options);
 }
 
-export function iterdir(path: string): AsyncGenerator<string> {
-  return getCurrentJian().iterdir(path);
+export function iterdir(
+  path: string,
+  options?: { signal?: AbortSignal; maxEntries?: number },
+): AsyncGenerator<string> {
+  return getCurrentJian().iterdir(path, options);
 }
 
 export function glob(
