@@ -37,15 +37,18 @@ import {
 /**
  * The close-out checklist every session registers at construction, in
  * registration order. A new teardown step must appear here — making the
- * omission a test failure is the point of the snapshot.
+ * omission a test failure is the point of the snapshot. Release order is the
+ * reverse of this list, so `log` sitting first means the session log sink is
+ * still open while every other resource (LSP, MCP, parked commands) reports
+ * its teardown, and the sink itself is closed last.
  */
 const EXPECTED_DISPOSABLES = [
+  'log',
   'background-pending',
   'cron',
   'rlm',
   'lsp',
   'mcp',
-  'log',
   'message-bus',
 ] as const;
 

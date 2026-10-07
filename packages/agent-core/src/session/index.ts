@@ -184,9 +184,14 @@ export class Session {
    *
    * Registration order is the checklist order; `disposeAll()` releases in
    * reverse (last registered first released), so `message-bus` is released
-   * first and `background-pending` last.
+   * first and the session log sink last: every teardown step above it (LSP,
+   * MCP, ...) can still report what it did through `log` instead of writing
+   * into a closed sink.
    */
   private registerDisposables(): void {
+    this.disposables.add('log', async () => {
+      await this.logHandle?.close();
+    });
     this.disposables.add('background-pending', async () => {
       // Sweep the shell tool's module-level pending-task map (timed-out
       // commands parked in the background) for THIS session only: the map is
@@ -222,9 +227,6 @@ export class Session {
     });
     this.disposables.add('mcp', async () => {
       await this.mcp.shutdown();
-    });
-    this.disposables.add('log', async () => {
-      await this.logHandle?.close();
     });
     this.disposables.add('message-bus', () => {
       this.subagentMessages.clear();
