@@ -9,7 +9,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'pathe';
-import { Readable } from 'node:stream';
+import { PassThrough, Readable } from 'node:stream';
 import type { Writable } from 'node:stream';
 
 import type { JianProcess } from '@scream-code/jian';
@@ -96,6 +96,47 @@ function manuallyResolvedProcess(): {
   return {
     proc,
     killSpy,
+    resolve: (exitCode) => {
+      if (currentExitCode !== null) return;
+      currentExitCode = exitCode;
+      resolveWait(exitCode);
+    },
+  };
+}
+
+/**
+ * Creates a JianProcess with a live stdout stream, so chunks can be injected
+ * at any point in the lifecycle — including after `resolve()` has exited the
+ * process, which is how a real shell's stdio drain outlives `'exit'`.
+ */
+function controllableProcess(): {
+  proc: JianProcess;
+  stdout: PassThrough;
+  resolve: (exitCode: number) => void;
+} {
+  let resolveWait: (n: number) => void = () => {
+    /* replaced below */
+  };
+  const waitPromise = new Promise<number>((res) => {
+    resolveWait = res;
+  });
+  let currentExitCode: number | null = null;
+  const stdout = new PassThrough();
+  const killSpy = vi.fn().mockResolvedValue(undefined);
+  const proc: JianProcess = {
+    stdin: { write: vi.fn(), end: vi.fn() } as unknown as Writable,
+    stdout,
+    stderr: new PassThrough(),
+    pid: 54325,
+    get exitCode(): number | null {
+      return currentExitCode;
+    },
+    wait: () => waitPromise,
+    kill: killSpy as unknown as JianProcess['kill'],
+  };
+  return {
+    proc,
+    stdout,
     resolve: (exitCode) => {
       if (currentExitCode !== null) return;
       currentExitCode = exitCode;
@@ -823,5 +864,72 @@ describe('BackgroundProcessManager — terminal eviction', () => {
     // Finished task stays readable via the retired ring, untouched by stopAll.
     expect(manager.getTask(finished)?.status).toBe('completed');
     expect(manager.getOutput(finished)).toContain('done');
+  });
+
+  // A3(P2): 'exit' routinely beats the stdio drain, so a chunk can still
+  // arrive after finalizeTerminal retired the task. That late chunk extends
+  // the on-disk log, and flushOutput / readOutput must wait for its write
+  // instead of settling on the queue snapshot taken at retire time.
+  it('awaits a post-exit chunk on the retired record until the log is drained', async () => {
+    const persistModule = await import('../../../src/tools/background/persist');
+    const realAppend = persistModule.appendTaskOutput;
+    let releaseTail!: () => void;
+    const tailGate = new Promise<void>((resolve) => {
+      releaseTail = resolve;
+    });
+    const appendSpy = vi
+      .spyOn(persistModule, 'appendTaskOutput')
+      .mockImplementation(async (dir, id, chunk) => {
+        if (chunk === 'tail-after-exit\n') await tailGate;
+        await realAppend(dir, id, chunk);
+      });
+
+    try {
+      const { proc, stdout, resolve } = controllableProcess();
+      const taskId = manager.register(proc, 'sleep 1', 'post-exit chunk');
+
+      stdout.write('head\n');
+      await vi.waitFor(async () => {
+        expect(await manager.getOutputSizeBytes(taskId)).toBeGreaterThan(0);
+      });
+
+      // The process exits and the task is retired...
+      resolve(0);
+      await vi.waitFor(() => {
+        expect(manager.liveTaskCount).toBe(0);
+      });
+      expect(manager.getTask(taskId)?.status).toBe('completed');
+
+      // ...but stdio is still draining into the retired record.
+      const chunkObserved = new Promise<void>((resolveObserved) => {
+        stdout.on('data', () => {
+          resolveObserved();
+        });
+      });
+      stdout.write('tail-after-exit\n');
+      await chunkObserved;
+
+      // The tail append is still in flight (gated), so flushOutput must not
+      // report the task as drained.
+      let drained = false;
+      const flush = manager.flushOutput(taskId).then(() => {
+        drained = true;
+      });
+      await new Promise((r) => {
+        setTimeout(r, 25);
+      });
+      expect(drained).toBe(false);
+
+      releaseTail();
+      await flush;
+
+      // Once drained the tail is on disk, reachable through every read path.
+      expect(await manager.readOutput(taskId)).toContain('tail-after-exit');
+      expect(manager.getOutput(taskId)).toContain('tail-after-exit');
+      const snapshot = await manager.getOutputSnapshot(taskId, 4096);
+      expect(snapshot.preview).toContain('tail-after-exit');
+    } finally {
+      appendSpy.mockRestore();
+    }
   });
 });

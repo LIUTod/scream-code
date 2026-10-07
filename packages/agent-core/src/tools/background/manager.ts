@@ -157,7 +157,14 @@ interface RetiredTask {
   /** Total UTF-8 bytes observed, including chunks dropped from the live ring. */
   outputSizeBytes: number;
   readonly outputSessionDir: string | undefined;
-  readonly outputWriteQueue: Promise<void>;
+  /**
+   * The live `output.log` append chain. Deliberately mutable: `'exit'`
+   * routinely beats stdio drain, so chunks can keep arriving after the task
+   * was retired. Each late chunk republishes the extended queue here so
+   * `flushOutput` / `readOutput` await the real tail instead of the snapshot
+   * taken at retire time.
+   */
+  outputWriteQueue: Promise<void>;
 }
 
 /**
@@ -685,7 +692,9 @@ export class BackgroundProcessManager {
     const entry = this.processes.get(taskId);
     const outputSessionDir = this.outputSessionDirFor(taskId);
     if (outputSessionDir !== undefined) {
-      await entry?.outputWriteQueue;
+      // A retired task has no live ManagedProcess; await the retired record's
+      // queue so a late stdio append still in flight is on disk before we read.
+      await (entry?.outputWriteQueue ?? this.retiredTasks.get(taskId)?.outputWriteQueue);
       if (tail !== undefined && tail > 0) {
         // Bounded window read: a task's output.log can grow unbounded, so
         // paging a tail must not load the whole file. UTF-8 needs at most 4
@@ -1191,13 +1200,14 @@ export class BackgroundProcessManager {
     entry.outputSizeBytes += Buffer.byteLength(chunk, 'utf-8');
     // Late stdout after finalize: the live entry is already retired, so extend
     // the retained tail copy instead of growing a dead chunk array.
-    const retired = this.retiredTasks.get(entry.taskId);
+    let retired = this.retiredTasks.get(entry.taskId);
     if (retired !== undefined) {
-      this.retiredTasks.set(entry.taskId, {
+      retired = {
         ...retired,
         outputText: retired.outputText + chunk,
         outputSizeBytes: entry.outputSizeBytes,
-      });
+      };
+      this.retiredTasks.set(entry.taskId, retired);
     } else {
       entry.outputChunks.push(chunk);
       // Enforce output cap: drop oldest chunks when over budget.
@@ -1214,6 +1224,12 @@ export class BackgroundProcessManager {
     entry.outputWriteQueue = entry.outputWriteQueue
       .then(() => appendTaskOutput(outputSessionDir, entry.taskId, chunk))
       .catch(() => {});
+    if (retired !== undefined) {
+      // Keep the retired record's queue live: flushOutput / readOutput await
+      // whatever promise is published here, so leaving the snapshot taken in
+      // finalizeTerminal would let them settle before this append lands.
+      this.retiredTasks.set(entry.taskId, { ...retired, outputWriteQueue: entry.outputWriteQueue });
+    }
   }
 
   private outputSessionDirFor(taskId: string): string | undefined {
