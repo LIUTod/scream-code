@@ -1056,7 +1056,7 @@ export const zh: Record<string, string> = {
   'editor.tip_7': '💡 Tips：按 Ctrl+E 跳到行尾，Ctrl+W 删除前一个单词  【Ctrl+B 关闭 Tips】',
   'editor.tip_8': '💡 Tips：输入 /compact 可手动压缩上下文，释放 token 空间  【Ctrl+B 关闭 Tips】',
   'editor.tip_9': '💡 Tips：按 Ctrl+O 可在外部编辑器中编写长消息  【Ctrl+B 关闭 Tips】',
-  'editor.tip_10': '💡 Tips：输入 /rlm 可开启运行时记忆，让 Agent 跨轮记住更多上下文  【Ctrl+B 关闭 Tips】',
+  'editor.tip_10': '💡 Tips：输入 /rlm 开启持久 Python 工作环境（可派生 subagent）  【Ctrl+B 关闭 Tips】',
   'editor.tip_11': '💡 Tips：按 Ctrl+D（空输入时）可快速退出，再按一次确认  【Ctrl+B 关闭 Tips】',
   'editor.tip_12': '💡 Tips：输入 /sessions 可查看并恢复历史会话  【Ctrl+B 关闭 Tips】',
   'editor.tip_13': '💡 Tips：按 Ctrl+Shift+F 或输入 /search 可搜索会话历史  【Ctrl+B 关闭 Tips】',
@@ -1239,7 +1239,6 @@ export const zh: Record<string, string> = {
   'config.script_on': '脚本模式已开启 — RunScript 可在沙箱中批量调用工具',
   'config.script_off': '脚本模式已关闭 — RunScript 已从工具中移除',
   'config.rlm_off': 'RLM 模式已关闭',
-  'config.rlm_usage': '用法: /rlm (切换) | /rlm on | /rlm off',
   'config.auto_already_on': '自动模式已开启',
   'config.auto_already_off': '自动模式已关闭',
 

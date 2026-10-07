@@ -55,6 +55,9 @@ export type TurnEndReason = 'completed' | 'cancelled' | 'failed';
 
 export interface AgentStatusUpdatedEvent {
   readonly type: 'agent.status.updated';
+  /** Id of the agent that emitted the status ('main' for the root agent).
+   *  Optional at the wire boundary so older emitters/servers coexist. */
+  readonly agentId?: string | undefined;
   readonly model?: string | undefined;
   readonly thinkingLevel?: string | undefined;
   readonly contextTokens?: number | undefined;
@@ -64,6 +67,8 @@ export interface AgentStatusUpdatedEvent {
   readonly planStrategy?: 'normal' | 'fusion' | undefined;
   readonly wolfpackMode?: boolean | undefined;
   readonly rlmEnabled?: boolean | undefined;
+  /** RLM recursion cap; null means unlimited (the core keeps `Infinity`). */
+  readonly rlmMaxDepth?: number | null | undefined;
   readonly permission?: PermissionMode | undefined;
   readonly usage?: UsageStatus | undefined;
 }

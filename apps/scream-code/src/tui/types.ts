@@ -114,6 +114,8 @@ export interface AppState {
   wolfpackMode: boolean;
   /** RLM (persistent-python) mode is active. */
   rlmEnabled: boolean;
+  /** RLM recursion cap; null means unlimited (the core keeps `Infinity`). */
+  rlmMaxDepth: number | null;
   /** Current retry attempt during a step retry (1-indexed); 0 = no retry in progress. */
   reconnectAttempt: number;
   /** Retry context for the status-bar reconnect label; set alongside reconnectAttempt. */

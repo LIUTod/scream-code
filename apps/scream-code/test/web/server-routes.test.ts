@@ -157,3 +157,45 @@ describe('background task REST routes', () => {
     expect(getOutput).toHaveBeenCalledWith('task-1', { tail: 12 });
   });
 });
+
+describe('RLM control REST route', () => {
+  it('rejects negative and non-integer maxDepth with 400 and forwards accepted values', async () => {
+    const root = await makeTempDir('scream-web-rlm-routes-');
+    const home = join(root, 'home');
+    const workspace = join(root, 'workspace');
+    await mkdir(workspace);
+
+    // The route validates the body before it touches the session; the accepted
+    // path stubs the session mutations so the test needs no configured model.
+    const setRlmEnabled = vi.spyOn(Session.prototype, 'setRlmEnabled').mockResolvedValue(undefined);
+    const setRlmMaxDepth = vi.spyOn(Session.prototype, 'setRlmMaxDepth').mockResolvedValue(undefined);
+
+    const handle = await startServer(home, workspace);
+    const sessionId = await createSession(handle, workspace);
+    const post = (maxDepth: unknown) =>
+      fetch(`${handle.url}/api/v1/sessions/${encodeURIComponent(sessionId)}/rlm`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: true, maxDepth }),
+      });
+
+    for (const invalid of [-1, 1.5, 'abc']) {
+      const response = await post(invalid);
+      expect({ invalid, status: response.status }).toEqual({ invalid, status: 400 });
+    }
+    // A rejected body never reaches the session.
+    expect(setRlmEnabled).not.toHaveBeenCalled();
+    expect(setRlmMaxDepth).not.toHaveBeenCalled();
+
+    // 0 is valid and means unlimited.
+    expect((await post(0)).status).toBe(200);
+    expect(setRlmMaxDepth).toHaveBeenCalledWith(0);
+    expect((await post(3)).status).toBe(200);
+    expect(setRlmMaxDepth).toHaveBeenLastCalledWith(3);
+
+    // An absent / null cap leaves the current value untouched.
+    setRlmMaxDepth.mockClear();
+    expect((await post(null)).status).toBe(200);
+    expect(setRlmMaxDepth).not.toHaveBeenCalled();
+  });
+});

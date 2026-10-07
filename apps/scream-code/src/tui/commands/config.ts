@@ -1,4 +1,5 @@
 import type { PermissionMode, Session, ScreamHarness, ThinkingEffort, ModelAlias } from '@scream-code/scream-code-sdk';
+import { parseRlmMaxDepthArg } from '@scream-code/scream-code-sdk';
 import { t } from '@scream-code/config';
 
 import { EditorSelectorComponent } from '../components/dialogs/editor-selector';
@@ -315,7 +316,8 @@ export async function handleScriptCommand(host: SlashCommandHost, args: string):
 }
 
 /** /rlm-max-depth [N] — query or set the maximum RLM recursion depth.
- * N=0 or no limit means unlimited (the default). */
+ * N=0 or no limit means unlimited (the default). Validation is shared with
+ * the core setter and the web REST route (agent-core session/rlm-settings). */
 export async function handleRlmMaxDepthCommand(host: SlashCommandHost, args: string): Promise<void> {
   const session = host.session;
   if (session === undefined) {
@@ -324,20 +326,23 @@ export async function handleRlmMaxDepthCommand(host: SlashCommandHost, args: str
   }
   const arg = args.trim();
   if (arg.length === 0) {
-    host.showStatus('RLM max depth: run /rlm-max-depth <N> (0 or blank = unlimited) to set it.');
+    // Query form: report the authoritative value synced from the status
+    // event / session snapshot (null = unlimited).
+    const current = host.state.appState.rlmMaxDepth;
+    host.showStatus(`RLM max depth: ${current === null ? 'unlimited' : current}`);
     return;
   }
-  const parsed = Number(arg);
-  if (!Number.isInteger(parsed) || parsed < 0) {
-    host.showError(`Invalid rlm-max-depth: ${arg} (expected a non-negative integer, 0 = unlimited).`);
+  const parsed = parseRlmMaxDepthArg(arg);
+  if (!parsed.ok) {
+    host.showError(`Invalid rlm-max-depth: ${arg} (${parsed.reason}).`);
     return;
   }
   try {
-    await session.setRlmMaxDepth(parsed);
-    if (parsed === 0) {
+    await session.setRlmMaxDepth(parsed.value);
+    if (parsed.value === 0) {
       host.showStatus('RLM recursion depth set to unlimited.', host.state.theme.colors.success);
     } else {
-      host.showStatus(`RLM max depth set to ${parsed}.`, host.state.theme.colors.success);
+      host.showStatus(`RLM max depth set to ${parsed.value}.`, host.state.theme.colors.success);
     }
   } catch (error) {
     const msg = formatErrorMessage(error);

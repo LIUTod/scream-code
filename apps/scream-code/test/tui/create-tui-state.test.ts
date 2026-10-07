@@ -47,6 +47,7 @@ function fakeInitialAppState(): AppState {
     ccConnectActive: false,
     wolfpackMode: false,
     rlmEnabled: false,
+    rlmMaxDepth: null,
     reconnectAttempt: 0,
     recentSessions: [],
     subagentUsage: {},

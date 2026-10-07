@@ -475,6 +475,34 @@ describe('useScreamWebClient', () => {
     expect(h.client.subagents.value).toEqual([]);
   });
 
+  it('applies RLM status patches from the main agent only', async () => {
+    h = setupHarness();
+    const ws = await h.handshake();
+
+    // A subagent carries its own (inherited) RLM state — it must not flip the
+    // main session's badge or depth in any open tab.
+    ws.fireMessage({
+      type: 'event',
+      epoch: 10,
+      seq: 5,
+      payload: { type: 'agent.status.updated', agentId: 'agent-2', rlmEnabled: true, rlmMaxDepth: 9 },
+    });
+    await settle();
+    expect(h.client.status.value.rlmEnabled).toBeUndefined();
+    expect(h.client.status.value.rlmMaxDepth).toBeUndefined();
+
+    // The main agent's event applies both fields; null = unlimited.
+    ws.fireMessage({
+      type: 'event',
+      epoch: 10,
+      seq: 6,
+      payload: { type: 'agent.status.updated', agentId: 'main', rlmEnabled: true, rlmMaxDepth: null },
+    });
+    await settle();
+    expect(h.client.status.value.rlmEnabled).toBe(true);
+    expect(h.client.status.value.rlmMaxDepth).toBeNull();
+  });
+
   it('close code 1008 clears the session to idle without reconnecting', async () => {
     h = setupHarness();
     const ws = await h.handshake();

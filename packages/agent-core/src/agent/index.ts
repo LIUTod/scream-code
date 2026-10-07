@@ -23,6 +23,7 @@ import type { McpConnectionManager } from '../mcp';
 import { systemPromptForRequest } from '../profile';
 import type { PreparedSystemPromptContext, ResolvedAgentProfile } from '../profile';
 import type { LspProcessSupervisor } from '../lsp/process-supervisor';
+import { normalizeRlmMaxDepth } from '../session/rlm-settings';
 import type { ModelProvider } from '../session/provider-manager';
 import type { SessionSubagentHost } from '../session/subagent-host';
 import type { SubagentCapabilityMode } from '../session/subagent-capability';
@@ -83,11 +84,20 @@ export type AgentType = 'main' | 'sub' | 'independent';
 const SIDE_QUESTION_SYSTEM =
   'You are a helpful coding assistant answering a quick side question. The user is in the middle of a coding session and needs a fast, concise answer. Keep your response short and focused — this is a side question, not the main task.';
 
+/** Wire representation of the RLM recursion cap: `Infinity` (unlimited) is
+ *  serialized as null, since JSON has no Infinity. */
+function rlmMaxDepthForWire(maxDepth: number): number | null {
+  return Number.isFinite(maxDepth) ? maxDepth : null;
+}
+
 export interface AgentOptions {
   readonly jian: Jian;
   readonly config?: ScreamConfig;
   readonly homedir?: string;
   readonly screamHomeDir?: string;
+  /** Stable id of this agent inside its session ('main' for the root agent).
+   *  Set by `Session.instantiateAgent`; defaults to 'main'. */
+  readonly agentId?: string;
   readonly rpc?: Partial<SDKAgentRPC>;
   readonly persistence?: AgentRecordPersistence;
   readonly type?: AgentType;
@@ -141,6 +151,9 @@ export interface AgentServices {
 
 export class Agent {
   readonly type: AgentType;
+  /** Stable id of this agent inside its session ('main' for the root agent);
+   *  status events carry it so consumers can tell main from subagents. */
+  readonly agentId: string;
   readonly jian: Jian;
   readonly screamConfig?: ScreamConfig;
   readonly homedir?: string;
@@ -199,6 +212,7 @@ export class Agent {
   constructor(options: AgentOptions) {
     // ── Group 1: external dependencies (injected via AgentOptions) ────────────
     this.type = options.type ?? 'main';
+    this.agentId = options.agentId ?? 'main';
     this.jian = options.jian;
     this.screamConfig = options.config;
     this.homedir = options.homedir;
@@ -386,11 +400,16 @@ export class Agent {
   }
 
   setRlmMaxDepth(maxDepth: number): void {
-    if (!Number.isFinite(maxDepth) || maxDepth <= 0) {
-      this.rlmMaxDepth = Infinity;
-      return;
-    }
-    this.rlmMaxDepth = Math.trunc(maxDepth);
+    const normalized = normalizeRlmMaxDepth(maxDepth);
+    // No-op writes would spam the wire: every subagent spawn calls this as
+    // pure inheritance, so only actual changes are recorded/emitted.
+    if (normalized === this.rlmMaxDepth) return;
+    this.rlmMaxDepth = normalized;
+    // Persist the cap (wire null = unlimited) regardless of the current mode:
+    // /rlm-max-depth can be set while RLM is off, and the setting must
+    // survive resume independently of enter/exit.
+    this.records.logRecord({ type: 'rlm.settings', maxDepth: rlmMaxDepthForWire(this.rlmMaxDepth) });
+    this.emitStatusUpdated();
   }
 
   /** Disposes the persistent python kernel (if any) and resets RLM mode.
@@ -432,7 +451,11 @@ export class Agent {
       }
       (this.tools.getBuiltinTool('python') as { dispose?: () => void } | undefined)?.dispose?.();
     }
-    this.records.logRecord({ type: enabled ? 'rlm.enter' : 'rlm.exit' });
+    this.records.logRecord(
+      enabled
+        ? { type: 'rlm.enter', maxDepth: rlmMaxDepthForWire(this.rlmMaxDepth) }
+        : { type: 'rlm.exit' },
+    );
     this.emitStatusUpdated();
   }
 
@@ -485,7 +508,11 @@ export class Agent {
     if (!current.includes('python')) {
       this.tools.setActiveTools([...current, 'python']);
     }
-    this.records.logRecord({ type: 'rlm.enter' });
+    this.records.logRecord({
+      type: 'rlm.enter',
+      depth: this.rlmDepth,
+      maxDepth: rlmMaxDepthForWire(this.rlmMaxDepth),
+    });
   }
 
   /** Capability mode this agent runs under; `all` for main agents and for
@@ -504,10 +531,20 @@ export class Agent {
     return this.capabilityMode;
   }
 
-  /** Restores RLM mode from a persisted record during replay. Does not log
-   * a new record and does not emit a status update (both are suppressed while
-   * records are restoring). */
-  restoreRlm(enabled: boolean): void {
+  /** Restores RLM mode from a persisted record during replay, including the
+   * recursion bookkeeping the enter payload carries since wire v1.6 (missing
+   * fields mean an older wire — the defaults stay). Does not log a new record
+   * and does not emit a status update (both are suppressed while records are
+   * restoring). */
+  restoreRlm(
+    enabled: boolean,
+    payload: {
+      readonly depth?: number | undefined;
+      readonly maxDepth?: number | null | undefined;
+    } = {},
+  ): void {
+    if (payload.depth !== undefined) this.setRlmDepth(payload.depth);
+    if (payload.maxDepth !== undefined) this.restoreRlmSettings(payload.maxDepth);
     this.rlmEnabled = enabled;
     const current = this.tools.getActiveTools();
     if (enabled) {
@@ -520,6 +557,12 @@ export class Agent {
         this.tools.setActiveTools(withoutPython);
       }
     }
+  }
+
+  /** Restores the RLM recursion cap from a persisted `rlm.settings` record
+   * during replay. Silent on purpose: no new record, no status event. */
+  restoreRlmSettings(maxDepth: number | null): void {
+    this.rlmMaxDepth = maxDepth === null ? Infinity : normalizeRlmMaxDepth(maxDepth);
   }
 
   get generate(): typeof generate {
@@ -1127,6 +1170,7 @@ export class Agent {
 
     this.emitEvent({
       type: 'agent.status.updated',
+      agentId: this.agentId,
       model,
       thinkingLevel: this.config.thinkingLevel,
       contextTokens,
@@ -1136,6 +1180,7 @@ export class Agent {
       planStrategy: this.planMode.isActive ? this.planMode.strategy : undefined,
       wolfpackMode: this.wolfpackMode.isActive,
       rlmEnabled: this.rlmEnabled,
+      rlmMaxDepth: rlmMaxDepthForWire(this.rlmMaxDepth),
       permission: this.permission.mode,
       usage,
     });

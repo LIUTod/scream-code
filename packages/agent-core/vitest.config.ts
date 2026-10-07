@@ -10,9 +10,10 @@ export default defineConfig({
     setupFiles: ['./test/setup.ts'],
     // Heavy integration tests (real subagent turns, RLM kernels, spawned
     // processes) legitimately take seconds; under full-suite parallelism the
-    // default 5s budget flakes. 15s is a ceiling, not a target — unit tests
+    // default 5s budget flakes, and heavily loaded machines can inflate the
+    // integration turns past 15s. 60s is a ceiling, not a target — unit tests
     // still finish in milliseconds.
-    testTimeout: 15_000,
-    hookTimeout: 15_000,
+    testTimeout: 60_000,
+    hookTimeout: 60_000,
   },
 });

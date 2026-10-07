@@ -37,6 +37,7 @@ import {
   normalizeWorkDir,
   readSessionIndex,
   removeSessionIndexEntry,
+  parseRlmMaxDepthArg,
   type Session,
   type Event,
   type SessionStatus,
@@ -3781,14 +3782,29 @@ export interface WebServerOptions {
 // Every route returns `false` so the caller falls through when the URL does not
 // match, and routes are wired in runWebServer after the goal route.
 
+/**
+ * Validates the optional `maxDepth` body field of the /rlm route with the same
+ * grammar as /rlm-max-depth (a non-negative integer; 0 = unlimited) via the
+ * shared agent-core helper. Absent / null leaves the cap untouched; any other
+ * invalid value is a 400 so a client cannot silently send a cap that never
+ * lands.
+ */
+function optionalRlmMaxDepth(raw: unknown): number | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  const parsed = parseRlmMaxDepthArg(typeof raw === 'string' ? raw : String(raw));
+  if (!parsed.ok) {
+    throw new HttpError(400, `Invalid rlm max depth: ${parsed.reason}`);
+  }
+  return parsed.value;
+}
+
 async function handleSessionControlRoutes(
   req: IncomingMessage,
   res: ServerResponse,
   url: string,
   method: string,
   manager: SessionManager,
-): Promise<boolean> {
-  // Query set (GET)
+): Promise<boolean> {  // Query set (GET)
   const statusMatch = new RegExp(`^${API_PREFIX}/sessions/([^/]+)/status$`).exec(url);
   if (statusMatch && method === 'GET') {
     try { sendJson(res, 200, await manager.getSessionStatus(decodeURIComponent(statusMatch[1]!))); }
@@ -3859,7 +3875,7 @@ async function handleSessionControlRoutes(
     try {
       const body = await readJsonBody(req);
       const enabled = optionalBoolean(body, 'enabled', true);
-      const maxDepth = typeof body['maxDepth'] === 'number' ? Number(body['maxDepth']) : undefined;
+      const maxDepth = optionalRlmMaxDepth(body['maxDepth']);
       await manager.setRlm(decodeURIComponent(rlmMatch[1]!), enabled, maxDepth);
       sendJson(res, 200, { ok: true });
     } catch (error) { sendHttpError(res, error); }

@@ -18,8 +18,12 @@ function fakeClient() {
     fetchSessionPlan: vi.fn(async () => undefined),
     switchPlanMode: vi.fn(async () => true),
     switchWolfpack: vi.fn(async () => true),
-    switchRlm: vi.fn(async (enabled: boolean) => {
-      status.value = { ...status.value, rlmEnabled: enabled };
+    switchRlm: vi.fn(async (enabled: boolean, maxDepth?: number) => {
+      status.value = {
+        ...status.value,
+        rlmEnabled: enabled,
+        ...(maxDepth !== undefined ? { rlmMaxDepth: maxDepth } : {}),
+      };
       return true;
     }),
     clearPlan: vi.fn(async () => true),
@@ -95,6 +99,27 @@ describe('SessionControlsPanel', () => {
     });
     await flushPromises();
     expect(wrapper.find('input[type="number"]').element.value).toBe('7');
+  });
+
+  it('saves the depth without turning RLM on and re-hydrates the field', async () => {
+    const fixture = fakeClient();
+    fixture.client.status.value = { ...fixture.client.status.value, rlmEnabled: true, rlmMaxDepth: 3 };
+    const wrapper = mount(SessionControlsPanel, {
+      props: { client: fixture.client as never },
+      global: { stubs: { SvgIcon: true } },
+    });
+    await flushPromises();
+
+    await wrapper.find('input[type="number"]').setValue('4');
+    await wrapper.find('button[aria-label="保存 RLM 最大深度"]').trigger('click');
+    await flushPromises();
+
+    // Depth-only write: the current enabled state travels with it (TUI parity —
+    // saving the cap must not toggle the mode), and the refresh re-reads the
+    // authoritative value.
+    expect(fixture.actions.switchRlm).toHaveBeenCalledWith(true, 4);
+    expect(fixture.client.status.value.rlmMaxDepth).toBe(4);
+    expect(wrapper.find('input[type="number"]').element.value).toBe('4');
   });
 
   it('refreshes the loaded transcript after undoing the latest turn', async () => {

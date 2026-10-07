@@ -607,6 +607,7 @@ export class Session {
     const cwd = parentAgent?.config.cwd ?? this.options.jian.getcwd();
     return new Agent({
       ...config,
+      agentId: id,
       type,
       jian: this.options.jian.withCwd(cwd),
       toolServices: this.options.toolServices,

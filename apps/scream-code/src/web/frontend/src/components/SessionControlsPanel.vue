@@ -67,7 +67,9 @@ function setWolfpack(event: Event): void {
 }
 
 function parseRlmDepth(): number | null {
-  const value = rlmDepth.value.trim();
+  // Coerce first: `v-model` on an `<input type="number">` can hand back a
+  // number (Vue Test Utils does), and a numeric draft must not crash the save.
+  const value = String(rlmDepth.value).trim();
   if (!/^\d+$/.test(value)) {
     showToast('RLM 深度需为 0 或正整数', 'warning');
     return null;
@@ -87,7 +89,11 @@ function setRlm(event: Event): void {
 function saveRlmDepth(): void {
   const depth = parseRlmDepth();
   if (depth === null) return;
-  void mutate(() => props.client.switchRlm(true, depth));
+  // Preserve the current enabled state: saving the depth must not turn RLM on
+  // as a side effect (parity with TUI /rlm-max-depth). Fall back to true only
+  // when the status has not loaded yet, matching the historical behaviour.
+  const enabled = props.client.status.value.rlmEnabled ?? true;
+  void mutate(() => props.client.switchRlm(enabled, depth));
 }
 
 function clearPlan(): void {

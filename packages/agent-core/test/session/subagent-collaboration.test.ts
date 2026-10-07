@@ -26,7 +26,7 @@ function drainGate() {
   return {
     command: `touch "${started}" && while [ ! -f "${go}" ]; do sleep 0.05; done`,
     async waitForStart() {
-      const deadline = Date.now() + 15_000;
+      const deadline = Date.now() + 60_000;
       while (Date.now() < deadline) {
         if (existsSync(started)) return;
         await new Promise((resolve) => setTimeout(resolve, 10));

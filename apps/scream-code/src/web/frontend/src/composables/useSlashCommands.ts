@@ -47,12 +47,19 @@ function parseRevokeCount(args?: string): number | null {
   return Number.isSafeInteger(count) ? count : null;
 }
 
-/** /rlm-max-depth accepts zero (unlimited) or a non-negative integer. */
+/**
+ * /rlm-max-depth accepts zero (unlimited) or a non-negative integer — the same
+ * grammar as the canonical validator in
+ * packages/agent-core/src/session/rlm-settings.ts. The frontend deliberately
+ * does not import agent-core (browser bundle; local type copies only), so this
+ * stays a mirrored copy; the REST route re-validates with the shared helper
+ * server-side, which is the authoritative gate.
+ */
 function parseRlmMaxDepth(args?: string): number | null {
   const value = args?.trim() ?? '';
-  if (value.length === 0) return null;
+  if (!/^\d+$/.test(value)) return null;
   const depth = Number(value);
-  return Number.isInteger(depth) && depth >= 0 && Number.isSafeInteger(depth) ? depth : null;
+  return Number.isSafeInteger(depth) ? depth : null;
 }
 
 export interface SlashCommandHandlers {

@@ -158,10 +158,14 @@ export class SessionSubagentHost {
       undefined,
       this.ownerAgentId,
     );
-    // RLM recursion depth: a subagent spawned from an RLM kernel runs one
-    // level deeper than its parent. Depth is carried on the agent instance,
-    // not the process. The max-depth cap is inherited too, so /rlm-max-depth
-    // configured on the root applies uniformly to every descendant.
+    // RLM recursion depth: every spawned child starts one level deeper than
+    // its spawner — the counter lives on the agent instance, not the process,
+    // and is incremented on every spawn (whether the spawn came from the RLM
+    // kernel or the Agent tool). The max-depth cap is inherited too, so
+    // /rlm-max-depth configured on the root applies uniformly to every
+    // descendant; the RLM bridge consults both when the kernel spawns on this
+    // agent's behalf (agent/tool/index.ts, rlm.run). Persisting the cap here
+    // (rlm.settings) keeps a resumed child's records self-contained.
     // RLM inheritance itself is applied in configureChild, after the profile
     // has mounted its tools — doing it here would be wiped by useProfile's
     // setActiveTools(profile.tools) overwrite.
@@ -252,6 +256,11 @@ export class SessionSubagentHost {
       // current model when unbound), so a /model diy rebind or a parent
       // setModel between the initial spawn and the resume is reflected.
       () => {
+        // RLM parameters are deliberately NOT re-pushed from the parent here:
+        // the child's recursion state (enabled / depth / cap) is restored from
+        // its own wire records — the `rlm.enter` payload (v1.6+) and
+        // `rlm.settings` — so a resume keeps exactly what the child had when
+        // it last ran, independent of later parent-side changes.
         const binding = this.resolveModelBinding(profileName);
         const modelAlias = this.resolveValidModelAlias(parent, binding);
         const thinkingLevel = this.resolveThinkingLevel(parent, binding, parent.config.thinkingLevel);

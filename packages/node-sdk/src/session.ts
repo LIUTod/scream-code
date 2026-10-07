@@ -333,8 +333,9 @@ export class Session {
     });
   }
 
-  /** Sets the maximum RLM recursion depth (default 1). Depth 1 means the root
-   * kernel may spawn rlm() children but they cannot spawn grandchildren. */
+  /** Sets the maximum RLM recursion depth. The default is unlimited
+   *  (`Infinity`); 0 also means unlimited. Depth 1 means the root kernel may
+   *  spawn rlm() children but they cannot spawn grandchildren. */
   async setRlmMaxDepth(maxDepth: number): Promise<void> {
     this.ensureOpen();
     await this.rpc.setRlmMaxDepth({

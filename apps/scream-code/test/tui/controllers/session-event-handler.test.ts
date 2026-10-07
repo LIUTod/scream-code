@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { Event, Session } from '@scream-code/scream-code-sdk';
 import {
   SessionEventHandler,
+  isMainAgentStatusEvent,
   type SessionEventHost,
 } from '#/tui/controllers/session-event-handler';
 import type { StreamingUIController } from '#/tui/controllers/streaming-ui';
@@ -1116,5 +1117,65 @@ describe('SessionEventHandler — retry label clearing', () => {
 
     expect(host.state.appState.reconnectAttempt).toBe(0);
     expect(host.state.appState.reconnectStatusCode).toBeUndefined();
+  });
+});
+
+describe('SessionEventHandler — main-agent RLM status filtering', () => {
+  it('treats main and unlabelled events as main, subagents as foreign', () => {
+    expect(isMainAgentStatusEvent({ agentId: 'main' })).toBe(true);
+    expect(isMainAgentStatusEvent({})).toBe(true);
+    expect(isMainAgentStatusEvent({ agentId: 'agent-1' })).toBe(false);
+  });
+
+  it('never lets a subagent status event overwrite the main RLM state', () => {
+    const host = createMockHost();
+    const handler = new SessionEventHandler(host);
+    host.state.appState.rlmEnabled = true;
+    host.state.appState.rlmMaxDepth = 3;
+
+    // Subagent event: carries its own RLM state (an inherited cap can differ
+    // from main's) and must be ignored for the main badge / depth query.
+    handler.handleEvent(
+      {
+        ...baseEvent('agent.status.updated'),
+        agentId: 'agent-1',
+        rlmEnabled: false,
+        rlmMaxDepth: 9,
+      } as unknown as Event,
+      vi.fn(),
+    );
+    expect(host.state.appState.rlmEnabled).toBe(true);
+    expect(host.state.appState.rlmMaxDepth).toBe(3);
+
+    // Unlabelled events cannot reach the main patch path: the subagent router
+    // consumes anything whose agentId is not 'main' (undefined included) before
+    // handleStatusUpdate runs, so the `agentId === undefined` acceptance in
+    // isMainAgentStatusEvent is defensive only. Pin the pipeline's real
+    // behaviour: no label is treated as foreign, never as main.
+    const { agentId, ...unlabelled } = baseEvent('agent.status.updated');
+    void agentId; // deliberately dropped: an older emitter sends no label
+    handler.handleEvent(
+      {
+        ...unlabelled,
+        rlmEnabled: false,
+        rlmMaxDepth: 9,
+      } as unknown as Event,
+      vi.fn(),
+    );
+    expect(host.state.appState.rlmEnabled).toBe(true);
+    expect(host.state.appState.rlmMaxDepth).toBe(3);
+
+    // Main events apply both fields, including null = unlimited.
+    handler.handleEvent(
+      {
+        ...baseEvent('agent.status.updated'),
+        agentId: 'main',
+        rlmEnabled: true,
+        rlmMaxDepth: null,
+      } as unknown as Event,
+      vi.fn(),
+    );
+    expect(host.state.appState.rlmEnabled).toBe(true);
+    expect(host.state.appState.rlmMaxDepth).toBeNull();
   });
 });

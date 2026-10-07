@@ -159,8 +159,26 @@ export interface AgentRecordEvents {
   'wolfpack.enter': {};
   'wolfpack.exit': {};
 
-  'rlm.enter': {};
+  /**
+   * RLM mode entered. New in wire v1.6: the payload carries the recursion
+   * bookkeeping so a replay can restore it. `maxDepth` is recorded on every
+   * enter (null = unlimited); `depth` only on a subagent's inherited enter
+   * (a subagent runs one level deeper than its parent). Pre-1.6 wires carry
+   * an empty payload — replay then keeps the defaults (depth 0, unlimited).
+   */
+  'rlm.enter': {
+    depth?: number;
+    maxDepth?: number | null;
+  };
   'rlm.exit': {};
+  /**
+   * RLM recursion-cap change (any state, including while RLM is disabled), so
+   * the cap survives resume even when it is set before/without entering RLM
+   * mode. `maxDepth` is null when unlimited (the core keeps `Infinity`).
+   */
+  'rlm.settings': {
+    maxDepth: number | null;
+  };
 
   'goal.create': {
     goalId: string;

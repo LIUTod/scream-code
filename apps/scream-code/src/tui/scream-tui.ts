@@ -158,6 +158,7 @@ function createInitialAppState(input: ScreamTUIStartupInput): AppState {
     ccConnectActive: false,
     wolfpackMode: input.cliOptions.wolfpack === true,
     rlmEnabled: false,
+    rlmMaxDepth: null,
     reconnectAttempt: 0,
     recentSessions: [],
     subagentUsage: {},

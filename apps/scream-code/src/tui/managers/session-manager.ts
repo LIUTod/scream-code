@@ -294,6 +294,7 @@ export class SessionManager {
         : 'off') as PlanModeState,
       wolfpackMode: status.wolfpackMode,
       rlmEnabled: status.rlmEnabled,
+      rlmMaxDepth: status.rlmMaxDepth ?? null,
       contextTokens: status.contextTokens,
       maxContextTokens: status.maxContextTokens,
       contextUsage: status.contextUsage,

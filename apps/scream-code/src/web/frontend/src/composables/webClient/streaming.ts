@@ -180,7 +180,6 @@ export function createStreamingModule(ctx: ClientContext): StreamingModule {
         if (payload.contextTokens !== undefined) patch.contextTokens = payload.contextTokens as number;
         if (payload.maxContextTokens !== undefined) patch.maxContextTokens = payload.maxContextTokens as number;
         if (payload.contextUsage !== undefined) patch.contextUsage = payload.contextUsage as number;
-        if (payload.rlmMaxDepth !== undefined) patch.rlmMaxDepth = payload.rlmMaxDepth as number | null;
         s.status.value = { ...s.status.value, ...patch };
         break;
       }
@@ -191,6 +190,15 @@ export function createStreamingModule(ctx: ClientContext): StreamingModule {
         if (payload.contextTokens !== undefined) patch.contextTokens = payload.contextTokens as number;
         if (payload.maxContextTokens !== undefined) patch.maxContextTokens = payload.maxContextTokens as number;
         if (payload.contextUsage !== undefined) patch.contextUsage = payload.contextUsage as number;
+        // The RLM pair is main-agent state: subagent status updates carry
+        // their own agentId and must not overwrite the main badge / depth.
+        // Events without an agentId (older emitters) stay accepted.
+        if (payload.agentId === undefined || payload.agentId === 'main') {
+          if (payload.rlmEnabled !== undefined) patch.rlmEnabled = payload.rlmEnabled as boolean;
+          if (payload.rlmMaxDepth !== undefined) {
+            patch.rlmMaxDepth = payload.rlmMaxDepth as number | null;
+          }
+        }
         if (payload.usage !== undefined) {
           patch.usage = payload.usage as SessionUsage;
           // Late-arriving token usage: backfill the last settled assistant turn

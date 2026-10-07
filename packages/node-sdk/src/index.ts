@@ -45,6 +45,12 @@ export {
 // predicate is exported here instead of being reimplemented in the TUI.
 export { REPLAY_TURN_LIMIT, isRealUserPrompt } from '@scream-code/agent-core';
 
+// RLM recursion-cap grammar shared with the core setter and the web REST
+// route: the TUI `/rlm-max-depth` command validates through the same helpers
+// so the command surfaces cannot drift apart.
+export { normalizeRlmMaxDepth, parseRlmMaxDepthArg } from '@scream-code/agent-core';
+export type { RlmMaxDepthParseResult } from '@scream-code/agent-core';
+
 // Diagnostic logging — public surface only.
 // RootLogger / getRootLogger / LoggingConfig stay inside agent-core.
 export {

@@ -25,6 +25,15 @@
 
 ## Boundaries
 - Does NOT: implement tool logic (that is each tool module / plugin's job)
+- RLM kernel ownership & rebuild reuse: the `PythonTool` instance owns the
+  long-lived kernel and the `rlm()` handle table. `initializeBuiltinTools` can
+  run repeatedly (config refresh / skills reload) and must reuse the existing
+  instance while the cwd is unchanged — rebuilding would orphan the live kernel
+  and silently drop its in-memory state; a different cwd disposes the old
+  kernel so the next `/rlm` call starts a deterministic fresh one. The bridge
+  handlers (`rlm.run` / `rlm.result` / `__dispose__`) live in this module and
+  read `subagentHost` at call time, so the kernel bootstrap can always define
+  `rlm()` without NameErrors
 - RLM bridge boundary: `createRlmHostHandlers`'s `rlm.run` always spawns the
   `coder` profile — the profile `spawns` whitelist constrains the `Agent` tool,
   not this power mode. It forwards the caller's `capabilityMode`, so a

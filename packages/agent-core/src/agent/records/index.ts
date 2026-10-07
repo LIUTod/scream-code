@@ -102,10 +102,13 @@ function restoreAgentRecord(agent: Agent, input: AgentRecord): void {
       agent.wolfpackMode.exit();
       return;
     case 'rlm.enter':
-      agent.restoreRlm(true);
+      agent.restoreRlm(true, input);
       return;
     case 'rlm.exit':
       agent.restoreRlm(false);
+      return;
+    case 'rlm.settings':
+      agent.restoreRlmSettings(input.maxDepth);
       return;
     case 'goal.create':
       agent.goal.restoreCreate(input);

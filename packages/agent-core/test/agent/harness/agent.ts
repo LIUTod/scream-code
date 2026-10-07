@@ -97,6 +97,8 @@ export interface TestAgentOptions {
   readonly generate?: GenerateFn | undefined;
   readonly hookEngine?: AgentOptions['hookEngine'];
   readonly type?: AgentOptions['type'];
+  /** Session-scoped agent id (defaults to 'main' in the Agent constructor). */
+  readonly agentId?: string | undefined;
   readonly permission?: AgentOptions['permission'];
   readonly providerManager?: ProviderManager;
   readonly initialConfig?: ScreamConfig;
@@ -190,6 +192,7 @@ export class AgentTestContext {
       modelProvider: providerManager,
       subagentHost: options.subagentHost,
       type: options.type,
+      agentId: options.agentId,
       permission: options.permission,
       hookEngine: options.hookEngine,
       log: options.log,

@@ -1061,7 +1061,7 @@ export const en: Record<string, string> = {
   'editor.tip_7': '💡 Tips: Ctrl+E jumps to end of line, Ctrl+W deletes the previous word  [Ctrl+B to hide Tips]',
   'editor.tip_8': '💡 Tips: Type /compact to manually compact context and free token space  [Ctrl+B to hide Tips]',
   'editor.tip_9': '💡 Tips: Press Ctrl+O to compose long messages in an external editor  [Ctrl+B to hide Tips]',
-  'editor.tip_10': '💡 Tips: Type /rlm to enable runtime memory for better cross-turn recall  [Ctrl+B to hide Tips]',
+  'editor.tip_10': '💡 Tips: Type /rlm to enable a persistent Python workspace (subagents can be spawned from it)  [Ctrl+B to hide Tips]',
   'editor.tip_11': '💡 Tips: Press Ctrl+D (on empty input) to quit, press again to confirm  [Ctrl+B to hide Tips]',
   'editor.tip_12': '💡 Tips: Type /sessions to browse and resume past sessions  [Ctrl+B to hide Tips]',
   'editor.tip_13': '💡 Tips: Press Ctrl+Shift+F or type /search to search the conversation  [Ctrl+B to hide Tips]',
@@ -1244,7 +1244,6 @@ export const en: Record<string, string> = {
   'config.script_on': 'Script mode enabled — RunScript can batch tool calls from a sandbox',
   'config.script_off': 'Script mode disabled — RunScript removed from the tools',
   'config.rlm_off': 'RLM mode disabled',
-  'config.rlm_usage': 'Usage: /rlm (toggle) | /rlm on | /rlm off',
   'config.auto_already_on': 'Auto mode is already on',
   'config.auto_already_off': 'Auto mode is already off',
 

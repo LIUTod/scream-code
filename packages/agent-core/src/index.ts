@@ -60,6 +60,10 @@ export type {
 } from './session/provider-manager';
 export { fetchProviderBalance } from './session/provider-balance';
 export { isSupportedBalanceProvider } from './session/provider-balance';
+// RLM recursion-cap grammar shared by the core setter, the TUI command and
+// the web REST route (see session/rlm-settings.ts).
+export { normalizeRlmMaxDepth, parseRlmMaxDepthArg } from './session/rlm-settings';
+export type { RlmMaxDepthParseResult } from './session/rlm-settings';
 export { subagentRoster } from './profile/roster';
 export type { ProviderBalance } from './session/provider-balance';
 

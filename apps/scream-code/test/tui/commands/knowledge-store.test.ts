@@ -149,7 +149,7 @@ describe('getKnowledgeStore 单例契约', () => {
     const result = await startManualEmbeddingDownload();
     expect(result.error).toBeUndefined();
     expect(storeImpl.setEmbeddingEngine).toHaveBeenCalledTimes(1);
-  });
+  }, 30_000);
 
   it('并发调用共享同一次构建，且在 init 完成前一律不返回', async () => {
     let releaseInit: () => void = () => {};

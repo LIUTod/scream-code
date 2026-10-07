@@ -285,11 +285,25 @@ interface McpToolEntry {
   readonly serverName: string;
 }
 
+/** Retained-handle capacity of the rlm bridge. When full, settled handles are
+ * evicted first (FIFO, oldest insertion first); only a pathological map where
+ * every handle is still in flight falls back to dropping the oldest live
+ * handle, whose result then becomes unretrievable. */
+const RLM_HANDLE_CAPACITY = 128;
+/** How long a settled handle's result stays retrievable before the next
+ * handle operation lazily evicts it. */
+const RLM_HANDLE_TTL_MS = 30 * 60_000;
+
 /**
  * Host bridge handlers for the /rlm python kernel: `rlm.run` spawns a
  * subagent (reusing the subagent host) and returns its handle id;
  * `rlm.result` waits for that subagent's final summary. Handles are kept in
  * a closure map for the lifetime of the ToolManager (one per session).
+ *
+ * Handle retention: a settled handle stays readable — rlm_wait can be called
+ * any number of times and always returns the same result — and an entry is
+ * only removed by (1) kernel teardown (`__dispose__`), (2) capacity eviction,
+ * or (3) the lazy TTL sweep. It is never removed by consumption.
  *
  * Recursion guard: a subagent may only spawn its own rlm() children if its
  * depth is below the cap. Depth is carried on each agent instance (root = 0,
@@ -298,23 +312,46 @@ interface McpToolEntry {
  * recursion — and a positive integer when the user opts into a limit.
  */
 export function createRlmHostHandlers(agent: Agent): HostRequestHandlers {
-  const handles = new Map<
-    string,
-    {
-      completion: SubagentHandle['completion'];
-      name: string;
-      controller: AbortController;
-      /** Result cached after the child settles, so a late rlm_wait can still
-       * retrieve it. Previously the handle was deleted on settlement, which
-       * made rlm_wait fail with "unknown rlm handle" whenever the subagent
-       * finished faster than the caller got around to waiting — a real
-       * race that burned child results. The entry is only removed once the
-       * result has been consumed (or on kernel teardown). */
-      result?: unknown;
+  type RlmHandle = {
+    completion: SubagentHandle['completion'];
+    name: string;
+    controller: AbortController;
+    /** Result cached after the child settles — always the completion's
+     * `result` string, so a late or repeated rlm_wait can retrieve it.
+     * Absent while in flight, and for a failed child (whose rejection the
+     * waiter must observe instead of a fabricated result). */
+    result?: string | undefined;
+    /** Settlement timestamp — the TTL anchor for lazy eviction. */
+    settledAt?: number | undefined;
+  };
+  const handles = new Map<string, RlmHandle>();
+  /** Lazy TTL sweep, run at the top of every handle operation: settled
+   * handles older than the TTL are dropped so a long session cannot retain
+   * them forever. */
+  const evictExpired = (): void => {
+    const now = Date.now();
+    for (const [id, entry] of handles) {
+      if (entry.settledAt !== undefined && now - entry.settledAt > RLM_HANDLE_TTL_MS) {
+        handles.delete(id);
+      }
     }
-  >();
+  };
+  /** Capacity guard, run before inserting a new handle. Map iteration is
+   * insertion order, so the first settled entry found is the oldest. */
+  const makeRoom = (): void => {
+    if (handles.size < RLM_HANDLE_CAPACITY) return;
+    for (const [id, entry] of handles) {
+      if (entry.settledAt !== undefined) {
+        handles.delete(id);
+        return;
+      }
+    }
+    const oldest = handles.keys().next().value;
+    if (oldest !== undefined) handles.delete(oldest);
+  };
   return {
     'rlm.run': async (payload) => {
+      evictExpired();
       const host = agent.subagentHost;
       if (host === undefined) throw new Error('subagent host unavailable');
       if (agent.getRlmDepth() >= agent.getRlmMaxDepth()) {
@@ -344,42 +381,46 @@ export function createRlmHostHandlers(agent: Agent): HostRequestHandlers {
         runInBackground: false,
         signal: controller.signal,
       });
-      const entry: { completion: SubagentHandle['completion']; name: string; controller: AbortController; result?: unknown } = {
+      const entry: RlmHandle = {
         completion: handle.completion,
         name,
         controller,
       };
+      makeRoom();
       handles.set(handle.agentId, entry);
       // Cache the result when the child settles. The entry stays in the map
-      // until rlm.result consumes it (or teardown), so a fast subagent never
-      // races the caller's rlm_wait. Use .then with both callbacks (not
-      // .finally) so a rejected completion is consumed instead of surfacing
-      // as an unhandled promise rejection (which crashes the process on
-      // Node >= 15).
+      // (idempotent re-reads) until evicted by capacity/TTL or teardown, so a
+      // fast subagent never races the caller's rlm_wait. Use .then with both
+      // callbacks (not .finally) so a rejected completion is consumed instead
+      // of surfacing as an unhandled promise rejection (which crashes the
+      // process on Node >= 15). `settledAt` anchors the lazy TTL sweep.
       void handle.completion.then(
-        (result) => {
-          entry.result = result;
+        (completion) => {
+          entry.result = completion.result;
+          entry.settledAt = Date.now();
         },
         () => {
           // Child failed or was aborted; keep the entry so rlm.result can
-          // surface the error rather than "unknown rlm handle".
-          entry.result = undefined;
+          // surface the error (it re-awaits the rejected completion) rather
+          // than "unknown rlm handle".
+          entry.settledAt = Date.now();
         },
       );
       return { id: handle.agentId, name };
     },
     'rlm.result': async (payload) => {
+      evictExpired();
       const id = String(payload['id']);
       const entry = handles.get(id);
       if (entry === undefined) throw new Error(`unknown rlm handle: ${id}`);
-      if (entry.result !== undefined) {
-        handles.delete(id);
-        return { result: entry.result };
-      }
+      // One reply shape for both timings: whichever side of the race won, the
+      // host answers `{ result: <string> }` — the completion's summary text.
+      // The cache branch previously returned the whole completion object while
+      // the wait branch returned the string, so the kernel got two different
+      // payload shapes for the same call depending on subagent speed.
+      if (entry.result !== undefined) return { result: entry.result };
       const completion = await entry.completion;
-      const result = completion.result;
-      handles.delete(id);
-      return { result };
+      return { result: completion.result };
     },
     // Convention hook invoked by PythonTool.dispose: cancels every in-flight
     // rlm() subagent so a kernel teardown (session close / /rlm off) does not
@@ -1064,6 +1105,21 @@ export class ToolManager {
       this.lspRegistry = new LspRegistry(jian, this.agent.lspSupervisor);
       this.lspRegistryJian = jian;
     }
+    // Same reuse rule for the /rlm python kernel: a rebuild must not orphan
+    // the running kernel process (which would silently drop its in-memory
+    // state) or reset the rlm() handle table. The instance is reused only
+    // while the cwd is unchanged — a different cwd means a different
+    // workspace, so the old kernel is disposed and the next /rlm call starts
+    // a deterministic fresh kernel instead of quietly serving the wrong
+    // directory.
+    const previousPython = this.getBuiltinTool('python');
+    let pythonTool: b.PythonTool;
+    if (previousPython instanceof b.PythonTool && previousPython.cwd === cwd) {
+      pythonTool = previousPython;
+    } else {
+      if (previousPython instanceof b.PythonTool) previousPython.dispose();
+      pythonTool = new b.PythonTool(cwd, { hostHandlers: createRlmHostHandlers(this.agent) });
+    }
     const allowBackground =
       this.enabledTools.has('TaskList') &&
       this.enabledTools.has('TaskOutput') &&
@@ -1103,7 +1159,8 @@ export class ToolManager {
         // Host handlers are ALWAYS passed so the kernel bootstrap always
         // defines rlm()/rlm_wait() — the handler body checks subagentHost at
         // call time (never at construction), so rlm() never NameErrors.
-        new b.PythonTool(cwd, { hostHandlers: createRlmHostHandlers(this.agent) }),
+        // `pythonTool` is the reused-or-fresh instance resolved above.
+        pythonTool,
         // Script execution mode: model-written JS runs in a QuickJS sandbox
         // that calls the step's tools through the regular pipeline. Enabled by
         // default for the main agent (profile/default/agent.yaml); /script

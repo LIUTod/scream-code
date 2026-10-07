@@ -55,7 +55,7 @@ When Scream wants to modify files or run commands, an approval panel pops up —
 - **Bot Mode (`/bot`)** — unattended execution: reversible work (reads, in-workspace edits, read-only commands) runs freely, while irreversible actions (push / publish / delete / sensitive files / unclassified operations) are automatically denied and queued for your review — with the reason fed back to the model so it stops retrying.
 - **Persistent Memory** — structured pain-point memory with FTS5 full-text + tag + vector retrieval, shared across sessions.
 - **Local Knowledge Graph** — SAG-based visual knowledge base for multi-hop reasoning; import your own docs anytime.
-- **RLM Mode** — persistent Python workspace for long-running tasks, with unlimited recursive sub-agents.
+- **RLM Mode** — persistent Python workspace for long-running tasks; `rlm()` spawns recursive sub-agents straight from code, always through the `coder` profile, unlimited by default and cap-limited per session with `/rlm-max-depth`. Every `rlm()` call is a real sub-agent run — it consumes tokens like any other delegation.
 - **Script Mode** — on by default: the model can run JavaScript in a sandbox that calls the other tools for it, so batch work (dozens of files/pages, filter-then-report) finishes in one round trip — only the script's summary enters the conversation; `/script` toggles it.
 - **Session Trace** — `/trace` exports any session as a self-contained, offline interactive HTML timeline.
 - **Context Search** — `/search` (Ctrl+Shift+F) full-screen keyword search over the conversation.
@@ -80,8 +80,8 @@ Type `/` in the input to browse. All 55 commands:
 | `/bot` | Unattended bot mode: reversible actions auto-approve, irreversible ones park for review |
 | `/goal [objective]` | View/manage auto goals |
 | `/wolfpack` (`/wp`) | Toggle wolfpack mode — auto-approve + batch concurrency |
-| `/rlm` | RLM mode: persistent Python workspace, unlimited recursive subagents |
-| `/rlm-max-depth [N]` | Set RLM recursion depth limit |
+| `/rlm` | RLM mode: persistent Python workspace; `rlm()` spawns real recursive subagents (coder profile) |
+| `/rlm-max-depth [N]` | Show or set the RLM recursion depth limit (0 = unlimited; the default is unlimited) |
 | `/script` | Script mode: run JavaScript in a sandbox that batches tool calls (on by default) |
 | `/plan` | Toggle plan mode |
 | `/fusionplan` (`/fp`) | Fusion plan mode (multi-agent parallel planning) |

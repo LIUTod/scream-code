@@ -116,6 +116,20 @@ function isZeroUsage(u: TokenUsage): boolean {
   );
 }
 
+/**
+ * Whether a status event may patch main-agent state (RLM mode / recursion cap).
+ * Only the main agent's own events qualify; subagent status updates carry their
+ * own agentId and must never overwrite the main display. Events without an
+ * agentId (older emitters) are accepted for backward compatibility.
+ *
+ * Exported (pure) so the filtering rule is unit-testable without a TUI.
+ */
+export function isMainAgentStatusEvent(event: {
+  readonly agentId?: string | undefined;
+}): boolean {
+  return event.agentId === undefined || event.agentId === MAIN_AGENT_ID;
+}
+
 
 export interface SessionEventHost {
   state: TUIState;
@@ -921,8 +935,18 @@ export class SessionEventHandler {
     if (event.wolfpackMode !== undefined) {
       patch.wolfpackMode = event.wolfpackMode;
     }
-    if (event.rlmEnabled !== undefined) {
-      patch.rlmEnabled = event.rlmEnabled;
+    if (event.rlmEnabled !== undefined || event.rlmMaxDepth !== undefined) {
+      // Subagent status updates also carry rlmEnabled/rlmMaxDepth, and a
+      // subagent inherits the cap while its own mode may differ — applying
+      // them unconditionally would flash the subagent's state onto the main
+      // badge / query result. Only the main agent's events patch these.
+      const fromMain = isMainAgentStatusEvent(event);
+      if (fromMain && event.rlmEnabled !== undefined) {
+        patch.rlmEnabled = event.rlmEnabled;
+      }
+      if (fromMain && event.rlmMaxDepth !== undefined) {
+        patch.rlmMaxDepth = event.rlmMaxDepth;
+      }
     }
     if (event.permission !== undefined) {
       patch.permissionMode = event.permission;

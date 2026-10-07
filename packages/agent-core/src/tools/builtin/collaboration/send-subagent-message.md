@@ -18,10 +18,11 @@ information arrives, or to hand it a correction while it is still running.
   every tool that observes the abort signal is cut short (side-effecting
   commands included), approvals still waiting for an answer are withdrawn, and
   the abort travels down the signal chain into any foreground grandchild the
-  batch is waiting on. A tool that never reads the signal — a long Python exec
-  in an RLM child, say — is not cut short: the correction only lands after it
-  settles. An interject aimed at an idle or structured-output subagent
-  degrades to the steer/mailbox path.
+  batch is waiting on. The RLM Python kernel observes the signal too: a long
+  exec is interrupted through the same SIGINT route, the running statement is
+  unwound and the kernel keeps its state (variables survive; a kernel that does
+  not return to an idle prompt is restarted instead). An interject aimed at an
+  idle or structured-output subagent degrades to the steer/mailbox path.
 
 ## Rules
 
