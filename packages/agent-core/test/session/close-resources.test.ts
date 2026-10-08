@@ -12,7 +12,7 @@
  * stamped with the session id, and a close sweeps exactly that owner.
  */
 
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { PassThrough, type Writable } from 'node:stream';
 import { join } from 'pathe';
@@ -24,6 +24,7 @@ import { TEST_OS_ENV, testJian } from '../fixtures/test-jian';
 import { testAgent } from '../agent/harness/agent';
 import { createFakeJian } from '../tools/fixtures/fake-jian';
 import { executeTool } from '../tools/fixtures/execute-tool';
+import { __resetRootLoggerForTest, getRootLogger, resolveGlobalLogPath } from '../../src/logging/logger';
 import type { SDKSessionRPC } from '../../src/rpc';
 import { Session } from '../../src/session';
 import { buildSubagentMessage } from '../../src/session/subagent-messages';
@@ -38,13 +39,17 @@ import {
 /**
  * The close-out checklist every session registers at construction, in
  * registration order. A new teardown step must appear here — making the
- * omission a test failure is the point of the snapshot. Release order is the
- * reverse of this list, so `log` sitting first means the session log sink is
- * still open while every other resource (LSP, MCP, parked commands) reports
- * its teardown, and the sink itself is closed last.
+ * omission a test failure is the point of the snapshot.
+ *
+ * Release order is the reverse of this list, which is what makes the order
+ * load-bearing: `log` sitting first means the session log sink is still open
+ * while every other step reports its teardown and closes last, and
+ * `session-finalize` (metadata flush + SessionEnd hooks, registered second)
+ * runs with the sink open while still after every resource teardown above it.
  */
 const EXPECTED_DISPOSABLES = [
   'log',
+  'session-finalize',
   'background-pending',
   'cron',
   'rlm',
@@ -76,6 +81,52 @@ describe('Session close-out checklist', () => {
     });
 
     expect(session.disposables.names()).toEqual([...EXPECTED_DISPOSABLES]);
+  });
+
+  it('writes through the session log sink from the finalize step', async () => {
+    const logHome = await mkdtemp(join(tmpdir(), 'scream-session-finalize-log-'));
+    tempDirs.push(logHome);
+    await getRootLogger().configure({
+      level: 'info',
+      globalLogPath: resolveGlobalLogPath(logHome),
+      globalMaxBytes: 1_000_000,
+      globalFiles: 1,
+      sessionMaxBytes: 500_000,
+      sessionFiles: 1,
+    });
+    try {
+      const { sessionDir, workDir } = await sessionFixture();
+      // The finalize step is the metadata flush. `close()` used to run it AFTER
+      // `disposeAll()` had closed the sink, and a record emitted then is routed
+      // to the GLOBAL log instead of the session's — so logging from inside the
+      // step observes the order directly: this marker only reaches the session
+      // file while the sink is still open, which is also why it must land before
+      // the SessionEnd hooks that follow it.
+      class FinalizeMarkerSession extends Session {
+        override async flushMetadata(): Promise<void> {
+          this.log.info('session-finalize marker');
+          await super.flushMetadata();
+        }
+      }
+      const session = new FinalizeMarkerSession({
+        jian: testJian.withCwd(workDir),
+        id: 'session-finalize-sink',
+        homedir: sessionDir,
+        rpc: createSessionRpc(),
+        skills: { explicitDirs: [join(workDir, 'missing-skills')] },
+      });
+
+      await session.close();
+
+      // A sink that closed before the step ran writes no session file at all,
+      // so the missing-file case is the same failure as a missing marker.
+      const text = await readFile(join(sessionDir, 'logs', 'scream-code.log'), 'utf-8').catch(
+        () => '',
+      );
+      expect(text).toContain('session-finalize marker');
+    } finally {
+      await __resetRootLoggerForTest();
+    }
   });
 
   it('sweeps the shell tool pending-task registry on close', async () => {

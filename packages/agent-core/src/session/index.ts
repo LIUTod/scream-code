@@ -186,11 +186,26 @@ export class Session {
    * reverse (last registered first released), so `message-bus` is released
    * first and the session log sink last: every teardown step above it (LSP,
    * MCP, ...) can still report what it did through `log` instead of writing
-   * into a closed sink.
+   * into a closed sink. `session-finalize` is registered directly after `log`
+   * for the same reason — it is released immediately before the sink closes,
+   * once every resource teardown above it has run.
    */
   private registerDisposables(): void {
     this.disposables.add('log', async () => {
       await this.logHandle?.close();
+    });
+    this.disposables.add('session-finalize', async () => {
+      // The last close-out work, done while the log sink is still open and
+      // after every teardown above it: persist metadata and the wire records
+      // emitted during disposal (e.g. `rlm.exit`), then fire the SessionEnd
+      // hooks. Both report failures through `log`, which would be a closed
+      // sink if this ran after `disposeAll()` returned — the order the sink
+      // comment above promises.
+      //
+      // A rejection here is collected into the same AggregateError as a failed
+      // teardown step, so it cannot skip the trigger that follows it.
+      await this.flushMetadata();
+      await this.triggerSessionEnd('exit');
     });
     this.disposables.add('background-pending', async () => {
       // Sweep the shell tool's module-level pending-task map (timed-out
@@ -313,7 +328,13 @@ export class Session {
     // Teardown is registry-driven (see registerDisposables): every step runs
     // even when one fails, and the collected failures surface as one
     // AggregateError — the way the old `finally` rethrew the first LSP/MCP
-    // rejection instead of hiding it.
+    // rejection instead of hiding it. The close-out work that has to run with
+    // the log sink still open (persisting metadata plus the wire records
+    // emitted while disposing, then the SessionEnd hooks) is itself a registered
+    // step, released just before the sink closes; calling it here after
+    // `disposeAll()` would write it through an already-closed sink. close() is
+    // therefore single-shot like `disposeAll()`: a second call runs no teardown
+    // step twice, so SessionEnd hooks cannot fire twice either.
     let disposeError: AggregateError | null = null;
     try {
       // Cancel any in-flight turn so the session can be resumed or have its
@@ -326,10 +347,6 @@ export class Session {
     } finally {
       disposeError = await this.disposables.disposeAll();
     }
-    // Persist after teardown so wire records emitted while disposing (e.g.
-    // `rlm.exit`) reach disk before close() returns.
-    await this.flushMetadata();
-    await this.triggerSessionEnd('exit');
     if (disposeError !== null) throw disposeError;
   }
 
