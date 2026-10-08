@@ -25,6 +25,11 @@ import { CronMessageComponent } from '#/tui/components/messages/cron-message';
 
 import { ImageAttachmentStore } from '#/tui/utils/image-attachment-store';
 import { darkColors } from '#/tui/theme/colors';
+import {
+  CommittedTranscriptComponent,
+  MAX_COMMITTED_ENTRIES,
+} from '#/tui/components/transcript/committed-transcript';
+import { parseCollapsedEntries } from '#/tui/utils/collapse-stub';
 import type { TranscriptEntry, ToolCallBlockData } from '#/tui/types';
 
 import { createMockTUIState, makeMockStreamingUI } from '../fixtures/mock-host';
@@ -247,6 +252,51 @@ describe('TranscriptController.commit() fold algorithm', () => {
     // (The committed component itself occupies one child slot.)
     expect(controller.getCommittedCount()).toBe(16);
     expect(controller.getLiveCount()).toBe(150);
+  });
+});
+
+describe('TranscriptController committed tree retention', () => {
+  it('keeps the tree at its retention point across thousands of commits', () => {
+    const { controller, state } = makeHost();
+    const folds = 5_000;
+
+    for (let i = 0; i < folds; i += 1) {
+      // Real ingress, so both caps are live at once: the shadow array folds its
+      // oldest entries while the committed tree folds its oldest children.
+      controller.appendEntry(entry({ kind: 'status', content: `row-${String(i)}` }));
+      controller.commit();
+    }
+
+    const committed = state.transcriptContainer.children[0];
+    expect(committed).toBeInstanceOf(CommittedTranscriptComponent);
+    const tree = committed as CommittedTranscriptComponent;
+
+    // Bounded at the retention point: header + at most the cap in entry
+    // children (retained rows plus the fold stub).
+    expect(tree.children.length).toBeLessThanOrEqual(MAX_COMMITTED_ENTRIES + 1);
+    const rows = tree.children.length - 2; // minus the header and the fold stub
+    expect(rows).toBe(MAX_COMMITTED_ENTRIES - 1);
+    // Folded rows + rendered rows account for every committed row: neither the
+    // tree's fold nor the array's cap counts a row twice.
+    expect(tree.getCollapsedCount()).toBeGreaterThan(0);
+    expect(tree.getCollapsedCount() + rows).toBe(tree.getCount());
+
+    // One fold summary per store — the tree renders exactly one, and the array
+    // still holds exactly one stub entry of its own.
+    const summaries = rendered(tree)
+      .split('\n')
+      .filter((line) => line.includes('earlier entries collapsed'));
+    expect(summaries).toHaveLength(1);
+    expect(summaries[0]).toContain(String(tree.getCollapsedCount()));
+    const stubs = state.transcriptEntries.filter((e) => parseCollapsedEntries(e.content) > 0);
+    expect(stubs).toHaveLength(1);
+    expect(state.transcriptEntries[0]).toBe(stubs[0]);
+
+    // Rendering is intact: the newest committed row survives (folds take the
+    // oldest) and the header still announces the whole committed history.
+    const out = rendered(tree);
+    expect(out).toContain(`row-${String(tree.getCount() - 1)}`);
+    expect(out).toContain(t('transcript.more_history', { count: tree.getCount() }));
   });
 });
 

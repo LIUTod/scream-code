@@ -2,6 +2,7 @@ import type { Component } from '@liutod-scream/pi-tui';
 import { Text } from '@liutod-scream/pi-tui';
 import { t } from '@scream-code/config';
 import { CachedContainer } from '../../utils/cached-container';
+import { formatCollapsedEntries } from '../../utils/collapse-stub';
 import chalk from 'chalk';
 
 import { NoticeMessageComponent, StatusMessageComponent } from '../messages/status-message';
@@ -108,10 +109,26 @@ class CommittedMessageComponent implements Component {
   }
 }
 
+/**
+ * Retention point of the committed tree: how many entry children it keeps —
+ * the summary stub included. It mirrors the shadow entry array's
+ * MAX_TRANSCRIPT_ENTRIES (transcript-controller), because the live fold hands
+ * rows to this tree and history must not stay unbounded on the render side
+ * either. It is its own cap rather than the array's because it bounds its own
+ * set: entries reach the tree only through `commit()`, and the array cap can
+ * already have dropped an entry whose component is still live. Each side
+ * counting only the rows it holds is what keeps the two folds from
+ * double-counting.
+ */
+export const MAX_COMMITTED_ENTRIES = 500;
+
 export class CommittedTranscriptComponent extends CachedContainer {
   private readonly header: Text;
   private readonly colors: ColorPalette;
   private committedCount = 0;
+  /** Rows the retention cap has folded into the summary stub. */
+  private collapsedCount = 0;
+  private collapseStub: Text | undefined;
 
   constructor(colors: ColorPalette) {
     super();
@@ -122,6 +139,13 @@ export class CommittedTranscriptComponent extends CachedContainer {
 
   getCount(): number {
     return this.committedCount;
+  }
+
+  /** Rows the tree folded into its summary stub. They still count toward
+   *  {@link getCount()}: folding changes what is on screen, never what was
+   *  committed. */
+  getCollapsedCount(): number {
+    return this.collapsedCount;
   }
 
   setCount(count: number): void {
@@ -139,6 +163,35 @@ export class CommittedTranscriptComponent extends CachedContainer {
     colors: ColorPalette,
   ): void {
     this.addChild(new CommittedMessageComponent(entry, colors));
+    this.enforceRetentionCap();
+  }
+
+  /**
+   * Holds the tree at its retention point: the entry children it renders —
+   * the summary stub included — never exceed MAX_COMMITTED_ENTRIES. Past that
+   * the oldest rows fold into the stub, the same semantics as the entry-array
+   * cap, so the child list (and the render cache every child carries) stops
+   * growing with the session. The stub takes one slot of the budget, so the
+   * fold lands on stub + (MAX - 1) rows: the cap is the actually retained set.
+   */
+  private enforceRetentionCap(): void {
+    if (this.children.length - 1 <= MAX_COMMITTED_ENTRIES) return;
+
+    let stub = this.collapseStub;
+    if (stub === undefined) {
+      // The stub takes the first entry slot, right under the header.
+      stub = new Text('', 0, 0);
+      this.collapseStub = stub;
+      this.children.splice(1, 0, stub);
+    }
+
+    const fold = this.children.length - 2 - (MAX_COMMITTED_ENTRIES - 1);
+    // The oldest rows are the ones right under the stub.
+    this.children.splice(2, fold);
+    this.collapsedCount += fold;
+    stub.setText(
+      `  ${chalk.hex(this.colors.textDim)(formatCollapsedEntries(this.collapsedCount))}`,
+    );
     this.invalidate();
   }
 }

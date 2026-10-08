@@ -32,36 +32,42 @@ import { disposeChildren, hasDispose, isExpandable, isPlanExpandable } from '../
 import { buildApprovalNotice } from '../utils/approval-notice';
 import { isStreaming } from '../utils/app-state';
 import { boundEntryForUi } from '../utils/transcript-bound';
+import { formatCollapsedEntries, parseCollapsedEntries } from '../utils/collapse-stub';
 import { CommittedTranscriptComponent } from '../components/transcript/committed-transcript';
 
 /**
  * Entry-count backstop for `state.transcriptEntries`. Beyond this many stored
  * entries the oldest are folded into one aggregate stub, so the ingest path
  * can never grow the array without bound — even if a caller floods it.
+ *
+ * The committed render tree is capped at the same retention point
+ * (`MAX_COMMITTED_ENTRIES` in committed-transcript), but as its own bound: the
+ * tree holds entries this array no longer has (the cap can drop a row whose
+ * component is still live), so it counts its own set instead of leaning on
+ * this one — and because the two sets never mix, neither fold counts the
+ * other's rows.
  */
 export const MAX_TRANSCRIPT_ENTRIES = 500;
 
 /** Id of the aggregate stub that stands in for the folded oldest entries. */
 const COLLAPSE_STUB_ID = 'transcript-collapse-stub';
 
-/** The stub's rendered text — also how a later fold reads its count back. */
-const COLLAPSE_STUB_PATTERN = /^…\((\d+) earlier entries collapsed\)$/;
-
 function makeCollapseStub(count: number): TranscriptEntry {
   // System-style status row: the placeholder is metadata about the fold, not
-  // speech, so it rides the plain status line (textDim).
+  // speech, so it rides the plain status line (textDim). The wording is shared
+  // with the committed tree's fold, so both folds read alike.
   return {
     id: COLLAPSE_STUB_ID,
     kind: 'status',
     renderMode: 'plain',
-    content: `…(${String(count)} earlier entries collapsed)`,
+    content: formatCollapsedEntries(count),
   };
 }
 
 /** Entries an existing stub already stands in for (0 when it is not one). */
 function stubCount(entry: TranscriptEntry | undefined): number {
   if (entry === undefined || entry.id !== COLLAPSE_STUB_ID) return 0;
-  return Number(COLLAPSE_STUB_PATTERN.exec(entry.content)?.[1] ?? 0);
+  return parseCollapsedEntries(entry.content);
 }
 
 export interface TranscriptControllerHost {
