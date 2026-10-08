@@ -1,11 +1,14 @@
 /**
  * Session close-out checklist.
  *
- * `Session.disposables` is the mechanism that keeps `close()` complete: the
- * names snapshot freezes the full cleanup list so a dropped or renamed
- * registration fails here instead of leaking, and the cases below observe two
- * cleanups that used to be pure memory leaks — the shell tool's pending-task
- * map and the subagent message bus.
+ * `Session.disposables` is the mechanism that keeps `close()` complete, and it
+ * is checked from both directions here: the names snapshot freezes the full
+ * cleanup list so a dropped, renamed or invented registration fails instead of
+ * leaking, while the release case pairs each collaborator the session actually
+ * holds (log sink, mcp, cron, bus, ...) with the registration that owns it and
+ * observes exactly one release per collaborator through `close()`. The cases
+ * below also observe two cleanups that used to be pure memory leaks — the shell
+ * tool's pending-task map and the subagent message bus.
  *
  * The pending-task map is process-wide while sessions are not, so its teardown
  * cases also pin the ownership contract: what an agent's Bash tool parks is
@@ -25,6 +28,7 @@ import { testAgent } from '../agent/harness/agent';
 import { createFakeJian } from '../tools/fixtures/fake-jian';
 import { executeTool } from '../tools/fixtures/execute-tool';
 import { __resetRootLoggerForTest, getRootLogger, resolveGlobalLogPath } from '../../src/logging/logger';
+import type { SessionLogHandle } from '../../src/logging/types';
 import type { SDKSessionRPC } from '../../src/rpc';
 import { Session } from '../../src/session';
 import { buildSubagentMessage } from '../../src/session/subagent-messages';
@@ -126,6 +130,49 @@ describe('Session close-out checklist', () => {
       expect(text).toContain('session-finalize marker');
     } finally {
       await __resetRootLoggerForTest();
+    }
+  });
+
+  it('releases each collaborator exactly once through its own registration', async () => {
+    const { sessionDir, workDir } = await sessionFixture();
+    const session = new Session({
+      jian: testJian.withCwd(workDir),
+      id: 'session-collaborator-release',
+      homedir: sessionDir,
+      rpc: createSessionRpc(),
+      skills: { explicitDirs: [join(workDir, 'missing-skills')] },
+    });
+    const { agent } = await session.createAgent({ type: 'main' });
+
+    // The positive direction of the snapshot above, in behavioural form: every
+    // teardown-relevant collaborator the session holds is paired with the
+    // registration that owns it, and closing the session must release each one
+    // exactly once. A collaborator nobody registered is never released (0
+    // calls) and one registered twice is released twice (2 calls) — neither is
+    // visible in a name list, which only knows the names it was told about.
+    vi.stubEnv(BACKGROUND_KEEP_ALIVE_ON_EXIT_ENV, 'false');
+    try {
+      const releases = [
+        { name: 'log', spy: vi.spyOn(logHandleOf(session), 'close') },
+        { name: 'session-finalize', spy: vi.spyOn(session, 'flushMetadata') },
+        { name: 'background-pending', spy: vi.spyOn(agent.background, 'stopAll') },
+        { name: 'cron', spy: vi.spyOn(agent.cron!, 'stop') },
+        { name: 'rlm', spy: vi.spyOn(agent, 'disposeRlm') },
+        { name: 'lsp', spy: vi.spyOn(agent.tools, 'disposeLsp') },
+        { name: 'mcp', spy: vi.spyOn(session.mcp, 'shutdown') },
+        { name: 'message-bus', spy: vi.spyOn(session.subagentMessages, 'clear') },
+      ];
+      for (const { name } of releases) {
+        expect(session.disposables.names().filter((entry) => entry === name), name).toHaveLength(1);
+      }
+
+      await session.close();
+
+      for (const { name, spy } of releases) {
+        expect(spy, `${name} release`).toHaveBeenCalledTimes(1);
+      }
+    } finally {
+      vi.unstubAllEnvs();
     }
   });
 
@@ -301,6 +348,20 @@ async function sessionFixture(): Promise<{
   const workDir = join(dir, 'work');
   const sessionDir = join(dir, 'session');
   return { sessionDir, workDir };
+}
+
+/** Matches the private constant in `src/session/index.ts` (see disposables). */
+const BACKGROUND_KEEP_ALIVE_ON_EXIT_ENV = 'SCREAM_CODE_BACKGROUND_KEEP_ALIVE_ON_EXIT';
+
+/**
+ * The session log sink handle the session owns. Private on `Session` — the
+ * collaborator the `log` registration exists to release, so the release test
+ * has to reach it the way the registration does.
+ */
+function logHandleOf(session: Session): SessionLogHandle {
+  const handle = (session as unknown as { logHandle?: SessionLogHandle }).logHandle;
+  if (handle === undefined) throw new Error('session fixture must be created with an id');
+  return handle;
 }
 
 /** A process that never exits: the Bash tool times out and parks the command. */
