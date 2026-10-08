@@ -16,6 +16,7 @@ import type { Theme } from '../theme';
 import { getNoActiveSessionMessage } from '../constant/scream-tui';
 import { isTheme } from '../theme/index';
 import { formatErrorMessage } from '../utils/event-payload';
+import { readExistingImageConfig } from '../utils/image-config';
 import { showUsage } from './info';
 import { refreshProviderBalance } from '../api-balance';
 import type { AppState, PlanModeState } from '../types';
@@ -482,14 +483,14 @@ export async function handleModelCommand(host: SlashCommandHost, args: string): 
   const alias = trimmed;
   if (alias.length === 0) {
     await refreshModelsForPicker(host);
-    showModelPicker(host);
+    await showModelPicker(host);
     return;
   }
   if (host.state.appState.availableModels[alias] === undefined) {
     host.showError(`Unknown model alias: ${alias}`);
     return;
   }
-  showModelPicker(host, alias);
+  await showModelPicker(host, alias);
 }
 
 /**
@@ -574,7 +575,10 @@ async function applyEditorChoice(host: SlashCommandHost, value: string): Promise
   );
 }
 
-export function showModelPicker(host: SlashCommandHost, selectedValue: string = host.state.appState.model): void {
+export async function showModelPicker(
+  host: SlashCommandHost,
+  selectedValue: string = host.state.appState.model,
+): Promise<void> {
   const entries = Object.entries(host.state.appState.availableModels);
   if (entries.length === 0) {
     host.showNotice(
@@ -583,6 +587,10 @@ export function showModelPicker(host: SlashCommandHost, selectedValue: string = 
     );
     return;
   }
+  // Surface the image-generation setup next to the multimodal capabilities:
+  // it is configured separately (/config image) and never follows the chat
+  // model selected here.
+  const imageConfig = await readExistingImageConfig();
   host.mountEditorReplacement(
     new ModelSelectorComponent({
       models: host.state.appState.availableModels,
@@ -591,6 +599,10 @@ export function showModelPicker(host: SlashCommandHost, selectedValue: string = 
       currentThinkingLevel: host.state.appState.thinkingLevel,
       colors: host.state.theme.colors,
       searchable: true,
+      imageGeneration:
+        imageConfig === undefined
+          ? { configured: false }
+          : { configured: true, model: imageConfig.model },
       onSelect: ({ alias, thinkingLevel }) => {
         host.restoreEditor();
         void performModelSwitch(host, alias, thinkingLevel);
@@ -907,7 +919,7 @@ export function showSettingsSelector(host: SlashCommandHost): void {
 function handleSettingsSelection(host: SlashCommandHost, value: SettingsSelection): void {
   host.restoreEditor();
   switch (value) {
-    case 'model': showModelPicker(host); return;
+    case 'model': void showModelPicker(host); return;
     case 'language': handleLanguageCommand(host); return;
     case 'permission': showPermissionPicker(host); return;
     case 'theme': showThemePicker(host); return;

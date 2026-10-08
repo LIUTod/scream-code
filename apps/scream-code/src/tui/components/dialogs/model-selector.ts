@@ -50,6 +50,13 @@ export function createModelChoiceOptions(
   }));
 }
 
+/** Status of the independently configured image-generation API (/config image). */
+export interface ImageGenerationSummary {
+  readonly configured: boolean;
+  /** The configured image model — present only when `configured` is true. */
+  readonly model?: string;
+}
+
 export interface ModelSelectorOptions {
   readonly models: Record<string, ModelAlias>;
   readonly currentValue: string;
@@ -60,6 +67,13 @@ export interface ModelSelectorOptions {
   readonly searchable?: boolean;
   /** Items per page. Lists longer than this paginate (PgUp/PgDn). */
   readonly pageSize?: number;
+  /**
+   * Image-generation status to surface under the multimodal block. Only the
+   * /model picker supplies it; callers that omit it render no status line.
+   * Image generation is configured independently via /config image — it is
+   * not a property of the selected chat model.
+   */
+  readonly imageGeneration?: ImageGenerationSummary;
   readonly onSelect: (selection: ModelSelection) => void;
   readonly onCancel: () => void;
   /**
@@ -236,6 +250,17 @@ export class ModelSelectorComponent extends Container implements Focusable {
       lines.push(this.renderImageControl(selected.model));
       lines.push(this.renderVideoControl(selected.model));
       lines.push(this.renderAudioControl(selected.model));
+    }
+    if (this.opts.imageGeneration !== undefined) {
+      const imageGeneration = this.opts.imageGeneration;
+      lines.push('');
+      lines.push(
+        chalk.hex(colors.textMuted)(
+          imageGeneration.configured && imageGeneration.model !== undefined
+            ? t('model.image_gen_configured', { model: imageGeneration.model })
+            : t('model.image_gen_missing'),
+        ),
+      );
     }
     lines.push('');
     if (view.page.pageCount > 1) {

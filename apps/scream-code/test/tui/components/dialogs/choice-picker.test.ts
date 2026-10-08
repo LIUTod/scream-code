@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { ChoicePickerComponent } from '#/tui/components/dialogs/choice-picker';
 import { EditorSelectorComponent } from '#/tui/components/dialogs/editor-selector';
-import { ModelSelectorComponent } from '#/tui/components/dialogs/model-selector';
+import { ModelSelectorComponent, type ImageGenerationSummary } from '#/tui/components/dialogs/model-selector';
 import { PermissionSelectorComponent } from '#/tui/components/dialogs/permission-selector';
 import { SettingsSelectorComponent } from '#/tui/components/dialogs/settings-selector';
 import { ThemeSelectorComponent } from '#/tui/components/dialogs/theme-selector';
@@ -453,7 +453,11 @@ describe('ModelSelectorComponent search and pagination', () => {
     return models;
   }
 
-  function makeSelector(models: Record<string, ModelAlias>, currentThinkingLevel: ThinkingEffort = 'high') {
+  function makeSelector(
+    models: Record<string, ModelAlias>,
+    currentThinkingLevel: ThinkingEffort = 'high',
+    imageGeneration?: ImageGenerationSummary,
+  ) {
     const onSelect = vi.fn();
     const onCancel = vi.fn();
     const firstAlias = Object.keys(models)[0] ?? '';
@@ -463,6 +467,7 @@ describe('ModelSelectorComponent search and pagination', () => {
       currentThinkingLevel,
       colors: darkColors,
       searchable: true,
+      ...(imageGeneration !== undefined ? { imageGeneration } : {}),
       onSelect,
       onCancel,
     });
@@ -505,5 +510,23 @@ describe('ModelSelectorComponent search and pagination', () => {
     expect(rendered(selector)).toContain('[ high ]');
     selector.handleInput(PAGE_UP);
     expect(rendered(selector)).toContain('Page 1/3');
+  });
+
+  it('surfaces the image-generation status under the multimodal block', () => {
+    const models = { 'p/alpha': { provider: 'p', model: 'alpha', maxContextSize: 1000 } };
+    const { selector } = makeSelector(models, 'high', { configured: true, model: 'gpt-image-2' });
+    const out = rendered(selector);
+    expect(out).toContain('生图模型：gpt-image-2 · 已配置');
+    expect(out).toContain('/config image');
+  });
+
+  it('renders the not-configured hint, and nothing when the host omits the status', () => {
+    const models = { 'p/alpha': { provider: 'p', model: 'alpha', maxContextSize: 1000 } };
+    const missing = makeSelector(models, 'high', { configured: false }).selector;
+    expect(rendered(missing)).toContain('生图模型：未配置');
+    expect(rendered(missing)).toContain('/config image');
+
+    const absent = makeSelector(models).selector;
+    expect(rendered(absent)).not.toContain('生图模型');
   });
 });

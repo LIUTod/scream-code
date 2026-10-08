@@ -1,5 +1,4 @@
-import { chmod, readFile, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { chmod, writeFile } from 'node:fs/promises';
 
 import { t } from '@scream-code/config';
 import {
@@ -22,6 +21,7 @@ import { ChoicePickerComponent, type ChoiceOption } from '../components/dialogs/
 
 import { resolveConnectCatalogRequest } from '../utils/connect-catalog';
 import { formatErrorMessage } from '../utils/event-payload';
+import { getImageConfigPath, readExistingImageConfig } from '../utils/image-config';
 import {
   promptApiKey,
   promptAudioMode,
@@ -340,52 +340,6 @@ interface ImageConfigFile {
   edit_url?: string;
   /** Optional image-edit model; empty/absent = same as model. */
   edit_model?: string;
-}
-
-function getImageConfigPath(): string {
-  return join(resolveScreamHome(), 'image-config.json');
-}
-
-/** Best-effort read of an existing image config (never throws, never exposes the key). */
-async function readExistingImageConfig(): Promise<
-  { provider: string; model: string; url: string } | undefined
-> {
-  try {
-    const text = await readFile(getImageConfigPath(), 'utf8');
-    const parsed = JSON.parse(text) as Record<string, unknown>;
-    const urlDirect = typeof parsed['url'] === 'string' ? parsed['url'].trim() : '';
-    // Legacy (pre-full-URL) configs stored a base URL; compose the classic
-    // endpoint so the notice shows for existing setups too.
-    const legacyBase = typeof parsed['base_url'] === 'string' ? parsed['base_url'].trim() : '';
-    const url =
-      urlDirect.length > 0
-        ? urlDirect
-        : legacyBase.length > 0
-          ? `${legacyBase.replace(/\/+$/, '')}/images/generations`
-          : '';
-    const model = typeof parsed['model'] === 'string' ? parsed['model'].trim() : '';
-    const apiKey = typeof parsed['api_key'] === 'string' ? parsed['api_key'].trim() : '';
-    // Same predicate the tool's loadConfig applies: a config that the tool
-    // would reject must not be advertised as "already configured" here.
-    const usable =
-      url.length > 0 &&
-      !url.includes('replace-with') &&
-      !(url.startsWith('<') && url.endsWith('>')) &&
-      model.length > 0 &&
-      apiKey.length > 0 &&
-      !apiKey.includes('replace-with') &&
-      !(apiKey.startsWith('<') && apiKey.endsWith('>'));
-    if (usable) {
-      return {
-        provider: typeof parsed['provider'] === 'string' ? parsed['provider'] : 'openai-compatible',
-        model,
-        url,
-      };
-    }
-  } catch {
-    // Missing or malformed file — treat as unconfigured.
-  }
-  return undefined;
 }
 
 /**

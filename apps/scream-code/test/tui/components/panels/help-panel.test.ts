@@ -34,11 +34,30 @@ describe('HelpPanelComponent', () => {
     expect(out).toMatch(/Exit/);
   });
 
+  it('lists the newer global bindings and advertises /config image', () => {
+    const panel = new HelpPanelComponent({
+      commands: [cmd('model', 'Switch model')],
+      colors: darkColors,
+      onClose: () => {},
+      maxVisible: 40,
+    });
+    const out = strip(panel.render(80).join('\n'));
+    // Tab cycles the thinking effort when the input is empty.
+    expect(out).toMatch(/空输入时循环思考档位/);
+    expect(out).toMatch(/Ctrl-E/);
+    expect(out).toMatch(/Ctrl-X/);
+    expect(out).toMatch(/Ctrl-B/);
+    expect(out).toMatch(/Ctrl-W/);
+    // The hidden-commands line surfaces the image-generation setup path.
+    expect(out).toMatch(/\/config image 生图配置/);
+  });
+
   it('sorts slash commands by name', () => {
     const panel = new HelpPanelComponent({
       commands: [cmd('zebra', 'Z'), cmd('alpha', 'A'), cmd('mango', 'M')],
       colors: darkColors,
       onClose: () => {},
+      maxVisible: 40,
     });
     const out = strip(panel.render(80).join('\n'));
     const alphaIdx = out.indexOf('/alpha');
