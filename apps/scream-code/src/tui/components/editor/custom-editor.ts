@@ -339,6 +339,7 @@ export class CustomEditor extends Editor {
       thinkingLevel: this.thinkingLevel,
       toolPriority: this.toolPriority,
       paint: this.borderColor ?? ((s: string) => s),
+      modeHex: getPermissionModeColor(this.permissionMode, this.colors),
       borderHex: this.borderHex,
     });
     return lines;
@@ -604,6 +605,17 @@ export function wrapWithSideBorders(
 const THINK_LABEL_MIN_WIDTH = 14;
 const MODE_BADGE_MIN_WIDTH = 10;
 
+function getPermissionModeColor(mode: PermissionMode, colors: ColorPalette): string {
+  const modeColors: Record<PermissionMode, string> = {
+    manual: colors.permissionManual,
+    yolo: colors.permissionYolo,
+    auto: colors.permissionAuto,
+    ask: colors.permissionAsk,
+    bot: colors.permissionBot,
+  };
+  return modeColors[mode];
+}
+
 function isLightBg(hex: string): boolean {
   const r = parseInt(hex.slice(1, 3), 16);
   const g = parseInt(hex.slice(3, 5), 16);
@@ -624,6 +636,7 @@ interface BorderBadgeOptions {
   thinkingLevel: ThinkingEffort;
   toolPriority: 'default' | 'skill' | 'mcp' | undefined;
   paint: (s: string) => string;
+  modeHex: string;
   borderHex: string;
 }
 
@@ -651,12 +664,10 @@ function injectBorderBadges(lines: string[], width: number, opts: BorderBadgeOpt
 
   if (width >= MODE_BADGE_MIN_WIDTH) {
     // Mode labels stay in English across locales: they are mode names, not
-    // prose. The badge takes the border's own colour (fluorescent green by
-    // default) so it always matches the input box; bold keeps it readable
-    // against the surrounding dashes.
+    // prose. Their foreground comes from the current theme palette so it
+    // remains independent of ordinary or plan-mode border colors.
     const badgeText = ` ${opts.mode} `;
-    left =
-      paint('──') + (opts.borderHex ? chalk.hex(opts.borderHex).bold(badgeText) : paint(badgeText));
+    left = paint('──') + chalk.hex(opts.modeHex).bold(badgeText);
   }
   // Right-side badges, built rightmost-first: think badge sits at the far
   // right, the First (tool priority) badge just left of it.

@@ -4,17 +4,34 @@ import type {
   AutocompleteSuggestions,
   TUI,
 } from '@liutod-scream/pi-tui';
+import chalk from 'chalk';
 import { describe, expect, it, vi } from 'vitest';
 
 import { CustomEditor } from '#/tui/components/editor/custom-editor';
+import type { ColorPalette, ResolvedTheme } from '#/tui/theme/colors';
 import { getColorPalette } from '#/tui/theme/index';
 
-function makeEditor(): CustomEditor {
+function makeEditor(theme: ResolvedTheme = 'dark', colors?: ColorPalette): CustomEditor {
   const tui = {
     requestRender: vi.fn(),
     terminal: { rows: 24, cols: 80 },
   } as unknown as TUI;
-  return new CustomEditor(tui, { ...getColorPalette('dark') });
+  return new CustomEditor(tui, colors ?? { ...getColorPalette(theme) });
+}
+
+function withTrueColor<T>(run: () => T): T {
+  const originalLevel = chalk.level;
+  chalk.level = 3;
+  try {
+    return run();
+  } finally {
+    chalk.level = originalLevel;
+  }
+}
+
+function setBorderColor(editor: CustomEditor, hex: string): void {
+  editor.borderHex = hex;
+  editor.borderColor = (text: string) => chalk.hex(hex)(text);
 }
 
 async function flushAutocomplete(): Promise<void> {
@@ -297,6 +314,94 @@ describe('CustomEditor permission mode badge', () => {
     const lines = editor.render(width);
     return lines[0] ?? '';
   }
+
+  const MODE_COLOR_CASES = [
+    [
+      'dark',
+      [
+        ['manual', '#79EB00'],
+        ['yolo', '#FFD700'],
+        ['auto', '#FF7043'],
+        ['ask', '#9CDCFE'],
+        ['bot', '#C084FC'],
+      ],
+    ],
+    [
+      'light',
+      [
+        ['manual', '#4B7A06'],
+        ['yolo', '#A16207'],
+        ['auto', '#C2410C'],
+        ['ask', '#1565C0'],
+        ['bot', '#7C3AED'],
+      ],
+    ],
+  ] as const;
+
+  for (const [theme, cases] of MODE_COLOR_CASES) {
+    for (const [mode, modeHex] of cases) {
+      it(`uses ${theme} ${mode} foreground independently from the border`, () =>
+        withTrueColor(() => {
+          const editor = makeEditor(theme);
+          const borderHex = '#123456';
+          editor.permissionMode = mode;
+          setBorderColor(editor, borderHex);
+
+          const out = topBorder(editor);
+
+          expect(out).toContain(chalk.hex(modeHex).bold(` ${mode} `));
+          expect(out).toContain(chalk.hex(borderHex)('──'));
+          expect(out).not.toContain(chalk.hex(borderHex).bold(` ${mode} `));
+        }),
+      );
+    }
+  }
+
+  it('tracks live theme changes while Plan/FusionPlan borders remain independent', () =>
+    withTrueColor(() => {
+      const colors = { ...getColorPalette('dark') };
+      const editor = makeEditor('dark', colors);
+      editor.permissionMode = 'auto';
+
+      const normalBorder = '#123456';
+      setBorderColor(editor, normalBorder);
+      const normalOutput = topBorder(editor);
+
+      const planBorder = '#7048E8';
+      setBorderColor(editor, planBorder);
+      const planOutput = topBorder(editor);
+
+      Object.assign(colors, getColorPalette('light'));
+      const fusionPlanBorder = '#0F766E';
+      setBorderColor(editor, fusionPlanBorder);
+      const lightOutput = topBorder(editor);
+
+      expect(normalOutput).toContain(chalk.hex('#FF7043').bold(' auto '));
+      expect(normalOutput).toContain(chalk.hex(normalBorder)('──'));
+      expect(planOutput).toContain(chalk.hex('#FF7043').bold(' auto '));
+      expect(planOutput).toContain(chalk.hex(planBorder)('──'));
+      expect(lightOutput).toContain(chalk.hex('#C2410C').bold(' auto '));
+      expect(lightOutput).toContain(chalk.hex(fusionPlanBorder)('──'));
+    }),
+  );
+
+  it('keeps the Think and First badges tied to the border color', () =>
+    withTrueColor(() => {
+      const editor = makeEditor('dark');
+      const borderHex = '#123456';
+      editor.permissionMode = 'ask';
+      editor.thinking = true;
+      editor.toolPriority = 'skill';
+      setBorderColor(editor, borderHex);
+
+      const out = topBorder(editor, 60);
+      const borderBadge = chalk.bgHex(borderHex).hex('#FFFFFF');
+
+      expect(out).toContain(chalk.hex('#9CDCFE').bold(' ask '));
+      expect(out).toContain(borderBadge(' Think '));
+      expect(out).toContain(borderBadge(' First skill '));
+    }),
+  );
 
   it('always shows the mode badge at the top-left of the border', () => {
     const editor = makeEditor();

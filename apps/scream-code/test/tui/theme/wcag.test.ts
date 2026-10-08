@@ -53,6 +53,11 @@ const TEXT_TOKENS: readonly (keyof ColorPalette)[] = [
   'roleAssistant',
   'roleThinking',
   'roleTool',
+  'permissionManual',
+  'permissionYolo',
+  'permissionAuto',
+  'permissionAsk',
+  'permissionBot',
   'status',
 ];
 

@@ -14,6 +14,10 @@
 
 const dark = {
   yellowGreen: '#79eb00',
+  gold: '#FFD700',
+  coral: '#FF7043',
+  skyBlue: '#9CDCFE',
+  violet: '#C084FC',
   pink400: '#FF6B9D',
   cyan400: '#56D4DD',
   amber400: '#E8A838',
@@ -31,6 +35,10 @@ const dark = {
 
 const light = {
   yellowGreen700: '#4B7A06',
+  gold: '#A16207',
+  orange: '#C2410C',
+  blue: '#1565C0',
+  violet: '#7C3AED',
   pink700: '#C2185B',
   cyan800: '#006978',
   gray900: '#1A1A1A',
@@ -52,6 +60,12 @@ export interface ColorPalette {
   wolfpackMode: string;
   /** RLM (persistent-python) mode badge — bright yellow. */
   rlmMode: string;
+  // Permission mode labels
+  permissionManual: string;
+  permissionYolo: string;
+  permissionAuto: string;
+  permissionAsk: string;
+  permissionBot: string;
   // Text
   text: string;
   textStrong: string;
@@ -100,8 +114,13 @@ export const darkColors: ColorPalette = {
   accent: dark.pink400,
   planMode: dark.cyan400,
   fusionPlanMode: dark.amber500,
-  wolfpackMode: '#C084FC',
-  rlmMode: '#FFD700',
+  wolfpackMode: dark.violet,
+  rlmMode: dark.gold,
+  permissionManual: dark.yellowGreen,
+  permissionYolo: dark.gold,
+  permissionAuto: dark.coral,
+  permissionAsk: dark.skyBlue,
+  permissionBot: dark.violet,
   text: dark.gray100,
   textStrong: dark.gray50,
   textDim: dark.gray500,
@@ -109,7 +128,7 @@ export const darkColors: ColorPalette = {
 
   // Markdown
   mdLink: '#56B6C2',
-  mdCodeBlock: '#9CDCFE',
+  mdCodeBlock: dark.skyBlue,
   mdCodeBlockBorder: '#5C6370',
   mdCodeBlockBg: '#16191f',
   mdQuote: '#7F848E',
@@ -145,8 +164,13 @@ export const lightColors: ColorPalette = {
   accent: light.pink700,
   planMode: light.cyan800,
   fusionPlanMode: light.amber700,
-  wolfpackMode: '#7C3AED',
-  rlmMode: '#A16207',
+  wolfpackMode: light.violet,
+  rlmMode: light.gold,
+  permissionManual: light.yellowGreen700,
+  permissionYolo: light.gold,
+  permissionAuto: light.orange,
+  permissionAsk: light.blue,
+  permissionBot: light.violet,
   text: light.gray900,
   textStrong: light.gray900,
   textDim: light.gray700,
@@ -154,7 +178,7 @@ export const lightColors: ColorPalette = {
 
   // Markdown
   mdLink: '#007A8A',
-  mdCodeBlock: '#1565C0',
+  mdCodeBlock: light.blue,
   mdCodeBlockBorder: '#848484',
   mdCodeBlockBg: '#f7f9fb',
   mdQuote: '#616161',
