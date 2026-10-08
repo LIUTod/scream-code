@@ -38,6 +38,13 @@ vi.mock('../../src/session/git-context', () => ({
 const signal = new AbortController().signal;
 const tempDirs: string[] = [];
 
+/**
+ * Mirrors `CHILD_RELEASE_BOUND_MS` in `src/session/subagent-host.ts`. Pinned
+ * here on purpose: the bound is a caller-facing latency contract, so a release
+ * wait that grows past it must fail this test rather than silently pass.
+ */
+const CHILD_RELEASE_BOUND_MS = 5_000;
+
 afterEach(async () => {
   for (const dir of tempDirs.splice(0)) {
     await rm(dir, { recursive: true, force: true });
@@ -634,6 +641,93 @@ describe('SessionSubagentHost', () => {
     // catch arm, and the release lives in `finally` precisely so it still runs.
     await expect(handle.completion).rejects.toThrow('Aborted');
     expect(childDispose).toHaveBeenCalledTimes(1);
+  });
+
+  it('settles the completion when a stuck lsp teardown outlives the child release bound', async () => {
+    const unhandled: unknown[] = [];
+    const onUnhandledRejection = (reason: unknown) => unhandled.push(reason);
+    process.on('unhandledRejection', onUnhandledRejection);
+    try {
+      const parent = testAgent();
+      parent.configure();
+      const warn = vi.spyOn(parent.agent.log, 'warn');
+
+      const child = testAgent();
+      // The child's language server stopped answering: `shutdown` never
+      // settles, so an unbounded release parks here until the 120s LSP request
+      // timeout — and every caller awaiting the completion with it.
+      let rejectRelease: (error: unknown) => void = () => {};
+      let releaseStarted: () => void = () => {};
+      const started = new Promise<void>((resolve) => {
+        releaseStarted = resolve;
+      });
+      const childDispose = vi.spyOn(child.agent.tools, 'disposeLsp').mockImplementation(() => {
+        // Swap in the fake clock from inside the call: the child turn above ran
+        // on real timers, while the bound this test drives is armed
+        // synchronously right after this returns, so it lands on the fake clock.
+        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+        releaseStarted();
+        return new Promise<void>((_resolve, reject) => {
+          rejectRelease = reject;
+        });
+      });
+      child.mockNextResponse({
+        type: 'text',
+        text: 'Verified the stuck-teardown path end to end and reported a detailed enough summary for the parent agent to continue without repeating the work. '.repeat(
+          2,
+        ),
+      });
+      const session = fakeSession(parent.agent, child.agent);
+      const host = new SessionSubagentHost(session, 'main');
+
+      const handle = await host.spawn('explore', {
+        parentToolCallId: 'call_agent',
+        prompt: 'Investigate',
+        description: 'Investigate',
+        runInBackground: false,
+        signal,
+      });
+      let settledCount = 0;
+      const completion = handle.completion.then((result) => {
+        settledCount += 1;
+        return result;
+      });
+
+      // The turn is over and only the release is pending from here on.
+      await started;
+      // One tick short of the bound nothing has settled yet: the run is really
+      // parked on the release, not merely slow to get there.
+      await vi.advanceTimersByTimeAsync(CHILD_RELEASE_BOUND_MS - 1);
+      expect(childDispose).toHaveBeenCalledTimes(1);
+      expect(settledCount).toBe(0);
+
+      // The bound is what frees the caller.
+      await vi.advanceTimersByTimeAsync(1);
+      expect(settledCount).toBe(1);
+      await expect(completion).resolves.toMatchObject({
+        result: expect.stringContaining('Verified the stuck-teardown path'),
+      });
+      // Reported, so an eviction that outran its release is not silent.
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('agent-0'));
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining(String(CHILD_RELEASE_BOUND_MS)));
+      // Eviction still happened without waiting for the abandoned release.
+      expect(session.agents.has(handle.agentId)).toBe(false);
+
+      // The release left running in the background is still attached: when the
+      // stuck server finally fails, that failure must neither surface as an
+      // unhandled rejection nor disturb the settled completion.
+      rejectRelease(new Error(`LSP request 'shutdown' timed out after 120000ms`));
+      await new Promise((resolve) => setImmediate(resolve));
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(unhandled).toEqual([]);
+      expect(warn).toHaveBeenCalledWith('Failed to dispose subagent lsp servers', {
+        error: expect.stringContaining('timed out'),
+      });
+      expect(settledCount).toBe(1);
+    } finally {
+      process.off('unhandledRejection', onUnhandledRejection);
+      vi.useRealTimers();
+    }
   });
 
   it('stops the subagent own rlm kernel but leaves the parent kernel running', async () => {

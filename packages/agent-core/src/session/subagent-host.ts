@@ -55,6 +55,15 @@ const SUMMARY_CONTINUATION_ATTEMPTS = 1;
  */
 const MAX_PARENT_MESSAGE_DELIVERY_TURNS = 2;
 const HOOK_TEXT_PREVIEW_LENGTH = 500;
+/**
+ * Upper bound on how long a finished child's resource release may hold back the
+ * `completion` its callers await. A healthy release finishes in well under a
+ * second; the bound only bites when a language server has stopped answering,
+ * where the wait is capped only by the LSP request timeout and every caller —
+ * the foreground Agent tool call, TaskStop, rlm_wait — is parked with it, so
+ * the parent turn looks hung.
+ */
+const CHILD_RELEASE_BOUND_MS = 5_000;
 const SUBAGENT_MAX_TOKENS_ERROR =
   'Subagent turn failed before completing its final summary: reason=max_tokens';
 
@@ -360,7 +369,8 @@ export class SessionSubagentHost {
    * no longer reach its LSP servers or its RLM kernel. `run` is awaited inside
    * the `try` so a run that threw (failure, stop) releases exactly like a
    * completed one, and the release finishes before the caller's `completion`
-   * settles — awaiting the run also awaits its process teardown.
+   * settles — awaiting the run also awaits its process teardown (bounded by
+   * `CHILD_RELEASE_BOUND_MS`, see `releaseChildResourcesBounded`).
    */
   private async withChildTerminalRelease<T>(
     parent: Agent,
@@ -373,7 +383,7 @@ export class SessionSubagentHost {
       return result;
     } finally {
       terminal.unlinkAbortSignal();
-      await this.releaseChildResources(parent, child);
+      await this.releaseChildResourcesBounded(parent, child, terminal.childId);
       this.activeChildren.delete(terminal.childId);
       this.childRequestCounts.delete(terminal.childId);
       this.childRequestSeen.delete(terminal.childId);
@@ -387,6 +397,49 @@ export class SessionSubagentHost {
       // Direct Map delete (the accessor is optional on session shims) so a
       // finished child cannot pin the live instance either way.
       if (terminal.childId !== 'main') this.session.agents.delete(terminal.childId);
+    }
+  }
+
+  /**
+   * `releaseChildResources`, awaited for at most `CHILD_RELEASE_BOUND_MS`.
+   *
+   * The healthy path is unchanged: the release is still awaited to completion,
+   * so the "released before evict" ordering holds. The bound only matters for a
+   * child whose language server stopped answering — `LspClient.stop()` waits
+   * for its `shutdown` request, which is capped only by the 120s request
+   * timeout, so an unresponsive server used to hold every caller awaiting
+   * `completion` (foreground Agent call, TaskStop, rlm_wait) for ~125s.
+   *
+   * Past the bound the release keeps running in the background — the process is
+   * still reaped, just not before the caller gets its result — and the wait is
+   * reported once so the stall is visible instead of silent.
+   */
+  private async releaseChildResourcesBounded(
+    parent: Agent,
+    child: Agent,
+    childId: string,
+  ): Promise<void> {
+    // Attached up front: a release that fails (or fails long after the bound
+    // fired) is reported here and must never become an unhandled rejection or
+    // replace the run's own result.
+    const release = this.releaseChildResources(parent, child).catch((error: unknown) => {
+      parent.log.warn('Failed to release subagent resources', { childId, error: String(error) });
+    });
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const bound = new Promise<'bound'>((resolve) => {
+      timer = setTimeout(() => {
+        resolve('bound');
+      }, CHILD_RELEASE_BOUND_MS);
+    });
+    try {
+      const outcome = await Promise.race([release.then(() => 'released' as const), bound]);
+      if (outcome === 'bound') {
+        parent.log.warn(
+          `subagent ${childId}: resource release exceeded ${CHILD_RELEASE_BOUND_MS}ms and continues in the background (a language server is likely unresponsive); completion is not held back by it`,
+        );
+      }
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
     }
   }
 
