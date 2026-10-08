@@ -340,7 +340,7 @@ describe('CustomEditor permission mode badge', () => {
 
   for (const [theme, cases] of MODE_COLOR_CASES) {
     for (const [mode, modeHex] of cases) {
-      it(`uses ${theme} ${mode} foreground independently from the border`, () =>
+      it(`uses ${theme} ${mode} foreground independently from the border`, () => {
         withTrueColor(() => {
           const editor = makeEditor(theme);
           const borderHex = '#123456';
@@ -352,12 +352,12 @@ describe('CustomEditor permission mode badge', () => {
           expect(out).toContain(chalk.hex(modeHex).bold(` ${mode} `));
           expect(out).toContain(chalk.hex(borderHex)('──'));
           expect(out).not.toContain(chalk.hex(borderHex).bold(` ${mode} `));
-        }),
-      );
+        });
+      });
     }
   }
 
-  it('tracks live theme changes while Plan/FusionPlan borders remain independent', () =>
+  it('tracks live theme changes while Plan/FusionPlan borders remain independent', () => {
     withTrueColor(() => {
       const colors = { ...getColorPalette('dark') };
       const editor = makeEditor('dark', colors);
@@ -382,10 +382,10 @@ describe('CustomEditor permission mode badge', () => {
       expect(planOutput).toContain(chalk.hex(planBorder)('──'));
       expect(lightOutput).toContain(chalk.hex('#C2410C').bold(' auto '));
       expect(lightOutput).toContain(chalk.hex(fusionPlanBorder)('──'));
-    }),
-  );
+    });
+  });
 
-  it('keeps the Think and First badges tied to the border color', () =>
+  it('keeps the Think and First badges tied to the border color', () => {
     withTrueColor(() => {
       const editor = makeEditor('dark');
       const borderHex = '#123456';
@@ -400,8 +400,8 @@ describe('CustomEditor permission mode badge', () => {
       expect(out).toContain(chalk.hex('#9CDCFE').bold(' ask '));
       expect(out).toContain(borderBadge(' Think '));
       expect(out).toContain(borderBadge(' First skill '));
-    }),
-  );
+    });
+  });
 
   it('always shows the mode badge at the top-left of the border', () => {
     const editor = makeEditor();
