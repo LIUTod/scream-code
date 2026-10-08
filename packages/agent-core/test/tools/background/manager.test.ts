@@ -950,3 +950,186 @@ describe('BackgroundProcessManager — terminal eviction', () => {
     expect(terminal?.exitCode).toBe(0);
   });
 });
+
+describe('BackgroundProcessManager — retired late-output budget', () => {
+  interface RetiredShape {
+    readonly outputChunks: string[];
+    readonly outputTextBytes: number;
+    readonly outputSizeBytes: number;
+  }
+
+  interface DeadEntryShape {
+    readonly outputChunks: string[];
+    readonly outputSizeBytes: number;
+  }
+
+  // The leak guarded here is precisely about state no public read path
+  // exposes any more (the chunk ring behind an evicted record, the dead
+  // entry of a retired task), so the probe reaches into the manager's maps —
+  // the same way `waiterCount` above does.
+  interface Internals {
+    readonly processes: Map<string, DeadEntryShape>;
+    readonly retiredTasks: Map<string, RetiredShape>;
+  }
+
+  let manager: BackgroundProcessManager;
+
+  beforeEach(() => {
+    // Detached (no session dir): every read falls back to the in-memory
+    // retained tail, which is the structure under test.
+    manager = new BackgroundProcessManager();
+  });
+
+  afterEach(() => {
+    manager._reset();
+  });
+
+  function internalsOf(target: BackgroundProcessManager): Internals {
+    return target as unknown as Internals;
+  }
+
+  /**
+   * Register a task, retire it, and leave its stdout open so chunks written
+   * afterwards arrive exactly like a shell's stdio drain outliving `'exit'`.
+   */
+  async function retireWithOpenStdout(): Promise<{ taskId: string; stdout: PassThrough }> {
+    const { proc, stdout, resolve } = controllableProcess();
+    const taskId = manager.register(proc, 'sleep 1', 'late stdout');
+    stdout.write('head\n');
+    resolve(0);
+    await vi.waitFor(() => {
+      expect(manager.liveTaskCount).toBe(0);
+    });
+    expect(manager.getTask(taskId)?.status).toBe('completed');
+    return { taskId, stdout };
+  }
+
+  /**
+   * Write `count` copies of `chunk` and resolve once the manager's own data
+   * listener has seen the last one (listeners fire in registration order, so
+   * the manager has already appended it when ours runs).
+   */
+  async function flood(stdout: PassThrough, chunk: string, count: number): Promise<void> {
+    let delivered = 0;
+    let drained: () => void = () => {
+      /* replaced below */
+    };
+    const done = new Promise<void>((resolve) => {
+      drained = resolve;
+    });
+    stdout.on('data', () => {
+      delivered += 1;
+      if (delivered >= count) drained();
+    });
+    for (let i = 0; i < count; i++) {
+      stdout.write(chunk);
+    }
+    await done;
+  }
+
+  it('caps late post-retirement stdout at the live-ring 1 MiB budget', async () => {
+    const { taskId, stdout } = await retireWithOpenStdout();
+
+    const chunk = `${'x'.repeat(4095)}\n`; // 4 KiB per late chunk
+    await flood(stdout, chunk, 2048); // 8 MiB delivered after retirement
+
+    const retained = manager.getOutput(taskId);
+    const retainedBytes = Buffer.byteLength(retained, 'utf-8');
+    // Bounded exactly like the live ring...
+    expect(retainedBytes).toBe(1024 * 1024);
+    // ...head-trimmed, tail kept: the newest chunk survives.
+    expect(retained.endsWith(chunk)).toBe(true);
+    // The record still reports every byte it observed, ring-dropped included.
+    const retired = internalsOf(manager).retiredTasks.get(taskId);
+    expect(retired).toBeDefined();
+    expect(retired!.outputTextBytes).toBe(retainedBytes);
+    expect(retired!.outputSizeBytes).toBeGreaterThan(4 * 1024 * 1024);
+  });
+
+  it('keeps a single oversized late chunk inside the budget by keeping its tail', async () => {
+    const { taskId, stdout } = await retireWithOpenStdout();
+
+    const huge = 'y'.repeat(2 * 1024 * 1024); // whole budget exceeded by one write
+    await flood(stdout, huge, 1);
+
+    const retained = manager.getOutput(taskId);
+    expect(Buffer.byteLength(retained, 'utf-8')).toBe(1024 * 1024);
+    expect(retained.endsWith('y'.repeat(1024))).toBe(true);
+  });
+
+  it('cuts an oversized multi-byte late chunk on a code point boundary', async () => {
+    const { taskId, stdout } = await retireWithOpenStdout();
+
+    const huge = '😀'.repeat(300_000); // 4 bytes / 2 code units per char
+    await flood(stdout, huge, 1);
+
+    const retained = manager.getOutput(taskId);
+    // Byte budget holds for 4-byte code points too...
+    expect(Buffer.byteLength(retained, 'utf-8')).toBeLessThanOrEqual(1024 * 1024);
+    // ...and the head cut lands on a boundary: no broken surrogate pair, no
+    // replacement character introduced by the trim.
+    expect(retained.startsWith('😀')).toBe(true);
+    expect(retained).not.toContain('\uFFFD');
+  });
+
+  it('drops late chunks once the retired record left the ring (nothing reachable grows)', async () => {
+    const { proc, stdout, resolve } = controllableProcess();
+    const taskId = manager.register(proc, 'sleep 1', 'evicted late chunk');
+    const deadEntry = internalsOf(manager).processes.get(taskId)!;
+    stdout.write('head\n');
+    resolve(0);
+    await vi.waitFor(() => {
+      expect(manager.liveTaskCount).toBe(0);
+    });
+    const evictedRecord = internalsOf(manager).retiredTasks.get(taskId);
+    expect(evictedRecord).toBeDefined();
+
+    // Overflow the 20-slot retired ring so this task's record is FIFO-evicted.
+    for (let i = 0; i < 21; i++) {
+      const filler = manager.register(
+        immediateProcess(0, `filler-${i}\n`),
+        'echo',
+        `filler ${i}`,
+      );
+      await manager.wait(filler);
+      await manager.flushOutput(filler);
+    }
+    expect(internalsOf(manager).retiredTasks.has(taskId)).toBe(false);
+    expect(manager.getTask(taskId)).toBeUndefined();
+
+    const entryChunksBefore = deadEntry.outputChunks.length;
+    const entryBytesBefore = deadEntry.outputSizeBytes;
+    const retainedBefore = evictedRecord!.outputTextBytes;
+    const ringBefore = manager.retiredTaskCount;
+
+    // A chunk drains in after both the live entry and its retired record are
+    // gone: it must be dropped, not piled into the dead entry's ring.
+    await flood(stdout, 'dead-late-chunk\n', 1);
+
+    expect(manager.retiredTaskCount).toBe(ringBefore);
+    expect(manager.getTask(taskId)).toBeUndefined();
+    expect(manager.getOutput(taskId)).toBe('');
+    expect(evictedRecord!.outputTextBytes).toBe(retainedBefore);
+    expect(deadEntry.outputChunks.length).toBe(entryChunksBefore);
+    expect(deadEntry.outputSizeBytes).toBe(entryBytesBefore);
+  });
+
+  it('appends a late flood in amortized-linear time (no per-chunk whole-tail rebuild)', async () => {
+    const { taskId, stdout } = await retireWithOpenStdout();
+
+    const chunk = 'z'.repeat(1024); // 1 KiB per late chunk
+    const totalChunks = 16_384; // 16 MiB delivered after retirement
+
+    const startedAt = performance.now();
+    await flood(stdout, chunk, totalChunks);
+    const elapsedMs = performance.now() - startedAt;
+
+    // The retained tail stays bounded...
+    const retired = internalsOf(manager).retiredTasks.get(taskId);
+    expect(retired!.outputTextBytes).toBeLessThanOrEqual(1024 * 1024);
+    // ...and 16 MiB of late output costs tens of ms here. A per-chunk rebuild
+    // of the ≤1 MiB tail copies ≈16 GiB and measures ≈3.5 s, so this bound
+    // sits ~10× above the linear cost and ~4× below the quadratic one.
+    expect(elapsedMs).toBeLessThan(800);
+  }, 20_000);
+});

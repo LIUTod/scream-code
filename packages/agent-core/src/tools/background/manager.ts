@@ -146,15 +146,25 @@ interface ManagedProcess {
 
 /**
  * Slim terminal record kept after `finalizeTerminal` evicts the live
- * `ManagedProcess`. Deliberately drops `proc` / the chunk array so a finished
- * task cannot pin process streams — the on-disk `output.log` remains the
- * authoritative full log. `outputText` is a last-known tail copy used only
- * when the manager was never attached to a session dir (detached managers).
+ * `ManagedProcess`. Deliberately drops `proc` so a finished task cannot pin
+ * process streams — the on-disk `output.log` remains the authoritative full
+ * log. `outputChunks` is a last-known tail used only when the manager was
+ * never attached to a session dir (detached managers).
  */
 interface RetiredTask {
   readonly info: BackgroundTaskInfo;
-  readonly outputText: string;
-  /** Total UTF-8 bytes observed, including chunks dropped from the live ring. */
+  /**
+   * Retained tail chunks (newest output), lazily joined on read. Bounded by
+   * `MAX_OUTPUT_BYTES` exactly like the live ring, but stored as chunks so a
+   * late post-retirement chunk never rebuilds the whole retained text.
+   */
+  readonly outputChunks: string[];
+  /** UTF-8 byte total of `outputChunks`, maintained incrementally on append. */
+  outputTextBytes: number;
+  /**
+   * Total UTF-8 bytes observed, including chunks dropped from the live ring /
+   * the retained tail.
+   */
   outputSizeBytes: number;
   readonly outputSessionDir: string | undefined;
   /**
@@ -169,7 +179,8 @@ interface RetiredTask {
 
 /**
  * Maximum bytes of combined output kept in the in-memory ring buffer per
- * task. When exceeded, the oldest chunks are dropped.
+ * task — applies to the live ring AND to the retired record's retained tail.
+ * When exceeded, the oldest chunks are dropped.
  *
  * The ring buffer is a lightweight tail intended for the `/tasks` UI and
  * terminal notifications only — it deliberately discards old output to
@@ -644,7 +655,7 @@ export class BackgroundProcessManager {
     const entry = this.processes.get(taskId);
     const retired = entry === undefined ? this.retiredTasks.get(taskId) : undefined;
     const availableText =
-      entry !== undefined ? entry.outputChunks.join('') : (retired?.outputText ?? '');
+      entry !== undefined ? entry.outputChunks.join('') : (retired?.outputChunks.join('') ?? '');
     const outputSizeBytes = entry !== undefined ? entry.outputSizeBytes : (retired?.outputSizeBytes ?? 0);
     if (entry === undefined && retired === undefined) return emptyOutputSnapshot();
 
@@ -675,7 +686,7 @@ export class BackgroundProcessManager {
     // reads); the retained tail copy covers detached managers with no disk.
     const retired = this.retiredTasks.get(taskId);
     if (retired === undefined) return '';
-    let full = retired.outputText;
+    let full = retired.outputChunks.join('');
     if (retired.outputSessionDir !== undefined) {
       try {
         const persisted = readFileSync(taskOutputFile(retired.outputSessionDir, taskId), 'utf-8');
@@ -1199,18 +1210,10 @@ export class BackgroundProcessManager {
   }
 
   private appendOutput(entry: ManagedProcess, chunk: string): void {
-    entry.outputSizeBytes += Buffer.byteLength(chunk, 'utf-8');
-    // Late stdout after finalize: the live entry is already retired, so extend
-    // the retained tail copy instead of growing a dead chunk array.
-    let retired = this.retiredTasks.get(entry.taskId);
-    if (retired !== undefined) {
-      retired = {
-        ...retired,
-        outputText: retired.outputText + chunk,
-        outputSizeBytes: entry.outputSizeBytes,
-      };
-      this.retiredTasks.set(entry.taskId, retired);
-    } else {
+    const chunkBytes = Buffer.byteLength(chunk, 'utf-8');
+    let retired: RetiredTask | undefined;
+    if (this.processes.get(entry.taskId) === entry) {
+      entry.outputSizeBytes += chunkBytes;
       entry.outputChunks.push(chunk);
       // Enforce output cap: drop oldest chunks when over budget.
       let total = entry.outputChunks.reduce((s, c) => s + c.length, 0);
@@ -1219,6 +1222,17 @@ export class BackgroundProcessManager {
         if (removed === undefined) break;
         total -= removed.length;
       }
+    } else {
+      retired = this.retiredTasks.get(entry.taskId);
+      if (retired === undefined) {
+        // Late stdout for a task whose retired record already left the ring
+        // (FIFO eviction) or was forgotten: no manager read path can reach
+        // the task any more, so drop the chunk instead of piling it into the
+        // dead entry's ring (an unbounded leak) or re-creating a deleted log.
+        return;
+      }
+      retired.outputSizeBytes += chunkBytes;
+      this.appendRetiredChunk(retired, chunk);
     }
 
     const outputSessionDir = entry.outputSessionDir;
@@ -1230,7 +1244,45 @@ export class BackgroundProcessManager {
       // Keep the retired record's queue live: flushOutput / readOutput await
       // whatever promise is published here, so leaving the snapshot taken in
       // finalizeTerminal would let them settle before this append lands.
-      this.retiredTasks.set(entry.taskId, { ...retired, outputWriteQueue: entry.outputWriteQueue });
+      retired.outputWriteQueue = entry.outputWriteQueue;
+    }
+  }
+
+  /**
+   * Append a late post-retirement chunk to the retired tail under the same
+   * `MAX_OUTPUT_BYTES` budget as the live ring: over budget the oldest chunks
+   * are dropped from the head while the newest output is kept. The chunk array
+   * is trimmed in place and joined lazily on read, so one late chunk costs
+   * O(chunk) — never the O(retained) rebuild a per-chunk `text += chunk`
+   * would pay.
+   */
+  private appendRetiredChunk(retired: RetiredTask, chunk: string): void {
+    retired.outputChunks.push(chunk);
+    retired.outputTextBytes += Buffer.byteLength(chunk, 'utf-8');
+    this.trimRetiredOutput(retired);
+  }
+
+  /**
+   * Head-trim the retired tail back under `MAX_OUTPUT_BYTES` (tail = newest
+   * output kept), mirroring the live ring's policy. Accounts in UTF-8 bytes
+   * rather than UTF-16 code units so multi-byte output cannot exceed the
+   * budget either.
+   */
+  private trimRetiredOutput(retired: RetiredTask): void {
+    while (retired.outputTextBytes > MAX_OUTPUT_BYTES && retired.outputChunks.length > 1) {
+      const removed = retired.outputChunks.shift();
+      if (removed === undefined) break;
+      retired.outputTextBytes -= Buffer.byteLength(removed, 'utf-8');
+    }
+    if (retired.outputTextBytes > MAX_OUTPUT_BYTES) {
+      // The one surviving chunk exceeds the whole budget on its own (a single
+      // multi-MiB write drained after retirement): keep only its byte tail so
+      // the retained text stays within the budget in every case.
+      const only = retired.outputChunks[0];
+      if (only === undefined) return;
+      const tail = utf8ByteTail(only, MAX_OUTPUT_BYTES);
+      retired.outputChunks[0] = tail;
+      retired.outputTextBytes = Buffer.byteLength(tail, 'utf-8');
     }
   }
 
@@ -1326,19 +1378,28 @@ export class BackgroundProcessManager {
     // readOutput can never observe a gap. Deliberately AFTER the terminal
     // notification so subscriber latency stays off the disk-write path.
     await entry.outputWriteQueue;
-    // Terminal eviction: drop the ≤1 MiB output ring and the live process
-    // handle, keep a slim retired record (metadata + disk-log coordinates)
-    // in a bounded FIFO ring. `stopAll`/`stop` only ever see `processes`,
-    // so they act on active tasks alone from here on.
-    const outputText = entry.outputChunks.join('');
-    entry.outputChunks.length = 0;
-    this.retiredTasks.set(entry.taskId, {
+    // Terminal eviction: drop the live process handle and keep a slim retired
+    // record (metadata + disk-log coordinates) in a bounded FIFO ring.
+    // `stopAll`/`stop` only ever see `processes`, so they act on active tasks
+    // alone from here on. The chunk array is *handed over* (not joined): late
+    // chunks arriving after `'exit'` keep landing in it via `appendOutput`,
+    // which owns keeping the retired tail under the same byte budget.
+    const retainedChunks = entry.outputChunks.splice(0);
+    const retired: RetiredTask = {
       info: this.toInfo(entry),
-      outputText,
+      outputChunks: retainedChunks,
+      outputTextBytes: retainedChunks.reduce(
+        (total, chunk) => total + Buffer.byteLength(chunk, 'utf-8'),
+        0,
+      ),
       outputSizeBytes: entry.outputSizeBytes,
       outputSessionDir: entry.outputSessionDir,
       outputWriteQueue: entry.outputWriteQueue,
-    });
+    };
+    // The live ring counts UTF-16 code units against the budget; re-check in
+    // UTF-8 bytes so the retired tail honors the same 1 MiB cap for non-ASCII.
+    this.trimRetiredOutput(retired);
+    this.retiredTasks.set(entry.taskId, retired);
     while (this.retiredTasks.size > RETIRED_TASK_LIMIT) {
       const oldest = this.retiredTasks.keys().next().value;
       if (oldest === undefined) break;
@@ -1350,6 +1411,22 @@ export class BackgroundProcessManager {
 }
 
 // ── persistence shape <-> in-memory shape ──────────────────────────────
+
+/**
+ * Longest suffix of `text` whose UTF-8 encoding fits in `maxBytes`. Encoding
+ * through a Buffer keeps lone surrogates accounted as the 3-byte replacement
+ * character, and the cut is moved to the next code point boundary (continuation
+ * bytes `10xxxxxx` skipped) so the tail never starts mid-sequence.
+ */
+function utf8ByteTail(text: string, maxBytes: number): string {
+  const encoded = Buffer.from(text, 'utf-8');
+  if (encoded.byteLength <= maxBytes) return text;
+  let start = encoded.byteLength - maxBytes;
+  while (start < encoded.byteLength && ((encoded.at(start) ?? 0) & 0xc0) === 0x80) {
+    start += 1;
+  }
+  return encoded.subarray(start).toString('utf-8');
+}
 
 function persistedToInfo(t: PersistedTask): BackgroundTaskInfo {
   return {
