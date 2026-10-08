@@ -57,6 +57,7 @@ export {
   APIConnectionError,
   APIContextOverflowError,
   APIEmptyResponseError,
+  APIFinishReasonError,
   APIOrphanedToolCallError,
   APIProviderRateLimitError,
   APIRequestTooLargeError,

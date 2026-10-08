@@ -29,6 +29,7 @@ import {
   type ToolMessageConversion,
   reasoningEffortToThinkingEffort,
   thinkingEffortToReasoningEffort,
+  throwIfErrorFinishReason,
   toolToOpenAI,
 } from './openai-common';
 import {
@@ -253,6 +254,11 @@ export class OpenAILegacyStreamedMessage implements StreamedMessage {
     const normalized = normalizeOpenAIFinishReason(raw);
     this._finishReason = normalized.finishReason;
     this._rawFinishReason = normalized.rawFinishReason;
+    // `finish_reason: "error"` (Mistral-style) is an in-band failure signal,
+    // not a normal terminal reason: raise a retryable error instead of letting
+    // the turn end silently on `'other'`. State is captured above, so the raw
+    // reason stays readable on the stream for diagnostics.
+    throwIfErrorFinishReason(normalized.rawFinishReason, 'OpenAILegacyChatProvider');
   }
 
   private async *_convertNonStreamResponse(

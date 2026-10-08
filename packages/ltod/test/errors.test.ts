@@ -2,6 +2,7 @@ import {
   APIConnectionError,
   APIContextOverflowError,
   APIEmptyResponseError,
+  APIFinishReasonError,
   APIOrphanedToolCallError,
   APIProviderRateLimitError,
   APIStatusError,
@@ -89,6 +90,17 @@ describe('APIContextOverflowError', () => {
   });
 });
 
+describe('APIFinishReasonError', () => {
+  it('extends ChatProviderError and preserves the raw finish reason', () => {
+    const err = new APIFinishReasonError('Provider stream ended with finish_reason "error"', 'error');
+    expect(err).toBeInstanceOf(ChatProviderError);
+    expect(err).toBeInstanceOf(Error);
+    expect(err.name).toBe('APIFinishReasonError');
+    expect(err.message).toBe('Provider stream ended with finish_reason "error"');
+    expect(err.rawFinishReason).toBe('error');
+  });
+});
+
 describe('APIProviderRateLimitError', () => {
   it('extends APIStatusError with status 429', () => {
     const err = new APIProviderRateLimitError('too many requests', 'req-429');
@@ -148,6 +160,41 @@ describe('isRetryableGenerateError', () => {
     expect(isRetryableGenerateError(capacity)).toBe(true);
     expect(isRetryableGenerateError(quota)).toBe(true);
     expect(isRetryableGenerateError(unknown)).toBe(true);
+  });
+
+  it('retries in-band finish_reason "error" failures (Mistral-style terminal signal)', () => {
+    expect(
+      isRetryableGenerateError(
+        new APIFinishReasonError('Provider stream ended with finish_reason "error"', 'error'),
+      ),
+    ).toBe(true);
+  });
+
+  it('retries status-less server-busy load wording', () => {
+    // Provider wording without any HTTP status: the serving node is full.
+    expect(isRetryableGenerateError(new ChatProviderError('server_busy'))).toBe(true);
+    expect(isRetryableGenerateError(new ChatProviderError('Server Busy'))).toBe(true);
+    expect(isRetryableGenerateError(new ChatProviderError('upstream server-busy, try later'))).toBe(
+      true,
+    );
+    expect(
+      isRetryableGenerateError(new ChatProviderError('The servers are currently busy')),
+    ).toBe(true);
+    expect(isRetryableGenerateError(new ChatProviderError('servers are busy right now'))).toBe(true);
+    expect(isRetryableGenerateError(new ChatProviderError('server is busy'))).toBe(true);
+    expect(isRetryableGenerateError(new ChatProviderError('Server is currently busy'))).toBe(true);
+  });
+
+  it('keeps account-level wording non-retryable even next to server-busy wording', () => {
+    // Denylist wins: "connection limit" is an account/limit problem, not load.
+    expect(isRetryableGenerateError(new ChatProviderError('Connection limit exceeded'))).toBe(false);
+    expect(
+      isRetryableGenerateError(new ChatProviderError('server_busy: connection limit reached')),
+    ).toBe(false);
+    // Precision: "busy" alone, or a "server" token glued to another word,
+    // must not become retryable by accident.
+    expect(isRetryableGenerateError(new ChatProviderError('the agent is busy'))).toBe(false);
+    expect(isRetryableGenerateError(new ChatProviderError('myserver-busy-marker'))).toBe(false);
   });
 
   it('classifies status-less ChatProviderError messages conservatively', () => {
@@ -215,6 +262,7 @@ describe('error hierarchy instanceof checks', () => {
       new APIContextOverflowError(400, 'context length exceeded'),
       new APIProviderRateLimitError('rate limited'),
       new APIEmptyResponseError('empty'),
+      new APIFinishReasonError('finish_reason "error"', 'error'),
     ];
 
     for (const err of errors) {

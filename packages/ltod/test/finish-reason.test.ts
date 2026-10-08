@@ -1,3 +1,4 @@
+import { APIFinishReasonError, isRetryableGenerateError } from '#/errors';
 import { generate } from '#/generate';
 import type { Message, StreamedMessagePart } from '#/message';
 import { MockChatProvider } from './fixtures/mock-provider';
@@ -942,5 +943,134 @@ describe('MockChatProvider finishReason defaults and propagation', () => {
     }
     expect(stream.finishReason).toBe('filtered');
     expect(stream.rawFinishReason).toBe('content_filter');
+  });
+});
+
+// =====================================================================
+// F. In-band `finish_reason: "error"` (Mistral-style terminal failure).
+//
+// The provider reports a broken generation through its terminal signal
+// instead of throwing. That must not end the turn silently: the adapters
+// raise a retryable `APIFinishReasonError`, which is exactly what the
+// engine's step retry (`chatWithRetry` in
+// packages/agent-core/src/loop/retry.ts, via `LLM.isRetryableError` →
+// `isRetryableGenerateError`) classifies before scheduling another attempt —
+// and what it rethrows once the retry budget is exhausted.
+// =====================================================================
+
+async function drainCatching(stream: AsyncIterable<StreamedMessagePart>): Promise<unknown> {
+  try {
+    for await (const _ of stream) {
+      void _;
+    }
+    return null;
+  } catch (error) {
+    return error;
+  }
+}
+
+function createScreamNonStreamResponse(finishReason: string): unknown {
+  return {
+    id: 'chatcmpl-ns-error',
+    choices: [
+      {
+        index: 0,
+        message: { role: 'assistant', content: 'partial answer' },
+        finish_reason: finishReason,
+      },
+    ],
+    usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+  };
+}
+
+describe('ScreamChatProvider finish_reason "error" (in-band failure)', () => {
+  it('throws a retryable APIFinishReasonError on the stream terminal chunk', async () => {
+    const provider = createScreamProvider(makeScreamStream('error'), true);
+    const stream = await provider.generate('', [], [USER_MSG]);
+
+    const error = await drainCatching(stream);
+
+    expect(error).toBeInstanceOf(APIFinishReasonError);
+    expect((error as APIFinishReasonError).rawFinishReason).toBe('error');
+    expect((error as Error).message).toContain('finish_reason "error"');
+    // The engine's retry classifier accepts it: the step is retried.
+    expect(isRetryableGenerateError(error)).toBe(true);
+    // Diagnostics survive: the raw terminal signal stays on the stream.
+    expect(stream.rawFinishReason).toBe('error');
+  });
+
+  it('throws on a non-stream payload carrying finish_reason "error"', async () => {
+    const provider = createScreamProvider(createScreamNonStreamResponse('error'), false);
+    const stream = await provider.generate('', [], [USER_MSG]);
+
+    const error = await drainCatching(stream);
+
+    expect(error).toBeInstanceOf(APIFinishReasonError);
+    expect(stream.rawFinishReason).toBe('error');
+  });
+
+  it('accepts casing/whitespace variants of the error token', async () => {
+    const provider = createScreamProvider(makeScreamStream('ERROR'), true);
+    const stream = await provider.generate('', [], [USER_MSG]);
+
+    expect(await drainCatching(stream)).toBeInstanceOf(APIFinishReasonError);
+  });
+
+  it('leaves other unknown finish reasons untouched', async () => {
+    const provider = createScreamProvider(makeScreamStream('error_code'), true);
+    const stream = await provider.generate('', [], [USER_MSG]);
+
+    expect(await drainCatching(stream)).toBeNull();
+    expect(stream.finishReason).toBe('other');
+    expect(stream.rawFinishReason).toBe('error_code');
+  });
+});
+
+describe('OpenAILegacyChatProvider finish_reason "error" (in-band failure)', () => {
+  it('throws a retryable APIFinishReasonError on the stream terminal chunk', async () => {
+    const provider = createOpenAILegacyProvider(makeScreamStream('error'), true);
+    const stream = await provider.generate('', [], [USER_MSG]);
+
+    const error = await drainCatching(stream);
+
+    expect(error).toBeInstanceOf(APIFinishReasonError);
+    expect(isRetryableGenerateError(error)).toBe(true);
+    expect(stream.rawFinishReason).toBe('error');
+  });
+
+  it('throws on a non-stream payload carrying finish_reason "error"', async () => {
+    const provider = createOpenAILegacyProvider(createScreamNonStreamResponse('error'), false);
+    const stream = await provider.generate('', [], [USER_MSG]);
+
+    const error = await drainCatching(stream);
+
+    expect(error).toBeInstanceOf(APIFinishReasonError);
+    expect(stream.rawFinishReason).toBe('error');
+  });
+});
+
+describe('finish_reason "error" through generate() — retry, then explicit failure', () => {
+  it('is retryable on the first attempt and still fails on the retry (no silent end_turn)', async () => {
+    // One step attempt exactly as the engine runs it: a failed attempt whose
+    // error the retry layer re-runs, then the same failure again.
+    const attempt = async (): Promise<unknown> => {
+      const provider = createScreamProvider(makeScreamStream('error'), true);
+      try {
+        await generate(provider, '', [], [USER_MSG]);
+        return null;
+      } catch (error) {
+        return error;
+      }
+    };
+
+    const firstAttempt = await attempt();
+    expect(firstAttempt).toBeInstanceOf(APIFinishReasonError);
+    // chatWithRetry's gate — true means the engine schedules attempt #2.
+    expect(isRetryableGenerateError(firstAttempt)).toBe(true);
+
+    // Retry budget exhausted: the failure is raised, never swallowed into a
+    // completed turn with no content.
+    const secondAttempt = await attempt();
+    expect(secondAttempt).toBeInstanceOf(APIFinishReasonError);
   });
 });

@@ -1,5 +1,6 @@
 import {
   APIConnectionError,
+  APIFinishReasonError,
   APITimeoutError,
   ChatProviderError,
   normalizeAPIStatusError,
@@ -308,6 +309,42 @@ export function normalizeOpenAIFinishReason(raw: string | null | undefined): {
     default:
       return { finishReason: 'other', rawFinishReason: raw };
   }
+}
+
+/**
+ * Raise a retryable {@link APIFinishReasonError} when a provider signalled an
+ * in-band stream failure through its terminal finish reason instead of
+ * throwing.
+ *
+ * Mistral-style Chat Completions endpoints end a broken generation with
+ * `finish_reason: "error"`. Normalizing that to `'other'` used to end the turn
+ * silently (no retry, no error shown). Throwing here — from the adapter's
+ * finish-reason capture, i.e. while `generate()` drains the stream — routes the
+ * failure out of `provider.generate()`/`generate()` and into the engine's step
+ * retry (`chatWithRetry` → `LLM.isRetryableError` → `isRetryableGenerateError`),
+ * so the step is retried and, once the retry budget is exhausted, fails loudly
+ * instead of ending the turn.
+ *
+ * The raw value is preserved twice: on the thrown error
+ * ({@link APIFinishReasonError.rawFinishReason}) and — because capture happens
+ * before the throw — on the streamed message's `rawFinishReason` for callers
+ * that still hold it.
+ */
+export function throwIfErrorFinishReason(
+  rawFinishReason: string | null,
+  providerLabel: string,
+): void {
+  // Exact token, case/whitespace tolerant: `error` is the provider's failure
+  // signal, while e.g. `error_code` stays an unknown-but-harmless reason.
+  if (rawFinishReason === null || rawFinishReason.trim().toLowerCase() !== 'error') {
+    return;
+  }
+  throw new APIFinishReasonError(
+    `Provider stream ended with finish_reason "${rawFinishReason}": the provider reported an ` +
+      `in-band generation failure instead of a normal stop. Provider: ${providerLabel}. ` +
+      `The request itself is unchanged, so retrying it may succeed.`,
+    rawFinishReason,
+  );
 }
 /**
  * Strategy for converting tool-role message content.

@@ -170,11 +170,36 @@ export class APIEmptyResponseError extends ChatProviderError {
   }
 }
 
+/**
+ * The provider ended its stream with an in-band failure signal instead of
+ * throwing (`finish_reason: "error"` — Mistral-style Chat Completions
+ * endpoints). Normalized without a typed class this looked like an "unknown"
+ * stop and ended the turn silently: no retry, no error surfaced. Typed here so
+ * {@link isRetryableGenerateError} classifies it without message sniffing —
+ * the upstream generation broke, the request itself is fine, so the step is
+ * worth retrying.
+ */
+export class APIFinishReasonError extends ChatProviderError {
+  /** Raw provider finish reason, preserved verbatim (`"error"`). */
+  readonly rawFinishReason: string;
+
+  constructor(message: string, rawFinishReason: string) {
+    super(message);
+    this.name = 'APIFinishReasonError';
+    this.rawFinishReason = rawFinishReason;
+  }
+}
+
 export function isRetryableGenerateError(error: unknown): boolean {
   if (error instanceof APIConnectionError || error instanceof APITimeoutError) {
     return true;
   }
   if (error instanceof APIEmptyResponseError) {
+    return true;
+  }
+  if (error instanceof APIFinishReasonError) {
+    // In-band stream failure reported through the terminal finish reason:
+    // upstream breakage, not a malformed request — retry the step.
     return true;
   }
   if (error instanceof APIProviderRateLimitError) {
@@ -239,6 +264,12 @@ const RETRYABLE_PROVIDER_MESSAGE_PATTERNS = [
   /you can retry your request/i,
   /try your request again/i,
   /please retry your request/i,
+  // Status-less server-load wording: the inference server that would serve
+  // this request is momentarily full. Deliberately narrow — no bare "busy",
+  // and the NON_RETRYABLE denylist above (account-level "connection limit"
+  // etc.) still wins when both appear in one message.
+  /\bserver[\s_-]+busy\b/i,
+  /\bservers?\s+(?:are|is)\s+(?:currently\s+)?busy\b/i,
 ] as const;
 
 /**
