@@ -41,6 +41,28 @@ describe('script sandbox (package integration)', () => {
     }
   });
 
+  it('marks console output with `console: true` and leaves text() items unchanged', async () => {
+    const sandbox = new CodemodeSandbox({ tools: [] });
+    try {
+      const result = await sandbox.execute(
+        ['text("plain");', 'console.log("logged");', 'console.error("failed");'].join('\n'),
+      );
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) throw new Error(result.error.message);
+      // The 1.1.0 output shape, asserted structurally so a dropped or renamed
+      // field fails: only console.* items carry `console: true`; text() items
+      // keep the original two-field form the assembly path consumes.
+      expect(result.output).toEqual([
+        { type: 'text', text: 'plain' },
+        { type: 'text', text: 'logged', console: true },
+        { type: 'text', text: 'failed', console: true },
+      ]);
+    } finally {
+      await sandbox.close();
+    }
+  });
+
   it('reports script errors as the script kind', async () => {
     const sandbox = new CodemodeSandbox({ tools: [] });
     try {

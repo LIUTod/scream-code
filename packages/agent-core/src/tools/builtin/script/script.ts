@@ -178,7 +178,7 @@ export class ScriptTool implements BuiltinTool<ScriptInput> {
         store: this.store.get('scriptStore') ?? {},
       });
       if (!result.ok) {
-        return await this.failedResult(result.error, result.output, state);
+        return await this.failedResult(result.error, result.output, state, parsed.options);
       }
       this.commitStoreWrites(result.storeWrites);
       return await this.successResult(result.output, result.value, state, parsed.options);
@@ -279,10 +279,7 @@ export class ScriptTool implements BuiltinTool<ScriptInput> {
     if (value !== undefined) {
       textParts.push(valueText(value));
     }
-    const { shown } = await truncateOutput(
-      textParts.join('\n'),
-      (options.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS) * CHARS_PER_TOKEN,
-    );
+    const { shown } = await truncateOutput(textParts.join('\n'), outputBudgetChars(options));
     const parts: ContentPart[] = [];
     if (shown.length > 0) {
       parts.push({ type: 'text', text: shown });
@@ -308,6 +305,7 @@ export class ScriptTool implements BuiltinTool<ScriptInput> {
     error: CodemodeError,
     output: readonly CodemodeOutputItem[],
     state: NestedRunState,
+    options: CodemodeSourceOptions,
   ): Promise<ExecutableToolResult> {
     const lines = [`Script failed (${error.kind}): ${error.message}`];
     // The sandbox keeps the output produced up to the failure (mirroring the
@@ -318,10 +316,7 @@ export class ScriptTool implements BuiltinTool<ScriptInput> {
       .map((item) => item.text)
       .join('\n');
     if (partial.length > 0) {
-      const { shown } = await truncateOutput(
-        partial,
-        DEFAULT_MAX_OUTPUT_TOKENS * CHARS_PER_TOKEN,
-      );
+      const { shown } = await truncateOutput(partial, outputBudgetChars(options));
       lines.push('', 'Partial output before the failure:', shown);
     }
     if (state.records.length > 0) {
@@ -373,6 +368,16 @@ function valueText(value: unknown): string {
   } catch {
     return String(value);
   }
+}
+
+/**
+ * The script's effective output budget in characters: the `@options.max_output_tokens`
+ * annotation when the script carries one, the tool default otherwise. The success path
+ * and the failure path both read this single value, so the annotation cannot apply to
+ * only one of them.
+ */
+function outputBudgetChars(options: CodemodeSourceOptions): number {
+  return (options.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS) * CHARS_PER_TOKEN;
 }
 
 /**

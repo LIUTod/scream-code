@@ -51,6 +51,24 @@ describe('RunScript tool', () => {
     expect(events).toContain('call_script/1');
   });
 
+  it('keeps console output in the result (the upstream console flag stays upstream-only)', async () => {
+    const ctx = testAgent({ jian: createCommandJian('nested-output') });
+    ctx.configure({ tools: ['Bash', 'RunScript'] });
+    await ctx.rpc.setPermission({ mode: 'auto' });
+
+    // The 1.1.0 sandbox tags console.* items with `console: true`; the assembly
+    // path reads only the item text, so both segments reach the conversation.
+    const code = ['text("plain-segment");', 'console.log("console-segment");'].join('\n');
+    ctx.mockNextResponse({ type: 'text', text: 'Running.' }, runScriptCall(code));
+    ctx.mockNextResponse({ type: 'text', text: 'Done.' });
+    await ctx.rpc.prompt({ input: [{ type: 'text', text: 'go' }] });
+    await ctx.untilTurnEnd();
+
+    const serialized = JSON.stringify(toolMessages(ctx)[0]?.content ?? []);
+    expect(serialized).toContain('plain-segment');
+    expect(serialized).toContain('console-segment');
+  });
+
   it('routes nested calls through the approval flow', async () => {
     const ctx = testAgent({ jian: createCommandJian('nested-output') });
     ctx.configure({ tools: ['Bash', 'RunScript'] });
@@ -232,6 +250,44 @@ describe('RunScript tool', () => {
     const serialized = JSON.stringify(toolMessages(ctx)[0]?.content ?? []);
     expect(serialized).toContain('truncated');
     expect(serialized).not.toContain('SECRET-CONTENT-');
+  });
+
+  it('applies the @options.max_output_tokens budget to the failure path exactly like the success path', async () => {
+    const ctx = testAgent({ jian: createCommandJian('nested-output') });
+    ctx.configure({ tools: ['Bash', 'RunScript'] });
+    await ctx.rpc.setPermission({ mode: 'auto' });
+
+    // 200 tokens → an 800-character budget, far below the 10k-token default the
+    // failure path used to hardcode: a truncated "Partial output" section can
+    // only come from the annotation being read on that path too.
+    const head = 'X'.repeat(6_000);
+    const body = `${head}${'Y'.repeat(6_000)}`;
+    const runScript = async (code: string, id: string): Promise<string> => {
+      ctx.mockNextResponse({ type: 'text', text: 'ok' }, runScriptCall(code, id));
+      ctx.mockNextResponse({ type: 'text', text: 'done' });
+      await ctx.rpc.prompt({ input: [{ type: 'text', text: 'step' }] });
+      await ctx.untilTurnEnd();
+      return JSON.stringify(toolMessages(ctx).at(-1)?.content ?? '');
+    };
+
+    const optionsLine = '// @options: {"max_output_tokens": 200}';
+    const success = await runScript(
+      `${optionsLine}\ntext(${JSON.stringify(body)});`,
+      'call_budget_ok',
+    );
+    const failure = await runScript(
+      `${optionsLine}\ntext(${JSON.stringify(body)});\nthrow new Error("boom");`,
+      'call_budget_fail',
+    );
+
+    expect(failure).toContain('Script failed');
+    const keptHeadChars = (text: string): number => text.match(/X+/)?.[0]?.length ?? 0;
+    // Both paths truncate, and they keep exactly the same amount of text: the
+    // failure path's budget is the same annotation-derived one as the success path's.
+    expect(keptHeadChars(success)).toBeGreaterThan(0);
+    expect(keptHeadChars(failure)).toBe(keptHeadChars(success));
+    // Nothing close to the full text leaks through the failure message.
+    expect(failure).not.toContain(head);
   });
 
   it('persists store writes across invocations (successful runs only)', async () => {
