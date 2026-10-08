@@ -1,6 +1,6 @@
 {
   "name": "@scream-code/agent-core",
-  "version": "0.17.9",
+  "version": "0.18.0",
   "private": true,
   "description": "The unified agent engine for Scream",
   "license": "MIT",
@@ -44,7 +44,7 @@
   },
   "dependencies": {
     "@antfu/utils": "^9.3.0",
-    "@earendil-works/pi-codemode": "^1.0.4",
+    "@earendil-works/pi-codemode": "^1.1.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@mozilla/readability": "^0.6.0",
     "@scream-code/jian": "workspace:^",

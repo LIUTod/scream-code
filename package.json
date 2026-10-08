@@ -1,6 +1,6 @@
 {
   "name": "scream-code-monorepo",
-  "version": "0.17.9",
+  "version": "0.18.0",
   "private": true,
   "license": "MIT",
   "type": "module",
@@ -59,6 +59,6 @@
   },
   "packageManager": "pnpm@10.33.0",
   "dependencies": {
-    "@liutod-scream/pi-tui": "^1.0.4"
+    "@liutod-scream/pi-tui": "^1.1.0"
   }
 }
