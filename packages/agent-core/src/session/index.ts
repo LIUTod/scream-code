@@ -202,10 +202,16 @@ export class Session {
       // sink if this ran after `disposeAll()` returned — the order the sink
       // comment above promises.
       //
-      // A rejection here is collected into the same AggregateError as a failed
-      // teardown step, so it cannot skip the trigger that follows it.
-      await this.flushMetadata();
-      await this.triggerSessionEnd('exit');
+      // A rejected flush still propagates to `disposeAll()` and lands in the
+      // same AggregateError as a failed teardown step; the trigger, however,
+      // runs from a `finally` so that rejection cannot skip the SessionEnd
+      // hooks. When both fail, try/finally surfaces only the trigger's
+      // rejection — the flush error is superseded, not duplicated.
+      try {
+        await this.flushMetadata();
+      } finally {
+        await this.triggerSessionEnd('exit');
+      }
     });
     this.disposables.add('background-pending', async () => {
       // Sweep the shell tool's module-level pending-task map (timed-out

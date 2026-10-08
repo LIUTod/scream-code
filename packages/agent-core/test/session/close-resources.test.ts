@@ -133,6 +133,37 @@ describe('Session close-out checklist', () => {
     }
   });
 
+  it('still fires SessionEnd when the metadata flush in the finalize step rejects', async () => {
+    const { sessionDir, workDir } = await sessionFixture();
+    const session = new Session({
+      jian: testJian.withCwd(workDir),
+      id: 'session-finalize-flush-fails',
+      homedir: sessionDir,
+      rpc: createSessionRpc(),
+      skills: { explicitDirs: [join(workDir, 'missing-skills')] },
+    });
+    const { agent } = await session.createAgent({ type: 'main' });
+
+    // A real flush failure, not a mocked step: the per-agent records flush is
+    // what `flushMetadata()` awaits last, and its rejection is the one that
+    // must not unwind the step before the SessionEnd trigger runs.
+    const flushError = new Error('records flush failed');
+    const flushSpy = vi.spyOn(agent.records, 'flush').mockRejectedValue(flushError);
+    const triggerSpy = vi.spyOn(session.hookEngine, 'trigger');
+
+    const closeError = await session.close().catch((error: unknown) => error);
+
+    // The trigger runs from a `finally`: a rejected flush may not skip it...
+    expect(flushSpy).toHaveBeenCalledTimes(1);
+    expect(triggerSpy).toHaveBeenCalledWith('SessionEnd', {
+      matcherValue: 'exit',
+      inputData: { reason: 'exit' },
+    });
+    // ...and the rejection still surfaces through the close() AggregateError.
+    expect(closeError).toBeInstanceOf(AggregateError);
+    expect((closeError as AggregateError).errors).toContain(flushError);
+  });
+
   it('releases each collaborator exactly once through its own registration', async () => {
     const { sessionDir, workDir } = await sessionFixture();
     const session = new Session({
