@@ -44,19 +44,24 @@ vi.mock('#/tui/utils/ui-preferences', () => ({
   },
 }));
 
-function makeHost(): { host: SlashCommandHost; invalidate: ReturnType<typeof vi.fn> } {
+function makeHost(): {
+  host: SlashCommandHost;
+  invalidate: ReturnType<typeof vi.fn>;
+  resetSelection: ReturnType<typeof vi.fn>;
+} {
   const invalidate = vi.fn();
+  const resetSelection = vi.fn();
   const host = {
     state: {
       theme: { colors: darkColors },
       transcriptContainer: { children: [{ invalidate }] },
-      ui: { requestRender: vi.fn() },
+      ui: { requestRender: vi.fn(), resetTextSelection: resetSelection },
     },
     mountEditorReplacement: vi.fn(),
     restoreEditor: vi.fn(),
     showStatus: vi.fn(),
   } as unknown as SlashCommandHost;
-  return { host, invalidate };
+  return { host, invalidate, resetSelection };
 }
 
 /** 当前挂载的 picker（最后一个）。 */
@@ -91,7 +96,7 @@ describe('handleBlockRowsCommand', () => {
   });
 
   it('opens the value list for the chosen budget and applies the choice', async () => {
-    const { host, invalidate } = makeHost();
+    const { host, invalidate, resetSelection } = makeHost();
     await handleBlockRowsCommand(host, '');
 
     lastPicker().onSelect('activityExpandedToolLines');
@@ -113,6 +118,8 @@ describe('handleBlockRowsCommand', () => {
     expect(host.showStatus).toHaveBeenCalledTimes(1);
     // Blocks already on screen cache their rows, so they are repainted.
     expect(invalidate).toHaveBeenCalledTimes(1);
+    // 预算换了，屏上已有的块随之重新排版（行可能增减）：坐标选区先清掉。
+    expect(resetSelection).toHaveBeenCalledTimes(1);
   });
 
   it('steps back to the budget list when the value list is cancelled', async () => {

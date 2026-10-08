@@ -25,13 +25,14 @@ interface PickerHandle {
 function makeHost() {
   const setRuntimeSystemPrompt = vi.fn(async () => {});
   const invalidate = vi.fn();
+  const resetSelection = vi.fn();
   const mounted: unknown[] = [];
   const host = {
     session: { setRuntimeSystemPrompt },
     state: {
       theme: { colors: darkColors },
       transcriptContainer: { children: [{ invalidate }] },
-      ui: { requestRender: vi.fn() },
+      ui: { requestRender: vi.fn(), resetTextSelection: resetSelection },
     },
     showStatus: vi.fn(),
     mountEditorReplacement: (panel: unknown) => {
@@ -39,7 +40,7 @@ function makeHost() {
     },
     restoreEditor: vi.fn(),
   } as unknown as SlashCommandHost;
-  return { host, setRuntimeSystemPrompt, invalidate, mounted };
+  return { host, setRuntimeSystemPrompt, invalidate, resetSelection, mounted };
 }
 
 function pickerOf(mounted: unknown[]): PickerHandle {
@@ -92,12 +93,14 @@ describe('/mermaid 面板', () => {
   });
 
   it('选定后写入偏好、收起面板并重画屏上内容', async () => {
-    const { host, mounted, invalidate } = makeHost();
+    const { host, mounted, invalidate, resetSelection } = makeHost();
     await handleMermaidCommand(host, '');
     pickerOf(mounted).opts.onSelect('ascii');
     expect(getMermaidDisplay()).toBe('ascii');
     expect(host.restoreEditor).toHaveBeenCalled();
     expect(invalidate).toHaveBeenCalled();
+    // 制表符 → ASCII 是同栅格换字形（行数、行宽一致），屏上没有行位移，选区不动。
+    expect(resetSelection).not.toHaveBeenCalled();
     expect(host.state.ui.requestRender).toHaveBeenCalled();
     expect(host.showStatus).toHaveBeenLastCalledWith(
       t('mermaid.applied', { mode: t('mermaid.option.ascii') }),
@@ -137,15 +140,19 @@ describe('/mermaid 直接指定（与面板选定同一条落地路径）', () =
   });
 
   it('off 用弱化色提示，on 用成功色', async () => {
-    const { host } = makeHost();
+    const { host, resetSelection } = makeHost();
     await handleMermaidCommand(host, 'off');
     expect(getMermaidDisplay()).toBe('off');
+    // 图收回到源码，屏上行的数量随之变化：坐标选区先清掉。
+    expect(resetSelection).toHaveBeenCalledTimes(1);
     expect(host.showStatus).toHaveBeenLastCalledWith(
       t('mermaid.applied', { mode: t('mermaid.option.off') }),
       darkColors.textDim,
     );
     await handleMermaidCommand(host, 'on');
     expect(getMermaidDisplay()).toBe('on');
+    // 源码重新画成图，行又动了一次。
+    expect(resetSelection).toHaveBeenCalledTimes(2);
     expect(host.showStatus).toHaveBeenLastCalledWith(
       t('mermaid.applied', { mode: t('mermaid.option.on') }),
       darkColors.success,

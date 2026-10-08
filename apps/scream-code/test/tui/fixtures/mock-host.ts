@@ -101,6 +101,9 @@ export function createMockTUIState(options: { appState?: Partial<AppState> } = {
       requestRender: vi.fn(),
       setFocus: vi.fn(),
       setLayoutRoot: vi.fn(),
+      // pi-tui's selection reset — transcript rebuild paths call it so a stale
+      // highlight cannot repaint over the new content.
+      resetTextSelection: vi.fn(),
     },
     terminal: { write: vi.fn(), title: undefined },
     layoutRoot: { render: (): string[] => ['root'], invalidate: (): void => {} },

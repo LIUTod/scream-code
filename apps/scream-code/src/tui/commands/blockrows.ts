@@ -57,12 +57,21 @@ function showValuePicker(host: SlashCommandHost, key: ActivityLineKey): void {
       onSelect: (value) => {
         const parsed = Number(value);
         if (!Number.isFinite(parsed)) return;
+        // The saved budget re-lays out blocks that are already on screen: rows
+        // below them grow or shrink, so a live selection's coordinates stop
+        // pointing at the text the user picked — clear it before the repaint.
+        // Re-picking the value already in effect redraws identical rows and
+        // keeps the selection, the same rule the Ctrl+O gate follows. Done here
+        // rather than inside repaintTranscript, which also serves /codebg —
+        // that repaints without moving a row.
+        const resized = parsed !== getActivityLineValue(key);
         setActivityLineValue(key, parsed);
         host.restoreEditor();
         host.showStatus(
           t('blockrows.saved', { label: t(setting.label), value: String(parsed) }),
           host.state.theme.colors.success,
         );
+        if (resized) host.state.ui.resetTextSelection();
         repaintTranscript(host);
       },
       onCancel: () => {

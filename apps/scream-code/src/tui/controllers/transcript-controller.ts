@@ -213,6 +213,14 @@ export class TranscriptController {
       }
 
       this.committedComponent.setCount(this.committedComponent.getCount() + toCommit.length);
+      // Evicting rows is itself a coordinate change: every committed card is
+      // replaced by the tree's single-line summary, so all rows below move up
+      // and a live selection's stored coordinates now point at other text — its
+      // highlight would repaint over it and copy-on-select would hand out the
+      // wrong content. The tree folding its own oldest rows does the same thing
+      // again, so that case rides the same call. Commits with nothing to evict
+      // returned above; wholesale rebuilds are handled in clearAndRedraw.
+      state.ui.resetTextSelection();
       if (process.env['SCREAM_CODE_DEBUG'] === '1') {
         this.host.showStatus(
           `[debug] committed=${this.committedComponent.getCount()} live=${this.getLiveCount()}`,
@@ -520,6 +528,11 @@ export class TranscriptController {
 
   clearAndRedraw(): void {
     const { state, streamingUI, imageStore } = this.host;
+    // The transcript is being replaced wholesale (session switch, /new). A live
+    // text selection is stored as coordinates and re-applied on every frame, so
+    // leaving it behind paints the old highlight over the new session's rows and
+    // copy-on-select would hand out their text. Drop it before the content goes.
+    state.ui.resetTextSelection();
     streamingUI.discardPending();
     streamingUI.endActivityGroup();
     // Settle anything the discarded transcript still owned *before* the entry
@@ -611,6 +624,7 @@ export class TranscriptController {
     // up half expanded. Work from earlier prompts keeps whatever it was showing.
     const next = !state.toolOutputExpanded;
     const children = state.transcriptContainer.children;
+    let resized = false;
     for (let i = children.length - 1; i >= 0; i -= 1) {
       const child = children[i];
       if (child === undefined) continue;
@@ -627,8 +641,17 @@ export class TranscriptController {
       ) {
         break;
       }
-      if (isExpandable(child)) child.setExpanded(next);
+      if (isExpandable(child)) {
+        child.setExpanded(next);
+        resized = true;
+      }
     }
+    // Cards just changed height, so every row below them moved: a live
+    // selection's stored coordinates now point at other text, for the same
+    // reason as in commit(). A press that flips no card (nothing expandable in
+    // the current turn) moves nothing on screen and leaves the selection where
+    // the user put it — it only records the mode for what mounts next.
+    if (resized) state.ui.resetTextSelection();
     state.toolOutputExpanded = next;
     state.ui.requestRender();
   }
@@ -643,6 +666,12 @@ export class TranscriptController {
       }
     }
     if (!toggled) return false;
+    // Revealing or hiding a plan box rebuilds the card body at a different
+    // height — the same row movement Ctrl+O causes — so a live selection's
+    // stored coordinates now point at other text. A press with no plan card on
+    // screen returned above: nothing moved, the selection stays where the user
+    // put it.
+    state.ui.resetTextSelection();
     state.planExpanded = next;
     state.ui.requestRender();
     return true;

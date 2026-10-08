@@ -503,10 +503,13 @@ describe('TranscriptController misc surface', () => {
 
   it('togglePlanExpansion only flips when a plan-expandable child accepted it', () => {
     const { controller, state } = makeHost();
+    const reset = vi.mocked(state.ui.resetTextSelection);
     const rejecting = { setPlanExpanded: vi.fn((): boolean => false) };
     state.transcriptContainer.addChild(rejecting as unknown as Component);
     expect(controller.togglePlanExpansion()).toBe(false);
     expect(state.planExpanded).toBe(false);
+    // 没有卡片吃下这一按：屏上没有行位移，选区留在原处。
+    expect(reset).not.toHaveBeenCalled();
 
     const accepting = { setPlanExpanded: vi.fn((): boolean => true) };
     state.transcriptContainer.addChild(accepting as unknown as Component);
@@ -514,11 +517,14 @@ describe('TranscriptController misc surface', () => {
     expect(state.planExpanded).toBe(true);
     expect(accepting.setPlanExpanded).toHaveBeenCalledWith(true);
     expect(rejecting.setPlanExpanded).toHaveBeenCalledTimes(2);
+    // 计划框改了卡片高度，下方行位移：坐标选区清掉一次。
+    expect(reset).toHaveBeenCalledTimes(1);
 
     // Flipping back calls setPlanExpanded(false).
     expect(controller.togglePlanExpansion()).toBe(true);
     expect(state.planExpanded).toBe(false);
     expect(accepting.setPlanExpanded).toHaveBeenLastCalledWith(false);
+    expect(reset).toHaveBeenCalledTimes(2);
   });
 
   it('renderWelcome mounts a welcome component and stops breathing after first input', () => {

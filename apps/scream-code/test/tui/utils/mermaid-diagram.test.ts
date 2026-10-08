@@ -450,6 +450,22 @@ describe('边界', () => {
     expect(out).toContain('-');
   });
 
+  // /mermaid 的选区重置门控靠这个事实：两档边框是同一栅格换字形（一一对应），
+  // 切档本身不动任何行 —— 只有切到/离开 off 才动行。哪个映射哪天变成多列字符，
+  // 门控就要跟着改，这组行数/行宽对比就是提示。
+  it('制表符档与 ASCII 档占用完全相同的行数与行宽', () => {
+    for (const [, source] of DRAWABLES) {
+      const width = frameWidth(source) + 4;
+      const box = rowsOf(drawer()(block(source), ctx({ availableWidth: width })), width);
+      const ascii = rowsOf(
+        drawer({ ascii: true })(block(source), ctx({ availableWidth: width })),
+        width,
+      );
+      expect(ascii).toHaveLength(box.length);
+      expect(ascii.map(visibleWidth)).toEqual(box.map(visibleWidth));
+    }
+  });
+
   it('默认是开，且偏好可写回', () => {
     const before = getMermaidDisplay();
     expect(before).toBe('on');

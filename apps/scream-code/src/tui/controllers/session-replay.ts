@@ -65,6 +65,11 @@ export class SessionReplayRenderer {
   constructor(private readonly host: SessionReplayHost) {}
 
   async hydrateFromReplay(session: Session): Promise<boolean> {
+    // Replay repopulates the transcript from scratch — the startup resume
+    // reaches this without passing through a session switch, so the rebuild
+    // path that clears the selection on the way in cannot cover it. Drop the
+    // stale highlight before the first replayed row is mounted over it.
+    this.host.state.ui.resetTextSelection();
     this.host.setAppState({ isReplaying: true });
     try {
       const main = session.getResumeState()?.agents['main'];

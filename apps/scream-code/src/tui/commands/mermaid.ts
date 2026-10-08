@@ -34,12 +34,22 @@ function buildOptions(): ChoiceOption[] {
 
 /** Apply a choice: redraw what is already on screen, restate the capability. */
 async function applyDisplay(host: SlashCommandHost, value: MermaidDisplay): Promise<void> {
+  const previous = getMermaidDisplay();
   setMermaidDisplay(value);
   host.showStatus(
     t('mermaid.applied', { mode: optionLabel(value) }),
     value === 'off' ? host.state.theme.colors.textDim : host.state.theme.colors.success,
   );
-  // Frames already on screen were laid out under the previous choice.
+  // Frames already on screen were laid out under the previous choice. Only a
+  // switch between the drawing and its source changes how many rows a block
+  // takes, so only that moves the rows below and stales a live coordinate
+  // selection — clear it. Box ↔ ascii is the same frame grid in another
+  // alphabet (a one-for-one glyph swap: same row count, same widths), and
+  // re-picking the current choice redraws identical rows; both keep the
+  // selection. Cleared here rather than inside repaintTranscript, which also
+  // serves /codebg — that repaints without moving a row.
+  const resized = previous !== value && (previous === 'off' || value === 'off');
+  if (resized) host.state.ui.resetTextSelection();
   repaintTranscript(host);
   // Telling the model it can draw diagrams has to follow the switch: leaving the
   // statement in place after `off` would have it producing fences this terminal

@@ -72,6 +72,10 @@ export async function handleRevokeCommand(
     renderWelcome(host);
   }
 
+  // Rows left the transcript, so everything below them moved up: a live
+  // selection still carries the dropped rows' coordinates and its highlight
+  // would repaint over whatever slid into that region.
+  host.state.ui.resetTextSelection();
   host.state.ui.requestRender();
 }
 
