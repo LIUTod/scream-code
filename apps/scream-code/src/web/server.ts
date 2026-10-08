@@ -3084,19 +3084,40 @@ export class SessionManager {
       // any row a still-racing write has not landed yet is appended from
       // memory — the copy is never short and never doubled.
       await source.flushPendingWrites();
-      const { entries: diskEntries } = await loadJournal(this.homeDir, sourceId);
+      const { entries: diskEntries, corrupt } = await loadJournal(this.homeDir, sourceId);
       const entries = mergeForkJournalEntries(diskEntries, source.getDurableJournalEntries());
-      if (entries.length > 0) {
+      webSession.loadFromPersisted(entries);
+      // Replicate the activation guard (doActivateSession) verbatim: when the
+      // journal is damaged (byte-interleaving damage, see journal-writer.ts) the
+      // lines that still parse are often empty shells whose body line was
+      // skipped, so the remnants are dropped and the transcript rebuilt from
+      // core history — but only when the journal is damaged *and* no parsed
+      // message carries a body; any surviving body keeps the remnants untouched
+      // (showing less is acceptable, replacing the user's only remaining
+      // history is not). Without this the fork copies the damage into its own
+      // transcript, whose shell rows count as message-bearing and suppress the
+      // seed — the source shows its core history, the fork an empty hull.
+      const journalHasContent = webSession.hasAnyAssistantContent();
+      const journalDamaged = corrupt > 0 && !journalHasContent;
+      if (journalDamaged) {
+        webSession.markDamaged(`journal has ${corrupt} corrupt lines and no parsed message carries a body`);
+      } else if (entries.length > 0) {
+        // The fork's own journal file stays unwritten when the guard fires:
+        // the damaged remnants would land there as *parseable* rows (the
+        // corrupt tally is lost on reserialization), so the fork's next load
+        // could not arm the same guard and would repaint the shells the seed
+        // just replaced. An absent journal seeds from core history, exactly
+        // like an empty one.
         const lines = entries.map((e) => JSON.stringify(e)).join('\n') + '\n';
         await writeFile(getJournalPath(this.homeDir, newId), lines);
       }
-      webSession.loadFromPersisted(entries);
       // If the source session itself only showed its history because the
       // activation path seeded it from core history (its journal holds nothing
-      // but state entries), the copied journal is still an empty shell — the
-      // fork would look almost blank while its core wire history is complete.
-      // Seed once, exactly like the activation path.
-      if (!entries.some(isMessageBearingEntry)) {
+      // but state entries — or the damaged-journal guard above fired), the
+      // copied journal is still an empty shell — the fork would look almost
+      // blank while its core wire history is complete. Seed once, exactly like
+      // the activation path.
+      if (!entries.some(isMessageBearingEntry) || journalDamaged) {
         try {
           const context = await session.getContext();
           webSession.seedHistory(contextHistoryToChatMessages(context.history));

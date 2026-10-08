@@ -2,7 +2,7 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import type { Event, GoalSnapshotData, Session, SessionStatus, TodoItem } from '@scream-code/scream-code-sdk';
+import type { ContextMessage, Event, GoalSnapshotData, Session, SessionStatus, TodoItem } from '@scream-code/scream-code-sdk';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { SessionManager } from '#/web/server';
@@ -27,7 +27,10 @@ const STATUS: SessionStatus = {
   contextUsage: 0.01,
 };
 
-function makeFakeSession(id: string): FakeSessionControl {
+function makeFakeSession(
+  id: string,
+  getContext?: () => Promise<{ history: readonly ContextMessage[]; tokenCount: number }>,
+): FakeSessionControl {
   const listeners = new Set<(event: Event) => void>();
   const session = {
     id,
@@ -43,6 +46,9 @@ function makeFakeSession(id: string): FakeSessionControl {
     getTodos: vi.fn(async () => [] as readonly TodoItem[]),
     generateText: vi.fn(async () => 'Refined objective'),
     close: vi.fn(async () => {}),
+    // The activation/fork seed paths read the core wire history; without a
+    // provider the call throws and is swallowed by those paths' catch.
+    ...(getContext ? { getContext: vi.fn(getContext) } : {}),
   };
   return {
     session: session as unknown as Session,
@@ -409,6 +415,131 @@ describe('web fork journal copy', () => {
     expect(forkJournal.split('\n').filter((line) => line.includes('"user_message"'))).toHaveLength(3);
     expect(manager.get(result!.sessionId)?.getSnapshot().messages.map((message) => message.content))
       .toEqual(transcript);
+    await manager.closeAll();
+  });
+});
+
+/**
+ * Forking a session whose journal file is damaged (byte-interleaving damage,
+ * see journal-writer.ts): the lines that still parse are bodyless shells — a
+ * user row and a turn skeleton whose assistant body line never made it. The
+ * activation path drops those remnants and rebuilds from the core transcript;
+ * the fork copies from the same file and has to walk the same guard, or it
+ * inherits the damage: its shell rows count as message-bearing and suppress
+ * the seed, so the source shows its history while the fork shows an empty hull.
+ */
+describe('web fork from a damaged journal', () => {
+  it('mirrors the activation damage guard instead of copying the bodyless shells', async () => {
+    const homeDir = await mkdtemp(join(tmpdir(), 'scream-web-forkdmg-'));
+    tempDirs.push(homeDir);
+    const sessionsDir = join(homeDir, 'web-sessions');
+    await mkdir(sessionsDir, { recursive: true });
+
+    // What still parses: a user row and a turn skeleton (its finalized body
+    // never made it to disk). The other two lines are what the damage left —
+    // unparseable, hence the corrupt tally.
+    const damaged = [
+      JSON.stringify({ type: 'user_message', text: '残存提问', beforeSeq: 0, clientMessageId: 'cm-dmg' }),
+      JSON.stringify({
+        type: 'journal', seq: 1, epoch: 1, volatile: false,
+        payload: { type: 'turn.started', turnId: 0, origin: 'web', sessionId: 'web-dmg', agentId: 'main' },
+      }),
+      '{"type":"journal","seq":2,"epoch":1,"volatile":false,"payl',
+      JSON.stringify({
+        type: 'journal', seq: 3, epoch: 1, volatile: false,
+        payload: { type: 'turn.ended', turnId: 0, reason: 'done', sessionId: 'web-dmg', agentId: 'main' },
+      }),
+      '\u0000\u0001interleaved-garbage',
+    ].join('\n') + '\n';
+    await writeFile(join(sessionsDir, 'web-dmg.jsonl'), damaged);
+    await writeFile(join(sessionsDir, 'web-dmg.meta.json'), JSON.stringify({
+      sessionId: 'web-dmg', coreSessionId: 'core-dmg', workDir: '/tmp/project',
+      title: 'Dmg', createdAt: 1, model: 'test-model', permission: 'manual',
+    }));
+
+    const history: readonly ContextMessage[] = [
+      { role: 'user', content: [{ type: 'text', text: '源历史提问' }], toolCalls: [] },
+      { role: 'assistant', content: [{ type: 'text', text: '源历史回答' }], toolCalls: [] },
+    ];
+    const source = makeFakeSession('core-dmg', async () => ({ history, tokenCount: 2 }));
+    const forked = makeFakeSession('core-fork-dmg', async () => ({ history, tokenCount: 2 }));
+    const manager = await newManager(homeDir, source, forked);
+
+    // Reference: activating the damaged source drops the bodyless remnants
+    // (the surviving user row included) and rebuilds from the core transcript.
+    const live = await manager.activateSession('web-dmg');
+    expect(live).not.toBeNull();
+    const activated = live!.getSnapshot().messages.map((m) => m.content);
+    expect(activated).toEqual(['源历史提问', '源历史回答']);
+
+    const result = await manager.forkSession('web-dmg');
+    expect(result).not.toBeNull();
+    const forkContents = manager.get(result!.sessionId)?.getSnapshot().messages.map((m) => m.content);
+    // Exactly the activated source's history — seed included — not the shells.
+    expect(forkContents).toEqual(activated);
+    expect(forkContents).toContain('源历史回答');
+
+    // And the durability holds: a fresh server must not repaint the shells
+    // from a journal file the fork copied the damage into.
+    const restarted = makeFakeSession('core-fork-dmg', async () => ({ history, tokenCount: 2 }));
+    const reloadManager = await newManager(homeDir, restarted);
+    const reloaded = await reloadManager.activateSession(result!.sessionId);
+    expect(reloaded).not.toBeNull();
+    expect(reloaded!.getSnapshot().messages.map((m) => m.content)).toEqual(activated);
+
+    await reloadManager.closeAll();
+    await manager.closeAll();
+  });
+
+  it('writes no damaged remnants into the fork journal when no parsed entry carries a message', async () => {
+    const homeDir = await mkdtemp(join(tmpdir(), 'scream-web-forkdmg2-'));
+    tempDirs.push(homeDir);
+    const sessionsDir = join(homeDir, 'web-sessions');
+    await mkdir(sessionsDir, { recursive: true });
+
+    // No message-bearing entry at all: only a state row survived the damage.
+    const damaged = [
+      JSON.stringify({
+        type: 'journal', seq: 5, epoch: 1, volatile: false,
+        payload: {
+          type: 'session.meta.updated', turnId: 0, sessionId: 'web-dmgstate', agentId: 'main',
+          meta: { marker: 'remnant' },
+        },
+      }),
+      '{"type":"journal","seq":6,"epoch":1,"volatile":false,"payl',
+    ].join('\n') + '\n';
+    await writeFile(join(sessionsDir, 'web-dmgstate.jsonl'), damaged);
+    await writeFile(join(sessionsDir, 'web-dmgstate.meta.json'), JSON.stringify({
+      sessionId: 'web-dmgstate', coreSessionId: 'core-dmgstate', workDir: '/tmp/project',
+      title: 'DmgState', createdAt: 1, model: 'test-model', permission: 'manual',
+    }));
+
+    const history: readonly ContextMessage[] = [
+      { role: 'user', content: [{ type: 'text', text: '源历史提问' }], toolCalls: [] },
+      { role: 'assistant', content: [{ type: 'text', text: '源历史回答' }], toolCalls: [] },
+    ];
+    const source = makeFakeSession('core-dmgstate', async () => ({ history, tokenCount: 2 }));
+    const forked = makeFakeSession('core-fork-dmgstate', async () => ({ history, tokenCount: 2 }));
+    const manager = await newManager(homeDir, source, forked);
+
+    const live = await manager.activateSession('web-dmgstate');
+    expect(live).not.toBeNull();
+    const activated = live!.getSnapshot().messages.map((m) => m.content);
+    expect(activated).toEqual(['源历史提问', '源历史回答']);
+
+    const result = await manager.forkSession('web-dmgstate');
+    expect(result).not.toBeNull();
+    expect(manager.get(result!.sessionId)?.getSnapshot().messages.map((m) => m.content)).toEqual(activated);
+    // The damaged remnants must not become the fork's durable journal: those
+    // rows reserialize as valid lines (no corrupt tally to rearm the guard),
+    // so a later load would present the dead state as the fork's history.
+    let forkJournal = '';
+    try {
+      forkJournal = await readFile(join(sessionsDir, `${result!.sessionId}.jsonl`), 'utf-8');
+    } catch {
+      // No file written — there was nothing trustworthy to copy.
+    }
+    expect(forkJournal).not.toContain('web-dmgstate');
     await manager.closeAll();
   });
 });
