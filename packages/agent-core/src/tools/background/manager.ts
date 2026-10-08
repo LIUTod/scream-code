@@ -199,6 +199,18 @@ const MAX_OUTPUT_BYTES = 1024 * 1024; // 1 MiB
  */
 const RETIRED_TASK_LIMIT = 20;
 
+/**
+ * Pre-cut bytes the bounded window read (`readOutput`) keeps as context for
+ * `tailSlice`'s boundary rules, on top of the last `tail` code units it must
+ * return. The rules inspect the text before the cut (the nearest ESC, a CSI
+ * body run, a string-sequence opener), so a window starting exactly at the cut
+ * would decide differently from the whole-file read in `getOutput`. Control
+ * sequences in task output sit far closer to the cut than this margin; one
+ * opened farther back is invisible to the window and is not worth paging the
+ * rest of a multi-megabyte log for.
+ */
+const TAIL_WINDOW_LOOKBACK_BYTES = 4096;
+
 const SIGTERM_GRACE_MS = 5_000;
 const EXIT_SETTLE_GRACE_MS = 10;
 
@@ -677,7 +689,7 @@ export class BackgroundProcessManager {
     if (entry) {
       const full = entry.outputChunks.join('');
       if (tail !== undefined && tail < full.length) {
-        return full.slice(-tail);
+        return tailSlice(full, tail);
       }
       return full;
     }
@@ -695,7 +707,7 @@ export class BackgroundProcessManager {
         /* fall back to the retained tail */
       }
     }
-    if (tail !== undefined && tail < full.length) return full.slice(-tail);
+    if (tail !== undefined && tail < full.length) return tailSlice(full, tail);
     return full;
   }
 
@@ -710,12 +722,15 @@ export class BackgroundProcessManager {
         // Bounded window read: a task's output.log can grow unbounded, so
         // paging a tail must not load the whole file. UTF-8 needs at most 4
         // bytes per code point (+3 slack for a window that starts mid-
-        // sequence), so this window is guaranteed to cover the last `tail`
-        // code units and the decoded result matches the previous whole-file
-        // slice(-tail) semantics exactly.
+        // sequence) to cover the last `tail` code units; the look-back margin
+        // on top of that is context only, and buys agreement with the
+        // whole-file read in `getOutput` for every control sequence that
+        // starts within it. One opened farther back is invisible to the
+        // window, so the two reads can then differ in where the head starts
+        // (never in whether the newest bytes are returned).
         const size = await taskOutputSizeBytes(outputSessionDir, taskId);
         if (size > 0) {
-          const windowBytes = Math.min(size, tail * 4 + 7);
+          const windowBytes = Math.min(size, tail * 4 + 7 + TAIL_WINDOW_LOOKBACK_BYTES);
           const start = size - windowBytes;
           let persisted = await readTaskOutputBytes(outputSessionDir, taskId, start, windowBytes);
           if (persisted.length > 0) {
@@ -730,14 +745,14 @@ export class BackgroundProcessManager {
               }
               if (lead > 0) persisted = persisted.slice(lead);
             }
-            return tail < persisted.length ? persisted.slice(-tail) : persisted;
+            return tail < persisted.length ? tailSlice(persisted, tail) : persisted;
           }
           return this.getOutput(taskId, tail);
         }
       } else {
         const persisted = await readTaskOutput(outputSessionDir, taskId);
         if (persisted.length > 0) {
-          return tail !== undefined && tail < persisted.length ? persisted.slice(-tail) : persisted;
+          return tail !== undefined && tail < persisted.length ? tailSlice(persisted, tail) : persisted;
         }
       }
     }
@@ -1408,6 +1423,299 @@ export class BackgroundProcessManager {
     this.processes.delete(entry.taskId);
     return true;
   }
+}
+
+// ── boundary-safe tail slices ─────────────────────────────────────────
+
+const ESC = '\u001B';
+
+/**
+ * Largest share of a retained tail the boundary rules may discard.
+ *
+ * Both rules trade content for a head that is whole by construction: rule 1
+ * restarts after the next `\n` and drops the torn line, and rule 2 skips the
+ * remainder of a torn sequence. The trade only pays while the tail keeps a
+ * (non-strict) majority — with one 5000-char line ahead, a 100-unit budget
+ * would come back with the few units after it, and the caller asked for the
+ * newest output, not for a tidy head. Past the bound the raw cut keeps the
+ * content: a string payload stays visible, and a torn CSI or two-byte escape
+ * run keeps the fragment it left in view, because skipping that remainder
+ * would cost more than the fragment it hides — unless the introducer ESC sits
+ * immediately before the head *and* the sequence provably closes, where one
+ * unit of look-back keeps the sequence whole and the fragment never surfaces.
+ * An unclosed run keeps the raw cut: with no terminator to hand the sanitizer,
+ * backing onto its ESC would surface a bare ESC the sanitizer cannot strip.
+ */
+const MAX_TAIL_DROP_SHARE = 0.5;
+
+/**
+ * `text.slice(-tail)` (clamping exactly like `slice` does for `tail` outside
+ * `(0, text.length)`), with the head moved to a boundary no ANSI escape
+ * sequence spans, so the first bytes a reader sees are never a torn fragment.
+ */
+function tailSlice(text: string, tail: number): string {
+  if (tail <= 0 || tail >= text.length) return text;
+  return text.slice(safeTailStart(text, text.length - tail));
+}
+
+/**
+ * Move a tail cut point forward to a boundary no ANSI escape sequence spans.
+ *
+ * A raw `slice(-tail)` can land inside a sequence (`…\u001b[31|m…`), leaving a
+ * fragment (`m`, `0m`, `[31`) whose ESC byte was cut away — the TUI sanitizer
+ * only recognizes complete sequences, so the fragment renders as text. Two
+ * provable rules keep the head clean:
+ *
+ * 1. Line alignment: a CSI sequence cannot contain `\n` (LF is not a
+ *    parameter, intermediate or final byte), so a cut that lands mid-line
+ *    restarts after the next `\n`. The only loss is the torn partial line,
+ *    whose head cannot be trusted; every escape after the newline is whole.
+ *    Bounded by `MAX_TAIL_DROP_SHARE`, so one huge line cannot eat the budget.
+ * 2. Torn-sequence skip: when the retained text is one line (no `\n` after
+ *    the cut), or an OSC/DCS/PM/APC payload spans the newline the cut aligned
+ *    to, the dropped prefix is inspected for a sequence still open at the cut
+ *    — a run of CSI body bytes (0x20–0x3F) reaching back to `ESC [`, an `ESC`
+ *    whose intermediate bytes were torn (`ESC ( B`), or a string-sequence
+ *    opener the cut landed inside. The head then skips exactly the bytes a
+ *    terminal would consume for that sequence, so no visible text is dropped —
+ *    but only while that skip stays within `MAX_TAIL_DROP_SHARE` of the tail.
+ *    A CSI body or escape-intermediate run can be arbitrarily long, so past
+ *    the bound the head keeps the newest bytes and the fragment the raw cut
+ *    left with them — or one unit earlier, onto an introducer ESC sitting
+ *    immediately before the head, so the whole sequence survives and is
+ *    stripped (`withinDropShare`) — but only when the skip proved the sequence
+ *    closed: an unclosed run keeps the raw cut, because with no terminator to
+ *    hand the sanitizer the ESC would surface bare and swallow what follows
+ *    it. So does the head for a string that never ends or ended ahead of the
+ *    cut. A sliver of the tail is worse than a fragment.
+ *
+ * The result never splits a surrogate pair, and a non-empty input never comes
+ * back empty: the head is never below `cut` (a tail never grows) except in two
+ * cases — the cut splits a trailing pair, where dropping the orphan half would
+ * empty the tail, so the head backs onto the pair's first half and the last
+ * character survives; and a torn sequence's introducer ESC sits immediately
+ * before the head *and* the sequence's skip proved it closes, where backing
+ * one unit onto it keeps the sequence whole and the fragment is stripped
+ * instead of surfaced. An unclosed skip takes the raw cut.
+ */
+function safeTailStart(text: string, cut: number): number {
+  if (cut <= 0 || cut >= text.length) return cut;
+  const tail = text.length - cut;
+  let start = cut;
+  if (text[start - 1] !== '\n') {
+    const newline = text.indexOf('\n', start);
+    // Bounded alignment: past `MAX_TAIL_DROP_SHARE` the torn line is worth
+    // more than the clean head, and rule 2 still strips the fragment the raw
+    // cut leaves behind.
+    if (newline !== -1 && newline + 1 - cut <= tail * MAX_TAIL_DROP_SHARE) {
+      start = newline + 1;
+    }
+  }
+  start = skipOpenEscape(text, start);
+  // A cut between the halves of a surrogate pair surfaces as a lone low
+  // surrogate at the head (rendered as U+FFFD): drop the orphan half — unless
+  // the orphan is the last unit, where dropping it would empty the tail of a
+  // non-empty log. Backing onto the pair's first half keeps the character.
+  const head = text.codePointAt(start);
+  if (head !== undefined && head >= 0xdc00 && head <= 0xdfff) {
+    return start + 1 < text.length ? start + 1 : start - 1;
+  }
+  return start;
+}
+
+/** CSI parameter (0x30–0x3F) / intermediate (0x20–0x2F) bytes — everything before the final byte. */
+function isCsiBody(code: number | undefined): boolean {
+  return code !== undefined && code >= 0x20 && code <= 0x3f;
+}
+
+/** CSI final byte (0x40–0x7E) — the sequence ends here. */
+function isCsiFinal(code: number | undefined): boolean {
+  return code !== undefined && code >= 0x40 && code <= 0x7e;
+}
+
+/** OSC / DCS / PM / APC introducers — string sequences ended by BEL or ST. */
+function isStringIntro(intro: string | undefined): boolean {
+  return intro === ']' || intro === 'P' || intro === '^' || intro === '_';
+}
+
+/** ESC-intermediate byte (0x20–0x2F) of a two-byte escape sequence. */
+function isEscapeIntermediate(code: number | undefined): boolean {
+  return code !== undefined && code >= 0x20 && code <= 0x2f;
+}
+
+/** Final byte (0x30–0x7E) that closes a two-byte escape sequence. */
+function isEscapeFinal(code: number | undefined): boolean {
+  return code !== undefined && code >= 0x30 && code <= 0x7e;
+}
+
+/** True when every code point in the half-open range `[from, to)` is an ESC intermediate (0x20–0x2F). */
+function allEscapeIntermediates(text: string, from: number, to: number): boolean {
+  for (let i = from; i < to; i += 1) {
+    if (!isEscapeIntermediate(text.codePointAt(i))) return false;
+  }
+  return true;
+}
+
+/**
+ * When the dropped prefix proves an escape sequence is still open at `cut`,
+ * return the index after its remainder; otherwise return `cut` unchanged.
+ */
+function skipOpenEscape(text: string, cut: number): number {
+  // `ESC [ body… | cut` — the body bytes run straight back to the opener.
+  let run = cut;
+  while (run > 0 && isCsiBody(text.codePointAt(run - 1))) run -= 1;
+  if (run >= 2 && text[run - 1] === '[' && text[run - 2] === ESC) {
+    const skip = skipCsiRest(text, cut);
+    return withinDropShare(text, cut, skip.end, skip.closed);
+  }
+  // `ESC intermediates… | cut` — the introducer was cut away (`[31m`, `m`) or
+  // the torn run is an escape's own intermediate bytes (`ESC ( B`).
+  if (text[run - 1] === ESC && allEscapeIntermediates(text, run, cut)) {
+    return skipEscapeRest(text, cut);
+  }
+  // `ESC ] P ^ _ … | cut` — a string sequence the cut landed inside; payloads
+  // may contain `\n`, so it can span the newline the head aligned to.
+  const open = text.lastIndexOf(ESC, cut - 1);
+  if (open !== -1 && isStringIntro(text[open + 1])) {
+    return stringSequenceHead(text, open, cut);
+  }
+  return cut;
+}
+
+/**
+ * Keep a provable skip only while it stays within `MAX_TAIL_DROP_SHARE` of the
+ * tail that starts at `from`: the skipped bytes are exactly what the reader
+ * loses from the tail it asked for. A CSI body or escape-intermediate run can
+ * be arbitrarily long, so past the bound the raw cut is worth more than the
+ * clean head — except when the sequence's introducer ESC sits immediately
+ * before the head (`…\u001b|[31m…`) *and* `closed` says the skip found the
+ * sequence's terminator, where one unit of look-back keeps the sequence whole
+ * instead: the sanitizer strips it and the visible text is the skip's, for
+ * that one unit rather than a sliver of the tail. An unclosed run must keep
+ * the raw cut even with that ESC one unit ahead: nothing terminates it, so
+ * look-back would hand the reader a bare ESC whose sequence run a terminal
+ * swallows along with the bytes behind it.
+ */
+function withinDropShare(text: string, from: number, target: number, closed: boolean): number {
+  if (target - from <= (text.length - from) * MAX_TAIL_DROP_SHARE) return target;
+  return closed && from > 0 && text[from - 1] === ESC ? from - 1 : from;
+}
+
+/** Where a torn sequence's remainder ends, and whether it provably closed. */
+interface SequenceEnd {
+  /** Index just past the sequence's remainder. */
+  end: number;
+  /** True when a terminator was found inside `text` — false when the run hit `text.length` or a byte that cannot end it. */
+  closed: boolean;
+}
+
+/**
+ * The rest of a CSI sequence whose body was torn at `cut`, with the closure
+ * its skip proved: `closed` holds only when a final byte (0x40–0x7E) was
+ * actually found, so a parameter run that reaches the end of `text` — or stops
+ * on a byte no CSI can end with — reports the sequence as open.
+ */
+function skipCsiRest(text: string, cut: number): SequenceEnd {
+  let end = cut;
+  while (end < text.length && isCsiBody(text.codePointAt(end))) end += 1;
+  const closed = end < text.length && isCsiFinal(text.codePointAt(end));
+  return { end: closed ? end + 1 : end, closed };
+}
+
+/** Index after the escape sequence whose introducer ESC sits at `cut - 1`. */
+function skipEscapeRest(text: string, cut: number): number {
+  const intro = text[cut];
+  if (intro === '[') {
+    const skip = skipCsiRest(text, cut + 1);
+    return withinDropShare(text, cut, skip.end, skip.closed);
+  }
+  if (isStringIntro(intro)) return stringSequenceHead(text, cut - 1, cut + 1);
+  // Two-byte escape: intermediates (0x20–0x2F), then one final byte (0x30–0x7E).
+  let end = cut;
+  while (end < text.length && isEscapeIntermediate(text.codePointAt(end))) end += 1;
+  // Same closure test as the CSI skip: a torn intermediate run that never
+  // reaches a final byte leaves the escape open.
+  const closed = end < text.length && isEscapeFinal(text.codePointAt(end));
+  return withinDropShare(text, cut, closed ? end + 1 : end, closed);
+}
+
+/**
+ * Head index for a cut that lands inside the string sequence opened at `open`.
+ *
+ * `stringEnd` gives the byte a terminal stops at; skipping to it hides the
+ * payload's remainder, which is what a terminal shows — but only while that
+ * costs at most `MAX_TAIL_DROP_SHARE` of the tail. A long OSC 8 URL, or any
+ * payload longer than the budget, would otherwise hand the caller a sliver of
+ * the tail it asked for; a payload whose extent exceeds the budget stays
+ * visible instead. A cut the string already ended ahead of needs no skip, and
+ * an unterminated one must not swallow the tail (`stringPayloadHead`).
+ */
+function stringSequenceHead(text: string, open: number, cut: number): number {
+  const drop = stringEnd(text, open + 2) - cut;
+  if (drop >= 0 && drop <= (text.length - cut) * MAX_TAIL_DROP_SHARE) {
+    return cut + drop;
+  }
+  return stringPayloadHead(text, open, cut);
+}
+
+/**
+ * Head index that keeps a string sequence's payload visible, moving the cut
+ * only past the opener's own bytes when the cut landed inside them.
+ *
+ * A terminal swallows an unterminated payload, but a viewer must never render
+ * a blank body: `tailSlice` backs the tasks-browser tail read, and a log that
+ * opens with an unterminated OSC — a run killed mid-title, a truncated write —
+ * would otherwise come back empty. The head stays at `cut` unless the cut
+ * landed inside the opener (`\u001b]0;` would leave `0;` in front of the
+ * payload), and never reaches `text.length` — the clamp to the last unit steps
+ * back onto the pair's first half when that unit is a trailing surrogate
+ * pair's low half — so the tail is empty only for empty input.
+ */
+function stringPayloadHead(text: string, open: number, cut: number): number {
+  const head = Math.min(Math.max(cut, stringPayloadStart(text, open)), text.length - 1);
+  // `text.length - 1` can be the low half of a trailing surrogate pair; the
+  // head must sit on a code point boundary, or the orphan-half drop in
+  // `safeTailStart` would push it past `text.length` and empty the tail.
+  const code = text.codePointAt(head);
+  return head > 0 && code !== undefined && code >= 0xdc00 && code <= 0xdfff ? head - 1 : head;
+}
+
+/**
+ * Index after the byte that ends the string sequence whose payload starts at
+ * `from` — its BEL or `ESC \` terminator, or a CAN (0x18) / SUB (0x1A), which
+ * a terminal reads as "string over, resume normal parsing". `-1` when the
+ * string never ends.
+ */
+function stringEnd(text: string, from: number): number {
+  for (let i = from; i < text.length; i += 1) {
+    const code = text.codePointAt(i);
+    if (code === 0x07) return i + 1;
+    if (code === 0x1b && text[i + 1] === '\\') return i + 2;
+    if (code === 0x18 || code === 0x1a) return i + 1;
+  }
+  return -1;
+}
+
+/**
+ * Index where the payload of the string sequence opened at `open` starts: for
+ * OSC after `ESC ] Ps ;`, for DCS/PM/APC after their parameter and
+ * intermediate bytes and the final byte that opens the payload.
+ */
+function stringPayloadStart(text: string, open: number): number {
+  let i = open + 2;
+  if (text[open + 1] === ']') {
+    while (i < text.length && isOscParam(text.codePointAt(i))) i += 1;
+    if (text[i] === ';') i += 1;
+    return i;
+  }
+  while (i < text.length && isCsiBody(text.codePointAt(i))) i += 1;
+  const final = text.codePointAt(i);
+  return i < text.length && isCsiFinal(final) ? i + 1 : i;
+}
+
+/** OSC numeric parameter byte (0x30–0x39) — the `Ps` before the `;` separator. */
+function isOscParam(code: number | undefined): boolean {
+  return code !== undefined && code >= 0x30 && code <= 0x39;
 }
 
 // ── persistence shape <-> in-memory shape ──────────────────────────────

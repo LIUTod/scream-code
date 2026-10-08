@@ -1133,3 +1133,266 @@ describe('BackgroundProcessManager — retired late-output budget', () => {
     expect(elapsedMs).toBeLessThan(800);
   }, 20_000);
 });
+
+describe('BackgroundProcessManager — tail slices stay ANSI-safe', () => {
+  let manager: BackgroundProcessManager;
+
+  beforeEach(() => {
+    // Detached (no session dir): the tail comes from the in-memory text.
+    manager = new BackgroundProcessManager();
+  });
+
+  afterEach(() => {
+    manager._reset();
+  });
+
+  /**
+   * Mirrors the TUI's `sanitizeShellOutput` contract: it strips complete
+   * escape sequences only, so any residue left here is rendered to the user
+   * as literal text.
+   */
+  function visibleText(text: string): string {
+    return text
+      .replaceAll(/\u001B\[[0-?]*[ -/]*[@-~]/g, '')
+      .replaceAll(/\u001B\][^\u0007\u001B]*(?:\u0007|\u001B\\)/g, '');
+  }
+
+  async function registerSettled(text: string): Promise<string> {
+    const taskId = manager.register(immediateProcess(0, text), 'printf', 'ansi tail');
+    // The stdout `data` event lands a tick after `register()`; wait until the
+    // chunk is actually captured before reading tails.
+    await vi.waitFor(() => {
+      expect(manager.getOutput(taskId)).toContain(text.slice(-8));
+    });
+    await manager.wait(taskId);
+    await manager.flushOutput(taskId);
+    return taskId;
+  }
+
+  it('aligns a torn CSI cut to the next line when the cut lands mid-line', async () => {
+    const text = `${'x'.repeat(64)}\u001B[31mred first line\nkept second line`;
+    const taskId = await registerSettled(text);
+
+    // `tail = 32` puts the cut right after `\u001B[31`: a raw slice(-32)
+    // starts inside the SGR opener, so `m` survives the sanitizer as text.
+    const output = manager.getOutput(taskId, 32);
+
+    expect(visibleText(output)).toBe('kept second line');
+    expect(output).not.toContain('red first line');
+  });
+
+  it('keeps a tail that already starts on a line boundary', async () => {
+    const taskId = await registerSettled(`first\nsecond\n${'z'.repeat(4)}`);
+
+    // The cut sits exactly on the last line: alignment must not hunt for a
+    // following newline (there is none) and drop the whole tail.
+    expect(manager.getOutput(taskId, 4)).toBe('zzzz');
+  });
+
+  it('drops the torn-sequence remainder when a single line has no newline to align to', async () => {
+    const taskId = await registerSettled(`${'x'.repeat(64)}\u001B[31mred`);
+
+    // The cut lands after `\u001B[31`: `red` is visible text and must survive,
+    // while the `m` that completes the SGR opener must not.
+    expect(manager.getOutput(taskId, 4)).toBe('red');
+  });
+
+  it('drops a torn escape-intermediate fragment (`ESC ( B` shape)', async () => {
+    const taskId = await registerSettled(`${'x'.repeat(64)}\u001B(Bbody`);
+
+    // `tail = 5` keeps `Bbody`; the dropped prefix ends inside `ESC (`.
+    expect(manager.getOutput(taskId, 5)).toBe('body');
+  });
+
+  it('never leaves an orphan surrogate half at the head of a tail slice', async () => {
+    const taskId = await registerSettled(`${'x'.repeat(63)}😀tail`);
+
+    // `tail = 5` splits the surrogate pair; the low half alone would render as
+    // U+FFFD.
+    expect(manager.getOutput(taskId, 5)).toBe('tail');
+  });
+
+  it('keeps a non-empty tail when the cut splits a trailing surrogate pair', async () => {
+    const taskId = await registerSettled(`${'x'.repeat(60)}😀`);
+
+    // `tail = 1` puts the raw cut on the pair's low half; dropping the orphan
+    // would land past `text.length` and hand back an empty tail for a
+    // non-empty log. Backing onto the pair's first half keeps the character.
+    expect(manager.getOutput(taskId, 1)).toBe('😀');
+  });
+
+  it('never empties the tail when the open-string clamp lands on a trailing pair', async () => {
+    // The unterminated-OSC rule clamps its head to `text.length - 1`, the
+    // trailing pair's low half here. The orphan drop used to push the head
+    // past `text.length`, so `tailSlice(…, 1)` returned an empty string.
+    const taskId = await registerSettled('\u001B]0;😀');
+
+    for (const tail of [1, 2, 3, 4, 5]) {
+      const output = manager.getOutput(taskId, tail);
+      expect(output.length).toBeGreaterThan(0);
+      const first = output.codePointAt(0);
+      expect(first !== undefined && first >= 0xdc00 && first <= 0xdfff).toBe(false);
+      expect(output).toBe('😀');
+    }
+  });
+
+  it('applies the same boundary-safe cut on the disk window path (readOutput)', async () => {
+    const sessionDir = mkdtempSync(join(tmpdir(), 'bpm-tail-ansi-'));
+    const diskManager = new BackgroundProcessManager();
+    diskManager.attachSessionDir(sessionDir);
+    try {
+      const text = `${'x'.repeat(64)}\u001B[31mred first line\nkept second line`;
+      const taskId = diskManager.register(immediateProcess(0, text), 'printf', 'ansi tail on disk');
+      await vi.waitFor(() => {
+        expect(diskManager.getOutput(taskId)).toContain(text.slice(-8));
+      });
+      await diskManager.wait(taskId);
+      await diskManager.flushOutput(taskId);
+
+      // Same torn cut as the in-memory case, now through the bounded window read.
+      expect(await diskManager.readOutput(taskId, 32)).toBe('kept second line');
+      // The untailed read still returns the authoritative full log.
+      expect(await diskManager.readOutput(taskId)).toContain('red first line');
+    } finally {
+      diskManager._reset();
+      rmSync(sessionDir, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps the newest bytes when an OSC sequence never terminates', async () => {
+    // A run killed mid-title (or a truncated write) leaves an OSC with no BEL
+    // or ST behind it. A terminal swallows the rest of the log there, but the
+    // tail must not: the open-string rule used to return `text.length`, so
+    // paging a tail (`tasks-browser` reads `tail: 4000`) came back empty.
+    const text = `\u001B]0;build 42%${'p'.repeat(120)}TAILEND`;
+    const taskId = await registerSettled(text);
+
+    expect(manager.getOutput(taskId, 40)).toBe(text.slice(-40));
+  });
+
+  it('skips a torn OSC opener instead of leaking its header into the head', async () => {
+    // `tail = 62` puts the cut between the `0` and the `;` of `\u001B]0;`: the
+    // head starts on the payload, not on the `0;` fragment left by the opener.
+    const text = `\u001B]0;${'A'.repeat(60)}`;
+    const taskId = await registerSettled(text);
+
+    expect(manager.getOutput(taskId, 62)).toBe('A'.repeat(60));
+  });
+
+  it('resumes normal output after a CAN / SUB aborted string sequence', async () => {
+    // CAN (0x18) and SUB (0x1A) abort a string sequence: a terminal drops the
+    // payload and keeps parsing after them, so those bytes are real output and
+    // must stay in the tail.
+    for (const abort of ['\u0018', '\u001A']) {
+      const text = `\u001B]0;${'g'.repeat(200)}${abort}AFTER${'v'.repeat(50)}`;
+      const taskId = await registerSettled(text);
+
+      // The cut lands a few bytes before the abort: the payload's remainder
+      // goes, the output after the abort stays.
+      expect(manager.getOutput(taskId, 60)).toBe(`AFTER${'v'.repeat(50)}`);
+    }
+  });
+
+  it('does not spend more than half the tail aligning to a far-away newline', async () => {
+    // Rule 1 restarts after the next `\n`; with a 5000-char line ahead, a
+    // 100-unit budget would come back as the 9 units after it. The raw cut
+    // keeps the newest output the caller actually asked for.
+    const text = `head\n${'L'.repeat(5000)}\ntail-line`;
+    const taskId = await registerSettled(text);
+
+    expect(manager.getOutput(taskId, 100)).toBe(text.slice(-100));
+  });
+
+  it('does not spend more than half the tail skipping a torn CSI colour run', async () => {
+    // The cut lands inside the parameter run of an SGR sequence whose final
+    // `m` sits 23 units past it. Skipping to that `m` would keep only the 17
+    // units of visible text behind it — 57% of the 40 asked for gone. Past the
+    // bound the raw cut keeps the newest bytes, fragment and all.
+    const text = `${'x'.repeat(200)}\u001B[38;2;255;0;0;48;2;0;255;0;7;4;1mtail-after-colour`;
+    const taskId = await registerSettled(text);
+
+    expect(manager.getOutput(taskId, 40)).toBe(text.slice(-40));
+  });
+
+  it('does not spend more than half the tail on a torn 100-unit CSI parameter run', async () => {
+    // Same torn cut with a synthetic run: the skip would keep only the 8 units
+    // behind the sequence's final byte.
+    const text = `${'y'.repeat(200)}\u001B[${'1'.repeat(100)}mabcdefgh`;
+    const taskId = await registerSettled(text);
+
+    expect(manager.getOutput(taskId, 59)).toBe(text.slice(-59));
+  });
+
+  it('backs onto the introducer ESC when bounding the skip would surface its fragment', async () => {
+    // `tail = 7` makes the `[31m` opener worth 57% of the window, so the skip
+    // is past the bound — but the ESC byte sits one unit before the head, and
+    // keeping it makes the sequence whole, so the sanitizer strips it instead
+    // of the fragment rendering as text.
+    const text = `${'x'.repeat(64)}\u001B[31mred`;
+    const taskId = await registerSettled(text);
+
+    expect(manager.getOutput(taskId, 7)).toBe('\u001B[31mred');
+  });
+
+  it('does not back onto the introducer ESC when the torn CSI never closes', async () => {
+    // `tail = 101` puts the cut right after the `\u001B[` opener, one unit
+    // past the ESC, of a parameter run that reaches the end of the log with no
+    // final byte. The look-back would keep the ESC, but the sequence never
+    // closes, so the sanitizer cannot strip it: the window would start with a
+    // bare ESC and a terminal would swallow the bytes behind it. The raw cut
+    // keeps a text-only head (`[3…`) instead.
+    const text = `${'x'.repeat(10)}\u001B[${'3'.repeat(100)}`;
+    const taskId = await registerSettled(text);
+
+    const output = manager.getOutput(taskId, 101);
+    expect(output).toHaveLength(101);
+    expect(output).toBe(`[${'3'.repeat(100)}`);
+    expect(output.startsWith('\u001B')).toBe(false);
+    // Same contract the TUI applies: with no ESC left in front, nothing can be
+    // swallowed and the run renders as the literal text it is.
+    expect(visibleText(output)).toBe(output);
+  });
+
+  it('returns the same tail from the disk window read and the whole-file read', async () => {
+    const sessionDir = mkdtempSync(join(tmpdir(), 'bpm-tail-window-'));
+    const diskManager = new BackgroundProcessManager();
+    diskManager.attachSessionDir(sessionDir);
+    try {
+      // Three shapes the two reads have to agree on: an unterminated string
+      // opener (its payload is all the log has), an aborted one, and a line
+      // past the alignment bound. Each case is larger than the read window, so
+      // the window read really is a window and not the whole file.
+      const cases = [
+        {
+          text: `\u001B]0;build 42%${'p'.repeat(20_000)}newest-osc-line`,
+          marker: 'newest-osc-line',
+        },
+        {
+          text: `\u001B]0;title${'g'.repeat(8_000)}\u0018newest-after-abort`,
+          marker: 'newest-after-abort',
+        },
+        { text: `head\n${'L'.repeat(5_000)}\ntail-line`, marker: 'tail-line' },
+      ];
+      for (const { text, marker } of cases) {
+        const taskId = diskManager.register(immediateProcess(0, text), 'printf', 'window vs whole file');
+        await vi.waitFor(() => {
+          expect(diskManager.getOutput(taskId)).toContain(text.slice(-8));
+        });
+        await diskManager.wait(taskId);
+        await diskManager.flushOutput(taskId);
+
+        // `readOutput` pages a bounded window off the end of the log;
+        // `getOutput` reads the authoritative file whole.
+        const window = await diskManager.readOutput(taskId, 100);
+        const whole = diskManager.getOutput(taskId, 100);
+
+        // The two reads agree, and the newest bytes survive both of them.
+        expect(window).toBe(whole);
+        expect(whole).toContain(marker);
+      }
+    } finally {
+      diskManager._reset();
+      rmSync(sessionDir, { recursive: true, force: true });
+    }
+  });
+});
