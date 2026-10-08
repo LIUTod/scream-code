@@ -172,7 +172,7 @@ export class GlobTool implements BuiltinTool<GlobInput> {
     if (startsWithDoubleStarPrefix(args.pattern)) {
       let tree: string;
       try {
-        tree = await listDirectory(this.jian, this.workspace.workspaceDir);
+        tree = await listDirectory(this.jian, this.workspace.workspaceDir, signal);
       } catch {
         tree = '(listing unavailable)';
       }
@@ -193,7 +193,7 @@ export class GlobTool implements BuiltinTool<GlobInput> {
       const rootList = allowedRoots.map((d) => `  - ${d}`).join('\n');
       let tree: string;
       try {
-        tree = await listDirectory(this.jian, this.workspace.workspaceDir);
+        tree = await listDirectory(this.jian, this.workspace.workspaceDir, signal);
       } catch {
         tree = '(listing unavailable)';
       }
@@ -239,7 +239,11 @@ export class GlobTool implements BuiltinTool<GlobInput> {
     // so the existing jian.glob path still runs.
     for (const root of searchRoots) {
       try {
-        const iter = this.jian.iterdir(root);
+        // The probe needs at most one entry, and it must not outlive a
+        // cancelled tool call: forward the execution signal so jian ends the
+        // iteration where the abort fired, and cap the budget at that single
+        // entry.
+        const iter = this.jian.iterdir(root, { signal, maxEntries: 1 });
         await iter.next();
         if (typeof iter.return === 'function') {
           await iter.return(undefined);

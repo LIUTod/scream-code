@@ -27,10 +27,13 @@ async function collectEntries(
   jian: Jian,
   dirPath: string,
   maxWidth: number,
+  signal?: AbortSignal,
 ): Promise<{ entries: Entry[]; total: number; readable: boolean }> {
   const all: Entry[] = [];
   try {
-    for await (const fullPath of jian.iterdir(dirPath)) {
+    // `signal` is forwarded so an abandoned tool call stops the walk at jian's
+    // per-entry checkpoint instead of enumerating the directory to the end.
+    for await (const fullPath of jian.iterdir(dirPath, { signal })) {
       const name = basename(fullPath);
       let isDir = false;
       try {
@@ -57,13 +60,22 @@ async function collectEntries(
  * Return a 2-level tree listing of `workDir` suitable for inclusion in a
  * tool error message. Returns `"(empty directory)"` if the directory is
  * empty, or an error marker line if the directory itself is unreadable.
+ *
+ * `signal` is forwarded to the underlying `iterdir` walks (root and child
+ * levels) as cooperative cancellation, so a listing produced for an
+ * abandoned tool call stops emitting entries instead of walking on.
  */
-export async function listDirectory(jian: Jian, workDir: string = jian.getcwd()): Promise<string> {
+export async function listDirectory(
+  jian: Jian,
+  workDir: string = jian.getcwd(),
+  signal?: AbortSignal,
+): Promise<string> {
   const lines: string[] = [];
   const { entries, total, readable } = await collectEntries(
     jian,
     workDir,
     LIST_DIR_ROOT_WIDTH,
+    signal,
   );
   if (!readable) return '[not readable]';
   const remaining = total - entries.length;
@@ -79,7 +91,7 @@ export async function listDirectory(jian: Jian, workDir: string = jian.getcwd())
       lines.push(`${connector}${name}/`);
       const childPrefix = isLast ? '    ' : '│   ';
       const childDir = join(workDir, name);
-      const child = await collectEntries(jian, childDir, LIST_DIR_CHILD_WIDTH);
+      const child = await collectEntries(jian, childDir, LIST_DIR_CHILD_WIDTH, signal);
       if (!child.readable) {
         lines.push(`${childPrefix}└── [not readable]`);
         continue;

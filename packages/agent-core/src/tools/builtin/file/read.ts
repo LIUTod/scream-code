@@ -212,7 +212,7 @@ export class ReadTool implements BuiltinTool<ReadInput> {
           pathClass: this.jian.pathClass(),
           homeDir: this.jian.gethome(),
         }),
-      execute: () => this.execution(args, path),
+      execute: ({ signal }) => this.execution(args, path, signal),
     };
   }
 
@@ -222,6 +222,7 @@ export class ReadTool implements BuiltinTool<ReadInput> {
   // to the normal does-not-exist error.
   private async trySuffixMatchRead(
     args: ReadInput,
+    signal?: AbortSignal,
   ): Promise<ExecutableToolResult | null> {
     const suffixMatch = await findUniqueSuffixMatch(
       args.path,
@@ -236,14 +237,17 @@ export class ReadTool implements BuiltinTool<ReadInput> {
       return null;
     }
     const notice = suffixResolutionNotice(args.path, suffixMatch.displayPath);
-    const inner = await this.execution(args, suffixMatch.absolutePath, true);
+    const inner = await this.execution(args, suffixMatch.absolutePath, signal, true);
     return prependNotice(inner, notice);
   }
 
-  private async fileNotFoundResult(displayPath: string): Promise<ExecutableToolResult> {
+  private async fileNotFoundResult(
+    displayPath: string,
+    signal?: AbortSignal,
+  ): Promise<ExecutableToolResult> {
     let tree: string;
     try {
-      tree = await listDirectory(this.jian, this.workspace.workspaceDir);
+      tree = await listDirectory(this.jian, this.workspace.workspaceDir, signal);
     } catch {
       tree = '(listing unavailable)';
     }
@@ -258,8 +262,12 @@ export class ReadTool implements BuiltinTool<ReadInput> {
   private async execution(
     args: ReadInput,
     safePath: string,
+    signal?: AbortSignal,
     suffixResolved = false,
   ): Promise<ExecutableToolResult> {
+    // Already-cancelled call: do not start reading (or probing for a suffix
+    // match) at all.
+    signal?.throwIfAborted();
     try {
       let stat: StatResult;
       try {
@@ -267,10 +275,10 @@ export class ReadTool implements BuiltinTool<ReadInput> {
       } catch (error) {
         if (isFileNotFoundError(error)) {
           if (!suffixResolved) {
-            const resolved = await this.trySuffixMatchRead(args);
+            const resolved = await this.trySuffixMatchRead(args, signal);
             if (resolved !== null) return resolved;
           }
-          return await this.fileNotFoundResult(args.path);
+          return await this.fileNotFoundResult(args.path, signal);
         }
         throw error;
       }
@@ -304,6 +312,7 @@ export class ReadTool implements BuiltinTool<ReadInput> {
           lineOffset,
           effectiveLimit,
           requestedLines,
+          signal,
         );
       }
       return await this.readForward(
@@ -312,8 +321,14 @@ export class ReadTool implements BuiltinTool<ReadInput> {
         lineOffset,
         effectiveLimit,
         requestedLines,
+        signal,
       );
     } catch (error) {
+      // An abort must not be swallowed into a retryable-looking result: the
+      // runtime (runRunnableToolCall) routes a thrown AbortError to
+      // abortedToolOutput with "do not retry" semantics, exactly as GlobTool
+      // does for its own signal path.
+      if (signal?.aborted) throw error;
       if (isTextDecodeError(error)) {
         return { isError: true, output: notReadableFileOutput(args.path) };
       }
@@ -330,6 +345,7 @@ export class ReadTool implements BuiltinTool<ReadInput> {
     lineOffset: number,
     effectiveLimit: number,
     requestedLines: number,
+    signal?: AbortSignal,
   ): Promise<ExecutableToolResult> {
     const selectedEntries: ReadLineEntry[] = [];
     const flags: LineEndingFlags = { hasCrLf: false, hasLf: false, hasLoneCr: false };
@@ -342,7 +358,7 @@ export class ReadTool implements BuiltinTool<ReadInput> {
     let maxLinesReached = false;
     let collectionClosed = false;
 
-    for await (const rawLine of this.jian.readLines(safePath, { errors: 'strict' })) {
+    for await (const rawLine of this.jian.readLines(safePath, { errors: 'strict', signal })) {
       if (containsNulByte(rawLine)) {
         return { isError: true, output: notReadableFileOutput(displayPath) };
       }
@@ -372,6 +388,13 @@ export class ReadTool implements BuiltinTool<ReadInput> {
         collectionClosed = true;
       }
     }
+
+    // jian's cancellation is graceful (the iteration just ends), so an
+    // aborted read is indistinguishable from EOF here. A cancelled read must
+    // not be reported — nor hand back a half-file anchor — as a completed
+    // one: re-check so it surfaces as AbortError and the catch in `execution`
+    // re-throws it for the runtime's aborted-tool path.
+    signal?.throwIfAborted();
 
     const lineEndingStyle = lineEndingStyleFromFlags(flags);
     const anchor = (lineEndingStyle === 'crlf' ? normalizedHash : rawHash).digest('hex').slice(0, 8);
@@ -418,6 +441,7 @@ export class ReadTool implements BuiltinTool<ReadInput> {
     lineOffset: number,
     effectiveLimit: number,
     requestedLines: number,
+    signal?: AbortSignal,
   ): Promise<ExecutableToolResult> {
     const tailCount = Math.abs(lineOffset);
     const entries: ReadLineEntry[] = [];
@@ -426,7 +450,7 @@ export class ReadTool implements BuiltinTool<ReadInput> {
     const normalizedHash = createHash('sha256');
     let currentLineNo = 0;
 
-    for await (const rawLine of this.jian.readLines(safePath, { errors: 'strict' })) {
+    for await (const rawLine of this.jian.readLines(safePath, { errors: 'strict', signal })) {
       if (containsNulByte(rawLine)) {
         return { isError: true, output: notReadableFileOutput(displayPath) };
       }
@@ -442,6 +466,10 @@ export class ReadTool implements BuiltinTool<ReadInput> {
         entries.shift();
       }
     }
+
+    // Mirror of readForward: a graceful stop mid-tail must not be reported as
+    // a completed tail read with an anchor hashed from a partial prefix.
+    signal?.throwIfAborted();
 
     const lineEndingStyle = lineEndingStyleFromFlags(flags);
     const anchor = (lineEndingStyle === 'crlf' ? normalizedHash : rawHash).digest('hex').slice(0, 8);

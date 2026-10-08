@@ -244,4 +244,40 @@ describe('listDirectory', () => {
     const tree = await listDirectory(jian, '/w');
     expect(tree).toBe('└── only_dir/\n    └── child.txt');
   });
+
+  it('forwards the abort signal to iterdir and stops the listing where the abort fired', async () => {
+    const controller = new AbortController();
+    const seenSignals: Array<AbortSignal | undefined> = [];
+    const jian = createFakeJian({
+      iterdir: (async function* (p: string, options?: { signal?: AbortSignal }) {
+        seenSignals.push(options?.signal);
+        for (let i = 0; i < 50; i += 1) {
+          if (options?.signal?.aborted === true) return;
+          yield `${p}/file_${String(i).padStart(2, '0')}.txt`;
+          if (i === 1) controller.abort();
+        }
+      }) as unknown as Jian['iterdir'],
+      stat: (async () => ({
+        stMode: 0o100_644,
+        stIno: 1,
+        stDev: 1,
+        stNlink: 1,
+        stUid: 0,
+        stGid: 0,
+        stSize: 1,
+        stAtime: 0,
+        stMtime: 0,
+        stCtime: 0,
+      })) as unknown as Jian['stat'],
+    });
+
+    const tree = await listDirectory(jian, '/w', controller.signal);
+
+    expect(seenSignals[0]).toBe(controller.signal);
+    // The walk stopped at the abort (2 entries), not after all 50.
+    expect(tree).toContain('file_00.txt');
+    expect(tree).toContain('file_01.txt');
+    expect(tree).not.toContain('file_02.txt');
+    expect(tree).not.toContain('more entries');
+  });
 });

@@ -259,7 +259,7 @@ describe('ReadTool', () => {
         'external'),
     );
     expect(readBytes).toHaveBeenCalledWith('/tmp/external.txt', MEDIA_SNIFF_BYTES);
-    expect(readLines).toHaveBeenCalledWith('/tmp/external.txt', { errors: 'strict' });
+    expect(readLines).toHaveBeenCalledWith('/tmp/external.txt', { errors: 'strict', signal });
   });
 
   it('returns a friendly error for missing files before sniffing bytes', async () => {
@@ -346,7 +346,10 @@ describe('ReadTool', () => {
         'home note'),
     );
     expect(readBytes).toHaveBeenCalledWith('/home/test/notes/today.txt', MEDIA_SNIFF_BYTES);
-    expect(readLines).toHaveBeenCalledWith('/home/test/notes/today.txt', { errors: 'strict' });
+    expect(readLines).toHaveBeenCalledWith('/home/test/notes/today.txt', {
+      errors: 'strict',
+      signal,
+    });
   });
 
   it('blocks sensitive files independently from workspace access', async () => {
@@ -585,6 +588,80 @@ describe('ReadTool', () => {
     expect(consumed).toBe(MAX_LINES + 5);
     expect(readBytes).toHaveBeenCalledWith('/tmp/large.txt', MEDIA_SNIFF_BYTES);
     expect(readText).not.toHaveBeenCalled();
+  });
+
+  it('forwards the execution signal into jian.readLines and stops the read on abort', async () => {
+    // Behavioural contract: jian polls the signal per chunk/line and ends the
+    // iteration where it fires, so a forwarded signal stops the read early.
+    // The fake mirrors that contract and aborts the caller's controller once
+    // three lines went through.
+    const controller = new AbortController();
+    let seenSignal: AbortSignal | undefined;
+    let linesConsumed = 0;
+    const readLines = vi.fn<Jian['readLines']>().mockImplementation(async function* readLines(
+      _path,
+      options,
+    ) {
+      seenSignal = options?.signal;
+      for (let i = 1; i <= 100; i += 1) {
+        if (options?.signal?.aborted === true) return;
+        linesConsumed = i;
+        yield `line ${String(i)}\n`;
+        if (i === 3) controller.abort();
+      }
+    });
+    const tool = new ReadTool(
+      createFakeJian({
+        stat: vi.fn<Jian['stat']>().mockResolvedValue(REGULAR_FILE_STAT),
+        readBytes: vi.fn<Jian['readBytes']>().mockResolvedValue(Buffer.from('text header')),
+        readLines,
+      }),
+      PERMISSIVE_WORKSPACE,
+    );
+
+    await expect(
+      executeTool(tool, { ...context({ path: '/tmp/cancel.txt' }), signal: controller.signal }),
+    ).rejects.toThrow();
+
+    expect(seenSignal).toBe(controller.signal);
+    // Stopped where the signal fired (line 3), not after the full 100 lines.
+    expect(linesConsumed).toBe(3);
+  });
+
+  it('forwards the execution signal into jian.readLines on the tail path too', async () => {
+    const controller = new AbortController();
+    let seenSignal: AbortSignal | undefined;
+    let linesConsumed = 0;
+    const readLines = vi.fn<Jian['readLines']>().mockImplementation(async function* readLines(
+      _path,
+      options,
+    ) {
+      seenSignal = options?.signal;
+      for (let i = 1; i <= 100; i += 1) {
+        if (options?.signal?.aborted === true) return;
+        linesConsumed = i;
+        yield `line ${String(i)}\n`;
+        if (i === 3) controller.abort();
+      }
+    });
+    const tool = new ReadTool(
+      createFakeJian({
+        stat: vi.fn<Jian['stat']>().mockResolvedValue(REGULAR_FILE_STAT),
+        readBytes: vi.fn<Jian['readBytes']>().mockResolvedValue(Buffer.from('text header')),
+        readLines,
+      }),
+      PERMISSIVE_WORKSPACE,
+    );
+
+    await expect(
+      executeTool(tool, {
+        ...context({ path: '/tmp/cancel-tail.txt', line_offset: -5 }),
+        signal: controller.signal,
+      }),
+    ).rejects.toThrow();
+
+    expect(seenSignal).toBe(controller.signal);
+    expect(linesConsumed).toBe(3);
   });
 
   it('caps default reads at MAX_LINES', async () => {

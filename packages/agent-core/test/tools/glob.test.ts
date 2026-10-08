@@ -386,6 +386,62 @@ describe('GlobTool', () => {
     expect(result.output).toContain('No matches found');
   });
 
+  it('forwards the execution signal and a one-entry budget into the pre-check iterdir', async () => {
+    // The existence probe pulls exactly one entry; forwarding the signal ties
+    // the probe to the tool call's cancellation and maxEntries pins its budget
+    // to that single entry.
+    const controller = new AbortController();
+    const iterdirCalls: Array<{ signal?: AbortSignal; maxEntries?: number } | undefined> = [];
+    const iterdir = vi.fn(
+      (_path: string, options?: { signal?: AbortSignal; maxEntries?: number }) => {
+        iterdirCalls.push(options);
+        return asyncPaths(['/workspace/src']);
+      },
+    );
+    const glob = vi.fn().mockReturnValue(asyncPaths([]));
+    const tool = new GlobTool(createFakeJian({ iterdir, glob }), workspace);
+
+    const result = await executeTool(tool, {
+      ...context({ pattern: '*.ts' }),
+      signal: controller.signal,
+    });
+
+    expect(result.output).toContain('No matches found');
+    expect(iterdirCalls).toEqual([{ signal: controller.signal, maxEntries: 1 }]);
+  });
+
+  it('forwards the execution signal into the listing iterdir calls on the rejection path', async () => {
+    // The "**/" rejection renders a workspace listing through listDirectory;
+    // its iterdir walks (root level and one child) must carry the same signal
+    // so an abandoned call stops listing too.
+    const controller = new AbortController();
+    const iterdirCalls: Array<{ signal?: AbortSignal; maxEntries?: number } | undefined> = [];
+    const iterdir = vi.fn(
+      (path: string, options?: { signal?: AbortSignal; maxEntries?: number }) => {
+        iterdirCalls.push(options);
+        return path === '/workspace' ? asyncPaths(['/workspace/src']) : asyncPaths([]);
+      },
+    );
+    const glob = vi.fn();
+    const tool = new GlobTool(
+      createFakeJian({
+        iterdir,
+        glob,
+        stat: vi.fn().mockResolvedValue(stat(0, 0o040000)),
+      }),
+      workspace,
+    );
+
+    const result = await executeTool(tool, {
+      ...context({ pattern: '**/*.py' }),
+      signal: controller.signal,
+    });
+
+    expect(result).toMatchObject({ isError: true });
+    expect(glob).not.toHaveBeenCalled();
+    expect(iterdirCalls).toEqual([{ signal: controller.signal }, { signal: controller.signal }]);
+  });
+
   it('reports "does not exist" when the search directory is missing', async () => {
     // Real jian.glob silently returns empty for a missing root because
     // its _globWalk catches readdir failures. The tool now pre-checks

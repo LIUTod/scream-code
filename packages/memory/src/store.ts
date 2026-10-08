@@ -1159,9 +1159,13 @@ export function sharedMemoStore(projectDir: string, log?: MemoryMemoStoreLogger)
 }
 
 /**
- * Drop a home directory's shared store and close its handle. Intended for
- * tests and process shutdown — after this, the next `sharedMemoStore` call
- * builds a fresh instance.
+ * Drop a home directory's shared store and close its handle.
+ *
+ * Positioning: a test-isolation utility and a future process-exit hook. The
+ * production exit paths deliberately do not call it today — process exit
+ * relies on the OS reclaiming the sqlite handle — so having no production
+ * call site is expected, not an oversight. After this call the next
+ * `sharedMemoStore` builds a fresh instance.
  */
 export function closeSharedMemoStore(projectDir: string): void {
   const store = sharedStores.get(projectDir);
