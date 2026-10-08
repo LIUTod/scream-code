@@ -2,13 +2,24 @@
  * Session close-out checklist.
  *
  * `Session.disposables` is the mechanism that keeps `close()` complete, and it
- * is checked from both directions here: the names snapshot freezes the full
- * cleanup list so a dropped, renamed or invented registration fails instead of
- * leaking, while the release case pairs each collaborator the session actually
- * holds (log sink, mcp, cron, bus, ...) with the registration that owns it and
- * observes exactly one release per collaborator through `close()`. The cases
- * below also observe two cleanups that used to be pure memory leaks — the shell
- * tool's pending-task map and the subagent message bus.
+ * is checked from both directions here: the names snapshot freezes every
+ * registered step — a dropped, renamed or invented registration fails instead
+ * of leaking — while the release case pairs the collaborators this session
+ * holds today (log sink, mcp, cron, bus, ...) with the registration that owns
+ * each one and observes exactly one release per collaborator through `close()`.
+ * The cases below also observe two cleanups that used to be pure memory leaks —
+ * the shell tool's pending-task map and the subagent message bus.
+ *
+ * Both checks are bounded by their inputs, and stating that is the point: the
+ * registry enumerates the steps that registered, not the resources that exist,
+ * so a resource the session acquires without a registration — the proverbial
+ * ninth collaborator — fails neither check; and the release list is hand-kept,
+ * so a freshly registered step is covered only once its entry is added there
+ * (the snapshot flags the new registration, not the missing release case). No
+ * field in the session object graph is marked as needing teardown, so telling
+ * "must be released" from "plain field" stays a code-review job; what is
+ * machine-checked is every registration this checklist contains and every
+ * release the listed collaborators get.
  *
  * The pending-task map is process-wide while sessions are not, so its teardown
  * cases also pin the ownership contract: what an agent's Bash tool parks is
@@ -42,8 +53,10 @@ import {
 
 /**
  * The close-out checklist every session registers at construction, in
- * registration order. A new teardown step must appear here — making the
- * omission a test failure is the point of the snapshot.
+ * registration order. A registered step must appear here — the snapshot fails
+ * until it does — and that is its whole reach: it freezes registrations, so a
+ * resource that should have one but never got registered is invisible to it
+ * (the file header states the shared blind spot).
  *
  * Release order is the reverse of this list, which is what makes the order
  * load-bearing: `log` sitting first means the session log sink is still open
@@ -175,12 +188,17 @@ describe('Session close-out checklist', () => {
     });
     const { agent } = await session.createAgent({ type: 'main' });
 
-    // The positive direction of the snapshot above, in behavioural form: every
-    // teardown-relevant collaborator the session holds is paired with the
-    // registration that owns it, and closing the session must release each one
-    // exactly once. A collaborator nobody registered is never released (0
-    // calls) and one registered twice is released twice (2 calls) — neither is
-    // visible in a name list, which only knows the names it was told about.
+    // The behavioural half of the snapshot above: each collaborator the
+    // checklist knows about today is paired with the registration that owns it,
+    // and closing the session must release each one exactly once. Wiring drift
+    // among these eight is a failure — a registration dropped or turned into a
+    // no-op leaves its spy at 0 calls, a collaborator released by two steps
+    // reaches 2 — and the name filter above keeps each listed collaborator
+    // matched to exactly one registration. The list itself is hand-kept,
+    // though: a ninth collaborator grown without a registration has no spy
+    // here to notice it, and a new registration is covered only once its entry
+    // is added below. That residue needs review, not this case (see the file
+    // header).
     vi.stubEnv(BACKGROUND_KEEP_ALIVE_ON_EXIT_ENV, 'false');
     try {
       const releases = [
