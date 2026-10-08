@@ -96,6 +96,13 @@ export class TranscriptController {
    *  replacing the oldest rows, so a length-only key can go stale. */
   private ingestCount = 0;
 
+  /** Contributions of the rows the entry cap has already folded out of the
+   *  array. Kept separate from the rows still held, so aggregates that must
+   *  stay monotonic over a long session (the sidebar's session stats) can add
+   *  them back — see {@link getFoldedEntryCounts}. */
+  private foldedTurns = 0;
+  private foldedToolCalls = 0;
+
   /** Max live transcript children before the oldest are folded into the
    *  committed single-line summary. Overridable via SCREAM_TRANSCRIPT_LIVE_LIMIT
    *  (mirrors a commit-fold approach for bounding ultra-long sessions). */
@@ -354,6 +361,18 @@ export class TranscriptController {
     return this.ingestCount;
   }
 
+  /**
+   * What the entry cap has already folded out of `state.transcriptEntries`:
+   * user turns and real tool calls (compression markers ride kind 'tool_call'
+   * but are not invocations — same rule as the retained-row scan). Aggregates
+   * that must be monotonic over a long session — the sidebar's session stats —
+   * add these to the rows the array still holds, because the array stops
+   * holding the oldest ones at the cap.
+   */
+  getFoldedEntryCounts(): { turns: number; toolCalls: number } {
+    return { turns: this.foldedTurns, toolCalls: this.foldedToolCalls };
+  }
+
   appendEntry(entry: TranscriptEntry): Component | null {
     // Ingest through the shared bounded ingress: a tool-group entry's
     // `result.output` can be huge (model-side bounding only shapes what the
@@ -407,6 +426,18 @@ export class TranscriptController {
     // One entry more than the overflow: that slot becomes the stub's, so the
     // array — stub included — lands back within the cap after the unshift.
     const dropped = entries.splice(0, entries.length - MAX_TRANSCRIPT_ENTRIES + 1);
+    // The dropped rows leave the array but they still happened: carry their
+    // kind contributions so a counter over the whole session does not fall
+    // back with them. A head stub contributes nothing — it is a status row —
+    // so it needs no special case here.
+    for (const entry of dropped) {
+      if (entry.kind === 'user') {
+        this.foldedTurns += 1;
+      } else if (entry.kind === 'tool_call' && entry.compactionData === undefined) {
+        // Compression markers ride kind 'tool_call' but are not invocations.
+        this.foldedToolCalls += 1;
+      }
+    }
     const folded = dropped.length - (isStub ? 1 : 0);
     entries.unshift(makeCollapseStub(stubCount(head) + folded));
     // The fold changes the composition without netting a length change (the
@@ -495,6 +526,10 @@ export class TranscriptController {
     // list is replaced, so a flush cannot leave a row behind in the new session.
     streamingUI.flushPendingApprovals();
     state.transcriptEntries = [];
+    // A fresh transcript starts with no folded history either: the row
+    // contributions the cap was carrying belong to the session that just ended.
+    this.foldedTurns = 0;
+    this.foldedToolCalls = 0;
     streamingUI.disposeActiveCompactionBlock();
     streamingUI.resetLiveText();
     streamingUI.resetToolUi();

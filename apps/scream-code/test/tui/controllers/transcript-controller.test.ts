@@ -774,3 +774,65 @@ describe('TranscriptController entry-count cap (collapse stub)', () => {
     expect(controller.getIngestCount()).toBe(atCap + 2);
   });
 });
+
+describe('TranscriptController folded-entry contributions', () => {
+  const statusRow = (content: string): TranscriptEntry =>
+    entry({ kind: 'status', content });
+
+  it('carries the contributions of rows the cap folds out of the array', () => {
+    const { controller, state } = makeHost();
+    controller.appendEntry(entry({ kind: 'user', content: 'q-0' }));
+    controller.appendEntry(entry({ kind: 'user', content: 'q-1' }));
+    controller.appendEntry(
+      entry({ kind: 'tool_call', content: 'Bash-1', toolCallData: toolCallData() }),
+    );
+    for (let i = 0; i < MAX_TRANSCRIPT_ENTRIES - 3; i += 1) {
+      controller.appendEntry(statusRow(`row-${String(i)}`));
+    }
+    // Exactly at the cap: nothing has folded yet.
+    expect(state.transcriptEntries).toHaveLength(MAX_TRANSCRIPT_ENTRIES);
+    expect(controller.getFoldedEntryCounts()).toEqual({ turns: 0, toolCalls: 0 });
+
+    // Two overflows fold four rows out — the two turns and the tool call among
+    // them — and their contributions survive the array dropping them.
+    controller.appendEntry(statusRow('overflow-1'));
+    controller.appendEntry(statusRow('overflow-2'));
+
+    expect(state.transcriptEntries.some((e) => e.content === 'q-0')).toBe(false);
+    expect(state.transcriptEntries.some((e) => e.content === 'Bash-1')).toBe(false);
+    expect(controller.getFoldedEntryCounts()).toEqual({ turns: 2, toolCalls: 1 });
+    // The stub's own count and the retained rows still account for every
+    // appended row — 3 rows out (the two turns and the tool call), 502 in.
+    const folded = parseCollapsedEntries(state.transcriptEntries[0]!.content);
+    expect(folded).toBe(3);
+    expect(folded + state.transcriptEntries.length - 1).toBe(MAX_TRANSCRIPT_ENTRIES + 2);
+  });
+
+  it('never counts compression markers, folded or retained', () => {
+    const { controller } = makeHost();
+    controller.appendEntry({
+      ...entry({ kind: 'tool_call', content: 'auto-compact' }),
+      compactionData: { tokensBefore: 100, tokensAfter: 10 },
+    });
+    for (let i = 0; i < MAX_TRANSCRIPT_ENTRIES - 1; i += 1) {
+      controller.appendEntry(statusRow(`row-${String(i)}`));
+    }
+
+    controller.appendEntry(statusRow('overflow'));
+
+    // The marker rode the fold — a real invocation would have counted.
+    expect(controller.getFoldedEntryCounts()).toEqual({ turns: 0, toolCalls: 0 });
+  });
+
+  it('starts the contributions over with the session', () => {
+    const { controller } = makeHost();
+    for (let i = 0; i < MAX_TRANSCRIPT_ENTRIES + 2; i += 1) {
+      controller.appendEntry(entry({ kind: 'user', content: `q-${String(i)}` }));
+    }
+    expect(controller.getFoldedEntryCounts().turns).toBeGreaterThan(0);
+
+    controller.clearAndRedraw();
+
+    expect(controller.getFoldedEntryCounts()).toEqual({ turns: 0, toolCalls: 0 });
+  });
+});

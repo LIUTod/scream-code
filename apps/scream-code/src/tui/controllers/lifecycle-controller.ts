@@ -460,6 +460,13 @@ export class LifecycleController {
       // they are not real tool invocations.
       if (entry.kind === 'tool_call' && entry.compactionData === undefined) toolCalls += 1;
     }
+    // The array is capped: once it trips, the oldest rows are folded into a
+    // stub and their contributions leave the scan with them. Add back what the
+    // cap has already folded so a long session's counters keep counting
+    // history instead of falling back at the retention point.
+    const foldedAway = this.host.transcriptController.getFoldedEntryCounts();
+    turns += foldedAway.turns;
+    toolCalls += foldedAway.toolCalls;
     // Subagent output is separate from the main agent's output; sum it in so
     // the sidebar total matches what the user actually pays for.
     let subagentOutput = 0;

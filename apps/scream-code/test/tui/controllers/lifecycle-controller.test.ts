@@ -55,7 +55,10 @@ function createMockHost(overrides: {
     sessionReplay: {} as SessionReplayRenderer,
     transcriptController:
       overrides.transcriptController ??
-      ({ getIngestCount: () => 0 } as unknown as TranscriptController),
+      ({
+        getIngestCount: () => 0,
+        getFoldedEntryCounts: () => ({ turns: 0, toolCalls: 0 }),
+      } as unknown as TranscriptController),
     onEmergencyExit: vi.fn((exitCode?: number) => {
       throw new Error(`emergency-exit-${exitCode ?? 129}`);
     }) as unknown as LifecycleControllerHost['onEmergencyExit'],
@@ -328,23 +331,109 @@ describe('LifecycleController', () => {
       const countBefore = transcript.getIngestCount();
       const before = readStats();
       expect(before.turns).toBe(MAX_TRANSCRIPT_ENTRIES);
+      expect(before.toolCalls).toBe(0);
 
       // One more ingest trips the cap: the fold makes room for the stub by
       // dropping the two oldest rows, so the array lands back on the same
       // length with a different composition. A length-only memo key would
-      // serve `before` again here.
+      // serve `before` again here, and a scan-only count would fall back with
+      // the dropped turns.
       transcript.ingestEntry({
-        id: 'a-1',
-        kind: 'assistant',
+        id: 't-1',
+        kind: 'tool_call',
         renderMode: 'plain',
-        content: 'done',
+        content: 'Bash',
+        toolCallData: { id: 'tc-1', name: 'Bash', args: { command: 'ls' } },
       });
       expect(state.transcriptEntries.length).toBe(lengthBefore);
       expect(transcript.getIngestCount()).toBeGreaterThan(countBefore);
 
       const after = readStats();
-      expect(after.turns).toBe(MAX_TRANSCRIPT_ENTRIES - 2);
-      expect(after.turns).not.toBe(before.turns);
+      // Turns from the folded rows are still counted — nothing fell back — and
+      // the new tool call is counted too, which proves the memo recomputed
+      // rather than serving `before`.
+      expect(after.turns).toBe(before.turns);
+      expect(after.toolCalls).toBe(1);
+    });
+
+    it('keeps counting past the cap, monotonic and true to every ingest', () => {
+      const { transcript, readStats } = makeStatsHarness();
+      const userEntry = (i: number): TranscriptEntry => ({
+        id: `u-${String(i)}`,
+        kind: 'user',
+        renderMode: 'plain',
+        content: `need ${String(i)}`,
+      });
+      const toolEntry = (i: number): TranscriptEntry => ({
+        id: `t-${String(i)}`,
+        kind: 'tool_call',
+        renderMode: 'plain',
+        content: 'Bash',
+        toolCallData: { id: `tc-${String(i)}`, name: 'Bash', args: { command: 'ls' } },
+      });
+      const statusEntry = (i: number): TranscriptEntry => ({
+        id: `s-${String(i)}`,
+        kind: 'status',
+        renderMode: 'plain',
+        content: `row-${String(i)}`,
+      });
+
+      let turns = 0;
+      let toolCalls = 0;
+      let previous = readStats();
+      for (let i = 0; i < 5_000; i += 1) {
+        switch (i % 5) {
+          case 0:
+          case 1:
+            transcript.ingestEntry(userEntry(i));
+            turns += 1;
+            break;
+          case 2:
+            transcript.ingestEntry(toolEntry(i));
+            toolCalls += 1;
+            break;
+          default:
+            transcript.ingestEntry(statusEntry(i));
+            break;
+        }
+        const stats = readStats();
+        // The regression this pins: past the cap every ingest pushed one row
+        // out of the array, so the counters stopped following history.
+        expect(stats.turns).toBeGreaterThanOrEqual(previous.turns);
+        expect(stats.toolCalls).toBeGreaterThanOrEqual(previous.toolCalls);
+        previous = stats;
+      }
+
+      expect(previous.turns).toBe(turns);
+      expect(previous.toolCalls).toBe(toolCalls);
+      expect(turns).toBe(2_000);
+      expect(toolCalls).toBe(1_000);
+    });
+
+    it('matches the array-derived values while the cap is not reached', () => {
+      const { state, transcript, readStats } = makeStatsHarness();
+      for (let i = 0; i < 300; i += 1) {
+        transcript.ingestEntry({
+          id: `e-${String(i)}`,
+          kind: i % 3 === 0 ? 'user' : i % 3 === 1 ? 'tool_call' : 'status',
+          renderMode: 'plain',
+          content: `row-${String(i)}`,
+          ...(i % 3 === 1
+            ? { toolCallData: { id: `tc-${String(i)}`, name: 'Bash', args: { command: 'ls' } } }
+            : {}),
+        });
+      }
+
+      // Below the cap this is the old derivation, value for value.
+      const scan = (kind: TranscriptEntry['kind']): number =>
+        state.transcriptEntries.filter((e) => e.kind === kind && e.compactionData === undefined)
+          .length;
+      const stats = readStats();
+      expect(transcript.getFoldedEntryCounts()).toEqual({ turns: 0, toolCalls: 0 });
+      expect(stats.turns).toBe(scan('user'));
+      expect(stats.toolCalls).toBe(scan('tool_call'));
+      expect(stats.turns).toBe(100);
+      expect(stats.toolCalls).toBe(100);
     });
   });
 });
