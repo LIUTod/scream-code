@@ -365,6 +365,10 @@ export class TasksBrowserController {
     }
     const current = state.tasksBrowser;
     if (current === undefined || current !== browser) return;
+    // A second Enter/O (or key auto-repeat) can land inside the fetch window:
+    // the entry guard ran before the await, so re-check here — otherwise the
+    // extra viewer replaces the first one below and its poll interval leaks.
+    if (current.viewer !== undefined) return;
 
     const info = this.host.backgroundTasks.get(taskId);
     const viewer = new TaskOutputViewer(
@@ -380,7 +384,13 @@ export class TasksBrowserController {
       state.terminal,
     );
 
-    const savedBrowserLayout = state.layoutRoot;
+    // The viewer replaces the *current* layout root — while the browser is
+    // open that is `browser.component`. `state.layoutRoot` still points at
+    // the main layout (only the lifecycle controller ever writes it), and
+    // restoring that here drops the browser out of the render tree while its
+    // focus survives: the screen looks like the main TUI, typing stays dead,
+    // and a second Esc is needed to really leave.
+    const savedBrowserLayout: Component = browser.component;
     state.ui.setLayoutRoot(viewer);
     state.ui.setFocus(viewer);
     state.ui.requestRender(true);
