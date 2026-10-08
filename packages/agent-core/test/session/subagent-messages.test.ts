@@ -190,15 +190,48 @@ describe('SubagentMessageBus', () => {
     }
   });
 
-  it('dropMailbox releases one agent slot without touching siblings', () => {
-    const bus = new SubagentMessageBus();
-    msg(bus, 'child-a', 'queue', 'for-a', { inFlightLimit: 10 });
-    msg(bus, 'child-b', 'queue', 'for-b', { inFlightLimit: 10 });
-    expect(bus.mailboxCount).toBe(2);
-    bus.dropMailbox('child-a');
-    expect(bus.mailboxCount).toBe(1);
-    expect(bus.poll('child-a')).toEqual([]);
-    expect(bus.poll('child-b').map((m) => m.text)).toEqual(['for-b']);
-    expect(bus.mailboxCount).toBe(0);
+  it('keeps accepted mail until the next ordinary access reclaims it past the deadline', () => {
+    vi.useFakeTimers();
+    try {
+      const bus = new SubagentMessageBus();
+      // Mail for a child that has already finished: nothing polls this mailbox
+      // again, which is exactly the state the child's terminal used to purge —
+      // and the case where purging destroyed accepted mail.
+      msg(bus, 'child-a', 'queue', 'undelivered', { deadline: NOW + 1000 });
+      expect(bus.mailboxCount).toBe(1);
+      expect(bus.activeCount('child-a')).toBe(1);
+
+      vi.setSystemTime(NOW + 1001);
+      // An ordinary access FOR ANOTHER AGENT reclaims the dead mailbox: a
+      // finished child must not leave one Map entry behind per run.
+      expect(bus.activeCount('child-b')).toBe(0);
+      expect(bus.mailboxCount).toBe(0);
+      expect(bus.poll('child-a')).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not let expired mail hold an in-flight slot', () => {
+    vi.useFakeTimers();
+    try {
+      const bus = new SubagentMessageBus();
+      const first = msg(bus, 'child-a', 'queue', 'first', {
+        inFlightLimit: 1,
+        deadline: NOW + 1000,
+      });
+      expect(first.status).toBe('accepted');
+
+      vi.setSystemTime(NOW + 1001);
+      // Undeliverable mail must not jam the channel the parent still needs.
+      const second = msg(bus, 'child-a', 'queue', 'second', {
+        inFlightLimit: 1,
+        deadline: NOW + 2000,
+      });
+      expect(second.status).toBe('accepted');
+      expect(bus.poll('child-a').map((m) => m.text)).toEqual(['second']);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

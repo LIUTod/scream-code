@@ -545,7 +545,7 @@ describe('SessionSubagentHost', () => {
     ]);
   });
 
-  it('evicts the child from Session.agents and drops its mailbox at terminal', async () => {
+  it('evicts the child from Session.agents at terminal', async () => {
     const parent = testAgent();
     parent.configure();
     await parent.rpc.setPermission({ mode: 'yolo' });
@@ -576,7 +576,75 @@ describe('SessionSubagentHost', () => {
 
     expect(session.agents.has(handle.agentId)).toBe(false);
     expect(session.agents.size).toBe(1); // only 'main' remains
+    // No mail was ever queued for this child, so its mailbox never existed —
+    // the terminal evicts the live instance, not a message queue.
     expect(bus.mailboxCount).toBe(0);
+  });
+
+  it('keeps a message accepted during the run when the child ends undelivered', async () => {
+    let releaseStart!: () => void;
+    let startEntered!: () => void;
+    const startGate = new Promise<void>((resolve) => {
+      releaseStart = resolve;
+    });
+    const entered = new Promise<void>((resolve) => {
+      startEntered = resolve;
+    });
+    const trigger = vi.fn(async (event: string) => {
+      if (event === 'SubagentStart') {
+        startEntered();
+        await startGate;
+      }
+      return [];
+    });
+    const parent = testAgent({
+      hookEngine: {
+        trigger,
+        fireAndForgetTrigger: vi.fn(() => Promise.resolve([])),
+      } as unknown as NonNullable<Agent['hooks']>,
+    });
+    parent.configure();
+
+    const child = testAgent();
+    child.mockNextResponse({ type: 'text', text: 'never reached' });
+    const session = fakeSession(parent.agent, child.agent, {
+      'agent-0': {
+        homedir: '/tmp/scream-session/agents/agent-0',
+        type: 'sub',
+        parentAgentId: 'main',
+      },
+    });
+    const bus = new SubagentMessageBus();
+    const host = new SessionSubagentHost(session, 'main', undefined, undefined, bus);
+
+    const spawnPromise = host.spawn('coder', {
+      parentToolCallId: 'call_agent',
+      prompt: 'Investigate',
+      description: 'Investigate',
+      runInBackground: false,
+      signal,
+    });
+    // The child is registered but parked before its first turn, so a message
+    // sent here is accepted and waits in the mailbox.
+    await entered;
+    const sent = host.sendMessage('agent-0', 'queue', 'hold on, use the other parser');
+    expect(sent.status).toBe('accepted');
+    expect(sent.delivery).toBe('queued');
+
+    // The run ends without any turn start: the abort is checked before the
+    // first turn, so nothing ever polls this mailbox. A terminal teardown that
+    // purges it destroys a message the parent was already told was accepted —
+    // and one no later resume could recover, since ensureAgent rebuilds the
+    // agent and not the in-memory bus.
+    host.cancelAll();
+    releaseStart();
+    const handle = await spawnPromise;
+    await expect(handle.completion).rejects.toThrow();
+
+    expect(session.agents.has('agent-0')).toBe(false);
+    expect(bus.poll('agent-0').map((m) => m.text)).toEqual([
+      'hold on, use the other parser',
+    ]);
   });
 
   it('stops the finished subagent lsp servers without disarming the parent', async () => {

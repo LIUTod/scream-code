@@ -388,11 +388,15 @@ export class SessionSubagentHost {
       this.childRequestCounts.delete(terminal.childId);
       this.childRequestSeen.delete(terminal.childId);
       this.parentMessageSeen.delete(terminal.childId);
-      // Terminal eviction: drop the mailbox slot and the live Agent reference
-      // so a finished child cannot pin message queues or context/tool state.
-      // Undelivered mail is destroyed with the mailbox (the run is over); a
-      // later resume re-hydrates the agent from its records via ensureAgent.
-      this.bus?.dropMailbox(terminal.childId);
+      // The terminal evicts the live Agent reference and the bookkeeping that
+      // belongs to a running child — but NOT its mailbox. Mail accepted here
+      // was answered `accepted` to the parent, and the mailbox is in-memory
+      // bus state: re-hydrating the child (ensureAgent) rebuilds the agent from
+      // its records and would not bring a purged message back. An undelivered
+      // message therefore stays deliverable until its own deadline (a resume of
+      // this child polls it at the next turn start) and is reclaimed by the
+      // bus' expiry sweep afterwards, so the mailbox map stays bounded either
+      // way (see subagent-messages.ts).
       this.session.removeAgent?.(terminal.childId);
       // Direct Map delete (the accessor is optional on session shims) so a
       // finished child cannot pin the live instance either way.

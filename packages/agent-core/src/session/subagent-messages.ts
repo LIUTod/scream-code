@@ -11,6 +11,15 @@
  * the session store, emitted over RPC, or survives a process restart. Child
  * agents poll their mailbox at the start of each turn; the bus itself has no
  * knowledge of agents, turns, or lifecycles — the host layer owns those checks.
+ *
+ * Delivery contract: an accepted message is delivered if its target polls the
+ * mailbox before its deadline, and expires afterwards. Nothing else may discard
+ * it — in particular a finished child's terminal must not purge the mailbox.
+ * The parent has already been told `accepted`, and re-hydrating the child
+ * (ensureAgent) rebuilds the agent, not this in-memory bus, so a terminal purge
+ * would destroy a message that neither the parent nor a resume could recover.
+ * Expired mail is reclaimed lazily on the next bus access (`reclaimExpired`),
+ * which keeps the mailbox map bounded without such a purge.
  */
 
 /** How a message is delivered to the target subagent. */
@@ -89,13 +98,14 @@ export class SubagentMessageBus {
   /**
    * Number of messages still deliverable for `agentId`. Expired ones are not
    * counted: `poll` drops them, so counting them would make the host spend a
-   * delivery turn on a message that can never arrive.
+   * delivery turn on a message that can never arrive. Counting is also an
+   * ordinary bus access, so it reclaims mail that has expired by now.
    */
   activeCount(agentId: string): number {
-    const queue = this.mailboxes.get(agentId)?.queue;
-    if (queue === undefined) return 0;
-    const now = Date.now();
-    return queue.reduce((count, m) => (m.deadline > now ? count + 1 : count), 0);
+    this.reclaimExpired(Date.now());
+    // Reclaiming above removed every expired message, so what remains is
+    // exactly the deliverable set.
+    return this.mailboxes.get(agentId)?.queue.length ?? 0;
   }
 
   /**
@@ -104,7 +114,11 @@ export class SubagentMessageBus {
    * on acceptance, the queue depth seen by the recipient at poll time.
    */
   send(msg: SubagentMessageInput): { status: SubagentMessageStatus; reason?: 'bytes' | 'queue'; queueDepth?: number } {
-    if (Date.now() > msg.deadline) return { status: 'deadline_elapsed' };
+    const now = Date.now();
+    // Reclaim before deciding: an expired message is not deliverable, so it
+    // must not hold an in-flight slot and turn an honest send into `saturated`.
+    this.reclaimExpired(now);
+    if (now > msg.deadline) return { status: 'deadline_elapsed' };
     if (byteLength(msg.text) > msg.byteLimit) return { status: 'saturated', reason: 'bytes' };
 
     let mailbox = this.mailboxes.get(msg.toAgentId);
@@ -132,38 +146,52 @@ export class SubagentMessageBus {
     this.mailboxes.clear();
   }
 
-  /**
-   * Drop one agent's mailbox outright (subagent terminal). Complements
-   * `clear()` (session teardown): this releases a single slot once the child
-   * will never poll again, so an empty Map entry cannot outlive its run.
-   */
-  dropMailbox(agentId: string): void {
-    this.mailboxes.delete(agentId);
-  }
-
-  /** Live mailbox entries (diagnostics / eviction assertions). */
+  /** Mailbox entries currently pinned in memory (diagnostics / assertions).
+   *  Reading does not reclaim: an entry whose mail has all expired is freed by
+   *  the next send/activeCount/poll, not by this getter. */
   get mailboxCount(): number {
     return this.mailboxes.size;
+  }
+
+  /**
+   * Drop mail that can no longer be delivered and free the mailbox slot it
+   * pinned. A message is deliverable only until its deadline; past it, `poll`
+   * would discard it rather than hand it to the child, so keeping it would pin
+   * memory for a run that has already ended. Called on every ordinary bus
+   * access — send, activeCount, poll — which is what keeps the mailbox map
+   * bounded now that a finished child's terminal no longer purges its mailbox.
+   */
+  private reclaimExpired(now: number): void {
+    for (const [agentId, mailbox] of this.mailboxes) {
+      const live = mailbox.queue.filter((m) => m.deadline > now);
+      if (live.length === 0) {
+        this.mailboxes.delete(agentId);
+      } else if (live.length !== mailbox.queue.length) {
+        mailbox.queue = live;
+      }
+    }
   }
 
   /**
    * Deliver all pending, unexpired messages for `agentId`. Steer messages are
    * always dequeued before queue messages; within an operation class, arrival
    * order is preserved via the monotonically increasing `seq` (this is a stable
-   * two-pass collection, not a sort). Messages past their deadline are dropped.
+   * two-pass collection, not a sort). Messages past their deadline are
+   * reclaimed, never delivered.
    *
    * The mailbox entry is removed once its queue is emptied: a polled-out (or
-   * fully expired) mailbox must not pin a Map slot until `dropMailbox`.
+   * fully expired) mailbox must not pin a Map slot.
    */
   poll(agentId: string): SubagentMessage[] {
+    const now = Date.now();
+    this.reclaimExpired(now);
     const mailbox = this.mailboxes.get(agentId);
     if (mailbox === undefined) return [];
-    const now = Date.now();
-    const live = mailbox.queue.filter((m) => m.deadline > now);
-    // Queue is consumed either way (delivered or expired past deadline).
+    // Delivery consumes the queue, so the entry leaves with the messages it
+    // held.
     this.mailboxes.delete(agentId);
-    const steers = live.filter((m) => m.operation === 'steer');
-    const queues = live.filter((m) => m.operation === 'queue');
+    const steers = mailbox.queue.filter((m) => m.operation === 'steer');
+    const queues = mailbox.queue.filter((m) => m.operation === 'queue');
     steers.sort((a, b) => a.seq - b.seq);
     queues.sort((a, b) => a.seq - b.seq);
     return [...steers, ...queues];
