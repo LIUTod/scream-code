@@ -197,9 +197,10 @@ export class Session {
       // commands parked in the background) for THIS session only: the map is
       // process-wide while several sessions (and all their subagents) share it,
       // so an unscoped sweep here would execute another session's parked
-      // commands. Every agent of this session stamps its id on what it parks
-      // (see AgentOptions.sessionId); a session without an id falls back to the
-      // unscoped sweep, which is also the process-exit path. Then keep the
+      // commands. The owner key is this session's id — the value each of its
+      // agents stamps on what it parks (see AgentOptions.sessionId). The id is
+      // optional: a session created without one stamps no owner and sweeps the
+      // owner-less tasks only, never another session's. Then keep the
       // established keepAliveOnExit-gated stop of per-agent background
       // processes.
       stopAllPendingBackgroundTasks(this.options.id);

@@ -31,6 +31,7 @@ import { BashTool } from '../../src/tools/builtin/shell/bash';
 import {
   createBackgroundTask,
   getPendingBackgroundCount,
+  killAllPendingBackgroundTasks,
   stopAllPendingBackgroundTasks,
 } from '../../src/tools/builtin/shell/background-tasks';
 
@@ -55,7 +56,9 @@ const EXPECTED_DISPOSABLES = [
 const tempDirs: string[] = [];
 
 afterEach(async () => {
-  stopAllPendingBackgroundTasks();
+  // Module-level registry shared by every case: the process-wide sweep is the
+  // only reset that can clear owners this file does not own.
+  killAllPendingBackgroundTasks();
   for (const dir of tempDirs.splice(0)) {
     await rm(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 10 });
   }
@@ -138,6 +141,53 @@ describe('Session close-out checklist', () => {
     // so an unscoped sweep here would execute another session's command.
     expect(foreignKill).not.toHaveBeenCalled();
     expect(getPendingBackgroundCount()).toBe(1);
+  });
+
+  it('leaves an identified session alone when an id-less session closes', async () => {
+    const { sessionDir, workDir } = await sessionFixture();
+    const identified = new Session({
+      jian: testJian.withCwd(workDir),
+      id: 'session-identified',
+      homedir: sessionDir,
+      rpc: createSessionRpc(),
+      skills: { explicitDirs: [join(workDir, 'missing-skills')] },
+    });
+    // SessionOptions.id is optional, so the SDK can build a session that stamps
+    // no owner on anything its agents park.
+    const anonymous = new Session({
+      jian: testJian.withCwd(workDir),
+      homedir: join(sessionDir, 'anonymous'),
+      rpc: createSessionRpc(),
+      skills: { explicitDirs: [join(workDir, 'missing-skills')] },
+    });
+    expect(anonymous.options.id).toBeUndefined();
+
+    const identifiedKill = vi.fn(async () => {});
+    const anonymousKill = vi.fn(async () => {});
+    createBackgroundTask('identified-build', new Promise(() => {}), {
+      kill: identifiedKill,
+      pid: 6001,
+      ownerId: 'session-identified',
+    });
+    createBackgroundTask('anonymous-build', new Promise(() => {}), {
+      kill: anonymousKill,
+      pid: 6002,
+    });
+    expect(getPendingBackgroundCount()).toBe(2);
+
+    await anonymous.close();
+
+    // The id-less session sweeps what ITS agents parked — the owner-less
+    // tasks...
+    expect(anonymousKill).toHaveBeenCalledTimes(1);
+    // ...and stops there: "no id" must not read as "every owner", or this
+    // close would execute a command the identified session still owns.
+    expect(identifiedKill).not.toHaveBeenCalled();
+    expect(getPendingBackgroundCount()).toBe(1);
+
+    await identified.close();
+    expect(identifiedKill).toHaveBeenCalledTimes(1);
+    expect(getPendingBackgroundCount()).toBe(0);
   });
 
   it('parks a timed-out command under the session its agent belongs to', async () => {

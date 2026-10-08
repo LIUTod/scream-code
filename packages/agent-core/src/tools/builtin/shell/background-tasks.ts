@@ -8,7 +8,8 @@ interface PendingBackgroundTask {
    * session id (see `Session.instantiateAgent`). Teardown sweeps by this key so
    * closing one session cannot kill another session's parked commands; a task
    * with no owner (a caller outside any session, or a session created without
-   * an id) is reached only by the unscoped process-wide sweep.
+   * an id) is reached only by a sweep that asks for exactly that — an id-less
+   * session's own close, or the process-wide exit sweep.
    */
   readonly ownerId?: string;
   /** Resolves when the process exits with { exitCode, output }. */
@@ -110,18 +111,34 @@ export function drainCompletedBackgroundTasks(): Array<{
 }
 
 /**
- * Kill pending background tasks and clear them from the registry.
+ * Kill the parked commands one owner is responsible for and clear them.
  *
- * With an `ownerId`, only that owner's tasks are killed: a session's teardown
- * must not execute another session's parked commands, since several sessions
- * (and every subagent within them) share this module-level registry. Without
- * an owner, every task is killed regardless of owner — the process-wide exit
- * path, and the fallback for sessions that carry no id to stamp on their
- * agents.
+ * Strictly owner-matched, `undefined` included: the registry is module-level
+ * while sessions are not, so a session teardown must reach exactly the tasks
+ * its own agents parked (every agent's Bash tool stamps its session id — see
+ * `Session.instantiateAgent`) and never another session's. The undefined match
+ * is a real case, not a wildcard: `SessionOptions.id` is optional, so a session
+ * created without an id stamps no owner, and matching it against "no owner" is
+ * what keeps that session's close() from executing a foreign session's command.
+ * Process-wide cleanup is `killAllPendingBackgroundTasks`, which only a real
+ * exit path may call.
  */
-export function stopAllPendingBackgroundTasks(ownerId?: string): void {
+export function stopAllPendingBackgroundTasks(ownerId: string | undefined): void {
   for (const [id, task] of pendingTasks) {
-    if (ownerId !== undefined && task.ownerId !== ownerId) continue;
+    if (task.ownerId !== ownerId) continue;
+    void task.kill();
+    pendingTasks.delete(id);
+  }
+}
+
+/**
+ * Kill every parked command regardless of owner and clear the registry — the
+ * process-wide exit sweep, and the reset tests use between cases. Nothing
+ * inside a live process may call it: it executes commands belonging to every
+ * other session too.
+ */
+export function killAllPendingBackgroundTasks(): void {
+  for (const [id, task] of pendingTasks) {
     void task.kill();
     pendingTasks.delete(id);
   }

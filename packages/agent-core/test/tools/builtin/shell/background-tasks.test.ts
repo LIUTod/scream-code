@@ -4,6 +4,7 @@ import {
   createBackgroundTask,
   drainCompletedBackgroundTasks,
   getPendingBackgroundCount,
+  killAllPendingBackgroundTasks,
   stopAllPendingBackgroundTasks,
 } from '../../../../src/tools/builtin/shell/background-tasks';
 
@@ -24,7 +25,7 @@ function deferredCompletion(): {
 }
 
 beforeEach(() => {
-  stopAllPendingBackgroundTasks();
+  killAllPendingBackgroundTasks();
 });
 
 describe('createBackgroundTask capacity eviction', () => {
@@ -59,28 +60,7 @@ describe('createBackgroundTask capacity eviction', () => {
 });
 
 describe('stopAllPendingBackgroundTasks', () => {
-  it('clears every owner when called without one (process exit)', () => {
-    const kills = [vi.fn(async () => {}), vi.fn(async () => {}), vi.fn(async () => {})];
-    const owners: Array<string | undefined> = ['session-a', 'session-b', undefined];
-    for (const [i, kill] of kills.entries()) {
-      createBackgroundTask(`cmd-${String(i)}`, neverCompletes(), {
-        kill,
-        pid: 2000 + i,
-        ownerId: owners[i],
-      });
-    }
-    expect(getPendingBackgroundCount()).toBe(3);
-
-    stopAllPendingBackgroundTasks();
-
-    // Nothing may outlive the process: the unscoped sweep is the exit path, so
-    // it ignores ownership (including tasks parked with no owner at all).
-    for (const kill of kills) expect(kill).toHaveBeenCalledTimes(1);
-    expect(getPendingBackgroundCount()).toBe(0);
-    expect(drainCompletedBackgroundTasks()).toEqual([]);
-  });
-
-  it('sweeps only the named owner and leaves other sessions parked', () => {
+  it('sweeps only the named owner and leaves every other task parked', () => {
     const ownKill = vi.fn(async () => {});
     const foreignKill = vi.fn(async () => {});
     const unownedKill = vi.fn(async () => {});
@@ -102,10 +82,63 @@ describe('stopAllPendingBackgroundTasks', () => {
     // session must not execute another session's parked command...
     expect(ownKill).toHaveBeenCalledTimes(1);
     expect(foreignKill).not.toHaveBeenCalled();
-    // ...nor a command parked by a caller that had no session to be swept by
-    // (only the unscoped exit sweep above reaches that one).
+    // ...nor a command parked by a caller that had no session to be swept by.
     expect(unownedKill).not.toHaveBeenCalled();
     expect(getPendingBackgroundCount()).toBe(2);
+  });
+
+  it('treats a missing owner as its own owner, never as every owner', () => {
+    const identifiedKill = vi.fn(async () => {});
+    const otherKill = vi.fn(async () => {});
+    const ownerlessKill = vi.fn(async () => {});
+    createBackgroundTask('identified-build', neverCompletes(), {
+      kill: identifiedKill,
+      pid: 4001,
+      ownerId: 'session-a',
+    });
+    createBackgroundTask('other-build', neverCompletes(), {
+      kill: otherKill,
+      pid: 4002,
+      ownerId: 'session-b',
+    });
+    createBackgroundTask('ownerless-build', neverCompletes(), {
+      kill: ownerlessKill,
+      pid: 4003,
+    });
+
+    // A session created without an id (SessionOptions.id is optional) stamps no
+    // owner on what its agents park, so its teardown asks for exactly that:
+    // the owner-less tasks. Reading the missing id as "everything" would make
+    // that close() execute two other sessions' commands.
+    stopAllPendingBackgroundTasks(undefined);
+
+    expect(ownerlessKill).toHaveBeenCalledTimes(1);
+    expect(identifiedKill).not.toHaveBeenCalled();
+    expect(otherKill).not.toHaveBeenCalled();
+    expect(getPendingBackgroundCount()).toBe(2);
+  });
+});
+
+describe('killAllPendingBackgroundTasks', () => {
+  it('kills every task regardless of owner (process-wide sweep)', () => {
+    const kills = [vi.fn(async () => {}), vi.fn(async () => {}), vi.fn(async () => {})];
+    const owners: Array<string | undefined> = ['session-a', 'session-b', undefined];
+    for (const [i, kill] of kills.entries()) {
+      createBackgroundTask(`cmd-${String(i)}`, neverCompletes(), {
+        kill,
+        pid: 2000 + i,
+        ownerId: owners[i],
+      });
+    }
+    expect(getPendingBackgroundCount()).toBe(3);
+
+    killAllPendingBackgroundTasks();
+
+    // Nothing may outlive the process: the explicit process-wide sweep ignores
+    // ownership (including tasks parked with no owner at all).
+    for (const kill of kills) expect(kill).toHaveBeenCalledTimes(1);
+    expect(getPendingBackgroundCount()).toBe(0);
+    expect(drainCompletedBackgroundTasks()).toEqual([]);
   });
 });
 
