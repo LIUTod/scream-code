@@ -53,17 +53,17 @@ function makeFakeSession(id: string): FakeSessionControl {
   };
 }
 
-function makeHarness(resumed: FakeSessionControl) {
+function makeHarness(resumed: FakeSessionControl, forked?: FakeSessionControl) {
   return {
     createSession: vi.fn(),
     resumeSession: vi.fn(async () => resumed.session),
-    forkSession: vi.fn(),
+    forkSession: vi.fn(async () => forked?.session),
   };
 }
 
-async function newManager(homeDir: string, resumed: FakeSessionControl) {
+async function newManager(homeDir: string, resumed: FakeSessionControl, forked?: FakeSessionControl) {
   const manager = new SessionManager({
-    harness: makeHarness(resumed) as never,
+    harness: makeHarness(resumed, forked) as never,
     homeDir,
     workDir: '/tmp/project',
     model: 'test-model',
@@ -299,6 +299,116 @@ describe('web journal / message FIFO caps', () => {
     expect(messages).toHaveLength(200);
     expect(messages[0]?.content).toBe('user-50');
     expect(messages.at(-1)?.content).toBe('user-249');
+    await manager.closeAll();
+  });
+});
+
+describe('web fork journal copy', () => {
+  it('copies the source\'s complete on-disk journal, not the capped in-memory tail', async () => {
+    const homeDir = await mkdtemp(join(tmpdir(), 'scream-web-fork-'));
+    tempDirs.push(homeDir);
+    const sessionsDir = join(homeDir, 'web-sessions');
+    await mkdir(sessionsDir, { recursive: true });
+    await writeFile(join(sessionsDir, 'web-big.meta.json'), JSON.stringify({
+      sessionId: 'web-big', coreSessionId: 'web-big', workDir: '/tmp/project',
+      title: 'Big', createdAt: 1, model: 'test-model', permission: 'manual',
+    }));
+
+    const source = makeFakeSession('web-big');
+    const forked = makeFakeSession('core-fork-big');
+    const manager = await newManager(homeDir, source, forked);
+    const live = await manager.activateSession('web-big');
+    expect(live).not.toBeNull();
+
+    // 60 complete turns: 5 durable rows each (turn.started / tool.call.started /
+    // tool.result / finalized snapshot / turn.ended) plus two volatile deltas.
+    // The source's file ends up with 300 durable rows while its in-memory
+    // journal is FIFO-capped at 200 rows — and since volatile deltas occupy
+    // cap slots, the in-memory window covers far fewer turns than 200 durable
+    // rows would.
+    for (let i = 0; i < 60; i++) turnEvents(source, `正文-${i}`, `思考-${i}`);
+    // Fence: appends are serialized per file in arrival order (journal-writer),
+    // so once the fence row is readable every earlier durable row is on disk.
+    const fence = 'fence-after-60-turns';
+    source.emit({
+      type: 'session.meta.updated', turnId: 0, sessionId: 'web-big', agentId: 'main', meta: { marker: fence },
+    } as unknown as Event);
+    const sourceJournal = await waitForJournal(homeDir, 'web-big', fence);
+    const sourceLines = sourceJournal.split('\n').filter((line) => line.trim().length > 0);
+    expect(sourceLines.length).toBeGreaterThan(200);
+    expect(sourceJournal).toContain('正文-0');
+
+    const result = await manager.forkSession('web-big');
+    expect(result).not.toBeNull();
+
+    // The fork's journal file is the source's whole history: neither its head
+    // (dropped by the in-memory FIFO) nor its tail is lost.
+    const forkJournal = await readFile(join(sessionsDir, `${result!.sessionId}.jsonl`), 'utf-8');
+    const forkLines = forkJournal.split('\n').filter((line) => line.trim().length > 0);
+    expect(forkLines.length).toBe(sourceLines.length);
+    expect(forkJournal).toContain('正文-0');
+    expect(forkJournal).toContain(fence);
+
+    // The fork's transcript shows the same history a reload of the source
+    // shows under the same in-memory caps; the capped memory copy reached only
+    // a later turn and silently dropped everything before it.
+    const restarted = makeFakeSession('web-big');
+    const reloadManager = await newManager(homeDir, restarted);
+    const reloaded = await reloadManager.activateSession('web-big');
+    expect(reloaded).not.toBeNull();
+    const reloadContents = reloaded!.getSnapshot().messages.map((message) => message.content);
+    const forkContents = manager.get(result!.sessionId)?.getSnapshot().messages.map((message) => message.content);
+    expect(reloadContents.length).toBeGreaterThan(0);
+    expect(forkContents).toEqual(reloadContents);
+    expect(forkContents).toContain('正文-20');
+
+    await reloadManager.closeAll();
+    await manager.closeAll();
+  });
+
+  it('copies every user message once when memory and disk both carry it', async () => {
+    const homeDir = await mkdtemp(join(tmpdir(), 'scream-web-forkum-'));
+    tempDirs.push(homeDir);
+    const sessionsDir = join(homeDir, 'web-sessions');
+    await mkdir(sessionsDir, { recursive: true });
+    // A resumed conversation: the journal holds user rows (the fork copy reads
+    // them from disk) and the activation path loads them back into memory as
+    // well — the copy must not double any of them.
+    const lines: string[] = [];
+    for (let i = 0; i < 3; i++) {
+      // The user row is persisted before its turn and carries the seq the turn
+      // then receives (buildMessages interleaves by beforeSeq).
+      lines.push(JSON.stringify({
+        type: 'user_message', text: `提问-${i}`, beforeSeq: i * 2, clientMessageId: `cm-${i}`,
+      }));
+      lines.push(JSON.stringify({
+        type: 'journal', seq: i * 2, epoch: 1, volatile: false,
+        payload: { type: 'turn.started', turnId: i, origin: 'web', sessionId: 'web-um', agentId: 'main' },
+      }));
+      lines.push(JSON.stringify({
+        type: 'journal', seq: i * 2 + 1, epoch: 1, volatile: false,
+        payload: { type: 'web.message.finalized', message: { role: 'assistant', content: `回答-${i}`, tools: [] } },
+      }));
+    }
+    await writeFile(join(sessionsDir, 'web-um.jsonl'), lines.join('\n') + '\n');
+    await writeFile(join(sessionsDir, 'web-um.meta.json'), JSON.stringify({
+      sessionId: 'web-um', coreSessionId: 'web-um', workDir: '/tmp/project',
+      title: 'UserMsgs', createdAt: 1, model: 'test-model', permission: 'manual',
+    }));
+
+    const source = makeFakeSession('web-um');
+    const manager = await newManager(homeDir, source, makeFakeSession('core-fork-um'));
+    const live = await manager.activateSession('web-um');
+    expect(live).not.toBeNull();
+    const transcript = ['提问-0', '回答-0', '提问-1', '回答-1', '提问-2', '回答-2'];
+    expect(live!.getSnapshot().messages.map((message) => message.content)).toEqual(transcript);
+
+    const result = await manager.forkSession('web-um');
+    expect(result).not.toBeNull();
+    const forkJournal = await readFile(join(sessionsDir, `${result!.sessionId}.jsonl`), 'utf-8');
+    expect(forkJournal.split('\n').filter((line) => line.includes('"user_message"'))).toHaveLength(3);
+    expect(manager.get(result!.sessionId)?.getSnapshot().messages.map((message) => message.content))
+      .toEqual(transcript);
     await manager.closeAll();
   });
 });

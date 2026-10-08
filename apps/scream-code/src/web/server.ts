@@ -635,6 +635,54 @@ const MAIN_TRANSCRIPT_EVENTS = new Set<string>([
 ]);
 
 /**
+ * Identity of a persisted user-message row; used by the fork copy to drop the
+ * memory copy of a row the disk already carries.
+ */
+function persistedUserMessageKey(entry: PersistedUserMessage): string {
+  return JSON.stringify([entry.beforeSeq, entry.clientMessageId ?? null, entry.text]);
+}
+
+/**
+ * Union of the two views of one session's durable journal, for the fork copy.
+ *
+ * `diskEntries` (read back from the source's journal file) is the complete
+ * history and forms the base: the in-memory journal is FIFO-capped
+ * (MAX_JOURNAL_ENTRIES), so a long conversation's memory only holds its tail
+ * while the file keeps every row. `memoryEntries` fills the rows a
+ * fire-and-forget write has not flushed yet; rows the disk already carries are
+ * dropped by seq (journal rows) or identity (user messages), so no line is
+ * doubled.
+ */
+function mergeForkJournalEntries(
+  diskEntries: readonly PersistedEntry[],
+  memoryEntries: readonly PersistedEntry[],
+): PersistedEntry[] {
+  const journalSeqs = new Set<number>();
+  const userMessageKeys = new Set<string>();
+  const journalEntries: PersistedEntry[] = [];
+  const userMessages: PersistedEntry[] = [];
+  const push = (entry: PersistedEntry): void => {
+    if (entry.type === 'user_message') {
+      const key = persistedUserMessageKey(entry);
+      if (userMessageKeys.has(key)) return;
+      userMessageKeys.add(key);
+      userMessages.push(entry);
+      return;
+    }
+    if (journalSeqs.has(entry.seq)) return;
+    journalSeqs.add(entry.seq);
+    journalEntries.push(entry);
+  };
+  for (const entry of diskEntries) push(entry);
+  for (const entry of memoryEntries) push(entry);
+  // The replay rebuilds the transcript in array order, so the merged journal
+  // rows stay seq-ordered — including a row the disk lost between two rows it
+  // kept (the memory tail must land where it belongs, not simply at the end).
+  journalEntries.sort((a, b) => (a as JournalEntry).seq - (b as JournalEntry).seq);
+  return [...journalEntries, ...userMessages];
+}
+
+/**
  * Whether a journal entry already carries a message (if so it needs no seeding
  * from core history).
  */
@@ -1200,7 +1248,11 @@ class WebSession {
     return this.title;
   }
 
-  /** Return in-memory durable journal entries for fork copy (avoids file persistence race). */
+  /**
+   * Return the in-memory durable journal entries (capped tail). The fork copy
+   * takes these only for rows the source's journal file does not carry yet;
+   * the file itself is the complete history.
+   */
   getDurableJournalEntries(): PersistedEntry[] {
     const entries: PersistedEntry[] = [];
     for (const e of this.journal) {
@@ -1217,6 +1269,16 @@ class WebSession {
       });
     }
     return entries;
+  }
+
+  /**
+   * Drain in-flight persistence writes (journal rows, user messages, metadata).
+   * A fork reads the source's journal file afterwards and must not race a write
+   * still queued behind the serialization gate — the reader would otherwise
+   * mistake a flushed row for unsaved state.
+   */
+  async flushPendingWrites(): Promise<void> {
+    await Promise.allSettled(this.pendingWrites);
   }
 
   // ── Persistence ────────────────────────────────────────────────────────
@@ -2988,8 +3050,9 @@ export class SessionManager {
 
   /**
    * Fork an active session: harness.forkSession copies the agent state into a
-   * new session, and we additionally copy the source's durable journal so the
-   * forked web session displays the same prior conversation.
+   * new session, and we additionally copy the source's durable journal from its
+   * journal file — the complete history, not the FIFO-capped in-memory tail —
+   * so the forked web session displays the same prior conversation.
    */
   async forkSession(sourceId: string): Promise<{ sessionId: string; title: string } | null> {
     const source = this.sessions.get(sourceId);
@@ -3013,9 +3076,16 @@ export class SessionManager {
         title,
         onFork: (id) => this.forkSession(id),
       });
-      // Copy durable journal + user messages from the source's in-memory state
-      // (not from disk, to avoid race with fire-and-forget persistence).
-      const entries = source.getDurableJournalEntries();
+      // Copy the source's durable journal into the fork. Read it back from the
+      // source's journal file: the in-memory journal is FIFO-capped
+      // (MAX_JOURNAL_ENTRIES), so copying memory would hand a long
+      // conversation's fork only its tail while the source's file keeps the
+      // complete history. The source's in-flight writes are drained first, and
+      // any row a still-racing write has not landed yet is appended from
+      // memory — the copy is never short and never doubled.
+      await source.flushPendingWrites();
+      const { entries: diskEntries } = await loadJournal(this.homeDir, sourceId);
+      const entries = mergeForkJournalEntries(diskEntries, source.getDurableJournalEntries());
       if (entries.length > 0) {
         const lines = entries.map((e) => JSON.stringify(e)).join('\n') + '\n';
         await writeFile(getJournalPath(this.homeDir, newId), lines);
