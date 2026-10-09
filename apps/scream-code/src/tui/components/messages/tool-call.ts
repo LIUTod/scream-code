@@ -1690,7 +1690,7 @@ export class ToolCallComponent extends CachedContainer {
         // A foreground run handed to the background says so; one spawned in
         // the background keeps the plain label.
         return this.subagentBackgrounded
-          ? chalk.hex(this.colors.roleAssistant)(`◐ ${t('toolcall.bg_handed_off')}`)
+          ? chalk.hex(this.colors.warning)(`◐ ${t('toolcall.bg_handed_off')}`)
           : t('toolcall.bg_running');
       case 'spawning':
       case undefined:
