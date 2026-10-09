@@ -70,7 +70,7 @@ describe('LiveTailContainer', () => {
     expect(c.unpinTail()).toBe(false);
   });
 
-  it('falls back to the array order without throwing when the pinned child was removed', () => {
+  it('drops the pin with the removed child instead of letting it render from the tail', () => {
     const c = new LiveTailContainer(1, 1);
     const block = new FakeChild(() => ['block']);
     const below = new FakeChild(() => ['below']);
@@ -80,9 +80,11 @@ describe('LiveTailContainer', () => {
 
     c.removeChild(block);
 
+    // The pin went with the child: the removed block is not resurrected after
+    // the remaining rows, and a later release has nothing left to do.
+    expect(rows(c)).toEqual(['below']);
     expect(() => c.unpinTail(block)).not.toThrow();
     expect(c.unpinTail(block)).toBe(false);
-    expect(rows(c)).toEqual(['below']);
   });
 
   it('drops the pin when the container is cleared', () => {

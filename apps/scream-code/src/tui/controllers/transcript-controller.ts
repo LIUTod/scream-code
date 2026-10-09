@@ -623,7 +623,10 @@ export class TranscriptController {
     // that mount later come up in the same mode and the transcript can never end
     // up half expanded. Work from earlier prompts keeps whatever it was showing.
     const next = !state.toolOutputExpanded;
-    const children = state.transcriptContainer.children;
+    // Render order, not array order: a running block is pinned to the tail of
+    // the render even though it sits earlier in the array, and the press must
+    // reach the block the user actually sees at the bottom of the viewport.
+    const children = state.transcriptContainer.renderOrder();
     let resized = false;
     for (let i = children.length - 1; i >= 0; i -= 1) {
       const child = children[i];

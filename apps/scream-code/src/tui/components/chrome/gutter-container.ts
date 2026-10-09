@@ -38,4 +38,15 @@ export class GutterContainer extends Container {
   protected orderedChildren(): readonly Component[] {
     return this.children;
   }
+
+  /**
+   * The children in the order this container actually renders them — the order
+   * a consumer must use to ask "what is on screen, top to bottom". A scan that
+   * walks the transcript bottom-up (Ctrl+O) must ask here instead of reading
+   * `children` directly, or a reordering subclass (a pinned tail) silently
+   * desyncs the scan from the viewport.
+   */
+  renderOrder(): readonly Component[] {
+    return this.orderedChildren();
+  }
 }

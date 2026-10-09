@@ -15,8 +15,10 @@
  *   never mutates it. Only `render` consults the pin.
  * - The pin is a single slot: a component mounted below the pinned one must
  *   never be hidden, so only the tail moves.
- * - `render` is the sole consumer of the pin; callers that reorder or rebuild
- *   the container (clear) drop the pin instead of trusting it.
+ * - Only `orderedChildren` (render and renderOrder) consults the pin; every
+ *   path that takes the pinned child out of the container — clear, or a
+ *   removeChild of the pinned child itself — drops the pin instead of trusting
+ *   it, so a gone child can never render from the tail.
  */
 
 import { type Component } from '@liutod-scream/pi-tui';
@@ -53,6 +55,16 @@ export class LiveTailContainer extends GutterContainer {
   override clear(): void {
     super.clear();
     this.pinned = null;
+  }
+
+  /**
+   * A removed child must not keep rendering from the tail: the pin goes with
+   * the pinned child, so `orderedChildren` cannot resurrect it.
+   */
+  override removeChild(child: Component): void {
+    if (this.pinned === child) this.pinned = null;
+    // oxlint-disable-next-line unicorn/prefer-dom-node-remove -- pi-tui Container API, not DOM.
+    super.removeChild(child);
   }
 
   protected override orderedChildren(): readonly Component[] {
