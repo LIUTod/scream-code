@@ -4,6 +4,7 @@ import { AskModeGuardDenyPermissionPolicy } from './ask-mode-guard-deny';
 import { AutoModeApprovePermissionPolicy } from './auto-mode-approve';
 import { AutoModeAskUserQuestionDenyPermissionPolicy } from './auto-mode-ask-user-question-deny';
 import { BotModePermissionPolicy } from './bot-mode-permission';
+import { CapabilityGuardDenyPermissionPolicy } from './capability-guard-deny';
 import { DefaultToolApprovePermissionPolicy } from './default-tool-approve';
 import { ExitPlanModeReviewAskPermissionPolicy } from './exit-plan-mode-review-ask';
 import { FallbackAskPermissionPolicy } from './fallback-ask';
@@ -32,6 +33,11 @@ export function createPermissionDecisionPolicies(agent: Agent): readonly Permiss
   return [
     // PreToolUse hook returned a block → deny.
     new PreToolCallHookPermissionPolicy(agent),
+    // Restricted capability contract (read-only/read-write/execute) → deny any
+    // tool the mode does not permit. Runs before every approve policy so no
+    // user allow-rule, session grant or yolo/wolfpack mode can widen a
+    // contract the parent set at spawn (inert for `all`).
+    new CapabilityGuardDenyPermissionPolicy(agent),
     // auto mode + AskUserQuestion → deny.
     new AutoModeAskUserQuestionDenyPermissionPolicy(agent),
     // plan mode: Write/Edit outside the plan file, or TaskStop → deny.

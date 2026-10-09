@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { WolfPackTool } from '../../src/tools/builtin/collaboration/wolfpack';
+import { MAX_AGENT_SPAWN_DEPTH } from '../../src/tools/builtin/collaboration/agent';
 import type { ExecutableToolContext, ExecutableToolResult } from '../../src/loop/types';
 
 /**
@@ -25,11 +26,15 @@ function makeHost() {
   return { spawn };
 }
 
-function makeTool(host: ReturnType<typeof makeHost>): WolfPackTool {
+function makeTool(
+  host: ReturnType<typeof makeHost>,
+  extra?: { spawnDepth?: () => number },
+): WolfPackTool {
   return new WolfPackTool(host as never, () => true, {
     log: undefined,
     allowedSpawns: undefined,
     timeoutMs: 30_000,
+    ...extra,
   });
 }
 
@@ -152,5 +157,42 @@ describe('WolfPackTool batch-level options', () => {
     const output = await execPromise;
 
     expect(output.output).toContain('Success: 2');
+  });
+
+  it('refuses the batch once the caller sits at the nesting depth cap', async () => {
+    const host = makeHost();
+    const tool = makeTool(host, { spawnDepth: () => MAX_AGENT_SPAWN_DEPTH });
+
+    const output = await execute(tool, {
+      description: 'batch review',
+      prompt_template: 'review {{item}}',
+      items: ['a.ts', 'b.ts'],
+    });
+
+    expect(output.isError).toBe(true);
+    expect(output.output).toContain('nesting depth cap');
+    expect(host.spawn).not.toHaveBeenCalled();
+  });
+
+  it('still spawns the batch one hop below the nesting depth cap', async () => {
+    const host = makeHost();
+    const tool = makeTool(host, { spawnDepth: () => MAX_AGENT_SPAWN_DEPTH - 1 });
+    const done = deferred<{ result: string; usage: unknown }>();
+    host.spawn.mockResolvedValueOnce({
+      agentId: 'agent-0',
+      profileName: 'coder',
+      completion: done.promise,
+    });
+
+    const execPromise = execute(tool, {
+      description: 'batch lint',
+      prompt_template: 'lint {{item}}',
+      items: ['a.ts'],
+    });
+    done.resolve({ result: 'ok', usage: {} });
+    const output = await execPromise;
+
+    expect(host.spawn).toHaveBeenCalledTimes(1);
+    expect(output.output).toContain('Success: 1');
   });
 });

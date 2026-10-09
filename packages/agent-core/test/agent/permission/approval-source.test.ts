@@ -6,6 +6,7 @@ import type { Agent } from '../../../src/agent';
 import { PermissionManager } from '../../../src/agent/permission';
 import type { ApprovalResponse } from '../../../src/agent/permission/types';
 import type { PermissionPolicyContext } from '../../../src/agent/permission/types';
+import type { SubagentCapabilityMode } from '../../../src/session/subagent-capability';
 import { createFakeJian } from '../../tools/fixtures/fake-jian';
 
 const signal = new AbortController().signal;
@@ -13,6 +14,7 @@ const signal = new AbortController().signal;
 interface FakeAgentOptions {
   readonly agentId?: string;
   readonly profileName?: string | undefined;
+  readonly capabilityMode?: SubagentCapabilityMode | undefined;
   readonly approval?: ApprovalResponse;
   readonly handler?: (request: unknown) => Promise<ApprovalResponse>;
 }
@@ -37,6 +39,7 @@ function makeManager(options: FakeAgentOptions = {}): {
     replayBuilder: { push: vi.fn() },
     rpc: { requestApproval },
     log: { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() },
+    getCapabilityMode: () => options.capabilityMode ?? ('all' as const),
     planMode: {
       get isActive() {
         return false;
@@ -94,6 +97,29 @@ describe('approval source attribution', () => {
         sourceAgentId: 'agent-7',
         sourceAgentName: 'reviewer',
         sourceToolName: 'Bash',
+      }),
+      expect.any(Object),
+    );
+    // Unrestricted askers carry no capability field: the payload for the
+    // common (main-agent) case is unchanged by the capability extension.
+    const [request] = requestApproval.mock.calls[0] as [Record<string, unknown>];
+    expect(request).not.toHaveProperty('sourceCapabilityMode');
+  });
+
+  it('adds the capability contract when the asker runs in a restricted mode', async () => {
+    const { manager, requestApproval } = makeManager({
+      agentId: 'agent-9',
+      profileName: 'execute-child',
+      capabilityMode: 'execute',
+    });
+
+    await expect(manager.beforeToolCall(bashContext())).resolves.toBeUndefined();
+
+    expect(requestApproval).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceAgentId: 'agent-9',
+        sourceToolName: 'Bash',
+        sourceCapabilityMode: 'execute',
       }),
       expect.any(Object),
     );

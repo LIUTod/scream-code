@@ -16,7 +16,12 @@ import type { ExecutableToolContext, ExecutableToolResult, ToolExecution } from 
 import type { SessionSubagentHost } from '../../../session/subagent-host';
 import type { ResolvedAgentProfile } from '../../../profile/types';
 import { toInputJsonSchema } from '../../support/input-schema';
-import { buildSubagentDescriptions, parseJsonObject } from './agent';
+import {
+  buildSubagentDescriptions,
+  MAX_AGENT_SPAWN_DEPTH,
+  parseJsonObject,
+  spawnDepthLimitRefusal,
+} from './agent';
 import WOLFPACK_DESCRIPTION from './wolfpack.md';
 
 // Unlimited subagent concurrency: spawn every item in parallel.
@@ -79,6 +84,9 @@ export class WolfPackTool implements BuiltinTool<WolfPackToolInput> {
       log?: Logger;
       allowedSpawns?: string[];
       timeoutMs?: number;
+      /** How many spawn hops the calling agent already sits from the root
+       *  (root = 0). Consulted by the anti-cycle nesting gate. */
+      spawnDepth?: () => number;
     },
   ) {
     const visibleSubagents = filterSubagentsBySpawns(options?.subagents, options?.allowedSpawns);
@@ -89,11 +97,16 @@ export class WolfPackTool implements BuiltinTool<WolfPackToolInput> {
     this.log = options?.log;
     this.allowedSpawns = options?.allowedSpawns;
     this.timeoutMs = options?.timeoutMs ?? DEFAULT_SUBAGENT_TIMEOUT_MS;
+    // Defaults to the root depth: a caller that does not report its depth is
+    // treated as sitting at the top of the chain (same default as AgentTool).
+    this.spawnDepth = options?.spawnDepth ?? (() => 0);
   }
 
   private readonly log?: Logger;
   private readonly allowedSpawns?: string[];
   private readonly timeoutMs: number;
+  /** Reads the calling agent's spawn depth for the nesting gate. */
+  private readonly spawnDepth: () => number;
 
   resolveExecution(args: WolfPackToolInput): ToolExecution {
     return {
@@ -129,6 +142,15 @@ export class WolfPackTool implements BuiltinTool<WolfPackToolInput> {
         output: `Cannot spawn "${profileName}" via WolfPack. Allowed subagents: ${this.allowedSpawns.join(', ')}.`,
         isError: true,
       };
+    }
+
+    // Anti-cycle depth gate, mirroring the Agent tool's: every item spawns
+    // through the same host, so one check before the batch bounds the
+    // delegation chain — WolfPack must not be the way around
+    // MAX_AGENT_SPAWN_DEPTH when the Agent tool refuses at that depth.
+    const depth = this.spawnDepth();
+    if (depth >= MAX_AGENT_SPAWN_DEPTH) {
+      return { output: spawnDepthLimitRefusal(depth), isError: true };
     }
 
     const template = args.prompt_template;

@@ -643,6 +643,7 @@ describe('Permission policy chain', () => {
   it('keeps built-in policies in document order', () => {
     expect(createPermissionDecisionPolicies({} as Agent).map((policy) => policy.name)).toEqual([
       'pre-tool-call-hook',
+      'capability-guard-deny',
       'auto-mode-ask-user-question-deny',
       'plan-mode-guard-deny',
       'ask-mode-guard-deny',
@@ -3343,6 +3344,7 @@ function makePermissionManager(
     rpc: options.approvalHandlerAvailable === false ? {} : { requestApproval },
     hooks: options.hooks,
     wolfpackMode: { isActive: options.wolfpackModeActive ?? false },
+    getCapabilityMode: () => 'all' as const,
     planMode: {
       get isActive() {
         return options.planModeActive ?? false;
@@ -3389,6 +3391,7 @@ function makePlanPermissionManager(input: {
     replayBuilder: { push: vi.fn() },
     rpc: input.approvalHandlerAvailable === false ? {} : { requestApproval },
     log: { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() },
+    getCapabilityMode: () => 'all' as const,
     planMode: {
       get isActive() {
         return true;

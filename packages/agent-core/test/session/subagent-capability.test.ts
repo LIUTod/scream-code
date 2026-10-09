@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { filterToolsForCapability } from '../../src/session/subagent-capability';
+import {
+  filterToolsForCapability,
+  isToolAllowedForCapability,
+} from '../../src/session/subagent-capability';
 
 const FULL = [
   'Read',
@@ -64,9 +67,12 @@ describe('filterToolsForCapability', () => {
     expect(all).toContain('WolfPack');
   });
 
-  it('preserves unknown tool names (fail open)', () => {
+  it('strips unknown tool names in restricted modes (fail closed)', () => {
     const withUnknown = [...FULL, 'FutureToolX'];
-    expect(filterToolsForCapability(withUnknown, 'read-only')).toContain('FutureToolX');
+    for (const mode of ['read-only', 'read-write', 'execute'] as const) {
+      expect(filterToolsForCapability(withUnknown, mode), mode).not.toContain('FutureToolX');
+    }
+    expect(filterToolsForCapability(withUnknown, 'all')).toContain('FutureToolX');
   });
 
   it('strips MCP tools in restricted modes (fail closed)', () => {
@@ -75,5 +81,26 @@ describe('filterToolsForCapability', () => {
       expect(filterToolsForCapability(withMcp, mode)).not.toContain('mcp__chrome_devtools__navigate');
     }
     expect(filterToolsForCapability(withMcp, 'all')).toContain('mcp__chrome_devtools__navigate');
+  });
+});
+
+describe('isToolAllowedForCapability', () => {
+  it('is the membership test the filter and the permission gate share', () => {
+    for (const name of FULL) {
+      for (const mode of ['read-only', 'read-write', 'execute'] as const) {
+        expect(isToolAllowedForCapability(name, mode), `${name}@${mode}`).toBe(
+          filterToolsForCapability([name], mode).length === 1,
+        );
+      }
+    }
+  });
+
+  it('fails closed for unclassified tool names in every restricted mode', () => {
+    for (const mode of ['read-only', 'read-write', 'execute'] as const) {
+      expect(isToolAllowedForCapability('FutureToolX', mode), mode).toBe(false);
+      expect(isToolAllowedForCapability('mcp__db__query', mode), mode).toBe(false);
+    }
+    expect(isToolAllowedForCapability('FutureToolX', 'all')).toBe(true);
+    expect(isToolAllowedForCapability('Bash', 'all')).toBe(true);
   });
 });

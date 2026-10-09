@@ -1,5 +1,6 @@
 import type { ContentPart } from '@scream-code/ltod';
 
+import type { SubagentCapabilityMode } from '../session/subagent-capability';
 import type { RPCMethods } from './client';
 import type { AgentEvent, ToolInputDisplay } from './events';
 import type { WithAgentId, WithSessionId } from './types';
@@ -29,6 +30,9 @@ export interface ApprovalRequest {
   /** Tool that triggered the approval; mirrors `toolName` on the origin side,
    *  present so consumers can attribute without re-deriving. */
   readonly sourceToolName?: string | undefined;
+  /** Capability contract the asking agent runs under (`read-only` /
+   *  `read-write` / `execute`); absent when the asker is unrestricted. */
+  readonly sourceCapabilityMode?: SubagentCapabilityMode | undefined;
 }
 
 export interface QuestionOption {

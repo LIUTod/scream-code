@@ -1,4 +1,5 @@
 import type { PrepareToolExecutionResult, ResolvedToolExecutionHookContext } from '../../loop';
+import type { SubagentCapabilityMode } from '../../session/subagent-capability';
 import type { ToolInputDisplay } from '../../tools/display';
 
 export type PermissionRuleDecision = 'allow' | 'deny' | 'ask';
@@ -46,6 +47,9 @@ export interface ApprovalRequest {
   sourceAgentName?: string | undefined;
   /** Tool that triggered the approval request. */
   sourceToolName?: string | undefined;
+  /** Capability contract the asking agent runs under; omitted when it is
+   *  unrestricted (`all`), so main-agent payloads are unchanged. */
+  sourceCapabilityMode?: SubagentCapabilityMode | undefined;
 }
 
 export interface ApprovalResponse {

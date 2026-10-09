@@ -199,13 +199,18 @@ export class PermissionManager {
     const startedAt = Date.now();
     // Who is asking + what triggered it, carried on the wire so the UI can
     // attribute the request. `sourceAgentName` is omitted when the agent has
-    // no profile name — consumers fall back to `sourceAgentId`.
+    // no profile name — consumers fall back to `sourceAgentId`. The capability
+    // mode rides along only when the asker is restricted, so the common
+    // main-agent payload keeps its existing shape.
     const sourceAgentId = this.agent.agentId;
     const sourceAgentName = this.agent.config.profileName;
-    const source =
-      sourceAgentName !== undefined
-        ? { sourceAgentId, sourceAgentName, sourceToolName: name }
-        : { sourceAgentId, sourceToolName: name };
+    const sourceCapabilityMode = this.agent.getCapabilityMode();
+    const source = {
+      sourceAgentId,
+      ...(sourceAgentName !== undefined ? { sourceAgentName } : {}),
+      ...(sourceCapabilityMode !== 'all' ? { sourceCapabilityMode } : {}),
+      sourceToolName: name,
+    };
 
     let response: ApprovalResponse;
     if (this.agent.rpc?.requestApproval) {

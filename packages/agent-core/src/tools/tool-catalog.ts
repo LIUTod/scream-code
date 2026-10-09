@@ -24,6 +24,7 @@ export const READ_TOOLS: ReadonlySet<string> = new Set([
   'Read',
   'ReadGroup',
   'ReadMediaFile',
+  'ReportArchFinding',
   'ReportFinding',
   'Skill',
   'TodoList',

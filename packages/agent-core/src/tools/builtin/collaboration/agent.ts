@@ -148,6 +148,34 @@ export type AgentToolOutput = z.infer<typeof AgentToolOutputSchema>;
 const BACKGROUND_AGENT_UNAVAILABLE =
   'Background agent execution is not available for this agent because TaskList, TaskOutput, and TaskStop are not enabled.';
 
+/**
+ * Hard ceiling on nested Agent-tool spawning, counted in spawn hops from the
+ * root agent (root = 0, each spawned subagent = spawner + 1). It exists to
+ * bound delegation cycles (A→B→A through custom profiles): it caps the CHAIN,
+ * never sibling fan-out — parallel children at the same depth are unaffected.
+ *
+ * 3 is chosen against the shipped profile graph: the deepest whitelisted chain
+ * is 2 hops (main → plan/oracle/designer/reviewer → explore, and `explore`
+ * spawns nothing), so the cap admits every default chain plus one level of
+ * headroom for user-authored profiles while a cycle stops after three
+ * generations instead of running forever.
+ */
+export const MAX_AGENT_SPAWN_DEPTH = 3;
+
+/**
+ * Refusal text for the nesting-depth gate. Shared by every spawn surface
+ * (the Agent tool and WolfPack) so both refuse at the same cap with the same
+ * wording — a cap the model can walk around through another spawn tool is no
+ * cap at all.
+ */
+export function spawnDepthLimitRefusal(depth: number): string {
+  return (
+    `Depth limit reached: this agent is already ${String(depth)} spawn hops from the root agent, and the nesting depth cap is ${String(MAX_AGENT_SPAWN_DEPTH)}. ` +
+    'Spawning another subagent here would keep (or loop) the delegation chain instead of finishing the work. ' +
+    'Do the task in this agent; if you are blocked, report back to your parent with ContactParent.'
+  );
+}
+
 // ── AgentTool class ──────────────────────────────────────────────────
 
 export class AgentTool implements BuiltinTool<AgentToolInput> {
@@ -164,6 +192,9 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
       allowBackground?: boolean;
       log?: Logger;
       allowedSpawns?: string[];
+      /** How many spawn hops the calling agent already sits from the root
+       *  (root = 0). Consulted by the anti-cycle nesting gate. */
+      spawnDepth?: () => number;
     },
   ) {
     this.allowBackground = options?.allowBackground ?? this.backgroundManager !== undefined;
@@ -178,6 +209,10 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
       : baseDescription;
     this.log = log;
     this.allowedSpawns = options?.allowedSpawns;
+    // Defaults to the root depth: a caller that does not report its depth is
+    // treated as sitting at the top of the chain (partial hosts keep the
+    // pre-gate behavior).
+    this.spawnDepth = options?.spawnDepth ?? (() => 0);
   }
 
   private checkSpawnAllowed(profileName: string): ExecutableToolResult | undefined {
@@ -192,6 +227,8 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
 
   private readonly log?: Logger;
   private readonly allowedSpawns?: string[];
+  /** Reads the calling agent's spawn depth for the nesting gate. */
+  private readonly spawnDepth: () => number;
 
   resolveExecution(args: AgentToolInput): ToolExecution {
     let profileName = args.subagent_type?.length ? args.subagent_type : 'coder';
@@ -236,6 +273,19 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
           output: 'Cannot set subagent_type when resuming an existing agent. Resume by agent id only.',
           isError: true,
         };
+      }
+
+      const isResume = resumeAgentId !== undefined && resumeAgentId.length > 0;
+      // Anti-cycle depth gate: a spawn chain (including an A→B→A loop through
+      // custom profiles) may not grow past MAX_AGENT_SPAWN_DEPTH hops from the
+      // root. Resume is exempt — it continues an existing agent and adds no
+      // depth. This bounds the chain, not parallelism: sibling spawns at the
+      // same depth are untouched.
+      if (!isResume) {
+        const depth = this.spawnDepth();
+        if (depth >= MAX_AGENT_SPAWN_DEPTH) {
+          return { output: spawnDepthLimitRefusal(depth), isError: true };
+        }
       }
 
       const effectiveProfileName = resumeAgentId !== undefined && resumeAgentId.length > 0

@@ -1152,10 +1152,6 @@ export class ToolManager {
         new b.BashTool(jian, cwd, background, {
           allowBackground,
           availableTools: this.enabledTools,
-          // Owns the pending-command registry the same way sessions close it:
-          // a timed-out command parked by this agent is swept when its session
-          // closes, never when another session does.
-          ownerId: this.agent.sessionId,
         }),
         // /rlm mode: persistent python kernel. Registered but NOT enabled by
         // default — activated only when the /rlm command adds 'python' to the
@@ -1221,6 +1217,10 @@ export class ToolManager {
               allowBackground,
               log: this.agent.log,
               allowedSpawns,
+              // Hard anti-cycle cap: the caller's spawn depth (root = 0, +1 per
+              // spawned subagent, maintained by the subagent host on every
+              // spawn) bounds nested Agent spawning.
+              spawnDepth: () => this.agent.getRlmDepth(),
             },
           ),
         canSpawn && new b.SendSubagentMessageTool(this.agent.subagentHost),
@@ -1238,6 +1238,7 @@ export class ToolManager {
               subagents: visibleSubagents,
               log: this.agent.log,
               allowedSpawns,
+              spawnDepth: () => this.agent.getRlmDepth(),
             },
           ),
         // FusionPlan is main-agent-only because it enters plan mode and writes

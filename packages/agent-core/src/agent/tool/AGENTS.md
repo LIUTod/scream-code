@@ -39,6 +39,13 @@
   not this power mode. It forwards the caller's `capabilityMode`, so a
   restricted agent's `rlm()` grandchild stays restricted; tighten by adding a
   `spawns` check in the handler if that contract ever changes
+- Nested Agent spawning is bounded: `AgentTool` is wired with a `spawnDepth`
+  reader (the caller's spawn depth, root = 0, maintained by the subagent host on
+  every spawn) and refuses to spawn once it reaches `MAX_AGENT_SPAWN_DEPTH`
+  (3 hops). WolfPack is wired with the same reader and gate. This is an
+  anti-cycle chain cap, NOT a fan-out/concurrency limit — sibling agents at the
+  same depth are unaffected; `Agent(resume=...)` is exempt (it continues an
+  existing agent and adds no depth)
 - `registerUserTool` has two execution paths: an in-process `execute` closure
   (code plugins; a throw becomes an isError result), or the host-callback path
   when no closure was given (hosts without `rpc.toolCall` get an error result,

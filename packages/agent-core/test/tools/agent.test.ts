@@ -5,7 +5,11 @@ import type { Logger, LogPayload } from '../../src/logging';
 import type { ResolvedAgentProfile } from '../../src/profile';
 import type { SessionSubagentHost } from '../../src/session/subagent-host';
 import { BackgroundProcessManager } from '../../src/tools/background/manager';
-import { AgentTool, AgentToolInputSchema } from '../../src/tools/builtin/collaboration/agent';
+import {
+  AgentTool,
+  AgentToolInputSchema,
+  MAX_AGENT_SPAWN_DEPTH,
+} from '../../src/tools/builtin/collaboration/agent';
 import { userCancellationReason } from '../../src/utils/abort';
 import { executeTool } from './fixtures/execute-tool';
 
@@ -470,6 +474,65 @@ describe('AgentTool', () => {
       }),
     );
     expect(result.output).toContain('actual_subagent_type: explore');
+  });
+
+  it('refuses to spawn once the caller sits at the nesting depth cap', async () => {
+    const host = mockSubagentHost({ spawn: vi.fn() });
+    const tool = new AgentTool(host, undefined, undefined, {
+      spawnDepth: () => MAX_AGENT_SPAWN_DEPTH,
+    });
+
+    const result = await executeTool(tool,
+      context({ prompt: 'Nested work', description: 'Nested task' }),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.output).toContain('nesting depth');
+    expect(host.spawn).not.toHaveBeenCalled();
+  });
+
+  it('still spawns one hop below the nesting depth cap', async () => {
+    const host = mockSubagentHost({
+      spawn: vi.fn().mockResolvedValue({
+        agentId: 'agent-child',
+        profileName: 'coder',
+        resumed: false,
+        completion: Promise.resolve({ result: 'done' }),
+      }),
+    });
+    const tool = new AgentTool(host, undefined, undefined, {
+      spawnDepth: () => MAX_AGENT_SPAWN_DEPTH - 1,
+    });
+
+    const result = await executeTool(tool,
+      context({ prompt: 'Nested work', description: 'Nested task' }),
+    );
+
+    expect(result.isError).toBeFalsy();
+    expect(host.spawn).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not apply the depth gate to a resume', async () => {
+    const host = mockSubagentHost({
+      spawn: vi.fn(),
+      resume: vi.fn().mockResolvedValue({
+        agentId: 'agent-existing',
+        profileName: 'explore',
+        resumed: true,
+        completion: Promise.resolve({ result: 'resumed result' }),
+      }),
+    });
+    const tool = new AgentTool(host, undefined, undefined, {
+      spawnDepth: () => MAX_AGENT_SPAWN_DEPTH,
+    });
+
+    const result = await executeTool(tool,
+      context({ prompt: 'Continue', description: 'Continue work', resume: 'agent-existing' }),
+    );
+
+    expect(result.output).toContain('resumed result');
+    expect(host.resume).toHaveBeenCalledTimes(1);
+    expect(host.spawn).not.toHaveBeenCalled();
   });
 
   it('declares no resource accesses so concurrent Agent calls can run in parallel', () => {

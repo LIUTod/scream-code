@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { HookEngine } from '../../src/session/hooks';
 import type { SessionSubagentHost } from '../../src/session/subagent-host';
+import { MAX_AGENT_SPAWN_DEPTH } from '../../src/tools/builtin/collaboration/agent';
 import { createFakeJian } from '../tools/fixtures/fake-jian';
 import { createCommandJian, testAgent } from './harness/agent';
 import { executeTool } from '../tools/fixtures/execute-tool';
@@ -151,6 +152,48 @@ describe('Agent tools', () => {
       }),
     );
     expect(JSON.stringify(ctx.llmCalls[1]?.history)).toContain('reason=max_tokens');
+  });
+
+  it('refuses to spawn past the nesting depth cap through the live tool wiring', async () => {
+    const subagentHost = {
+      spawn: vi.fn(),
+      resume: vi.fn(),
+    } as unknown as SessionSubagentHost;
+    const ctx = testAgent({ subagentHost });
+    ctx.configure({ tools: ['Agent'] });
+    // Spawn depth is carried on the agent instance (root = 0); the Agent tool
+    // reads it off the live agent, so a caller already at the cap is refused
+    // before the host is touched.
+    ctx.agent.setRlmDepth(MAX_AGENT_SPAWN_DEPTH);
+
+    ctx.mockNextResponse({ type: 'text', text: 'I will ask a subagent.' }, agentCall());
+    ctx.mockNextResponse({ type: 'text', text: 'The spawn was refused; I will do it myself.' });
+    await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Delegate' }] });
+    await ctx.untilTurnEnd();
+
+    expect(subagentHost.spawn).not.toHaveBeenCalled();
+    expect(JSON.stringify(ctx.llmCalls[1]?.history)).toContain('nesting depth cap');
+  });
+
+  it('refuses to spawn past the nesting depth cap through the live WolfPack wiring', async () => {
+    const subagentHost = {
+      spawn: vi.fn(),
+      resume: vi.fn(),
+    } as unknown as SessionSubagentHost;
+    const ctx = testAgent({ subagentHost });
+    ctx.configure({ tools: ['WolfPack'] });
+    // WolfPack execution is gated on the mode; with the mode on, the depth cap
+    // must still hold — otherwise the pack would be the way around it.
+    ctx.agent.wolfpackMode.enter();
+    ctx.agent.setRlmDepth(MAX_AGENT_SPAWN_DEPTH);
+
+    ctx.mockNextResponse({ type: 'text', text: 'I will fan this out.' }, wolfpackCall());
+    ctx.mockNextResponse({ type: 'text', text: 'The batch was refused; I will do it myself.' });
+    await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Fan out' }] });
+    await ctx.untilTurnEnd();
+
+    expect(subagentHost.spawn).not.toHaveBeenCalled();
+    expect(JSON.stringify(ctx.llmCalls[1]?.history)).toContain('nesting depth cap');
   });
 
   it('passes text from content-part error outputs to PostToolUseFailure hooks', async () => {
@@ -396,6 +439,19 @@ function agentCall(): ToolCall {
         description: 'Investigate deeply',
         subagent_type: 'coder',
       }),
+  };
+}
+
+function wolfpackCall(): ToolCall {
+  return {
+    type: 'function',
+    id: 'call_wolfpack',
+    name: 'WolfPack',
+    arguments: JSON.stringify({
+      description: 'Batch review',
+      prompt_template: 'Review {{item}}',
+      items: ['a.ts', 'b.ts'],
+    }),
   };
 }
 
