@@ -9,7 +9,7 @@
  * the edge and adding them would just churn the diff renderer.
  */
 
-import { Container } from '@liutod-scream/pi-tui';
+import { Container, type Component } from '@liutod-scream/pi-tui';
 
 export class GutterContainer extends Container {
   constructor(
@@ -23,11 +23,19 @@ export class GutterContainer extends Container {
     const inner = Math.max(1, width - this.leftPad - this.rightPad);
     const lead = ' '.repeat(this.leftPad);
     const out: string[] = [];
-    for (const child of this.children) {
+    for (const child of this.orderedChildren()) {
       for (const line of child.render(inner)) {
         out.push(lead + line);
       }
     }
     return out;
+  }
+
+  /**
+   * The children in render order. Defaults to the array order; subclasses may
+   * override this seam (the array itself stays the source of truth).
+   */
+  protected orderedChildren(): readonly Component[] {
+    return this.children;
   }
 }

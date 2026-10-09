@@ -16,6 +16,9 @@
 import { Container } from '@liutod-scream/pi-tui';
 import { vi } from 'vitest';
 
+import { LiveTailContainer } from '#/tui/components/transcript/live-tail-container';
+import { CHROME_GUTTER } from '#/tui/constant/rendering';
+
 import type { SlashCommandHost } from '#/tui/commands/dispatch';
 import type { ScreamHarness, Session, SessionStatus } from '@scream-code/scream-code-sdk';
 import type { StreamingUIController } from '#/tui/controllers/streaming-ui';
@@ -107,7 +110,9 @@ export function createMockTUIState(options: { appState?: Partial<AppState> } = {
     },
     terminal: { write: vi.fn(), title: undefined },
     layoutRoot: { render: (): string[] => ['root'], invalidate: (): void => {} },
-    transcriptContainer: new Container(),
+    // The live transcript pins the running block to the render tail, so the
+    // mock keeps the production container instead of a plain one.
+    transcriptContainer: new LiveTailContainer(CHROME_GUTTER, CHROME_GUTTER),
     activityContainer: new Container(),
     statusBarContainer: new Container(),
     todoPanelContainer: new Container(),

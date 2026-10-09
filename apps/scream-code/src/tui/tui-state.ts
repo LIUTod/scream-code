@@ -14,6 +14,7 @@ import { SidebarManager } from './components/sidebar/sidebar-manager';
 import { ErrorBannerComponent } from './components/chrome/error-banner';
 import { FooterComponent } from './components/chrome/footer';
 import { GutterContainer } from './components/chrome/gutter-container';
+import { LiveTailContainer } from './components/transcript/live-tail-container';
 import type { MoonLoader } from './components/chrome/moon-loader';
 import { PlanModeBannerComponent } from './components/chrome/plan-mode-banner';
 import type { PulseWaveLoader } from './components/chrome/pulse-wave-loader';
@@ -59,7 +60,9 @@ export interface TUIState {
   /** Gutter-wrapped sidebar used in buildLayout: same 1-column horizontal
    * padding as the transcript region so both columns line up. */
   sidebarPane: GutterContainer;
-  transcriptContainer: Container;
+  /** Transcript rows, rendered in array order except for the running block,
+   *  which `LiveTailContainer` draws last (pinned) until its turn settles. */
+  transcriptContainer: LiveTailContainer;
   activityContainer: Container;
   statusBarContainer: Container;
   todoPanelContainer: Container;
@@ -209,7 +212,7 @@ export function createTUIState(options: ScreamTUIOptions): TUIState {
     renderBatcher.requestRender(force);
   };
 
-  const transcriptContainer = new GutterContainer(CHROME_GUTTER, CHROME_GUTTER);
+  const transcriptContainer = new LiveTailContainer(CHROME_GUTTER, CHROME_GUTTER);
   const activityContainer = new GutterContainer(CHROME_GUTTER, CHROME_GUTTER);
   const statusBarContainer = new GutterContainer(CHROME_GUTTER, CHROME_GUTTER);
   const todoPanelContainer = new GutterContainer(CHROME_GUTTER, CHROME_GUTTER);
