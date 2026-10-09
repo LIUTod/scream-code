@@ -22,7 +22,9 @@
  *      map while a background task it owns may still be running, so the
  *      session keeps a weak reference to every manager it ever created and
  *      latches the surviving ones on close (a GC-reclaimed manager has no one
- *      left to notify and is skipped).
+ *      left to notify and is skipped). The same registry drives the exit stop
+ *      sweep, so agent-class tasks owned by an evicted subagent are stopped on
+ *      close instead of being stranded into a later failed/resume notice.
  */
 
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -197,6 +199,48 @@ describe('Session close vs. background task notifications', () => {
     // The bash process is exactly what keepAliveOnExit still protects.
     expect(main.background.getTask(bashTaskId)?.status).toBe('running');
     expect(bash.kill).not.toHaveBeenCalled();
+  });
+
+  it('stops agent-class tasks owned by an evicted subagent on close', async () => {
+    const { sessionDir, workDir } = await sessionFixture();
+    const session = new Session({
+      jian: testJian.withCwd(workDir),
+      id: 'session-close-evicted-subagent-task',
+      homedir: sessionDir,
+      rpc: createSessionRpc(),
+      skills: { explicitDirs: [join(workDir, 'missing-skills')] },
+    });
+    await session.createMain();
+    // A finished subagent leaves `session.agents` while an agent-class task it
+    // registered — a grandchild still running — keeps its manager alive.
+    const { id: childId, agent: child } = await session.createAgent(
+      { type: 'sub' },
+      undefined,
+      'main',
+    );
+    session.removeAgent(childId);
+    expect(session.agents.has(childId)).toBe(false);
+
+    const aborted = vi.fn();
+    const completion = new Promise<{ result: string }>((_resolve, reject) => {
+      aborted.mockImplementation(() => {
+        const error = new Error('subagent run aborted');
+        error.name = 'AbortError';
+        reject(error);
+      });
+    });
+    const agentTaskId = child.background.registerAgentTask(completion, 'grandchild run', {
+      abort: () => aborted(),
+    });
+
+    await session.close();
+
+    // Before the registry-driven sweep, close() walked only `session.agents`:
+    // this task survived, then a later open judged it failed/lost and its
+    // notification advertised `Agent(resume=...)` for a session that had
+    // already ended. It must be stopped like a resident agent's task instead.
+    expect(aborted).toHaveBeenCalledTimes(1);
+    expect(child.background.getTask(agentTaskId)?.status).toBe('killed');
   });
 
   it('keeps the keepAlive=false contract: close stops bash processes too', async () => {

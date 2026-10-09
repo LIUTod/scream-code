@@ -331,33 +331,21 @@ export class Session {
   }
 
   async close(): Promise<void> {
-    // Seal every agent's background manager before anything else runs — in
-    // particular before the turn cancels below. From this point on a background
-    // task that reaches a terminal state must not steer its notification into
-    // the closing session: an idle steer auto-launches a turn no one can see
-    // (the ghost turn; see BackgroundManager.notifyBackgroundTask), while an
-    // undelivered notification is what lets the next open of this session
-    // replay it through reconcile. The latch is never reset on this instance
-    // because none survives a close: a closed session is discarded (the RPC
-    // layer's closeSession drops it from the active map — unconditionally, even
-    // when this close throws — and activation builds a new Session), and
-    // `resume()` clears every live agent before re-instantiating it, so a
-    // reopened session always runs fresh BackgroundManager instances.
-    for (const agent of this.agents.values()) {
-      agent.background.markSessionClosed();
-    }
-    // Resident agents are latched above; a finished subagent is evicted from
-    // `agents` while background tasks it registered may still be running (its
-    // manager stays reachable through the task's terminal hook), so latch every
-    // manager this session ever created — see `trackBackgroundManager`. An
-    // entry the GC already reclaimed needs no latch: nothing can notify through
-    // a manager that no longer exists, so it is dropped instead.
-    for (const ref of this.backgroundManagers) {
-      const manager = ref.deref();
-      if (manager === undefined) {
-        this.backgroundManagers.delete(ref);
-        continue;
-      }
+    // Seal every background manager this session created before anything else
+    // runs — in particular before the turn cancels below. The registry covers
+    // resident agents and evicted subagents alike (see
+    // `liveBackgroundManagers`): from this point on a background task that
+    // reaches a terminal state must not steer its notification into the closing
+    // session — an idle steer auto-launches a turn no one can see (the ghost
+    // turn; see BackgroundManager.notifyBackgroundTask), while an undelivered
+    // notification is what lets the next open of this session replay it through
+    // reconcile. The latch is never reset on this instance because none
+    // survives a close: a closed session is discarded (the RPC layer's
+    // closeSession drops it from the active map — unconditionally, even when
+    // this close throws — and activation builds a new Session), and `resume()`
+    // clears every live agent before re-instantiating it, so a reopened session
+    // always runs fresh BackgroundManager instances.
+    for (const manager of this.liveBackgroundManagers()) {
       manager.markSessionClosed();
     }
     const main = this.agents.get('main');
@@ -408,6 +396,11 @@ export class Session {
    * they are stopped in both paths: via `stopAll` when keepAlive is off (which
    * covers every task, so the agent-only stop is not repeated on top of it),
    * and via `stopAgentTasks` when keepAlive is on.
+   *
+   * The sweep runs over `liveBackgroundManagers()`, not just `this.agents`: a
+   * finished subagent is evicted while agent-class tasks it registered may
+   * still be running, and those are exactly the tasks that would otherwise be
+   * stranded into a later `failed` notification that advertises `Agent(resume=)`.
    */
   private async stopBackgroundTasksOnExit(): Promise<void> {
     const keepAliveOnExit = resolveConfigValue({
@@ -417,19 +410,12 @@ export class Session {
       defaultValue: true,
       parseEnv: parseBooleanEnv,
     });
+    const managers = this.liveBackgroundManagers();
     if (!keepAliveOnExit) {
-      await Promise.all(
-        Array.from(this.agents.values(), (agent) =>
-          agent.background.stopAll('Session closed'),
-        ),
-      );
+      await Promise.all(managers.map((manager) => manager.stopAll('Session closed')));
       return;
     }
-    await Promise.all(
-      Array.from(this.agents.values(), (agent) =>
-        agent.background.stopAgentTasks('Session closed'),
-      ),
-    );
+    await Promise.all(managers.map((manager) => manager.stopAgentTasks('Session closed')));
   }
 
   async createAgent(
@@ -819,6 +805,30 @@ export class Session {
       if (ref.deref() === undefined) this.backgroundManagers.delete(ref);
     }
     this.backgroundManagers.add(new WeakRef(manager));
+  }
+
+  /**
+   * Every BackgroundManager this session created that is still alive. Agents
+   * are registered at construction (`instantiateAgent` →
+   * `trackBackgroundManager`), so resident agents' managers are included and
+   * this is the one enumeration both `close()`'s latch and
+   * `stopBackgroundTasksOnExit`'s stop sweep run over — an evicted subagent's
+   * manager stays reachable here after the agent left `agents`.
+   *
+   * An entry the GC already reclaimed is pruned: nothing can notify through,
+   * or hold tasks in, a manager that no longer exists.
+   */
+  private liveBackgroundManagers(): readonly BackgroundManager[] {
+    const live: BackgroundManager[] = [];
+    for (const ref of this.backgroundManagers) {
+      const manager = ref.deref();
+      if (manager === undefined) {
+        this.backgroundManagers.delete(ref);
+        continue;
+      }
+      live.push(manager);
+    }
+    return live;
   }
 
   private permissionOptions(
