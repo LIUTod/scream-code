@@ -20,7 +20,10 @@
   thinking.delta (via `appendLoopEvent`)
 - Snapshots: `toJSONSnapshot`/`restoreJSONSnapshot` (persisted after
   compaction, used for the replay fast-path; the payload carries
-  `messageEdits`)
+  `messageEdits` and the background manager's delivered-notification keys —
+  the latter because the compaction that writes the snapshot folds the
+  notification messages those marks came from; see
+  `BackgroundManager.exportDeliveredNotificationKeys`)
 - `context.prefix_break` (`observePrefixStability`) is diagnostic only: it
   records a cache-prefix break on the wire for auditability, is never replayed
   into state and never enters a provider request. It fingerprints the whole
