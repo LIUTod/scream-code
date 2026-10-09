@@ -746,6 +746,30 @@ describe('useScreamWebClient frame dispatch discipline', () => {
     expect(consoleError).not.toHaveBeenCalled();
   });
 
+  it('carries approval source attribution through to the pending list', async () => {
+    h = setupHarness();
+    const ws = await h.handshake();
+
+    ws.fireMessage({
+      type: 'approval_request',
+      id: 'ap-src',
+      toolName: 'Bash',
+      action: 'run ls',
+      display: {},
+      sourceAgentId: 'agent-3',
+      sourceAgentName: 'explore',
+      sourceToolName: 'Bash',
+    });
+
+    expect(h.client.pendingApprovals.value).toHaveLength(1);
+    expect(h.client.pendingApprovals.value[0]).toMatchObject({
+      id: 'ap-src',
+      sourceAgentId: 'agent-3',
+      sourceAgentName: 'explore',
+      sourceToolName: 'Bash',
+    });
+  });
+
   it('unknown frame type fails loud and does not break the dispatch loop', async () => {
     h = setupHarness();
     const ws = await h.handshake();

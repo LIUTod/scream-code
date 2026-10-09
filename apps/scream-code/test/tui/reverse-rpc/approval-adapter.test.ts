@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { adaptApprovalRequest, adaptPanelResponse } from '#/tui/reverse-rpc/approval/adapter';
+import { adaptApprovalRequest, adaptPanelResponse, formatApprovalSource } from '#/tui/reverse-rpc/approval/adapter';
 
 describe('approval adapter', () => {
   it('adapts generic command displays into shell blocks with approval choices', () => {
@@ -209,6 +209,45 @@ describe('approval adapter', () => {
         requires_feedback: true,
       },
     ]);
+  });
+
+  it('carries approval source attribution into the panel label', () => {
+    const adapted = adaptApprovalRequest({
+      toolCallId: 'tc-src',
+      toolName: 'Bash',
+      action: 'run',
+      display: { kind: 'generic', summary: 'run', detail: { command: 'ls' } },
+      sourceAgentId: 'agent-3',
+      sourceAgentName: 'explore',
+      sourceToolName: 'Bash',
+    });
+
+    expect(adapted.source_label).toBe('来源：explore（agent-3） · Bash');
+  });
+
+  it('falls back to the agent id when the payload carries no readable name', () => {
+    const adapted = adaptApprovalRequest({
+      toolCallId: 'tc-src-main',
+      toolName: 'Bash',
+      action: 'run',
+      display: { kind: 'generic', summary: 'run', detail: { command: 'ls' } },
+      sourceAgentId: 'main',
+      sourceToolName: 'Bash',
+    });
+
+    expect(adapted.source_label).toBe('来源：main · Bash');
+  });
+
+  it('omits the source label for payloads without attribution (older emitters)', () => {
+    const adapted = adaptApprovalRequest({
+      toolCallId: 'tc-legacy',
+      toolName: 'Bash',
+      action: 'run',
+      display: { kind: 'generic', summary: 'run', detail: { command: 'ls' } },
+    });
+
+    expect(adapted).not.toHaveProperty('source_label');
+    expect(formatApprovalSource({ toolName: 'Bash' })).toBeUndefined();
   });
 
   it('maps approved-for-session responses into core approval payloads', () => {

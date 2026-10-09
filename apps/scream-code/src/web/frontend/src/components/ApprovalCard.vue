@@ -38,6 +38,21 @@ function displayText(a: ApprovalRequest): string {
   return a.action ?? '执行该操作';
 }
 
+function formatSource(a: ApprovalRequest): string {
+  const agentId = a.sourceAgentId;
+  const name = a.sourceAgentName;
+  const tool = a.sourceToolName ?? a.toolName;
+  const label = name ?? agentId ?? '';
+  const agent =
+    agentId !== undefined && agentId !== '' && agentId !== label ? `${label}（${agentId}）` : label;
+  const toolSuffix = tool !== undefined && tool !== '' ? ` · ${tool}` : '';
+  return `来源：${agent}${toolSuffix}`;
+}
+
+function hasSource(a: ApprovalRequest | undefined): boolean {
+  return a !== undefined && (a.sourceAgentId !== undefined || a.sourceAgentName !== undefined);
+}
+
 function isBusy(id: string): boolean {
   return busyIds.value.has(id);
 }
@@ -108,6 +123,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
         <span v-if="approvals.length > 1" class="approval-count">+{{ approvals.length - 1 }}</span>
         <button class="icon-btn" title="最小化" aria-label="最小化" @click="minimized = true">—</button>
       </div>
+
+      <p v-if="hasSource(current)" class="approval-source">{{ formatSource(current) }}</p>
 
       <pre class="approval-action">{{ displayText(current) }}</pre>
 
@@ -271,6 +288,16 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
   word-break: break-word;
   max-height: 200px;
   overflow-y: auto;
+}
+
+.approval-source {
+  margin: var(--space-2) var(--space-3) 0;
+  padding: 0;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .feedback-area {

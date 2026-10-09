@@ -149,6 +149,9 @@ interface ApprovalRequestMessage {
   readonly toolName: string;
   readonly action?: string;
   readonly display?: unknown;
+  readonly sourceAgentId?: string | undefined;
+  readonly sourceAgentName?: string | undefined;
+  readonly sourceToolName?: string | undefined;
 }
 
 interface SessionSnapshot {
@@ -1140,6 +1143,9 @@ class WebSession {
       toolName: string;
       action?: string;
       display?: unknown;
+      sourceAgentId?: string | undefined;
+      sourceAgentName?: string | undefined;
+      sourceToolName?: string | undefined;
     }
   >();
 
@@ -1988,12 +1994,18 @@ class WebSession {
           toolName: request.toolName,
           action: request.action,
           display: request.display,
+          sourceAgentId: request.sourceAgentId,
+          sourceAgentName: request.sourceAgentName,
+          sourceToolName: request.sourceToolName,
         });
         const payload: ApprovalRequestMessage = {
           id,
           toolName: request.toolName,
           action: request.action,
           display: request.display,
+          sourceAgentId: request.sourceAgentId,
+          sourceAgentName: request.sourceAgentName,
+          sourceToolName: request.sourceToolName,
         };
         this.broadcast({ type: 'approval_request', ...payload }, false);
       });
@@ -2047,6 +2059,9 @@ class WebSession {
         toolName: approval.toolName,
         action: approval.action,
         display: approval.display,
+        sourceAgentId: approval.sourceAgentId,
+        sourceAgentName: approval.sourceAgentName,
+        sourceToolName: approval.sourceToolName,
       })),
       status: this.cachedStatus ?? {
         model: 'unknown',

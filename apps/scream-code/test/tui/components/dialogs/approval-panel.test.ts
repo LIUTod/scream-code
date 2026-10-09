@@ -490,4 +490,19 @@ describe('ApprovalPanelComponent — selection pulse', () => {
     expect(out).toContain('█ 1. Approve once');
     expect(out).toContain('  2. Approve for this session');
   });
+
+  it('shows the requesting agent and tool as a source row', () => {
+    const pending = makePending();
+    pending.data.source_label = '来源：explore（agent-3） · Bash';
+    const dialog = new ApprovalPanelComponent(pending, () => {}, COLORS);
+
+    const out = strip(dialog.render(80).join('\n'));
+    expect(out).toContain('来源：explore（agent-3） · Bash');
+  });
+
+  it('omits the source row for payloads without attribution (older emitters)', () => {
+    const dialog = new ApprovalPanelComponent(makePending(), () => {}, COLORS);
+
+    expect(strip(dialog.render(80).join('\n'))).not.toContain('来源：');
+  });
 });

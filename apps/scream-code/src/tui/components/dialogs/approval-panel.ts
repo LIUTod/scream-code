@@ -362,6 +362,9 @@ export class ApprovalPanelComponent extends Container implements Focusable {
       horizontalBar,
       indent(`${borderColorBold('→')} ${borderColorBold(title)}`),
     ];
+    if (data.source_label !== undefined && data.source_label.length > 0) {
+      lines.push(indent(dim(truncateToWidth(data.source_label, Math.max(width - 4, 1)))));
+    }
 
     const dedupedBlocks = data.display.filter(
       (block) => !isDuplicateBriefBlock(block, data.description),

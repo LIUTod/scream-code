@@ -152,7 +152,18 @@ export function createMessagesModule(ctx: ClientContext): MessagesModule {
 
   onWsMessage(s, 'approval_request', (msg) => {
     s.liveGeneration++;
-    s.pendingApprovals.value = [...s.pendingApprovals.value, { id: msg.id, toolName: msg.toolName, action: msg.action, display: msg.display }];
+    s.pendingApprovals.value = [
+      ...s.pendingApprovals.value,
+      {
+        id: msg.id,
+        toolName: msg.toolName,
+        action: msg.action,
+        display: msg.display,
+        sourceAgentId: msg.sourceAgentId,
+        sourceAgentName: msg.sourceAgentName,
+        sourceToolName: msg.sourceToolName,
+      },
+    ];
   });
 
   onWsMessage(s, 'approval_resolved', (msg) => {

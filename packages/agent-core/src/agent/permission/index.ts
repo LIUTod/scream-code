@@ -34,6 +34,12 @@ interface PendingApproval {
   reject(error: Error): void;
 }
 
+/**
+ * Readable view of a pending approval. Deliberately carries no source
+ * attribution: `sourceAgentId` / `sourceAgentName` / `sourceToolName` are
+ * stamped on the `ApprovalRequest` handed to `rpc.requestApproval` (the path
+ * the TUI/web panels consume), and nothing reads them off the pending list.
+ */
 export interface PendingApprovalInfo {
   readonly id: string;
   readonly turnId: number;
@@ -191,6 +197,15 @@ export class PermissionManager {
       };
     const action = context.execution.description ?? `Call ${name}`;
     const startedAt = Date.now();
+    // Who is asking + what triggered it, carried on the wire so the UI can
+    // attribute the request. `sourceAgentName` is omitted when the agent has
+    // no profile name — consumers fall back to `sourceAgentId`.
+    const sourceAgentId = this.agent.agentId;
+    const sourceAgentName = this.agent.config.profileName;
+    const source =
+      sourceAgentName !== undefined
+        ? { sourceAgentId, sourceAgentName, sourceToolName: name }
+        : { sourceAgentId, sourceToolName: name };
 
     let response: ApprovalResponse;
     if (this.agent.rpc?.requestApproval) {
@@ -221,6 +236,7 @@ export class PermissionManager {
                 toolName: name,
                 action,
                 display,
+                ...source,
               },
               { signal },
             ).then(resolve, reject);

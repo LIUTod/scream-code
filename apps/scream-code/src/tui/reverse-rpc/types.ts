@@ -115,6 +115,9 @@ export interface ApprovalPanelData {
   description: string;
   display: DisplayBlock[];
   choices: ApprovalPanelChoice[];
+  /** "来源：<代理名>（<agentId>）· <工具>" — absent on payloads without
+   *  attribution (older emitters), in which case the panel omits the row. */
+  source_label?: string | undefined;
 }
 
 export interface QuestionPanelItem {

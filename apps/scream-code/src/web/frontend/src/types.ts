@@ -67,6 +67,12 @@ export interface ApprovalRequest {
   toolName: string;
   action?: string;
   display?: unknown;
+  /** Id of the agent that asked ('main' for the root agent). */
+  sourceAgentId?: string;
+  /** Human-readable name of the asking agent (its profile name). */
+  sourceAgentName?: string;
+  /** Tool that triggered the approval. */
+  sourceToolName?: string;
 }
 
 export interface TokenUsage {
@@ -272,7 +278,16 @@ export interface JournalEvent {
 export type WsMessage =
   | ServerHello
   | JournalEvent
-  | { type: 'approval_request'; id: string; toolName: string; action?: string; display?: unknown }
+  | {
+      type: 'approval_request';
+      id: string;
+      toolName: string;
+      action?: string;
+      display?: unknown;
+      sourceAgentId?: string;
+      sourceAgentName?: string;
+      sourceToolName?: string;
+    }
   | { type: 'approval_resolved'; id: string }
   | { type: 'user_message'; clientMessageId?: string; text: string }
   | { type: 'command_result'; command: string; ok: boolean; message: string; pendingMsgId?: string; sessionId?: string }

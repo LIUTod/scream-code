@@ -20,6 +20,15 @@ export interface ApprovalRequest {
   readonly toolName: string;
   readonly action: string;
   readonly display: ToolInputDisplay;
+  /** Id of the agent that asked ('main' for the root agent). Optional so
+   *  older emitters and replayed payloads stay valid. */
+  readonly sourceAgentId?: string | undefined;
+  /** Human-readable name of the asking agent (its profile name). Optional:
+   *  falls back to `sourceAgentId` in the UI when absent. */
+  readonly sourceAgentName?: string | undefined;
+  /** Tool that triggered the approval; mirrors `toolName` on the origin side,
+   *  present so consumers can attribute without re-deriving. */
+  readonly sourceToolName?: string | undefined;
 }
 
 export interface QuestionOption {

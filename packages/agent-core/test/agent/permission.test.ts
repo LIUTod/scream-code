@@ -238,7 +238,7 @@ describe('Agent permission', () => {
       [wire] context.append_loop_event   { "event": { "type": "block.start", "uuid": "<uuid-2>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "index": 0, "blockType": "text" }, "time": "<time>" }
       [wire] context.append_loop_event   { "event": { "type": "content.part", "uuid": "<uuid-3>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "part": { "type": "text", "text": "I will try Bash." } }, "time": "<time>" }
       [wire] context.append_loop_event   { "event": { "type": "block.end", "uuid": "<uuid-4>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "index": 0, "blockType": "text" }, "time": "<time>" }
-      [emit] requestApproval             { "turnId": 0, "toolCallId": "call_bash", "toolName": "Bash", "action": "Running: printf should-not-run", "display": { "kind": "command", "command": "printf should-not-run", "cwd": "<cwd>", "language": "bash" } }
+      [emit] requestApproval             { "turnId": 0, "toolCallId": "call_bash", "toolName": "Bash", "action": "Running: printf should-not-run", "display": { "kind": "command", "command": "printf should-not-run", "cwd": "<cwd>", "language": "bash" }, "sourceAgentId": "main", "sourceToolName": "Bash" }
     `);
     expect(ctx.lastLlmInput()).toMatchInlineSnapshot(`
       system: <system-prompt>
@@ -1457,6 +1457,8 @@ describe('Plan mode Bash permission policy', () => {
           kind: 'command',
           command: 'ls -la',
         },
+        sourceAgentId: 'main',
+        sourceToolName: 'Bash',
       },
       { signal: expect.any(AbortSignal) },
     );
@@ -1570,6 +1572,8 @@ describe('ExitPlanMode permission policy', () => {
           path: '/tmp/plan.md',
           options: planOptions,
         },
+        sourceAgentId: 'main',
+        sourceToolName: 'ExitPlanMode',
       },
       { signal: expect.any(AbortSignal) },
     );
@@ -3377,6 +3381,7 @@ function makePlanPermissionManager(input: {
   const path = input.path ?? '/tmp/plan.md';
   const agent = {
     type: 'main',
+    agentId: 'main',
     config: { cwd: '/workspace' },
     jian: createFakeJian(),
     emitStatusUpdated: vi.fn(),

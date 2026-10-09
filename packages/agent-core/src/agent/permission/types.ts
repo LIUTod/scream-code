@@ -40,6 +40,12 @@ export interface ApprovalRequest {
   toolName: string;
   action: string;
   display: ToolInputDisplay;
+  /** Id of the agent asking for approval; 'main' for the root agent. */
+  sourceAgentId?: string | undefined;
+  /** Profile name of the asking agent, for people-facing attribution. */
+  sourceAgentName?: string | undefined;
+  /** Tool that triggered the approval request. */
+  sourceToolName?: string | undefined;
 }
 
 export interface ApprovalResponse {

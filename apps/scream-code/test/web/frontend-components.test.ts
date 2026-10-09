@@ -5,6 +5,45 @@ import ModeSwitch from '../../src/web/frontend/src/components/ModeSwitch.vue';
 import MessageList from '../../src/web/frontend/src/components/MessageList.vue';
 import WorkspaceHome from '../../src/web/frontend/src/components/WorkspaceHome.vue';
 import ToolGroup from '../../src/web/frontend/src/components/ToolGroup.vue';
+import ApprovalCard from '../../src/web/frontend/src/components/ApprovalCard.vue';
+
+describe('ApprovalCard source attribution', () => {
+  function approval(overrides: Record<string, unknown> = {}) {
+    return {
+      id: 'req_1',
+      toolName: 'Bash',
+      action: 'run ls',
+      display: { description: 'run ls' },
+      ...overrides,
+    };
+  }
+
+  it('shows the requesting agent and tool', () => {
+    const wrapper = mount(ApprovalCard, {
+      props: {
+        approvals: [
+          approval({ sourceAgentId: 'agent-3', sourceAgentName: 'explore', sourceToolName: 'Bash' }),
+        ],
+      },
+    });
+
+    expect(wrapper.find('.approval-source').text()).toBe('来源：explore（agent-3） · Bash');
+  });
+
+  it('falls back to the agent id when no readable name is carried', () => {
+    const wrapper = mount(ApprovalCard, {
+      props: { approvals: [approval({ sourceAgentId: 'main', sourceToolName: 'Bash' })] },
+    });
+
+    expect(wrapper.find('.approval-source').text()).toBe('来源：main · Bash');
+  });
+
+  it('omits the source row for payloads without attribution (older emitters)', () => {
+    const wrapper = mount(ApprovalCard, { props: { approvals: [approval()] } });
+
+    expect(wrapper.find('.approval-source').exists()).toBe(false);
+  });
+});
 
 describe('ModeSwitch', () => {
   it('defaults to chat active and emits goal when the goal mode pill is clicked', async () => {

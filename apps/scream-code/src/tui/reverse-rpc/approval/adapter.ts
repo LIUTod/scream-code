@@ -1,5 +1,5 @@
 import type { ApprovalRequest, ApprovalResponse, ToolInputDisplay } from '@scream-code/scream-code-sdk';
-import { t } from '@scream-code/config';
+import { getLocale, t } from '@scream-code/config';
 
 import type { ApprovalPanelResponse } from '#/tui/components/dialogs/approval-panel';
 import type { ApprovalPanelChoice, ApprovalPanelData, DisplayBlock } from '#/tui/reverse-rpc/types';
@@ -22,6 +22,7 @@ function getPlanRejectChoices(): ApprovalPanelChoice[] {
 
 export function adaptApprovalRequest(event: ApprovalRequest): ApprovalPanelData {
   const resolved = resolveDisplay(event.toolName, event.display, event.action);
+  const sourceLabel = formatApprovalSource(event);
   return {
     id: event.toolCallId,
     tool_call_id: event.toolCallId,
@@ -30,7 +31,31 @@ export function adaptApprovalRequest(event: ApprovalRequest): ApprovalPanelData 
     description: resolved.description,
     display: resolved.blocks,
     choices: adaptChoices(event.toolName, event.display),
+    ...(sourceLabel !== undefined ? { source_label: sourceLabel } : {}),
   };
+}
+
+/**
+ * "来源：<代理名>（<agentId>）· <工具>" — who asked and what triggered it.
+ * Returns undefined on payloads without attribution (older emitters), so
+ * the panel can skip the row entirely.
+ *
+ * The label itself follows the sidebar's locale-conditional pattern
+ * (`getLocale()`), not the i18n dictionary: this row renders inside the
+ * approval panel's own text and needs no placeholder plumbing.
+ */
+export function formatApprovalSource(
+  event: Pick<ApprovalRequest, 'toolName' | 'sourceAgentId' | 'sourceAgentName' | 'sourceToolName'>,
+): string | undefined {
+  const agentId = event.sourceAgentId;
+  const name = event.sourceAgentName;
+  if (agentId === undefined && name === undefined) return undefined;
+  const tool = event.sourceToolName ?? event.toolName;
+  const label = name ?? agentId ?? '';
+  const agent =
+    agentId !== undefined && agentId !== '' && agentId !== label ? `${label}（${agentId}）` : label;
+  const toolSuffix = tool !== undefined && tool !== '' ? ` · ${tool}` : '';
+  return `${getLocale() === 'zh' ? '来源：' : 'Source: '}${agent}${toolSuffix}`;
 }
 
 interface ResolvedDisplay {
