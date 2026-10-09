@@ -50,6 +50,7 @@ import {
   stringValue,
 } from '../utils/event-payload';
 import { formatBackgroundAgentTranscript } from '../utils/background-agent-status';
+import { isBackgroundedHandoffResult } from '../utils/subagent-handoff';
 import {
   childRequestFieldsFromEvent,
   renderChildRequestNotice,
@@ -1064,6 +1065,16 @@ export class SessionEventHandler {
       display: event.display,
       message: event.message,
     };
+    // The handoff result is the one frame both handoff outcomes emit: a
+    // successful registration (whose `background.task.started` follows) and a
+    // failed one (registration threw, so no task frame is ever emitted). The
+    // mark is read off the result so the card also reads `backgrounded` in the
+    // failed case — and it stays decoupled from the footer accounting, which
+    // only the `background.task.*` frames drive (see
+    // handleBackgroundTaskEvent).
+    if (isBackgroundedHandoffResult(resultData.output)) {
+      streamingUI.markSubagentBackgrounded({ toolCallId: event.toolCallId });
+    }
     streamingUI.completeToolResult(event.toolCallId, resultData);
     // Stay in "执行中" while siblings of the same parallel batch are still
     // running: core schedules the whole batch concurrently and dispatches the

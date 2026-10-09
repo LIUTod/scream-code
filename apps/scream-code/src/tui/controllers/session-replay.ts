@@ -26,6 +26,7 @@ import {
   renderChildRequestNotice,
 } from '../utils/child-request-notice';
 import { formatBackgroundTaskTranscript } from '../utils/background-task-status';
+import { isBackgroundedHandoffResult } from '../utils/subagent-handoff';
 import {
   appStateFromResumeAgent,
   backgroundOrigin,
@@ -360,10 +361,12 @@ export class SessionReplayRenderer {
     call.result = result;
     this.applyStepContext(context);
     // A foreground subagent handed to the background manager returns a normal
-    // result whose body says `status: backgrounded`. Replay has no spawn /
-    // task lifecycle events, so the persisted output is the signal that keeps
-    // the replayed card on `backgrounded` instead of an ordinary finish.
-    if (call.name === 'Agent' && result.output.includes('status: backgrounded')) {
+    // result whose body carries the handoff protocol line (`status:
+    // backgrounded`). Replay has no spawn / task lifecycle events, so the
+    // persisted output is the signal that keeps the replayed card on
+    // `backgrounded` instead of an ordinary finish — the same predicate the
+    // live path reads off the `tool.result` frame.
+    if (call.name === 'Agent' && isBackgroundedHandoffResult(result.output)) {
       this.host.streamingUI.markSubagentBackgrounded({ toolCallId });
     }
     this.host.streamingUI.onToolCallEnd(toolCallId, result);

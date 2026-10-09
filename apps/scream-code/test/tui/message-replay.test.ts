@@ -969,4 +969,81 @@ describe('replayed foreground→background handoff', () => {
     expect(out).toContain('后台运行');
     expect(out).not.toContain('已完成');
   });
+
+  it('keeps the register-failure handoff on 后台运行: the result line is the only signal', async () => {
+    const driver = await replayIntoDriver([
+      message('user', [{ type: 'text', text: 'run an agent' }]),
+      message('assistant', [], {
+        toolCalls: [
+          toolCall('call_agent', 'Agent', { description: 'inspect storage', subagent_type: 'explore' }),
+        ],
+      }),
+      message(
+        'tool',
+        [
+          {
+            type: 'text',
+            text: [
+              'agent_id: agent-1',
+              'actual_subagent_type: explore',
+              'status: backgrounded',
+              '',
+              'warning: the subagent requested input and could not register a background task: running-task limit reached',
+            ].join('\n'),
+          },
+        ],
+        { toolCallId: 'call_agent' },
+      ),
+    ]);
+
+    const card = driver.state.transcriptContainer.children.find(
+      (child) => child instanceof ToolCallComponent,
+    );
+    expect(card).toBeInstanceOf(ToolCallComponent);
+    expect((card as ToolCallComponent).getSubagentSnapshot().phase).toBe('backgrounded');
+    const out = (card as ToolCallComponent)
+      .render(120)
+      .map(stripAnsi)
+      .join('\n');
+    expect(out).toContain('后台运行');
+    expect(out).not.toContain('已完成');
+  });
+
+  it('leaves a completed card alone when the phrase only appears inside prose', async () => {
+    const driver = await replayIntoDriver([
+      message('user', [{ type: 'text', text: 'run an agent' }]),
+      message('assistant', [], {
+        toolCalls: [
+          toolCall('call_agent', 'Agent', { description: 'inspect storage', subagent_type: 'explore' }),
+        ],
+      }),
+      message(
+        'tool',
+        [
+          {
+            type: 'text',
+            text: [
+              'agent_id: agent-2',
+              'actual_subagent_type: explore',
+              'status: completed',
+              '',
+              'summary: the earlier run resumed after status: backgrounded was reported.',
+            ].join('\n'),
+          },
+        ],
+        { toolCallId: 'call_agent' },
+      ),
+    ]);
+
+    const card = driver.state.transcriptContainer.children.find(
+      (child) => child instanceof ToolCallComponent,
+    );
+    expect(card).toBeInstanceOf(ToolCallComponent);
+    expect((card as ToolCallComponent).getSubagentSnapshot().phase).toBe('done');
+    const out = (card as ToolCallComponent)
+      .render(120)
+      .map(stripAnsi)
+      .join('\n');
+    expect(out).not.toContain('后台运行');
+  });
 });

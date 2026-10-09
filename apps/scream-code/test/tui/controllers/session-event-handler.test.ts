@@ -1846,3 +1846,64 @@ describe('SessionEventHandler — foreground→background handoff', () => {
     });
   });
 });
+
+/**
+ * The result half of the same handoff fact. Registration can fail (the
+ * running-task limit is full) and that path emits no `background.task.started`
+ * frame at all — but the child is still running, so the card must not read as
+ * an ordinary finish. The result body is then the only signal, and it must be
+ * matched as the protocol line rather than any substring occurrence.
+ */
+describe('SessionEventHandler — foreground→background handoff result', () => {
+  function setup(): { handler: SessionEventHandler; mark: ReturnType<typeof vi.fn> } {
+    const host = createMockHost();
+    return {
+      handler: new SessionEventHandler(host),
+      mark: vi.mocked(host.streamingUI.markSubagentBackgrounded),
+    };
+  }
+
+  function toolResult(handler: SessionEventHandler, toolCallId: string, output: string): void {
+    handler.handleEvent(
+      { ...baseEvent('tool.result'), toolCallId, output } as unknown as Event,
+      vi.fn(),
+    );
+  }
+
+  it('marks the card from the result alone when registration failed (no task frame)', () => {
+    const { handler, mark } = setup();
+
+    toolResult(
+      handler,
+      'call-agent',
+      [
+        'agent_id: agent-7',
+        'actual_subagent_type: coder',
+        'status: backgrounded',
+        '',
+        'warning: the subagent requested input and could not register a background task: running-task limit reached',
+      ].join('\n'),
+    );
+
+    expect(mark).toHaveBeenCalledTimes(1);
+    expect(mark).toHaveBeenCalledWith({ toolCallId: 'call-agent' });
+  });
+
+  it('does not mark a completed result that only quotes the phrase inside prose', () => {
+    const { handler, mark } = setup();
+
+    toolResult(
+      handler,
+      'call-agent',
+      [
+        'agent_id: agent-7',
+        'actual_subagent_type: coder',
+        'status: completed',
+        '',
+        'summary: the earlier run resumed after status: backgrounded was reported.',
+      ].join('\n'),
+    );
+
+    expect(mark).not.toHaveBeenCalled();
+  });
+});
