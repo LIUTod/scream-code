@@ -9,6 +9,7 @@
   "include": ["src", "test", "../../packages/agent-core/src/prompt-modules.d.ts"],
   "exclude": [
     "src/web/frontend",
+    "test/web/background-task-events.test.ts",
     "test/web/session-controls-panel.test.ts",
     "test/web/session-detail-view.test.ts",
     "test/web/subagent-activity.test.ts",

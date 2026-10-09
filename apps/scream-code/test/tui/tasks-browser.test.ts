@@ -64,6 +64,7 @@ function task(overrides: Partial<BackgroundTaskInfo> = {}): BackgroundTaskInfo {
 function makeProps(overrides: Partial<TasksBrowserProps> = {}): TasksBrowserProps {
   return {
     tasks: [],
+    taskSourceNames: new Map(),
     agents: [],
     filter: 'all',
     selectedTaskId: undefined,
@@ -177,6 +178,44 @@ describe('TasksBrowserApp — full-screen rendering', () => {
     expect(out).toContain('long running task');
   });
 
+  it('names the owning subagent on a subagent-owned task row and detail line', () => {
+    // 200 columns: the list column caps at 44 cells, so this is the widest the
+    // tag can ever be rendered in.
+    const out = strip(
+      makeApp(
+        {
+          tasks: [task({ taskId: 'bash-aaaaaaaa', description: 'subagent build' })],
+          taskSourceNames: new Map([['bash-aaaaaaaa', 'coder']]),
+          selectedTaskId: 'bash-aaaaaaaa',
+        },
+        30,
+        200,
+      )
+        .render(200)
+        .join('\n'),
+    );
+    // List row: the provenance tag; detail pane: the same owner under the shared
+    // `taskbrowser.agent_source` label.
+    expect(out).toContain('来自 coder');
+    expect(out).toContain(detailRow('来源：', 'coder'));
+  });
+
+  it('leaves a main-agent task untagged', () => {
+    const out = strip(
+      makeApp(
+        {
+          tasks: [task({ taskId: 'bash-aaaaaaaa' })],
+          selectedTaskId: 'bash-aaaaaaaa',
+        },
+        30,
+        200,
+      )
+        .render(200)
+        .join('\n'),
+    );
+    expect(out).not.toContain('来自');
+  });
+
   it('renders tail output in the Preview Output pane', () => {
     const out = strip(
       makeApp({
@@ -237,7 +276,6 @@ describe('TasksBrowserApp — full-screen rendering', () => {
   it('renders without throwing for every BackgroundTaskStatus', () => {
     const statuses: BackgroundTaskStatus[] = [
       'running',
-      'awaiting_approval',
       'completed',
       'failed',
       'killed',

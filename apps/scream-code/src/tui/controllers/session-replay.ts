@@ -574,9 +574,15 @@ export class SessionReplayRenderer {
       return;
     }
 
+    // Identity, not the task id: the live path stores this metadata — and the
+    // later `subagent.completed` lookup reads it — under the subagent id. The
+    // task id must not stand in for it, or the delete below misses the entry
+    // the completion needs and the notice reports an id no event carries.
+    const subagentId = agentTaskSubagentId(task);
     const meta: BackgroundAgentMetadata = {
-      agentId: origin.taskId,
-      parentToolCallId: origin.taskId,
+      agentId: subagentId ?? origin.taskId,
+      // Not recoverable from a resume payload; nothing reads it.
+      parentToolCallId: '',
       description: task?.description,
     };
     let status = formatBackgroundAgentTranscript(
@@ -599,6 +605,20 @@ export class SessionReplayRenderer {
       detail: status.detail,
       backgroundAgentStatus: status,
     });
-    sessionEventHandler.backgroundAgentMetadata.delete(meta.agentId);
+    if (subagentId !== undefined) {
+      sessionEventHandler.backgroundAgentMetadata.delete(subagentId);
+    }
   }
+}
+
+/**
+ * Subagent id behind an agent-class background task: `info.agentId` when a real
+ * subagent was recorded, else `undefined`. The task-id fallback that
+ * `registerAgentTask` writes when the caller passed no id is not a subagent
+ * identity and must not be treated as one.
+ */
+function agentTaskSubagentId(info: BackgroundTaskInfo | undefined): string | undefined {
+  if (info === undefined || !info.taskId.startsWith('agent-')) return undefined;
+  const { agentId } = info;
+  return agentId === undefined || agentId === info.taskId ? undefined : agentId;
 }

@@ -787,7 +787,6 @@ export const zh: Record<string, string> = {
 
   // ─── 任务浏览器 UI ─────────────
   'taskbrowser.running': '运行中',
-  'taskbrowser.awaiting': '等待中',
   'taskbrowser.completed': '已完成',
   'taskbrowser.interrupted': '已中断',
   'taskbrowser.total': '总计',
@@ -816,7 +815,7 @@ export const zh: Record<string, string> = {
   'taskbrowser.stop_reason': '停止原因：',
   'taskbrowser.timed_out': '已超时：',
   'taskbrowser.yes': '是',
-  'taskbrowser.awaiting_label': '等待中：',
+  'taskbrowser.task_source_via': '来自 {name}',
   // ─── 任务浏览器：子代理视图 ─────────────
   'taskbrowser.agents': '子代理',
   'taskbrowser.agents_title': '子代理',
@@ -963,14 +962,12 @@ export const zh: Record<string, string> = {
   'bash.background_completed': '后台任务 {id} 已完成：{command}',
   'bash.background_failed': '后台任务 {id} 执行失败（退出码 {exitCode}）：{command}',
   'bgtask.started_bg': '{subject} 已在后台启动',
-  'bgtask.awaiting_approval': '{subject} 等待审批',
   'bgtask.completed_bg': '{subject} 已在后台完成',
   'bgtask.failed_bg': '{subject} 在后台失败',
   'bgtask.killed': '{subject} 已停止',
   'bgtask.lost': '{subject} 已丢失',
   'bgtask.stopped_reason': '已停止 — {reason}',
   'bgtask.stopped': '已停止',
-  'bgtask.waiting': '等待中: {reason}',
   'bgtask.session_restarted': '会话在完成前已重启',
   'bgtask.timed_out': '已超时',
 

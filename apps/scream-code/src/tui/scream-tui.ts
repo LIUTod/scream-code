@@ -624,6 +624,12 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
     return this.sessionEventHandler.backgroundTasks;
   }
 
+  /** Owner agent of each subagent-owned background task (task id → agent id) —
+   *  /tasks tags those rows and routes output/stop through the owner. */
+  get backgroundTaskOwners(): ReadonlyMap<string, string> {
+    return this.sessionEventHandler.backgroundTaskOwners;
+  }
+
   /** Live per-type subagent slots (sidebar state machine) — source of the
    *  /tasks browser's Agents view. */
   get subagentSlots(): readonly SubagentSlot[] {

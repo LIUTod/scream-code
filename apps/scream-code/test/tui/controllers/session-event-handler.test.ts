@@ -1471,3 +1471,162 @@ describe('SessionEventHandler — main-agent RLM status filtering', () => {
     }
   });
 });
+
+/**
+ * Subagent-owned background tasks (batch 2.2 + 5.5): the rows become visible
+ * with an owner tag, the footer badge stays on main (口径：仅 main), the parent
+ * tool-card routing is untouched, and the visible registry stays bounded.
+ */
+describe('SessionEventHandler — subagent-owned background tasks', () => {
+  const runInfo = (taskId: string, description = 'sub work'): Record<string, unknown> => ({
+    taskId,
+    command: `[bash] ${description}`,
+    description,
+    status: 'running',
+    pid: 1,
+    exitCode: null,
+    startedAt: 1,
+    endedAt: null,
+  });
+
+  const doneInfo = (taskId: string, endedAt: number): Record<string, unknown> => ({
+    ...runInfo(taskId),
+    status: 'completed',
+    exitCode: 0,
+    endedAt,
+  });
+
+  it('records a subagent task for /tasks while the footer badge counts main only', () => {
+    const host = createMockHost();
+    const setBackgroundCounts = vi.fn();
+    (host.state as { footer?: unknown }).footer = { setBackgroundCounts };
+    const handler = new SessionEventHandler(host);
+
+    handler.handleEvent(
+      {
+        ...baseEvent('background.task.started'),
+        agentId: 'agent-7',
+        info: runInfo('bash-sub1'),
+      } as unknown as Event,
+      vi.fn(),
+    );
+
+    expect(handler.backgroundTaskOwners.get('bash-sub1')).toBe('agent-7');
+    expect(handler.backgroundTasks.has('bash-sub1')).toBe(true);
+    // Footer 口径 = 仅 main: the subagent-owned row is skipped in
+    // syncBackgroundTaskBadge, so the task never reaches the badge — the badge
+    // reports the same set a resume restores (countActiveBackgroundTasks runs
+    // over main's resumed list only).
+    expect(setBackgroundCounts).not.toHaveBeenCalled();
+
+    handler.handleEvent(
+      { ...baseEvent('background.task.started'), info: runInfo('bash-main1') } as unknown as Event,
+      vi.fn(),
+    );
+    expect(setBackgroundCounts).toHaveBeenLastCalledWith({
+      bashTasks: 1,
+      agentTasks: 0,
+      foregroundSubagents: 0,
+    });
+  });
+
+  it('absorbs a subagent task event without breaking the parent tool-card routing', () => {
+    const host = createMockHost();
+    const appendSubToolCall = vi.fn();
+    (host.streamingUI.getToolComponent as ReturnType<typeof vi.fn>).mockReturnValue({
+      appendSubToolCall,
+      setSubagentMeta: vi.fn(),
+    });
+    const handler = new SessionEventHandler(host);
+    handler.subagentInfo.set('agent-7', { parentToolCallId: 'call_parent', name: 'coder' });
+
+    handler.handleEvent(
+      {
+        ...baseEvent('background.task.updated'),
+        agentId: 'agent-7',
+        info: runInfo('bash-sub1'),
+      } as unknown as Event,
+      vi.fn(),
+    );
+    // A task event carries no subagent text for the card, but the row must be
+    // recorded even though it never reaches the card.
+    expect(appendSubToolCall).not.toHaveBeenCalled();
+    expect(handler.backgroundTaskOwners.get('bash-sub1')).toBe('agent-7');
+
+    // The core route is untouched: a subagent tool call still lands on the card.
+    handler.handleEvent(
+      {
+        ...baseEvent('tool.call.started'),
+        agentId: 'agent-7',
+        toolCallId: 't1',
+        name: 'Bash',
+        args: {},
+      } as unknown as Event,
+      vi.fn(),
+    );
+    expect(appendSubToolCall).toHaveBeenCalledTimes(1);
+  });
+
+  it('bounds the visible registry at 200, oldest terminal first (batch 5.5)', () => {
+    const host = createMockHost();
+    const handler = new SessionEventHandler(host);
+
+    for (let i = 0; i < 201; i += 1) {
+      handler.handleEvent(
+        {
+          ...baseEvent('background.task.terminated'),
+          info: doneInfo(`bash-t${i}`, i),
+        } as unknown as Event,
+        vi.fn(),
+      );
+    }
+
+    expect(handler.backgroundTasks.size).toBe(200);
+    expect(handler.backgroundTasks.has('bash-t0')).toBe(false);
+    // The transcript-dedupe marker leaves with the entry it belonged to, so the
+    // side set is bounded by the same cap instead of growing per task forever.
+    expect(handler.backgroundTaskTranscriptedTerminal.has('bash-t0')).toBe(false);
+    expect(handler.backgroundTasks.has('bash-t200')).toBe(true);
+    expect(handler.backgroundTaskTranscriptedTerminal.has('bash-t200')).toBe(true);
+  });
+
+  it('never evicts a non-terminal task, and drops a subagent owner tag with its entry', () => {
+    const host = createMockHost();
+    const handler = new SessionEventHandler(host);
+
+    // The subagent's *running* task is the oldest entry: still running, so it
+    // must survive the cap — a /tasks row vanishing mid-run misreports reality.
+    handler.handleEvent(
+      {
+        ...baseEvent('background.task.started'),
+        agentId: 'agent-7',
+        info: runInfo('bash-sub1'),
+      } as unknown as Event,
+      vi.fn(),
+    );
+    // A terminal subagent-owned row, ended before every main one: evicted first.
+    handler.handleEvent(
+      {
+        ...baseEvent('background.task.terminated'),
+        agentId: 'agent-7',
+        info: doneInfo('bash-sub0', 0),
+      } as unknown as Event,
+      vi.fn(),
+    );
+    for (let i = 0; i < 200; i += 1) {
+      handler.handleEvent(
+        {
+          ...baseEvent('background.task.terminated'),
+          info: doneInfo(`bash-m${i}`, i + 1),
+        } as unknown as Event,
+        vi.fn(),
+      );
+    }
+
+    expect(handler.backgroundTasks.size).toBe(200);
+    expect(handler.backgroundTasks.has('bash-sub1')).toBe(true);
+    expect(handler.backgroundTaskOwners.get('bash-sub1')).toBe('agent-7');
+    expect(handler.backgroundTasks.has('bash-sub0')).toBe(false);
+    expect(handler.backgroundTaskOwners.has('bash-sub0')).toBe(false);
+  });
+});

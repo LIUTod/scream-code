@@ -37,6 +37,14 @@ export type TasksFilter = 'all' | 'active' | 'agents';
 
 export interface TasksBrowserProps {
   readonly tasks: readonly BackgroundTaskInfo[];
+  /**
+   * Source subagent of every subagent-owned task, keyed by task id. A
+   * subagent's task lives in that subagent's own registry, so the main-agent
+   * list the controller polls cannot contain it: these rows are fed from the
+   * live event stream (`SessionEventHandler.recordSubagentBackgroundTask`) and
+   * name their owner so the row never reads as the main agent's work.
+   */
+  readonly taskSourceNames: ReadonlyMap<string, string>;
   /** Subagent rows shown by the `agents` filter (see utils/subagent-instances). */
   readonly agents: readonly AgentRow[];
   readonly filter: TasksFilter;
@@ -59,7 +67,6 @@ export interface TasksBrowserProps {
 
 const STATUS_LABEL: Record<BackgroundTaskStatus, string> = {
   running: 'running',
-  awaiting_approval: 'awaiting',
   completed: 'completed',
   failed: 'failed',
   killed: 'killed',
@@ -82,8 +89,6 @@ function statusColor(colors: ColorPalette, status: BackgroundTaskStatus): string
   switch (status) {
     case 'running':
       return colors.success;
-    case 'awaiting_approval':
-      return colors.warning;
     case 'completed':
       return colors.textMuted;
     case 'failed':
@@ -254,20 +259,16 @@ function compareTasks(a: BackgroundTaskInfo, b: BackgroundTaskInfo): number {
 
 interface StatusCounts {
   running: number;
-  awaiting: number;
   completed: number;
   terminalFailed: number;
 }
 
 function countByStatus(tasks: readonly BackgroundTaskInfo[]): StatusCounts {
-  const counts: StatusCounts = { running: 0, awaiting: 0, completed: 0, terminalFailed: 0 };
+  const counts: StatusCounts = { running: 0, completed: 0, terminalFailed: 0 };
   for (const t of tasks) {
     switch (t.status) {
       case 'running':
         counts.running += 1;
-        break;
-      case 'awaiting_approval':
-        counts.awaiting += 1;
         break;
       case 'completed':
         counts.completed += 1;
@@ -521,8 +522,6 @@ export class TasksBrowserApp extends Container implements Focusable {
       const counts = countByStatus(this.props.tasks);
       if (counts.running > 0)
         segments.push(chalk.hex(colors.success)(` ${String(counts.running)} ${t('taskbrowser.running')} `));
-      if (counts.awaiting > 0)
-        segments.push(chalk.hex(colors.warning)(` ${String(counts.awaiting)} ${t('taskbrowser.awaiting')} `));
       if (counts.completed > 0)
         segments.push(chalk.hex(colors.textDim)(` ${String(counts.completed)} ${t('taskbrowser.completed')} `));
       if (counts.terminalFailed > 0)
@@ -740,13 +739,32 @@ export class TasksBrowserApp extends Container implements Focusable {
 
     const prefix = `${pointerStyled}${idText}${idPad} ${statusBadge}`;
     const prefixWidth = visibleWidth(prefix);
-    const descBudget = Math.max(0, innerWidth - prefixWidth - 1);
-    if (descBudget < 4) return fitExactly(prefix, innerWidth);
-
+    // Subagent-owned rows name their owner: the row must not read as the main
+    // agent's work (its own registry cannot answer for it). The tag is reserved
+    // its width first and the description takes what is left; when only one of
+    // the two fits, the tag stays — the detail pane carries the description in
+    // full either way.
+    const source = this.props.taskSourceNames.get(task.taskId);
+    const tag = source === undefined ? '' : ` ${t('taskbrowser.task_source_via', { name: source })}`;
+    const remaining = Math.max(0, innerWidth - prefixWidth - 1);
+    const descBudget = Math.max(0, remaining - visibleWidth(tag));
     const description =
       singleLine(task.description) || singleLine(task.command) || '(no description)';
-    const desc = truncateToWidth(description, descBudget, ELLIPSIS);
-    return fitExactly(`${prefix} ${chalk.hex(colors.text)(desc)}`, innerWidth);
+
+    if (tag.length === 0) {
+      if (descBudget < 4) return fitExactly(prefix, innerWidth);
+      const desc = truncateToWidth(description, descBudget, ELLIPSIS);
+      return fitExactly(`${prefix} ${chalk.hex(colors.text)(desc)}`, innerWidth);
+    }
+
+    if (descBudget >= 4) {
+      const desc = chalk.hex(colors.text)(truncateToWidth(description, descBudget, ELLIPSIS));
+      return fitExactly(`${prefix} ${desc}${chalk.hex(colors.textDim)(tag)}`, innerWidth);
+    }
+
+    if (remaining < 4) return fitExactly(prefix, innerWidth);
+    const tagOnly = truncateToWidth(tag.slice(1), remaining, ELLIPSIS);
+    return fitExactly(`${prefix} ${chalk.hex(colors.textDim)(tagOnly)}`, innerWidth);
   }
 
   private adjustScroll(visibleRows: number): void {
@@ -791,11 +809,17 @@ export class TasksBrowserApp extends Container implements Focusable {
       `${label(t('taskbrowser.status'))}${chalk.hex(statusColor(colors, task.status))(STATUS_LABEL[task.status])}`,
       `${label(t('taskbrowser.description'))}${value(singleLine(task.description) || '—')}`,
     ];
+    const source = this.props.taskSourceNames.get(task.taskId);
+    if (source !== undefined) {
+      // Detail line label reused from the Agents view: the value is the owning
+      // subagent, i.e. whose registry holds this task.
+      lines.push(`${label(t('taskbrowser.agent_source'))}${value(singleLine(source))}`);
+    }
     if (task.command && task.command !== task.description) {
       lines.push(`${label(t('taskbrowser.command'))}${value(singleLine(task.command))}`);
     }
     const timing =
-      task.status === 'running' || task.status === 'awaiting_approval'
+      task.status === 'running'
         ? `${t('taskbrowser.running_time')} ${formatRelativeTime(task.startedAt)}`
         : task.endedAt !== null && task.endedAt !== undefined
           ? `${t('taskbrowser.completed_time')} ${formatRelativeTime(task.endedAt)}`
@@ -810,11 +834,6 @@ export class TasksBrowserApp extends Container implements Focusable {
     }
     if (task.timedOut === true) {
       lines.push(`${label(t('taskbrowser.timed_out'))}${chalk.hex(colors.warning)(t('taskbrowser.yes'))}`);
-    }
-    if (task.approvalReason !== undefined && task.approvalReason.length > 0) {
-      lines.push(
-        `${label(t('taskbrowser.awaiting_label'))}${chalk.hex(colors.warning)(singleLine(task.approvalReason))}`,
-      );
     }
 
     while (lines.length < innerHeight) lines.push('');

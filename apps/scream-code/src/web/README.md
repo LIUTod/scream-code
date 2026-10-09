@@ -113,6 +113,15 @@ Base prefix: `/api/v1`. Every `:id` must be URL-decoded; session-scoped endpoint
 |---|---|---|
 | `POST /sessions/:id/tasks/:taskId/stop` | `{ reason? }` | `stopBackgroundTask` |
 
+These REST projections read the **main** agent's registry only (the web layer
+passes no `agentId`), and the task panel keeps its **3s poll** while the
+section is open with an active task. `background.task.*` frames are consumed as
+a latency cut on top of that poll: the frontend ignores frames whose `agentId`
+is not `main` (a subagent's task lives in that subagent's own registry and is
+absent from the REST list), coalesces a burst into a single
+`fetchBackgroundTasks()` call (streaming.ts, 250 ms), and never replaces the
+interval — polling remains the panel's authority.
+
 ### G. Global (harness scope, no session needed)
 
 | Endpoint | Method | Request body | Underlying method |
@@ -151,7 +160,7 @@ Base prefix: `/api/v1`. Every `:id` must be URL-decoded; session-scoped endpoint
 
 ### Events (server → client, through the `event` envelope + `seq/epoch`)
 
-Core events (dispatched by `useScreamWebClient.handleMessage`): `server_hello`, `event` (including `assistant.delta` / `thinking.delta` / `tool.call.started` / `tool.result` / `turn.started` / `turn.ended` / `goal.updated` / `todo.updated` / `status` / `agent.status.updated`), `approval_request`, `approval_resolved`, `user_message`, `command_result`, `resync_required`, `server_empty`, `pong`, `error`.
+Core events (dispatched by `useScreamWebClient.handleMessage`): `server_hello`, `event` (including `assistant.delta` / `thinking.delta` / `tool.call.started` / `tool.result` / `turn.started` / `turn.ended` / `goal.updated` / `todo.updated` / `status` / `agent.status.updated` / `background.task.started` / `background.task.updated` / `background.task.terminated`), `approval_request`, `approval_resolved`, `user_message`, `command_result`, `resync_required`, `server_empty`, `pong`, `error`.
 
 ### Commands (client → server)
 

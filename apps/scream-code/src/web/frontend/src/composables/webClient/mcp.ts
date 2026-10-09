@@ -110,6 +110,10 @@ export function createMcpModule(ctx: ClientContext): McpModule {
     return ctx.postSessionAction(`tasks/${encodeURIComponent(taskId)}/stop`, (reason ? { reason } : {}));
   }
 
+  // Exposed to the WS layer: a main-agent `background.task.*` frame refetches
+  // this projection instead of waiting for the panel's 3s poll.
+  ctx.refreshBackgroundTasks = fetchBackgroundTasks;
+
   return {
     fetchMcpServers,
     fetchMcpStartupMetrics,

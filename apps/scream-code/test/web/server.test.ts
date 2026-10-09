@@ -27,6 +27,21 @@ interface Deferred<T> {
   readonly reject: (error: unknown) => void;
 }
 
+/** Shape of the approval request the server hands to `setApprovalHandler`. */
+interface ApprovalHandlerRequest {
+  readonly toolName: string;
+  readonly action?: string;
+  readonly display?: unknown;
+  readonly sourceAgentId?: string;
+  readonly sourceAgentName?: string;
+  readonly sourceToolName?: string;
+  readonly sourceCapabilityMode?: 'read-only' | 'read-write' | 'execute' | 'all';
+}
+
+type ApprovalHandler = (
+  request: ApprovalHandlerRequest,
+) => Promise<{ decision: 'approved' | 'rejected' }>;
+
 interface FakeSessionControl {
   readonly session: Session;
   readonly createGoal: ReturnType<typeof vi.fn>;
@@ -1650,4 +1665,60 @@ describe('Web transcript ownership (multi-agent merge regression)', () => {
     expect(assistant[0]!.tools).toHaveLength(0);
     expect(JSON.stringify(messages)).not.toContain('子代理');
   }, 10_000);
+});
+
+describe('Web approval transport', () => {
+  it('carries sourceCapabilityMode through the approval broadcast and the snapshot', async () => {
+    const control = makeFakeSession();
+    const handle = await start(control);
+    const { socket } = await openSocket(handle.url);
+    // `broadcast` only reaches subscribed connections; the pong round-trip
+    // proves the server processed the hello before the approval fires.
+    const ready = nextMessage(socket);
+    socket.send(JSON.stringify({ type: 'client_hello', lastSeq: 0, epoch: 0 }));
+    socket.send(JSON.stringify({ type: 'ping' }));
+    expect(await ready).toMatchObject({ type: 'pong' });
+
+    const approvalHandler = (
+      control.session.setApprovalHandler as unknown as {
+        mock: { calls: Array<[ApprovalHandler | undefined]> };
+      }
+    ).mock.calls[0]?.[0];
+    expect(approvalHandler).toBeDefined();
+
+    const pending = approvalHandler!({
+      toolName: 'Bash',
+      action: 'run',
+      display: undefined,
+      sourceAgentId: 'agent-1',
+      sourceAgentName: 'explorer',
+      sourceToolName: 'Bash',
+      sourceCapabilityMode: 'read-only',
+    });
+
+    const broadcast = await nextMessage(socket);
+    expect(broadcast).toMatchObject({
+      type: 'approval_request',
+      id: expect.any(String),
+      sourceAgentId: 'agent-1',
+      sourceCapabilityMode: 'read-only',
+    });
+
+    // The same field survives the snapshot mirror while the approval pends.
+    const snapshot = await jsonRequest(handle.url, '/api/v1/sessions/session-1/snapshot');
+    expect(snapshot.body).toMatchObject({
+      pendingApprovals: [
+        expect.objectContaining({
+          id: broadcast['id'],
+          sourceCapabilityMode: 'read-only',
+        }),
+      ],
+    });
+
+    socket.send(
+      JSON.stringify({ type: 'approval_response', id: broadcast['id'], decision: 'approved' }),
+    );
+    await expect(pending).resolves.toMatchObject({ decision: 'approved' });
+    socket.close();
+  });
 });

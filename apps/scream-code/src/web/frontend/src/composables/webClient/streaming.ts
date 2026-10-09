@@ -52,6 +52,17 @@ export function createStreamingModule(ctx: ClientContext): StreamingModule {
 
   const streamFlush = useThrottledFlush(flushStreaming);
 
+  // Coalesce a burst of lifecycle frames (started + updated + terminated can
+  // land in the same macrotask) into one REST refetch.
+  let backgroundTasksRefreshTimer: number | null = null;
+  function scheduleBackgroundTasksRefresh(): void {
+    if (backgroundTasksRefreshTimer !== null) return;
+    backgroundTasksRefreshTimer = window.setTimeout(() => {
+      backgroundTasksRefreshTimer = null;
+      void ctx.refreshBackgroundTasks?.();
+    }, 250);
+  }
+
   function onEvent(payload: { type: string; [key: string]: unknown }): void {
     const subagents = applySubagentActivityEvent(s.subagents.value, payload);
     if (subagents !== s.subagents.value) s.subagents.value = subagents;
@@ -145,6 +156,18 @@ export function createStreamingModule(ctx: ClientContext): StreamingModule {
         // Progress is overwrite-semantics: keep only the latest text per tool.
         s.pendingToolProgress.set(String(payload.toolCallId), String(payload.message ?? payload.output));
         streamFlush.schedule();
+        break;
+      }
+      case 'background.task.started':
+      case 'background.task.updated':
+      case 'background.task.terminated': {
+        // 口径 = main, matching the REST list: `GET /sessions/:id/tasks` reads
+        // the *main* agent's registry, so a subagent-owned task (agentId ≠ main)
+        // is not in that projection and must not trigger a refetch. The panel
+        // still polls every 3s while it is open; this only removes the latency
+        // between a lifecycle frame and the next poll tick.
+        if (payload.agentId !== undefined && payload.agentId !== 'main') break;
+        scheduleBackgroundTasksRefresh();
         break;
       }
       case 'turn.ended': {
@@ -298,6 +321,10 @@ export function createStreamingModule(ctx: ClientContext): StreamingModule {
 
   function disposeStreaming(): void {
     s.streamDisposed = true;
+    if (backgroundTasksRefreshTimer !== null) {
+      window.clearTimeout(backgroundTasksRefreshTimer);
+      backgroundTasksRefreshTimer = null;
+    }
     streamFlush.dispose();
   }
 

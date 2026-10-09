@@ -759,6 +759,7 @@ describe('useScreamWebClient frame dispatch discipline', () => {
       sourceAgentId: 'agent-3',
       sourceAgentName: 'explore',
       sourceToolName: 'Bash',
+      sourceCapabilityMode: 'read-only',
     });
 
     expect(h.client.pendingApprovals.value).toHaveLength(1);
@@ -767,6 +768,7 @@ describe('useScreamWebClient frame dispatch discipline', () => {
       sourceAgentId: 'agent-3',
       sourceAgentName: 'explore',
       sourceToolName: 'Bash',
+      sourceCapabilityMode: 'read-only',
     });
   });
 

@@ -73,12 +73,21 @@ function task(overrides: Partial<BackgroundTaskInfo> = {}): BackgroundTaskInfo {
   };
 }
 
-function makeHarness(): {
+function makeHarness(options: {
+  fetched?: BackgroundTaskInfo[];
+  subagentOwned?: readonly [BackgroundTaskInfo, string][];
+  subagentType?: string;
+} = {}): {
   state: {
     tasksBrowser: TasksBrowserState | undefined;
     ui: { requestRender: Mock; setFocus: Mock; setLayoutRoot: Mock };
   };
   controller: TasksBrowserController;
+  session: {
+    listBackgroundTasks: Mock;
+    getBackgroundTaskOutput: Mock;
+    stopBackgroundTask: Mock;
+  };
 } {
   const state = {
     tasksBrowser: undefined as TasksBrowserState | undefined,
@@ -88,15 +97,34 @@ function makeHarness(): {
     layoutRoot: MAIN_LAYOUT,
     editor: EDITOR,
   };
+  const fetched = options.fetched ?? [task()];
+  const owned = options.subagentOwned ?? [];
+  const allTasks = [...fetched, ...owned.map(([info]) => info)];
   const session = {
-    listBackgroundTasks: vi.fn(async () => [task()]),
+    listBackgroundTasks: vi.fn(async () => fetched),
     getBackgroundTaskOutput: vi.fn(async () => 'hello\nworld'),
+    stopBackgroundTask: vi.fn(async () => {}),
   };
   const host = {
     state,
-    backgroundTasks: new Map([[task().taskId, task()]]),
+    backgroundTasks: new Map(allTasks.map((info) => [info.taskId, info] as const)),
+    backgroundTaskOwners: new Map(owned.map(([info, owner]) => [info.taskId, owner] as const)),
     subagentSlots: [],
-    subagentInstances: new Map(),
+    subagentInstances: new Map(
+      owned.map(([, owner]) => [
+        owner,
+        {
+          agentId: owner,
+          type: options.subagentType ?? 'coder',
+          description: undefined,
+          parentAgentId: undefined,
+          parentToolCallId: `call_${owner}`,
+          parentToolName: undefined,
+          parentToolDescription: undefined,
+          spawnedAt: 1,
+        },
+      ]),
+    ),
     recentSubagentInstances: [],
     session: session as unknown as Session,
     showError: vi.fn(),
@@ -104,7 +132,7 @@ function makeHarness(): {
       state.tasksBrowser = value;
     }),
   } as unknown as TasksBrowserHost;
-  return { state, controller: new TasksBrowserController(host) };
+  return { state, controller: new TasksBrowserController(host), session };
 }
 
 describe('TasksBrowserController — viewer/browser layout swaps', () => {
@@ -166,6 +194,81 @@ describe('TasksBrowserController — viewer/browser layout swaps', () => {
         (call: unknown[]) => call[0] instanceof TaskOutputViewer,
       );
       expect(viewerRootCalls).toHaveLength(1);
+    } finally {
+      controller.close();
+    }
+  });
+});
+
+const ANSI_SGR = /\[[0-9;]*m/g;
+function strip(text: string): string {
+  return text.replaceAll(ANSI_SGR, '');
+}
+
+/**
+ * A subagent's task lives in that subagent's own registry: the main-agent list
+ * cannot contain it, so /tasks must show it from the event-fed map, tag its
+ * owner, and route output/stop through that owner (batch 2.2).
+ */
+describe('TasksBrowserController — subagent-owned tasks', () => {
+  it('lists a subagent task with its owner and routes output/stop to that owner', async () => {
+    const { state, controller, session } = makeHarness({
+      fetched: [],
+      subagentOwned: [[task({ taskId: 'bash-sub00001', description: 'sub build' }), 'agent-7']],
+    });
+    await controller.show();
+    try {
+      const browser = state.tasksBrowser;
+      if (browser === undefined) throw new Error('browser did not open');
+
+      const rendered = strip(browser.component.render(200).join('\n'));
+      expect(rendered).toContain('bash-sub00001');
+      expect(rendered).toContain('来自 coder');
+
+      // Selection (tail) already routed to the owner.
+      expect(session.getBackgroundTaskOutput).toHaveBeenCalledWith('bash-sub00001', {
+        tail: 4000,
+        agentId: 'agent-7',
+      });
+
+      // Enter → full output.
+      browser.component.handleInput('\r');
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(session.getBackgroundTaskOutput).toHaveBeenCalledWith('bash-sub00001', {
+        agentId: 'agent-7',
+      });
+
+      // S + Y → stop through the owner's registry.
+      browser.component.handleInput('s');
+      browser.component.handleInput('y');
+      await Promise.resolve();
+      expect(session.stopBackgroundTask).toHaveBeenCalledWith('bash-sub00001', {
+        reason: expect.any(String),
+        agentId: 'agent-7',
+      });
+    } finally {
+      controller.close();
+    }
+  });
+
+  it('keeps main-agent tasks on the default (main) registry', async () => {
+    const { state, controller, session } = makeHarness();
+    await controller.show();
+    try {
+      const browser = state.tasksBrowser;
+      if (browser === undefined) throw new Error('browser did not open');
+      expect(session.getBackgroundTaskOutput).toHaveBeenCalledWith('bash-aaaaaaaa', {
+        tail: 4000,
+        agentId: undefined,
+      });
+
+      browser.component.handleInput('\r');
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(session.getBackgroundTaskOutput).toHaveBeenCalledWith('bash-aaaaaaaa', {
+        agentId: undefined,
+      });
     } finally {
       controller.close();
     }

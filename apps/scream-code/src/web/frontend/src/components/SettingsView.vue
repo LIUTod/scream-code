@@ -187,13 +187,17 @@ const selectedTask = computed(() =>
   selectedTaskId.value ? tasks.value.find((task) => task.taskId === selectedTaskId.value) ?? null : null,
 );
 const hasActiveTasks = computed(() =>
-  tasks.value.some((task) => task.status === 'running' || task.status === 'awaiting_approval'),
+  tasks.value.some((task) => task.status === 'running'),
 );
 
 async function refreshTasks(): Promise<void> {
   await client.value?.fetchBackgroundTasks?.();
 }
 
+// The panel polls every 3s while it is open with an active task; a main-agent
+// `background.task.*` frame only triggers an extra immediate refetch (see
+// webClient/streaming.ts). The interval is the authority — never replace it
+// with the event stream.
 function stopTaskPolling(): void {
   if (taskPollTimer === null) return;
   window.clearInterval(taskPollTimer);
@@ -472,7 +476,7 @@ function statusColor(status: string): string {
               <div class="row-actions">
                 <button class="row-action" :disabled="taskBusy" @click="onShowOutput(t.taskId)">输出</button>
                 <button
-                  v-if="t.status === 'running' || t.status === 'awaiting_approval'"
+                  v-if="t.status === 'running'"
                   class="row-action danger"
                   :disabled="taskBusy"
                   @click="onStopTask(t.taskId)"

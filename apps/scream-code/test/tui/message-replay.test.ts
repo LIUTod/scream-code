@@ -210,6 +210,7 @@ function backgroundTask(
   taskId: string,
   description: string,
   status: BackgroundTaskInfo['status'] = 'running',
+  agentId?: string,
 ): BackgroundTaskInfo {
   return {
     taskId,
@@ -219,7 +220,8 @@ function backgroundTask(
     pid: 0,
     exitCode: status === 'completed' ? 0 : null,
     startedAt: 1,
-    endedAt: status === 'running' || status === 'awaiting_approval' ? null : 2,
+    endedAt: status === 'running' ? null : 2,
+    agentId,
   };
 }
 
@@ -721,5 +723,74 @@ describe('replayed internal injections', () => {
         .filter((entry) => entry.kind === 'user')
         .map((entry) => entry.content),
     ).toEqual(['真用户消息']);
+  });
+});
+
+/**
+ * Replayed background-agent identity (batch 5.4).
+ *
+ * `backgroundAgentMetadata` is keyed by *subagent id* — the identity the live
+ * path stores at spawn and the one a later `subagent.completed` /
+ * `subagent.failed` looks up. The task id is not a substitute: an entry filed
+ * under it is invisible to that lookup, so after a resume the completion took
+ * the foreground branch — it decremented the badge and routed the result into a
+ * card that owns no run, while the notice named an id no event carries.
+ */
+describe('replayed background-agent identity', () => {
+  it('keys replayed metadata by subagent id, not by task id', async () => {
+    const driver = await replayIntoDriver([], {
+      background: [backgroundTask('agent-bg1', 'Review long-running work', 'running', 'agent-7')],
+    });
+
+    expect(driver.sessionEventHandler.backgroundAgentMetadata.get('agent-7')).toEqual({
+      agentId: 'agent-7',
+      parentToolCallId: '',
+      description: 'Review long-running work',
+    });
+    expect(driver.sessionEventHandler.backgroundAgentMetadata.has('agent-bg1')).toBe(false);
+  });
+
+  it('skips entries with no real subagent identity instead of inventing one', async () => {
+    const driver = await replayIntoDriver([], {
+      background: [
+        // `registerAgentTask` falls back to `agentId = taskId` when its caller
+        // passed no handle; that id names no subagent.
+        backgroundTask('agent-fallback', 'no real owner', 'running', 'agent-fallback'),
+        // A payload persisted before the id existed carries no agentId at all.
+        backgroundTask('agent-legacy', 'legacy payload', 'running'),
+        // A terminal task never seeds metadata: its completion already ran.
+        backgroundTask('agent-done', 'already finished', 'completed', 'agent-9'),
+        // Bash tasks are not subagents.
+        backgroundTask('bash-plain', 'plain bash', 'running'),
+      ],
+    });
+
+    expect(driver.sessionEventHandler.backgroundAgentMetadata.size).toBe(0);
+  });
+
+  it('reports a replayed agent notification under the owner id and clears its metadata', async () => {
+    const driver = await replayIntoDriver(
+      [
+        message('user', [{ type: 'text', text: 'Nested agent was lost.' }], {
+          origin: {
+            kind: 'background_task',
+            taskId: 'agent-bg9',
+            status: 'lost',
+            notificationId: 'task:agent-bg9:lost',
+          },
+        }),
+      ],
+      // Persisted mid-flight: the entry still reads `running` while the
+      // notification record that follows says it was lost (reconcile
+      // reclassification). The metadata seeded from this entry is what the
+      // delete has to find — by owner id, not by task id.
+      { background: [backgroundTask('agent-bg9', 'Nested run', 'running', 'agent-9')] },
+    );
+
+    const status = driver.state.transcriptEntries.find(
+      (entry) => entry.backgroundAgentStatus !== undefined,
+    );
+    expect(status?.backgroundAgentStatus?.trackingId).toBe('agent-9');
+    expect(driver.sessionEventHandler.backgroundAgentMetadata.has('agent-9')).toBe(false);
   });
 });

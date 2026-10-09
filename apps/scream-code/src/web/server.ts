@@ -144,6 +144,11 @@ function truncateThinking(messages: ChatMessage[]): void {
   }
 }
 
+/** Capability contract the asking agent runs under — mirrors the core
+ *  `SubagentCapabilityMode`, re-stated because the SDK does not re-export that
+ *  type. Absent when the asker is unrestricted. */
+type ApprovalCapabilityMode = 'read-only' | 'read-write' | 'execute' | 'all';
+
 interface ApprovalRequestMessage {
   readonly id: string;
   readonly toolName: string;
@@ -152,6 +157,7 @@ interface ApprovalRequestMessage {
   readonly sourceAgentId?: string | undefined;
   readonly sourceAgentName?: string | undefined;
   readonly sourceToolName?: string | undefined;
+  readonly sourceCapabilityMode?: ApprovalCapabilityMode | undefined;
 }
 
 interface SessionSnapshot {
@@ -1146,6 +1152,7 @@ class WebSession {
       sourceAgentId?: string | undefined;
       sourceAgentName?: string | undefined;
       sourceToolName?: string | undefined;
+      sourceCapabilityMode?: ApprovalCapabilityMode | undefined;
     }
   >();
 
@@ -1997,6 +2004,7 @@ class WebSession {
           sourceAgentId: request.sourceAgentId,
           sourceAgentName: request.sourceAgentName,
           sourceToolName: request.sourceToolName,
+          sourceCapabilityMode: request.sourceCapabilityMode,
         });
         const payload: ApprovalRequestMessage = {
           id,
@@ -2006,6 +2014,7 @@ class WebSession {
           sourceAgentId: request.sourceAgentId,
           sourceAgentName: request.sourceAgentName,
           sourceToolName: request.sourceToolName,
+          sourceCapabilityMode: request.sourceCapabilityMode,
         };
         this.broadcast({ type: 'approval_request', ...payload }, false);
       });
@@ -2062,6 +2071,7 @@ class WebSession {
         sourceAgentId: approval.sourceAgentId,
         sourceAgentName: approval.sourceAgentName,
         sourceToolName: approval.sourceToolName,
+        sourceCapabilityMode: approval.sourceCapabilityMode,
       })),
       status: this.cachedStatus ?? {
         model: 'unknown',

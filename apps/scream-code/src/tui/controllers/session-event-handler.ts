@@ -63,6 +63,7 @@ import {
   type SubagentInstanceRow,
 } from '../utils/subagent-instances';
 import { formatBackgroundTaskTranscript } from '../utils/background-task-status';
+import { isTerminalBackgroundTask } from '../utils/message-replay';
 import { formatHookResultMarkdown, formatHookResultPlain } from '../utils/hook-result-format';
 import {
   formatMcpStartupStatusSummary,
@@ -138,6 +139,21 @@ export function isMainAgentStatusEvent(event: {
   return event.agentId === undefined || event.agentId === MAIN_AGENT_ID;
 }
 
+/**
+ * Cap for the visible background-task registry (`backgroundTasks`).
+ *
+ * Eviction policy: terminal entries leave oldest-terminal-first; a
+ * non-terminal task is never evicted. Terminal-time FIFO is chosen over a
+ * per-owner cap because the registry is one flat map — a per-owner cap would
+ * multiply the ceiling by the owner count (the number it is supposed to bound)
+ * and still let one owner's history crowd out another's, while a single global
+ * cap keeps the memory bound exact. Evicting also drops the task's owner tag
+ * and its transcript-dedupe marker, so those two side maps stay bounded with
+ * it. 200 is far above any plausible live set (the manager itself retires at
+ * 20 per owner) and only ever trims scrolling history.
+ */
+const MAX_BACKGROUND_TASKS = 200;
+
 
 export interface SessionEventHost {
   state: TUIState;
@@ -169,6 +185,16 @@ export class SessionEventHandler {
   // Runtime state – owned by this handler, reset between sessions.
   backgroundAgentMetadata: Map<string, BackgroundAgentMetadata> = new Map();
   backgroundTasks: Map<string, BackgroundTaskInfo> = new Map();
+  /**
+   * Owner of every subagent-owned entry in {@link backgroundTasks}: the agent
+   * id whose registry emitted the task's lifecycle events. Only subagent-owned
+   * tasks are recorded — the interactive (main) agent is the implicit default,
+   * so `has(taskId)` reads as "not main's". The /tasks browser annotates those
+   * rows with their source subagent and routes output/stop to the owner,
+   * because a subagent's task lives in that subagent's own registry: asked
+   * through main, its output reads empty and its stop is a no-op.
+   */
+  readonly backgroundTaskOwners = new Map<string, string>();
   /**
    * Compaction trigger of the in-flight compaction, captured in
    * `handleCompactionBegin` (CompactionStartedEvent carries `trigger`) and
@@ -222,6 +248,7 @@ export class SessionEventHandler {
   resetRuntimeState(): void {
     this.backgroundAgentMetadata.clear();
     this.backgroundTasks.clear();
+    this.backgroundTaskOwners.clear();
     this.backgroundTaskTranscriptedTerminal.clear();
     this.subagentInfo.clear();
     this.subagentSlots.reset();
@@ -542,6 +569,22 @@ export class SessionEventHandler {
     if (subagentId === MAIN_AGENT_ID) return false;
     this.feedSubagentSlots(event, subagentId);
 
+    if (
+      event.type === 'background.task.started' ||
+      event.type === 'background.task.updated' ||
+      event.type === 'background.task.terminated'
+    ) {
+      // A subagent's own background task keeps out of the main transcript — the
+      // same rule that keeps subagent turn events from interleaving into the
+      // main body — but it must not become invisible: record it owner-tagged so
+      // /tasks shows it (and can route output/stop to the owner). Handled before
+      // the parent-tool-card routing below because a task event carries no
+      // subagent text to append and must be recorded even when `subagentInfo`
+      // has no entry for the emitter.
+      this.recordSubagentBackgroundTask(subagentId, event);
+      return true;
+    }
+
     const { streamingUI } = this.host;
     const info = this.subagentInfo.get(subagentId);
     if (info === undefined || info.parentToolCallId.length === 0) return true;
@@ -592,9 +635,6 @@ export class SessionEventHandler {
         });
         return true;
       }
-      case 'background.task.started':
-      case 'background.task.updated':
-      case 'background.task.terminated':
       case 'compaction.blocked':
       case 'compaction.cancelled':
       case 'compaction.completed':
@@ -1622,6 +1662,10 @@ export class SessionEventHandler {
     let match: string | undefined;
     for (const info of this.backgroundTasks.values()) {
       if (!info.taskId.startsWith('agent-')) continue;
+      // A subagent-owned agent task belongs to that subagent's registry; this
+      // lookup answers "which of MAIN's background agents is this completion
+      // about", so a nested spawn's task must never match here.
+      if (this.backgroundTaskOwners.has(info.taskId)) continue;
       if (info.description !== description) continue;
       if (match !== undefined) return undefined;
       match = info.taskId;
@@ -1672,7 +1716,7 @@ export class SessionEventHandler {
     const { state } = this.host;
     const { info } = event;
     const previous = this.backgroundTasks.get(info.taskId);
-    this.backgroundTasks.set(info.taskId, info);
+    this.rememberBackgroundTask(info);
 
     const viewer = state.tasksBrowser?.viewer;
     if (viewer !== undefined && viewer.taskId === info.taskId) {
@@ -1726,6 +1770,54 @@ export class SessionEventHandler {
     this.host.tasksBrowserController.repaint();
   }
 
+  /**
+   * Record a subagent-owned task in the visible registry. It stays out of the
+   * transcript (a subagent's stream never joins the main body) and out of the
+   * footer badge (see syncBackgroundTaskBadge), but /tasks lists it with its
+   * source agent, and output/stop reach it through that owner.
+   */
+  private recordSubagentBackgroundTask(
+    ownerId: string,
+    event: BackgroundTaskStartedEvent | BackgroundTaskUpdatedEvent | BackgroundTaskTerminatedEvent,
+  ): void {
+    const { info } = event;
+    this.backgroundTaskOwners.set(info.taskId, ownerId);
+    this.rememberBackgroundTask(info);
+
+    const viewer = this.host.state.tasksBrowser?.viewer;
+    if (viewer !== undefined && viewer.taskId === info.taskId) {
+      void this.host.tasksBrowserController.refreshOutputViewer({ silent: true });
+    }
+    this.host.tasksBrowserController.repaint();
+  }
+
+  /** Insert/refresh one visible task, then keep the registry within
+   *  {@link MAX_BACKGROUND_TASKS}. */
+  private rememberBackgroundTask(info: BackgroundTaskInfo): void {
+    this.backgroundTasks.set(info.taskId, info);
+    this.evictExcessBackgroundTasks();
+  }
+
+  /**
+   * Drop the oldest terminal entries once the registry is over the cap. A
+   * non-terminal task is never evicted — it is still running, and a /tasks row
+   * vanishing mid-run would misreport reality. The owner tag and the
+   * transcript-dedupe marker leave with their entry, so those side maps stay
+   * bounded by the same cap instead of growing per task forever.
+   */
+  private evictExcessBackgroundTasks(): void {
+    if (this.backgroundTasks.size <= MAX_BACKGROUND_TASKS) return;
+    const evictable = [...this.backgroundTasks.values()]
+      .filter(isTerminalBackgroundTask)
+      .toSorted((a, b) => (a.endedAt ?? a.startedAt) - (b.endedAt ?? b.startedAt));
+    for (const info of evictable) {
+      if (this.backgroundTasks.size <= MAX_BACKGROUND_TASKS) break;
+      this.backgroundTasks.delete(info.taskId);
+      this.backgroundTaskOwners.delete(info.taskId);
+      this.backgroundTaskTranscriptedTerminal.delete(info.taskId);
+    }
+  }
+
   private appendBackgroundTaskEntry(info: BackgroundTaskInfo): void {
     const status = formatBackgroundTaskTranscript(info);
     const entry: TranscriptEntry = {
@@ -1745,6 +1837,13 @@ export class SessionEventHandler {
     let bashTasks = 0;
     let agentTasks = 0;
     for (const info of this.backgroundTasks.values()) {
+      // Subagent-owned tasks are listed in /tasks but never move the footer
+      // badge: the badge reports the interactive agent's background load, the
+      // same set a resume restores (countActiveBackgroundTasks runs over the
+      // main agent's resumed task list). Counting them here would make the
+      // badge change on a session switch with nothing having changed in the
+      // main agent's own workload.
+      if (this.backgroundTaskOwners.has(info.taskId)) continue;
       if (
         info.status === 'completed' ||
         info.status === 'failed' ||

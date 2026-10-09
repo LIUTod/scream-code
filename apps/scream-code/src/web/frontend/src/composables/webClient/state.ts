@@ -311,6 +311,11 @@ export interface ClientContext {
   resetGoalRequestState(): void;
   syncGoalRequestPending(): void;
   onEvent(payload: { type: string; [key: string]: unknown }): void;
+  /**
+   * Refetch the task-panel REST projection. Installed by the MCP/resources
+   * module; the WS layer calls it on main-agent `background.task.*` frames.
+   */
+  refreshBackgroundTasks?(): Promise<void>;
   flushQueue(): void;
   flushQueueNext(): void;
   enqueueOfflinePrompt(text: string): void;

@@ -62,6 +62,11 @@ export interface ToolMessage {
   progress?: string;
 }
 
+/** Capability contract the asking agent runs under — mirrors the core
+ *  `SubagentCapabilityMode`, re-stated because the SDK does not re-export it.
+ *  Absent when the asker is unrestricted. */
+type ApprovalCapabilityMode = 'read-only' | 'read-write' | 'execute' | 'all';
+
 export interface ApprovalRequest {
   id: string;
   toolName: string;
@@ -73,6 +78,9 @@ export interface ApprovalRequest {
   sourceAgentName?: string;
   /** Tool that triggered the approval. */
   sourceToolName?: string;
+  /** Capability contract the asking agent runs under; absent when the asker
+   *  is unrestricted. */
+  sourceCapabilityMode?: ApprovalCapabilityMode;
 }
 
 export interface TokenUsage {
@@ -287,6 +295,7 @@ export type WsMessage =
       sourceAgentId?: string;
       sourceAgentName?: string;
       sourceToolName?: string;
+      sourceCapabilityMode?: ApprovalCapabilityMode;
     }
   | { type: 'approval_resolved'; id: string }
   | { type: 'user_message'; clientMessageId?: string; text: string }
@@ -422,7 +431,7 @@ export interface McpStartupMetrics {
   durationMs: number;
 }
 
-export type BackgroundTaskStatus = 'running' | 'completed' | 'failed' | 'killed' | 'lost' | 'awaiting_approval';
+export type BackgroundTaskStatus = 'running' | 'completed' | 'failed' | 'killed' | 'lost';
 
 export interface BackgroundTaskInfo {
   taskId: string;
@@ -433,7 +442,6 @@ export interface BackgroundTaskInfo {
   exitCode: number | null;
   startedAt: number;
   endedAt: number | null;
-  approvalReason?: string;
   timedOut?: boolean;
   stopReason?: string;
   timeoutMs?: number;

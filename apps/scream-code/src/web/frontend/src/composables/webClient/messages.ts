@@ -162,6 +162,7 @@ export function createMessagesModule(ctx: ClientContext): MessagesModule {
         sourceAgentId: msg.sourceAgentId,
         sourceAgentName: msg.sourceAgentName,
         sourceToolName: msg.sourceToolName,
+        sourceCapabilityMode: msg.sourceCapabilityMode,
       },
     ];
   });

@@ -98,9 +98,24 @@ export function replayBackgroundProjection(
   for (const info of background) {
     if (!info.taskId.startsWith('agent-')) continue;
     if (isTerminalBackgroundTask(info)) continue;
-    backgroundAgentMetadata.set(info.taskId, {
-      agentId: info.taskId,
-      parentToolCallId: info.taskId,
+    // Keyed by subagentId — the identity the live path stores
+    // (`handleSubagentSpawned` → `backgroundAgentMetadata.set(event.subagentId, …)`)
+    // and the id a later `subagent.completed` / `subagent.failed` looks up. The
+    // task id is NOT a substitute: keying the map by it left that lookup empty
+    // after a resume, so the completion took the foreground branch — it
+    // decremented the badge and routed the result to a card that owns no run.
+    // `agentId` is missing (or the task-id fallback `registerAgentTask` writes
+    // when the caller passed none) exactly when no real subagent was recorded:
+    // there is then no identity to key by, so the entry is skipped rather than
+    // invented.
+    const subagentId = info.agentId;
+    if (subagentId === undefined || subagentId === info.taskId) continue;
+    backgroundAgentMetadata.set(subagentId, {
+      agentId: subagentId,
+      // The resume payload carries no spawning tool-call id, and no consumer
+      // reads this field (both key on agentId / description), so it stays
+      // empty instead of borrowing an id that means something else.
+      parentToolCallId: '',
       description: info.description,
     });
   }

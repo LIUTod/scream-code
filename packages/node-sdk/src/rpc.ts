@@ -609,37 +609,46 @@ export class SDKRpcClient {
   }
 
 
+  /**
+   * Background tasks are registered per agent: a subagent's Bash/Agent task
+   * lives in that subagent's own registry, so `agentId` selects whose registry
+   * answers. Omitted ⇒ the interactive agent (main), which is the pre-existing
+   * behavior. An id the session does not know fails with AGENT_NOT_FOUND —
+   * an owner whose live instance has already been dropped is gone, not empty.
+   */
   async listBackgroundTasks(
-    input: SessionIdRpcInput & { activeOnly?: boolean; limit?: number },
+    input: SessionIdRpcInput & { activeOnly?: boolean; limit?: number; agentId?: string },
   ): Promise<readonly BackgroundTaskInfo[]> {
     const rpc = await this.getRpc();
     return rpc.getBackground({
       sessionId: input.sessionId,
-      agentId: this.interactiveAgentId,
+      agentId: input.agentId ?? this.interactiveAgentId,
       activeOnly: input.activeOnly,
       limit: input.limit,
     });
   }
 
+  /** See {@link listBackgroundTasks} for the `agentId` contract. */
   async getBackgroundTaskOutput(
-    input: SessionIdRpcInput & { taskId: string; tail?: number },
+    input: SessionIdRpcInput & { taskId: string; tail?: number; agentId?: string },
   ): Promise<string> {
     const rpc = await this.getRpc();
     return rpc.getBackgroundOutput({
       sessionId: input.sessionId,
-      agentId: this.interactiveAgentId,
+      agentId: input.agentId ?? this.interactiveAgentId,
       taskId: input.taskId,
       tail: input.tail,
     });
   }
 
+  /** See {@link listBackgroundTasks} for the `agentId` contract. */
   async getBackgroundTaskOutputPath(
-    input: SessionIdRpcInput & { taskId: string },
+    input: SessionIdRpcInput & { taskId: string; agentId?: string },
   ): Promise<string | undefined> {
     const rpc = await this.getRpc();
     return rpc.getBackgroundOutputPath({
       sessionId: input.sessionId,
-      agentId: this.interactiveAgentId,
+      agentId: input.agentId ?? this.interactiveAgentId,
       taskId: input.taskId,
     });
   }
@@ -671,13 +680,14 @@ export class SDKRpcClient {
     });
   }
 
+  /** See {@link listBackgroundTasks} for the `agentId` contract. */
   async stopBackgroundTask(
-    input: SessionIdRpcInput & { taskId: string; reason?: string },
+    input: SessionIdRpcInput & { taskId: string; reason?: string; agentId?: string },
   ): Promise<void> {
     const rpc = await this.getRpc();
     return rpc.stopBackground({
       sessionId: input.sessionId,
-      agentId: this.interactiveAgentId,
+      agentId: input.agentId ?? this.interactiveAgentId,
       taskId: input.taskId,
       reason: input.reason,
     });

@@ -263,15 +263,20 @@ export class Session {
    *
    * Defaults to all tasks (including terminal/lost). Pass
    * `{ activeOnly: true }` to filter to non-terminal entries.
+   *
+   * `agentId` selects whose registry answers — a subagent's task lives in
+   * that subagent's own registry. Omitted ⇒ the interactive agent (main);
+   * an unknown id fails with AGENT_NOT_FOUND.
    */
   async listBackgroundTasks(
-    options: { activeOnly?: boolean; limit?: number } = {},
+    options: { activeOnly?: boolean; limit?: number; agentId?: string } = {},
   ): Promise<readonly BackgroundTaskInfo[]> {
     this.ensureOpen();
     return this.rpc.listBackgroundTasks({
       sessionId: this.id,
       activeOnly: options.activeOnly,
       limit: options.limit,
+      agentId: options.agentId,
     });
   }
 
@@ -279,11 +284,12 @@ export class Session {
    * Read a background task's captured output. Returns the in-memory
    * ring buffer if available, otherwise falls back to the persisted
    * `<sessionDir>/tasks/<taskId>/output.log`. `tail` caps the returned
-   * string to that many trailing characters.
+   * string to that many trailing characters. `agentId` selects the owning
+   * agent's registry (default: the interactive agent).
    */
   async getBackgroundTaskOutput(
     taskId: string,
-    options: { tail?: number } = {},
+    options: { tail?: number; agentId?: string } = {},
   ): Promise<string> {
     this.ensureOpen();
     const trimmedTaskId = normalizeRequiredString(
@@ -295,6 +301,7 @@ export class Session {
       sessionId: this.id,
       taskId: trimmedTaskId,
       tail: options.tail,
+      agentId: options.agentId,
     });
   }
 
@@ -303,7 +310,9 @@ export class Session {
    * grace period (handled by the core BPM); subscribers receive a
    * `background.task.terminated` event when the kill settles. Calls
    * for unknown or already-terminal task ids are no-ops at the core
-   * level — this method does not throw in those cases.
+   * level — this method does not throw in those cases. `agentId` selects
+   * the owning agent's registry (default: the interactive agent); stopping
+   * a subagent's task through the main registry would be such a no-op.
    */
   /**
    * Enables or disables the /rlm persistent-python mode. When enabled, the
@@ -346,7 +355,7 @@ export class Session {
 
   async stopBackgroundTask(
     taskId: string,
-    options: { reason?: string } = {},
+    options: { reason?: string; agentId?: string } = {},
   ): Promise<void> {
     this.ensureOpen();
     const trimmedTaskId = normalizeRequiredString(
@@ -358,15 +367,20 @@ export class Session {
       sessionId: this.id,
       taskId: trimmedTaskId,
       reason: options.reason,
+      agentId: options.agentId,
     });
   }
 
   /**
    * Return the absolute path to the task's `output.log` on disk, or
    * `undefined` when the task is unknown or has no persisted output.
-   * Callers can hand the path to an external pager.
+   * Callers can hand the path to an external pager. `agentId` selects the
+   * owning agent's registry (default: the interactive agent).
    */
-  async getBackgroundTaskOutputPath(taskId: string): Promise<string | undefined> {
+  async getBackgroundTaskOutputPath(
+    taskId: string,
+    options: { agentId?: string } = {},
+  ): Promise<string | undefined> {
     this.ensureOpen();
     const trimmedTaskId = normalizeRequiredString(
       taskId,
@@ -376,6 +390,7 @@ export class Session {
     return this.rpc.getBackgroundTaskOutputPath({
       sessionId: this.id,
       taskId: trimmedTaskId,
+      agentId: options.agentId,
     });
   }
 

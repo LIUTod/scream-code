@@ -19,6 +19,13 @@ export interface TasksBrowserHost {
     readonly editor: CustomEditor;
   };
   readonly backgroundTasks: ReadonlyMap<string, BackgroundTaskInfo>;
+  /**
+   * Agent that owns each subagent-owned entry in {@link backgroundTasks}
+   * (task id → agent id). Absent ⇒ the main agent's own task. A subagent's task
+   * is only reachable through its owner: the main registry answers neither its
+   * rows nor its output, and the owner id is what routes output/stop RPCs.
+   */
+  readonly backgroundTaskOwners: ReadonlyMap<string, string>;
   /** Sidebar slot snapshot — the live per-type subagent state machine. */
   readonly subagentSlots: readonly SubagentSlot[];
   /** Per-instance subagent provenance (spawn parent, outcome), keyed by agentId. */
@@ -69,7 +76,7 @@ export class TasksBrowserController {
 
     let tasks: readonly BackgroundTaskInfo[] = [];
     try {
-      tasks = await session.listBackgroundTasks({ activeOnly: false });
+      tasks = this.withSubagentTasks(await session.listBackgroundTasks({ activeOnly: false }));
     } catch (error) {
       this.host.showError(
         t('tasks.load_failed', { msg: error instanceof Error ? error.message : String(error) }),
@@ -83,6 +90,7 @@ export class TasksBrowserController {
     const component = new TasksBrowserApp(
       {
         tasks,
+        taskSourceNames: this.taskSourceNames(),
         agents: this.snapshotAgentRows(),
         filter,
         selectedTaskId,
@@ -159,7 +167,9 @@ export class TasksBrowserController {
     const myRefreshId = ++viewer.refreshId;
     let output: string;
     try {
-      output = await session.getBackgroundTaskOutput(viewer.taskId);
+      output = await session.getBackgroundTaskOutput(viewer.taskId, {
+        agentId: this.ownerOf(viewer.taskId),
+      });
     } catch (error) {
       if (!opts.silent) {
         const message = error instanceof Error ? error.message : String(error);
@@ -204,10 +214,52 @@ export class TasksBrowserController {
           );
     if (candidates.length === 0) return undefined;
     return (
-      candidates.find(
-        (t) => t.status === 'running' || t.status === 'awaiting_approval',
-      )?.taskId ?? candidates[0]!.taskId
+      candidates.find((t) => t.status === 'running')?.taskId ?? candidates[0]!.taskId
     );
+  }
+
+  /**
+   * Merge the subagent-owned rows into a main-agent list. The polled list is
+   * authoritative for main's own registry — it cannot list a subagent's
+   * registry at all — so those rows come from the event-fed
+   * {@link TasksBrowserHost.backgroundTasks}, tagged in
+   * {@link TasksBrowserHost.backgroundTaskOwners}. Without this, opening /tasks
+   * would show an empty list for work the transcript never mentions and the
+   * subagent's own rows would be invisible.
+   */
+  private withSubagentTasks(fetched: readonly BackgroundTaskInfo[]): readonly BackgroundTaskInfo[] {
+    const owners = this.host.backgroundTaskOwners;
+    if (owners.size === 0) return fetched;
+    const merged = new Map(fetched.map((info) => [info.taskId, info] as const));
+    for (const taskId of owners.keys()) {
+      if (merged.has(taskId)) continue;
+      const local = this.host.backgroundTasks.get(taskId);
+      if (local !== undefined) merged.set(taskId, local);
+    }
+    return [...merged.values()];
+  }
+
+  /** Row/detail tag: the owning subagent's display name per subagent-owned task. */
+  private taskSourceNames(): ReadonlyMap<string, string> {
+    const names = new Map<string, string>();
+    for (const [taskId, ownerId] of this.host.backgroundTaskOwners) {
+      names.set(taskId, this.ownerDisplayName(ownerId));
+    }
+    return names;
+  }
+
+  /** Owning subagent's profile name, falling back to the archived instance row
+   *  and finally to the raw agent id — an id is better than a wrong name. */
+  private ownerDisplayName(ownerId: string): string {
+    const live = this.host.subagentInstances.get(ownerId);
+    if (live !== undefined) return live.type;
+    const archived = this.host.recentSubagentInstances.find((row) => row.instanceId === ownerId);
+    return archived?.type ?? ownerId;
+  }
+
+  /** Agent whose registry answers for this task; undefined ⇒ the main agent's. */
+  private ownerOf(taskId: string): string | undefined {
+    return this.host.backgroundTaskOwners.get(taskId);
   }
 
   private async refresh(opts: { silent?: boolean } = {}): Promise<void> {
@@ -230,7 +282,7 @@ export class TasksBrowserController {
       return;
     }
     if (state.tasksBrowser !== browser) return;
-    this.pushProps(tasks);
+    this.pushProps(this.withSubagentTasks(tasks));
   }
 
   private pushProps(tasks: readonly BackgroundTaskInfo[]): void {
@@ -238,6 +290,7 @@ export class TasksBrowserController {
     if (browser === undefined) return;
     browser.component.setProps({
       tasks,
+      taskSourceNames: this.taskSourceNames(),
       agents: this.snapshotAgentRows(),
       filter: browser.filter,
       selectedTaskId: browser.selectedTaskId,
@@ -335,7 +388,12 @@ export class TasksBrowserController {
 
     this.flash(t('tasks.stopping', { name: taskId }), 1500);
     try {
-      await session.stopBackgroundTask(taskId, { reason: t('tasks.user_stopped') });
+      // Stop through the owning registry: a subagent's task is unknown to the
+      // main one, where stopping it would be a silent no-op.
+      await session.stopBackgroundTask(taskId, {
+        reason: t('tasks.user_stopped'),
+        agentId: this.ownerOf(taskId),
+      });
       await this.refresh({ silent: true });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -357,7 +415,7 @@ export class TasksBrowserController {
 
     let output: string;
     try {
-      output = await session.getBackgroundTaskOutput(taskId);
+      output = await session.getBackgroundTaskOutput(taskId, { agentId: this.ownerOf(taskId) });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.flash(t('tasks.open_output_failed', { msg: message }));
@@ -423,7 +481,7 @@ export class TasksBrowserController {
 
     const requestId = ++browser.tailRequestId;
     void session
-      .getBackgroundTaskOutput(taskId, { tail: 4000 })
+      .getBackgroundTaskOutput(taskId, { tail: 4000, agentId: this.ownerOf(taskId) })
       .then((output) => {
         const current = state.tasksBrowser;
         if (current === undefined) return;

@@ -792,7 +792,6 @@ export const en: Record<string, string> = {
 
   // ─── Task browser UI ────────────
   'taskbrowser.running': 'running',
-  'taskbrowser.awaiting': 'awaiting',
   'taskbrowser.completed': 'completed',
   'taskbrowser.interrupted': 'interrupted',
   'taskbrowser.total': 'total',
@@ -821,7 +820,7 @@ export const en: Record<string, string> = {
   'taskbrowser.stop_reason': 'Stop reason: ',
   'taskbrowser.timed_out': 'Timed out: ',
   'taskbrowser.yes': 'Yes',
-  'taskbrowser.awaiting_label': 'Awaiting: ',
+  'taskbrowser.task_source_via': 'from {name}',
   // ─── Task browser: Agents view ─────────────
   'taskbrowser.agents': 'agents',
   'taskbrowser.agents_title': 'Agents',
@@ -969,14 +968,12 @@ export const en: Record<string, string> = {
   'bash.background_completed': 'Background task {id} completed: {command}',
   'bash.background_failed': 'Background task {id} failed (exit {exitCode}): {command}',
   'bgtask.started_bg': '{subject} started in background',
-  'bgtask.awaiting_approval': '{subject} awaiting approval',
   'bgtask.completed_bg': '{subject} completed in background',
   'bgtask.failed_bg': '{subject} failed in background',
   'bgtask.killed': '{subject} stopped',
   'bgtask.lost': '{subject} lost',
   'bgtask.stopped_reason': 'Stopped — {reason}',
   'bgtask.stopped': 'Stopped',
-  'bgtask.waiting': 'Waiting: {reason}',
   'bgtask.session_restarted': 'Session restarted before completion',
   'bgtask.timed_out': 'Timed out',
 
