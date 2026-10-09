@@ -407,13 +407,30 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
   }
 
   /**
-   * Foreground completion wait with optional timeout.
+   * Foreground completion wait.
    *
-   * When `timeoutMs` is set and background dispatch is available, the wait is
-   * bounded by a race: if the child has not finished by the deadline it is
-   * handed to the background task manager (never aborted) and the caller
-   * receives a `backgrounded` outcome carrying the task id. A timeout degrades
-   * the wait; it does not destroy the subagent's work.
+   * When background dispatch is available the wait races three legs: the
+   * child's completion (always), a collaboration request from the child
+   * (always), and the deadline (only when `timeoutMs` is set). Either bounded
+   * outcome hands the still-running child to the background task manager —
+   * never aborts it — and returns a `backgrounded` outcome carrying the task
+   * id:
+   *
+   * - A request means the parent is needed mid-run: the parent is parked
+   *   inside this tool call, so the `child_request` notification would sit in
+   *   the steer buffer until the child finishes. Backgrounding lets the parent
+   *   read the request at its next step boundary and answer the still-running
+   *   child through `SendSubagentMessage`.
+   * - A timeout degrades the wait; it does not destroy the subagent's work.
+   *
+   * Without background dispatch (`!allowBackground` or no manager) the wait
+   * degrades to awaiting completion directly.
+   *
+   * A child whose controller is already aborted (the user cancelled the parent
+   * turn while the child was parked in a signal-ignoring tool such as
+   * `ContactParent`) is never handed over: both bounded legs fall back to the
+   * completion leg so the cancellation is reported instead of resurrected as a
+   * background task.
    */
   private async awaitForegroundCompletion(
     handle: SubagentHandle,
@@ -425,80 +442,178 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
     | { kind: 'completed'; result: SubagentCompletion }
     | { kind: 'backgrounded'; output: string }
   > {
-    if (timeoutMs === undefined || !this.allowBackground || this.backgroundManager === undefined) {
+    const backgroundManager = this.backgroundManager;
+    if (!this.allowBackground || backgroundManager === undefined) {
       return { kind: 'completed', result: await handle.completion };
     }
 
+    // The request leg is what keeps a blocked parent responsive: without it
+    // the child's request is only flushed after the child finishes. Hosts that
+    // predate the API (partial test doubles) skip the leg and keep the
+    // completion/timeout behavior unchanged.
+    const childRequestArrival = this.subagentHost.waitForChildRequest?.(handle.agentId);
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const deadline: Promise<'timeout'> = new Promise((resolve) => {
-      timer = setTimeout(() => resolve('timeout'), timeoutMs);
-    });
     try {
-      const outcome = await Promise.race([
-        handle.completion.then((result) => ({ kind: 'completed' as const, result })),
-        deadline.then(() => ({ kind: 'timeout' as const })),
-      ]);
-      if (outcome.kind === 'completed') return outcome;
-
-      // Timeout fired: the child is still running on childController.signal.
-      // Register it as a background task; a later user stop aborts it through
-      // the abort callback.
-      let taskId: string;
-      try {
-        taskId = this.backgroundManager.registerAgentTask(handle.completion, description, {
-          agentId: handle.agentId,
-          subagentType: handle.profileName,
-          abort: () => childController.abort(),
-        });
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        this.log?.warn('foreground→background handoff failed; child kept running', {
-          agentId: handle.agentId,
-          error,
-        });
-        // Registration failed: keep the parent→child link so the parent signal
-        // can still stop the child; do not orphan it.
-        return {
-          kind: 'backgrounded',
-          output: [
-            `agent_id: ${handle.agentId}`,
-            `actual_subagent_type: ${handle.profileName}`,
-            'status: backgrounded',
-            '',
-            `warning: timed out after ${timeoutMs}ms and could not register a background task: ${message}`,
-            '',
-            `resume_hint: The subagent is still running. To pick it up, call Agent(resume="${handle.agentId}", prompt="...").`,
-          ].join('\n'),
-        };
+      // Leg order is the tie-break: `Promise.race` settles with the first leg
+      // that is already settled when the handlers attach, so a completion
+      // landing together with a request (or the deadline) wins. That is the
+      // accepted trade-off — a finished child has nothing left to background.
+      const legs: Promise<
+        | { kind: 'completed'; result: SubagentCompletion }
+        | { kind: 'request' }
+        | { kind: 'timeout'; timeoutMs: number }
+      >[] = [handle.completion.then((result) => ({ kind: 'completed' as const, result }))];
+      if (childRequestArrival !== undefined) {
+        legs.push(childRequestArrival.then(() => ({ kind: 'request' as const })));
       }
-      // Handoff succeeded: decouple the child from the parent signal so a later
-      // parent cancellation cannot kill the backgrounded task — only an explicit
-      // TaskStop of the background task aborts it from now on.
-      unlinkChild?.();
-      // Flip the child's lifecycle flag so cancelAll (parent-turn cancellation)
-      // skips it as well — otherwise a later user interruption would still
-      // abort the backgrounded child and mis-report it as "failed" instead of
-      // "cancelled".
-      this.subagentHost.markBackground?.(handle.agentId);
+      if (timeoutMs !== undefined) {
+        const bound = timeoutMs;
+        legs.push(
+          new Promise<{ kind: 'timeout'; timeoutMs: number }>((resolve) => {
+            timer = setTimeout(() => {
+              resolve({ kind: 'timeout', timeoutMs: bound });
+            }, bound);
+          }),
+        );
+      }
+      const outcome = await Promise.race(legs);
+      if (outcome.kind === 'completed') return outcome;
+      // A cancellation that landed while one of the bounded legs fired must
+      // keep cancellation semantics: `ContactParent` does not observe the
+      // abort signal, so a request can still arrive after the user cancelled
+      // the parent turn (`linkAbortSignal` above pushes `ctx.signal`'s
+      // cancellation into `childController`), and a deadline can fire inside
+      // the same window. Backgrounding that child would resurrect a
+      // deliberately cancelled run as a "recoverable" task: its completion
+      // rejects with the cancellation, the manager classifies it `failed`,
+      // and the notification offers the `Agent(resume=...)` hint that the
+      // killed/cancelled path deliberately withholds. Fall back to the
+      // completion leg instead — it settles with the child's abort reason, so
+      // the caller reports the same deliberate-interruption wording as any
+      // other cancelled foreground child.
+      if (childController.signal.aborted) {
+        return { kind: 'completed', result: await handle.completion };
+      }
+      if (outcome.kind === 'request') {
+        return this.handoffChildToBackground(
+          backgroundManager,
+          handle,
+          description,
+          { kind: 'request' },
+          childController,
+          unlinkChild,
+        );
+      }
+      return this.handoffChildToBackground(
+        backgroundManager,
+        handle,
+        description,
+        { kind: 'timeout', timeoutMs: outcome.timeoutMs },
+        childController,
+        unlinkChild,
+      );
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+      this.subagentHost.releaseChildRequestWait?.(handle.agentId);
+    }
+  }
+
+  /**
+   * Hand a still-running foreground child to the background task manager.
+   *
+   * Shared by both bounded-wait outcomes: the timeout path keeps its exact
+   * wording, the request path reports why the parent got the task (the child
+   * asked something; the parent answers it at its next step). Registration
+   * failure keeps the parent→child link intact — the child is neither orphaned
+   * nor aborted — and only a successful handoff decouples it from the parent
+   * signal and flips it to the background lifecycle.
+   */
+  private handoffChildToBackground(
+    backgroundManager: BackgroundProcessManager,
+    handle: SubagentHandle,
+    description: string,
+    reason: { kind: 'timeout'; timeoutMs: number } | { kind: 'request' },
+    childController: AbortController,
+    unlinkChild: (() => void) | undefined,
+  ): { kind: 'backgrounded'; output: string } {
+    // Backstop for the invariant `awaitForegroundCompletion` pre-checks: a
+    // cancelled child is never registered as a background task. Rethrowing the
+    // signal's reason (via `throwIfAborted`) keeps the caller's cancellation
+    // wording (a user cancellation surfaces as the deliberate-interruption
+    // message) instead of fabricating a backgrounded result for a dead run.
+    childController.signal.throwIfAborted();
+    // The child is still running on childController.signal: register it as a
+    // background task; a later user stop aborts it through the abort callback.
+    let taskId: string;
+    try {
+      taskId = backgroundManager.registerAgentTask(handle.completion, description, {
+        agentId: handle.agentId,
+        subagentType: handle.profileName,
+        abort: () => {
+          childController.abort();
+        },
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.log?.warn('foreground→background handoff failed; child kept running', {
+        agentId: handle.agentId,
+        error,
+      });
+      // Registration failed: keep the parent→child link so the parent signal
+      // can still stop the child; do not orphan it.
+      const warning =
+        reason.kind === 'timeout'
+          ? `warning: timed out after ${reason.timeoutMs}ms and could not register a background task: ${message}`
+          : `warning: the subagent requested input and could not register a background task: ${message}`;
+      const tail =
+        reason.kind === 'timeout'
+          ? `resume_hint: The subagent is still running. To pick it up, call Agent(resume="${handle.agentId}", prompt="...").`
+          : [
+              'next_step: The subagent is still running and its request is already queued for you — it reaches you at your next step boundary, and SendSubagentMessage can steer the child.',
+              `resume_hint: To continue or recover this same subagent later, call Agent(resume="${handle.agentId}", prompt="...").`,
+            ].join('\n');
       return {
         kind: 'backgrounded',
         output: [
-          `task_id: ${taskId}`,
-          'status: backgrounded',
           `agent_id: ${handle.agentId}`,
           `actual_subagent_type: ${handle.profileName}`,
-          'automatic_notification: true',
-          'cancel_semantics: Stopping this task (TaskStop) cancels it — its completion notification will not suggest resume. Only tasks that finish or fail on their own are recoverable via Agent(resume=...).',
+          'status: backgrounded',
           '',
-          `description: ${description}`,
+          warning,
           '',
-          `next_step: The subagent exceeded the foreground timeout (${timeoutMs}ms) and was moved to the background instead of being aborted. Its completion arrives automatically in a later turn — no polling needed. To peek at progress without blocking, call TaskOutput(task_id="${taskId}", block=false).`,
-          `resume_hint: To continue or recover this same subagent later, call Agent(resume="${handle.agentId}", prompt="..."). The parameter is agent_id ("${handle.agentId}"), NOT task_id ("${taskId}") or source_id from a later <notification>.`,
+          tail,
         ].join('\n'),
       };
-    } finally {
-      if (timer !== undefined) clearTimeout(timer);
     }
+    // Handoff succeeded: decouple the child from the parent signal so a later
+    // parent cancellation cannot kill the backgrounded task — only an explicit
+    // TaskStop of the background task aborts it from now on.
+    unlinkChild?.();
+    // Flip the child's lifecycle flag so cancelAll (parent-turn cancellation)
+    // skips it as well — otherwise a later user interruption would still
+    // abort the backgrounded child and mis-report it as "failed" instead of
+    // "cancelled".
+    this.subagentHost.markBackground?.(handle.agentId);
+    const nextStep =
+      reason.kind === 'timeout'
+        ? `next_step: The subagent exceeded the foreground timeout (${reason.timeoutMs}ms) and was moved to the background instead of being aborted. Its completion arrives automatically in a later turn — no polling needed. To peek at progress without blocking, call TaskOutput(task_id="${taskId}", block=false).`
+        : `next_step: The subagent raised a request and was moved to the background so you can answer it in real time. The request text arrives with the subagent message at your next step boundary. Reply with SendSubagentMessage — the subagent keeps running and a steer lands inside its live turn (operation "interject" if it must be read immediately, e.g. it is stuck in a long tool call). Its completion arrives automatically in a later turn; to wait for it without polling, call TaskOutput(task_id="${taskId}", block=true).`;
+    return {
+      kind: 'backgrounded',
+      output: [
+        `task_id: ${taskId}`,
+        'status: backgrounded',
+        `agent_id: ${handle.agentId}`,
+        `actual_subagent_type: ${handle.profileName}`,
+        'automatic_notification: true',
+        'cancel_semantics: Stopping this task (TaskStop) cancels it — its completion notification will not suggest resume. Only tasks that finish or fail on their own are recoverable via Agent(resume=...).',
+        '',
+        `description: ${description}`,
+        '',
+        nextStep,
+        `resume_hint: To continue or recover this same subagent later, call Agent(resume="${handle.agentId}", prompt="..."). The parameter is agent_id ("${handle.agentId}"), NOT task_id ("${taskId}") or source_id from a later <notification>.`,
+      ].join('\n'),
+    };
   }
 
   /** Render the completed-subagent result text (summary + optional structured block). */

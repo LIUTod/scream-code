@@ -141,6 +141,19 @@ export class SessionSubagentHost {
   private readonly parentMessageSeen = new Map<string, Set<string>>();
   /** Agent → childId lookup for child→parent collaboration requests. */
   private readonly childIdByAgent = new WeakMap<Agent, string>();
+  /**
+   * One-shot "this child submitted a collaboration request" wake-ups, keyed by
+   * child id. The Agent tool registers one when a foreground wait begins — the
+   * parent is parked inside the tool call, so the parent turn has no step
+   * boundary to flush the notification into — and releases it when the wait
+   * ends. `submitChildRequest` resolves it once the request has been steered to
+   * the parent. Without a registration the request keeps the plain
+   * notification path (it waits for the parent's next boundary).
+   */
+  private readonly childRequestWaiters = new Map<
+    string,
+    { readonly promise: Promise<void>; readonly resolve: () => void }
+  >();
 
   constructor(
     private readonly session: Session,
@@ -388,6 +401,11 @@ export class SessionSubagentHost {
       this.childRequestCounts.delete(terminal.childId);
       this.childRequestSeen.delete(terminal.childId);
       this.parentMessageSeen.delete(terminal.childId);
+      // A wake-up registration cannot outlive its child's run: the completion
+      // leg settles the Agent tool's race anyway, and dropping the entry here
+      // covers every exit path (completion, failure, abort) even when no
+      // caller reached its own release.
+      this.childRequestWaiters.delete(terminal.childId);
       // The terminal evicts the live Agent reference and the bookkeeping that
       // belongs to a running child — but NOT its mailbox. Mail accepted here
       // was answered `accepted` to the parent, and the mailbox is in-memory
@@ -685,7 +703,40 @@ export class SessionSubagentHost {
       ],
       { kind: 'system_trigger', name: 'child_request' },
     );
+    // Wake a foreground wait, if one is registered: the parent is blocked
+    // inside the Agent tool call with no step boundary to flush the steer
+    // into, so the Agent tool races this signal and hands the child to the
+    // background task manager — the parent then reads the request at its next
+    // step boundary and can answer the still-running child in real time.
+    // Only after an accepted request (saturated/deduped ones returned above)
+    // and only when the notification actually landed.
+    if (parent !== undefined) this.childRequestWaiters.get(fromChildId)?.resolve();
     return { status: 'accepted' };
+  }
+
+  /**
+   * Register (or reuse) the one-shot wake-up resolved when this child submits
+   * its next accepted collaboration request. Called by the Agent tool when a
+   * foreground wait begins; the returned promise resolves at most once.
+   */
+  waitForChildRequest(childId: string): Promise<void> {
+    const existing = this.childRequestWaiters.get(childId);
+    if (existing !== undefined) return existing.promise;
+    let resolve!: () => void;
+    const promise = new Promise<void>((res) => {
+      resolve = res;
+    });
+    this.childRequestWaiters.set(childId, { promise, resolve });
+    return promise;
+  }
+
+  /**
+   * Drop a child's wake-up registration (its foreground wait ended). The entry
+   * is deleted rather than kept resolved: the next foreground wait registers a
+   * fresh one-shot signal, so a stale resolution cannot background a later run.
+   */
+  releaseChildRequestWait(childId: string): void {
+    this.childRequestWaiters.delete(childId);
   }
 
   /** Per-turn budget reset for child→parent collaboration requests. */

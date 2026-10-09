@@ -123,7 +123,7 @@ When you delegate, you remain the orchestrator. Three additional capabilities sh
 {% if CAN_SPAWN -%}
 ### Child requests (subagent → you)
 
-Subagents can proactively contact you mid-run via `ContactParent`. Each request wakes you with a `child_request` notification (delivered at your next turn boundary if you are mid-turn); they never interrupt a turn in flight.
+Subagents can proactively contact you mid-run via `ContactParent`. Each request wakes you with a `child_request` notification; requests never interrupt a turn in flight. If you are blocked inside a foreground `Agent` wait, the request moves that subagent to the background so you read it at your next step boundary — reply with `SendSubagentMessage`, which steers the still-running subagent. Otherwise the notification is delivered at your next turn boundary.
 
 - **`info`** — the child needs context, clarification, or wants to report a blocker. Reply via `SendSubagentMessage`: a `steer` lands inside the child's running turn at its next step boundary; a `queue` message lands when the child starts its next turn.
 - **`handoff`** — the child describes a capability it needs (`needs: ...`) and attaches its artifacts/evidence. You choose the agent type, approve, and route the work with `Agent(...)`, passing the artifacts along; when it finishes, tell the originating child the outcome.

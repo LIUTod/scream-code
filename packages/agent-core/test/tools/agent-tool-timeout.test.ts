@@ -23,16 +23,21 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
-function makeHost(handle: {
-  agentId: string;
-  profileName: string;
-  completion: Promise<{ result: string; usage: unknown }>;
-}) {
+function makeHost(
+  handle: {
+    agentId: string;
+    profileName: string;
+    completion: Promise<{ result: string; usage: unknown }>;
+  },
+  childRequestArrival: Promise<void> = new Promise<void>(() => {}),
+) {
   return {
     spawn: vi.fn(async () => handle),
     resume: vi.fn(),
     getProfileName: vi.fn(() => 'coder'),
     backgroundTaskTimeoutMs: 600_000,
+    waitForChildRequest: vi.fn(() => childRequestArrival),
+    releaseChildRequestWait: vi.fn(),
   };
 }
 
@@ -177,6 +182,8 @@ describe('AgentTool foreground timeout → background handoff', () => {
       resume: vi.fn(),
       getProfileName: vi.fn(() => 'coder'),
       backgroundTaskTimeoutMs: 600_000,
+      waitForChildRequest: vi.fn(() => new Promise<void>(() => {})),
+      releaseChildRequestWait: vi.fn(),
     };
     let abortCallback: (() => void) | undefined;
     const registerAgentTask = vi.fn(
@@ -242,5 +249,173 @@ describe('AgentTool foreground timeout → background handoff', () => {
     expect(output.output).toContain('no slot');
     expect(output.output).toContain('resume_hint');
     expect(controller.signal.aborted).toBe(false);
+  });
+});
+
+describe('AgentTool foreground request arrival → background handoff', () => {
+  it('hands the child to the background manager when it submits a request, with no timeout set', async () => {
+    vi.useFakeTimers();
+    const completion = deferred<{ result: string; usage: unknown }>();
+    const requestArrival = deferred<void>();
+    const handle = { agentId: 'agent-0', profileName: 'coder', completion: completion.promise };
+    const registerAgentTask = vi.fn(() => 'task-7');
+    const host = makeHost(handle, requestArrival.promise);
+    const tool = makeTool(host, { registerAgentTask });
+
+    const controller = new AbortController();
+    const execPromise = execute(
+      tool,
+      { prompt: 'task', description: 'needs input' },
+      controller.signal,
+    );
+    await vi.advanceTimersByTimeAsync(1);
+    // The wait registered its wake-up and is parked: the child is still running
+    // and no timeout was given, so nothing but the request can end it early.
+    expect(host.waitForChildRequest).toHaveBeenCalledWith('agent-0');
+    expect(registerAgentTask).not.toHaveBeenCalled();
+
+    requestArrival.resolve();
+    await vi.advanceTimersByTimeAsync(1);
+    let settled = false;
+    void execPromise.then(() => {
+      settled = true;
+    });
+    await vi.advanceTimersByTimeAsync(1);
+    // The request ends the wait promptly; without the request leg the call is
+    // still parked on the child's completion here.
+    expect(settled).toBe(true);
+
+    const output = await execPromise;
+
+    expect(output.isError).toBeUndefined();
+    expect(output.output).toContain('status: backgrounded');
+    expect(output.output).toContain('task_id: task-7');
+    expect(output.output).not.toContain('status: completed');
+    // The request path tells the parent how to answer the still-running child.
+    expect(output.output).toContain('SendSubagentMessage');
+    expect(output.output).toContain('interject');
+    expect(output.output).toContain('TaskOutput(task_id="task-7", block=true)');
+    expect(registerAgentTask).toHaveBeenCalledWith(
+      completion.promise,
+      'needs input',
+      expect.objectContaining({ agentId: 'agent-0', subagentType: 'coder' }),
+    );
+    // The request is not an abort.
+    expect(controller.signal.aborted).toBe(false);
+    // The one-shot registration is released when the wait ends.
+    expect(host.releaseChildRequestWait).toHaveBeenCalledWith('agent-0');
+  });
+
+  it('does not background a child that was cancelled while parked in a request', async () => {
+    vi.useFakeTimers();
+    const completion = deferred<{ result: string; usage: unknown }>();
+    const requestArrival = deferred<void>();
+    const handle = { agentId: 'agent-0', profileName: 'coder', completion: completion.promise };
+    const registerAgentTask = vi.fn(() => 'task-7');
+    const markBackground = vi.fn();
+    const host = { ...makeHost(handle, requestArrival.promise), markBackground };
+    const tool = makeTool(host, { registerAgentTask });
+
+    const controller = new AbortController();
+    const execPromise = execute(
+      tool,
+      { prompt: 'task', description: 'needs input' },
+      controller.signal,
+    );
+    await vi.advanceTimersByTimeAsync(1);
+
+    // The user cancels the parent turn while the child is parked inside
+    // ContactParent: the cancellation reaches the child controller through
+    // `linkAbortSignal`, but ContactParent does not observe the signal — so the
+    // request still arrives and wakes the wait.
+    controller.abort(new UserCancellationError());
+    requestArrival.resolve();
+    await vi.advanceTimersByTimeAsync(1);
+
+    // The cancelled child is NOT handed to the background manager: a
+    // backgrounded cancelled run settles as a `failed` task whose notification
+    // advertises Agent(resume=...), the opposite of the "user cancellation
+    // never suggests resume" contract.
+    expect(registerAgentTask).not.toHaveBeenCalled();
+    expect(markBackground).not.toHaveBeenCalled();
+    const settled = { value: false };
+    void execPromise.then(() => {
+      settled.value = true;
+    });
+    await vi.advanceTimersByTimeAsync(1);
+    // The wait fell back to the completion leg: still parked until the child's
+    // own run settles (it too is being cancelled).
+    expect(settled.value).toBe(false);
+
+    completion.reject(new Error('aborted by the user'));
+    const output = await execPromise;
+
+    expect(output.isError).toBe(true);
+    expect(output.output).toContain('user manually interrupted');
+    expect(output.output).not.toContain('backgrounded');
+    expect(output.output).not.toContain('resume_hint');
+    // The one-shot registration is released when the wait ends.
+    expect(host.releaseChildRequestWait).toHaveBeenCalledWith('agent-0');
+  });
+
+  it('keeps the completed result when the child finishes together with a request', async () => {
+    vi.useFakeTimers();
+    const completion = deferred<{ result: string; usage: unknown }>();
+    const requestArrival = deferred<void>();
+    const handle = { agentId: 'agent-0', profileName: 'coder', completion: completion.promise };
+    const registerAgentTask = vi.fn(() => 'task-7');
+    const host = makeHost(handle, requestArrival.promise);
+    const tool = makeTool(host, { registerAgentTask });
+
+    const execPromise = execute(
+      tool,
+      { prompt: 'task', description: 'task' },
+      new AbortController().signal,
+    );
+    await vi.advanceTimersByTimeAsync(1);
+    // Same dispatch, completion attached first: the accepted trade-off is that
+    // a finished child is never backgrounded.
+    completion.resolve({ result: 'all done', usage: {} });
+    requestArrival.resolve();
+    const output = await execPromise;
+
+    expect(output.isError).toBeUndefined();
+    expect(output.output).toContain('status: completed');
+    expect(output.output).toContain('all done');
+    expect(output.output).not.toContain('backgrounded');
+    expect(registerAgentTask).not.toHaveBeenCalled();
+    expect(host.releaseChildRequestWait).toHaveBeenCalledWith('agent-0');
+  });
+
+  it('keeps waiting for completion when background dispatch is unavailable', async () => {
+    vi.useFakeTimers();
+    const completion = deferred<{ result: string; usage: unknown }>();
+    const requestArrival = deferred<void>();
+    const handle = { agentId: 'agent-0', profileName: 'coder', completion: completion.promise };
+    const host = makeHost(handle, requestArrival.promise);
+    // No background manager → no handoff target, so the wait stays unchanged.
+    const tool = makeTool(host, undefined);
+
+    const execPromise = execute(
+      tool,
+      { prompt: 'task', description: 'task' },
+      new AbortController().signal,
+    );
+    await vi.advanceTimersByTimeAsync(1);
+    requestArrival.resolve();
+    let settled = false;
+    void execPromise.then(() => {
+      settled = true;
+    });
+    await vi.advanceTimersByTimeAsync(1);
+    // The request cannot move the child anywhere: the tool is still awaiting
+    // completion, and no wake-up was ever registered.
+    expect(settled).toBe(false);
+    expect(host.waitForChildRequest).not.toHaveBeenCalled();
+
+    completion.resolve({ result: 'finished', usage: {} });
+    const output = await execPromise;
+    expect(output.output).toContain('status: completed');
+    expect(output.output).toContain('finished');
   });
 });

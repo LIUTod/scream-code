@@ -234,4 +234,85 @@ describe('child→parent collaboration (ContactParent)', () => {
       host.submitChildRequest(child.agent, { request_type: 'info', message: 'hi' }).status,
     ).toBe('not_active');
   });
+
+  it('resolves the one-shot request wake on an accepted request and starts fresh after release', async () => {
+    const child = testAgent({ type: 'sub' });
+    const parent = testAgent();
+    parent.configure();
+    child.configure();
+    parent.mockNextResponse({ type: 'text', text: 'acknowledged.' });
+    const session = fakeSession(parent.agent, child.agent);
+    const bus = new SubagentMessageBus();
+    const host = new SessionSubagentHost(session, 'main', undefined, undefined, bus);
+    const internals = host as unknown as {
+      activeChildren: Map<string, unknown>;
+      childIdByAgent: WeakMap<Agent, string>;
+      childRequestWaiters: Map<string, unknown>;
+    };
+    internals.activeChildren = new Map([['agent-0', {}]]);
+    internals.childIdByAgent.set(child.agent, 'agent-0');
+
+    const wake = host.waitForChildRequest('agent-0');
+    // A second registration while the wait is live reuses the same one-shot
+    // signal — the Agent tool registers once per wait.
+    expect(host.waitForChildRequest('agent-0')).toBe(wake);
+
+    let woke = false;
+    void wake.then(() => {
+      woke = true;
+    });
+    expect(
+      host.submitChildRequest(child.agent, { request_type: 'info', message: 'need context' }).status,
+    ).toBe('accepted');
+    // Accepted means the wake resolved: a foreground Agent call can end its
+    // wait and background the child instead of parking until it finishes.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(woke).toBe(true);
+
+    // Releasing drops the entry, so the next wait registers a fresh signal
+    // rather than reusing a forever-resolved promise.
+    host.releaseChildRequestWait('agent-0');
+    expect(internals.childRequestWaiters.size).toBe(0);
+    expect(host.waitForChildRequest('agent-0')).not.toBe(wake);
+    host.releaseChildRequestWait('agent-0');
+    expect(internals.childRequestWaiters.size).toBe(0);
+  });
+
+  it('does not resolve the wake for a saturated request', async () => {
+    const child = testAgent({ type: 'sub' });
+    const parent = testAgent();
+    parent.configure();
+    child.configure();
+    const session = fakeSession(parent.agent, child.agent);
+    const bus = new SubagentMessageBus();
+    const host = new SessionSubagentHost(session, 'main', undefined, undefined, bus);
+    const internals = host as unknown as {
+      activeChildren: Map<string, unknown>;
+      childIdByAgent: WeakMap<Agent, string>;
+    };
+    internals.activeChildren = new Map([['agent-0', {}]]);
+    internals.childIdByAgent.set(child.agent, 'agent-0');
+
+    // Spend the per-turn budget before registering, so the wake below can only
+    // observe the saturated (rejected) request.
+    for (let i = 0; i < 4; i += 1) {
+      expect(
+        host.submitChildRequest(child.agent, { request_type: 'info', message: `request ${i}` }).status,
+      ).toBe('accepted');
+    }
+    const wake = host.waitForChildRequest('agent-0');
+    let woke = false;
+    void wake.then(() => {
+      woke = true;
+    });
+
+    expect(
+      host.submitChildRequest(child.agent, { request_type: 'info', message: 'over budget' }).status,
+    ).toBe('saturated');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    // A rejected request must not background the child: there is nothing for
+    // the parent to answer.
+    expect(woke).toBe(false);
+    host.releaseChildRequestWait('agent-0');
+  });
 });

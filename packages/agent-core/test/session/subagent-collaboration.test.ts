@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { testAgent } from '../agent/harness/agent';
 import { SessionSubagentHost } from '../../src/session/subagent-host';
 import { SubagentMessageBus } from '../../src/session/subagent-messages';
+import { AgentTool } from '../../src/tools/builtin/collaboration/agent';
 import type { Agent } from '../../src/agent';
 import type { ResolvedAgentProfile } from '../../src/profile';
 import type { Session } from '../../src/session';
@@ -697,4 +698,208 @@ describe('subagent collaboration integration', () => {
     // The delivery turn really ran: the child answered after reading the message.
     expect(completion.result).toContain('acknowledged');
   }, 30_000);
+
+  it('wakes a blocked foreground Agent call on a child request and hands the child to the background', async () => {
+    const child = testAgent({ type: 'sub' });
+    const parent = testAgent();
+    parent.configure();
+    child.configure();
+    parent.newEvents();
+    await parent.rpc.setPermission({ mode: 'yolo' });
+    await child.rpc.setPermission({ mode: 'yolo' });
+
+    const session = fakeSession(parent.agent, child.agent, {
+      'agent-0': { homedir: '/tmp/x', type: 'sub', parentAgentId: 'main' },
+    });
+    const bus = new SubagentMessageBus();
+    const host = new SessionSubagentHost(session, 'main', undefined, undefined, bus);
+    (child.agent as unknown as { ownerHost?: SessionSubagentHost }).ownerHost = host;
+    // The child_request wake launches a parent turn while the parent is idle
+    // (mid-turn it is flushed at the parent's next step boundary instead); give
+    // that turn a scripted answer.
+    parent.mockNextResponse({ type: 'text', text: 'acknowledged.' });
+
+    const gate = drainGate();
+    child.mockNextResponse({
+      type: 'function',
+      id: 'tc_cp',
+      name: 'ContactParent',
+      arguments: JSON.stringify({
+        request_type: 'info',
+        message: 'which branch should I target?',
+      }),
+    });
+    child.mockNextResponse({
+      type: 'function',
+      id: 'tc_bash',
+      name: 'Bash',
+      arguments: JSON.stringify({ command: gate.command }),
+    });
+    child.mockNextResponse({ type: 'text', text: `finished. ${'x'.repeat(220)}` });
+
+    const completions: Promise<{ result: string }>[] = [];
+    const backgroundManager = {
+      registerAgentTask: vi.fn((completion: Promise<{ result: string }>) => {
+        completions.push(completion);
+        return 'task-42';
+      }),
+    };
+    // Foreground call, no timeout: the wait can only end early through the
+    // request leg.
+    const tool = new AgentTool(host, backgroundManager as never);
+    const execution = tool.resolveExecution({
+      prompt: 'original prompt',
+      description: 'needs input',
+    } as never) as { execute(ctx: unknown): Promise<{ output: string; isError?: boolean }> };
+    const execPromise = execution.execute({
+      toolCallId: 'call_1',
+      signal: new AbortController().signal,
+    } as never);
+
+    // The child is parked in the gated Bash: its request was accepted in an
+    // earlier step, and its completion cannot settle before the gate opens, so
+    // only the request wake can resolve the tool call.
+    await gate.waitForStart();
+    const resolvedWhileChildParked = await Promise.race([
+      execPromise.then(() => true as const),
+      new Promise<false>((resolve) => {
+        setTimeout(() => {
+          resolve(false);
+        }, 2_000);
+      }),
+    ]);
+
+    const internals = host as unknown as {
+      activeChildren: Map<string, { runInBackground: boolean }>;
+      childRequestWaiters: Map<string, unknown>;
+    };
+    // Read the handoff's side effects while the child is still parked, so the
+    // child's own teardown cannot race these observations.
+    const flippedToBackground = internals.activeChildren.get('agent-0')?.runInBackground;
+    const wakeRegistrations = internals.childRequestWaiters.size;
+    // Release before asserting: in the no-wake state the tool only settles once
+    // the child runs to completion, and the gate has to open for that.
+    gate.release();
+    const output = await execPromise;
+
+    expect(resolvedWhileChildParked).toBe(true);
+    expect(output.isError).toBeUndefined();
+    expect(output.output).toContain('status: backgrounded');
+    expect(output.output).toContain('task_id: task-42');
+    expect(output.output).not.toContain('status: completed');
+    // The request path names the reply route for the still-running child.
+    expect(output.output).toContain('SendSubagentMessage');
+    expect(output.output).toContain('TaskOutput(task_id="task-42", block=true)');
+    expect(backgroundManager.registerAgentTask).toHaveBeenCalledWith(
+      expect.anything(),
+      'needs input',
+      expect.objectContaining({ agentId: 'agent-0', subagentType: 'coder' }),
+    );
+    // The handoff flipped the child to the background lifecycle and the wait
+    // released its wake-up registration.
+    expect(flippedToBackground).toBe(true);
+    expect(wakeRegistrations).toBe(0);
+    // Nothing was aborted: the child still runs to its final answer.
+    const completion = await completions[0]!;
+    gate.cleanup();
+    expect(completion.result).toContain('finished.');
+  }, 20_000);
+
+  it('steers the still-running child mid-run after the request handoff', async () => {
+    const child = testAgent({ type: 'sub' });
+    const parent = testAgent();
+    parent.configure();
+    child.configure();
+    parent.newEvents();
+    await parent.rpc.setPermission({ mode: 'yolo' });
+    await child.rpc.setPermission({ mode: 'yolo' });
+
+    const session = fakeSession(parent.agent, child.agent, {
+      'agent-0': { homedir: '/tmp/x', type: 'sub', parentAgentId: 'main' },
+    });
+    const bus = new SubagentMessageBus();
+    const host = new SessionSubagentHost(session, 'main', undefined, undefined, bus);
+    (child.agent as unknown as { ownerHost?: SessionSubagentHost }).ownerHost = host;
+    parent.mockNextResponse({ type: 'text', text: 'acknowledged.' });
+
+    const gate = drainGate();
+    child.mockNextResponse({
+      type: 'function',
+      id: 'tc_cp',
+      name: 'ContactParent',
+      arguments: JSON.stringify({
+        request_type: 'info',
+        message: 'which branch should I target?',
+      }),
+    });
+    child.mockNextResponse({
+      type: 'function',
+      id: 'tc_bash',
+      name: 'Bash',
+      arguments: JSON.stringify({ command: gate.command }),
+    });
+    child.mockNextResponse({ type: 'text', text: `finished with the instruction. ${'x'.repeat(200)}` });
+
+    const completions: Promise<{ result: string }>[] = [];
+    const backgroundManager = {
+      registerAgentTask: vi.fn((completion: Promise<{ result: string }>) => {
+        completions.push(completion);
+        return 'task-43';
+      }),
+    };
+    const tool = new AgentTool(host, backgroundManager as never);
+    const execution = tool.resolveExecution({
+      prompt: 'original prompt',
+      description: 'needs input',
+    } as never) as { execute(ctx: unknown): Promise<{ output: string; isError?: boolean }> };
+    const execPromise = execution.execute({
+      toolCallId: 'call_1',
+      signal: new AbortController().signal,
+    } as never);
+
+    await gate.waitForStart();
+    const resolvedWhileChildParked = await Promise.race([
+      execPromise.then(() => true as const),
+      new Promise<false>((resolve) => {
+        setTimeout(() => {
+          resolve(false);
+        }, 2_000);
+      }),
+    ]);
+
+    // The parent received the request: the idle parent's wake-up turn carries
+    // the notification text into its next LLM input.
+    await parent.untilTurnEnd();
+    const parentInput = JSON.stringify(parent.lastLlmInput());
+    expect(parentInput).toContain('child_request');
+    expect(parentInput).toContain('which branch should I target?');
+
+    // The parent answers while the child still runs — a steer into the live
+    // turn, no resume and no waiting for the child to finish.
+    const sent = host.sendMessage('agent-0', 'steer', 'Target the release branch.');
+    expect(sent.status).toBe('accepted');
+    expect(sent.delivery).toBe('mid-run');
+
+    gate.release();
+    const output = await execPromise;
+    const completion = await completions[0]!;
+    gate.cleanup();
+
+    expect(resolvedWhileChildParked).toBe(true);
+    expect(output.output).toContain('status: backgrounded');
+
+    // The reply landed inside the running turn at its next step boundary, and
+    // the child completed normally afterwards.
+    const history = child.agent.context.history as readonly { role: string; content: unknown }[];
+    const textOf = (content: unknown): string =>
+      Array.isArray(content)
+        ? content.map((x: { text?: string }) => x.text ?? '').join('\n')
+        : String(content);
+    const injectedAt = history.findIndex(
+      (m) => m.role === 'user' && textOf(m.content).includes('[parent_messages]'),
+    );
+    expect(injectedAt).toBeGreaterThan(-1);
+    expect(textOf(history[injectedAt]!.content)).toContain('[directive] Target the release branch.');
+    expect(completion.result).toContain('finished with the instruction.');
+  }, 20_000);
 });

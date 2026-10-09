@@ -647,6 +647,39 @@ describe('SessionSubagentHost', () => {
     ]);
   });
 
+  it('drops a pending child request wake-up when the child run ends', async () => {
+    const parent = testAgent();
+    parent.configure();
+    const child = testAgent();
+    const summary =
+      'Finished the child task completely and returned a detailed enough technical summary for the parent agent to continue confidently without repeating the work already done. '.repeat(
+        2,
+      );
+    child.mockNextResponse({ type: 'text', text: summary });
+    const session = fakeSession(parent.agent, child.agent);
+    const bus = new SubagentMessageBus();
+    const host = new SessionSubagentHost(session, 'main', undefined, undefined, bus);
+
+    const handle = await host.spawn('coder', {
+      parentToolCallId: 'call_agent',
+      prompt: 'Implement the fix',
+      description: 'Fix bug',
+      runInBackground: false,
+      signal,
+    });
+    // A foreground Agent call registers exactly this wake-up while it waits.
+    void host.waitForChildRequest(handle.agentId);
+    const internals = host as unknown as { childRequestWaiters: Map<string, unknown> };
+    expect(internals.childRequestWaiters.has(handle.agentId)).toBe(true);
+
+    // Every exit path — here a normal completion — must drop the registration:
+    // a leaked entry would keep a dead child's resolver alive and could wake a
+    // later wait through stale bookkeeping.
+    await handle.completion;
+    expect(internals.childRequestWaiters.has(handle.agentId)).toBe(false);
+    expect(internals.childRequestWaiters.size).toBe(0);
+  });
+
   it('stops the finished subagent lsp servers without disarming the parent', async () => {
     const parent = testAgent();
     parent.configure();

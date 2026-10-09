@@ -8,6 +8,6 @@ Three request types:
 
 Include a `payload` with your work products (`artifacts`), proof (`evidence`), anything left unfinished (`missing`), and — for a handoff — what a good reply looks like (`expecting`: the shape, format, or acceptance criteria you want back) so the parent can route the work without you re-explaining everything.
 
-Rate limit: up to 4 requests per turn; duplicate requests within a turn are merged. `accepted` means the request was delivered to the parent as a notification — the parent sees it at its next turn boundary (it may be delayed if the parent is mid-turn). Keep working while you wait; do not block on a reply. If the parent cannot help, it will tell you why via a message.
+Rate limit: up to 4 requests per turn; duplicate requests within a turn are merged. `accepted` means the request was delivered to the parent as a notification — the parent sees it at its next turn boundary. If the parent is blocked waiting on your run (a foreground Agent call), the request moves you to the background so the parent can read it and reply while you keep running — this never aborts you or discards work. Keep working while you wait; do not block on a reply. If the parent cannot help, it will tell you why via a message.
 
 **Never guess your way through a blocker.** If you are stuck or unsure, contact the parent instead of inventing an answer.
