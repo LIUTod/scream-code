@@ -1,11 +1,18 @@
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'pathe';
+
 import { describe, expect, it } from 'vitest';
 
 import type { CompactionResult } from '../../../src/agent/compaction';
 import {
   AGENT_WIRE_PROTOCOL_VERSION,
+  FileSystemAgentRecordPersistence,
   InMemoryAgentRecordPersistence,
   type AgentRecord,
+  type AgentRecordPersistence,
 } from '../../../src/agent/records';
+import { appendTaskOutput, writeTask } from '../../../src/tools/background/persist';
 import { testAgent } from '../harness/agent';
 
 const METADATA: AgentRecord = {
@@ -276,6 +283,140 @@ describe('replay-time vacuous message cleanup', () => {
   });
 });
 
+
+describe('delivered background notification marks across compaction', () => {
+  // The delivered mark of a background-task notification is written when the
+  // notification message lands in the context (`pushHistory` →
+  // `markDeliveredNotification`), and rebuild on resume relies on that message
+  // replaying. A full compaction folds the message into the summary and the
+  // snapshot fast-path skips the append record, so the mark must survive in
+  // the `context.snapshot` payload — otherwise the reopen reconcile path
+  // re-delivers a notification the session already saw.
+  const origin = {
+    kind: 'background_task',
+    taskId: 'agent-folded00',
+    status: 'completed',
+    notificationId: 'task:agent-folded00:completed',
+  } as const;
+
+  async function completedTaskWire(options: {
+    readonly notificationDelivered: boolean;
+  }): Promise<AgentRecord[]> {
+    const persistence = new InMemoryAgentRecordPersistence();
+    const live = testAgent({ persistence });
+    live.agent.context.appendUserMessage([{ type: 'text', text: 'first question' }]);
+    if (options.notificationDelivered) {
+      // The delivery side effect: the notification is a history message whose
+      // origin carries the delivered key.
+      live.agent.context.appendUserMessage(
+        [{ type: 'text', text: '<notification>folded notification</notification>' }],
+        origin,
+      );
+    }
+    live.agent.context.appendUserMessage([{ type: 'text', text: 'second question' }]);
+    const count = options.notificationDelivered ? 3 : 2;
+    live.agent.context.applyCompaction(compaction('summary of the pre-restart history', count, 500));
+    live.agent.context.appendUserMessage([{ type: 'text', text: 'after compaction' }]);
+    return persistence.records;
+  }
+
+  async function reconcileOnReopen(persistence: AgentRecordPersistence) {
+    const sessionDir = await mkdtemp(join(tmpdir(), 'scream-snapshot-notify-'));
+    const resumed = testAgent({ persistence });
+    resumed.agent.background.attachSessionDir(sessionDir);
+    await writeTask(sessionDir, {
+      task_id: origin.taskId,
+      command: '[agent] folded notification',
+      description: 'folded notification task',
+      pid: 0,
+      started_at: 1_700_000_000,
+      ended_at: 1_700_000_010,
+      exit_code: 0,
+      status: 'completed',
+    });
+    await appendTaskOutput(sessionDir, origin.taskId, 'already delivered summary');
+    // Exactly what `Agent.resume()` does: replay the wire, load the task
+    // ledger, then reconcile terminal tasks against the delivered marks.
+    await resumed.agent.records.replay();
+    await resumed.agent.background.loadFromDisk();
+    await resumed.agent.background.reconcile();
+    return { resumed, sessionDir };
+  }
+
+  it('does not re-deliver a notification the compaction folded into the summary', async () => {
+    const records = await completedTaskWire({ notificationDelivered: true });
+
+    // The snapshot written by the compaction carries the delivered key.
+    const snapshotRecord = records.find((record) => record.type === 'context.snapshot');
+    if (snapshotRecord?.type !== 'context.snapshot') {
+      throw new Error('expected the live wire to contain a context.snapshot record');
+    }
+    expect(snapshotRecord.snapshot.deliveredNotificationKeys).toEqual([
+      `${origin.taskId}\u0000${origin.status}\u0000${origin.notificationId}`,
+    ]);
+
+    const { resumed, sessionDir } = await reconcileOnReopen(
+      new InMemoryAgentRecordPersistence(diskRoundTrip(records)),
+    );
+    try {
+      // Reopen must not append the notification a second time.
+      expect(
+        resumed.agent.context.history.filter((m) => m.origin?.kind === 'background_task'),
+      ).toHaveLength(0);
+    } finally {
+      await rm(sessionDir, { recursive: true, force: true });
+    }
+  });
+
+  it('restores the marks through the file-backed parse-skipping path', async () => {
+    const records = await completedTaskWire({ notificationDelivered: true });
+    const wireDir = await mkdtemp(join(tmpdir(), 'scream-snapshot-notify-wire-'));
+    try {
+      const wirePath = join(wireDir, 'wire.jsonl');
+      await writeFile(
+        wirePath,
+        `${records.map((record) => JSON.stringify(record)).join('\n')}\n`,
+        'utf8',
+      );
+
+      const { resumed, sessionDir } = await reconcileOnReopen(
+        new FileSystemAgentRecordPersistence(wirePath),
+      );
+      try {
+        // The production restart path: the parse-skip reader drops the folded
+        // append records but keeps the snapshot line, whose payload carries the
+        // delivered key — so no duplicate append here either.
+        expect(
+          resumed.agent.context.history.filter((m) => m.origin?.kind === 'background_task'),
+        ).toHaveLength(0);
+      } finally {
+        await rm(sessionDir, { recursive: true, force: true });
+      }
+    } finally {
+      await rm(wireDir, { recursive: true, force: true });
+    }
+  });
+
+  it('still re-delivers a terminal notification that was never delivered', async () => {
+    const records = await completedTaskWire({ notificationDelivered: false });
+
+    const { resumed, sessionDir } = await reconcileOnReopen(
+      new InMemoryAgentRecordPersistence(diskRoundTrip(records)),
+    );
+    try {
+      const notifications = resumed.agent.context.history.filter(
+        (m) => m.origin?.kind === 'background_task',
+      );
+      expect(notifications).toHaveLength(1);
+      expect(notifications[0]!.origin).toMatchObject({
+        taskId: origin.taskId,
+        status: origin.status,
+      });
+    } finally {
+      await rm(sessionDir, { recursive: true, force: true });
+    }
+  });
+});
 
 describe('file-backed resume with parse-skipping', () => {
   async function makeWirePath(): Promise<string> {

@@ -80,6 +80,14 @@ export interface ContextMemoryJSONSnapshot {
   readonly messageEdits?:
     | readonly (readonly [string, readonly ContentPart[] | null])[]
     | undefined;
+  /** Delivered background-task notification keys at snapshot time (see
+   *  `BackgroundManager.exportDeliveredNotificationKeys`). A full compaction
+   *  folds the notification messages these marks were derived from into the
+   *  summary, and the folded `context.append_message` records never replay —
+   *  so without this payload the marks would be lost and the reopen reconcile
+   *  path would re-deliver notifications the session already saw.
+   *  Optional: snapshots written before the field restore with none. */
+  readonly deliveredNotificationKeys?: readonly string[] | undefined;
 }
 
 export class ContextMemory {
@@ -156,6 +164,11 @@ export class ContextMemory {
    * {@link ContextMemoryJSONSnapshot}).
    */
   toJSONSnapshot(): ContextMemoryJSONSnapshot {
+    // Delivered notification marks ride along even though they are the
+    // background manager's state: this snapshot is written by a compaction
+    // that is about to fold the notification messages they were derived from
+    // out of history, so it is the last place that can carry them.
+    const deliveredNotificationKeys = this.agent.background.exportDeliveredNotificationKeys();
     return {
       history: [...this._history],
       tokenCount: this._tokenCount,
@@ -170,6 +183,7 @@ export class ContextMemory {
       ...(this._messageEdits.size > 0
         ? { messageEdits: [...this._messageEdits.entries()] }
         : {}),
+      ...(deliveredNotificationKeys.length > 0 ? { deliveredNotificationKeys } : {}),
     };
   }
 
@@ -193,6 +207,12 @@ export class ContextMemory {
     this.pendingToolResultIds = new Set(snapshot.pendingToolResultIds);
     this.deferredMessages = [...snapshot.deferredMessages];
     this._messageEdits = new Map(snapshot.messageEdits ?? []);
+    // Rebuild the delivered-notification marks the snapshot carries (see the
+    // field comment). The replay path also re-marks every notification message
+    // still present in the restored history, so the two sources are unioned.
+    this.agent.background.restoreDeliveredNotificationKeys(
+      snapshot.deliveredNotificationKeys ?? [],
+    );
     // Legacy wires predate message ids: synthesize them deterministically in
     // history order so persisted edits (and future ones) keep resolving.
     for (const message of this._history) this.assignMessageId(message);

@@ -230,6 +230,29 @@ export class BackgroundManager extends BackgroundProcessManager {
     this.deliveredNotificationKeys.add(notificationKey(origin));
   }
 
+  /**
+   * Export the delivered-notification keys for wire persistence. A full
+   * compaction folds the notification messages these marks were derived from
+   * into its summary, and the folded `context.append_message` records never
+   * replay — the `context.snapshot` payload is therefore the only place a
+   * resume can recover the marks from (see
+   * `ContextMemoryJSONSnapshot.deliveredNotificationKeys`). Losing them makes
+   * reconcile re-deliver notifications the session already saw.
+   */
+  exportDeliveredNotificationKeys(): readonly string[] {
+    return [...this.deliveredNotificationKeys];
+  }
+
+  /**
+   * Rebuild delivered marks from a restored snapshot. Additive on purpose:
+   * replay separately re-marks every notification message still present in
+   * the restored history, and a key from either source suppresses re-delivery
+   * — only a notification neither source knows about is appended by reconcile.
+   */
+  restoreDeliveredNotificationKeys(keys: readonly string[]): void {
+    for (const key of keys) this.deliveredNotificationKeys.add(key);
+  }
+
   private hasDeliveredNotification(origin: BackgroundTaskOrigin): boolean {
     return this.deliveredNotificationKeys.has(notificationKey(origin));
   }
