@@ -14,12 +14,18 @@ function stubHost(
   status: SubagentMessageStatus = 'accepted',
   delivery?: 'mid-run' | 'queued' | 'interjected',
   duplicate?: boolean,
+  extra?: {
+    messageId?: string;
+    downgrade?: 'structured' | 'idle' | 'steer-buffer-full';
+    reason?: 'bytes' | 'queue';
+  },
 ): SessionSubagentHost {
   return {
     sendMessage: vi.fn((_to: string, _op: 'queue' | 'steer' | 'interject', _text: string) => ({
       status,
       delivery,
       duplicate,
+      ...extra,
     })),
   } as unknown as SessionSubagentHost;
 }
@@ -75,10 +81,14 @@ describe('SendSubagentMessageTool', () => {
     });
     expect(queuedResult.output).toContain('queued');
     expect(queuedResult.output).toContain('next turn');
+    // The queued receipt has to state the delivery window, or "accepted" reads
+    // as "will be delivered eventually no matter what".
+    expect(queuedResult.output).toContain('in-session');
+    expect(queuedResult.output).toContain('expires 5 minutes');
   });
 
   it('says when a message was a duplicate', async () => {
-    const host = stubHost('accepted', undefined, true);
+    const host = stubHost('accepted', undefined, true, { messageId: 'main:agent-123:7' });
     const result = await runTool(host, {
       agent_id: 'agent-123',
       operation: 'steer',
@@ -86,6 +96,51 @@ describe('SendSubagentMessageTool', () => {
     });
     expect(result.isError).toBe(false);
     expect(result.output).toContain('Duplicate of a message already in flight');
+    // Without the id the parent cannot reconcile its retry with the copy it
+    // duplicated.
+    expect(result.output).toContain('(id: main:agent-123:7)');
+  });
+
+  it('says why an interject was downgraded instead of interrupting', async () => {
+    const structured = stubHost('accepted', 'queued', false, { downgrade: 'structured' });
+    const structuredResult = await runTool(structured, {
+      agent_id: 'agent-123',
+      operation: 'interject',
+      message: 'stop now',
+    });
+    expect(structuredResult.output).toContain('downgraded');
+    expect(structuredResult.output).toContain('structured (JSON) answer');
+
+    const idle = stubHost('accepted', 'queued', false, { downgrade: 'idle' });
+    const idleResult = await runTool(idle, {
+      agent_id: 'agent-123',
+      operation: 'interject',
+      message: 'stop now',
+    });
+    expect(idleResult.output).toContain('no turn is running');
+  });
+
+  it('names the byte limit when a message is rejected for size', async () => {
+    const host = stubHost('saturated', undefined, false, { reason: 'bytes' });
+    const result = await runTool(host, {
+      agent_id: 'agent-123',
+      operation: 'queue',
+      message: 'x'.repeat(20),
+    });
+    expect(result.isError).toBe(true);
+    expect(result.output).toContain('16 KiB UTF-8 byte limit');
+  });
+
+  it('tells the parent how to recover when it is itself gone', async () => {
+    const host = stubHost('parent_gone');
+    const result = await runTool(host, {
+      agent_id: 'agent-123',
+      operation: 'queue',
+      message: 'hello',
+    });
+    expect(result.isError).toBe(true);
+    expect(result.output).toContain('no longer running');
+    expect(result.output).toContain('Resume that agent and send the message again');
   });
 
   it('reports an interjected message as immediately effective', async () => {
@@ -114,6 +169,19 @@ describe('SendSubagentMessageTool', () => {
     ).properties?.operation;
     expect(operation?.enum).toEqual(['queue', 'steer', 'interject']);
     expect(operation?.description).toContain('interject');
+  });
+
+  it('states the UTF-8 byte limit in the model-facing message schema', () => {
+    const tool = new SendSubagentMessageTool(stubHost());
+    const message = (
+      tool.parameters as {
+        properties?: { message?: { description?: string; maxLength?: number } };
+      }
+    ).properties?.message;
+    // A character cap (maxLength) cannot express a byte limit, so the
+    // description carries the real boundary the host enforces.
+    expect(message?.description).toContain('16 KiB of UTF-8 text');
+    expect(message?.maxLength).toBeUndefined();
   });
 
   it('reports non-accepted statuses as errors with the human message', async () => {

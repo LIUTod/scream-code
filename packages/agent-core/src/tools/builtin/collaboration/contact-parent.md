@@ -10,4 +10,6 @@ Include a `payload` with your work products (`artifacts`), proof (`evidence`), a
 
 Rate limit: up to 4 requests per turn; duplicate requests within a turn are merged. `accepted` means the request was delivered to the parent as a notification — the parent sees it at its next turn boundary. If the parent is blocked waiting on your run (a foreground Agent call) and it has background dispatch, the request moves you to the background so the parent can read it and reply while you keep running (without background dispatch on the parent's side it can only read it after your run finishes) — this never aborts you or discards work. Keep working while you wait; do not block on a reply. If the parent cannot help, it will tell you why via a message.
 
+A request that is not `accepted` was not delivered: `parent_gone` (the parent agent is no longer running in this session) or `not_active` means no reply can ever arrive — do not wait for one, finish your work and report the open question in your result.
+
 **Never guess your way through a blocker.** If you are stuck or unsure, contact the parent instead of inventing an answer.

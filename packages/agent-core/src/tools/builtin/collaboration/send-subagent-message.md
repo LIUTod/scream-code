@@ -22,7 +22,8 @@ information arrives, or to hand it a correction while it is still running.
   exec is interrupted through the same SIGINT route, the running statement is
   unwound and the kernel keeps its state (variables survive; a kernel that does
   not return to an idle prompt is restarted instead). An interject aimed at an
-  idle or structured-output subagent degrades to the steer/mailbox path.
+  idle or structured-output subagent degrades to the steer/mailbox path, and
+  the acknowledgement names the reason for the downgrade.
 
 ## Rules
 
@@ -37,6 +38,15 @@ information arrives, or to hand it a correction while it is still running.
 - The acknowledgement says which path the message took. "queued" means it has
   not reached the subagent yet; "interjected" means the in-flight batch was cut
   short.
+- Delivery is in-session and time-boxed. The mailbox lives in memory for this
+  session only: "accepted" (queued) promises delivery only if the subagent
+  reaches its next turn — or is resumed in this session — within the delivery
+  deadline (about 5 minutes); after that the message expires undelivered, and
+  nothing is persisted across a process restart. A subagent that already
+  finished is refused outright — resume it instead of messaging it.
+- Message size is capped at 16 KiB of UTF-8 text (about 5,400 Chinese
+  characters, since those take three bytes each); a longer message is rejected
+  rather than truncated.
 - Keep messages short and unambiguous. The subagent sees them as a
   `[parent_messages]` block — merged into its running turn at the next step
   boundary, or at the top of its next prompt when the message waited for a turn

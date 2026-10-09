@@ -12,10 +12,17 @@
  * agents poll their mailbox at the start of each turn; the bus itself has no
  * knowledge of agents, turns, or lifecycles — the host layer owns those checks.
  *
- * Delivery contract: an accepted message is delivered if its target polls the
- * mailbox before its deadline, and expires afterwards. Nothing else may discard
- * it — in particular a finished child's terminal must not purge the mailbox.
- * The parent has already been told `accepted`, and re-hydrating the child
+ * Delivery contract (in-session, time-boxed): an accepted message is delivered
+ * if its target polls the mailbox before its deadline, and expires afterwards.
+ * "Delivered" means it reached the target's next turn inside this session — the
+ * bus is memory-only, so nothing survives a process restart, and a message that
+ * is never polled is dropped at its deadline rather than persisted for later.
+ * The host reports those boundaries at the tool surface instead of promising
+ * more than this file can keep: a finished target is refused (`not_active`), a
+ * vanished parent is refused (`parent_gone`), and the accepted-queued receipt
+ * states the expiry window. Nothing else may discard an accepted message before
+ * then — in particular a finished child's terminal must not purge the mailbox:
+ * the parent has already been told `accepted`, and re-hydrating the child
  * (ensureAgent) rebuilds the agent, not this in-memory bus, so a terminal purge
  * would destroy a message that neither the parent nor a resume could recover.
  * Expired mail is reclaimed lazily on the next bus access (`reclaimExpired`),
@@ -26,15 +33,21 @@
 export type SubagentMessageOperation = 'queue' | 'steer';
 
 /** Delivery outcomes, collapsed from the reference's nine states to the six
- *  that are reachable in a per-session in-memory bus. `not_owned` is safety-
- *  critical and is produced by the host's ownership check, not the bus. */
+ *  that are reachable in a per-session in-memory bus. `not_owned` and
+ *  `parent_gone` are safety-critical and are produced by the host's
+ *  ownership/liveness checks, not the bus. There is deliberately no
+ *  `deadline_elapsed` status: both tool paths stamp the deadline when they
+ *  build the message (`Date.now() + SUBAGENT_MESSAGE_DEADLINE_MS`), so a send
+ *  can never observe an already-elapsed deadline; expiry is enforced where it
+ *  matters, by `poll`/`reclaimExpired`, and a message that expires undelivered
+ *  is reported as such by the accepted-queued receipt's time box. */
 export type SubagentMessageStatus =
   | 'accepted'
   | 'not_found'
   | 'not_owned'
   | 'not_active'
-  | 'saturated'
-  | 'deadline_elapsed';
+  | 'parent_gone'
+  | 'saturated';
 
 /** All caller-supplied fields of a message. `id`/`seq` are assigned by the
  *  bus on acceptance and are present only on the delivered SubagentMessage. */
@@ -111,14 +124,24 @@ export class SubagentMessageBus {
   /**
    * Queue a message for a subagent. Pure mailbox logic: ownership, liveness
    * and activity checks belong to the host. Returns the delivery status and,
-   * on acceptance, the queue depth seen by the recipient at poll time.
+   * on acceptance, the stable message id plus the queue depth seen by the
+   * recipient at poll time.
+   *
+   * The id is the reconciliation handle for a delivery: it is unique within
+   * this bus, never reissued (see `clear`), carried by the delivered message
+   * and returned here so the host can tie a retried send to the message it
+   * duplicates and can watch the message's consumption (`holdsMessage`).
    */
-  send(msg: SubagentMessageInput): { status: SubagentMessageStatus; reason?: 'bytes' | 'queue'; queueDepth?: number } {
+  send(msg: SubagentMessageInput): {
+    status: SubagentMessageStatus;
+    reason?: 'bytes' | 'queue';
+    queueDepth?: number;
+    messageId?: string;
+  } {
     const now = Date.now();
     // Reclaim before deciding: an expired message is not deliverable, so it
     // must not hold an in-flight slot and turn an honest send into `saturated`.
     this.reclaimExpired(now);
-    if (now > msg.deadline) return { status: 'deadline_elapsed' };
     if (byteLength(msg.text) > msg.byteLimit) return { status: 'saturated', reason: 'bytes' };
 
     let mailbox = this.mailboxes.get(msg.toAgentId);
@@ -134,7 +157,7 @@ export class SubagentMessageBus {
       seq: ++this.nextSeq,
     };
     mailbox.queue.push(message);
-    return { status: 'accepted', queueDepth: mailbox.queue.length };
+    return { status: 'accepted', queueDepth: mailbox.queue.length, messageId: message.id };
   }
 
   /**
@@ -146,11 +169,26 @@ export class SubagentMessageBus {
     this.mailboxes.clear();
   }
 
-  /** Mailbox entries currently pinned in memory (diagnostics / assertions).
-   *  Reading does not reclaim: an entry whose mail has all expired is freed by
-   *  the next send/activeCount/poll, not by this getter. */
+  /** How many mailboxes currently hold undelivered mail (diagnostics). */
   get mailboxCount(): number {
     return this.mailboxes.size;
+  }
+
+  /**
+   * Whether the message with this id is still queued and deliverable — the
+   * consumption check behind the host's parent→child dedupe: while this
+   * returns true a retried send is a duplicate, and once it returns false the
+   * message has been delivered (or expired) and the retry must go through.
+   * Ordinary bus access: expired mail is reclaimed first, so an expired
+   * message reads as no longer in flight, which is exactly right — it will
+   * never reach the child.
+   */
+  holdsMessage(id: string): boolean {
+    this.reclaimExpired(Date.now());
+    for (const mailbox of this.mailboxes.values()) {
+      if (mailbox.queue.some((message) => message.id === id)) return true;
+    }
+    return false;
   }
 
   /**

@@ -12,7 +12,6 @@ const DEFAULT_HOOK_TIMEOUT_SECONDS = 30;
 
 export class HookEngine {
   private readonly byEvent = new Map<string, HookDef[]>();
-  private readonly pendingTriggers = new Set<Promise<HookResult[]>>();
 
   constructor(
     hooks: readonly HookDef[] = [],
@@ -86,21 +85,28 @@ export class HookEngine {
     return blockDecision(event, await this.trigger(event, args));
   }
 
+  /**
+   * Fire an event without making the caller wait for it. The returned promise
+   * is still awaitable by a caller that wants the results, and every failure
+   * path (synchronous throw included) resolves to `[]` so a caller that drops
+   * it can never produce an unhandled rejection.
+   *
+   * The engine keeps no bookkeeping of its own: there is no drain point for
+   * in-flight fire-and-forget work (no engine lifecycle owner — the engine is
+   * constructed per agent and never awaits a shutdown), so tracking the
+   * promises here would be write-only state that only pins memory. The
+   * per-hook timeout in `runHook` bounds the work itself, and the returned
+   * promise is the handle for a caller that does want to await it.
+   */
   fireAndForgetTrigger(
     event: string,
     args: HookEngineTriggerArgs = {},
   ): Promise<HookResult[]> {
-    let promise: Promise<HookResult[]>;
     try {
-      promise = this.trigger(event, args).catch((): HookResult[] => []);
+      return this.trigger(event, args).catch((): HookResult[] => []);
     } catch {
-      promise = Promise.resolve([]);
+      return Promise.resolve([]);
     }
-    this.pendingTriggers.add(promise);
-    void promise.finally(() => {
-      this.pendingTriggers.delete(promise);
-    });
-    return promise;
   }
 
   private async triggerInner(

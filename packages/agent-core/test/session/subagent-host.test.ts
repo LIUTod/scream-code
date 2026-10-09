@@ -311,6 +311,96 @@ describe('SessionSubagentHost', () => {
     );
   });
 
+  it('fires SubagentStop when the child run fails', async () => {
+    const fireAndForgetTrigger = vi.fn(() => Promise.resolve([]));
+    const parent = testAgent({
+      hookEngine: {
+        trigger: vi.fn(async () => []),
+        fireAndForgetTrigger,
+      } as unknown as NonNullable<Agent['hooks']>,
+    });
+    parent.configure();
+    parent.newEvents();
+
+    const child = testAgent();
+    // Truncated response: the run fails before a summary exists.
+    child.mockNextProviderResponse({
+      parts: [
+        { type: 'think', think: 'The child used its output budget before writing a summary.' },
+        { type: 'text', text: 'partial answer' },
+      ],
+      finishReason: 'truncated',
+      rawFinishReason: 'length',
+    });
+    const session = fakeSession(parent.agent, child.agent, {
+      'agent-0': {
+        homedir: '/tmp/scream-session/agents/agent-0',
+        type: 'sub',
+        parentAgentId: 'main',
+      },
+    });
+    const host = new SessionSubagentHost(session, 'main');
+
+    const handle = await host.spawn('coder', {
+      parentToolCallId: 'call_agent',
+      prompt: 'Implement the fix',
+      description: 'Fix bug',
+      runInBackground: false,
+      signal,
+    });
+    await expect(handle.completion).rejects.toThrow('reason=max_tokens');
+
+    // Failure is a terminal state too: a hook that mirrors child runs
+    // (metrics, cleanup) must see it, with the error attached.
+    expect(fireAndForgetTrigger).toHaveBeenCalledWith('SubagentStop', {
+      matcherValue: 'coder',
+      inputData: {
+        agentName: 'coder',
+        response: 'partial answer',
+        error: expect.stringContaining('reason=max_tokens'),
+      },
+    });
+  });
+
+  it('fires SubagentStop when the child run is cancelled', async () => {
+    const fireAndForgetTrigger = vi.fn(() => Promise.resolve([]));
+    const parent = testAgent({
+      hookEngine: {
+        trigger: vi.fn(async () => []),
+        fireAndForgetTrigger,
+      } as unknown as NonNullable<Agent['hooks']>,
+    });
+    parent.configure();
+    parent.newEvents();
+
+    const child = testAgent();
+    child.mockNextResponse({ type: 'text', text: 'I will run Bash.' }, bashCall());
+    const session = fakeSession(parent.agent, child.agent);
+    const host = new SessionSubagentHost(session, 'main');
+
+    const handle = await host.spawn('explore', {
+      parentToolCallId: 'call_agent',
+      prompt: 'Keep working',
+      description: 'Long task',
+      runInBackground: false,
+      signal,
+    });
+    await child.untilApprovalRequest();
+    host.cancelAll();
+    await expect(handle.completion).rejects.toThrow('Aborted');
+
+    // Cancellation is not a silent early exit: the stop notification fires
+    // with the failure that ended the run.
+    expect(fireAndForgetTrigger).toHaveBeenCalledWith('SubagentStop', {
+      matcherValue: 'explore',
+      inputData: {
+        agentName: 'explore',
+        response: 'I will run Bash.',
+        error: expect.stringContaining('Aborted'),
+      },
+    });
+  });
+
   it('aggregates subagent usage into the parent session totals', async () => {
     const parent = testAgent();
     parent.configure();
@@ -451,6 +541,199 @@ describe('SessionSubagentHost', () => {
       .toBe(childAfterResume.output - childBeforeResume.output);
   });
 
+  it('does not re-fold a re-hydrated history when the resumed instance replays it', async () => {
+    const parent = testAgent();
+    parent.configure();
+    parent.agent.permission.setMode('yolo');
+    parent.newEvents();
+    await parent.rpc.setPermission({ mode: 'yolo' });
+
+    // First run: this instance records the usage that gets folded into the
+    // parent at the end of the run.
+    const child = testAgent({
+      type: 'sub',
+      permission: { parent: parent.agent.permission },
+    });
+    child.configure({ tools: ['Read'] });
+    child.agent.useProfile(
+      profile({ name: 'explore', tools: ['Read'], systemPrompt: 'explore prompt' }),
+    );
+    child.agent.context.appendUserMessage([{ type: 'text', text: 'Earlier context' }]);
+    child.mockNextResponse({
+      type: 'text',
+      text: 'Explored the earlier context and completed the requested investigation with a complete technical summary so the parent can continue without repeating any of the work described here in detail. No files were modified during the investigation.',
+    });
+    child.agent.usage.record(
+      'seed-model',
+      { inputOther: 100, output: 20, inputCacheRead: 0, inputCacheCreation: 0 },
+      'turn',
+    );
+
+    const session = fakeSession(parent.agent, child.agent, {
+      'agent-0': {
+        homedir: '/tmp/scream-session/agents/agent-0',
+        type: 'sub',
+        parentAgentId: 'main',
+      },
+    });
+    const host = new SessionSubagentHost(session, 'main');
+
+    const first = await host.resume('agent-0', {
+      parentToolCallId: 'call_agent',
+      prompt: 'Continue from context',
+      description: 'Continue work',
+      runInBackground: false,
+      signal,
+    });
+    await first.completion;
+    const parentAfterFirst = parent.agent.usage.data().total ?? zeroUsage();
+    expect(parentAfterFirst.inputOther).toBeGreaterThanOrEqual(100);
+    // What that fold saw: the child's cumulative total at eviction, which the
+    // wire replay below has to reproduce exactly.
+    const foldedByModel = child.agent.usage.data().byModel ?? {};
+
+    // The finished child was evicted, and the next resume re-hydrates a NEW
+    // Agent instance from the persisted wire. Replaying the usage records
+    // restores the child's whole cumulative total on that instance
+    // (records/index.ts `usage.record`), including the amount already folded.
+    const rehydrated = testAgent({
+      type: 'sub',
+      agentId: 'agent-0',
+      permission: { parent: parent.agent.permission },
+    });
+    rehydrated.configure({ tools: ['Read'] });
+    rehydrated.agent.useProfile(
+      profile({ name: 'explore', tools: ['Read'], systemPrompt: 'explore prompt' }),
+    );
+    rehydrated.agent.context.appendUserMessage([{ type: 'text', text: 'Earlier context' }]);
+    for (const [model, usage] of Object.entries(foldedByModel)) {
+      rehydrated.agent.usage.record(model, usage, 'turn');
+    }
+    rehydrated.mockNextResponse({
+      type: 'text',
+      text: 'Resumed the subagent from its replayed context and carried the task through to completion, then reported a full and detailed technical summary so the parent agent can continue without repeating prior work.',
+    });
+    (session as unknown as { ensureAgent(id: string): Promise<Agent> }).ensureAgent = async (
+      id: string,
+    ) => {
+      session.agents.set(id, rehydrated.agent);
+      return rehydrated.agent;
+    };
+
+    const childBeforeResume = rehydrated.agent.usage.data().total ?? zeroUsage();
+    rehydrated.agent.usage.record(
+      'seed-model',
+      { inputOther: 30, output: 10, inputCacheRead: 0, inputCacheCreation: 0 },
+      'turn',
+    );
+    const resumed = await host.resume('agent-0', {
+      parentToolCallId: 'call_agent2',
+      prompt: 'Continue again',
+      description: 'Continue work',
+      runInBackground: false,
+      signal,
+    });
+    await resumed.completion;
+
+    // Only the resumed instance's newly accrued usage may reach the parent:
+    // the replayed history was already folded by the first run, and the
+    // ledger keyed by the stable child id is what makes the delta right.
+    const parentAfterResume = parent.agent.usage.data().total ?? zeroUsage();
+    const childAfterResume = rehydrated.agent.usage.data().total ?? zeroUsage();
+    expect(parentAfterResume.inputOther - parentAfterFirst.inputOther)
+      .toBe(childAfterResume.inputOther - childBeforeResume.inputOther);
+    expect(parentAfterResume.output - parentAfterFirst.output)
+      .toBe(childAfterResume.output - childBeforeResume.output);
+  });
+
+  it('rolls a grandchild usage up to the nearest resident ancestor after the middle layer finished', async () => {
+    const root = testAgent();
+    root.configure();
+    root.newEvents();
+    await root.rpc.setPermission({ mode: 'yolo' });
+
+    // The middle layer (agent-0) starts the grandchild's resumed run, then
+    // reaches its own terminal state and is evicted while the grandchild is
+    // still parked mid-turn.
+    const middle = testAgent({
+      type: 'sub',
+      agentId: 'agent-0',
+      permission: { parent: root.agent.permission },
+    });
+    const grandchild = testAgent({
+      type: 'sub',
+      agentId: 'agent-1',
+      permission: { parent: root.agent.permission },
+    });
+    grandchild.configure({ tools: ['Read', 'Bash'] });
+    await grandchild.rpc.setPermission({ mode: 'yolo' });
+    // The synthetic profile mounts Bash too: the turn has to park inside a
+    // gated command so the middle layer can be evicted mid-run.
+    grandchild.agent.useProfile(
+      profile({ name: 'explore', tools: ['Read', 'Bash'], systemPrompt: 'explore prompt' }),
+    );
+
+    const gate = drainGate();
+    grandchild.mockNextResponse({
+      type: 'function',
+      id: 'tc_bash',
+      name: 'Bash',
+      arguments: JSON.stringify({ command: gate.command, timeout: 60 }),
+    });
+    grandchild.mockNextResponse({
+      type: 'text',
+      text: 'Finished the grandchild task with a complete implementation and verification summary that gives the parent agent everything it needs to continue without repeating any work. The verification steps and their outcomes are recorded in this summary.',
+    });
+    // Usage accrued after the middle layer's own totals were already folded.
+    grandchild.agent.usage.record(
+      'seed-model',
+      { inputOther: 40, output: 8, inputCacheRead: 0, inputCacheCreation: 0 },
+      'turn',
+    );
+
+    const session = fakeSession(root.agent, middle.agent, {
+      'agent-0': {
+        homedir: '/tmp/scream-session/agents/agent-0',
+        type: 'sub',
+        parentAgentId: 'main',
+      },
+      'agent-1': {
+        homedir: '/tmp/scream-session/agents/agent-1',
+        type: 'sub',
+        parentAgentId: 'agent-0',
+      },
+    });
+    session.agents.set('agent-1', grandchild.agent);
+    const rootBefore = root.agent.usage.data().total ?? zeroUsage();
+
+    const middleHost = new SessionSubagentHost(session, 'agent-0');
+    const handle = await middleHost.resume('agent-1', {
+      parentToolCallId: 'call_1',
+      prompt: 'Continue',
+      description: 'Continue grandchild',
+      runInBackground: false,
+      signal,
+    });
+    await gate.waitForStart();
+    // The middle layer finishes and is evicted from the session: its recorder
+    // is no longer read by anyone.
+    session.agents.delete('agent-0');
+    gate.release();
+    await handle.completion;
+    gate.cleanup();
+
+    const grandchildTotal = grandchild.agent.usage.data().total ?? zeroUsage();
+    const rootAfter = root.agent.usage.data().total ?? zeroUsage();
+    expect(grandchildTotal.inputOther).toBeGreaterThanOrEqual(40);
+    // The whole amount lands on the session-visible root, not only on the
+    // evicted middle layer's recorder (where nobody would ever read it).
+    expect(rootAfter.inputOther).toBe(rootBefore.inputOther + grandchildTotal.inputOther);
+    expect(rootAfter.output).toBe(rootBefore.output + grandchildTotal.output);
+    const middleTotal = middle.agent.usage.data().total ?? zeroUsage();
+    expect(middleTotal.inputOther).toBe(0);
+    expect(middleTotal.output).toBe(0);
+  });
+
   it('runs a child agent turn and returns the last assistant text', async () => {
     const parent = testAgent();
     parent.configure();
@@ -579,6 +862,60 @@ describe('SessionSubagentHost', () => {
     // No mail was ever queued for this child, so its mailbox never existed —
     // the terminal evicts the live instance, not a message queue.
     expect(bus.mailboxCount).toBe(0);
+  });
+
+  it('latches a child manager at eviction so a parked task cannot wake the dead run', async () => {
+    const parent = testAgent();
+    parent.configure();
+    await parent.rpc.setPermission({ mode: 'yolo' });
+
+    const child = testAgent({
+      type: 'sub',
+      permission: { parent: parent.agent.permission },
+    });
+    const summary =
+      'Finished the child task completely and returned a detailed enough technical summary for the parent agent to continue confidently without repeating the work already done. '.repeat(
+        2,
+      );
+    child.mockNextResponse({ type: 'text', text: summary });
+    const session = fakeSession(parent.agent, child.agent);
+    const host = new SessionSubagentHost(session, 'main');
+
+    // The foreground-Bash-timeout shape: a command parked in the child's own
+    // manager outlives the tool call that started it.
+    let resolveParked!: (value: { exitCode: number }) => void;
+    const parkedCompletion = new Promise<{ exitCode: number }>((resolve) => {
+      resolveParked = resolve;
+    });
+    const parkedId = child.agent.background.parkForegroundProcess(
+      parkedCompletion,
+      'sleep 60',
+      'parked command',
+      { kill: async () => {}, initialOutput: 'so far\n' },
+    );
+
+    const handle = await host.spawn('explore', {
+      parentToolCallId: 'call_agent',
+      prompt: 'Investigate',
+      description: 'Investigate',
+      runInBackground: false,
+      signal,
+    });
+    await handle.completion;
+    // The child ends and is evicted while its parked task is still running.
+    expect(session.agents.has(handle.agentId)).toBe(false);
+
+    const steer = vi.spyOn(child.agent.turn, 'steer');
+    resolveParked({ exitCode: 0 });
+    const settled = await child.agent.background.waitForTerminal(parkedId);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    // The task itself still settles — only the notification is dropped.
+    expect(settled?.status).toBe('completed');
+    // No ghost turn: the eviction latched the manager, so the terminal
+    // notification never reaches the evicted agent's turn.
+    expect(steer).not.toHaveBeenCalled();
+    expect(child.agent.turn.hasActiveTurn).toBe(false);
   });
 
   it('keeps a message accepted during the run when the child ends undelivered', async () => {
@@ -1412,6 +1749,84 @@ describe('SessionSubagentHost', () => {
         }),
       }),
     );
+    // The finished child is evicted from session.agents, but its profile must
+    // still be reportable: the Agent tool validates the parent's spawn
+    // whitelist through this lookup before it ever reaches resume.
+    expect(session.agents.has('agent-0')).toBe(false);
+    expect(host.getProfileName('agent-0')).toBe('explore');
+  });
+
+  it("enforces the parent profile's spawns whitelist when resuming an evicted child", async () => {
+    const parent = testAgent();
+    parent.configure();
+    parent.agent.permission.setMode('yolo');
+
+    const summary =
+      'Resumed the subagent from its earlier context and carried the task through to completion, then reported a full and detailed technical summary so the parent agent can continue without repeating prior work.';
+    // A child whose profile is NOT whitelisted, and one whose profile is.
+    const denied = testAgent({ type: 'sub', permission: { parent: parent.agent.permission } });
+    denied.configure({ tools: ['Read'] });
+    denied.agent.useProfile(
+      profile({ name: 'coder', tools: ['Read'], systemPrompt: 'coder prompt' }),
+    );
+    denied.agent.context.appendUserMessage([{ type: 'text', text: 'Earlier context' }]);
+    denied.mockNextResponse({ type: 'text', text: summary });
+
+    const allowed = testAgent({ type: 'sub', permission: { parent: parent.agent.permission } });
+    allowed.configure({ tools: ['Read'] });
+    allowed.agent.useProfile(
+      profile({ name: 'explore', tools: ['Read'], systemPrompt: 'explore prompt' }),
+    );
+    allowed.agent.context.appendUserMessage([{ type: 'text', text: 'Earlier context' }]);
+    allowed.mockNextResponse({ type: 'text', text: summary });
+
+    const session = fakeSession(parent.agent, denied.agent, {
+      'agent-0': {
+        homedir: '/tmp/scream-session/agents/agent-0',
+        type: 'sub',
+        parentAgentId: 'main',
+      },
+      'agent-1': {
+        homedir: '/tmp/scream-session/agents/agent-1',
+        type: 'sub',
+        parentAgentId: 'main',
+      },
+    });
+    session.agents.set('agent-1', allowed.agent);
+    const host = new SessionSubagentHost(session, 'main');
+
+    // From here on the parent profile only permits `explore` children
+    // (default/plan.yaml `spawns: [explore]`) — the same source of truth the
+    // Agent tool derives its allowedSpawns from.
+    parent.agent.useProfile(
+      profile({ name: 'plan', tools: ['Read'], systemPrompt: 'plan prompt' }),
+    );
+
+    await expect(
+      host.resume('agent-0', {
+        parentToolCallId: 'call_agent',
+        prompt: 'Continue',
+        description: 'Continue work',
+        runInBackground: false,
+        signal,
+      }),
+    ).rejects.toThrow(/is not in the parent profile's spawn whitelist/);
+    // Rejected before any run state was registered.
+    expect(
+      (host as unknown as { activeChildren: Map<string, unknown> }).activeChildren.size,
+    ).toBe(0);
+
+    // The whitelisted profile still resumes normally.
+    const handle = await host.resume('agent-1', {
+      parentToolCallId: 'call_agent_2',
+      prompt: 'Continue',
+      description: 'Continue work',
+      runInBackground: false,
+      signal,
+    });
+    expect(handle.profileName).toBe('explore');
+    await handle.completion;
+    expect(host.getProfileName('agent-1')).toBe('explore');
   });
 
   it('realigns a resumed subagent to the parent agent current model', async () => {
@@ -2019,6 +2434,9 @@ describe('SessionSubagentHost interject', () => {
     const sent = host.sendMessage('agent-0', 'interject', 'wait for my details first');
     expect(sent.status).toBe('accepted');
     expect(sent.delivery).toBe('queued');
+    // The caller asked for an interrupt; the receipt has to say that no batch
+    // existed to interrupt rather than reporting a downgrade silently.
+    expect(sent.downgrade).toBe('idle');
     expect(bus.activeCount('agent-0')).toBe(1);
 
     releaseStart();
@@ -2076,6 +2494,7 @@ describe('SessionSubagentHost interject', () => {
     // Conservative first-release rule: the interrupt never fires for a child
     // whose final answer must stay machine-parseable.
     expect(steerSpy).not.toHaveBeenCalled();
+    expect(sent.downgrade).toBe('structured');
 
     gate.release();
     const handle = await spawnPromise;

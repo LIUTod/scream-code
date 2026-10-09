@@ -31,11 +31,21 @@ describe('SubagentMessageBus', () => {
     const bus = new SubagentMessageBus();
     const a = msg(bus, 'child-a', 'queue', 'first', { inFlightLimit: 10 });
     const b = msg(bus, 'child-a', 'queue', 'second', { inFlightLimit: 10 });
-    expect(a).toEqual({ status: 'accepted', queueDepth: 1 });
-    expect(b).toEqual({ status: 'accepted', queueDepth: 2 });
+    expect(a).toMatchObject({ status: 'accepted', queueDepth: 1 });
+    expect(b).toMatchObject({ status: 'accepted', queueDepth: 2 });
     expect(bus.activeCount('child-a')).toBe(2);
     expect(bus.poll('child-a').map((m) => m.text)).toEqual(['first', 'second']);
     expect(bus.activeCount('child-a')).toBe(0);
+  });
+
+  it('reports the stable id of an accepted message to its sender', () => {
+    const bus = new SubagentMessageBus();
+    const accepted = msg(bus, 'child-a', 'queue', 'hello', { inFlightLimit: 10 });
+    const delivered = bus.poll('child-a')[0]!;
+    // The id the sender was handed is the id the child receives: that is what
+    // makes retries reconcilable (a duplicate can be tied to this copy).
+    expect(accepted.messageId).toBe(delivered.id);
+    expect(accepted.messageId).toEqual(expect.any(String));
   });
 
   it('delivers steer messages before queue messages regardless of arrival order', () => {
@@ -48,7 +58,7 @@ describe('SubagentMessageBus', () => {
 
   it('saturates when the in-flight limit is reached', () => {
     const bus = new SubagentMessageBus();
-    expect(msg(bus, 'child-a', 'queue', 'x', { inFlightLimit: 1 })).toEqual({
+    expect(msg(bus, 'child-a', 'queue', 'x', { inFlightLimit: 1 })).toMatchObject({
       status: 'accepted',
       queueDepth: 1,
     });
@@ -71,12 +81,42 @@ describe('SubagentMessageBus', () => {
     );
   });
 
-  it('rejects expired messages as deadline_elapsed without enqueueing', () => {
+  it('never delivers a message whose deadline is already past', () => {
     const bus = new SubagentMessageBus();
-    expect(msg(bus, 'child-a', 'queue', 'late', { deadline: NOW - 1 }).status).toBe(
-      'deadline_elapsed',
-    );
+    // There is deliberately no send-time `deadline_elapsed` status: callers
+    // stamp the deadline when they build the message, so the only thing a past
+    // deadline can mean is "undeliverable", which poll/reclaim enforces.
+    const late = msg(bus, 'child-a', 'queue', 'late', { deadline: NOW - 1 });
+    expect(late.status).toBe('accepted');
+    expect(bus.holdsMessage(late.messageId!)).toBe(false);
     expect(bus.activeCount('child-a')).toBe(0);
+    expect(bus.poll('child-a')).toEqual([]);
+  });
+
+  it('reports whether an accepted message is still queued', () => {
+    const bus = new SubagentMessageBus();
+    const accepted = msg(bus, 'child-a', 'queue', 'first', { inFlightLimit: 10 });
+    // In flight: a retried send is a duplicate of this copy.
+    expect(bus.holdsMessage(accepted.messageId!)).toBe(true);
+    expect(bus.poll('child-a')).toHaveLength(1);
+    // Consumed: the copy is gone, so the retry has to go through.
+    expect(bus.holdsMessage(accepted.messageId!)).toBe(false);
+    expect(bus.holdsMessage('never-issued')).toBe(false);
+  });
+
+  it('reports an expired message as no longer in flight', () => {
+    vi.useFakeTimers();
+    try {
+      const bus = new SubagentMessageBus();
+      const accepted = msg(bus, 'child-a', 'queue', 'x', { deadline: NOW + 1000 });
+      expect(bus.holdsMessage(accepted.messageId!)).toBe(true);
+      vi.setSystemTime(NOW + 1001);
+      // The check is an ordinary bus access: an undeliverable copy cannot keep
+      // a retry deduped against a message that will never arrive.
+      expect(bus.holdsMessage(accepted.messageId!)).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('gives queued mail a deadline that outlasts a real child turn', () => {

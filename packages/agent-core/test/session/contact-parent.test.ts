@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { testAgent } from '../agent/harness/agent';
 import { SessionSubagentHost } from '../../src/session/subagent-host';
 import { SubagentMessageBus } from '../../src/session/subagent-messages';
+import { ContactParentTool } from '../../src/tools/builtin/collaboration/contact-parent';
 import type { Agent } from '../../src/agent';
 import type { ResolvedAgentProfile } from '../../src/profile';
 import type { Session } from '../../src/session';
@@ -313,6 +314,80 @@ describe('child→parent collaboration (ContactParent)', () => {
     // A rejected request must not background the child: there is nothing for
     // the parent to answer.
     expect(woke).toBe(false);
+    host.releaseChildRequestWait('agent-0');
+  });
+
+  it('rejects a request when the parent agent is gone, without waking or spending budget', async () => {
+    const child = testAgent({ type: 'sub' });
+    const parent = testAgent();
+    parent.configure();
+    child.configure();
+    const session = fakeSession(parent.agent, child.agent);
+    const bus = new SubagentMessageBus();
+    const host = new SessionSubagentHost(session, 'main', undefined, undefined, bus);
+    const internals = host as unknown as {
+      activeChildren: Map<string, unknown>;
+      childIdByAgent: WeakMap<Agent, string>;
+      childRequestCounts: Map<string, number>;
+      childRequestSeen: Map<string, Set<string>>;
+    };
+    internals.activeChildren = new Map([['agent-0', {}]]);
+    internals.childIdByAgent.set(child.agent, 'agent-0');
+
+    const wake = host.waitForChildRequest('agent-0');
+    let woke = false;
+    void wake.then(() => {
+      woke = true;
+    });
+
+    // The parent was evicted: the request cannot be delivered to anyone.
+    session.agents.delete('main');
+    const request = { request_type: 'info' as const, message: 'need context' };
+    expect(host.submitChildRequest(child.agent, request).status).toBe('parent_gone');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    // No half-state: the foreground wait is not called off for a request that
+    // was never delivered, and the per-turn bookkeeping was never touched, so
+    // the same request is not a "duplicate" of an undelivered one.
+    expect(woke).toBe(false);
+    expect(internals.childRequestCounts.has('agent-0')).toBe(false);
+    expect(internals.childRequestSeen.has('agent-0')).toBe(false);
+    expect(
+      host.submitChildRequest(child.agent, request).status,
+    ).toBe('parent_gone');
+    host.releaseChildRequestWait('agent-0');
+  });
+
+  it('tells the child not to wait when the parent is gone', async () => {
+    const child = testAgent({ type: 'sub' });
+    const parent = testAgent();
+    parent.configure();
+    child.configure();
+    const session = fakeSession(parent.agent, child.agent);
+    const bus = new SubagentMessageBus();
+    const host = new SessionSubagentHost(session, 'main', undefined, undefined, bus);
+    const internals = host as unknown as {
+      activeChildren: Map<string, unknown>;
+      childIdByAgent: WeakMap<Agent, string>;
+    };
+    internals.activeChildren = new Map([['agent-0', {}]]);
+    internals.childIdByAgent.set(child.agent, 'agent-0');
+    session.agents.delete('main');
+
+    const tool = new ContactParentTool(host, () => child.agent);
+    const execution = tool.resolveExecution({
+      request_type: 'info',
+      message: 'need context',
+    });
+    if (!('execute' in execution)) throw new Error('expected an executable tool');
+    const result = (await execution.execute({
+      turnId: 't1',
+      toolCallId: 'call_1',
+      signal: new AbortController().signal,
+    })) as { isError?: boolean; output: string };
+    // The child must not read a transport-level failure as "wait longer".
+    expect(result.isError).toBe(true);
+    expect(result.output).toContain('parent agent is no longer running');
+    expect(result.output).toContain('Do not wait');
     host.releaseChildRequestWait('agent-0');
   });
 });

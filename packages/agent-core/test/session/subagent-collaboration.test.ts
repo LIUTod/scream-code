@@ -209,6 +209,61 @@ describe('subagent collaboration integration', () => {
     expect(host.sendMessage('agent-0', 'steer', 'reconsider the approach').duplicate).not.toBe(true);
   });
 
+  it('releases the dedupe key once the queued copy has been consumed', () => {
+    const child = testAgent();
+    const parent = testAgent();
+    parent.configure();
+    child.configure();
+
+    const session = fakeSession(parent.agent, child.agent, {
+      'agent-0': { homedir: '/tmp/x', type: 'sub', parentAgentId: 'main' },
+    });
+    const bus = new SubagentMessageBus();
+    const host = new SessionSubagentHost(session, 'main', undefined, undefined, bus);
+    (host as unknown as { activeChildren: Map<string, unknown> }).activeChildren = new Map([
+      ['agent-0', { controller: new AbortController(), runInBackground: false, structured: false }],
+    ]);
+
+    const first = host.sendMessage('agent-0', 'queue', 'reconsider the approach');
+    expect(first.status).toBe('accepted');
+    expect(first.messageId).toEqual(expect.any(String));
+    // While the copy waits in the mailbox, a retry is honestly a duplicate, and
+    // the receipt names the copy it duplicates (stable id, not a fresh one).
+    const retry = host.sendMessage('agent-0', 'queue', 'reconsider the approach');
+    expect(retry.duplicate).toBe(true);
+    expect(retry.messageId).toBe(first.messageId);
+
+    // The child's next turn start polls the mailbox: the copy has been consumed,
+    // so the key must not swallow a fresh instruction reusing the same words.
+    expect(bus.poll('agent-0')).toHaveLength(1);
+    const resend = host.sendMessage('agent-0', 'queue', 'reconsider the approach');
+    expect(resend.status).toBe('accepted');
+    expect(resend.duplicate).not.toBe(true);
+    expect(resend.messageId).not.toBe(first.messageId);
+  });
+
+  it('refuses to message when the sending parent is no longer resident', () => {
+    const child = testAgent();
+    const parent = testAgent();
+    parent.configure();
+    child.configure();
+
+    const session = fakeSession(parent.agent, child.agent, {
+      'agent-0': { homedir: '/tmp/x', type: 'sub', parentAgentId: 'main' },
+    });
+    const bus = new SubagentMessageBus();
+    const host = new SessionSubagentHost(session, 'main', undefined, undefined, bus);
+    (host as unknown as { activeChildren: Map<string, unknown> }).activeChildren = new Map([
+      ['agent-0', { controller: new AbortController(), runInBackground: false, structured: false }],
+    ]);
+
+    // The owner host outlived its agent: accepting mail here would acknowledge
+    // a delivery whose owner can never observe it.
+    session.agents.delete('main');
+    expect(host.sendMessage('agent-0', 'queue', 'x')).toEqual({ status: 'parent_gone' });
+    expect(bus.activeCount('agent-0')).toBe(0);
+  });
+
   it('does not poison the dedupe key when the mailbox refuses the send', () => {
     const child = testAgent();
     const parent = testAgent();
@@ -406,7 +461,16 @@ describe('subagent collaboration integration', () => {
     const sent = host.sendMessage('agent-0', 'steer', 'one more');
     expect(sent.status).toBe('accepted');
     expect(sent.delivery).toBe('queued');
-    expect(bus.activeCount('agent-0')).toBe(1);
+    // A steer falling back to the mailbox is documented behavior, not a
+    // downgrade...
+    expect(sent.downgrade).toBeUndefined();
+    // ...but an interject asked for an interrupt it could not deliver, so the
+    // result has to name the reason.
+    const interjected = host.sendMessage('agent-0', 'interject', 'and another thing');
+    expect(interjected.status).toBe('accepted');
+    expect(interjected.delivery).toBe('queued');
+    expect(interjected.downgrade).toBe('steer-buffer-full');
+    expect(bus.activeCount('agent-0')).toBe(2);
     gate.release();
 
     const handle = await spawnPromise;
@@ -902,4 +966,70 @@ describe('subagent collaboration integration', () => {
     expect(textOf(history[injectedAt]!.content)).toContain('[directive] Target the release branch.');
     expect(completion.result).toContain('finished with the instruction.');
   }, 20_000);
+
+  it('releases the dedupe key once a steered copy has been flushed into the turn', async () => {
+    const child = testAgent();
+    const parent = testAgent();
+    parent.configure();
+    child.configure();
+    parent.newEvents();
+    await parent.rpc.setPermission({ mode: 'yolo' });
+    await child.rpc.setPermission({ mode: 'yolo' });
+
+    const session = fakeSession(parent.agent, child.agent, {
+      'agent-0': { homedir: '/tmp/x', type: 'sub', parentAgentId: 'main' },
+    });
+    const bus = new SubagentMessageBus();
+    const host = new SessionSubagentHost(session, 'main', undefined, undefined, bus);
+
+    const firstGate = drainGate();
+    const secondGate = drainGate();
+    child.mockNextResponse({
+      type: 'function',
+      id: 'tc_1',
+      name: 'Bash',
+      arguments: JSON.stringify({ command: firstGate.command, timeout: 60 }),
+    });
+    child.mockNextResponse({
+      type: 'function',
+      id: 'tc_2',
+      name: 'Bash',
+      arguments: JSON.stringify({ command: secondGate.command, timeout: 60 }),
+    });
+    child.mockNextResponse({ type: 'text', text: `finished. ${'x'.repeat(220)}` });
+
+    const spawnPromise = host.spawn('coder', {
+      parentToolCallId: 'call_1',
+      parentToolCallUuid: undefined,
+      prompt: 'original prompt',
+      description: 'child',
+      runInBackground: false,
+      signal,
+    });
+    await firstGate.waitForStart();
+
+    const first = host.sendMessage('agent-0', 'steer', 'reconsider the approach');
+    expect(first.status).toBe('accepted');
+    expect(first.delivery).toBe('mid-run');
+    // While the steer waits in the turn's buffer, the retry is a duplicate.
+    expect(host.sendMessage('agent-0', 'steer', 'reconsider the approach').duplicate).toBe(true);
+
+    firstGate.release();
+    // The turn reaches its next step boundary (flushing the steer into the
+    // child's context) and parks in the second gated command — so the copy is
+    // consumed while the turn is still running.
+    await secondGate.waitForStart();
+    expect(child.agent.turn.steerQueueLength).toBe(0);
+
+    const resend = host.sendMessage('agent-0', 'steer', 'reconsider the approach');
+    expect(resend.status).toBe('accepted');
+    expect(resend.duplicate).not.toBe(true);
+    expect(resend.delivery).toBe('mid-run');
+
+    secondGate.release();
+    const handle = await spawnPromise;
+    await handle.completion;
+    firstGate.cleanup();
+    secondGate.cleanup();
+  }, 30_000);
 });

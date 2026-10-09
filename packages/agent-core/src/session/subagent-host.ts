@@ -52,6 +52,14 @@ const SUMMARY_CONTINUATION_ATTEMPTS = 1;
  * that was too short consumed the only delivery window, so a message queued a
  * few milliseconds later was destroyed at run end while the parent still held
  * an "accepted" acknowledgement.
+ *
+ * Scope: this budget bounds the MAILBOX path only — a message that has to wait
+ * for a turn start, and therefore only ever costs a delivery turn. A mid-run
+ * `steer` (including the foreground→background handoff, where the parent wakes
+ * from a blocked Agent call and answers the still-running child) joins the turn
+ * that is already running through the steer buffer instead; it is bounded there
+ * by DEFAULT_IN_FLIGHT_LIMIT and must not spend delivery turns, because no
+ * delivery turn is needed to reach it.
  */
 const MAX_PARENT_MESSAGE_DELIVERY_TURNS = 2;
 const HOOK_TEXT_PREVIEW_LENGTH = 500;
@@ -116,6 +124,19 @@ type ActiveChild = {
   structured: boolean;
 };
 
+/**
+ * What a parent→child dedupe key currently stands for — the message a re-send
+ * of the same operation+text would duplicate. Either it waits in the mailbox
+ * (identified by its stable bus id, so `SubagentMessageBus.holdsMessage` can
+ * tell whether the copy is still undelivered) or it joined a live turn's steer
+ * buffer (where the buffer length at acceptance is the observable handle: a
+ * buffer that has since drained below that mark was flushed, so the message
+ * reached the child's context).
+ */
+type ParentMessageReceipt =
+  | { readonly kind: 'mailbox'; readonly messageId: string }
+  | { readonly kind: 'steer'; readonly bufferLengthAtSend: number };
+
 export type SubagentHandle = {
   readonly agentId: string;
   readonly profileName: string;
@@ -125,20 +146,27 @@ export type SubagentHandle = {
 
 export class SessionSubagentHost {
   private readonly activeChildren = new Map<string, ActiveChild>();
-  /** Per-child per-model usage already folded into the parent totals, so a
-   * resumed child's aggregation only adds the delta. */
-  private readonly aggregatedChildUsage = new WeakMap<Agent, Record<string, TokenUsage>>();
   /** Per-turn budget (≤4 accepted) for child→parent collaboration requests. */
   private readonly childRequestCounts = new Map<string, number>();
   /** Dedupe keys seen within the current turn, per child. */
   private readonly childRequestSeen = new Map<string, Set<string>>();
   /**
-   * Parent→child message dedupe keys, per child, for the child's current turn.
-   * A retried send (the parent re-issuing the same directive after a tool
-   * hiccup) must not reach the child twice; asking again in a later turn is a
-   * legitimate re-ask, so the keys are cleared with the child request limits.
+   * Parent→child message dedupe ledger, per child, for the child's current
+   * turn: key → the in-flight message that key stands for. A retried send (the
+   * parent re-issuing the same directive after a tool hiccup) must not reach
+   * the child twice WHILE the first copy is still in flight; once the child has
+   * consumed that copy — the mailbox no longer holds it, or the steer buffer
+   * has flushed it — the key is released, because a re-send then is a fresh
+   * instruction rather than a retry of an undelivered one. Asking again in a
+   * later turn is legitimate too, so the ledger is cleared with the child
+   * request limits.
    */
-  private readonly parentMessageSeen = new Map<string, Set<string>>();
+  private readonly parentMessageSeen = new Map<string, Map<string, ParentMessageReceipt>>();
+  /** Profile names of children spawned or resumed through this host, keyed by
+   *  child id. `getProfileName` falls back to it once a child is evicted: the
+   *  Agent tool reads that name to validate the parent's `spawns` whitelist on
+   *  the resume path, and an evicted child has no live config left to read. */
+  private readonly childProfiles = new Map<string, string>();
   /** Agent → childId lookup for child→parent collaboration requests. */
   private readonly childIdByAgent = new WeakMap<Agent, string>();
   /**
@@ -180,6 +208,10 @@ export class SessionSubagentHost {
       undefined,
       this.ownerAgentId,
     );
+    // Record the profile by child id, not by instance: `getProfileName` must
+    // still answer once this child is evicted, because the Agent tool reads it
+    // to validate the parent's `spawns` whitelist on the resume path.
+    this.childProfiles.set(id, profile.name);
     // RLM recursion depth: every spawned child starts one level deeper than
     // its spawner — the counter lives on the agent instance, not the process,
     // and is incremented on every spawn (whether the spawn came from the RLM
@@ -258,6 +290,22 @@ export class SessionSubagentHost {
     }
 
     const profileName = child.config.profileName ?? 'subagent';
+    this.childProfiles.set(agentId, profileName);
+    // Resume is a spawn by another name, so it must clear the same `spawns`
+    // whitelist the Agent tool enforces on the spawn path — from one source of
+    // truth (`spawnWhitelistFor`, the expression agent/tool/index.ts derives
+    // `allowedSpawns` from). The Agent tool also checks the resumed profile,
+    // but it resolves it through `getProfileName`, which for an evicted child
+    // (the resume case) has no live instance to read and used to report
+    // `undefined` — silently skipping the check. Here the just-rehydrated
+    // instance is in hand, so the check cannot be bypassed; a rejection
+    // happens before any run state is registered.
+    const whitelist = spawnWhitelistFor(parent);
+    if (whitelist !== undefined && !whitelist.includes(profileName)) {
+      throw new Error(
+        `Subagent profile "${profileName}" is not in the parent profile's spawn whitelist (${whitelist.join(', ')}): agent "${agentId}" cannot be resumed by this parent`,
+      );
+    }
 
     const controller = new AbortController();
     const unlinkAbortSignal = linkAbortSignal(options.signal, controller);
@@ -365,12 +413,21 @@ export class SessionSubagentHost {
     }
   }
 
+  /**
+   * Profile name of one of this host's children, or undefined when the id is
+   * not a child of this owner. Reads the live instance when it is resident and
+   * falls back to the name recorded at spawn/resume: a finished child is
+   * evicted from `session.agents`, and its resumability is then judged from
+   * exactly this call (the Agent tool validates the parent's spawn whitelist
+   * before calling `resume`), so reporting `undefined` for the evicted child
+   * would skip the whitelist instead of consulting it.
+   */
   getProfileName(agentId: string): string | undefined {
     const metadata = this.session.metadata.agents[agentId];
     if (metadata?.type !== 'sub' || metadata.parentAgentId !== this.ownerAgentId) {
       return undefined;
     }
-    return this.session.agents.get(agentId)?.config.profileName;
+    return this.session.agents.get(agentId)?.config.profileName ?? this.childProfiles.get(agentId);
   }
 
   /**
@@ -395,6 +452,17 @@ export class SessionSubagentHost {
       const result = await run;
       return result;
     } finally {
+      // The child cannot consume a terminal task notification anymore, and a
+      // task that outlives the run — a parked foreground command is the shape
+      // this covers — would otherwise steer one into an evicted agent:
+      // `AgentTurn.steer` on an idle turn launches a new one (see
+      // BackgroundManager.notifyBackgroundTask), which for the evicted child is
+      // a ghost — real model calls nobody can read. Latch the child's manager
+      // shut here, before the bounded resource release below, exactly the way
+      // `Session.close()` latches every manager it created: the notification
+      // stays undelivered, and a later resume of this child runs a brand-new
+      // manager whose reconcile reports the task as lost instead.
+      child.background.markSessionClosed();
       terminal.unlinkAbortSignal();
       await this.releaseChildResourcesBounded(parent, child, terminal.childId);
       this.activeChildren.delete(terminal.childId);
@@ -509,7 +577,11 @@ export class SessionSubagentHost {
    * Send a directed message to a subagent owned by this parent. Ownership is
    * verified against the session metadata before anything is enqueued; a
    * message addressed to a foreign or unknown agent is refused as
-   * `not_owned`/`not_found`.
+   * `not_owned`/`not_found`, one addressed to a finished child as `not_active`,
+   * and one whose sender is no longer resident in the session as `parent_gone`
+   * — an accepted message must have a live owner that can observe (and act on)
+   * the delivery it was promised, instead of being acknowledged into a bus
+   * whose owning turn has already ended.
    *
    * `steer` redirects a running child without disturbing its in-flight tools;
    * `interject` does the same but additionally interrupts the tool batch in
@@ -528,6 +600,14 @@ export class SessionSubagentHost {
     queueDepth?: number;
     /** True when this exact message is already in flight for the child. */
     duplicate?: boolean;
+    /** Stable id of the message this result accepted — or, on a duplicate, of
+     *  the still-in-flight copy the parent just retried. A retry never mints a
+     *  second id for the same logical message, which is what makes the ids
+     *  usable for reconciliation. */
+    messageId?: string;
+    /** Why an accepted `interject` did not interrupt: it fell back to the
+     *  mailbox. Absent when the interrupt fired (or for queue/steer). */
+    downgrade?: 'structured' | 'idle' | 'steer-buffer-full';
   } {
     const metadata = this.session.metadata.agents[toAgentId];
     if (metadata === undefined || metadata.type !== 'sub') return { status: 'not_found' };
@@ -535,6 +615,11 @@ export class SessionSubagentHost {
     const child = this.session.agents.get(toAgentId);
     const record = this.activeChildren.get(toAgentId);
     if (child === undefined || record === undefined) return { status: 'not_active' };
+    // An accepted message promises the live owner will observe the delivery.
+    // Once the owner is evicted from the session there is no turn left to
+    // observe it, so the send is refused instead of acknowledged into a bus
+    // nobody owns.
+    if (this.session.agents.get(this.ownerAgentId) === undefined) return { status: 'parent_gone' };
 
     // The bus has no interrupt concept: an interject that has to wait keeps
     // plain steer semantics — steer priority in the mailbox, `[directive]`
@@ -547,19 +632,34 @@ export class SessionSubagentHost {
       overrides,
     );
     const byteLimit = overrides?.byteLimit ?? DEFAULT_BYTE_LIMIT;
+    // Checked before the dedupe ledger or a steer buffer sees the text: an
+    // oversized message must not claim a key that a later, legal retry would
+    // then duplicate.
     if (subagentMessageBytes(text) > byteLimit) return { status: 'saturated', reason: 'bytes' };
 
     // Idempotency: a retried send — the parent re-issuing the same directive
     // after a tool hiccup, or concluding the first attempt did not land — must
-    // not reach the child twice. The key lives exactly as long as the child's
-    // current turn; asking again in a later turn is a legitimate re-ask.
+    // not reach the child twice while the first copy is still in flight. Once
+    // that copy has been consumed (polled out of the mailbox, or flushed from
+    // the steer buffer into the child's turn) the key is released: the retry
+    // then carries a fresh instruction rather than an undelivered duplicate.
     let seen = this.parentMessageSeen.get(toAgentId);
     if (seen === undefined) {
-      seen = new Set();
+      seen = new Map();
       this.parentMessageSeen.set(toAgentId, seen);
     }
     const dedupeKey = `${operation}\n${text}`;
-    if (seen.has(dedupeKey)) return { status: 'accepted', duplicate: true };
+    const pending = seen.get(dedupeKey);
+    if (pending !== undefined) {
+      if (this.parentMessageInFlight(child, pending)) {
+        return {
+          status: 'accepted',
+          duplicate: true,
+          ...(pending.kind === 'mailbox' ? { messageId: pending.messageId } : {}),
+        };
+      }
+      seen.delete(dedupeKey);
+    }
 
     // A steer exists to redirect work that is already running, so when the child
     // has a live turn it is injected into that turn and joins at the child's
@@ -579,7 +679,9 @@ export class SessionSubagentHost {
     //   cannot decay into prose and break the contract. An interject is
     //   deliberately conservative here too (first release): a structured
     //   child stuck in a tool call is still stopped with TaskStop, never by
-    //   interrupting the batch that produces its machine-readable answer.
+    //   interrupting the batch that produces its machine-readable answer. The
+    //   result carries the reason as `downgrade` so the receipt can say why
+    //   the interrupt did not fire.
     // - A full steer buffer (same budget as the mailbox) falls back to the
     //   mailbox, so neither channel is unbounded.
     const wantsMidRunSteer = operation === 'steer' || operation === 'interject';
@@ -597,11 +699,10 @@ export class SessionSubagentHost {
         },
         operation === 'interject' ? { interrupt: true } : undefined,
       );
-      // Register the dedupe key only once the message actually landed. A send
-      // rejected below (mailbox full, deadline elapsed) must leave no key
-      // behind, or an honest retry would be swallowed as a duplicate of a
-      // message that never reached the child.
-      seen.add(dedupeKey);
+      // The entry is registered only once the message actually landed; the
+      // buffer length at acceptance is what later tells a retry whether this
+      // copy is still waiting or has been flushed into the child's turn.
+      seen.set(dedupeKey, { kind: 'steer', bufferLengthAtSend: child.turn.steerQueueLength });
       return {
         status: 'accepted',
         delivery: operation === 'interject' ? 'interjected' : 'mid-run',
@@ -609,13 +710,41 @@ export class SessionSubagentHost {
     }
 
     const out = this.bus!.send(message);
-    if (out.status === 'accepted') seen.add(dedupeKey);
+    if (out.status === 'accepted' && out.messageId !== undefined) {
+      seen.set(dedupeKey, { kind: 'mailbox', messageId: out.messageId });
+    }
     return {
       status: out.status,
       reason: out.reason,
       delivery: out.status === 'accepted' ? 'queued' : undefined,
       queueDepth: out.queueDepth,
+      messageId: out.messageId,
+      // The receipt has to say why an interject became a queued message, or a
+      // caller reads "queued" as "the batch is being cut short".
+      downgrade:
+        operation === 'interject' && out.status === 'accepted'
+          ? record.structured
+            ? 'structured'
+            : child.turn.hasActiveTurn
+              ? 'steer-buffer-full'
+              : 'idle'
+          : undefined,
     };
+  }
+
+  /**
+   * Whether the message a dedupe key stands for is still undelivered. Mailbox
+   * copies are judged by the bus (which also reclaims expired mail, so a
+   * message that can never arrive reads as consumed); steered copies by the
+   * turn's buffer: a buffer shorter than the length recorded at acceptance was
+   * flushed — flushes drain the whole buffer, so the copy rode along. A full
+   * buffer that flushed and was refilled reads as still in flight (the count is
+   * back at or above the mark); that errs toward deduplicating, never toward
+   * delivering the same directive twice.
+   */
+  private parentMessageInFlight(child: Agent, pending: ParentMessageReceipt): boolean {
+    if (pending.kind === 'mailbox') return this.bus!.holdsMessage(pending.messageId);
+    return child.turn.hasActiveTurn && child.turn.steerQueueLength >= pending.bufferLengthAtSend;
   }
 
   /**
@@ -646,6 +775,11 @@ export class SessionSubagentHost {
     if (fromChildId === undefined || !this.activeChildren.has(fromChildId)) {
       return { status: 'not_active' };
     }
+    // Liveness before bookkeeping: a request accepted for a parent that can
+    // never observe it is a false acknowledgement, and it must not spend the
+    // per-turn budget, claim a dedupe key, or settle the foreground wake.
+    const parent = this.session.agents.get(this.ownerAgentId);
+    if (parent === undefined) return { status: 'parent_gone' };
     const count = this.childRequestCounts.get(fromChildId) ?? 0;
     if (count >= 4) return { status: 'saturated' };
     const dedupeKey = `${req.request_type}|${req.needs ?? ''}|${req.message}`;
@@ -683,9 +817,9 @@ export class SessionSubagentHost {
     // steer notification, so the parent sees it at its next turn boundary
     // without a bus mailbox that nothing ever polls (which would accumulate
     // accepted-but-unread messages and saturate). Rate limits above are the
-    // only backpressure needed.
-    const parent = this.session.agents.get(this.ownerAgentId);
-    parent?.turn.steer(
+    // only backpressure needed. The parent is resident here — a missing one
+    // was refused as `parent_gone` above, before any bookkeeping.
+    parent.turn.steer(
       [
         {
           type: 'text',
@@ -703,14 +837,7 @@ export class SessionSubagentHost {
       ],
       { kind: 'system_trigger', name: 'child_request' },
     );
-    // Wake a foreground wait, if one is registered: the parent is blocked
-    // inside the Agent tool call with no step boundary to flush the steer
-    // into, so the Agent tool races this signal and hands the child to the
-    // background task manager — the parent then reads the request at its next
-    // step boundary and can answer the still-running child in real time.
-    // Only after an accepted request (saturated/deduped ones returned above)
-    // and only when the notification actually landed.
-    if (parent !== undefined) this.childRequestWaiters.get(fromChildId)?.resolve();
+    this.childRequestWaiters.get(fromChildId)?.resolve();
     return { status: 'accepted' };
   }
 
@@ -743,7 +870,11 @@ export class SessionSubagentHost {
   private resetChildRequestLimits(childId: string): void {
     this.childRequestCounts.set(childId, 0);
     this.childRequestSeen.set(childId, new Set());
-    this.parentMessageSeen.set(childId, new Set());
+    // Fresh per-turn ledger: every copy registered in the previous turn has
+    // either been consumed by the turn that just ended (poll/flush) or was
+    // already released by the in-flight check — re-issuing the same text in a
+    // new turn is a legitimate re-ask, not a retry.
+    this.parentMessageSeen.set(childId, new Map());
   }
 
   private resolveProfile(parent: Agent, profileName: string): ResolvedAgentProfile {
@@ -872,24 +1003,42 @@ export class SessionSubagentHost {
       // subagent (their usage only lands on the short-lived child agent).
       // Session scope, not turn: a background child can finish after the
       // parent turn already ended, so turn attribution is unreliable.
-      // Delta-based: a RESUMED child (runChild re-entered for the same child
-      // agent) has accumulated additional usage, so only the newly accrued
-      // part is folded in - the previously aggregated amount is not added
-      // twice while the delta still counts.
+      //
+      // Delta-based against a ledger keyed by the child's STABLE agent id: a
+      // resumed child is re-hydrated by ensureAgent as a NEW Agent instance
+      // whose replayed recorder already holds its whole history, so an
+      // instance-keyed cache would miss and fold that history into the parent
+      // a second time. The ledger remembers how much of the id's cumulative
+      // usage has been folded (session-scoped, so rebuilding an owner's host
+      // does not lose it) and only the newly accrued part is folded in.
       const childByModel = child.usage.data().byModel ?? {};
-      const previous = this.aggregatedChildUsage.get(child) ?? {};
+      const ledger = foldedChildUsageFor(this.session);
+      const previous = ledger.get(childId) ?? {};
+      const deltas: Record<string, TokenUsage> = {};
       for (const [model, childUsage] of Object.entries(childByModel)) {
         const delta = previous[model] === undefined ? childUsage : subtractUsage(childUsage, previous[model]);
-        if (isZeroUsage(delta)) continue;
+        if (!isZeroUsage(delta)) deltas[model] = delta;
+      }
+      // A background grandchild can outlive the child that spawned it: by the
+      // time it finishes, its direct parent may already be evicted, and a fold
+      // into that finished agent's recorder would be read by nobody. The
+      // chain walks up to the nearest resident ancestor so the totals still
+      // roll up to the session (see usageFoldTarget). The intermediate's own
+      // recorder deliberately does not receive this delta — only its live
+      // total could ever have rolled it up — so no compensating entry is
+      // needed there; the child's ledger below is the one that must remember
+      // the amount was folded.
+      const foldTarget = this.usageFoldTarget(parent);
+      for (const [model, delta] of Object.entries(deltas)) {
         try {
-          parent.usage.record(model, delta, 'session');
+          foldTarget.usage.record(model, delta, 'session');
         } catch (error) {
           // Usage accounting is ancillary: a failure here must never fail
           // the completed subagent (the parent turn already has its result).
           parent.log.warn('Failed to aggregate subagent usage', { model, error: String(error) });
         }
       }
-      this.aggregatedChildUsage.set(child, childByModel);
+      ledger.set(childId, childByModel);
 
       // Aggregate structured findings so the parent agent can act on them
       // without re-parsing free-text summaries. Both blocks carry the problem
@@ -926,8 +1075,40 @@ export class SessionSubagentHost {
         error: message,
         usage: child.usage.data().total,
       });
+      // SubagentStop is a lifecycle notification, not a success signal: a hook
+      // that mirrors child runs (metrics, cleanup, logging) has to see a failed
+      // or cancelled run too, or it silently under-counts. `error` carries the
+      // failure; `response` carries whatever the child had produced by then.
+      this.triggerSubagentStop(parent, profileName, lastAssistantText(child), message);
       throw error;
     }
+  }
+
+  /**
+   * Where a finished child's usage delta is folded. Normally its direct parent.
+   * When that parent has been evicted from the session (a background
+   * grandchild can outlive the child that spawned it), its recorder is no
+   * longer part of any live rollup — the fold would land on an agent nobody
+   * reads again — so the delta goes to the nearest RESIDENT ancestor instead,
+   * and the chain keeps rolling up through finished intermediates. The delta
+   * is recorded exactly once, at that target: the ledger that guards against
+   * re-folding is keyed by the CHILD, so a later resume of the intermediate
+   * can never fold the amount a second time (its own total never received it).
+   *
+   * The direct parent is the fallback when nothing in the chain is resident
+   * (session teardown): recording there is what happened before this walk, and
+   * no live reader remains to disagree.
+   */
+  private usageFoldTarget(parent: Agent): Agent {
+    const resident = this.session.agents.get(parent.agentId);
+    if (resident !== undefined) return resident;
+    let ancestorId = this.session.metadata.agents[parent.agentId]?.parentAgentId ?? null;
+    while (ancestorId !== null) {
+      const ancestor = this.session.agents.get(ancestorId);
+      if (ancestor !== undefined) return ancestor;
+      ancestorId = this.session.metadata.agents[ancestorId]?.parentAgentId ?? null;
+    }
+    return parent;
   }
 
   private async configureChild(
@@ -1049,15 +1230,61 @@ export class SessionSubagentHost {
     });
   }
 
-  private triggerSubagentStop(parent: Agent, profileName: string, result: string): void {
+  /**
+   * Fire the SubagentStop hook for a child run that has reached a terminal
+   * state. Called on the success path and from the failure/cancel handler, so
+   * the event means "this child run ended", never just "it succeeded"; a failed
+   * run adds the `error` field (and `response` still carries whatever the child
+   * had produced) while a successful one keeps the original payload shape.
+   */
+  private triggerSubagentStop(
+    parent: Agent,
+    profileName: string,
+    result: string,
+    error?: string,
+  ): void {
     void parent.hooks?.fireAndForgetTrigger('SubagentStop', {
       matcherValue: profileName,
       inputData: {
         agentName: profileName,
         response: result.slice(0, HOOK_TEXT_PREVIEW_LENGTH),
+        ...(error !== undefined ? { error: error.slice(0, HOOK_TEXT_PREVIEW_LENGTH) } : {}),
       },
     });
   }
+}
+
+/**
+ * How much of each child's cumulative usage has already been folded into its
+ * owner's session totals, keyed by the child's stable agent id. Session-scoped
+ * and module-level: an Agent-instance key cannot survive the resume path
+ * (`ensureAgent` re-hydrates a new instance whose replayed recorder holds the
+ * full history, which was then folded a second time), and a host-level map
+ * cannot survive an owner being re-instantiated, which would reopen the same
+ * hole one level down.
+ */
+const foldedChildUsageBySession = new WeakMap<object, Map<string, Record<string, TokenUsage>>>();
+
+function foldedChildUsageFor(session: object): Map<string, Record<string, TokenUsage>> {
+  let ledger = foldedChildUsageBySession.get(session);
+  if (ledger === undefined) {
+    ledger = new Map();
+    foldedChildUsageBySession.set(session, ledger);
+  }
+  return ledger;
+}
+
+/**
+ * The `spawns` whitelist of the given agent's own profile — the same source of
+ * truth the Agent tool derives its `allowedSpawns` from (agent/tool/index.ts:
+ * `DEFAULT_AGENT_PROFILES[agent.config.profileName ?? 'agent']?.spawns`).
+ * Named here because the resume path must enforce the identical rule from
+ * inside the host: the Agent tool resolves a resumed child's profile through
+ * `getProfileName`, which historically could not see an evicted child and so
+ * skipped the check entirely.
+ */
+function spawnWhitelistFor(agent: Agent): readonly string[] | undefined {
+  return DEFAULT_AGENT_PROFILES[agent.config.profileName ?? 'agent']?.spawns;
 }
 
 /** Element-wise subtraction clamped at zero (usage can never go negative). */
