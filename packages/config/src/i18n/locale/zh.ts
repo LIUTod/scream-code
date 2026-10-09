@@ -1150,6 +1150,7 @@ export const zh: Record<string, string> = {
   'activitygroup.hint_expand': '  (ctrl+o 展开)',
   'activitygroup.hint_collapse': '  (ctrl+o 收起)',
   'activitygroup.segments_hidden': '… 还有 {count} 步',
+  'activitygroup.segments_folded_above': '… 前 {count} 步已折叠',
   'activitygroup.thinking_label': 'Thinking',
   'activitygroup.thinking_summary': 'Thinking: {summary}',
   'activitygroup.thinking_more': '...（还有 {count} 行）',

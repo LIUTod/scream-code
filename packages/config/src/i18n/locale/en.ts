@@ -1156,6 +1156,7 @@ export const en: Record<string, string> = {
   'activitygroup.hint_expand': '  (ctrl+o to expand)',
   'activitygroup.hint_collapse': '  (ctrl+o to collapse)',
   'activitygroup.segments_hidden': '… {count} more steps',
+  'activitygroup.segments_folded_above': '… {count} earlier steps folded',
   'activitygroup.thinking_label': 'Thinking',
   'activitygroup.thinking_summary': 'Thinking: {summary}',
   'activitygroup.thinking_more': '... ({count} more lines)',

@@ -1,8 +1,10 @@
 /**
  * ActivityGroupComponent compacts one turn's reasoning and tool calls into a
  * single block: a header plus the newest steps of the timeline while collapsed,
- * and the whole timeline — reasoning runs and tool calls interleaved in the
- * order they happened — with per-tool result previews while expanded.
+ * and — while expanded — the timeline itself, reasoning runs and tool calls
+ * interleaved in the order they happened with per-tool result previews: the
+ * newest steps while the turn is still running, the whole timeline in order
+ * once it settles.
  *
  * Rows follow the work rather than the tool type: each reasoning run stays next
  * to the tools it produced, so the block reads as a timeline instead of one
@@ -636,11 +638,22 @@ export class ActivityGroupComponent extends Container {
   }
 
   /**
-   * Expanded state: the whole timeline in order. Rows are budgeted for the block
+   * Expanded state, split by whether the block is still running. A running block
+   * anchors its window on the newest steps — the part of the timeline still
+   * moving — while a settled block keeps the window that starts at the first
+   * step. Both spend one shared row budget for the block as a whole.
+   */
+  private buildExpandedRows(width: number): void {
+    if (this.running) this.buildExpandedRowsTail(width);
+    else this.buildExpandedRowsHead(width);
+  }
+
+  /**
+   * Settled state: the whole timeline in order. Rows are budgeted for the block
    * as a whole, so a turn with dozens of steps cannot expand into hundreds of
    * rows; whatever does not fit is summarised in one row at the end.
    */
-  private buildExpandedRows(width: number): void {
+  private buildExpandedRowsHead(width: number): void {
     this.bodyContainer.addChild(new Text(TREE_PIPE_ROW, 0, 0));
     let used = 1;
     let hidden = 0;
@@ -663,6 +676,43 @@ export class ActivityGroupComponent extends Container {
       const summary = t('activitygroup.segments_hidden', { count: String(hidden) });
       this.bodyContainer.addChild(new Text(`${BRANCH_PIPE}${BODY_TEXT_INDENT}${chalk.dim(summary)}`, 0, 0));
     }
+  }
+
+  /**
+   * Running state: the newest steps, still in chronological order so the tail
+   * reads top-down, with the older steps that no longer fit counted in one row
+   * above them. The budget is spent from the newest end backwards and the newest
+   * step always renders, mirroring the head-anchored loop's rule that the first
+   * step always renders — a single oversized step cannot leave the block
+   * expanded-but-empty in either direction. The end-of-tree summary of the
+   * settled loop is structurally unreachable here: a running block never keeps
+   * rows below its newest step, so there is nothing at the end to count.
+   */
+  private buildExpandedRowsTail(width: number): void {
+    const visible: Component[] = [];
+    let used = 1;
+    let hidden = 0;
+    for (let index = this.segments.length - 1; index >= 0; index -= 1) {
+      const segment = this.segments[index] as BlockSegment;
+      const isLastStep = index === this.segments.length - 1;
+      const rows = this.segmentRows(segment, width, isLastStep);
+      // A counted run of older steps costs one more row for its row above the
+      // window, which the newest step does not need because nothing can precede
+      // the top of the tree.
+      const budget = ACTIVITY_GROUP_EXPANDED_LINES - (isLastStep ? 0 : 1);
+      if (!isLastStep && used + rows.cost > budget) {
+        hidden = index + 1;
+        break;
+      }
+      visible.unshift(...rows.components);
+      used += rows.cost;
+    }
+    this.bodyContainer.addChild(new Text(TREE_PIPE_ROW, 0, 0));
+    if (hidden > 0) {
+      const summary = t('activitygroup.segments_folded_above', { count: String(hidden) });
+      this.bodyContainer.addChild(new Text(`${BRANCH_PIPE}${BODY_TEXT_INDENT}${chalk.dim(summary)}`, 0, 0));
+    }
+    for (const component of visible) this.bodyContainer.addChild(component);
   }
 
   /** Renders one step of the timeline: its branch row plus its own body rows. */

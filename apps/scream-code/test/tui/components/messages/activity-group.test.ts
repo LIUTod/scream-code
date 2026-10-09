@@ -47,6 +47,13 @@ function nonEmpty(lines: string[]): string[] {
   return lines.filter((line) => line.trim().length > 0);
 }
 
+/** Pattern of a rendered i18n row whose `{count}` placeholder is any number. */
+function countPattern(key: string): RegExp {
+  const escape = (text: string): string => text.replaceAll(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const [head = '', tail = ''] = t(key).split('{count}');
+  return new RegExp(`${escape(head)}\\d+${escape(tail)}`);
+}
+
 const THINKING = ['first reasoning line', 'second reasoning line', 'third reasoning line'].join('\n');
 const LONG_THINKING = Array.from({ length: 14 }, (_, i) => `reasoning line ${i + 1}`).join('\n');
 /**
@@ -501,12 +508,15 @@ describe('ActivityGroupComponent', () => {
     expect(render(group).some((line) => line.includes('output line'))).toBe(false);
   });
 
-  it('keeps the expanded tree inside its block budget', () => {
+  it('keeps the expanded tree inside its block budget once settled (settled-state gate)', () => {
     const group = new ActivityGroupComponent(darkColors, undefined);
     for (let i = 0; i < 8; i += 1) {
       group.attachTool(makeTool(`t${String(i)}`, 'Bash', { command: `ls ${String(i)}` }, 40), i + 1);
     }
     group.appendThinking(LONG_THINKING, false);
+    // The block is over, so this is the settled-state gate for the expanded rows:
+    // the head-anchored window below is exactly the one the block always had.
+    group.setRunning(false);
     group.setExpanded(true);
 
     const lines = nonEmpty(render(group, 100));
@@ -520,6 +530,112 @@ describe('ActivityGroupComponent', () => {
     expect(summary).toContain('6');
     // The summarised row closes the tree, so the last shown tool keeps a branch.
     expect(lines.some((line) => line.startsWith('  ├─'))).toBe(true);
+  });
+
+  it('anchors the expanded rows on the newest step while running', () => {
+    const group = new ActivityGroupComponent(darkColors, undefined);
+    for (let i = 0; i < 8; i += 1) {
+      group.attachTool(
+        makeTool(`t${String(i)}`, 'Bash', { command: `ls ${String(i).padStart(3, '0')}` }, 40),
+        i + 1,
+      );
+    }
+    group.appendThinking(LONG_THINKING, true);
+    group.setExpanded(true);
+
+    const lines = nonEmpty(render(group, 100));
+    const foldedIndex = lines.findIndex((line) =>
+      countPattern('activitygroup.segments_folded_above').test(line),
+    );
+
+    // The window is spent from the newest step backwards, so the live reasoning
+    // run is the bottom of the tree and keeps its newest lines (the run's own
+    // "earlier lines" hint sits below them).
+    expect(lines.some((line) => line.includes('reasoning line 14'))).toBe(true);
+    expect(
+      lines.some(
+        (line) => line.startsWith('  └─') && line.includes(t('activitygroup.thinking_label')),
+      ),
+    ).toBe(true);
+    // The oldest steps are folded away, counted in one row at the top of the
+    // tree: header, tree stem, count row.
+    expect(foldedIndex).toBe(2);
+    expect(lines[foldedIndex]).toContain(t('activitygroup.segments_folded_above', { count: '6' }));
+    expect(lines.some((line) => line.includes('ls 000'))).toBe(false);
+    expect(lines.some((line) => line.includes('ls 007'))).toBe(true);
+    // Nothing is counted at the end: a running block never keeps rows below its
+    // newest step. The reasoning hint carries "还有" too, so match the pattern.
+    expect(lines.some((line) => countPattern('activitygroup.segments_hidden').test(line))).toBe(
+      false,
+    );
+  });
+
+  it('folds exactly the steps beyond the budget at the 59/60 boundary while running', () => {
+    const withNotices = (count: number): string[] => {
+      const group = new ActivityGroupComponent(darkColors, undefined);
+      for (let i = 0; i < count; i += 1) {
+        group.attachNotice({
+          phase: 'completed',
+          headline: '后台任务已完成',
+          detail: `bash-${String(i).padStart(3, '0')}`,
+        });
+      }
+      group.setExpanded(true);
+      return nonEmpty(render(group, 100));
+    };
+    const bodyRows = (lines: string[]): string[] =>
+      lines.filter((line) => /^ {2}(│|├─|└─)/.test(line));
+
+    // One row per notice, so the boundary sits where the shared budget says it
+    // does: 58 steps fill the tree, 59 folds only the oldest one and 60 folds two.
+    const fits = withNotices(58);
+    expect(bodyRows(fits)).toHaveLength(ACTIVITY_GROUP_EXPANDED_LINES - 1);
+    expect(
+      fits.some((line) => countPattern('activitygroup.segments_folded_above').test(line)),
+    ).toBe(false);
+
+    const at59 = withNotices(59);
+    expect(bodyRows(at59)).toHaveLength(ACTIVITY_GROUP_EXPANDED_LINES);
+    expect(
+      at59.some((line) => line.includes(t('activitygroup.segments_folded_above', { count: '1' }))),
+    ).toBe(true);
+    expect(at59.some((line) => line.includes('bash-000'))).toBe(false);
+    expect(at59.some((line) => line.includes('bash-058'))).toBe(true);
+
+    const at60 = withNotices(60);
+    expect(bodyRows(at60)).toHaveLength(ACTIVITY_GROUP_EXPANDED_LINES);
+    expect(
+      at60.some((line) => line.includes(t('activitygroup.segments_folded_above', { count: '2' }))),
+    ).toBe(true);
+    expect(at60.some((line) => line.includes('bash-001'))).toBe(false);
+    expect(at60.some((line) => line.includes('bash-059'))).toBe(true);
+  });
+
+  it('keeps the oldest-step window once the block settles', () => {
+    const group = new ActivityGroupComponent(darkColors, undefined);
+    for (let i = 0; i < 8; i += 1) {
+      group.attachTool(
+        makeTool(`t${String(i)}`, 'Bash', { command: `ls ${String(i).padStart(3, '0')}` }, 40),
+        i + 1,
+      );
+    }
+    group.appendThinking(LONG_THINKING, false);
+    group.setRunning(false);
+    group.setExpanded(true);
+
+    const lines = nonEmpty(render(group, 100));
+
+    // Settling flips the window back to the first step: the newest work is what
+    // gets counted at the end, exactly as it did before the running-state change.
+    expect(lines.some((line) => line.includes('ls 000'))).toBe(true);
+    expect(lines.some((line) => line.includes('ls 007'))).toBe(false);
+    expect(lines.some((line) => line.includes(t('activitygroup.thinking_label')))).toBe(false);
+    expect(
+      lines.some((line) => line.includes(t('activitygroup.segments_hidden', { count: '6' }))),
+    ).toBe(true);
+    expect(
+      lines.some((line) => countPattern('activitygroup.segments_folded_above').test(line)),
+    ).toBe(false);
   });
 
   it('caps the excerpt by rendered lines for a wrapped paragraph', () => {
