@@ -9,7 +9,7 @@
  * the edge and adding them would just churn the diff renderer.
  */
 
-import { Container, type Component } from '@liutod-scream/pi-tui';
+import { Container } from '@liutod-scream/pi-tui';
 
 export class GutterContainer extends Container {
   constructor(
@@ -23,30 +23,11 @@ export class GutterContainer extends Container {
     const inner = Math.max(1, width - this.leftPad - this.rightPad);
     const lead = ' '.repeat(this.leftPad);
     const out: string[] = [];
-    for (const child of this.orderedChildren()) {
+    for (const child of this.children) {
       for (const line of child.render(inner)) {
         out.push(lead + line);
       }
     }
     return out;
-  }
-
-  /**
-   * The children in render order. Defaults to the array order; subclasses may
-   * override this seam (the array itself stays the source of truth).
-   */
-  protected orderedChildren(): readonly Component[] {
-    return this.children;
-  }
-
-  /**
-   * The children in the order this container actually renders them — the order
-   * a consumer must use to ask "what is on screen, top to bottom". A scan that
-   * walks the transcript bottom-up (Ctrl+O) must ask here instead of reading
-   * `children` directly, or a reordering subclass (a pinned tail) silently
-   * desyncs the scan from the viewport.
-   */
-  renderOrder(): readonly Component[] {
-    return this.orderedChildren();
   }
 }

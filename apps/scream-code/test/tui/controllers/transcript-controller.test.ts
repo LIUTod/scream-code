@@ -501,22 +501,6 @@ describe('TranscriptController misc surface', () => {
     expect(earlier.isExpanded()).toBe(false);
   });
 
-  it('toggleToolOutputExpansion reaches a pinned block under a mid-turn row', () => {
-    const { controller, state } = makeHost();
-    const block = new ActivityGroupComponent(darkColors, undefined);
-    state.transcriptContainer.addChild(block);
-    state.transcriptContainer.pinTail(block);
-    // A mid-turn row lands after the running block in the array, but the pin
-    // renders the block last: the press must reach the block the user sees at
-    // the bottom, not stop at the row sitting above it on screen.
-    state.transcriptContainer.addChild(new UserMessageComponent('mid-turn steer', darkColors));
-
-    controller.toggleToolOutputExpansion();
-
-    expect(block.isExpanded()).toBe(true);
-    expect(state.toolOutputExpanded).toBe(true);
-  });
-
   it('togglePlanExpansion only flips when a plan-expandable child accepted it', () => {
     const { controller, state } = makeHost();
     const reset = vi.mocked(state.ui.resetTextSelection);

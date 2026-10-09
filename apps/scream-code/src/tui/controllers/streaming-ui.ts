@@ -471,9 +471,6 @@ export class StreamingUIController {
     group.setExpanded(state.toolOutputExpanded);
     this._activityGroup = group;
     state.transcriptContainer.addChild(group);
-    // The block is the turn's live tail: it renders last while it runs, so the
-    // cards and notices appended below it cannot push it out of view.
-    state.transcriptContainer.pinTail(group);
     state.ui.requestRender();
     return group;
   }
@@ -602,13 +599,6 @@ export class StreamingUIController {
     this._activityGroupRegistered = false;
     if (group === undefined) return;
     group.setRunning(false);
-    // The block drops back into its array slot. Only a pin that actually moved
-    // rows needs the terminal's coordinate-based selection dropped — a block
-    // still sitting last (the common case: nothing was appended below it)
-    // leaves the highlight alone.
-    if (this.host.state.transcriptContainer.unpinTail(group)) {
-      this.host.state.ui.resetTextSelection();
-    }
     if (group.isEmpty()) {
       this.host.transcriptController.unmarkPending(group);
       this.host.state.transcriptContainer.removeChild(group);
