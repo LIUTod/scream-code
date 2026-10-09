@@ -66,7 +66,6 @@ max_running_tasks = 4
 keep_alive_on_exit = false
 kill_grace_period_ms = 2000
 agent_task_timeout_s = 900
-print_wait_ceiling_s = 3600
 
 [notifications]
 claim_stale_after_ms = 15000
@@ -111,7 +110,6 @@ describe('SDK config TOML', () => {
       keepAliveOnExit: false,
       killGracePeriodMs: 2000,
       agentTaskTimeoutS: 900,
-      printWaitCeilingS: 3600,
     });
 
     expect('theme' in config).toBe(false);

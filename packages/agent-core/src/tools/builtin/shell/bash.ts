@@ -56,7 +56,6 @@ import { toInputJsonSchema } from '../../support/input-schema';
 import { commandApprovalRule, matchesCommandRule } from '../../support/command-rule';
 import { ToolResultBuilder } from '../../support/result-builder';
 import bashDescriptionTemplate from './bash.md';
-import { createBackgroundTask, drainCompletedBackgroundTasks } from './background-tasks';
 
 const MS_PER_SECOND = 1000;
 const DEFAULT_TIMEOUT_S = 60;
@@ -617,14 +616,6 @@ export class BashTool implements BuiltinTool<BashInput> {
 
   private readonly availableTools: Set<string>;
 
-  /**
-   * Session this tool belongs to (the owning agent's session id). A command
-   * that times out is parked in the module-level pending registry under this
-   * key, so closing one session sweeps only its own parked commands instead of
-   * executing every other session's running work.
-   */
-  private readonly ownerId: string | undefined;
-
   constructor(
     private readonly jian: Jian,
     private readonly cwd: string,
@@ -632,7 +623,6 @@ export class BashTool implements BuiltinTool<BashInput> {
     options?: {
       allowBackground?: boolean | undefined;
       availableTools?: Set<string> | undefined;
-      ownerId?: string | undefined;
     },
   ) {
     this.isWindows = this.jian.osEnv.osKind === 'Windows';
@@ -640,7 +630,6 @@ export class BashTool implements BuiltinTool<BashInput> {
     this.isWindowsBash = this.isWindows && this.shellKind === 'posix';
     this.allowBackground = options?.allowBackground ?? this.backgroundManager !== undefined;
     this.availableTools = options?.availableTools ?? new Set();
-    this.ownerId = options?.ownerId;
     const rendered = renderBashDescription(
       this.jian.osEnv.shellName,
       this.shellKind === 'powershell',
@@ -712,26 +701,17 @@ export class BashTool implements BuiltinTool<BashInput> {
 
   private async execution(args: BashInput, ctx: ExecutableToolContext): Promise<ExecutableToolResult> {
     const { signal, onUpdate } = ctx;
-    // Drain completed background tasks from previous timeout-detached commands.
-    const completedBg = drainCompletedBackgroundTasks();
-    const bgPrefix = completedBg.length > 0
-      ? completedBg.map((t) =>
-        `[Background task ${t.id} completed] Command: ${t.command}\nExit code: ${String(t.exitCode)} (${(t.elapsedMs / 1000).toFixed(1)}s)\nOutput:\n${t.output}\n---\n`
-      ).join('')
-      : '';
 
     if (signal.aborted) {
       return {
         isError: true,
-        output:
-          bgPrefix +
-          (isParentInterject(signal.reason)
-            ? 'Interrupted by the parent agent before the command started'
-            : 'Aborted before command started'),
+        output: isParentInterject(signal.reason)
+          ? 'Interrupted by the parent agent before the command started'
+          : 'Aborted before command started',
       };
     }
     if (args.command.length === 0) {
-      return { isError: true, output: bgPrefix + 'Command cannot be empty.' };
+      return { isError: true, output: 'Command cannot be empty.' };
     }
 
     // Self-protection patterns are OS-level, not dialect-level: `taskkill`,
@@ -780,7 +760,15 @@ export class BashTool implements BuiltinTool<BashInput> {
     // background on timeout (the Bash result has already left) or the turn is
     // aborted, so the TUI never receives trailing output it can no longer use.
     let streaming = true;
+    // Set once the command is parked as a background task: the reader's
+    // output belongs to that task's log from then on, not to the finished
+    // tool call.
+    let parkedTaskId: string | undefined;
     const forwardChunk = (kind: 'stdout' | 'stderr', text: string): void => {
+      if (parkedTaskId !== undefined) {
+        this.backgroundManager?.appendCapturedOutput(parkedTaskId, text);
+        return;
+      }
       if (!streaming || signal.aborted || onUpdate === undefined) return;
       onUpdate({ kind, text });
     };
@@ -857,7 +845,6 @@ export class BashTool implements BuiltinTool<BashInput> {
           return artifactPath;
         },
       });
-      if (bgPrefix.length > 0) builder.write(bgPrefix);
       const stdoutDone = readStreamIntoBuilder(proc.stdout, builder, (text) => forwardChunk('stdout', text));
       const stderrDone = readStreamIntoBuilder(proc.stderr, builder, (text) => forwardChunk('stderr', text));
       // A destroy() below aborts the for-await read, rejecting its promise
@@ -903,44 +890,67 @@ export class BashTool implements BuiltinTool<BashInput> {
           : await completionPromise;
 
       if (raceResult.timedOut) {
-        // Process is still running - move to background instead of killing.
+        // The foreground call is over while the process is still running:
+        // hand it to this agent's background manager instead of killing it.
+        // From here the task owns its id, capacity slot, persisted record and
+        // terminal notification — the result reaches the model through that
+        // notification, never as output prepended to some later Bash call.
         streaming = false;
         const timeoutLabel =
           timeoutMs % 1000 === 0 ? `${String(timeoutMs / 1000)}s` : `${String(timeoutMs)}ms`;
-        const taskId = createBackgroundTask(
-          command,
-          completionPromise.then(({ exitCode }) => ({ exitCode, output: builder.toString() })),
-          { kill: killProc, pid: proc.pid, ownerId: this.ownerId },
-        );
-        // Surface a completion notification through the tool.progress custom
-        // channel once the backgrounded command exits, so the user is not
-        // left guessing about a long-running task that outlived its Bash
-        // call. The model still receives the full result on the next Bash
-        // call via drainCompletedBackgroundTasks.
-        if (onUpdate !== undefined) {
-          void completionPromise.then(
-            ({ exitCode }) => {
-              onUpdate({
-                kind: 'custom',
-                customKind: 'background.task.terminated',
-                customData: { id: taskId, command, exitCode },
-              });
-            },
-            () => {
-              onUpdate({
-                kind: 'custom',
-                customKind: 'background.task.terminated',
-                customData: { id: taskId, command, exitCode: -1 },
-              });
+        const manager = this.backgroundManager;
+        if (manager === undefined) {
+          // Nothing can own the process: leaving it running would strand a
+          // command no task can report on, read or stop.
+          void killProc();
+          return {
+            isError: true,
+            output: `Command timed out after ${timeoutLabel} and was stopped: this agent has no background task manager.`,
+          } satisfies ExecutableToolResult;
+        }
+        let parkedId: string;
+        // A task is labelled by its description in notifications and the
+        // /tasks panel; a foreground command often has none, so fall back to
+        // the command itself rather than parking an unnamed task.
+        const trimmedDescription = args.description?.trim();
+        try {
+          parkedId = manager.parkForegroundProcess(
+            completionPromise,
+            command,
+            trimmedDescription === undefined || trimmedDescription.length === 0
+              ? command
+              : trimmedDescription,
+            {
+              // The reader owns the escalation: SIGTERM → grace → SIGKILL
+              // with the streams torn down, so a TaskStop of the parked task
+              // behaves exactly like the foreground kill path.
+              kill: () => killProc(),
+              pid: proc.pid,
+              initialOutput: builder.toString(),
             },
           );
+        } catch (error) {
+          // Parking was refused (this agent is at its background-task limit).
+          // The process cannot be left untracked, so it is stopped and the
+          // model is told why the command has no result.
+          void killProc();
+          return {
+            isError: true,
+            output:
+              `Command timed out after ${timeoutLabel} and was stopped: could not park it as a background task ` +
+              `(${error instanceof Error ? error.message : String(error)}).`,
+          } satisfies ExecutableToolResult;
         }
+        parkedTaskId = parkedId;
         const outputSoFar = builder.toString();
+        const nextStep = this.allowBackground
+          ? `The task keeps running and notifies you when it finishes; TaskOutput(task_id="${parkedId}") shows its output and TaskStop(task_id="${parkedId}") cancels it.`
+          : 'The task keeps running and notifies you when it finishes.';
         return {
           output:
-            `Command timed out after ${timeoutLabel} but is still running in the background (task: ${taskId}).\n` +
+            `Command timed out after ${timeoutLabel} but is still running in the background (task: ${parkedId}).\n` +
             `Output so far (${String(builder.nChars)} chars):\n${outputSoFar}\n` +
-            `---\nThe command will complete in the background. The result will be included in your next Bash call.`,
+            `---\n${nextStep}`,
           isError: false,
         } satisfies ExecutableToolResult;
       }

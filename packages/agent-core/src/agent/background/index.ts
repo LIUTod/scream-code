@@ -41,14 +41,16 @@ export class BackgroundManager extends BackgroundProcessManager {
   private readonly deliveredNotificationKeys = new Set<string>();
   /**
    * Session-death latch, set by `Session.close()` before it tears anything
-   * down (see `markSessionClosed`). While set, a terminal task notification is
-   * dropped instead of steered — see `notifyBackgroundTask`.
+   * down, and by a subagent's terminal release as it evicts its finished
+   * owner (see `markSessionClosed`). While set, a terminal task notification
+   * is dropped instead of steered — see `notifyBackgroundTask`.
    */
   private sessionClosed = false;
 
   constructor(public readonly agent: Agent) {
     super({
       maxRunningTasks: agent.screamConfig?.background?.maxRunningTasks,
+      killGracePeriodMs: agent.screamConfig?.background?.killGracePeriodMs,
       sessionDir: agent.homedir,
     });
 
@@ -68,22 +70,28 @@ export class BackgroundManager extends BackgroundProcessManager {
   }
 
   /**
-   * Latch this manager to a closing session. `Session.close()` calls it for
-   * every resident agent before any teardown runs, so that from the very first
-   * teardown step on a terminal task notification is no longer steered into the
-   * session (see `notifyBackgroundTask`). That single drop does both jobs:
-   * no ghost turn is launched for the dead session, and the notification stays
-   * undelivered, so the reconcile path (`restoreBackgroundTaskNotifications`)
-   * appends it silently the next time the session is opened.
+   * Latch this manager so no further terminal task notification is steered
+   * through it (see `notifyBackgroundTask`). Two owners set it:
    *
-   * The latch has no reset counterpart on purpose: it models the session's
-   * death, and no manager instance outlives the close that set it. A closed
-   * session is discarded (the RPC layer's closeSession deletes it from the
-   * active map, and a later activation constructs a new `Session`), and even a
-   * direct `Session.resume()` on the same object drops every live agent
-   * (`this.agents.clear()`) before re-instantiating them from metadata — so a
-   * reopened session always runs brand-new BackgroundManager instances whose
-   * latch starts unset.
+   * - `Session.close()` calls it for every manager the session created, before
+   *   any teardown runs. That single drop does both jobs: no ghost turn is
+   *   launched for the closing session, and the notification stays undelivered,
+   *   so the reconcile path (`restoreBackgroundTaskNotifications`) appends it
+   *   silently the next time the session is opened.
+   * - The subagent host latches a child's manager when the child is evicted at
+   *   the end of its run. The child can no longer consume a notification, and
+   *   the tasks that outlive it — a parked foreground command above all —
+   *   would otherwise wake the evicted agent as a ghost turn. The drop is the
+   *   same: undelivered here, reported as `lost` by the reconcile of the
+   *   fresh manager a later resume builds.
+   *
+   * The latch has no reset counterpart on purpose: it models "this manager has
+   * no live consumer left", and nothing re-registers the latched instance. A
+   * closed session is discarded (the RPC layer's closeSession deletes it from
+   * the active map, and a later activation constructs a new `Session`), and
+   * `Session.resume()` / `ensureAgent` drop evicted agents before
+   * re-instantiating them from metadata — so every reopened or resumed owner
+   * runs a brand-new BackgroundManager whose latch starts unset.
    */
   markSessionClosed(): void {
     this.sessionClosed = true;
@@ -139,23 +147,25 @@ export class BackgroundManager extends BackgroundProcessManager {
    * same boundary, each scoped to the manager's own agent.
    */
   private async notifyBackgroundTask(info: BackgroundTaskInfo): Promise<void> {
-    // Session-death gate (see `markSessionClosed`): a session that is closing
-    // or closed must not be steered. Steering an idle agent auto-launches a
-    // turn (`AgentTurn.steer` → `launch`), and for a dead session that turn is
-    // a ghost — invisible to the user, but it still spends API calls and
-    // writes wire records. Checked BEFORE the context builder on purpose: the
-    // builder reserves a scheduled-notification key, and a reservation whose
-    // delivery never happened would also block the reconcile path
-    // (`restoreBackgroundTaskNotifications`) from re-delivering this
+    // Consumer gate (see `markSessionClosed`): there is no one left to steer
+    // this notification into when the session is closing or closed, OR the
+    // owning subagent was evicted at the end of its run. Steering an idle
+    // agent auto-launches a turn (`AgentTurn.steer` → `launch`), and in both
+    // cases that turn is a ghost — invisible to the user, but it still spends
+    // API calls and writes wire records. Checked BEFORE the context builder on
+    // purpose: the builder reserves a scheduled-notification key, and a
+    // reservation whose delivery never happened would also block the reconcile
+    // path (`restoreBackgroundTaskNotifications`) from re-delivering this
     // notification when the session is next opened.
     if (this.sessionClosed) return;
     const context = await this.buildBackgroundTaskNotificationContext(info);
     if (context === undefined) return;
     if (this.sessionClosed) {
-      // The close started while the notification was being built. Release the
-      // reservation taken above for the same reason — reconcile must still be
-      // able to re-deliver — and do not steer: steering now would launch
-      // exactly the ghost turn this gate exists to prevent.
+      // The latch was set while the notification was being built (the session
+      // started closing, or the child was evicted). Release the reservation
+      // taken above for the same reason — reconcile must still be able to
+      // re-deliver — and do not steer: steering now would launch exactly the
+      // ghost turn this gate exists to prevent.
       this.scheduledNotificationKeys.delete(notificationKey(context.origin));
       return;
     }

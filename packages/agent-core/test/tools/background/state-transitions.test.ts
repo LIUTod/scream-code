@@ -1,178 +1,65 @@
 /**
- * `awaiting_approval` state transitions.
+ * Cancellation attribution for background tasks.
  *
- * BPM has 6 states:
- *   running ↔ awaiting_approval → {completed, failed, killed, lost}
+ * A cancellation is not a failure: `killed` is the status the notification
+ * layer reads as "the user ended this deliberately" — it never advertises
+ * Agent(resume=...) — so every cancel path must land there.
  *
  * Semantics:
- *   - mark / clear are no-ops unless the target task exists and is not
- *     terminal
- *   - UI reads the BPM state directly (ApprovalRuntime remains the
- *     policy layer); BPM is the single source of truth for "is this
- *     task actively running or gated"
- *   - `stop()` applied to an awaiting_approval task transitions
- *     straight to `killed` with the approvalReason cleared
+ *   - an abort-shaped rejection is a cancellation whether or not a BPM-side
+ *     `stop()` latched `stopRequested` first: a user interrupt (ESC / turn
+ *     cancel) aborts a background run through its own controller, without
+ *     ever calling `stop()`
+ *   - a runner-raised `RunCancelled` is the same signal arriving as an error
+ *     name
+ *   - a non-abort rejection that arrives while a stop is in flight stays a
+ *     failure: the user's cancellation must not hide a real error
  */
 
-import { Readable } from 'node:stream';
-import type { Writable } from 'node:stream';
-
-import type { JianProcess } from '@scream-code/jian';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import { BackgroundProcessManager } from '../../../src/tools/background/manager';
 
-function pendingProcess(): { proc: JianProcess; resolve: (code: number) => void } {
-  let resolveWait: (code: number) => void = () => {};
-  const waitPromise = new Promise<number>((res) => {
-    resolveWait = res;
+/** Reject a completion on the next tick so registration has returned. */
+function rejectSoon(error: unknown): Promise<{ result: string }> {
+  return new Promise((_resolve, reject) => {
+    setTimeout(() => {
+      reject(error);
+    }, 0);
   });
-  let currentExitCode: number | null = null;
-  const proc: JianProcess = {
-    stdin: { write: vi.fn(), end: vi.fn() } as unknown as Writable,
-    stdout: Readable.from([]),
-    stderr: Readable.from([]),
-    pid: 42_042,
-    get exitCode(): number | null {
-      return currentExitCode;
-    },
-    wait: () => waitPromise,
-    kill: vi.fn(async () => {
-      if (currentExitCode === null) {
-        currentExitCode = 143;
-        resolveWait(143);
-      }
-    }) as unknown as JianProcess['kill'],
-  };
-  return {
-    proc,
-    resolve: (code) => {
-      if (currentExitCode === null) {
-        currentExitCode = code;
-        resolveWait(code);
-      }
-    },
-  };
 }
 
-describe('BackgroundProcessManager — awaiting_approval state', () => {
+describe('BackgroundProcessManager — cancellation attribution', () => {
   const manager = new BackgroundProcessManager();
 
   afterEach(() => {
     manager._reset();
   });
 
-  it('markAwaitingApproval flips running → awaiting_approval and stores reason', () => {
-    const { proc } = pendingProcess();
-    const taskId = manager.register(proc, 'sleep 999', 'approval test');
+  it('an abort rejection without a stop() marks the task killed, not failed', async () => {
+    // The user-interrupt shape: the run's own controller aborts and the
+    // completion rejects with an AbortError, while no BPM stop() ever ran.
+    const abortError = new Error('Aborted by the user');
+    abortError.name = 'AbortError';
+    const taskId = manager.registerAgentTask(rejectSoon(abortError), 'interrupted run');
 
-    manager.markAwaitingApproval(taskId, 'Write to /etc/hosts');
-    const info = manager.getTask(taskId);
-    expect(info?.status).toBe('awaiting_approval');
-    expect(info?.approvalReason).toBe('Write to /etc/hosts');
+    const info = await manager.waitForTerminal(taskId);
+
+    expect(info?.status).toBe('killed');
+    expect(info?.stopReason).toBeUndefined();
   });
 
-  it('clearAwaitingApproval flips awaiting_approval → running and drops reason', () => {
-    const { proc } = pendingProcess();
-    const taskId = manager.register(proc, 'x', 'd');
-    manager.markAwaitingApproval(taskId, 'do thing');
+  it('treats a session-cancelled run the same way (abort reason, no stop latch)', async () => {
+    const cancelReason = new Error('Aborted by the user');
+    cancelReason.name = 'AbortError';
+    (cancelReason as Error & { userCancelled?: boolean }).userCancelled = true;
+    const taskId = manager.registerAgentTask(rejectSoon(cancelReason), 'session cancel');
 
-    manager.clearAwaitingApproval(taskId);
-    const info = manager.getTask(taskId);
-    expect(info?.status).toBe('running');
-    expect(info?.approvalReason).toBeUndefined();
+    const info = await manager.waitForTerminal(taskId);
+
+    expect(info?.status).toBe('killed');
   });
 
-  it('markAwaitingApproval is a no-op on terminal tasks', async () => {
-    const { proc, resolve } = pendingProcess();
-    const taskId = manager.register(proc, 'x', 'd');
-    resolve(0);
-    await new Promise((r) => {
-      setTimeout(r, 20);
-    });
-    expect(manager.getTask(taskId)?.status).toBe('completed');
-
-    manager.markAwaitingApproval(taskId, 'too late');
-    // Status and approvalReason unchanged.
-    const info = manager.getTask(taskId);
-    expect(info?.status).toBe('completed');
-    expect(info?.approvalReason).toBeUndefined();
-  });
-
-  it('stop on an awaiting_approval task flips to killed and clears reason', async () => {
-    const { proc } = pendingProcess();
-    const taskId = manager.register(proc, 'x', 'd');
-    manager.markAwaitingApproval(taskId, 'waiting…');
-
-    const stopped = await manager.stop(taskId);
-    expect(stopped?.status).toBe('killed');
-    expect(stopped?.approvalReason).toBeUndefined();
-  });
-
-  it('list(true) includes awaiting_approval (non-terminal is active)', () => {
-    const { proc } = pendingProcess();
-    const taskId = manager.register(proc, 'x', 'd');
-    manager.markAwaitingApproval(taskId, 'waiting…');
-
-    const active = manager.list(true);
-    expect(active).toHaveLength(1);
-    expect(active[0]?.status).toBe('awaiting_approval');
-  });
-
-  it('clearAwaitingApproval on a non-awaiting task is a no-op', () => {
-    const { proc } = pendingProcess();
-    const taskId = manager.register(proc, 'x', 'd');
-    // Task is still `running` — nothing to clear.
-    manager.clearAwaitingApproval(taskId);
-    expect(manager.getTask(taskId)?.status).toBe('running');
-  });
-
-  // _mark_task_running is a no-op if the task is already in a terminal
-  // state. Prevents a late approval-resolve from clobbering `killed`
-  // or `completed`.
-  it('a state transition does not overwrite a terminal status', async () => {
-    const { proc, resolve } = pendingProcess();
-    const taskId = manager.register(proc, 'x', 'd');
-    resolve(0);
-    await new Promise((r) => {
-      setTimeout(r, 20);
-    });
-    expect(manager.getTask(taskId)?.status).toBe('completed');
-
-    // Try to flip to awaiting_approval and back — both must be no-ops.
-    manager.markAwaitingApproval(taskId, 'too late');
-    manager.clearAwaitingApproval(taskId);
-    expect(manager.getTask(taskId)?.status).toBe('completed');
-  });
-
-  // State transitions out of awaiting_approval must clear failure_reason
-  // (which carried the approval prompt). Both transitions back to
-  // running AND straight to completed must clear it.
-  it('leaving awaiting_approval clears the carried approval reason', async () => {
-    const { proc, resolve } = pendingProcess();
-    const taskId = manager.register(proc, 'x', 'd');
-    manager.markAwaitingApproval(taskId, 'pending approval prompt');
-    expect(manager.getTask(taskId)?.approvalReason).toBe('pending approval prompt');
-
-    // Path 1: awaiting → running clears reason.
-    manager.clearAwaitingApproval(taskId);
-    expect(manager.getTask(taskId)?.approvalReason).toBeUndefined();
-
-    // Path 2: awaiting → completed must ALSO clear approval reason.
-    manager.markAwaitingApproval(taskId, 'second prompt');
-    resolve(0);
-    await new Promise((r) => {
-      setTimeout(r, 20);
-    });
-    const finalInfo = manager.getTask(taskId);
-    expect(finalInfo?.status).toBe('completed');
-    expect(finalInfo?.approvalReason).toBeUndefined();
-  });
-
-  // RunCancelled propagating from the background runner marks the task
-  // as `killed` (not `failed`) — Ctrl+C is cancel, not failure. The TS
-  // agent code today maps internal rejections to `failed`; this is the
-  // py contract that diverges at the agent-runner layer.
   it('RunCancelled in an agent run marks the task as killed (not failed)', async () => {
     class RunCancelled extends Error {
       constructor() {
@@ -186,5 +73,24 @@ describe('BackgroundProcessManager — awaiting_approval state', () => {
     );
     const info = await manager.waitForTerminal(taskId);
     expect(info?.status).toBe('killed');
+  });
+
+  it('a real failure racing an in-flight stop stays failed', async () => {
+    // stopRequested is set, but the rejection is not abort-shaped: a model
+    // error won the race, and recording it as a kill would file a genuine
+    // failure as a user cancellation.
+    let rejectCompletion!: (err: unknown) => void;
+    const completion = new Promise<{ result: string }>((_resolve, reject) => {
+      rejectCompletion = reject;
+    });
+    const taskId = manager.registerAgentTask(completion, 'racy failure', {
+      abort: () => {
+        rejectCompletion(new Error('model error'));
+      },
+    });
+
+    const info = await manager.stop(taskId);
+
+    expect(info?.status).toBe('failed');
   });
 });

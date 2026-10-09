@@ -2,9 +2,9 @@
  * Format a `BackgroundTaskInfo` snapshot into the transcript card data
  * consumed by `BackgroundAgentStatusComponent`.
  *
- * Background tasks have six statuses (running / awaiting_approval /
- * completed / failed / killed / lost) but the transcript card only
- * renders three visual phases (started / completed / failed). The
+ * Background tasks have five statuses (running / completed / failed /
+ * killed / lost) but the transcript card only renders three visual
+ * phases (started / completed / failed). The
  * mapping packs the extra nuance — exit code, kill reason, lost-reason
  * — into the dim detail line so the user still sees it.
  */
@@ -30,7 +30,6 @@ export type BackgroundTaskTranscriptPhase = 'started' | 'updated' | 'terminal';
 function phaseFromStatus(status: BackgroundTaskStatus): BackgroundAgentStatusPhase {
   switch (status) {
     case 'running':
-    case 'awaiting_approval':
       return 'started';
     case 'completed':
       return 'completed';
@@ -50,8 +49,6 @@ function headlineFor(info: BackgroundTaskInfo): string {
   switch (info.status) {
     case 'running':
       return t('bgtask.started_bg', { subject });
-    case 'awaiting_approval':
-      return t('bgtask.awaiting_approval', { subject });
     case 'completed':
       return t('bgtask.completed_bg', { subject });
     case 'failed':
@@ -76,10 +73,6 @@ function detailFor(info: BackgroundTaskInfo): string | undefined {
   if (info.status === 'killed') {
     const reason = truncate(info.stopReason);
     parts.push(reason !== undefined ? t('bgtask.stopped_reason', { reason }) : t('bgtask.stopped'));
-  }
-  if (info.status === 'awaiting_approval') {
-    const reason = truncate(info.approvalReason);
-    if (reason !== undefined) parts.push(t('bgtask.waiting', { reason }));
   }
   if (info.status === 'lost') {
     parts.push(t('bgtask.session_restarted'));

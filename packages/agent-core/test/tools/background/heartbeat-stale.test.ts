@@ -1,11 +1,13 @@
 /**
- * BPM reconcile identifies stale ghost tasks on startup and fires a
- * single `onTerminal` callback (lost) per ghost, deduped on a second
- * reconcile.
+ * BPM reconcile identifies ghost tasks on startup and fires a single
+ * `onTerminal` callback (lost) per ghost, deduped on a second reconcile.
  *
- * Uses **real timers**: reconcile is a batch operation driven by
- * `started_at` comparisons, not setTimeout, so fake timers would only
- * add noise.
+ * Reconcile is immediate, not TTL-based: the persisted shape carries no
+ * heartbeat timestamp, and any non-terminal record loaded from a previous
+ * process has no live process behind it (see `markLoadedTasksLost`).
+ *
+ * Uses **real timers**: reconcile is a batch operation over the loaded ghost
+ * map, not a setTimeout race, so fake timers would only add noise.
  *
  * The broader BPM ↔ notification wiring used to live in a host integration
  * test; here we validate the BPM surface (callback shape + idempotency) in
@@ -35,9 +37,9 @@ afterEach(async () => {
   await rm(sessionDir, { recursive: true, force: true });
 });
 
-describe('BPM reconcile — stale heartbeat ghost detection', () => {
-  it('fires onTerminal with status=lost for a stale running ghost', async () => {
-    // Seed a ghost that started 1 hour ago and was never closed out.
+describe('BPM reconcile — restored non-terminal ghost detection', () => {
+  it('fires onTerminal with status=lost for a restored non-terminal ghost', async () => {
+    // Seed a ghost from a previous process: left running, never closed out.
     const oneHourAgo = Date.now() - 60 * 60 * 1000;
     await writeTask(sessionDir, {
       task_id: 'bash-stale000',

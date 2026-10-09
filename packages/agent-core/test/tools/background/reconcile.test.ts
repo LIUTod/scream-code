@@ -186,20 +186,19 @@ describe('BackgroundProcessManager — loadFromDisk + reconcile', () => {
     expect(fired[0]?.status).toBe('lost');
   });
 
-  it('reconcile treats corrupted runtime (awaiting_approval ghost) as lost', async () => {
-    // awaiting_approval is non-terminal — when the previous process
-    // died mid-approval, the task cannot possibly resume; reconcile
-    // must downgrade it to `lost` just like a running ghost.
+  it('reconcile downgrades a non-terminal ghost and rewrites its on-disk record', async () => {
+    // A record left non-terminal by a dead process has no handle behind it in
+    // this process — no streams, no pid it can act on — so reconcile must
+    // downgrade it to `lost` and persist that, not leave it reading `running`.
     await writeTask(sessionDir, {
       task_id: 'bash-corrupt0',
       command: 'do_approval',
-      description: 'corrupted approval',
+      description: 'left non-terminal',
       pid: 7777,
       started_at: 1_700_000_000,
       ended_at: null,
       exit_code: null,
-      status: 'awaiting_approval',
-      approval_reason: 'ghost reason that should be cleared',
+      status: 'running',
     });
     const mgr = new BackgroundProcessManager();
     mgr.attachSessionDir(sessionDir);
@@ -208,7 +207,9 @@ describe('BackgroundProcessManager — loadFromDisk + reconcile', () => {
 
     expect(result.lost).toEqual(['bash-corrupt0']);
     expect(result.lostInfo[0]?.status).toBe('lost');
-    expect(result.lostInfo[0]?.approvalReason).toBeUndefined();
+    expect(result.lostInfo[0]?.endedAt).toBeTypeOf('number');
+    const persisted = (await listTasks(sessionDir)).find((t) => t.task_id === 'bash-corrupt0');
+    expect(persisted?.status).toBe('lost');
   });
 
   it('reconcile does not republish already-lost ghosts on second pass', async () => {
@@ -236,10 +237,11 @@ describe('BackgroundProcessManager — loadFromDisk + reconcile', () => {
     expect(fired).toEqual(['bash-nodup000']);
   });
 
-  // Stale running task with heartbeat older than threshold gets
-  // reclassified as `lost` AND its failure_reason is set to the
-  // canonical "heartbeat expired" string.
-  it('recover marks a stale heartbeat as lost with the expected failure reason', async () => {
+  // A non-terminal record left by a dead process has no handle in this
+  // process, so reconcile marks it `lost` immediately and the reason states
+  // that fact. Deliberately not a staleness verdict: the persisted shape
+  // carries no heartbeat timestamp for one to expire.
+  it('reconcile marks a restored non-terminal record lost with a factual reason', async () => {
     await writeTask(sessionDir, {
       task_id: 'bash-stale001',
       command: 'sleep 10',
@@ -256,12 +258,7 @@ describe('BackgroundProcessManager — loadFromDisk + reconcile', () => {
     const result = await mgr.reconcile();
     expect(result.lost).toEqual(['bash-stale001']);
     const ghost = mgr.getTask('bash-stale001');
-    // Py: failure_reason == "Background worker heartbeat expired".
-    // TS does not carry a failureReason field — gap at the manager
-    // surface. Assert the py contract.
-    expect((ghost as unknown as { failureReason?: string }).failureReason).toBe(
-      'Background worker heartbeat expired',
-    );
+    expect(ghost?.failureReason).toBe('Task had no live process when the session was restored');
   });
 
   // Full reconcile integration: stale-running task is downgraded to

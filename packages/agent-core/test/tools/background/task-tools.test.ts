@@ -391,17 +391,16 @@ describe('TaskOutputTool', () => {
     }
   });
 
-  it('reports awaiting_approval as not_ready when block=false', async () => {
+  it('reports a still-running task as not_ready when block=false', async () => {
     const proc = pendingProcess();
-    const taskId = manager.register(proc, 'sleep 60', 'approval output test');
-    manager.markAwaitingApproval(taskId, 'waiting for root approval');
+    const taskId = manager.register(proc, 'sleep 60', 'running output test');
 
     const result = await executeTool(tool, context('c_awaiting_output', { task_id: taskId }));
 
     expect(result.isError).toBe(false);
     const content = toolContentString(result);
     expect(content).toContain('retrieval_status: not_ready');
-    expect(content).toContain('status: awaiting_approval');
+    expect(content).toContain('status: running');
   });
 
   it('settles an already-exited process before reporting non-blocking output', async () => {
@@ -420,10 +419,9 @@ describe('TaskOutputTool', () => {
     expect(content).toContain('exit_code: 143');
   });
 
-  it('waits on awaiting_approval when block=true and reports timeout if still non-terminal', async () => {
+  it('waits on a still-running task when block=true and reports timeout if still non-terminal', async () => {
     const proc = pendingProcess();
-    const taskId = manager.register(proc, 'sleep 60', 'approval blocking output test');
-    manager.markAwaitingApproval(taskId, 'waiting for root approval');
+    const taskId = manager.register(proc, 'sleep 60', 'blocking output test');
 
     const result = await executeTool(tool,
       context('c_awaiting_output_block', { task_id: taskId, block: true, timeout: 0 }),
@@ -432,7 +430,7 @@ describe('TaskOutputTool', () => {
     expect(result.isError).toBe(false);
     const content = toolContentString(result);
     expect(content).toContain('retrieval_status: timeout');
-    expect(content).toContain('status: awaiting_approval');
+    expect(content).toContain('status: running');
   });
 });
 
@@ -796,16 +794,15 @@ describe('TaskStopTool', () => {
     expect(manager.getTask(taskId)?.stopReason).toBe('custom stop reason');
   });
 
-  it('stops an awaiting_approval task', async () => {
+  it('stops a running task and records the kill', async () => {
     const proc = pendingProcess();
-    const taskId = manager.register(proc, 'sleep 60', 'approval stop test');
-    manager.markAwaitingApproval(taskId, 'waiting for root approval');
+    const taskId = manager.register(proc, 'sleep 60', 'stop test');
 
     const result = await executeTool(tool, context('c_awaiting_stop', { task_id: taskId }));
 
     expect(result.isError).toBe(false);
     expect(toolContentString(result)).toContain('status: killed');
-    expect(manager.getTask(taskId)?.approvalReason).toBeUndefined();
+    expect(manager.getTask(taskId)?.status).toBe('killed');
   });
 
   it('persists stop reason when attached to a session directory', async () => {
@@ -1190,13 +1187,9 @@ describe('background store — partial output reads (TS surface)', () => {
   });
 });
 
-// A background agent paused in `awaiting_approval` can be killed via
-// the TaskStop tool — the task transitions to `killed`. The
-// downstream side effect (clearing pending approvals on the
-// ApprovalRuntime) lives outside the BPM in TS by design and is
-// covered by ApprovalRuntime's own tests; this test scopes only the
-// status transition through the tool boundary.
-describe('TaskStopTool on awaiting-approval agents', () => {
+// A running background agent can be stopped through the TaskStop tool: the
+// task transitions to `killed`, and its abort callback ends the run.
+describe('TaskStopTool on running agents', () => {
   const manager = new BackgroundProcessManager();
   const stop = new TaskStopTool(manager);
 
@@ -1204,7 +1197,7 @@ describe('TaskStopTool on awaiting-approval agents', () => {
     manager._reset();
   });
 
-  it('TaskStop on an awaiting_approval agent transitions the task to killed', async () => {
+  it('TaskStop aborts a running agent task and lands it on killed', async () => {
     let rejectCompletion!: (err: unknown) => void;
     const completion = new Promise<{ result: string }>((_res, rej) => {
       rejectCompletion = rej;
@@ -1216,7 +1209,6 @@ describe('TaskStopTool on awaiting-approval agents', () => {
         rejectCompletion(abortError);
       },
     });
-    manager.markAwaitingApproval(taskId, 'edit file');
     const result = await executeTool(stop, context('c_stop_awaiting', { task_id: taskId }));
     expect(result.isError).toBe(false);
     const info = manager.getTask(taskId);

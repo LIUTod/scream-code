@@ -45,10 +45,6 @@ import type { SubagentCapabilityMode } from './subagent-capability';
 import { SessionDisposables } from './dispose-registry';
 import { SubagentMessageBus } from './subagent-messages';
 import type { ToolServices } from '../tools/support/services';
-// Cross-layer value import (orchestration → tool layer): the pending-task map
-// is module-level state owned by the shell tool and has no ToolContext at
-// session teardown; `stopAllPendingBackgroundTasks` is its public sweep entry.
-import { stopAllPendingBackgroundTasks } from '../tools/builtin/shell/background-tasks';
 import type { LspProcessSupervisor } from '../lsp/process-supervisor';
 
 export interface SessionOptions {
@@ -223,18 +219,13 @@ export class Session {
       }
     });
     this.disposables.add('background-pending', async () => {
-      // Sweep the shell tool's module-level pending-task map (timed-out
-      // commands parked in the background) for THIS session only: the map is
-      // process-wide while several sessions (and all their subagents) share it,
-      // so an unscoped sweep here would execute another session's parked
-      // commands. The owner key is this session's id — the value each of its
-      // agents stamps on what it parks (see AgentOptions.sessionId). The id is
-      // optional: a session created without one stamps no owner and sweeps the
-      // owner-less tasks only, never another session's. Then apply the
-      // session-exit policy for per-agent background tasks
-      // (stopBackgroundTasksOnExit): keepAliveOnExit only protects bash
-      // processes now — agent tasks die with the session.
-      stopAllPendingBackgroundTasks(this.options.id);
+      // Apply the session-exit policy for per-agent background tasks
+      // (stopBackgroundTasksOnExit). Every background task — a timed-out
+      // foreground command parked by the shell tool included — lives in the
+      // manager of the agent that owns it, so this sweep reaches exactly this
+      // session's tasks by construction; no cross-session registry exists to
+      // scope. keepAliveOnExit protects bash processes (parked commands
+      // included) — agent tasks die with the session.
       await this.stopBackgroundTasksOnExit();
     });
     this.disposables.add('cron', async () => {

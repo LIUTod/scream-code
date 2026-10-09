@@ -38,18 +38,9 @@ import {
  * `'lost'` is a reconcile-only terminal state. Tasks loaded from disk
  * that were marked `running` at startup but have no live JianProcess
  * (the previous CLI process died) are reclassified as lost.
- *
- * `'awaiting_approval'` is a non-terminal state entered when a background
- * agent task is paused waiting for tool-call approval from the root
- * agent. The BPM state machine is the single source of truth for "is
- * this task actively running vs. gated on approval" — UI reads from BPM
- * instead of reverse-querying the ApprovalRuntime. The loop boundary is
- * preserved because `awaiting_approval` in BPM does not leak permission
- * vocabulary into the loop.
  */
 export type BackgroundTaskStatus =
   | 'running'
-  | 'awaiting_approval'
   | 'completed'
   | 'failed'
   | 'killed'
@@ -82,8 +73,6 @@ export interface BackgroundTaskInfo {
   readonly exitCode: number | null;
   readonly startedAt: number;
   readonly endedAt: number | null;
-  /** Populated only while `status === 'awaiting_approval'`. */
-  readonly approvalReason?: string | undefined;
   /** True when an agent task was aborted by its deadline. */
   readonly timedOut?: boolean | undefined;
   /** Reason recorded when a task is explicitly stopped. */
@@ -100,7 +89,10 @@ export interface BackgroundTaskInfo {
   readonly subagentType?: string | undefined;
   /**
    * Human-readable reason recorded when a non-terminal task is reclassified
-   * via reconcile (e.g. a stale heartbeat → lost).
+   * via reconcile (e.g. "Task had no live process when the session was
+   * restored"). Deliberately not a staleness/TTL check: a ghost is
+   * reclassified because no process owns its exit anymore, never because a
+   * heartbeat aged out (see `markLoadedTasksLost`).
    */
   readonly failureReason?: string | undefined;
 }
@@ -113,6 +105,14 @@ interface ManagedProcess {
   readonly outputChunks: string[];
   /** Total UTF-8 bytes observed, including chunks dropped from the live ring buffer. */
   outputSizeBytes: number;
+  /** UTF-8 bytes currently held in `outputChunks` (never above `MAX_OUTPUT_BYTES`). */
+  outputRingBytes: number;
+  /**
+   * True when the caller owns the process streams and forwards what it
+   * captures through `appendCapturedOutput` (a parked foreground command)
+   * instead of the manager attaching its own stdout/stderr listeners.
+   */
+  externalStreams?: boolean | undefined;
   status: BackgroundTaskStatus;
   exitCode: number | null;
   readonly startedAt: number;
@@ -121,8 +121,6 @@ interface ManagedProcess {
   readonly waiters: Array<() => void>;
   /** True once `fireTerminalCallbacks` has already run. */
   terminalFired: boolean;
-  /** Reason carried while awaiting approval. */
-  approvalReason?: string | undefined;
   /** Set when a deadline fires before natural completion. */
   timedOut?: boolean | undefined;
   /** Reason recorded when a task is explicitly stopped. */
@@ -133,7 +131,7 @@ interface ManagedProcess {
   agentId?: string | undefined;
   /** Subagent profile name (agent tasks only). */
   subagentType?: string | undefined;
-  /** Non-terminal-reclassification reason (e.g. stale heartbeat). */
+  /** Non-terminal-reclassification reason (e.g. no live process at restore; see `markLoadedTasksLost`). */
   failureReason?: string | undefined;
   /** True after stop() has requested cancellation but before terminal status is chosen. */
   stopRequested: boolean;
@@ -211,6 +209,7 @@ const RETIRED_TASK_LIMIT = 20;
  */
 const TAIL_WINDOW_LOOKBACK_BYTES = 4096;
 
+/** Default SIGTERM→SIGKILL grace; `BackgroundProcessManagerOptions.killGracePeriodMs` overrides it. */
 const SIGTERM_GRACE_MS = 5_000;
 const EXIT_SETTLE_GRACE_MS = 10;
 
@@ -246,6 +245,8 @@ export interface ReconcileResult {
 
 export interface BackgroundProcessManagerOptions {
   readonly maxRunningTasks?: number;
+  /** SIGTERM→SIGKILL grace used by `stop()`; defaults to `SIGTERM_GRACE_MS`. */
+  readonly killGracePeriodMs?: number;
   readonly sessionDir?: string;
 }
 
@@ -326,7 +327,10 @@ export class BackgroundProcessManager {
   /**
    * Register a callback that fires on every lifecycle transition:
    *   - 'started':    task just registered (either bash or agent)
-   *   - 'updated':    awaiting_approval entered / cleared
+   *   - 'updated':    in-place state change of a non-terminal task;
+   *                   nothing emits it today (no non-terminal state has a
+   *                   producer), kept in the lifecycle contract for
+   *                   subscribers that switch on it
    *   - 'terminated': task reached a terminal state (also triggers
    *                   onTerminal); fires exactly once per task.
    *
@@ -475,6 +479,7 @@ export class BackgroundProcessManager {
       proc,
       outputChunks: [],
       outputSizeBytes: 0,
+      outputRingBytes: 0,
       status: 'running',
       exitCode: null,
       startedAt: Date.now(),
@@ -515,6 +520,123 @@ export class BackgroundProcessManager {
     return taskId;
   }
 
+  /**
+   * Adopt a foreground command that outlived its tool timeout.
+   *
+   * The caller (the Bash tool) has been reading the process streams since
+   * spawn and keeps reading them, so this path deliberately does NOT attach
+   * the manager's own stdout/stderr capture: the caller forwards what it
+   * captures through `appendCapturedOutput`, and `completion` settles the
+   * task through the same exit path as a spawned background command.
+   * Everything else is the unified background base — a stable id, per-agent
+   * capacity, the persisted record, lifecycle events, TaskList/TaskOutput/
+   * TaskStop visibility, and the terminal notification that delivers the
+   * result back to the agent that parked it (the only delivery channel for
+   * a subagent that has no Task tools).
+   *
+   * Throws when this agent is already at `maxRunningTasks`, exactly like
+   * `register()`: the caller owns what happens to a process it cannot park.
+   */
+  parkForegroundProcess(
+    completion: Promise<{ exitCode: number }>,
+    command: string,
+    description: string,
+    handles: {
+      /** Caller-side escalation (SIGTERM → grace → SIGKILL). */
+      readonly kill: () => Promise<void>;
+      readonly pid?: number | undefined;
+      /** Output captured before parking; the task's log continues from it. */
+      readonly initialOutput?: string | undefined;
+    },
+  ): string {
+    this.assertCanRegister();
+    const taskId = generateTaskId('bash');
+    const entry: ManagedProcess = {
+      taskId,
+      command,
+      description,
+      // Streamless process stand-in: the caller owns the pipes and its kill
+      // handle carries the escalation, so `stop()`'s own SIGKILL call is a
+      // second chance rather than the primary one. `completion` drives the
+      // lifecycle below; the dummy `wait` only satisfies the shape. `exitCode`
+      // starts null and is written back when the caller's completion reports
+      // the exit, so the handle mirrors the two-step exit of a real process —
+      // see the lifecycle chain below.
+      proc: {
+        stdin: { write: () => false, end: () => {} } as never,
+        stdout: { setEncoding: () => {}, on: () => {} } as never,
+        stderr: { setEncoding: () => {}, on: () => {} } as never,
+        pid: handles.pid ?? 0,
+        exitCode: null,
+        wait: () => completion.then(({ exitCode }) => exitCode),
+        kill: async () => {
+          await handles.kill();
+        },
+      } as unknown as JianProcess,
+      outputChunks: [],
+      outputSizeBytes: 0,
+      outputRingBytes: 0,
+      externalStreams: true,
+      status: 'running',
+      exitCode: null,
+      startedAt: Date.now(),
+      endedAt: null,
+      waiters: [],
+      terminalFired: false,
+      stopRequested: false,
+      outputSessionDir: this.sessionDir,
+      lifecyclePromise: Promise.resolve(),
+      persistWriteQueue: Promise.resolve(),
+      outputWriteQueue: Promise.resolve(),
+    };
+    this.processes.set(taskId, entry);
+    if (handles.initialOutput !== undefined && handles.initialOutput.length > 0) {
+      this.appendOutput(entry, handles.initialOutput);
+    }
+    void this.persistLive(entry);
+    this.fireLifecycle('started', this.toInfo(entry));
+
+    entry.lifecyclePromise = completion
+      // Publish the observed exit on the stand-in handle first, in its own
+      // microtask: a real process reports its exit in two steps — the OS
+      // 'exit' event makes `proc.exitCode` non-null, then `wait()` resolves
+      // and the lifecycle settles — and `observedExitCompletions` selects
+      // "just exited" tasks by exactly that non-null `proc.exitCode`. Without
+      // this writeback a parked task is invisible to that selector, so a
+      // caller settling right as the command exits (TaskOutput / TaskList /
+      // TaskStop via `settlePendingExits`) reads the stale `running` instead
+      // of waiting the last step out.
+      .then(({ exitCode }) => {
+        // The stand-in handle is ours: JianProcess types `exitCode` readonly
+        // because a real handle's value comes from the OS, and the parked path
+        // has no such event — this writeback is its stand-in.
+        (entry.proc as { exitCode: number | null }).exitCode = exitCode;
+        return exitCode;
+      })
+      .then((exitCode) => this.settleProcessExit(entry, exitCode))
+      .catch(async () => {
+        // The caller's completion is the process wait(): a rejection means
+        // the wait itself failed, so the task ends unresolved instead of
+        // borrowing an exit code that was never observed.
+        await this.finalizeTerminal(entry, entry.stopRequested ? 'killed' : 'failed', null);
+      });
+    void entry.lifecyclePromise;
+
+    return taskId;
+  }
+
+  /**
+   * Forward output a caller captured for a task it parked
+   * (`parkForegroundProcess`). A no-op for every other task: the manager
+   * reads its streams itself for those, so appending a caller's copy would
+   * duplicate the log.
+   */
+  appendCapturedOutput(taskId: string, chunk: string): void {
+    const entry = this.processes.get(taskId);
+    if (entry === undefined || entry.externalStreams !== true) return;
+    this.appendOutput(entry, chunk);
+  }
+
   /** Get info about a specific task. Falls back to retired, then reconcile ghosts. */
   getTask(taskId: string): BackgroundTaskInfo | undefined {
     const entry = this.processes.get(taskId);
@@ -551,9 +673,6 @@ export class BackgroundProcessManager {
   list(activeOnly = true, limit?: number): BackgroundTaskInfo[] {
     const result: BackgroundTaskInfo[] = [];
     for (const entry of this.processes.values()) {
-      // An awaiting_approval task is non-terminal and therefore counts
-      // as active in listings (UI needs to show it alongside plain
-      // running tasks).
       if (activeOnly && TERMINAL_STATUSES.has(entry.status)) continue;
       result.push(this.toInfo(entry));
       if (limit !== undefined && result.length >= limit) return result;
@@ -766,8 +885,9 @@ export class BackgroundProcessManager {
     return taskOutputFile(outputSessionDir, taskId);
   }
 
-  /** Stop a running task. SIGTERM → 5s grace → SIGKILL. Active-only: a
-   *  retired/ghost task is a pure no-op read of its terminal info. */
+  /** Stop a running task. SIGTERM → configured grace (5s by default) →
+   *  SIGKILL. Active-only: a retired/ghost task is a pure no-op read of its
+   *  terminal info. */
   async stop(taskId: string, reason?: string): Promise<BackgroundTaskInfo | undefined> {
     const entry = this.processes.get(taskId);
     if (!entry) {
@@ -779,15 +899,11 @@ export class BackgroundProcessManager {
     const trimmedReason = reason?.trim();
     const stopReason =
       trimmedReason === undefined || trimmedReason.length === 0 ? undefined : trimmedReason;
-    // Terminal tasks short-circuit. awaiting_approval tasks can still
-    // be stopped (the approval gate is lifted when we transition to
-    // 'killed').
     if (TERMINAL_STATUSES.has(entry.status)) {
       await entry.persistWriteQueue;
       return this.toInfo(entry);
     }
 
-    entry.approvalReason = undefined;
     entry.stopRequested = true;
     entry.stopReason = stopReason;
 
@@ -797,9 +913,9 @@ export class BackgroundProcessManager {
       /* process already gone */
     }
 
-    // Wait up to 5s for the lifecycle path to settle, then SIGKILL.
-    // Waiting on lifecyclePromise, rather than proc.wait() directly, lets a
-    // natural completion win the race instead of being overwritten here.
+    // Wait out the configured grace for the lifecycle path to settle, then
+    // SIGKILL. Waiting on lifecyclePromise, rather than proc.wait() directly,
+    // lets a natural completion win the race instead of being overwritten.
     let graceTimer: ReturnType<typeof setTimeout> | undefined;
     const graceful = await Promise.race([
       entry.lifecyclePromise.then(
@@ -809,7 +925,7 @@ export class BackgroundProcessManager {
       new Promise<false>((resolve) => {
         graceTimer = setTimeout(() => {
           resolve(false);
-        }, SIGTERM_GRACE_MS);
+        }, this.options.killGracePeriodMs ?? SIGTERM_GRACE_MS);
       }),
     ]);
     if (graceTimer !== undefined) clearTimeout(graceTimer);
@@ -942,6 +1058,7 @@ export class BackgroundProcessManager {
       } as unknown as JianProcess,
       outputChunks: [],
       outputSizeBytes: 0,
+      outputRingBytes: 0,
       status: 'running',
       exitCode: null,
       startedAt: Date.now(),
@@ -991,16 +1108,13 @@ export class BackgroundProcessManager {
         await this.finalizeTerminal(entry, 'completed', 0);
       })
       .catch(async (error: unknown) => {
-        // Caller-driven stop() that ran to completion through our own
-        // abort callback: the rejection is an AbortError-shaped object.
-        // Treat as `killed` so user-initiated cancellation is recorded
-        // as a cancellation, not a failure. The shape check is
-        // load-bearing — if a non-AbortError rejection arrives while
-        // `stopRequested` is set, it means a real failure (e.g. a
-        // model error) won the race against the in-flight stop, and we
-        // must record that failure rather than hide it behind the
-        // user's cancellation.
-        if (entry.stopRequested && isAbortError(error)) {
+        // Cancellation is attributed by the abort reason, not only by a
+        // BPM-side `stopRequested` latch: a user interrupt (ESC / turn
+        // cancel) aborts a background run through its own controller, and a
+        // session close stops everything it can reach — neither may be
+        // recorded as a failure, because a `failed` agent task advertises
+        // Agent(resume=...) on work the user deliberately ended.
+        if (isAbortError(error)) {
           await this.finalizeTerminal(entry, 'killed', null);
           return;
         }
@@ -1012,6 +1126,9 @@ export class BackgroundProcessManager {
           await this.finalizeTerminal(entry, 'killed', null);
           return;
         }
+        // Anything else is a real failure — including a non-abort error
+        // that arrived while `stopRequested` was set, where recording the
+        // failure is what keeps the user's cancellation from hiding it.
         // Internal rejection (including TimeoutError, model errors,
         // and stopRequested cases where a non-abort failure won the
         // race): generic failure. `timedOut` stays unset so consumers
@@ -1026,41 +1143,6 @@ export class BackgroundProcessManager {
     void entry.lifecyclePromise;
 
     return taskId;
-  }
-
-  // ── awaiting_approval state transitions ────────────────────────────
-
-  /**
-   * Mark a running task as paused pending approval. The approval reason
-   * (tool call description) is retained until the task either returns
-   * to `'running'` via `clearAwaitingApproval()` or reaches a terminal
-   * state. Calls on terminal or unknown tasks are silently ignored so
-   * the ApprovalRuntime callback path is race-safe.
-   */
-  markAwaitingApproval(taskId: string, reason: string): void {
-    const entry = this.processes.get(taskId);
-    if (!entry) return;
-    if (TERMINAL_STATUSES.has(entry.status)) return;
-    entry.status = 'awaiting_approval';
-    entry.approvalReason = reason;
-    void this.persistLive(entry);
-    this.fireLifecycle('updated', this.toInfo(entry));
-  }
-
-  /**
-   * Drop the approval gate and return to `'running'`. Clears the stored
-   * reason so stale text cannot leak into a future `awaiting_approval`
-   * cycle. No-op unless the task is currently in the awaiting_approval
-   * state.
-   */
-  clearAwaitingApproval(taskId: string): void {
-    const entry = this.processes.get(taskId);
-    if (!entry) return;
-    if (entry.status !== 'awaiting_approval') return;
-    entry.status = 'running';
-    entry.approvalReason = undefined;
-    void this.persistLive(entry);
-    this.fireLifecycle('updated', this.toInfo(entry));
   }
 
   // ── completion event (await lifecycle end) ────────────────────────
@@ -1139,25 +1221,25 @@ export class BackgroundProcessManager {
   }
 
   /**
-   * Reconcile loaded ghost tasks. Any ghost with status `running` is
-   * reclassified as `lost` (its previous CLI process died without
-   * writing a terminal state). Updates the on-disk record and returns
-   * the lost task ids so the caller can emit user-facing notifications.
+   * Reconcile loaded ghost tasks. Any ghost still non-terminal is
+   * reclassified as `lost`: the process that owned it died with the previous
+   * CLI process, so nothing here can drive it to a terminal state — there are
+   * no streams to read and no process to stop. Deliberately not a
+   * staleness/TTL check: the persisted shape carries no heartbeat timestamp,
+   * and a "recent enough" ghost would still have no process handle behind it.
+   * Updates the on-disk record and returns the lost task ids so the caller can
+   * emit user-facing notifications.
    */
   protected async markLoadedTasksLost(): Promise<ReconcileResult> {
     const lost: string[] = [];
     const lostInfo: BackgroundTaskInfo[] = [];
     for (const [id, info] of this.ghosts) {
-      // Any non-terminal ghost is lost. Includes `awaiting_approval`
-      // (the approval context died with the previous process so it
-      // cannot be resumed).
       if (TERMINAL_STATUSES.has(info.status)) continue;
       const updated: BackgroundTaskInfo = {
         ...info,
         status: 'lost',
         endedAt: info.endedAt ?? Date.now(),
-        approvalReason: undefined,
-        failureReason: 'Background worker heartbeat expired',
+        failureReason: 'Task had no live process when the session was restored',
       };
       this.ghosts.set(id, updated);
       if (this.sessionDir !== undefined) {
@@ -1208,7 +1290,6 @@ export class BackgroundProcessManager {
       ended_at: entry.endedAt,
       exit_code: entry.exitCode,
       status: entry.status,
-      approval_reason: entry.approvalReason,
       timed_out: entry.timedOut,
       stop_reason: entry.stopReason,
       // Only persist subagent identifiers for agent tasks. The base-class
@@ -1230,13 +1311,8 @@ export class BackgroundProcessManager {
     if (this.processes.get(entry.taskId) === entry) {
       entry.outputSizeBytes += chunkBytes;
       entry.outputChunks.push(chunk);
-      // Enforce output cap: drop oldest chunks when over budget.
-      let total = entry.outputChunks.reduce((s, c) => s + c.length, 0);
-      while (total > MAX_OUTPUT_BYTES && entry.outputChunks.length > 1) {
-        const removed = entry.outputChunks.shift();
-        if (removed === undefined) break;
-        total -= removed.length;
-      }
+      entry.outputRingBytes += chunkBytes;
+      this.trimLiveOutput(entry);
     } else {
       retired = this.retiredTasks.get(entry.taskId);
       if (retired === undefined) {
@@ -1260,6 +1336,29 @@ export class BackgroundProcessManager {
       // whatever promise is published here, so leaving the snapshot taken in
       // finalizeTerminal would let them settle before this append lands.
       retired.outputWriteQueue = entry.outputWriteQueue;
+    }
+  }
+
+  /**
+   * Head-trim the live ring back under `MAX_OUTPUT_BYTES` (tail = newest
+   * output kept). Budgeted in UTF-8 bytes rather than UTF-16 code units, so
+   * multi-byte output cannot exceed the cap the way a code-unit count would.
+   */
+  private trimLiveOutput(entry: ManagedProcess): void {
+    while (entry.outputRingBytes > MAX_OUTPUT_BYTES && entry.outputChunks.length > 1) {
+      const removed = entry.outputChunks.shift();
+      if (removed === undefined) break;
+      entry.outputRingBytes -= Buffer.byteLength(removed, 'utf-8');
+    }
+    if (entry.outputRingBytes > MAX_OUTPUT_BYTES) {
+      // The one surviving chunk exceeds the whole budget on its own (a single
+      // multi-MiB write): keep only its byte tail so the ring — presented to
+      // callers as a bounded tail — stays within the budget in every case.
+      const only = entry.outputChunks[0];
+      if (only === undefined) return;
+      const tail = utf8ByteTail(only, MAX_OUTPUT_BYTES);
+      entry.outputChunks[0] = tail;
+      entry.outputRingBytes = Buffer.byteLength(tail, 'utf-8');
     }
   }
 
@@ -1356,7 +1455,6 @@ export class BackgroundProcessManager {
       exitCode: entry.exitCode,
       startedAt: entry.startedAt,
       endedAt: entry.endedAt,
-      approvalReason: entry.approvalReason,
       timedOut: entry.timedOut,
       stopReason: entry.stopReason,
       timeoutMs: entry.timeoutMs,
@@ -1378,12 +1476,6 @@ export class BackgroundProcessManager {
     entry.endedAt = Date.now();
     entry.timedOut = options.timedOut;
     entry.stopReason = status === 'killed' ? (options.stopReason ?? entry.stopReason) : undefined;
-    // A task that ended while still in awaiting_approval (e.g. crashed
-    // mid-prompt, deadline fired, or got killed) must not leak the
-    // stale approvalReason onto the terminal record. The awaiting →
-    // running path (clearAwaitingApproval) already clears it; mirror
-    // that here for the awaiting → terminal path.
-    entry.approvalReason = undefined;
     entry.stopRequested = false;
     await this.persistLive(entry);
     this.fireTerminalCallbacks(entry);
@@ -1403,16 +1495,14 @@ export class BackgroundProcessManager {
     const retired: RetiredTask = {
       info: this.toInfo(entry),
       outputChunks: retainedChunks,
-      outputTextBytes: retainedChunks.reduce(
-        (total, chunk) => total + Buffer.byteLength(chunk, 'utf-8'),
-        0,
-      ),
+      outputTextBytes: entry.outputRingBytes,
       outputSizeBytes: entry.outputSizeBytes,
       outputSessionDir: entry.outputSessionDir,
       outputWriteQueue: entry.outputWriteQueue,
     };
-    // The live ring counts UTF-16 code units against the budget; re-check in
-    // UTF-8 bytes so the retired tail honors the same 1 MiB cap for non-ASCII.
+    entry.outputRingBytes = 0;
+    // The retained tail was already byte-budgeted as part of the live ring;
+    // re-check so the invariant holds however the chunks arrived.
     this.trimRetiredOutput(retired);
     this.retiredTasks.set(entry.taskId, retired);
     while (this.retiredTasks.size > RETIRED_TASK_LIMIT) {
@@ -1746,7 +1836,6 @@ function persistedToInfo(t: PersistedTask): BackgroundTaskInfo {
     exitCode: t.exit_code,
     startedAt: t.started_at,
     endedAt: t.ended_at,
-    approvalReason: t.approval_reason,
     timedOut: t.timed_out,
     stopReason: t.stop_reason,
     agentId: t.agent_id,
@@ -1764,7 +1853,6 @@ function infoToPersisted(info: BackgroundTaskInfo): PersistedTask {
     ended_at: info.endedAt,
     exit_code: info.exitCode,
     status: info.status,
-    approval_reason: info.approvalReason,
     timed_out: info.timedOut,
     stop_reason: info.stopReason,
     agent_id: info.agentId === info.taskId ? undefined : info.agentId,

@@ -113,4 +113,45 @@ describe('Session.listBackgroundTasks / getBackgroundTaskOutput / getBackgroundT
       await harness.close();
     }
   });
+
+  it('selects the owning registry by agentId and fails loud when the owner is gone', async () => {
+    const homeDir = await makeTempDir(tempDirs, 'scream-sdk-bgtask-home-');
+    const workDir = await makeTempDir(tempDirs, 'scream-sdk-bgtask-work-');
+    const harness = new ScreamHarness({ homeDir, identity: TEST_IDENTITY });
+
+    try {
+      const session = await harness.createSession({ id: 'ses_bg_agent_scope', workDir });
+
+      // agentId omitted / `main` = the interactive agent's registry: unknown
+      // task ids answer empty instead of throwing (the UI fetches output
+      // speculatively), so this is the pre-existing behavior unchanged.
+      await expect(session.listBackgroundTasks({ agentId: 'main' })).resolves.toEqual([]);
+      await expect(
+        session.getBackgroundTaskOutput('bash-deadbeef', { agentId: 'main' }),
+      ).resolves.toBe('');
+      await expect(
+        session.getBackgroundTaskOutputPath('bash-deadbeef', { agentId: 'main' }),
+      ).resolves.toBeUndefined();
+
+      // A subagent's task lives in that subagent's own registry: `agentId`
+      // must reach the session-level router (getAgent), not be dropped on the
+      // way. An owner the session no longer knows is *gone*, not empty —
+      // silently answering from main would read empty output and no-op the
+      // stop, so every task call fails loud with AGENT_NOT_FOUND.
+      const subagentCalls = [
+        () => session.listBackgroundTasks({ agentId: 'agent-7' }),
+        () => session.getBackgroundTaskOutput('bash-deadbeef', { agentId: 'agent-7' }),
+        () => session.getBackgroundTaskOutputPath('bash-deadbeef', { agentId: 'agent-7' }),
+        () => session.stopBackgroundTask('bash-deadbeef', { agentId: 'agent-7' }),
+      ];
+      for (const call of subagentCalls) {
+        await expect(call()).rejects.toMatchObject({
+          name: 'ScreamError',
+          code: 'agent.not_found',
+        } satisfies Partial<ScreamError>);
+      }
+    } finally {
+      await harness.close();
+    }
+  });
 });

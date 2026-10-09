@@ -2,8 +2,8 @@
  * BackgroundProcessManager — onLifecycle hook.
  *
  * Covers the three lifecycle events emitted to subscribers:
- *   - 'started' on register / registerAgentTask
- *   - 'updated' on awaiting_approval enter / leave
+ *   - 'started' on register / registerAgentTask / parkForegroundProcess
+ *   - 'updated' reserved for in-place changes (no producer today)
  *   - 'terminated' on natural exit / failure / stop / reconcile-as-lost
  *
  * Subscribers must receive each phase exactly once per task, in order,
@@ -115,38 +115,6 @@ describe('BackgroundProcessManager — onLifecycle', () => {
     expect(records[0]!.info.taskId).toMatch(/^agent-/);
   });
 
-  it("fires 'updated' on markAwaitingApproval / clearAwaitingApproval", () => {
-    const { records, callback } = makeRecorder();
-    const taskId = manager.register(pendingProcess(), 'sleep', 'demo');
-    manager.onLifecycle(callback);
-
-    manager.markAwaitingApproval(taskId, 'needs permission');
-    manager.clearAwaitingApproval(taskId);
-
-    const events = records.map((r) => r.event);
-    expect(events).toEqual(['updated', 'updated']);
-    expect(records[0]!.info.status).toBe('awaiting_approval');
-    expect(records[0]!.info.approvalReason).toBe('needs permission');
-    expect(records[1]!.info.status).toBe('running');
-    expect(records[1]!.info.approvalReason).toBeUndefined();
-  });
-
-  it("does not fire 'updated' for no-op markAwaitingApproval / clearAwaitingApproval", () => {
-    const { records, callback } = makeRecorder();
-    manager.onLifecycle(callback);
-
-    // unknown task
-    manager.markAwaitingApproval('bash-deadbeef', 'nope');
-    manager.clearAwaitingApproval('bash-deadbeef');
-
-    // clear when not in awaiting_approval state is a no-op
-    const taskId = manager.register(pendingProcess(), 'sleep', 'demo');
-    records.length = 0;
-    manager.clearAwaitingApproval(taskId);
-
-    expect(records.length).toBe(0);
-  });
-
   it("fires 'terminated' on natural process exit (completed)", async () => {
     const { records, callback } = makeRecorder();
     manager.onLifecycle(callback);
@@ -225,7 +193,6 @@ describe('BackgroundProcessManager — onLifecycle', () => {
         ended_at: null,
         exit_code: null,
         status: 'running',
-        approval_reason: undefined,
         timed_out: undefined,
         stop_reason: undefined,
       };

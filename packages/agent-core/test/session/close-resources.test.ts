@@ -8,7 +8,8 @@
  * holds today (log sink, mcp, cron, bus, ...) with the registration that owns
  * each one and observes exactly one release per collaborator through `close()`.
  * The cases below also observe two cleanups that used to be pure memory leaks —
- * the shell tool's pending-task map and the subagent message bus.
+ * the shell tool's parked commands (per-agent background tasks today) and the
+ * subagent message bus.
  *
  * Both checks are bounded by their inputs, and stating that is the point: the
  * registry enumerates the steps that registered, not the resources that exist,
@@ -20,10 +21,6 @@
  * "must be released" from "plain field" stays a code-review job; what is
  * machine-checked is every registration this checklist contains and every
  * release the listed collaborators get.
- *
- * The pending-task map is process-wide while sessions are not, so its teardown
- * cases also pin the ownership contract: what an agent's Bash tool parks is
- * stamped with the session id, and a close sweeps exactly that owner.
  */
 
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
@@ -32,7 +29,7 @@ import { PassThrough, type Writable } from 'node:stream';
 import { join } from 'pathe';
 
 import type { JianProcess } from '@scream-code/jian';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi, type Mock } from 'vitest';
 
 import { TEST_OS_ENV, testJian } from '../fixtures/test-jian';
 import { testAgent } from '../agent/harness/agent';
@@ -44,12 +41,6 @@ import type { SDKSessionRPC } from '../../src/rpc';
 import { Session } from '../../src/session';
 import { buildSubagentMessage } from '../../src/session/subagent-messages';
 import { BashTool } from '../../src/tools/builtin/shell/bash';
-import {
-  createBackgroundTask,
-  getPendingBackgroundCount,
-  killAllPendingBackgroundTasks,
-  stopAllPendingBackgroundTasks,
-} from '../../src/tools/builtin/shell/background-tasks';
 
 /**
  * The close-out checklist every session registers at construction, in
@@ -78,9 +69,6 @@ const EXPECTED_DISPOSABLES = [
 const tempDirs: string[] = [];
 
 afterEach(async () => {
-  // Module-level registry shared by every case: the process-wide sweep is the
-  // only reset that can clear owners this file does not own.
-  killAllPendingBackgroundTasks();
   for (const dir of tempDirs.splice(0)) {
     await rm(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 10 });
   }
@@ -225,7 +213,7 @@ describe('Session close-out checklist', () => {
     }
   });
 
-  it('sweeps the shell tool pending-task registry on close', async () => {
+  it('stops the parked commands of its own agents on close', async () => {
     const { sessionDir, workDir } = await sessionFixture();
     const session = new Session({
       jian: testJian.withCwd(workDir),
@@ -234,25 +222,34 @@ describe('Session close-out checklist', () => {
       rpc: createSessionRpc(),
       skills: { explicitDirs: [join(workDir, 'missing-skills')] },
     });
-    const kill = vi.fn(async () => {});
-    // The owner key is the session's own id — the same value its agents stamp
-    // on what their Bash tools park (see the scoping case below).
-    createBackgroundTask('sleep 60', new Promise(() => {}), {
-      kill,
-      pid: 4242,
-      ownerId: 'session-close-pending-sweep',
-    });
-    expect(getPendingBackgroundCount()).toBe(1);
+    const { agent } = await session.createAgent({ type: 'main' });
+    const { completion, kill } = parkableCommand();
+    // A timed-out foreground command parked by this session's agent lives in
+    // that agent's own background manager.
+    const taskId = agent.background.parkForegroundProcess(
+      completion,
+      'sleep 60',
+      'parked on close',
+      { kill, pid: 4242 },
+    );
+    expect(agent.background.getTask(taskId)?.status).toBe('running');
 
-    await session.close();
+    // keepAliveOnExit=false is the exit policy that reclaims parked commands;
+    // the default keepAlive leaves bash processes running on purpose.
+    vi.stubEnv(BACKGROUND_KEEP_ALIVE_ON_EXIT_ENV, 'false');
+    try {
+      await session.close();
+    } finally {
+      vi.unstubAllEnvs();
+    }
 
     // Timed-out commands parked in the background must not outlive the
-    // session: the sweep kills them and empties the registry entry.
+    // session: the sweep kills them and the ledger records the kill.
     expect(kill).toHaveBeenCalledTimes(1);
-    expect(getPendingBackgroundCount()).toBe(0);
+    expect(agent.background.getTask(taskId)?.status).toBe('killed');
   });
 
-  it('sweeps only its own parked commands, never another session ones', async () => {
+  it('stops only its own parked commands, never another session ones', async () => {
     const { sessionDir, workDir } = await sessionFixture();
     const session = new Session({
       jian: testJian.withCwd(workDir),
@@ -261,33 +258,54 @@ describe('Session close-out checklist', () => {
       rpc: createSessionRpc(),
       skills: { explicitDirs: [join(workDir, 'missing-skills')] },
     });
-    // The key the sweep uses is the id stamped on every agent this session
-    // creates, which is where its Bash tools take the owner they park under.
+    const otherSession = new Session({
+      jian: testJian.withCwd(workDir),
+      id: 'session-other',
+      homedir: join(sessionDir, 'other'),
+      rpc: createSessionRpc(),
+      skills: { explicitDirs: [join(workDir, 'missing-skills')] },
+    });
     const { agent } = await session.createAgent({ type: 'main' });
+    const { agent: otherAgent } = await otherSession.createAgent({ type: 'main' });
     expect(agent.sessionId).toBe('session-close-scoped');
 
-    const ownKill = vi.fn(async () => {});
-    const foreignKill = vi.fn(async () => {});
-    createBackgroundTask('own-build', new Promise(() => {}), {
-      kill: ownKill,
-      pid: 5001,
-      ownerId: 'session-close-scoped',
-    });
-    createBackgroundTask('foreign-build', new Promise(() => {}), {
-      kill: foreignKill,
-      pid: 5002,
-      ownerId: 'session-other',
-    });
-    expect(getPendingBackgroundCount()).toBe(2);
+    const own = parkableCommand();
+    const foreign = parkableCommand();
+    const ownId = agent.background.parkForegroundProcess(
+      own.completion,
+      'own-build',
+      'own',
+      { kill: own.kill, pid: 5001 },
+    );
+    const foreignId = otherAgent.background.parkForegroundProcess(
+      foreign.completion,
+      'foreign-build',
+      'foreign',
+      { kill: foreign.kill, pid: 5002 },
+    );
 
-    await session.close();
+    vi.stubEnv(BACKGROUND_KEEP_ALIVE_ON_EXIT_ENV, 'false');
+    try {
+      await session.close();
+    } finally {
+      vi.unstubAllEnvs();
+    }
 
     // Closing this session reclaims its own parked command...
-    expect(ownKill).toHaveBeenCalledTimes(1);
-    // ...and leaves the other session's running: the registry is process-wide,
-    // so an unscoped sweep here would execute another session's command.
-    expect(foreignKill).not.toHaveBeenCalled();
-    expect(getPendingBackgroundCount()).toBe(1);
+    expect(own.kill).toHaveBeenCalledTimes(1);
+    expect(agent.background.getTask(ownId)?.status).toBe('killed');
+    // ...and leaves the other session's running: the task belongs to the
+    // other session's own agent manager, so an unscoped sweep is impossible.
+    expect(foreign.kill).not.toHaveBeenCalled();
+    expect(otherAgent.background.getTask(foreignId)?.status).toBe('running');
+
+    vi.stubEnv(BACKGROUND_KEEP_ALIVE_ON_EXIT_ENV, 'false');
+    try {
+      await otherSession.close();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+    expect(foreign.kill).toHaveBeenCalledTimes(1);
   });
 
   it('leaves an identified session alone when an id-less session closes', async () => {
@@ -299,8 +317,8 @@ describe('Session close-out checklist', () => {
       rpc: createSessionRpc(),
       skills: { explicitDirs: [join(workDir, 'missing-skills')] },
     });
-    // SessionOptions.id is optional, so the SDK can build a session that stamps
-    // no owner on anything its agents park.
+    // SessionOptions.id is optional, so the SDK can build a session that
+    // identifies no owner at all.
     const anonymous = new Session({
       jian: testJian.withCwd(workDir),
       homedir: join(sessionDir, 'anonymous'),
@@ -308,36 +326,49 @@ describe('Session close-out checklist', () => {
       skills: { explicitDirs: [join(workDir, 'missing-skills')] },
     });
     expect(anonymous.options.id).toBeUndefined();
+    const { agent: anonymousAgent } = await anonymous.createAgent({ type: 'main' });
+    const { agent: identifiedAgent } = await identified.createAgent({ type: 'main' });
 
-    const identifiedKill = vi.fn(async () => {});
-    const anonymousKill = vi.fn(async () => {});
-    createBackgroundTask('identified-build', new Promise(() => {}), {
-      kill: identifiedKill,
-      pid: 6001,
-      ownerId: 'session-identified',
-    });
-    createBackgroundTask('anonymous-build', new Promise(() => {}), {
-      kill: anonymousKill,
-      pid: 6002,
-    });
-    expect(getPendingBackgroundCount()).toBe(2);
+    const anonymousCmd = parkableCommand();
+    const identifiedCmd = parkableCommand();
+    const anonymousId = anonymousAgent.background.parkForegroundProcess(
+      anonymousCmd.completion,
+      'anonymous-build',
+      'anonymous',
+      { kill: anonymousCmd.kill, pid: 6002 },
+    );
+    const identifiedId = identifiedAgent.background.parkForegroundProcess(
+      identifiedCmd.completion,
+      'identified-build',
+      'identified',
+      { kill: identifiedCmd.kill, pid: 6001 },
+    );
 
-    await anonymous.close();
+    vi.stubEnv(BACKGROUND_KEEP_ALIVE_ON_EXIT_ENV, 'false');
+    try {
+      await anonymous.close();
+    } finally {
+      vi.unstubAllEnvs();
+    }
 
-    // The id-less session sweeps what ITS agents parked — the owner-less
-    // tasks...
-    expect(anonymousKill).toHaveBeenCalledTimes(1);
-    // ...and stops there: "no id" must not read as "every owner", or this
-    // close would execute a command the identified session still owns.
-    expect(identifiedKill).not.toHaveBeenCalled();
-    expect(getPendingBackgroundCount()).toBe(1);
+    // The id-less session sweeps what ITS agents parked...
+    expect(anonymousCmd.kill).toHaveBeenCalledTimes(1);
+    expect(anonymousAgent.background.getTask(anonymousId)?.status).toBe('killed');
+    // ...and stops there: the absence of a session id must not read as "every
+    // owner", or this close would execute the identified session's command.
+    expect(identifiedCmd.kill).not.toHaveBeenCalled();
+    expect(identifiedAgent.background.getTask(identifiedId)?.status).toBe('running');
 
-    await identified.close();
-    expect(identifiedKill).toHaveBeenCalledTimes(1);
-    expect(getPendingBackgroundCount()).toBe(0);
+    vi.stubEnv(BACKGROUND_KEEP_ALIVE_ON_EXIT_ENV, 'false');
+    try {
+      await identified.close();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+    expect(identifiedCmd.kill).toHaveBeenCalledTimes(1);
   });
 
-  it('parks a timed-out command under the session its agent belongs to', async () => {
+  it('parks a timed-out command in its own agent manager, not another agent one', async () => {
     const ctx = testAgent({
       sessionId: 'session-parks-own',
       jian: createFakeJian({
@@ -349,9 +380,10 @@ describe('Session close-out checklist', () => {
     const bash = ctx.agent.tools.getBuiltinTool('Bash') as BashTool | undefined;
     expect(bash).toBeDefined();
 
-    // A command that outlives its timeout is parked module-wide, so the tool
-    // has to stamp the owner it parks under; without it no session teardown
-    // could ever reclaim the command.
+    // A command that outlives its timeout is parked as a task of the agent
+    // that ran it — addressable by TaskList/TaskOutput/TaskStop and reclaimed
+    // by that agent's session-exit policy — instead of in a process-wide
+    // registry every other agent could read from.
     const result = await executeTool(bash!, {
       turnId: '0',
       toolCallId: 'call_bash',
@@ -359,13 +391,17 @@ describe('Session close-out checklist', () => {
       signal: new AbortController().signal,
     });
     expect(result.output).toContain('still running in the background');
-    expect(getPendingBackgroundCount()).toBe(1);
+    const parked = ctx.agent.background.list();
+    expect(parked).toHaveLength(1);
+    expect(parked[0]?.status).toBe('running');
+    expect(result.output).toContain(parked[0]?.taskId);
 
-    stopAllPendingBackgroundTasks('session-elsewhere');
-    expect(getPendingBackgroundCount()).toBe(1);
-
-    stopAllPendingBackgroundTasks('session-parks-own');
-    expect(getPendingBackgroundCount()).toBe(0);
+    // Another agent's ledger holds nothing of this command: ownership is the
+    // manager, so no cross-agent leak is possible at all.
+    const other = testAgent({ sessionId: 'session-elsewhere' });
+    other.configure();
+    expect(other.agent.background.list()).toEqual([]);
+    expect(other.agent.background.getTask((parked[0]?.taskId ?? ''))).toBeUndefined();
   });
 
   it('clears undelivered subagent messages on close', async () => {
@@ -413,7 +449,28 @@ function logHandleOf(session: Session): SessionLogHandle {
   return handle;
 }
 
-/** A process that never exits: the Bash tool times out and parks the command. */
+/**
+ * A parked command whose completion settles when its kill handle runs — the
+ * way a real process behaves, so a stop finishes inside the grace window
+ * instead of waiting it out.
+ */
+function parkableCommand(): {
+  readonly completion: Promise<{ exitCode: number }>;
+  readonly kill: Mock<() => Promise<void>>;
+} {
+  let resolveCompletion: (value: { exitCode: number }) => void = () => {};
+  const completion = new Promise<{ exitCode: number }>((resolve) => {
+    resolveCompletion = resolve;
+  });
+  const kill = vi.fn<() => Promise<void>>(async () => {
+    resolveCompletion({ exitCode: 143 });
+  });
+  return { completion, kill };
+}
+
+/**
+ * A process that never exits: the Bash tool times out and parks the command.
+ */
 function neverExitingProcess(): JianProcess {
   return {
     stdin: { end: vi.fn(), write: vi.fn() } as unknown as Writable,

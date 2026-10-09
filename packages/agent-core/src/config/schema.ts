@@ -123,9 +123,9 @@ export type LoopControl = z.infer<typeof LoopControlSchema>;
 export const BackgroundConfigSchema = z.object({
   maxRunningTasks: z.number().int().min(1).optional(),
   keepAliveOnExit: z.boolean().optional(),
+  // SIGTERM→SIGKILL grace applied by the background manager's stop path.
   killGracePeriodMs: z.number().int().min(0).optional(),
   agentTaskTimeoutS: z.number().int().min(1).optional(),
-  printWaitCeilingS: z.number().int().min(1).optional(),
 });
 
 export type BackgroundConfig = z.infer<typeof BackgroundConfigSchema>;

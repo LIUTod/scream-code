@@ -231,8 +231,11 @@ describe('BashTool', () => {
       await vi.advanceTimersByTimeAsync(1);
       const result = await running;
 
-      // Auto-background: process is NOT killed on timeout, moved to background instead.
-      expect(proc.kill).not.toHaveBeenCalled();
+      // No manager is configured here, so nothing can own the still-running
+      // process: the timeout stops it instead of stranding it untracked (see
+      // parked-foreground.test.ts for the parked contract).
+      expect(proc.kill).toHaveBeenCalled();
+      expect(result.isError).toBe(true);
       expect(result.output).toContain('Command timed out after 2s');
     } finally {
       vi.useRealTimers();
@@ -741,6 +744,7 @@ describe('BashTool', () => {
       const tool = new BashTool(
         createFakeJian({ execWithEnv: vi.fn().mockResolvedValue(proc), osEnv: posixEnv }),
         '/workspace',
+        new BackgroundProcessManager(),
       );
 
       const running = executeTool(tool, context({ command: 'sleep 2', timeout: 1 }));

@@ -100,7 +100,6 @@ max_running_tasks = 4
 keep_alive_on_exit = false
 kill_grace_period_ms = 2000
 agent_task_timeout_s = 900
-print_wait_ceiling_s = 3600
 
 [[hooks]]
 event = "PreToolUse"

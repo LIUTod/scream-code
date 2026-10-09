@@ -40,11 +40,6 @@ export interface PersistedTask {
   readonly exit_code: number | null;
   readonly status: BackgroundTaskStatus;
   /**
-   * Reason supplied when the task is marked `awaiting_approval`.
-   * Cleared (omitted) when the task leaves that state.
-   */
-  readonly approval_reason?: string | undefined;
-  /**
    * True when an agent task was forcibly terminated by its external
    * deadline (`registerAgentTask(..., { timeoutMs })`). An internal
    * `TimeoutError` raised by the agent promise itself is a generic
