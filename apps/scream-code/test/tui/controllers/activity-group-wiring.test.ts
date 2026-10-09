@@ -1,4 +1,5 @@
 import { Container, Text } from '@liutod-scream/pi-tui';
+import type { Event } from '@scream-code/scream-code-sdk';
 import { describe, expect, it, vi } from 'vitest';
 
 import { ActivityGroupComponent } from '#/tui/components/messages/activity-group';
@@ -9,6 +10,8 @@ import { ToolCallComponent } from '#/tui/components/messages/tool-call';
 import { UserMessageComponent } from '#/tui/components/messages/user-message';
 import { StreamingUIController } from '#/tui/controllers/streaming-ui';
 import type { StreamingUIHost } from '#/tui/controllers/streaming-ui';
+import { SessionEventHandler } from '#/tui/controllers/session-event-handler';
+import type { SessionEventHost } from '#/tui/controllers/session-event-handler';
 import { TranscriptController } from '#/tui/controllers/transcript-controller';
 import type { TranscriptControllerHost } from '#/tui/controllers/transcript-controller';
 import { darkColors } from '#/tui/theme/colors';
@@ -658,5 +661,175 @@ describe('activity block wiring — plan cards seal the running block', () => {
     // Sealing is a no-op when no block was open: no empty block is mounted.
     expect(state.transcriptContainer.children.filter((child) => child instanceof ActivityGroupComponent)).toHaveLength(0);
     expect(state.transcriptContainer.children.filter((child) => child instanceof ToolCallComponent)).toHaveLength(1);
+  });
+});
+
+describe('activity block wiring — agent cards and delivered requests seal the running block', () => {
+  /**
+   * The delivered-request signal arrives as a session event, so this fixture
+   * pairs the real streaming controller with a handler whose transcript writes
+   * land in the same container.
+   */
+  function createSignalFixture(): Fixture & { handler: SessionEventHandler } {
+    const { state, controller, transcript } = createFixture();
+    const host = {
+      state,
+      session: undefined,
+      aborted: false,
+      sessionEventUnsubscribe: undefined,
+      streamingUI: controller,
+      deferUserMessages: false,
+      tasksBrowserController: { refreshOutputViewer: vi.fn(), repaint: vi.fn() },
+      requireSession: vi.fn(),
+      setAppState: vi.fn(),
+      patchLivePane: vi.fn(),
+      resetLivePane: vi.fn(),
+      showError: vi.fn(),
+      showStatus: vi.fn(),
+      showNotice: vi.fn(),
+      appendTranscriptEntry: vi.fn((entry: TranscriptEntry) => {
+        transcript.appendEntry(entry);
+      }),
+      sendQueuedMessage: vi.fn(),
+      sendNormalUserInput: vi.fn(),
+      shiftQueuedMessage: vi.fn(),
+      updateQueueDisplay: vi.fn(),
+      markMemoryExtracted: vi.fn(),
+    } as unknown as SessionEventHost;
+    return { state, controller, transcript, handler: new SessionEventHandler(host) };
+  }
+
+  /** The kernel's delivery frame for a child→parent request. */
+  function deliverChildRequest(handler: SessionEventHandler): void {
+    handler.handleEvent(
+      {
+        type: 'subagent.child_request',
+        sessionId: 'ses-test',
+        agentId: 'main',
+        subagentId: 'agent-7',
+        subagentName: 'coder',
+        requestType: 'info',
+        message: 'check the terminal width',
+      } as unknown as Event,
+      vi.fn(),
+    );
+  }
+
+  function renderAll(state: TUIState): string {
+    return state.transcriptContainer.children
+      .map((child) => child.render(100).join('\n'))
+      .join('\n')
+      .replaceAll(/\u001B\[[0-9;]*m/g, '');
+  }
+
+  it('seals the running block when a first agent card mounts, and the next work starts below the card', () => {
+    const { state, controller } = createFixture();
+    state.appState.streamingPhase = 'thinking';
+
+    controller.onToolCallStart(makeToolCall('t1', 'Bash', 1, { command: 'ls -la' }));
+    const first = findGroup(state.transcriptContainer) as ActivityGroupComponent;
+    const slot = state.transcriptContainer.children.indexOf(first);
+    expect(first.render(90).join('\n')).toContain('工具执行中');
+
+    controller.onToolCallStart(
+      makeToolCall('a1', 'Agent', 1, { description: 'inspect storage', subagent_type: 'explore' }),
+    );
+
+    // Sealed in place: the block keeps its slot and its header claims completion.
+    expect(state.transcriptContainer.children.indexOf(first)).toBe(slot);
+    expect(first.render(90).join('\n')).toContain('工具执行完成');
+    expect(first.render(90).join('\n')).not.toContain('工具执行中');
+
+    const card = state.transcriptContainer.children.find(
+      (child): child is ToolCallComponent => child instanceof ToolCallComponent,
+    );
+    expect(card).toBeDefined();
+    expect(state.transcriptContainer.children.indexOf(card as ToolCallComponent)).toBeGreaterThan(
+      slot,
+    );
+
+    // The next stretch of work opens a fresh block below the card.
+    controller.onToolCallStart(makeToolCall('t2', 'Edit', 2, { file_path: 'a.ts' }));
+
+    const blocks = findGroups(state.transcriptContainer);
+    expect(blocks).toHaveLength(2);
+    expect(blocks[0]).toBe(first);
+    const rendered = renderAll(state);
+    expect(rendered.indexOf('Bash')).toBeLessThan(rendered.indexOf('inspect storage'));
+    expect(rendered.indexOf('inspect storage')).toBeLessThan(rendered.indexOf('Edit'));
+  });
+
+  it('seals once for a step: later cards of the same step join the row without a second seal', () => {
+    const { state, controller } = createFixture();
+    state.appState.streamingPhase = 'thinking';
+
+    controller.onToolCallStart(makeToolCall('t1', 'Bash', 1));
+    const seal = vi.spyOn(controller, 'endActivityGroup');
+
+    controller.onToolCallStart(makeToolCall('a1', 'Agent', 1, { description: 'first child' }));
+    expect(seal).toHaveBeenCalledTimes(1);
+
+    controller.onToolCallStart(makeToolCall('a2', 'Agent', 1, { description: 'second child' }));
+    // The second card attaches to the row that already exists: no new cut, no
+    // empty block, and the seal above is not repeated.
+    expect(seal).toHaveBeenCalledTimes(1);
+
+    expect(
+      state.transcriptContainer.children.filter((child) => child instanceof AgentGroupComponent),
+    ).toHaveLength(1);
+    expect(
+      state.transcriptContainer.children.filter((child) => child instanceof ToolCallComponent),
+    ).toHaveLength(0);
+    const blocks = findGroups(state.transcriptContainer);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]?.render(90).join('\n')).toContain('工具执行完成');
+  });
+
+  it('seals the running block when a delivered child request cuts in', () => {
+    const { state, controller, handler } = createSignalFixture();
+    state.appState.streamingPhase = 'thinking';
+
+    controller.onToolCallStart(makeToolCall('t1', 'Bash', 1, { command: 'ls -la' }));
+    const block = findGroup(state.transcriptContainer) as ActivityGroupComponent;
+    expect(block.render(90).join('\n')).toContain('工具执行中');
+
+    deliverChildRequest(handler);
+
+    // Sealed in place, and the notice row lands below the settled block.
+    const notice = state.transcriptContainer.children.find(
+      (child): child is NoticeMessageComponent => child instanceof NoticeMessageComponent,
+    );
+    expect(notice).toBeDefined();
+    expect(block.render(90).join('\n')).toContain('工具执行完成');
+    expect(state.transcriptContainer.children.indexOf(block)).toBeLessThan(
+      state.transcriptContainer.children.indexOf(notice as NoticeMessageComponent),
+    );
+    const noticeRows = (notice as NoticeMessageComponent).render(120).join('\n');
+    expect(noticeRows).toContain('▸');
+    expect(noticeRows).toContain('coder');
+
+    // The work that follows opens a fresh block below the notice.
+    controller.onToolCallStart(makeToolCall('t2', 'Edit', 2, { file_path: 'a.ts' }));
+
+    const blocks = findGroups(state.transcriptContainer);
+    expect(blocks).toHaveLength(2);
+    expect(blocks[0]).toBe(block);
+    const rendered = renderAll(state);
+    expect(rendered.indexOf('Bash')).toBeLessThan(rendered.indexOf('▸'));
+    expect(rendered.indexOf('▸')).toBeLessThan(rendered.indexOf('Edit'));
+  });
+
+  it('keeps both signals as no-ops when no block is open', () => {
+    const { state, controller, handler } = createSignalFixture();
+
+    controller.onToolCallStart(makeToolCall('a1', 'Agent', 1, { description: 'no block yet' }));
+    deliverChildRequest(handler);
+
+    // Neither signal mints an empty block: the card row and the notice row are
+    // the only things that appear.
+    expect(findGroups(state.transcriptContainer)).toHaveLength(0);
+    expect(
+      state.transcriptContainer.children.some((child) => child instanceof NoticeMessageComponent),
+    ).toBe(true);
   });
 });

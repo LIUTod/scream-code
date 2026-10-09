@@ -1272,6 +1272,12 @@ export class StreamingUIController {
 
     const cur = this._pendingAgentGroup;
     if (cur === null) {
+      // A first agent card opens a row of its own: it cuts the running stretch
+      // in two, like a plan card does, so the card lands below the settled
+      // block and the following work opens a fresh block under the card. A
+      // later card of the same step joins this row (below) and must not seal
+      // again — there is nothing new on screen for it to cut around.
+      this.endActivityGroup();
       this._pendingAgentGroup = { step, turnId, solo: tc };
       tc.setExpanded(state.toolOutputExpanded);
       state.transcriptContainer.addChild(tc);

@@ -570,6 +570,10 @@ export class SessionEventHandler {
       fields,
       event.subagentName ?? this.subagentInfo.get(event.subagentId)?.name,
     );
+    // A delivered request cuts into the transcript: settle the running stretch
+    // of work, so the notice lands below it and the work that follows opens a
+    // fresh block under the notice instead of writing above it.
+    this.host.streamingUI.endActivityGroup();
     this.host.appendTranscriptEntry({
       id: nextTranscriptId(),
       kind: 'status',

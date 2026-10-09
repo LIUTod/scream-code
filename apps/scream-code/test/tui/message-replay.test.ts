@@ -17,6 +17,7 @@ import type { SessionEventHandler } from '#/tui/controllers/session-event-handle
 import type { StreamingUIController } from '#/tui/controllers/streaming-ui';
 import { AgentGroupComponent } from '#/tui/components/messages/agent-group';
 import { ActivityGroupComponent } from '#/tui/components/messages/activity-group';
+import { NoticeMessageComponent } from '#/tui/components/messages/status-message';
 import { ToolCallComponent } from '#/tui/components/messages/tool-call';
 
 vi.mock('#/tui/utils/open-url', () => ({ openUrl: vi.fn() }));
@@ -841,5 +842,90 @@ describe('replayed background-agent identity', () => {
     );
     expect(status?.backgroundAgentStatus?.trackingId).toBe('agent-9');
     expect(driver.sessionEventHandler.backgroundAgentMetadata.has('agent-9')).toBe(false);
+  });
+});
+
+describe('replayed block sealing at agent cards and delivered requests', () => {
+  const stripAnsi = (line: string): string => line.replaceAll(/\u001B\[[0-9;]*m/g, '');
+
+  it('seals the block above a replayed Agent card, so the next work starts below it', async () => {
+    const driver = await replayIntoDriver([
+      message('user', [{ type: 'text', text: 'run one agent' }]),
+      message('assistant', [], { toolCalls: [toolCall('call_bash', 'Bash', { command: 'ls' })] }),
+      message('tool', [{ type: 'text', text: 'file list' }], { toolCallId: 'call_bash' }),
+      message('assistant', [], {
+        toolCalls: [
+          toolCall('call_agent', 'Agent', { description: 'inspect storage', subagent_type: 'explore' }),
+        ],
+      }),
+      message('tool', [{ type: 'text', text: 'agent done' }], { toolCallId: 'call_agent' }),
+      message('assistant', [], { toolCalls: [toolCall('call_read', 'Read', { file_path: 'a.ts' })] }),
+      message('tool', [{ type: 'text', text: 'ok' }], { toolCallId: 'call_read' }),
+    ]);
+
+    const children = driver.state.transcriptContainer.children;
+    const blocks = children.filter(
+      (child): child is ActivityGroupComponent => child instanceof ActivityGroupComponent,
+    );
+    const card = children.find((child) => child instanceof ToolCallComponent);
+
+    // The same shape the live session builds: the first Agent card cuts the
+    // stretch of work in two, so the read after it opens a block below the card.
+    expect(blocks).toHaveLength(2);
+    expect(card).toBeInstanceOf(ToolCallComponent);
+    expect(children.indexOf(blocks[0] as ActivityGroupComponent)).toBeLessThan(
+      children.indexOf(card as ToolCallComponent),
+    );
+    expect(children.indexOf(card as ToolCallComponent)).toBeLessThan(
+      children.indexOf(blocks[1] as ActivityGroupComponent),
+    );
+    expect(stripAnsi((blocks[0] as ActivityGroupComponent).render(120).join('\n'))).not.toContain('a.ts');
+    expect(stripAnsi((blocks[1] as ActivityGroupComponent).render(120).join('\n'))).toContain('a.ts');
+    expect(children.map((child) => child.render(120).join('\n')).join('\n')).toContain(
+      'inspect storage',
+    );
+  });
+
+  it('seals the block above a replayed child-request notice, so the next work starts below it', async () => {
+    const notification = [
+      '<notification id="child_request:agent-7:1700000000000" category="task" type="child_request" source_kind="subagent" source_id="agent-7">',
+      'Title: Subagent info request',
+      'Severity: info',
+      'info: 目标终端宽度是否含侧栏展开态',
+      'needs: independent verification',
+      '</notification>',
+    ].join('\n');
+
+    const driver = await replayIntoDriver([
+      message('user', [{ type: 'text', text: '继续侧栏的事' }]),
+      message('assistant', [], { toolCalls: [toolCall('call_read', 'Read', { file_path: 'a.ts' })] }),
+      message('tool', [{ type: 'text', text: 'ok' }], { toolCallId: 'call_read' }),
+      message('user', [{ type: 'text', text: notification }], {
+        origin: { kind: 'system_trigger', name: 'child_request' },
+      }),
+      message('assistant', [], {
+        toolCalls: [toolCall('call_bash', 'Bash', { command: 'ls' })],
+      }),
+      message('tool', [{ type: 'text', text: 'file list' }], { toolCallId: 'call_bash' }),
+    ]);
+
+    const children = driver.state.transcriptContainer.children;
+    const blocks = children.filter(
+      (child): child is ActivityGroupComponent => child instanceof ActivityGroupComponent,
+    );
+    const notice = children.find((child) => child instanceof NoticeMessageComponent);
+
+    // Live and replay show one shape: the notice cuts the stretch of work in
+    // two, so the bash call after it opens a block below the notice.
+    expect(blocks).toHaveLength(2);
+    expect(notice).toBeInstanceOf(NoticeMessageComponent);
+    expect(children.indexOf(blocks[0] as ActivityGroupComponent)).toBeLessThan(
+      children.indexOf(notice as NoticeMessageComponent),
+    );
+    expect(children.indexOf(notice as NoticeMessageComponent)).toBeLessThan(
+      children.indexOf(blocks[1] as ActivityGroupComponent),
+    );
+    expect(stripAnsi((blocks[0] as ActivityGroupComponent).render(120).join('\n'))).not.toContain('Bash');
+    expect(stripAnsi((blocks[1] as ActivityGroupComponent).render(120).join('\n'))).toContain('Bash');
   });
 });

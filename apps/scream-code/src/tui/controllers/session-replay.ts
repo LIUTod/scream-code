@@ -317,6 +317,9 @@ export class SessionReplayRenderer {
     if (fields === null) return;
     const notice = renderChildRequestNotice(fields);
     this.flushAssistant(context);
+    // The same cut the live path makes: the replayed notice seals the stretch
+    // of work above it, so live and replay show one shape.
+    this.host.streamingUI.endActivityGroup();
     this.host.appendTranscriptEntry({
       ...replayEntry(context, 'status', notice.title, 'notice', { detail: notice.detail }),
       noticeMarkerColor: this.host.state.theme.colors.warning,
