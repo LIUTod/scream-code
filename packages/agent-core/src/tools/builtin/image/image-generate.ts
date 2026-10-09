@@ -38,7 +38,7 @@ export const ImageGenerateInputSchema = z.object({
   mode: z
     .enum(['new', 'edit', 'continue'])
     .describe("new = text-to-image, edit = rewrite imagePaths, continue = edit the session's last image."),
-  prompt: z.string().min(1).describe('The refined image-generation prompt.'),
+  prompt: z.string().min(1).describe('The image-generation prompt exactly as the user wrote it.'),
   imagePaths: z
     .array(z.string())
     .optional()
