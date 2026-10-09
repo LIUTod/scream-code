@@ -929,3 +929,44 @@ describe('replayed block sealing at agent cards and delivered requests', () => {
     expect(stripAnsi((blocks[1] as ActivityGroupComponent).render(120).join('\n'))).toContain('Bash');
   });
 });
+
+describe('replayed foreground→background handoff', () => {
+  const stripAnsi = (line: string): string => line.replaceAll(/\u001B\[[0-9;]*m/g, '');
+
+  it('keeps a handed-off agent card on 后台运行 instead of an ordinary finish', async () => {
+    const driver = await replayIntoDriver([
+      message('user', [{ type: 'text', text: 'run an agent' }]),
+      message('assistant', [], {
+        toolCalls: [
+          toolCall('call_agent', 'Agent', { description: 'inspect storage', subagent_type: 'explore' }),
+        ],
+      }),
+      message(
+        'tool',
+        [
+          {
+            type: 'text',
+            text: [
+              'task_id: agent-handoff1',
+              'status: backgrounded',
+              'agent_id: agent-1',
+              'automatic_notification: true',
+            ].join('\n'),
+          },
+        ],
+        { toolCallId: 'call_agent' },
+      ),
+    ]);
+
+    const card = driver.state.transcriptContainer.children.find(
+      (child) => child instanceof ToolCallComponent,
+    );
+    expect(card).toBeInstanceOf(ToolCallComponent);
+    const out = (card as ToolCallComponent)
+      .render(120)
+      .map(stripAnsi)
+      .join('\n');
+    expect(out).toContain('后台运行');
+    expect(out).not.toContain('已完成');
+  });
+});

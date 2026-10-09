@@ -209,6 +209,7 @@ describe('transcript rebuilds clear the terminal text selection', () => {
         backgroundAgentMetadata: new Map(),
         backgroundTasks: new Map(),
         backgroundTaskTranscriptedTerminal: new Set<string>(),
+        foregroundSubagentIds: new Set<string>(),
         renderedSkillActivationIds: new Set<string>(),
       } as unknown as SessionEventHandler,
       setAppState: vi.fn(),

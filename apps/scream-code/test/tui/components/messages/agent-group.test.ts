@@ -127,4 +127,17 @@ describe('AgentGroupComponent', () => {
     const out = strip(group.render(80).join('\n'));
     expect(out).not.toContain('0 tools');
   });
+
+  it('shows a handed-off card as ◐ 后台运行 instead of a finished row', () => {
+    vi.useFakeTimers();
+    const handedOff = makeAgent('call_bg', 'handed to background', 'working');
+    handedOff.setSubagentBackgrounded();
+    const group = new AgentGroupComponent(darkColors, undefined);
+    group.attach('call_bg', handedOff);
+    vi.advanceTimersByTime(THROTTLE_WAIT_MS);
+
+    const out = strip(group.render(80).join('\n'));
+    expect(out).toContain('◐ 后台运行');
+    expect(out).not.toContain('已完成');
+  });
 });

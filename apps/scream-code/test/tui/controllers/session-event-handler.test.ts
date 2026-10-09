@@ -24,6 +24,8 @@ function createMockHost(): SessionEventHost {
     resetLiveText: vi.fn(),
     resetToolUi: vi.fn(),
     endActivityGroup: vi.fn(),
+    markSubagentBackgrounded: vi.fn(),
+    applyBackgroundTaskTerminalStatus: vi.fn(),
     flushNow: vi.fn(),
     flushPendingApprovals: vi.fn(),
     finalizeLiveTextBuffers: vi.fn(),
@@ -1706,5 +1708,141 @@ describe('SessionEventHandler — subagent-owned background tasks', () => {
     expect(handler.backgroundTaskOwners.get('bash-sub1')).toBe('agent-7');
     expect(handler.backgroundTasks.has('bash-sub0')).toBe(false);
     expect(handler.backgroundTaskOwners.has('bash-sub0')).toBe(false);
+  });
+});
+
+/**
+ * Foreground→background handoff: when a subagent's request leg wins, the run
+ * is registered as an `agent-*` background task. It must leave the foreground
+ * badge (it was booked there at spawn) and its card must be marked so it stops
+ * reading as an ordinary finish — while a real background spawn, which was
+ * never booked as foreground, keeps its own path untouched.
+ */
+describe('SessionEventHandler — foreground→background handoff', () => {
+  const taskInfo = (taskId: string, agentId?: string): Record<string, unknown> => ({
+    taskId,
+    command: '[agent] sub work',
+    description: 'sub work',
+    status: 'running',
+    pid: 1,
+    exitCode: null,
+    startedAt: 1,
+    endedAt: null,
+    ...(agentId === undefined ? {} : { agentId }),
+  });
+
+  function setup(): {
+    handler: SessionEventHandler;
+    mark: ReturnType<typeof vi.fn>;
+    setBackgroundCounts: ReturnType<typeof vi.fn>;
+  } {
+    const host = createMockHost();
+    const setBackgroundCounts = vi.fn();
+    (host.state as { footer?: unknown }).footer = { setBackgroundCounts };
+    return {
+      handler: new SessionEventHandler(host),
+      mark: vi.mocked(host.streamingUI.markSubagentBackgrounded),
+      setBackgroundCounts,
+    };
+  }
+
+  function spawn(
+    handler: SessionEventHandler,
+    subagentId: string,
+    runInBackground = false,
+  ): void {
+    handler.handleEvent(
+      {
+        ...baseEvent('subagent.spawned'),
+        subagentId,
+        subagentName: 'coder',
+        description: 'foreground work',
+        parentToolCallId: 'call-agent',
+        runInBackground,
+      } as unknown as Event,
+      vi.fn(),
+    );
+  }
+
+  function startTask(handler: SessionEventHandler, info: Record<string, unknown>): void {
+    handler.handleEvent(
+      { ...baseEvent('background.task.started'), info } as unknown as Event,
+      vi.fn(),
+    );
+  }
+
+  it('moves a handed-off run out of the foreground badge, onto the background one, and marks its card', () => {
+    const { handler, mark, setBackgroundCounts } = setup();
+
+    spawn(handler, 'agent-7');
+    expect(setBackgroundCounts).toHaveBeenLastCalledWith({
+      bashTasks: 0,
+      agentTasks: 0,
+      foregroundSubagents: 1,
+    });
+
+    startTask(handler, taskInfo('agent-handoff', 'agent-7'));
+
+    expect(mark).toHaveBeenCalledTimes(1);
+    expect(mark).toHaveBeenCalledWith({ agentId: 'agent-7' });
+    // Footer now reports the run once, on the background side only.
+    expect(setBackgroundCounts).toHaveBeenLastCalledWith({
+      bashTasks: 0,
+      agentTasks: 1,
+      foregroundSubagents: 0,
+    });
+  });
+
+  it('never counts one run twice: repeated starts and duplicate terminals are idempotent', () => {
+    const { handler, mark, setBackgroundCounts } = setup();
+    spawn(handler, 'agent-7');
+    startTask(handler, taskInfo('agent-handoff', 'agent-7'));
+
+    // A repeated start frame must not mark (or subtract) a second time.
+    startTask(handler, taskInfo('agent-handoff', 'agent-7'));
+    expect(mark).toHaveBeenCalledTimes(1);
+
+    // The subagent's own terminal frame repeats: the badge stays put.
+    handler.handleEvent(
+      { ...baseEvent('subagent.completed'), subagentId: 'agent-7' } as unknown as Event,
+      vi.fn(),
+    );
+    handler.handleEvent(
+      { ...baseEvent('subagent.completed'), subagentId: 'agent-7' } as unknown as Event,
+      vi.fn(),
+    );
+    expect(setBackgroundCounts).toHaveBeenLastCalledWith({
+      bashTasks: 0,
+      agentTasks: 1,
+      foregroundSubagents: 0,
+    });
+
+    // The background task's own terminal clears the background badge.
+    handler.handleEvent(
+      {
+        ...baseEvent('background.task.terminated'),
+        info: { ...taskInfo('agent-handoff', 'agent-7'), status: 'completed', exitCode: 0, endedAt: 9 },
+      } as unknown as Event,
+      vi.fn(),
+    );
+    expect(setBackgroundCounts).toHaveBeenLastCalledWith({
+      bashTasks: 0,
+      agentTasks: 0,
+      foregroundSubagents: 0,
+    });
+  });
+
+  it('leaves a real background spawn untouched by the transition path', () => {
+    const { handler, mark, setBackgroundCounts } = setup();
+
+    spawn(handler, 'agent-9', true);
+    startTask(handler, taskInfo('agent-real', 'agent-9'));
+
+    expect(mark).not.toHaveBeenCalled();
+    expect(setBackgroundCounts).toHaveBeenLastCalledWith({
+      bashTasks: 0,
+      agentTasks: 1,
+      foregroundSubagents: 0,
+    });
   });
 });

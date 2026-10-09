@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { Container } from '@liutod-scream/pi-tui';
 import {
   MAX_CHARS_PER_FRAME,
   SMOOTH_CATCHUP_MAX_PER_FRAME,
@@ -7,6 +8,7 @@ import {
 } from '#/tui/constant/streaming';
 import { StreamingUIController } from '#/tui/controllers/streaming-ui';
 import type { StreamingUIHost } from '#/tui/controllers/streaming-ui';
+import { darkColors } from '#/tui/theme/colors';
 import { getSharedSpeedTracker, resetSharedSpeedTracker } from '#/tui/utils/speed-tracker';
 import type { ToolCallBlockData } from '#/tui/types';
 
@@ -341,5 +343,44 @@ describe('smooth streaming (token pacing)', () => {
     const deltas = shownLengths.map((length, i) => length - (i === 0 ? 0 : shownLengths[i - 1]!));
     // Catch-up never applied: every frame stays within the base ceiling.
     expect(Math.max(...deltas)).toBeLessThanOrEqual(MAX_CHARS_PER_FRAME);
+  });
+
+  it('markSubagentBackgrounded routes by subagent id and by tool call id, and reports misses', () => {
+    const host = createMockHost();
+    host.state.transcriptContainer = new Container();
+    host.state.theme.colors = darkColors;
+    const controller = new StreamingUIController(host);
+
+    controller.onToolCallStart({
+      id: 'call-fg-1',
+      name: 'Agent',
+      args: { description: 'foreground work' },
+      step: 1,
+      turnId: 'turn-1',
+    });
+    const liveCard = controller.getToolComponent('call-fg-1');
+    expect(liveCard).toBeDefined();
+    liveCard?.onSubagentSpawned({ agentId: 'agent-3', agentName: 'coder', runInBackground: false });
+
+    // Live route: the background task event names the subagent.
+    expect(controller.markSubagentBackgrounded({ agentId: 'agent-3' })).toBe(true);
+    expect(liveCard?.getSubagentSnapshot().phase).toBe('backgrounded');
+
+    // Replay route: a replayed card has no subagent meta, only a tool call id.
+    controller.onToolCallStart({
+      id: 'call-fg-2',
+      name: 'Agent',
+      args: { description: 'replayed agent' },
+      step: 2,
+      turnId: 'turn-1',
+    });
+    expect(controller.markSubagentBackgrounded({ toolCallId: 'call-fg-2' })).toBe(true);
+    expect(controller.getToolComponent('call-fg-2')?.getSubagentSnapshot().phase).toBe(
+      'backgrounded',
+    );
+
+    expect(controller.markSubagentBackgrounded({ agentId: 'agent-nope' })).toBe(false);
+    expect(controller.markSubagentBackgrounded({ toolCallId: 'call-nope' })).toBe(false);
+    expect(controller.markSubagentBackgrounded({})).toBe(false);
   });
 });

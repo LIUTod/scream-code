@@ -1117,6 +1117,75 @@ describe('ToolCallComponent', () => {
       component.setBackgroundTaskTerminalStatus('failed');
       expect(component.getSubagentSnapshot().errorText).toBe('real crash from subagent');
     });
+
+    // Foreground→background handoff: the AgentTool call returns normally with
+    // a `status: backgrounded` body, so the result alone reads as `done`.
+    // `setSubagentBackgrounded` is the mark the controller sets from the
+    // background task lifecycle; a real terminal status still wins.
+    const handoffResult = {
+      tool_call_id: 'call_fg_agent',
+      output: [
+        'task_id: agent-handoff1',
+        'status: backgrounded',
+        'agent_id: agent-1',
+        'automatic_notification: true',
+      ].join('\n'),
+      is_error: false,
+    };
+
+    function makeHandedOffAgentComponent(): ToolCallComponent {
+      const component = new ToolCallComponent(
+        { id: 'call_fg_agent', name: 'Agent', args: { description: 'foreground agent' } },
+        undefined,
+        darkColors,
+      );
+      component.onSubagentSpawned({
+        agentId: 'agent-1',
+        agentName: 'coder',
+        runInBackground: false,
+      });
+      return component;
+    }
+
+    it('pins the legacy behavior: the handoff result alone reads as "done"', () => {
+      const component = makeHandedOffAgentComponent();
+      component.setResult(handoffResult);
+      expect(component.getSubagentSnapshot().phase).toBe('done');
+    });
+
+    it('setSubagentBackgrounded beats the handoff result in the snapshot and the standalone header', () => {
+      const component = makeHandedOffAgentComponent();
+      component.setResult(handoffResult);
+      component.setSubagentBackgrounded();
+      expect(component.getSubagentSnapshot().phase).toBe('backgrounded');
+      const out = strip(component.render(120).join('\n'));
+      expect(out).toContain('后台运行');
+      expect(out).not.toContain('已完成');
+    });
+
+    it('setSubagentBackgrounded works before the result lands too, and is idempotent', () => {
+      const component = makeHandedOffAgentComponent();
+      component.setSubagentBackgrounded();
+      component.setResult(handoffResult);
+      expect(component.getSubagentSnapshot().phase).toBe('backgrounded');
+      expect(strip(component.render(120).join('\n'))).toContain('后台运行');
+      component.setSubagentBackgrounded();
+      expect(component.getSubagentSnapshot().phase).toBe('backgrounded');
+    });
+
+    it('a real terminal status still beats the backgrounded mark, in either order', () => {
+      const markedFirst = makeHandedOffAgentComponent();
+      markedFirst.setSubagentBackgrounded();
+      markedFirst.setBackgroundTaskTerminalStatus('lost');
+      expect(markedFirst.getSubagentSnapshot().phase).toBe('failed');
+      expect(strip(markedFirst.render(120).join('\n'))).toMatch(/失败|丢失/);
+
+      const terminalFirst = makeHandedOffAgentComponent();
+      terminalFirst.setBackgroundTaskTerminalStatus('completed');
+      terminalFirst.setSubagentBackgrounded();
+      expect(terminalFirst.getSubagentSnapshot().phase).toBe('done');
+      expect(strip(terminalFirst.render(120).join('\n'))).toContain('已完成');
+    });
   });
 
   it('scrolls the Write streaming preview to the last COMMAND_PREVIEW_LINES', () => {

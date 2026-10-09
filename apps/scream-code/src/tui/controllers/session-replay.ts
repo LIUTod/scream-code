@@ -166,7 +166,13 @@ export class SessionReplayRenderer {
         sessionEventHandler.backgroundTaskTranscriptedTerminal.add(info.taskId);
       }
     }
-    state.footer.setBackgroundCounts({ ...countActiveBackgroundTasks(sessionEventHandler.backgroundTasks), foregroundSubagents: 0 });
+    // A resumed session has no live foreground runs: drop any ids booked
+    // before the switch so the badge cannot re-assert a stale count.
+    sessionEventHandler.foregroundSubagentIds.clear();
+    state.footer.setBackgroundCounts({
+      ...countActiveBackgroundTasks(sessionEventHandler.backgroundTasks),
+      foregroundSubagents: sessionEventHandler.foregroundSubagentIds.size,
+    });
     state.ui.requestRender();
   }
 
@@ -353,6 +359,13 @@ export class SessionReplayRenderer {
     };
     call.result = result;
     this.applyStepContext(context);
+    // A foreground subagent handed to the background manager returns a normal
+    // result whose body says `status: backgrounded`. Replay has no spawn /
+    // task lifecycle events, so the persisted output is the signal that keeps
+    // the replayed card on `backgrounded` instead of an ordinary finish.
+    if (call.name === 'Agent' && result.output.includes('status: backgrounded')) {
+      this.host.streamingUI.markSubagentBackgrounded({ toolCallId });
+    }
     this.host.streamingUI.onToolCallEnd(toolCallId, result);
     this.host.streamingUI.removeActiveToolCall(toolCallId);
     context.completedToolCallIds.add(toolCallId);

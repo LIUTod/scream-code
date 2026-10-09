@@ -346,6 +346,49 @@ export class StreamingUIController {
     return true;
   }
 
+  /**
+   * Marks the Agent card of a subagent that was handed from the foreground to
+   * the background mid-run, so the card keeps reading as `backgrounded`
+   * instead of turning into `done` when the handoff result lands.
+   *
+   * Live callers route by subagent id (the `background.task.started` frame
+   * names it); replay routes by tool call id, the only key a replayed card
+   * has. Returns true when a card was found and marked.
+   */
+  markSubagentBackgrounded(ref: {
+    agentId?: string | undefined;
+    toolCallId?: string | undefined;
+  }): boolean {
+    let target = ref.agentId === undefined ? undefined : this.findAgentCardByAgentId(ref.agentId);
+    if (target === undefined && ref.toolCallId !== undefined) {
+      const byCall = this._pendingToolComponents.get(ref.toolCallId);
+      if (byCall !== undefined && byCall.toolCallView.name === 'Agent') target = byCall;
+    }
+    if (target === undefined) return false;
+    target.setSubagentBackgrounded();
+    return true;
+  }
+
+  /**
+   * The mounted Agent card backed by the given subagent id — the in-flight
+   * card, a standalone card, or one borrowed by an agent group.
+   */
+  private findAgentCardByAgentId(agentId: string): ToolCallComponent | undefined {
+    for (const tc of this._pendingToolComponents.values()) {
+      if (tc.getSubagentAgentId() === agentId) return tc;
+    }
+    for (const child of this.host.state.transcriptContainer.children) {
+      if (child instanceof ToolCallComponent) {
+        if (child.getSubagentAgentId() === agentId) return child;
+      } else if (child instanceof AgentGroupComponent) {
+        for (const tc of child.getToolComponents()) {
+          if (tc.getSubagentAgentId() === agentId) return tc;
+        }
+      }
+    }
+    return undefined;
+  }
+
   /** Registers a tool call that arrived via tool.call.started.
    *  Clears any pending streaming state for this id, updates or creates the
    *  component, and returns whether the call was new (no previous entry). */

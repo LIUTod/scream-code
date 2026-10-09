@@ -208,10 +208,13 @@ export class SessionEventHandler {
    */
   private lastCompactionTrigger: 'manual' | 'auto' | undefined;
   backgroundTaskTranscriptedTerminal: Set<string> = new Set();
-  /** Active foreground (non-background) subagents. Footer badge counts them
-   *  separately from background agents: foreground subagents are transient
-   *  (spawned by the current turn's Agent tool), background agents persist. */
-  private foregroundSubagentCount = 0;
+  /** Active foreground (non-background) subagents, by subagent id. Footer
+   *  badge counts them separately from background agents: foreground
+   *  subagents are transient (spawned by the current turn's Agent tool),
+   *  background agents persist. Tracking ids instead of a bare count keeps
+   *  the releases idempotent and lets a foreground→background handoff move
+   *  exactly one run between the two badges. */
+  foregroundSubagentIds: Set<string> = new Set();
   subagentInfo: Map<string, { parentToolCallId: string; name: string }> = new Map();
   /** Sidebar subagent slot state machine (see utils/subagent-slots.ts). */
   readonly subagentSlots = new SubagentSlots();
@@ -252,6 +255,7 @@ export class SessionEventHandler {
     this.backgroundTaskOwners.clear();
     this.backgroundTaskTranscriptedTerminal.clear();
     this.subagentInfo.clear();
+    this.foregroundSubagentIds.clear();
     this.subagentSlots.reset();
     this.subagentInstances.clear();
     this.recentSubagentInstances.length = 0;
@@ -1507,8 +1511,8 @@ export class SessionEventHandler {
       this.syncBackgroundAgentBadge();
       return;
     }
-    // Foreground subagent: count it in the footer badge (spawn +1).
-    this.foregroundSubagentCount += 1;
+    // Foreground subagent: book it in the footer badge (spawn +1).
+    this.foregroundSubagentIds.add(event.subagentId);
     this.syncBackgroundAgentBadge();
 
     let tc = streamingUI.getToolComponent(event.parentToolCallId);
@@ -1568,8 +1572,10 @@ export class SessionEventHandler {
       this.appendBackgroundAgentEntry('completed', backgroundMeta, extras);
       return;
     }
-    // Foreground subagent: decrement the footer badge (completed -1).
-    this.foregroundSubagentCount = Math.max(0, this.foregroundSubagentCount - 1);
+    // Foreground subagent: release its badge slot (completed -1). The delete
+    // is idempotent, and a run handed to the background already left the set
+    // when its background task registered.
+    this.foregroundSubagentIds.delete(event.subagentId);
     this.syncBackgroundAgentBadge();
     // Route to the per-subagent card (WolfPack) or parent card (normal Agent).
     const info = this.subagentInfo.get(event.subagentId);
@@ -1619,8 +1625,9 @@ export class SessionEventHandler {
       this.appendBackgroundAgentEntry('failed', backgroundMeta, { error: event.error });
       return;
     }
-    // Foreground subagent: decrement the footer badge (failed -1).
-    this.foregroundSubagentCount = Math.max(0, this.foregroundSubagentCount - 1);
+    // Foreground subagent: release its badge slot (failed -1). Idempotent for
+    // the same reason as the completed path.
+    this.foregroundSubagentIds.delete(event.subagentId);
     this.syncBackgroundAgentBadge();
     const tc = streamingUI.getToolComponent(
       this.subagentInfo.get(event.subagentId)?.parentToolCallId ?? event.parentToolCallId,
@@ -1752,6 +1759,14 @@ export class SessionEventHandler {
 
     if (event.type === 'background.task.started') {
       if (info.taskId.startsWith('agent-')) {
+        // Foreground→background handoff: the run was booked as foreground at
+        // spawn, so it must leave that badge now that its own background task
+        // exists — and its card must stop reading as an ordinary finish. A
+        // real background spawn was never booked, so it passes through
+        // untouched.
+        if (info.agentId !== undefined && this.foregroundSubagentIds.delete(info.agentId)) {
+          this.host.streamingUI.markSubagentBackgrounded({ agentId: info.agentId });
+        }
         this.syncBackgroundTaskBadge();
         this.host.tasksBrowserController.repaint();
         return;
@@ -1879,7 +1894,7 @@ export class SessionEventHandler {
         bashTasks += 1;
       }
     }
-    state.footer?.setBackgroundCounts({ bashTasks, agentTasks, foregroundSubagents: this.foregroundSubagentCount });
+    state.footer?.setBackgroundCounts({ bashTasks, agentTasks, foregroundSubagents: this.foregroundSubagentIds.size });
     state.ui?.requestRender();
   }
 }

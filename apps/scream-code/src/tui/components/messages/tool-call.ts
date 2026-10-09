@@ -499,6 +499,15 @@ export class ToolCallComponent extends CachedContainer {
    * background agent — including lost ones — as `✓ Completed`.
    */
   private backgroundTaskTerminalPhase: 'done' | 'failed' | undefined;
+  /**
+   * True when a foreground subagent was handed to the background manager
+   * mid-run (the request-leg / timeout handoff). The Agent tool still returns
+   * a normal result — its body carries `status: backgrounded` — which the
+   * result-based derivation would otherwise read as `done`; this mark keeps
+   * the card on `backgrounded` until a real terminal status
+   * (`backgroundTaskTerminalPhase`) arrives, which still wins.
+   */
+  private subagentBackgrounded = false;
   private subagentContextTokens: number | undefined;
   private subagentUsage: TokenUsage | undefined;
   /** Latest activity (Using X / Used Y) for the running-phase chip. */
@@ -871,16 +880,19 @@ export class ToolCallComponent extends CachedContainer {
     //   2. Live type-validation failures may skip `subagent.failed`, or
     //      `tool.result` may arrive first; otherwise the UI can stay stuck at
     //      'spawning' and keep showing `Initializing...`.
-    // Intermediate states without a result still use `subagentPhase`.
-    // `backgrounded` has no result because background agents do not enter the
-    // transcript.
+    // Intermediate states without a result still use `subagentPhase`. A run
+    // handed off to the background keeps `backgrounded` even though its
+    // result already landed, so the mark sits between the terminal override
+    // and the result.
     const derivedPhase: ToolCallSubagentSnapshot['phase'] =
       this.backgroundTaskTerminalPhase ??
-      (this.result !== undefined
-        ? this.result.is_error
-          ? 'failed'
-          : 'done'
-        : this.subagentPhase);
+      (this.subagentBackgrounded
+        ? 'backgrounded'
+        : this.result !== undefined
+          ? this.result.is_error
+            ? 'failed'
+            : 'done'
+          : this.subagentPhase);
     const errorText =
       this.subagentError ?? (derivedPhase === 'failed' ? this.result?.output : undefined);
     return {
@@ -1169,6 +1181,21 @@ export class ToolCallComponent extends CachedContainer {
     this.headerText.setText(this.buildHeader());
     this.rebuildContent();
     this.notifySnapshotChange();
+  }
+
+  /**
+   * Marks the run as handed off to the background manager (foreground→
+   * background). Idempotent, and never downgrades a terminal phase: the card
+   * reads `backgrounded` until `setBackgroundTaskTerminalStatus` reports the
+   * real end state.
+   */
+  setSubagentBackgrounded(): void {
+    if (this.subagentBackgrounded) return;
+    this.subagentBackgrounded = true;
+    this.headerText.setText(this.buildHeader());
+    this.rebuildContent();
+    this.notifySnapshotChange();
+    this.ui?.requestRender();
   }
 
   /**
@@ -1473,7 +1500,8 @@ export class ToolCallComponent extends CachedContainer {
       this.finishedSubCalls.length === 0 &&
       this.subagentText.length === 0 &&
       this.subagentPhase === undefined &&
-      this.backgroundTaskTerminalPhase === undefined
+      this.backgroundTaskTerminalPhase === undefined &&
+      !this.subagentBackgrounded
     ) {
       return;
     }
@@ -1599,7 +1627,8 @@ export class ToolCallComponent extends CachedContainer {
       this.subagentText.length > 0 ||
       this.subagentThinkingText.length > 0 ||
       this.subagentPhase !== undefined ||
-      this.backgroundTaskTerminalPhase !== undefined
+      this.backgroundTaskTerminalPhase !== undefined ||
+      this.subagentBackgrounded
     );
   }
 
@@ -1617,6 +1646,8 @@ export class ToolCallComponent extends CachedContainer {
     if (this.backgroundTaskTerminalPhase !== undefined) {
       return this.backgroundTaskTerminalPhase;
     }
+    // A handed-off run stays `backgrounded` although its result landed.
+    if (this.subagentBackgrounded) return 'backgrounded';
     if (this.result !== undefined) return this.result.is_error ? 'failed' : 'done';
     return this.subagentPhase;
   }
