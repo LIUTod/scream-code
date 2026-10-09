@@ -712,6 +712,7 @@ export const zh: Record<string, string> = {
   'toolcall.turns': '{count} 轮',
   'toolcall.failed': '失败',
   'toolcall.bg_running': '后台运行',
+  'toolcall.bg_handed_off': '已转后台运行',
   'toolcall.truncation_notice': 'Tool 调用参数因 max_tokens 被截断 — 调用未执行。',
   'toolcall.lines_hidden': '...（还有 {hidden} 行，共 {total} 行，按 ctrl+o 展开）',
   'toolcall.preparing_changes': '正在准备变更{path}...{bytes} · 已用 {elapsed}',

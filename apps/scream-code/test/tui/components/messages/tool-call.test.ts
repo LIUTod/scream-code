@@ -1159,7 +1159,7 @@ describe('ToolCallComponent', () => {
       component.setSubagentBackgrounded();
       expect(component.getSubagentSnapshot().phase).toBe('backgrounded');
       const out = strip(component.render(120).join('\n'));
-      expect(out).toContain('后台运行');
+      expect(out).toContain('◐ 已转后台运行');
       expect(out).not.toContain('已完成');
     });
 
@@ -1168,7 +1168,7 @@ describe('ToolCallComponent', () => {
       component.setSubagentBackgrounded();
       component.setResult(handoffResult);
       expect(component.getSubagentSnapshot().phase).toBe('backgrounded');
-      expect(strip(component.render(120).join('\n'))).toContain('后台运行');
+      expect(strip(component.render(120).join('\n'))).toContain('◐ 已转后台运行');
       component.setSubagentBackgrounded();
       expect(component.getSubagentSnapshot().phase).toBe('backgrounded');
     });
@@ -1185,6 +1185,22 @@ describe('ToolCallComponent', () => {
       terminalFirst.setSubagentBackgrounded();
       expect(terminalFirst.getSubagentSnapshot().phase).toBe('done');
       expect(strip(terminalFirst.render(120).join('\n'))).toContain('已完成');
+    });
+
+    it('leaves a spawn-time background card on the plain wording', () => {
+      const component = new ToolCallComponent(
+        { id: 'call_bg_agent', name: 'Agent', args: { description: 'background agent' } },
+        undefined,
+        darkColors,
+      );
+      component.onSubagentSpawned({
+        agentId: 'agent-2',
+        agentName: 'coder',
+        runInBackground: true,
+      });
+      const out = strip(component.render(120).join('\n'));
+      expect(out).toContain('后台运行');
+      expect(out).not.toContain('已转');
     });
   });
 

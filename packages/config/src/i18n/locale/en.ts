@@ -716,6 +716,7 @@ export const en: Record<string, string> = {
   'toolcall.turns': '{count} turns',
   'toolcall.failed': 'Failed',
   'toolcall.bg_running': 'Background',
+  'toolcall.bg_handed_off': 'Moved to the background',
   'toolcall.truncation_notice': 'Tool call arguments truncated due to max_tokens — call not executed.',
   'toolcall.lines_hidden': '...({hidden} more lines, {total} total, press ctrl+o to expand)',
   'toolcall.preparing_changes': 'Preparing changes{path}...{bytes} · Elapsed {elapsed}',

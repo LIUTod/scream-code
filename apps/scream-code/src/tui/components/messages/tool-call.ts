@@ -1687,7 +1687,11 @@ export class ToolCallComponent extends CachedContainer {
       case 'running':
         return chalk.hex(this.colors.primary)(t('toolcall.running'));
       case 'backgrounded':
-        return t('toolcall.bg_running');
+        // A foreground run handed to the background says so; one spawned in
+        // the background keeps the plain label.
+        return this.subagentBackgrounded
+          ? chalk.hex(this.colors.roleAssistant)(`◐ ${t('toolcall.bg_handed_off')}`)
+          : t('toolcall.bg_running');
       case 'spawning':
       case undefined:
         return chalk.hex(this.colors.primary)(t('toolcall.starting'));
