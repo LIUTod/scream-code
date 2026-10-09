@@ -65,6 +65,10 @@ export function applySubagentActivityEvent(
   now = Date.now(),
 ): SubagentActivity[] {
   if (!payload.type.startsWith('subagent.')) return current as SubagentActivity[];
+  // A collaboration request is not a lifecycle frame: it carries a subagentId
+  // but says nothing about that child's run, so folding it would mint a
+  // phantom 'spawning' row for an id whose spawn frame a replay pruned.
+  if (payload.type === 'subagent.child_request') return current as SubagentActivity[];
 
   const record = payload as Record<string, unknown>;
   const subagentId = stringField(record, 'subagentId');

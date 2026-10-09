@@ -837,6 +837,24 @@ export class SessionSubagentHost {
       ],
       { kind: 'system_trigger', name: 'child_request' },
     );
+    // The request is in the parent's turn (or its steer buffer) — the only
+    // definition of delivered this path has, and the one replay reconstructs
+    // from the parent's persisted context. Announcing it here rather than at
+    // the child's tool call keeps the two producers in step: a request the
+    // host deduped or rate-limited above returns before this point and paints
+    // nothing.
+    parent.emitEvent({
+      type: 'subagent.child_request',
+      subagentId: fromChildId,
+      subagentName: this.getProfileName(fromChildId),
+      requestType: req.request_type,
+      message: req.message,
+      needs: req.needs,
+      expecting: req.payload?.expecting,
+      artifacts: req.payload?.artifacts,
+      evidence: req.payload?.evidence,
+      missing: req.payload?.missing,
+    });
     this.childRequestWaiters.get(fromChildId)?.resolve();
     return { status: 'accepted' };
   }

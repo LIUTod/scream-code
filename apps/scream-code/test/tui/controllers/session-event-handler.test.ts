@@ -560,7 +560,7 @@ describe('SessionEventHandler', () => {
     expect(appendLiveOutput).toHaveBeenCalledTimes(1);
   });
 
-  it('marks the sidebar slot as requesting when a subagent contacts the parent', () => {
+  it('raises the requesting marker only once a request actually reached the parent', () => {
     const host = createMockHost();
     const handler = new SessionEventHandler(host);
 
@@ -575,18 +575,19 @@ describe('SessionEventHandler', () => {
       } as unknown as Event,
       vi.fn(),
     );
-    const coderStatus = () =>
-      handler.getSubagentSlots().find((slot) => slot.type === 'coder')?.status;
-    expect(coderStatus()).toBe('working');
+    const coderSlot = () => handler.getSubagentSlots().find((slot) => slot.type === 'coder');
+    expect(coderSlot()?.status).toBe('working');
 
     // Ordinary tool work keeps reading as working…
     handler.handleEvent(
       { ...baseEvent('tool.call.started'), agentId: 'agent-7', name: 'Read' } as unknown as Event,
       vi.fn(),
     );
-    expect(coderStatus()).toBe('working');
+    expect(coderSlot()?.detail).toBe('tool: Read');
 
-    // …but asking the parent raises the transient help marker instead.
+    // …while asking the parent is not ordinary tool work — and a call that has
+    // only *started* proves nothing, because the host may still dedupe or
+    // rate-limit it: no marker, and no tool activity either.
     handler.handleEvent(
       {
         ...baseEvent('tool.call.started'),
@@ -595,10 +596,24 @@ describe('SessionEventHandler', () => {
       } as unknown as Event,
       vi.fn(),
     );
-    expect(coderStatus()).toBe('requesting');
+    expect(coderSlot()?.status).toBe('working');
+    expect(coderSlot()?.detail).toBe('tool: Read');
+
+    // The kernel's delivery frame is what raises the transient help marker.
+    handler.handleEvent(
+      {
+        ...baseEvent('subagent.child_request'),
+        subagentId: 'agent-7',
+        subagentName: 'coder',
+        requestType: 'info',
+        message: 'need context',
+      } as unknown as Event,
+      vi.fn(),
+    );
+    expect(coderSlot()?.status).toBe('requesting');
   });
 
-  it('cuts into the transcript when a subagent asks the parent', () => {
+  it('cuts into the transcript only for a request the kernel actually delivered', () => {
     const host = createMockHost();
     const handler = new SessionEventHandler(host);
     const appended = () =>
@@ -618,12 +633,26 @@ describe('SessionEventHandler', () => {
       } as unknown as Event,
       vi.fn(),
     );
+    // The call starting is not delivery: a deduped or rate-limited request
+    // never reaches the parent, so nothing may be painted here.
     handler.handleEvent(
       {
         ...baseEvent('tool.call.started'),
         agentId: 'agent-7',
         name: 'ContactParent',
         args: { request_type: 'info', message: '目标终端宽度是否含侧栏展开态' },
+      } as unknown as Event,
+      vi.fn(),
+    );
+    expect(appended()).toHaveLength(0);
+
+    handler.handleEvent(
+      {
+        ...baseEvent('subagent.child_request'),
+        subagentId: 'agent-7',
+        subagentName: 'coder',
+        requestType: 'info',
+        message: '目标终端宽度是否含侧栏展开态',
       } as unknown as Event,
       vi.fn(),
     );
@@ -647,6 +676,35 @@ describe('SessionEventHandler', () => {
     expect(appended()).toHaveLength(1);
   });
 
+  it("surfaces a subagent-owned child's delivered request through the same notice path", () => {
+    const host = createMockHost();
+    const handler = new SessionEventHandler(host);
+    const appended = () =>
+      (host.appendTranscriptEntry as ReturnType<typeof vi.fn>).mock.calls.map((call) => call[0]);
+
+    // A subagent that owns its own children emits the frame itself, so the
+    // event is routed rather than treated as a main-agent one: the requester is
+    // the grandchild the frame names, not the emitter.
+    handler.handleEvent(
+      {
+        ...baseEvent('subagent.child_request'),
+        agentId: 'agent-5',
+        subagentId: 'agent-11',
+        subagentName: 'explore',
+        requestType: 'info',
+        message: '还需要一个目录清单',
+      } as unknown as Event,
+      vi.fn(),
+    );
+
+    expect(appended()).toHaveLength(1);
+    expect(appended()[0]).toMatchObject({
+      renderMode: 'notice',
+      content: expect.stringContaining('explore'),
+      detail: expect.stringContaining('还需要一个目录清单'),
+    });
+  });
+
   it('labels an unnamed requester and never paints an empty notice', () => {
     const host = createMockHost();
     const handler = new SessionEventHandler(host);
@@ -657,22 +715,42 @@ describe('SessionEventHandler', () => {
     // notice must appear — just without a name to attribute.
     handler.handleEvent(
       {
-        ...baseEvent('tool.call.started'),
-        agentId: 'agent-9',
-        name: 'ContactParent',
-        args: { request_type: 'escalate', message: '需要人工决策' },
+        ...baseEvent('subagent.child_request'),
+        subagentId: 'agent-9',
+        requestType: 'escalate',
+        message: '需要人工决策',
       } as unknown as Event,
       vi.fn(),
     );
     expect(appended()).toHaveLength(1);
     expect(appended()[0]?.content).not.toContain('agent-9');
 
-    // A malformed call carries no request text: render nothing at all.
+    // Otherwise the delivery names its own requester: the kernel attaches the
+    // name, so the row is attributed even when no spawn frame reached us.
     handler.handleEvent(
-      { ...baseEvent('tool.call.started'), agentId: 'agent-9', name: 'ContactParent' } as unknown as Event,
+      {
+        ...baseEvent('subagent.child_request'),
+        subagentId: 'agent-10',
+        subagentName: 'reviewer',
+        requestType: 'info',
+        message: '核对用例',
+      } as unknown as Event,
       vi.fn(),
     );
-    expect(appended()).toHaveLength(1);
+    expect(appended()).toHaveLength(2);
+    expect(appended()[1]?.content).toContain('reviewer');
+
+    // A frame with no request text renders nothing at all, matching replay.
+    handler.handleEvent(
+      {
+        ...baseEvent('subagent.child_request'),
+        subagentId: 'agent-9',
+        requestType: 'escalate',
+        message: '   ',
+      } as unknown as Event,
+      vi.fn(),
+    );
+    expect(appended()).toHaveLength(2);
   });
 
   describe('skill_candidate', () => {

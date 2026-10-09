@@ -4,7 +4,8 @@
  * dim detail line carrying the request itself.
  *
  * Two producers share this formatter so live and replay never disagree:
- *  - the live path reads the subagent's `tool.call.started` args;
+ *  - the live path reads the `subagent.child_request` event, which the kernel
+ *    emits only once the request was actually delivered;
  *  - session replay recovers the same fields from the `<notification>` XML the
  *    kernel injects into the parent's context.
  *
@@ -12,6 +13,7 @@
  * of the persisted context), so it renders the name-less title variant.
  */
 
+import type { SubagentChildRequestEvent } from '@scream-code/scream-code-sdk';
 import { t } from '@scream-code/config';
 
 export const CHILD_REQUEST_KINDS = ['info', 'handoff', 'escalate'] as const;
@@ -89,26 +91,30 @@ function previewedList(
   return t(LIST_KEY[field], { value: stringifyList(items) });
 }
 
-/** Live producer: the args the model handed to `ContactParent`. */
-export function childRequestFieldsFromArgs(args: Record<string, unknown>): ChildRequestFields | null {
-  const message = textOf(args['message']);
-  // A call without a request body must not paint an empty notice.
+/**
+ * Live producer: the delivery event the kernel emits once a request landed in
+ * the parent's turn. Events cross the wire as untyped JSON, so every field is
+ * re-checked here rather than trusted from the declared type.
+ */
+export function childRequestFieldsFromEvent(
+  event: SubagentChildRequestEvent,
+): ChildRequestFields | null {
+  const record = event as unknown as Record<string, unknown>;
+  const message = textOf(record['message']);
+  // A request with no text must not paint an empty notice — the same gate the
+  // replay parser applies to the notification body.
   if (message === undefined) return null;
-  const payload =
-    typeof args['payload'] === 'object' && args['payload'] !== null && !Array.isArray(args['payload'])
-      ? (args['payload'] as Record<string, unknown>)
-      : {};
   const listOf = (key: string): readonly string[] | undefined => {
-    const raw = payload[key];
+    const raw = record[key];
     if (!Array.isArray(raw)) return undefined;
     const items = raw.map((item) => textOf(item)).filter((item): item is string => item !== undefined);
     return items.length > 0 ? items : undefined;
   };
   return {
-    requestType: kindOf(args['request_type']),
+    requestType: kindOf(record['requestType']),
     message,
-    needs: textOf(args['needs']),
-    expecting: textOf(payload['expecting']),
+    needs: textOf(record['needs']),
+    expecting: textOf(record['expecting']),
     artifacts: listOf('artifacts'),
     evidence: listOf('evidence'),
     missing: listOf('missing'),

@@ -70,6 +70,38 @@ describe('applySubagentActivityEvent', () => {
     })]);
   });
 
+  it('ignores a delivered collaboration request instead of minting a phantom row', () => {
+    let activities = applySubagentActivityEvent([], {
+      type: 'subagent.spawned',
+      subagentId: 'agent-1',
+      subagentName: 'explore',
+      parentToolCallId: 'call-1',
+      runInBackground: false,
+    }, 100);
+
+    activities = applySubagentActivityEvent(activities, {
+      type: 'subagent.child_request',
+      subagentId: 'agent-1',
+      subagentName: 'explore',
+      requestType: 'info',
+      message: 'need context',
+    }, 200);
+    // A request is not a lifecycle frame: it neither adds a row nor restamps
+    // the one it belongs to.
+    expect(activities).toHaveLength(1);
+    expect(activities[0]).toMatchObject({ subagentId: 'agent-1', state: 'spawning', updatedAt: 100 });
+
+    // And a request whose spawn frame a replay pruned must not conjure a child.
+    expect(
+      applySubagentActivityEvent([], {
+        type: 'subagent.child_request',
+        subagentId: 'agent-ghost',
+        requestType: 'info',
+        message: 'need context',
+      }, 300),
+    ).toEqual([]);
+  });
+
   it('keeps active agents first and retains only the newest 24 entries', () => {
     const completed = Array.from({ length: 25 }, (_, index) => ({
       type: 'subagent.completed',

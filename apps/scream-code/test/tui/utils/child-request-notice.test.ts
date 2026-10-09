@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { t } from '@scream-code/config';
+import type { SubagentChildRequestEvent } from '@scream-code/scream-code-sdk';
 
 import {
-  childRequestFieldsFromArgs,
+  childRequestFieldsFromEvent,
   childRequestFieldsFromNotification,
   renderChildRequestNotice,
 } from '#/tui/utils/child-request-notice';
@@ -44,19 +45,30 @@ function kernelBody(fields: {
   ].filter((line): line is string => line !== undefined);
 }
 
-describe('childRequestFieldsFromArgs', () => {
-  it('reads every field the tool exposes', () => {
-    const fields = childRequestFieldsFromArgs({
-      request_type: 'handoff',
-      message: '需要独立验证这段逻辑',
-      needs: 'independent verification',
-      payload: {
+/** The delivery frame the kernel emits once a request actually landed. */
+function requestEvent(overrides: Partial<SubagentChildRequestEvent> = {}): SubagentChildRequestEvent {
+  return {
+    type: 'subagent.child_request',
+    subagentId: 'agent-7',
+    requestType: 'info',
+    message: 'x',
+    ...overrides,
+  };
+}
+
+describe('childRequestFieldsFromEvent', () => {
+  it('reads every field the kernel delivers', () => {
+    const fields = childRequestFieldsFromEvent(
+      requestEvent({
+        requestType: 'handoff',
+        message: '需要独立验证这段逻辑',
+        needs: 'independent verification',
+        expecting: '带行号和文件路径的结论',
         artifacts: ['src/a.ts', 'src/b.ts'],
         evidence: [],
         missing: ['tests'],
-        expecting: '带行号和文件路径的结论',
-      },
-    });
+      }),
+    );
     expect(fields).toEqual({
       requestType: 'handoff',
       message: '需要独立验证这段逻辑',
@@ -69,20 +81,30 @@ describe('childRequestFieldsFromArgs', () => {
   });
 
   it('refuses to build a notice without a request body', () => {
-    expect(childRequestFieldsFromArgs({ request_type: 'info' })).toBeNull();
-    expect(childRequestFieldsFromArgs({ request_type: 'info', message: '   ' })).toBeNull();
+    // Events cross the wire as JSON: neither a missing nor a blank body is
+    // guaranteed away by the declared type.
+    expect(
+      childRequestFieldsFromEvent({
+        type: 'subagent.child_request',
+        subagentId: 'agent-7',
+        requestType: 'info',
+      } as unknown as SubagentChildRequestEvent),
+    ).toBeNull();
+    expect(childRequestFieldsFromEvent(requestEvent({ message: '   ' }))).toBeNull();
   });
 
   it('degrades an unknown request type to info instead of guessing', () => {
-    expect(childRequestFieldsFromArgs({ request_type: 'yolo', message: 'x' })?.requestType).toBe('info');
+    const event = { ...requestEvent(), requestType: 'yolo' } as unknown as SubagentChildRequestEvent;
+    expect(childRequestFieldsFromEvent(event)?.requestType).toBe('info');
   });
 
   it('ignores a malformed payload', () => {
-    const fields = childRequestFieldsFromArgs({
-      request_type: 'info',
-      message: 'x',
-      payload: { artifacts: 'not-an-array', evidence: [null, 'ok'] },
-    });
+    const event = {
+      ...requestEvent(),
+      artifacts: 'not-an-array',
+      evidence: [null, 'ok'],
+    } as unknown as SubagentChildRequestEvent;
+    const fields = childRequestFieldsFromEvent(event);
     expect(fields?.artifacts).toBeUndefined();
     expect(fields?.evidence).toEqual(['ok']);
   });
@@ -90,27 +112,19 @@ describe('childRequestFieldsFromArgs', () => {
 
 describe('childRequestFieldsFromNotification', () => {
   it('round-trips what the kernel injects', () => {
-    const args = {
-      request_type: 'handoff',
+    const request = {
+      requestType: 'handoff' as const,
       message: '需要独立验证这段逻辑',
       needs: 'independent verification',
-      payload: { artifacts: ['src/a.ts', 'src/b.ts'], expecting: '带测试命令的输出' },
+      expecting: '带测试命令的输出',
+      artifacts: ['src/a.ts', 'src/b.ts'],
     };
-    const fromArgs = childRequestFieldsFromArgs(args);
+    const fromEvent = childRequestFieldsFromEvent(requestEvent(request));
     const fromNotification = childRequestFieldsFromNotification(
-      kernelNotification(
-        'agent-7',
-        kernelBody({
-          requestType: args.request_type,
-          message: args.message,
-          needs: args.needs,
-          expecting: args.payload.expecting,
-          artifacts: args.payload.artifacts,
-        }),
-      ),
+      kernelNotification('agent-7', kernelBody(request)),
     );
     // Live and replay must never disagree about the same request.
-    expect(fromNotification).toEqual(fromArgs);
+    expect(fromNotification).toEqual(fromEvent);
   });
 
   it('keeps extra lines that are not fields attached to the message', () => {

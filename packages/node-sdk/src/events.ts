@@ -79,12 +79,13 @@ export type {
   QuestionResult,
 } from '@scream-code/agent-core';
 
-// Subagent lifecycle events.
+// Subagent lifecycle events, plus the delivered child→parent request.
 export type {
   SubagentSpawnedEvent,
   SubagentStartedEvent,
   SubagentCompletedEvent,
   SubagentFailedEvent,
+  SubagentChildRequestEvent,
 } from '@scream-code/agent-core';
 
 // Compaction lifecycle events and compaction result payload.

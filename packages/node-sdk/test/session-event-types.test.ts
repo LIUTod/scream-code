@@ -46,6 +46,17 @@ describe('Event public types', () => {
     expectTypeOf<EventByType<'subagent.spawned'>['runInBackground']>().toEqualTypeOf<boolean>();
   });
 
+  it('narrows a delivered collaboration request by type', () => {
+    expectTypeOf<EventByType<'subagent.child_request'>['subagentId']>().toEqualTypeOf<string>();
+    expectTypeOf<EventByType<'subagent.child_request'>['requestType']>().toEqualTypeOf<
+      'info' | 'handoff' | 'escalate'
+    >();
+    expectTypeOf<EventByType<'subagent.child_request'>['message']>().toEqualTypeOf<string>();
+    expectTypeOf<EventByType<'subagent.child_request'>['expecting']>().toEqualTypeOf<
+      string | undefined
+    >();
+  });
+
   it('exposes approval and question reverse-RPC requests', () => {
     expectTypeOf<ApprovalRequest['turnId']>().toEqualTypeOf<number | undefined>();
     expectTypeOf<ApprovalRequest['toolName']>().toEqualTypeOf<string>();
@@ -83,6 +94,7 @@ describe('Event public types', () => {
         case 'subagent.started':
         case 'subagent.completed':
         case 'subagent.failed':
+        case 'subagent.child_request':
         case 'compaction.started':
         case 'compaction.blocked':
         case 'compaction.cancelled':

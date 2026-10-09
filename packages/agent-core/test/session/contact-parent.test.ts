@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { testAgent } from '../agent/harness/agent';
+import { testAgent, type AgentTestContext } from '../agent/harness/agent';
 import { SessionSubagentHost } from '../../src/session/subagent-host';
 import { SubagentMessageBus } from '../../src/session/subagent-messages';
 import { ContactParentTool } from '../../src/tools/builtin/collaboration/contact-parent';
@@ -39,6 +39,13 @@ function fakeSession(parent: Agent, child: Agent) {
 
 function stubJian() {
   return undefined; // use the harness default (testJian), same as subagent-host.test.ts
+}
+
+/** Collaboration-request frames the host announced to the UI, in order. */
+function childRequestFrames(harness: AgentTestContext): Record<string, unknown>[] {
+  return harness.allEvents
+    .filter((entry) => entry.type === '[rpc]' && entry.event === 'subagent.child_request')
+    .map((entry) => entry.args as Record<string, unknown>);
 }
 
 describe('child→parent collaboration (ContactParent)', () => {
@@ -117,6 +124,7 @@ describe('child→parent collaboration (ContactParent)', () => {
     expect(JSON.stringify(parentInput)).toContain(
       'expecting: the exact lines to fix plus a test command to prove the fix',
     );
+    expect(childRequestFrames(parent)).toHaveLength(1);
   });
 
   it('flattens multi-line needs and expecting onto single notification lines', async () => {
@@ -222,6 +230,62 @@ describe('child→parent collaboration (ContactParent)', () => {
     expect(second).toEqual({ status: 'accepted', deduped: true });
   });
 
+  it('announces a delivered request exactly once and nothing on the outcomes that never deliver', () => {
+    const child = testAgent({ type: 'sub' });
+    const parent = testAgent();
+    parent.configure();
+    child.configure();
+    const session = fakeSession(parent.agent, child.agent);
+    const bus = new SubagentMessageBus();
+    const host = new SessionSubagentHost(session, 'main', undefined, undefined, bus);
+    const internals = host as unknown as {
+      activeChildren: Map<string, unknown>;
+      childIdByAgent: WeakMap<Agent, string>;
+    };
+    internals.activeChildren = new Map([['agent-0', {}]]);
+    internals.childIdByAgent.set(child.agent, 'agent-0');
+
+    const request = {
+      request_type: 'handoff' as const,
+      message: '需要独立验证这段逻辑',
+      needs: 'independent verification',
+      payload: { artifacts: ['src/a.ts'], expecting: '带行号的结论' },
+    };
+    expect(host.submitChildRequest(child.agent, request).status).toBe('accepted');
+    expect(childRequestFrames(parent)).toEqual([
+      expect.objectContaining({
+        subagentId: 'agent-0',
+        requestType: 'handoff',
+        message: '需要独立验证这段逻辑',
+        needs: 'independent verification',
+        expecting: '带行号的结论',
+        artifacts: ['src/a.ts'],
+      }),
+    ]);
+
+    // The parent already holds this request: a duplicate is accepted without a
+    // second delivery, so it must not announce a second time either.
+    expect(host.submitChildRequest(child.agent, request)).toEqual({
+      status: 'accepted',
+      deduped: true,
+    });
+    expect(childRequestFrames(parent)).toHaveLength(1);
+
+    // Spend the rest of the per-turn budget — one announcement per delivery…
+    for (const message of ['second', 'third', 'fourth']) {
+      expect(host.submitChildRequest(child.agent, { request_type: 'info', message }).status).toBe(
+        'accepted',
+      );
+    }
+    expect(childRequestFrames(parent)).toHaveLength(4);
+
+    // …and the request over it is refused before any delivery, so it paints nothing.
+    expect(
+      host.submitChildRequest(child.agent, { request_type: 'info', message: 'over budget' }).status,
+    ).toBe('saturated');
+    expect(childRequestFrames(parent)).toHaveLength(4);
+  });
+
   it('rejects requests from agents that are not active children', async () => {
     const child = testAgent({ type: 'sub', jian: stubJian() });
     const parent = testAgent({ jian: stubJian() });
@@ -234,6 +298,8 @@ describe('child→parent collaboration (ContactParent)', () => {
     expect(
       host.submitChildRequest(child.agent, { request_type: 'info', message: 'hi' }).status,
     ).toBe('not_active');
+    // A refused request never reached the parent, so it was never announced.
+    expect(childRequestFrames(parent)).toHaveLength(0);
   });
 
   it('resolves the one-shot request wake on an accepted request and starts fresh after release', async () => {
@@ -346,9 +412,11 @@ describe('child→parent collaboration (ContactParent)', () => {
     expect(host.submitChildRequest(child.agent, request).status).toBe('parent_gone');
     await new Promise((resolve) => setTimeout(resolve, 0));
     // No half-state: the foreground wait is not called off for a request that
-    // was never delivered, and the per-turn bookkeeping was never touched, so
-    // the same request is not a "duplicate" of an undelivered one.
+    // was never delivered, no announcement reaches the UI, and the per-turn
+    // bookkeeping was never touched, so the same request is not a "duplicate"
+    // of an undelivered one.
     expect(woke).toBe(false);
+    expect(childRequestFrames(parent)).toHaveLength(0);
     expect(internals.childRequestCounts.has('agent-0')).toBe(false);
     expect(internals.childRequestSeen.has('agent-0')).toBe(false);
     expect(

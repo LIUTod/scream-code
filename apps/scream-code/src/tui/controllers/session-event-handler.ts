@@ -19,6 +19,7 @@ import type {
   SkillActivatedEvent,
   TodoUpdatedEvent,
   GoalUpdatedEvent,
+  SubagentChildRequestEvent,
   SubagentCompletedEvent,
   SubagentFailedEvent,
   SubagentSpawnedEvent,
@@ -50,7 +51,7 @@ import {
 } from '../utils/event-payload';
 import { formatBackgroundAgentTranscript } from '../utils/background-agent-status';
 import {
-  childRequestFieldsFromArgs,
+  childRequestFieldsFromEvent,
   renderChildRequestNotice,
 } from '../utils/child-request-notice';
 import { SubagentSlots, type SubagentSlot } from '../utils/subagent-slots';
@@ -363,6 +364,7 @@ export class SessionEventHandler {
       case 'subagent.started': this.handleSubagentStarted(event); break;
       case 'subagent.completed': this.handleSubagentCompleted(event); break;
       case 'subagent.failed': this.handleSubagentFailed(event); break;
+      case 'subagent.child_request': this.handleSubagentChildRequest(event); break;
       case 'background.task.started':
       case 'background.task.updated':
       case 'background.task.terminated':
@@ -518,14 +520,19 @@ export class SessionEventHandler {
           event.type === 'subagent.failed' ? 'failed' : 'completed',
         );
         break;
+      case 'subagent.child_request':
+        // A routed owner's own child asked for help. The frame is emitted by
+        // the owner (not the requester), so the notice and the requesting
+        // marker are keyed by the child that asked, not by the emitter.
+        this.handleSubagentChildRequest(event);
+        break;
       case 'tool.call.started':
-        // Asking the parent for help is not ordinary tool work: raise the
-        // transient requesting marker (SubagentSlots.onRequesting) and cut into
-        // the main transcript, instead of logging it as tool activity.
-        if (event.name === 'ContactParent') {
-          this.subagentSlots.onRequesting(agentId);
-          this.appendChildRequestNotice(agentId, event.args);
-        } else {
+        // Asking the parent for help is not ordinary tool work. The call
+        // starting proves nothing — the host may still dedupe or rate-limit it
+        // — so it only stays out of the slot's tool activity here; the
+        // requesting marker comes from `subagent.child_request` once the
+        // request was actually delivered.
+        if (event.name !== 'ContactParent') {
           this.subagentSlots.onActivity(agentId, 'tool', `tool: ${event.name}`);
         }
         break;
@@ -544,15 +551,25 @@ export class SessionEventHandler {
   }
 
   /**
-   * Surface a child→parent collaboration request in the transcript the moment
-   * the subagent asks, so the human sees it without expanding the agent card.
-   * The request always targets the main agent (one subagent host per session),
-   * which is why a top-level transcript entry is the right home for it.
+   * A child→parent collaboration request that the kernel actually delivered:
+   * raise the requester's transient requesting marker and cut into the main
+   * transcript, so the human sees it without expanding the agent card. The
+   * kernel emits the frame at the steering success point only, so a request it
+   * deduped or refused never reaches this handler — the live transcript paints
+   * exactly what replay reconstructs from the parent's context.
    */
-  private appendChildRequestNotice(agentId: string, args: unknown): void {
-    const fields = childRequestFieldsFromArgs(argsRecord(args));
+  private handleSubagentChildRequest(event: SubagentChildRequestEvent): void {
+    this.subagentSlots.onRequesting(event.subagentId);
+    this.appendChildRequestNotice(event);
+  }
+
+  private appendChildRequestNotice(event: SubagentChildRequestEvent): void {
+    const fields = childRequestFieldsFromEvent(event);
     if (fields === null) return;
-    const notice = renderChildRequestNotice(fields, this.subagentInfo.get(agentId)?.name);
+    const notice = renderChildRequestNotice(
+      fields,
+      event.subagentName ?? this.subagentInfo.get(event.subagentId)?.name,
+    );
     this.host.appendTranscriptEntry({
       id: nextTranscriptId(),
       kind: 'status',

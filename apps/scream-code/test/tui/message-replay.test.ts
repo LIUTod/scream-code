@@ -2,6 +2,7 @@ import type {
   AgentReplayRecord,
   BackgroundTaskInfo,
   ContentPart,
+  Event,
   PromptOrigin,
   ResumedAgentState,
   Role,
@@ -708,6 +709,54 @@ describe('replayed internal injections', () => {
         .map((entry) => entry.content),
     ).toEqual(['继续侧栏的事']);
     expect(driver.state.transcriptContainer.render(120).join('\n')).not.toContain('<notification');
+  });
+
+  it('paints a delivered request live exactly as replay reconstructs it', async () => {
+    const notification = [
+      '<notification id="child_request:agent-7:1700000000000" category="task" type="child_request" source_kind="subagent" source_id="agent-7">',
+      'Title: Subagent info request',
+      'Severity: info',
+      'info: 目标终端宽度是否含侧栏展开态',
+      'needs: independent verification',
+      'artifacts: [src/a.ts, src/b.ts]',
+      '</notification>',
+    ].join('\n');
+
+    const driver = await replayIntoDriver([
+      message('user', [{ type: 'text', text: '继续侧栏的事' }]),
+      message('user', [{ type: 'text', text: notification }], {
+        origin: { kind: 'system_trigger', name: 'child_request' },
+      }),
+    ]);
+
+    // The same request, now as the delivery frame the kernel emits live once
+    // the request has actually landed in the parent's turn.
+    driver.sessionEventHandler.handleEvent(
+      {
+        type: 'subagent.child_request',
+        sessionId: 'ses-replay',
+        agentId: 'main',
+        subagentId: 'agent-7',
+        subagentName: 'coder',
+        requestType: 'info',
+        message: '目标终端宽度是否含侧栏展开态',
+        needs: 'independent verification',
+        artifacts: ['src/a.ts', 'src/b.ts'],
+      } as unknown as Event,
+      vi.fn(),
+    );
+
+    const notices = driver.state.transcriptEntries.filter(
+      (entry) => entry.kind === 'status' && entry.renderMode === 'notice',
+    );
+    // One row per delivered request. The body matches byte-for-byte; the title
+    // is where the producers legitimately differ — the kernel names a live
+    // child, while replay cannot recover a display name and stays name-less.
+    expect(notices).toHaveLength(2);
+    expect(notices[1]?.detail).toBe(notices[0]?.detail);
+    expect(notices[1]?.content).toContain('coder');
+    expect(notices[0]?.content).not.toContain('coder');
+    expect(notices[1]?.noticeMarkerColor).toBe(driver.state.theme.colors.warning);
   });
 
   it('drops internal injections that carry no transcript meaning', async () => {

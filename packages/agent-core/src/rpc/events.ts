@@ -286,6 +286,27 @@ export interface SubagentFailedEvent {
   readonly usage?: TokenUsage | undefined;
 }
 
+/**
+ * A child→parent collaboration request that actually reached the parent. The
+ * host emits it at the steering success point, so a call the host deduped or
+ * rate-limited — one the parent never receives — announces nothing. A replay
+ * reconstructs the same set from the `child_request` notifications persisted in
+ * the parent's history, which is why this event is delivery-shaped and not a
+ * copy of the tool call.
+ */
+export interface SubagentChildRequestEvent {
+  readonly type: 'subagent.child_request';
+  readonly subagentId: string;
+  readonly subagentName?: string | undefined;
+  readonly requestType: 'info' | 'handoff' | 'escalate';
+  readonly message: string;
+  readonly needs?: string | undefined;
+  readonly expecting?: string | undefined;
+  readonly artifacts?: readonly string[] | undefined;
+  readonly evidence?: readonly string[] | undefined;
+  readonly missing?: readonly string[] | undefined;
+}
+
 export interface CompactionStartedEvent {
   readonly type: 'compaction.started';
   readonly trigger: 'manual' | 'auto';
@@ -388,6 +409,7 @@ export type AgentEvent =
   | SubagentStartedEvent
   | SubagentCompletedEvent
   | SubagentFailedEvent
+  | SubagentChildRequestEvent
   | CompactionStartedEvent
   | CompactionBlockedEvent
   | CompactionCancelledEvent
