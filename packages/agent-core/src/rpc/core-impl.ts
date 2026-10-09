@@ -400,16 +400,41 @@ export class ScreamCore implements PromisableMethods<CoreAPI> {
   async closeSession({ sessionId }: CloseSessionPayload): Promise<void> {
     const session = this.sessions.get(sessionId);
     if (session) {
-      await session.close();
-      this.sessions.delete(sessionId);
+      try {
+        await session.close();
+      } finally {
+        // Deleted even when the close threw. `Session.close()` latches the
+        // session's background managers shut before it tears anything down,
+        // and that latch has no reset counterpart — a failed-to-close
+        // instance left in the active map would be handed straight back by a
+        // later resumeSession (see its active-instance branch), leaving the
+        // resumed session permanently unable to deliver background task
+        // notifications. Dropping it forces the resume to build a fresh
+        // Session, exactly as after a successful close.
+        this.sessions.delete(sessionId);
+      }
     }
   }
 
   async deleteSession({ sessionId }: DeleteSessionPayload): Promise<void> {
     const active = this.sessions.get(sessionId);
     if (active) {
-      await active.close();
-      this.sessions.delete(sessionId);
+      try {
+        await active.close();
+      } finally {
+        // Aligned with closeSession: the instance leaves the active map even
+        // when the close threw. Its background managers were latched shut by
+        // `Session.close()` (no reset counterpart), so keeping it here would
+        // let a later resumeSession serve back a session that can never
+        // deliver background task notifications again.
+        this.sessions.delete(sessionId);
+      }
+      // Only a clean close reaches the destructive step. Deleting the store
+      // removes the session directory from disk, so destroying recoverable
+      // data after a failed teardown would turn a retryable failure into
+      // permanent loss. A close failure therefore propagates with the store
+      // intact; retrying the delete finds no active session and goes straight
+      // to the store.
     }
     await this.sessionStore.delete(sessionId);
   }

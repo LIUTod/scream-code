@@ -643,6 +643,128 @@ describe('BackgroundManager — RPC event emission', () => {
     });
   });
 
+  describe('session-death gate', () => {
+    // `Session.close()` latches `markSessionClosed()` on every resident agent
+    // before it tears anything down. From then on a terminal task notification
+    // must not be steered: an idle steer auto-launches a turn (`AgentTurn.steer`
+    // → `launch`), and for a dead session that turn is a ghost — invisible to
+    // the user but still spending API calls. The drop must also leave no
+    // delivery mark behind, or reconcile could never re-deliver the
+    // notification when the session is opened again.
+    it('drops a terminal task notification addressed to a closed session', async () => {
+      agent.background.markSessionClosed();
+
+      const taskId = agent.background.registerAgentTask(
+        Promise.resolve({ result: 'late subagent summary' }),
+        'late task',
+      );
+      await agent.background.waitForTerminal(taskId);
+
+      // fireTerminalCallbacks does not await the notification pipeline, so give
+      // its async tail a beat before the negative assertion — without the gate
+      // the steer lands well within it (this case is the fix's red-proof).
+      await new Promise((r) => setTimeout(r, 20));
+
+      expect(agent.turn.steer).not.toHaveBeenCalled();
+      expect(agent.context.appendUserMessage).not.toHaveBeenCalled();
+    });
+
+    it('reconcile re-delivers the notification the gate suppressed', async () => {
+      agent.background.markSessionClosed();
+
+      const taskId = agent.background.registerAgentTask(
+        Promise.resolve({ result: 'review me after reopen' }),
+        'gated task',
+      );
+      await agent.background.waitForTerminal(taskId);
+      await new Promise((r) => setTimeout(r, 20));
+      expect(agent.turn.steer).not.toHaveBeenCalled();
+
+      // The reopen path (`Agent.resume()` → `reconcile()`): the suppressed
+      // notification is appended to context instead of steered, and the append
+      // itself marks it delivered so a second reconcile cannot re-append it.
+      await agent.background.reconcile();
+
+      expect(agent.turn.steer).not.toHaveBeenCalled();
+      expect(agent.context.appendUserMessage).toHaveBeenCalledTimes(1);
+      const [content, origin] = vi.mocked(agent.context.appendUserMessage).mock.calls[0]!;
+      expect(origin).toMatchObject({
+        kind: 'background_task',
+        taskId,
+        status: 'completed',
+      });
+      expect((content as Array<{ text: string }>)[0]!.text).toContain('review me after reopen');
+
+      await agent.background.reconcile();
+      expect(agent.context.appendUserMessage).toHaveBeenCalledTimes(1);
+    });
+
+    it('drops a notification whose build spans the close, leaving it re-deliverable', async () => {
+      // The second half of the gate: the task went terminal while the session
+      // was still alive, and the close lands while the notification context is
+      // being built. The steer must be dropped at the post-build check, and the
+      // scheduled reservation the aborted build took must be released — kept,
+      // it would let reconcile believe the notification was already on its way.
+      const firstSnapshot = agent.background.getOutputSnapshot.bind(agent.background);
+      let releaseSnapshot: () => void = () => {};
+      const snapshotGate = new Promise<void>((resolve) => {
+        releaseSnapshot = resolve;
+      });
+      let blockedFirstSnapshot = false;
+      vi.spyOn(agent.background, 'getOutputSnapshot').mockImplementation(async (taskId, limit) => {
+        if (!blockedFirstSnapshot) {
+          blockedFirstSnapshot = true;
+          await snapshotGate;
+        }
+        return firstSnapshot(taskId, limit);
+      });
+
+      const taskId = agent.background.registerAgentTask(
+        Promise.resolve({ result: 'built mid-close' }),
+        'in-flight task',
+      );
+      await agent.background.waitForTerminal(taskId);
+      await vi.waitFor(() => {
+        expect(blockedFirstSnapshot).toBe(true);
+      });
+
+      // close() lands while the build is parked on the output snapshot.
+      agent.background.markSessionClosed();
+      releaseSnapshot();
+      await new Promise((r) => setTimeout(r, 20));
+
+      expect(agent.turn.steer).not.toHaveBeenCalled();
+
+      await agent.background.reconcile();
+      expect(agent.turn.steer).not.toHaveBeenCalled();
+      expect(agent.context.appendUserMessage).toHaveBeenCalledTimes(1);
+    });
+
+    it('stops agent-class tasks and leaves bash tasks running', async () => {
+      const aborted = vi.fn();
+      const completion = new Promise<{ result: string }>((_resolve, reject) => {
+        aborted.mockImplementation(() => {
+          const error = new Error('subagent run aborted');
+          error.name = 'AbortError';
+          reject(error);
+        });
+      });
+      const agentTaskId = agent.background.registerAgentTask(completion, 'subagent run', {
+        abort: () => aborted(),
+      });
+      const bashTaskId = agent.background.register(pendingProcess(), 'sleep 60', 'long shell');
+
+      await agent.background.stopAgentTasks('Session closed');
+
+      // The agent-class coroutine is terminal (its abort path ran), the bash
+      // process is untouched — keeping bash alive is what keepAliveOnExit
+      // means, and `stopAll` covers this case when the switch is off.
+      expect(aborted).toHaveBeenCalledTimes(1);
+      expect(agent.background.getTask(agentTaskId)?.status).toBe('killed');
+      expect(agent.background.getTask(bashTaskId)?.status).toBe('running');
+    });
+  });
+
   // Note: the `records.restoring` guard is enforced inside `Agent.emitEvent`
   // (see agent/index.ts). BackgroundManager unconditionally forwards
   // lifecycle events to the agent; suppression is the agent's job.

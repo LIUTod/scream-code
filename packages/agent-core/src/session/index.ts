@@ -11,6 +11,7 @@ import type { RuntimeSystemPrompt, ScreamConfig, SDKSessionRPC } from '#/rpc';
 import { proxyWithExtraPayload } from '#/rpc/types';
 
 import { Agent, type AgentOptions, type AgentType } from '../agent';
+import type { BackgroundManager } from '../agent/background';
 import { HookEngine, type HookDef } from './hooks';
 import type { PermissionManagerOptions, PermissionRule } from '../agent/permission';
 import { parseBooleanEnv, resolveConfigValue, type BackgroundConfig } from '../config';
@@ -123,6 +124,14 @@ export class Session {
   /** Session-level parent→child message bus shared by every subagent host. */
   readonly subagentMessages = new SubagentMessageBus();
   private agentIdCounter = 0;
+  /**
+   * Every BackgroundManager this session created for one of its agents, held
+   * through a `WeakRef` so `close()` can still latch the manager of a finished
+   * (evicted) subagent — see `trackBackgroundManager`. Weak on purpose: a
+   * strong reference would pin each manager for the session's lifetime, the
+   * leak `removeAgent` exists to avoid.
+   */
+  private readonly backgroundManagers = new Set<WeakRef<BackgroundManager>>();
   private readonly skillsReady: Promise<void>;
   private readonly mcpReady: Promise<void>;
   metadata: SessionMeta = {
@@ -221,9 +230,10 @@ export class Session {
       // commands. The owner key is this session's id — the value each of its
       // agents stamps on what it parks (see AgentOptions.sessionId). The id is
       // optional: a session created without one stamps no owner and sweeps the
-      // owner-less tasks only, never another session's. Then keep the
-      // established keepAliveOnExit-gated stop of per-agent background
-      // processes.
+      // owner-less tasks only, never another session's. Then apply the
+      // session-exit policy for per-agent background tasks
+      // (stopBackgroundTasksOnExit): keepAliveOnExit only protects bash
+      // processes now — agent tasks die with the session.
       stopAllPendingBackgroundTasks(this.options.id);
       await this.stopBackgroundTasksOnExit();
     });
@@ -321,6 +331,35 @@ export class Session {
   }
 
   async close(): Promise<void> {
+    // Seal every agent's background manager before anything else runs — in
+    // particular before the turn cancels below. From this point on a background
+    // task that reaches a terminal state must not steer its notification into
+    // the closing session: an idle steer auto-launches a turn no one can see
+    // (the ghost turn; see BackgroundManager.notifyBackgroundTask), while an
+    // undelivered notification is what lets the next open of this session
+    // replay it through reconcile. The latch is never reset on this instance
+    // because none survives a close: a closed session is discarded (the RPC
+    // layer's closeSession drops it from the active map — unconditionally, even
+    // when this close throws — and activation builds a new Session), and
+    // `resume()` clears every live agent before re-instantiating it, so a
+    // reopened session always runs fresh BackgroundManager instances.
+    for (const agent of this.agents.values()) {
+      agent.background.markSessionClosed();
+    }
+    // Resident agents are latched above; a finished subagent is evicted from
+    // `agents` while background tasks it registered may still be running (its
+    // manager stays reachable through the task's terminal hook), so latch every
+    // manager this session ever created — see `trackBackgroundManager`. An
+    // entry the GC already reclaimed needs no latch: nothing can notify through
+    // a manager that no longer exists, so it is dropped instead.
+    for (const ref of this.backgroundManagers) {
+      const manager = ref.deref();
+      if (manager === undefined) {
+        this.backgroundManagers.delete(ref);
+        continue;
+      }
+      manager.markSessionClosed();
+    }
     const main = this.agents.get('main');
     if (main !== undefined) {
       const recap = main.sessionMemory.getSessionSummary();
@@ -356,6 +395,20 @@ export class Session {
     if (disposeError !== null) throw disposeError;
   }
 
+  /**
+   * Per-agent background-task policy for session exit, run from the
+   * `background-pending` close-out step — i.e. after `close()` cancelled the
+   * agent turns.
+   *
+   * `keepAliveOnExit` now protects bash processes only. They are real OS
+   * processes whose work (`npm install`, a dev server) is still meaningful to
+   * the user after the session is gone, so the true path leaves them running.
+   * Agent tasks are not processes — they are coroutines over a subagent turn
+   * that `close()` has already cancelled and can never finish on their own — so
+   * they are stopped in both paths: via `stopAll` when keepAlive is off (which
+   * covers every task, so the agent-only stop is not repeated on top of it),
+   * and via `stopAgentTasks` when keepAlive is on.
+   */
   private async stopBackgroundTasksOnExit(): Promise<void> {
     const keepAliveOnExit = resolveConfigValue({
       env: process.env,
@@ -364,10 +417,17 @@ export class Session {
       defaultValue: true,
       parseEnv: parseBooleanEnv,
     });
-    if (keepAliveOnExit) return;
+    if (!keepAliveOnExit) {
+      await Promise.all(
+        Array.from(this.agents.values(), (agent) =>
+          agent.background.stopAll('Session closed'),
+        ),
+      );
+      return;
+    }
     await Promise.all(
       Array.from(this.agents.values(), (agent) =>
-        agent.background.stopAll('Session closed'),
+        agent.background.stopAgentTasks('Session closed'),
       ),
     );
   }
@@ -702,7 +762,7 @@ export class Session {
   ): Agent {
     const parentAgent = parentAgentId !== null ? this.agents.get(parentAgentId) : undefined;
     const cwd = parentAgent?.config.cwd ?? this.options.jian.getcwd();
-    return new Agent({
+    const agent = new Agent({
       ...config,
       agentId: id,
       type,
@@ -733,6 +793,32 @@ export class Session {
       pluginSessionStarts: type === 'main' ? this.options.pluginSessionStarts : undefined,
       resolveRuntimeSystemPrompt: (basePrompt) => this.effectiveSystemPrompt(basePrompt),
     });
+    // Registered at construction, before any caller can run or evict the
+    // agent: `close()` must be able to latch this manager even when the agent
+    // has already left `agents` (a finished subagent is evicted by the
+    // subagent host while its background tasks may still be running).
+    this.trackBackgroundManager(agent.background);
+    return agent;
+  }
+
+  /**
+   * Remember a BackgroundManager so `close()` can latch it shut (see
+   * BackgroundManager.markSessionClosed) even after its agent was evicted from
+   * `agents`. A manager `close()` cannot reach would deliver a terminal task
+   * notification into the closing session — the ghost turn the latch exists to
+   * prevent.
+   *
+   * The reference is weak on purpose: a strong one would pin every manager this
+   * session ever created for the session's whole lifetime, exactly the leak
+   * `removeAgent` avoids for finished subagents. A manager the GC has reclaimed
+   * cannot notify anyone, so skipping it is correct. Dead entries are pruned
+   * here and again in `close()`.
+   */
+  private trackBackgroundManager(manager: BackgroundManager): void {
+    for (const ref of this.backgroundManagers) {
+      if (ref.deref() === undefined) this.backgroundManagers.delete(ref);
+    }
+    this.backgroundManagers.add(new WeakRef(manager));
   }
 
   private permissionOptions(

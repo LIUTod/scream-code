@@ -39,6 +39,12 @@ const NOTIFICATION_TAIL_BYTES = 3_000;
 export class BackgroundManager extends BackgroundProcessManager {
   private readonly scheduledNotificationKeys = new Set<string>();
   private readonly deliveredNotificationKeys = new Set<string>();
+  /**
+   * Session-death latch, set by `Session.close()` before it tears anything
+   * down (see `markSessionClosed`). While set, a terminal task notification is
+   * dropped instead of steered — see `notifyBackgroundTask`.
+   */
+  private sessionClosed = false;
 
   constructor(public readonly agent: Agent) {
     super({
@@ -59,6 +65,49 @@ export class BackgroundManager extends BackgroundProcessManager {
           return;
       }
     });
+  }
+
+  /**
+   * Latch this manager to a closing session. `Session.close()` calls it for
+   * every resident agent before any teardown runs, so that from the very first
+   * teardown step on a terminal task notification is no longer steered into the
+   * session (see `notifyBackgroundTask`). That single drop does both jobs:
+   * no ghost turn is launched for the dead session, and the notification stays
+   * undelivered, so the reconcile path (`restoreBackgroundTaskNotifications`)
+   * appends it silently the next time the session is opened.
+   *
+   * The latch has no reset counterpart on purpose: it models the session's
+   * death, and no manager instance outlives the close that set it. A closed
+   * session is discarded (the RPC layer's closeSession deletes it from the
+   * active map, and a later activation constructs a new `Session`), and even a
+   * direct `Session.resume()` on the same object drops every live agent
+   * (`this.agents.clear()`) before re-instantiating them from metadata — so a
+   * reopened session always runs brand-new BackgroundManager instances whose
+   * latch starts unset.
+   */
+  markSessionClosed(): void {
+    this.sessionClosed = true;
+  }
+
+  /**
+   * Stop every non-terminal agent-class task — the tasks registered through
+   * `registerAgentTask`, whose ids carry the `agent-` prefix (see
+   * generateTaskId).
+   *
+   * `Session.close()` calls this under `keepAliveOnExit`: that switch protects
+   * real bash processes, whose work stays meaningful to the user after the
+   * session is gone, while an agent task is a coroutine driving a subagent turn
+   * the close has already cancelled — left "alive" it can never finish on its
+   * own and would strand a half-dead ledger entry that later notifies a dead
+   * session. Bash tasks are deliberately untouched here; stopping those is
+   * `stopAll`, the keepAlive=false path.
+   */
+  async stopAgentTasks(reason?: string): Promise<readonly BackgroundTaskInfo[]> {
+    const taskIds = this.list()
+      .filter((info) => isAgentTaskId(info.taskId))
+      .map((info) => info.taskId);
+    const results = await Promise.all(taskIds.map((taskId) => this.stop(taskId, reason)));
+    return results.filter((info): info is BackgroundTaskInfo => info !== undefined);
   }
 
   override async reconcile(): Promise<ReconcileResult> {
@@ -90,8 +139,26 @@ export class BackgroundManager extends BackgroundProcessManager {
    * same boundary, each scoped to the manager's own agent.
    */
   private async notifyBackgroundTask(info: BackgroundTaskInfo): Promise<void> {
+    // Session-death gate (see `markSessionClosed`): a session that is closing
+    // or closed must not be steered. Steering an idle agent auto-launches a
+    // turn (`AgentTurn.steer` → `launch`), and for a dead session that turn is
+    // a ghost — invisible to the user, but it still spends API calls and
+    // writes wire records. Checked BEFORE the context builder on purpose: the
+    // builder reserves a scheduled-notification key, and a reservation whose
+    // delivery never happened would also block the reconcile path
+    // (`restoreBackgroundTaskNotifications`) from re-delivering this
+    // notification when the session is next opened.
+    if (this.sessionClosed) return;
     const context = await this.buildBackgroundTaskNotificationContext(info);
     if (context === undefined) return;
+    if (this.sessionClosed) {
+      // The close started while the notification was being built. Release the
+      // reservation taken above for the same reason — reconcile must still be
+      // able to re-deliver — and do not steer: steering now would launch
+      // exactly the ghost turn this gate exists to prevent.
+      this.scheduledNotificationKeys.delete(notificationKey(context.origin));
+      return;
+    }
     this.agent.turn.steer(context.content, context.origin);
     this.fireNotificationHook(context.notification);
   }
@@ -121,7 +188,7 @@ export class BackgroundManager extends BackgroundProcessManager {
     const tailOutput = (await this.getOutputSnapshot(info.taskId, NOTIFICATION_TAIL_BYTES))
       .preview;
     if (this.hasDeliveredNotification(origin)) return;
-    const isAgentTask = info.taskId.startsWith('agent-');
+    const isAgentTask = isAgentTaskId(info.taskId);
     const label = isAgentTask ? 'agent' : 'task';
     const notification: BackgroundTaskNotification = {
       id: notificationId,
@@ -184,6 +251,14 @@ export class BackgroundManager extends BackgroundProcessManager {
 
 function notificationKey(origin: BackgroundTaskOrigin): string {
   return `${origin.taskId}\0${origin.status}\0${origin.notificationId}`;
+}
+
+/**
+ * Agent-class tasks are the ones registered through `registerAgentTask`; their
+ * ids carry the `agent-` prefix (generateTaskId in tools/background/manager).
+ */
+function isAgentTaskId(taskId: string): boolean {
+  return taskId.startsWith('agent-');
 }
 
 /**
