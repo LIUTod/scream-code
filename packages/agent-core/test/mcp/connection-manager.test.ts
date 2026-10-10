@@ -22,7 +22,12 @@ import { z } from 'zod';
 
 import { ScreamError } from '../../src/errors';
 import { ProviderManager } from '../../src/session/provider-manager';
-import { McpConnectionManager, type McpServerEntry } from '../../src/mcp/connection-manager';
+import {
+  DEFAULT_TOOL_TIMEOUT_MS,
+  McpConnectionManager,
+  resolveToolCallTimeoutMs,
+  type McpServerEntry,
+} from '../../src/mcp/connection-manager';
 import { JsonFileStore, McpOAuthService } from '../../src/mcp/oauth';
 import type { AgentEvent, SDKSessionRPC } from '../../src/rpc';
 import { Session } from '../../src/session';
@@ -64,6 +69,21 @@ function sessionRpc(options: {
     toolCall: async () => ({ output: '' }),
   } as unknown as SDKSessionRPC;
 }
+
+describe('MCP tool-call budget', () => {
+  it('falls back to the SDK request timeout when the server sets none', () => {
+    // The fallback equals the SDK's own default (measured 60 000 ms), so
+    // resolving it explicitly changes nothing at runtime.
+    expect(resolveToolCallTimeoutMs({ transport: 'stdio', command: 'x' })).toBe(60_000);
+    expect(DEFAULT_TOOL_TIMEOUT_MS).toBe(60_000);
+  });
+
+  it('keeps an explicit toolTimeoutMs', () => {
+    expect(
+      resolveToolCallTimeoutMs({ transport: 'stdio', command: 'x', toolTimeoutMs: 1234 }),
+    ).toBe(1234);
+  });
+});
 
 describe('McpConnectionManager', () => {
   it('connects servers in parallel and exposes connected entries with their tool count', async () => {

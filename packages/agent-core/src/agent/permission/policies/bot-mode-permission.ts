@@ -4,6 +4,7 @@ import { isPathInside } from '#/utils/path-safety';
 
 import type { Agent } from '../..';
 import type { PermissionPolicy, PermissionPolicyContext, PermissionPolicyResult } from '../types';
+import { assessPrivateReadEgress } from './private-read-egress-ask';
 
 /**
  * Tools whose effects are reversible within the workspace (safe to run
@@ -116,6 +117,16 @@ export class BotModePermissionPolicy implements PermissionPolicy {
       return { kind: 'approve', reason: { reason: 'bot: in-workspace reversible edit' } };
     }
     if (REVERSIBLE_TOOLS.has(tool)) {
+      // Unattended mode must not let private-read data leave the machine: no
+      // prompt can reach a human here, so a hit is parked (deny) instead of
+      // waiting on the approval timeout. The egress guard is shared with the
+      // ask policy so both paths agree on what counts as egress.
+      if (assessPrivateReadEgress(this.agent, context) !== undefined) {
+        return {
+          kind: 'deny',
+          reason: { reason: 'bot: egress after private read blocked (unattended)' },
+        };
+      }
       return { kind: 'approve', reason: { reason: 'bot: reversible tool' } };
     }
     return { kind: 'deny', reason: { reason: `bot: tool '${tool}' not in the reversible allowlist` } };

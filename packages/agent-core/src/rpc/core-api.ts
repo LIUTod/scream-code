@@ -243,6 +243,10 @@ export interface RemoveSkillPayload {
   readonly skillName: string;
 }
 
+export interface RevokeSessionApprovalGrantPayload {
+  readonly pattern: string;
+}
+
 export interface McpServerInfo {
   readonly name: string;
   readonly transport: 'stdio' | 'http';
@@ -477,6 +481,10 @@ export interface SessionAPI extends AgentAPIWithId {
   listSkills: (payload: EmptyPayload) => readonly SkillSummary[];
   injectPlugin: (payload: InjectPluginPayload) => void;
   removeSkill: (payload: RemoveSkillPayload) => void;
+  /** Approval patterns currently granted for the session (approve-for-session). */
+  getSessionApprovalGrants: (payload: EmptyPayload) => string[];
+  /** Revoke one approve-for-session grant; true when a grant was removed. */
+  revokeSessionApprovalGrant: (payload: RevokeSessionApprovalGrantPayload) => boolean;
   listMcpServers: (payload: EmptyPayload) => readonly McpServerInfo[];
   getMcpStartupMetrics: (payload: EmptyPayload) => McpStartupMetrics;
   reconnectMcpServer: (payload: ReconnectMcpServerPayload) => void;

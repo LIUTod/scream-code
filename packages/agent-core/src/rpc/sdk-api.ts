@@ -1,5 +1,6 @@
 import type { ContentPart } from '@scream-code/ltod';
 
+import type { ApprovalGrant } from '../agent/permission/types';
 import type { SubagentCapabilityMode } from '../session/subagent-capability';
 import type { RPCMethods } from './client';
 import type { AgentEvent, ToolInputDisplay } from './events';
@@ -7,6 +8,12 @@ import type { WithAgentId, WithSessionId } from './types';
 
 export type ApprovalDecision = 'approved' | 'rejected' | 'cancelled';
 export type ApprovalScope = 'session';
+/**
+ * Scope a user can grant from an approval prompt. Re-exported from the
+ * permission module, which owns the policy contract that produces it, so the
+ * wire and the domain cannot drift apart.
+ */
+export type { ApprovalGrant } from '../agent/permission/types';
 
 export interface ApprovalResponse {
   readonly decision: ApprovalDecision;
@@ -33,6 +40,15 @@ export interface ApprovalRequest {
   /** Capability contract the asking agent runs under (`read-only` /
    *  `read-write` / `execute`); absent when the asker is unrestricted. */
   readonly sourceCapabilityMode?: SubagentCapabilityMode | undefined;
+  /** Risk notes from the asking policy; the approval UI renders one row per
+   *  entry. Optional so older emitters and replayed payloads stay valid. */
+  readonly reasons?: readonly string[] | undefined;
+  /** Grants the prompt may offer. Absent means every grant is on offer;
+   *  a narrowed list filters the UI's choices. */
+  readonly grantOptions?: readonly ApprovalGrant[] | undefined;
+  /** Plain-text summary of the prompt that started the current turn; the
+   *  approval UI shows it dimmed. Optional so older emitters stay valid. */
+  readonly requestSummary?: string | undefined;
 }
 
 export interface QuestionOption {

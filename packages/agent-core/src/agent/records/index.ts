@@ -68,6 +68,18 @@ function restoreAgentRecord(agent: Agent, input: AgentRecord): void {
     case 'permission.record_approval_result':
       agent.permission.recordApprovalResult(input);
       return;
+    case 'permission.record_grant_revocation':
+      // Stateful on purpose: the approval-result record re-adds the pattern
+      // earlier in the same replay, and a resumed session must not keep a
+      // grant the user revoked. `revokeSessionGrant` is the write side too;
+      // `logRecord` is suppressed while restoring, so this cannot self-record.
+      agent.permission.revokeSessionGrant(input.pattern);
+      return;
+    case 'permission.record_decision':
+      // Audit trail only: the blocked call already produced its error result
+      // on the wire, and no in-memory state derives from the decision record,
+      // so restore must stay a no-op here — the explicit case documents that.
+      return;
     case 'usage.record':
       // Preserve the original scope so the recorder's turn-scoped total
       // (turnTotal) is restored correctly on resume; hardcoding 'session'

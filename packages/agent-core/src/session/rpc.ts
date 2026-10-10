@@ -24,6 +24,7 @@ import type {
   RemoveSkillPayload,
   RenameSessionPayload,
   RegisterToolPayload,
+  RevokeSessionApprovalGrantPayload,
   SessionAPI,
   SetActiveToolsPayload,
   SetRlmEnabledPayload,
@@ -96,6 +97,14 @@ export class SessionAPIImpl implements PromisableMethods<SessionAPI> {
   }
   async removeSkill(payload: RemoveSkillPayload): Promise<void> {
     return this.session.removeSkill(payload.skillName);
+  }
+
+  getSessionApprovalGrants(_payload: EmptyPayload): string[] {
+    return this.session.getSessionApprovalGrants();
+  }
+
+  revokeSessionApprovalGrant(payload: RevokeSessionApprovalGrantPayload): boolean {
+    return this.session.revokeSessionApprovalGrant(payload.pattern);
   }
 
 

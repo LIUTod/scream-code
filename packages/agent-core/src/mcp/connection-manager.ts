@@ -43,6 +43,19 @@ export type McpStatusListener = (entry: McpServerEntry) => void;
 
 const DEFAULT_STARTUP_TIMEOUT_MS = 60_000;
 
+/**
+ * Budget for one MCP tool call when `toolTimeoutMs` is not configured. The
+ * value equals the SDK's own request timeout (its `DEFAULT_REQUEST_TIMEOUT_MSEC`,
+ * measured at 60 000 ms against the installed SDK), so resolving it here makes
+ * the budget explicit without changing behavior.
+ */
+export const DEFAULT_TOOL_TIMEOUT_MS = 60_000;
+
+/** Effective tool-call budget for a server: configured value or the default. */
+export function resolveToolCallTimeoutMs(config: McpServerConfig): number {
+  return config.toolTimeoutMs ?? DEFAULT_TOOL_TIMEOUT_MS;
+}
+
 type RuntimeMcpClient = StdioMcpClient | HttpMcpClient;
 
 export interface McpConnectionManagerOptions {
@@ -349,7 +362,7 @@ export class McpConnectionManager {
   }
 
   private createClient(config: McpServerConfig, name: string): RuntimeMcpClient {
-    const toolCallTimeoutMs = config.toolTimeoutMs;
+    const toolCallTimeoutMs = resolveToolCallTimeoutMs(config);
     if (config.transport === 'stdio') {
       return new StdioMcpClient(config, { toolCallTimeoutMs });
     }

@@ -36,6 +36,11 @@ export interface McpRequestOptions {
  * including either the configured tool-call timeout, an in-flight abort
  * signal, both, or neither. Returns `undefined` when nothing needs to be
  * passed so the SDK falls back to its defaults.
+ *
+ * `McpServerConfig.toolTimeoutMs` resolves to `DEFAULT_TOOL_TIMEOUT_MS` when
+ * unset, which equals the SDK's own request timeout — a config-derived call
+ * therefore arrives here with the same budget the SDK would have applied on
+ * its own.
  */
 export function buildRequestOptions(
   toolCallTimeoutMs: number | undefined,

@@ -949,7 +949,8 @@ export class BackgroundProcessManager {
     }
 
     // Agent tasks whose completion promise never settles (no timeoutMs,
-    // or a truly hung coroutine) need an explicit terminal finalize here.
+    // or a truly hung coroutine) need an explicit terminal finalize here:
+    // such a task is intentionally unbounded until stopped.
     await this.finalizeTerminal(entry, 'killed', null, { stopReason });
 
     return this.toInfo(entry);

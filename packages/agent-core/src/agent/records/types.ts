@@ -32,6 +32,32 @@ export interface AgentRecordEvents {
     mode: PermissionMode;
   };
   'permission.record_approval_result': PermissionApprovalResultRecord;
+  /**
+   * A memorized approve-for-session pattern the user revoked. Stateful on
+   * replay (it removes the pattern) so a resumed session does not resurrect a
+   * grant that was taken back. New in wire v1.8.
+   */
+  'permission.record_grant_revocation': {
+    pattern: string;
+  };
+  /**
+   * A permission decision that stopped a call before it ran, written for the
+   * wire so denials and aborted approvals stay auditable after the session
+   * ends. New in wire v1.7; pre-1.7 wires simply carry no such record.
+   * Wire-only: replay must not re-run anything from it (see the explicit
+   * no-op case in `restoreAgentRecord`).
+   */
+  'permission.record_decision': {
+    turnId: number;
+    toolCallId: string;
+    toolName: string;
+    /** Policy that produced the decision; absent when no policy was involved
+     *  (the approval was cancelled or timed out). */
+    policyName?: string;
+    decision: 'deny' | 'cancelled' | 'timeout';
+    /** Human-readable reason, already formatted for the reader. */
+    reason?: string;
+  };
 
   'full_compaction.begin': CompactionBeginData;
 

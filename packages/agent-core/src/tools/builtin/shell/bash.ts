@@ -1016,6 +1016,8 @@ export class BashTool implements BuiltinTool<BashInput> {
       };
     }
 
+    // `disable_timeout` is intentionally unbounded: the task runs until it
+    // finishes or is stopped, with no timer armed.
     const timeoutMs = args.disable_timeout ? undefined : normalizeTimeoutMs(args.timeout, true);
 
     let proc: JianProcess;

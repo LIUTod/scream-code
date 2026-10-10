@@ -224,6 +224,28 @@ describe('harness config TOML loader', () => {
     expect(reloaded.raw?.['theme']).toBe('dark');
   });
 
+  it('round-trips the permission egress allowlist through TOML', async () => {
+    const dir = makeTempDir();
+    const configPath = join(dir, 'config.toml');
+    const config = parseConfigString(
+      `
+[permission]
+egress_allowlist = [ "internal.example", "*.corp.example" ]
+`,
+      configPath,
+    );
+
+    expect(config.permission?.egressAllowlist).toEqual(['internal.example', '*.corp.example']);
+
+    await writeConfigFile(configPath, config);
+
+    const text = await readFile(configPath, 'utf-8');
+    expect(text).toContain('egress_allowlist');
+
+    const reloaded = readConfigFile(configPath);
+    expect(reloaded.permission?.egressAllowlist).toEqual(['internal.example', '*.corp.example']);
+  });
+
   it('creates a parseable default config scaffold without changing runtime defaults', async () => {
     const dir = makeTempDir();
     const configPath = join(dir, 'config.toml');

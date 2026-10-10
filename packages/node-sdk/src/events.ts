@@ -63,6 +63,7 @@ export type {
   ApprovalRequest,
   ApprovalDecision,
   ApprovalScope,
+  ApprovalGrant,
   ApprovalResponse,
   ToolInputDisplay,
   ToolResultDisplay,

@@ -399,6 +399,18 @@ export class Session {
     return this.rpc.listMcpServers({ sessionId: this.id });
   }
 
+  /** Approval patterns with an active approve-for-session grant. */
+  async getSessionApprovalGrants(): Promise<string[]> {
+    this.ensureOpen();
+    return this.rpc.getSessionApprovalGrants({ sessionId: this.id });
+  }
+
+  /** Revoke one approve-for-session grant; true when a grant was removed. */
+  async revokeSessionApprovalGrant(pattern: string): Promise<boolean> {
+    this.ensureOpen();
+    return this.rpc.revokeSessionApprovalGrant({ sessionId: this.id, pattern });
+  }
+
   async getMcpStartupMetrics(): Promise<McpStartupMetrics> {
     this.ensureOpen();
     return this.rpc.getMcpStartupMetrics({ sessionId: this.id });

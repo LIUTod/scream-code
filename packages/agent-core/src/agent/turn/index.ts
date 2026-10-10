@@ -108,11 +108,23 @@ export class TurnFlow {
   private turnStartWorkingSetPathCount = 0;
   private turnStartVerificationCount = 0;
   private verificationFailureInjected = false;
+  /**
+   * Plain-text summary of the most recent prompt, carried onto approval
+   * requests so the panel can attribute a prompt to what the user asked for.
+   * In-memory only: it is UI context, not session state.
+   */
+  private lastPromptSummary: string | undefined;
 
   constructor(protected readonly agent: Agent) {}
 
+  /** See {@link lastPromptSummary}. Undefined until a text prompt arrives. */
+  getLastPromptSummary(): string | undefined {
+    return this.lastPromptSummary;
+  }
+
   // Returns the new turnId, or null if the turn was marked as resuming.
   prompt(input: readonly ContentPart[], origin: PromptOrigin = USER_PROMPT_ORIGIN): number | null {
+    this.lastPromptSummary = summarizePrompt(input);
     this.agent.records.logRecord({
       type: 'turn.prompt',
       input,
@@ -1024,6 +1036,11 @@ export class TurnFlow {
                     );
               const { isError, output } = finalResult;
 
+              // Second half of the two-phase private-read taint: only a call
+              // that actually succeeded may taint the session, because a
+              // failed read never delivered its content to the model.
+              this.agent.permission.settlePrivateRead(ctx.toolCall.id, isError === true);
+
               // Record in session memory for post-compaction context injection
               this.agent.sessionMemory.recordToolExecution(
                 ctx.toolCall.name,
@@ -1237,4 +1254,25 @@ export class TurnFlow {
     }
     return false;
   }
+}
+
+/** Longest prompt summary kept for the approval card. */
+const PROMPT_SUMMARY_LIMIT = 120;
+
+/**
+ * Plain text of a prompt, whitespace-collapsed and truncated. Returns
+ * undefined for input without text (attachments only), so consumers can omit
+ * the field instead of rendering an empty row.
+ */
+function summarizePrompt(input: readonly ContentPart[]): string | undefined {
+  const text = input
+    .filter((part) => part.type === 'text')
+    .map((part) => part.text)
+    .join(' ')
+    .replaceAll(/\s+/g, ' ')
+    .trim();
+  if (text.length === 0) return undefined;
+  return text.length > PROMPT_SUMMARY_LIMIT
+    ? `${text.slice(0, PROMPT_SUMMARY_LIMIT)}…`
+    : text;
 }

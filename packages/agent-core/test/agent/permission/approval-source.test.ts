@@ -17,6 +17,7 @@ interface FakeAgentOptions {
   readonly capabilityMode?: SubagentCapabilityMode | undefined;
   readonly approval?: ApprovalResponse;
   readonly handler?: (request: unknown) => Promise<ApprovalResponse>;
+  readonly promptSummary?: string;
 }
 
 /** Minimal Agent surface PermissionManager touches when raising an approval. */
@@ -38,6 +39,8 @@ function makeManager(options: FakeAgentOptions = {}): {
     records: { logRecord: vi.fn() },
     replayBuilder: { push: vi.fn() },
     rpc: { requestApproval },
+    // The approval payload reads the turn's prompt summary.
+    turn: { getLastPromptSummary: () => options.promptSummary },
     log: { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() },
     getCapabilityMode: () => options.capabilityMode ?? ('all' as const),
     planMode: {
@@ -123,6 +126,24 @@ describe('approval source attribution', () => {
       }),
       expect.any(Object),
     );
+  });
+
+  it('carries the turn prompt summary, and omits the field without one', async () => {
+    const withSummary = makeManager({ promptSummary: 'deploy the release' });
+
+    await expect(withSummary.manager.beforeToolCall(bashContext())).resolves.toBeUndefined();
+
+    expect(withSummary.requestApproval).toHaveBeenCalledWith(
+      expect.objectContaining({ requestSummary: 'deploy the release' }),
+      expect.any(Object),
+    );
+
+    const withoutSummary = makeManager();
+
+    await expect(withoutSummary.manager.beforeToolCall(bashContext())).resolves.toBeUndefined();
+
+    const [request] = withoutSummary.requestApproval.mock.calls[0] as [Record<string, unknown>];
+    expect(request).not.toHaveProperty('requestSummary');
   });
 
   it("attributes the root agent as 'main'", async () => {

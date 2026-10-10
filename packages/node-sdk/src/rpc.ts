@@ -608,6 +608,21 @@ export class SDKRpcClient {
     return rpc.removeSkill({ sessionId: input.sessionId, skillName: input.skillName });
   }
 
+  async getSessionApprovalGrants(input: SessionIdRpcInput): Promise<string[]> {
+    const rpc = await this.getRpc();
+    return rpc.getSessionApprovalGrants({ sessionId: input.sessionId });
+  }
+
+  async revokeSessionApprovalGrant(
+    input: SessionIdRpcInput & { pattern: string },
+  ): Promise<boolean> {
+    const rpc = await this.getRpc();
+    return rpc.revokeSessionApprovalGrant({
+      sessionId: input.sessionId,
+      pattern: input.pattern,
+    });
+  }
+
 
   /**
    * Background tasks are registered per agent: a subagent's Bash/Agent task

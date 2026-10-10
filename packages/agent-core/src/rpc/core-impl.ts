@@ -99,6 +99,7 @@ import type {
   RemoveSkillPayload,
   RenameSessionPayload,
   ResumeSessionPayload,
+  RevokeSessionApprovalGrantPayload,
   SessionSummary,
   SetActiveToolsPayload,
   SetRlmEnabledPayload,
@@ -973,6 +974,20 @@ export class ScreamCore implements PromisableMethods<CoreAPI> {
     ...payload
   }: SessionScopedPayload<EmptyPayload>): readonly McpServerInfo[] {
     return this.sessionApi(sessionId).listMcpServers(payload);
+  }
+
+  getSessionApprovalGrants({
+    sessionId,
+    ...payload
+  }: SessionScopedPayload<EmptyPayload>): string[] {
+    return this.sessionApi(sessionId).getSessionApprovalGrants(payload);
+  }
+
+  revokeSessionApprovalGrant({
+    sessionId,
+    ...payload
+  }: SessionScopedPayload<RevokeSessionApprovalGrantPayload>): boolean {
+    return this.sessionApi(sessionId).revokeSessionApprovalGrant(payload);
   }
 
   getMcpStartupMetrics({

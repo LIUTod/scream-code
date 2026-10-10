@@ -101,6 +101,10 @@ export const PermissionRuleSchema = z.object({
 
 export const PermissionConfigSchema = z.object({
   rules: z.array(PermissionRuleSchema).optional(),
+  // Hosts the egress guard may send data to after a private read. Merged
+  // (union) with the built-in default list; entries match case-insensitively
+  // and a `*.` prefix covers a domain and its subdomains.
+  egressAllowlist: z.array(z.string()).optional(),
 });
 
 export type PermissionConfig = z.infer<typeof PermissionConfigSchema>;
@@ -172,6 +176,11 @@ export type ServicesConfig = z.infer<typeof ServicesConfigSchema>;
 const McpServerCommonFields = {
   enabled: z.boolean().optional(),
   startupTimeoutMs: z.number().int().min(1).optional(),
+  // Budget for one tool call on this server. Left optional on purpose: when
+  // unset the transport resolves it to `DEFAULT_TOOL_TIMEOUT_MS` in
+  // `mcp/connection-manager.ts` (60 000 ms, the MCP SDK's own request
+  // timeout), so the resolved value is explicit while the config type stays
+  // free of a required field.
   toolTimeoutMs: z.number().int().min(1).optional(),
   enabledTools: z.array(z.string()).optional(),
   disabledTools: z.array(z.string()).optional(),

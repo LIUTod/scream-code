@@ -139,6 +139,8 @@ function makeManager(options: FakeAgentOptions): {
     records: { logRecord: vi.fn() },
     replayBuilder: { push: vi.fn() },
     rpc: { requestApproval },
+    // The approval payload reads the turn's prompt summary.
+    turn: { getLastPromptSummary: () => undefined },
     log: { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() },
     planMode: {
       get isActive() {

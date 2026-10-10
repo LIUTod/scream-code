@@ -238,7 +238,7 @@ describe('Agent permission', () => {
       [wire] context.append_loop_event   { "event": { "type": "block.start", "uuid": "<uuid-2>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "index": 0, "blockType": "text" }, "time": "<time>" }
       [wire] context.append_loop_event   { "event": { "type": "content.part", "uuid": "<uuid-3>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "part": { "type": "text", "text": "I will try Bash." } }, "time": "<time>" }
       [wire] context.append_loop_event   { "event": { "type": "block.end", "uuid": "<uuid-4>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "index": 0, "blockType": "text" }, "time": "<time>" }
-      [emit] requestApproval             { "turnId": 0, "toolCallId": "call_bash", "toolName": "Bash", "action": "Running: printf should-not-run", "display": { "kind": "command", "command": "printf should-not-run", "cwd": "<cwd>", "language": "bash" }, "sourceAgentId": "main", "sourceToolName": "Bash" }
+      [emit] requestApproval             { "turnId": 0, "toolCallId": "call_bash", "toolName": "Bash", "action": "Running: printf should-not-run", "display": { "kind": "command", "command": "printf should-not-run", "cwd": "<cwd>", "language": "bash" }, "requestSummary": "Try to run Bash", "sourceAgentId": "main", "sourceToolName": "Bash" }
     `);
     expect(ctx.lastLlmInput()).toMatchInlineSnapshot(`
       system: <system-prompt>
@@ -650,7 +650,9 @@ describe('Permission policy chain', () => {
       'user-configured-deny',
       'bot-mode-permission',
       'collaboration-auto-approve',
+      'private-read-egress-ask',
       'auto-mode-approve',
+      'dangerous-command-warnings-ask',
       'session-approval-history',
       'user-configured-ask',
       'user-configured-allow',
@@ -1729,7 +1731,13 @@ describe('ExitPlanMode permission policy', () => {
     ).rejects.toThrow('approval transport closed');
 
     expect(exit).not.toHaveBeenCalled();
-    expect(record).not.toHaveBeenCalled();
+    // The aborted approval writes its own audit record; nothing else may be
+    // recorded on this path.
+    expect(
+      record.mock.calls
+        .map((call) => call[0] as { type?: string })
+        .filter((entry) => entry.type !== 'permission.record_decision'),
+    ).toEqual([]);
   });
 
   it('keeps plan mode active and returns revision feedback as a synthetic result', async () => {
@@ -3325,6 +3333,7 @@ function makePermissionManager(
     readonly hooks?: Agent['hooks'];
     readonly approvalHandlerAvailable?: boolean;
     readonly wolfpackModeActive?: boolean;
+    readonly promptSummary?: string;
   } = {},
 ): {
   manager: PermissionManager;
@@ -3342,6 +3351,8 @@ function makePermissionManager(
     records: { logRecord: record },
     replayBuilder: { push: vi.fn() },
     rpc: options.approvalHandlerAvailable === false ? {} : { requestApproval },
+    // The approval payload reads the turn's prompt summary.
+    turn: { getLastPromptSummary: () => options.promptSummary },
     hooks: options.hooks,
     wolfpackMode: { isActive: options.wolfpackModeActive ?? false },
     getCapabilityMode: () => 'all' as const,
@@ -3390,6 +3401,8 @@ function makePlanPermissionManager(input: {
     records: { logRecord: record },
     replayBuilder: { push: vi.fn() },
     rpc: input.approvalHandlerAvailable === false ? {} : { requestApproval },
+    // The approval payload reads the turn's prompt summary.
+    turn: { getLastPromptSummary: () => undefined },
     log: { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() },
     getCapabilityMode: () => 'all' as const,
     planMode: {

@@ -615,6 +615,24 @@ export class Session {
   }
 
   /**
+   * Approval patterns with an active approve-for-session grant in this
+   * session, in insertion order. Empty when the main agent has not been
+   * instantiated (or has no grants).
+   */
+  getSessionApprovalGrants(): string[] {
+    return this.agents.get('main')?.permission.sessionApprovalRulePatterns.slice() ?? [];
+  }
+
+  /**
+   * Revoke one approve-for-session grant held by the main agent. Returns true
+   * when a grant was removed; false when the pattern was not granted (or the
+   * main agent does not exist yet).
+   */
+  revokeSessionApprovalGrant(pattern: string): boolean {
+    return this.agents.get('main')?.permission.revokeSessionGrant(pattern) ?? false;
+  }
+
+  /**
    * Dynamically load additional skill roots into the running session.
    * Used after a plugin is installed so its skills become available
    * without requiring the user to create a new session.

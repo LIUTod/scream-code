@@ -18,12 +18,14 @@ import { ManagePluginReadOnlyApprovePermissionPolicy } from './manage-plugin-rea
 import { PlanModeGuardDenyPermissionPolicy } from './plan-mode-guard-deny';
 import { PlanModeToolApprovePermissionPolicy } from './plan-mode-tool-approve';
 import { PreToolCallHookPermissionPolicy } from './pre-tool-call-hook';
+import { PrivateReadEgressAskPermissionPolicy } from './private-read-egress-ask';
 import { SessionApprovalHistoryPermissionPolicy } from './session-approval-history';
 import {
   UserConfiguredAllowPermissionPolicy,
   UserConfiguredAskPermissionPolicy,
   UserConfiguredDenyPermissionPolicy,
 } from './user-configured-rules';
+import { WarningsAskPermissionPolicy } from './warnings-ask';
 import { CollaborationAutoApprovePermissionPolicy } from './collaboration-auto-approve';
 import { YoloModeApprovePermissionPolicy } from './yolo-mode-approve';
 import { WolfPackModeApprovePermissionPolicy } from './wolfpack-mode-approve';
@@ -53,8 +55,21 @@ export function createPermissionDecisionPolicies(agent: Agent): readonly Permiss
     // Coordination tools (ContactParent/ReportFinding/SendSubagentMessage) are
     // conversation, not mutation — never block them on an approval prompt.
     new CollaborationAutoApprovePermissionPolicy(),
+    // The session read private data from outside the workspace and this call
+    // sends data out → ask, even in auto mode. Order invariant: this line MUST
+    // stay between `collaboration-auto-approve` and `auto-mode-approve` (the
+    // chain is first-match-wins). Below auto → unattended auto mode would
+    // exfiltrate without prompting; the egress allowlist, not the chain
+    // position, is what keeps ordinary auto-mode work quiet.
+    new PrivateReadEgressAskPermissionPolicy(agent),
     // auto mode → approve (any auto-mode block must be a deny rule above this).
     new AutoModeApprovePermissionPolicy(agent),
+    // Dangerous shell commands → ask, once only. Order invariant: this line
+    // MUST stay between `auto-mode-approve` and `session-approval-history`
+    // (the chain is first-match-wins). Above auto → auto mode would stop to
+    // ask, breaking unattended runs; below session history → a memorized
+    // Bash grant would silence the warning, making the risk memorizable.
+    new WarningsAskPermissionPolicy(agent),
     // Approve-for-session memorized rule matches → approve. Runs before user-configured ask rules so an in-session grant beats a still-matching ask rule on later calls.
     new SessionApprovalHistoryPermissionPolicy(agent),
     // User-configured ask rule matches → ask.

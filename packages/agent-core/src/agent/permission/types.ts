@@ -1,6 +1,4 @@
 import type { PrepareToolExecutionResult, ResolvedToolExecutionHookContext } from '../../loop';
-import type { SubagentCapabilityMode } from '../../session/subagent-capability';
-import type { ToolInputDisplay } from '../../tools/display';
 
 export type PermissionRuleDecision = 'allow' | 'deny' | 'ask';
 
@@ -36,21 +34,12 @@ export interface PermissionRule {
   readonly reason?: string;
 }
 
-export interface ApprovalRequest {
-  toolCallId: string;
-  toolName: string;
-  action: string;
-  display: ToolInputDisplay;
-  /** Id of the agent asking for approval; 'main' for the root agent. */
-  sourceAgentId?: string | undefined;
-  /** Profile name of the asking agent, for people-facing attribution. */
-  sourceAgentName?: string | undefined;
-  /** Tool that triggered the approval request. */
-  sourceToolName?: string | undefined;
-  /** Capability contract the asking agent runs under; omitted when it is
-   *  unrestricted (`all`), so main-agent payloads are unchanged. */
-  sourceCapabilityMode?: SubagentCapabilityMode | undefined;
-}
+/**
+ * Scope a user can grant from an approval prompt. `once` covers the single
+ * call; `session` memorizes the call's approval rule for the rest of the
+ * session (see `sessionApprovalRulePatterns`).
+ */
+export type ApprovalGrant = 'once' | 'session';
 
 export interface ApprovalResponse {
   decision: 'approved' | 'rejected' | 'cancelled';
@@ -99,6 +88,10 @@ export type PermissionPolicyResult =
   | {
       readonly kind: 'ask';
       readonly reason?: PermissionDecisionReason;
+      /** Human-readable risk notes surfaced on the approval request. */
+      readonly reasons?: readonly string[];
+      /** Grants the prompt may offer. Absent = all of them. */
+      readonly grantOptions?: readonly ApprovalGrant[];
       readonly resolveApproval?: (
         result: ApprovalResponse,
       ) => PermissionPolicyResolution | undefined;

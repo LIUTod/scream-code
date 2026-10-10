@@ -191,6 +191,11 @@ function transformPermissionData(data: Record<string, unknown>): Record<string, 
   if (rules.length > 0) {
     out['rules'] = rules;
   }
+  // Kept verbatim (already camelCased by `transformPlainObject`); without
+  // this copy the key would be silently dropped before schema parsing.
+  if (raw['egressAllowlist'] !== undefined) {
+    out['egressAllowlist'] = raw['egressAllowlist'];
+  }
   return out;
 }
 
@@ -396,6 +401,11 @@ function permissionToToml(
     out['rules'] = permission.rules.map(permissionRuleToToml);
   } else {
     delete out['rules'];
+  }
+  if (permission.egressAllowlist !== undefined) {
+    out['egress_allowlist'] = [...permission.egressAllowlist];
+  } else {
+    delete out['egress_allowlist'];
   }
   return out;
 }

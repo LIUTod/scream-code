@@ -8,15 +8,25 @@ function ctx(toolName: string, args: Record<string, unknown> = {}): PermissionPo
   return { toolCall: { name: toolName, arguments: undefined }, args } as unknown as PermissionPolicyContext;
 }
 
+/** Permission surface the policy reads: mode plus the egress-guard taint. */
+function permissionStub(mode: string): Record<string, unknown> {
+  return {
+    mode,
+    taintedPrivateReads: [],
+    hasPendingPrivateReads: () => false,
+    sessionApprovalRulePatterns: [],
+  };
+}
+
 function botPolicy(): BotModePermissionPolicy {
   return new BotModePermissionPolicy({
-    permission: { mode: 'bot' },
+    permission: permissionStub('bot'),
     config: { cwd: '/work' },
   } as unknown as Agent);
 }
 
 function manualPolicy(): BotModePermissionPolicy {
-  return new BotModePermissionPolicy({ permission: { mode: 'manual' } } as unknown as Agent);
+  return new BotModePermissionPolicy({ permission: permissionStub('manual') } as unknown as Agent);
 }
 
 describe('BotModePermissionPolicy', () => {

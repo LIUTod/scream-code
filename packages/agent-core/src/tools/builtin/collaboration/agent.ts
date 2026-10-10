@@ -516,6 +516,8 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
       if (childRequestArrival !== undefined) {
         legs.push(childRequestArrival.then(() => ({ kind: 'request' as const })));
       }
+      // Without `timeoutMs` the foreground wait is intentionally unbounded —
+      // only the background path carries a deadline.
       if (timeoutMs !== undefined) {
         const bound = timeoutMs;
         legs.push(
