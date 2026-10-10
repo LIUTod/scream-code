@@ -1,4 +1,4 @@
-import { CURSOR_MARKER } from '@liutod-scream/pi-tui';
+import { CURSOR_MARKER, visibleWidth } from '@liutod-scream/pi-tui';
 import { describe, expect, it, vi } from 'vitest';
 
 import { ApprovalPanelComponent } from '#/tui/components/dialogs/approval-panel';
@@ -504,5 +504,56 @@ describe('ApprovalPanelComponent — selection pulse', () => {
     const dialog = new ApprovalPanelComponent(makePending(), () => {}, COLORS);
 
     expect(strip(dialog.render(80).join('\n'))).not.toContain('来源：');
+  });
+
+  it('renders the policy risk notes above the choices', () => {
+    const pending = makePending();
+    pending.data.reasons = [
+      'dangerous command: recursive force delete',
+      'dangerous command: privilege escalation',
+    ];
+    const dialog = new ApprovalPanelComponent(pending, () => {}, COLORS);
+
+    const out = strip(dialog.render(80).join('\n'));
+    expect(out).toContain('风险提示');
+    expect(out).toContain('· dangerous command: recursive force delete');
+    expect(out).toContain('· dangerous command: privilege escalation');
+  });
+
+  it('omits the risk rows for payloads without reasons (older emitters)', () => {
+    const dialog = new ApprovalPanelComponent(makePending(), () => {}, COLORS);
+
+    expect(strip(dialog.render(80).join('\n'))).not.toContain('风险提示');
+  });
+
+  it('renders the turn prompt summary as a dim context row', () => {
+    const pending = makePending();
+    pending.data.request_summary = 'deploy the release';
+    const dialog = new ApprovalPanelComponent(pending, () => {}, COLORS);
+
+    expect(strip(dialog.render(80).join('\n'))).toContain('本回合请求： deploy the release');
+  });
+
+  it('omits the prompt summary row for payloads without one (older emitters)', () => {
+    const dialog = new ApprovalPanelComponent(makePending(), () => {}, COLORS);
+
+    expect(strip(dialog.render(80).join('\n'))).not.toContain('本回合请求');
+  });
+
+  it('keeps a long prompt summary inside the terminal width with a visible ellipsis', () => {
+    const pending = makePending();
+    pending.data.request_summary = 'deploy '.repeat(40).trim();
+    const dialog = new ApprovalPanelComponent(pending, () => {}, COLORS);
+
+    const summaryLine = dialog
+      .render(60)
+      .map(strip)
+      .find((line) => line.includes('本回合请求'));
+
+    expect(summaryLine).toBeDefined();
+    // The row must fit on its own, not by being clipped in the final width
+    // pass: indent + label + text leave two columns of slack.
+    expect(visibleWidth(summaryLine ?? '')).toBeLessThanOrEqual(58);
+    expect((summaryLine ?? '').trimEnd().endsWith('...')).toBe(true);
   });
 });

@@ -28,6 +28,10 @@ vi.mock('../../../src/tui/commands/config.js', () => ({
   showSettingsSelector: vi.fn(),
 }));
 
+vi.mock('../../../src/tui/commands/grants.js', () => ({
+  handleGrantsCommand: vi.fn(async (): Promise<void> => {}),
+}));
+
 vi.mock('../../../src/tui/commands/goal.js', () => ({
   handleGoalCommand: vi.fn(async (): Promise<void> => {}),
 }));
@@ -46,6 +50,7 @@ import {
   handleThemeCommand,
   showPermissionPicker,
 } from '../../../src/tui/commands/config.js';
+import { handleGrantsCommand } from '../../../src/tui/commands/grants.js';
 import { showStatusReport, showUsage } from '../../../src/tui/commands/info.js';
 
 function makeHost(overrides: {
@@ -139,6 +144,13 @@ describe('dispatchInput — intent routing', () => {
     dispatchInput(host, '/permission');
     await settle();
     expect(showPermissionPicker).toHaveBeenCalledWith(host);
+  });
+
+  it('builtin: routes /grants to the grants handler', async () => {
+    const host = makeHost();
+    dispatchInput(host, '/grants');
+    await settle();
+    expect(handleGrantsCommand).toHaveBeenCalledWith(host);
   });
 
   it('skill: maps slash alias to sendSkillActivation with trimmed args', async () => {

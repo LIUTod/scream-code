@@ -49,6 +49,8 @@ describe('built-in slash command registry', () => {
     expect(findBuiltInSlashCommand('codeblock')?.name).toBe('codebg');
     expect(findBuiltInSlashCommand('config')?.aliases).toContain('login');
     expect(findBuiltInSlashCommand('login')?.name).toBe('config');
+    expect(findBuiltInSlashCommand('grants')?.name).toBe('grants');
+    expect(findBuiltInSlashCommand('permission')?.name).toBe('permission');
     expect(findBuiltInSlashCommand('unknown')).toBeUndefined();
   });
 
@@ -121,6 +123,7 @@ describe('built-in slash command registry', () => {
         'model',
         'new',
         'permission',
+        'grants',
         'plan',
         'fusionplan',
         'revoke',

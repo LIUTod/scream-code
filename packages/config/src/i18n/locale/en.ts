@@ -70,6 +70,8 @@ export const en: Record<string, string> = {
   'approval.header.plan': 'Build according to this plan?',
   'approval.header.generic': 'Approve {name}?',
   'approval.feedback_hint': 'Enter feedback · ↵ to submit.',
+  'approval.warnings_title': 'Warnings',
+  'approval.request_summary': 'Request:',
 
   // ─── Common ───────────────────
   'common.cancel': 'Cancel',
@@ -494,6 +496,14 @@ export const en: Record<string, string> = {
   'revoke.usage': 'Usage: /revoke [count], where count is a positive integer.',
   'revoke.nothing': 'Nothing to revoke.',
   'revoke.failed': 'Revoke failed: {msg}',
+
+  // ─── /grants ─────────────
+  'grants.title': 'Session approvals ({count})',
+  'grants.hint': '↑/↓ select · ↵ revoke · esc cancel',
+  'grants.empty': 'No session approvals are active.',
+  'grants.revoked': 'Revoked session approval: {pattern} — the next matching call asks again.',
+  'grants.revoke_failed': 'Nothing revoked: no such session approval ({pattern}).',
+  'grants.load_failed': 'Failed to load session approvals: {msg}',
 
   // ─── /btw ─────────────────────
   'btw.usage': '/btw usage',
@@ -1469,6 +1479,7 @@ export const en: Record<string, string> = {
   'registry.title_desc': 'Set or show session title',
   'registry.config_desc': 'Browse and configure models (fetch latest directory remotely)',
   'registry.permission_desc': 'Select permission mode',
+  'registry.grants_desc': 'Review and revoke session approvals',
   'registry.theme_desc': 'Set terminal UI theme',
   'registry.language_desc': 'Switch interface language',
   'registry.editor_desc': 'Set external editor',

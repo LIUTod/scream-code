@@ -115,6 +115,39 @@ describe('buildTraceCells', () => {
     expect(cells.map((c) => c.kind)).toEqual(['user', 'user']);
   });
 
+  it('renders permission decisions as context cells', () => {
+    const wirePath = withWire([
+      { type: 'turn.prompt', input: [{ type: 'text', text: 'hi' }], time: T0 },
+      {
+        type: 'permission.record_decision',
+        turnId: 0,
+        toolCallId: 'call_1',
+        toolName: 'Bash',
+        policyName: 'user-configured-deny',
+        decision: 'deny',
+        reason: 'Tool "Bash" was denied by permission rule.',
+        time: T0 + 100,
+      },
+      {
+        type: 'permission.record_decision',
+        turnId: 0,
+        toolCallId: 'call_2',
+        toolName: 'Write',
+        decision: 'timeout',
+        reason: 'Approval request timed out after 300000ms',
+        time: T0 + 200,
+      },
+    ]);
+    const cells = buildTraceCells({ wirePath });
+    const decisions = cells.filter((c) => c.kind === 'context');
+    expect(decisions.map((c) => c.text)).toEqual([
+      '审批拒绝: Bash (user-configured-deny)',
+      '审批超时: Write',
+    ]);
+    expect(decisions[0]!.inputDetail).toBe('Tool "Bash" was denied by permission rule.');
+    expect(decisions[1]!.inputDetail).toBe('Approval request timed out after 300000ms');
+  });
+
   it('flushes trailing system-context changes at the end of the wire', () => {
     const wirePath = withWire([
       { type: 'turn.prompt', input: [{ type: 'text', text: 'hi' }], time: T0 },

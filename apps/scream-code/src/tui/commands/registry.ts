@@ -316,6 +316,13 @@ export const BUILTIN_SLASH_COMMANDS = [
     availability: 'always',
   },
   {
+    name: 'grants',
+    aliases: [],
+    description: 'registry.grants_desc',
+    priority: 188,
+    availability: 'always',
+  },
+  {
     name: 'editor',
     aliases: [],
     description: 'registry.editor_desc',

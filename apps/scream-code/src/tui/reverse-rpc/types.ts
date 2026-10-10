@@ -115,6 +115,12 @@ export interface ApprovalPanelData {
   description: string;
   display: DisplayBlock[];
   choices: ApprovalPanelChoice[];
+  /** Risk notes from the asking policy (e.g. dangerous-command warnings).
+   *  Absent when the request carries none — the panel then omits the rows. */
+  reasons?: string[] | undefined;
+  /** Plain-text summary of the prompt that started the turn; shown dimmed.
+   *  Absent when the request carries none — the panel then omits the row. */
+  request_summary?: string | undefined;
   /** "来源：<代理名>（<agentId>）· <工具>" — absent on payloads without
    *  attribution (older emitters), in which case the panel omits the row. */
   source_label?: string | undefined;

@@ -42,6 +42,7 @@ import {
   type Event,
   type SessionStatus,
   type PermissionMode,
+  type ApprovalGrant,
   type GoalSnapshotData,
   type TodoItem,
   type ContextMessage,
@@ -158,6 +159,12 @@ interface ApprovalRequestMessage {
   readonly sourceAgentName?: string | undefined;
   readonly sourceToolName?: string | undefined;
   readonly sourceCapabilityMode?: ApprovalCapabilityMode | undefined;
+  /** Risk notes from the asking policy; the card renders one row per entry. */
+  readonly reasons?: readonly string[] | undefined;
+  /** Grants the card may offer; absent = all grants (older emitters). */
+  readonly grantOptions?: readonly ApprovalGrant[] | undefined;
+  /** Prompt summary for the current turn; the card renders it dimmed. */
+  readonly requestSummary?: string | undefined;
 }
 
 interface SessionSnapshot {
@@ -1153,6 +1160,9 @@ class WebSession {
       sourceAgentName?: string | undefined;
       sourceToolName?: string | undefined;
       sourceCapabilityMode?: ApprovalCapabilityMode | undefined;
+      reasons?: readonly string[] | undefined;
+      grantOptions?: readonly ApprovalGrant[] | undefined;
+      requestSummary?: string | undefined;
     }
   >();
 
@@ -2005,6 +2015,9 @@ class WebSession {
           sourceAgentName: request.sourceAgentName,
           sourceToolName: request.sourceToolName,
           sourceCapabilityMode: request.sourceCapabilityMode,
+          reasons: request.reasons,
+          grantOptions: request.grantOptions,
+          requestSummary: request.requestSummary,
         });
         const payload: ApprovalRequestMessage = {
           id,
@@ -2015,6 +2028,9 @@ class WebSession {
           sourceAgentName: request.sourceAgentName,
           sourceToolName: request.sourceToolName,
           sourceCapabilityMode: request.sourceCapabilityMode,
+          reasons: request.reasons,
+          grantOptions: request.grantOptions,
+          requestSummary: request.requestSummary,
         };
         this.broadcast({ type: 'approval_request', ...payload }, false);
       });
@@ -2072,6 +2088,9 @@ class WebSession {
         sourceAgentName: approval.sourceAgentName,
         sourceToolName: approval.sourceToolName,
         sourceCapabilityMode: approval.sourceCapabilityMode,
+        reasons: approval.reasons,
+        grantOptions: approval.grantOptions,
+        requestSummary: approval.requestSummary,
       })),
       status: this.cachedStatus ?? {
         model: 'unknown',

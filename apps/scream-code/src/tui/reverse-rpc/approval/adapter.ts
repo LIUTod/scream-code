@@ -1,4 +1,9 @@
-import type { ApprovalRequest, ApprovalResponse, ToolInputDisplay } from '@scream-code/scream-code-sdk';
+import type {
+  ApprovalGrant,
+  ApprovalRequest,
+  ApprovalResponse,
+  ToolInputDisplay,
+} from '@scream-code/scream-code-sdk';
 import { getLocale, t } from '@scream-code/config';
 
 import type { ApprovalPanelResponse } from '#/tui/components/dialogs/approval-panel';
@@ -30,7 +35,13 @@ export function adaptApprovalRequest(event: ApprovalRequest): ApprovalPanelData 
     action: event.action,
     description: resolved.description,
     display: resolved.blocks,
-    choices: adaptChoices(event.toolName, event.display),
+    choices: adaptChoices(event.toolName, event.display, event.grantOptions),
+    ...(event.reasons !== undefined && event.reasons.length > 0
+      ? { reasons: [...event.reasons] }
+      : {}),
+    ...(event.requestSummary !== undefined && event.requestSummary.length > 0
+      ? { request_summary: event.requestSummary }
+      : {}),
     ...(sourceLabel !== undefined ? { source_label: sourceLabel } : {}),
   };
 }
@@ -363,12 +374,35 @@ function adaptDisplay(display: ToolInputDisplay): DisplayBlock[] {
   }
 }
 
-function adaptChoices(toolName: string, display: ToolInputDisplay): ApprovalPanelChoice[] {
+function adaptChoices(
+  toolName: string,
+  display: ToolInputDisplay,
+  grantOptions?: readonly ApprovalGrant[],
+): ApprovalPanelChoice[] {
   if (toolName === 'ExitPlanMode' || display.kind === 'plan_review') {
     return adaptPlanReviewChoices(display);
   }
 
-  return getDefaultApprovalChoices().map((choice) => cloneChoice(choice));
+  return getDefaultApprovalChoices()
+    .filter((choice) => isGrantOffered(choice, grantOptions))
+    .map((choice) => cloneChoice(choice));
+}
+
+/**
+ * A narrowed `grantOptions` list drops the grants it does not offer — e.g. a
+ * dangerous-command prompt offers `once` only, so the panel must not paint a
+ * "allow for session" button. The response validation in the core downgrades
+ * such a scope anyway; hiding the button keeps the UI from offering a choice
+ * that cannot be honored. Absent list = every grant (older emitters).
+ */
+function isGrantOffered(
+  choice: ApprovalPanelChoice,
+  grantOptions: readonly ApprovalGrant[] | undefined,
+): boolean {
+  if (grantOptions === undefined) return true;
+  if (choice.response === 'approved') return grantOptions.includes('once');
+  if (choice.response === 'approved_for_session') return grantOptions.includes('session');
+  return true;
 }
 
 function adaptPlanReviewChoices(display: ToolInputDisplay): ApprovalPanelChoice[] {

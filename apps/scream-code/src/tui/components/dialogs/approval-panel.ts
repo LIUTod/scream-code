@@ -365,6 +365,29 @@ export class ApprovalPanelComponent extends Container implements Focusable {
     if (data.source_label !== undefined && data.source_label.length > 0) {
       lines.push(indent(dim(truncateToWidth(data.source_label, Math.max(width - 4, 1)))));
     }
+    if (data.request_summary !== undefined && data.request_summary.length > 0) {
+      // Budget like the sibling rows: indent + prefix + 2 columns of slack,
+      // so the row still ends in a visible ellipsis instead of being clipped
+      // silently by the final width pass.
+      const prefix = `${t('approval.request_summary')} `;
+      lines.push(
+        indent(
+          dim(
+            `${prefix}${truncateToWidth(
+              replaceTabs(data.request_summary),
+              Math.max(width - 4 - visibleWidth(prefix), 1),
+            )}`,
+          ),
+        ),
+      );
+    }
+    if (data.reasons !== undefined && data.reasons.length > 0) {
+      const warning = chalk.hex(this.colors.warning);
+      lines.push(indent(warning(t('approval.warnings_title'))));
+      for (const reason of data.reasons) {
+        lines.push(indent(warning(`· ${truncateToWidth(replaceTabs(reason), Math.max(width - 6, 1))}`)));
+      }
+    }
 
     const dedupedBlocks = data.display.filter(
       (block) => !isDuplicateBriefBlock(block, data.description),

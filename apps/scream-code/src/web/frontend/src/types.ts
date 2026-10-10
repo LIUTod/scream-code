@@ -67,6 +67,10 @@ export interface ToolMessage {
  *  Absent when the asker is unrestricted. */
 type ApprovalCapabilityMode = 'read-only' | 'read-write' | 'execute' | 'all';
 
+/** Scope a user can grant from an approval prompt — mirrors the core
+ *  `ApprovalGrant`. */
+export type ApprovalGrant = 'once' | 'session';
+
 export interface ApprovalRequest {
   id: string;
   toolName: string;
@@ -81,6 +85,12 @@ export interface ApprovalRequest {
   /** Capability contract the asking agent runs under; absent when the asker
    *  is unrestricted. */
   sourceCapabilityMode?: ApprovalCapabilityMode;
+  /** Risk notes from the asking policy; the card renders one row per entry. */
+  reasons?: string[];
+  /** Grants the card may offer; absent means every grant is on offer. */
+  grantOptions?: ApprovalGrant[];
+  /** Prompt summary for the current turn; the card renders it dimmed. */
+  requestSummary?: string;
 }
 
 export interface TokenUsage {
@@ -296,6 +306,9 @@ export type WsMessage =
       sourceAgentName?: string;
       sourceToolName?: string;
       sourceCapabilityMode?: ApprovalCapabilityMode;
+      reasons?: string[];
+      grantOptions?: ApprovalGrant[];
+      requestSummary?: string;
     }
   | { type: 'approval_resolved'; id: string }
   | { type: 'user_message'; clientMessageId?: string; text: string }

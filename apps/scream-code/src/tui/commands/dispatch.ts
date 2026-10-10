@@ -72,6 +72,7 @@ import { handleCronCommand } from './cron';
 import { handleMermaidCommand } from './mermaid';
 import { handleLikeCommand } from './like';
 import { handleKnowledgeCommand } from './knowledge';
+import { handleGrantsCommand } from './grants';
 import { runEvalCommand } from './eval';
 
 // ---------------------------------------------------------------------------
@@ -112,6 +113,7 @@ export {
   handleTitleCommand,
 } from './session';
 export { handleRevokeCommand } from './revoke';
+export { handleGrantsCommand } from './grants';
 export { handleCcCommand } from './cc';
 export { handleUpdateCommand } from './update';
 export { handleMcpCommand } from './mcp';
@@ -305,6 +307,9 @@ async function handleBuiltInSlashCommand(
       return;
     case 'permission':
       showPermissionPicker(host);
+      return;
+    case 'grants':
+      await handleGrantsCommand(host);
       return;
     case 'settings':
       showSettingsSelector(host);

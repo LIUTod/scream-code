@@ -211,6 +211,60 @@ describe('approval adapter', () => {
     ]);
   });
 
+  it('drops the session grant when the policy offers a one-time grant only', () => {
+    const adapted = adaptApprovalRequest({
+      toolCallId: 'tc-once',
+      toolName: 'Bash',
+      action: 'run',
+      display: { kind: 'generic', summary: 'run', detail: { command: 'rm -rf /tmp/cache' } },
+      reasons: ['dangerous command: recursive force delete'],
+      grantOptions: ['once'],
+    });
+
+    expect(adapted.choices.map((choice) => choice.response)).toEqual([
+      'approved',
+      'rejected',
+      'rejected',
+    ]);
+    expect(adapted.reasons).toEqual(['dangerous command: recursive force delete']);
+  });
+
+  it('keeps every grant and omits the reasons row for payloads that carry neither', () => {
+    const adapted = adaptApprovalRequest({
+      toolCallId: 'tc-legacy-grants',
+      toolName: 'Bash',
+      action: 'run',
+      display: { kind: 'generic', summary: 'run', detail: { command: 'ls' } },
+    });
+
+    expect(adapted.choices.map((choice) => choice.response)).toEqual([
+      'approved',
+      'approved_for_session',
+      'rejected',
+      'rejected',
+    ]);
+    expect(adapted).not.toHaveProperty('reasons');
+  });
+
+  it('carries the turn prompt summary and omits it for payloads without one', () => {
+    const withSummary = adaptApprovalRequest({
+      toolCallId: 'tc-summary',
+      toolName: 'Bash',
+      action: 'run',
+      display: { kind: 'generic', summary: 'run', detail: { command: 'ls' } },
+      requestSummary: 'deploy the release',
+    });
+    expect(withSummary.request_summary).toBe('deploy the release');
+
+    const withoutSummary = adaptApprovalRequest({
+      toolCallId: 'tc-no-summary',
+      toolName: 'Bash',
+      action: 'run',
+      display: { kind: 'generic', summary: 'run', detail: { command: 'ls' } },
+    });
+    expect(withoutSummary).not.toHaveProperty('request_summary');
+  });
+
   it('carries approval source attribution into the panel label', () => {
     const adapted = adaptApprovalRequest({
       toolCallId: 'tc-src',

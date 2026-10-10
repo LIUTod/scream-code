@@ -105,6 +105,7 @@ scream -y         # 自动批准模式
 | `/language`（`/lang`） | 切换界面语言 |
 | `/theme` | 设置终端 UI 主题 |
 | `/permission` | 选择权限模式 |
+| `/grants` | 查看并撤销本会话的审批授权 |
 | `/editor` | 设置外部编辑器 |
 | `/settings` | 打开 TUI 设置 |
 | `/init` | 分析代码库并生成 AGENTS.md |

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch, onMounted, onBeforeUnmount } from 'vue';
-import type { ApprovalRequest } from '../types';
+import type { ApprovalGrant, ApprovalRequest } from '../types';
 import Button from './ui/Button.vue';
 
 const props = defineProps<{
@@ -18,6 +18,19 @@ const feedbackText = ref('');
 const busyIds = ref<Set<string>>(new Set());
 
 const current = computed(() => props.approvals[0]);
+
+/** Grants the card may offer when the request carries no explicit list. */
+const DEFAULT_GRANTS: ApprovalGrant[] = ['once', 'session'];
+
+/**
+ * A narrowed `grantOptions` list drops the grants it does not offer — a
+ * dangerous-command prompt offers `once` only, so the session button must not
+ * paint. The core downgrades such a scope anyway; hiding the button keeps the
+ * UI from offering a choice that cannot be honored.
+ */
+const sessionOffered = computed(() =>
+  (current.value?.grantOptions ?? DEFAULT_GRANTS).includes('session'),
+);
 
 // Reset per-request UI state when the current request changes; drop resolved busy flags.
 watch(
@@ -89,6 +102,7 @@ function onKeydown(e: KeyboardEvent) {
       act('approved', undefined, 'once');
       break;
     case '2':
+      if (!sessionOffered.value) break;
       e.preventDefault();
       act('approved', undefined, 'session');
       break;
@@ -126,6 +140,12 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
 
       <p v-if="hasSource(current)" class="approval-source">{{ formatSource(current) }}</p>
 
+      <p v-if="current.requestSummary" class="approval-summary">{{ current.requestSummary }}</p>
+
+      <ul v-if="current.reasons && current.reasons.length" class="approval-reasons">
+        <li v-for="(reason, index) in current.reasons" :key="index">{{ reason }}</li>
+      </ul>
+
       <pre class="approval-action">{{ displayText(current) }}</pre>
 
       <div v-if="feedbackOpen" class="feedback-area">
@@ -148,6 +168,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
           <kbd>1</kbd> 批准
         </Button>
         <Button
+          v-if="sessionOffered"
           variant="secondary"
           :disabled="isBusy(current.id)"
           @click="act('approved', undefined, 'session')"
@@ -298,6 +319,29 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Dim context row: what the user asked for in this turn. */
+.approval-summary {
+  margin: var(--space-1) var(--space-3) 0;
+  padding: 0;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.approval-reasons {
+  margin: var(--space-2) var(--space-3) 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--font-size-xs);
+  color: var(--color-warning);
+}
+
+.approval-reasons li::before {
+  content: '· ';
 }
 
 .feedback-area {

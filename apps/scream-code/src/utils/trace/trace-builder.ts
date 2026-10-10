@@ -347,6 +347,25 @@ export function buildTraceCells({ wirePath }: BuildTraceInput): TraceCell[] {
         );
         break;
       }
+      case 'permission.record_decision': {
+        const decision = asString(record['decision']) ?? '';
+        const toolName = asString(record['toolName']) ?? '';
+        const policyName = asString(record['policyName']);
+        const reason = asString(record['reason']);
+        const label =
+          decision === 'timeout'
+            ? '审批超时'
+            : decision === 'cancelled'
+              ? '审批取消'
+              : '审批拒绝';
+        pushCell(
+          'context',
+          `${label}: ${toolName}${policyName !== undefined ? ` (${policyName})` : ''}`,
+          { inputDetail: reason, sourceSeq: seq },
+          time,
+        );
+        break;
+      }
       case 'request.header': {
         const provider = asString(record['provider']) ?? '';
         const model = asString(record['model']) ?? '';

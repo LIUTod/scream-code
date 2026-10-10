@@ -70,6 +70,8 @@ export const zh: Record<string, string> = {
   'approval.header.plan': '是否按此计划构建？',
   'approval.header.generic': '是否批准 {name}？',
   'approval.feedback_hint': '输入反馈 · ↵ 提交。',
+  'approval.warnings_title': '风险提示',
+  'approval.request_summary': '本回合请求：',
 
   // ─── 通用 ─────────────────────
   'common.cancel': '取消',
@@ -490,6 +492,14 @@ export const zh: Record<string, string> = {
   'revoke.usage': '用法：/revoke [数量]，数量为正整数。',
   'revoke.nothing': '没有可以撤回的内容。',
   'revoke.failed': '撤回失败：{msg}',
+
+  // ─── /grants ─────────────
+  'grants.title': '会话授权（{count}）',
+  'grants.hint': '↑/↓ 选择 · ↵ 撤销 · esc 取消',
+  'grants.empty': '当前没有会话授权。',
+  'grants.revoked': '已撤销会话授权：{pattern} — 下次匹配调用会重新询问。',
+  'grants.revoke_failed': '未撤销：没有找到该会话授权（{pattern}）。',
+  'grants.load_failed': '读取会话授权失败：{msg}',
 
   // ─── /btw ─────────────────────
   'btw.usage': '/btw 用法',
@@ -1463,6 +1473,7 @@ export const zh: Record<string, string> = {
   'registry.title_desc': '设置或显示会话标题',
   'registry.config_desc': '浏览并配置模型（远程拉取最新目录）',
   'registry.permission_desc': '选择权限模式',
+  'registry.grants_desc': '查看并撤销本会话的审批授权',
   'registry.theme_desc': '设置终端 UI 主题',
   'registry.language_desc': '切换界面语言 / Switch interface language',
   'registry.editor_desc': '设置外部编辑器',

@@ -22,6 +22,7 @@ export {
 } from './config';
 export { handleLikeCommand } from './like';
 export { handleKnowledgeCommand } from './knowledge';
+export { handleGrantsCommand } from './grants';
 export {
   showMcpServers,
   showStatusReport,

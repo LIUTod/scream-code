@@ -109,6 +109,7 @@ Type `/` in the input to browse. All 55 commands:
 | `/language` (`/lang`) | Switch interface language |
 | `/theme` | Set terminal UI theme |
 | `/permission` | Select permission mode |
+| `/grants` | Review and revoke session approvals |
 | `/editor` | Set external editor |
 | `/settings` | Open TUI settings |
 | `/init` | Analyze codebase and generate AGENTS.md |

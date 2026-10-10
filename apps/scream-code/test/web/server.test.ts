@@ -36,6 +36,9 @@ interface ApprovalHandlerRequest {
   readonly sourceAgentName?: string;
   readonly sourceToolName?: string;
   readonly sourceCapabilityMode?: 'read-only' | 'read-write' | 'execute' | 'all';
+  readonly reasons?: readonly string[];
+  readonly grantOptions?: readonly ('once' | 'session')[];
+  readonly requestSummary?: string;
 }
 
 type ApprovalHandler = (
@@ -1711,6 +1714,61 @@ describe('Web approval transport', () => {
         expect.objectContaining({
           id: broadcast['id'],
           sourceCapabilityMode: 'read-only',
+        }),
+      ],
+    });
+
+    socket.send(
+      JSON.stringify({ type: 'approval_response', id: broadcast['id'], decision: 'approved' }),
+    );
+    await expect(pending).resolves.toMatchObject({ decision: 'approved' });
+    socket.close();
+  });
+
+  it('carries policy reasons and grant options through the approval broadcast and the snapshot', async () => {
+    const control = makeFakeSession();
+    const handle = await start(control);
+    const { socket } = await openSocket(handle.url);
+    const ready = nextMessage(socket);
+    socket.send(JSON.stringify({ type: 'client_hello', lastSeq: 0, epoch: 0 }));
+    socket.send(JSON.stringify({ type: 'ping' }));
+    expect(await ready).toMatchObject({ type: 'pong' });
+
+    const approvalHandler = (
+      control.session.setApprovalHandler as unknown as {
+        mock: { calls: Array<[ApprovalHandler | undefined]> };
+      }
+    ).mock.calls[0]?.[0];
+    expect(approvalHandler).toBeDefined();
+
+    const pending = approvalHandler!({
+      toolName: 'Bash',
+      action: 'run',
+      display: undefined,
+      reasons: ['dangerous command: recursive force delete'],
+      grantOptions: ['once'],
+      requestSummary: 'deploy the release',
+    });
+
+    const broadcast = await nextMessage(socket);
+    expect(broadcast).toMatchObject({
+      type: 'approval_request',
+      id: expect.any(String),
+      reasons: ['dangerous command: recursive force delete'],
+      grantOptions: ['once'],
+      requestSummary: 'deploy the release',
+    });
+
+    // The same fields survive the snapshot mirror while the approval pends,
+    // so a reloaded browser paints the same filtered buttons and risk rows.
+    const snapshot = await jsonRequest(handle.url, '/api/v1/sessions/session-1/snapshot');
+    expect(snapshot.body).toMatchObject({
+      pendingApprovals: [
+        expect.objectContaining({
+          id: broadcast['id'],
+          reasons: ['dangerous command: recursive force delete'],
+          grantOptions: ['once'],
+          requestSummary: 'deploy the release',
         }),
       ],
     });
