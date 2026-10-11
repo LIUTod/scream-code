@@ -7,10 +7,12 @@ import type { Tool } from '@scream-code/ltod';
 import { abortable } from '../utils/abort';
 import { resolveServerCapabilities } from './capabilities';
 import { HttpMcpClient } from './client-http';
-import type { UnexpectedCloseReason } from './client-shared';
+import type { McpRootsProvider, UnexpectedCloseReason } from './client-shared';
 import { StdioMcpClient } from './client-stdio';
 import type { McpOAuthService } from './oauth';
 import { assertMcpInputSchema, type MCPClient } from './types';
+
+export type { McpRootsProvider } from './client-shared';
 
 export type McpServerStatus = 'pending' | 'connected' | 'failed' | 'disabled' | 'needs-auth';
 
@@ -70,6 +72,13 @@ export interface McpConnectionManagerOptions {
    *    drives the browser flow through the synthetic auth tool.
    */
   readonly oauthService?: McpOAuthService;
+  /**
+   * Workspace roots advertised to every server through the MCP `roots`
+   * capability. Session injects `[cwd, tmpdir()]` so roots-aware servers can
+   * write into the workspace (see {@link McpRootsProvider}); servers that
+   * ignore roots behave exactly as before.
+   */
+  readonly rootsProvider?: McpRootsProvider;
   /**
    * Parent logger. Defaults to the global `log`; Session passes its own
    * `session.log` so MCP events land in the session log too.
@@ -364,10 +373,14 @@ export class McpConnectionManager {
   private createClient(config: McpServerConfig, name: string): RuntimeMcpClient {
     const toolCallTimeoutMs = resolveToolCallTimeoutMs(config);
     if (config.transport === 'stdio') {
-      return new StdioMcpClient(config, { toolCallTimeoutMs });
+      return new StdioMcpClient(config, {
+        toolCallTimeoutMs,
+        rootsProvider: this.options.rootsProvider,
+      });
     }
     return new HttpMcpClient(config, {
       toolCallTimeoutMs,
+      rootsProvider: this.options.rootsProvider,
       envLookup: this.options.envLookup,
       oauthProvider: this.resolveOAuthProvider(config, name),
     });

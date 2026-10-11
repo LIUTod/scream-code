@@ -1,3 +1,9 @@
+import { basename, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
+
+import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { ListRootsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
+
 import { getCoreVersion } from '#/version';
 
 import type { MCPToolDefinition, MCPToolResult } from './types';
@@ -25,6 +31,58 @@ export interface UnexpectedCloseReason {
 }
 
 export type UnexpectedCloseListener = (reason: UnexpectedCloseReason) => void;
+
+/**
+ * Returns the directories this client advertises as its workspace roots (the
+ * MCP `roots` capability). Consulted on every `roots/list` request rather than
+ * captured once, so a provider that tracks the live workspace is re-read
+ * without reconnecting.
+ */
+export type McpRootsProvider = () => readonly string[];
+
+/**
+ * Shape a `roots/list` response from filesystem paths.
+ *
+ * Roots-aware servers (chrome-devtools-mcp and friends) confine their file
+ * writes to the directories listed here; with no `roots` capability they fall
+ * back to the OS temp dir, so a screenshot aimed at the workspace gets
+ * rejected. The MCP schema carries `file://` URIs — plain paths are not
+ * accepted.
+ *
+ * Paths are normalised with the platform's OWN semantics (then deduplicated,
+ * so `/a/` and `/a` collapse to one root). Cross-platform path helpers are
+ * deliberately avoided here: they rewrite POSIX names containing backslashes
+ * and mangle Windows drive / UNC roots, producing a root that does not exist —
+ * which the server drops, taking workspace writes down with it. A filesystem
+ * root (`/`) has an empty basename, so the optional `name` is omitted.
+ */
+export function toRootsResult(paths: readonly string[]): {
+  roots: Array<{ uri: string; name?: string }>;
+} {
+  const seen = new Set<string>();
+  const roots: Array<{ uri: string; name?: string }> = [];
+  for (const input of paths) {
+    const path = resolve(input);
+    if (seen.has(path)) continue;
+    seen.add(path);
+    const root: { uri: string; name?: string } = { uri: pathToFileURL(path).href };
+    const name = basename(path);
+    if (name.length > 0) root.name = name;
+    roots.push(root);
+  }
+  return { roots };
+}
+
+/**
+ * Declare the `roots` capability on an SDK client and answer `roots/list` from
+ * `provider`. Must run BEFORE `connect()` so the handler is registered by the
+ * time the server completes its handshake — and only when the capability was
+ * declared, since the SDK refuses to register a `roots/list` handler
+ * otherwise (the two travel together at the construction site).
+ */
+export function installRootsHandler(client: Client, provider: McpRootsProvider): void {
+  client.setRequestHandler(ListRootsRequestSchema, async () => toRootsResult(provider()));
+}
 
 export interface McpRequestOptions {
   readonly timeout?: number;

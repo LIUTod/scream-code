@@ -4,6 +4,8 @@
 //   - boom() -> isError: true
 //   - read_env(name: string) -> the value of process.env[name] (used to assert
 //     that StdioClientTransport `env` is honoured)
+//   - client_roots() -> the client's `roots/list` result as JSON (used to
+//     assert the MCP `roots` capability negotiation)
 
 import { setTimeout as sleep } from 'node:timers/promises';
 
@@ -50,6 +52,28 @@ server.registerTool(
   ({ name }) => ({
     content: [{ type: 'text', text: process.env[name] ?? '' }],
   }),
+);
+
+// Asks the CLIENT for its roots (MCP `roots/list`) so tests can prove the
+// capability negotiation end-to-end: a client that never declared `roots`
+// answers the request with a JSON-RPC "Method not found" error instead.
+server.registerTool(
+  'client_roots',
+  {
+    description: 'Returns the client roots as reported by roots/list',
+    inputSchema: {},
+  },
+  async () => {
+    try {
+      const { roots } = await server.server.listRoots();
+      return { content: [{ type: 'text', text: JSON.stringify(roots) }] };
+    } catch (error) {
+      return {
+        content: [{ type: 'text', text: `roots/list failed: ${error.message}` }],
+        isError: true,
+      };
+    }
+  },
 );
 
 await server.connect(new StdioServerTransport());

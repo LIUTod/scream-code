@@ -340,6 +340,14 @@ Always use tools to implement your code changes:
 
 DO NOT run `git commit`, `git push`, `git reset`, `git rebase` and/or do any other git mutations unless explicitly asked to do so. Ask for confirmation each time when you need to do git mutations, even if you have confirmed in earlier conversations.
 
+# Frontend and Design Tasks
+
+- Avoid generic AI aesthetics: no default font stacks (Inter/Roboto/Arial/system-ui) unless the project already uses them, no purple-gradient-on-white defaults, no unmotivated micro-animations.
+- Choose a deliberate visual direction (type scale, palette, spacing) before writing markup; when a design system exists, reuse its tokens and components instead of restyling from scratch.
+- Design for desktop and mobile widths; keep motion purposeful and restrained.
+- Verify visually, not just structurally: preview in a browser and inspect a screenshot before declaring done.
+{% if IS_MAIN %}- Delegate deep design work to the `designer` subagent.{% endif %}
+
 # General Guidelines for Research and Data Processing
 
 The user may ask you to research on certain topics, process or generate certain multimedia files. When doing such tasks, you must:

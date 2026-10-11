@@ -1,6 +1,6 @@
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'pathe';
+import { basename, dirname, join } from 'pathe';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -55,6 +55,11 @@ function stdioConfig(args: string[] = [stdioFixture]) {
   };
 }
 
+/** The mock fixture's `client_roots` tool replies with a single text block. */
+function firstText(result: { content: Array<{ text?: string }> }): string {
+  return result.content[0]?.text ?? '';
+}
+
 function sessionRpc(options: {
   readonly events?: SessionRpcEvent[] | undefined;
   readonly onEvent?: ((event: SessionRpcEvent) => void) | undefined;
@@ -94,13 +99,32 @@ describe('McpConnectionManager', () => {
       expect(entries.map((e) => e.name).toSorted()).toEqual(['alpha', 'beta']);
       for (const entry of entries) {
         expect(entry.status).toBe('connected');
-        expect(entry.toolCount).toBe(3);
+        expect(entry.toolCount).toBe(4);
         expect(entry.transport).toBe('stdio');
       }
     } finally {
       await cm.shutdown();
     }
   }, 20000);
+
+  it('passes the roots provider through to stdio clients', async () => {
+    const root = join(tmpdir(), 'scream-cm-root');
+    const cm = new McpConnectionManager({ rootsProvider: () => [root] });
+    try {
+      await cm.connectAll({ alpha: stdioConfig() });
+      const resolved = cm.resolved('alpha');
+      expect(resolved).toBeDefined();
+      // End-to-end through the fixture: the server asked the client for
+      // `roots/list` and got the manager-supplied provider's answer back.
+      const result = await resolved!.client.callTool('client_roots', {});
+      expect(result.isError).toBe(false);
+      expect(JSON.parse(firstText(result))).toEqual([
+        { uri: pathToFileURL(root).href, name: basename(root) },
+      ]);
+    } finally {
+      await cm.shutdown();
+    }
+  }, 15000);
 
   it('publishes resolved capabilities on every public entry (explicit > fingerprint > none)', async () => {
     const cm = new McpConnectionManager();
@@ -247,7 +271,7 @@ describe('McpConnectionManager', () => {
 
       expect(cm.get('slow')).toMatchObject({
         status: 'connected',
-        toolCount: 3,
+        toolCount: 4,
       });
       expect(seen.filter((event) => event.name === 'slow').map((event) => event.status)).toEqual([
         'pending',

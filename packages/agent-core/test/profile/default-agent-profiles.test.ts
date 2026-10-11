@@ -273,6 +273,19 @@ describe('default agent profiles', () => {
     expect(leadPrompt).toContain('`designer` owns the visual layer');
   });
 
+  it('keeps the designer delegation bullet in the lead prompt only', () => {
+    // The bullet instructs the reader to spawn a subagent, so it must not
+    // render into profiles that cannot spawn it — least of all the designer's
+    // own prompt, which would tell the designer to delegate to the designer.
+    const bullet = 'Delegate deep design work to the `designer` subagent';
+    const leadPrompt = DEFAULT_AGENT_PROFILES['agent']?.systemPrompt(promptContext) ?? '';
+    expect(leadPrompt).toContain(bullet);
+    for (const name of ['designer', 'coder', 'reviewer', 'explore']) {
+      const prompt = DEFAULT_AGENT_PROFILES[name]?.systemPrompt(promptContext) ?? '';
+      expect(prompt, `${name} prompt`).not.toContain(bullet);
+    }
+  });
+
   it('fails loudly when an embedded system prompt source is missing', () => {
     expect(() =>
       loadAgentProfilesFromSources(['profile/default/agent.yaml'], {

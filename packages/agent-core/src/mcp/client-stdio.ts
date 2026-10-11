@@ -5,10 +5,12 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 
 import {
   buildRequestOptions,
+  installRootsHandler,
   SCREAM_MCP_CLIENT_NAME,
   SCREAM_MCP_CLIENT_VERSION,
   toMcpToolDefinition,
   toMcpToolResult,
+  type McpRootsProvider,
   type UnexpectedCloseListener,
   type UnexpectedCloseReason,
 } from './client-shared';
@@ -18,6 +20,13 @@ export interface StdioMcpClientOptions {
   readonly clientName?: string;
   readonly clientVersion?: string;
   readonly toolCallTimeoutMs?: number;
+  /**
+   * Directories advertised through the MCP `roots` capability. When set, the
+   * client declares `roots` during `initialize` and answers `roots/list`, so
+   * roots-aware servers confine their file writes to these directories
+   * instead of falling back to the OS temp dir.
+   */
+  readonly rootsProvider?: McpRootsProvider;
 }
 
 const STDERR_BUFFER_CAPACITY = 4 * 1024;
@@ -70,10 +79,22 @@ export class StdioMcpClient implements MCPClient {
     this.transport.stderr?.on('data', (chunk: Buffer | string) => {
       this.stderrBuffer.push(typeof chunk === 'string' ? chunk : chunk.toString('utf8'));
     });
-    this.client = new Client({
-      name: options.clientName ?? SCREAM_MCP_CLIENT_NAME,
-      version: options.clientVersion ?? SCREAM_MCP_CLIENT_VERSION,
-    });
+    this.client = new Client(
+      {
+        name: options.clientName ?? SCREAM_MCP_CLIENT_NAME,
+        version: options.clientVersion ?? SCREAM_MCP_CLIENT_VERSION,
+      },
+      // Declaring `roots` is what makes a server treat our provider as the
+      // authoritative write scope; without it the capability is absent from
+      // `initialize` and roots-aware servers keep their temp-dir default.
+      options.rootsProvider !== undefined ? { capabilities: { roots: {} } } : undefined,
+    );
+    if (options.rootsProvider !== undefined) {
+      // Installed before `connect()`: the server may ask for roots as soon as
+      // the handshake completes, and the SDK only accepts the handler when the
+      // capability above was declared.
+      installRootsHandler(this.client, options.rootsProvider);
+    }
     this.toolCallTimeoutMs = options.toolCallTimeoutMs;
   }
 

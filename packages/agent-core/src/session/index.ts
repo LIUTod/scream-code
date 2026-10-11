@@ -1,6 +1,6 @@
 import { rm } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { homedir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'pathe';
 import type { Jian } from '@scream-code/jian';
 
@@ -164,6 +164,11 @@ export class Session {
     this.mcp = new McpConnectionManager({
       oauthService: new McpOAuthService({ screamHomeDir: options.screamHomeDir }),
       log: this.log,
+      // Roots-aware MCP servers (chrome-devtools-mcp) confine their file
+      // writes to the roots we advertise; with no `roots` capability they
+      // fall back to the OS temp dir, so a screenshot aimed at the workspace
+      // is rejected. `tmpdir()` keeps that upstream default working.
+      rootsProvider: () => [this.options.jian.getcwd(), tmpdir()],
     });
     this.mcp.onStatusChange((entry) => {
       this.onMcpServerStatusChange(entry);

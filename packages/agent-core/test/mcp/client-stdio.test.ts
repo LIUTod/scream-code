@@ -1,5 +1,7 @@
+import { tmpdir } from 'node:os';
+import { basename, resolve } from 'node:path';
 import { dirname, join } from 'pathe';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
@@ -10,6 +12,11 @@ const here = import.meta.dirname;
 const fixture = join(here, 'fixtures', 'mock-stdio-server.mjs');
 const stderrThenExitFixture = join(here, 'fixtures', 'stderr-then-exit-stdio-server.mjs');
 const crashAfterConnectFixture = join(here, 'fixtures', 'crash-after-connect-stdio-server.mjs');
+
+/** The fixture's `client_roots` tool replies with a single text block. */
+function firstText(result: { content: Array<{ text?: string }> }): string {
+  return result.content[0]?.text ?? '';
+}
 
 describe('StdioMcpClient', () => {
   it('rejects unsupported executor at construction time', () => {
@@ -43,7 +50,12 @@ describe('StdioMcpClient', () => {
     try {
       await client.connect();
       const tools = await client.listTools();
-      expect(tools.map((t) => t.name).toSorted()).toEqual(['boom', 'echo', 'read_env']);
+      expect(tools.map((t) => t.name).toSorted()).toEqual([
+        'boom',
+        'client_roots',
+        'echo',
+        'read_env',
+      ]);
       const echo = tools.find((t) => t.name === 'echo');
       expect(echo?.description).toBe('Echoes input text');
       expect(echo?.inputSchema).toMatchObject({ type: 'object' });
@@ -51,6 +63,77 @@ describe('StdioMcpClient', () => {
       const result = await client.callTool('echo', { text: 'hello mcp' });
       expect(result.isError).toBe(false);
       expect(result.content).toEqual([{ type: 'text', text: 'hello mcp' }]);
+    } finally {
+      await client.close();
+    }
+  }, 15000);
+
+  it('answers roots/list when a roots provider is configured', async () => {
+    const rootA = join(tmpdir(), 'scream-roots-a');
+    const rootB = join(tmpdir(), 'scream-roots-b');
+    const provided = [`${rootA}/`, rootA, rootB];
+    const client = new StdioMcpClient(
+      {
+        transport: 'stdio',
+        command: process.execPath,
+        args: [fixture],
+      },
+      { rootsProvider: () => provided },
+    );
+    try {
+      await client.connect();
+      const result = await client.callTool('client_roots', {});
+      expect(result.isError).toBe(false);
+      // The trailing slash and the repeat both normalise to one root, and
+      // paths arrive as `file://` URIs — the MCP schema rejects plain paths.
+      expect(JSON.parse(firstText(result))).toEqual([
+        { uri: pathToFileURL(rootA).href, name: basename(rootA) },
+        { uri: pathToFileURL(rootB).href, name: basename(rootB) },
+      ]);
+      // The provider is consulted per request — not captured at construction —
+      // so a provider tracking the live workspace needs no reconnect.
+      provided.splice(0, provided.length, rootB);
+      const second = await client.callTool('client_roots', {});
+      expect(JSON.parse(firstText(second))).toEqual([
+        { uri: pathToFileURL(rootB).href, name: basename(rootB) },
+      ]);
+      // A filesystem root has an empty basename: `name` is omitted (it is
+      // optional in the MCP schema) rather than sent as an empty string.
+      provided.splice(0, provided.length, '/');
+      const rootOnly = await client.callTool('client_roots', {});
+      expect(JSON.parse(firstText(rootOnly))).toEqual([{ uri: pathToFileURL('/').href }]);
+      // A POSIX directory name may contain a literal backslash: normalisation
+      // must use the platform's own rules. A cross-platform helper rewrites it
+      // into a separator (`.../scream-roots-a/b`, name `b`) and points the root
+      // at a directory that does not exist — which is how workspace writes get
+      // rejected. Both sides of the expectation are computed with the platform's
+      // own path functions, so a Windows runner degrades to ordinary subdirectory
+      // semantics instead of a false red.
+      const backslashRoot = `${rootA}\\b`;
+      provided.splice(0, provided.length, backslashRoot);
+      const backslash = await client.callTool('client_roots', {});
+      expect(JSON.parse(firstText(backslash))).toEqual([
+        { uri: pathToFileURL(backslashRoot).href, name: basename(resolve(backslashRoot)) },
+      ]);
+    } finally {
+      await client.close();
+    }
+  }, 15000);
+
+  it('does not answer roots/list when no roots provider is configured', async () => {
+    const client = new StdioMcpClient({
+      transport: 'stdio',
+      command: process.execPath,
+      args: [fixture],
+    });
+    try {
+      await client.connect();
+      const result = await client.callTool('client_roots', {});
+      // No `roots` capability was declared, so no handler is registered and
+      // the SDK answers the server's request with Method not found. Match the
+      // JSON-RPC code as well — the wording is SDK-owned.
+      expect(result.isError).toBe(true);
+      expect(firstText(result)).toMatch(/-32601|Method not found/);
     } finally {
       await client.close();
     }

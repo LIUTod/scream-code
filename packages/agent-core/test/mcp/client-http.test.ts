@@ -1,9 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { tmpdir } from 'node:os';
+import { pathToFileURL } from 'node:url';
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import { basename, join } from 'pathe';
 import { afterEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
@@ -15,6 +18,11 @@ import {
 } from '../../src/mcp/client-http';
 
 const cleanups: Array<() => Promise<void> | void> = [];
+
+/** The roots fixture tool replies with a single text block. */
+function firstText(result: { content: Array<{ text?: string }> }): string {
+  return result.content[0]?.text ?? '';
+}
 
 afterEach(async () => {
   for (const cleanup of cleanups.splice(0)) {
@@ -131,6 +139,8 @@ describe('buildMcpHttpHeaders', () => {
 
 async function startInProcessHttpMcpServer(opts?: {
   authToken?: string;
+  /** Adds a tool that asks the client for `roots/list`. */
+  rootsTool?: boolean;
 }): Promise<{ url: string; close: () => Promise<void> }> {
   const mcpServer = new McpServer({ name: 'mock-http', version: '0.0.1' });
   mcpServer.registerTool(
@@ -138,6 +148,26 @@ async function startInProcessHttpMcpServer(opts?: {
     { description: 'Echoes text', inputSchema: { text: z.string() } },
     ({ text }) => ({ content: [{ type: 'text', text }] }),
   );
+  if (opts?.rootsTool === true) {
+    // Mirrors the stdio fixture's `client_roots`, so the same capability
+    // negotiation is provable over the HTTP transport.
+    mcpServer.registerTool(
+      'client_roots',
+      { description: 'Returns the client roots as reported by roots/list', inputSchema: {} },
+      async () => {
+        try {
+          const { roots } = await mcpServer.server.listRoots();
+          return { content: [{ type: 'text', text: JSON.stringify(roots) }] };
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          return {
+            content: [{ type: 'text', text: `roots/list failed: ${message}` }],
+            isError: true,
+          };
+        }
+      },
+    );
+  }
 
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: () => randomUUID(),
@@ -191,6 +221,44 @@ describe('HttpMcpClient', () => {
       const result = await client.callTool('echo', { text: 'hello http' });
       expect(result.isError).toBe(false);
       expect(result.content).toEqual([{ type: 'text', text: 'hello http' }]);
+    } finally {
+      await client.close();
+    }
+  }, 15000);
+
+  it('answers roots/list when a roots provider is configured', async () => {
+    const server = await startInProcessHttpMcpServer({ rootsTool: true });
+    cleanups.push(server.close);
+
+    const root = join(tmpdir(), 'scream-http-root');
+    const client = new HttpMcpClient(
+      { transport: 'http', url: server.url },
+      { rootsProvider: () => [root] },
+    );
+    try {
+      await client.connect();
+      const result = await client.callTool('client_roots', {});
+      expect(result.isError).toBe(false);
+      expect(JSON.parse(firstText(result))).toEqual([
+        { uri: pathToFileURL(root).href, name: basename(root) },
+      ]);
+    } finally {
+      await client.close();
+    }
+  }, 15000);
+
+  it('does not answer roots/list when no roots provider is configured', async () => {
+    const server = await startInProcessHttpMcpServer({ rootsTool: true });
+    cleanups.push(server.close);
+
+    const client = new HttpMcpClient({ transport: 'http', url: server.url });
+    try {
+      await client.connect();
+      const result = await client.callTool('client_roots', {});
+      // No `roots` capability declared → no handler → Method not found (match
+      // the JSON-RPC code too; the wording is SDK-owned).
+      expect(result.isError).toBe(true);
+      expect(firstText(result)).toMatch(/-32601|Method not found/);
     } finally {
       await client.close();
     }

@@ -50,9 +50,29 @@ see which pages exist.
   \`handle_dialog\`
 - Debug: \`list_console_messages\`, \`get_console_message\`,
   \`list_network_requests\`, \`get_network_request\`
+- Inspect styles: \`get_css_styles\` — matched rules, inherited styles and
+  cascade for an element; treat its output as authoritative. Returns one page
+  of rules at a time; page through with \`pageIdx\`.
 - Performance & memory: \`performance_start_trace\`, \`performance_stop_trace\`,
   \`performance_analyze_insight\`, \`lighthouse_audit\`, \`take_heapsnapshot\`,
   \`emulate\` (network/CPU throttling, dark mode, mobile viewports)
+
+### Keep context lean
+- Leave \`includeSnapshot\` off (the default) for action calls; request a snapshot
+  only when you need to observe the result.
+- Send large outputs (snapshots, traces) to \`filePath\`; narrow \`list_console_messages\`
+  with \`pageIdx\`/\`pageSize\`/\`types\` and \`list_network_requests\` with
+  \`pageIdx\`/\`pageSize\`/\`resourceTypes\`.
+- Screenshots default to JPEG here; pass \`format: 'png'\` per call for pixel-accurate output.
+
+### Batch multi-step flows with RunScript
+When \`RunScript\` is available, a deterministic multi-step flow (navigate → snapshot
+→ fill → click → verify) is one scripted batch call: inside the script
+\`await tools.mcp__chrome_devtools__<tool>({...})\`, keep raw snapshots in the sandbox,
+and return only a summary through \`text(...)\` (console errors, matched elements,
+counts, screenshot paths). Re-take the snapshot inside the script before acting —
+uids go stale. Without \`RunScript\`, call the tools step by step; likewise for single
+actions, or when each step depends on observing the previous result.
 
 ### Local dev preview workflow
 Use this whenever a local dev server backs a UI change (vite/next/webpack…):
@@ -64,6 +84,10 @@ Use this whenever a local dev server backs a UI change (vite/next/webpack…):
    visual acceptance of the changed part.
 5. After further code edits, \`navigate_page\` type=\`reload\` and repeat
    steps 3-4; HMR usually applies without a reload.
+6. Close the design loop: \`take_screenshot({ pageId, filePath })\` lands in the
+   workspace — inspect it with \`ReadMediaFile\` (when available) for visual
+   acceptance, and reach for \`get_css_styles\` when a rule behaves unexpectedly; iterate.
+7. When the \`designer\` subagent is available, hand deep design work to it with the screenshot paths.
 
 ### When to use
 - Test a localhost app → navigate + screenshot + console check

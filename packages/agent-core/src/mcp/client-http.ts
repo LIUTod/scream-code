@@ -6,10 +6,12 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 
 import {
   buildRequestOptions,
+  installRootsHandler,
   SCREAM_MCP_CLIENT_NAME,
   SCREAM_MCP_CLIENT_VERSION,
   toMcpToolDefinition,
   toMcpToolResult,
+  type McpRootsProvider,
   type UnexpectedCloseListener,
   type UnexpectedCloseReason,
 } from './client-shared';
@@ -35,6 +37,12 @@ export interface HttpMcpClientOptions {
    * this in and surfaces `UnauthorizedError` as a `needs-auth` status.
    */
   readonly oauthProvider?: OAuthClientProvider;
+  /**
+   * Directories advertised through the MCP `roots` capability. Remote servers
+   * may request `roots/list` just like stdio ones; servers that never ask are
+   * unaffected by the declared capability.
+   */
+  readonly rootsProvider?: McpRootsProvider;
 }
 
 /**
@@ -72,10 +80,20 @@ export class HttpMcpClient implements MCPClient {
       fetch: options.fetch,
       authProvider: options.oauthProvider,
     });
-    this.client = new Client({
-      name: options.clientName ?? SCREAM_MCP_CLIENT_NAME,
-      version: options.clientVersion ?? SCREAM_MCP_CLIENT_VERSION,
-    });
+    this.client = new Client(
+      {
+        name: options.clientName ?? SCREAM_MCP_CLIENT_NAME,
+        version: options.clientVersion ?? SCREAM_MCP_CLIENT_VERSION,
+      },
+      // See StdioMcpClient: the capability must be declared at construction
+      // for the roots/list handler to be registrable below.
+      options.rootsProvider !== undefined ? { capabilities: { roots: {} } } : undefined,
+    );
+    if (options.rootsProvider !== undefined) {
+      // Installed before `connect()` so the handler is ready for any
+      // `roots/list` the server sends after the handshake.
+      installRootsHandler(this.client, options.rootsProvider);
+    }
     this.toolCallTimeoutMs = options.toolCallTimeoutMs;
   }
 
