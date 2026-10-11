@@ -70,6 +70,9 @@ function getRecommended(): McpRecommendation[] {
         // Performance traces must not leak page URLs to Google's CrUX API —
         // same privacy stance as --no-usage-statistics above.
         '--no-performance-crux',
+        // Redact network headers before they reach the model — same privacy
+        // stance as the two flags above.
+        '--redact-network-headers',
         // Downscale + recompress screenshots: full-size PNGs dominate the
         // context window (the official --screenshot-* flags exist for this).
         '--screenshot-format=jpeg',
