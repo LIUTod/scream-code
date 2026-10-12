@@ -1,6 +1,6 @@
 {
   "name": "@scream-code/evals",
-  "version": "0.18.3",
+  "version": "0.18.5",
   "private": true,
   "type": "module",
   "scripts": {
