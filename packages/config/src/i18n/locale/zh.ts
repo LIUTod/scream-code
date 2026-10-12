@@ -996,7 +996,7 @@ export const zh: Record<string, string> = {
   'permission.manual_desc': '执行命令、编辑等风险操作前询问。读取/搜索工具直接运行；会话审批规则生效。',
   'permission.auto': '自动',
   'permission.auto_desc': '完全无交互运行。工具操作自动批准，跳过代理问题以便其自行决策。',
-  'permission.yolo_desc': '自动批准工具操作和计划转换。需要您输入时代理仍会明确提问。',
+  'permission.yolo_desc': '自动批准工具操作（含危险命令）。需要您决策时（提问、计划评审）代理仍会来找您。',
   'permission.bot': 'Bot',
   'permission.bot_desc': '无人值守模式：可逆操作自动执行；其余一律拒绝并排队等你决策。',
   'permission.ask_desc': '只读问答模式：直接对话回答，不修改文件、不运行命令、不调用 MCP 工具。',

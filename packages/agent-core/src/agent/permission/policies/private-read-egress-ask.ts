@@ -34,7 +34,8 @@ export interface PrivateReadEgressAssessment {
  *
  * Two callers keep the same semantics:
  * - `PrivateReadEgressAskPermissionPolicy` — prompt the user (once or
- *   session), even in auto/yolo mode;
+ *   session) in the modes that ask (manual, ask); auto and yolo approve above
+ *   this policy, so it is unreachable there by design;
  * - bot mode — deny instead, because no human is there to answer a prompt.
  *
  * Fail-closed details:
@@ -73,11 +74,12 @@ export function assessPrivateReadEgress(
  * assumed safe.
  *
  * The chain position is the mechanism (see `createPermissionDecisionPolicies`):
- * the policy sits after `collaboration-auto-approve` and before
- * `auto-mode-approve`, so it fires even in unattended auto mode; the allowlist,
- * not the chain, is what keeps ordinary auto-mode work quiet. It sits before
- * `session-approval-history` as well, so only a memorized grant that matches
- * this exact call can silence it.
+ * the policy sits after `auto-mode-approve`/`yolo-mode-approve`, so auto and
+ * yolo never stop to ask — the ask applies only in the modes that prompt
+ * (manual, ask). It sits before `warnings-ask`, so a dangerous-command prompt
+ * cannot replace the egress check on a command that matches both, and a
+ * memorized grant whose pattern matches this call still silences the ask
+ * (checked below).
  *
  * Egress detection is deliberately narrow (MVP): `FetchURL` and the shell
  * download/remote verbs in `Bash`. Known blind spots, kept here so the next

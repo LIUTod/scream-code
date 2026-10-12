@@ -18,6 +18,7 @@ import type {
   PermissionPolicyContext,
 } from '../../../../src/agent/permission/types';
 import type { ScreamConfig } from '../../../../src/config';
+import { commandApprovalRule, matchesCommandRule } from '../../../../src/tools/support/command-rule';
 import { createFakeJian } from '../../../tools/fixtures/fake-jian';
 
 const signal = new AbortController().signal;
@@ -102,11 +103,26 @@ export function toolContext(
   } as unknown as PermissionPolicyContext;
 }
 
-export function bashContext(command: string): PermissionPolicyContext {
-  return toolContext('Bash', { command, timeout: 60 });
+/**
+ * Bash as the real tool declares it: a per-command approval rule plus the
+ * command matcher. `toolContext`'s `approvalRule: toolName` is a generic
+ * simplification — grants recorded off a Bash approval must look like
+ * `Bash(<command>)`, never the bare tool name.
+ */
+export function bashContext(command: string, id = 'call_bash'): PermissionPolicyContext {
+  const context = toolContext('Bash', { command, timeout: 60 });
+  return {
+    ...context,
+    toolCall: { ...context.toolCall, id },
+    execution: {
+      ...context.execution,
+      approvalRule: commandApprovalRule('Bash', command),
+      matchesRule: (ruleArgs: string) => matchesCommandRule(ruleArgs, command),
+    },
+  } as PermissionPolicyContext;
 }
 
-/** Memorize an approve-for-session grant for Bash the way the TUI does. */
+/** Record a legacy tool-wide `Bash` grant (what the v1.1 wire migration produces) — real approvals record `Bash(<command>)` (see `bashContext`). */
 export function grantBashForSession(manager: PermissionManager): void {
   manager.recordApprovalResult({
     turnId: 0,

@@ -55,20 +55,30 @@ export function createPermissionDecisionPolicies(agent: Agent): readonly Permiss
     // Coordination tools (ContactParent/ReportFinding/SendSubagentMessage) are
     // conversation, not mutation — never block them on an approval prompt.
     new CollaborationAutoApprovePermissionPolicy(),
-    // The session read private data from outside the workspace and this call
-    // sends data out → ask, even in auto mode. Order invariant: this line MUST
-    // stay between `collaboration-auto-approve` and `auto-mode-approve` (the
-    // chain is first-match-wins). Below auto → unattended auto mode would
-    // exfiltrate without prompting; the egress allowlist, not the chain
-    // position, is what keeps ordinary auto-mode work quiet.
-    new PrivateReadEgressAskPermissionPolicy(agent),
     // auto mode → approve (any auto-mode block must be a deny rule above this).
+    // Order invariant: every ask policy lives below this line (the chain is
+    // first-match-wins) — auto is a blanket-approve contract, so an ask below
+    // it would contradict the mode the user selected.
     new AutoModeApprovePermissionPolicy(agent),
-    // Dangerous shell commands → ask, once only. Order invariant: this line
-    // MUST stay between `auto-mode-approve` and `session-approval-history`
-    // (the chain is first-match-wins). Above auto → auto mode would stop to
-    // ask, breaking unattended runs; below session history → a memorized
-    // Bash grant would silence the warning, making the risk memorizable.
+    // yolo mode → approve every tool operation. Order invariant: every
+    // tool-operation ask lives below this line (the chain is first-match-wins)
+    // — yolo is the pass-through sibling of auto that keeps the agent's
+    // questions and plan reviews. ExitPlanMode is exempt inside the policy, so
+    // plan decisions still reach the review below.
+    new YoloModeApprovePermissionPolicy(agent),
+    // The session read private data from outside the workspace and this call
+    // sends data out → ask. Order invariant: this line MUST stay between
+    // `yolo-mode-approve` and `warnings-ask` (the chain is first-match-wins).
+    // Above yolo → yolo would stop to ask; below `warnings-ask` → a
+    // dangerous-command prompt could replace the egress check for a command
+    // that matches both.
+    new PrivateReadEgressAskPermissionPolicy(agent),
+    // Dangerous shell commands → ask, once or for the session. Order invariant:
+    // this line MUST stay between `yolo-mode-approve` and
+    // `session-approval-history` (the chain is first-match-wins). Above yolo →
+    // yolo would stop to ask; below session history → any matching grant —
+    // a blanket `Bash` grant included — would silence the warning before this
+    // policy can require the identical rule.
     new WarningsAskPermissionPolicy(agent),
     // Approve-for-session memorized rule matches → approve. Runs before user-configured ask rules so an in-session grant beats a still-matching ask rule on later calls.
     new SessionApprovalHistoryPermissionPolicy(agent),
@@ -76,7 +86,11 @@ export function createPermissionDecisionPolicies(agent: Agent): readonly Permiss
     new UserConfiguredAskPermissionPolicy(agent),
     // User-configured allow rule matches → approve.
     new UserConfiguredAllowPermissionPolicy(agent),
-    // ExitPlanMode with active plan_review + non-empty plan + non-auto → ask (tracks plan_submitted/plan_resolved itself). Runs before session history so a stale session approval can't bypass review of a new plan body.
+    // ExitPlanMode with active plan_review + non-empty plan + non-auto → ask
+    // (tracks plan_submitted/plan_resolved itself). Sits after
+    // `session-approval-history` on purpose: an ExitPlanMode already approved
+    // for the session is reused without re-prompting, and auto never reaches
+    // it (`auto-mode-approve` above takes over; the policy self-gates on auto).
     new ExitPlanModeReviewAskPermissionPolicy(agent),
     // EnterPlanMode, Write/Edit on the plan file, or ExitPlanMode with no actionable plan_review → approve.
     new PlanModeToolApprovePermissionPolicy(agent),
@@ -86,8 +100,6 @@ export function createPermissionDecisionPolicies(agent: Agent): readonly Permiss
     new GitControlPathAccessAskPermissionPolicy(agent),
     // Write target is outside cwd → ask. Reads and searches outside cwd are allowed without prompting.
     new CwdOutsideFileWriteAskPermissionPolicy(agent),
-    // yolo mode → approve.
-    new YoloModeApprovePermissionPolicy(agent),
     // WolfPack mode active → approve.
     new WolfPackModeApprovePermissionPolicy(agent),
     // Tool is in the default-approve list (read-only / UI helpers) → approve.

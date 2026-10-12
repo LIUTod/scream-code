@@ -23,10 +23,10 @@ const current = computed(() => props.approvals[0]);
 const DEFAULT_GRANTS: ApprovalGrant[] = ['once', 'session'];
 
 /**
- * A narrowed `grantOptions` list drops the grants it does not offer — a
- * dangerous-command prompt offers `once` only, so the session button must not
- * paint. The core downgrades such a scope anyway; hiding the button keeps the
- * UI from offering a choice that cannot be honored.
+ * A narrowed `grantOptions` list drops the grants it does not offer — a prompt
+ * that offers `once` only must not paint the session button. The core
+ * downgrades such a scope anyway; hiding the button keeps the UI from offering
+ * a choice that cannot be honored.
  */
 const sessionOffered = computed(() =>
   (current.value?.grantOptions ?? DEFAULT_GRANTS).includes('session'),

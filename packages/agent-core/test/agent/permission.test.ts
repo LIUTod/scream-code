@@ -414,7 +414,7 @@ describe('Permission auto mode', () => {
   );
 
   it.each(
-    (['manual', 'yolo'] as const).flatMap((mode) =>
+    (['manual'] as const).flatMap((mode) =>
       [
         [mode, 'Write', { path: '/tmp/notes.md', content: 'x' }, 'write', 'write file'],
         [mode, 'Edit', { path: '/tmp/notes.md', old_string: 'a', new_string: 'b' }, 'edit', 'edit file'],
@@ -471,16 +471,20 @@ describe('Permission auto mode', () => {
     },
   );
 
-  it.each([
-    ['Read', { path: '/tmp/notes.md' }],
-    ['ReadMediaFile', { path: '/tmp/image.png' }],
-    ['Write', { path: '/tmp/notes.md', content: 'x' }],
-    ['Edit', { path: '/tmp/notes.md', old_string: 'a', new_string: 'b' }],
-  ] as const)('approves %s outside the cwd in auto mode', async (toolName, args) => {
+  it.each(
+    (['auto', 'yolo'] as const).flatMap((mode) =>
+      [
+        ['Read', mode, { path: '/tmp/notes.md' }],
+        ['ReadMediaFile', mode, { path: '/tmp/image.png' }],
+        ['Write', mode, { path: '/tmp/notes.md', content: 'x' }],
+        ['Edit', mode, { path: '/tmp/notes.md', old_string: 'a', new_string: 'b' }],
+      ] as const,
+    ),
+  )('approves %s outside the cwd in %s mode', async (toolName, mode, args) => {
     const { manager, requestApproval } = makePermissionManager(async () => ({
       decision: 'approved',
     }));
-    manager.setMode('auto');
+    manager.setMode(mode);
 
     await expect(
       manager.beforeToolCall(hookContext({ id: `call_${toolName}`, toolName, args })),
@@ -614,7 +618,7 @@ describe('Permission auto mode', () => {
     
   });
 
-  it('reuses approve-for-session for repeated outside-workspace writes in yolo mode', async () => {
+  it('approves outside-workspace writes in yolo mode without prompting', async () => {
     const { manager, requestApproval } = makePermissionManager(async () => ({
       decision: 'approved',
       scope: 'session',
@@ -633,8 +637,8 @@ describe('Permission auto mode', () => {
     await expect(call()).resolves.toBeUndefined();
     await expect(call()).resolves.toBeUndefined();
 
-    expect(requestApproval).toHaveBeenCalledTimes(1);
-    expect(manager.sessionApprovalRulePatterns).toEqual(['Write(/tmp/notes.md)']);
+    expect(requestApproval).not.toHaveBeenCalled();
+    expect(manager.sessionApprovalRulePatterns).toEqual([]);
     expect(manager.data().rules).toEqual([]);
   });
 });
@@ -650,8 +654,9 @@ describe('Permission policy chain', () => {
       'user-configured-deny',
       'bot-mode-permission',
       'collaboration-auto-approve',
-      'private-read-egress-ask',
       'auto-mode-approve',
+      'yolo-mode-approve',
+      'private-read-egress-ask',
       'dangerous-command-warnings-ask',
       'session-approval-history',
       'user-configured-ask',
@@ -661,7 +666,6 @@ describe('Permission policy chain', () => {
       'sensitive-file-access-ask',
       'git-control-path-access-ask',
       'cwd-outside-file-write-ask',
-      'yolo-mode-approve',
       'wolfpack-mode-approve',
       'default-tool-approve',
       'manage-plugin-read-only-approve',
@@ -719,10 +723,15 @@ describe('Simple permission policy direct behavior', () => {
   it('approves only in yolo mode for YoloModeApprovePermissionPolicy', () => {
     const agent = { permission: { mode: 'manual' } } as unknown as Agent;
     const policy = new YoloModeApprovePermissionPolicy(agent);
+    const bash = hookContext({ id: 'call_bash_yolo', toolName: 'Bash' });
 
-    expect(policy.evaluate()).toBeUndefined();
+    expect(policy.evaluate(bash)).toBeUndefined();
     Object.assign(agent.permission, { mode: 'yolo' });
-    expect(policy.evaluate()).toEqual({ kind: 'approve' });
+    expect(policy.evaluate(bash)).toEqual({ kind: 'approve' });
+    // ExitPlanMode is exempt — plan decisions stay with the user in yolo.
+    expect(
+      policy.evaluate(hookContext({ id: 'call_exit_plan_yolo', toolName: 'ExitPlanMode' })),
+    ).toBeUndefined();
   });
 
   it('always asks in FallbackAskPermissionPolicy', () => {

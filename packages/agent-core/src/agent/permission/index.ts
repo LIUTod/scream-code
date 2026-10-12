@@ -438,9 +438,12 @@ export class PermissionManager {
   /**
    * Drop a session scope the policy never offered. Panels filter their buttons
    * by `grantOptions`, but the response is wire input — the core is the only
-   * place that can guarantee a once-only prompt never memorizes a session
-   * grant. Runs before the session rule is derived, so a downgraded response
-   * leaves no `session-runtime` rule behind.
+   * place that can guarantee a prompt never memorizes a scope it did not
+   * offer, whatever the emitting build or a future once-only prompt does. Runs
+   * before the session rule is derived, so a downgraded response leaves no
+   * `session-runtime` rule behind. No built-in prompt is once-only today
+   * (every ask offers `once` + `session`), so this path is wire-input defense
+   * rather than a covered product flow.
    */
   private downgradeUnofferedSessionScope(
     response: ApprovalResponse,

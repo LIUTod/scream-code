@@ -1002,7 +1002,7 @@ export const en: Record<string, string> = {
   'permission.manual_desc': 'Ask before risky operations like running commands or editing files. Read/search tools run directly; session approval rules apply.',
   'permission.auto': 'Auto',
   'permission.auto_desc': 'Run fully without interaction. Tool operations are auto-approved; agent questions are skipped so it can decide on its own.',
-  'permission.yolo_desc': 'Auto-approve tool operations and plan transitions. The agent will still explicitly ask when it needs your input.',
+  'permission.yolo_desc': 'Auto-approve tool operations (dangerous commands included). The agent still brings its questions and plan reviews to you.',
   'permission.bot': 'Bot',
   'permission.bot_desc': 'Unattended mode: reversible actions auto-approve; anything else is denied and parked for you to review.',
   'permission.ask_desc': 'Read-only Q&A mode: answer in conversation, never modify files, run commands, or call MCP tools.',

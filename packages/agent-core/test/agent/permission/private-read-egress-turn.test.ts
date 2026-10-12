@@ -104,15 +104,14 @@ it('does not taint a read inside the workspace', async () => {
   expect(ctx.agent.permission.taintedPrivateReads).toEqual([]);
 });
 
-it('asks for a same-batch egress call that follows an outside read (auto mode)', async () => {
+it('asks for a same-batch egress call that follows an outside read (fail-closed before the read settles)', async () => {
   const outside = await makeOutsideFile();
   const ctx = testAgent({ runtime: { urlFetcher: fakeFetcher() } });
   ctx.configure({ tools: ['Read', 'Bash'] });
-  await ctx.rpc.setPermission({ mode: 'auto' });
 
   // One batch: the read is authorized (and its result not yet finalized) when
   // the Bash call is authorized, so only the pending-read fail-closed path can
-  // stop this — auto mode would otherwise approve the curl silently.
+  // stop this — the settled taint does not exist yet.
   ctx.mockNextResponse(
     { type: 'text', text: 'Reading and sending.' },
     readCall(outside),

@@ -389,11 +389,11 @@ function adaptChoices(
 }
 
 /**
- * A narrowed `grantOptions` list drops the grants it does not offer — e.g. a
- * dangerous-command prompt offers `once` only, so the panel must not paint a
- * "allow for session" button. The response validation in the core downgrades
- * such a scope anyway; hiding the button keeps the UI from offering a choice
- * that cannot be honored. Absent list = every grant (older emitters).
+ * A narrowed `grantOptions` list drops the grants it does not offer — a prompt
+ * that offers `once` only must not paint an "allow for session" button. The
+ * response validation in the core downgrades such a scope anyway; hiding the
+ * button keeps the UI from offering a choice that cannot be honored. Absent
+ * list = every grant (older emitters; no built-in prompt is once-only today).
  */
 function isGrantOffered(
   choice: ApprovalPanelChoice,
