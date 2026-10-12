@@ -690,6 +690,39 @@ describe('Agent turn flow', () => {
     expect(JSON.stringify(ctx.agent.context.data().history)).not.toContain('late pre tool hook');
   });
 
+  it('settles a pending approval when the turn is cancelled', async () => {
+    const execWithEnv = vi.fn().mockRejectedValue(new Error('Bash should not execute'));
+    const ctx = testAgent({ jian: createFakeJian({ execWithEnv }) });
+    ctx.configure({ tools: ['Bash'] });
+    ctx.newEvents();
+    ctx.mockNextResponse({ type: 'text', text: 'I will run Bash.' }, bashCall());
+
+    await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Run Bash' }] });
+    // The turn is parked on the approval request; cancel it without answering.
+    await ctx.takeApprovalRequest();
+    await ctx.rpc.cancel({ turnId: 0 });
+    const events = await ctx.untilTurnEnd();
+
+    expect(execWithEnv).not.toHaveBeenCalled();
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        event: 'turn.ended',
+        args: expect.objectContaining({ reason: 'cancelled' }),
+      }),
+    );
+    // The pending approval must be settled by the cancel path itself — the
+    // signal's generic 'Aborted' reason would mean cancelAllApprovals is gone.
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        event: 'permission.record_decision',
+        args: expect.objectContaining({
+          decision: 'cancelled',
+          reason: 'Approval request cancelled',
+        }),
+      }),
+    );
+  });
+
   it('fires StopFailure when a turn fails', async () => {
     const triggered: Array<[string, string, number]> = [];
     const hookEngine = new HookEngine(
@@ -1236,7 +1269,7 @@ describe('Agent turn flow', () => {
 
     expect(await ctx.untilTurnEnd()).toMatchInlineSnapshot(`
       [wire] turn.cancel                  { "turnId": 0, "time": "<time>" }
-      [wire] permission.record_decision   { "turnId": 0, "toolCallId": "call_bash", "toolName": "Bash", "decision": "cancelled", "reason": "Aborted", "time": "<time>" }
+      [wire] permission.record_decision   { "turnId": 0, "toolCallId": "call_bash", "toolName": "Bash", "decision": "cancelled", "reason": "Approval request cancelled", "time": "<time>" }
       [wire] context.append_loop_event    { "event": { "type": "block.start", "uuid": "<uuid-5>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "index": 0, "blockType": "tool-call" }, "time": "<time>" }
       [wire] context.append_loop_event    { "event": { "type": "tool.call", "uuid": "call_bash", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "toolCallId": "call_bash", "name": "Bash", "args": { "command": "printf should-not-run", "timeout": 60 }, "description": "Running: printf should-not-run", "display": { "kind": "command", "command": "printf should-not-run", "cwd": "<cwd>", "language": "bash" } }, "time": "<time>" }
       [emit] tool.call.started            { "turnId": 0, "toolCallId": "call_bash", "name": "Bash", "args": { "command": "printf should-not-run", "timeout": 60 }, "description": "Running: printf should-not-run", "display": { "kind": "command", "command": "printf should-not-run", "cwd": "<cwd>", "language": "bash" } }

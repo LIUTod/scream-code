@@ -43,6 +43,8 @@ function createHarness(opts: {
       ui: { requestRender: vi.fn() },
     },
     session: { cancel } as unknown as Session,
+    approvalController: { cancelAll: vi.fn() },
+    questionController: { cancelAll: vi.fn() },
     clearQueuedMessages: vi.fn(function (this: typeof host) {
       this.state.queuedMessages = [];
     }),
@@ -91,6 +93,16 @@ describe('EditorKeyboardController — Esc queue interception', () => {
     h.escape();
 
     expect(h.cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it('clears pending approval and question panels when the interrupt cancels the turn', () => {
+    const h = createHarness({ queued: [], streaming: true });
+
+    h.escape();
+
+    expect(h.cancel).toHaveBeenCalledTimes(1);
+    expect(h.host.approvalController.cancelAll).toHaveBeenCalledWith('turn cancelled');
+    expect(h.host.questionController.cancelAll).toHaveBeenCalledWith('turn cancelled');
   });
 
   it('does nothing special when idle with an empty queue', () => {

@@ -241,6 +241,11 @@ export class TurnFlow {
     this.agent.usage.endTurn();
     this.abortTurn(cancelReason);
     this.agent.subagentHost?.cancelAll(cancelReason);
+    // Settle approvals still waiting on this turn. The RPC layer already
+    // rejects them once the signal aborts, but settling here keeps the
+    // decision deterministic (a stable 'Approval request cancelled' reason)
+    // and independent of signal plumbing through the host.
+    this.agent.permission.cancelAllApprovals();
   }
 
   get currentId() {

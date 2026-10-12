@@ -23,6 +23,8 @@ import type { AppState, PendingExit, PlanModeState, QueuedMessage } from '../typ
 import type { TUIState } from '../tui-state';
 import { changeThinkingLevel, getModelCycleLevel } from '../commands/config';
 import { SESSION_TIPS } from '../constant/scream-tui';
+import type { ApprovalController } from '../reverse-rpc/approval/controller';
+import type { QuestionController } from '../reverse-rpc/question/controller';
 import type { AuthFlowController } from './auth-flow';
 import type { LifecycleController } from './lifecycle-controller';
 
@@ -33,6 +35,8 @@ export interface EditorKeyboardHost {
   readonly harness: ScreamHarness;
   readonly authFlow: AuthFlowController;
   readonly lifecycleController: LifecycleController;
+  readonly approvalController: ApprovalController;
+  readonly questionController: QuestionController;
 
   setAppState(patch: Partial<AppState>): void;
   showStatus(msg: string, color?: string): void;
@@ -309,6 +313,10 @@ export class EditorKeyboardController {
 
   private cancelCurrentStream(): void {
     void this.host.session?.cancel();
+    // The core settles its own pending approvals on cancel; the panels are
+    // host-side, so they must be resolved here or they linger on screen.
+    this.host.approvalController.cancelAll('turn cancelled');
+    this.host.questionController.cancelAll('turn cancelled');
   }
 
   private cancelCurrentCompaction(): void {
