@@ -19,11 +19,11 @@ const tempDir = path.join(packageRoot, '.tmp-api-extractor');
 const dtsRoot = path.join(tempDir, 'dts');
 const providerClientShimPath = path.join(dtsRoot, 'provider-clients.d.ts');
 
-const packageDirs = new Set(['agent-core', 'jian', 'ltod', 'node-sdk', 'oauth']);
+const packageDirs = new Set(['agent-core', 'config', 'jian', 'ltod', 'node-sdk']);
 const workspacePackages = new Map([
   ['@scream-code/agent-core', 'agent-core'],
+  ['@scream-code/config', 'config'],
   ['@scream-code/jian', 'jian'],
-  ['@scream-code/scream-code-oauth', 'oauth'],
   ['@scream-code/ltod', 'ltod'],
 ]);
 
@@ -133,7 +133,7 @@ async function rewriteWorkspaceSpecifiers() {
           `import { GoogleGenAI as GenAIClient } from '${providerClientSpecifier}';`,
         );
       const updated = providerClientText.replaceAll(
-        /(["'])(#\/[^"']+|@scream-code\/(?:agent-core|jian|scream-code-oauth|ltod)(?:\/[^"']+)?)\1/g,
+        /(["'])(#\/[^"']+|@scream-code\/(?:agent-core|config|jian|ltod)(?:\/[^"']+)?)\1/g,
         (_match, quote, specifier) => {
           const resolved = resolveSpecifier({
             currentFile: file,
