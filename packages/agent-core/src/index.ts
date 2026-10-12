@@ -16,6 +16,7 @@ export {
 } from './session/store';
 export * from './plugin';
 export {
+  __resetRootLoggerForTest,
   flushDiagnosticLogs,
   getRootLogger,
   log,

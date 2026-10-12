@@ -8,8 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { registerExportCommand } from '#/cli/sub/export';
 import { createScreamCodeHostIdentity } from '#/cli/version';
-import { ScreamHarness, log } from '@scream-code/scream-code-sdk';
-import { __resetRootLoggerForTest } from '../../../../packages/agent-core/src/logging/logger';
+import { ScreamHarness, __resetRootLoggerForTest, log } from '@scream-code/scream-code-sdk';
 
 const SESSION_LOG = 'logs/scream-code.log';
 const GLOBAL_LOG = 'logs/global/scream-code.log';

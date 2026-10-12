@@ -9,10 +9,13 @@
  * reappears, in any of its forms: static `from`, side-effect bare import,
  * dynamic `import()`, `require()`, and re-`export ... from` (covered by the
  * `from` branch). The pattern deliberately over-matches `agent-core/` and
- * `agent-core'` so subpath imports cannot slip through.
+ * `agent-core'` so subpath imports cannot slip through. Relative specifiers
+ * never mention the package name, so they get a second pass: every specifier
+ * (quotes and backticks alike) is resolved against the importing file and
+ * checked against the core root — the root itself included.
  */
 import { readdirSync, readFileSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 
 const APP_ROOTS = [
   'apps/scream-code/src',
@@ -23,13 +26,38 @@ const EXT = new Set(['.ts', '.tsx', '.mts', '.js', '.mjs', '.cjs', '.vue']);
 // Stateless (no /g): a global regex would carry lastIndex across files and
 // skip offenders whose match sits before the previous file's match point.
 const BANNED =
-  /(?:\bfrom\s*(?:\/\*[\s\S]*?\*\/\s*)*|\bimport\s*\(\s*|\bimport\s+(?:\/\*[\s\S]*?\*\/\s*)*|\brequire\s*\(\s*)['"]@scream-code\/agent-core(?:['"/])/;
+  /(?:\bfrom\s*(?:\/\*[\s\S]*?\*\/\s*)*|\bimport\s*\(\s*|\bimport\s+(?:\/\*[\s\S]*?\*\/\s*)*|\brequire\s*\(\s*)['"`]@scream-code\/agent-core(?:['"`/])/;
+// Captures every import specifier; matchAll clones the /g regex, so it stays
+// stateless across files. Matching is textual (comments and strings included,
+// same as the literal pass) — keep specifier-shaped prose out of app trees.
+const SPECIFIER =
+  /(?:\bfrom\s*(?:\/\*[\s\S]*?\*\/\s*)*|\bimport\s*\(\s*|\bimport\s+(?:\/\*[\s\S]*?\*\/\s*)*|\brequire\s*\(\s*)['"`]([^'"`]+)['"`]/g;
+const CORE_ROOT = resolve('packages/agent-core');
 
 const offenders = [];
 
+function escapesIntoCore(path, specifier) {
+  if (!specifier.startsWith('.')) return false;
+  const target = resolve(dirname(path), specifier);
+  const rel = relative(CORE_ROOT, target);
+  // rel === '' means the target IS the core root — an offender, not an exclusion.
+  return !rel.startsWith('..') && !isAbsolute(rel);
+}
+
 function scan(path) {
   const text = readFileSync(path, 'utf8');
-  if (BANNED.test(text)) offenders.push(relative(process.cwd(), path));
+  if (BANNED.test(text)) {
+    offenders.push(relative(process.cwd(), path));
+    return;
+  }
+  for (const match of text.matchAll(SPECIFIER)) {
+    if (escapesIntoCore(path, match[1])) {
+      offenders.push(
+        `${relative(process.cwd(), path)} (relative import into agent-core: ${match[1]})`,
+      );
+      return;
+    }
+  }
 }
 
 function walk(dir) {

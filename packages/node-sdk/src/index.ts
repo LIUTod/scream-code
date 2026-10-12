@@ -52,8 +52,11 @@ export { normalizeRlmMaxDepth, parseRlmMaxDepthArg } from '@scream-code/agent-co
 export type { RlmMaxDepthParseResult } from '@scream-code/agent-core';
 
 // Diagnostic logging — public surface only.
-// RootLogger / getRootLogger / LoggingConfig stay inside agent-core.
+// RootLogger / getRootLogger / LoggingConfig stay inside agent-core;
+// `__resetRootLoggerForTest` is the test-only hook e2e suites reset the
+// process-global logger with.
 export {
+  __resetRootLoggerForTest,
   flushDiagnosticLogs,
   log,
   redact,
