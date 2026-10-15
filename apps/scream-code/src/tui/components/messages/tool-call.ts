@@ -1338,7 +1338,13 @@ export class ToolCallComponent extends CachedContainer {
         // aborts are expected (user pressed Ctrl-C or interrupted), so they
         // use the warning color rather than the error color.
         const output = typeof result?.output === 'string' ? result.output : '';
-        const isAborted = /\b(?:aborted|cancelled|canceled)\b/i.test(output);
+        const isAborted =
+          result?.code !== undefined
+            ? result.code === 'aborted'
+            : // Legacy path: records persisted before tool errors carried
+              // `code` (and replayed history, which does not rebuild it) have
+              // no classification — read the text only for those.
+              /\b(?:aborted|cancelled|canceled)\b/i.test(output);
         bullet = isAborted
           ? chalk.hex(colors.warning)('⊙ ')
           : chalk.hex(colors.error)('✗ ');

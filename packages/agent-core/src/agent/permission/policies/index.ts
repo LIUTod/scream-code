@@ -6,6 +6,7 @@ import { AutoModeAskUserQuestionDenyPermissionPolicy } from './auto-mode-ask-use
 import { BotModePermissionPolicy } from './bot-mode-permission';
 import { CapabilityGuardDenyPermissionPolicy } from './capability-guard-deny';
 import { DefaultToolApprovePermissionPolicy } from './default-tool-approve';
+import { DestructiveHintAskPermissionPolicy } from './destructive-hint-ask';
 import { ExitPlanModeReviewAskPermissionPolicy } from './exit-plan-mode-review-ask';
 import { FallbackAskPermissionPolicy } from './fallback-ask';
 import {
@@ -102,6 +103,10 @@ export function createPermissionDecisionPolicies(agent: Agent): readonly Permiss
     new CwdOutsideFileWriteAskPermissionPolicy(agent),
     // WolfPack mode active → approve.
     new WolfPackModeApprovePermissionPolicy(agent),
+    // Tool author declared the call destructive (unverified hint) → ask. Sits above the
+    // default-approve list so a helper that declares itself destructive still asks; auto/
+    // yolo approve earlier in the chain and user/session grants run above this point.
+    new DestructiveHintAskPermissionPolicy(),
     // Tool is in the default-approve list (read-only / UI helpers) → approve.
     new DefaultToolApprovePermissionPolicy(),
     // ManagePlugin's read-only actions (list/info/check/marketplace) → approve. Mutating

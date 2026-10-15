@@ -6,6 +6,7 @@ import { ToolCallComponent } from '#/tui/components/messages/tool-call';
 import { STATUS_BULLET } from '#/tui/constant/symbols';
 import { darkColors } from '#/tui/theme/colors';
 import { createMarkdownTheme } from '#/tui/theme/pi-tui-theme';
+import type { ToolResultBlockData } from '#/tui/types';
 
 import { captureProcessWrite } from '../../../helpers/process';
 
@@ -1719,5 +1720,50 @@ describe('ToolCallComponent', () => {
     const expanded = component.render(100);
     expect(expanded).not.toBe(collapsed);
     expect(strip(expanded.join('\n'))).toContain('line5');
+  });
+});
+
+describe('ToolCallComponent — error classification', () => {
+  /** Rendered, ANSI-stripped output of a finished call with `result`. */
+  function renderResult(result: ToolResultBlockData): string {
+    const component = new ToolCallComponent(
+      { id: 'call_classify', name: 'Bash', args: { command: 'false' } },
+      result,
+      darkColors,
+    );
+    return strip(component.render(100).join('\n'));
+  }
+
+  it('reads the aborted classification off the result, not the output text', () => {
+    // The output carries no abort wording at all: only `code` can say that
+    // this error was a cancellation.
+    const out = renderResult({
+      tool_call_id: 'call_classify',
+      output: 'tool stopped early',
+      is_error: true,
+      code: 'aborted',
+    });
+    expect(out).toContain('⊙');
+    expect(out).not.toContain('✗');
+  });
+
+  it('keeps a genuine failure on the error bullet even when the text says aborted', () => {
+    const out = renderResult({
+      tool_call_id: 'call_classify',
+      output: 'Tool "Bash" was aborted by the provider after 30s',
+      is_error: true,
+      code: 'failed',
+    });
+    expect(out).toContain('✗');
+    expect(out).not.toContain('⊙');
+  });
+
+  it('falls back to the output text for results without a code (legacy wire records)', () => {
+    const out = renderResult({
+      tool_call_id: 'call_classify',
+      output: 'Tool "Bash" was aborted',
+      is_error: true,
+    });
+    expect(out).toContain('⊙');
   });
 });

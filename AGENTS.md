@@ -152,6 +152,7 @@ Test the contract the system exposes — not the easiest internal detail to asse
 - Tests **must be full-suite safe**, not just file-local safe. No long-lived file-wide mutations of `Bun.*`, `process.platform`, `process.env`, or `Bun.env` when a narrower seam exists. Prefer per-test `vi.spyOn(...)` with `vi.restoreAllMocks()` in `afterEach`.
 - **Never use `mock.module()`**. It mutates the global module registry and leaks across files. Use `spyOn` on the imported module object instead.
 - For lifecycle/stateful code, prefer one test per invariant or transition over several tiny tests asserting one field each from the same transition.
+- **HOME isolation**: `build/isolate-home.ts` (shared repo infra, same directory as `raw-text-plugin.mjs`) redirects `HOME`/`TMPDIR`/`USERPROFILE` to a one-shot tmp dir and is wired into `packages/{jian,config,memory,knowledge,ltod}/vitest.config.ts`. `agent-core` and `apps/scream-code` still isolate only `SCREAM_CODE_HOME` (their suites assert real-homedir paths, e.g. `test/mcp/oauth-store.test.ts`, `apps/scream-code/test/utils/paths.test.ts` — extending the isolation there requires updating those assertions first).
 - For error handling, trigger the real failure path and assert the surfaced contract — don't instantiate error classes directly or inspect internal metadata.
 - Smoke tests are acceptable only when they catch a failure mode narrower tests would miss. "Package boots" or "command starts" alone is not enough.
 - Assert exact strings, ordering, and formatting only when downstream code parses or depends on the exact bytes. Otherwise assert semantic content.
@@ -485,6 +486,15 @@ Stateless retry with an optional `--verify` shell gate. Each iteration re-sends 
 - **Auto permission**: opening loop with `permissionMode === 'manual'` auto-switches to `auto` (via `ensureAutoPermission`) so iterations don't block on approval. Closing loop does **not** restore the previous mode.
 - **Footer badge**: `loop N/M` (iterations), `loop Nm` / `loop Ns` (duration), ` · ✗` suffix when the last verify failed
 - **TUI ordering**: `/loop` is a lightweight inner-loop mode, not part of the quick command priority list — it is a tool for driving repeated verify cycles, not a goal replacement.
+
+### Turn budget & stop-loss (agent-core)
+
+- **Step budget**: `loop_control.max_steps_per_turn` (default `TURN_DEFAULTS.maxStepsPerTurn = 160`, per turn, fresh on each new user message; `0` disables). Exhaustion soft-lands: one `finalStep` wrap-up step (reminder injected in `agent/turn/index.ts` beforeStep) then `end_turn`; the result and `turn.ended` carry `stepBudgetExhausted: true` (CLI exit code 4, TUI notice). The old thrown error `loop.max_steps_exceeded` no longer exists.
+- **Failure breaker**: `agent/turn/index.ts` counts consecutive failed model tool calls via `classifyToolResult` (`aborted` = neutral — a user/parent abort must not be misattributed as a model failure; `blocked` counts). 6 → change-approach reminder; 10 → forced wrap-up (`stopTurn` + `shouldContinueAfterStop` early-exit).
+- **Approval timeout stop-loss**: `permission/index.ts` — the timeout error tells the model the user is away; a second approval request for the same tool in the same turn is denied immediately instead of stalling another 5 minutes.
+- **Tool annotations**: `ltod` `ToolAnnotations` (+ `Tool.annotations`), MCP-native annotations pass through (`connection-manager.mapMcpAnnotations`). Policy `destructive-hint-ask` sits above `default-tool-approve`: a `destructiveHint` forces an approval in manual mode and never grants one (hints are author-declared, unverified).
+- **Structured tool errors**: `ExecutableToolErrorResult.code: 'aborted' | 'failed' | 'blocked'` + `abortReason`; `turn.step.retrying/interrupted` carry `errorCode`. TUI reads the code first and falls back to the legacy regex only for records without one.
+- **On-demand MCP tools**: server config `exposure: 'on-demand'` (default) keeps MCP tool schemas out of the request; the model lists/enables them with `DiscoverMcpTools` (pattern-filtered; enabling an excluded name reports `skipped`). `exposure: 'always'` opts a server back into eager declaration.
 
 One-click cc-connect daemon life cycle management (cross-platform).
 

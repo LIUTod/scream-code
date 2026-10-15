@@ -1,16 +1,16 @@
 /**
  * Error propagation contract.
  *
- * The loop never returns `'error'` or `'max_steps'` as a stopReason — those
- * states surface only by throwing. AbortError-shaped exceptions converge
- * to `stopReason='aborted'` and never throw to the caller. Every throw
- * is preceded by exactly one `turn.interrupted` event whose `reason`
- * names the cause.
+ * The loop never returns `'error'` as a stopReason — request-level failures
+ * surface by throwing, always preceded by exactly one `turn.interrupted`
+ * event whose `reason` names the cause. AbortError-shaped exceptions
+ * converge to `stopReason='aborted'` and never throw to the caller. Step
+ * budget exhaustion is neither: the loop runs one wrap-up step and returns
+ * `'end_turn'`.
  */
 
 import { describe, expect, it } from 'vitest';
 
-import { ErrorCodes, ScreamError } from '../../src/errors';
 import type { Logger, LogPayload } from '../../src/logging';
 import type { LoopHooks } from '../../src/loop/index';
 import { makeEndTurnResponse, makeToolCall, makeToolUseResponse } from './fixtures/fake-llm';
@@ -81,24 +81,23 @@ describe('runTurn — error paths', () => {
     expect(entries).toEqual([]);
   });
 
-  it('throws ScreamError(loop.max_steps_exceeded) with turn.interrupted{reason:"max_steps"} before the throw', async () => {
+  it('wraps up instead of throwing when the step budget is exhausted', async () => {
     const echo = new EchoTool();
-    const { error, sink } = await runTurnExpectingThrow({
+    const { result, sink } = await runTurn({
       maxSteps: 2,
       tools: [echo],
       responses: [
         makeToolUseResponse([makeToolCall('echo', { text: '1' }, 'a')]),
         makeToolUseResponse([makeToolCall('echo', { text: '2' }, 'b')]),
-        // never reached
+        makeEndTurnResponse('budget exhausted; reporting'),
       ],
     });
 
-    expect(error).toBeInstanceOf(ScreamError);
-    expect((error as ScreamError).code).toBe(ErrorCodes.LOOP_MAX_STEPS_EXCEEDED);
-    const interrupted = sink.byType('turn.interrupted');
-    expect(interrupted.map((e) => e.reason)).toEqual(['max_steps']);
-    expect(interrupted[0]?.attemptedSteps).toBe(2);
-    expect(interrupted[0]?.activeStep).toBeUndefined();
+    expect(result.stopReason).toBe('end_turn');
+    expect(result.stepBudgetExhausted).toBe(true);
+    expect(result.steps).toBe(3);
+    // Budget exhaustion is a wrap-up, not an interruption.
+    expect(sink.byType('turn.interrupted')).toEqual([]);
   });
 
   it('rethrows non-abort hook errors via the same path', async () => {

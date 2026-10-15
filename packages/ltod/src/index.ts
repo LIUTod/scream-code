@@ -46,7 +46,7 @@ export { generate } from './generate';
 export type { GenerateCallbacks, GenerateResult } from './generate';
 
 // Tool wire schema
-export type { Tool } from './tool';
+export type { Tool, ToolAnnotations } from './tool';
 
 // Token usage
 export { addUsage, emptyUsage, grandTotal, inputTotal } from './usage';

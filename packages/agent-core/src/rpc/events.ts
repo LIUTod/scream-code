@@ -127,6 +127,13 @@ export interface TurnEndedEvent {
   readonly turnId: number;
   readonly reason: TurnEndReason;
   readonly error?: ScreamErrorPayload | undefined;
+  /**
+   * True when the turn wrapped up because its step budget was exhausted (soft
+   * landing — `TurnResult.stepBudgetExhausted`). `reason` still reports
+   * `completed`; this flag is what lets hosts (CLI exit code, TUI notice) tell
+   * a budget cut from a natural finish.
+   */
+  readonly stepBudgetExhausted?: boolean | undefined;
 }
 
 export interface TurnStepStartedEvent {
@@ -161,6 +168,13 @@ export interface TurnStepRetryingEvent {
   readonly errorName: string;
   readonly errorMessage: string;
   readonly statusCode?: number;
+  /**
+   * Machine-readable classification of the failed attempt (an error-protocol
+   * code such as `provider.timeout`), so consumers label the retry from a
+   * field instead of pattern-matching `errorName`. Absent when the error
+   * carries no classification.
+   */
+  readonly errorCode?: string | undefined;
 }
 
 export interface TurnStepInterruptedEvent {
@@ -170,6 +184,12 @@ export interface TurnStepInterruptedEvent {
   readonly stepId?: string | undefined;
   readonly reason: string;
   readonly message?: string | undefined;
+  /**
+   * Machine-readable classification of the interrupting failure — see
+   * {@link TurnStepRetryingEvent.errorCode}. Absent for aborts / step-budget
+   * interruptions and for errors that carry no classification.
+   */
+  readonly errorCode?: string | undefined;
 }
 
 export interface AssistantDeltaEvent {
@@ -242,6 +262,16 @@ export interface ToolResultEvent {
    * The TUI renders this separately so it doesn't trigger a second collapse.
    */
   readonly message?: string | undefined;
+  /**
+   * Machine-readable classification of an error result — see
+   * `ExecutableToolErrorResult.code`. Consumers branch on this instead of
+   * matching `output` prose; absent on success results and on records written
+   * before the field existed.
+   */
+  readonly code?: 'aborted' | 'failed' | 'blocked' | undefined;
+  /** Abort attribution for `code: 'aborted'` — see
+   *  `ExecutableToolErrorResult.abortReason`. */
+  readonly abortReason?: string | undefined;
 }
 
 export interface SubagentSpawnedEvent {

@@ -4,5 +4,6 @@ export default defineConfig({
   test: {
     name: 'scream-oauth',
     include: ['test/**/*.test.ts'],
+    setupFiles: ['../../build/isolate-home.ts'],
   },
 });

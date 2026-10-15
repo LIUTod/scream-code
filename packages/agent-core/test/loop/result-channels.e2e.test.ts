@@ -121,4 +121,35 @@ describe('mapLoopEvent — tool.result side channels', () => {
     expect(mapped.display).toBeUndefined();
     expect(mapped.message).toBe(LSP_MESSAGE);
   });
+
+  it('forwards the error classification so consumers never match the output text', () => {
+    const event: LoopEvent = {
+      type: 'tool.result',
+      parentUuid: 'parent-1',
+      toolCallId: 'tc-1',
+      result: {
+        isError: true,
+        output: 'Tool "Bash" was aborted',
+        code: 'aborted',
+        abortReason: 'Aborted by the user',
+      },
+    };
+    const mapped = mapLoopEvent(event, 1);
+    if (mapped?.type !== 'tool.result') throw new Error('expected tool.result mapping');
+    expect(mapped.code).toBe('aborted');
+    expect(mapped.abortReason).toBe('Aborted by the user');
+  });
+
+  it('leaves the classification off success results', () => {
+    const event: LoopEvent = {
+      type: 'tool.result',
+      parentUuid: 'parent-1',
+      toolCallId: 'tc-1',
+      result: { output: 'x' },
+    };
+    const mapped = mapLoopEvent(event, 1);
+    if (mapped?.type !== 'tool.result') throw new Error('expected tool.result mapping');
+    expect(mapped.code).toBeUndefined();
+    expect(mapped.abortReason).toBeUndefined();
+  });
 });

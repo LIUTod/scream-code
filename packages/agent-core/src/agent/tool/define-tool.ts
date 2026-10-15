@@ -19,6 +19,8 @@ export interface DefineUserToolInput {
   readonly name: string;
   readonly description: string;
   readonly parameters: z.ZodType;
+  /** Optional author-declared behaviour hints (see `ToolAnnotations`). */
+  readonly annotations?: UserToolRegistration['annotations'];
 }
 
 export function defineUserTool(input: DefineUserToolInput): UserToolRegistration {
@@ -26,5 +28,6 @@ export function defineUserTool(input: DefineUserToolInput): UserToolRegistration
     name: input.name,
     description: input.description,
     parameters: toInputJsonSchema(input.parameters),
+    ...(input.annotations === undefined ? {} : { annotations: input.annotations }),
   };
 }
