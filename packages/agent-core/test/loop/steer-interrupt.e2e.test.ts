@@ -11,7 +11,7 @@ import { describe, expect, it } from 'vitest';
 
 import { makeEndTurnResponse, makeToolCall, makeToolUseResponse } from './fixtures/fake-llm';
 import { runTurn, startTurn } from './fixtures/helpers';
-import { EchoTool, SlowTool } from './fixtures/tools';
+import { EchoTool, SelfAbortTool, SlowTool } from './fixtures/tools';
 
 describe('runTurn — steer interruption', () => {
   it('interrupts an in-flight tool when a steer is queued mid-batch', async () => {
@@ -72,5 +72,92 @@ describe('runTurn — steer interruption', () => {
 
     expect(result.stopReason).toBe('end_turn');
     expect(context.toolResults()[0]?.result?.output).toBe('plain');
+  });
+
+  /**
+   * A tool that handles its own interruption — Bash and Python both return a
+   * plain `builder.error(...)` result for an interrupted command, with no
+   * `code` the loop supplied. Without the loop tagging it, such a result reads
+   * as an ordinary failure to `classifyToolResult`, and the user's own
+   * interrupt charges the consecutive-failure streak.
+   */
+  it('tags a tool-authored error result as aborted when the steer cut the batch short', async () => {
+    const tool = new SelfAbortTool({
+      isError: true,
+      output: 'Interrupted by the user; kernel state preserved.',
+    });
+    let steered = false;
+
+    const { promise, context } = startTurn({
+      tools: [tool],
+      responses: [
+        makeToolUseResponse([makeToolCall(tool.name, {}, 'tc-1')]),
+        makeEndTurnResponse('done after steer'),
+      ],
+      hasPendingSteer: () => steered,
+    });
+
+    await tool.started.promise;
+    steered = true;
+    await promise;
+
+    const result = context.toolResults()[0]?.result;
+    expect(result).toMatchObject({
+      isError: true,
+      code: 'aborted',
+      abortReason: 'Aborted by the user',
+    });
+  });
+
+  it('keeps the code a tool put on its own error result (never overwrites)', async () => {
+    const tool = new SelfAbortTool({
+      isError: true,
+      output: 'The tool classified this failure itself.',
+      code: 'failed',
+    });
+    let steered = false;
+
+    const { promise, context } = startTurn({
+      tools: [tool],
+      responses: [
+        makeToolUseResponse([makeToolCall(tool.name, {}, 'tc-1')]),
+        makeEndTurnResponse('done after steer'),
+      ],
+      hasPendingSteer: () => steered,
+    });
+
+    await tool.started.promise;
+    steered = true;
+    await promise;
+
+    const result = context.toolResults()[0]?.result;
+    expect(result).toMatchObject({ isError: true, code: 'failed' });
+    expect(result).not.toHaveProperty('abortReason');
+  });
+
+  it('leaves a successful result untagged when the tool won the abort race', async () => {
+    // The tool finished its work just as the steer fired: it did what it was
+    // asked to do, so the result stays a success instead of borrowing the
+    // abort's `code`.
+    const tool = new SelfAbortTool({ output: 'finished just in time' });
+    let steered = false;
+
+    const { promise, context } = startTurn({
+      tools: [tool],
+      responses: [
+        makeToolUseResponse([makeToolCall(tool.name, {}, 'tc-1')]),
+        makeEndTurnResponse('done after steer'),
+      ],
+      hasPendingSteer: () => steered,
+    });
+
+    await tool.started.promise;
+    steered = true;
+    await promise;
+
+    const result = context.toolResults()[0]?.result;
+    expect(result?.isError).toBeUndefined();
+    expect(result).not.toHaveProperty('code');
+    expect(result?.output).toBe('finished just in time');
   });
 });

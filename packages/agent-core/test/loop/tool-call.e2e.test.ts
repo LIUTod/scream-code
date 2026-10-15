@@ -193,6 +193,9 @@ describe('runTurn — tool-call behaviour', () => {
     const results = sink.byType('tool.result');
     expect(results[0]?.result.isError).toBe(true);
     expect(expectTextOutput(results[0]?.result.output).toLowerCase()).toContain('boom');
+    // A tool that runs and throws is a failure — not an abort and not a block.
+    expect(results[0]?.result).toMatchObject({ code: 'failed' });
+    expect(results[0]?.result).not.toHaveProperty('abortReason');
     expect(context.toolResults()[0]?.result.isError).toBe(true);
   });
 

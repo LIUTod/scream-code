@@ -40,6 +40,14 @@
   trips it for user steers and for an explicit `interrupt: true` (the parent
   host's interject), never for background/cron steers or `interrupt: false`
   queue drains
+- **Abort classification is the loop's job, not the tool's**: every interrupt
+  path the loop settles itself carries `code: 'aborted'` (+ `abortReason`), and
+  a tool-authored error result gets the same tag in `runRunnableToolCall` when
+  the step's signal is aborted — tools that handle their own interruption
+  (Bash/Python `builder.error(...)`) return no code, and an uncoded error reads
+  as an ordinary failure to the consecutive-failure breaker. Only the missing
+  case is filled: an existing `code` (`blocked`/`failed`) and any non-error
+  result are left untouched
 - `turn.ended` emits after cleanup (RPC snapshot stays consistent with replay)
 
 ## Extension points

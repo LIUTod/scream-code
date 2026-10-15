@@ -170,6 +170,59 @@ export class HangingTool implements ExecutableTool<Record<string, unknown>> {
   }
 }
 
+/**
+ * Handles its own interruption the way the real shell tools do: it waits for
+ * the abort and then returns a result *it* authored, with no loop-supplied
+ * `code` — exactly the shape `builder.error(...)` produces in Bash/Python.
+ *
+ * The loop is the only layer that knows the step's signal is why the call came
+ * back short, so this fixture pins the loop-side abort tagging of
+ * tool-authored results (`outcome` is a parameter so a test can also assert
+ * that an existing code, or a success, is left alone).
+ */
+export class SelfAbortTool implements ExecutableTool<Record<string, unknown>> {
+  readonly name: string;
+  readonly description = 'Waits for the abort, then returns a result it authored.';
+  readonly parameters = RECORD_PARAMETERS;
+  readonly calls: RecordedToolCall<Record<string, unknown>>[] = [];
+  readonly outcome: ExecutableToolResult;
+  readonly started: { resolve: () => void; promise: Promise<void> };
+
+  constructor(outcome: ExecutableToolResult, name = 'self-abort') {
+    this.name = name;
+    this.outcome = outcome;
+    let resolveStart: () => void = () => {};
+    const startedPromise = new Promise<void>((resolve) => {
+      resolveStart = resolve;
+    });
+    this.started = { resolve: resolveStart, promise: startedPromise };
+  }
+
+  resolveExecution(args: Record<string, unknown>): ToolExecution {
+    return {
+      approvalRule: this.name,
+      execute: async (ctx): Promise<ExecutableToolResult> => {
+        this.calls.push({
+          id: ctx.toolCallId,
+          args,
+          turnId: ctx.turnId,
+        });
+        this.started.resolve();
+        await new Promise<void>((resolve) => {
+          if (ctx.signal.aborted) {
+            resolve();
+            return;
+          }
+          ctx.signal.addEventListener('abort', () => {
+            resolve();
+          }, { once: true });
+        });
+        return this.outcome;
+      },
+    };
+  }
+}
+
 export type ProgressInput = Record<string, unknown>;
 
 export class ProgressTool implements ExecutableTool<ProgressInput> {

@@ -34,6 +34,7 @@ import { ToolScheduler, type ToolCallTask } from './tool-scheduler';
 import type {
   AuthorizeToolExecutionResult,
   ExecutableTool,
+  ExecutableToolErrorResult,
   LoopHooks,
   ToolCall,
   PrepareToolExecutionResult,
@@ -70,6 +71,72 @@ function abortedToolOutput(toolName: string, signal: AbortSignal): string {
     return `The parent agent interrupted "${toolName}" (and anything else running at the same time) with an interjection. This was a deliberate redirection, not a system error, timeout, or capacity limit. Read the [parent_messages] directive that follows and follow it — do not retry this call or wait for the user.`;
   }
   return `Tool "${toolName}" was aborted`;
+}
+
+/**
+ * Stringify an `AbortSignal`'s reason for the `abortReason` field.
+ *
+ * The abort's own words are reported as-is: a signal aborted without an
+ * explicit reason carries the runtime's default reason, and that is what the
+ * consumer sees rather than a second-hand guess. A signal that was never
+ * aborted (`reason === undefined`) and an Error with neither message nor name
+ * yield nothing, so the field is omitted instead of recorded blank.
+ */
+function abortReasonText(signal: AbortSignal): string | undefined {
+  // `AbortSignal.reason` is typed `any`, so narrow it before stringifying: a
+  // non-Error object reason would otherwise degrade into "[object Object]".
+  const reason: unknown = signal.reason;
+  if (reason === undefined || reason === null) return undefined;
+  if (reason instanceof Error) {
+    // Abort reasons spend their meaning on the message ("Aborted by the
+    // user"); the class name is the fallback for an empty one.
+    return nonEmpty(reason.message) ?? nonEmpty(reason.name);
+  }
+  if (typeof reason === 'string') return nonEmpty(reason);
+  if (typeof reason === 'number' || typeof reason === 'boolean' || typeof reason === 'bigint') {
+    return String(reason);
+  }
+  return undefined;
+}
+
+/** Trimmed text, or undefined when there is nothing to report. */
+function nonEmpty(text: string): string | undefined {
+  const trimmed = text.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+/**
+ * Tag a tool's *own* error result as an abort when this step's signal is what
+ * cut the call short.
+ *
+ * Everything the loop synthesizes itself already carries a `code`, but a tool
+ * that handles its own interruption returns a plain error result: Bash and
+ * Python report an interrupted command through `builder.error(...)`, which
+ * only takes the human-readable text. An error result with no code reads as an
+ * ordinary failure to the consecutive-failure breaker, so an interrupted
+ * command used to charge the streak and (at the stop threshold) end the turn
+ * reporting "N consecutive tool calls have failed" — blaming the model for the
+ * user's or parent agent's own interrupt.
+ *
+ * Only the missing case is filled in:
+ *   - a result that already carries a code keeps it: the tool's own
+ *     classification (`blocked`, `failed`) is more specific than ours;
+ *   - a result that is not an error is left untouched: a tool that finished
+ *     successfully inside the abort race did succeed.
+ */
+function tagAbortedToolResult(
+  result: ExecutableToolResult,
+  signal: AbortSignal,
+): ExecutableToolResult {
+  if (!signal.aborted) return result;
+  if (result.isError !== true) return result;
+  if (result.code !== undefined) return result;
+  const abortReason = abortReasonText(signal);
+  return {
+    ...result,
+    code: 'aborted' as const,
+    ...(abortReason !== undefined ? { abortReason } : {}),
+  };
 }
 
 export interface ToolCallStepContext {
@@ -276,7 +343,15 @@ export async function runToolCallBatch(
         if (effectiveStep.signal.aborted) {
           await dispatchToolCall(step, call, call.args);
           pendingResults.push(
-            Promise.resolve(makeErrorToolResult(call, call.args, abortedToolOutput(call.toolName, effectiveStep.signal))),
+            Promise.resolve(
+              makeErrorToolResult(
+                call,
+                call.args,
+                abortedToolOutput(call.toolName, effectiveStep.signal),
+                'aborted',
+                abortReasonText(effectiveStep.signal),
+              ),
+            ),
           );
           continue;
         }
@@ -285,7 +360,9 @@ export async function runToolCallBatch(
         pendingResults.push(
           scheduler
             .add(prepared.task)
-            .catch((error) => makeErrorToolResult(call, call.args, errorMessage(error))),
+            .catch((error) =>
+              synthesizePreparationError(effectiveStep.signal, call, call.args, error, errorMessage(error)),
+            ),
         );
 
         if (prepared.stopBatchAfterThis === true) {
@@ -329,7 +406,13 @@ export async function runToolCallBatch(
         });
         pendingResults.push(
           Promise.resolve(
-            makeErrorToolResult(call, call.args, `Tool preparation failed: ${errorMessage(error)}`),
+            synthesizePreparationError(
+              effectiveStep.signal,
+              call,
+              call.args,
+              error,
+              `Tool preparation failed: ${errorMessage(error)}`,
+            ),
           ),
         );
       }
@@ -530,10 +613,18 @@ async function prepareToolCall(
   const settleError = async (
     args: unknown,
     output: string,
+    classification?: {
+      readonly code?: ExecutableToolErrorResult['code'];
+      readonly abortReason?: string;
+    },
     displayFields?: ToolCallDisplayFields,
   ): Promise<PreparedToolCallTask> => {
     await dispatchToolCall(step, call, args, displayFields);
-    return { task: makeResolvedToolCallTask(makeErrorToolResult(call, args, output)) };
+    return {
+      task: makeResolvedToolCallTask(
+        makeErrorToolResult(call, args, output, classification?.code, classification?.abortReason),
+      ),
+    };
   };
 
   const settleSynthetic = async (
@@ -571,8 +662,19 @@ async function prepareToolCall(
   }
 
   const decision = await runPrepareToolExecutionHook(step, call);
-  if (decision.kind === 'blocked' || decision.kind === 'hookFailed') {
-    return settleError(decision.args, decision.output);
+  if (decision.kind === 'blocked') {
+    return settleError(decision.args, decision.output, { code: 'blocked' });
+  }
+  if (decision.kind === 'hookFailed') {
+    // An abort that cut the prepare hook short is reported as an abort, not as
+    // a hook failure, so consumers keep seeing the cancellation the caller
+    // caused instead of a defect in the tool/hook pair.
+    return step.signal.aborted
+      ? settleError(decision.args, decision.output, {
+          code: 'aborted',
+          abortReason: abortReasonText(step.signal),
+        })
+      : settleError(decision.args, decision.output);
   }
   if (decision.kind === 'synthetic') {
     return settleSynthetic(decision.args, decision.result);
@@ -607,7 +709,12 @@ async function prepareToolCall(
 
   const displayFields = toolCallDisplayFieldsFromExecution(execution);
   const settleAborted = (): Promise<PreparedToolCallTask> =>
-    settleError(effectiveArgs, abortedToolOutput(call.toolName, step.signal), displayFields);
+    settleError(
+      effectiveArgs,
+      abortedToolOutput(call.toolName, step.signal),
+      { code: 'aborted', abortReason: abortReasonText(step.signal) },
+      displayFields,
+    );
 
   if (step.signal.aborted) return settleAborted();
 
@@ -622,6 +729,7 @@ async function prepareToolCall(
     return settleError(
       effectiveArgs,
       authorization.reason ?? `Tool call "${call.toolName}" was blocked`,
+      { code: 'blocked' },
       displayFields,
     );
   }
@@ -776,7 +884,13 @@ async function runRunnableToolCall(
   const { toolCall, toolName } = call;
 
   if (signal.aborted) {
-    return makeErrorToolResult(call, effectiveArgs, abortedToolOutput(toolName, signal));
+    return makeErrorToolResult(
+      call,
+      effectiveArgs,
+      abortedToolOutput(toolName, signal),
+      'aborted',
+      abortReasonText(signal),
+    );
   }
 
   let toolResult: ExecutableToolResult;
@@ -791,14 +905,27 @@ async function runRunnableToolCall(
         toolCallId: toolCall.id,
         error,
       });
+      return makeErrorToolResult(
+        call,
+        effectiveArgs,
+        `Tool "${toolName}" failed: ${errorMessage(error)}`,
+        'failed',
+      );
     }
-    const output = aborted
-      ? abortedToolOutput(toolName, signal)
-      : `Tool "${toolName}" failed: ${errorMessage(error)}`;
-    return makeErrorToolResult(call, effectiveArgs, output);
+    return makeErrorToolResult(
+      call,
+      effectiveArgs,
+      abortedToolOutput(toolName, signal),
+      'aborted',
+      abortReasonText(signal),
+    );
   }
 
-  return makeToolResult(call, effectiveArgs, toolResult);
+  // The tool ran to its own completion: an error result it authored itself
+  // (an interrupted command included) is classified here, because only this
+  // path knows whether the step's signal is what cut the call short. The catch
+  // above already reports a throw from the tool itself as `failed`.
+  return makeToolResult(call, effectiveArgs, tagAbortedToolResult(toolResult, signal));
 }
 
 async function finalizePendingToolResult(
@@ -844,10 +971,21 @@ async function finalizePendingToolResult(
     const output = aborted
       ? `Tool "${pendingResult.toolName}" aborted during finalizeToolResult hook.`
       : `finalizeToolResult hook failed for "${pendingResult.toolName}": ${errorMessage(error)}`;
+    // An abort that cut the hook short is a cancellation, not a defect in the
+    // hook or the tool — the same classification `prepareToolCall` gives an
+    // abort inside `prepareToolExecution`. Consumers that branch on `code`
+    // (TUI/RPC, the failure-streak classifier) must not have to parse this
+    // message to learn that.
+    const abortReason = aborted ? abortReasonText(signal) : undefined;
     return {
       ...pendingResult,
       stopTurn: pendingResult.stopTurn,
-      result: { output, isError: true },
+      result: {
+        output,
+        isError: true,
+        ...(aborted ? { code: 'aborted' as const } : {}),
+        ...(abortReason !== undefined ? { abortReason } : {}),
+      },
     };
   }
 }
@@ -897,9 +1035,15 @@ async function raceExecuteWithGraceTimeout(
   const graceSentinel: Promise<ExecutableToolResult> = new Promise((resolve) => {
     const armTimer = (): void => {
       graceTimer = setTimeout(() => {
+        const abortReason = abortReasonText(signal);
         resolve({
           output: `Tool "${toolName}" aborted by grace timeout (${String(GRACE_TIMEOUT_MS)}ms)`,
           isError: true,
+          // This branch only arms once the call was aborted and the tool
+          // ignored the signal, so the synthetic result is classified as an
+          // abort instead of leaving consumers to read the text.
+          code: 'aborted',
+          ...(abortReason !== undefined ? { abortReason } : {}),
         });
       }, GRACE_TIMEOUT_MS);
     };
@@ -990,7 +1134,13 @@ function normalizeToolResult(r: ExecutableToolResult): ExecutableToolResult {
   const nested = nestedCalls !== undefined ? { nestedCalls } : {};
   const messagePart = r.message !== undefined ? { message: r.message } : {};
   if (r.isError === true) {
-    return { output, isError: true, ...nested, ...messagePart };
+    // The error classification is part of the result contract, not a
+    // transient: it must survive this rebuild so the tool.result event (and
+    // the TUI/RPC layers reading it) can branch on the code instead of
+    // pattern-matching the output text.
+    const codePart = r.code !== undefined ? { code: r.code } : {};
+    const abortReasonPart = r.abortReason !== undefined ? { abortReason: r.abortReason } : {};
+    return { output, isError: true, ...nested, ...messagePart, ...codePart, ...abortReasonPart };
   }
   const useless = r.useless;
   const uselessPart = useless !== undefined ? { useless } : {};
@@ -1020,12 +1170,52 @@ function toolResultStopsTurn(result: ExecutableToolResult): boolean {
   return 'stopTurn' in result && result.stopTurn === true;
 }
 
+/**
+ * Build an error result for a call the loop settled itself (aborted, failed,
+ * blocked, or never run). `code` carries the machine-readable classification
+ * and `abortReason` the abort's own attribution — both optional, because a
+ * tool's own error result and records written before these fields existed
+ * have neither.
+ */
+/**
+ * Fallback result for a task or preparation that threw before the tool could
+ * author its own failure. A throw inside an interrupt window is not a tool
+ * failure: without the `aborted` stamp `classifyToolResult` would count it
+ * towards the stop-loss streak and attribute a user or parent interruption to
+ * the model. Non-abort failures keep the historical shape (no `code` field),
+ * so classification is unchanged, and the emitted message is passed through
+ * untouched.
+ */
+function synthesizePreparationError(
+  signal: AbortSignal,
+  call: PreflightedToolCall,
+  args: unknown,
+  error: unknown,
+  output: string,
+): PendingToolResult {
+  if (isAbortError(error) || signal.aborted) {
+    return makeErrorToolResult(call, args, output, 'aborted', abortReasonText(signal));
+  }
+  return makeErrorToolResult(call, args, output);
+}
+
 function makeErrorToolResult(
   call: PreflightedToolCall,
   args: unknown,
   output: string,
+  code?: ExecutableToolErrorResult['code'],
+  abortReason?: string,
 ): PendingToolResult {
-  return makeToolResult(call, args, { output, isError: true });
+  return makeToolResult(call, args, {
+    output,
+    isError: true,
+    // Unclassified results stay field-free rather than carrying an
+    // `undefined` value, so a persisted record never relies on JSON dropping
+    // the key.
+    ...(code !== undefined ? { code } : {}),
+    // Only meaningful alongside `code: 'aborted'`.
+    ...(abortReason !== undefined ? { abortReason } : {}),
+  });
 }
 
 /**
