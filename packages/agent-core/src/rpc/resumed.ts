@@ -1,6 +1,6 @@
 import type { AgentType } from '#/agent';
 import type { AgentConfigData, AgentConfigUpdateData } from '#/agent/config';
-import type { AgentContextData, ContextMessage } from '#/agent/context';
+import type { ContextMessage } from '#/agent/context';
 import type {
   PermissionApprovalResultRecord,
   PermissionData,
@@ -29,7 +29,13 @@ export type AgentReplayRecord =
 export interface ResumedAgentState {
   readonly type: AgentType;
   readonly config: AgentConfigData;
-  readonly context: AgentContextData;
+  /**
+   * Token accounting only — the client reads `tokenCount` for the status bar
+   * and nothing else. The full history is fetched on demand through
+   * `getContext({ agentId })`; inlining it here made the resume payload grow
+   * with session size (see {@link ResumeSessionResult.agents}).
+   */
+  readonly context: { readonly tokenCount: number };
   readonly replay: readonly AgentReplayRecord[];
   readonly permission: PermissionData;
   readonly plan: PlanData;
@@ -41,6 +47,16 @@ export interface ResumedAgentState {
 
 export interface ResumeSessionResult extends SessionSummary {
   readonly sessionMetadata: SessionMeta;
+  /**
+   * Interactive agent state, under its agent id (`main`), and nothing else.
+   *
+   * Every other agent in the session is deliberately omitted: no client reads
+   * a subagent entry, while shipping them — with each one's context history —
+   * made the payload scale with session size until the RPC "network" deep copy
+   * overflowed V8's string limit and permanently killed resume on large
+   * sessions. Non-interactive agents are served on demand through the
+   * `AgentAPIWithId` family, whose payloads carry the `agentId` to read.
+   */
   readonly agents: Readonly<Record<string, ResumedAgentState>>;
   readonly warning?: string | undefined;
 }

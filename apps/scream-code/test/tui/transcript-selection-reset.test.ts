@@ -154,7 +154,7 @@ function makeReplaySession() {
   const main = {
     type: 'main',
     config: { modelAlias: 'k2', modelCapabilities: { max_context_tokens: 100 } },
-    context: { tokenCount: 10, messages: [] },
+    context: { tokenCount: 10 },
     replay: [
       { type: 'message', message: { role: 'user', content: [{ type: 'text', text: 'old prompt' }] } },
     ],

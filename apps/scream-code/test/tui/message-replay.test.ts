@@ -113,7 +113,7 @@ function baseAgentState(
       thinkingLevel: 'off',
       systemPrompt: '',
     },
-    context: { history: [], tokenCount: 0 },
+    context: { tokenCount: 0 },
     replay,
     permission: { mode: 'manual', rules: [] },
     plan: null,

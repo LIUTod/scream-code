@@ -1461,23 +1461,31 @@ async function resumeSessionResult(
 ): Promise<ResumeSessionResult> {
   const api = new SessionAPIImpl(session);
   const agents: Record<string, ResumedAgentState> = {};
-  for (const [agentId, agent] of session.agents) {
+  // Interactive agent only. The client renders `agents['main']` and never reads
+  // another entry, so building state for the rest would make this payload — and
+  // its JSON.stringify deep copy across the RPC "network" — grow with session
+  // size until a large one overflowed V8's string limit and could no longer be
+  // resumed at all. Subagent state stays reachable on demand, by agentId.
+  const main = session.agents.get('main');
+  if (main !== undefined) {
+    const agentId = 'main';
     const config = await api.getConfig({ agentId });
-    const context = await api.getContext({ agentId });
+    // Token accounting only; full history is served by getContext on demand.
+    const { tokenCount } = await api.getContext({ agentId });
     const permission = await api.getPermission({ agentId });
     const plan = await api.getPlan({ agentId });
     const usage = await api.getUsage({ agentId });
     agents[agentId] = {
-      type: agent.type,
+      type: main.type,
       config,
-      context,
-      replay: agent.replayBuilder.buildResult(),
+      context: { tokenCount },
+      replay: main.replayBuilder.buildResult(),
       permission,
       plan,
       usage,
       tools: await api.getTools({ agentId }),
-      toolStore: agent.tools.storeData(),
-      background: agent.background.list(false),
+      toolStore: main.tools.storeData(),
+      background: main.background.list(false),
     };
   }
   return {
