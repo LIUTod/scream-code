@@ -14,7 +14,15 @@ function entry(
   capabilities: readonly string[],
   status: McpServerEntry['status'] = 'connected',
 ): McpServerEntry {
-  return { name, transport: 'stdio', status, toolCount: 1, error: undefined, capabilities };
+  return {
+    name,
+    transport: 'stdio',
+    status,
+    toolCount: 1,
+    error: undefined,
+    capabilities,
+    exposure: 'on-demand',
+  };
 }
 
 function guideAgent(entries: readonly McpServerEntry[]) {

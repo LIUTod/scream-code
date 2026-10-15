@@ -41,6 +41,10 @@ describe('UsagePanelComponent', () => {
 
     // Session total row plus the main/sub split (session total = main + sub).
     expect(lines.join('\n')).toContain('会话总计');
+    // Cache reads/writes break out under the total: 500 read + 500 created,
+    // aligned with the input/output columns. No third number — a "sum" would
+    // invite double-counting against the input column above.
+    expect(lines.join('\n')).toMatch(/↳ 缓存\s+500\s+500(?:\s|$)/);
     expect(lines.join('\n')).toContain('主 Agent');
     expect(lines.join('\n')).toContain('子 Agent');
     // Name-column row for the model breakdown (labels live in the header row).
@@ -60,6 +64,24 @@ describe('UsagePanelComponent', () => {
     // sub-agent table itself is header + per-agent rows only.
     expect(lines.join('\n')).toMatch(/└ 子 Agent\s+150\s+75\s+225/);
     expect(lines.join('\n')).not.toContain('子 Agent 合计');
+  });
+
+  it('omits the cache row when nothing was cached', () => {
+    const lines = buildUsageReportLines({
+      colors: darkColors,
+      sessionUsage: {
+        byModel: {
+          scream: { inputOther: 1000, inputCacheRead: 0, inputCacheCreation: 0, output: 250 },
+        },
+      } as never,
+      contextUsage: 0.1,
+      contextTokens: 1250,
+      maxContextTokens: 10000,
+      managedUsage: undefined,
+      subagentUsage: {},
+    }).map(strip);
+
+    expect(lines.join('\n')).not.toContain('↳ 缓存');
   });
 
   it('wraps preformatted usage lines in a bordered panel', () => {

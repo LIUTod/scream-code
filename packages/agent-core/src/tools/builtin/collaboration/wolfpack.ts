@@ -34,20 +34,20 @@ export const WolfPackToolInputSchema = z.object({
   subagent_type: z
     .string()
     .default('coder')
-    .describe('Subagent type for all spawned agents (e.g., coder, explore, verify)'),
+    .describe('Subagent type for all spawned agents (see the agent-type list in the description).'),
   prompt_template: z
     .string()
     .min(1)
-    .describe('Prompt template with {{item}} placeholder. Each item is substituted in.'),
+    .describe('Prompt template with a {{item}} placeholder; each item is substituted in.'),
   items: z
     .array(z.string().min(1))
     .min(1)
-    .describe('Array of items to process. Each item gets its own subagent.'),
+    .describe('Items to process — each one gets its own subagent, all running in parallel.'),
   output_schema: z
     .string()
     .optional()
     .describe(
-      'Optional JSON Schema (as a JSON string) describing the single JSON object each subagent should reply with. When provided, each item result that parses as a JSON object is surfaced as a [structured] block; parse failures are reported as structured: invalid alongside the raw text.',
+      'JSON Schema (as a JSON string) each subagent should answer with; parseable JSON objects surface as [structured] blocks, parse failures are reported as structured: invalid alongside the raw text.',
     ),
   output_token_hint: z
     .number()
@@ -56,13 +56,13 @@ export const WolfPackToolInputSchema = z.object({
     .max(32768)
     .optional()
     .describe(
-      'Optional hint for the final-answer length of each subagent (keeps structured replies compact, e.g. 1024). Not an enforced cap.',
+      'Hint for each subagent final-answer length (e.g. 1024). Not an enforced cap.',
     ),
   capability_mode: z
     .enum(['read-only', 'read-write', 'execute', 'all'])
     .optional()
     .describe(
-      'Runtime capability isolation applied to every spawned subagent: read-only (no writes/execution), read-write (no execution), execute (commands allowed, external side effects still gated), all (full, default). Restricted modes also strip MCP tools and nested Agent/SendSubagentMessage/WolfPack tools at runtime.',
+      'Runtime capability isolation applied to every spawned subagent: read-only (no writes or execution), read-write (no execution), execute (commands allowed), all (full, default). Restricted modes also strip MCP and nested Agent/SendSubagentMessage/WolfPack tools.',
     ),
 });
 

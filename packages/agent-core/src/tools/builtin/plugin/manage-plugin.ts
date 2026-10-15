@@ -57,15 +57,19 @@ export const ManagePluginInputSchema = z.object({
   id: z
     .string()
     .optional()
-    .describe('Plugin id. Required for info, check, enable, disable, set_mcp_enabled, activate, deactivate, remove, reset.'),
+    .describe('Plugin id — required by info, enable, disable, set_mcp_enabled, activate, deactivate, remove, reset, rollback.'),
   source: z
     .string()
     .optional()
-    .describe('install: absolute path / GitHub URL / zip URL. register_generated: the generated plugin directory. marketplace: optional catalog URL or local JSON path.'),
+    .describe(
+      'install: absolute path, GitHub URL, or zip URL. register_generated: the generated directory. marketplace: optional catalog URL or local JSON path.',
+    ),
   upgrade: z
     .boolean()
     .optional()
-    .describe('install onto an existing plugin id: back up its current files, replace with the incoming ones, and reload. Without it, installing over an existing id silently overwrites.'),
+    .describe(
+      'install over an existing id: back up its files, replace, reload. Without it, installing over an existing id overwrites silently.',
+    ),
   server: z.string().optional().describe('MCP server name, for set_mcp_enabled.'),
   enabled: z.boolean().optional().describe('Target state, for set_mcp_enabled.'),
   query: z.string().optional().describe('Case-insensitive substring filter, for marketplace.'),

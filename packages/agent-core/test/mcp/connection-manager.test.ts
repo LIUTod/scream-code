@@ -825,6 +825,10 @@ describe('Session MCP startup', () => {
             args: [stdioFixture],
             env: { SCREAM_TEST_MCP_START_DELAY_MS: '250' },
             startupTimeoutMs: 2_000,
+            // This test is about startup ordering (tools ready before the
+            // first prompt), not deferral — declare eagerly so the tool table
+            // assertion below stays meaningful.
+            exposure: 'always',
           },
         },
       },

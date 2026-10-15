@@ -1,3 +1,5 @@
+import type { ToolAnnotations } from '@scream-code/ltod';
+
 import type { ExecutableTool, ExecutableToolContext, ExecutableToolResult } from '../../loop';
 
 export type ToolSource = 'builtin' | 'user' | 'mcp';
@@ -12,6 +14,13 @@ export interface UserToolRegistrationBase {
   readonly name: string;
   readonly description: string;
   readonly parameters: Record<string, unknown>;
+  /**
+   * Optional author-declared behaviour hints. Serialized with the record, so
+   * a resumed session keeps them; the permission layer consumes
+   * `destructiveHint` conservatively (it can force an approval, never grant
+   * one — see `ltod`'s `ToolAnnotations`).
+   */
+  readonly annotations?: ToolAnnotations;
 }
 
 export interface UserToolRegistration extends UserToolRegistrationBase {

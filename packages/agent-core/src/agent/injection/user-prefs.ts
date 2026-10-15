@@ -6,18 +6,22 @@ import { DynamicInjector } from './injector';
 const USER_PREFS_VARIANT = 'user_prefs';
 
 /**
- * Injects the user's /like preferences as a system-reminder at the start of
- * every turn (i.e. after each new user prompt). The system prompt already
- * carries the preferences via {{ ROLE_ADDITIONAL }}, but that block is far
- * from the model's attention by mid-conversation. This reminder keeps the
- * preferences visible right before each response.
+ * Injects the user's /like preferences as a system-reminder. The system prompt
+ * already carries the preferences via {{ ROLE_ADDITIONAL }}; this reminder
+ * exists so mid-conversation turns do not lose them.
  *
  * Fires when:
- *   - user-prefs.md exists and is non-empty
- *   - at least one real user prompt has arrived since the last injection
+ *   - user-prefs.md exists and is non-empty, and
+ *   - the previous reminder left the context (compaction/undo/clear), or
+ *   - the preferences changed since the last injection.
+ *
+ * An identical copy is NOT re-sent every turn: repeating the same 1.6 KB
+ * block after every user message was pure token cost — history accumulated
+ * one duplicate per prompt while the content never changed.
  */
 export class UserPrefsInjector extends DynamicInjector {
   protected override readonly injectionVariant = USER_PREFS_VARIANT;
+  private lastInjectedText: string | null = null;
 
   protected override async getInjection(): Promise<string | undefined> {
     if (this.injectedAt !== null && !this.hasNewUserPromptSince(this.injectedAt)) {
@@ -26,13 +30,17 @@ export class UserPrefsInjector extends DynamicInjector {
     const prefs = await loadRoleAdditional(this.agent.jian);
     if (prefs === undefined) return undefined;
 
-    return [
+    const text = [
       'USER PREFERENCES REMINDER: Before responding, re-read and apply EVERY',
       'user preference below. These are direct user instructions set via /like',
       '— violating them is equivalent to ignoring an explicit user request.',
       '',
       prefs,
     ].join('\n');
+
+    if (this.injectedAt !== null && text === this.lastInjectedText) return undefined;
+    this.lastInjectedText = text;
+    return text;
   }
 
   private hasNewUserPromptSince(from: number): boolean {

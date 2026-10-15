@@ -46,79 +46,67 @@ export const GrepInputSchema = z.object({
     .string()
     .optional()
     .describe(
-      'File or directory to search. Accepts an absolute path, or a path relative to the current working directory. Omit to search the current working directory. Use Read instead when you already know a concrete file path and need its contents.',
+      'File or directory to search: an absolute path, or one relative to the current working directory; omit to search the working directory. Use Read instead when you already know a concrete file path and need its contents.',
     ),
-  glob: z.string().optional().describe('Optional glob filter passed to ripgrep.'),
+  glob: z.string().optional().describe('Glob filter passed to ripgrep.'),
   type: z
     .string()
     .optional()
     .describe(
-      'Optional ripgrep file type filter, such as ts or py. Prefer this over `glob` when filtering by language or file kind: it is more efficient and less error-prone than an equivalent glob pattern.',
+      'Ripgrep file type filter, such as ts or py. Prefer this over `glob` when filtering by language or file kind: more efficient and less error-prone.',
     ),
   output_mode: z
     .enum(['content', 'files_with_matches', 'count_matches'])
     .optional()
     .describe(
-      'Shape of the result. `content` shows matching lines (honors `-A`, `-B`, `-C`, `-n`, and `head_limit`); `files_with_matches` shows only the paths of files that contain a match (honors `head_limit`); `count_matches` shows the total number of matches. Defaults to `files_with_matches`.',
+      'Shape of the result. `content` shows matching lines (honors `-A`, `-B`, `-C`, `-n`, `head_limit`); `files_with_matches` shows only paths of files with a match (honors `head_limit`); `count_matches` shows the total match count. Defaults to `files_with_matches`.',
     ),
-  '-i': z.boolean().optional().describe('Perform a case-insensitive search. Defaults to false.'),
+  '-i': z.boolean().optional().describe('Case-insensitive search. Defaults to false.'),
   '-n': z
     .boolean()
     .optional()
-    .describe(
-      'Prefix each matching line with its line number. Applies only when `output_mode` is `content`. Defaults to true.',
-    ),
+    .describe('Prefix each matching line with its line number; applies only when `output_mode` is `content`. Defaults to true.'),
   '-A': z
     .number()
     .int()
     .nonnegative()
     .optional()
-    .describe(
-      'Number of lines to show after each match. Applies only when `output_mode` is `content`.',
-    ),
+    .describe('Lines to show after each match; applies only when `output_mode` is `content`.'),
   '-B': z
     .number()
     .int()
     .nonnegative()
     .optional()
-    .describe(
-      'Number of lines to show before each match. Applies only when `output_mode` is `content`.',
-    ),
+    .describe('Lines to show before each match; applies only when `output_mode` is `content`.'),
   '-C': z
     .number()
     .int()
     .nonnegative()
     .optional()
     .describe(
-      'Number of lines to show before and after each match. Applies only when `output_mode` is `content`; takes precedence over `-A` and `-B`.',
+      'Lines to show before and after each match; applies only when `output_mode` is `content`, and takes precedence over `-A` and `-B`.',
     ),
   head_limit: z
     .number()
     .int()
     .nonnegative()
     .optional()
-    .describe(
-      'Limit output to the first N lines/entries after offset. Defaults to 250. Pass 0 for unlimited.',
-    ),
+    .describe('Limit output to the first N lines/entries after offset. Defaults to 250; 0 means unlimited.'),
   offset: z
     .number()
     .int()
     .nonnegative()
     .optional()
-    .describe(
-      'Number of leading lines/entries to skip before applying `head_limit`. Use it together with `head_limit` to page through large result sets. Defaults to 0.',
-    ),
+    .describe('Leading lines/entries to skip before `head_limit` — use it with `head_limit` to page through large results. Defaults to 0.'),
   multiline: z
     .boolean()
     .optional()
-    .describe(
-      'Enable multiline matching, where the pattern can span line boundaries and `.` also matches newlines. Defaults to false.',
-    ),
+    .describe('Multiline matching: the pattern may span lines and `.` also matches newlines. Defaults to false.'),
   include_ignored: z
     .boolean()
     .optional()
     .describe(
-      'Also search files excluded by ignore files such as `.gitignore`, `.ignore`, and `.rgignore` (for example `node_modules` or build outputs). Sensitive files (such as `.env`) remain filtered out for safety. Defaults to false.',
+      'Also search files excluded by ignore files such as `.gitignore`, `.ignore`, and `.rgignore` (e.g. `node_modules` or build output). Sensitive files (such as `.env`) stay filtered out. Defaults to false.',
     ),
 });
 

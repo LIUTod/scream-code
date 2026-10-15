@@ -49,7 +49,7 @@ export const CronCreateInputSchema = z.object({
   cron: z
     .string()
     .describe(
-      '5-field cron expression in local time: "M H DoM Mon DoW" (e.g. "*/5 * * * *" = every 5 minutes, "30 14 28 2 *" = Feb 28 at 2:30pm local once).',
+      '5-field cron expression in local time: "M H DoM Mon DoW" (e.g. "*/5 * * * *" = every 5 minutes, "30 14 28 2 *" = Feb 28, 2:30pm local, once).',
     ),
   prompt: z
     .string()
@@ -61,7 +61,7 @@ export const CronCreateInputSchema = z.object({
     .optional()
     .default(true)
     .describe(
-      'true (default) = fire on every cron match until deleted or auto-expired after 7 days. false = fire once at the next match, then auto-delete. Use false for "remind me at X" one-shot requests with pinned minute/hour/dom/month.',
+      'true (default) = fire on every cron match until deleted or auto-expired after 7 days; false = fire once at the next match, then auto-delete (use for "remind me at X" with pinned minute/hour/dom/month).',
     ),
 });
 

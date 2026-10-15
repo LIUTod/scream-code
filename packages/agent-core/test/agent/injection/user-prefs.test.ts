@@ -123,7 +123,7 @@ describe('UserPrefsInjector', () => {
     expect(state.history.filter((m) => m.role === 'user')).toHaveLength(1);
   });
 
-  it('re-injects after a new user prompt arrives', async () => {
+  it('does not repeat an identical reminder after a new user prompt', async () => {
     await writeFile(join(homeDir, 'user-prefs.md'), PREFS_CONTENT, 'utf-8');
     const state: StubState = { history: [] };
     const agent = makeAgent(state);
@@ -137,9 +137,47 @@ describe('UserPrefsInjector', () => {
     const injections = state.history.filter(
       (m) => m.origin?.kind === 'injection' && m.origin?.variant === 'user_prefs',
     );
+    // The identical 1.6 KB block is not repeated on every prompt — the system
+    // prompt still carries the preferences.
+    expect(injections).toHaveLength(1);
+  });
+
+  it('re-injects when the preferences changed', async () => {
+    await writeFile(join(homeDir, 'user-prefs.md'), PREFS_CONTENT, 'utf-8');
+    const state: StubState = { history: [] };
+    const agent = makeAgent(state);
+    const injector = new UserPrefsInjector(agent);
+
+    await injector.inject();
+    await writeFile(join(homeDir, 'user-prefs.md'), `${PREFS_CONTENT}\n- Extra: be brief.\n`, 'utf-8');
+    state.history.push(assistant('ok'));
+    state.history.push(userPrompt('next task'));
+    await injector.inject();
+
+    const injections = state.history.filter(
+      (m) => m.origin?.kind === 'injection' && m.origin?.variant === 'user_prefs',
+    );
     expect(injections).toHaveLength(2);
-    const lastText = (injections[1]!.content[0] as { text: string }).text;
-    expect(lastText).toContain('USER PREFERENCES REMINDER');
-    expect(lastText).toContain('Alex');
+    expect((injections[1]!.content[0] as { text: string }).text).toContain('be brief');
+  });
+
+  it('re-injects after the previous copy left the context', async () => {
+    await writeFile(join(homeDir, 'user-prefs.md'), PREFS_CONTENT, 'utf-8');
+    const state: StubState = { history: [] };
+    const agent = makeAgent(state);
+    const injector = new UserPrefsInjector(agent);
+
+    await injector.inject();
+    // Context maintenance dropped the injected message: the injector forgets
+    // where it was (injectedAt → null) and restores the reminder even though
+    // the text did not change.
+    injector.onContextMessageRemoved(0);
+    state.history.push(userPrompt('next task'));
+    await injector.inject();
+
+    const injections = state.history.filter(
+      (m) => m.origin?.kind === 'injection' && m.origin?.variant === 'user_prefs',
+    );
+    expect(injections).toHaveLength(2);
   });
 });

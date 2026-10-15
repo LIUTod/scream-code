@@ -54,18 +54,18 @@ export const ReportArchFindingInputSchema = z.object({
   title: z
     .string()
     .min(1)
-    .describe('Imperative title, ≤80 chars. Example: "Delete the wrapper that only forwards".'),
+    .describe('Imperative title, ≤80 chars.'),
   problem: z
     .string()
     .min(1)
-    .describe('What is wrong, when it bites, what it costs. One paragraph. Neutral tone.'),
+    .describe('What is wrong, when it bites, what it costs. One paragraph, neutral tone.'),
   fix: z
     .string()
     .min(1)
-    .describe('The concrete replacement. One or two imperative sentences. Required: a finding without a replacement is a complaint, not a finding.'),
+    .describe('The concrete replacement, in one or two imperative sentences. Required — a finding without one is a complaint.'),
   tag: z
     .enum(['dead', 'dup', 'wrong-layer', 'over-build', 'under-build', 'debt', 'portable'])
-    .describe('What replaces it: dead=delete · dup=keep one · wrong-layer=move or invert · over-build=inline until a second consumer · under-build=extract once · debt=name the ceiling and the trigger · portable=use the built-in.'),
+    .describe('Replacement implied: dead=delete · dup=keep one · wrong-layer=move or invert · over-build=inline until a second consumer · under-build=extract once · debt=name the ceiling and the trigger · portable=use the built-in.'),
   severity: z
     .enum(['P0', 'P1', 'P2', 'P3'])
     .describe('P0 blocks the next change, P1 high friction, P2 medium friction, P3 cleanup.'),
@@ -73,19 +73,19 @@ export const ReportArchFindingInputSchema = z.object({
   file_path: z
     .string()
     .optional()
-    .describe('Path to the affected file. Omit for module- or repo-level issues.'),
+    .describe('Path to the affected file; omit for module- or repo-level issues.'),
   line_start: z
     .number()
     .int()
     .min(1)
     .optional()
-    .describe('First line (1-indexed). Omit for module- or repo-level issues.'),
+    .describe('First line (1-indexed); omit for module- or repo-level issues.'),
   line_end: z
     .number()
     .int()
     .min(1)
     .optional()
-    .describe('Last line (1-indexed). Omit for module- or repo-level issues.'),
+    .describe('Last line (1-indexed); omit for module- or repo-level issues.'),
 });
 
 export type ReportArchFindingInput = z.infer<typeof ReportArchFindingInputSchema>;

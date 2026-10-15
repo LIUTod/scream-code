@@ -1,65 +1,13 @@
-Launch a subagent to handle a focused task. Prefer this tool over doing the work yourself when the task matches one of the specialists listed below.
+Launch a subagent to handle a focused task. Prefer this over doing the work yourself when the task matches one of the specialists in "Available agent types" at the end of this description — read that list (each type carries its own USE WHEN / NOT FOR) before choosing a `subagent_type`, and never assume a type exists. When not to use: trivial one-step work (e.g. reading a known file). Everything else is a candidate for delegation.
 
-Specialist subagents are listed at the end of this description under "Available agent types" — that list is generated from the active profiles and carries each specialist's own USE WHEN / NOT FOR triggers. Read it before choosing a `subagent_type`; never assume a type exists.
+The subagent starts with zero context — brief it like a colleague who just walked in. The final prompt MUST carry three sections, written into `prompt` or passed as `target` / `change` / `acceptance` (appended to `prompt` automatically): **Target** — exact files, symbols, or directories to touch plus explicit non-goals; **Change** — step-by-step what to add, remove, or modify, with concrete examples where possible; **Acceptance** — the observable result that proves completion (a passing test, a build command, exact file content, or a verification step the subagent must run). Omitting a section makes the subagent miss context; `Acceptance` is not optional — the subagent MUST verify against it before returning.
 
-## Required prompt structure
+Put the exact path or command in the prompt; for investigations give the question, not prescribed steps. Do not delegate understanding — find the file path or line number yourself first.
 
-The final prompt sent to the subagent MUST contain these sections. Provide them either by writing them directly into the `prompt` field, or by using the structured `target`, `change`, and `acceptance` fields — they will be appended to `prompt` automatically.
+Usage notes: continue a subagent's earlier work by resuming it (its `resume` id) rather than spawning fresh — a resumed agent keeps its prior context. A subagent's result is only visible to you, not to the user: summarize what matters yourself, and leave a running subagent's scope to it instead of redoing its searches or finishing its job manually.
 
-```markdown
-# Target
-Exact files, symbols, or directories to touch. Explicit non-goals.
+Capability constraints (authorization, not advice): `capability_mode` restricts the child's tool set at runtime, not just by prompting, and also strips `Agent` and `SendSubagentMessage`, so a constrained subagent cannot spawn an unconstrained grandchild to bypass the filter. Modes: `read-only` (inspection, search, lookups, reporting), `read-write` (+ writes), `execute` (+ bash/python), `all` (full, default). Resume can only tighten, never widen: a resumed agent keeps the tool set it was spawned with.
 
-# Change
-Step-by-step what to add, remove, or modify. Include concrete examples when possible.
+Only the owning parent may message a subagent; use `SendSubagentMessage` to steer one that is still running (`interject` interrupts the tools in flight — side-effecting commands included, pending approvals withdrawn).
 
-# Acceptance
-Observable result that proves completion: a passing test, a build command, a specific file content, or a verification step the subagent must run.
-```
-
-Omitting a section causes the subagent to miss context and increases the chance of a wrong or incomplete result.
-
-Writing the prompt:
-- The subagent starts with zero context — it has not seen this conversation. Brief it like a colleague who just walked into the room: state the goal, list what you already know, hand over the specifics.
-- Lookups (read this file, run that test): put the exact path or command in the prompt. The subagent should not have to search for things you already know.
-- Investigations (figure out X, find why Y): give the question, not prescribed steps — fixed steps become dead weight when the premise is wrong.
-- Do not delegate understanding. If the task hinges on a file path or line number, find it yourself first and write it into the prompt.
-- The `Acceptance` section is not optional. The subagent MUST verify against it before returning.
-
-Usage notes:
-- When the task continues earlier work a subagent already did, prefer resuming that agent (pass its `resume` id) over spawning a fresh instance — the resumed agent keeps its prior context.
-- A subagent's result is only visible to you, not to the user. When the user needs to see what a subagent produced, summarize the relevant parts yourself in your own reply.
-
-## Structured output
-
-When you need a machine-readable result (not a free-form summary), pass `output_schema` with a JSON Schema string. The subagent is instructed to reply with a single JSON object matching the schema; if the reply parses, it is surfaced as a `[structured]` block in the tool output. Use `output_token_hint` to keep structured replies compact (e.g. 1024 for a schema-shaped answer).
-
-Example:
-```
-Agent(prompt="Extract the test commands from this project", output_schema='{"type":"object","properties":{"commands":{"type":"array","items":{"type":"string"}}}}')
-```
-
-## Capability constraints
-
-By default a subagent gets its profile's full tool set. Pass `capability_mode` to restrict it at the tool level (not just by prompting):
-
-- `read-only` — inspection, search, web/memory lookups, and reporting only. No file writes, no command execution, no spawning further agents.
-- `read-write` — additionally file/memory writes. No command execution, no spawning.
-- `execute` — additionally command execution (bash, python). Still no spawning of further agents.
-- `all` — full profile tool set (default).
-
-Restricted modes also remove `Agent` and `SendSubagentMessage`, so a constrained subagent cannot spawn an unconstrained grandchild to bypass the filter.
-
-Resume clamps the contract — it can only tighten, never widen. A resumed agent keeps the tool set it was spawned with (its profile is not rebuilt), so a wider `capability_mode` than the one it already carries is ignored, and a stored restriction is re-applied on the resumed instance. To hand a subagent more tools, spawn a fresh one.
-
-## Steering running subagents
-
-Use `SendSubagentMessage` to send a directed message to a subagent you own while it is still running: `steer` for a priority redirection, `queue` for context that applies next turn. A `steer` joins the subagent's running turn at its next step boundary; a `queue` message is delivered when the subagent starts its next turn. When the correction cannot wait for a checkpoint, use `interject`: it interrupts the tools running at that moment (side-effecting commands included, and pending approvals are withdrawn) so the message lands at the very next step. Only the owning parent may message a subagent.
-
-When NOT to use Agent: skip delegation for trivial one-step work (e.g. reading a known file). Almost everything else is a candidate for delegation.
-
-Once a subagent is running, leave that scope to it: do not redo its searches or reads in parallel, and do not abandon it midway and finish the job manually. Both undo the context savings the delegation was meant to buy.
-
-## Foreground timeouts auto-background
-
-A `timeout` on a foreground `Agent` call bounds your wait, not the subagent's life. When the deadline fires while the child is still running, it is handed to the background task manager (status: backgrounded) instead of being aborted: the tool returns a `task_id`, its completion notification arrives automatically in a later turn (no polling), and you can peek with `TaskOutput(task_id=..., block=false)` or stop it with `TaskStop`. User cancellation still aborts immediately. A stopped (TaskStop) background task never suggests resume; only tasks that finish or fail on their own are recoverable via `Agent(resume=...)`.
+Foreground timeouts auto-background: a `timeout` bounds your wait, not the subagent's life. When it fires the child is handed to the background task manager (status: backgrounded) instead of being aborted: the tool returns a `task_id`, the completion arrives in a later turn, and you can peek with `TaskOutput(task_id=..., block=false)` or stop it with `TaskStop`. User cancellation still aborts immediately. A task stopped with `TaskStop` never suggests resume; only tasks that finish or fail on their own are recoverable via `Agent(resume=...)`.

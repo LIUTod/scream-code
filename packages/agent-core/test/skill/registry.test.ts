@@ -124,6 +124,35 @@ describe('skill registry prompt rendering', () => {
   });
 });
 
+describe('skill registry model listing', () => {
+  it('truncates an over-budget description with an ellipsis inside the char budget', () => {
+    const description = 'x'.repeat(400);
+    const registry = makeRegistry([
+      makeSkill('long-desc', 'user', description, '/tmp/user/long-desc/SKILL.md'),
+    ]);
+
+    const rendered = registry.getModelSkillListing();
+
+    const line = rendered.split('\n').find((candidate) => candidate.startsWith('- long-desc: '));
+    const renderedDescription = (line ?? '').slice('- long-desc: '.length);
+    expect(renderedDescription).toHaveLength(300);
+    expect(renderedDescription.endsWith('…')).toBe(true);
+    expect(renderedDescription).toBe(`${description.slice(0, 299)}…`);
+    expect(rendered).not.toContain(description);
+  });
+
+  it('keeps a description that fits the budget verbatim', () => {
+    const description = 'y'.repeat(300);
+    const registry = makeRegistry([
+      makeSkill('exact-fit', 'user', description, '/tmp/user/exact-fit/SKILL.md'),
+    ]);
+
+    const rendered = registry.getModelSkillListing();
+
+    expect(rendered).toContain(`- exact-fit: ${description}`);
+  });
+});
+
 function makeRegistry(skills: readonly SkillDefinition[]): SkillRegistry {
   const registry = new SkillRegistry();
   for (const skill of skills) registry.register(skill);

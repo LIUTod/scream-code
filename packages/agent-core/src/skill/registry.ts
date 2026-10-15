@@ -3,7 +3,17 @@ import { discoverSkills, type DiscoverSkillsOptions } from './scanner';
 import type { SkillDefinition, SkillRoot, SkillSource, SkippedSkill } from './types';
 import { isInlineSkillType, normalizeSkillName } from './types';
 
-const LISTING_DESC_MAX = 250;
+/**
+ * Character budget for one skill description inside the model skill listing
+ * (the block injected into the system prompt as `SCREAM_SKILLS`).
+ *
+ * The listing is a discovery index, not the skill's documentation: the leading
+ * sentence is enough to decide whether a skill is worth loading, and the byte
+ * cost is paid on every turn of every session. The full description lives in
+ * the SKILL.md body next to the skill, and becomes visible when the Skill tool
+ * loads that file on demand — so nothing is lost by shortening it here.
+ */
+const SKILL_LIST_DESCRIPTION_MAX_CHARS = 300;
 
 export class SkillNotFoundError extends Error {
   readonly skillName: string;
@@ -295,7 +305,8 @@ function formatFullSkill(skill: SkillDefinition): readonly string[] {
 }
 
 function formatModelSkill(skill: SkillDefinition): readonly string[] {
-  const lines = [`- ${skill.name}: ${truncate(skill.description, LISTING_DESC_MAX)}`];
+  const description = truncate(skill.description, SKILL_LIST_DESCRIPTION_MAX_CHARS);
+  const lines = [`- ${skill.name}: ${description}`];
   if (typeof skill.metadata.whenToUse === 'string' && skill.metadata.whenToUse.length > 0) {
     lines.push(`  When to use: ${skill.metadata.whenToUse}`);
   }
@@ -303,8 +314,13 @@ function formatModelSkill(skill: SkillDefinition): readonly string[] {
   return lines;
 }
 
+/**
+ * Cut `value` down to at most `max` characters, appending an ellipsis when it
+ * was shortened so the model can tell the text continues in SKILL.md. The
+ * ellipsis counts toward `max`, so a truncated value never exceeds the budget.
+ */
 function truncate(value: string, max: number): string {
-  return value.length > max ? value.slice(0, max) : value;
+  return value.length > max ? `${value.slice(0, max - 1)}…` : value;
 }
 
 function escapeAttr(value: string): string {

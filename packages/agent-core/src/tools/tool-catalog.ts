@@ -14,6 +14,7 @@
 export const READ_TOOLS: ReadonlySet<string> = new Set([
   'AskUserQuestion',
   'ContactParent',
+  'DiscoverMcpTools',
   'FetchURL',
   'Glob',
   'Grep',
@@ -80,6 +81,7 @@ export const DEFAULT_AUTO_APPROVE_TOOLS: ReadonlySet<string> = new Set([
   'Glob',
   'ReadMediaFile',
   'InspectOwnAssets',
+  'DiscoverMcpTools',
   'SetTodoList',
   'TodoList',
   'TaskList',

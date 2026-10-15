@@ -23,6 +23,10 @@ const BROWSER_SKILL_GUIDANCE = `\
 ## Browser Automation (chrome-devtools-mcp)
 
 A Chrome DevTools MCP server is connected (\`mcp__chrome_devtools__*\` tools).
+Its tools are **on-demand**: the schemas are withheld to keep requests lean.
+Enable the ones you need first — \`DiscoverMcpTools({ server: "chrome-devtools" })\`
+lists them, then \`DiscoverMcpTools({ tools: [...] })\` makes them callable from
+the next step on.
 It drives a live Chrome instance for testing, debugging and performance
 analysis. Every page-scoped tool needs its \`pageId\`; use \`list_pages\` to
 see which pages exist.

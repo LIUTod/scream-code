@@ -180,6 +180,27 @@ function buildSessionUsageSection(
   // 1. Session total, then a main/sub split so the relationship is explicit:
   //    session total = main agent + sub-agents (no double-counting).
   lines.push(padName(t('usage.session_total')) + num(sessionTotal.input) + num(sessionTotal.output) + num(sessionTotal.input + sessionTotal.output));
+
+  // Cache accounting: the input number above already contains cache reads and
+  // cache writes (see usageInputTotal); break them out so a session total of
+  // e.g. "100k" does not read as if every token were freshly billed.
+  let cacheReadTotal = 0;
+  let cacheCreationTotal = 0;
+  for (const [, row] of entries) {
+    cacheReadTotal += usageNumber(row.inputCacheRead);
+    cacheCreationTotal += usageNumber(row.inputCacheCreation);
+  }
+  if (cacheReadTotal > 0 || cacheCreationTotal > 0) {
+    // Columns read like the table above: cache reads on the input side, cache
+    // writes on the output side. No third number — the cache pair is already
+    // part of the input column above, and a "sum" here would invite
+    // double-counting. The label stays short because `padName` truncates the
+    // name column.
+    lines.push(
+      padName(`  ↳ ${t('usage.cache_rw')}`) + num(cacheReadTotal) + num(cacheCreationTotal),
+    );
+  }
+
   if (subagentRows.length > 0) {
     const mainInput = Math.max(0, sessionTotal.input - subagentTotal.input);
     const mainOutput = Math.max(0, sessionTotal.output - subagentTotal.output);

@@ -1,58 +1,26 @@
-Use this tool proactively when you're about to start a non-trivial implementation task.
-Getting user sign-off on your approach via ExitPlanMode before writing code prevents wasted effort.
+Use this tool proactively when you're about to start a non-trivial implementation task: getting user sign-off on your approach via ExitPlanMode before writing code prevents wasted effort.
 
 ## Planning Modes
 
-- **Normal plan**: You investigate the codebase, design a single approach, write it to the plan file, and present it for approval.
-- **Fusion plan**: Invoke the FusionPlan tool to spawn parallel planning subagents, each exploring a different angle, then synthesize their outputs into one plan. Fusion plan may take longer but tends to surface risks and alternatives you might miss.
+- **Normal plan**: investigate the codebase, design a single approach, write it to the plan file, then present it for approval.
+- **Fusion plan**: call the FusionPlan tool to spawn parallel planning subagents that each explore a different angle, then synthesize their output into one plan. Slower, but it tends to surface risks and alternatives you would otherwise miss.
 
-### When to choose which mode
-
-Prefer **normal plan** when:
-1. The user gave specific, detailed instructions.
-2. The change is small or localized (1-3 files, single concern).
-3. You are confident about the codebase structure and the right approach.
-4. Speed matters more than exploring alternatives.
-
-Prefer **fusion plan** when:
-1. The task is open-ended or ambiguous (e.g. "improve performance", "refactor auth").
-2. Multiple valid architectures or approaches exist.
-3. The change spans more than 3-5 files or touches core abstractions.
-4. You are unfamiliar with the relevant code paths and want parallel exploration.
-5. The user explicitly asked for a thorough plan or mentioned comparing options.
-
-If unsure, choose normal plan for small fixes and fusion plan for larger design tasks.
+Prefer **normal plan** for specific detailed instructions, small or localized changes (1-3 files), a codebase you know well, or when speed matters; prefer **fusion plan** for open-ended or ambiguous tasks ("improve performance", "refactor auth"), multiple valid architectures, changes spanning more than 3-5 files or touching core abstractions, and when you want parallel exploration. If unsure: normal for small fixes, fusion for larger design tasks.
 
 ## When to Use
 
-Use this tool when ANY of these conditions apply:
-
-1. New Feature Implementation - e.g. "Add a caching layer to the API"
-2. Multiple Valid Approaches - e.g. "Optimize database queries" (indexing vs rewrite vs caching)
-3. Code Modifications - e.g. "Refactor auth module to support OAuth"
-4. Architectural Decisions - e.g. "Add WebSocket support"
-5. Multi-File Changes - involves more than 2-3 files
-6. Unclear Requirements - need exploration to understand scope
-7. User Preferences Matter - if user input would materially change the implementation approach, use EnterPlanMode to structure the decision
+Use it when any of these apply: new feature implementation; multiple valid approaches; code modifications to existing modules; architectural decisions; multi-file changes (more than 2-3 files); unclear requirements that need exploration; decisions where the user's preference would materially change the approach.
 
 Permission mode notes:
-- EnterPlanMode enters plan mode automatically without an approval prompt in all permission modes.
-- In yolo and manual modes, ExitPlanMode still presents the plan to the user for approval.
-- In auto permission mode, do not use AskUserQuestion; make the best decision from available context.
-- In auto permission mode, ExitPlanMode exits plan mode without asking the user.
+- EnterPlanMode enters plan mode automatically, without an approval prompt, in all permission modes.
+- In yolo and manual modes, ExitPlanMode still presents the plan to the user for approval; in auto permission mode it exits without asking, and you should not use AskUserQuestion there — decide from the available context.
 - Use EnterPlanMode only when planning itself adds value.
 
-When NOT to use:
-- Single-line or few-line fixes (typos, obvious bugs, small tweaks)
-- User gave very specific, detailed instructions
-- Pure research/exploration tasks
+When NOT to use: single-line or few-line fixes (typos, obvious bugs, small tweaks), very specific detailed instructions from the user, or pure research/exploration tasks.
 
 ## What Happens in Plan Mode
-In plan mode, you will:
-1. Identify 2-3 key questions about the codebase that are critical to your plan. If you are not confident about the codebase structure or relevant code paths, use `Agent(subagent_type="explore")` to investigate these questions first - this is strongly recommended for non-trivial tasks.
-2. Explore the codebase using Glob, Grep, Read, and other read-only tools for any remaining quick lookups. Use Bash only when needed; Bash follows the normal permission mode and rules.
-3. Design an implementation approach based on your findings (or, for fusion plan, call FusionPlan to generate the synthesized plan).
-4. Review the generated plan, fill in any gaps, and ensure it matches the user's intent.
-5. Present your plan to the user via ExitPlanMode for approval
 
-For fusion plan, the FusionPlan tool performs the parallel exploration and synthesis for you; you should still review the result before exiting plan mode.
+1. Identify the 2-3 key questions about the codebase that are critical to your plan. If you are not confident about the structure or the relevant code paths, use `Agent(subagent_type="explore")` to investigate them first — strongly recommended for non-trivial tasks.
+2. Do the remaining quick lookups with Glob, Grep, Read and the other read-only tools; use Bash only when needed (it follows the normal permission mode and rules).
+3. Design the implementation approach from your findings — for fusion plan, call FusionPlan to generate the synthesized plan.
+4. Review the plan, fill in any gaps, check it matches the user's intent, then present it via ExitPlanMode for approval.

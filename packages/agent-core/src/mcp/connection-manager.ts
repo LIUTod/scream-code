@@ -2,7 +2,7 @@ import { ErrorCodes, ScreamError } from '#/errors';
 import type { McpServerConfig } from '#/config/schema';
 import { log as defaultLog } from '#/logging/logger';
 import type { Logger } from '#/logging/types';
-import type { Tool } from '@scream-code/ltod';
+import type { Tool, ToolAnnotations } from '@scream-code/ltod';
 
 import { abortable } from '../utils/abort';
 import { resolveServerCapabilities } from './capabilities';
@@ -16,6 +16,21 @@ export type { McpRootsProvider } from './client-shared';
 
 export type McpServerStatus = 'pending' | 'connected' | 'failed' | 'disabled' | 'needs-auth';
 
+/**
+ * Narrow an MCP `annotations` block to the four boolean hints we consume.
+ * The block also carries display-only fields (`title`) and the values are
+ * author-declared by the server, so anything non-boolean is dropped rather
+ * than coerced.
+ */
+function mapMcpAnnotations(raw: Record<string, unknown>): ToolAnnotations {
+  const result: { -readonly [K in keyof ToolAnnotations]: boolean | undefined } = {};
+  for (const key of ['readOnlyHint', 'destructiveHint', 'idempotentHint', 'openWorldHint'] as const) {
+    const value = raw[key];
+    if (typeof value === 'boolean') result[key] = value;
+  }
+  return result;
+}
+
 export interface McpServerEntry {
   readonly name: string;
   readonly transport: 'stdio' | 'http';
@@ -28,6 +43,13 @@ export interface McpServerEntry {
    * chokepoint every entry leaves the manager through.
    */
   readonly capabilities: readonly string[];
+  /**
+   * Effective tool-declaration policy: `'always'` declares every tool of the
+   * server in each request; `'on-demand'` (the default) withholds the schemas
+   * until the model enables specific tools via `DiscoverMcpTools`. Resolved
+   * in {@link toPublicEntry} next to `capabilities`.
+   */
+  readonly exposure: 'always' | 'on-demand';
 }
 
 interface InternalEntry {
@@ -421,6 +443,10 @@ export class McpConnectionManager {
       name: mcpTool.name,
       description: mcpTool.description,
       parameters: assertMcpInputSchema(mcpTool.name, mcpTool.inputSchema),
+      // Pass the server's native annotations through as author-declared
+      // hints: the permission layer consumes `destructiveHint`
+      // conservatively (forces an approval, never grants one).
+      ...(mcpTool.annotations === undefined ? {} : { annotations: mapMcpAnnotations(mcpTool.annotations) }),
     }));
   }
 
@@ -491,6 +517,7 @@ function toPublicEntry(entry: InternalEntry): McpServerEntry {
         : 0,
     error: entry.error,
     capabilities: resolveServerCapabilities(entry.name, entry.config),
+    exposure: entry.config.exposure ?? 'on-demand',
   };
 }
 

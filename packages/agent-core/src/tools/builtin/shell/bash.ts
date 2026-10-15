@@ -111,24 +111,20 @@ export const BashInputSchema = z
     cwd: z
       .string()
       .optional()
-      .describe(
-        "The working directory in which to run the command. When omitted, the command runs in the session's working directory.",
-      ),
+      .describe("Working directory; defaults to the session's working directory."),
     timeout: z
       .number()
       .int()
       .positive()
       .default(DEFAULT_TIMEOUT_S)
       .describe(
-        `Optional timeout in seconds for the command to execute. Foreground default ${String(DEFAULT_TIMEOUT_S)}s, max ${String(MAX_TIMEOUT_S)}s. Background default ${String(DEFAULT_BACKGROUND_TIMEOUT_S)}s, max ${String(MAX_BACKGROUND_TIMEOUT_S)}s. Ignored for background commands when disable_timeout=true.`,
+        `Timeout in seconds. Foreground: default ${String(DEFAULT_TIMEOUT_S)}, max ${String(MAX_TIMEOUT_S)}. Background: default ${String(DEFAULT_BACKGROUND_TIMEOUT_S)}, max ${String(MAX_BACKGROUND_TIMEOUT_S)}; ignored when disable_timeout=true.`,
       )
       .optional(),
     description: z
       .string()
       .optional()
-      .describe(
-        'A short description for the background task. Required when run_in_background is true.',
-      ),
+      .describe('Short background-task description. Required when run_in_background is true.'),
     run_in_background: z
       .boolean()
       .optional()
@@ -136,9 +132,7 @@ export const BashInputSchema = z
     disable_timeout: z
       .boolean()
       .optional()
-      .describe(
-        'If true, do not apply a timeout to the command. Only applies when run_in_background is true.',
-      ),
+      .describe('No timeout at all. Only applies when run_in_background is true.'),
   })
   .superRefine((val, ctx) => {
     if (val.timeout === undefined) return;
@@ -205,11 +199,11 @@ function withoutBackgroundDescription(description: string): string {
   return description
     .replaceAll('\r\n', '\n')
     .replace(
-      /\n\nIf `run_in_background=true`,[\s\S]*?point them to the `\/tasks` command, which opens an interactive panel; it has no subcommands\./,
+      /\n\nIf `run_in_background=true`,[\s\S]*?at `\/tasks` \(an interactive panel\)\./,
       '\n\nBackground execution is disabled for this agent. Do not set `run_in_background=true`.',
     )
     .replace(
-      ` For possibly long-running foreground commands, set the \`timeout\` argument in seconds. Foreground commands default to ${String(DEFAULT_TIMEOUT_S)}s and allow up to ${String(MAX_TIMEOUT_S)}s.`,
+      ` For possibly long-running foreground commands set \`timeout\` (in seconds): the default is ${String(DEFAULT_TIMEOUT_S)}s and foreground commands allow up to ${String(MAX_TIMEOUT_S)}s.`,
       ` For possibly long-running commands, set the \`timeout\` argument in seconds. The default is ${String(DEFAULT_TIMEOUT_S)}s; foreground commands allow up to ${String(MAX_TIMEOUT_S)}s.`,
     )
     .replace(

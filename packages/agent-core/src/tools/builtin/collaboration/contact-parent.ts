@@ -23,7 +23,7 @@ export const ContactParentInputSchema = z.object({
   request_type: z
     .enum(['info', 'handoff', 'escalate'])
     .describe(
-      'info: ask the parent for context or clarification. handoff: ask the parent to route part of your work to a different capability (describe the need, never a named agent). escalate: bump a decision to the human.',
+      'info: ask the parent for context or clarification. handoff: ask the parent to route part of your work to another capability (describe the need, never a named agent). escalate: bump a decision to the human.',
     ),
   message: z.string().min(1).max(8192).describe('What you need. Be specific.'),
   needs: z
@@ -40,7 +40,7 @@ export const ContactParentInputSchema = z.object({
         .string()
         .max(500)
         .optional()
-        .describe('What a good reply looks like — the shape, format, or acceptance criteria you want back.'),
+        .describe('The shape, format, or acceptance criteria you want back.'),
     })
     .optional(),
 });

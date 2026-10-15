@@ -67,17 +67,17 @@ export const AgentToolInputSchema = z.preprocess(
       .string()
       .optional()
       .describe(
-        'One of the available agent types (see "Available agent types" in this tool description). Defaults to "coder" when omitted.',
+        'One of the available agent types (see the list at the end of this tool description). Defaults to "coder" when omitted.',
       ),
     resume: z
       .string()
       .optional()
-      .describe('Optional agent ID to resume instead of creating a new instance'),
+      .describe('Agent id to resume instead of creating a new instance.'),
     run_in_background: z
       .boolean()
       .optional()
       .describe(
-        'If true, return immediately without waiting for completion. Foreground is the default. Consider background for long or complex work, for running several subagents in parallel, or when the task may need your input or steering while it runs (see the background notes in this tool description). You hold the full context of the work, so you decide whether foreground or background fits the task.',
+        'If true, return immediately without waiting for completion. Foreground is the default; prefer background for long or complex work, parallel subagents, or tasks that may need input or steering while they run.',
       ),
     timeout: z
       .number()
@@ -86,7 +86,7 @@ export const AgentToolInputSchema = z.preprocess(
       .max(3600)
       .optional()
       .describe(
-        'Timeout in seconds for a foreground agent task (min 30s, max 3600s / 1hr). When omitted, a foreground task runs until completion with no timeout. On timeout the still-running subagent is NOT aborted — it is handed to the background task manager and keeps running (status: backgrounded): its completion notification arrives automatically in a later turn, and you can peek with TaskOutput / stop it with TaskStop. Use a timeout to bound your waiting, not to kill the subagent.',
+        'Seconds to wait for a foreground task (min 30, max 3600); omitted, it runs until completion. On timeout the subagent is NOT aborted — it keeps running in the background and its completion arrives in a later turn (peek with TaskOutput, stop with TaskStop). This bounds the wait, not the subagent.',
       ),
     // Optional structured fields. When provided, they are composed into the
     // required Target / Change / Acceptance format before being sent to the
@@ -107,7 +107,7 @@ export const AgentToolInputSchema = z.preprocess(
       .string()
       .optional()
       .describe(
-        'Optional JSON Schema (as a JSON string) describing the structured result the subagent should return. When provided, the subagent is told to reply with a single JSON object conforming to this schema; if the reply parses as JSON it is surfaced as a `[structured]` block in the tool output, alongside the raw text.',
+        'JSON Schema (as a JSON string) for a machine-readable answer: the subagent replies with one JSON object matching it, surfaced as a `[structured]` block.',
       ),
     output_token_hint: z
       .number()
@@ -116,13 +116,13 @@ export const AgentToolInputSchema = z.preprocess(
       .max(32_768)
       .optional()
       .describe(
-        'Optional prompt-level hint for the subagent final-answer length (keeps structured replies compact, e.g. 1024 for a schema-shaped answer). Not an enforced cap.',
+        'Prompt-level hint for the subagent final-answer length (e.g. 1024). Not an enforced cap.',
       ),
     capability_mode: z
       .enum(['read-only', 'read-write', 'execute', 'all'])
       .optional()
       .describe(
-        'Runtime capability contract for the subagent. read-only: may inspect but not modify the workspace. read-write: may read and edit files but not run arbitrary commands. execute: may additionally run commands. all: full tool access (default). Restricted modes strip the child tool set at runtime (including MCP and spawning tools) — the constraint is enforced, not just prompted. The parent remains the final gate. On resume the contract can only tighten: a resumed agent keeps the tool set it already has, so a mode wider than the one it was spawned with is ignored — spawn a fresh subagent for a wider contract.',
+        'Runtime capability contract, enforced on the child tool set (not merely prompted): read-only (inspect only), read-write (+ writes), execute (+ bash/python), all (full, default). Restricted modes also strip MCP and spawning tools, and the parent stays the final gate; on resume the contract can only tighten — spawn a fresh subagent for a wider one.',
       ),
   }),
 );

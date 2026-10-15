@@ -25,6 +25,10 @@ tools:
   - CronCreate
   - CronList
   - CronDelete
+  # Meta tool for on-demand MCP tools (server `exposure: on-demand`, the
+  # default): withheld tool schemas stay out of every request until the model
+  # enables specific ones through this tool.
+  - DiscoverMcpTools
   - CreateGoal
   - GetGoal
   - SetGoalBudget

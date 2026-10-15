@@ -19,7 +19,7 @@ export const EnterPlanModeInputSchema = z.object({
     .enum(['normal', 'fusion'])
     .default('normal')
     .describe(
-      "Planning strategy. 'normal' (default): you design the plan. 'fusion': the host spawns parallel planning subagents and synthesizes a single plan for you to review. Use 'fusion' for ambiguous, large, or multi-approach tasks.",
+      "Planning strategy. 'normal' (default): you design the plan. 'fusion': the host spawns parallel planning subagents and synthesizes one plan for you to review — use it for ambiguous, large, or multi-approach tasks.",
     ),
 }).strict();
 export type EnterPlanModeInput = z.infer<typeof EnterPlanModeInputSchema>;

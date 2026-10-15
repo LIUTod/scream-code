@@ -60,6 +60,13 @@ export interface MCPToolDefinition {
   name: string;
   description: string;
   inputSchema: unknown;
+  /**
+   * Native MCP `annotations` block (readOnlyHint/destructiveHint/
+   * idempotentHint/openWorldHint/title). Author-declared by the server, so
+   * unverified — the permission layer consumes `destructiveHint`
+   * conservatively only.
+   */
+  annotations?: Record<string, unknown>;
 }
 
 /**

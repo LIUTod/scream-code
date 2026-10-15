@@ -23,6 +23,7 @@ export * from './memory/memory-write';
 export * from './knowledge/knowledge-lookup';
 export * from './image/image-generate';
 export * from './lsp-tool';
+export * from './mcp/discover-mcp-tools';
 
 export * from './collaboration/skill-tool';
 export * from './skill/make-skill-apply';

@@ -32,7 +32,7 @@ export const SendSubagentMessageInputSchema = z.object({
   operation: z
     .enum(['queue', 'steer', 'interject'])
     .describe(
-      "queue: delivered when the subagent starts its next turn, after any steer messages. steer: delivered into the subagent's running turn at its next step boundary, or first in the mailbox if no turn is running. interject: like steer, but also interrupts the tool call the subagent has in flight right now — use it to correct a subagent stuck in a long wait; it falls back to the mailbox when no turn is running.",
+      "queue: delivered at the subagent's next-turn start, after any steer messages. steer: joins the running turn at its next step boundary, or the mailbox when no turn is running. interject: like steer, but also interrupts the tool call the subagent has in flight right now — use it to correct a subagent stuck in a long wait; it falls back to the mailbox when no turn is running.",
     ),
   message: z
     .string()

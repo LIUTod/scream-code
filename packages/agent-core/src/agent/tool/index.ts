@@ -447,6 +447,10 @@ export class ToolManager {
   protected readonly trippedPlugins: Set<string> = new Set();
   protected readonly mcpTools: Map<string, McpToolEntry> = new Map();
   /** server name → list of qualified tool names registered for that server. */
+  /** Withheld-until-enabled MCP tool names (see registerMcpServer). */
+  private readonly deferredMcpTools = new Set<string>();
+  /** Deferred MCP tools enabled this session via DiscoverMcpTools. */
+  private readonly enabledDeferredMcpTools = new Set<string>();
   protected readonly mcpToolsByServer: Map<string, string[]> = new Map();
   protected enabledTools: Set<string> = new Set();
   /** Glob patterns (e.g. `mcp__*`, `mcp__github__*`) gating which MCP tools the profile exposes. */
@@ -721,7 +725,16 @@ export class ToolManager {
     client: MCPClient,
     tools: readonly Tool[],
     enabledTools?: ReadonlySet<string>,
-    options?: { readonly mcp?: McpConnectionManager },
+    options?: {
+      readonly mcp?: McpConnectionManager;
+      /**
+       * Withhold every tool's schema from the offered tool table until the
+       * model enables it via `DiscoverMcpTools` (server config
+       * `exposure: 'on-demand'`, the default). Registration, naming and
+       * calling are unaffected — only declaration is deferred.
+       */
+      readonly deferAll?: boolean;
+    },
   ): McpServerRegistrationResult {
     this.unregisterMcpServer(serverName);
     const qualifiedNames: string[] = [];
@@ -846,6 +859,9 @@ export class ToolManager {
       qualifiedNames.push(qualified);
     }
     this.mcpToolsByServer.set(serverName, qualifiedNames);
+    if (options?.deferAll === true) {
+      for (const qualified of qualifiedNames) this.deferredMcpTools.add(qualified);
+    }
     return { registered: qualifiedNames, collisions };
   }
 
@@ -854,6 +870,8 @@ export class ToolManager {
     if (existing === undefined) return false;
     for (const qualified of existing) {
       this.mcpTools.delete(qualified);
+      this.deferredMcpTools.delete(qualified);
+      this.enabledDeferredMcpTools.delete(qualified);
     }
     this.mcpToolsByServer.delete(serverName);
     return true;
@@ -928,7 +946,7 @@ export class ToolManager {
       resolved.client,
       resolved.tools,
       resolved.enabledNames,
-      { mcp },
+      { mcp, deferAll: entry.exposure !== 'always' },
     );
     this.emitMcpToolCollisions(entry.name, result.collisions);
     this.agent.emitEvent({
@@ -985,6 +1003,63 @@ export class ToolManager {
     return this.mcpAccessPatterns.some((pattern) => picomatch.isMatch(name, pattern));
   }
 
+  /**
+   * True while a tool's schema is withheld from the offered table: the
+   * owning server deferred it and this session has not enabled it yet.
+   */
+  isDeferredMcpTool(name: string): boolean {
+    return this.deferredMcpTools.has(name) && !this.enabledDeferredMcpTools.has(name);
+  }
+
+  /**
+   * Deferred MCP tools the model can ask for: registered, accessible under
+   * the active patterns, but not declared yet. Optionally narrowed to one
+   * server. Sorted by qualified name for stable output.
+   */
+  listDeferredMcpTools(
+    server?: string,
+  ): readonly { name: string; serverName: string; description: string }[] {
+    return [...this.mcpTools.entries()]
+      .filter(([name]) => this.isDeferredMcpTool(name) && this.isMcpToolEnabled(name))
+      .filter(([, entry]) => server === undefined || entry.serverName === server)
+      .map(([name, entry]) => ({
+        name,
+        serverName: entry.serverName,
+        description: entry.tool.description,
+      }))
+      .toSorted((a, b) => a.name.localeCompare(b.name));
+  }
+
+  /**
+   * Enable deferred MCP tools for this session (the `DiscoverMcpTools`
+   * tool). Enabled tools join the offered table from the next step on.
+   * Already-enabled, unknown, or pattern-excluded names land in `skipped`
+   * so the caller can report exactly what happened instead of guessing.
+   */
+  enableDeferredMcpTools(names: readonly string[]): {
+    enabled: readonly string[];
+    skipped: readonly string[];
+  } {
+    const enabled: string[] = [];
+    const skipped: string[] = [];
+    for (const name of names) {
+      if (
+        !this.deferredMcpTools.has(name) ||
+        this.enabledDeferredMcpTools.has(name) ||
+        // Pattern check must match the listing path: enabling a name the active
+        // patterns exclude would report success while `loopToolsFor` keeps it
+        // out of the offer table, and the model would follow a false promise.
+        !this.isMcpToolEnabled(name)
+      ) {
+        skipped.push(name);
+        continue;
+      }
+      this.enabledDeferredMcpTools.add(name);
+      enabled.push(name);
+    }
+    return { enabled, skipped };
+  }
+
   /** The enabled-name filter a turn freezes at its start. */
   snapshotEnabledTools(): { names: ReadonlySet<string>; mcpPatterns: readonly string[] } {
     return { names: new Set(this.enabledTools), mcpPatterns: [...this.mcpAccessPatterns] };
@@ -1002,8 +1077,13 @@ export class ToolManager {
     names: ReadonlySet<string>;
     mcpPatterns: readonly string[];
   }): readonly ExecutableTool[] {
-    const mcpNames = [...this.mcpTools.keys()].filter((name) =>
-      filter.mcpPatterns.some((pattern) => picomatch.isMatch(name, pattern)),
+    const mcpNames = [...this.mcpTools.keys()].filter(
+      (name) =>
+        filter.mcpPatterns.some((pattern) => picomatch.isMatch(name, pattern)) &&
+        // On-demand servers contribute nothing until DiscoverMcpTools
+        // enabled the specific tool — the whole point is not paying for
+        // their schemas in every request.
+        !this.isDeferredMcpTool(name),
     );
     // Mutation goal tools are only offered to the model while a goal exists.
     const hideGoalMutationTools = this.agent.goal.getGoal().goal === null;
@@ -1069,7 +1149,7 @@ export class ToolManager {
       yield {
         name: entry.tool.name,
         description: entry.tool.description,
-        active: this.isMcpToolEnabled(entry.tool.name),
+        active: this.isMcpToolEnabled(entry.tool.name) && !this.isDeferredMcpTool(entry.tool.name),
         source: 'mcp',
       };
     }
@@ -1180,6 +1260,10 @@ export class ToolManager {
         this.agent.cron && new b.CronCreateTool(this.agent.cron),
         this.agent.cron && new b.CronListTool(this.agent.cron),
         this.agent.cron && new b.CronDeleteTool(this.agent.cron),
+        // On-demand MCP tools stay out of the request until the model
+        // enables them through this meta tool (server `exposure: on-demand`,
+        // the default); see `tools/builtin/mcp/discover-mcp-tools.ts`.
+        this.agent.mcp && new b.DiscoverMcpToolsTool(this),
         // Goal tools are main-agent-only.
         this.agent.type === 'main' && new b.CreateGoalTool(this.agent),
         this.agent.type === 'main' && new b.UpdateGoalTool(this.agent, createGoalGrader(this.agent)),
