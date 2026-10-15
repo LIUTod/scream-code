@@ -163,7 +163,14 @@ export const DomesticSearchConfigSchema = z.object({
 
 export type DomesticSearchConfig = z.infer<typeof DomesticSearchConfigSchema>;
 
+export const GoogleSearchConfigSchema = z.object({
+  enabled: z.boolean().default(true),
+});
+
+export type GoogleSearchConfig = z.infer<typeof GoogleSearchConfigSchema>;
+
 export const ServicesConfigSchema = z.object({
+  google: GoogleSearchConfigSchema.optional(),
   duckduckgo: DuckDuckGoConfigSchema.optional(),
   bing: BingSearchConfigSchema.optional(),
   sogou: DomesticSearchConfigSchema.optional(),
@@ -286,7 +293,9 @@ const BackgroundConfigPatchSchema = BackgroundConfigSchema.partial();
 const DuckDuckGoConfigPatchSchema = DuckDuckGoConfigSchema.partial();
 const BingSearchConfigPatchSchema = BingSearchConfigSchema.partial();
 const DomesticSearchConfigPatchSchema = DomesticSearchConfigSchema.partial();
+const GoogleSearchConfigPatchSchema = GoogleSearchConfigSchema.partial();
 const ServicesConfigPatchSchema = z.object({
+  google: GoogleSearchConfigPatchSchema.optional(),
   duckduckgo: DuckDuckGoConfigPatchSchema.optional(),
   bing: BingSearchConfigPatchSchema.optional(),
   sogou: DomesticSearchConfigPatchSchema.optional(),

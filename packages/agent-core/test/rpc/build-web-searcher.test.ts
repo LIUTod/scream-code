@@ -14,12 +14,12 @@ function searcherWith(services: Record<string, { enabled?: boolean }> | undefine
 }
 
 describe('buildWebSearcher', () => {
-  it('defaults to the DDG → Bing → Sogou → Baidu → 360 chain', () => {
+  it('defaults to the Google → DDG → Sogou → Baidu → 360 chain', () => {
     const searcher = searcherWith(undefined);
     expect(searcher).toBeInstanceOf(FallbackSearchProvider);
     expect((searcher as FallbackSearchProvider).providerNames).toEqual([
+      'google',
       'duckduckgo',
-      'bing',
       'sogou',
       'baidu',
       '360',
@@ -27,9 +27,9 @@ describe('buildWebSearcher', () => {
   });
 
   it('drops a disabled engine from the chain', () => {
-    const searcher = searcherWith({ bing: { enabled: false } });
+    const searcher = searcherWith({ duckduckgo: { enabled: false } });
     expect((searcher as FallbackSearchProvider).providerNames).toEqual([
-      'duckduckgo',
+      'google',
       'sogou',
       'baidu',
       '360',
@@ -38,8 +38,8 @@ describe('buildWebSearcher', () => {
 
   it('returns a single provider (not a chain) when only one engine remains', () => {
     const searcher = searcherWith({
+      google: { enabled: false },
       duckduckgo: { enabled: false },
-      bing: { enabled: false },
       sogou: { enabled: false },
       baidu: { enabled: false },
     });
@@ -49,8 +49,8 @@ describe('buildWebSearcher', () => {
 
   it('returns undefined when every engine is disabled (tool is not mounted)', () => {
     const searcher = searcherWith({
+      google: { enabled: false },
       duckduckgo: { enabled: false },
-      bing: { enabled: false },
       sogou: { enabled: false },
       baidu: { enabled: false },
       so360: { enabled: false },

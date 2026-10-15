@@ -17,7 +17,7 @@ import {
 import { FetchCache } from '#/tools/providers/fetch-cache';
 import { LocalFetchURLProvider } from '#/tools/providers/local-fetch-url';
 import { DuckDuckGoSearchProvider } from '#/tools/providers/duckduckgo-search';
-import { BingSearchProvider } from '#/tools/providers/bing-search';
+import { GoogleSearchProvider } from '#/tools/providers/google-search';
 import { BaiduSearchProvider, So360SearchProvider, SogouSearchProvider } from '#/tools/providers/domestic-search';
 import { FallbackSearchProvider } from '#/tools/providers/fallback-search';
 import { ArxivPaperSource } from '#/tools/providers/paper/arxiv';
@@ -1428,12 +1428,14 @@ export function buildWebSearcher(input: {
 }): WebSearchProvider | undefined {
   const services = input.config.services;
 
-  // Chain order: DDG → Bing → Sogou → Baidu → 360 (global-quality engines
-  // first; domestic engines are the reachable tail — Bing and Baidu hold the
-  // middle ground, 360 is the final fallback).
+  // Chain order: Google → DDG → Sogou → Baidu → 360. Global engines first;
+  // domestic engines are the reachable tail on mainland-China routes, with
+  // 360 as the final fallback. Bing is intentionally absent: from datacenter
+  // egress it serves results pages unrelated to the query, which the chain
+  // otherwise accepts as a successful answer.
   const providers: WebSearchProvider[] = [];
+  if (services?.google?.enabled !== false) providers.push(new GoogleSearchProvider());
   if (services?.duckduckgo?.enabled !== false) providers.push(new DuckDuckGoSearchProvider());
-  if (services?.bing?.enabled !== false) providers.push(new BingSearchProvider());
   if (services?.sogou?.enabled !== false) providers.push(new SogouSearchProvider());
   if (services?.baidu?.enabled !== false) providers.push(new BaiduSearchProvider());
   if (services?.so360?.enabled !== false) providers.push(new So360SearchProvider());

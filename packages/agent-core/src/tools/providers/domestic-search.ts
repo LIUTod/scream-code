@@ -1,11 +1,13 @@
 /**
  * Domestic (China-reachable) HTML search providers — Sogou, 360, Baidu.
  *
- * These are the tail of the web-search fallback chain: when DuckDuckGo is
- * unreachable or bot-blocked (always the case for direct connections from
- * mainland China), these engines still answer over plain HTTPS without any
- * API key. Each POSTs/GETs a server-rendered results page with browser-like
- * headers and parses the result blocks.
+ * Domestic (China-reachable) HTML search providers — Sogou, 360, Baidu.
+ *
+ * They sit behind Google and DuckDuckGo in the web-search fallback chain
+ * (global engines first), and answer over plain HTTPS without any API key
+ * when those are unreachable or bot-blocked — which is the common case for
+ * direct connections from mainland China. Each GETs/POSTs a server-rendered
+ * results page with browser-like headers and parses the result blocks.
  *
  * Same contract as DuckDuckGoSearchProvider: hard failures (network error,
  * non-2xx, anti-bot page) THROW so the FallbackSearchProvider records the
@@ -39,16 +41,16 @@ const BROWSER_HEADERS: Record<string, string> = {
 /** Strip inline tags and decode the common named/numeric entities. */
 function decodeHtmlText(value: string): string {
   return value
-    .replace(/<[^>]*>/g, ' ')
-    .replace(/&#(\d+);/g, (_, code: string) => String.fromCharCode(Number(code)))
-    .replace(/&#x([0-9a-f]+);/gi, (_, code: string) => String.fromCharCode(Number.parseInt(code, 16)))
-    .replace(/&nbsp;/gi, ' ')
-    .replace(/&amp;/gi, '&')
-    .replace(/&lt;/gi, '<')
-    .replace(/&gt;/gi, '>')
-    .replace(/&quot;/gi, '"')
-    .replace(/&#39;|&apos;/gi, "'")
-    .replace(/\s+/g, ' ')
+    .replaceAll(/<[^>]*>/g, ' ')
+    .replaceAll(/&#(\d+);/g, (_, code: string) => String.fromCodePoint(Number(code)))
+    .replaceAll(/&#x([0-9a-f]+);/gi, (_, code: string) => String.fromCodePoint(Number.parseInt(code, 16)))
+    .replaceAll(/&nbsp;/gi, ' ')
+    .replaceAll(/&amp;/gi, '&')
+    .replaceAll(/&lt;/gi, '<')
+    .replaceAll(/&gt;/gi, '>')
+    .replaceAll(/&quot;/gi, '"')
+    .replaceAll(/&#39;|&apos;/gi, "'")
+    .replaceAll(/\s+/g, ' ')
     .trim();
 }
 
@@ -95,7 +97,7 @@ async function searchEngine(
     const block = match[1] ?? '';
     const title = spec.titleRe.exec(block);
     if (title === null) continue;
-    const rawHref = (title[1] ?? '').replace(/&amp;/gi, '&');
+    const rawHref = (title[1] ?? '').replaceAll(/&amp;/gi, '&');
     const url = spec.normalizeUrl !== undefined ? spec.normalizeUrl(rawHref) : rawHref;
     if (url === undefined || url === '' || seen.has(url)) continue;
     const titleText = decodeHtmlText(title[2] ?? '');
