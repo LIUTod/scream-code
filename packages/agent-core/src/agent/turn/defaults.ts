@@ -11,7 +11,8 @@
  * - compaction: `agent/compaction/micro.ts` (0.3, 1.15), `agent/compaction/strategy.ts` (0.85/0.9, 2.5)
  * - retry: `loop/retry.ts` (10 attempts, 0.5s→32s ±25%)
  * - steer polling: `loop/tool-call.ts` (150ms)
- * - step limits: `loop/run-turn.ts` (maxSteps, 8 consecutive rejected steps)
+ * - step limits: `loop/run-turn.ts` (8 consecutive rejected steps); the
+ *   default per-turn step budget lives here (`maxStepsPerTurn`)
  * - tool output truncation: `agent/context/index.ts` (5000 tokens), `tools/support/result-builder.ts` (50KB)
  */
 
@@ -41,4 +42,28 @@ export const TURN_DEFAULTS = {
    * budget. Prevents a goal from spinning forever and burning tokens.
    */
   maxGoalTurns: 50,
+
+  /**
+   * Consecutive failed model tool calls that trigger a "change approach"
+   * reminder at the next step boundary.
+   */
+  toolFailureNoticeStreak: 6,
+
+  /**
+   * Consecutive failed model tool calls that end the turn: the next step
+   * becomes a final wrap-up in which the model is asked to stop and report.
+   */
+  toolFailureStopStreak: 10,
+
+  /**
+   * Default per-turn step budget when `loop_control.max_steps_per_turn` is
+   * unset. **Scope: one single turn** — an autonomous run with no user
+   * participation (each new user message starts a fresh budget). 160 leaves
+   * headroom for long, script-driven workflows; a lower bound was cutting
+   * legitimate big-script runs off. Reaching it is not a failure: the loop
+   * runs one extra wrap-up step that tells the model to stop and report to
+   * the user, then ends the turn. Set `max_steps_per_turn = 0` to disable
+   * the budget.
+   */
+  maxStepsPerTurn: 160,
 } as const;

@@ -3,7 +3,7 @@ import type { FinishReason, TextPart, ThinkPart, TokenUsage } from '@scream-code
 import type { ToolInputDisplay } from '../tools/display';
 import type { ExecutableToolResult, LoopStepStopReason, ToolUpdate } from './types';
 
-export type LoopInterruptReason = 'aborted' | 'max_steps' | 'error';
+export type LoopInterruptReason = 'aborted' | 'error';
 
 export interface LoopStepBeginEvent {
   readonly type: 'step.begin';
@@ -48,6 +48,13 @@ export interface LoopStepRetryingEvent {
   readonly errorName: string;
   readonly errorMessage: string;
   readonly statusCode?: number;
+  /**
+   * Machine-readable classification of the failed attempt (an error-protocol
+   * code such as `provider.timeout`), so consumers can label the retry
+   * without pattern-matching `errorName` / `errorMessage`. Omitted when the
+   * error carries no classification.
+   */
+  readonly errorCode?: string | undefined;
 }
 
 export interface LoopContentPartEvent {
@@ -110,6 +117,13 @@ export interface LoopTurnInterruptedEvent {
   readonly attemptedSteps: number;
   readonly activeStep?: number | undefined;
   readonly message?: string | undefined;
+  /**
+   * Machine-readable classification of the failure that interrupted the turn
+   * (an error-protocol code), so consumers branch on a field instead of
+   * matching `message` prose. Omitted when the error carries none (and always
+   * absent for `reason: 'aborted'`).
+   */
+  readonly errorCode?: string | undefined;
 }
 
 export interface LoopTextDeltaEvent {

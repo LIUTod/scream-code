@@ -11,7 +11,6 @@
 import { inputTotal } from '@scream-code/ltod';
 import { describe, expect, it } from 'vitest';
 
-import { ErrorCodes, ScreamError } from '../../src/errors';
 import {
   makeEndTurnResponse,
   makeMaxTokensResponse,
@@ -20,7 +19,7 @@ import {
   makeToolCall,
   makeToolUseResponse,
 } from './fixtures/fake-llm';
-import { runTurn, runTurnExpectingThrow } from './fixtures/helpers';
+import { runTurn } from './fixtures/helpers';
 import { EchoTool } from './fixtures/tools';
 
 describe('runTurn — turn lifecycle', () => {
@@ -146,24 +145,70 @@ describe('runTurn — turn lifecycle', () => {
     expect(sink.count('tool.result')).toBe(0);
   });
 
-  it('throws ScreamError(loop.max_steps_exceeded) when steps reach maxSteps', async () => {
+  it('wraps up with one final step when steps reach maxSteps (soft landing)', async () => {
     const echo = new EchoTool();
-    const { error, sink } = await runTurnExpectingThrow({
+    const { result, sink, llm } = await runTurn({
       maxSteps: 2,
       tools: [echo],
       responses: [
         makeToolUseResponse([makeToolCall('echo', { text: '1' }, 'a')]),
         makeToolUseResponse([makeToolCall('echo', { text: '2' }, 'b')]),
-        // The loop throws before requesting a third step.
+        makeEndTurnResponse('stopping to report'),
       ],
     });
 
-    expect(error).toBeInstanceOf(ScreamError);
-    expect((error as ScreamError).code).toBe(ErrorCodes.LOOP_MAX_STEPS_EXCEEDED);
-    expect((error as ScreamError).details).toEqual({ maxSteps: 2 });
-    // turn.interrupted{reason:'max_steps'} is emitted before the throw
-    const interruptedTypes = sink.byType('turn.interrupted').map((e) => e.reason);
-    expect(interruptedTypes).toContain('max_steps');
+    expect(result.stopReason).toBe('end_turn');
+    expect(result.stepBudgetExhausted).toBe(true);
+    // Two budgeted steps plus the one wrap-up step.
+    expect(result.steps).toBe(3);
+    expect(llm.callCount).toBe(3);
+    expect(echo.calls.map((c) => c.id)).toEqual(['a', 'b']);
+    // Soft landing is not an interruption.
+    expect(sink.byType('turn.interrupted')).toEqual([]);
+  });
+
+  it('marks the wrap-up step as finalStep for step hooks', async () => {
+    const echo = new EchoTool();
+    const seen: Array<[number, boolean | undefined]> = [];
+    const { result } = await runTurn({
+      maxSteps: 2,
+      tools: [echo],
+      hooks: {
+        beforeStep: async ({ stepNumber, finalStep }) => {
+          seen.push([stepNumber, finalStep]);
+        },
+      },
+      responses: [
+        makeToolUseResponse([makeToolCall('echo', { text: '1' }, 'a')]),
+        makeToolUseResponse([makeToolCall('echo', { text: '2' }, 'b')]),
+        makeEndTurnResponse('done'),
+      ],
+    });
+
+    expect(result.steps).toBe(3);
+    expect(seen).toEqual([
+      [1, false],
+      [2, false],
+      [3, true],
+    ]);
+  });
+
+  it('ends the turn after the wrap-up step even if it requests more tools', async () => {
+    const echo = new EchoTool();
+    const { result, llm } = await runTurn({
+      maxSteps: 1,
+      tools: [echo],
+      responses: [
+        makeToolUseResponse([makeToolCall('echo', { text: '1' }, 'a')]),
+        makeToolUseResponse([makeToolCall('echo', { text: '2' }, 'b')]),
+      ],
+    });
+
+    expect(result.stopReason).toBe('end_turn');
+    expect(result.steps).toBe(2);
+    // The wrap-up step's tools still execute; no further step starts.
+    expect(llm.callCount).toBe(2);
+    expect(echo.calls.map((c) => c.id)).toEqual(['a', 'b']);
   });
 
   it('does not enforce a max step limit when maxSteps is 0', async () => {
@@ -179,6 +224,7 @@ describe('runTurn — turn lifecycle', () => {
     });
 
     expect(result.stopReason).toBe('end_turn');
+    expect(result.stepBudgetExhausted).toBeUndefined();
     expect(result.steps).toBe(3);
     expect(echo.calls).toEqual([
       { id: 'a', turnId: 'turn-1', args: { text: '1' } },

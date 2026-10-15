@@ -35,6 +35,35 @@ import chalk from 'chalk';
 
 type EffectiveActivityPaneMode = ActivityPaneMode | 'idle';
 
+/** Wording used for the retry reason in the status bar. */
+type ReconnectReasonKey =
+  | 'status.reason_rate_limit'
+  | 'status.reason_server'
+  | 'status.reason_timeout'
+  | 'status.reason_connection';
+
+/**
+ * Reason label for the status-bar reconnect line.
+ *
+ * The structured `errorCode` carried by the retry event is authoritative. The
+ * status-code and error-name checks are the fallback for retry records written
+ * before that field existed — and for codes this label has no wording for.
+ */
+export function reconnectReasonKey(a: AppState): ReconnectReasonKey {
+  if (a.reconnectErrorCode === 'provider.timeout') return 'status.reason_timeout';
+  if (a.reconnectErrorCode === 'provider.rate_limit') return 'status.reason_rate_limit';
+  if (a.reconnectStatusCode === 429) return 'status.reason_rate_limit';
+  if (a.reconnectStatusCode !== undefined && a.reconnectStatusCode >= 500) {
+    return 'status.reason_server';
+  }
+  // Legacy fallback (records without `errorCode`): a timeout used to be
+  // recognizable only by the error class name.
+  if (a.reconnectErrorCode === undefined && (a.reconnectErrorName ?? '').includes('Timeout')) {
+    return 'status.reason_timeout';
+  }
+  return 'status.reason_connection';
+}
+
 export interface LifecycleControllerHost {
   readonly state: TUIState;
   readonly options: ScreamTUIOptions;
@@ -680,14 +709,7 @@ export class LifecycleController {
   private buildReconnectLabel(state: TUIState): string {
     const a = state.appState;
     if (a.reconnectAttempt <= 0) return '';
-    const reasonKey =
-      a.reconnectStatusCode === 429
-        ? 'status.reason_rate_limit'
-        : a.reconnectStatusCode !== undefined && a.reconnectStatusCode >= 500
-          ? 'status.reason_server'
-          : (a.reconnectErrorName ?? '').includes('Timeout')
-            ? 'status.reason_timeout'
-            : 'status.reason_connection';
+    const reasonKey = reconnectReasonKey(a);
     const reason = a.reconnectStatusCode !== undefined
       ? `${t(reasonKey)} (${String(a.reconnectStatusCode)})`
       : a.reconnectErrorName !== undefined && a.reconnectErrorName.length > 0

@@ -1136,6 +1136,7 @@ describe('SessionEventHandler — retry label clearing', () => {
       maxAttempts: 10,
       delayMs: 20_000,
       statusCode: 429,
+      errorCode: 'provider.rate_limit',
     } as unknown as Event;
   }
 
@@ -1146,6 +1147,7 @@ describe('SessionEventHandler — retry label clearing', () => {
     handler.handleEvent(retryingEvent(), vi.fn());
     expect(host.state.appState.reconnectAttempt).toBe(2);
     expect(host.state.appState.reconnectStatusCode).toBe(429);
+    expect(host.state.appState.reconnectErrorCode).toBe('provider.rate_limit');
 
     handler.handleEvent(
       {
@@ -1161,6 +1163,7 @@ describe('SessionEventHandler — retry label clearing', () => {
     expect(host.state.appState.reconnectAttempt).toBe(0);
     expect(host.state.appState.reconnectStatusCode).toBeUndefined();
     expect(host.state.appState.reconnectDelayMs).toBeUndefined();
+    expect(host.state.appState.reconnectErrorCode).toBeUndefined();
   });
 
   it('does not write the retry fields when no retry is in flight', () => {
@@ -1905,5 +1908,55 @@ describe('SessionEventHandler — foreground→background handoff result', () =>
     );
 
     expect(mark).not.toHaveBeenCalled();
+  });
+});
+
+describe('SessionEventHandler — structured error classification', () => {
+  it('records the retry classification from the event', () => {
+    const host = createMockHost();
+    const handler = new SessionEventHandler(host);
+
+    handler.handleEvent(
+      {
+        ...baseEvent('turn.step.retrying'),
+        turnId: 1,
+        attempt: 1,
+        nextAttempt: 2,
+        maxAttempts: 10,
+        delayMs: 20_000,
+        errorName: 'APITimeoutError',
+        errorMessage: 'request timed out',
+        errorCode: 'provider.timeout',
+      } as unknown as Event,
+      vi.fn(),
+    );
+
+    expect(host.state.appState.reconnectErrorCode).toBe('provider.timeout');
+    // A timeout carries no HTTP status — the code is the only structured
+    // signal the status bar has for the "网络超时" wording.
+    expect(host.state.appState.reconnectStatusCode).toBeUndefined();
+  });
+
+  it('forwards the tool result classification into the rendered block', () => {
+    const host = createMockHost();
+    const handler = new SessionEventHandler(host);
+    const completeToolResult = vi.mocked(host.streamingUI.completeToolResult);
+
+    handler.handleEvent(
+      {
+        ...baseEvent('tool.result'),
+        turnId: 1,
+        toolCallId: 'call_aborted',
+        output: 'Tool "Bash" was aborted',
+        isError: true,
+        code: 'aborted',
+      } as unknown as Event,
+      vi.fn(),
+    );
+
+    expect(completeToolResult).toHaveBeenCalledWith(
+      'call_aborted',
+      expect.objectContaining({ is_error: true, code: 'aborted' }),
+    );
   });
 });

@@ -896,6 +896,7 @@ export const en: Record<string, string> = {
   'usage.subagent_title': 'Sub-Agent Usage',
   'usage.panel_title': ' Usage ',
   'usage.session_total': 'Session Total',
+  'usage.cache_rw': 'cache',
   'usage.main_agent': 'Main Agent',
   'usage.sub_agent': 'Sub-Agent',
   'usage.model': 'Model',

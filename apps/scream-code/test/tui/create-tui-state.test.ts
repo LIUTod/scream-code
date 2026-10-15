@@ -27,6 +27,7 @@ function fakeInitialAppState(): AppState {
     streamingPhase: 'idle',
     streamingStartTime: 0,
     pendingUserAction: null,
+    pendingUserActionSince: null,
     language: 'zh',
     theme: 'dark',
     version: '0.0.0-test',

@@ -6,15 +6,10 @@ import {
 import type { Agent } from '..';
 import {
   type ScreamErrorPayload,
-  isScreamError,
   makeErrorPayload,
   toScreamErrorPayload,
 } from '#/errors';
-import {
-  isAbortError,
-  isContextOverflowError,
-  isMaxStepsExceededError,
-} from '../../loop/errors';
+import { isAbortError, isContextOverflowError } from '../../loop/errors';
 import {
   createLoopEventDispatcher,
   runTurn,
@@ -24,6 +19,8 @@ import {
   type LoopTurnStopReason,
 } from '../../loop/index';
 import type { AgentEvent, TurnEndedEvent } from '../../rpc';
+import { TURN_DEFAULTS } from './defaults';
+import { classifyToolResult } from './tool-failure-streak';
 
 /** Cap on how long the first turn waits for MCP servers to finish loading. */
 const MCP_WAIT_TIMEOUT_MS = 10_000;
@@ -51,7 +48,6 @@ import { USER_PROMPT_ORIGIN, type PromptOrigin, type ContextMessage } from '../c
 import { renderUserPromptHookBlockResult, renderUserPromptHookResult } from '../../session/hooks';
 import { looksLikeVerificationCommand } from '../working-set';
 import { ToolCallDeduplicator } from './tool-dedup';
-import { TURN_DEFAULTS } from './defaults';
 import { isBudgetNearExhaustion } from '../goal';
 
 interface ActiveTurn {
@@ -104,6 +100,26 @@ export class TurnFlow {
   private convergenceInjections = 0;
   private currentStepHadContent = false;
   private lastToolFailure: { toolName: string; isExploratory: boolean } | null = null;
+  /**
+   * Consecutive-failure circuit breaker (model-issued calls only; nested
+   * calls are excluded): `toolFailureStreak` counts consecutive `isError`
+   * results and resets on any success. Crossing the notice threshold queues a
+   * "change approach" reminder; crossing the stop threshold makes the next
+   * step a wrap-up after which the turn ends. Injections happen at the next
+   * step boundary (beforeStep), never mid-batch.
+   */
+  private toolFailureStreak = 0;
+  private toolFailureNoticeIssued = false;
+  private toolFailureNoticePending = false;
+  private toolFailureWrapUpPending = false;
+  /** Set once the wrap-up step for the failure stop threshold ran. */
+  private failureStopEngaged = false;
+  /**
+   * True when this turn's loop result carried `stepBudgetExhausted` (the
+   * wrap-up step after the step budget ran out). Reset per turn; read when
+   * `turn.ended` is built so hosts can distinguish a budget cut.
+   */
+  private stepBudgetExhaustedThisTurn = false;
   private summaryGuardInjected = false;
   private turnStartWorkingSetPathCount = 0;
   private turnStartVerificationCount = 0;
@@ -487,6 +503,12 @@ export class TurnFlow {
     this.convergenceInjections = 0;
     this.currentStepHadContent = false;
     this.lastToolFailure = null;
+    this.toolFailureStreak = 0;
+    this.toolFailureNoticeIssued = false;
+    this.toolFailureNoticePending = false;
+    this.toolFailureWrapUpPending = false;
+    this.failureStopEngaged = false;
+    this.stepBudgetExhaustedThisTurn = false;
     this.currentTurnId = turnId;
     this.agent.workingSet.decay(turnId);
     this.summaryGuardInjected = false;
@@ -524,6 +546,7 @@ export class TurnFlow {
           type: 'turn.ended',
           turnId,
           reason: stopReason === 'aborted' ? 'cancelled' : 'completed',
+          ...(this.stepBudgetExhaustedThisTurn ? { stepBudgetExhausted: true } : {}),
         };
       }
     } catch (error) {
@@ -701,7 +724,10 @@ export class TurnFlow {
           // setActiveTools still waits for the next turn by design.
           buildTools: () => (stepTools.current = this.agent.tools.loopToolsFor(turnToolFilter)),
           log: this.agent.log,
-          maxSteps: loopControl?.maxStepsPerTurn,
+          // Soft per-turn step budget: the configured value wins, `0` disables
+          // the budget, and otherwise the default caps a runaway turn — the
+          // loop then wraps up with one final reporting step instead of failing.
+          maxSteps: loopControl?.maxStepsPerTurn ?? TURN_DEFAULTS.maxStepsPerTurn,
           maxRetryAttempts: loopControl?.maxRetriesPerStep,
           // Interactive user steers interrupt an in-flight tool batch, and so
           // does any steer carrying an explicit `interrupt: true` (the parent
@@ -742,10 +768,46 @@ export class TurnFlow {
             });
           },
           hooks: {
-            beforeStep: async ({ signal: stepSignal, stepNumber }) => {
+            beforeStep: async ({ signal: stepSignal, stepNumber, finalStep }) => {
               this.flushSteerBuffer();
               this.currentStepHadContent = false;
               await this.agent.fullCompaction.beforeStep(stepSignal);
+
+              if (finalStep === true) {
+                // Wrap-up step after the step budget was exhausted: the turn
+                // ends when this step returns, so tell the model to stop and
+                // report instead of starting more work.
+                this.agent.context.appendSystemReminder(
+                  'Step budget exhausted: this is the final step of this turn. ' +
+                    'Stop exploring and do not start new work. Report to the user now in a normal ' +
+                    'text reply — what you completed, what is blocked, what you already tried, ' +
+                    'and which decision or input you need from them. This report is a normal ' +
+                    'completion, not a failure.',
+                  { kind: 'system_trigger', name: 'step_budget_exhausted' },
+                );
+              }
+
+              if (this.toolFailureNoticePending) {
+                this.toolFailureNoticePending = false;
+                this.agent.context.appendSystemReminder(
+                  `${TURN_DEFAULTS.toolFailureNoticeStreak} consecutive tool calls have failed. ` +
+                    'Re-read the errors and change approach — different parameters, a different tool, ' +
+                    'or re-check your assumptions. If the blockage needs user input, stop and report it ' +
+                    'instead of retrying.',
+                  { kind: 'system_trigger', name: 'tool_failure_streak' },
+                );
+              }
+
+              if (this.toolFailureWrapUpPending) {
+                this.toolFailureWrapUpPending = false;
+                this.failureStopEngaged = true;
+                this.agent.context.appendSystemReminder(
+                  `${TURN_DEFAULTS.toolFailureStopStreak} consecutive tool calls have failed. This is ` +
+                    'the final step of this turn: stop calling tools and report to the user now — what ' +
+                    'you tried, how the attempts failed, what blocks progress, and what you need from them.',
+                  { kind: 'system_trigger', name: 'tool_failure_stop' },
+                );
+              }
 
               const goal = this.agent.goal.getGoal().goal;
               if (stepNumber === 1 && goal?.status === 'active' && !this.todoSeenThisTurn) {
@@ -814,6 +876,12 @@ export class TurnFlow {
               await this.agent.goal.recordTokenUsage(ltodGrandTotal(usage), usage);
               await this.agent.fullCompaction.afterStep();
               deduper.endStep();
+              if (this.failureStopEngaged) {
+                // The wrap-up step for the failure stop threshold ran: this is
+                // the turn's last step even if the model used tools again.
+                return { stopTurn: true };
+              }
+              return undefined;
             },
             // oxlint-disable-next-line no-loop-func -- stop hook continuation state is scoped to this turn.
             shouldContinueAfterStop: async ({ signal, stopReason }) => {
@@ -840,6 +908,9 @@ export class TurnFlow {
               // before the answer.
               //
               // See the 「续轮输出纪律」 section of `docs/turn-pipeline.md`.
+              // The failure stop threshold already decided this turn ends: its
+              // wrap-up step ran, so no category below may extend the turn.
+              if (this.failureStopEngaged) return { continue: false };
               // allow: external-input
               if (this.flushSteerBuffer()) return { continue: true };
               signal.throwIfAborted();
@@ -1041,6 +1112,32 @@ export class TurnFlow {
                     );
               const { isError, output } = finalResult;
 
+              // Consecutive-failure streak over model-issued calls (nested
+              // calls excluded): any success resets it. Only flags are set
+              // here — the actual reminders are injected at the next step
+              // boundary in beforeStep, never mid-batch, so they cannot
+              // interleave with the pending tool results of the running batch.
+              if (ctx.nested !== true) {
+                const outcome = classifyToolResult(finalResult);
+                if (outcome === 'failure') {
+                  this.toolFailureStreak += 1;
+                  if (this.toolFailureStreak >= TURN_DEFAULTS.toolFailureStopStreak) {
+                    this.toolFailureWrapUpPending = true;
+                  } else if (
+                    this.toolFailureStreak === TURN_DEFAULTS.toolFailureNoticeStreak &&
+                    !this.toolFailureNoticeIssued
+                  ) {
+                    this.toolFailureNoticeIssued = true;
+                    this.toolFailureNoticePending = true;
+                  }
+                } else if (outcome === 'success') {
+                  this.toolFailureStreak = 0;
+                  this.toolFailureNoticeIssued = false;
+                }
+                // 'neutral' (aborted) leaves the streak untouched — the user or a
+                // parent agent stopped the call, which is not evidence about the model.
+              }
+
               // Second half of the two-phase private-read taint: only a call
               // that actually succeeded may taint the session, because a
               // failed read never delivered its content to the model.
@@ -1167,21 +1264,14 @@ export class TurnFlow {
           },
         });
 
+        if (result.stepBudgetExhausted === true) this.stepBudgetExhaustedThisTurn = true;
         return result.stopReason;
       } catch (error) {
         if (isContextOverflowError(error)) {
           await this.agent.fullCompaction.handleOverflowError(signal, error);
           continue; // Retry with compacted context
         }
-        if (isMaxStepsExceededError(error)) {
-          this.agent.log.warn('turn hit max steps', {
-            turnId,
-            steps: this.currentStepByTurn.get(turnId) ?? this.currentStep,
-            limit: isScreamError(error) ? error.details?.['maxSteps'] : undefined,
-          });
-        } else {
-          this.agent.log.error('turn failed', { turnId, error });
-        }
+        this.agent.log.error('turn failed', { turnId, error });
         throw error;
       }
     }

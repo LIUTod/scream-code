@@ -12,7 +12,10 @@ export class AutoModeAskUserQuestionDenyPermissionPolicy implements PermissionPo
     return {
       kind: 'deny',
       message:
-        'AskUserQuestion is disabled while auto permission mode is active. Make a reasonable decision and continue without asking the user.',
+        'AskUserQuestion is unavailable in auto permission mode. Decide reasonable defaults and ' +
+        'keep working — but when a decision genuinely requires the user, stop that direction, state ' +
+        'the question and your recommended option in a normal text reply, and end the turn so the ' +
+        'user can answer when they return. Do not keep guessing past a question only the user can settle.',
     };
   }
 }

@@ -40,6 +40,12 @@ export interface ExecuteLoopStepDeps {
   readonly hooks?: LoopHooks | undefined;
   readonly log?: Logger | undefined;
   readonly currentStep: number;
+  /**
+   * True for the single wrap-up step that runs after the turn's step budget
+   * is exhausted (see `runTurn`). Step hooks receive it in their context; the
+   * turn ends when this step returns. False on normal steps.
+   */
+  readonly finalStep?: boolean | undefined;
   readonly maxRetryAttempts?: number;
   readonly recordUsage:
     (usage: TokenUsage) => RecordStepUsageResult | void | Promise<RecordStepUsageResult | void>;
@@ -78,6 +84,7 @@ export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<{
     hooks,
     log,
     currentStep,
+    finalStep,
     maxRetryAttempts,
     recordUsage,
     mediaProjection,
@@ -89,6 +96,7 @@ export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<{
       stepNumber: currentStep,
       signal,
       llm,
+      finalStep,
     });
     if (beforeStep?.block === true) {
       throw new Error(beforeStep.reason ?? `Step ${String(currentStep)} was blocked`);
@@ -286,6 +294,7 @@ export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<{
         stopReason: effectiveStopReason,
         signal,
         llm,
+        finalStep,
       });
       stopTurnAfterStep = stopTurnAfterStep || afterStep?.stopTurn === true;
     } catch {

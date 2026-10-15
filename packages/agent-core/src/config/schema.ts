@@ -191,6 +191,15 @@ const McpServerCommonFields = {
    * declaration (highest priority). See `mcp/capabilities.ts`.
    */
   capabilities: z.array(z.string().min(1)).optional(),
+  /**
+   * How this server's tools are offered to the model. `'on-demand'` (the
+   * default when unset) keeps the tool schemas out of every request: the
+   * model lists and enables them through the `DiscoverMcpTools` meta tool.
+   * `'always'` declares every tool from the first step (the behaviour
+   * before deferral). Large servers (browser automation, code indexes)
+   * routinely cost tens of thousands of tokens per request when eager.
+   */
+  exposure: z.enum(['always', 'on-demand']).optional(),
 } as const;
 
 export const McpServerStdioConfigSchema = z.object({

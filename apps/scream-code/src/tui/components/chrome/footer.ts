@@ -225,12 +225,29 @@ function pickContextColor(usage: number, colors: ColorPalette): string {
 const SPINNER_FRAMES = ['●', '◉', '◎', '◌', '○', '◌', '◎', '◉'];
 const SPINNER_TICK_MS = 60;
 
+/**
+ * Elapsed suffix for human-blocked states ("等待批准 · 4m"), shown only after a
+ * minute: below that a clock reads as noise, while a long silent stall must be
+ * visible — the previous behaviour showed nothing ever, which made a stalled
+ * approval look like normal work. Units (m/h) are language-neutral symbols, so
+ * the suffix is not routed through i18n.
+ */
+function waitingStallSuffix(since: number | null | undefined): string {
+  if (since === null || since === undefined) return '';
+  const seconds = Math.floor((Date.now() - since) / 1000);
+  if (seconds < 60) return '';
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return ` · ${String(minutes)}m`;
+  return ` · ${String(Math.floor(minutes / 60))}h${String(minutes % 60)}m`;
+}
+
 function buildStatusLine(
   streamingPhase: AppState['streamingPhase'],
   streamingStartTime: number,
   statusFlags: {
     readonly isCompacting: boolean;
     readonly pendingUserAction: AppState['pendingUserAction'];
+    readonly pendingUserActionSince?: AppState['pendingUserActionSince'];
     readonly reconnectAttempt: number;
     readonly reconnectMaxAttempts: number | undefined;
   },
@@ -239,9 +256,14 @@ function buildStatusLine(
   // outrank the phase table below because the phase alone cannot express them:
   // a compaction runs as `waiting`, a retry keeps the last phase of the failed
   // attempt, and an approval/question panel blocks the turn without any event.
-  // None of them shows an elapsed time — a growing clock would claim progress.
-  if (statusFlags.pendingUserAction === 'approval') return t('status.awaiting_approval');
-  if (statusFlags.pendingUserAction === 'question') return t('status.awaiting_answer');
+  // The phase timer is wrong for all of them; a panel that has waited long
+  // enough gets its own "how long" suffix instead (waitingStallSuffix).
+  if (statusFlags.pendingUserAction === 'approval') {
+    return t('status.awaiting_approval') + waitingStallSuffix(statusFlags.pendingUserActionSince);
+  }
+  if (statusFlags.pendingUserAction === 'question') {
+    return t('status.awaiting_answer') + waitingStallSuffix(statusFlags.pendingUserActionSince);
+  }
   if (statusFlags.isCompacting) return t('status.compacting');
   if (streamingPhase === 'idle') {
     return t('status.idle');
@@ -537,6 +559,7 @@ export class FooterComponent implements Component {
         {
           isCompacting: state.isCompacting === true,
           pendingUserAction: state.pendingUserAction ?? null,
+          pendingUserActionSince: state.pendingUserActionSince ?? null,
           reconnectAttempt: state.reconnectAttempt ?? 0,
           reconnectMaxAttempts: state.reconnectMaxAttempts,
         },

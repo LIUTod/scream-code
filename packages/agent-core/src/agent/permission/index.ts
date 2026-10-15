@@ -76,6 +76,14 @@ export class PermissionManager {
   private readonly localPendingPrivateReads = new Map<string, string>();
   private readonly localTaintedPrivateReads = new Set<string>();
   private nextApprovalId = 0;
+  /**
+   * Tools whose approval already timed out in the current turn. The user was
+   * away once for this tool; asking again would stall for another full
+   * timeout, so a second request is denied outright with guidance (see
+   * `requestToolApproval`). Reset when the turn id changes; never persisted.
+   */
+  private approvalTimeoutTurnId: number | undefined;
+  private readonly approvalTimeoutTools = new Set<string>();
 
   constructor(
     protected readonly agent: Agent,
@@ -305,6 +313,25 @@ export class PermissionManager {
     const { signal } = context;
     const id = context.toolCall.id;
     const name = context.toolCall.name;
+    const turnIdNumber = Number(context.turnId);
+    if (this.approvalTimeoutTurnId !== turnIdNumber) {
+      this.approvalTimeoutTurnId = turnIdNumber;
+      this.approvalTimeoutTools.clear();
+    }
+    if (this.approvalTimeoutTools.has(name)) {
+      // The user already let this tool's approval time out earlier in this
+      // turn: deny immediately instead of stalling for another full timeout.
+      return this.permissionPolicyResolutionToPrepare(
+        {
+          kind: 'deny',
+          message:
+            `Approval for ${name} already timed out earlier in this turn — the user is away. ` +
+            'Do not re-issue this call; use a path that does not need approval, or stop and report the blockage to the user.',
+        },
+        context,
+        policyName,
+      );
+    }
     const display =
       context.execution.display ?? {
         kind: 'generic',
@@ -375,12 +402,21 @@ export class PermissionManager {
         const timeoutPromise = new Promise<never>((_, reject) => {
           timeoutHandle = setTimeout(() => {
             timedOut = true;
-            reject(new Error(`Approval request timed out after ${String(APPROVAL_TIMEOUT_MS)}ms`));
+            reject(
+              new Error(
+                `Approval request timed out after ${String(APPROVAL_TIMEOUT_MS)}ms. ` +
+                  'The user is likely away: do NOT re-issue this approval-requiring call. ' +
+                  'Use a path that does not need approval, or stop and report the blockage to the user.',
+              ),
+            );
           }, APPROVAL_TIMEOUT_MS);
         });
         response = await Promise.race([customPromise, timeoutPromise]);
       } catch (error) {
         this.pendingApprovals.delete(approvalId);
+        if (timedOut) {
+          this.approvalTimeoutTools.add(name);
+        }
         this.recordDecision(context, {
           decision: timedOut ? 'timeout' : 'cancelled',
           reason: errorText(error),

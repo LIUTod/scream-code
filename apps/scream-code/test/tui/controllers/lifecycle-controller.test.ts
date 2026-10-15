@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { LifecycleController } from '#/tui/controllers/lifecycle-controller';
+import { LifecycleController, reconnectReasonKey } from '#/tui/controllers/lifecycle-controller';
 import {
   MAX_TRANSCRIPT_ENTRIES,
   TranscriptController,
@@ -435,5 +435,51 @@ describe('LifecycleController', () => {
       expect(stats.turns).toBe(100);
       expect(stats.toolCalls).toBe(100);
     });
+  });
+});
+
+describe('LifecycleController — reconnect reason wording', () => {
+  function reasonKeyFor(patch: Partial<AppState>): string {
+    return reconnectReasonKey(patch as AppState);
+  }
+
+  it('prefers the structured code over the legacy status-code and name checks', () => {
+    // Contradictory legacy fields: the code wins.
+    expect(
+      reasonKeyFor({
+        reconnectErrorCode: 'provider.timeout',
+        reconnectStatusCode: 429,
+        reconnectErrorName: 'APIStatusError',
+      }),
+    ).toBe('status.reason_timeout');
+  });
+
+  it.each([
+    ['provider.rate_limit', 'status.reason_rate_limit'],
+    ['provider.timeout', 'status.reason_timeout'],
+    ['provider.connection_error', 'status.reason_connection'],
+  ])('maps %s to %s', (errorCode, expected) => {
+    expect(reasonKeyFor({ reconnectErrorCode: errorCode })).toBe(expected);
+  });
+
+  it('still labels a server error by its status code', () => {
+    expect(
+      reasonKeyFor({ reconnectErrorCode: 'provider.api_error', reconnectStatusCode: 503 }),
+    ).toBe('status.reason_server');
+  });
+
+  it('falls back to the error name for retry records without a code', () => {
+    // Legacy wire records: no `errorCode`, so the timeout used to be
+    // recognizable only by the error class name.
+    expect(reasonKeyFor({ reconnectErrorName: 'APITimeoutError' })).toBe('status.reason_timeout');
+    expect(reasonKeyFor({ reconnectErrorName: 'APIConnectionError' })).toBe(
+      'status.reason_connection',
+    );
+  });
+
+  it('falls back to the status code for retry records without a code', () => {
+    expect(reasonKeyFor({ reconnectStatusCode: 429 })).toBe('status.reason_rate_limit');
+    expect(reasonKeyFor({ reconnectStatusCode: 500 })).toBe('status.reason_server');
+    expect(reasonKeyFor({})).toBe('status.reason_connection');
   });
 });

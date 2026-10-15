@@ -41,9 +41,10 @@ export type LoopTerminalStepStopReason = Exclude<LoopStepStopReason, 'tool_use'>
  * Stop reasons that can be returned in a normal `TurnResult`.
  *
  * `tool_use` is intentionally absent because it cannot be the final result of a
- * completed turn. Errors and max-step exhaustion are represented by thrown
- * errors, not by this union. Compaction is a host-level retry concern rather
- * than a stop reason.
+ * completed turn. Errors are represented by thrown errors, not by this union;
+ * max-step exhaustion is not an error — the loop runs one wrap-up step and
+ * ends the turn with `end_turn`. Compaction is a host-level retry concern
+ * rather than a stop reason.
  */
 export type LoopTurnStopReason = LoopTerminalStepStopReason | 'aborted';
 
@@ -68,6 +69,14 @@ export interface TurnResult {
   stopReason: LoopTurnStopReason;
   steps: number;
   usage: TokenUsage;
+  /**
+   * True when the turn ran its single wrap-up step because the step budget
+   * (`maxSteps`) was exhausted (see `runTurn`). Hosts use it to distinguish
+   * "budget cut, the model reported where it got stuck" from an ordinary
+   * completion — the loop no longer throws for this case, so this flag is the
+   * only machine-readable signal that the stop was not natural.
+   */
+  stepBudgetExhausted?: boolean | undefined;
 }
 
 export type ExecutableToolOutput = string | ContentPart[];
@@ -113,6 +122,26 @@ export interface ExecutableToolErrorResult {
   readonly isError: true;
   /** See {@link ExecutableToolSuccessResult.message}. */
   readonly message?: string | undefined;
+  /**
+   * Machine-readable classification of the error, so consumers (TUI, RPC
+   * clients, hooks) read a field instead of guessing from `output` prose:
+   * - `'aborted'` — the call was cancelled (user stop, parent-agent
+   *   interject, or any other abort signal).
+   * - `'failed'` — the tool ran and threw.
+   * - `'blocked'` — a permission policy or guard refused the call before it
+   *   ran.
+   *
+   * Optional: a tool's own error result carries no code, and records written
+   * before this field existed have none either — consumers must treat
+   * `undefined` as "unclassified" rather than as a fourth state.
+   */
+  readonly code?: 'aborted' | 'failed' | 'blocked' | undefined;
+  /**
+   * Human-readable abort attribution, taken from `AbortSignal.reason`
+   * (stringified). Present only alongside `code: 'aborted'`, and omitted when
+   * the abort carried no reason.
+   */
+  readonly abortReason?: string | undefined;
   /**
    * Internal loop-control hint. Tool result events strip this field before
    * persistence; it only tells the current turn whether another model step is
@@ -215,6 +244,12 @@ export interface LoopStepHookContext {
   readonly stepNumber: number;
   readonly signal: AbortSignal;
   readonly llm: LLM;
+  /**
+   * True for the single wrap-up step that runs after the turn's step budget
+   * is exhausted: the model is asked to stop and report, and the turn ends
+   * when this step returns. False on normal steps.
+   */
+  readonly finalStep?: boolean | undefined;
 }
 
 export interface ToolExecutionHookContext extends LoopStepHookContext {

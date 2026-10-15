@@ -14,7 +14,7 @@ import type { LLMChatResponse, LoopHooks } from '../../src/loop/index';
 import { userCancellationReason } from '../../src/utils/abort';
 import { makeEndTurnResponse, makeToolCall, makeToolUseResponse } from './fixtures/fake-llm';
 import { runTurn } from './fixtures/helpers';
-import { EchoTool, GatedTool, markReadFileAccesses, SlowTool } from './fixtures/tools';
+import { EchoTool, GatedTool, HangingTool, markReadFileAccesses, SlowTool } from './fixtures/tools';
 
 function waitOneMacrotask(): Promise<void> {
   return new Promise((resolve) => {
@@ -149,6 +149,50 @@ describe('runTurn — abort handling', () => {
     // tool.execute must not have been invoked
     expect(echo.calls.length).toBe(0);
     expect(sink.byType('turn.interrupted')[0]?.reason).toBe('aborted');
+    // The abort that cut the hook short is classified as an abort — not as a
+    // hook failure — and carries the abort's own reason.
+    const toolResult = sink.byType('tool.result').find((e) => e.toolCallId === 'tc-1');
+    expect(toolResult?.result).toMatchObject({
+      isError: true,
+      code: 'aborted',
+      abortReason: expect.any(String),
+    });
+  });
+
+  it('classifies a tool an abort prevented from starting as aborted', async () => {
+    // The abort lands after the call was recorded but before execution starts:
+    // `echo` here is a queued sibling the abort never lets run.
+    const gated = new GatedTool('gated');
+    const echo = new EchoTool();
+    const controller = new AbortController();
+
+    const turnPromise = runTurn({
+      tools: [gated, echo],
+      responses: [
+        makeToolUseResponse([
+          makeToolCall('gated', {}, 'tc-gated'),
+          makeToolCall('echo', { text: 'never' }, 'tc-echo'),
+        ]),
+        makeEndTurnResponse('unreachable'),
+      ],
+      signal: controller.signal,
+    });
+
+    await gated.started;
+    await waitOneMacrotask();
+    controller.abort(userCancellationReason());
+    gated.release();
+    const { sink } = await turnPromise;
+
+    expect(echo.calls.length).toBe(0);
+    const echoResult = sink.byType('tool.result').find((e) => e.toolCallId === 'tc-echo');
+    // The `Tool "echo" was aborted` wording only comes from the pre-execution
+    // abort check, so this asserts that branch's classification.
+    expect(echoResult?.result).toMatchObject({
+      isError: true,
+      code: 'aborted',
+      abortReason: 'Aborted by the user',
+    });
   });
 
   it('does NOT crash when an aborted turn still has work to drain', async () => {
@@ -173,6 +217,41 @@ describe('runTurn — abort handling', () => {
     expect(result.stopReason).toBe('aborted');
     // Exactly one turn.interrupted record
     expect(sink.byType('turn.interrupted').length).toBe(1);
+  });
+
+  it('classifies a tool that ignores the abort through the grace timeout', async () => {
+    // The grace branch synthesizes the only result the loop produces for a tool
+    // that never settles. It must carry the same `aborted` classification as
+    // the regular cancellation paths, otherwise this one path would keep
+    // forcing consumers to read the wording.
+    const hang = new HangingTool();
+    const controller = new AbortController();
+
+    const turnPromise = runTurn({
+      tools: [hang],
+      responses: [
+        makeToolUseResponse([makeToolCall('hang', {}, 'tc-hang')]),
+        makeEndTurnResponse('unreachable'),
+      ],
+      signal: controller.signal,
+    });
+
+    while (hang.calls.length === 0) {
+      await waitOneMacrotask();
+    }
+    controller.abort(userCancellationReason());
+    const { result, sink } = await turnPromise;
+
+    expect(result.stopReason).toBe('aborted');
+    const toolResult = sink.byType('tool.result').find((e) => e.toolCallId === 'tc-hang');
+    // The grace wording proves this result came from the timeout branch rather
+    // than the pre-execution abort check.
+    expect(toolResult?.result).toMatchObject({
+      output: expect.stringContaining('aborted by grace timeout'),
+      isError: true,
+      code: 'aborted',
+      abortReason: 'Aborted by the user',
+    });
   });
 
   it('does not start a queued conflicting tool after abort', async () => {
@@ -206,9 +285,14 @@ describe('runTurn — abort handling', () => {
     const results = sink.byType('tool.result');
     expect(results.map((e) => e.toolCallId)).toEqual(['tc-gated', 'tc-echo']);
     const echoResult = results.find((event) => event.toolCallId === 'tc-echo');
-    expect(echoResult?.result).toEqual({
+    // The cancellation classification travels with the result, so consumers
+    // read `code` instead of matching the output text.
+    expect(echoResult?.result).toMatchObject({
       output: 'Tool "echo" was aborted',
       isError: true,
+      code: 'aborted',
+      // A bare `abort()` still carries the runtime's default reason.
+      abortReason: expect.any(String),
     });
   });
 
@@ -240,6 +324,12 @@ describe('runTurn — abort handling', () => {
     expect(output).not.toBe('Tool "slow" was aborted');
     expect(output).toContain('not a system error');
     expect(output).toContain("wait for the user");
+    // The code names the cancellation lane; the abort's own reason rides along
+    // so a consumer never has to re-derive it from the wording.
+    expect(toolResult?.result).toMatchObject({
+      code: 'aborted',
+      abortReason: 'Aborted by the user',
+    });
   });
 
   it('every tool.call still has a matching tool.result when aborted mid-batch', async () => {

@@ -1,9 +1,11 @@
 import { sleep } from '@antfu/utils';
 import {
   APIProviderRateLimitError,
+  ChatProviderError,
   calculateRateLimitBackoffMs,
 } from '@scream-code/ltod';
 
+import { isScreamError, toScreamErrorPayload } from '#/errors';
 import type { Logger } from '#/logging/types';
 
 import { abortable } from '../utils/abort';
@@ -187,6 +189,7 @@ interface RetryErrorFields {
   readonly errorName: string;
   readonly errorMessage: string;
   readonly statusCode?: number;
+  readonly errorCode?: string;
 }
 
 function retryErrorFields(error: unknown): RetryErrorFields {
@@ -194,7 +197,25 @@ function retryErrorFields(error: unknown): RetryErrorFields {
     errorName: error instanceof Error ? error.name : typeof error,
     errorMessage: error instanceof Error ? error.message : String(error),
     statusCode: maybeStatusCode(error),
+    errorCode: retryErrorCode(error),
   };
+}
+
+/**
+ * Error-protocol classification of a failed attempt, for consumers that label
+ * the retry (e.g. the TUI's reconnect status bar string).
+ *
+ * Only errors the protocol actually classifies get a code: an unrecognized
+ * error is omitted rather than reported as `internal`, so consumers can tell
+ * "unclassified" apart from "classified as an internal fault" and keep their
+ * own fallback wording for the former.
+ */
+function retryErrorCode(error: unknown): string | undefined {
+  if (isScreamError(error)) return error.code;
+  // Every ltod provider error (status / connection / timeout / rate limit) is
+  // a ChatProviderError; the payload mapper holds the subclass precedence, so
+  // this one check covers them all without duplicating that ordering here.
+  return error instanceof ChatProviderError ? toScreamErrorPayload(error).code : undefined;
 }
 
 function maybeStatusCode(error: unknown): number | undefined {

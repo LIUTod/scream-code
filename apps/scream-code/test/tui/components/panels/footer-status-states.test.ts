@@ -26,6 +26,7 @@ function baseState(overrides: Partial<AppState> = {}): AppState {
     streamingPhase: 'idle',
     streamingStartTime: 0,
     pendingUserAction: null,
+    pendingUserActionSince: null,
     theme: 'dark',
     version: 'test',
     editorCommand: null,
@@ -112,7 +113,40 @@ describe('footer status block — non-phase states', () => {
   it('tolerates fixtures without the new fields (older AppState shapes)', () => {
     const legacy = baseState({ streamingPhase: 'waiting', streamingStartTime: NOW - 3000 });
     delete (legacy as { pendingUserAction?: unknown }).pendingUserAction;
+    delete (legacy as { pendingUserActionSince?: unknown }).pendingUserActionSince;
     expect(statusSegment(legacy).endsWith('等待中 3s')).toBe(true);
+  });
+
+  it('shows how long a blocked wait has lasted once it passes a minute', () => {
+    const out = statusSegment(
+      baseState({
+        streamingPhase: 'tool',
+        pendingUserAction: 'approval',
+        pendingUserActionSince: NOW - 4 * 60_000,
+      }),
+    );
+    expect(out.endsWith('等待批准 · 4m')).toBe(true);
+  });
+
+  it('hides the wait clock under a minute — and without a start time', () => {
+    expect(
+      statusSegment(
+        baseState({
+          streamingPhase: 'tool',
+          pendingUserAction: 'question',
+          pendingUserActionSince: NOW - 30_000,
+        }),
+      ).endsWith('等待回答'),
+    ).toBe(true);
+    expect(
+      statusSegment(
+        baseState({
+          streamingPhase: 'tool',
+          pendingUserAction: 'question',
+          pendingUserActionSince: null,
+        }),
+      ).endsWith('等待回答'),
+    ).toBe(true);
   });
 });
 

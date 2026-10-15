@@ -852,7 +852,8 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
             errCode === "provider.auth_error" ||
             errCode === "provider.rate_limit" ||
             errCode === "provider.api_error" ||
-            errCode === "provider.connection_error"
+            errCode === "provider.connection_error" ||
+            errCode === "provider.timeout"
           ) {
             exitCode = 3;
           }
@@ -924,7 +925,14 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
           }
         } else if (type === "turn.ended") {
           if (event.reason === "completed") {
-            finish();
+            if (event.stepBudgetExhausted === true) {
+              // Exit 4 = incomplete: the turn ran out of steps and wrapped up
+              // (soft landing — see `TurnResult.stepBudgetExhausted`). The loop
+              // no longer throws for this case, so the flag is the only signal.
+              finish(new Error("Turn ended: step budget exhausted"), 4);
+            } else {
+              finish();
+            }
           } else if (event.reason === "cancelled") {
             // SIGINT handler sets exitCode=130; don't override.
             finish(new Error("Turn cancelled"));
@@ -936,17 +944,16 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
                 ? `${event.error.code}: ${event.error.message}`
                 : `Turn ended: ${event.reason}`;
             // Semantic exit codes:
-            //   4 = incomplete (max steps exceeded, agent didn't finish)
             //   3 = provider error (auth, rate limit, API failure)
             //   1 = generic error (everything else)
+            //   (4 = incomplete comes from the step-budget path above)
             let code = 1;
-            if (errCode === "loop.max_steps_exceeded") {
-              code = 4;
-            } else if (
+            if (
               errCode === "provider.auth_error" ||
               errCode === "provider.rate_limit" ||
               errCode === "provider.api_error" ||
-              errCode === "provider.connection_error"
+              errCode === "provider.connection_error" ||
+              errCode === "provider.timeout"
             ) {
               code = 3;
             }

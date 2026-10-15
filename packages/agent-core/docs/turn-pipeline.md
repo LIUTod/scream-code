@@ -73,14 +73,15 @@ runOneTurn()                           [turn/index.ts:443-565]
 ```
 while (true)
   ├─ signal.throwIfAborted()
-  ├─ maxSteps 检查（loopControl.maxStepsPerTurn）
+  ├─ 步数预算检查（loopControl.maxStepsPerTurn，默认 TURN_DEFAULTS.maxStepsPerTurn）
+  │     耗尽 → finalStep 软着陆：跑最后一个 wrap-up 步（模型收到停止并报告的提醒）后结束
   ├─ executeLoopStep()（loop/turn-step.ts）
   │     beforeStep hook → chatWithRetry → usage 记录 → deriveStepStopReason → 工具批
   ├─ 连续 8 步全 rejected 熔断（run-turn.ts:140-149）
   ├─ stopReason === 'tool_use' → continue
   ├─ 否则调宿主 hooks.shouldContinueAfterStop()
   │     true → continue；false/undefined → break
-  └─ 异常：abort → turn.interrupted；max_steps/error → 抛出（宿主 catch）
+  └─ 异常：abort → turn.interrupted；error → 抛出（宿主 catch）
 ```
 
 宿主在 `runTurn({ hooks })` 里注入 7 个 hook（`turn/index.ts:680-1084`），按调用顺序：
@@ -171,7 +172,8 @@ goal 语义的常量与提示词在 **`turn/goal.ts`**（GOAL_*）。
 
 | 守卫 | 位置 | 触发 | 后果 |
 |---|---|---|---|
-| maxSteps | loop/run-turn.ts:109-110 | `loopControl.maxStepsPerTurn` | 抛 MaxStepsExceededError |
+| 步数预算 | loop/run-turn.ts（finalStep 分支） | `maxSteps`（`loopControl.maxStepsPerTurn`，默认 TURN_DEFAULTS.maxStepsPerTurn=160；0 禁用）。**口径：单个 turn 内、无用户参与的自主循环**，每条新用户消息重新起算；耗尽后额外跑 1 个 wrap-up 步 | 软着陆：跑 1 个 wrap-up 步（注入停止并报告提醒）后 end_turn，结果带 `stepBudgetExhausted: true`（CLI 退出码 4 / TUI 提示据此；不再抛 `loop.max_steps_exceeded`） |
+| 连续失败熔断 | turn/index.ts（toolFailureStreak） | 连续 6 次工具执行失败 → 提醒；10 次 → 强制 wrap-up | 提醒后继续；wrap-up 步后 end_turn |
 | 连续拒绝熔断 | loop/run-turn.ts:140-149 | 连续 8 步全 rejected | stopReason=end_turn |
 | 收敛注入上限 | turn/defaults.ts（TURN_DEFAULTS） | 3 次 | 停止注入 convergence_gate |
 | summary guard | turn/index.ts:853-872 | 每轮 1 次 | 要求结构化总结 |

@@ -890,6 +890,7 @@ export const zh: Record<string, string> = {
   'usage.subagent_title': '子 Agent 用量',
   'usage.panel_title': ' 用量 ',
   'usage.session_total': '会话总计',
+  'usage.cache_rw': '缓存',
   'usage.main_agent': '主 Agent',
   'usage.sub_agent': '子 Agent',
   'usage.model': '模型',

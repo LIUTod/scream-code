@@ -7,7 +7,7 @@
  * the policies resolve it lazily.
  */
 
-import type { ToolCall } from '@scream-code/ltod';
+import type { ToolAnnotations, ToolCall } from '@scream-code/ltod';
 import { vi } from 'vitest';
 
 import type { Agent } from '../../../../src/agent';
@@ -78,6 +78,7 @@ export function makePermissionHarness(options: PermissionHarnessOptions = {}): P
 export function toolContext(
   toolName: string,
   args: Record<string, unknown>,
+  annotations?: ToolAnnotations,
 ): PermissionPolicyContext {
   const toolCall: ToolCall = {
     type: 'function',
@@ -93,6 +94,11 @@ export function toolContext(
     llm: {} as never,
     args,
     toolCall,
+    // The loop passes the resolved tool into the hook context; policies read
+    // `tool.annotations` from here (author-declared hints).
+    ...(annotations === undefined
+      ? {}
+      : { tool: { name: toolName, description: '', parameters: {}, annotations } }),
     execution: {
       description: `Running: ${toolName}`,
       display: { kind: 'command', command, cwd: '/workspace' },

@@ -973,7 +973,7 @@ describe('Agent turn flow', () => {
     );
   });
 
-  it('honors configured maxStepsPerTurn in agent turns', async () => {
+  it('wraps up a turn that reaches the configured maxStepsPerTurn', async () => {
     const ctx = testAgent({
       initialConfig: {
         providers: {},
@@ -992,25 +992,112 @@ describe('Agent turn flow', () => {
       arguments: '{"command":"printf loop-output","timeout":60}',
     };
     ctx.mockNextResponse(bashCall);
+    ctx.mockNextResponse({ type: 'text', text: 'Step budget exhausted; here is where I got to.' });
 
     await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Run a command once' }] });
     const events = await ctx.untilTurnEnd();
 
-    expect(ctx.llmCalls).toHaveLength(1);
+    // Step 1 ran the tool; the exhausted budget then ran one wrap-up step.
+    expect(ctx.llmCalls).toHaveLength(2);
     expect(events).toContainEqual(
       expect.objectContaining({
         event: 'turn.ended',
-        args: expect.objectContaining({
-          reason: 'failed',
-          error: expect.objectContaining({
-            code: 'loop.max_steps_exceeded',
-            details: expect.objectContaining({
-              maxSteps: 1,
-            }),
-          }),
-        }),
+        args: expect.objectContaining({ reason: 'completed', stepBudgetExhausted: true }),
       }),
     );
+  });
+
+  it('notes a failure streak and wraps up when it crosses the stop threshold', async () => {
+    const jian = createFakeJian({
+      execWithEnv: vi.fn(async () => ({
+        stdin: { write: vi.fn(), end: vi.fn() } as unknown as Writable,
+        stdout: Readable.from(['boom']),
+        stderr: Readable.from(['']),
+        pid: 42,
+        exitCode: 1,
+        wait: vi.fn().mockResolvedValue(1),
+        kill: vi.fn().mockResolvedValue(undefined),
+      })),
+      mkdir: vi.fn().mockResolvedValue(undefined),
+      writeText: vi.fn(async (_path: string, content: string) => content.length),
+    });
+    const ctx = testAgent({ jian });
+    ctx.configure({ tools: ['Bash'] });
+    await ctx.rpc.setPermission({ mode: 'yolo' });
+    ctx.newEvents();
+
+    // Ten distinct failing calls in one step: the notice threshold (6) and
+    // the stop threshold (10) are both crossed before the next step starts.
+    const failing = Array.from({ length: 10 }, (_, index) =>
+      bashCallWithId(`fail_${String(index + 1)}`, `ls missing-${String(index + 1)}.mjs`),
+    );
+    ctx.mockNextResponse({ type: 'text', text: 'Prospecting the tree in many ways.' }, ...failing);
+    ctx.mockNextResponse({
+      type: 'text',
+      text: 'All ten probe attempts failed; the blockage is an unreadable mount and I need your call on it.',
+    });
+
+    await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Survey the tree' }] });
+    const events = await ctx.untilTurnEnd();
+
+    // One failing step plus one wrap-up step; the failure stop forced the end.
+    expect(ctx.llmCalls).toHaveLength(2);
+    const history = JSON.stringify(ctx.agent.context.data().history);
+    expect(history).toContain('consecutive tool calls have failed');
+    expect(history).toContain('the final step of this turn');
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        event: 'turn.ended',
+        args: expect.objectContaining({ reason: 'completed' }),
+      }),
+    );
+  });
+
+  it('resets the failure streak when a call succeeds', async () => {
+    let callIndex = 0;
+    const jian = createFakeJian({
+      execWithEnv: vi.fn(async () => {
+        callIndex += 1;
+        const failure = callIndex <= 6;
+        return {
+          stdin: { write: vi.fn(), end: vi.fn() } as unknown as Writable,
+          stdout: Readable.from([failure ? 'boom' : 'listed']),
+          stderr: Readable.from(['']),
+          pid: 42,
+          exitCode: failure ? 1 : 0,
+          wait: vi.fn().mockResolvedValue(failure ? 1 : 0),
+          kill: vi.fn().mockResolvedValue(undefined),
+        };
+      }),
+      mkdir: vi.fn().mockResolvedValue(undefined),
+      writeText: vi.fn(async (_path: string, content: string) => content.length),
+    });
+    const ctx = testAgent({ jian });
+    ctx.configure({ tools: ['Bash'] });
+    await ctx.rpc.setPermission({ mode: 'yolo' });
+
+    const failing = Array.from({ length: 6 }, (_, index) =>
+      bashCallWithId(`fail_${String(index + 1)}`, `ls missing-${String(index + 1)}.mjs`),
+    );
+    ctx.mockNextResponse({ type: 'text', text: 'Probing six locations.' }, ...failing);
+    ctx.mockNextResponse(
+      { type: 'text', text: 'Retrying with a readable target.' },
+      bashCallWithId('ok_1', 'ls .'),
+    );
+    ctx.mockNextResponse({
+      type: 'text',
+      text: 'The probe recovered: the readable target listed fine, so the earlier failures were path issues.',
+    });
+
+    await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Survey the tree' }] });
+    await ctx.untilTurnEnd();
+
+    const history = JSON.stringify(ctx.agent.context.data().history);
+    // The streak notice fired at step 2, but the success reset the streak, so
+    // the turn never entered the failure wrap-up.
+    expect(history).toContain('consecutive tool calls have failed');
+    expect(history).not.toContain('the final step of this turn');
+    expect(ctx.llmCalls).toHaveLength(3);
   });
 
   it.skip('force-refreshes OAuth credentials and replays the request on 401', async () => {
@@ -1274,8 +1361,8 @@ describe('Agent turn flow', () => {
       [wire] context.append_loop_event    { "event": { "type": "tool.call", "uuid": "call_bash", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "toolCallId": "call_bash", "name": "Bash", "args": { "command": "printf should-not-run", "timeout": 60 }, "description": "Running: printf should-not-run", "display": { "kind": "command", "command": "printf should-not-run", "cwd": "<cwd>", "language": "bash" } }, "time": "<time>" }
       [emit] tool.call.started            { "turnId": 0, "toolCallId": "call_bash", "name": "Bash", "args": { "command": "printf should-not-run", "timeout": 60 }, "description": "Running: printf should-not-run", "display": { "kind": "command", "command": "printf should-not-run", "cwd": "<cwd>", "language": "bash" } }
       [wire] context.append_loop_event    { "event": { "type": "block.end", "uuid": "<uuid-6>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "index": 0, "blockType": "tool-call" }, "time": "<time>" }
-      [wire] context.append_loop_event    { "event": { "type": "tool.result", "parentUuid": "call_bash", "toolCallId": "call_bash", "result": { "output": "The user manually interrupted \\"Bash\\" (and anything else running at the same time). This was a deliberate user action, not a system error, timeout, or capacity limit. Do not retry automatically or guess at the cause — wait for the user's next instruction.", "isError": true } }, "time": "<time>" }
-      [emit] tool.result                  { "turnId": 0, "toolCallId": "call_bash", "output": "The user manually interrupted \\"Bash\\" (and anything else running at the same time). This was a deliberate user action, not a system error, timeout, or capacity limit. Do not retry automatically or guess at the cause — wait for the user's next instruction.", "isError": true }
+      [wire] context.append_loop_event    { "event": { "type": "tool.result", "parentUuid": "call_bash", "toolCallId": "call_bash", "result": { "output": "The user manually interrupted \\"Bash\\" (and anything else running at the same time). This was a deliberate user action, not a system error, timeout, or capacity limit. Do not retry automatically or guess at the cause — wait for the user's next instruction.", "isError": true, "code": "aborted", "abortReason": "Aborted by the user" } }, "time": "<time>" }
+      [emit] tool.result                  { "turnId": 0, "toolCallId": "call_bash", "output": "The user manually interrupted \\"Bash\\" (and anything else running at the same time). This was a deliberate user action, not a system error, timeout, or capacity limit. Do not retry automatically or guess at the cause — wait for the user's next instruction.", "isError": true, "code": "aborted", "abortReason": "Aborted by the user" }
       [emit] turn.step.interrupted        { "turnId": 0, "step": 1, "reason": "aborted" }
       [emit] turn.ended                   { "turnId": 0, "reason": "cancelled" }
     `);

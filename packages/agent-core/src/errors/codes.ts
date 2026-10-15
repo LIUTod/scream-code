@@ -41,11 +41,11 @@ export const ErrorCodes = {
   AUTH_LOGIN_REQUIRED: 'auth.login_required',
 
   CONTEXT_OVERFLOW: 'context.overflow',
-  LOOP_MAX_STEPS_EXCEEDED: 'loop.max_steps_exceeded',
   PROVIDER_API_ERROR: 'provider.api_error',
   PROVIDER_RATE_LIMIT: 'provider.rate_limit',
   PROVIDER_AUTH_ERROR: 'provider.auth_error',
   PROVIDER_CONNECTION_ERROR: 'provider.connection_error',
+  PROVIDER_TIMEOUT: 'provider.timeout',
 
   GOAL_OBJECTIVE_EMPTY: 'goal.objective_empty',
   GOAL_OBJECTIVE_TOO_LONG: 'goal.objective_too_long',
@@ -272,12 +272,6 @@ export const SCREAM_ERROR_INFO = {
     public: true,
     action: 'Compact the conversation or start a new session.',
   },
-  'loop.max_steps_exceeded': {
-    title: 'Turn exceeded max steps',
-    retryable: false,
-    public: true,
-    action: 'Increase loop_control.max_steps_per_turn or split the task.',
-  },
   'provider.api_error': {
     title: 'Provider API error',
     retryable: false,
@@ -301,6 +295,12 @@ export const SCREAM_ERROR_INFO = {
     retryable: true,
     public: true,
     action: 'Check network connectivity and retry.',
+  },
+  'provider.timeout': {
+    title: 'Provider request timed out',
+    retryable: true,
+    public: true,
+    action: 'Retry the request; raise the client timeout if it keeps expiring.',
   },
 
   'goal.objective_empty': {

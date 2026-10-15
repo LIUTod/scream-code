@@ -93,12 +93,24 @@ export function toScreamErrorPayload(error: unknown): ScreamErrorPayload {
     };
   }
 
-  if (error instanceof APIConnectionError || error instanceof APITimeoutError) {
+  if (error instanceof APIConnectionError) {
     return {
       code: ErrorCodes.PROVIDER_CONNECTION_ERROR,
       message: error.message,
       name: error.name,
       retryable: SCREAM_ERROR_INFO[ErrorCodes.PROVIDER_CONNECTION_ERROR].retryable,
+    };
+  }
+
+  // Timeouts get their own code rather than folding into connection_error:
+  // consumers key UI/user-facing wording off the code, and "timed out" is a
+  // distinct, actionable condition from "could not connect".
+  if (error instanceof APITimeoutError) {
+    return {
+      code: ErrorCodes.PROVIDER_TIMEOUT,
+      message: error.message,
+      name: error.name,
+      retryable: SCREAM_ERROR_INFO[ErrorCodes.PROVIDER_TIMEOUT].retryable,
     };
   }
 

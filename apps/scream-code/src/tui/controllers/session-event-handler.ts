@@ -704,6 +704,12 @@ export class SessionEventHandler {
   }
 
   private handleTurnEnd(event: TurnEndedEvent, sendQueued: (item: QueuedMessage) => void): void {
+    if (event.stepBudgetExhausted === true) {
+      // The turn wrapped up because it ran out of steps (soft landing): the
+      // reason still reads `completed`, so this flag is the only signal that
+      // the stop was a budget cut rather than a natural finish.
+      this.host.showStatus(t('handler.max_steps_reached'), this.host.state.theme.colors.warning);
+    }
     this.host.setAppState({ reconnectAttempt: 0 });
     const todos = this.host.state.todoPanel.getTodos();
     if (todos.length > 0 && todos.every((todo) => todo.status === 'done')) {
@@ -801,6 +807,7 @@ export class SessionEventHandler {
       reconnectDelayMs: event.delayMs,
       reconnectStatusCode: event.statusCode,
       reconnectErrorName: event.errorName,
+      reconnectErrorCode: event.errorCode,
       // The failed attempt was a real request too, so 调用次数 counts it.
       sessionApiCalls: this.host.state.appState.sessionApiCalls + 1,
     });
@@ -824,6 +831,7 @@ export class SessionEventHandler {
       reconnectDelayMs: undefined,
       reconnectStatusCode: undefined,
       reconnectErrorName: undefined,
+      reconnectErrorCode: undefined,
     });
   }
 
@@ -887,11 +895,10 @@ export class SessionEventHandler {
       this.host.showStatus(t('handler.user_interrupted'), this.host.state.theme.colors.error);
       return;
     }
-    this.host.showError(
-      reason === 'max_steps'
-        ? t('handler.max_steps_reached')
-        : t('handler.step_interrupted', { reason }),
-    );
+    // `max_steps` is no longer an interrupt reason: the step budget soft-lands
+    // and reports through `turn.ended.stepBudgetExhausted`. Every remaining
+    // interruption reason is an error to surface.
+    this.host.showError(t('handler.step_interrupted', { reason }));
   }
 
   private handleThinkingDelta(event: ThinkingDeltaEvent): void {
@@ -1064,6 +1071,12 @@ export class SessionEventHandler {
       synthetic: event.synthetic,
       display: event.display,
       message: event.message,
+      // Error classification travels with the block so renderers branch on the
+      // code instead of pattern-matching the output text.
+      code: event.code,
+      // Abort attribution travels alongside the code for the cases that carry
+      // it (no consumer yet — recorded so a later one does not guess from text).
+      abort_reason: event.abortReason,
     };
     // The handoff result is the one frame both handoff outcomes emit: a
     // successful registration (whose `background.task.started` follows) and a

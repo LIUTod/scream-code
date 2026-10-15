@@ -1929,7 +1929,7 @@ describe('Agent compaction', () => {
       [emit] turn.step.completed         { "turnId": 0, "step": 1, "stepId": "<uuid-1>", "usage": { "inputOther": 67, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "tool_use" }
       [wire] usage.record                { "model": "mock-model", "usage": { "inputOther": 67, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
       [emit] agent.status.updated        { "agentId": "main", "model": "mock-model", "thinkingLevel": "off", "contextTokens": 78, "maxContextTokens": 1000000, "contextUsage": 0.000078, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "rlmMaxDepth": null, "permission": "manual", "usage": { "byModel": { "mock-model": { "inputOther": 1436, "output": 20, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 1436, "output": 20, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 67, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "turnTotal": { "inputOther": 67, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
-      [emit] turn.step.interrupted       { "turnId": 0, "step": 2, "reason": "error", "message": "Compaction limit exceeded (1)" }
+      [emit] turn.step.interrupted       { "turnId": 0, "step": 2, "reason": "error", "message": "Compaction limit exceeded (1)", "errorCode": "context.overflow" }
       [emit] turn.ended                  { "turnId": 0, "reason": "failed", "error": { "code": "context.overflow", "message": "Compaction limit exceeded (1)", "name": "ScreamError", "details": { "maxCompactions": 1, "turnId": 0 }, "retryable": true } }
     `);
     expect(ctx.newEvents()).toMatchInlineSnapshot(

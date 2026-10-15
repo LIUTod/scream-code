@@ -70,6 +70,7 @@ export function mapLoopEvent(event: LoopEvent, turnId: number): AgentEvent | und
         errorName: event.errorName,
         errorMessage: event.errorMessage,
         statusCode: event.statusCode,
+        errorCode: event.errorCode,
       };
     case 'content.part':
       return undefined;
@@ -100,6 +101,10 @@ export function mapLoopEvent(event: LoopEvent, turnId: number): AgentEvent | und
         // ran; UI side channel, persisted with the event.
         nestedCalls:
           event.result.isError === true ? undefined : event.result.nestedCalls,
+        // Error classification for consumers that used to infer it from the
+        // output text; see `ExecutableToolErrorResult.code`.
+        code: event.result.isError === true ? event.result.code : undefined,
+        abortReason: event.result.isError === true ? event.result.abortReason : undefined,
       };
     case 'turn.interrupted':
       if (event.activeStep === undefined) return undefined;
@@ -109,6 +114,7 @@ export function mapLoopEvent(event: LoopEvent, turnId: number): AgentEvent | und
         step: event.activeStep,
         reason: event.reason,
         message: event.message,
+        errorCode: event.errorCode,
       };
     case 'text.delta':
       return {

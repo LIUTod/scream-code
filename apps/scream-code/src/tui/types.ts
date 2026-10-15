@@ -8,6 +8,7 @@ import type {
   TokenUsage,
   ToolInputDisplay,
   ToolResultDisplay,
+  ToolResultEvent,
 } from '@scream-code/scream-code-sdk';
 import type { NotificationsConfig, TuiConfig, TuiLikePreferences } from './config';
 import type { PendingApproval, PendingQuestion } from './reverse-rpc/types';
@@ -92,6 +93,12 @@ export interface AppState {
    * footer status block can separate "waiting on a human" from "working".
    */
   pendingUserAction: 'approval' | 'question' | null;
+  /**
+   * When the current pending panel appeared (`Date.now()`), null when nothing
+   * is pending. The footer only surfaces this after a minute: below that a
+   * clock reads as noise, but a long silent stall must look like one.
+   */
+  pendingUserActionSince: number | null;
   theme: Theme;
   version: string;
   hasNewVersion: boolean;
@@ -123,6 +130,13 @@ export interface AppState {
   reconnectDelayMs?: number;
   reconnectStatusCode?: number;
   reconnectErrorName?: string;
+  /**
+   * Error-protocol classification of the failed attempt (`event.errorCode` on
+   * `turn.step.retrying`), e.g. `provider.timeout`. Unset on records written
+   * before the field existed — the reconnect label then falls back to its
+   * status-code / error-name heuristics.
+   */
+  reconnectErrorCode?: string;
   recentSessions: RecentSession[];
   subagentUsage: SubagentUsageMap;
 }
@@ -150,6 +164,20 @@ export interface ToolResultBlockData {
   output: string;
   is_error?: boolean;
   synthetic?: boolean;
+  /**
+   * Machine-readable classification of a failed result, forwarded from the
+   * `tool.result` event. Renderers read this instead of matching `output`
+   * prose; left unset by replay (`session-replay`) and by records written
+   * before the field existed, which is what keeps the legacy text heuristic
+   * reachable.
+   */
+  code?: ToolResultEvent['code'];
+  /**
+   * Abort attribution when the code is `'aborted'` (e.g. `'user-cancel'`,
+   * `'parent-interject'`). Recorded so a future consumer does not have to
+   * infer the cause from the output text; no consumer reads it yet.
+   */
+  abort_reason?: ToolResultEvent['abortReason'];
   /**
    * Structured payload for TUI renderers. When present, renderers prefer this
    * over parsing `output`. Currently populated by Grep `content` mode as

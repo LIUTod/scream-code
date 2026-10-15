@@ -73,7 +73,7 @@ describe('permission decision records', () => {
 
       const pending = manager.beforeToolCall(toolContext('Write', { path: '/workspace/a.ts' }));
       const assertion = expect(pending).rejects.toThrow(
-        'Approval request timed out after 300000ms',
+        'Approval request timed out after 300000ms. The user is likely away',
       );
       await vi.advanceTimersByTimeAsync(300_000);
       await assertion;
@@ -82,7 +82,7 @@ describe('permission decision records', () => {
         expect.objectContaining({
           toolName: 'Write',
           decision: 'timeout',
-          reason: 'Approval request timed out after 300000ms',
+          reason: expect.stringContaining('Approval request timed out after 300000ms.'),
         }),
       ]);
     } finally {

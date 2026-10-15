@@ -1,21 +1,18 @@
 /**
  * Turn-level loop for a stateless agent run.
  *
- * Owns convergence across steps: abort checks at loop boundaries, max-step
- * enforcement, usage aggregation, optional continuation after non-tool stops,
- * and final `TurnResult` mapping. One-step execution lives in `turn-step.ts`.
+ * Owns convergence across steps: abort checks at loop boundaries, the
+ * max-step budget with its single wrap-up step, usage aggregation, optional
+ * continuation after non-tool stops, and final `TurnResult` mapping.
+ * One-step execution lives in `turn-step.ts`.
  */
 
-import { addUsage, emptyUsage, type TokenUsage } from '@scream-code/ltod';
+import { ChatProviderError, addUsage, emptyUsage, type TokenUsage } from '@scream-code/ltod';
 
+import { isScreamError, toScreamErrorPayload } from '#/errors';
 import type { Logger } from '#/logging/types';
 
-import {
-  createMaxStepsExceededError,
-  errorMessage,
-  isAbortError,
-  isMaxStepsExceededError,
-} from './errors';
+import { errorMessage, isAbortError } from './errors';
 import type { LoopInterruptReason, LoopEventDispatcher, LoopTurnInterruptedEvent } from './events';
 import type { LLM } from './llm';
 import { executeLoopStep } from './turn-step';
@@ -95,6 +92,12 @@ export async function runTurn(input: RunTurnInput): Promise<TurnResult> {
   let usage: TokenUsage = emptyUsage();
   let steps = 0;
   let consecutiveRejectedSteps = 0;
+  // Step budget (undefined or 0 = unlimited). Exhausting it is not a failure:
+  // the loop runs exactly one wrap-up step so the model can stop where it is
+  // and report, then ends the turn. `wrapUpIssued` is a one-shot guard.
+  const stepLimit = maxSteps !== undefined && maxSteps > 0 ? maxSteps : undefined;
+  let wrapUpIssued = false;
+  let stepBudgetExhausted = false;
   // Normal exits overwrite this with the completed step's stop reason.
   let stopReason: LoopTurnStopReason = 'end_turn';
   let activeStep: number | undefined;
@@ -112,8 +115,18 @@ export async function runTurn(input: RunTurnInput): Promise<TurnResult> {
     while (true) {
       signal.throwIfAborted();
 
-      if (maxSteps !== undefined && maxSteps > 0 && steps >= maxSteps) {
-        throw createMaxStepsExceededError(maxSteps);
+      // Budget exhausted → one wrap-up step; step hooks see `finalStep` and
+      // inject the wrap-up instruction. Reaching this branch twice is a guard
+      // bug, not a path — the wrap-up step always breaks out below.
+      let finalStep = false;
+      if (stepLimit !== undefined && steps >= stepLimit) {
+        if (wrapUpIssued) {
+          stopReason = 'end_turn';
+          break;
+        }
+        wrapUpIssued = true;
+        finalStep = true;
+        stepBudgetExhausted = true;
       }
 
       steps += 1;
@@ -129,6 +142,7 @@ export async function runTurn(input: RunTurnInput): Promise<TurnResult> {
         hooks,
         log,
         currentStep: steps,
+        finalStep,
         maxRetryAttempts,
         recordUsage: recordStepUsage,
         hasPendingSteer: input.hasPendingSteer,
@@ -137,6 +151,13 @@ export async function runTurn(input: RunTurnInput): Promise<TurnResult> {
         onStreamingDraft: input.onStreamingDraft,
       });
       activeStep = undefined;
+
+      if (finalStep) {
+        // The wrap-up step ends the turn whatever it returns: its output is
+        // the model's report of where the budget ran out.
+        stopReason = 'end_turn';
+        break;
+      }
 
       // Invalid-tool-call circuit breaker: a model that keeps emitting calls
       // that fail preflight (unknown tool / malformed args) would otherwise
@@ -185,12 +206,29 @@ export async function runTurn(input: RunTurnInput): Promise<TurnResult> {
       dispatchEvent(makeInterruptedEvent('aborted', steps, activeStep));
       return { stopReason: 'aborted', steps, usage };
     }
-    const reason: LoopInterruptReason = isMaxStepsExceededError(error) ? 'max_steps' : 'error';
-    dispatchEvent(makeInterruptedEvent(reason, steps, activeStep, errorMessage(error)));
+    dispatchEvent(
+      makeInterruptedEvent('error', steps, activeStep, errorMessage(error), turnErrorCode(error)),
+    );
     throw error;
   }
 
-  return { stopReason, steps, usage };
+  return {
+    stopReason,
+    steps,
+    usage,
+    ...(stepBudgetExhausted ? { stepBudgetExhausted: true } : {}),
+  };
+}
+
+/**
+ * Error-protocol classification of the failure that interrupted the turn,
+ * when the protocol has one. Unrecognized errors (`internal` by default) are
+ * left uncoded so consumers keep their own generic wording instead of
+ * printing an "internal error" label for an unclassified throw.
+ */
+function turnErrorCode(error: unknown): string | undefined {
+  if (isScreamError(error)) return error.code;
+  return error instanceof ChatProviderError ? toScreamErrorPayload(error).code : undefined;
 }
 
 function makeInterruptedEvent(
@@ -198,6 +236,7 @@ function makeInterruptedEvent(
   attemptedSteps: number,
   activeStep: number | undefined,
   message?: string | undefined,
+  errorCode?: string | undefined,
 ): LoopTurnInterruptedEvent {
   return {
     type: 'turn.interrupted',
@@ -205,5 +244,6 @@ function makeInterruptedEvent(
     attemptedSteps,
     ...(activeStep !== undefined ? { activeStep } : {}),
     ...(message !== undefined ? { message } : {}),
+    ...(errorCode !== undefined ? { errorCode } : {}),
   };
 }

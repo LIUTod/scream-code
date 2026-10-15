@@ -4,7 +4,7 @@ import { DynamicInjector } from './injector';
 const AUTO_MODE_ENTER_REMINDER = [
   'Auto permission mode is active. Tool approvals will be handled automatically while this mode remains enabled.',
   '  - Continue normally without pausing for approval prompts.',
-  '  - Do NOT call AskUserQuestion while auto mode is active. Make a reasonable decision and continue without asking the user.',
+  '  - Do NOT call AskUserQuestion while auto mode is active — the tool is blocked. When a decision genuinely requires the user, stop that direction, state the question and your recommended option in a normal text reply, and end the turn; otherwise decide and continue.',
 ].join('\n');
 
 const AUTO_MODE_EXIT_REMINDER = [

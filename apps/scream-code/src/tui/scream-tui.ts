@@ -140,6 +140,7 @@ function createInitialAppState(input: ScreamTUIStartupInput): AppState {
     streamingPhase: 'idle',
     streamingStartTime: 0,
     pendingUserAction: null,
+    pendingUserActionSince: null,
     theme: input.tuiConfig.theme,
     version: input.version,
     hasNewVersion: false,
@@ -791,7 +792,10 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
     const next: AppState['pendingUserAction'] =
       pendingApproval !== null ? 'approval' : pendingQuestion !== null ? 'question' : null;
     if (next !== this.state.appState.pendingUserAction) {
-      this.setAppState({ pendingUserAction: next });
+      this.setAppState({
+        pendingUserAction: next,
+        pendingUserActionSince: next === null ? null : Date.now(),
+      });
     }
   }
 
