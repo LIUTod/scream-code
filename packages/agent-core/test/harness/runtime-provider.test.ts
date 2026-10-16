@@ -425,7 +425,7 @@ describe('resolveRuntimeProvider Scream request headers', () => {
     });
   });
 
-  it('does not apply screamRequestHeaders to non-Scream providers', () => {
+  it('applies only the first-party User-Agent to third-party OpenAI providers', () => {
     const resolved = resolveRuntimeProvider({
       config: {
         defaultModel: 'gpt-alias',
@@ -452,8 +452,42 @@ describe('resolveRuntimeProvider Scream request headers', () => {
       model: 'gpt-runtime',
       apiKey: 'sk-openai',
     });
-    expect('defaultHeaders' in resolved.provider).toBe(false);
+    // 产品身份上墙、设备指纹不外漏：第三方端点只见 UA，
+    // SDK 默认的 "OpenAI/JS x.y.z" 从此被 First-party UA 覆盖。
+    expect(resolved.provider).toMatchObject({
+      defaultHeaders: { 'User-Agent': TEST_SCREAM_HEADERS['User-Agent'] },
+    });
+    for (const key of Object.keys(
+      (resolved.provider as { defaultHeaders?: Record<string, string> }).defaultHeaders ?? {},
+    )) {
+      if (key !== 'User-Agent') {
+        throw new Error(`X-Msh header leaked to a third-party provider: ${key}`);
+      }
+    }
     expect('generationKwargs' in resolved.provider).toBe(false);
+  });
+
+  it('third-party providers keep the SDK default UA when the host sends no identity', () => {
+    const resolved = resolveRuntimeProvider({
+      config: {
+        defaultModel: 'gpt-alias',
+        providers: {
+          openai: {
+            type: 'openai',
+            apiKey: 'sk-openai',
+          },
+        },
+        models: {
+          'gpt-alias': {
+            provider: 'openai',
+            model: 'gpt-runtime',
+            maxContextSize: 200000,
+          },
+        },
+      },
+    });
+
+    expect('defaultHeaders' in resolved.provider).toBe(false);
   });
 });
 
@@ -801,14 +835,25 @@ describe('sessionHeader injection', () => {
     });
   });
 
-  it('does not add defaultHeaders when sessionHeader is unset', () => {
+  it('applies the first-party UA even when the session header is unset', () => {
     const resolved = resolveRuntimeProvider({
       config: openaiConfig(),
       promptCacheKey: 'session-abc',
       screamRequestHeaders: TEST_SCREAM_HEADERS,
     });
 
-    expect('defaultHeaders' in resolved.provider).toBe(false);
+    // 无 session_header 的第三方端点也带产品 UA（覆盖 SDK 默认 "OpenAI/JS"），
+    // 但 X-Msh 设备头不随行。
+    expect(resolved.provider).toMatchObject({
+      defaultHeaders: { 'User-Agent': TEST_SCREAM_HEADERS['User-Agent'] },
+    });
+    for (const key of Object.keys(
+      (resolved.provider as { defaultHeaders?: Record<string, string> }).defaultHeaders ?? {},
+    )) {
+      if (key !== 'User-Agent') {
+        throw new Error(`X-Msh header leaked to a third-party provider: ${key}`);
+      }
+    }
   });
 
   it('uses the live prompt cache key as the header value', () => {
@@ -851,16 +896,20 @@ describe('sessionHeader injection', () => {
     });
   });
 
-  it('does not inject an empty header when the session id is missing', () => {
+  it('does not inject an empty session header when the session id is missing (UA still applies)', () => {
     const resolved = resolveRuntimeProvider({
       config: openaiConfig({ sessionHeader: 'x-test-session' }),
       screamRequestHeaders: TEST_SCREAM_HEADERS,
     });
 
-    expect('defaultHeaders' in resolved.provider).toBe(false);
+    const headers = (resolved.provider as { defaultHeaders?: Record<string, string> })
+      .defaultHeaders;
+    expect(headers).toBeDefined();
+    expect(headers && 'x-test-session' in headers).toBe(false);
+    expect(headers && headers['User-Agent']).toBe(TEST_SCREAM_HEADERS['User-Agent']);
   });
 
-  it('attaches the product User-Agent only when the session header is enabled', () => {
+  it('attaches the product User-Agent with and without a session header', () => {
     const withHeader = resolveRuntimeProvider({
       config: openaiConfig({ sessionHeader: 'x-test-session' }),
       promptCacheKey: 'session-abc',
@@ -878,7 +927,9 @@ describe('sessionHeader injection', () => {
       promptCacheKey: 'session-abc',
       screamRequestHeaders: TEST_SCREAM_HEADERS,
     });
-    expect('defaultHeaders' in withoutHeaderName.provider).toBe(false);
+    expect(withoutHeaderName.provider).toMatchObject({
+      defaultHeaders: { 'User-Agent': 'scream-code-cli/0.0.0-test' },
+    });
   });
 
   it('omits User-Agent when screamRequestHeaders are absent', () => {

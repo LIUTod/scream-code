@@ -118,7 +118,7 @@ describe('runtime provider identity headers', () => {
     });
   });
 
-  it('does not add Scream identity headers to non-Scream providers', async () => {
+  it('adds only the User-Agent identity to non-Scream providers (no X-Msh leakage)', async () => {
     const homeDir = await makeTempDir();
     const screamRequestHeaders = createScreamDefaultHeaders({ homeDir, ...TEST_IDENTITY });
     const config: ScreamConfig = {
@@ -148,7 +148,38 @@ describe('runtime provider identity headers', () => {
     expect(resolved.provider).toMatchObject({
       type: 'openai',
       model: 'gpt-test',
+      defaultHeaders: { 'User-Agent': 'scream-code-cli/0.0.0-test' },
     });
-    expect(resolved.provider).not.toHaveProperty('defaultHeaders');
+    for (const key of Object.keys(
+      (resolved.provider as { defaultHeaders?: Record<string, string> }).defaultHeaders ?? {},
+    )) {
+      if (key !== 'User-Agent') {
+        throw new Error(`X-Msh header leaked to a third-party provider: ${key}`);
+      }
+    }
+  });
+
+  it('keeps the SDK-default UA when the host sends no identity', async () => {
+    const config: ScreamConfig = {
+      providers: {
+        openai: {
+          type: 'openai',
+          baseUrl: 'https://example.test/v1',
+          apiKey: 'sk-test',
+        },
+      },
+      defaultProvider: 'openai',
+      defaultModel: 'gpt-test',
+      models: {
+        'gpt-test': {
+          provider: 'openai',
+          model: 'gpt-test',
+          maxContextSize: 1000,
+        },
+      },
+    };
+
+    const resolved = resolveRuntimeProvider({ config });
+    expect('defaultHeaders' in resolved.provider).toBe(false);
   });
 });

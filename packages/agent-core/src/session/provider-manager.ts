@@ -211,17 +211,27 @@ function resolveModelCapabilities(
 function sessionHeaderFields(
   provider: ProviderConfig,
   sessionId: string | undefined,
-  screamRequestHeaders: Record<string, string> | undefined,
 ): Record<string, string> {
   const name = provider.sessionHeader;
   if (name === undefined || sessionId === undefined || sessionId.length === 0) return {};
-  const out: Record<string, string> = { [name]: sessionId };
-  // Gateways that ask for a session header also want a first-party User-Agent.
-  // Only attached when the session header is enabled so ordinary
-  // OpenAI-compatible providers keep the SDK default UA.
+  return { [name]: sessionId };
+}
+
+/**
+ * The first-party product identity handed to third-party provider SDKs.
+ *
+ * The OpenAI/Anthropic JS SDKs stamp their own default User-Agent
+ * (`OpenAI/JS x.y.z`) whenever the client sends none, so gateway operators
+ * see the SDK instead of the product. Only the UA is carried over here —
+ * the `X-Msh-*` device headers in `screamRequestHeaders` stay host-scoped
+ * and must not leak to third-party endpoints. Providers can still override
+ * it via `customHeaders` (merged later by the callers).
+ */
+function firstPartyUserAgentFields(
+  screamRequestHeaders: Record<string, string> | undefined,
+): Record<string, string> {
   const userAgent = screamRequestHeaders?.['User-Agent'];
-  if (userAgent !== undefined) out['User-Agent'] = userAgent;
-  return out;
+  return userAgent === undefined ? {} : { 'User-Agent': userAgent };
 }
 
 function resolvedHeaderFields(
@@ -230,7 +240,8 @@ function resolvedHeaderFields(
   screamRequestHeaders: Record<string, string> | undefined,
 ): Record<string, string> | undefined {
   const headers = {
-    ...sessionHeaderFields(provider, sessionId, screamRequestHeaders),
+    ...sessionHeaderFields(provider, sessionId),
+    ...firstPartyUserAgentFields(screamRequestHeaders),
     ...provider.customHeaders,
   };
   return Object.keys(headers).length > 0 ? headers : undefined;
