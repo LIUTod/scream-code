@@ -133,9 +133,10 @@ export class EditorKeyboardController {
       if (host.state.transcriptEntries.length > 0) return false;
       if (isEmptySessionHintDismissed()) return false;
       // Only the ad tip responds to Ctrl+F; other tips fall through.
-      const isAd = SESSION_TIPS[host.lifecycleController.currentTipIdx]?.isAd ?? false;
-      if (!isAd) return false;
-      openUrl(EMPTY_SESSION_HINT_URL);
+      // The destination lives on the tip itself, so each ad opens its own URL.
+      const currentTip = SESSION_TIPS[host.lifecycleController.currentTipIdx];
+      if ((currentTip?.isAd ?? false) !== true) return false;
+      openUrl(currentTip?.url ?? EMPTY_SESSION_HINT_URL);
       return true;
     };
 

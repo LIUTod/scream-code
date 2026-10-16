@@ -1,6 +1,7 @@
 import type { Session, ScreamHarness, TokenUsage } from '@scream-code/scream-code-sdk';
 import { t } from '@scream-code/config';
 import { Container, HStack, ScrollView, VStack } from '@liutod-scream/pi-tui';
+import { composeTipLabel, pickTipIndex } from '../utils/tip-hyperlink';
 import { GutterContainer } from '../components/chrome/gutter-container';
 import { isEmptySessionHintDismissed } from '../utils/ui-preferences';
 import { SESSION_TIPS, TIP_ROTATION_INTERVAL_MS } from '../constant/scream-tui';
@@ -114,7 +115,7 @@ export class LifecycleController {
   }
 
   private tipRotationTimer: ReturnType<typeof setInterval> | undefined;
-  private currentTipIndex = Math.floor(Math.random() * SESSION_TIPS.length);
+  private currentTipIndex = pickTipIndex(SESSION_TIPS, undefined);
   /** Sidebar-only git cache (the footer owns its own). Rebuilt when the
    * workDir changes; `getStatus()` is TTL-cached so polling is cheap. */
   private sidebarGitCache: GitStatusCache | undefined;
@@ -688,7 +689,7 @@ export class LifecycleController {
           state.statusBarContainer.addChild(
             new StatusBarPaneComponent({
               mode: 'idle',
-              label: t(tip.i18nKey),
+              label: composeTipLabel(t(tip.i18nKey), tip, state.theme.colors.primary),
               // Fixed light grey, deliberately theme-independent: the tip
               // carousel reads as a quiet cue in both dark and light themes.
               labelColor: '#999999',
@@ -701,6 +702,9 @@ export class LifecycleController {
     state.ui.requestRender();
   }
 
+  /** The idle tip line delegates its optional domain link to composeTipLabel
+   *  (see tui/utils/tip-hyperlink.ts): linked tips render the bare domain as
+   *  a clickable OSC 8 hyperlink against the dimmed cue text. */
   /** Builds the reconnect label shown next to the status-bar pulse wave
    * while a step retry is in flight, e.g. "重连中 3/10 · 限流 · 20s 后重试".
    * Returns an empty string when no retry is active. Static by design: the
@@ -740,17 +744,13 @@ export class LifecycleController {
     return this.currentTipIndex;
   }
 
-  /** Start the random tip rotation timer. Picks a random tip different
-   *  from the current one and refreshes the status bar. */
+  /** Start the weighted tip rotation timer: 80% of rotations land on the
+   *  offer tip (see tui/utils/tip-hyperlink.ts), the rest spread uniformly
+   *  and never repeat the line currently on screen. */
   private startTipRotation(): void {
     if (this.tipRotationTimer !== undefined) return;
     this.tipRotationTimer = setInterval(() => {
-      if (SESSION_TIPS.length <= 1) return;
-      let next: number;
-      do {
-        next = Math.floor(Math.random() * SESSION_TIPS.length);
-      } while (next === this.currentTipIndex);
-      this.currentTipIndex = next;
+      this.currentTipIndex = pickTipIndex(SESSION_TIPS, this.currentTipIndex);
       this.lastActivityMode = undefined;
       this.updateActivityPane();
     }, TIP_ROTATION_INTERVAL_MS);

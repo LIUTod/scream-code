@@ -15,14 +15,18 @@ export const EXIT_CONFIRM_WINDOW_MS = 1500;
 export const EMPTY_SESSION_HINT_URL = 'https://github.com/LIUTod/scream-code';
 
 /** Tips shown in rotation above the editor when the chat is empty.
- *  `isAd` marks the partner tip - only it responds to Ctrl+F. */
+ *  `isAd` marks tips that respond to Ctrl+F; a `url` tip is opened as-is and
+ *  its bare domain is rendered as a clickable OSC 8 link inside the tip text. */
 export interface SessionTip {
   readonly i18nKey: string;
   readonly isAd: boolean;
+  /** Destination opened by Ctrl+F (and by clicking the domain in the tip). */
+  readonly url?: string;
 }
 
 export const SESSION_TIPS: readonly SessionTip[] = [
-  { i18nKey: 'editor.tip_ad', isAd: true },
+  { i18nKey: 'editor.tip_offer', isAd: true, url: 'https://todapi.work' },
+  { i18nKey: 'editor.tip_ad', isAd: true, url: EMPTY_SESSION_HINT_URL },
   { i18nKey: 'editor.tip_1', isAd: false },
   { i18nKey: 'editor.tip_2', isAd: false },
   { i18nKey: 'editor.tip_3', isAd: false },

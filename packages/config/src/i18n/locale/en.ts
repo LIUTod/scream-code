@@ -1088,6 +1088,7 @@ export const en: Record<string, string> = {
   'editor.auto_detect': 'Auto detect ($VISUAL / $EDITOR)',
   'editor.select_title': 'Select external editor',
   'editor.empty_session_hint': 'Tips: Like this project or hit an issue? Give feedback or a star on GitHub. Ctrl+B: toggle this tip.',
+  'editor.tip_offer': '💡 Tips: Some models from 90% off — one API for all! todapi.work [Ctrl+B to hide Tips]',
   'editor.tip_ad': '💡 Tips: Like this project or hit an issue? Give feedback or a star on GitHub  [Ctrl+B to hide Tips]',
   'editor.tip_1': '💡 Tips: Press Tab on an empty input to cycle thinking effort  [Ctrl+B to hide Tips]',
   'editor.tip_2': '💡 Tips: Type / to see all commands, type @ to reference a file path  [Ctrl+B to hide Tips]',

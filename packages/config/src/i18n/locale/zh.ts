@@ -1082,6 +1082,7 @@ export const zh: Record<string, string> = {
   'editor.auto_detect': '自动检测 ($VISUAL / $EDITOR)',
   'editor.select_title': '选择外部编辑器',
   'editor.empty_session_hint': 'Tips：如果你支持本项目或遇到问题，欢迎在 GitHub 上反馈或点个星标。按 Ctrl+B 切换显示',
+  'editor.tip_offer': '💡 Tips：部分模型低至1折起，一个API搞定！todapi.work 【Ctrl+B 关闭 Tips】',
   'editor.tip_ad': '💡 Tips：如果你支持本项目或遇到问题，欢迎在 GitHub 上反馈或点个星标  【Ctrl+B 关闭 Tips】',
   'editor.tip_1': '💡 Tips：空输入框状态下可按下 Tab 切换模型思考等级  【Ctrl+B 关闭 Tips】',
   'editor.tip_2': '💡 Tips：输入 / 查看所有命令，输入 @ 引用文件路径  【Ctrl+B 关闭 Tips】',
