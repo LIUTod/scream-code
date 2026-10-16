@@ -34,7 +34,8 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "pathe": "^2.0.3"
+    "pathe": "^2.0.3",
+    "tar": "^7.5.13"
   },
   "optionalDependencies": {
     "fastembed": "^2.1.0"

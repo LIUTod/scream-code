@@ -1,5 +1,8 @@
-import { existsSync, mkdirSync, rmSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, mkdirSync, rmSync, statSync } from 'node:fs';
+import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { extract as untar } from 'tar';
 import type { MemoryMemo } from './models.js';
 
 /**
@@ -178,6 +181,11 @@ async function loadEmbedder(cacheDir?: string): Promise<FastembedModel | null> {
   const { FlagEmbedding, EmbeddingModel } = await import('fastembed');
   if (cacheDir !== undefined) {
     mkdirSync(cacheDir, { recursive: true });
+    // Stage the payload ourselves when it is missing. fastembed's shipping
+    // source is dead (see ensureEmbeddingModelFiles) and its downloader cannot
+    // check the status code; retrieveModel skips its download whenever the
+    // model directory exists, so pre-staging wins for both problems.
+    await ensureEmbeddingModelFiles(cacheDir);
   }
   const model = EmbeddingModel.BGESmallZH;
   const initOpts = cacheDir !== undefined
@@ -202,6 +210,102 @@ async function loadEmbedder(cacheDir?: string): Promise<FastembedModel | null> {
  * into `<cacheDir>/<name>/` from the staged archive `<cacheDir>/<name>.tar.gz`.
  */
 const BGESMALLZH_CACHE_NAME = 'fast-bge-small-zh-v1.5';
+
+/**
+ * First-party model payload source (GitHub Releases asset; sha256-pinned).
+ *
+ * Why not let fastembed download on its own: fastembed 2.x stages the BGESmallZH
+ * archive from a third-party model mirror whose anonymous read access was
+ * removed — and its downloader does not look at the HTTP status, so an error
+ * page is written into `<model>.tar.gz` and every subsequent extraction fails
+ * with TAR_BAD_ARCHIVE. Any install without a pre-existing cache then can never
+ * complete the download, and the startup setup card comes back on every launch.
+ *
+ * This function stages the same on-disk layout fastembed expects
+ * (`<cacheDir>/<BGESMALLZH_CACHE_NAME>/model_optimized.onnx`) from a pinned
+ * first-party package; `FlagEmbedding.retrieveModel` then finds the model
+ * directory on disk and never issues its own (broken) download.
+ */
+export const EMBEDDING_MODEL_SOURCE_URL =
+  'https://github.com/LIUTod/scream-code/releases/download/embedding-models-v1/fast-bge-small-zh-v1.5.tar.gz';
+
+/** Escape hatch for air-gapped installs and tests: points at an archive file. */
+const EMBEDDING_MODEL_URL_ENV = 'SCREAM_CODE_EMBEDDING_MODEL_URL';
+
+/** sha256 of the `model_optimized.onnx` payload inside the pinned package. */
+export const EMBEDDING_MODEL_ONNX_SHA256 = '1294ea4b6331115a353d81f96b85e8c8d7fdcc284453d5b2fab5b016230aad38';
+
+export interface EnsureEmbeddingModelOptions {
+  /** Archive source override (tests / self-hosted mirrors). Absolute URL. */
+  readonly sourceUrl?: string;
+  /** Expected sha256 of the extracted `model_optimized.onnx` (tests override). */
+  readonly expectedOnnxSha256?: string;
+}
+
+function modelWeightsPath(cacheDir: string): string {
+  return join(cacheDir, BGESMALLZH_CACHE_NAME, 'model_optimized.onnx');
+}
+
+export function sha256File(filePath: string): Promise<string> {
+  return readFile(filePath).then((data) => createHash('sha256').update(data).digest('hex'));
+}
+
+/**
+ * Stage the embedding model files when they are missing: download the pinned
+ * archive (HTTP status verified — unlike fastembed's own downloader), extract,
+ * and verify the weights payload against the pinned sha256.
+ *
+ * A partially extracted tree or a hash mismatch is removed so the caller keeps
+ * the honest "weights missing" state the setup card is gated on — never a
+ * directory that only looks installed.
+ */
+export async function ensureEmbeddingModelFiles(
+  cacheDir: string,
+  options?: EnsureEmbeddingModelOptions,
+): Promise<void> {
+  if (hasEmbeddingModelCache(cacheDir)) return;
+
+  // Self-sufficient entry point: callers may hand us a not-yet-created dir.
+  mkdirSync(cacheDir, { recursive: true });
+  const modelDir = join(cacheDir, BGESMALLZH_CACHE_NAME);
+  // Distinct staging name: `.tar.gz` is fastembed's "already downloaded" marker
+  // (an existing file there makes it skip its download and extract junk).
+  const stagingPath = join(cacheDir, `${BGESMALLZH_CACHE_NAME}.tar.gz.part`);
+  const url = options?.sourceUrl ?? process.env[EMBEDDING_MODEL_URL_ENV] ?? EMBEDDING_MODEL_SOURCE_URL;
+
+  try {
+    let response: Response;
+    try {
+      response = await fetch(url);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`fetch failed for ${url}: ${message}`, { cause: error });
+    }
+    if (!response.ok) {
+      throw new Error(`model source returned HTTP ${response.status} for ${url}`);
+    }
+    await writeFile(stagingPath, Buffer.from(await response.arrayBuffer()));
+    await untar({ file: stagingPath, cwd: cacheDir });
+
+    const weightsPath = modelWeightsPath(cacheDir);
+    if (!existsSync(weightsPath) || statSync(weightsPath).size === 0) {
+      throw new Error(`model package did not contain weights after extraction: ${url}`);
+    }
+    const sha256 = await sha256File(weightsPath);
+    const expected = options?.expectedOnnxSha256 ?? EMBEDDING_MODEL_ONNX_SHA256;
+    if (sha256 !== expected) {
+      throw new Error(`model weights sha256 mismatch (${sha256.slice(0, 12)}… != ${expected.slice(0, 12)}…): ${url}`);
+    }
+  } catch (error: unknown) {
+    // A partly extracted tree with no verified weights is worthless and would
+    // keep the caller from retrying cleanly — remove it (best effort; rmSync
+    // failure must not shadow the download error).
+    rmSync(modelDir, { recursive: true, force: true });
+    throw error instanceof Error ? error : new Error(String(error));
+  } finally {
+    rmSync(stagingPath, { force: true });
+  }
+}
 
 /** Why a local embedding load failed, as far as the message can tell. */
 export type EmbeddingFailureKind = 'platform' | 'archive' | 'network' | 'other';

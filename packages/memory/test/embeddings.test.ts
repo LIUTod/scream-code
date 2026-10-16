@@ -11,8 +11,11 @@
  * fastembed 与 HuggingFace 网络一律打桩，不碰真模型/真网络。
  */
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { create as tarCreate } from 'tar';
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -21,6 +24,7 @@ import {
   probeLocalEmbeddingSupport,
   clearEmbeddingModelCache,
   createFastEmbedEngine,
+  ensureEmbeddingModelFiles,
   EMBEDDING_MODEL_NAME,
 } from '../src/embeddings.js';
 import type { MemoryMemo } from '../src/models.js';
@@ -71,6 +75,13 @@ function freshCacheDir(): string {
   return join(testRoot, `engine-${dirCounter}`);
 }
 
+/** 权重标记文件：让 loadEmbedder 里新增的自托管补包短路，fastembed 打桩测试不需要真包。 */
+function seedWeights(dir: string): string {
+  mkdirSync(join(dir, FE_MODEL_ID), { recursive: true });
+  writeFileSync(join(dir, FE_MODEL_ID, 'model_optimized.onnx'), 'stub weights');
+  return dir;
+}
+
 beforeEach(() => {
   fe.impls.length = 0;
   fe.opts.length = 0;
@@ -78,6 +89,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
 });
 
 afterAll(() => {
@@ -123,7 +135,7 @@ describe('ensureReady 成功路径', () => {
   it('init 成功后 available=true；embedBatch 产出 Float32Array 向量；重复 ensureReady 不再 init；空数组直接返回 []', async () => {
     const model = makeModel();
     fe.impls.push(() => model);
-    const dir = freshCacheDir();
+    const dir = seedWeights(freshCacheDir());
     const engine = createFastEmbedEngine(dir);
 
     expect(await engine.ensureReady()).toBe(true);
@@ -155,7 +167,7 @@ describe('加载失败 → fail-fast + 可重试', () => {
       },
       () => makeModel(),
     );
-    const engine = createFastEmbedEngine(freshCacheDir());
+    const engine = createFastEmbedEngine(seedWeights(freshCacheDir()));
 
     expect(await engine.ensureReady()).toBe(false);
     expect(engine.available).toBe(false);
@@ -172,7 +184,7 @@ describe('加载失败 → fail-fast + 可重试', () => {
 
   it('init 返回空模型（null）→ false + 固定诊断文案 "fastembed returned an empty model"，重试同样生效', async () => {
     fe.impls.push(() => null, () => makeModel());
-    const engine = createFastEmbedEngine(freshCacheDir());
+    const engine = createFastEmbedEngine(seedWeights(freshCacheDir()));
 
     expect(await engine.ensureReady()).toBe(false);
     expect(engine.available).toBe(false);
@@ -187,7 +199,7 @@ describe('运行时批次失败 ≠ 加载失败（共享引擎不能被一批�
   it('embed 抛错 → embedBatch=null + lastError，但 available 保持 true，下一批自动恢复；空产出返回 null 但不算加载失败', async () => {
     const model = makeModel();
     fe.impls.push(() => model);
-    const engine = createFastEmbedEngine(freshCacheDir());
+    const engine = createFastEmbedEngine(seedWeights(freshCacheDir()));
     expect(await engine.ensureReady()).toBe(true);
 
     model.mode = 'throw';
@@ -222,7 +234,7 @@ describe('sidecar 缺失自愈（HuggingFace 补拉后重试 init）', () => {
       },
       () => makeModel(),
     );
-    const dir = freshCacheDir();
+    const dir = seedWeights(freshCacheDir());
     const engine = createFastEmbedEngine(dir);
 
     expect(await engine.ensureReady()).toBe(true);
@@ -244,7 +256,7 @@ describe('sidecar 缺失自愈（HuggingFace 补拉后重试 init）', () => {
       },
       () => makeModel(),
     );
-    const engine = createFastEmbedEngine(freshCacheDir());
+    const engine = createFastEmbedEngine(seedWeights(freshCacheDir()));
 
     expect(await engine.ensureReady()).toBe(true);
     expect(fe.opts).toHaveLength(2);
@@ -259,12 +271,171 @@ describe('sidecar 缺失自愈（HuggingFace 补拉后重试 init）', () => {
       },
       () => makeModel(),
     );
-    const engine = createFastEmbedEngine(freshCacheDir());
+    const engine = createFastEmbedEngine(seedWeights(freshCacheDir()));
 
     expect(await engine.ensureReady()).toBe(false);
     expect(engine.lastError).toBe('CUDA out of memory');
     expect(fe.opts).toHaveLength(1); // 没有 sidecar 重试路径
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+// ─── ensureEmbeddingModelFiles 自托管下载器 ─────────────────────────
+
+/**
+ * 造一个真实 tar.gz 夹具：`<name>/model_optimized.onnx` + config + tokenizer，
+ * 供 fetch 打桩回放；并给出夹具权重文件的 sha256 供校验参数使用。
+ */
+async function makeModelArchive(): Promise<{ payload: Uint8Array; onnxSha: string }> {
+  const src = mkdtempSync(join(tmpdir(), 'scream-embedding-archive-src-'));
+  const modelDir = join(src, FE_MODEL_ID);
+  mkdirSync(modelDir, { recursive: true });
+  const onnxBytes = Buffer.from('fixture onnx weights');
+  writeFileSync(join(modelDir, 'model_optimized.onnx'), onnxBytes);
+  writeFileSync(join(modelDir, 'config.json'), '{"vocab_size":21128}');
+  writeFileSync(join(modelDir, 'tokenizer.json'), '{"fixture":true}');
+  const archivePath = join(testRoot, `bge-fixture-${dirCounter}.tar.gz`);
+  dirCounter += 1;
+  await tarCreate({ gzip: true, cwd: src, file: archivePath }, [FE_MODEL_ID]);
+  const payload = new Uint8Array(await readFile(archivePath));
+  const onnxSha = createHash('sha256').update(onnxBytes).digest('hex');
+  return { payload, onnxSha };
+}
+
+describe('ensureEmbeddingModelFiles 自托管下载器', () => {
+  it('权重已存在时短路：不发请求、不落暂存文件', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const dir = seedWeights(freshCacheDir());
+
+    await expect(ensureEmbeddingModelFiles(dir)).resolves.toBeUndefined();
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('下载→解包→校验✓：权重与 sidecar 落盘、暂存包清理、重复调用不再拉网', async () => {
+    const fixture = await makeModelArchive();
+    const fetchMock = vi.fn(async (_url: string) => ({
+      ok: true,
+      status: 200,
+      arrayBuffer: async () => fixture.payload.buffer,
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const dir = freshCacheDir();
+
+    await expect(
+      ensureEmbeddingModelFiles(dir, { sourceUrl: 'https://stub/pkg.tar.gz', expectedOnnxSha256: fixture.onnxSha }),
+    ).resolves.toBeUndefined();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]![0]).toBe('https://stub/pkg.tar.gz');
+    expect(existsSync(join(dir, FE_MODEL_ID, 'model_optimized.onnx'))).toBe(true);
+    expect(existsSync(join(dir, FE_MODEL_ID, 'config.json'))).toBe(true);
+    expect(existsSync(join(dir, FE_MODEL_ID, 'tokenizer.json'))).toBe(true);
+    // 暂存名用 .part，不能与 fastembed 的"已下载"标记同名
+    expect(existsSync(join(dir, `${FE_MODEL_ID}.tar.gz.part`))).toBe(false);
+    expect(existsSync(join(dir, `${FE_MODEL_ID}.tar.gz`))).toBe(false);
+
+    // 已就位 → 第二次调用短路
+    await expect(ensureEmbeddingModelFiles(dir)).resolves.toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('模型源返回 403 → 报出状态码、不落任何文件；经 ensureReady 走一遍归类为 network', async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: false,
+      status: 403,
+      arrayBuffer: async () => new ArrayBuffer(0),
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const dir = freshCacheDir();
+    const engine = createFastEmbedEngine(dir);
+    fe.impls.push(() => makeModel()); // 若实现失控跳过了报错，也别让它以"成功"蒙混
+
+    expect(await engine.ensureReady()).toBe(false);
+    expect(engine.available).toBe(false);
+    expect(engine.lastError).toContain('HTTP 403');
+    expect(classifyEmbeddingFailure(engine.lastError)).toBe('network');
+    expect(existsSync(join(dir, `${FE_MODEL_ID}.tar.gz.part`))).toBe(false);
+    expect(existsSync(join(dir, FE_MODEL_ID))).toBe(false);
+    // 关键顺序证据：1.补包先行（确实发过请求）2.fastembed init 未被调用
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fe.opts).toHaveLength(0);
+  });
+
+  it('下载到垃圾包（非 gzip）→ tar 解包报错、暂存物与半成品目录全部清理', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      arrayBuffer: async () => new TextEncoder().encode('403 AccessDenied XML junk').buffer,
+    })));
+    const dir = freshCacheDir();
+    const engine = createFastEmbedEngine(dir);
+    fe.impls.push(() => makeModel());
+
+    expect(await engine.ensureReady()).toBe(false);
+    expect(engine.lastError).toBeDefined();
+    expect(classifyEmbeddingFailure(engine.lastError)).toBe('archive');
+    expect(existsSync(join(dir, `${FE_MODEL_ID}.tar.gz.part`))).toBe(false);
+    // 半成品目录也必须清掉，防止下次被判成"已安装"（关键：这是重复弹卡的根）
+    expect(existsSync(join(dir, FE_MODEL_ID))).toBe(false);
+  });
+
+  it('权重 sha 不匹配 → 报 mismatch 并把落地物清掉', async () => {
+    const fixture = await makeModelArchive();
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      arrayBuffer: async () => fixture.payload.buffer,
+    })));
+    const dir = freshCacheDir();
+
+    await expect(
+      ensureEmbeddingModelFiles(dir, { sourceUrl: 'https://stub/pkg.tar.gz', expectedOnnxSha256: 'deadbeef'.repeat(8) }),
+    ).rejects.toThrow(/sha256 mismatch/);
+
+    expect(existsSync(join(dir, FE_MODEL_ID))).toBe(false);
+    expect(existsSync(join(dir, `${FE_MODEL_ID}.tar.gz.part`))).toBe(false);
+  });
+
+  it('SCREAM_CODE_EMBEDDING_MODEL_URL 环境变量改为下载来源', async () => {
+    const fixture = await makeModelArchive();
+    const fetchMock = vi.fn(async (_url: string) => ({
+      ok: true,
+      status: 200,
+      arrayBuffer: async () => fixture.payload.buffer,
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    vi.stubEnv('SCREAM_CODE_EMBEDDING_MODEL_URL', 'https://env-override/pkg.tar.gz');
+
+    await expect(
+      ensureEmbeddingModelFiles(freshCacheDir(), { expectedOnnxSha256: fixture.onnxSha }),
+    ).resolves.toBeUndefined();
+
+    expect(fetchMock.mock.calls[0]![0]).toBe('https://env-override/pkg.tar.gz');
+  });
+
+  it('loadEmbedder：权重已在位 → 直接进 init（同一 cacheDir、不再拉网、重复 ensure 不触发第二次）', async () => {    // 先用一个合法包把权重 place 到位（真实 ensure 路径），pin 用夹具自带的 sha：
+    // pin 的默认常量校验已由独立用例覆盖，这里钉的是 loadEmbedder 的接线行为。
+    const fixture = await makeModelArchive();
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      arrayBuffer: async () => fixture.payload.buffer,
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const dir = freshCacheDir();
+    await ensureEmbeddingModelFiles(dir, { expectedOnnxSha256: fixture.onnxSha });
+
+    fe.impls.push(() => makeModel(), () => makeModel());
+    const engine = createFastEmbedEngine(dir);
+    expect(await engine.ensureReady()).toBe(true);
+    expect(fe.opts[0]).toEqual({ model: FE_MODEL_ID, cacheDir: dir });
+    expect(fetchMock).toHaveBeenCalledTimes(1); // 只有手动 staging 那一次
+    expect(engine.available).toBe(true);
+    expect(await engine.ensureReady()).toBe(true);
+    expect(fe.opts).toHaveLength(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
 
