@@ -22,6 +22,7 @@ import { fileDiffSummary } from '../../support/file-diff';
 import { toInputJsonSchema } from '../../support/input-schema';
 import { literalRulePattern, matchesPathRuleSubject } from '../../support/rule-match';
 import { scanCache } from '../../support/scan-cache';
+import { withFileMutationLock } from './mutation-queue';
 import type { WorkspaceConfig } from '../../support/workspace';
 import { scanConflictLines } from './conflict-detect';
 import { fetchDiagnostics, formatDiagnosticsHint, formatDiagnosticsNotice } from './lsp-diagnostics';
@@ -146,7 +147,10 @@ export class EditTool implements BuiltinTool<EditInput> {
           pathClass: this.jian.pathClass(),
           homeDir: this.jian.gethome(),
         }),
-      execute: ({ signal }) => this.execution(args, path, signal),
+      // Same-path mutations serialize (see mutation-queue). The noop-loop
+      // bookkeeping inside `execution` runs under the lock too, so concurrent
+      // attempts cannot interleave their failure counters.
+      execute: ({ signal }) => withFileMutationLock(path, () => this.execution(args, path, signal)),
     };
   }
 

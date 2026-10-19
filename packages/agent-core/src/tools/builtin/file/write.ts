@@ -18,6 +18,7 @@ import { resolvePathAccessPath } from '../../policies/path-access';
 import { countLines, fileDiffSummary } from '../../support/file-diff';
 import { toInputJsonSchema } from '../../support/input-schema';
 import { literalRulePattern, matchesPathRuleSubject } from '../../support/rule-match';
+import { withFileMutationLock } from './mutation-queue';
 import { scanCache } from '../../support/scan-cache';
 import type { WorkspaceConfig } from '../../support/workspace';
 import { scanConflictLines } from './conflict-detect';
@@ -103,7 +104,10 @@ export class WriteTool implements BuiltinTool<WriteInput> {
           pathClass: this.jian.pathClass(),
           homeDir: this.jian.gethome(),
         }),
-      execute: ({ signal }) => this.execution(args, path, signal),
+      // Same-path mutations serialize (see mutation-queue): a batch or two
+      // sub-agents can write one file concurrently, and the read-modify-write
+      // step must not interleave.
+      execute: ({ signal }) => withFileMutationLock(path, () => this.execution(args, path, signal)),
     };
   }
 

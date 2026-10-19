@@ -18,6 +18,14 @@ import {
   type EmbeddingFailureKind,
 } from './commands/knowledge-store';
 import { embeddingFailureDetail } from './commands/embedding-failure-hint';
+import { embeddingProgressLabel } from './utils/embedding-progress-label';
+import {
+  clearRuntimeMarker,
+  collectStaleMarkers,
+  writeRuntimeMarker,
+  type RuntimeMarkerInfo,
+} from './utils/runtime-marker';
+import { getDataDir } from '../utils/paths';
 import { ScreamHarness } from '@scream-code/scream-code-sdk';
 import { t, setLocale } from '@scream-code/config';
 import type { CLIOptions } from '#/cli/options';
@@ -183,6 +191,7 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
   deferUserMessages = false;
   aborted = false;
   private isShuttingDown = false;
+  private readonly startedAt = Date.now();
   readonly reverseRpcDisposers: Array<() => void> = [];
   startupNotice: string | undefined;
   /** Interval handle for the periodic provider-balance refresh. */
@@ -322,6 +331,10 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
       this.lifecycleController.startEventLoop();
       try {
         await this.finishStartup(shouldReplayHistory);
+        // Register this instance, then report (once) any instance that never
+        // shut down. Both are advisory: a marker problem must never block the UI.
+        this.refreshRuntimeMarker();
+        this.reportStaleSessions();
         this.lifecycleController.startCcConnectPolling();
         this.startBalancePolling();
       } catch (error) {
@@ -436,6 +449,41 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
     }
   }
 
+  /** Keep this instance's crash marker in sync with the running session. */
+  private refreshRuntimeMarker(): void {
+    try {
+      writeRuntimeMarker(getDataDir(), {
+        pid: process.pid,
+        startedAt: this.startedAt,
+        ...(this.state.appState.sessionId ? { sessionId: this.state.appState.sessionId } : {}),
+        ...(this.state.appState.sessionTitle ? { title: this.state.appState.sessionTitle } : {}),
+      });
+    } catch {
+      // Advisory file: a read-only home must not break startup or shutdown.
+    }
+  }
+
+  /** Report a previous instance that never shut down, exactly once. */
+  private reportStaleSessions(): void {
+    let stale: RuntimeMarkerInfo[] = [];
+    try {
+      stale = collectStaleMarkers(getDataDir());
+    } catch {
+      return;
+    }
+    const latest = stale[0];
+    if (latest === undefined) return;
+    const label = latest.title ?? (latest.sessionId !== undefined ? latest.sessionId.slice(0, 8) : '');
+    if (label.length === 0) {
+      this.showNotice(t('tui.crash_recovery_title'));
+      return;
+    }
+    this.showNotice(
+      t('tui.crash_recovery_title'),
+      t('tui.crash_recovery_detail', { title: label }),
+    );
+  }
+
   async stop(exitCode?: number): Promise<void> {
     if (this.isShuttingDown) return;
     this.isShuttingDown = true;
@@ -458,6 +506,10 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
     this.inputController.dispose();
     this.state.footer.dispose();
     this.state.sidebarContainer.dispose();
+    // Clean shutdown: clear the crash marker before any teardown awaits. If a
+    // teardown step throws, this path still ran and the next launch must not
+    // report a crash that did not happen.
+    clearRuntimeMarker(getDataDir());
     await this.closeSession();
     await this.harness.close();
     this.sessionEventHandler.stopAllMcpServerStatusSpinners();
@@ -496,6 +548,9 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
   onEmergencyExit(exitCode = 129): never {
     this.isShuttingDown = true;
     this.lifecycleController.uninstallSignalHandlers();
+    // A SIGHUP means the terminal went away, not that the process crashed:
+    // clear the marker so the next launch does not blame the user's session.
+    clearRuntimeMarker(getDataDir());
     process.exit(exitCode);
   }
 
@@ -715,6 +770,9 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
     const sessionChanged =
       'sessionId' in patch && this.state.appState.sessionId !== prevSessionId;
     if (sessionChanged) {
+      // Keep the crash marker pointing at the session the user is in, so a
+      // hinted recovery names the right session after an abnormal exit.
+      this.refreshRuntimeMarker();
       // Per-session token/usage statistics: reset when switching sessions so
       // the cache hit rate reflects the current session only. (Compaction's
       // summary calls bypass the step loop, so they never pollute this.)
@@ -907,7 +965,7 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
     const card = new OnboardingCardComponent({
       colors: this.state.theme.colors,
       onConfigure: () => {
-        // Enter /config connect flow (provider → api key → model).
+        // Open the /config entry menu (quick pick / custom / image).
         void import('./commands/dispatch')
           .then(({ handleConnectCommand }) => handleConnectCommand(this, ''))
           .finally(() => {
@@ -957,7 +1015,13 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
           let error: string | undefined;
           let failureKind: EmbeddingFailureKind | undefined;
           try {
-            ({ ok, error, failureKind } = await startManualEmbeddingDownload());
+            ({ ok, error, failureKind } = await startManualEmbeddingDownload((progress) => {
+              // Keep the spinner text honest about what is happening: byte
+              // progress while downloading, then the verify and load phases.
+              // A stalled network shows a frozen byte count instead of an
+              // eternal generic spinner.
+              spinner.setLabel(embeddingProgressLabel(progress));
+            }));
           } catch (error: unknown) {
             error = error instanceof Error ? error.message : String(error);
           }
@@ -1073,6 +1137,10 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
 
   showHelpPanel(): void {
     this.dialogManager.showHelpPanel(this.getSlashCommands() as unknown as readonly HelpPanelCommand[]);
+  }
+
+  showHotkeysPanel(): void {
+    this.dialogManager.showHotkeysPanel();
   }
 
   hideHelpPanel(): void {

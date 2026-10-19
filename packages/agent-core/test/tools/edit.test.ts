@@ -166,6 +166,37 @@ describe('EditTool', () => {
     expect(writeText).toHaveBeenCalledWith('/tmp/a.txt', 'alpha gamma');
   });
 
+  it('serializes concurrent edits to the same file so both apply (no lost update)', async () => {
+    // Shared mutable file state: without per-path serialization both edits read
+    // the same original content and the second write clobbers the first.
+    let content = 'alpha beta gamma';
+    const readText = vi.fn(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      return content;
+    });
+    const writeText = vi.fn(async (_path: string, next: string) => {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      content = next;
+      return next.length;
+    });
+    const tool = new EditTool(
+      createFakeJian({
+        readText: readText as never,
+        writeText: writeText as never,
+      }),
+      PERMISSIVE_WORKSPACE,
+    );
+
+    const [first, second] = await Promise.all([
+      executeTool(tool, context({ path: '/tmp/concurrent.txt', old_string: 'alpha', new_string: 'ALPHA' })),
+      executeTool(tool, context({ path: '/tmp/concurrent.txt', old_string: 'gamma', new_string: 'GAMMA' })),
+    ]);
+
+    expect(first.isError).toBeFalsy();
+    expect(second.isError).toBeFalsy();
+    expect(content).toBe('ALPHA beta GAMMA');
+  });
+
   it('expands leading tilde paths using the jian home directory', async () => {
     const readText = vi.fn().mockResolvedValue('alpha beta');
     const writeText = vi.fn().mockResolvedValue(0);
