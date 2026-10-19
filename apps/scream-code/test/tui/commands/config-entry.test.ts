@@ -25,6 +25,12 @@ vi.mock('@scream-code/scream-code-sdk', async (importOriginal) => {
   };
 });
 
+// 生图流程第一步会读真实配置文件；固定为"无既有配置"，让本地与 CI 行为一致。
+vi.mock('#/utils/image-config', () => ({
+  readExistingImageConfig: vi.fn(async () => undefined),
+  getImageConfigPath: () => '/tmp/scream-test-image-config.json',
+}));
+
 // DIY 首步打桩：记录被调用即算"已进入 DIY 流程"，返回 undefined 立即退出。
 const promptsState = vi.hoisted(() => ({ wireCalls: 0 }));
 vi.mock('#/tui/commands/prompts', async (importOriginal) => {
@@ -82,10 +88,17 @@ function panelText(panel: MountedPanel): string {
   return panel.render(120).join('\n').replaceAll(ANSI_SGR, '');
 }
 
-/** 让 fire-and-forget 的流程推进过若干微任务/宏任务（含 fs 读取等异步步骤）。 */
-async function flush(times = 4): Promise<void> {
-  for (let i = 0; i < times; i += 1) {
-    await new Promise((resolve) => setImmediate(resolve));
+/**
+ * 等条件成立而不是等固定 tick：fire-and-forget 流程里有真实 await（fs、mock
+ * 的异步步骤），固定次数的事件循环推进在覆盖插桩的 CI 上不够用。
+ */
+async function waitFor(predicate: () => boolean, timeoutMs = 2000): Promise<void> {
+  const startedAt = Date.now();
+  while (!predicate()) {
+    if (Date.now() - startedAt > timeoutMs) {
+      throw new Error('waitFor timed out');
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5));
   }
 }
 
@@ -103,7 +116,7 @@ describe('/config 入口菜单', () => {
     promptsState.wireCalls = 0;
 
     void handleConnectCommand(host, '');
-    await flush();
+    await waitFor(() => mounted.length > 0);
 
     expect(mounted).toHaveLength(1);
     const text = panelText(mounted[0]!);
@@ -120,7 +133,7 @@ describe('/config 入口菜单', () => {
     const { host, mounted } = makeHost();
 
     void handleConnectCommand(host, 'foo');
-    await flush();
+    await waitFor(() => mounted.length > 0);
 
     expect(mounted).toHaveLength(1);
     expect(panelText(mounted[0]!)).toContain(t('config.entry_title'));
@@ -131,9 +144,9 @@ describe('/config 入口菜单', () => {
     sdkState.fetchCatalogCalls = 0;
 
     void handleConnectCommand(host, '');
-    await flush();
+    await waitFor(() => mounted.length > 0);
     (mounted[0] as unknown as { handleInput(data: string): void }).handleInput(ENTER);
-    await flush();
+    await waitFor(() => sdkState.fetchCatalogCalls === 1);
 
     expect(restoreEditor).toHaveBeenCalled();
     expect(sdkState.fetchCatalogCalls).toBe(1);
@@ -145,11 +158,11 @@ describe('/config 入口菜单', () => {
     promptsState.wireCalls = 0;
 
     void handleConnectCommand(host, '');
-    await flush();
+    await waitFor(() => mounted.length > 0);
     const picker = mounted[0] as unknown as { handleInput(data: string): void };
     picker.handleInput(DOWN);
     picker.handleInput(ENTER);
-    await flush();
+    await waitFor(() => promptsState.wireCalls === 1);
 
     expect(restoreEditor).toHaveBeenCalled();
     expect(promptsState.wireCalls).toBe(1);
@@ -161,12 +174,12 @@ describe('/config 入口菜单', () => {
     sdkState.fetchCatalogCalls = 0;
 
     void handleConnectCommand(host, '');
-    await flush();
+    await waitFor(() => mounted.length > 0);
     const picker = mounted[0] as unknown as { handleInput(data: string): void };
     picker.handleInput(DOWN);
     picker.handleInput(DOWN);
     picker.handleInput(ENTER);
-    await flush();
+    await waitFor(() => mounted.length === 2);
 
     expect(mounted).toHaveLength(2);
     expect(panelText(mounted[1]!)).toContain(t('image.provider_title'));
@@ -179,9 +192,9 @@ describe('/config 入口菜单', () => {
     promptsState.wireCalls = 0;
 
     void handleConnectCommand(host, '');
-    await flush();
+    await waitFor(() => mounted.length > 0);
     (mounted[0] as unknown as { handleInput(data: string): void }).handleInput(ESC);
-    await flush();
+    await waitFor(() => restoreEditor.mock.calls.length > 0);
 
     expect(restoreEditor).toHaveBeenCalledTimes(1);
     expect(sdkState.fetchCatalogCalls).toBe(0);
@@ -195,6 +208,7 @@ describe('/config 入口菜单', () => {
     promptsState.wireCalls = 0;
 
     await handleConnectCommand(host, 'diy');
+    await waitFor(() => promptsState.wireCalls === 1);
 
     expect(promptsState.wireCalls).toBe(1);
     expect(mounted).toHaveLength(0);
@@ -204,7 +218,7 @@ describe('/config 入口菜单', () => {
     const { host, mounted } = makeHost();
 
     void handleConnectCommand(host, 'image');
-    await flush();
+    await waitFor(() => mounted.length > 0);
 
     expect(mounted).toHaveLength(1);
     const text = panelText(mounted[0]!);
