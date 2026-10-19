@@ -15,6 +15,7 @@ import {
   decodeKittyPrintable,
   type Focusable,
   truncateToWidth,
+  visibleWidth,
 } from '@liutod-scream/pi-tui';
 import chalk from 'chalk';
 import { t } from '@scream-code/config';
@@ -43,6 +44,8 @@ export const DEFAULT_KEYBOARD_SHORTCUTS: readonly KeyboardShortcut[] = [
   { keys: 'Ctrl-X', description: t('help.toggle_sidebar') },
   { keys: 'Ctrl-B', description: t('help.toggle_hint') },
   { keys: 'Ctrl-W', description: t('help.cancel_memory') },
+  { keys: '↑（忙碌时）', description: t('help.recall_queued') },
+  { keys: 'Ctrl-V / Alt-V', description: t('help.paste_image') },
   { keys: 'Shift-Enter / Ctrl-J', description: t('help.newline') },
   { keys: 'Ctrl-C', description: t('help.cancel_stream') },
   { keys: 'Ctrl-D', description: t('help.exit') },
@@ -58,6 +61,8 @@ export interface HelpPanelOptions {
   readonly onClose: () => void;
   /** Terminal height — used to decide whether to show the hint tail. */
   readonly maxVisible?: number;
+  /** Panel heading; defaults to the /help title. */
+  readonly title?: string;
 }
 
 export class HelpPanelComponent extends Container implements Focusable {
@@ -107,38 +112,55 @@ export class HelpPanelComponent extends Container implements Focusable {
     const slashColor = chalk.hex(colors.primary);
 
     const shortcuts = this.opts.shortcuts ?? DEFAULT_KEYBOARD_SHORTCUTS;
-    const kbdWidth = Math.max(8, ...shortcuts.map((s) => s.keys.length));
+    // CJK labels (e.g. "↑（忙碌时）") render double-width: pad by rendered width,
+    // not string length, or the description column zig-zags.
+    const padToWidth = (text: string, width: number): string => {
+      const pad = width - visibleWidth(text);
+      return pad > 0 ? text + ' '.repeat(pad) : text;
+    };
+    const kbdWidth = Math.max(8, ...shortcuts.map((s) => visibleWidth(s.keys)));
     const sortedCmds = [...this.opts.commands].toSorted((a, b) => a.name.localeCompare(b.name));
     const cmdLabels = sortedCmds.map((c) => {
       const aliases = c.aliases.length > 0 ? ` (${c.aliases.map((a) => '/' + a).join(', ')})` : '';
       return `/${c.name}${aliases}`;
     });
     const cmdWidth = Math.max(12, ...cmdLabels.map((l) => l.length));
+    const hasCommands = sortedCmds.length > 0;
     const lines: string[] = [
       accent('─'.repeat(width)),
-      accent.bold(t('help.title')) + muted(` · ${t('help.close_hint')}`),
+      accent.bold(this.opts.title ?? t('help.title')) + muted(` · ${t('help.close_hint')}`),
       '',
-      // Greeting
-      `  ${dim(t('help.welcome_msg'))}`,
-      `  ${muted(t('help.hidden_commands'))}`,
-      '',
+      // Greeting and hidden-command hints only make sense next to the command list.
+      ...(hasCommands
+        ? [
+            `  ${dim(t('help.welcome_msg'))}`,
+            `  ${muted(t('help.hidden_commands'))}`,
+            '',
+          ]
+        : []),
       // Section: keyboard shortcuts
       `  ${chalk.bold(t('help.shortcuts'))}`,
-      ...shortcuts.map((s) => `    ${kbdColor(s.keys.padEnd(kbdWidth))}  ${dim(s.description)}`),
+      ...shortcuts.map((s) => `    ${kbdColor(padToWidth(s.keys, kbdWidth))}  ${dim(s.description)}`),
       '',
-      // Section: slash commands
-      `  ${chalk.bold(t('help.slash_commands'))}`,
-      ...sortedCmds.map((cmd, i) => {
-        const label = cmdLabels[i] ?? `/${cmd.name}`;
-        return `    ${slashColor(label.padEnd(cmdWidth))}  ${dim(t(cmd.description))}`;
-      }),
-      '',
+      // Section: slash commands (omitted for shortcuts-only panels)
+      ...(hasCommands
+        ? [
+            `  ${chalk.bold(t('help.slash_commands'))}`,
+            ...sortedCmds.map((cmd, i) => {
+              const label = cmdLabels[i] ?? `/${cmd.name}`;
+              return `    ${slashColor(label.padEnd(cmdWidth))}  ${dim(t(cmd.description))}`;
+            }),
+            '',
+          ]
+        : []),
       accent('─'.repeat(width)),
     ];
 
     // Apply scroll windowing — keep the borders visible.
     const content = lines.slice(1, lines.length - 1);
-    const maxVisible = Math.max(5, this.opts.maxVisible ?? 24);
+    // 30 lines fits the full shortcut reference plus the start of the command
+    // list on a standard terminal; anything longer scrolls (see the hint line).
+    const maxVisible = Math.max(5, this.opts.maxVisible ?? 30);
     if (content.length > maxVisible) {
       this.scrollTop = Math.max(0, Math.min(this.scrollTop, content.length - maxVisible));
       const slice = content.slice(this.scrollTop, this.scrollTop + maxVisible);

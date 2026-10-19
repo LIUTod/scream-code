@@ -70,6 +70,7 @@ import { handleBlockRowsCommand } from './blockrows';
 import { handleCodeBgCommand } from './codebg';
 import { handleCronCommand } from './cron';
 import { handleMermaidCommand } from './mermaid';
+import { handleCopyCommand } from './copy';
 import { handleLikeCommand } from './like';
 import { handleKnowledgeCommand } from './knowledge';
 import { handleGrantsCommand } from './grants';
@@ -158,6 +159,7 @@ export interface SlashCommandHost {
   // Dispatch
   stop(exitCode?: number): Promise<void>;
   showHelpPanel(): void;
+  showHotkeysPanel(): void;
   createNewSession(): Promise<void>;
   showSessionPicker(): Promise<void>;
   showMemoryPicker(): void;
@@ -251,6 +253,12 @@ async function handleBuiltInSlashCommand(
       return;
     case 'help':
       host.showHelpPanel();
+      return;
+    case 'hotkeys':
+      host.showHotkeysPanel();
+      return;
+    case 'copy':
+      await handleCopyCommand(host);
       return;
     case 'version':
       host.showStatus(`Scream Code v${host.state.appState.version}`);

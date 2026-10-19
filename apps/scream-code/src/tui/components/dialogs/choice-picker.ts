@@ -53,6 +53,13 @@ export interface ChoicePickerOptions {
   readonly pageSize?: number;
   readonly onSelect: (value: string) => void;
   readonly onCancel: () => void;
+  /**
+   * Fired when the panel is replaced by another panel (a command mounted over
+   * it). Callers that await a choice must settle on this path too, otherwise
+   * the awaiting promise lives forever. Deliberately does NOT restore the
+   * editor: another panel now owns it.
+   */
+  readonly onDispose?: () => void;
 }
 
 const CURRENT_MARK = '← current';
@@ -96,6 +103,11 @@ export class ChoicePickerComponent extends Container implements Focusable {
       initialIndex: Math.max(currentIdx, 0),
       searchable: opts.searchable === true,
     });
+  }
+
+  /** Panel replaced by another one before a choice was made. */
+  dispose(): void {
+    this.opts.onDispose?.();
   }
 
   handleInput(data: string): void {

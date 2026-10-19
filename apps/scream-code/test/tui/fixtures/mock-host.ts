@@ -377,6 +377,7 @@ export function makeMockSlashCommandHost(
 
     stop: vi.fn(async (): Promise<void> => {}),
     showHelpPanel: vi.fn(),
+    showHotkeysPanel: vi.fn(),
     createNewSession: vi.fn(async (): Promise<void> => {}),
     showSessionPicker: vi.fn(async (): Promise<void> => {}),
     showMemoryPicker: vi.fn(),

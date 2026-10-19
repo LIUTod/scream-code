@@ -110,6 +110,22 @@ describe('dispatchInput — command vs message split', () => {
     await settle();
     expect(host.showHelpPanel).toHaveBeenCalledTimes(1);
   });
+
+  it('routes /hotkeys to the dedicated shortcuts panel', async () => {
+    const host = makeHost();
+    dispatchInput(host, '/hotkeys');
+    await settle();
+    expect(host.showHotkeysPanel).toHaveBeenCalledTimes(1);
+    expect(host.showHelpPanel).not.toHaveBeenCalled();
+  });
+
+  it('routes /copy through the clipboard command (no reply → status, not error)', async () => {
+    const host = makeHost();
+    dispatchInput(host, '/copy');
+    await settle();
+    expect(host.showStatus).toHaveBeenCalledTimes(1);
+    expect(host.showError).not.toHaveBeenCalled();
+  });
 });
 
 describe('dispatchInput — intent routing', () => {

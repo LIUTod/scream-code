@@ -246,6 +246,20 @@ export const BUILTIN_SLASH_COMMANDS = [
     availability: 'always',
   },
   {
+    name: 'hotkeys',
+    aliases: ['keys'],
+    description: 'registry.hotkeys_desc',
+    priority: 197,
+    availability: 'always',
+  },
+  {
+    name: 'copy',
+    aliases: ['yank'],
+    description: 'registry.copy_desc',
+    priority: 196,
+    availability: 'always',
+  },
+  {
     name: 'make-skill',
     aliases: ['makeskill', 'craftskill'],
     description: 'registry.make_skill_desc',
