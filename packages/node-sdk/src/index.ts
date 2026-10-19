@@ -39,6 +39,13 @@ export {
   toScreamErrorPayload,
 } from '@scream-code/agent-core';
 
+// Plugin-owned MCP runtime names share this predicate with the core's plugin
+// hot-apply pass, so `/mcp` cannot drift from the naming contract.
+export { isPluginMcpRuntimeName, pluginIdFromMcpRuntimeName } from '@scream-code/agent-core';
+// Shared with the core's MCP config loader: the TUI uses the same path chain
+// to tell "user-declared" apart from "project-declared" servers on uninstall.
+export { resolveMcpJsonPaths } from '@scream-code/agent-core';
+
 // Replay window shared with the TUI: the core trims replay payloads to the
 // last REPLAY_TURN_LIMIT user turns, and the TUI renders the same window. The
 // TUI cuts that window with the same "what starts a user turn" rule, so the

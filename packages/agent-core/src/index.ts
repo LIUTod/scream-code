@@ -15,6 +15,9 @@ export {
   sessionIndexPath,
 } from './session/store';
 export * from './plugin';
+// Shared with SDK consumers that need to tell user- vs project-declared MCP
+// servers apart (TUI uninstall) without duplicating the path-chain rules.
+export { resolveMcpJsonPaths } from './mcp';
 export {
   __resetRootLoggerForTest,
   flushDiagnosticLogs,

@@ -4,7 +4,7 @@
  * 查看已安装的 MCP 服务器状态，一键安装推荐服务器。 */
 
 import { writeFile, readFile, mkdir } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -19,6 +19,10 @@ import {
 } from '@liutod-scream/pi-tui';
 import chalk from 'chalk';
 import { t } from '@scream-code/config';
+import {
+  pluginIdFromMcpRuntimeName,
+  resolveMcpJsonPaths,
+} from '@scream-code/scream-code-sdk';
 
 import { getDataDir } from '#/utils/paths';
 import type { ColorPalette } from '#/tui/theme/colors';
@@ -209,7 +213,7 @@ function sanitizeDesc(s: string): string {
   return s.replaceAll(/\r?\n/g, ' ').replaceAll(/\s+/g, ' ').trim();
 }
 
-function buildRows(
+export function buildRows(
   servers: readonly { name: string; status: string; toolCount: number; error?: string; capabilities?: readonly string[] }[],
 ): McpRow[] {
   const rows: McpRow[] = [];
@@ -227,6 +231,9 @@ function buildRows(
       const capLabels = getCapabilityLabels();
       const capInfo = (s.capabilities ?? []).map((c) => capLabels[c] ?? c).join('  ');
       const errorInfo = s.error ? ` — ${sanitizeDesc(s.error)}` : '';
+      // Plugin-contributed servers are managed by the plugin registry, not by
+      // mcp.json: /mcp must say so instead of offering a silent no-op uninstall.
+      const pluginInfo = pluginIdFromMcpRuntimeName(s.name) !== undefined ? t('mcp.plugin_owned') : '';
       rows.push({
         kind: 'installed',
         name: s.name,
@@ -234,7 +241,7 @@ function buildRows(
         status: s.status,
         toolCount: s.toolCount,
         error: s.error,
-        description: [statusLabel, toolInfo, capInfo, errorInfo].filter(Boolean).join('  '),
+        description: [statusLabel, toolInfo, capInfo, pluginInfo, errorInfo].filter(Boolean).join('  '),
       });
     }
   } else {
@@ -265,7 +272,7 @@ function buildRows(
 
 // ─── 动作处理 ────────────────────────────────────────────────────────
 
-async function handleEnter(
+export async function handleEnter(
   host: SlashCommandHost,
   row: McpRow,
 ): Promise<void> {
@@ -286,11 +293,19 @@ async function handleEnter(
   }
 }
 
-async function handleDelete(
+export async function handleDelete(
   host: SlashCommandHost,
   row: McpRow,
 ): Promise<void> {
   if (row.kind !== 'installed' || !row.status || row.status === '__section' || row.status === '__empty') {
+    return;
+  }
+  // Plugin-owned servers are refused outright — before the confirmation
+  // dialog, so the user gets the explanation instead of a dead-end prompt
+  // for an action that the plugin sync would undo on the next startup.
+  const pluginId = pluginIdFromMcpRuntimeName(row.name);
+  if (pluginId !== undefined) {
+    host.showError(t('mcp.uninstall_plugin_blocked', { name: row.label, plugin: pluginId }));
     return;
   }
   const confirmed = await confirmAction(host, t('mcp.uninstall_confirm', { name: row.label }));
@@ -406,7 +421,13 @@ async function disableMcp(host: SlashCommandHost, name: string): Promise<void> {
   if (!session) return;
   try {
     await session.stopMcpServer(name);
-    host.showStatus(t('mcp.disabled_done', { name }));
+    // Stopping really does take effect for this session, but a plugin-owned
+    // server is re-registered by the plugin sync on the next startup — say so
+    // instead of implying a persistent disable.
+    const note = pluginIdFromMcpRuntimeName(name) !== undefined
+      ? ` ${t('mcp.plugin_owned_stop_note')}`
+      : '';
+    host.showStatus(t('mcp.disabled_done', { name }) + note);
   } catch (error) {
     host.showError(
       t('mcp.disable_failed', { msg: error instanceof Error ? error.message : String(error) }),
@@ -427,12 +448,77 @@ async function enableMcp(host: SlashCommandHost, name: string): Promise<void> {
   }
 }
 
-async function uninstallMcp(host: SlashCommandHost, name: string): Promise<void> {
+/**
+ * Project-level mcp.json files (cwd + parent chain) that declare `name`.
+ *
+ * The runtime list cannot tell where a server came from, but a server declared
+ * by a project config is re-loaded on every start no matter what we delete from
+ * the user-level file — removing it there is the same silent lie as removing a
+ * plugin-owned server. Paths come from the core's own resolver so the rule that
+ * decides "which files count" cannot drift.
+ */
+function projectConfigFilesDeclaring(name: string): string[] {
+  let parents: readonly string[];
+  let project: string;
+  try {
+    const resolved = resolveMcpJsonPaths({ cwd: process.cwd(), homeDir: getDataDir() });
+    parents = resolved.parents;
+    project = resolved.project;
+  } catch {
+    return [];
+  }
+
+  return [...parents, project].filter((file) => {
+    if (!existsSync(file)) return false;
+    try {
+      const parsed = JSON.parse(readFileSync(file, 'utf-8')) as {
+        mcpServers?: Record<string, unknown>;
+      };
+      return parsed !== null
+        && typeof parsed === 'object'
+        && parsed.mcpServers !== undefined
+        && Object.hasOwn(parsed.mcpServers, name);
+    } catch {
+      // An unreadable project config cannot be edited from here; ignore it and
+      // let the runtime verification below catch any surprise.
+      return false;
+    }
+  });
+}
+
+export async function uninstallMcp(host: SlashCommandHost, name: string): Promise<void> {
   const session = host.session;
   if (!session) return;
+  // Defence in depth: the panel refuses plugin rows before the confirmation
+  // dialog, but a programmatic caller must hit the same wall — plugin-owned
+  // servers are runtime entries derived from the plugin registry, so removing
+  // them here is undone on the next startup by the plugin hot-apply pass.
+  const pluginId = pluginIdFromMcpRuntimeName(name);
+  if (pluginId !== undefined) {
+    host.showError(t('mcp.uninstall_plugin_blocked', { name, plugin: pluginId }));
+    return;
+  }
+  const projectFiles = projectConfigFilesDeclaring(name);
+  if (projectFiles.length > 0) {
+    host.showError(t('mcp.uninstall_project_owned', { name, files: projectFiles.join(', ') }));
+    return;
+  }
   try {
     await session.removeMcpServer(name);
     await removeMcpConfig(host, name);
+    // Config files are re-read at startup and the runtime only knows what it
+    // was handed; if the entry is still listed here the removal did not stick.
+    // The listing itself is best-effort: a failing re-list must not turn a
+    // completed removal into a misleading "uninstall failed".
+    let stillListed = false;
+    try {
+      const remaining = await session.listMcpServers();
+      stillListed = remaining.some((server) => server.name === name);
+    } catch { /* listing is best-effort */ }
+    if (stillListed) {
+      host.showError(t('mcp.uninstall_verify_failed', { name }));
+      return;
+    }
     host.showStatus(t('mcp.uninstalled', { name }));
   } catch (error) {
     host.showError(
