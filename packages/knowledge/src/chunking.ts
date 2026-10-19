@@ -4,7 +4,7 @@ const HEADING_RE = /^(#{1,6})\s+(.+?)\s*$/;
 const CODE_FENCE_RE = /^(\s*)(`{3,}|~{3,})/;
 
 /**
- * Soft cap on chunk token count. BGE-small-zh-v1.5 (the fastembed model used
+ * Soft cap on chunk token count. BGE-small-zh-v1.5 (the embedding model used
  * here) has a 512-token sequence limit; chunks longer than that get truncated
  * at the embedding layer, hurting retrieval quality. We split at ~480 to leave
  * headroom for the heading line that gets prepended at embed time.

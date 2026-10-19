@@ -44,7 +44,7 @@ import { USER_PROMPT_ORIGIN } from './context/types';
 import { GoalMode } from './goal';
 import { HookEngine } from '../session/hooks';
 import { InjectionManager } from './injection/manager';
-import { DreamTracker, EXIT_EXTRACTION_SYSTEM_PROMPT, MemoryMemoStore, buildExitExtractionPrompt, createFastEmbedEngine, parseMemoryMemos, sharedMemoStore, type EmbeddingEngine } from '@scream-code/memory';
+import { DreamTracker, EXIT_EXTRACTION_SYSTEM_PROMPT, MemoryMemoStore, buildExitExtractionPrompt, createEmbeddingEngine, parseMemoryMemos, sharedMemoStore, type EmbeddingEngine } from '@scream-code/memory';
 import { KnowledgeStore, sharedKnowledgeStore, sharedKnowledgeStoreReady } from '@scream-code/knowledge';
 import { PermissionManager, type PermissionManagerOptions } from './permission';
 import { PlanMode } from './plan';
@@ -243,7 +243,7 @@ export class Agent {
       ? join(options.screamHomeDir, 'cache', 'fastembed')
       : undefined;
     this.embeddingCacheDir = embedCacheDir;
-    this.sharedEmbeddingEngine = createFastEmbedEngine(embedCacheDir);
+    this.sharedEmbeddingEngine = createEmbeddingEngine(embedCacheDir);
     this.log = options.log ?? log;
 
     // ── Group 2: infrastructure (blob store → wire persistence → compaction) ──

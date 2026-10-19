@@ -5,8 +5,9 @@
  * 1. store 与 embedding engine 一起建成后才对外发布 —— 瞬时 init 失败之后
  *    必须还能重试（旧实现把 store 先发布，之后每次下载都秒回
  *    "embedding engine not initialized"，进程内不可恢复）；
- * 2. 缓存门禁按 fastembed 真实需要的文件集判定（少一个就会被判成"已安装"）；
- * 3. 平台没有本地模型二进制时，不进下载、不清缓存，直接给出可分类的失败。
+ * 2. 缓存门禁按运行时真实需要的文件集（权重 + 两个 tokenizer 文件）判定，
+ *    半装态必须被判成"未安装"，否则用户会永远卡在加载失败上；
+ * 3. 安装被破坏（模块缺失）时，不进下载、不清缓存，直接给出可自救的分类。
  *
  * 打桩：`@scream-code/knowledge`（KnowledgeStore）与 `@scream-code/memory` 的
  * 有副作用函数；错误分类函数用真实实现（`importActual`）。
@@ -23,15 +24,15 @@ const storeImpl = vi.hoisted(() => ({
 }));
 
 vi.mock('@scream-code/knowledge', async () => {
-  const { createFastEmbedEngine } = await import('@scream-code/memory');
+  const { createEmbeddingEngine } = await import('@scream-code/memory');
   class KnowledgeStore {
-    private engine: ReturnType<typeof createFastEmbedEngine> | undefined;
+    private engine: ReturnType<typeof createEmbeddingEngine> | undefined;
     init = storeImpl.init;
-    setEmbeddingEngine = (engine: ReturnType<typeof createFastEmbedEngine>): void => {
+    setEmbeddingEngine = (engine: ReturnType<typeof createEmbeddingEngine>): void => {
       this.engine = engine;
       storeImpl.setEmbeddingEngine(engine);
     };
-    getEmbeddingEngine = (): ReturnType<typeof createFastEmbedEngine> | undefined => this.engine;
+    getEmbeddingEngine = (): ReturnType<typeof createEmbeddingEngine> | undefined => this.engine;
   }
   // Minimal mirror of the real shared provider: memoized per homeDir, engine
   // wired after init, entry dropped on failure so the next caller retries.
@@ -43,7 +44,7 @@ vi.mock('@scream-code/knowledge', async () => {
     const ready = (async () => {
       try {
         await store.init();
-        store.setEmbeddingEngine(createFastEmbedEngine(join(homeDir, 'cache', 'fastembed')));
+        store.setEmbeddingEngine(createEmbeddingEngine(join(homeDir, 'cache', 'fastembed')));
       } catch (error) {
         entries.delete(homeDir);
         throw error;
@@ -77,7 +78,7 @@ vi.mock('@scream-code/memory', async () => {
   const actual = await vi.importActual<typeof import('@scream-code/memory')>('@scream-code/memory');
   return {
     ...actual,
-    createFastEmbedEngine: vi.fn(() => {
+    createEmbeddingEngine: vi.fn(() => {
       const engine = {
         available: false,
         lastError: undefined as string | undefined,
@@ -95,10 +96,8 @@ vi.mock('@scream-code/memory', async () => {
 const MODEL_DIR = 'fast-bge-small-zh-v1.5';
 const REQUIRED_FILES = [
   'model_optimized.onnx',
-  'config.json',
   'tokenizer.json',
   'tokenizer_config.json',
-  'special_tokens_map.json',
 ] as const;
 
 let home: string;
@@ -110,8 +109,10 @@ async function loadModule(): Promise<typeof import('#/tui/commands/knowledge-sto
   return await import('#/tui/commands/knowledge-store');
 }
 
+/** 写入指定文件集并清掉上一次的同名目录内容（调用即代表"磁盘现状"）。 */
 function writeCacheFiles(files: readonly string[]): void {
   const dir = join(home, 'cache', 'fastembed', MODEL_DIR);
+  rmSync(dir, { recursive: true, force: true });
   mkdirSync(dir, { recursive: true });
   for (const file of files) writeFileSync(join(dir, file), 'x');
 }
@@ -183,27 +184,30 @@ describe('getKnowledgeStore 单例契约', () => {
 });
 
 describe('hasEmbeddingModelCache', () => {
-  it('有目录与权重即视为可用（缺 sidecar 由 loader 自己补），空目录不算', async () => {
+  it('三件套齐全才算可用；半装态（缺 tokenizer / 只有 tokenizer）一律不算', async () => {
     const { hasEmbeddingModelCache } = await loadModule();
 
     expect(hasEmbeddingModelCache()).toBe(false);
 
-    // 只有 sidecar、没有权重：仍然没有可用的模型
+    // 只有 tokenizer、没有权重：没有可用的模型
     writeCacheFiles(REQUIRED_FILES.filter((file) => file !== 'model_optimized.onnx'));
     expect(hasEmbeddingModelCache()).toBe(false);
 
-    // 权重在（哪怕 sidecar 不全）：FlagEmbedding 加载时会去 Hub 补齐，
-    // 门禁若拦下就等于禁止了唯一能自修的路径（fastembed 见目录存在便不再下载）。
+    // 权重在但 tokenizer 缺：运行时无法加载，且半装态必须能触发重下修复
     writeCacheFiles(['model_optimized.onnx']);
+    expect(hasEmbeddingModelCache()).toBe(false);
+
+    // 三件套齐全：可用
+    writeCacheFiles(REQUIRED_FILES);
     expect(hasEmbeddingModelCache()).toBe(true);
   });
 });
 
 describe('startManualEmbeddingDownload 失败分类', () => {
-  it('平台缺原生绑定 → 直接失败、不下载、不清缓存', async () => {
+  it('安装被破坏（运行时模块缺失）→ 直接失败、不下载、不清缓存，归类 install', async () => {
     memImpl.probe.mockResolvedValue({
       supported: false,
-      error: "Cannot find module '@anush008/tokenizers-linux-arm64-gnu'",
+      error: "Cannot find package 'onnxruntime-web' imported from /app/dist/src-abc.mjs",
     });
     const { getKnowledgeStore, startManualEmbeddingDownload } = await loadModule();
     await getKnowledgeStore();
@@ -211,7 +215,7 @@ describe('startManualEmbeddingDownload 失败分类', () => {
     const result = await startManualEmbeddingDownload();
 
     expect(result.ok).toBe(false);
-    expect(result.failureKind).toBe('platform');
+    expect(result.failureKind).toBe('install');
     expect(memImpl.clear).not.toHaveBeenCalled();
     expect(memImpl.engines[0]!.ensureReady).not.toHaveBeenCalled();
   });
@@ -238,22 +242,21 @@ describe('startManualEmbeddingDownload 失败分类', () => {
     expect(result.failureKind).toBe('archive');
   });
 
-  it('平台类失败（探测通过但加载期报 dlopen）→ 不清缓存、不重试', async () => {
+  it('网络类失败（下载超时）→ 不清缓存、不重试（避免弱网等待 ×2）', async () => {
     memImpl.probe.mockResolvedValue({ supported: true });
     const { getKnowledgeStore, startManualEmbeddingDownload } = await loadModule();
     await getKnowledgeStore();
     const engine = memImpl.engines[0]!;
     engine.ensureReady = vi.fn(async () => {
-      engine.lastError =
-        'ERR_DLOPEN_FAILED: Error loading shared library libstdc++.so.6: No such file or directory';
+      engine.lastError = 'model download timed out (received 1048576 of 55429514 bytes): https://x';
       return false;
     });
 
     const result = await startManualEmbeddingDownload();
 
-    expect(result.failureKind).toBe('platform');
+    expect(result.failureKind).toBe('network');
     expect(engine.ensureReady).toHaveBeenCalledTimes(1); // 没有第二次尝试
-    expect(memImpl.clear).not.toHaveBeenCalled(); // 缓存与失败无关，不动它
+    expect(memImpl.clear).not.toHaveBeenCalled(); // 超时与缓存无关，不动它
   });
 
   it('返回的 error 保留完整原文（多行的 Require stack 不丢）', async () => {
@@ -266,7 +269,7 @@ describe('startManualEmbeddingDownload 失败分类', () => {
     expect(result.error).toContain('Require stack:');
   });
 
-  it('首次失败后重试成功 → ok，且失败不残留', async () => {
+  it('残包（archive 类）→ 清缓存并重试一次，第二次成功即 ok', async () => {
     memImpl.probe.mockResolvedValue({ supported: true });
     const { getKnowledgeStore, startManualEmbeddingDownload } = await loadModule();
     await getKnowledgeStore();
@@ -274,7 +277,7 @@ describe('startManualEmbeddingDownload 失败分类', () => {
     engine.ensureReady = vi
       .fn()
       .mockImplementationOnce(async () => {
-        engine.lastError = 'fetch failed';
+        engine.lastError = 'TAR_BAD_ARCHIVE: Unrecognized archive format';
         return false;
       })
       .mockImplementationOnce(async () => true);
@@ -282,7 +285,8 @@ describe('startManualEmbeddingDownload 失败分类', () => {
     const result = await startManualEmbeddingDownload();
 
     expect(result).toEqual({ ok: true });
-    // 失败即连包一起清：失败时磁盘上的包多半是残包，留下它会让重试零网络地解坏包
+    // 残包是唯一"清缓存能治"的失败：连包一起清，否则重试会零网络地解同一个坏包
     expect(memImpl.clear).toHaveBeenCalledWith(expect.any(String));
+    expect(engine.ensureReady).toHaveBeenCalledTimes(2);
   });
 });

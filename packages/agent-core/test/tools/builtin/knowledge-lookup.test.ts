@@ -65,7 +65,11 @@ function mockResults() {
 function writeModelCache(cacheDir: string): void {
   const modelDir = join(cacheDir, 'fast-bge-small-zh-v1.5');
   mkdirSync(modelDir, { recursive: true });
+  // 运行时要求三件套齐备（权重 + tokenizer.json + tokenizer_config.json）；
+  // 缺一即视为"未安装"，预热不会被触发。
   writeFileSync(join(modelDir, 'model_optimized.onnx'), new Uint8Array([1, 2, 3]));
+  writeFileSync(join(modelDir, 'tokenizer.json'), '{}');
+  writeFileSync(join(modelDir, 'tokenizer_config.json'), '{}');
 }
 
 const ctx = { turnId: 't', toolCallId: 'c', signal: undefined } as unknown as ExecutableToolContext;

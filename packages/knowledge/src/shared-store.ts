@@ -1,7 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import { join } from 'pathe';
 
-import { createFastEmbedEngine } from '@scream-code/memory';
+import { createEmbeddingEngine } from '@scream-code/memory';
 
 import { KnowledgeStore } from './store.js';
 
@@ -19,9 +19,12 @@ function entryFor(homeDir: string): SharedEntry {
   const ready = (async () => {
     try {
       await store.init();
+      // The directory name is a legacy path kept for cache compatibility: the
+      // downloaded model payload lives there and existing installs must keep
+      // finding it (see @scream-code/memory for the layout).
       const cacheDir = join(homeDir, 'cache', 'fastembed');
       mkdirSync(cacheDir, { recursive: true });
-      store.setEmbeddingEngine(createFastEmbedEngine(cacheDir));
+      store.setEmbeddingEngine(createEmbeddingEngine(cacheDir));
     } catch (error) {
       // Drop the entry so the next caller rebuilds — same retry-on-failure
       // contract the per-host store promises used to give each side.
@@ -41,7 +44,7 @@ function entryFor(homeDir: string): SharedEntry {
  *
  * The map key is the raw homeDir string so the engine cache key
  * join(homeDir, 'cache', 'fastembed') stays byte-identical with every other
- * createFastEmbedEngine call site: same string → same engine instance.
+ * createEmbeddingEngine call site: same string → same engine instance.
  */
 export function sharedKnowledgeStore(homeDir: string): KnowledgeStore {
   return entryFor(homeDir).store;

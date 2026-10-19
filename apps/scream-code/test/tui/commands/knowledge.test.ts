@@ -238,12 +238,12 @@ describe('handleKnowledgeCommand — 菜单', () => {
 // ─── 1b. 下载向量模型：失败分型 + store 初始化失败路径 ─────────────
 
 describe('handleKnowledgeCommand — 下载向量模型', () => {
-  it('平台无原生绑定 → 通知给平台提示，而不是"建议科学上网"', async () => {
+  it('安装被破坏 → 通知给重装指引，而不是"建议科学上网"', async () => {
     const { host, spinner } = makeHost();
     vi.mocked(knowledgeStore.startManualEmbeddingDownload).mockResolvedValue({
       ok: false,
-      error: "Cannot find module '@anush008/tokenizers-linux-arm64-gnu'",
-      failureKind: 'platform',
+      error: "Cannot find package 'onnxruntime-web' imported from /app/dist/src-abc.mjs",
+      failureKind: 'install',
     } as never);
 
     await openMenu(host);
@@ -252,7 +252,7 @@ describe('handleKnowledgeCommand — 下载向量模型', () => {
     expect(spinner.stop).toHaveBeenCalledWith({ ok: false, label: t('kw.embedding_failed') });
     expect(host.showNotice).toHaveBeenCalledWith(
       t('kw.embedding_failed'),
-      `${t('knowledge.embedding_platform_hint')}\nCannot find module '@anush008/tokenizers-linux-arm64-gnu'`,
+      `${t('knowledge.embedding_install_hint')}\nCannot find package 'onnxruntime-web' imported from /app/dist/src-abc.mjs`,
     );
   });
 

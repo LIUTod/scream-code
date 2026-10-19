@@ -1,6 +1,6 @@
 {
   "name": "@scream-code/memory",
-  "version": "0.18.7",
+  "version": "0.18.8",
   "private": true,
   "description": "Persistent memory memo store for cross-session knowledge sharing",
   "license": "MIT",
@@ -34,10 +34,9 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
+    "@huggingface/tokenizers": "^0.2.0",
+    "onnxruntime-web": "1.21.0",
     "pathe": "^2.0.3",
     "tar": "^7.5.13"
-  },
-  "optionalDependencies": {
-    "fastembed": "^2.1.0"
   }
 }

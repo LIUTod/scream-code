@@ -12,8 +12,8 @@ import type { EmbeddingFailureKind } from '@scream-code/memory';
  */
 export function embeddingFailureHint(kind: EmbeddingFailureKind | undefined): string {
   switch (kind) {
-    case 'platform':
-      return t('knowledge.embedding_platform_hint');
+    case 'install':
+      return t('knowledge.embedding_install_hint');
     case 'archive':
       return t('knowledge.embedding_cache_corrupt_hint');
     case 'network':

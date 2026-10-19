@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, rmSync, statSync } from 'node:fs';
-import { readFile, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { open, readFile, type FileHandle } from 'node:fs/promises';
+import { join, resolve } from 'node:path';
 import { extract as untar } from 'tar';
 import type { MemoryMemo } from './models.js';
 
@@ -12,6 +12,15 @@ import type { MemoryMemo } from './models.js';
 export function buildEmbeddingText(memo: MemoryMemo): string {
   return `${memo.userNeed} ${memo.approach} ${memo.whatWorked}`;
 }
+
+/** Where a load attempt currently is: bytes coming down, archive being checked,
+ *  or the model being brought up in memory. */
+export type EmbeddingLoadProgress =
+  | { readonly phase: 'download'; readonly received: number; readonly total?: number }
+  | { readonly phase: 'verify' }
+  | { readonly phase: 'load' };
+
+export type EmbeddingProgressListener = (progress: EmbeddingLoadProgress) => void;
 
 export interface EmbeddingEngine {
   /** Whether the model is loaded in memory and ready to embed. */
@@ -44,14 +53,13 @@ export interface EmbeddingEngine {
    * Safe to call multiple times; failed loads can be retried.
    */
   ensureReady(): Promise<boolean>;
-}
 
-/** Minimal interface for the fastembed model — avoids importing fastembed at module level. */
-interface FastembedModel {
-  embed(
-    textStrings: string[],
-    batchSize?: number,
-  ): AsyncGenerator<number[][], void, unknown>;
+  /**
+   * Observe an in-flight load: byte progress while the archive downloads, then
+   * the verify and load phases. Pass undefined to detach. Optional so existing
+   * engine fakes in tests keep compiling.
+   */
+  setProgressListener?(listener: EmbeddingProgressListener | undefined): void;
 }
 
 /**
@@ -64,7 +72,7 @@ interface FastembedModel {
 const engineCache = new Map<string, EmbeddingEngine>();
 
 /**
- * Create an embedding engine backed by fastembed.
+ * Create an embedding engine backed by the in-process WASM pipeline.
  * Lazily loads the model on first use so startup is not blocked.
  * Engines are cached by cacheDir so repeated calls with the same cacheDir
  * return the same instance, sharing model state and download progress.
@@ -72,23 +80,35 @@ const engineCache = new Map<string, EmbeddingEngine>();
  *                 Defaults to "local_cache" (CWD-relative) if not provided — prefer
  *                 passing an explicit path so the cache doesn't duplicate across CWDs.
  */
-export function createFastEmbedEngine(cacheDir?: string): EmbeddingEngine {
-  const key = cacheDir ?? '';
+export function createEmbeddingEngine(cacheDir?: string): EmbeddingEngine {
+  // Normalize once: callers build the path with different join helpers (same
+  // directory, different separators on Windows), and two keys would mean two
+  // engines loading the same 94MB model — and two downloaders racing on one
+  // staging file.
+  const key = cacheDir === undefined ? '' : resolve(cacheDir);
   const cached = engineCache.get(key);
   if (cached !== undefined) return cached;
-  const engine = createFastEmbedEngineImpl(cacheDir);
+  const engine = createEmbeddingEngineImpl(cacheDir);
   engineCache.set(key, engine);
   return engine;
 }
 
+/**
+ * @deprecated Renamed to {@link createEmbeddingEngine} when the engine moved to
+ * the WASM pipeline. Kept as an alias for one release cycle so external callers
+ * (SDK consumers, older tests) keep compiling.
+ */
+export const createFastEmbedEngine = createEmbeddingEngine;
+
 /** Stable identity of the model used by every engine created here. */
 export const EMBEDDING_MODEL_NAME = 'bge-small-zh-v1.5';
 
-function createFastEmbedEngineImpl(cacheDir?: string): EmbeddingEngine {
-  let embedder: FastembedModel | null = null;
-  let initPromise: Promise<FastembedModel | null> | null = null;
+function createEmbeddingEngineImpl(cacheDir?: string): EmbeddingEngine {
+  let embedder: EmbeddingRuntime | null = null;
+  let initPromise: Promise<EmbeddingRuntime | null> | null = null;
   let loadFailed = false;
   let lastError: string | undefined;
+  let progressListener: EmbeddingProgressListener | undefined;
 
   return {
     modelName: EMBEDDING_MODEL_NAME,
@@ -99,6 +119,10 @@ function createFastEmbedEngineImpl(cacheDir?: string): EmbeddingEngine {
 
     get lastError(): string | undefined {
       return lastError;
+    },
+
+    setProgressListener(listener: EmbeddingProgressListener | undefined): void {
+      progressListener = listener;
     },
 
     async embedBatch(texts: string[]): Promise<Float32Array[] | null> {
@@ -151,12 +175,12 @@ function createFastEmbedEngineImpl(cacheDir?: string): EmbeddingEngine {
         if (loadFailed || initPromise === null) {
           loadFailed = false;
           lastError = undefined;
-          initPromise = loadEmbedder(cacheDir);
+          initPromise = loadEmbeddingRuntime(cacheDir, (progress) => progressListener?.(progress));
         }
         embedder = await initPromise;
         if (embedder === null) {
           initPromise = null;
-          lastError = 'fastembed returned an empty model';
+          lastError = 'embedding runtime returned an empty session';
           return false;
         }
         loadFailed = false;
@@ -177,54 +201,187 @@ function createFastEmbedEngineImpl(cacheDir?: string): EmbeddingEngine {
   };
 }
 
-async function loadEmbedder(cacheDir?: string): Promise<FastembedModel | null> {
-  const { FlagEmbedding, EmbeddingModel } = await import('fastembed');
-  if (cacheDir !== undefined) {
-    mkdirSync(cacheDir, { recursive: true });
-    // Stage the payload ourselves when it is missing. fastembed's shipping
-    // source is dead (see ensureEmbeddingModelFiles) and its downloader cannot
-    // check the status code; retrieveModel skips its download whenever the
-    // model directory exists, so pre-staging wins for both problems.
-    await ensureEmbeddingModelFiles(cacheDir);
-  }
-  const model = EmbeddingModel.BGESmallZH;
-  const initOpts = cacheDir !== undefined
-    ? { model, cacheDir }
-    : { model };
-  try {
-    return await FlagEmbedding.init(initOpts as Parameters<typeof FlagEmbedding.init>[0]);
-  } catch (initError: unknown) {
-    // If init fails due to missing config/tokenizer sidecars, download them
-    // from HuggingFace mirror and retry.
-    const msg = initError instanceof Error ? initError.message : '';
-    if (!/Config file not found|Tokenizer file not found|Tokens map file not found/ui.test(msg)) {
-      throw initError;
-    }
-    await ensureFastembedModelSidecars(model, cacheDir);
-    return FlagEmbedding.init(initOpts as Parameters<typeof FlagEmbedding.init>[0]);
-  }
+/** Maximum tokens per text; matches the model's position-embedding limit. */
+const MAX_SEQ_LEN = 512;
+/** Texts per inference batch: 16 × 512 × 512 floats ≈ 16MB of activations. */
+const EMBED_BATCH_SIZE = 16;
+/** Threads for the WASM backend. One keeps resolution deterministic in packaged
+ *  builds; `SCREAM_CODE_EMBEDDING_THREADS=4` is the supported opt-in. */
+const EMBEDDING_THREADS_ENV = 'SCREAM_CODE_EMBEDDING_THREADS';
+
+interface EmbeddingRuntime {
+  embed(textStrings: string[]): AsyncGenerator<number[][], void, unknown>;
+}
+
+interface EncodedText {
+  readonly index: number;
+  readonly ids: number[];
+  readonly types: number[];
 }
 
 /**
- * Cache entry names fastembed uses for the fixed BGESmallZH model: it extracts
- * into `<cacheDir>/<name>/` from the staged archive `<cacheDir>/<name>.tar.gz`.
+ * Token-level truncation that keeps the sentence boundary tokens.
+ *
+ * The tokenizer package does not apply the truncation policy itself and the
+ * model package ships no truncation config, so this is the only place it can
+ * happen. Keeping the head (which starts with `[CLS]`) and re-appending the
+ * trailing special token (`[SEP]`) mirrors what a HuggingFace pipeline would
+ * produce; slicing the tail off blindly would feed the encoder a sentence that
+ * never closes and drift from the reference vectors on long inputs.
+ */
+function truncateEncoded(ids: readonly number[], types: readonly number[]): { ids: number[]; types: number[] } {
+  if (ids.length <= MAX_SEQ_LEN) {
+    return { ids: [...ids], types: [...types] };
+  }
+  const headSize = MAX_SEQ_LEN - 1;
+  const head = ids.slice(0, headSize);
+  const headTypes = types.slice(0, headSize);
+  return {
+    ids: [...head, ids.at(-1)!],
+    types: [...headTypes, types.at(-1)!],
+  };
+}
+
+/**
+ * Builds the embedding runtime in-process on `onnxruntime-web` (WASM) and the
+ * pure-JS tokenizer. No native binaries, no install scripts: the whole stack is
+ * JavaScript plus one WebAssembly artifact resolved from the package.
+ *
+ * The numeric pipeline is load-bearing and must stay compatible with the
+ * reference embeddings of this model: token ids come from `tokenizer.json`, and
+ * the sentence vector is the **CLS token** hidden state (`last_hidden_state[0]`)
+ * followed by L2 normalization. Mean pooling produces visibly different vectors
+ * (cosine ≈ 0.9 against the reference), so pooling is not a stylistic choice.
+ */
+async function createWasmRuntime(modelDir: string): Promise<EmbeddingRuntime | null> {
+  const ort = await import('onnxruntime-web');
+  const { Tokenizer } = await import('@huggingface/tokenizers');
+  // Leave `env.wasm.wasmPaths` at its default: the runtime resolves the wasm
+  // assets relative to its own module URL internally. Assigning a filesystem
+  // path there breaks on Windows, where a plain `C:\…` string is not a valid
+  // ESM specifier for the dynamic import the runtime performs.
+  const requestedThreads = Number(process.env[EMBEDDING_THREADS_ENV]);
+  ort.env.wasm.numThreads = Number.isFinite(requestedThreads) && requestedThreads > 0
+    ? requestedThreads
+    : 1;
+  ort.env.logLevel = 'error';
+
+  const tokenizer = new Tokenizer(
+    JSON.parse(readFileSync(join(modelDir, 'tokenizer.json'), 'utf8')),
+    JSON.parse(readFileSync(join(modelDir, 'tokenizer_config.json'), 'utf8')),
+  );
+  const session = await ort.InferenceSession.create(
+    readFileSync(join(modelDir, 'model_optimized.onnx')),
+    { executionProviders: ['wasm'] },
+  );
+  // Surfaced to the caller as "empty session" instead of a later TypeError.
+  if (session === null || session === undefined) return null;
+
+  return {
+    async *embed(textStrings: string[]): AsyncGenerator<number[][], void, unknown> {
+      if (textStrings.length === 0) return;
+
+      const encoded: EncodedText[] = textStrings.map((text, index) => {
+        const encoding = tokenizer.encode(text, { return_token_type_ids: true });
+        const types = encoding.token_type_ids ?? encoding.ids.map(() => 0);
+        const truncated = truncateEncoded(encoding.ids, types);
+        return { index, ids: truncated.ids, types: truncated.types };
+      });
+      const results: number[][] = Array.from<number[]>({ length: textStrings.length });
+
+      // Park the longest texts together so padding inside a batch stays small,
+      // then put every vector back at its original index: `embedBatch` flattens
+      // in yield order, and a mismatch here would attach the wrong vector to
+      // the wrong memo.
+      const buckets = encoded.toSorted((a, b) => a.ids.length - b.ids.length);
+      for (let start = 0; start < buckets.length; start += EMBED_BATCH_SIZE) {
+        const group = buckets.slice(start, start + EMBED_BATCH_SIZE);
+        const rows = group.length;
+        const width = Math.max(...group.map((entry) => entry.ids.length));
+        const ids = new BigInt64Array(rows * width);
+        const mask = new BigInt64Array(rows * width);
+        const types = new BigInt64Array(rows * width);
+        group.forEach((entry, row) => {
+          for (let column = 0; column < width; column++) {
+            const offset = row * width + column;
+            ids[offset] = BigInt(column < entry.ids.length ? entry.ids[column]! : 0);
+            mask[offset] = column < entry.ids.length ? 1n : 0n;
+            types[offset] = BigInt(column < entry.types.length ? entry.types[column]! : 0);
+          }
+        });
+
+        const output = await session.run({
+          input_ids: new ort.Tensor('int64', ids, [rows, width]),
+          attention_mask: new ort.Tensor('int64', mask, [rows, width]),
+          token_type_ids: new ort.Tensor('int64', types, [rows, width]),
+        });
+        const hidden = output['last_hidden_state'] ?? output[Object.keys(output)[0]!]!;
+        const dims = hidden.dims as number[];
+        const hiddenSize = dims.at(-1)!;
+        const data = hidden.data as Float32Array;
+        group.forEach((entry, row) => {
+          const rowStart = row * width * hiddenSize;
+          const vector = Array.from(data.subarray(rowStart, rowStart + hiddenSize));
+          let norm = 0;
+          for (const value of vector) norm += value * value;
+          norm = Math.sqrt(norm) || 1;
+          for (let i = 0; i < vector.length; i += 1) vector[i] = vector[i]! / norm;
+          results[entry.index] = vector;
+        });
+      }
+
+      for (let start = 0; start < results.length; start += EMBED_BATCH_SIZE) {
+        yield results.slice(start, start + EMBED_BATCH_SIZE);
+      }
+    },
+  };
+}
+
+async function loadEmbeddingRuntime(
+  cacheDir?: string,
+  emit?: (progress: EmbeddingLoadProgress) => void,
+): Promise<EmbeddingRuntime | null> {
+  if (cacheDir === undefined) {
+    // No cache dir handed in: keep the previous contract and read the model
+    // from the CWD-relative legacy location.
+    emit?.({ phase: 'load' });
+    return createWasmRuntime(join('local_cache', BGESMALLZH_CACHE_NAME));
+  }
+  mkdirSync(cacheDir, { recursive: true });
+  // Stage the payload ourselves when it is missing: the runtime only loads from
+  // disk, so a missing cache would otherwise surface as a bare ENOENT.
+  await ensureEmbeddingModelFiles(cacheDir, {
+    onProgress: (received, total) => {
+      emit?.(total === undefined
+        ? { phase: 'download', received }
+        : { phase: 'download', received, total });
+    },
+    onPhase: (phase) => {
+      if (phase === 'verify') emit?.({ phase: 'verify' });
+    },
+  });
+  emit?.({ phase: 'load' });
+  return createWasmRuntime(join(cacheDir, BGESMALLZH_CACHE_NAME));
+}
+
+/**
+ * Cache entry name for the fixed BGESmallZH model: the staged archive extracts
+ * to `<cacheDir>/<name>/` and the runtime loads from that directory.
  */
 const BGESMALLZH_CACHE_NAME = 'fast-bge-small-zh-v1.5';
+
+/** Files the runtime needs before the model can be considered installed. */
+const EMBEDDING_REQUIRED_FILES = ['model_optimized.onnx', 'tokenizer.json', 'tokenizer_config.json'] as const;
 
 /**
  * First-party model payload source (GitHub Releases asset; sha256-pinned).
  *
- * Why not let fastembed download on its own: fastembed 2.x stages the BGESmallZH
- * archive from a third-party model mirror whose anonymous read access was
- * removed — and its downloader does not look at the HTTP status, so an error
- * page is written into `<model>.tar.gz` and every subsequent extraction fails
- * with TAR_BAD_ARCHIVE. Any install without a pre-existing cache then can never
- * complete the download, and the startup setup card comes back on every launch.
- *
- * This function stages the same on-disk layout fastembed expects
- * (`<cacheDir>/<BGESMALLZH_CACHE_NAME>/model_optimized.onnx`) from a pinned
- * first-party package; `FlagEmbedding.retrieveModel` then finds the model
- * directory on disk and never issues its own (broken) download.
+ * The runtime loads strictly from disk, so this downloader is the only path
+ * that fetches model bytes. It validates the HTTP status, extracts with the
+ * bundled tar implementation and verifies the weights payload against a pinned
+ * sha256 — an error page or a truncated archive can never masquerade as an
+ * installed model (which is how installs used to end up with a cache directory
+ * that made the setup card reappear on every startup).
  */
 export const EMBEDDING_MODEL_SOURCE_URL =
   'https://github.com/LIUTod/scream-code/releases/download/embedding-models-v1/fast-bge-small-zh-v1.5.tar.gz';
@@ -240,10 +397,26 @@ export interface EnsureEmbeddingModelOptions {
   readonly sourceUrl?: string;
   /** Expected sha256 of the extracted `model_optimized.onnx` (tests override). */
   readonly expectedOnnxSha256?: string;
+  /** Byte-progress sink, throttled to ~10 callbacks per second. */
+  readonly onProgress?: (received: number, total?: number) => void;
+  /** Phase transitions the byte sink cannot express (currently: 'verify'). */
+  readonly onPhase?: (phase: 'verify') => void;
+  /** Abort the transfer when the caller no longer needs the payload. */
+  readonly signal?: AbortSignal;
+  /** Fail when no chunk arrives for this long (default 60s). */
+  readonly idleTimeoutMs?: number;
+  /** Fail when the whole transfer exceeds this (default 15min). */
+  readonly totalTimeoutMs?: number;
 }
 
-function modelWeightsPath(cacheDir: string): string {
-  return join(cacheDir, BGESMALLZH_CACHE_NAME, 'model_optimized.onnx');
+/** Default stall guards: a trickling connection must not spin a spinner forever. */
+const DEFAULT_IDLE_TIMEOUT_MS = 60_000;
+const DEFAULT_TOTAL_TIMEOUT_MS = 15 * 60_000;
+/** Progress callback throttle: frequent enough to move, rare enough to be free. */
+const PROGRESS_THROTTLE_MS = 100;
+
+function modelDirPath(cacheDir: string): string {
+  return join(cacheDir, BGESMALLZH_CACHE_NAME);
 }
 
 export function sha256File(filePath: string): Promise<string> {
@@ -252,7 +425,7 @@ export function sha256File(filePath: string): Promise<string> {
 
 /**
  * Stage the embedding model files when they are missing: download the pinned
- * archive (HTTP status verified — unlike fastembed's own downloader), extract,
+ * archive (HTTP status verified, unlike a naive downloader), extract,
  * and verify the weights payload against the pinned sha256.
  *
  * A partially extracted tree or a hash mismatch is removed so the caller keeps
@@ -267,16 +440,45 @@ export async function ensureEmbeddingModelFiles(
 
   // Self-sufficient entry point: callers may hand us a not-yet-created dir.
   mkdirSync(cacheDir, { recursive: true });
-  const modelDir = join(cacheDir, BGESMALLZH_CACHE_NAME);
-  // Distinct staging name: `.tar.gz` is fastembed's "already downloaded" marker
-  // (an existing file there makes it skip its download and extract junk).
+  const modelDir = modelDirPath(cacheDir);
+  // Staging name is ours alone: a stray `<name>.tar.gz` from older versions
+  // never influences this downloader.
   const stagingPath = join(cacheDir, `${BGESMALLZH_CACHE_NAME}.tar.gz.part`);
   const url = options?.sourceUrl ?? process.env[EMBEDDING_MODEL_URL_ENV] ?? EMBEDDING_MODEL_SOURCE_URL;
+  const idleTimeoutMs = options?.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
+  const totalTimeoutMs = options?.totalTimeoutMs ?? DEFAULT_TOTAL_TIMEOUT_MS;
+
+  // Abort plumbing: caller cancellation, stall detection and the overall cap all
+  // funnel into one controller so cleanup below always sees a settled state.
+  const controller = new AbortController();
+  const onExternalAbort = (): void => { controller.abort(); };
+  if (options?.signal !== undefined) {
+    if (options.signal.aborted) controller.abort();
+    else options.signal.addEventListener('abort', onExternalAbort, { once: true });
+  }
+  let idleTimer: NodeJS.Timeout | undefined;
+  const armIdleTimer = (): void => {
+    if (idleTimer !== undefined) clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => { controller.abort(); }, idleTimeoutMs);
+  };
+  const totalTimer = setTimeout(() => { controller.abort(); }, totalTimeoutMs);
+
+  let received = 0;
+  let announcedTotal: number | undefined;
+  // Set only when the body was read to completion. Extraction and checksum
+  // failures must surface with their own error instead of being rewritten into
+  // a bogus "network timeout"; an aborted read never sets it, so the guards
+  // below still own their own failure.
+  let downloadCompleted = false;
+  const announceProgress = (): void => {
+    options?.onProgress?.(received, announcedTotal);
+  };
 
   try {
     let response: Response;
     try {
-      response = await fetch(url);
+      armIdleTimer();
+      response = await fetch(url, { signal: controller.signal });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       throw new Error(`fetch failed for ${url}: ${message}`, { cause: error });
@@ -284,13 +486,84 @@ export async function ensureEmbeddingModelFiles(
     if (!response.ok) {
       throw new Error(`model source returned HTTP ${response.status} for ${url}`);
     }
-    await writeFile(stagingPath, Buffer.from(await response.arrayBuffer()));
+    const contentLength = Number(response.headers.get('content-length'));
+    announcedTotal = Number.isFinite(contentLength) && contentLength > 0 ? contentLength : undefined;
+    announceProgress();
+
+    const body = response.body;
+    if (body === null) {
+      throw new Error(`model source returned an empty body for ${url}`);
+    }
+    const reader = body.getReader();
+    // A reader whose stream ignores the abort signal would leave `read()`
+    // pending forever; racing it against the abort keeps the stall guards in
+    // charge of the loop regardless of how well-behaved the stream is.
+    const abortRejection = new Promise<never>((_, reject) => {
+      if (controller.signal.aborted) {
+        reject(new Error('aborted'));
+        return;
+      }
+      controller.signal.addEventListener('abort', () => { reject(new Error('aborted')); }, { once: true });
+    });
+    const abortAwareRead = (): Promise<{ done: true; value?: undefined } | { done: false; value: Uint8Array }> =>
+      Promise.race([reader.read(), abortRejection]);
+    let handle: FileHandle;
+    try {
+      handle = await open(stagingPath, 'w');
+    } catch (error) {
+      // The stream must be released even when the local file cannot be opened.
+      await reader.cancel().catch(() => undefined);
+      throw error;
+    }
+    let lastProgressAt = 0;
+    try {
+      await (async (): Promise<void> => {
+        // Stream to disk: the archive is ~55MB and used to sit in memory in
+        // full before extraction.
+        for (;;) {
+          let chunk: { done: true; value?: undefined } | { done: false; value: Uint8Array };
+          try {
+            chunk = await abortAwareRead();
+          } catch (error) {
+            // A stalled transfer surfaces here; report the stall honestly
+            // instead of letting the read hang past the guard.
+            const message = error instanceof Error ? error.message : String(error);
+            throw new Error(`${message} (received ${received} of ${announcedTotal ?? '?'} bytes): ${url}`, { cause: error });
+          }
+          if (chunk.done) break;
+          const bytes = chunk.value;
+          armIdleTimer();
+          await handle.write(bytes);
+          received += bytes.byteLength;
+          const now = Date.now();
+          if (now - lastProgressAt >= PROGRESS_THROTTLE_MS) {
+            lastProgressAt = now;
+            announceProgress();
+          }
+        }
+        announceProgress();
+        downloadCompleted = true;
+      })();
+    } finally {
+      if (idleTimer !== undefined) clearTimeout(idleTimer);
+      await handle.close();
+      // Release the underlying stream; best-effort because an aborted fetch
+      // may already have torn it down.
+      await reader.cancel().catch(() => undefined);
+    }
+
+    options?.onPhase?.('verify');
     await untar({ file: stagingPath, cwd: cacheDir });
 
-    const weightsPath = modelWeightsPath(cacheDir);
-    if (!existsSync(weightsPath) || statSync(weightsPath).size === 0) {
-      throw new Error(`model package did not contain weights after extraction: ${url}`);
+    // Every required file must be present: a cache that only looks installed
+    // (e.g. weights without tokenizer) would reload the setup card forever.
+    for (const fileName of EMBEDDING_REQUIRED_FILES) {
+      const target = join(modelDir, fileName);
+      if (!existsSync(target) || statSync(target).size === 0) {
+        throw new Error(`model package is missing ${fileName} after extraction: ${url}`);
+      }
     }
+    const weightsPath = join(modelDir, 'model_optimized.onnx');
     const sha256 = await sha256File(weightsPath);
     const expected = options?.expectedOnnxSha256 ?? EMBEDDING_MODEL_ONNX_SHA256;
     if (sha256 !== expected) {
@@ -298,58 +571,70 @@ export async function ensureEmbeddingModelFiles(
     }
   } catch (error: unknown) {
     // A partly extracted tree with no verified weights is worthless and would
-    // keep the caller from retrying cleanly — remove it (best effort; rmSync
-    // failure must not shadow the download error).
-    rmSync(modelDir, { recursive: true, force: true });
-    throw error instanceof Error ? error : new Error(String(error));
+    // keep the caller from retrying cleanly — remove it. Best effort: on
+    // Windows a locked ONNX file can refuse deletion, and that failure must
+    // not replace the real error.
+    try {
+      rmSync(modelDir, { recursive: true, force: true });
+    } catch {
+      // Keep the original error.
+    }
+    if (!downloadCompleted && controller.signal.aborted && !(options?.signal?.aborted ?? false)) {
+      // Our own guard fired (stall or overall cap), not the caller. Expressed
+      // with the words NETWORK_FAILURE recognises so callers can say "network".
+      throw new Error(`model download timed out (received ${received} of ${announcedTotal ?? '?'} bytes): ${url}`, { cause: error });
+    }
+    throw error instanceof Error ? error : new Error(String(error), { cause: error });
   } finally {
+    clearTimeout(totalTimer);
+    if (idleTimer !== undefined) clearTimeout(idleTimer);
+    if (options?.signal !== undefined) options.signal.removeEventListener('abort', onExternalAbort);
     rmSync(stagingPath, { force: true });
   }
 }
 
 /** Why a local embedding load failed, as far as the message can tell. */
-export type EmbeddingFailureKind = 'platform' | 'archive' | 'network' | 'other';
+export type EmbeddingFailureKind = 'install' | 'archive' | 'network' | 'other';
 
 // The shapes these failures arrive in, verified against the real errors:
-//   platform → "Cannot find module '@anush008/tokenizers-linux-arm64-gnu'"
-//              (the native tokenizer binding loads when fastembed is imported,
-//              so an unsupported platform/arch/libc fails before any I/O)
-//              …or the binding *is* installed but cannot be loaded: musl hosts
-//              loading a glibc build, an older glibc than the prebuilt needs, a
-//              wrong-architecture binary — all dlopen failures with these texts.
+//   install  → "Cannot find package 'onnxruntime-web'" / tokenizer module
+//              missing: the installation is incomplete (interrupted install,
+//              pruned optional tree, broken node_modules) — reinstall fixes it
 //   archive  → "TAR_BAD_ARCHIVE: Unrecognized archive format" from a staged
 //              archive that is truncated or an HTML error page
-//   network  → transport errors, and an HTTP status when the downloader reports
-//              one instead of throwing a code (heuristic, but a status never
-//              shows up in a cache-path problem)
-const PLATFORM_FAILURE =
-  /@anush008\/tokenizers|Failed to load native binding|Unsupported (?:OS|platform|architecture)|ERR_DLOPEN_FAILED|invalid ELF header|Exec format error|is not a valid Win32 application|GLIBC_\d+[^"\n]*not found|Error loading shared library|cannot open shared object file/iu;
-const ARCHIVE_FAILURE = /\bTAR_[A-Z_]+|incorrect header check|unexpected end of file|invalid tar|zlib/iu;
+//   network  → transport errors, our own stall/timeout guards ("model download
+//              timed out"), and an HTTP status when the downloader reports one
+//              instead of throwing a code
+const INSTALL_FAILURE =
+  /Cannot find (?:package|module) '(?:onnxruntime-web|@huggingface\/tokenizers)'|ERR_MODULE_NOT_FOUND|Failed to resolve module specifier/iu;
+const ARCHIVE_FAILURE =
+  /\bTAR_[A-Z_]+|incorrect header check|unexpected end of file|invalid tar|zlib|after extraction|sha256 mismatch/iu;
 const NETWORK_FAILURE =
-  /\b(?:ENOTFOUND|EAI_AGAIN|ETIMEDOUT|ECONNRESET|ECONNREFUSED|EHOSTUNREACH|socket hang up|fetch failed)\b|network error|HTTP \d{3}/iu;
+  /\b(?:ENOTFOUND|EAI_AGAIN|ETIMEDOUT|ECONNRESET|ECONNREFUSED|EHOSTUNREACH|socket hang up|fetch failed)\b|network error|HTTP \d{3}|timed out|empty body/iu;
 
 /**
- * Classify a load failure so callers can say something true about it: the four
- * causes need four different answers (unsupported platform, corrupt cache,
- * network, unknown), and they used to be reported as one network problem.
+ * Classify a load failure so callers can say something true about it: an
+ * incomplete install, a corrupt cache, a network problem and anything else need
+ * four different answers, and they used to be reported as one network problem.
  */
 export function classifyEmbeddingFailure(message: string | undefined): EmbeddingFailureKind {
   if (message === undefined) return 'other';
-  if (PLATFORM_FAILURE.test(message)) return 'platform';
+  if (INSTALL_FAILURE.test(message)) return 'install';
   if (ARCHIVE_FAILURE.test(message)) return 'archive';
   if (NETWORK_FAILURE.test(message)) return 'network';
   return 'other';
 }
 
 /**
- * Loads only the module entry point — no model download — so callers can tell
- * "this machine cannot run the local model at all" apart from "the download
- * failed". fastembed imports its native tokenizer binding at module scope, which
- * is exactly the step a platform without a published binary cannot pass.
+ * Loads both runtime packages — no model download — so callers can tell "this
+ * installation cannot run the local model at all" apart from "the download
+ * failed". The runtime is JavaScript plus WebAssembly, so a failure here is an
+ * incomplete installation rather than an unsupported platform.
  */
 export async function probeLocalEmbeddingSupport(): Promise<{ supported: boolean; error?: string }> {
   try {
-    await import('fastembed');
+    await import('onnxruntime-web');
+    await import('@huggingface/tokenizers');
     return { supported: true };
   } catch (error: unknown) {
     return { supported: false, error: error instanceof Error ? error.message : String(error) };
@@ -358,15 +643,11 @@ export async function probeLocalEmbeddingSupport(): Promise<{ supported: boolean
 
 /**
  * Remove every trace of a previous BGESmallZH download: the extracted model
- * directory *and* the staged archive it came from.
+ * directory and the legacy staged archive name.
  *
- * The archive has to go with it. fastembed skips the download whenever
- * `<cacheDir>/<name>.tar.gz` exists, and it only deletes that file after a
- * *successful* extract — its download error paths (response error, file stream
- * error) reject and leave whatever was written behind. So an archive sitting
- * next to a failed attempt is usually a partial leftover, and keeping it makes
- * every retry extract the same junk locally: no network traffic, a few
- * milliseconds, the same failure forever.
+ * The legacy `<name>.tar.gz` file is still swept because older versions staged
+ * the archive under that name; leaving it behind would waste 55MB per doomed
+ * attempt. Our own downloader stages `.tar.gz.part` and always removes it.
  *
  * Never throws: a file locked by another process (on Windows a mapped ONNX file
  * stays locked) must not replace the download error the caller is reporting.
@@ -384,57 +665,17 @@ export function clearEmbeddingModelCache(cacheDir: string): void {
 }
 
 /**
- * True when the extracted model weights are already on disk. Loading then
- * never downloads (fastembed skips the fetch whenever the model dir exists),
- * so callers can safely trigger a local load without risking a surprise
- * mid-query download.
+ * True when every file the runtime needs is already on disk. Loading then never
+ * downloads, so callers can safely trigger a local load without risking a
+ * surprise mid-query download. All required files are checked (not just the
+ * weights): a partially restored cache must count as missing so the setup flow
+ * repairs it instead of failing at load time.
  */
 export function hasEmbeddingModelCache(cacheDir: string): boolean {
-  const modelDir = join(cacheDir, BGESMALLZH_CACHE_NAME);
-  return existsSync(modelDir) && existsSync(join(modelDir, 'model_optimized.onnx'));
-}
-
-/**
- * Small config/tokenizer files that fastembed expects alongside model.onnx.
- * If these are missing (e.g. GCS download partially failed), fastembed throws.
- * We download them from HuggingFace so the model can load — this covers the
- * case where the GCS tarball was incomplete but the HF repo is reachable.
- */
-const FASTEMBED_SIDECARS = [
-  'config.json',
-  'tokenizer.json',
-  'tokenizer_config.json',
-  'special_tokens_map.json',
-] as const;
-
-const FASTEMBED_HF_REPOS: Record<string, string> = {
-  'fast-bge-small-zh-v1.5': 'BAAI/bge-small-zh-v1.5',
-};
-
-async function ensureFastembedModelSidecars(model: string, cacheDir?: string): Promise<void> {
-  const repo = FASTEMBED_HF_REPOS[model];
-  if (repo === undefined) return;
-  const baseDir = cacheDir ?? 'local_cache';
-  const modelDir = join(baseDir, model);
-  mkdirSync(modelDir, { recursive: true });
-
-  for (const fileName of FASTEMBED_SIDECARS) {
+  const modelDir = modelDirPath(cacheDir);
+  if (!existsSync(modelDir)) return false;
+  return EMBEDDING_REQUIRED_FILES.every((fileName) => {
     const target = join(modelDir, fileName);
-    try {
-      const { access } = await import('node:fs/promises');
-      await access(target);
-      continue; // file exists
-    } catch {
-      // file missing — download from HuggingFace
-    }
-    const hfUrl = `https://huggingface.co/${repo}/resolve/main/${fileName}`;
-    try {
-      const response = await fetch(hfUrl);
-      if (!response.ok) continue;
-      const { writeFile } = await import('node:fs/promises');
-      await writeFile(target, Buffer.from(await response.arrayBuffer()));
-    } catch {
-      // best-effort — if HF is also unreachable, just skip
-    }
-  }
+    return existsSync(target) && statSync(target).size > 0;
+  });
 }

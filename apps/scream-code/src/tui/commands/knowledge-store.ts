@@ -9,6 +9,7 @@ import {
   probeLocalEmbeddingSupport,
   type EmbeddingEngine,
   type EmbeddingFailureKind,
+  type EmbeddingProgressListener,
 } from '@scream-code/memory';
 
 import { getDataDir } from '#/utils/paths';
@@ -29,12 +30,12 @@ function getEmbeddingCacheDir(): string {
 }
 
 /**
- * Any usable cache: the model directory with its weights present.
+ * Any usable cache: every file the embedding runtime needs is on disk.
  *
- * Such a cache can still be missing sidecars, which FlagEmbedding repairs from
- * the Hub while loading — so callers must not treat it as "no model here".
- * Flagging it as missing would block the very path that repairs it, and
- * fastembed itself skips downloading whenever the model directory exists.
+ * Loading then never downloads. A cache that only looks installed (weights
+ * without the tokenizer, for instance) is deliberately *not* counted as ready:
+ * the setup flow repairs it through one clean re-download instead of failing
+ * halfway through a load, and reporting it as present would block that repair.
  * The existence check itself lives in @scream-code/memory next to the cache
  * layout it inspects.
  */
@@ -92,8 +93,14 @@ export interface EmbeddingDownloadResult {
  * Concurrent calls join the in-flight download and share its result instead
  * of failing — the startup warm-up and a user-initiated download must never
  * race into a spurious "download already in progress" error.
+ *
+ * `onProgress` observes the attempt (byte progress, then verify/load phases)
+ * so the caller can keep a spinner honest; it is detached when the attempt
+ * settles either way.
  */
-export async function startManualEmbeddingDownload(): Promise<EmbeddingDownloadResult> {
+export async function startManualEmbeddingDownload(
+  onProgress?: EmbeddingProgressListener,
+): Promise<EmbeddingDownloadResult> {
   if (embeddingEngineInstance === undefined) {
     return failureResult('embedding engine not initialized');
   }
@@ -106,7 +113,9 @@ export async function startManualEmbeddingDownload(): Promise<EmbeddingDownloadR
   // Join an in-flight download rather than rejecting concurrent callers.
   if (downloadPromise !== undefined) return downloadPromise;
 
+  embeddingEngineInstance.setProgressListener?.(onProgress);
   downloadPromise = performDownload().finally(() => {
+    embeddingEngineInstance?.setProgressListener?.(undefined);
     downloadPromise = undefined;
   });
   return downloadPromise;
@@ -120,29 +129,27 @@ function failureResult(error: string | undefined): EmbeddingDownloadResult {
 
 async function performDownload(): Promise<EmbeddingDownloadResult> {
   try {
-    // The native tokenizer binding loads when fastembed is imported, so a
-    // platform without a published binary fails right here — before any
-    // download exists to retry, and with a cache that has nothing to do with it.
+    // The runtime is JavaScript plus WebAssembly, so this probe only fails on a
+    // broken installation (missing modules), never on an unsupported platform.
     const support = await probeLocalEmbeddingSupport();
     if (!support.supported) {
       lastManualFailed = true;
-      // The import failed, so this machine cannot load the local model at all —
-      // which is the platform case for every shape the native loader emits. An
-      // unrecognised message keeps its own hint (retry / report) rather than
-      // blaming the operating system.
       return { ok: false, error: support.error, failureKind: classifyEmbeddingFailure(support.error) };
     }
 
     let ok = await embeddingEngineInstance!.ensureReady();
     let error = ok ? undefined : embeddingEngineInstance!.lastError;
 
-    // If the first attempt failed, wipe any partial/corrupted cache and retry once.
+    // Retry once, but only for a corrupt archive: that is the one failure a
+    // wipe can cure. A network failure retried here doubles the wait for a
+    // user who is already watching a stalled download (the downloader has its
+    // own stall guards and reports the failure honestly), and a broken
+    // installation will not fix itself by downloading again.
     if (!ok) {
       const kind = classifyEmbeddingFailure(error);
-      if (kind !== 'platform') {
-        // The staged archive goes too: a failed download leaves a partial one
-        // behind, and fastembed skips downloading whenever it exists — the retry
-        // would extract the same junk offline instead of fetching the model.
+      if (kind === 'archive') {
+        // The staged archive goes too: extraction failed, and a partial file
+        // left behind would only be re-extracted on the next attempt.
         clearEmbeddingModelCache(getEmbeddingCacheDir());
         ok = await embeddingEngineInstance!.ensureReady();
         error = ok ? undefined : embeddingEngineInstance!.lastError;

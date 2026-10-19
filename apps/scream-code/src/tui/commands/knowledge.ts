@@ -16,6 +16,7 @@ import type { SlashCommandHost } from './dispatch';
 import { handleWeb } from './knowledge-web';
 import { getKnowledgeStore, getEmbeddingStatus, startManualEmbeddingDownload, hasEmbeddingModelCache, type EmbeddingStatus } from './knowledge-store';
 import { embeddingFailureDetail } from './embedding-failure-hint';
+import { embeddingProgressLabel } from '../utils/embedding-progress-label';
 import { TextInputDialogComponent } from '../components/dialogs/text-input-dialog';
 import { ChoicePickerComponent, type ChoiceOption } from '../components/dialogs/choice-picker';
 import { KnowledgeResultViewer } from '../components/dialogs/knowledge-result-viewer';
@@ -208,7 +209,9 @@ async function ensureEmbeddingReadyInteractive(host: SlashCommandHost): Promise<
     return false;
   }
   const spinner = host.showProgressSpinner(t('knowledge.loading_model'));
-  const { ok, error, failureKind } = await startManualEmbeddingDownload();
+  const { ok, error, failureKind } = await startManualEmbeddingDownload((progress) => {
+    spinner.setLabel(embeddingProgressLabel(progress));
+  });
   spinner.stop({ ok, label: ok ? t('kw.embedding_ready') : t('kw.embedding_failed') });
   if (!ok) {
     const detail = embeddingFailureDetail(failureKind, error);
