@@ -10,9 +10,10 @@ export interface ConnectCatalogRequest {
 
 /**
  * Resolve the catalog request for /config.
- * - /config        → remote-first catalog browser
  * - /config diy    → hidden manual provider setup (not shown in help)
  * - /config image  → hidden image-generation API setup (not shown in help)
+ * - anything else  → the caller must ask first: a bare `/config` opens the
+ *   entry menu (shortcut directory / DIY / image) before any flow starts.
  */
 export function resolveConnectCatalogRequest(args: string): ConnectCatalogRequest {
   const trimmed = args.trim().toLowerCase();

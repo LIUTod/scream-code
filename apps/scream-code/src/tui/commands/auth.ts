@@ -52,6 +52,74 @@ export async function handleConnectCommand(host: SlashCommandHost, args: string)
     return;
   }
 
+  // A bare `/config` (and anything unrecognised) asks how the user wants to
+  // configure first: the shortcut directory, the manual DIY wizard, or the
+  // image-generation service. `/config diy` and `/config image` stay direct,
+  // and so does the first-run nudge (it enters through the same menu).
+  const target = await promptConfigEntry(host);
+  if (target === undefined) return; // Esc: nothing mounted, nothing to undo
+
+  if (target === 'diy') {
+    await handleDiyConfig(host);
+    return;
+  }
+  if (target === 'image') {
+    await handleImageConfig(host);
+    return;
+  }
+
+  await runCatalogConnectFlow(host, url);
+}
+
+/** Which configuration flow a bare `/config` should enter. */
+type ConfigEntry = 'catalog' | 'diy' | 'image';
+
+/**
+ * Entry menu for a bare `/config`. Mirrors `promptImageProviderPreset`: mount
+ * the picker, resolve on select/cancel, and hand the editor back in both cases.
+ */
+function promptConfigEntry(host: SlashCommandHost): Promise<ConfigEntry | undefined> {
+  return new Promise((resolve) => {
+    // Settle exactly once. Three exits: a choice, Esc, or being replaced by
+    // another panel — the last one used to leave this promise pending forever,
+    // which also stalled the first-run chain that awaits the command.
+    let settled = false;
+    const settle = (value: ConfigEntry | undefined): void => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+    };
+    const picker = new ChoicePickerComponent({
+      title: t('config.entry_title'),
+      hint: t('config.entry_hint'),
+      colors: host.state.theme.colors,
+      options: [
+        { value: 'catalog', label: t('config.entry_quick'), description: t('config.entry_quick_desc') },
+        { value: 'diy', label: t('config.entry_diy'), description: t('config.entry_diy_desc') },
+        { value: 'image', label: t('config.entry_image'), description: t('config.entry_image_desc') },
+      ],
+      onSelect: (value) => {
+        host.restoreEditor();
+        settle(value as ConfigEntry);
+      },
+      onCancel: () => {
+        host.restoreEditor();
+        settle(undefined);
+      },
+      onDispose: () => {
+        // Another panel took over the editor; do not restore it here.
+        settle(undefined);
+      },
+    });
+    host.mountEditorReplacement(picker);
+  });
+}
+
+/**
+ * The shortcut flow: remote catalog (with cache and built-in fallbacks) →
+ * provider → model → API key → apply, then refresh the running config.
+ */
+async function runCatalogConnectFlow(host: SlashCommandHost, url: string): Promise<void> {
   let catalog: Catalog | undefined;
   const controller = new AbortController();
   const cancel = (): void => {
