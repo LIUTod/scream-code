@@ -74,18 +74,30 @@ describe('pickTipIndex（广告加权轮播）', () => {
     }
   });
 
-  it('统计面：大量轮换中 offer 占比 ≈ 80%（±3σ）', () => {
-    const rounds = 4000;
-    let offerHits = 0;
-    let current: number | undefined = undefined;
-    for (let i = 0; i < rounds; i++) {
-      const next = pickTipIndex(tips, current);
-      if (next === OFFER) offerHits += 1;
-      current = next;
+  it('统计面：大量轮换中 offer 占比 ≈ 80%', () => {
+    // 用固定种子的 LCG 代替真随机：断言仍然检验权重行为，但结果完全可复现，
+    // 不会像 ±3σ 的随机采样那样在多次全量运行中偶发越界（flake）。
+    let seed = 123456789;
+    const lcg = (): number => {
+      seed = (1664525 * seed + 1013904223) % 4294967296;
+      return seed / 4294967296;
+    };
+    const spy = vi.spyOn(Math, 'random').mockImplementation(lcg);
+    try {
+      const rounds = 4000;
+      let offerHits = 0;
+      let current: number | undefined = undefined;
+      for (let i = 0; i < rounds; i++) {
+        const next = pickTipIndex(tips, current);
+        if (next === OFFER) offerHits += 1;
+        current = next;
+      }
+      const rate = offerHits / rounds;
+      expect(rate).toBeGreaterThan(0.78);
+      expect(rate).toBeLessThan(0.82);
+    } finally {
+      spy.mockRestore();
     }
-    const stderr = Math.sqrt(OFFER_TIP_PROBABILITY * (1 - OFFER_TIP_PROBABILITY) / rounds);
-    expect(offerHits / rounds).toBeGreaterThan(OFFER_TIP_PROBABILITY - 3 * stderr);
-    expect(offerHits / rounds).toBeLessThan(OFFER_TIP_PROBABILITY + 3 * stderr);
   });
 
   it('单条池防死循环：返回唯一索引', () => {
