@@ -1,7 +1,12 @@
 import { describe, it, expect, vi } from 'vitest';
 
+import { getLocale, setLocale, t } from '@scream-code/config';
+
 import type { ScreamSlashCommand } from '#/tui/commands/index';
-import { HelpPanelComponent } from '#/tui/components/dialogs/help-panel';
+import {
+  defaultKeyboardShortcuts,
+  HelpPanelComponent,
+} from '#/tui/components/dialogs/help-panel';
 import { darkColors } from '#/tui/theme/colors';
 
 function cmd(name: string, description: string, aliases: string[] = []): ScreamSlashCommand {
@@ -118,5 +123,40 @@ describe('HelpPanelComponent', () => {
     panel.handleInput('\u001B[A'); // ↑
     const out2 = strip(panel.render(80).join('\n'));
     expect(out2).toMatch(/显示 2-7 \/ /);
+  });
+});
+
+
+describe('defaultKeyboardShortcuts', () => {
+  it('描述随当前 locale 求值，不冻结在 import 时的语言', () => {
+    const previous = getLocale();
+    try {
+      const descriptionOf = (key: string): string | undefined =>
+        defaultKeyboardShortcuts().find((shortcut) => shortcut.keys === key)?.description;
+
+      setLocale('zh');
+      const zhExpected = t('help.toggle_plan');
+      setLocale('en');
+      const enExpected = t('help.toggle_plan');
+      expect(zhExpected).not.toBe(enExpected);
+
+      setLocale('zh');
+      expect(descriptionOf('Shift-Tab')).toBe(zhExpected);
+      setLocale('en');
+      expect(descriptionOf('Shift-Tab')).toBe(enExpected);
+      // 再切回中文仍然生效（同一模块实例，无缓存冻结）
+      setLocale('zh');
+      expect(descriptionOf('Shift-Tab')).toBe(zhExpected);
+    } finally {
+      setLocale(previous);
+    }
+  });
+
+  it('键位标签不含需要翻译的 CJK 文本（语言差异只出现在描述里）', () => {
+    // 箭头等键位符号是通用记法，允许；CJK 文本（如"忙碌时"）必须进描述。
+    const cjk = /[\u3000-\u9FFF\uFF00-\uFFEF]/u;
+    for (const shortcut of defaultKeyboardShortcuts()) {
+      expect(cjk.test(shortcut.keys)).toBe(false);
+    }
   });
 });

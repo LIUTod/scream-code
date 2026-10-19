@@ -10,7 +10,7 @@ import type { TUIState } from '../tui-state';
 import type { LivePaneState } from '../types';
 import { ApprovalPanelComponent, type ApprovalPanelResponse } from '../components/dialogs/approval-panel';
 import { ApprovalPreviewViewer, type ApprovalPreviewBlock } from '../components/dialogs/approval-preview';
-import { DEFAULT_KEYBOARD_SHORTCUTS, HelpPanelComponent, type HelpPanelCommand } from '../components/dialogs/help-panel';
+import { defaultKeyboardShortcuts, HelpPanelComponent, type HelpPanelCommand } from '../components/dialogs/help-panel';
 import { MemoryPickerComponent } from '../components/dialogs/memory-picker';
 import { SessionPickerComponent, type SessionRow } from '../components/dialogs/session-picker';
 import { QuestionDialogComponent } from '../components/dialogs/question-dialog';
@@ -113,7 +113,7 @@ export class DialogManager {
     this.mountEditorReplacement(
       new HelpPanelComponent({
         commands: [],
-        shortcuts: DEFAULT_KEYBOARD_SHORTCUTS,
+        shortcuts: defaultKeyboardShortcuts(),
         colors: this.host.state.theme.colors,
         title: t('help.hotkeys_title'),
         onClose: () => {

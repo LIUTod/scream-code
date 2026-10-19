@@ -595,7 +595,7 @@ export const zh: Record<string, string> = {
   'help.submit': '提交',
   'help.title': ' 帮助 ',
   'help.hotkeys_title': ' 键盘快捷键 ',
-  'help.recall_queued': '召回上一条排队中的消息',
+  'help.recall_queued': '忙碌时召回上一条排队中的消息',
   'help.paste_image': '粘贴图片（Windows: Alt-V）',
   'help.close_hint': 'Esc / Enter / q 关闭 · ↑↓ 滚动',
   'help.welcome_msg': 'Scream 已准备好帮助您！发送消息即可开始。',

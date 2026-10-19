@@ -33,26 +33,35 @@ export interface HelpPanelCommand {
   readonly description: string;
 }
 
-/** Static list — keep in sync with the global editor bindings. */
-export const DEFAULT_KEYBOARD_SHORTCUTS: readonly KeyboardShortcut[] = [
-  { keys: 'Shift-Tab', description: t('help.toggle_plan') },
-  { keys: 'Tab', description: t('help.cycle_thinking') },
-  { keys: 'Ctrl-G', description: t('help.external_editor') },
-  { keys: 'Ctrl-O', description: t('help.toggle_output') },
-  { keys: 'Ctrl-E', description: t('help.toggle_plan_view') },
-  { keys: 'Ctrl-S', description: t('help.interrupt') },
-  { keys: 'Ctrl-X', description: t('help.toggle_sidebar') },
-  { keys: 'Ctrl-B', description: t('help.toggle_hint') },
-  { keys: 'Ctrl-W', description: t('help.cancel_memory') },
-  { keys: '↑（忙碌时）', description: t('help.recall_queued') },
-  { keys: 'Ctrl-V / Alt-V', description: t('help.paste_image') },
-  { keys: 'Shift-Enter / Ctrl-J', description: t('help.newline') },
-  { keys: 'Ctrl-C', description: t('help.cancel_stream') },
-  { keys: 'Ctrl-D', description: t('help.exit') },
-  { keys: 'Esc', description: t('help.close_dialog') },
-  { keys: '↑ / ↓', description: t('help.browse_history') },
-  { keys: 'Enter', description: t('help.submit') },
-];
+/**
+ * Keyboard shortcut reference — keep in sync with the global editor bindings.
+ *
+ * A function, not a constant: `t()` must run on every call. As a module-level
+ * constant the descriptions were evaluated once at import time and froze to
+ * whichever locale happened to be active then, so a Chinese session showed an
+ * English shortcut list (and vice versa).
+ */
+export function defaultKeyboardShortcuts(): readonly KeyboardShortcut[] {
+  return [
+    { keys: 'Shift-Tab', description: t('help.toggle_plan') },
+    { keys: 'Tab', description: t('help.cycle_thinking') },
+    { keys: 'Ctrl-G', description: t('help.external_editor') },
+    { keys: 'Ctrl-O', description: t('help.toggle_output') },
+    { keys: 'Ctrl-E', description: t('help.toggle_plan_view') },
+    { keys: 'Ctrl-S', description: t('help.interrupt') },
+    { keys: 'Ctrl-X', description: t('help.toggle_sidebar') },
+    { keys: 'Ctrl-B', description: t('help.toggle_hint') },
+    { keys: 'Ctrl-W', description: t('help.cancel_memory') },
+    { keys: '↑', description: t('help.recall_queued') },
+    { keys: 'Ctrl-V / Alt-V', description: t('help.paste_image') },
+    { keys: 'Shift-Enter / Ctrl-J', description: t('help.newline') },
+    { keys: 'Ctrl-C', description: t('help.cancel_stream') },
+    { keys: 'Ctrl-D', description: t('help.exit') },
+    { keys: 'Esc', description: t('help.close_dialog') },
+    { keys: '↑ / ↓', description: t('help.browse_history') },
+    { keys: 'Enter', description: t('help.submit') },
+  ];
+}
 
 export interface HelpPanelOptions {
   readonly commands: readonly HelpPanelCommand[];
@@ -111,7 +120,7 @@ export class HelpPanelComponent extends Container implements Focusable {
     const kbdColor = chalk.hex(colors.warning);
     const slashColor = chalk.hex(colors.primary);
 
-    const shortcuts = this.opts.shortcuts ?? DEFAULT_KEYBOARD_SHORTCUTS;
+    const shortcuts = this.opts.shortcuts ?? defaultKeyboardShortcuts();
     // CJK labels (e.g. "↑（忙碌时）") render double-width: pad by rendered width,
     // not string length, or the description column zig-zags.
     const padToWidth = (text: string, width: number): string => {

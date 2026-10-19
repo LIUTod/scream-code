@@ -599,7 +599,7 @@ export const en: Record<string, string> = {
   'help.submit': 'Submit',
   'help.title': ' Help ',
   'help.hotkeys_title': ' Keyboard shortcuts ',
-  'help.recall_queued': 'Recall the last queued message',
+  'help.recall_queued': 'Recall the last queued message (while busy)',
   'help.paste_image': 'Paste an image (Alt-V on Windows)',
   'help.close_hint': 'Esc / Enter / q Close · ↑↓ Scroll',
   'help.welcome_msg': 'Scream is ready to help! Send a message to get started.',
