@@ -31,7 +31,8 @@ npm install -g scream-code
 ```
 
 > [!NOTE]
-> Requires **Node.js >= 22**. Git recommended. Same command installs and updates.
+> Requires **Node.js >= 22**. Git recommended. Same command installs and updates. No native build steps and no dependency install scripts: the local embedding engine runs on WebAssembly.
+> The first use of the knowledge/memory vector features downloads a ~53MB model into `~/.scream-code/cache` (progress is shown, and the download verifies its checksum before use).
 
 ### Quick Start
 
@@ -42,7 +43,7 @@ scream --auto     # auto permission mode
 scream -y         # auto-approve mode
 ```
 
-On first launch Scream walks you through model setup (`/config`). 130+ providers built in — or point it at any OpenAI-compatible endpoint with `/config diy`. Switch models anytime with `/model`, no restart needed — or use `/model diy` to give each sub-agent its own model, letting every model do what it does best. Generate or edit images the same way: run `/config image` once, then just ask for a picture (the `/image` skill).
+On first launch Scream walks you through model setup (`/config` — pick the shortcut provider directory, a custom DIY setup, or image generation). 130+ providers built in — or point it at any OpenAI-compatible endpoint with `/config diy`. Switch models anytime with `/model`, no restart needed — or use `/model diy` to give each sub-agent its own model, letting every model do what it does best. Generate or edit images the same way: run `/config image` once, then just ask for a picture (the `/image` skill).
 
 When Scream wants to modify files or run commands, an approval panel pops up — pick a number, press Enter.
 
@@ -103,7 +104,7 @@ Type `/` in the input to browse. All 55 commands:
 | `/knowledge` (`/know`) `[query]` | Manage local knowledge base |
 | **Models & configuration** | |
 | `/model [alias]` | Switch LLM model |
-| `/config` (`/login`) | Browse and configure models |
+| `/config` (`/login`) | Configure model services: quick provider pick, custom DIY setup, or image generation |
 | `/config image` | Configure image generation (provider, URL, key, model) |
 | `/logout` (`/disconnect`) | Remove configured models |
 | `/language` (`/lang`) | Switch interface language |
@@ -136,6 +137,8 @@ Type `/` in the input to browse. All 55 commands:
 | `/cron` | View and manage scheduled tasks — list, create (pick a time + a task), delete |
 | `/like` | Set your preferences |
 | `/help` (`/h`) | Show commands and shortcuts |
+| `/hotkeys` (`/keys`) | Keyboard shortcut reference |
+| `/copy` (`/yank`) | Copy the last reply to the clipboard |
 | `/exit` (`/quit`, `/q`) | Exit application |
 
 </details>

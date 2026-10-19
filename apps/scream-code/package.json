@@ -1,6 +1,6 @@
 {
   "name": "scream-code",
-  "version": "0.18.7",
+  "version": "0.18.8",
   "description": "A terminal-native AI agent for builders",
   "license": "MIT",
   "author": "ScreamCli",
@@ -57,6 +57,7 @@
     "bench:startup": "node scripts/startup-bench.mjs"
   },
   "dependencies": {
+    "@huggingface/tokenizers": "^0.2.0",
     "@earendil-works/pi-codemode": "^1.1.0",
     "@fontsource-variable/inter": "^5.3.0",
     "@fontsource-variable/jetbrains-mono": "^5.3.0",
@@ -69,15 +70,13 @@
     "grok-mermaid": "^0.2.3",
     "marked": "^15.0.7",
     "mupdf": "^1.28.0",
+    "onnxruntime-web": "1.21.0",
     "qrcode": "^1.5.4",
     "semver": "^7.7.4",
     "shiki": "^3.2.1",
     "smol-toml": "^1.6.1",
     "ws": "^8.21.1",
     "zod": "^4.3.6"
-  },
-  "optionalDependencies": {
-    "fastembed": "^2.1.0"
   },
   "devDependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",

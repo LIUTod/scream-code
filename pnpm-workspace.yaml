@@ -2,6 +2,13 @@ packages:
   - packages/*
   - apps/*
 
+# Dependency install scripts are denied by default. Nothing in this workspace
+# needs to run code at install time, and a failing postinstall in a transitive
+# dependency can silently break a feature (a GPU runtime download in an
+# optional dependency once did exactly that). Adding a package here is a
+# reviewed decision, not a convenience: state why it must run at install time.
+onlyBuiltDependencies: []
+
 catalog:
   zod: ^4.3.6
 

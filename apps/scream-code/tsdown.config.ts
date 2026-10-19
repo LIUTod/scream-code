@@ -48,6 +48,9 @@ export default defineConfig({
     // directory at runtime; bundling the JS breaks that lookup. The script
     // sandbox has the same constraint: it spawns a worker file (and loads a
     // wasm module) resolved relative to its own package directory.
-    neverBundle: ['fastembed', 'mupdf', '@earendil-works/pi-codemode'],
+    // onnxruntime-web loads its wasm artifact and worker from its own dist
+    // directory (resolved via require.resolve), and the tokenizer ships its
+    // own runtime data — both must stay unwrapped for that lookup to work.
+    neverBundle: ['mupdf', 'onnxruntime-web', '@huggingface/tokenizers', '@earendil-works/pi-codemode'],
   },
 });

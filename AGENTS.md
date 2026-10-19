@@ -179,6 +179,10 @@ Test the contract the system exposes — not the easiest internal detail to asse
 - Do not run raw `tsc` directly.
 - **Dist rebuild rule (runtime uses build output, not `src/`)**: after changing `packages/config` (i18n/locales), `packages/node-sdk` (e.g. permission-mode validation), or `packages/agent-core`, run `pnpm --filter @scream-code/<pkg> run build` so their `dist/` is fresh. `apps/scream-code` bundles workspace deps into its own `dist/` via tsdown — after any package-level change that the app consumes (including error-message text), also run `pnpm --filter scream-code run build`, otherwise the running TUI/web server keeps executing stale inline copies (symptom seen in practice: a fixed validation message still reports the old wording).
 
+### Dependency Install Scripts
+
+`pnpm-workspace.yaml` sets `onlyBuiltDependencies: []`: dependency install scripts are denied by default. Nothing in this workspace needs to run code at install time, and a failing `postinstall` in a transitive dependency can silently break a feature (an optional runtime once downloaded a GPU bundle, and when that download failed npm pruned the whole optional chain). If a dependency genuinely must build at install time, add it to that list in the same PR that introduces it and state why — never flip the list to a wildcard.
+
 ### Changesets
 
 When generating a changeset (`.changeset/*.md`), never decide on a `major` bump on your own. `major` is reserved for breaking changes — renamed or removed commands/arguments, removed public APIs, changed behavior semantics, or incompatible user configuration. When you judge a change to meet the major criteria, stop and ask the user for confirmation first; only write `major` after they explicitly agree. Otherwise default to `minor` (fall back to `patch` when the change is clearly a fix with no new surface).

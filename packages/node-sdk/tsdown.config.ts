@@ -27,6 +27,6 @@ export default defineConfig({
   },
   deps: {
     alwaysBundle: [/^@scream-./],
-    neverBundle: ['fastembed'],
+    neverBundle: ['onnxruntime-web', '@huggingface/tokenizers'],
   },
 });
