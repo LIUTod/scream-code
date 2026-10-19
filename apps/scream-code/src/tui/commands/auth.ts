@@ -98,13 +98,17 @@ function promptConfigEntry(host: SlashCommandHost): Promise<ConfigEntry | undefi
         { value: 'diy', label: t('config.entry_diy'), description: t('config.entry_diy_desc') },
         { value: 'image', label: t('config.entry_image'), description: t('config.entry_image_desc') },
       ],
+      // Settle BEFORE restoring the editor: restore swaps the panel out, and
+      // the picker's dispose callback settles with `undefined`. Restoring first
+      // would therefore swallow the actual choice (the once-only guard keeps
+      // the first settlement).
       onSelect: (value) => {
-        host.restoreEditor();
         settle(value as ConfigEntry);
+        host.restoreEditor();
       },
       onCancel: () => {
-        host.restoreEditor();
         settle(undefined);
+        host.restoreEditor();
       },
       onDispose: () => {
         // Another panel took over the editor; do not restore it here.

@@ -66,7 +66,12 @@ function makeHost(): {
   showError: ReturnType<typeof vi.fn>;
 } {
   const mounted: MountedPanel[] = [];
-  const restoreEditor = vi.fn();
+  // 真实的 restoreEditor 会替换面板并 dispose 旧面板；stub 必须复制这一点，
+  // 否则 onDispose/结算顺序这类 bug 在测试里永远看不见。
+  const restoreEditor = vi.fn(() => {
+    const panel = mounted.at(-1) as unknown as { dispose?: () => void } | undefined;
+    panel?.dispose?.();
+  });
   const showError = vi.fn();
   const host = {
     session: undefined,
