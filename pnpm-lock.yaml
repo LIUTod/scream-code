@@ -230,21 +230,12 @@ importers:
       fast-xml-parser:
         specifier: ^5.10.1
         version: 5.10.1
-      fflate:
-        specifier: ^0.8.3
-        version: 0.8.3
       js-yaml:
         specifier: ^4.1.1
         version: 4.1.1
       linkedom:
         specifier: ^0.18.12
         version: 0.18.12
-      mammoth:
-        specifier: ^1.12.0
-        version: 1.12.0
-      mupdf:
-        specifier: ^1.28.0
-        version: 1.28.0
       nunjucks:
         specifier: ^3.2.4
         version: 3.2.4
@@ -272,12 +263,6 @@ importers:
       tar:
         specifier: ^7.5.13
         version: 7.5.15
-      turndown:
-        specifier: ^7.2.4
-        version: 7.2.4
-      turndown-plugin-gfm:
-        specifier: ^1.0.2
-        version: 1.0.2
       yauzl:
         specifier: ^3.3.0
         version: 3.3.1
@@ -309,9 +294,6 @@ importers:
       '@types/tar':
         specifier: ^7.0.87
         version: 7.0.87
-      '@types/turndown':
-        specifier: ^5.0.6
-        version: 5.0.6
       '@types/yauzl':
         specifier: ^2.10.3
         version: 2.10.3
@@ -344,9 +326,31 @@ importers:
       '@scream-code/memory':
         specifier: workspace:*
         version: link:../memory
+      fast-xml-parser:
+        specifier: ^5.10.1
+        version: 5.10.1
+      fflate:
+        specifier: ^0.8.3
+        version: 0.8.3
+      mammoth:
+        specifier: ^1.12.0
+        version: 1.12.0
+      mupdf:
+        specifier: ^1.28.0
+        version: 1.28.0
       pathe:
         specifier: ^2.0.3
         version: 2.0.3
+      turndown:
+        specifier: ^7.2.4
+        version: 7.2.4
+      turndown-plugin-gfm:
+        specifier: ^1.0.2
+        version: 1.0.2
+    devDependencies:
+      '@types/turndown':
+        specifier: ^5.0.6
+        version: 5.0.6
 
   packages/ltod:
     dependencies:
@@ -1762,6 +1766,7 @@ packages:
   '@xmldom/xmldom@0.8.13':
     resolution: {integrity: sha512-KRYzxepc14G/CEpEGc3Yn+JKaAeT63smlDr+vjB8jRfgTBBI9wRj/nkQEO+ucV8p8I9bfKLWp37uHgFrbntPvw==}
     engines: {node: '>=10.0.0'}
+    deprecated: this version has critical issues, please update to the latest version
 
   a-sync-waterfall@1.0.1:
     resolution: {integrity: sha512-RYTOHHdWipFUliRFMCS4X2Yn2X8M87V/OpSqWzKKOGhzqyUxzyVmhHDH9sAvG+ZuQf/TAOFsLCpMw09I1ufUnA==}

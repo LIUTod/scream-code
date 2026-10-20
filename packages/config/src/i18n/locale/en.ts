@@ -95,7 +95,7 @@ export const en: Record<string, string> = {
   // ─── Errors ───────────────────
   'error.path_empty': 'Path cannot be empty',
   'error.path_not_exist': 'Path does not exist: {path}',
-  'error.unsupported_format': 'Only .md, .markdown, .txt files are supported',
+  'error.unsupported_format': 'Only .md, .markdown, .txt, .pdf, .docx and .xlsx files are supported',
   'error.image_not_supported': 'Current model does not support image input.',
   'error.video_not_supported': 'Current model does not support video input.',
   'error.network_timeout': 'Network timeout. Check your connection or try with a proxy.',
@@ -209,6 +209,7 @@ export const en: Record<string, string> = {
 
   // ─── Knowledge ───────────────
   'knowledge.chunking': 'Chunking file...',
+  'knowledge.converting': 'Converting document: {file}',
   'knowledge.embedding_chunks': 'Embedding chunks: {index}/{total}',
   'knowledge.extracting': 'Extracting events: {index}/{total}',
   'knowledge.embedding_events': 'Embedding events: {index}/{total}',
@@ -216,7 +217,7 @@ export const en: Record<string, string> = {
   'knowledge.embedding_relations': 'Embedding relations...',
   'knowledge.error': 'Error: {msg}',
   'knowledge.ingest': 'Ingest files',
-  'knowledge.ingest_desc': 'Enter a markdown/txt file or folder path [Ingestion calls LLM for event extraction; for large files, consider a cost-effective model]',
+  'knowledge.ingest_desc': 'Enter a Markdown/TXT file or folder path (Markdown recommended: cleanest structure, best retrieval). PDF / Word(.docx) / Excel(.xlsx) are supported too, but scans, image-heavy files and wide tables extract poorly [Ingestion calls LLM for event extraction; for large files, consider a cost-effective model]',
   'knowledge.ingesting': 'Starting ingest...',
   'knowledge.ingest_done': 'Ingest complete',
   'knowledge.ingest_fail': 'Ingest failed',
@@ -263,7 +264,7 @@ export const en: Record<string, string> = {
   'knowledge.stats_chunks': 'Chunks (split by heading)',
   'knowledge.stats_events': 'LLM-extracted fusion events',
   'knowledge.stats_entities': 'Deduplicated entities',
-  'knowledge.ingest_full': 'Ingest knowledge from markdown/txt files or folders (chunk + extract events + extract entities)',
+  'knowledge.ingest_full': 'Ingest knowledge from Markdown / TXT / PDF / Word(.docx) / Excel(.xlsx) files or folders (chunk + extract events + extract entities)',
   'knowledge.doc_list': 'Document List',
   'knowledge.doc_list_desc': 'View all ingested documents',
   'knowledge.search_effect': 'Enter a query to test multi-hop retrieval',
@@ -1346,7 +1347,7 @@ export const en: Record<string, string> = {
   'adapter.task_label': 'Task {taskId}',
 
   // ─── Knowledge ─────────────────
-  'knowledge.path_placeholder': '/path/to/doc.md or /path/to/docs',
+  'knowledge.path_placeholder': '/path/to/doc.md, /path/to/report.pdf or /path/to/docs',
   'knowledge.ingest_summary': 'Total: {chunks} chunks, {events} events, {entities} entities',
   'knowledge.empty_store': 'Knowledge base is empty, please ingest documents with /knowledge first',
   'knowledge.web_opened': 'Knowledge graph opened: {url}',

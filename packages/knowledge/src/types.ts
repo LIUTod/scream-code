@@ -156,6 +156,7 @@ export type KnowledgeSearchStepCallback = (step: KnowledgeSearchTraceStep) => vo
 /** Progress callback for ingest operations. */
 export type IngestProgress =
   | { stage: 'embedding-check'; message: string }
+  | { stage: 'converting'; message: string }
   | { stage: 'chunking'; message: string }
   | { stage: 'embedding-chunks'; chunkIndex: number; totalChunks: number; message: string }
   | { stage: 'extracting'; chunkIndex: number; totalChunks: number; message: string }

@@ -7,7 +7,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 
 import { log } from '#/logging/logger';
-import type { ConversionResult, Markit, StreamInfo } from '../markit';
+import type { ConversionResult, Markit, StreamInfo } from '@scream-code/knowledge/markit';
 import { abortError } from './abort';
 import {
   type MarkitConversionCacheStatus,
@@ -50,7 +50,7 @@ installMuPdfWasmLogger();
 let markit: () => Markit | Promise<Markit> = async () => {
   // Lazy: the document engine (mammoth/mupdf) loads only when a document is
   // first converted.
-  const promise = import('../markit').then(({ Markit }) => {
+  const promise = import('@scream-code/knowledge/markit').then(({ Markit }) => {
     const instance = new Markit();
     markit = () => instance;
     return instance;

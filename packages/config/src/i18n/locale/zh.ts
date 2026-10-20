@@ -95,7 +95,7 @@ export const zh: Record<string, string> = {
   // ─── 错误 ─────────────────────
   'error.path_empty': '路径不能为空',
   'error.path_not_exist': '路径不存在: {path}',
-  'error.unsupported_format': '仅支持 .md、.markdown、.txt 文件',
+  'error.unsupported_format': '仅支持 .md、.markdown、.txt、.pdf、.docx、.xlsx 文件',
   'error.image_not_supported': '当前模型不支持图片输入。',
   'error.video_not_supported': '当前模型不支持视频输入。',
   'error.network_timeout': '网络超时，建议检查网络或开启加速后重试。',
@@ -209,6 +209,7 @@ export const zh: Record<string, string> = {
 
   // ─── 知识库 ───────────────────
   'knowledge.chunking': '切分文件中...',
+  'knowledge.converting': '转换文档：{file}',
   'knowledge.embedding_chunks': '嵌入 chunks: {index}/{total}',
   'knowledge.extracting': '抽取事件: {index}/{total}',
   'knowledge.embedding_events': '嵌入 events: {index}/{total}',
@@ -216,7 +217,7 @@ export const zh: Record<string, string> = {
   'knowledge.embedding_relations': '嵌入关系...',
   'knowledge.error': '错误: {msg}',
   'knowledge.ingest': '摄入文件/文件夹',
-  'knowledge.ingest_desc': '输入 markdown/txt 文件或文件夹路径【摄入后首次抽取事件关联需要调用llm，文件过大建议更换性价比模型】',
+  'knowledge.ingest_desc': '输入 Markdown/TXT 文件或文件夹路径（推荐 Markdown：结构清晰、检索最准）。也支持 PDF / Word(.docx) / Excel(.xlsx)，但扫描件、图片多、宽表格的提取效果会明显下降【摄入后首次抽取事件关联需要调用llm，文件过大建议更换性价比模型】',
   'knowledge.ingesting': '开始摄入...',
   'knowledge.ingest_done': '摄入完成',
   'knowledge.ingest_fail': '摄入失败',
@@ -263,7 +264,7 @@ export const zh: Record<string, string> = {
   'knowledge.stats_chunks': '切片数（按标题切分）',
   'knowledge.stats_events': 'LLM 抽取的融合事件数',
   'knowledge.stats_entities': '去重后的实体数',
-  'knowledge.ingest_full': '从 markdown/txt 文件或文件夹摄入知识（chunk + 抽事件 + 抽实体）',
+  'knowledge.ingest_full': '从 Markdown / TXT / PDF / Word(.docx) / Excel(.xlsx) 文件或文件夹摄入知识（chunk + 抽事件 + 抽实体）',
   'knowledge.doc_list': '文档列表',
   'knowledge.doc_list_desc': '查看所有已摄入的文档',
   'knowledge.search_effect': '输入查询，测试多跳检索效果',
@@ -1340,7 +1341,7 @@ export const zh: Record<string, string> = {
   'adapter.task_label': '任务 {taskId}',
 
   // ─── Knowledge ─────────────────
-  'knowledge.path_placeholder': '/path/to/doc.md 或 /path/to/docs',
+  'knowledge.path_placeholder': '/path/to/doc.md、/path/to/report.pdf 或 /path/to/docs',
   'knowledge.ingest_summary': '总计: {chunks} chunks, {events} events, {entities} entities',
   'knowledge.empty_store': '知识库为空，请先用 /knowledge 摄入文档',
   'knowledge.web_opened': '知识图谱已打开: {url}',

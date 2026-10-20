@@ -81,6 +81,8 @@ function formatProgress(progress: IngestProgress): string {
   switch (progress.stage) {
     case 'embedding-check':
       return progress.message;
+    case 'converting':
+      return t('knowledge.converting', { file: progress.message });
     case 'chunking':
       return t('knowledge.chunking');
     case 'embedding-chunks':
@@ -165,9 +167,18 @@ async function handleIngest(host: SlashCommandHost): Promise<void> {
         host.showError(t('error.unsupported_format'));
         return;
       }
-      const result = await ingestFile(store, llm, filePath, (progress) => {
-        spinner.setLabel(formatProgress(progress));
-      });
+      let result: Awaited<ReturnType<typeof ingestFile>>;
+      try {
+        result = await ingestFile(store, llm, filePath, (progress) => {
+          spinner.setLabel(formatProgress(progress));
+        });
+      } catch (error) {
+        // Conversion failures (scanned PDF, corrupt archive, oversized file)
+        // carry the actionable reason; show it instead of bubbling a bare throw.
+        spinner.stop({ ok: false, label: t('knowledge.ingest_fail') });
+        host.showNotice(t('knowledge.ingest_fail'), error instanceof Error ? error.message : String(error));
+        return;
+      }
       const outcomeLabel =
         result.outcome === 'unchanged'
           ? t('knowledge.ingest_unchanged')

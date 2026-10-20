@@ -4,7 +4,7 @@
 // Adapted under the MIT License. See ../NOTICE.
 import * as path from "node:path";
 import { XMLParser } from "fast-xml-parser";
-import { unzip, unzipText } from "../../utils/zip";
+import { unzip, unzipText } from "../utils/zip";
 import type { ConversionResult, Converter, StreamInfo } from "../types";
 
 const EXTENSIONS = [".pptx"];

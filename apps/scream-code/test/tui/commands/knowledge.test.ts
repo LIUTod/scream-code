@@ -423,6 +423,22 @@ describe('handleKnowledgeCommand — ingest 文件', () => {
     expect(knowledgePkg.ingestFile).not.toHaveBeenCalled();
   });
 
+  it('转换失败：spinner 标红并显示具体原因，不向上抛出', async () => {
+    vi.mocked(knowledgeStore.getKnowledgeStore).mockResolvedValue(makeStore() as never);
+    knowledgePkg.ingestFile.mockRejectedValue(new Error('文档未提取到文字（可能是扫描版 PDF）'));
+    const file = await makeFilePath('scan.pdf');
+
+    const { host, spinner } = makeHost();
+    await openMenu(host);
+    await selectMenuAction('ingest');
+    await submitPath(file);
+
+    expect(spinner.stop).toHaveBeenCalledWith({ ok: false, label: t('knowledge.ingest_fail') });
+    const [title, body] = vi.mocked(host.showNotice).mock.calls[0]!;
+    expect(title).toBe(t('knowledge.ingest_fail'));
+    expect(body).toContain('扫描版 PDF');
+  });
+
   it('created 结果：ingest_done 汇总含 chunk/event/entity 计数与向量覆盖率', async () => {
     const store = makeStore({ embeddingCoverage: vi.fn(async () => ({ embedded: 2, total: 2 })) });
     vi.mocked(knowledgeStore.getKnowledgeStore).mockResolvedValue(store as never);

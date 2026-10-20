@@ -1,9 +1,10 @@
 import { createHash } from 'node:crypto';
-import { readdir, readFile } from 'node:fs/promises';
+import { readdir, readFile, stat } from 'node:fs/promises';
 import { basename, join } from 'pathe';
 
 import { chunkMarkdown, chunkText } from './chunking.js';
 import { extractEventFromChunk } from './extractor.js';
+import type { Markit } from './markit/index.js';
 import { EMBEDDING_MODEL_META_KEY, type KnowledgeStore } from './store.js';
 import type { EmbeddingEngine } from '@scream-code/memory';
 import type {
@@ -34,11 +35,103 @@ async function embedOrNulls(
 
 /** LLM concurrency for extraction — callers and comments below refer to this constant. */
 const LLM_CONCURRENCY = 20;
-const SUPPORTED_EXTENSIONS = new Set(['.md', '.markdown', '.txt']);
 
-/** Read a file and return its content. */
-async function readFileContent(filePath: string): Promise<string> {
-  return readFile(filePath, 'utf-8');
+/** Formats read directly as UTF-8 text. */
+const TEXT_EXTENSIONS = new Set(['.md', '.markdown', '.txt']);
+/**
+ * Binary documents run through the markit converter (they become Markdown,
+ * then take the exact same chunking/embedding path as a `.md` file).
+ */
+const DOCUMENT_EXTENSIONS = new Set(['.pdf', '.docx', '.xlsx']);
+const SUPPORTED_EXTENSIONS = new Set([...TEXT_EXTENSIONS, ...DOCUMENT_EXTENSIONS]);
+
+/**
+ * Hard ceiling for a converted document. Every chunk costs one LLM extraction
+ * call, so an unbounded PDF would silently turn into hundreds of requests.
+ */
+const MAX_DOCUMENT_BYTES = 50 * 1024 * 1024;
+
+/** Lazily-loaded converter instance: only binary ingests pay the import cost. */
+let markitPromise: Promise<Markit> | undefined;
+function getMarkit(): Promise<Markit> {
+  markitPromise ??= import('./markit/index.js')
+    .then(({ Markit }) => new Markit())
+    // A failed load must not poison every later ingest in this process.
+    .catch((error: unknown) => {
+      markitPromise = undefined;
+      throw error;
+    });
+  return markitPromise;
+}
+
+/**
+ * The converters record images as `<!-- image: id (page N, WxHpt) -->` when
+ * they are not asked to write them out. Those comments carry no searchable
+ * meaning and would otherwise burn tokens in every chunk they land in.
+ */
+export function stripImagePlaceholders(markdown: string): string {
+  return markdown
+    .replaceAll(/<!--\s*image:[^>]*-->/g, '')
+    .replaceAll(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+interface SourceBytes {
+  bytes: Buffer;
+  ext: string;
+  contentHash: string;
+}
+
+/**
+ * Read a source file and fingerprint it.
+ *
+ * Text files hash the decoded string — exactly what the previous
+ * `sha256(readFile(path, 'utf-8'))` produced, so existing `contentHash` values
+ * keep matching even for non-UTF-8 text. Binary files hash the raw bytes, which
+ * stays stable across converter upgrades.
+ */
+async function readSource(filePath: string): Promise<SourceBytes> {
+  const ext = getFileExtension(filePath);
+  // Reject oversized binaries before slurping them into memory: a multi-GB PDF
+  // must not be read just to be discarded. Text files keep their old,
+  // unlimited behaviour.
+  if (!TEXT_EXTENSIONS.has(ext)) {
+    const { size } = await stat(filePath);
+    if (size > MAX_DOCUMENT_BYTES) {
+      throw new Error(
+        `文档超过 ${MAX_DOCUMENT_BYTES / 1024 / 1024}MB 上限，已跳过: ${basename(filePath)}`,
+      );
+    }
+  }
+  const bytes = await readFile(filePath);
+  const contentHash = TEXT_EXTENSIONS.has(ext)
+    ? createHash('sha256').update(bytes.toString('utf8')).digest('hex')
+    : createHash('sha256').update(bytes).digest('hex');
+  return { bytes, ext, contentHash };
+}
+
+/**
+ * Convert a binary document to Markdown. Only called once the bytes are known
+ * to be new or changed — an unchanged PDF is never re-parsed.
+ */
+async function convertSource(
+  filePath: string,
+  bytes: Buffer,
+  ext: string,
+  onConverting?: (fileName: string) => void,
+): Promise<string> {
+  onConverting?.(basename(filePath));
+  const markit = await getMarkit();
+  const { markdown } = await markit.convert(bytes, { extension: ext, filename: basename(filePath) });
+  const content = stripImagePlaceholders(markdown ?? '');
+  if (content.length === 0) {
+    throw new Error(
+      ext === '.pdf'
+        ? '文档未提取到文字（可能是扫描版 PDF），本功能不含 OCR'
+        : '文档未提取到可索引的文字，文件可能已损坏或为空',
+    );
+  }
+  return content;
 }
 
 function getFileExtension(filePath: string): string {
@@ -137,6 +230,15 @@ export async function ingestFile(
   entityCount: number;
   outcome: 'created' | 'updated' | 'unchanged';
 }> {
+  // Library-level guard: the slash command checks too, but any other caller
+  // must not be able to feed a binary file into the UTF-8 reader and end up
+  // with mojibake silently stored as knowledge. Kept first so a rejected call
+  // cannot stamp the library with this model first.
+  if (!isSupportedFile(filePath)) {
+    const ext = getFileExtension(filePath);
+    throw new Error(`不支持的文件类型: ${ext === '' ? '(无扩展名)' : ext}`);
+  }
+
   const engine = store.getEmbeddingEngine();
   const skipEmbed = engine === undefined || !engine.available;
   if (skipEmbed) {
@@ -144,10 +246,11 @@ export async function ingestFile(
   }
   await ensureEmbeddingModelMatches(store, engine);
 
-  // 1. Read + fingerprint the content, then reconcile with any existing source.
+  // 1. Read + fingerprint, then short-circuit unchanged sources BEFORE any
+  // conversion: re-parsing an untouched PDF costs seconds and would turn a
+  // converter hiccup into a failure for a file that never changed.
   onProgress?.({ stage: 'chunking', message: `读取并切分文件: ${basename(filePath)}` });
-  const content = await readFileContent(filePath);
-  const contentHash = createHash('sha256').update(content).digest('hex');
+  const { bytes, ext, contentHash } = await readSource(filePath);
 
   const existing = await store.findSourceByFilePath(filePath);
   let replacedOldVersion = false;
@@ -161,14 +264,23 @@ export async function ingestFile(
       onProgress?.({ stage: 'completed', message: '内容未变化，已跳过' });
       return { documentId: null, chunkCount: 0, eventCount: 0, entityCount: 0, outcome: 'unchanged' };
     }
-    // Content changed: replace. The source file remains on disk, so even if
-    // the re-ingest fails after the delete, re-running ingestion recovers.
+    // Content changed: convert first, then replace. Converting before the
+    // delete keeps the old version intact when a conversion fails.
     onProgress?.({ stage: 'chunking', message: `检测到内容变更，替换旧版本: ${existing.name}` });
+  }
+
+  const content = TEXT_EXTENSIONS.has(ext)
+    ? bytes.toString('utf8')
+    : await convertSource(filePath, bytes, ext, (file) => {
+        onProgress?.({ stage: 'converting', message: file });
+      });
+
+  if (existing !== undefined) {
     await store.deleteSource(existing.id);
     replacedOldVersion = true;
   }
 
-  const sections = chunkContent(content, getFileExtension(filePath));
+  const sections = chunkContent(content, ext);
 
   store.beginTransaction();
   try {
@@ -474,6 +586,9 @@ async function collectSupportedFiles(dirPath: string): Promise<string[]> {
   const files: string[] = [];
   const entries = await readdir(dirPath, { withFileTypes: true });
   for (const entry of entries) {
+    // Skip hidden entries and Office lock/temp files (`~$report.docx` is
+    // created while a document is open and is not a real source).
+    if (entry.name.startsWith('.') || entry.name.startsWith('~$')) continue;
     const fullPath = join(dirPath, entry.name);
     if (entry.isDirectory()) {
       files.push(...(await collectSupportedFiles(fullPath)));
@@ -502,7 +617,7 @@ export async function ingestDirectory(
 }> {
   const files = await collectSupportedFiles(dirPath);
   if (files.length === 0) {
-    throw new Error(`目录下没有支持的文件 (.md, .markdown, .txt): ${dirPath}`);
+    throw new Error(`目录下没有支持的文件 (${[...SUPPORTED_EXTENSIONS].join(', ')}): ${dirPath}`);
   }
 
   const errors: Array<{ filePath: string; message: string }> = [];
@@ -517,6 +632,13 @@ export async function ingestDirectory(
   for (let i = 0; i < files.length; i++) {
     const filePath = files[i]!;
     const fileProgress = (progress: IngestProgress): void => {
+      // The converting message is already the file name and `formatProgress`
+      // renders it inside a "converting <file>" sentence — prefixing it there
+      // would duplicate the name.
+      if (progress.stage === 'converting') {
+        onProgress?.(progress);
+        return;
+      }
       const prefix = `批量摄入 ${i + 1}/${files.length}: ${basename(filePath)}`;
       onProgress?.({ ...progress, message: `${prefix} · ${progress.message}` });
     };

@@ -3,8 +3,8 @@
 // engine's behaviour.
 // Adapted under the MIT License. See ../NOTICE.
 import { XMLParser } from "fast-xml-parser";
-import { createTurndown, normalizeTablesHtml } from "../../utils/turndown";
-import { unzip, unzipText } from "../../utils/zip";
+import { createTurndown, normalizeTablesHtml } from "../utils/turndown";
+import { unzip, unzipText } from "../utils/zip";
 import type { ConversionResult, Converter, StreamInfo } from "../types";
 
 const EXTENSIONS = [".epub"];
