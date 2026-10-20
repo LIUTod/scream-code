@@ -27,15 +27,14 @@ export const TOOL_OUTPUT_PREVIEW_LINES = 15;
 export const MAX_SHELL_OUTPUT_BYTES = 128 * 1024;
 
 // Activity group: a turn's reasoning plus its tool calls collapsed into a
-// single block. The collapsed height is three rows by construction (header,
-// latest activity, reasoning summary); the expanded tree previews this many
-// result lines per tool and this many reasoning lines.
+// single block. The expanded tree previews this many result lines per tool and
+// this many reasoning lines.
 export const ACTIVITY_GROUP_TOOL_PREVIEW_LINES = 3;
-// Total rows of a collapsed block, header included: the header plus this many
-// minus one steps of the timeline (reasoning runs and tool calls share the
-// budget, newest kept). Three keeps the block as short as it has always been
-// while still showing the newest step plus the reasoning run before it.
-export const ACTIVITY_GROUP_COLLAPSED_LINES = 3;
+// Rows of a collapsed block, header included: the header plus this many minus
+// one steps of the timeline (reasoning runs and tool calls share the budget,
+// newest kept). Eight keeps a running turn from looking frozen — at three rows
+// the block only ever showed its header plus a single step.
+export const ACTIVITY_GROUP_COLLAPSED_LINES = 8;
 // Result lines previewed per tool once the group is expanded. Kept at the
 // standalone card's collapsed budget so grouping never hides more output than
 // the card showed on its own.

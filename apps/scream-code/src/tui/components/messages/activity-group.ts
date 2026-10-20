@@ -589,7 +589,7 @@ export class ActivityGroupComponent extends Container {
       this.expanded ? t('activitygroup.hint_collapse') : t('activitygroup.hint_expand'),
     );
     // Drop the optional tail on narrow terminals instead of letting the header
-    // wrap into a second row: the collapsed block must stay three rows tall.
+    // wrap into a second row: a collapsed header occupies exactly one row.
     const head = `${marker}${chalk.hex(colors.primary).bold(label)}${stats}`;
     const withRate = `${head}${diffPart}${rate}`;
     const full = `${withRate}${hint}`;

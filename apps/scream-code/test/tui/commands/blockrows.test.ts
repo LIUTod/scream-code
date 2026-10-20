@@ -92,7 +92,7 @@ describe('handleBlockRowsCommand', () => {
       'activityExpandedThinkingLines',
     ]);
     expect(picker.options[0]?.label).toBe(t('blockrows.item_collapsed'));
-    expect(picker.options[0]?.description).toBe(t('blockrows.current', { value: '3' }));
+    expect(picker.options[0]?.description).toBe(t('blockrows.current', { value: '8' }));
   });
 
   it('opens the value list for the chosen budget and applies the choice', async () => {

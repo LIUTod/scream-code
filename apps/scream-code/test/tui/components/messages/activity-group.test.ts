@@ -110,36 +110,35 @@ describe('ActivityGroupComponent', () => {
     expect(fileBody.indexOf('1  /**')).toBe(bodyColumn + 3);
   });
 
-  it('collapses reasoning plus tool calls into exactly three rows', () => {
+  it('collapses reasoning plus tool calls into one row per step', () => {
     const group = makeGroup();
     group.appendThinking(THINKING, false);
 
     const lines = nonEmpty(render(group));
 
-    expect(lines).toHaveLength(3);
+    expect(lines).toHaveLength(4);
     expect(lines[0]).toContain('工具执行中');
     expect(lines[0]).toContain('2 步');
     expect(lines[0]).toContain('2 个工具');
     expect(lines[0]).toContain('ctrl+o');
   });
 
-  it('shows the two newest steps of the timeline in the collapsed rows', () => {
+  it('shows every step of a short timeline in chronological order', () => {
     const group = makeGroup();
     group.appendThinking(THINKING, false);
 
     const lines = nonEmpty(render(group));
 
-    // Timeline is [Bash, Edit, reasoning]: the newest two steps are the second
-    // tool and the reasoning run that followed it.
+    // Timeline is [Bash, Edit, reasoning]; the default budget shows all three.
     expect(lines[1]?.startsWith('  ├─')).toBe(true);
-    expect(lines[1]).toContain('✓');
-    expect(lines[1]).toContain('Edit');
-    expect(lines[1]).not.toContain('Bash');
-    expect(lines[2]?.startsWith('  └─')).toBe(true);
-    expect(lines[2]).toContain(t('activitygroup.thinking_summary', { summary: 'first reasoning line' }));
+    expect(lines[1]).toContain('Bash');
+    expect(lines[2]?.startsWith('  ├─')).toBe(true);
+    expect(lines[2]).toContain('Edit');
+    expect(lines[3]?.startsWith('  └─')).toBe(true);
+    expect(lines[3]).toContain(t('activitygroup.thinking_summary', { summary: 'first reasoning line' }));
     // The token estimate belongs to the header row only: the reasoning row used
     // to repeat the same number right below it.
-    expect(lines[2]).not.toContain('tok');
+    expect(lines[3]).not.toContain('tok');
   });
 
   it('keeps a background task notice on the timeline as a normal step', () => {
@@ -150,11 +149,11 @@ describe('ActivityGroupComponent', () => {
 
     const lines = nonEmpty(render(group));
 
-    expect(lines).toHaveLength(3);
-    expect(lines[1]?.startsWith('  ├─')).toBe(true);
-    expect(lines[1]).toContain('后台任务已启动');
-    expect(lines[2]?.startsWith('  └─')).toBe(true);
-    expect(lines[2]).toContain('Bash');
+    expect(lines).toHaveLength(4);
+    expect(lines[1]).toContain('先起一个后台任务');
+    expect(lines[2]).toContain('后台任务已启动');
+    expect(lines[3]?.startsWith('  └─')).toBe(true);
+    expect(lines[3]).toContain('Bash');
   });
 
   it('marks a background task notice with the same glyphs as a tool row', () => {
@@ -203,13 +202,12 @@ describe('ActivityGroupComponent', () => {
 
     const lines = nonEmpty(render(group));
 
-    expect(lines).toHaveLength(3);
+    expect(lines).toHaveLength(5);
     // Chronological within the row budget: reasoning above the tool it produced.
-    expect(lines[1]?.startsWith('  ├─')).toBe(true);
-    expect(lines[1]).toContain(t('activitygroup.thinking_summary', { summary: 'second run reasoning' }));
-    expect(lines[2]?.startsWith('  └─')).toBe(true);
-    expect(lines[2]).toContain('Edit');
-    expect(lines[2]).not.toContain('Bash');
+    expect(lines[3]).toContain(t('activitygroup.thinking_summary', { summary: 'second run reasoning' }));
+    expect(lines[4]?.startsWith('  └─')).toBe(true);
+    expect(lines[4]).toContain('Edit');
+    expect(lines[4]).not.toContain('Bash');
   });
 
   it('opens a new reasoning row for each run instead of merging them', () => {
@@ -482,13 +480,13 @@ describe('ActivityGroupComponent', () => {
     }
   });
 
-  it('stays three rows tall on a narrow terminal instead of wrapping', () => {
+  it('stays within the collapsed row budget on a narrow terminal instead of wrapping', () => {
     const group = makeGroup();
     group.appendThinking('a very long reasoning summary that would never fit in a narrow window', false);
 
     for (const width of [48, 60, 72]) {
       const lines = nonEmpty(render(group, width));
-      expect(lines).toHaveLength(3);
+      expect(lines).toHaveLength(4);
       for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
     }
   });
@@ -651,13 +649,13 @@ describe('ActivityGroupComponent', () => {
     expect(excerptBody.some((line) => line.includes('…'))).toBe(true);
   });
 
-  it('stays three rows tall on a very narrow terminal', () => {
+  it('stays within the collapsed row budget on a very narrow terminal', () => {
     const group = makeGroup();
     group.appendThinking('reasoning that cannot possibly fit', false);
 
     for (const width of [30, 40, 48]) {
       const lines = nonEmpty(render(group, width));
-      expect(lines).toHaveLength(3);
+      expect(lines).toHaveLength(4);
       for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
     }
   });
@@ -820,8 +818,8 @@ describe('header diff stat', () => {
     // spacer plus a bright line each); as steps of the block they cannot grow
     // past its own budget, and the newest pair is what stays on screen.
     expect(lines).toHaveLength(ACTIVITY_GROUP_COLLAPSED_LINES);
-    expect(lines[1]).toContain('f11.py');
-    expect(lines[2]).toContain('已批准 · Writing /tmp/cut/f11.py');
+    expect(lines.at(-2)).toContain('f11.py');
+    expect(lines.at(-1)).toContain('已批准 · Writing /tmp/cut/f11.py');
   });
 
   it('shows every approval once the block is expanded', () => {

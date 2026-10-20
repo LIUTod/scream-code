@@ -537,10 +537,10 @@ describe('activity block wiring', () => {
     const group = findGroup(state.transcriptContainer);
     expect(group).toBeDefined();
     // Every outcome is a step of the block: nothing became a row of its own and
-    // the collapsed height stays at the block's budget.
+    // the collapsed block is header + the six steps, inside its row budget.
     expect(notices(state)).toHaveLength(0);
     const collapsed = (group?.render(90) ?? []).filter((line) => line.trim().length > 0);
-    expect(collapsed).toHaveLength(3);
+    expect(collapsed).toHaveLength(7);
 
     transcript.toggleToolOutputExpansion();
     const expanded =
