@@ -30,7 +30,7 @@ describe('manual plan entry', () => {
 
     expect(ctx.agent.planMode.isActive).toBe(true);
     expect(ctx.agent.planMode.planFilePath).toMatch(/\.md$/);
-    expect(mkdir).toHaveBeenCalledWith('/workspace/plan', { parents: true, existOk: true });
+    expect(mkdir).toHaveBeenCalledWith('/workspace/.scream/plans', { parents: true, existOk: true });
     expect(writeText).not.toHaveBeenCalled();
     expect(ctx.allEvents.some((event) => event.event === 'turn.started')).toBe(false);
     expect(ctx.llmCalls).toHaveLength(0);
@@ -46,7 +46,7 @@ describe('manual plan entry', () => {
 
     const livePath = ctx.agent.planMode.planFilePath;
     if (livePath === null) throw new Error('expected active plan path');
-    expect(livePath).toBe('/workspace/plan/stable-plan.md');
+    expect(livePath).toBe('/workspace/.scream/plans/stable-plan.md');
 
     const enterRecord = ctx.allEvents.find(
       (event) => event.type === '[wire]' && event.event === 'plan_mode.enter',

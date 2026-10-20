@@ -162,9 +162,12 @@ export class PlanMode {
   }
 
   private planFilePathFor(id: string): string {
+    // Without a session home there is nowhere durable to put plans, but the
+    // project root is not the place for generated files: use the hidden state
+    // directory (already gitignored) instead of a visible `plan/` folder.
     const plansDir =
       this.agent.homedir === undefined
-        ? join(this.agent.config.cwd, 'plan')
+        ? join(this.agent.config.cwd, '.scream', 'plans')
         : join(this.agent.homedir, 'plans');
     return join(plansDir, `${id}.md`);
   }
