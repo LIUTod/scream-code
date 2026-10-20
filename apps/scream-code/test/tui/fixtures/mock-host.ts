@@ -105,7 +105,7 @@ export function createMockTUIState(options: { appState?: Partial<AppState> } = {
       // highlight cannot repaint over the new content.
       resetTextSelection: vi.fn(),
     },
-    terminal: { write: vi.fn(), title: undefined },
+    terminal: { write: vi.fn(), setProgress: vi.fn(), title: undefined },
     layoutRoot: { render: (): string[] => ['root'], invalidate: (): void => {} },
     transcriptContainer: new Container(),
     activityContainer: new Container(),
@@ -154,6 +154,7 @@ export function createMockTUIState(options: { appState?: Partial<AppState> } = {
     activeDialog: null as TUIState['activeDialog'],
     tasksBrowser: undefined,
     externalEditorRunning: false,
+    lastActivityAt: 0,
     queuedMessages: [] as TranscriptEntry[],
     fdPath: null,
     gitLsFilesCache: {},

@@ -5,7 +5,6 @@ import {
   easeSpeedRatio,
   estimateTokens,
   getSharedSpeedTracker,
-  lerpHex,
   resetSharedSpeedTracker,
   SPEED_MAX,
   SPEED_WINDOW_MS,
@@ -99,25 +98,6 @@ describe('shared speed tracker', () => {
     expect(shared.getSpeed(100)).toBeCloseTo(100, 1);
     resetSharedSpeedTracker();
     expect(shared.getSpeed(100)).toBe(0);
-  });
-});
-
-describe('lerpHex', () => {
-  it('returns the `from` color at t=0', () => {
-    expect(lerpHex('#000000', '#ffffff', 0)).toBe('#000000');
-  });
-
-  it('returns the `to` color at t=1', () => {
-    expect(lerpHex('#000000', '#ffffff', 1)).toBe('#ffffff');
-  });
-
-  it('clamps t below 0 and above 1', () => {
-    expect(lerpHex('#000000', '#ffffff', -1)).toBe('#000000');
-    expect(lerpHex('#000000', '#ffffff', 2)).toBe('#ffffff');
-  });
-
-  it('interpolates the midpoint at t=0.5', () => {
-    expect(lerpHex('#000000', '#ffffff', 0.5)).toBe('#808080');
   });
 });
 

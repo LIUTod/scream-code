@@ -1960,3 +1960,79 @@ describe('SessionEventHandler — structured error classification', () => {
     );
   });
 });
+/**
+ * The status-bar wave colours itself from `lastActivityAt`. These cover the
+ * writer side — without them, deleting the stamp in `handleEvent` would leave
+ * every wave test green.
+ */
+describe('liveness stamp for the status-bar wave', () => {
+  it('stamps lastActivityAt on inbound assistant traffic', () => {
+    const host = createMockHost();
+    const handler = new SessionEventHandler(host);
+    host.state.lastActivityAt = 0;
+
+    handler.handleEvent(
+      {
+        ...baseEvent('assistant.delta'),
+        turnId: 1,
+        delta: { type: 'text', text: 'Hello' },
+      } as unknown as Event,
+      vi.fn(),
+    );
+
+    expect(host.state.lastActivityAt).toBeGreaterThan(0);
+  });
+
+  it('stamps subagent traffic before it is routed away from the main pane', () => {
+    const host = createMockHost();
+    const handler = new SessionEventHandler(host);
+    host.state.lastActivityAt = 0;
+
+    handler.handleEvent(
+      {
+        ...baseEvent('thinking.delta'),
+        agentId: 'child-1',
+        turnId: 1,
+        delta: 'hmm',
+      } as unknown as Event,
+      vi.fn(),
+    );
+
+    expect(host.state.lastActivityAt).toBeGreaterThan(0);
+  });
+
+  it('does not treat turn bookkeeping as activity', () => {
+    const host = createMockHost();
+    const handler = new SessionEventHandler(host);
+    host.state.lastActivityAt = 1234;
+
+    handler.handleEvent(
+      { ...baseEvent('turn.ended'), turnId: 1, reason: 'completed' } as unknown as Event,
+      vi.fn(),
+    );
+
+    expect(host.state.lastActivityAt).toBe(1234);
+  });
+
+  it('re-anchors the wave clock when a compaction finishes mid-turn', () => {
+    const host = createMockHost();
+    (host.streamingUI.hasActiveTurn as unknown as { mockReturnValue: (v: boolean) => void })
+      .mockReturnValue(true);
+    const handler = new SessionEventHandler(host);
+    host.state.appState.isCompacting = true;
+    host.state.appState.streamingPhase = 'waiting';
+    host.state.appState.streamingStartTime = 1;
+
+    handler.handleEvent(
+      {
+        ...baseEvent('compaction.completed'),
+        result: { tokensBefore: 100, tokensAfter: 20 },
+      } as unknown as Event,
+      vi.fn(),
+    );
+
+    // A long summarisation must not leave the wave red on the first frame of
+    // the fresh request that follows it.
+    expect(host.state.appState.streamingStartTime).toBeGreaterThan(1);
+  });
+});

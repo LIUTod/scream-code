@@ -98,25 +98,6 @@ export function resetSharedSpeedTracker(): void {
 }
 
 /**
- * Linear-interpolate two `#rrggbb` colors in sRGB space. `t` clamps to [0,1]:
- * `t = 0` → `from`, `t = 1` → `to`. Drives the streaming speed badge, fading
- * from a dim gray toward the theme accent as tok/s rises.
- */
-export function lerpHex(from: string, to: string, t: number): string {
-  const k = t < 0 ? 0 : Math.min(1, t);
-  const fr = Number.parseInt(from.slice(1, 3), 16);
-  const fg = Number.parseInt(from.slice(3, 5), 16);
-  const fb = Number.parseInt(from.slice(5, 7), 16);
-  const tr = Number.parseInt(to.slice(1, 3), 16);
-  const tg = Number.parseInt(to.slice(3, 5), 16);
-  const tb = Number.parseInt(to.slice(5, 7), 16);
-  const r = Math.round(fr + (tr - fr) * k);
-  const g = Math.round(fg + (tg - fg) * k);
-  const b = Math.round(fb + (tb - fb) * k);
-  return `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1)}`;
-}
-
-/**
  * Estimate token count from a character delta. At least 1 to avoid zero-rate
  * observations when a tiny delta arrives.
  */

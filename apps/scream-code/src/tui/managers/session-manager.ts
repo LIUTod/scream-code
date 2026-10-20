@@ -541,6 +541,11 @@ export class SessionManager {
   resetSessionRuntime(): void {
     this.host.state.queuedMessages = [];
     this.host.harness.interactiveAgentId = MAIN_AGENT_ID;
+    // A switch has no turn in flight: clear the work phase and the liveness
+    // clock, otherwise the new session inherits the old one's anchors and the
+    // status-bar wave can animate a permanent stall for a session that is idle.
+    this.host.setAppState({ streamingPhase: 'idle', streamingStartTime: 0 });
+    this.host.state.lastActivityAt = 0;
     this.host.streamingUI.discardPending();
     this.host.streamingUI.resetToolCallState();
     this.host.streamingUI.resetToolUi();

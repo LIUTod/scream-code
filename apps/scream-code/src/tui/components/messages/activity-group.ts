@@ -40,10 +40,10 @@ import type { BackgroundAgentStatusData } from '#/tui/types';
 import type { ApprovalNoticeTone } from '#/tui/utils/approval-notice';
 import { DONE_MARK, STATUS_BULLET } from '#/tui/constant/symbols';
 import type { ColorPalette } from '#/tui/theme/colors';
+import { lerpHex } from '#/tui/utils/gradient';
 import {
   easeSpeedRatio,
   getSharedSpeedTracker,
-  lerpHex,
   SPEED_MAX,
 } from '#/tui/utils/speed-tracker';
 

@@ -27,3 +27,21 @@ export function lerpGradient(t: number): string {
   const b = Math.round(b0 + (b1 - b0) * localT);
   return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
 }
+
+/**
+ * Linear blend between two explicit `#rrggbb` colours at t ∈ [0,1] (clamped).
+ *
+ * `lerpGradient` above walks a fixed brand cycle that never touches red. This
+ * takes both endpoints instead, so callers can ramp between semantic tokens:
+ * the status-bar wave walks green → amber → red, and the speed badge fades a
+ * dim grey toward the theme accent.
+ */
+export function lerpHex(from: string, to: string, t: number): string {
+  const k = t < 0 ? 0 : Math.min(1, t);
+  const [fr, fg, fb] = hexToRgb(from);
+  const [tr, tg, tb] = hexToRgb(to);
+  const r = Math.round(fr + (tr - fr) * k);
+  const g = Math.round(fg + (tg - fg) * k);
+  const b = Math.round(fb + (tb - fb) * k);
+  return `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1)}`;
+}

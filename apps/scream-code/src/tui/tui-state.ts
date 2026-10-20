@@ -92,6 +92,14 @@ export interface TUIState {
   activeDialog: 'session-picker' | 'memory-picker' | 'help' | 'hotkeys' | 'overlay' | null;
   tasksBrowser: TasksBrowserState | undefined;
   externalEditorRunning: boolean;
+  /**
+   * Wall-clock time of the last inbound stream event (assistant text,
+   * reasoning, or tool traffic). The status-bar wave reads it to colour a
+   * silent stream — a reasoning phase that stopped receiving tokens — so it
+   * is stamped without going through `setAppState`, which would re-render the
+   * footer on every delta.
+   */
+  lastActivityAt: number;
   queuedMessages: QueuedMessage[];
   fdPath: string | null;
   gitLsFilesCache: GitLsFilesCache;
@@ -277,6 +285,7 @@ export function createTUIState(options: ScreamTUIOptions): TUIState {
     activeDialog: null,
     tasksBrowser: undefined,
     externalEditorRunning: false,
+    lastActivityAt: 0,
     queuedMessages: [],
     fdPath: detectFdPath(),
     gitLsFilesCache: createGitLsFilesCache(initialAppState.workDir),

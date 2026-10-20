@@ -34,7 +34,9 @@ export class PulseWaveLoader extends Text {
   private currentFrame = 0;
   private intervalId: ReturnType<typeof setTimeout> | null = null;
   private ui: TUI;
-  private colorHex: string;
+  /** Resolved on every frame so a theme switch lands immediately and the
+   *  first-token ramp can advance without rebuilding the status bar. */
+  private readonly resolveColor: () => string;
   /** Wall-clock time of the last frame advance, for drift-free scheduling. */
   private lastTickAt = 0;
   /** Raw frame text without Text's full-width render padding, exposed so
@@ -47,10 +49,10 @@ export class PulseWaveLoader extends Text {
     return this.frameText;
   }
 
-  constructor(ui: TUI, colorHex: string) {
+  constructor(ui: TUI, resolveColor: () => string) {
     super('', 1, 0);
     this.ui = ui;
-    this.colorHex = colorHex;
+    this.resolveColor = resolveColor;
     this.start();
   }
 
@@ -65,6 +67,13 @@ export class PulseWaveLoader extends Text {
       clearTimeout(this.intervalId);
       this.intervalId = null;
     }
+  }
+
+  /** Re-resolve the colour and repaint now. The cached frame text still carries
+   *  the previous colour, and the next scheduled tick can be up to 80ms away —
+   *  a palette swapped in place should land on the frame that follows it. */
+  repaint(): void {
+    this.updateDisplay();
   }
 
   dispose(): void {
@@ -97,17 +106,13 @@ export class PulseWaveLoader extends Text {
     this.intervalId = timer;
   }
 
-  setColorHex(colorHex: string): void {
-    this.colorHex = colorHex;
-    this.updateDisplay();
-  }
-
   private updateDisplay(): void {
     // The frame list is statically generated (non-empty); the fallback is a
     // safety net for out-of-range indices only.
     const step = PULSE_WAVE_FRAMES[this.currentFrame] ?? PULSE_WAVE_FRAMES[0]!;
+    const color = this.resolveColor();
     const cells = Array.from({ length: PULSE_WAVE_CELLS }, (_, idx) =>
-      this.renderCell(idx, step.active, step.forward),
+      this.renderCell(idx, step.active, step.forward, color),
     );
     // Boxes are glued together (no separators) per the approved design.
     this.frameText = cells.join('');
@@ -118,10 +123,10 @@ export class PulseWaveLoader extends Text {
     this.ui.requestRender();
   }
 
-  private renderCell(index: number, active: number, forward: boolean): string {
+  private renderCell(index: number, active: number, forward: boolean, color: string): string {
     const distance = forward ? active - index : index - active;
-    if (distance === 0) return chalk.hex(this.colorHex)(LEADING_BOX);
-    if (distance === 1) return chalk.hex(this.colorHex).dim(LEADING_BOX);
+    if (distance === 0) return chalk.hex(color)(LEADING_BOX);
+    if (distance === 1) return chalk.hex(color).dim(LEADING_BOX);
     // Rest of the stage: muted middle dots (Latin-1, width-safe).
     return chalk.dim('·');
   }

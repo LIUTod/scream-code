@@ -30,6 +30,7 @@ import { isDeadTerminalError } from '../utils/dead-terminal';
 import { isStreaming } from '../utils/app-state';
 import { installTerminalFocusTracking } from '../utils/terminal-focus';
 import { installTerminalThemeTracking } from '../utils/terminal-theme';
+import { resolveWaveColor, WAVE_AMBER_AT_MS } from '../utils/wave-color';
 import { PulseWaveLoader } from '../components/chrome/pulse-wave-loader';
 import { type ActivityPaneMode } from '../components/panes/activity-pane';
 import chalk from 'chalk';
@@ -108,7 +109,7 @@ export class LifecycleController {
   private lastReconnectAttempt = 0;
   /** The active status-bar loader (PulseWaveLoader or MoonLoader). Owned by
    * this controller; stopped before replacement to avoid leaking timers. */
-  private statusBarLoader: { stop(): void } | undefined;
+  private statusBarLoader: PulseWaveLoader | undefined;
   /** Sum all four token buckets into the session's total token consumption. */
   private static sumTokens(usage: TokenUsage): number {
     return usage.inputOther + usage.inputCacheRead + usage.inputCacheCreation + usage.output;
@@ -584,6 +585,9 @@ export class LifecycleController {
     state.theme.resolvedTheme = nextTheme.resolvedTheme;
     state.theme.styles = nextTheme.styles;
     state.theme.markdownTheme = nextTheme.markdownTheme;
+    // The palette is mutated in place, so the wave's cached frame still holds
+    // the old colour; repaint it before the triggered render.
+    this.statusBarLoader?.repaint();
     this.host.setAppState({ theme });
     this.host.updateEditorBorderHighlight();
     for (const child of state.transcriptContainer.children) {
@@ -661,7 +665,7 @@ export class LifecycleController {
         // dialog replaces the root and restores it); the MoonLoader animation did
         // not survive that restore, so a single wave is used everywhere.
         {
-          const loader = new PulseWaveLoader(state.ui, state.theme.colors.primary);
+          const loader = new PulseWaveLoader(state.ui, () => this.currentWaveColor());
           this.statusBarLoader = loader;
           state.statusBarContainer.addChild(
             new StatusBarPaneComponent({
@@ -794,6 +798,40 @@ export class LifecycleController {
     if (this.host.state.terminalState.progressActive === active) return;
     this.host.state.terminal.setProgress(active);
     this.host.state.terminalState.progressActive = active;
+  }
+
+  /**
+   * Colour for the status-bar pulse wave.
+   *
+   * Measures silence in whatever the agent is doing: a request awaiting its
+   * first token, a reasoning/text stream that stopped delivering, or a tool
+   * that has been running without emitting progress. Red is an early warning
+   * only — it never triggers a retry, because retries are driven by real
+   * transport errors (the 60s stall timeout, disconnects, rate limits).
+   *
+   * Resolved per frame, so the ramp advances and a live theme switch applies
+   * without rebuilding the status bar.
+   */
+  private currentWaveColor(): string {
+    const { appState, theme, lastActivityAt } = this.host.state;
+    const colors = theme.colors;
+    const { streamingPhase, streamingStartTime, reconnectAttempt } = appState;
+    if (streamingPhase === 'idle') return colors.primary;
+    // Anchor to whichever anchor is newer. `waiting` usually has no traffic
+    // yet, so this resolves to the request itself; when an inbound notice does
+    // arrive mid-wait (a background task finishing, an empty-id tool delta)
+    // the clock resets like it does in every other phase.
+    const anchor = Math.max(lastActivityAt, streamingStartTime);
+    if (anchor === 0) return colors.primary;
+    const elapsed = Date.now() - anchor;
+    // A retry is a known failure, not normal silence: floor the ramp at amber
+    // so the wave never reads "healthy" while the status bar says "reconnecting".
+    const effective = reconnectAttempt > 0 ? Math.max(elapsed, WAVE_AMBER_AT_MS) : elapsed;
+    return resolveWaveColor(effective, {
+      green: colors.primary,
+      amber: colors.warning,
+      red: colors.error,
+    });
   }
 
   private stopActivitySpinner(): void {

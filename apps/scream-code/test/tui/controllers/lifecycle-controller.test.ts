@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import chalk from 'chalk';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { LifecycleController, reconnectReasonKey } from '#/tui/controllers/lifecycle-controller';
 import {
@@ -481,5 +482,105 @@ describe('LifecycleController — reconnect reason wording', () => {
     expect(reasonKeyFor({ reconnectStatusCode: 429 })).toBe('status.reason_rate_limit');
     expect(reasonKeyFor({ reconnectStatusCode: 500 })).toBe('status.reason_server');
     expect(reasonKeyFor({})).toBe('status.reason_connection');
+  });
+});
+/**
+ * The status-bar wave reports silence: it ramps while the agent is working but
+ * not receiving anything, whatever the phase. These tests drive the real
+ * controller so the anchor choice and the palette lookup are both covered
+ * (dark theme here — the ramp itself is unit-tested).
+ */
+describe('status-bar wave colour', () => {
+  const originalLevel = chalk.level;
+
+  /** SGR prefix chalk emits for a hex colour at level 3. */
+  const sgr = (hex: string): string => {
+    const value = Number.parseInt(hex.slice(1), 16);
+    return `38;2;${(value >> 16) & 255};${(value >> 8) & 255};${value & 255}`;
+  };
+
+  beforeEach(() => {
+    // Every working phase mounts a self-rescheduling 80 ms timer. Fake timers
+    // keep those chains from leaking repaints into later tests.
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    chalk.level = originalLevel;
+  });
+
+  function renderWave(appState: Partial<AppState>, lastActivityAgoMs = 0): string {
+    chalk.level = 3; // non-TTY test env strips ANSI otherwise
+    const state = createMockTUIState({ appState });
+    state.lastActivityAt = lastActivityAgoMs === 0 ? 0 : Date.now() - lastActivityAgoMs;
+    const controller = new LifecycleController(createMockHost({ state }));
+    controller.updateActivityPane();
+    return state.statusBarContainer.render(80).join('\n');
+  }
+
+  it('keeps the brand colour while the first token is still expected', () => {
+    const line = renderWave({
+      streamingPhase: 'waiting',
+      streamingStartTime: Date.now() - 2_000,
+    });
+    expect(line).toContain(sgr('#79eb00'));
+  });
+
+  it('turns red once the first-token wait passes 25s', () => {
+    const line = renderWave({
+      streamingPhase: 'waiting',
+      streamingStartTime: Date.now() - 40_000,
+    });
+    expect(line).toContain(sgr('#E85454'));
+  });
+
+  it('stays green while reasoning tokens keep arriving', () => {
+    const line = renderWave(
+      { streamingPhase: 'thinking', streamingStartTime: Date.now() - 120_000 },
+      1_000,
+    );
+    expect(line).toContain(sgr('#79eb00'));
+  });
+
+  it('turns red when the reasoning stream goes silent', () => {
+    const line = renderWave(
+      { streamingPhase: 'thinking', streamingStartTime: Date.now() - 120_000 },
+      40_000,
+    );
+    expect(line).toContain(sgr('#E85454'));
+  });
+
+  it('turns red when a tool runs without progress past 25s', () => {
+    const line = renderWave({
+      streamingPhase: 'tool',
+      streamingStartTime: Date.now() - 120_000,
+    });
+    expect(line).toContain(sgr('#E85454'));
+  });
+
+  it('keeps the brand colour right after a tool event', () => {
+    const line = renderWave(
+      { streamingPhase: 'tool', streamingStartTime: Date.now() - 120_000 },
+      1_000,
+    );
+    expect(line).toContain(sgr('#79eb00'));
+  });
+
+  it('resets the clock when an inbound notice arrives mid-wait', () => {
+    const line = renderWave(
+      { streamingPhase: 'waiting', streamingStartTime: Date.now() - 120_000 },
+      1_000,
+    );
+    expect(line).toContain(sgr('#79eb00'));
+  });
+
+  it('floors the wave at amber while a retry is in flight', () => {
+    const line = renderWave({
+      streamingPhase: 'waiting',
+      streamingStartTime: Date.now() - 2_000,
+      reconnectAttempt: 1,
+    });
+    expect(line).toContain(sgr('#E8A838'));
   });
 });

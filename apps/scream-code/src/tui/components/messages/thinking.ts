@@ -19,7 +19,8 @@ import {
 import { STATUS_BULLET } from '#/tui/constant/symbols';
 import type { ColorPalette } from '#/tui/theme/colors';
 import { isRenderCacheEnabled } from '#/tui/utils/render-cache';
-import { easeSpeedRatio, getSharedSpeedTracker, lerpHex, SPEED_MAX } from '#/tui/utils/speed-tracker';
+import { lerpHex } from '#/tui/utils/gradient';
+import { easeSpeedRatio, getSharedSpeedTracker, SPEED_MAX } from '#/tui/utils/speed-tracker';
 
 /** gpt-5 reasoning summaries contain empty HTML comment padding sentinels
  * like `<!-- -->`. Strip them to keep the thinking display clean. */

@@ -100,6 +100,20 @@ import type {
 import { normalizeGoalStatus } from '../types';
 import type { TUIState } from '../tui-state';
 
+/**
+ * Inbound events that prove the stream is still delivering. `TUIState.lastActivityAt`
+ * is stamped from this set so the status-bar wave can colour a stream that went
+ * silent mid-reasoning — before the 60s transport-level stall timeout fires.
+ */
+const ACTIVITY_EVENT_TYPES: ReadonlySet<Event['type']> = new Set([
+  'assistant.delta',
+  'thinking.delta',
+  'tool.call.started',
+  'tool.call.delta',
+  'tool.progress',
+  'tool.result',
+]);
+
 function addTokenUsage(a: TokenUsage, b: TokenUsage): TokenUsage {
   return {
     inputOther: a.inputOther + b.inputOther,
@@ -335,6 +349,15 @@ export class SessionEventHandler {
   }
 
   handleEvent(event: Event, sendQueued: (item: QueuedMessage) => void): void {
+    // Stamp the liveness clock before anything routes the event away: child
+    // agent deltas are inbound traffic too, and a healthy subagent run must
+    // not read as a stalled parent. Written directly rather than through
+    // setAppState — this runs on every delta, and a full state patch would
+    // re-render the footer once per token for a value only the wave reads.
+    if (ACTIVITY_EVENT_TYPES.has(event.type)) {
+      this.host.state.lastActivityAt = Date.now();
+    }
+
     if (this.routeSubagentEvent(event)) return;
 
     if ('turnId' in event && event.turnId !== undefined) {
@@ -1479,7 +1502,10 @@ export class SessionEventHandler {
         }, 0);
       }
     } else {
-      this.host.setAppState({ isCompacting: false });
+      // Compaction ran as `waiting` and stamped the clock when it STARTED.
+      // Re-anchor on completion, otherwise a slow summarisation leaves the
+      // wave red on the first visible frame of the fresh request.
+      this.host.setAppState({ isCompacting: false, streamingStartTime: Date.now() });
     }
   }
 

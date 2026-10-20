@@ -782,9 +782,16 @@ describe('SessionManager session swap / reset bookkeeping', () => {
     (state.queuedMessages as unknown[]).push({ text: 'stale' });
     harness.interactiveAgentId = 'worker-3';
     host.streamingUI.resetToolCallState = vi.fn();
+    // A session left mid-turn must not carry its work phase across the switch.
+    state.appState.streamingPhase = 'tool';
+    state.appState.streamingStartTime = Date.now() - 60_000;
+    state.lastActivityAt = Date.now() - 60_000;
 
     manager.resetSessionRuntime();
 
+    expect(state.appState.streamingPhase).toBe('idle');
+    expect(state.appState.streamingStartTime).toBe(0);
+    expect(state.lastActivityAt).toBe(0);
     expect(state.queuedMessages.length).toBe(0);
     expect(harness.interactiveAgentId).toBe(MAIN_AGENT_ID);
     expect(host.streamingUI.discardPending).toHaveBeenCalled();
