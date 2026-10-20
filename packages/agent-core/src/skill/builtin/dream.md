@@ -1,73 +1,141 @@
 ---
 name: dream
-description: 整理记忆库 — 合并重复、解决矛盾、清理过时条目
+description: 整理记忆库 — 把经历归纳成可复用的规则
 ---
 
-# Dream: 记忆合并整理
+# 归纳记忆：把经历变成规则
 
-用户调用了 `/dream`。你要对全局记忆库进行一次完整的整理和清理。
+用户调用了 `/dream`。你的任务不是清理垃圾，而是**把一次次的经历归纳成规则**。
 
-记忆库是**全局**的，所有会话的记忆都保存在同一个 SQLite 数据库里（`<screamHomeDir>/memory/memos.sqlite`），不是按会话分散存放。
+记忆库是**全局**的，所有会话的备忘（memo）都在同一个 SQLite 数据库里（`<screamHomeDir>/memory/memos.sqlite`）。
 
-## 前置检查
+- **备忘录（memo）**是原料：一次任务一条，人查、可注入。
+- **巩固卡（digest）**是产品：一个主题一张，一句话结论 + 证据 + 时间戳。
 
-1. 调用 `MemoryConsolidatePlan` 工具获取整理计划。
-   - 如果返回"记忆库为空"，告知用户"记忆库为空，无需整理"并停止。
-   - 否则你会得到一个 JSON 计划，包含：duplicateGroups（重复组）、resolved（已完成条目）、stale（过时条目）、summary（统计）。
+`/dream` 的完整链路是：**先计划 → 用户确认 → 你亲自写卡 → 落卡**。任何一步都不能跳过。
 
-2. 不要直接修改记忆文件。所有删除和写入都通过 `MemoryConsolidateApply` 工具完成。
+## 第一步：取计划
 
-## 整理计划展示
+调用 `MemoryConsolidatePlan`。返回 JSON 包含：
 
-把计划转换成用户可读的格式：
+- `clusters`：主题簇。每簇有 `id`、`topicHint`（共同关键词）、`memoIds`、`sample`（至多 3 条原文摘要）、`recordedFrom` / `recordedTo`（**整簇**证据的最早/最晚时间）、`kindGuess`。
+- `existingDigests`：已有的卡（`id` / `topic` / `kind`），用于判断是新建还是更新。
+- `maintenance`：待维护数量（`expiredDigested` 宽限期已过的原料、`expiredEpisodic` 过期流水账、`overCap` 超上限、`dormant` 待休眠的卡）。
+- `summary`：`totalMemos` / `clusters` / `estimatedLlmCalls`。
+
+规则：
+
+- `summary.totalMemos === 0` → 回复"记忆库为空，无需整理"并结束。
+- `clusters` 为空 → 说明最近没有可归纳的重复经历，不要硬凑；但若 `maintenance` 里还有待处理项（`expiredDigested` / `expiredEpisodic` / `overCap` / `dormant`），仍应调用 `MemoryConsolidateApply` 并传 `{ "clusters": [] }`，让清理和休眠生效。
+- `summary.estimatedLlmCalls > 30` → 先告诉用户这次归纳的规模，等确认后再继续。
+
+## 第二步：展示计划（主题卡预览）
+
+只展示**主题**，不要罗列原始 memo。每簇一行：
 
 ```
-## Dream 整理计划
+## Dream 归纳计划
 
 ### 概况
-- 当前共 X 条记忆
-- 重复组：N 组
-- 建议删除：M 条（已完成 + 过时）
-- 整理后预计：Y 条
+- 活跃备忘：X 条
+- 可归纳主题：N 个
+- 已有巩固卡：M 张
 
-### 重复合并（N 组）
-**组 1: 修复登录 token 刷新**
-- memo-abc123 (2026-05-01, 完成) — "登录页 token 过期需要手动刷新"
-- memo-def456 (2026-05-10, 完成) — "登录 token 过期问题修复"
-→ 合并为: "修复登录页 token 过期问题。方案: 在 axios 拦截器中添加自动 refresh 逻辑..."
-  结果: 完成
+### 主题预览
+1. <topicHint> — 证据 4 条 · 2026-08-02 ~ 2026-09-18 · 建议 kind: procedure
+2. <topicHint> — 证据 2 条 · 2026-09-01 ~ 2026-09-05 · 建议 kind: pitfall
 
-### 建议删除（M 条）
-- memo-xyz789: "添加暗色模式" (完成, 2026-04-01) — 已完成超过 2 个月
-- memo-old001: "尝试某方案" (放弃, 2026-03-01) — 过时
-
-### 总结
-- 合并: N 组 → 减少 X 条
-- 删除: M 条
-- 整理后: 共 Y 条记忆
+### 维护
+- 宽限期已过、将删除的原料：A 条
+- 过期流水账：B 条
+- 超上限淘汰：C 条
+- 转休眠的卡：D 张
 ```
 
-用 AskUserQuestion 让用户选择：
-- "执行整理" — 按上述计划执行
-- "仅显示计划" — 不做修改，直接结束
-- "取消"
+时间范围必须取该簇的 `recordedFrom` / `recordedTo`（整簇范围），**不要**用 `sample[].recordedAt` 计算——sample 只有最新 3 条，会低估范围。格式 `YYYY-MM-DD`。说明："原料不会被立刻删除；归纳成功后会保留 14 天，可用卡片的 digest id 回滚。"
 
-## 执行整理
+用 `AskUserQuestion` 让用户选择：
 
-如果用户选择"执行整理"：
+- `执行归纳` — 你写卡并落库
+- `仅看计划` — 不做任何修改，直接结束
+- `取消` — 结束
 
-1. 直接把 `MemoryConsolidatePlan` 返回的完整 JSON 计划作为参数，调用 `MemoryConsolidateApply`。
-2. 工具会自动完成以下操作：
-   - 删除重复组中的原记忆
-   - 为每组重复记忆追加一条合并后的新记忆（字段格式由工具保证正确）
-   - 删除已完成和过时的记忆
-   - 更新 `dream-lock.json`，重置建议计数器
-3. 向用户报告工具返回的结果："已删除 X 条，创建 Y 条合并记忆。记忆库整理完成。"
+## 第三步：自己写卡（你是 LLM）
 
-## 重要规则
+用户选择 `执行归纳` 后，**逐簇写 digest**。这是整个流程的核心，不要偷懒交给工具：
 
-- **仅合并高度重复的记忆**。只有当两条记忆描述的是同一件事、同一个问题、同一个修复方案时才可合并。如果只是主题相关但细节不同（如两个不同的 bug、两个不同的优化方向），**绝对不能合并**。宁可多保留十条，不可误删一条。
-- 如果 `MemoryConsolidatePlan` 标记的某组重复实际上并不是同一件事，在展示计划时把它从"重复合并"里去掉，只保留你确信重复的组，再把精简后的计划传给 `MemoryConsolidateApply`。
-- 不确定时保留原文，不要猜测删除。
-- 操作前必须得到用户确认，不能擅自执行。
-- 不要手动写 Bash 去修改 `entries.jsonl`，统一通过 `MemoryConsolidateApply` 工具执行。
+对每个簇：
+
+1. 读该簇的 `sample`（原文摘要），判断这些经历共同指向什么规则。
+2. 写 `topic`：一个稳定的主题名，同一个主题必须**每次写成同样的字符串**（否则会新建重复卡）。优先复用 `existingDigests` 里已有的 topic。
+3. 写 `statement`：**一句话结论**，是能直接照着做的规则，不是任务复述。控制在 60 字以内。
+4. 写 `kind`：
+   - `fact` — 环境/代码库的客观事实
+   - `procedure` — 可复用的做法或流程
+   - `pitfall` — 踩过的坑、必须避免的做法
+   - `preference` — 用户的偏好（通常走 `/like` 通道，这里只归档）
+5. 写 `confidence`：`high`（多次验证/明确结果）、`medium`、`low`（单次、结果含糊）。
+6. 写 `evidenceIds`：**只能**取该簇 `memoIds` 里的 id，且只放真正支撑这句话的那些。**绝不能编造 id，也不能引用别的簇的 id。**
+
+无法从样本里归纳出可靠规则的簇：**直接跳过**，不要为了凑数写空话。
+
+最终交给 `MemoryConsolidateApply` 的参数形如：
+
+```json
+{
+  "clusters": [
+    {
+      "memoIds": ["memo-abc", "memo-def"],
+      "digest": {
+        "topic": "pnpm workspace 发布流程",
+        "kind": "procedure",
+        "statement": "发版前先跑 pnpm -r build，再用 changeset 生成版本号，最后统一推送。",
+        "confidence": "high",
+        "evidenceIds": ["memo-abc", "memo-def"]
+      }
+    }
+  ]
+}
+```
+
+- `memoIds`：该簇的全部 id（这些都会被折叠进这张卡）。
+- `evidenceIds`：其中真正被引用到的 id，必须 ⊆ `memoIds`。越界会整批被拒绝，一卡不落。
+
+## 第四步：执行并报告
+
+调用 `MemoryConsolidateApply`，参数就是上面自写的 `{ clusters }`。
+
+工具会做这些事（你不需要也不允许手动改库）：
+
+- 同 topic 的卡：更新结论、`updatedAt`、`lastConfirmedAt`；旧结论进 `superseded`。结论没变则只刷新确认时间。
+- 新 topic：新建巩固卡，`evidence_from/to` 取证据时间范围。
+- 成功折叠的 memo：标为 `digested`，**保留 14 天**后才物理删除。
+- 维护：删除宽限期已过的原料、清理 90 天未命中的流水账、超过 200 张的卡按"休眠优先 → 最久未命中 → 命中最少"淘汰、180 天未确认且从未命中的卡转 `dormant`。
+
+拿到结果后，用四行数字报告：
+
+```
+新增卡 X / 更新卡 Y / 归档原料 Z / 淘汰卡 W
+当前：备忘 N 条，巩固卡 M 张
+```
+
+其中 `created` → 新增卡，`updated` → 更新卡，`archived` → 归档原料，`evicted` → 淘汰卡。若 `deletedExpired` / `deletedStale` / `dormant` / `restored` 不为 0，另起一行说明。同时给出本次涉及的 digest id（可省略前缀），并注明：**14 天内可用 `MemoryConsolidateApply` 传 `undoDigestId` 回滚**。
+
+## 附：回滚
+
+用户说"撤销刚才的归纳"时，调用 `MemoryConsolidateApply`：
+
+```json
+{ "clusters": [], "undoDigestId": "digest-xxxx" }
+```
+
+工具会恢复该卡覆盖的 memo 并删除卡片；超过 14 天宽限期的原料已被物理删除，无法恢复，要如实告知。
+
+## 硬性规则
+
+- **只归档成功折叠的 memo**。没有产出卡的簇，其 memo 一条都不能动。
+- **删除的顺序不能颠倒**：先提炼进卡，再标 `digested`，宽限期结束才物理删除。未折叠的流水账仍会在 **90 天未被命中**后过期（这是设计内的清理，不是归纳造成的）。
+- **绝不编造 evidence id**，也不能跨簇引用。`evidenceIds ⊆ memoIds`，否则整批拒绝。
+- **不写空话**。归纳不出规则就跳过，宁可少一张卡，不可多一条噪音。
+- **不手改数据库**。不要用 Bash / 编辑工具直接动 `memos.sqlite` 或 `entries.jsonl`，一切通过 `MemoryConsolidateApply`。
+- **操作前必须得到用户确认**，不能擅自执行。

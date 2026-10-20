@@ -3,7 +3,15 @@ import { mkdir, readdir, rename, rmdir, stat, unlink, writeFile } from 'node:fs/
 import { DatabaseSync } from 'node:sqlite';
 import { dirname, join } from 'pathe';
 
-import type { MemoryMemo, MemoryMemoListResult } from './models.js';
+import type {
+  DigestEvidence,
+  DigestKind,
+  DigestStatus,
+  MemoryDigest,
+  MemoryMemo,
+  MemoryMemoListResult,
+  SupersededStatement,
+} from './models.js';
 import { toSummary } from './models.js';
 import { buildEmbeddingText, EMBEDDING_MODEL_NAME, type EmbeddingEngine } from './embeddings.js';
 
@@ -201,7 +209,7 @@ export class MemoryMemoStore {
    */
   async search(
     query: string,
-    options?: { candidateLimit?: number; projectDir?: string },
+    options?: { candidateLimit?: number; projectDir?: string; includeDigested?: boolean },
   ): Promise<MemoryMemo[]> {
     await this.init();
     if (this.db === undefined) return [];
@@ -209,18 +217,22 @@ export class MemoryMemoStore {
     if (ftsQuery === undefined) return [];
     const limit = options?.candidateLimit ?? 200;
     const projectDir = options?.projectDir;
+    // Filter status inside SQL: the cap below is applied to the match set, so
+    // filtering afterwards could hide matching active memos behind digested
+    // ones.
+    const statusClause = options?.includeDigested === true ? '' : " AND m.status = 'active'";
     const stmt =
       projectDir === undefined
         ? this.db.prepare(
             `SELECT m.* FROM memos m
          JOIN memos_fts f ON m.rowid = f.rowid
-         WHERE f.memos_fts MATCH ?
+         WHERE f.memos_fts MATCH ?${statusClause}
          ORDER BY m.recorded_at DESC LIMIT ?`,
           )
         : this.db.prepare(
             `SELECT m.* FROM memos m
          JOIN memos_fts f ON m.rowid = f.rowid
-         WHERE f.memos_fts MATCH ? AND (m.project_dir = ? OR m.project_dir = '')
+         WHERE f.memos_fts MATCH ? AND (m.project_dir = ? OR m.project_dir = '')${statusClause}
          ORDER BY m.recorded_at DESC LIMIT ?`,
           );
     const rows = (
@@ -235,6 +247,8 @@ export class MemoryMemoStore {
     limit?: number;
     offset?: number;
     projectDir?: string;
+    /** Include memos already folded into a digest (default false). */
+    includeDigested?: boolean;
   }): Promise<MemoryMemoListResult> {
     await this.init();
     if (this.db === undefined) return { memos: [], total: 0 };
@@ -243,9 +257,12 @@ export class MemoryMemoStore {
     const limit = options?.limit ?? 50;
     const offset = options?.offset ?? 0;
     const projectDir = options?.projectDir;
+    const includeDigested = options?.includeDigested ?? false;
+    const keepStatus = (memo: MemoryMemo): boolean =>
+      includeDigested || (memo.status ?? 'active') === 'active';
 
     if (search !== undefined && search.length > 0) {
-      let candidates = await this.search(search, { projectDir });
+      let candidates = await this.search(search, { projectDir, includeDigested });
       // Preserve the pre-SQLite behavior: keyword search is intersected with a
       // substring filter so the exact query string must appear somewhere in the
       // memo text.
@@ -256,12 +273,12 @@ export class MemoryMemoStore {
           candidates.push(memo);
         }
       }
-      const filtered = candidates.filter((memo) => memoMatchesSearch(memo, search));
+      const filtered = candidates.filter(keepStatus).filter((memo) => memoMatchesSearch(memo, search));
       const total = filtered.length;
       return { memos: filtered.slice(offset, offset + limit).map(toSummary), total };
     }
 
-    const { rows, total } = this.listAll(limit, offset, projectDir);
+    const { rows, total } = this.listAll(limit, offset, projectDir, includeDigested);
     return { memos: rows.map(toSummary), total };
   }
 
@@ -430,6 +447,35 @@ export class MemoryMemoStore {
       );
 
       CREATE INDEX IF NOT EXISTS idx_memory_embeddings_created_at ON memory_embeddings(created_at DESC);
+
+      CREATE TABLE IF NOT EXISTS memory_digests (
+        id TEXT PRIMARY KEY,
+        topic TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        statement TEXT NOT NULL,
+        applies_to TEXT,
+        confidence TEXT NOT NULL,
+        evidence_json TEXT NOT NULL DEFAULT '[]',
+        evidence_from INTEGER NOT NULL DEFAULT 0,
+        evidence_to INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        last_confirmed_at INTEGER NOT NULL,
+        last_hit_at INTEGER,
+        hit_count INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'active',
+        superseded_json TEXT
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_memory_digests_status
+        ON memory_digests(status, last_confirmed_at DESC);
+
+      CREATE TABLE IF NOT EXISTS memory_digest_embeddings (
+        digest_id TEXT PRIMARY KEY REFERENCES memory_digests(id) ON DELETE CASCADE,
+        embedding_json TEXT NOT NULL,
+        model TEXT NOT NULL DEFAULT '${EMBEDDING_MODEL_NAME}',
+        created_at INTEGER NOT NULL
+      );
     `);
     this.migrateSchema();
   }
@@ -450,10 +496,28 @@ export class MemoryMemoStore {
     if (!hasTags) {
       this.db.exec("ALTER TABLE memos ADD COLUMN tags TEXT NOT NULL DEFAULT '[]'");
     }
+    if (!info.some((col) => col.name === 'status')) {
+      this.db.exec("ALTER TABLE memos ADD COLUMN status TEXT NOT NULL DEFAULT 'active'");
+    }
+    if (!info.some((col) => col.name === 'kind')) {
+      this.db.exec('ALTER TABLE memos ADD COLUMN kind TEXT');
+    }
+    if (!info.some((col) => col.name === 'digested_at')) {
+      this.db.exec('ALTER TABLE memos ADD COLUMN digested_at INTEGER');
+    }
+    if (!info.some((col) => col.name === 'digest_id')) {
+      this.db.exec('ALTER TABLE memos ADD COLUMN digest_id TEXT');
+    }
+    if (!info.some((col) => col.name === 'last_hit_at')) {
+      this.db.exec('ALTER TABLE memos ADD COLUMN last_hit_at INTEGER');
+    }
     // Ensure indexes exist even for databases created before these indexes were added.
     this.db.exec(`
       CREATE INDEX IF NOT EXISTS idx_memos_project_dir ON memos(project_dir);
+      CREATE INDEX IF NOT EXISTS idx_memos_status ON memos(status, last_hit_at);
       CREATE INDEX IF NOT EXISTS idx_memory_embeddings_created_at ON memory_embeddings(created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_memory_digests_status
+        ON memory_digests(status, last_confirmed_at DESC);
     `);
   }
 
@@ -711,6 +775,354 @@ export class MemoryMemoStore {
       throw new Error('Failed to delete memo');
     }
   }
+
+  // ── /dream lifecycle ──────────────────────────────────────────────────────
+
+  /**
+   * Fold memos into a digest. They stay readable (and restorable) until the
+   * grace window ends, then get physically deleted.
+   */
+  async markMemosDigested(ids: string[], digestId: string, at = Date.now()): Promise<number> {
+    if (ids.length === 0) return 0;
+    return this.withWriteLock(async () => {
+      await this.init();
+      if (this.db === undefined) return 0;
+      const stmt = this.db.prepare(
+        "UPDATE memos SET status = 'digested', digested_at = ?, digest_id = ? WHERE id = ? AND status = 'active'",
+      );
+      this.db.exec('BEGIN TRANSACTION');
+      try {
+        let changed = 0;
+        for (const id of ids) {
+          if (stmt.run(at, digestId, id).changes > 0) changed += 1;
+        }
+        this.db.exec('COMMIT');
+        return changed;
+      } catch {
+        this.db.exec('ROLLBACK');
+        throw new Error('Failed to mark memos as digested');
+      }
+    });
+  }
+
+  /** Undo a digest: bring its evidence memos back before the grace window ends. */
+  async restoreMemosFromDigest(digestId: string): Promise<number> {
+    return this.withWriteLock(async () => {
+      await this.init();
+      if (this.db === undefined) return 0;
+      const result = this.db
+        .prepare(
+          "UPDATE memos SET status = 'active', digested_at = NULL, digest_id = NULL WHERE digest_id = ? AND status = 'digested'",
+        )
+        .run(digestId);
+      return Number(result.changes);
+    });
+  }
+
+  /** Physically delete digested memos whose grace window has passed. */
+  async deleteDigestedBefore(cutoff: number): Promise<number> {
+    return this.withWriteLock(async () => {
+      await this.init();
+      if (this.db === undefined) return 0;
+      const rows = this.db
+        .prepare(
+          "SELECT id FROM memos WHERE status = 'digested' AND digested_at IS NOT NULL AND digested_at < ?",
+        )
+        .all(cutoff) as Array<{ id: string }>;
+      return this.deleteRowsInternal(rows.map((row) => row.id));
+    });
+  }
+
+  /** Physically delete ephemeral memos that nothing has touched since the cutoff. */
+  async deleteStaleEpisodicBefore(cutoff: number): Promise<number> {
+    return this.withWriteLock(async () => {
+      await this.init();
+      if (this.db === undefined) return 0;
+      const rows = this.db
+        .prepare(
+          `SELECT id FROM memos
+             WHERE status = 'active'
+               AND COALESCE(kind, 'episodic') = 'episodic'
+               AND COALESCE(last_hit_at, recorded_at) < ?
+               AND extraction_source != 'manual'`,
+        )
+        .all(cutoff) as Array<{ id: string }>;
+      return this.deleteRowsInternal(rows.map((row) => row.id));
+    });
+  }
+
+  /** Evict the least recently touched active memos beyond `cap`. Manual memos are kept. */
+  async pruneActiveMemos(cap: number): Promise<number> {
+    return this.withWriteLock(async () => {
+      await this.init();
+      if (this.db === undefined) return 0;
+      const row = this.db
+        .prepare("SELECT COUNT(*) AS total FROM memos WHERE status = 'active'")
+        .get() as { total: number } | undefined;
+      const excess = (row?.total ?? 0) - cap;
+      if (excess <= 0) return 0;
+      const victims = this.db
+        .prepare(
+          `SELECT id FROM memos
+             WHERE status = 'active' AND extraction_source != 'manual'
+             ORDER BY COALESCE(last_hit_at, recorded_at) ASC
+             LIMIT ?`,
+        )
+        .all(excess) as Array<{ id: string }>;
+      return this.deleteRowsInternal(victims.map((victim) => victim.id));
+    });
+  }
+
+  /** Record that retrieval surfaced these memos (drives TTL and eviction). */
+  async touchMemoHits(ids: string[], at = Date.now()): Promise<void> {
+    if (ids.length === 0) return;
+    return this.withWriteLock(async () => {
+      await this.init();
+      if (this.db === undefined) return;
+      const stmt = this.db.prepare('UPDATE memos SET last_hit_at = ? WHERE id = ?');
+      for (const id of ids) stmt.run(at, id);
+    });
+  }
+
+  // ── Digests ───────────────────────────────────────────────────────────────
+
+  async listDigests(options?: {
+    kinds?: DigestKind[];
+    status?: DigestStatus;
+    limit?: number;
+  }): Promise<MemoryDigest[]> {
+    await this.init();
+    if (this.db === undefined) return [];
+    const clauses: string[] = [];
+    const params: Array<string | number> = [];
+    if (options?.status !== undefined) {
+      clauses.push('status = ?');
+      params.push(options.status);
+    }
+    if (options?.kinds !== undefined && options.kinds.length > 0) {
+      clauses.push(`kind IN (${options.kinds.map(() => '?').join(', ')})`);
+      params.push(...options.kinds);
+    }
+    const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM memory_digests ${where} ORDER BY last_confirmed_at DESC LIMIT ?`,
+      )
+      .all(...params, options?.limit ?? 200) as Array<Record<string, unknown>>;
+    return rows.map(rowToDigest);
+  }
+
+  async getDigest(id: string): Promise<MemoryDigest | undefined> {
+    await this.init();
+    if (this.db === undefined) return undefined;
+    const row = this.db.prepare('SELECT * FROM memory_digests WHERE id = ?').get(id) as
+      | Record<string, unknown>
+      | undefined;
+    return row === undefined ? undefined : rowToDigest(row);
+  }
+
+  async upsertDigest(digest: MemoryDigest): Promise<void> {
+    return this.withWriteLock(async () => {
+      await this.init();
+      if (this.db === undefined) return;
+      this.db
+        .prepare(
+          `INSERT INTO memory_digests (
+             id, topic, kind, statement, applies_to, confidence, evidence_json,
+             evidence_from, evidence_to, created_at, updated_at, last_confirmed_at,
+             last_hit_at, hit_count, status, superseded_json
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(id) DO UPDATE SET
+             topic = excluded.topic,
+             kind = excluded.kind,
+             statement = excluded.statement,
+             applies_to = excluded.applies_to,
+             confidence = excluded.confidence,
+             evidence_json = excluded.evidence_json,
+             evidence_from = excluded.evidence_from,
+             evidence_to = excluded.evidence_to,
+             updated_at = excluded.updated_at,
+             last_confirmed_at = excluded.last_confirmed_at,
+             hit_count = excluded.hit_count,
+             status = excluded.status,
+             superseded_json = excluded.superseded_json`,
+        )
+        .run(
+          digest.id,
+          digest.topic,
+          digest.kind,
+          digest.statement,
+          digest.appliesTo ?? null,
+          digest.confidence,
+          JSON.stringify(digest.evidence),
+          digest.evidenceFrom,
+          digest.evidenceTo,
+          digest.createdAt,
+          digest.updatedAt,
+          digest.lastConfirmedAt,
+          digest.lastHitAt ?? null,
+          digest.hitCount,
+          digest.status,
+          digest.superseded === undefined ? null : JSON.stringify(digest.superseded),
+        );
+    });
+  }
+
+  async deleteDigest(id: string): Promise<boolean> {
+    return this.withWriteLock(async () => {
+      await this.init();
+      if (this.db === undefined) return false;
+      const result = this.db.prepare('DELETE FROM memory_digests WHERE id = ?').run(id);
+      return result.changes > 0;
+    });
+  }
+
+  /** Stop injecting digests nobody confirmed or used for a long time. They are not deleted. */
+  async markDigestsDormant(cutoff: number): Promise<number> {
+    return this.withWriteLock(async () => {
+      await this.init();
+      if (this.db === undefined) return 0;
+      const result = this.db
+        .prepare(
+          "UPDATE memory_digests SET status = 'dormant' WHERE status = 'active' AND last_confirmed_at < ? AND last_hit_at IS NULL",
+        )
+        .run(cutoff);
+      return Number(result.changes);
+    });
+  }
+
+  /** Drop the least useful digests beyond `cap`: dormant first, then never-hit, then lowest hit count. */
+  async evictDigests(cap: number): Promise<number> {
+    return this.withWriteLock(async () => {
+      await this.init();
+      if (this.db === undefined) return 0;
+      const row = this.db.prepare('SELECT COUNT(*) AS total FROM memory_digests').get() as
+        | { total: number }
+        | undefined;
+      const excess = (row?.total ?? 0) - cap;
+      if (excess <= 0) return 0;
+      const victims = this.db
+        .prepare(
+          `SELECT id FROM memory_digests
+             ORDER BY (status = 'dormant') DESC,
+                      COALESCE(last_hit_at, 0) ASC,
+                      hit_count ASC,
+                      last_confirmed_at ASC
+             LIMIT ?`,
+        )
+        .all(excess) as Array<{ id: string }>;
+      const stmt = this.db.prepare('DELETE FROM memory_digests WHERE id = ?');
+      this.db.exec('BEGIN TRANSACTION');
+      try {
+        for (const victim of victims) stmt.run(victim.id);
+        this.db.exec('COMMIT');
+        return victims.length;
+      } catch {
+        this.db.exec('ROLLBACK');
+        throw new Error('Failed to evict digests');
+      }
+    });
+  }
+
+  /** Record that an injection surfaced these digests. */
+  async touchDigestHits(ids: string[], at = Date.now()): Promise<void> {
+    if (ids.length === 0) return;
+    return this.withWriteLock(async () => {
+      await this.init();
+      if (this.db === undefined) return;
+      const stmt = this.db.prepare(
+        'UPDATE memory_digests SET hit_count = hit_count + 1, last_hit_at = ? WHERE id = ?',
+      );
+      for (const id of ids) stmt.run(at, id);
+    });
+  }
+
+  async setDigestEmbedding(digestId: string, vector: number[], model: string): Promise<void> {
+    return this.withWriteLock(async () => {
+      await this.init();
+      if (this.db === undefined) return;
+      this.db
+        .prepare(
+          `INSERT INTO memory_digest_embeddings (digest_id, embedding_json, model, created_at)
+           VALUES (?, ?, ?, ?)
+           ON CONFLICT(digest_id) DO UPDATE SET
+             embedding_json = excluded.embedding_json,
+             model = excluded.model,
+             created_at = excluded.created_at`,
+        )
+        .run(digestId, JSON.stringify(vector), model, Date.now());
+    });
+  }
+
+  async listDigestEmbeddings(): Promise<Array<{ digestId: string; vector: number[] }>> {
+    await this.init();
+    if (this.db === undefined) return [];
+    const rows = this.db
+      .prepare('SELECT digest_id, embedding_json FROM memory_digest_embeddings')
+      .all() as Array<{ digest_id: string; embedding_json: string }>;
+    return rows.map((row) => ({
+      digestId: row.digest_id,
+      vector: JSON.parse(row.embedding_json) as number[],
+    }));
+  }
+
+  /** Memo embeddings of active memos — used by /dream clustering. */
+  async listMemoEmbeddings(
+    projectDir?: string,
+  ): Promise<Array<{ memoId: string; vector: number[] }>> {
+    await this.init();
+    if (this.db === undefined) return [];
+    const rows = (
+      projectDir === undefined
+        ? this.db
+            .prepare(
+              `SELECT e.memory_id AS id, e.embedding_json AS vec
+                 FROM memory_embeddings e
+                 JOIN memos m ON m.id = e.memory_id
+                WHERE m.status = 'active'`,
+            )
+            .all()
+        : this.db
+            .prepare(
+              `SELECT e.memory_id AS id, e.embedding_json AS vec
+                 FROM memory_embeddings e
+                 JOIN memos m ON m.id = e.memory_id
+                WHERE m.status = 'active' AND (m.project_dir = ? OR m.project_dir = '')`,
+            )
+            .all(projectDir)
+    ) as Array<{ id: string; vec: string }>;
+    return rows.map((row) => ({
+      memoId: row.id,
+      vector: JSON.parse(row.vec) as number[],
+    }));
+  }
+
+  /** Delete several memos (FTS rows included) inside one transaction. */
+  private deleteRowsInternal(ids: string[]): number {
+    if (this.db === undefined || ids.length === 0) return 0;
+    const select = this.db.prepare('SELECT rowid FROM memos WHERE id = ?');
+    const deleteFts = this.db.prepare(
+      "INSERT INTO memos_fts(memos_fts, rowid) VALUES ('delete', ?)",
+    );
+    const deleteMemo = this.db.prepare('DELETE FROM memos WHERE id = ?');
+    this.db.exec('BEGIN TRANSACTION');
+    try {
+      let deleted = 0;
+      for (const id of ids) {
+        const row = select.get(id) as { rowid: number } | undefined;
+        if (row === undefined) continue;
+        deleteFts.run(row.rowid);
+        deleteMemo.run(id);
+        deleted += 1;
+      }
+      this.db.exec('COMMIT');
+      return deleted;
+    } catch {
+      this.db.exec('ROLLBACK');
+      throw new Error('Failed to delete memos');
+    }
+  }
+
 
   /** Set the embedding engine. Call once after construction, before any writes. */
   setEmbeddingEngine(engine: EmbeddingEngine): void {
@@ -1020,21 +1432,31 @@ export class MemoryMemoStore {
     };
   }
 
-  private listAll(limit: number, offset: number, projectDir?: string): { rows: MemoryMemo[]; total: number } {
+  private listAll(
+    limit: number,
+    offset: number,
+    projectDir?: string,
+    includeDigested = false,
+  ): { rows: MemoryMemo[]; total: number } {
     if (this.db === undefined) return { rows: [], total: 0 };
+    const statusClause = includeDigested ? '' : " AND status = 'active'";
     const countStmt =
       projectDir === undefined
-        ? this.db.prepare('SELECT COUNT(*) as total FROM memos')
-        : this.db.prepare("SELECT COUNT(*) as total FROM memos WHERE project_dir = ? OR project_dir = ''");
+        ? this.db.prepare(`SELECT COUNT(*) as total FROM memos WHERE 1=1${statusClause}`)
+        : this.db.prepare(
+            `SELECT COUNT(*) as total FROM memos WHERE (project_dir = ? OR project_dir = '')${statusClause}`,
+          );
     const countRow = (
       projectDir === undefined ? countStmt.get() : countStmt.get(projectDir)
     ) as { total: number } | undefined;
     const total = countRow?.total ?? 0;
     const stmt =
       projectDir === undefined
-        ? this.db.prepare('SELECT * FROM memos ORDER BY recorded_at DESC LIMIT ? OFFSET ?')
+        ? this.db.prepare(
+            `SELECT * FROM memos WHERE 1=1${statusClause} ORDER BY recorded_at DESC LIMIT ? OFFSET ?`,
+          )
         : this.db.prepare(
-            "SELECT * FROM memos WHERE project_dir = ? OR project_dir = '' ORDER BY recorded_at DESC LIMIT ? OFFSET ?",
+            `SELECT * FROM memos WHERE (project_dir = ? OR project_dir = '')${statusClause} ORDER BY recorded_at DESC LIMIT ? OFFSET ?`,
           );
     const rows = (
       projectDir === undefined ? stmt.all(limit, offset) : stmt.all(projectDir, limit, offset)
@@ -1057,7 +1479,7 @@ export class MemoryMemoStore {
 function rowToMemo(row: Record<string, unknown>): MemoryMemo {
   const sourceSessionTitle = row['source_session_title'];
   const projectDir = row['project_dir'];
-  return {
+  const memo: MemoryMemo = {
     id: String(row['id']),
     sourceSessionId: String(row['source_session_id']),
     sourceSessionTitle: typeof sourceSessionTitle === 'string' ? sourceSessionTitle : undefined,
@@ -1071,6 +1493,51 @@ function rowToMemo(row: Record<string, unknown>): MemoryMemo {
     projectDir: typeof projectDir === 'string' ? projectDir : '',
     tags: parseTags(row['tags']),
   };
+  // Lifecycle fields are omitted while they hold their default so memos read
+  // back byte-for-byte identical to the rows written before /dream existed.
+  if (row['status'] === 'digested') memo.status = 'digested';
+  if (typeof row['kind'] === 'string') memo.kind = row['kind'] as MemoryMemo['kind'];
+  if (typeof row['digested_at'] === 'number') memo.digestedAt = row['digested_at'];
+  if (typeof row['digest_id'] === 'string') memo.digestId = row['digest_id'];
+  if (typeof row['last_hit_at'] === 'number') memo.lastHitAt = row['last_hit_at'];
+  return memo;
+}
+
+function rowToDigest(row: Record<string, unknown>): MemoryDigest {
+  const evidence = parseJsonArray<DigestEvidence>(row['evidence_json']);
+  const supersededRaw = row['superseded_json'];
+  const superseded =
+    typeof supersededRaw === 'string'
+      ? parseJsonArray<SupersededStatement>(supersededRaw)
+      : [];
+  return {
+    id: String(row['id']),
+    topic: String(row['topic']),
+    kind: String(row['kind']) as DigestKind,
+    statement: String(row['statement']),
+    appliesTo: typeof row['applies_to'] === 'string' ? row['applies_to'] : undefined,
+    confidence: String(row['confidence']) as MemoryDigest['confidence'],
+    evidence,
+    evidenceFrom: Number(row['evidence_from'] ?? 0),
+    evidenceTo: Number(row['evidence_to'] ?? 0),
+    createdAt: Number(row['created_at'] ?? 0),
+    updatedAt: Number(row['updated_at'] ?? 0),
+    lastConfirmedAt: Number(row['last_confirmed_at'] ?? 0),
+    lastHitAt: typeof row['last_hit_at'] === 'number' ? row['last_hit_at'] : undefined,
+    hitCount: Number(row['hit_count'] ?? 0),
+    status: row['status'] === 'dormant' ? 'dormant' : 'active',
+    superseded: superseded.length > 0 ? superseded : undefined,
+  };
+}
+
+function parseJsonArray<T>(value: unknown): T[] {
+  if (typeof value !== 'string') return [];
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return Array.isArray(parsed) ? (parsed as T[]) : [];
+  } catch {
+    return [];
+  }
 }
 
 function parseTags(value: unknown): string[] | undefined {

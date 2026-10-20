@@ -2,6 +2,12 @@ import { normalizeTags } from './tags.js';
 
 /** Memory memo types — structured task experience records extracted from conversations. */
 
+/** `digested` memos are kept for a short grace window after /dream folds them into a digest, then deleted. */
+export type MemoStatus = 'active' | 'digested';
+
+/** What kind of experience a memo carries. Unset for rows written before /dream classified them. */
+export type MemoKind = 'fact' | 'preference' | 'procedure' | 'pitfall' | 'episodic';
+
 export interface MemoryMemo {
   /** Unique ID generated at creation time. */
   id: string;
@@ -31,6 +37,16 @@ export interface MemoryMemo {
    * supplement (e.g. a reusable behavioural hint) that helps future turns
    * understand the memo. Advisory only, not a user-enforced preference. */
   note?: string;
+  /** Lifecycle status; absent means `active` (default for older rows). */
+  status?: MemoStatus;
+  /** Classification produced by /dream; absent until the memo is analyzed. */
+  kind?: MemoKind;
+  /** When /dream folded this memo into a digest. */
+  digestedAt?: number;
+  /** Digest that absorbed this memo. */
+  digestId?: string;
+  /** Last time retrieval surfaced this memo — drives TTL and eviction. */
+  lastHitAt?: number;
 }
 
 /** JSONL envelope — one line in entries.jsonl. */
@@ -55,6 +71,10 @@ export interface MemoryMemoSummary {
   projectDir: string;
   tags?: string[];
   note?: string;
+  /** Lifecycle status; absent means active. Present for `digested` rows. */
+  status?: MemoStatus;
+  /** Classification, once /dream has analyzed the memo. */
+  kind?: MemoKind;
 }
 
 /** Result of listing/filtering memos. */
@@ -100,7 +120,7 @@ function normalizedTags(value: unknown): string[] | undefined {
 }
 
 export function toSummary(memo: MemoryMemo): MemoryMemoSummary {
-  return {
+  const summary: MemoryMemoSummary = {
     id: memo.id,
     sourceSessionTitle: memo.sourceSessionTitle,
     sourceSessionId: memo.sourceSessionId,
@@ -115,4 +135,54 @@ export function toSummary(memo: MemoryMemo): MemoryMemoSummary {
     tags: memo.tags,
     note: memo.note,
   };
+  if (summary.status === 'digested') summary.status = 'digested';
+  return summary;
+}
+
+/** A distilled rule produced by /dream. */
+export type DigestKind = 'fact' | 'preference' | 'procedure' | 'pitfall';
+export type DigestStatus = 'active' | 'dormant';
+
+/** One piece of evidence behind a digest; the memo itself is deleted after the grace window. */
+export interface DigestEvidence {
+  id: string;
+  title: string;
+  at: number;
+}
+
+/** A statement this digest replaced, kept so history is not lost on conflict. */
+export interface SupersededStatement {
+  statement: string;
+  at: number;
+}
+
+export interface MemoryDigest {
+  id: string;
+  topic: string;
+  kind: DigestKind;
+  /** The conclusion itself — short enough to inject verbatim. */
+  statement: string;
+  /** Project path this applies to; undefined means global. */
+  appliesTo?: string;
+  confidence: 'high' | 'medium' | 'low';
+  evidence: DigestEvidence[];
+  /** Earliest evidence timestamp. */
+  evidenceFrom: number;
+  /** Latest evidence timestamp. */
+  evidenceTo: number;
+  createdAt: number;
+  /** Last time the statement itself changed. */
+  updatedAt: number;
+  /** Last time /dream re-derived the same statement (unchanged still counts). */
+  lastConfirmedAt: number;
+  lastHitAt?: number;
+  hitCount: number;
+  status: DigestStatus;
+  superseded?: SupersededStatement[];
+}
+
+export function generateDigestId(): string {
+  const ts = Date.now().toString(36);
+  const rand = Math.random().toString(36).slice(2, 8);
+  return `digest-${ts}-${rand}`;
 }

@@ -767,7 +767,7 @@ Decouples "arrival" from "display" — a shown-length cursor on the draft gains 
 
 ### Activity Block (per-turn reasoning + tool calls)
 
-One turn's reasoning and its ordinary tool cards (everything except `Read`, `Agent`, `AskUserQuestion`, `ExitPlanMode`, `ReadMediaFile`) collapse into a single block: three rows while collapsed (header with step/tool counts, token estimate and live `toks/s`; latest tool row; reasoning summary) and a tree while expanded (per-tool result preview `ACTIVITY_GROUP_TOOL_EXPANDED_LINES=15`, whole-block ceiling `ACTIVITY_GROUP_EXPANDED_LINES=60` with a `… N more steps` row for the rest, reasoning excerpt `ACTIVITY_GROUP_THINKING_EXCERPT_LINES=10`). A running block anchors its expanded window on the newest steps and counts the older ones above them (`… N earlier steps folded`); settling flips the window back to the first step, so a settled tree keeps exactly the rows it always had.
+One turn's reasoning and its ordinary tool cards (everything except `Read`, `Agent`, `AskUserQuestion`, `ExitPlanMode`, `ReadMediaFile`) collapse into a single block: eight rows while collapsed (header with step/tool counts, token estimate and live `toks/s`, followed by the newest steps — reasoning runs and tool rows share the budget; `/blockrows` picks 5/8/10. A stored value that is no longer offered falls back to the default) and a tree while expanded (per-tool result preview `ACTIVITY_GROUP_TOOL_EXPANDED_LINES=15`, whole-block ceiling `ACTIVITY_GROUP_EXPANDED_LINES=60` with a `… N more steps` row for the rest, reasoning excerpt `ACTIVITY_GROUP_THINKING_EXCERPT_LINES=10`). A running block anchors its expanded window on the newest steps and counts the older ones above them (`… N earlier steps folded`); settling flips the window back to the first step, so a settled tree keeps exactly the rows it always had.
 
 - **Component**: `src/tui/components/messages/activity-group.ts` — borrows the real `ToolCallComponent`s (never mounts them), 200ms throttle, rebuilds rows on width/invalidate changes, spins only while the turn is streaming
 - **Sealing**: a block is created lazily by its first reasoning/tool content and sealed as soon as visible assistant text appears, so each stretch of work stays next to the answer it produced; an agent card mounting and a delivered child request also seal the stretch, and the work that follows opens a fresh block below them
@@ -953,11 +953,15 @@ to search the knowledge base.
   (a half-migrated library stays correct) — and ranked via JS cosine similarity
   (same pattern as memory). FTS5 indexes chunks/events/entities for keyword
   fallback, scored by bm25 (`score = -bm25`, larger is better).
-- **Ingest** (`/knowledge` → ingest): markdown file → heading_strict chunking →
+- **Ingest** (`/knowledge` → ingest): `.md/.markdown/.txt` are read as UTF-8;
+  `.pdf/.docx/.xlsx` are lazily converted to Markdown by the bundled `markit`
+  engine (`packages/knowledge/src/markit` — imported on the first binary ingest,
+  never at startup). Text then goes through heading_strict chunking →
   embed chunks → LLM extract 1 fused event + N entities per chunk → embed event
-  title/content + entity names + relation text → store. All writes run in a
-  single SQLite transaction; a mid-ingest failure rolls back every partial row.
-  Re-ingesting the same file path errors out (deduped via `knowledge_sources.file_path`).
+  title/content + entity names + relation text → store. Text files are
+  fingerprinted by `sha256(text)`, binary documents by `sha256(bytes)`, so an
+  unchanged file is skipped before any conversion or LLM call. All writes run in
+  a single SQLite transaction; a mid-ingest failure rolls back every partial row.
 - **Search** (`KnowledgeLookup` tool and `/knowledge` → search): multi-hop
   retrieval in two gears. Fast (default for the tool unless `deep=true`, and
   for the TUI search): vectorize query → local entity-vector recall → seed
@@ -1011,24 +1015,33 @@ Key file: `packages/agent-core/src/agent/session-memory.ts`.
 
 #### Dream Consolidation (`/dream`)
 
-A CCB-style four-stage memory consolidation command. LLM-driven planning,
-programmatic execution:
+Two memory layers: **memos** are raw per-task records (`/memory`), **digests**
+are the distilled rules `/dream` produces (topic, statement, kind, evidence,
+three separate timestamps). `/dream` never deletes raw material to "merge" it: a
+memo is folded into a digest first, marked `digested`, and physically deleted
+only after the 14-day grace window.
 
-1. **Orient** — `MemoryConsolidatePlan` scans all memories and reports overview
-   stats (count, outcome distribution, time range).
-2. **Gather** — the model reviews the programmatic plan and semantically checks
-   for false positives, contradictions, and additional stale entries.
-3. **Consolidate** — the model presents the merge plan to the user.
-4. **Prune** — after user confirmation, `MemoryConsolidateApply` deletes the
-   originals, appends merged records with the correct JSONL envelope, and resets
-   the dream tracker.
+1. **Plan** — `MemoryConsolidatePlan` runs `buildDreamPlan`: the newest ≤200
+   active memos, clustered by embedding cosine similarity (0.82) with a keyword
+   Jaccard fallback (0.45), plus the existing digests and pending maintenance
+   counts. Planning is read-only.
+2. **Confirm** — the model presents one line per cluster (topic hint, evidence
+   count, date range) and asks the user before writing anything.
+3. **Write** — the model writes one digest per cluster (topic, kind, statement,
+   confidence, `evidenceIds ⊆ memoIds`); an out-of-range evidence id rejects the
+   whole batch without touching the store.
+4. **Apply** — `applyDreamPlan` creates or updates digests, marks the folded
+   memos `digested`, then runs maintenance: grace-window deletion, 90-day
+   episodic TTL, 2000-memo cap, 180-day dormancy, 200-digest eviction. A matching
+   topic updates the statement and keeps the old one in `superseded`; an
+   unchanged statement only moves `lastConfirmedAt`.
 
 Includes automatic reminders: when >= 24 hours and >= 5 sessions have passed since
 the last dream, a suggestion is injected on the first step of the turn.
 
 `/dream` operates globally across all projects' memories. Legacy entries
-without a `projectDir` are still considered so existing data is not lost. Merged
-records inherit the union of the original tags.
+without a `projectDir` are still considered so existing data is not lost. A
+digest's `appliesTo` is set only when every folded memo shares one project.
 
 - **Tracker**: `packages/memory/src/dream.ts` — `DreamTracker`, persisted to
   `<screamHomeDir>/dream-lock.json` through a temp-file + rename swap (a failed
@@ -1038,9 +1051,10 @@ records inherit the union of the original tags.
   `SCREAM_CODE_HOME` moves the file and an omitted home directory still lands
   under `~/.scream-code` instead of the process working directory.
 - **Store**: `packages/memory/src/store.ts` — `MemoryMemoStore`, persisted to
-  `<screamHomeDir>/memory/entries.jsonl`.
+  `<screamHomeDir>/memory/memos.sqlite` (legacy `entries.jsonl` files are
+  imported once and left in place).
 - **Consolidator**: `packages/memory/src/consolidator.ts` —
-  `buildConsolidationPlan` / `applyConsolidation`.
+  `buildDreamPlan` / `applyDreamPlan`, bounded by `DREAM_CONSTANTS`.
 - **Tools**: `packages/agent-core/src/tools/builtin/memory/memory-consolidate.ts` —
   `MemoryConsolidatePlan` / `MemoryConsolidateApply`.
 - **Skill**: `packages/agent-core/src/skill/builtin/dream.ts` + `dream.md`.
