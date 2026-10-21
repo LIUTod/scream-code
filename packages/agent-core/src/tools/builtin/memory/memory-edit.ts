@@ -19,6 +19,15 @@ export const MemoryEditInputSchema = z.object({
       outcome: z.string().optional().describe('Updated outcome.'),
       whatFailed: z.string().optional().describe('Updated dead-ends notes.'),
       whatWorked: z.string().optional().describe('Updated successful actions.'),
+      note: z
+        .string()
+        .optional()
+        .describe('Updated advisory note that helps future AI reuse this memo.'),
+      distilled: z
+        .string()
+        .max(200)
+        .optional()
+        .describe('Updated latest one-sentence conclusion (最新归纳) for this memo.'),
       tags: z
         .array(z.string())
         .optional()
@@ -73,6 +82,16 @@ export class MemoryEditTool implements BuiltinTool<MemoryEditInput> {
         if (updates.outcome !== undefined) patch.outcome = updates.outcome;
         if (updates.whatFailed !== undefined) patch.whatFailed = updates.whatFailed;
         if (updates.whatWorked !== undefined) patch.whatWorked = updates.whatWorked;
+        if (updates.note !== undefined) patch.note = updates.note.trim().length > 0 ? updates.note : undefined;
+        if (updates.distilled !== undefined) {
+          const text = updates.distilled.trim();
+          patch.distilled = text.length > 0 ? text : undefined;
+          // A user-directed rewrite is authored by the user, not by /dream.
+          // Clearing it also drops the lineage: it is no longer a rule.
+          patch.origin = text.length > 0 ? 'user' : 'session';
+          patch.distilledAt = text.length > 0 ? Date.now() : undefined;
+          patch.distilledFrom = text.length > 0 ? existing.distilledFrom : undefined;
+        }
         if (updates.tags !== undefined) patch.tags = normalizeTags(updates.tags);
 
         if (Object.keys(patch).length === 0) {

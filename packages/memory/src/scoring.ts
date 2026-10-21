@@ -86,7 +86,7 @@ export function computeRelevanceScore(
   const fi = intent?.factualBias ?? 0.6;
 
   const factors: RelevanceFactors = {
-    keywordOverlap: computeKeywordSimilarity(memo, query),
+    keywordOverlap: computeKeywordOverlap(memo, query),
     recency: computeRecency(memo.recordedAt),
     // NOTE: usageCount is always 0 — per-memo usage counting is not yet
     // implemented in the store. When added, increment on each search hit.
@@ -241,7 +241,27 @@ export function computeKeywordSimilarity(
   memo: MemoryMemoSummary,
   query: string,
 ): number {
-  const memoText = `${memo.userNeed} ${memo.approach} ${memo.whatFailed} ${memo.whatWorked}`;
+  return jaccardSimilarity(keywordText(memo), query);
+}
+
+/**
+ * Ranking variant: the distilled conclusion and the note are separate
+ * retrieval surfaces. Score each field on its own and keep the best match —
+ * a short conclusion would otherwise be diluted by the long base text.
+ */
+function computeKeywordOverlap(memo: MemoryMemoSummary, query: string): number {
+  return Math.max(
+    jaccardSimilarity(keywordText(memo), query),
+    jaccardSimilarity(memo.distilled ?? '', query),
+    jaccardSimilarity(memo.note ?? '', query),
+  );
+}
+
+function keywordText(memo: MemoryMemoSummary): string {
+  return `${memo.userNeed} ${memo.approach} ${memo.whatFailed} ${memo.whatWorked}`;
+}
+
+function jaccardSimilarity(memoText: string, query: string): number {
   const memoWords = extractKeywords(memoText);
   const queryWords = extractKeywords(query);
 

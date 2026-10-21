@@ -81,8 +81,8 @@ export class MemoryLookupTool implements BuiltinTool<MemoryLookupInput> {
     'Search the memory memo store for historical experiences from past user tasks. ' +
     'Call this when the current task may benefit from prior work, when you encounter a ' +
     'repeating error or pattern, or when you are unsure of the best approach. ' +
-    'Returns memos ranked by relevance, including the approach taken, the outcome, ' +
-    'what failed, what worked, project, and tags.';
+    'Returns memos ranked by relevance, including the latest distillation written ' +
+    'by /dream, the approach taken, the outcome, what failed, what worked, the note, project, and tags.';
   readonly parameters: Record<string, unknown> = toInputJsonSchema(MemoryLookupInputSchema);
 
   constructor(private readonly agent: Agent) {}
@@ -194,10 +194,14 @@ export class MemoryLookupTool implements BuiltinTool<MemoryLookupInput> {
             `  Score: ${score.toFixed(3)}`,
             ...(project !== undefined ? [`  ${project}`] : []),
             ...(tags !== undefined ? [`  ${tags}`] : []),
+            ...(memo.distilled !== undefined && memo.distilled.length > 0
+              ? [`  Latest distillation: ${memo.distilled}`]
+              : []),
             `  Approach: ${memo.approach}`,
             `  Outcome: ${memo.outcome}`,
             ...(memo.whatFailed !== 'none' ? [`  What failed: ${memo.whatFailed}`] : []),
             ...(memo.whatWorked !== 'none' ? [`  What worked: ${memo.whatWorked}`] : []),
+            ...(memo.note !== undefined && memo.note.length > 0 ? [`  Note: ${memo.note}`] : []),
             '',
           );
         }

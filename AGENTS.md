@@ -905,14 +905,14 @@ The system prompt carries an "anti-drift" discipline section (context management
 
 The agent has a memory system provided by the `@scream-code/memory` package. Positioned as "task experience records" — structured logs of what was tried, what worked, and what failed. Each record also carries 3-5 semantic `tags` and a `projectDir`. Legacy entries without a `projectDir` or `tags` remain visible and usable.
 
-- **Storage**: SQLite database at `<screamHomeDir>/memory/memos.sqlite` (legacy JSONL at `<screamHomeDir>/memory/entries.jsonl` is migrated and kept as `.bak`). Schema includes `project_dir` and `tags`.
-- **Fields**: `userNeed` (the user's goal), `approach` (what was done), `outcome` (the result), `whatFailed` (dead ends), `whatWorked` (key successful actions), `projectDir` (project directory), `tags` (semantic tags).
+- **Storage**: SQLite database at `<screamHomeDir>/memory/memos.sqlite` (legacy JSONL at `<screamHomeDir>/memory/entries.jsonl` is migrated and kept as `.bak`). Schema includes `project_dir`, `tags`, `note`, `distilled`, `origin`, `distilled_from` and `distilled_at`.
+- **Fields**: `userNeed` (the user's goal), `approach` (what was done), `outcome` (the result), `whatFailed` (dead ends), `whatWorked` (key successful actions), `projectDir` (project directory), `tags` (semantic tags), `note` (optional AI-readable supplement), `distilled` (the latest one-sentence conclusion written by /dream; empty until the memo is distilled), `origin` (`'session'` = extracted experience, `'dream'` = /dream rule, `'user'` = conclusion rewritten by the user via `/memory` or `MemoryEdit`), `distilledAt` (epoch ms when the conclusion was generated or last rewritten), `distilledFrom` (snapshot of the memos folded into the conclusion: `{id, title, at}[]`, title clipped to 80 chars, max 100 items, carried across generations).
 - **Extraction triggers**:
   - Compaction: `extractAndStoreMemos()` in `packages/agent-core/src/agent/compaction/full.ts` — scans compaction summary for `memory-memo` blocks.
   - Session exit: `extractMemoriesOnExit()` in `packages/agent-core/src/agent/index.ts` — takes last 30 messages × 300 chars, calls LLM.
   - Idle timer: after 10 minutes of no user input, `ScreamTUI.performIdleMemoryExtraction()` calls `session.extractMemoriesOnExit()`. Cooldown: 10 minutes. Compaction extraction updates the cooldown timestamp to avoid duplicates.
   - Manual write: `MemoryWrite` tool in `packages/agent-core/src/tools/builtin/memory/memory-write.ts` — the model can save a structured memo immediately when the user explicitly asks, e.g. "save this to memory", "save to memo", or "summarize and save". These entries are tagged with `extractionSource: 'manual'`.
-- **Scoring**: keyword Jaccard similarity (45%) + recency decay 90 days (25%) + usage boost (15%) + project affinity (10%) + tag overlap with the current project's tag cloud (5%). Rule-based with optional local embedding similarity via `fastembed` (ONNX runtime, `packages/memory/src/embeddings.ts`).
+- **Scoring**: keyword Jaccard similarity (45%) + recency decay 90 days (25%) + usage boost (15%) + project affinity (10%) + tag overlap with the current project's tag cloud (5%). The keyword set covers `userNeed`, `approach`, `whatFailed`, `whatWorked`, `distilled` and `note`. Rule-based with optional local embedding similarity via `fastembed` (ONNX runtime, `packages/memory/src/embeddings.ts`).
 
 #### Active Lookup
 
@@ -920,13 +920,13 @@ The model queries the memory store on demand via the `MemoryLookup` tool. It is 
 
 - **When to call**: the current task resembles prior work, you hit a repeating error or pattern, you are unsure of the best approach, or the user references a previous fix/decision.
 - **Input**: `query` (required), optional `limit` (default 5, max 20), optional `min_score` (default 0.2), optional `scope` (`'global'` by default; use `'project'` to restrict results to the current working directory).
-- **Output**: ranked memos with `approach`, `outcome`, `whatFailed`, `whatWorked`, relevance `score`, `projectDir`, and `tags`. Memos from the current project and memos sharing tags with it are ranked higher. The model should apply `whatWorked` and avoid `whatFailed`.
+- **Output**: ranked memos with `distilled` (latest /dream conclusion), `approach`, `outcome`, `whatFailed`, `whatWorked`, `note`, relevance `score`, `projectDir`, and `tags`. Memos from the current project and memos sharing tags with it are ranked higher. The model should apply `distilled` and `whatWorked`, and avoid `whatFailed`.
 - **Registration**: `ToolManager.initializeBuiltinTools()` registers it only for the `main` agent when `memoStore` is available.
 - **Manual injection**: users can still browse and inject existing memos via the `/memory` TUI picker (`apps/scream-code/src/tui/managers/dialog-manager.ts`).
 
 #### Editing Memories
 
-The `MemoryEdit` tool lets the model correct or delete a single memo by id. Use it when the user says a memory is wrong, outdated, or should be removed. For updates, only the provided fields are changed; omitted fields are preserved. `tags` can be updated to add or remove labels.
+The `MemoryEdit` tool lets the model correct or delete a single memo by id. Use it when the user says a memory is wrong, outdated, or should be removed. For updates, only the provided fields are changed; omitted fields are preserved. `tags` can be updated to add or remove labels; `note` and `distilled` (最新归纳) can also be corrected. Users can rewrite the 最新归纳 in place too: the `/memory` detail view (`e` → edit → Enter) saves through `store.update` and flips `origin` to `'user'` with a fresh `distilledAt`; clearing the text drops back to `origin='session'`.
 
 Key files: `packages/agent-core/src/tools/builtin/memory/memory-lookup.ts`,
 `packages/agent-core/src/tools/builtin/memory/memory-write.ts`,
@@ -1015,33 +1015,45 @@ Key file: `packages/agent-core/src/agent/session-memory.ts`.
 
 #### Dream Consolidation (`/dream`)
 
-Two memory layers: **memos** are raw per-task records (`/memory`), **digests**
-are the distilled rules `/dream` produces (topic, statement, kind, evidence,
-three separate timestamps). `/dream` never deletes raw material to "merge" it: a
-memo is folded into a digest first, marked `digested`, and physically deleted
-only after the 14-day grace window.
+Memory is one store with one entity: **memos** in `memos.sqlite` (`/memory` browses
+them). `/dream` clusters near-duplicate memos, the model writes a one-sentence
+distilled conclusion per merge group, and apply appends one replacement memo
+carrying that `distilled` value (UI label 最新归纳), its provenance
+(`origin='dream'`, `distilledAt`, `distilledFrom`) before deleting the originals.
+Resolved (completed, >7 days old) and stale (>30 days, unfinished) entries are
+pruned, but only session-origin experiences: a distilled rule is never
+age-pruned. A merged record inherits the union of tags from its originals.
 
-1. **Plan** — `MemoryConsolidatePlan` runs `buildDreamPlan`: the newest ≤200
-   active memos, clustered by embedding cosine similarity (0.82) with a keyword
-   Jaccard fallback (0.45), plus the existing digests and pending maintenance
+1. **Plan** — `MemoryConsolidatePlan` runs `buildConsolidationPlan`: keyword
+   similarity clusters near-duplicate memos, and topic anchors surface related
+   groups that should stay separate. Each duplicate group ships a `merged` draft
+   with `distilled: ''` for the model to fill, plus the resolved/stale lists and
    counts. Planning is read-only.
-2. **Confirm** — the model presents one line per cluster (topic hint, evidence
-   count, date range) and asks the user before writing anything.
-3. **Write** — the model writes one digest per cluster (topic, kind, statement,
-   confidence, `evidenceIds ⊆ memoIds`); an out-of-range evidence id rejects the
-   whole batch without touching the store.
-4. **Apply** — `applyDreamPlan` creates or updates digests, marks the folded
-   memos `digested`, then runs maintenance: grace-window deletion, 90-day
-   episodic TTL, 2000-memo cap, 180-day dormancy, 200-digest eviction. A matching
-   topic updates the statement and keeps the old one in `superseded`; an
-   unchanged statement only moves `lastConfirmedAt`.
+2. **Confirm** — the model presents the plan (one line per group, including the
+   conclusion it wrote, the group's source composition, and — when the group
+   contains an existing `origin='dream'|'user'` memo — that memo's previous
+   `distilled`, stating whether the new conclusion inherits, corrects or replaces
+   it) and asks the user before writing anything. The preview states that merging
+   deletes the originals permanently.
+3. **Write** — for every duplicate group the model rewrites `merged` and writes
+   `distilled`: one reusable rule, ≤60 characters, not a restatement of the task.
+   A group it cannot distil reliably is left untouched, and an existing rule is
+   never overwritten without showing it first.
+4. **Apply** — `applyConsolidation` appends one replacement memo per group
+   (carrying `distilled`, the union of the originals' tags, `origin: 'dream'`,
+   `distilledAt: Date.now()` and `distilledFrom`: the group's memos plus each
+   source's own lineage, deduped by id, oldest-first, capped at 100), then deletes
+   the originals; resolved and stale memos are deleted too. Deletion is
+   irreversible — there is no grace window or undo. An empty `distilled` is
+   stored as undefined; when a group contains an existing rule and the plan
+   carries no new conclusion, the whole group is skipped and its originals are
+   kept (the tool reports the skipped count).
 
 Includes automatic reminders: when >= 24 hours and >= 5 sessions have passed since
 the last dream, a suggestion is injected on the first step of the turn.
 
 `/dream` operates globally across all projects' memories. Legacy entries
-without a `projectDir` are still considered so existing data is not lost. A
-digest's `appliesTo` is set only when every folded memo shares one project.
+without a `projectDir` are still considered so existing data is not lost.
 
 - **Tracker**: `packages/memory/src/dream.ts` — `DreamTracker`, persisted to
   `<screamHomeDir>/dream-lock.json` through a temp-file + rename swap (a failed
@@ -1054,7 +1066,7 @@ digest's `appliesTo` is set only when every folded memo shares one project.
   `<screamHomeDir>/memory/memos.sqlite` (legacy `entries.jsonl` files are
   imported once and left in place).
 - **Consolidator**: `packages/memory/src/consolidator.ts` —
-  `buildDreamPlan` / `applyDreamPlan`, bounded by `DREAM_CONSTANTS`.
+  `buildConsolidationPlan` / `applyConsolidation`.
 - **Tools**: `packages/agent-core/src/tools/builtin/memory/memory-consolidate.ts` —
   `MemoryConsolidatePlan` / `MemoryConsolidateApply`.
 - **Skill**: `packages/agent-core/src/skill/builtin/dream.ts` + `dream.md`.

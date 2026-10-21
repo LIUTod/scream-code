@@ -55,6 +55,8 @@ function makeStore(memos: MemoryMemo[]): { store: NonNullable<Agent['memoStore']
             memo.approach,
             memo.whatFailed,
             memo.whatWorked,
+            memo.distilled ?? '',
+            memo.note ?? '',
             memo.sourceSessionTitle ?? '',
           ]
             .join(' ')
@@ -138,8 +140,37 @@ describe('MemoryLookupTool', () => {
     expect(result.output).not.toContain('Resolve OAuth redirect loop');
   });
 
-  it('returns an error when the store is unavailable', async () => {
-    const tool = new MemoryLookupTool({ memoStore: undefined } as unknown as Agent);
+  it('surfaces the latest distillation and note', async () => {
+    const memos = [
+      makeMemo({
+        id: 'm1',
+        sourceSessionId: 's1',
+        userNeed: '修复令牌刷新',
+        approach: '统一走拦截器',
+        outcome: '完成',
+        whatFailed: 'none',
+        whatWorked: '拦截器自动刷新',
+        distilled: '刷新令牌统一走拦截器，不要在页面手动重试',
+        note: '先看网关日志',
+        extractionSource: 'compaction',
+      }),
+    ];
+    const { agent } = makeAgent(memos);
+    const tool = new MemoryLookupTool(agent);
+
+    const result = await executeTool(tool, {
+      turnId: 't1',
+      toolCallId: 'call_1',
+      args: { query: '手动重试', min_score: 0 },
+      signal,
+    });
+
+    expect(result.isError).toBeFalsy();
+    expect(result.output).toContain('Latest distillation: 刷新令牌统一走拦截器');
+    expect(result.output).toContain('Note: 先看网关日志');
+  });
+
+  it('returns an error when the store is unavailable', async () => {    const tool = new MemoryLookupTool({ memoStore: undefined } as unknown as Agent);
 
     const result = await executeTool(tool, {
       turnId: 't1',

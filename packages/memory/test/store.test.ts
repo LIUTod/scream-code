@@ -147,6 +147,67 @@ describe('MemoryMemoStore', () => {
     it('returns false when updating a missing memo', async () => {
       expect(await store.update('nonexistent', { userNeed: 'x' })).toBe(false);
     });
+
+    it('round-trips the distilled conclusion through append, get and update', async () => {
+      const memo = makeMemo({ distilled: '刷新令牌统一走拦截器' });
+      await store.append(memo);
+      expect((await store.get(memo.id))!.distilled).toBe('刷新令牌统一走拦截器');
+
+      await store.update(memo.id, { distilled: '更新后的最新归纳' });
+      expect((await store.get(memo.id))!.distilled).toBe('更新后的最新归纳');
+    });
+
+    it('reads back undefined when a memo has no distilled conclusion', async () => {
+      const memo = makeMemo();
+      await store.append(memo);
+      expect((await store.get(memo.id))!.distilled).toBeUndefined();
+    });
+
+    it('finds a memo whose only match is the distilled conclusion', async () => {
+      // `memos_fts` does not index `distilled`, so a second memo matches the
+      // query in an indexed field and makes the FTS stage return a non-empty
+      // candidate set. The distilled-only memo must still be found.
+      await store.append(makeMemo({ userNeed: 'redis 配置管理', approach: '集中管理' }));
+      const distilledOnly = makeMemo({
+        userNeed: '修复慢查询',
+        approach: '加索引',
+        distilled: 'redis 连接池要复用',
+      });
+      await store.append(distilledOnly);
+
+      const result = await store.list({ search: 'redis' });
+      expect(result.memos.map((memo) => memo.id)).toContain(distilledOnly.id);
+    });
+
+    it('caps the union of FTS and distilled/note matches at the candidate limit', async () => {
+      await store.append(makeMemo({ userNeed: '任务一', note: 'redis 一' }));
+      await store.append(makeMemo({ userNeed: '任务二', note: 'redis 二' }));
+
+      const matches = await store.search('redis', { candidateLimit: 1 });
+      expect(matches.length).toBeLessThanOrEqual(1);
+    });
+
+    it('round-trips the note through append, get and update', async () => {
+      const memo = makeMemo({ note: '先跑 typecheck 再提交' });
+      await store.append(memo);
+      expect((await store.get(memo.id))!.note).toBe('先跑 typecheck 再提交');
+
+      await store.update(memo.id, { note: '提交前先跑全量门禁' });
+      expect((await store.get(memo.id))!.note).toBe('提交前先跑全量门禁');
+    });
+
+    it('finds a memo whose only match is the note', async () => {
+      await store.append(makeMemo({ userNeed: '发布流程', approach: 'changeset' }));
+      const noteOnly = makeMemo({
+        userNeed: '另一个任务',
+        approach: '另一种做法',
+        note: '记得关闭 tcp 端口',
+      });
+      await store.append(noteOnly);
+
+      const result = await store.list({ search: 'tcp' });
+      expect(result.memos.map((memo) => memo.id)).toContain(noteOnly.id);
+    });
   });
 
   describe('init', () => {
@@ -689,5 +750,144 @@ describe('buildExitExtractionPrompt', () => {
     expect(prompt).toContain('[assistant] done');
     expect(prompt).toContain('已完成的任务闭环');
     expect(prompt).toContain('对话记录');
+  });
+});
+
+describe('memo provenance', () => {
+  let tmpDir: string;
+  let store: MemoryMemoStore;
+
+  beforeEach(async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'scream-provenance-'));
+    store = new MemoryMemoStore(tmpDir);
+    await store.init();
+  });
+
+  afterEach(async () => {
+    store.close();
+    await rm(tmpDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 25 });
+  });
+
+  const lineage = [
+    { id: 'memo-a', title: '修复登录', at: 1_700_000_000_000 },
+    { id: 'memo-b', title: '刷新令牌', at: 1_700_000_100_000 },
+  ];
+
+  it('round-trips origin, distilledAt and distilledFrom through append/get/update', async () => {
+    const memo = createMemoryMemo({
+      sourceSessionId: 's1',
+      userNeed: '令牌刷新',
+      approach: '统一走拦截器',
+      outcome: '完成',
+      whatFailed: 'none',
+      whatWorked: 'none',
+      extractionSource: 'compaction',
+      distilled: '刷新令牌统一走拦截器',
+      origin: 'dream',
+      distilledAt: 1_700_000_200_000,
+      distilledFrom: lineage,
+    });
+    await store.append(memo);
+
+    const loaded = await store.get(memo.id);
+    expect(loaded?.origin).toBe('dream');
+    expect(loaded?.distilledAt).toBe(1_700_000_200_000);
+    expect(loaded?.distilledFrom).toEqual(lineage);
+
+    await store.update(memo.id, {
+      origin: 'user',
+      distilled: '人工改写后的结论',
+      distilledAt: 1_700_000_300_000,
+    });
+    const updated = await store.get(memo.id);
+    expect(updated?.origin).toBe('user');
+    expect(updated?.distilled).toBe('人工改写后的结论');
+    expect(updated?.distilledAt).toBe(1_700_000_300_000);
+    expect(updated?.distilledFrom).toEqual(lineage);
+
+    await store.update(memo.id, {
+      distilled: undefined,
+      origin: 'session',
+      distilledAt: undefined,
+      distilledFrom: undefined,
+    });
+    const cleared = await store.get(memo.id);
+    expect(cleared?.distilled).toBeUndefined();
+    expect(cleared?.origin).toBe('session');
+    expect(cleared?.distilledAt).toBeUndefined();
+    expect(cleared?.distilledFrom).toBeUndefined();
+  });
+
+  it('defaults origin to session for extracted memos', async () => {
+    const memo = createMemoryMemo({
+      sourceSessionId: 's1',
+      userNeed: '普通经历',
+      approach: '直接做',
+      outcome: '完成',
+      whatFailed: 'none',
+      whatWorked: 'none',
+      extractionSource: 'exit',
+    });
+    expect(memo.origin).toBe('session');
+    await store.append(memo);
+    expect((await store.get(memo.id))?.origin).toBe('session');
+    expect((await store.get(memo.id))?.distilledAt).toBeUndefined();
+    expect((await store.get(memo.id))?.distilledFrom).toBeUndefined();
+  });
+
+  it('falls back to session when the stored origin is not a known value', async () => {
+    const memo = createMemoryMemo({
+      sourceSessionId: 's1',
+      userNeed: '非法来源',
+      approach: '直接做',
+      outcome: '完成',
+      whatFailed: 'none',
+      whatWorked: 'none',
+      extractionSource: 'exit',
+    });
+    await store.append(memo);
+    const db = new DatabaseSync(join(tmpDir, 'memory', 'memos.sqlite'));
+    db.prepare("UPDATE memos SET origin = 'bogus' WHERE id = ?").run(memo.id);
+    db.close();
+    expect((await store.get(memo.id))?.origin).toBe('session');
+  });
+
+  it('drops invalid distilled_from entries and ignores corrupt JSON', async () => {
+    const memo = createMemoryMemo({
+      sourceSessionId: 's1',
+      userNeed: '来源校验',
+      approach: '直接做',
+      outcome: '完成',
+      whatFailed: 'none',
+      whatWorked: 'none',
+      extractionSource: 'exit',
+      distilled: '结论',
+      origin: 'dream',
+    });
+    await store.append(memo);
+    const db = new DatabaseSync(join(tmpDir, 'memory', 'memos.sqlite'));
+    const setColumn = (value: string): void => {
+      db.prepare('UPDATE memos SET distilled_from = ? WHERE id = ?').run(value, memo.id);
+    };
+
+    setColumn(
+      JSON.stringify([
+        { id: 'ok', title: '有效', at: 1 },
+        { id: 'no-at', title: '缺时间' },
+        'garbage',
+        { id: 'bad-at', title: '坏时间', at: Number.NaN },
+      ]),
+    );
+    expect((await store.get(memo.id))?.distilledFrom).toEqual([
+      { id: 'ok', title: '有效', at: 1 },
+    ]);
+
+    setColumn('not-json{');
+    expect((await store.get(memo.id))?.distilledFrom).toBeUndefined();
+
+    setColumn('{"id":"not-an-array"}');
+    expect((await store.get(memo.id))?.distilledFrom).toBeUndefined();
+
+    db.close();
   });
 });

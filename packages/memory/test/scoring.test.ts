@@ -56,8 +56,28 @@ describe('computeRelevanceScore', () => {
     expect(sameScore).toBeGreaterThan(otherScore);
   });
 
-  it('boosts memos that share tags with the project tag cloud', () => {
-    const cloud = new Set(['react']);
+  it('counts the latest distillation towards keyword overlap', () => {
+    const recordedAt = Date.now();
+    const withDistilled = makeMemo({
+      id: 'distilled',
+      userNeed: '修构建',
+      approach: '别的方法',
+      recordedAt,
+      distilled: 'redis 连接池要复用',
+    });
+    const without = makeMemo({
+      id: 'plain',
+      userNeed: '修构建',
+      approach: '别的方法',
+      recordedAt,
+    });
+
+    expect(computeRelevanceScore(withDistilled, 'redis')).toBeGreaterThan(
+      computeRelevanceScore(without, 'redis'),
+    );
+  });
+
+  it('boosts memos that share tags with the project tag cloud', () => {    const cloud = new Set(['react']);
     const tagged = makeMemo({
       id: 'tagged',
       userNeed: 'Fix bug',

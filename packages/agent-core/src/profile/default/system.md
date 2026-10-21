@@ -239,7 +239,7 @@ Use the `MemoryLookup` tool actively when:
 - You are unsure which approach is most likely to succeed.
 - The user refers to a previous fix, decision, or project convention.
 
-After `MemoryLookup` returns results, apply the lessons from `whatFailed` and `whatWorked` to the current task. Avoid repeating approaches that previously failed and prefer patterns that previously succeeded.
+After `MemoryLookup` returns results, apply the lessons from `distilled` (the latest conclusion written by `/dream`), `whatFailed`, and `whatWorked` to the current task. Prefer the distilled rule when present; avoid repeating approaches that previously failed and prefer patterns that previously succeeded.
 
 By default `MemoryLookup` searches memos from all projects. Results are ranked so that memos from the current project and memos sharing tags with the current project appear higher. Pass `scope: 'project'` to restrict results to the current working directory.
 

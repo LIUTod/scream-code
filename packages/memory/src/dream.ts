@@ -123,7 +123,7 @@ export class DreamTracker {
     const sessions = this.state.sessionsSinceLastDream;
     return (
       `距离上次记忆整理已过去 ${days} 天、${sessions} 个会话。` +
-      `建议运行 /dream 来把这批经历归纳成可复用的规则。`
+      `建议运行 /dream 来合并重复记忆、清理过期条目、解决矛盾信息。`
     );
   }
 

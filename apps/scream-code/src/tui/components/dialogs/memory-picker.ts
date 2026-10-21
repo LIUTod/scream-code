@@ -35,6 +35,9 @@ import { printableChar } from '#/tui/utils/printable-key';
 
 const ELLIPSIS = '…';
 
+/** One-sentence conclusion: generous for a rule, bounded for prompt injection. */
+const MAX_DISTILLED_CHARS = 200;
+
 function formatRelativeTime(ts: number): string {
   if (!Number.isFinite(ts) || ts <= 0) return '';
   const diffSec = Math.floor(Math.max(0, Date.now() - ts) / 1000);
@@ -45,6 +48,14 @@ function formatRelativeTime(ts: number): string {
   if (hours < 24) return t('memory.hours_ago', { hours });
   const days = Math.floor(hours / 24);
   return t('memory.days_ago', { days });
+}
+
+/** Local calendar date as YYYY-MM-DD; avoids the UTC off-by-one of toISOString. */
+function formatDate(ts: number): string {
+  const date = new Date(ts);
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${date.getFullYear()}-${month}-${day}`;
 }
 
 function singleLine(text: string): string {
@@ -117,7 +128,7 @@ export interface MemoryPickerOptions {
   onInject: (memo: MemoryMemoSummary) => void;
 }
 
-type PickerMode = 'list' | 'detail' | 'confirmDelete';
+type PickerMode = 'list' | 'detail' | 'confirmDelete' | 'editDistilled';
 
 export class MemoryPickerComponent extends Container implements Focusable {
   private store: MemoryMemoStore;
@@ -132,6 +143,12 @@ export class MemoryPickerComponent extends Container implements Focusable {
   private searchQuery = '';
   private isSearching = false;
   private searchInput = '';
+  /** Draft text for the in-place edit of the latest distillation. */
+  private editBuffer = '';
+  /** Set when the last save failed; keeps the draft on screen for a retry. */
+  private editError = false;
+  /** Guards against a second Enter while the update is in flight. */
+  private saving = false;
   /** Memo ids ticked for batch delete (space toggles, a selects all). */
   private selectedIds = new Set<string>();
 
@@ -198,6 +215,31 @@ export class MemoryPickerComponent extends Container implements Focusable {
       return;
     }
 
+    if (this.mode === 'editDistilled') {
+      if (matchesKey(data, Key.escape)) {
+        this.editBuffer = '';
+        this.mode = 'detail';
+        this.ui?.requestRender();
+        return;
+      }
+      if (matchesKey(data, Key.enter)) {
+        if (!this.saving) void this.saveDistilled();
+        return;
+      }
+      if (matchesKey(data, Key.backspace) || matchesKey(data, Key.delete)) {
+        // Slice by code point so an emoji is removed whole.
+        this.editBuffer = Array.from(this.editBuffer).slice(0, -1).join('');
+        this.ui?.requestRender();
+        return;
+      }
+      const typed = printableChar(data);
+      if (typed.length > 0) {
+        if (Array.from(this.editBuffer).length < MAX_DISTILLED_CHARS) this.editBuffer += typed;
+        this.ui?.requestRender();
+      }
+      return;
+    }
+
     if (this.mode === 'confirmDelete') {
       if (matchesKey(data, Key.enter)) {
         if (this.selectedIds.size > 0) {
@@ -219,6 +261,14 @@ export class MemoryPickerComponent extends Container implements Focusable {
       if (matchesKey(data, Key.escape) || matchesKey(data, Key.enter)) {
         this.mode = 'list';
         this.detailMemo = null;
+        return;
+      }
+      const key = printableChar(data);
+      if ((key === 'e' || key === 'E') && this.detailMemo !== null) {
+        this.editBuffer = this.detailMemo.distilled ?? '';
+        this.editError = false;
+        this.mode = 'editDistilled';
+        this.ui?.requestRender();
         return;
       }
     }
@@ -295,6 +345,60 @@ export class MemoryPickerComponent extends Container implements Focusable {
     this.ui?.requestRender();
   }
 
+  /**
+   * Persist the edited distillation. A non-empty text becomes a user-authored
+   * rule; clearing it drops back to a plain extracted memo.
+   */
+  private async saveDistilled(): Promise<void> {
+    const memo = this.detailMemo;
+    if (memo === null) {
+      this.mode = 'list';
+      return;
+    }
+    this.saving = true;
+    const text = this.editBuffer.trim();
+    // Pressing Enter without changing the conclusion must not rewrite its
+    // provenance (origin would flip to `user` and the real date would be lost).
+    if (text === (memo.distilled ?? '').trim()) {
+      this.saving = false;
+      this.editBuffer = '';
+      this.mode = 'detail';
+      this.ui?.requestRender();
+      return;
+    }
+    try {
+      await this.store.update(memo.id, {
+        distilled: text.length > 0 ? text : undefined,
+        // A cleared conclusion is no longer a rule, so its lineage goes too.
+        distilledFrom: text.length > 0 ? memo.distilledFrom : undefined,
+        origin: text.length > 0 ? 'user' : 'session',
+        distilledAt: text.length > 0 ? Date.now() : undefined,
+      });
+    } catch {
+      // Keep the edit view and the draft so the user can retry.
+      this.editError = true;
+      this.saving = false;
+      this.ui?.requestRender();
+      return;
+    }
+    this.saving = false;
+    this.editError = false;
+    this.editBuffer = '';
+    await this.loadMemos();
+    // loadMemos resets the cursor; keep the edited memo selected so the detail
+    // view returns to the entry that was just saved. An active search may have
+    // filtered it out, in which case there is nothing safe to open.
+    const index = this.memos.findIndex((item) => item.id === memo.id);
+    if (index < 0) {
+      this.detailMemo = null;
+      this.mode = 'list';
+      this.ui?.requestRender();
+      return;
+    }
+    this.selectedIndex = index;
+    await this.showDetail();
+  }
+
   private async deleteAndReload(id: string): Promise<void> {
     try {
       await this.store.delete(id);
@@ -323,10 +427,8 @@ export class MemoryPickerComponent extends Container implements Focusable {
 
   override render(width: number): string[] {
     const c = this.colors;
-    const lines: string[] = [];
-
     // ── separator
-    lines.push(chalk.hex(c.primary)('─'.repeat(width)));
+    const lines: string[] = [chalk.hex(c.primary)('─'.repeat(width))];
 
     // Search input bar
     if (this.isSearching) {
@@ -386,6 +488,11 @@ export class MemoryPickerComponent extends Container implements Focusable {
       return this.renderDetail(lines, width, c);
     }
 
+    // In-place editing of the latest distillation
+    if (this.mode === 'editDistilled' && this.detailMemo) {
+      return this.renderEditDistilled(lines, width, c);
+    }
+
     // Confirm delete
     if (this.mode === 'confirmDelete') {
       if (this.selectedIds.size > 0) {
@@ -396,6 +503,17 @@ export class MemoryPickerComponent extends Container implements Focusable {
           width, ELLIPSIS,
         ));
         lines.push(chalk.hex(c.warning)(t('memory.batch_delete_hint')));
+        const hasRule = this.memos.some(
+          (memo) =>
+            this.selectedIds.has(memo.id) &&
+            memo.origin !== undefined &&
+            memo.origin !== 'session',
+        );
+        if (hasRule) {
+          lines.push(chalk.hex(c.warning)(
+            truncateToWidth(`  ${t('memory.delete_rule_warning')}`, width, ELLIPSIS),
+          ));
+        }
       } else {
         const memo = this.memos[this.selectedIndex];
         if (memo) {
@@ -404,6 +522,11 @@ export class MemoryPickerComponent extends Container implements Focusable {
             width, ELLIPSIS,
           ));
           lines.push(chalk.hex(c.warning)(t('memory.delete_confirm_hint')));
+          if (memo.origin !== undefined && memo.origin !== 'session') {
+            lines.push(chalk.hex(c.warning)(
+              truncateToWidth(`  ${t('memory.delete_rule_warning')}`, width, ELLIPSIS),
+            ));
+          }
         }
       }
       lines.push(chalk.hex(c.primary)('─'.repeat(width)));
@@ -451,9 +574,18 @@ export class MemoryPickerComponent extends Container implements Focusable {
     const titleColor = isSelected ? c.primary : c.text;
     const titleStyle = isSelected ? chalk.hex(titleColor).bold : chalk.hex(titleColor);
 
-    const time = formatRelativeTime(memo.recordedAt);
-    const src = sourceLabel(memo.extractionSource);
+    const sources = memo.distilledFrom ?? [];
+    const isRule = memo.origin !== undefined && memo.origin !== 'session';
+    const time = formatRelativeTime(isRule ? (memo.distilledAt ?? memo.recordedAt) : memo.recordedAt);
+    const src = isRule
+      ? memo.origin === 'user'
+        ? t('memory.origin_user')
+        : t('memory.origin_dream')
+      : sourceLabel(memo.extractionSource);
     const trailingParts = [time, src].filter((p) => p.length > 0);
+    if (isRule && sources.length > 0) {
+      trailingParts.push(t('memory.source_count', { count: String(sources.length) }));
+    }
     const trailingText = trailingParts.length > 0 ? '  ' + trailingParts.join('  ') : '';
     const trailingWidth = visibleWidth(trailingText);
     const headerPrefixWidth = visibleWidth(pointer) + 1 + visibleWidth(check) + 1;
@@ -498,6 +630,14 @@ export class MemoryPickerComponent extends Container implements Focusable {
       );
     }
 
+    // Fifth line: latest distillation (only when /dream wrote one)
+    if (memo.distilled !== undefined && memo.distilled.length > 0) {
+      const distilledPreview = t('memory.distilled_label') + singleLine(memo.distilled);
+      card.push(
+        indent + chalk.hex(c.success ?? c.primary)(truncateToWidth(distilledPreview, Math.max(8, width - indentWidth), ELLIPSIS)),
+      );
+    }
+
     return card;
   }
 
@@ -507,7 +647,7 @@ export class MemoryPickerComponent extends Container implements Focusable {
     c: ColorPalette,
   ): string[] {
     const memo = this.detailMemo!;
-    const time = new Date(memo.recordedAt).toLocaleString('zh-CN');
+    const time = formatDate(memo.recordedAt);
     const sessionLabel = memo.sourceSessionTitle && memo.sourceSessionTitle.length > 0
       ? `${memo.sourceSessionTitle} (${memo.sourceSessionId.slice(0, 12)})`
       : memo.sourceSessionId.slice(0, 12);
@@ -519,8 +659,13 @@ export class MemoryPickerComponent extends Container implements Focusable {
       width, ELLIPSIS,
     ));
     lines.push('');
+    const sourceName = memo.origin !== undefined && memo.origin !== 'session'
+      ? memo.origin === 'user'
+        ? t('memory.origin_user')
+        : t('memory.origin_dream')
+      : sourceLabel(memo.extractionSource);
     lines.push(chalk.hex(c.textMuted)(
-      truncateToWidth(`${indent}${t('memory.result_label')}${memo.outcome}    ${t('memory.source_label')}${sourceLabel(memo.extractionSource)}    ${time}`, width, ELLIPSIS),
+      truncateToWidth(`${indent}${t('memory.result_label')}${memo.outcome}    ${t('memory.source_label')}${sourceName}    ${time}`, width, ELLIPSIS),
     ));
     lines.push(chalk.hex(c.textMuted)(
       truncateToWidth(`${indent}${t('memory.session_label')}${sessionLabel}`, width, ELLIPSIS),
@@ -578,6 +723,49 @@ export class MemoryPickerComponent extends Container implements Focusable {
       }
       lines.push('');
     }
+    if (memo.distilled !== undefined && memo.distilled.length > 0) {
+      const label = t('memory.distilled_label');
+      const wrapped = wrapText(memo.distilled, contentWidth - visibleWidth(label));
+      for (let i = 0; i < wrapped.length; i++) {
+        const prefix = i === 0 ? `${indent}${label}` : indent + ' '.repeat(visibleWidth(label));
+        lines.push(truncateToWidth(
+          chalk.hex(c.success ?? c.primary)(prefix + wrapped[i]),
+          width, ELLIPSIS,
+        ));
+      }
+      lines.push('');
+    }
+    if (memo.origin !== undefined && memo.origin !== 'session') {
+      const distilledAtLabel = memo.distilledAt !== undefined
+        ? `${t('memory.distilled_at')} ${formatDate(memo.distilledAt)}`
+        : t('memory.distilled_at_unknown');
+      lines.push(chalk.hex(c.textMuted)(
+        truncateToWidth(`${indent}${distilledAtLabel}`, width, ELLIPSIS),
+      ));
+      const sources = memo.distilledFrom ?? [];
+      lines.push(chalk.hex(c.textMuted)(truncateToWidth(
+        `${indent}${sources.length > 0
+          ? t('memory.source_count', { count: String(sources.length) })
+          : t('memory.source_unknown')}`,
+        width, ELLIPSIS,
+      )));
+      for (const source of sources.slice(0, 5)) {
+        const date = formatDate(source.at);
+        lines.push(chalk.hex(c.textMuted)(truncateToWidth(
+          `${indent}- ${date} · ${singleLine(source.title)}`, width, ELLIPSIS,
+        )));
+      }
+      if (sources.length > 5) {
+        lines.push(chalk.hex(c.textDim)(
+          truncateToWidth(
+            `${indent}${t('memory.source_more', { count: String(sources.length - 5) })}`,
+            width,
+            ELLIPSIS,
+          ),
+        ));
+      }
+      lines.push('');
+    }
     if (memo.note !== undefined && memo.note.length > 0) {
       const label = t('memory.note_label');
       const wrapped = wrapText(memo.note, contentWidth - visibleWidth(label));
@@ -593,6 +781,39 @@ export class MemoryPickerComponent extends Container implements Focusable {
 
     lines.push(chalk.hex(c.textMuted)(
       truncateToWidth(t('memory.detail_nav_hint'), width, ELLIPSIS),
+    ));
+    lines.push(chalk.hex(c.primary)('─'.repeat(width)));
+    return lines;
+  }
+
+  private renderEditDistilled(
+    lines: string[],
+    width: number,
+    c: ColorPalette,
+  ): string[] {
+    const memo = this.detailMemo!;
+    const indent = '  ';
+    lines.push(truncateToWidth(
+      chalk.hex(c.primary).bold(`${indent}${t('memory.requirement_label')}${memo.userNeed}`),
+      width, ELLIPSIS,
+    ));
+    lines.push('');
+    lines.push(chalk.hex(c.textMuted)(
+      truncateToWidth(`${indent}${t('memory.distilled_label')}`, width, ELLIPSIS),
+    ));
+    // Wrap instead of truncating: the cursor must stay visible while typing.
+    const contentWidth = Math.max(8, width - indent.length * 2);
+    for (const line of wrapText(`${this.editBuffer}█`, contentWidth)) {
+      lines.push(chalk.hex(c.success ?? c.primary)(`${indent}${line}`));
+    }
+    lines.push('');
+    if (this.editError) {
+      lines.push(chalk.hex(c.error)(
+        truncateToWidth(`${indent}${t('memory.edit_save_failed')}`, width, ELLIPSIS),
+      ));
+    }
+    lines.push(chalk.hex(c.textMuted)(
+      truncateToWidth(`${indent}${t('memory.edit_distilled_hint')}`, width, ELLIPSIS),
     ));
     lines.push(chalk.hex(c.primary)('─'.repeat(width)));
     return lines;

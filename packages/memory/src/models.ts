@@ -2,11 +2,16 @@ import { normalizeTags } from './tags.js';
 
 /** Memory memo types — structured task experience records extracted from conversations. */
 
-/** `digested` memos are kept for a short grace window after /dream folds them into a digest, then deleted. */
-export type MemoStatus = 'active' | 'digested';
+/** What produced a memo: an extracted session experience, a /dream rule, or a user rewrite. */
+export type MemoOrigin = 'session' | 'dream' | 'user';
 
-/** What kind of experience a memo carries. Unset for rows written before /dream classified them. */
-export type MemoKind = 'fact' | 'preference' | 'procedure' | 'pitfall' | 'episodic';
+/** Snapshot of a memo folded into a distilled conclusion. */
+export interface DistilledSource {
+  id: string;
+  /** Source memo's userNeed, truncated for storage. */
+  title: string;
+  at: number;
+}
 
 export interface MemoryMemo {
   /** Unique ID generated at creation time. */
@@ -25,6 +30,14 @@ export interface MemoryMemo {
   whatFailed: string;
   /** What ultimately worked — key actions that led to success. 'none' if nothing notable. */
   whatWorked: string;
+  /** Latest one-sentence distillation written by /dream; empty/undefined when never distilled. */
+  distilled?: string;
+  /** What produced this memo. Defaults to 'session' for extracted experiences. */
+  origin?: MemoOrigin;
+  /** Memos folded into `distilled`; kept across generations of consolidation. */
+  distilledFrom?: DistilledSource[];
+  /** Epoch milliseconds when `distilled` was generated or last rewritten. */
+  distilledAt?: number;
   /** How this memo was triggered. */
   extractionSource: 'compaction' | 'exit' | 'manual';
   /** Epoch milliseconds when this entry was created. */
@@ -37,16 +50,6 @@ export interface MemoryMemo {
    * supplement (e.g. a reusable behavioural hint) that helps future turns
    * understand the memo. Advisory only, not a user-enforced preference. */
   note?: string;
-  /** Lifecycle status; absent means `active` (default for older rows). */
-  status?: MemoStatus;
-  /** Classification produced by /dream; absent until the memo is analyzed. */
-  kind?: MemoKind;
-  /** When /dream folded this memo into a digest. */
-  digestedAt?: number;
-  /** Digest that absorbed this memo. */
-  digestId?: string;
-  /** Last time retrieval surfaced this memo — drives TTL and eviction. */
-  lastHitAt?: number;
 }
 
 /** JSONL envelope — one line in entries.jsonl. */
@@ -66,15 +69,15 @@ export interface MemoryMemoSummary {
   outcome: string;
   whatFailed: string;
   whatWorked: string;
+  distilled?: string;
+  origin?: MemoOrigin;
+  distilledFrom?: DistilledSource[];
+  distilledAt?: number;
   extractionSource: string;
   recordedAt: number;
   projectDir: string;
   tags?: string[];
   note?: string;
-  /** Lifecycle status; absent means active. Present for `digested` rows. */
-  status?: MemoStatus;
-  /** Classification, once /dream has analyzed the memo. */
-  kind?: MemoKind;
 }
 
 /** Result of listing/filtering memos. */
@@ -90,11 +93,18 @@ function generateId(): string {
 }
 
 export function createMemoryMemo(
-  partial: Omit<MemoryMemo, 'id' | 'recordedAt' | 'projectDir' | 'tags'> & {
+  partial: Omit<
+    MemoryMemo,
+    'id' | 'recordedAt' | 'projectDir' | 'tags' | 'distilled' | 'origin' | 'distilledFrom' | 'distilledAt'
+  > & {
     id?: string;
     recordedAt?: number;
     projectDir?: string;
     tags?: string[] | unknown;
+    distilled?: string;
+    origin?: MemoOrigin;
+    distilledFrom?: DistilledSource[];
+    distilledAt?: number;
   },
 ): MemoryMemo {
   return {
@@ -106,6 +116,10 @@ export function createMemoryMemo(
     outcome: partial.outcome,
     whatFailed: partial.whatFailed,
     whatWorked: partial.whatWorked,
+    distilled: partial.distilled,
+    origin: partial.origin ?? 'session',
+    distilledFrom: partial.distilledFrom,
+    distilledAt: partial.distilledAt,
     extractionSource: partial.extractionSource,
     recordedAt: partial.recordedAt ?? Date.now(),
     projectDir: partial.projectDir ?? '',
@@ -120,7 +134,7 @@ function normalizedTags(value: unknown): string[] | undefined {
 }
 
 export function toSummary(memo: MemoryMemo): MemoryMemoSummary {
-  const summary: MemoryMemoSummary = {
+  return {
     id: memo.id,
     sourceSessionTitle: memo.sourceSessionTitle,
     sourceSessionId: memo.sourceSessionId,
@@ -129,60 +143,14 @@ export function toSummary(memo: MemoryMemo): MemoryMemoSummary {
     outcome: memo.outcome,
     whatFailed: memo.whatFailed,
     whatWorked: memo.whatWorked,
+    distilled: memo.distilled,
+    origin: memo.origin,
+    distilledFrom: memo.distilledFrom,
+    distilledAt: memo.distilledAt,
     extractionSource: memo.extractionSource,
     recordedAt: memo.recordedAt,
     projectDir: memo.projectDir,
     tags: memo.tags,
     note: memo.note,
   };
-  if (summary.status === 'digested') summary.status = 'digested';
-  return summary;
-}
-
-/** A distilled rule produced by /dream. */
-export type DigestKind = 'fact' | 'preference' | 'procedure' | 'pitfall';
-export type DigestStatus = 'active' | 'dormant';
-
-/** One piece of evidence behind a digest; the memo itself is deleted after the grace window. */
-export interface DigestEvidence {
-  id: string;
-  title: string;
-  at: number;
-}
-
-/** A statement this digest replaced, kept so history is not lost on conflict. */
-export interface SupersededStatement {
-  statement: string;
-  at: number;
-}
-
-export interface MemoryDigest {
-  id: string;
-  topic: string;
-  kind: DigestKind;
-  /** The conclusion itself — short enough to inject verbatim. */
-  statement: string;
-  /** Project path this applies to; undefined means global. */
-  appliesTo?: string;
-  confidence: 'high' | 'medium' | 'low';
-  evidence: DigestEvidence[];
-  /** Earliest evidence timestamp. */
-  evidenceFrom: number;
-  /** Latest evidence timestamp. */
-  evidenceTo: number;
-  createdAt: number;
-  /** Last time the statement itself changed. */
-  updatedAt: number;
-  /** Last time /dream re-derived the same statement (unchanged still counts). */
-  lastConfirmedAt: number;
-  lastHitAt?: number;
-  hitCount: number;
-  status: DigestStatus;
-  superseded?: SupersededStatement[];
-}
-
-export function generateDigestId(): string {
-  const ts = Date.now().toString(36);
-  const rand = Math.random().toString(36).slice(2, 8);
-  return `digest-${ts}-${rand}`;
 }

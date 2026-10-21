@@ -2,7 +2,6 @@ import type { Agent } from '..';
 import type { DynamicInjector } from './injector';
 import { GoalInjector } from './goal';
 import { createMcpCapabilityGuideInjectors } from './mcp-capability-guides';
-import { MemoryDigestInjector } from './memory-digests';
 import { PermissionModeInjector } from './permission-mode';
 import { PluginSessionStartInjector } from './plugin-session-start';
 import { PlanModeInjector } from './plan-mode';
@@ -24,7 +23,6 @@ export class InjectionManager {
       new TodoListReminderInjector(agent),
       new GoalInjector(agent),
       new WorkingSetInjector(agent),
-      new MemoryDigestInjector(agent),
       new UserPrefsInjector(agent),
     ];
   }

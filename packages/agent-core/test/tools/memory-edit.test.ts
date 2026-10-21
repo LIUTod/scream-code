@@ -93,8 +93,47 @@ describe('MemoryEditTool', () => {
     expect(stored[0]!.tags).toEqual(['old']);
   });
 
-  it('updates tags', async () => {
+  it('updates the note and the latest distillation', async () => {
     const { agent, stored } = makeAgent([makeMemo('m1')]);
+    const tool = new MemoryEditTool(agent);
+
+    const result = await executeTool(tool, {
+      turnId: 't1',
+      toolCallId: 'call_1',
+      args: {
+        id: 'm1',
+        action: 'update',
+        updates: { note: '先看网关日志', distilled: '刷新令牌统一走拦截器' },
+      },
+      signal,
+    });
+
+    expect(result.isError).toBeFalsy();
+    expect(stored[0]!.note).toBe('先看网关日志');
+    expect(stored[0]!.distilled).toBe('刷新令牌统一走拦截器');
+    expect(stored[0]!.origin).toBe('user');
+    expect(stored[0]!.distilledAt).toBeGreaterThan(0);
+  });
+
+  it('clears the note and distillation when updated to an empty string', async () => {
+    const memo = { ...makeMemo('m1'), note: '旧笔记', distilled: '旧结论' };
+    const { agent, stored } = makeAgent([memo]);
+    const tool = new MemoryEditTool(agent);
+
+    await executeTool(tool, {
+      turnId: 't1',
+      toolCallId: 'call_1',
+      args: { id: 'm1', action: 'update', updates: { note: '   ', distilled: '' } },
+      signal,
+    });
+
+    expect(stored[0]!.note).toBeUndefined();
+    expect(stored[0]!.distilled).toBeUndefined();
+    expect(stored[0]!.origin).toBe('session');
+    expect(stored[0]!.distilledAt).toBeUndefined();
+  });
+
+  it('updates tags', async () => {    const { agent, stored } = makeAgent([makeMemo('m1')]);
     const tool = new MemoryEditTool(agent);
 
     const result = await executeTool(tool, {
