@@ -145,8 +145,6 @@ export function createMockTUIState(options: { appState?: Partial<AppState> } = {
       supportsOsc9: false,
       insideTmux: false,
     },
-    activitySpinner: null,
-    pulseWave: null,
     toolOutputExpanded: false,
     planExpanded: false,
     sessions: [] as unknown[],
@@ -199,6 +197,7 @@ export function makeMockStreamingUI(
     getActiveToolCall: vi.fn((): undefined => undefined),
     onToolCallStart: vi.fn(),
     hasActiveTurn: vi.fn((): boolean => false),
+    hasExecutingToolCalls: vi.fn((): boolean => false),
     // Default: no block is open, so a notice keeps its own transcript row.
     attachNotice: vi.fn((): boolean => false),
     recordApproval: vi.fn(),

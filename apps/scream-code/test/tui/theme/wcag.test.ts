@@ -73,6 +73,10 @@ const CHROME_TOKENS: readonly (keyof ColorPalette)[] = [
   'diffRemovedStrong',
   'diffGutter',
   'diffMeta',
+  // Status-bar wave stages are graphics, not body text: 3:1 is the bar. The
+  // yellow is deliberately vivid and the deep red is a solid block glyph.
+  'waveMid',
+  'wavePeak',
 ];
 
 const TEXT_THRESHOLD = 4.5;

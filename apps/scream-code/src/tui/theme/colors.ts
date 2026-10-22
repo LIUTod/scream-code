@@ -89,6 +89,9 @@ export interface ColorPalette {
   success: string;
   warning: string;
   error: string;
+  /** Status-bar wave ramp: mid stage (yellow) and peak stage (deep red). */
+  waveMid: string;
+  wavePeak: string;
 
   // Diff
   diffAdded: string;
@@ -142,6 +145,10 @@ export const darkColors: ColorPalette = {
   success: dark.yellowGreen,
   warning: dark.amber400,
   error: dark.red,
+  // Yellow arrives at 15s and deep red at 25s. The red is deliberately deeper
+  // than `error` but still clears 3:1 on a dark terminal (#1e1e1e ≈ 3.35:1).
+  waveMid: '#FFD400',
+  wavePeak: '#D32F2F',
 
   diffAdded: dark.yellowGreen,
   diffRemoved: dark.red,
@@ -192,6 +199,10 @@ export const lightColors: ColorPalette = {
   success: light.yellowGreen700,
   warning: light.amber800,
   error: light.red,
+  // Darkened for a white background: yellow needs ≥3:1 to stay legible
+  // (#A88400 ≈ 3.52:1) and deep red is free to go dark (#8B0000 = 10:1).
+  waveMid: '#A88400',
+  wavePeak: '#8B0000',
   diffAdded: light.yellowGreen700,
   diffRemoved: light.red,
   diffAddedStrong: light.yellowGreen700,

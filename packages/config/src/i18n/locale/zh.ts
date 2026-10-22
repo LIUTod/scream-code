@@ -29,6 +29,7 @@ export const zh: Record<string, string> = {
   'status.thinking': '思考中',
   'status.composing': '输出中',
   'status.tool': '执行中',
+  'status.calling_tool': '调用中',
   'status.waiting': '等待中',
   'status.compacting': '压缩中',
   'status.awaiting_approval': '等待批准',

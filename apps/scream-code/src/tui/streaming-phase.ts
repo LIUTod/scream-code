@@ -6,6 +6,7 @@
 //   waiting   — turn started, awaiting first token (footer "等待响应")
 //   thinking  — model emitting reasoning tokens (footer "思考中")
 //   composing — model emitting assistant text (footer "输出中")
+//   tool-args — model streaming a tool call's arguments (footer "调用中")
 //   tool      — tool call executing (footer "执行中")
 //
 // Transitions are directed. The graph below is intentionally permissive —
@@ -24,6 +25,7 @@ export const STREAMING_PHASES: readonly StreamingPhase[] = [
   'waiting',
   'thinking',
   'composing',
+  'tool-args',
   'tool',
 ] as const;
 

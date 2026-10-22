@@ -485,10 +485,11 @@ describe('LifecycleController — reconnect reason wording', () => {
   });
 });
 /**
- * The status-bar wave reports silence: it ramps while the agent is working but
- * not receiving anything, whatever the phase. These tests drive the real
- * controller so the anchor choice and the palette lookup are both covered
- * (dark theme here — the ramp itself is unit-tested).
+ * The status-bar wave reports network silence: it ramps while the agent is
+ * waiting on the model but receiving nothing, and stays on the brand colour
+ * while a tool executes locally. These tests drive the real controller so the
+ * anchor choice and the palette lookup are both covered (dark theme here — the
+ * ramp itself is unit-tested).
  */
 describe('status-bar wave colour', () => {
   const originalLevel = chalk.level;
@@ -527,12 +528,12 @@ describe('status-bar wave colour', () => {
     expect(line).toContain(sgr('#79eb00'));
   });
 
-  it('turns red once the first-token wait passes 25s', () => {
+  it('turns deep red once the first-token wait passes 25s', () => {
     const line = renderWave({
       streamingPhase: 'waiting',
       streamingStartTime: Date.now() - 40_000,
     });
-    expect(line).toContain(sgr('#E85454'));
+    expect(line).toContain(sgr('#D32F2F'));
   });
 
   it('stays green while reasoning tokens keep arriving', () => {
@@ -543,28 +544,28 @@ describe('status-bar wave colour', () => {
     expect(line).toContain(sgr('#79eb00'));
   });
 
-  it('turns red when the reasoning stream goes silent', () => {
+  it('turns deep red when the reasoning stream goes silent', () => {
     const line = renderWave(
       { streamingPhase: 'thinking', streamingStartTime: Date.now() - 120_000 },
       40_000,
     );
-    expect(line).toContain(sgr('#E85454'));
+    expect(line).toContain(sgr('#D32F2F'));
   });
 
-  it('turns red when a tool runs without progress past 25s', () => {
+  it('stays on the brand colour while a tool executes, however long it runs', () => {
     const line = renderWave({
       streamingPhase: 'tool',
-      streamingStartTime: Date.now() - 120_000,
+      streamingStartTime: Date.now() - 10 * 60_000,
     });
-    expect(line).toContain(sgr('#E85454'));
+    expect(line).toContain(sgr('#79eb00'));
   });
 
-  it('keeps the brand colour right after a tool event', () => {
-    const line = renderWave(
-      { streamingPhase: 'tool', streamingStartTime: Date.now() - 120_000 },
-      1_000,
-    );
-    expect(line).toContain(sgr('#79eb00'));
+  it('still ramps while the model is authoring a tool call', () => {
+    const line = renderWave({
+      streamingPhase: 'tool-args',
+      streamingStartTime: Date.now() - 40_000,
+    });
+    expect(line).toContain(sgr('#D32F2F'));
   });
 
   it('resets the clock when an inbound notice arrives mid-wait', () => {
@@ -575,12 +576,12 @@ describe('status-bar wave colour', () => {
     expect(line).toContain(sgr('#79eb00'));
   });
 
-  it('floors the wave at amber while a retry is in flight', () => {
+  it('floors the wave at yellow while a retry is in flight', () => {
     const line = renderWave({
       streamingPhase: 'waiting',
       streamingStartTime: Date.now() - 2_000,
       reconnectAttempt: 1,
     });
-    expect(line).toContain(sgr('#E8A838'));
+    expect(line).toContain(sgr('#FFD400'));
   });
 });

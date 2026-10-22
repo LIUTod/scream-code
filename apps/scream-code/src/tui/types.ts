@@ -84,7 +84,14 @@ export interface AppState {
   autoCompactionCount: number;
   isReplaying: boolean;
   isSwitchingSession: boolean;
-  streamingPhase: 'idle' | 'waiting' | 'thinking' | 'composing' | 'tool';
+  /**
+   * Work phase shown by the footer and the status-bar wave.
+   *
+   * `tool-args` is the model still streaming a tool call's arguments (network
+   * traffic, so silence there is meaningful); `tool` is a tool actually
+   * executing (local work, where silence is normal).
+   */
+  streamingPhase: 'idle' | 'waiting' | 'thinking' | 'composing' | 'tool-args' | 'tool';
   streamingStartTime: number;
   /**
    * Non-null while an interactive panel is blocked on the user (an approval

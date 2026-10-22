@@ -151,7 +151,7 @@ describe('footer status block — non-phase states', () => {
 });
 
 describe('footer status block — phase regressions', () => {
-  it('keeps the five phase labels and their elapsed formats', () => {
+  it('keeps the six phase labels and their elapsed formats', () => {
     expect(statusSegment(baseState({ streamingPhase: 'idle' })).endsWith('○ 空闲中')).toBe(true);
     expect(
       statusSegment(baseState({ streamingPhase: 'waiting', streamingStartTime: NOW - 3000 })).endsWith(
@@ -166,6 +166,11 @@ describe('footer status block — phase regressions', () => {
     expect(
       statusSegment(baseState({ streamingPhase: 'composing', streamingStartTime: NOW - 7000 })).endsWith(
         '输出中 7s',
+      ),
+    ).toBe(true);
+    expect(
+      statusSegment(baseState({ streamingPhase: 'tool-args', streamingStartTime: NOW - 4000 })).endsWith(
+        '调用中 4s',
       ),
     ).toBe(true);
     expect(

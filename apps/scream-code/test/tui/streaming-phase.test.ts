@@ -8,8 +8,15 @@ import {
 
 describe('streaming-phase', () => {
   describe('STREAMING_PHASES', () => {
-    it('enumerates the five canonical phases', () => {
-      expect(STREAMING_PHASES).toEqual(['idle', 'waiting', 'thinking', 'composing', 'tool']);
+    it('enumerates the six canonical phases', () => {
+      expect(STREAMING_PHASES).toEqual([
+        'idle',
+        'waiting',
+        'thinking',
+        'composing',
+        'tool-args',
+        'tool',
+      ]);
     });
   });
 
@@ -38,6 +45,10 @@ describe('streaming-phase', () => {
         ['composing', 'tool'],
         ['composing', 'waiting'],
         ['composing', 'idle'],
+        ['composing', 'tool-args'],
+        ['tool-args', 'tool'],
+        ['tool-args', 'composing'],
+        ['tool-args', 'waiting'],
         ['tool', 'composing'],
         ['tool', 'thinking'],
         ['tool', 'waiting'],
@@ -49,8 +60,8 @@ describe('streaming-phase', () => {
     });
 
     it('covers every directed pair across the phase space', () => {
-      // Sanity: 5 phases × 5 phases = 25 (from,to) pairs.
-      // 5 self-loops return false; the remaining 20 return true.
+      // Sanity: 6 phases × 6 phases = 36 (from,to) pairs.
+      // 6 self-loops return false; the remaining 30 return true.
       let trueCount = 0;
       let falseCount = 0;
       for (const from of STREAMING_PHASES) {
@@ -59,8 +70,8 @@ describe('streaming-phase', () => {
           else falseCount += 1;
         }
       }
-      expect(trueCount).toBe(20);
-      expect(falseCount).toBe(5);
+      expect(trueCount).toBe(30);
+      expect(falseCount).toBe(6);
     });
   });
 });

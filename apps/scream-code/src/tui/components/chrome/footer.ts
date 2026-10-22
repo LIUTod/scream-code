@@ -281,6 +281,8 @@ function buildStatusLine(
   let label: string;
   if (streamingPhase === 'tool') {
     label = t('status.tool');
+  } else if (streamingPhase === 'tool-args') {
+    label = t('status.calling_tool');
   } else if (streamingPhase === 'waiting') {
     label = t('status.waiting');
   } else if (streamingPhase === 'thinking') {
@@ -495,8 +497,8 @@ export class FooterComponent implements Component {
 
     const model = shortenModel(modelDisplayName(state));
     if (model) {
-      if (state.streamingPhase === 'thinking' || state.streamingPhase === 'waiting' || state.streamingPhase === 'composing') {
-        // Reasoning/latency states keep the default green shimmer.
+      if (state.streamingPhase === 'thinking' || state.streamingPhase === 'waiting' || state.streamingPhase === 'composing' || state.streamingPhase === 'tool-args') {
+        // Reasoning/latency/call-authoring states keep the default green shimmer.
         left.push(shimmerText(model, colors));
       } else if (state.streamingPhase === 'tool') {
         // A tool is executing: switch the glow to cyan so the user can tell

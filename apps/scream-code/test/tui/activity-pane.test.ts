@@ -125,7 +125,6 @@ describe('updateActivityPane terminal progress', () => {
 
       expect(setProgress).toHaveBeenCalledTimes(1);
       expect(setProgress).toHaveBeenLastCalledWith(true);
-      expect(state.activitySpinner).toBeNull();
       expect(state.activityContainer.children).toHaveLength(0);
 
       state.appState.streamingPhase = 'idle';
@@ -133,7 +132,6 @@ describe('updateActivityPane terminal progress', () => {
 
       expect(setProgress).toHaveBeenCalledTimes(2);
       expect(setProgress).toHaveBeenLastCalledWith(false);
-      expect(state.activitySpinner).toBeNull();
     } finally {
       vi.useRealTimers();
     }

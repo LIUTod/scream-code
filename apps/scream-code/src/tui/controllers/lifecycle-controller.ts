@@ -30,7 +30,7 @@ import { isDeadTerminalError } from '../utils/dead-terminal';
 import { isStreaming } from '../utils/app-state';
 import { installTerminalFocusTracking } from '../utils/terminal-focus';
 import { installTerminalThemeTracking } from '../utils/terminal-theme';
-import { resolveWaveColor, WAVE_AMBER_AT_MS } from '../utils/wave-color';
+import { resolveWaveColor, WAVE_YELLOW_AT_MS } from '../utils/wave-color';
 import { PulseWaveLoader } from '../components/chrome/pulse-wave-loader';
 import { type ActivityPaneMode } from '../components/panes/activity-pane';
 import chalk from 'chalk';
@@ -614,24 +614,8 @@ export class LifecycleController {
     this.updateStatusBar(effectiveMode);
     const { state } = this.host;
     state.activityContainer.clear();
-    // The status bar (above the editor) now owns the live work-phase
-    // indicator (spinner / pulse wave). The activity pane no longer renders
-    // a duplicate indicator — it stays empty. We still stop the shared
-    // activity spinner/pulse timers so nothing leaks.
-    switch (effectiveMode) {
-      case 'hidden':
-      case 'idle':
-        this.stopActivitySpinner();
-        this.stopPulseWave();
-        break;
-      case 'waiting':
-      case 'thinking':
-      case 'composing':
-      case 'tool':
-        this.stopActivitySpinner();
-        this.stopPulseWave();
-        break;
-    }
+    // The status bar (above the editor) owns the live work-phase indicator;
+    // the activity pane stays empty, so there is nothing else to tear down.
     state.ui.requestRender();
   }
 
@@ -774,13 +758,14 @@ export class LifecycleController {
     if (state.appState.isCompacting) return 'hidden';
     if (state.livePane.pendingQuestion !== null) return 'hidden';
 
-    // streamingPhase is the single source of truth for the work phase —
-    // 'tool' covers tool execution, the rest map directly to activity-pane
-    // display modes. 'idle' maps to the idle branch below.
+    // streamingPhase is the single source of truth for the work phase. Both
+    // tool phases share the activity-pane mode: 'tool-args' is the model
+    // authoring a call, 'tool' is it executing. 'idle' maps to the idle branch.
     const streamingPhase = state.appState.streamingPhase;
-    if (streamingPhase === 'waiting' || streamingPhase === 'thinking' || streamingPhase === 'composing' || streamingPhase === 'tool') {
+    if (streamingPhase === 'waiting' || streamingPhase === 'thinking' || streamingPhase === 'composing') {
       return streamingPhase;
     }
+    if (streamingPhase === 'tool-args' || streamingPhase === 'tool') return 'tool';
     return 'idle';
   }
 
@@ -803,48 +788,42 @@ export class LifecycleController {
   /**
    * Colour for the status-bar pulse wave.
    *
-   * Measures silence in whatever the agent is doing: a request awaiting its
-   * first token, a reasoning/text stream that stopped delivering, or a tool
-   * that has been running without emitting progress. Red is an early warning
-   * only — it never triggers a retry, because retries are driven by real
-   * transport errors (the 60s stall timeout, disconnects, rate limits).
+   * Measures silence in the *network* work: a request awaiting its first
+   * token, a reasoning/text stream that stopped delivering, or the model
+   * authoring a tool call. Tool execution itself is local work with its own
+   * timeout — a quiet `sleep`, build, or MCP call is not a stall — so the wave
+   * stays on the brand colour there and only a known retry lifts it to yellow.
    *
-   * Resolved per frame, so the ramp advances and a live theme switch applies
-   * without rebuilding the status bar.
+   * Timing is an early warning only: retries are driven by real transport
+   * errors (the 60s stall timeout, disconnects, rate limits), never by this
+   * colour. Resolved per frame, so the ramp advances and a live theme switch
+   * applies without rebuilding the status bar.
    */
   private currentWaveColor(): string {
     const { appState, theme, lastActivityAt } = this.host.state;
     const colors = theme.colors;
     const { streamingPhase, streamingStartTime, reconnectAttempt } = appState;
     if (streamingPhase === 'idle') return colors.primary;
+    // Tool execution is local: the process is alive and its own timeout owns
+    // the outcome, so silence must not read as a transport stall. A retry in
+    // flight is still a known failure, so it keeps the yellow floor.
+    if (streamingPhase === 'tool') {
+      return reconnectAttempt > 0 ? colors.waveMid : colors.primary;
+    }
     // Anchor to whichever anchor is newer. `waiting` usually has no traffic
     // yet, so this resolves to the request itself; when an inbound notice does
-    // arrive mid-wait (a background task finishing, an empty-id tool delta)
-    // the clock resets like it does in every other phase.
+    // arrive mid-wait (an empty-id tool delta) the clock resets like it does
+    // in every other phase.
     const anchor = Math.max(lastActivityAt, streamingStartTime);
     if (anchor === 0) return colors.primary;
     const elapsed = Date.now() - anchor;
-    // A retry is a known failure, not normal silence: floor the ramp at amber
+    // A retry is a known failure, not normal silence: floor the ramp at yellow
     // so the wave never reads "healthy" while the status bar says "reconnecting".
-    const effective = reconnectAttempt > 0 ? Math.max(elapsed, WAVE_AMBER_AT_MS) : elapsed;
+    const effective = reconnectAttempt > 0 ? Math.max(elapsed, WAVE_YELLOW_AT_MS) : elapsed;
     return resolveWaveColor(effective, {
       green: colors.primary,
-      amber: colors.warning,
-      red: colors.error,
+      yellow: colors.waveMid,
+      red: colors.wavePeak,
     });
-  }
-
-  private stopActivitySpinner(): void {
-    if (this.host.state.activitySpinner !== null) {
-      this.host.state.activitySpinner.instance.stop();
-      this.host.state.activitySpinner = null;
-    }
-  }
-
-  private stopPulseWave(): void {
-    if (this.host.state.pulseWave !== null) {
-      this.host.state.pulseWave.stop();
-      this.host.state.pulseWave = null;
-    }
   }
 }

@@ -33,8 +33,8 @@ export function lerpGradient(t: number): string {
  *
  * `lerpGradient` above walks a fixed brand cycle that never touches red. This
  * takes both endpoints instead, so callers can ramp between semantic tokens:
- * the status-bar wave walks green → amber → red, and the speed badge fades a
- * dim grey toward the theme accent.
+ * the status-bar wave walks green → yellow → deep red, and the speed badge
+ * fades a dim grey toward the theme accent.
  */
 export function lerpHex(from: string, to: string, t: number): string {
   const k = t < 0 ? 0 : Math.min(1, t);

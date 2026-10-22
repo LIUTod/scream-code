@@ -133,47 +133,13 @@ describe('StreamingUIController', () => {
     expect(controller.hasActiveTurn()).toBe(true);
   });
 
-  it('hasPendingToolCalls tracks calls of the current step that have no result', () => {
-    const controller = new StreamingUIController(createMockHost());
-    controller.setTurnId('turn-1');
-    controller.setStep(1);
-
-    expect(controller.hasPendingToolCalls()).toBe(false);
-
-    controller.setActiveToolCall('tc-pending', {
-      id: 'tc-pending',
-      name: 'Bash',
-      args: {},
-      turnId: 'turn-1',
-      step: 1,
-    });
-    controller.setActiveToolCall('tc-done', {
-      id: 'tc-done',
-      name: 'Bash',
-      args: {},
-      turnId: 'turn-1',
-      step: 1,
-      result: { tool_call_id: 'tc-done', output: 'ok' },
-    });
-
-    // Only the call without a result keeps the batch open.
-    expect(controller.hasPendingToolCalls()).toBe(true);
-
-    controller.completeToolResult('tc-pending', {
-      tool_call_id: 'tc-pending',
-      output: 'ok',
-    });
-
-    expect(controller.hasPendingToolCalls()).toBe(false);
-  });
-
-  it('hasPendingToolCalls ignores entries from an earlier step or turn', () => {
+  it('hasExecutingToolCalls ignores entries from an earlier step or turn', () => {
     const controller = new StreamingUIController(createMockHost());
     controller.setTurnId('turn-2');
     controller.setStep(1);
 
     // An abandoned call from an earlier step can never settle, so counting it
-    // would pin the footer in "执行中" for the rest of the turn.
+    // would pin the phase for the rest of the turn.
     controller.setActiveToolCall('tc-stale-step', {
       id: 'tc-stale-step',
       name: 'Bash',
@@ -189,7 +155,40 @@ describe('StreamingUIController', () => {
       step: 1,
     });
 
-    expect(controller.hasPendingToolCalls()).toBe(false);
+    expect(controller.hasExecutingToolCalls()).toBe(false);
+  });
+
+  it('hasExecutingToolCalls counts started tools but not argument previews', () => {
+    const controller = new StreamingUIController(createMockHost());
+    controller.setTurnId('turn-1');
+    controller.setStep(1);
+
+    // A preview is still model output — it must not read as a running tool.
+    controller.setActiveToolCall('tc-preview', {
+      id: 'tc-preview',
+      name: 'Bash',
+      args: {},
+      streamingArguments: '{"command":"pnpm test"}',
+      turnId: 'turn-1',
+      step: 1,
+    });
+    expect(controller.hasExecutingToolCalls()).toBe(false);
+
+    // Registering the call's start replaces the preview entry: it is running now.
+    controller.setActiveToolCall('tc-preview', {
+      id: 'tc-preview',
+      name: 'Bash',
+      args: { command: 'pnpm test' },
+      turnId: 'turn-1',
+      step: 1,
+    });
+    expect(controller.hasExecutingToolCalls()).toBe(true);
+
+    controller.completeToolResult('tc-preview', {
+      tool_call_id: 'tc-preview',
+      output: 'ok',
+    });
+    expect(controller.hasExecutingToolCalls()).toBe(false);
   });
 });
 

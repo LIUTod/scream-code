@@ -783,7 +783,7 @@ Fenced code renders as a theme-aware background panel instead of ```` ``` ```` b
 
 Footer persistently shows the cache hit rate and token usage (session accumulation + model badge glow).
 
-- **Footer**: `src/tui/components/chrome/footer.ts` — `${ccDot} ${segHit} ${contextPart} ${statusPart}` order; shows `--` before any input tokens; model badge green shimmer while thinking/waiting/composing, cyan during tool execution, gray when idle; 30fps ticker (`1000/30`ms)
+- **Footer**: `src/tui/components/chrome/footer.ts` — `${ccDot} ${segHit} ${contextPart} ${statusPart}` order; shows `--` before any input tokens; model badge green shimmer while thinking/waiting/composing/streaming tool-call arguments (`tool-args`), cyan while a tool executes (`tool`), gray when idle; 30fps ticker (`1000/30`ms)
 - **TUI accumulation**: `src/tui/controllers/session-event-handler.ts` `handleStepCompleted` accumulates `turn.step.completed` usage into `appState.sessionUsage` (compaction produces no such event, so it is excluded)
 - **Agent-side persistence**: `packages/agent-core/src/agent/usage/index.ts` — `turnTotal` field, `record(scope:'turn')` accumulation, `records/index.ts` keeps `usageScope` on restore/replay; `session-manager.ts` `syncRuntimeState` seeds with `status.usage.turnTotal`
 - **Cache-write separate accounting**: `packages/ltod/src/providers/openai-common.ts` — pulls `prompt_tokens_details.cache_write_tokens` into `inputCacheCreation`; the three buckets are disjoint (input/cacheRead/cacheWrite)

@@ -14,9 +14,7 @@ import { SidebarManager } from './components/sidebar/sidebar-manager';
 import { ErrorBannerComponent } from './components/chrome/error-banner';
 import { FooterComponent } from './components/chrome/footer';
 import { GutterContainer } from './components/chrome/gutter-container';
-import type { MoonLoader } from './components/chrome/moon-loader';
 import { PlanModeBannerComponent } from './components/chrome/plan-mode-banner';
-import type { PulseWaveLoader } from './components/chrome/pulse-wave-loader';
 import { TodoPanelComponent } from './components/chrome/todo-panel';
 import type { SessionRow } from './components/dialogs/session-picker';
 import { CustomEditor } from './components/editor/custom-editor';
@@ -78,8 +76,6 @@ export interface TUIState {
   livePane: LivePaneState;
   transcriptEntries: TranscriptEntry[];
   terminalState: TerminalState;
-  activitySpinner: { instance: MoonLoader } | null;
-  pulseWave: PulseWaveLoader | null;
   /**
    * Ctrl+O mode for tool output: the press applies it to the current turn and
    * components that mount later inherit it, so the transcript stays in one
@@ -276,8 +272,6 @@ export function createTUIState(options: ScreamTUIOptions): TUIState {
     livePane: { ...INITIAL_LIVE_PANE },
     transcriptEntries: [],
     terminalState: createTerminalState(),
-    activitySpinner: null,
-    pulseWave: null,
     toolOutputExpanded: false,
     planExpanded: false,
     sessions: [],

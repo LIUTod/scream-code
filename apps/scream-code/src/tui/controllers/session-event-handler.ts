@@ -101,9 +101,18 @@ import { normalizeGoalStatus } from '../types';
 import type { TUIState } from '../tui-state';
 
 /**
- * Inbound events that prove the stream is still delivering. `TUIState.lastActivityAt`
- * is stamped from this set so the status-bar wave can colour a stream that went
- * silent mid-reasoning — before the 60s transport-level stall timeout fires.
+ * Inbound events that prove the main agent's stream is still delivering.
+ * `TUIState.lastActivityAt` is stamped from this set so the status-bar wave can
+ * colour a stream that went silent mid-reasoning — before the 60s transport-level
+ * stall timeout fires.
+ *
+ * Two exclusions matter:
+ *   - Child-agent traffic proves the child is alive, not the parent's model
+ *     call. A background subagent streaming away must not hide a stalled
+ *     parent, so only main-agent events stamp the clock.
+ *   - A `tool.progress` custom frame is an app notification (for example the
+ *     MCP OAuth authorization URL prompt), not stream traffic; it must not
+ *     clear a genuine silence.
  */
 const ACTIVITY_EVENT_TYPES: ReadonlySet<Event['type']> = new Set([
   'assistant.delta',
@@ -113,6 +122,15 @@ const ACTIVITY_EVENT_TYPES: ReadonlySet<Event['type']> = new Set([
   'tool.progress',
   'tool.result',
 ]);
+
+/** Whether `event` is evidence that the main agent's stream is alive. */
+export function stampsActivity(event: Event): boolean {
+  if (!ACTIVITY_EVENT_TYPES.has(event.type)) return false;
+  // `undefined` is treated as main: older/partial event shapes omit the field.
+  if (event.agentId !== undefined && event.agentId !== MAIN_AGENT_ID) return false;
+  if (event.type === 'tool.progress' && event.update.kind === 'custom') return false;
+  return true;
+}
 
 function addTokenUsage(a: TokenUsage, b: TokenUsage): TokenUsage {
   return {
@@ -349,12 +367,11 @@ export class SessionEventHandler {
   }
 
   handleEvent(event: Event, sendQueued: (item: QueuedMessage) => void): void {
-    // Stamp the liveness clock before anything routes the event away: child
-    // agent deltas are inbound traffic too, and a healthy subagent run must
-    // not read as a stalled parent. Written directly rather than through
-    // setAppState — this runs on every delta, and a full state patch would
-    // re-render the footer once per token for a value only the wave reads.
-    if (ACTIVITY_EVENT_TYPES.has(event.type)) {
+    // Stamp the liveness clock for main-agent stream traffic only (see
+    // `stampsActivity`). Written directly rather than through setAppState —
+    // this runs on every delta, and a full state patch would re-render the
+    // footer once per token for a value only the wave reads.
+    if (stampsActivity(event)) {
       this.host.state.lastActivityAt = Date.now();
     }
 
@@ -1029,8 +1046,15 @@ export class SessionEventHandler {
       pendingApproval: null,
       pendingQuestion: null,
     });
-    if (canTransitionTo(state.appState.streamingPhase, 'tool')) {
-      this.host.setAppState({ streamingPhase: 'tool' });
+    // The model is still streaming the call's arguments: that is network work,
+    // so it stays on the silent-ramp side of the wave. A sibling tool that has
+    // actually started executing keeps the phase at 'tool' instead; argument
+    // previews do not count as execution.
+    if (
+      !streamingUI.hasExecutingToolCalls() &&
+      canTransitionTo(state.appState.streamingPhase, 'tool-args')
+    ) {
+      this.host.setAppState({ streamingPhase: 'tool-args' });
     }
     streamingUI.scheduleFlush();
   }
@@ -1115,9 +1139,11 @@ export class SessionEventHandler {
     // Stay in "执行中" while siblings of the same parallel batch are still
     // running: core schedules the whole batch concurrently and dispatches the
     // results in provider order, so the first result can land before the other
-    // tools have finished.
+    // tools have finished. A preview whose tool never started is model-side
+    // state, not a running tool, so it must not hold the phase (and the green
+    // wave) after the last real call settled.
     if (
-      !streamingUI.hasPendingToolCalls() &&
+      !streamingUI.hasExecutingToolCalls() &&
       canTransitionTo(this.host.state.appState.streamingPhase, 'waiting')
     ) {
       this.host.setAppState({ streamingPhase: 'waiting' });

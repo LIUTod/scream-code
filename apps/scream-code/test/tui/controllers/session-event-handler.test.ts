@@ -47,7 +47,7 @@ function createMockHost(): SessionEventHost {
     getActiveToolCall: vi.fn().mockReturnValue(undefined),
     onToolCallStart: vi.fn(),
     hasActiveTurn: vi.fn().mockReturnValue(false),
-    hasPendingToolCalls: vi.fn().mockReturnValue(false),
+    hasExecutingToolCalls: vi.fn().mockReturnValue(false),
     accumulateToolCallDelta: vi.fn(),
   } as unknown as StreamingUIController;
 
@@ -1107,22 +1107,69 @@ describe('SessionEventHandler — parallel tool batch', () => {
     const host = createMockHost();
     const handler = new SessionEventHandler(host);
     host.state.appState.streamingPhase = 'tool';
-    vi.mocked(host.streamingUI.hasPendingToolCalls).mockReturnValue(true);
+    vi.mocked(host.streamingUI.hasExecutingToolCalls).mockReturnValue(true);
 
     handler.handleEvent(toolResultEvent('call_a'), vi.fn());
 
     expect(host.setAppState).not.toHaveBeenCalledWith({ streamingPhase: 'waiting' });
   });
 
-  it('falls back to "waiting" once the last tool of the batch has a result', () => {
+  it('falls back to "waiting" once the last executing tool has a result', () => {
     const host = createMockHost();
     const handler = new SessionEventHandler(host);
     host.state.appState.streamingPhase = 'tool';
-    vi.mocked(host.streamingUI.hasPendingToolCalls).mockReturnValue(false);
+    vi.mocked(host.streamingUI.hasExecutingToolCalls).mockReturnValue(false);
 
     handler.handleEvent(toolResultEvent('call_b'), vi.fn());
 
     expect(host.setAppState).toHaveBeenCalledWith({ streamingPhase: 'waiting' });
+  });
+
+  it('does not let an argument preview hold "tool" open after the last result', () => {
+    const host = createMockHost();
+    const handler = new SessionEventHandler(host);
+    host.state.appState.streamingPhase = 'tool';
+    // A preview has no result, but its tool never started: it is model output,
+    // not a running tool, so it must not keep the phase (and the green wave).
+    vi.mocked(host.streamingUI.hasExecutingToolCalls).mockReturnValue(false);
+
+    handler.handleEvent(toolResultEvent('call_c'), vi.fn());
+
+    expect(host.setAppState).toHaveBeenCalledWith({ streamingPhase: 'waiting' });
+  });
+});
+
+describe('SessionEventHandler — tool phases', () => {
+  function toolDeltaEvent(toolCallId = 'call_1'): Event {
+    return {
+      ...baseEvent('tool.call.delta'),
+      turnId: 1,
+      toolCallId,
+      name: 'Bash',
+      argumentsPart: '{"command"',
+    } as unknown as Event;
+  }
+
+  it('enters "tool-args" while the model authors a tool call', () => {
+    const host = createMockHost();
+    const handler = new SessionEventHandler(host);
+    host.state.appState.streamingPhase = 'composing';
+    vi.mocked(host.streamingUI.hasExecutingToolCalls).mockReturnValue(false);
+
+    handler.handleEvent(toolDeltaEvent(), vi.fn());
+
+    expect(host.setAppState).toHaveBeenCalledWith({ streamingPhase: 'tool-args' });
+  });
+
+  it('keeps "tool" when a sibling is already executing', () => {
+    const host = createMockHost();
+    const handler = new SessionEventHandler(host);
+    host.state.appState.streamingPhase = 'tool';
+    vi.mocked(host.streamingUI.hasExecutingToolCalls).mockReturnValue(true);
+
+    handler.handleEvent(toolDeltaEvent(), vi.fn());
+
+    expect(host.setAppState).not.toHaveBeenCalledWith({ streamingPhase: 'tool-args' });
   });
 });
 
@@ -1983,10 +2030,10 @@ describe('liveness stamp for the status-bar wave', () => {
     expect(host.state.lastActivityAt).toBeGreaterThan(0);
   });
 
-  it('stamps subagent traffic before it is routed away from the main pane', () => {
+  it('does not let subagent traffic mask a stalled main stream', () => {
     const host = createMockHost();
     const handler = new SessionEventHandler(host);
-    host.state.lastActivityAt = 0;
+    host.state.lastActivityAt = 1234;
 
     handler.handleEvent(
       {
@@ -1994,6 +2041,50 @@ describe('liveness stamp for the status-bar wave', () => {
         agentId: 'child-1',
         turnId: 1,
         delta: 'hmm',
+      } as unknown as Event,
+      vi.fn(),
+    );
+
+    // The child is alive; that says nothing about the parent's model call.
+    expect(host.state.lastActivityAt).toBe(1234);
+  });
+
+  it('does not treat a non-stream custom notification as stream activity', () => {
+    const host = createMockHost();
+    const handler = new SessionEventHandler(host);
+    host.state.lastActivityAt = 1234;
+
+    handler.handleEvent(
+      {
+        ...baseEvent('tool.progress'),
+        turnId: 1,
+        toolCallId: 'tc-1',
+        update: {
+          kind: 'custom',
+          customKind: 'mcp.oauth.authorization_url',
+          customData: {
+            serverName: 'demo',
+            authorizationUrl: 'https://example.test/oauth',
+          },
+        },
+      } as unknown as Event,
+      vi.fn(),
+    );
+
+    expect(host.state.lastActivityAt).toBe(1234);
+  });
+
+  it('still stamps live tool output', () => {
+    const host = createMockHost();
+    const handler = new SessionEventHandler(host);
+    host.state.lastActivityAt = 0;
+
+    handler.handleEvent(
+      {
+        ...baseEvent('tool.progress'),
+        turnId: 1,
+        toolCallId: 'tc-1',
+        update: { kind: 'stdout', text: 'installing…' },
       } as unknown as Event,
       vi.fn(),
     );

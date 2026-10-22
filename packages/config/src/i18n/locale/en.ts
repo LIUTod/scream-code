@@ -29,6 +29,7 @@ export const en: Record<string, string> = {
   'status.thinking': 'Thinking',
   'status.composing': 'Writing',
   'status.tool': 'Running',
+  'status.calling_tool': 'Calling',
   'status.waiting': 'Waiting',
   'status.compacting': 'Compacting',
   'status.awaiting_approval': 'Awaiting approval',
