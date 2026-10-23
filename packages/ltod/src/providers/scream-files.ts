@@ -113,7 +113,9 @@ export class ScreamFiles {
       // `Blob` and `File` are available as globals in Node 20+. The cast via
       // `Uint8Array` satisfies `BlobPart` in both Node and DOM lib contexts.
       const bytes = input.data instanceof Uint8Array ? input.data : new Uint8Array(input.data);
-      const blob = new Blob([bytes], { type: input.mimeType });
+      // The DOM lib's BlobPart is not available in this package's lib; the
+      // runtime value is still the Uint8Array, only the type is widened.
+      const blob = new Blob([bytes as unknown as ArrayBuffer], { type: input.mimeType });
       file = new File([blob], filename, { type: input.mimeType });
     }
 

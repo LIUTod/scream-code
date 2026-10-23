@@ -10,7 +10,7 @@ import {
   readSessionIndex,
   removeSessionIndexEntry,
 } from '#/session/store/session-index';
-import { encodeWorkDirKey, normalizeWorkDir } from '#/session/store/workdir-key';
+import { encodeWorkDirKey, normalizeWorkDir, resolveWorkDir } from '#/session/store/workdir-key';
 import { atomicWrite, rmWithRetry } from '#/utils/fs';
 import type { JsonObject, ListSessionsPayload, SessionSummary } from '#/rpc/core-api';
 
@@ -27,6 +27,12 @@ type SessionSummaryState = z.infer<typeof SessionSummaryStateSchema>;
 export interface CreateSessionRecordInput {
   readonly id: string;
   readonly workDir: string;
+  /**
+   * Keep `workDir` exactly as given instead of walking up to the nearest
+   * `.git` / `package.json` ancestor. Used by bot workspaces so a bot rooted
+   * at `<repo>/bots/research` does not silently operate on `<repo>`.
+   */
+  readonly exactWorkDir?: boolean | undefined;
 }
 
 export interface ForkSessionRecordInput {
@@ -48,15 +54,27 @@ export class SessionStore {
     this.sessionsDir = join(homeDir, 'sessions');
   }
 
-  sessionDirFor(input: { readonly id: string; readonly workDir: string }): string {
+  sessionDirFor(input: {
+    readonly id: string;
+    readonly workDir: string;
+    readonly exactWorkDir?: boolean | undefined;
+  }): string {
     assertSafeSessionId(input.id);
-    return join(this.sessionsDir, encodeWorkDirKey(normalizeWorkDir(input.workDir)), input.id);
+    return join(
+      this.sessionsDir,
+      encodeWorkDirKey(input.workDir, input.exactWorkDir),
+      input.id,
+    );
   }
 
   async create(input: CreateSessionRecordInput): Promise<SessionSummary> {
     assertSafeSessionId(input.id);
-    const workDir = normalizeWorkDir(input.workDir);
-    const dir = this.sessionDirFor({ id: input.id, workDir });
+    const workDir = resolveWorkDir(input.workDir, input.exactWorkDir);
+    const dir = this.sessionDirFor({
+      id: input.id,
+      workDir,
+      exactWorkDir: input.exactWorkDir,
+    });
 
     const indexed = await this.findSessionEntry(input.id);
     if (indexed !== undefined) {

@@ -37,7 +37,6 @@ npm install -g scream-code
 
 ```bash
 scream            # 终端 TUI
-scream web        # 浏览器网页端 (http://localhost:3210)
 scream --auto     # 自动权限模式
 scream -y         # 自动批准模式
 ```
@@ -138,10 +137,6 @@ scream -y         # 自动批准模式
 | `/exit`（`/quit`、`/q`） | 退出应用 |
 
 **常用快捷键：** `Ctrl+S` 中断 · `Ctrl+C` 取消 · `Ctrl+O` 展开工具输出 · `Ctrl+Shift+F` 搜索 · `Shift+Tab` 计划模式 · `Shift+Enter` 换行 · `Tab`（空输入）切换思考强度 · `@` 提及文件
-
-### Web 网页端
-
-与 TUI 共用同一套 agent-core，功能零损失。多会话侧边栏、模型与思考强度切换、亮/暗/跟随系统主题、移动端适配。仅绑定 `127.0.0.1`，外部无法访问。
 
 ### 文档
 

@@ -177,7 +177,7 @@ Test the contract the system exposes — not the easiest internal detail to asse
 - Tests: `bunx vitest run` (package) or `bun run test` (workspace).
 - Build: `bun run build`.
 - Do not run raw `tsc` directly.
-- **Dist rebuild rule (runtime uses build output, not `src/`)**: after changing `packages/config` (i18n/locales), `packages/node-sdk` (e.g. permission-mode validation), or `packages/agent-core`, run `pnpm --filter @scream-code/<pkg> run build` so their `dist/` is fresh. `apps/scream-code` bundles workspace deps into its own `dist/` via tsdown — after any package-level change that the app consumes (including error-message text), also run `pnpm --filter scream-code run build`, otherwise the running TUI/web server keeps executing stale inline copies (symptom seen in practice: a fixed validation message still reports the old wording).
+- **Dist rebuild rule (runtime uses build output, not `src/`)**: after changing `packages/config` (i18n/locales), `packages/node-sdk` (e.g. permission-mode validation), or `packages/agent-core`, run `pnpm --filter @scream-code/<pkg> run build` so their `dist/` is fresh. `apps/scream-code` bundles workspace deps into its own `dist/` via tsdown — after any package-level change that the app consumes (including error-message text), also run `pnpm --filter scream-code run build`, otherwise the running TUI keeps executing stale inline copies (symptom seen in practice: a fixed validation message still reports the old wording).
 
 ### Dependency Install Scripts
 
@@ -417,7 +417,7 @@ Batch parallel subagent orchestration. Toggles `wolfpackMode` in `AppState`. Whe
 
 Persistent-python runtime: a long-lived `python3 -u -i` kernel where state (variables, loaded data) survives across tool calls, plus a subagent bridge so the model can spawn recursive subagents from code. Variables and loaded data survive across calls; imports are code — they persist while the same kernel lives, but after a kernel restart (snapshot resurrection after a crash, or a cwd change) they must be re-imported.
 
-- **Entry**: `/rlm` toggles on/off with no args; `/rlm on|off` explicit. `/rlm-max-depth N` sets the recursion cap; with no argument the TUI and the web slash command both report the current value (0 = unlimited; the default is unlimited). The accepted grammar is shared by the core setter, the TUI command and the web REST route (`session/rlm-settings.ts`).
+- **Entry**: `/rlm` toggles on/off with no args; `/rlm on|off` explicit. `/rlm-max-depth N` sets the recursion cap; with no argument the TUI reports the current value (0 = unlimited; the default is unlimited). The accepted grammar is shared by the core setter and the TUI command (`session/rlm-settings.ts`).
 - **Kernel**: `packages/agent-core/src/tools/builtin/python/python.ts` — `PythonTool` with a base64 single-line `exec` bootstrap injecting `rlm()`/`rlm_wait()` bridge helpers. Replies go through a `/tmp` file bridge (`scream-rlm-<nonce>-<pid>-<rid>.json`) to avoid stdin read/write contention; a per-instance nonce namespaces every reply file and channel marker.
 - **Lifecycle**: the kernel instance is reused across tool-list rebuilds while the cwd is unchanged (a rebuild must not orphan a live kernel or reset the `rlm()` handle table); a different cwd disposes the old kernel and the next call starts a deterministic fresh one. `_snapshot()`/`_restore()` pickle state so a crashed kernel is resurrected with variables intact (the snapshot file is created with 0600 permissions on POSIX; Windows ignores the mode) — serialized state above the 32 MiB cap is skipped (it stays in the running kernel, but will not survive a restart). RLM settings (mode, depth, max-depth) are persisted in the session records and restored on resume.
 - **State machine**: `packages/agent-core/src/agent/index.ts` — `setRlmEnabled` / `getRlmEnabled` / `inheritRlm` / `rlmDepth` / `rlmMaxDepth` (default `Infinity` = unlimited recursion).
@@ -472,10 +472,9 @@ The completion grader returns `{pass, reason, issues}`; each issue carries `kind
 
 Unattended permission mode: reversible actions auto-approve; everything else is denied and parked for human review (fail-closed — when in doubt, stop).
 
-- **Entry**: `/bot` toggles; `/bot on|off` explicit. Web: the `bot` command is handled in `src/web/server.ts` `handleCommand` (frontend command list mirrors it).
+- **Entry**: `/bot` toggles; `/bot on|off` explicit.
 - **Policy**: `packages/agent-core/src/agent/permission/policies/bot-mode-permission.ts` — `BotModePermissionPolicy`, installed after user-configured deny rules (an explicit user deny always wins). Reversible allowlist → approve: reads/lookups, in-workspace `Write`/`Edit` (sensitive-file regex guard, `~` rejected, separator-boundary path check), read-only Bash (metacharacter exclusions block chaining/substitution/redirection/newlines; mutable git subcommands and `find`/`sort` are absent), plus goal and collaboration tools. Everything else → deny.
 - **Deny reasons**: policy deny reasons are propagated into the tool error (`permission/index.ts`), so the model can tell "parked for human review" from a permanent failure and does not retry blindly.
-- **Idle exit**: web sessions in bot mode keep the server alive (per-session `busy` + `anyBusy()`), so unattended goals can finish with no browser connected.
 - **Validation**: `PermissionMode` covers `bot` across agent-core (`permission/types.ts`, `config/schema.ts`, `config/toml.ts`, `errors/codes.ts`), node-sdk (`types.ts`, `session.ts` runtime guard), and the TUI selector.
 
 ### Loop Mode (`/loop`)
@@ -874,7 +873,6 @@ Key files: `packages/agent-core/src/agent/context/index.ts`,
 ### Service Manifest & Extension Contracts
 
 - **Manifest**: plugin packages carry `manifest.json` (incl. `entryPoint`), parsed/validated by `packages/agent-core/src/plugin/manifest.ts`; the 117-package set is the manifest publish/parse closure, not the browser-runtime or TS-import closure
-- **Contract doc**: `apps/scream-code/src/web/migration/protocol-report.md` — minimal protocol reimplementation plan + vendor-closure advice for keeping the Cordis plugin ABI
 - **Registration model**: manifest hooks register in bulk via `session/hooks/engine.ts:registerAll`, shared with the `/extension` runtime
 
 ### Output-Truncation Recovery
@@ -1153,11 +1151,7 @@ The canonical public DTO is `TodoItem` in `packages/agent-core/src/todo.ts`. Suc
 
 Every Goal mutation that changes its visible state—including lifecycle, objective, budget, token/turn accounting, and notes—emits `goal.updated` with the complete current snapshot. Goal restore remains silent and retains the existing resume/terminal normalization semantics.
 
-Web snapshots read Goal/Todo through the node SDK after subscribing to core events, then use revision guards so late initial RPC reads cannot overwrite newer events. Main-agent `goal.updated` / `todo.updated` events flow through the existing durable journal exactly once, preserving multi-tab broadcast and seq/epoch reconnect replay. Web metadata keeps Web IDs separate from `coreSessionId`; activation resumes the core ID instead of creating an empty replacement session.
-
-The Web frontend hydrates Goal/Todo only from session snapshots and full `goal.updated` / `todo.updated` journal events. Its session detail drawer (opened from the conversation header) keeps the existing quick actions above a complete Goal manager and a read-only, phase-grouped core Todo view; session/connection generations plus epoch/seq guards prevent stale snapshots and mutation responses from crossing session switches or reconnects.
-
-Key files: `packages/agent-core/src/todo.ts`, `packages/agent-core/src/agent/goal/index.ts`, `packages/agent-core/src/tools/builtin/state/todo-list.ts`, `packages/agent-core/src/tools/builtin/state/todo-list.md`, `apps/scream-code/src/tui/controllers/session-event-handler.ts`, `apps/scream-code/src/web/server.ts`, `apps/scream-code/src/web/frontend/src/composables/useScreamWebClient.ts`, `apps/scream-code/src/web/frontend/src/components/GoalPanel.vue`, `apps/scream-code/src/web/frontend/src/components/TodoPanel.vue`, `apps/scream-code/src/utils/goal-refiner.ts`.
+Key files: `packages/agent-core/src/todo.ts`, `packages/agent-core/src/agent/goal/index.ts`, `packages/agent-core/src/tools/builtin/state/todo-list.ts`, `packages/agent-core/src/tools/builtin/state/todo-list.md`, `apps/scream-code/src/tui/controllers/session-event-handler.ts`, `apps/scream-code/src/utils/goal-refiner.ts`.
 
 ### Verification Protocol and Convergence Gate
 
@@ -1207,6 +1201,17 @@ The welcome logo cycles through a 24-hue colour wheel at 40 ms intervals (25 fps
 - **Rationale**: prevents expensive full-tree re-renders when the transcript is packed with replayed historical components.
 
 ---
+
+## Bot Engineering (apps/scream-code)
+
+- **Scope:** `src/bot/{server,shared,ui}`. See the [Bot operator guide](apps/scream-code/src/bot/README.md) and [UI guide](apps/scream-code/src/bot/ui/README.md). Reuse one SDK harness with multiple full main sessions, one core session per thread; Bots are not specialist subagent types. Keep core execution, permissions, default profiles and MCP management unchanged.
+- **Transport:** components use `BotClient`; `shared/contracts.ts` owns REST/SSE DTOs. `HttpBotClient` is the default. `VITE_BOT_MOCK=1` is an explicit non-production preview, never an offline fallback or release setting.
+- **Execution:** serialize each thread until the actual main turn ends, not until prompt RPC acknowledges scheduling. Other threads may run concurrently. Attribute events by session, main agent, session generation and turn; internal delegation must not finish a main Run.
+- **State:** transcripts use `{ threadId, version, messages }`; reconcile snapshots and live messages by stable identity/version. SSE cursors are process `epoch` plus workbench-global `seq`; resync invalidates every query domain, not just the active Bot.
+- **Safety:** only the existing `bot`/`auto` modes. Workspace selection is not sandboxing, and shared/project memory is not Bot-private memory. Do not imply that attachment fields or tool-policy DTOs add supported uploads or new tool grants.
+- **Lifecycle:** preserve seeded/replacement conversations, quick deletion and the last-Bot guard. Finish asynchronous deletion against its original IDs; clear its cache/selection without redirecting a different active thread or treating a post-DELETE refresh failure as deletion failure.
+- **Persistence:** use versioned transactional SQLite migrations with a SQLite-consistent pre-upgrade backup. Automatically resume only complete, provably undispatched queued inputs. Unknown execution becomes `interrupted` and blocks that thread until an explicit recovery decision; never replay uncertain side effects or mark interruption as success.
+- **Tests and provenance:** follow the root Vitest projects and the guides' commands; keep browser aliases/DOM setup separate from CLI tests. Preserve vendored copyright/MIT notices while keeping user-facing product text Scream. Document only implemented, verified behavior.
 
 ## General Coding Requirements
 

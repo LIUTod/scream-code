@@ -1,7 +1,13 @@
 import type {
   ExportSessionManifest,
+  RegisterToolPayload,
   ResumeSessionResult,
+  SessionAgentProfile,
+  SetActiveToolsPayload,
   ShellEnvironment,
+  ToolCallRequest,
+  ToolCallResponse,
+  UnregisterToolPayload,
 } from '@scream-code/agent-core';
 import type { ScreamHostIdentity } from '@scream-code/config';
 import type { ContentPart } from '@scream-code/ltod';
@@ -41,14 +47,20 @@ export type {
   PromptOrigin,
   ProviderConfig,
   ProviderType,
+  RegisterToolPayload,
   ReloadSummary,
   RuntimeSystemPrompt,
   ResumedAgentState,
   ServicesConfig,
+  SessionAgentProfile,
+  SetActiveToolsPayload,
   ShellEnvironment,
   SkillSummary,
   ThinkingConfig,
+  ToolCallRequest,
+  ToolCallResponse,
   ToolInfo,
+  UnregisterToolPayload,
 } from '@scream-code/agent-core';
 
 export type { ScreamHostIdentity } from '@scream-code/config';
@@ -61,6 +73,13 @@ export type PromptPart = Extract<ContentPart, { type: 'text' | 'image_url' | 'vi
 
 export type PromptInput = readonly PromptPart[];
 
+/**
+ * Host-side executor for tools the session registered through
+ * `Session.registerTool`. The handler is responsible for refusing names it did
+ * not register — the SDK forwards the request verbatim.
+ */
+export type ToolCallHandler = (request: ToolCallRequest) => Promise<ToolCallResponse>;
+
 export interface ScreamHarnessOptions {
   readonly identity?: ScreamHostIdentity | undefined;
   readonly homeDir?: string | undefined;
@@ -68,6 +87,11 @@ export interface ScreamHarnessOptions {
   readonly autoLoadConfig?: boolean | undefined;
   readonly uiMode?: string;
   readonly skillDirs?: readonly string[];
+  /**
+   * Execute in-band tool calls (session-registered tools). When omitted, tool
+   * calls keep the historical "not supported" rejection.
+   */
+  readonly onToolCall?: ToolCallHandler | undefined;
 }
 
 export interface CreateSessionOptions {
@@ -78,6 +102,13 @@ export interface CreateSessionOptions {
   readonly permission?: PermissionMode | undefined;
   readonly planMode?: boolean;
   readonly metadata?: JsonObject | undefined;
+  /**
+   * Session-scoped agent profile: role text appended to the built-in system
+   * prompt plus the exact `activeTools` list (defaults to the built-in tools).
+   */
+  readonly profile?: SessionAgentProfile | undefined;
+  /** Root the session at `workDir` exactly, skipping the ancestor walk. */
+  readonly exactWorkDir?: boolean | undefined;
 }
 
 export interface RenameSessionInput {

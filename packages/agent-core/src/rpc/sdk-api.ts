@@ -85,6 +85,11 @@ export interface QuestionRequest {
 export interface ToolCallRequest {
   readonly turnId?: number | undefined;
   readonly toolCallId: string;
+  /** Registered tool name, so one host callback can dispatch several tools. */
+  readonly name?: string | undefined;
+  /** Injected by the session/agent RPC proxies. */
+  readonly sessionId?: string | undefined;
+  readonly agentId?: string | undefined;
   readonly args: unknown;
 }
 

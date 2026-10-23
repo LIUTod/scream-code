@@ -98,6 +98,73 @@ describe('BotModePermissionPolicy', () => {
     }
   });
 
+  it('approves reversible test/build commands in bot mode', () => {
+    for (const command of [
+      'pnpm test',
+      'pnpm lint',
+      'pnpm run lint',
+      'pnpm run test:unit',
+      'npm test',
+      'yarn run build',
+      'node --test',
+      'vitest run',
+      'tsc --noEmit',
+      'tsc --noEmit -p tsconfig.json',
+      'eslint',
+      'oxlint',
+    ]) {
+      expect(botPolicy().evaluate(ctx('Bash', { command }))?.kind).toBe('approve');
+    }
+  });
+
+  it('keeps shell syntax out of reversible commands', () => {
+    // Each head word is allowlisted, but the payload after it is not: chaining,
+    // pipes, newlines and an unquoted path after -p must all fail closed.
+    for (const command of [
+      'pnpm test && echo hi',
+      'pnpm run lint; echo hi',
+      'pnpm test | tee log',
+      'tsc --noEmit -p a;echo hi',
+      'pnpm test\nrm file.txt',
+      'ls\nrm file.txt',
+      'pnpm test $(whoami)',
+      'vitest run `id`',
+    ]) {
+      expect(botPolicy().evaluate(ctx('Bash', { command }))?.kind).toBe('deny');
+    }
+  });
+
+  it('denies packages and scripts outside the reversible heads', () => {
+    for (const command of ['pnpm publish', 'pnpm run publish', 'npm unpublish pkg', 'git push', 'rm -rf /']) {
+      expect(botPolicy().evaluate(ctx('Bash', { command }))?.kind).toBe('deny');
+    }
+  });
+
+  it('lets a bot ask a person but never schedule itself', () => {
+    expect(botPolicy().evaluate(ctx('AskUserQuestion'))?.kind).toBe('approve');
+    for (const tool of ['CronCreate', 'CronList', 'CronDelete']) {
+      expect(botPolicy().evaluate(ctx(tool))?.kind).toBe('deny');
+    }
+  });
+
+  it('refuses writes under .git (hook installation is privilege escalation)', () => {
+    for (const path of [
+      '/work/.git/hooks/pre-commit',
+      '.git/hooks/pre-commit',
+      './.git/config',
+      '.GIT/hooks/pre-commit',
+    ]) {
+      expect(botPolicy().evaluate(ctx('Write', { path }))?.kind).toBe('deny');
+      expect(botPolicy().evaluate(ctx('Edit', { path }))?.kind).toBe('deny');
+    }
+  });
+
+  it('approves plain in-workspace file writes in bot mode', () => {
+    for (const path of ['/work/src/a.ts', 'src/a.ts', './docs/notes.md']) {
+      expect(botPolicy().evaluate(ctx('Write', { path }))?.kind).toBe('approve');
+    }
+  });
+
   it('denies unclassified Bash commands in bot mode (fail-closed)', () => {
     expect(botPolicy().evaluate(ctx('Bash', { command: 'some-custom-tool --migrate' }))?.kind).toBe('deny');
   });

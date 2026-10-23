@@ -1,4 +1,10 @@
-import { ErrorCodes, ScreamError, type AgentContextData, type ScreamErrorCode } from '@scream-code/agent-core';
+import {
+  ErrorCodes,
+  ScreamError,
+  type AgentContextData,
+  type RegisterToolPayload,
+  type ScreamErrorCode,
+} from '@scream-code/agent-core';
 import { type ApprovalHandler, type Event, type QuestionHandler } from '#/events';
 import type { PluginExtensionSummary } from '@scream-code/agent-core';
 import type { CreateCronTaskRpcInput, SDKRpcClient } from '#/rpc';
@@ -126,6 +132,35 @@ export class Session {
   async setRuntimeSystemPrompt(prompt: RuntimeSystemPrompt): Promise<void> {
     this.ensureOpen();
     await this.rpc.setRuntimeSystemPrompt({ sessionId: this.id, prompt });
+  }
+
+  /**
+   * Register a host-executed tool on this session's agent. The host services
+   * its calls through `ScreamHarnessOptions.onToolCall`; without that handler
+   * the call is reported as a tool error.
+   */
+  async registerTool(payload: RegisterToolPayload): Promise<void> {
+    this.ensureOpen();
+    await this.rpc.registerTool({ sessionId: this.id, ...payload });
+  }
+
+  async unregisterTool(name: string): Promise<void> {
+    this.ensureOpen();
+    const toolName = normalizeRequiredString(
+      name,
+      'Tool name cannot be empty',
+      ErrorCodes.REQUEST_INVALID,
+    );
+    await this.rpc.unregisterTool({ sessionId: this.id, name: toolName });
+  }
+
+  /**
+   * Replace the agent's active tool set. Names are exact builtin/user tool
+   * names plus optional MCP glob patterns (`mcp__*`).
+   */
+  async setActiveTools(names: readonly string[]): Promise<void> {
+    this.ensureOpen();
+    await this.rpc.setActiveTools({ sessionId: this.id, names });
   }
 
   async setModel(model: string): Promise<void> {

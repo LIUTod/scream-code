@@ -38,7 +38,6 @@ npm install -g scream-code
 
 ```bash
 scream            # terminal UI
-scream web        # browser UI (http://localhost:3210)
 scream --auto     # auto permission mode
 scream -y         # auto-approve mode
 ```
@@ -144,10 +143,6 @@ Type `/` in the input to browse. All 55 commands:
 </details>
 
 **Shortcuts:** `Ctrl+S` interrupt · `Ctrl+C` cancel · `Ctrl+O` expand tool output · `Ctrl+Shift+F` search · `Shift+Tab` plan mode · `Shift+Enter` new line · `Tab` (empty) cycle thinking effort · `@` mention a file
-
-### Web UI
-
-The browser UI shares the same agent-core as the TUI — zero feature loss. Multi-session sidebar, model & thinking-effort switching, light/dark/system themes, mobile-friendly. Binds `127.0.0.1` only — no external access.
 
 ### Documentation
 

@@ -17,7 +17,7 @@ function strip(text: string): string {
 const call: ToolCallBlockData = {
   id: 'tc',
   name: 'Read',
-  args: { path: 'src/web/server.ts' },
+  args: { path: 'src/app.ts' },
 };
 
 /** Read attaches a `NNN\t` prefix to every line it returns. */

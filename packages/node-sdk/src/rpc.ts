@@ -13,12 +13,15 @@ import {
   type OAuthTokenProviderResolver,
   type QuestionRequest,
   type QuestionResult,
+  type RegisterToolPayload,
   type SDKAPI,
   type SDKRPCClient,
   type SessionMeta,
+  type SetActiveToolsPayload,
   type TodoItem,
   type ToolCallRequest,
   type ToolCallResponse,
+  type UnregisterToolPayload,
 } from '@scream-code/agent-core';
 import { createScreamDefaultHeaders } from '@scream-code/config';
 
@@ -52,6 +55,7 @@ import type {
   SkillSummary,
   Unsubscribe,
   ScreamHostIdentity,
+  ToolCallHandler,
 } from '#/types';
 
 const MAIN_AGENT_ID = 'main';
@@ -63,6 +67,7 @@ export interface SDKRpcClientOptions {
   readonly resolveOAuthTokenProvider?: OAuthTokenProviderResolver | undefined;
   readonly skillDirs?: readonly string[];
   readonly subagentModelBindings?: () => Record<string, string | undefined>;
+  readonly onToolCall?: ToolCallHandler | undefined;
 }
 
 export interface SessionPromptRpcInput {
@@ -182,6 +187,7 @@ export class SDKRpcClient {
   private readonly eventListeners = new Set<(event: Event) => void>();
   private readonly approvalHandlers = new Map<string, ApprovalHandler>();
   private readonly questionHandlers = new Map<string, QuestionHandler>();
+  private readonly toolCallHandler: ToolCallHandler | undefined;
 
   constructor(options: SDKRpcClientOptions = {}) {
     const [coreRpc, sdkRpc] = createRPC<CoreAPI, SDKAPI>();
@@ -201,6 +207,7 @@ export class SDKRpcClient {
     this.ready = sdkRpc(new ClientAPI(this)).then((rpc) => {
       this.rpc = rpc;
     });
+    this.toolCallHandler = options.onToolCall;
   }
 
   get homeDir(): string {
@@ -867,6 +874,40 @@ export class SDKRpcClient {
     this.questionHandlers.delete(sessionId);
   }
 
+  /**
+   * Register a host-executed tool on this session's interactive agent. The
+   * host services its calls through `ScreamHarnessOptions.onToolCall`.
+   */
+  async registerTool(input: SessionIdRpcInput & RegisterToolPayload): Promise<void> {
+    const rpc = await this.getRpc();
+    return rpc.registerTool({
+      sessionId: input.sessionId,
+      agentId: this.interactiveAgentId,
+      name: input.name,
+      description: input.description,
+      parameters: input.parameters,
+    });
+  }
+
+  async unregisterTool(input: SessionIdRpcInput & UnregisterToolPayload): Promise<void> {
+    const rpc = await this.getRpc();
+    return rpc.unregisterTool({
+      sessionId: input.sessionId,
+      agentId: this.interactiveAgentId,
+      name: input.name,
+    });
+  }
+
+  /** Replace the interactive agent's active tool set. */
+  async setActiveTools(input: SessionIdRpcInput & SetActiveToolsPayload): Promise<void> {
+    const rpc = await this.getRpc();
+    return rpc.setActiveTools({
+      sessionId: input.sessionId,
+      agentId: this.interactiveAgentId,
+      names: input.names,
+    });
+  }
+
   async extractMemoriesOnExit(input: SessionIdRpcInput): Promise<number> {
     const rpc = await this.getRpc();
     return rpc.extractMemoriesOnExit({
@@ -943,10 +984,25 @@ export class SDKRpcClient {
   }
 
   async toolCall(request: ToolCallRequest): Promise<ToolCallResponse> {
-    return {
-      output: `SDK custom tool calls are not supported: ${request.toolCallId}`,
-      isError: true,
-    };
+    const handler = this.toolCallHandler;
+    if (handler === undefined) {
+      // Historical behavior for hosts that never opted into in-band tool
+      // execution: surface a tool error instead of pretending to run.
+      return {
+        output: `SDK custom tool calls are not supported: ${request.toolCallId}`,
+        isError: true,
+      };
+    }
+    try {
+      return await handler(request);
+    } catch (error) {
+      // The agent loop reads a response, not an exception: a throwing handler
+      // becomes a tool error so the turn can continue.
+      return {
+        output: `SDK custom tool handler failed: ${errorMessage(error)}`,
+        isError: true,
+      };
+    }
   }
 
   private async getRpc(): Promise<ResolvedCoreAPI> {

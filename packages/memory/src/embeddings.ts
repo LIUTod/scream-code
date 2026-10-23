@@ -505,8 +505,11 @@ export async function ensureEmbeddingModelFiles(
       }
       controller.signal.addEventListener('abort', () => { reject(new Error('aborted')); }, { once: true });
     });
-    const abortAwareRead = (): Promise<{ done: true; value?: undefined } | { done: false; value: Uint8Array }> =>
-      Promise.race([reader.read(), abortRejection]);
+    // The DOM lib models `ReadableStreamReadResult` with a discriminated union
+    // that does not line up with the Node stream's optional value; the loop
+    // only reads `done`/`value`, so keep the narrow shape.
+    const abortAwareRead = (): Promise<{ done: boolean; value?: Uint8Array }> =>
+      Promise.race([reader.read(), abortRejection]) as Promise<{ done: boolean; value?: Uint8Array }>;
     let handle: FileHandle;
     try {
       handle = await open(stagingPath, 'w');
@@ -521,7 +524,7 @@ export async function ensureEmbeddingModelFiles(
         // Stream to disk: the archive is ~55MB and used to sit in memory in
         // full before extraction.
         for (;;) {
-          let chunk: { done: true; value?: undefined } | { done: false; value: Uint8Array };
+          let chunk: { done: boolean; value?: Uint8Array };
           try {
             chunk = await abortAwareRead();
           } catch (error) {
@@ -530,7 +533,7 @@ export async function ensureEmbeddingModelFiles(
             const message = error instanceof Error ? error.message : String(error);
             throw new Error(`${message} (received ${received} of ${announcedTotal ?? '?'} bytes): ${url}`, { cause: error });
           }
-          if (chunk.done) break;
+          if (chunk.done || chunk.value === undefined) break;
           const bytes = chunk.value;
           armIdleTimer();
           await handle.write(bytes);

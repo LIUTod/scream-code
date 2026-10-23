@@ -69,6 +69,7 @@ export { isSupportedBalanceProvider } from './session/provider-balance';
 export { normalizeRlmMaxDepth, parseRlmMaxDepthArg } from './session/rlm-settings';
 export type { RlmMaxDepthParseResult } from './session/rlm-settings';
 export { subagentRoster } from './profile/roster';
+export { DEFAULT_AGENT_PROFILES } from './profile/default';
 export type { ProviderBalance } from './session/provider-balance';
 
 // ─── Wire records (for in-monorepo consumers like apps/vis) ────────────────

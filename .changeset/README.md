@@ -16,12 +16,12 @@ Current publishable packages:
 All other workspace packages are private internal packages, are not published to npm, and are excluded via `ignore` in `.changeset/config.json`:
 
 - `@scream-code/agent-core`
-- `@scream-code/scream-code-oauth`
+- `@scream-code/config`
+- `@scream-code/evals`
 - `@scream-code/jian`
+- `@scream-code/knowledge`
 - `@scream-code/ltod`
-- `@scream-code/vis`
-- `@scream-code/vis-server`
-- `@scream-code/vis-web`
+- `@scream-code/memory`
 
 Version impact from internal dependencies must be judged manually. The published artifacts for CLI and SDK bundle internal workspace packages into the artifact itself; runtime `dependencies` of published packages must not include any `@scream-code/*` internal workspace packages.
 

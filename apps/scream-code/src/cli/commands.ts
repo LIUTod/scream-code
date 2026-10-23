@@ -3,8 +3,8 @@ import { Command, Option } from 'commander';
 import { CLI_COMMAND_NAME } from '#/constant/app';
 
 import type { CLIOptions } from './options';
+import type { BotOptions } from './run-bot';
 import { registerExportCommand } from './sub/export';
-import type { WebOptions } from './run-web';
 
 export type MainCommandHandler = (opts: CLIOptions) => void;
 export type PluginNodeRunnerHandler = (entry: string, args: readonly string[]) => void;
@@ -25,7 +25,7 @@ export type StreamJsonHandler = (opts: {
 
 export type ChannelSetupHandler = () => void;
 
-export type WebHandler = (opts: WebOptions) => void;
+export type BotHandler = (opts: BotOptions) => void;
 
 export function createProgram(
   version: string,
@@ -33,7 +33,7 @@ export function createProgram(
   onPluginNodeRunner: PluginNodeRunnerHandler = () => {},
   onStreamJson: StreamJsonHandler = () => {},
   onChannelSetup: ChannelSetupHandler = () => {},
-  onWeb: WebHandler = () => {},
+  onBot: BotHandler = () => {},
 ): Command {
   const program = new Command(CLI_COMMAND_NAME)
     .description('下一代智能体的起点')
@@ -150,19 +150,18 @@ export function createProgram(
       });
     });
 
-  // `scream web` - browser-based chat UI (third consumer of agent-core).
+  // `scream bot` - multi-bot workspace backed by the local gateway.
   program
-    .command('web')
-    .description('启动浏览器 Web UI')
+    .command('bot')
+    .description('启动 Scream Bot 多 bot 工作台')
     .option('--port <port>', '端口号', '3210')
     .option('--model <model>', 'LLM 模型别名')
     .option('-y, --yolo', '自动批准所有操作', false)
     .option('--auto', '以自动权限模式启动', false)
     .option('--no-open', '不自动打开浏览器')
     .option('--lan', '开启局域网共享（同网设备凭网关密钥访问）', false)
-    .option('--token <key>', '自定义网关访问密钥（保存后供 --lan 使用）')
-    .option('--reset-password', '交互式重设网关访问密钥', false)
-    .option('--idle-minutes <minutes>', '无浏览器连接 N 分钟后自动退出（0=禁用，默认 15）', '15')
+    .option('--token <key>', '自定义网关访问密钥')
+    .option('--idle-minutes <minutes>', '空闲 N 分钟后关闭会话（0=禁用，默认 30）', '30')
     .option(
       '--skills-dir <dir>',
       '从该目录加载技能（可多次指定）',
@@ -170,18 +169,17 @@ export function createProgram(
       [] as string[],
     )
     .action((subOpts: Record<string, unknown>) => {
-      const idleMinutes = Number(subOpts['idleMinutes'] ?? '15');
-      onWeb({
+      const idleMinutes = Number(subOpts['idleMinutes'] ?? '30');
+      onBot({
         port: parseInt(subOpts['port'] as string, 10) || 3210,
         model: subOpts['model'] as string | undefined,
         yolo: (subOpts['yolo'] as boolean) ?? false,
         auto: (subOpts['auto'] as boolean) ?? false,
         open: subOpts['open'] !== false,
-        skillsDirs: (subOpts['skillsDir'] as string[]) ?? [],
         lan: (subOpts['lan'] as boolean) ?? false,
         token: subOpts['token'] as string | undefined,
-        resetPassword: (subOpts['resetPassword'] as boolean) ?? false,
-        idleMinutes: Number.isFinite(idleMinutes) && idleMinutes >= 0 ? idleMinutes : 15,
+        idleMinutes: Number.isFinite(idleMinutes) && idleMinutes >= 0 ? idleMinutes : 30,
+        skillsDirs: (subOpts['skillsDir'] as string[]) ?? [],
       });
     });
 

@@ -21,8 +21,8 @@ import { OptionConflictError, validateOptions } from './cli/options';
 import { runPrompt } from './cli/run-prompt';
 import { runShell } from './cli/run-shell';
 import { runChannelSetup } from './cli/channel-setup';
+import { runBot } from './cli/run-bot';
 import { runStreamJson } from './cli/run-stream-json';
-import { runWeb } from './cli/run-web';
 import { formatStartupError } from './cli/startup-error';
 import { runPluginNodeEntry } from './cli/sub/plugin-run-node';
 import { getVersion } from './cli/version';
@@ -95,8 +95,8 @@ export function main(): void {
       });
     },
     (opts) => {
-      void runWeb(opts).catch(async (error: unknown) => {
-        await logStartupFailure('运行 web', error);
+      void runBot(opts).catch(async (error: unknown) => {
+        await logStartupFailure('运行 bot', error);
         process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
         process.exit(1);
       });

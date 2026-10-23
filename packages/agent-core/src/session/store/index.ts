@@ -10,4 +10,4 @@ export {
   removeSessionIndexEntry,
   sessionIndexPath,
 } from '#/session/store/session-index';
-export { encodeWorkDirKey, normalizeWorkDir } from '#/session/store/workdir-key';
+export { encodeWorkDirKey, normalizeWorkDir, resolveWorkDir } from '#/session/store/workdir-key';

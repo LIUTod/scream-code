@@ -82,7 +82,7 @@ describe('ToolManager.registerUserTool host callback support', () => {
     expect(result.isError).not.toBe(true);
     expect(result.output).toBe('echo: hi');
     expect(toolCall).toHaveBeenCalledWith(
-      { turnId: 7, toolCallId: 'call_1', args: { text: 'hi' } },
+      { turnId: 7, toolCallId: 'call_1', name: 'plugin_echo', args: { text: 'hi' } },
       { signal },
     );
   });

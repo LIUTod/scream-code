@@ -26,7 +26,9 @@ export function createTurndown(): TurndownService {
 	turndown.use(gfm);
 	// GFM spec uses ~~ (double tilde), not ~ (single)
 	turndown.addRule("strikethrough", {
-		filter: ["del", "s", "strike"],
+		// `strike` is obsolete and absent from the DOM tag-name map; `never[]`
+		// keeps this valid whether or not the consumer project enables DOM.
+		filter: ["del", "s", "strike"] as unknown as never[],
 		replacement(content) {
 			return `~~${content}~~`;
 		},

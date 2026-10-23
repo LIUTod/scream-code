@@ -36,12 +36,8 @@ copyFileSync(srcReadme, dstReadme);
 console.log('[verify-publish] Synced README.md from repo root to package dir.');
 
 // Step 1 — rebuild dist so __SCREAM_CODE_VERSION__ is freshly injected.
-// IMPORTANT: run the full `build` script, not bare `tsdown`. tsdown has
-// `clean: true` and wipes dist/ before building; a bare tsdown rebuild here
-// would delete dist/public (the web UI static assets copied by
-// copy-web-assets.mjs) right before npm packs, shipping a package whose
-// `scream web` fails with "Failed to load web UI". `pnpm run build` runs
-// tsdown + vite build + copy-web-assets so dist/public is regenerated.
+// IMPORTANT: run the full `build` script, not bare `tsdown`, so any extra
+// packaging steps run in the same order as a release build.
 console.log('[verify-publish] Rebuilding dist via pnpm run build...');
 execSync('pnpm run build', { stdio: 'inherit', cwd: pkgRoot });
 

@@ -7,7 +7,7 @@ import type { Jian } from '@scream-code/jian';
 import { ErrorCodes, ScreamError } from '#/errors';
 import { getRootLogger, log } from '#/logging/logger';
 import type { Logger, SessionLogHandle } from '#/logging/types';
-import type { RuntimeSystemPrompt, ScreamConfig, SDKSessionRPC } from '#/rpc';
+import type { RuntimeSystemPrompt, ScreamConfig, SDKSessionRPC, SessionAgentProfile } from '#/rpc';
 import { proxyWithExtraPayload } from '#/rpc/types';
 
 import { Agent, type AgentOptions, type AgentType } from '../agent';
@@ -68,8 +68,7 @@ export interface SessionOptions {
   readonly lspSupervisor?: LspProcessSupervisor | undefined;
 }
 
-export interface SessionSkillConfig {
-  readonly userHomeDir?: string;
+export interface SessionSkillConfig {  readonly userHomeDir?: string;
   readonly explicitDirs?: readonly string[];
   readonly extraDirs?: readonly string[];
   readonly pluginSkillRoots?: readonly SkillRoot[];
@@ -101,6 +100,72 @@ export interface SessionMeta {
   forkedFrom?: string;
   agents: Record<string, AgentMeta>;
   custom: Record<string, any>;
+}
+
+/** Session-metadata key holding a serialized {@link SessionAgentProfile}. */
+export const SESSION_AGENT_PROFILE_METADATA_KEY = 'agentProfile';
+
+/**
+ * Validates an untrusted serializable profile — an RPC payload or a persisted
+ * `state.json` entry — and normalizes it. Returns `undefined` when nothing
+ * usable is present, so a hand-edited or older metadata file degrades to the
+ * default agent profile instead of failing the resume.
+ */
+export function readSessionAgentProfile(value: unknown): SessionAgentProfile | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  const name = readProfileText(record['name']);
+  const systemPrompt = readProfileText(record['systemPrompt']);
+  const activeTools = readProfileToolNames(record['activeTools']);
+  if (name === undefined && systemPrompt === undefined && activeTools === undefined) {
+    return undefined;
+  }
+  return {
+    ...(name !== undefined ? { name } : {}),
+    ...(systemPrompt !== undefined ? { systemPrompt } : {}),
+    ...(activeTools !== undefined ? { activeTools } : {}),
+  };
+}
+
+/**
+ * Composes a serializable session profile onto the built-in main-agent
+ * profile: the base renderer runs first and the role text is appended after
+ * it, so a bot keeps the built-in operating instructions and adds its own
+ * role on top instead of replacing them.
+ */
+export function composeSessionAgentProfile(
+  profile: SessionAgentProfile,
+): ResolvedAgentProfile | undefined {
+  const base = DEFAULT_AGENT_PROFILES['agent'];
+  if (base === undefined) return undefined;
+  const baseRenderer = base.systemPrompt;
+  const roleText = profile.systemPrompt?.trim();
+  const systemPrompt: ResolvedAgentProfile['systemPrompt'] = (context) => {
+    const rendered = baseRenderer(context);
+    return roleText === undefined || roleText.length === 0
+      ? rendered
+      : `${rendered}\n\n${roleText}`;
+  };
+  return {
+    name: profile.name ?? base.name,
+    description: base.description,
+    systemPrompt,
+    tools: [...(profile.activeTools ?? base.tools)],
+    whenToUse: base.whenToUse,
+    subagents: base.subagents,
+    spawns: base.spawns,
+  };
+}
+
+function readProfileText(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function readProfileToolNames(value: unknown): readonly string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  return value.every((name): name is string => typeof name === 'string') ? value : undefined;
 }
 
 const BACKGROUND_KEEP_ALIVE_ON_EXIT_ENV = 'SCREAM_CODE_BACKGROUND_KEEP_ALIVE_ON_EXIT';
@@ -260,8 +325,11 @@ export class Session {
       this.subagentMessages.clear();
     });
   }
-  async createMain() {
-    const { agent } = await this.createAgent({ type: 'main' }, DEFAULT_AGENT_PROFILES['agent']);
+  async createMain(profile?: ResolvedAgentProfile) {
+    const { agent } = await this.createAgent(
+      { type: 'main' },
+      profile ?? DEFAULT_AGENT_PROFILES['agent'],
+    );
     await agent.memoStoreReady;
     await agent.knowledgeStoreReady;
     await this.triggerSessionStart('startup');
@@ -291,15 +359,23 @@ export class Session {
     // replay a non-empty system prompt and never enter this branch.
     const main = this.agents.get('main');
     if (main !== undefined) {
-      if (main.context.history.length === 0) {
+      // Bot sessions pin their role/tools in session metadata. That serialized
+      // profile is the source of truth on resume: the wire replay restores the
+      // prompt captured at create time, but a profile edited between runs must
+      // win, and a session resumed with an empty wire still needs the bot role.
+      const pinned = readSessionAgentProfile(
+        this.metadata.custom?.[SESSION_AGENT_PROFILE_METADATA_KEY],
+      );
+      const pinnedProfile = pinned === undefined ? undefined : composeSessionAgentProfile(pinned);
+      let profile: ResolvedAgentProfile | undefined;
+      if (pinnedProfile !== undefined) {
+        profile = pinnedProfile;
+      } else if (main.context.history.length === 0) {
         // A session migrated from an external tool replays an empty wire
         // without the `config.update` bootstrap events a natively-created
         // agent writes, so the main agent comes back with an empty system
         // prompt and no tools. Apply the default profile so it is usable.
-        const profile = DEFAULT_AGENT_PROFILES['agent'];
-        if (profile !== undefined) {
-          await this.bootstrapAgentProfile(main, profile);
-        }
+        profile = DEFAULT_AGENT_PROFILES['agent'];
       } else {
         // Native session: keep its (possibly custom) profile, but re-read
         // AGENTS.md on every resume so edits take effect without requiring
@@ -308,12 +384,12 @@ export class Session {
         // DEFAULT_AGENT_PROFILES holds the built-in profiles; an unknown or
         // undefined profile name falls back to the default so the session is
         // never left without a system prompt or tools.
-        const profile =
+        profile =
           (profileName !== undefined ? DEFAULT_AGENT_PROFILES[profileName] : undefined) ??
           DEFAULT_AGENT_PROFILES['agent'];
-        if (profile !== undefined) {
-          await this.bootstrapAgentProfile(main, profile);
-        }
+      }
+      if (profile !== undefined) {
+        await this.bootstrapAgentProfile(main, profile);
       }
     }
     if (main !== undefined && this.metadata.custom?.['recap']) {
@@ -717,6 +793,8 @@ export class Session {
   private emitInitialMcpLoadError(error: unknown): void {
     const message = error instanceof Error ? error.message : String(error);
     this.log.error('mcp initial load failed', error);
+    // Fire-and-forget: an event-emitter failure cannot be reported anywhere useful.
+    // oxlint-disable-next-line promise/no-promise-in-callback
     void this.rpc.emitEvent({
       type: 'error',
       agentId: 'main',

@@ -8,9 +8,8 @@
  *   B  dev:  node <tsx cli> --import ../../build/register-raw-text-loader.mjs ./src/main.ts --version
  *
  * `build:cli` is CLI-only: tsdown runs with clean:true and wipes the whole
- * dist directory, including the dist/public web assets produced by the vite
- * web build. Run the full `pnpm build` (tsdown + vite + copy-web-assets) when
- * the web bundle is needed as well.
+ * dist directory. Use the full `pnpm build` when other artifacts are needed
+ * alongside the CLI bundle.
  *
  * Each scenario runs RUNS times and reports every run plus the median.
  * Zero third-party dependencies.
@@ -139,8 +138,7 @@ if (skipped.length > 0) {
   console.error(
     '\ndist build not found — run `pnpm -C apps/scream-code run build:cli` first.\n' +
       'Note: `build:cli` is CLI-only and runs tsdown with clean:true, so it wipes\n' +
-      'all of dist (including the dist/public web assets). Run the full `pnpm build`\n' +
-      'when you need the web bundle as well.',
+      'all of dist. Run the full `pnpm build` when you need every build artifact.',
   );
   process.exitCode = 1;
 }

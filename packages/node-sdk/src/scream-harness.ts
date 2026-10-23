@@ -59,6 +59,7 @@ export class ScreamHarness {
       identity: this.identity,
       resolveOAuthTokenProvider: this.auth.resolveOAuthTokenProvider,
       skillDirs: options.skillDirs,
+      onToolCall: options.onToolCall,
     });
   }
 

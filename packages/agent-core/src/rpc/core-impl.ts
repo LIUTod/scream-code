@@ -49,7 +49,14 @@ import type { Logger } from '../logging/types';
 import { LspProcessSupervisor } from '../lsp/process-supervisor';
 import { resolveSessionMcpConfig, type SessionMcpConfig } from '../mcp';
 import type { McpServerConfig } from '../config/schema';
-import { Session, type SessionMeta, type SessionSkillConfig } from '../session';
+import {
+  composeSessionAgentProfile,
+  readSessionAgentProfile,
+  Session,
+  SESSION_AGENT_PROFILE_METADATA_KEY,
+  type SessionMeta,
+  type SessionSkillConfig,
+} from '../session';
 import type { SkillRoot } from '../skill';
 import { exportSessionDirectory } from '../session/export';
 import {
@@ -57,7 +64,7 @@ import {
   type OAuthTokenProviderResolver
 } from '../session/provider-manager';
 import { SessionAPIImpl } from '../session/rpc';
-import { normalizeWorkDir, SessionStore } from '../session/store';
+import { resolveWorkDir, SessionStore } from '../session/store';
 import type { CoreRPCClient } from './client';
 import type {
   ActivateSkillPayload,
@@ -310,7 +317,14 @@ export class ScreamCore implements PromisableMethods<CoreAPI> {
 
   async createSession(input: CreateSessionPayload): Promise<SessionSummary> {
     const options = input;
-    const workDir = requiredWorkDir('createSession', options.workDir);
+    const workDir = requiredWorkDir('createSession', options.workDir, options.exactWorkDir);
+    // A pinned bot profile is composed once and handed to createMain; the
+    // serializable half is persisted below so resume() can rebuild it. Absent
+    // profile ⇒ undefined ⇒ createMain applies the built-in agent profile,
+    // byte-for-byte the pre-profile behavior.
+    const pinnedProfile = readSessionAgentProfile(options.profile);
+    const agentProfile =
+      pinnedProfile === undefined ? undefined : composeSessionAgentProfile(pinnedProfile);
     const config = this.reloadProviderManager();
     const id = options.id ?? createSessionId();
     const thinkingLevel = resolveThinkingLevel(options.thinking, config);
@@ -322,6 +336,7 @@ export class ScreamCore implements PromisableMethods<CoreAPI> {
     const summary = await this.sessionStore.create({
       id,
       workDir,
+      exactWorkDir: options.exactWorkDir,
     });
     const result: SessionSummary = {
       ...summary,
@@ -366,7 +381,12 @@ export class ScreamCore implements PromisableMethods<CoreAPI> {
           : {}),
         custom: options.metadata === undefined ? {} : { ...options.metadata },
       };
-      const mainAgent = await session.createMain();
+      // Persisted before the first writeMetadata below, so a bot session's
+      // role/tools survive process restarts (resume() re-applies them).
+      if (pinnedProfile !== undefined) {
+        session.metadata.custom[SESSION_AGENT_PROFILE_METADATA_KEY] = pinnedProfile;
+      }
+      const mainAgent = await session.createMain(agentProfile);
       mainAgent.config.update({
         modelAlias: options.model ?? config.defaultModel,
         thinkingLevel,
@@ -1444,11 +1464,11 @@ export function buildWebSearcher(input: {
   return providers.length === 1 ? providers[0] : new FallbackSearchProvider(providers);
 }
 
-function requiredWorkDir(operation: string, value: string): string {
+function requiredWorkDir(operation: string, value: string, exactWorkDir?: boolean): string {
   if (typeof value !== 'string' || value.trim() === '') {
     throw new ScreamError(ErrorCodes.REQUEST_WORK_DIR_REQUIRED, `${operation} requires workDir`);
   }
-  return normalizeWorkDir(value);
+  return resolveWorkDir(value, exactWorkDir);
 }
 
 function createSessionId(): string {

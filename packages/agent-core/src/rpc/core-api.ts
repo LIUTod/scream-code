@@ -32,6 +32,20 @@ export type PromptInput = readonly PromptPart[];
 export type EmptyPayload = {};
 export type SessionMetadataPatch = Partial<Omit<SessionMeta, 'agents'>>;
 
+/**
+ * Serializable subset of an agent profile a host can pin to a session.
+ *
+ * The core composes it onto `DEFAULT_AGENT_PROFILES['agent']`: `systemPrompt`
+ * is appended to the rendered base prompt, `activeTools` replaces the base
+ * tool list. Everything here must survive JSON — it is persisted in session
+ * metadata and re-applied on resume so a bot keeps its role across restarts.
+ */
+export interface SessionAgentProfile {
+  readonly name?: string | undefined;
+  readonly systemPrompt?: string | undefined;
+  readonly activeTools?: readonly string[] | undefined;
+}
+
 export interface CreateSessionPayload {
   readonly id?: string | undefined;
   readonly workDir: string;
@@ -39,6 +53,13 @@ export interface CreateSessionPayload {
   readonly thinking?: string | undefined;
   readonly permission?: PermissionMode | undefined;
   readonly metadata?: JsonObject | undefined;
+  /** Session-scoped agent profile (bot role/tools). Omitted ⇒ default agent profile. */
+  readonly profile?: SessionAgentProfile | undefined;
+  /**
+   * Root the session at exactly `workDir` instead of walking up to the nearest
+   * `.git` / `package.json` ancestor. Defaults to the ancestor walk.
+   */
+  readonly exactWorkDir?: boolean | undefined;
 }
 
 export interface CloseSessionPayload {
