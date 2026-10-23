@@ -1,2 +1,2 @@
-# Copied from packages/scream-core at build time
-agents/
+# Copied from the core package at build time
+/agents/
