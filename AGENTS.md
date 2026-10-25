@@ -477,6 +477,19 @@ Unattended permission mode: reversible actions auto-approve; everything else is 
 - **Deny reasons**: policy deny reasons are propagated into the tool error (`permission/index.ts`), so the model can tell "parked for human review" from a permanent failure and does not retry blindly.
 - **Validation**: `PermissionMode` covers `bot` across agent-core (`permission/types.ts`, `config/schema.ts`, `config/toml.ts`, `errors/codes.ts`), node-sdk (`types.ts`, `session.ts` runtime guard), and the TUI selector.
 
+### Bot Workbench (`bot:server` / `bot:dev`)
+
+Local multi-Bot workspace in `apps/scream-code/src/bot` (server / shared / ui). This is the workbench, not the `/bot` permission mode.
+
+- **Surfaces**: single chat with a Bot, rooms (2+ Bots), an inbox for approvals / questions / hand-offs, settings. Routes: `src/bot/ui/routes/{bot,room,inbox,settings}.tsx`.
+- **Thread scope is a data-layer invariant**: `BotStore.listThreads` defaults to `scope: 'direct'` and excludes every session registered in `room_threads`. Internal paths that need every session (`deleteBot` cleanup, `closeBot` recovery scans) pass `{ scope: 'all' }` explicitly. Do not re-add UI-level filters for this rule.
+- **Rooms are projections**: each member Bot runs its own core session; `room_messages` projects them with `speakerKind` / `via` / `answeredBy` / `source_message_id` and `attachments_json` (schema v6). A relayed answer is written with `via: 'handoff'` by `appendRoomReply`.
+- **Hand-off caps**: depth lives on the thread (`handoffDepth`); reuse requires an exact depth match; a source thread at the cap refuses with `handoff.refused {reason:'depth'}` (an answer, not a crash). Fan-out is capped per run.
+- **Attachments**: upload first (`POST /api/bots/:id/attachments` or `POST /api/rooms/:id/attachments`), then reference the returned object in the prompt. Files land in `<workspace>/.scream-attachments/<uuid>-<name>` (hidden from the files panel); 25 MB per file, 10 per message. Room uploads are copied into every member workspace. Only server-issued paths are accepted; the turn receives a trailing file list while the transcript renders chips.
+- **Mentions**: the room composer inserts `@Name`; `runtime.resolveRoomTargets` matches whole names (longest wins) and falls back to the lead. Pure token logic in `ui/lib/mention.ts`, listbox in `ui/components/chat/mention-popup.tsx`.
+- **Read state**: Bot unread counts direct threads only; room unread uses a per-room localStorage watermark (`ui/lib/room-read.ts`), stamped when the room opens.
+- **Tests**: `test/bot/server/*.test.ts` (gateway / runtime / store / handoff / migrations / recovery), `test/bot/ui/*.dom.test.tsx`, and real-engine suites via `test/bot/fixtures/browser-scenarios.ts --suite basic|handoff|recovery`.
+
 ### Loop Mode (`/loop`)
 
 Stateless retry with an optional `--verify` shell gate. Each iteration re-sends the same prompt; the model does not see prior iteration output. Use only for idempotent tasks with an objective exit condition (wait for CI, health-check polling, retry a flaky build). For tasks that need to adapt based on the previous failure, use `/goal` instead — the model carries working notes across turns.
