@@ -22,15 +22,33 @@ export type { BotServerHandle, BotServerOptions } from '../shared/contracts';
 
 const DEFAULT_BOT_NAME = 'Scream';
 
-/** Candidate `dist/bot-ui` locations across source, bundled and installed layouts. */
-function resolveUiDir(): string | undefined {
-  const candidates = [
-    join(process.cwd(), 'dist', 'bot-ui'),
-    join(import.meta.dirname, '../../../../dist/bot-ui'),
-    join(import.meta.dirname, '../../../dist/bot-ui'),
-    join(import.meta.dirname, '../../dist/bot-ui'),
+/**
+ * Candidate `dist/bot-ui` locations across bundled, installed and source layouts.
+ * All segments go through `node:path`, so the same list works on Windows.
+ */
+export function uiDirCandidates(
+  moduleDir: string,
+  cwd: string,
+  joinPath: (...segments: string[]) => string = join,
+): readonly string[] {
+  return [
+    // Bundled/installed CLI: the entrypoint lives in `<package>/dist`.
+    joinPath(moduleDir, 'bot-ui'),
+    joinPath(moduleDir, '../dist/bot-ui'),
+    joinPath(cwd, 'dist', 'bot-ui'),
+    joinPath(moduleDir, '../../../../dist/bot-ui'),
+    joinPath(moduleDir, '../../../dist/bot-ui'),
+    joinPath(moduleDir, '../../dist/bot-ui'),
   ];
-  const found = candidates.find((candidate) => existsSync(join(candidate, 'index.html')));
+}
+
+/** First candidate that actually contains a built index page. */
+export function pickUiDir(candidates: readonly string[]): string | undefined {
+  return candidates.find((candidate) => existsSync(join(candidate, 'index.html')));
+}
+
+function resolveUiDir(): string | undefined {
+  const found = pickUiDir(uiDirCandidates(import.meta.dirname, process.cwd()));
   if (found !== undefined) warnIfStaleBuild(found);
   return found;
 }

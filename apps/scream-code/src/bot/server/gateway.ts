@@ -7,7 +7,7 @@
  */
 import { existsSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join, relative, resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { Hono } from 'hono';
 import type { Context } from 'hono';
@@ -818,9 +818,10 @@ export function createGateway(options: GatewayOptions): Hono {
   // ------------------------------------------------------------------- UI
 
   if (options.uiDir !== undefined && existsSync(options.uiDir)) {
-    const root = relative(process.cwd(), options.uiDir);
-    app.use('*', serveStatic({ root }));
-    app.get('*', serveStatic({ path: join(root, 'index.html') }));
+    // Absolute root: the bundle may live in the installed package while the
+    // process was started from anywhere.
+    app.use('*', serveStatic({ root: options.uiDir }));
+    app.get('*', serveStatic({ path: join(options.uiDir, 'index.html') }));
   }
 
   app.notFound((context) => {
@@ -828,7 +829,7 @@ export function createGateway(options: GatewayOptions): Hono {
       return context.json(apiError('not_found', `No route for ${context.req.path}`), 404);
     }
     return context.text(
-      'Bot UI is not built. Run `pnpm --filter scream-code run bot:build`.\n',
+      'The Bot UI is missing from this installation. Reinstall or upgrade `scream`; from a source checkout run `pnpm --filter scream-code bot:build`.\n',
       404,
     );
   });
