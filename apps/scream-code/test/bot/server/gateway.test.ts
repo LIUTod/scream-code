@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type {
   Approval,
+  Attachment,
   Bot,
   Message,
   Question,
@@ -430,6 +431,15 @@ describe('gateway rooms', () => {
     expect(second.messages).toHaveLength(first.messages.length);
     const replies = first.messages.filter((row) => row.speakerKind === 'bot');
     expect(new Set(replies.map((row) => row.answeredBy))).toEqual(new Set([tony.id, vera.id]));
+
+    // Room threads stay out of the Bot's 1:1 thread list.
+    for (const bot of [tony, vera]) {
+      const list = (await (
+        await app.request(`/api/bots/${bot.id}/threads`)
+      ).json()) as Thread[];
+      const roomThreadId = store.getRoomThread(room.id, bot.id);
+      expect(list.map((entry) => entry.id)).not.toContain(roomThreadId);
+    }
   });
 });
 
@@ -536,7 +546,7 @@ describe('gateway recovery protocol', () => {
     await f.runtime.close();
   });
 
-  it('rejects nonempty attachments instead of accepting an incomplete prompt', async () => {
+  it('rejects malformed attachment payloads instead of accepting an incomplete prompt', async () => {
     const f = createApp();
     const bot = await createBot(f.app);
     const thread = await createThread(f.app,bot.id);
@@ -544,7 +554,7 @@ describe('gateway recovery protocol', () => {
       method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({text:'read it',attachments:['file.txt']}),
     });
     expect(response.status).toBe(400);
-    expect(await response.json()).toMatchObject({error:{code:'attachments.unsupported'}});
+    expect(await response.json()).toMatchObject({error:{code:'request.invalid'}});
     expect(f.store.listRunsForThread(thread.id)).toEqual([]);
     await f.runtime.close();
   });
@@ -571,5 +581,95 @@ describe('gateway fixed thread workspace', () => {
     const defaultRoot = await f.app.request(`/api/bots/${bot.id}/files`);
     expect(await defaultRoot.json()).toEqual({path:next,entries:[]});
     await f.runtime.close();
+  });
+});
+
+describe('gateway attachments', () => {
+  it('stores an upload inside the Bot workspace and carries it into a room message', async () => {
+    const { app, factory, store } = createApp();
+    const tony = await createBot(app, tempDir(), 'Tony');
+    const created = await app.request('/api/rooms', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'files', memberIds: [tony.id], leadBotId: tony.id }),
+    });
+    const room = (await created.json()) as Room;
+
+    const form = new FormData();
+    form.append('file', new File(['hello'], 'notes.txt', { type: 'text/plain' }));
+    const uploaded = await app.request(`/api/bots/${tony.id}/attachments`, {
+      method: 'POST',
+      body: form,
+    });
+    expect(uploaded.status).toBe(201);
+    const saved = (await uploaded.json()) as Attachment;
+    expect(saved.name).toBe('notes.txt');
+    expect(saved.path).toMatch(/^\.scream-attachments\/[\w-]+-notes\.txt$/);
+    expect(existsSync(join(tony.workspace, saved.path))).toBe(true);
+
+    const posted = await app.request(`/api/rooms/${room.id}/messages`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text: '@Tony read this', attachments: [saved] }),
+    });
+    expect(posted.status).toBe(202);
+
+    const [message] = store.listRoomMessages(room.id);
+    expect(message?.attachments).toEqual([saved]);
+    const threadId = store.getRoomThread(room.id, tony.id);
+    await vi.waitFor(() => {
+      expect(factory.sessionFor(threadId!).prompts[0]).toContain(saved.path);
+    });
+  });
+
+  it('copies a room upload into every member workspace before anyone is prompted', async () => {
+    const { app, factory, store } = createApp();
+    const tony = await createBot(app, tempDir(), 'Tony');
+    const vera = await createBot(app, tempDir(), 'Vera');
+    const created = await app.request('/api/rooms', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'shared', memberIds: [tony.id, vera.id], leadBotId: tony.id }),
+    });
+    const room = (await created.json()) as Room;
+
+    const form = new FormData();
+    form.append('file', new File(['quarterly numbers'], '季度 报告.txt', { type: 'text/plain' }));
+    const uploaded = await app.request(`/api/rooms/${room.id}/attachments`, { method: 'POST', body: form });
+    expect(uploaded.status).toBe(201);
+    const saved = (await uploaded.json()) as Attachment;
+    // Characters a filesystem dislikes are normalized; letters from any script survive.
+    expect(saved.name).toBe('季度_报告.txt');
+    for (const bot of [tony, vera]) {
+      expect(existsSync(join(bot.workspace, saved.path))).toBe(true);
+    }
+
+    const posted = await app.request(`/api/rooms/${room.id}/messages`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text: '@Tony @Vera compare these', attachments: [saved] }),
+    });
+    expect(posted.status).toBe(202);
+    for (const bot of [tony, vera]) {
+      const threadId = store.getRoomThread(room.id, bot.id)!;
+      await vi.waitFor(() => {
+        expect(factory.sessionFor(threadId).prompts[0]).toContain(saved.path);
+      });
+    }
+  });
+
+  it('rejects an attachment that was never uploaded by this server', async () => {
+    const { app } = createApp();
+    const tony = await createBot(app, tempDir(), 'Tony');
+    const thread = await createThread(app, tony.id);
+    const response = await app.request(`/api/threads/${thread.id}/messages`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        text: 'look',
+        attachments: [{ id: 'x', name: 'evil.txt', path: '../../etc/passwd', size: 1, mime: 'text/plain' }],
+      }),
+    });
+    expect(response.status).toBe(400);
   });
 });

@@ -105,10 +105,10 @@ The Bot database is `<screamHome>/bot/bot.db`. Scream home resolution is an expl
 `<screamHome>/config.toml` unless an explicit configuration path is supplied. SDK session history
 is separate from the Bot database; its display projection is not a replacement execution log.
 
-`server/migrations.ts` currently declares schema version **5**. It records applied versions in
+`server/migrations.ts` currently declares schema version **6**. It records applied versions in
 `schema_migrations` and `PRAGMA user_version`. Before upgrading an existing on-disk database, it
 uses SQLite `VACUUM INTO` to create a consistent backup named
-`bot.db.pre-v5-<uuid>.bak` beside the database, including committed WAL data. Fresh databases do
+`bot.db.pre-v6-<uuid>.bak` beside the database, including committed WAL data. Fresh databases do
 not need that pre-upgrade backup. Required schema changes run in a transaction; failure rolls
 back and prevents the store from opening for service. A server also rejects a database with a
 newer schema than it supports.
@@ -134,8 +134,23 @@ creating a second concurrent turn on that thread.
 `POST /api/threads/:id/messages` accepts `text`, optional `mode` (`queue` or `steer`) and an optional
 `requestKey`. Reusing a key for the same thread/text returns its accepted Run; reusing it for a
 different thread/text is a conflict. The API responds `202` with the Run identity, not a completed
-answer. Nonempty `attachments` are rejected as `attachments.unsupported`; this guide does not
-promise attachment upload or a new tool-grant workflow.
+answer.
+
+### Attachments
+
+Files are uploaded first, then referenced by a prompt:
+
+- `POST /api/bots/:id/attachments` (multipart field `file`, optional `?threadId=`) stores a file in
+  that Bot's workspace under `.scream-attachments/<uuid>-<name>` and returns an `Attachment`. The
+  optional thread id resolves the workspace exactly as that thread's runs would.
+- `POST /api/rooms/:id/attachments` stores the same file, under the same relative path, in **every
+  member workspace**, so any addressed Bot can open it.
+- Limits: 25 MB per file and 10 files per message. The body is rejected before multipart parsing
+  when `Content-Length` already exceeds the limit. Names keep letters and digits from any script;
+  other characters become `_`, and the path always carries a server-generated UUID prefix.
+- Prompts accept `attachments` (the returned objects). Only paths the server issued are accepted.
+  The turn sees a trailing "Attached files" list of workspace-relative paths; the transcript keeps
+  the person's text plus attachment chips. A retried send reuses the same attachments.
 
 On startup, recovery distinguishes work that can be proved unstarted from work whose effects
 are unknown:

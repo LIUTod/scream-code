@@ -436,8 +436,8 @@ describe('BotRuntime promptRoom', () => {
 
   it('reuses the same room request instead of duplicating member runs', async () => {
     const fixture = roomFixture();
-    const first = fixture.runtime.promptRoom(fixture.room.id, '@Tony run once', 'room-key-1');
-    const second = fixture.runtime.promptRoom(fixture.room.id, '@Tony run once', 'room-key-1');
+    const first = fixture.runtime.promptRoom(fixture.room.id, '@Tony run once', { requestKey: 'room-key-1' });
+    const second = fixture.runtime.promptRoom(fixture.room.id, '@Tony run once', { requestKey: 'room-key-1' });
 
     expect(second.roomMessage.id).toBe(first.roomMessage.id);
     expect(second.runIds).toEqual([first.runId]);
@@ -449,8 +449,8 @@ describe('BotRuntime promptRoom', () => {
 
   it('rejects a reused request key with different text', () => {
     const fixture = roomFixture();
-    fixture.runtime.promptRoom(fixture.room.id, '@Tony first', 'same-key');
-    expect(() => fixture.runtime.promptRoom(fixture.room.id, '@Tony second', 'same-key')).toThrow(/different message/);
+    fixture.runtime.promptRoom(fixture.room.id, '@Tony first', { requestKey: 'same-key' });
+    expect(() => fixture.runtime.promptRoom(fixture.room.id, '@Tony second', { requestKey: 'same-key' })).toThrow(/different message/);
     expect(fixture.store.listRoomMessages(fixture.room.id)).toHaveLength(1);
   });
 

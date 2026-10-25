@@ -2,6 +2,8 @@
  * Local adaptation: plain text, per-Bot/thread request ownership, tab-scoped recovery;
  * accepted work belongs exclusively to the server queue, never a browser drain.
  */
+import type { Attachment } from "../../shared/contracts";
+
 export type DraftMode = "queue" | "steer";
 export interface DraftRequest {
   readonly id: string;
@@ -11,12 +13,14 @@ export interface DraftRequest {
   readonly text: string;
   readonly restore: string;
   readonly mode: DraftMode;
+  readonly attachments?: readonly Attachment[];
 }
 export interface DraftRetry {
   readonly id: string;
   readonly text: string;
   readonly restore: string;
   readonly mode: DraftMode;
+  readonly attachments?: readonly Attachment[];
 }
 export interface DraftState {
   readonly retry: DraftRetry | null;
@@ -28,6 +32,23 @@ export interface DraftState {
 type DraftStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 const EMPTY: DraftState = { value: "", pending: null, error: null, recovered: false, retry: null };
 const PREFIX = "scream.bot.draft.v2:";
+
+/** A retry keeps the files that were attached when it was first attempted. */
+function restoredAttachments(candidate: object): { attachments?: readonly Attachment[] } {
+  if (!("attachments" in candidate) || !Array.isArray(candidate.attachments)) return {};
+  const valid = candidate.attachments.filter((entry): entry is Attachment => {
+    if (entry === null || typeof entry !== "object") return false;
+    const row = entry as Record<string, unknown>;
+    return (
+      typeof row["id"] === "string" &&
+      typeof row["name"] === "string" &&
+      typeof row["path"] === "string" &&
+      typeof row["size"] === "number" &&
+      typeof row["mime"] === "string"
+    );
+  });
+  return valid.length === 0 ? {} : { attachments: valid };
+}
 export const draftKey = (botId: string, threadId: string) => JSON.stringify([botId, threadId]);
 
 export function canSubmitDraft(text: string, paused: boolean, pending: boolean): boolean {
@@ -62,7 +83,13 @@ export class DraftStore {
             "text" in candidate && typeof candidate.text === "string" &&
             "restore" in candidate && typeof candidate.restore === "string" &&
             "mode" in candidate && (candidate.mode === "queue" || candidate.mode === "steer")) {
-            retry = { id: candidate.id, text: candidate.text, restore: candidate.restore, mode: candidate.mode };
+            retry = {
+              id: candidate.id,
+              text: candidate.text,
+              restore: candidate.restore,
+              mode: candidate.mode,
+              ...restoredAttachments(candidate),
+            };
           }
         }
         state = { ...EMPTY, value: saved.value, recovered, retry };
@@ -83,7 +110,15 @@ export class DraftStore {
     for (const listener of this.listeners) listener();
   }
   edit(key: string, value: string) { this.put(key, { ...this.get(key), value }); }
-  begin(botId: string, threadId: string, text: string, paused: boolean, mode: DraftMode = "queue", consume = true): DraftRequest | null {
+  begin(
+    botId: string,
+    threadId: string,
+    text: string,
+    paused: boolean,
+    mode: DraftMode = "queue",
+    consume = true,
+    attachments: readonly Attachment[] = [],
+  ): DraftRequest | null {
     const key = draftKey(botId, threadId);
     const state = this.get(key);
     if (!canSubmitDraft(text, paused, state.pending !== null || state.retry !== null)) return null;
@@ -92,6 +127,7 @@ export class DraftStore {
       id: crypto.randomUUID(),
       key, botId, threadId, text: text.trim(), mode,
       restore: text,
+      ...(attachments.length === 0 ? {} : { attachments }),
     };
     // Lock synchronously: a second Enter before React commits cannot start another POST.
     this.put(key, { value: consuming ? "" : state.value, pending: request, error: null, recovered: false, retry: null });

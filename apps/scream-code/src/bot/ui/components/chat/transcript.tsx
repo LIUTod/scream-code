@@ -16,6 +16,7 @@ import { ApprovalCard } from "@/components/approvals/approval-card";
 import { HandoffCard } from "./handoff-card";
 import { QuestionCard } from "@/components/approvals/question-card";
 import { ToolActivity } from "./tool-activity";
+import { AttachmentChips } from "./attachment-chips";
 import { MessageBody } from "./message-body";
 
 const clock = new Intl.DateTimeFormat(undefined, {
@@ -52,8 +53,11 @@ function MessageRow({ bot, message }: { bot: Bot; message: Message }) {
   if (message.role === "user") {
     return (
       <div className="flex justify-end">
-        <div className="max-w-[85%] rounded-2xl rounded-br-md bg-secondary px-3.5 py-2 text-[13.5px] text-secondary-foreground leading-relaxed whitespace-pre-wrap">
-          {message.content}
+        <div className="max-w-[85%]">
+          <div className="rounded-2xl rounded-br-md bg-secondary px-3.5 py-2 text-[13.5px] text-secondary-foreground leading-relaxed whitespace-pre-wrap">
+            {message.content}
+          </div>
+          <AttachmentChips align="end" attachments={message.attachments} />
         </div>
       </div>
     );
@@ -114,7 +118,7 @@ export function Transcript({
     <MessageScrollerProvider key={`${bot.id}:${threadId}`}>
       <MessageScroller className="min-h-0 flex-1">
         <MessageScrollerViewport className="px-4 md:px-8">
-          <MessageScrollerContent className="mx-auto w-full max-w-3xl py-7">
+          <MessageScrollerContent className="mx-auto w-full max-w-2xl py-7">
             {!hasConversation && !activeRun && !messages.isPending && !messages.isError ? (
               <div className="flex flex-col items-center gap-3 py-20 text-center">
                 <AbstractAvatar

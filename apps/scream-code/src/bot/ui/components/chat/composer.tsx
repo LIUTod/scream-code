@@ -1,8 +1,8 @@
-import { IconArrowUp, IconPlayerStop } from "@tabler/icons-react";
+import { IconArrowUp, IconPaperclip, IconPlayerStop, IconX } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useLayoutEffect, useRef, useSyncExternalStore } from "react";
+import { useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { canSubmitDraft, composerDrafts, draftKey, type DraftMode, type DraftRequest } from "@/lib/draft";
-import type { Bot } from "../../../shared/contracts";
+import type { Attachment, Bot } from "../../../shared/contracts";
 import { Button } from "@/components/ui/button";
 import { getBotClient } from "@/lib/api/client";
 import { queryKeys, runsQuery } from "@/lib/api/queries";
@@ -32,7 +32,13 @@ function ThreadComposer({ bot, threadId }: { bot: Bot; threadId: string }) {
   const activeRun = threadRuns.find((run) => run.status === "running" || run.status === "waiting_user");
   const queued = threadRuns.filter((run) => run.status === "queued");
   const waiting = activeRun?.status === "waiting_user";
-  const canSend = (text: string) => canSubmitDraft(text, bot.paused, draft.pending !== null || draft.retry !== null);
+  const [files, setFiles] = useState<readonly Attachment[]>([]);
+  const [uploading, setUploading] = useState(0);
+  const [fileError, setFileError] = useState<string | null>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const canSend = (text: string) =>
+    uploading === 0 &&
+    canSubmitDraft(text, bot.paused, draft.pending !== null || draft.retry !== null);
   const refresh = (ownerBotId: string, ownerThreadId: string) => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.messages(ownerThreadId) });
     void queryClient.invalidateQueries({ queryKey: queryKeys.runs(ownerBotId) });
@@ -48,7 +54,13 @@ function ThreadComposer({ bot, threadId }: { bot: Bot; threadId: string }) {
 
   const send = useMutation({
     retry: false,
-    mutationFn: (request: DraftRequest) => getBotClient().prompt(request.threadId, { mode: request.mode, text: request.text, requestKey: request.id }),
+    mutationFn: (request: DraftRequest) =>
+      getBotClient().prompt(request.threadId, {
+        mode: request.mode,
+        text: request.text,
+        requestKey: request.id,
+        attachments: request.attachments ?? [],
+      }),
     onSuccess: (_accepted, request) => {
       // Acceptance transfers ownership to the server. Never clear the live editor here.
       composerDrafts.finish(request);
@@ -66,8 +78,30 @@ function ThreadComposer({ bot, threadId }: { bot: Bot; threadId: string }) {
     mutationFn: (runId: string) => getBotClient().cancelRun(runId),
     onSettled: () => { refresh(bot.id, threadId); },
   });
+  const attach = async (picked: FileList | null) => {
+    if (picked === null || picked.length === 0) return;
+    const room = Math.max(0, 10 - files.length);
+    const batch = Array.from(picked).slice(0, room);
+    if (batch.length < picked.length) setFileError(t("composer.tooManyFiles", { max: 10 }));
+    setUploading((count) => count + batch.length);
+    for (const file of batch) {
+      try {
+        // The upload must land in the workspace this thread's runs actually open.
+        const saved = await getBotClient().uploadAttachment(bot.id, file, threadId);
+        setFiles((current) => [...current, saved]);
+      } catch (error) {
+        setFileError(error instanceof Error ? error.message : t("composer.uploadFailed"));
+      } finally {
+        setUploading((count) => Math.max(0, count - 1));
+      }
+    }
+    if (fileInput.current !== null) fileInput.current.value = "";
+  };
+
   const submit = (text: string, mode: DraftMode = "queue", consume = true) => {
-    const request = composerDrafts.begin(bot.id, threadId, text, bot.paused, mode, consume);
+    if (uploading > 0) return;
+    const request = composerDrafts.begin(bot.id, threadId, text, bot.paused, mode, consume, files);
+    if (request !== null && files.length > 0) setFiles([]);
     if (request) send.mutate(request);
   };
 
@@ -125,11 +159,59 @@ function ThreadComposer({ bot, threadId }: { bot: Bot; threadId: string }) {
             rows={1}
             value={value}
           />
-          <div className="flex items-center gap-2 px-2.5 pb-2">
-            <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">
+          {fileError !== null ? (
+            <p className="px-2 pb-1.5 text-[11.5px] text-destructive" role="alert">
+              {fileError}
+            </p>
+          ) : null}
+          {files.length > 0 || uploading > 0 ? (
+            <div className="flex flex-wrap gap-1.5 px-2 pb-1.5">
+              {files.map((file) => (
+                <span
+                  className="flex max-w-[220px] items-center gap-1.5 rounded-lg bg-muted px-2 py-1 text-[11.5px]"
+                  key={file.id}
+                >
+                  <IconPaperclip className="size-3 shrink-0 text-muted-foreground" />
+                  <span className="truncate">{file.name}</span>
+                  <button
+                    aria-label={t("composer.removeAttachment", { name: file.name })}
+                    className="text-muted-foreground hover:text-foreground"
+                    onClick={() => setFiles((current) => current.filter((entry) => entry.id !== file.id))}
+                    type="button"
+                  >
+                    <IconX className="size-3" />
+                  </button>
+                </span>
+              ))}
+              {uploading > 0 ? (
+                <span className="rounded-lg bg-muted px-2 py-1 text-[11.5px] text-muted-foreground">
+                  {t("composer.attaching", { count: uploading })}
+                </span>
+              ) : null}
+            </div>
+          ) : null}
+          <div className="flex items-center gap-2 px-2 pb-2">
+            <Button
+              aria-label={t("composer.attach")}
+              className="h-7 px-2 text-muted-foreground"
+              disabled={uploading > 0}
+              onClick={() => fileInput.current?.click()}
+              size="sm"
+              variant="ghost"
+            >
+              <IconPaperclip className="size-4" />
+            </Button>
+            <input
+              className="hidden"
+              multiple
+              onChange={(event) => { void attach(event.target.files); }}
+              ref={fileInput}
+              type="file"
+            />
+            <span className="min-w-0 flex-1 truncate text-[10.5px] text-muted-foreground">
               {waiting
                 ? t("composer.waiting")
-                : t("composer.hint")}
+                : t("composer.enterToSend")}
             </span>
             {activeRun ? (
               <Button
@@ -143,12 +225,13 @@ function ThreadComposer({ bot, threadId }: { bot: Bot; threadId: string }) {
               </Button>
             ) : null}
             {activeRun?.status === "running" ? (
-              <Button disabled={!canSend(value)} onClick={() => { submit(value, "steer"); }} size="sm" variant="ghost">
+              <Button className="h-7 px-2 text-[12px]" disabled={!canSend(value)} onClick={() => { submit(value, "steer"); }} size="sm" variant="ghost">
                 {t("composer.steer")}
               </Button>
             ) : null}
             <Button
               aria-label={t("composer.send")}
+              className="rounded-full"
               disabled={!canSend(value)}
               onClick={() => { submit(value); }}
               size="icon-sm"

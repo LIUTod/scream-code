@@ -273,9 +273,9 @@ describe('Bot HTTP query contracts', () => {
       .mockRejectedValueOnce(new TypeError('response lost'));
     vi.stubGlobal('fetch', fetcher);
     const transport = new HttpBotClient();
-    await transport.promptRoom('room/a', 'accepted task', 'room-request');
+    await transport.promptRoom('room/a', 'accepted task', { requestKey: 'room-request' });
     await transport.promptRoom('room/a', 'no explicit key');
-    await expect(transport.promptRoom('room/a', 'uncertain original task', 'same-request')).rejects.toThrow('response lost');
+    await expect(transport.promptRoom('room/a', 'uncertain original task', { requestKey: 'same-request' })).rejects.toThrow('response lost');
     expect(fetcher).toHaveBeenCalledTimes(3);
     expect(fetcher.mock.calls[0]?.[0]).toBe('/api/rooms/room%2Fa/messages');
     expect(fetcher.mock.calls[0]?.[1]).toMatchObject({ method: 'POST', body: '{"text":"accepted task","requestKey":"room-request"}' });

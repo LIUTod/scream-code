@@ -7,7 +7,7 @@ import type { RecoveryDecision } from "@/lib/client";
 import { useI18n } from "@/lib/i18n";
 
 /** Interrupted work is never silently replayed: the person chooses the next action. */
-export function RecoveryCard({ run }: { run: Run }) {
+export function RecoveryCard({ run, roomId }: { run: Run; roomId?: string }) {
   const { t } = useI18n();
   const queries = useQueryClient();
   const recover = useMutation({
@@ -19,6 +19,9 @@ export function RecoveryCard({ run }: { run: Run }) {
         queries.invalidateQueries({ queryKey: queryKeys.runs(operation.botId) }),
         queries.invalidateQueries({ queryKey: queryKeys.threads(operation.botId) }),
         queries.invalidateQueries({ queryKey: queryKeys.messages(operation.threadId) }),
+        ...(roomId === undefined
+          ? []
+          : [queries.invalidateQueries({ queryKey: queryKeys.roomMessages(roomId) })]),
         queries.invalidateQueries({ queryKey: queryKeys.inbox() }),
         queries.invalidateQueries({ queryKey: queryKeys.bots() }),
       ]);

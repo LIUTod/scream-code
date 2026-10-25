@@ -4,20 +4,24 @@ import {
   IconInbox,
   IconMoon,
   IconPlus,
+  IconSearch,
   IconSettings,
   IconSun,
   IconTrash,
 } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { AbstractAvatar } from "@/components/agents/abstract-avatar";
+import { AvatarStack } from "@/components/agents/avatar-stack";
 import { NewRoomSheet } from "@/components/agents/new-room-sheet";
 import { StatusDot } from "@/components/bots/status";
 import { Button } from "@/components/ui/button";
 import { getBotClient } from "@/lib/api/client";
 import { botsQuery, inboxQuery, queryKeys, roomsQuery } from "@/lib/api/queries";
 import { LangToggle, useI18n } from "@/lib/i18n";
+import { relativeTime } from "@/lib/relative-time";
+import { roomIsUnread } from "@/lib/room-read";
 import { forgetDeletedBot, rememberActiveBot } from "@/lib/session";
 import { readTheme, type Theme, writeTheme } from "@/lib/theme";
 import { cn } from "@/lib/utils";
@@ -40,7 +44,11 @@ function SectionLabel({
 }
 
 const rowClass =
-  "group flex min-h-10 items-center gap-2.5 rounded-lg px-2 py-1.5 transition-colors hover:bg-sidebar-accent/70";
+  "group flex min-h-[50px] items-center gap-2.5 rounded-lg px-2 py-1.5 transition-colors hover:bg-sidebar-accent/70";
+
+const rowTitle = "truncate text-[13px] leading-5";
+const rowPreview = "truncate text-[12px] leading-4 text-muted-foreground";
+const rowTime = "shrink-0 text-[11px] text-muted-foreground/70 tabular-nums";
 
 export function BotRail({
   onNavigate,
@@ -55,6 +63,31 @@ export function BotRail({
   const rooms = useQuery(roomsQuery());
   const inbox = useQuery(inboxQuery());
   const { t } = useI18n();
+  const [query, setQuery] = useState("");
+  const needle = query.trim().toLowerCase();
+  const visibleBots = useMemo(
+    () =>
+      needle.length === 0
+        ? (bots.data ?? [])
+        : (bots.data ?? []).filter(
+            (bot) =>
+              bot.name.toLowerCase().includes(needle) ||
+              bot.title.toLowerCase().includes(needle) ||
+              (bot.lastMessage ?? "").toLowerCase().includes(needle),
+          ),
+    [bots.data, needle],
+  );
+  const visibleRooms = useMemo(
+    () =>
+      needle.length === 0
+        ? (rooms.data ?? [])
+        : (rooms.data ?? []).filter(
+            (room) =>
+              room.name.toLowerCase().includes(needle) ||
+              (room.lastMessage ?? "").toLowerCase().includes(needle),
+          ),
+    [needle, rooms.data],
+  );
   const [theme, setTheme] = useState<Theme>(() => readTheme());
   const [roomOpen, setRoomOpen] = useState(false);
   const queryClient = useQueryClient();
@@ -111,6 +144,20 @@ export function BotRail({
         </button>
       </div>
 
+      <div className="shrink-0 px-2 pb-1">
+        <label className="flex h-9 items-center gap-2 rounded-lg bg-background/60 px-2.5 ring-1 ring-border/70 focus-within:ring-foreground/20">
+          <IconSearch className="size-3.5 text-muted-foreground" stroke={1.8} />
+          <input
+            aria-label={t("app.searchPlaceholder")}
+            className="min-w-0 flex-1 bg-transparent text-[12.5px] outline-none placeholder:text-muted-foreground"
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder={t("app.searchPlaceholder")}
+            type="search"
+            value={query}
+          />
+        </label>
+      </div>
+
       <nav className="min-h-0 flex-1 overflow-y-auto px-2 pb-4">
         <Link
           activeProps={{ className: "bg-sidebar-accent" }}
@@ -142,7 +189,7 @@ export function BotRail({
           {t("app.bots")}
         </SectionLabel>
         <ul className="flex flex-col gap-0.5">
-          {(bots.data ?? []).map((bot) => (
+          {visibleBots.map((bot) => (
             <li className="group/row relative" key={bot.id}>
               <Link
                 activeProps={{ className: "bg-sidebar-accent" }}
@@ -155,23 +202,37 @@ export function BotRail({
                 to="/bots/$botId"
               >
                 <span className="relative shrink-0">
-                  <AbstractAvatar name={bot.name} seed={bot.avatarSeed} size={26} />
+                  <AbstractAvatar name={bot.name} seed={bot.avatarSeed} size={32} />
                   <StatusDot status={bot.status} />
                 </span>
                 <span className="flex min-w-0 flex-1 flex-col leading-tight">
-                  <span
-                    className={cn(
-                      "truncate text-[13px]",
-                      bot.paused ? "text-muted-foreground" : "text-foreground",
-                    )}
-                  >
-                    {bot.name}
-                  </span>
-                  {bot.title ? (
-                    <span className="truncate text-[11px] text-muted-foreground">
-                      {bot.title}
+                  <span className="flex items-baseline gap-1.5">
+                    <span
+                      className={cn(
+                        rowTitle,
+                        "min-w-0 flex-1",
+                        bot.paused ? "text-muted-foreground" : "text-foreground",
+                      )}
+                    >
+                      {bot.name}
                     </span>
-                  ) : null}
+                    {bot.lastMessageAt ? (
+                      <span className={rowTime}>
+                        {relativeTime(new Date(bot.lastMessageAt).toISOString())}
+                      </span>
+                    ) : null}
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <span className={cn(rowPreview, "min-w-0 flex-1")}>
+                      {bot.lastMessage ?? bot.title}
+                    </span>
+                    {bot.unread > 0 ? (
+                      <span
+                        aria-label={t("app.unread", { count: bot.unread })}
+                        className="size-1.5 shrink-0 rounded-full bg-brand"
+                      />
+                    ) : null}
+                  </span>
                 </span>
                 {bot.needsYou > 0 ? (
                   <span
@@ -180,11 +241,6 @@ export function BotRail({
                   >
                     {bot.needsYou}
                   </span>
-                ) : bot.unread > 0 ? (
-                  <span
-                    aria-label={t("app.unread", { count: bot.unread })}
-                    className="size-1.5 rounded-full bg-brand"
-                  />
                 ) : null}
               </Link>
               <button
@@ -219,28 +275,56 @@ export function BotRail({
           {t("app.rooms")}
         </SectionLabel>
         <ul className="flex flex-col gap-0.5">
-          {(rooms.data ?? []).map((room) => (
-            <li key={room.id}>
-              <Link
-                activeProps={{ className: "bg-sidebar-accent" }}
-                className={rowClass}
-                onClick={onNavigate}
-                params={{ roomId: room.id }}
-                to="/rooms/$roomId"
-              >
-                <IconHash className="size-4 text-muted-foreground" stroke={1.8} />
-                <span className="min-w-0 flex-1 truncate text-[13px]">
-                  {room.name}
-                </span>
-                <span className="text-[11px] text-muted-foreground">
-                  {room.memberIds.length}
-                </span>
-              </Link>
-            </li>
-          ))}
-          {rooms.data?.length === 0 ? (
+          {visibleRooms.map((room) => {
+            const members = room.memberIds
+              .map((memberId) => bots.data?.find((bot) => bot.id === memberId))
+              .filter((bot): bot is NonNullable<typeof bot> => Boolean(bot))
+              .map((bot) => ({ name: bot.name, seed: bot.avatarSeed }));
+            const unread = roomIsUnread(room);
+            return (
+              <li key={room.id}>
+                <Link
+                  activeProps={{ className: "bg-sidebar-accent" }}
+                  className={rowClass}
+                  onClick={onNavigate}
+                  params={{ roomId: room.id }}
+                  to="/rooms/$roomId"
+                >
+                  {members.length > 0 ? (
+                    <AvatarStack people={members} size={32} />
+                  ) : (
+                    <span className="grid size-8 shrink-0 place-items-center rounded-full bg-muted text-muted-foreground">
+                      <IconHash className="size-4" stroke={1.8} />
+                    </span>
+                  )}
+                  <span className="flex min-w-0 flex-1 flex-col leading-tight">
+                    <span className="flex items-baseline gap-1.5">
+                      <span className={cn(rowTitle, "min-w-0 flex-1")}>{room.name}</span>
+                      {room.lastMessageAt ? (
+                        <span className={rowTime}>
+                          {relativeTime(new Date(room.lastMessageAt).toISOString())}
+                        </span>
+                      ) : null}
+                    </span>
+                    <span className="flex items-center gap-1.5">
+                      <span className={cn(rowPreview, "min-w-0 flex-1")}>
+                        {room.lastMessage ?? t("app.noMessages")}
+                      </span>
+                      {unread ? (
+                        <span
+                          aria-label={t("app.unreadRoom", { name: room.name })}
+                          className="size-1.5 shrink-0 rounded-full bg-brand"
+                        />
+                      ) : null}
+                    </span>
+                  </span>
+                </Link>
+              </li>
+            );
+          })}
+          {visibleRooms.length === 0 ? (
             <p className="px-2 py-1 text-[12px] text-muted-foreground">
-              {t("app.noRooms")}
+              {needle.length > 0 ? t("app.noMatches") : t("app.noRooms")}
             </p>
           ) : null}
         </ul>

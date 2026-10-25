@@ -6,6 +6,7 @@
 import type {
   Approval,
   ApprovalResponse,
+  Attachment,
   AuditEntry,
   Bot,
   BotStatus,
@@ -111,9 +112,25 @@ export class MockBotClient implements BotClient {
   // ---------------------------------------------------------------- bots
 
   async listBots(): Promise<Bot[]> {
-    return [...this.bots].sort(
-      (a, b) => (b.lastActiveAt ?? 0) - (a.lastActiveAt ?? 0),
-    );
+    const lastOf = (botId: string): MutableMessage | undefined => {
+      const threadIds = this.threads
+        .filter((thread) => thread.botId === botId && thread.archivedAt === null)
+        .map((thread) => thread.id);
+      return this.messages
+        .filter((message) => threadIds.includes(message.threadId) && message.role !== "system")
+        .sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0))
+        .at(-1);
+    };
+    return [...this.bots]
+      .sort((a, b) => (b.lastActiveAt ?? 0) - (a.lastActiveAt ?? 0))
+      .map((bot) => {
+        const last = lastOf(bot.id);
+        return {
+          ...bot,
+          lastMessage: last?.content ?? null,
+          lastMessageAt: last?.createdAt ?? null,
+        };
+      });
   }
 
   async getBot(botId: string): Promise<Bot | undefined> {
@@ -259,7 +276,6 @@ export class MockBotClient implements BotClient {
   ): Promise<{ runId: string }> {
     const thread = this.requireThread(threadId);
     const bot = this.requireBot(thread.botId);
-    if (input.attachments?.length) throw new Error("Attachments are unsupported in this preview.");
     if (!input.text.trim()) throw new Error("Say something first.");
     const body = JSON.stringify([input.text.trim(), input.mode ?? "queue"]);
     const requestKey = input.requestKey ? JSON.stringify([threadId, input.requestKey]) : undefined;
@@ -271,13 +287,22 @@ export class MockBotClient implements BotClient {
     if (bot.paused) throw new Error(`${bot.name} is paused.`);
     const active = this.runs.find((candidate) => candidate.threadId === threadId && candidate.status === "running");
     if (input.mode === "steer" && active) {
-      this.addMessage(threadId, "user", input.text.trim());
+      this.addMessage(threadId, "user", input.text.trim(), {
+        ...(input.attachments === undefined || input.attachments.length === 0
+          ? {}
+          : { attachments: input.attachments }),
+      });
       if (requestKey) this.promptRequests.set(requestKey, { body, runId: active.id });
       this.emitForBot(bot.id, threadId);
       return { runId: active.id };
     }
 
     const now = Date.now();
+    this.addMessage(threadId, "user", input.text.trim(), {
+      ...(input.attachments === undefined || input.attachments.length === 0
+        ? {}
+        : { attachments: input.attachments }),
+    });
     const run: MutableRun = {
       botId: bot.id,
       endedAt: null,
@@ -601,7 +626,20 @@ export class MockBotClient implements BotClient {
   // --------------------------------------------------------------- rooms
 
   async listRooms(): Promise<Room[]> {
-    return [...this.rooms].sort((a, b) => b.createdAt - a.createdAt);
+    return [...this.rooms]
+      .sort((a, b) => b.createdAt - a.createdAt)
+      .map((room) => {
+        const last = this.roomMessages
+          .filter((message) => message.roomId === room.id)
+          .sort((a, b) => a.createdAt - b.createdAt)
+          .at(-1);
+        return {
+          ...room,
+          lastMessage: last?.content ?? null,
+          lastMessageAt: last?.createdAt ?? null,
+          lastSpeakerKind: last?.speakerKind ?? null,
+        };
+      });
   }
 
   async deleteRoom(roomId: string): Promise<void> {
@@ -633,7 +671,12 @@ export class MockBotClient implements BotClient {
     return this.runs.filter((run) => run.roomId === roomId);
   }
 
-  async promptRoom(roomId: string, text: string, requestKey?: string): Promise<void> {
+  async promptRoom(
+    roomId: string,
+    text: string,
+    options?: { readonly requestKey?: string; readonly attachments?: readonly Attachment[] },
+  ): Promise<void> {
+    const requestKey = options?.requestKey;
     const room = this.rooms.find((candidate) => candidate.id === roomId);
     if (!room) throw new Error("That room is gone.");
     const trimmed = text.trim();
@@ -645,15 +688,15 @@ export class MockBotClient implements BotClient {
       return;
     }
     if (key) this.roomRequests.set(key, trimmed);
-    this.addRoomMessage(roomId, "user", trimmed, "direct", null);
-    const mention = /@([\w-]+)/.exec(trimmed)?.[1]?.toLowerCase();
-    const target = mention
-      ? room.memberIds
-          .map((memberId) => this.bots.find((bot) => bot.id === memberId))
-          .find((bot) => bot?.name.toLowerCase() === mention)
-      : room.memberIds
-          .map((memberId) => this.bots.find((bot) => bot.id === memberId))
-          .find((bot) => bot?.id === room.leadBotId);
+    this.addRoomMessage(roomId, "user", trimmed, "direct", null, options?.attachments);
+    const members = room.memberIds
+      .map((memberId) => this.bots.find((bot) => bot.id === memberId))
+      .filter((bot): bot is MutableBot => bot !== undefined);
+    // Longest name wins, matching the gateway's whole-name mention rule.
+    const named = members
+      .filter((bot) => new RegExp(`(^|\\s)@${bot.name.replaceAll(/[.*+?^${}()|[\]\\]/gu, "\\$&")}(?=$|\\s|[,.!?;:，。！？；：])`, "iu").test(trimmed))
+      .sort((a, b) => b.name.length - a.name.length);
+    const target = named[0] ?? members.find((bot) => bot.id === room.leadBotId);
     if (!target) {
       this.addRoomMessage(
         roomId,
@@ -674,6 +717,25 @@ export class MockBotClient implements BotClient {
         target.id,
       );
     });
+  }
+
+  async uploadAttachment(_botId: string, file: File, _threadId?: string): Promise<Attachment> {
+    return this.previewAttachment(file);
+  }
+
+  async uploadRoomAttachment(_roomId: string, file: File): Promise<Attachment> {
+    return this.previewAttachment(file);
+  }
+
+  private previewAttachment(file: File): Attachment {
+    const safe = file.name.replaceAll(/[^\p{L}\p{N}._-]+/gu, "_").replace(/^[._]+/u, "") || "file";
+    return {
+      id: id("attachment"),
+      name: safe,
+      path: `.scream-attachments/${id("file")}-${safe}`,
+      size: file.size,
+      mime: file.type || "application/octet-stream",
+    };
   }
 
   // --------------------------------------------------------------- files
@@ -1183,7 +1245,11 @@ export class MockBotClient implements BotClient {
     threadId: string,
     role: Message["role"],
     content: string,
-    extra?: { toolCalls?: MutableToolCall[]; handoff?: MutableHandoff },
+    extra?: {
+      toolCalls?: MutableToolCall[];
+      handoff?: MutableHandoff;
+      attachments?: readonly Attachment[];
+    },
   ): MutableMessage {
     const message: MutableMessage = {
       content,
@@ -1203,6 +1269,7 @@ export class MockBotClient implements BotClient {
     content: string,
     via: RoomMessage["via"],
     speakerId: string | null,
+    attachments?: readonly Attachment[],
   ): MutableRoomMessage {
     const message: MutableRoomMessage = {
       answeredBy: via === "handoff" ? speakerId : null,
@@ -1213,6 +1280,7 @@ export class MockBotClient implements BotClient {
       speakerId: speakerId ?? "you",
       speakerKind,
       via,
+      ...(attachments === undefined || attachments.length === 0 ? {} : { attachments }),
     };
     this.roomMessages.push(message);
     this.emit({ data: message, roomId, type: "room.message" });

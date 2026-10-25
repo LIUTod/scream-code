@@ -17,6 +17,7 @@ import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import type {
   Approval,
   ApprovalDecision,
+  Attachment,
   AuditEntry,
   Bot,
   CreateBotInput,
@@ -31,7 +32,7 @@ import type {
   UpdateBotInput,
 } from '../shared/contracts';
 import { type AuthPolicy, createAuthGuard } from './auth';
-import { BotFiles, FileAccessError } from './files';
+import { BotFiles, FileAccessError, MAX_ATTACHMENT } from './files';
 import {
   BotRuntime,
   RuntimeError,
@@ -104,19 +105,26 @@ async function readJson<T>(context: Context): Promise<T> {
   }
 }
 
-function publicRoom(room: {
-  readonly id: string;
-  readonly name: string;
-  readonly leadBotId: string | null;
-  readonly memberIds: readonly string[];
-  readonly createdAt: number;
-}): Room {
+function publicRoom(
+  store: BotStore,
+  room: {
+    readonly id: string;
+    readonly name: string;
+    readonly leadBotId: string | null;
+    readonly memberIds: readonly string[];
+    readonly createdAt: number;
+  },
+): Room {
+  const last = store.lastRoomMessage(room.id);
   return {
     id: room.id,
     name: room.name,
     leadBotId: room.leadBotId,
     memberIds: [...room.memberIds],
     createdAt: room.createdAt,
+    lastMessage: last?.content ?? null,
+    lastMessageAt: last?.createdAt ?? null,
+    lastSpeakerKind: last?.speakerKind ?? null,
   };
 }
 
@@ -133,6 +141,50 @@ function runView(run: RunRecord): Run {
     kind:run.kind,origin:run.origin,requestKey:run.requestKey,dispatchStartedAt:run.dispatchStartedAt,
     retryOfRunId:run.retryOfRunId,recoveryDecision:run.recoveryDecision,recoveryAt:run.recoveryAt,
   };
+}
+
+/** Reject an obviously oversized body before multipart parsing buffers it. */
+async function readUpload(context: Context): Promise<{
+  readonly name: string;
+  readonly size: number;
+  readonly type: string;
+  arrayBuffer(): Promise<ArrayBuffer>;
+}> {
+  const declared = Number(context.req.header('content-length') ?? '0');
+  if (Number.isFinite(declared) && declared > MAX_ATTACHMENT + 1024 * 1024) {
+    throw new RuntimeError('attachment.too_large', 'Attachment is too large', 413);
+  }
+  const form = await context.req.formData();
+  const file = form.get('file');
+  if (file === null || typeof file === 'string' || typeof file.arrayBuffer !== 'function') {
+    throw badRequest('file is required');
+  }
+  return { name: file.name, size: file.size, type: file.type, arrayBuffer: () => file.arrayBuffer() };
+}
+
+function readAttachments(value: readonly unknown[] | undefined): readonly Attachment[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) throw badRequest('attachments must be an array');
+  return value.map((entry) => {
+    if (entry === null || typeof entry !== 'object') throw badRequest('attachment must be an object');
+    const row = entry as Record<string, unknown>;
+    if (
+      typeof row['id'] !== 'string' ||
+      typeof row['name'] !== 'string' ||
+      typeof row['path'] !== 'string' ||
+      typeof row['size'] !== 'number' ||
+      typeof row['mime'] !== 'string'
+    ) {
+      throw badRequest('attachment fields are invalid');
+    }
+    return {
+      id: row['id'],
+      name: row['name'],
+      path: row['path'],
+      size: row['size'],
+      mime: row['mime'],
+    };
+  });
 }
 
 function requireString(value: unknown, field: string): string {
@@ -205,17 +257,23 @@ export function createGateway(options: GatewayOptions): Hono {
     return thread;
   };
 
+  // `listThreads` defaults to direct threads, so a room's conversations stay out of a
+  // Bot's 1:1 list without every caller having to remember a filter.
+  const publicThreads = (botId: string) =>
+    store.listThreads(botId).map((thread) => publicThread(store, thread));
+
   const snapshot = (botId: string | undefined): SnapshotResponse => {
     const bots = (botId === undefined ? store.listBots() : [requireBot(botId)]).map((bot) =>
       publicBot(store, bot),
     );
-    const threads = bots.flatMap((bot) => store.listThreads(bot.id).map((thread) => publicThread(store, thread)));
+    const threads = bots.flatMap((bot) => publicThreads(bot.id));
+    const roomThreads = store.roomThreadMap();
     const approvals = store
       .listApprovals({ pendingOnly: true, ...(botId === undefined ? {} : { botId }) })
-      .map(publicApproval);
+      .map((row) => ({ ...publicApproval(row), roomId: roomThreads.get(row.threadId) ?? null }));
     const questions = store
       .listQuestions({ pendingOnly: true, ...(botId === undefined ? {} : { botId }) })
-      .map(publicQuestion);
+      .map((row) => ({ ...publicQuestion(row), roomId: roomThreads.get(row.threadId) ?? null }));
     return { bots, threads, approvals, questions };
   };
 
@@ -231,7 +289,7 @@ export function createGateway(options: GatewayOptions): Hono {
   });
 
   app.get('/api/rooms', (context) => {
-    const rooms = store.listRooms().map(publicRoom);
+    const rooms = store.listRooms().map((room) => publicRoom(store, room));
     return context.json(rooms);
   });
 
@@ -250,7 +308,7 @@ export function createGateway(options: GatewayOptions): Hono {
         ? body.leadBotId
         : memberIds[0];
     const room = store.createRoom({ name, memberIds, leadBotId });
-    return context.json(publicRoom(room), 201);
+    return context.json(publicRoom(store, room), 201);
   });
 
   app.get('/api/rooms/:id/messages', (context) => {
@@ -283,15 +341,59 @@ export function createGateway(options: GatewayOptions): Hono {
     if (store.getRoom(roomId) === undefined) {
       throw new RuntimeError('room.not_found', `Room not found: ${roomId}`, 404);
     }
-    const body = await readJson<{ text: string; requestKey?: string }>(context);
+    const body = await readJson<{ text: string; requestKey?: string; attachments?: readonly unknown[] }>(context);
     const text = requireString(body.text, 'text');
     const requestKey = typeof body.requestKey === 'string' && body.requestKey.length > 0 ? body.requestKey : undefined;
+    const attachments = readAttachments(body.attachments);
     try {
-      const result = runtime.promptRoom(roomId, text, requestKey);
+      const result = runtime.promptRoom(roomId, text, { requestKey, attachments });
       return context.json(result, 202);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       throw new RuntimeError('room.prompt_failed', message, 400);
+    }
+  });
+
+  app.post('/api/bots/:id/attachments', async (context) => {
+    const botId = context.req.param('id');
+    if (store.getBot(botId) === undefined) {
+      throw new RuntimeError('bot.not_found', `Bot not found: ${botId}`, 404);
+    }
+    const threadId = context.req.query('threadId');
+    const file = await readUpload(context);
+    try {
+      const saved = await files.saveAttachment(
+        botId,
+        file,
+        threadId === undefined ? {} : { threadId },
+      );
+      return context.json(saved, 201);
+    } catch (error) {
+      if (error instanceof FileAccessError) {
+        throw new RuntimeError('attachment.rejected', error.message, error.statusCode);
+      }
+      throw error;
+    }
+  });
+
+  // A room hands one file to every member, so each member's workspace gets a copy
+  // under the same relative path before anyone is prompted.
+  app.post('/api/rooms/:id/attachments', async (context) => {
+    const roomId = context.req.param('id');
+    const room = store.getRoom(roomId);
+    if (room === undefined) throw new RuntimeError('room.not_found', `Room not found: ${roomId}`, 404);
+    if (room.memberIds.length === 0) {
+      throw new RuntimeError('room.no_available_bot', 'Room has no Bots left', 409);
+    }
+    const file = await readUpload(context);
+    try {
+      const saved = await files.saveAttachmentForBots(room.memberIds, file);
+      return context.json(saved, 201);
+    } catch (error) {
+      if (error instanceof FileAccessError) {
+        throw new RuntimeError('attachment.rejected', error.message, error.statusCode);
+      }
+      throw error;
     }
   });
 
@@ -399,7 +501,7 @@ export function createGateway(options: GatewayOptions): Hono {
   app.get('/api/bots/:id/threads', (context) => {
     const botId = context.req.param('id');
     requireBot(botId);
-    const threads = store.listThreads(botId).map((thread) => publicThread(store, thread));
+    const threads = publicThreads(botId);
     return context.json(threads);
   });
 
@@ -462,16 +564,16 @@ export function createGateway(options: GatewayOptions): Hono {
     const body = await readJson<{
       readonly text: string;
       readonly mode?: 'steer' | 'queue';
-      readonly attachments?: readonly string[];
+      readonly attachments?: readonly unknown[];
       readonly requestKey?: string;
     }>(context);
     const text = requireString(body.text, 'text');
     if (body.mode !== undefined && body.mode !== 'steer' && body.mode !== 'queue') {
       throw badRequest("mode must be 'steer' or 'queue'");
     }
-    if (body.attachments !== undefined && (!Array.isArray(body.attachments) || !body.attachments.every((value) => typeof value === 'string'))) throw badRequest('attachments must be a string array');
+    const attachments = readAttachments(body.attachments);
     if (body.requestKey !== undefined && (typeof body.requestKey !== 'string' || body.requestKey.length === 0 || body.requestKey.length > 200)) throw badRequest('requestKey must contain 1–200 characters');
-    const result = runtime.prompt(threadId, {text,mode:body.mode,attachments:body.attachments,requestKey:body.requestKey});
+    const result = runtime.prompt(threadId, {text,mode:body.mode,attachments,requestKey:body.requestKey});
     store.appendAudit({
       actor: 'person',
       initiator: 'person',
@@ -544,12 +646,13 @@ export function createGateway(options: GatewayOptions): Hono {
 
   app.get('/api/inbox', (context) => {
     const botId = context.req.query('botId');
+    const roomThreads = store.roomThreadMap();
     const approvals = store
       .listApprovals({ pendingOnly: true, ...(botId === undefined ? {} : { botId }) })
-      .map(publicApproval);
+      .map((row) => ({ ...publicApproval(row), roomId: roomThreads.get(row.threadId) ?? null }));
     const questions = store
       .listQuestions({ pendingOnly: true, ...(botId === undefined ? {} : { botId }) })
-      .map(publicQuestion);
+      .map((row) => ({ ...publicQuestion(row), roomId: roomThreads.get(row.threadId) ?? null }));
     const handoffs = store
       .listHandoffs({ ...(botId === undefined ? {} : { botId }), limit: 50 })
       .map(publicHandoff);

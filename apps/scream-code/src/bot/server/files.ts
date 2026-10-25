@@ -3,17 +3,21 @@
  * default workspace when no thread was selected. Lexical and realpath checks
  * prevent paths and symlinks from escaping that single root.
  */
-import { lstat, open, readdir, realpath, stat, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, open, readdir, realpath, stat, writeFile } from 'node:fs/promises';
 import { StringDecoder } from 'node:string_decoder';
+import { randomUUID } from 'node:crypto';
 import type { Dirent } from 'node:fs';
-import { isAbsolute, join, relative, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 
 import type { BotStore } from './store';
 
 export const MAX_FILE_READ = 256 * 1024;
 export const MAX_FILE_WRITE = 2 * 1024 * 1024;
+export const MAX_ATTACHMENT = 25 * 1024 * 1024;
 
-const IGNORED_DIRS = new Set(['node_modules', '.git', 'dist', '.next', 'target', '.turbo']);
+const ATTACHMENT_DIR = '.scream-attachments';
+
+const IGNORED_DIRS = new Set(['node_modules', '.git', 'dist', '.next', 'target', '.turbo', ATTACHMENT_DIR]);
 
 export class FileAccessError extends Error {
   constructor(
@@ -43,8 +47,93 @@ export interface FileReadResult {
   readonly truncated: boolean;
 }
 
+export interface AttachmentUpload {
+  readonly name: string;
+  readonly size: number;
+  readonly type: string;
+  arrayBuffer(): Promise<ArrayBuffer>;
+}
+
+export interface SavedAttachment {
+  readonly id: string;
+  readonly name: string;
+  readonly path: string;
+  readonly size: number;
+  readonly mime: string;
+}
+
+/**
+ * Keep only the leaf name, and only characters every filesystem accepts.
+ * Letters and digits are kept in any script; separators and control characters
+ * become underscores so the stored path is stable and saf01e to quote.
+ */
+function safeAttachmentName(raw: string): string {
+  const leaf = basename(raw.replaceAll('\\', '/'));
+  const cleaned = leaf.replaceAll(/[^\p{L}\p{N}._-]+/gu, '_').replace(/^[._]+/, '').slice(0, 120);
+  return cleaned.length === 0 ? 'file' : cleaned;
+}
+
 export class BotFiles {
   constructor(private readonly store: BotStore) {}
+
+  /**
+   * Save one upload into several workspaces under the same relative path.
+   *
+   * A room hands the same attachment to every addressed Bot, so every one of
+   * them must be able to open it from its own workspace.
+   */
+  async saveAttachmentForBots(
+    botIds: readonly string[],
+    upload: AttachmentUpload,
+  ): Promise<SavedAttachment> {
+    if (botIds.length === 0) throw new FileAccessError(409, 'No Bot can receive this file');
+    if (upload.size <= 0) throw new FileAccessError(400, 'Empty attachment');
+    if (upload.size > MAX_ATTACHMENT) throw new FileAccessError(413, 'Attachment is too large');
+    const name = safeAttachmentName(upload.name);
+    const id = randomUUID();
+    const path = `${ATTACHMENT_DIR}/${id}-${name}`;
+    const body = Buffer.from(await upload.arrayBuffer());
+    for (const botId of botIds) {
+      const { abs } = await this.resolve(botId, path, { write: true });
+      await mkdir(dirname(abs), { recursive: true });
+      await writeFile(abs, body, { flag: 'wx' });
+    }
+    return {
+      id,
+      name,
+      path,
+      size: upload.size,
+      mime: upload.type.length > 0 ? upload.type : 'application/octet-stream',
+    };
+  }
+
+  /**
+   * Save an uploaded file inside the Bot workspace.
+   *
+   * The file name is reduced to a leaf and the directory gets a unique prefix,
+   * so an upload can neither overwrite a workspace file nor escape the root.
+   */
+  async saveAttachment(
+    botId: string,
+    upload: AttachmentUpload,
+    options: { readonly threadId?: string } = {},
+  ): Promise<SavedAttachment> {
+    if (upload.size <= 0) throw new FileAccessError(400, 'Empty attachment');
+    if (upload.size > MAX_ATTACHMENT) throw new FileAccessError(413, 'Attachment is too large');
+    const name = safeAttachmentName(upload.name);
+    const id = randomUUID();
+    const path = `${ATTACHMENT_DIR}/${id}-${name}`;
+    const { abs } = await this.resolve(botId, path, { write: true, threadId: options.threadId });
+    await mkdir(dirname(abs), { recursive: true });
+    await writeFile(abs, Buffer.from(await upload.arrayBuffer()), { flag: 'wx' });
+    return {
+      id,
+      name,
+      path,
+      size: upload.size,
+      mime: upload.type.length > 0 ? upload.type : 'application/octet-stream',
+    };
+  }
 
   async list(botId: string, requestedPath?: string, threadId?: string): Promise<FileListResult> {
     const { abs, root } = await this.resolve(botId, requestedPath, { threadId });

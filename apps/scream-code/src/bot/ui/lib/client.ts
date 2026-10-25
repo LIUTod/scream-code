@@ -7,6 +7,7 @@
 import type {
   Approval,
   ApprovalResponse,
+  Attachment,
   AuditEntry,
   Bot,
   CreateBotInput,
@@ -85,7 +86,13 @@ export interface BotClient {
   createRoom(input: CreateRoomInput): Promise<Room>;
   listRoomMessages(roomId: string): Promise<RoomMessage[]>;
   listRoomRuns(roomId: string): Promise<Run[]>;
-  promptRoom(roomId: string, text: string, requestKey?: string): Promise<void>;
+  promptRoom(
+    roomId: string,
+    text: string,
+    options?: { readonly requestKey?: string; readonly attachments?: readonly Attachment[] },
+  ): Promise<void>;
+  uploadAttachment(botId: string, file: File, threadId?: string): Promise<Attachment>;
+  uploadRoomAttachment(roomId: string, file: File): Promise<Attachment>;
 
   listFiles(botId: string, path?: string, threadId?: string): Promise<FileListing>;
   readFile(botId: string, path: string, threadId?: string): Promise<FilePreview>;

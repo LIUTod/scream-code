@@ -5,6 +5,7 @@ import type {
   Bot,
   CreateBotInput,
   CreateRoomInput,
+  Attachment,
   CreateThreadInput,
   Handoff,
   Message,
@@ -70,7 +71,9 @@ export class HttpBotClient implements BotClient {
   private async request<T>(path: string, init?: RequestInit): Promise<T> {
     const headers = new Headers(init?.headers);
     if (!headers.has("accept")) headers.set("accept", "application/json");
-    if (init?.body !== undefined && !headers.has("content-type")) headers.set("content-type", "application/json");
+    if (init?.body !== undefined && !(init.body instanceof FormData) && !headers.has("content-type")) {
+      headers.set("content-type", "application/json");
+    }
     const response = await fetch(`${this.baseUrl}${path}`, { ...init, headers });
     if (!response.ok) {
       let message = `Request failed (${response.status})`;
@@ -411,10 +414,39 @@ export class HttpBotClient implements BotClient {
     return [...result.runs];
   }
 
-  async promptRoom(roomId: string, text: string, requestKey?: string): Promise<void> {
+  async promptRoom(
+    roomId: string,
+    text: string,
+    options?: { readonly requestKey?: string; readonly attachments?: readonly Attachment[] },
+  ): Promise<void> {
     await this.request<{ runId: string }>(`/api/rooms/${encodeURIComponent(roomId)}/messages`, {
       method: "POST",
-      body: JSON.stringify({ text, ...(requestKey === undefined ? {} : { requestKey }) }),
+      body: JSON.stringify({
+        text,
+        ...(options?.requestKey === undefined ? {} : { requestKey: options.requestKey }),
+        ...(options?.attachments === undefined || options.attachments.length === 0
+          ? {}
+          : { attachments: options.attachments }),
+      }),
+    });
+  }
+
+  async uploadAttachment(botId: string, file: File, threadId?: string): Promise<Attachment> {
+    const form = new FormData();
+    form.append("file", file);
+    const query = threadId === undefined ? "" : `?threadId=${encodeURIComponent(threadId)}`;
+    return this.request<Attachment>(`/api/bots/${encodeURIComponent(botId)}/attachments${query}`, {
+      method: "POST",
+      body: form,
+    });
+  }
+
+  async uploadRoomAttachment(roomId: string, file: File): Promise<Attachment> {
+    const form = new FormData();
+    form.append("file", file);
+    return this.request<Attachment>(`/api/rooms/${encodeURIComponent(roomId)}/attachments`, {
+      method: "POST",
+      body: form,
     });
   }
 

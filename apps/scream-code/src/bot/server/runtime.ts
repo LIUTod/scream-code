@@ -28,6 +28,7 @@ import type {
 import type {
   Approval,
   ApprovalDecision,
+  Attachment,
   Bot,
   BotPermission,
   Handoff,
@@ -107,12 +108,37 @@ export interface PromptOptions {
   readonly text: string;
   readonly mode?: 'steer' | 'queue' | undefined;
   readonly requestKey?: string;
-  readonly attachments?: readonly string[];
+  readonly attachments?: readonly Attachment[];
 }
 
 export interface PromptResult {
   readonly runId: string;
   readonly status: RunStatus;
+}
+
+const ATTACHMENT_PATH = /^\.scream-attachments\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}-[\p{L}\p{N}._-]+$/u;
+
+/** Only files this server saved may be attached; anything else is a client bug. */
+function normalizeAttachments(input: readonly Attachment[] | undefined): readonly Attachment[] {
+  if (input === undefined || input.length === 0) return [];
+  if (input.length > 10) {
+    throw new RuntimeError('attachments.too_many', 'At most 10 attachments per message', 400);
+  }
+  for (const attachment of input) {
+    if (!ATTACHMENT_PATH.test(attachment.path)) {
+      throw new RuntimeError('attachments.invalid', 'Attachment path is not an uploaded file', 400);
+    }
+  }
+  return input;
+}
+
+/** The turn sees where the files are; the transcript keeps the plain sentence. */
+function withAttachments(text: string, attachments: readonly Attachment[]): string {
+  if (attachments.length === 0) return text;
+  const lines = attachments.map(
+    (attachment) => `- ${attachment.path} (${attachment.name}, ${attachment.mime})`,
+  );
+  return `${text}\n\nAttached files (paths are relative to your workspace):\n${lines.join('\n')}`;
 }
 
 /** Error with an HTTP status so the gateway does not have to guess. */
@@ -387,9 +413,7 @@ export class BotRuntime {
     if (this.deletingThreads.has(threadId) || this.deletingBots.has(bot.id)) {
       throw new RuntimeError('thread.deleting', 'Thread is being deleted', 409);
     }
-    if ((input.attachments?.length ?? 0) > 0) {
-      throw new RuntimeError('attachments.unsupported', 'Attachments are not supported', 400);
-    }
+    const attachments = normalizeAttachments(input.attachments);
     const key = input.requestKey ?? `request_${randomUUID()}`;
     const accepted = this.store.getAcceptedInput(key);
     if (accepted !== undefined) {
@@ -404,9 +428,11 @@ export class BotRuntime {
     const active = runningId === undefined ? undefined : this.store.getRun(runningId);
     const steer = input.mode === 'steer' && active !== undefined && active.turnId !== null && open !== undefined;
     const { run, message } = this.store.transaction(() => {
-      const run = steer ? active : this.store.createRun({ botId: bot.id, threadId, text, requestKey: key });
+      const promptText = withAttachments(text, attachments);
+      const run = steer ? active : this.store.createRun({ botId: bot.id, threadId, text: promptText, requestKey: key });
       const message: Message = {
         id: `msg_${randomUUID()}`, threadId, role: 'user', content: text, createdAt: this.now(), runId: run.id,
+        ...(attachments.length === 0 ? {} : { attachments }),
       };
       this.store.recordInput(key, run.id, message, steer ? 'steer' : 'queue');
       this.store.touchThread(threadId, this.now());
@@ -417,7 +443,7 @@ export class BotRuntime {
     this.publishMessage(bot.id, threadId, message);
     this.publishRun(run);
     if (steer) {
-      void open.session.steer(text).catch((error: unknown) => {
+      void open.session.steer(withAttachments(text, attachments)).catch((error: unknown) => {
         void this.interruptUncertain(run.id, threadId, `steer failed: ${errorMessage(error)}`);
       });
     } else {
@@ -578,7 +604,7 @@ export class BotRuntime {
   /** Drop every live session/transcript for a bot before the row is deleted. */
   async closeBot(botId: string): Promise<void> {
     this.deletingBots.add(botId);
-    for (const thread of this.store.listThreads(botId,{includeArchived:true})) {
+    for (const thread of this.store.listThreads(botId,{includeArchived:true,scope:'all'})) {
       this.deletingThreads.add(thread.id);
       this.expireInboxForThread(thread.id,'deleted');
       for (const run of this.store.listRunsForThread(thread.id,Number.MAX_SAFE_INTEGER)) {
@@ -591,7 +617,7 @@ export class BotRuntime {
       entry.unsubscribe();
       await entry.session.close({ extractMemories: false }).catch(() => {});
     }
-    for (const thread of this.store.listThreads(botId, { includeArchived: true })) {
+    for (const thread of this.store.listThreads(botId, { includeArchived: true, scope: 'all' })) {
       this.transcripts.delete(thread.id);
       this.activeRunByThread.delete(thread.id);
     }
@@ -892,8 +918,10 @@ export class BotRuntime {
   promptRoom(
     roomId: string,
     text: string,
-    requestKey?: string,
+    options: { readonly requestKey?: string; readonly attachments?: readonly Attachment[] } = {},
   ): { roomMessage: RoomMessageRecord; runId: string; runIds: readonly string[] } {
+    const requestKey = options.requestKey;
+    const attachments = normalizeAttachments(options.attachments);
     const room = this.store.requireRoom(roomId);
     if (requestKey !== undefined) {
       const existing = this.store.findRoomMessageByRequest(roomId, requestKey);
@@ -921,7 +949,7 @@ export class BotRuntime {
         : members.find((bot) => bot.id === room.leadBotId);
     const fallback = lead ?? members[0];
     if (fallback === undefined) {
-      throw new Error(`Room has no Bots: ${room.name}`);
+      throw new RuntimeError('room.no_available_bot', 'Room has no Bots left', 409);
     }
 
     const targets = resolveRoomTargets(members, fallback, text).filter((bot) => !bot.paused);
@@ -935,6 +963,7 @@ export class BotRuntime {
       content: text,
       via: 'direct',
       roomRequestId: requestKey ?? null,
+      attachments,
     });
     this.hub.publish({
       botId: targets[0]?.id ?? fallback.id,
@@ -957,7 +986,7 @@ export class BotRuntime {
           context.trim().length === 0
             ? text
             : `Shared conversation in #${room.name} (oldest first; reference only):\n${context}\n\nNew message from person:\n${text}`;
-        const started = this.prompt(threadId, { text: envelope, mode: 'queue' });
+        const started = this.prompt(threadId, { text: envelope, mode: 'queue', attachments });
         runIds.push(started.runId);
         if (runIds.length === 1) {
           this.store.setRoomMessageRun(roomMessage.id, started.runId);
@@ -984,12 +1013,15 @@ export class BotRuntime {
       (message) => message.role === 'assistant' && message.content.trim().length > 0,
     );
     if (last === undefined) return;
+    // A relay run speaks an answer that came from another Bot; the room shows that
+    // attribution instead of presenting it as a direct reply.
+    const relayed = last.runId === undefined ? undefined : this.store.getHandoffByRelayRun(last.runId);
     const roomMessage = this.store.appendRoomMessage({
       roomId: mapping.roomId,
       speakerKind: 'bot',
       speakerId: mapping.botId,
       content: last.content,
-      via: 'direct',
+      via: relayed === undefined ? 'direct' : 'handoff',
       answeredBy: mapping.botId,
       sourceMessageId: last.id,
     });
@@ -1219,9 +1251,11 @@ export class BotRuntime {
    */
   private handoffThreadFor(toBotId: string, fromName: string, depth: number): ThreadRecord {
     const title = `handoff from ${fromName}`;
+    // Depth is part of the identity: reusing a shallower thread would let a chain
+    // run past its cap, because the thread is what carries the depth forward.
     const reusable = this.store
       .listThreads(toBotId)
-      .find((thread) => thread.handoffDepth >= 1 && thread.title === title);
+      .find((thread) => thread.handoffDepth === depth && thread.title === title);
     return reusable ?? this.store.createThread(toBotId, { title, handoffDepth: depth });
   }
 
@@ -1974,6 +2008,7 @@ export class BotRuntime {
 
 export function publicBot(store: BotStore, bot: BotRecord): Bot {
   const counters = store.counters().get(bot.id) ?? { unread: 0, needsYou: 0 };
+  const last = store.lastDirectMessage(bot.id);
   return {
     id: bot.id,
     name: bot.name,
@@ -1990,6 +2025,8 @@ export function publicBot(store: BotStore, bot: BotRecord): Bot {
     unread: counters.unread,
     needsYou: counters.needsYou,
     lastActiveAt: bot.lastActiveAt,
+    lastMessage: last?.content ?? null,
+    lastMessageAt: last?.createdAt ?? null,
   };
 }
 

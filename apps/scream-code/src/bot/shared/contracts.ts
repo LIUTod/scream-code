@@ -52,6 +52,9 @@ export interface Bot {
   readonly unread: number;
   readonly needsYou: number;
   readonly lastActiveAt: number | null;
+  /** Newest message in this Bot's 1:1 history, for the roster preview. */
+  readonly lastMessage?: string | null;
+  readonly lastMessageAt?: number | null;
   readonly configRevision?: number;
 }
 
@@ -120,6 +123,15 @@ export interface Handoff {
   readonly relayStatus?: RelayStatus | null;
 }
 
+/** A file the person handed to a Bot; `path` is relative to the Bot workspace. */
+export interface Attachment {
+  readonly id: string;
+  readonly name: string;
+  readonly path: string;
+  readonly size: number;
+  readonly mime: string;
+}
+
 export interface Message {
   readonly id: string;
   readonly threadId: string;
@@ -135,6 +147,7 @@ export interface Message {
   readonly projectionVersion?: number;
   readonly toolCalls?: readonly ToolCall[];
   readonly handoff?: Handoff;
+  readonly attachments?: readonly Attachment[];
 }
 
 export interface Approval {
@@ -149,6 +162,8 @@ export interface Approval {
   readonly status: ApprovalStatus;
   readonly createdAt: number;
   readonly expiresAt: number;
+  /** Set when the thread backing this approval belongs to a room. */
+  readonly roomId?: string | null;
 }
 
 export interface QuestionOption {
@@ -173,6 +188,8 @@ export interface Question {
   readonly items: readonly QuestionItem[];
   readonly status: 'pending' | 'answered' | 'expired';
   readonly createdAt: number;
+  /** Set when the thread backing this question belongs to a room. */
+  readonly roomId?: string | null;
 }
 
 export interface Room {
@@ -181,6 +198,10 @@ export interface Room {
   readonly leadBotId: string | null;
   readonly memberIds: readonly string[];
   readonly createdAt: number;
+  /** Newest message in the room, for the roster preview. */
+  readonly lastMessage?: string | null;
+  readonly lastMessageAt?: number | null;
+  readonly lastSpeakerKind?: RoomSpeakerKind | null;
 }
 
 export interface RoomMessage {
@@ -196,6 +217,7 @@ export interface RoomMessage {
   readonly via: RoomMessageVia;
   readonly answeredBy: string | null;
   readonly createdAt: number;
+  readonly attachments?: readonly Attachment[];
 }
 
 export interface AuditEntry {
@@ -272,7 +294,7 @@ export interface CreateThreadInput {
 export interface PromptInput {
   readonly text: string;
   readonly mode?: 'steer' | 'queue';
-  readonly attachments?: readonly string[];
+  readonly attachments?: readonly Attachment[];
   readonly requestKey?: string;
 }
 

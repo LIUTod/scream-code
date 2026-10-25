@@ -23,10 +23,10 @@ describe('Bot SSE wire transport', () => {
     if (address === null || typeof address === 'string') throw new Error('Expected a TCP listener');
     const client = new HttpBotClient(`http://127.0.0.1:${String(address.port)}`);
     try {
-      await expect(client.promptRoom('room', 'original task', 'original-key')).rejects.toThrow();
+      await expect(client.promptRoom('room', 'original task', { requestKey: 'original-key' })).rejects.toThrow();
       expect(received).toEqual([{ text: 'original task', requestKey: 'original-key' }]);
       // Only an explicit caller retry may replay the original body and key.
-      await client.promptRoom('room', 'original task', 'original-key');
+      await client.promptRoom('room', 'original task', { requestKey: 'original-key' });
       expect(received).toEqual([
         { text: 'original task', requestKey: 'original-key' },
         { text: 'original task', requestKey: 'original-key' },

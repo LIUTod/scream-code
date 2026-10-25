@@ -425,3 +425,79 @@ describe('handoff gateway routes', () => {
     expect(inbox.handoffs[0]?.id).toBe(listed[0]?.id);
   });
 });
+
+describe('room hand-off chain', () => {
+  it('caps the chain at one hop and relays the answer into the room as a hand-off', async () => {
+    const fixture = createRuntimeFixture();
+    const from = fixture.store.createBot({ name: 'Scream', workspace: process.cwd() });
+    const to = fixture.store.createBot({ name: 'Research', workspace: process.cwd() });
+    const room = fixture.store.createRoom({
+      name: 'crew',
+      memberIds: [from.id, to.id],
+      leadBotId: from.id,
+    });
+
+    fixture.runtime.promptRoom(room.id, '@Scream plan the audit');
+    const roomThreadId = fixture.store.getRoomThread(room.id, from.id);
+    if (roomThreadId === undefined) throw new Error('room thread missing');
+    await vi.waitFor(() => {
+      expect(fixture.factory.sessionFor(roomThreadId).prompts).toHaveLength(1);
+    });
+
+    // The room Bot hands the task to a peer while its room turn is still running.
+    const offered = await fixture.runtime.handleToolCall({
+      toolCallId: 'room_handoff_1',
+      name: 'message_bot',
+      sessionId: sessionIdFor(fixture, roomThreadId),
+      args: { to: 'Research', task: 'Audit the shell' },
+    });
+    expect(offered.isError).toBe(false);
+    expect(offered.output).toBe('Handed to Research. Its answer will come back to this conversation.');
+
+    const handoffThread = fixture.store
+      .listThreads(to.id, { scope: 'all' })
+      .find((thread) => thread.handoffDepth === 1);
+    if (handoffThread === undefined) throw new Error('hand-off thread missing');
+    // The target's conversation still shows up in its own 1:1 list: it is a direct thread.
+    expect(fixture.store.listThreads(to.id).map((thread) => thread.id)).toContain(handoffThread.id);
+    await vi.waitFor(() => {
+      expect(fixture.factory.sessionFor(handoffThread.id).prompts).toHaveLength(1);
+    });
+
+    // A thread that arrived through a hand-off cannot hand work on again.
+    const refused = await fixture.runtime.handleToolCall({
+      toolCallId: 'room_handoff_2',
+      name: 'message_bot',
+      sessionId: sessionIdFor(fixture, handoffThread.id),
+      args: { to: 'Scream', task: 'Pass it on' },
+    });
+    expect(refused.isError).toBe(false);
+    expect(refused.output).toBe(
+      'This task already came from another Bot; it cannot be handed on again.',
+    );
+    const refusals = fixture.store
+      .listAudit({ botId: to.id })
+      .filter((entry) => entry.action === 'handoff.refused');
+    expect(refusals).toHaveLength(1);
+    expect(refusals[0]?.payload).toMatchObject({ reason: 'depth', to: 'Scream' });
+
+    // Finish the room turn, then the peer's answer relays back into the same room thread.
+    fixture.factory.sessionFor(roomThreadId).complete('planned');
+    fixture.factory.sessionFor(handoffThread.id).complete('audited the shell');
+    await vi.waitFor(() => {
+      expect(fixture.factory.sessionFor(roomThreadId).prompts).toHaveLength(2);
+    });
+    expect(fixture.factory.sessionFor(roomThreadId).prompts[1]).toContain(
+      '[handoff result] Research answered:',
+    );
+    fixture.factory.sessionFor(roomThreadId).complete('All good.');
+    await vi.waitFor(() => {
+      const replies = fixture.store
+        .listRoomMessages(room.id)
+        .filter((row) => row.speakerKind === 'bot' && row.content === 'All good.');
+      expect(replies).toHaveLength(1);
+      expect(replies[0]?.via).toBe('handoff');
+      expect(replies[0]?.answeredBy).toBe(from.id);
+    });
+  });
+});

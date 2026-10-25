@@ -54,6 +54,7 @@ function InboxPage() {
                     botId={bot.id}
                     botName={bot.name}
                     threadId={question.threadId}
+                    roomId={question.roomId ?? undefined}
                   />
                   <QuestionCard botName={bot.name} question={question} />
                 </div>
@@ -68,6 +69,7 @@ function InboxPage() {
                     botId={bot.id}
                     botName={bot.name}
                     threadId={approval.threadId}
+                    roomId={approval.roomId ?? undefined}
                   />
                   <ApprovalCard approval={approval} botName={bot.name} />
                 </div>
@@ -99,10 +101,12 @@ function ThreadLink({
   botId,
   botName,
   threadId,
+  roomId,
 }: {
   botId: string;
   botName: string;
   threadId: string;
+  roomId?: string;
 }) {
   const { t } = useI18n();
   return (
@@ -110,14 +114,25 @@ function ThreadLink({
       <span className="font-medium text-[11px] text-muted-foreground uppercase tracking-[0.12em]">
         {botName}
       </span>
-      <Link
-        className="flex items-center gap-1 text-[11.5px] text-muted-foreground hover:text-foreground"
-        params={{ botId, threadId }}
-        to="/bots/$botId/threads/$threadId"
-      >
-        {t("inbox.openThread")}
-        <IconArrowUpRight className="size-3" />
-      </Link>
+      {roomId !== undefined ? (
+        <Link
+          className="flex items-center gap-1 text-[11.5px] text-muted-foreground hover:text-foreground"
+          params={{ roomId }}
+          to="/rooms/$roomId"
+        >
+          {t("inbox.openRoom")}
+          <IconArrowUpRight className="size-3" />
+        </Link>
+      ) : (
+        <Link
+          className="flex items-center gap-1 text-[11.5px] text-muted-foreground hover:text-foreground"
+          params={{ botId, threadId }}
+          to="/bots/$botId/threads/$threadId"
+        >
+          {t("inbox.openThread")}
+          <IconArrowUpRight className="size-3" />
+        </Link>
+      )}
     </div>
   );
 }

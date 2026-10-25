@@ -86,9 +86,9 @@ describe('durable queue recovery', () => {
     await f.runtime.close();
   });
 
-  it('rejects attachments explicitly and can cancel individual queued items', async () => {
+  it('rejects forged attachment paths and can cancel individual queued items', async () => {
     const f = setup();
-    expect(() => f.runtime.prompt(f.thread.id,{text:'file',attachments:['a.txt']})).toThrow(/not supported/);
+    expect(() => f.runtime.prompt(f.thread.id,{text:'file',attachments:[{id:'a',name:'a.txt',path:'../evil.txt',size:3,mime:'text/plain'}]})).toThrow(/not an uploaded file/);
     const run = f.runtime.prompt(f.thread.id,{text:'never start'});
     expect(f.runtime.cancelQueuedRun(run.runId).status).toBe('cancelled');
     await new Promise((resolve) => setTimeout(resolve,10));

@@ -44,7 +44,7 @@ describe('explicit transactional database migrations', () => {
     expect(store.listQueuedRuns()).toEqual([]);
     store.close();
     const check = new DatabaseSync(location.path,{readOnly:true});
-    expect(check.prepare('SELECT version FROM schema_migrations ORDER BY version').all()).toEqual([{version:1},{version:2},{version:3},{version:4},{version:5}]);
+    expect(check.prepare('SELECT version FROM schema_migrations ORDER BY version').all()).toEqual([{version:1},{version:2},{version:3},{version:4},{version:5},{version:6}]);
     check.close();
     const reopened = new BotStore(location.path); reopened.open(); reopened.close();
     expect(readdirSync(location.root).filter((name) => name.endsWith('.bak'))).toHaveLength(1);

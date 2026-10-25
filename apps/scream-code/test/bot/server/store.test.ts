@@ -226,6 +226,57 @@ describe('BotStore runs', () => {
   });
 });
 
+describe('BotStore thread scopes', () => {
+  it('keeps room threads out of the default list and still deletes them with the bot', () => {
+    const store = open(':memory:');
+    const botId = bot(store);
+    const otherId = bot(store, 'Other');
+    const room = store.createRoom({ name: 'crew', memberIds: [botId, otherId], leadBotId: botId });
+    const landing = store.listThreads(botId).map((thread) => thread.id);
+    const roomThread = store.createThread(botId, { title: '# crew' });
+    store.setRoomThread(room.id, botId, roomThread.id);
+
+    // The safe default hides the room's conversation from a 1:1 list.
+    expect(store.listThreads(botId).map((thread) => thread.id)).toEqual(landing);
+    expect(store.listThreads(botId).map((thread) => thread.id)).not.toContain(roomThread.id);
+    // Internal paths opt in to every session.
+    expect(store.listThreads(botId, { scope: 'all' }).map((thread) => thread.id)).toContain(
+      roomThread.id,
+    );
+
+    // Cleanup must see the room thread, or deleting the bot would leave the row behind.
+    expect(store.deleteBot(botId)).toBe(true);
+    expect(store.getRoomThread(room.id, botId)).toBeUndefined();
+  });
+});
+
+describe('BotStore roster previews', () => {
+  it('previews the newest direct message regardless of insert order', () => {
+    const store = open(':memory:');
+    const botId = bot(store);
+    const early = store.createThread(botId);
+    const late = store.createThread(botId);
+    // The newer message is written first, so a rowid-ordered query would pick the old one.
+    store.saveMessage({ id: 'm-new', threadId: late.id, role: 'assistant', content: 'newer', createdAt: 2_000 }, 0);
+    store.saveMessage({ id: 'm-old', threadId: early.id, role: 'assistant', content: 'older', createdAt: 1_000 }, 0);
+    expect(store.lastDirectMessage(botId)?.content).toBe('newer');
+  });
+
+  it('keeps room unread out of the Bot badge', () => {
+    const store = open(':memory:');
+    const botId = bot(store);
+    const otherId = bot(store, 'Other');
+    const room = store.createRoom({ name: 'crew', memberIds: [botId, otherId], leadBotId: botId });
+    const roomThread = store.createThread(botId, { title: '# crew' });
+    store.setRoomThread(room.id, botId, roomThread.id);
+    store.markThreadUnread(roomThread.id, true);
+    expect(store.counters().get(botId)?.unread ?? 0).toBe(0);
+    const direct = store.createThread(botId);
+    store.markThreadUnread(direct.id, true);
+    expect(store.counters().get(botId)?.unread).toBe(1);
+  });
+});
+
 describe('BotStore room messages', () => {
   it('persists the answerer and collapses a replayed source message', () => {
     const store = open(':memory:');

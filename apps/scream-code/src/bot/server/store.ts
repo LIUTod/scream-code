@@ -14,6 +14,7 @@ import { migrateBotDatabase } from './migrations';
 
 import type {
   ApprovalDecision,
+  Attachment,
   ApprovalStatus,
   AuditEntry,
   BotStatus,
@@ -43,6 +44,7 @@ export interface RoomRecord {
 
 export interface RoomMessageRecord {
   readonly id: string;
+  readonly attachments?: readonly Attachment[];
   readonly roomId: string;
   readonly speakerKind: 'user' | 'bot' | 'system';
   readonly speakerId: string;
@@ -452,6 +454,9 @@ function rowToRoomMessage(row: Record<string, unknown>): RoomMessageRecord {
     runId: toStringOrNull(row['run_id']),
     roomRequestId: toStringOrNull(row['room_request_id']),
     createdAt: Number(row['created_at']),
+    ...(parseJson<readonly Attachment[] | null>(row['attachments_json'], null) === null
+      ? {}
+      : { attachments: parseJson<readonly Attachment[]>(row['attachments_json'], []) }),
   };
 }
 
@@ -700,7 +705,9 @@ export class BotStore {
 
   /** Delete a bot and its threads/runs/inbox rows. Returns false when unknown. */
   deleteBot(id: string): boolean {
-    const threadIds = this.listThreads(id, { includeArchived: true }).map((thread) => thread.id);
+    const threadIds = this.listThreads(id, { includeArchived: true, scope: 'all' }).map(
+      (thread) => thread.id,
+    );
     const db = this.handle();
     db.exec('BEGIN');
     try {
@@ -736,11 +743,27 @@ export class BotStore {
 
   // -------------------------------------------------------------- threads
 
-  listThreads(botId: string, options: { readonly includeArchived?: boolean } = {}): ThreadRecord[] {
+  /**
+   * A Bot's threads, scoped to what the caller is allowed to see.
+   *
+   * `direct` is the safe default: threads opened on behalf of a room are that room's
+   * conversation, not the Bot's 1:1 history, and must never show up in a single-chat list.
+   * Internal paths that need every session (cleanup, recovery) ask for `all` explicitly.
+   */
+  listThreads(
+    botId: string,
+    options: { readonly includeArchived?: boolean; readonly scope?: 'direct' | 'all' } = {},
+  ): ThreadRecord[] {
     const includeArchived = options.includeArchived === true;
+    const scope = options.scope ?? 'direct';
+    const archived = includeArchived ? '' : ' AND archived_at IS NULL';
+    const roomFilter =
+      scope === 'all'
+        ? ''
+        : ' AND id NOT IN (SELECT core_session_id FROM room_threads)';
     const rows = this.handle()
       .prepare(
-        `SELECT * FROM threads WHERE bot_id = ?${includeArchived ? '' : ' AND archived_at IS NULL'}
+        `SELECT * FROM threads WHERE bot_id = ?${archived}${roomFilter}
          ORDER BY last_active_at DESC`,
       )
       .all(botId) as Record<string, unknown>[];
@@ -905,6 +928,7 @@ export class BotStore {
     readonly sourceMessageId?: string | null;
     readonly roomRequestId?: string | null;
     readonly runId?: string | null;
+    readonly attachments?: readonly Attachment[];
   }): RoomMessageRecord {
     const id = `rm_${randomUUID()}`;
     const now = this.now();
@@ -915,8 +939,8 @@ export class BotStore {
       this.handle()
         .prepare(
           `INSERT INTO room_messages (id, room_id, speaker_kind, speaker_id, content, via,
-            answered_by, source_message_id, created_at, room_request_id, run_id)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            answered_by, source_message_id, created_at, room_request_id, run_id, attachments_json)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           id,
@@ -930,6 +954,9 @@ export class BotStore {
           now,
           input.roomRequestId ?? null,
           input.runId ?? null,
+          input.attachments === undefined || input.attachments.length === 0
+            ? null
+            : JSON.stringify(input.attachments),
         );
     };
     if (sourceMessageId !== null) {
@@ -956,6 +983,9 @@ export class BotStore {
       runId: input.runId ?? null,
       roomRequestId: input.roomRequestId ?? null,
       createdAt: now,
+      ...(input.attachments === undefined || input.attachments.length === 0
+        ? {}
+        : { attachments: input.attachments }),
     };
   }
 
@@ -979,12 +1009,48 @@ export class BotStore {
     return rows.map(rowToRoomMessage);
   }
 
+  /** Room id for every thread a room owns. */
+  roomThreadMap(): Map<string, string> {
+    const rows = this.handle()
+      .prepare('SELECT room_id, core_session_id FROM room_threads')
+      .all() as Record<string, unknown>[];
+    return new Map(rows.map((row) => [String(row['core_session_id']), String(row['room_id'])]));
+  }
+
   getRoomThread(roomId: string, botId: string): string | undefined {
     const row = this.handle()
       .prepare('SELECT core_session_id FROM room_threads WHERE room_id = ? AND bot_id = ?')
       .get(roomId, botId) as Record<string, unknown> | undefined;
     const threadId = row?.['core_session_id'];
     return typeof threadId === 'string' ? threadId : undefined;
+  }
+
+  /** Newest message across a Bot's 1:1 history, for roster previews. */
+  lastDirectMessage(botId: string): Message | undefined {
+    const row = this.handle()
+      .prepare(
+        `SELECT message_json FROM thread_messages
+         WHERE thread_id IN (
+           SELECT id FROM threads WHERE bot_id = ? AND archived_at IS NULL
+             AND id NOT IN (SELECT core_session_id FROM room_threads)
+         )
+         ORDER BY COALESCE(json_extract(message_json, '$.createdAt'), 0) DESC, rowid DESC
+         LIMIT 1`,
+      )
+      .get(botId) as Record<string, unknown> | undefined;
+    return row === undefined
+      ? undefined
+      : (JSON.parse(String(row['message_json'])) as Message);
+  }
+
+  /** Newest message in a room, for roster previews. */
+  lastRoomMessage(roomId: string): RoomMessageRecord | undefined {
+    const row = this.handle()
+      .prepare(
+        'SELECT * FROM room_messages WHERE room_id = ? ORDER BY created_at DESC, id DESC LIMIT 1',
+      )
+      .get(roomId) as Record<string, unknown> | undefined;
+    return row === undefined ? undefined : rowToRoomMessage(row);
   }
 
   listRoomThreads(roomId: string): { botId: string; threadId: string }[] {
@@ -1656,7 +1722,10 @@ export class BotStore {
       return entry;
     };
     const unreadRows = this.handle()
-      .prepare('SELECT bot_id, SUM(unread) AS n FROM threads GROUP BY bot_id')
+      .prepare(
+        `SELECT bot_id, SUM(CASE WHEN id IN (SELECT core_session_id FROM room_threads)
+           THEN 0 ELSE unread END) AS n FROM threads GROUP BY bot_id`,
+      )
       .all() as Record<string, unknown>[];
     for (const row of unreadRows) {
       ensure(String(row['bot_id'])).unread = Number(row['n'] ?? 0);

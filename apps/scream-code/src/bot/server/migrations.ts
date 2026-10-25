@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 
-export const BOT_SCHEMA_VERSION = 5;
+export const BOT_SCHEMA_VERSION = 6;
 
 function columns(db: DatabaseSync, table: string): Set<string> {
   return new Set(db.prepare(`PRAGMA table_info(${table})`).all().map((row) => String(row['name'])));
@@ -103,6 +103,11 @@ export function migrateBotDatabase(db: DatabaseSync, path: string, baseline: str
          WHERE target_run_id IS NULL AND status IN ('queued', 'running')`,
       ).run('legacy hand-off interrupted during upgrade; confirm before retrying', Date.now());
       db.prepare('INSERT INTO schema_migrations VALUES(5, ?)').run(Date.now());
+    }
+    if (version < 6) {
+      const rc6 = columns(db, 'room_messages');
+      if (!rc6.has('attachments_json')) db.exec('ALTER TABLE room_messages ADD COLUMN attachments_json TEXT');
+      db.prepare('INSERT INTO schema_migrations VALUES(6, ?)').run(Date.now());
     }
     db.exec("UPDATE bots SET permission='auto' WHERE permission='yolo'; UPDATE bots SET permission='bot' WHERE permission NOT IN ('auto','bot')");
     db.exec(`PRAGMA user_version=${BOT_SCHEMA_VERSION}`);
