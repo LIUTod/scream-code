@@ -42,6 +42,10 @@ export interface Bot {
   readonly title: string;
   readonly rolePrompt: string;
   readonly avatarSeed: string;
+  /** Optional emoji shown on the identity color; empty keeps the generated avatar. */
+  readonly avatarEmoji?: string | null;
+  /** Identity hue (0-359) used by the avatar and message cards. */
+  readonly accentHue?: number | null;
   readonly workspace: string;
   readonly model: string | undefined;
   readonly thinking: string | undefined;
@@ -285,6 +289,8 @@ export interface UpdateBotInput {
   readonly permission?: BotPermission;
   readonly toolPolicy?: ToolPolicy;
   readonly paused?: boolean;
+  readonly avatarEmoji?: string | null;
+  readonly accentHue?: number | null;
 }
 
 export interface CreateThreadInput {

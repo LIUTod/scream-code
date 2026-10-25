@@ -13,12 +13,19 @@ import { DraftStore, draftKey, type DraftRequest } from "@/lib/draft";
 
 // Separate ownership from Bot/thread drafts; accepted requests stay server-owned.
 const roomDrafts = new DraftStore(() => undefined);
-import { AbstractAvatar } from "@/components/agents/abstract-avatar";
+import { AbstractAvatar, hueForSeed } from "@/components/agents/abstract-avatar";
 import { AvatarStack } from "@/components/agents/avatar-stack";
 import { Button } from "@/components/ui/button";
 import { AttachmentChips } from "@/components/chat/attachment-chips";
 import { MentionPopup } from "@/components/chat/mention-popup";
 import { RecoveryCard } from "@/components/chat/recovery-card";
+import {
+  MessageScroller,
+  MessageScrollerButton,
+  MessageScrollerContent,
+  MessageScrollerProvider,
+  MessageScrollerViewport,
+} from "@/components/ui/message-scroller";
 import { MessageBody } from "@/components/chat/message-body";
 import { clearRoomDrafts, getRoomDrafts, onRoomDrafts, type RoomDraft } from "@/lib/api/events";
 import { useShell } from "@/components/layout/shell-context";
@@ -158,6 +165,8 @@ function RoomView({ roomId }: { roomId: string }) {
       id: member.id,
       name: member.name,
       seed: member.avatarSeed,
+      emoji: member.avatarEmoji,
+      hue: member.accentHue,
     }));
     return filterMentions(people, mention.token.query).slice(0, 6);
   }, [members, mention]);
@@ -210,7 +219,12 @@ function RoomView({ roomId }: { roomId: string }) {
           title={lead ? t("room.lead", { name: lead.name }) : t("room.noLead")}
         >
           <AvatarStack
-            people={members.map((member) => ({ name: member.name, seed: member.avatarSeed }))}
+            people={members.map((member) => ({
+              name: member.name,
+              seed: member.avatarSeed,
+              emoji: member.avatarEmoji,
+              hue: member.accentHue,
+            }))}
             size={22}
           />
         </div>
@@ -251,8 +265,10 @@ function RoomView({ roomId }: { roomId: string }) {
             ))}
         </div>
       ) : null}
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 md:px-8">
-        <div className="mx-auto flex w-full max-w-2xl flex-col gap-5 py-7">
+      <MessageScrollerProvider>
+        <MessageScroller>
+          <MessageScrollerViewport>
+            <MessageScrollerContent className="mx-auto w-full max-w-2xl gap-5 px-4 py-7 md:px-8">
           {(messages.data ?? []).map((message) => {
             if (message.speakerKind === "system") {
               return (
@@ -268,19 +284,28 @@ function RoomView({ roomId }: { roomId: string }) {
               (bot) => bot.id === message.speakerId,
             );
             const isUser = message.speakerKind === "user";
+            const speakerName =
+              speaker?.name ?? message.answeredBy ?? t("room.removedMember");
+            const speakerSeed = speaker?.avatarSeed ?? message.speakerId;
+            const hue = speaker?.accentHue ?? hueForSeed(speakerSeed);
             return (
               <div
                 className={isUser ? "flex justify-end" : "flex min-w-0 gap-2.5"}
                 key={message.id}
               >
-                {!isUser && speaker ? (
+                {!isUser ? (
                   <AbstractAvatar
-                    name={speaker.name}
-                    seed={speaker.avatarSeed}
+                    emoji={speaker?.avatarEmoji}
+                    hue={speaker?.accentHue}
+                    name={speakerName}
+                    seed={speakerSeed}
                     size={26}
                   />
                 ) : null}
-                <div className={isUser ? "max-w-[85%]" : "min-w-0 flex-1"}>
+                <div
+                  className={isUser ? "max-w-[85%]" : "bot-card min-w-0 flex-1 rounded-xl px-3 py-2"}
+                  style={isUser ? undefined : ({ ["--bot-hue" as string]: String(hue) })}
+                >
                   <div
                     className={
                       isUser
@@ -289,7 +314,7 @@ function RoomView({ roomId }: { roomId: string }) {
                     }
                   >
                     <span className="font-medium text-[12.5px]">
-                      {isUser ? t("room.you") : (speaker?.name ?? t("room.bot"))}
+                      {isUser ? t("room.you") : speakerName}
                     </span>
                     {message.via === "handoff" ? (
                       <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
@@ -317,17 +342,32 @@ function RoomView({ roomId }: { roomId: string }) {
               </div>
             </div>
           ) : null}
-          {drafts.map((live) => (
-            <div className="flex min-w-0 gap-2.5" key={`live-${live.botId}`}>
-              <div className="min-w-0 flex-1">
-                <div className="flex items-baseline gap-2">
-                  <span className="font-medium text-[12.5px]">{bots.data?.find((bot) => bot.id === live.botId)?.name ?? t("room.bot")}</span>
-                  <span className="animate-pulse text-[11px] text-muted-foreground">{t("room.replying")}</span>
+          {drafts.map((live) => {
+            const author = bots.data?.find((bot) => bot.id === live.botId);
+            const seed = author?.avatarSeed ?? live.botId;
+            const hue = author?.accentHue ?? hueForSeed(seed);
+            return (
+              <div className="flex min-w-0 gap-2.5" key={`live-${live.botId}`}>
+                <AbstractAvatar
+                  emoji={author?.avatarEmoji}
+                  hue={author?.accentHue}
+                  name={author?.name ?? t("room.bot")}
+                  seed={seed}
+                  size={26}
+                />
+                <div
+                  className="bot-card min-w-0 flex-1 rounded-xl px-3 py-2"
+                  style={{ ["--bot-hue" as string]: String(hue) }}
+                >
+                  <div className="flex items-baseline gap-2">
+                    <span className="font-medium text-[12.5px]">{author?.name ?? t("room.bot")}</span>
+                    <span className="animate-pulse text-[11px] text-muted-foreground">{t("room.replying")}</span>
+                  </div>
+                  <MessageBody content={live.content} className="mt-1 opacity-80" />
                 </div>
-                <MessageBody content={live.content} className="mt-1 opacity-80" />
               </div>
-            </div>
-          ))}
+            );
+          })}
           {drafts.length === 0 && (send.isPending || (runs.data ?? []).some((run) => run.status === "queued" || run.status === "running" || run.status === "waiting_user")) ? (
             <p className="flex items-center gap-2 py-2 text-muted-foreground text-xs" role="status">
               <span className="size-1.5 animate-pulse rounded-full bg-muted-foreground" />
@@ -339,8 +379,11 @@ function RoomView({ roomId }: { roomId: string }) {
               {t("room.empty")}
             </p>
           ) : null}
-        </div>
-      </div>
+            </MessageScrollerContent>
+            <MessageScrollerButton />
+          </MessageScrollerViewport>
+        </MessageScroller>
+      </MessageScrollerProvider>
 
       <div className="shrink-0 px-4 pb-4 md:px-8 md:pb-5">
         <div className="relative mx-auto w-full max-w-2xl">

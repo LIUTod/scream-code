@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import type { Bot, Message } from "../../../shared/contracts";
-import { AbstractAvatar } from "@/components/agents/abstract-avatar";
+import { AbstractAvatar, hueForSeed } from "@/components/agents/abstract-avatar";
 import { ToolLine } from "@/components/channels/tool-line";
 import {
   MessageScroller,
@@ -63,10 +63,20 @@ function MessageRow({ bot, message }: { bot: Bot; message: Message }) {
     );
   }
 
+  const hue = bot.accentHue ?? hueForSeed(bot.avatarSeed);
   return (
     <div className="flex min-w-0 gap-2.5">
-      <AbstractAvatar name={bot.name} seed={bot.avatarSeed} size={26} />
-      <div className="min-w-0 flex-1">
+      <AbstractAvatar
+        emoji={bot.avatarEmoji}
+        hue={bot.accentHue}
+        name={bot.name}
+        seed={bot.avatarSeed}
+        size={26}
+      />
+      <div
+        className="bot-card min-w-0 flex-1 rounded-xl px-3 py-2"
+        style={{ ["--bot-hue" as string]: String(hue) }}
+      >
         <div className="flex items-baseline gap-2">
           <span className="font-medium text-[12.5px]">{bot.name}</span>
           {/* Hydrated history carries no wall clock; 0 means "unknown", not 1970. */}

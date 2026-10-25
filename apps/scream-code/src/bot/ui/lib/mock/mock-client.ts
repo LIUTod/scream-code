@@ -184,6 +184,8 @@ export class MockBotClient implements BotClient {
     if (input.permission !== undefined) bot.permission = input.permission;
     if (input.toolPolicy !== undefined) bot.toolPolicy = input.toolPolicy;
     if (input.paused !== undefined) bot.paused = input.paused;
+    if (input.avatarEmoji !== undefined) bot.avatarEmoji = input.avatarEmoji;
+    if (input.accentHue !== undefined) bot.accentHue = input.accentHue;
     this.refreshBot(bot);
     this.emitForBot(botId);
     if (!bot.paused) this.scheduleBot(bot.id);

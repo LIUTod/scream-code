@@ -18,6 +18,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
+import { AbstractAvatar, hueForSeed } from "@/components/agents/abstract-avatar";
 import { getBotClient } from "@/lib/api/client";
 import { queryKeys } from "@/lib/api/queries";
 import { forgetDeletedBot } from "@/lib/session";
@@ -45,6 +46,8 @@ export function BotSettingsSheet({
   const [workspace, setWorkspace] = useState(bot.workspace);
   const [rolePrompt, setRolePrompt] = useState(bot.rolePrompt);
   const [permission, setPermission] = useState<BotPermission>(bot.permission);
+  const [emoji, setEmoji] = useState(bot.avatarEmoji ?? "");
+  const [hue, setHue] = useState<number | null>(bot.accentHue ?? null);
   const [confirming, setConfirming] = useState(false);
   const openedBot = useRef<string | null>(null);
   const active = useRef({ botId: bot.id, open });
@@ -60,6 +63,8 @@ export function BotSettingsSheet({
     setWorkspace(bot.workspace);
     setRolePrompt(bot.rolePrompt);
     setPermission(bot.permission);
+    setEmoji(bot.avatarEmoji ?? "");
+    setHue(bot.accentHue ?? null);
     setConfirming(false);
   }, [bot, open]);
 
@@ -115,7 +120,18 @@ export function BotSettingsSheet({
           onSubmit={(event) => {
             event.preventDefault();
             if (save.isPending) return;
-            save.mutate({ botId: bot.id, input: { name, permission, rolePrompt, title, workspace } });
+            save.mutate({
+              botId: bot.id,
+              input: {
+                accentHue: hue,
+                avatarEmoji: emoji.trim().length === 0 ? null : emoji.trim(),
+                name,
+                permission,
+                rolePrompt,
+                title,
+                workspace,
+              },
+            });
           }}
         >
           <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
@@ -135,6 +151,58 @@ export function BotSettingsSheet({
                   onChange={(event) => setTitle(event.target.value)}
                   value={title}
                 />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="settings-emoji">{t("bot.settings.identity")}</FieldLabel>
+                <div className="flex items-center gap-3">
+                  <AbstractAvatar
+                    emoji={emoji.trim().length === 0 ? null : emoji.trim()}
+                    hue={hue}
+                    name={name}
+                    seed={bot.avatarSeed}
+                    size={44}
+                  />
+                  <Input
+                    className="w-20 text-center text-lg"
+                    id="settings-emoji"
+                    maxLength={8}
+                    onChange={(event) => setEmoji(event.target.value)}
+                    placeholder={t("bot.settings.identityPlaceholder")}
+                    value={emoji}
+                  />
+                  <input
+                    aria-label={t("bot.settings.hue")}
+                    className="min-w-0 flex-1"
+                    max={359}
+                    min={0}
+                    onChange={(event) => setHue(Number(event.target.value))}
+                    style={{
+                      accentColor: `hsl(${String(hue ?? hueForSeed(bot.avatarSeed))} 60% 45%)`,
+                    }}
+                    type="range"
+                    value={hue ?? hueForSeed(bot.avatarSeed)}
+                  />
+                </div>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {[0, 25, 45, 145, 175, 210, 260, 320].map((preset) => (
+                    <button
+                      aria-label={t("bot.settings.huePreset", { hue: preset })}
+                      className="size-5 rounded-full ring-1 ring-black/10 dark:ring-white/20"
+                      key={preset}
+                      onClick={() => setHue(preset)}
+                      style={{ background: `hsl(${String(preset)} 60% 55%)` }}
+                      type="button"
+                    />
+                  ))}
+                  <button
+                    className="text-[11px] text-muted-foreground hover:text-foreground"
+                    onClick={() => setHue(null)}
+                    type="button"
+                  >
+                    {t("bot.settings.hueReset")}
+                  </button>
+                </div>
+                <FieldDescription>{t("bot.settings.identityHint")}</FieldDescription>
               </Field>
               <Field>
                 <FieldLabel htmlFor="settings-workspace">{t("bot.new.workspace")}</FieldLabel>

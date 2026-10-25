@@ -250,6 +250,20 @@ describe('BotStore thread scopes', () => {
   });
 });
 
+describe('BotStore identity', () => {
+  it('stores an emoji and identity hue, and clears them on request', () => {
+    const store = open(':memory:');
+    const botId = bot(store);
+    expect(store.getBot(botId)?.avatarEmoji ?? null).toBeNull();
+    store.updateBot(botId, { avatarEmoji: '🦊', accentHue: 210 });
+    expect(store.getBot(botId)?.avatarEmoji).toBe('🦊');
+    expect(store.getBot(botId)?.accentHue).toBe(210);
+    store.updateBot(botId, { avatarEmoji: null, accentHue: null });
+    expect(store.getBot(botId)?.avatarEmoji ?? null).toBeNull();
+    expect(store.getBot(botId)?.accentHue ?? null).toBeNull();
+  });
+});
+
 describe('BotStore roster previews', () => {
   it('previews the newest direct message regardless of insert order', () => {
     const store = open(':memory:');

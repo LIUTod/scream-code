@@ -2015,6 +2015,8 @@ export function publicBot(store: BotStore, bot: BotRecord): Bot {
     title: bot.title,
     rolePrompt: bot.rolePrompt,
     avatarSeed: bot.avatarSeed,
+    avatarEmoji: bot.avatarEmoji,
+    accentHue: bot.accentHue,
     workspace: bot.workspace,
     model: bot.model ?? undefined,
     thinking: bot.thinking ?? undefined,

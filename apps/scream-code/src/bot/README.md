@@ -105,10 +105,10 @@ The Bot database is `<screamHome>/bot/bot.db`. Scream home resolution is an expl
 `<screamHome>/config.toml` unless an explicit configuration path is supplied. SDK session history
 is separate from the Bot database; its display projection is not a replacement execution log.
 
-`server/migrations.ts` currently declares schema version **6**. It records applied versions in
+`server/migrations.ts` currently declares schema version **7**. It records applied versions in
 `schema_migrations` and `PRAGMA user_version`. Before upgrading an existing on-disk database, it
 uses SQLite `VACUUM INTO` to create a consistent backup named
-`bot.db.pre-v6-<uuid>.bak` beside the database, including committed WAL data. Fresh databases do
+`bot.db.pre-v7-<uuid>.bak` beside the database, including committed WAL data. Fresh databases do
 not need that pre-upgrade backup. Required schema changes run in a transaction; failure rolls
 back and prevents the store from opening for service. A server also rejects a database with a
 newer schema than it supports.
@@ -136,6 +136,10 @@ creating a second concurrent turn on that thread.
 different thread/text is a conflict. The API responds `202` with the Run identity, not a completed
 answer.
 
+### Launching
+
+`scream bot` starts the gateway (default `127.0.0.1:3210`, opens the UI). Useful flags: `--port`, `--lan` (requires the printed access key), `--token`, `--yolo`, `--idle-minutes`. The gateway serves `dist/bot-ui`; rebuild with `bot:build` after UI edits.
+
 ### Attachments
 
 Files are uploaded first, then referenced by a prompt:
@@ -148,6 +152,7 @@ Files are uploaded first, then referenced by a prompt:
 - Limits: 25 MB per file and 10 files per message. The body is rejected before multipart parsing
   when `Content-Length` already exceeds the limit. Names keep letters and digits from any script;
   other characters become `_`, and the path always carries a server-generated UUID prefix.
+- Bot identity: `avatarEmoji` (≤8 graphemes) and `accentHue` (0-359) drive the avatar and the tinted message card (schema v7 columns `avatar_emoji`, `accent_hue`).
 - Prompts accept `attachments` (the returned objects). Only paths the server issued are accepted.
   The turn sees a trailing "Attached files" list of workspace-relative paths; the transcript keeps
   the person's text plus attachment chips. A retried send reuses the same attachments.

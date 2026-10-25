@@ -6,7 +6,7 @@
  * returned URL; tests drive the app directly through `createGateway`.
  */
 import { randomBytes } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { serve } from '@hono/node-server';
@@ -30,7 +30,38 @@ function resolveUiDir(): string | undefined {
     join(import.meta.dirname, '../../../dist/bot-ui'),
     join(import.meta.dirname, '../../dist/bot-ui'),
   ];
-  return candidates.find((candidate) => existsSync(join(candidate, 'index.html')));
+  const found = candidates.find((candidate) => existsSync(join(candidate, 'index.html')));
+  if (found !== undefined) warnIfStaleBuild(found);
+  return found;
+}
+
+function newestMtime(dir: string): number {
+  let newest = 0;
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) newest = Math.max(newest, newestMtime(path));
+    else newest = Math.max(newest, statSync(path).mtimeMs);
+  }
+  return newest;
+}
+
+/**
+ * Serving a bundle older than its source looks exactly like "my change did
+ * nothing", so say it out loud when running from a checkout.
+ */
+function warnIfStaleBuild(uiDir: string): void {
+  try {
+    const sourceDir = join(import.meta.dirname, '..', 'ui');
+    if (!existsSync(sourceDir)) return;
+    const built = statSync(join(uiDir, 'index.html')).mtimeMs;
+    if (newestMtime(sourceDir) > built) {
+      process.stderr.write(
+        '[bot] The UI bundle is older than src/bot/ui. Run: pnpm --filter scream-code bot:build\n',
+      );
+    }
+  } catch {
+    // A read-only or partial checkout must not block startup.
+  }
 }
 
 /** Gateway DB lives inside the Scream home so it survives reinstalls. */

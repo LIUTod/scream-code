@@ -18,18 +18,39 @@ function nextRandom(state: { value: number }): number {
   return state.value / 0xffffffff;
 }
 
+/** The identity hue this seed falls back to when no explicit hue is configured. */
+export function hueForSeed(seed: string): number {
+  return hashSeed(seed) % 360;
+}
+
 export function AbstractAvatar({
   name,
   seed,
   size = 40,
+  emoji,
+  hue: hueProp,
 }: {
   name: string;
   seed: string;
   size?: number;
+  emoji?: string | null;
+  hue?: number | null;
 }) {
   const hash = hashSeed(seed);
   const state = { value: hash || 1 };
-  const hue = hash % 360;
+  const hue = hueProp ?? hash % 360;
+  if (emoji !== undefined && emoji !== null && emoji.length > 0) {
+    return (
+      <span
+        aria-label={name}
+        className="avatar-emoji inline-flex shrink-0 items-center justify-center rounded-full ring-1 ring-black/5 dark:ring-white/10"
+        role="img"
+        style={{ height: size, width: size, ["--avatar-hue" as string]: String(hue) }}
+      >
+        <span style={{ fontSize: Math.max(10, Math.round(size * 0.5)), lineHeight: 1 }}>{emoji}</span>
+      </span>
+    );
+  }
   const palette = [
     `hsl(${hue} 58% 88%)`,
     `hsl(${(hue + 28) % 360} 52% 58%)`,

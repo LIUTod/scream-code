@@ -12,6 +12,9 @@ import {
 import { useBotConnectionState, useBotEvents } from "@/lib/api/events";
 import { useI18n } from "@/lib/i18n";
 import { rememberActiveBot } from "@/lib/session";
+import { cn } from "@/lib/utils";
+
+const RAIL_COLLAPSED_KEY = "scream.rail.collapsed";
 
 /**
  * The workbench frame: one rail, one pane, and the two global overlays (new Bot, command menu).
@@ -24,6 +27,24 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const { t } = useI18n();
   const navigate = useNavigate();
   const [railOpen, setRailOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(() => {
+    try {
+      return window.localStorage.getItem(RAIL_COLLAPSED_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
+  const toggleCollapsed = () => {
+    setCollapsed((current) => {
+      const next = !current;
+      try {
+        window.localStorage.setItem(RAIL_COLLAPSED_KEY, next ? "1" : "0");
+      } catch {
+        // A blocked storage does not prevent the toggle from working this session.
+      }
+      return next;
+    });
+  };
   const [newBotOpen, setNewBotOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
 
@@ -38,8 +59,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
-  const rail = (
+  const rail = (isCollapsed: boolean, toggle?: () => void) => (
     <BotRail
+      collapsed={isCollapsed}
       onNavigate={() => setRailOpen(false)}
       onNewBot={() => {
         setRailOpen(false);
@@ -49,14 +71,20 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         setRailOpen(false);
         setPaletteOpen(true);
       }}
+      {...(toggle === undefined ? {} : { onToggleCollapsed: toggle })}
     />
   );
 
   return (
     <ShellProvider value={{ openRail: () => setRailOpen(true) }}>
       <div className="flex h-svh overflow-hidden bg-background">
-        <aside className="hidden w-[340px] shrink-0 border-sidebar-border border-r bg-sidebar lg:block">
-          {rail}
+        <aside
+          className={cn(
+            "hidden shrink-0 border-sidebar-border border-r bg-sidebar transition-[width] duration-150 lg:block",
+            collapsed ? "w-[76px]" : "w-[340px]",
+          )}
+        >
+          {rail(collapsed, toggleCollapsed)}
         </aside>
         <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
           {connection.status !== "connected" && connection.status !== "local" ? (
@@ -76,7 +104,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           side="left"
         >
           <SheetTitle className="sr-only">{t("cockpit.openNav")}</SheetTitle>
-          {rail}
+          {rail(false)}
         </SheetContent>
       </Sheet>
 

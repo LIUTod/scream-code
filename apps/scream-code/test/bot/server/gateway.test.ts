@@ -673,3 +673,27 @@ describe('gateway attachments', () => {
     expect(response.status).toBe(400);
   });
 });
+
+describe('gateway identity', () => {
+  it('validates the identity hue and trims the emoji', async () => {
+    const { app } = createApp();
+    const tony = await createBot(app, tempDir(), 'Tony');
+
+    const rejected = await app.request(`/api/bots/${tony.id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ accentHue: 400 }),
+    });
+    expect(rejected.status).toBe(400);
+
+    const accepted = await app.request(`/api/bots/${tony.id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ avatarEmoji: '  🦊  ', accentHue: 210 }),
+    });
+    expect(accepted.status).toBe(200);
+    const saved = (await accepted.json()) as Bot;
+    expect(saved.avatarEmoji).toBe('🦊');
+    expect(saved.accentHue).toBe(210);
+  });
+});

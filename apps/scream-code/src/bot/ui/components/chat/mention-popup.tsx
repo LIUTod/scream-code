@@ -6,6 +6,8 @@ export interface MentionCandidate {
   readonly id: string;
   readonly name: string;
   readonly seed: string;
+  readonly emoji?: string | null;
+  readonly hue?: number | null;
 }
 
 /**
@@ -53,7 +55,13 @@ export function MentionPopup({
           role="option"
           type="button"
         >
-          <AbstractAvatar name={candidate.name} seed={candidate.seed} size={22} />
+          <AbstractAvatar
+            emoji={candidate.emoji}
+            hue={candidate.hue}
+            name={candidate.name}
+            seed={candidate.seed}
+            size={22}
+          />
           <span className="min-w-0 flex-1 truncate">{candidate.name}</span>
         </button>
       ))}

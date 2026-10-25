@@ -224,3 +224,25 @@ body {
 .typing-dot {
   animation: pulse-dot 1.2s ease-in-out infinite;
 }
+
+
+/* Identity surfaces ------------------------------------------------------- */
+
+.avatar-emoji {
+  background: hsl(var(--avatar-hue, 200) 55% 88%);
+}
+
+.dark .avatar-emoji {
+  background: hsl(var(--avatar-hue, 200) 32% 30%);
+}
+
+/* A Bot's messages carry a light card in its identity hue. */
+.bot-card {
+  background: hsl(var(--bot-hue, 200) 52% 97%);
+  border: 1px solid hsl(var(--bot-hue, 200) 36% 92%);
+}
+
+.dark .bot-card {
+  background: hsl(var(--bot-hue, 200) 22% 15%);
+  border-color: hsl(var(--bot-hue, 200) 18% 24%);
+}

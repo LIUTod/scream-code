@@ -67,15 +67,28 @@ When Scream wants to modify files or run commands, an approval panel pops up —
 
 ### Bot Workbench
 
-Run a local multi-Bot workspace alongside the CLI:
+Launch the Bot collaboration gateway with the CLI:
 
 ```bash
-pnpm --filter scream-code bot:server   # UI + HTTP/SSE API
+scream bot                       # gateway on http://127.0.0.1:3210, opens the UI
+scream bot --port 4000           # pick another port
+scream bot --lan                 # share on the local network (access key required)
+scream bot --yolo                # auto-approve tool calls (use with care)
+scream bot --idle-minutes 0      # never close idle sessions (default 30)
+```
+
+Working from a checkout:
+
+```bash
+pnpm --filter scream-code bot:serve    # build the UI, then start the gateway
+pnpm --filter scream-code bot:server   # gateway only
 pnpm --filter scream-code bot:build    # build the UI into dist/bot-ui
 pnpm --filter scream-code bot:dev      # UI dev server with a mock transport
 ```
 
-Chat with one Bot or put several in a room. Members share context, can hand work to each other (one hop by default, capped fan-out), and report approvals / questions to a single inbox. Upload files up to 25 MB — ten per message — and every addressed Bot can open them from its own workspace; room uploads are copied to all members. The HTTP surface, schema (SQLite, migrations at v6) and recovery rules are documented in [`apps/scream-code/src/bot/README.md`](apps/scream-code/src/bot/README.md).
+The gateway serves the bundle in `dist/bot-ui`, not `src/bot/ui` — rebuild after UI edits (the server prints a warning when the bundle is older than its source).
+
+Chat with one Bot or put several in a room. Members share context, can hand work to each other (one hop by default, capped fan-out), and report approvals / questions to a single inbox. Upload files up to 25 MB — ten per message — and every addressed Bot can open them from its own workspace; room uploads are copied to all members. The HTTP surface, schema (SQLite, migrations at v7) and recovery rules are documented in [`apps/scream-code/src/bot/README.md`](apps/scream-code/src/bot/README.md).
 
 ### Slash Commands
 

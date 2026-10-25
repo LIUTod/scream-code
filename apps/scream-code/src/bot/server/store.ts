@@ -62,6 +62,8 @@ export interface BotRecord {
   readonly title: string;
   readonly rolePrompt: string;
   readonly avatarSeed: string;
+  readonly avatarEmoji: string | null;
+  readonly accentHue: number | null;
   readonly workspace: string;
   readonly model: string | null;
   readonly thinking: string | null;
@@ -411,6 +413,8 @@ function rowToBot(row: Record<string, unknown>): BotRecord {
     title: String(row['title']),
     rolePrompt: String(row['role_prompt']),
     avatarSeed: String(row['avatar_seed']),
+    avatarEmoji: toStringOrNull(row['avatar_emoji']),
+    accentHue: row['accent_hue'] === null || row['accent_hue'] === undefined ? null : Number(row['accent_hue']),
     workspace: String(row['workspace']),
     model: toStringOrNull(row['model']),
     thinking: toStringOrNull(row['thinking']),
@@ -667,6 +671,8 @@ export class BotStore {
       permission: patch.permission ?? current.permission,
       toolPolicy: patch.toolPolicy ?? current.toolPolicy,
       paused: patch.paused ?? current.paused,
+      avatarEmoji: patch.avatarEmoji === undefined ? current.avatarEmoji : patch.avatarEmoji,
+      accentHue: patch.accentHue === undefined ? current.accentHue : patch.accentHue,
     };
     const configChanged =
       patch.name !== undefined ||
@@ -681,6 +687,7 @@ export class BotStore {
       .prepare(
         `UPDATE bots SET name = ?, title = ?, role_prompt = ?, model = ?, thinking = ?,
           permission = ?, tool_policy_json = ?, paused = ?, workspace = ?,
+          avatar_emoji = ?, accent_hue = ?,
           config_revision = config_revision + ? WHERE id = ?`,
       )
       .run(
@@ -693,6 +700,8 @@ export class BotStore {
         JSON.stringify(next.toolPolicy),
         next.paused ? 1 : 0,
         next.workspace,
+        next.avatarEmoji,
+        next.accentHue,
         configChanged ? 1 : 0,
         id,
       );

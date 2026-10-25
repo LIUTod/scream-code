@@ -46,6 +46,7 @@
     "dev:prod": "node dist/main.mjs",
     "bot:dev": "vite --config vite.bot.config.ts",
     "bot:server": "tsx src/bot/server/main.ts",
+    "bot:serve": "pnpm bot:build && pnpm bot:server",
     "bot:build": "vite build --config vite.bot.config.ts",
     "clean": "rm -rf dist",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p src/bot/ui/tsconfig.json --noEmit",

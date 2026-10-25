@@ -162,6 +162,11 @@ async function readUpload(context: Context): Promise<{
   return { name: file.name, size: file.size, type: file.type, arrayBuffer: () => file.arrayBuffer() };
 }
 
+/** Emoji are multi-code-point; count what a reader sees, not UTF-16 units. */
+function graphemeCount(value: string): number {
+  return Array.from(new Intl.Segmenter().segment(value)).length;
+}
+
 function readAttachments(value: readonly unknown[] | undefined): readonly Attachment[] {
   if (value === undefined) return [];
   if (!Array.isArray(value)) throw badRequest('attachments must be an array');
@@ -402,6 +407,7 @@ export function createGateway(options: GatewayOptions): Hono {
     const name = requireString(body.name, 'name');
     const workspace = ensureWorkspace(requireString(body.workspace, 'workspace'));
     if (body.toolPolicy !== undefined) assertToolPolicy(body.toolPolicy);
+
     const bot = store.createBot({
       name,
       workspace,
@@ -434,8 +440,20 @@ export function createGateway(options: GatewayOptions): Hono {
     const body = await readJson<UpdateBotInput>(context);
     if (body.name !== undefined) requireString(body.name, 'name');
     if (body.toolPolicy !== undefined) assertToolPolicy(body.toolPolicy);
+    let avatarEmoji = body.avatarEmoji;
+    if (typeof avatarEmoji === 'string') {
+      const trimmed = avatarEmoji.trim();
+      if (graphemeCount(trimmed) > 8) throw badRequest('avatarEmoji is too long');
+      avatarEmoji = trimmed.length === 0 ? null : trimmed;
+    }
+    if (body.accentHue !== undefined && body.accentHue !== null) {
+      if (!Number.isInteger(body.accentHue) || body.accentHue < 0 || body.accentHue > 359) {
+        throw badRequest('accentHue must be an integer between 0 and 359');
+      }
+    }
     const updated = store.updateBot(botId, {
       ...body,
+      ...(avatarEmoji === undefined ? {} : { avatarEmoji }),
       ...(body.permission === undefined
         ? {}
         : { permission: normalizePermission(body.permission) }),

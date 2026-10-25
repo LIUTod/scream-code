@@ -9,13 +9,12 @@ import {
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
+import { shortcutLabel } from "@/lib/platform";
+
 /**
- * ⌘ on Apple platforms, Ctrl everywhere else. The primitive's listener accepts either modifier, so
- * this only decides which of the two to name.
+ * The primitive's listener accepts either modifier; this only decides which one to name.
  */
-const SHORTCUT_LABEL = /Mac|iPhone|iPad|iPod/.test(navigator.userAgent)
-  ? "⌘B"
-  : "Ctrl+B";
+const SHORTCUT_LABEL = shortcutLabel("B");
 
 /**
  * Whether {@link SidebarToggle} will actually draw anything.

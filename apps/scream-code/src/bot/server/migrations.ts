@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 
-export const BOT_SCHEMA_VERSION = 6;
+export const BOT_SCHEMA_VERSION = 7;
 
 function columns(db: DatabaseSync, table: string): Set<string> {
   return new Set(db.prepare(`PRAGMA table_info(${table})`).all().map((row) => String(row['name'])));
@@ -103,6 +103,12 @@ export function migrateBotDatabase(db: DatabaseSync, path: string, baseline: str
          WHERE target_run_id IS NULL AND status IN ('queued', 'running')`,
       ).run('legacy hand-off interrupted during upgrade; confirm before retrying', Date.now());
       db.prepare('INSERT INTO schema_migrations VALUES(5, ?)').run(Date.now());
+    }
+    if (version < 7) {
+      const b7 = columns(db, 'bots');
+      if (!b7.has('avatar_emoji')) db.exec('ALTER TABLE bots ADD COLUMN avatar_emoji TEXT');
+      if (!b7.has('accent_hue')) db.exec('ALTER TABLE bots ADD COLUMN accent_hue INTEGER');
+      db.prepare('INSERT INTO schema_migrations VALUES(7, ?)').run(Date.now());
     }
     if (version < 6) {
       const rc6 = columns(db, 'room_messages');
