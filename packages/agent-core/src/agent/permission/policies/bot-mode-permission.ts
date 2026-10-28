@@ -40,10 +40,6 @@ const REVERSIBLE_TOOLS = new Set([
   'SendSubagentMessage',
   'Agent',
   'WolfPack',
-  // Bot-to-bot handoff is coordination, not mutation: it starts a turn in
-  // another Bot's own thread, where that Bot's policy governs every tool it
-  // then calls.
-  'message_bot',
   'CreateGoal',
   'GetGoal',
   'UpdateGoal',

@@ -38,7 +38,7 @@ export type SessionMetadataPatch = Partial<Omit<SessionMeta, 'agents'>>;
  * The core composes it onto `DEFAULT_AGENT_PROFILES['agent']`: `systemPrompt`
  * is appended to the rendered base prompt, `activeTools` replaces the base
  * tool list. Everything here must survive JSON — it is persisted in session
- * metadata and re-applied on resume so a bot keeps its role across restarts.
+ * metadata and re-applied on resume so a pinned profile survives restarts.
  */
 export interface SessionAgentProfile {
   readonly name?: string | undefined;
@@ -53,7 +53,7 @@ export interface CreateSessionPayload {
   readonly thinking?: string | undefined;
   readonly permission?: PermissionMode | undefined;
   readonly metadata?: JsonObject | undefined;
-  /** Session-scoped agent profile (bot role/tools). Omitted ⇒ default agent profile. */
+  /** Session-scoped agent profile (name / system prompt / tool subset). Omitted ⇒ default agent profile. */
   readonly profile?: SessionAgentProfile | undefined;
   /**
    * Root the session at exactly `workDir` instead of walking up to the nearest

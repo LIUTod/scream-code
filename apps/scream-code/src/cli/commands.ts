@@ -3,7 +3,6 @@ import { Command, Option } from 'commander';
 import { CLI_COMMAND_NAME } from '#/constant/app';
 
 import type { CLIOptions } from './options';
-import type { BotOptions } from './run-bot';
 import { registerExportCommand } from './sub/export';
 
 export type MainCommandHandler = (opts: CLIOptions) => void;
@@ -25,15 +24,12 @@ export type StreamJsonHandler = (opts: {
 
 export type ChannelSetupHandler = () => void;
 
-export type BotHandler = (opts: BotOptions) => void;
-
 export function createProgram(
   version: string,
   onMain: MainCommandHandler,
   onPluginNodeRunner: PluginNodeRunnerHandler = () => {},
   onStreamJson: StreamJsonHandler = () => {},
   onChannelSetup: ChannelSetupHandler = () => {},
-  onBot: BotHandler = () => {},
 ): Command {
   const program = new Command(CLI_COMMAND_NAME)
     .description('下一代智能体的起点')
@@ -147,39 +143,6 @@ export function createProgram(
         effort: subOpts['effort'] as string | undefined,
         maxContextTokens: subOpts['maxContextTokens'] as string | undefined,
         pluginDirs: (subOpts['pluginDir'] as string[]) ?? [],
-      });
-    });
-
-  // `scream bot` - multi-bot workspace backed by the local gateway.
-  program
-    .command('bot')
-    .description('启动 Scream Bot 多 bot 工作台')
-    .option('--port <port>', '端口号', '3210')
-    .option('--model <model>', 'LLM 模型别名')
-    .option('-y, --yolo', '自动批准所有操作', false)
-    .option('--auto', '以自动权限模式启动', false)
-    .option('--no-open', '不自动打开浏览器')
-    .option('--lan', '开启局域网共享（同网设备凭网关密钥访问）', false)
-    .option('--token <key>', '自定义网关访问密钥')
-    .option('--idle-minutes <minutes>', '空闲 N 分钟后关闭会话（0=禁用，默认 30）', '30')
-    .option(
-      '--skills-dir <dir>',
-      '从该目录加载技能（可多次指定）',
-      (value: string, previous: string[]) => [...(previous ?? []), value],
-      [] as string[],
-    )
-    .action((subOpts: Record<string, unknown>) => {
-      const idleMinutes = Number(subOpts['idleMinutes'] ?? '30');
-      onBot({
-        port: parseInt(subOpts['port'] as string, 10) || 3210,
-        model: subOpts['model'] as string | undefined,
-        yolo: (subOpts['yolo'] as boolean) ?? false,
-        auto: (subOpts['auto'] as boolean) ?? false,
-        open: subOpts['open'] !== false,
-        lan: (subOpts['lan'] as boolean) ?? false,
-        token: subOpts['token'] as string | undefined,
-        idleMinutes: Number.isFinite(idleMinutes) && idleMinutes >= 0 ? idleMinutes : 30,
-        skillsDirs: (subOpts['skillsDir'] as string[]) ?? [],
       });
     });
 

@@ -20,11 +20,9 @@ export default defineConfig({
         test: {
           name: 'cli',
           include: ['apps/scream-code/test/**/*.test.ts', 'apps/scream-code/test/**/*.test.tsx'],
-          exclude: ['apps/scream-code/test/bot/ui/**/*.dom.test.tsx'],
           setupFiles: ['apps/scream-code/test/global-setup.ts'],
         },
       },
-      'apps/scream-code/vitest.bot-ui.config.ts',
     ],
     coverage: {
       provider: 'v8',

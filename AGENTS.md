@@ -477,22 +477,6 @@ Unattended permission mode: reversible actions auto-approve; everything else is 
 - **Deny reasons**: policy deny reasons are propagated into the tool error (`permission/index.ts`), so the model can tell "parked for human review" from a permanent failure and does not retry blindly.
 - **Validation**: `PermissionMode` covers `bot` across agent-core (`permission/types.ts`, `config/schema.ts`, `config/toml.ts`, `errors/codes.ts`), node-sdk (`types.ts`, `session.ts` runtime guard), and the TUI selector.
 
-### Bot Workbench (`bot:server` / `bot:dev`)
-
-Local multi-Bot workspace in `apps/scream-code/src/bot` (server / shared / ui). This is the workbench, not the `/bot` permission mode.
-
-- **Launching the gateway**: `scream bot` starts the HTTP/SSE gateway on `127.0.0.1:3210` and opens the UI. Flags: `--port <n>`, `--model`, `-y/--yolo`, `--auto`, `--no-open`, `--lan` (access key required), `--token <key>`, `--idle-minutes <n>` (0 disables). From a checkout use `pnpm --filter scream-code bot:serve` (build + serve), `bot:server`, or `bot:dev`.
-- **Surfaces**: single chat with a Bot, rooms (2+ Bots), an inbox for approvals / questions / hand-offs, settings. Routes: `src/bot/ui/routes/{bot,room,inbox,settings}.tsx`.
-- **Thread scope is a data-layer invariant**: `BotStore.listThreads` defaults to `scope: 'direct'` and excludes every session registered in `room_threads`. Internal paths that need every session (`deleteBot` cleanup, `closeBot` recovery scans) pass `{ scope: 'all' }` explicitly. Do not re-add UI-level filters for this rule.
-- **Rooms are projections**: each member Bot runs its own core session; `room_messages` projects them with `speakerKind` / `via` / `answeredBy` / `source_message_id` and `attachments_json` (schema v7). A relayed answer is written with `via: 'handoff'` by `appendRoomReply`.
-- **Hand-off caps**: depth lives on the thread (`handoffDepth`); reuse requires an exact depth match; a source thread at the cap refuses with `handoff.refused {reason:'depth'}` (an answer, not a crash). Fan-out is capped per run.
-- **Attachments**: upload first (`POST /api/bots/:id/attachments` or `POST /api/rooms/:id/attachments`), then reference the returned object in the prompt. Files land in `<workspace>/.scream-attachments/<uuid>-<name>` (hidden from the files panel); 25 MB per file, 10 per message. Room uploads are copied into every member workspace. Only server-issued paths are accepted; the turn receives a trailing file list while the transcript renders chips.
-- **Mentions**: the room composer inserts `@Name`; `runtime.resolveRoomTargets` matches whole names (longest wins) and falls back to the lead. Pure token logic in `ui/lib/mention.ts`, listbox in `ui/components/chat/mention-popup.tsx`.
-- **Identity**: a Bot may carry `avatarEmoji` (≤8 graphemes) and `accentHue` (0-359). Both reach the avatar (`ui/components/agents/abstract-avatar.tsx`, default hue = `hueForSeed`) and the message card (`.bot-card`, tinted via the `--bot-hue` custom property). Room messages always render an avatar: the speaker falls back to `answeredBy`, then to a neutral "removed member" identity, so history stays attributable after a Bot is deleted.
-- **Read state**: Bot unread counts direct threads only; room unread uses a per-room localStorage watermark (`ui/lib/room-read.ts`), stamped when the room opens.
-- **Serving the UI**: `scream bot` serves the built bundle from `dist/bot-ui`, not `src/bot/ui`. After any UI change run `pnpm --filter scream-code bot:build` (or use `bot:dev` for hot reload, `bot:serve` to build and serve). The server warns at startup when the bundle is older than its source.
-- **Tests**: `test/bot/server/*.test.ts` (gateway / runtime / store / handoff / migrations / recovery), `test/bot/ui/*.dom.test.tsx`, and real-engine suites via `test/bot/fixtures/browser-scenarios.ts --suite basic|handoff|recovery`.
-
 ### Loop Mode (`/loop`)
 
 Stateless retry with an optional `--verify` shell gate. Each iteration re-sends the same prompt; the model does not see prior iteration output. Use only for idempotent tasks with an objective exit condition (wait for CI, health-check polling, retry a flaky build). For tasks that need to adapt based on the previous failure, use `/goal` instead — the model carries working notes across turns.
@@ -1217,17 +1201,6 @@ The welcome logo cycles through a 24-hue colour wheel at 40 ms intervals (25 fps
 - **Rationale**: prevents expensive full-tree re-renders when the transcript is packed with replayed historical components.
 
 ---
-
-## Bot Engineering (apps/scream-code)
-
-- **Scope:** `src/bot/{server,shared,ui}`. See the [Bot operator guide](apps/scream-code/src/bot/README.md) and [UI guide](apps/scream-code/src/bot/ui/README.md). Reuse one SDK harness with multiple full main sessions, one core session per thread; Bots are not specialist subagent types. Keep core execution, permissions, default profiles and MCP management unchanged.
-- **Transport:** components use `BotClient`; `shared/contracts.ts` owns REST/SSE DTOs. `HttpBotClient` is the default. `VITE_BOT_MOCK=1` is an explicit non-production preview, never an offline fallback or release setting.
-- **Execution:** serialize each thread until the actual main turn ends, not until prompt RPC acknowledges scheduling. Other threads may run concurrently. Attribute events by session, main agent, session generation and turn; internal delegation must not finish a main Run.
-- **State:** transcripts use `{ threadId, version, messages }`; reconcile snapshots and live messages by stable identity/version. SSE cursors are process `epoch` plus workbench-global `seq`; resync invalidates every query domain, not just the active Bot.
-- **Safety:** only the existing `bot`/`auto` modes. Workspace selection is not sandboxing, and shared/project memory is not Bot-private memory. Do not imply that attachment fields or tool-policy DTOs add supported uploads or new tool grants.
-- **Lifecycle:** preserve seeded/replacement conversations, quick deletion and the last-Bot guard. Finish asynchronous deletion against its original IDs; clear its cache/selection without redirecting a different active thread or treating a post-DELETE refresh failure as deletion failure.
-- **Persistence:** use versioned transactional SQLite migrations with a SQLite-consistent pre-upgrade backup. Automatically resume only complete, provably undispatched queued inputs. Unknown execution becomes `interrupted` and blocks that thread until an explicit recovery decision; never replay uncertain side effects or mark interruption as success.
-- **Tests and provenance:** follow the root Vitest projects and the guides' commands; keep browser aliases/DOM setup separate from CLI tests. Preserve vendored copyright/MIT notices while keeping user-facing product text Scream. Document only implemented, verified behavior.
 
 ## General Coding Requirements
 

@@ -53,7 +53,6 @@ When Scream wants to modify files or run commands, an approval panel pops up —
 - **Wolfpack** — unlimited parallel sub-agents (coder / explore / plan / verify / reviewer / oracle / worker / writer / designer).
 - **Subagent Collaboration** — delegate to specialist sub-agents and stay in control: they **ask the lead agent for guidance mid-task instead of guessing when blocked**, request a handoff when a different specialist fits, take mid-task redirects or follow-up notes, return structured JSON when asked, and can be confined to a safe mode (read-only / edit-only / commands-allowed) so they never overstep your limits.
 - **Bot Mode (`/bot`)** — unattended execution: reversible work (reads, in-workspace edits, read-only commands) runs freely, while irreversible actions (push / publish / delete / sensitive files / unclassified operations) are automatically denied and queued for your review — with the reason fed back to the model so it stops retrying.
-- **Bot Workbench** — a local multi-Bot workspace: single chat per Bot, rooms with shared context, Bot-to-Bot hand-offs with depth and fan-out caps, approvals and questions in one inbox, `@` mentions, and file attachments (25 MB each, 10 per message) — all streamed over SSE.
 - **Persistent Memory** — structured pain-point memory with FTS5 full-text + tag + vector retrieval, shared across sessions.
 - **Local Knowledge Graph** — SAG-based visual knowledge base for multi-hop reasoning; import your own docs anytime.
 - **RLM Mode** — persistent Python workspace for long-running tasks; `rlm()` spawns recursive sub-agents straight from code, always through the `coder` profile, unlimited by default and cap-limited per session with `/rlm-max-depth`. Every `rlm()` call is a real sub-agent run — it consumes tokens like any other delegation.
@@ -64,31 +63,6 @@ When Scream wants to modify files or run commands, an approval panel pops up —
 - **MCP / Skills / 130+ providers** — all DIY-configurable; ships with browser automation and macOS desktop automation.
 - **Self-Evolving Plugins** — a built-in `ManagePlugin` tool lets the agent find, make, and install add-on skills/MCP servers itself and hot-apply them to the running session: nothing executes until an approved activate, a circuit breaker reclaims a plugin after repeated failures, immune memory warns before reinstalling a source that already broke, and upgrades keep a rollback-ready backup.
 - **Remote Control** — drive Scream from WeChat, Feishu, Slack, DingTalk, QQ, Telegram, Discord via cc-connect.
-
-### Bot Workbench
-
-Launch the Bot collaboration gateway with the CLI:
-
-```bash
-scream bot                       # gateway on http://127.0.0.1:3210, opens the UI
-scream bot --port 4000           # pick another port
-scream bot --lan                 # share on the local network (access key required)
-scream bot --yolo                # auto-approve tool calls (use with care)
-scream bot --idle-minutes 0      # never close idle sessions (default 30)
-```
-
-Working from a checkout:
-
-```bash
-pnpm --filter scream-code bot:serve    # build the UI, then start the gateway
-pnpm --filter scream-code bot:server   # gateway only
-pnpm --filter scream-code bot:build    # build the UI into dist/bot-ui
-pnpm --filter scream-code bot:dev      # UI dev server with a mock transport
-```
-
-The gateway serves the bundle in `dist/bot-ui`, not `src/bot/ui` — rebuild after UI edits (the server prints a warning when the bundle is older than its source).
-
-Chat with one Bot or put several in a room. Members share context, can hand work to each other (one hop by default, capped fan-out), and report approvals / questions to a single inbox. Upload files up to 25 MB — ten per message — and every addressed Bot can open them from its own workspace; room uploads are copied to all members. The HTTP surface, schema (SQLite, migrations at v7) and recovery rules are documented in [`apps/scream-code/src/bot/README.md`](apps/scream-code/src/bot/README.md).
 
 ### Slash Commands
 

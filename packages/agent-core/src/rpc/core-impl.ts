@@ -318,7 +318,7 @@ export class ScreamCore implements PromisableMethods<CoreAPI> {
   async createSession(input: CreateSessionPayload): Promise<SessionSummary> {
     const options = input;
     const workDir = requiredWorkDir('createSession', options.workDir, options.exactWorkDir);
-    // A pinned bot profile is composed once and handed to createMain; the
+    // A pinned profile is composed once and handed to createMain; the
     // serializable half is persisted below so resume() can rebuild it. Absent
     // profile ⇒ undefined ⇒ createMain applies the built-in agent profile,
     // byte-for-byte the pre-profile behavior.
@@ -381,7 +381,7 @@ export class ScreamCore implements PromisableMethods<CoreAPI> {
           : {}),
         custom: options.metadata === undefined ? {} : { ...options.metadata },
       };
-      // Persisted before the first writeMetadata below, so a bot session's
+      // Persisted before the first writeMetadata below, so a pinned session's
       // role/tools survive process restarts (resume() re-applies them).
       if (pinnedProfile !== undefined) {
         session.metadata.custom[SESSION_AGENT_PROFILE_METADATA_KEY] = pinnedProfile;

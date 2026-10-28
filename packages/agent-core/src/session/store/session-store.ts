@@ -29,8 +29,9 @@ export interface CreateSessionRecordInput {
   readonly workDir: string;
   /**
    * Keep `workDir` exactly as given instead of walking up to the nearest
-   * `.git` / `package.json` ancestor. Used by bot workspaces so a bot rooted
-   * at `<repo>/bots/research` does not silently operate on `<repo>`.
+   * `.git` / `package.json` ancestor. Used by pinned-profile sessions so a
+   * session rooted at `<repo>/agents/research` does not silently operate on
+   * `<repo>`.
    */
   readonly exactWorkDir?: boolean | undefined;
 }

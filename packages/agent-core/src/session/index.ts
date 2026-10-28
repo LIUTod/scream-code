@@ -130,8 +130,8 @@ export function readSessionAgentProfile(value: unknown): SessionAgentProfile | u
 /**
  * Composes a serializable session profile onto the built-in main-agent
  * profile: the base renderer runs first and the role text is appended after
- * it, so a bot keeps the built-in operating instructions and adds its own
- * role on top instead of replacing them.
+ * it, so a pinned profile keeps the built-in operating instructions and adds
+ * its own role on top instead of replacing them.
  */
 export function composeSessionAgentProfile(
   profile: SessionAgentProfile,
@@ -359,10 +359,11 @@ export class Session {
     // replay a non-empty system prompt and never enter this branch.
     const main = this.agents.get('main');
     if (main !== undefined) {
-      // Bot sessions pin their role/tools in session metadata. That serialized
-      // profile is the source of truth on resume: the wire replay restores the
-      // prompt captured at create time, but a profile edited between runs must
-      // win, and a session resumed with an empty wire still needs the bot role.
+      // Pinned sessions store their role/tools in session metadata. That
+      // serialized profile is the source of truth on resume: the wire replay
+      // restores the prompt captured at create time, but a profile edited
+      // between runs must win, and a session resumed with an empty wire still
+      // needs the pinned role.
       const pinned = readSessionAgentProfile(
         this.metadata.custom?.[SESSION_AGENT_PROFILE_METADATA_KEY],
       );

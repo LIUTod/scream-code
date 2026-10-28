@@ -7,6 +7,5 @@
       "@/*": ["./src/*"]
     }
   },
-  "include": ["src", "test", "../../packages/agent-core/src/prompt-modules.d.ts"],
-  "exclude": ["src/bot/ui", "test/bot/ui/**/*.dom.test.tsx"]
+  "include": ["src", "test", "../../packages/agent-core/src/prompt-modules.d.ts"]
 }

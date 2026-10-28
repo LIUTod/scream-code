@@ -203,7 +203,6 @@
     "coverage/",
     "node_modules/",
     "apps/*/scripts/",
-    "apps/scream-code/src/bot/ui/**",
     "*.generated.ts",
     "**/markit/**",
     "packages/knowledge/src/ingest.ts"

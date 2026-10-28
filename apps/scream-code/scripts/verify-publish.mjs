@@ -48,15 +48,6 @@ if (!existsSync(distDir)) {
   process.exit(1);
 }
 
-// Step 2b — the published package must carry the Bot UI it serves.
-if (!existsSync(join(distDir, 'bot-ui', 'index.html'))) {
-  console.error(
-    '[verify-publish] FAIL: dist/bot-ui/index.html missing — run `pnpm run build` (it includes the Bot UI build) before publishing.',
-  );
-  process.exit(1);
-}
-console.log('[verify-publish] Bot UI bundle found in dist/bot-ui.');
-
 // Step 3 — scan all .mjs files for SCREAM_BUILD_INFO.version injection.
 //    `optionalBuildString("<version>")` is the call site in build-info.ts:20
 //    that receives `__SCREAM_CODE_VERSION__` from tsdown's `define`.

@@ -19,11 +19,9 @@ export default defineConfig({
         test: {
           name: 'cli',
           include: ['test/**/*.test.ts', 'test/**/*.test.tsx'],
-          exclude: ['test/bot/ui/**/*.dom.test.tsx'],
           setupFiles: ['test/global-setup.ts'],
         },
       },
-      './vitest.bot-ui.config.ts',
     ],
   },
 });
