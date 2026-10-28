@@ -1,7 +1,7 @@
 /**
  * Shared breathing clock — single source of truth for the breathing
  * animation frame across all chrome components (welcome panel, editor
- * border, loading splash).
+ * border).
  *
  * Before this module each component ran its own `setInterval` + local
  * frame counter. Because they started at different times (welcome at

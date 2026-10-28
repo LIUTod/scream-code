@@ -61,6 +61,7 @@ function createMockHost(): SessionEventHost {
   const state = {
     appState: {
       sessionId: 'ses-test',
+      model: 'gpt-test',
       streamingPhase: 'idle',
       streamingStartTime: 0,
       isCompacting: false,
@@ -788,6 +789,13 @@ describe('SessionEventHandler', () => {
       handler.handleEvent(candidateEvent('build-flow'), vi.fn());
       handler.handleEvent(candidateEvent('build-flow'), vi.fn());
       expect(prompt).toHaveBeenCalledTimes(1);
+    });
+
+    it('is a no-op when the model was detached (provider removed)', () => {
+      const { handler, prompt, host } = makeHandlerWithSession();
+      host.state.appState.model = '';
+      handler.handleEvent(candidateEvent('detached-guard'), vi.fn());
+      expect(prompt).not.toHaveBeenCalled();
     });
 
     it('is a no-op when there is no active session', () => {

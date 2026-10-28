@@ -175,7 +175,11 @@ export class InputController {
 
   async sendNormalUserInput(text: string): Promise<void> {
     if (this.host.state.appState.model.trim().length === 0) {
-      this.host.showError(getLlmNotSetMessage());
+      this.host.showError(
+        this.host.session === undefined
+          ? getLlmNotSetMessage()
+          : t('constant.model_detached'),
+      );
       return;
     }
     const session = this.host.session;
@@ -391,6 +395,19 @@ export class InputController {
   }
 
   private sendMessageInternal(session: Session, input: string, options?: SendMessageOptions): void {
+    // Single exit guard: once the model is detached (the provider it pointed
+    // at was removed), no path may put a request on the wire — including
+    // queued auto-sends and `/goal` continuations, which bypass
+    // sendNormalUserInput. Checked before appending the transcript entry so a
+    // message that can never be delivered is not recorded as user history.
+    if (this.host.state.appState.model.trim().length === 0) {
+      this.host.showError(
+        this.host.session === undefined
+          ? getLlmNotSetMessage()
+          : t('constant.model_detached'),
+      );
+      return;
+    }
     const imageAttachmentIds =
       options?.imageAttachmentIds !== undefined && options.imageAttachmentIds.length > 0
         ? options.imageAttachmentIds
@@ -414,6 +431,18 @@ export class InputController {
   }
 
   sendQueuedMessage(session: Session, item: QueuedMessage): void {
+    // The queue consumer dequeues before calling here, so the generic exit
+    // guard in sendMessageInternal would silently drop the message. Put it back
+    // at the head instead: the text stays visible in the queue pane until the
+    // next turn ends (or the user pulls it back with Esc), and it is never
+    // lost. It is deliberately not auto-sent when a model is picked again —
+    // an old queued message firing after a re-config would be a surprise.
+    if (this.host.state.appState.model.trim().length === 0) {
+      this.host.state.queuedMessages.unshift(item);
+      this.host.updateQueueDisplay();
+      this.host.showError(t('constant.model_detached'));
+      return;
+    }
     this.host.harness.interactiveAgentId = item.agentId ?? MAIN_AGENT_ID;
     this.sendMessageInternal(session, item.text, {
       parts: item.parts,

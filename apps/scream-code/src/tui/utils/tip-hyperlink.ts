@@ -22,23 +22,23 @@ export function composeTipLabel(raw: string, tip: SessionTip, linkColor: string)
   return raw.replace(domain, link);
 }
 
-/** Probability that a rotation lands on the offer tip (the first ad with a
- *  url — the product's own placement). Repeats are allowed on this branch,
- *  which is what keeps the on-screen share at the full 80%: the line simply
- *  stays put across rotations while the roll keeps favoring it. The 20%
- *  remainder picks uniformly from every tip except the currently visible one,
- *  so non-ad rotations always change the line. */
-export const OFFER_TIP_PROBABILITY = 0.8;
+/** Index of the boot-default tip: the first ad that carries a url (the
+ *  product's own placement). Falls back to `0` when no such tip exists. */
+export function findOfferTipIndex(tips: readonly SessionTip[]): number {
+  const index = tips.findIndex((tip) => tip.isAd && tip.url !== undefined);
+  return index === -1 ? 0 : index;
+}
 
 /**
- * Weighted rotation pick: `OFFER_TIP_PROBABILITY` of the rolls select the
- * offer tip (regardless of what is currently shown — a re-pick keeps the ad
- * line up), everything else picks uniformly excluding the current tip.
+ * Rotation pick. `current === undefined` is the boot call and returns the
+ * offer tip, so a fresh screen opens on the ad line. Every later pick is
+ * uniform across the whole pool — ads included — excluding the tip currently
+ * on screen, so consecutive rotations always change the line.
  */
 export function pickTipIndex(tips: readonly SessionTip[], current: number | undefined): number {
-  if (tips.length <= 1) return Math.max(0, current ?? 0);
-  const offerIndex = tips.findIndex((tip) => tip.isAd && tip.url !== undefined);
-  if (offerIndex !== -1 && Math.random() < OFFER_TIP_PROBABILITY) return offerIndex;
+  if (tips.length === 0) return 0;
+  if (current === undefined) return findOfferTipIndex(tips);
+  if (tips.length === 1) return 0;
   let next: number;
   do {
     next = Math.floor(Math.random() * tips.length);

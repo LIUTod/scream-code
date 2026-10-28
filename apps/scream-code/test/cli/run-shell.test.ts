@@ -41,7 +41,6 @@ const mocks = vi.hoisted(() => {
     screamTuiConstructor: vi.fn(),
     tuiStart: vi.fn(),
     tuiGetStartupMcpMs: vi.fn(async () => 0),
-    runLoadingAnimation: vi.fn((_theme: string) => Promise.resolve()),
     tuiGetCurrentSessionId: vi.fn(() => ''),
     tuiHasSessionContent: vi.fn(() => false),
     createScreamDeviceId: vi.fn<CreateScreamDeviceId>(() => 'device-1'),
@@ -92,7 +91,6 @@ vi.mock('@scream-code/config', async () => {
   };
 });
 
-
 vi.mock('../../src/tui/config', () => ({
   loadTuiConfig: mocks.loadTuiConfig,
   TuiConfigParseError: mocks.TuiConfigParseError,
@@ -124,10 +122,6 @@ vi.mock('node:child_process', async (importOriginal) => {
     execSync: mocks.execSync,
   };
 });
-
-vi.mock('../../src/tui/components/chrome/loading', () => ({
-  runLoadingAnimation: mocks.runLoadingAnimation,
-}));
 
 vi.mock('../../src/cli/update/refresh', () => ({
   refreshUpdateCache: mocks.refreshUpdateCache,
@@ -189,17 +183,7 @@ describe('runShell', () => {
     );
     expect(execSync).toHaveBeenCalledWith('stty -ixon', { stdio: 'ignore' });
     expect(mocks.refreshUpdateCache).toHaveBeenCalledOnce();
-    expect(mocks.runLoadingAnimation).toHaveBeenCalledOnce();
-    // The parsed config is handed to the splash so it does not re-read tui.toml.
-    expect(mocks.runLoadingAnimation).toHaveBeenCalledWith(
-      'dark',
-      expect.objectContaining({ theme: 'dark' }),
-    );
-    // The session listing is prefetched before the splash blocks startup.
     expect(mocks.harnessListSessions).toHaveBeenCalledWith({ workDir: process.cwd() });
-    expect(mocks.harnessListSessions.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.runLoadingAnimation.mock.invocationCallOrder[0]!,
-    );
     expect(mocks.screamTuiConstructor).toHaveBeenCalledTimes(1);
 
     const [, harness, startupInput] = mocks.screamTuiConstructor.mock.calls[0]!;
@@ -275,9 +259,9 @@ describe('runShell', () => {
           session: undefined,
           continue: false,
           yolo: false,
-        auto: false,
+          auto: false,
           plan: false,
-        wolfpack: false,
+          wolfpack: false,
           model: undefined,
           outputFormat: undefined,
           prompt: undefined,
@@ -309,9 +293,9 @@ describe('runShell', () => {
           session: undefined,
           continue: false,
           yolo: false,
-        auto: false,
+          auto: false,
           plan: false,
-        wolfpack: false,
+          wolfpack: false,
           model: undefined,
           outputFormat: undefined,
           prompt: undefined,

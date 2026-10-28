@@ -1498,6 +1498,10 @@ export class SessionEventHandler {
     name: string,
     purpose: string,
   ): void {
+    // Fire-and-forget prompt would fail with CONFIG_INVALID once the model is
+    // detached (provider removed); stay silent instead of surfacing a
+    // confusing "ask failed" hint for a feature the user did not initiate.
+    if (this.host.state.appState.model.trim().length === 0) return;
     const purposeText = purpose ? `（${purpose}）` : '';
     const request =
       `检测到可复用过程「${name}」${purposeText}。` +

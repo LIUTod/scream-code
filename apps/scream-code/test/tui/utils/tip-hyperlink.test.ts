@@ -6,7 +6,7 @@ vi.hoisted(() => {
   process.env['FORCE_COLOR'] = '3';
 });
 
-import { composeTipLabel, OFFER_TIP_PROBABILITY, pickTipIndex } from '#/tui/utils/tip-hyperlink';
+import { composeTipLabel, findOfferTipIndex, pickTipIndex } from '#/tui/utils/tip-hyperlink';
 import { SESSION_TIPS } from '#/tui/constant/scream-tui';
 
 /** Strips OSC 8 wrappers and SGR codes down to the visible text. */
@@ -49,34 +49,40 @@ describe('composeTipLabel', () => {
   });
 });
 
-describe('pickTipIndex（广告加权轮播）', () => {
+describe('pickTipIndex（首屏广告 + 全员等概率轮换）', () => {
   const tips = SESSION_TIPS; // 16 条；offer = index 0
   const OFFER = 0;
 
-  it('roll 在 0.8 内 → 恒选 offer（无论当前条是什么，允许重复保持广告位）', () => {
-    for (const value of [0.0, 0.5, 0.79, 0.7999]) {
-      for (const current of [3, OFFER, tips.length - 1]) {
-        vi.spyOn(Math, 'random').mockReturnValueOnce(value).mockReturnValue(0.5);
-        expect(pickTipIndex(tips, current)).toBe(OFFER);
-        vi.restoreAllMocks();
-      }
-    }
+  it('首屏（current 未定义）固定返回 offer 广告位，且不受随机数影响', () => {
+    expect(pickTipIndex(tips, undefined)).toBe(OFFER);
+    expect(findOfferTipIndex(tips)).toBe(OFFER);
+    vi.spyOn(Math, 'random').mockReturnValue(0.99);
+    expect(pickTipIndex(tips, undefined)).toBe(OFFER);
+    vi.restoreAllMocks();
   });
 
-  it('roll ≥ 0.8 → 均匀池（可含另一条 ad，但永不等于当前条）', () => {
-    for (const current of [5, OFFER, tips.length - 1]) {
-      const uniformIndex = (current + 1) % tips.length;
-      vi.spyOn(Math, 'random')
-        .mockReturnValueOnce(0.8)
-        .mockReturnValueOnce((uniformIndex + 0.5) / tips.length);
-      expect(pickTipIndex(tips, current)).toBe(uniformIndex);
+  it('后续轮换覆盖全部 16 条（含广告），每条都能被选中', () => {
+    for (let target = 0; target < tips.length; target++) {
+      const current = (target + 1) % tips.length;
+      vi.spyOn(Math, 'random').mockReturnValue((target + 0.5) / tips.length);
+      expect(pickTipIndex(tips, current)).toBe(target);
       vi.restoreAllMocks();
     }
   });
 
-  it('统计面：大量轮换中 offer 占比 ≈ 80%', () => {
-    // 用固定种子的 LCG 代替真随机：断言仍然检验权重行为，但结果完全可复现，
-    // 不会像 ±3σ 的随机采样那样在多次全量运行中偶发越界（flake）。
+  it('永不返回当前条：命中当前条时重新投掷', () => {
+    for (let current = 0; current < tips.length; current++) {
+      const expected = (current + 1) % tips.length;
+      vi.spyOn(Math, 'random')
+        .mockReturnValueOnce((current + 0.5) / tips.length)
+        .mockReturnValue((expected + 0.5) / tips.length);
+      expect(pickTipIndex(tips, current)).toBe(expected);
+      vi.restoreAllMocks();
+    }
+  });
+
+  it('统计面：16000 轮后各条出现率接近 1/16', () => {
+    // 固定种子 LCG：断言检验分布，但结果可复现，避免随机采样 flake。
     let seed = 123456789;
     const lcg = (): number => {
       seed = (1664525 * seed + 1013904223) % 4294967296;
@@ -84,24 +90,26 @@ describe('pickTipIndex（广告加权轮播）', () => {
     };
     const spy = vi.spyOn(Math, 'random').mockImplementation(lcg);
     try {
-      const rounds = 4000;
-      let offerHits = 0;
+      const rounds = 16000;
+      const hits = tips.map(() => 0);
       let current: number | undefined = undefined;
       for (let i = 0; i < rounds; i++) {
-        const next = pickTipIndex(tips, current);
-        if (next === OFFER) offerHits += 1;
-        current = next;
+        current = pickTipIndex(tips, current);
+        hits[current] = (hits[current] ?? 0) + 1;
       }
-      const rate = offerHits / rounds;
-      expect(rate).toBeGreaterThan(0.78);
-      expect(rate).toBeLessThan(0.82);
+      const expected = rounds / tips.length;
+      for (const count of hits) {
+        expect(count).toBeGreaterThan(expected * 0.8);
+        expect(count).toBeLessThan(expected * 1.2);
+      }
     } finally {
       spy.mockRestore();
     }
   });
 
-  it('单条池防死循环：返回唯一索引', () => {
-    expect(pickTipIndex([{ i18nKey: 'x', isAd: false }], 0)).toBe(0);
+  it('边界：空池 / 单条池', () => {
+    expect(pickTipIndex([], undefined)).toBe(0);
     expect(pickTipIndex([{ i18nKey: 'x', isAd: false }], undefined)).toBe(0);
+    expect(pickTipIndex([{ i18nKey: 'x', isAd: false }], 0)).toBe(0);
   });
 });

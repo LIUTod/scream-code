@@ -310,7 +310,7 @@ describe('SessionManager.init — prefetched session listing (prune candidates o
     ['a user prompt landed', { lastPrompt: 'hello' }],
     ['the session was renamed', { title: 'Real Work' }],
     ['the session was touched again', { updatedAt: Date.now() - 1_000 }],
-  ])('keeps a stale-looking candidate when %s during the splash', async (_label, freshPatch) => {
+  ])('keeps a stale-looking candidate when %s before startup', async (_label, freshPatch) => {
     const created = makeMockSession({ id: 'ses-new' });
     const listSessions = vi.fn(async (input: { workDir?: string; sessionId?: string } = {}) =>
       input.sessionId === undefined
@@ -426,7 +426,7 @@ describe('SessionManager.init — prefetched session listing (prune candidates o
     expect(listSessions).toHaveBeenLastCalledWith({ sessionId: 'ses-r', workDir: WORK_DIR });
   });
 
-  it('--session rejects a session that vanished during the splash even though the snapshot still has it', async () => {
+  it('--session rejects a session that vanished before startup even though the snapshot still has it', async () => {
     const resumed = makeMockSession({ id: 'ses-r' });
     // The snapshot (call 1) still lists the session; the live id lookup (call
     // 2) reports it gone — the resume decision must follow the live answer.
@@ -691,6 +691,47 @@ describe('SessionManager.syncRuntimeState', () => {
   it('kicks off the provider balance refresh for the synced model', async () => {
     await syncWith({ model: 'gpt-balance' });
     expect(refreshProviderBalance).toHaveBeenCalledWith('gpt-balance', expect.any(Function));
+  });
+
+  it('does not restore a model alias that was detached (provider removed)', async () => {
+    const session = makeMockSession({
+      id: 'ses-s',
+      overrides: {
+        getStatus: vi.fn(async () => ({
+          model: 'deleted-alias', thinkingLevel: 'low',
+          planMode: false, wolfpackMode: false, rlmEnabled: false,
+          contextTokens: 5, maxContextTokens: 10, contextUsage: 0.5,
+        })),
+        getGoal: vi.fn(async () => ({ goal: null })),
+      },
+    });
+    const { manager, host } = makeHost({
+      session,
+      appState: { model: '', detachedModel: 'deleted-alias' },
+    });
+
+    await manager.syncRuntimeState(session as never);
+
+    expect(lastPatch(host).model).toBe('');
+  });
+
+  it('syncs any alias that was not detached, so a CLI --model override survives', async () => {
+    const session = makeMockSession({
+      id: 'ses-s',
+      overrides: {
+        getStatus: vi.fn(async () => ({
+          model: 'scream-code/k2.5', thinkingLevel: 'low',
+          planMode: false, wolfpackMode: false, rlmEnabled: false,
+          contextTokens: 5, maxContextTokens: 10, contextUsage: 0.5,
+        })),
+        getGoal: vi.fn(async () => ({ goal: null })),
+      },
+    });
+    const { manager, host } = makeHost({ session, appState: { detachedModel: 'old-alias' } });
+
+    await manager.syncRuntimeState(session as never);
+
+    expect(lastPatch(host).model).toBe('scream-code/k2.5');
   });
 });
 

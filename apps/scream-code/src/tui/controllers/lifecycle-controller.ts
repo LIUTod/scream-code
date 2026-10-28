@@ -732,9 +732,9 @@ export class LifecycleController {
     return this.currentTipIndex;
   }
 
-  /** Start the weighted tip rotation timer: 80% of rotations land on the
-   *  offer tip (see tui/utils/tip-hyperlink.ts), the rest spread uniformly
-   *  and never repeat the line currently on screen. */
+  /** Start the tip rotation timer: the first frame shows the offer ad, then
+   *  every rotation picks uniformly from the whole pool (ads included) and
+   *  never repeats the line currently on screen. */
   private startTipRotation(): void {
     if (this.tipRotationTimer !== undefined) return;
     this.tipRotationTimer = setInterval(() => {

@@ -241,11 +241,11 @@ describe('InputController.steerMessage decision matrix', () => {
 });
 
 describe('InputController.sendNormalUserInput + media capabilities', () => {
-  it('rejects when no model is configured', () => {
+  it('rejects with the detached-model hint when a session is alive but the model was removed', () => {
     const session = makeMockSession();
     const { controller, host } = makeController({ session, appState: { model: '  ' } });
     void controller.sendNormalUserInput('hi');
-    expect(host.showError).toHaveBeenCalledWith(getLlmNotSetMessage());
+    expect(host.showError).toHaveBeenCalledWith(t('constant.model_detached'));
     expect(session.prompt).not.toHaveBeenCalled();
   });
 
@@ -502,5 +502,43 @@ describe('InputController queue display + persisted history', () => {
     vi.mocked(loadInputHistory).mockRejectedValueOnce(new Error('no file'));
     const { controller } = makeController();
     await expect(controller.loadPersistedInputHistory()).resolves.toBeUndefined();
+  });
+});
+
+describe('模型解绑（删除当前服务商后）的发送守卫', () => {
+  it('普通发送：有会话但模型为空 → 拦截并给出解绑文案', async () => {
+    const session = makeMockSession();
+    const { controller, host } = makeController({ appState: { model: '' }, session });
+
+    await controller.sendNormalUserInput('hello');
+
+    expect(host.showError).toHaveBeenCalledWith(t('constant.model_detached'));
+    expect(session.prompt).not.toHaveBeenCalled();
+  });
+
+  it('队列自动发送：模型解绑时把消息放回队首，不丢失', () => {
+    const session = makeMockSession();
+    const { controller, host, state, extras } = makeController({ appState: { model: '' }, session });
+    const item = { text: 'queued', agentId: undefined };
+
+    controller.sendQueuedMessage(session as never, item as never);
+
+    expect(session.prompt).not.toHaveBeenCalled();
+    expect(extras.appendTranscriptEntry).not.toHaveBeenCalled();
+    expect(state.queuedMessages).toEqual([item]);
+    expect(host.showError).toHaveBeenCalledWith(t('constant.model_detached'));
+  });
+
+  it('模型正常时队列自动发送仍然放行（守卫不误伤）', () => {
+    const session = makeMockSession();
+    const { controller, extras } = makeController({ appState: { model: 'gpt-test' }, session });
+
+    controller.sendQueuedMessage(session as never, {
+      text: 'queued',
+      agentId: undefined,
+    } as never);
+
+    expect(session.prompt).toHaveBeenCalledWith('queued');
+    expect(extras.appendTranscriptEntry).toHaveBeenCalledOnce();
   });
 });

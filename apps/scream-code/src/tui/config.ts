@@ -39,8 +39,6 @@ export type TuiLikePreferences = z.infer<typeof TuiLikePreferencesSchema>;
 export const TuiConfigFileSchema = z.object({
   theme: TuiThemeSchema.optional(),
   language: z.enum(['zh', 'en']).optional(),
-  /** Auto-enter the welcome page after the loading splash finishes. */
-  autoStart: z.boolean().optional(),
   editor: z
     .object({
       command: z.string().optional(),
@@ -75,7 +73,6 @@ export const TuiConfigFileSchema = z.object({
 export const TuiConfigSchema = z.object({
   theme: TuiThemeSchema,
   language: z.enum(['zh', 'en']),
-  autoStart: z.boolean(),
   editorCommand: z.string().nullable(),
   notifications: NotificationsConfigSchema,
   like: TuiLikePreferencesSchema,
@@ -98,7 +95,6 @@ export const DEFAULT_NOTIFICATIONS_CONFIG: NotificationsConfig = {
 export const DEFAULT_TUI_CONFIG: TuiConfig = TuiConfigSchema.parse({
   theme: 'auto',
   language: getLocale(),
-  autoStart: false,
   editorCommand: null,
   notifications: DEFAULT_NOTIFICATIONS_CONFIG,
   like: {},
@@ -165,7 +161,6 @@ export function normalizeTuiConfig(config: TuiConfigFileShape): TuiConfig {
   return TuiConfigSchema.parse({
     theme: config.theme ?? DEFAULT_TUI_CONFIG.theme,
     language: config.language ?? DEFAULT_TUI_CONFIG.language,
-    autoStart: config.autoStart ?? DEFAULT_TUI_CONFIG.autoStart,
     editorCommand: command === undefined || command.length === 0 ? null : command,
     notifications: {
       enabled: config.notifications?.enabled ?? DEFAULT_NOTIFICATIONS_CONFIG.enabled,
@@ -218,7 +213,6 @@ export function renderTuiConfig(config: TuiConfig): string {
 
 theme = "${config.theme}" # "auto" | "dark" | "light"
 language = "${config.language}" # "zh" | "en"
-autoStart = ${String(config.autoStart)} # true = auto-enter welcome after loading
 
 [editor]
 command = "${escapeTomlBasicString(config.editorCommand ?? '')}" # Empty uses $VISUAL / $EDITOR

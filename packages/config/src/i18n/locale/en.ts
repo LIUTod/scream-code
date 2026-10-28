@@ -170,7 +170,6 @@ export const en: Record<string, string> = {
   'sidebar.goal_judge_judging': 'judging',
   'sidebar.goal_judge_adjudicated': 'adjudicated',
 
-
   'input.replay_blocked': 'Cannot send input while session history is replaying.',
   'input.send_failed': 'Send failed: {message}',
   'input.guide_failed': 'Guide failed: {message}',
@@ -190,15 +189,6 @@ export const en: Record<string, string> = {
   'welcome.like_active': 'like active',
   'welcome.like_inactive': 'like not loaded',
   'welcome.help_hint': '/help for help',
-
-  // ─── Loading ──────────────────
-  'loading.ai': 'AI is loading...',
-  'loading.waking': 'Waking core...',
-  'loading.press_enter': 'Press ENTER to wake core',
-  'loading.quit_hint': 'Hold Ctrl+C to quit Scream Code',
-  'loading.auto_start_hint': 'Ctrl+E to toggle auto-start',
-  'loading.auto_start_on': 'Ctrl+E to toggle auto-start (ON)',
-  'loading.auto_start_off': 'Ctrl+E to toggle auto-start (OFF)',
 
   // ─── Language ─────────────────
   'language.picker_title': 'Language / 语言',
@@ -435,6 +425,8 @@ export const en: Record<string, string> = {
   'auth.catalog_fetch_failed': 'Failed to fetch the remote model catalog: {error}. Check your network (the catalog host may be unreachable in your region) and retry, or use /config diy to set up a provider manually.',
   'auth.no_providers': 'No model providers configured.',
   'auth.deleted': 'Deleted provider: {name}',
+  'auth.deleted_current': 'Deleted provider: {name}. The current session is kept — pick a model to continue (/config or /model).',
+  'auth.logout_busy': 'Cannot remove a provider while a turn is running — press Esc or Ctrl-C first.',
   'auth.input_api_url': 'Enter provider API URL',
   'auth.api_url_hint': 'e.g. https://api.example.com (paste supported)',
   'auth.api_url_hint_google': 'e.g. https://generativelanguage.googleapis.com (official) or a proxy/gateway URL (paste supported)',
@@ -1343,6 +1335,7 @@ export const en: Record<string, string> = {
 
   // ─── Constants ─────────────────
   'constant.llm_not_set': 'LLM not set, run /config to configure model',
+  'constant.model_detached': 'The current model was removed — pick one with /config or /model.',
   'constant.no_active_session': 'No active session. Run /config to configure model.',
   'constant.ctrl_d_hint': 'Press Ctrl+D again to exit',
   'constant.ctrl_c_hint': 'Press Ctrl+C again to exit',

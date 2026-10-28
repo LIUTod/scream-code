@@ -170,7 +170,6 @@ export const zh: Record<string, string> = {
   'sidebar.goal_judge_judging': '裁定中',
   'sidebar.goal_judge_adjudicated': '已裁定',
 
-
   'input.replay_blocked': '会话历史正在回放时无法发送输入。',
   'input.send_failed': '发送失败：{message}',
   'input.guide_failed': '引导失败：{message}',
@@ -190,15 +189,6 @@ export const zh: Record<string, string> = {
   'welcome.like_active': 'like已激活',
   'welcome.like_inactive': 'like未加载',
   'welcome.help_hint': '/help 查看帮助',
-
-  // ─── 加载 ─────────────────────
-  'loading.ai': 'Ai正在加载中...',
-  'loading.waking': '正在唤醒核心...',
-  'loading.press_enter': '按下 ENTER 唤醒核心',
-  'loading.quit_hint': '按住 Ctrl+C 即可退出 Scream Code',
-  'loading.auto_start_hint': 'Ctrl+E 即可切换一键启动',
-  'loading.auto_start_on': 'Ctrl+E 即可切换一键启动（默认启动开）',
-  'loading.auto_start_off': 'Ctrl+E 即可切换一键启动（默认启动关）',
 
   // ─── 语言 ─────────────────────
   'language.picker_title': '语言 / Language',
@@ -431,6 +421,8 @@ export const zh: Record<string, string> = {
   'auth.catalog_fetch_failed': '拉取远程模型目录失败: {error}。请检查网络（目录站点在你的网络环境下可能无法访问）后重试，或使用 /config diy 自行配置服务商。',
   'auth.no_providers': '没有已配置的模型商。',
   'auth.deleted': '已删除模型商: {name}',
+  'auth.deleted_current': '已删除模型商: {name}。当前会话已保留，重新选择模型后即可继续（/config 或 /model）。',
+  'auth.logout_busy': '正在执行任务时无法删除模型商 — 请先按 Esc 或 Ctrl-C。',
   'auth.input_api_url': '输入服务商 API 地址',
   'auth.api_url_hint': '例如 https://api.example.com（可粘贴）',
   'auth.api_url_hint_google': '例如 https://generativelanguage.googleapis.com（官方）或代理/网关地址（可粘贴）',
@@ -1337,6 +1329,7 @@ export const zh: Record<string, string> = {
 
   // ─── Constants ─────────────────
   'constant.llm_not_set': 'LLM 未设置，运行 /config 自定义模型配置',
+  'constant.model_detached': '当前模型已被移除，请用 /config 或 /model 重新选择。',
   'constant.no_active_session': '没有活动会话。运行 /config 自定义模型配置。',
   'constant.ctrl_d_hint': '再次按 Ctrl+D 退出',
   'constant.ctrl_c_hint': '再次按 Ctrl+C 退出',

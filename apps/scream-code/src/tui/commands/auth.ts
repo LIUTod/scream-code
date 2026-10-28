@@ -22,6 +22,7 @@ import { ChoicePickerComponent, type ChoiceOption } from '../components/dialogs/
 import { resolveConnectCatalogRequest } from '../utils/connect-catalog';
 import { formatErrorMessage } from '../utils/event-payload';
 import { getImageConfigPath, readExistingImageConfig } from '../utils/image-config';
+import { isBusy } from '../utils/app-state';
 import {
   promptApiKey,
   promptAudioMode,
@@ -212,6 +213,10 @@ async function runCatalogConnectFlow(host: SlashCommandHost, url: string): Promi
 }
 
 export async function handleLogoutCommand(host: SlashCommandHost): Promise<void> {
+  if (isBusy(host.state.appState)) {
+    host.showError(t('auth.logout_busy'));
+    return;
+  }
   const config = await host.harness.getConfig();
   const providerIds = Object.keys(config.providers ?? {}).toSorted();
 
@@ -240,14 +245,16 @@ export async function handleLogoutCommand(host: SlashCommandHost): Promise<void>
 
   if (target === currentProvider) {
     await host.authFlow.refreshConfigAfterLogout();
-    await host.authFlow.clearActiveSessionAfterLogout();
-  } else {
-    const updated = await host.harness.getConfig({ reload: true });
-    host.setAppState({
-      availableModels: updated.models ?? {},
-      availableProviders: updated.providers ?? {},
-    });
+    await host.authFlow.detachModelAfterLogout();
+    host.showStatus(t('auth.deleted_current', { name: target }));
+    return;
   }
+
+  const updated = await host.harness.getConfig({ reload: true });
+  host.setAppState({
+    availableModels: updated.models ?? {},
+    availableProviders: updated.providers ?? {},
+  });
   host.showStatus(t('auth.deleted', { name: target }));
 }
 

@@ -62,6 +62,7 @@ export class AuthFlowController {
       if (level !== undefined) {
         await host.session.setThinking(level);
       }
+      host.setAppState({ model, detachedModel: null });
       return;
     }
 
@@ -79,6 +80,7 @@ export class AuthFlowController {
     await host.setSession(session);
     host.setAppState({
       sessionId: session.id,
+      detachedModel: null,
       sessionTitle: session.summary?.title ?? null,
     });
     await host.syncRuntimeState(session);
@@ -88,15 +90,13 @@ export class AuthFlowController {
     void host.refreshSkillCommands(host.session);
   }
 
-  async clearActiveSessionAfterLogout(): Promise<void> {
-    await this.host.closeSession('logged out');
-    this.host.resetSessionRuntime();
-    this.host.setAppState({
-      sessionId: '',
-      model: '',
-      sessionTitle: null,
-    });
-    await this.host.refreshSkillCommands();
+  /** Drop the model binding but keep the live session: transcript, context and
+   *  session id stay valid, so configuring a provider afterwards resumes the
+   *  same conversation instead of silently opening a new one. */
+  async detachModelAfterLogout(): Promise<void> {
+    const { appState } = this.host.state;
+    this.host.setAppState({ model: '', detachedModel: appState.model || null });
+    await this.host.refreshSkillCommands(this.host.session);
   }
 
   async refreshConfigAfterLogin(): Promise<void> {
@@ -130,9 +130,10 @@ export class AuthFlowController {
       availableProviders: config.providers ?? {},
       model: '',
       thinkingLevel: 'off',
-      maxContextTokens: 0,
-      contextUsage: 0,
-      contextTokens: 0,
+      // Session-scoped counters stay untouched: they describe the live
+      // conversation, not the provider that was just removed. Clearing them
+      // would make the status bar report an empty context for a session that
+      // still holds one.
     });
   }
 }

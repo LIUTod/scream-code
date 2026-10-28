@@ -118,7 +118,7 @@ export class SessionManager {
   async init(options: {
     startup: TUIStartupOptions;
     workDir: string;
-    /** Session listing prefetched by the shell during the loading splash.
+    /** Session listing prefetched by the shell before the TUI starts.
      * Used only as the empty-session prune's candidate enumeration; the
      * deletion decision is made on a live re-check, and resume decisions
      * never read this snapshot. */
@@ -209,8 +209,8 @@ export class SessionManager {
    * are archived sessions, any session that produced a prompt or a title, and
    * any session touched within the grace window (protects a fresh empty
    * session being used from another terminal). The prefetched listing, when
-   * present, only enumerates candidates: the snapshot can lag the splash
-   * duration, so every candidate is re-checked against a live id lookup and is
+   * present, only enumerates candidates: the snapshot can be stale by the time
+   * startup runs, so every candidate is re-checked against a live id lookup and is
    * deleted only if it still looks prunable right now (a session that woke up
    * meanwhile — prompt, rename, new activity — stays). Best-effort: cleanup
    * failures never block startup.
@@ -285,9 +285,16 @@ export class SessionManager {
     const status = await session.getStatus();
     const goalResult = await session.getGoal().catch(() => ({ goal: null }));
     const goal = goalResult.goal;
+    // A live session keeps the alias it was created with even after that
+    // provider is removed (removal only rewrites config.toml). Copying that
+    // alias back would re-arm a provider that no longer exists, so the alias
+    // recorded by detachModelAfterLogout is never restored — any other value
+    // (including a CLI `--model` override) syncs through unchanged.
+    const detached = this.host.state.appState.detachedModel;
+    const model = detached !== null && status.model === detached ? '' : (status.model ?? '');
     this.host.setAppState({
       sessionId: session.id,
-      model: status.model ?? '',
+      model,
       thinkingLevel: status.thinkingLevel as import('@scream-code/scream-code-sdk').ThinkingEffort,
       planMode: (status.planMode
         ? status.planStrategy === 'fusion' ? 'fusionplan' : 'plan'

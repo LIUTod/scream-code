@@ -9,7 +9,6 @@ import type { TuiConfig } from '#/tui/config';
 import { loadTuiConfig, TuiConfigParseError } from '#/tui/config';
 import { CHROME_GUTTER } from '#/tui/constant/rendering';
 import { ScreamTUI } from '#/tui/index';
-import { runLoadingAnimation } from '#/tui/components/chrome/loading';
 import { detectTerminalTheme } from '#/tui/theme/detect';
 
 import type { CLIOptions } from './options';
@@ -54,7 +53,7 @@ export async function runShell(
   // Preflight validates the host environment (e.g. Git Bash on Windows)
   await harness.preflight();
 
-  // Scan the workDir session list once while the splash animation runs. The
+  // Scan the workDir session list once, before the TUI takes over. The
   // TUI's SessionManager uses it only to enumerate candidates for the
   // empty-session sweep — every candidate is re-checked against a live listing
   // before deletion, and resume decisions always re-scan. The no-op catch is
@@ -63,14 +62,12 @@ export async function runShell(
   const sessionsPrefetch: Promise<readonly SessionSummary[]> = harness.listSessions({ workDir });
   void sessionsPrefetch.catch(() => {});
 
-  // Fire the update-cache refresh detached in the background. The loading
-  // splash no longer waits on it — a slow npm registry won't delay startup.
-  // The result lands in the cache for the next launch or `/update` to pick up.
+  // Fire the update-cache refresh detached in the background — a slow npm
+  // registry won't delay startup. The result lands in the cache for the next
+  // launch or `/update`; this launch may still read the previous cache.
   void refreshUpdateCache().catch((error) => {
     log.warn('update cache refresh failed', { error });
   });
-
-  await runLoadingAnimation(resolvedTheme, tuiConfig);
 
   const tui = new ScreamTUI(harness, {
     cliOptions: opts,

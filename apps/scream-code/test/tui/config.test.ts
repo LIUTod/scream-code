@@ -55,7 +55,6 @@ notification_condition = "always"
     expect(config).toEqual({
       theme: 'light',
       editorCommand: 'code --wait',
-      autoStart: false,
       notifications: { enabled: false, condition: 'always' },
       like: { nickname: undefined, tone: undefined, other: undefined },
       fusionPlan: { timeoutSeconds: 600, workerCount: 3 },
@@ -88,7 +87,6 @@ command = "   "
 `);
     expect(config).toEqual({
       theme: 'auto',
-      autoStart: false,
       editorCommand: null,
       notifications: { enabled: true, condition: 'unfocused' },
       like: { nickname: undefined, tone: undefined, other: undefined },
@@ -102,6 +100,18 @@ command = "   "
     const config = parseTuiConfig(`theme = "dark"`);
 
     expect(config.notifications).toEqual({ enabled: true, condition: 'unfocused' });
+  });
+
+  it('ignores a leftover autoStart key from older configs', () => {
+    const config = parseTuiConfig(`
+theme = "dark"
+language = "zh"
+autoStart = true
+`);
+
+    expect(config.theme).toBe('dark');
+    expect(config.language).toBe('zh');
+    expect(config).not.toHaveProperty('autoStart');
   });
 
   it('throws TuiConfigParseError with fallback when parsing fails, leaving the file untouched', async () => {
@@ -124,7 +134,6 @@ command = "   "
         theme: 'light',
         language: 'zh',
         editorCommand: 'vim',
-        autoStart: false,
         notifications: { enabled: false, condition: 'always' },
         like: { nickname: undefined, tone: undefined, other: undefined },
         fusionPlan: { timeoutSeconds: 600, workerCount: 3 },
@@ -135,7 +144,6 @@ command = "   "
 
     expect(await loadTuiConfig(filePath)).toEqual({
       theme: 'light',
-      autoStart: false,
       editorCommand: 'vim',
       notifications: { enabled: false, condition: 'always' },
       like: { nickname: undefined, tone: undefined, other: undefined },

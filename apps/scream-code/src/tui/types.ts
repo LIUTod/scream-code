@@ -61,6 +61,10 @@ export type GoalJudgeState = 'awaiting' | 'judging' | 'adjudicated';
 
 export interface AppState {
   model: string;
+  /** Model alias that was detached because its provider was removed. Keeps
+   *  `syncRuntimeState` from re-arming the dead alias after a session switch;
+   *  cleared as soon as a model is bound again. */
+  detachedModel: string | null;
   workDir: string;
   sessionId: string;
   permissionMode: PermissionMode;

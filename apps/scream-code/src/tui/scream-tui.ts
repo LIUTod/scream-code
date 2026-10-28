@@ -109,11 +109,12 @@ export interface ScreamTUIStartupInput {
   readonly workDir: string;
   readonly startupNotice?: string;
   readonly resolvedTheme?: ResolvedTheme;
-  /** When true, the update cache was already refreshed during the loading
-   * splash screen, so checkForUpdates() should skip the network refresh and
-   * just read the cache. */
+  /** When true, the shell already fired a detached update-cache refresh before
+   * the TUI starts, so checkForUpdates() reads the cache instead of awaiting a
+   * network round-trip. A cold cache simply skips the hint for this launch —
+   * the refreshed result lands in time for the next one. */
   readonly updatePrefetched?: boolean;
-  /** Session listing started by the shell during the loading splash; it only
+  /** Session listing started by the shell before the TUI takes over; it only
    * enumerates candidates for the empty-session sweep (each deletion is
    * re-checked against a live listing), and resume decisions never read it. */
   readonly sessionsPrefetch?: SessionsPrefetch;
@@ -128,6 +129,7 @@ function createInitialAppState(input: ScreamTUIStartupInput): AppState {
   setLocale(input.tuiConfig.language);
   return {
     model: '',
+    detachedModel: null,
     workDir: input.workDir,
     sessionId: '',
     permissionMode: startupPermission,
@@ -618,6 +620,12 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
   }
 
   sendSkillActivation(session: Session, skillName: string, skillArgs: string): void {
+    // Skill activation puts a turn on the wire without going through
+    // sendMessageInternal, so it needs the same detached-model guard.
+    if (this.state.appState.model.trim().length === 0) {
+      this.showError(t('constant.model_detached'));
+      return;
+    }
     this.beginSessionRequest();
     void session.activateSkill(skillName, skillArgs).catch((error: unknown) => {
       const message = formatErrorMessage(error);
@@ -885,8 +893,8 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
   }
   private async checkForUpdates(): Promise<void> {
     try {
-      // When the loading splash already refreshed the npm cache, skip the
-      // network round-trip and just read the warm cache.
+      // The shell already fired a detached refresh; read whatever the cache
+      // holds now instead of blocking startup on the network.
       if (!this.updatePrefetched) {
         await refreshUpdateCache().catch(() => {});
       }

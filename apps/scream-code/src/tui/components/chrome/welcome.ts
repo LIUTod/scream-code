@@ -28,7 +28,7 @@ const MIN_BOX_WIDTH = 50;
 // With 2 border chars that means 87 terminal columns minimum.
 const FULL_LOGO_MIN_WIDTH = 87;
 
-// ── Full SCREAM CODE ASCII art (matches loading splash) ────────────
+// ── Full SCREAM CODE ASCII art ─────────────────────────────────────
 const LOGO = [
   '███████╗ ██████╗██████╗ ███████╗ █████╗ ███╗   ███╗  ██████╗ ██████╗ ██████╗ ███████╗',
   '██╔════╝██╔════╝██╔══██╗██╔════╝██╔══██╗████╗ ████║ ██╔════╝██╔═══██╗██╔══██╗██╔════╝',
@@ -122,7 +122,7 @@ function centerText(text: string, width: number): string {
 }
 
 /**
- * Colour a single logo line matching the loading splash scheme:
+ * Colour a single logo line matching the welcome logo scheme:
  * - `█` blocks  → white (the "font")
  * - shadow chars → breathing primary colour (the "stroke")
  * - others       → dim grey

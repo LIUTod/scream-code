@@ -31,6 +31,7 @@ import { createScreamTUIThemeBundle } from '#/tui/theme/bundle';
 export function createMockAppState(overrides: Partial<AppState> = {}): AppState {
   return {
     model: 'gpt-test',
+    detachedModel: null,
     workDir: '/tmp/scream-test',
     sessionId: 'ses-test',
     permissionMode: 'ask',
@@ -301,6 +302,7 @@ export function makeMockHarness(overrides: Record<string, unknown> = {}): MockHa
     ),
     listSessions: vi.fn(async () => []),
     deleteSession: vi.fn(async (): Promise<void> => {}),
+    getConfig: vi.fn(async () => ({ providers: {}, models: {} })),
     ...overrides,
   };
   return harness;
