@@ -29,6 +29,7 @@ import { getDataDir } from '../utils/paths';
 import { ScreamHarness } from '@scream-code/scream-code-sdk';
 import { t, setLocale } from '@scream-code/config';
 import type { CLIOptions } from '#/cli/options';
+import { autoStartLineDaemonIfConfigured } from '#/line/auto-start';
 
 import {
   BUILTIN_SLASH_COMMANDS,
@@ -168,7 +169,7 @@ function createInitialAppState(input: ScreamTUIStartupInput): AppState {
     goalActive: false,
     goalJudge: 'awaiting',
     goalContinuationCount: 0,
-    ccConnectActive: false,
+    lineActive: false,
     wolfpackMode: input.cliOptions.wolfpack === true,
     rlmEnabled: false,
     rlmMaxDepth: null,
@@ -337,7 +338,8 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
         // shut down. Both are advisory: a marker problem must never block the UI.
         this.refreshRuntimeMarker();
         this.reportStaleSessions();
-        this.lifecycleController.startCcConnectPolling();
+        this.lifecycleController.startLinePolling();
+        void autoStartLineDaemonIfConfigured();
         this.startBalancePolling();
       } catch (error) {
         this.lifecycleController.disposeTerminalTracking();
@@ -489,7 +491,7 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
   async stop(exitCode?: number): Promise<void> {
     if (this.isShuttingDown) return;
     this.isShuttingDown = true;
-    this.lifecycleController.stopCcConnectPolling();
+    this.lifecycleController.stopLinePolling();
     if (this.balancePollTimer !== undefined) {
       clearInterval(this.balancePollTimer);
       this.balancePollTimer = undefined;
@@ -532,9 +534,9 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
     this.lifecycleController.onTurnCompleted();
   }
 
-  /** Trigger an immediate cc-connect liveness poll. Called by /cc after start/stop/restart. */
-  refreshCcStatus(): void {
-    this.lifecycleController.refreshCcStatus();
+  /** Trigger an immediate line daemon liveness poll. Called by /line after start/stop. */
+  refreshLineStatus(): void {
+    this.lifecycleController.refreshLineStatus();
   }
 
   refreshTerminalThemeTracking(): void {

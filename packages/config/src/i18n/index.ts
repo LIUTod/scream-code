@@ -7,9 +7,11 @@ export type { Locale } from './locale/types';
 const dictionaries: Record<Locale, Record<string, string>> = { zh, en };
 
 function detectSystemLocale(): Locale {
-  // 1. Unix/macOS: standard locale environment variables
+  // 1. Unix/macOS: standard locale environment variables. POSIX treats an
+  // empty value as unset, so "first non-empty wins" — semantically `||`,
+  // spelled without it to keep the lint rule (empty string is not nullish).
   const env = process.env;
-  const envLang = (env['LC_ALL'] || env['LC_MESSAGES'] || env['LANG'] || env['LANGUAGE'] || '').toLowerCase();
+  const envLang = (['LC_ALL', 'LC_MESSAGES', 'LANG', 'LANGUAGE'].map((name) => env[name]).find((v) => v !== undefined && v !== '') ?? '').toLowerCase();
   if (envLang.startsWith('zh')) return 'zh';
   if (envLang.length > 0) return 'en';
 
@@ -23,7 +25,8 @@ function detectSystemLocale(): Locale {
 
   // 3. Windows: check process.env.LANG set by some Node distributions
   if (process.platform === 'win32') {
-    const winLang = (env['LANG'] || '').toLowerCase();
+    const winRaw = env['LANG'];
+    const winLang = (winRaw !== undefined && winRaw !== '' ? winRaw : '').toLowerCase();
     if (winLang.startsWith('zh')) return 'zh';
   }
 

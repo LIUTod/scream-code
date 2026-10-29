@@ -18,9 +18,9 @@ import { createProgram } from './cli/commands';
 
 import type { CLIOptions } from './cli/options';
 import { OptionConflictError, validateOptions } from './cli/options';
+import { runLineCommand } from './cli/line-command';
 import { runPrompt } from './cli/run-prompt';
 import { runShell } from './cli/run-shell';
-import { runChannelSetup } from './cli/channel-setup';
 import { runStreamJson } from './cli/run-stream-json';
 import { formatStartupError } from './cli/startup-error';
 import { runPluginNodeEntry } from './cli/sub/plugin-run-node';
@@ -86,9 +86,9 @@ export function main(): void {
         process.exit(1);
       });
     },
-    () => {
-      void runChannelSetup().catch(async (error: unknown) => {
-        await logStartupFailure('运行 channel setup', error);
+    (action) => {
+      void runLineCommand(action).catch(async (error: unknown) => {
+        await logStartupFailure('运行 line 命令', error);
         process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
         process.exit(1);
       });

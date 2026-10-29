@@ -16,8 +16,8 @@ describe('stream-json runtime system prompt', () => {
     });
 
     expect(prompt.replace).toBeUndefined();
-    expect(prompt.append).toContain('cc-connect send --image');
-    expect(prompt.append).toContain('cc-connect send --file');
+    expect(prompt.append).toContain('inline instructions');
+    expect(prompt.append).toContain('file instructions');
     expect(prompt.append.indexOf('inline instructions')).toBeLessThan(
       prompt.append.indexOf('file instructions'),
     );
@@ -30,11 +30,10 @@ describe('stream-json runtime system prompt', () => {
     });
 
     expect(prompt.replace).toBe('replacement prompt');
-    expect(prompt.append).toMatch(/^【重要】/);
-    expect(prompt.append).toContain('\n\nextra instructions');
+    expect(prompt.append).toBe('extra instructions');
   });
 
-  it('ignores empty optional prompt parts without changing the stable send hint', () => {
+  it('ignores empty optional prompt parts', () => {
     const prompt = buildStreamJsonRuntimePrompt({
       systemPrompt: '   ',
       appendSystemPrompt: '',
@@ -42,8 +41,7 @@ describe('stream-json runtime system prompt', () => {
     });
 
     expect(prompt.replace).toBeUndefined();
-    expect(prompt.append).toContain('cc-connect send --image');
-    expect(prompt.append).not.toContain('\n\n\n');
+    expect(prompt.append).toBe('');
   });
 });
 

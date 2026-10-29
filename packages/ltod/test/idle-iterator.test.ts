@@ -135,7 +135,9 @@ describe('iterateWithIdleTimeout', () => {
       errorMessage: 'stalled',
       abortSignal: controller.signal,
     });
-    setTimeout(() => controller.abort(), 50);
+    setTimeout(() => {
+      controller.abort();
+    }, 50);
     await expect(
       (async () => {
         for await (const _ of iter) {

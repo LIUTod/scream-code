@@ -295,17 +295,10 @@ export const BUILTIN_SLASH_COMMANDS = [
     availability: 'idle-only',
   },
   {
-    name: 'cc',
+    name: 'line',
     aliases: [],
-    description: 'registry.cc_desc',
-    priority: 192,
-    availability: 'always',
-  },
-  {
-    name: 'cc-connect',
-    aliases: [],
-    description: 'registry.cc_connect_desc',
-    priority: 191,
+    description: 'registry.line_desc',
+    priority: 190,
     availability: 'always',
   },
   {

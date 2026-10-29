@@ -66,4 +66,4 @@ it. Configurable via `loopControl.compactionTriggerRatio` (0.5–0.99).
 ## Deleting
 
 `/sessions` → select → `d` (then `Enter` to confirm). The session currently open
-cannot be deleted, and cc-connect sessions are managed by their channel instead.
+cannot be deleted, and channel-owned (line) sessions are managed by their channel instead.

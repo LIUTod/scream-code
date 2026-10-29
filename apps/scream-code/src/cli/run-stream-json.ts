@@ -1,9 +1,9 @@
 /**
- * Stream-json stdio adapter (cc-connect compat).
+ * Stream-json stdio adapter (the reference compat).
  *
  * Reads stdin as line-based stream-json messages, processes them through the
  * ScreamCode agent, and writes stdout as stream-json events. This is the
- * integration surface cc-connect drives when it spawns `scream stream-json`,
+ * integration surface the reference drives when it spawns `scream stream-json`,
  * and any tool that speaks the same stdio protocol can use ScreamCode as an
  * agent backend through it.
  */
@@ -35,13 +35,7 @@ export function buildStreamJsonRuntimePrompt(input: RuntimePromptInput): {
   readonly replace?: string | undefined;
   readonly append: string;
 } {
-  const sendHint =
-    '【重要】你可以通过以下命令向用户发送图片或文件：\n' +
-    '  cc-connect send --image /absolute/path/to/image.png\n' +
-    '  cc-connect send --file /absolute/path/to/file.pdf\n' +
-    '当用户要求你发送文件、截图、生成的图片时，使用 Bash 工具执行上述命令即可。';
   const appendParts = [
-    sendHint,
     input.appendSystemPrompt?.trim(),
     input.appendSystemPromptFileContent?.trim(),
   ].filter((part): part is string => part !== undefined && part.length > 0);
@@ -361,8 +355,8 @@ export class StreamJsonWriter {
     });
   }
 
-  /** Emit a `control_request` event for cc-connect permission flow.
-   *  Format matches cc-connect's handleControlRequest which expects
+  /** Emit a `control_request` event for the reference permission flow.
+   *  Format matches the reference's handleControlRequest which expects
    *  `request.subtype = "can_use_tool"`, `request.tool_name`, `request.input`. */
   emitControlRequest(requestId: string, toolCallId: string, toolName: string, input: unknown): void {
     this.writeJson({
@@ -380,7 +374,7 @@ export class StreamJsonWriter {
   /** Returns the accumulated token usage for the current turn. Used by
    *  the result event emitter so the final `result` event carries the
    *  turn's total token usage. Without this, usage was accumulated but
-   *  never emitted — consumers (cc-connect, mobile clients) saw empty
+   *  never emitted — consumers (the reference, mobile clients) saw empty
    *  usage fields. */
   getTokenUsage(): TokenUsage {
     return { ...this.tokenUsage };
@@ -485,7 +479,7 @@ export function mapCcConnectMode(mode: string | undefined): MappedMode {
  * Install the stdout EPIPE guard and return the line writer handed to
  * {@link StreamJsonWriter}.
  *
- * cc-connect closes our stdout when it kills/restarts the agent (idle
+ * the reference closes our stdout when it kills/restarts the agent (idle
  * timeout, /restart, config change). Writing after that raises EPIPE as an
  * unhandled error and crashes the process. The pipe is gone — results can
  * no longer be delivered — so exit quietly instead of burning tokens as a
@@ -534,8 +528,8 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
   });
 
   // Read `[subagentModels]` from tui.toml so `/model diy` bindings configured
-  // in the interactive TUI also apply to cc-connect stream-json sessions.
-  // Read once at startup; cc-connect is a long-lived process that doesn't
+  // in the interactive TUI also apply to the reference stream-json sessions.
+  // Read once at startup; the reference is a long-lived process that doesn't
   // watch tui.toml for changes. A malformed tui.toml falls back to empty
   // bindings rather than aborting the protocol handshake.
   let streamTuiConfig;
@@ -557,7 +551,7 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
   let currentSessionId: string | undefined;
   let sessionKey = "cc-connect-main";
 
-  // Pending approvals awaiting control_response from cc-connect.
+  // Pending approvals awaiting control_response from the reference.
   const pendingApprovals = new Map<
     string,
     { resolve: (response: { decision: "approved" | "rejected"; scope?: "session"; feedback?: string }) => void }
@@ -566,7 +560,7 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
   // Subagent id → name mapping (completed/failed events only carry id).
   const subagentNames = new Map<string, string>();
 
-  // cc-connect passes an optional replacement prompt plus append text/file.
+  // the reference passes an optional replacement prompt plus append text/file.
   // Keep the overlay in session memory: mutating project AGENTS.md creates
   // crash and concurrency hazards and can overwrite user edits.
   let appendSystemPromptFileContent: string | undefined;
@@ -661,7 +655,7 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
       }
 
       // ── Create or reuse session ──────────────────────────────────────
-      // One channel = one session.  Use --resume if cc-connect passes one,
+      // One channel = one session.  Use --resume if the reference passes one,
       // otherwise fall back to the deterministic key.
       sessionKey = opts.resume ?? "cc-connect-main";
       const { permission: mappedPermission, planMode: mappedPlanMode } = mapCcConnectMode(
@@ -729,11 +723,11 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
         currentSessionId = session.id;
         writer.setSessionId(session.id);
         writer.setModel(opts.model ?? config.defaultModel ?? "");
-        // Emit the deterministic session key so cc-connect stores it
+        // Emit the deterministic session key so the reference stores it
         // and passes it back via --resume next time.
         writer.emitSystem(sessionKey, opts.model ?? config.defaultModel);
 
-        // ── Approval handler wired to cc-connect control_request ─────────
+        // ── Approval handler wired to the reference control_request ─────────
         function sendControlRequest(
           request: { toolCallId: string; toolName: string; action: string; display: unknown },
         ): Promise<{ decision: "approved" | "rejected"; scope?: "session"; feedback?: string }> {
@@ -755,7 +749,7 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
           return promise;
         }
 
-        // Build tool whitelist/blacklist from cc-connect flags.
+        // Build tool whitelist/blacklist from the reference flags.
         const allowedSet = opts.allowedTools
           ? new Set(opts.allowedTools.split(",").map((t) => t.trim()).filter(Boolean))
           : undefined;
@@ -898,7 +892,7 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
         }
 
         // Translate ScreamCode events to the stream-json dialect.
-        // Forward thinking, tool_use, and tool_result events so cc-connect
+        // Forward thinking, tool_use, and tool_result events so the reference
         // can display tool progress in chat platforms (Feishu/Telegram/etc.).
         const type = event.type;
         if (type === "turn.step.started" || type === "turn.step.interrupted") {
@@ -995,7 +989,7 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
       } catch {
         // finish() already emitted this turn's result event. The daemon
         // keeps serving subsequent messages — a single failed or cancelled
-        // turn must not kill the whole cc-connect process.
+        // turn must not kill the whole the reference process.
       }
     }
   } catch (error) {

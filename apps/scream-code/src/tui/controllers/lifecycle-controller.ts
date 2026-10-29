@@ -25,7 +25,7 @@ import type { ResolvedTheme } from '../theme/colors';
 import type { Theme } from '../theme/index';
 import type { AppState, ScreamTUIOptions } from '../types';
 import type { TUIState } from '../tui-state';
-import { checkCcConnectActive } from '../utils/cc-connect-status';
+import { checkLineDaemonActive } from '../utils/line-status';
 import { isDeadTerminalError } from '../utils/dead-terminal';
 import { isStreaming } from '../utils/app-state';
 import { installTerminalFocusTracking } from '../utils/terminal-focus';
@@ -99,7 +99,7 @@ export interface LifecycleControllerHost {
 export class LifecycleController {
   private signalCleanupHandlers: Array<() => void> = [];
   private footerWrap: GutterContainer | undefined;
-  private ccConnectPollTimer: ReturnType<typeof setInterval> | undefined;
+  private linePollTimer: ReturnType<typeof setInterval> | undefined;
   private memoryIdleTimer: ReturnType<typeof setTimeout> | undefined;
   private memoryCountdownTimer: ReturnType<typeof setTimeout> | undefined;
   private lastMemoryExtractionTime = 0;
@@ -203,31 +203,31 @@ export class LifecycleController {
     this.host.onEmergencyExit(exitCode);
   }
 
-  startCcConnectPolling(): void {
+  startLinePolling(): void {
     const POLL_INTERVAL_MS = 30_000;
-    void checkCcConnectActive().then((active) => {
-      this.host.setAppState({ ccConnectActive: active });
+    void checkLineDaemonActive().then((active) => {
+      this.host.setAppState({ lineActive: active });
     });
-    this.ccConnectPollTimer = setInterval(() => {
-      void checkCcConnectActive().then((active) => {
-        this.host.setAppState({ ccConnectActive: active });
+    this.linePollTimer = setInterval(() => {
+      void checkLineDaemonActive().then((active) => {
+        this.host.setAppState({ lineActive: active });
       });
     }, POLL_INTERVAL_MS);
   }
 
-  stopCcConnectPolling(): void {
-    if (this.ccConnectPollTimer !== undefined) {
-      clearInterval(this.ccConnectPollTimer);
-      this.ccConnectPollTimer = undefined;
+  stopLinePolling(): void {
+    if (this.linePollTimer !== undefined) {
+      clearInterval(this.linePollTimer);
+      this.linePollTimer = undefined;
     }
   }
 
-  refreshCcStatus(): void {
+  refreshLineStatus(): void {
     setTimeout(() => {
-      void checkCcConnectActive().then((active) => {
-        this.host.setAppState({ ccConnectActive: active });
+      void checkLineDaemonActive().then((active) => {
+        this.host.setAppState({ lineActive: active });
       });
-    }, 3000);
+    }, 1500);
   }
 
   startMemoryIdleTimer(): void {

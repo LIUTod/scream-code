@@ -566,9 +566,9 @@ export class FooterComponent implements Component {
           reconnectMaxAttempts: state.reconnectMaxAttempts,
         },
       );
-      const ccDot = state.ccConnectActive
-        ? chalk.hex(colors.success)('●')
-        : chalk.hex(colors.textDim)('●');
+      const lineDot = state.lineActive
+        ? chalk.hex(colors.success)('◆')
+        : chalk.hex(colors.textDim)('◆');
       // Session token usage: input (cache read + created + other) and output.
       // Session token usage (from turn.step.completed accumulation), used for
       // the cache hit rate below. Defensive default so footer rendering never
@@ -605,7 +605,7 @@ export class FooterComponent implements Component {
         formatContextStatus(state.contextUsage, state.contextTokens, state.maxContextTokens, contextBarWidth),
       );
       const statusPart = chalk.hex(colors.textDim)(` ${statusLine}`);
-      rightText = `${ccDot} ${segHit} ${contextPart} ${statusPart}`;
+      rightText = `${lineDot} ${segHit} ${contextPart} ${statusPart}`;
     }
     const rightWidth = visibleWidth(rightText);
     const gap = 3;

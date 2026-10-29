@@ -55,10 +55,9 @@ import {
 import { handleGoalCommand } from './goal';
 import { handleSidebarCommand } from './sidebar';
 import { handleRevokeCommand } from './revoke';
-import { handleCcCommand } from './cc';
+import { handleLineCommand } from './line';
 import { handleUpdateCommand } from './update';
 import { handleMcpCommand } from './mcp';
-import { handleChannelCommand } from './cc-connect';
 import { handleMemoryCommand } from './memory';
 import { handleMakeSkillCommand } from './make-skill';
 import { handleSkillCommand } from './skill-center';
@@ -115,10 +114,9 @@ export {
 } from './session';
 export { handleRevokeCommand } from './revoke';
 export { handleGrantsCommand } from './grants';
-export { handleCcCommand } from './cc';
+export { handleLineCommand } from './line';
 export { handleUpdateCommand } from './update';
 export { handleMcpCommand } from './mcp';
-export { handleChannelCommand } from './cc-connect';
 export { handleMemoryCommand } from './memory';
 export { handleSkillCommand } from './skill-center';
 export { handleExtensionCommand } from './extension';
@@ -167,8 +165,8 @@ export interface SlashCommandHost {
   sendSkillActivation(session: Session, skillName: string, skillArgs: string): void;
   readonly skillCommandMap: Map<string, string>;
 
-  /** Trigger an immediate cc-connect liveness poll (bypasses the 30 s interval). */
-  refreshCcStatus(): void;
+  /** Trigger an immediate line daemon liveness poll (bypasses the 30 s interval). */
+  refreshLineStatus(): void;
 
   // Controller refs
   readonly streamingUI: StreamingUIController;
@@ -383,11 +381,8 @@ async function handleBuiltInSlashCommand(
     case 'update':
       await handleUpdateCommand(host);
       return;
-    case 'cc':
-      await handleCcCommand(host);
-      return;
-    case 'cc-connect':
-      await handleChannelCommand(host, args);
+    case 'line':
+      await handleLineCommand(host);
       return;
     case 'compact':
       await handleCompactCommand(host, args);

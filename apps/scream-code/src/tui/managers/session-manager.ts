@@ -427,7 +427,7 @@ export class SessionManager {
     if (isBusy(this.host.state.appState)) {
       this.host.showError(t('session.switch_streaming'));
       // blocked: the refusal is transient state, not "session missing" —
-      // callers (cc-connect picker) must not treat it as a reason to create
+      // callers (the channel picker) must not treat it as a reason to create
       // and force-switch to a new session mid-stream.
       return { switched: false, blocked: true };
     }

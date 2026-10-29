@@ -499,12 +499,14 @@ Stateless retry with an optional `--verify` shell gate. Each iteration re-sends 
 - **Structured tool errors**: `ExecutableToolErrorResult.code: 'aborted' | 'failed' | 'blocked'` + `abortReason`; `turn.step.retrying/interrupted` carry `errorCode`. TUI reads the code first and falls back to the legacy regex only for records without one.
 - **On-demand MCP tools**: server config `exposure: 'on-demand'` (default) keeps MCP tool schemas out of the request; the model lists/enables them with `DiscoverMcpTools` (pattern-filtered; enabling an excluded name reports `skipped`). `exposure: 'always'` opts a server back into eager declaration.
 
-One-click cc-connect daemon life cycle management (cross-platform).
+Native IM channel layer (`/line`) — Feishu/Lark and WeChat, one channel at a time.
 
-- **TUI**: `src/tui/commands/cc.ts` — panel with start / stop / restart.
-- **Platform**: macOS `launchd`, Linux `systemd`, Windows `pm2`.
-- **Footer dot**: `●` green when cc-connect is active, dim when not. Refreshed every 3 s via `refreshCcStatus()`.
-- **Config**: `src/tui/commands/cc-connect.ts` — channel setup wizard.
+- **Daemon**: `src/line/daemon.ts` — `scream line` foreground / `line start|stop|status`; pidfile lifecycle (`src/line/pidfile.ts`, O_EXCL claim, stale cleanup, 10 s shutdown grace); config `~/.scream-code/line/config.json` (0600), `assertSinglePlatformConfig` enforces single-channel (both platforms present → refuse).
+- **Feishu**: `src/line/feishu/` — WebSocket long connection; receive pipeline (dedup, group @mention fail-closed, allow_from/allow_chat, mention stripping); receipt reactions; reply as text or post-md.
+- **WeChat**: `src/line/weixin/` — ilink gateway long-poll (`getupdates`/`sendmessage`), cursor + context_token persistence (0600), typing indicator, 3800-char fence-aware chunked replies, `ret=-2` throttle fail-fast, errcode -14 session-expired pause; native QR login in `qrcode.ts`.
+- **Sessions**: `src/line/session-driver.ts` — ScreamHarness sessions keyed `line-feishu-<hash>` / `line-weixin-<hash>`, per-session FIFO queues, unattended approval (`yolo` approve-all / `dontAsk` reject-all), `LineTurnCollector` replies with final content only (thinking deltas and pre-tool narration never reach IM). Metadata `{source:'line', platform}` → channel-managed (not deletable in the session picker).
+- **TUI**: `src/tui/commands/line.ts` — feishu guided 6-step setup, weixin QR wizard, lifecycle actions. **Footer dot**: `◆` green when the daemon is active; 30 s polling via `startLinePolling()`, immediate refresh via `refreshLineStatus()`; `autoStart` spawns the daemon on TUI boot (`src/line/auto-start.ts`).
+- **CLI**: `src/cli/line-command.ts` + `src/app.ts` wiring.
 
 ### Update (`/update`)
 

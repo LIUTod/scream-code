@@ -104,11 +104,11 @@ export function calculateRateLimitBackoffMs(reason: RateLimitReason): number {
       return MODEL_CAPACITY_BASE_MS + Math.random() * MODEL_CAPACITY_JITTER_MS;
     case 'SERVER_ERROR':
       return SERVER_ERROR_BACKOFF_MS;
-    default:
-      // UNKNOWN: a classified 429 with no recognized reason. Keep the retry
-      // short (20s like SERVER_ERROR) — a long quota backoff on an
-      // unrecoverable error would hang a turn far longer than the value of
-      // retrying, and UNKNOWN is not evidence of quota exhaustion.
+    case 'UNKNOWN':
+      // A classified 429 with no recognized reason. Keep the retry short
+      // (20s like SERVER_ERROR) — a long quota backoff on an unrecoverable
+      // error would hang a turn far longer than the value of retrying, and
+      // UNKNOWN is not evidence of quota exhaustion.
       return SERVER_ERROR_BACKOFF_MS;
   }
 }

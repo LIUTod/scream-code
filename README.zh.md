@@ -61,7 +61,7 @@ scream -y         # 自动批准模式
 - **高缓存命中率 HitR** — 状态栏会话级命中率，适配多种兼容协议，工作不降智的情况下最大化优化了缓存命中率。
 - **MCP / Skill / 130+ 模型商** — 全部可 DIY 配置；内置浏览器自动化与 macOS 桌面自动化。
 - **自进化插件系统** — 内置 `ManagePlugin` 工具，让 Agent 自行检索/自制/安装技能与 MCP 服务器，装入即对当前会话热生效；安全兜底：代码入口需单独批准激活、熔断自动摘除、免疫记忆在重复安装前提示历史、升级保留一键回滚备份。
-- **多渠道远程控制** — 通过 cc-connect 打通微信、飞书、Slack、钉钉、QQ、Telegram、Discord。
+- **远程控制** — 通过原生 `/line` 通道，从微信、飞书（Lark）远程使用。
 
 ### 斜杠命令
 
@@ -117,8 +117,7 @@ scream -y         # 自动批准模式
 | `/extension` | 代码扩展：激活或停用插件入口 |
 | `/make-skill` | 从当前会话沉淀工作流为 Skill |
 | `/image` | 画图 / 改图（image 技能；先用 `/config image` 完成一次配置） |
-| `/cc` | 操控你的 cc（启动/关闭/重启） |
-| `/cc-connect` | cc-connect 快速通道配置 |
+| `/line` | 原生 IM 通道：飞书（Lark）与微信（配置向导 + 守护进程） |
 | **工具** | |
 | `/search` | 上下文关键词搜索，ESC 关闭 |
 | `/trace` | 查看会话工作轨迹 |
@@ -146,6 +145,7 @@ scream -y         # 自动批准模式
 - **技能** — 技能包、发现路径与 `/skill:<name>`： [`docs/skills.md`](docs/skills.md)
 - **MCP** — 外部工具服务： [`docs/mcp.md`](docs/mcp.md)
 - **会话** — 存储、恢复、分叉与导出： [`docs/sessions.md`](docs/sessions.md)
+- **飞书/微信通道** — `/line` 配置向导与守护进程： [`docs/line.md`](docs/line.md)
 - **架构** — 包分层与提示词组装： [`docs/architecture.md`](docs/architecture.md)
 - **自进化实测手册** — 从自制技能、安装、激活、熔断到回滚的完整演练：`packages/agent-core/docs/self-evolution-e2e.md`。
 

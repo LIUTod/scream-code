@@ -22,14 +22,14 @@ export type StreamJsonHandler = (opts: {
   pluginDirs: string[];
 }) => void;
 
-export type ChannelSetupHandler = () => void;
+export type LineCommandHandler = (action: 'run' | 'start' | 'stop' | 'status') => void;
 
 export function createProgram(
   version: string,
   onMain: MainCommandHandler,
   onPluginNodeRunner: PluginNodeRunnerHandler = () => {},
   onStreamJson: StreamJsonHandler = () => {},
-  onChannelSetup: ChannelSetupHandler = () => {},
+  onLine: LineCommandHandler = () => {},
 ): Command {
   const program = new Command(CLI_COMMAND_NAME)
     .description('下一代智能体的起点')
@@ -90,11 +90,11 @@ export function createProgram(
 
   registerExportCommand(program);
 
-  // Hidden subcommand for the cc-connect stream-json protocol.
-  // cc-connect spawns: scream stream-json --output-format stream-json --input-format stream-json
+  // Hidden subcommand for the stream-json protocol stream-json protocol.
+  // the external client spawns: scream stream-json --output-format stream-json --input-format stream-json
   //   --permission-prompt-tool stdio --replay-user-messages --verbose ...
-  // Flag set mirrors cc-connect's agent invocation (v1.3.2+); keep it in sync
-  // so Commander never rejects a flag cc-connect may pass.
+  // Flag set mirrors the external client's agent invocation (v1.3.2+); keep it in sync
+  // so Commander never rejects a flag the external client may pass.
   // Flags we actually use: --input-format, --output-format, --resume, --model, --permission-mode,
   //   --append-system-prompt, --append-system-prompt-file, --system-prompt, --skills-dir,
   //   --allowedTools, --disallowedTools, --effort.
@@ -107,16 +107,16 @@ export function createProgram(
     .option('--resume <id>', 'resume a previous session')
     .option('--model <model>', 'model to use')
     .option('--permission-mode <mode>', 'permission mode')
-    .option('--permission-prompt-tool <mode>', '(ignored, cc-connect compat)')
-    .option('--replay-user-messages', '(ignored, cc-connect compat)')
-    .option('--verbose', '(ignored, cc-connect compat)')
+    .option('--permission-prompt-tool <mode>', '(ignored for compatibility)')
+    .option('--replay-user-messages', '(ignored for compatibility)')
+    .option('--verbose', '(ignored for compatibility)')
     .option('--system-prompt <text>', '(passed through to agent system prompt)')
     .option('--append-system-prompt <text>', '(passed through to agent)')
     .option('--append-system-prompt-file <path>', '(passed through to agent; file contents are read and merged)')
     .option('--allowedTools <list>', '(comma-separated tool whitelist)')
     .option('--disallowedTools <list>', '(comma-separated tool blacklist)')
     .option('--effort <value>', '(reasoning effort: low/medium/high/max)')
-    .option('--max-context-tokens <N>', '(ignored, cc-connect compat)')
+    .option('--max-context-tokens <N>', '(ignored for compatibility)')
     .option(
       '--skills-dir <dir>',
       'additional skills directory (repeatable)',
@@ -125,7 +125,7 @@ export function createProgram(
     )
     .option(
       '--plugin-dir <dir>',
-      '(ignored, cc-connect compat; repeatable)',
+      '(ignored, compatibility flag; repeatable)',
       (value: string, previous: string[]) => [...(previous ?? []), value],
       [] as string[],
     )
@@ -146,15 +146,36 @@ export function createProgram(
       });
     });
 
-  // `scream channel setup` - interactive cc-connect platform configuration wizard.
-  const channelCmd = program
-    .command('channel')
-    .description('管理 cc-connect 消息平台通道');
-  channelCmd
-    .command('setup')
-    .description('配置 cc-connect 并选择要连接的平台')
+  // `scream line` - native IM channel daemon (configured via /line in the TUI).
+  const lineCmd = program
+    .command('line')
+    .description('IM 原生通道守护进程（飞书/Lark、微信；在 TUI 里用 /line 配置）')
     .action(() => {
-      onChannelSetup();
+      onLine('run');
+    });
+  lineCmd
+    .command('run')
+    .description('前台运行守护进程（调试用）')
+    .action(() => {
+      onLine('run');
+    });
+  lineCmd
+    .command('start')
+    .description('后台启动守护进程')
+    .action(() => {
+      onLine('start');
+    });
+  lineCmd
+    .command('stop')
+    .description('停止守护进程')
+    .action(() => {
+      onLine('stop');
+    });
+  lineCmd
+    .command('status')
+    .description('查看守护进程状态')
+    .action(() => {
+      onLine('status');
     });
 
   program

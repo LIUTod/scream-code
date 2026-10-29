@@ -128,7 +128,8 @@ export interface AppState {
   /** Sidebar adjudication state (TUI-inferred from UpdateGoal tool calls). */
   goalJudge: GoalJudgeState;
   goalContinuationCount: number;
-  ccConnectActive: boolean;
+  /** line (native IM channel) daemon is running — footer dot. */
+  lineActive: boolean;
   wolfpackMode: boolean;
   /** RLM (persistent-python) mode is active. */
   rlmEnabled: boolean;

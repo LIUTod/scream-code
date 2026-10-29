@@ -104,8 +104,6 @@ describe('built-in slash command registry', () => {
       expect.arrayContaining([
         'auto',
         'btw',
-        'cc',
-        'cc-connect',
         'compact',
         'config',
         'editor',

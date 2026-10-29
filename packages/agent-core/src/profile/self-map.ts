@@ -43,6 +43,7 @@ export function buildSelfMap(options: BuildSelfMapOptions): string {
   const memoryDir = join(home, 'memory');
   const knowledgeDir = join(home, 'knowledge');
   const docsDir = join(home, 'docs');
+  const lineDir = join(home, 'line');
 
   const block = [
     'Your persistent configuration and data live under your Scream home directory',
@@ -61,6 +62,7 @@ export function buildSelfMap(options: BuildSelfMapOptions): string {
     `- memory/ — persistent cross-session memory: \`${memoryDir}\` (memos.sqlite + entries.jsonl)`,
     `- knowledge/ — local knowledge base (via the KnowledgeLookup tool): \`${knowledgeDir}\` (knowledge.db)`,
     `- docs/ — product documentation (configuration, skills, MCP, sessions, architecture): \`${docsDir}\``,
+    `- line/ — native Feishu & WeChat channel state (config.json 0600, daemon.pid, daemon.log, weixin/ cursor+context tokens): \`${lineDir}\``,
     '',
     'Boundaries:',
     '- Do not modify these files unless the user explicitly asks you to',

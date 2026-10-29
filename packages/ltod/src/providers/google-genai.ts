@@ -213,7 +213,9 @@ async function abortRace<T>(signal: AbortSignal | undefined, work: Promise<T>): 
   }
   let onAbort: (() => void) | undefined = undefined;
   const abortPromise = new Promise<never>((_, reject) => {
-    onAbort = () => reject(createAbortError());
+    onAbort = () => {
+      reject(createAbortError());
+    };
     signal.addEventListener('abort', onAbort, { once: true });
   });
   try {

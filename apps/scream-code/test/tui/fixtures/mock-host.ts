@@ -68,7 +68,6 @@ export function createMockAppState(overrides: Partial<AppState> = {}): AppState 
     goalActive: false,
     goalJudge: 'awaiting',
     goalContinuationCount: 0,
-    ccConnectActive: false,
     wolfpackMode: false,
     rlmEnabled: false,
     reconnectAttempt: 0,
@@ -390,7 +389,7 @@ export function makeMockSlashCommandHost(
         ? undefined
         : Array.from(options.skillCommands, ([key, value]) => [key, value]),
     ),
-    refreshCcStatus: vi.fn(),
+    refreshLineStatus: vi.fn(),
 
     streamingUI: makeMockStreamingUI(options.streamingUIOverrides),
     tasksBrowserController: makeMockTasksBrowser(),

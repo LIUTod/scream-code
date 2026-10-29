@@ -12,6 +12,8 @@ import {
 } from '@liutod-scream/pi-tui';
 import chalk from 'chalk';
 
+import { channelSessionPlatform, isChannelManagedSession } from '../../utils/channel-sessions';
+
 import { t } from '@scream-code/config';
 
 import { formatSessionLabel } from '#/tui/utils/session-label';
@@ -148,14 +150,14 @@ export class SessionPickerComponent extends Container implements Focusable {
           void this.onDeleteMany?.([...this.selectedIds]);
           return;
         }
-        if (session.metadata?.['source'] === 'cc-connect') {
+        if (session.metadata !== undefined && isChannelManagedSession(session.metadata)) {
           this.onStatus(t('session_picker.cc_restricted'));
           return;
         }
         void this.onDelete?.(session.id);
         return;
       }
-      if (session.metadata?.['source'] === 'cc-connect') {
+      if (session.metadata !== undefined && isChannelManagedSession(session.metadata)) {
         this.onStatus(t('session_picker.cc_restricted'));
         return;
       }
@@ -178,7 +180,7 @@ export class SessionPickerComponent extends Container implements Focusable {
     if ((k === 'd' || k === 'D') && !this.confirmingDelete && this.sessions.length > 0) {
       const session = this.sessions[this.selectedIndex];
       if (!session) return;
-      if (session.metadata?.['source'] === 'cc-connect') {
+      if (session.metadata !== undefined && isChannelManagedSession(session.metadata)) {
         this.onStatus(t('session_picker.cc_restricted'));
         return;
       }
@@ -188,10 +190,10 @@ export class SessionPickerComponent extends Container implements Focusable {
     }
     if (k === ' ' && !this.confirmingDelete) {
       const session = this.sessions[this.selectedIndex];
-      // The current session and cc-connect sessions cannot be deleted, so
-      // they are excluded from batch selection up front.
+      // The current session and channel-managed sessions cannot be deleted,
+      // so they are excluded from batch selection up front.
       if (!session || session.id === this.currentSessionId) return;
-      if (session.metadata?.['source'] === 'cc-connect') {
+      if (session.metadata !== undefined && isChannelManagedSession(session.metadata)) {
         this.onStatus(t('session_picker.cc_restricted'));
         return;
       }
@@ -203,7 +205,7 @@ export class SessionPickerComponent extends Container implements Focusable {
       if (this.confirmingDelete) return;
       if (this.sessions.length === 0) return;
       const selectable = this.sessions.filter(
-        (s) => s.id !== this.currentSessionId && s.metadata?.['source'] !== 'cc-connect',
+        (s) => s.id !== this.currentSessionId && !isChannelManagedSession(s.metadata),
       );
       if (selectable.length === 0) return;
       const allSelected = selectable.every((s) => this.selectedIds.has(s.id));
@@ -315,10 +317,7 @@ export class SessionPickerComponent extends Container implements Focusable {
     const titleStyle = isSelected ? chalk.hex(titleColor).bold : chalk.hex(titleColor);
 
     const time = formatRelativeTime(session.updated_at);
-    const isCcConnect = session.metadata?.['source'] === 'cc-connect';
-    const platform = isCcConnect
-      ? (session.metadata?.['agentType'] as string | undefined) ?? 'cc'
-      : undefined;
+    const platform = channelSessionPlatform(session.metadata);
     const badge = [
       isCurrent ? CURRENT_BADGE : '',
       platform ? `💬 ${platform}` : '',

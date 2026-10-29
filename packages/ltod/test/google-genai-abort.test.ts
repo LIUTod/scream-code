@@ -54,7 +54,9 @@ describe('google-genai abort race listener hygiene', () => {
       for await (const _part of stream) void _part;
     })();
 
-    setTimeout(() => controller.abort(), 5);
+    setTimeout(() => {
+      controller.abort();
+    }, 5);
     await expect(pending).rejects.toBeDefined();
   });
 

@@ -11,7 +11,7 @@ import { SidebarManager } from '#/tui/components/sidebar/sidebar-manager';
 import type { SidebarHubData, SidebarSessionStats } from '#/tui/components/sidebar/sidebar-panel';
 import { HUB_MODEL_ROW_ID } from '#/tui/utils/hub-probe';
 import { ImageAttachmentStore } from '#/tui/utils/image-attachment-store';
-import * as ccConnectStatus from '#/tui/utils/cc-connect-status';
+import * as lineStatus from '#/tui/utils/line-status';
 import type { LifecycleControllerHost } from '#/tui/controllers/lifecycle-controller';
 import type { ScreamHarness, Session } from '@scream-code/scream-code-sdk';
 import type { AppState, ScreamTUIOptions, TranscriptEntry } from '#/tui/types';
@@ -77,39 +77,39 @@ describe('LifecycleController', () => {
     vi.restoreAllMocks();
   });
 
-  describe('cc-connect status', () => {
+  describe('line daemon status', () => {
     it('commits the initial and interval poll results through setAppState', async () => {
       vi.useFakeTimers();
-      vi.spyOn(ccConnectStatus, 'checkCcConnectActive')
+      vi.spyOn(lineStatus, 'checkLineDaemonActive')
         .mockResolvedValueOnce(true)
         .mockResolvedValueOnce(false);
       const host = createMockHost();
       const controller = new LifecycleController(host);
 
-      controller.startCcConnectPolling();
+      controller.startLinePolling();
       await Promise.resolve();
-      expect(host.setAppState).toHaveBeenNthCalledWith(1, { ccConnectActive: true });
+      expect(host.setAppState).toHaveBeenNthCalledWith(1, { lineActive: true });
 
       vi.advanceTimersByTime(30_000);
       await Promise.resolve();
-      expect(host.setAppState).toHaveBeenNthCalledWith(2, { ccConnectActive: false });
+      expect(host.setAppState).toHaveBeenNthCalledWith(2, { lineActive: false });
 
-      controller.stopCcConnectPolling();
+      controller.stopLinePolling();
     });
 
-    it('commits the delayed refresh through setAppState after three seconds', async () => {
+    it('commits the delayed refresh through setAppState after 1.5 seconds', async () => {
       vi.useFakeTimers();
-      vi.spyOn(ccConnectStatus, 'checkCcConnectActive').mockResolvedValue(true);
+      vi.spyOn(lineStatus, 'checkLineDaemonActive').mockResolvedValue(true);
       const host = createMockHost();
       const controller = new LifecycleController(host);
 
-      controller.refreshCcStatus();
-      vi.advanceTimersByTime(2999);
+      controller.refreshLineStatus();
+      vi.advanceTimersByTime(1499);
       expect(host.setAppState).not.toHaveBeenCalled();
 
       vi.advanceTimersByTime(1);
       await Promise.resolve();
-      expect(host.setAppState).toHaveBeenCalledWith({ ccConnectActive: true });
+      expect(host.setAppState).toHaveBeenCalledWith({ lineActive: true });
     });
   });
 

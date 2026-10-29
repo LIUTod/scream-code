@@ -62,7 +62,7 @@ When Scream wants to modify files or run commands, an approval panel pops up —
 - **High Cache Hit Rate** — per-session HitR in the status bar, tuned across compatible protocols to maximize cache hits without compromising quality.
 - **MCP / Skills / 130+ providers** — all DIY-configurable; ships with browser automation and macOS desktop automation.
 - **Self-Evolving Plugins** — a built-in `ManagePlugin` tool lets the agent find, make, and install add-on skills/MCP servers itself and hot-apply them to the running session: nothing executes until an approved activate, a circuit breaker reclaims a plugin after repeated failures, immune memory warns before reinstalling a source that already broke, and upgrades keep a rollback-ready backup.
-- **Remote Control** — drive Scream from WeChat, Feishu, Slack, DingTalk, QQ, Telegram, Discord via cc-connect.
+- **Remote Control** — drive Scream from WeChat or Feishu/Lark via the native `/line` channel.
 
 ### Slash Commands
 
@@ -121,8 +121,7 @@ Type `/` in the input to browse. All 55 commands:
 | `/extension` | Code extensions: activate or deactivate a plugin entry point |
 | `/make-skill` | Distill the session into a Skill |
 | `/image` | Draw or edit an image (image skill; set up once with `/config image`) |
-| `/cc` | Control your cc daemon |
-| `/cc-connect` | cc-connect quick channel setup |
+| `/line` | Native IM channels: Feishu/Lark & WeChat (wizard + daemon) |
 | **Tools** | |
 | `/search` | Search the conversation (Esc to close) |
 | `/trace` | View the session working trajectory |
@@ -152,6 +151,7 @@ Website: [scream.chat](https://scream.chat)
 - **Skills** — skill packages, discovery and `/skill:<name>`: [`docs/skills.md`](docs/skills.md)
 - **MCP** — external tool servers: [`docs/mcp.md`](docs/mcp.md)
 - **Sessions** — storage, resume, fork and export: [`docs/sessions.md`](docs/sessions.md)
+- **Feishu & WeChat channels** — the `/line` wizard and daemon: [`docs/line.md`](docs/line.md)
 - **Architecture** — package layout and prompt assembly: [`docs/architecture.md`](docs/architecture.md)
 - **Self-Evolution manual** — walk through making, installing, tripping, and rolling back a plugin: `packages/agent-core/docs/self-evolution-e2e.md`.
 
