@@ -18,12 +18,14 @@ const PREFS_CONTENT = [
 
 interface StubState {
   history: ContextMessage[];
+  systemPrompt?: string;
 }
 
 function makeAgent(state: StubState): Agent {
   return {
     type: 'main',
     jian: testJian,
+    config: { systemPrompt: state.systemPrompt ?? '' },
     context: {
       history: state.history,
       appendSystemReminder: (content: string, origin: unknown) => {
@@ -179,5 +181,41 @@ describe('UserPrefsInjector', () => {
       (m) => m.origin?.kind === 'injection' && m.origin?.variant === 'user_prefs',
     );
     expect(injections).toHaveLength(2);
+  });
+
+  it('skips the reminder while the system prompt already carries the prefs', async () => {
+    await writeFile(join(homeDir, 'user-prefs.md'), PREFS_CONTENT, 'utf-8');
+    const state: StubState = { history: [], systemPrompt: PREFS_CONTENT };
+    const agent = makeAgent(state);
+    const injector = new UserPrefsInjector(agent);
+
+    state.history.push(userPrompt('first task'));
+    await injector.inject();
+
+    const reminders = state.history.filter(
+      (m) => m.origin?.kind === 'injection' && m.origin?.variant === 'user_prefs',
+    );
+    expect(reminders).toHaveLength(0);
+  });
+
+  it('still fires when the prefs change after the system prompt carried an older copy', async () => {
+    await writeFile(join(homeDir, 'user-prefs.md'), PREFS_CONTENT, 'utf-8');
+    const state: StubState = { history: [], systemPrompt: PREFS_CONTENT };
+    const agent = makeAgent(state);
+    const injector = new UserPrefsInjector(agent);
+
+    state.history.push(userPrompt('first task'));
+    await injector.inject();
+
+    const changed = `${PREFS_CONTENT}\n- New rule: never push without asking.`;
+    await writeFile(join(homeDir, 'user-prefs.md'), changed, 'utf-8');
+    state.history.push(userPrompt('second task'));
+    await injector.inject();
+
+    const reminders = state.history.filter(
+      (m) => m.origin?.kind === 'injection' && m.origin?.variant === 'user_prefs',
+    );
+    expect(reminders).toHaveLength(1);
+    expect(reminders[0]?.content?.[0]?.text).toContain('never push without asking');
   });
 });

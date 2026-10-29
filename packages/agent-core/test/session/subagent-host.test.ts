@@ -820,7 +820,15 @@ describe('SessionSubagentHost', () => {
       'LSP',
       'Read',
     ]);
-    expect(child.llmCalls[0]?.history).toMatchObject([
+    // Permission-mode reminders are injected as extra user messages; they are
+    // expected and should not change what the conversational history asserts.
+    const conversationalHistory = (child.llmCalls[0]?.history ?? []).filter(
+      (message) =>
+        !((message.content?.[0] as { text?: string } | undefined)?.text ?? '').startsWith(
+          '<system-reminder>',
+        ),
+    );
+    expect(conversationalHistory).toMatchObject([
       {
         role: 'user',
         content: [{ type: 'text', text: 'Find the cause' }],
@@ -1737,6 +1745,7 @@ describe('SessionSubagentHost', () => {
       messages:
         user: text "Earlier context"
         user: text "Continue from context"
+        user: text "<system-reminder>\\nYolo permission mode is active — every tool call is approved automatically, including irreversible ones.\\n  - Nothing will stop you, so verify destructive operations yourself before running them.\\n</system-reminder>"
     `);
     expect(parent.allEvents).toContainEqual(
       expect.objectContaining({

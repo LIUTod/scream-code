@@ -113,9 +113,10 @@ describe('Agent permission', () => {
       [wire] turn.prompt                 { "input": [ { "type": "text", "text": "Run Bash in yolo mode" } ], "origin": { "kind": "user" }, "time": "<time>" }
       [emit] turn.started                { "turnId": 0, "origin": { "kind": "user" } }
       [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "Run Bash in yolo mode" } ], "toolCalls": [], "origin": { "kind": "user" }, "id": "m0" }, "time": "<time>" }
+      [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "<system-reminder>\\nYolo permission mode is active — every tool call is approved automatically, including irreversible ones.\\n  - Nothing will stop you, so verify destructive operations yourself before running them.\\n</system-reminder>" } ], "toolCalls": [], "origin": { "kind": "injection", "variant": "permission_mode" }, "id": "m1" }, "time": "<time>" }
       [wire] context.append_loop_event   { "event": { "type": "step.begin", "uuid": "<uuid-1>", "turnId": "0", "step": 1 }, "time": "<time>" }
       [emit] turn.step.started           { "turnId": 0, "step": 1, "stepId": "<uuid-1>" }
-      [wire] request.header              { "provider": "scream", "model": "mock-model", "modelAlias": "mock-model", "systemPrompt": "You are a deterministic test agent.", "activeTools": [ "Bash" ], "messagesCount": 1, "estimatedInputTokens": "<tokens>", "time": "<time>" }
+      [wire] request.header              { "provider": "scream", "model": "mock-model", "modelAlias": "mock-model", "systemPrompt": "You are a deterministic test agent.", "activeTools": [ "Bash" ], "messagesCount": 2, "estimatedInputTokens": "<tokens>", "time": "<time>" }
       [emit] assistant.delta             { "turnId": 0, "delta": "Running in yolo mode." }
       [emit] tool.call.delta             { "turnId": 0, "toolCallId": "call_bash", "name": "Bash", "argumentsPart": "{\\"command\\":\\"printf permission-output\\",\\"timeout\\":60}" }
       [wire] context.append_loop_event   { "event": { "type": "block.start", "uuid": "<uuid-2>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "index": 0, "blockType": "text" }, "time": "<time>" }
@@ -128,21 +129,21 @@ describe('Agent permission', () => {
       [emit] tool.progress               { "turnId": 0, "toolCallId": "call_bash", "update": { "kind": "stdout", "text": "yolo-output" } }
       [wire] context.append_loop_event   { "event": { "type": "tool.result", "parentUuid": "call_bash", "toolCallId": "call_bash", "result": { "output": "yolo-output", "message": "Command executed successfully." } }, "time": "<time>" }
       [emit] tool.result                 { "turnId": 0, "toolCallId": "call_bash", "output": "yolo-output", "message": "Command executed successfully." }
-      [wire] context.append_loop_event   { "event": { "type": "step.end", "uuid": "<uuid-1>", "turnId": "0", "step": 1, "usage": { "inputOther": 7, "output": 25, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "tool_use" }, "time": "<time>" }
-      [emit] turn.step.completed         { "turnId": 0, "step": 1, "stepId": "<uuid-1>", "usage": { "inputOther": 7, "output": 25, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "tool_use" }
-      [wire] usage.record                { "model": "mock-model", "usage": { "inputOther": 7, "output": 25, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
-      [emit] agent.status.updated        { "agentId": "main", "model": "mock-model", "thinkingLevel": "off", "contextTokens": 32, "maxContextTokens": 1000000, "contextUsage": 0.000032, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "rlmMaxDepth": null, "permission": "yolo", "usage": { "byModel": { "mock-model": { "inputOther": 7, "output": 25, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 7, "output": 25, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 7, "output": 25, "inputCacheRead": 0, "inputCacheCreation": 0 }, "turnTotal": { "inputOther": 7, "output": 25, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
+      [wire] context.append_loop_event   { "event": { "type": "step.end", "uuid": "<uuid-1>", "turnId": "0", "step": 1, "usage": { "inputOther": 67, "output": 25, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "tool_use" }, "time": "<time>" }
+      [emit] turn.step.completed         { "turnId": 0, "step": 1, "stepId": "<uuid-1>", "usage": { "inputOther": 67, "output": 25, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "tool_use" }
+      [wire] usage.record                { "model": "mock-model", "usage": { "inputOther": 67, "output": 25, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
+      [emit] agent.status.updated        { "agentId": "main", "model": "mock-model", "thinkingLevel": "off", "contextTokens": 92, "maxContextTokens": 1000000, "contextUsage": 0.000092, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "rlmMaxDepth": null, "permission": "yolo", "usage": { "byModel": { "mock-model": { "inputOther": 67, "output": 25, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 67, "output": 25, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 67, "output": 25, "inputCacheRead": 0, "inputCacheCreation": 0 }, "turnTotal": { "inputOther": 67, "output": 25, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
       [wire] context.append_loop_event   { "event": { "type": "step.begin", "uuid": "<uuid-7>", "turnId": "0", "step": 2 }, "time": "<time>" }
       [emit] turn.step.started           { "turnId": 0, "step": 2, "stepId": "<uuid-7>" }
-      [wire] request.header              { "provider": "scream", "model": "mock-model", "modelAlias": "mock-model", "systemPromptReused": true, "activeTools": [ "Bash" ], "messagesCount": 3, "estimatedInputTokens": "<tokens>", "time": "<time>" }
+      [wire] request.header              { "provider": "scream", "model": "mock-model", "modelAlias": "mock-model", "systemPromptReused": true, "activeTools": [ "Bash" ], "messagesCount": 4, "estimatedInputTokens": "<tokens>", "time": "<time>" }
       [emit] assistant.delta             { "turnId": 0, "delta": "The command printed yolo-output." }
       [wire] context.append_loop_event   { "event": { "type": "block.start", "uuid": "<uuid-8>", "turnId": "0", "step": 2, "stepUuid": "<uuid-7>", "index": 0, "blockType": "text" }, "time": "<time>" }
       [wire] context.append_loop_event   { "event": { "type": "content.part", "uuid": "<uuid-9>", "turnId": "0", "step": 2, "stepUuid": "<uuid-7>", "part": { "type": "text", "text": "The command printed yolo-output." } }, "time": "<time>" }
       [wire] context.append_loop_event   { "event": { "type": "block.end", "uuid": "<uuid-10>", "turnId": "0", "step": 2, "stepUuid": "<uuid-7>", "index": 0, "blockType": "text" }, "time": "<time>" }
-      [wire] context.append_loop_event   { "event": { "type": "step.end", "uuid": "<uuid-7>", "turnId": "0", "step": 2, "usage": { "inputOther": 36, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }, "time": "<time>" }
-      [emit] turn.step.completed         { "turnId": 0, "step": 2, "stepId": "<uuid-7>", "usage": { "inputOther": 36, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }
-      [wire] usage.record                { "model": "mock-model", "usage": { "inputOther": 36, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
-      [emit] agent.status.updated        { "agentId": "main", "model": "mock-model", "thinkingLevel": "off", "contextTokens": 47, "maxContextTokens": 1000000, "contextUsage": 0.000047, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "rlmMaxDepth": null, "permission": "yolo", "usage": { "byModel": { "mock-model": { "inputOther": 43, "output": 36, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 43, "output": 36, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 43, "output": 36, "inputCacheRead": 0, "inputCacheCreation": 0 }, "turnTotal": { "inputOther": 43, "output": 36, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
+      [wire] context.append_loop_event   { "event": { "type": "step.end", "uuid": "<uuid-7>", "turnId": "0", "step": 2, "usage": { "inputOther": 96, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }, "time": "<time>" }
+      [emit] turn.step.completed         { "turnId": 0, "step": 2, "stepId": "<uuid-7>", "usage": { "inputOther": 96, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }
+      [wire] usage.record                { "model": "mock-model", "usage": { "inputOther": 96, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
+      [emit] agent.status.updated        { "agentId": "main", "model": "mock-model", "thinkingLevel": "off", "contextTokens": 107, "maxContextTokens": 1000000, "contextUsage": 0.000107, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "rlmMaxDepth": null, "permission": "yolo", "usage": { "byModel": { "mock-model": { "inputOther": 163, "output": 36, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 163, "output": 36, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 163, "output": 36, "inputCacheRead": 0, "inputCacheCreation": 0 }, "turnTotal": { "inputOther": 163, "output": 36, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
       [emit] turn.ended                  { "turnId": 0, "reason": "completed" }
     `);
     expect(ctx.llmInputs()).toMatchInlineSnapshot(`
@@ -151,6 +152,7 @@ describe('Agent permission', () => {
         tools: Bash
         messages:
           user: text "Run Bash in yolo mode"
+          user: text "<system-reminder>\\nYolo permission mode is active — every tool call is approved automatically, including irreversible ones.\\n  - Nothing will stop you, so verify destructive operations yourself before running them.\\n</system-reminder>"
 
       call 2:
         messages:
@@ -187,10 +189,10 @@ describe('Agent permission', () => {
       [wire] context.append_loop_event   { "event": { "type": "block.start", "uuid": "<uuid-6>", "turnId": "1", "step": 1, "stepUuid": "<uuid-5>", "index": 0, "blockType": "text" }, "time": "<time>" }
       [wire] context.append_loop_event   { "event": { "type": "content.part", "uuid": "<uuid-7>", "turnId": "1", "step": 1, "stepUuid": "<uuid-5>", "part": { "type": "text", "text": "Manual turn done." } }, "time": "<time>" }
       [wire] context.append_loop_event   { "event": { "type": "block.end", "uuid": "<uuid-8>", "turnId": "1", "step": 1, "stepUuid": "<uuid-5>", "index": 0, "blockType": "text" }, "time": "<time>" }
-      [wire] context.append_loop_event   { "event": { "type": "step.end", "uuid": "<uuid-5>", "turnId": "1", "step": 1, "usage": { "inputOther": 197, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }, "time": "<time>" }
-      [emit] turn.step.completed         { "turnId": 1, "step": 1, "stepId": "<uuid-5>", "usage": { "inputOther": 197, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }
-      [wire] usage.record                { "model": "mock-model", "usage": { "inputOther": 197, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
-      [emit] agent.status.updated        { "agentId": "main", "model": "mock-model", "thinkingLevel": "off", "contextTokens": 205, "maxContextTokens": 1000000, "contextUsage": 0.000205, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "rlmMaxDepth": null, "permission": "manual", "usage": { "byModel": { "mock-model": { "inputOther": 322, "output": 15, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 322, "output": 15, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 197, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 }, "turnTotal": { "inputOther": 322, "output": 15, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
+      [wire] context.append_loop_event   { "event": { "type": "step.end", "uuid": "<uuid-5>", "turnId": "1", "step": 1, "usage": { "inputOther": 239, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }, "time": "<time>" }
+      [emit] turn.step.completed         { "turnId": 1, "step": 1, "stepId": "<uuid-5>", "usage": { "inputOther": 239, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }
+      [wire] usage.record                { "model": "mock-model", "usage": { "inputOther": 239, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
+      [emit] agent.status.updated        { "agentId": "main", "model": "mock-model", "thinkingLevel": "off", "contextTokens": 247, "maxContextTokens": 1000000, "contextUsage": 0.000247, "planMode": false, "wolfpackMode": false, "rlmEnabled": false, "rlmMaxDepth": null, "permission": "manual", "usage": { "byModel": { "mock-model": { "inputOther": 364, "output": 15, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 364, "output": 15, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 239, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 }, "turnTotal": { "inputOther": 364, "output": 15, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
       [emit] turn.ended                  { "turnId": 1, "reason": "completed" }
     `);
     expect(ctx.llmInputs()).toMatchInlineSnapshot(`
@@ -297,6 +299,71 @@ describe('Permission auto mode', () => {
     expect(appendSystemReminder).toHaveBeenCalledWith(
       expect.stringContaining('Do NOT call AskUserQuestion while auto mode is active'),
       { kind: 'injection', variant: 'permission_mode' },
+    );
+  });
+
+  it('announces bot mode with the unattended-execution rules', async () => {
+    const appendSystemReminder = vi.fn();
+    const agent = {
+      permission: { mode: 'bot' },
+      context: { history: [], appendSystemReminder },
+    } as unknown as Agent;
+    const injector = new PermissionModeInjector(agent);
+
+    await injector.inject();
+
+    expect(appendSystemReminder).toHaveBeenCalledWith(
+      expect.stringContaining('Bot permission mode is active'),
+      { kind: 'injection', variant: 'permission_mode' },
+    );
+    expect(appendSystemReminder).toHaveBeenCalledWith(
+      expect.stringContaining('Do not retry a denied call unchanged'),
+      expect.anything(),
+    );
+  });
+
+  it('announces yolo mode and its destructive-action caveat', async () => {
+    const appendSystemReminder = vi.fn();
+    const agent = {
+      permission: { mode: 'yolo' },
+      context: { history: [], appendSystemReminder },
+    } as unknown as Agent;
+    const injector = new PermissionModeInjector(agent);
+
+    await injector.inject();
+
+    expect(appendSystemReminder).toHaveBeenCalledWith(
+      expect.stringContaining('Yolo permission mode is active'),
+      { kind: 'injection', variant: 'permission_mode' },
+    );
+    expect(appendSystemReminder).toHaveBeenCalledWith(
+      expect.stringContaining('verify destructive operations yourself'),
+      expect.anything(),
+    );
+  });
+
+  it('announces a return to manual mode only on a real transition', async () => {
+    const appendSystemReminder = vi.fn();
+    const agent = {
+      permission: { mode: 'manual' },
+      context: { history: [], appendSystemReminder },
+    } as unknown as Agent;
+    const injector = new PermissionModeInjector(agent);
+
+    // Session start in manual mode: nothing to announce.
+    await injector.inject();
+    expect(appendSystemReminder).not.toHaveBeenCalled();
+
+    (agent.permission as { mode: string }).mode = 'auto';
+    await injector.inject();
+
+    appendSystemReminder.mockClear();
+    (agent.permission as { mode: string }).mode = 'manual';
+    await injector.inject();
+
+    expect(appendSystemReminder).toHaveBeenCalledWith(
+      expect.stringContaining('Manual permission mode is active'),
+      expect.anything(),
     );
   });
 

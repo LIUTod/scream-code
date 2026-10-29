@@ -60,6 +60,7 @@ describe('Agent resume', () => {
           assistant: text "Historical compacted summary."
           user: text "Fresh prompt after resume"
           user: text <plan-mode-reminder>
+          user: text "<system-reminder>\\nYolo permission mode is active — every tool call is approved automatically, including irreversible ones.\\n  - Nothing will stop you, so verify destructive operations yourself before running them.\\n</system-reminder>"
     `);
   });
 

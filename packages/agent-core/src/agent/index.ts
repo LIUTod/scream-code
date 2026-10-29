@@ -744,6 +744,10 @@ export class Agent {
       skills: this.skills?.registry,
       cwdListing: context?.cwdListing,
       agentsMd: context?.agentsMd,
+      // Without this the `{{ ROLE_ADDITIONAL }}` block in system.md never
+      // renders, and user-prefs.md only survives through the per-turn
+      // reminder injector instead of living in the (cacheable) system prompt.
+      roleAdditional: context?.roleAdditional,
     });
     this.config.update({ profileName: profile.name, systemPrompt, activeTools: profile.tools });
     this.tools.setActiveTools(profile.tools);

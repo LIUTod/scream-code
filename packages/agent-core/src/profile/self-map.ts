@@ -42,6 +42,7 @@ export function buildSelfMap(options: BuildSelfMapOptions): string {
   const pluginsDir = join(home, 'plugins');
   const memoryDir = join(home, 'memory');
   const knowledgeDir = join(home, 'knowledge');
+  const docsDir = join(home, 'docs');
 
   const block = [
     'Your persistent configuration and data live under your Scream home directory',
@@ -59,6 +60,7 @@ export function buildSelfMap(options: BuildSelfMapOptions): string {
     `- plugins/ — managed plugins and plugin-managed skills: \`${pluginsDir}\` (installed.json + managed/<name>/); manage them with the \`ManagePlugin\` builtin (read-only actions are free, mutations ask for approval) — never edit installed.json by hand`,
     `- memory/ — persistent cross-session memory: \`${memoryDir}\` (memos.sqlite + entries.jsonl)`,
     `- knowledge/ — local knowledge base (via the KnowledgeLookup tool): \`${knowledgeDir}\` (knowledge.db)`,
+    `- docs/ — product documentation (configuration, skills, MCP, sessions, architecture): \`${docsDir}\``,
     '',
     'Boundaries:',
     '- Do not modify these files unless the user explicitly asks you to',

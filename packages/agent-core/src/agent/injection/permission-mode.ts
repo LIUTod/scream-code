@@ -24,14 +24,60 @@ const ASK_MODE_EXIT_REMINDER = [
   '  - Resume normal work. The previous read-only Q&A constraint is lifted.',
 ].join('\n');
 
+const BOT_MODE_ENTER_REMINDER = [
+  'Bot permission mode is active — unattended execution.',
+  '  - Reversible work (reads, in-workspace edits, read-only commands) runs without approval.',
+  '  - Irreversible actions (push, publish, delete, sensitive files, unclassified operations) are denied automatically and queued for the user to review; the denial reason is returned to you.',
+  '  - Do not retry a denied call unchanged. Continue with what is allowed and report what needs the user.',
+].join('\n');
+
+const BOT_MODE_EXIT_REMINDER = [
+  'Bot permission mode is no longer active. Approval handling is back to the current mode.',
+].join('\n');
+
+const YOLO_MODE_ENTER_REMINDER = [
+  'Yolo permission mode is active — every tool call is approved automatically, including irreversible ones.',
+  '  - Nothing will stop you, so verify destructive operations yourself before running them.',
+].join('\n');
+
+const YOLO_MODE_EXIT_REMINDER = [
+  'Yolo permission mode is no longer active. Approvals follow the current mode again.',
+].join('\n');
+
+const MANUAL_MODE_ENTER_REMINDER = [
+  'Manual permission mode is active — tool calls that need approval will ask the user.',
+  '  - Expect waits on approval; state intent before long or destructive operations.',
+].join('\n');
+
 export class PermissionModeInjector extends DynamicInjector {
   protected override readonly injectionVariant = 'permission_mode';
   private lastMode: PermissionMode | undefined;
+
+  // Context maintenance resets the marker too: the reminder only lives in the
+  // context, so after /clear, /undo of the reminder message, or a compaction
+  // that drops it, the next pass must re-announce the current mode instead of
+  // silently losing the awareness until the user happens to switch again.
+  override onContextClear(): void {
+    super.onContextClear();
+    this.lastMode = undefined;
+  }
+
+  override onContextCompacted(compactedCount: number): void {
+    super.onContextCompacted(compactedCount);
+    this.lastMode = undefined;
+  }
+
+  override onContextMessageRemoved(index: number): void {
+    super.onContextMessageRemoved(index);
+    this.lastMode = undefined;
+  }
 
   getInjection(): string | undefined {
     const mode = this.agent.permission.mode;
     const previousMode = this.lastMode;
 
+    // A same-value sync is a no-op: without this short-circuit every injector
+    // pass would re-announce the current mode.
     if (mode === previousMode) return undefined;
 
     this.lastMode = mode;
@@ -43,6 +89,12 @@ export class PermissionModeInjector extends DynamicInjector {
     if (previousMode === 'auto') parts.push(AUTO_MODE_EXIT_REMINDER);
     if (mode === 'ask') parts.push(ASK_MODE_ENTER_REMINDER);
     if (previousMode === 'ask') parts.push(ASK_MODE_EXIT_REMINDER);
+    if (mode === 'bot') parts.push(BOT_MODE_ENTER_REMINDER);
+    if (previousMode === 'bot') parts.push(BOT_MODE_EXIT_REMINDER);
+    if (mode === 'yolo') parts.push(YOLO_MODE_ENTER_REMINDER);
+    if (previousMode === 'yolo') parts.push(YOLO_MODE_EXIT_REMINDER);
+    // Manual is the default at session start, so only announce a return to it.
+    if (mode === 'manual' && previousMode !== undefined) parts.push(MANUAL_MODE_ENTER_REMINDER);
     return parts.length > 0 ? parts.join('\n\n') : undefined;
   }
 }

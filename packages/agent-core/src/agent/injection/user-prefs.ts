@@ -39,6 +39,19 @@ export class UserPrefsInjector extends DynamicInjector {
     ].join('\n');
 
     if (this.injectedAt !== null && text === this.lastInjectedText) return undefined;
+
+    // The system prompt carries the preferences too (Agent.useProfile passes
+    // roleAdditional). While that copy is current, do not send the same block
+    // again as a reminder — a fresh session would otherwise carry it twice.
+    // Marking injectedAt keeps later passes cheap; a context reset re-checks,
+    // and a genuine prefs change changes the text so the reminder still fires.
+    const systemPrompt = this.agent.config?.systemPrompt ?? '';
+    if (this.injectedAt === null && systemPrompt.includes(prefs)) {
+      this.lastInjectedText = text;
+      this.injectedAt = this.agent.context.history.length;
+      return undefined;
+    }
+
     this.lastInjectedText = text;
     return text;
   }
