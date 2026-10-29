@@ -138,17 +138,20 @@ async function isProcessAlive(pid: number): Promise<boolean> {
     if (code === 'EPERM') return true; // exists, owned by another user
     return false; // ESRCH — no such process
   }
-  // PID reuse guard: the pid is alive, but is it a line daemon? Check the
-  // process name on unix (`ps` is unavailable on Windows).
+  // PID reuse guard: the pid is alive, but is it a line daemon? Match the full
+  // command line (works on every POSIX platform; `comm` is kernel-truncated
+  // and varies between environments). kill(0) stays the primary signal — an
+  // unavailable `ps` must not turn a live daemon into a "dead" one.
   if (process.platform === 'win32') return true;
   try {
-    const { stdout } = await execFileAsync('ps', ['-p', String(pid), '-o', 'comm='], {
+    const { stdout } = await execFileAsync('ps', ['-p', String(pid), '-o', 'command='], {
       timeout: 3_000,
     });
-    const comm = stdout.trim().toLowerCase();
-    return comm.includes('node') || comm.includes('scream') || comm.length === 0;
+    const commandLine = stdout.trim().toLowerCase();
+    if (commandLine === '') return true;
+    return commandLine.includes('node') || commandLine.includes('scream');
   } catch {
-    return false; // process exited between kill(0) and ps
+    return true; // `ps` unavailable — trust kill(0)
   }
 }
 
