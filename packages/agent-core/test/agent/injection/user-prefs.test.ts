@@ -216,6 +216,8 @@ describe('UserPrefsInjector', () => {
       (m) => m.origin?.kind === 'injection' && m.origin?.variant === 'user_prefs',
     );
     expect(reminders).toHaveLength(1);
-    expect(reminders[0]?.content?.[0]?.text).toContain('never push without asking');
+    const firstPart = reminders[0]?.content?.[0];
+    const reminderText = firstPart?.type === 'text' ? firstPart.text : '';
+    expect(reminderText).toContain('never push without asking');
   });
 });
