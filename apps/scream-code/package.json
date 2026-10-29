@@ -26,7 +26,8 @@
     "scream": "dist/main.mjs"
   },
   "files": [
-    "dist"
+    "dist",
+    "docs"
   ],
   "type": "module",
   "imports": {

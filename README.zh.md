@@ -142,6 +142,11 @@ scream -y         # 自动批准模式
 
 官网：https://scream.chat
 
+- **配置** — 服务商、模型别名与生图： [`docs/configuration.md`](docs/configuration.md)
+- **技能** — 技能包、发现路径与 `/skill:<name>`： [`docs/skills.md`](docs/skills.md)
+- **MCP** — 外部工具服务： [`docs/mcp.md`](docs/mcp.md)
+- **会话** — 存储、恢复、分叉与导出： [`docs/sessions.md`](docs/sessions.md)
+- **架构** — 包分层与提示词组装： [`docs/architecture.md`](docs/architecture.md)
 - **自进化实测手册** — 从自制技能、安装、激活、熔断到回滚的完整演练：`packages/agent-core/docs/self-evolution-e2e.md`。
 
 ### 致谢

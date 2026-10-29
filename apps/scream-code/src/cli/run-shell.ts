@@ -12,6 +12,7 @@ import { ScreamTUI } from '#/tui/index';
 import { detectTerminalTheme } from '#/tui/theme/detect';
 
 import type { CLIOptions } from './options';
+import { ensureDocsInstalled } from './ensure-docs';
 import { refreshUpdateCache } from './update/refresh';
 import { createScreamCodeHostIdentity } from './version';
 
@@ -19,6 +20,15 @@ export async function runShell(
   opts: CLIOptions,
   version: string,
 ): Promise<void> {
+  // Ship the product docs into the Scream home so the model can read them from
+  // an absolute path. A read-only home must not block the TUI, so failures are
+  // swallowed: the prompt tells the model to say the docs are missing.
+  try {
+    ensureDocsInstalled(resolveScreamHome(), import.meta.dirname);
+  } catch {
+    // ignored on purpose
+  }
+
   let tuiConfig: TuiConfig;
   let configWarning: string | undefined;
   try {

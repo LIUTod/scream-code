@@ -10,7 +10,7 @@
  * Run automatically by `npm publish` / `pnpm publish` via the
  * `prepublishOnly` script hook. Run manually with `node scripts/verify-publish.mjs`.
  */
-import { copyFileSync, readFileSync, readdirSync, existsSync } from 'node:fs';
+import { cpSync, readFileSync, readdirSync, existsSync, rmSync, writeFileSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
@@ -32,7 +32,20 @@ if (!existsSync(srcReadme)) {
   console.error(`[verify-publish] FAIL: repo-root README.md not found at ${srcReadme}`);
   process.exit(1);
 }
-copyFileSync(srcReadme, dstReadme);
+// The package copy sits one directory deeper than the repo root, so
+// repo-relative links would 404 on npmjs.com. Rewrite `docs/...` links to
+// absolute GitHub URLs while copying.
+const repoUrl = String(pkg.repository?.url ?? '')
+  .replace(/^git\+/, '')
+  .replace(/\.git$/, '');
+const docsBase = repoUrl.length > 0 ? `${repoUrl}/blob/main` : null;
+const readmeSource = readFileSync(srcReadme, 'utf-8');
+writeFileSync(
+  dstReadme,
+  docsBase === null
+    ? readmeSource
+    : readmeSource.replaceAll('](docs/', `](${docsBase}/docs/`),
+);
 console.log('[verify-publish] Synced README.md from repo root to package dir.');
 
 // Step 1 — rebuild dist so __SCREAM_CODE_VERSION__ is freshly injected.
@@ -47,6 +60,20 @@ if (!existsSync(distDir)) {
   console.error(`[verify-publish] FAIL: dist directory not found at ${distDir}`);
   process.exit(1);
 }
+
+// Step 2b — the package ships `docs/` (see package.json "files"), but the
+// source lives at the repo root, so copy it into the package before publishing.
+const docsSource = join(repoRoot, 'docs');
+const docsTarget = join(pkgRoot, 'docs');
+if (!existsSync(docsSource)) {
+  console.error(
+    '[verify-publish] FAIL: docs/ missing at repo root — package.json "files" advertises it, publishing a docs-less tarball would break the model-facing index.',
+  );
+  process.exit(1);
+}
+rmSync(docsTarget, { recursive: true, force: true });
+cpSync(docsSource, docsTarget, { recursive: true });
+console.log('[verify-publish] Copied product docs into the package.');
 
 // Step 3 — scan all .mjs files for SCREAM_BUILD_INFO.version injection.
 //    `optionalBuildString("<version>")` is the call site in build-info.ts:20

@@ -1,6 +1,7 @@
 node_modules/
 dist/
 dist-native/
+apps/scream-code/docs/
 .tmp-api-extractor/
 coverage/
 *.tsbuildinfo

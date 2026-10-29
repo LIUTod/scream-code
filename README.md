@@ -148,6 +148,11 @@ Type `/` in the input to browse. All 55 commands:
 
 Website: [scream.chat](https://scream.chat)
 
+- **Configuration** — providers, model aliases and image generation: [`docs/configuration.md`](docs/configuration.md)
+- **Skills** — skill packages, discovery and `/skill:<name>`: [`docs/skills.md`](docs/skills.md)
+- **MCP** — external tool servers: [`docs/mcp.md`](docs/mcp.md)
+- **Sessions** — storage, resume, fork and export: [`docs/sessions.md`](docs/sessions.md)
+- **Architecture** — package layout and prompt assembly: [`docs/architecture.md`](docs/architecture.md)
 - **Self-Evolution manual** — walk through making, installing, tripping, and rolling back a plugin: `packages/agent-core/docs/self-evolution-e2e.md`.
 
 ### Contributing
