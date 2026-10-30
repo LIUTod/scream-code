@@ -21,10 +21,6 @@ import type {
 import { formatErrorMessage, isTodoItemShape } from '../utils/event-payload';
 import { buildApprovalNotice } from '../utils/approval-notice';
 import { formatBackgroundAgentTranscript } from '../utils/background-agent-status';
-import {
-  childRequestFieldsFromNotification,
-  renderChildRequestNotice,
-} from '../utils/child-request-notice';
 import { formatBackgroundTaskTranscript } from '../utils/background-task-status';
 import { isBackgroundedHandoffResult } from '../utils/subagent-handoff';
 import {
@@ -289,7 +285,8 @@ export class SessionReplayRenderer {
       return;
     }
     if (message.origin?.kind === 'system_trigger') {
-      this.renderSystemTrigger(context, message);
+      // Internal injections (including child_request): the live transcript no
+      // longer prints them, so replay must not either.
       return;
     }
 
@@ -307,30 +304,6 @@ export class SessionReplayRenderer {
     this.host.appendTranscriptEntry(
       replayEntry(context, 'user', contentPartsToText(message.content), 'plain'),
     );
-  }
-
-  /**
-   * `system_trigger` messages are internal injections, not user speech: the
-   * live transcript never prints them and markdown export filters them out, so
-   * replay must not surface them as a user row either. The single exception is
-   * a child→parent collaboration request, which gets the same notice the live
-   * path shows. Replay has no spawn events, so the subagent's display name is
-   * gone and the name-less title variant keeps the notice honest.
-   */
-  private renderSystemTrigger(context: ReplayRenderContext, message: ContextMessage): void {
-    const origin: PromptOrigin | undefined = message.origin;
-    if (origin?.kind !== 'system_trigger' || origin.name !== 'child_request') return;
-    const fields = childRequestFieldsFromNotification(contentPartsToText(message.content));
-    if (fields === null) return;
-    const notice = renderChildRequestNotice(fields);
-    this.flushAssistant(context);
-    // The same cut the live path makes: the replayed notice seals the stretch
-    // of work above it, so live and replay show one shape.
-    this.host.streamingUI.endActivityGroup();
-    this.host.appendTranscriptEntry({
-      ...replayEntry(context, 'status', notice.title, 'notice', { detail: notice.detail }),
-      noticeMarkerColor: this.host.state.theme.colors.warning,
-    });
   }
 
   private renderToolCalls(context: ReplayRenderContext, toolCalls: readonly ToolCall[]): void {

@@ -103,6 +103,8 @@ function createMockHost(): SessionEventHost {
     deferUserMessages: false,
     tasksBrowserController,
     requireSession: vi.fn(),
+    showCollabActivity: vi.fn(),
+    clearCollabActivity: vi.fn(),
     setAppState: vi.fn((patch) => {
       Object.assign(state.appState, patch);
     }),
@@ -616,11 +618,13 @@ describe('SessionEventHandler', () => {
     expect(coderSlot()?.status).toBe('requesting');
   });
 
-  it('cuts into the transcript only for a request the kernel actually delivered', () => {
+  it('surfaces only a delivered request, as a one-line ticker instead of a transcript row', () => {
     const host = createMockHost();
     const handler = new SessionEventHandler(host);
     const appended = () =>
       (host.appendTranscriptEntry as ReturnType<typeof vi.fn>).mock.calls.map((call) => call[0]);
+    const ticker = () =>
+      (host.showCollabActivity as ReturnType<typeof vi.fn>).mock.calls.map((call) => call[0]);
 
     // Spawn events are emitted by the parent agent, so they carry the main
     // agentId and reach handleSubagentSpawned, which registers the name.
@@ -637,7 +641,7 @@ describe('SessionEventHandler', () => {
       vi.fn(),
     );
     // The call starting is not delivery: a deduped or rate-limited request
-    // never reaches the parent, so nothing may be painted here.
+    // never reaches the parent, so nothing may be surfaced here.
     handler.handleEvent(
       {
         ...baseEvent('tool.call.started'),
@@ -647,7 +651,7 @@ describe('SessionEventHandler', () => {
       } as unknown as Event,
       vi.fn(),
     );
-    expect(appended()).toHaveLength(0);
+    expect(ticker()).toHaveLength(0);
 
     handler.handleEvent(
       {
@@ -660,30 +664,28 @@ describe('SessionEventHandler', () => {
       vi.fn(),
     );
 
-    expect(appended()).toHaveLength(1);
-    expect(appended()[0]).toMatchObject({
-      kind: 'status',
-      renderMode: 'notice',
-      // The turn stamp keeps the row attributable for /revoke, same as replay.
-      turnId: '1',
-      content: expect.stringContaining('coder'),
-      detail: expect.stringContaining('目标终端宽度是否含侧栏展开态'),
-      noticeMarkerColor: host.state.theme.colors.warning,
-    });
+    // The ticker carries the whole story in one truncated line; the request
+    // body no longer lands in the conversation.
+    expect(appended()).toHaveLength(0);
+    expect(ticker()).toHaveLength(1);
+    expect(ticker()[0]).toContain('coder');
+    expect(ticker()[0]).toContain('目标终端宽度是否含侧栏展开态');
+    expect((host.showCollabActivity as ReturnType<typeof vi.fn>).mock.calls[0]?.[1]).toBe('request');
 
-    // Ordinary tool work stays out of the transcript.
+    // Ordinary tool work stays out of both surfaces.
     handler.handleEvent(
       { ...baseEvent('tool.call.started'), agentId: 'agent-7', name: 'Read', args: { path: 'x' } } as unknown as Event,
       vi.fn(),
     );
-    expect(appended()).toHaveLength(1);
+    expect(appended()).toHaveLength(0);
+    expect(ticker()).toHaveLength(1);
   });
 
-  it("surfaces a subagent-owned child's delivered request through the same notice path", () => {
+  it("surfaces a subagent-owned child's delivered request through the same ticker", () => {
     const host = createMockHost();
     const handler = new SessionEventHandler(host);
-    const appended = () =>
-      (host.appendTranscriptEntry as ReturnType<typeof vi.fn>).mock.calls.map((call) => call[0]);
+    const ticker = () =>
+      (host.showCollabActivity as ReturnType<typeof vi.fn>).mock.calls.map((call) => call[0]);
 
     // A subagent that owns its own children emits the frame itself, so the
     // event is routed rather than treated as a main-agent one: the requester is
@@ -700,22 +702,19 @@ describe('SessionEventHandler', () => {
       vi.fn(),
     );
 
-    expect(appended()).toHaveLength(1);
-    expect(appended()[0]).toMatchObject({
-      renderMode: 'notice',
-      content: expect.stringContaining('explore'),
-      detail: expect.stringContaining('还需要一个目录清单'),
-    });
+    expect(ticker()).toHaveLength(1);
+    expect(ticker()[0]).toContain('explore');
+    expect(ticker()[0]).toContain('还需要一个目录清单');
   });
 
-  it('labels an unnamed requester and never paints an empty notice', () => {
+  it('names an unseen requester neutrally and keeps a bodiless frame terse', () => {
     const host = createMockHost();
     const handler = new SessionEventHandler(host);
-    const appended = () =>
-      (host.appendTranscriptEntry as ReturnType<typeof vi.fn>).mock.calls.map((call) => call[0]);
+    const ticker = () =>
+      (host.showCollabActivity as ReturnType<typeof vi.fn>).mock.calls.map((call) => call[0]);
 
     // A child the handler has never seen still reached the parent, so the
-    // notice must appear — just without a name to attribute.
+    // ticker must appear — with a neutral label instead of a raw agent id.
     handler.handleEvent(
       {
         ...baseEvent('subagent.child_request'),
@@ -725,11 +724,13 @@ describe('SessionEventHandler', () => {
       } as unknown as Event,
       vi.fn(),
     );
-    expect(appended()).toHaveLength(1);
-    expect(appended()[0]?.content).not.toContain('agent-9');
+    expect(ticker()).toHaveLength(1);
+    expect(ticker()[0]).toContain('subagent');
+    expect(ticker()[0]).not.toContain('agent-9');
+    expect(ticker()[0]).toContain('需要人工决策');
 
     // Otherwise the delivery names its own requester: the kernel attaches the
-    // name, so the row is attributed even when no spawn frame reached us.
+    // name, so the line is attributed even when no spawn frame reached us.
     handler.handleEvent(
       {
         ...baseEvent('subagent.child_request'),
@@ -740,10 +741,10 @@ describe('SessionEventHandler', () => {
       } as unknown as Event,
       vi.fn(),
     );
-    expect(appended()).toHaveLength(2);
-    expect(appended()[1]?.content).toContain('reviewer');
+    expect(ticker()).toHaveLength(2);
+    expect(ticker()[1]).toContain('reviewer');
 
-    // A frame with no request text renders nothing at all, matching replay.
+    // A frame with no request text stays terse: no dangling "problem:" label.
     handler.handleEvent(
       {
         ...baseEvent('subagent.child_request'),
@@ -753,7 +754,169 @@ describe('SessionEventHandler', () => {
       } as unknown as Event,
       vi.fn(),
     );
-    expect(appended()).toHaveLength(2);
+    expect(ticker()).toHaveLength(3);
+    expect(ticker()[2]).not.toContain('问题');
+  });
+
+  it('drops the ticker line when the session is reset', () => {
+    const host = createMockHost();
+    const handler = new SessionEventHandler(host);
+
+    handler.resetRuntimeState();
+    expect(host.clearCollabActivity).toHaveBeenCalledTimes(1);
+  });
+
+  it('echoes a successful reply to the child as a handled ticker line', () => {
+    const host = createMockHost();
+    const handler = new SessionEventHandler(host);
+    const toast = host.showCollabActivity as ReturnType<typeof vi.fn>;
+
+    handler.handleEvent(
+      {
+        type: 'subagent.spawned',
+        sessionId: 'ses-test',
+        agentId: 'main',
+        subagentId: 'agent-7',
+        subagentName: 'coder',
+        description: 'do work',
+        parentToolCallId: 'call-agent-7',
+      } as unknown as Event,
+      vi.fn(),
+    );
+
+    // The child actually asked for something first: only an answer to a
+    // pending request may claim "handled".
+    handler.handleEvent(
+      {
+        ...baseEvent('subagent.child_request'),
+        subagentId: 'agent-7',
+        subagentName: 'coder',
+        requestType: 'info',
+        message: '需要确认目录结构',
+      } as unknown as Event,
+      vi.fn(),
+    );
+    toast.mockClear();
+
+    // The parent answers with SendSubagentMessage; the call start records the
+    // target because SubagentSlots drops its own mapping when the call ends.
+    handler.handleEvent(
+      {
+        ...baseEvent('tool.call.started'),
+        toolCallId: 'call-msg-1',
+        name: 'SendSubagentMessage',
+        args: { agent_id: 'agent-7', operation: 'steer', message: 'go ahead' },
+      } as unknown as Event,
+      vi.fn(),
+    );
+    handler.handleEvent(
+      {
+        ...baseEvent('tool.result'),
+        toolCallId: 'call-msg-1',
+        output: 'Message delivered.',
+        isError: false,
+      } as unknown as Event,
+      vi.fn(),
+    );
+
+    expect(toast).toHaveBeenCalledTimes(1);
+    expect(toast.mock.calls[0]?.[0]).toContain('已处理');
+    expect(toast.mock.calls[0]?.[0]).toContain('coder');
+    expect(toast.mock.calls[0]?.[1]).toBe('handled');
+
+    // A failed send did not reach the child, so it must stay silent — and the
+    // bookkeeping entry is still dropped (no second echo on a stray result).
+    handler.handleEvent(
+      {
+        ...baseEvent('tool.call.started'),
+        toolCallId: 'call-msg-2',
+        name: 'SendSubagentMessage',
+        args: { agent_id: 'agent-7', operation: 'queue', message: 'again' },
+      } as unknown as Event,
+      vi.fn(),
+    );
+    handler.handleEvent(
+      {
+        ...baseEvent('tool.result'),
+        toolCallId: 'call-msg-2',
+        output: 'Subagent is not running.',
+        isError: true,
+      } as unknown as Event,
+      vi.fn(),
+    );
+    expect(toast).toHaveBeenCalledTimes(1);
+
+    // Unknown call ids never echo.
+    handler.handleEvent(
+      {
+        ...baseEvent('tool.result'),
+        toolCallId: 'call-unknown',
+        output: '',
+        isError: false,
+      } as unknown as Event,
+      vi.fn(),
+    );
+    expect(toast).toHaveBeenCalledTimes(1);
+  });
+
+  it('applies the live context ratio from a main-agent status update', () => {
+    const host = createMockHost();
+    const handler = new SessionEventHandler(host);
+
+    // This is the frame that keeps the footer's `上下文🗑️：xx%` gauge alive.
+    handler.handleEvent(
+      {
+        ...baseEvent('agent.status.updated'),
+        contextUsage: 0.62,
+        contextTokens: 620_000,
+        maxContextTokens: 1_000_000,
+      } as unknown as Event,
+      vi.fn(),
+    );
+
+    expect(host.state.appState.contextUsage).toBe(0.62);
+    expect(host.state.appState.contextTokens).toBe(620_000);
+    expect(host.state.appState.maxContextTokens).toBe(1_000_000);
+  });
+
+  it('does not call an ordinary steer a handled request', () => {
+    const host = createMockHost();
+    const handler = new SessionEventHandler(host);
+    const toast = host.showCollabActivity as ReturnType<typeof vi.fn>;
+
+    handler.handleEvent(
+      {
+        type: 'subagent.spawned',
+        sessionId: 'ses-test',
+        agentId: 'main',
+        subagentId: 'agent-7',
+        subagentName: 'coder',
+        description: 'do work',
+        parentToolCallId: 'call-agent-7',
+      } as unknown as Event,
+      vi.fn(),
+    );
+    handler.handleEvent(
+      {
+        ...baseEvent('tool.call.started'),
+        toolCallId: 'call-steer',
+        name: 'SendSubagentMessage',
+        args: { agent_id: 'agent-7', operation: 'steer', message: 'keep going' },
+      } as unknown as Event,
+      vi.fn(),
+    );
+    handler.handleEvent(
+      {
+        ...baseEvent('tool.result'),
+        toolCallId: 'call-steer',
+        output: 'Message delivered.',
+        isError: false,
+      } as unknown as Event,
+      vi.fn(),
+    );
+
+    // No request was ever pending, so the ticker stays quiet.
+    expect(toast).not.toHaveBeenCalled();
   });
 
   describe('skill_candidate', () => {

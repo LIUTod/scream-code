@@ -140,7 +140,7 @@ while (true)
 2. **续轮不得在最终回答之后追加可见内容**；状态维护一律前置到 `beforeStep`。现有的回答前对账提醒见 §3 hook 表的 `todo_reconcile`（step 1 的 goal `todo_required` 提醒同理）。
 3. **类别集合恰好是这三类**：新增类别必须同时改 `test/agent/turn-stop-gate.test.ts`，属有意动作。该测试直接读 `src/agent/turn/index.ts` 的源码做形态校验——每个 `continue:true` 是否带合法标记、类别是否越界、函数体内是否出现清单相关字样、以及已删除的两句理由是否回归。空口注释会腐烂，所以用测试钉住。
 
-**为什么"回答之后冒出的可见块"只可能来自续轮本身**：`system_trigger` 类系统提醒在 TUI 侧本就不渲染。会话重放 `apps/scream-code/src/tui/controllers/session-replay.ts` 的 `renderSystemTrigger()` 只处理子 agent 协作请求（`child_request`），其余一律直接返回；`apps/scream-code/src/tui/utils/message-replay.ts` 复用 agent-core 的 `isRealUserPrompt()`（`src/agent/context/identity.ts`），对 `system_trigger` 同样返回 `false`；markdown 导出同理由 `INTERNAL_ORIGINS` 过滤。既然提醒文本本身不上屏，那"回答之后多出来的折叠块"就不是提醒，而是续轮新 step 的真实输出。
+**为什么"回答之后冒出的可见块"只可能来自续轮本身**：`system_trigger` 类系统提醒在 TUI 侧本就不渲染。会话重放 `apps/scream-code/src/tui/controllers/session-replay.ts` 对 `system_trigger` 一律直接返回（协作请求 `child_request` 也不例外——它改为输入框上方的状态行 ticker，与 conversation 无关）；`apps/scream-code/src/tui/utils/message-replay.ts` 复用 agent-core 的 `isRealUserPrompt()`（`src/agent/context/identity.ts`），对 `system_trigger` 同样返回 `false`；markdown 导出同理由 `INTERNAL_ORIGINS` 过滤。既然提醒文本本身不上屏，那"回答之后多出来的折叠块"就不是提醒，而是续轮新 step 的真实输出。
 
 ## 5. Goal 驱动（driveGoal）
 

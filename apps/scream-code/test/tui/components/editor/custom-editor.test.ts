@@ -4,6 +4,7 @@ import type {
   AutocompleteSuggestions,
   TUI,
 } from '@liutod-scream/pi-tui';
+import { visibleWidth } from '@liutod-scream/pi-tui';
 import chalk from 'chalk';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -349,9 +350,9 @@ describe('CustomEditor permission mode badge', () => {
 
           const out = topBorder(editor);
 
-          expect(out).toContain(chalk.hex(modeHex).bold(` ${mode} `));
+          expect(out).toContain(chalk.hex(modeHex).bold(` ${mode} ✎﹏ `));
           expect(out).toContain(chalk.hex(borderHex)('──'));
-          expect(out).not.toContain(chalk.hex(borderHex).bold(` ${mode} `));
+          expect(out).not.toContain(chalk.hex(borderHex).bold(` ${mode} ✎﹏ `));
         });
       });
     }
@@ -376,11 +377,11 @@ describe('CustomEditor permission mode badge', () => {
       setBorderColor(editor, fusionPlanBorder);
       const lightOutput = topBorder(editor);
 
-      expect(normalOutput).toContain(chalk.hex('#FF7043').bold(' auto '));
+      expect(normalOutput).toContain(chalk.hex('#FF7043').bold(' auto ✎﹏ '));
       expect(normalOutput).toContain(chalk.hex(normalBorder)('──'));
-      expect(planOutput).toContain(chalk.hex('#FF7043').bold(' auto '));
+      expect(planOutput).toContain(chalk.hex('#FF7043').bold(' auto ✎﹏ '));
       expect(planOutput).toContain(chalk.hex(planBorder)('──'));
-      expect(lightOutput).toContain(chalk.hex('#C2410C').bold(' auto '));
+      expect(lightOutput).toContain(chalk.hex('#C2410C').bold(' auto ✎﹏ '));
       expect(lightOutput).toContain(chalk.hex(fusionPlanBorder)('──'));
     });
   });
@@ -397,7 +398,7 @@ describe('CustomEditor permission mode badge', () => {
       const out = topBorder(editor, 60);
       const borderBadge = chalk.bgHex(borderHex).hex('#FFFFFF');
 
-      expect(out).toContain(chalk.hex('#9CDCFE').bold(' ask '));
+      expect(out).toContain(chalk.hex('#9CDCFE').bold(' ask ✎﹏ '));
       expect(out).toContain(borderBadge(' Think '));
       expect(out).toContain(borderBadge(' First skill '));
     });
@@ -421,6 +422,18 @@ describe('CustomEditor permission mode badge', () => {
 
     editor.permissionMode = 'yolo';
     expect(topBorder(editor)).toContain('yolo');
+  });
+
+  it('closes the mode badge with the ✎﹏ mark without overflowing the border', () => {
+    const editor = makeEditor();
+    editor.permissionMode = 'yolo';
+
+    expect(topBorder(editor, 40)).toContain('yolo ✎﹏');
+    // ✎ is one cell and ﹏ is two, so the prefix must not shift the border.
+    for (const width of [10, 12, 20, 40, 80]) {
+      const line = topBorder(editor, width);
+      expect(visibleWidth(line), `width ${width}`).toBeLessThanOrEqual(width);
+    }
   });
 
   it('composes the mode badge on the left and the think badge on the right', () => {

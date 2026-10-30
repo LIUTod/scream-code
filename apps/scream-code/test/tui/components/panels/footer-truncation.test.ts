@@ -76,36 +76,40 @@ function wideFooter(): FooterComponent {
 describe('FooterComponent - progressive truncation', () => {
   it('fits without truncation at columns=190 (no ellipsis, RIGHT visible)', () => {
     const footer = wideFooter();
-    const [line1] = footer.render(190);
+    const [line1, line2] = footer.render(190);
     expect(line1).toBeDefined();
     expect(visibleWidth(line1!)).toBeLessThanOrEqual(190);
     const stripped = strip(line1!);
     expect(stripped).not.toContain('…');
-    expect(stripped).toContain('GOAL');
-    expect(stripped).toContain('HitR: --');
+    // Line 2 opens with the hit rate, then the goal and task badges.
+    const strippedLine2 = strip(line2!);
+    expect(strippedLine2.startsWith('↓ Hitr: --')).toBe(true);
+    expect(strippedLine2).toContain('GOAL');
+    expect(strippedLine2).toContain('后台任务 x2');
+    expect(strippedLine2.indexOf('Hitr:')).toBeLessThan(strippedLine2.indexOf('GOAL'));
+    expect(strippedLine2.indexOf('GOAL')).toBeLessThan(strippedLine2.indexOf('后台任务 x2'));
   });
 
   it('never overflows at columns=40', () => {
     const footer = wideFooter();
-    const [line1] = footer.render(40);
-    expect(line1).toBeDefined();
-    expect(visibleWidth(line1!)).toBeLessThanOrEqual(40);
+    for (const line of footer.render(40)) {
+      expect(line).toBeDefined();
+      expect(visibleWidth(line)).toBeLessThanOrEqual(40);
+    }
   });
 
   it('stage 1: shrinks LEFT with a middle ellipsis to keep RIGHT visible', () => {
     const footer = wideFooter();
-    // width 96: full LEFT+RIGHT > 96, so a shrunk LEFT (head + tail via
-    // truncateMiddle) + gap + RIGHT fits. RIGHT now carries the five-segment
-    // metrics (remote/hit/in-out/context/status), so it needs more room than
-    // before — the LEFT head keeps the 计划 badge plus the GOAL badge's
-    // leading letter (G), not "GO".
-    const [line1] = footer.render(96);
+    // width 38: line 1's LEFT (model name) plus RIGHT (dot + line label +
+    // status) exceeds it, so a shrunk LEFT (head + tail via truncateMiddle) +
+    // gap + RIGHT fits — the head keeps the model marker.
+    const [line1] = footer.render(38);
     expect(line1).toBeDefined();
     const stripped = strip(line1!);
-    expect(visibleWidth(line1!)).toBeLessThanOrEqual(96);
+    expect(visibleWidth(line1!)).toBeLessThanOrEqual(38);
     expect(stripped).toContain('…');
-    expect(stripped).toContain('HitR: --'); // RIGHT survived
-    expect(stripped).toContain('计划'); // head of LEFT kept (计划 badge)
+    expect(stripped).toContain('Line:'); // RIGHT survived
+    expect(stripped.startsWith('📟️')).toBe(true); // head of LEFT kept (marker)
   });
 
   it('stage 2: drops RIGHT when it cannot fit even after shrinking LEFT', () => {
@@ -123,7 +127,7 @@ describe('FooterComponent - progressive truncation', () => {
     expect(line1).toBeDefined();
     const stripped = strip(line1!);
     expect(visibleWidth(line1!)).toBeLessThanOrEqual(20);
-    expect(stripped).not.toContain('HitR'); // RIGHT dropped
+    expect(stripped).not.toContain('Hitr'); // RIGHT dropped
     expect(stripped).not.toContain('…'); // LEFT fit whole, no ellipsis needed
   });
 
@@ -133,7 +137,7 @@ describe('FooterComponent - progressive truncation', () => {
     expect(line1).toBeDefined();
     expect(visibleWidth(line1!)).toBeLessThanOrEqual(10);
     // RIGHT is gone and LEFT is clipped to the narrow width.
-    expect(strip(line1!)).not.toContain('HitR');
+    expect(strip(line1!)).not.toContain('Hitr');
   });
 
   it('pads stage 2 to the full width so the line never wraps', () => {

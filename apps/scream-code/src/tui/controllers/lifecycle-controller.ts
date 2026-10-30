@@ -25,7 +25,7 @@ import type { ResolvedTheme } from '../theme/colors';
 import type { Theme } from '../theme/index';
 import type { AppState, ScreamTUIOptions } from '../types';
 import type { TUIState } from '../tui-state';
-import { checkLineDaemonActive } from '../utils/line-status';
+import { readLineFooterStatus } from '../utils/line-status';
 import { isDeadTerminalError } from '../utils/dead-terminal';
 import { isStreaming } from '../utils/app-state';
 import { installTerminalFocusTracking } from '../utils/terminal-focus';
@@ -96,10 +96,27 @@ export interface LifecycleControllerHost {
   onEmergencyExit(exitCode?: number): never;
 }
 
+/** How long a collaboration ticker line stays on the status bar (newest wins). */
+const COLLAB_ACTIVITY_TTL_MS = 8_000;
+/** Footer git badge freshness window; the deferred read refreshes past it. */
+const GIT_DIFF_TTL_MS = 15_000;
+/** Window after a command-driven line write during which the poll stands down. */
+const MANUAL_LINE_WRITE_GRACE_MS = 5_000;
+
 export class LifecycleController {
   private signalCleanupHandlers: Array<() => void> = [];
   private footerWrap: GutterContainer | undefined;
   private linePollTimer: ReturnType<typeof setInterval> | undefined;
+  /** Deferred git-diff read for the footer badge (never on the render path). */
+  private gitDiffRefreshTimer: ReturnType<typeof setTimeout> | undefined;
+  private gitDiffSnapshot: { workDir: string; added: number; deleted: number } | null = null;
+  /** Timestamp/workDir of the last probe (covers negative "not a repo" reads,
+   *  so a null snapshot cannot re-trigger a probe on every frame). */
+  private gitDiffReadAt = 0;
+  private gitDiffReadWorkDir: string | null = null;
+  private gitTimersStopped = false;
+  /** Last command-driven line-state write; the poll skips right after one. */
+  private lineStateManualWriteAt = 0;
   private memoryIdleTimer: ReturnType<typeof setTimeout> | undefined;
   private memoryCountdownTimer: ReturnType<typeof setTimeout> | undefined;
   private lastMemoryExtractionTime = 0;
@@ -110,6 +127,9 @@ export class LifecycleController {
   /** The active status-bar loader (PulseWaveLoader or MoonLoader). Owned by
    * this controller; stopped before replacement to avoid leaking timers. */
   private statusBarLoader: PulseWaveLoader | undefined;
+  /** Single-slot collaboration ticker (subagent ↔ main agent traffic). */
+  private collabActivity: { text: string; color: string } | null = null;
+  private collabTimer: ReturnType<typeof setTimeout> | undefined;
   /** Sum all four token buckets into the session's total token consumption. */
   private static sumTokens(usage: TokenUsage): number {
     return usage.inputOther + usage.inputCacheRead + usage.inputCacheCreation + usage.output;
@@ -205,14 +225,16 @@ export class LifecycleController {
 
   startLinePolling(): void {
     const POLL_INTERVAL_MS = 30_000;
-    void checkLineDaemonActive().then((active) => {
-      this.host.setAppState({ lineActive: active });
-    });
-    this.linePollTimer = setInterval(() => {
-      void checkLineDaemonActive().then((active) => {
-        this.host.setAppState({ lineActive: active });
+    const sync = (): void => {
+      void readLineFooterStatus().then(({ active, platform }) => {
+        // A command write that landed while this read was in flight is newer
+        // than the read's snapshot — never clobber it.
+        if (Date.now() - this.lineStateManualWriteAt < MANUAL_LINE_WRITE_GRACE_MS) return;
+        this.host.setAppState({ lineActive: active, linePlatform: platform });
       });
-    }, POLL_INTERVAL_MS);
+    };
+    sync();
+    this.linePollTimer = setInterval(sync, POLL_INTERVAL_MS);
   }
 
   stopLinePolling(): void {
@@ -224,8 +246,8 @@ export class LifecycleController {
 
   refreshLineStatus(): void {
     setTimeout(() => {
-      void checkLineDaemonActive().then((active) => {
-        this.host.setAppState({ lineActive: active });
+      void readLineFooterStatus().then(({ active, platform }) => {
+        this.host.setAppState({ lineActive: active, linePlatform: platform });
       });
     }, 1500);
   }
@@ -350,8 +372,11 @@ export class LifecycleController {
       { component: this.host.state.editorContainer, shrink: 1, minSize: 3 },
       {
         component: this.ensureFooterWrap(),
-        shrink: 1,
-        minSize: 1,
+        // The footer is a fixed two-row block (status line + context line).
+        // It must not shrink below its rendered height, otherwise the context
+        // row is clipped away on a short terminal.
+        shrink: 0,
+        minSize: 2,
       },
     ]);
     // Register the sidebar panels once (idempotent). The stacked sidebar
@@ -401,7 +426,9 @@ export class LifecycleController {
     ]);
     const layoutRoot = new VStack([
       { component: topRegion, basis: 0, grow: 1, shrink: 1, minSize: 1 },
-      { component: dock, basis: 'auto', grow: 0, shrink: 1, minSize: 1 },
+      // The dock's own floor matches the footer's two rows: shrinking the dock
+      // below that would clip the footer's second row.
+      { component: dock, basis: 'auto', grow: 0, shrink: 1, minSize: 2 },
     ]);
     ui.setLayoutRoot(layoutRoot);
     // Keep the root reachable so full-screen overlays (approval preview,
@@ -440,6 +467,55 @@ export class LifecycleController {
       samples: buildHubSamples(snapshot, this.host.sessionEventHandler.getProviderLatency()),
       pending: snapshot.pending,
     };
+  }
+
+  /**
+   * Working-tree diff stats for the footer's line-1 git badge.
+   *
+   * This is called from `render()`, so it must never touch git directly: the
+   * snapshot is served from a cached field and a stale/mismatched workDir only
+   * schedules a deferred refresh. Shares the sidebar's cache, so a read costs
+   * no extra git spawn.
+   */
+  getGitDiffStats(workDir: string): { added: number; deleted: number } | null {
+    const fresh = this.gitDiffReadWorkDir === workDir && Date.now() - this.gitDiffReadAt < GIT_DIFF_TTL_MS;
+    if (!fresh) this.scheduleGitDiffRefresh(workDir);
+    return this.gitDiffSnapshot !== null && this.gitDiffReadWorkDir === workDir
+      ? { added: this.gitDiffSnapshot.added, deleted: this.gitDiffSnapshot.deleted }
+      : null;
+  }
+
+  /** Deferred git read: `spawnSync` inside `render()` would stall the frame. */
+  private scheduleGitDiffRefresh(workDir: string): void {
+    if (this.gitDiffRefreshTimer !== undefined) return;
+    this.gitDiffRefreshTimer = setTimeout(() => {
+      this.gitDiffRefreshTimer = undefined;
+      if (this.gitTimersStopped) return;
+      const diff = this.readSidebarGit(workDir);
+      this.gitDiffSnapshot =
+        diff === undefined ? null : { workDir, added: diff.diffAdded, deleted: diff.diffDeleted };
+      this.gitDiffReadWorkDir = workDir;
+      this.gitDiffReadAt = Date.now();
+      // Deferred: the host may already be tearing down.
+      this.host.state.ui?.requestRender();
+    }, 0);
+  }
+
+  /** Cancel the deferred git read (shutdown). */
+  stopGitDiffRefresh(): void {
+    this.gitTimersStopped = true;
+    if (this.gitDiffRefreshTimer !== undefined) {
+      clearTimeout(this.gitDiffRefreshTimer);
+      this.gitDiffRefreshTimer = undefined;
+    }
+  }
+
+  /**
+   * Marks a command-driven line-state write (`/line start|stop|uninstall`), so
+   * an in-flight poll result cannot clobber it with a stale read.
+   */
+  noteLineStateWrite(): void {
+    this.lineStateManualWriteAt = Date.now();
   }
 
   private readSidebarGit(workDir: string): SidebarGitData | undefined {
@@ -656,36 +732,43 @@ export class LifecycleController {
               mode,
               label: this.buildReconnectLabel(state),
               pulseWave: loader,
+              activity: () => this.getCollabActivity(),
             }),
           );
         }
         break;
       case 'idle':
-      case 'hidden':
+      case 'hidden': {
+        if (mode === 'hidden') break;
         // When the chat is completely empty (fresh session / just switched),
         // show a one-line hint above the editor pointing at the model-provider
         // partner page, with Ctrl+F to open it. Once the user sends anything
         // the phase leaves idle and the bar rebuilds, so the hint disappears
         // automatically — no extra state to clean up.
-        if (
-          mode === 'idle'
-          && state.transcriptEntries.length === 0
-          && !isEmptySessionHintDismissed()
-        ) {
-          // Quiet interactive cue: dimmed label, lighter than body text.
-          const tip = SESSION_TIPS[this.currentTipIndex] ?? SESSION_TIPS[0]!;
-          state.statusBarContainer.addChild(
-            new StatusBarPaneComponent({
-              mode: 'idle',
-              label: composeTipLabel(t(tip.i18nKey), tip, state.theme.colors.primary),
-              // Fixed light grey, deliberately theme-independent: the tip
-              // carousel reads as a quiet cue in both dark and light themes.
-              labelColor: '#999999',
-            }),
-          );
-          this.startTipRotation();
-        }
+        const showHint = state.transcriptEntries.length === 0 && !isEmptySessionHintDismissed();
+        // Quiet interactive cue: dimmed label, lighter than body text.
+        const tip = showHint ? (SESSION_TIPS[this.currentTipIndex] ?? SESSION_TIPS[0]!) : undefined;
+        // The row is also the collaboration ticker's home and reads its getter
+        // live, so it is mounted even without a tip: a notice arriving while the
+        // session is idle (e.g. an acknowledgement after the turn ended) shows
+        // up without waiting for the next phase change. When a tip and a notice
+        // coexist, the tip keeps its place and the notice is truncated after it.
+        state.statusBarContainer.addChild(
+          new StatusBarPaneComponent({
+            mode: 'idle',
+            label:
+              tip === undefined
+                ? ''
+                : composeTipLabel(t(tip.i18nKey), tip, state.theme.colors.primary),
+            // Fixed light grey, deliberately theme-independent: the tip
+            // carousel reads as a quiet cue in both dark and light themes.
+            labelColor: '#999999',
+            activity: () => this.getCollabActivity(),
+          }),
+        );
+        if (tip !== undefined) this.startTipRotation();
         break;
+      }
     }
     state.ui.requestRender();
   }
@@ -725,6 +808,50 @@ export class LifecycleController {
   forceUpdateStatusBar(): void {
     this.lastActivityMode = undefined;
     this.updateActivityPane();
+  }
+
+  /**
+   * Shows a one-slot collaboration notice above the editor: the newest request
+   * or acknowledgement replaces the previous one and expires after
+   * `COLLAB_ACTIVITY_TTL_MS`. Rendered live by the status row, so no rebuild
+   * (and no animation reset) is involved.
+   */
+  showCollabActivity(text: string, tone: 'request' | 'handled'): void {
+    const colors = this.host.state.theme.colors;
+    this.collabActivity = { text, color: tone === 'request' ? colors.warning : colors.success };
+    if (this.collabTimer !== undefined) clearTimeout(this.collabTimer);
+    this.collabTimer = setTimeout(() => {
+      this.collabTimer = undefined;
+      this.collabActivity = null;
+      this.host.state.ui?.requestRender();
+    }, COLLAB_ACTIVITY_TTL_MS);
+    this.host.state.ui?.requestRender();
+  }
+
+  /** Live getter consumed by the status row on every render. */
+  getCollabActivity(): { text: string; color: string } | null {
+    return this.collabActivity;
+  }
+
+  /** Drops any pending notice (session switch, shutdown). */
+  clearCollabActivity(): void {
+    if (this.collabTimer !== undefined) {
+      clearTimeout(this.collabTimer);
+      this.collabTimer = undefined;
+    }
+    this.collabActivity = null;
+  }
+
+  /**
+   * Stops every animation this controller owns. Called from the shutdown path:
+   * the pulse wave re-schedules itself every 80ms, so without this the render
+   * chain keeps running until the process exits.
+   */
+  stopActivityAnimation(): void {
+    this.statusBarLoader?.stop();
+    this.statusBarLoader = undefined;
+    this.stopTipRotation();
+    this.clearCollabActivity();
   }
 
   /** Current tip index (for Ctrl+F to check if the visible tip is the ad). */

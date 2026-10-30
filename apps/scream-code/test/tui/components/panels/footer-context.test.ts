@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
+import { visibleWidth } from '@liutod-scream/pi-tui';
 import chalk from 'chalk';
 
 import { FooterComponent, buildWeightedTips } from '#/tui/components/chrome/footer';
@@ -77,15 +78,17 @@ describe('FooterComponent — context NaN resilience', () => {
     expect(out).toContain('██▓▒░░░░░░');
   });
 
-  it('tokens provided but max=0 → falls back to percent-only, no division-by-zero artefact', () => {
+  it('reports the percentage only — absolute token counts are gone', () => {
     const fc = makeFooter(
       baseState({ contextUsage: 0, contextTokens: 500, maxContextTokens: 0 }),
     );
     const out = strip(fc.render(200).join(''));
     expect(out).not.toMatch(/Infinity|NaN/);
     expect(out).toContain('░░░░░░░░░░');
-    // With maxTokens=0, token-count annotation is suppressed.
-    expect(out).not.toMatch(/\(500\//);
+    expect(out).toContain('上下文🗑️：0.0%');
+    // Neither the raw count nor the window size is printed any more.
+    expect(out).not.toContain('500/');
+    expect(out).not.toContain('0/0');
   });
 
   it('setState updates visible model and context values', () => {
@@ -105,7 +108,7 @@ describe('FooterComponent — context NaN resilience', () => {
     );
     const out = strip(fc.render(200).join(''));
     // 28.8% × 10 cells = 2.88 → 3 filled cells: 1 deep + 2 foam.
-    expect(out).toContain('█▓▒░░░░░░░ (288.0k/1.0M)');
+    expect(out).toContain('上下文🗑️：28.8% █▓▒░░░░░░░');
   });
 
   it('renders an all-empty bar at 0% and an all-filled bar at >=100%', () => {
@@ -150,23 +153,27 @@ describe('FooterComponent — context NaN resilience', () => {
     expect(strip(line1 ?? '')).toContain('Press Ctrl-C again to exit');
   });
 
-  it('renders status info on line 1 when no hint', () => {
+  it('renders status info on line 1 and hit rate + context on line 2', () => {
     const footer = makeFooter(baseState());
 
-    const [line1] = footer.render(120);
-    expect(strip(line1 ?? '')).toContain('░░░░░░░░░░');
+    const [line1, line2] = footer.render(120);
+    expect(strip(line1 ?? '')).not.toContain('Hitr');
+    expect(strip(line2 ?? '')).toContain('↓ Hitr: --');
+    expect(strip(line2 ?? '')).toContain('░░░░░░░░░░');
   });
 
-  it('renders plan badge on line 1 in plan mode', () => {
+  it('renders plan badge on line 2 in plan mode', () => {
     const footer = makeFooter(baseState({ planMode: 'plan' }));
-    const [line1] = footer.render(120);
-    expect(strip(line1 ?? '')).toMatch(/计划/);
+    const [line1, line2] = footer.render(120);
+    expect(strip(line1 ?? '')).not.toMatch(/计划/);
+    expect(strip(line2 ?? '')).toMatch(/计划/);
   });
 
-  it('renders fusion badge on line 1 in fusion plan mode', () => {
+  it('renders fusion badge on line 2 in fusion plan mode', () => {
     const footer = makeFooter(baseState({ planMode: 'fusionplan' }));
-    const [line1] = footer.render(120);
-    expect(strip(line1 ?? '')).toMatch(/融合计划/);
+    const [line1, line2] = footer.render(120);
+    expect(strip(line1 ?? '')).not.toMatch(/融合计划/);
+    expect(strip(line2 ?? '')).toMatch(/融合计划/);
   });
 
   it('colors context usage with textDim when below warning threshold', () => {
@@ -212,6 +219,139 @@ describe('FooterComponent — context NaN resilience', () => {
       expect(out).not.toContain(hexToSgr(darkColors.warning));
     } finally {
       chalk.level = previousLevel;
+    }
+  });
+});
+
+describe('FooterComponent — two-line layout', () => {
+  it('always renders exactly two rows, at every width', () => {
+    for (const width of [0, 1, 2, 3, 5, 10, 16, 20, 24, 40, 52, 68, 120, 200]) {
+      const footer = makeFooter(
+        baseState({ contextUsage: 0.5, contextTokens: 50_000, maxContextTokens: 200_000 }),
+      );
+      const lines = footer.render(width);
+      expect(lines).toHaveLength(2);
+      for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
+      footer.dispose();
+    }
+  });
+
+  it('moves the context readout to line 2, right-aligned, out of line 1', () => {
+    const footer = makeFooter(
+      baseState({ contextUsage: 0.288, contextTokens: 288_000, maxContextTokens: 1_000_000 }),
+    );
+    const [line1, line2] = footer.render(120);
+    expect(strip(line1!)).not.toContain('上下文');
+    // The trash mark rides inside the label: `上下文🗑️：percent bar`.
+    expect(strip(line2!)).toContain('上下文🗑️：28.8% █▓▒░░░░░░░');
+    // Right-aligned to the terminal edge: no padding after the bar.
+    expect(strip(line2!).endsWith('█▓▒░░░░░░░')).toBe(true);
+    expect(visibleWidth(line2!)).toBe(120);
+  });
+
+  it('tracks the context ratio as it changes between renders', () => {
+    const footer = makeFooter(
+      baseState({ contextUsage: 0.1, contextTokens: 100_000, maxContextTokens: 1_000_000 }),
+    );
+    expect(strip(footer.render(120)[1] ?? '')).toContain('上下文🗑️：10.0%');
+
+    // Live path: `agent.status.updated` patches appState.contextUsage, the TUI
+    // re-runs footer.setState(), and the next frame must show the new ratio.
+    footer.setState(
+      baseState({ contextUsage: 0.62, contextTokens: 620_000, maxContextTokens: 1_000_000 }),
+    );
+    expect(strip(footer.render(120)[1] ?? '')).toContain('上下文🗑️：62.0%');
+
+    footer.setState(
+      baseState({ contextUsage: 0.95, contextTokens: 950_000, maxContextTokens: 1_000_000 }),
+    );
+    const line = strip(footer.render(120)[1] ?? '');
+    expect(line).toContain('上下文🗑️：95.0%');
+    // The bar follows the same value: 95% of 10 cells = 9 filled (8 deep +
+    // 1 foam), 1 empty.
+    expect(line).toMatch(/上下文🗑️：95\.0% [█▓▒░]{10}$/);
+
+    footer.dispose();
+  });
+
+  it('drops the bar but keeps the percentage on a narrow terminal', () => {
+    const footer = makeFooter(
+      baseState({ contextUsage: 0.5, contextTokens: 50_000, maxContextTokens: 200_000 }),
+    );
+    // 40 columns: bar collapses, so the bar-less template must not leave the
+    // double space the collapsed bar used to occupy.
+    const line2 = strip(footer.render(40)[1]!);
+    expect(line2).toContain('上下文🗑️：50.0%');
+    expect(line2).not.toContain('上下文: ');
+  });
+
+  it('keeps the context row while a transient hint owns line 1', () => {
+    const footer = makeFooter(
+      baseState({ contextUsage: 0.288, contextTokens: 288_000, maxContextTokens: 1_000_000 }),
+    );
+    footer.setTransientHint('Press Ctrl-C again to exit');
+    const [line1, line2] = footer.render(120);
+    expect(strip(line1!)).toContain('Press Ctrl-C again to exit');
+    expect(strip(line2!)).toContain('上下文🗑️：');
+  });
+});
+
+describe('FooterComponent — badge order', () => {
+  it('marks the mode badges with their emoji (🗒️ plan, 🪐 rlm, 🐺 wolfpack)', () => {
+    const footer = makeFooter(
+      baseState({ planMode: 'plan', rlmEnabled: true, wolfpackMode: true }),
+    );
+    const line2 = strip(footer.render(160)[1] ?? '');
+    expect(line2).toContain('🗒️ 计划');
+    expect(line2).toContain('🪐 RLM');
+    expect(line2).toContain('🐺 群狼');
+    expect(line2.indexOf('🗒️')).toBeLessThan(line2.indexOf('🪐'));
+    expect(line2.indexOf('🪐')).toBeLessThan(line2.indexOf('🐺'));
+  });
+
+  it('separates the identity strip (line 1) from the mode badges (line 2)', () => {
+    const footer = makeFooter(
+      baseState({
+        model: 'scream-k2-5',
+        availableModels: {
+          'scream-k2-5': { displayName: 'scream-k2-5', model: 'scream-k2-5' } as any,
+        },
+        wolfpackMode: true,
+        rlmEnabled: true,
+        planMode: 'plan',
+        goalActive: true,
+        goal: {
+          objective: 'footer order',
+          status: 'active',
+          turnsUsed: 3,
+          wallClockMs: 0,
+          wallClockBaseAt: Date.now(),
+          completionCriterion: null,
+          tokensUsed: 0,
+          inputTokens: null,
+          outputTokens: null,
+        },
+        providerBalance: { currency: 'CNY', totalBalance: '12.34' },
+      }),
+    );
+
+    const [first, second] = footer.render(200).map(strip);
+    // Line 1 is the identity strip: model + balance only.
+    let previous = -1;
+    for (const token of ['scream-k2-5', '¥12.34']) {
+      const at = first!.indexOf(token);
+      expect(at, `missing or out of order: ${token}`).toBeGreaterThan(previous);
+      previous = at;
+    }
+    // Line 2 opens with the hit rate, then plan → rlm → wolfpack → goal.
+    expect(first).not.toContain('群狼');
+    expect(first).not.toContain('GOAL');
+    expect(second).toMatch(/^↓ Hitr:/);
+    previous = -1;
+    for (const token of ['Hitr:', '计划', 'RLM', '群狼', 'GOAL']) {
+      const at = second!.indexOf(token);
+      expect(at, `missing or out of order on line 2: ${token}`).toBeGreaterThan(previous);
+      previous = at;
     }
   });
 });

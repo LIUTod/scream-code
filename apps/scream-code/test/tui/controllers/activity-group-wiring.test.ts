@@ -670,8 +670,12 @@ describe('activity block wiring — agent cards and delivered requests seal the 
    * pairs the real streaming controller with a handler whose transcript writes
    * land in the same container.
    */
-  function createSignalFixture(): Fixture & { handler: SessionEventHandler } {
+  function createSignalFixture(): Fixture & {
+    handler: SessionEventHandler;
+    collab: ReturnType<typeof vi.fn>;
+  } {
     const { state, controller, transcript } = createFixture();
+    const collab = vi.fn();
     const host = {
       state,
       session: undefined,
@@ -695,8 +699,9 @@ describe('activity block wiring — agent cards and delivered requests seal the 
       shiftQueuedMessage: vi.fn(),
       updateQueueDisplay: vi.fn(),
       markMemoryExtracted: vi.fn(),
+      showCollabActivity: collab,
     } as unknown as SessionEventHost;
-    return { state, controller, transcript, handler: new SessionEventHandler(host) };
+    return { state, controller, transcript, handler: new SessionEventHandler(host), collab };
   }
 
   /** The kernel's delivery frame for a child→parent request. */
@@ -785,8 +790,8 @@ describe('activity block wiring — agent cards and delivered requests seal the 
     expect(blocks[0]?.render(90).join('\n')).toContain('工具执行完成');
   });
 
-  it('seals the running block when a delivered child request cuts in', () => {
-    const { state, controller, handler } = createSignalFixture();
+  it('leaves the running block alone when a delivered child request arrives', () => {
+    const { state, controller, handler, collab } = createSignalFixture();
     state.appState.streamingPhase = 'thinking';
 
     controller.onToolCallStart(makeToolCall('t1', 'Bash', 1, { command: 'ls -la' }));
@@ -795,41 +800,34 @@ describe('activity block wiring — agent cards and delivered requests seal the 
 
     deliverChildRequest(handler);
 
-    // Sealed in place, and the notice row lands below the settled block.
-    const notice = state.transcriptContainer.children.find(
-      (child): child is NoticeMessageComponent => child instanceof NoticeMessageComponent,
-    );
-    expect(notice).toBeDefined();
-    expect(block.render(90).join('\n')).toContain('工具执行完成');
-    expect(state.transcriptContainer.children.indexOf(block)).toBeLessThan(
-      state.transcriptContainer.children.indexOf(notice as NoticeMessageComponent),
-    );
-    const noticeRows = (notice as NoticeMessageComponent).render(120).join('\n');
-    expect(noticeRows).toContain('▸');
-    expect(noticeRows).toContain('coder');
+    // Requests never cut into the transcript any more: the running block keeps
+    // its shape and no notice row is minted.
+    expect(block.render(90).join('\n')).toContain('工具执行中');
+    expect(
+      state.transcriptContainer.children.filter((child) => child instanceof NoticeMessageComponent),
+    ).toHaveLength(0);
+    // The collaboration ticker carries the request instead.
+    expect(collab).toHaveBeenCalledTimes(1);
+    expect(collab.mock.calls[0]?.[0]).toContain('coder');
 
-    // The work that follows opens a fresh block below the notice.
+    // Work that follows continues in the same block.
     controller.onToolCallStart(makeToolCall('t2', 'Edit', 2, { file_path: 'a.ts' }));
-
-    const blocks = findGroups(state.transcriptContainer);
-    expect(blocks).toHaveLength(2);
-    expect(blocks[0]).toBe(block);
-    const rendered = renderAll(state);
-    expect(rendered.indexOf('Bash')).toBeLessThan(rendered.indexOf('▸'));
-    expect(rendered.indexOf('▸')).toBeLessThan(rendered.indexOf('Edit'));
+    expect(findGroups(state.transcriptContainer)).toHaveLength(1);
+    expect(renderAll(state)).not.toContain('▸');
   });
 
   it('keeps both signals as no-ops when no block is open', () => {
-    const { state, controller, handler } = createSignalFixture();
+    const { state, controller, handler, collab } = createSignalFixture();
 
     controller.onToolCallStart(makeToolCall('a1', 'Agent', 1, { description: 'no block yet' }));
     deliverChildRequest(handler);
 
-    // Neither signal mints an empty block: the card row and the notice row are
-    // the only things that appear.
+    // Neither signal mints an empty block, and the request stays out of the
+    // transcript — only the agent card row appears.
     expect(findGroups(state.transcriptContainer)).toHaveLength(0);
     expect(
       state.transcriptContainer.children.some((child) => child instanceof NoticeMessageComponent),
-    ).toBe(true);
+    ).toBe(false);
+    expect(collab.mock.calls[0]?.[0]).toContain('coder');
   });
 });

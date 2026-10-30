@@ -132,6 +132,11 @@ export interface SlashCommandHost {
   deferUserMessages: boolean;
 
   setAppState(patch: Partial<AppState>): void;
+  /**
+   * Marks a command-driven line-state write (`/line start|stop|uninstall`) so
+   * the 30s liveness poll cannot overwrite it with a stale in-flight read.
+   */
+  noteLineStateWrite?: () => void;
   resetLivePane(): void;
   showError(msg: string): void;
   showStatus(msg: string, color?: string): void;

@@ -68,9 +68,9 @@ describe('i18n dictionary symmetry', () => {
   });
 
   // Regression guard: this key used to exist only in zh (en.ts was one key short).
-  it('footer.context_short is defined in both locales', () => {
-    expect(zh['footer.context_short']).toBe('上下文: {bar}');
-    expect(en['footer.context_short']).toBe('Context: {bar}');
+  it('footer.context_plain is defined in both locales', () => {
+    expect(zh['footer.context_plain']).toBe('上下文🗑️：{percent}');
+    expect(en['footer.context_plain']).toBe('Context🗑️: {percent}');
   });
 });
 
@@ -78,8 +78,8 @@ describe('i18n t() interpolation', () => {
   it('interpolates named params', async () => {
     const { t, setLocale } = await loadI18n({ LANG: 'en_US.UTF-8' });
     setLocale('en');
-    expect(t('footer.context', { bar: '▓▓░░', tokens: '8.2k', maxTokens: '200k' })).toBe(
-      'Context: ▓▓░░ (8.2k/200k)',
+    expect(t('footer.context', { bar: '▓▓░░', percent: '4.1%' })).toBe(
+      'Context🗑️: 4.1% ▓▓░░',
     );
   });
 
@@ -102,7 +102,7 @@ describe('i18n t() interpolation', () => {
   it('keeps the literal {var} when the param is not provided', async () => {
     const { t, setLocale } = await loadI18n({ LANG: 'en_US.UTF-8' });
     setLocale('en');
-    expect(t('footer.context', { bar: '▓░' })).toBe('Context: ▓░ ({tokens}/{maxTokens})');
+    expect(t('footer.context', { bar: '▓░' })).toBe('Context🗑️: {percent} ▓░');
   });
 
   it('returns the key itself when missing in both dictionaries', async () => {
@@ -118,13 +118,13 @@ describe('i18n setLocale / getLocale', () => {
     const mod = await loadI18n({ LANG: 'en_US.UTF-8' });
     mod.setLocale('en');
     expect(mod.getLocale()).toBe('en');
-    expect(mod.t('footer.context', { bar: 'B', tokens: 'T', maxTokens: 'M' })).toBe(
-      'Context: B (T/M)',
+    expect(mod.t('footer.context', { bar: 'B', percent: 'P' })).toBe(
+      'Context🗑️: P B',
     );
     mod.setLocale('zh');
     expect(mod.getLocale()).toBe('zh');
-    expect(mod.t('footer.context', { bar: 'B', tokens: 'T', maxTokens: 'M' })).toBe(
-      '上下文: B (T/M)',
+    expect(mod.t('footer.context', { bar: 'B', percent: 'P' })).toBe(
+      '上下文🗑️：P B',
     );
   });
 
@@ -134,7 +134,7 @@ describe('i18n setLocale / getLocale', () => {
     const bogus: string = 'fr';
     mod.setLocale(bogus as Locale);
     expect(mod.getLocale()).toBe('en');
-    expect(mod.t('footer.hit')).toBe('HitR');
+    expect(mod.t('footer.hit')).toBe('Hitr');
   });
 });
 
@@ -143,8 +143,8 @@ describe('i18n fallback chain (current locale -> zh -> key)', () => {
     vi.doMock('../src/i18n/locale/en', () => ({ en: {} }));
     const mod = await loadI18n({ LANG: 'en_US.UTF-8' });
     mod.setLocale('en');
-    expect(mod.t('footer.context', { bar: '▓░', tokens: '1', maxTokens: '2' })).toBe(
-      '上下文: ▓░ (1/2)',
+    expect(mod.t('footer.context', { bar: '▓░', percent: '50.0%' })).toBe(
+      '上下文🗑️：50.0% ▓░',
     );
     // Still missing in zh as well -> raw key.
     expect(mod.t('totally.absent.key')).toBe('totally.absent.key');

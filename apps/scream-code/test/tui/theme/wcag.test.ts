@@ -69,6 +69,7 @@ const CHROME_TOKENS: readonly (keyof ColorPalette)[] = [
   'mdCodeBlockBorder',
   'planMode',
   'fusionPlanMode',
+  'lineLark',
   'diffAddedStrong',
   'diffRemovedStrong',
   'diffGutter',

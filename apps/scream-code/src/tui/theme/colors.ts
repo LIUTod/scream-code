@@ -17,6 +17,7 @@ const dark = {
   gold: '#FFD700',
   coral: '#FF7043',
   skyBlue: '#9CDCFE',
+  blue400: '#4C9AFF',
   violet: '#C084FC',
   pink400: '#FF6B9D',
   cyan400: '#56D4DD',
@@ -60,6 +61,8 @@ export interface ColorPalette {
   wolfpackMode: string;
   /** RLM (persistent-python) mode badge — bright yellow. */
   rlmMode: string;
+  /** line channel dot for the Lark channel (blue); WeChat reuses `success`. */
+  lineLark: string;
   // Permission mode labels
   permissionManual: string;
   permissionYolo: string;
@@ -119,6 +122,7 @@ export const darkColors: ColorPalette = {
   fusionPlanMode: dark.amber500,
   wolfpackMode: dark.violet,
   rlmMode: dark.gold,
+  lineLark: dark.blue400,
   permissionManual: dark.yellowGreen,
   permissionYolo: dark.gold,
   permissionAuto: dark.coral,
@@ -173,6 +177,7 @@ export const lightColors: ColorPalette = {
   fusionPlanMode: light.amber700,
   wolfpackMode: light.violet,
   rlmMode: light.gold,
+  lineLark: light.blue,
   permissionManual: light.yellowGreen700,
   permissionYolo: light.gold,
   permissionAuto: light.orange,

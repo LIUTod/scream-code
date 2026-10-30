@@ -68,11 +68,6 @@ export class MoonLoader extends Text {
     this.updateDisplay();
   }
 
-  setColorFn(colorFn: (s: string) => string): void {
-    this.colorFn = colorFn;
-    this.updateDisplay();
-  }
-
   private updateDisplay(): void {
     const frame = BRAILLE_SPINNER_FRAMES[this.currentFrame]!;
     const coloredFrame = this.colorFn ? this.colorFn(frame) : frame;

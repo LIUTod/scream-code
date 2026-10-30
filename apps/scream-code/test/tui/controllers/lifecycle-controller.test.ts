@@ -77,29 +77,216 @@ describe('LifecycleController', () => {
     vi.restoreAllMocks();
   });
 
+  describe('collaboration ticker', () => {
+    function makeHost(ui: { requestRender: () => void }) {
+      const state = {
+        appState: {} as AppState,
+        ui,
+        theme: { colors: { warning: '#FFB020', success: '#79EB00' } },
+      } as unknown as TUIState;
+      return createMockHost({ state });
+    }
+
+    it('shows the newest notice and clears it after the 8s TTL', () => {
+      vi.useFakeTimers();
+      const ui = { requestRender: vi.fn() };
+      const controller = new LifecycleController(makeHost(ui));
+
+      controller.showCollabActivity('coder 向 Scream 求助中！问题：因为 A', 'request');
+      expect(controller.getCollabActivity()).toEqual({
+        text: 'coder 向 Scream 求助中！问题：因为 A',
+        color: '#FFB020',
+      });
+      expect(ui.requestRender).toHaveBeenCalled();
+
+      // A newer event replaces the previous one — no queue, no stacking.
+      controller.showCollabActivity('Scream 已处理 coder 的请求！', 'handled');
+      expect(controller.getCollabActivity()).toEqual({
+        text: 'Scream 已处理 coder 的请求！',
+        color: '#79EB00',
+      });
+
+      vi.advanceTimersByTime(7_999);
+      expect(controller.getCollabActivity()).not.toBeNull();
+      vi.advanceTimersByTime(1);
+      expect(controller.getCollabActivity()).toBeNull();
+      // The expiry repaints so the row drops the line immediately.
+      expect(ui.requestRender).toHaveBeenCalledTimes(3);
+
+      controller.stopActivityAnimation();
+    });
+
+    it('mounts the ticker on both the idle and the working row', () => {
+      vi.useFakeTimers();
+      const state = createMockTUIState({
+        appState: { streamingPhase: 'idle', reconnectAttempt: undefined },
+      });
+      const host = createMockHost({ state });
+      const controller = new LifecycleController(host);
+
+      controller.forceUpdateStatusBar();
+      expect(state.statusBarContainer.render(80).join('\n')).not.toContain('求助中');
+
+      controller.showCollabActivity('coder 向 Scream 求助中！问题：因为 A', 'request');
+      // Idle row reads the live getter — no rebuild needed for the notice.
+      expect(state.statusBarContainer.render(80).join('\n')).toContain('求助中');
+
+      // The working row mounts the same getter, so the phase change keeps it.
+      state.appState.streamingPhase = 'waiting';
+      controller.forceUpdateStatusBar();
+      expect(state.statusBarContainer.render(80).join('\n')).toContain('求助中');
+
+      controller.stopActivityAnimation();
+      state.statusBarContainer.clear();
+      controller.forceUpdateStatusBar();
+      expect(state.statusBarContainer.render(80).join('\n')).not.toContain('求助中');
+    });
+
+    it('re-arms the TTL on every new event', () => {
+      vi.useFakeTimers();
+      const ui = { requestRender: vi.fn() };
+      const controller = new LifecycleController(makeHost(ui));
+
+      controller.showCollabActivity('first', 'request');
+      vi.advanceTimersByTime(6_000);
+      controller.showCollabActivity('second', 'handled');
+      vi.advanceTimersByTime(6_000);
+      // 12s after the first event, but only 6s after the latest one.
+      expect(controller.getCollabActivity()?.text).toBe('second');
+
+      vi.advanceTimersByTime(2_000);
+      expect(controller.getCollabActivity()).toBeNull();
+      controller.stopActivityAnimation();
+    });
+
+    it('stopActivityAnimation clears the notice and its timer', () => {
+      vi.useFakeTimers();
+      const ui = { requestRender: vi.fn() };
+      const host = makeHost(ui);
+      const controller = new LifecycleController(host);
+
+      controller.showCollabActivity('leftover', 'request');
+      controller.stopActivityAnimation();
+      expect(controller.getCollabActivity()).toBeNull();
+
+      // The cleared timer must not fire after shutdown.
+      const before = ui.requestRender.mock.calls.length;
+      vi.advanceTimersByTime(30_000);
+      expect(ui.requestRender.mock.calls.length).toBe(before);
+    });
+  });
+
+  describe('footer git diff stats', () => {
+    it('serves a deferred snapshot instead of probing git inside render', () => {
+      vi.useFakeTimers();
+      const host = createMockHost();
+      const ui = { requestRender: vi.fn() };
+      (host.state as unknown as { ui: typeof ui }).ui = ui;
+      const controller = new LifecycleController(host);
+      const internals = controller as unknown as {
+        readSidebarGit: (workDir: string) => unknown;
+      };
+      const readSpy = vi.spyOn(internals, 'readSidebarGit').mockReturnValue({
+        workDir: '/repo',
+        diffAdded: 7,
+        diffDeleted: 2,
+        filesCount: 1,
+      });
+
+      // First frame: nothing cached yet — no synchronous git probe.
+      expect(controller.getGitDiffStats('/repo')).toBeNull();
+      expect(readSpy).not.toHaveBeenCalled();
+
+      // The deferred read lands on the next tick and repaints.
+      vi.advanceTimersByTime(0);
+      expect(readSpy).toHaveBeenCalledTimes(1);
+      expect(ui.requestRender).toHaveBeenCalled();
+      expect(controller.getGitDiffStats('/repo')).toEqual({ added: 7, deleted: 2 });
+
+      // Still fresh: no second probe within the TTL.
+      vi.advanceTimersByTime(0);
+      expect(readSpy).toHaveBeenCalledTimes(1);
+
+      controller.stopGitDiffRefresh();
+    });
+
+    it('does not re-probe a non-repo workdir on every frame', () => {
+      vi.useFakeTimers();
+      const host = createMockHost();
+      const ui = { requestRender: vi.fn() };
+      (host.state as unknown as { ui: typeof ui }).ui = ui;
+      const controller = new LifecycleController(host);
+      const internals = controller as unknown as {
+        readSidebarGit: (workDir: string) => unknown;
+      };
+      const readSpy = vi.spyOn(internals, 'readSidebarGit').mockReturnValue(undefined);
+
+      for (let i = 0; i < 30; i += 1) {
+        expect(controller.getGitDiffStats('/not-a-repo')).toBeNull();
+        vi.advanceTimersByTime(16);
+      }
+      // One probe per TTL window, not one per frame.
+      expect(readSpy.mock.calls.length).toBeLessThanOrEqual(2);
+
+      controller.stopGitDiffRefresh();
+    });
+  });
+
   describe('line daemon status', () => {
     it('commits the initial and interval poll results through setAppState', async () => {
       vi.useFakeTimers();
-      vi.spyOn(lineStatus, 'checkLineDaemonActive')
-        .mockResolvedValueOnce(true)
-        .mockResolvedValueOnce(false);
+      vi.spyOn(lineStatus, 'readLineFooterStatus')
+        .mockResolvedValueOnce({ active: true, platform: 'lark' })
+        .mockResolvedValueOnce({ active: false, platform: 'lark' });
       const host = createMockHost();
       const controller = new LifecycleController(host);
 
       controller.startLinePolling();
       await Promise.resolve();
-      expect(host.setAppState).toHaveBeenNthCalledWith(1, { lineActive: true });
+      expect(host.setAppState).toHaveBeenNthCalledWith(1, { lineActive: true, linePlatform: 'lark' });
 
       vi.advanceTimersByTime(30_000);
       await Promise.resolve();
-      expect(host.setAppState).toHaveBeenNthCalledWith(2, { lineActive: false });
+      expect(host.setAppState).toHaveBeenNthCalledWith(2, { lineActive: false, linePlatform: 'lark' });
+
+      controller.stopLinePolling();
+    });
+
+    it('stands down after a command-driven write so a stale read cannot clobber it', async () => {
+      vi.useFakeTimers();
+      vi.spyOn(lineStatus, 'readLineFooterStatus').mockResolvedValue({
+        active: false,
+        platform: 'lark',
+      });
+      const host = createMockHost();
+      const controller = new LifecycleController(host);
+
+      controller.startLinePolling();
+      await Promise.resolve();
+      expect(host.setAppState).toHaveBeenCalledTimes(1);
+
+      // /line start wrote `lineActive: true` a moment before the next poll
+      // fires: that poll must not overwrite it with the stale read.
+      vi.advanceTimersByTime(29_999);
+      controller.noteLineStateWrite();
+      vi.advanceTimersByTime(1);
+      await Promise.resolve();
+      expect(host.setAppState).toHaveBeenCalledTimes(1);
+
+      // A later cycle (past the grace window) resumes normally.
+      vi.advanceTimersByTime(30_000);
+      await Promise.resolve();
+      expect(host.setAppState).toHaveBeenCalledTimes(2);
 
       controller.stopLinePolling();
     });
 
     it('commits the delayed refresh through setAppState after 1.5 seconds', async () => {
       vi.useFakeTimers();
-      vi.spyOn(lineStatus, 'checkLineDaemonActive').mockResolvedValue(true);
+      vi.spyOn(lineStatus, 'readLineFooterStatus').mockResolvedValue({
+        active: true,
+        platform: 'wechat',
+      });
       const host = createMockHost();
       const controller = new LifecycleController(host);
 
@@ -109,7 +296,7 @@ describe('LifecycleController', () => {
 
       vi.advanceTimersByTime(1);
       await Promise.resolve();
-      expect(host.setAppState).toHaveBeenCalledWith({ lineActive: true });
+      expect(host.setAppState).toHaveBeenCalledWith({ lineActive: true, linePlatform: 'wechat' });
     });
   });
 

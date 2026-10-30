@@ -1,4 +1,5 @@
 import chalk from 'chalk';
+import { truncateToWidth } from '@liutod-scream/pi-tui';
 import { t } from '@scream-code/config';
 import type {
   AgentStatusUpdatedEvent,
@@ -51,10 +52,7 @@ import {
 } from '../utils/event-payload';
 import { formatBackgroundAgentTranscript } from '../utils/background-agent-status';
 import { isBackgroundedHandoffResult } from '../utils/subagent-handoff';
-import {
-  childRequestFieldsFromEvent,
-  renderChildRequestNotice,
-} from '../utils/child-request-notice';
+import { childRequestFieldsFromEvent, previewText } from '../utils/child-request-notice';
 import { SubagentSlots, type SubagentSlot } from '../utils/subagent-slots';
 import {
   buildAgentRows,
@@ -187,6 +185,10 @@ export function isMainAgentStatusEvent(event: {
  * 20 per owner) and only ever trims scrolling history.
  */
 const MAX_BACKGROUND_TASKS = 200;
+/** Name column budget in the ticker: a long agent name must not eat the issue. */
+const COLLAB_NAME_MAX_COLUMNS = 12;
+/** Upper bound for in-flight SendSubagentMessage bookkeeping (aborted turns). */
+const MAX_TRACKED_SUBAGENT_CALLS = 200;
 
 
 export interface SessionEventHost {
@@ -204,6 +206,13 @@ export interface SessionEventHost {
   showError(msg: string): void;
   showStatus(msg: string, color?: string): void;
   showNotice(title: string, detail?: string): void;
+  /**
+   * One-line collaboration ticker above the editor (subagent ↔ main agent).
+   * Optional so headless/test hosts can omit it.
+   */
+  showCollabActivity?(text: string, tone: 'request' | 'handled'): void;
+  /** Drops a pending ticker line (session switch). */
+  clearCollabActivity?(): void;
   appendTranscriptEntry(entry: TranscriptEntry): void;
   sendQueuedMessage(session: Session, item: QueuedMessage): void;
   sendNormalUserInput(text: string): void;
@@ -281,6 +290,18 @@ export class SessionEventHandler {
   renderedSkillActivationIds: Set<string> = new Set();
   renderedMcpServerStatusKeys: Map<string, string> = new Map();
   mcpServerStatusSpinners: Map<string, MoonLoader> = new Map();
+  /**
+   * `SendSubagentMessage` tool call → target agent id. Needed at result time
+   * because `SubagentSlots.onMessagingEnd()` deletes its own mapping, and a
+   * successful send is the main agent's answer to a child request.
+   */
+  private readonly subagentMessageCalls = new Map<string, string>();
+  /**
+   * Children that asked the main agent for something and have not been answered
+   * yet. An acknowledgement is only echoed for one of these — an ordinary steer
+   * to a running child is not "handling a request" and must not claim to be.
+   */
+  private readonly pendingChildRequests = new Set<string>();
 
   resetRuntimeState(): void {
     this.backgroundAgentMetadata.clear();
@@ -290,6 +311,10 @@ export class SessionEventHandler {
     this.subagentInfo.clear();
     this.foregroundSubagentIds.clear();
     this.subagentSlots.reset();
+    this.subagentMessageCalls.clear();
+    this.pendingChildRequests.clear();
+    // A ticker line belongs to the session that produced it.
+    this.host.clearCollabActivity?.();
     this.subagentInstances.clear();
     this.recentSubagentInstances.length = 0;
     this.renderedSkillActivationIds.clear();
@@ -597,37 +622,33 @@ export class SessionEventHandler {
 
   /**
    * A child→parent collaboration request that the kernel actually delivered:
-   * raise the requester's transient requesting marker and cut into the main
-   * transcript, so the human sees it without expanding the agent card. The
-   * kernel emits the frame at the steering success point only, so a request it
-   * deduped or refused never reaches this handler — the live transcript paints
-   * exactly what replay reconstructs from the parent's context.
+   * raise the requester's transient requesting marker and surface a one-line
+   * ticker above the editor.
+   *
+   * It deliberately does NOT write to the transcript any more — the request
+   * body (needs / evidence / artifacts) is long, and cutting it into the
+   * conversation pushed the user's own work off screen. The full text stays
+   * available in the agent card's `ContactParent` arguments and in the parent's
+   * context; the ticker only says who is asking and why, in one truncated line.
    */
   private handleSubagentChildRequest(event: SubagentChildRequestEvent): void {
     this.subagentSlots.onRequesting(event.subagentId);
-    this.appendChildRequestNotice(event);
-  }
-
-  private appendChildRequestNotice(event: SubagentChildRequestEvent): void {
-    const fields = childRequestFieldsFromEvent(event);
-    if (fields === null) return;
-    const notice = renderChildRequestNotice(
-      fields,
-      event.subagentName ?? this.subagentInfo.get(event.subagentId)?.name,
+    this.pendingChildRequests.add(event.subagentId);
+    // A requester we never saw spawn has no display name; a neutral label
+    // reads better than a raw agent id in a one-line ticker.
+    const name = truncateToWidth(
+      event.subagentName ?? this.subagentInfo.get(event.subagentId)?.name ?? 'subagent',
+      COLLAB_NAME_MAX_COLUMNS,
+      '…',
     );
-    // A delivered request cuts into the transcript: settle the running stretch
-    // of work, so the notice lands below it and the work that follows opens a
-    // fresh block under the notice instead of writing above it.
-    this.host.streamingUI.endActivityGroup();
-    this.host.appendTranscriptEntry({
-      id: nextTranscriptId(),
-      kind: 'status',
-      turnId: this.host.streamingUI.getTurnContext().turnId,
-      renderMode: 'notice',
-      content: notice.title,
-      detail: notice.detail,
-      noticeMarkerColor: this.host.state.theme.colors.warning,
-    });
+    const fields = childRequestFieldsFromEvent(event);
+    const issue = fields === null ? '' : previewText(fields.message);
+    this.host.showCollabActivity?.(
+      issue.length > 0
+        ? t('status.collab_request', { name, issue })
+        : t('status.collab_request_bare', { name }),
+      'request',
+    );
   }
 
   private routeSubagentEvent(event: Event): boolean {
@@ -1004,6 +1025,16 @@ export class SessionEventHandler {
         target === undefined || target.length === 0 ? undefined : target,
         operation === undefined || operation.length === 0 ? undefined : operation,
       );
+      if (target !== undefined && target.length > 0) {
+        this.subagentMessageCalls.set(event.toolCallId, target);
+        // An aborted turn may never deliver a result, so bound the map instead
+        // of letting one entry per unanswered call accumulate for the session.
+        while (this.subagentMessageCalls.size > MAX_TRACKED_SUBAGENT_CALLS) {
+          const oldest = this.subagentMessageCalls.keys().next().value;
+          if (oldest === undefined) break;
+          this.subagentMessageCalls.delete(oldest);
+        }
+      }
     }
     // Goal complete → internal grader runs while this tool call is in flight:
     // mark the sidebar judge state as judging (裁判 裁定中).
@@ -1102,6 +1133,23 @@ export class SessionEventHandler {
     // Close the messaging window for SendSubagentMessage if this result
     // belongs to one (no-op otherwise — the map lookup misses safely).
     this.subagentSlots.onMessagingEnd(event.toolCallId);
+    // A successful send IS the main agent answering that child: echo it in the
+    // ticker so the exchange reads end to end. Failed sends stay silent (the
+    // message never landed), but the bookkeeping entry is dropped either way.
+    const repliedTo = this.subagentMessageCalls.get(event.toolCallId);
+    if (repliedTo !== undefined) {
+      this.subagentMessageCalls.delete(event.toolCallId);
+      // Only an answer to an actual request earns the "handled" line: a steer
+      // or queue to a running child is ordinary collaboration, not a reply.
+      if (event.isError !== true && this.pendingChildRequests.delete(repliedTo)) {
+        this.host.showCollabActivity?.(
+          t('status.collab_handled', {
+            name: truncateToWidth(this.subagentInfo.get(repliedTo)?.name ?? repliedTo, COLLAB_NAME_MAX_COLUMNS, '…'),
+          }),
+          'handled',
+        );
+      }
+    }
     // UpdateGoal(complete) result: grading finished. If the snapshot already
     // reported complete the goal handler marked us adjudicated; otherwise the
     // goal was resumed → back to awaiting.

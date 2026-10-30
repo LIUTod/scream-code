@@ -364,6 +364,8 @@ async function mergeAndSaveConfig(
       ...(existing?.workDir !== undefined ? { workDir: existing.workDir } : {}),
     };
     await saveLineConfig(config);
+    host.setAppState({ linePlatform: config.feishu !== undefined ? 'lark' : 'wechat' });
+    host.noteLineStateWrite?.();
   } catch (error) {
     host.showError(error instanceof Error ? error.message : String(error));
     return false;
@@ -406,10 +408,15 @@ async function doStart(host: SlashCommandHost): Promise<void> {
   try {
     const { pid, alreadyRunning } = await startLineDaemonDetached();
     host.showStatus(alreadyRunning ? t('line.already_running', { pid: `${pid}` }) : t('line.started', { pid: `${pid}` }));
-    host.setAppState({ lineActive: true });
+    host.setAppState({
+      lineActive: true,
+      linePlatform: config.feishu !== undefined ? 'lark' : 'wechat',
+    });
+    host.noteLineStateWrite?.();
   } catch (error) {
     host.showError(t('line.start_failed', { error: error instanceof Error ? error.message : String(error) }));
     host.setAppState({ lineActive: false });
+    host.noteLineStateWrite?.();
   }
 }
 
@@ -461,7 +468,8 @@ async function doUninstall(host: SlashCommandHost): Promise<void> {
       label: t('line.uninstall_failed', { error: error instanceof Error ? error.message : String(error) }),
     });
   }
-  host.setAppState({ lineActive: false });
+  host.setAppState({ lineActive: false, linePlatform: null });
+  host.noteLineStateWrite?.();
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────

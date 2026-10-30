@@ -1,9 +1,19 @@
 /**
- * Footer/status bar — multi-line status display at the bottom of the TUI.
+ * Footer/status bar — fixed two-line status display at the bottom of the TUI.
  *
  * Layout:
- *   Line 1: [yolo] [plan] <model>  <git-badge>  <shortcut hints>
- *   Line 2: context: XX.X% (tokens/max)
+ *   Line 1 (identity strip): `📟️ <model>` · `<balance>` · `📁 工作区Git +N-M`
+ *           … right-aligned: `<line-dot> Line: <Lark|Wechat|未连接> ↓ Hitr: xx%
+ *           <work status>`
+ *   Line 2 (run strip): `🗒️ 计划/融合计划` · `🪐 RLM` · `🐺 群狼` · `GOAL …` ·
+ *           task badges … right-aligned: `🗑️ 上下文:tokens/max bar`
+ *           When a transient hint owns line 1's right half, line 2 keeps its
+ *           context readout.
+ *
+ * Both rows are always rendered, so the dock must reserve two rows for the
+ * footer (see LifecycleController.buildLayout) — a one-row slot would clip the
+ * context readout away. Every row is width-safe: emoji are counted by
+ * `visibleWidth` and each line is finally clamped with `truncateToWidth`.
  */
 
 import type { Component, TUI } from '@liutod-scream/pi-tui';
@@ -132,12 +142,6 @@ function modelDisplayName(state: AppState): string {
   return model?.displayName ?? model?.model ?? state.model;
 }
 
-function formatTokenCount(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
-  return String(n);
-}
-
 function safeUsage(usage: number): number {
   return safeUsageRatio(usage);
 }
@@ -173,15 +177,16 @@ function formatContextBar(usage: number, width: number = CONTEXT_BAR_WIDTH): str
   return `${used}${air}`;
 }
 
-function formatContextStatus(usage: number, tokens?: number, maxTokens?: number, barWidth = CONTEXT_BAR_WIDTH): string {
-  // Bar only: `█▓▒░░░░░░░ (287.9k/1.0M)`. No percentage and no "Context:" label
-  // — the footer already groups this visually, so those were redundant noise.
-  // `barWidth` 0 collapses the bar on narrow terminals.
-  const bar = barWidth > 0 ? formatContextBar(usage, barWidth) : '';
-  if (maxTokens && maxTokens > 0 && tokens !== undefined) {
-    return t('footer.context', { bar, tokens: formatTokenCount(tokens), maxTokens: formatTokenCount(maxTokens) });
-  }
-  return t('footer.context_short', { bar });
+function formatContextStatus(usage: number, barWidth = CONTEXT_BAR_WIDTH): string {
+  // `上下文🗑️：5.5% ▓░░░░░░░░░` — the percentage is the metric, the bar is its
+  // gauge. Absolute token counts were dropped: they made the row read like a
+  // ledger and duplicated what `/status` already reports.
+  // `barWidth` 0 collapses the bar on narrow terminals, which needs its own
+  // template so no trailing space is left where the bar used to sit.
+  const clamped = Number.isFinite(usage) ? Math.min(1, Math.max(0, usage)) : 0;
+  const percent = `${(clamped * 100).toFixed(1)}%`;
+  if (barWidth <= 0) return t('footer.context_plain', { percent });
+  return t('footer.context', { percent, bar: formatContextBar(usage, barWidth) });
 }
 
 /** Format goal wall-clock duration compactly: `3m`, `1m30s`, `45s`. */
@@ -353,6 +358,10 @@ export class FooterComponent implements Component {
    * respective badge.
    */
   private backgroundBashTaskCount = 0;
+  /** Line-1 git badge source (shares the sidebar's cache); null = not a repo.
+   * Called from `render()`, so the provider must be a cached read, never a
+   * process spawn. */
+  private gitDiffProvider: (() => { added: number; deleted: number } | null) | null = null;
   /** Balance flash animation: shimmer the badge until this timestamp. */
   private balanceFlashUntil = 0;
   private balanceFlashTimer: NodeJS.Timeout | undefined;
@@ -428,6 +437,26 @@ export class FooterComponent implements Component {
     this.foregroundSubagentCount = Math.max(0, counts.foregroundSubagents);
   }
 
+  /**
+   * Wire the line-2 git badge to a diff-stats provider. The provider shares the
+   * sidebar's git cache, so this costs no extra git spawns; `null` means "not a
+   * repo" and hides the badge.
+   */
+  setGitDiffProvider(provider: (() => { added: number; deleted: number } | null) | null): void {
+    this.gitDiffProvider = provider;
+  }
+
+  /** Provider call isolated behind a guard: a status probe must never throw
+   * inside `render()` and take the whole frame down. */
+  private readGitDiff(): { added: number; deleted: number } | null {
+    if (this.gitDiffProvider === null) return null;
+    try {
+      return this.gitDiffProvider();
+    } catch {
+      return null;
+    }
+  }
+
   invalidate(): void {}
 
   /** Stop the active-status timer. Idempotent and safe during disposal. */
@@ -479,41 +508,37 @@ export class FooterComponent implements Component {
     const colors = this.colors;
     const state = this.state;
 
-    // ── Line 1: mode badges + model + [N task(s) running] + [N agent(s) running] + cwd + hints ──
+    // ── Line 1 left: model + balance + git summary ───────────────────────
+    // The model name leads the row (`📟️` + name), the balance hugs it and the
+    // git working-tree summary closes the run. Mode badges (wolfpack / rlm /
+    // plan) open line 2 instead, so line 1 stays a quiet identity strip.
     // Permission mode is NOT rendered here — it lives in the editor's top
     // border (CustomEditor permissionMode badge), next to the input it
     // governs.
     const left: string[] = [];
-    if (state.planMode !== 'off') {
-      const isFusion = state.planMode === 'fusionplan';
-      left.push(chalk.hex(isFusion ? colors.fusionPlanMode : colors.planMode).bold(isFusion ? t('badge.fusion') : t('badge.plan')));
-    }
-    if (state.wolfpackMode) left.push(chalk.hex(colors.wolfpackMode).bold(t('badge.wolfpack')));
-    if (state.rlmEnabled) left.push(chalk.hex(colors.rlmMode).bold(t('badge.rlm')));
-    if (state.goalActive && state.goal) {
-      const goalLabel = formatGoalBadge(state.goal);
-      left.push(chalk.hex(colors.primary).bold(goalLabel));
-    }
-
     const model = shortenModel(modelDisplayName(state));
     if (model) {
+      // The pager emoji marks the model segment; it is a 2-cell glyph, so the
+      // width math below stays accurate (visibleWidth counts it as 2).
       if (state.streamingPhase === 'thinking' || state.streamingPhase === 'waiting' || state.streamingPhase === 'composing' || state.streamingPhase === 'tool-args') {
         // Reasoning/latency/call-authoring states keep the default green shimmer.
-        left.push(shimmerText(model, colors));
+        left.push(`📟️ ${shimmerText(model, colors)}`);
       } else if (state.streamingPhase === 'tool') {
         // A tool is executing: switch the glow to cyan so the user can tell
         // "working on it" from "running a tool" at a glance. Same grey→tint
         // structure as the thinking glow — only the peak color changes.
         left.push(
-          shimmerTextWithPalette(model, {
+          `📟️ ${shimmerTextWithPalette(model, {
             low: colors.textDim,
             mid: colors.textMuted,
             high: colors.planMode,
-          }),
+          })}`,
         );
       } else {
-        left.push(chalk.hex(colors.textDim)(model));
+        left.push(`📟️ ${chalk.hex(colors.textDim)(model)}`);
       }
+      // The balance hugs the model name — both describe the account the model
+      // bills to, so they read as one block.
       const balance = state.providerBalance;
       if (balance !== null && balance !== undefined) {
         const text = `${currencySymbol(balance.currency)}${balance.totalBalance}`;
@@ -524,33 +549,89 @@ export class FooterComponent implements Component {
         }
       }
     }
-
-    // Background-task badges sit immediately before cwd. `bash-*` tasks
-    // (shell processes) and `agent-*` tasks (background subagents) get
-    // separate badges so the user can distinguish them at a glance.
-    if (this.backgroundBashTaskCount > 0) {
+    // The git working-tree summary closes line 1's run (`📁 工作区Git +N-M`).
+    // It is independent of the model (it describes the working dir) and hidden
+    // outside a repo, where there is nothing to report.
+    const gitDiff = this.readGitDiff();
+    if (gitDiff !== null) {
       left.push(
+        `${chalk.hex(colors.textDim)(t('footer.git_label'))} ${chalk.hex(colors.success)(`+${gitDiff.added}`)}${chalk.hex(colors.error)(`-${gitDiff.deleted}`)}`,
+      );
+    }
+
+    // ── Line 2 left: mode badges + goal + background tasks ───────────────
+    // Run-state readouts start line 2 from the left edge and leave the right
+    // half to the context readout. Mode badges open the row so line 1 stays a
+    // quiet identity strip (model · balance · git).
+    // ── Cache hit rate: fixed first item of line 2 ───────────────────────
+    // Session token usage accumulated from turn.step.completed. Cache hit rate
+    // = cache-read / (cache-read + cache-created + non-cached input) — the full
+    // billed input, matching how providers count tokens. `--` until the session
+    // has produced input tokens (a "0%" would be misleading). Colour only when
+    // the rate is genuinely high (90%+), and only on the number.
+    const sessionUsage = state.sessionUsage ?? {
+      inputOther: 0,
+      output: 0,
+      inputCacheRead: 0,
+      inputCacheCreation: 0,
+    };
+    const totalInput =
+      sessionUsage.inputCacheRead + sessionUsage.inputCacheCreation + sessionUsage.inputOther;
+    const hitRatePct = totalInput > 0 ? (sessionUsage.inputCacheRead / totalInput) * 100 : undefined;
+    const hitColor = hitRatePct !== undefined && hitRatePct >= 90 ? colors.success : colors.textDim;
+    const segHit =
+      chalk.hex(colors.textDim)(`↓ ${t('footer.hit')}:`) +
+      ' ' +
+      chalk.hex(hitColor)(hitRatePct === undefined ? '--' : `${hitRatePct.toFixed(2)}%`);
+
+    // ── Line 2 left: hit rate, mode badges, goal, background tasks ───────
+    // Run-state readouts start line 2 from the left edge and leave the right
+    // half to the context readout. The hit rate is pinned first (it is always
+    // present), then plan → rlm → wolfpack — the left-to-right reading order
+    // the user expects for the mode strip.
+    const leftSecond: string[] = [segHit];
+    if (state.planMode !== 'off') {
+      const isFusion = state.planMode === 'fusionplan';
+      // Emoji marks: memo (plan), ringed planet (rlm), wolf (wolfpack). The
+      // memo carries VS16 so it renders as a 2-cell emoji like the others.
+      leftSecond.push(
+        chalk
+          .hex(isFusion ? colors.fusionPlanMode : colors.planMode)
+          .bold(`🗒️ ${isFusion ? t('badge.fusion') : t('badge.plan')}`),
+      );
+    }
+    if (state.rlmEnabled) leftSecond.push(chalk.hex(colors.rlmMode).bold(`🪐 ${t('badge.rlm')}`));
+    if (state.wolfpackMode) leftSecond.push(chalk.hex(colors.wolfpackMode).bold(`🐺 ${t('badge.wolfpack')}`));
+    if (state.goalActive && state.goal) {
+      const goalLabel = formatGoalBadge(state.goal);
+      leftSecond.push(chalk.hex(colors.primary).bold(goalLabel));
+    }
+    // `bash-*` tasks (shell processes) and `agent-*` tasks (background
+    // subagents) get separate badges so the user can distinguish them at a
+    // glance.
+    if (this.backgroundBashTaskCount > 0) {
+      leftSecond.push(
         chalk.hex(colors.primary)(`[${t('footer.tasks_running', { count: String(this.backgroundBashTaskCount) })}]`),
       );
     }
     if (this.backgroundAgentCount > 0) {
-      left.push(
+      leftSecond.push(
         chalk.hex(colors.primary)(`[${t('footer.agents_running', { count: String(this.backgroundAgentCount) })}]`),
       );
     }
     if (this.foregroundSubagentCount > 0) {
-      left.push(
+      leftSecond.push(
         chalk.hex(colors.primary)(`[${t('footer.subagents_working', { count: String(this.foregroundSubagentCount) })}]`),
       );
     }
 
-    // Git status moved to the sidebar Git panel (working tree summary); the
-    // footer no longer renders a git badge.
-
     const leftLine = left.join('  ');
-    const leftWidth = visibleWidth(leftLine);
+    const leftSecondLine = leftSecond.join('  ');
 
-    // ── Right side: transient hint (when active) or status info ─────
+    // Git working-tree summary now closes line 1 (the sidebar Git panel keeps
+    // the detailed file list).
+
+    // ── Line 1 right side: transient hint (when active) or status info ─────
     let rightText: string;
     if (this.transientHint) {
       rightText = chalk.hex(colors.warning).bold(this.transientHint);
@@ -566,77 +647,105 @@ export class FooterComponent implements Component {
           reconnectMaxAttempts: state.reconnectMaxAttempts,
         },
       );
-      const lineDot = state.lineActive
-        ? chalk.hex(colors.success)('◆')
-        : chalk.hex(colors.textDim)('◆');
-      // Session token usage: input (cache read + created + other) and output.
-      // Session token usage (from turn.step.completed accumulation), used for
-      // the cache hit rate below. Defensive default so footer rendering never
-      // crashes on a partial state (some call sites/tests build AppState
-      // incrementally).
-      const sessionUsage = state.sessionUsage ?? {
-        inputOther: 0,
-        output: 0,
-        inputCacheRead: 0,
-        inputCacheCreation: 0,
-      };
-      // Cache hit rate = cache-read / (cache-read + cache-created + non-cached
-      // input) — the full billed input, matching how providers count tokens.
-      // `--` until the session has produced input tokens (no data yet, so a
-      // "0%" would be misleading).
-      const totalInput =
-        sessionUsage.inputCacheRead + sessionUsage.inputCacheCreation + sessionUsage.inputOther;
-      const hitRatePct = totalInput > 0 ? (sessionUsage.inputCacheRead / totalInput) * 100 : undefined;
-      // Colour only when the hit rate is genuinely high (90%+); below that it
-      // stays muted so a mid-rate session doesn't read as "good". Threshold
-      // uses the precise value so 89.99% never flips to green.
-      const hitColor = hitRatePct !== undefined && hitRatePct >= 90 ? colors.success : colors.textDim;
-      // Label stays muted; only the percentage carries the hit-rate colour
-      // (green ≥90%, muted otherwise) so a high rate doesn't flood the line.
-      const segHit =
-        chalk.hex(colors.textDim)(`${t('footer.hit')}:`) +
-        ' ' +
-        chalk.hex(hitColor)(hitRatePct === undefined ? '--' : `${hitRatePct.toFixed(2)}%`);
-      const contextColor = pickContextColor(state.contextUsage, colors);
-      // Collapse the water-level bar on narrow terminals so the percentage
-      // itself is never squeezed out: 10 cells on wide, 6 mid, 0 = plain text.
-      const contextBarWidth = width >= 68 ? CONTEXT_BAR_WIDTH : width >= 52 ? 6 : 0;
-      const contextPart = chalk.hex(contextColor)(
-        formatContextStatus(state.contextUsage, state.contextTokens, state.maxContextTokens, contextBarWidth),
+      const platform = state.linePlatform ?? null;
+      const lineConnected = state.lineActive && platform !== null;
+      // Only the dot carries the channel colour — blue for Lark, green for
+      // WeChat, muted when not connected. The label stays muted so the status
+      // segment never glows as a whole.
+      const dotColor = !lineConnected
+        ? colors.textDim
+        : platform === 'lark'
+          ? colors.lineLark
+          : colors.success;
+      const lineDot = chalk.hex(dotColor)('◆');
+      // `Line：` + the channel brand while it runs, `未连接` otherwise — the
+      // brand alone reads as a stray word without the label.
+      const lineLabel = chalk.hex(colors.textDim)(
+        t('footer.line_status', {
+          status: lineConnected ? (platform === 'lark' ? 'Lark' : 'Wechat') : t('footer.line_disconnected'),
+        }),
       );
-      const statusPart = chalk.hex(colors.textDim)(` ${statusLine}`);
-      rightText = `${lineDot} ${segHit} ${contextPart} ${statusPart}`;
+      const statusPart = chalk.hex(colors.textDim)(statusLine);
+      rightText = `${lineDot} ${lineLabel} ${statusPart}`;
     }
-    const rightWidth = visibleWidth(rightText);
-    const gap = 3;
 
     const ellipsis = chalk.hex(colors.textDim)('…');
 
-    // Three-stage progressive truncation keeps the footer on a single line at
-    // any terminal width:
-    //   1. Shrink LEFT with a middle ellipsis (head + tail kept) until
-    //      LEFT + gap + RIGHT fits, so RIGHT stays visible.
-    //   2. If RIGHT still cannot fit after shrinking LEFT (its width plus the
-    //      gap already exceeds the line), drop RIGHT and show LEFT alone,
-    //      padded to the full width.
-    //   3. If LEFT alone exceeds the width, truncate LEFT to the width.
-    let line1: string;
+    // ── Line 2: run-state badges (left) + context usage (right) ──────────
+    // The water-level bar collapses on narrow terminals (10 cells on wide,
+    // 6 mid, 0 = plain token counts) so the readout itself never disappears:
+    // the second row is rendered at every width.
+    const contextBarWidth = width >= 68 ? CONTEXT_BAR_WIDTH : width >= 52 ? 6 : 0;
+    // The trash mark lives in the label (`上下文🗑️：…`, i18n-side) so it reads
+    // as part of the metric rather than trailing decoration.
+    const contextLine = chalk.hex(pickContextColor(state.contextUsage, colors))(
+      formatContextStatus(state.contextUsage, contextBarWidth),
+    );
+
+    return [
+      truncateToWidth(this.composeLine(leftLine, rightText, width, ellipsis), width, '…'),
+      truncateToWidth(
+        this.composeLine(leftSecondLine, contextLine, width, ellipsis, 'right'),
+        width,
+        '…',
+      ),
+    ];
+  }
+
+  /**
+   * Compose a single footer row from a LEFT block and a RIGHT block.
+   *
+   * Three-stage progressive truncation keeps the row on one terminal line:
+   *   1. Shrink LEFT with a middle ellipsis (head + tail kept) until
+   *      LEFT + gap + RIGHT fits, so RIGHT stays visible.
+   *   2. If RIGHT still cannot fit after shrinking LEFT (its width plus the
+   *      gap already exceeds the line), drop RIGHT and show LEFT alone,
+   *      padded to the full width.
+   *   3. If LEFT alone exceeds the width, truncate LEFT to the width.
+   *
+   * `priority: 'right'` (line 2) inverts stage 2: the context readout is the
+   * row's reason to exist, so LEFT is clipped to whatever space remains and
+   * the readout is only truncated once LEFT is gone.
+   *
+   * A row with no LEFT is right-aligned and never drops RIGHT, clipping the
+   * RIGHT tail when the row is too short instead.
+   */
+  private composeLine(
+    leftText: string,
+    rightText: string,
+    width: number,
+    ellipsis: string,
+    priority: 'left' | 'right' = 'left',
+  ): string {
+    const leftWidth = visibleWidth(leftText);
+    const rightWidth = visibleWidth(rightText);
+    const gap = 3;
+    if (leftWidth === 0) return rightAligned(rightText, width, ellipsis);
     if (leftWidth + gap + rightWidth <= width) {
       const pad = width - leftWidth - rightWidth;
-      line1 = leftLine + ' '.repeat(pad) + rightText;
-    } else {
-      const targetLeft = width - gap - rightWidth;
-      if (targetLeft > 0) {
-        const shrunkLeft = truncateMiddle(leftLine, targetLeft, ellipsis);
-        const pad = width - visibleWidth(shrunkLeft) - rightWidth;
-        line1 = shrunkLeft + ' '.repeat(pad) + rightText;
-      } else if (leftWidth <= width) {
-        line1 = leftLine + ' '.repeat(width - leftWidth);
-      } else {
-        line1 = truncateMiddle(leftLine, width, ellipsis);
-      }
+      return leftText + ' '.repeat(pad) + rightText;
     }
-
-    return [truncateToWidth(line1, width, '…')];
+    const targetLeft = width - gap - rightWidth;
+    if (priority === 'right') {
+      if (targetLeft <= 0) return rightAligned(rightText, width, ellipsis);
+      const shrunkLeft = truncateMiddle(leftText, targetLeft, ellipsis);
+      const pad = Math.max(0, width - visibleWidth(shrunkLeft) - rightWidth);
+      return shrunkLeft + ' '.repeat(pad) + rightText;
+    }
+    if (targetLeft > 0) {
+      const shrunkLeft = truncateMiddle(leftText, targetLeft, ellipsis);
+      const pad = width - visibleWidth(shrunkLeft) - rightWidth;
+      return shrunkLeft + ' '.repeat(pad) + rightText;
+    }
+    if (leftWidth <= width) {
+      return leftText + ' '.repeat(width - leftWidth);
+    }
+    return truncateMiddle(leftText, width, ellipsis);
   }
+}
+
+/** Pad a RIGHT-only row to the full width, trimming its tail when too long. */
+function rightAligned(text: string, width: number, ellipsis: string): string {
+  const clipped = visibleWidth(text) <= width ? text : truncateToWidth(text, width, ellipsis);
+  return ' '.repeat(Math.max(0, width - visibleWidth(clipped))) + clipped;
 }

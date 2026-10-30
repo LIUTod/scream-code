@@ -603,7 +603,11 @@ export function wrapWithSideBorders(
 }
 
 const THINK_LABEL_MIN_WIDTH = 14;
-const MODE_BADGE_MIN_WIDTH = 10;
+/**
+ * Decorative mark closing the permission-mode label (pen + wavy rule).
+ * Width-safe: ✎ is 1 cell and ﹏ is 2, so the mark costs 3 columns.
+ */
+const MODE_BADGE_MARK = '✎﹏';
 
 function getPermissionModeColor(mode: PermissionMode, colors: ColorPalette): string {
   const modeColors: Record<PermissionMode, string> = {
@@ -662,12 +666,15 @@ function injectBorderBadges(lines: string[], width: number, opts: BorderBadgeOpt
   let left = '';
   let right = paint('─');
 
-  if (width >= MODE_BADGE_MIN_WIDTH) {
-    // Mode labels stay in English across locales: they are mode names, not
-    // prose. Their foreground comes from the current theme palette so it
-    // remains independent of ordinary or plan-mode border colors.
-    const badgeText = ` ${opts.mode} `;
-    left = paint('──') + chalk.hex(opts.modeHex).bold(badgeText);
+  // Mode labels stay in English across locales: they are mode names, not
+  // prose. Their foreground comes from the current theme palette so it
+  // remains independent of ordinary or plan-mode border colors. The guard is
+  // derived from the badge's real width (label + mark + padding + the two
+  // leading border cells), so it stays honest as the text grows: below that
+  // the badge would leave no fill at all.
+  const badgeLeft = paint('──') + chalk.hex(opts.modeHex).bold(` ${opts.mode} ${MODE_BADGE_MARK} `);
+  if (width >= visibleWidth(badgeLeft) + 1) {
+    left = badgeLeft;
   }
   // Right-side badges, built rightmost-first: think badge sits at the far
   // right, the First (tool priority) badge just left of it.

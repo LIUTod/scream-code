@@ -1,39 +1,10 @@
-import { Container, Spacer } from '@liutod-scream/pi-tui';
-
-import type { MoonLoader } from '../chrome/moon-loader';
-import type { PulseWaveLoader } from '../chrome/pulse-wave-loader';
-
+/**
+ * Status-area phase shared by the lifecycle controller and the status bar.
+ *
+ * The former `ActivityPaneComponent` lived here too, but it was never
+ * instantiated in production code (only its unit test built it), so the class
+ * and its options were removed in favour of the single-row
+ * `StatusBarPaneComponent`. The mode union stays, because the controller's
+ * `resolveActivityPaneMode()` is typed by it.
+ */
 export type ActivityPaneMode = 'hidden' | 'waiting' | 'thinking' | 'composing' | 'tool';
-
-export interface ActivityPaneOptions {
-  readonly mode: ActivityPaneMode;
-  readonly spinner?: MoonLoader;
-  readonly pulseWave?: PulseWaveLoader;
-}
-
-export class ActivityPaneComponent extends Container {
-  constructor(options: ActivityPaneOptions) {
-    super();
-
-    if (options.mode === 'waiting' || options.mode === 'tool') {
-      if (options.spinner !== undefined) {
-        this.addChild(new Spacer(1));
-        this.addChild(options.spinner);
-      }
-      if (options.pulseWave !== undefined) {
-        this.addChild(new Spacer(1));
-        this.addChild(options.pulseWave);
-      }
-      return;
-    }
-
-    if (options.mode === 'composing' && options.spinner !== undefined) {
-      this.addChild(new Spacer(1));
-      this.addChild(options.spinner);
-      if (options.pulseWave !== undefined) {
-        this.addChild(new Spacer(1));
-        this.addChild(options.pulseWave);
-      }
-    }
-  }
-}

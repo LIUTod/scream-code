@@ -1,49 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { t } from '@scream-code/config';
 import type { SubagentChildRequestEvent } from '@scream-code/scream-code-sdk';
 
-import {
-  childRequestFieldsFromEvent,
-  childRequestFieldsFromNotification,
-  renderChildRequestNotice,
-} from '#/tui/utils/child-request-notice';
-
-/**
- * The kernel builds the injected notification in
- * `packages/agent-core/src/session/subagent-host.ts` (`submitChildRequest`),
- * and `packages/agent-core/test/session/contact-parent.test.ts` pins its shape.
- * This fixture replicates that format so the parser is tested against the real
- * wire text rather than an invented one.
- */
-function kernelNotification(sourceId: string, bodyLines: readonly string[]): string {
-  const head = bodyLines[0] ?? '';
-  const requestType = head.split(':')[0] ?? 'info';
-  return [
-    `<notification id="child_request:${sourceId}:1700000000000" category="task" type="child_request" source_kind="subagent" source_id="${sourceId}">`,
-    `Title: Subagent ${requestType} request`,
-    'Severity: info',
-    ...bodyLines,
-    '</notification>',
-  ].join('\n');
-}
-
-/** Same line builder the kernel uses, so a live request and its replay agree. */
-function kernelBody(fields: {
-  requestType: string;
-  message: string;
-  needs?: string | undefined;
-  expecting?: string | undefined;
-  artifacts?: readonly string[] | undefined;
-}): string[] {
-  return [
-    `${fields.requestType}: ${fields.message}`,
-    fields.needs !== undefined ? `needs: ${fields.needs}` : undefined,
-    fields.expecting !== undefined ? `expecting: ${fields.expecting}` : undefined,
-    fields.artifacts !== undefined && fields.artifacts.length > 0
-      ? `artifacts: [${fields.artifacts.join(', ')}]`
-      : undefined,
-  ].filter((line): line is string => line !== undefined);
-}
+import { childRequestFieldsFromEvent, previewText } from '#/tui/utils/child-request-notice';
 
 /** The delivery frame the kernel emits once a request actually landed. */
 function requestEvent(overrides: Partial<SubagentChildRequestEvent> = {}): SubagentChildRequestEvent {
@@ -80,7 +38,7 @@ describe('childRequestFieldsFromEvent', () => {
     });
   });
 
-  it('refuses to build a notice without a request body', () => {
+  it('returns null without a request body', () => {
     // Events cross the wire as JSON: neither a missing nor a blank body is
     // guaranteed away by the declared type.
     expect(
@@ -110,138 +68,35 @@ describe('childRequestFieldsFromEvent', () => {
   });
 });
 
-describe('childRequestFieldsFromNotification', () => {
-  it('round-trips what the kernel injects', () => {
-    const request = {
-      requestType: 'handoff' as const,
-      message: '需要独立验证这段逻辑',
-      needs: 'independent verification',
-      expecting: '带测试命令的输出',
-      artifacts: ['src/a.ts', 'src/b.ts'],
-    };
-    const fromEvent = childRequestFieldsFromEvent(requestEvent(request));
-    const fromNotification = childRequestFieldsFromNotification(
-      kernelNotification('agent-7', kernelBody(request)),
-    );
-    // Live and replay must never disagree about the same request.
-    expect(fromNotification).toEqual(fromEvent);
+describe('previewText', () => {
+  it('collapses newlines and trims so the ticker stays a single paragraph', () => {
+    expect(previewText('第一行\n  第二行  ')).toBe('第一行 第二行');
   });
 
-  it('keeps extra lines that are not fields attached to the message', () => {
-    const fields = childRequestFieldsFromNotification(
-      kernelNotification('agent-7', ['escalate: 第一行', '第二行还是正文', 'needs: 决策']),
-    );
-    expect(fields?.requestType).toBe('escalate');
-    expect(fields?.message).toBe('第一行\n第二行还是正文');
-    expect(fields?.needs).toBe('决策');
+  it('caps an over-long request at 200 chars plus an ellipsis', () => {
+    // The kernel allows 8192 chars; the ticker is one terminal line.
+    const long = previewText('x'.repeat(8000));
+    expect(long.endsWith('…')).toBe(true);
+    expect(long.length).toBeLessThanOrEqual(201);
   });
 
-  it('returns null for anything that is not a child_request notification', () => {
-    expect(childRequestFieldsFromNotification('plain user text')).toBeNull();
-    expect(
-      childRequestFieldsFromNotification(
-        kernelNotification('agent-7', ['info: x']).replace('type="child_request"', 'type="task.completed"'),
-      ),
-    ).toBeNull();
-    expect(childRequestFieldsFromNotification('<notification type="child_request">\n</notification>')).toBeNull();
+  it('leaves short text untouched', () => {
+    expect(previewText('因为缺少基线')).toBe('因为缺少基线');
   });
 
-  it('only treats the kernel bracket form as a payload field', () => {
-    const fields = childRequestFieldsFromNotification(
-      kernelNotification('agent-7', [
-        'info: 第一行',
-        'missing: 这一行其实是正文，不是字段',
-        'artifacts: [a.ts, b.ts]',
-      ]),
-    );
-    expect(fields?.message).toBe('第一行\nmissing: 这一行其实是正文，不是字段');
-    expect(fields?.missing).toBeUndefined();
-    expect(fields?.artifacts).toEqual(['a.ts', 'b.ts']);
+  it('strips terminal control sequences from untrusted request text', () => {
+    // A child's message is model output: an unescaped sequence would reach the
+    // status row and could clear the screen or write the clipboard (OSC 52).
+    const hostile = '因为\u001B[2J缺少基\u001B]52;c;aGVsbG8=\u0007线\r';
+    expect(previewText(hostile)).toBe('因为缺少基线');
   });
 
-  it('returns null when the request text is empty, same as the live path', () => {
-    expect(childRequestFieldsFromNotification(kernelNotification('agent-7', ['info:    ']))).toBeNull();
-  });
-
-  it('parses expecting and keeps unrecognised lines in the message', () => {
-    const fields = childRequestFieldsFromNotification(
-      kernelNotification('agent-7', [
-        'info: 问一句',
-        'expecting: 引用原文片段',
-        'unrecognised: 这一行留在正文',
-      ]),
-    );
-    expect(fields?.expecting).toBe('引用原文片段');
-    // ⑦: an unknown field must not vanish — it stays part of the request text.
-    expect(fields?.message).toContain('unrecognised: 这一行留在正文');
-  });
-});
-
-describe('renderChildRequestNotice', () => {
-  it('names the requester when the live path knows it', () => {
-    const notice = renderChildRequestNotice(
-      { requestType: 'info', message: '目标终端宽度是否含侧栏展开态' },
-      'coder',
-    );
-    expect(notice.title).toBe(
-      t('transcript.child_request', { name: 'coder', type: t('transcript.child_request_type_info') }),
-    );
-    expect(notice.title).toContain('coder');
-    expect(notice.detail).toBe('目标终端宽度是否含侧栏展开态');
-  });
-
-  it('falls back to an unnamed title on replay', () => {
-    const notice = renderChildRequestNotice({ requestType: 'escalate', message: '需要人工决策' });
-    expect(notice.title).toContain(t('transcript.child_request_type_escalate'));
-    expect(notice.title).toBe(t('transcript.child_request_anon', { type: t('transcript.child_request_type_escalate') }));
-  });
-
-  it('collapses newlines and caps an over-long request so one row stays readable', () => {
-    const short = renderChildRequestNotice({ requestType: 'info', message: '第一行\n第二行' });
-    expect(short.detail).toBe('第一行 第二行');
-
-    // The kernel allows 8192 chars; the transcript must not turn into a wall.
-    const long = renderChildRequestNotice({ requestType: 'info', message: 'x'.repeat(8000) });
-    expect(long.detail.endsWith('…')).toBe(true);
-    expect(long.detail.length).toBeLessThanOrEqual(201);
-  });
-
-  it('shows what a good reply looks like in the detail line', () => {
-    const notice = renderChildRequestNotice({
-      requestType: 'handoff',
-      message: '需要复核',
-      needs: 'independent verification',
-      expecting: '引用行号的结论',
-    });
-    expect(notice.detail).toContain(
-      t('transcript.child_request_expecting', { value: '引用行号的结论' }),
-    );
-  });
-
-  it('joins needs and payload previews into the detail line', () => {
-    const notice = renderChildRequestNotice({
-      requestType: 'handoff',
-      message: '需要复核',
-      needs: 'independent verification',
-      artifacts: ['a.ts', 'b.ts', 'c.ts', 'd.ts', 'e.ts'],
-    });
-    expect(notice.detail).toContain('需要复核');
-    expect(notice.detail).toContain(t('transcript.child_request_needs', { value: 'independent verification' }));
-    // Long lists collapse to three names plus a hidden count.
-    expect(notice.detail).toContain('+2');
-    expect(notice.detail).not.toContain('e.ts');
-  });
-
-  it('keeps the hidden count when a long path list has to be truncated', () => {
-    const long = `${'dir/'.repeat(40)}a.ts`;
-    const notice = renderChildRequestNotice({
-      requestType: 'escalate',
-      message: '看产物',
-      artifacts: [long, long, long, 'x.ts', 'y.ts'],
-    });
-    // Truncation happens to the names, so the +N tail is never cut off.
-    expect(notice.detail).toContain('+2');
-    expect(notice.detail).not.toContain('x.ts');
-    expect(notice.detail.length).toBeLessThanOrEqual(240);
+  it('caps by code point so an emoji at the boundary is never split', () => {
+    const text = `${'x'.repeat(199)}😀tail`;
+    const preview = previewText(text);
+    // 199 ASCII + the emoji = 200 code points, then the ellipsis.
+    expect(preview).toBe(`${'x'.repeat(199)}😀…`);
+    expect(preview.includes('\uFFFD')).toBe(false);
+    expect(Array.from(preview).length).toBe(201);
   });
 });

@@ -47,6 +47,7 @@ function fakeInitialAppState(): AppState {
     goalJudge: 'awaiting',
     goalContinuationCount: 0,
     lineActive: false,
+    linePlatform: null,
     wolfpackMode: false,
     rlmEnabled: false,
     rlmMaxDepth: null,

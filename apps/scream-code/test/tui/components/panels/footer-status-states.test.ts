@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { visibleWidth } from '@liutod-scream/pi-tui';
+import chalk from 'chalk';
 
 import { FooterComponent } from '#/tui/components/chrome/footer';
 import { darkColors } from '#/tui/theme/colors';
@@ -8,6 +9,15 @@ import type { AppState } from '#/tui/types';
 const ANSI_SGR = /\u001B\[[0-9;]*m/g;
 function strip(text: string): string {
   return text.replaceAll(ANSI_SGR, '');
+}
+
+/** SGR sequence chalk emits for a hex colour at level 3. */
+function hexToSgr(hex: string): string {
+  const value = hex.replace(/^#/, '');
+  const r = Number.parseInt(value.slice(0, 2), 16);
+  const g = Number.parseInt(value.slice(2, 4), 16);
+  const b = Number.parseInt(value.slice(4, 6), 16);
+  return `\u001B[38;2;${String(r)};${String(g)};${String(b)}m`;
 }
 
 function baseState(overrides: Partial<AppState> = {}): AppState {
@@ -147,6 +157,84 @@ describe('footer status block — non-phase states', () => {
         }),
       ).endsWith('等待回答'),
     ).toBe(true);
+  });
+});
+
+describe('footer status block — line channel segment', () => {
+  it('shows Line: 未连接 when the daemon is down or no channel is configured', () => {
+    expect(statusSegment(baseState({ streamingPhase: 'idle' }))).toContain('◆ Line: 未连接');
+    expect(statusSegment(baseState({ linePlatform: 'wechat' }))).toContain('◆ Line: 未连接');
+    expect(statusSegment(baseState({ linePlatform: 'lark' }))).toContain('◆ Line: 未连接');
+  });
+
+  it('shows the channel brand once connected', () => {
+    expect(statusSegment(baseState({ linePlatform: 'lark', lineActive: true }))).toContain('◆ Line: Lark');
+    expect(statusSegment(baseState({ linePlatform: 'wechat', lineActive: true }))).toContain('◆ Line: Wechat');
+    expect(statusSegment(baseState({ linePlatform: 'wechat', lineActive: true }))).not.toContain('未连接');
+  });
+
+  it('lights only the dot: blue for Lark, green for WeChat, muted when disconnected', () => {
+    const previousLevel = chalk.level;
+    chalk.level = 3;
+    try {
+      const renderLine = (state: AppState): string => {
+        const footer = new FooterComponent(state, darkColors, uiMock);
+        const line = footer.render(200)[0] ?? '';
+        footer.dispose();
+        return line;
+      };
+      expect(renderLine(baseState({ linePlatform: 'lark', lineActive: true }))).toContain(
+        `${hexToSgr(darkColors.lineLark)}◆`,
+      );
+      expect(renderLine(baseState({ linePlatform: 'wechat', lineActive: true }))).toContain(
+        `${hexToSgr(darkColors.success)}◆`,
+      );
+      expect(renderLine(baseState({ linePlatform: 'lark' }))).toContain(
+        `${hexToSgr(darkColors.textDim)}◆`,
+      );
+      // The label itself never takes the channel colour.
+      expect(renderLine(baseState({ linePlatform: 'lark', lineActive: true }))).not.toContain(
+        `${hexToSgr(darkColors.lineLark)}Line`,
+      );
+    } finally {
+      chalk.level = previousLevel;
+    }
+  });
+
+  it('marks the model name with the 📟️ glyph (2 cells) without breaking the row', () => {
+    for (const width of [60, 80, 120]) {
+      const footer = new FooterComponent(baseState({ model: 'k2' }), darkColors, uiMock);
+      const line1 = strip(footer.render(width)[0] ?? '');
+      footer.dispose();
+      expect(line1).toContain('📟️ k2');
+      expect(visibleWidth(line1)).toBeLessThanOrEqual(width);
+    }
+  });
+
+  it('pins the ↓ cache-hit marker as the first item of line 2', () => {
+    const footer = new FooterComponent(baseState({ streamingPhase: 'idle' }), darkColors, uiMock);
+    const [line1, line2] = footer.render(120).map(strip);
+    footer.dispose();
+    // Line 1 is the channel/status strip; the hit rate moved to line 2.
+    expect(line1).not.toContain('Hitr');
+    expect(line2!.startsWith('↓ Hitr: --')).toBe(true);
+    // Exactly one space after the colon — no doubled separator.
+    expect(line2).toContain('↓ Hitr: --');
+    expect(line2).not.toContain('↓ Hitr:  --');
+  });
+
+  it('keeps the channel segment ahead of the status label on line 1', () => {
+    const out = statusSegment(
+      baseState({
+        streamingPhase: 'waiting',
+        streamingStartTime: NOW - 3000,
+        linePlatform: 'lark',
+        lineActive: true,
+      }),
+    );
+    expect(out.indexOf('Line:')).toBeLessThan(out.indexOf('等待中'));
+    // The hit rate no longer shares this row.
+    expect(out).not.toContain('Hitr:');
   });
 });
 

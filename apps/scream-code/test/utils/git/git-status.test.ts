@@ -35,6 +35,16 @@ function mockGit(porcelain: string, branch = 'main'): void {
 }
 
 describe('git status cache', () => {
+  it('keeps the repo when HEAD is detached (empty branch name)', () => {
+    mockGit(' M src/app.ts\n', '');
+
+    const status = createGitStatusCache('/repo').getStatus();
+    expect(status).not.toBeNull();
+    expect(status?.branch).toBe('(detached)');
+    expect(status?.diffAdded).toBe(4);
+    expect(status?.diffDeleted).toBe(1);
+  });
+
   it('caches branch and status reads until their TTL expires', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-04-24T00:00:00Z'));

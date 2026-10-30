@@ -170,6 +170,7 @@ function createInitialAppState(input: ScreamTUIStartupInput): AppState {
     goalJudge: 'awaiting',
     goalContinuationCount: 0,
     lineActive: false,
+    linePlatform: null,
     wolfpackMode: input.cliOptions.wolfpack === true,
     rlmEnabled: false,
     rlmMaxDepth: null,
@@ -282,6 +283,11 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
     this.dialogManager = new DialogManager(this);
     this.transcriptController = new TranscriptController(this);
     this.lifecycleController = new LifecycleController(this);
+    // The footer's line-1 git badge reads through the controller's git cache
+    // (same snapshot as the sidebar Git panel, no extra spawns).
+    this.state.footer.setGitDiffProvider(() =>
+      this.lifecycleController.getGitDiffStats(this.state.appState.workDir),
+    );
     this.inputController = new InputController(this);
     this.lifecycleController.buildLayout();
   }
@@ -492,6 +498,9 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
     if (this.isShuttingDown) return;
     this.isShuttingDown = true;
     this.lifecycleController.stopLinePolling();
+    this.lifecycleController.stopGitDiffRefresh();
+    // The pulse wave re-schedules itself every 80ms — stop it with the rest.
+    this.lifecycleController.stopActivityAnimation();
     if (this.balancePollTimer !== undefined) {
       clearInterval(this.balancePollTimer);
       this.balancePollTimer = undefined;
@@ -750,6 +759,21 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
     } catch {
       return 0;
     }
+  }
+
+  /** Collaboration ticker above the editor (subagent ↔ main-agent traffic). */
+  showCollabActivity(text: string, tone: 'request' | 'handled'): void {
+    this.lifecycleController.showCollabActivity(text, tone);
+  }
+
+  /** Drops a pending collaboration ticker line (session switch). */
+  clearCollabActivity(): void {
+    this.lifecycleController.clearCollabActivity();
+  }
+
+  /** Command-driven line-state writes stand the 30s poll down briefly. */
+  noteLineStateWrite(): void {
+    this.lifecycleController.noteLineStateWrite();
   }
 
   setAppState(patch: Partial<AppState>): void {

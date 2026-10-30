@@ -123,11 +123,11 @@ describe('FooterComponent - active status animation', () => {
       }),
     );
 
-    const line0 = footer.render(200)[0];
+    const line0 = footer.render(200)[1];
     expect(line0).toContain('GOAL 5s · 3 turns');
 
     vi.advanceTimersByTime(2_500);
-    const line1 = footer.render(200)[0];
+    const line1 = footer.render(200)[1];
     expect(line1).toContain('GOAL 7s · 3 turns');
 
     footer.dispose();

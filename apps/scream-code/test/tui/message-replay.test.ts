@@ -17,7 +17,6 @@ import type { SessionEventHandler } from '#/tui/controllers/session-event-handle
 import type { StreamingUIController } from '#/tui/controllers/streaming-ui';
 import { AgentGroupComponent } from '#/tui/components/messages/agent-group';
 import { ActivityGroupComponent } from '#/tui/components/messages/activity-group';
-import { NoticeMessageComponent } from '#/tui/components/messages/status-message';
 import { ToolCallComponent } from '#/tui/components/messages/tool-call';
 
 vi.mock('#/tui/utils/open-url', () => ({ openUrl: vi.fn() }));
@@ -671,7 +670,7 @@ describe('ScreamTUI resume message replay', () => {
 
 
 describe('replayed internal injections', () => {
-  it('renders a replayed child→parent request as a notice, not as raw XML', async () => {
+  it('never paints a child→parent request (neither live nor replay)', async () => {
     // Verbatim shape injected by submitChildRequest() in agent-core.
     const notification = [
       '<notification id="child_request:agent-7:1700000000000" category="task" type="child_request" source_kind="subagent" source_id="agent-7">',
@@ -686,44 +685,6 @@ describe('replayed internal injections', () => {
     const driver = await replayIntoDriver([
       message('user', [{ type: 'text', text: '继续侧栏的事' }]),
       message('assistant', [{ type: 'text', text: '好' }]),
-      message('user', [{ type: 'text', text: notification }], {
-        origin: { kind: 'system_trigger', name: 'child_request' },
-      }),
-    ]);
-
-    const notice = driver.state.transcriptEntries.find(
-      (entry) => entry.kind === 'status' && entry.renderMode === 'notice',
-    );
-    expect(notice?.content).toBe(
-      t('transcript.child_request_anon', { type: t('transcript.child_request_type_info') }),
-    );
-    expect(notice?.detail).toContain('目标终端宽度是否含侧栏展开态');
-    expect(notice?.detail).toContain('src/a.ts');
-    // Replay carries the same interjection marker as the live path.
-    expect(notice?.noticeMarkerColor).toBe(driver.state.theme.colors.warning);
-    expect(driver.state.transcriptContainer.render(120).join('\n')).toContain('▸ ');
-    // An injection is not user speech: it must never surface as a user row.
-    expect(
-      driver.state.transcriptEntries
-        .filter((entry) => entry.kind === 'user')
-        .map((entry) => entry.content),
-    ).toEqual(['继续侧栏的事']);
-    expect(driver.state.transcriptContainer.render(120).join('\n')).not.toContain('<notification');
-  });
-
-  it('paints a delivered request live exactly as replay reconstructs it', async () => {
-    const notification = [
-      '<notification id="child_request:agent-7:1700000000000" category="task" type="child_request" source_kind="subagent" source_id="agent-7">',
-      'Title: Subagent info request',
-      'Severity: info',
-      'info: 目标终端宽度是否含侧栏展开态',
-      'needs: independent verification',
-      'artifacts: [src/a.ts, src/b.ts]',
-      '</notification>',
-    ].join('\n');
-
-    const driver = await replayIntoDriver([
-      message('user', [{ type: 'text', text: '继续侧栏的事' }]),
       message('user', [{ type: 'text', text: notification }], {
         origin: { kind: 'system_trigger', name: 'child_request' },
       }),
@@ -746,17 +707,20 @@ describe('replayed internal injections', () => {
       vi.fn(),
     );
 
-    const notices = driver.state.transcriptEntries.filter(
-      (entry) => entry.kind === 'status' && entry.renderMode === 'notice',
-    );
-    // One row per delivered request. The body matches byte-for-byte; the title
-    // is where the producers legitimately differ — the kernel names a live
-    // child, while replay cannot recover a display name and stays name-less.
-    expect(notices).toHaveLength(2);
-    expect(notices[1]?.detail).toBe(notices[0]?.detail);
-    expect(notices[1]?.content).toContain('coder');
-    expect(notices[0]?.content).not.toContain('coder');
-    expect(notices[1]?.noticeMarkerColor).toBe(driver.state.theme.colors.warning);
+    // Requests are surfaced as a one-line ticker above the editor, so neither
+    // producer writes a transcript row any more — live and replay agree.
+    expect(
+      driver.state.transcriptEntries.filter(
+        (entry) => entry.kind === 'status' && entry.renderMode === 'notice',
+      ),
+    ).toHaveLength(0);
+    // An injection is not user speech: it must never surface as a user row.
+    expect(
+      driver.state.transcriptEntries
+        .filter((entry) => entry.kind === 'user')
+        .map((entry) => entry.content),
+    ).toEqual(['继续侧栏的事']);
+    expect(driver.state.transcriptContainer.render(120).join('\n')).not.toContain('<notification');
   });
 
   it('drops internal injections that carry no transcript meaning', async () => {
@@ -885,48 +849,6 @@ describe('replayed block sealing at agent cards and delivered requests', () => {
     );
   });
 
-  it('seals the block above a replayed child-request notice, so the next work starts below it', async () => {
-    const notification = [
-      '<notification id="child_request:agent-7:1700000000000" category="task" type="child_request" source_kind="subagent" source_id="agent-7">',
-      'Title: Subagent info request',
-      'Severity: info',
-      'info: 目标终端宽度是否含侧栏展开态',
-      'needs: independent verification',
-      '</notification>',
-    ].join('\n');
-
-    const driver = await replayIntoDriver([
-      message('user', [{ type: 'text', text: '继续侧栏的事' }]),
-      message('assistant', [], { toolCalls: [toolCall('call_read', 'Read', { file_path: 'a.ts' })] }),
-      message('tool', [{ type: 'text', text: 'ok' }], { toolCallId: 'call_read' }),
-      message('user', [{ type: 'text', text: notification }], {
-        origin: { kind: 'system_trigger', name: 'child_request' },
-      }),
-      message('assistant', [], {
-        toolCalls: [toolCall('call_bash', 'Bash', { command: 'ls' })],
-      }),
-      message('tool', [{ type: 'text', text: 'file list' }], { toolCallId: 'call_bash' }),
-    ]);
-
-    const children = driver.state.transcriptContainer.children;
-    const blocks = children.filter(
-      (child): child is ActivityGroupComponent => child instanceof ActivityGroupComponent,
-    );
-    const notice = children.find((child) => child instanceof NoticeMessageComponent);
-
-    // Live and replay show one shape: the notice cuts the stretch of work in
-    // two, so the bash call after it opens a block below the notice.
-    expect(blocks).toHaveLength(2);
-    expect(notice).toBeInstanceOf(NoticeMessageComponent);
-    expect(children.indexOf(blocks[0] as ActivityGroupComponent)).toBeLessThan(
-      children.indexOf(notice as NoticeMessageComponent),
-    );
-    expect(children.indexOf(notice as NoticeMessageComponent)).toBeLessThan(
-      children.indexOf(blocks[1] as ActivityGroupComponent),
-    );
-    expect(stripAnsi((blocks[0] as ActivityGroupComponent).render(120).join('\n'))).not.toContain('Bash');
-    expect(stripAnsi((blocks[1] as ActivityGroupComponent).render(120).join('\n'))).toContain('Bash');
-  });
 });
 
 describe('replayed foreground→background handoff', () => {

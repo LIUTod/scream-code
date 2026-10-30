@@ -130,6 +130,11 @@ export interface AppState {
   goalContinuationCount: number;
   /** line (native IM channel) daemon is running — footer dot. */
   lineActive: boolean;
+  /**
+   * Channel configured for /line — `lark` or `wechat`; `null` when the feature
+   * is not configured. Drives the footer's channel label.
+   */
+  linePlatform: 'lark' | 'wechat' | null;
   wolfpackMode: boolean;
   /** RLM (persistent-python) mode is active. */
   rlmEnabled: boolean;

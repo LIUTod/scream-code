@@ -120,7 +120,10 @@ function readBranch(workDir: string): string | null {
     });
     if (result.status !== 0) return null;
     const name = result.stdout.trim();
-    return name.length > 0 ? name : null;
+    // Detached HEAD (mid-rebase, `checkout <sha>`, bisect) prints nothing: the
+    // directory is still a repo with a real working tree, so report a
+    // placeholder instead of degrading to "not a repo" and hiding its stats.
+    return name.length > 0 ? name : '(detached)';
   } catch {
     return null;
   }
