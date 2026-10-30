@@ -81,7 +81,11 @@ export interface ColorPalette {
   mdCodeBlockBorder: string;
   /** Panel background behind fenced code blocks (dark/light aware surface). */
   mdCodeBlockBg: string;
+  /** Quoted blocks — a side note, so it must stay lighter than `mdBold`. */
   mdQuote: string;
+  /** Bold emphasis inside a reply. Deliberately the heaviest markdown token:
+   *  the reader should never confuse an aside (`mdQuote`) with an emphasis. */
+  mdBold: string;
   /** Markdown headings — the amber signature color that gives replies a structure. */
   mdHeading: string;
 
@@ -138,7 +142,11 @@ export const darkColors: ColorPalette = {
   mdCodeBlock: dark.skyBlue,
   mdCodeBlockBorder: '#5C6370',
   mdCodeBlockBg: '#16191f',
-  mdQuote: '#7F848E',
+  // Dark mode leads with pink for emphasis and violet for asides; the light
+  // palette swaps the two (see lightColors) so each mode keeps the same
+  // "emphasis is the heavier of the pair" reading.
+  mdQuote: '#B48CD8',
+  mdBold: '#FF6B9D',
   mdHeading: '#FFC35C',
 
   // Surface
@@ -193,7 +201,11 @@ export const lightColors: ColorPalette = {
   mdCodeBlock: light.blue,
   mdCodeBlockBorder: '#848484',
   mdCodeBlockBg: '#f7f9fb',
-  mdQuote: '#616161',
+  // The swap: on white, emphasis takes the deep violet (#6C2B8C, 8.9:1) and the
+  // aside takes the deep pink (#C2185B, 5.9:1) — same pair as dark mode, roles
+  // reversed, so the emphasis is the darker of the two here.
+  mdQuote: '#C2185B',
+  mdBold: '#6C2B8C',
   mdHeading: '#8F6400',
 
   // Surface

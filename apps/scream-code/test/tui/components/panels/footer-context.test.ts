@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { visibleWidth } from '@liutod-scream/pi-tui';
 import chalk from 'chalk';
 
-import { FooterComponent, buildWeightedTips } from '#/tui/components/chrome/footer';
+import { FooterComponent } from '#/tui/components/chrome/footer';
 import { darkColors } from '#/tui/theme/colors';
 import type { AppState } from '#/tui/types';
 
@@ -54,7 +54,7 @@ describe('FooterComponent — context NaN resilience', () => {
     const fc = makeFooter(baseState({ contextUsage: Number.NaN }));
     const out = strip(fc.render(120).join(''));
     expect(out).not.toMatch(/NaN/);
-    expect(out).toContain('░░░░░░░░░░');
+    expect(out).toContain('▱▱▱▱▱▱▱▱▱▱');
   });
 
   it('undefined-ish (coerced) usage → renders 0.0%', () => {
@@ -63,19 +63,19 @@ describe('FooterComponent — context NaN resilience', () => {
     );
     const out = strip(fc.render(120).join(''));
     expect(out).not.toMatch(/NaN/);
-    expect(out).toContain('░░░░░░░░░░');
+    expect(out).toContain('▱▱▱▱▱▱▱▱▱▱');
   });
 
   it('clamps ratios above 1.0 → renders 100.0%', () => {
     const fc = makeFooter(baseState({ contextUsage: 1.5 }));
     const out = strip(fc.render(120).join(''));
-    expect(out).toContain('████████▓▒');
+    expect(out).toContain('▰▰▰▰▰▰▰▰▰▰');
   });
 
   it('ratio 0.427 → renders 42.7%', () => {
     const fc = makeFooter(baseState({ contextUsage: 0.427 }));
     const out = strip(fc.render(200).join(''));
-    expect(out).toContain('██▓▒░░░░░░');
+    expect(out).toContain('▰▰▰▰▱▱▱▱▱▱');
   });
 
   it('reports the percentage only — absolute token counts are gone', () => {
@@ -84,8 +84,8 @@ describe('FooterComponent — context NaN resilience', () => {
     );
     const out = strip(fc.render(200).join(''));
     expect(out).not.toMatch(/Infinity|NaN/);
-    expect(out).toContain('░░░░░░░░░░');
-    expect(out).toContain('上下文🗑️：0.0%');
+    expect(out).toContain('▱▱▱▱▱▱▱▱▱▱');
+    expect(out).toContain('📨 Context：');
     // Neither the raw count nor the window size is printed any more.
     expect(out).not.toContain('500/');
     expect(out).not.toContain('0/0');
@@ -99,7 +99,7 @@ describe('FooterComponent — context NaN resilience', () => {
     const out = strip(footer.render(200).join(''));
     expect(out).toContain('scream-k2-5');
     expect(out).not.toContain(' k2 ');
-    expect(out).toContain('███▓▒░░░░░');
+    expect(out).toContain('▰▰▰▰▰▱▱▱▱▱');
   });
 
   it('renders a water-level progress bar ahead of the percentage', () => {
@@ -107,15 +107,23 @@ describe('FooterComponent — context NaN resilience', () => {
       baseState({ contextUsage: 0.288, contextTokens: 288_000, maxContextTokens: 1_000_000 }),
     );
     const out = strip(fc.render(200).join(''));
-    // 28.8% × 10 cells = 2.88 → 3 filled cells: 1 deep + 2 foam.
-    expect(out).toContain('上下文🗑️：28.8% █▓▒░░░░░░░');
+    // 28.8% × 10 cells = 2.88 → 2 filled cells (floored).
+    expect(out).toContain('📨 Context：▰▰▱▱▱▱▱▱▱▱ 28.8%');
+  });
+
+  it('keeps at least one lit cell for a tiny non-zero usage', () => {
+    const out = strip(
+      makeFooter(baseState({ contextUsage: 0.005 })).render(200).join(''),
+    );
+    // 0.5% would floor to zero cells; an empty bar beside "0.5%" reads as a bug.
+    expect(out).toContain('📨 Context：▰▱▱▱▱▱▱▱▱▱ 0.5%');
   });
 
   it('renders an all-empty bar at 0% and an all-filled bar at >=100%', () => {
     const empty = strip(makeFooter(baseState({ contextUsage: 0 })).render(200).join(''));
-    expect(empty).toContain('░░░░░░░░░░');
+    expect(empty).toContain('▱▱▱▱▱▱▱▱▱▱');
     const full = strip(makeFooter(baseState({ contextUsage: 1.5 })).render(200).join(''));
-    expect(full).toContain('████████▓▒');
+    expect(full).toContain('▰▰▰▰▰▰▰▰▰▰');
   });
 
   it('does not show a thinking label in the footer', () => {
@@ -153,13 +161,15 @@ describe('FooterComponent — context NaN resilience', () => {
     expect(strip(line1 ?? '')).toContain('Press Ctrl-C again to exit');
   });
 
-  it('renders status info on line 1 and hit rate + context on line 2', () => {
+  it('keeps the context gauge on line 1 and the run strip on line 2', () => {
     const footer = makeFooter(baseState());
 
     const [line1, line2] = footer.render(120);
-    expect(strip(line1 ?? '')).not.toContain('Hitr');
+    expect(strip(line1 ?? '')).toContain('📨 Context：');
     expect(strip(line2 ?? '')).toContain('↓ Hitr: --');
-    expect(strip(line2 ?? '')).toContain('░░░░░░░░░░');
+    expect(strip(line2 ?? '')).toContain('Line:');
+    // The gauge no longer shares a row with the hit rate.
+    expect(strip(line2 ?? '')).not.toContain('Context');
   });
 
   it('renders plan badge on line 2 in plan mode', () => {
@@ -190,6 +200,47 @@ describe('FooterComponent — context NaN resilience', () => {
     } finally {
       chalk.level = previousLevel;
     }
+  });
+
+  it('colors the whole gauge — label, percentage and bar — as one span', () => {
+    const previousLevel = chalk.level;
+    chalk.level = 3;
+    try {
+      const fc = makeFooter(
+        baseState({ contextUsage: 0.5, contextTokens: 50_000, maxContextTokens: 200_000 }),
+      );
+      const out = fc.render(200).join('');
+      // The reset must come right after the bar, i.e. the bar is inside the
+      // usage colour like the rest of the reading.
+      expect(out).toContain(
+        `${hexToSgr(darkColors.textDim)}📨 Context：▰▰▰▰▰▱▱▱▱▱ 50.0%\u001B[39m`,
+      );
+    } finally {
+      chalk.level = previousLevel;
+    }
+  });
+
+  it('uses a 6-cell bar between 52 and 67 columns and none below 52', () => {
+    const footer = makeFooter(
+      baseState({ contextUsage: 0.5, contextTokens: 50_000, maxContextTokens: 200_000 }),
+    );
+    const at60 = strip(footer.render(60)[0] ?? '');
+    expect(at60).toContain('📨 Context：▰▰▰▱▱▱ 50.0%');
+    expect(visibleWidth(at60)).toBe(60);
+
+    const at40 = strip(footer.render(40)[0] ?? '');
+    expect(at40).toContain('📨 Context：50.0%');
+    expect(at40).not.toContain('▰');
+    expect(at40).not.toContain('▱');
+  });
+
+  it('keeps the gauge flush against the right edge on line 1', () => {
+    const footer = makeFooter(
+      baseState({ contextUsage: 0.5, contextTokens: 50_000, maxContextTokens: 200_000 }),
+    );
+    const line1 = footer.render(60)[0] ?? '';
+    expect(strip(line1).endsWith('📨 Context：▰▰▰▱▱▱ 50.0%')).toBe(true);
+    expect(visibleWidth(line1)).toBe(60);
   });
 
   it('colors context usage with warning color at 60-90%', () => {
@@ -236,40 +287,41 @@ describe('FooterComponent — two-line layout', () => {
     }
   });
 
-  it('moves the context readout to line 2, right-aligned, out of line 1', () => {
+  it('right-aligns the context readout on line 1', () => {
     const footer = makeFooter(
       baseState({ contextUsage: 0.288, contextTokens: 288_000, maxContextTokens: 1_000_000 }),
     );
     const [line1, line2] = footer.render(120);
-    expect(strip(line1!)).not.toContain('上下文');
-    // The trash mark rides inside the label: `上下文🗑️：percent bar`.
-    expect(strip(line2!)).toContain('上下文🗑️：28.8% █▓▒░░░░░░░');
+    // Envelope mark + `Context：` label, then bar, then the percentage.
+    expect(strip(line1!)).toContain('📨 Context：▰▰▱▱▱▱▱▱▱▱ 28.8%');
     // Right-aligned to the terminal edge: no padding after the bar.
-    expect(strip(line2!).endsWith('█▓▒░░░░░░░')).toBe(true);
-    expect(visibleWidth(line2!)).toBe(120);
+    expect(strip(line1!).endsWith('▰▰▱▱▱▱▱▱▱▱ 28.8%')).toBe(true);
+    expect(strip(line2!)).not.toContain('Context');
+    expect(visibleWidth(line1!)).toBe(120);
   });
 
   it('tracks the context ratio as it changes between renders', () => {
     const footer = makeFooter(
       baseState({ contextUsage: 0.1, contextTokens: 100_000, maxContextTokens: 1_000_000 }),
     );
-    expect(strip(footer.render(120)[1] ?? '')).toContain('上下文🗑️：10.0%');
+    expect(strip(footer.render(120)[0] ?? '')).toContain('📨 Context：');
 
     // Live path: `agent.status.updated` patches appState.contextUsage, the TUI
     // re-runs footer.setState(), and the next frame must show the new ratio.
     footer.setState(
       baseState({ contextUsage: 0.62, contextTokens: 620_000, maxContextTokens: 1_000_000 }),
     );
-    expect(strip(footer.render(120)[1] ?? '')).toContain('上下文🗑️：62.0%');
+    expect(strip(footer.render(120)[0] ?? '')).toContain('📨 Context：');
 
     footer.setState(
       baseState({ contextUsage: 0.95, contextTokens: 950_000, maxContextTokens: 1_000_000 }),
     );
-    const line = strip(footer.render(120)[1] ?? '');
-    expect(line).toContain('上下文🗑️：95.0%');
+    const line = strip(footer.render(120)[0] ?? '');
+    expect(line).toContain('📨 Context：');
     // The bar follows the same value: 95% of 10 cells = 9 filled (8 deep +
     // 1 foam), 1 empty.
-    expect(line).toMatch(/上下文🗑️：95\.0% [█▓▒░]{10}$/);
+    // 95% floors to 9 filled cells; the row still ends at the bar.
+    expect(line).toMatch(/📨 Context：[▰▱]{10} 95\.0%$/);
 
     footer.dispose();
   });
@@ -280,19 +332,22 @@ describe('FooterComponent — two-line layout', () => {
     );
     // 40 columns: bar collapses, so the bar-less template must not leave the
     // double space the collapsed bar used to occupy.
-    const line2 = strip(footer.render(40)[1]!);
-    expect(line2).toContain('上下文🗑️：50.0%');
-    expect(line2).not.toContain('上下文: ');
+    const line2 = strip(footer.render(40)[0]!);
+    expect(line2).toContain('📨 Context：50.0%');
+    expect(line2).not.toContain('Context: ');
   });
 
-  it('keeps the context row while a transient hint owns line 1', () => {
+  it('lets a transient hint take the line-1 right side while line 2 keeps the channel', () => {
     const footer = makeFooter(
       baseState({ contextUsage: 0.288, contextTokens: 288_000, maxContextTokens: 1_000_000 }),
     );
     footer.setTransientHint('Press Ctrl-C again to exit');
     const [line1, line2] = footer.render(120);
     expect(strip(line1!)).toContain('Press Ctrl-C again to exit');
-    expect(strip(line2!)).toContain('上下文🗑️：');
+    // The hint is transient and owns line 1's right side; the gauge returns
+    // as soon as it clears, and line 2 is untouched.
+    expect(strip(line1!)).not.toContain('Context');
+    expect(strip(line2!)).toContain('Line:');
   });
 });
 
@@ -353,49 +408,5 @@ describe('FooterComponent — badge order', () => {
       expect(at, `missing or out of order on line 2: ${token}`).toBeGreaterThan(previous);
       previous = at;
     }
-  });
-});
-
-describe('buildWeightedTips — weighted rotation', () => {
-  it('repeats higher-priority tips more often (length = sum of weights)', () => {
-    const seq = buildWeightedTips([
-      { text: 'a' }, // weight 1 (default)
-      { text: 'b', priority: 3 },
-      { text: 'c', priority: 2 },
-    ]);
-
-    const count = (t: string) => seq.filter((x) => x.text === t).length;
-    expect(seq).toHaveLength(6);
-    expect(count('a')).toBe(1);
-    expect(count('b')).toBe(3);
-    expect(count('c')).toBe(2);
-    expect(count('b')).toBeGreaterThan(count('a'));
-  });
-
-  it('keeps duplicates spread out — no tip sits next to itself', () => {
-    const seq = buildWeightedTips([
-      { text: 'a' },
-      { text: 'b', priority: 3 },
-      { text: 'c', priority: 2 },
-    ]);
-
-    for (let i = 1; i < seq.length; i++) {
-      expect(seq[i]!.text).not.toBe(seq[i - 1]!.text);
-    }
-  });
-
-  it('preserves array order when all weights are the default (1)', () => {
-    const seq = buildWeightedTips([{ text: 'x' }, { text: 'y' }, { text: 'z' }]);
-    expect(seq.map((t) => t.text)).toEqual(['x', 'y', 'z']);
-  });
-
-  it('clamps non-positive / fractional priorities to a weight of at least 1', () => {
-    const seq = buildWeightedTips([
-      { text: 'a', priority: 0 },
-      { text: 'b', priority: -5 },
-      { text: 'c', priority: 1.9 },
-    ]);
-    expect(seq).toHaveLength(3);
-    expect(seq.map((t) => t.text).toSorted()).toEqual(['a', 'b', 'c']);
   });
 });

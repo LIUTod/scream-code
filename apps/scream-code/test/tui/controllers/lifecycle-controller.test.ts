@@ -1,7 +1,12 @@
 import chalk from 'chalk';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { LifecycleController, reconnectReasonKey } from '#/tui/controllers/lifecycle-controller';
+import {
+  DOCK_FOOTER_ROWS,
+  DOCK_STATUS_ROWS,
+  LifecycleController,
+  reconnectReasonKey,
+} from '#/tui/controllers/lifecycle-controller';
 import {
   MAX_TRANSCRIPT_ENTRIES,
   TranscriptController,
@@ -23,17 +28,28 @@ import type { SessionEventHandler } from '#/tui/controllers/session-event-handle
 import type { SessionReplayRenderer } from '#/tui/controllers/session-replay';
 import type { SessionManager } from '#/tui/managers/session-manager';
 
+/** SGR sequence chalk emits for a hex colour at level 3 (colour assertions). */
+function hexToSgr(hex: string): string {
+  const value = hex.replace(/^#/, '');
+  const r = Number.parseInt(value.slice(0, 2), 16);
+  const g = Number.parseInt(value.slice(2, 4), 16);
+  const b = Number.parseInt(value.slice(4, 6), 16);
+  return `\u001B[38;2;${String(r)};${String(g)};${String(b)}m`;
+}
+
 import { createMockTUIState, makeMockStreamingUI } from '../fixtures/mock-host';
 
 function createMockHost(overrides: {
   state?: TUIState;
   transcriptController?: TranscriptController;
+  streamingUIOverrides?: Record<string, unknown>;
 } = {}): LifecycleControllerHost {
   const host: LifecycleControllerHost = {
     state: overrides.state ?? ({ appState: {} as AppState } as TUIState),
     options: {} as ScreamTUIOptions,
     harness: {} as ScreamHarness,
     session: undefined,
+    streamingUI: makeMockStreamingUI(overrides.streamingUIOverrides),
     setStartupReady: vi.fn(),
     appendStartupNotice: vi.fn(),
     refreshSkillCommands: vi.fn(),
@@ -77,6 +93,16 @@ describe('LifecycleController', () => {
     vi.restoreAllMocks();
   });
 
+  describe('dock row contract', () => {
+    it('keeps the footer at two rows and the status row at one', () => {
+      // The footer always renders two lines (footer-context locks that); these
+      // constants are what buildLayout reserves for it. A silent change here
+      // would clip the second row on a short terminal.
+      expect(DOCK_FOOTER_ROWS).toBe(2);
+      expect(DOCK_STATUS_ROWS).toBe(1);
+    });
+  });
+
   describe('collaboration ticker', () => {
     function makeHost(ui: { requestRender: () => void }) {
       const state = {
@@ -114,6 +140,58 @@ describe('LifecycleController', () => {
       expect(ui.requestRender).toHaveBeenCalledTimes(3);
 
       controller.stopActivityAnimation();
+    });
+
+    it('renders the status row with one chip grammar', () => {
+      vi.useFakeTimers();
+      const previousLevel = chalk.level;
+      chalk.level = 3;
+      let controller: LifecycleController | undefined;
+      let idleController: LifecycleController | undefined;
+      try {
+      const state = createMockTUIState({
+        appState: {
+          streamingPhase: 'waiting',
+          reconnectAttempt: 2,
+          reconnectMaxAttempts: 10,
+          reconnectStatusCode: 429,
+          reconnectDelayMs: 20_000,
+        },
+      });
+      const host = createMockHost({ state });
+      controller = new LifecycleController(host);
+
+      controller.forceUpdateStatusBar();
+      controller.showCollabActivity('🤝 coder 求助：因为缺少基线', 'request');
+      const working = state.statusBarContainer.render(120).join('\n');
+      // Alert chip and the collaboration chip coexist; both use the shared
+      // `symbol label：value` grammar.
+      expect(working).toContain('⚠️ 重连中 2/10：');
+      expect(working).toContain('🤝 coder 求助：因为缺少基线');
+      // Semantic colours: warning for the alert, warning for the request chip.
+      expect(working).toContain(`${hexToSgr(state.theme.colors.warning)}⚠️ 重连中`);
+      expect(working).toContain(`${hexToSgr(state.theme.colors.warning)}🤝 coder`);
+
+      // Idle: the hint becomes `💡 <tip>` and a live notice supersedes it.
+      const idle = createMockTUIState({ appState: { streamingPhase: 'idle' } });
+      const idleHost = createMockHost({ state: idle });
+      idleController = new LifecycleController(idleHost);
+      idleController.forceUpdateStatusBar();
+      const idleRow = idle.statusBarContainer.render(120).join('\n');
+      expect(idleRow).toContain('💡 ');
+      // The hint uses the theme's dim token, not a hardcoded grey.
+      expect(idleRow).toContain(`${hexToSgr(idle.theme.colors.textDim)}💡 `);
+      expect(idleRow).not.toContain(hexToSgr('#999999'));
+      idleController.showCollabActivity('✓ Scream 已处理 coder 的请求', 'handled');
+      const afterNotice = idle.statusBarContainer.render(120).join('\n');
+      expect(afterNotice).toContain('✓ Scream 已处理');
+      expect(afterNotice).not.toContain('💡');
+
+      } finally {
+        controller?.stopActivityAnimation();
+        idleController?.stopActivityAnimation();
+        chalk.level = previousLevel;
+      }
     });
 
     it('mounts the ticker on both the idle and the working row', () => {
@@ -698,11 +776,15 @@ describe('status-bar wave colour', () => {
     chalk.level = originalLevel;
   });
 
-  function renderWave(appState: Partial<AppState>, lastActivityAgoMs = 0): string {
+  function renderWave(
+    appState: Partial<AppState>,
+    lastActivityAgoMs = 0,
+    streamingUIOverrides: Record<string, unknown> = {},
+  ): string {
     chalk.level = 3; // non-TTY test env strips ANSI otherwise
     const state = createMockTUIState({ appState });
     state.lastActivityAt = lastActivityAgoMs === 0 ? 0 : Date.now() - lastActivityAgoMs;
-    const controller = new LifecycleController(createMockHost({ state }));
+    const controller = new LifecycleController(createMockHost({ state, streamingUIOverrides }));
     controller.updateActivityPane();
     return state.statusBarContainer.render(80).join('\n');
   }
@@ -755,6 +837,29 @@ describe('status-bar wave colour', () => {
     expect(line).toContain(sgr('#D32F2F'));
   });
 
+  it('stays green while a tool call is in flight, whatever the phase says', () => {
+    // A quiet command (or one whose arguments are still streaming in) is not a
+    // dead connection: the call itself is evidence that work is underway, so
+    // the wave must not ramp just because the phase or the clock lags.
+    for (const phase of ['tool', 'tool-args'] as const) {
+      const line = renderWave(
+        { streamingPhase: phase, streamingStartTime: Date.now() - 10 * 60_000 },
+        10 * 60_000,
+        { hasInFlightToolCalls: vi.fn((): boolean => true) },
+      );
+      expect(line).toContain(sgr('#79eb00'));
+    }
+  });
+
+  it('floors an in-flight tool call at yellow while a retry is in flight', () => {
+    const line = renderWave(
+      { streamingPhase: 'tool-args', streamingStartTime: Date.now() - 60_000, reconnectAttempt: 2 },
+      0,
+      { hasInFlightToolCalls: vi.fn((): boolean => true) },
+    );
+    expect(line).toContain(sgr('#FFD400'));
+  });
+
   it('resets the clock when an inbound notice arrives mid-wait', () => {
     const line = renderWave(
       { streamingPhase: 'waiting', streamingStartTime: Date.now() - 120_000 },
@@ -770,5 +875,87 @@ describe('status-bar wave colour', () => {
       reconnectAttempt: 1,
     });
     expect(line).toContain(sgr('#FFD400'));
+  });
+});
+
+/**
+ * The scheduled-task reminder keeps its own slot on the status row: it must not
+ * be evicted by a collaboration chip, it outlives one (10s vs 8s), and it is
+ * drawn to the left so the row's truncation eats the collaboration line first.
+ */
+describe('scheduled-task reminder chip', () => {
+  const originalLevel = chalk.level;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    chalk.level = 3;
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    chalk.level = originalLevel;
+  });
+
+  function mount() {
+    const state = createMockTUIState({ appState: { streamingPhase: 'waiting' } });
+    const controller = new LifecycleController(createMockHost({ state }));
+    controller.updateActivityPane();
+    return { state, controller };
+  }
+
+  it('renders the reminder on the working row in the accent colour', () => {
+    const { state, controller } = mount();
+    controller.showReminderActivity('⏰ 定时任务已触发：检查 CI 构建状态', 'fired');
+
+    const line = state.statusBarContainer.render(120).join('\n');
+    expect(line).toContain('⏰ 定时任务已触发：检查 CI 构建状态');
+    expect(line).toContain(hexToSgr(state.theme.colors.accent));
+  });
+
+  it('uses the warning colour for a stale task', () => {
+    const { state, controller } = mount();
+    controller.showReminderActivity('⚠️ 定时任务已过期，仍触发：检查 CI', 'missed');
+
+    const line = state.statusBarContainer.render(120).join('\n');
+    expect(line).toContain(hexToSgr(state.theme.colors.warning));
+  });
+
+  it('sits before the collaboration chip so it survives truncation', () => {
+    const { state, controller } = mount();
+    controller.showReminderActivity('⏰ 定时任务已触发：检查 CI', 'fired');
+    controller.showCollabActivity('🤝 coder 求助：缺少样例', 'request');
+
+    const line = state.statusBarContainer.render(200).join('\n');
+    expect(line.indexOf('⏰')).toBeGreaterThanOrEqual(0);
+    expect(line.indexOf('⏰')).toBeLessThan(line.indexOf('🤝'));
+  });
+
+  it('expires after its own 10s, one tick after the collaboration chip', () => {
+    const { state, controller } = mount();
+    controller.showReminderActivity('⏰ 定时任务已触发：检查 CI', 'fired');
+    controller.showCollabActivity('🤝 coder 求助：缺少样例', 'request');
+
+    vi.advanceTimersByTime(8_001);
+    let line = state.statusBarContainer.render(200).join('\n');
+    expect(line).not.toContain('🤝');
+    expect(line).toContain('⏰');
+
+    vi.advanceTimersByTime(2_000);
+    line = state.statusBarContainer.render(200).join('\n');
+    expect(line).not.toContain('⏰');
+  });
+
+  it('clears both chips together on a session switch', () => {
+    const { state, controller } = mount();
+    controller.showReminderActivity('⏰ 定时任务已触发：检查 CI', 'fired');
+    controller.showCollabActivity('🤝 coder 求助：缺少样例', 'request');
+
+    controller.clearStatusActivity();
+
+    const line = state.statusBarContainer.render(200).join('\n');
+    expect(line).not.toContain('⏰');
+    expect(line).not.toContain('🤝');
+    expect(controller.getReminderActivity()).toBeNull();
+    expect(controller.getCollabActivity()).toBeNull();
   });
 });

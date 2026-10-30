@@ -104,7 +104,8 @@ function createMockHost(): SessionEventHost {
     tasksBrowserController,
     requireSession: vi.fn(),
     showCollabActivity: vi.fn(),
-    clearCollabActivity: vi.fn(),
+    showReminderActivity: vi.fn(),
+    clearStatusActivity: vi.fn(),
     setAppState: vi.fn((patch) => {
       Object.assign(state.appState, patch);
     }),
@@ -758,12 +759,38 @@ describe('SessionEventHandler', () => {
     expect(ticker()[2]).not.toContain('问题');
   });
 
-  it('drops the ticker line when the session is reset', () => {
+  it('drops every transient chip when the session is reset', () => {
     const host = createMockHost();
     const handler = new SessionEventHandler(host);
 
     handler.resetRuntimeState();
-    expect(host.clearCollabActivity).toHaveBeenCalledTimes(1);
+    expect(host.clearStatusActivity).toHaveBeenCalledTimes(1);
+  });
+
+  it('surfaces a fired cron task on the status row', () => {
+    const host = createMockHost();
+    const handler = new SessionEventHandler(host);
+
+    handler.handleEvent(
+      {
+        ...baseEvent('cron.fired'),
+        origin: {
+          kind: 'cron_job',
+          jobId: 'job-1',
+          cron: '*/5 * * * *',
+          recurring: true,
+          coalescedCount: 1,
+          stale: false,
+        },
+        prompt: '检查 CI 构建状态',
+      } as unknown as Event,
+      vi.fn(),
+    );
+
+    expect(host.showReminderActivity).toHaveBeenCalledWith(
+      '⏰ 定时任务已触发：检查 CI 构建状态',
+      'fired',
+    );
   });
 
   it('echoes a successful reply to the child as a handled ticker line', () => {
@@ -863,7 +890,7 @@ describe('SessionEventHandler', () => {
     const host = createMockHost();
     const handler = new SessionEventHandler(host);
 
-    // This is the frame that keeps the footer's `上下文🗑️：xx%` gauge alive.
+    // This is the frame that keeps the footer's `📨 Context：… xx%` gauge alive.
     handler.handleEvent(
       {
         ...baseEvent('agent.status.updated'),

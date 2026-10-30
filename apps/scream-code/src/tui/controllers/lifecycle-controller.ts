@@ -18,6 +18,7 @@ import { CHROME_GUTTER } from '../constant/rendering';
 import type { AuthFlowController } from './auth-flow';
 import type { SessionEventHandler } from './session-event-handler';
 import type { SessionReplayRenderer } from './session-replay';
+import type { StreamingUIController } from './streaming-ui';
 import type { TranscriptController } from './transcript-controller';
 import type { SessionManager } from '../managers/session-manager';
 import { createScreamTUIThemeBundle } from '../theme/bundle';
@@ -33,7 +34,6 @@ import { installTerminalThemeTracking } from '../utils/terminal-theme';
 import { resolveWaveColor, WAVE_YELLOW_AT_MS } from '../utils/wave-color';
 import { PulseWaveLoader } from '../components/chrome/pulse-wave-loader';
 import { type ActivityPaneMode } from '../components/panes/activity-pane';
-import chalk from 'chalk';
 
 type EffectiveActivityPaneMode = ActivityPaneMode | 'idle';
 
@@ -92,16 +92,27 @@ export interface LifecycleControllerHost {
   readonly sessionEventHandler: SessionEventHandler;
   readonly sessionReplay: SessionReplayRenderer;
   readonly transcriptController: TranscriptController;
+  /** Read by the status-bar wave: a tool call in flight is local work, so the
+   *  silence ramp must not treat it as a dead connection. */
+  readonly streamingUI: StreamingUIController;
 
   onEmergencyExit(exitCode?: number): never;
 }
 
 /** How long a collaboration ticker line stays on the status bar (newest wins). */
 const COLLAB_ACTIVITY_TTL_MS = 8_000;
+/** How long a scheduled-task reminder stays: longer than the collaboration
+ *  chip because a cron fire is time-sensitive and must not slip by. */
+const REMINDER_ACTIVITY_TTL_MS = 10_000;
 /** Footer git badge freshness window; the deferred read refreshes past it. */
 const GIT_DIFF_TTL_MS = 15_000;
 /** Window after a command-driven line write during which the poll stands down. */
 const MANUAL_LINE_WRITE_GRACE_MS = 5_000;
+/** Footer renders exactly two rows (footer.ts); the dock must reserve both. */
+export const DOCK_FOOTER_ROWS = 2;
+/** The status row above the editor keeps one row even when it renders nothing
+ *  (hidden modes); minSize 0 would let the dock's shrink pass squeeze it away. */
+export const DOCK_STATUS_ROWS = 1;
 
 export class LifecycleController {
   private signalCleanupHandlers: Array<() => void> = [];
@@ -130,6 +141,10 @@ export class LifecycleController {
   /** Single-slot collaboration ticker (subagent ↔ main agent traffic). */
   private collabActivity: { text: string; color: string } | null = null;
   private collabTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Single-slot scheduled-task reminder (⏰ cron chip). Sits in its own slot so
+   *  a collaboration request can never evict a fired reminder. */
+  private reminderActivity: { text: string; color: string } | null = null;
+  private reminderTimer: ReturnType<typeof setTimeout> | undefined;
   /** Sum all four token buckets into the session's total token consumption. */
   private static sumTokens(usage: TokenUsage): number {
     return usage.inputOther + usage.inputCacheRead + usage.inputCacheCreation + usage.output;
@@ -366,7 +381,7 @@ export class LifecycleController {
       {
         component: this.host.state.statusBarContainer,
         shrink: 1,
-        minSize: 1,
+        minSize: DOCK_STATUS_ROWS,
         visible: (viewport) => viewport.width >= 60,
       },
       { component: this.host.state.editorContainer, shrink: 1, minSize: 3 },
@@ -376,7 +391,7 @@ export class LifecycleController {
         // It must not shrink below its rendered height, otherwise the context
         // row is clipped away on a short terminal.
         shrink: 0,
-        minSize: 2,
+        minSize: DOCK_FOOTER_ROWS,
       },
     ]);
     // Register the sidebar panels once (idempotent). The stacked sidebar
@@ -731,7 +746,11 @@ export class LifecycleController {
             new StatusBarPaneComponent({
               mode,
               label: this.buildReconnectLabel(state),
+              // Alert semantics: the reconnect chip is the only warning-level
+              // text that shares this row outside the collab ticker.
+              labelColor: state.theme.colors.warning,
               pulseWave: loader,
+              reminder: () => this.getReminderActivity(),
               activity: () => this.getCollabActivity(),
             }),
           );
@@ -756,13 +775,14 @@ export class LifecycleController {
         state.statusBarContainer.addChild(
           new StatusBarPaneComponent({
             mode: 'idle',
-            label:
-              tip === undefined
-                ? ''
-                : composeTipLabel(t(tip.i18nKey), tip, state.theme.colors.primary),
-            // Fixed light grey, deliberately theme-independent: the tip
-            // carousel reads as a quiet cue in both dark and light themes.
-            labelColor: '#999999',
+            // The tip copy already opens with its own icon (`💡 Tips：…`), so
+            // it keeps the shared `symbol label：value` grammar as-is; the hint
+            // is the lowest-priority segment and yields to a live notice.
+            label: tip === undefined ? '' : composeTipLabel(t(tip.i18nKey), tip, state.theme.colors.primary),
+            // Semantic colour instead of a hardcoded grey so both themes read
+            // the hint as secondary text.
+            labelColor: state.theme.colors.textDim,
+            reminder: () => this.getReminderActivity(),
             activity: () => this.getCollabActivity(),
           }),
         );
@@ -797,9 +817,9 @@ export class LifecycleController {
       reason,
       delay: String(delaySec),
     });
-    // Render in the same dim gray as the thinking chain (theme textDim) so
-    // the reconnect info reads as secondary status text.
-    return chalk.hex(state.theme.colors.textDim)(label);
+    // Plain text: the row applies the semantic colour (warning) uniformly to
+    // the whole chip, so the label must not carry its own ANSI.
+    return label;
   }
 
   /** Force a status-bar refresh even when the mode is unchanged. Used after
@@ -833,13 +853,43 @@ export class LifecycleController {
     return this.collabActivity;
   }
 
-  /** Drops any pending notice (session switch, shutdown). */
-  clearCollabActivity(): void {
+  /**
+   * Shows a scheduled-task reminder on the status row (`⏰ 定时任务已触发：…`).
+   *
+   * Own slot, own TTL: the reminder outlives the collaboration chip because a
+   * cron fire is time-sensitive, and neither can push the other off the row.
+   * `missed` (a stale/overdue task) switches to `warning` so an out-of-date
+   * schedule is not mistaken for a fresh one.
+   */
+  showReminderActivity(text: string, tone: 'fired' | 'missed'): void {
+    const colors = this.host.state.theme.colors;
+    this.reminderActivity = { text, color: tone === 'missed' ? colors.warning : colors.accent };
+    if (this.reminderTimer !== undefined) clearTimeout(this.reminderTimer);
+    this.reminderTimer = setTimeout(() => {
+      this.reminderTimer = undefined;
+      this.reminderActivity = null;
+      this.host.state.ui?.requestRender();
+    }, REMINDER_ACTIVITY_TTL_MS);
+    this.host.state.ui?.requestRender();
+  }
+
+  /** Live getter consumed by the status row on every render. */
+  getReminderActivity(): { text: string; color: string } | null {
+    return this.reminderActivity;
+  }
+
+  /** Drops every transient chip (session switch, shutdown). */
+  clearStatusActivity(): void {
     if (this.collabTimer !== undefined) {
       clearTimeout(this.collabTimer);
       this.collabTimer = undefined;
     }
     this.collabActivity = null;
+    if (this.reminderTimer !== undefined) {
+      clearTimeout(this.reminderTimer);
+      this.reminderTimer = undefined;
+    }
+    this.reminderActivity = null;
   }
 
   /**
@@ -851,7 +901,7 @@ export class LifecycleController {
     this.statusBarLoader?.stop();
     this.statusBarLoader = undefined;
     this.stopTipRotation();
-    this.clearCollabActivity();
+    this.clearStatusActivity();
   }
 
   /** Current tip index (for Ctrl+F to check if the visible tip is the ad). */
@@ -915,11 +965,12 @@ export class LifecycleController {
   /**
    * Colour for the status-bar pulse wave.
    *
-   * Measures silence in the *network* work: a request awaiting its first
-   * token, a reasoning/text stream that stopped delivering, or the model
-   * authoring a tool call. Tool execution itself is local work with its own
-   * timeout — a quiet `sleep`, build, or MCP call is not a stall — so the wave
-   * stays on the brand colour there and only a known retry lifts it to yellow.
+   * Measures silence in the *model* work: a request awaiting its first token,
+   * a reasoning/text stream that stopped delivering. A tool call in flight is
+   * exempt for its whole lifetime — both while the process runs (a quiet
+   * `sleep`, build, or MCP call is still working) and while its arguments are
+   * still streaming in (`调用中`, a preview the user is watching fill out). Only
+   * a known retry lifts the wave to yellow there.
    *
    * Timing is an early warning only: retries are driven by real transport
    * errors (the 60s stall timeout, disconnects, rate limits), never by this
@@ -931,10 +982,11 @@ export class LifecycleController {
     const colors = theme.colors;
     const { streamingPhase, streamingStartTime, reconnectAttempt } = appState;
     if (streamingPhase === 'idle') return colors.primary;
-    // Tool execution is local: the process is alive and its own timeout owns
-    // the outcome, so silence must not read as a transport stall. A retry in
-    // flight is still a known failure, so it keeps the yellow floor.
-    if (streamingPhase === 'tool') {
+    // Judged from the call itself, not from the phase: the preview mounts
+    // before `tool.call.started` lands, and a lagging phase must never make a
+    // running command read as a dead connection. A retry in flight is still a
+    // known failure, so it keeps the yellow floor.
+    if (streamingPhase === 'tool' || this.host.streamingUI.hasInFlightToolCalls()) {
       return reconnectAttempt > 0 ? colors.waveMid : colors.primary;
     }
     // Anchor to whichever anchor is newer. `waiting` usually has no traffic

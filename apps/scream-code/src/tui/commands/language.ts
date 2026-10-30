@@ -1,7 +1,6 @@
 import { t, setLocale, getLocale, type Locale } from '@scream-code/config';
 
 import { ChoicePickerComponent, type ChoiceOption } from '../components/dialogs/choice-picker';
-import { invalidateRotation } from '../components/chrome/footer';
 import { loadTuiConfig, saveTuiConfig } from '../config';
 import { formatErrorMessage } from '../utils/event-payload';
 import type { SlashCommandHost } from './dispatch';
@@ -39,7 +38,6 @@ async function applyLanguageChoice(host: SlashCommandHost, locale: Locale): Prom
 
   try {
     setLocale(locale);
-    invalidateRotation();
     host.state.appState.language = locale;
     await saveTuiConfig({
       ...(await loadTuiConfig()),

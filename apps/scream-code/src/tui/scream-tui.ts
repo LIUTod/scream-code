@@ -766,9 +766,14 @@ export class ScreamTUI implements TranscriptControllerHost, LifecycleControllerH
     this.lifecycleController.showCollabActivity(text, tone);
   }
 
-  /** Drops a pending collaboration ticker line (session switch). */
-  clearCollabActivity(): void {
-    this.lifecycleController.clearCollabActivity();
+  /** Scheduled-task reminder above the editor (`⏰ 定时任务已触发：…`). */
+  showReminderActivity(text: string, tone: 'fired' | 'missed'): void {
+    this.lifecycleController.showReminderActivity(text, tone);
+  }
+
+  /** Drops every transient chip on the status row (session switch). */
+  clearStatusActivity(): void {
+    this.lifecycleController.clearStatusActivity();
   }
 
   /** Command-driven line-state writes stand the 30s poll down briefly. */

@@ -26,6 +26,7 @@ function createMockHost(): StreamingUIHost {
       transcriptContainer: {
         addChild: vi.fn(),
       } as unknown as StreamingUIHost['state']['transcriptContainer'],
+      transcriptEntries: [],
       ui: {
         requestRender: vi.fn(),
       } as unknown as StreamingUIHost['state']['ui'],
@@ -43,6 +44,7 @@ function createMockHost(): StreamingUIHost {
     onTurnCompleted: vi.fn(),
     transcriptController: {
       registerLiveComponent: vi.fn(),
+      releaseLiveComponent: vi.fn(),
       markPending: vi.fn(),
       unmarkPending: vi.fn(),
       commit: vi.fn(),
@@ -189,6 +191,70 @@ describe('StreamingUIController', () => {
       output: 'ok',
     });
     expect(controller.hasExecutingToolCalls()).toBe(false);
+  });
+
+  it('hasInFlightToolCalls counts previews and started calls, drops settled ones', () => {
+    const host = createMockHost();
+    // Registering a call mounts its component, which reads the palette.
+    host.state.theme.colors = darkColors;
+    const controller = new StreamingUIController(host);
+    controller.setTurnId('turn-1');
+    controller.setStep(1);
+    expect(controller.hasInFlightToolCalls()).toBe(false);
+
+    // A preview is in flight even though nothing executes yet: the user is
+    // watching the call fill out, so a tool owns the wait.
+    controller.accumulateToolCallDelta('tc-args', 'Bash', '{"command":"pnpm build"}');
+    expect(controller.hasInFlightToolCalls()).toBe(true);
+
+    controller.registerToolCall({
+      id: 'tc-args',
+      name: 'Bash',
+      args: { command: 'pnpm build' },
+      turnId: 'turn-1',
+      step: 1,
+    });
+    expect(controller.hasInFlightToolCalls()).toBe(true);
+
+    controller.completeToolResult('tc-args', { tool_call_id: 'tc-args', output: 'ok' });
+    expect(controller.hasInFlightToolCalls()).toBe(false);
+  });
+
+  it('hasInFlightToolCalls ignores entries from an earlier step', () => {
+    const controller = new StreamingUIController(createMockHost());
+    controller.setTurnId('turn-1');
+    controller.setStep(2);
+    controller.setActiveToolCall('tc-stale', {
+      id: 'tc-stale',
+      name: 'Bash',
+      args: {},
+      turnId: 'turn-1',
+      step: 1,
+    });
+    expect(controller.hasInFlightToolCalls()).toBe(false);
+  });
+
+  it('a late argument preview cannot overwrite a call that already started', () => {
+    const host = createMockHost();
+    host.state.theme.colors = darkColors;
+    const controller = new StreamingUIController(host);
+    controller.setTurnId('turn-1');
+    controller.setStep(1);
+    controller.registerToolCall({
+      id: 'tc-late',
+      name: 'Bash',
+      args: { command: 'pnpm build' },
+      turnId: 'turn-1',
+      step: 1,
+    });
+
+    // A delta that lands after `tool.call.started` must not re-mark the running
+    // call as "still being authored" — that would drop the executing state.
+    controller.accumulateToolCallDelta('tc-late', 'Bash', '{"command":');
+    flushFrame(controller);
+
+    expect(controller.hasExecutingToolCalls()).toBe(true);
+    expect(controller.getActiveToolCall('tc-late')?.streamingArguments).toBeUndefined();
   });
 });
 

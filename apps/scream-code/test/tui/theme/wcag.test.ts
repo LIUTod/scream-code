@@ -43,6 +43,7 @@ const TEXT_TOKENS: readonly (keyof ColorPalette)[] = [
   'mdLink',
   'mdCodeBlock',
   'mdQuote',
+  'mdBold',
   'mdHeading',
   'success',
   'warning',

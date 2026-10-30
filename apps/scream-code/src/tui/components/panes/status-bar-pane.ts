@@ -13,8 +13,8 @@ import chalk from 'chalk';
 
 import type { PulseWaveLoader } from '../chrome/pulse-wave-loader';
 
-/** Transient collaboration line drawn after the wave (one slot, newest wins). */
-export interface CollabActivityLine {
+/** One transient chip on the status row (newest of its slot wins). */
+export interface StatusChipLine {
   readonly text: string;
   readonly color?: string;
 }
@@ -29,45 +29,55 @@ export interface StatusBarPaneOptions {
   readonly labelColor?: string;
   readonly pulseWave?: PulseWaveLoader;
   /**
+   * Live scheduled-task reminder (⏰ cron chip). Read on every render like
+   * `activity`, and drawn BEFORE it: a fired reminder is time-sensitive, so
+   * when the row must truncate it is the collaboration ticker that loses.
+   */
+  readonly reminder?: () => StatusChipLine | null;
+  /**
    * Live collaboration line. Read on every render (not captured at update
    * time), so a new request replaces the previous one without rebuilding the
    * row — the wave animation keeps its phase.
    */
-  readonly activity?: () => CollabActivityLine | null;
+  readonly activity?: () => StatusChipLine | null;
 }
 
 /**
- * Single-line row: `<wave>  <label>  <activity>`, empty parts omitted.
+ * Single-line row: `<wave>  <label>  <reminder>  <activity>`, empty parts
+ * omitted.
  *
  * HStack cannot produce this layout: pi-tui's Text.render pads every line to
  * the full row width, so each child's intrinsic width equals the full width
  * and HStack's shrink distribution pushes later segments far to the right.
  * Composing the line manually from the loader's unpadded frame text keeps the
- * segments adjacent, and it re-reads the frame (and the activity) on every
- * render so the wave keeps animating and the ticker updates in place.
+ * segments adjacent, and it re-reads the frame (and both chips) on every
+ * render so the wave keeps animating and the tickers update in place.
  */
 class StatusLine implements Component {
   constructor(
     private readonly wave: PulseWaveLoader | undefined,
     private readonly label: string,
-    private readonly activity: (() => CollabActivityLine | null) | undefined,
     private readonly labelColor: string | undefined,
-    /** Idle rows: a live notice supersedes the rotating tip, which would
-     * otherwise eat the whole row and truncate the notice away. */
-    private readonly labelCollapsesOnActivity = false,
+    private readonly reminder: (() => StatusChipLine | null) | undefined,
+    private readonly activity: (() => StatusChipLine | null) | undefined,
+    /** Idle rows: a live chip supersedes the rotating tip, which would
+     * otherwise eat the whole row and truncate the chip away. */
+    private readonly labelCollapsesOnChip = false,
   ) {}
 
   render(width: number): string[] {
     const minWidth = Math.max(1, width);
+    const reminder = this.reminder?.() ?? null;
     const activity = this.activity?.() ?? null;
-    const showLabel = !(this.labelCollapsesOnActivity && activity !== null);
+    const showLabel = !(this.labelCollapsesOnChip && (reminder !== null || activity !== null));
     const segments: string[] = [];
     if (this.wave !== undefined) segments.push(this.wave.getFrameText());
     if (showLabel && this.label.length > 0) {
       segments.push(this.labelColor === undefined ? this.label : chalk.hex(this.labelColor)(this.label));
     }
-    if (activity !== null) {
-      segments.push(activity.color === undefined ? activity.text : chalk.hex(activity.color)(activity.text));
+    for (const chip of [reminder, activity]) {
+      if (chip === null) continue;
+      segments.push(chip.color === undefined ? chip.text : chalk.hex(chip.color)(chip.text));
     }
     if (segments.length === 0) return [];
     // A bare wave keeps the pre-existing output (no padding).
@@ -103,15 +113,33 @@ export class StatusBarPaneComponent extends Container {
   update(options: StatusBarPaneOptions): void {
     this.clear();
     if (options.mode === 'idle') {
-      // The activity getter is live: mounting the row even with an empty label
-      // lets a collaboration notice appear while the session sits idle.
-      if (options.label.length > 0 || options.activity !== undefined) {
-        this.addChild(new StatusLine(undefined, options.label, options.activity, options.labelColor, true));
+      // The chip getters are live: mounting the row even with an empty label
+      // lets a collaboration notice or a cron reminder appear while the
+      // session sits idle.
+      if (options.label.length > 0 || options.reminder !== undefined || options.activity !== undefined) {
+        this.addChild(
+          new StatusLine(
+            undefined,
+            options.label,
+            options.labelColor,
+            options.reminder,
+            options.activity,
+            true,
+          ),
+        );
       }
       return;
     }
     if (options.pulseWave !== undefined) {
-      this.addChild(new StatusLine(options.pulseWave, options.label, options.activity, undefined));
+      this.addChild(
+        new StatusLine(
+          options.pulseWave,
+          options.label,
+          options.labelColor,
+          options.reminder,
+          options.activity,
+        ),
+      );
       return;
     }
     // Compatibility: a bare label (no wave) still renders as static text —

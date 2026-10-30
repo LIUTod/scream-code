@@ -1,19 +1,19 @@
 /**
- * Footer/status bar — fixed two-line status display at the bottom of the TUI.
+ * Footer — fixed two-line status block at the bottom of the TUI (distinct from
+ * the single-line status bar above the editor).
  *
  * Layout:
  *   Line 1 (identity strip): `📟️ <model>` · `<balance>` · `📁 工作区Git +N-M`
- *           … right-aligned: `<line-dot> Line: <Lark|Wechat|未连接> ↓ Hitr: xx%
- *           <work status>`
- *   Line 2 (run strip): `🗒️ 计划/融合计划` · `🪐 RLM` · `🐺 群狼` · `GOAL …` ·
- *           task badges … right-aligned: `🗑️ 上下文:tokens/max bar`
- *           When a transient hint owns line 1's right half, line 2 keeps its
- *           context readout.
+ *           … right-aligned context gauge `📨 Context：<bar> <percent>`
+ *           (a transient hint takes that right side while active)
+ *   Line 2 (run strip): `↓ Hitr: xx%` · `🗒️ 计划/融合计划` · `🪐 RLM` · `🐺 群狼`
+ *           · `GOAL …` · task badges
+ *           … right-aligned `◆ Line: <Lark|Wechat|未连接> <work status>`
  *
- * Both rows are always rendered, so the dock must reserve two rows for the
- * footer (see LifecycleController.buildLayout) — a one-row slot would clip the
- * context readout away. Every row is width-safe: emoji are counted by
- * `visibleWidth` and each line is finally clamped with `truncateToWidth`.
+ * Both rows are always rendered, so the dock reserves two rows for the footer
+ * (see LifecycleController.buildLayout) — a one-row slot would clip line 2.
+ * Line 2 shrinks its LEFT first (`priority: 'right'`); line 1 keeps the default
+ * order, so the gauge yields after the identity run.
  */
 
 import type { Component, TUI } from '@liutod-scream/pi-tui';
@@ -26,110 +26,6 @@ import type { AppState, GoalBadgeInfo } from '#/tui/types';
 import { GRADIENT_CYCLE_MS, lerpGradient } from '#/tui/utils/gradient';
 import { shimmerText, shimmerTextWithPalette } from '#/tui/utils/shimmer';
 import { safeUsageRatio } from '#/utils/usage/usage-format';
-
-// Toolbar tips — rotates every 10s. Most tips are short and pair up (two
-// joined by " | ") when space allows; tips flagged `solo` are long or
-// important enough to take the whole slot on their own. A `priority` weight
-// makes a tip recur more often in the rotation (default 1). Width is always
-// the final arbiter (a pair that doesn't fit falls back to its first tip).
-//
-// This is deliberately code-level configuration: edit the interval and the
-// TOOLBAR_TIPS array below to change what the footer advertises.
-export const TIP_ROTATE_INTERVAL_MS = 10_000;
-export const TIP_SEPARATOR = ' | ';
-
-export interface ToolbarTip {
-  readonly text: string;
-  /**
-   * Long/important tips render on their own. They never pair with a
-   * neighbour and never appear as the second half of someone else's pair.
-   */
-  readonly solo?: boolean;
-  /**
-   * Rotation weight: a higher value makes the tip recur more often. Defaults
-   * to 1. Used to give newer/important features more airtime.
-   */
-  readonly priority?: number;
-}
-
-export function getToolbarTips(): readonly ToolbarTip[] {
-  return [
-    { text: t('footer.shift_tab') },
-    { text: t('footer.model') },
-    { text: t('footer.ctrl_s'), priority: 2 },
-    { text: t('footer.compact'), priority: 2 },
-    { text: t('footer.ctrl_o') },
-    { text: t('footer.tasks') },
-    { text: t('footer.shift_enter') },
-    { text: t('footer.init'), priority: 2 },
-    { text: t('footer.at') },
-    { text: t('footer.ctrl_c') },
-    { text: t('footer.skill'), priority: 2 },
-    { text: t('footer.help') },
-    { text: t('footer.config'), solo: true, priority: 3 },
-    { text: t('footer.reminder'), solo: true, priority: 3 },
-  ];
-}
-
-/**
- * Expand tips into a rotation sequence using smooth weighted round-robin
- * (the nginx SWRR algorithm). Higher-`priority` tips appear more often while
- * staying evenly spread, so a tip generally does not land next to its own
- * duplicate. Deterministic and computed once at module load. Exported for
- * unit testing.
- */
-export function buildWeightedTips(tips: readonly ToolbarTip[]): readonly ToolbarTip[] {
-  const items = tips.map((t) => ({
-    tip: t,
-    weight: Math.max(1, Math.trunc(t.priority ?? 1)),
-    current: 0,
-  }));
-  const total = items.reduce((sum, it) => sum + it.weight, 0);
-  const seq: ToolbarTip[] = [];
-  for (let n = 0; n < total; n++) {
-    let best = items[0]!;
-    for (const it of items) {
-      it.current += it.weight;
-      if (it.current > best.current) best = it;
-    }
-    best.current -= total;
-    seq.push(best.tip);
-  }
-  return seq;
-}
-
-let _rotation: readonly ToolbarTip[] | null = null;
-function getRotation(): readonly ToolbarTip[] {
-  if (_rotation === null) _rotation = buildWeightedTips(getToolbarTips());
-  return _rotation;
-}
-
-/** Invalidate cached rotation (call after locale change). */
-export function invalidateRotation(): void { _rotation = null; }
-
-export function currentTipIndex(): number {
-  return Math.floor(Date.now() / TIP_ROTATE_INTERVAL_MS);
-}
-
-/**
- * Pick the tip(s) for a rotation index over the weighted ROTATION sequence.
- * `primary` is always shown when it fits; `pair` (primary + next tip joined
- * by the separator) is offered for wide terminals. Pairing is skipped when
- * the current/next tip is `solo` or when the neighbour is a duplicate of the
- * current tip (which can happen at the wrap boundary), keeping long/important
- * tips on their own and avoiding "X | X".
- */
-export function tipsForIndex(index: number): { primary: string; pair: string | null } {
-  const rotation = getRotation();
-  const n = rotation.length;
-  if (n === 0) return { primary: '', pair: null };
-  const offset = ((index % n) + n) % n;
-  const current = rotation[offset]!;
-  if (n === 1 || current.solo) return { primary: current.text, pair: null };
-  const next = rotation[(offset + 1) % n]!;
-  if (next.solo || next.text === current.text) return { primary: current.text, pair: null };
-  return { primary: current.text, pair: current.text + TIP_SEPARATOR + next.text };
-}
 
 function shortenModel(model: string): string {
   if (!model) return model;
@@ -147,11 +43,10 @@ function safeUsage(usage: number): number {
 }
 
 const CONTEXT_BAR_WIDTH = 10;
-// Water-level progress bar glyphs: solid depth (█) with a foam transition
-// (▓▒) hugging the water line; unused cells read as air (░).
-const CONTEXT_BAR_DEEP = '█';
-const CONTEXT_BAR_FOAM = '▓▒';
-const CONTEXT_BAR_AIR = '░';
+// Slim progress bar glyphs: filled cell / empty cell (Geometric Shapes,
+// 1 column each — same class as the ◆ channel dot already in use).
+const CONTEXT_BAR_FILLED = '▰';
+const CONTEXT_BAR_EMPTY = '▱';
 const BALANCE_FLASH_MS = 1500;
 
 function currencySymbol(currency: string): string {
@@ -161,24 +56,22 @@ function currencySymbol(currency: string): string {
 }
 
 /**
- * Water-level progress bar for context usage: `█████▓▒░░░` (10 cells).
- * Used cells read as water — solid depth (█) with a foam transition (▓▒)
- * hugging the water line; unused cells read as air (░). Cell count is
- * rounded from the clamped ratio, so 0% is all-air and >=100% is all-water;
- * NaN/undefined coerce through safeUsageRatio first.
+ * Slim progress bar for context usage: `▰▰▰▱▱▱▱▱▱▱` (10 cells).
+ * One glyph per cell keeps the row visually light; the fill is floored so the
+ * bar never overstates usage (100% covers the whole row). NaN/undefined coerce
+ * through safeUsageRatio first.
  */
 function formatContextBar(usage: number, width: number = CONTEXT_BAR_WIDTH): string {
   const clamped = Math.min(1, Math.max(0, safeUsageRatio(usage)));
-  const filled = Math.round(clamped * width);
-  const foam = Math.min(2, filled);
-  const deep = Math.max(0, filled - foam);
-  const used = CONTEXT_BAR_DEEP.repeat(deep) + CONTEXT_BAR_FOAM.slice(0, foam);
-  const air = CONTEXT_BAR_AIR.repeat(width - filled);
-  return `${used}${air}`;
+  // Floor so the bar never overstates, but any non-zero usage keeps one cell
+  // lit — an all-empty bar next to "5.5%" reads as a bug.
+  const filled =
+    clamped >= 1 ? width : clamped > 0 ? Math.max(1, Math.floor(clamped * width)) : 0;
+  return `${CONTEXT_BAR_FILLED.repeat(filled)}${CONTEXT_BAR_EMPTY.repeat(width - filled)}`;
 }
 
 function formatContextStatus(usage: number, barWidth = CONTEXT_BAR_WIDTH): string {
-  // `上下文🗑️：5.5% ▓░░░░░░░░░` — the percentage is the metric, the bar is its
+  // `📨 Context：▰▰▱▱▱▱▱▱▱▱ 28.8%` — the bar is the gauge, the percentage is
   // gauge. Absolute token counts were dropped: they made the row read like a
   // ledger and duplicated what `/status` already reports.
   // `barWidth` 0 collapses the bar on narrow terminals, which needs its own
@@ -631,61 +524,60 @@ export class FooterComponent implements Component {
     // Git working-tree summary now closes line 1 (the sidebar Git panel keeps
     // the detailed file list).
 
-    // ── Line 1 right side: transient hint (when active) or status info ─────
-    let rightText: string;
-    if (this.transientHint) {
-      rightText = chalk.hex(colors.warning).bold(this.transientHint);
-    } else {
-      const statusLine = buildStatusLine(
-        state.streamingPhase,
-        state.streamingStartTime,
-        {
-          isCompacting: state.isCompacting === true,
-          pendingUserAction: state.pendingUserAction ?? null,
-          pendingUserActionSince: state.pendingUserActionSince ?? null,
-          reconnectAttempt: state.reconnectAttempt ?? 0,
-          reconnectMaxAttempts: state.reconnectMaxAttempts,
-        },
-      );
-      const platform = state.linePlatform ?? null;
-      const lineConnected = state.lineActive && platform !== null;
-      // Only the dot carries the channel colour — blue for Lark, green for
-      // WeChat, muted when not connected. The label stays muted so the status
-      // segment never glows as a whole.
-      const dotColor = !lineConnected
-        ? colors.textDim
-        : platform === 'lark'
-          ? colors.lineLark
-          : colors.success;
-      const lineDot = chalk.hex(dotColor)('◆');
-      // `Line：` + the channel brand while it runs, `未连接` otherwise — the
-      // brand alone reads as a stray word without the label.
-      const lineLabel = chalk.hex(colors.textDim)(
-        t('footer.line_status', {
-          status: lineConnected ? (platform === 'lark' ? 'Lark' : 'Wechat') : t('footer.line_disconnected'),
-        }),
-      );
-      const statusPart = chalk.hex(colors.textDim)(statusLine);
-      rightText = `${lineDot} ${lineLabel} ${statusPart}`;
-    }
-
-    const ellipsis = chalk.hex(colors.textDim)('…');
-
-    // ── Line 2: run-state badges (left) + context usage (right) ──────────
-    // The water-level bar collapses on narrow terminals (10 cells on wide,
-    // 6 mid, 0 = plain token counts) so the readout itself never disappears:
-    // the second row is rendered at every width.
+    // ── Context gauge: line 1 right ──────────────────────────────────────
+    // Layout: `📨 Context：▰▰▱▱▱… 28.8%` — the bar collapses on narrow
+    // terminals (10 cells on wide, 6 mid, 0 = percentage only). The envelope
+    // mark and the label live in the i18n template so both locales match.
     const contextBarWidth = width >= 68 ? CONTEXT_BAR_WIDTH : width >= 52 ? 6 : 0;
-    // The trash mark lives in the label (`上下文🗑️：…`, i18n-side) so it reads
-    // as part of the metric rather than trailing decoration.
     const contextLine = chalk.hex(pickContextColor(state.contextUsage, colors))(
       formatContextStatus(state.contextUsage, contextBarWidth),
     );
 
+    // Line 2 right: channel dot + label + work status (always rendered).
+    const statusLine = buildStatusLine(
+      state.streamingPhase,
+      state.streamingStartTime,
+      {
+        isCompacting: state.isCompacting === true,
+        pendingUserAction: state.pendingUserAction ?? null,
+        pendingUserActionSince: state.pendingUserActionSince ?? null,
+        reconnectAttempt: state.reconnectAttempt ?? 0,
+        reconnectMaxAttempts: state.reconnectMaxAttempts,
+      },
+    );
+
+    const platform = state.linePlatform ?? null;
+    const lineConnected = state.lineActive && platform !== null;
+    // Only the dot carries the channel colour — blue for Lark, green for
+    // WeChat, muted when not connected. The label stays muted.
+    const dotColor = !lineConnected
+      ? colors.textDim
+      : platform === 'lark'
+        ? colors.lineLark
+        : colors.success;
+    const lineDot = chalk.hex(dotColor)('◆');
+    const lineLabel = chalk.hex(colors.textDim)(
+      t('footer.line_status', {
+        status: lineConnected ? (platform === 'lark' ? 'Lark' : 'Wechat') : t('footer.line_disconnected'),
+      }),
+    );
+    const statusPart = chalk.hex(colors.textDim)(statusLine);
+    const secondRightText = `${lineDot} ${lineLabel} ${statusPart}`;
+
+    // Line 1 right: the context gauge, or the transient hint (Ctrl+C
+    // confirmation) while one is active.
+    const rightText = this.transientHint
+      ? chalk.hex(colors.warning).bold(this.transientHint)
+      : contextLine;
+    const ellipsis = chalk.hex(colors.textDim)('…');
+
+    // ── Line 2: run-state badges (left) + channel & status (right) ───────
+    // Line 2 keeps its LEFT-protected rule: the badges shrink before the
+    // channel/status readout disappears.
     return [
       truncateToWidth(this.composeLine(leftLine, rightText, width, ellipsis), width, '…'),
       truncateToWidth(
-        this.composeLine(leftSecondLine, contextLine, width, ellipsis, 'right'),
+        this.composeLine(leftSecondLine, secondRightText, width, ellipsis, 'right'),
         width,
         '…',
       ),

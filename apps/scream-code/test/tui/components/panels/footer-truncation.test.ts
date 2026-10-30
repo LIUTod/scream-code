@@ -100,20 +100,21 @@ describe('FooterComponent - progressive truncation', () => {
 
   it('stage 1: shrinks LEFT with a middle ellipsis to keep RIGHT visible', () => {
     const footer = wideFooter();
-    // width 38: line 1's LEFT (model name) plus RIGHT (dot + line label +
-    // status) exceeds it, so a shrunk LEFT (head + tail via truncateMiddle) +
-    // gap + RIGHT fits — the head keeps the model marker.
-    const [line1] = footer.render(38);
+    // width 30: line 1's LEFT (model name) plus RIGHT (context gauge) exceeds
+    // it, so a shrunk LEFT (head + tail via truncateMiddle) + gap + RIGHT fits —
+    // the head keeps the model marker and the gauge survives.
+    const [line1] = footer.render(30);
     expect(line1).toBeDefined();
     const stripped = strip(line1!);
-    expect(visibleWidth(line1!)).toBeLessThanOrEqual(38);
+    expect(visibleWidth(line1!)).toBeLessThanOrEqual(30);
     expect(stripped).toContain('…');
-    expect(stripped).toContain('Line:'); // RIGHT survived
+    expect(stripped).toContain('Context：'); // RIGHT survived
     expect(stripped.startsWith('📟️')).toBe(true); // head of LEFT kept (marker)
   });
 
   it('stage 2: drops RIGHT when it cannot fit even after shrinking LEFT', () => {
-    // Short LEFT (model only) + long RIGHT: any width below RIGHT+gap drops RIGHT.
+    // Short LEFT (model only) + gauge wider than the row: below gauge+gap the
+    // RIGHT block is dropped so LEFT can render whole.
     const footer = new FooterComponent(
       baseState({
         contextUsage: 0.5,
@@ -123,11 +124,11 @@ describe('FooterComponent - progressive truncation', () => {
       darkColors,
       uiMock,
     );
-    const [line1] = footer.render(20);
+    const [line1] = footer.render(17);
     expect(line1).toBeDefined();
     const stripped = strip(line1!);
-    expect(visibleWidth(line1!)).toBeLessThanOrEqual(20);
-    expect(stripped).not.toContain('Hitr'); // RIGHT dropped
+    expect(visibleWidth(line1!)).toBeLessThanOrEqual(17);
+    expect(stripped).not.toContain('Context：'); // RIGHT dropped
     expect(stripped).not.toContain('…'); // LEFT fit whole, no ellipsis needed
   });
 

@@ -49,11 +49,11 @@ function baseState(overrides: Partial<AppState> = {}): AppState {
 const uiMock = { requestRender: () => {} } as any;
 const NOW = 1_700_000_000_000;
 
-/** Render line 1 and return the trailing status segment (SGR stripped). */
+/** Render line 2 (channel + work status) with SGR stripped. */
 function statusSegment(state: AppState, width = 200): string {
   vi.spyOn(Date, 'now').mockReturnValue(NOW);
   const footer = new FooterComponent(state, darkColors, uiMock);
-  const line = strip(footer.render(width)[0] ?? '');
+  const line = strip(footer.render(width)[1] ?? '');
   footer.dispose();
   vi.restoreAllMocks();
   return line.trimEnd();
@@ -179,7 +179,7 @@ describe('footer status block — line channel segment', () => {
     try {
       const renderLine = (state: AppState): string => {
         const footer = new FooterComponent(state, darkColors, uiMock);
-        const line = footer.render(200)[0] ?? '';
+        const line = footer.render(200)[1] ?? '';
         footer.dispose();
         return line;
       };
@@ -215,15 +215,14 @@ describe('footer status block — line channel segment', () => {
     const footer = new FooterComponent(baseState({ streamingPhase: 'idle' }), darkColors, uiMock);
     const [line1, line2] = footer.render(120).map(strip);
     footer.dispose();
-    // Line 1 is the channel/status strip; the hit rate moved to line 2.
+    // Line 1 now carries the context gauge; the hit rate opens line 2.
     expect(line1).not.toContain('Hitr');
     expect(line2!.startsWith('↓ Hitr: --')).toBe(true);
-    // Exactly one space after the colon — no doubled separator.
     expect(line2).toContain('↓ Hitr: --');
     expect(line2).not.toContain('↓ Hitr:  --');
   });
 
-  it('keeps the channel segment ahead of the status label on line 1', () => {
+  it('keeps the channel segment ahead of the status label on line 2', () => {
     const out = statusSegment(
       baseState({
         streamingPhase: 'waiting',
@@ -233,8 +232,6 @@ describe('footer status block — line channel segment', () => {
       }),
     );
     expect(out.indexOf('Line:')).toBeLessThan(out.indexOf('等待中'));
-    // The hit rate no longer shares this row.
-    expect(out).not.toContain('Hitr:');
   });
 });
 

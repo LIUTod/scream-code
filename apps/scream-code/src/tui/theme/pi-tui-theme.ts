@@ -78,7 +78,9 @@ function createMarkdownCodeHighlightTheme(colors: ColorPalette): Theme {
     strong: (s) => chalk.bold(s),
     formula: text,
     link: chalk.hex(colors.mdLink),
-    quote: chalk.hex(colors.mdQuote),
+    // Syntax `quote` token inside a fence — neutral, like the file-preview
+    // theme. `mdQuote` belongs to markdown block quotes only.
+    quote: muted,
     addition: keyword,
     deletion: chalk.hex(colors.diffRemoved),
     default: text,
@@ -149,7 +151,10 @@ export function createMarkdownTheme(colors: ColorPalette): MarkdownTheme {
     // prefix. Ordered lists arrive as `"1. "` / `"2. "` and are left
     // untouched by the leading-dash anchor.
     listBullet: (text) => chalk.hex(colors.roleAssistant)(text.replace(/^-/, '•')),
-    bold: (text) => chalk.bold(text),
+    // Emphasis carries a colour: bold-only was the one markdown mark that read
+    // as plain body text, which left replies looking monochrome. `mdBold` is
+    // the heaviest markdown token in every palette — keep it that way.
+    bold: (text) => chalk.bold.hex(colors.mdBold)(text),
     italic: (text) => chalk.italic(text),
     strikethrough: (text) => chalk.strikethrough(text),
     underline: (text) => chalk.underline(text),

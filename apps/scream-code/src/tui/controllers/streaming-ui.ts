@@ -415,6 +415,11 @@ export class StreamingUIController {
     eventName: string | undefined,
     argumentsPart: string | null | undefined,
   ): void {
+    // A delta for a call that already started (or settled) cannot be part of
+    // the preview any more: recording it would re-enter the in-flight preview
+    // map and keep the status-bar wave green after the tool finished.
+    const registered = this._activeToolCalls.get(id);
+    if (registered !== undefined && registered.streamingArguments === undefined) return;
     const existing = this._streamingToolCallArguments.get(id);
     const argumentsText = appendStreamingArgsPreview(existing?.argumentsText, argumentsPart);
     const name = eventName ?? existing?.name ?? this._activeToolCalls.get(id)?.name ?? 'Tool';
@@ -455,6 +460,26 @@ export class StreamingUIController {
       if (call.result === undefined) return true;
     }
     return false;
+  }
+
+  /** True while a tool call of the current step is in flight — either a
+   *  preview whose arguments are still streaming (`tool-args`) or a call that
+   *  already started executing and has no result yet (`tool`).
+   *
+   *  This answers "does a tool own the current wait", which is what the status
+   *  bar's silence wave needs. `hasExecutingToolCalls()` answers the narrower
+   *  "is a process running" one, so keep the two apart: argument previews count
+   *  here and must not count there. Entries from an earlier step or turn are
+   *  ignored for the same reason they are there — nothing can settle them. */
+  hasInFlightToolCalls(): boolean {
+    for (const call of this._activeToolCalls.values()) {
+      if (call.turnId !== this._currentTurnId || call.step !== this._currentStep) continue;
+      if (call.result === undefined) return true;
+    }
+    // The first delta of a call is not flushed into `_activeToolCalls` until
+    // the next paint frame; without this the wave would ramp through the gap
+    // between "arguments started streaming" and "preview mounted".
+    return this._streamingToolCallArguments.size > 0;
   }
 
   /** Marks in-flight tool calls as truncated when a step hits max_tokens.
@@ -1278,6 +1303,11 @@ export class StreamingUIController {
   private flushToolCallPreview(id: string): void {
     const streaming = this._streamingToolCallArguments.get(id);
     if (streaming === undefined) return;
+    // A call that already registered its start keeps that identity: replacing
+    // it with the argument preview would re-mark a running tool as "still being
+    // authored", clearing the executing-tool state the phase and the wave read.
+    const started = this._activeToolCalls.get(id);
+    if (started !== undefined && started.streamingArguments === undefined) return;
     const toolCall: ToolCallBlockData = {
       id,
       name: streaming.name ?? this._activeToolCalls.get(id)?.name ?? 'Tool',

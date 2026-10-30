@@ -1,12 +1,15 @@
 /**
  * Silence ramp for the status-bar pulse wave.
  *
- * The wave reports one thing: how long the agent has been waiting on network
- * work without receiving anything. That covers a request awaiting its first
- * token, a reasoning or text stream that stopped delivering, and the model
- * still authoring a tool call. Tool execution is deliberately exempt — a
- * local process that prints nothing is still working, and its own timeout
- * owns the outcome.
+ * The wave reports one thing: how long the agent has been waiting on the model
+ * without receiving anything. That covers a request awaiting its first token
+ * and a reasoning or text stream that stopped delivering.
+ *
+ * A tool call in flight is exempt for its whole lifetime: a local process that
+ * prints nothing is still working and its own timeout owns the outcome, and a
+ * call whose arguments are still streaming in is the block the user is already
+ * watching fill out — reddening the wave there reads as a false alarm rather
+ * than as a stall report.
  *
  * Timeline (elapsed since the last inbound event, or since the request was
  * sent while no token has arrived yet):

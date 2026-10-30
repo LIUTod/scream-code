@@ -1,6 +1,9 @@
 import chalk from 'chalk';
 import { truncateToWidth } from '@liutod-scream/pi-tui';
 import { t } from '@scream-code/config';
+
+import { sanitizeShellOutput } from '../utils/sanitize';
+import { buildCronReminderChip } from '../utils/cron-chip';
 import type {
   AgentStatusUpdatedEvent,
   AssistantDeltaEvent,
@@ -211,8 +214,13 @@ export interface SessionEventHost {
    * Optional so headless/test hosts can omit it.
    */
   showCollabActivity?(text: string, tone: 'request' | 'handled'): void;
-  /** Drops a pending ticker line (session switch). */
-  clearCollabActivity?(): void;
+  /**
+   * One-line scheduled-task reminder above the editor. Its own slot, so a
+   * collaboration request cannot evict it. Optional for headless hosts.
+   */
+  showReminderActivity?(text: string, tone: 'fired' | 'missed'): void;
+  /** Drops every transient chip on the status row (session switch). */
+  clearStatusActivity?(): void;
   appendTranscriptEntry(entry: TranscriptEntry): void;
   sendQueuedMessage(session: Session, item: QueuedMessage): void;
   sendNormalUserInput(text: string): void;
@@ -313,8 +321,8 @@ export class SessionEventHandler {
     this.subagentSlots.reset();
     this.subagentMessageCalls.clear();
     this.pendingChildRequests.clear();
-    // A ticker line belongs to the session that produced it.
-    this.host.clearCollabActivity?.();
+    // A ticker/reminder chip belongs to the session that produced it.
+    this.host.clearStatusActivity?.();
     this.subagentInstances.clear();
     this.recentSubagentInstances.length = 0;
     this.renderedSkillActivationIds.clear();
@@ -636,8 +644,12 @@ export class SessionEventHandler {
     this.pendingChildRequests.add(event.subagentId);
     // A requester we never saw spawn has no display name; a neutral label
     // reads better than a raw agent id in a one-line ticker.
+    // The name comes from profile config, not free-form model text, but the
+    // ticker is still terminal output — strip control sequences like the issue.
     const name = truncateToWidth(
-      event.subagentName ?? this.subagentInfo.get(event.subagentId)?.name ?? 'subagent',
+      sanitizeShellOutput(
+        event.subagentName ?? this.subagentInfo.get(event.subagentId)?.name ?? 'subagent',
+      ),
       COLLAB_NAME_MAX_COLUMNS,
       '…',
     );
@@ -1379,6 +1391,11 @@ export class SessionEventHandler {
 
   private handleCronFired(event: CronFiredEvent): void {
     this.host.streamingUI.flushNow();
+    // The transcript block is the lasting record; the status row carries the
+    // live signal for the next few seconds (own slot, never evicted by a
+    // collaboration chip).
+    const chip = buildCronReminderChip(event);
+    this.host.showReminderActivity?.(chip.text, chip.tone);
     this.host.appendTranscriptEntry({
       id: nextTranscriptId(),
       kind: 'cron',

@@ -198,6 +198,7 @@ export function makeMockStreamingUI(
     onToolCallStart: vi.fn(),
     hasActiveTurn: vi.fn((): boolean => false),
     hasExecutingToolCalls: vi.fn((): boolean => false),
+    hasInFlightToolCalls: vi.fn((): boolean => false),
     // Default: no block is open, so a notice keeps its own transcript row.
     attachNotice: vi.fn((): boolean => false),
     recordApproval: vi.fn(),

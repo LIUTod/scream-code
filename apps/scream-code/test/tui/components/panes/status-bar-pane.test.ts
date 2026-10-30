@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import chalk from 'chalk';
 import { visibleWidth } from '@liutod-scream/pi-tui';
 
 import { StatusBarPaneComponent } from '#/tui/components/panes/status-bar-pane';
@@ -35,6 +36,26 @@ describe('StatusBarPaneComponent', () => {
     const toolLines = tool.render(80).map((line) => line.trimEnd());
     expect(toolLines.length).toBe(1);
     expect(toolLines[0]).toBe(' ⬝  [working]');
+  });
+
+  it('applies labelColor on the working row too (regression: it was dropped)', () => {
+    const previousLevel = chalk.level;
+    chalk.level = 3;
+    try {
+      const pane = new StatusBarPaneComponent({
+        mode: 'waiting',
+        label: '⚠️ 重连中 2/10：限流 (429) · 20s',
+        labelColor: '#E8A838',
+        pulseWave: fakeWave(),
+      });
+      const line = pane.render(120)[0] ?? '';
+      const sgr = '\u001B[38;2;232;168;56m';
+      // The whole chip shares one colour span; without the forward it renders
+      // unstyled (the bug this test locks).
+      expect(line).toContain(`${sgr}⚠️ 重连中 2/10：限流 (429) · 20s\u001B[39m`);
+    } finally {
+      chalk.level = previousLevel;
+    }
   });
 
   it('renders a bare wave without padding when there is no label or activity', () => {

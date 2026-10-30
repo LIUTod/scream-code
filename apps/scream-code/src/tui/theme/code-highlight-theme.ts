@@ -57,7 +57,10 @@ export function createCodeHighlightTheme(colors: ColorPalette): Theme {
     strong: (s) => chalk.bold(s),
     formula: text,
     link: chalk.hex(colors.mdLink),
-    quote: chalk.hex(colors.mdQuote),
+    // File-preview syntax only: keep the neutral grey it always had. `mdQuote`
+    // is a *markdown* token now (violet/pink for quoted replies), and borrowing
+    // it here would repaint syntax in previews for no reason.
+    quote: muted,
     addition: chalk.hex(colors.diffAdded),
     deletion: chalk.hex(colors.diffRemoved),
     // CSS/HTML selectors and template literals (used by the css/html/jsx
