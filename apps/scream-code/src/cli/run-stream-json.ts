@@ -453,7 +453,7 @@ interface MappedMode {
   planMode: boolean;
 }
 
-export function mapCcConnectMode(mode: string | undefined): MappedMode {
+export function mapStreamJsonMode(mode: string | undefined): MappedMode {
   switch (mode) {
     case "default":
       return { permission: "manual", planMode: false };
@@ -551,7 +551,7 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
   let currentSessionId: string | undefined;
   let sessionKey = "cc-connect-main";
 
-  // Pending approvals awaiting control_response from the reference.
+  // Pending approvals awaiting control_response from the client.
   const pendingApprovals = new Map<
     string,
     { resolve: (response: { decision: "approved" | "rejected"; scope?: "session"; feedback?: string }) => void }
@@ -658,7 +658,7 @@ export async function runStreamJson(opts: StreamJsonOptions): Promise<void> {
       // One channel = one session.  Use --resume if the reference passes one,
       // otherwise fall back to the deterministic key.
       sessionKey = opts.resume ?? "cc-connect-main";
-      const { permission: mappedPermission, planMode: mappedPlanMode } = mapCcConnectMode(
+      const { permission: mappedPermission, planMode: mappedPlanMode } = mapStreamJsonMode(
         opts.permissionMode,
       );
       if (!session) {

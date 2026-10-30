@@ -5,7 +5,7 @@ import {
   StreamJsonWriter,
   extractUserText,
   installStdoutEpipeGuard,
-  mapCcConnectMode,
+  mapStreamJsonMode,
 } from '../../src/cli/run-stream-json';
 
 describe('stream-json runtime system prompt', () => {
@@ -60,7 +60,7 @@ interface Event {
   [key: string]: unknown;
 }
 
-describe('mapCcConnectMode', () => {
+describe('mapStreamJsonMode', () => {
   it.each([
     ['default', 'manual', false],
     ['acceptEdits', 'manual', false],
@@ -70,11 +70,11 @@ describe('mapCcConnectMode', () => {
     ['bypassPermissions', 'yolo', false],
     ['yolo', 'yolo', false],
   ] as const)('maps %s → permission=%s planMode=%s', (input, permission, planMode) => {
-    expect(mapCcConnectMode(input)).toEqual({ permission, planMode });
+    expect(mapStreamJsonMode(input)).toEqual({ permission, planMode });
   });
 
   it('falls back to auto when no mode is configured', () => {
-    expect(mapCcConnectMode(undefined)).toEqual({ permission: 'auto', planMode: false });
+    expect(mapStreamJsonMode(undefined)).toEqual({ permission: 'auto', planMode: false });
   });
 });
 

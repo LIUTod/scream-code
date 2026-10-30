@@ -3,7 +3,7 @@
  *
  * Ports of the reference:
  *   - platform/weixin/parse.go `bodyFromItemList` (text, quoted refs, voice ASR)
- *   - platform/weixin/weixin.go `mediaOnlyItems` + the media placeholder copy
+ *   - platform/weixin/weixin.go text/voice extraction
  *   - core.SplitMessageCodeFenceAware (3800-char chunks, fence-balanced)
  */
 
@@ -68,30 +68,6 @@ export function bodyFromItemList(items: IlinkMessageItem[] | undefined): string 
   }
   return '';
 }
-
-/** True when every item is media (used for the "media received" placeholder). */
-export function mediaOnlyItems(items: IlinkMessageItem[] | undefined): boolean {
-  if (!items || items.length === 0) return false;
-  let sawMedia = false;
-  for (const it of items) {
-    if (it.type === MESSAGE_ITEM_IMAGE || it.type === MESSAGE_ITEM_VIDEO || it.type === MESSAGE_ITEM_FILE) {
-      sawMedia = true;
-      continue;
-    }
-    if (it.type === MESSAGE_ITEM_VOICE) {
-      if (!it.voice_item || (it.voice_item.text ?? '').trim() === '') {
-        sawMedia = true; // voice without ASR counts as media
-        continue;
-      }
-      return false; // has usable ASR text
-    }
-    return false; // a text item exists
-  }
-  return sawMedia;
-}
-
-export const WEIXIN_MEDIA_PLACEHOLDER =
-  '[收到媒体消息：图片/文件接收即将支持，请改用文字说明。]';
 
 /**
  * Split long replies into ≤max chunks at line boundaries, keeping code fences

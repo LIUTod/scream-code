@@ -3,9 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   MESSAGE_ITEM_TEXT,
   MAX_WEIXIN_CHUNK,
-  WEIXIN_MEDIA_PLACEHOLDER,
   bodyFromItemList,
-  mediaOnlyItems,
   splitMessageCodeFenceAware,
   type IlinkMessageItem,
 } from '#/line/weixin/format';
@@ -58,20 +56,6 @@ describe('bodyFromItemList (text/ref/voice extraction)', () => {
   });
 });
 
-describe('mediaOnlyItems', () => {
-  it('is true for pure media items', () => {
-    expect(mediaOnlyItems([{ type: 2 }])).toBe(true);
-    expect(mediaOnlyItems([{ type: 4 }])).toBe(true);
-    expect(mediaOnlyItems([{ type: 3 }])).toBe(true); // voice without ASR
-  });
-
-  it('is false when a text item or ASR voice exists', () => {
-    expect(mediaOnlyItems([{ type: 1, text_item: { text: 'x' } }])).toBe(false);
-    expect(mediaOnlyItems([{ type: 3, voice_item: { text: 'asr' } }])).toBe(false);
-    expect(mediaOnlyItems([])).toBe(false);
-  });
-});
-
 describe('splitMessageCodeFenceAware', () => {
   it('passes short content through as a single chunk', () => {
     expect(splitMessageCodeFenceAware('hello')).toEqual(['hello']);
@@ -113,11 +97,5 @@ describe('splitMessageCodeFenceAware', () => {
     const chunks = splitMessageCodeFenceAware(content);
     expect(chunks.length).toBe(2);
     expect(chunks[0]?.length).toBe(MAX_WEIXIN_CHUNK);
-  });
-});
-
-describe('media placeholder copy', () => {
-  it('tells the user to fall back to text', () => {
-    expect(WEIXIN_MEDIA_PLACEHOLDER).toContain('请改用文字说明');
   });
 });

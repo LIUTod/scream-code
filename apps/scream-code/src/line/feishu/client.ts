@@ -26,6 +26,23 @@ export interface FeishuMention {
   name?: string;
 }
 
+/** Shape returned by `im.v1.message.get` (only the fields we consume). */
+export interface FeishuRawMessage {
+  message_id?: string;
+  msg_type?: string;
+  body?: { content?: string };
+  sender?: { id?: string };
+}
+
+/** One quoted (parent) message, flattened for prompt use. */
+export interface FeishuQuotedMessage {
+  messageId: string;
+  msgType: string;
+  content: string;
+  /** open_id of the parent's sender (used to gate quoted attachments). */
+  senderId?: string;
+}
+
 export interface FeishuEventMessage {
   messageId: string;
   chatId: string;
@@ -51,6 +68,76 @@ export interface FeishuSdkLike {
 export const MAX_TRANSIENT_RETRIES = 3;
 const TRANSIENT_INITIAL_DELAY_MS = 500;
 const TRANSIENT_MAX_DELAY_MS = 5_000;
+
+// ─── Message resource download (Range-chunked) ───────────────────────────────
+
+/**
+ * Feishu truncates a plain `messageResource.get` stream at ~2 MiB
+ * (code=234037), which is smaller than a full-screen PNG. The supported
+ * workaround — the same one the reference implementation uses — is to bypass
+ * the SDK builder and issue Range requests, reassembling the bytes here.
+ */
+const RESOURCE_CHUNK_BYTES = 8 * 1024 * 1024;
+const RESOURCE_MAX_BYTES = 512 * 1024 * 1024;
+
+interface RawResourceResponse {
+  /** Lower-cased response headers (only present with `$return_headers`). */
+  headers: Record<string, string | undefined>;
+  data: Buffer;
+}
+
+/** SDK responses are axios-style (`{ data: { image_key } }`) but tolerate flat. */
+function extractKey(response: unknown, field: 'image_key' | 'file_key'): string | null {
+  if (response === null || typeof response !== 'object') return null;
+  const record = response as Record<string, unknown>;
+  const nested = record['data'];
+  const candidates = [record[field], nested !== null && typeof nested === 'object' ? (nested as Record<string, unknown>)[field] : undefined];
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string' && candidate.length > 0) return candidate;
+  }
+  return null;
+}
+
+/**
+ * Feishu `file_type` enum, derived from the extension the way the reference
+ * `detectFeishuFileMessageType` does; unknown types fall back to `stream`.
+ */
+export function feishuFileType(fileName: string): string {
+  const ext = fileName.toLowerCase().slice(fileName.lastIndexOf('.') + 1);
+  switch (ext) {
+    case 'pdf':
+      return 'pdf';
+    case 'doc':
+    case 'docx':
+      return 'doc';
+    case 'xls':
+    case 'xlsx':
+      return 'xls';
+    case 'ppt':
+    case 'pptx':
+      return 'ppt';
+    case 'mp4':
+      return 'mp4';
+    case 'opus':
+      return 'opus';
+    default:
+      return 'stream';
+  }
+}
+
+/** Node hands back either a pooled Buffer or a raw ArrayBuffer per response. */
+function toBuffer(data: ArrayBuffer | Buffer): Buffer {
+  return Buffer.isBuffer(data) ? data : Buffer.from(data);
+}
+
+/** `bytes 0-0/12345` → 12345; null when the header is missing or malformed. */
+export function parseContentRangeTotal(header: string | undefined): number | null {
+  if (header === undefined) return null;
+  const slash = header.lastIndexOf('/');
+  if (slash < 0 || slash === header.length - 1) return null;
+  const total = Number.parseInt(header.slice(slash + 1).trim(), 10);
+  return Number.isFinite(total) && total >= 0 ? total : null;
+}
 
 /** Retryable network failures (the reference isTransientError, typed where JS allows). */
 export function isTransientError(error: unknown): boolean {
@@ -168,6 +255,9 @@ export async function validateFeishuCredentials(
 interface LarkClient {
   im: {
     message: {
+      get: (payload: {
+        path: { message_id: string };
+      }) => Promise<{ data?: { items?: FeishuRawMessage[] } }>;
       reply: (payload: {
         path: { message_id: string };
         data: { msg_type: string; content: string };
@@ -183,6 +273,16 @@ interface LarkClient {
         data: { reaction_type: { emoji_type: string } };
       }) => Promise<{ data?: { reaction_id?: string } }>;
       delete: (payload: { path: { message_id: string; reaction_id: string } }) => Promise<unknown>;
+    };
+    image: {
+      create: (payload: {
+        data: { image_type: string; image: Buffer };
+      }) => Promise<{ data?: { image_key?: string } }>;
+    };
+    file: {
+      create: (payload: {
+        data: { file_type: string; file_name: string; file: Buffer };
+      }) => Promise<{ data?: { file_key?: string } }>;
     };
   };
 }
@@ -257,6 +357,26 @@ export class FeishuClient {
     );
   }
 
+  /** Uploads an image for a message (`image_type: message`), returns its key. */
+  async uploadImage(data: Buffer): Promise<string> {
+    const response = await withTransientRetry('feishu.image.create', () =>
+      this.client.im.image.create({ data: { image_type: 'message', image: data } }),
+    );
+    const key = extractKey(response, 'image_key');
+    if (key === null) throw new Error('feishu image upload returned no image_key');
+    return key;
+  }
+
+  /** Uploads a file for a message, returns its key. */
+  async uploadFile(data: Buffer, fileName: string, fileType: string): Promise<string> {
+    const response = await withTransientRetry('feishu.file.create', () =>
+      this.client.im.file.create({ data: { file_type: fileType, file_name: fileName, file: data } }),
+    );
+    const key = extractKey(response, 'file_key');
+    if (key === null) throw new Error('feishu file upload returned no file_key');
+    return key;
+  }
+
   async sendToChat(chatId: string, msgType: string, body: string): Promise<void> {
     await withTransientRetry('feishu.create', () =>
       this.client.im.message.create({
@@ -267,6 +387,143 @@ export class FeishuClient {
   }
 
   /** Add a reaction; returns the reaction id (empty when the call fails). */
+  /**
+   * Downloads a message resource (image or file) with Range requests.
+   *
+   * The first request asks for a single byte: a 206 tells us the total size via
+   * `Content-Range`, a 200 means the server ignored the header and already sent
+   * the whole body. Remaining chunks are fetched in 8 MiB slices and verified,
+   * because a silent short read is the failure mode this path exists to avoid.
+   */
+  async downloadResource(
+    messageId: string,
+    fileKey: string,
+    type: 'image' | 'file',
+    maxBytes = RESOURCE_MAX_BYTES,
+  ): Promise<Buffer> {
+    const url = `/open-apis/im/v1/messages/${encodeURIComponent(messageId)}/resources/${encodeURIComponent(fileKey)}?type=${type}`;
+
+    // Probe with a single byte. A gateway that rejects Range outright (4xx)
+    // gets one plain GET instead — the reference does the same.
+    let first: RawResourceResponse;
+    try {
+      first = await this.requestResourceWithRetry(url, 'bytes=0-0');
+    } catch (error) {
+      log.warn('line: ranged resource probe failed, retrying as a plain GET', {
+        messageId,
+        error: String(error),
+      });
+      first = await this.requestResourceWithRetry(url, undefined);
+    }
+
+    // The SDK never exposes the HTTP status; `content-range` is the signal that
+    // the body is a slice. Without it (or when the slice already covers the
+    // whole file) the response is complete.
+    const total = parseContentRangeTotal(first.headers['content-range']);
+    if (total === null || total <= first.data.length) {
+      if (first.data.length > maxBytes) {
+        throw new Error(`resource too large: ${first.data.length} bytes exceeds cap ${maxBytes}`);
+      }
+      return first.data;
+    }
+    // Reject on the advertised size, before a single chunk is fetched: an
+    // 8 MiB image cap must not turn into a 512 MiB buffer.
+    if (total > maxBytes) {
+      throw new Error(`resource too large: ${total} bytes exceeds cap ${maxBytes}`);
+    }
+
+    const parts: Buffer[] = [first.data];
+    let received = first.data.length;
+    while (received < total) {
+      const end = Math.min(received + RESOURCE_CHUNK_BYTES - 1, total - 1);
+      const chunk = await this.requestResourceWithRetry(url, `bytes=${received}-${end}`);
+      const body = chunk.data;
+      const expected = end - received + 1;
+      if (body.length !== expected) {
+        throw new Error(`resource chunk short read: got ${body.length} want ${expected}`);
+      }
+      parts.push(body);
+      received += body.length;
+    }
+    const merged = Buffer.concat(parts);
+    if (merged.length !== total) {
+      throw new Error(`resource size mismatch: assembled ${merged.length} expected ${total}`);
+    }
+    return merged;
+  }
+
+  /** Convenience wrapper for inbound images (same endpoint, `type=image`). */
+  async downloadImage(
+    messageId: string,
+    imageKey: string,
+    maxBytes = RESOURCE_MAX_BYTES,
+  ): Promise<Buffer> {
+    return this.downloadResource(messageId, imageKey, 'image', maxBytes);
+  }
+
+  /** One ranged/full GET, with the SDK's header passthrough enabled. */
+  private async requestResource(
+    url: string,
+    range: string | undefined,
+  ): Promise<RawResourceResponse> {
+    // The SDK's typed REST builders do not expose Range, but `client.request`
+    // passes arbitrary axios config through and still injects the tenant token.
+    // `$return_headers` is required: without it the SDK's response interceptor
+    // unwraps the axios response to `resp.data` and the headers are lost.
+    const requester = this.client as unknown as {
+      request(opts: {
+        method: 'GET';
+        url: string;
+        headers?: Record<string, string>;
+        responseType?: 'arraybuffer';
+        $return_headers?: boolean;
+      }): Promise<{ data?: unknown; headers?: Record<string, string | undefined> }>;
+    };
+    const response = await requester.request({
+      method: 'GET',
+      url,
+      ...(range === undefined ? {} : { headers: { Range: range } }),
+      responseType: 'arraybuffer',
+      $return_headers: true,
+    });
+    const headers = response.headers ?? {};
+    return {
+      // axios lower-cases response headers, but normalise defensively.
+      headers: Object.fromEntries(
+        Object.entries(headers).map(([name, value]) => [name.toLowerCase(), value]),
+      ),
+      data: toBuffer(response.data as ArrayBuffer | Buffer),
+    };
+  }
+
+  private async requestResourceWithRetry(
+    url: string,
+    range: string | undefined,
+  ): Promise<RawResourceResponse> {
+    return withTransientRetry(`feishu.resource:${range ?? 'full'}`, () =>
+      this.requestResource(url, range),
+    );
+  }
+
+  /**
+   * Fetches one message (used for quoted replies). Returns null when the
+   * message is gone or the payload has no body — the caller degrades to a
+   * reply without the quote instead of failing the whole turn.
+   */
+  async getMessage(messageId: string): Promise<FeishuQuotedMessage | null> {
+    const response = await withTransientRetry('feishu.message.get', () =>
+      this.client.im.message.get({ path: { message_id: messageId } }),
+    );
+    const item = response?.data?.items?.[0];
+    if (item === undefined || item.message_id === undefined) return null;
+    return {
+      messageId: item.message_id,
+      msgType: item.msg_type ?? '',
+      content: item.body?.content ?? '',
+      ...(item.sender?.id !== undefined ? { senderId: item.sender.id } : {}),
+    };
+  }
+
   async addReaction(messageId: string, emojiType: string): Promise<string> {
     try {
       const result = await withTransientRetry('feishu.reaction.add', () =>

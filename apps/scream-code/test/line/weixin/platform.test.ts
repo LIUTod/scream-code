@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -6,6 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { getWeixinContextTokensFile, type WeixinRuntimeOptions } from '#/line/config';
 import { WeixinApiError, type IlinkMessage } from '#/line/weixin/client';
+import { encryptAesEcb } from '#/line/weixin/cdn';
+import { FfmpegUnavailableError } from '#/line/weixin/voice';
 import { MAX_WEIXIN_CHUNK } from '#/line/weixin/format';
 import { WeixinPlatform, allowListPasses, makeWeixinSessionKey } from '#/line/weixin/platform';
 
@@ -42,25 +44,40 @@ interface MockClient {
   sendText: ReturnType<typeof vi.fn>;
   sendTyping: ReturnType<typeof vi.fn>;
   newClientId: ReturnType<typeof vi.fn>;
+  fetchCdnBytes: ReturnType<typeof vi.fn>;
+  uploadMedia: ReturnType<typeof vi.fn>;
+  sendMediaItem: ReturnType<typeof vi.fn>;
 }
 
 function setup(
   optionOverrides: Partial<WeixinRuntimeOptions> = {},
   clientOverrides: Partial<MockClient> = {},
-): { platform: WeixinPlatform; dispatched: Array<{ sessionKey: string; text: string }>; client: MockClient } {
+): {
+  platform: WeixinPlatform;
+  dispatched: Array<{ sessionKey: string; text: string; images?: unknown[]; files?: string[] }>;
+  client: MockClient;
+} {
   const client: MockClient = {
     getConfig: vi.fn(async () => 'ticket1'),
     sendText: vi.fn(async () => {}),
     sendTyping: vi.fn(async () => {}),
     newClientId: vi.fn(() => 'line-deadbeef1234'),
+    fetchCdnBytes: vi.fn(async () => Buffer.from('not-a-real-image')),
+    uploadMedia: vi.fn(async () => ({
+      downloadParam: 'dl-param',
+      aesKey: Buffer.from('00112233445566778899aabbccddeeff', 'hex'),
+      cipherSize: 32,
+      rawSize: 8,
+    })),
+    sendMediaItem: vi.fn(async () => {}),
     ...clientOverrides,
   };
-  const dispatched: Array<{ sessionKey: string; text: string }> = [];
+  const dispatched: Array<{ sessionKey: string; text: string; images?: unknown[]; files?: string[] }> = [];
   const platform = new WeixinPlatform(
     baseOptions(optionOverrides),
     client as unknown as import('#/line/weixin/client').WeixinClient,
     async (d) => {
-      dispatched.push({ sessionKey: d.sessionKey, text: d.text });
+      dispatched.push({ sessionKey: d.sessionKey, text: d.text, images: d.images, files: d.files });
     },
   );
   return { platform, dispatched, client };
@@ -126,12 +143,57 @@ describe('receive pipeline', () => {
     expect(JSON.parse(raw)).toEqual({ 'user@im.wechat': 'ctx_1' });
   });
 
-  it('extracts voice ASR text and the media placeholder', async () => {
+  it('keeps voice ASR text and drops an empty media item silently', async () => {
     const { platform, dispatched } = setup();
     await platform.dispatchInbound(msg({ item_list: [{ type: 3, voice_item: { text: '语音内容' } }] }));
     await platform.dispatchInbound(msg({ item_list: [{ type: 2 }], message_id: 102, context_token: 'ctx_2' }));
+    expect(dispatched).toHaveLength(1);
     expect(dispatched[0]?.text).toBe('语音内容');
-    expect(dispatched[1]?.text).toContain('请改用文字说明');
+  });
+
+  it('downloads, decrypts and forwards an inbound image', async () => {
+    // 32 hex chars = raw 16-byte key, the shape inbound images use.
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    // The CDN body is AES-ECB encrypted with the item's key.
+    const ciphertext = encryptAesEcb(png, Buffer.alloc(16));
+    const { platform, dispatched, client } = setup({}, {
+      fetchCdnBytes: vi.fn(async () => ciphertext),
+    });
+    await platform.dispatchInbound(
+      msg({
+        item_list: [
+          {
+            type: 2,
+            image_item: { media: { encrypt_query_param: 'abc' }, aeskey: '00'.repeat(16) },
+          },
+        ],
+        message_id: 103,
+      }),
+    );
+    expect(client.fetchCdnBytes).toHaveBeenCalledTimes(1);
+    expect(String((client.fetchCdnBytes.mock.calls[0] as unknown[])[0])).toContain(
+      '/download?encrypted_query_param=abc',
+    );
+    // Decryption must actually run: same length but different bytes.
+    const forwarded = dispatched[0]?.images?.[0] as { data: Buffer; mime: string } | undefined;
+    expect(forwarded?.data.equals(png)).toBe(true);
+    expect(forwarded?.mime).toBe('image/png');
+  });
+
+  it('answers once when a media-only message cannot be decoded', async () => {
+    const { platform, client } = setup({}, {
+      fetchCdnBytes: vi.fn(async () => {
+        throw new Error('cdn down');
+      }),
+    });
+    await platform.dispatchInbound(
+      msg({
+        item_list: [{ type: 2, image_item: { media: { encrypt_query_param: 'abc' }, aeskey: '00'.repeat(16) } }],
+        message_id: 104,
+      }),
+    );
+    const lastCall = client.sendText.mock.calls.at(-1) as unknown[];
+    expect(String(lastCall[1])).toContain('媒体接收失败');
   });
 });
 
@@ -230,5 +292,128 @@ describe('allowListPasses', () => {
     expect(allowListPasses([], 'any@im.wechat')).toBe(true);
     expect(allowListPasses(['a@im.wechat'], 'a@im.wechat')).toBe(true);
     expect(allowListPasses(['a@im.wechat'], 'b@im.wechat')).toBe(false);
+  });
+});
+
+describe('outbound media', () => {
+  it('uploads an image and sends the exact ilink item payload', async () => {
+    const { platform, client } = setup();
+    const internals = platform as unknown as {
+      latestTargets: Map<string, { peerUserId: string; contextToken: string }>;
+    };
+    internals.latestTargets.set('line-weixin-x', { peerUserId: 'peer', contextToken: 'ctx' });
+
+    const dir = mkdtempSync(join(tmpdir(), 'out-'));
+    const file = join(dir, 'shot.png');
+    writeFileSync(file, Buffer.from('png'));
+    await platform.sendMedia('line-weixin-x', 'image', file);
+    rmSync(dir, { recursive: true, force: true });
+
+    expect(client.uploadMedia).toHaveBeenCalledTimes(1);
+    const uploadArgs = (client.uploadMedia.mock.calls[0] as unknown[])[0] as {
+      mediaType: number;
+      toUserId: string;
+    };
+    expect(uploadArgs.mediaType).toBe(1);
+    expect(uploadArgs.toUserId).toBe('peer');
+
+    const item = (client.sendMediaItem.mock.calls[0] as unknown[])[3] as {
+      type: number;
+      image_item: { media: { encrypt_query_param: string; aes_key: string; encrypt_type: number }; mid_size: number };
+    };
+    expect(item.type).toBe(2);
+    expect(item.image_item.media.encrypt_query_param).toBe('dl-param');
+    // base64 of the 32-char hex form, not of the raw bytes.
+    expect(item.image_item.media.aes_key).toBe(
+      Buffer.from('00112233445566778899aabbccddeeff', 'latin1').toString('base64'),
+    );
+    expect(item.image_item.media.encrypt_type).toBe(1);
+    expect(item.image_item.mid_size).toBe(32);
+  });
+
+  it('sends non-image files as file items and mp4 as video', async () => {
+    const { platform, client } = setup();
+    const internals = platform as unknown as {
+      latestTargets: Map<string, { peerUserId: string; contextToken: string }>;
+    };
+    internals.latestTargets.set('k', { peerUserId: 'peer', contextToken: 'ctx' });
+    const dir = mkdtempSync(join(tmpdir(), 'out-'));
+    const doc = join(dir, '报告.pdf');
+    const video = join(dir, 'clip.mp4');
+    writeFileSync(doc, Buffer.from('pdf'));
+    writeFileSync(video, Buffer.from('mp4'));
+
+    await platform.sendMedia('k', 'file', doc);
+    await platform.sendMedia('k', 'file', video);
+    rmSync(dir, { recursive: true, force: true });
+
+    const fileItem = (client.sendMediaItem.mock.calls[0] as unknown[])[3] as {
+      type: number;
+      file_item: { file_name: string; len: string };
+    };
+    expect(fileItem.type).toBe(4);
+    expect(fileItem.file_item.file_name).toBe('报告.pdf');
+    expect(fileItem.file_item.len).toBe('8');
+
+    const videoItem = (client.sendMediaItem.mock.calls[1] as unknown[])[3] as {
+      type: number;
+      video_item: { video_size: number };
+    };
+    expect(videoItem.type).toBe(5);
+    expect(videoItem.video_item.video_size).toBe(32);
+    expect((client.uploadMedia.mock.calls[1] as unknown[])[0]).toMatchObject({ mediaType: 2 });
+  });
+});
+
+describe('voice outbound', () => {
+  it('sends AMR audio as a voice bubble', async () => {
+    const { platform, client } = setup();
+    const internals = platform as unknown as {
+      latestTargets: Map<string, { peerUserId: string; contextToken: string }>;
+    };
+    internals.latestTargets.set('k', { peerUserId: 'peer', contextToken: 'ctx' });
+    const dir = mkdtempSync(join(tmpdir(), 'voice-'));
+    const file = join(dir, 'note.amr');
+    writeFileSync(file, Buffer.concat([Buffer.from('#!AMR\n', 'latin1'), Buffer.from([1, 2])]));
+
+    const note = await platform.sendMedia('k', 'voice', file);
+    rmSync(dir, { recursive: true, force: true });
+
+    expect(note).toBe('');
+    const upload = (client.uploadMedia.mock.calls[0] as unknown[])[0] as { mediaType: number };
+    expect(upload.mediaType).toBe(3);
+    const item = (client.sendMediaItem.mock.calls[0] as unknown[])[3] as {
+      type: number;
+      voice_item: { encode_type: number; media: { encrypt_type: number } };
+    };
+    expect(item.type).toBe(3);
+    expect(item.voice_item.encode_type).toBe(0);
+    expect(item.voice_item.media.encrypt_type).toBe(1);
+  });
+
+  it('falls back to a file message when ffmpeg cannot convert', async () => {
+    const { platform, client } = setup();
+    const internals = platform as unknown as {
+      latestTargets: Map<string, { peerUserId: string; contextToken: string }>;
+      convertVoiceToAmr(data: Buffer): Promise<Buffer>;
+    };
+    internals.latestTargets.set('k', { peerUserId: 'peer', contextToken: 'ctx' });
+    internals.convertVoiceToAmr = async () => {
+      throw new FfmpegUnavailableError();
+    };
+    const dir = mkdtempSync(join(tmpdir(), 'voice-'));
+    const file = join(dir, 'note.wav');
+    writeFileSync(file, Buffer.from('RIFF....WAVEfmt '));
+
+    const note = await platform.sendMedia('k', 'voice', file);
+    rmSync(dir, { recursive: true, force: true });
+
+    expect(note).toContain('未转成语音');
+    const item = (client.sendMediaItem.mock.calls[0] as unknown[])[3] as {
+      type: number;
+      file_item: { file_name: string };
+    };
+    expect(item.type).toBe(4);
+    expect(item.file_item.file_name).toBe('note.wav');
   });
 });

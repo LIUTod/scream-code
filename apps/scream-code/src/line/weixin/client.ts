@@ -13,9 +13,12 @@
  *     throttle and must fail fast (retrying escalates the penalty)
  */
 
+import { createHash, randomBytes } from 'node:crypto';
+
 import { log } from '@scream-code/scream-code-sdk';
 
 import type { WeixinRuntimeOptions } from '../config';
+import { buildCdnUploadUrl, encryptAesEcb } from './cdn';
 
 export const MESSAGE_TYPE_USER = 1;
 export const MESSAGE_TYPE_BOT = 2;
@@ -26,16 +29,72 @@ export const TYPING_STATUS_STOP = 2;
 
 const CHANNEL_VERSION = 'scream-line-weixin/1.0';
 const API_TIMEOUT_MS = 15_000;
+/** Media downloads are bulk transfers, not interactive calls. */
+const CDN_TIMEOUT_MS = 120_000;
+/** Mirrors the reference ceiling for a single CDN body. */
+const MAX_CDN_BYTES = 100 * 1024 * 1024;
+/** Server-side CDN upload retries (the reference uses three). */
+const CDN_UPLOAD_MAX_ATTEMPTS = 3;
 const LONG_POLL_HTTP_BUFFER_MS = 5_000;
+
+/** `CDNMedia` in the ilink JSON API (media pointer + AES material). */
+export interface IlinkCdnMedia {
+  encrypt_query_param?: string;
+  /** base64 of the raw 16-byte key, or base64 of its 32-char hex form. */
+  aes_key?: string;
+  encrypt_type?: number;
+}
+
+export interface IlinkImageItem {
+  media?: IlinkCdnMedia;
+  thumb_media?: IlinkCdnMedia;
+  /** Inbound images carry the raw key as 32 hex chars instead of `media.aes_key`. */
+  aeskey?: string;
+  mid_size?: number;
+}
+
+export interface IlinkFileItem {
+  media?: IlinkCdnMedia;
+  file_name?: string;
+  len?: string;
+}
+
+export interface IlinkVideoItem {
+  media?: IlinkCdnMedia;
+  thumb_media?: IlinkCdnMedia;
+  video_size?: number;
+}
+
+export interface IlinkVoiceItem {
+  text?: string;
+  media?: IlinkCdnMedia;
+  encode_type?: number;
+}
 
 export interface IlinkMessageItem {
   type?: number;
   text_item?: { text?: string };
-  voice_item?: { text?: string };
+  image_item?: IlinkImageItem;
+  file_item?: IlinkFileItem;
+  video_item?: IlinkVideoItem;
+  voice_item?: IlinkVoiceItem;
   ref_msg?: {
     title?: string;
     message_item?: IlinkMessageItem;
   };
+}
+
+/** `media_type` values accepted by `ilink/bot/getuploadurl`. */
+export const UPLOAD_MEDIA_TYPE = { image: 1, video: 2, file: 3 } as const;
+
+/** What the gateway needs after a successful CDN upload to reference the media. */
+export interface IlinkUploadRef {
+  /** `x-encrypted-param` from the CDN response. */
+  downloadParam: string;
+  aesKey: Buffer;
+  /** AES-padded size, sent as `mid_size`/field sizes on the item. */
+  cipherSize: number;
+  rawSize: number;
 }
 
 export interface IlinkMessage {
@@ -124,6 +183,28 @@ export class WeixinClient {
     return headers;
   }
 
+  /**
+   * Raw CDN GET for media. The CDN is a separate host that takes no bot token,
+   * and the URL already carries the encrypted pointer.
+   */
+  async fetchCdnBytes(url: string): Promise<Buffer> {
+    const doFetch = this.deps.fetchImpl ?? fetch;
+    let response: Response;
+    try {
+      response = await doFetch(url, { method: 'GET', signal: AbortSignal.timeout(CDN_TIMEOUT_MS) });
+    } catch (error) {
+      throw new WeixinApiError(`CDN request failed: ${String(error)}`, 'network');
+    }
+    if (!response.ok) {
+      throw new WeixinApiError(`CDN http ${response.status}`, 'http');
+    }
+    const buffer = Buffer.from(await response.arrayBuffer());
+    if (buffer.length > MAX_CDN_BYTES) {
+      throw new WeixinApiError(`CDN body exceeds ${MAX_CDN_BYTES} bytes`, 'http');
+    }
+    return buffer;
+  }
+
   private async post(endpoint: string, body: unknown, timeoutMs: number, label: string): Promise<unknown> {
     const url = `${this.options.baseUrl.replace(/\/+$/, '')}/${endpoint.replace(/^\//, '')}`;
     const payload = JSON.stringify(body);
@@ -157,7 +238,7 @@ export class WeixinClient {
 
   /**
    * One long-poll round. A poll timeout is NOT an error — it returns an
-   * empty batch with the unchanged cursor (the reference getUpdates).
+   * empty batch with the unchanged cursor (the upstream getUpdates contract).
    */
   async getUpdates(cursor: string): Promise<IlinkGetUpdatesResponse> {
     const timeoutMs = this.options.longPollTimeoutMs + LONG_POLL_HTTP_BUFFER_MS;
@@ -179,6 +260,137 @@ export class WeixinClient {
   }
 
   /** Send one text message; rejects on ret!==0 (including the -2 throttle). */
+  /**
+   * Uploads one media buffer: `getuploadurl` → AES-128-ECB → CDN POST, and the
+   * CDN answers with `x-encrypted-param`, which is what `sendmessage` then
+   * references. Ported from the reference `SendImage`/`SendFile` upload path
+   * (including the newer `upload_full_url` response variant).
+   */
+  async uploadMedia(input: {
+    toUserId: string;
+    data: Buffer;
+    mediaType: number;
+    cdnBaseUrl: string;
+  }): Promise<IlinkUploadRef> {
+    const aesKey = randomBytes(16);
+    const filekey = randomHex(16);
+    const ciphertext = encryptAesEcb(input.data, aesKey);
+    const digest = createHash('md5').update(input.data).digest('hex');
+    const raw = await this.post(
+      'ilink/bot/getuploadurl',
+      {
+        filekey,
+        media_type: input.mediaType,
+        to_user_id: input.toUserId,
+        rawsize: input.data.length,
+        rawfilemd5: digest,
+        filesize: ciphertext.length,
+        no_need_thumb: true,
+        aeskey: aesKey.toString('hex'),
+        base_info: { channel_version: CHANNEL_VERSION },
+      },
+      API_TIMEOUT_MS,
+      'getUploadUrl',
+    );
+    const env = raw as {
+      ret?: number;
+      errcode?: number;
+      errmsg?: string;
+      upload_param?: string;
+      upload_full_url?: string;
+    };
+    if ((env.ret ?? 0) !== 0) {
+      throw new WeixinApiError(
+        `weixin: getUploadUrl: ret=${env.ret} errcode=${env.errcode} errmsg=${env.errmsg ?? ''}`,
+        'ret',
+        env.ret,
+        env.errcode,
+      );
+    }
+    const full = (env.upload_full_url ?? '').trim();
+    const param = (env.upload_param ?? '').trim();
+    if (full.length === 0 && param.length === 0) {
+      throw new WeixinApiError('weixin: getUploadUrl returned no upload target', 'ret');
+    }
+    const uploadUrl = full.length > 0 ? full : buildCdnUploadUrl(input.cdnBaseUrl, param, filekey);
+    const downloadParam = await this.uploadCdn(uploadUrl, ciphertext);
+    return { downloadParam, aesKey, cipherSize: ciphertext.length, rawSize: input.data.length };
+  }
+
+  /** POSTs the ciphertext; `x-encrypted-param` identifies the stored object. */
+  private async uploadCdn(url: string, ciphertext: Buffer): Promise<string> {
+    const doFetch = this.deps.fetchImpl ?? fetch;
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= CDN_UPLOAD_MAX_ATTEMPTS; attempt += 1) {
+      let response: Response;
+      try {
+        response = await doFetch(url, {
+          method: 'POST',
+          headers: { 'content-type': 'application/octet-stream' },
+          body: new Uint8Array(ciphertext),
+          signal: AbortSignal.timeout(CDN_TIMEOUT_MS),
+        });
+      } catch (error) {
+        lastError = error;
+        continue;
+      }
+      if (response.status >= 400 && response.status < 500) {
+        const message = response.headers.get('x-error-message') ?? `status ${response.status}`;
+        throw new WeixinApiError(`CDN upload rejected: ${message}`, 'http');
+      }
+      if (response.status !== 200) {
+        lastError = new Error(`CDN upload status ${response.status}`);
+        continue;
+      }
+      const downloadParam = response.headers.get('x-encrypted-param') ?? '';
+      if (downloadParam.length === 0) {
+        lastError = new Error('CDN upload response missing x-encrypted-param');
+        continue;
+      }
+      return downloadParam;
+    }
+    throw new WeixinApiError(`CDN upload failed after ${CDN_UPLOAD_MAX_ATTEMPTS} attempts: ${String(lastError)}`, 'network');
+  }
+
+  /** Sends one pre-built item (image/file/video) through `sendmessage`. */
+  async sendMediaItem(
+    toUserId: string,
+    contextToken: string,
+    clientId: string,
+    item: Record<string, unknown>,
+  ): Promise<void> {
+    if (contextToken.trim() === '') {
+      throw new WeixinApiError('weixin: context_token is required for send', 'ret');
+    }
+    const body = await this.post(
+      'ilink/bot/sendmessage',
+      {
+        msg: {
+          from_user_id: '',
+          to_user_id: toUserId,
+          client_id: clientId,
+          message_type: MESSAGE_TYPE_BOT,
+          message_state: MESSAGE_STATE_FINISH,
+          item_list: [item],
+          context_token: contextToken,
+        },
+        base_info: { channel_version: CHANNEL_VERSION },
+      },
+      API_TIMEOUT_MS,
+      'sendMessage',
+    );
+    const env = body as IlinkEnvelope;
+    // Go-parity zero-value semantics: missing ret/errcode means success.
+    if ((env.ret ?? 0) !== 0) {
+      throw new WeixinApiError(
+        `weixin: sendMessage: ret=${env.ret} errcode=${env.errcode} errmsg=${env.errmsg ?? ''}`,
+        'ret',
+        env.ret,
+        env.errcode,
+      );
+    }
+  }
+
   async sendText(toUserId: string, text: string, contextToken: string, clientId: string): Promise<void> {
     if (contextToken.trim() === '') {
       throw new WeixinApiError('weixin: context_token is required for send', 'ret');

@@ -101,7 +101,8 @@ describe('loadLineConfig / saveLineConfig', () => {
       JSON.stringify({ version: 1, feishu: { app_id: 'cli_a', app_secret: 'sec' } }),
     );
     const loaded = await loadLineConfig();
-    expect(loaded?.permissionMode).toBe('yolo');
+    // `auto` is the IM default: no approval surface, deny rules still apply.
+    expect(loaded?.permissionMode).toBe('auto');
     expect(loaded?.autoStart).toBe(true);
     // The stored file keeps raw values; defaults only materialize in memory.
     const raw = readFileSync(getLineConfigPath(), 'utf-8');
@@ -109,8 +110,8 @@ describe('loadLineConfig / saveLineConfig', () => {
   });
 });
 
-describe('resolveWeixinOptions (cc-connect weixin New defaults)', () => {
-  it('applies cc-connect defaults: ilink gateway, 35s long-poll, 300s dedup', () => {
+describe('resolveWeixinOptions (legacy weixin defaults)', () => {
+  it('applies the legacy defaults: ilink gateway, 35s long-poll, 300s dedup', () => {
     const o = resolveWeixinOptions({ token: 'tok' });
     expect(o.token).toBe('tok');
     expect(o.baseUrl).toBe('https://ilinkai.weixin.qq.com');
@@ -197,8 +198,8 @@ describe('assertSinglePlatformConfig (single-channel invariant)', () => {
   });
 });
 
-describe('resolveFeishuOptions (cc-connect newPlatform defaults)', () => {
-  it('applies cc-connect defaults: OnIt receipt, no done emoji, mention required', () => {
+describe('resolveFeishuOptions (legacy platform defaults)', () => {
+  it('applies the legacy defaults: OnIt receipt, no done emoji, mention required', () => {
     const o = resolveFeishuOptions({ app_id: 'cli_a', app_secret: 'sec' });
     expect(o.reactionEmoji).toBe('OnIt');
     expect(o.doneEmoji).toBe('');
@@ -226,5 +227,55 @@ describe('resolveFeishuOptions (cc-connect newPlatform defaults)', () => {
     expect(o.reactionEmoji).toBe('');
     expect(o.doneEmoji).toBe('THUMBSUP');
     expect(o.domain).toBe('https://open.larksuite.com');
+  });
+});
+
+describe('custom commands', () => {
+  function baseConfig(commands: unknown) {
+    return {
+      version: 1,
+      feishu: { app_id: 'cli_a', app_secret: 'secret', allow_from: 'ou_1' },
+      commands,
+    };
+  }
+
+  it('accepts prompt and exec commands and maps snake_case to camelCase', async () => {
+    useHome(tempHome());
+    await saveLineConfig(baseConfig([
+      { name: '/standup', prompt: '总结：{args}' },
+      { name: '/deploy', exec: './deploy.sh', work_dir: 'scripts' },
+    ]) as never);
+
+    const loaded = await loadLineConfig();
+    const commands = loaded?.commands ?? [];
+    expect(commands).toHaveLength(2);
+    expect(commands[0]).toMatchObject({ name: '/standup', prompt: '总结：{args}' });
+    expect(commands[1]).toMatchObject({ name: '/deploy', exec: './deploy.sh', work_dir: 'scripts' });
+  });
+
+  it('rejects prompt+exec together and neither of them', async () => {
+    useHome(tempHome());
+    await saveLineConfig(baseConfig([{ name: '/both', prompt: 'x', exec: 'y' }]) as never);
+    await expect(loadLineConfig()).rejects.toThrow(/prompt|exec/);
+
+    useHome(tempHome());
+    await saveLineConfig(baseConfig([{ name: '/neither' }]) as never);
+    await expect(loadLineConfig()).rejects.toThrow(/prompt|exec/);
+  });
+
+  it('rejects malformed names, reserved names and duplicates', async () => {
+    for (const commands of [
+      [{ name: 'standup', prompt: 'x' }],
+      [{ name: '/bad name', prompt: 'x' }],
+      [{ name: '/status', prompt: 'x' }],
+      [
+        { name: '/dup', prompt: 'x' },
+        { name: '/dup', prompt: 'y' },
+      ],
+    ]) {
+      useHome(tempHome());
+      await saveLineConfig(baseConfig(commands) as never);
+      await expect(loadLineConfig()).rejects.toThrow();
+    }
   });
 });

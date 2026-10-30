@@ -85,21 +85,72 @@ const weixinPlatformSchema = z.object({
   long_poll_timeout_ms: z.number().int().positive().optional(),
   /** ilink retransmits on ACK delay — dedup window default 300s (the reference #1667). */
   dedup_window_seconds: z.number().int().positive().optional(),
+  /** Override the media CDN root (default https://novac2c.cdn.weixin.qq.com/c2c). */
+  cdn_base_url: z.string().optional(),
 });
+
+/** User-defined IM command: a prompt template or a shell command. */
+export interface LineCustomCommand {
+  name: string;
+  description?: string;
+  prompt?: string;
+  exec?: string;
+  /** Relative to the line workDir; must stay inside it. */
+  workDir?: string;
+}
+
+/** Names a custom command may not shadow (built-ins + desktop-only commands). */
+export const RESERVED_COMMAND_NAMES = new Set([
+  '/help',
+  '/status',
+  '/model',
+  '/compact',
+  '/new',
+  '/line',
+  '/theme',
+  '/sessions',
+  '/login',
+  '/image',
+]);
+
+const CUSTOM_COMMAND_NAME = /^\/[a-z0-9][a-z0-9_-]*$/i;
+
+const customCommandSchema = z
+  .object({
+    name: z.string().regex(CUSTOM_COMMAND_NAME, '命令名必须形如 /name（字母数字、-、_）'),
+    description: z.string().optional(),
+    prompt: z.string().optional(),
+    exec: z.string().optional(),
+    work_dir: z.string().optional(),
+  })
+  // Exactly one implementation: a prompt template or a shell command.
+  .refine((value) => (value.prompt === undefined) !== (value.exec === undefined), {
+    message: '自定义命令必须且只能提供 prompt 或 exec 之一',
+  });
 
 export const lineConfigSchema = z.object({
   version: z.literal(1).default(1),
   feishu: feishuPlatformSchema.optional(),
   weixin: weixinPlatformSchema.optional(),
-  /** Unattended permission mode for line sessions. */
-  permissionMode: z.enum(['yolo', 'dontAsk']).default('yolo'),
+  /**
+   * Permission mode for line sessions. `auto` is the default: it approves
+   * everything after the deny rules but never raises an interactive surface
+   * (no AskUserQuestion, no plan-review prompt), which is what an IM channel
+   * needs. `yolo` still routes ExitPlanMode through review; `dontAsk` rejects
+   * every tool call instead.
+   */
+  permissionMode: z.enum(['auto', 'yolo', 'dontAsk']).default('auto'),
   /** TUI boot auto-starts the daemon when configured and not running. */
   autoStart: z.boolean().default(true),
+  /** User-defined IM commands (`/name`), see LineCustomCommand. */
+  commands: z.array(customCommandSchema).optional(),
   /** Working directory for line sessions (default: daemon start cwd). */
   workDir: z.string().optional(),
 });
 
 export type LineConfig = z.infer<typeof lineConfigSchema>;
+/** What callers may write: schema defaults are optional on input. */
+export type LineConfigInput = z.input<typeof lineConfigSchema>;
 export type FeishuPlatformConfig = NonNullable<LineConfig['feishu']>;
 export type WeixinPlatformConfig = NonNullable<LineConfig['weixin']>;
 
@@ -135,6 +186,19 @@ export async function loadLineConfig(): Promise<LineConfig | null> {
       .join('; ');
     throw new LineConfigError(`line 配置不合法（${getLineConfigPath()}）：${issues}`);
   }
+  // Custom command names are user-authored: reject collisions here so the
+  // router never has to guess which one wins.
+  const seen = new Set<string>();
+  for (const command of result.data.commands ?? []) {
+    const name = command.name.toLowerCase();
+    if (RESERVED_COMMAND_NAMES.has(name)) {
+      throw new LineConfigError(`自定义命令名与内置命令冲突：${command.name}`);
+    }
+    if (seen.has(name)) {
+      throw new LineConfigError(`自定义命令名重复：${command.name}`);
+    }
+    seen.add(name);
+  }
   return result.data;
 }
 
@@ -152,7 +216,7 @@ export function assertSinglePlatformConfig(config: LineConfig): void {
 }
 
 /** Persist config with 0600 (contains app_secret). Atomic-ish: write + rename. */
-export async function saveLineConfig(config: LineConfig): Promise<void> {
+export async function saveLineConfig(config: LineConfigInput): Promise<void> {
   const dir = getLineDir();
   await mkdir(dir, { recursive: true });
   const target = getLineConfigPath();
@@ -189,6 +253,19 @@ export interface FeishuRuntimeOptions {
 export const DEFAULT_FEISHU_DOMAIN = 'https://open.feishu.cn';
 
 /** Apply the reference `newPlatform` defaults on top of the stored options. */
+/** Schema entries are snake_case; the driver wants camelCase. */
+export function resolveCustomCommands(
+  commands: readonly z.infer<typeof customCommandSchema>[] | undefined,
+): LineCustomCommand[] {
+  return (commands ?? []).map((command) => ({
+    name: command.name,
+    description: command.description,
+    prompt: command.prompt,
+    exec: command.exec,
+    workDir: command.work_dir,
+  }));
+}
+
 export function resolveFeishuOptions(cfg: FeishuPlatformConfig): FeishuRuntimeOptions {
   const reactionRaw = cfg.reaction_emoji?.trim() ?? '';
   const doneRaw = cfg.done_emoji?.trim() ?? '';
@@ -223,11 +300,14 @@ export interface WeixinRuntimeOptions {
   routeTag: string;
   longPollTimeoutMs: number;
   dedupWindowMs: number;
+  /** Media CDN root; defaults to the official c2c host. */
+  cdnBaseUrl?: string;
 }
 
 export const DEFAULT_WEIXIN_BASE_URL = 'https://ilinkai.weixin.qq.com';
 export const DEFAULT_WEIXIN_LONG_POLL_MS = 35_000;
 export const DEFAULT_WEIXIN_DEDUP_WINDOW_MS = 300_000;
+export const DEFAULT_WEIXIN_CDN_BASE_URL = 'https://novac2c.cdn.weixin.qq.com/c2c';
 
 /** Apply the reference `New` defaults on top of the stored weixin options. */
 export function resolveWeixinOptions(cfg: WeixinPlatformConfig): WeixinRuntimeOptions {
@@ -244,5 +324,9 @@ export function resolveWeixinOptions(cfg: WeixinPlatformConfig): WeixinRuntimeOp
       (cfg.dedup_window_seconds ?? 0) > 0
         ? (cfg.dedup_window_seconds as number) * 1000
         : DEFAULT_WEIXIN_DEDUP_WINDOW_MS,
+    cdnBaseUrl:
+      cfg.cdn_base_url !== undefined && cfg.cdn_base_url.trim().replace(/\/+$/, '') !== ''
+        ? cfg.cdn_base_url.trim().replace(/\/+$/, '')
+        : DEFAULT_WEIXIN_CDN_BASE_URL,
   };
 }

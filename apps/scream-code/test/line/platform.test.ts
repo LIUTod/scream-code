@@ -1,3 +1,7 @@
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import { describe, expect, it, vi } from 'vitest';
 
 import type { FeishuClient, FeishuEventMessage } from '#/line/feishu/client';
@@ -51,13 +55,19 @@ interface Harness {
     addReaction: ReturnType<typeof vi.fn>;
     removeReaction: ReturnType<typeof vi.fn>;
     reply: ReturnType<typeof vi.fn>;
+    downloadImage: ReturnType<typeof vi.fn>;
+    downloadResource: ReturnType<typeof vi.fn>;
+    getMessage: ReturnType<typeof vi.fn>;
+    uploadImage: ReturnType<typeof vi.fn>;
+    uploadFile: ReturnType<typeof vi.fn>;
+    sendToChat: ReturnType<typeof vi.fn>;
   };
   platform: FeishuPlatform;
 }
 
 function setup(
   optionOverrides: Partial<FeishuRuntimeOptions> = {},
-  clientOverrides: { botOpenId?: string; groupFilterActive?: boolean } = {},
+  clientOverrides: Record<string, unknown> = {},
 ): Harness {
   const client = {
     botOpenId: 'bot_oid',
@@ -65,6 +75,12 @@ function setup(
     addReaction: vi.fn(async () => 'reaction_1'),
     removeReaction: vi.fn(async () => {}),
     reply: vi.fn(async () => {}),
+    downloadImage: vi.fn(async () => Buffer.from([0x89, 0x50, 0x4e, 0x47])),
+    downloadResource: vi.fn(async () => Buffer.from('file-bytes')),
+    getMessage: vi.fn(async () => null),
+    uploadImage: vi.fn(async () => 'img_key_1'),
+    uploadFile: vi.fn(async () => 'file_key_1'),
+    sendToChat: vi.fn(async () => {}),
     ...clientOverrides,
   };
   const dispatched: LineDispatch[] = [];
@@ -281,5 +297,276 @@ describe('helpers', () => {
 
   it('stripMentions removes bot mention keys and trims', () => {
     expect(stripMentions('@_u1  hello', [{ key: '@_u1', openId: 'bot' }], 'bot')).toBe('hello');
+  });
+});
+
+describe('inbound media', () => {
+  it('batches images that arrive together into one turn', async () => {
+    vi.useFakeTimers();
+    const { platform, dispatched } = setup();
+    await platform.handleEvent(
+      msg({ msgType: 'image', messageId: 'om_i1', content: JSON.stringify({ image_key: 'k1' }) }),
+    );
+    await platform.handleEvent(
+      msg({ msgType: 'image', messageId: 'om_i2', content: JSON.stringify({ image_key: 'k2' }) }),
+    );
+    expect(dispatched).toHaveLength(0);
+
+    await vi.advanceTimersByTimeAsync(900);
+    expect(dispatched).toHaveLength(1);
+    expect(dispatched[0]?.images).toHaveLength(2);
+    // The batch is attributed to the newest image message.
+    expect(dispatched[0]?.context.messageId).toBe('om_i2');
+    platform.stop();
+  });
+
+  it('flushes a pending image batch before a following text message', async () => {
+    vi.useFakeTimers();
+    const { platform, dispatched } = setup();
+    await platform.handleEvent(
+      msg({ msgType: 'image', messageId: 'om_i1', content: JSON.stringify({ image_key: 'k1' }) }),
+    );
+    await platform.handleEvent(msg({ messageId: 'om_t', content: JSON.stringify({ text: '看图' }) }));
+
+    expect(dispatched).toHaveLength(2);
+    expect(dispatched[0]?.images).toHaveLength(1);
+    expect(dispatched[1]?.text).toBe('看图');
+    platform.stop();
+  });
+
+  it('extracts text and inline images from a rich-text post', async () => {
+    const { platform, dispatched, client } = setup();
+    await platform.handleEvent(
+      msg({
+        msgType: 'post',
+        messageId: 'om_post',
+        content: JSON.stringify({
+          title: '标题',
+          content: [
+            [{ tag: 'text', text: '第一段' }, { tag: 'img', image_key: 'pk1' }],
+            [{ tag: 'a', text: '链接', href: 'https://example.com' }],
+          ],
+        }),
+      }),
+    );
+
+    expect(client.downloadImage).toHaveBeenCalledTimes(1);
+    expect(dispatched).toHaveLength(1);
+    expect(dispatched[0]?.text).toContain('标题');
+    expect(dispatched[0]?.text).toContain('第一段');
+    expect(dispatched[0]?.text).toContain('链接');
+    expect(dispatched[0]?.images).toHaveLength(1);
+  });
+
+  it('saves a file under the Scream home and hands the path over', async () => {
+    const { platform, dispatched, client } = setup();
+    await platform.handleEvent(
+      msg({
+        msgType: 'file',
+        messageId: 'om_file',
+        content: JSON.stringify({ file_key: 'fk1', file_name: '../evil/报告.pdf' }),
+      }),
+    );
+
+    expect(client.downloadResource).toHaveBeenCalledWith('om_file', 'fk1', 'file', expect.any(Number));
+    expect(dispatched).toHaveLength(1);
+    const path = dispatched[0]?.files?.[0] ?? '';
+    // Sanitized name, and never inside the user's cwd.
+    expect(path).toContain('/line/inbox/');
+    expect(path.endsWith('-报告.pdf')).toBe(true);
+    expect(path).not.toContain('evil/');
+  });
+
+  it('replies once when an image cannot be downloaded', async () => {
+    const { platform, client } = setup({}, {
+      downloadImage: vi.fn(async () => {
+        throw new Error('boom');
+      }),
+    });
+    await platform.handleEvent(
+      msg({ msgType: 'image', messageId: 'om_bad', content: JSON.stringify({ image_key: 'k' }) }),
+    );
+    expect(client.reply).toHaveBeenCalledTimes(1);
+    // reply(messageId, msgType, body)
+    const args = client.reply.mock.calls[0] as unknown[];
+    expect(String(args[2])).toContain('图片下载失败');
+  });
+
+  it('stop() cancels a pending batch', async () => {
+    vi.useFakeTimers();
+    const { platform, dispatched } = setup();
+    await platform.handleEvent(
+      msg({ msgType: 'image', messageId: 'om_i9', content: JSON.stringify({ image_key: 'k9' }) }),
+    );
+    platform.stop();
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(dispatched).toHaveLength(0);
+  });
+});
+
+describe('outbound media', () => {
+  it('uploads then posts an image to the chat that owns the session', async () => {
+    const { platform, client } = setup();
+    const internals = platform as unknown as { chatBySession: Map<string, string> };
+    internals.chatBySession.set('line-feishu-x', 'oc_chat');
+
+    const dir = mkdtempSync(join(tmpdir(), 'out-'));
+    const file = join(dir, 'shot.png');
+    writeFileSync(file, Buffer.from('png'));
+    await platform.sendMedia('line-feishu-x', 'image', file);
+    rmSync(dir, { recursive: true, force: true });
+
+    expect(client.uploadImage).toHaveBeenCalledTimes(1);
+    expect(client.sendToChat).toHaveBeenCalledWith('oc_chat', 'image', JSON.stringify({ image_key: 'img_key_1' }));
+  });
+
+  it('uploads files with the extension-derived file_type', async () => {
+    const { platform, client } = setup();
+    const internals = platform as unknown as { chatBySession: Map<string, string> };
+    internals.chatBySession.set('k', 'oc_chat');
+    const dir = mkdtempSync(join(tmpdir(), 'out-'));
+    const file = join(dir, '报告.pdf');
+    writeFileSync(file, Buffer.from('pdf'));
+
+    await platform.sendMedia('k', 'file', file);
+    rmSync(dir, { recursive: true, force: true });
+
+    expect(client.uploadFile).toHaveBeenCalledWith(expect.any(Buffer), '报告.pdf', 'pdf');
+    expect(client.sendToChat).toHaveBeenCalledWith('oc_chat', 'file', JSON.stringify({ file_key: 'file_key_1' }));
+  });
+
+  it('fails clearly when the chat is unknown (restart before any inbound)', async () => {
+    const { platform } = setup();
+    await expect(platform.sendMedia('unknown', 'image', '/tmp/x.png')).rejects.toThrow(/no chat recorded/);
+  });
+});
+
+describe('quoted replies', () => {
+  it('prefixes the quoted text and keeps the reply in order', async () => {
+    const { platform, dispatched, client } = setup({}, {
+      getMessage: vi.fn(async () => ({
+        messageId: 'om_parent',
+        msgType: 'text',
+        content: JSON.stringify({ text: '原始问题是什么' }),
+      })),
+    });
+    await platform.handleEvent(
+      msg({ messageId: 'om_reply', parentId: 'om_parent', content: JSON.stringify({ text: '那再解释一下' }) }),
+    );
+
+    expect(client.getMessage).toHaveBeenCalledWith('om_parent');
+    expect(dispatched).toHaveLength(1);
+    expect(dispatched[0]?.text).toBe('[引用: 原始问题是什么]\n那再解释一下');
+  });
+
+  it('pulls images carried by the quoted message', async () => {
+    const { platform, dispatched } = setup({}, {
+      getMessage: vi.fn(async () => ({
+        messageId: 'om_parent',
+        msgType: 'image',
+        content: JSON.stringify({ image_key: 'quoted_key' }),
+      })),
+    });
+    await platform.handleEvent(
+      msg({ messageId: 'om_reply2', parentId: 'om_parent', content: JSON.stringify({ text: '这张图什么意思' }) }),
+    );
+
+    expect(dispatched[0]?.images).toHaveLength(1);
+    expect(dispatched[0]?.text).toContain('这张图什么意思');
+  });
+
+  it('degrades to a plain reply when the parent cannot be fetched', async () => {
+    const { platform, dispatched } = setup({}, {
+      getMessage: vi.fn(async () => {
+        throw new Error('message not found');
+      }),
+    });
+    await platform.handleEvent(
+      msg({ messageId: 'om_reply3', parentId: 'om_missing', content: JSON.stringify({ text: '还在吗' }) }),
+    );
+
+    expect(dispatched).toHaveLength(1);
+    expect(dispatched[0]?.text).toBe('还在吗');
+  });
+
+  it('flattens a quoted rich-text post into one line', async () => {
+    const { platform, dispatched } = setup({}, {
+      getMessage: vi.fn(async () => ({
+        messageId: 'om_parent',
+        msgType: 'post',
+        content: JSON.stringify({ title: '周报', content: [[{ tag: 'text', text: '第二段' }]] }),
+      })),
+    });
+    await platform.handleEvent(
+      msg({ messageId: 'om_reply4', parentId: 'om_parent', content: JSON.stringify({ text: '第三段呢' }) }),
+    );
+
+    expect(dispatched[0]?.text).toBe('[引用: 周报 第二段]\n第三段呢');
+  });
+});
+
+describe('quoted replies with media', () => {
+  it('keeps the quoted text when the reply itself is a photo (no batching)', async () => {
+    const { platform, dispatched } = setup({}, {
+      getMessage: vi.fn(async () => ({
+        messageId: 'om_parent',
+        msgType: 'text',
+        senderId: 'ou_actor',
+        content: JSON.stringify({ text: '这张图是什么' }),
+      })),
+    });
+    await platform.handleEvent(
+      msg({
+        msgType: 'image',
+        messageId: 'om_img_reply',
+        parentId: 'om_parent',
+        content: JSON.stringify({ image_key: 'k1' }),
+      }),
+    );
+
+    // Dispatched immediately: a batch would send `text: ''` and lose the quote.
+    expect(dispatched).toHaveLength(1);
+    expect(dispatched[0]?.text).toBe('[引用: 这张图是什么]\n');
+    expect(dispatched[0]?.images).toHaveLength(1);
+  });
+
+  it('forwards a quoted file only when the quoting user sent it', async () => {
+    const same = setup({}, {
+      getMessage: vi.fn(async () => ({
+        messageId: 'om_parent',
+        msgType: 'file',
+        senderId: 'ou_actor',
+        content: JSON.stringify({ file_key: 'fk_quoted', file_name: 'a.pdf' }),
+      })),
+    });
+    await same.platform.handleEvent(
+      msg({
+        messageId: 'om_reply_file',
+        parentId: 'om_parent',
+        senderUserId: 'ou_actor',
+        content: JSON.stringify({ text: '这个文件呢' }),
+      }),
+    );
+    expect(same.dispatched[0]?.files).toHaveLength(1);
+
+    const other = setup({}, {
+      getMessage: vi.fn(async () => ({
+        messageId: 'om_parent',
+        msgType: 'file',
+        senderId: 'ou_someone_else',
+        content: JSON.stringify({ file_key: 'fk_quoted', file_name: 'a.pdf' }),
+      })),
+    });
+    await other.platform.handleEvent(
+      msg({
+        messageId: 'om_reply_file2',
+        parentId: 'om_parent',
+        senderUserId: 'ou_actor',
+        content: JSON.stringify({ text: '这个文件呢' }),
+      }),
+    );
+    // Different sender: the attachment never leaves the sandbox.
+    expect(other.dispatched[0]?.files ?? []).toHaveLength(0);
+    expect(other.dispatched[0]?.text).toContain('这个文件呢');
   });
 });

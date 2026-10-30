@@ -348,7 +348,7 @@ async function collectWeixinCredentials(host: SlashCommandHost): Promise<void> {
 
 // ─── Shared save + start prompt ───────────────────────────────────────────
 
-async function mergeAndSaveConfig(
+export async function mergeAndSaveConfig(
   host: SlashCommandHost,
   patch: { feishu?: FeishuPlatformConfig; weixin?: WeixinPlatformConfig },
 ): Promise<boolean> {
@@ -359,9 +359,13 @@ async function mergeAndSaveConfig(
       // Single-channel invariant: saving one platform clears the other.
       feishu: patch.feishu ?? (patch.weixin !== undefined ? undefined : existing?.feishu),
       weixin: patch.weixin ?? (patch.feishu !== undefined ? undefined : existing?.weixin),
-      permissionMode: existing?.permissionMode ?? 'yolo',
+      // Wizard-created configs get the IM default (`auto`), not the old `yolo`.
+      permissionMode: existing?.permissionMode ?? 'auto',
       autoStart: existing?.autoStart ?? true,
       ...(existing?.workDir !== undefined ? { workDir: existing.workDir } : {}),
+      // Preserve fields the wizard does not edit (custom commands, and any
+      // forward-compatible key): rebuilding the object must not delete them.
+      ...(existing?.commands !== undefined ? { commands: existing.commands } : {}),
     };
     await saveLineConfig(config);
     host.setAppState({ linePlatform: config.feishu !== undefined ? 'lark' : 'wechat' });
@@ -425,6 +429,8 @@ async function doStop(host: SlashCommandHost): Promise<void> {
   const stopped = await stopLineDaemon();
   host.showStatus(stopped ? t('line.stopped') : t('line.not_running'));
   host.setAppState({ lineActive: false });
+    // Stand the 30s poll down: a stale read must not flip the dot back on.
+    host.noteLineStateWrite?.();
 }
 
 async function doRestart(host: SlashCommandHost): Promise<void> {

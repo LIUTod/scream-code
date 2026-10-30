@@ -14,10 +14,12 @@
  *   - chunked replies (≤3800 chars, fence-aware, 100ms between chunks);
  *     ret=-2 throttle fails fast, and a partial-failure notice is sent once
  *
- * P1 deviations: no media download (placeholder text, like the reference's
- * failure copy), no proactive push path (line only replies), no proxy/cdn
- * options, burst quota not needed (everything is a reply, which ilink does
- * not throttle).
+ * Media: `inbound-media.ts` downloads and AES-128-ECB-decrypts image / file /
+ * video / untranscribed voice items (ASR text wins when present); outbound goes
+ * `getuploadurl` → CDN upload → `sendmessage` media item (`sendMedia`).
+ *
+ * Deviations: no proactive push path (line only replies), no proxy support,
+ * burst quota not needed (everything is a reply, which ilink does not throttle).
  */
 
 import { createHash, randomInt } from 'node:crypto';
@@ -25,19 +27,33 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 
 import { log } from '@scream-code/scream-code-sdk';
 
+import { basename } from 'node:path';
+
 import { MessageDedup } from '../dedup';
+import type { LineImageAttachment } from '../media';
+import { collectInboundMedia } from './inbound-media';
+import { AudioConversionError, FfmpegUnavailableError, convertToAmr } from './voice';
+import { DEFAULT_CDN_BASE_URL } from './cdn';
 import {
   getWeixinContextTokensFile,
   getWeixinCursorFile,
   getWeixinStateDir,
   type WeixinRuntimeOptions,
 } from '../config';
-import { WeixinClient, isSendThrottled, type IlinkMessage, MESSAGE_TYPE_BOT, MESSAGE_TYPE_USER, SESSION_EXPIRED_ERRCODE, TYPING_STATUS_START, TYPING_STATUS_STOP } from './client';
+import {
+  MESSAGE_TYPE_BOT,
+  MESSAGE_TYPE_USER,
+  SESSION_EXPIRED_ERRCODE,
+  TYPING_STATUS_START,
+  TYPING_STATUS_STOP,
+  UPLOAD_MEDIA_TYPE,
+  WeixinClient,
+  isSendThrottled,
+  type IlinkMessage,
+} from './client';
 import {
   WEIXIN_CHUNK_SEND_DELAY_MS,
-  WEIXIN_MEDIA_PLACEHOLDER,
   bodyFromItemList,
-  mediaOnlyItems,
   splitMessageCodeFenceAware,
   type IlinkMessageItem,
 } from './format';
@@ -49,6 +65,13 @@ const BACKOFF_MAX_MS = 30_000;
 const TYPING_TICKET_TTL_MS = 10 * 60 * 1000;
 const TYPING_REPEAT_MS = 5_000;
 const PARTIAL_SEND_NOTICE = '⚠️ 消息发送不完整，请在终端查看完整结果。';
+/** ilink item types used for outbound media (reference: 2/4/5). */
+const ITEM_TYPE_IMAGE = 2;
+const ITEM_TYPE_FILE = 4;
+const ITEM_TYPE_VOICE = 3;
+const ITEM_TYPE_VIDEO = 5;
+/** Reply used when a media-only message could not be decoded. */
+export const MEDIA_FAILED_TEXT = '媒体接收失败，请重新发送一次。';
 
 export interface WeixinDispatchContext {
   peerUserId: string;
@@ -60,6 +83,10 @@ export interface WeixinDispatchContext {
 export interface WeixinDispatch {
   sessionKey: string;
   text: string;
+  /** Inbound images, already downloaded and decrypted. */
+  images?: LineImageAttachment[];
+  /** Inbound files already written to disk (absolute paths). */
+  files?: string[];
   context: WeixinDispatchContext;
 }
 
@@ -88,6 +115,8 @@ export class WeixinPlatform {
   private readonly startMs = Date.now();
   private cursor = '';
   private readonly contextTokens = new Map<string, string>();
+  /** sessionKey → latest peer/context, so outbound media can be addressed. */
+  private readonly latestTargets = new Map<string, { peerUserId: string; contextToken: string }>();
   private readonly typingTickets = new Map<string, TypingTicketEntry>();
   private readonly activeTypings = new Map<string, ReturnType<typeof setInterval>>();
   private pauseUntil = 0;
@@ -209,12 +238,6 @@ export class WeixinPlatform {
       void this.prefetchTypingTicket(from, contextToken).catch(() => {});
     }
 
-    let body = bodyFromItemList(m.item_list);
-    if (body.trim() === '' && mediaOnlyItems(m.item_list as IlinkMessageItem[] | undefined)) {
-      body = WEIXIN_MEDIA_PLACEHOLDER;
-    }
-    if (body.trim() === '') return;
-
     const messageId = (m.message_id ?? 0) !== 0 ? String(m.message_id) : randomHex(8);
     const dispatchContext: WeixinDispatchContext = {
       peerUserId: from,
@@ -222,13 +245,35 @@ export class WeixinPlatform {
       messageId,
       userId: from,
     };
+    const sessionKey = makeWeixinSessionKey(from);
+
+    const body = bodyFromItemList(m.item_list);
+    const media = await collectInboundMedia({
+      client: this.client,
+      items: (m.item_list ?? []) as IlinkMessageItem[],
+      cdnBaseUrl: this.options.cdnBaseUrl ?? DEFAULT_CDN_BASE_URL,
+      sessionKey,
+    });
+
+    if (body.trim() === '' && media.images.length === 0 && media.files.length === 0) {
+      // A media-only message that we could not decode is worth one line back;
+      // staying silent reads as "the bot is broken".
+      if (media.failed) await this.replyText(dispatchContext, MEDIA_FAILED_TEXT);
+      return;
+    }
+
+    this.latestTargets.set(sessionKey, { peerUserId: from, contextToken });
     log.debug('line-weixin: dispatching inbound message', {
       messageId,
-      sessionKey: makeWeixinSessionKey(from),
+      sessionKey,
+      images: media.images.length,
+      files: media.files.length,
     });
     await this.dispatch({
-      sessionKey: makeWeixinSessionKey(from),
+      sessionKey,
       text: body,
+      images: media.images,
+      files: media.files,
       context: dispatchContext,
     });
   }
@@ -236,6 +281,83 @@ export class WeixinPlatform {
   // ─── Outbound (port of Reply/sendChunks) ────────────────────────────────
 
   /** Reply text to a peer; chunked, fence-aware, throttle fail-fast. */
+  /**
+   * Sends a local image or file to the chat that owns this session: upload to
+   * the CDN (AES-128-ECB), then `sendmessage` with the media item. Ported from
+   * the reference `SendImage`/`SendFile`.
+   */
+  async sendMedia(
+    sessionKey: string,
+    kind: 'image' | 'file' | 'voice',
+    path: string,
+  ): Promise<string> {
+    const target = this.latestTargets.get(sessionKey);
+    if (target === undefined) {
+      throw new Error(`line: no reply target recorded for session ${sessionKey}`);
+    }
+    let data: Buffer = await readFile(path);
+    const name = basename(path);
+    let effectiveKind: 'image' | 'file' | 'voice' = kind;
+    let note = '';
+
+    if (kind === 'voice') {
+      // The gateway only accepts AMR-NB for a voice bubble; anything else is
+      // transcoded. A missing/unusable ffmpeg degrades to a file message
+      // instead of failing the turn — product must work without extra deps.
+      try {
+        data = await this.convertVoiceToAmr(data);
+      } catch (error) {
+        if (error instanceof FfmpegUnavailableError || error instanceof AudioConversionError) {
+          effectiveKind = 'file';
+          note = `（未转成语音：${error.message}）`;
+        } else {
+          throw error;
+        }
+      }
+    }
+
+    const isVideo = effectiveKind === 'file' && /\.(mp4|mov|m4v)$/i.test(name);
+    const mediaType =
+      effectiveKind === 'image'
+        ? UPLOAD_MEDIA_TYPE.image
+        : isVideo
+          ? UPLOAD_MEDIA_TYPE.video
+          : UPLOAD_MEDIA_TYPE.file;
+    const ref = await this.client.uploadMedia({
+      toUserId: target.peerUserId,
+      data,
+      mediaType,
+      cdnBaseUrl: this.options.cdnBaseUrl ?? DEFAULT_CDN_BASE_URL,
+    });
+    const media = {
+      encrypt_query_param: ref.downloadParam,
+      // The gateway wants base64 of the 32-char hex form, not the raw bytes.
+      aes_key: Buffer.from(ref.aesKey.toString('hex'), 'latin1').toString('base64'),
+      encrypt_type: 1,
+    };
+    const item =
+      effectiveKind === 'image'
+        ? { type: ITEM_TYPE_IMAGE, image_item: { media, mid_size: ref.cipherSize } }
+        : effectiveKind === 'voice'
+          ? // encode_type 0 = AMR (1 would be SILK).
+            { type: ITEM_TYPE_VOICE, voice_item: { media, encode_type: 0 } }
+          : isVideo
+            ? { type: ITEM_TYPE_VIDEO, video_item: { media, video_size: ref.cipherSize } }
+            : { type: ITEM_TYPE_FILE, file_item: { media, file_name: name, len: String(ref.rawSize) } };
+    await this.client.sendMediaItem(
+      target.peerUserId,
+      target.contextToken,
+      this.client.newClientId(),
+      item,
+    );
+    return note;
+  }
+
+  /** Indirection so tests can exercise the ffmpeg-missing fallback. */
+  protected async convertVoiceToAmr(data: Buffer): Promise<Buffer> {
+    return convertToAmr(data);
+  }
+
   async replyText(context: WeixinDispatchContext, content: string): Promise<void> {
     let token = context.contextToken.trim();
     if (token === '') token = this.contextTokens.get(context.peerUserId) ?? '';

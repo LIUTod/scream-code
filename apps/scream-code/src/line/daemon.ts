@@ -21,6 +21,7 @@ import {
   assertSinglePlatformConfig,
   getLinePidFile,
   loadLineConfig,
+  resolveCustomCommands,
   resolveFeishuOptions,
   resolveWeixinOptions,
   type FeishuPlatformConfig,
@@ -82,6 +83,7 @@ export async function runLineDaemon(): Promise<void> {
     permissionMode: lineConfig.permissionMode,
     workDir: lineConfig.workDir,
     platform: lineConfig.feishu !== undefined ? 'feishu' : 'weixin',
+    commands: resolveCustomCommands(lineConfig.commands),
   });
 
   const handles: PlatformHandle[] = [];
@@ -181,7 +183,16 @@ async function startFeishu(cfg: FeishuPlatformConfig, driver: LineSessionDriver)
   const client = new FeishuClient(options);
   const platform = new FeishuPlatform(client, options, async (message) => {
     try {
-      const outcome = await driver.submit({ sessionKey: message.sessionKey, text: message.text });
+      // Outbound media from the model is routed back through this chat.
+      driver.setMediaSender(message.sessionKey, (kind, path) =>
+        platform.sendMedia(message.sessionKey, kind, path),
+      );
+      const outcome = await driver.submit({
+        sessionKey: message.sessionKey,
+        text: message.text,
+        images: message.images,
+        files: message.files,
+      });
       const outbound = buildReplyContent(truncateForLine(outcome.text));
       await client.reply(message.context.messageId, outbound.msgType, outbound.body);
     } catch (error) {
@@ -211,6 +222,7 @@ async function startFeishu(cfg: FeishuPlatformConfig, driver: LineSessionDriver)
   return {
     name: 'feishu',
     close: async () => {
+      platform.stop();
       await client.close();
     },
   };
@@ -232,7 +244,15 @@ async function startWeixin(cfg: WeixinPlatformConfig, driver: LineSessionDriver)
   const platform = new WeixinPlatform(options, client, async (message) => {
     const stopTyping = platform.startTyping(message.context);
     try {
-      const outcome = await driver.submit({ sessionKey: message.sessionKey, text: message.text });
+      driver.setMediaSender(message.sessionKey, (kind, path) =>
+        platform.sendMedia(message.sessionKey, kind, path),
+      );
+      const outcome = await driver.submit({
+        sessionKey: message.sessionKey,
+        text: message.text,
+        images: message.images,
+        files: message.files,
+      });
       await platform.replyText(message.context, outcome.text);
     } catch (error) {
       log.error('line: weixin reply failed', { messageId: message.context.messageId, error: String(error) });
@@ -302,6 +322,9 @@ function scheduleGroupFilterSupervisor(client: FeishuClient): void {
 }
 
 async function gracefulShutdown(handles: PlatformHandle[], driver: LineSessionDriver): Promise<void> {
+  // Let the running turn finish and reply before the transports go away; the
+  // grace window keeps a stuck turn from blocking the exit forever.
+  await driver.waitIdle(SHUTDOWN_GRACE_MS).catch(() => {});
   for (const handle of handles) {
     try {
       await handle.close();
