@@ -52,6 +52,21 @@ describe('markdown theme colours', () => {
         expect(out).not.toContain(sgr(colors.mdQuote));
       });
 
+      it('keeps headings amber even though the renderer bolds them first', () => {
+        // pi-tui calls `heading(bold(text))`; a coloured `bold` must not leak
+        // into the heading, which is what made every heading violet.
+        const out = theme().heading(theme().bold('构建流程'));
+        expect(out).toContain(sgr(colors.mdHeading));
+        expect(out).not.toContain(sgr(colors.mdBold));
+        expect(out).toContain('\u001B[1m');
+      });
+
+      it('keeps table headers weight-only', () => {
+        const out = theme().tableHeader?.('命令') ?? '';
+        expect(out).toContain('\u001B[1m');
+        expect(out).not.toContain(sgr(colors.mdBold));
+      });
+
       it('renders block quotes in mdQuote, border included', () => {
         expect(theme().quote('旁注')).toContain(sgr(colors.mdQuote));
         expect(theme().quoteBorder('│')).toContain(sgr(colors.mdQuote));

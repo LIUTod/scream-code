@@ -89,12 +89,19 @@ function createMarkdownCodeHighlightTheme(colors: ColorPalette): Theme {
 
 export function createMarkdownTheme(colors: ColorPalette): MarkdownTheme {
   const stripHash = (text: string): string => text.replace(HEADING_HASH_PREFIX, '$1');
+  // pi-tui renders a heading as `heading(bold(text))`. Since `bold` now carries
+  // the emphasis colour, the inner span would repaint the whole heading — every
+  // heading in a reply would come out violet instead of amber. The heading owns
+  // its hue, so whatever styling it is handed is dropped first. (Inline code
+  // inside a heading loses its green for the same reason; a heading reads as one
+  // unit and the structure matters more than the nested accent.)
+  const stripSgr = (text: string): string => text.replaceAll(/\u001B\[[0-9;]*m/g, '');
   const muted = chalk.hex(colors.textMuted);
   const border = chalk.hex(colors.border);
   const codeTheme = createMarkdownCodeHighlightTheme(colors);
   return {
     // Signature heading color — gives long replies a visible structure.
-    heading: (text) => chalk.bold.hex(colors.mdHeading)(stripHash(text)),
+    heading: (text) => chalk.bold.hex(colors.mdHeading)(stripSgr(stripHash(text))),
     link: (text) => chalk.hex(colors.mdLink)(text),
     linkUrl: (text) => muted(text),
     // Inline code is the brand accent itself; the palette keeps it the only green.

@@ -142,11 +142,11 @@ export const darkColors: ColorPalette = {
   mdCodeBlock: dark.skyBlue,
   mdCodeBlockBorder: '#5C6370',
   mdCodeBlockBg: '#16191f',
-  // Dark mode leads with pink for emphasis and violet for asides; the light
-  // palette swaps the two (see lightColors) so each mode keeps the same
-  // "emphasis is the heavier of the pair" reading.
-  mdQuote: '#B48CD8',
-  mdBold: '#FF6B9D',
+  // Same two hues as the light palette, tuned for a dark surface: emphasis is
+  // violet (#C9A0FF, 7.9:1) and asides are pink (pink400, 6.2:1). Only the
+  // brightness differs between modes — the meaning never does.
+  mdQuote: dark.pink400,
+  mdBold: '#C9A0FF',
   mdHeading: '#FFC35C',
 
   // Surface
@@ -201,9 +201,9 @@ export const lightColors: ColorPalette = {
   mdCodeBlock: light.blue,
   mdCodeBlockBorder: '#848484',
   mdCodeBlockBg: '#f7f9fb',
-  // The swap: on white, emphasis takes the deep violet (#6C2B8C, 8.9:1) and the
-  // aside takes the deep pink (#C2185B, 5.9:1) — same pair as dark mode, roles
-  // reversed, so the emphasis is the darker of the two here.
+  // On white the emphasis keeps the deep violet (#6C2B8C, 8.9:1) and the aside
+  // takes the deep pink (#C2185B, 5.9:1): emphasis stays the darker/heavier of
+  // the pair, and violet means emphasis in both palettes.
   mdQuote: '#C2185B',
   mdBold: '#6C2B8C',
   mdHeading: '#8F6400',
