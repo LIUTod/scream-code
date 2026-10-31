@@ -21,6 +21,20 @@ const promptContext = {
 } as const;
 
 describe('default agent profiles', () => {
+  it('opens every agent with the capability-first rule', () => {
+    const rule = 'Take stock of what already exists before you start';
+    const main = DEFAULT_AGENT_PROFILES['agent']?.systemPrompt(promptContext) ?? '';
+    expect(main).toContain(rule);
+    // It has to sit ahead of the workflow sections, not buried in one.
+    expect(main.indexOf(rule)).toBeLessThan(main.indexOf('# Do It Yourself or Delegate'));
+
+    // Specialists get the same rule: it lives outside the main-only block, so a
+    // subagent also starts from existing capability instead of building anew.
+    const coder = DEFAULT_AGENT_PROFILES['agent']?.subagents?.['coder'];
+    expect(coder).toBeDefined();
+    expect(coder?.systemPrompt(promptContext)).toContain(rule);
+  });
+
   it('loads the bundled default system prompt from embedded sources', () => {
     const prompt = DEFAULT_AGENT_PROFILES['agent']?.systemPrompt(promptContext);
 

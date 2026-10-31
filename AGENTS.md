@@ -104,6 +104,7 @@ Rules:
   ```
   Do not inline multi-line prompts as template literals.
 - UI copy, option labels, help text, and dialog titles should stay next to the component or command that uses them. Do not centralize them into a global "copy constants" module.
+- `system.md` opens with the **capability-first rule** (right after the primary-goal paragraph), unconditionally: take stock of what already exists — the product surface this prompt describes, tools, skills, subagents, memory, knowledge, session facilities — and start from whatever covers the task; add or change only the part nothing covers. It sits **outside** the `{% if IS_MAIN %}` block on purpose, so specialists inherit it too, and it points at the existing sections (`Product Documentation`, `Product Command Index`, `Suggesting Capabilities`, `Skills`, `Self Assets`) instead of restating them. `test/profile/default-agent-profiles.test.ts` locks both the wording and the main/specialist reach.
 
 ### Logging
 
