@@ -17,6 +17,14 @@
  *     coalesce yesterday's already-fired 09:00 into today's tick. A
  *     value greater than the current wall clock is treated as corrupt
  *     and the scheduler falls back to `createdAt` for that task.
+ *   - `silent` — suppress the "task fired" notice on the delivery side; the
+ *     result still goes out. A five-minute task would otherwise announce
+ *     itself every five minutes.
+ *   - `mute` — suppress *everything*: notice and result. For maintenance
+ *     runs whose value is the side effect, not the transcript.
+ *   - `lastError` — outcome of the most recent delivery, so a list command can
+ *     answer "did it work?" without a log grep. Cleared by the next clean run;
+ *     `lastFiredAt` already answers "when did it last run?".
  */
 export interface CronTask {
   readonly id: string;
@@ -25,4 +33,7 @@ export interface CronTask {
   readonly createdAt: number;
   readonly recurring?: boolean;
   readonly lastFiredAt?: number;
+  readonly silent?: boolean;
+  readonly mute?: boolean;
+  readonly lastError?: string | null;
 }

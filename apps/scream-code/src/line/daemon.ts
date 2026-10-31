@@ -33,21 +33,41 @@ import { FeishuPlatform } from './feishu/platform';
 import { LineSessionDriver } from './session-driver';
 import { WeixinClient, WeixinApiError, validateWeixinToken } from './weixin/client';
 import { WeixinPlatform } from './weixin/platform';
+import { queuedNotice } from './notices';
+import type { ProactiveDelivery } from './proactive';
 
 const GROUP_FILTER_RETRY_INTERVAL_MS = 5 * 60 * 1000;
-const SHUTDOWN_GRACE_MS = 10_000;
+/**
+ * How long a shutdown waits for the in-flight turn to finish before forcing an
+ * exit. Ten seconds used to be enough in theory but cut real turns mid-tool, so
+ * the window matches a slow tool call; the wait is announced on stderr.
+ */
+const SHUTDOWN_GRACE_MS = 60_000;
 
 interface PlatformHandle {
   name: 'feishu' | 'weixin';
+  /** Unsolicited send, for scheduled tasks that have no inbound message. */
+  sendProactive: (sessionKey: string, text: string) => Promise<ProactiveDelivery>;
+  /** Upload + send an image/file; target resolved from the platform's cache. */
+  sendMedia: (
+    sessionKey: string,
+    kind: 'image' | 'file' | 'voice',
+    path: string,
+  ) => Promise<string>;
   close: () => Promise<void>;
 }
 
+/** `daemon.log` is read long after the fact, so every line carries a stamp. */
+function stamp(): string {
+  return new Date().toISOString();
+}
+
 function out(message: string): void {
-  process.stdout.write(`${message}\n`);
+  process.stdout.write(`${stamp()} ${message}\n`);
 }
 
 function err(message: string): void {
-  process.stderr.write(`${message}\n`);
+  process.stderr.write(`${stamp()} ${message}\n`);
 }
 
 /** Run the daemon in the foreground; resolves on graceful shutdown. */
@@ -79,6 +99,13 @@ export async function runLineDaemon(): Promise<void> {
     return;
   }
 
+  const resolvedWorkDir = lineConfig.workDir ?? process.cwd();
+  if (lineConfig.workDir === undefined) {
+    err(`警告（line）：配置未设置 workDir，本次以启动目录作为工作目录：${resolvedWorkDir}（建议在 /line 向导里固定它）`);
+  } else {
+    out(`工作目录：${resolvedWorkDir}`);
+  }
+
   const driver = new LineSessionDriver({
     permissionMode: lineConfig.permissionMode,
     workDir: lineConfig.workDir,
@@ -94,6 +121,7 @@ export async function runLineDaemon(): Promise<void> {
     if (shuttingDown) return;
     shuttingDown = true;
     log.info('line: shutting down', { signal });
+    err(`正在等待当前回合结束（最多 ${SHUTDOWN_GRACE_MS / 1000}s），收到再次信号将立即退出`);
     const forceTimer = setTimeout(() => {
       err(`line: shutdown exceeded ${SHUTDOWN_GRACE_MS / 1000}s, forcing exit`);
       process.exit(1);
@@ -135,6 +163,11 @@ export async function runLineDaemon(): Promise<void> {
     process.exit(1);
   }
 
+  // Host capability probe: voice is the one path that depends on the local
+  // ffmpeg build, and the answer belongs in `/status` rather than in a failed
+  // send.
+  await driver.probeVoice();
+
   if (lineConfig.feishu) {
     try {
       handles.push(await startFeishu(lineConfig.feishu, driver));
@@ -149,6 +182,31 @@ export async function runLineDaemon(): Promise<void> {
       failures.push(`微信：${error instanceof Error ? error.message : String(error)}`);
     }
   }
+  // Scheduled tasks fire inside a session, not from an inbound message, so the
+  // driver needs its own way back to the chat. Route by session-key prefix —
+  // the keys are hashed, so the platform cannot be inferred from the chat id.
+  const proactivePlatforms = new Map(handles.map((handle) => [handle.name, handle]));
+  driver.setProactiveSender(async (sessionKey, text) => {
+    const name = sessionKey.startsWith('line-feishu-')
+      ? 'feishu'
+      : sessionKey.startsWith('line-weixin-')
+        ? 'weixin'
+        : undefined;
+    const platform = name === undefined ? undefined : proactivePlatforms.get(name);
+    if (platform === undefined) return 'no-target';
+    return platform.sendProactive(sessionKey, text);
+  });
+  driver.setMediaSenderResolver((sessionKey) => {
+    const name = sessionKey.startsWith('line-feishu-')
+      ? 'feishu'
+      : sessionKey.startsWith('line-weixin-')
+        ? 'weixin'
+        : undefined;
+    const platform = name === undefined ? undefined : proactivePlatforms.get(name);
+    if (platform === undefined) return undefined;
+    return (kind, path) => platform.sendMedia(sessionKey, kind, path);
+  });
+
   for (const failure of failures) {
     err(`平台启动失败：${failure}`);
   }
@@ -192,13 +250,27 @@ async function startFeishu(cfg: FeishuPlatformConfig, driver: LineSessionDriver)
         text: message.text,
         images: message.images,
         files: message.files,
+        onQueued: (position) => {
+          // A silent queue reads as a dead bot; one line buys the turn time.
+          const notice = buildReplyContent(queuedNotice(position));
+          void client
+            .reply(message.context.messageId, notice.msgType, notice.body)
+            .catch((error: unknown) => {
+              log.warn('line: feishu queued notice failed', { error: String(error) });
+            });
+        },
       });
+      if (outcome.silent === true) return;
       const outbound = buildReplyContent(truncateForLine(outcome.text));
       await client.reply(message.context.messageId, outbound.msgType, outbound.body);
     } catch (error) {
       log.error('line: feishu reply failed', { messageId: message.context.messageId, error: String(error) });
+    } finally {
+      // Must run on every path — including the `/stop` one that returns above —
+      // or the "received" reaction stays on the message and its id stays in
+      // `receipts` for the lifetime of the daemon.
+      await platform.finishMessage(message.context.messageId).catch(() => {});
     }
-    await platform.finishMessage(message.context.messageId).catch(() => {});
   });
 
   await client.connect(async (event) => {
@@ -221,6 +293,8 @@ async function startFeishu(cfg: FeishuPlatformConfig, driver: LineSessionDriver)
   log.info('line: feishu platform started', { appId: options.appId, domain: options.domain });
   return {
     name: 'feishu',
+    sendProactive: (sessionKey, text) => platform.sendProactive(sessionKey, text),
+    sendMedia: (sessionKey, kind, path) => platform.sendMedia(sessionKey, kind, path),
     close: async () => {
       platform.stop();
       await client.close();
@@ -252,7 +326,13 @@ async function startWeixin(cfg: WeixinPlatformConfig, driver: LineSessionDriver)
         text: message.text,
         images: message.images,
         files: message.files,
+        onQueued: (position) => {
+          void platform.replyText(message.context, queuedNotice(position)).catch((error: unknown) => {
+            log.warn('line: weixin queued notice failed', { error: String(error) });
+          });
+        },
       });
+      if (outcome.silent === true) return;
       await platform.replyText(message.context, outcome.text);
     } catch (error) {
       log.error('line: weixin reply failed', { messageId: message.context.messageId, error: String(error) });
@@ -266,6 +346,8 @@ async function startWeixin(cfg: WeixinPlatformConfig, driver: LineSessionDriver)
   log.info('line: weixin platform started', { baseUrl: options.baseUrl });
   return {
     name: 'weixin',
+    sendProactive: (sessionKey, text) => platform.sendProactive(sessionKey, text),
+    sendMedia: (sessionKey, kind, path) => platform.sendMedia(sessionKey, kind, path),
     close: async () => {
       await platform.stop();
     },
@@ -325,6 +407,13 @@ async function gracefulShutdown(handles: PlatformHandle[], driver: LineSessionDr
   // Let the running turn finish and reply before the transports go away; the
   // grace window keeps a stuck turn from blocking the exit forever.
   await driver.waitIdle(SHUTDOWN_GRACE_MS).catch(() => {});
+  const abandoned = driver.pendingTurnCount();
+  if (abandoned > 0) {
+    // The window expired with work still queued: those chats will never get a
+    // reply. Say so — a silent exit reads as "the bot died".
+    log.warn('line: shutdown timed out with pending turns', { pending: abandoned });
+    err(`警告：仍有 ${abandoned} 个回合未完成，退出后这些消息不会有回复`);
+  }
   for (const handle of handles) {
     try {
       await handle.close();

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { LineTurnCollector } from '#/line/session-driver';
+import { LineTurnCollector } from '#/line/turn-collector';
 
 function baseEvent(fields: Record<string, unknown>): Record<string, unknown> {
   return { sessionId: 's1', agentId: 'main', turnId: 1, ...fields };

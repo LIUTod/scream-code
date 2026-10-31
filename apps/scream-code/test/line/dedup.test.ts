@@ -6,7 +6,7 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-describe('MessageDedup (port of cc-connect core/dedup.go)', () => {
+describe('MessageDedup', () => {
   it('drops the same message id within the TTL window', () => {
     const dedup = new MessageDedup();
     expect(dedup.isDuplicate('om_1')).toBe(false);

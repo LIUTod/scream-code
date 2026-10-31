@@ -254,3 +254,63 @@ describe('expandPrompt', () => {
     expect(expandPrompt('生成周报', '')).toBe('生成周报');
   });
 });
+
+describe('/stop', () => {
+  it('aborts the running turn even while the chat is busy', async () => {
+    const stopTurn = vi.fn(() => true);
+    const { deps: d } = deps({ isBusy: () => true, stopTurn });
+
+    expect(await runLineCommand('/stop', d)).toEqual({ handled: true, text: '已停止当前任务。' });
+    expect(stopTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it('answers plainly when nothing is running', async () => {
+    const { deps: d } = deps({ stopTurn: () => false });
+
+    expect(await runLineCommand('/stop', d)).toEqual({
+      handled: true,
+      text: '当前没有正在运行的任务。',
+    });
+  });
+
+  it('points a blocked command at /stop', async () => {
+    const { deps: d } = deps({ isBusy: () => true });
+
+    expect(textOf(await runLineCommand('/compact', d))).toContain('/stop');
+  });
+
+  it('lists /stop in help', async () => {
+    const { deps: d } = deps();
+
+    expect(textOf(await runLineCommand('/help', d))).toContain('/stop');
+  });
+
+  it('renders the startup voice probe in /status', async () => {
+    const { deps: d } = deps({
+      voiceStatus: '语音：不可用（ffmpeg 缺少 AMR-NB 编码器，将改发文件）',
+    });
+
+    expect(textOf(await runLineCommand('/status', d))).toContain('AMR-NB');
+  });
+});
+
+describe('/cancel', () => {
+  it('reports a stop plus a fresh session', async () => {
+    const { deps: d } = deps({ cancelSession: async () => true });
+    expect(await runLineCommand('/cancel', d)).toEqual({
+      handled: true,
+      text: '已停止当前任务并开始新会话。',
+    });
+  });
+
+  it('reports a plain reset when nothing was running', async () => {
+    const { deps: d } = deps({ cancelSession: async () => false });
+    expect(await runLineCommand('/cancel', d)).toEqual({ handled: true, text: '已开始新会话。' });
+  });
+
+  it('is listed in help and is not busy-gated', async () => {
+    const { deps: d } = deps({ isBusy: () => true, cancelSession: async () => true });
+    expect(textOf(await runLineCommand('/help', d))).toContain('/cancel');
+    expect(textOf(await runLineCommand('/cancel', d))).toContain('新会话');
+  });
+});

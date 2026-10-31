@@ -27,7 +27,8 @@ import {
   type FeishuEventMessage,
   type FeishuQuotedMessage,
 } from './client';
-import { buildTextJSON } from './format';
+import { buildReplyContent, buildTextJSON, truncateForLine } from './format';
+import type { ProactiveDelivery } from '../proactive';
 import { MessageDedup } from '../dedup';
 import type { FeishuRuntimeOptions } from '../config';
 import { basename } from 'node:path';
@@ -360,6 +361,29 @@ export class FeishuPlatform {
     await this.client.sendToChat(chatId, 'file', JSON.stringify({ file_key: fileKey }));
     // Voice bubbles are a WeChat-only shape here; Lark gets the file instead.
     return kind === 'voice' ? '（飞书按文件发送，语音气泡仅微信支持）' : '';
+  }
+
+  /**
+   * Sends text to the chat that owns this session with no inbound message to
+   * reply to — the scheduled-task path. Lark only needs the chat id, which is
+   * cached per session on every inbound message, so a fire at 3am still lands.
+   */
+  async sendProactive(sessionKey: string, text: string): Promise<ProactiveDelivery> {
+    const body = text.trim();
+    if (body === '') return 'no-target';
+    const chatId = this.chatBySession.get(sessionKey);
+    if (chatId === undefined) {
+      log.warn('line-feishu: no chat recorded for proactive send', { sessionKey });
+      return 'no-target';
+    }
+    try {
+      const outbound = buildReplyContent(truncateForLine(body));
+      await this.client.sendToChat(chatId, outbound.msgType, outbound.body);
+      return 'sent';
+    } catch (error) {
+      log.warn('line-feishu: proactive send failed', { sessionKey, error: String(error) });
+      return 'failed';
+    }
   }
 
   /** Cancels pending batch timers (daemon shutdown). */

@@ -50,6 +50,10 @@ export interface CronJobOrigin {
   readonly coalescedCount: number;
   /** True for recurring tasks past the 7-day age threshold. */
   readonly stale: boolean;
+  /** Suppress the "fired" notice on delivery; the result still goes out. */
+  readonly silent?: boolean;
+  /** Suppress notice and result alike. */
+  readonly mute?: boolean;
 }
 
 export interface CronMissedOrigin {

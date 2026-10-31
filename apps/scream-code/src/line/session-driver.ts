@@ -19,7 +19,7 @@ import {
   isOrphanedToolCallError,
   log,
   resolveScreamHome,
-  type Event,
+  type Event as SdkEvent,
   type PromptPart,
   type Session,
   type ToolCallRequest,
@@ -32,78 +32,26 @@ import type { LineCustomCommand } from './config';
 import type { LineImageAttachment } from './media';
 import { isLineCommand, runLineCommand, type LineCommandResult } from './command-router';
 import { createScreamCodeHostIdentity } from '#/cli/version';
+import { describeVoiceSupport, probeVoiceSupport, type VoiceSupport } from './voice-support';
+import { buildCronFailureNotice, buildCronReminderChip } from '../tui/utils/cron-chip';
+import type { ProactiveDelivery } from './proactive';
+import { CronRelay } from './cron-relay';
+import { LineTurnCollector } from './turn-collector';
 
 const MAX_QUEUE_PER_SESSION = 3;
 const ORPHAN_RESET_NOTICE = '会话已自动重置，请重新发送你的消息。';
-
-/**
- * Collects the final content output of one turn from the session event
- * stream (main agent only).
- *
- * Remote-channel reply policy: thinking deltas are a separate event type and
- * never accumulate; intermediate assistant narration BEFORE a tool call is
- * discarded — the IM reply carries only the content that follows the last
- * tool call, i.e. the final answer (the reference parity: it forwards progress
- * for display, but the "reply" is the completion text).
- */
-export class LineTurnCollector {
-  text = '';
-  failure: { code: string; message: string } | undefined;
-  ended: 'completed' | 'cancelled' | 'failed' | undefined;
-  stepBudgetExhausted = false;
-  private activeTurnId: number | undefined;
-  private activeAgentId: string | undefined;
-  private resolveTurn: () => void;
-
-  constructor(onTurnSettled: () => void) {
-    this.resolveTurn = onTurnSettled;
-  }
-
-  handleEvent(event: Event): void {
-    if (event.type === 'error') {
-      if (event.agentId !== 'main') return;
-      this.failure = { code: event.code, message: event.message };
-      this.resolveTurn();
-      return;
-    }
-    if (event.type === 'turn.started') {
-      if (this.activeTurnId !== undefined) return;
-      this.activeTurnId = event.turnId;
-      this.activeAgentId = event.agentId;
-      return;
-    }
-    if (
-      this.activeTurnId === undefined ||
-      this.activeAgentId === undefined ||
-      !('turnId' in event) ||
-      event.turnId !== this.activeTurnId ||
-      event.agentId !== this.activeAgentId
-    ) {
-      return;
-    }
-    if (event.type === 'tool.call.started' || event.type === 'tool.call.delta') {
-      // Drop narration emitted before the tool call.
-      this.text = '';
-      return;
-    }
-    if (event.type === 'assistant.delta') {
-      this.text += event.delta;
-      return;
-    }
-    if (event.type === 'turn.ended') {
-      this.ended = event.reason;
-      if (event.reason === 'completed' && event.stepBudgetExhausted === true) {
-        this.stepBudgetExhausted = true;
-      }
-      this.resolveTurn();
-    }
-  }
-}
 
 export type { LineImageAttachment } from './media';
 
 /** A turn that never settles is cancelled after this long (product default). */
 const TURN_TIMEOUT_MS = 15 * 60 * 1000;
+/**
+ * `/stop` interrupts in-process. A tool that ignores the abort would otherwise
+ * keep the chat busy until the 15-minute cap, so after this window the live
+ * session is closed: history stays on disk and the next message resumes the same
+ * session id — the same end result as tearing down the agent process.
+ */
+const STOP_ESCALATION_MS = 10_000;
 const TURN_TIMEOUT_TEXT = '本轮执行超时（15 分钟），已取消。请重试或拆分任务。';
 
 /** `exec`-type custom commands are bounded like any other IM command. */
@@ -135,11 +83,19 @@ export interface LineTurnJob {
   readonly images?: readonly LineImageAttachment[];
   /** Absolute paths of inbound files already saved to disk. */
   readonly files?: readonly string[];
+  /**
+   * Called when this message has to wait behind a running turn. Without it the
+   * chat hears nothing for minutes, which reads as "the bot is dead"; the
+   * daemon sends a one-line receipt instead.
+   */
+  readonly onQueued?: (position: number) => void;
 }
 
 export interface TurnOutcome {
   ok: boolean;
   text: string;
+  /** No reply should be sent: the chat was already answered (e.g. `/stop`). */
+  silent?: boolean;
 }
 
 export interface LineSessionDriverOptions {
@@ -152,6 +108,12 @@ export interface LineSessionDriverOptions {
   model?: string;
   /** Channel platform — recorded in session metadata for the picker badge. */
   platform: 'feishu' | 'weixin';
+  /**
+   * Called when this message has to wait behind a running turn. Without it the
+   * chat hears nothing for minutes, which reads as "the bot is dead"; the
+   * daemon sends a one-line "queued" receipt instead.
+   */
+  onQueued?: (position: number) => void;
 }
 
 interface SessionQueue {
@@ -171,12 +133,36 @@ export class LineSessionDriver {
   private readonly promptedSessions = new WeakSet<Session>();
   /** sessionKey → platform sender for outbound media (registered by the daemon). */
   private readonly mediaSenders = new Map<string, LineMediaSender>();
+  /** Fallback sender resolved from the platform's own target cache, so a
+   *  scheduled-task turn can still send media after a reset or restart. */
+  private mediaSenderResolver: ((sessionKey: string) => LineMediaSender | undefined) | undefined;
   /** Session id → sessionKey, so a host tool call can find its channel. */
   private readonly sessionKeyBySessionId = new Map<string, string>();
   /** Chats currently executing `/new`; a turn must not start meanwhile. */
   private readonly resetting = new Set<string>();
-  /** Deadline timer for the running turn (see `turnDeadline`). */
-  private turnTimer: ReturnType<typeof setTimeout> | undefined;
+  /** The turn executing right now per chat, so `/stop` has something to abort.
+   *  Chats run in parallel, so this is keyed by session — a single slot would
+   *  let one chat's turn hide another's from `/stop`. */
+  private readonly activeTurns = new Map<string, { sessionKey: string; stop: () => void }>();
+  /** Bumped by `/stop`: turns queued before the bump are dropped instead of
+   *  running. "Stop" has to mean the messages I just sent, not only the one
+   *  that happens to be executing. */
+  private stopEpoch = new Map<string, number>();
+  /** Escalation timers for a `/stop` whose turn never settles, per chat. */
+  private readonly stopEscalations = new Map<string, ReturnType<typeof setTimeout>>();
+  /** Injected by the daemon: sends to a chat with no inbound message to reply
+   *  to. Undefined when no platform supports proactive delivery. */
+  private proactiveSender:
+    | ((sessionKey: string, text: string) => Promise<ProactiveDelivery>)
+    | undefined;
+  /** One relay + event subscription per live session, so scheduled tasks can
+   *  reach the chat. Replaced on session reset, dropped on close. */
+  private cronForwarders = new Map<
+    string,
+    { unsubscribe: () => void; relay: CronRelay; isCronTurnRunning: () => boolean }
+  >();
+  /** Cached ffmpeg capability answer (see `probeVoice`). */
+  private voiceSupport: VoiceSupport | null = null;
   /** In-flight creations, so a command and a turn cannot create two sessions. */
   private readonly sessionCreations = new Map<string, Promise<Session>>();
   /** Per-chat lifecycle mutex: session creation must never interleave a reset. */
@@ -197,6 +183,110 @@ export class LineSessionDriver {
     const config = await harness.getConfig();
     this.defaultModel = config.defaultModel ?? '';
     this.harness = harness;
+  }
+
+  /**
+   * Probes the host for an AMR-NB encoder once. Called by the daemon at startup
+   * so `/status` can warn before the first voice reply falls back to a file.
+   * Never throws.
+   */
+  async probeVoice(): Promise<void> {
+    try {
+      this.voiceSupport = await probeVoiceSupport();
+      const description = describeVoiceSupport(this.voiceSupport);
+      if (description !== null) log.info('line: voice capability', { support: this.voiceSupport });
+    } catch (error) {
+      this.voiceSupport = 'unknown';
+      log.warn('line: voice probe failed', { error: String(error) });
+    }
+  }
+
+  /**
+   * `/stop`: aborts the turn that is running now. The cancel itself happens
+   * inside `runTurn` so the queue unwinds in one place; this only requests it.
+   */
+  stopActiveTurn(sessionKey: string): boolean {
+    const running = this.activeTurns.get(sessionKey);
+    const pending = this.queues.get(sessionKey)?.pending ?? 0;
+    const forwarder = this.cronForwarders.get(sessionKey);
+    const forwarding = forwarder?.relay.isCollecting() ?? false;
+    const cronTurn = forwarder?.isCronTurnRunning() ?? false;
+    if (running === undefined && pending === 0 && !forwarding && !cronTurn) return false;
+    // Queued turns captured this epoch are dropped when their chain reaches
+    // them; the running one is interrupted through its stop promise.
+    this.stopEpoch.set(sessionKey, (this.stopEpoch.get(sessionKey) ?? 0) + 1);
+    if (running !== undefined) {
+      running.stop();
+      this.armStopEscalation(sessionKey);
+    }
+    if (forwarding || cronTurn) {
+      // A scheduled task's turn is not in the queue, so it needs its own stop:
+      // discard the relay first, otherwise the cancelled turn would be reported
+      // as "finished with no output".
+      forwarder?.relay.dispose();
+      void this.sessions.get(sessionKey)?.cancel().catch(() => {});
+      log.info('line: dropped a scheduled-task turn', { sessionKey });
+    }
+    log.info('line: stop requested', { sessionKey, running: running !== undefined, pending });
+    return true;
+  }
+
+  /**
+   * `/cancel`: stop whatever runs and start a clean session. Falls back to
+   * closing the live session when a hung tool refuses to settle, then resets.
+   */
+  async cancelSession(sessionKey: string): Promise<boolean> {
+    const stopped = this.stopActiveTurn(sessionKey);
+    const timeout = new Promise<'timeout'>((resolve) => {
+      const timer = setTimeout(() => {
+        resolve('timeout');
+      }, STOP_ESCALATION_MS);
+      timer.unref?.();
+    });
+    const reset = this.resetSession(sessionKey).then(
+      () => 'done' as const,
+      () => 'done' as const,
+    );
+    if ((await Promise.race([reset, timeout])) === 'timeout') {
+      log.warn('line: cancel could not reset in time, closing live session', { sessionKey });
+      await this.forceCloseSession(sessionKey);
+      await this.resetSession(sessionKey).catch((error: unknown) => {
+        log.warn('line: cancel reset failed after close', { sessionKey, error: String(error) });
+      });
+    }
+    return stopped;
+  }
+
+  private armStopEscalation(sessionKey: string): void {
+    this.clearStopEscalation(sessionKey);
+    const timer = setTimeout(() => {
+      this.stopEscalations.delete(sessionKey);
+      if (!this.activeTurns.has(sessionKey)) return;
+      log.warn('line: /stop did not settle, closing the live session', { sessionKey });
+      void this.forceCloseSession(sessionKey);
+    }, STOP_ESCALATION_MS);
+    timer.unref?.();
+    this.stopEscalations.set(sessionKey, timer);
+  }
+
+  private clearStopEscalation(sessionKey: string): void {
+    const timer = this.stopEscalations.get(sessionKey);
+    if (timer === undefined) return;
+    clearTimeout(timer);
+    this.stopEscalations.delete(sessionKey);
+  }
+
+  /** Closes the live session without deleting it: the next message resumes. */
+  private async forceCloseSession(sessionKey: string): Promise<void> {
+    this.stopCronForwarder(sessionKey);
+    const session = this.sessions.get(sessionKey);
+    this.sessions.delete(sessionKey);
+    if (session !== undefined) {
+      this.sessionKeyBySessionId.delete(session.id);
+      // Closing the RPC is what unblocks a hung `cancel()`.
+      await session.close().catch(() => {});
+    }
+    this.mediaSenders.delete(sessionKey);
   }
 
   /**
@@ -233,11 +323,28 @@ export class LineSessionDriver {
       log.warn('line: session queue full, replying busy', { sessionKey: effectiveJob.sessionKey });
       return { ok: false, text: '上一条消息还在处理中，队列已满，请稍后再发。' };
     }
+    const epoch = this.stopEpoch.get(effectiveJob.sessionKey) ?? 0;
+    const waitingBehind = queue.pending;
     queue.pending += 1;
     this.queues.set(effectiveJob.sessionKey, queue);
+    if (waitingBehind > 0) {
+      // Fire-and-forget receipt: the chat should know it was heard even though
+      // the turn has not started. A broken notifier must never fail the turn.
+      try {
+        effectiveJob.onQueued?.(waitingBehind);
+      } catch (error) {
+        log.warn('line: queued notice failed', { sessionKey: effectiveJob.sessionKey, error: String(error) });
+      }
+    }
 
     let outcome!: TurnOutcome;
     const next = queue.chain.then(async () => {
+      if ((this.stopEpoch.get(effectiveJob.sessionKey) ?? 0) !== epoch) {
+        // `/stop` arrived while this message waited: drop it silently — the
+        // chat already got the "已停止" receipt.
+        outcome = { ok: false, text: '', silent: true };
+        return;
+      }
       try {
         outcome = await this.runTurn(effectiveJob);
       } catch (error) {
@@ -259,24 +366,37 @@ export class LineSessionDriver {
   /**
    * Resolves after `TURN_TIMEOUT_MS`. Raced against the turn promise so a
    * provider that never emits a settlement event cannot wedge the chat queue.
+   *
+   * The timer belongs to this turn, not to the driver: chats run in parallel,
+   * so a shared field would let the first chat to finish cancel the second
+   * chat's deadline and leave that turn with no way out.
    */
-  private turnDeadline(): Promise<void> {
-    return new Promise<void>((resolve) => {
-      this.turnTimer = setTimeout(resolve, TURN_TIMEOUT_MS);
-      this.turnTimer.unref?.();
+  private turnDeadline(): { promise: Promise<void>; clear: () => void } {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const promise = new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, TURN_TIMEOUT_MS);
+      timer.unref?.();
     });
-  }
-
-  private clearTurnDeadline(): void {
-    if (this.turnTimer !== undefined) {
-      clearTimeout(this.turnTimer);
-      this.turnTimer = undefined;
-    }
+    return {
+      promise,
+      clear: () => {
+        if (timer !== undefined) clearTimeout(timer);
+        timer = undefined;
+      },
+    };
   }
 
   /** Close all sessions and the harness (daemon shutdown). */
   async close(): Promise<void> {
     this.closed = true;
+    for (const timer of this.stopEscalations.values()) clearTimeout(timer);
+    this.stopEscalations.clear();
+    const forwarders = [...this.cronForwarders.values()];
+    this.cronForwarders.clear();
+    for (const forwarder of forwarders) {
+      forwarder.unsubscribe();
+      forwarder.relay.dispose();
+    }
     const sessions = [...this.sessions.values()];
     this.sessions.clear();
     for (const session of sessions) {
@@ -303,12 +423,23 @@ export class LineSessionDriver {
     const turnPromise = new Promise<void>((resolve) => {
       resolveTurn = resolve;
     });
+    let stopRequested = false;
+    let requestStop!: () => void;
+    const stopPromise = new Promise<void>((resolve) => {
+      requestStop = () => {
+        stopRequested = true;
+        resolve();
+      };
+    });
     const collector = new LineTurnCollector(resolveTurn);
 
     const unsubscribe = session.onEvent((event) => {
       collector.handleEvent(event);
     });
 
+    const registration = { sessionKey: job.sessionKey, stop: requestStop };
+    this.activeTurns.set(job.sessionKey, registration);
+    const deadline = this.turnDeadline();
     try {
       session
         .prompt(buildPromptParts(job))
@@ -318,7 +449,13 @@ export class LineSessionDriver {
           // surface the prompt failure below instead of hanging.
           resolveTurn();
         });
-      await Promise.race([turnPromise, this.turnDeadline()]);
+      await Promise.race([turnPromise, deadline.promise, stopPromise]);
+      if (stopRequested) {
+        // `/stop` already replied in the chat; suppress this turn's own reply
+        // so the user does not read the same sentence twice.
+        await session.cancel().catch(() => {});
+        return { ok: false, text: '', silent: true };
+      }
       if (!collector.ended) {
         // The deadline won: cancel the run and report, otherwise the queue
         // slot would stay occupied until the daemon restarts.
@@ -326,8 +463,12 @@ export class LineSessionDriver {
         return { ok: false, text: TURN_TIMEOUT_TEXT };
       }
     } finally {
+      if (this.activeTurns.get(job.sessionKey) === registration) {
+        this.activeTurns.delete(job.sessionKey);
+      }
+      this.clearStopEscalation(job.sessionKey);
       unsubscribe();
-      this.clearTurnDeadline();
+      deadline.clear();
     }
 
     // Orphaned tool calls in history — reset the session so the next message
@@ -366,6 +507,14 @@ export class LineSessionDriver {
    * Waits for in-flight turns to finish (bounded), so a shutdown does not cut a
    * reply mid-flight. Only the per-chat queues are awaited.
    */
+  /** How many turns are queued or running. Read by the shutdown path so a
+   *  timed-out drain is reported instead of looking like a clean exit. */
+  pendingTurnCount(): number {
+    let total = 0;
+    for (const queue of this.queues.values()) total += queue.pending;
+    return total;
+  }
+
   async waitIdle(timeoutMs: number): Promise<void> {
     // Shutdown barrier: no new turn may start while we drain.
     this.closed = true;
@@ -464,6 +613,86 @@ export class LineSessionDriver {
   }
 
   /** Registers the channel's outbound-media sender for one chat. */
+  /** Wired once by the daemon after the platforms are up. */
+  setProactiveSender(
+    sender: (sessionKey: string, text: string) => Promise<ProactiveDelivery>,
+  ): void {
+    this.proactiveSender = sender;
+  }
+
+  /**
+   * Watches one session for `cron.fired`.
+   *
+   * A scheduled task runs inside the session, not through `submit()`, so this
+   * subscription is the only path that carries its output back to the chat.
+   */
+  private attachCronForwarder(sessionKey: string, session: Session): void {
+    this.stopCronForwarder(sessionKey);
+    const relay = new CronRelay({
+      send: (text) => this.proactiveSender?.(sessionKey, text) ?? Promise.resolve('no-target'),
+      // Per chat: another chat's running turn says nothing about this one, and
+      // treating it as busy would drop this chat's scheduled result outright.
+      isBusy: () => this.activeTurns.has(sessionKey),
+    });
+    // The core emits `turn.started` *before* `cron.fired` because `steer()`
+    // launches the turn synchronously. Keep the latest start so the relay can
+    // replay it and actually collect that turn's text.
+    let pendingStart: SdkEvent | undefined;
+    // A cron turn the relay is not collecting — `mute`, or a fire that was
+    // dropped — is still a running turn of this chat: `/stop` must see it, or
+    // it answers "nothing is running" while the task keeps working.
+    let cronTurnId: number | undefined;
+    const unsubscribe = session.onEvent((event) => {
+      if (event.type === 'turn.started') {
+        pendingStart = event;
+        // Only the main agent's turns describe what `/stop` can abort; a
+        // subagent starting mid-task must not clear the owner's turn.
+        if (event.agentId === 'main') {
+          cronTurnId = event.origin.kind === 'cron_job' ? event.turnId : undefined;
+        }
+        relay.onEvent(event);
+        return;
+      }
+      if (event.type === 'turn.ended') {
+        pendingStart = undefined;
+        if (event.turnId === cronTurnId) cronTurnId = undefined;
+        relay.onEvent(event);
+        return;
+      }
+      if (event.type === 'cron.fired') {
+        if (event.agentId !== 'main') return;
+        // `mute`: the task exists for its side effect — say nothing at all.
+        if (event.origin.mute === true) return;
+        relay.onFire(
+          event.origin.silent === true ? null : buildCronReminderChip(event).text,
+          pendingStart,
+          event.origin.silent === true ? undefined : buildCronFailureNotice(event),
+        );
+        return;
+      }
+      relay.onEvent(event);
+    });
+    this.cronForwarders.set(sessionKey, {
+      unsubscribe,
+      relay,
+      isCronTurnRunning: () => cronTurnId !== undefined,
+    });
+  }
+
+  private stopCronForwarder(sessionKey: string): void {
+    const entry = this.cronForwarders.get(sessionKey);
+    if (entry === undefined) return;
+    entry.unsubscribe();
+    entry.relay.dispose();
+    this.cronForwarders.delete(sessionKey);
+  }
+
+  /** Wired once by the daemon; covers sessions whose per-message sender is gone
+   *  (scheduled tasks, after `/stop`, after a restart). */
+  setMediaSenderResolver(resolver: (sessionKey: string) => LineMediaSender | undefined): void {
+    this.mediaSenderResolver = resolver;
+  }
+
   setMediaSender(sessionKey: string, sender: LineMediaSender): void {
     this.mediaSenders.set(sessionKey, sender);
   }
@@ -475,7 +704,16 @@ export class LineSessionDriver {
     if (!this.harness) return { handled: true, text: 'line 守护进程未初始化' };
     return runLineCommand(text, {
       defaultModel: this.defaultModel,
-      isBusy: () => (this.queues.get(sessionKey)?.pending ?? 0) > 0,
+      // A fired scheduled task runs as a turn of this chat too, but outside the
+      // queue; without it a `/new` or `/compact` would tear down or compact the
+      // context under a running task.
+      isBusy: () =>
+        (this.queues.get(sessionKey)?.pending ?? 0) > 0 ||
+        (this.cronForwarders.get(sessionKey)?.relay.isCollecting() ?? false),
+      // Only the turn of *this* chat is interruptible from this chat.
+      stopTurn: () => this.stopActiveTurn(sessionKey),
+      cancelSession: () => this.cancelSession(sessionKey),
+      voiceStatus: describeVoiceSupport(this.voiceSupport),
       getSession: () => this.resolveSession(sessionKey),
       resetSession: () => this.resetSession(sessionKey),
       commands: this.options.commands ?? [],
@@ -539,6 +777,7 @@ export class LineSessionDriver {
     const session = await this.getOrCreateSession(harness, sessionKey, workDir, permission, planMode);
     this.sessions.set(sessionKey, session);
     this.sessionKeyBySessionId.set(session.id, sessionKey);
+    this.attachCronForwarder(sessionKey, session);
     await this.applyChannelPrompt(session);
     return session;
   }
@@ -548,6 +787,8 @@ export class LineSessionDriver {
     // Any message that lands during the reset gets a "try again" reply instead
     // of starting a turn on a session this reset is about to delete.
     this.resetting.add(sessionKey);
+    // The old session is about to be replaced: stop forwarding its fires.
+    this.stopCronForwarder(sessionKey);
     try {
       // Let the running turn finish first: deleting storage underneath it would
       // lose that turn's history.
@@ -625,7 +866,10 @@ export class LineSessionDriver {
     }
     const sessionKey =
       request.sessionId === undefined ? undefined : this.sessionKeyBySessionId.get(request.sessionId);
-    const sender = sessionKey === undefined ? undefined : this.mediaSenders.get(sessionKey);
+    const sender =
+      sessionKey === undefined
+        ? undefined
+        : (this.mediaSenders.get(sessionKey) ?? this.mediaSenderResolver?.(sessionKey));
     if (sender === undefined) {
       return { output: '当前会话没有可用的发送通道（该工具仅在 IM 会话中可用）。', isError: true };
     }

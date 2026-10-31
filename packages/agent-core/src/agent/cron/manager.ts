@@ -237,6 +237,26 @@ export class CronManager {
   }
 
   /**
+   * Watches the turn a fire started and records whether it failed.
+   *
+   * `steer()` returns `null` when the fire was buffered into a turn that is
+   * already running — that turn's outcome belongs to the user's request, not to
+   * this task, so nothing is recorded for it.
+   */
+  private trackRunOutcome(taskId: string, turnId: number | null): void {
+    if (turnId === null) return;
+    const unsubscribe = this.agent.eventBus.subscribe('turn.ended', (event) => {
+      if (event.type !== 'turn.ended' || event.turnId !== turnId) return;
+      unsubscribe();
+      const message = event.error === undefined ? null : event.error.message;
+      const updated = this.store.recordRunError(taskId, message === null ? null : message.slice(0, 200));
+      if (updated === undefined) return;
+      if (this.persistStore === undefined) return;
+      this.persistEnqueue(taskId, () => this.persistStore!.write(taskId, updated));
+    });
+  }
+
+  /**
    * Rehydrate the in-memory store from `<sessionDir>/cron/` after
    * `scream resume`. No-op when persistence is not attached. Idempotent:
    * clears the in-memory map and re-inserts every record on disk.
@@ -400,6 +420,8 @@ export class CronManager {
       recurring: task.recurring !== false,
       coalescedCount: ctx.coalescedCount,
       stale,
+      ...(task.silent === true ? { silent: true } : {}),
+      ...(task.mute === true ? { mute: true } : {}),
     };
     const content: ContentPart[] = [
       {
@@ -407,12 +429,13 @@ export class CronManager {
         text: renderCronFireXml(origin, task.prompt),
       },
     ];
-    void this.agent.turn.steer(content, origin);
+    const turnId = this.agent.turn.steer(content, origin);
     this.agent.emitEvent?.({
       type: 'cron.fired',
       origin,
       prompt: task.prompt,
     });
+    this.trackRunOutcome(task.id, turnId);
 
     // 7-day auto-expire — the recurring branch of CronCreate's tool
     // description promises this contract to the model. Without the

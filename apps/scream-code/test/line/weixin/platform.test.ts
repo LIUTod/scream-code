@@ -417,3 +417,42 @@ describe('voice outbound', () => {
     expect(item.file_item.file_name).toBe('note.wav');
   });
 });
+
+describe('proactive send (scheduled tasks)', () => {
+  it('sends to the peer with the cached context_token', async () => {
+    const { platform, dispatched, client } = setup();
+    await platform.dispatchInbound(msg());
+    const sessionKey = dispatched[0]?.sessionKey ?? '';
+
+    expect(await platform.sendProactive(sessionKey, '定时任务结果')).toBe('sent');
+    expect(client.sendText).toHaveBeenCalledTimes(1);
+    const [peer, text, token] = client.sendText.mock.calls[0] as [string, string, string];
+    expect(peer).toBe('user@im.wechat');
+    expect(text).toBe('定时任务结果');
+    expect(token).toBe('ctx_1');
+  });
+
+  it('reports no-target for a session it has never seen', async () => {
+    const { platform, client } = setup();
+    expect(await platform.sendProactive('line-weixin-0000000000000000', 'x')).toBe('no-target');
+    expect(client.sendText).not.toHaveBeenCalled();
+  });
+
+  it('reports no-target when the token was never captured', async () => {
+    const { platform, dispatched, client } = setup();
+    await platform.dispatchInbound(msg({ context_token: '' }));
+    const sessionKey = dispatched[0]?.sessionKey ?? '';
+
+    expect(await platform.sendProactive(sessionKey, 'x')).toBe('no-target');
+    expect(client.sendText).not.toHaveBeenCalled();
+  });
+
+  it('reports failed instead of throwing when the send rejects', async () => {
+    const { platform, dispatched, client } = setup();
+    await platform.dispatchInbound(msg());
+    const sessionKey = dispatched[0]?.sessionKey ?? '';
+    client.sendText.mockRejectedValueOnce(new Error('expired token'));
+
+    expect(await platform.sendProactive(sessionKey, 'x')).toBe('failed');
+  });
+});

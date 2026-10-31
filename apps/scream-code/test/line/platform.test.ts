@@ -570,3 +570,43 @@ describe('quoted replies with media', () => {
     expect(other.dispatched[0]?.text).toContain('这个文件呢');
   });
 });
+
+describe('proactive send (scheduled tasks)', () => {
+  async function registered(): Promise<Harness & { sessionKey: string }> {
+    const h = setup();
+    await h.platform.handleEvent(msg());
+    const sessionKey = h.dispatched[0]?.sessionKey ?? '';
+    expect(sessionKey).toMatch(/^line-feishu-[0-9a-f]{16}$/);
+    return { ...h, sessionKey };
+  }
+
+  it('sends into the chat recorded by the last inbound message', async () => {
+    const h = await registered();
+
+    expect(await h.platform.sendProactive(h.sessionKey, '定时任务结果')).toBe('sent');
+    expect(h.client.sendToChat).toHaveBeenCalledTimes(1);
+    const [chatId, msgType, body] = h.client.sendToChat.mock.calls[0] as [string, string, string];
+    expect(chatId).toBe('oc_chat');
+    expect(msgType).toBe('text');
+    expect(body).toContain('定时任务结果');
+  });
+
+  it('reports no-target for a session it has never seen', async () => {
+    const h = setup();
+    expect(await h.platform.sendProactive('line-feishu-0000000000000000', 'x')).toBe('no-target');
+    expect(h.client.sendToChat).not.toHaveBeenCalled();
+  });
+
+  it('treats empty text as nothing to send', async () => {
+    const h = await registered();
+    expect(await h.platform.sendProactive(h.sessionKey, '   ')).toBe('no-target');
+    expect(h.client.sendToChat).not.toHaveBeenCalled();
+  });
+
+  it('reports failed instead of throwing when the platform rejects', async () => {
+    const h = await registered();
+    h.client.sendToChat.mockRejectedValueOnce(new Error('chat not found'));
+
+    expect(await h.platform.sendProactive(h.sessionKey, 'x')).toBe('failed');
+  });
+});

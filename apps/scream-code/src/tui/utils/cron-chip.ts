@@ -62,3 +62,14 @@ export function buildCronReminderChip(event: CronFiredEvent): CronReminderChip {
   }
   return { text: t('status.cron_fired', { preview }), tone: 'fired' };
 }
+
+/**
+ * Chat-side notice for a fired task that finished without any reply text — an
+ * error swallowed by the agent, or a turn the model ended silently. The chat
+ * should hear *something*; silence is the one outcome a reminder must not have.
+ */
+export function buildCronFailureNotice(event: CronFiredEvent): string {
+  const origin = event.origin;
+  const preview = shorten(previewText(event.prompt), CRON_PREVIEW_CHARS) || origin.cron;
+  return t('status.cron_empty', { preview });
+}

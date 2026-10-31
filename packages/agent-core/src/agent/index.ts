@@ -808,6 +808,11 @@ export class Agent {
       lastFiredAt: task.lastFiredAt,
       nextFireAt:
         nextFireAt === undefined ? manager.getNextFireForTask(task.id) : nextFireAt,
+      ...(task.silent === true ? { silent: true } : {}),
+      ...(task.mute === true ? { mute: true } : {}),
+      ...(task.lastError === undefined || task.lastError === null
+        ? {}
+        : { lastError: task.lastError }),
     };
   }
 

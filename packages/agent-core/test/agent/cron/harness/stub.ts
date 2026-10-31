@@ -11,6 +11,8 @@ import type { ContentPart } from '@scream-code/ltod';
 import type { Agent } from '../../../../src/agent';
 import type { PromptOrigin } from '../../../../src/agent/context/types';
 import type { ClockSources } from '../../../../src/tools/cron/clock';
+import { EventSubscriptionBus } from '../../../../src/agent/events';
+import type { AgentEvent } from '#/rpc';
 
 /**
  * Stable wall-clock anchor (Nov 14 2023, 22:13:20 UTC). Deliberately
@@ -41,6 +43,8 @@ export interface AgentStub {
   readonly agent: Agent;
   readonly steerCalls: SteerCall[];
   setHasActiveTurn(v: boolean): void;
+  /** Dispatches an agent event (e.g. `turn.ended`) to manager subscribers. */
+  emit(event: AgentEvent): void;
 }
 
 export function createAgentStub(opts: AgentStubOptions = {}): AgentStub {
@@ -60,12 +64,18 @@ export function createAgentStub(opts: AgentStubOptions = {}): AgentStub {
       return steerReturns;
     },
   };
-  const agent = { turn, homedir: opts.homedir } as unknown as Agent;
+  // The manager records each fire's outcome by watching `turn.ended`, so the
+  // stub carries a real bus; tests drive it with `emit()`.
+  const eventBus = new EventSubscriptionBus();
+  const agent = { turn, homedir: opts.homedir, eventBus } as unknown as Agent;
   return {
     agent,
     steerCalls,
     setHasActiveTurn: (v: boolean) => {
       hasActiveTurn = v;
+    },
+    emit: (event: AgentEvent) => {
+      eventBus.dispatch(event);
     },
   };
 }

@@ -100,6 +100,18 @@ export class SessionCronStore {
     return updated;
   }
 
+  /**
+   * Records how the most recent delivery went. `lastFiredAt` already says when,
+   * so this only carries the failure text; a clean run clears it.
+   */
+  recordRunError(id: string, error: string | null): CronTask | undefined {
+    const existing = this.tasks.get(id);
+    if (existing === undefined) return undefined;
+    const updated: CronTask = { ...existing, lastError: error };
+    this.tasks.set(id, updated);
+    return updated;
+  }
+
   /** Returns the task or `undefined`. */
   get(id: string): CronTask | undefined {
     return this.tasks.get(id);

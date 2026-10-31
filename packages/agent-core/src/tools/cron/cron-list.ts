@@ -26,6 +26,9 @@
  *                       decimal places. Useful context for the `stale`
  *                       flag and for the LLM's "should I still be
  *                       running?" judgement.
+ *   - `silent` / `mute` — present only when set (see `CronCreate`).
+ *   - `lastError`     — failure text from the most recent delivery, if it
+ *                       failed; cleared by the next clean run.
  *   - `stale`         — mirrors `CronManager.isStale(task)`; see that
  *                       method for the precise rules
  *                       (`recurring && age >= 7 days`, gated by
@@ -165,6 +168,11 @@ export class CronListTool implements BuiltinTool<CronListInput> {
       `recurring: ${String(recurring)}`,
       `ageDays: ${ageDays.toFixed(2)}`,
       `stale: ${String(stale)}`,
+      ...(task.silent === true ? ['silent: true'] : []),
+      ...(task.mute === true ? ['mute: true'] : []),
+      ...(task.lastError === undefined || task.lastError === null
+        ? []
+        : [`lastError: ${JSON.stringify(task.lastError)}`]),
     ].join('\n');
   }
 }

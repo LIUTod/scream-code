@@ -2,7 +2,7 @@
  * Native WeChat QR login for the /line wizard — no the reference required.
  *
  * Direct port of the official ilink gateway login flow (same endpoints
- * the reference's `weixin setup` calls, see cc core/setup.go):
+ * the setup flow expects):
  *   1. GET {base}/ilink/bot/get_bot_qrcode?bot_type=3
  *      → {qrcode: <key>, qrcode_img_content: <login URL>}
  *   2. GET {base}/ilink/bot/get_qrcode_status?qrcode=<key>

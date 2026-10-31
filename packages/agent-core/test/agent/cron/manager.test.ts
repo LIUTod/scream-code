@@ -395,3 +395,74 @@ describe('CronManager', () => {
     });
   });
 });
+
+describe('silent / mute delivery flags', () => {
+  function fired(recurring = true) {
+    const stub = createAgentStub({ steerReturns: 7 });
+    const harness = createClocks();
+    const manager = new CronManager(stub.agent, { clocks: harness.clocks, pollIntervalMs: null });
+    manager.store.add({ cron: '*/5 * * * *', prompt: 'quiet task', recurring, silent: true, mute: true }, harness.now() - 1);
+    harness.advance(6 * 60_000);
+    manager.tick();
+    const origin = stub.steerCalls[0]!.origin;
+    if (origin.kind !== 'cron_job') throw new Error('unreachable');
+    return { origin, stub, manager, harness };
+  }
+
+  it('carries both flags on the fire origin', () => {
+    const { origin } = fired();
+    expect(origin.silent).toBe(true);
+    expect(origin.mute).toBe(true);
+  });
+
+  it('omits the flags when the task is not quiet', () => {
+    const stub = createAgentStub({ steerReturns: 7 });
+    const harness = createClocks();
+    const manager = new CronManager(stub.agent, { clocks: harness.clocks, pollIntervalMs: null });
+    manager.store.add({ cron: '*/5 * * * *', prompt: 'loud task' }, harness.now() - 1);
+    harness.advance(6 * 60_000);
+    manager.tick();
+    const origin = stub.steerCalls[0]!.origin;
+    if (origin.kind !== 'cron_job') throw new Error('unreachable');
+    expect('silent' in origin).toBe(false);
+    expect('mute' in origin).toBe(false);
+  });
+});
+
+describe('run outcome recording', () => {
+  it('stores the failure text and clears it on the next clean run', () => {
+    const stub = createAgentStub({ steerReturns: 7 });
+    const harness = createClocks();
+    const manager = new CronManager(stub.agent, { clocks: harness.clocks, pollIntervalMs: null });
+    const task = manager.store.add(
+      { cron: '*/5 * * * *', prompt: 'check the deploy' },
+      harness.now() - 1,
+    );
+    harness.advance(6 * 60_000);
+    manager.tick();
+
+    stub.emit({ type: 'turn.ended', turnId: 7, reason: 'error', error: { message: 'boom' } } as never);
+    expect(manager.store.get(task.id)?.lastError).toBe('boom');
+
+    // Next fire (new turn id) completes cleanly → the error is cleared.
+    const clean = createAgentStub({ steerReturns: 9 });
+    const cleanManager = new CronManager(clean.agent, { clocks: harness.clocks, pollIntervalMs: null });
+    cleanManager.store.adopt({ ...manager.store.get(task.id)! });
+    harness.advance(6 * 60_000);
+    cleanManager.tick();
+    clean.emit({ type: 'turn.ended', turnId: 9, reason: 'completed' } as never);
+    expect(cleanManager.store.get(task.id)?.lastError).toBeNull();
+  });
+
+  it('ignores a buffered fire (steer returned null)', () => {
+    const stub = createAgentStub({ steerReturns: null, hasActiveTurn: true });
+    const harness = createClocks();
+    const manager = new CronManager(stub.agent, { clocks: harness.clocks, pollIntervalMs: null });
+    const task = manager.store.add({ cron: '*/5 * * * *', prompt: 'x' }, harness.now() - 1);
+    harness.advance(6 * 60_000);
+    manager.tick();
+
+    stub.emit({ type: 'turn.ended', turnId: 1, reason: 'error', error: { message: 'boom' } } as never);
+    expect(manager.store.get(task.id)?.lastError).toBeUndefined();
+  });
+});

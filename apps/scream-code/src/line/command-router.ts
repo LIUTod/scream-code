@@ -14,6 +14,8 @@
 
 import type { Session } from '@scream-code/scream-code-sdk';
 
+import { CRON_USAGE, formatCronList, parseCronAdd } from './cron-commands';
+
 import type { LineCustomCommand } from './config';
 
 export interface LineCommandDeps {
@@ -23,6 +25,20 @@ export interface LineCommandDeps {
   resetSession(): Promise<void>;
   /** A turn is queued or running for this chat. */
   isBusy(): boolean;
+  /**
+   * Aborts the turn running for this chat right now. Returns false when there
+   * was nothing to stop. Wired to `session.cancel()`, so `/stop` is the IM
+   * counterpart of the TUI's interrupt — it must work *while* busy.
+   */
+  stopTurn?: () => boolean;
+  /** Stops the running turn *and* starts a fresh session (`/cancel`). */
+  cancelSession?: () => Promise<boolean>;
+  /**
+   * Startup ffmpeg probe result, rendered in `/status`. Voice is the only path
+   * that depends on host tooling, so the user should learn about a missing AMR
+   * encoder before sending rather than after.
+   */
+  voiceStatus?: string | null;
   /** Model configured as the default for new sessions. */
   defaultModel: string;
   /** User-defined commands from the line config. */
@@ -42,6 +58,9 @@ const HELP_TEXT = [
   '/status            查看当前模型、权限与上下文占用',
   '/model <名称>      切换模型（不带参数查看当前值）',
   '/compact           压缩上下文',
+  '/stop              停止正在运行的任务',
+  '/cron              查看定时任务（add/rm 见用法）',
+  '/cancel            停止并开始新会话',
   '/new               开启新会话',
   '/help              显示本帮助',
   '',
@@ -51,7 +70,7 @@ const HELP_TEXT = [
 
 const DESKTOP_ONLY = new Set(['/line', '/theme', '/sessions', '/login', '/image']);
 
-const BUSY_TEXT = '当前有任务正在处理中，请等这一轮结束后再发该命令。';
+const BUSY_TEXT = '当前有任务正在处理中：回复 /stop 可中止，或等这一轮结束后再发该命令。';
 
 /** Built-ins plus the user's configured commands. */
 function helpText(commands: readonly LineCustomCommand[]): string {
@@ -104,6 +123,55 @@ export async function runLineCommand(
 
     case '/model':
       return { handled: true, text: await modelText(deps, arg) };
+
+    case '/stop': {
+      // Deliberately not busy-gated: stopping is only meaningful while busy.
+      const stopped = deps.stopTurn?.() ?? false;
+      if (!stopped) return { handled: true, text: '当前没有正在运行的任务。' };
+      return { handled: true, text: '已停止当前任务。' };
+    }
+
+    case '/cron': {
+      let session: Awaited<ReturnType<LineCommandDeps['getSession']>>;
+      try {
+        session = await deps.getSession();
+      } catch (error) {
+        return { handled: true, text: `读取会话失败：${describeError(error)}` };
+      }
+      const tokens = arg.trim() === '' ? [] : arg.trim().split(/\s+/);
+      const sub = tokens[0];
+      const parts = tokens.slice(1);
+      try {
+        if (sub === undefined || sub === 'list') {
+          return { handled: true, text: formatCronList(await session.listCronTasks()) };
+        }
+        if (sub === 'add') {
+          const parsed = parseCronAdd(parts);
+          if (parsed === null) return { handled: true, text: CRON_USAGE };
+          const task = await session.createCronTask(parsed);
+          return { handled: true, text: `已创建定时任务 ${task.cron}：\n${task.prompt}` };
+        }
+        if (sub === 'rm' || sub === 'remove') {
+          if (parts.length === 0) return { handled: true, text: CRON_USAGE };
+          const removed = await session.removeCronTasks(parts);
+          return {
+            handled: true,
+            text: removed.length === 0 ? '没有找到该任务。' : `已删除 ${removed.length} 个任务。`,
+          };
+        }
+        return { handled: true, text: CRON_USAGE };
+      } catch (error) {
+        return { handled: true, text: `定时任务操作失败：${describeError(error)}` };
+      }
+    }
+
+    case '/cancel': {
+      const stopped = (await deps.cancelSession?.()) ?? false;
+      return {
+        handled: true,
+        text: stopped ? '已停止当前任务并开始新会话。' : '已开始新会话。',
+      };
+    }
 
     case '/compact': {
       if (deps.isBusy()) return { handled: true, text: BUSY_TEXT };
@@ -163,6 +231,7 @@ async function statusText(deps: LineCommandDeps): Promise<string> {
       `模式：${modes.join(' · ')}`,
       `上下文：${percent}（${formatTokens(status.contextTokens)}/${formatTokens(status.maxContextTokens)}）`,
       `思考级别：${status.thinkingLevel}`,
+      ...(deps.voiceStatus === undefined || deps.voiceStatus === null ? [] : [deps.voiceStatus]),
     ].join('\n');
   } catch (error) {
     return `读取状态失败：${describeError(error)}`;

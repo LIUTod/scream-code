@@ -63,6 +63,18 @@ export const CronCreateInputSchema = z.object({
     .describe(
       'true (default) = fire on every cron match until deleted or auto-expired after 7 days; false = fire once at the next match, then auto-delete (use for "remind me at X" with pinned minute/hour/dom/month).',
     ),
+  silent: z
+    .boolean()
+    .optional()
+    .describe(
+      'true = skip the "task fired" notice in the chat and deliver only the result. Use for frequent tasks that would otherwise announce themselves on every run.',
+    ),
+  mute: z
+    .boolean()
+    .optional()
+    .describe(
+      'true = deliver nothing at all (no notice, no result). Use for maintenance runs whose value is the side effect.',
+    ),
 });
 
 export type CronCreateInput = z.Infer<typeof CronCreateInputSchema>;
@@ -75,6 +87,8 @@ interface CronCreateOutput {
   readonly humanSchedule: string;
   readonly recurring: boolean;
   readonly nextFireAt: number | null;
+  readonly silent: boolean;
+  readonly mute: boolean;
 }
 
 // ── Implementation ───────────────────────────────────────────────────
@@ -149,6 +163,8 @@ export class CronCreateTool implements BuiltinTool<CronCreateInput> {
           humanSchedule: cronToHuman(accepted.parsed),
           recurring: created.recurring,
           nextFireAt: created.nextFireAt,
+          silent: created.task.silent === true,
+          mute: created.task.mute === true,
         };
 
         return {
@@ -167,6 +183,8 @@ function formatOutput(o: CronCreateOutput): string {
     `cron: ${o.cron}`,
     `humanSchedule: ${o.humanSchedule}`,
     `recurring: ${String(o.recurring)}`,
+    ...(o.silent ? ['silent: true'] : []),
+    ...(o.mute ? ['mute: true'] : []),
     `nextFireAt: ${
       o.nextFireAt === null ? 'null' : new Date(o.nextFireAt).toISOString()
     }`,

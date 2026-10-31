@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { buildCronReminderChip } from '#/tui/utils/cron-chip';
+import { buildCronFailureNotice, buildCronReminderChip } from '#/tui/utils/cron-chip';
 import type { CronFiredEvent } from '@scream-code/scream-code-sdk';
 
 function fired(overrides: {
@@ -79,5 +79,13 @@ describe('buildCronReminderChip', () => {
     const preview = chip.text.replace('⏰ 定时任务已触发：', '');
     expect(Array.from(preview)).toHaveLength(40);
     expect(preview.endsWith('…')).toBe(true);
+  });
+});
+
+describe('buildCronFailureNotice', () => {
+  it('names the task that produced nothing', () => {
+    expect(buildCronFailureNotice(fired())).toBe(
+      '⚠️ 定时任务执行结束但没有输出：检查 CI 构建状态',
+    );
   });
 });

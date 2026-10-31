@@ -40,6 +40,15 @@ export function isValidCronTask(obj: unknown): obj is CronTask {
   if (typeof o['prompt'] !== 'string') return false;
   if (typeof o['createdAt'] !== 'number') return false;
   if (o['recurring'] !== undefined && typeof o['recurring'] !== 'boolean') return false;
+  if (o['silent'] !== undefined && typeof o['silent'] !== 'boolean') return false;
+  if (o['mute'] !== undefined && typeof o['mute'] !== 'boolean') return false;
+  if (
+    o['lastError'] !== undefined &&
+    o['lastError'] !== null &&
+    typeof o['lastError'] !== 'string'
+  ) {
+    return false;
+  }
   if (
     o['lastFiredAt'] !== undefined &&
     (typeof o['lastFiredAt'] !== 'number' || !Number.isFinite(o['lastFiredAt']))

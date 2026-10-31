@@ -31,6 +31,7 @@ import { basename } from 'node:path';
 
 import { MessageDedup } from '../dedup';
 import type { LineImageAttachment } from '../media';
+import type { ProactiveDelivery } from '../proactive';
 import { collectInboundMedia } from './inbound-media';
 import { AudioConversionError, FfmpegUnavailableError, convertToAmr } from './voice';
 import { DEFAULT_CDN_BASE_URL } from './cdn';
@@ -282,6 +283,43 @@ export class WeixinPlatform {
 
   /** Reply text to a peer; chunked, fence-aware, throttle fail-fast. */
   /**
+   * Sends text to the peer that owns this session with no inbound message to
+   * reply to — the scheduled-task path. WeChat requires a `context_token`,
+   * cached from the last inbound message; without one there is nothing we can
+   * legally address, so this reports `no-target` instead of failing a send.
+   */
+  async sendProactive(sessionKey: string, text: string): Promise<ProactiveDelivery> {
+    const body = text.trim();
+    if (body === '') return 'no-target';
+    const target = this.latestTargets.get(sessionKey);
+    const peer = target?.peerUserId;
+    if (peer === undefined) {
+      log.warn('line-weixin: no peer recorded for proactive send', { sessionKey });
+      return 'no-target';
+    }
+    const token = (target?.contextToken ?? '').trim() || (this.contextTokens.get(peer) ?? '');
+    if (token === '') {
+      // Same constraint the reference documents: the user must message the bot
+      // once after a restart before we may push to them.
+      log.warn('line-weixin: no context_token for proactive send (user must message first)', {
+        sessionKey,
+      });
+      return 'no-target';
+    }
+    try {
+      const chunks = splitMessageCodeFenceAware(body);
+      for (let i = 0; i < chunks.length; i++) {
+        if (i > 0) await sleep(WEIXIN_CHUNK_SEND_DELAY_MS);
+        await this.client.sendText(peer, chunks[i] ?? '', token, this.client.newClientId());
+      }
+      return 'sent';
+    } catch (error) {
+      log.warn('line-weixin: proactive send failed', { sessionKey, error: String(error) });
+      return 'failed';
+    }
+  }
+
+  /**
    * Sends a local image or file to the chat that owns this session: upload to
    * the CDN (AES-128-ECB), then `sendmessage` with the media item. Ported from
    * the reference `SendImage`/`SendFile`.
@@ -350,6 +388,16 @@ export class WeixinPlatform {
       this.client.newClientId(),
       item,
     );
+    if (effectiveKind === 'voice') {
+      // The gateway answers `ret: 0` even when it drops a voice item, so a
+      // successful call is not proof of delivery. Record it: without this line
+      // "sent but the phone stayed silent" has no trace to investigate.
+      log.warn('line: voice submitted without delivery receipt', {
+        sessionKey,
+        bytes: data.length,
+        note: 'gateway ret=0 is not a delivery confirmation',
+      });
+    }
     return note;
   }
 

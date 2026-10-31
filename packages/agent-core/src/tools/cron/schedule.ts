@@ -64,6 +64,10 @@ export type CronScheduleInput = {
   readonly cron: string;
   readonly prompt: string;
   readonly recurring?: boolean | undefined;
+  /** Suppress the "fired" notice on the delivery side; the result still goes out. */
+  readonly silent?: boolean | undefined;
+  /** Suppress notice and result alike — a maintenance run. */
+  readonly mute?: boolean | undefined;
 };
 
 export type CronScheduleFailure = { readonly ok: false; readonly error: string };
@@ -250,6 +254,8 @@ export function scheduleCronTask(
     cron: accepted.normalizedCron,
     prompt: input.prompt,
     recurring: input.recurring,
+    ...(input.silent === true ? { silent: true } : {}),
+    ...(input.mute === true ? { mute: true } : {}),
   });
 
   // Post-jitter next-fire for the response. `computeNextCronRun` returns

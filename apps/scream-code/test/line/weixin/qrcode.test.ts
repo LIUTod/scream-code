@@ -41,7 +41,7 @@ describe('beginWeixinQRLogin (official ilink gateway)', () => {
   });
 });
 
-describe('pollWeixinQRStatus (long-poll, cc-connect parity)', () => {
+describe('pollWeixinQRStatus (long-poll behaviour)', () => {
   it('sends the client-version header and resolves wait for status=wait', async () => {
     const initCalls: Array<RequestInit | undefined> = [];
     const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {

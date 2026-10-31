@@ -100,13 +100,18 @@ function kindText(task: CronTaskInfo): string {
   return task.recurring ? t('cron.kind_recurring') : t('cron.kind_once');
 }
 
-/** One dim description line: schedule · next fire · kind · stale · prompt. */
+/** One dim description line: schedule · next fire · kind · flags · last error · prompt. */
 function describeTask(task: CronTaskInfo): string {
   return [
     scheduleLabel(task.cron),
     nextFireText(task.nextFireAt),
     kindText(task),
     task.stale ? t('cron.stale') : undefined,
+    task.silent === true ? t('cron.silent') : undefined,
+    task.mute === true ? t('cron.mute') : undefined,
+    task.lastError === undefined || task.lastError === null
+      ? undefined
+      : t('cron.last_error', { error: truncate(singleLine(task.lastError), PROMPT_PREVIEW_MAX) }),
     truncate(singleLine(task.prompt), PROMPT_PREVIEW_MAX),
   ]
     .filter((part): part is string => part !== undefined && part.length > 0)

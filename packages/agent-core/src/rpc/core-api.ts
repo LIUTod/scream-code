@@ -295,12 +295,22 @@ export interface CronTaskInfo {
   readonly lastFiredAt?: number | undefined;
   /** Post-jitter next fire, or `null` when nothing fires within 5 years. */
   readonly nextFireAt: number | null;
+  /** The task runs without a "fired" notice. */
+  readonly silent?: boolean | undefined;
+  /** The task delivers nothing at all. */
+  readonly mute?: boolean | undefined;
+  /** Failure text from the latest delivery; cleared by a clean run. */
+  readonly lastError?: string | null | undefined;
 }
 
 export interface CreateCronTaskPayload {
   readonly cron: string;
   readonly prompt: string;
   readonly recurring?: boolean | undefined;
+  /** Skip the "fired" notice; the result still goes out. */
+  readonly silent?: boolean | undefined;
+  /** Deliver nothing at all — a maintenance run. */
+  readonly mute?: boolean | undefined;
 }
 
 export interface RemoveCronTasksPayload {

@@ -28,6 +28,8 @@ function makeDriver(workDir: string): {
   driver: LineSessionDriver;
   call: (request: HostToolCall) => Promise<{ output: string; isError?: boolean }>;
   register: (sessionKey: string, sender: LineMediaSender) => void;
+  /** Installs the daemon-level fallback used by scheduled-task turns. */
+  useResolver: (resolver: (sessionKey: string) => LineMediaSender | undefined) => void;
   bindSession: (sessionKey: string, sessionId: string) => void;
 } {
   const driver = new LineSessionDriver({
@@ -46,6 +48,9 @@ function makeDriver(workDir: string): {
     driver,
     call: (request) => internals.handleHostToolCall(request),
     register: (sessionKey, sender) => internals.mediaSenders.set(sessionKey, sender),
+    useResolver: (resolver) => {
+      driver.setMediaSenderResolver(resolver);
+    },
     bindSession: (sessionKey, sessionId) => internals.sessionKeyBySessionId.set(sessionId, sessionKey),
   };
 }
@@ -227,6 +232,7 @@ describe('session resolution', () => {
       id: 'sess-race',
       setRuntimeSystemPrompt: vi.fn(async () => {}),
       registerTool: vi.fn(async () => {}),
+      onEvent: vi.fn(() => () => {}),
     };
     const create = vi.fn(async () => {
       // Widen the window the race used to exploit.
@@ -371,5 +377,42 @@ describe('session lifecycle guards', () => {
     expect(outcome.text).toContain('超时');
     expect(cancel).toHaveBeenCalledTimes(1);
     vi.useRealTimers();
+  });
+});
+
+describe('media sender fallback', () => {
+  it('uses the platform resolver when no per-message sender exists', async () => {
+    // Scheduled-task turns have no inbound message to register a sender for;
+    // without this fallback their `line_send_media` calls would fail.
+    const workDir = await makeWorkDir();
+    await writeFile(join(workDir, 'chart.png'), Buffer.from('png'));
+    const { call, bindSession, useResolver } = makeDriver(workDir);
+    const sender = vi.fn(async () => {});
+    useResolver((sessionKey) => (sessionKey === 'line-feishu-cron' ? sender : undefined));
+    bindSession('line-feishu-cron', 'sess-cron');
+
+    const result = await call({
+      name: LINE_SEND_MEDIA_TOOL,
+      sessionId: 'sess-cron',
+      args: { path: 'chart.png' },
+    });
+
+    expect(result.isError).toBeUndefined();
+    expect(sender).toHaveBeenCalledTimes(1);
+  });
+
+  it('still rejects a session the resolver does not know', async () => {
+    const workDir = await makeWorkDir();
+    const { call, bindSession, useResolver } = makeDriver(workDir);
+    useResolver(() => undefined);
+    bindSession('line-weixin-unknown', 'sess-x');
+
+    const result = await call({
+      name: LINE_SEND_MEDIA_TOOL,
+      sessionId: 'sess-x',
+      args: { path: 'a.png' },
+    });
+    expect(result.isError).toBe(true);
+    expect(result.output).toContain('没有可用的发送通道');
   });
 });

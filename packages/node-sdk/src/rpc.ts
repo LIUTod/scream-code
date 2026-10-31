@@ -154,6 +154,10 @@ export interface CreateCronTaskRpcInput extends SessionIdRpcInput {
   readonly cron: string;
   readonly prompt: string;
   readonly recurring?: boolean | undefined;
+  /** Skip the "fired" notice; the result still goes out. */
+  readonly silent?: boolean | undefined;
+  /** Deliver nothing at all — a maintenance run. */
+  readonly mute?: boolean | undefined;
 }
 
 export interface RemoveCronTasksRpcInput extends SessionIdRpcInput {
