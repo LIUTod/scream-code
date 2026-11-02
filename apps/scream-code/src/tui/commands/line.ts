@@ -363,6 +363,10 @@ export async function mergeAndSaveConfig(
       permissionMode: existing?.permissionMode ?? 'auto',
       autoStart: existing?.autoStart ?? true,
       ...(existing?.workDir !== undefined ? { workDir: existing.workDir } : {}),
+      // Re-running the wizard must not reset a raised turn cap back to 60.
+      ...(existing?.turnTimeoutMinutes !== undefined
+        ? { turnTimeoutMinutes: existing.turnTimeoutMinutes }
+        : {}),
       // Preserve fields the wizard does not edit (custom commands, and any
       // forward-compatible key): rebuilding the object must not delete them.
       ...(existing?.commands !== undefined ? { commands: existing.commands } : {}),

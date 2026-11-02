@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { LineSessionDriver } from '#/line/session-driver';
+import { DEFAULT_TURN_TIMEOUT_MS, LineSessionDriver } from '#/line/session-driver';
 import type { LineSessionDriverOptions } from '#/line/session-driver';
 
 /**
@@ -152,7 +152,7 @@ describe('per-chat turn tracking', () => {
       a.emit(turnEnded(1));
       await first;
 
-      await vi.advanceTimersByTimeAsync(15 * 60_000 + 10);
+      await vi.advanceTimersByTimeAsync(DEFAULT_TURN_TIMEOUT_MS + 10);
       const outcome = await Promise.race([second, Promise.resolve('hung')]);
 
       expect(outcome).not.toBe('hung');

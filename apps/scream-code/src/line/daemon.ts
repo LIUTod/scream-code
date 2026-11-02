@@ -23,6 +23,7 @@ import {
   loadLineConfig,
   resolveCustomCommands,
   resolveFeishuOptions,
+  resolveTurnTimeoutMs,
   resolveWeixinOptions,
   type FeishuPlatformConfig,
   type WeixinPlatformConfig,
@@ -111,7 +112,9 @@ export async function runLineDaemon(): Promise<void> {
     workDir: lineConfig.workDir,
     platform: lineConfig.feishu !== undefined ? 'feishu' : 'weixin',
     commands: resolveCustomCommands(lineConfig.commands),
+    turnTimeoutMs: resolveTurnTimeoutMs(lineConfig),
   });
+  out(`单轮上限：${Math.round(resolveTurnTimeoutMs(lineConfig) / 60_000)} 分钟（config.json 的 turnTimeoutMinutes）`);
 
   const handles: PlatformHandle[] = [];
   const failures: string[] = [];

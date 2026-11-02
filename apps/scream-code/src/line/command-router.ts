@@ -41,6 +41,12 @@ export interface LineCommandDeps {
   voiceStatus?: string | null;
   /** Model configured as the default for new sessions. */
   defaultModel: string;
+  /**
+   * Wall-clock cap for one turn, in minutes. Shown in `/status` so a long task
+   * that was cut off does not read as a mystery: the user can see the bound and
+   * raise `turnTimeoutMinutes` in the line config.
+   */
+  turnTimeoutMinutes?: number;
   /** User-defined commands from the line config. */
   commands?: readonly LineCustomCommand[];
   /** Runs an `exec`-type custom command and returns its reply text. */
@@ -231,6 +237,9 @@ async function statusText(deps: LineCommandDeps): Promise<string> {
       `模式：${modes.join(' · ')}`,
       `上下文：${percent}（${formatTokens(status.contextTokens)}/${formatTokens(status.maxContextTokens)}）`,
       `思考级别：${status.thinkingLevel}`,
+      ...(deps.turnTimeoutMinutes === undefined
+        ? []
+        : [`单轮上限：${deps.turnTimeoutMinutes} 分钟`]),
       ...(deps.voiceStatus === undefined || deps.voiceStatus === null ? [] : [deps.voiceStatus]),
     ].join('\n');
   } catch (error) {

@@ -11,6 +11,7 @@ import {
   getLineDir,
   loadLineConfig,
   resolveFeishuOptions,
+  resolveTurnTimeoutMs,
   resolveWeixinOptions,
   saveLineConfig,
 } from '#/line/config';
@@ -104,9 +105,47 @@ describe('loadLineConfig / saveLineConfig', () => {
     // `auto` is the IM default: no approval surface, deny rules still apply.
     expect(loaded?.permissionMode).toBe('auto');
     expect(loaded?.autoStart).toBe(true);
+    // A long task over chat must not be cut at the old 15-minute mark: the
+    // stored config stays empty and the resolver applies the 60-minute default.
+    expect(loaded?.turnTimeoutMinutes).toBeUndefined();
+    expect(resolveTurnTimeoutMs(loaded!)).toBe(60 * 60_000);
     // The stored file keeps raw values; defaults only materialize in memory.
     const raw = readFileSync(getLineConfigPath(), 'utf-8');
     expect(raw).toContain('cli_a');
+  });
+
+  it('honours a configured turn cap and converts it to milliseconds', async () => {
+    const home = tempHome();
+    useHome(home);
+    mkdirSync(getLineDir(), { recursive: true });
+    writeFileSync(
+      getLineConfigPath(),
+      JSON.stringify({
+        version: 1,
+        feishu: { app_id: 'cli_a', app_secret: 'sec' },
+        turnTimeoutMinutes: 180,
+      }),
+    );
+    const loaded = await loadLineConfig();
+    expect(loaded?.turnTimeoutMinutes).toBe(180);
+    expect(resolveTurnTimeoutMs(loaded!)).toBe(180 * 60_000);
+  });
+
+  it('rejects a turn cap outside 1–1440 minutes', async () => {
+    for (const value of [0, -5, 1441, 1.5]) {
+      const home = tempHome();
+      useHome(home);
+      mkdirSync(getLineDir(), { recursive: true });
+      writeFileSync(
+        getLineConfigPath(),
+        JSON.stringify({
+          version: 1,
+          feishu: { app_id: 'cli_a', app_secret: 'sec' },
+          turnTimeoutMinutes: value,
+        }),
+      );
+      await expect(loadLineConfig()).rejects.toBeInstanceOf(LineConfigError);
+    }
   });
 });
 

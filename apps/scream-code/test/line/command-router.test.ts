@@ -79,6 +79,13 @@ describe('runLineCommand', () => {
     expect(textOf(result)).toContain('288.0k/1.0M');
   });
 
+  it('reports the turn cap so a cut-off long task is not a mystery', async () => {
+    const { deps: d } = deps();
+    expect(textOf(await runLineCommand('/status', d))).not.toContain('单轮上限');
+    const { deps: withCap } = deps({ turnTimeoutMinutes: 60 });
+    expect(textOf(await runLineCommand('/status', withCap))).toContain('单轮上限：60 分钟');
+  });
+
   it('is case-insensitive on the command name', async () => {
     const { deps: d } = deps();
     const result = await runLineCommand('/STATUS', d);

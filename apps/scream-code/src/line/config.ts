@@ -48,6 +48,26 @@ export function getWeixinContextTokensFile(): string {
 
 // ─── Schema (option names aligned with the reference) ────────────────────────
 
+/**
+ * Default wall-clock cap for one turn, in minutes.
+ *
+ * 15 minutes was too tight for real work over a chat: a long build, a full test
+ * suite or a multi-file review legitimately runs past it and the user lost the
+ * whole turn. An hour matches what long-task users expect from an IM agent; the
+ * cap still exists so a wedged turn cannot occupy the chat queue forever.
+ */
+export const DEFAULT_TURN_TIMEOUT_MINUTES = 60;
+
+/** Upper bound for `turnTimeoutMinutes` (24 h). */
+export const MAX_TURN_TIMEOUT_MINUTES = 1440;
+
+export const MINUTE_MS = 60_000;
+
+/** Configured cap in milliseconds; the schema fills the default, this is the one place that converts. */
+export function resolveTurnTimeoutMs(config: { turnTimeoutMinutes?: number | undefined }): number {
+  return (config.turnTimeoutMinutes ?? DEFAULT_TURN_TIMEOUT_MINUTES) * MINUTE_MS;
+}
+
 const feishuPlatformSchema = z.object({
   /** Feishu app id (`cli_...`). */
   app_id: z.string().min(1),
@@ -146,6 +166,18 @@ export const lineConfigSchema = z.object({
   commands: z.array(customCommandSchema).optional(),
   /** Working directory for line sessions (default: daemon start cwd). */
   workDir: z.string().optional(),
+  /**
+   * Wall-clock cap for one turn, in minutes (default 60).
+   *
+   * The cap is not a performance limit: it only exists so a turn that never
+   * settles cannot hold the chat's queue forever. Long build/debug/review runs
+   * regularly pass a quarter of an hour, so the default leaves room for them;
+   * raise it (up to 24 h) for workloads that legitimately run longer.
+   *
+   * Optional on purpose: the stored file only carries what the user set, and
+   * `resolveTurnTimeoutMs` is the single place the default is applied.
+   */
+  turnTimeoutMinutes: z.number().int().min(1).max(MAX_TURN_TIMEOUT_MINUTES).optional(),
 });
 
 export type LineConfig = z.infer<typeof lineConfigSchema>;

@@ -17,10 +17,14 @@ import { log } from '@scream-code/scream-code-sdk';
 import type { Event } from '@scream-code/scream-code-sdk';
 
 import type { ProactiveDelivery } from './proactive';
+import { DEFAULT_TURN_TIMEOUT_MINUTES, MINUTE_MS } from './config';
 import { LineTurnCollector } from './turn-collector';
 
-/** A fired turn that never reports its end must not block later fires. */
-const DEFAULT_COLLECT_TIMEOUT_MS = 15 * 60_000;
+/**
+ * A fired turn that never reports its end must not block later fires. Follows
+ * the channel's turn cap, so a long scheduled task is not dropped early.
+ */
+const DEFAULT_COLLECT_TIMEOUT_MS = DEFAULT_TURN_TIMEOUT_MINUTES * MINUTE_MS;
 
 export interface CronRelayOptions {
   /** Delivers one message to the chat that owns the session. */

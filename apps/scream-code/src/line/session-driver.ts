@@ -43,16 +43,22 @@ const ORPHAN_RESET_NOTICE = '会话已自动重置，请重新发送你的消息
 
 export type { LineImageAttachment } from './media';
 
-/** A turn that never settles is cancelled after this long (product default). */
-const TURN_TIMEOUT_MS = 15 * 60 * 1000;
+/**
+ * Default wall-clock cap for one turn (60 minutes).
+ *
+ * Long tasks over a chat — a full test run, a multi-file refactor, a review —
+ * routinely pass a quarter of an hour; the cap is only here so a turn that never
+ * settles cannot hold the chat's queue forever. The daemon passes the configured
+ * value (`turnTimeoutMinutes`), so this is the fallback for direct construction.
+ */
+export const DEFAULT_TURN_TIMEOUT_MS = 60 * 60 * 1000;
 /**
  * `/stop` interrupts in-process. A tool that ignores the abort would otherwise
- * keep the chat busy until the 15-minute cap, so after this window the live
- * session is closed: history stays on disk and the next message resumes the same
- * session id — the same end result as tearing down the agent process.
+ * keep the chat busy until the turn cap, so after this window the live session is
+ * closed: history stays on disk and the next message resumes the same session
+ * id — the same end result as tearing down the agent process.
  */
 const STOP_ESCALATION_MS = 10_000;
-const TURN_TIMEOUT_TEXT = '本轮执行超时（15 分钟），已取消。请重试或拆分任务。';
 
 /** `exec`-type custom commands are bounded like any other IM command. */
 const CUSTOM_COMMAND_TIMEOUT_MS = 30_000;
@@ -114,6 +120,12 @@ export interface LineSessionDriverOptions {
    * daemon sends a one-line "queued" receipt instead.
    */
   onQueued?: (position: number) => void;
+  /**
+   * Wall-clock cap for one turn, in ms (default `DEFAULT_TURN_TIMEOUT_MS`).
+   * The daemon passes the configured `turnTimeoutMinutes` so a long task is
+   * bounded by policy rather than by a hardcoded 15 minutes.
+   */
+  turnTimeoutMs?: number;
 }
 
 interface SessionQueue {
@@ -167,9 +179,13 @@ export class LineSessionDriver {
   private readonly sessionCreations = new Map<string, Promise<Session>>();
   /** Per-chat lifecycle mutex: session creation must never interleave a reset. */
   private readonly lifecycleLocks = new Map<string, Promise<void>>();
+  /** Wall-clock cap for one turn; see `turnDeadline`. */
+  private readonly turnTimeoutMs: number;
   private closed = false;
 
-  constructor(private readonly options: LineSessionDriverOptions) {}
+  constructor(private readonly options: LineSessionDriverOptions) {
+    this.turnTimeoutMs = options.turnTimeoutMs ?? DEFAULT_TURN_TIMEOUT_MS;
+  }
 
   async init(): Promise<void> {
     const harness = new ScreamHarness({
@@ -364,7 +380,7 @@ export class LineSessionDriver {
   }
 
   /**
-   * Resolves after `TURN_TIMEOUT_MS`. Raced against the turn promise so a
+   * Resolves after the configured turn cap. Raced against the turn promise so a
    * provider that never emits a settlement event cannot wedge the chat queue.
    *
    * The timer belongs to this turn, not to the driver: chats run in parallel,
@@ -374,7 +390,7 @@ export class LineSessionDriver {
   private turnDeadline(): { promise: Promise<void>; clear: () => void } {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const promise = new Promise<void>((resolve) => {
-      timer = setTimeout(resolve, TURN_TIMEOUT_MS);
+      timer = setTimeout(resolve, this.turnTimeoutMs);
       timer.unref?.();
     });
     return {
@@ -384,6 +400,15 @@ export class LineSessionDriver {
         timer = undefined;
       },
     };
+  }
+
+  /** The cap in whole minutes, for `/status` and the timeout reply. */
+  get turnTimeoutMinutes(): number {
+    return Math.max(1, Math.round(this.turnTimeoutMs / 60_000));
+  }
+
+  private turnTimeoutText(): string {
+    return `本轮执行超时（${this.turnTimeoutMinutes} 分钟），已取消。请重试或拆分任务。`;
   }
 
   /** Close all sessions and the harness (daemon shutdown). */
@@ -460,7 +485,7 @@ export class LineSessionDriver {
         // The deadline won: cancel the run and report, otherwise the queue
         // slot would stay occupied until the daemon restarts.
         await session.cancel().catch(() => {});
-        return { ok: false, text: TURN_TIMEOUT_TEXT };
+        return { ok: false, text: this.turnTimeoutText() };
       }
     } finally {
       if (this.activeTurns.get(job.sessionKey) === registration) {
@@ -633,6 +658,10 @@ export class LineSessionDriver {
       // Per chat: another chat's running turn says nothing about this one, and
       // treating it as busy would drop this chat's scheduled result outright.
       isBusy: () => this.activeTurns.has(sessionKey),
+      // A scheduled turn is started by the core scheduler, not through
+      // `submit()`, so the driver's own deadline never races it: this guard is
+      // its only bound and must follow the configured cap, not a fixed 15 min.
+      collectTimeoutMs: this.turnTimeoutMs,
     });
     // The core emits `turn.started` *before* `cron.fired` because `steer()`
     // launches the turn synchronously. Keep the latest start so the relay can
@@ -714,6 +743,7 @@ export class LineSessionDriver {
       stopTurn: () => this.stopActiveTurn(sessionKey),
       cancelSession: () => this.cancelSession(sessionKey),
       voiceStatus: describeVoiceSupport(this.voiceSupport),
+      turnTimeoutMinutes: this.turnTimeoutMinutes,
       getSession: () => this.resolveSession(sessionKey),
       resetSession: () => this.resetSession(sessionKey),
       commands: this.options.commands ?? [],

@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  DEFAULT_TURN_TIMEOUT_MS,
   LineSessionDriver,
   LINE_SEND_MEDIA_TOOL,
   MAX_OUTBOUND_MEDIA_BYTES,
@@ -24,7 +25,7 @@ interface HostToolCall {
   args: unknown;
 }
 
-function makeDriver(workDir: string): {
+function makeDriver(workDir: string, overrides: Partial<LineSessionDriverOptions> = {}): {
   driver: LineSessionDriver;
   call: (request: HostToolCall) => Promise<{ output: string; isError?: boolean }>;
   register: (sessionKey: string, sender: LineMediaSender) => void;
@@ -36,6 +37,7 @@ function makeDriver(workDir: string): {
     platform: 'feishu',
     workDir,
     permissionMode: 'yolo',
+    ...overrides,
   } as unknown as LineSessionDriverOptions);
   // Private surfaces used by the host callback; exercising them directly keeps
   // the test free of a live harness.
@@ -370,11 +372,49 @@ describe('session lifecycle guards', () => {
     });
 
     const pending = internals.runTurn({ sessionKey: 'k-timeout', text: 'hang forever' });
-    await vi.advanceTimersByTimeAsync(15 * 60 * 1000 + 10);
+    await vi.advanceTimersByTimeAsync(DEFAULT_TURN_TIMEOUT_MS + 10);
     const outcome = await pending;
 
     expect(outcome.ok).toBe(false);
     expect(outcome.text).toContain('超时');
+    expect(cancel).toHaveBeenCalledTimes(1);
+    vi.useRealTimers();
+  });
+
+  it('defaults to a one-hour cap and reports the configured minutes', async () => {
+    // 15 minutes cut real work short; the default now leaves an hour, and a
+    // configured value has to reach both the timer and the reply text.
+    expect(new LineSessionDriver({ platform: 'feishu', permissionMode: 'yolo' }).turnTimeoutMinutes).toBe(60);
+
+    vi.useFakeTimers();
+    const { driver } = makeDriver(await makeWorkDir(), { turnTimeoutMs: 5 * 60_000 });
+    const cancel = vi.fn(async () => {});
+    const internals = driver as unknown as {
+      harness: unknown;
+      sessions: Map<string, unknown>;
+      runTurn(job: { sessionKey: string; text: string }): Promise<{ ok: boolean; text: string }>;
+    };
+    internals.harness = {};
+    internals.sessions.set('k-cap', {
+      id: 'sess-cap',
+      prompt: () => new Promise<void>(() => {}),
+      onEvent: () => () => {},
+      setRuntimeSystemPrompt: async () => {},
+      registerTool: async () => {},
+      setApprovalHandler: () => {},
+      setQuestionHandler: () => {},
+      cancel,
+    });
+
+    const pending = internals.runTurn({ sessionKey: 'k-cap', text: 'still working' });
+    // Short of the cap: the turn must still be running.
+    await vi.advanceTimersByTimeAsync(4 * 60_000);
+    expect(cancel).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(60_000 + 10);
+    const outcome = await pending;
+
+    expect(outcome.ok).toBe(false);
+    expect(outcome.text).toContain('（5 分钟）');
     expect(cancel).toHaveBeenCalledTimes(1);
     vi.useRealTimers();
   });
