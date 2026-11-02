@@ -58,6 +58,23 @@ describe('loadAgentsMd user-level discovery', () => {
     expect(result).not.toContain(homeDir);
   });
 
+  it('truncates an oversized AGENTS.md on a character boundary, not one char at a time', async () => {
+    // Multi-byte content so a byte-blind cut would leave U+FFFD behind.
+    await writeFile(join(workDir, 'AGENTS.md'), '项目说明'.repeat(40_000), 'utf-8');
+
+    const startedAt = Date.now();
+    const result = await loadAgentsMd(testJian);
+    const elapsed = Date.now() - startedAt;
+
+    // 32 KB budget plus the per-file annotation line.
+    expect(Buffer.byteLength(result, 'utf8')).toBeLessThanOrEqual(32 * 1024);
+    expect(result).not.toContain('\uFFFD');
+    expect(result.length).toBeGreaterThan(1_000);
+    // Dropping characters one at a time is quadratic here (~9s for this size);
+    // the bound is loose enough for a loaded CI runner and still catches it.
+    expect(elapsed).toBeLessThan(1_500);
+  }, 20_000);
+
   it('does not load the same file twice when the work dir is the home dir', async () => {
     vi.spyOn(testJian, 'getcwd').mockReturnValue(homeDir);
     await mkdir(join(homeDir, '.scream-code'), { recursive: true });

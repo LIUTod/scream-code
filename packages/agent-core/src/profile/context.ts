@@ -169,12 +169,24 @@ function renderAgentFiles(files: readonly AgentFile[]): string {
     .join('\n\n');
 }
 
+/**
+ * Cut `text` to at most `maxBytes` UTF-8 bytes on a character boundary.
+ *
+ * One encode, one boundary walk. Dropping characters one at a time and
+ * re-measuring the whole string is quadratic, and it runs on the prompt path of
+ * every agent start and every subagent spawn: a 148 KB AGENTS.md against the
+ * 32 KB budget did ~115k full-string `byteLength()` passes and blocked the event
+ * loop for ~5s before this.
+ */
 function truncateUtf8(text: string, maxBytes: number): string {
-  let result = text;
-  while (byteLength(result) > maxBytes) {
-    result = result.slice(0, -1);
-  }
-  return result;
+  if (byteLength(text) <= maxBytes) return text;
+
+  const bytes = Buffer.from(text, 'utf8');
+  let end = Math.min(maxBytes, bytes.length);
+  // A continuation byte (0b10xxxxxx) belongs to the character that starts
+  // before it, so back up until the cut lands on a lead byte.
+  while (end > 0 && (bytes[end]! & 0b1100_0000) === 0b1000_0000) end -= 1;
+  return bytes.toString('utf8', 0, end);
 }
 
 function byteLength(text: string): number {
